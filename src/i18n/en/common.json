@@ -1,0 +1,11 @@
+{
+  "hello": "Hello",
+  "welcome": "Welcome to the Rabotka API — your reliable platform, ready when you are.",
+  "health": {
+    "title": "System Health",
+    "description": "Verify that all services are running correctly."
+  },
+  "app": {
+    "greeting": "Welcome! The Rabotka API is ready to serve you."
+  }
+}
