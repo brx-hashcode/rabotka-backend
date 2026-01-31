@@ -13,7 +13,7 @@ export class GetHelloUseCase extends BaseUseCase<GetHelloDto, AppEntity> {
   execute(input: GetHelloDto): Promise<AppEntity> {
     this.validate(input);
 
-    const message: string = this.i18n.t('test.app.greeting', {
+    const message: string = this.i18n.t('common.app.greeting', {
       lang: input.language,
     });
 
