@@ -10,22 +10,22 @@ export class AppController {
 
   @Get()
   @ApiOperation({
-    summary: 'Get hello message',
+    summary: 'Get index message',
     description:
-      'Returns a greeting message from the API. Language is determined by ACCEPT-LANGUAGE header (defaults to "en").',
+      'Returns an index message from the API. Language is determined by ACCEPT-LANGUAGE header (defaults to "en").',
   })
   @ApiResponse({
     status: 200,
-    description: 'Successfully returns hello message',
+    description: 'Successfully returns index message',
     schema: {
       type: 'object',
       properties: {
-        message: { type: 'string', example: 'Hello from Rabotka API!' },
+        message: { type: 'string', example: 'Welcome to Rabotka API!' },
         language: { type: 'string', example: 'en' },
       },
     },
   })
-  getHello(@I18n() i18n: I18nContext) {
-    return this.appService.getHello(i18n.lang);
+  getIndex(@I18n() i18n: I18nContext) {
+    return this.appService.getIndex(i18n.lang);
   }
 }
