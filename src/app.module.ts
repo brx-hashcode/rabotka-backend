@@ -16,11 +16,18 @@ import { HealthModule } from './health/health.module';
     }),
     I18nModule.forRoot({
       fallbackLanguage: 'en',
+      fallbacks: {
+        'en-*': 'en',
+      },
       loaderOptions: {
         path: path.join(__dirname, '/i18n/'),
         watch: true,
       },
-      resolvers: [AcceptLanguageResolver],
+      resolvers: [
+        new AcceptLanguageResolver({
+          matchType: 'strict',
+        }),
+      ],
     }),
     HealthModule,
   ],
