@@ -1,8 +1,8 @@
 {
   "name": "rabotka-backend",
   "version": "0.0.1",
-  "description": "",
-  "author": "",
+  "description": "Rabotka backend API",
+  "author": "Fariol <fariol@akieni.tech>",
   "private": true,
   "license": "UNLICENSED",
   "scripts": {
