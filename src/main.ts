@@ -22,6 +22,19 @@ async function bootstrap() {
     'development',
   );
 
+  const allowOrigins = configService.get<string>(
+    'ALLOW_ORIGINS',
+    'http://localhost:3000',
+  );
+  const origins = allowOrigins
+    .split(',')
+    .map((o) => o.trim())
+    .filter(Boolean);
+  app.enableCors({
+    origin: origins.length ? origins : ['http://localhost:3000'],
+    credentials: true,
+  });
+
   app.setGlobalPrefix('api/v1');
 
   app.useGlobalInterceptors(new LoggingInterceptor());
