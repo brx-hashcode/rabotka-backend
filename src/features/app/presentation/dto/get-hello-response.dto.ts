@@ -1,8 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
 
-/**
- * Response DTO for GetHello endpoint
- */
 export class GetHelloResponseDto {
   @ApiProperty({
     description: 'The greeting message',
