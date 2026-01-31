@@ -21,7 +21,7 @@ import { AppService } from './app.service';
         'en-*': 'en',
       },
       loaderOptions: {
-        path: path.join(__dirname, '/i18n/'),
+        path: path.join(__dirname, '../i18n/'),
         watch: true,
       },
       resolvers: [
