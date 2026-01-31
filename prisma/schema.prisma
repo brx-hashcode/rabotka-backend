@@ -8,16 +8,6 @@ datasource db {
   provider = "postgresql"
 }
 
-model App {
-  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
-  greeting  String   @db.VarChar(255)
-  language  String   @db.VarChar(64)
-
-  @@map("app")
-}
-
 enum ProfileType {
   WORKER
   EMPLOYER
@@ -81,7 +71,7 @@ model AdminOtpSession {
   id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @default(now()) @updatedAt @map("updated_at")
-  userId    String    @map("user_id")
+  userId    String    @map("user_id") @db.Uuid
   codeHash  String    @map("code_hash")
   expiresAt DateTime @map("expires_at")
   usedAt    DateTime? @map("used_at")
@@ -107,7 +97,7 @@ model File {
   storageProvider  StorageProvider @map("storage_provider")
   storageKey       String          @map("storage_key")
   bucket           String?
-  uploadedById     String?         @map("uploaded_by_id")
+  uploadedById     String?         @map("uploaded_by_id") @db.Uuid
 
   uploadedBy User? @relation(fields: [uploadedById], references: [id])
 
@@ -121,8 +111,8 @@ model Log {
   action    String
   entityType String? @map("entity_type")
   entityId   String? @map("entity_id") @db.Uuid
-  userId     String? @map("user_id")
-  profileId  String? @map("profile_id")
+  userId     String? @map("user_id") @db.Uuid
+  profileId  String? @map("profile_id") @db.Uuid
   metadata   Json?
   ipAddress  String? @map("ip_address")
   userAgent  String? @map("user_agent")
@@ -147,7 +137,7 @@ model Conversation {
   id           String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   createdAt    DateTime           @default(now()) @map("created_at")
   updatedAt    DateTime           @default(now()) @updatedAt @map("updated_at")
-  profileId    String             @map("profile_id")
+  profileId    String             @map("profile_id") @db.Uuid
   botSessionId String             @map("bot_session_id")
   botPlatform  BotPlatform        @default(WHATSAPP) @map("bot_platform")
   status       ConversationStatus @default(ACTIVE)

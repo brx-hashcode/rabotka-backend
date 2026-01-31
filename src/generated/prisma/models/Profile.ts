@@ -615,6 +615,14 @@ export type ProfileScalarRelationFilter = {
   isNot?: Prisma.ProfileWhereInput
 }
 
+export type StringFieldUpdateOperationsInput = {
+  set?: string
+}
+
+export type DateTimeFieldUpdateOperationsInput = {
+  set?: Date | string
+}
+
 export type NullableStringFieldUpdateOperationsInput = {
   set?: string | null
 }
