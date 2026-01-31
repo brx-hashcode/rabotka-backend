@@ -20,7 +20,7 @@ async function bootstrap() {
     .setTitle('Rabotka API Documentation')
     .setDescription('API documentation for Rabotka backend service')
     .setVersion('1.0')
-    .addServer(`http://localhost:${port}/api/v1`, 'Local Development Server')
+    .addServer(`http://localhost:${port}`, 'Local Development Server')
     .build();
 
   const document = SwaggerModule.createDocument(app, config);
