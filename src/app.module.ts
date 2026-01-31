@@ -1,10 +1,9 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { I18nModule, AcceptLanguageResolver } from 'nestjs-i18n';
-import * as path from 'path';
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
-import { HealthModule } from './health/health.module';
+import * as path from 'node:path';
+import { AppFeatureModule } from './features/app/app.module';
+import { HealthModule } from './features/health/health.module';
 
 @Module({
   imports: [
@@ -29,9 +28,10 @@ import { HealthModule } from './health/health.module';
         }),
       ],
     }),
+    AppFeatureModule,
     HealthModule,
   ],
-  controllers: [AppController],
-  providers: [AppService],
+  controllers: [],
+  providers: [],
 })
 export class AppModule {}
