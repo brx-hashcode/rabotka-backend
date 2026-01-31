@@ -1,11 +1,11 @@
 {
-  "hello": "Hello",
-  "welcome": "Welcome to the Rabotka API — your reliable platform, ready when you are.",
+  "hello": "Привет",
+  "welcome": "Добро пожаловать в Rabotka API — ваша надежная платформа, готова когда вы готовы.",
   "health": {
-    "title": "System Health",
-    "description": "Verify that all services are running correctly."
+    "title": "Состояние системы",
+    "description": "Проверьте, что все сервисы работают корректно."
   },
   "app": {
-    "greeting": "Welcome! The Rabotka API is ready to serve you."
+    "greeting": "Добро пожаловать! Rabotka API готов обслуживать вас."
   }
 }
