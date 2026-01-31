@@ -384,7 +384,6 @@ type FieldRefInputType<Model, FieldType> = Model extends never ? never : FieldRe
 
 
 export const ModelName = {
-  App: 'App',
   Profile: 'Profile',
   User: 'User',
   AdminOtpSession: 'AdminOtpSession',
@@ -406,84 +405,10 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
     omit: GlobalOmitOptions
   }
   meta: {
-    modelProps: "app" | "profile" | "user" | "adminOtpSession" | "file" | "log" | "conversation"
+    modelProps: "profile" | "user" | "adminOtpSession" | "file" | "log" | "conversation"
     txIsolationLevel: TransactionIsolationLevel
   }
   model: {
-    App: {
-      payload: Prisma.$AppPayload<ExtArgs>
-      fields: Prisma.AppFieldRefs
-      operations: {
-        findUnique: {
-          args: Prisma.AppFindUniqueArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$AppPayload> | null
-        }
-        findUniqueOrThrow: {
-          args: Prisma.AppFindUniqueOrThrowArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$AppPayload>
-        }
-        findFirst: {
-          args: Prisma.AppFindFirstArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$AppPayload> | null
-        }
-        findFirstOrThrow: {
-          args: Prisma.AppFindFirstOrThrowArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$AppPayload>
-        }
-        findMany: {
-          args: Prisma.AppFindManyArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$AppPayload>[]
-        }
-        create: {
-          args: Prisma.AppCreateArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$AppPayload>
-        }
-        createMany: {
-          args: Prisma.AppCreateManyArgs<ExtArgs>
-          result: BatchPayload
-        }
-        createManyAndReturn: {
-          args: Prisma.AppCreateManyAndReturnArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$AppPayload>[]
-        }
-        delete: {
-          args: Prisma.AppDeleteArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$AppPayload>
-        }
-        update: {
-          args: Prisma.AppUpdateArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$AppPayload>
-        }
-        deleteMany: {
-          args: Prisma.AppDeleteManyArgs<ExtArgs>
-          result: BatchPayload
-        }
-        updateMany: {
-          args: Prisma.AppUpdateManyArgs<ExtArgs>
-          result: BatchPayload
-        }
-        updateManyAndReturn: {
-          args: Prisma.AppUpdateManyAndReturnArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$AppPayload>[]
-        }
-        upsert: {
-          args: Prisma.AppUpsertArgs<ExtArgs>
-          result: runtime.Types.Utils.PayloadToResult<Prisma.$AppPayload>
-        }
-        aggregate: {
-          args: Prisma.AppAggregateArgs<ExtArgs>
-          result: runtime.Types.Utils.Optional<Prisma.AggregateApp>
-        }
-        groupBy: {
-          args: Prisma.AppGroupByArgs<ExtArgs>
-          result: runtime.Types.Utils.Optional<Prisma.AppGroupByOutputType>[]
-        }
-        count: {
-          args: Prisma.AppCountArgs<ExtArgs>
-          result: runtime.Types.Utils.Optional<Prisma.AppCountAggregateOutputType> | number
-        }
-      }
-    }
     Profile: {
       payload: Prisma.$ProfilePayload<ExtArgs>
       fields: Prisma.ProfileFieldRefs
@@ -967,17 +892,6 @@ export const TransactionIsolationLevel = runtime.makeStrictEnum({
 export type TransactionIsolationLevel = (typeof TransactionIsolationLevel)[keyof typeof TransactionIsolationLevel]
 
 
-export const AppScalarFieldEnum = {
-  id: 'id',
-  createdAt: 'createdAt',
-  updatedAt: 'updatedAt',
-  greeting: 'greeting',
-  language: 'language'
-} as const
-
-export type AppScalarFieldEnum = (typeof AppScalarFieldEnum)[keyof typeof AppScalarFieldEnum]
-
-
 export const ProfileScalarFieldEnum = {
   id: 'id',
   createdAt: 'createdAt',
@@ -1381,7 +1295,6 @@ export type PrismaClientOptions = ({
   comments?: runtime.SqlCommenterPlugin[]
 }
 export type GlobalOmitConfig = {
-  app?: Prisma.AppOmit
   profile?: Prisma.ProfileOmit
   user?: Prisma.UserOmit
   adminOtpSession?: Prisma.AdminOtpSessionOmit
