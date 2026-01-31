@@ -1,0 +1,60 @@
+# Dependencies
+node_modules
+
+# Build output
+dist
+coverage
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# Environment files
+.env
+.env.local
+.env.*.local
+.env.example
+
+# Test files
+test
+*.spec.ts
+*.test.ts
+*.e2e-spec.ts
+jest.config.js
+jest-e2e.json
+
+# Documentation
+README.md
+docs
+*.md
+
+# CI/CD
+.github
+.gitlab-ci.yml
+.travis.yml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Misc
+.cache
+.temp
+*.tmp
+
