@@ -2,9 +2,10 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { I18nModule, AcceptLanguageResolver } from 'nestjs-i18n';
 import * as path from 'node:path';
-import { DatabaseModule } from './infrastructure/database/database.module';
-import { AppFeatureModule } from './features/app/app.module';
-import { HealthModule } from './features/health/health.module';
+import { PrismaModule } from './prisma/prisma.module';
+import { HealthModule } from './health/health.module';
+import { AppController } from './app.controller';
+import { AppService } from './app.service';
 
 @Module({
   imports: [
@@ -29,11 +30,10 @@ import { HealthModule } from './features/health/health.module';
         }),
       ],
     }),
-    DatabaseModule,
-    AppFeatureModule,
+    PrismaModule,
     HealthModule,
   ],
-  controllers: [],
-  providers: [],
+  controllers: [AppController],
+  providers: [AppService],
 })
 export class AppModule {}
