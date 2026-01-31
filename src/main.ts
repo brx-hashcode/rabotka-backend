@@ -8,11 +8,19 @@ import { AppModule } from './app.module';
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
 
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, {
+    logger: ['error', 'warn', 'log', 'debug', 'verbose'],
+  });
 
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-argument
   const configService = app.get(ConfigService);
-  const port: number = configService.get('PORT', 3000);
-  const environment = configService.get('NODE_ENV', 'development');
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
+  const port: number = configService.get<number>('PORT', 3000);
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
+  const environment: string = configService.get<string>(
+    'NODE_ENV',
+    'development',
+  );
 
   app.setGlobalPrefix('api/v1');
 
@@ -29,7 +37,7 @@ async function bootstrap() {
     '/api-docs',
     apiReference({
       darkMode: true,
-      theme: 'deepSpace',
+      theme: 'fastify',
       layout: 'classic',
       spec: {
         content: document,
@@ -54,7 +62,7 @@ async function bootstrap() {
         description:
           'API documentation for Rabotka backend service. Explore endpoints, request/response schemas, and test API calls directly from the documentation.',
       },
-    } as any),
+    } as Parameters<typeof apiReference>[0]),
   );
 
   await app.listen(port);
@@ -63,4 +71,9 @@ async function bootstrap() {
   logger.log(`📚 API Documentation: http://localhost:${port}/api-docs`);
   logger.log(`🌍 Environment: ${environment}`);
 }
-bootstrap();
+
+bootstrap().catch((error: unknown) => {
+  const logger = new Logger('Bootstrap');
+  logger.error('❌ Error starting application:', error);
+  process.exit(1);
+});
