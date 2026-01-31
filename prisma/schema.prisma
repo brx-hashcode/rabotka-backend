@@ -1,0 +1,151 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "commonjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum ProfileType {
+  WORKER
+  EMPLOYER
+}
+
+enum VerificationStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+model Profile {
+  id                 String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  createdAt          DateTime           @default(now()) @map("created_at")
+  updatedAt          DateTime           @default(now()) @updatedAt @map("updated_at")
+  firstName          String             @map("first_name")
+  lastName           String             @map("last_name")
+  phone              String             @unique
+  email              String             @unique
+  address            String?
+  verificationStatus VerificationStatus @default(PENDING) @map("verification_status")
+  profileType        ProfileType        @map("profile_type")
+  profileTitle       String?            @map("profile_title")
+  profileDescription String?            @map("profile_description") @db.Text
+  kycDocumentId      String?            @map("kyc_document_id") @db.Uuid
+  kycSelfieId        String?            @map("kyc_selfie_id") @db.Uuid
+  whatsappConnected  Boolean            @default(false) @map("whatsapp_connected")
+  verifiedBy         String?            @map("verified_by") @db.Uuid
+  verifiedAt         DateTime?          @map("verified_at")
+  rejectionReason    String?            @map("rejection_reason")
+
+  conversations Conversation[]
+  logs          Log[]
+
+  @@map("profiles")
+}
+
+enum UserRole {
+  ADMIN
+}
+
+model User {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @default(now()) @updatedAt @map("updated_at")
+  firstName   String    @map("first_name")
+  lastName    String    @map("last_name")
+  email       String    @unique
+  role        UserRole  @default(ADMIN)
+  isActive    Boolean   @default(true) @map("is_active")
+  lastLoginAt DateTime? @map("last_login_at")
+
+  adminOtpSessions AdminOtpSession[]
+  files            File[]
+  logs             Log[]
+
+  @@map("users")
+}
+
+model AdminOtpSession {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @default(now()) @updatedAt @map("updated_at")
+  userId    String    @map("user_id") @db.Uuid
+  codeHash  String    @map("code_hash")
+  expiresAt DateTime @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("admin_otp_sessions")
+}
+
+enum StorageProvider {
+  S3
+  LOCAL
+}
+
+model File {
+  id               String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  createdAt        DateTime        @default(now()) @map("created_at")
+  updatedAt        DateTime        @default(now()) @updatedAt @map("updated_at")
+  filename         String
+  originalFilename String          @map("original_filename")
+  mimeType         String          @map("mime_type")
+  size             Int
+  storageProvider  StorageProvider @map("storage_provider")
+  storageKey       String          @map("storage_key")
+  bucket           String?
+  uploadedById     String?         @map("uploaded_by_id") @db.Uuid
+
+  uploadedBy User? @relation(fields: [uploadedById], references: [id])
+
+  @@map("files")
+}
+
+model Log {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+  action    String
+  entityType String? @map("entity_type")
+  entityId   String? @map("entity_id") @db.Uuid
+  userId     String? @map("user_id") @db.Uuid
+  profileId  String? @map("profile_id") @db.Uuid
+  metadata   Json?
+  ipAddress  String? @map("ip_address")
+  userAgent  String? @map("user_agent")
+
+  user    User?    @relation(fields: [userId], references: [id])
+  profile Profile? @relation(fields: [profileId], references: [id])
+
+  @@map("logs")
+}
+
+enum BotPlatform {
+  WHATSAPP
+}
+
+enum ConversationStatus {
+  ACTIVE
+  ENDED
+  ARCHIVED
+}
+
+model Conversation {
+  id           String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  createdAt    DateTime           @default(now()) @map("created_at")
+  updatedAt    DateTime           @default(now()) @updatedAt @map("updated_at")
+  profileId    String             @map("profile_id") @db.Uuid
+  botSessionId String             @map("bot_session_id")
+  botPlatform  BotPlatform        @default(WHATSAPP) @map("bot_platform")
+  status       ConversationStatus @default(ACTIVE)
+  startedAt    DateTime           @map("started_at")
+  endedAt      DateTime?          @map("ended_at")
+
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@unique([profileId, botSessionId])
+  @@map("conversations")
+}

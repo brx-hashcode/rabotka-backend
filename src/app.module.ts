@@ -1,9 +1,14 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { APP_GUARD } from '@nestjs/core';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { I18nModule, AcceptLanguageResolver } from 'nestjs-i18n';
 import * as path from 'node:path';
-import { AppFeatureModule } from './features/app/app.module';
-import { HealthModule } from './features/health/health.module';
+import { PrismaModule } from './prisma/prisma.module';
+import { HealthModule } from './health/health.module';
+import { CsrfModule } from './csrf/csrf.module';
+import { AppController } from './app.controller';
+import { AppService } from './app.service';
 
 @Module({
   imports: [
@@ -13,13 +18,25 @@ import { HealthModule } from './features/health/health.module';
       cache: true,
       expandVariables: true,
     }),
+    ThrottlerModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        throttlers: [
+          {
+            ttl: config.get<number>('THROTTLE_TTL', 60000),
+            limit: config.get<number>('THROTTLE_LIMIT', 100),
+          },
+        ],
+      }),
+    }),
     I18nModule.forRoot({
       fallbackLanguage: 'en',
       fallbacks: {
         'en-*': 'en',
       },
       loaderOptions: {
-        path: path.join(__dirname, '/i18n/'),
+        path: path.join(__dirname, '../i18n/'),
         watch: true,
       },
       resolvers: [
@@ -28,10 +45,11 @@ import { HealthModule } from './features/health/health.module';
         }),
       ],
     }),
-    AppFeatureModule,
+    PrismaModule,
     HealthModule,
+    CsrfModule,
   ],
-  controllers: [],
-  providers: [],
+  controllers: [AppController],
+  providers: [AppService, { provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
 export class AppModule {}

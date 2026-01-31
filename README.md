@@ -135,7 +135,7 @@ All API routes are prefixed with `/api/v1` for versioning and consistency.
 
 ```bash
 # Clone the repository
-git clone <repository-url>
+git clone https://github.com/bruxx-6243/rabotka-backend.git
 cd rabotka-backend
 
 # Install dependencies
