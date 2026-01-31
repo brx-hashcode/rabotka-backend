@@ -4,6 +4,7 @@ import {
   detectBot,
   fixedWindow,
   shield,
+  validateEmail,
 } from '@arcjet/nest';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
@@ -53,6 +54,10 @@ import { AppService } from './app.service';
             mode: 'LIVE',
             window: '60s',
             max: 2,
+          }),
+          validateEmail({
+            mode: 'LIVE',
+            deny: ['DISPOSABLE', 'INVALID', 'NO_MX_RECORDS'],
           }),
         ],
       }),
