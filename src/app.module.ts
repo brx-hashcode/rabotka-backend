@@ -1,3 +1,10 @@
+import {
+  ArcjetGuard,
+  ArcjetModule,
+  detectBot,
+  fixedWindow,
+  shield,
+} from '@arcjet/nest';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
@@ -30,6 +37,26 @@ import { AppService } from './app.service';
         ],
       }),
     }),
+    ArcjetModule.forRootAsync({
+      isGlobal: true,
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        key: config.get<string>('ARCJET_KEY') ?? '',
+        rules: [
+          shield({ mode: 'LIVE' }),
+          detectBot({
+            mode: 'LIVE',
+            allow: ['CATEGORY:SEARCH_ENGINE'],
+          }),
+          fixedWindow({
+            mode: 'LIVE',
+            window: '60s',
+            max: 2,
+          }),
+        ],
+      }),
+    }),
     I18nModule.forRoot({
       fallbackLanguage: 'en',
       fallbacks: {
@@ -50,6 +77,10 @@ import { AppService } from './app.service';
     CsrfModule,
   ],
   controllers: [AppController],
-  providers: [AppService, { provide: APP_GUARD, useClass: ThrottlerGuard }],
+  providers: [
+    AppService,
+    { provide: APP_GUARD, useClass: ArcjetGuard },
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
+  ],
 })
 export class AppModule {}
