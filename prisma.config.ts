@@ -10,9 +10,5 @@ export default defineConfig({
   migrations: {
     seed: 'tsx prisma/seed.ts',
   },
-  datasource: {
-    url:
-      process.env.DATABASE_URL ??
-      'postgresql://postgres:postgres@localhost:5433/rabotka',
-  },
+  datasource: { url: process.env.DATABASE_URL },
 });

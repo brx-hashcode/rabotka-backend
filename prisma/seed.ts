@@ -5,9 +5,7 @@ import { PrismaClient, UserRole } from '../src/generated/prisma/client';
 config({ path: '.env.local' });
 config({ path: '.env' });
 
-const connectionString =
-  process.env.DATABASE_URL ??
-  'postgresql://postgres:postgres@localhost:5433/rabotka';
+const connectionString = process.env.DATABASE_URL;
 const adapter = new PrismaPg({ connectionString });
 const prisma = new PrismaClient({ adapter });
 
