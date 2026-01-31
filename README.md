@@ -154,6 +154,9 @@ NODE_ENV=development
 # Health Check Configuration (optional)
 HEALTH_DISK_CHECK_ENABLED=true
 HEALTH_DISK_THRESHOLD_PERCENT=0.98
+
+# Arcjet (get key from https://app.arcjet.com)
+ARCJET_KEY=
 ```
 
 ### Running the Application
