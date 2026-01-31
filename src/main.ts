@@ -3,8 +3,11 @@ import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { apiReference } from '@scalar/nestjs-api-reference';
+import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
+import { CSRF_UTILITIES } from './csrf/csrf.constants';
+import { csrfVisitorMiddleware } from './csrf/csrf-visitor.middleware';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
@@ -26,16 +29,24 @@ async function bootstrap() {
     'ALLOW_ORIGINS',
     'http://localhost:3000',
   );
+
   const origins = allowOrigins
     .split(',')
     .map((o) => o.trim())
     .filter(Boolean);
+
   app.enableCors({
     origin: origins.length ? origins : ['http://localhost:3000'],
     credentials: true,
   });
 
   app.setGlobalPrefix('api/v1');
+
+  app.use(cookieParser());
+  app.use(csrfVisitorMiddleware);
+
+  const csrfUtilities = app.get(CSRF_UTILITIES);
+  app.use(csrfUtilities.doubleCsrfProtection);
 
   app.useGlobalInterceptors(new LoggingInterceptor());
 
