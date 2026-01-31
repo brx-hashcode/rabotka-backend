@@ -6,6 +6,7 @@ import { I18nModule, AcceptLanguageResolver } from 'nestjs-i18n';
 import * as path from 'node:path';
 import { PrismaModule } from './prisma/prisma.module';
 import { HealthModule } from './health/health.module';
+import { CsrfModule } from './csrf/csrf.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 
@@ -46,6 +47,7 @@ import { AppService } from './app.service';
     }),
     PrismaModule,
     HealthModule,
+    CsrfModule,
   ],
   controllers: [AppController],
   providers: [AppService, { provide: APP_GUARD, useClass: ThrottlerGuard }],
