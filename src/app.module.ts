@@ -4,7 +4,6 @@ import {
   detectBot,
   fixedWindow,
   shield,
-  validateEmail,
 } from '@arcjet/nest';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
@@ -56,10 +55,6 @@ import { AppService } from './app.service';
             window: '60s',
             max: 2,
           }),
-          validateEmail({
-            mode: 'LIVE',
-            deny: ['DISPOSABLE', 'INVALID', 'NO_MX_RECORDS'],
-          }),
         ],
       }),
     }),
@@ -69,7 +64,7 @@ import { AppService } from './app.service';
         'en-*': 'en',
       },
       loaderOptions: {
-        path: path.join(__dirname, '../i18n/'),
+        path: path.join(process.cwd(), 'dist', 'i18n'),
         watch: true,
       },
       resolvers: [
