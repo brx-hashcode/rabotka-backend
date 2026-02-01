@@ -8,6 +8,11 @@
       {
         "include": "**/i18n/**/*",
         "watchAssets": true
+      },
+      {
+        "include": "mail/templates/**/*.hbs",
+        "outDir": "dist/src",
+        "watchAssets": true
       }
     ]
   }

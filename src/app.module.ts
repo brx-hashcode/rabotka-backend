@@ -1,10 +1,10 @@
 import {
-  ArcjetGuard,
-  ArcjetModule,
-  detectBot,
-  fixedWindow,
-  shield,
-  validateEmail,
+    ArcjetGuard,
+    ArcjetModule,
+    detectBot,
+    fixedWindow,
+    shield,
+    validateEmail,
 } from '@arcjet/nest';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
@@ -15,6 +15,7 @@ import * as path from 'node:path';
 import { PrismaModule } from './prisma/prisma.module';
 import { HealthModule } from './health/health.module';
 import { CsrfModule } from './csrf/csrf.module';
+import { MailModule } from './mail/mail.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 
@@ -80,6 +81,7 @@ import { AppService } from './app.service';
     PrismaModule,
     HealthModule,
     CsrfModule,
+    MailModule,
   ],
   controllers: [AppController],
   providers: [
