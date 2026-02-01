@@ -37,6 +37,15 @@ services:
     networks:
       - rabotka_network
 
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: rabotka_mailhog
+    ports:
+      - "1025:1025" # SMTP (for your app to send to)
+      - "8025:8025" # Web UI
+    networks:
+      - rabotka_network
+
   localstack:
     image: localstack/localstack:latest
     container_name: rabotka_localstack
@@ -80,11 +89,15 @@ services:
       - DB_DATABASE=rabotka
       - PORT=${PORT:-3000}
       - AWS_ENDPOINT_URL=http://localstack:4566
+      - SMTP_HOST=mailhog
+      - SMTP_PORT=1025
     depends_on:
       postgres:
         condition: service_healthy
       localstack:
         condition: service_healthy
+      mailhog:
+        condition: service_started
     healthcheck:
       test:
         [
