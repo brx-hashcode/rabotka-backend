@@ -46,6 +46,14 @@ services:
     networks:
       - rabotka_network
 
+  redis:
+    image: redis:7-alpine
+    container_name: rabotka_redis
+    ports:
+      - "6379:6379"
+    networks:
+      - rabotka_network
+
   localstack:
     image: localstack/localstack:latest
     container_name: rabotka_localstack
@@ -91,12 +99,16 @@ services:
       - AWS_ENDPOINT_URL=http://localstack:4566
       - SMTP_HOST=mailhog
       - SMTP_PORT=1025
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
     depends_on:
       postgres:
         condition: service_healthy
       localstack:
         condition: service_healthy
       mailhog:
+        condition: service_started
+      redis:
         condition: service_started
     healthcheck:
       test:
