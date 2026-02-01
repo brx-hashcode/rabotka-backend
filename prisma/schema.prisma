@@ -19,6 +19,25 @@ enum VerificationStatus {
   REJECTED
 }
 
+enum UserRole {
+  ADMIN
+}
+
+enum StorageProvider {
+  S3
+  LOCAL
+}
+
+enum BotPlatform {
+  WHATSAPP
+}
+
+enum ConversationStatus {
+  ACTIVE
+  ENDED
+  ARCHIVED
+}
+
 model Profile {
   id                 String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   createdAt          DateTime           @default(now()) @map("created_at")
@@ -43,10 +62,6 @@ model Profile {
   logs          Log[]
 
   @@map("profiles")
-}
-
-enum UserRole {
-  ADMIN
 }
 
 model User {
@@ -79,11 +94,6 @@ model AdminOtpSession {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("admin_otp_sessions")
-}
-
-enum StorageProvider {
-  S3
-  LOCAL
 }
 
 model File {
@@ -123,15 +133,7 @@ model Log {
   @@map("logs")
 }
 
-enum BotPlatform {
-  WHATSAPP
-}
 
-enum ConversationStatus {
-  ACTIVE
-  ENDED
-  ARCHIVED
-}
 
 model Conversation {
   id           String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
