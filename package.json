@@ -12,7 +12,7 @@
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/src/main",
-    "queue:email": "ts-node -r tsconfig-paths/register src/worker.ts",
+    "queue:email": "pnpm run build && node dist/src/worker.js",
     "queue:email:prod": "node dist/src/worker.js",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
     "test": "jest",
