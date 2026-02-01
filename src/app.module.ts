@@ -1,10 +1,10 @@
 import {
-    ArcjetGuard,
-    ArcjetModule,
-    detectBot,
-    fixedWindow,
-    shield,
-    validateEmail,
+  ArcjetGuard,
+  ArcjetModule,
+  detectBot,
+  fixedWindow,
+  shield,
+  validateEmail,
 } from '@arcjet/nest';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
