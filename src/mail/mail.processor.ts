@@ -18,7 +18,10 @@ export class MailProcessor extends WorkerHost {
     super();
   }
 
-  async process(job: Job<SendMailJobPayload, void, string>, _token?: string): Promise<void> {
+  async process(
+    job: Job<SendMailJobPayload, void, string>,
+    _token?: string,
+  ): Promise<void> {
     if (job.name !== 'send') {
       this.logger.warn(`Unknown job name: ${job.name}`);
       return;
