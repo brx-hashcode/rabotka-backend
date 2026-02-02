@@ -1,9 +1,9 @@
 import {
-  ArcjetGuard,
-  ArcjetModule,
-  detectBot,
-  fixedWindow,
-  shield,
+    ArcjetGuard,
+    ArcjetModule,
+    detectBot,
+    fixedWindow,
+    shield,
 } from '@arcjet/nest';
 import { Module } from '@nestjs/common';
 import { createArcjetLoggerAdapter } from './common/utils/arcjet-logger.adapter.js';
@@ -14,6 +14,8 @@ import { I18nModule, AcceptLanguageResolver } from 'nestjs-i18n';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { PrismaModule } from './prisma/prisma.module';
+import { RedisModule } from './redis/redis.module';
+import { QueueModule } from './queue/queue.module';
 import { HealthModule } from './health/health.module';
 import { CsrfModule } from './csrf/csrf.module';
 import { MailModule } from './mail/mail.module';
@@ -81,6 +83,8 @@ import { AppService } from './app.service';
       ],
     }),
     PrismaModule,
+    RedisModule.forRoot(),
+    QueueModule.forRoot(),
     HealthModule,
     CsrfModule,
     MailModule,
