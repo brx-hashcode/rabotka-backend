@@ -11,6 +11,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { I18nModule, AcceptLanguageResolver } from 'nestjs-i18n';
+import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { PrismaModule } from './prisma/prisma.module';
 import { HealthModule } from './health/health.module';
@@ -66,7 +67,11 @@ import { AppService } from './app.service';
         'en-*': 'en',
       },
       loaderOptions: {
-        path: path.join(process.cwd(), 'dist', 'i18n'),
+        path: (() => {
+          const distI18n = path.join(process.cwd(), 'dist', 'i18n');
+          const srcI18n = path.join(process.cwd(), 'src', 'i18n');
+          return fs.existsSync(distI18n) ? distI18n : srcI18n;
+        })(),
         watch: true,
       },
       resolvers: [
