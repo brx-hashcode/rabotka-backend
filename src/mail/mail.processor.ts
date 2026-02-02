@@ -1,8 +1,4 @@
-import {
-    Injectable,
-    Logger,
-    OnModuleInit,
-} from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { MailerService } from '@nestjs-modules/mailer';
 import { EMAIL_QUEUE } from '../queue/queue.module';
@@ -17,7 +13,7 @@ export class MailProcessor implements OnModuleInit {
     private readonly configService: ConfigService,
   ) {}
 
-  async onModuleInit() {
+  onModuleInit() {
     if (process.env.RUN_QUEUE_WORKER === 'true') {
       this.logger.log(
         '⏭️ Email worker is registered by worker bootstrap (worker.ts)',
