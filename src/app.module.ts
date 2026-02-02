@@ -1,9 +1,9 @@
 import {
-    ArcjetGuard,
-    ArcjetModule,
-    detectBot,
-    fixedWindow,
-    shield,
+  ArcjetGuard,
+  ArcjetModule,
+  detectBot,
+  fixedWindow,
+  shield,
 } from '@arcjet/nest';
 import { Module } from '@nestjs/common';
 import { createArcjetLoggerAdapter } from './common/utils/arcjet-logger.adapter.js';

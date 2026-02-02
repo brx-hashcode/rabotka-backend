@@ -11,7 +11,7 @@ export class MailController {
   @ApiOperation({
     summary: 'Send welcome email',
     description:
-      'Queues a welcome template email to fariol@akieni.tech (for testing).',
+      'Queues a welcome template email to wodod93616@aixind.com (for testing).',
   })
   @ApiResponse({
     status: 200,
@@ -23,10 +23,10 @@ export class MailController {
   })
   async sendWelcome() {
     const { jobId } = await this.mailService.sendMail({
-      to: 'fariol@akieni.tech',
+      to: 'wodod93616@aixind.com',
       subject: 'Welcome',
       template: 'welcome',
-      context: { name: 'Fariol' },
+      context: { name: 'Wodod' },
     });
     return { jobId, message: 'Welcome email queued' };
   }
