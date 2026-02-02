@@ -6,7 +6,12 @@
     "deleteOutDir": true,
     "assets": [
       {
-        "include": "**/i18n/**/*",
+        "include": "i18n/**/*",
+        "watchAssets": true
+      },
+      {
+        "include": "mail/templates/**/*.mjml",
+        "outDir": "dist/src",
         "watchAssets": true
       }
     ]

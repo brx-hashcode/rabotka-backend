@@ -30,7 +30,7 @@ WORKDIR /app
 
 # Update Alpine packages and install production dependencies and tini for proper signal handling
 RUN apk update && apk upgrade && \
-    apk add --no-cache curl postgresql-client tini && \
+    apk add --no-cache curl postgresql-client redis tini && \
     npm install -g pnpm
 
 # Create non-root user for security
@@ -70,4 +70,4 @@ EXPOSE 3000
 ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/docker-entrypoint.sh"]
 
 # Start the application
-CMD ["node", "dist/main"]
+CMD ["node", "dist/src/main"]
