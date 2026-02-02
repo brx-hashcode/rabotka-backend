@@ -19,6 +19,7 @@ export class MailService {
       template: options.template,
       context: options.context ?? {},
     });
+
     return { jobId: jobId ?? '' };
   }
 }

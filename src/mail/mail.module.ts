@@ -2,15 +2,16 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MailerModule } from '@nestjs-modules/mailer';
 import { HandlebarsAdapter } from '@nestjs-modules/mailer/dist/adapters/handlebars.adapter';
+import { BullModule } from '@nestjs/bullmq';
 import * as path from 'node:path';
-import { QueueModule } from '../queue/queue.module';
 import { MailController } from './mail.controller.js';
 import { MailProcessor } from './mail.processor.js';
 import { MailService } from './mail.service.js';
 
+const registerProcessor = process.env.RUN_QUEUE_WORKER === 'true';
+
 @Module({
   imports: [
-    QueueModule.forRoot(),
     MailerModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
@@ -38,9 +39,21 @@ import { MailService } from './mail.service.js';
         };
       },
     }),
+    BullModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        connection: {
+          host: config.get<string>('REDIS_HOST', 'localhost'),
+          port: config.get<number>('REDIS_PORT', 6379),
+          password: config.get<string>('REDIS_PASSWORD') || undefined,
+        },
+      }),
+    }),
+    BullModule.registerQueue({ name: 'mail' }),
   ],
   controllers: [MailController],
-  providers: [MailService, MailProcessor],
+  providers: [MailService, ...(registerProcessor ? [MailProcessor] : [])],
   exports: [MailService],
 })
 export class MailModule {}
