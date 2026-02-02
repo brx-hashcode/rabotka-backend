@@ -6,6 +6,7 @@ import {
   shield,
 } from '@arcjet/nest';
 import { Module } from '@nestjs/common';
+import { createArcjetLoggerAdapter } from './common/utils/arcjet-logger.adapter.js';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
@@ -44,6 +45,7 @@ import { AppService } from './app.service';
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
         key: config.get<string>('ARCJET_KEY') ?? '',
+        log: createArcjetLoggerAdapter(),
         rules: [
           shield({ mode: 'LIVE' }),
           detectBot({
