@@ -4,17 +4,21 @@ import {
   detectBot,
   fixedWindow,
   shield,
-  validateEmail,
 } from '@arcjet/nest';
 import { Module } from '@nestjs/common';
+import { createArcjetLoggerAdapter } from './common/utils/arcjet-logger.adapter.js';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { I18nModule, AcceptLanguageResolver } from 'nestjs-i18n';
+import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { PrismaModule } from './prisma/prisma.module';
+import { RedisModule } from './redis/redis.module';
+import { QueueModule } from './queue/queue.module';
 import { HealthModule } from './health/health.module';
 import { CsrfModule } from './csrf/csrf.module';
+import { MailModule } from './mail/mail.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 
@@ -44,6 +48,7 @@ import { AppService } from './app.service';
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
         key: config.get<string>('ARCJET_KEY') ?? '',
+        log: createArcjetLoggerAdapter(),
         rules: [
           shield({ mode: 'LIVE' }),
           detectBot({
@@ -55,10 +60,6 @@ import { AppService } from './app.service';
             window: '60s',
             max: 2,
           }),
-          validateEmail({
-            mode: 'LIVE',
-            deny: ['DISPOSABLE', 'INVALID', 'NO_MX_RECORDS'],
-          }),
         ],
       }),
     }),
@@ -68,7 +69,11 @@ import { AppService } from './app.service';
         'en-*': 'en',
       },
       loaderOptions: {
-        path: path.join(__dirname, '../i18n/'),
+        path: (() => {
+          const distI18n = path.join(process.cwd(), 'dist', 'i18n');
+          const srcI18n = path.join(process.cwd(), 'src', 'i18n');
+          return fs.existsSync(distI18n) ? distI18n : srcI18n;
+        })(),
         watch: true,
       },
       resolvers: [
@@ -78,8 +83,11 @@ import { AppService } from './app.service';
       ],
     }),
     PrismaModule,
+    RedisModule.forRoot(),
+    QueueModule.forRoot(),
     HealthModule,
     CsrfModule,
+    MailModule,
   ],
   controllers: [AppController],
   providers: [
