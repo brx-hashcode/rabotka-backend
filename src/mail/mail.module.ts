@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MailerModule } from '@nestjs-modules/mailer';
-import { HandlebarsAdapter } from '@nestjs-modules/mailer/dist/adapters/handlebars.adapter';
+import { MjmlHandlebarsAdapter } from './adapters/mjml-handlebars.adapter.js';
 import { BullModule } from '@nestjs/bullmq';
 import * as path from 'node:path';
 import { MailController } from './mail.controller.js';
@@ -33,7 +33,7 @@ const registerProcessor = process.env.RUN_QUEUE_WORKER === 'true';
           },
           template: {
             dir: path.join(__dirname, 'templates'),
-            adapter: new HandlebarsAdapter(),
+            adapter: new MjmlHandlebarsAdapter({ inlineCssEnabled: false }),
             options: { strict: true },
           },
         };
