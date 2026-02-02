@@ -124,6 +124,41 @@ services:
     networks:
       - rabotka_network
 
+  queue-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: rabotka_queue_worker
+    command: node dist/src/worker.js
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USERNAME=postgres
+      - DB_PASSWORD=postgres
+      - DB_DATABASE=rabotka
+      - AWS_ENDPOINT_URL=http://localstack:4566
+      - SMTP_HOST=mailhog
+      - SMTP_PORT=1025
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - RUN_QUEUE_WORKER=true
+    depends_on:
+      postgres:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
+      mailhog:
+        condition: service_started
+      redis:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - rabotka_network
+
 volumes:
   postgres_data:
   pgadmin_data:

@@ -137,6 +137,10 @@ ARCJET_KEY=
 
 # AWS / LocalStack (for Docker)
 # AWS_ENDPOINT_URL=http://localhost:4566
+
+# Redis (for BullMQ queue - required for email worker)
+REDIS_HOST=localhost
+REDIS_PORT=6379
 ```
 
 ### Database Setup with Docker
@@ -172,6 +176,19 @@ pnpm run start:prod
 pnpm run start:dev
 ```
 
+### Queue Worker (Email Jobs)
+
+The API enqueues email jobs to Redis; a separate worker process consumes them. Run the worker in a **separate terminal** (do not combine with `start:dev` in the same process).
+
+| Context | Command |
+|---------|---------|
+| **Development** (no build) | `pnpm queue:worker:dev` |
+| **Production** (after build) | `pnpm run build` then `pnpm queue:worker` |
+| **Docker** | `docker compose up -d queue-worker` |
+| **Logs** | `docker compose logs -f queue-worker` |
+
+For local development, ensure Redis is running (e.g. `docker compose up -d redis`) before starting the worker.
+
 Once running, the application will be available at:
 
 - **API**: `http://localhost:3000/api/v1`
@@ -197,6 +214,8 @@ Once running, the application will be available at:
 | `pnpm prisma:studio` | Open Prisma Studio |
 | `pnpm db:seed` | Seed the database |
 | `pnpm db:reset` | Reset database (Docker only) |
+| `pnpm queue:worker` | Run queue worker (production; requires prior build) |
+| `pnpm queue:worker:dev` | Run queue worker in development (no build) |
 
 ## API Documentation
 
@@ -247,7 +266,7 @@ For mutating requests (POST, PUT, PATCH, DELETE), include the CSRF token:
 
 ## Docker
 
-### Full Stack (API + PostgreSQL + pgAdmin + LocalStack)
+### Full Stack (API + Queue Worker + PostgreSQL + pgAdmin + LocalStack)
 
 ```bash
 docker compose up -d
@@ -258,17 +277,24 @@ Services:
 | Service | Port | Description |
 |---------|------|-------------|
 | API | 3000 | NestJS backend |
+| queue-worker | — | BullMQ worker (processes email jobs) |
 | PostgreSQL | 5433 | Database |
 | pgAdmin | 5050 | Database management UI |
 | LocalStack | 4566 | Local AWS (S3, SQS, etc.) |
 
-### API Only
+### API and Queue Worker
 
-Build and run the API container:
+Build and run the API and queue worker:
 
 ```bash
-docker compose up -d postgres localstack
-docker compose up api
+docker compose up -d postgres redis localstack mailhog
+docker compose up -d api queue-worker
+```
+
+View queue worker logs:
+
+```bash
+docker compose logs -f queue-worker
 ```
 
 ## Development
@@ -310,9 +336,11 @@ When deploying to production:
 2. Configure `DATABASE_URL` for production PostgreSQL
 3. Set `ARCJET_KEY` for security features
 4. Configure `ALLOW_ORIGINS` for CORS
-5. Build the application: `pnpm run build`
-6. Run migrations: `pnpm prisma:migrate:deploy`
-7. Start with: `pnpm run start:prod`
+5. Configure `REDIS_HOST` and `REDIS_PORT` for BullMQ
+6. Build the application: `pnpm run build`
+7. Run migrations: `pnpm prisma:migrate:deploy`
+8. Start API: `pnpm run start:prod`
+9. Start queue worker (separate process): `pnpm queue:worker`
 
 ## License
 
