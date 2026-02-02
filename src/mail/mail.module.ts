@@ -8,6 +8,9 @@ import { MailController } from './mail.controller.js';
 import { MailProcessor } from './mail.processor.js';
 import { MailService } from './mail.service.js';
 
+/** Only the process that sets RUN_QUEUE_WORKER=true runs the mail queue worker. */
+const registerProcessor = process.env.RUN_QUEUE_WORKER === 'true';
+
 @Module({
   imports: [
     MailerModule.forRootAsync({
@@ -51,7 +54,7 @@ import { MailService } from './mail.service.js';
     BullModule.registerQueue({ name: 'mail' }),
   ],
   controllers: [MailController],
-  providers: [MailService, MailProcessor],
+  providers: [MailService, ...(registerProcessor ? [MailProcessor] : [])],
   exports: [MailService],
 })
 export class MailModule {}
