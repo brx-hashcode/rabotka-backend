@@ -1,18 +1,26 @@
 import { createConnection } from 'node:net';
 import { config as loadEnv } from 'dotenv';
-import type { LoggerService } from '@nestjs/common';
+import type { INestApplicationContext, LoggerService } from '@nestjs/common';
 import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
-import { AppModule } from './app.module';
+import { WorkerModule } from './worker.module';
 
 loadEnv({ path: '.env.local' });
-loadEnv(); // .env (envFilePath order: .env.local, .env)
+loadEnv();
 
-/**
- * Custom logger that only shows worker-related logs
- */
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled Rejection:', reason);
+  process.exitCode = 1;
+  setImmediate(() => process.exit(1));
+});
+
 class WorkerLogger implements LoggerService {
-  private readonly allowedContexts = ['Worker', 'MailProcessor', 'Queue'];
+  private readonly allowedContexts = [
+    'Worker',
+    'MailProcessor',
+    'Queue',
+    'ExceptionHandler',
+  ];
 
   log(message: string, context?: string) {
     if (!context || this.allowedContexts.includes(context)) {
@@ -20,9 +28,13 @@ class WorkerLogger implements LoggerService {
     }
   }
 
-  error(message: string, trace?: string, context?: string) {
+  error(message: unknown, trace?: string, context?: string) {
     if (!context || this.allowedContexts.includes(context)) {
-      console.error(`[${context || 'Worker'}] ${message}`, trace || '');
+      const msg =
+        message instanceof Error
+          ? `${message.message}\n${message.stack ?? ''}`
+          : String(message);
+      console.error(`[${context || 'Worker'}] ${msg}`, trace ?? '');
     }
   }
 
@@ -73,14 +85,26 @@ async function bootstrap(): Promise<void> {
     process.exit(1);
   }
 
-  // Set environment variable to indicate we're running as a queue worker
   process.env.RUN_QUEUE_WORKER = 'true';
 
   logger.log('🚀 Starting queue worker process...');
 
-  const app = await NestFactory.createApplicationContext(AppModule, {
-    logger: new WorkerLogger(),
-  });
+  let app: INestApplicationContext;
+  try {
+    app = await NestFactory.createApplicationContext(WorkerModule, {
+      logger: new WorkerLogger(),
+    });
+  } catch (err: unknown) {
+    const message =
+      err instanceof Error ? (err.stack ?? err.message) : String(err);
+    console.error(
+      '[Worker] Nest failed to create application context:',
+      message,
+    );
+    process.exitCode = 1;
+    setImmediate(() => process.exit(1));
+    return;
+  }
 
   app.enableShutdownHooks();
 
@@ -118,7 +142,9 @@ async function bootstrap(): Promise<void> {
 }
 
 bootstrap().catch((error: unknown) => {
-  const logger = new Logger('Worker');
-  logger.error('Worker failed to start:', error);
-  process.exit(1);
+  const message =
+    error instanceof Error ? (error.stack ?? error.message) : String(error);
+  console.error('[Worker] Worker failed to start:', message);
+  process.exitCode = 1;
+  setImmediate(() => process.exit(1));
 });

@@ -1,5 +1,6 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import { Job } from 'bullmq';
 import { MailerService } from '@nestjs-modules/mailer';
 
@@ -14,7 +15,7 @@ interface SendMailJobPayload {
 export class MailProcessor extends WorkerHost {
   private readonly logger = new Logger(MailProcessor.name);
 
-  constructor(private readonly mailerService: MailerService) {
+  constructor(private readonly moduleRef: ModuleRef) {
     super();
   }
 
@@ -27,10 +28,18 @@ export class MailProcessor extends WorkerHost {
       return;
     }
 
+    const mailerService = this.moduleRef.get(MailerService, { strict: false });
+    if (!mailerService?.sendMail) {
+      this.logger.error(
+        `MailerService not available (job ${job.id}). Is MailerModule loaded in the worker context?`,
+      );
+      throw new Error('MailerService not available in queue worker');
+    }
+
     const { to, subject, template, context } = job.data;
 
     try {
-      await this.mailerService.sendMail({
+      await mailerService.sendMail({
         to,
         subject,
         template,
