@@ -1,6 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { InjectQueue } from '@nestjs/bullmq';
-import { Queue } from 'bullmq';
+import { QueueService } from '../queue/queue.service';
 
 export interface SendMailOptions {
   to: string;
@@ -11,26 +10,15 @@ export interface SendMailOptions {
 
 @Injectable()
 export class MailService {
-  constructor(
-    @InjectQueue('mail')
-    private readonly mailQueue: Queue,
-  ) {}
+  constructor(private readonly queueService: QueueService) {}
 
   async sendMail(options: SendMailOptions): Promise<{ jobId: string }> {
-    const job = await this.mailQueue.add(
-      'send',
-      {
-        to: options.to,
-        subject: options.subject,
-        template: options.template,
-        context: options.context ?? {},
-      },
-      {
-        attempts: 3,
-        backoff: { type: 'exponential', delay: 1000 },
-        removeOnComplete: true,
-      },
-    );
-    return { jobId: job.id ?? '' };
+    const jobId = await this.queueService.addEmailJob({
+      to: options.to,
+      subject: options.subject,
+      template: options.template,
+      context: options.context ?? {},
+    });
+    return { jobId: jobId ?? '' };
   }
 }

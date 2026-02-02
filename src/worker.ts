@@ -3,22 +3,21 @@ import { config as loadEnv } from 'dotenv';
 import type { INestApplicationContext, LoggerService } from '@nestjs/common';
 import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
-import { WorkerModule } from './worker.module';
+import { MailerService } from '@nestjs-modules/mailer';
+import { AppModule } from './app.module';
+import { QueueService } from './queue/queue.service';
+import { EMAIL_QUEUE } from './queue/queue.module';
+import type { EmailJobData } from './queue/queue.service';
 
 loadEnv({ path: '.env.local' });
 loadEnv();
 
-process.on('unhandledRejection', (reason) => {
-  console.error('Unhandled Rejection:', reason);
-  process.exitCode = 1;
-  setImmediate(() => process.exit(1));
-});
-
 class WorkerLogger implements LoggerService {
   private readonly allowedContexts = [
     'Worker',
+    'QueueService',
     'MailProcessor',
-    'Queue',
+    'RedisService',
     'ExceptionHandler',
   ];
 
@@ -91,7 +90,7 @@ async function bootstrap(): Promise<void> {
 
   let app: INestApplicationContext;
   try {
-    app = await NestFactory.createApplicationContext(WorkerModule, {
+    app = await NestFactory.createApplicationContext(AppModule, {
       logger: new WorkerLogger(),
     });
   } catch (err: unknown) {
@@ -106,6 +105,41 @@ async function bootstrap(): Promise<void> {
     return;
   }
 
+  const queueService = app.get(QueueService);
+  if (!queueService) {
+    logger.error('QueueService not found');
+    await app.close();
+    process.exit(1);
+  }
+
+  const mailerService = app.get(MailerService);
+  if (!mailerService) {
+    logger.error('MailerService not found');
+    await app.close();
+    process.exit(1);
+  }
+
+  queueService.createWorker<EmailJobData>(
+    EMAIL_QUEUE,
+    async (job) => {
+      const { to, subject, template, context } = job.data;
+      const jobId = job.id ?? 'unknown';
+      console.log(
+        `[MailProcessor] 📧 Processing email job [${jobId}] from ${EMAIL_QUEUE}: Recipient(s): ${to}, Subject: "${subject}"`,
+      );
+      await mailerService.sendMail({
+        to,
+        subject,
+        template,
+        context: context ?? {},
+      });
+      console.log(
+        `[MailProcessor] ✅ Email sent successfully [${jobId}] to ${to} - Subject: "${subject}"`,
+      );
+    },
+    { concurrency: Number(process.env.EMAIL_QUEUE_CONCURRENCY) || 5 },
+  );
+
   app.enableShutdownHooks();
 
   logger.log('✅ Queue worker initialized successfully');
@@ -115,6 +149,9 @@ async function bootstrap(): Promise<void> {
     logger.log(`\n${signal} received. Shutting down queue worker...`);
 
     try {
+      if (queueService && typeof queueService.closeAll === 'function') {
+        await queueService.closeAll();
+      }
       await app.close();
       logger.log('✅ Queue worker shut down gracefully');
       process.exit(0);
@@ -141,7 +178,7 @@ async function bootstrap(): Promise<void> {
   });
 }
 
-bootstrap().catch((error: unknown) => {
+void bootstrap().catch((error: unknown) => {
   const message =
     error instanceof Error ? (error.stack ?? error.message) : String(error);
   console.error('[Worker] Worker failed to start:', message);

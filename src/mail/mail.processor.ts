@@ -1,56 +1,80 @@
-import { Processor, WorkerHost } from '@nestjs/bullmq';
-import { Logger } from '@nestjs/common';
-import { ModuleRef } from '@nestjs/core';
-import { Job } from 'bullmq';
+import {
+    Injectable,
+    Logger,
+    OnModuleInit,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { MailerService } from '@nestjs-modules/mailer';
+import { EMAIL_QUEUE } from '../queue/queue.module';
+import { type EmailJobData } from '../queue/queue.service';
 
-interface SendMailJobPayload {
-  to: string;
-  subject: string;
-  template: string;
-  context: Record<string, unknown>;
-}
-
-@Processor('mail')
-export class MailProcessor extends WorkerHost {
+@Injectable()
+export class MailProcessor implements OnModuleInit {
   private readonly logger = new Logger(MailProcessor.name);
 
-  constructor(private readonly moduleRef: ModuleRef) {
-    super();
-  }
+  constructor(
+    private readonly mailerService: MailerService,
+    private readonly configService: ConfigService,
+  ) {}
 
-  async process(
-    job: Job<SendMailJobPayload, void, string>,
-    _token?: string,
-  ): Promise<void> {
-    if (job.name !== 'send') {
-      this.logger.warn(`Unknown job name: ${job.name}`);
+  async onModuleInit() {
+    if (process.env.RUN_QUEUE_WORKER === 'true') {
+      this.logger.log(
+        '⏭️ Email worker is registered by worker bootstrap (worker.ts)',
+      );
       return;
     }
+    this.logger.log(
+      '⏭️ Skipping email worker initialization (running as API server)',
+    );
+  }
 
-    const mailerService = this.moduleRef.get(MailerService, { strict: false });
-    if (!mailerService?.sendMail) {
-      this.logger.error(
-        `MailerService not available (job ${job.id}). Is MailerModule loaded in the worker context?`,
-      );
-      throw new Error('MailerService not available in queue worker');
-    }
-
+  private async processEmailJob(job: {
+    id?: string;
+    data: EmailJobData;
+  }): Promise<void> {
     const { to, subject, template, context } = job.data;
+    const jobId = job.id ?? 'unknown';
+
+    this.validateJobData(job.data);
+
+    this.logger.log(
+      `📧 Processing email job [${jobId}] from ${EMAIL_QUEUE}: Recipient(s): ${to}, Subject: "${subject}"`,
+    );
 
     try {
-      await mailerService.sendMail({
+      await this.mailerService.sendMail({
         to,
         subject,
         template,
-        context,
+        context: context ?? {},
       });
-      this.logger.log(`Email sent to ${to} (job ${job.id})`);
+
+      this.logger.log(
+        `✅ Email sent successfully [${jobId}] to ${to} - Subject: "${subject}"`,
+      );
     } catch (error) {
       this.logger.error(
-        `Failed to send email to ${to} (job ${job.id}): ${error instanceof Error ? error.message : String(error)}`,
+        `❌ Failed to process email job [${jobId}] to ${to} with subject "${subject}":`,
+        error instanceof Error ? error.message : String(error),
       );
       throw error;
+    }
+  }
+
+  private validateJobData(data: EmailJobData): void {
+    if (!data.to || typeof data.to !== 'string') {
+      throw new Error('Email recipient (to) is required');
+    }
+    if (!data.subject || typeof data.subject !== 'string') {
+      throw new Error('Email subject is required');
+    }
+    if (!data.template || typeof data.template !== 'string') {
+      throw new Error('Email template is required');
+    }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(data.to)) {
+      throw new Error(`Invalid email format: ${data.to}`);
     }
   }
 }
