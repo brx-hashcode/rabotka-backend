@@ -41,8 +41,8 @@ services:
     image: mailhog/mailhog:latest
     container_name: rabotka_mailhog
     ports:
-      - "1025:1025" # SMTP (for your app to send to)
-      - "8025:8025" # Web UI
+      - "1025:1025"
+      - "8025:8025"
     networks:
       - rabotka_network
 
