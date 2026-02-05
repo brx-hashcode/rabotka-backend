@@ -22,12 +22,14 @@ export class MailController {
     },
   })
   async sendWelcome() {
+    const email: string = 'blondeau.nbif@icloud.com';
+
     const { jobId } = await this.mailService.sendMail({
-      to: 'wodod93616@aixind.com',
+      to: email,
       subject: 'Welcome',
       template: 'welcome',
       context: { name: 'Wodod' },
     });
-    return { jobId, message: 'Welcome email queued' };
+    return { jobId, message: 'Welcome email queued', email };
   }
 }

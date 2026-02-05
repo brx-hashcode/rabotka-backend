@@ -10,7 +10,7 @@
         "watchAssets": true
       },
       {
-        "include": "mail/templates/**/*.mjml",
+        "include": "modules/mail/templates/**/*.mjml",
         "outDir": "dist/src",
         "watchAssets": true
       }

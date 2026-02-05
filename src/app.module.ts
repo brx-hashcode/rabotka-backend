@@ -13,12 +13,18 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { I18nModule, AcceptLanguageResolver } from 'nestjs-i18n';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { PrismaModule } from './prisma/prisma.module';
-import { RedisModule } from './redis/redis.module';
-import { QueueModule } from './queue/queue.module';
-import { HealthModule } from './health/health.module';
-import { CsrfModule } from './csrf/csrf.module';
-import { MailModule } from './mail/mail.module';
+import { PrismaModule } from './common/services/prisma/prisma.module';
+import { RedisModule } from './common/services/redis/redis.module';
+import { QueueModule } from './common/services/queue/queue.module';
+import { HealthModule } from './modules/health/health.module';
+import { CsrfModule } from './modules/csrf/csrf.module';
+import { MailModule } from './modules/mail/mail.module';
+import { AuthModule } from './modules/auth/auth.module';
+import { ProfileModule } from './modules/profile/profile.module';
+import { UserModule } from './modules/user/user.module';
+import { ConversationModule } from './modules/conversation/conversation.module';
+import { FileModule } from './modules/file/file.module';
+import { LogModule } from './modules/log/log.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 
@@ -88,6 +94,12 @@ import { AppService } from './app.service';
     HealthModule,
     CsrfModule,
     MailModule,
+    AuthModule,
+    ProfileModule,
+    UserModule,
+    ConversationModule,
+    FileModule,
+    LogModule,
   ],
   controllers: [AppController],
   providers: [
