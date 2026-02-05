@@ -40,6 +40,13 @@ async function bootstrap() {
     credentials: true,
   });
 
+  app
+    .getHttpAdapter()
+    .getInstance()
+    .get('/', (_, res) => {
+      res.redirect('/api-docs');
+    });
+
   app.setGlobalPrefix('api/v1');
 
   app.use(cookieParser());
