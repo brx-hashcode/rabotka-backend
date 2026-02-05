@@ -41,8 +41,8 @@ services:
     image: mailhog/mailhog:latest
     container_name: rabotka_mailhog
     ports:
-      - "1025:1025" # SMTP (for your app to send to)
-      - "8025:8025" # Web UI
+      - "1025:1025"
+      - "8025:8025"
     networks:
       - rabotka_network
 
@@ -90,17 +90,6 @@ services:
       - .env
     environment:
       - NODE_ENV=production
-      - DB_HOST=postgres
-      - DB_PORT=5432
-      - DB_USERNAME=postgres
-      - DB_PASSWORD=postgres
-      - DB_DATABASE=rabotka
-      - PORT=${PORT:-3000}
-      - AWS_ENDPOINT_URL=http://localstack:4566
-      - SMTP_HOST=mailhog
-      - SMTP_PORT=1025
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
     depends_on:
       postgres:
         condition: service_healthy
