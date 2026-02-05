@@ -84,7 +84,7 @@ enum PaymentFlow {
 }
 
 model Profile {
-  id                      String             @id @default(uuid())
+  id                      String             @id @default(uuid()) @db.Uuid
   created_at              DateTime           @default(now())
   updated_at              DateTime           @updatedAt
   first_name              String
@@ -122,7 +122,7 @@ model Profile {
 }
 
 model User {
-  id            String    @id @default(uuid())
+  id            String    @id @default(uuid()) @db.Uuid
   created_at    DateTime  @default(now())
   updated_at    DateTime  @updatedAt
   first_name    String
@@ -141,7 +141,7 @@ model User {
 }
 
 model KycDocument {
-  id                  String             @id @default(uuid())
+  id                  String             @id @default(uuid()) @db.Uuid
   created_at          DateTime           @default(now())
   updated_at          DateTime           @updatedAt
   profile_id          String             @unique @db.Uuid
@@ -161,7 +161,7 @@ model KycDocument {
 }
 
 model JobOffer {
-  id           String         @id @default(uuid())
+  id           String         @id @default(uuid()) @db.Uuid
   created_at   DateTime       @default(now())
   updated_at   DateTime       @updatedAt
   employer_id  String         @db.Uuid
@@ -184,7 +184,7 @@ model JobOffer {
 }
 
 model Application {
-  id                  String            @id @default(uuid())
+  id                  String            @id @default(uuid()) @db.Uuid
   created_at          DateTime          @default(now())
   updated_at          DateTime          @updatedAt
   job_offer_id        String            @db.Uuid
@@ -207,7 +207,7 @@ model Application {
 }
 
 model Penalty {
-  id             String   @id @default(uuid())
+  id             String   @id @default(uuid()) @db.Uuid
   created_at     DateTime @default(now())
   worker_id      String   @db.Uuid
   application_id String   @db.Uuid
@@ -224,7 +224,7 @@ model Penalty {
 }
 
 model Payment {
-  id             String        @id @default(uuid())
+  id             String        @id @default(uuid()) @db.Uuid
   created_at     DateTime      @default(now())
   updated_at     DateTime      @updatedAt
   profile_id     String        @db.Uuid
@@ -243,7 +243,7 @@ model Payment {
 }
 
 model File {
-  id                String          @id @default(uuid())
+  id                String          @id @default(uuid()) @db.Uuid
   created_at        DateTime        @default(now())
   updated_at        DateTime        @updatedAt
   filename          String
@@ -265,7 +265,7 @@ model File {
 }
 
 model Log {
-  id          String   @id @default(uuid())
+  id          String   @id @default(uuid()) @db.Uuid
   created_at  DateTime @default(now())
   updated_at  DateTime @updatedAt
   action      String
@@ -287,7 +287,7 @@ model Log {
 }
 
 model Conversation {
-  id             String             @id @default(uuid())
+  id             String             @id @default(uuid()) @db.Uuid
   created_at     DateTime           @default(now())
   updated_at     DateTime           @updatedAt
   profile_id     String             @db.Uuid
