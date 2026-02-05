@@ -1,12 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { QueueService } from '../../common/services/queue/queue.service';
 
-export interface SendMailOptions {
+export type SendMailOptions = {
   to: string;
   subject: string;
   template: string;
   context?: Record<string, unknown>;
-}
+};
 
 @Injectable()
 export class MailService {

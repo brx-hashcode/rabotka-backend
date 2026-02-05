@@ -4,8 +4,7 @@ import type { MailerOptions } from '@nestjs-modules/mailer/dist/interfaces/maile
 import type { TemplateAdapter } from '@nestjs-modules/mailer/dist/interfaces/template-adapter.interface';
 import Handlebars from 'handlebars';
 
-// CJS-safe: mjml package exports the function as module.exports; .default is undefined at runtime.
-// eslint-disable-next-line @typescript-eslint/no-require-imports -- required for correct CJS interop in worker
+// eslint-disable-next-line @typescript-eslint/no-require-imports
 const mjmlModule = require('mjml');
 const mjml = typeof mjmlModule === 'function' ? mjmlModule : mjmlModule.default;
 
