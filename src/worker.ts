@@ -5,9 +5,9 @@ import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { MailerService } from '@nestjs-modules/mailer';
 import { AppModule } from './app.module';
-import { QueueService } from './queue/queue.service';
-import { EMAIL_QUEUE } from './queue/queue.module';
-import type { EmailJobData } from './queue/queue.service';
+import { QueueService } from './common/services/queue/queue.service';
+import { EMAIL_QUEUE } from './common/services/queue/queue.module';
+import type { EmailJobData } from './common/services/queue/queue.service';
 
 loadEnv({ path: '.env.local' });
 loadEnv();

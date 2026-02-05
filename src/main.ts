@@ -6,8 +6,8 @@ import { apiReference } from '@scalar/nestjs-api-reference';
 import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
-import { CSRF_UTILITIES } from './csrf/csrf.constants';
-import { csrfVisitorMiddleware } from './csrf/csrf-visitor.middleware';
+import { CSRF_UTILITIES } from './modules/csrf/csrf.constants';
+import { csrfVisitorMiddleware } from './modules/csrf/csrf-visitor.middleware';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
