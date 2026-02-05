@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { PrismaModule } from './prisma/prisma.module';
-import { MailModule } from './mail/mail.module';
+import { PrismaModule } from './common/services/prisma/prisma.module';
+import { MailModule } from './modules/mail/mail.module';
 
 /**
  * Minimal module for the queue worker process.
