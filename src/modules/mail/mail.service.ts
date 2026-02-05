@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { QueueService } from '../queue/queue.service';
+import { QueueService } from '../../common/services/queue/queue.service';
 
 export interface SendMailOptions {
   to: string;
