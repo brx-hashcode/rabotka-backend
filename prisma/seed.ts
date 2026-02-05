@@ -1,6 +1,6 @@
 import { config } from 'dotenv';
 import { PrismaPg } from '@prisma/adapter-pg';
-import { PrismaClient } from '../src/generated/prisma/client';
+import { PrismaClient } from '@prisma/client';
 import { seedUsers } from './seed/user.seed';
 
 config({ path: '.env.local' });

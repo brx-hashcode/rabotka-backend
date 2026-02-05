@@ -1,5 +1,4 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { MailerService } from '@nestjs-modules/mailer';
 import { EMAIL_QUEUE } from '../../common/services/queue/queue.module';
 import { type EmailJobData } from '../../common/services/queue/queue.service';
@@ -8,10 +7,7 @@ import { type EmailJobData } from '../../common/services/queue/queue.service';
 export class MailProcessor implements OnModuleInit {
   private readonly logger = new Logger(MailProcessor.name);
 
-  constructor(
-    private readonly mailerService: MailerService,
-    private readonly configService: ConfigService,
-  ) {}
+  constructor(private readonly mailerService: MailerService) {}
 
   onModuleInit() {
     if (process.env.RUN_QUEUE_WORKER === 'true') {
