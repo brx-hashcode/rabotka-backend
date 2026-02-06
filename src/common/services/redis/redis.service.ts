@@ -16,8 +16,10 @@ export class RedisService implements OnModuleInit {
       await this.redis.ping();
       this.logger.log('✅ Redis connected successfully');
     } catch (error) {
-      this.logger.error('❌ Redis connection failed:', error);
-      throw error;
+      this.logger.warn(
+        '⚠️ Redis connection failed - server will continue but queue features may be unavailable:',
+        error instanceof Error ? error.message : String(error),
+      );
     }
   }
 
