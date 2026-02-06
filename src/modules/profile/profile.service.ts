@@ -80,17 +80,28 @@ export class ProfileService {
         tx,
         createProfileDto,
       );
+
       await this.createFileRecords(tx, createdProfile.id, [
         documentUploadResult,
         selfieUploadResult,
       ]);
-      await this.createKycDocument(
-        tx,
-        createdProfile.id,
-        createProfileDto.documentType,
-        documentUploadResult.url,
-        selfieUploadResult.url,
-      );
+
+      await Promise.all([
+        this.createKycDocumentRecord(
+          tx,
+          createdProfile.id,
+          createProfileDto.documentType,
+          'DOCUMENT',
+          documentUploadResult.url,
+        ),
+        this.createKycDocumentRecord(
+          tx,
+          createdProfile.id,
+          createProfileDto.documentType,
+          'SELFIE',
+          selfieUploadResult.url,
+        ),
+      ]);
       return createdProfile;
     });
   }
@@ -141,22 +152,31 @@ export class ProfileService {
     );
   }
 
-  private createKycDocument(
+  private createKycDocumentRecord(
     tx: PrismaTransactionClient,
     profileId: string,
-    documentType: CreateProfileDto['documentType'],
+    documentType: CreateProfileDto['documentType'] | undefined,
+    documentCategory: 'DOCUMENT' | 'SELFIE',
     documentUrl: string,
-    selfieUrl: string,
   ) {
-    return tx.kycDocument.create({
-      data: {
-        profile_id: profileId,
-        document_type: documentType,
-        document_url: documentUrl,
-        selfie_url: selfieUrl,
-        verification_status: 'PENDING',
-      },
-    });
+    const data: {
+      profile_id: string;
+      document_type?: CreateProfileDto['documentType'];
+      document_category: 'DOCUMENT' | 'SELFIE';
+      document_url: string;
+      verification_status: 'PENDING';
+    } = {
+      profile_id: profileId,
+      document_category: documentCategory,
+      document_url: documentUrl,
+      verification_status: 'PENDING',
+    };
+
+    if (documentType !== undefined) {
+      data.document_type = documentType;
+    }
+
+    return tx.kycDocument.create({ data });
   }
 
   private handleCreateProfileError(error: any): never {

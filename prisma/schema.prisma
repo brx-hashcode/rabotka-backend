@@ -53,6 +53,11 @@ enum DocumentType {
   DRIVER_LICENSE
 }
 
+enum KycDocumentCategory {
+  DOCUMENT
+  SELFIE
+}
+
 enum JobOfferStatus {
   ACTIVE
   FILLED
@@ -107,7 +112,7 @@ model Profile {
   verified_at             DateTime?
   rejection_reason        String?
 
-  kyc_document  KycDocument?
+  kyc_documents KycDocument[]
   applications  Application[]
   job_offers    JobOffer[]
   penalties     Penalty[]
@@ -147,10 +152,10 @@ model KycDocument {
   id                  String             @id @default(uuid()) @db.Uuid
   created_at          DateTime           @default(now())
   updated_at          DateTime           @updatedAt
-  profile_id          String             @unique @db.Uuid
-  document_type       DocumentType
+  profile_id          String             @db.Uuid
+  document_type       DocumentType?
+  document_category   KycDocumentCategory
   document_url        String
-  selfie_url          String
   verification_status VerificationStatus @default(PENDING)
   verified_at         DateTime?
   verified_by         String?            @db.Uuid
@@ -158,6 +163,7 @@ model KycDocument {
 
   profile Profile @relation(fields: [profile_id], references: [id], onDelete: Cascade)
 
+  @@unique([profile_id, document_category], name: "idx_kyc_document_profile_category")
   @@index([profile_id], name: "idx_kyc_document_profile")
   @@index([verification_status], name: "idx_kyc_document_status")
   @@map("kyc_documents")
