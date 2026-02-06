@@ -25,6 +25,9 @@ enum UserRole {
 enum StorageProvider {
   S3
   LOCAL
+  CLOUDINARY
+  VERCEL_BLOB
+  CLOUDFLARE
 }
 
 enum BotPlatform {
