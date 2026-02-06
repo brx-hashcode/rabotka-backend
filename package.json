@@ -49,6 +49,8 @@
     "@scalar/nestjs-api-reference": "^0.5.11",
     "@vercel/blob": "^0.25.0",
     "bullmq": "^5.67.2",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.14.1",
     "cloudinary": "^2.0.0",
     "cookie-parser": "^1.4.7",
     "csrf-csrf": "^4.0.3",
