@@ -8,7 +8,7 @@ import {
 import { Module } from '@nestjs/common';
 import { createArcjetLoggerAdapter } from './common/utils/arcjet-logger.adapter.js';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { MailerModule } from '@nestjs-modules/mailer';
 import { I18nModule, AcceptLanguageResolver } from 'nestjs-i18n';
@@ -27,8 +27,10 @@ import { UserModule } from './modules/user/user.module';
 import { ConversationModule } from './modules/conversation/conversation.module';
 import { FileModule } from './modules/file/file.module';
 import { LogModule } from './modules/log/log.module';
+import { StorageModule } from './common/services/storage/storage.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { I18nExceptionFilter } from './common/filters/i18n-exception.filter';
 
 @Module({
   imports: [
@@ -105,6 +107,7 @@ import { AppService } from './app.service';
     ProfileModule,
     UserModule,
     ConversationModule,
+    StorageModule,
     FileModule,
     LogModule,
   ],
@@ -113,6 +116,7 @@ import { AppService } from './app.service';
     AppService,
     { provide: APP_GUARD, useClass: ArcjetGuard },
     { provide: APP_GUARD, useClass: ThrottlerGuard },
+    { provide: APP_FILTER, useClass: I18nExceptionFilter },
   ],
 })
 export class AppModule {}

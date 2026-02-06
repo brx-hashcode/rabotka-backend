@@ -1,4 +1,4 @@
-import { Logger } from '@nestjs/common';
+import { Logger, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
@@ -49,6 +49,17 @@ async function bootstrap() {
 
   app.setGlobalPrefix('api/v1');
 
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+      transformOptions: {
+        enableImplicitConversion: true,
+      },
+    }),
+  );
+
   app.use(cookieParser());
   app.use(csrfVisitorMiddleware);
 
@@ -69,9 +80,31 @@ async function bootstrap() {
   app.use(
     '/api-docs',
     apiReference({
-      darkMode: true,
-      theme: 'fastify',
+      defaultOpenAllTags: true,
+      hideClientButton: false,
+      showSidebar: true,
+      showDeveloperTools: environment === 'development' ? 'localhost' : false,
+      showToolbar: environment === 'development' ? 'localhost' : false,
+      operationTitleSource: 'summary',
+      theme: 'moon',
+      persistAuth: false,
+      telemetry: true,
       layout: 'classic',
+      isEditable: false,
+      isLoading: false,
+      hideModels: false,
+      documentDownloadType: 'both',
+      hideTestRequestButton: false,
+      hideSearch: false,
+      showOperationId: false,
+      hideDarkModeToggle: false,
+      withDefaultFonts: true,
+      expandAllModelSections: false,
+      expandAllResponses: false,
+      orderSchemaPropertiesBy: 'alpha',
+      orderRequiredPropertiesFirst: true,
+      _integration: 'nestjs',
+      darkMode: true,
       spec: {
         content: document,
       },
@@ -80,11 +113,6 @@ async function bootstrap() {
         clientKey: 'fetch',
       },
       configuration: {
-        showSidebar: true,
-        hideDownloadButton: false,
-        hideTestRequestButton: false,
-        hideSchemas: false,
-        hideModels: false,
         proxy:
           environment === 'development'
             ? `http://localhost:${port}`
