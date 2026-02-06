@@ -1,4 +1,4 @@
-import { escapeHtml, wrapEmailHtml } from './layout.js';
+import { escapeHtml, wrapEmailHtml } from './layout';
 
 export function sendWelcomeEmail(name: string): string {
   const body = `<p>Hi ${escapeHtml(name)},</p>
