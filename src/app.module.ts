@@ -27,6 +27,7 @@ import { UserModule } from './modules/user/user.module';
 import { ConversationModule } from './modules/conversation/conversation.module';
 import { FileModule } from './modules/file/file.module';
 import { LogModule } from './modules/log/log.module';
+import { StorageModule } from './common/services/storage/storage.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 
@@ -105,6 +106,7 @@ import { AppService } from './app.service';
     ProfileModule,
     UserModule,
     ConversationModule,
+    StorageModule,
     FileModule,
     LogModule,
   ],
