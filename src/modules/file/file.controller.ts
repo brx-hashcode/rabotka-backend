@@ -84,6 +84,7 @@ export class FileController {
             fileName,
             {
               mimeType: file.mimetype,
+              folder: 'files',
             },
           );
 
@@ -114,6 +115,7 @@ export class FileController {
       fileName,
       {
         mimeType: file.mimetype,
+        folder: 'files',
       },
     );
 
