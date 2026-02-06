@@ -8,8 +8,10 @@ import { EMAIL_QUEUE } from './queue.module';
 export type EmailJobData = {
   to: string;
   subject: string;
-  template: string;
-  context?: Record<string, unknown>;
+  text?: string;
+  html?: string;
+  from?: string;
+  fromName?: string;
 };
 
 @Injectable()
@@ -160,7 +162,12 @@ export class QueueService implements OnModuleInit {
   }
 
   async addEmailJob(data: EmailJobData): Promise<string | undefined> {
-    const { to, subject } = data;
+    const { to, subject, text, html } = data;
+    if (text === undefined && html === undefined) {
+      throw new Error(
+        'Email body is required: provide at least one of text or html',
+      );
+    }
     this.logger.log(
       `📧 Enqueuing email job to ${to} with subject: "${subject}"`,
     );

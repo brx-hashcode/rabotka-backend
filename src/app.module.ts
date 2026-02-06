@@ -10,6 +10,7 @@ import { createArcjetLoggerAdapter } from './common/utils/arcjet-logger.adapter.
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { MailerModule } from '@nestjs-modules/mailer';
 import { I18nModule, AcceptLanguageResolver } from 'nestjs-i18n';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -18,6 +19,7 @@ import { RedisModule } from './common/services/redis/redis.module';
 import { QueueModule } from './common/services/queue/queue.module';
 import { HealthModule } from './modules/health/health.module';
 import { CsrfModule } from './modules/csrf/csrf.module';
+import { getMailerTransportConfig } from './modules/mail/mailer-transport.config.js';
 import { MailModule } from './modules/mail/mail.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { ProfileModule } from './modules/profile/profile.module';
@@ -91,6 +93,11 @@ import { AppService } from './app.service';
     PrismaModule,
     RedisModule.forRoot(),
     QueueModule.forRoot(),
+    MailerModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => getMailerTransportConfig(config),
+    }),
     HealthModule,
     CsrfModule,
     MailModule,

@@ -4,8 +4,10 @@ import { QueueService } from '../../common/services/queue/queue.service';
 export type SendMailOptions = {
   to: string;
   subject: string;
-  template: string;
-  context?: Record<string, unknown>;
+  text?: string;
+  html?: string;
+  from?: string;
+  fromName?: string;
 };
 
 @Injectable()
@@ -16,8 +18,10 @@ export class MailService {
     const jobId = await this.queueService.addEmailJob({
       to: options.to,
       subject: options.subject,
-      template: options.template,
-      context: options.context ?? {},
+      ...(options.text !== undefined && { text: options.text }),
+      ...(options.html !== undefined && { html: options.html }),
+      ...(options.from !== undefined && { from: options.from }),
+      ...(options.fromName !== undefined && { fromName: options.fromName }),
     });
 
     return { jobId: jobId ?? '' };

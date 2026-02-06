@@ -1,5 +1,6 @@
 import { Controller, Get } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { getWelcomeMessage } from './templates/index.js';
 import { MailService } from './mail.service.js';
 
 @ApiTags('Mail')
@@ -11,7 +12,7 @@ export class MailController {
   @ApiOperation({
     summary: 'Send welcome email',
     description:
-      'Queues a welcome template email to wodod93616@aixind.com (for testing).',
+      'Queues a plain text welcome email to fariol@akieni.tech (for testing).',
   })
   @ApiResponse({
     status: 200,
@@ -22,13 +23,13 @@ export class MailController {
     },
   })
   async sendWelcome() {
-    const email: string = 'blondeau.nbif@icloud.com';
+    const email: string = 'fariol@akieni.tech';
+    const name = 'Fariol';
 
     const { jobId } = await this.mailService.sendMail({
       to: email,
       subject: 'Welcome',
-      template: 'welcome',
-      context: { name: 'Wodod' },
+      text: getWelcomeMessage(name),
     });
     return { jobId, message: 'Welcome email queued', email };
   }
