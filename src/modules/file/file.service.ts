@@ -12,6 +12,44 @@ export class FileService {
     private readonly storageService: StorageService,
   ) {}
 
+  /**
+   * Uploads a file to storage without creating a database record.
+   * Use this when you need to create the File record inside a transaction.
+   */
+  async uploadToStorage(
+    file: Express.Multer.File,
+    options?: {
+      folder?: string;
+    },
+  ) {
+    if (!file.buffer || !file.originalname) {
+      throw new Error('File buffer or originalname is missing');
+    }
+
+    const uploadOptions: UploadOptions = {
+      mimeType: file.mimetype,
+      folder: options?.folder,
+    };
+
+    const fileBuffer: Buffer = Buffer.isBuffer(file.buffer)
+      ? file.buffer
+      : Buffer.from(file.buffer);
+    const fileName: string = String(file.originalname);
+
+    const uploadResult = await this.storageService.upload(
+      fileBuffer,
+      fileName,
+      uploadOptions,
+    );
+
+    return {
+      ...uploadResult,
+      originalFilename: file.originalname,
+      mimeType: file.mimetype,
+      size: file.size,
+    };
+  }
+
   async uploadFile(
     file: Express.Multer.File,
     options?: {
@@ -21,32 +59,16 @@ export class FileService {
     },
   ) {
     try {
-      if (!file.buffer || !file.originalname) {
-        throw new Error('File buffer or originalname is missing');
-      }
-
-      const uploadOptions: UploadOptions = {
-        mimeType: file.mimetype,
+      const uploadResult = await this.uploadToStorage(file, {
         folder: options?.folder,
-      };
-
-      const fileBuffer: Buffer = Buffer.isBuffer(file.buffer)
-        ? file.buffer
-        : Buffer.from(file.buffer);
-      const fileName: string = String(file.originalname);
-
-      const uploadResult = await this.storageService.upload(
-        fileBuffer,
-        fileName,
-        uploadOptions,
-      );
+      });
 
       const fileRecord = await this.prisma.file.create({
         data: {
           filename: uploadResult.key,
-          original_filename: file.originalname,
-          mime_type: file.mimetype,
-          size: file.size,
+          original_filename: uploadResult.originalFilename,
+          mime_type: uploadResult.mimeType,
+          size: uploadResult.size,
           storage_provider: uploadResult.provider,
           storage_key: uploadResult.key,
           bucket: uploadResult.bucket,
