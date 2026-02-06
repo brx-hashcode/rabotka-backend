@@ -1,44 +1,12 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { MailerModule } from '@nestjs-modules/mailer';
-import { MjmlHandlebarsAdapter } from './adapters/mjml-handlebars.adapter.js';
 import { BullModule } from '@nestjs/bullmq';
-import * as path from 'node:path';
-import { MailController } from './mail.controller.js';
-import { MailProcessor } from './mail.processor.js';
-import { MailService } from './mail.service.js';
-
-const registerProcessor = process.env.RUN_QUEUE_WORKER === 'true';
+import { MailController } from './mail.controller';
+import { MailProcessor } from './mail.processor';
+import { MailService } from './mail.service';
 
 @Module({
   imports: [
-    MailerModule.forRootAsync({
-      imports: [ConfigModule],
-      inject: [ConfigService],
-      useFactory: (config: ConfigService) => {
-        const host = config.get<string>('SMTP_HOST', 'localhost');
-        const port = config.get<number>('SMTP_PORT', 1025);
-        const secure = config.get<string>('SMTP_SECURE') === 'true';
-        const user = config.get<string>('SMTP_USER');
-        const pass = config.get<string>('SMTP_PASSWORD');
-        return {
-          transport: {
-            host,
-            port,
-            secure,
-            ...(user && pass ? { auth: { user, pass } } : {}),
-          },
-          defaults: {
-            from: config.get<string>('MAIL_FROM') ?? 'noreply@localhost',
-          },
-          template: {
-            dir: path.join(__dirname, 'templates'),
-            adapter: new MjmlHandlebarsAdapter({ inlineCssEnabled: false }),
-            options: { strict: true },
-          },
-        };
-      },
-    }),
     BullModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
@@ -53,7 +21,7 @@ const registerProcessor = process.env.RUN_QUEUE_WORKER === 'true';
     BullModule.registerQueue({ name: 'mail' }),
   ],
   controllers: [MailController],
-  providers: [MailService, ...(registerProcessor ? [MailProcessor] : [])],
+  providers: [MailService, MailProcessor],
   exports: [MailService],
 })
 export class MailModule {}

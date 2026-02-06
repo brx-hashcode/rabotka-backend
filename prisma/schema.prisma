@@ -1,7 +1,5 @@
 generator client {
-  provider     = "prisma-client"
-  output       = "../src/generated/prisma"
-  moduleFormat = "commonjs"
+  provider = "prisma-client-js"
 }
 
 datasource db {
@@ -39,114 +37,270 @@ enum ConversationStatus {
   ARCHIVED
 }
 
-model Profile {
-  id                 String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  createdAt          DateTime           @default(now()) @map("created_at")
-  updatedAt          DateTime           @default(now()) @updatedAt @map("updated_at")
-  firstName          String             @map("first_name")
-  lastName           String             @map("last_name")
-  phone              String             @unique
-  email              String             @unique
-  address            String?
-  verificationStatus VerificationStatus @default(PENDING) @map("verification_status")
-  profileType        ProfileType        @map("profile_type")
-  profileTitle       String?            @map("profile_title")
-  profileDescription String?            @map("profile_description") @db.Text
-  kycDocumentId      String?            @map("kyc_document_id") @db.Uuid
-  kycSelfieId        String?            @map("kyc_selfie_id") @db.Uuid
-  whatsappConnected  Boolean            @default(false) @map("whatsapp_connected")
-  verifiedBy         String?            @map("verified_by") @db.Uuid
-  verifiedAt         DateTime?          @map("verified_at")
-  rejectionReason    String?            @map("rejection_reason")
+enum AccountStatus {
+  PENDING_PAYMENT
+  ACTIVE
+  SUSPENDED
+  BANNED
+}
 
+enum DocumentType {
+  IDENTITY_CARD
+  PASSPORT
+  DRIVER_LICENSE
+}
+
+enum JobOfferStatus {
+  ACTIVE
+  FILLED
+  CANCELLED
+  COMPLETED
+}
+
+enum ApplicationStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+enum PaymentMethod {
+  MOBILE_MONEY
+  CARD
+  OTHER
+}
+
+enum PaymentFlow {
+  HOURLY
+  DAILY
+  MONTHLY
+}
+
+model Profile {
+  id                      String             @id @default(uuid()) @db.Uuid
+  created_at              DateTime           @default(now())
+  updated_at              DateTime           @updatedAt
+  first_name              String
+  last_name               String
+  phone                   String             @unique
+  email                   String             @unique
+  address                 String
+  description             String             @db.Text
+  profile_type            ProfileType
+  status                  AccountStatus      @default(PENDING_PAYMENT)
+  reliability_score       Int?               @default(100)
+  whatsapp_connected      Boolean            @default(false)
+  payment_link            String?
+  payment_link_expires_at DateTime?
+  verification_status     VerificationStatus @default(PENDING)
+  verified_by             String?            @db.Uuid
+  verified_at             DateTime?
+  rejection_reason        String?
+
+  kyc_document  KycDocument?
+  applications  Application[]
+  job_offers    JobOffer[]
+  penalties     Penalty[]
+  payments      Payment[]
   conversations Conversation[]
   logs          Log[]
+  files         File[]
 
+  @@index([email], name: "idx_profile_email")
+  @@index([phone], name: "idx_profile_phone")
+  @@index([status], name: "idx_profile_status")
+  @@index([profile_type], name: "idx_profile_type")
+  @@index([reliability_score], name: "idx_profile_reliability")
   @@map("profiles")
 }
 
 model User {
-  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  createdAt   DateTime  @default(now()) @map("created_at")
-  updatedAt   DateTime  @default(now()) @updatedAt @map("updated_at")
-  firstName   String    @map("first_name")
-  lastName    String    @map("last_name")
-  email       String    @unique
-  role        UserRole  @default(ADMIN)
-  isActive    Boolean   @default(true) @map("is_active")
-  lastLoginAt DateTime? @map("last_login_at")
+  id            String    @id @default(uuid()) @db.Uuid
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @updatedAt
+  first_name    String
+  last_name     String
+  email         String    @unique
+  role          UserRole  @default(ADMIN)
+  is_active     Boolean   @default(true)
+  last_login_at DateTime?
 
-  adminOtpSessions AdminOtpSession[]
-  files            File[]
-  logs             Log[]
+  files File[]
+  logs  Log[]
 
+  @@index([email], name: "idx_user_email")
+  @@index([role], name: "idx_user_role")
   @@map("users")
 }
 
-model AdminOtpSession {
-  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  createdAt DateTime  @default(now()) @map("created_at")
-  updatedAt DateTime  @default(now()) @updatedAt @map("updated_at")
-  userId    String    @map("user_id") @db.Uuid
-  codeHash  String    @map("code_hash")
-  expiresAt DateTime  @map("expires_at")
-  usedAt    DateTime? @map("used_at")
+model KycDocument {
+  id                  String             @id @default(uuid()) @db.Uuid
+  created_at          DateTime           @default(now())
+  updated_at          DateTime           @updatedAt
+  profile_id          String             @unique @db.Uuid
+  document_type       DocumentType
+  document_url        String
+  selfie_url          String
+  verification_status VerificationStatus @default(PENDING)
+  verified_at         DateTime?
+  verified_by         String?            @db.Uuid
+  rejection_reason    String?
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  profile Profile @relation(fields: [profile_id], references: [id], onDelete: Cascade)
 
-  @@map("admin_otp_sessions")
+  @@index([profile_id], name: "idx_kyc_document_profile")
+  @@index([verification_status], name: "idx_kyc_document_status")
+  @@map("kyc_documents")
+}
+
+model JobOffer {
+  id           String         @id @default(uuid()) @db.Uuid
+  created_at   DateTime       @default(now())
+  updated_at   DateTime       @updatedAt
+  employer_id  String         @db.Uuid
+  title        String
+  description  String         @db.Text
+  scheduled_at DateTime
+  amount       Decimal        @db.Decimal(10, 2)
+  payment_flow PaymentFlow
+  address      String
+  note         String?
+  status       JobOfferStatus @default(ACTIVE)
+
+  employer     Profile       @relation(fields: [employer_id], references: [id], onDelete: Cascade)
+  applications Application[]
+
+  @@index([employer_id], name: "idx_job_offer_employer")
+  @@index([status], name: "idx_job_offer_status")
+  @@index([scheduled_at], name: "idx_job_offer_scheduled")
+  @@map("job_offers")
+}
+
+model Application {
+  id                  String            @id @default(uuid()) @db.Uuid
+  created_at          DateTime          @default(now())
+  updated_at          DateTime          @updatedAt
+  job_offer_id        String            @db.Uuid
+  worker_id           String            @db.Uuid
+  status              ApplicationStatus @default(PENDING)
+  cancelled_at        DateTime?
+  cancellation_reason String?
+  penalty_applied     Boolean           @default(false)
+  penalty_amount      Decimal?          @db.Decimal(10, 2)
+
+  job_offer JobOffer  @relation(fields: [job_offer_id], references: [id], onDelete: Cascade)
+  worker    Profile   @relation(fields: [worker_id], references: [id], onDelete: Cascade)
+  penalties Penalty[]
+
+  @@unique([job_offer_id, worker_id], name: "idx_application_unique")
+  @@index([worker_id], name: "idx_application_worker")
+  @@index([job_offer_id], name: "idx_application_job_offer")
+  @@index([status], name: "idx_application_status")
+  @@map("applications")
+}
+
+model Penalty {
+  id             String   @id @default(uuid()) @db.Uuid
+  created_at     DateTime @default(now())
+  worker_id      String   @db.Uuid
+  application_id String   @db.Uuid
+  amount         Decimal  @db.Decimal(10, 2)
+  reason         String?
+  applied_at     DateTime @default(now())
+
+  worker      Profile     @relation(fields: [worker_id], references: [id], onDelete: Cascade)
+  application Application @relation(fields: [application_id], references: [id], onDelete: Cascade)
+
+  @@index([worker_id], name: "idx_penalty_worker")
+  @@index([applied_at], name: "idx_penalty_applied_at")
+  @@map("penalties")
+}
+
+model Payment {
+  id             String        @id @default(uuid()) @db.Uuid
+  created_at     DateTime      @default(now())
+  updated_at     DateTime      @updatedAt
+  profile_id     String        @db.Uuid
+  amount         Decimal       @db.Decimal(10, 2)
+  payment_method PaymentMethod
+  transaction_id String        @unique
+  status         PaymentStatus @default(PENDING)
+  completed_at   DateTime?
+
+  profile Profile @relation(fields: [profile_id], references: [id], onDelete: Cascade)
+
+  @@index([transaction_id], name: "idx_payment_transaction")
+  @@index([status], name: "idx_payment_status")
+  @@index([profile_id], name: "idx_payment_profile")
+  @@map("payments")
 }
 
 model File {
-  id               String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  createdAt        DateTime        @default(now()) @map("created_at")
-  updatedAt        DateTime        @default(now()) @updatedAt @map("updated_at")
-  filename         String
-  originalFilename String          @map("original_filename")
-  mimeType         String          @map("mime_type")
-  size             Int
-  storageProvider  StorageProvider @map("storage_provider")
-  storageKey       String          @map("storage_key")
-  bucket           String?
-  uploadedById     String?         @map("uploaded_by_id") @db.Uuid
+  id                String          @id @default(uuid()) @db.Uuid
+  created_at        DateTime        @default(now())
+  updated_at        DateTime        @updatedAt
+  filename          String
+  original_filename String
+  mime_type         String
+  size              Int
+  storage_provider  StorageProvider
+  storage_key       String
+  bucket            String?
+  profile_id        String?         @db.Uuid
+  uploaded_by_id    String?         @db.Uuid
 
-  uploadedBy User? @relation(fields: [uploadedById], references: [id])
+  profile     Profile? @relation(fields: [profile_id], references: [id], onDelete: Cascade)
+  uploaded_by User?    @relation(fields: [uploaded_by_id], references: [id], onDelete: Cascade)
 
+  @@index([profile_id], name: "idx_file_profile")
+  @@index([uploaded_by_id], name: "idx_file_uploaded_by")
   @@map("files")
 }
 
 model Log {
-  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  createdAt  DateTime @default(now()) @map("created_at")
-  updatedAt  DateTime @default(now()) @updatedAt @map("updated_at")
-  action     String
-  entityType String?  @map("entity_type")
-  entityId   String?  @map("entity_id") @db.Uuid
-  userId     String?  @map("user_id") @db.Uuid
-  profileId  String?  @map("profile_id") @db.Uuid
-  metadata   Json?
-  ipAddress  String?  @map("ip_address")
-  userAgent  String?  @map("user_agent")
+  id          String   @id @default(uuid()) @db.Uuid
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+  action      String
+  entity_type String?
+  entity_id   String?  @db.Uuid
+  user_id     String?  @db.Uuid
+  profile_id  String?  @db.Uuid
+  metadata    Json?
+  ip_address  String?
+  user_agent  String?
 
-  user    User?    @relation(fields: [userId], references: [id])
-  profile Profile? @relation(fields: [profileId], references: [id])
+  user    User?    @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  profile Profile? @relation(fields: [profile_id], references: [id], onDelete: Cascade)
 
+  @@index([user_id], name: "idx_log_user")
+  @@index([profile_id], name: "idx_log_profile")
+  @@index([entity_type, entity_id], name: "idx_log_entity")
   @@map("logs")
 }
 
 model Conversation {
-  id           String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  createdAt    DateTime           @default(now()) @map("created_at")
-  updatedAt    DateTime           @default(now()) @updatedAt @map("updated_at")
-  profileId    String             @map("profile_id") @db.Uuid
-  botSessionId String             @map("bot_session_id")
-  botPlatform  BotPlatform        @default(WHATSAPP) @map("bot_platform")
-  status       ConversationStatus @default(ACTIVE)
-  startedAt    DateTime           @map("started_at")
-  endedAt      DateTime?          @map("ended_at")
+  id             String             @id @default(uuid()) @db.Uuid
+  created_at     DateTime           @default(now())
+  updated_at     DateTime           @updatedAt
+  profile_id     String             @db.Uuid
+  bot_session_id String
+  bot_platform   BotPlatform        @default(WHATSAPP)
+  status         ConversationStatus @default(ACTIVE)
+  started_at     DateTime
+  ended_at       DateTime?
 
-  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  profile Profile @relation(fields: [profile_id], references: [id], onDelete: Cascade)
 
-  @@unique([profileId, botSessionId])
+  @@unique([profile_id, bot_session_id], name: "idx_conversation_unique")
+  @@index([profile_id], name: "idx_conversation_profile")
+  @@index([status], name: "idx_conversation_status")
   @@map("conversations")
 }

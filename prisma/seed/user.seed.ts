@@ -1,5 +1,5 @@
-import type { PrismaClient } from '../../src/generated/prisma/client';
-import { UserRole } from '../../src/generated/prisma/client';
+import type { PrismaClient } from '@prisma/client';
+import { UserRole } from '@prisma/client';
 
 const FAKE_USERS = [
   {
@@ -35,25 +35,25 @@ export async function seedUsers(prisma: PrismaClient): Promise<void> {
     if (existing) {
       skipped++;
       console.log(
-        `[${i + 1}/${total}] Skipped (already exists): ${existing.firstName} ${existing.lastName} <${email}>`,
+        `[${i + 1}/${total}] Skipped (already exists): ${existing.first_name} ${existing.last_name} <${email}>`,
       );
       continue;
     }
 
     const user = await prisma.user.create({
       data: {
-        firstName,
-        lastName,
+        first_name: firstName,
+        last_name: lastName,
         email,
         role: UserRole.ADMIN,
-        isActive,
-        lastLoginAt: null,
+        is_active: isActive,
+        last_login_at: null,
       },
     });
 
     created++;
     console.log(
-      `[${i + 1}/${total}] Created user: ${user.firstName} ${user.lastName} <${user.email}> (id: ${user.id})`,
+      `[${i + 1}/${total}] Created user: ${user.first_name} ${user.last_name} <${user.email}> (id: ${user.id})`,
     );
   }
 

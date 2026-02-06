@@ -3,8 +3,9 @@ import { config as loadEnv } from 'dotenv';
 import type { INestApplicationContext, LoggerService } from '@nestjs/common';
 import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
-import { MailerService } from '@nestjs-modules/mailer';
 import { AppModule } from './app.module';
+import { MailerService } from '@nestjs-modules/mailer';
+import { MailProcessor } from './modules/mail/mail.processor';
 import { QueueService } from './common/services/queue/queue.service';
 import { EMAIL_QUEUE } from './common/services/queue/queue.module';
 import type { EmailJobData } from './common/services/queue/queue.service';
@@ -112,31 +113,26 @@ async function bootstrap(): Promise<void> {
     process.exit(1);
   }
 
-  const mailerService = app.get(MailerService);
-  if (!mailerService) {
-    logger.error('MailerService not found');
+  const mailProcessor = app.get(MailProcessor);
+  if (!mailProcessor) {
+    logger.error('MailProcessor not found');
     await app.close();
     process.exit(1);
   }
 
+  try {
+    const mailerService = app.get(MailerService);
+    mailProcessor.setMailerService(mailerService);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.warn(
+      `MailerService not in context (${msg}); real email send will fail (mock mode may still work)`,
+    );
+  }
+
   queueService.createWorker<EmailJobData>(
     EMAIL_QUEUE,
-    async (job) => {
-      const { to, subject, template, context } = job.data;
-      const jobId = job.id ?? 'unknown';
-      console.log(
-        `[MailProcessor] 📧 Processing email job [${jobId}] from ${EMAIL_QUEUE}: Recipient(s): ${to}, Subject: "${subject}"`,
-      );
-      await mailerService.sendMail({
-        to,
-        subject,
-        template,
-        context: context ?? {},
-      });
-      console.log(
-        `[MailProcessor] ✅ Email sent successfully [${jobId}] to ${to} - Subject: "${subject}"`,
-      );
-    },
+    (job) => mailProcessor.processEmailJob(job),
     { concurrency: Number(process.env.EMAIL_QUEUE_CONCURRENCY) || 5 },
   );
 
