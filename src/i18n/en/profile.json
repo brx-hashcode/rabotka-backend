@@ -1,0 +1,20 @@
+{
+  "created": {
+    "success": "Profile created successfully"
+  },
+  "errors": {
+    "email": {
+      "exists": "An account with this email address already exists"
+    },
+    "phone": {
+      "exists": "An account with this phone number already exists"
+    },
+    "unique": {
+      "constraint": "A profile with this information already exists"
+    },
+    "database": "A database error occurred. Please try again later",
+    "create": {
+      "failed": "Failed to create profile. Please try again"
+    }
+  }
+}
