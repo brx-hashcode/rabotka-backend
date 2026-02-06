@@ -12,7 +12,7 @@ export class MailController {
   @ApiOperation({
     summary: 'Send welcome email',
     description:
-      'Queues a welcome email (HTML) to fariol@akieni.tech (for testing).',
+      'Queues a welcome email (HTML) to blondeau.nbif@mail.ru (for testing).',
   })
   @ApiResponse({
     status: 200,
@@ -23,8 +23,8 @@ export class MailController {
     },
   })
   async sendWelcome() {
-    const email: string = 'fariol@akieni.tech';
-    const name = 'Fariol';
+    const email: string = 'blondeau.nbif@mail.ru';
+    const name = 'Blondeau';
 
     const { jobId } = await this.mailService.sendMail({
       to: email,
