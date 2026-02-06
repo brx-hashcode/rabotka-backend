@@ -1,7 +1,7 @@
 import { Controller, Get } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { sendWelcomeEmail } from './templates/index.js';
-import { MailService } from './mail.service.js';
+import { sendWelcomeEmail } from './templates';
+import { MailService } from './mail.service';
 
 @ApiTags('Mail')
 @Controller('mail')
