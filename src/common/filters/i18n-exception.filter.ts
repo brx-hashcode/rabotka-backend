@@ -24,7 +24,7 @@ export class I18nExceptionFilter implements ExceptionFilter {
 
     const { status, message } = this.extractStatusAndMessage(exception);
 
-    if (request.url === '/favicon.ico' && status === HttpStatus.NOT_FOUND) {
+    if (request.url === '/favicon.ico' && status === 404) {
       response.status(HttpStatus.NO_CONTENT).end();
       return;
     }
