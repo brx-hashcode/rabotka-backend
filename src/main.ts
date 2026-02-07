@@ -4,6 +4,8 @@ import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { apiReference } from '@scalar/nestjs-api-reference';
 import cookieParser from 'cookie-parser';
+import express from 'express';
+import * as path from 'node:path';
 import { AppModule } from './app.module';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { CSRF_UTILITIES } from './modules/csrf/csrf.constants';
@@ -40,12 +42,15 @@ async function bootstrap() {
     credentials: true,
   });
 
-  app
-    .getHttpAdapter()
-    .getInstance()
-    .get('/', (_, res) => {
-      res.redirect('/api-docs');
-    });
+  const httpAdapter = app.getHttpAdapter().getInstance();
+
+  httpAdapter.get('/', (_, res) => {
+    res.redirect('/api-docs');
+  });
+
+  httpAdapter.use(
+    express.static(path.join(process.cwd(), 'public'), { index: false }),
+  );
 
   app.setGlobalPrefix('api/v1');
 
@@ -73,6 +78,11 @@ async function bootstrap() {
     .setDescription('API documentation for Rabotka backend service')
     .setVersion('1.0')
     .addServer(`http://localhost:${port}`, 'Local Development Server')
+    .addBearerAuth({
+      type: 'http',
+      scheme: 'bearer',
+      bearerFormat: 'JWT',
+    })
     .build();
 
   const document = SwaggerModule.createDocument(app, config);
