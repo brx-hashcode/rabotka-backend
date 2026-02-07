@@ -91,7 +91,15 @@ async function bootstrap() {
     '/api-docs',
     apiReference({
       defaultOpenAllTags: true,
+      additionalHeaders: [
+        {
+          name: 'X-CSRF-TOKEN',
+          description: 'CSRF token',
+          required: true,
+        },
+      ],
       hideClientButton: false,
+
       showSidebar: true,
       showDeveloperTools: environment === 'development' ? 'localhost' : false,
       showToolbar: environment === 'development' ? 'localhost' : false,
