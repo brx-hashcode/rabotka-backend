@@ -74,9 +74,14 @@ async function bootstrap() {
   app.useGlobalInterceptors(new LoggingInterceptor());
 
   const config = new DocumentBuilder()
-    .setTitle('Rabotka API Documentation')
-    .setDescription('API documentation for Rabotka backend service')
-    .setVersion('1.0')
+    .setTitle('Rabotka Backend API - REST Service Documentation')
+    .setDescription(
+      'Comprehensive REST API documentation for the Rabotka backend service. ' +
+        'This API provides endpoints for user authentication, job management, application processing, ' +
+        'and workforce analytics. All endpoints require JWT bearer token authentication except for public endpoints. ' +
+        'For integration support, contact api-support@rabotka.com',
+    )
+    .setVersion('1.0.0')
     .addServer(`http://localhost:${port}`, 'Local Development Server')
     .addBearerAuth({
       type: 'http',
@@ -135,11 +140,6 @@ async function bootstrap() {
           environment === 'development'
             ? `http://localhost:${port}`
             : undefined,
-      },
-      metaData: {
-        title: 'Rabotka API Documentation',
-        description:
-          'API documentation for Rabotka backend service. Explore endpoints, request/response schemas, and test API calls directly from the documentation.',
       },
     } as Parameters<typeof apiReference>[0]),
   );
