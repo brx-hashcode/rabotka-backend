@@ -4,6 +4,8 @@ import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { apiReference } from '@scalar/nestjs-api-reference';
 import cookieParser from 'cookie-parser';
+import express from 'express';
+import * as path from 'node:path';
 import { AppModule } from './app.module';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { CSRF_UTILITIES } from './modules/csrf/csrf.constants';
@@ -40,12 +42,15 @@ async function bootstrap() {
     credentials: true,
   });
 
-  app
-    .getHttpAdapter()
-    .getInstance()
-    .get('/', (_, res) => {
-      res.redirect('/api-docs');
-    });
+  const httpAdapter = app.getHttpAdapter().getInstance();
+
+  httpAdapter.get('/', (_, res) => {
+    res.redirect('/api-docs');
+  });
+
+  httpAdapter.use(
+    express.static(path.join(process.cwd(), 'public'), { index: false }),
+  );
 
   app.setGlobalPrefix('api/v1');
 
@@ -69,10 +74,20 @@ async function bootstrap() {
   app.useGlobalInterceptors(new LoggingInterceptor());
 
   const config = new DocumentBuilder()
-    .setTitle('Rabotka API Documentation')
-    .setDescription('API documentation for Rabotka backend service')
-    .setVersion('1.0')
+    .setTitle('Rabotka Backend API - REST Service Documentation')
+    .setDescription(
+      'Comprehensive REST API documentation for the Rabotka backend service. ' +
+        'This API provides endpoints for user authentication, job management, application processing, ' +
+        'and workforce analytics. All endpoints require JWT bearer token authentication except for public endpoints. ' +
+        'For integration support, contact api-support@rabotka.com',
+    )
+    .setVersion('1.0.0')
     .addServer(`http://localhost:${port}`, 'Local Development Server')
+    .addBearerAuth({
+      type: 'http',
+      scheme: 'bearer',
+      bearerFormat: 'JWT',
+    })
     .build();
 
   const document = SwaggerModule.createDocument(app, config);
@@ -81,7 +96,15 @@ async function bootstrap() {
     '/api-docs',
     apiReference({
       defaultOpenAllTags: true,
+      additionalHeaders: [
+        {
+          name: 'X-CSRF-TOKEN',
+          description: 'CSRF token',
+          required: true,
+        },
+      ],
       hideClientButton: false,
+
       showSidebar: true,
       showDeveloperTools: environment === 'development' ? 'localhost' : false,
       showToolbar: environment === 'development' ? 'localhost' : false,
@@ -117,11 +140,6 @@ async function bootstrap() {
           environment === 'development'
             ? `http://localhost:${port}`
             : undefined,
-      },
-      metaData: {
-        title: 'Rabotka API Documentation',
-        description:
-          'API documentation for Rabotka backend service. Explore endpoints, request/response schemas, and test API calls directly from the documentation.',
       },
     } as Parameters<typeof apiReference>[0]),
   );

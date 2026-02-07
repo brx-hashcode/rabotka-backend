@@ -47,6 +47,9 @@ COPY --from=builder /app/node_modules ./node_modules
 # Copy built application from builder stage
 COPY --from=builder /app/dist ./dist
 
+# Copy public assets (e.g. favicon for API docs)
+COPY --from=builder /app/public ./public
+
 # Copy entrypoint script, fix CRLF line endings (Windows), and set permissions
 COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh && chmod +x /usr/local/bin/docker-entrypoint.sh

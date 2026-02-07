@@ -1,7 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { BullModule } from '@nestjs/bullmq';
-import { MailController } from './mail.controller';
 import { MailProcessor } from './mail.processor';
 import { MailService } from './mail.service';
 
@@ -20,7 +19,7 @@ import { MailService } from './mail.service';
     }),
     BullModule.registerQueue({ name: 'mail' }),
   ],
-  controllers: [MailController],
+  controllers: [],
   providers: [MailService, MailProcessor],
   exports: [MailService],
 })
