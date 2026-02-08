@@ -152,7 +152,7 @@ export class ProfileController {
 
     await this.mailService.sendMail({
       to: createProfileDto.email,
-      subject: 'Welcome to Rabotka',
+      subject: i18n.t('profile.errors.mail.subject'),
       html: sendWelcomeEmail(createProfileDto.firstName),
     });
 

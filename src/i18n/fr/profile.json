@@ -15,6 +15,9 @@
     "database": "Une erreur de base de données s'est produite. Veuillez réessayer plus tard",
     "create": {
       "failed": "Échec de la création du profil. Veuillez réessayer"
+    },
+    "mail": {
+      "subject": "Bienvenue sur Rabotka"
     }
   }
 }
