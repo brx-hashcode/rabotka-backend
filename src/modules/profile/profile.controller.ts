@@ -153,7 +153,7 @@ export class ProfileController {
     await this.mailService.sendMail({
       to: createProfileDto.email,
       subject: 'Welcome to Rabotka',
-      text: sendWelcomeEmail(createProfileDto.firstName),
+      html: sendWelcomeEmail(createProfileDto.firstName),
     });
 
     const localizedMessage = i18n.t(result.message, {
