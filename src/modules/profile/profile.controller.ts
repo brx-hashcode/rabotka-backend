@@ -137,11 +137,15 @@ export class ProfileController {
     const kycSelfie = files?.kycSelfie?.[0];
 
     if (!kycDocument) {
-      throw new BadRequestException('KYC document is required');
+      throw new BadRequestException(
+        i18n.t('profile.errors.kyc.document.required'),
+      );
     }
 
     if (!kycSelfie) {
-      throw new BadRequestException('KYC selfie is required');
+      throw new BadRequestException(
+        i18n.t('profile.errors.kyc.selfie.required'),
+      );
     }
 
     const result = await this.profileService.createProfile(

@@ -18,6 +18,14 @@
     },
     "mail": {
       "subject": "Welcome to Rabotka"
+    },
+    "kyc": {
+      "document": {
+        "required": "KYC document is required"
+      },
+      "selfie": {
+        "required": "KYC selfie is required"
+      }
     }
   }
 }
