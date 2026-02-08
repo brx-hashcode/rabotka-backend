@@ -3,11 +3,28 @@ import {
   Logger,
   BadRequestException,
   ConflictException,
+  NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { FileService } from '../file/file.service';
 import { CreateProfileDto } from './dto/create-profile.dto';
 import { Prisma } from '@prisma/client';
+
+export type ProfileMeResponse = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string;
+  address: string;
+  description: string;
+  profileType: string;
+  status: string;
+  verificationStatus: string;
+  reliabilityScore: number | null;
+  whatsappConnected: boolean;
+  createdAt: Date;
+};
 
 type PrismaTransactionClient = Parameters<
   Parameters<PrismaService['$transaction']>[0]
@@ -21,6 +38,50 @@ export class ProfileService {
     private readonly prisma: PrismaService,
     private readonly fileService: FileService,
   ) {}
+
+  /**
+   * Find profile by ID and return sanitized data for /profile/me
+   */
+  async findById(id: string): Promise<ProfileMeResponse> {
+    const profile = await this.prisma.profile.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        first_name: true,
+        last_name: true,
+        email: true,
+        phone: true,
+        address: true,
+        description: true,
+        profile_type: true,
+        status: true,
+        verification_status: true,
+        reliability_score: true,
+        whatsapp_connected: true,
+        created_at: true,
+      },
+    });
+
+    if (!profile) {
+      throw new NotFoundException('profile.errors.not_found');
+    }
+
+    return {
+      id: profile.id,
+      firstName: profile.first_name,
+      lastName: profile.last_name,
+      email: profile.email,
+      phone: profile.phone,
+      address: profile.address,
+      description: profile.description,
+      profileType: profile.profile_type,
+      status: profile.status,
+      verificationStatus: profile.verification_status,
+      reliabilityScore: profile.reliability_score,
+      whatsappConnected: profile.whatsapp_connected,
+      createdAt: profile.created_at,
+    };
+  }
 
   async createProfile(
     createProfileDto: CreateProfileDto,
