@@ -68,7 +68,7 @@ import { I18nExceptionFilter } from './common/filters/i18n-exception.filter';
           fixedWindow({
             mode: 'LIVE',
             window: '60s',
-            max: 2,
+            max: 100,
           }),
         ],
       }),
