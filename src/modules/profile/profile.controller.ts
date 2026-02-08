@@ -17,11 +17,16 @@ import {
 import { I18n, I18nContext } from 'nestjs-i18n';
 import { ProfileService } from './profile.service';
 import { CreateProfileDto } from './dto/create-profile.dto';
+import { sendWelcomeEmail } from '../mail/templates';
+import { MailService } from '../mail/mail.service';
 
 @ApiTags('Profile')
 @Controller('profile')
 export class ProfileController {
-  constructor(private readonly profileService: ProfileService) {}
+  constructor(
+    private readonly profileService: ProfileService,
+    private readonly mailService: MailService,
+  ) {}
 
   @Post()
   @UseInterceptors(
@@ -132,11 +137,15 @@ export class ProfileController {
     const kycSelfie = files?.kycSelfie?.[0];
 
     if (!kycDocument) {
-      throw new BadRequestException('KYC document is required');
+      throw new BadRequestException(
+        i18n.t('profile.errors.kyc.document.required'),
+      );
     }
 
     if (!kycSelfie) {
-      throw new BadRequestException('KYC selfie is required');
+      throw new BadRequestException(
+        i18n.t('profile.errors.kyc.selfie.required'),
+      );
     }
 
     const result = await this.profileService.createProfile(
@@ -144,6 +153,12 @@ export class ProfileController {
       kycDocument,
       kycSelfie,
     );
+
+    await this.mailService.sendMail({
+      to: createProfileDto.email,
+      subject: i18n.t('profile.errors.mail.subject'),
+      html: sendWelcomeEmail(createProfileDto.firstName),
+    });
 
     const localizedMessage = i18n.t(result.message, {
       lang: i18n.lang,

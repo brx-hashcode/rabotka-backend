@@ -1,5 +1,5 @@
 import { Controller, Get, Inject, Req, Res } from '@nestjs/common';
-import { ApiOkResponse, ApiTags } from '@nestjs/swagger';
+import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
 import { CSRF_UTILITIES } from './csrf.constants';
 import type { DoubleCsrfUtilities } from 'csrf-csrf';
@@ -12,6 +12,11 @@ export class CsrfController {
   ) {}
 
   @Get()
+  @ApiOperation({
+    summary: 'Generate a CSRF token',
+    description:
+      'Generates a CSRF token for the client to use in the x-csrf-token header',
+  })
   @ApiOkResponse({
     description:
       'Returns a CSRF token for the client to use in the x-csrf-token header',

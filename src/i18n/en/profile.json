@@ -15,6 +15,17 @@
     "database": "A database error occurred. Please try again later",
     "create": {
       "failed": "Failed to create profile. Please try again"
+    },
+    "mail": {
+      "subject": "Welcome to Rabotka"
+    },
+    "kyc": {
+      "document": {
+        "required": "KYC document is required"
+      },
+      "selfie": {
+        "required": "KYC selfie is required"
+      }
     }
   }
 }
