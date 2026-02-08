@@ -3,6 +3,7 @@
     "success": "Profile created successfully"
   },
   "errors": {
+    "not_found": "Profile not found",
     "email": {
       "exists": "An account with this email address already exists"
     },

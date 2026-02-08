@@ -1,9 +1,12 @@
 import {
   Controller,
   Post,
+  Get,
   UseInterceptors,
+  UseGuards,
   UploadedFiles,
   Body,
+  Req,
   BadRequestException,
 } from '@nestjs/common';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
@@ -13,12 +16,16 @@ import {
   ApiConsumes,
   ApiBody,
   ApiResponse,
+  ApiBearerAuth,
+  ApiCookieAuth,
 } from '@nestjs/swagger';
 import { I18n, I18nContext } from 'nestjs-i18n';
-import { ProfileService } from './profile.service';
+import { ProfileService, ProfileMeResponse } from './profile.service';
 import { CreateProfileDto } from './dto/create-profile.dto';
 import { sendWelcomeEmail } from '../mail/templates';
 import { MailService } from '../mail/mail.service';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import type { AuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
 
 @ApiTags('Profile')
 @Controller('profile')
@@ -167,5 +174,48 @@ export class ProfileController {
     return {
       message: localizedMessage,
     };
+  }
+
+  @Get('me')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiCookieAuth()
+  @ApiOperation({
+    summary: 'Get current authenticated profile',
+    description:
+      'Returns the profile of the currently authenticated user. Requires valid JWT in cookie or Authorization header.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Profile retrieved successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', format: 'uuid' },
+        firstName: { type: 'string' },
+        lastName: { type: 'string' },
+        email: { type: 'string', format: 'email' },
+        phone: { type: 'string' },
+        address: { type: 'string' },
+        description: { type: 'string' },
+        profileType: { type: 'string', enum: ['WORKER', 'EMPLOYER'] },
+        status: {
+          type: 'string',
+          enum: ['PENDING_PAYMENT', 'ACTIVE', 'SUSPENDED', 'BANNED'],
+        },
+        verificationStatus: {
+          type: 'string',
+          enum: ['PENDING', 'VERIFIED', 'REJECTED'],
+        },
+        reliabilityScore: { type: 'number', nullable: true },
+        whatsappConnected: { type: 'boolean' },
+        createdAt: { type: 'string', format: 'date-time' },
+      },
+    },
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized - no valid token' })
+  @ApiResponse({ status: 404, description: 'Profile not found' })
+  getMe(@Req() req: AuthenticatedRequest): Promise<ProfileMeResponse> {
+    return this.profileService.findById(req.user.profileId);
   }
 }
