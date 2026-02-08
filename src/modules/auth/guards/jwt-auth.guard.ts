@@ -27,7 +27,7 @@ export class JwtAuthGuard implements CanActivate {
     private readonly configService: ConfigService,
   ) {}
 
-  async canActivate(context: ExecutionContext): Promise<boolean> {
+  canActivate(context: ExecutionContext): boolean {
     const request = context.switchToHttp().getRequest<Request>();
     const token = this.extractToken(request);
 
@@ -40,7 +40,6 @@ export class JwtAuthGuard implements CanActivate {
         secret: this.configService.get<string>('JWT_SECRET'),
       });
 
-      // Attach user info to request
       (request as AuthenticatedRequest).user = {
         profileId: payload.sub,
       };
@@ -52,18 +51,19 @@ export class JwtAuthGuard implements CanActivate {
   }
 
   private extractToken(request: Request): string | undefined {
-    const cookieName =
-      this.configService.get<string>('AUTH_COOKIE_NAME') || 'access_token';
+    const cookieName = this.configService.get<string>('AUTH_COOKIE_NAME');
 
-    // Try cookie first
+    if (!cookieName) {
+      throw new Error('AUTH_COOKIE_NAME is not set');
+    }
+
     const cookieToken = request.cookies?.[cookieName];
     if (cookieToken) {
       return cookieToken;
     }
 
-    // Fall back to Authorization header
     const authHeader = request.headers.authorization;
-    if (authHeader && authHeader.startsWith('Bearer ')) {
+    if (authHeader?.startsWith('Bearer ')) {
       return authHeader.substring(7);
     }
 
