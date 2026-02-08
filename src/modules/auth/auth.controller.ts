@@ -82,12 +82,14 @@ export class AuthController {
       verifyOtpDto.otp,
     );
 
-    // Set httpOnly cookie with JWT
     const isProduction =
       this.configService.get<string>('NODE_ENV') === 'production';
-    const cookieName =
-      this.configService.get<string>('AUTH_COOKIE_NAME') || 'access_token';
-    const maxAge = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+    const cookieName = this.configService.get<string>('AUTH_COOKIE_NAME');
+    const maxAge = 24 * 60 * 60 * 1000;
+
+    if (!cookieName) {
+      throw new Error('AUTH_COOKIE_NAME is not set');
+    }
 
     res.cookie(cookieName, result.token, {
       httpOnly: true,
@@ -97,7 +99,6 @@ export class AuthController {
       path: '/',
     });
 
-    // Return only { success: true } - no token, no user in body
     return { success: true };
   }
 }
