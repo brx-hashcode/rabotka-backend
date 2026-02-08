@@ -7,6 +7,6 @@ import { StorageProviderFactory } from './storage-provider.factory';
 @Module({
   imports: [ConfigModule],
   providers: [StorageProviderFactory, StorageService],
-  exports: [StorageService],
+  exports: [StorageService, StorageProviderFactory],
 })
 export class StorageModule {}
