@@ -3,7 +3,7 @@ import { config as loadEnv } from 'dotenv';
 import type { INestApplicationContext, LoggerService } from '@nestjs/common';
 import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
-import { AppModule } from './app.module';
+import { WorkerModule } from './worker.module';
 import { MailerService } from '@nestjs-modules/mailer';
 import { MailProcessor } from './modules/mail/mail.processor';
 import { QueueService } from './common/services/queue/queue.service';
@@ -91,7 +91,7 @@ async function bootstrap(): Promise<void> {
 
   let app: INestApplicationContext;
   try {
-    app = await NestFactory.createApplicationContext(AppModule, {
+    app = await NestFactory.createApplicationContext(WorkerModule, {
       logger: new WorkerLogger(),
     });
   } catch (err: unknown) {

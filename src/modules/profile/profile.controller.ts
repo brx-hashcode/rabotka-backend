@@ -17,11 +17,16 @@ import {
 import { I18n, I18nContext } from 'nestjs-i18n';
 import { ProfileService } from './profile.service';
 import { CreateProfileDto } from './dto/create-profile.dto';
+import { sendWelcomeEmail } from '../mail/templates';
+import { MailService } from '../mail/mail.service';
 
 @ApiTags('Profile')
 @Controller('profile')
 export class ProfileController {
-  constructor(private readonly profileService: ProfileService) {}
+  constructor(
+    private readonly profileService: ProfileService,
+    private readonly mailService: MailService,
+  ) {}
 
   @Post()
   @UseInterceptors(
@@ -144,6 +149,12 @@ export class ProfileController {
       kycDocument,
       kycSelfie,
     );
+
+    await this.mailService.sendMail({
+      to: createProfileDto.email,
+      subject: 'Welcome to Rabotka',
+      text: sendWelcomeEmail(createProfileDto.firstName),
+    });
 
     const localizedMessage = i18n.t(result.message, {
       lang: i18n.lang,
