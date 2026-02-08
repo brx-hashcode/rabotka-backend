@@ -15,6 +15,17 @@
     "database": "Une erreur de base de données s'est produite. Veuillez réessayer plus tard",
     "create": {
       "failed": "Échec de la création du profil. Veuillez réessayer"
+    },
+    "mail": {
+      "subject": "Bienvenue sur Rabotka"
+    },
+    "kyc": {
+      "document": {
+        "required": "Le document KYC est requis"
+      },
+      "selfie": {
+        "required": "La photo KYC est requise"
+      }
     }
   }
 }

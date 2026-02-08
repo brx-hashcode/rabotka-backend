@@ -1,11 +1,15 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { MailerModule } from '@nestjs-modules/mailer';
 import { PrismaModule } from './common/services/prisma/prisma.module';
+import { RedisModule } from './common/services/redis/redis.module';
+import { QueueModule } from './common/services/queue/queue.module';
 import { MailModule } from './modules/mail/mail.module';
+import { getMailerTransportConfig } from './modules/mail/mailer-transport.config';
 
 /**
  * Minimal module for the queue worker process.
- * MailModule registers MailProcessor only when RUN_QUEUE_WORKER=true (set in worker.ts).
+ * Includes only the dependencies needed for processing email jobs.
  */
 @Module({
   imports: [
@@ -14,6 +18,13 @@ import { MailModule } from './modules/mail/mail.module';
       envFilePath: ['.env.local', '.env'],
       cache: true,
       expandVariables: true,
+    }),
+    RedisModule.forRoot(),
+    QueueModule.forRoot(),
+    MailerModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => getMailerTransportConfig(config),
     }),
     PrismaModule,
     MailModule,
