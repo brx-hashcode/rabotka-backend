@@ -7,9 +7,11 @@ export function sendWelcomeEmail(name: string): string {
     <p>Votre profil a bien été créé avec succès 🎉</p>
 
     <p>
-      Nous procédons actuellement à la vérification de vos informations.
-      Une fois votre profil validé, vous recevrez un lien sur WhatsApp afin de
-      finaliser et activer votre compte.
+      Pour profiter pleinement de nos services, nous vous invitons à compléter votre profil en ajoutant une photo et vos informations personnelles.
+    </p>
+
+    <p>
+      Une fois votre profil vérifié, vous recevrez un lien sur WhatsApp pour activer votre compte.
     </p>
 
     <p>
