@@ -209,6 +209,7 @@ export class ProfileController {
         },
         reliabilityScore: { type: 'number', nullable: true },
         whatsappConnected: { type: 'boolean' },
+        avatarUrl: { type: 'string', nullable: true },
         createdAt: { type: 'string', format: 'date-time' },
       },
     },

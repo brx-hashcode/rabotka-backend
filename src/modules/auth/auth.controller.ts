@@ -101,4 +101,36 @@ export class AuthController {
 
     return { success: true };
   }
+
+  @Post('logout')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Logout user',
+    description: 'Clears the authentication cookie to log out the user.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Logged out successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: true },
+      },
+    },
+  })
+  async logout(
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<{ success: boolean }> {
+    const cookieName = this.configService.get<string>('AUTH_COOKIE_NAME');
+
+    if (!cookieName) {
+      throw new Error('AUTH_COOKIE_NAME is not set');
+    }
+
+    res.clearCookie(cookieName, {
+      path: '/',
+    });
+
+    return { success: true };
+  }
 }
