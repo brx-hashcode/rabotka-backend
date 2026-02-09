@@ -112,6 +112,8 @@ model Profile {
   verified_at             DateTime?
   rejection_reason        String?
 
+  avatar_url String?
+
   kyc_documents KycDocument[]
   applications  Application[]
   job_offers    JobOffer[]

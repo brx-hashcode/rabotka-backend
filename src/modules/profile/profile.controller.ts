@@ -2,14 +2,19 @@ import {
   Controller,
   Post,
   Get,
+  Patch,
   UseInterceptors,
   UseGuards,
   UploadedFiles,
+  UploadedFile,
   Body,
   Req,
   BadRequestException,
 } from '@nestjs/common';
-import { FileFieldsInterceptor } from '@nestjs/platform-express';
+import {
+  FileFieldsInterceptor,
+  FileInterceptor,
+} from '@nestjs/platform-express';
 import {
   ApiTags,
   ApiOperation,
@@ -22,6 +27,7 @@ import {
 import { I18n, I18nContext } from 'nestjs-i18n';
 import { ProfileService, ProfileMeResponse } from './profile.service';
 import { CreateProfileDto } from './dto/create-profile.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 import { sendWelcomeEmail } from '../mail/templates';
 import { MailService } from '../mail/mail.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -209,6 +215,7 @@ export class ProfileController {
         },
         reliabilityScore: { type: 'number', nullable: true },
         whatsappConnected: { type: 'boolean' },
+        avatarUrl: { type: 'string', nullable: true },
         createdAt: { type: 'string', format: 'date-time' },
       },
     },
@@ -217,5 +224,111 @@ export class ProfileController {
   @ApiResponse({ status: 404, description: 'Profile not found' })
   getMe(@Req() req: AuthenticatedRequest): Promise<ProfileMeResponse> {
     return this.profileService.findById(req.user.profileId);
+  }
+
+  @Patch()
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiCookieAuth()
+  @ApiOperation({
+    summary: 'Update profile information',
+    description:
+      'Updates the profile information (firstName, lastName, description) for the authenticated user.',
+  })
+  @ApiBody({ type: UpdateProfileDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Profile updated successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', format: 'uuid' },
+        firstName: { type: 'string' },
+        lastName: { type: 'string' },
+        email: { type: 'string', format: 'email' },
+        phone: { type: 'string' },
+        address: { type: 'string' },
+        description: { type: 'string' },
+        profileType: { type: 'string', enum: ['WORKER', 'EMPLOYER'] },
+        status: {
+          type: 'string',
+          enum: ['PENDING_PAYMENT', 'ACTIVE', 'SUSPENDED', 'BANNED'],
+        },
+        verificationStatus: {
+          type: 'string',
+          enum: ['PENDING', 'VERIFIED', 'REJECTED'],
+        },
+        reliabilityScore: { type: 'number', nullable: true },
+        whatsappConnected: { type: 'boolean' },
+        avatarUrl: { type: 'string', nullable: true },
+        createdAt: { type: 'string', format: 'date-time' },
+      },
+    },
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized - no valid token' })
+  @ApiResponse({ status: 404, description: 'Profile not found' })
+  updateProfile(
+    @Req() req: AuthenticatedRequest,
+    @Body() updateProfileDto: UpdateProfileDto,
+  ): Promise<ProfileMeResponse> {
+    return this.profileService.updateProfile(
+      req.user.profileId,
+      updateProfileDto,
+    );
+  }
+
+  @Post('avatar')
+  @UseGuards(JwtAuthGuard)
+  @UseInterceptors(FileInterceptor('avatar'))
+  @ApiBearerAuth()
+  @ApiCookieAuth()
+  @ApiOperation({
+    summary: 'Upload profile avatar',
+    description:
+      'Uploads a new avatar image for the authenticated user. The image is stored and the avatar_url is updated.',
+  })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['avatar'],
+      properties: {
+        avatar: {
+          type: 'string',
+          format: 'binary',
+          description: 'Avatar image file (PNG, JPG up to 2MB)',
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'Avatar uploaded successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        avatarUrl: {
+          type: 'string',
+          description: 'URL of the uploaded avatar',
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Bad request - missing file or invalid format',
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized - no valid token' })
+  @ApiResponse({ status: 404, description: 'Profile not found' })
+  async uploadAvatar(
+    @Req() req: AuthenticatedRequest,
+    @UploadedFile() avatar: Express.Multer.File,
+    @I18n() i18n: I18nContext,
+  ): Promise<{ avatarUrl: string }> {
+    if (!avatar) {
+      throw new BadRequestException(i18n.t('profile.errors.avatar.required'));
+    }
+
+    return this.profileService.updateAvatar(req.user.profileId, avatar);
   }
 }
