@@ -8,6 +8,7 @@ import {
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { FileService } from '../file/file.service';
 import { CreateProfileDto } from './dto/create-profile.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 import { Prisma } from '@prisma/client';
 
 export type ProfileMeResponse = {
@@ -40,9 +41,6 @@ export class ProfileService {
     private readonly fileService: FileService,
   ) {}
 
-  /**
-   * Find profile by ID and return sanitized data for /profile/me
-   */
   async findById(id: string): Promise<ProfileMeResponse> {
     const profile = await this.prisma.profile.findUnique({
       where: { id },
@@ -84,6 +82,73 @@ export class ProfileService {
       avatarUrl: profile.avatar_url,
       createdAt: profile.created_at,
     };
+  }
+
+  async updateProfile(
+    id: string,
+    updateProfileDto: UpdateProfileDto,
+  ): Promise<ProfileMeResponse> {
+    const existingProfile = await this.prisma.profile.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+
+    if (!existingProfile) {
+      throw new NotFoundException('profile.errors.not_found');
+    }
+
+    const dataToUpdate: Prisma.ProfileUpdateInput = {};
+
+    if (updateProfileDto.firstName !== undefined) {
+      dataToUpdate.first_name = updateProfileDto.firstName;
+    }
+    if (updateProfileDto.lastName !== undefined) {
+      dataToUpdate.last_name = updateProfileDto.lastName;
+    }
+    if (updateProfileDto.description !== undefined) {
+      dataToUpdate.description = updateProfileDto.description;
+    }
+    if (updateProfileDto.address !== undefined) {
+      dataToUpdate.address = updateProfileDto.address;
+    }
+
+    await this.prisma.profile.update({
+      where: { id },
+      data: dataToUpdate,
+    });
+
+    this.logger.log(`Profile updated successfully: ${id}`);
+    return this.findById(id);
+  }
+
+  async updateAvatar(
+    id: string,
+    avatarFile: Express.Multer.File,
+  ): Promise<{ avatarUrl: string }> {
+    const existingProfile = await this.prisma.profile.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+
+    if (!existingProfile) {
+      throw new NotFoundException('profile.errors.not_found');
+    }
+
+    if (!avatarFile) {
+      throw new BadRequestException('profile.errors.avatar.required');
+    }
+
+    const uploadResult = await this.fileService.uploadToStorage(avatarFile, {
+      folder: 'avatars',
+    });
+
+    await this.prisma.profile.update({
+      where: { id },
+      data: { avatar_url: uploadResult.url },
+    });
+
+    this.logger.log(`Avatar updated successfully for profile: ${id}`);
+    return { avatarUrl: uploadResult.url };
   }
 
   async createProfile(

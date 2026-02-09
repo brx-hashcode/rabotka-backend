@@ -47,6 +47,8 @@ export class AuthService {
 
     const otp = this.generateOtp();
 
+    console.log('[OTP] :', otp);
+
     const redisKey = `${OTP_KEY_PREFIX}${normalized}`;
     await this.redis.set(redisKey, otp, 'EX', OTP_TTL_SECONDS);
 
