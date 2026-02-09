@@ -23,6 +23,7 @@ export type ProfileMeResponse = {
   verificationStatus: string;
   reliabilityScore: number | null;
   whatsappConnected: boolean;
+  avatarUrl: string | null;
   createdAt: Date;
 };
 
@@ -58,6 +59,7 @@ export class ProfileService {
         verification_status: true,
         reliability_score: true,
         whatsapp_connected: true,
+        avatar_url: true,
         created_at: true,
       },
     });
@@ -79,6 +81,7 @@ export class ProfileService {
       verificationStatus: profile.verification_status,
       reliabilityScore: profile.reliability_score,
       whatsappConnected: profile.whatsapp_connected,
+      avatarUrl: profile.avatar_url,
       createdAt: profile.created_at,
     };
   }
