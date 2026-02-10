@@ -154,9 +154,7 @@ export class AuthController {
       },
     },
   })
-  async logout(
-    @Res({ passthrough: true }) res: Response,
-  ): Promise<{ success: boolean }> {
+  logout(@Res({ passthrough: true }) res: Response): { success: boolean } {
     const cookieName = this.configService.get<string>('AUTH_COOKIE_NAME');
 
     if (!cookieName) {

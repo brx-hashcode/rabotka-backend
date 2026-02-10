@@ -138,9 +138,13 @@ ARCJET_KEY=
 # AWS / LocalStack (for Docker)
 # AWS_ENDPOINT_URL=http://localhost:4566
 
-# Redis (for BullMQ queue - required for email worker)
+# Redis (for BullMQ queue and WhatsApp session)
 REDIS_HOST=localhost
 REDIS_PORT=6379
+
+# WhatsApp (Baileys) – session is stored in Redis
+WHATSAPP_ENABLED=true
+WHATSAPP_SESSION_PREFIX=wa:auth:
 ```
 
 ### Database Setup with Docker
@@ -188,6 +192,20 @@ The API enqueues email jobs to Redis; a separate worker process consumes them. R
 | **Logs** | `docker compose logs -f queue-worker` |
 
 For local development, ensure Redis is running (e.g. `docker compose up -d redis`) before starting the worker.
+
+### WhatsApp (Baileys) and first-time pairing
+
+The backend uses [Baileys](https://github.com/WhiskeySockets/Baileys) for WhatsApp. The session is stored **only in Redis** (no file-based auth). OTP for phone login and incoming bot messages are handled by `WhatsAppService`.
+
+**First-time pairing**
+
+1. Set `WHATSAPP_ENABLED=true` and ensure Redis is running.
+2. Start the API (`pnpm run start:dev`). On first run there is no session in Redis, so Baileys will ask you to pair.
+3. **QR code**: A QR code is printed in the terminal (`printQRInTerminal: true`). Open WhatsApp on your phone → **Linked devices** → **Link a device** → scan the QR code.
+4. **Pairing code (headless)**: Alternatively you can use Baileys’ pairing code flow (e.g. `requestPairingCode(phoneNumber)`) and enter the code in the phone; this requires a small code change to request and log the code.
+5. After a successful connection, the session is saved in Redis under `WHATSAPP_SESSION_PREFIX` (default `wa:auth:`). The next time you start the server, it will reuse that session and **no new QR or pairing is needed** unless you log out or clear Redis.
+
+To disable WhatsApp (e.g. in tests or when not using it), set `WHATSAPP_ENABLED=false`. OTP for phone login will then only be logged and not sent via WhatsApp.
 
 Once running, the application will be available at:
 
