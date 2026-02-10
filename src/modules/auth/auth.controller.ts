@@ -53,6 +53,42 @@ export class AuthController {
     };
   }
 
+  @Post('resend-otp')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Resend OTP to email or phone',
+    description:
+      'Resends a 6-digit OTP for the same email or phone. Rate-limited with a short cooldown (e.g. 60s).',
+  })
+  @ApiBody({ type: SendOtpDto })
+  @ApiResponse({
+    status: 200,
+    description: 'OTP resent successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: true },
+        message: { type: 'string', example: 'OTP sent successfully' },
+      },
+    },
+  })
+  @ApiResponse({ status: 400, description: 'Invalid email or phone' })
+  @ApiResponse({ status: 404, description: 'Profile not found' })
+  @ApiResponse({
+    status: 429,
+    description: 'Resend cooldown active; wait before requesting again',
+  })
+  async resendOtp(
+    @Body() sendOtpDto: SendOtpDto,
+    @I18n() i18n: I18nContext,
+  ): Promise<{ success: boolean; message: string }> {
+    const result = await this.authService.resendOtp(sendOtpDto.emailOrPhone);
+    return {
+      success: result.success,
+      message: i18n.t('auth.otp_sent'),
+    };
+  }
+
   @Post('verify-otp')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
