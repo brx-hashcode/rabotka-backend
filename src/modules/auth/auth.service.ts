@@ -13,6 +13,7 @@ import Redis from 'ioredis';
 import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
+import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { sendOtpEmail } from '../mail/templates';
 
 const OTP_TTL_SECONDS = 300;
@@ -30,6 +31,7 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
     private readonly mailService: MailService,
+    private readonly whatsAppService: WhatsAppService,
   ) {}
 
   async sendOtp(emailOrPhone: string): Promise<{ success: boolean }> {
@@ -51,15 +53,13 @@ export class AuthService {
 
     const otp = this.generateOtp();
 
-    console.log('[OTP] :', otp);
-
     const redisKey = `${OTP_KEY_PREFIX}${normalized}`;
     await this.redis.set(redisKey, otp, 'EX', OTP_TTL_SECONDS);
 
     if (isEmail) {
       await this.sendOtpByEmail(normalized, otp);
     } else {
-      this.sendOtpByWhatsApp(normalized, otp);
+      await this.sendOtpByWhatsApp(normalized, otp);
     }
 
     return { success: true };
@@ -96,17 +96,12 @@ export class AuthService {
 
     const redisKey = `${OTP_KEY_PREFIX}${normalized}`;
     await this.redis.set(redisKey, otp, 'EX', OTP_TTL_SECONDS);
-    await this.redis.set(
-      resendCooldownKey,
-      '1',
-      'EX',
-      RESEND_COOLDOWN_SECONDS,
-    );
+    await this.redis.set(resendCooldownKey, '1', 'EX', RESEND_COOLDOWN_SECONDS);
 
     if (isEmail) {
       await this.sendOtpByEmail(normalized, otp);
     } else {
-      this.sendOtpByWhatsApp(normalized, otp);
+      await this.sendOtpByWhatsApp(normalized, otp);
     }
 
     return { success: true };
@@ -184,7 +179,15 @@ export class AuthService {
     this.logger.log(`OTP email sent to ${email}`);
   }
 
-  private sendOtpByWhatsApp(phone: string, otp: string): void {
-    this.logger.log(`[MOCK] WhatsApp OTP for ${phone}: ${otp}`);
+  private async sendOtpByWhatsApp(phone: string, otp: string): Promise<void> {
+    const message = `Votre code Rabotka : ${otp}`;
+    const sent = await this.whatsAppService.sendTextMessage(phone, message);
+    if (sent) {
+      this.logger.log(`WhatsApp OTP sent to ${phone}`);
+    } else {
+      this.logger.warn(
+        `WhatsApp not connected or failed to send OTP to ${phone}; user may not receive the code`,
+      );
+    }
   }
 }
