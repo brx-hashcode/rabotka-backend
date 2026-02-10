@@ -5,6 +5,8 @@ import {
   BadRequestException,
   UnauthorizedException,
   NotFoundException,
+  HttpException,
+  HttpStatus,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import Redis from 'ioredis';
@@ -15,6 +17,8 @@ import { sendOtpEmail } from '../mail/templates';
 
 const OTP_TTL_SECONDS = 300;
 const OTP_KEY_PREFIX = 'otp:';
+const RESEND_COOLDOWN_SECONDS = 60;
+const RESEND_COOLDOWN_KEY_PREFIX = 'otp:resend:';
 
 @Injectable()
 export class AuthService {
@@ -51,6 +55,53 @@ export class AuthService {
 
     const redisKey = `${OTP_KEY_PREFIX}${normalized}`;
     await this.redis.set(redisKey, otp, 'EX', OTP_TTL_SECONDS);
+
+    if (isEmail) {
+      await this.sendOtpByEmail(normalized, otp);
+    } else {
+      this.sendOtpByWhatsApp(normalized, otp);
+    }
+
+    return { success: true };
+  }
+
+  async resendOtp(emailOrPhone: string): Promise<{ success: boolean }> {
+    const normalized = this.normalize(emailOrPhone);
+    const isEmail = this.isEmail(normalized);
+    const isPhone = this.isPhone(normalized);
+
+    if (!isEmail && !isPhone) {
+      throw new BadRequestException('auth.errors.invalid_email_or_phone');
+    }
+
+    const profile = isEmail
+      ? await this.findProfileByEmail(normalized)
+      : await this.findProfileByPhone(normalized);
+
+    if (!profile) {
+      throw new NotFoundException('auth.errors.profile_not_found');
+    }
+
+    const resendCooldownKey = `${RESEND_COOLDOWN_KEY_PREFIX}${normalized}`;
+    const cooldownActive = await this.redis.get(resendCooldownKey);
+    if (cooldownActive) {
+      throw new HttpException(
+        'auth.errors.resend_cooldown',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
+    const otp = this.generateOtp();
+    this.logger.log(`[OTP resend] : ${otp}`);
+
+    const redisKey = `${OTP_KEY_PREFIX}${normalized}`;
+    await this.redis.set(redisKey, otp, 'EX', OTP_TTL_SECONDS);
+    await this.redis.set(
+      resendCooldownKey,
+      '1',
+      'EX',
+      RESEND_COOLDOWN_SECONDS,
+    );
 
     if (isEmail) {
       await this.sendOtpByEmail(normalized, otp);
