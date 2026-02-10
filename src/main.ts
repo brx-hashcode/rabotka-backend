@@ -37,8 +37,7 @@ async function bootstrap() {
     .map((o) => o.trim())
     .filter(Boolean);
 
-
-  console.log("my origins ==>>>", origins)
+  console.log('my origins ==>>>', origins);
 
   app.enableCors({
     origin: origins.length ? origins : ['http://localhost:3000'],
