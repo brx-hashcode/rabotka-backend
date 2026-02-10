@@ -28,6 +28,36 @@ export type ProfileMeResponse = {
   createdAt: Date;
 };
 
+export type ProfilePenaltyItem = {
+  id: string;
+  amount: number;
+  reason: string | null;
+  appliedAt: Date;
+  applicationId: string;
+  jobOfferTitle?: string;
+};
+
+export type ProfileApplicationItem = {
+  id: string;
+  status: string;
+  createdAt: Date;
+  jobOffer: {
+    id: string;
+    title: string;
+    scheduledAt: Date;
+    amount: number;
+    address: string;
+    status: string;
+  };
+};
+
+export type ProfileApplicationsResponse = {
+  data: ProfileApplicationItem[];
+  total: number;
+  page: number;
+  limit: number;
+};
+
 type PrismaTransactionClient = Parameters<
   Parameters<PrismaService['$transaction']>[0]
 >[0];
@@ -149,6 +179,58 @@ export class ProfileService {
 
     this.logger.log(`Avatar updated successfully for profile: ${id}`);
     return { avatarUrl: uploadResult.url };
+  }
+
+  async getPenaltiesByProfileId(
+    profileId: string,
+  ): Promise<ProfilePenaltyItem[]> {
+    const penalties = await this.prisma.penalty.findMany({
+      where: { worker_id: profileId },
+      orderBy: { applied_at: 'desc' },
+      include: {
+        application: { include: { job_offer: true } },
+      },
+    });
+    return penalties.map((p) => ({
+      id: p.id,
+      amount: Number(p.amount),
+      reason: p.reason,
+      appliedAt: p.applied_at,
+      applicationId: p.application_id,
+      jobOfferTitle: p.application?.job_offer?.title,
+    }));
+  }
+
+  async getApplicationsByProfileId(
+    profileId: string,
+    page: number,
+    limit: number,
+  ): Promise<ProfileApplicationsResponse> {
+    const skip = (page - 1) * limit;
+    const [applications, total] = await Promise.all([
+      this.prisma.application.findMany({
+        where: { worker_id: profileId },
+        orderBy: { created_at: 'desc' },
+        skip,
+        take: limit,
+        include: { job_offer: true },
+      }),
+      this.prisma.application.count({ where: { worker_id: profileId } }),
+    ]);
+    const data: ProfileApplicationItem[] = applications.map((a) => ({
+      id: a.id,
+      status: a.status,
+      createdAt: a.created_at,
+      jobOffer: {
+        id: a.job_offer.id,
+        title: a.job_offer.title,
+        scheduledAt: a.job_offer.scheduled_at,
+        amount: Number(a.job_offer.amount),
+        address: a.job_offer.address,
+        status: a.job_offer.status,
+      },
+    }));
+    return { data, total, page, limit };
   }
 
   async createProfile(
