@@ -1,7 +1,6 @@
 import { config } from 'dotenv';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '@prisma/client';
-import { seedUsers } from './seed/user.seed';
 import { seedProfiles } from './seed/profile.seed';
 
 config({ path: '.env.local' });
@@ -15,7 +14,7 @@ void run();
 
 async function run() {
   try {
-    await seedUsers(prisma);
+    // await seedUsers(prisma);
     await seedProfiles(prisma);
   } catch (e) {
     console.error(e);
