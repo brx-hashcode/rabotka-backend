@@ -9,6 +9,7 @@ import {
   UploadedFile,
   Body,
   Req,
+  Query,
   BadRequestException,
 } from '@nestjs/common';
 import {
@@ -25,7 +26,12 @@ import {
   ApiCookieAuth,
 } from '@nestjs/swagger';
 import { I18n, I18nContext } from 'nestjs-i18n';
-import { ProfileService, ProfileMeResponse } from './profile.service';
+import {
+  ProfileService,
+  ProfileMeResponse,
+  ProfilePenaltyItem,
+  ProfileApplicationsResponse,
+} from './profile.service';
 import { CreateProfileDto } from './dto/create-profile.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { sendWelcomeEmail } from '../mail/templates';
@@ -224,6 +230,101 @@ export class ProfileController {
   @ApiResponse({ status: 404, description: 'Profile not found' })
   getMe(@Req() req: AuthenticatedRequest): Promise<ProfileMeResponse> {
     return this.profileService.findById(req.user.profileId);
+  }
+
+  @Get('penalties')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiCookieAuth()
+  @ApiOperation({
+    summary: 'Get penalties for current profile',
+    description:
+      'Returns all penalties for the authenticated worker. Requires valid JWT.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'List of penalties',
+    schema: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', format: 'uuid' },
+          amount: { type: 'number' },
+          reason: { type: 'string', nullable: true },
+          appliedAt: { type: 'string', format: 'date-time' },
+          applicationId: { type: 'string', format: 'uuid' },
+          jobOfferTitle: { type: 'string' },
+        },
+      },
+    },
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized - no valid token' })
+  getPenalties(
+    @Req() req: AuthenticatedRequest,
+  ): Promise<ProfilePenaltyItem[]> {
+    return this.profileService.getPenaltiesByProfileId(req.user.profileId);
+  }
+
+  @Get('applications')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiCookieAuth()
+  @ApiOperation({
+    summary: 'Get applications for current profile (paginated)',
+    description:
+      'Returns paginated applications for the authenticated worker. Default: 10 per page.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Paginated list of applications',
+    schema: {
+      type: 'object',
+      properties: {
+        data: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string', format: 'uuid' },
+              status: { type: 'string' },
+              createdAt: { type: 'string', format: 'date-time' },
+              jobOffer: {
+                type: 'object',
+                properties: {
+                  id: { type: 'string', format: 'uuid' },
+                  title: { type: 'string' },
+                  scheduledAt: { type: 'string', format: 'date-time' },
+                  amount: { type: 'number' },
+                  address: { type: 'string' },
+                  status: { type: 'string' },
+                },
+              },
+            },
+          },
+        },
+        total: { type: 'number' },
+        page: { type: 'number' },
+        limit: { type: 'number' },
+      },
+    },
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized - no valid token' })
+  getApplications(
+    @Req() req: AuthenticatedRequest,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ): Promise<ProfileApplicationsResponse> {
+    const pageNum = Math.max(1, Number.parseInt(String(page || '1'), 10) || 1);
+    const limitNum = Math.min(
+      100,
+      Math.max(1, Number.parseInt(String(limit || '10'), 10) || 10),
+    );
+    return this.profileService.getApplicationsByProfileId(
+      req.user.profileId,
+      pageNum,
+      limitNum,
+    );
   }
 
   @Patch()
