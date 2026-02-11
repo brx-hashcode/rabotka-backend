@@ -18,8 +18,10 @@ import { sendOtpEmail } from '../mail/templates';
 
 const OTP_TTL_SECONDS = 300;
 const OTP_KEY_PREFIX = 'otp:';
+const ADMIN_OTP_KEY_PREFIX = 'admin:otp:';
 const RESEND_COOLDOWN_SECONDS = 60;
 const RESEND_COOLDOWN_KEY_PREFIX = 'otp:resend:';
+const ADMIN_RESEND_COOLDOWN_KEY_PREFIX = 'admin:otp:resend:';
 
 @Injectable()
 export class AuthService {
@@ -51,6 +53,19 @@ export class AuthService {
       throw new NotFoundException('auth.errors.profile_not_found');
     }
 
+    // Check WhatsApp verification if using phone number
+    if (isPhone) {
+      const phoneProfile = profile as {
+        id: string;
+        email: string;
+        phone: string;
+        whatsapp_connected: boolean;
+      };
+      if (!phoneProfile.whatsapp_connected) {
+        throw new BadRequestException('auth.errors.whatsapp_not_verified');
+      }
+    }
+
     const otp = this.generateOtp();
 
     const redisKey = `${OTP_KEY_PREFIX}${normalized}`;
@@ -80,6 +95,19 @@ export class AuthService {
 
     if (!profile) {
       throw new NotFoundException('auth.errors.profile_not_found');
+    }
+
+    // Check WhatsApp verification if using phone number
+    if (isPhone) {
+      const phoneProfile = profile as {
+        id: string;
+        email: string;
+        phone: string;
+        whatsapp_connected: boolean;
+      };
+      if (!phoneProfile.whatsapp_connected) {
+        throw new BadRequestException('auth.errors.whatsapp_not_verified');
+      }
     }
 
     const resendCooldownKey = `${RESEND_COOLDOWN_KEY_PREFIX}${normalized}`;
@@ -131,8 +159,113 @@ export class AuthService {
 
     await this.redis.del(redisKey);
 
-    const payload = { sub: profile.id };
+    const payload = { sub: profile.id, type: 'profile' };
     const token = this.jwtService.sign(payload);
+
+    return { success: true, token };
+  }
+
+  async sendAdminOtp(email: string): Promise<{ success: boolean }> {
+    const normalized = this.normalize(email);
+
+    if (!this.isEmail(normalized)) {
+      throw new BadRequestException('auth.errors.invalid_email');
+    }
+
+    const user = await this.findUserByEmail(normalized);
+
+    if (!user) {
+      throw new NotFoundException('auth.errors.user_not_found');
+    }
+
+    if (!user.is_active) {
+      throw new UnauthorizedException('auth.errors.user_inactive');
+    }
+
+    const otp = this.generateOtp();
+
+    const redisKey = `${ADMIN_OTP_KEY_PREFIX}${normalized}`;
+    await this.redis.set(redisKey, otp, 'EX', OTP_TTL_SECONDS);
+
+    await this.sendOtpByEmail(normalized, otp);
+
+    return { success: true };
+  }
+
+  async resendAdminOtp(email: string): Promise<{ success: boolean }> {
+    const normalized = this.normalize(email);
+
+    if (!this.isEmail(normalized)) {
+      throw new BadRequestException('auth.errors.invalid_email');
+    }
+
+    const user = await this.findUserByEmail(normalized);
+
+    if (!user) {
+      throw new NotFoundException('auth.errors.user_not_found');
+    }
+
+    if (!user.is_active) {
+      throw new UnauthorizedException('auth.errors.user_inactive');
+    }
+
+    const resendCooldownKey = `${ADMIN_RESEND_COOLDOWN_KEY_PREFIX}${normalized}`;
+    const cooldownActive = await this.redis.get(resendCooldownKey);
+    if (cooldownActive) {
+      throw new HttpException(
+        'auth.errors.resend_cooldown',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
+    const otp = this.generateOtp();
+    this.logger.log(`[Admin OTP resend] : ${otp}`);
+
+    const redisKey = `${ADMIN_OTP_KEY_PREFIX}${normalized}`;
+    await this.redis.set(redisKey, otp, 'EX', OTP_TTL_SECONDS);
+    await this.redis.set(resendCooldownKey, '1', 'EX', RESEND_COOLDOWN_SECONDS);
+
+    await this.sendOtpByEmail(normalized, otp);
+
+    return { success: true };
+  }
+
+  async verifyAdminOtp(
+    email: string,
+    otp: string,
+  ): Promise<{ success: boolean; token: string }> {
+    const normalized = this.normalize(email);
+
+    if (!this.isEmail(normalized)) {
+      throw new BadRequestException('auth.errors.invalid_email');
+    }
+
+    const redisKey = `${ADMIN_OTP_KEY_PREFIX}${normalized}`;
+    const storedOtp = await this.redis.get(redisKey);
+
+    if (!storedOtp || storedOtp !== otp) {
+      throw new UnauthorizedException('auth.errors.invalid_or_expired_otp');
+    }
+
+    const user = await this.findUserByEmail(normalized);
+
+    if (!user) {
+      throw new NotFoundException('auth.errors.user_not_found');
+    }
+
+    if (!user.is_active) {
+      throw new UnauthorizedException('auth.errors.user_inactive');
+    }
+
+    await this.redis.del(redisKey);
+
+    const payload = { sub: user.id, type: 'admin' };
+    const token = this.jwtService.sign(payload);
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { last_login_at: new Date() },
+    });
 
     return { success: true, token };
   }
@@ -166,7 +299,14 @@ export class AuthService {
   private async findProfileByPhone(phone: string) {
     return this.prisma.profile.findUnique({
       where: { phone },
-      select: { id: true, email: true, phone: true },
+      select: { id: true, email: true, phone: true, whatsapp_connected: true },
+    });
+  }
+
+  private async findUserByEmail(email: string) {
+    return this.prisma.user.findUnique({
+      where: { email },
+      select: { id: true, email: true, is_active: true },
     });
   }
 

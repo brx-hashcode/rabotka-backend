@@ -12,13 +12,30 @@ import { IS_PUBLIC_KEY } from '../decorators/public.decorator.js';
 
 export interface JwtPayload {
   sub: string;
+  type?: 'profile' | 'admin';
   iat?: number;
   exp?: number;
 }
 
 export interface AuthenticatedRequest extends Request {
   user: {
+    profileId?: string;
+    userId?: string;
+    type: 'profile' | 'admin';
+  };
+}
+
+export interface ProfileAuthenticatedRequest extends Request {
+  user: {
     profileId: string;
+    type: 'profile';
+  };
+}
+
+export interface AdminAuthenticatedRequest extends Request {
+  user: {
+    userId: string;
+    type: 'admin';
   };
 }
 
@@ -51,8 +68,11 @@ export class JwtAuthGuard implements CanActivate {
         secret: this.configService.get<string>('JWT_SECRET'),
       });
 
+      const tokenType = payload.type || 'profile'; // Default to 'profile' for backward compatibility
+
       (request as AuthenticatedRequest).user = {
-        profileId: payload.sub,
+        ...(tokenType === 'profile' ? { profileId: payload.sub } : { userId: payload.sub }),
+        type: tokenType,
       };
 
       return true;
