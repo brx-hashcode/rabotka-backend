@@ -15,6 +15,8 @@ import makeWASocket, {
   type WASocket,
   type BaileysEventMap,
   type WAVersion,
+  type WAMessageKey,
+  type WAMessageContent,
 } from 'baileys';
 import pino from 'pino';
 import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
@@ -23,6 +25,10 @@ import {
   useRedisAuthState,
   clearRedisAuthState,
 } from './auth/redis-auth-state';
+import {
+  storeMessage,
+  getMessage as getStoredMessage,
+} from './message-storage';
 import type { ConversationService } from '../conversation/conversation.service';
 
 const JID_SUFFIX = '@s.whatsapp.net';
@@ -125,7 +131,9 @@ export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
       version: this.waVersion,
       printQRInTerminal: true,
       qrTimeout: 20000,
-      getMessage: () => Promise.resolve(undefined),
+      getMessage: async (key: WAMessageKey) => {
+        return getStoredMessage(this.redis, key);
+      },
       markOnlineOnConnect: false,
     });
 
@@ -144,6 +152,13 @@ export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
       'messages.upsert',
       (event: BaileysEventMap['messages.upsert']) => {
         this.handleMessagesUpsert(event);
+      },
+    );
+
+    this.socket.ev.on(
+      'messages.update',
+      (event: BaileysEventMap['messages.update']) => {
+        void this.handleMessagesUpdate(event);
       },
     );
   }
@@ -200,6 +215,14 @@ export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
   ): void {
     const { messages } = event;
     for (const m of messages) {
+      // Store sent messages for retry handling
+      if (m.key.fromMe && m.message) {
+        void storeMessage(this.redis, m.key, m.message).catch((err) =>
+          this.logger.warn('Failed to store sent message:', err),
+        );
+      }
+
+      // Handle incoming messages
       if (m.key.fromMe ?? false) continue;
       const remoteJid = m.key.remoteJid;
       if (remoteJid == null) continue;
@@ -219,6 +242,36 @@ export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
               ),
             );
         }
+      }
+    }
+  }
+
+  private async handleMessagesUpdate(
+    event: BaileysEventMap['messages.update'],
+  ): Promise<void> {
+    for (const update of event) {
+      const { key, update: updateData } = update;
+
+      // Store message if it's being updated and we sent it
+      if (key.fromMe && updateData?.message) {
+        await storeMessage(this.redis, key, updateData.message).catch((err) =>
+          this.logger.warn('Failed to store updated message:', err),
+        );
+      }
+
+      // Clean up message from storage if it's been successfully delivered/read
+      // Status 4 = DELIVERY_ACK, Status 5 = READ
+      const status = updateData?.status;
+      if (
+        key.fromMe &&
+        (status === 4 || status === 5) &&
+        updateData?.message == null
+      ) {
+        // Message was acknowledged, we can optionally clean it up
+        // But keep it for a while in case of retries, Redis TTL will handle cleanup
+        this.logger.debug(
+          `Message ${key.id} delivered/read, will expire naturally`,
+        );
       }
     }
   }
@@ -251,7 +304,15 @@ export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
     }
     try {
       const jid = phoneToJid(phone);
-      await this.socket.sendMessage(jid, { text });
+      const result = await this.socket.sendMessage(jid, { text });
+      
+      // Store message immediately for retry handling
+      if (result?.key && result?.message) {
+        await storeMessage(this.redis, result.key, result.message).catch(
+          (err) => this.logger.warn('Failed to store sent message:', err),
+        );
+      }
+      
       this.logger.debug(`Sent WhatsApp message to ${phone}`);
       return true;
     } catch (err) {
