@@ -53,6 +53,19 @@ export class AuthService {
       throw new NotFoundException('auth.errors.profile_not_found');
     }
 
+    // Check WhatsApp verification if using phone number
+    if (isPhone) {
+      const phoneProfile = profile as {
+        id: string;
+        email: string;
+        phone: string;
+        whatsapp_connected: boolean;
+      };
+      if (!phoneProfile.whatsapp_connected) {
+        throw new BadRequestException('auth.errors.whatsapp_not_verified');
+      }
+    }
+
     const otp = this.generateOtp();
 
     const redisKey = `${OTP_KEY_PREFIX}${normalized}`;
@@ -82,6 +95,19 @@ export class AuthService {
 
     if (!profile) {
       throw new NotFoundException('auth.errors.profile_not_found');
+    }
+
+    // Check WhatsApp verification if using phone number
+    if (isPhone) {
+      const phoneProfile = profile as {
+        id: string;
+        email: string;
+        phone: string;
+        whatsapp_connected: boolean;
+      };
+      if (!phoneProfile.whatsapp_connected) {
+        throw new BadRequestException('auth.errors.whatsapp_not_verified');
+      }
     }
 
     const resendCooldownKey = `${RESEND_COOLDOWN_KEY_PREFIX}${normalized}`;
@@ -273,7 +299,7 @@ export class AuthService {
   private async findProfileByPhone(phone: string) {
     return this.prisma.profile.findUnique({
       where: { phone },
-      select: { id: true, email: true, phone: true },
+      select: { id: true, email: true, phone: true, whatsapp_connected: true },
     });
   }
 
