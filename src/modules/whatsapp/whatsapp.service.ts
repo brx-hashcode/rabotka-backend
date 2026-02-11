@@ -242,4 +242,15 @@ export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
       return false;
     }
   }
+
+  async verifyWhatsAppToken(token: string): Promise<void> {
+    // TODO: Implement actual token verification logic
+    // This should validate the token, check expiration, and link WhatsApp to user profile
+    // For now, just log the token
+    this.logger.log(`Verifying WhatsApp token: ${token.substring(0, 8)}...`);
+    // Throw error if token is invalid
+    if (!token || token.trim().length === 0) {
+      throw new Error('Invalid verification token');
+    }
+  }
 }
