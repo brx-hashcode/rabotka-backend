@@ -45,7 +45,10 @@ export class AuthController {
       },
     },
   })
-  @ApiResponse({ status: 400, description: 'Invalid email or phone' })
+  @ApiResponse({
+    status: 400,
+    description: 'Invalid email or phone, or WhatsApp not verified',
+  })
   @ApiResponse({ status: 404, description: 'Profile not found' })
   async sendOtp(
     @Body() sendOtpDto: SendOtpDto,
@@ -77,7 +80,10 @@ export class AuthController {
       },
     },
   })
-  @ApiResponse({ status: 400, description: 'Invalid email or phone' })
+  @ApiResponse({
+    status: 400,
+    description: 'Invalid email or phone, or WhatsApp not verified',
+  })
   @ApiResponse({ status: 404, description: 'Profile not found' })
   @ApiResponse({
     status: 429,
