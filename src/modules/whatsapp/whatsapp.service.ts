@@ -16,8 +16,8 @@ import makeWASocket, {
   type BaileysEventMap,
   type WAVersion,
   type WAMessageKey,
-  type WAMessageContent,
 } from 'baileys';
+import { proto } from 'baileys/WAProto';
 import pino from 'pino';
 import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
@@ -92,8 +92,7 @@ export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
       this.sessionPrefix,
     );
 
-    const isDevelopment =
-      this.config.get<string>('NODE_ENV') !== 'production';
+    const isDevelopment = this.config.get<string>('NODE_ENV') !== 'production';
     const logger = pino({
       level: this.config.get<string>('LOG_LEVEL', 'silent'),
       transport: isDevelopment
@@ -215,14 +214,12 @@ export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
   ): void {
     const { messages } = event;
     for (const m of messages) {
-      // Store sent messages for retry handling
       if (m.key.fromMe && m.message) {
         void storeMessage(this.redis, m.key, m.message).catch((err) =>
           this.logger.warn('Failed to store sent message:', err),
         );
       }
 
-      // Handle incoming messages
       if (m.key.fromMe ?? false) continue;
       const remoteJid = m.key.remoteJid;
       if (remoteJid == null) continue;
@@ -252,23 +249,17 @@ export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
     for (const update of event) {
       const { key, update: updateData } = update;
 
-      // Store message if it's being updated and we sent it
       if (key.fromMe && updateData?.message) {
         await storeMessage(this.redis, key, updateData.message).catch((err) =>
           this.logger.warn('Failed to store updated message:', err),
         );
       }
 
-      // Clean up message from storage if it's been successfully delivered/read
-      // Status 4 = DELIVERY_ACK, Status 5 = READ
       const status = updateData?.status;
-      if (
-        key.fromMe &&
-        (status === 4 || status === 5) &&
-        updateData?.message == null
-      ) {
-        // Message was acknowledged, we can optionally clean it up
-        // But keep it for a while in case of retries, Redis TTL will handle cleanup
+      const isDeliveredOrRead =
+        status === proto.WebMessageInfo.Status.DELIVERY_ACK ||
+        status === proto.WebMessageInfo.Status.READ;
+      if (key.fromMe && isDeliveredOrRead && updateData?.message == null) {
         this.logger.debug(
           `Message ${key.id} delivered/read, will expire naturally`,
         );
@@ -305,14 +296,13 @@ export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
     try {
       const jid = phoneToJid(phone);
       const result = await this.socket.sendMessage(jid, { text });
-      
-      // Store message immediately for retry handling
+
       if (result?.key && result?.message) {
         await storeMessage(this.redis, result.key, result.message).catch(
           (err) => this.logger.warn('Failed to store sent message:', err),
         );
       }
-      
+
       this.logger.debug(`Sent WhatsApp message to ${phone}`);
       return true;
     } catch (err) {
@@ -330,22 +320,43 @@ export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
     const profileId = await this.redis.get(redisKey);
 
     if (!profileId) {
-      throw new BadRequestException(
-        'Invalid or expired verification token',
-      );
+      throw new BadRequestException('Invalid or expired verification token');
     }
 
-    // Update profile to mark WhatsApp as connected
+    const profile = await this.prisma.profile.findUnique({
+      where: { id: profileId },
+      select: {
+        phone: true,
+        first_name: true,
+      },
+    });
+
+    if (!profile) {
+      throw new BadRequestException('Profile not found');
+    }
+
     await this.prisma.profile.update({
       where: { id: profileId },
       data: { whatsapp_connected: true },
     });
 
-    // Delete token from Redis (one-time use)
     await this.redis.del(redisKey);
 
-    this.logger.log(
-      `WhatsApp verified successfully for profile ${profileId}`,
-    );
+    if (this.isConnected()) {
+      const successMessage = `Bonjour ${profile.first_name},
+
+Votre compte WhatsApp a été vérifié avec succès !
+
+Vous pouvez maintenant accéder au menu et utiliser toutes les fonctionnalités de Rabotka.`;
+
+      await this.sendTextMessage(profile.phone, successMessage).catch((err) =>
+        this.logger.warn(
+          `Failed to send WhatsApp success message to ${profile.phone}:`,
+          err,
+        ),
+      );
+    }
+
+    this.logger.log(`WhatsApp verified successfully for profile ${profileId}`);
   }
 }
