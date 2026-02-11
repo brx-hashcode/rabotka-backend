@@ -34,6 +34,7 @@ import {
 } from './profile.service';
 import { CreateProfileDto } from './dto/create-profile.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import { VerifyWhatsAppDto } from './dto/verify-whatsapp.dto';
 import { sendWelcomeEmail } from '../mail/templates';
 import { MailService } from '../mail/mail.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -431,5 +432,39 @@ export class ProfileController {
     }
 
     return this.profileService.updateAvatar(req.user.profileId, avatar);
+  }
+
+  @Post('verify-whatsapp')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiCookieAuth()
+  @ApiOperation({
+    summary: 'Request WhatsApp verification for a profile',
+    description:
+      'Admin endpoint: Generates a secure verification token and sends it via WhatsApp to the specified profile phone number. The token expires in 30 minutes.',
+  })
+  @ApiBody({ type: VerifyWhatsAppDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Verification token sent successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: true },
+      },
+    },
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized - no valid token' })
+  @ApiResponse({ status: 404, description: 'Profile not found' })
+  @ApiResponse({
+    status: 503,
+    description: 'WhatsApp service unavailable or message send failed',
+  })
+  async requestWhatsAppVerification(
+    @Body() verifyWhatsAppDto: VerifyWhatsAppDto,
+  ): Promise<{ success: boolean }> {
+    return this.profileService.requestWhatsAppVerification(
+      verifyWhatsAppDto.profileId,
+    );
   }
 }

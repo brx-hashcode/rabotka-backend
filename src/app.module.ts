@@ -27,6 +27,7 @@ import { UserModule } from './modules/user/user.module';
 import { ConversationModule } from './modules/conversation/conversation.module';
 import { FileModule } from './modules/file/file.module';
 import { LogModule } from './modules/log/log.module';
+import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
 import { StorageModule } from './common/services/storage/storage.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -103,6 +104,7 @@ import { I18nExceptionFilter } from './common/filters/i18n-exception.filter';
     HealthModule,
     CsrfModule,
     MailModule,
+    WhatsAppModule,
     AuthModule,
     ProfileModule,
     UserModule,
