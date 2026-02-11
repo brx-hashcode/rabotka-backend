@@ -5,6 +5,7 @@ import {
   Inject,
   Optional,
   Logger,
+  BadRequestException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
@@ -17,6 +18,7 @@ import makeWASocket, {
 } from 'baileys';
 import pino from 'pino';
 import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
+import { PrismaService } from '../../common/services/prisma/prisma.service';
 import {
   useRedisAuthState,
   clearRedisAuthState,
@@ -24,6 +26,7 @@ import {
 import type { ConversationService } from '../conversation/conversation.service';
 
 const JID_SUFFIX = '@s.whatsapp.net';
+const VERIFICATION_TOKEN_KEY_PREFIX = 'wa:verify:';
 
 function phoneToJid(phone: string): string {
   const digits = phone.replaceAll(/\D/g, '');
@@ -50,6 +53,7 @@ export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
     @Inject(REDIS_CONNECTION)
     private readonly redis: Redis,
     private readonly config: ConfigService,
+    private readonly prisma: PrismaService,
     @Optional()
     private readonly conversationService: ConversationService | null,
   ) {}
@@ -257,13 +261,30 @@ export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
   }
 
   async verifyWhatsAppToken(token: string): Promise<void> {
-    // TODO: Implement actual token verification logic
-    // This should validate the token, check expiration, and link WhatsApp to user profile
-    // For now, just log the token
-    this.logger.log(`Verifying WhatsApp token: ${token.substring(0, 8)}...`);
-    // Throw error if token is invalid
     if (!token || token.trim().length === 0) {
-      throw new Error('Invalid verification token');
+      throw new BadRequestException('Invalid verification token');
     }
+
+    const redisKey = `${VERIFICATION_TOKEN_KEY_PREFIX}${token}`;
+    const profileId = await this.redis.get(redisKey);
+
+    if (!profileId) {
+      throw new BadRequestException(
+        'Invalid or expired verification token',
+      );
+    }
+
+    // Update profile to mark WhatsApp as connected
+    await this.prisma.profile.update({
+      where: { id: profileId },
+      data: { whatsapp_connected: true },
+    });
+
+    // Delete token from Redis (one-time use)
+    await this.redis.del(redisKey);
+
+    this.logger.log(
+      `WhatsApp verified successfully for profile ${profileId}`,
+    );
   }
 }

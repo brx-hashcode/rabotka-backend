@@ -1,5 +1,18 @@
-import { Controller, Get, Post, Res, HttpStatus, Body, HttpCode } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
+import {
+  Controller,
+  Get,
+  Post,
+  Res,
+  HttpStatus,
+  Query,
+  BadRequestException,
+} from '@nestjs/common';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiQuery,
+} from '@nestjs/swagger';
 import type { Response } from 'express';
 import { Public } from '../auth/decorators/public.decorator.js';
 import { WhatsAppService } from './whatsapp.service';
@@ -143,14 +156,19 @@ export class WhatsAppController {
       .send(CONNECT_HTML);
   }
 
-  @Post('verify')
-  @HttpCode(HttpStatus.OK)
+  @Get('verify')
   @ApiOperation({
     summary: 'Verify WhatsApp token',
     description:
-      'Verifies a WhatsApp verification token and links WhatsApp to the user profile. Requires CSRF token.',
+      'Verifies a WhatsApp verification token and links WhatsApp to the user profile. Token must be valid and not expired. Called automatically when user clicks the verification link.',
   })
-  @ApiBody({ type: VerifyWhatsAppDto })
+  @ApiQuery({
+    name: 'token',
+    type: String,
+    description: 'Verification token received via WhatsApp',
+    example: 'abc123def456',
+    required: true,
+  })
   @ApiResponse({
     status: 200,
     description: 'WhatsApp verified successfully',
@@ -161,14 +179,23 @@ export class WhatsAppController {
       },
     },
   })
-  @ApiResponse({ status: 400, description: 'Invalid token' })
-  @ApiResponse({ status: 401, description: 'Unauthorized - CSRF token required' })
+  @ApiResponse({
+    status: 400,
+    description: 'Invalid or expired token',
+  })
   async verifyWhatsApp(
-    @Body() verifyWhatsAppDto: VerifyWhatsAppDto,
+    @Query() verifyWhatsAppDto: VerifyWhatsAppDto,
   ): Promise<{ success: boolean }> {
-    // TODO: Implement actual verification logic in service
-    // For now, return success if token is provided
-    await this.whatsAppService.verifyWhatsAppToken(verifyWhatsAppDto.token);
-    return { success: true };
+    try {
+      await this.whatsAppService.verifyWhatsAppToken(verifyWhatsAppDto.token);
+      return { success: true };
+    } catch (error: any) {
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+      throw new BadRequestException(
+        error.message || 'Invalid verification token',
+      );
+    }
   }
 }
