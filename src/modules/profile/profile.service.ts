@@ -4,12 +4,19 @@ import {
   BadRequestException,
   ConflictException,
   NotFoundException,
+  Inject,
+  ServiceUnavailableException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import Redis from 'ioredis';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { FileService } from '../file/file.service';
+import { WhatsAppService } from '../whatsapp/whatsapp.service';
+import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
 import { CreateProfileDto } from './dto/create-profile.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { Prisma } from '@prisma/client';
+import { randomBytes } from 'crypto';
 
 export type ProfileMeResponse = {
   id: string;
@@ -62,6 +69,9 @@ type PrismaTransactionClient = Parameters<
   Parameters<PrismaService['$transaction']>[0]
 >[0];
 
+const VERIFICATION_TOKEN_TTL_SECONDS = 1800; // 30 minutes
+const VERIFICATION_TOKEN_KEY_PREFIX = 'wa:verify:';
+
 @Injectable()
 export class ProfileService {
   private readonly logger = new Logger(ProfileService.name);
@@ -69,6 +79,10 @@ export class ProfileService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly fileService: FileService,
+    @Inject(REDIS_CONNECTION)
+    private readonly redis: Redis,
+    private readonly whatsAppService: WhatsAppService,
+    private readonly configService: ConfigService,
   ) {}
 
   async findById(id: string): Promise<ProfileMeResponse> {
@@ -448,5 +462,70 @@ export class ProfileService {
 
   private isPrismaError(error: any): boolean {
     return error instanceof Prisma.PrismaClientKnownRequestError;
+  }
+
+  async requestWhatsAppVerification(
+    profileId: string,
+  ): Promise<{ success: boolean }> {
+    // Get profile with phone number
+    const profile = await this.prisma.profile.findUnique({
+      where: { id: profileId },
+      select: {
+        id: true,
+        first_name: true,
+        phone: true,
+      },
+    });
+
+    if (!profile) {
+      throw new NotFoundException('profile.errors.not_found');
+    }
+
+    // Check if WhatsApp service is connected
+    if (!this.whatsAppService.isConnected()) {
+      throw new ServiceUnavailableException('whatsapp.errors.not_connected');
+    }
+
+    // Generate secure token
+    const token = randomBytes(32).toString('base64url');
+    const redisKey = `${VERIFICATION_TOKEN_KEY_PREFIX}${token}`;
+
+    // Store token in Redis with 30 minute expiration
+    await this.redis.set(
+      redisKey,
+      profileId,
+      'EX',
+      VERIFICATION_TOKEN_TTL_SECONDS,
+    );
+
+    // Get frontend URL from config
+    const frontendUrl = this.configService.get<string>(
+      'FRONTEND_URL',
+      'http://localhost:3000',
+    );
+    const verificationLink = `${frontendUrl}/verify/whatsapp?token=${token}`;
+
+    // Create WhatsApp message
+    const message = `Bonjour ${profile.first_name},
+
+Cliquez sur ce lien pour vérifier votre compte WhatsApp :
+${verificationLink}
+
+Ce lien expire dans 30 minutes.`;
+
+    // Send WhatsApp message
+    const sent = await this.whatsAppService.sendTextMessage(
+      profile.phone,
+      message,
+    );
+
+    if (!sent) {
+      // Clean up token if message failed to send
+      await this.redis.del(redisKey);
+      throw new ServiceUnavailableException('whatsapp.errors.send_failed');
+    }
+
+    this.logger.log(`WhatsApp verification token sent to profile ${profileId}`);
+    return { success: true };
   }
 }

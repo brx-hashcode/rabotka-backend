@@ -3,7 +3,7 @@ import { ApiProperty } from '@nestjs/swagger';
 
 export class VerifyWhatsAppDto {
   @ApiProperty({
-    description: 'Verification token for WhatsApp linking',
+    description: 'Verification token for WhatsApp linking (query parameter)',
     example: 'abc123def456',
   })
   @IsString()
