@@ -4,9 +4,10 @@ import { ProfileService } from './profile.service';
 import { FileModule } from '../file/file.module';
 import { MailModule } from '../mail/mail.module';
 import { AuthModule } from '../auth/auth.module';
+import { WhatsAppModule } from '../whatsapp/whatsapp.module';
 
 @Module({
-  imports: [FileModule, MailModule, AuthModule],
+  imports: [FileModule, MailModule, AuthModule, WhatsAppModule],
   controllers: [ProfileController],
   providers: [ProfileService],
   exports: [ProfileService],
