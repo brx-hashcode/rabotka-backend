@@ -61,3 +61,33 @@ export async function seedUsers(prisma: PrismaClient): Promise<void> {
     `Seeded ${total} user(s): ${created} created, ${skipped} skipped.`,
   );
 }
+
+export async function seedSuperAdmin(prisma: PrismaClient): Promise<void> {
+  const superAdminEmail = process.env.SUPER_ADMIN_EMAIL || 'admin@rabotka.com';
+
+  const existing = await prisma.user.findUnique({
+    where: { email: superAdminEmail },
+  });
+
+  if (existing) {
+    console.log(
+      `[Super Admin] Skipped (already exists): ${existing.first_name} ${existing.last_name} <${superAdminEmail}>`,
+    );
+    return;
+  }
+
+  const superAdmin = await prisma.user.create({
+    data: {
+      first_name: 'Super',
+      last_name: 'Admin',
+      email: superAdminEmail,
+      role: UserRole.SUPER_ADMIN,
+      is_active: true,
+      last_login_at: null,
+    },
+  });
+
+  console.log(
+    `[Super Admin] Created: ${superAdmin.first_name} ${superAdmin.last_name} <${superAdmin.email}> (id: ${superAdmin.id})`,
+  );
+}
