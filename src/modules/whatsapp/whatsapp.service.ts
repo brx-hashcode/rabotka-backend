@@ -82,8 +82,21 @@ export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
       this.sessionPrefix,
     );
 
+    const isDevelopment =
+      this.config.get<string>('NODE_ENV') !== 'production';
     const logger = pino({
       level: this.config.get<string>('LOG_LEVEL', 'silent'),
+      transport: isDevelopment
+        ? {
+            target: 'pino-pretty',
+            options: {
+              colorize: true,
+              translateTime: 'SYS:standard',
+              ignore: 'pid,hostname',
+              singleLine: false,
+            },
+          }
+        : undefined,
     }).child({ module: 'baileys' });
 
     if (this.waVersion == null) {
