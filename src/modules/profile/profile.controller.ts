@@ -38,7 +38,7 @@ import { VerifyWhatsAppDto } from './dto/verify-whatsapp.dto';
 import { sendWelcomeEmail } from '../mail/templates';
 import { MailService } from '../mail/mail.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import type { AuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
+import type { ProfileAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
 
 @ApiTags('Profile')
 @Controller('profile')
@@ -229,7 +229,7 @@ export class ProfileController {
   })
   @ApiResponse({ status: 401, description: 'Unauthorized - no valid token' })
   @ApiResponse({ status: 404, description: 'Profile not found' })
-  getMe(@Req() req: AuthenticatedRequest): Promise<ProfileMeResponse> {
+  getMe(@Req() req: ProfileAuthenticatedRequest): Promise<ProfileMeResponse> {
     return this.profileService.findById(req.user.profileId);
   }
 
@@ -262,7 +262,7 @@ export class ProfileController {
   })
   @ApiResponse({ status: 401, description: 'Unauthorized - no valid token' })
   getPenalties(
-    @Req() req: AuthenticatedRequest,
+    @Req() req: ProfileAuthenticatedRequest,
   ): Promise<ProfilePenaltyItem[]> {
     return this.profileService.getPenaltiesByProfileId(req.user.profileId);
   }
@@ -312,7 +312,7 @@ export class ProfileController {
   })
   @ApiResponse({ status: 401, description: 'Unauthorized - no valid token' })
   getApplications(
-    @Req() req: AuthenticatedRequest,
+    @Req() req: ProfileAuthenticatedRequest,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
   ): Promise<ProfileApplicationsResponse> {
@@ -370,7 +370,7 @@ export class ProfileController {
   @ApiResponse({ status: 401, description: 'Unauthorized - no valid token' })
   @ApiResponse({ status: 404, description: 'Profile not found' })
   updateProfile(
-    @Req() req: AuthenticatedRequest,
+    @Req() req: ProfileAuthenticatedRequest,
     @Body() updateProfileDto: UpdateProfileDto,
   ): Promise<ProfileMeResponse> {
     return this.profileService.updateProfile(
@@ -423,7 +423,7 @@ export class ProfileController {
   @ApiResponse({ status: 401, description: 'Unauthorized - no valid token' })
   @ApiResponse({ status: 404, description: 'Profile not found' })
   async uploadAvatar(
-    @Req() req: AuthenticatedRequest,
+    @Req() req: ProfileAuthenticatedRequest,
     @UploadedFile() avatar: Express.Multer.File,
     @I18n() i18n: I18nContext,
   ): Promise<{ avatarUrl: string }> {
