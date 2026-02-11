@@ -11,7 +11,12 @@ import type { Response } from 'express';
 import { ConfigService } from '@nestjs/config';
 import { I18n, I18nContext } from 'nestjs-i18n';
 import { AuthService } from './auth.service';
-import { SendOtpDto, VerifyOtpDto } from './dto';
+import {
+  SendOtpDto,
+  VerifyOtpDto,
+  SendAdminOtpDto,
+  VerifyAdminOtpDto,
+} from './dto';
 
 @ApiTags('Auth')
 @Controller('auth')
@@ -166,5 +171,126 @@ export class AuthController {
     });
 
     return { success: true };
+  }
+
+  @Post('admin/send-otp')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Send OTP to admin email',
+    description:
+      'Sends a 6-digit OTP to the provided admin email address. Email-only authentication for admin users.',
+  })
+  @ApiBody({ type: SendAdminOtpDto })
+  @ApiResponse({
+    status: 200,
+    description: 'OTP sent successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: true },
+        message: { type: 'string', example: 'OTP sent successfully' },
+      },
+    },
+  })
+  @ApiResponse({ status: 400, description: 'Invalid email' })
+  @ApiResponse({ status: 404, description: 'User not found' })
+  @ApiResponse({ status: 401, description: 'User is inactive' })
+  async sendAdminOtp(
+    @Body() sendAdminOtpDto: SendAdminOtpDto,
+    @I18n() i18n: I18nContext,
+  ): Promise<{ success: boolean; message: string }> {
+    const result = await this.authService.sendAdminOtp(
+      sendAdminOtpDto.email as string,
+    );
+    return {
+      success: result.success,
+      message: i18n.t('auth.otp_sent'),
+    };
+  }
+
+  @Post('admin/resend-otp')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Resend OTP to admin email',
+    description:
+      'Resends a 6-digit OTP for the same admin email. Rate-limited with a short cooldown (e.g. 60s).',
+  })
+  @ApiBody({ type: SendAdminOtpDto })
+  @ApiResponse({
+    status: 200,
+    description: 'OTP resent successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: true },
+        message: { type: 'string', example: 'OTP sent successfully' },
+      },
+    },
+  })
+  @ApiResponse({ status: 400, description: 'Invalid email' })
+  @ApiResponse({ status: 404, description: 'User not found' })
+  @ApiResponse({ status: 401, description: 'User is inactive' })
+  @ApiResponse({
+    status: 429,
+    description: 'Resend cooldown active; wait before requesting again',
+  })
+  async resendAdminOtp(
+    @Body() sendAdminOtpDto: SendAdminOtpDto,
+    @I18n() i18n: I18nContext,
+  ): Promise<{ success: boolean; message: string }> {
+    const result = await this.authService.resendAdminOtp(sendAdminOtpDto.email);
+    return {
+      success: result.success,
+      message: i18n.t('auth.otp_sent'),
+    };
+  }
+
+  @Post('admin/verify-otp')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Verify admin OTP and authenticate',
+    description:
+      'Verifies the admin OTP and sets an httpOnly session cookie. Returns only { success: true } for security.',
+  })
+  @ApiBody({ type: VerifyAdminOtpDto })
+  @ApiResponse({
+    status: 200,
+    description: 'OTP verified, session cookie set',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: true },
+      },
+    },
+  })
+  @ApiResponse({ status: 401, description: 'Invalid or expired OTP' })
+  @ApiResponse({ status: 404, description: 'User not found' })
+  async verifyAdminOtp(
+    @Body() verifyAdminOtpDto: VerifyAdminOtpDto,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<{ success: boolean; token: string }> {
+    const result = await this.authService.verifyAdminOtp(
+      verifyAdminOtpDto.email as string,
+      verifyAdminOtpDto.otp as string,
+    );
+
+    const isProduction =
+      this.configService.get<string>('NODE_ENV') === 'production';
+    const cookieName = this.configService.get<string>('AUTH_COOKIE_NAME');
+    const maxAge = 24 * 60 * 60 * 1000;
+
+    if (!cookieName) {
+      throw new Error('AUTH_COOKIE_NAME is not set');
+    }
+
+    res.cookie(cookieName, result.token, {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: 'lax',
+      maxAge,
+      path: '/',
+    });
+
+    return { success: true, token: result.token };
   }
 }

@@ -1,0 +1,7 @@
+{
+  "errors": {
+    "email_already_exists": "An admin user with this email address already exists",
+    "invalid_role": "Role must be either ADMIN or SUPER_ADMIN",
+    "not_found": "User not found"
+  }
+}
