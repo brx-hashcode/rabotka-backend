@@ -1,8 +1,9 @@
-import { Controller, Get, Res, HttpStatus } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { Controller, Get, Post, Res, HttpStatus, Body, HttpCode } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { Public } from '../auth/decorators/public.decorator.js';
 import { WhatsAppService } from './whatsapp.service';
+import { VerifyWhatsAppDto } from './dto/verify-whatsapp.dto';
 
 const CONNECT_HTML = `
 <!DOCTYPE html>
@@ -140,5 +141,34 @@ export class WhatsAppController {
     res
       .setHeader('Content-Type', 'text/html; charset=utf-8')
       .send(CONNECT_HTML);
+  }
+
+  @Post('verify')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Verify WhatsApp token',
+    description:
+      'Verifies a WhatsApp verification token and links WhatsApp to the user profile. Requires CSRF token.',
+  })
+  @ApiBody({ type: VerifyWhatsAppDto })
+  @ApiResponse({
+    status: 200,
+    description: 'WhatsApp verified successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: true },
+      },
+    },
+  })
+  @ApiResponse({ status: 400, description: 'Invalid token' })
+  @ApiResponse({ status: 401, description: 'Unauthorized - CSRF token required' })
+  async verifyWhatsApp(
+    @Body() verifyWhatsAppDto: VerifyWhatsAppDto,
+  ): Promise<{ success: boolean }> {
+    // TODO: Implement actual verification logic in service
+    // For now, return success if token is provided
+    await this.whatsAppService.verifyWhatsAppToken(verifyWhatsAppDto.token);
+    return { success: true };
   }
 }
