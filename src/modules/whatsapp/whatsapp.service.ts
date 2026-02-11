@@ -54,6 +54,10 @@ export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
   private initPromise: Promise<void> | null = null;
   private waVersion: WAVersion | null = null;
   private currentQr: string | null = null;
+  private lastSuccessfulMessage: number | null = null;
+  private healthCheckInterval: NodeJS.Timeout | null = null;
+  private readonly HEALTH_CHECK_INTERVAL_MS = 60000; // 1 minute
+  private readonly MAX_TIME_SINCE_SUCCESS_MS = 300000; // 5 minutes
 
   constructor(
     @Inject(REDIS_CONNECTION)
@@ -75,6 +79,10 @@ export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
   }
 
   onModuleDestroy(): void {
+    if (this.healthCheckInterval) {
+      clearInterval(this.healthCheckInterval);
+      this.healthCheckInterval = null;
+    }
     if (this.socket != null) {
       this.socket.end(undefined);
       this.socket = null;
@@ -176,10 +184,15 @@ export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
       this.connectionOpen = true;
       this.currentQr = null;
       this.logger.log('WhatsApp socket connected');
+      this.startHealthCheck();
     }
     if (connection === 'close') {
       this.connectionOpen = false;
       this.currentQr = null;
+      if (this.healthCheckInterval) {
+        clearInterval(this.healthCheckInterval);
+        this.healthCheckInterval = null;
+      }
       const statusCode = (
         lastDisconnect?.error as
           | { output?: { statusCode?: number } }
@@ -271,11 +284,89 @@ export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
     return this.connectionOpen && this.socket != null;
   }
 
-  getConnectionStatus(): { connected: boolean; hasQr: boolean } {
+  getConnectionStatus(): {
+    connected: boolean;
+    hasQr: boolean;
+    lastSuccessfulMessage: number | null;
+    connectionHealthy: boolean;
+  } {
+    const timeSinceLastSuccess = this.lastSuccessfulMessage
+      ? Date.now() - this.lastSuccessfulMessage
+      : Infinity;
+    const isHealthy =
+      this.connectionOpen &&
+      this.socket != null &&
+      (timeSinceLastSuccess < this.MAX_TIME_SINCE_SUCCESS_MS ||
+        this.lastSuccessfulMessage === null);
+
     return {
       connected: this.connectionOpen && this.socket != null,
       hasQr: this.currentQr != null,
+      lastSuccessfulMessage: this.lastSuccessfulMessage,
+      connectionHealthy: isHealthy,
     };
+  }
+
+  async forceReconnect(): Promise<void> {
+    this.logger.log('Forcing WhatsApp reconnection...');
+
+    // Stop health check
+    if (this.healthCheckInterval) {
+      clearInterval(this.healthCheckInterval);
+      this.healthCheckInterval = null;
+    }
+
+    // Close existing socket
+    if (this.socket) {
+      try {
+        this.socket.end(undefined);
+      } catch (err) {
+        this.logger.warn('Error closing socket:', err);
+      }
+      this.socket = null;
+    }
+
+    this.connectionOpen = false;
+    this.lastSuccessfulMessage = null;
+
+    // Wait a bit before reconnecting
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+
+    // Reconnect
+    await this.connect();
+  }
+
+  private startHealthCheck(): void {
+    // Clear any existing interval
+    if (this.healthCheckInterval) {
+      clearInterval(this.healthCheckInterval);
+    }
+
+    this.healthCheckInterval = setInterval(() => {
+      void this.performHealthCheck();
+    }, this.HEALTH_CHECK_INTERVAL_MS);
+  }
+
+  private async performHealthCheck(): Promise<void> {
+    if (!this.connectionOpen || !this.socket) {
+      return;
+    }
+
+    // If no successful message in last 5 minutes and we think we're connected,
+    // something is wrong - force reconnect
+    const timeSinceLastSuccess = this.lastSuccessfulMessage
+      ? Date.now() - this.lastSuccessfulMessage
+      : Infinity;
+
+    if (
+      timeSinceLastSuccess > this.MAX_TIME_SINCE_SUCCESS_MS &&
+      this.lastSuccessfulMessage !== null
+    ) {
+      this.logger.warn(
+        `Health check failed: No successful messages in ${Math.round(timeSinceLastSuccess / 1000)}s. Forcing reconnect...`,
+      );
+      await this.forceReconnect();
+    }
   }
 
   async getQrImageBuffer(): Promise<Buffer | null> {
@@ -288,27 +379,62 @@ export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  async sendTextMessage(phone: string, text: string): Promise<boolean> {
+  async sendTextMessage(
+    phone: string,
+    text: string,
+    retries = 2,
+  ): Promise<boolean> {
     if (this.socket == null || !this.connectionOpen) {
       this.logger.warn('WhatsApp not connected; cannot send message');
       return false;
     }
-    try {
-      const jid = phoneToJid(phone);
-      const result = await this.socket.sendMessage(jid, { text });
 
-      if (result?.key && result?.message) {
-        await storeMessage(this.redis, result.key, result.message).catch(
-          (err) => this.logger.warn('Failed to store sent message:', err),
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        const jid = phoneToJid(phone);
+
+        // Add timeout wrapper (30 seconds)
+        const sendPromise = this.socket.sendMessage(jid, { text });
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Send timeout after 30s')), 30000),
+        );
+
+        const result = await Promise.race([sendPromise, timeoutPromise]);
+
+        if (result?.key && result?.message) {
+          await storeMessage(this.redis, result.key, result.message).catch(
+            (err) => this.logger.warn('Failed to store sent message:', err),
+          );
+        }
+
+        // Track successful send
+        this.lastSuccessfulMessage = Date.now();
+        this.logger.debug(`Sent WhatsApp message to ${phone}`);
+        return true;
+      } catch (err) {
+        const isLastAttempt = attempt === retries;
+        this.logger.warn(
+          `Failed to send WhatsApp message to ${phone} (attempt ${attempt + 1}/${retries + 1}):`,
+          err,
+        );
+
+        if (isLastAttempt) {
+          this.logger.error(`All retry attempts failed for ${phone}`);
+          // If all retries failed, mark connection as potentially broken
+          this.connectionOpen = false;
+          setTimeout(() => {
+            void this.forceReconnect();
+          }, 5000);
+          return false;
+        }
+
+        // Exponential backoff: 1s, 2s, 4s
+        await new Promise((resolve) =>
+          setTimeout(resolve, Math.pow(2, attempt) * 1000),
         );
       }
-
-      this.logger.debug(`Sent WhatsApp message to ${phone}`);
-      return true;
-    } catch (err) {
-      this.logger.error(`Failed to send WhatsApp message to ${phone}:`, err);
-      return false;
     }
+    return false;
   }
 
   async verifyWhatsAppToken(token: string): Promise<void> {

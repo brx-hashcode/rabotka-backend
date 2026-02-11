@@ -7,12 +7,7 @@ import {
   Query,
   BadRequestException,
 } from '@nestjs/common';
-import {
-  ApiTags,
-  ApiOperation,
-  ApiResponse,
-  ApiQuery,
-} from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { Public } from '../auth/decorators/public.decorator.js';
 import { WhatsAppService } from './whatsapp.service';
@@ -120,8 +115,42 @@ export class WhatsAppController {
       },
     },
   })
-  getConnectStatus(): { connected: boolean; hasQr: boolean } {
+  getConnectStatus(): {
+    connected: boolean;
+    hasQr: boolean;
+    lastSuccessfulMessage: number | null;
+    connectionHealthy: boolean;
+  } {
     return this.whatsAppService.getConnectionStatus();
+  }
+
+  @Post('reconnect')
+  @ApiOperation({
+    summary: 'Force WhatsApp reconnection',
+    description:
+      'Manually trigger WhatsApp reconnection. Useful when messages stop sending.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Reconnection initiated',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: true },
+        message: {
+          type: 'string',
+          example: 'Reconnection initiated',
+        },
+      },
+    },
+  })
+  async reconnect(): Promise<{ success: boolean; message: string }> {
+    await this.whatsAppService.forceReconnect();
+    return {
+      success: true,
+      message:
+        'Reconnection initiated. Check connection status in a few seconds.',
+    };
   }
 
   @Get('connect/qr-image')
