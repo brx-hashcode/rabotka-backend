@@ -199,9 +199,7 @@ export class AuthController {
     @Body() sendAdminOtpDto: SendAdminOtpDto,
     @I18n() i18n: I18nContext,
   ): Promise<{ success: boolean; message: string }> {
-    const result = await this.authService.sendAdminOtp(
-      sendAdminOtpDto.email as string,
-    );
+    const result = await this.authService.sendAdminOtp(sendAdminOtpDto.email);
     return {
       success: result.success,
       message: i18n.t('auth.otp_sent'),
@@ -270,8 +268,8 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ): Promise<{ success: boolean; token: string }> {
     const result = await this.authService.verifyAdminOtp(
-      verifyAdminOtpDto.email as string,
-      verifyAdminOtpDto.otp as string,
+      verifyAdminOtpDto.email,
+      verifyAdminOtpDto.otp,
     );
 
     const isProduction =
