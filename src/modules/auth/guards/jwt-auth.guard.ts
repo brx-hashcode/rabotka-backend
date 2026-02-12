@@ -71,7 +71,9 @@ export class JwtAuthGuard implements CanActivate {
       const tokenType = payload.type || 'profile'; // Default to 'profile' for backward compatibility
 
       (request as AuthenticatedRequest).user = {
-        ...(tokenType === 'profile' ? { profileId: payload.sub } : { userId: payload.sub }),
+        ...(tokenType === 'profile'
+          ? { profileId: payload.sub }
+          : { userId: payload.sub }),
         type: tokenType,
       };
 
