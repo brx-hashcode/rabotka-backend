@@ -15,6 +15,7 @@ import { I18nModule, AcceptLanguageResolver } from 'nestjs-i18n';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { PrismaModule } from './common/services/prisma/prisma.module';
+import { TwilioModule } from './common/services/twilio/twilio.module';
 import { RedisModule } from './common/services/redis/redis.module';
 import { QueueModule } from './common/services/queue/queue.module';
 import { HealthModule } from './modules/health/health.module';
@@ -94,6 +95,7 @@ import { I18nExceptionFilter } from './common/filters/i18n-exception.filter';
       ],
     }),
     PrismaModule,
+    TwilioModule,
     RedisModule.forRoot(),
     QueueModule.forRoot(),
     MailerModule.forRootAsync({

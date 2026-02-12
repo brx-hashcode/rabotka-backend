@@ -12,6 +12,7 @@ import Redis from 'ioredis';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { FileService } from '../file/file.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
+import { verificationLinkMessage } from '../whatsapp/templates';
 import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
 import { CreateProfileDto } from './dto/create-profile.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
@@ -482,7 +483,7 @@ export class ProfileService {
     }
 
     // Check if WhatsApp service is connected
-    if (!this.whatsAppService.isConnected()) {
+    if (!this.whatsAppService.isConfigured()) {
       throw new ServiceUnavailableException('whatsapp.errors.not_connected');
     }
 
@@ -504,14 +505,10 @@ export class ProfileService {
       'http://localhost:3000',
     );
     const verificationLink = `${frontendUrl}/verify/whatsapp?token=${token}`;
-
-    // Create WhatsApp message
-    const message = `Bonjour ${profile.first_name},
-
-Cliquez sur ce lien pour vérifier votre compte WhatsApp :
-${verificationLink}
-
-Ce lien expire dans 30 minutes.`;
+    const message = verificationLinkMessage(
+      profile.first_name,
+      verificationLink,
+    );
 
     // Send WhatsApp message
     const sent = await this.whatsAppService.sendTextMessage(
