@@ -54,7 +54,6 @@ export class AuthService {
       throw new NotFoundException('auth.errors.profile_not_found');
     }
 
-    // Check WhatsApp verification if using phone number
     if (isPhone) {
       const phoneProfile = profile as {
         id: string;
@@ -98,7 +97,6 @@ export class AuthService {
       throw new NotFoundException('auth.errors.profile_not_found');
     }
 
-    // Check WhatsApp verification if using phone number
     if (isPhone) {
       const phoneProfile = profile as {
         id: string;
