@@ -45,11 +45,18 @@ function jidToPhone(jid: string): string {
   return jid.slice(0, at);
 }
 
+export type WhatsAppConnectionStatus =
+  | 'connected'
+  | 'reconnecting'
+  | 'unhealthy'
+  | 'need_qr';
+
 @Injectable()
 export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(WhatsAppService.name);
   private socket: WASocket | null = null;
   private connectionOpen = false;
+  private connectionState: WhatsAppConnectionStatus = 'need_qr';
   private sessionPrefix = 'wa:auth:';
   private initPromise: Promise<void> | null = null;
   private waVersion: WAVersion | null = null;
@@ -58,6 +65,8 @@ export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
   private healthCheckInterval: NodeJS.Timeout | null = null;
   private readonly HEALTH_CHECK_INTERVAL_MS = 60000; // 1 minute
   private readonly MAX_TIME_SINCE_SUCCESS_MS = 300000; // 5 minutes
+  private readonly PENDING_MESSAGE_TIMEOUT_MS = 60000; // 1 minute
+  private readonly pendingMessageKeys = new Map<string, number>(); // key string -> timestamp
 
   constructor(
     @Inject(REDIS_CONNECTION)
@@ -142,6 +151,9 @@ export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
         return getStoredMessage(this.redis, key);
       },
       markOnlineOnConnect: false,
+      // Request full history like desktop client; helps establish Signal sessions
+      // for group participants (reduces "No session record" / LID decrypt failures)
+      syncFullHistory: true,
     });
 
     this.socket.ev.on(
@@ -183,6 +195,7 @@ export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
     if (connection === 'open') {
       this.connectionOpen = true;
       this.currentQr = null;
+      this.connectionState = 'connected';
       this.logger.log('WhatsApp socket connected');
       this.startHealthCheck();
     }
@@ -204,6 +217,7 @@ export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
           `WhatsApp session invalid (${statusCode}); clearing Redis session so you can scan a new QR code.`,
         );
         await clearRedisAuthState(this.redis, this.sessionPrefix);
+        this.connectionState = 'need_qr';
       }
       const shouldReconnect =
         statusCode !== DisconnectReason.loggedOut &&
@@ -212,6 +226,7 @@ export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
         `WhatsApp connection closed (${statusCode ?? 'unknown'}), reconnecting: ${shouldReconnect}`,
       );
       if (shouldReconnect) {
+        this.connectionState = 'reconnecting';
         setTimeout(
           () => {
             void this.connect();
@@ -230,6 +245,10 @@ export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
       if (m.key.fromMe && m.message) {
         void storeMessage(this.redis, m.key, m.message).catch((err) =>
           this.logger.warn('Failed to store sent message:', err),
+        );
+        this.pendingMessageKeys.set(
+          this.pendingMessageKeyString(m.key),
+          Date.now(),
         );
       }
 
@@ -252,8 +271,17 @@ export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
               ),
             );
         }
+      } else if (m.key.participant) {
+        // Group message with no decrypted content (e.g. SessionError for LID participant)
+        this.logger.debug(
+          `Skipping message from group ${remoteJid} participant ${m.key.participant}: decryption failed (no session record). Re-link the device or wait for syncFullHistory to establish sessions.`,
+        );
       }
     }
+  }
+
+  private pendingMessageKeyString(key: WAMessageKey): string {
+    return `${key.remoteJid ?? ''}:${key.id ?? ''}`;
   }
 
   private async handleMessagesUpdate(
@@ -266,6 +294,10 @@ export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
         await storeMessage(this.redis, key, updateData.message).catch((err) =>
           this.logger.warn('Failed to store updated message:', err),
         );
+        this.pendingMessageKeys.set(
+          this.pendingMessageKeyString(key),
+          Date.now(),
+        );
       }
 
       const status = updateData?.status;
@@ -273,9 +305,24 @@ export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
         status === proto.WebMessageInfo.Status.DELIVERY_ACK ||
         status === proto.WebMessageInfo.Status.READ;
       if (key.fromMe && isDeliveredOrRead && updateData?.message == null) {
+        this.pendingMessageKeys.delete(this.pendingMessageKeyString(key));
         this.logger.debug(
           `Message ${key.id} delivered/read, will expire naturally`,
         );
+      }
+    }
+
+    // If any pending message has been waiting too long, treat connection as unhealthy and refresh
+    const now = Date.now();
+    for (const [msgKey, timestamp] of this.pendingMessageKeys) {
+      if (now - timestamp > this.PENDING_MESSAGE_TIMEOUT_MS) {
+        this.logger.warn(
+          `Message ${msgKey} pending for ${Math.round((now - timestamp) / 1000)}s; triggering reconnect`,
+        );
+        this.connectionState = 'unhealthy';
+        this.pendingMessageKeys.delete(msgKey);
+        void this.forceReconnect();
+        break;
       }
     }
   }
@@ -285,6 +332,7 @@ export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
   }
 
   getConnectionStatus(): {
+    status: WhatsAppConnectionStatus;
     connected: boolean;
     hasQr: boolean;
     lastSuccessfulMessage: number | null;
@@ -300,6 +348,7 @@ export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
         this.lastSuccessfulMessage === null);
 
     return {
+      status: this.connectionState,
       connected: this.connectionOpen && this.socket != null,
       hasQr: this.currentQr != null,
       lastSuccessfulMessage: this.lastSuccessfulMessage,
@@ -308,7 +357,10 @@ export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
   }
 
   async forceReconnect(): Promise<void> {
+    this.connectionState = 'reconnecting';
     this.logger.log('Forcing WhatsApp reconnection...');
+
+    this.pendingMessageKeys.clear();
 
     // Stop health check
     if (this.healthCheckInterval) {
@@ -362,6 +414,7 @@ export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
       timeSinceLastSuccess > this.MAX_TIME_SINCE_SUCCESS_MS &&
       this.lastSuccessfulMessage !== null
     ) {
+      this.connectionState = 'unhealthy';
       this.logger.warn(
         `Health check failed: No successful messages in ${Math.round(timeSinceLastSuccess / 1000)}s. Forcing reconnect...`,
       );
