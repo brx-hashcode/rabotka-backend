@@ -482,7 +482,7 @@ export class ProfileService {
     }
 
     // Check if WhatsApp service is connected
-    if (!this.whatsAppService.isConnected()) {
+    if (!this.whatsAppService.isConfigured()) {
       throw new ServiceUnavailableException('whatsapp.errors.not_connected');
     }
 
