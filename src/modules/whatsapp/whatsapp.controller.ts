@@ -10,13 +10,12 @@ import {
   Logger,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
-import { ConfigService } from '@nestjs/config';
-import { Request } from 'express';
-import twilio from 'twilio';
+import type { Request } from 'express';
 import { Public } from '../auth/decorators/public.decorator.js';
 import { WhatsAppService } from './whatsapp.service';
 import { VerifyWhatsAppDto } from './dto/verify-whatsapp.dto';
 import { ConversationService } from '../conversation/conversation.service';
+import { TwilioService } from '../../common/services/twilio/twilio.service';
 
 @ApiTags('WhatsApp')
 @Controller('whatsapp')
@@ -27,13 +26,14 @@ export class WhatsAppController {
   constructor(
     private readonly whatsAppService: WhatsAppService,
     private readonly conversationService: ConversationService,
-    private readonly config: ConfigService,
+    private readonly twilioService: TwilioService,
   ) {}
 
   @Get('status')
   @ApiOperation({
     summary: 'WhatsApp (Twilio) configuration status',
-    description: 'Returns whether Twilio WhatsApp is configured (credentials and from number).',
+    description:
+      'Returns whether Twilio WhatsApp is configured (credentials and from number).',
   })
   @ApiResponse({
     status: 200,
@@ -59,8 +59,7 @@ export class WhatsAppController {
     @Req() req: Request,
     @Body() body: Record<string, string>,
   ): Promise<void> {
-    const authToken = this.config.get<string>('TWILIO_AUTH_TOKEN');
-    if (!authToken) {
+    if (!this.twilioService.getAuthToken()) {
       this.logger.warn('TWILIO_AUTH_TOKEN not set; rejecting webhook');
       throw new ForbiddenException('Webhook not configured');
     }
@@ -74,7 +73,11 @@ export class WhatsAppController {
     const host = req.get('host') || '';
     const url = `${protocol}://${host}${req.originalUrl}`;
 
-    const isValid = twilio.validateRequest(authToken, signature, url, body);
+    const isValid = this.twilioService.validateWebhookSignature(
+      signature,
+      url,
+      body,
+    );
     if (!isValid) {
       this.logger.warn('Twilio webhook signature validation failed');
       throw new ForbiddenException('Invalid signature');
@@ -87,7 +90,6 @@ export class WhatsAppController {
       throw new BadRequestException('Missing From');
     }
 
-    // Strip whatsapp: prefix to get phone number
     const phone = from.startsWith('whatsapp:')
       ? from.slice('whatsapp:'.length)
       : from;
