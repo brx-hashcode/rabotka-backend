@@ -10,7 +10,10 @@ import {
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { Public } from '../auth/decorators/public.decorator.js';
-import { WhatsAppService } from './whatsapp.service';
+import {
+  WhatsAppService,
+  type WhatsAppConnectionStatus,
+} from './whatsapp.service';
 import { VerifyWhatsAppDto } from './dto/verify-whatsapp.dto';
 
 const CONNECT_HTML = `
@@ -110,12 +113,19 @@ export class WhatsAppController {
     schema: {
       type: 'object',
       properties: {
+        status: {
+          type: 'string',
+          enum: ['connected', 'reconnecting', 'unhealthy', 'need_qr'],
+        },
         connected: { type: 'boolean' },
         hasQr: { type: 'boolean' },
+        lastSuccessfulMessage: { type: 'number', nullable: true },
+        connectionHealthy: { type: 'boolean' },
       },
     },
   })
   getConnectStatus(): {
+    status: WhatsAppConnectionStatus;
     connected: boolean;
     hasQr: boolean;
     lastSuccessfulMessage: number | null;
