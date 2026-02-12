@@ -138,13 +138,15 @@ ARCJET_KEY=
 # AWS / LocalStack (for Docker)
 # AWS_ENDPOINT_URL=http://localhost:4566
 
-# Redis (for BullMQ queue and WhatsApp session)
+# Redis (queue)
 REDIS_HOST=localhost
 REDIS_PORT=6379
 
-# WhatsApp (Baileys) – session is stored in Redis
-WHATSAPP_ENABLED=true
-WHATSAPP_SESSION_PREFIX=wa:auth:
+# Twilio (WhatsApp and optional SMS)
+TWILIO_ACCOUNT_SID=
+TWILIO_AUTH_TOKEN=
+TWILIO_WHATSAPP_FROM=
+# TWILIO_SMS_FROM=  # Optional
 ```
 
 ### Database Setup with Docker
@@ -193,19 +195,22 @@ The API enqueues email jobs to Redis; a separate worker process consumes them. R
 
 For local development, ensure Redis is running (e.g. `docker compose up -d redis`) before starting the worker.
 
-### WhatsApp (Baileys) and first-time pairing
+### WhatsApp (Twilio)
 
-The backend uses [Baileys](https://github.com/WhiskeySockets/Baileys) for WhatsApp. The session is stored **only in Redis** (no file-based auth). OTP for phone login and incoming bot messages are handled by `WhatsAppService`.
+The backend uses [Twilio](https://www.twilio.com/whatsapp) for WhatsApp. OTP for phone login and verification links are sent via Twilio. Incoming messages are received via webhook.
 
-**First-time pairing**
+**Setup**
 
-1. Set `WHATSAPP_ENABLED=true` and ensure Redis is running.
-2. Start the API (`pnpm run start:dev`). On first run there is no session in Redis, so Baileys will ask you to pair.
-3. **QR code**: A QR code is printed in the terminal (`printQRInTerminal: true`). Open WhatsApp on your phone → **Linked devices** → **Link a device** → scan the QR code.
-4. **Pairing code (headless)**: Alternatively you can use Baileys’ pairing code flow (e.g. `requestPairingCode(phoneNumber)`) and enter the code in the phone; this requires a small code change to request and log the code.
-5. After a successful connection, the session is saved in Redis under `WHATSAPP_SESSION_PREFIX` (default `wa:auth:`). The next time you start the server, it will reuse that session and **no new QR or pairing is needed** unless you log out or clear Redis.
+1. Create a Twilio account and get your WhatsApp-enabled number (or use the [Twilio Sandbox](https://www.twilio.com/docs/whatsapp/sandbox)).
+2. Set in `.env`: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_FROM` (e.g. `whatsapp:+14155238886`). No fallbacks in code — if these are missing, WhatsApp sending is disabled.
+3. For **incoming messages**, configure your Twilio WhatsApp number (or sandbox) to send webhooks to: `https://your-domain/api/v1/whatsapp/incoming` (POST). The endpoint validates `X-Twilio-Signature` using `TWILIO_AUTH_TOKEN`.
 
-To disable WhatsApp (e.g. in tests or when not using it), set `WHATSAPP_ENABLED=false`. OTP for phone login will then only be logged and not sent via WhatsApp.
+**Endpoints**
+
+- `GET /api/v1/whatsapp/status` — returns `{ configured: boolean }`.
+- `GET /api/v1/whatsapp/verify?token=...` — verifies a WhatsApp verification token (used when the user clicks the link sent via WhatsApp).
+- `POST /api/v1/whatsapp/incoming` — Twilio webhook for incoming WhatsApp messages (configure this URL in the Twilio console).
+
 
 Once running, the application will be available at:
 
