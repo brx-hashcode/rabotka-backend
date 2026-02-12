@@ -4,8 +4,8 @@ export function verificationLinkMessage(
 ): string {
   return `Bonjour ${firstName},
 
-Veuillez cliquer sur le lien ci-dessous pour vérifier votre compte WhatsApp :
+Cliquez sur ce lien pour vérifier votre compte WhatsApp :
 ${link}
 
-Ce lien est valable pendant 30 minutes.`;
+Ce lien expire dans 30 minutes.`;
 }
