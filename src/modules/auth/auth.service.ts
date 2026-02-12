@@ -15,6 +15,7 @@ import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { sendOtpEmail } from '../mail/templates';
+import { otpMessage } from '../whatsapp/templates';
 
 const OTP_TTL_SECONDS = 300;
 const OTP_KEY_PREFIX = 'otp:';
@@ -53,7 +54,6 @@ export class AuthService {
       throw new NotFoundException('auth.errors.profile_not_found');
     }
 
-    // Check WhatsApp verification if using phone number
     if (isPhone) {
       const phoneProfile = profile as {
         id: string;
@@ -97,7 +97,6 @@ export class AuthService {
       throw new NotFoundException('auth.errors.profile_not_found');
     }
 
-    // Check WhatsApp verification if using phone number
     if (isPhone) {
       const phoneProfile = profile as {
         id: string;
@@ -320,7 +319,7 @@ export class AuthService {
   }
 
   private async sendOtpByWhatsApp(phone: string, otp: string): Promise<void> {
-    const message = `Votre code Rabotka : ${otp}`;
+    const message = otpMessage(otp);
     const sent = await this.whatsAppService.sendTextMessage(phone, message);
     if (sent) {
       this.logger.log(`WhatsApp OTP sent to ${phone}`);
