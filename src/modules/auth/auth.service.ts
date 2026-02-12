@@ -20,7 +20,8 @@ import { otpMessage } from '../whatsapp/templates';
 const OTP_TTL_SECONDS = 300;
 const OTP_KEY_PREFIX = 'otp:';
 const ADMIN_OTP_KEY_PREFIX = 'admin:otp:';
-const RESEND_COOLDOWN_SECONDS = 60;
+// 60 seconds is equal to one minute
+const RESEND_COOLDOWN_SECONDS = 60; // 1 minute
 const RESEND_COOLDOWN_KEY_PREFIX = 'otp:resend:';
 const ADMIN_RESEND_COOLDOWN_KEY_PREFIX = 'admin:otp:resend:';
 
