@@ -2,197 +2,97 @@ import {
   Controller,
   Get,
   Post,
-  Res,
-  HttpStatus,
   Query,
+  Body,
+  Req,
   BadRequestException,
+  ForbiddenException,
+  Logger,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
-import type { Response } from 'express';
+import { ConfigService } from '@nestjs/config';
+import { Request } from 'express';
+import twilio from 'twilio';
 import { Public } from '../auth/decorators/public.decorator.js';
-import {
-  WhatsAppService,
-  type WhatsAppConnectionStatus,
-} from './whatsapp.service';
+import { WhatsAppService } from './whatsapp.service';
 import { VerifyWhatsAppDto } from './dto/verify-whatsapp.dto';
-
-const CONNECT_HTML = `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Connect WhatsApp – Rabotka</title>
-  <style>
-    * { box-sizing: border-box; }
-    body {
-      font-family: system-ui, -apple-system, sans-serif;
-      max-width: 360px;
-      margin: 2rem auto;
-      padding: 1rem;
-      text-align: center;
-      background: #0f0f0f;
-      color: #e5e5e5;
-      min-height: 100vh;
-    }
-    h1 { font-size: 1.25rem; margin-bottom: 0.5rem; }
-    p { color: #a3a3a3; font-size: 0.9rem; margin-bottom: 1.5rem; }
-    #qr-wrap {
-      background: #fff;
-      padding: 1rem;
-      border-radius: 12px;
-      display: inline-block;
-      margin-bottom: 1rem;
-    }
-    #qr-wrap img { display: block; border-radius: 4px; }
-    #status { font-size: 0.85rem; margin-top: 1rem; }
-    .connected { color: #22c55e; }
-    .waiting { color: #eab308; }
-    a { color: #3b82f6; }
-  </style>
-</head>
-<body>
-  <h1>Connect WhatsApp</h1>
-  <p>Scan the QR code with WhatsApp: Linked devices → Link a device</p>
-  <div id="qr-wrap" style="display: none;">
-    <img id="qr-img" src="" alt="QR code" width="280" height="280" />
-  </div>
-  <div id="status" class="waiting">Checking connection…</div>
-  <script>
-    var base = '/api/v1/whatsapp/connect';
-    function refresh() {
-      fetch(base + '/status')
-        .then(function(r) { return r.json(); })
-        .then(function(d) {
-          var wrap = document.getElementById('qr-wrap');
-          var img = document.getElementById('qr-img');
-          var status = document.getElementById('status');
-          if (d.connected) {
-            wrap.style.display = 'none';
-            status.textContent = 'Connected. You can close this page.';
-            status.className = 'connected';
-            return;
-          }
-          if (d.hasQr) {
-            img.src = base + '/qr-image?t=' + Date.now();
-            wrap.style.display = 'inline-block';
-            status.textContent = 'Scan the QR code with your phone. This page refreshes every 10s.';
-            status.className = 'waiting';
-          } else {
-            wrap.style.display = 'none';
-            status.textContent = 'Waiting for QR… Refresh the page in a few seconds.';
-            status.className = 'waiting';
-          }
-        })
-        .catch(function() {
-          document.getElementById('status').textContent = 'Could not load status.';
-        });
-    }
-    refresh();
-    setInterval(refresh, 10000);
-  </script>
-</body>
-</html>
-`;
+import { ConversationService } from '../conversation/conversation.service';
 
 @ApiTags('WhatsApp')
 @Controller('whatsapp')
 @Public()
 export class WhatsAppController {
-  constructor(private readonly whatsAppService: WhatsAppService) {}
+  private readonly logger = new Logger(WhatsAppController.name);
 
-  @Get('connect/status')
+  constructor(
+    private readonly whatsAppService: WhatsAppService,
+    private readonly conversationService: ConversationService,
+    private readonly config: ConfigService,
+  ) {}
+
+  @Get('status')
   @ApiOperation({
-    summary: 'WhatsApp connection status',
-    description:
-      'Returns whether WhatsApp is connected and if a QR code is available for pairing.',
+    summary: 'WhatsApp (Twilio) configuration status',
+    description: 'Returns whether Twilio WhatsApp is configured (credentials and from number).',
   })
   @ApiResponse({
     status: 200,
-    description: 'Connection status',
+    description: 'Configuration status',
     schema: {
       type: 'object',
-      properties: {
-        status: {
-          type: 'string',
-          enum: ['connected', 'reconnecting', 'unhealthy', 'need_qr'],
-        },
-        connected: { type: 'boolean' },
-        hasQr: { type: 'boolean' },
-        lastSuccessfulMessage: { type: 'number', nullable: true },
-        connectionHealthy: { type: 'boolean' },
-      },
+      properties: { configured: { type: 'boolean' } },
     },
   })
-  getConnectStatus(): {
-    status: WhatsAppConnectionStatus;
-    connected: boolean;
-    hasQr: boolean;
-    lastSuccessfulMessage: number | null;
-    connectionHealthy: boolean;
-  } {
-    return this.whatsAppService.getConnectionStatus();
+  getStatus(): { configured: boolean } {
+    return { configured: this.whatsAppService.isConfigured() };
   }
 
-  @Post('reconnect')
+  @Post('incoming')
   @ApiOperation({
-    summary: 'Force WhatsApp reconnection',
+    summary: 'Twilio WhatsApp webhook',
     description:
-      'Manually trigger WhatsApp reconnection. Useful when messages stop sending.',
+      'Receives incoming WhatsApp messages from Twilio. Configure this URL in your Twilio WhatsApp sandbox or number. Validates X-Twilio-Signature.',
   })
-  @ApiResponse({
-    status: 200,
-    description: 'Reconnection initiated',
-    schema: {
-      type: 'object',
-      properties: {
-        success: { type: 'boolean', example: true },
-        message: {
-          type: 'string',
-          example: 'Reconnection initiated',
-        },
-      },
-    },
-  })
-  async reconnect(): Promise<{ success: boolean; message: string }> {
-    await this.whatsAppService.forceReconnect();
-    return {
-      success: true,
-      message:
-        'Reconnection initiated. Check connection status in a few seconds.',
-    };
-  }
-
-  @Get('connect/qr-image')
-  @ApiOperation({
-    summary: 'WhatsApp QR code image',
-    description: 'Returns the current pairing QR code as PNG, or 204 if none.',
-  })
-  @ApiResponse({ status: 200, description: 'PNG image of the QR code' })
-  @ApiResponse({ status: 204, description: 'No QR code available' })
-  async getQrImage(@Res() res: Response): Promise<void> {
-    const buffer = await this.whatsAppService.getQrImageBuffer();
-    if (buffer == null) {
-      res.status(HttpStatus.NO_CONTENT).end();
-      return;
+  @ApiResponse({ status: 200, description: 'Message handled' })
+  @ApiResponse({ status: 403, description: 'Invalid signature' })
+  async incomingWebhook(
+    @Req() req: Request,
+    @Body() body: Record<string, string>,
+  ): Promise<void> {
+    const authToken = this.config.get<string>('TWILIO_AUTH_TOKEN');
+    if (!authToken) {
+      this.logger.warn('TWILIO_AUTH_TOKEN not set; rejecting webhook');
+      throw new ForbiddenException('Webhook not configured');
     }
-    res
-      .setHeader('Content-Type', 'image/png')
-      .setHeader('Cache-Control', 'no-store')
-      .send(buffer);
-  }
 
-  @Get('connect')
-  @ApiOperation({
-    summary: 'WhatsApp connect page',
-    description:
-      'HTML page that shows the pairing QR code. Open in a browser to connect WhatsApp.',
-  })
-  @ApiResponse({ status: 200, description: 'HTML page' })
-  connectPage(@Res() res: Response): void {
-    res
-      .setHeader('Content-Type', 'text/html; charset=utf-8')
-      .send(CONNECT_HTML);
+    const signature = req.headers['x-twilio-signature'] as string | undefined;
+    if (!signature) {
+      throw new ForbiddenException('Missing X-Twilio-Signature');
+    }
+
+    const protocol = req.protocol || 'https';
+    const host = req.get('host') || '';
+    const url = `${protocol}://${host}${req.originalUrl}`;
+
+    const isValid = twilio.validateRequest(authToken, signature, url, body);
+    if (!isValid) {
+      this.logger.warn('Twilio webhook signature validation failed');
+      throw new ForbiddenException('Invalid signature');
+    }
+
+    const from = body.From ?? '';
+    const text = body.Body ?? '';
+
+    if (!from) {
+      throw new BadRequestException('Missing From');
+    }
+
+    // Strip whatsapp: prefix to get phone number
+    const phone = from.startsWith('whatsapp:')
+      ? from.slice('whatsapp:'.length)
+      : from;
+
+    await this.conversationService.handleIncomingMessage(phone, text);
   }
 
   @Get('verify')
@@ -228,12 +128,12 @@ export class WhatsAppController {
     try {
       await this.whatsAppService.verifyWhatsAppToken(verifyWhatsAppDto.token);
       return { success: true };
-    } catch (error: any) {
+    } catch (error: unknown) {
       if (error instanceof BadRequestException) {
         throw error;
       }
       throw new BadRequestException(
-        error.message || 'Invalid verification token',
+        error instanceof Error ? error.message : 'Invalid verification token',
       );
     }
   }
