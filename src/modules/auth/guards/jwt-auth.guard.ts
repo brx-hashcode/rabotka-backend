@@ -68,7 +68,7 @@ export class JwtAuthGuard implements CanActivate {
         secret: this.configService.get<string>('JWT_SECRET'),
       });
 
-      const tokenType = payload.type || 'profile'; // Default to 'profile' for backward compatibility
+      const tokenType = payload.type || 'profile';
 
       (request as AuthenticatedRequest).user = {
         ...(tokenType === 'profile'
