@@ -10,10 +10,6 @@ export class ConversationService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  /**
-   * Handle an incoming WhatsApp message: resolve profile by phone,
-   * find or create Conversation, and log. Bot logic (menu, replies) can be added later.
-   */
   async handleIncomingMessage(phone: string, text: string): Promise<void> {
     const profile = await this.prisma.profile.findUnique({
       where: { phone },
@@ -48,6 +44,5 @@ export class ConversationService {
     this.logger.log(
       `Conversation ${conversation.id} (profile ${profile.id}): "${text.slice(0, 50)}${text.length > 50 ? '...' : ''}"`,
     );
-    // TODO: dispatch to bot logic (menu, job search, etc.) and send replies via WhatsAppService
   }
 }
