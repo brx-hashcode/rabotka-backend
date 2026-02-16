@@ -64,6 +64,8 @@ export class WhatsAppController {
       throw new ForbiddenException('Webhook not configured');
     }
 
+    console.log('req', req);
+
     const signature = req.headers['x-twilio-signature'] as string | undefined;
     if (!signature) {
       throw new ForbiddenException('Missing X-Twilio-Signature');
@@ -94,8 +96,10 @@ export class WhatsAppController {
       ? from.slice('whatsapp:'.length)
       : from;
 
-    const replies =
-      await this.conversationService.handleIncomingMessage(phone, text);
+    const replies = await this.conversationService.handleIncomingMessage(
+      phone,
+      text,
+    );
     for (const message of replies) {
       if (message) {
         await this.whatsAppService.sendTextMessage(phone, message);
