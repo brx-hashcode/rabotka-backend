@@ -12,11 +12,14 @@ import Redis from 'ioredis';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { FileService } from '../file/file.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
-import { verificationLinkMessage } from '../whatsapp/templates';
+import {
+  verificationLinkMessage,
+  accountActivatedMessage,
+} from '../whatsapp/templates';
 import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
 import { CreateProfileDto } from './dto/create-profile.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
-import { Prisma } from '@prisma/client';
+import { AccountStatus, Prisma } from '@prisma/client';
 import { randomBytes } from 'crypto';
 
 export type ProfileMeResponse = {
@@ -135,13 +138,14 @@ export class ProfileService {
   ): Promise<ProfileMeResponse> {
     const existingProfile = await this.prisma.profile.findUnique({
       where: { id },
-      select: { id: true },
+      select: { id: true, status: true },
     });
 
     if (!existingProfile) {
       throw new NotFoundException('profile.errors.not_found');
     }
 
+    const previousStatus = existingProfile.status;
     const dataToUpdate: Prisma.ProfileUpdateInput = {};
 
     if (updateProfileDto.firstName !== undefined) {
@@ -156,11 +160,45 @@ export class ProfileService {
     if (updateProfileDto.address !== undefined) {
       dataToUpdate.address = updateProfileDto.address;
     }
+    if (updateProfileDto.status !== undefined) {
+      dataToUpdate.status = updateProfileDto.status;
+    }
 
     await this.prisma.profile.update({
       where: { id },
       data: dataToUpdate,
     });
+
+    const transitionedToActive =
+      previousStatus !== AccountStatus.ACTIVE &&
+      updateProfileDto.status === AccountStatus.ACTIVE;
+    if (transitionedToActive) {
+      try {
+        const profile = await this.prisma.profile.findUnique({
+          where: { id },
+          select: { phone: true, first_name: true, profile_type: true },
+        });
+        if (profile?.phone) {
+          const text = accountActivatedMessage(
+            profile.first_name,
+            profile.profile_type,
+          );
+          await this.whatsAppService
+            .sendTextMessage(profile.phone, text)
+            .catch((err) =>
+              this.logger.warn(
+                `Failed to send account-activated WhatsApp to ${profile.phone}:`,
+                err,
+              ),
+            );
+        }
+      } catch (err) {
+        this.logger.warn(
+          `Failed to send account-activated WhatsApp for profile ${id}:`,
+          err,
+        );
+      }
+    }
 
     this.logger.log(`Profile updated successfully: ${id}`);
     return this.findById(id);

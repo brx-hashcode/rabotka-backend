@@ -1,6 +1,7 @@
 import { Transform } from 'class-transformer';
-import { IsString, IsOptional } from 'class-validator';
+import { IsString, IsOptional, IsEnum } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { AccountStatus } from '@prisma/client';
 
 export class UpdateProfileDto {
   @ApiPropertyOptional({ description: 'First name of the profile' })
@@ -26,4 +27,12 @@ export class UpdateProfileDto {
   @IsOptional()
   @IsString()
   address?: string;
+
+  @ApiPropertyOptional({
+    description: 'Account status',
+    enum: AccountStatus,
+  })
+  @IsOptional()
+  @IsEnum(AccountStatus)
+  status?: AccountStatus;
 }
