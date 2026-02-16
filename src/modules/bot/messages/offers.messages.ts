@@ -1,7 +1,3 @@
-/**
- * Format job offer list and detail messages (spec 5.2, 5.3)
- */
-
 const SEP = '━━━━━━━━━━━━━━━━━━━━';
 
 export type OfferListItem = {
@@ -40,15 +36,13 @@ export function formatOfferList(
   total: number,
   pageInfo?: { hasNext: boolean },
 ): string {
-  const lines = [
-    `📋 Offres disponibles (${total} offres)`,
-    '',
-    SEP,
-  ];
+  const lines = [`📋 Offres disponibles (${total} offres)`, '', SEP];
 
   for (const o of offers) {
     const summary =
-      o.description.length > 60 ? o.description.slice(0, 60) + '...' : o.description;
+      o.description.length > 60
+        ? o.description.slice(0, 60) + '...'
+        : o.description;
     lines.push(
       `📌 Offre #${o.id.slice(0, 8)}`,
       o.title,
@@ -68,7 +62,7 @@ export function formatOfferList(
   if (pageInfo?.hasNext) {
     lines.push('3️⃣ Offre suivante');
   }
-  lines.push('4️⃣ Retour au menu', '', "Tapez le numéro correspondant.");
+  lines.push('4️⃣ Retour au menu', '', 'Tapez le numéro correspondant.');
 
   return lines.join('\n');
 }
@@ -92,13 +86,13 @@ export function formatOfferDetail(offer: OfferListItem): string {
     lines.push(`📌 Note de l'employeur:`, offer.note, '');
   }
   lines.push(
-    '👤 Employeur: [Masqué jusqu\'à acceptation]',
+    "👤 Employeur: [Masqué jusqu'à acceptation]",
     '',
     'Actions:',
     '1️⃣ Postuler à cette offre',
     '2️⃣ Retour à la liste',
     '',
-    "Tapez le numéro correspondant.",
+    'Tapez le numéro correspondant.',
   );
   return lines.join('\n');
 }
@@ -106,7 +100,7 @@ export function formatOfferDetail(offer: OfferListItem): string {
 export function formatOfferPublishedSuccess(offerId: string): string {
   return [
     '✅ Votre offre a été publiée avec succès !',
-    "Elle est maintenant visible par tous les workers.",
+    'Elle est maintenant visible par tous les workers.',
     '',
     `Offre ID: #${offerId.slice(0, 8)}`,
     "Vous recevrez une notification dès qu'un worker postulera.",

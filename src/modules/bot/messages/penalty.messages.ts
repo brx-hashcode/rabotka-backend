@@ -1,7 +1,3 @@
-/**
- * Format penalty and profile stats messages (spec 6.2, 5.1 profile)
- */
-
 const SEP = '━━━━━━━━━━━━━━━━━━━━';
 
 function formatDate(d: Date): string {
@@ -103,11 +99,11 @@ export function formatProfileStats(params: {
     `• Annulations tardives: ${params.lateCancellations}`,
     '',
     'Actions:',
-    '1️⃣ Voir l\'historique complet',
+    "1️⃣ Voir l'historique complet",
     '2️⃣ Historique des pénalités',
     '3️⃣ Retour au menu',
     '',
-    "Tapez le numéro correspondant.",
+    'Tapez le numéro correspondant.',
   ].join('\n');
 }
 
@@ -148,7 +144,7 @@ export function formatCancelApplicationWithPenalty(params: {
     'Vous souhaitez annuler votre candidature pour :',
     '',
     `📌 ${params.offerTitle}`,
-    `🕐 ${formatDate(params.scheduledAt)} (AUJOURD\'HUI)`,
+    `🕐 ${formatDate(params.scheduledAt)} (AUJOURDHUI)`,
     `💰 ${params.amount.toLocaleString('fr-FR')} FCFA`,
     '',
     `⏰ Temps restant: ${params.timeRemaining}`,
