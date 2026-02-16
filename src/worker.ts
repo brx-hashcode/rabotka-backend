@@ -25,6 +25,9 @@ class WorkerLogger implements LoggerService {
     'MailProcessor',
     'RedisService',
     'ExceptionHandler',
+    'NestFactory',
+    'InstanceLoader',
+    'ReminderProcessor',
   ];
 
   log(message: string, context?: string) {
@@ -34,13 +37,12 @@ class WorkerLogger implements LoggerService {
   }
 
   error(message: unknown, trace?: string, context?: string) {
-    if (!context || this.allowedContexts.includes(context)) {
-      const msg =
-        message instanceof Error
-          ? `${message.message}\n${message.stack ?? ''}`
-          : String(message);
-      console.error(`[${context || 'Worker'}] ${msg}`, trace ?? '');
-    }
+    // Always show errors so startup failures are visible
+    const msg =
+      message instanceof Error
+        ? `${message.message}\n${message.stack ?? ''}`
+        : String(message);
+    console.error(`[${context || 'Worker'}] ${msg}`, trace ?? '');
   }
 
   warn(message: string, context?: string) {
@@ -92,20 +94,23 @@ async function bootstrap(): Promise<void> {
 
   process.env.RUN_QUEUE_WORKER = 'true';
 
-  logger.log('🚀 Starting queue worker process...');
+  const reminderEnabled = process.env.RUN_REMINDER_WORKER !== 'false';
+  logger.log(
+    reminderEnabled
+      ? '🚀 Starting queue worker process (email + reminders)...'
+      : '🚀 Starting queue worker process (email only, RUN_REMINDER_WORKER=false)...',
+  );
 
   let app: INestApplicationContext;
   try {
-    app = await NestFactory.createApplicationContext(WorkerModule, {
+    app = await NestFactory.createApplicationContext(WorkerModule.forRoot(), {
       logger: new WorkerLogger(),
     });
+    logger.log('Nest application context created');
   } catch (err: unknown) {
     const message =
       err instanceof Error ? (err.stack ?? err.message) : String(err);
-    console.error(
-      '[Worker] Nest failed to create application context:',
-      message,
-    );
+    logger.error(`Nest failed to create application context: ${message}`);
     process.exitCode = 1;
     setImmediate(() => process.exit(1));
     return;
