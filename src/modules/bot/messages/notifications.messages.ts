@@ -1,7 +1,3 @@
-/**
- * Outgoing notification messages (spec 4.2, 5.8 - reminders)
- */
-
 function formatDate(d: Date): string {
   return d.toLocaleDateString('fr-FR', {
     day: '2-digit',
@@ -18,12 +14,12 @@ export function formatAccountActivatedMessage(params: {
 }): string {
   const typeLabel = params.profileType === 'WORKER' ? 'Worker' : 'Employer';
   const workerActions = [
-    '📋 Consulter les offres d\'emploi disponibles',
+    "📋 Consulter les offres d'emploi disponibles",
     '✋ Postuler aux offres qui vous intéressent',
     '💼 Gérer vos candidatures',
   ];
   const employerActions = [
-    '📝 Publier des offres d\'emploi',
+    "📝 Publier des offres d'emploi",
     '👥 Recevoir des candidatures',
     '📊 Gérer vos offres',
   ];
@@ -77,9 +73,9 @@ export function formatReminder24h(params: {
     'Actions:',
     '1️⃣ Confirmer ma présence',
     '2️⃣ Annuler (sans pénalité pour le moment)',
-    '3️⃣ Contacter l\'employeur',
+    "3️⃣ Contacter l'employeur",
     '',
-    "Tapez le numéro correspondant.",
+    'Tapez le numéro correspondant.',
   ].join('\n');
 }
 
@@ -100,7 +96,7 @@ export function formatReminder2h(params: {
     `👤 Employeur: ${params.employerName}`,
     `📞 ${params.employerPhone}`,
     '',
-    '⚠️ Dernier délai d\'annulation sans pénalité dépassé.',
+    "⚠️ Dernier délai d'annulation sans pénalité dépassé.",
     '',
     '💡 Conseils:',
     '✓ Prévoyez votre trajet',
