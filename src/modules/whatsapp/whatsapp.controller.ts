@@ -94,7 +94,13 @@ export class WhatsAppController {
       ? from.slice('whatsapp:'.length)
       : from;
 
-    await this.conversationService.handleIncomingMessage(phone, text);
+    const replies =
+      await this.conversationService.handleIncomingMessage(phone, text);
+    for (const message of replies) {
+      if (message) {
+        await this.whatsAppService.sendTextMessage(phone, message);
+      }
+    }
   }
 
   @Get('verify')
