@@ -17,11 +17,49 @@ export type RouteResult =
   | { type: 'command'; commandId: string }
   | { type: 'unknown' };
 
+function matchCommandAlias(
+  normalized: string,
+  isWorker: boolean,
+  isEmployer: boolean,
+): string | null {
+  const isMenu =
+    CMD_MENU.includes(normalized) ||
+    CMD_MENU.some((c) => normalized.startsWith(c + ' '));
+  if (isMenu) return 'menu';
+  if (CMD_PUBLISH.includes(normalized) && isEmployer)
+    return 'start_publish_job';
+  if (CMD_MY_OFFERS.includes(normalized) && isEmployer) return 'my_offers';
+  if (CMD_CANDIDATURES.includes(normalized) && isEmployer)
+    return 'candidatures_received';
+  if (CMD_PROFILE.includes(normalized)) return 'profile';
+  if (CMD_HISTORY.includes(normalized)) return 'penalty_history';
+  if (CMD_LIST_OFFERS.includes(normalized) && isWorker) return 'list_offers';
+  return null;
+}
+
+function matchWorkerNumeric(trimmed: string): string | null {
+  if (trimmed === WORKER_MENU_OPTIONS.LIST_OFFERS) return 'list_offers';
+  if (trimmed === WORKER_MENU_OPTIONS.MY_APPLICATIONS) return 'my_applications';
+  if (trimmed === WORKER_MENU_OPTIONS.PROFILE) return 'profile';
+  if (trimmed === WORKER_MENU_OPTIONS.HISTORY) return 'penalty_history';
+  if (trimmed === WORKER_MENU_OPTIONS.HELP) return 'menu';
+  return null;
+}
+
+function matchEmployerNumeric(trimmed: string): string | null {
+  if (trimmed === EMPLOYER_MENU_OPTIONS.PUBLISH_OFFER)
+    return 'start_publish_job';
+  if (trimmed === EMPLOYER_MENU_OPTIONS.MY_OFFERS) return 'my_offers';
+  if (trimmed === EMPLOYER_MENU_OPTIONS.CANDIDATURES_RECEIVED)
+    return 'candidatures_received';
+  if (trimmed === EMPLOYER_MENU_OPTIONS.PROFILE) return 'profile';
+  if (trimmed === EMPLOYER_MENU_OPTIONS.HISTORY) return 'penalty_history';
+  if (trimmed === EMPLOYER_MENU_OPTIONS.HELP) return 'menu';
+  return null;
+}
+
 @Injectable()
 export class BotRouterService {
-  /**
-   * Resolve the incoming message to either a flow (continue existing or start) or a command.
-   */
   route(
     input: string,
     profile: BotProfile,
@@ -32,71 +70,20 @@ export class BotRouterService {
     const isWorker = profile.profile_type === 'WORKER';
     const isEmployer = profile.profile_type === 'EMPLOYER';
 
-    // If we have an active flow, the orchestrator will pass to the flow handler; we only route when there's no flow or flow is list_offers and user chose an option
     if (state?.flowId) {
-      // Let the orchestrator handle flow continuation
       return { type: 'flow', flowId: state.flowId, state };
     }
 
-    // Command aliases
-    if (
-      CMD_MENU.some((c) => normalized === c || normalized.startsWith(c + ' '))
-    ) {
-      return { type: 'command', commandId: 'menu' };
-    }
-    if (CMD_PUBLISH.some((c) => normalized === c) && isEmployer) {
-      return { type: 'command', commandId: 'start_publish_job' };
-    }
-    if (CMD_MY_OFFERS.some((c) => normalized === c) && isEmployer) {
-      return { type: 'command', commandId: 'my_offers' };
-    }
-    if (CMD_CANDIDATURES.some((c) => normalized === c) && isEmployer) {
-      return { type: 'command', commandId: 'candidatures_received' };
-    }
-    if (CMD_PROFILE.some((c) => normalized === c)) {
-      return { type: 'command', commandId: 'profile' };
-    }
-    if (CMD_HISTORY.some((c) => normalized === c)) {
-      return { type: 'command', commandId: 'penalty_history' };
-    }
-    if (CMD_LIST_OFFERS.some((c) => normalized === c) && isWorker) {
-      return { type: 'command', commandId: 'list_offers' };
-    }
+    const aliasCmd = matchCommandAlias(normalized, isWorker, isEmployer);
+    if (aliasCmd) return { type: 'command', commandId: aliasCmd };
 
-    // Numeric menu options
-    if (trimmed === WORKER_MENU_OPTIONS.LIST_OFFERS && isWorker) {
-      return { type: 'command', commandId: 'list_offers' };
+    if (isWorker) {
+      const workerCmd = matchWorkerNumeric(trimmed);
+      if (workerCmd) return { type: 'command', commandId: workerCmd };
     }
-    if (trimmed === WORKER_MENU_OPTIONS.MY_APPLICATIONS && isWorker) {
-      return { type: 'command', commandId: 'my_applications' };
-    }
-    if (trimmed === WORKER_MENU_OPTIONS.PROFILE && isWorker) {
-      return { type: 'command', commandId: 'profile' };
-    }
-    if (trimmed === WORKER_MENU_OPTIONS.HISTORY && isWorker) {
-      return { type: 'command', commandId: 'penalty_history' };
-    }
-    if (trimmed === WORKER_MENU_OPTIONS.HELP && isWorker) {
-      return { type: 'command', commandId: 'menu' };
-    }
-
-    if (trimmed === EMPLOYER_MENU_OPTIONS.PUBLISH_OFFER && isEmployer) {
-      return { type: 'command', commandId: 'start_publish_job' };
-    }
-    if (trimmed === EMPLOYER_MENU_OPTIONS.MY_OFFERS && isEmployer) {
-      return { type: 'command', commandId: 'my_offers' };
-    }
-    if (trimmed === EMPLOYER_MENU_OPTIONS.CANDIDATURES_RECEIVED && isEmployer) {
-      return { type: 'command', commandId: 'candidatures_received' };
-    }
-    if (trimmed === EMPLOYER_MENU_OPTIONS.PROFILE && isEmployer) {
-      return { type: 'command', commandId: 'profile' };
-    }
-    if (trimmed === EMPLOYER_MENU_OPTIONS.HISTORY && isEmployer) {
-      return { type: 'command', commandId: 'penalty_history' };
-    }
-    if (trimmed === EMPLOYER_MENU_OPTIONS.HELP && isEmployer) {
-      return { type: 'command', commandId: 'menu' };
+    if (isEmployer) {
+      const employerCmd = matchEmployerNumeric(trimmed);
+      if (employerCmd) return { type: 'command', commandId: employerCmd };
     }
 
     return { type: 'unknown' };
