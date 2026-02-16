@@ -26,9 +26,12 @@ import { AuthModule } from './modules/auth/auth.module';
 import { ProfileModule } from './modules/profile/profile.module';
 import { UserModule } from './modules/user/user.module';
 import { ConversationModule } from './modules/conversation/conversation.module';
+import { JobOfferModule } from './modules/job-offer/job-offer.module';
+import { ApplicationModule } from './modules/application/application.module';
 import { FileModule } from './modules/file/file.module';
 import { LogModule } from './modules/log/log.module';
 import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
+import { ReminderModule } from './modules/bot/reminder/reminder.module';
 import { StorageModule } from './common/services/storage/storage.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -107,10 +110,13 @@ import { I18nExceptionFilter } from './common/filters/i18n-exception.filter';
     CsrfModule,
     MailModule,
     WhatsAppModule,
+    ReminderModule,
     AuthModule,
     ProfileModule,
     UserModule,
     ConversationModule,
+    JobOfferModule,
+    ApplicationModule,
     StorageModule,
     FileModule,
     LogModule,

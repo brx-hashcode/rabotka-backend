@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { QueueService } from './queue.service';
 
 export const EMAIL_QUEUE = 'email-queue';
+export const WHATSAPP_REMINDERS_QUEUE = 'whatsapp-reminders-queue';
 
 @Module({})
 export class QueueModule {

@@ -5,11 +5,12 @@ import { PrismaModule } from './common/services/prisma/prisma.module';
 import { RedisModule } from './common/services/redis/redis.module';
 import { QueueModule } from './common/services/queue/queue.module';
 import { MailModule } from './modules/mail/mail.module';
+import { ReminderModule } from './modules/bot/reminder/reminder.module';
 import { getMailerTransportConfig } from './modules/mail/mailer-transport.config';
 
 /**
  * Minimal module for the queue worker process.
- * Includes only the dependencies needed for processing email jobs.
+ * Includes only the dependencies needed for processing email and reminder jobs.
  */
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { getMailerTransportConfig } from './modules/mail/mailer-transport.config
     }),
     PrismaModule,
     MailModule,
+    ReminderModule,
   ],
 })
 export class WorkerModule {}
