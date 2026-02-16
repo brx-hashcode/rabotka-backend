@@ -128,10 +128,7 @@ export class BotNotificationService {
         reason,
         wasLatePenalty,
       });
-      await this.whatsApp.sendTextMessage(
-        app.job_offer.employer.phone,
-        text,
-      );
+      await this.whatsApp.sendTextMessage(app.job_offer.employer.phone, text);
     } catch (err) {
       this.logger.warn(
         `Failed to send cancellation notification to employer: ${applicationId}`,
