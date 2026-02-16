@@ -23,6 +23,13 @@ function formatPaymentFlow(flow: string): string {
   return map[flow] ?? flow;
 }
 
+function applicationStatusLabel(status: string): string {
+  if (status === 'ACCEPTED') return '✅ ACCEPTÉE';
+  if (status === 'PENDING') return '⏳ EN ATTENTE';
+  if (status === 'REJECTED') return '❌ REFUSÉE';
+  return '⚠️ ANNULÉE';
+}
+
 export type ApplicationForList = {
   id: string;
   status: string;
@@ -46,14 +53,7 @@ export function formatMyApplicationsList(
   const lines = [`📋 Mes candidatures (${applications.length})`, '', SEP];
 
   for (const app of applications) {
-    const statusEmoji =
-      app.status === 'ACCEPTED'
-        ? '✅ ACCEPTÉE'
-        : app.status === 'PENDING'
-          ? '⏳ EN ATTENTE'
-          : app.status === 'REJECTED'
-            ? '❌ REFUSÉE'
-            : '⚠️ ANNULÉE';
+    const statusEmoji = applicationStatusLabel(app.status);
     lines.push(
       statusEmoji,
       `📌 ${app.job_offer.title}`,
@@ -92,7 +92,7 @@ export function formatApplyConfirmation(params: {
     `📍 ${params.address}`,
     '',
     '⚠️ Engagement important:',
-    '✓ Vos informations seront partagées avec l\'employeur',
+    "✓ Vos informations seront partagées avec l'employeur",
     '✓ Vous vous engagez à être présent et ponctuel',
     '✓ Annulation < 4h avant = pénalité de 5,000 FCFA',
     '✓ Impact sur votre score de fiabilité',
@@ -107,7 +107,7 @@ export function formatApplyConfirmation(params: {
     '1️⃣ Oui, je postule',
     '2️⃣ Non, retour',
     '',
-    "Tapez 1 ou 2.",
+    'Tapez 1 ou 2.',
   ].join('\n');
 }
 
@@ -141,7 +141,7 @@ export function formatNewApplicationToEmployer(params: {
   return [
     '🎉 Nouvelle candidature !',
     '',
-    "Un worker a postulé à votre offre :",
+    'Un worker a postulé à votre offre :',
     `📌 ${params.offerTitle}`,
     '',
     '👤 Candidat:',
@@ -162,11 +162,14 @@ export function formatNewApplicationToEmployer(params: {
     '2️⃣ Voir son profil complet',
     '3️⃣ Refuser',
     '',
-    "Tapez le numéro correspondant.",
+    'Tapez le numéro correspondant.',
   ].join('\n');
 }
 
-export function formatApplicationAcceptedToWorker(employerName: string, employerPhone: string): string {
+export function formatApplicationAcceptedToWorker(
+  employerName: string,
+  employerPhone: string,
+): string {
   return [
     '✅ Candidature acceptée !',
     '',
@@ -180,7 +183,7 @@ export function formatApplicationAcceptedToWorker(employerName: string, employer
 
 export function formatApplicationRejectedToWorker(): string {
   return [
-    "❌ Candidature refusée",
+    '❌ Candidature refusée',
     '',
     "L'employeur a choisi un autre candidat pour cette offre.",
     "Consultez d'autres offres avec Menu > 1.",
@@ -205,17 +208,20 @@ export function formatCancellationToEmployer(params: {
     '',
   ];
   if (params.wasLatePenalty) {
-    lines.push('⚠️ Note: Cette annulation était tardive (< 4h). Une pénalité a été appliquée au worker.', '');
+    lines.push(
+      '⚠️ Note: Cette annulation était tardive (< 4h). Une pénalité a été appliquée au worker.',
+      '',
+    );
   }
   lines.push(
     "Votre offre est de nouveau disponible pour d'autres candidats.",
     '',
     'Actions:',
     '1️⃣ Voir les autres candidatures',
-    '2️⃣ Republier l\'offre',
-    '3️⃣ Supprimer l\'offre',
+    "2️⃣ Republier l'offre",
+    "3️⃣ Supprimer l'offre",
     '',
-    "Tapez le numéro correspondant.",
+    'Tapez le numéro correspondant.',
   );
   return lines.join('\n');
 }

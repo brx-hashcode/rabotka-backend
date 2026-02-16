@@ -1,8 +1,5 @@
 import type { BotProfileType } from '../types/bot-state.types';
 
-/**
- * Menu principal Worker (spec: 5.1)
- */
 export function workerMenuMessage(): string {
   return [
     '📱 Menu Rabotka - Worker',
@@ -17,9 +14,6 @@ export function workerMenuMessage(): string {
   ].join('\n');
 }
 
-/**
- * Menu principal Employer (spec: 5.1)
- */
 export function employerMenuMessage(): string {
   return [
     '📱 Menu Rabotka - Employer',
@@ -35,16 +29,10 @@ export function employerMenuMessage(): string {
   ].join('\n');
 }
 
-/**
- * Return menu text based on profile type
- */
 export function menuMessage(profileType: BotProfileType): string {
   return profileType === 'WORKER' ? workerMenuMessage() : employerMenuMessage();
 }
 
-/**
- * Help / unknown command (same as menu)
- */
 export function helpMessage(profileType: BotProfileType): string {
   return [
     menuMessage(profileType),
@@ -53,9 +41,6 @@ export function helpMessage(profileType: BotProfileType): string {
   ].join('\n');
 }
 
-/**
- * Command not recognized
- */
 export function unknownCommandMessage(): string {
   return "Commande non reconnue. Tapez 'Menu' pour voir les options.";
 }
