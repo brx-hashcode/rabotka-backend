@@ -1,7 +1,3 @@
-/**
- * Format application/candidature messages (spec 5.4, 5.5, 5.6, 5.7)
- */
-
 const SEP = '━━━━━━━━━━━━━━━━━━━━';
 
 function formatDate(d: Date): string {
