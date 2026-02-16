@@ -7,8 +7,13 @@ import { WorkerModule } from './worker.module';
 import { MailerService } from '@nestjs-modules/mailer';
 import { MailProcessor } from './modules/mail/mail.processor';
 import { QueueService } from './common/services/queue/queue.service';
-import { EMAIL_QUEUE } from './common/services/queue/queue.module';
+import {
+  EMAIL_QUEUE,
+  WHATSAPP_REMINDERS_QUEUE,
+} from './common/services/queue/queue.module';
 import type { EmailJobData } from './common/services/queue/queue.service';
+import { ReminderProcessor } from './modules/bot/reminder/reminder.processor';
+import type { ReminderJobData } from './modules/bot/reminder/reminder.processor';
 
 loadEnv({ path: '.env.local' });
 loadEnv();
@@ -113,6 +118,13 @@ async function bootstrap(): Promise<void> {
     process.exit(1);
   }
 
+  let reminderProcessor: ReminderProcessor | null = null;
+  try {
+    reminderProcessor = app.get(ReminderProcessor);
+  } catch {
+    logger.warn('ReminderProcessor not found; reminder jobs will not be processed');
+  }
+
   const mailProcessor = app.get(MailProcessor);
   if (!mailProcessor) {
     logger.error('MailProcessor not found');
@@ -135,6 +147,14 @@ async function bootstrap(): Promise<void> {
     (job) => mailProcessor.processEmailJob(job),
     { concurrency: Number(process.env.EMAIL_QUEUE_CONCURRENCY) || 5 },
   );
+
+  if (reminderProcessor) {
+    queueService.createWorker<ReminderJobData>(
+      WHATSAPP_REMINDERS_QUEUE,
+      (job) => reminderProcessor!.process(job),
+      { concurrency: 2 },
+    );
+  }
 
   app.enableShutdownHooks();
 
