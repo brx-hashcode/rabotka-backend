@@ -111,7 +111,7 @@ export class JobOfferService {
     const data = (hasMore ? offers.slice(0, limit) : offers).map((o) =>
       this.toListItem(o),
     );
-    const nextCursor = hasMore ? data[data.length - 1].id : null;
+    const nextCursor = hasMore ? (data.at(-1)?.id ?? null) : null;
 
     return { data, nextCursor };
   }
