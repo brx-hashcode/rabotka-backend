@@ -41,7 +41,7 @@ import { CsrfController } from './csrf.controller';
             httpOnly: true,
           },
           ignoredMethods: ['GET', 'HEAD', 'OPTIONS'],
-          // Skip CSRF for external webhooks (e.g. Twilio WhatsApp) that cannot send a token
+          //NOTE: Skip CSRF for external webhooks (e.g. Twilio WhatsApp) that cannot send a token
           skipCsrfProtection: (req) => {
             const path =
               (req.route?.path as string | undefined) ?? req.path ?? req.url;
