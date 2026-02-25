@@ -67,22 +67,34 @@ export function formatOfferList(
   return lines.join('\n');
 }
 
-/** Compact numbered list for list-offers flow: 1-5 select offer, 6 Voir plus, 7 Menu */
+/** Compact numbered list for list-offers flow: two lines per offer, 1-5 select, 6 Voir plus, 7 Menu */
 export function formatOfferListCompact(
   offers: OfferListItem[],
   hasMore: boolean,
 ): string {
-  const lines = ['*OFFRES DISPONIBLES*', '', SEP];
+  const lines = ['*OFFRES DISPONIBLES*', ''];
   offers.forEach((o, i) => {
     const num = i + 1;
+    const flowLabel = formatPaymentFlow(o.payment_flow);
     lines.push(
-      `${num}. *${o.title}* - ${formatDate(o.scheduled_at)} - ${o.amount.toLocaleString('fr-FR')} FCFA`,
+      `${num}. ${o.title}`,
+      `    Montant: ${o.amount.toLocaleString('fr-FR')} FCFA ${flowLabel}`,
+      `    Date: ${formatDate(o.scheduled_at)}`,
     );
   });
-  lines.push(SEP, '');
-  lines.push('*Sélectionnez une offre par son numéro (1-5).*', '');
-  if (hasMore) lines.push('6️⃣ *Voir plus*');
-  lines.push("7️⃣ *Menu* (ou tapez 'Menu')", '', '*Tapez le numéro correspondant.*');
+  lines.push('');
+  if (hasMore) {
+    lines.push(
+      '6 - Voir plus',
+      '7 - Menu',
+      '',
+      "Veuillez taper un numéro (1-5) pour sélectionner une offre, 6 pour la suite, ou 7 / 'Menu' pour revenir au menu",
+    );
+  } else {
+    lines.push(
+      "Veuillez taper un numéro pour sélectionner une offre ou 'Menu' pour revenir au menu",
+    );
+  }
   return lines.join('\n');
 }
 
