@@ -6,7 +6,11 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
-import { AccountStatus, ApplicationStatus, JobOfferStatus } from '@prisma/client';
+import {
+  AccountStatus,
+  ApplicationStatus,
+  JobOfferStatus,
+} from '@prisma/client';
 import {
   LATE_CANCELLATION_PENALTY_FCFA,
   LATE_CANCELLATION_SCORE_DEDUCTION,
@@ -70,7 +74,10 @@ export type ApplicationWithOffer = ApplicationListItem & {
 export class ApplicationService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async create(jobOfferId: string, workerId: string): Promise<ApplicationListItem> {
+  async create(
+    jobOfferId: string,
+    workerId: string,
+  ): Promise<ApplicationListItem> {
     const [jobOffer, worker] = await Promise.all([
       this.prisma.jobOffer.findUnique({
         where: { id: jobOfferId },
@@ -89,21 +96,30 @@ export class ApplicationService {
       throw new NotFoundException('Profil worker non trouvé');
     }
     if (worker.status !== AccountStatus.ACTIVE) {
-      throw new ForbiddenException('Votre compte doit être actif pour postuler');
+      throw new ForbiddenException(
+        'Votre compte doit être actif pour postuler',
+      );
     }
     if (worker.profile_type !== 'WORKER') {
-      throw new ForbiddenException('Seuls les workers peuvent postuler aux offres');
+      throw new ForbiddenException(
+        'Seuls les workers peuvent postuler aux offres',
+      );
     }
     if (jobOffer.status !== JobOfferStatus.ACTIVE) {
-      throw new BadRequestException('Cette offre n\'est plus disponible');
+      throw new BadRequestException("Cette offre n'est plus disponible");
     }
     if (jobOffer.employer_id === workerId) {
-      throw new BadRequestException('Vous ne pouvez pas postuler à votre propre offre');
+      throw new BadRequestException(
+        'Vous ne pouvez pas postuler à votre propre offre',
+      );
     }
 
     const existing = await this.prisma.application.findUnique({
       where: {
-        idx_application_unique: { job_offer_id: jobOfferId, worker_id: workerId },
+        idx_application_unique: {
+          job_offer_id: jobOfferId,
+          worker_id: workerId,
+        },
       },
     });
     if (existing) {
@@ -203,7 +219,10 @@ export class ApplicationService {
     return this.toApplicationWithOffer(application);
   }
 
-  async accept(applicationId: string, employerId: string): Promise<ApplicationWithOffer> {
+  async accept(
+    applicationId: string,
+    employerId: string,
+  ): Promise<ApplicationWithOffer> {
     const application = await this.prisma.application.findUnique({
       where: { id: applicationId },
       include: { job_offer: true, worker: true },
@@ -213,10 +232,12 @@ export class ApplicationService {
       throw new NotFoundException('Candidature non trouvée');
     }
     if (application.job_offer.employer_id !== employerId) {
-      throw new ForbiddenException('Vous n\'êtes pas l\'employeur de cette offre');
+      throw new ForbiddenException(
+        "Vous n'êtes pas l'employeur de cette offre",
+      );
     }
     if (application.status !== ApplicationStatus.PENDING) {
-      throw new BadRequestException('Cette candidature n\'est plus en attente');
+      throw new BadRequestException("Cette candidature n'est plus en attente");
     }
 
     await this.prisma.$transaction([
@@ -231,7 +252,8 @@ export class ApplicationService {
     ]);
 
     const updated = await this.findById(applicationId);
-    if (!updated) throw new NotFoundException('Application not found after update');
+    if (!updated)
+      throw new NotFoundException('Application not found after update');
     return updated;
   }
 
@@ -249,10 +271,12 @@ export class ApplicationService {
       throw new NotFoundException('Candidature non trouvée');
     }
     if (application.job_offer.employer_id !== employerId) {
-      throw new ForbiddenException('Vous n\'êtes pas l\'employeur de cette offre');
+      throw new ForbiddenException(
+        "Vous n'êtes pas l'employeur de cette offre",
+      );
     }
     if (application.status !== ApplicationStatus.PENDING) {
-      throw new BadRequestException('Cette candidature n\'est plus en attente');
+      throw new BadRequestException("Cette candidature n'est plus en attente");
     }
 
     const updated = await this.prisma.application.update({
@@ -296,16 +320,25 @@ export class ApplicationService {
       throw new NotFoundException('Candidature non trouvée');
     }
     if (application.worker_id !== workerId) {
-      throw new ForbiddenException('Vous ne pouvez annuler que vos propres candidatures');
+      throw new ForbiddenException(
+        'Vous ne pouvez annuler que vos propres candidatures',
+      );
     }
-    if (application.status !== ApplicationStatus.ACCEPTED && application.status !== ApplicationStatus.PENDING) {
-      throw new BadRequestException('Cette candidature ne peut plus être annulée');
+    if (
+      application.status !== ApplicationStatus.ACCEPTED &&
+      application.status !== ApplicationStatus.PENDING
+    ) {
+      throw new BadRequestException(
+        'Cette candidature ne peut plus être annulée',
+      );
     }
 
     const now = new Date();
     const scheduledAt = application.job_offer.scheduled_at;
-    const hoursUntil = (scheduledAt.getTime() - now.getTime()) / (60 * 60 * 1000);
-    const isLateCancellation = hoursUntil < CANCELLATION_PENALTY_THRESHOLD_HOURS;
+    const hoursUntil =
+      (scheduledAt.getTime() - now.getTime()) / (60 * 60 * 1000);
+    const isLateCancellation =
+      hoursUntil < CANCELLATION_PENALTY_THRESHOLD_HOURS;
 
     let penaltyApplied = false;
     let penaltyAmount: number | null = null;
@@ -317,7 +350,10 @@ export class ApplicationService {
       });
     }
 
-    if (isLateCancellation && application.status === ApplicationStatus.ACCEPTED) {
+    if (
+      isLateCancellation &&
+      application.status === ApplicationStatus.ACCEPTED
+    ) {
       penaltyApplied = true;
       penaltyAmount = LATE_CANCELLATION_PENALTY_FCFA;
 
@@ -326,7 +362,9 @@ export class ApplicationService {
           worker_id: workerId,
           application_id: applicationId,
           amount: LATE_CANCELLATION_PENALTY_FCFA,
-          reason: reason ?? `Annulation tardive (< ${CANCELLATION_PENALTY_THRESHOLD_HOURS}h avant le rendez-vous)`,
+          reason:
+            reason ??
+            `Annulation tardive (< ${CANCELLATION_PENALTY_THRESHOLD_HOURS}h avant le rendez-vous)`,
         },
       });
 
@@ -337,7 +375,10 @@ export class ApplicationService {
       const currentScore = profile?.reliability_score ?? 100;
       const newScore = Math.max(
         RELIABILITY_SCORE_MIN,
-        Math.min(RELIABILITY_SCORE_MAX, currentScore - LATE_CANCELLATION_SCORE_DEDUCTION),
+        Math.min(
+          RELIABILITY_SCORE_MAX,
+          currentScore - LATE_CANCELLATION_SCORE_DEDUCTION,
+        ),
       );
       await this.prisma.profile.update({
         where: { id: workerId },
@@ -383,13 +424,15 @@ export class ApplicationService {
     applicationId: string,
     workerId: string,
   ): Promise<boolean> {
-    const app = await this.prisma.application
-      .findUnique({
-        where: { id: applicationId },
-        include: { job_offer: true },
-      });
+    const app = await this.prisma.application.findUnique({
+      where: { id: applicationId },
+      include: { job_offer: true },
+    });
     if (!app || app.worker_id !== workerId) return false;
-    if (app.status !== ApplicationStatus.ACCEPTED && app.status !== ApplicationStatus.PENDING)
+    if (
+      app.status !== ApplicationStatus.ACCEPTED &&
+      app.status !== ApplicationStatus.PENDING
+    )
       return false;
     const now = new Date();
     const hoursUntil =
@@ -459,7 +502,8 @@ export class ApplicationService {
       cancelled_at: app.cancelled_at,
       cancellation_reason: app.cancellation_reason,
       penalty_applied: app.penalty_applied,
-      penalty_amount: app.penalty_amount != null ? Number(app.penalty_amount) : null,
+      penalty_amount:
+        app.penalty_amount != null ? Number(app.penalty_amount) : null,
       created_at: app.created_at,
     };
     if (app.job_offer) {

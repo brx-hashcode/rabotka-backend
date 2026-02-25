@@ -127,7 +127,9 @@ async function bootstrap(): Promise<void> {
   try {
     reminderProcessor = app.get(ReminderProcessor);
   } catch {
-    logger.warn('ReminderProcessor not found; reminder jobs will not be processed');
+    logger.warn(
+      'ReminderProcessor not found; reminder jobs will not be processed',
+    );
   }
 
   const mailProcessor = app.get(MailProcessor);
@@ -156,7 +158,7 @@ async function bootstrap(): Promise<void> {
   if (reminderProcessor) {
     queueService.createWorker<ReminderJobData>(
       WHATSAPP_REMINDERS_QUEUE,
-      (job) => reminderProcessor!.process(job),
+      (job) => reminderProcessor.process(job),
       { concurrency: 2 },
     );
   }

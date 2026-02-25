@@ -56,18 +56,10 @@ export class ReminderProcessor {
 
   private async runScan(): Promise<void> {
     const now = new Date();
-    const window24hStart = new Date(
-      now.getTime() + 23 * 60 * 60 * 1000,
-    );
-    const window24hEnd = new Date(
-      now.getTime() + 24 * 60 * 60 * 1000,
-    );
-    const window2hStart = new Date(
-      now.getTime() + (2 * 60 - 10) * 60 * 1000,
-    );
-    const window2hEnd = new Date(
-      now.getTime() + (2 * 60 + 10) * 60 * 1000,
-    );
+    const window24hStart = new Date(now.getTime() + 23 * 60 * 60 * 1000);
+    const window24hEnd = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+    const window2hStart = new Date(now.getTime() + (2 * 60 - 10) * 60 * 1000);
+    const window2hEnd = new Date(now.getTime() + (2 * 60 + 10) * 60 * 1000);
 
     const [apps24h, apps2h] = await Promise.all([
       this.prisma.application.findMany({

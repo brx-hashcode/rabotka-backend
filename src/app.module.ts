@@ -85,9 +85,9 @@ import { I18nExceptionFilter } from './common/filters/i18n-exception.filter';
       },
       loaderOptions: {
         path: (() => {
-          const distI18n = path.join(process.cwd(), 'dist', 'i18n');
           const srcI18n = path.join(process.cwd(), 'src', 'i18n');
-          return fs.existsSync(distI18n) ? distI18n : srcI18n;
+          const distI18n = path.join(process.cwd(), 'dist', 'i18n');
+          return fs.existsSync(srcI18n) ? srcI18n : distI18n;
         })(),
         watch: true,
       },
