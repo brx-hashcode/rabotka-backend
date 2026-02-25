@@ -28,6 +28,10 @@ import {
   runMyApplicationsFlow,
   getMyApplicationsInitialState,
 } from '../flows/my-applications.flow';
+import {
+  runProfileSubmenuFlow,
+  getProfileSubmenuInitialState,
+} from '../flows/profile-submenu.flow';
 
 const INACTIVE_MESSAGE =
   'Votre compte est créé mais pas encore activé. Cliquez sur le lien de confirmation que nous vous avons envoyé par WhatsApp pour l’activer.';
@@ -169,6 +173,10 @@ export class BotOrchestratorService {
           applicationService: deps.applicationService,
           notificationService: deps.notificationService,
         }),
+      [FLOW_IDS.PROFILE_SUBMENU]: () =>
+        runProfileSubmenuFlow(state, input, profile, {
+          commands: this.commands,
+        }),
     };
     const runner = runners[flowId];
     return runner ? runner() : Promise.resolve(null);
@@ -185,11 +193,22 @@ export class BotOrchestratorService {
       list_offers: () => this.handleListOffersCommand(profile, profileId),
       my_applications: () =>
         this.handleMyApplicationsCommand(profile, profileId),
+      profile: () => this.handleProfileCommand(profileId, botProfile),
     };
     const handler = commandHandlers[route.commandId];
     if (handler) return handler();
     const reply = await this.runCommand(route.commandId, botProfile);
     return [reply];
+  }
+
+  private async handleProfileCommand(
+    profileId: string,
+    botProfile: BotProfile,
+  ): Promise<string[]> {
+    const message = await this.commands.profile(botProfile);
+    const submenuState = getProfileSubmenuInitialState(botProfile.profile_type);
+    await this.botState.set(profileId, submenuState);
+    return [message];
   }
 
   private async handleStartPublishJobCommand(
