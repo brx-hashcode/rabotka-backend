@@ -1,0 +1,108 @@
+function formatDate(d: Date): string {
+  return d.toLocaleDateString('fr-FR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+export function formatAccountActivatedMessage(params: {
+  firstName: string;
+  profileType: 'WORKER' | 'EMPLOYER';
+}): string {
+  const typeLabel = params.profileType === 'WORKER' ? 'Worker' : 'Employer';
+  const workerActions = [
+    "📋 Consulter les offres d'emploi disponibles",
+    '✋ Postuler aux offres qui vous intéressent',
+    '💼 Gérer vos candidatures',
+  ];
+  const employerActions = [
+    "📝 Publier des offres d'emploi",
+    '👥 Recevoir des candidatures',
+    '📊 Gérer vos offres',
+  ];
+  const actions =
+    params.profileType === 'WORKER' ? workerActions : employerActions;
+
+  return [
+    `🎉 Félicitations ${params.firstName} !`,
+    '',
+    'Votre compte Rabotka a été activé avec succès !',
+    '',
+    `✅ Type de compte : ${typeLabel}`,
+    '✅ Statut : Actif',
+    '',
+    'Vous pouvez maintenant :',
+    '',
+    ...actions.map((a) => `• ${a}`),
+    '',
+    'Pour commencer, tapez "Menu" pour voir toutes les options disponibles.',
+    '',
+    'Bienvenue dans la communauté Rabotka ! 🚀',
+  ].join('\n');
+}
+
+export function formatReminder24h(params: {
+  offerTitle: string;
+  scheduledAt: Date;
+  address: string;
+  amount: number;
+  employerName: string;
+  employerPhone: string;
+}): string {
+  return [
+    '🔔 Rappel - Mission demain',
+    '',
+    'Vous avez une mission prévue demain :',
+    '',
+    `📌 ${params.offerTitle}`,
+    `🕐 ${formatDate(params.scheduledAt)} (demain matin)`,
+    `📍 ${params.address}`,
+    '',
+    `💰 Rémunération: ${params.amount.toLocaleString('fr-FR')} FCFA`,
+    '',
+    `👤 Employeur: ${params.employerName}`,
+    `📞 Contact: ${params.employerPhone}`,
+    '',
+    '⚠️ Important:',
+    '• Toute annulation < 4h = pénalité de 5,000 FCFA',
+    '• Soyez ponctuel pour maintenir votre score',
+    '',
+    'Actions:',
+    '1️⃣ Confirmer ma présence',
+    '2️⃣ Annuler (sans pénalité pour le moment)',
+    "3️⃣ Contacter l'employeur",
+    '',
+    'Tapez le numéro correspondant.',
+  ].join('\n');
+}
+
+export function formatReminder2h(params: {
+  offerTitle: string;
+  scheduledAt: Date;
+  address: string;
+  employerName: string;
+  employerPhone: string;
+}): string {
+  return [
+    '⏰ Votre mission commence dans 2 heures !',
+    '',
+    `📌 ${params.offerTitle}`,
+    `🕐 Aujourd'hui à ${params.scheduledAt.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`,
+    `📍 ${params.address}`,
+    '',
+    `👤 Employeur: ${params.employerName}`,
+    `📞 ${params.employerPhone}`,
+    '',
+    "⚠️ Dernier délai d'annulation sans pénalité dépassé.",
+    '',
+    '💡 Conseils:',
+    '✓ Prévoyez votre trajet',
+    '✓ Vérifiez que vous avez tout votre matériel',
+    '✓ Arrivez 5-10 minutes en avance',
+    '',
+    'Bonne mission ! 💪',
+  ].join('\n');
+}

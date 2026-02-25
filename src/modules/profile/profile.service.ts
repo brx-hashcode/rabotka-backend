@@ -12,12 +12,15 @@ import Redis from 'ioredis';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { FileService } from '../file/file.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
-import { verificationLinkMessage } from '../whatsapp/templates';
+import {
+  verificationLinkMessage,
+  accountActivatedMessage,
+} from '../whatsapp/templates';
 import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
 import { CreateProfileDto } from './dto/create-profile.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
-import { Prisma } from '@prisma/client';
-import { randomBytes } from 'crypto';
+import { AccountStatus, Prisma } from '@prisma/client';
+import { randomBytes } from 'node:crypto';
 
 export type ProfileMeResponse = {
   id: string;
@@ -70,7 +73,7 @@ type PrismaTransactionClient = Parameters<
   Parameters<PrismaService['$transaction']>[0]
 >[0];
 
-const VERIFICATION_TOKEN_TTL_SECONDS = 1800; // 30 minutes
+const VERIFICATION_TOKEN_TTL_SECONDS = 1800;
 const VERIFICATION_TOKEN_KEY_PREFIX = 'wa:verify:';
 
 @Injectable()
@@ -135,13 +138,14 @@ export class ProfileService {
   ): Promise<ProfileMeResponse> {
     const existingProfile = await this.prisma.profile.findUnique({
       where: { id },
-      select: { id: true },
+      select: { id: true, status: true },
     });
 
     if (!existingProfile) {
       throw new NotFoundException('profile.errors.not_found');
     }
 
+    const previousStatus = existingProfile.status;
     const dataToUpdate: Prisma.ProfileUpdateInput = {};
 
     if (updateProfileDto.firstName !== undefined) {
@@ -156,11 +160,45 @@ export class ProfileService {
     if (updateProfileDto.address !== undefined) {
       dataToUpdate.address = updateProfileDto.address;
     }
+    if (updateProfileDto.status !== undefined) {
+      dataToUpdate.status = updateProfileDto.status;
+    }
 
     await this.prisma.profile.update({
       where: { id },
       data: dataToUpdate,
     });
+
+    const transitionedToActive =
+      previousStatus !== AccountStatus.ACTIVE &&
+      updateProfileDto.status === AccountStatus.ACTIVE;
+    if (transitionedToActive) {
+      try {
+        const profile = await this.prisma.profile.findUnique({
+          where: { id },
+          select: { phone: true, first_name: true, profile_type: true },
+        });
+        if (profile?.phone) {
+          const text = accountActivatedMessage(
+            profile.first_name,
+            profile.profile_type,
+          );
+          await this.whatsAppService
+            .sendTextMessage(profile.phone, text)
+            .catch((err) =>
+              this.logger.warn(
+                `Failed to send account-activated WhatsApp to ${profile.phone}:`,
+                err,
+              ),
+            );
+        }
+      } catch (err) {
+        this.logger.warn(
+          `Failed to send account-activated WhatsApp for profile ${id}:`,
+          err,
+        );
+      }
+    }
 
     this.logger.log(`Profile updated successfully: ${id}`);
     return this.findById(id);
@@ -468,7 +506,6 @@ export class ProfileService {
   async requestWhatsAppVerification(
     profileId: string,
   ): Promise<{ success: boolean }> {
-    // Get profile with phone number
     const profile = await this.prisma.profile.findUnique({
       where: { id: profileId },
       select: {
@@ -482,16 +519,13 @@ export class ProfileService {
       throw new NotFoundException('profile.errors.not_found');
     }
 
-    // Check if WhatsApp service is connected
     if (!this.whatsAppService.isConfigured()) {
       throw new ServiceUnavailableException('whatsapp.errors.not_connected');
     }
 
-    // Generate secure token
     const token = randomBytes(32).toString('base64url');
     const redisKey = `${VERIFICATION_TOKEN_KEY_PREFIX}${token}`;
 
-    // Store token in Redis with 30 minute expiration
     await this.redis.set(
       redisKey,
       profileId,
@@ -499,7 +533,6 @@ export class ProfileService {
       VERIFICATION_TOKEN_TTL_SECONDS,
     );
 
-    // Get frontend URL from config
     const frontendUrl = this.configService.get<string>(
       'FRONTEND_URL',
       'http://localhost:3000',
@@ -510,14 +543,12 @@ export class ProfileService {
       verificationLink,
     );
 
-    // Send WhatsApp message
     const sent = await this.whatsAppService.sendTextMessage(
       profile.phone,
       message,
     );
 
     if (!sent) {
-      // Clean up token if message failed to send
       await this.redis.del(redisKey);
       throw new ServiceUnavailableException('whatsapp.errors.send_failed');
     }
