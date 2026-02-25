@@ -1,4 +1,4 @@
-const SEP = '━━━━━━━━━━━━━━━━━━';
+import { SEP } from './application.messages';
 
 function formatDate(d: Date): string {
   return d.toLocaleDateString('fr-FR', {
@@ -63,6 +63,40 @@ export function formatPenaltyHistory(
     "Tapez 'Menu' pour revenir.",
   );
   return lines.join('\n');
+}
+
+export function formatEmployerProfileStats(params: {
+  firstName: string;
+  lastName: string;
+  memberSince: Date;
+  offersCount: number;
+  pendingCandidaturesCount: number;
+  activeOffersCount?: number;
+}): string {
+  const since = params.memberSince.toLocaleDateString('fr-FR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  });
+  const activeOffers = params.activeOffersCount ?? params.offersCount;
+  return [
+    `👤 Votre profil Employeur - ${params.firstName} ${params.lastName}`,
+    '',
+    '📊 Statistiques:',
+    SEP,
+    `📅 Membre depuis: ${since}`,
+    `📝 Offres publiées: ${params.offersCount}`,
+    `📋 Offres actives: ${activeOffers}`,
+    `👥 Candidatures en attente: ${params.pendingCandidaturesCount}`,
+    SEP,
+    '',
+    'Actions:',
+    '1️⃣ Voir mes offres',
+    '2️⃣ Candidatures reçues',
+    '3️⃣ Retour au menu',
+    '',
+    'Tapez le numéro correspondant.',
+  ].join('\n');
 }
 
 export function formatProfileStats(params: {

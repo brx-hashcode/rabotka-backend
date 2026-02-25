@@ -11,14 +11,16 @@ import {
 } from '../messages/offers.messages';
 import {
   formatMyApplicationsList,
+  SEP,
   type ApplicationForList,
 } from '../messages/application.messages';
 import {
   formatPenaltyHistory,
   formatProfileStats,
+  formatEmployerProfileStats,
   type PenaltyItem,
 } from '../messages/penalty.messages';
-import { ApplicationStatus } from '@prisma/client';
+import { ApplicationStatus, JobOfferStatus } from '@prisma/client';
 
 const LIST_PAGE_SIZE = 5;
 
@@ -119,11 +121,7 @@ export class BotCommandsService {
     if (offers.length === 0) {
       return "Vous n'avez publié aucune offre. Tapez 1 pour publier une offre.";
     }
-    const lines = [
-      `📋 Mes offres publiées (${offers.length})`,
-      '',
-      '━━━━━━━━━━━━━━━━━━━━',
-    ];
+    const lines = [`📋 Mes offres publiées (${offers.length})`, '', SEP];
     for (const o of offers) {
       const dateStr = o.scheduled_at.toLocaleDateString('fr-FR', {
         day: '2-digit',
@@ -137,7 +135,7 @@ export class BotCommandsService {
         `🕐 ${dateStr}`,
         `💰 ${o.amount.toLocaleString('fr-FR')} FCFA`,
         `Statut: ${o.status}`,
-        '━━━━━━━━━━━━━━━━━━━━',
+        SEP,
         '',
       );
     }
@@ -188,17 +186,51 @@ export class BotCommandsService {
   }
 
   async profile(profile: BotProfile): Promise<string> {
-    const [profileData, applications, penalties] = await Promise.all([
-      this.prisma.profile.findUnique({
-        where: { id: profile.id },
-        select: {
-          first_name: true,
-          last_name: true,
-          reliability_score: true,
-          created_at: true,
-          avatar_url: true,
+    const profileData = await this.prisma.profile.findUnique({
+      where: { id: profile.id },
+      select: {
+        first_name: true,
+        last_name: true,
+        reliability_score: true,
+        created_at: true,
+        avatar_url: true,
+        profile_type: true,
+      },
+    });
+
+    if (!profileData) return "Profil non trouvé. Tapez 'Menu'.";
+
+    if (profileData.profile_type === 'EMPLOYER') {
+      const [offersCount, pendingCandidaturesCount] = await Promise.all([
+        this.prisma.jobOffer.count({ where: { employer_id: profile.id } }),
+        this.prisma.application.count({
+          where: {
+            job_offer: { employer_id: profile.id },
+            status: 'PENDING',
+          },
+        }),
+      ]);
+      const activeOffersCount = await this.prisma.jobOffer.count({
+        where: {
+          employer_id: profile.id,
+          status: JobOfferStatus.ACTIVE,
         },
-      }),
+      });
+      const profileText = formatEmployerProfileStats({
+        firstName: profileData.first_name,
+        lastName: profileData.last_name,
+        memberSince: profileData.created_at,
+        offersCount,
+        pendingCandidaturesCount,
+        activeOffersCount,
+      });
+      if (profileData.avatar_url) {
+        return `[IMG:${profileData.avatar_url}]${profileText}`;
+      }
+      return profileText;
+    }
+
+    const [applications, penalties] = await Promise.all([
       this.applicationService.findByWorker(profile.id, { limit: 500 }),
       this.prisma.penalty.findMany({
         where: { worker_id: profile.id },
@@ -208,8 +240,6 @@ export class BotCommandsService {
         },
       }),
     ]);
-
-    if (!profileData) return "Profil non trouvé. Tapez 'Menu'.";
 
     const completed = applications.filter(
       (a) => a.status === ApplicationStatus.ACCEPTED,
