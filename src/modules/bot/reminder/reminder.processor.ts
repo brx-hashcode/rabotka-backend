@@ -1,5 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { Inject } from '@nestjs/common';
+import { Injectable, Logger, Inject } from '@nestjs/common';
 import Redis from 'ioredis';
 import { REDIS_CONNECTION } from '../../../common/services/redis/redis.constants';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
@@ -14,7 +13,7 @@ import { ApplicationStatus } from '@prisma/client';
 
 const REMINDER_24H_SENT_KEY = 'reminder:sent:24h:';
 const REMINDER_2H_SENT_KEY = 'reminder:sent:2h:';
-const SENT_KEY_TTL = 48 * 60 * 60; // 48h
+const SENT_KEY_TTL = 48 * 60 * 60;
 
 export type ReminderJobData =
   | { type: 'scan' }
@@ -51,7 +50,7 @@ export class ReminderProcessor {
       return;
     }
 
-    this.logger.warn(`Unknown reminder job type: ${type}`);
+    this.logger.warn(`Unknown reminder job type: ${String(type)}`);
   }
 
   private async runScan(): Promise<void> {

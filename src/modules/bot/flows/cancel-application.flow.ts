@@ -93,7 +93,7 @@ async function handleCancelStep1(
   if (isLate && !reason) {
     return {
       reply: [
-        'La raison est obligatoire pour une annulation tardive. Tapez votre raison.',
+        '*La raison est obligatoire pour une annulation tardive. Tapez votre raison.*',
       ],
       nextState: state,
     };
@@ -103,12 +103,12 @@ async function handleCancelStep1(
     return {
       reply: [
         [
-          'Êtes-vous certain de vouloir annuler ?',
-          `Pénalité: ${LATE_CANCELLATION_PENALTY_FCFA.toLocaleString('fr-FR')} FCFA`,
+          '*Êtes-vous certain de vouloir annuler ?*',
+          `*Pénalité*: ${LATE_CANCELLATION_PENALTY_FCFA.toLocaleString('fr-FR')} FCFA`,
           '1️⃣ Oui, annuler malgré la pénalité',
           '2️⃣ Non, maintenir ma candidature',
           '',
-          'Tapez 1 ou 2.',
+          '*Tapez 1 ou 2.*',
         ].join('\n'),
       ],
       nextState: {
@@ -134,18 +134,18 @@ async function handleCancelStep1(
     return {
       reply: [
         [
-          '✅ Candidature annulée',
+          '*Candidature annulée*',
           '',
           "Votre candidature a été annulée. L'employeur a été notifié.",
           '',
-          "Tapez 'Menu' pour revenir.",
+          "*Tapez 'Menu' pour revenir.*",
         ].join('\n'),
       ],
       clearState: true,
     };
   } catch (err: unknown) {
     const message =
-      err instanceof Error ? err.message : "Impossible d'annuler.";
+      err instanceof Error ? err.message : "*IMPOSSIBLE D'ANNULER.*";
     return { reply: [`❌ ${message}`], nextState: state };
   }
 }
@@ -171,7 +171,7 @@ async function handleCancelStep2(args: CancelStepArgs): Promise<FlowResult> {
       return {
         reply: [
           [
-            '⚠️ Candidature annulée avec pénalité',
+            '*Candidature annulée avec pénalité*',
             '',
             'Votre candidature a été annulée.' + penaltyMsg,
             '',
@@ -184,20 +184,20 @@ async function handleCancelStep2(args: CancelStepArgs): Promise<FlowResult> {
       };
     } catch (err: unknown) {
       const message =
-        err instanceof Error ? err.message : "Impossible d'annuler.";
+        err instanceof Error ? err.message : "*IMPOSSIBLE D'ANNULER.*";
       return { reply: [`❌ ${message}`], nextState: state };
     }
   }
   if (normalized === '2' || normalized === 'non') {
     return {
       reply: [
-        "Annulation annulée. Votre candidature est maintenue. Tapez 'Menu'.",
+        "*Annulation annulée. Votre candidature est maintenue. Tapez 'Menu'.*",
       ],
       clearState: true,
     };
   }
   return {
-    reply: ['Répondez par 1 (Oui, annuler) ou 2 (Non, maintenir).'],
+    reply: ['*RÉPONDEZ PAR 1 (OUI, ANNULER) OU 2 (NON, MAINTENIR).*'],
     nextState: state,
   };
 }
@@ -215,7 +215,7 @@ export async function runCancelApplicationFlow(
 
   if (!applicationId) {
     return {
-      reply: ["Erreur: candidature non trouvée. Tapez 'Menu'."],
+      reply: ["*ERREUR: CANDIDATURE NON TROUVÉE. TAPEZ 'MENU'.*"],
       clearState: true,
     };
   }
@@ -223,7 +223,7 @@ export async function runCancelApplicationFlow(
   if (profile.profile_type !== 'WORKER') {
     return {
       reply: [
-        "Seuls les workers peuvent annuler leurs candidatures. Tapez 'Menu'.",
+        "*SEULS LES WORKERS PEUVENT ANNULER LEURS CANDIDATURES. TAPEZ 'MENU'.*",
       ],
       clearState: true,
     };
@@ -232,14 +232,14 @@ export async function runCancelApplicationFlow(
   const app = await ctx.applicationService.findById(applicationId);
   if (!app || app.worker_id !== profile.id) {
     return {
-      reply: ["Candidature introuvable. Tapez 'Menu'."],
+      reply: ["*CANDIDATURE INTROUVABLE. TAPEZ 'MENU'.*"],
       clearState: true,
     };
   }
 
   if (app.status !== 'PENDING' && app.status !== 'ACCEPTED') {
     return {
-      reply: ["Cette candidature ne peut plus être annulée. Tapez 'Menu'."],
+      reply: ["*CETTE CANDIDATURE NE PEUT PLUS ÊTRE ANNULÉE. TAPEZ 'MENU'.*"],
       clearState: true,
     };
   }
@@ -272,7 +272,7 @@ export async function runCancelApplicationFlow(
   if (state.step === 2) return handleCancelStep2(stepArgs);
 
   return {
-    reply: ["Erreur. Tapez 'Menu'."],
+    reply: ["*ERREUR. TAPEZ 'MENU'.*"],
     clearState: true,
   };
 }

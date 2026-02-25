@@ -20,7 +20,8 @@ export async function runProfileSubmenuFlow(
   ctx: ProfileSubmenuContext,
 ): Promise<FlowResult> {
   const payload = state.payload ?? {};
-  const profileType = (payload.profileType as 'WORKER' | 'EMPLOYER') ?? profile.profile_type;
+  const profileType =
+    (payload.profileType as 'WORKER' | 'EMPLOYER') ?? profile.profile_type;
   const trimmed = input.trim();
   const normalized = trimmed.toLowerCase();
 
@@ -29,7 +30,11 @@ export async function runProfileSubmenuFlow(
     clearState: true,
   });
 
-  if (trimmed === '3' || normalized === 'retour' || CMD_MENU.some((c) => normalized === c || normalized.startsWith(c + ' '))) {
+  if (
+    trimmed === '3' ||
+    normalized === 'retour' ||
+    CMD_MENU.some((c) => normalized === c || normalized.startsWith(c + ' '))
+  ) {
     return goToMenu();
   }
 
@@ -61,7 +66,9 @@ export async function runProfileSubmenuFlow(
   };
 }
 
-export function getProfileSubmenuInitialState(profileType: 'WORKER' | 'EMPLOYER'): BotState {
+export function getProfileSubmenuInitialState(
+  profileType: 'WORKER' | 'EMPLOYER',
+): BotState {
   return {
     flowId: FLOW_IDS.PROFILE_SUBMENU,
     step: 0,

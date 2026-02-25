@@ -20,10 +20,10 @@ function formatPaymentFlow(flow: string): string {
 }
 
 function applicationStatusLabel(status: string): string {
-  if (status === 'ACCEPTED') return '✅ ACCEPTÉE';
-  if (status === 'PENDING') return '⏳ EN ATTENTE';
-  if (status === 'REJECTED') return '❌ REFUSÉE';
-  return '⚠️ ANNULÉE';
+  if (status === 'ACCEPTED') return '*ACCEPTÉE*';
+  if (status === 'PENDING') return '*EN ATTENTE*';
+  if (status === 'REJECTED') return '*REFUSÉE*';
+  return '*ANNULÉE*';
 }
 
 export type ApplicationForList = {
@@ -43,19 +43,19 @@ export function formatMyApplicationsList(
   applications: ApplicationForList[],
 ): string {
   if (applications.length === 0) {
-    return "Vous n'avez aucune candidature. Tapez 'Menu' puis 1 pour voir les offres.";
+    return "*VOUS N'AVEZ AUCUNE CANDIDATURE. TAPEZ 'MENU' PUIS 1 POUR VOIR LES OFFRES.*";
   }
 
-  const lines = [`📋 Mes candidatures (${applications.length})`, '', SEP];
+  const lines = [`*MES CANDIDATURES (${applications.length})*`, '', SEP];
 
   for (const app of applications) {
     const statusEmoji = applicationStatusLabel(app.status);
     lines.push(
       statusEmoji,
-      `📌 ${app.job_offer.title}`,
-      `🕐 ${formatDate(app.job_offer.scheduled_at)}`,
-      `💰 ${app.job_offer.amount.toLocaleString('fr-FR')} FCFA`,
-      `📍 ${app.job_offer.address.slice(0, 30)}${app.job_offer.address.length > 30 ? '...' : ''}`,
+      `*${app.job_offer.title}*`,
+      `*Date*: ${formatDate(app.job_offer.scheduled_at)}`,
+      `*Montant*: ${app.job_offer.amount.toLocaleString('fr-FR')} FCFA`,
+      `*Adresse*: ${app.job_offer.address.slice(0, 30)}${app.job_offer.address.length > 30 ? '...' : ''}`,
       '',
       '1️⃣ Voir détails / Annuler',
       SEP,
@@ -63,7 +63,7 @@ export function formatMyApplicationsList(
     );
   }
 
-  lines.push("Tapez le numéro de l'option ou 'Menu' pour revenir.");
+  lines.push("*TAPEZ LE NUMÉRO DE L'OPTION OU 'MENU' POUR REVENIR.*");
   return lines.join('\n');
 }
 
@@ -80,43 +80,43 @@ export function formatApplyConfirmation(params: {
 }): string {
   const flow = formatPaymentFlow(params.payment_flow);
   return [
-    '📋 Vous êtes sur le point de postuler',
+    '*Vous êtes sur le point de postuler*',
     '',
-    `📌 Offre: ${params.title}`,
-    `🕐 Date: ${formatDate(params.scheduled_at)}`,
-    `💰 Montant: ${params.amount.toLocaleString('fr-FR')} FCFA ${flow}`,
-    `📍 ${params.address}`,
+    `*Offre*: ${params.title}`,
+    `*Date*: ${formatDate(params.scheduled_at)}`,
+    `*Montant*: ${params.amount.toLocaleString('fr-FR')} FCFA ${flow}`,
+    `*Adresse*: ${params.address}`,
     '',
-    '⚠️ Engagement important:',
-    "✓ Vos informations seront partagées avec l'employeur",
-    '✓ Vous vous engagez à être présent et ponctuel',
-    '✓ Annulation < 4h avant = pénalité de 5,000 FCFA',
-    '✓ Impact sur votre score de fiabilité',
+    '*ENGAGEMENT IMPORTANT*:',
+    "✓ Vos informations seront partagées avec l'employeur*",
+    '*Vous vous engagez à être présent et ponctuel*',
+    '*Annulation < 4h avant = pénalité de 5,000 FCFA*',
+    '*Impact sur votre score de fiabilité*',
     '',
-    'Votre profil sera envoyé:',
-    `• Nom: ${params.workerName}`,
-    `• Téléphone: ${params.workerPhone}`,
-    `• Email: ${params.workerEmail}`,
-    `• Score: ⭐ ${params.reliabilityScore ?? 100}/100`,
+    '*Votre profil sera envoyé*:',
+    `*Nom*: ${params.workerName}`,
+    `*Téléphone*: ${params.workerPhone}`,
+    `*Email*: ${params.workerEmail}`,
+    `*Score*: ⭐ ${params.reliabilityScore ?? 100}/100`,
     '',
-    'Confirmez-vous votre candidature ?',
+    '*Confirmez-vous votre candidature ?*',
     '1️⃣ Oui, je postule',
     '2️⃣ Non, retour',
     '',
-    'Tapez 1 ou 2.',
+    '*Tapez 1 ou 2.*',
   ].join('\n');
 }
 
 export function formatApplicationSentSuccess(offerTitle: string): string {
   return [
-    '✅ Candidature envoyée !',
+    '*Candidature envoyée !*',
     '',
     `Votre candidature pour "${offerTitle}" a été transmise à l'employeur.`,
     '',
-    '📊 Statut: En attente de réponse',
-    "🔔 Vous serez notifié dès que l'employeur prendra une décision.",
+    '*Statut*: En attente de réponse',
+    "*Vous serez notifié dès que l'employeur prendra une décision.*",
     '',
-    '💡 Astuce: Consultez "Menu > Mes candidatures" pour suivre vos postulations.',
+    '*Astuce*: Consultez "Menu > Mes candidatures" pour suivre vos postulations.',
     '',
     "Tapez 'Menu' pour revenir.",
   ].join('\n');
@@ -135,30 +135,30 @@ export function formatNewApplicationToEmployer(params: {
 }): string {
   const score = params.reliabilityScore ?? 100;
   return [
-    '🎉 Nouvelle candidature !',
+    '*NOUVELLE CANDIDATURE !*',
     '',
-    'Un worker a postulé à votre offre :',
-    `📌 ${params.offerTitle}`,
+    '*Un worker a postulé à votre offre* :',
+    `*Offre*: ${params.offerTitle}`,
     '',
-    '👤 Candidat:',
+    '*CANDIDAT*:',
     SEP,
-    `• Nom: ${params.workerName}`,
-    `• Téléphone: ${params.workerPhone}`,
-    `• Email: ${params.workerEmail}`,
-    `• Description: ${params.workerDescription.slice(0, 200)}${params.workerDescription.length > 200 ? '...' : ''}`,
+    `*Nom*: ${params.workerName}`,
+    `*Téléphone*: ${params.workerPhone}`,
+    `*Email*: ${params.workerEmail}`,
+    `*Description*: ${params.workerDescription.slice(0, 200)}${params.workerDescription.length > 200 ? '...' : ''}`,
     SEP,
-    `⭐ Score de fiabilité: ${score}/100`,
-    `✅ Missions complétées: ${params.completedMissions}`,
+    `*Score de fiabilité*: ${score}/100`,
+    `*Missions complétées*: ${params.completedMissions}`,
     '',
-    `🕐 Rendez-vous prévu: ${formatDate(params.scheduledAt)}`,
-    `📍 ${params.address}`,
+    `*Rendez-vous prévu*: ${formatDate(params.scheduledAt)}`,
+    `*Adresse*: ${params.address}`,
     '',
-    'Actions:',
+    '*Actions*:',
     '1️⃣ Accepter le candidat',
     '2️⃣ Voir son profil complet',
     '3️⃣ Refuser',
     '',
-    'Tapez le numéro correspondant.',
+    '*Tapez le numéro correspondant.*',
   ].join('\n');
 }
 
@@ -167,22 +167,22 @@ export function formatApplicationAcceptedToWorker(
   employerPhone: string,
 ): string {
   return [
-    '✅ Candidature acceptée !',
+    '*Candidature acceptée !*',
     '',
     `L'employeur vous a accepté. Vous pouvez le contacter directement :`,
-    `👤 ${employerName}`,
-    `📞 ${employerPhone}`,
+    `*Nom*: ${employerName}`,
+    `*Téléphone*: ${employerPhone}`,
     '',
-    'Bonne collaboration ! 🤝',
+    '*Bonne collaboration ! 🤝*',
   ].join('\n');
 }
 
 export function formatApplicationRejectedToWorker(): string {
   return [
-    '❌ Candidature refusée',
+    '*Candidature refusée*',
     '',
     "L'employeur a choisi un autre candidat pour cette offre.",
-    "Consultez d'autres offres avec Menu > 1.",
+    "*Consultez d'autres offres avec Menu > 1.*",
   ].join('\n');
 }
 
@@ -194,25 +194,25 @@ export function formatCancellationToEmployer(params: {
   wasLatePenalty: boolean;
 }): string {
   const lines = [
-    '⚠️ Annulation de candidature',
+    '*ANNULATION DE CANDIDATURE*',
     '',
-    `Le worker ${params.workerName} a annulé sa candidature pour :`,
-    `📌 ${params.offerTitle}`,
-    `🕐 ${formatDate(params.scheduledAt)}`,
+    `*Le worker ${params.workerName} a annulé sa candidature pour* :`,
+    `*Offre*: ${params.offerTitle}`,
+    `*Date*: ${formatDate(params.scheduledAt)}`,
     '',
-    `💬 Raison: ${params.reason ?? 'Aucune raison donnée'}`,
+    `*Raison*: ${params.reason ?? 'Aucune raison donnée'}`,
     '',
   ];
   if (params.wasLatePenalty) {
     lines.push(
-      '⚠️ Note: Cette annulation était tardive (< 4h). Une pénalité a été appliquée au worker.',
+      '*Note*: Cette annulation était tardive (< 4h). Une pénalité a été appliquée au worker.',
       '',
     );
   }
   lines.push(
-    "Votre offre est de nouveau disponible pour d'autres candidats.",
+    "*Votre offre est de nouveau disponible pour d'autres candidats.*",
     '',
-    'Actions:',
+    '*Actions*:',
     '1️⃣ Voir les autres candidatures',
     "2️⃣ Republier l'offre",
     "3️⃣ Supprimer l'offre",
