@@ -102,12 +102,14 @@ async function handleCancelStep1(
   if (isLate) {
     return {
       reply: [
-        'Êtes-vous certain de vouloir annuler ?',
-        `Pénalité: ${LATE_CANCELLATION_PENALTY_FCFA.toLocaleString('fr-FR')} FCFA`,
-        '1️⃣ Oui, annuler malgré la pénalité',
-        '2️⃣ Non, maintenir ma candidature',
-        '',
-        'Tapez 1 ou 2.',
+        [
+          'Êtes-vous certain de vouloir annuler ?',
+          `Pénalité: ${LATE_CANCELLATION_PENALTY_FCFA.toLocaleString('fr-FR')} FCFA`,
+          '1️⃣ Oui, annuler malgré la pénalité',
+          '2️⃣ Non, maintenir ma candidature',
+          '',
+          'Tapez 1 ou 2.',
+        ].join('\n'),
       ],
       nextState: {
         ...state,
@@ -131,11 +133,13 @@ async function handleCancelStep1(
     );
     return {
       reply: [
-        '✅ Candidature annulée',
-        '',
-        "Votre candidature a été annulée. L'employeur a été notifié.",
-        '',
-        "Tapez 'Menu' pour revenir.",
+        [
+          '✅ Candidature annulée',
+          '',
+          "Votre candidature a été annulée. L'employeur a été notifié.",
+          '',
+          "Tapez 'Menu' pour revenir.",
+        ].join('\n'),
       ],
       clearState: true,
     };
@@ -166,13 +170,15 @@ async function handleCancelStep2(args: CancelStepArgs): Promise<FlowResult> {
         : '';
       return {
         reply: [
-          '⚠️ Candidature annulée avec pénalité',
-          '',
-          'Votre candidature a été annulée.' + penaltyMsg,
-          '',
-          "L'employeur a été notifié.",
-          '',
-          "Tapez 'Menu' pour revenir.",
+          [
+            '⚠️ Candidature annulée avec pénalité',
+            '',
+            'Votre candidature a été annulée.' + penaltyMsg,
+            '',
+            "L'employeur a été notifié.",
+            '',
+            "Tapez 'Menu' pour revenir.",
+          ].join('\n'),
         ],
         clearState: true,
       };

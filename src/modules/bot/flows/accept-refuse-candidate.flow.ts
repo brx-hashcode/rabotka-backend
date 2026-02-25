@@ -28,11 +28,13 @@ async function handleAcceptRefuseStep1(args: StepArgs): Promise<FlowResult> {
   if (!args.trimmed) {
     return {
       reply: [
-        'Actions disponibles pour cette candidature:',
-        '1️⃣ Accepter le candidat',
-        '2️⃣ Refuser',
-        '',
-        'Tapez 1 ou 2.',
+        [
+          'Actions disponibles pour cette candidature:',
+          '1️⃣ Accepter le candidat',
+          '2️⃣ Refuser',
+          '',
+          'Tapez 1 ou 2.',
+        ].join('\n'),
       ],
       nextState: state,
     };
@@ -45,11 +47,13 @@ async function handleAcceptRefuseStep1(args: StepArgs): Promise<FlowResult> {
       );
       return {
         reply: [
-          '✅ Candidature acceptée !',
-          '',
-          'Le worker a été notifié. Vous pouvez le contacter directement via les coordonnées fournies.',
-          '',
-          "Votre offre est maintenant marquée comme pourvue. Tapez 'Menu' pour revenir.",
+          [
+            '✅ Candidature acceptée !',
+            '',
+            'Le worker a été notifié. Vous pouvez le contacter directement via les coordonnées fournies.',
+            '',
+            "Votre offre est maintenant marquée comme pourvue. Tapez 'Menu' pour revenir.",
+          ].join('\n'),
         ],
         clearState: true,
       };
@@ -62,7 +66,9 @@ async function handleAcceptRefuseStep1(args: StepArgs): Promise<FlowResult> {
   if (normalized === '2' || normalized === 'refuser') {
     return {
       reply: [
-        "Raison du refus ? (optionnel). Tapez la raison ou 'Aucune' pour refuser sans raison.",
+        [
+          "Raison du refus ? (optionnel). Tapez la raison ou 'Aucune' pour refuser sans raison.",
+        ].join('\n'),
       ],
       nextState: {
         ...state,
@@ -93,11 +99,13 @@ async function handleAcceptRefuseStep2(args: StepArgs): Promise<FlowResult> {
     );
     return {
       reply: [
-        '❌ Candidature refusée',
-        '',
-        "Le worker a été notifié poliment. Votre offre reste ouverte pour d'autres candidatures.",
-        '',
-        "Tapez 'Menu' pour revenir.",
+        [
+          '❌ Candidature refusée',
+          '',
+          "Le worker a été notifié poliment. Votre offre reste ouverte pour d'autres candidatures.",
+          '',
+          "Tapez 'Menu' pour revenir.",
+        ].join('\n'),
       ],
       clearState: true,
     };
