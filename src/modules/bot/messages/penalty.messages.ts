@@ -80,7 +80,7 @@ export function formatEmployerProfileStats(params: {
   });
   const activeOffers = params.activeOffersCount ?? params.offersCount;
   return [
-    `👤 Votre profil Employeur - ${params.firstName} ${params.lastName}`,
+    `👤 Votre profil Employeur - *${params.firstName} ${params.lastName}*`,
     '',
     '📊 Statistiques:',
     SEP,
@@ -117,7 +117,7 @@ export function formatProfileStats(params: {
     year: 'numeric',
   });
   return [
-    `👤 Votre profil - ${params.firstName} ${params.lastName}`,
+    `👤 Votre profil - *${params.firstName} ${params.lastName}*`,
     '',
     '📊 Statistiques générales:',
     SEP,
