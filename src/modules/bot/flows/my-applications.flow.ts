@@ -32,7 +32,7 @@ export async function runMyApplicationsFlow(
 
   if (applicationIds.length === 0) {
     return {
-      reply: ["Aucune candidature. Tapez 'Menu'."],
+      reply: ["*AUCUNE CANDIDATURE. TAPEZ 'MENU'.*"],
       clearState: true,
     };
   }
@@ -40,12 +40,11 @@ export async function runMyApplicationsFlow(
   const applicationId = applicationIds[currentIndex];
   if (!applicationId) {
     return {
-      reply: ["Index invalide. Tapez 'Menu'."],
+      reply: ["*INDEX INVALIDE. TAPEZ 'MENU'.*"],
       clearState: true,
     };
   }
 
-  // "1" = Annuler cette candidature -> start cancel_application flow
   if (trimmed === '1') {
     const cancelState = getCancelApplicationInitialState(applicationId);
     const result = await runCancelApplicationFlow(
@@ -60,7 +59,6 @@ export async function runMyApplicationsFlow(
     };
   }
 
-  // "2" or "4" = Menu
   if (trimmed === '2' || trimmed === '4') {
     return {
       reply: [menuMessage(profile.profile_type)],
@@ -70,7 +68,7 @@ export async function runMyApplicationsFlow(
 
   return {
     reply: [
-      'Répondez par 1 (Annuler cette candidature) ou 2 (Retour au menu).',
+      '*RÉPONDEZ PAR 1 (ANNULER CETTE CANDIDATURE) OU 2 (RETOUR AU MENU).*',
     ],
     nextState: state,
   };

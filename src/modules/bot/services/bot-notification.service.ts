@@ -55,7 +55,7 @@ export class BotNotificationService {
         await this.whatsApp.sendMediaMessage(
           app.job_offer.employer.phone,
           app.worker.avatar_url,
-          `👤 ${app.worker.first_name} ${app.worker.last_name} - Candidat`,
+          `*${app.worker.first_name} ${app.worker.last_name} - CANDIDAT*`,
         );
       }
       await this.whatsApp.sendTextMessage(app.job_offer.employer.phone, text);
@@ -89,7 +89,7 @@ export class BotNotificationService {
       await this.whatsApp.sendTextMessage(app.worker.phone, text);
     } catch (err) {
       this.logger.warn(
-        `Failed to send accepted notification to worker: ${applicationId}`,
+        `Failed to send accepted notification to worker: ${String(applicationId)}`,
         err,
       );
     }
@@ -107,7 +107,7 @@ export class BotNotificationService {
       await this.whatsApp.sendTextMessage(app.worker.phone, text);
     } catch (err) {
       this.logger.warn(
-        `Failed to send rejected notification to worker: ${applicationId}`,
+        `Failed to send rejected notification to worker: ${String(applicationId)}`,
         err,
       );
     }
@@ -138,7 +138,7 @@ export class BotNotificationService {
       await this.whatsApp.sendTextMessage(app.job_offer.employer.phone, text);
     } catch (err) {
       this.logger.warn(
-        `Failed to send cancellation notification to employer: ${applicationId}`,
+        `Failed to send cancellation notification to employer: ${String(applicationId)}`,
         err,
       );
     }

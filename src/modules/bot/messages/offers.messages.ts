@@ -36,7 +36,7 @@ export function formatOfferList(
   total: number,
   pageInfo?: { hasNext: boolean },
 ): string {
-  const lines = [`📋 Offres disponibles (${total} offres)`, '', SEP];
+  const lines = [`*OFFRES DISPONIBLES (${total} offres)*`, '', SEP];
 
   for (const o of offers) {
     const summary =
@@ -44,13 +44,13 @@ export function formatOfferList(
         ? o.description.slice(0, 60) + '...'
         : o.description;
     lines.push(
-      `📌 Offre #${o.id.slice(0, 8)}`,
+      `*Offre #${o.id.slice(0, 8)}*`,
       o.title,
       '',
-      `📝 Résumé: ${summary}`,
-      `🕐 ${formatDate(o.scheduled_at)}`,
-      `💰 ${o.amount.toLocaleString('fr-FR')} FCFA ${formatPaymentFlow(o.payment_flow)}`,
-      `📍 ${o.address.length > 40 ? o.address.slice(0, 40) + '...' : o.address}`,
+      `*Résumé*: ${summary}`,
+      `*Date*: ${formatDate(o.scheduled_at)}`,
+      `*Montant*: ${o.amount.toLocaleString('fr-FR')} FCFA ${formatPaymentFlow(o.payment_flow)}`,
+      `*Adresse*: ${o.address.length > 40 ? o.address.slice(0, 40) + '...' : o.address}`,
       '',
       '1️⃣ Postuler',
       '2️⃣ Voir détails',
@@ -60,9 +60,9 @@ export function formatOfferList(
   }
 
   if (pageInfo?.hasNext) {
-    lines.push('3️⃣ Offre suivante');
+    lines.push('3️⃣ *Offre suivante*');
   }
-  lines.push('4️⃣ Retour au menu', '', 'Tapez le numéro correspondant.');
+  lines.push('4️⃣ *Retour au menu*', '', '*Tapez le numéro correspondant.*');
 
   return lines.join('\n');
 }
@@ -70,23 +70,23 @@ export function formatOfferList(
 export function formatOfferDetail(offer: OfferListItem): string {
   const flow = formatPaymentFlow(offer.payment_flow);
   const lines = [
-    `📋 Offre #${offer.id.slice(0, 8)} - Détails complets`,
+    `*OFFRE #${offer.id.slice(0, 8)} - DÉTAILS COMPLETS*`,
     '',
-    `📌 Titre: ${offer.title}`,
+    `*Titre*: ${offer.title}`,
     '',
-    '📝 Description complète:',
+    '*Description complète*:',
     offer.description,
     '',
-    `🕐 Date et heure: ${formatDate(offer.scheduled_at)}`,
-    `💰 Rémunération: ${offer.amount.toLocaleString('fr-FR')} FCFA ${flow}`,
-    `📍 Adresse: ${offer.address}`,
+    `*Date et heure*: ${formatDate(offer.scheduled_at)}`,
+    `*Rémunération*: ${offer.amount.toLocaleString('fr-FR')} FCFA ${flow}`,
+    `*Adresse*: ${offer.address}`,
     '',
   ];
   if (offer.note) {
-    lines.push(`📌 Note de l'employeur:`, offer.note, '');
+    lines.push(`*Note de l'employeur*:`, offer.note, '');
   }
   lines.push(
-    "👤 Employeur: [Masqué jusqu'à acceptation]",
+    "*Employeur*: [Masqué jusqu'à acceptation]",
     '',
     'Actions:',
     '1️⃣ Postuler à cette offre',
@@ -99,7 +99,7 @@ export function formatOfferDetail(offer: OfferListItem): string {
 
 export function formatOfferPublishedSuccess(offerId: string): string {
   return [
-    '✅ Votre offre a été publiée avec succès !',
+    '*Votre offre a été publiée avec succès !*',
     'Elle est maintenant visible par tous les workers.',
     '',
     `*Offre ID*: #${offerId.slice(0, 8)}`,

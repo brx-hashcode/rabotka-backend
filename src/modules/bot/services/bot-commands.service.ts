@@ -115,11 +115,11 @@ export class BotCommandsService {
 
   async myOffers(profile: BotProfile): Promise<string> {
     if (profile.profile_type !== 'EMPLOYER') {
-      return "❌ Seuls les employeurs peuvent voir leurs offres. Tapez 'Menu'.";
+      return "*SEULS LES EMPLOYEURS PEUVENT VOIR LEURS OFFRES. TAPEZ 'MENU' POUR REVENIR.*";
     }
     const offers = await this.jobOfferService.findByEmployerId(profile.id);
     if (offers.length === 0) {
-      return "Vous n'avez publié aucune offre. Tapez 1 pour publier une offre.";
+      return "*VOUS N'AVEZ PUBLIÉ AUCUNE OFFRE. TAPEZ 1 POUR PUBLIER UNE OFFRE.*";
     }
     const lines = [`*Mes offres publiées* (${offers.length})`, '', SEP];
     for (const o of offers) {
@@ -140,16 +140,16 @@ export class BotCommandsService {
         '',
       );
     }
-    lines.push("Tapez 'Menu' pour revenir.");
+    lines.push("*TAPEZ 'MENU' POUR REVENIR.*");
     return lines.join('\n');
   }
 
   async candidaturesReceived(profile: BotProfile): Promise<string> {
     if (profile.profile_type !== 'EMPLOYER') {
-      return '❌ Seuls les employeurs peuvent voir les candidatures reçues.';
+      return '*SEULS LES EMPLOYEURS PEUVENT VOIR LES CANDIDATURES REÇUES.*';
     }
     const offers = await this.jobOfferService.findByEmployerId(profile.id);
-    const lines = ['📋 Candidatures reçues', ''];
+    const lines = ['*CANDIDATURES REÇUES*', ''];
 
     let hasAny = false;
     for (const offer of offers) {
@@ -160,7 +160,7 @@ export class BotCommandsService {
       if (pending.length === 0) continue;
       hasAny = true;
       lines.push(
-        `📌 Offre: ${offer.title}`,
+        `*Offre*: ${offer.title}`,
         `   ${pending.length} candidature(s) en attente`,
         '',
       );

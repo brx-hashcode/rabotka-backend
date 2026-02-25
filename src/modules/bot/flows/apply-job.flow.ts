@@ -74,21 +74,21 @@ async function handleApplyStep1(
       };
     } catch (err: unknown) {
       const message =
-        err instanceof Error ? err.message : 'Impossible de postuler.';
+        err instanceof Error ? err.message : '*IMPOSSIBLE DE POSTULER.*';
       return {
-        reply: [`❌ ${message} Tapez 'Menu' pour revenir.`],
+        reply: [`❌ ${message} *TAPEZ 'MENU' POUR REVENIR.*`],
         nextState: state,
       };
     }
   }
   if (normalized === '2' || normalized === 'non') {
     return {
-      reply: ["Candidature annulée. Tapez 'Menu' pour revenir."],
+      reply: ["*CANDIDATURE ANNULÉE. TAPEZ 'MENU' POUR REVENIR.*"],
       clearState: true,
     };
   }
   return {
-    reply: ['Répondez par 1 (Oui, je postule) ou 2 (Non, retour).'],
+    reply: ['*RÉPONDEZ PAR 1 (OUI, JE POSTULE) OU 2 (NON, RETOUR).*'],
     nextState: state,
   };
 }
@@ -106,14 +106,14 @@ export async function runApplyJobFlow(
 
   if (!jobOfferId) {
     return {
-      reply: ["Erreur: offre non trouvée. Tapez 'Menu' pour revenir."],
+      reply: ["*ERREUR: OFFRE NON TROUVÉE. TAPEZ 'MENU' POUR REVENIR.*"],
       clearState: true,
     };
   }
 
   if (profile.profile_type !== 'WORKER') {
     return {
-      reply: ["Seuls les workers peuvent postuler aux offres. Tapez 'Menu'."],
+      reply: ["*SEULS LES WORKERS PEUVENT POSTULER AUX OFFRES. TAPEZ 'MENU'.*"],
       clearState: true,
     };
   }
@@ -121,7 +121,7 @@ export async function runApplyJobFlow(
   const offer = await ctx.jobOfferService.findById(jobOfferId);
   if (!offer) {
     return {
-      reply: ["Cette offre n'existe plus. Tapez 'Menu'."],
+      reply: ["*CETTE OFFRE N'EXISTE PLUS. TAPEZ 'MENU'.*"],
       clearState: true,
     };
   }
@@ -134,7 +134,7 @@ export async function runApplyJobFlow(
   }
 
   return {
-    reply: ["Erreur. Tapez 'Menu' pour revenir."],
+    reply: ["*ERREUR. TAPEZ 'MENU' POUR REVENIR.*"],
     clearState: true,
   };
 }

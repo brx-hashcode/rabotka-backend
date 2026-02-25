@@ -29,11 +29,11 @@ async function handleAcceptRefuseStep1(args: StepArgs): Promise<FlowResult> {
     return {
       reply: [
         [
-          'Actions disponibles pour cette candidature:',
+          '*ACTIONS DISPONIBLES POUR CETTE CANDIDATURE:*',
           '1️⃣ Accepter le candidat',
           '2️⃣ Refuser',
           '',
-          'Tapez 1 ou 2.',
+          '*Tapez 1 ou 2.*',
         ].join('\n'),
       ],
       nextState: state,
@@ -48,7 +48,7 @@ async function handleAcceptRefuseStep1(args: StepArgs): Promise<FlowResult> {
       return {
         reply: [
           [
-            '✅ Candidature acceptée !',
+            '*Candidature acceptée !*',
             '',
             'Le worker a été notifié. Vous pouvez le contacter directement via les coordonnées fournies.',
             '',
@@ -59,7 +59,7 @@ async function handleAcceptRefuseStep1(args: StepArgs): Promise<FlowResult> {
       };
     } catch (err: unknown) {
       const message =
-        err instanceof Error ? err.message : "Impossible d'accepter.";
+        err instanceof Error ? err.message : "*IMPOSSIBLE D'ACCEPTER.*";
       return { reply: [`❌ ${message}`], nextState: state };
     }
   }
@@ -67,7 +67,7 @@ async function handleAcceptRefuseStep1(args: StepArgs): Promise<FlowResult> {
     return {
       reply: [
         [
-          "Raison du refus ? (optionnel). Tapez la raison ou 'Aucune' pour refuser sans raison.",
+          "*RAISON DU REFUS ? (OPTIONNEL). TAPEZ LA RAISON OU 'AUCUNE' POUR REFUSER SANS RAISON.*",
         ].join('\n'),
       ],
       nextState: {
@@ -79,7 +79,7 @@ async function handleAcceptRefuseStep1(args: StepArgs): Promise<FlowResult> {
     };
   }
   return {
-    reply: ['Répondez par 1 (Accepter) ou 2 (Refuser).'],
+    reply: ['*RÉPONDEZ PAR 1 (ACCEPTER) OU 2 (REFUSER).*'],
     nextState: state,
   };
 }
@@ -100,18 +100,18 @@ async function handleAcceptRefuseStep2(args: StepArgs): Promise<FlowResult> {
     return {
       reply: [
         [
-          '❌ Candidature refusée',
+          '*Candidature refusée*',
           '',
           "Le worker a été notifié poliment. Votre offre reste ouverte pour d'autres candidatures.",
           '',
-          "Tapez 'Menu' pour revenir.",
+          "*Tapez 'Menu' pour revenir.*",
         ].join('\n'),
       ],
       clearState: true,
     };
   } catch (err: unknown) {
     const message =
-      err instanceof Error ? err.message : 'Impossible de refuser.';
+      err instanceof Error ? err.message : '*IMPOSSIBLE DE REFUSER.*';
     return { reply: [`❌ ${message}`], nextState: state };
   }
 }
@@ -132,7 +132,7 @@ export async function runAcceptRefuseCandidateFlow(
 
   if (!applicationId) {
     return {
-      reply: ["Erreur: candidature non trouvée. Tapez 'Menu'."],
+      reply: ["*ERREUR: CANDIDATURE NON TROUVÉE. TAPEZ 'MENU'.*"],
       clearState: true,
     };
   }
@@ -140,7 +140,7 @@ export async function runAcceptRefuseCandidateFlow(
   if (profile.profile_type !== 'EMPLOYER') {
     return {
       reply: [
-        "Seuls les employeurs peuvent gérer les candidatures. Tapez 'Menu'.",
+        "*SEULS LES EMPLOYEURS PEUVENT GÉRER LES CANDIDATURES. TAPEZ 'MENU'.*",
       ],
       clearState: true,
     };
@@ -159,7 +159,7 @@ export async function runAcceptRefuseCandidateFlow(
   if (state.step === 2) return handleAcceptRefuseStep2(args);
 
   return {
-    reply: ["Erreur. Tapez 'Menu' pour revenir."],
+    reply: ["*ERREUR. TAPEZ 'MENU' POUR REVENIR.*"],
     clearState: true,
   };
 }
