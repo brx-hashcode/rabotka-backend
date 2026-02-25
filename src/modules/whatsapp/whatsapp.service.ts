@@ -32,6 +32,19 @@ export class WhatsAppService {
     return sid != null;
   }
 
+  async sendMediaMessage(
+    phone: string,
+    mediaUrl: string,
+    caption?: string,
+  ): Promise<boolean> {
+    const sid = await this.twilioService.sendWhatsAppMedia(
+      phone,
+      mediaUrl,
+      caption,
+    );
+    return sid != null;
+  }
+
   async verifyWhatsAppToken(token: string): Promise<void> {
     if (!token || token.trim().length === 0) {
       throw new BadRequestException('Invalid verification token');

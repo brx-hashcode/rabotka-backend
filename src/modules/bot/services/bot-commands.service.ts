@@ -196,6 +196,7 @@ export class BotCommandsService {
           last_name: true,
           reliability_score: true,
           created_at: true,
+          avatar_url: true,
         },
       }),
       this.applicationService.findByWorker(profile.id, { limit: 500 }),
@@ -217,9 +218,6 @@ export class BotCommandsService {
       (sum, a) => sum + (a.job_offer?.amount ?? 0),
       0,
     );
-    const cancelled = applications.filter(
-      (a) => a.status === 'CANCELLED',
-    ).length;
     const completionRate =
       applications.length > 0
         ? Math.round((completed.length / applications.length) * 100)
@@ -227,7 +225,7 @@ export class BotCommandsService {
     const totalPenalties = penalties.reduce((s, p) => s + Number(p.amount), 0);
     const lateCount = penalties.length;
 
-    return formatProfileStats({
+    const profileText = formatProfileStats({
       firstName: profileData.first_name,
       lastName: profileData.last_name,
       reliabilityScore: profileData.reliability_score,
@@ -238,6 +236,10 @@ export class BotCommandsService {
       totalPenalties,
       lateCancellations: lateCount,
     });
+    if (profileData.avatar_url) {
+      return `[IMG:${profileData.avatar_url}]${profileText}`;
+    }
+    return profileText;
   }
 
   async penaltyHistory(profile: BotProfile): Promise<string> {

@@ -103,6 +103,50 @@ export class TwilioService {
     }
   }
 
+  async sendWhatsAppMedia(
+    to: string,
+    mediaUrl: string,
+    body?: string,
+  ): Promise<string | null> {
+    const client = this.getClient();
+
+    if (!client || !this.whatsappFrom) {
+      this.logger.error(
+        'Twilio client or TWILIO_WHATSAPP_FROM not configured. Cannot send WhatsApp media.',
+      );
+      return null;
+    }
+
+    const toFormatted = this.formatWhatsAppNumber(to);
+    const fromFormatted = this.formatWhatsAppNumber(this.whatsappFrom);
+
+    try {
+      const payload: {
+        from: string;
+        to: string;
+        mediaUrl: string[];
+        body?: string;
+      } = {
+        from: fromFormatted,
+        to: toFormatted,
+        mediaUrl: [mediaUrl],
+      };
+      if (body) payload.body = body;
+
+      const message = await client.messages.create(payload);
+      if (message.sid) {
+        this.logger.debug(
+          `WhatsApp media sent to ${to}. Message SID: ${message.sid}`,
+        );
+        return message.sid;
+      }
+      return null;
+    } catch (err) {
+      this.logger.error(`Twilio error sending WhatsApp media to ${to}:`, err);
+      return null;
+    }
+  }
+
   async sendSms(
     to: string,
     body: string,

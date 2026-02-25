@@ -101,8 +101,22 @@ export class WhatsAppController {
       phone,
       text,
     );
+    const MEDIA_PREFIX = '[IMG:';
+    const MEDIA_SUFFIX = ']';
     for (const message of replies) {
-      if (message) {
+      if (!message) continue;
+      if (message.startsWith(MEDIA_PREFIX) && message.includes(MEDIA_SUFFIX)) {
+        const end = message.indexOf(MEDIA_SUFFIX);
+        const mediaUrl = message.slice(MEDIA_PREFIX.length, end).trim();
+        const caption = message.slice(end + MEDIA_SUFFIX.length).trim();
+        if (mediaUrl) {
+          await this.whatsAppService.sendMediaMessage(
+            phone,
+            mediaUrl,
+            caption || undefined,
+          );
+        }
+      } else {
         await this.whatsAppService.sendTextMessage(phone, message);
       }
     }
