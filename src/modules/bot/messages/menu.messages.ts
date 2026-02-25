@@ -3,7 +3,7 @@ import { RABOTKA_CONTACT } from '../../../common/constants/rabotka-contact';
 
 export function workerMenuMessage(): string {
   return [
-    'Menu Rabotka - Worker',
+    '*MENU RABOTKA*',
     '',
     '1️⃣ Voir les offres disponibles',
     '2️⃣ Mes candidatures',
@@ -17,7 +17,7 @@ export function workerMenuMessage(): string {
 
 export function employerMenuMessage(): string {
   return [
-    'Menu Rabotka - Employer',
+    '*MENU RABOTKA*',
     '',
     '1️⃣ Publier une offre',
     '2️⃣ Mes offres publiées',
@@ -36,14 +36,13 @@ export function menuMessage(profileType: BotProfileType): string {
 
 export function helpMessage(): string {
   return [
-    'Aide - Contact Rabotka',
+    '*CONTACT RABOTKA*',
     '',
-    'Nous contacter:',
-    `*Téléphone*: _${RABOTKA_CONTACT.phone}_`,
-    `*Email*: _${RABOTKA_CONTACT.email}_`,
+    `*Téléphone*: ${RABOTKA_CONTACT.phone}`,
+    `*Email*: ${RABOTKA_CONTACT.email}`,
     `*Adresse*: _${RABOTKA_CONTACT.address}_`,
     '',
-    "Tapez 'Menu' à tout moment pour revoir le menu.",
+    "Tapez 'Menu' pour revenir.",
   ].join('\n');
 }
 

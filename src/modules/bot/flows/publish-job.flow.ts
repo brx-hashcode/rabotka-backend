@@ -244,9 +244,9 @@ function handlePublishStep1(args: StepArgs): FlowResult {
     return {
       reply: [
         [
-          "📝 Publication d'offre - Étape 1/7",
+          "*PUBLICATION D'OFFRE* - ÉTAPE 1/7",
           '',
-          'Quel est le titre de votre offre ?',
+          '*Quel est le titre de votre offre ?*',
           '',
           '*Exemple*: "_Plombier pour réparation urgente_"',
         ].join('\n'),
@@ -257,7 +257,7 @@ function handlePublishStep1(args: StepArgs): FlowResult {
   if (trimmed.length < TITLE_MIN || trimmed.length > TITLE_MAX) {
     return {
       reply: [
-        `Le titre doit contenir entre ${TITLE_MIN} et ${TITLE_MAX} caractères.`,
+        `*Le titre doit contenir entre ${TITLE_MIN} et ${TITLE_MAX} caractères.*`,
       ],
       nextState: state,
     };
@@ -265,9 +265,9 @@ function handlePublishStep1(args: StepArgs): FlowResult {
   return {
     reply: [
       [
-        '📝 Étape 2/7',
+        '*ÉTAPE 2/7*',
         '',
-        'Décrivez votre offre en détail. Soyez précis sur les tâches à réaliser.',
+        '*Décrivez votre offre en détail. Soyez précis sur les tâches à réaliser.*',
         '',
         '*Exemple*: "_Réparation fuite d\'eau cuisine, remplacement robinet, vérification tuyauterie_"',
       ].join('\n'),
@@ -285,14 +285,16 @@ function handlePublishStep2(args: StepArgs): FlowResult {
   const { state, payload, trimmed } = args;
   if (!trimmed) {
     return {
-      reply: ['Décrivez votre offre en détail (entre 20 et 1000 caractères).'],
+      reply: [
+        '*Décrivez votre offre en détail (entre 20 et 1000 caractères).*',
+      ],
       nextState: state,
     };
   }
   if (trimmed.length < DESC_MIN || trimmed.length > DESC_MAX) {
     return {
       reply: [
-        `La description doit contenir entre ${DESC_MIN} et ${DESC_MAX} caractères.`,
+        `*La description doit contenir entre ${DESC_MIN} et ${DESC_MAX} caractères.*`,
       ],
       nextState: state,
     };
@@ -300,9 +302,9 @@ function handlePublishStep2(args: StepArgs): FlowResult {
   return {
     reply: [
       [
-        '📝 Étape 3/7',
+        '*ÉTAPE 3/7*',
         '',
-        'À quelle date et heure le travail doit-il commencer ?',
+        '*À quelle date et heure le travail doit-il commencer ?*',
         'Format: JJ/MM/AAAA HH:MM',
         '',
         '*Exemple*: "_15/02/2026 09:00_"',
@@ -322,7 +324,7 @@ function handlePublishStep3(args: StepArgs): FlowResult {
   if (!trimmed) {
     return {
       reply: [
-        "Entrez la date et l'heure au format JJ/MM/AAAA HH:MM (ex: 15/02/2026 09:00)",
+        "*Entrez la date et l'heure au format JJ/MM/AAAA HH:MM (ex: 15/02/2026 09:00)*",
       ],
       nextState: state,
     };
@@ -331,7 +333,7 @@ function handlePublishStep3(args: StepArgs): FlowResult {
   if (!dt) {
     return {
       reply: [
-        'Format invalide ou date invalide. Utilisez JJ/MM/AAAA HH:MM et choisissez une date future.',
+        '*Format invalide ou date invalide. Utilisez JJ/MM/AAAA HH:MM et choisissez une date future.*',
       ],
       nextState: state,
     };
@@ -341,7 +343,7 @@ function handlePublishStep3(args: StepArgs): FlowResult {
   if (dt < minDate) {
     return {
       reply: [
-        `La date doit être au moins ${MIN_HOURS_FROM_NOW} heures dans le futur.`,
+        `*La date doit être au moins ${MIN_HOURS_FROM_NOW} heures dans le futur.*`,
       ],
       nextState: state,
     };
@@ -349,9 +351,9 @@ function handlePublishStep3(args: StepArgs): FlowResult {
   return {
     reply: [
       [
-        '📝 Étape 4/7',
+        '*ÉTAPE 4/7*',
         '',
-        'Quel est le montant proposé (en FCFA) ?',
+        '*Quel est le montant proposé (en FCFA) ?*',
         'Tapez uniquement le chiffre.',
         '',
         '*Exemple*: "_15000_"',
@@ -370,7 +372,7 @@ function handlePublishStep4(args: StepArgs): FlowResult {
   const { state, payload, trimmed } = args;
   if (!trimmed) {
     return {
-      reply: ['Entrez le montant en FCFA (entre 1 000 et 1 000 000).'],
+      reply: ['*Entrez le montant en FCFA (entre 1 000 et 1 000 000).*'],
       nextState: state,
     };
   }
@@ -378,7 +380,7 @@ function handlePublishStep4(args: StepArgs): FlowResult {
   if (Number.isNaN(amount) || amount < AMOUNT_MIN || amount > AMOUNT_MAX) {
     return {
       reply: [
-        `Montant invalide. Entrez un montant entre ${AMOUNT_MIN.toLocaleString('fr-FR')} et ${AMOUNT_MAX.toLocaleString('fr-FR')} FCFA`,
+        `*Montant invalide. Entrez un montant entre ${AMOUNT_MIN.toLocaleString('fr-FR')} et ${AMOUNT_MAX.toLocaleString('fr-FR')} FCFA*`,
       ],
       nextState: state,
     };
@@ -386,9 +388,9 @@ function handlePublishStep4(args: StepArgs): FlowResult {
   return {
     reply: [
       [
-        '📝 Étape 5/7',
+        '*ÉTAPE 5/7*',
         '',
-        'Type de rémunération ?',
+        '*Type de rémunération ?*',
         '1️⃣ Par heure',
         '2️⃣ Par jour',
         '3️⃣ Par mois',
@@ -410,16 +412,16 @@ function handlePublishStep5(args: StepArgs): FlowResult {
   const num = parsePaymentFlowChoice(trimmed);
   if (!num) {
     return {
-      reply: ['Choix invalide. Tapez 1, 2 ou 3.'],
+      reply: ['*CHOIX INVALIDE. TAPEZ 1, 2 OU 3.*'],
       nextState: state,
     };
   }
   return {
     reply: [
       [
-        '📝 Étape 6/7',
+        '*ÉTAPE 6/7*',
         '',
-        "Quelle est l'adresse complète du lieu de travail ?",
+        "*Quelle est l'adresse complète du lieu de travail ?*",
         '',
         '*Exemple*: "_123 Avenue de la Paix, Poto-Poto, Brazzaville_"',
       ].join('\n'),
@@ -438,7 +440,7 @@ function handlePublishStep6(args: StepArgs): FlowResult {
   if (!trimmed || trimmed.length < ADDRESS_MIN) {
     return {
       reply: [
-        `L'adresse doit contenir au moins ${String(ADDRESS_MIN)} caractères.`,
+        `*L'adresse doit contenir au moins ${String(ADDRESS_MIN)} caractères.*`,
       ],
       nextState: state,
     };
@@ -446,9 +448,9 @@ function handlePublishStep6(args: StepArgs): FlowResult {
   return {
     reply: [
       [
-        '📝 Étape 7/7 (optionnel)',
+        '*ÉTAPE 7/7 (OPTIONNEL)*',
         '',
-        'Avez-vous une note complémentaire à ajouter ?',
+        '*Avez-vous une note complémentaire à ajouter ?*',
         '',
         '*Exemple*: "_Apporter vos propres outils_"',
         'Tapez "Non" ou "Passer" pour ignorer.',
@@ -471,7 +473,7 @@ function handlePublishStep7(args: StepArgs): FlowResult {
       : trimmed;
   if (note != null && note.length > NOTE_MAX) {
     return {
-      reply: [`La note ne peut pas dépasser ${NOTE_MAX} caractères.`],
+      reply: [`*La note ne peut pas dépasser ${NOTE_MAX} caractères.*`],
       nextState: state,
     };
   }
@@ -480,11 +482,11 @@ function handlePublishStep7(args: StepArgs): FlowResult {
   return {
     reply: [
       [
-        '📋 Récapitulatif de votre offre :',
+        '*RÉCAPITULATIF DE VOTRE OFFRE* :',
         '',
         summary,
         '',
-        'Confirmez-vous la publication de cette offre ?',
+        '*Confirmez-vous la publication de cette offre ?*',
         '1️⃣ Oui, publier',
         '2️⃣ Modifier',
         '3️⃣ Annuler',
@@ -570,12 +572,12 @@ function buildSummary(payload: Record<string, unknown>): string {
       ? 'Aucune'
       : payload.note;
   return [
-    `📌 Titre: ${title}`,
+    `*Titre*: ${title}`,
     `📝 Description: ${descStr}`,
-    `🕐 Date et heure: ${scheduled}`,
-    `💰 Montant: ${Number(payload.amount ?? 0).toLocaleString('fr-FR')} FCFA ${flow}`,
-    `📍 Adresse: ${address}`,
-    `📌 Note: ${note}`,
+    `*Date et heure*: ${scheduled}`,
+    `*Montant*: ${Number(payload.amount ?? 0).toLocaleString('fr-FR')} FCFA ${flow}`,
+    `*Adresse*: ${address}`,
+    `*Note*: ${note}`,
   ].join('\n');
 }
 
@@ -590,9 +592,9 @@ export function getPublishJobInitialState(): BotState {
 
 export function getPublishJobFirstMessage(): string {
   return [
-    "📝 Publication d'offre - Étape 1/7",
+    "*PUBLICATION D'OFFRE* - ÉTAPE 1/7",
     '',
-    'Quel est le titre de votre offre ?',
+    '*Quel est le titre de votre offre ?*',
     '',
     '*Exemple*: "_Plombier pour réparation urgente_"',
   ].join('\n');

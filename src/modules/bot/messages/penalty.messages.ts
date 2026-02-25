@@ -26,14 +26,14 @@ export function formatPenaltyHistory(
   completedMissions: number,
 ): string {
   const lines = [
-    '📊 Historique des pénalités',
+    '*HISTORIQUE DES PÉNALITÉS*',
     '',
-    '💰 Récapitulatif:',
+    '*RÉCAPITULATIF*',
     SEP,
-    `Total pénalités: ${totalAmount.toLocaleString('fr-FR')} FCFA`,
-    `Nombre d'annulations tardives: ${lateCancellationsCount}`,
-    `Score actuel: ${currentScore}/100`,
-    `✅ Missions complétées: ${completedMissions}`,
+    `*Total pénalités*: ${totalAmount.toLocaleString('fr-FR')} FCFA`,
+    `*Nombre d'annulations tardives*: ${lateCancellationsCount}`,
+    `*Score actuel*: ${currentScore}/100`,
+    `*Missions complétées*: ${completedMissions}`,
     SEP,
     '',
   ];
@@ -45,9 +45,9 @@ export function formatPenaltyHistory(
     for (const p of penalties) {
       lines.push(
         `📅 ${formatDate(p.appliedAt)}`,
-        p.jobOfferTitle ? `📌 Offre: ${p.jobOfferTitle}` : '',
-        `💰 Pénalité: ${p.amount.toLocaleString('fr-FR')} FCFA`,
-        p.reason ? `💬 Raison: ${p.reason}` : '',
+        p.jobOfferTitle ? `*Offre*: ${p.jobOfferTitle}` : '',
+        `*Pénalité*: ${p.amount.toLocaleString('fr-FR')} FCFA`,
+        p.reason ? `*Raison*: ${p.reason}` : '',
         SEP,
         '',
       );
@@ -55,7 +55,7 @@ export function formatPenaltyHistory(
   }
 
   lines.push(
-    '💡 Conseils pour améliorer votre score:',
+    '*CONSEILS POUR AMÉLIORER VOTRE SCORE*',
     '✓ Complétez vos missions sans annulation',
     '✓ Maintenez un score > 90 pour plus de visibilité',
     '✓ Annulez toujours > 4h avant si nécessaire',
@@ -68,6 +68,7 @@ export function formatPenaltyHistory(
 export function formatEmployerProfileStats(params: {
   firstName: string;
   lastName: string;
+  email: string;
   memberSince: Date;
   offersCount: number;
   pendingCandidaturesCount: number;
@@ -80,17 +81,21 @@ export function formatEmployerProfileStats(params: {
   });
   const activeOffers = params.activeOffersCount ?? params.offersCount;
   return [
-    `👤 Votre profil Employeur - *${params.firstName} ${params.lastName}*`,
+    `*VOTRE PROFIL RABOTKA*`,
     '',
-    '📊 Statistiques:',
+    `*Nom*: ${params.lastName}`,
+    `*Prénom*: ${params.firstName}`,
+    `*Email*: ${params.email}`,
+    '',
+    '*Statistiques*',
     SEP,
-    `📅 Membre depuis: ${since}`,
-    `📝 Offres publiées: ${params.offersCount}`,
-    `📋 Offres actives: ${activeOffers}`,
-    `👥 Candidatures en attente: ${params.pendingCandidaturesCount}`,
+    `*Membre depuis*: ${since}`,
+    `*Offres publiées*: ${params.offersCount}`,
+    `*Offres actives*: ${activeOffers}`,
+    `*Candidatures en attente*: ${params.pendingCandidaturesCount}`,
     SEP,
     '',
-    'Actions:',
+    '*Actions*',
     '1️⃣ Voir mes offres',
     '2️⃣ Candidatures reçues',
     '3️⃣ Retour au menu',

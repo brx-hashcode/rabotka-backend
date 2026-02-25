@@ -121,7 +121,7 @@ export class BotCommandsService {
     if (offers.length === 0) {
       return "Vous n'avez publié aucune offre. Tapez 1 pour publier une offre.";
     }
-    const lines = [`📋 Mes offres publiées (${offers.length})`, '', SEP];
+    const lines = [`*Mes offres publiées* (${offers.length})`, '', SEP];
     for (const o of offers) {
       const dateStr = o.scheduled_at.toLocaleDateString('fr-FR', {
         day: '2-digit',
@@ -131,10 +131,11 @@ export class BotCommandsService {
         minute: '2-digit',
       });
       lines.push(
-        `📌 #${o.id.slice(0, 8)} - ${o.title}`,
-        `🕐 ${dateStr}`,
-        `💰 ${o.amount.toLocaleString('fr-FR')} FCFA`,
-        `Statut: ${o.status}`,
+        `*ID*: #${o.id.slice(0, 8)}`,
+        `*Titre*: ${o.title}`,
+        `*Date*: ${dateStr}`,
+        `*Montant*: ${o.amount.toLocaleString('fr-FR')} FCFA`,
+        `*Statut*: ${o.status}`,
         SEP,
         '',
       );
@@ -191,6 +192,7 @@ export class BotCommandsService {
       select: {
         first_name: true,
         last_name: true,
+        email: true,
         reliability_score: true,
         created_at: true,
         avatar_url: true,
@@ -219,6 +221,7 @@ export class BotCommandsService {
       const profileText = formatEmployerProfileStats({
         firstName: profileData.first_name,
         lastName: profileData.last_name,
+        email: profileData.email,
         memberSince: profileData.created_at,
         offersCount,
         pendingCandidaturesCount,
