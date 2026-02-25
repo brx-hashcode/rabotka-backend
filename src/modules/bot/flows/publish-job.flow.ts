@@ -117,8 +117,10 @@ function handleStep8Modifier(
     return null;
   return {
     reply: [
-      'Quelle étape souhaitez-vous modifier ? (1-7)',
-      '1=Titre, 2=Description, 3=Date/heure, 4=Montant, 5=Type rémunération, 6=Adresse, 7=Note',
+      [
+        'Quelle étape souhaitez-vous modifier ? (1-7)',
+        '1=Titre, 2=Description, 3=Date/heure, 4=Montant, 5=Type rémunération, 6=Adresse, 7=Note',
+      ].join('\n'),
     ],
     nextState: {
       ...state,
@@ -241,10 +243,13 @@ function handlePublishStep1(args: StepArgs): FlowResult {
   if (!trimmed) {
     return {
       reply: [
-        "📝 Publication d'offre - Étape 1/7",
-        '',
-        'Quel est le titre de votre offre ?',
-        'Exemple: "Plombier pour réparation urgente"',
+        [
+          "📝 Publication d'offre - Étape 1/7",
+          '',
+          'Quel est le titre de votre offre ?',
+          '',
+          '*Exemple*: "_Plombier pour réparation urgente_"',
+        ].join('\n'),
       ],
       nextState: state,
     };
@@ -259,10 +264,13 @@ function handlePublishStep1(args: StepArgs): FlowResult {
   }
   return {
     reply: [
-      '📝 Étape 2/7',
-      '',
-      'Décrivez votre offre en détail. Soyez précis sur les tâches à réaliser.',
-      'Exemple: "Réparation fuite d\'eau cuisine, remplacement robinet, vérification tuyauterie"',
+      [
+        '📝 Étape 2/7',
+        '',
+        'Décrivez votre offre en détail. Soyez précis sur les tâches à réaliser.',
+        '',
+        '*Exemple*: "_Réparation fuite d\'eau cuisine, remplacement robinet, vérification tuyauterie_"',
+      ].join('\n'),
     ],
     nextState: {
       ...state,
@@ -291,11 +299,14 @@ function handlePublishStep2(args: StepArgs): FlowResult {
   }
   return {
     reply: [
-      '📝 Étape 3/7',
-      '',
-      'À quelle date et heure le travail doit-il commencer ?',
-      'Format: JJ/MM/AAAA HH:MM',
-      'Exemple: 15/02/2026 09:00',
+      [
+        '📝 Étape 3/7',
+        '',
+        'À quelle date et heure le travail doit-il commencer ?',
+        'Format: JJ/MM/AAAA HH:MM',
+        '',
+        '*Exemple*: "_15/02/2026 09:00_"',
+      ].join('\n'),
     ],
     nextState: {
       ...state,
@@ -337,10 +348,14 @@ function handlePublishStep3(args: StepArgs): FlowResult {
   }
   return {
     reply: [
-      '📝 Étape 4/7',
-      '',
-      'Quel est le montant proposé (en FCFA) ?',
-      'Tapez uniquement le chiffre. Exemple: 15000',
+      [
+        '📝 Étape 4/7',
+        '',
+        'Quel est le montant proposé (en FCFA) ?',
+        'Tapez uniquement le chiffre.',
+        '',
+        '*Exemple*: "_15000_"',
+      ].join('\n'),
     ],
     nextState: {
       ...state,
@@ -370,14 +385,16 @@ function handlePublishStep4(args: StepArgs): FlowResult {
   }
   return {
     reply: [
-      '📝 Étape 5/7',
-      '',
-      'Type de rémunération ?',
-      '1️⃣ Par heure',
-      '2️⃣ Par jour',
-      '3️⃣ Par mois',
-      '',
-      'Tapez le numéro correspondant.',
+      [
+        '📝 Étape 5/7',
+        '',
+        'Type de rémunération ?',
+        '1️⃣ Par heure',
+        '2️⃣ Par jour',
+        '3️⃣ Par mois',
+        '',
+        'Tapez le numéro correspondant.',
+      ].join('\n'),
     ],
     nextState: {
       ...state,
@@ -399,10 +416,13 @@ function handlePublishStep5(args: StepArgs): FlowResult {
   }
   return {
     reply: [
-      '📝 Étape 6/7',
-      '',
-      "Quelle est l'adresse complète du lieu de travail ?",
-      'Exemple: 123 Avenue de la Paix, Poto-Poto, Brazzaville',
+      [
+        '📝 Étape 6/7',
+        '',
+        "Quelle est l'adresse complète du lieu de travail ?",
+        '',
+        '*Exemple*: "_123 Avenue de la Paix, Poto-Poto, Brazzaville_"',
+      ].join('\n'),
     ],
     nextState: {
       ...state,
@@ -425,11 +445,14 @@ function handlePublishStep6(args: StepArgs): FlowResult {
   }
   return {
     reply: [
-      '📝 Étape 7/7 (optionnel)',
-      '',
-      'Avez-vous une note complémentaire à ajouter ?',
-      'Exemple: "Apporter vos propres outils"',
-      'Tapez "Non" ou "Passer" pour ignorer.',
+      [
+        '📝 Étape 7/7 (optionnel)',
+        '',
+        'Avez-vous une note complémentaire à ajouter ?',
+        '',
+        '*Exemple*: "_Apporter vos propres outils_"',
+        'Tapez "Non" ou "Passer" pour ignorer.',
+      ].join('\n'),
     ],
     nextState: {
       ...state,
@@ -456,14 +479,16 @@ function handlePublishStep7(args: StepArgs): FlowResult {
   const summary = buildSummary(fullPayload);
   return {
     reply: [
-      '📋 Récapitulatif de votre offre :',
-      '',
-      summary,
-      '',
-      'Confirmez-vous la publication de cette offre ?',
-      '1️⃣ Oui, publier',
-      '2️⃣ Modifier',
-      '3️⃣ Annuler',
+      [
+        '📋 Récapitulatif de votre offre :',
+        '',
+        summary,
+        '',
+        'Confirmez-vous la publication de cette offre ?',
+        '1️⃣ Oui, publier',
+        '2️⃣ Modifier',
+        '3️⃣ Annuler',
+      ].join('\n'),
     ],
     nextState: {
       ...state,
@@ -568,6 +593,7 @@ export function getPublishJobFirstMessage(): string {
     "📝 Publication d'offre - Étape 1/7",
     '',
     'Quel est le titre de votre offre ?',
-    'Exemple: "Plombier pour réparation urgente"',
+    '',
+    '*Exemple*: "_Plombier pour réparation urgente_"',
   ].join('\n');
 }

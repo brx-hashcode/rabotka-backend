@@ -102,7 +102,7 @@ export function formatOfferPublishedSuccess(offerId: string): string {
     '✅ Votre offre a été publiée avec succès !',
     'Elle est maintenant visible par tous les workers.',
     '',
-    `Offre ID: #${offerId.slice(0, 8)}`,
+    `*Offre ID*: #${offerId.slice(0, 8)}`,
     "Vous recevrez une notification dès qu'un worker postulera.",
     '',
     "Tapez 'Menu' pour revenir au menu principal.",
