@@ -1,4 +1,4 @@
-const SEP = '━━━━━━━━━━━━━━━━━━━━';
+const SEP = '━━━━━━━━━━━━━━━━━━';
 
 export type OfferListItem = {
   id: string;

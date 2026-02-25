@@ -30,10 +30,13 @@ import {
 } from '../flows/my-applications.flow';
 
 const INACTIVE_MESSAGE =
-  'Finalisez votre inscription en suivant le lien envoyé par WhatsApp.';
+  'Votre compte est créé mais pas encore activé. Cliquez sur le lien de confirmation que nous vous avons envoyé par WhatsApp pour l’activer.';
+
 const NOT_FOUND_MESSAGE =
-  "Ce numéro n'est pas inscrit. Inscrivez-vous sur notre site pour créer un compte.";
-const ERROR_MESSAGE = 'Une erreur est survenue. Réessayez ou tapez Menu.';
+  "Ce numéro n'est pas encore enregistré. Inscrivez-vous sur notre site pour créer votre compte.";
+
+const ERROR_MESSAGE =
+  'Une erreur est survenue. Veuillez réessayer ou tapez « Menu ».';
 
 @Injectable()
 export class BotOrchestratorService {
