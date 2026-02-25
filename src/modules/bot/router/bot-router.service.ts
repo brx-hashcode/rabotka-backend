@@ -42,7 +42,7 @@ function matchWorkerNumeric(trimmed: string): string | null {
   if (trimmed === WORKER_MENU_OPTIONS.MY_APPLICATIONS) return 'my_applications';
   if (trimmed === WORKER_MENU_OPTIONS.PROFILE) return 'profile';
   if (trimmed === WORKER_MENU_OPTIONS.HISTORY) return 'penalty_history';
-  if (trimmed === WORKER_MENU_OPTIONS.HELP) return 'menu';
+  if (trimmed === WORKER_MENU_OPTIONS.HELP) return 'help';
   return null;
 }
 
@@ -54,7 +54,7 @@ function matchEmployerNumeric(trimmed: string): string | null {
     return 'candidatures_received';
   if (trimmed === EMPLOYER_MENU_OPTIONS.PROFILE) return 'profile';
   if (trimmed === EMPLOYER_MENU_OPTIONS.HISTORY) return 'penalty_history';
-  if (trimmed === EMPLOYER_MENU_OPTIONS.HELP) return 'menu';
+  if (trimmed === EMPLOYER_MENU_OPTIONS.HELP) return 'help';
   return null;
 }
 

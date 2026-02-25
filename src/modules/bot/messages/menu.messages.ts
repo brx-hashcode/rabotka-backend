@@ -1,8 +1,9 @@
 import type { BotProfileType } from '../types/bot-state.types';
+import { RABOTKA_CONTACT } from '../../../common/constants/rabotka-contact';
 
 export function workerMenuMessage(): string {
   return [
-    '📱 Menu Rabotka - Worker',
+    'Menu Rabotka - Worker',
     '',
     '1️⃣ Voir les offres disponibles',
     '2️⃣ Mes candidatures',
@@ -16,7 +17,7 @@ export function workerMenuMessage(): string {
 
 export function employerMenuMessage(): string {
   return [
-    '📱 Menu Rabotka - Employer',
+    'Menu Rabotka - Employer',
     '',
     '1️⃣ Publier une offre',
     '2️⃣ Mes offres publiées',
@@ -33,11 +34,16 @@ export function menuMessage(profileType: BotProfileType): string {
   return profileType === 'WORKER' ? workerMenuMessage() : employerMenuMessage();
 }
 
-export function helpMessage(profileType: BotProfileType): string {
+export function helpMessage(): string {
   return [
-    menuMessage(profileType),
+    'Aide - Contact Rabotka',
     '',
-    "Tapez 'Menu' ou 'Aide' à tout moment pour revoir le menu.",
+    'Nous contacter:',
+    `*Téléphone*: _${RABOTKA_CONTACT.phone}_`,
+    `*Email*: _${RABOTKA_CONTACT.email}_`,
+    `*Adresse*: _${RABOTKA_CONTACT.address}_`,
+    '',
+    "Tapez 'Menu' à tout moment pour revoir le menu.",
   ].join('\n');
 }
 

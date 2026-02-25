@@ -45,7 +45,11 @@ export async function runProfileSubmenuFlow(
   }
 
   if (profileType === 'WORKER') {
-    if (trimmed === '1' || trimmed === '2') {
+    if (trimmed === '1') {
+      const result = await ctx.commands.myApplications(profile);
+      return { reply: [result.message], clearState: true };
+    }
+    if (trimmed === '2') {
       const message = await ctx.commands.penaltyHistory(profile);
       return { reply: [message], clearState: true };
     }
