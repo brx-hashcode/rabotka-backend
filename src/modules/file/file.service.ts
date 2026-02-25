@@ -1,6 +1,7 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { StorageService } from '../../common/services/storage/storage.service';
+import { ImageWatermarkService } from '../../common/services/image-watermark/image-watermark.service';
 import { UploadOptions } from '../../common/services/storage/types/storage.types';
 
 @Injectable()
@@ -10,6 +11,7 @@ export class FileService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storageService: StorageService,
+    private readonly imageWatermarkService: ImageWatermarkService,
   ) {}
 
   /**
@@ -36,8 +38,16 @@ export class FileService {
       : Buffer.from(file.buffer);
     const fileName: string = String(file.originalname);
 
+    let bufferToUpload = fileBuffer;
+    if (file.mimetype.startsWith('image/')) {
+      bufferToUpload = await this.imageWatermarkService.addWatermark(
+        fileBuffer,
+        file.mimetype,
+      );
+    }
+
     const uploadResult = await this.storageService.upload(
-      fileBuffer,
+      bufferToUpload,
       fileName,
       uploadOptions,
     );
