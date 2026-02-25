@@ -7,8 +7,13 @@ import { WorkerModule } from './worker.module';
 import { MailerService } from '@nestjs-modules/mailer';
 import { MailProcessor } from './modules/mail/mail.processor';
 import { QueueService } from './common/services/queue/queue.service';
-import { EMAIL_QUEUE } from './common/services/queue/queue.module';
+import {
+  EMAIL_QUEUE,
+  WHATSAPP_REMINDERS_QUEUE,
+} from './common/services/queue/queue.module';
 import type { EmailJobData } from './common/services/queue/queue.service';
+import { ReminderProcessor } from './modules/bot/reminder/reminder.processor';
+import type { ReminderJobData } from './modules/bot/reminder/reminder.processor';
 
 loadEnv({ path: '.env.local' });
 loadEnv();
@@ -20,6 +25,9 @@ class WorkerLogger implements LoggerService {
     'MailProcessor',
     'RedisService',
     'ExceptionHandler',
+    'NestFactory',
+    'InstanceLoader',
+    'ReminderProcessor',
   ];
 
   log(message: string, context?: string) {
@@ -29,13 +37,12 @@ class WorkerLogger implements LoggerService {
   }
 
   error(message: unknown, trace?: string, context?: string) {
-    if (!context || this.allowedContexts.includes(context)) {
-      const msg =
-        message instanceof Error
-          ? `${message.message}\n${message.stack ?? ''}`
-          : String(message);
-      console.error(`[${context || 'Worker'}] ${msg}`, trace ?? '');
-    }
+    // Always show errors so startup failures are visible
+    const msg =
+      message instanceof Error
+        ? `${message.message}\n${message.stack ?? ''}`
+        : String(message);
+    console.error(`[${context || 'Worker'}] ${msg}`, trace ?? '');
   }
 
   warn(message: string, context?: string) {
@@ -87,20 +94,23 @@ async function bootstrap(): Promise<void> {
 
   process.env.RUN_QUEUE_WORKER = 'true';
 
-  logger.log('🚀 Starting queue worker process...');
+  const reminderEnabled = process.env.RUN_REMINDER_WORKER !== 'false';
+  logger.log(
+    reminderEnabled
+      ? '🚀 Starting queue worker process (email + reminders)...'
+      : '🚀 Starting queue worker process (email only, RUN_REMINDER_WORKER=false)...',
+  );
 
   let app: INestApplicationContext;
   try {
-    app = await NestFactory.createApplicationContext(WorkerModule, {
+    app = await NestFactory.createApplicationContext(WorkerModule.forRoot(), {
       logger: new WorkerLogger(),
     });
+    logger.log('Nest application context created');
   } catch (err: unknown) {
     const message =
       err instanceof Error ? (err.stack ?? err.message) : String(err);
-    console.error(
-      '[Worker] Nest failed to create application context:',
-      message,
-    );
+    logger.error(`Nest failed to create application context: ${message}`);
     process.exitCode = 1;
     setImmediate(() => process.exit(1));
     return;
@@ -111,6 +121,15 @@ async function bootstrap(): Promise<void> {
     logger.error('QueueService not found');
     await app.close();
     process.exit(1);
+  }
+
+  let reminderProcessor: ReminderProcessor | null = null;
+  try {
+    reminderProcessor = app.get(ReminderProcessor);
+  } catch {
+    logger.warn(
+      'ReminderProcessor not found; reminder jobs will not be processed',
+    );
   }
 
   const mailProcessor = app.get(MailProcessor);
@@ -135,6 +154,14 @@ async function bootstrap(): Promise<void> {
     (job) => mailProcessor.processEmailJob(job),
     { concurrency: Number(process.env.EMAIL_QUEUE_CONCURRENCY) || 5 },
   );
+
+  if (reminderProcessor) {
+    queueService.createWorker<ReminderJobData>(
+      WHATSAPP_REMINDERS_QUEUE,
+      (job) => reminderProcessor.process(job),
+      { concurrency: 2 },
+    );
+  }
 
   app.enableShutdownHooks();
 

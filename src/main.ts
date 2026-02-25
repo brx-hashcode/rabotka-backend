@@ -43,6 +43,7 @@ async function bootstrap() {
   });
 
   const httpAdapter = app.getHttpAdapter().getInstance();
+  httpAdapter.set('trust proxy', 1);
 
   httpAdapter.get('/', (_, res) => {
     res.redirect('/api-docs');
