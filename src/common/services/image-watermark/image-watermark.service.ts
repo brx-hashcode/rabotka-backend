@@ -41,7 +41,10 @@ export class ImageWatermarkService {
       const height = meta.height ?? 600;
 
       const logoSize = Math.min(
-        Math.max(Math.floor(Math.min(width, height) * LOGO_SCALE_FRACTION), MIN_LOGO_PX),
+        Math.max(
+          Math.floor(Math.min(width, height) * LOGO_SCALE_FRACTION),
+          MIN_LOGO_PX,
+        ),
         MAX_LOGO_PX,
       );
 
@@ -54,7 +57,9 @@ export class ImageWatermarkService {
       const { data, info } = logoBuffer;
       const channels = info.channels;
       if (channels !== 4) {
-        this.logger.warn('Logo does not have alpha channel; using full opacity');
+        this.logger.warn(
+          'Logo does not have alpha channel; using full opacity',
+        );
       }
       for (let i = 3; i < data.length; i += 4) {
         data[i] = Math.round(data[i] * opacity);
@@ -75,11 +80,11 @@ export class ImageWatermarkService {
         .composite([
           {
             input: overlayWithAlpha,
-            gravity: 'southeast',
+            gravity: 'centre',
             blend: 'over',
           },
         ])
-        .toFormat(format)
+        .toFormat(format, this.getFormatOptions(format))
         .toBuffer();
 
       return output;
@@ -114,5 +119,23 @@ export class ImageWatermarkService {
     if (normalized.includes('png')) return 'png';
     if (normalized.includes('webp')) return 'webp';
     return 'jpeg';
+  }
+
+  /**
+   * Format options to preserve image quality and avoid compression artifacts.
+   */
+  private getFormatOptions(
+    format: keyof sharp.FormatEnum,
+  ): Record<string, unknown> {
+    switch (format) {
+      case 'jpeg':
+        return { quality: 95, mozjpeg: true };
+      case 'webp':
+        return { quality: 95 };
+      case 'png':
+        return { compressionLevel: 6 };
+      default:
+        return {};
+    }
   }
 }
