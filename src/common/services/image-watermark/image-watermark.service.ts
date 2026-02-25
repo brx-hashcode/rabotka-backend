@@ -5,9 +5,9 @@ import * as fs from 'node:fs';
 import sharp from 'sharp';
 
 const DEFAULT_OPACITY = 0.3;
-const LOGO_SCALE_FRACTION = 0.2;
-const MIN_LOGO_PX = 32;
-const MAX_LOGO_PX = 120;
+const LOGO_SCALE_FRACTION = 0.12;
+const MIN_LOGO_PX = 24;
+const MAX_LOGO_PX = 72;
 
 @Injectable()
 export class ImageWatermarkService {
@@ -80,7 +80,7 @@ export class ImageWatermarkService {
         .composite([
           {
             input: overlayWithAlpha,
-            gravity: 'centre',
+            gravity: 'southeast',
             blend: 'over',
           },
         ])
