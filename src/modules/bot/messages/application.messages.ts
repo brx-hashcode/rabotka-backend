@@ -1,5 +1,82 @@
 export const SEP = '━━━━━━━━━━━━━━━';
 
+export type CandidatureListItem = {
+  id: string;
+  fullName: string;
+  score: string | number;
+  firstName: string;
+  lastName: string;
+  email: string;
+  status: string;
+  avatarUrl?: string | null;
+};
+
+export function formatCandidaturesListPage(
+  items: CandidatureListItem[],
+  hasMore: boolean,
+): string {
+  const lines = ['*CANDIDATURES REÇUES*', ''];
+  items.forEach((app, i) => {
+    const num = i + 1;
+    lines.push(
+      `${num}. Nom complet: ${app.firstName} ${app.lastName}`,
+      `    Score: ${app.score}/100`,
+    );
+  });
+  lines.push('');
+  if (hasMore) {
+    lines.push(
+      '6 - Voir plus',
+      '7 - Menu',
+      '',
+      "Veuillez taper un numéro (1-5), 6 pour la suite, ou 7 / 'Menu' pour revenir au menu",
+    );
+  } else {
+    lines.push("Veuillez taper un numéro ou 'Menu' pour revenir au menu");
+  }
+  return lines.join('\n');
+}
+
+function candidatureStatusLabel(status: string): string {
+  if (status === 'ACCEPTED') return 'ACCEPTÉE';
+  if (status === 'PENDING') return 'EN ATTENTE';
+  if (status === 'REJECTED') return 'REFUSÉE';
+  return 'ANNULÉE';
+}
+
+export function formatCandidatureDetail(params: {
+  firstName: string;
+  lastName: string;
+  email: string;
+  status: string;
+  score: string | number;
+  avatarUrl?: string | null;
+}): string {
+  const statusLabel = candidatureStatusLabel(params.status);
+  const lines = ['*Candidature sélectionnée:*', ''];
+  if (params.avatarUrl) {
+    lines.push(`[IMG:${params.avatarUrl}]`, '');
+  } else {
+    lines.push('[Photo de profil]', '');
+  }
+  lines.push(
+    `Nom: ${params.lastName}`,
+    `Prénom: ${params.firstName}`,
+    `Email: ${params.email}`,
+    `Statut: ${statusLabel}`,
+    `Score: ${params.score}/100`,
+    '',
+    '*Actions:*',
+    '1 - Accepter',
+    '2 - Refuser',
+    '3 - Retour',
+    "4 - Menu (ou tapez 'Menu')",
+    '',
+    '*Tapez le numéro correspondant.*',
+  );
+  return lines.join('\n');
+}
+
 function formatDate(d: Date): string {
   return d.toLocaleDateString('fr-FR', {
     day: '2-digit',

@@ -7,6 +7,7 @@ export const FLOW_IDS = {
   APPLY_JOB: 'apply_job',
   CANCEL_APPLICATION: 'cancel_application',
   ACCEPT_REFUSE_CANDIDATE: 'accept_refuse_candidate',
+  CANDIDATURES_LIST: 'candidatures_list',
   LIST_OFFERS: 'list_offers',
   MY_APPLICATIONS: 'my_applications',
   PROFILE_SUBMENU: 'profile_submenu',

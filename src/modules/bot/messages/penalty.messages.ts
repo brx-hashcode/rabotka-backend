@@ -107,6 +107,7 @@ export function formatEmployerProfileStats(params: {
 export function formatProfileStats(params: {
   firstName: string;
   lastName: string;
+  email: string;
   reliabilityScore: number | null;
   memberSince: Date;
   completedMissions: number;
@@ -122,27 +123,31 @@ export function formatProfileStats(params: {
     year: 'numeric',
   });
   return [
-    `👤 Votre profil - *${params.firstName} ${params.lastName}*`,
+    `*VOTRE PROFIL RABOTKA*`,
     '',
-    '📊 Statistiques générales:',
+    `*Nom*: ${params.lastName}`,
+    `*Prénom*: ${params.firstName}`,
+    `*Email*: ${params.email}`,
+    '',
+    '*STATISTIQUES GÉNÉRALES*:',
     SEP,
-    `⭐ Score de fiabilité: ${score}/100`,
-    `📅 Membre depuis: ${since}`,
-    `✅ Missions complétées: ${params.completedMissions}`,
-    `💰 Revenus totaux: ${params.totalEarnings.toLocaleString('fr-FR')} FCFA`,
-    `📈 Taux de complétion: ${params.completionRate}%`,
+    `*Score de fiabilité*: ${score}/100`,
+    `*Membre depuis*: ${since}`,
+    `*Missions complétées*: ${params.completedMissions}`,
+    `*Revenus totaux*: ${params.totalEarnings.toLocaleString('fr-FR')} FCFA`,
+    `*Taux de complétion*: ${params.completionRate}%`,
     SEP,
     '',
-    '⚠️ Pénalités:',
-    `• Total pénalités: ${params.totalPenalties.toLocaleString('fr-FR')} FCFA`,
-    `• Annulations tardives: ${params.lateCancellations}`,
+    '*PÉNALITÉS*:',
+    `*Total pénalités*: ${params.totalPenalties.toLocaleString('fr-FR')} FCFA`,
+    `*Annulations tardives*: ${params.lateCancellations}`,
     '',
-    'Actions:',
+    '*ACTIONS*:',
     "1️⃣ Voir l'historique complet",
     '2️⃣ Historique des pénalités',
     '3️⃣ Retour au menu',
     '',
-    'Tapez le numéro correspondant.',
+    '*Tapez le numéro correspondant.*',
   ].join('\n');
 }
 
@@ -153,18 +158,18 @@ export function formatCancelApplicationNoPenalty(params: {
   timeRemaining: string;
 }): string {
   return [
-    'Vous souhaitez annuler votre candidature pour :',
+    '*Vous souhaitez annuler votre candidature pour* :',
     '',
-    `📌 ${params.offerTitle}`,
-    `🕐 ${formatDate(params.scheduledAt)}`,
-    `💰 ${params.amount.toLocaleString('fr-FR')} FCFA`,
+    `*Offre*: ${params.offerTitle}`,
+    `*Date*: ${formatDate(params.scheduledAt)}`,
+    `*Montant*: ${params.amount.toLocaleString('fr-FR')} FCFA`,
     '',
-    `⏰ Temps restant: ${params.timeRemaining}`,
-    '✅ Aucune pénalité ne sera appliquée (> 4h)',
+    `*Temps restant*: ${params.timeRemaining}`,
+    '*Aucune pénalité ne sera appliquée (> 4h)*',
     '',
-    "💬 Raison de l'annulation ? (optionnel)",
+    "*Raison de l'annulation ? (optionnel)*",
     '',
-    'Tapez votre raison ou "Confirmer" pour annuler sans raison.',
+    '*Tapez votre raison ou "Confirmer" pour annuler sans raison.*',
   ].join('\n');
 }
 
@@ -178,27 +183,27 @@ export function formatCancelApplicationWithPenalty(params: {
   newScore: number;
 }): string {
   return [
-    '⚠️ ATTENTION - Annulation tardive',
+    '*ATTENTION - Annulation tardive*',
     '',
-    'Vous souhaitez annuler votre candidature pour :',
+    '*Vous souhaitez annuler votre candidature pour* :',
     '',
-    `📌 ${params.offerTitle}`,
-    `🕐 ${formatDate(params.scheduledAt)} (AUJOURDHUI)`,
-    `💰 ${params.amount.toLocaleString('fr-FR')} FCFA`,
+    `*Offre*: ${params.offerTitle}`,
+    `*Date*: ${formatDate(params.scheduledAt)} (AUJOURDHUI)`,
+    `*Montant*: ${params.amount.toLocaleString('fr-FR')} FCFA`,
     '',
-    `⏰ Temps restant: ${params.timeRemaining}`,
+    `*Temps restant*: ${params.timeRemaining}`,
     '',
-    '🚨 PÉNALITÉ APPLIQUÉE:',
+    '*PÉNALITÉ APPLIQUÉE*:',
     SEP,
-    `💰 Montant: ${params.penaltyAmount.toLocaleString('fr-FR')} FCFA`,
-    `📉 Impact score: -${params.scoreDeduction} points`,
-    `📊 Nouveau score: ${params.newScore}/100`,
+    `*Montant*: ${params.penaltyAmount.toLocaleString('fr-FR')} FCFA`,
+    `*Impact score*: -${params.scoreDeduction} points`,
+    `*Nouveau score*: ${params.newScore}/100`,
     '',
-    'Cette pénalité sera déduite de vos prochaines missions.',
+    '*Cette pénalité sera déduite de vos prochaines missions.*',
     SEP,
     '',
-    "💬 Raison de l'annulation ? (obligatoire pour annulation tardive)",
+    "*Raison de l'annulation ? (obligatoire pour annulation tardive)*",
     '',
-    'Tapez votre raison.',
+    '*Tapez votre raison.*',
   ].join('\n');
 }

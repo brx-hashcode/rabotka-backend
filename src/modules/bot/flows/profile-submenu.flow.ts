@@ -2,6 +2,7 @@ import type { BotProfile, BotState } from '../types/bot-state.types';
 import { FLOW_IDS, CMD_MENU } from '../bot.constants';
 import { menuMessage } from '../messages/menu.messages';
 import type { BotCommandsService } from '../services/bot-commands.service';
+import { getCandidaturesListInitialState } from './candidatures-list.flow';
 
 export type ProfileSubmenuContext = {
   commands: BotCommandsService;
@@ -44,8 +45,14 @@ export async function runProfileSubmenuFlow(
       return { reply: [message], clearState: true };
     }
     if (trimmed === '2') {
-      const message = await ctx.commands.candidaturesReceived(profile);
-      return { reply: [message], clearState: true };
+      const result = await ctx.commands.candidaturesReceived(profile);
+      if (result.items?.length) {
+        return {
+          reply: [result.message],
+          nextState: getCandidaturesListInitialState(result.items),
+        };
+      }
+      return { reply: [result.message], clearState: true };
     }
   }
 

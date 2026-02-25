@@ -29,6 +29,10 @@ import {
   getMyApplicationsInitialState,
 } from '../flows/my-applications.flow';
 import {
+  runCandidaturesListFlow,
+  getCandidaturesListInitialState,
+} from '../flows/candidatures-list.flow';
+import {
   runProfileSubmenuFlow,
   getProfileSubmenuInitialState,
 } from '../flows/profile-submenu.flow';
@@ -173,6 +177,11 @@ export class BotOrchestratorService {
           applicationService: deps.applicationService,
           notificationService: deps.notificationService,
         }),
+      [FLOW_IDS.CANDIDATURES_LIST]: () =>
+        runCandidaturesListFlow(state, input, profile, {
+          applicationService: deps.applicationService,
+          notificationService: deps.notificationService,
+        }),
       [FLOW_IDS.PROFILE_SUBMENU]: () =>
         runProfileSubmenuFlow(state, input, profile, {
           commands: this.commands,
@@ -193,6 +202,8 @@ export class BotOrchestratorService {
       list_offers: () => this.handleListOffersCommand(profile, profileId),
       my_applications: () =>
         this.handleMyApplicationsCommand(profile, profileId),
+      candidatures_received: () =>
+        this.handleCandidaturesReceivedCommand(botProfile, profileId),
       profile: () => this.handleProfileCommand(profileId, botProfile),
     };
     const handler = commandHandlers[route.commandId];
@@ -246,6 +257,18 @@ export class BotOrchestratorService {
     return [result.message];
   }
 
+  private async handleCandidaturesReceivedCommand(
+    profile: BotProfile,
+    profileId: string,
+  ): Promise<string[]> {
+    const result = await this.commands.candidaturesReceived(profile);
+    if (result.items?.length) {
+      const listState = getCandidaturesListInitialState(result.items);
+      await this.botState.set(profileId, listState);
+    }
+    return [result.message];
+  }
+
   private async loadProfile(profileId: string) {
     return this.prisma.profile.findUnique({
       where: { id: profileId },
@@ -273,8 +296,6 @@ export class BotOrchestratorService {
         return handleHelpCommand(commandId);
       case 'my_offers':
         return this.commands.myOffers(profile);
-      case 'candidatures_received':
-        return this.commands.candidaturesReceived(profile);
       case 'profile':
         return this.commands.profile(profile);
       case 'penalty_history':
