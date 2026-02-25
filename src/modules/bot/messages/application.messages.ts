@@ -1,4 +1,4 @@
-export const SEP = '━━━━━━━━━━━━━━━━━━';
+export const SEP = '━━━━━━━━━━━━━━━';
 
 function formatDate(d: Date): string {
   return d.toLocaleDateString('fr-FR', {

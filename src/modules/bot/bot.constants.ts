@@ -9,6 +9,7 @@ export const FLOW_IDS = {
   ACCEPT_REFUSE_CANDIDATE: 'accept_refuse_candidate',
   LIST_OFFERS: 'list_offers',
   MY_APPLICATIONS: 'my_applications',
+  PROFILE_SUBMENU: 'profile_submenu',
 } as const;
 
 export const WORKER_MENU_OPTIONS = {
