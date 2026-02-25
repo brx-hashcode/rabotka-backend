@@ -51,6 +51,13 @@ export class BotNotificationService {
         address: app.job_offer.address,
       });
 
+      if (app.worker.avatar_url) {
+        await this.whatsApp.sendMediaMessage(
+          app.job_offer.employer.phone,
+          app.worker.avatar_url,
+          `👤 ${app.worker.first_name} ${app.worker.last_name} - Candidat`,
+        );
+      }
       await this.whatsApp.sendTextMessage(app.job_offer.employer.phone, text);
       const employerProfileId = app.job_offer.employer_id;
       const state = getAcceptRefuseInitialState(applicationId);
