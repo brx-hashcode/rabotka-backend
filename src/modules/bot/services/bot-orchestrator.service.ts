@@ -270,7 +270,7 @@ export class BotOrchestratorService {
       case 'menu':
         return handleMenuCommand(profile);
       case 'help':
-        return handleHelpCommand(profile);
+        return handleHelpCommand(commandId);
       case 'my_offers':
         return this.commands.myOffers(profile);
       case 'candidatures_received':
