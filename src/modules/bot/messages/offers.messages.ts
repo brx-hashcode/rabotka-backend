@@ -67,6 +67,25 @@ export function formatOfferList(
   return lines.join('\n');
 }
 
+/** Compact numbered list for list-offers flow: 1-5 select offer, 6 Voir plus, 7 Menu */
+export function formatOfferListCompact(
+  offers: OfferListItem[],
+  hasMore: boolean,
+): string {
+  const lines = ['*OFFRES DISPONIBLES*', '', SEP];
+  offers.forEach((o, i) => {
+    const num = i + 1;
+    lines.push(
+      `${num}. *${o.title}* - ${formatDate(o.scheduled_at)} - ${o.amount.toLocaleString('fr-FR')} FCFA`,
+    );
+  });
+  lines.push(SEP, '');
+  lines.push('*Sélectionnez une offre par son numéro (1-5).*', '');
+  if (hasMore) lines.push('6️⃣ *Voir plus*');
+  lines.push("7️⃣ *Menu* (ou tapez 'Menu')", '', '*Tapez le numéro correspondant.*');
+  return lines.join('\n');
+}
+
 export function formatOfferDetail(offer: OfferListItem): string {
   const flow = formatPaymentFlow(offer.payment_flow);
   const lines = [
@@ -95,6 +114,32 @@ export function formatOfferDetail(offer: OfferListItem): string {
     'Tapez le numéro correspondant.',
   );
   return lines.join('\n');
+}
+
+/** Single offer view in list-offers flow with 4 actions */
+export function formatOfferDetailWithActions(offer: OfferListItem): string {
+  const flow = formatPaymentFlow(offer.payment_flow);
+  const summary =
+    offer.description.length > 80
+      ? offer.description.slice(0, 80) + '...'
+      : offer.description;
+  return [
+    `*OFFRE - ${offer.title}*`,
+    '',
+    `*Résumé*: ${summary}`,
+    `*Date*: ${formatDate(offer.scheduled_at)}`,
+    `*Montant*: ${offer.amount.toLocaleString('fr-FR')} FCFA ${flow}`,
+    `*Adresse*: ${offer.address.slice(0, 50)}${offer.address.length > 50 ? '...' : ''}`,
+    '',
+    SEP,
+    '',
+    '1️⃣ *Postuler*',
+    '2️⃣ *Voir description complète*',
+    '3️⃣ *Retour à la liste des offres*',
+    "4️⃣ *Menu* (ou tapez 'Menu')",
+    '',
+    '*Tapez le numéro correspondant.*',
+  ].join('\n');
 }
 
 export function formatOfferPublishedSuccess(offerId: string): string {

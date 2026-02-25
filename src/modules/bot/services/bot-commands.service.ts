@@ -4,7 +4,7 @@ import { JobOfferService } from '../../job-offer/job-offer.service';
 import { ApplicationService } from '../../application/application.service';
 import type { BotProfile } from '../types/bot-state.types';
 import {
-  formatOfferList,
+  formatOfferListCompact,
   formatOfferDetail,
   formatNoOffersAvailable,
   type OfferListItem,
@@ -12,7 +12,9 @@ import {
 import {
   formatMyApplicationsList,
   SEP,
+  formatCandidaturesListPage,
   type ApplicationForList,
+  type CandidatureListItem,
 } from '../messages/application.messages';
 import {
   formatPenaltyHistory,
@@ -58,8 +60,8 @@ export class BotCommandsService {
       note: o.note,
       status: o.status,
     }));
-    const total = data.length + (nextCursor ? 1 : 0);
-    const message = formatOfferList(offers, total, { hasNext: !!nextCursor });
+    const hasMore = !!nextCursor;
+    const message = formatOfferListCompact(offers, hasMore);
     return {
       message,
       offerIds: data.map((o) => o.id),
@@ -144,46 +146,58 @@ export class BotCommandsService {
     return lines.join('\n');
   }
 
-  async candidaturesReceived(profile: BotProfile): Promise<string> {
+  async candidaturesReceived(profile: BotProfile): Promise<{
+    message: string;
+    applicationIds?: string[];
+    items?: CandidatureListItem[];
+  }> {
     if (profile.profile_type !== 'EMPLOYER') {
-      return '*SEULS LES EMPLOYEURS PEUVENT VOIR LES CANDIDATURES REÇUES.*';
+      return {
+        message: '*SEULS LES EMPLOYEURS PEUVENT VOIR LES CANDIDATURES REÇUES.*',
+      };
     }
     const offers = await this.jobOfferService.findByEmployerId(profile.id);
-    const lines = ['*CANDIDATURES REÇUES*', ''];
-
-    let hasAny = false;
+    const allItems: CandidatureListItem[] = [];
     for (const offer of offers) {
       const applications = await this.applicationService.findByJobOffer(
         offer.id,
       );
       const pending = applications.filter((a) => a.status === 'PENDING');
-      if (pending.length === 0) continue;
-      hasAny = true;
-      lines.push(
-        `*Offre*: ${offer.title}`,
-        `   ${pending.length} candidature(s) en attente`,
-        '',
-      );
-      for (const app of pending.slice(0, 5)) {
-        const name = app.worker
+      for (const app of pending) {
+        const firstName = app.worker?.first_name ?? '';
+        const lastName = app.worker?.last_name ?? '';
+        const fullName = app.worker
           ? `${app.worker.first_name} ${app.worker.last_name}`
           : 'Inconnu';
-        lines.push(
-          `   • ${name} - Score: ${app.worker?.reliability_score ?? '?'}/100`,
-        );
+        const score = app.worker?.reliability_score ?? '?';
+        const email = app.worker?.email ?? '';
+        const avatarUrl = app.worker?.avatar_url;
+        allItems.push({
+          id: app.id,
+          fullName,
+          score,
+          firstName,
+          lastName,
+          email,
+          status: app.status,
+          avatarUrl: avatarUrl ?? undefined,
+        });
       }
-      lines.push(
-        '',
-        "Répondez avec l'ID candidature pour Accepter/Refuser.",
-        '',
-      );
     }
-
-    if (!hasAny) {
-      return "Aucune candidature en attente pour vos offres. Tapez 'Menu'.";
+    if (allItems.length === 0) {
+      return {
+        message: "Aucune candidature en attente pour vos offres. Tapez 'Menu'.",
+      };
     }
-    lines.push("Tapez 'Menu' pour revenir.");
-    return lines.join('\n');
+    const applicationIds = allItems.map((a) => a.id);
+    const firstPage = allItems.slice(0, 5);
+    const hasMore = allItems.length > 5;
+    const message = formatCandidaturesListPage(firstPage, hasMore);
+    return {
+      message,
+      applicationIds,
+      items: allItems,
+    };
   }
 
   async profile(profile: BotProfile): Promise<string> {
@@ -261,6 +275,7 @@ export class BotCommandsService {
     const profileText = formatProfileStats({
       firstName: profileData.first_name,
       lastName: profileData.last_name,
+      email: profileData.email,
       reliabilityScore: profileData.reliability_score,
       memberSince: profileData.created_at,
       completedMissions: completed.length,

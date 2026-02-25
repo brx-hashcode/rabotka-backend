@@ -46,6 +46,7 @@ export type ApplicationListItem = {
     email: string;
     description: string;
     reliability_score: number | null;
+    avatar_url?: string | null;
   };
 };
 
@@ -556,6 +557,7 @@ export class ApplicationService {
       email: string;
       description: string;
       reliability_score: number | null;
+      avatar_url?: string | null;
     };
   }): ApplicationWithOffer {
     return {
