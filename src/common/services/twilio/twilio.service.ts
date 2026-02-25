@@ -73,6 +73,7 @@ export class TwilioService {
 
   async sendWhatsApp(to: string, body: string): Promise<string | null> {
     const client = this.getClient();
+
     if (!client || !this.whatsappFrom) {
       this.logger.error(
         'Twilio client or TWILIO_WHATSAPP_FROM not configured. Cannot send WhatsApp message.',

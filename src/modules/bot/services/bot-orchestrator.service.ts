@@ -10,7 +10,7 @@ import { BotNotificationService } from './bot-notification.service';
 import { handleMenuCommand } from '../commands/menu.command';
 import { handleHelpCommand } from '../commands/help.command';
 import { unknownCommandMessage } from '../messages/menu.messages';
-import type { BotProfile } from '../types/bot-state.types';
+import type { BotProfile, BotState } from '../types/bot-state.types';
 import { FLOW_IDS } from '../bot.constants';
 import {
   runPublishJobFlow,
@@ -93,34 +93,7 @@ export class BotOrchestratorService {
       }
 
       if (route.type === 'command') {
-        if (route.commandId === 'start_publish_job') {
-          const initialState = getPublishJobInitialState();
-          await this.botState.set(profileId, initialState);
-          return [getPublishJobFirstMessage()];
-        }
-        if (route.commandId === 'list_offers') {
-          const result = await this.commands.listOffers(profile);
-          if (result.offerIds?.length) {
-            const listState = getListOffersInitialState(
-              result.offerIds,
-              result.nextCursor,
-            );
-            await this.botState.set(profileId, listState);
-          }
-          return [result.message];
-        }
-        if (route.commandId === 'my_applications') {
-          const result = await this.commands.myApplications(profile);
-          if (result.applicationIds?.length) {
-            const myAppState = getMyApplicationsInitialState(
-              result.applicationIds,
-            );
-            await this.botState.set(profileId, myAppState);
-          }
-          return [result.message];
-        }
-        const reply = await this.runCommand(route.commandId, botProfile);
-        return [reply];
+        return this.handleCommandRoute(route, profile, profileId, botProfile);
       }
 
       return [unknownCommandMessage()];
@@ -132,72 +105,123 @@ export class BotOrchestratorService {
 
   private async runFlow(
     flowId: string,
-    state: import('../types/bot-state.types').BotState,
+    state: BotState,
     input: string,
     profile: BotProfile,
     profileId: string,
   ): Promise<string[]> {
-    if (flowId === FLOW_IDS.PUBLISH_JOB) {
-      const result = await runPublishJobFlow(state, input, profile, {
-        jobOfferService: this.jobOfferService,
-      });
-      if (result.clearState) await this.botState.clear(profileId);
-      else if (result.nextState)
-        await this.botState.set(profileId, result.nextState);
-      return result.reply;
+    const result = await this.executeFlow(flowId, state, input, profile);
+    if (!result) {
+      this.logger.debug(`Flow ${flowId} not implemented`);
+      return [unknownCommandMessage()];
     }
-    if (flowId === FLOW_IDS.LIST_OFFERS) {
-      const result = await runListOffersFlow(state, input, profile, {
-        jobOfferService: this.jobOfferService,
-      });
-      if (result.clearState) await this.botState.clear(profileId);
-      else if (result.nextState)
-        await this.botState.set(profileId, result.nextState);
-      return result.reply;
+    if (result.clearState) await this.botState.clear(profileId);
+    else if (result.nextState)
+      await this.botState.set(profileId, result.nextState);
+    return result.reply;
+  }
+
+  private executeFlow(
+    flowId: string,
+    state: BotState,
+    input: string,
+    profile: BotProfile,
+  ): Promise<{
+    reply: string[];
+    clearState?: boolean;
+    nextState?: BotState;
+  } | null> {
+    const deps = {
+      jobOfferService: this.jobOfferService,
+      applicationService: this.applicationService,
+      notificationService: this.notificationService,
+    };
+    type FlowResult = {
+      reply: string[];
+      clearState?: boolean;
+      nextState?: BotState;
+    };
+    const runners: Record<string, () => Promise<FlowResult>> = {
+      [FLOW_IDS.PUBLISH_JOB]: () =>
+        runPublishJobFlow(state, input, profile, {
+          jobOfferService: deps.jobOfferService,
+        }),
+      [FLOW_IDS.LIST_OFFERS]: () =>
+        runListOffersFlow(state, input, profile, {
+          jobOfferService: deps.jobOfferService,
+        }),
+      [FLOW_IDS.APPLY_JOB]: () => runApplyJobFlow(state, input, profile, deps),
+      [FLOW_IDS.ACCEPT_REFUSE_CANDIDATE]: () =>
+        runAcceptRefuseCandidateFlow(state, input, profile, {
+          applicationService: deps.applicationService,
+          notificationService: deps.notificationService,
+        }),
+      [FLOW_IDS.CANCEL_APPLICATION]: () =>
+        runCancelApplicationFlow(state, input, profile, {
+          applicationService: deps.applicationService,
+          notificationService: deps.notificationService,
+        }),
+      [FLOW_IDS.MY_APPLICATIONS]: () =>
+        runMyApplicationsFlow(state, input, profile, {
+          applicationService: deps.applicationService,
+          notificationService: deps.notificationService,
+        }),
+    };
+    const runner = runners[flowId];
+    return runner ? runner() : Promise.resolve(null);
+  }
+
+  private async handleCommandRoute(
+    route: { type: 'command'; commandId: string },
+    profile: NonNullable<Awaited<ReturnType<typeof this.loadProfile>>>,
+    profileId: string,
+    botProfile: BotProfile,
+  ): Promise<string[]> {
+    const commandHandlers: Record<string, () => Promise<string[]>> = {
+      start_publish_job: () => this.handleStartPublishJobCommand(profileId),
+      list_offers: () => this.handleListOffersCommand(profile, profileId),
+      my_applications: () =>
+        this.handleMyApplicationsCommand(profile, profileId),
+    };
+    const handler = commandHandlers[route.commandId];
+    if (handler) return handler();
+    const reply = await this.runCommand(route.commandId, botProfile);
+    return [reply];
+  }
+
+  private async handleStartPublishJobCommand(
+    profileId: string,
+  ): Promise<string[]> {
+    const initialState = getPublishJobInitialState();
+    await this.botState.set(profileId, initialState);
+    return [getPublishJobFirstMessage()];
+  }
+
+  private async handleListOffersCommand(
+    profile: NonNullable<Awaited<ReturnType<typeof this.loadProfile>>>,
+    profileId: string,
+  ): Promise<string[]> {
+    const result = await this.commands.listOffers(profile);
+    if (result.offerIds?.length) {
+      const listState = getListOffersInitialState(
+        result.offerIds,
+        result.nextCursor,
+      );
+      await this.botState.set(profileId, listState);
     }
-    if (flowId === FLOW_IDS.APPLY_JOB) {
-      const result = await runApplyJobFlow(state, input, profile, {
-        applicationService: this.applicationService,
-        jobOfferService: this.jobOfferService,
-        notificationService: this.notificationService,
-      });
-      if (result.clearState) await this.botState.clear(profileId);
-      else if (result.nextState)
-        await this.botState.set(profileId, result.nextState);
-      return result.reply;
+    return [result.message];
+  }
+
+  private async handleMyApplicationsCommand(
+    profile: NonNullable<Awaited<ReturnType<typeof this.loadProfile>>>,
+    profileId: string,
+  ): Promise<string[]> {
+    const result = await this.commands.myApplications(profile);
+    if (result.applicationIds?.length) {
+      const myAppState = getMyApplicationsInitialState(result.applicationIds);
+      await this.botState.set(profileId, myAppState);
     }
-    if (flowId === FLOW_IDS.ACCEPT_REFUSE_CANDIDATE) {
-      const result = await runAcceptRefuseCandidateFlow(state, input, profile, {
-        applicationService: this.applicationService,
-        notificationService: this.notificationService,
-      });
-      if (result.clearState) await this.botState.clear(profileId);
-      else if (result.nextState)
-        await this.botState.set(profileId, result.nextState);
-      return result.reply;
-    }
-    if (flowId === FLOW_IDS.CANCEL_APPLICATION) {
-      const result = await runCancelApplicationFlow(state, input, profile, {
-        applicationService: this.applicationService,
-        notificationService: this.notificationService,
-      });
-      if (result.clearState) await this.botState.clear(profileId);
-      else if (result.nextState)
-        await this.botState.set(profileId, result.nextState);
-      return result.reply;
-    }
-    if (flowId === FLOW_IDS.MY_APPLICATIONS) {
-      const result = await runMyApplicationsFlow(state, input, profile, {
-        applicationService: this.applicationService,
-        notificationService: this.notificationService,
-      });
-      if (result.clearState) await this.botState.clear(profileId);
-      else if (result.nextState)
-        await this.botState.set(profileId, result.nextState);
-      return result.reply;
-    }
-    this.logger.debug(`Flow ${flowId} not implemented`);
-    return [unknownCommandMessage()];
+    return [result.message];
   }
 
   private async loadProfile(profileId: string) {
