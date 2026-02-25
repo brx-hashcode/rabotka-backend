@@ -1,0 +1,165 @@
+const SEP = '━━━━━━━━━━━━━━━━━━';
+
+function formatDate(d: Date): string {
+  return d.toLocaleDateString('fr-FR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+export type PenaltyItem = {
+  id: string;
+  amount: number;
+  reason: string | null;
+  appliedAt: Date;
+  jobOfferTitle?: string;
+};
+
+export function formatPenaltyHistory(
+  penalties: PenaltyItem[],
+  totalAmount: number,
+  lateCancellationsCount: number,
+  currentScore: number,
+  completedMissions: number,
+): string {
+  const lines = [
+    '📊 Historique des pénalités',
+    '',
+    '💰 Récapitulatif:',
+    SEP,
+    `Total pénalités: ${totalAmount.toLocaleString('fr-FR')} FCFA`,
+    `Nombre d'annulations tardives: ${lateCancellationsCount}`,
+    `Score actuel: ${currentScore}/100`,
+    `✅ Missions complétées: ${completedMissions}`,
+    SEP,
+    '',
+  ];
+
+  if (penalties.length === 0) {
+    lines.push('Aucune pénalité enregistrée.', '');
+  } else {
+    lines.push('📅 Détails des pénalités:', '', SEP);
+    for (const p of penalties) {
+      lines.push(
+        `📅 ${formatDate(p.appliedAt)}`,
+        p.jobOfferTitle ? `📌 Offre: ${p.jobOfferTitle}` : '',
+        `💰 Pénalité: ${p.amount.toLocaleString('fr-FR')} FCFA`,
+        p.reason ? `💬 Raison: ${p.reason}` : '',
+        SEP,
+        '',
+      );
+    }
+  }
+
+  lines.push(
+    '💡 Conseils pour améliorer votre score:',
+    '✓ Complétez vos missions sans annulation',
+    '✓ Maintenez un score > 90 pour plus de visibilité',
+    '✓ Annulez toujours > 4h avant si nécessaire',
+    '',
+    "Tapez 'Menu' pour revenir.",
+  );
+  return lines.join('\n');
+}
+
+export function formatProfileStats(params: {
+  firstName: string;
+  lastName: string;
+  reliabilityScore: number | null;
+  memberSince: Date;
+  completedMissions: number;
+  totalEarnings: number;
+  completionRate: number;
+  totalPenalties: number;
+  lateCancellations: number;
+}): string {
+  const score = params.reliabilityScore ?? 100;
+  const since = params.memberSince.toLocaleDateString('fr-FR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  });
+  return [
+    `👤 Votre profil - ${params.firstName} ${params.lastName}`,
+    '',
+    '📊 Statistiques générales:',
+    SEP,
+    `⭐ Score de fiabilité: ${score}/100`,
+    `📅 Membre depuis: ${since}`,
+    `✅ Missions complétées: ${params.completedMissions}`,
+    `💰 Revenus totaux: ${params.totalEarnings.toLocaleString('fr-FR')} FCFA`,
+    `📈 Taux de complétion: ${params.completionRate}%`,
+    SEP,
+    '',
+    '⚠️ Pénalités:',
+    `• Total pénalités: ${params.totalPenalties.toLocaleString('fr-FR')} FCFA`,
+    `• Annulations tardives: ${params.lateCancellations}`,
+    '',
+    'Actions:',
+    "1️⃣ Voir l'historique complet",
+    '2️⃣ Historique des pénalités',
+    '3️⃣ Retour au menu',
+    '',
+    'Tapez le numéro correspondant.',
+  ].join('\n');
+}
+
+export function formatCancelApplicationNoPenalty(params: {
+  offerTitle: string;
+  scheduledAt: Date;
+  amount: number;
+  timeRemaining: string;
+}): string {
+  return [
+    'Vous souhaitez annuler votre candidature pour :',
+    '',
+    `📌 ${params.offerTitle}`,
+    `🕐 ${formatDate(params.scheduledAt)}`,
+    `💰 ${params.amount.toLocaleString('fr-FR')} FCFA`,
+    '',
+    `⏰ Temps restant: ${params.timeRemaining}`,
+    '✅ Aucune pénalité ne sera appliquée (> 4h)',
+    '',
+    "💬 Raison de l'annulation ? (optionnel)",
+    '',
+    'Tapez votre raison ou "Confirmer" pour annuler sans raison.',
+  ].join('\n');
+}
+
+export function formatCancelApplicationWithPenalty(params: {
+  offerTitle: string;
+  scheduledAt: Date;
+  amount: number;
+  timeRemaining: string;
+  penaltyAmount: number;
+  scoreDeduction: number;
+  newScore: number;
+}): string {
+  return [
+    '⚠️ ATTENTION - Annulation tardive',
+    '',
+    'Vous souhaitez annuler votre candidature pour :',
+    '',
+    `📌 ${params.offerTitle}`,
+    `🕐 ${formatDate(params.scheduledAt)} (AUJOURDHUI)`,
+    `💰 ${params.amount.toLocaleString('fr-FR')} FCFA`,
+    '',
+    `⏰ Temps restant: ${params.timeRemaining}`,
+    '',
+    '🚨 PÉNALITÉ APPLIQUÉE:',
+    SEP,
+    `💰 Montant: ${params.penaltyAmount.toLocaleString('fr-FR')} FCFA`,
+    `📉 Impact score: -${params.scoreDeduction} points`,
+    `📊 Nouveau score: ${params.newScore}/100`,
+    '',
+    'Cette pénalité sera déduite de vos prochaines missions.',
+    SEP,
+    '',
+    "💬 Raison de l'annulation ? (obligatoire pour annulation tardive)",
+    '',
+    'Tapez votre raison.',
+  ].join('\n');
+}

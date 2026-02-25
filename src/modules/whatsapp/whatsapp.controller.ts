@@ -10,6 +10,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
+import { ConfigService } from '@nestjs/config';
 import type { Request } from 'express';
 import { Public } from '../auth/decorators/public.decorator.js';
 import { WhatsAppService } from './whatsapp.service';
@@ -27,6 +28,7 @@ export class WhatsAppController {
     private readonly whatsAppService: WhatsAppService,
     private readonly conversationService: ConversationService,
     private readonly twilioService: TwilioService,
+    private readonly configService: ConfigService,
   ) {}
 
   @Get('status')
@@ -69,9 +71,7 @@ export class WhatsAppController {
       throw new ForbiddenException('Missing X-Twilio-Signature');
     }
 
-    const protocol = req.protocol || 'https';
-    const host = req.get('host') || '';
-    const url = `${protocol}://${host}${req.originalUrl}`;
+    const url = this.buildWebhookUrl(req);
 
     const isValid = this.twilioService.validateWebhookSignature(
       signature,
@@ -94,7 +94,32 @@ export class WhatsAppController {
       ? from.slice('whatsapp:'.length)
       : from;
 
-    await this.conversationService.handleIncomingMessage(phone, text);
+    console.log('phone', phone);
+    console.log('text', text);
+
+    const replies = await this.conversationService.handleIncomingMessage(
+      phone,
+      text,
+    );
+    const MEDIA_PREFIX = '[IMG:';
+    const MEDIA_SUFFIX = ']';
+    for (const message of replies) {
+      if (!message) continue;
+      if (message.startsWith(MEDIA_PREFIX) && message.includes(MEDIA_SUFFIX)) {
+        const end = message.indexOf(MEDIA_SUFFIX);
+        const mediaUrl = message.slice(MEDIA_PREFIX.length, end).trim();
+        const caption = message.slice(end + MEDIA_SUFFIX.length).trim();
+        if (mediaUrl) {
+          await this.whatsAppService.sendMediaMessage(
+            phone,
+            mediaUrl,
+            caption || undefined,
+          );
+        }
+      } else {
+        await this.whatsAppService.sendTextMessage(phone, message);
+      }
+    }
   }
 
   @Get('verify')
@@ -124,6 +149,26 @@ export class WhatsAppController {
     status: 400,
     description: 'Invalid or expired token',
   })
+  /**
+   * Build the webhook URL for Twilio signature validation.
+   * Must match exactly the URL Twilio used when sending the request.
+   * When behind a proxy (ngrok, etc.), use X-Forwarded-* headers or TWILIO_WEBHOOK_BASE_URL.
+   */
+  private buildWebhookUrl(req: Request): string {
+    const baseUrl = this.configService.get<string>('TWILIO_WEBHOOK_BASE_URL');
+    if (baseUrl) {
+      const path = req.originalUrl.startsWith('/')
+        ? req.originalUrl
+        : `/${req.originalUrl}`;
+      return baseUrl.replace(/\/$/, '') + path;
+    }
+    const protocol =
+      (req.headers['x-forwarded-proto'] as string) || req.protocol || 'https';
+    const host =
+      (req.headers['x-forwarded-host'] as string) || req.get('host') || '';
+    return `${protocol}://${host}${req.originalUrl}`;
+  }
+
   async verifyWhatsApp(
     @Query() verifyWhatsAppDto: VerifyWhatsAppDto,
   ): Promise<{ success: boolean }> {

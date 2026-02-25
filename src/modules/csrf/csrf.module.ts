@@ -41,6 +41,16 @@ import { CsrfController } from './csrf.controller';
             httpOnly: true,
           },
           ignoredMethods: ['GET', 'HEAD', 'OPTIONS'],
+          //NOTE: Skip CSRF for external webhooks (e.g. Twilio WhatsApp) that cannot send a token
+          skipCsrfProtection: (req) => {
+            const path =
+              (req.route?.path as string | undefined) ?? req.path ?? req.url;
+            const full = req.originalUrl ?? req.url ?? path;
+            return (
+              path === '/api/v1/whatsapp/incoming' ||
+              full.startsWith('/api/v1/whatsapp/incoming')
+            );
+          },
         });
       },
       inject: [ConfigService],
