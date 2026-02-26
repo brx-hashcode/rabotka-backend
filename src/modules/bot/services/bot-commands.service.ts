@@ -12,8 +12,11 @@ import {
 import {
   formatMyApplicationsList,
   formatCandidaturesListPage,
+  formatFilledJobsListPage,
+  formatFilledJobDetail,
   type ApplicationForList,
   type CandidatureListItem,
+  type FilledJobListItem,
 } from '../messages/application.messages';
 import {
   formatPenaltyHistory,
@@ -200,6 +203,46 @@ export class BotCommandsService {
     };
   }
 
+  async filledJobs(profile: BotProfile): Promise<{
+    message: string;
+    items?: FilledJobListItem[];
+  }> {
+    if (profile.profile_type !== 'EMPLOYER') {
+      return {
+        message: '*SEULS LES EMPLOYEURS PEUVENT VOIR LES MISSIONS POURVUES.*',
+      };
+    }
+    const offers = await this.jobOfferService.findByEmployerId(profile.id);
+    const filledOffers = offers.filter((o) => o.status === JobOfferStatus.FILLED);
+    const items: FilledJobListItem[] = [];
+    for (const offer of filledOffers) {
+      const applications = await this.applicationService.findByJobOffer(
+        offer.id,
+      );
+      const accepted = applications.find((a) => a.status === 'ACCEPTED');
+      if (!accepted?.worker) continue;
+      const workerName = `${accepted.worker.first_name} ${accepted.worker.last_name}`.trim() || 'Inconnu';
+      items.push({
+        applicationId: accepted.id,
+        title: offer.title,
+        workerName,
+        scheduled_at: offer.scheduled_at,
+        amount: offer.amount,
+        payment_flow: offer.payment_flow,
+      });
+    }
+    if (items.length === 0) {
+      return {
+        message:
+          "Aucune mission pourvue pour le moment. Tapez 'Menu' pour revenir.",
+      };
+    }
+    const firstPage = items.slice(0, 5);
+    const hasMore = items.length > 5;
+    const message = formatFilledJobsListPage(firstPage, hasMore);
+    return { message, items };
+  }
+
   async profile(profile: BotProfile): Promise<string> {
     const profileData = await this.prisma.profile.findUnique({
       where: { id: profile.id },
@@ -259,7 +302,9 @@ export class BotCommandsService {
     ]);
 
     const completed = applications.filter(
-      (a) => a.status === ApplicationStatus.ACCEPTED,
+      (a) =>
+        a.status === ApplicationStatus.ACCEPTED &&
+        a.job_offer?.status === JobOfferStatus.COMPLETED,
     );
     const totalEarnings = completed.reduce(
       (sum, a) => sum + (a.job_offer?.amount ?? 0),
@@ -304,7 +349,9 @@ export class BotCommandsService {
 
     const totalAmount = penalties.reduce((s, p) => s + Number(p.amount), 0);
     const completed = applications.filter(
-      (a) => a.status === ApplicationStatus.ACCEPTED,
+      (a) =>
+        a.status === ApplicationStatus.ACCEPTED &&
+        a.job_offer?.status === JobOfferStatus.COMPLETED,
     ).length;
     const score = profile.reliability_score ?? 100;
 
