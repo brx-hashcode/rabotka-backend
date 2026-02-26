@@ -12,7 +12,7 @@ export type OfferListItem = {
   status: string;
 };
 
-function formatPaymentFlow(flow: string): string {
+export function formatPaymentFlow(flow: string): string {
   const map: Record<string, string> = {
     HOURLY: 'par heure',
     DAILY: 'par jour',
