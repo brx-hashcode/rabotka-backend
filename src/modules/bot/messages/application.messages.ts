@@ -173,7 +173,7 @@ export function formatApplyConfirmation(params: {
     `*Adresse*: ${params.address}`,
     '',
     '*ENGAGEMENT IMPORTANT*:',
-    "✓ Vos informations seront partagées avec l'employeur*",
+    "Vos informations seront partagées avec l'employeur",
     'Vous vous engagez à être présent et ponctuel',
     'Annulation < 4h avant = pénalité de *5,000 FCFA*',
     'Impact sur votre score de fiabilité',
@@ -305,4 +305,103 @@ export function formatCancellationToEmployer(params: {
     'Tapez le numéro correspondant.',
   );
   return lines.join('\n');
+}
+
+function formatDatePublic(d: Date | string | null | undefined): string {
+  if (d == null) return '—';
+  const date = typeof d === 'string' ? new Date(d) : d;
+  if (Number.isNaN(date.getTime())) return '—';
+  return date.toLocaleDateString('fr-FR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+export type FilledJobListItem = {
+  applicationId: string;
+  title: string;
+  workerName: string;
+  scheduled_at: Date | string;
+  amount: number;
+  payment_flow: string;
+};
+
+export function formatFilledJobsListPage(
+  items: FilledJobListItem[],
+  hasMore: boolean,
+): string {
+  const lines = ['*MISSIONS POURVUES*', ''];
+  if (items.length === 0) {
+    lines.push(
+      "Aucune mission pourvue pour le moment. Tapez 'Menu' pour revenir.",
+    );
+    return lines.join('\n');
+  }
+  items.forEach((item, i) => {
+    const num = i + 1;
+    const flowLabel = formatPaymentFlow(item.payment_flow);
+    lines.push(
+      `${num}. ${item.title}`,
+      `    Worker: ${item.workerName}`,
+      `    Date: ${formatDatePublic(item.scheduled_at)}`,
+      `    Montant: ${item.amount.toLocaleString('fr-FR')} FCFA ${flowLabel}`,
+      '',
+    );
+  });
+  if (hasMore) {
+    lines.push('6 - Voir plus', '7 - Menu', '');
+  }
+  lines.push(
+    "Tapez un numéro pour sélectionner une mission, ou 'Menu' pour revenir.",
+  );
+  return lines.join('\n');
+}
+
+export function formatFilledJobDetail(params: FilledJobListItem): string {
+  const flowLabel = formatPaymentFlow(params.payment_flow);
+  return [
+    '*Mission sélectionnée*',
+    '',
+    `*Offre*: ${params.title}`,
+    `*Worker*: ${params.workerName}`,
+    `*Date*: ${formatDatePublic(params.scheduled_at)}`,
+    `*Montant*: ${params.amount.toLocaleString('fr-FR')} FCFA ${flowLabel}`,
+    '',
+    '*Actions:*',
+    '1 - Marquer comme terminée (verser le gain au worker)',
+    "2 - Annuler (réouvrir l'offre)",
+    '3 - Retour',
+    '4 - Menu',
+    '',
+    '*Tapez le numéro correspondant.*',
+  ].join('\n');
+}
+
+export function formatJobCompletedToWorker(params: {
+  offerTitle: string;
+  amount: number;
+}): string {
+  return [
+    '*Mission terminée !*',
+    '',
+    `L'employeur a marqué la mission "${params.offerTitle}" comme terminée.`,
+    `*Gain enregistré*: ${params.amount.toLocaleString('fr-FR')} FCFA`,
+    '',
+    "Consultez votre profil pour voir vos gains. Tapez 'Menu'.",
+  ].join('\n');
+}
+
+export function formatJobCancelledByEmployerToWorker(
+  offerTitle: string,
+): string {
+  return [
+    "*Mission annulée par l'employeur*",
+    '',
+    `L'employeur a annulé la mission "${offerTitle}". L'offre est de nouveau ouverte.`,
+    '',
+    "Tapez 'Menu' pour revenir.",
+  ].join('\n');
 }

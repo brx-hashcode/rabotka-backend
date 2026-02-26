@@ -22,9 +22,10 @@ export function employerMenuMessage(): string {
     '1️⃣ Publier une offre',
     '2️⃣ Mes offres publiées',
     '3️⃣ Candidatures reçues',
-    '4️⃣ Mon profil',
-    '5️⃣ Historique',
-    '6️⃣ Aide',
+    '4️⃣ Missions pourvues',
+    '5️⃣ Mon profil',
+    '6️⃣ Historique',
+    '7️⃣ Aide',
     '',
     'Tapez le numéro correspondant à votre choix.',
   ].join('\n');
