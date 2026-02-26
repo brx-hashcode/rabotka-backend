@@ -72,7 +72,9 @@ export async function runListOffersFlow(
     clearState: true,
   });
 
-  if (CMD_MENU.some((c) => normalized === c || normalized.startsWith(c + ' '))) {
+  if (
+    CMD_MENU.some((c) => normalized === c || normalized.startsWith(c + ' '))
+  ) {
     return goToMenu();
   }
 
@@ -88,10 +90,8 @@ export async function runListOffersFlow(
           nextState: state,
         };
       }
-      const { data, nextCursor: newCursor } = await ctx.jobOfferService.findActive(
-        PAGE_SIZE,
-        nextCursor,
-      );
+      const { data, nextCursor: newCursor } =
+        await ctx.jobOfferService.findActive(PAGE_SIZE, nextCursor);
       if (data.length === 0) {
         return {
           reply: ["*Plus d'offres. Tapez 7 ou 'Menu' pour revenir.*"],
@@ -196,7 +196,7 @@ export async function runListOffersFlow(
         '',
         '*ENGAGEMENT IMPORTANT*:',
         "✓ Vos informations seront partagées avec l'employeur",
-        '*Vous vous engagez à être présent et ponctuel*',
+        'Vous vous engagez à être présent et ponctuel',
         '*Annulation < 4h avant = pénalité de 5,000 FCFA*',
         '',
         '*Confirmez-vous votre candidature ?*',
