@@ -6,6 +6,7 @@ import {
   formatOfferDetail,
   formatOfferDetailWithActions,
   formatOfferListCompact,
+  formatPaymentFlow,
   type OfferListItem,
 } from '../messages/offers.messages';
 import { menuMessage } from '../messages/menu.messages';
@@ -21,6 +22,219 @@ export type FlowResult = {
 };
 
 const PAGE_SIZE = 5;
+
+type FlowParams = {
+  state: BotState;
+  payload: Record<string, unknown>;
+  offerIds: string[];
+  nextCursor: string | undefined;
+  step: 'list' | 'detail';
+  selectedOfferIndex: number | undefined;
+  trimmed: string;
+  normalized: string;
+  profile: BotProfile;
+  ctx: ListOffersContext;
+  goToMenu: () => FlowResult;
+};
+
+function handleListStep(params: FlowParams): Promise<FlowResult> | FlowResult {
+  const { state, offerIds, nextCursor, trimmed, goToMenu } = params;
+  if (trimmed === '7') return goToMenu();
+  if (trimmed === '6') return handleLoadMore(params);
+  const choice = /^[1-5]$/.test(trimmed) ? Number.parseInt(trimmed, 10) : 0;
+  if (choice >= 1 && choice <= offerIds.length) {
+    return handleListSelectOffer(choice - 1, params);
+  }
+  return {
+    reply: [
+      `*RÉPONDEZ PAR 1-5 POUR SÉLECTIONNER UNE OFFRE${nextCursor ? ', 6 (VOIR PLUS)' : ''} OU 7 (MENU).*`,
+    ],
+    nextState: state,
+  };
+}
+
+async function handleLoadMore(params: FlowParams): Promise<FlowResult> {
+  const { state, nextCursor, ctx } = params;
+  if (!nextCursor) {
+    return {
+      reply: [
+        '*RÉPONDEZ PAR 1-5 POUR SÉLECTIONNER UNE OFFRE, 6 (VOIR PLUS) OU 7 (MENU).*',
+      ],
+      nextState: state,
+    };
+  }
+  const { data, nextCursor: newCursor } = await ctx.jobOfferService.findActive(
+    PAGE_SIZE,
+    nextCursor,
+  );
+  if (data.length === 0) {
+    return {
+      reply: ["*Plus d'offres. Tapez 7 ou 'Menu' pour revenir.*"],
+      nextState: state,
+    };
+  }
+  const newOfferIds = data.map((o) => o.id);
+  const offers = data.map((o) => toOfferListItem(o));
+  const message = formatOfferListCompact(offers, !!newCursor);
+  return {
+    reply: [message],
+    nextState: {
+      ...state,
+      payload: {
+        offerIds: newOfferIds,
+        nextCursor: newCursor ?? undefined,
+        step: 'list',
+      },
+      updatedAt: new Date().toISOString(),
+    },
+  };
+}
+
+async function handleListSelectOffer(
+  index: number,
+  params: FlowParams,
+): Promise<FlowResult> {
+  const { state, payload, offerIds, ctx } = params;
+  const offerId = offerIds[index];
+  const offer = await ctx.jobOfferService.findById(offerId);
+  if (!offer) {
+    return {
+      reply: ["*Cette offre n'existe plus. Tapez 'Menu'.*"],
+      clearState: true,
+    };
+  }
+  const message = formatOfferDetailWithActions(toOfferListItem(offer));
+  return {
+    reply: [message],
+    nextState: {
+      ...state,
+      payload: {
+        ...payload,
+        step: 'detail',
+        selectedOfferIndex: index,
+      },
+      updatedAt: new Date().toISOString(),
+    },
+  };
+}
+
+function handleDetailStep(
+  params: FlowParams,
+): Promise<FlowResult> | FlowResult {
+  const { state, offerIds, trimmed, goToMenu } = params;
+  const selectedOfferIndex = params.selectedOfferIndex;
+  const offerId =
+    selectedOfferIndex !== undefined && offerIds[selectedOfferIndex]
+      ? offerIds[selectedOfferIndex]
+      : null;
+  if (!offerId) {
+    return {
+      reply: ["*INDEX INVALIDE. TAPEZ 'MENU'.*"],
+      clearState: true,
+    };
+  }
+  if (trimmed === '4') return goToMenu();
+  if (trimmed === '1') return handleDetailApply(offerId, params);
+  if (trimmed === '2') return handleDetailViewDescription(offerId, params);
+  if (trimmed === '3') return handleDetailBackToList(offerId, params);
+  return {
+    reply: [
+      '*RÉPONDEZ PAR 1 (POSTULER), 2 (VOIR DESCRIPTION COMPLÈTE), 3 (RETOUR LISTE) OU 4 (MENU).*',
+    ],
+    nextState: state,
+  };
+}
+
+function formatOfferDate(d: Date): string {
+  return d.toLocaleDateString('fr-FR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+async function handleDetailApply(
+  offerId: string,
+  params: FlowParams,
+): Promise<FlowResult> {
+  const { ctx } = params;
+  const offer = await ctx.jobOfferService.findById(offerId);
+  if (!offer) {
+    return {
+      reply: ["*Cette offre n'existe plus. Tapez 'Menu'.*"],
+      clearState: true,
+    };
+  }
+  const flowLabel = formatPaymentFlow(offer.payment_flow);
+  const text = [
+    '*Vous êtes sur le point de postuler*',
+    '',
+    `*Offre*: ${offer.title}`,
+    `*Date*: ${formatOfferDate(offer.scheduled_at)}`,
+    `*Montant*: ${offer.amount.toLocaleString('fr-FR')} FCFA ${flowLabel}`,
+    `*Adresse*: ${offer.address}`,
+    '',
+    '*ENGAGEMENT IMPORTANT*:',
+    "Vos informations seront partagées avec l'employeur",
+    'Vous vous engagez à être présent et ponctuel',
+    '*Annulation < 4h avant = pénalité de 5,000 FCFA*',
+    '',
+    '*Confirmez-vous votre candidature ?*',
+    '1️⃣ Oui, je postule',
+    '2️⃣ Non, retour',
+    '',
+    'Tapez 1 ou 2.',
+    '',
+  ].join('\n');
+  const applyState = getApplyJobInitialState(offerId);
+  return { reply: [text], nextState: applyState };
+}
+
+async function handleDetailViewDescription(
+  offerId: string,
+  params: FlowParams,
+): Promise<FlowResult> {
+  const { state, ctx } = params;
+  const offer = await ctx.jobOfferService.findById(offerId);
+  if (!offer) {
+    return {
+      reply: ["*Offre introuvable. Tapez 'Menu'.*"],
+      clearState: true,
+    };
+  }
+  const text = formatOfferDetail(toOfferListItem(offer));
+  return { reply: [text], nextState: state };
+}
+
+async function handleDetailBackToList(
+  _offerId: string,
+  params: FlowParams,
+): Promise<FlowResult> {
+  const { state, offerIds, nextCursor, ctx } = params;
+  const offers = await Promise.all(
+    offerIds.map((id) => ctx.jobOfferService.findById(id)),
+  );
+  const validOffers = offers.filter(
+    (o): o is NonNullable<typeof o> => o != null,
+  );
+  const listItems = validOffers.map((o) => toOfferListItem(o));
+  const message = formatOfferListCompact(listItems, !!nextCursor);
+  return {
+    reply: [message],
+    nextState: {
+      ...state,
+      payload: {
+        offerIds,
+        nextCursor,
+        step: 'list',
+        selectedOfferIndex: undefined,
+      },
+      updatedAt: new Date().toISOString(),
+    },
+  };
+}
 
 function toOfferListItem(offer: {
   id: string;
@@ -78,178 +292,25 @@ export async function runListOffersFlow(
     return goToMenu();
   }
 
+  const flowParams: FlowParams = {
+    state,
+    payload,
+    offerIds,
+    nextCursor,
+    step,
+    selectedOfferIndex,
+    trimmed,
+    normalized,
+    profile,
+    ctx,
+    goToMenu,
+  };
+
   if (step === 'list') {
-    if (trimmed === '7') return goToMenu();
-
-    if (trimmed === '6') {
-      if (!nextCursor) {
-        return {
-          reply: [
-            '*RÉPONDEZ PAR 1-5 POUR SÉLECTIONNER UNE OFFRE, 6 (VOIR PLUS) OU 7 (MENU).*',
-          ],
-          nextState: state,
-        };
-      }
-      const { data, nextCursor: newCursor } =
-        await ctx.jobOfferService.findActive(PAGE_SIZE, nextCursor);
-      if (data.length === 0) {
-        return {
-          reply: ["*Plus d'offres. Tapez 7 ou 'Menu' pour revenir.*"],
-          nextState: state,
-        };
-      }
-      const newOfferIds = data.map((o) => o.id);
-      const offers = data.map((o) => toOfferListItem(o));
-      const message = formatOfferListCompact(offers, !!newCursor);
-      return {
-        reply: [message],
-        nextState: {
-          ...state,
-          payload: {
-            offerIds: newOfferIds,
-            nextCursor: newCursor ?? undefined,
-            step: 'list',
-          },
-          updatedAt: new Date().toISOString(),
-        },
-      };
-    }
-
-    const choice = trimmed.match(/^[1-5]$/) ? parseInt(trimmed, 10) : 0;
-    if (choice >= 1 && choice <= offerIds.length) {
-      const index = choice - 1;
-      const offerId = offerIds[index];
-      const offer = await ctx.jobOfferService.findById(offerId);
-      if (!offer) {
-        return {
-          reply: ["*Cette offre n'existe plus. Tapez 'Menu'.*"],
-          clearState: true,
-        };
-      }
-      const message = formatOfferDetailWithActions(toOfferListItem(offer));
-      return {
-        reply: [message],
-        nextState: {
-          ...state,
-          payload: {
-            ...payload,
-            step: 'detail',
-            selectedOfferIndex: index,
-          },
-          updatedAt: new Date().toISOString(),
-        },
-      };
-    }
-
-    return {
-      reply: [
-        `*RÉPONDEZ PAR 1-5 POUR SÉLECTIONNER UNE OFFRE${nextCursor ? ', 6 (VOIR PLUS)' : ''} OU 7 (MENU).*`,
-      ],
-      nextState: state,
-    };
+    return await handleListStep(flowParams);
   }
-
   if (step === 'detail') {
-    const offerId =
-      selectedOfferIndex !== undefined && offerIds[selectedOfferIndex]
-        ? offerIds[selectedOfferIndex]
-        : null;
-    if (!offerId) {
-      return {
-        reply: ["*INDEX INVALIDE. TAPEZ 'MENU'.*"],
-        clearState: true,
-      };
-    }
-
-    if (trimmed === '4') return goToMenu();
-
-    if (trimmed === '1') {
-      const applyState = getApplyJobInitialState(offerId);
-      const offer = await ctx.jobOfferService.findById(offerId);
-      if (!offer) {
-        return {
-          reply: ["*Cette offre n'existe plus. Tapez 'Menu'.*"],
-          clearState: true,
-        };
-      }
-      const formatDate = (d: Date) =>
-        d.toLocaleDateString('fr-FR', {
-          day: '2-digit',
-          month: '2-digit',
-          year: 'numeric',
-          hour: '2-digit',
-          minute: '2-digit',
-        });
-      const flowLabel =
-        offer.payment_flow === 'HOURLY'
-          ? 'par heure'
-          : offer.payment_flow === 'DAILY'
-            ? 'par jour'
-            : 'par mois';
-      const text = [
-        '*Vous êtes sur le point de postuler*',
-        '',
-        `*Offre*: ${offer.title}`,
-        `*Date*: ${formatDate(offer.scheduled_at)}`,
-        `*Montant*: ${offer.amount.toLocaleString('fr-FR')} FCFA ${flowLabel}`,
-        `*Adresse*: ${offer.address}`,
-        '',
-        '*ENGAGEMENT IMPORTANT*:',
-        "✓ Vos informations seront partagées avec l'employeur",
-        'Vous vous engagez à être présent et ponctuel',
-        '*Annulation < 4h avant = pénalité de 5,000 FCFA*',
-        '',
-        '*Confirmez-vous votre candidature ?*',
-        '1️⃣ Oui, je postule',
-        '2️⃣ Non, retour',
-        '',
-        'Tapez 1 ou 2.',
-      ].join('\n');
-      return { reply: [text], nextState: applyState };
-    }
-
-    if (trimmed === '2') {
-      const offer = await ctx.jobOfferService.findById(offerId);
-      if (!offer) {
-        return {
-          reply: ["*Offre introuvable. Tapez 'Menu'.*"],
-          clearState: true,
-        };
-      }
-      const text = formatOfferDetail(toOfferListItem(offer));
-      return { reply: [text], nextState: state };
-    }
-
-    if (trimmed === '3') {
-      const offers = await Promise.all(
-        offerIds.map((id) => ctx.jobOfferService.findById(id)),
-      );
-      const validOffers = offers.filter(
-        (o): o is NonNullable<typeof o> => o != null,
-      );
-      const listItems = validOffers.map((o) => toOfferListItem(o));
-      const message = formatOfferListCompact(listItems, !!nextCursor);
-      return {
-        reply: [message],
-        nextState: {
-          ...state,
-          payload: {
-            offerIds,
-            nextCursor,
-            step: 'list',
-            selectedOfferIndex: undefined,
-          },
-          updatedAt: new Date().toISOString(),
-        },
-      };
-    }
-
-    return {
-      reply: [
-        '*RÉPONDEZ PAR 1 (POSTULER), 2 (VOIR DESCRIPTION COMPLÈTE), 3 (RETOUR LISTE) OU 4 (MENU).*',
-      ],
-      nextState: state,
-    };
+    return await handleDetailStep(flowParams);
   }
 
   return {
