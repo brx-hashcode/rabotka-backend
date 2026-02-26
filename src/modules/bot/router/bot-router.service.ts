@@ -7,6 +7,7 @@ import {
   CMD_PUBLISH,
   CMD_MY_OFFERS,
   CMD_CANDIDATURES,
+  CMD_FILLED_JOBS,
   CMD_PROFILE,
   CMD_HISTORY,
   CMD_LIST_OFFERS,
@@ -31,6 +32,8 @@ function matchCommandAlias(
   if (CMD_MY_OFFERS.includes(normalized) && isEmployer) return 'my_offers';
   if (CMD_CANDIDATURES.includes(normalized) && isEmployer)
     return 'candidatures_received';
+  if (CMD_FILLED_JOBS.includes(normalized) && isEmployer)
+    return 'filled_jobs';
   if (CMD_PROFILE.includes(normalized)) return 'profile';
   if (CMD_HISTORY.includes(normalized)) return 'penalty_history';
   if (CMD_LIST_OFFERS.includes(normalized) && isWorker) return 'list_offers';
@@ -42,7 +45,7 @@ function matchWorkerNumeric(trimmed: string): string | null {
   if (trimmed === WORKER_MENU_OPTIONS.MY_APPLICATIONS) return 'my_applications';
   if (trimmed === WORKER_MENU_OPTIONS.PROFILE) return 'profile';
   if (trimmed === WORKER_MENU_OPTIONS.HISTORY) return 'penalty_history';
-  if (trimmed === WORKER_MENU_OPTIONS.HELP) return 'menu';
+  if (trimmed === WORKER_MENU_OPTIONS.HELP) return 'help';
   return null;
 }
 
@@ -52,9 +55,10 @@ function matchEmployerNumeric(trimmed: string): string | null {
   if (trimmed === EMPLOYER_MENU_OPTIONS.MY_OFFERS) return 'my_offers';
   if (trimmed === EMPLOYER_MENU_OPTIONS.CANDIDATURES_RECEIVED)
     return 'candidatures_received';
+  if (trimmed === EMPLOYER_MENU_OPTIONS.FILLED_JOBS) return 'filled_jobs';
   if (trimmed === EMPLOYER_MENU_OPTIONS.PROFILE) return 'profile';
   if (trimmed === EMPLOYER_MENU_OPTIONS.HISTORY) return 'penalty_history';
-  if (trimmed === EMPLOYER_MENU_OPTIONS.HELP) return 'menu';
+  if (trimmed === EMPLOYER_MENU_OPTIONS.HELP) return 'help';
   return null;
 }
 

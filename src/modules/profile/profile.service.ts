@@ -44,6 +44,7 @@ export type ProfilePenaltyItem = {
   amount: number;
   reason: string | null;
   appliedAt: Date;
+   paidAt: Date | null;
   applicationId: string;
   jobOfferTitle?: string;
 };
@@ -249,9 +250,29 @@ export class ProfileService {
       amount: Number(p.amount),
       reason: p.reason,
       appliedAt: p.applied_at,
+      paidAt: p.paid_at,
       applicationId: p.application_id,
       jobOfferTitle: p.application?.job_offer?.title,
     }));
+  }
+
+  async markPenaltyPaid(
+    penaltyId: string,
+    profileId: string,
+  ): Promise<void> {
+    const penalty = await this.prisma.penalty.findUnique({
+      where: { id: penaltyId },
+    });
+    if (!penalty || penalty.worker_id !== profileId) {
+      throw new NotFoundException('Pénalité introuvable');
+    }
+    if (penalty.paid_at) {
+      return;
+    }
+    await this.prisma.penalty.update({
+      where: { id: penaltyId },
+      data: { paid_at: new Date() },
+    });
   }
 
   async getApplicationsByProfileId(

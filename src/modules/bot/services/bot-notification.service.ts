@@ -8,6 +8,8 @@ import {
   formatApplicationAcceptedToWorker,
   formatApplicationRejectedToWorker,
   formatCancellationToEmployer,
+  formatJobCompletedToWorker,
+  formatJobCancelledByEmployerToWorker,
 } from '../messages/application.messages';
 
 @Injectable()
@@ -55,7 +57,7 @@ export class BotNotificationService {
         await this.whatsApp.sendMediaMessage(
           app.job_offer.employer.phone,
           app.worker.avatar_url,
-          `👤 ${app.worker.first_name} ${app.worker.last_name} - Candidat`,
+          `*${app.worker.first_name} ${app.worker.last_name} - CANDIDAT*`,
         );
       }
       await this.whatsApp.sendTextMessage(app.job_offer.employer.phone, text);
@@ -89,7 +91,7 @@ export class BotNotificationService {
       await this.whatsApp.sendTextMessage(app.worker.phone, text);
     } catch (err) {
       this.logger.warn(
-        `Failed to send accepted notification to worker: ${applicationId}`,
+        `Failed to send accepted notification to worker: ${String(applicationId)}`,
         err,
       );
     }
@@ -107,7 +109,7 @@ export class BotNotificationService {
       await this.whatsApp.sendTextMessage(app.worker.phone, text);
     } catch (err) {
       this.logger.warn(
-        `Failed to send rejected notification to worker: ${applicationId}`,
+        `Failed to send rejected notification to worker: ${String(applicationId)}`,
         err,
       );
     }
@@ -138,7 +140,46 @@ export class BotNotificationService {
       await this.whatsApp.sendTextMessage(app.job_offer.employer.phone, text);
     } catch (err) {
       this.logger.warn(
-        `Failed to send cancellation notification to employer: ${applicationId}`,
+        `Failed to send cancellation notification to employer: ${String(applicationId)}`,
+        err,
+      );
+    }
+  }
+
+  async sendJobCompletedToWorker(applicationId: string): Promise<void> {
+    try {
+      const app = await this.prisma.application.findUnique({
+        where: { id: applicationId },
+        include: { job_offer: true, worker: true },
+      });
+      if (!app?.worker?.phone || !app.job_offer) return;
+      const text = formatJobCompletedToWorker({
+        offerTitle: app.job_offer.title,
+        amount: Number(app.job_offer.amount),
+      });
+      await this.whatsApp.sendTextMessage(app.worker.phone, text);
+    } catch (err) {
+      this.logger.warn(
+        `Failed to send job completed notification to worker: ${applicationId}`,
+        err,
+      );
+    }
+  }
+
+  async sendJobCancelledByEmployerToWorker(
+    applicationId: string,
+  ): Promise<void> {
+    try {
+      const app = await this.prisma.application.findUnique({
+        where: { id: applicationId },
+        include: { job_offer: true, worker: true },
+      });
+      if (!app?.worker?.phone || !app.job_offer) return;
+      const text = formatJobCancelledByEmployerToWorker(app.job_offer.title);
+      await this.whatsApp.sendTextMessage(app.worker.phone, text);
+    } catch (err) {
+      this.logger.warn(
+        `Failed to send job cancelled by employer to worker: ${applicationId}`,
         err,
       );
     }

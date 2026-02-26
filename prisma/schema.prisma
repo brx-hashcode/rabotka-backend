@@ -225,6 +225,7 @@ model Penalty {
   amount         Decimal  @db.Decimal(10, 2)
   reason         String?
   applied_at     DateTime @default(now())
+  paid_at        DateTime?
 
   worker      Profile     @relation(fields: [worker_id], references: [id], onDelete: Cascade)
   application Application @relation(fields: [application_id], references: [id], onDelete: Cascade)

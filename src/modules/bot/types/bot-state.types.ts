@@ -10,6 +10,7 @@ export type FlowId =
   | 'apply_job'
   | 'cancel_application'
   | 'accept_refuse_candidate'
+  | 'candidatures_list'
   | 'list_offers'
   | 'my_applications';
 
