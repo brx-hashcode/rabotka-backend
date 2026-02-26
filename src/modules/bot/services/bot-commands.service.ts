@@ -11,7 +11,6 @@ import {
 } from '../messages/offers.messages';
 import {
   formatMyApplicationsList,
-  SEP,
   formatCandidaturesListPage,
   type ApplicationForList,
   type CandidatureListItem,
@@ -105,6 +104,7 @@ export class BotCommandsService {
         title: a.job_offer.title,
         scheduled_at: a.job_offer.scheduled_at,
         amount: a.job_offer.amount,
+        payment_flow: a.job_offer.payment_flow,
         address: a.job_offer.address,
         status: a.job_offer.status,
       },
@@ -123,8 +123,9 @@ export class BotCommandsService {
     if (offers.length === 0) {
       return "*VOUS N'AVEZ PUBLIÉ AUCUNE OFFRE. TAPEZ 1 POUR PUBLIER UNE OFFRE.*";
     }
-    const lines = [`*Mes offres publiées* (${offers.length})`, '', SEP];
-    for (const o of offers) {
+    const lines = [`*MES OFFRES PUBLIÉES (${offers.length})*`, ''];
+    offers.forEach((o, i) => {
+      const num = i + 1;
       const dateStr = o.scheduled_at.toLocaleDateString('fr-FR', {
         day: '2-digit',
         month: '2-digit',
@@ -133,16 +134,15 @@ export class BotCommandsService {
         minute: '2-digit',
       });
       lines.push(
-        `*ID*: #${o.id.slice(0, 8)}`,
-        `*Titre*: ${o.title}`,
-        `*Date*: ${dateStr}`,
-        `*Montant*: ${o.amount.toLocaleString('fr-FR')} FCFA`,
-        `*Statut*: ${o.status}`,
-        SEP,
+        `${num}. ${o.title}`,
+        `    ID: #${o.id.slice(0, 8)}`,
+        `    Date: ${dateStr}`,
+        `    Montant: ${o.amount.toLocaleString('fr-FR')} FCFA`,
+        `    Statut: ${o.status}`,
         '',
       );
-    }
-    lines.push("*TAPEZ 'MENU' POUR REVENIR.*");
+    });
+    lines.push("Veuillez taper 'Menu' pour revenir au menu.");
     return lines.join('\n');
   }
 
