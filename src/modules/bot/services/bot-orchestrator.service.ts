@@ -33,6 +33,10 @@ import {
   getCandidaturesListInitialState,
 } from '../flows/candidatures-list.flow';
 import {
+  runManageFilledJobFlow,
+  getManageFilledJobInitialState,
+} from '../flows/manage-filled-job.flow';
+import {
   runProfileSubmenuFlow,
   getProfileSubmenuInitialState,
 } from '../flows/profile-submenu.flow';
@@ -182,6 +186,11 @@ export class BotOrchestratorService {
           applicationService: deps.applicationService,
           notificationService: deps.notificationService,
         }),
+      [FLOW_IDS.MANAGE_FILLED_JOB]: () =>
+        runManageFilledJobFlow(state, input, profile, {
+          applicationService: deps.applicationService,
+          notificationService: deps.notificationService,
+        }),
       [FLOW_IDS.PROFILE_SUBMENU]: () =>
         runProfileSubmenuFlow(state, input, profile, {
           commands: this.commands,
@@ -204,6 +213,7 @@ export class BotOrchestratorService {
         this.handleMyApplicationsCommand(profile, profileId),
       candidatures_received: () =>
         this.handleCandidaturesReceivedCommand(botProfile, profileId),
+      filled_jobs: () => this.handleFilledJobsCommand(botProfile, profileId),
       profile: () => this.handleProfileCommand(profileId, botProfile),
     };
     const handler = commandHandlers[route.commandId];
@@ -264,6 +274,18 @@ export class BotOrchestratorService {
     const result = await this.commands.candidaturesReceived(profile);
     if (result.items?.length) {
       const listState = getCandidaturesListInitialState(result.items);
+      await this.botState.set(profileId, listState);
+    }
+    return [result.message];
+  }
+
+  private async handleFilledJobsCommand(
+    profile: BotProfile,
+    profileId: string,
+  ): Promise<string[]> {
+    const result = await this.commands.filledJobs(profile);
+    if (result.items?.length) {
+      const listState = getManageFilledJobInitialState(result.items);
       await this.botState.set(profileId, listState);
     }
     return [result.message];

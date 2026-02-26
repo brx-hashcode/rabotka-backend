@@ -10,6 +10,8 @@ import {
   AccountStatus,
   ApplicationStatus,
   JobOfferStatus,
+  PaymentStatus,
+  PaymentMethod,
 } from '@prisma/client';
 import {
   LATE_CANCELLATION_PENALTY_FCFA,
@@ -112,6 +114,18 @@ export class ApplicationService {
     if (jobOffer.employer_id === workerId) {
       throw new BadRequestException(
         'Vous ne pouvez pas postuler à votre propre offre',
+      );
+    }
+
+    const unpaidPenaltiesCount = await this.prisma.penalty.count({
+      where: {
+        worker_id: workerId,
+        paid_at: null,
+      },
+    });
+    if (unpaidPenaltiesCount > 0) {
+      throw new ForbiddenException(
+        'Vous avez des pénalités impayées. Réglez-les pour pouvoir postuler aux offres.',
       );
     }
 
@@ -439,6 +453,103 @@ export class ApplicationService {
     const hoursUntil =
       (app.job_offer.scheduled_at.getTime() - now.getTime()) / (60 * 60 * 1000);
     return hoursUntil < CANCELLATION_PENALTY_THRESHOLD_HOURS && hoursUntil >= 0;
+  }
+
+  /** Employer marks job as completed: set JobOffer to COMPLETED and create Payment for worker */
+  async markJobCompleted(
+    applicationId: string,
+    employerId: string,
+  ): Promise<ApplicationWithOffer> {
+    const application = await this.prisma.application.findUnique({
+      where: { id: applicationId },
+      include: { job_offer: true, worker: true },
+    });
+    if (!application) {
+      throw new NotFoundException('Candidature non trouvée');
+    }
+    if (application.job_offer.employer_id !== employerId) {
+      throw new ForbiddenException(
+        "Vous n'êtes pas l'employeur de cette offre",
+      );
+    }
+    if (application.status !== ApplicationStatus.ACCEPTED) {
+      throw new BadRequestException(
+        'Seule une candidature acceptée peut être marquée comme terminée',
+      );
+    }
+    if (application.job_offer.status === JobOfferStatus.COMPLETED) {
+      throw new BadRequestException(
+        'Cette mission est déjà marquée comme terminée',
+      );
+    }
+
+    const amount = Number(application.job_offer.amount);
+    await this.prisma.$transaction([
+      this.prisma.jobOffer.update({
+        where: { id: application.job_offer_id },
+        data: { status: JobOfferStatus.COMPLETED },
+      }),
+      this.prisma.payment.create({
+        data: {
+          profile_id: application.worker_id,
+          amount,
+          payment_method: PaymentMethod.OTHER,
+          transaction_id: `earn-${applicationId}`,
+          status: PaymentStatus.COMPLETED,
+          completed_at: new Date(),
+        },
+      }),
+    ]);
+
+    const updated = await this.findById(applicationId);
+    if (!updated)
+      throw new NotFoundException('Application not found after update');
+    return updated;
+  }
+
+  /** Employer cancels accepted application: reopen job offer, cancel application */
+  async cancelAcceptedByEmployer(
+    applicationId: string,
+    employerId: string,
+  ): Promise<ApplicationWithOffer> {
+    const application = await this.prisma.application.findUnique({
+      where: { id: applicationId },
+      include: { job_offer: true, worker: true },
+    });
+    if (!application) {
+      throw new NotFoundException('Candidature non trouvée');
+    }
+    if (application.job_offer.employer_id !== employerId) {
+      throw new ForbiddenException(
+        "Vous n'êtes pas l'employeur de cette offre",
+      );
+    }
+    if (application.status !== ApplicationStatus.ACCEPTED) {
+      throw new BadRequestException(
+        'Seule une candidature acceptée peut être annulée ici',
+      );
+    }
+
+    const now = new Date();
+    await this.prisma.$transaction([
+      this.prisma.application.update({
+        where: { id: applicationId },
+        data: {
+          status: ApplicationStatus.CANCELLED,
+          cancelled_at: now,
+          cancellation_reason: "Annulée par l'employeur",
+        },
+      }),
+      this.prisma.jobOffer.update({
+        where: { id: application.job_offer_id },
+        data: { status: JobOfferStatus.ACTIVE },
+      }),
+    ]);
+
+    const updated = await this.findById(applicationId);
+    if (!updated)
+      throw new NotFoundException('Application not found after update');
+    return updated;
   }
 
   /** Get applications with ACCEPTED status and scheduled_at in the given time window (for reminders) */

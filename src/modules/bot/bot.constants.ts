@@ -11,6 +11,7 @@ export const FLOW_IDS = {
   LIST_OFFERS: 'list_offers',
   MY_APPLICATIONS: 'my_applications',
   PROFILE_SUBMENU: 'profile_submenu',
+  MANAGE_FILLED_JOB: 'manage_filled_job',
 } as const;
 
 export const WORKER_MENU_OPTIONS = {
@@ -25,15 +26,17 @@ export const EMPLOYER_MENU_OPTIONS = {
   PUBLISH_OFFER: '1',
   MY_OFFERS: '2',
   CANDIDATURES_RECEIVED: '3',
-  PROFILE: '4',
-  HISTORY: '5',
-  HELP: '6',
+  FILLED_JOBS: '4',
+  PROFILE: '5',
+  HISTORY: '6',
+  HELP: '7',
 } as const;
 
 export const CMD_MENU = ['menu', 'aide', 'help', 'bonjour'];
 export const CMD_PUBLISH = ['publier', 'publish'];
 export const CMD_MY_OFFERS = ['mes offres', 'mes offres publiées', 'my offers'];
 export const CMD_CANDIDATURES = ['candidatures', 'candidatures reçues'];
+export const CMD_FILLED_JOBS = ['missions pourvues', 'gérer missions pourvues'];
 export const CMD_PROFILE = ['profil', 'mon profil', 'profile'];
 export const CMD_HISTORY = ['historique', 'history'];
 export const CMD_LIST_OFFERS = ['voir les offres', 'offres', 'list offres'];
