@@ -94,9 +94,6 @@ export class WhatsAppController {
       ? from.slice('whatsapp:'.length)
       : from;
 
-    console.log('phone', phone);
-    console.log('text', text);
-
     const replies = await this.conversationService.handleIncomingMessage(
       phone,
       text,

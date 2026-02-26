@@ -11,6 +11,7 @@ import {
   Req,
   Query,
   BadRequestException,
+  Param,
 } from '@nestjs/common';
 import {
   FileFieldsInterceptor,
@@ -265,6 +266,29 @@ export class ProfileController {
     @Req() req: ProfileAuthenticatedRequest,
   ): Promise<ProfilePenaltyItem[]> {
     return this.profileService.getPenaltiesByProfileId(req.user.profileId);
+  }
+
+  @Patch('penalties/:id/pay')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiCookieAuth()
+  @ApiOperation({
+    summary: 'Mark a penalty as paid for the current profile',
+    description:
+      'Marks the specified penalty as paid for the authenticated worker so they can apply to job offers again.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Penalty marked as paid',
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized - no valid token' })
+  @ApiResponse({ status: 404, description: 'Penalty not found' })
+  async payPenalty(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('id') id: string,
+  ): Promise<{ success: boolean }> {
+    await this.profileService.markPenaltyPaid(id, req.user.profileId);
+    return { success: true };
   }
 
   @Get('applications')

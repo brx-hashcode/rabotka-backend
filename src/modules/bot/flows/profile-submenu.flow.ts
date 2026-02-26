@@ -2,6 +2,7 @@ import type { BotProfile, BotState } from '../types/bot-state.types';
 import { FLOW_IDS, CMD_MENU } from '../bot.constants';
 import { menuMessage } from '../messages/menu.messages';
 import type { BotCommandsService } from '../services/bot-commands.service';
+import { getCandidaturesListInitialState } from './candidatures-list.flow';
 
 export type ProfileSubmenuContext = {
   commands: BotCommandsService;
@@ -20,7 +21,8 @@ export async function runProfileSubmenuFlow(
   ctx: ProfileSubmenuContext,
 ): Promise<FlowResult> {
   const payload = state.payload ?? {};
-  const profileType = (payload.profileType as 'WORKER' | 'EMPLOYER') ?? profile.profile_type;
+  const profileType =
+    (payload.profileType as 'WORKER' | 'EMPLOYER') ?? profile.profile_type;
   const trimmed = input.trim();
   const normalized = trimmed.toLowerCase();
 
@@ -29,7 +31,11 @@ export async function runProfileSubmenuFlow(
     clearState: true,
   });
 
-  if (trimmed === '3' || normalized === 'retour' || CMD_MENU.some((c) => normalized === c || normalized.startsWith(c + ' '))) {
+  if (
+    trimmed === '3' ||
+    normalized === 'retour' ||
+    CMD_MENU.some((c) => normalized === c || normalized.startsWith(c + ' '))
+  ) {
     return goToMenu();
   }
 
@@ -39,13 +45,23 @@ export async function runProfileSubmenuFlow(
       return { reply: [message], clearState: true };
     }
     if (trimmed === '2') {
-      const message = await ctx.commands.candidaturesReceived(profile);
-      return { reply: [message], clearState: true };
+      const result = await ctx.commands.candidaturesReceived(profile);
+      if (result.items?.length) {
+        return {
+          reply: [result.message],
+          nextState: getCandidaturesListInitialState(result.items),
+        };
+      }
+      return { reply: [result.message], clearState: true };
     }
   }
 
   if (profileType === 'WORKER') {
-    if (trimmed === '1' || trimmed === '2') {
+    if (trimmed === '1') {
+      const result = await ctx.commands.myApplications(profile);
+      return { reply: [result.message], clearState: true };
+    }
+    if (trimmed === '2') {
       const message = await ctx.commands.penaltyHistory(profile);
       return { reply: [message], clearState: true };
     }
@@ -57,7 +73,9 @@ export async function runProfileSubmenuFlow(
   };
 }
 
-export function getProfileSubmenuInitialState(profileType: 'WORKER' | 'EMPLOYER'): BotState {
+export function getProfileSubmenuInitialState(
+  profileType: 'WORKER' | 'EMPLOYER',
+): BotState {
   return {
     flowId: FLOW_IDS.PROFILE_SUBMENU,
     step: 0,
