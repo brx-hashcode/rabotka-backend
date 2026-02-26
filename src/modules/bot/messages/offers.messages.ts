@@ -80,6 +80,8 @@ export function formatOfferListCompact(
       `${num}. ${o.title}`,
       `    Montant: ${o.amount.toLocaleString('fr-FR')} FCFA ${flowLabel}`,
       `    Date: ${formatDate(o.scheduled_at)}`,
+      `    Adresse: ${o.address.length > 40 ? o.address.slice(0, 40) + '...' : o.address}`,
+      '',
     );
   });
   lines.push('');
