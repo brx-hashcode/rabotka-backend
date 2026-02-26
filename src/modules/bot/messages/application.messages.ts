@@ -111,6 +111,7 @@ export type ApplicationForList = {
     title: string;
     scheduled_at: Date;
     amount: number;
+    payment_flow: string;
     address: string;
     status: string;
   };
@@ -123,24 +124,31 @@ export function formatMyApplicationsList(
     return "*VOUS N'AVEZ AUCUNE CANDIDATURE. TAPEZ 'MENU' PUIS 1 POUR VOIR LES OFFRES.*";
   }
 
-  const lines = [`*MES CANDIDATURES (${applications.length})*`, '', SEP];
+  const lines = [`*MES CANDIDATURES (${applications.length})*`, ''];
 
-  for (const app of applications) {
-    const statusEmoji = applicationStatusLabel(app.status);
+  const ADDRESS_MAX = 40;
+  for (let i = 0; i < applications.length; i++) {
+    const app = applications[i];
+    const num = i + 1;
+    const flowLabel = formatPaymentFlow(app.job_offer.payment_flow);
+    const statusText = applicationStatusLabel(app.status).replaceAll('*', '');
+    const address =
+      app.job_offer.address.length > ADDRESS_MAX
+        ? app.job_offer.address.slice(0, ADDRESS_MAX) + '...'
+        : app.job_offer.address;
     lines.push(
-      statusEmoji,
-      `*${app.job_offer.title}*`,
-      `*Date*: ${formatDate(app.job_offer.scheduled_at)}`,
-      `*Montant*: ${app.job_offer.amount.toLocaleString('fr-FR')} FCFA`,
-      `*Adresse*: ${app.job_offer.address.slice(0, 30)}${app.job_offer.address.length > 30 ? '...' : ''}`,
-      '',
-      '1️⃣ Voir détails / Annuler',
-      SEP,
+      `${num}. ${app.job_offer.title}`,
+      `    Montant: ${app.job_offer.amount.toLocaleString('fr-FR')} FCFA ${flowLabel}`,
+      `    Date: ${formatDate(app.job_offer.scheduled_at)}`,
+      `    Statut: ${statusText}`,
+      `    Adresse: ${address}`,
       '',
     );
   }
 
-  lines.push("*TAPEZ LE NUMÉRO DE L'OPTION OU 'MENU' POUR REVENIR.*");
+  lines.push(
+    "Veuillez taper un numéro pour sélectionner une candidature ou 'Menu' pour revenir au menu",
+  );
   return lines.join('\n');
 }
 
@@ -166,15 +174,15 @@ export function formatApplyConfirmation(params: {
     '',
     '*ENGAGEMENT IMPORTANT*:',
     "✓ Vos informations seront partagées avec l'employeur*",
-    '*Vous vous engagez à être présent et ponctuel*',
-    '*Annulation < 4h avant = pénalité de 5,000 FCFA*',
-    '*Impact sur votre score de fiabilité*',
+    'Vous vous engagez à être présent et ponctuel',
+    'Annulation < 4h avant = pénalité de *5,000 FCFA*',
+    'Impact sur votre score de fiabilité',
     '',
     '*Votre profil sera envoyé*:',
     `*Nom*: ${params.workerName}`,
     `*Téléphone*: ${params.workerPhone}`,
     `*Email*: ${params.workerEmail}`,
-    `*Score*: ⭐ ${params.reliabilityScore ?? 100}/100`,
+    `*Score*: ${params.reliabilityScore ?? 100}/100`,
     '',
     '*Confirmez-vous votre candidature ?*',
     '1️⃣ Oui, je postule',
