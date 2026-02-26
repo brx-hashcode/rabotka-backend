@@ -243,7 +243,7 @@ export function formatNewApplicationToEmployer(params: {
     '2️⃣ Voir son profil complet',
     '3️⃣ Refuser',
     '',
-    '*Tapez le numéro correspondant.*',
+    'Tapez le numéro correspondant.',
   ].join('\n');
 }
 
@@ -258,6 +258,7 @@ export function formatApplicationAcceptedToWorker(
     `*Nom*: ${employerName}`,
     `*Téléphone*: ${employerPhone}`,
     '',
+    '',
     '*Bonne collaboration ! 🤝*',
   ].join('\n');
 }
@@ -267,7 +268,7 @@ export function formatApplicationRejectedToWorker(): string {
     '*Candidature refusée*',
     '',
     "L'employeur a choisi un autre candidat pour cette offre.",
-    "*Consultez d'autres offres avec Menu > 1.*",
+    "Consultez d'autres offres avec Menu > 1.",
   ].join('\n');
 }
 
@@ -376,7 +377,7 @@ export function formatFilledJobDetail(params: FilledJobListItem): string {
     '3 - Retour',
     '4 - Menu',
     '',
-    '*Tapez le numéro correspondant.*',
+    'Tapez le numéro correspondant.',
   ].join('\n');
 }
 
