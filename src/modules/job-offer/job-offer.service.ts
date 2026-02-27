@@ -96,6 +96,7 @@ export class JobOfferService {
   async findActive(
     limit = 20,
     cursor?: string,
+    excludeAppliedByWorkerId?: string,
   ): Promise<{
     data: JobOfferListItem[];
     nextCursor: string | null;
@@ -103,7 +104,18 @@ export class JobOfferService {
     const offers = await this.prisma.jobOffer.findMany({
       take: limit + 1,
       ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-      where: { status: JobOfferStatus.ACTIVE },
+      where: {
+        status: JobOfferStatus.ACTIVE,
+        ...(excludeAppliedByWorkerId
+          ? {
+              applications: {
+                none: {
+                  worker_id: excludeAppliedByWorkerId,
+                },
+              },
+            }
+          : {}),
+      },
       orderBy: [{ scheduled_at: 'asc' }, { created_at: 'desc' }],
     });
 

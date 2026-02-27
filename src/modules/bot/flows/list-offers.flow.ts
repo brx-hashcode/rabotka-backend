@@ -54,7 +54,7 @@ function handleListStep(params: FlowParams): Promise<FlowResult> | FlowResult {
 }
 
 async function handleLoadMore(params: FlowParams): Promise<FlowResult> {
-  const { state, nextCursor, ctx } = params;
+  const { state, nextCursor, ctx, profile } = params;
   if (!nextCursor) {
     return {
       reply: [
@@ -66,6 +66,7 @@ async function handleLoadMore(params: FlowParams): Promise<FlowResult> {
   const { data, nextCursor: newCursor } = await ctx.jobOfferService.findActive(
     PAGE_SIZE,
     nextCursor,
+    profile.id,
   );
   if (data.length === 0) {
     return {
