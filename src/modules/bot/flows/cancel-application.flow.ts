@@ -1,5 +1,5 @@
 import type { BotProfile, BotState } from '../types/bot-state.types';
-import { FLOW_IDS } from '../bot.constants';
+import { FLOW_IDS, CMD_MENU } from '../bot.constants';
 import {
   formatCancelApplicationNoPenalty,
   formatCancelApplicationWithPenalty,
@@ -10,6 +10,7 @@ import {
 } from '../../application/application.constants';
 import type { ApplicationService } from '../../application/application.service';
 import type { BotNotificationService } from '../services/bot-notification.service';
+import { menuMessage } from '../messages/menu.messages';
 
 export type CancelApplicationContext = {
   applicationService: ApplicationService;
@@ -89,17 +90,16 @@ async function handleCancelStep1(
     return { reply: [text], nextState: state };
   }
 
-  const reason = normalized === 'confirmer' ? undefined : trimmed;
-  if (isLate && !reason) {
-    return {
-      reply: [
-        '*La raison est obligatoire pour une annulation tardive. Tapez votre raison.*',
-      ],
-      nextState: state,
-    };
-  }
-
   if (isLate) {
+    const reason = normalized === 'confirmer' ? undefined : trimmed;
+    if (!reason) {
+      return {
+        reply: [
+          '*La raison est obligatoire pour une annulation tardive. Tapez votre raison.*',
+        ],
+        nextState: state,
+      };
+    }
     return {
       reply: [
         [
@@ -108,7 +108,7 @@ async function handleCancelStep1(
           '1️⃣ Oui, annuler malgré la pénalité',
           '2️⃣ Non, maintenir ma candidature',
           '',
-          '*Tapez 1 ou 2.*',
+          '*Tapez le numéro correspondant.*',
         ].join('\n'),
       ],
       nextState: {
@@ -120,11 +120,62 @@ async function handleCancelStep1(
     };
   }
 
+  // Non-late cancellation: interpret options 1, 2, 3 explicitly.
+  if (normalized === '1' || normalized === 'confirmer') {
+    try {
+      const result = await ctx.applicationService.cancel(
+        applicationId,
+        profile.id,
+      );
+      await ctx.notificationService.sendCancellationToEmployer(
+        applicationId,
+        result.application.cancellation_reason ?? null,
+        false,
+      );
+      return {
+        reply: [
+          [
+            '*Candidature annulée*',
+            '',
+            "Votre candidature a été annulée. L'employeur a été notifié.",
+            '',
+            "*Tapez 'Menu' pour revenir.*",
+          ].join('\n'),
+        ],
+        clearState: true,
+      };
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : "*IMPOSSIBLE D'ANNULER.*";
+      return { reply: [`❌ ${message}`], nextState: state };
+    }
+  }
+
+  if (normalized === '2') {
+    return {
+      reply: [
+        "*Annulation annulée. Votre candidature est maintenue. Tapez 'Menu'.*",
+      ],
+      clearState: true,
+    };
+  }
+
+  if (
+    normalized === '3' ||
+    CMD_MENU.some((c) => normalized === c || normalized.startsWith(c + ' '))
+  ) {
+    return {
+      reply: [menuMessage(profile.profile_type)],
+      clearState: true,
+    };
+  }
+
+  // Any other text is treated as a free-text reason followed by immediate cancel.
   try {
     const result = await ctx.applicationService.cancel(
       applicationId,
       profile.id,
-      reason ?? undefined,
+      trimmed,
     );
     await ctx.notificationService.sendCancellationToEmployer(
       applicationId,
@@ -177,7 +228,7 @@ async function handleCancelStep2(args: CancelStepArgs): Promise<FlowResult> {
             '',
             "L'employeur a été notifié.",
             '',
-            "Tapez 'Menu' pour revenir.",
+            "*Tapez 'Menu' pour revenir.*",
           ].join('\n'),
         ],
         clearState: true,
@@ -212,6 +263,15 @@ export async function runCancelApplicationFlow(
   const applicationId = payload.applicationId as string | undefined;
   const trimmed = input.trim();
   const normalized = trimmed.toLowerCase();
+
+  if (
+    CMD_MENU.some((c) => normalized === c || normalized.startsWith(c + ' '))
+  ) {
+    return {
+      reply: [menuMessage(profile.profile_type)],
+      clearState: true,
+    };
+  }
 
   if (!applicationId) {
     return {

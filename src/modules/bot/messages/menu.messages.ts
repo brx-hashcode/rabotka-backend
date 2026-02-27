@@ -11,7 +11,7 @@ export function workerMenuMessage(): string {
     '4️⃣ Historique',
     '5️⃣ Aide',
     '',
-    'Tapez le numéro correspondant à votre choix.',
+    '*Tapez le numéro correspondant.*',
   ].join('\n');
 }
 
@@ -27,7 +27,7 @@ export function employerMenuMessage(): string {
     '6️⃣ Historique',
     '7️⃣ Aide',
     '',
-    'Tapez le numéro correspondant à votre choix.',
+    '*Tapez le numéro correspondant.*',
   ].join('\n');
 }
 
@@ -43,7 +43,7 @@ export function helpMessage(): string {
     `*Email*: ${RABOTKA_CONTACT.email}`,
     `*Adresse*: _${RABOTKA_CONTACT.address}_`,
     '',
-    "Tapez 'Menu' pour revenir.",
+    "*Tapez 'Menu' pour revenir.*",
   ].join('\n');
 }
 
