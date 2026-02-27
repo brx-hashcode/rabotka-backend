@@ -395,7 +395,7 @@ function handlePublishStep4(args: StepArgs): FlowResult {
         '2️⃣ Par jour',
         '3️⃣ Par mois',
         '',
-        'Tapez le numéro correspondant.',
+        '*Tapez le numéro correspondant.*',
       ].join('\n'),
     ],
     nextState: {
@@ -412,7 +412,7 @@ function handlePublishStep5(args: StepArgs): FlowResult {
   const num = parsePaymentFlowChoice(trimmed);
   if (!num) {
     return {
-      reply: ['*CHOIX INVALIDE. TAPEZ 1, 2 OU 3.*'],
+      reply: ['*Choix invalide. Tapez le numéro correspondant.*'],
       nextState: state,
     };
   }
@@ -453,7 +453,7 @@ function handlePublishStep6(args: StepArgs): FlowResult {
         '*Avez-vous une note complémentaire à ajouter ?*',
         '',
         '*Exemple*: "_Apporter vos propres outils_"',
-        'Tapez "Non" ou "Passer" pour ignorer.',
+        '*Tapez "Non" ou "Passer" pour ignorer la note.*',
       ].join('\n'),
     ],
     nextState: {
