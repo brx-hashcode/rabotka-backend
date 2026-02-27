@@ -33,7 +33,7 @@ async function handleAcceptRefuseStep1(args: StepArgs): Promise<FlowResult> {
           '1️⃣ Accepter le candidat',
           '2️⃣ Refuser',
           '',
-          '*Tapez 1 ou 2.*',
+          '*Tapez le numéro correspondant.*',
         ].join('\n'),
       ],
       nextState: state,
