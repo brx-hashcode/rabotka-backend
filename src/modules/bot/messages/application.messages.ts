@@ -38,10 +38,11 @@ export function formatCandidaturesListPage(
 }
 
 function candidatureStatusLabel(status: string): string {
-  if (status === 'ACCEPTED') return 'ACCEPTÉE';
-  if (status === 'PENDING') return 'EN ATTENTE';
-  if (status === 'REJECTED') return 'REFUSÉE';
-  return 'ANNULÉE';
+  const s = status.toUpperCase();
+  if (s === 'VERIFIED') return 'Vérifié';
+  if (s === 'PENDING') return 'En cours de vérification';
+  if (s === 'REJECTED') return 'Rejeté';
+  return status;
 }
 
 export function formatCandidatureDetail(params: {
@@ -53,13 +54,9 @@ export function formatCandidatureDetail(params: {
   avatarUrl?: string | null;
 }): string {
   const statusLabel = candidatureStatusLabel(params.status);
-  const lines = ['*Candidature sélectionnée:*', ''];
-  if (params.avatarUrl) {
-    lines.push(`[IMG:${params.avatarUrl}]`, '');
-  } else {
-    lines.push('[Photo de profil]', '');
-  }
-  lines.push(
+  const bodyLines = [
+    '*Candidature sélectionnée:*',
+    '',
     `Nom: ${params.lastName}`,
     `Prénom: ${params.firstName}`,
     `Email: ${params.email}`,
@@ -73,8 +70,16 @@ export function formatCandidatureDetail(params: {
     "4️⃣ Menu (ou tapez 'Menu')",
     '',
     '*Tapez le numéro correspondant.*',
-  );
-  return lines.join('\n');
+  ];
+  const body = bodyLines.join('\n');
+
+  if (params.avatarUrl) {
+    // Start with [IMG:...] so WhatsAppController sends it as media + caption
+    const caption = body ? `\n${body}` : '';
+    return `[IMG:${params.avatarUrl}]${caption}`;
+  }
+
+  return body;
 }
 
 function formatDate(d: Date): string {

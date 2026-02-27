@@ -175,6 +175,7 @@ export class BotCommandsService {
         const score = app.worker?.reliability_score ?? '?';
         const email = app.worker?.email ?? '';
         const avatarUrl = app.worker?.avatar_url;
+        const verificationStatus = app.worker?.verification_status;
         allItems.push({
           id: app.id,
           fullName,
@@ -182,7 +183,7 @@ export class BotCommandsService {
           firstName,
           lastName,
           email,
-          status: app.status,
+          status: verificationStatus ?? app.status,
           avatarUrl: avatarUrl ?? undefined,
         });
       }
