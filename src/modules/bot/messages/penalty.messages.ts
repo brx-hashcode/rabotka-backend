@@ -169,11 +169,11 @@ export function formatCancelApplicationNoPenalty(params: {
     '',
     'Souhaitez-vous indiquer une raison ? (optionnel).',
     '',
-    "1 - Confirmer l'annulation (ou tapez une raison puis validez)",
-    '2 - Retour à la candidature',
-    '3 - Menu',
+    "1️⃣ Confirmer l'annulation (ou tapez une raison puis validez)",
+    '2️⃣ Retour à la candidature',
+    '3️⃣ Menu',
     '',
-    'Tapez 1, 2 ou 3.',
+    '*Tapez le numéro correspondant.*',
   ].join('\n');
 }
 
@@ -203,6 +203,6 @@ export function formatCancelApplicationWithPenalty(params: {
     '',
     "Raison de l'annulation ? (obligatoire pour annulation tardive).",
     '',
-    'Tapez votre raison.',
+    '*Tapez votre raison.*',
   ].join('\n');
 }

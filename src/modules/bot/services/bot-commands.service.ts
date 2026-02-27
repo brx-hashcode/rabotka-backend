@@ -13,7 +13,6 @@ import {
   formatMyApplicationsList,
   formatCandidaturesListPage,
   formatFilledJobsListPage,
-  formatFilledJobDetail,
   type ApplicationForList,
   type CandidatureListItem,
   type FilledJobListItem,
@@ -125,7 +124,7 @@ export class BotCommandsService {
     }
     const offers = await this.jobOfferService.findByEmployerId(profile.id);
     if (offers.length === 0) {
-      return "*VOUS N'AVEZ PUBLIÉ AUCUNE OFFRE. TAPEZ 1 POUR PUBLIER UNE OFFRE.*";
+      return "*VOUS N'AVEZ PUBLIÉ AUCUNE OFFRE. TAPEZ 'MENU' POUR REVENIR.*";
     }
     const lines = [`*MES OFFRES PUBLIÉES (${offers.length})*`, ''];
     offers.forEach((o, i) => {
@@ -146,7 +145,7 @@ export class BotCommandsService {
         '',
       );
     });
-    lines.push("Veuillez taper 'Menu' pour revenir au menu.");
+    lines.push("*Tapez 'Menu' pour revenir.*");
     return lines.join('\n');
   }
 
@@ -214,7 +213,9 @@ export class BotCommandsService {
       };
     }
     const offers = await this.jobOfferService.findByEmployerId(profile.id);
-    const filledOffers = offers.filter((o) => o.status === JobOfferStatus.FILLED);
+    const filledOffers = offers.filter(
+      (o) => o.status === JobOfferStatus.FILLED,
+    );
     const items: FilledJobListItem[] = [];
     for (const offer of filledOffers) {
       const applications = await this.applicationService.findByJobOffer(
@@ -222,7 +223,9 @@ export class BotCommandsService {
       );
       const accepted = applications.find((a) => a.status === 'ACCEPTED');
       if (!accepted?.worker) continue;
-      const workerName = `${accepted.worker.first_name} ${accepted.worker.last_name}`.trim() || 'Inconnu';
+      const workerName =
+        `${accepted.worker.first_name} ${accepted.worker.last_name}`.trim() ||
+        'Inconnu';
       items.push({
         applicationId: accepted.id,
         title: offer.title,

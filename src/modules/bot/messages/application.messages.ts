@@ -26,10 +26,10 @@ export function formatCandidaturesListPage(
   lines.push('');
   if (hasMore) {
     lines.push(
-      '6 - Voir plus',
-      '7 - Menu',
+      '6️⃣ Voir plus',
+      '7️⃣ Menu',
       '',
-      "Veuillez taper un numéro (1-5), 6 pour la suite, ou 7 / 'Menu' pour revenir au menu",
+      "Veuillez taper un numéro (1-5), 6️⃣ pour la suite, ou 7️⃣ / 'Menu' pour revenir au menu",
     );
   } else {
     lines.push("Veuillez taper un numéro ou 'Menu' pour revenir au menu");
@@ -67,10 +67,10 @@ export function formatCandidatureDetail(params: {
     `Score: ${params.score}/100`,
     '',
     '*Actions:*',
-    '1 - Accepter',
-    '2 - Refuser',
-    '3 - Retour',
-    "4 - Menu (ou tapez 'Menu')",
+    '1️⃣ Accepter',
+    '2️⃣ Refuser',
+    '3️⃣ Retour',
+    "4️⃣ Menu (ou tapez 'Menu')",
     '',
     '*Tapez le numéro correspondant.*',
   );
@@ -152,6 +152,60 @@ export function formatMyApplicationsList(
   return lines.join('\n');
 }
 
+export type MyApplicationDetailParams = {
+  jobTitle: string;
+  scheduled_at: Date;
+  amount: number;
+  payment_flow: string;
+  address: string;
+  status: string;
+};
+
+export function formatMyApplicationDetailWithCancel(
+  params: MyApplicationDetailParams,
+): string {
+  const flowLabel = formatPaymentFlow(params.payment_flow);
+  const statusText = applicationStatusLabel(params.status).replaceAll('*', '');
+  return [
+    '*CANDIDATURE SÉLECTIONNÉE*',
+    '',
+    `*Offre*: ${params.jobTitle}`,
+    `*Date*: ${formatDate(params.scheduled_at)}`,
+    `*Montant*: ${params.amount.toLocaleString('fr-FR')} FCFA ${flowLabel}`,
+    `*Statut*: ${statusText}`,
+    `*Adresse*: ${params.address}`,
+    '',
+    '*Actions:*',
+    '1️⃣ Annuler cette candidature',
+    '2️⃣ Retour à la liste',
+    "3️⃣ Menu (ou tapez 'Menu')",
+    '',
+    '*Tapez le numéro correspondant.*',
+  ].join('\n');
+}
+
+export function formatMyApplicationDetailReadOnly(
+  params: MyApplicationDetailParams,
+): string {
+  const flowLabel = formatPaymentFlow(params.payment_flow);
+  const statusText = applicationStatusLabel(params.status).replaceAll('*', '');
+  return [
+    '*CANDIDATURE SÉLECTIONNÉE*',
+    '',
+    `*Offre*: ${params.jobTitle}`,
+    `*Date*: ${formatDate(params.scheduled_at)}`,
+    `*Montant*: ${params.amount.toLocaleString('fr-FR')} FCFA ${flowLabel}`,
+    `*Statut*: ${statusText}`,
+    `*Adresse*: ${params.address}`,
+    '',
+    '*Actions:*',
+    '1️⃣ Retour à la liste',
+    "2️⃣ Menu (ou tapez 'Menu')",
+    '',
+    '*Tapez le numéro correspondant.*',
+  ].join('\n');
+}
+
 export function formatApplyConfirmation(params: {
   title: string;
   scheduled_at: Date;
@@ -188,7 +242,7 @@ export function formatApplyConfirmation(params: {
     '1️⃣ Oui, je postule',
     '2️⃣ Non, retour',
     '',
-    '*Tapez 1 ou 2.*',
+    '*Tapez le numéro correspondant.*',
   ].join('\n');
 }
 
@@ -353,7 +407,7 @@ export function formatFilledJobsListPage(
     );
   });
   if (hasMore) {
-    lines.push('6 - Voir plus', '7 - Menu', '');
+    lines.push('6️⃣ Voir plus', '7️⃣ Menu', '');
   }
   lines.push(
     "Tapez un numéro pour sélectionner une mission, ou 'Menu' pour revenir.",
@@ -372,10 +426,10 @@ export function formatFilledJobDetail(params: FilledJobListItem): string {
     `*Montant*: ${params.amount.toLocaleString('fr-FR')} FCFA ${flowLabel}`,
     '',
     '*Actions:*',
-    '1 - Marquer comme terminée (verser le gain au worker)',
-    "2 - Annuler (réouvrir l'offre)",
-    '3 - Retour',
-    '4 - Menu',
+    '1️⃣ Marquer comme terminée (verser le gain au worker)',
+    "2️⃣ Annuler (réouvrir l'offre)",
+    '3️⃣ Retour',
+    '4️⃣ Menu',
     '',
     'Tapez le numéro correspondant.',
   ].join('\n');

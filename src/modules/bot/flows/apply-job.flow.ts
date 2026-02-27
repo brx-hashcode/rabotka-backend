@@ -1,9 +1,10 @@
 import type { BotProfile, BotState } from '../types/bot-state.types';
-import { FLOW_IDS } from '../bot.constants';
+import { FLOW_IDS, CMD_MENU } from '../bot.constants';
 import {
   formatApplyConfirmation,
   formatApplicationSentSuccess,
 } from '../messages/application.messages';
+import { menuMessage } from '../messages/menu.messages';
 import type { ApplicationService } from '../../application/application.service';
 import type { JobOfferService } from '../../job-offer/job-offer.service';
 import type { BotNotificationService } from '../services/bot-notification.service';
@@ -77,7 +78,7 @@ async function handleApplyStep1(
         err instanceof Error ? err.message : '*IMPOSSIBLE DE POSTULER.*';
       return {
         reply: [`❌ ${message} *TAPEZ 'MENU' POUR REVENIR.*`],
-        nextState: state,
+        clearState: true,
       };
     }
   }
@@ -103,6 +104,15 @@ export async function runApplyJobFlow(
   const jobOfferId = payload.jobOfferId as string | undefined;
   const trimmed = input.trim();
   const normalized = trimmed.toLowerCase();
+
+  if (
+    CMD_MENU.some((c) => normalized === c || normalized.startsWith(c + ' '))
+  ) {
+    return {
+      reply: [menuMessage(profile.profile_type)],
+      clearState: true,
+    };
+  }
 
   if (!jobOfferId) {
     return {
