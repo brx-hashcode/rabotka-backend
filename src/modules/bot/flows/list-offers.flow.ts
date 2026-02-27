@@ -186,7 +186,7 @@ async function handleDetailApply(
     '1️⃣ Oui, je postule',
     '2️⃣ Non, retour',
     '',
-    'Tapez 1 ou 2.',
+    '*Tapez le numéro correspondant.*',
     '',
   ].join('\n');
   const applyState = getApplyJobInitialState(offerId);
