@@ -47,6 +47,7 @@ export class BotCommandsService {
     const { data, nextCursor } = await this.jobOfferService.findActive(
       LIST_PAGE_SIZE,
       pageCursor,
+      profile.id,
     );
     if (data.length === 0) {
       return { message: formatNoOffersAvailable() };
