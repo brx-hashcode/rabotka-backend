@@ -453,7 +453,7 @@ function handlePublishStep6(args: StepArgs): FlowResult {
         '*Avez-vous une note complémentaire à ajouter ?*',
         '',
         '*Exemple*: "_Apporter vos propres outils_"',
-        '*Tapez "Non" ou "Passer" pour ignorer.*',
+        '*Tapez "Non" ou "Passer" pour ignorer la note.*',
       ].join('\n'),
     ],
     nextState: {
