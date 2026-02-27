@@ -68,7 +68,7 @@ export async function runProfileSubmenuFlow(
   }
 
   return {
-    reply: ["Tapez 1, 2 ou 3 (ou 'Menu') pour continuer."],
+    reply: ['*Tapez le numéro correspondant.*'],
     nextState: state,
   };
 }
