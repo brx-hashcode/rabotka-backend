@@ -51,6 +51,10 @@ enum DocumentType {
   IDENTITY_CARD
   PASSPORT
   DRIVER_LICENSE
+  BIRTH_CERTIFICATE
+  STUDENT_CARD
+  NIU_CARD
+  OTHER
 }
 
 enum KycDocumentCategory {
