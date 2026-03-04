@@ -17,6 +17,8 @@ const AMOUNT_MIN_FCFA = 1000;
 const AMOUNT_MAX_FCFA = 1_000_000;
 const ADDRESS_MIN = 10;
 const NOTE_MAX = 500;
+const QUANTITY_MIN = 1;
+const QUANTITY_MAX = 100;
 
 export type JobOfferListItem = {
   id: string;
@@ -27,6 +29,7 @@ export type JobOfferListItem = {
   payment_flow: string;
   address: string;
   note: string | null;
+  quantity: number;
   status: string;
   employer_id: string;
   created_at: Date;
@@ -86,6 +89,7 @@ export class JobOfferService {
         payment_flow: dto.payment_flow,
         address: dto.address.trim(),
         note: dto.note?.trim() ?? null,
+        quantity: dto.quantity ?? 1,
         status: JobOfferStatus.ACTIVE,
       },
     });
@@ -225,6 +229,16 @@ export class JobOfferService {
         `La note ne peut pas dépasser ${NOTE_MAX} caractères`,
       );
     }
+    if (
+      dto.quantity != null &&
+      (!Number.isInteger(dto.quantity) ||
+        dto.quantity < QUANTITY_MIN ||
+        dto.quantity > QUANTITY_MAX)
+    ) {
+      throw new BadRequestException(
+        `Le nombre de personnes doit être entre ${QUANTITY_MIN} et ${QUANTITY_MAX}`,
+      );
+    }
   }
 
   private toListItem(offer: {
@@ -236,6 +250,7 @@ export class JobOfferService {
     payment_flow: string;
     address: string;
     note: string | null;
+    quantity: number;
     status: string;
     employer_id: string;
     created_at: Date;
@@ -249,6 +264,7 @@ export class JobOfferService {
       payment_flow: offer.payment_flow,
       address: offer.address,
       note: offer.note,
+      quantity: offer.quantity,
       status: offer.status,
       employer_id: offer.employer_id,
       created_at: offer.created_at,

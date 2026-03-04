@@ -187,6 +187,7 @@ model JobOffer {
   payment_flow PaymentFlow
   address      String
   note         String?
+  quantity     Int            @default(1)
   status       JobOfferStatus @default(ACTIVE)
 
   employer     Profile       @relation(fields: [employer_id], references: [id], onDelete: Cascade)

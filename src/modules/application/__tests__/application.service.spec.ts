@@ -1,0 +1,305 @@
+import { Test, TestingModule } from '@nestjs/testing';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
+import { ApplicationService } from '../application.service';
+import { PrismaService } from '../../../common/services/prisma/prisma.service';
+import {
+  ApplicationStatus,
+  JobOfferStatus,
+  PaymentFlow,
+  PaymentMethod,
+  PaymentStatus,
+} from '@prisma/client';
+import { LATE_CANCELLATION_PENALTY_FCFA } from '../application.constants';
+
+const JOB_OFFER_ID = 'offer-uuid-1';
+const WORKER_ID = 'worker-uuid-1';
+const EMPLOYER_ID = 'employer-uuid-1';
+const APPLICATION_ID = 'app-uuid-1';
+
+function hoursFromNow(h: number): Date {
+  return new Date(Date.now() + h * 60 * 60 * 1000);
+}
+
+const mockJobOffer = {
+  id: JOB_OFFER_ID,
+  title: 'Plombier',
+  description: 'Réparation urgente',
+  scheduled_at: hoursFromNow(5),
+  amount: 15000,
+  payment_flow: PaymentFlow.DAILY,
+  address: '123 Avenue de la Paix',
+  note: null,
+  quantity: 1,
+  status: JobOfferStatus.ACTIVE,
+  employer_id: EMPLOYER_ID,
+  created_at: new Date(),
+  updated_at: new Date(),
+  employer: {
+    id: EMPLOYER_ID,
+    first_name: 'John',
+    last_name: 'Doe',
+    phone: '+242000000',
+    email: 'employer@test.com',
+    profile_type: 'EMPLOYER',
+    status: 'ACTIVE',
+  },
+};
+
+const mockWorker = {
+  id: WORKER_ID,
+  status: 'ACTIVE',
+  profile_type: 'WORKER',
+};
+
+const mockApplication = {
+  id: APPLICATION_ID,
+  job_offer_id: JOB_OFFER_ID,
+  worker_id: WORKER_ID,
+  status: ApplicationStatus.PENDING,
+  cancelled_at: null,
+  cancellation_reason: null,
+  penalty_applied: false,
+  penalty_amount: null,
+  created_at: new Date(),
+  updated_at: new Date(),
+  job_offer: mockJobOffer,
+  worker: {
+    id: WORKER_ID,
+    first_name: 'Jane',
+    last_name: 'Doe',
+    phone: '+242111111',
+    email: 'worker@test.com',
+    description: 'Worker description',
+    reliability_score: 100,
+    verification_status: 'VERIFIED',
+    avatar_url: null,
+  },
+};
+
+describe('ApplicationService', () => {
+  let service: ApplicationService;
+  let prisma: jest.Mocked<PrismaService>;
+
+  beforeEach(async () => {
+    const mockPrismaService = {
+      jobOffer: { findUnique: jest.fn(), update: jest.fn() },
+      profile: { findUnique: jest.fn(), update: jest.fn() },
+      penalty: { count: jest.fn(), create: jest.fn() },
+      application: {
+        findUnique: jest.fn(),
+        findMany: jest.fn(),
+        create: jest.fn(),
+        update: jest.fn(),
+      },
+      payment: { create: jest.fn() },
+      $transaction: jest.fn(),
+    };
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        ApplicationService,
+        { provide: PrismaService, useValue: mockPrismaService },
+      ],
+    }).compile();
+
+    service = module.get<ApplicationService>(ApplicationService);
+    prisma = module.get(PrismaService);
+  });
+
+  describe('create()', () => {
+    beforeEach(() => {
+      (prisma.jobOffer.findUnique as jest.Mock).mockResolvedValue(mockJobOffer);
+      (prisma.profile.findUnique as jest.Mock).mockResolvedValue(mockWorker);
+      (prisma.penalty.count as jest.Mock).mockResolvedValue(0);
+      (prisma.application.findUnique as jest.Mock).mockResolvedValue(null);
+      (prisma.application.create as jest.Mock).mockResolvedValue({
+        ...mockApplication,
+        job_offer: mockJobOffer,
+      });
+    });
+
+    it('creates a valid application', async () => {
+      const result = await service.create(JOB_OFFER_ID, WORKER_ID);
+      expect(result.id).toBe(APPLICATION_ID);
+      expect(result.status).toBe(ApplicationStatus.PENDING);
+    });
+
+    it('throws ForbiddenException when worker has unpaid penalties', async () => {
+      (prisma.penalty.count as jest.Mock).mockResolvedValue(1);
+      await expect(service.create(JOB_OFFER_ID, WORKER_ID)).rejects.toThrow(
+        ForbiddenException,
+      );
+    });
+
+    it('throws BadRequestException when worker applies to own offer', async () => {
+      const offerOwnedByWorker = { ...mockJobOffer, employer_id: WORKER_ID };
+      (prisma.jobOffer.findUnique as jest.Mock).mockResolvedValue(offerOwnedByWorker);
+      await expect(service.create(JOB_OFFER_ID, WORKER_ID)).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('throws ConflictException when worker already applied', async () => {
+      (prisma.application.findUnique as jest.Mock).mockResolvedValue(mockApplication);
+      await expect(service.create(JOB_OFFER_ID, WORKER_ID)).rejects.toThrow(
+        ConflictException,
+      );
+    });
+
+    it('throws BadRequestException when offer is not ACTIVE', async () => {
+      (prisma.jobOffer.findUnique as jest.Mock).mockResolvedValue({
+        ...mockJobOffer,
+        status: JobOfferStatus.FILLED,
+      });
+      await expect(service.create(JOB_OFFER_ID, WORKER_ID)).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('throws NotFoundException when offer does not exist', async () => {
+      (prisma.jobOffer.findUnique as jest.Mock).mockResolvedValue(null);
+      await expect(service.create(JOB_OFFER_ID, WORKER_ID)).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+  });
+
+  describe('cancel()', () => {
+    const acceptedApplication = {
+      ...mockApplication,
+      status: ApplicationStatus.ACCEPTED,
+    };
+
+    beforeEach(() => {
+      (prisma.application.findUnique as jest.Mock).mockResolvedValue(acceptedApplication);
+      (prisma.jobOffer.update as jest.Mock).mockResolvedValue(mockJobOffer);
+      (prisma.application.update as jest.Mock).mockResolvedValue({
+        ...acceptedApplication,
+        status: ApplicationStatus.CANCELLED,
+        cancelled_at: new Date(),
+      });
+      (prisma.profile.findUnique as jest.Mock).mockResolvedValue({
+        id: WORKER_ID,
+        reliability_score: 100,
+      });
+      (prisma.penalty.create as jest.Mock).mockResolvedValue({});
+      (prisma.profile.update as jest.Mock).mockResolvedValue({});
+      // Mock findById (used internally)
+      jest.spyOn(service, 'findById').mockResolvedValue({
+        ...mockApplication,
+        status: ApplicationStatus.CANCELLED,
+        job_offer: {
+          ...mockJobOffer,
+          description: 'desc',
+          payment_flow: 'DAILY',
+          note: null,
+        } as any,
+        worker: mockApplication.worker as any,
+      } as any);
+    });
+
+    it('cancels > 4h before: no penalty applied', async () => {
+      // scheduled_at is 5h from now — no penalty
+      const result = await service.cancel(APPLICATION_ID, WORKER_ID);
+      expect(result.penaltyApplied).toBe(false);
+      expect(result.penaltyAmount).toBeNull();
+      expect(prisma.penalty.create).not.toHaveBeenCalled();
+    });
+
+    it('cancels ACCEPTED application < 4h before: penalty applied', async () => {
+      const lateMockOffer = { ...mockJobOffer, scheduled_at: hoursFromNow(2) };
+      (prisma.application.findUnique as jest.Mock).mockResolvedValue({
+        ...acceptedApplication,
+        job_offer: lateMockOffer,
+      });
+      const result = await service.cancel(APPLICATION_ID, WORKER_ID);
+      expect(result.penaltyApplied).toBe(true);
+      expect(result.penaltyAmount).toBe(LATE_CANCELLATION_PENALTY_FCFA);
+      expect(prisma.penalty.create).toHaveBeenCalled();
+    });
+
+    it('cancels PENDING application < 4h before: no penalty (only ACCEPTED triggers penalty)', async () => {
+      const lateMockOffer = { ...mockJobOffer, scheduled_at: hoursFromNow(2) };
+      (prisma.application.findUnique as jest.Mock).mockResolvedValue({
+        ...mockApplication,
+        status: ApplicationStatus.PENDING,
+        job_offer: lateMockOffer,
+      });
+      const result = await service.cancel(APPLICATION_ID, WORKER_ID);
+      expect(result.penaltyApplied).toBe(false);
+      expect(prisma.penalty.create).not.toHaveBeenCalled();
+    });
+
+    it('reverts offer to ACTIVE when cancelling accepted application', async () => {
+      await service.cancel(APPLICATION_ID, WORKER_ID);
+      expect(prisma.jobOffer.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: { status: JobOfferStatus.ACTIVE },
+        }),
+      );
+    });
+  });
+
+  describe('accept()', () => {
+    beforeEach(() => {
+      (prisma.application.findUnique as jest.Mock).mockResolvedValue(mockApplication);
+      (prisma.$transaction as jest.Mock).mockResolvedValue([]);
+      jest.spyOn(service, 'findById').mockResolvedValue({
+        ...mockApplication,
+        status: ApplicationStatus.ACCEPTED,
+        job_offer: {
+          ...mockJobOffer,
+          description: 'desc',
+          payment_flow: 'DAILY',
+          note: null,
+        } as any,
+        worker: mockApplication.worker as any,
+      } as any);
+    });
+
+    it('accepts application: application → ACCEPTED, offer → FILLED', async () => {
+      const result = await service.accept(APPLICATION_ID, EMPLOYER_ID);
+      expect(prisma.$transaction).toHaveBeenCalled();
+      expect(result.status).toBe(ApplicationStatus.ACCEPTED);
+    });
+
+    it('throws ForbiddenException when non-employer tries to accept', async () => {
+      await expect(
+        service.accept(APPLICATION_ID, 'other-employer-id'),
+      ).rejects.toThrow(ForbiddenException);
+    });
+  });
+
+  describe('markJobCompleted()', () => {
+    beforeEach(() => {
+      (prisma.application.findUnique as jest.Mock).mockResolvedValue({
+        ...mockApplication,
+        status: ApplicationStatus.ACCEPTED,
+      });
+      (prisma.$transaction as jest.Mock).mockResolvedValue([]);
+      jest.spyOn(service, 'findById').mockResolvedValue({
+        ...mockApplication,
+        status: ApplicationStatus.ACCEPTED,
+        job_offer: {
+          ...mockJobOffer,
+          status: JobOfferStatus.COMPLETED,
+          description: 'desc',
+          payment_flow: 'DAILY',
+          note: null,
+        } as any,
+        worker: mockApplication.worker as any,
+      } as any);
+    });
+
+    it('marks offer as COMPLETED and creates payment record', async () => {
+      const result = await service.markJobCompleted(APPLICATION_ID, EMPLOYER_ID);
+      expect(prisma.$transaction).toHaveBeenCalled();
+      expect(result.job_offer.status).toBe(JobOfferStatus.COMPLETED);
+    });
+  });
+});
