@@ -269,6 +269,25 @@ export class AuthService {
     return { success: true, token };
   }
 
+  async getAdminById(userId: string): Promise<{
+    id: string;
+    email: string;
+    name: string;
+  }> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, first_name: true, last_name: true, email: true },
+    });
+    if (!user) {
+      throw new NotFoundException('auth.errors.user_not_found');
+    }
+    return {
+      id: user.id,
+      email: user.email,
+      name: `${user.first_name} ${user.last_name}`.trim(),
+    };
+  }
+
   private normalize(value: string): string {
     return value.trim().toLowerCase();
   }
