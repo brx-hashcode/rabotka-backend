@@ -30,6 +30,7 @@ import { JobOfferModule } from './modules/job-offer/job-offer.module';
 import { ApplicationModule } from './modules/application/application.module';
 import { FileModule } from './modules/file/file.module';
 import { LogModule } from './modules/log/log.module';
+import { WalletModule } from './modules/wallet/wallet.module';
 import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
 import { ReminderModule } from './modules/bot/reminder/reminder.module';
 import { StorageModule } from './common/services/storage/storage.module';
@@ -122,6 +123,7 @@ import { I18nExceptionFilter } from './common/filters/i18n-exception.filter';
     ImageWatermarkModule,
     FileModule,
     LogModule,
+    WalletModule,
   ],
   controllers: [AppController],
   providers: [
