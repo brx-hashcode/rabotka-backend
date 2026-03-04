@@ -1,16 +1,21 @@
 import {
   Controller,
+  Get,
   Post,
   Body,
   Res,
+  Req,
   HttpCode,
   HttpStatus,
+  UseGuards,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBody, ApiCookieAuth } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { ConfigService } from '@nestjs/config';
 import { I18n, I18nContext } from 'nestjs-i18n';
 import { AuthService } from './auth.service';
+import { AdminAuthGuard } from './guards/admin-auth.guard';
+import type { AdminAuthenticatedRequest } from './guards/jwt-auth.guard';
 import {
   SendOtpDto,
   VerifyOtpDto,
@@ -166,17 +171,16 @@ export class AuthController {
     },
   })
   logout(@Res({ passthrough: true }) res: Response): { success: boolean } {
-    const cookieName = this.configService.get<string>('AUTH_COOKIE_NAME');
+    this.clearAuthCookie(res);
+    return { success: true };
+  }
 
+  private clearAuthCookie(res: Response): void {
+    const cookieName = this.configService.get<string>('AUTH_COOKIE_NAME');
     if (!cookieName) {
       throw new Error('AUTH_COOKIE_NAME is not set');
     }
-
-    res.clearCookie(cookieName, {
-      path: '/',
-    });
-
-    return { success: true };
+    res.clearCookie(cookieName, { path: '/' });
   }
 
   @Post('admin/send-otp')
@@ -272,7 +276,7 @@ export class AuthController {
   async verifyAdminOtp(
     @Body() verifyAdminOtpDto: VerifyAdminOtpDto,
     @Res({ passthrough: true }) res: Response,
-  ): Promise<{ success: boolean; token: string }> {
+  ): Promise<{ success: boolean }> {
     const result = await this.authService.verifyAdminOtp(
       verifyAdminOtpDto.email,
       verifyAdminOtpDto.otp,
@@ -295,6 +299,53 @@ export class AuthController {
       path: '/',
     });
 
-    return { success: true, token: result.token };
+    return { success: true };
+  }
+
+  @Get('admin/me')
+  @UseGuards(AdminAuthGuard)
+  @ApiOperation({
+    summary: 'Get current admin user',
+    description: 'Returns the authenticated admin user. Requires admin session cookie.',
+  })
+  @ApiCookieAuth()
+  @ApiResponse({
+    status: 200,
+    description: 'Current admin user',
+    schema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', format: 'uuid' },
+        email: { type: 'string', format: 'email' },
+        name: { type: 'string' },
+      },
+    },
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async getAdminMe(
+    @Req() req: AdminAuthenticatedRequest,
+  ): Promise<{ id: string; email: string; name: string }> {
+    return this.authService.getAdminById(req.user.userId);
+  }
+
+  @Post('admin/logout')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Logout admin',
+    description: 'Clears the authentication cookie to log out the admin.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Logged out successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: true },
+      },
+    },
+  })
+  adminLogout(@Res({ passthrough: true }) res: Response): { success: boolean } {
+    this.clearAuthCookie(res);
+    return { success: true };
   }
 }
