@@ -14,7 +14,9 @@ import { AccountStatus, ProfileType, VerificationStatus } from '@prisma/client';
 
 function toArray(value: unknown): string[] {
   if (Array.isArray(value)) return value.filter((v) => typeof v === 'string');
-  if (typeof value === 'string' && value.trim()) return [value.trim()];
+  if (typeof value === 'string' && value.trim()) {
+    return value.split(',').map((s) => s.trim()).filter(Boolean);
+  }
   return [];
 }
 
