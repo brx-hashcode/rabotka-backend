@@ -19,7 +19,7 @@ import {
 import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
 import { CreateProfileDto } from './dto/create-profile.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
-import { AccountStatus, Prisma } from '@prisma/client';
+import { AccountStatus, Prisma, ProfileType, VerificationStatus } from '@prisma/client';
 import { randomBytes } from 'node:crypto';
 
 export type ProfileMeResponse = {
@@ -65,6 +65,34 @@ export type ProfileApplicationItem = {
 
 export type ProfileApplicationsResponse = {
   data: ProfileApplicationItem[];
+  total: number;
+  page: number;
+  limit: number;
+};
+
+export type AdminProfileListItem = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string;
+  address: string;
+  description: string;
+  status: string;
+  profileType: string;
+  whatsappConnected: boolean;
+  verificationStatus: string;
+  verifiedBy: string | null;
+  verifiedAt: Date | null;
+  rejectionReason: string | null;
+  reliabilityScore: number | null;
+  avatarUrl: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type AdminProfilesListResponse = {
+  data: AdminProfileListItem[];
   total: number;
   page: number;
   limit: number;
@@ -304,6 +332,98 @@ export class ProfileService {
         status: a.job_offer.status,
       },
     }));
+    return { data, total, page, limit };
+  }
+
+  async getProfilesForAdmin(params: {
+    page: number;
+    limit: number;
+    q?: string;
+    status?: AccountStatus[];
+    profileType?: ProfileType[];
+    whatsappConnected?: boolean;
+    verificationStatus?: VerificationStatus[];
+  }): Promise<AdminProfilesListResponse> {
+    const { page, limit, q, status, profileType, whatsappConnected, verificationStatus } =
+      params;
+    const skip = (page - 1) * limit;
+
+    const where: Prisma.ProfileWhereInput = {};
+
+    const searchTrimmed = q?.trim() ?? '';
+    if (searchTrimmed.length > 0) {
+      where.OR = [
+        { first_name: { contains: searchTrimmed, mode: 'insensitive' } },
+        { last_name: { contains: searchTrimmed, mode: 'insensitive' } },
+        { email: { contains: searchTrimmed, mode: 'insensitive' } },
+        { phone: { contains: searchTrimmed, mode: 'insensitive' } },
+      ];
+    }
+
+    if (status != null && status.length > 0) {
+      where.status = { in: status };
+    }
+    if (profileType != null && profileType.length > 0) {
+      where.profile_type = { in: profileType };
+    }
+    if (whatsappConnected !== undefined) {
+      where.whatsapp_connected = whatsappConnected;
+    }
+    if (verificationStatus != null && verificationStatus.length > 0) {
+      where.verification_status = { in: verificationStatus };
+    }
+
+    const [profiles, total] = await Promise.all([
+      this.prisma.profile.findMany({
+        where,
+        orderBy: { created_at: 'desc' },
+        skip,
+        take: limit,
+        select: {
+          id: true,
+          first_name: true,
+          last_name: true,
+          email: true,
+          phone: true,
+          address: true,
+          description: true,
+          status: true,
+          profile_type: true,
+          whatsapp_connected: true,
+          verification_status: true,
+          verified_by: true,
+          verified_at: true,
+          rejection_reason: true,
+          reliability_score: true,
+          avatar_url: true,
+          created_at: true,
+          updated_at: true,
+        },
+      }),
+      this.prisma.profile.count({ where }),
+    ]);
+
+    const data: AdminProfileListItem[] = profiles.map((p) => ({
+      id: p.id,
+      firstName: p.first_name,
+      lastName: p.last_name,
+      email: p.email,
+      phone: p.phone,
+      address: p.address,
+      description: p.description,
+      status: p.status,
+      profileType: p.profile_type,
+      whatsappConnected: p.whatsapp_connected,
+      verificationStatus: p.verification_status,
+      verifiedBy: p.verified_by,
+      verifiedAt: p.verified_at,
+      rejectionReason: p.rejection_reason,
+      reliabilityScore: p.reliability_score,
+      avatarUrl: p.avatar_url,
+      createdAt: p.created_at,
+      updatedAt: p.updated_at,
+    }));
+
     return { data, total, page, limit };
   }
 
