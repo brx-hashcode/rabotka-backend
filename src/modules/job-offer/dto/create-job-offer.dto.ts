@@ -2,6 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsString,
   IsNumber,
+  IsInt,
   IsEnum,
   IsOptional,
   Min,
@@ -55,4 +56,10 @@ export class CreateJobOfferDto {
   @IsString()
   @MaxLength(500)
   note?: string;
+
+  @ApiProperty({ example: 2, description: 'Number of persons needed' })
+  @IsInt()
+  @Min(1, { message: 'Au moins 1 personne requise' })
+  @Max(100, { message: 'Maximum 100 personnes' })
+  quantity!: number;
 }

@@ -9,6 +9,7 @@ export type OfferListItem = {
   payment_flow: string;
   address: string;
   note: string | null;
+  quantity?: number;
   status: string;
 };
 
@@ -80,6 +81,7 @@ export function formatOfferListCompact(
       `${num}. ${o.title}`,
       `    Montant: ${o.amount.toLocaleString('fr-FR')} FCFA ${flowLabel}`,
       `    Date: ${formatDate(o.scheduled_at)}`,
+      `    Personnes: ${o.quantity ?? 1}`,
       `    Adresse: ${o.address.length > 40 ? o.address.slice(0, 40) + '...' : o.address}`,
       '',
     );
@@ -112,6 +114,7 @@ export function formatOfferDetail(offer: OfferListItem): string {
     '',
     `*Date et heure*: ${formatDate(offer.scheduled_at)}`,
     `*Rémunération*: ${offer.amount.toLocaleString('fr-FR')} FCFA ${flow}`,
+    `*Personnes requises*: ${offer.quantity ?? 1}`,
     `*Adresse*: ${offer.address}`,
     '',
   ];
@@ -143,6 +146,7 @@ export function formatOfferDetailWithActions(offer: OfferListItem): string {
     `*Résumé*: ${summary}`,
     `*Date*: ${formatDate(offer.scheduled_at)}`,
     `*Montant*: ${offer.amount.toLocaleString('fr-FR')} FCFA ${flow}`,
+    `*Personnes requises*: ${offer.quantity ?? 1}`,
     `*Adresse*: ${offer.address.slice(0, 50)}${offer.address.length > 50 ? '...' : ''}`,
     '',
     SEP,

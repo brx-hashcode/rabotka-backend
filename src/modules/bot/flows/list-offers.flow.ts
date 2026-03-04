@@ -246,6 +246,7 @@ function toOfferListItem(offer: {
   payment_flow: string;
   address: string;
   note: string | null;
+  quantity: number;
   status: string;
 }): OfferListItem {
   return {
@@ -257,6 +258,7 @@ function toOfferListItem(offer: {
     payment_flow: offer.payment_flow,
     address: offer.address,
     note: offer.note,
+    quantity: offer.quantity,
     status: offer.status,
   };
 }
