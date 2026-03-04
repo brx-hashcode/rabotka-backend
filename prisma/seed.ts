@@ -1,7 +1,7 @@
 import { config } from 'dotenv';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '@prisma/client';
-import { seedProfiles } from './seed/profile.seed';
+import { seedProfiles, seedProfilesBulk } from './seed/profile.seed';
 import { seedSuperAdmin } from './seed/user.seed';
 import { seedWallet } from './seed/wallet.seed';
 
@@ -19,6 +19,7 @@ async function run() {
     await seedSuperAdmin(prisma);
     // await seedUsers(prisma);
     await seedProfiles(prisma);
+    await seedProfilesBulk(prisma);
     await seedWallet(prisma);
   } catch (e) {
     console.error(e);
