@@ -88,6 +88,7 @@ const mockPrisma = {
     findMany: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
+    count: jest.fn(),
   },
   payment: { create: jest.fn() },
   $transaction: jest.fn(),
@@ -114,6 +115,7 @@ describe('ApplicationService (e2e integration)', () => {
     mockPrisma.jobOffer.findUnique.mockResolvedValue(mockJobOffer);
     mockPrisma.profile.findUnique.mockResolvedValue(mockWorker);
     mockPrisma.penalty.count.mockResolvedValue(0);
+    mockPrisma.application.count.mockResolvedValue(0);
     mockPrisma.application.findUnique.mockResolvedValue(null);
     mockPrisma.application.create.mockResolvedValue({
       ...mockApplication,

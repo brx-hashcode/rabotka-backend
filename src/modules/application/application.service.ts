@@ -256,6 +256,16 @@ export class ApplicationService {
       throw new BadRequestException("Cette candidature n'est plus en attente");
     }
 
+    const currentAcceptedCount = await this.prisma.application.count({
+      where: {
+        job_offer_id: application.job_offer_id,
+        status: ApplicationStatus.ACCEPTED,
+      },
+    });
+
+    const quantityNeeded = application.job_offer.quantity ?? 1;
+    const shouldFillJob = currentAcceptedCount + 1 >= quantityNeeded;
+
     await this.prisma.$transaction([
       this.prisma.application.update({
         where: { id: applicationId },
@@ -263,7 +273,9 @@ export class ApplicationService {
       }),
       this.prisma.jobOffer.update({
         where: { id: application.job_offer_id },
-        data: { status: JobOfferStatus.FILLED },
+        data: {
+          status: shouldFillJob ? JobOfferStatus.FILLED : JobOfferStatus.ACTIVE,
+        },
       }),
     ]);
 
