@@ -40,6 +40,8 @@ import { sendWelcomeEmail } from '../mail/templates';
 import { MailService } from '../mail/mail.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import type { ProfileAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
+import { WalletService } from '../wallet/wallet.service';
+import { PayPenaltyDto } from '../wallet/dto/pay-penalty.dto';
 
 @ApiTags('Profile')
 @Controller('profile')
@@ -47,6 +49,7 @@ export class ProfileController {
   constructor(
     private readonly profileService: ProfileService,
     private readonly mailService: MailService,
+    private readonly walletService: WalletService,
   ) {}
 
   @Post()
@@ -273,22 +276,36 @@ export class ProfileController {
   @ApiBearerAuth()
   @ApiCookieAuth()
   @ApiOperation({
-    summary: 'Mark a penalty as paid for the current profile',
+    summary: 'Pay a penalty for the current profile',
     description:
-      'Marks the specified penalty as paid for the authenticated worker so they can apply to job offers again.',
+      'Records the penalty payment, credits the system wallet, and marks the penalty as paid. Returns the generated RBK reference (e.g. RBK-2025-20250304-abc123).',
   })
+  @ApiBody({ type: PayPenaltyDto })
   @ApiResponse({
     status: 200,
-    description: 'Penalty marked as paid',
+    description: 'Penalty paid successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: true },
+        reference: { type: 'string', example: 'RBK-2025-20250304-a1b2c3d4' },
+      },
+    },
   })
+  @ApiResponse({ status: 400, description: 'Penalty already paid' })
   @ApiResponse({ status: 401, description: 'Unauthorized - no valid token' })
   @ApiResponse({ status: 404, description: 'Penalty not found' })
   async payPenalty(
     @Req() req: ProfileAuthenticatedRequest,
     @Param('id') id: string,
-  ): Promise<{ success: boolean }> {
-    await this.profileService.markPenaltyPaid(id, req.user.profileId);
-    return { success: true };
+    @Body() body: PayPenaltyDto,
+  ): Promise<{ success: boolean; reference: string }> {
+    const { reference } = await this.walletService.recordPenaltyPayment(
+      id,
+      req.user.profileId,
+      body,
+    );
+    return { success: true, reference };
   }
 
   @Get('applications')

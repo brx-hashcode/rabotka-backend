@@ -13,6 +13,7 @@ import {
   PaymentStatus,
   PaymentMethod,
 } from '@prisma/client';
+import { generatePaymentReference } from '../../common/utils/payment-reference';
 import {
   LATE_CANCELLATION_PENALTY_FCFA,
   LATE_CANCELLATION_SCORE_DEDUCTION,
@@ -497,6 +498,7 @@ export class ApplicationService {
     }
 
     const amount = Number(application.job_offer.amount);
+    const transactionId = generatePaymentReference();
     await this.prisma.$transaction([
       this.prisma.jobOffer.update({
         where: { id: application.job_offer_id },
@@ -507,7 +509,7 @@ export class ApplicationService {
           profile_id: application.worker_id,
           amount,
           payment_method: PaymentMethod.OTHER,
-          transaction_id: `earn-${applicationId}`,
+          transaction_id: transactionId,
           status: PaymentStatus.COMPLETED,
           completed_at: new Date(),
         },

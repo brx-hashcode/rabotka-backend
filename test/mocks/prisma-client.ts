@@ -52,3 +52,14 @@ export enum VerificationStatus {
   VERIFIED = 'VERIFIED',
   REJECTED = 'REJECTED',
 }
+
+export enum WalletOwnerType {
+  SYSTEM = 'SYSTEM',
+  USER = 'USER',
+  PROFILE = 'PROFILE',
+}
+
+export enum WalletTransactionType {
+  CREDIT_PENALTY = 'CREDIT_PENALTY',
+  CREDIT_COMMISSION = 'CREDIT_COMMISSION',
+}

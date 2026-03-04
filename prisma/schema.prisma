@@ -95,6 +95,17 @@ enum PaymentFlow {
   MONTHLY
 }
 
+enum WalletOwnerType {
+  SYSTEM
+  USER
+  PROFILE
+}
+
+enum WalletTransactionType {
+  CREDIT_PENALTY
+  CREDIT_COMMISSION
+}
+
 model Profile {
   id                      String             @id @default(uuid()) @db.Uuid
   created_at              DateTime           @default(now())
@@ -124,8 +135,9 @@ model Profile {
   penalties     Penalty[]
   payments      Payment[]
   conversations Conversation[]
-  logs          Log[]
-  files         File[]
+  logs    Log[]
+  files   File[]
+  wallets Wallet[]
 
   @@index([email], name: "idx_profile_email")
   @@index([phone], name: "idx_profile_phone")
@@ -146,8 +158,9 @@ model User {
   is_active     Boolean   @default(true)
   last_login_at DateTime?
 
-  files File[]
-  logs  Log[]
+  files   File[]
+  logs    Log[]
+  wallets Wallet[]
 
   @@index([email], name: "idx_user_email")
   @@index([role], name: "idx_user_role")
@@ -257,6 +270,42 @@ model Payment {
   @@index([status], name: "idx_payment_status")
   @@index([profile_id], name: "idx_payment_profile")
   @@map("payments")
+}
+
+model Wallet {
+  id         String          @id @default(uuid()) @db.Uuid
+  created_at DateTime        @default(now())
+  updated_at DateTime        @updatedAt
+  owner_type WalletOwnerType
+  user_id    String?         @db.Uuid
+  profile_id String?         @db.Uuid
+  balance    Decimal         @default(0) @db.Decimal(12, 2)
+
+  user    User?               @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  profile Profile?            @relation(fields: [profile_id], references: [id], onDelete: Cascade)
+  transactions WalletTransaction[]
+
+  @@unique([owner_type, user_id], name: "idx_wallet_owner_user")
+  @@unique([owner_type, profile_id], name: "idx_wallet_owner_profile")
+  @@index([owner_type], name: "idx_wallet_owner_type")
+  @@map("wallets")
+}
+
+model WalletTransaction {
+  id             String                @id @default(uuid()) @db.Uuid
+  wallet_id      String                @db.Uuid
+  type          WalletTransactionType
+  amount         Decimal               @db.Decimal(10, 2)
+  reference_type String?
+  reference_id   String?               @db.Uuid
+  created_at     DateTime              @default(now())
+
+  wallet Wallet @relation(fields: [wallet_id], references: [id], onDelete: Cascade)
+
+  @@index([wallet_id], name: "idx_wallet_transaction_wallet")
+  @@index([created_at], name: "idx_wallet_transaction_created_at")
+  @@index([type], name: "idx_wallet_transaction_type")
+  @@map("wallet_transactions")
 }
 
 model File {
