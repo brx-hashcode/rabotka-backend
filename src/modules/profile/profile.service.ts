@@ -37,6 +37,10 @@ export type ProfileMeResponse = {
   whatsappConnected: boolean;
   avatarUrl: string | null;
   createdAt: Date;
+  jobOffersCount: number;
+  applicationsCount: number;
+  penaltiesCount: number;
+  unpaidPenaltiesCount: number;
 };
 
 export type ProfilePenaltyItem = {
@@ -136,12 +140,23 @@ export class ProfileService {
         whatsapp_connected: true,
         avatar_url: true,
         created_at: true,
+        _count: {
+          select: {
+            job_offers: true,
+            applications: true,
+            penalties: true,
+          },
+        },
       },
     });
 
     if (!profile) {
       throw new NotFoundException('profile.errors.not_found');
     }
+
+    const unpaidPenaltiesCount = await this.prisma.penalty.count({
+      where: { worker_id: id, paid_at: null },
+    });
 
     return {
       id: profile.id,
@@ -158,6 +173,10 @@ export class ProfileService {
       whatsappConnected: profile.whatsapp_connected,
       avatarUrl: profile.avatar_url,
       createdAt: profile.created_at,
+      jobOffersCount: profile._count.job_offers,
+      applicationsCount: profile._count.applications,
+      penaltiesCount: profile._count.penalties,
+      unpaidPenaltiesCount,
     };
   }
 
