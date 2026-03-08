@@ -1,5 +1,5 @@
-import { IsEnum } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
+import { IsEnum, IsOptional, IsString } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { AccountStatus } from '@prisma/client';
 
 export class AdminUpdateStatusDto {
@@ -9,4 +9,11 @@ export class AdminUpdateStatusDto {
   })
   @IsEnum(AccountStatus)
   status: AccountStatus;
+
+  @ApiPropertyOptional({
+    description: 'Reason for the status change',
+  })
+  @IsOptional()
+  @IsString()
+  reason?: string;
 }
