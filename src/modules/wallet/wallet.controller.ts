@@ -18,7 +18,10 @@ import { AdminAuthGuard } from '../auth/guards/admin-auth.guard';
 import type { AdminAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 
-const ALLOWED_WALLET_ROLES: UserRole[] = [UserRole.ADMIN, UserRole.SUPER_ADMIN];
+const ALLOWED_WALLET_ROLES = new Set<UserRole>([
+  UserRole.ADMIN,
+  UserRole.SUPER_ADMIN,
+]);
 
 @ApiTags('Wallet')
 @Controller('admin/wallet')
@@ -49,7 +52,10 @@ export class WalletController {
     },
   })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: 'Forbidden - requires ADMIN or SUPER_ADMIN role' })
+  @ApiResponse({
+    status: 403,
+    description: 'Forbidden - requires ADMIN or SUPER_ADMIN role',
+  })
   async getRevenue(
     @Req() req: AdminAuthenticatedRequest,
   ): Promise<{ totalRevenue: number; balance: number }> {
@@ -57,7 +63,7 @@ export class WalletController {
       where: { id: req.user.userId },
       select: { role: true },
     });
-    if (!user || !ALLOWED_WALLET_ROLES.includes(user.role)) {
+    if (!user || !ALLOWED_WALLET_ROLES.has(user.role)) {
       throw new ForbiddenException(
         'Only ADMIN or SUPER_ADMIN can access wallet data',
       );

@@ -50,18 +50,21 @@ export class DashboardService {
       applicationsCurrent,
       applicationsPrevious,
     ] = await Promise.all([
+      // Total revenue: all completed payments
       this.prisma.payment.aggregate({
         where: { status: 'COMPLETED' },
         _sum: { amount: true },
       }),
+      // Revenue last 30 days
       this.prisma.payment.aggregate({
-        where: { status: 'COMPLETED', completed_at: { gte: thirtyDaysAgo } },
+        where: { status: 'COMPLETED', paid_at: { gte: thirtyDaysAgo } },
         _sum: { amount: true },
       }),
+      // Revenue previous 30 days
       this.prisma.payment.aggregate({
         where: {
           status: 'COMPLETED',
-          completed_at: { gte: sixtyDaysAgo, lt: thirtyDaysAgo },
+          paid_at: { gte: sixtyDaysAgo, lt: thirtyDaysAgo },
         },
         _sum: { amount: true },
       }),

@@ -8,6 +8,7 @@ import {
   WalletOwnerType,
   WalletTransactionType,
   PaymentStatus,
+  PaymentType,
 } from '@prisma/client';
 import { generatePaymentReference } from '../../common/utils/payment-reference';
 import type { PayPenaltyDto } from './dto/pay-penalty.dto';
@@ -69,12 +70,14 @@ export class WalletService {
     await this.prisma.$transaction(async (tx) => {
       await tx.payment.create({
         data: {
+          type: PaymentType.PENALTY,
           profile_id: profileId,
           amount: penalty.amount,
           payment_method: dto.paymentMethod,
           transaction_id: reference,
           status: PaymentStatus.COMPLETED,
-          completed_at: new Date(),
+          paid_at: new Date(),
+          description: `Penalty payment for penalty ${penaltyId}`,
         },
       });
       await tx.walletTransaction.create({

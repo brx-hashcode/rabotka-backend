@@ -12,6 +12,7 @@ import {
   JobOfferStatus,
   PaymentStatus,
   PaymentMethod,
+  PaymentType,
   Prisma,
 } from '@prisma/client';
 import { generatePaymentReference } from '../../common/utils/payment-reference';
@@ -529,12 +530,14 @@ export class ApplicationService {
       }),
       this.prisma.payment.create({
         data: {
+          type: PaymentType.JOB_POSTING,
           profile_id: application.worker_id,
           amount,
           payment_method: PaymentMethod.OTHER,
           transaction_id: transactionId,
           status: PaymentStatus.COMPLETED,
-          completed_at: new Date(),
+          paid_at: new Date(),
+          description: `Job completion payment for job ${application.job_offer_id}`,
         },
       }),
     ]);

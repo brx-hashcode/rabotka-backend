@@ -89,6 +89,12 @@ enum PaymentMethod {
   OTHER
 }
 
+enum PaymentType {
+  REGISTRATION
+  JOB_POSTING
+  PENALTY
+}
+
 enum PaymentFlow {
   HOURLY
   DAILY
@@ -257,18 +263,21 @@ model Payment {
   id             String        @id @default(uuid()) @db.Uuid
   created_at     DateTime      @default(now())
   updated_at     DateTime      @updatedAt
+  type           PaymentType
   profile_id     String        @db.Uuid
   amount         Decimal       @db.Decimal(10, 2)
   payment_method PaymentMethod
   transaction_id String        @unique
   status         PaymentStatus @default(PENDING)
-  completed_at   DateTime?
+  paid_at        DateTime?
+  description    String?
 
   profile Profile @relation(fields: [profile_id], references: [id], onDelete: Cascade)
 
   @@index([transaction_id], name: "idx_payment_transaction")
   @@index([status], name: "idx_payment_status")
   @@index([profile_id], name: "idx_payment_profile")
+  @@index([type], name: "idx_payment_type")
   @@map("payments")
 }
 
