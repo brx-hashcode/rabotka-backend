@@ -1,5 +1,5 @@
 import type { PrismaClient } from '@prisma/client';
-import { WalletOwnerType, WalletTransactionType, PaymentStatus, PaymentMethod } from '@prisma/client';
+import { WalletOwnerType, WalletTransactionType, PaymentStatus, PaymentMethod, PaymentType } from '@prisma/client';
 
 function seedPaymentReference(index: number): string {
   const now = new Date();
@@ -53,12 +53,14 @@ export async function seedWallet(prisma: PrismaClient): Promise<void> {
     await prisma.$transaction([
       prisma.payment.create({
         data: {
+          type: PaymentType.PENALTY,
           profile_id: penalty.worker_id,
           amount: penalty.amount,
           payment_method: PaymentMethod.OTHER,
           transaction_id: transactionId,
           status: PaymentStatus.COMPLETED,
-          completed_at: new Date(),
+          paid_at: new Date(),
+          description: `Seed penalty payment for penalty ${penalty.id}`,
         },
       }),
       prisma.walletTransaction.create({

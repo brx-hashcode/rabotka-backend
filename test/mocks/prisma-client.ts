@@ -34,6 +34,12 @@ export enum PaymentFlow {
   MONTHLY = 'MONTHLY',
 }
 
+export enum PaymentType {
+  REGISTRATION = 'REGISTRATION',
+  JOB_POSTING = 'JOB_POSTING',
+  PENALTY = 'PENALTY',
+}
+
 export enum PaymentMethod {
   MOBILE_MONEY = 'MOBILE_MONEY',
   CARD = 'CARD',
