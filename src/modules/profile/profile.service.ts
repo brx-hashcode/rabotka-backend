@@ -102,6 +102,28 @@ export type AdminProfilesListResponse = {
   limit: number;
 };
 
+export type AdminKycDocumentItem = {
+  id: string;
+  documentType: string | null;
+  documentCategory: string;
+  documentUrl: string;
+  verificationStatus: string;
+  verifiedAt: Date | null;
+  verifiedBy: string | null;
+  rejectionReason: string | null;
+  createdAt: Date;
+};
+
+export type AdminProfileDetailResponse = AdminProfileListItem & {
+  phone: string;
+  description: string;
+  jobOffersCount: number;
+  applicationsCount: number;
+  penaltiesCount: number;
+  unpaidPenaltiesCount: number;
+  kycDocuments: AdminKycDocumentItem[];
+};
+
 type PrismaTransactionClient = Parameters<
   Parameters<PrismaService['$transaction']>[0]
 >[0];
@@ -352,6 +374,218 @@ export class ProfileService {
       },
     }));
     return { data, total, page, limit };
+  }
+
+  async getProfileDetailForAdmin(id: string): Promise<AdminProfileDetailResponse> {
+    const profile = await this.prisma.profile.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        first_name: true,
+        last_name: true,
+        email: true,
+        phone: true,
+        address: true,
+        description: true,
+        status: true,
+        profile_type: true,
+        whatsapp_connected: true,
+        verification_status: true,
+        verified_by: true,
+        verified_at: true,
+        rejection_reason: true,
+        reliability_score: true,
+        avatar_url: true,
+        created_at: true,
+        updated_at: true,
+        kyc_documents: {
+          select: {
+            id: true,
+            document_type: true,
+            document_category: true,
+            document_url: true,
+            verification_status: true,
+            verified_at: true,
+            verified_by: true,
+            rejection_reason: true,
+            created_at: true,
+          },
+          orderBy: { created_at: 'asc' },
+        },
+        _count: {
+          select: {
+            job_offers: true,
+            applications: true,
+            penalties: true,
+          },
+        },
+      },
+    });
+
+    if (!profile) {
+      throw new NotFoundException('profile.errors.not_found');
+    }
+
+    const unpaidPenaltiesCount = await this.prisma.penalty.count({
+      where: { worker_id: id, paid_at: null },
+    });
+
+    // Resolve admin names for verified_by UUIDs
+    const verifierIds = new Set<string>();
+    if (profile.verified_by) verifierIds.add(profile.verified_by);
+    for (const doc of profile.kyc_documents) {
+      if (doc.verified_by) verifierIds.add(doc.verified_by);
+    }
+
+    const verifierNames = new Map<string, string>();
+    if (verifierIds.size > 0) {
+      const admins = await this.prisma.user.findMany({
+        where: { id: { in: [...verifierIds] } },
+        select: { id: true, first_name: true, last_name: true },
+      });
+      for (const admin of admins) {
+        verifierNames.set(admin.id, `${admin.first_name} ${admin.last_name}`);
+      }
+    }
+
+    return {
+      id: profile.id,
+      firstName: profile.first_name,
+      lastName: profile.last_name,
+      email: profile.email,
+      phone: profile.phone,
+      address: profile.address,
+      description: profile.description,
+      status: profile.status,
+      profileType: profile.profile_type,
+      whatsappConnected: profile.whatsapp_connected,
+      verificationStatus: profile.verification_status,
+      verifiedBy: profile.verified_by
+        ? (verifierNames.get(profile.verified_by) ?? profile.verified_by)
+        : null,
+      verifiedAt: profile.verified_at,
+      rejectionReason: profile.rejection_reason,
+      reliabilityScore: profile.reliability_score,
+      avatarUrl: profile.avatar_url,
+      createdAt: profile.created_at,
+      updatedAt: profile.updated_at,
+      jobOffersCount: profile._count.job_offers,
+      applicationsCount: profile._count.applications,
+      penaltiesCount: profile._count.penalties,
+      unpaidPenaltiesCount,
+      kycDocuments: profile.kyc_documents.map((doc) => ({
+        id: doc.id,
+        documentType: doc.document_type,
+        documentCategory: doc.document_category,
+        documentUrl: doc.document_url,
+        verificationStatus: doc.verification_status,
+        verifiedAt: doc.verified_at,
+        verifiedBy: doc.verified_by
+          ? (verifierNames.get(doc.verified_by) ?? doc.verified_by)
+          : null,
+        rejectionReason: doc.rejection_reason,
+        createdAt: doc.created_at,
+      })),
+    };
+  }
+
+  async verifyProfileKyc(
+    profileId: string,
+    adminUserId: string,
+    decision: 'VERIFIED' | 'REJECTED',
+    reason?: string,
+  ): Promise<AdminProfileDetailResponse> {
+    const profile = await this.prisma.profile.findUnique({
+      where: { id: profileId },
+      select: { id: true },
+    });
+    if (!profile) {
+      throw new NotFoundException('profile.errors.not_found');
+    }
+
+    const now = new Date();
+    await this.prisma.$transaction([
+      this.prisma.profile.update({
+        where: { id: profileId },
+        data: {
+          verification_status: decision as VerificationStatus,
+          verified_by: adminUserId,
+          verified_at: now,
+          rejection_reason: decision === 'REJECTED' ? (reason ?? null) : null,
+        },
+      }),
+      this.prisma.kycDocument.updateMany({
+        where: { profile_id: profileId },
+        data: {
+          verification_status: decision as VerificationStatus,
+          verified_by: adminUserId,
+          verified_at: now,
+          rejection_reason: decision === 'REJECTED' ? (reason ?? null) : null,
+        },
+      }),
+    ]);
+
+    return this.getProfileDetailForAdmin(profileId);
+  }
+
+  async updateProfileStatusByAdmin(
+    profileId: string,
+    status: AccountStatus,
+  ): Promise<AdminProfileDetailResponse> {
+    const profile = await this.prisma.profile.findUnique({
+      where: { id: profileId },
+      select: { id: true, status: true, phone: true, first_name: true, profile_type: true },
+    });
+    if (!profile) {
+      throw new NotFoundException('profile.errors.not_found');
+    }
+
+    await this.prisma.profile.update({
+      where: { id: profileId },
+      data: { status },
+    });
+
+    if (profile.status !== AccountStatus.ACTIVE && status === AccountStatus.ACTIVE) {
+      try {
+        if (profile.phone) {
+          const text = accountActivatedMessage(
+            profile.first_name,
+            profile.profile_type,
+          );
+          await this.whatsAppService.sendTextMessage(profile.phone, text);
+        }
+      } catch {
+        this.logger.warn(`Failed to send activation message for profile ${profileId}`);
+      }
+    }
+
+    return this.getProfileDetailForAdmin(profileId);
+  }
+
+  async updateProfileByAdmin(
+    profileId: string,
+    dto: UpdateProfileDto,
+  ): Promise<AdminProfileDetailResponse> {
+    const profile = await this.prisma.profile.findUnique({
+      where: { id: profileId },
+      select: { id: true },
+    });
+    if (!profile) {
+      throw new NotFoundException('profile.errors.not_found');
+    }
+
+    const dataToUpdate: Prisma.ProfileUpdateInput = {};
+    if (dto.firstName !== undefined) dataToUpdate.first_name = dto.firstName;
+    if (dto.lastName !== undefined) dataToUpdate.last_name = dto.lastName;
+    if (dto.description !== undefined) dataToUpdate.description = dto.description;
+    if (dto.address !== undefined) dataToUpdate.address = dto.address;
+
+    await this.prisma.profile.update({
+      where: { id: profileId },
+      data: dataToUpdate,
+    });
+
+    return this.getProfileDetailForAdmin(profileId);
   }
 
   async getProfilesForAdmin(params: {
