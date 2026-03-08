@@ -47,7 +47,11 @@ export class AdminProfileController {
               whatsappConnected: { type: 'boolean' },
               verificationStatus: { type: 'string' },
               verifiedBy: { type: 'string', format: 'uuid', nullable: true },
-              verifiedAt: { type: 'string', format: 'date-time', nullable: true },
+              verifiedAt: {
+                type: 'string',
+                format: 'date-time',
+                nullable: true,
+              },
               rejectionReason: { type: 'string', nullable: true },
               reliabilityScore: { type: 'number', nullable: true },
               avatarUrl: { type: 'string', nullable: true },
@@ -66,7 +70,7 @@ export class AdminProfileController {
   async list(@Query() dto: AdminListProfilesDto) {
     const page = dto.page ?? 1;
     const limit = dto.limit ?? 10;
-    return this.profileService.getProfilesForAdmin({
+    return await this.profileService.getProfilesForAdmin({
       page,
       limit,
       q: dto.q,
