@@ -18,6 +18,18 @@ import { JobActivityQueryDto, TimeRange } from './dto/job-activity-query.dto';
 export class AdminDashboardController {
   constructor(private readonly dashboardService: DashboardService) {}
 
+  @Get('metrics')
+  @ApiOperation({
+    summary: 'Get dashboard summary metrics (admin only)',
+    description:
+      'Returns total counts and 30-day trends for revenue, profiles, jobs, and applications.',
+  })
+  @ApiResponse({ status: 200, description: 'Dashboard metrics' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async getMetrics() {
+    return this.dashboardService.getMetrics();
+  }
+
   @Get('job-activity')
   @ApiOperation({
     summary: 'Get job activity chart data (admin only)',
