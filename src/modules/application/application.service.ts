@@ -12,6 +12,7 @@ import {
   JobOfferStatus,
   PaymentStatus,
   PaymentMethod,
+  Prisma,
 } from '@prisma/client';
 import { generatePaymentReference } from '../../common/utils/payment-reference';
 import {
@@ -21,6 +22,28 @@ import {
   RELIABILITY_SCORE_MIN,
   RELIABILITY_SCORE_MAX,
 } from './application.constants';
+
+export type AdminApplicationListItem = {
+  id: string;
+  jobTitle: string;
+  jobOfferId: string;
+  workerName: string;
+  workerEmail: string;
+  workerPhone: string;
+  workerAvatarUrl: string | null;
+  workerId: string;
+  employerName: string;
+  employerEmail: string;
+  employerAvatarUrl: string | null;
+  employerId: string;
+  status: string;
+  penaltyApplied: boolean;
+  penaltyAmount: number | null;
+  cancelledAt: string | null;
+  cancellationReason: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
 
 export type ApplicationListItem = {
   id: string;
@@ -599,6 +622,122 @@ export class ApplicationService {
       },
     });
     return applications.map((a) => this.toApplicationWithOffer(a));
+  }
+
+  async getApplicationsForAdmin(params: {
+    page: number;
+    limit: number;
+    q?: string;
+    status?: ApplicationStatus[];
+    penaltyApplied?: string[];
+  }): Promise<{
+    data: AdminApplicationListItem[];
+    total: number;
+    page: number;
+    limit: number;
+  }> {
+    const { page, limit, q, status, penaltyApplied } = params;
+    const skip = (page - 1) * limit;
+
+    const where: Prisma.ApplicationWhereInput = {};
+
+    const searchTrimmed = q?.trim() ?? '';
+    if (searchTrimmed.length > 0) {
+      where.OR = [
+        {
+          worker: {
+            first_name: { contains: searchTrimmed, mode: 'insensitive' },
+          },
+        },
+        {
+          worker: {
+            last_name: { contains: searchTrimmed, mode: 'insensitive' },
+          },
+        },
+        {
+          job_offer: {
+            title: { contains: searchTrimmed, mode: 'insensitive' },
+          },
+        },
+      ];
+    }
+
+    if (status != null && status.length > 0) {
+      where.status = { in: status };
+    }
+    if (penaltyApplied && penaltyApplied.length > 0) {
+      const boolValues = penaltyApplied.map((v) => v === 'true');
+      if (boolValues.length === 1) {
+        where.penalty_applied = boolValues[0];
+      }
+    }
+
+    const [applications, total] = await Promise.all([
+      this.prisma.application.findMany({
+        where,
+        orderBy: { created_at: 'desc' },
+        skip,
+        take: limit,
+        include: {
+          worker: {
+            select: {
+              id: true,
+              first_name: true,
+              last_name: true,
+              email: true,
+              phone: true,
+              avatar_url: true,
+            },
+          },
+          job_offer: {
+            select: {
+              id: true,
+              title: true,
+              employer_id: true,
+              employer: {
+                select: {
+                  id: true,
+                  first_name: true,
+                  last_name: true,
+                  email: true,
+                  avatar_url: true,
+                },
+              },
+            },
+          },
+        },
+      }),
+      this.prisma.application.count({ where }),
+    ]);
+
+    const data: AdminApplicationListItem[] = applications.map((a) => ({
+      id: a.id,
+      jobTitle: a.job_offer.title,
+      jobOfferId: a.job_offer_id,
+      workerName:
+        `${a.worker.first_name ?? ''} ${a.worker.last_name ?? ''}`.trim() ||
+        '—',
+      workerEmail: a.worker.email,
+      workerPhone: a.worker.phone,
+      workerAvatarUrl: a.worker.avatar_url ?? null,
+      workerId: a.worker_id,
+      employerName:
+        `${a.job_offer.employer?.first_name ?? ''} ${a.job_offer.employer?.last_name ?? ''}`.trim() ||
+        '—',
+      employerEmail: a.job_offer.employer?.email ?? '',
+      employerAvatarUrl: a.job_offer.employer?.avatar_url ?? null,
+      employerId: a.job_offer.employer_id,
+      status: a.status,
+      penaltyApplied: a.penalty_applied,
+      penaltyAmount:
+        a.penalty_amount != null ? Number(a.penalty_amount) : null,
+      cancelledAt: a.cancelled_at?.toISOString() ?? null,
+      cancellationReason: a.cancellation_reason,
+      createdAt: a.created_at.toISOString(),
+      updatedAt: a.updated_at.toISOString(),
+    }));
+
+    return { data, total, page, limit };
   }
 
   private toListItem(app: {
