@@ -6,7 +6,12 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { CreateJobOfferDto } from './dto/create-job-offer.dto';
-import { AccountStatus, JobOfferStatus } from '@prisma/client';
+import {
+  AccountStatus,
+  JobOfferStatus,
+  PaymentFlow,
+  Prisma,
+} from '@prisma/client';
 
 const MIN_SCHEDULED_HOURS_FROM_NOW = 4;
 const TITLE_MIN = 5;
@@ -19,6 +24,27 @@ const ADDRESS_MIN = 10;
 const NOTE_MAX = 500;
 const QUANTITY_MIN = 1;
 const QUANTITY_MAX = 100;
+
+export type AdminJobOfferListItem = {
+  id: string;
+  title: string;
+  description: string;
+  scheduledAt: string;
+  amount: number;
+  paymentFlow: string;
+  address: string;
+  note: string | null;
+  quantity: number;
+  status: string;
+  employerName: string;
+  employerEmail: string;
+  employerPhone: string;
+  employerAvatarUrl: string | null;
+  employerId: string;
+  applicationsCount: number;
+  createdAt: string;
+  updatedAt: string;
+};
 
 export type JobOfferListItem = {
   id: string;
@@ -239,6 +265,90 @@ export class JobOfferService {
         `Le nombre de personnes doit être entre ${QUANTITY_MIN} et ${QUANTITY_MAX}`,
       );
     }
+  }
+
+  async getJobOffersForAdmin(params: {
+    page: number;
+    limit: number;
+    q?: string;
+    status?: JobOfferStatus[];
+    paymentFlow?: PaymentFlow[];
+  }): Promise<{
+    data: AdminJobOfferListItem[];
+    total: number;
+    page: number;
+    limit: number;
+  }> {
+    const { page, limit, q, status, paymentFlow } = params;
+    const skip = (page - 1) * limit;
+
+    const where: Prisma.JobOfferWhereInput = {};
+
+    const searchTrimmed = q?.trim() ?? '';
+    if (searchTrimmed.length > 0) {
+      where.OR = [
+        { title: { contains: searchTrimmed, mode: 'insensitive' } },
+        { description: { contains: searchTrimmed, mode: 'insensitive' } },
+        { address: { contains: searchTrimmed, mode: 'insensitive' } },
+      ];
+    }
+
+    if (status != null && status.length > 0) {
+      where.status = { in: status };
+    }
+    if (paymentFlow != null && paymentFlow.length > 0) {
+      where.payment_flow = { in: paymentFlow };
+    }
+
+    const [offers, total] = await Promise.all([
+      this.prisma.jobOffer.findMany({
+        where,
+        orderBy: { created_at: 'desc' },
+        skip,
+        take: limit,
+        include: {
+          employer: {
+            select: {
+              id: true,
+              first_name: true,
+              last_name: true,
+              email: true,
+              phone: true,
+              avatar_url: true,
+            },
+          },
+          _count: {
+            select: { applications: true },
+          },
+        },
+      }),
+      this.prisma.jobOffer.count({ where }),
+    ]);
+
+    const data: AdminJobOfferListItem[] = offers.map((o) => ({
+      id: o.id,
+      title: o.title,
+      description: o.description,
+      scheduledAt: o.scheduled_at.toISOString(),
+      amount: Number(o.amount),
+      paymentFlow: o.payment_flow,
+      address: o.address,
+      note: o.note,
+      quantity: o.quantity,
+      status: o.status,
+      employerName:
+        `${o.employer.first_name ?? ''} ${o.employer.last_name ?? ''}`.trim() ||
+        '—',
+      employerEmail: o.employer.email,
+      employerPhone: o.employer.phone,
+      employerAvatarUrl: o.employer.avatar_url ?? null,
+      employerId: o.employer_id,
+      applicationsCount: o._count.applications,
+      createdAt: o.created_at.toISOString(),
+      updatedAt: o.updated_at.toISOString(),
+    }));
+
+    return { data, total, page, limit };
   }
 
   private toListItem(offer: {
