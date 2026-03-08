@@ -2,8 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException, BadRequestException } from '@nestjs/common';
 import { WalletService } from '../wallet.service';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
-import { WalletOwnerType, WalletTransactionType, PaymentStatus } from '@prisma/client';
-import { PaymentMethod } from '@prisma/client';
+import { WalletOwnerType, WalletTransactionType, PaymentStatus, PaymentType, PaymentMethod } from '@prisma/client';
 import { generatePaymentReference } from '../../../common/utils/payment-reference';
 
 jest.mock('../../../common/utils/payment-reference', () => ({
@@ -152,12 +151,14 @@ describe('WalletService', () => {
       expect(result.reference).toBe(expectedReference);
       expect(transactionTx.payment.create).toHaveBeenCalledWith({
         data: {
+          type: PaymentType.PENALTY,
           profile_id: PROFILE_ID,
           amount: mockPenalty.amount,
           payment_method: dto.paymentMethod,
           transaction_id: expectedReference,
           status: PaymentStatus.COMPLETED,
-          completed_at: expect.any(Date),
+          paid_at: expect.any(Date),
+          description: `Penalty payment for penalty ${PENALTY_ID}`,
         },
       });
       expect(transactionTx.walletTransaction.create).toHaveBeenCalledWith({
