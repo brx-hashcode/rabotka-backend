@@ -1,16 +1,32 @@
-import { Controller, Get, Patch, Param, Body, Query, UseGuards, Req } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Patch,
+  Param,
+  Body,
+  Query,
+  UseGuards,
+  Req,
+  UseInterceptors,
+  UploadedFiles,
+} from '@nestjs/common';
+import { FilesInterceptor } from '@nestjs/platform-express';
 import {
   ApiTags,
   ApiOperation,
   ApiResponse,
   ApiBearerAuth,
   ApiCookieAuth,
+  ApiConsumes,
 } from '@nestjs/swagger';
 import { ProfileService } from './profile.service';
 import { LogService } from '../log/log.service';
 import { AdminAuthGuard } from '../auth/guards/admin-auth.guard';
 import { AdminListProfilesDto } from './dto/admin-list-profiles.dto';
-import { AdminVerifyProfileDto } from './dto/admin-verify-profile.dto';
+import {
+  AdminVerifyProfileDto,
+  VerifyDecision,
+} from './dto/admin-verify-profile.dto';
 import { AdminUpdateStatusDto } from './dto/admin-update-status.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 
@@ -93,15 +109,19 @@ export class AdminProfileController {
   }
 
   @Patch(':id/verify')
+  @UseInterceptors(FilesInterceptor('files', 10))
+  @ApiConsumes('multipart/form-data')
   @ApiOperation({
     summary: 'Verify or reject profile KYC (admin only)',
-    description: 'Approves or rejects KYC verification for a profile and its documents.',
+    description:
+      'Approves or rejects KYC verification for a profile and its documents. Supports uploading verification images.',
   })
   @ApiResponse({ status: 200, description: 'Updated profile details' })
   @ApiResponse({ status: 404, description: 'Profile not found' })
   async verify(
     @Param('id') id: string,
     @Body() dto: AdminVerifyProfileDto,
+    @UploadedFiles() files: Express.Multer.File[],
     @Req() req: any,
   ) {
     const adminUserId = req.user?.userId ?? 'system';
@@ -110,9 +130,13 @@ export class AdminProfileController {
       adminUserId,
       dto.decision,
       dto.reason,
+      files,
     );
     await this.logService.create({
-      action: dto.decision === 'VERIFIED' ? 'KYC_APPROVED' : 'KYC_REJECTED',
+      action:
+        dto.decision === VerifyDecision.VERIFIED
+          ? 'KYC_APPROVED'
+          : 'KYC_REJECTED',
       entityType: 'Profile',
       entityId: id,
       userId: adminUserId,
@@ -128,7 +152,8 @@ export class AdminProfileController {
   @Patch(':id/status')
   @ApiOperation({
     summary: 'Update profile account status (admin only)',
-    description: 'Changes the account status (ACTIVE, SUSPENDED, BANNED, etc.).',
+    description:
+      'Changes the account status (ACTIVE, SUSPENDED, BANNED, etc.).',
   })
   @ApiResponse({ status: 200, description: 'Updated profile details' })
   @ApiResponse({ status: 404, description: 'Profile not found' })
@@ -137,7 +162,10 @@ export class AdminProfileController {
     @Body() dto: AdminUpdateStatusDto,
     @Req() req: any,
   ) {
-    const result = await this.profileService.updateProfileStatusByAdmin(id, dto.status);
+    const result = await this.profileService.updateProfileStatusByAdmin(
+      id,
+      dto.status,
+    );
     const adminUserId = req.user?.userId;
     await this.logService.create({
       action: 'STATUS_CHANGED',
@@ -160,11 +188,11 @@ export class AdminProfileController {
   })
   @ApiResponse({ status: 200, description: 'Updated profile details' })
   @ApiResponse({ status: 404, description: 'Profile not found' })
-  async confirmPayment(
-    @Param('id') id: string,
-    @Req() req: any,
-  ) {
-    const result = await this.profileService.updateProfileStatusByAdmin(id, 'ACTIVE' as any);
+  async confirmPayment(@Param('id') id: string, @Req() req: any) {
+    const result = await this.profileService.updateProfileStatusByAdmin(
+      id,
+      'ACTIVE' as any,
+    );
     const adminUserId = req.user?.userId;
     await this.logService.create({
       action: 'PAYMENT_CONFIRMED',

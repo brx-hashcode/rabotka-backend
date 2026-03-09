@@ -135,8 +135,9 @@ model Profile {
 
   avatar_url String?
 
-  kyc_documents KycDocument[]
-  applications  Application[]
+  kyc_documents          KycDocument[]
+  kyc_verification_images KycVerificationImage[]
+  applications           Application[]
   job_offers    JobOffer[]
   penalties     Penalty[]
   payments      Payment[]
@@ -192,6 +193,19 @@ model KycDocument {
   @@index([profile_id], name: "idx_kyc_document_profile")
   @@index([verification_status], name: "idx_kyc_document_status")
   @@map("kyc_documents")
+}
+
+model KycVerificationImage {
+  id             String   @id @default(uuid()) @db.Uuid
+  created_at     DateTime @default(now())
+  profile_id     String   @db.Uuid
+  image_url      String
+  uploaded_by    String?  @db.Uuid
+
+  profile Profile @relation(fields: [profile_id], references: [id], onDelete: Cascade)
+
+  @@index([profile_id], name: "idx_kyc_verification_image_profile")
+  @@map("kyc_verification_images")
 }
 
 model JobOffer {
