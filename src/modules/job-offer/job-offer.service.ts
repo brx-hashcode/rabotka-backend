@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { CreateJobOfferDto } from './dto/create-job-offer.dto';
+import { AdminUpdateJobOfferDto } from './dto/admin-update-job-offer.dto';
 import {
   AccountStatus,
   JobOfferStatus,
@@ -44,6 +45,25 @@ export type AdminJobOfferListItem = {
   applicationsCount: number;
   createdAt: string;
   updatedAt: string;
+};
+
+export type AdminJobOfferApplicationItem = {
+  id: string;
+  workerName: string;
+  workerEmail: string;
+  workerPhone: string;
+  workerAvatarUrl: string | null;
+  workerId: string;
+  status: string;
+  penaltyApplied: boolean;
+  penaltyAmount: number | null;
+  cancelledAt: string | null;
+  cancellationReason: string | null;
+  createdAt: string;
+};
+
+export type AdminJobOfferDetailResponse = AdminJobOfferListItem & {
+  applications: AdminJobOfferApplicationItem[];
 };
 
 export type JobOfferListItem = {
@@ -349,6 +369,115 @@ export class JobOfferService {
     }));
 
     return { data, total, page, limit };
+  }
+
+  async getJobOfferDetailForAdmin(
+    id: string,
+  ): Promise<AdminJobOfferDetailResponse> {
+    const offer = await this.prisma.jobOffer.findUnique({
+      where: { id },
+      include: {
+        employer: {
+          select: {
+            id: true,
+            first_name: true,
+            last_name: true,
+            email: true,
+            phone: true,
+            avatar_url: true,
+          },
+        },
+        applications: {
+          orderBy: { created_at: 'desc' },
+          include: {
+            worker: {
+              select: {
+                id: true,
+                first_name: true,
+                last_name: true,
+                email: true,
+                phone: true,
+                avatar_url: true,
+              },
+            },
+          },
+        },
+        _count: {
+          select: { applications: true },
+        },
+      },
+    });
+
+    if (!offer) {
+      throw new NotFoundException('Job offer not found');
+    }
+
+    return {
+      id: offer.id,
+      title: offer.title,
+      description: offer.description,
+      scheduledAt: offer.scheduled_at.toISOString(),
+      amount: Number(offer.amount),
+      paymentFlow: offer.payment_flow,
+      address: offer.address,
+      note: offer.note,
+      quantity: offer.quantity,
+      status: offer.status,
+      employerName:
+        `${offer.employer.first_name ?? ''} ${offer.employer.last_name ?? ''}`.trim() ||
+        '—',
+      employerEmail: offer.employer.email,
+      employerPhone: offer.employer.phone,
+      employerAvatarUrl: offer.employer.avatar_url ?? null,
+      employerId: offer.employer_id,
+      applicationsCount: offer._count.applications,
+      createdAt: offer.created_at.toISOString(),
+      updatedAt: offer.updated_at.toISOString(),
+      applications: offer.applications.map((a) => ({
+        id: a.id,
+        workerName:
+          `${a.worker.first_name ?? ''} ${a.worker.last_name ?? ''}`.trim() ||
+          '—',
+        workerEmail: a.worker.email,
+        workerPhone: a.worker.phone,
+        workerAvatarUrl: a.worker.avatar_url ?? null,
+        workerId: a.worker_id,
+        status: a.status,
+        penaltyApplied: a.penalty_applied,
+        penaltyAmount:
+          a.penalty_amount != null ? Number(a.penalty_amount) : null,
+        cancelledAt: a.cancelled_at?.toISOString() ?? null,
+        cancellationReason: a.cancellation_reason,
+        createdAt: a.created_at.toISOString(),
+      })),
+    };
+  }
+
+  async updateJobOfferByAdmin(
+    id: string,
+    dto: AdminUpdateJobOfferDto,
+  ): Promise<AdminJobOfferDetailResponse> {
+    const offer = await this.prisma.jobOffer.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+    if (!offer) {
+      throw new NotFoundException('Job offer not found');
+    }
+
+    const data: Prisma.JobOfferUpdateInput = {};
+    if (dto.title !== undefined) data.title = dto.title.trim();
+    if (dto.description !== undefined) data.description = dto.description.trim();
+    if (dto.scheduledAt !== undefined) data.scheduled_at = new Date(dto.scheduledAt);
+    if (dto.amount !== undefined) data.amount = dto.amount;
+    if (dto.paymentFlow !== undefined) data.payment_flow = dto.paymentFlow;
+    if (dto.address !== undefined) data.address = dto.address.trim();
+    if (dto.note !== undefined) data.note = dto.note.trim() || null;
+    if (dto.quantity !== undefined) data.quantity = dto.quantity;
+
+    await this.prisma.jobOffer.update({ where: { id }, data });
+
+    return this.getJobOfferDetailForAdmin(id);
   }
 
   private toListItem(offer: {
