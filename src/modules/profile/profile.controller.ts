@@ -439,7 +439,7 @@ export class ProfileController {
         avatar: {
           type: 'string',
           format: 'binary',
-          description: 'Avatar image file (PNG, JPG up to 2MB)',
+          description: 'Avatar image file (PNG, JPG up to 5MB)',
         },
       },
     },

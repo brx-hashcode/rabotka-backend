@@ -19,7 +19,12 @@ import {
 import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
 import { CreateProfileDto } from './dto/create-profile.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
-import { AccountStatus, Prisma, ProfileType, VerificationStatus } from '@prisma/client';
+import {
+  AccountStatus,
+  Prisma,
+  ProfileType,
+  VerificationStatus,
+} from '@prisma/client';
 import { randomBytes } from 'node:crypto';
 
 export type ProfileMeResponse = {
@@ -48,7 +53,7 @@ export type ProfilePenaltyItem = {
   amount: number;
   reason: string | null;
   appliedAt: Date;
-   paidAt: Date | null;
+  paidAt: Date | null;
   applicationId: string;
   jobOfferTitle?: string;
 };
@@ -114,6 +119,13 @@ export type AdminKycDocumentItem = {
   createdAt: Date;
 };
 
+export type AdminVerificationImageItem = {
+  id: string;
+  imageUrl: string;
+  uploadedBy: string | null;
+  createdAt: Date;
+};
+
 export type AdminProfileDetailResponse = AdminProfileListItem & {
   phone: string;
   description: string;
@@ -122,6 +134,7 @@ export type AdminProfileDetailResponse = AdminProfileListItem & {
   penaltiesCount: number;
   unpaidPenaltiesCount: number;
   kycDocuments: AdminKycDocumentItem[];
+  verificationImages: AdminVerificationImageItem[];
 };
 
 type PrismaTransactionClient = Parameters<
@@ -325,10 +338,7 @@ export class ProfileService {
     }));
   }
 
-  async markPenaltyPaid(
-    penaltyId: string,
-    profileId: string,
-  ): Promise<void> {
+  async markPenaltyPaid(penaltyId: string, profileId: string): Promise<void> {
     const penalty = await this.prisma.penalty.findUnique({
       where: { id: penaltyId },
     });
@@ -376,7 +386,9 @@ export class ProfileService {
     return { data, total, page, limit };
   }
 
-  async getProfileDetailForAdmin(id: string): Promise<AdminProfileDetailResponse> {
+  async getProfileDetailForAdmin(
+    id: string,
+  ): Promise<AdminProfileDetailResponse> {
     const profile = await this.prisma.profile.findUnique({
       where: { id },
       select: {
@@ -412,6 +424,15 @@ export class ProfileService {
           },
           orderBy: { created_at: 'asc' },
         },
+        kyc_verification_images: {
+          select: {
+            id: true,
+            image_url: true,
+            uploaded_by: true,
+            created_at: true,
+          },
+          orderBy: { created_at: 'asc' },
+        },
         _count: {
           select: {
             job_offers: true,
@@ -435,6 +456,9 @@ export class ProfileService {
     if (profile.verified_by) verifierIds.add(profile.verified_by);
     for (const doc of profile.kyc_documents) {
       if (doc.verified_by) verifierIds.add(doc.verified_by);
+    }
+    for (const img of profile.kyc_verification_images) {
+      if (img.uploaded_by) verifierIds.add(img.uploaded_by);
     }
 
     const verifierNames = new Map<string, string>();
@@ -486,6 +510,14 @@ export class ProfileService {
         rejectionReason: doc.rejection_reason,
         createdAt: doc.created_at,
       })),
+      verificationImages: profile.kyc_verification_images.map((img) => ({
+        id: img.id,
+        imageUrl: img.image_url,
+        uploadedBy: img.uploaded_by
+          ? (verifierNames.get(img.uploaded_by) ?? img.uploaded_by)
+          : null,
+        createdAt: img.created_at,
+      })),
     };
   }
 
@@ -494,6 +526,7 @@ export class ProfileService {
     adminUserId: string,
     decision: 'VERIFIED' | 'REJECTED',
     reason?: string,
+    files?: Express.Multer.File[],
   ): Promise<AdminProfileDetailResponse> {
     const profile = await this.prisma.profile.findUnique({
       where: { id: profileId },
@@ -501,6 +534,17 @@ export class ProfileService {
     });
     if (!profile) {
       throw new NotFoundException('profile.errors.not_found');
+    }
+
+    // Upload verification images
+    const uploadedUrls: string[] = [];
+    if (files && files.length > 0) {
+      for (const file of files) {
+        const result = await this.fileService.uploadToStorage(file, {
+          folder: 'kyc-verification',
+        });
+        uploadedUrls.push(result.url);
+      }
     }
 
     const now = new Date();
@@ -523,6 +567,20 @@ export class ProfileService {
           rejection_reason: decision === 'REJECTED' ? (reason ?? null) : null,
         },
       }),
+      // Delete previous verification images for this profile
+      this.prisma.kycVerificationImage.deleteMany({
+        where: { profile_id: profileId },
+      }),
+      // Create new verification image records
+      ...uploadedUrls.map((url) =>
+        this.prisma.kycVerificationImage.create({
+          data: {
+            profile_id: profileId,
+            image_url: url,
+            uploaded_by: adminUserId !== 'system' ? adminUserId : null,
+          },
+        }),
+      ),
     ]);
 
     return this.getProfileDetailForAdmin(profileId);
@@ -534,7 +592,13 @@ export class ProfileService {
   ): Promise<AdminProfileDetailResponse> {
     const profile = await this.prisma.profile.findUnique({
       where: { id: profileId },
-      select: { id: true, status: true, phone: true, first_name: true, profile_type: true },
+      select: {
+        id: true,
+        status: true,
+        phone: true,
+        first_name: true,
+        profile_type: true,
+      },
     });
     if (!profile) {
       throw new NotFoundException('profile.errors.not_found');
@@ -545,7 +609,10 @@ export class ProfileService {
       data: { status },
     });
 
-    if (profile.status !== AccountStatus.ACTIVE && status === AccountStatus.ACTIVE) {
+    if (
+      profile.status !== AccountStatus.ACTIVE &&
+      status === AccountStatus.ACTIVE
+    ) {
       try {
         if (profile.phone) {
           const text = accountActivatedMessage(
@@ -555,7 +622,9 @@ export class ProfileService {
           await this.whatsAppService.sendTextMessage(profile.phone, text);
         }
       } catch {
-        this.logger.warn(`Failed to send activation message for profile ${profileId}`);
+        this.logger.warn(
+          `Failed to send activation message for profile ${profileId}`,
+        );
       }
     }
 
@@ -577,7 +646,8 @@ export class ProfileService {
     const dataToUpdate: Prisma.ProfileUpdateInput = {};
     if (dto.firstName !== undefined) dataToUpdate.first_name = dto.firstName;
     if (dto.lastName !== undefined) dataToUpdate.last_name = dto.lastName;
-    if (dto.description !== undefined) dataToUpdate.description = dto.description;
+    if (dto.description !== undefined)
+      dataToUpdate.description = dto.description;
     if (dto.address !== undefined) dataToUpdate.address = dto.address;
 
     await this.prisma.profile.update({
@@ -597,8 +667,15 @@ export class ProfileService {
     whatsappConnected?: boolean;
     verificationStatus?: VerificationStatus[];
   }): Promise<AdminProfilesListResponse> {
-    const { page, limit, q, status, profileType, whatsappConnected, verificationStatus } =
-      params;
+    const {
+      page,
+      limit,
+      q,
+      status,
+      profileType,
+      whatsappConnected,
+      verificationStatus,
+    } = params;
     const skip = (page - 1) * limit;
 
     const where: Prisma.ProfileWhereInput = {};

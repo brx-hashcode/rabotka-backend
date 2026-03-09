@@ -35,7 +35,7 @@ export class ImageWatermarkService {
     const opacity = this.getOpacity();
 
     try {
-      const image = sharp(imageBuffer);
+      const image = sharp(imageBuffer).rotate();
       const meta = await image.metadata();
       const width = meta.width ?? 800;
       const height = meta.height ?? 600;
