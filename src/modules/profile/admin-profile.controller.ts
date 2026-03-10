@@ -293,25 +293,23 @@ export class AdminProfileController {
 
   @Patch(':id/confirm-payment')
   @ApiOperation({
-    summary: 'Confirm payment for a profile (admin only)',
-    description: 'Manually confirms payment and activates the profile.',
+    summary: 'Confirm or reject payment for a profile (admin only)',
+    description: 'Manually confirms or rejects a payment. Accepting activates the profile; rejecting keeps it in PENDING_PAYMENT.',
   })
   @ApiResponse({ status: 200, description: 'Updated profile details' })
   @ApiResponse({ status: 404, description: 'Profile not found' })
-  async confirmPayment(@Param('id') id: string, @Req() req: any) {
-    const result = await this.profileService.updateProfileStatusByAdmin(
-      id,
-      'ACTIVE' as any,
-    );
+  async confirmPayment(
+    @Param('id') id: string,
+    @Body() body: { decision: 'ACCEPTED' | 'REJECTED'; reason?: string },
+    @Req() req: any,
+  ) {
     const adminUserId = req.user?.userId;
-    await this.logService.create({
-      action: 'PAYMENT_CONFIRMED',
-      entityType: 'Profile',
-      entityId: id,
-      userId: adminUserId,
-      profileId: id,
-      metadata: { note: 'Payment manually confirmed by admin' },
-    });
-    return result;
+    await this.paymentRequestService.manualDecide(
+      id,
+      body.decision,
+      body.reason,
+      adminUserId,
+    );
+    return this.profileService.getProfileDetailForAdmin(id);
   }
 }
