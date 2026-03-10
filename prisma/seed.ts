@@ -5,6 +5,7 @@ import { seedProfiles, seedProfilesBulk } from './seed/profile.seed';
 import { seedSuperAdmin } from './seed/user.seed';
 import { seedWallet } from './seed/wallet.seed';
 import { seedJobOffersAndApplications } from './seed/job-offer.seed';
+import { seedPaymentTestProfiles } from './seed/payment-test.seed';
 
 config({ path: '.env.local' });
 config({ path: '.env' });
@@ -22,6 +23,7 @@ async function run() {
     await seedProfilesBulk(prisma);
     await seedWallet(prisma);
     await seedJobOffersAndApplications(prisma);
+    await seedPaymentTestProfiles(prisma);
   } catch (e) {
     console.error(e);
     process.exit(1);
