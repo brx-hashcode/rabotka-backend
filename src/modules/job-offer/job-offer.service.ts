@@ -453,16 +453,33 @@ export class JobOfferService {
     };
   }
 
-  async updateJobOfferByAdmin(
-    id: string,
-    dto: AdminUpdateJobOfferDto,
-  ): Promise<AdminJobOfferDetailResponse> {
+  async deleteJobOfferByAdmin(id: string): Promise<void> {
     const offer = await this.prisma.jobOffer.findUnique({
       where: { id },
       select: { id: true },
     });
     if (!offer) {
       throw new NotFoundException('Job offer not found');
+    }
+
+    await this.prisma.jobOffer.delete({ where: { id } });
+  }
+
+  async updateJobOfferByAdmin(
+    id: string,
+    dto: AdminUpdateJobOfferDto,
+  ): Promise<AdminJobOfferDetailResponse> {
+    const offer = await this.prisma.jobOffer.findUnique({
+      where: { id },
+      select: { id: true, status: true },
+    });
+    if (!offer) {
+      throw new NotFoundException('Job offer not found');
+    }
+    if (offer.status !== JobOfferStatus.ACTIVE) {
+      throw new BadRequestException(
+        'Only active job offers can be edited',
+      );
     }
 
     const data: Prisma.JobOfferUpdateInput = {};
