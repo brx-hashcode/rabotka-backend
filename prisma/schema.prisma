@@ -180,9 +180,10 @@ model User {
   is_active     Boolean   @default(true)
   last_login_at DateTime?
 
-  files   File[]
-  logs    Log[]
-  wallets Wallet[]
+  files            File[]
+  logs             Log[]
+  wallets          Wallet[]
+  sent_messages    Message[]
 
   @@index([email], name: "idx_user_email")
   @@index([role], name: "idx_user_role")
@@ -411,14 +412,16 @@ model Conversation {
 }
 
 model Message {
-  id         String           @id @default(uuid()) @db.Uuid
-  created_at DateTime         @default(now())
-  profile_id String           @db.Uuid
-  direction  MessageDirection
-  platform   BotPlatform      @default(WHATSAPP)
-  body       String
+  id           String           @id @default(uuid()) @db.Uuid
+  created_at   DateTime         @default(now())
+  profile_id   String           @db.Uuid
+  direction    MessageDirection
+  platform     BotPlatform      @default(WHATSAPP)
+  body         String
+  sent_by_id   String?          @db.Uuid
 
-  profile Profile @relation(fields: [profile_id], references: [id], onDelete: Cascade)
+  profile  Profile @relation(fields: [profile_id], references: [id], onDelete: Cascade)
+  sent_by  User?   @relation(fields: [sent_by_id], references: [id], onDelete: SetNull)
 
   @@index([profile_id], name: "idx_message_profile")
   @@index([created_at], name: "idx_message_created_at")
