@@ -32,6 +32,7 @@ enum StorageProvider {
 
 enum BotPlatform {
   WHATSAPP
+  EMAIL
 }
 
 enum MessageDirection {
