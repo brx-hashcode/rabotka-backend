@@ -772,6 +772,15 @@ export class ProfileService {
       );
 
       this.logger.log(`Profile created successfully: ${profile.id}`);
+
+      // Auto-send WhatsApp verification link (non-blocking)
+      this.requestWhatsAppVerification(profile.id).catch((err) =>
+        this.logger.warn(
+          `Failed to auto-send WhatsApp verification link for ${profile.id}:`,
+          err,
+        ),
+      );
+
       return { message: 'profile.created.success' };
     } catch (error: any) {
       this.handleCreateProfileError(error);
