@@ -5,11 +5,14 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomBytes } from 'node:crypto';
-import { AccountStatus, PaymentRequestStatus } from '@prisma/client';
+import { AccountStatus, PaymentRequestStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { LogService } from '../log/log.service';
-import { paymentApprovedMessage, paymentLinkMessage } from '../whatsapp/templates';
+import {
+  paymentApprovedMessage,
+  paymentLinkMessage,
+} from '../whatsapp/templates';
 import { CreatePaymentLinkDto } from './dto/create-payment-link.dto';
 import { SubmitPaymentDto } from './dto/submit-payment.dto';
 import { RejectPaymentDto } from './dto/reject-payment.dto';
@@ -38,6 +41,10 @@ const PAYMENT_REQUEST_SELECT = {
   },
 };
 
+type PaymentRequestWithProfile = Prisma.PaymentRequestGetPayload<{
+  select: typeof PAYMENT_REQUEST_SELECT;
+}>;
+
 @Injectable()
 export class PaymentRequestService {
   constructor(
@@ -63,14 +70,15 @@ export class PaymentRequestService {
     const frontendUrl = this.config.get<string>('FRONTEND_URL', '');
     const paymentUrl = `${frontendUrl}/pay/${token}`;
 
-    const request = await this.prisma.paymentRequest.create({
-      data: {
-        profile_id: dto.profileId,
-        token,
-        status: PaymentRequestStatus.PENDING,
-      },
-      select: PAYMENT_REQUEST_SELECT,
-    });
+    const request: PaymentRequestWithProfile =
+      await this.prisma.paymentRequest.create({
+        data: {
+          profile_id: dto.profileId,
+          token,
+          status: PaymentRequestStatus.PENDING,
+        },
+        select: PAYMENT_REQUEST_SELECT,
+      });
 
     await this.log.create({
       action: 'PAYMENT_LINK_CREATED',
@@ -83,13 +91,17 @@ export class PaymentRequestService {
 
     // Send via WhatsApp if profile has a phone
     if (profile.phone) {
-      const message = paymentLinkMessage(profile.first_name, paymentUrl);
+      const message: string = paymentLinkMessage(
+        profile.first_name,
+        paymentUrl,
+      );
       await this.whatsApp
         .sendTextMessage(profile.phone, message, profile.id)
         .catch(() => null);
     }
 
-    return { ...this.formatRequest(request), paymentUrl };
+    const formatted = this.formatRequest(request);
+    return { ...formatted, paymentUrl };
   }
 
   // ─── Admin: Get payment requests by profile ──────────────────────────────
@@ -100,7 +112,9 @@ export class PaymentRequestService {
       orderBy: { created_at: 'desc' },
       select: PAYMENT_REQUEST_SELECT,
     });
-    return requests.map((r) => this.formatRequest(r));
+    return requests.map((r: PaymentRequestWithProfile) =>
+      this.formatRequest(r),
+    );
   }
 
   // ─── Public: Get payment info by token ──────────────────────────────────
@@ -179,7 +193,9 @@ export class PaymentRequestService {
     ]);
 
     return {
-      data: requests.map((r) => this.formatRequest(r)),
+      data: requests.map((r: PaymentRequestWithProfile) =>
+        this.formatRequest(r),
+      ),
       total,
       page,
       limit,
@@ -224,14 +240,15 @@ export class PaymentRequestService {
 
     // Send WhatsApp notification if connected
     if (request.profile.phone) {
-      const message = paymentApprovedMessage(
+      const message: string = paymentApprovedMessage(
         request.profile.first_name,
         request.profile.profile_type as 'WORKER' | 'EMPLOYER',
       );
-      await this.whatsApp.sendTextMessage(request.profile.phone, message);
+      const phone: string = request.profile.phone;
+      await this.whatsApp.sendTextMessage(phone, message);
     }
 
-    return this.formatRequest(updated);
+    return this.formatRequest(updated as PaymentRequestWithProfile);
   }
 
   // ─── Admin: Reject ────────────────────────────────────────────────────────
@@ -250,14 +267,15 @@ export class PaymentRequestService {
       throw new BadRequestException('payment_request.errors.not_submitted');
     }
 
-    const updated = await this.prisma.paymentRequest.update({
-      where: { id },
-      data: {
-        status: PaymentRequestStatus.REJECTED,
-        rejection_note: dto.note,
-      },
-      select: PAYMENT_REQUEST_SELECT,
-    });
+    const updated: PaymentRequestWithProfile =
+      await this.prisma.paymentRequest.update({
+        where: { id },
+        data: {
+          status: PaymentRequestStatus.REJECTED,
+          rejection_note: dto.note,
+        },
+        select: PAYMENT_REQUEST_SELECT,
+      });
 
     await this.log.create({
       action: 'PAYMENT_REJECTED',
@@ -271,28 +289,81 @@ export class PaymentRequestService {
     return this.formatRequest(updated);
   }
 
+  // ─── Admin: Manual decision (bypasses SUBMITTED check) ───────────────────
+
+  async manualDecide(
+    profileId: string,
+    decision: 'ACCEPTED' | 'REJECTED',
+    reason: string | undefined,
+    adminUserId: string,
+  ) {
+    const request = await this.prisma.paymentRequest.findFirst({
+      where: { profile_id: profileId },
+      orderBy: { created_at: 'desc' },
+      select: PAYMENT_REQUEST_SELECT,
+    });
+
+    if (!request) return null;
+
+    if (decision === 'ACCEPTED') {
+      const [updated] = await this.prisma.$transaction([
+        this.prisma.paymentRequest.update({
+          where: { id: request.id },
+          data: { status: PaymentRequestStatus.APPROVED },
+          select: PAYMENT_REQUEST_SELECT,
+        }),
+        this.prisma.profile.update({
+          where: { id: profileId },
+          data: { status: AccountStatus.ACTIVE },
+        }),
+      ]);
+
+      await this.log.create({
+        action: 'PAYMENT_CONFIRMED',
+        entityType: 'PaymentRequest',
+        entityId: request.id,
+        userId: adminUserId,
+        profileId,
+        metadata: { note: 'Payment manually confirmed by admin' },
+      });
+
+      if (request.profile.phone) {
+        const message: string = paymentApprovedMessage(
+          request.profile.first_name,
+          request.profile.profile_type as 'WORKER' | 'EMPLOYER',
+        );
+        const phone: string = request.profile.phone;
+        await this.whatsApp.sendTextMessage(phone, message).catch(() => null);
+      }
+
+      return this.formatRequest(updated as PaymentRequestWithProfile);
+    } else {
+      const updated: PaymentRequestWithProfile =
+        await this.prisma.paymentRequest.update({
+          where: { id: request.id },
+          data: {
+            status: PaymentRequestStatus.REJECTED,
+            rejection_note: reason ?? null,
+          },
+          select: PAYMENT_REQUEST_SELECT,
+        });
+
+      await this.log.create({
+        action: 'PAYMENT_REJECTED',
+        entityType: 'PaymentRequest',
+        entityId: request.id,
+        userId: adminUserId,
+        profileId,
+        metadata: { reason: reason ?? null },
+      });
+
+      return this.formatRequest(updated);
+    }
+  }
+
   // ─── Helpers ──────────────────────────────────────────────────────────────
 
-  private formatRequest(r: {
-    id: string;
-    created_at: Date;
-    updated_at: Date;
-    profile_id: string;
-    token: string;
-    status: PaymentRequestStatus;
-    payment_reference: string | null;
-    proof_images: string[];
-    rejection_note: string | null;
-    profile: {
-      id: string;
-      first_name: string;
-      last_name: string;
-      email: string;
-      phone: string;
-      status: AccountStatus;
-      profile_type: string;
-    };
-  }) {
+  private formatRequest(r: PaymentRequestWithProfile) {
     return {
       id: r.id,
       profileId: r.profile_id,
