@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { Prisma } from '@prisma/client';
 
@@ -25,9 +25,86 @@ export type AdminPenaltiesListResponse = {
   limit: number;
 };
 
+export type AdminPenaltyDetailResponse = AdminPenaltyListItem & {
+  jobOfferId: string;
+  jobScheduledAt: string;
+  jobAmount: number;
+  jobAddress: string;
+  jobPaymentFlow: string;
+  jobStatus: string;
+  applicationStatus: string;
+};
+
 @Injectable()
 export class PenaltyService {
   constructor(private readonly prisma: PrismaService) {}
+
+  async getPenaltyDetailForAdmin(
+    id: string,
+  ): Promise<AdminPenaltyDetailResponse> {
+    const penalty = await this.prisma.penalty.findUnique({
+      where: { id },
+      include: {
+        worker: {
+          select: {
+            id: true,
+            first_name: true,
+            last_name: true,
+            email: true,
+            phone: true,
+            avatar_url: true,
+          },
+        },
+        application: {
+          select: {
+            id: true,
+            status: true,
+            job_offer: {
+              select: {
+                id: true,
+                title: true,
+                scheduled_at: true,
+                amount: true,
+                address: true,
+                payment_flow: true,
+                status: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!penalty) {
+      throw new NotFoundException('Penalty not found');
+    }
+
+    return {
+      id: penalty.id,
+      workerId: penalty.worker_id,
+      workerName:
+        `${penalty.worker.first_name ?? ''} ${penalty.worker.last_name ?? ''}`.trim() ||
+        '—',
+      workerEmail: penalty.worker.email,
+      workerPhone: penalty.worker.phone,
+      workerAvatarUrl: penalty.worker.avatar_url ?? null,
+      applicationId: penalty.application_id,
+      jobTitle: penalty.application.job_offer?.title ?? '—',
+      jobOfferId: penalty.application.job_offer?.id ?? '',
+      jobScheduledAt:
+        penalty.application.job_offer?.scheduled_at?.toISOString() ?? '',
+      jobAmount: Number(penalty.application.job_offer?.amount ?? 0),
+      jobAddress: penalty.application.job_offer?.address ?? '',
+      jobPaymentFlow: penalty.application.job_offer?.payment_flow ?? '',
+      jobStatus: penalty.application.job_offer?.status ?? '',
+      applicationStatus: penalty.application.status,
+      amount: Number(penalty.amount),
+      reason: penalty.reason,
+      appliedAt: penalty.applied_at.toISOString(),
+      paidAt: penalty.paid_at?.toISOString() ?? null,
+      createdAt: penalty.created_at.toISOString(),
+    };
+  }
 
   async getPenaltiesForAdmin(params: {
     page: number;
