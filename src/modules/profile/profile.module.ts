@@ -8,9 +8,20 @@ import { AuthModule } from '../auth/auth.module';
 import { WhatsAppModule } from '../whatsapp/whatsapp.module';
 import { WalletModule } from '../wallet/wallet.module';
 import { LogModule } from '../log/log.module';
+import { PrismaModule } from '../../common/services/prisma/prisma.module';
+import { PaymentRequestModule } from '../payment-request/payment-request.module';
 
 @Module({
-  imports: [FileModule, MailModule, AuthModule, WhatsAppModule, WalletModule, LogModule],
+  imports: [
+    FileModule,
+    MailModule,
+    AuthModule,
+    WhatsAppModule,
+    WalletModule,
+    LogModule,
+    PrismaModule,
+    PaymentRequestModule,
+  ],
   controllers: [ProfileController, AdminProfileController],
   providers: [ProfileService],
   exports: [ProfileService],
