@@ -2,10 +2,13 @@ import {
   Controller,
   Get,
   Patch,
+  Delete,
   Param,
   Body,
   Query,
   UseGuards,
+  HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -71,5 +74,17 @@ export class AdminJobOfferController {
     @Body() dto: AdminUpdateJobOfferDto,
   ) {
     return await this.jobOfferService.updateJobOfferByAdmin(id, dto);
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: 'Delete job offer (admin only)',
+    description: 'Permanently deletes a job offer and its related data.',
+  })
+  @ApiResponse({ status: 204, description: 'Job offer deleted' })
+  @ApiResponse({ status: 404, description: 'Job offer not found' })
+  async remove(@Param('id') id: string) {
+    await this.jobOfferService.deleteJobOfferByAdmin(id);
   }
 }
