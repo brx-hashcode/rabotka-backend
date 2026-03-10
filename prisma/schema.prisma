@@ -34,6 +34,11 @@ enum BotPlatform {
   WHATSAPP
 }
 
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
 enum ConversationStatus {
   ACTIVE
   ENDED
@@ -150,6 +155,7 @@ model Profile {
   penalties     Penalty[]
   payments      Payment[]
   conversations Conversation[]
+  messages      Message[]
   logs    Log[]
   files   File[]
   wallets Wallet[]
@@ -401,6 +407,21 @@ model Conversation {
   @@index([profile_id], name: "idx_conversation_profile")
   @@index([status], name: "idx_conversation_status")
   @@map("conversations")
+}
+
+model Message {
+  id         String           @id @default(uuid()) @db.Uuid
+  created_at DateTime         @default(now())
+  profile_id String           @db.Uuid
+  direction  MessageDirection
+  platform   BotPlatform      @default(WHATSAPP)
+  body       String
+
+  profile Profile @relation(fields: [profile_id], references: [id], onDelete: Cascade)
+
+  @@index([profile_id], name: "idx_message_profile")
+  @@index([created_at], name: "idx_message_created_at")
+  @@map("messages")
 }
 
 model PaymentRequest {

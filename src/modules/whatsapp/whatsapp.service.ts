@@ -5,6 +5,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import Redis from 'ioredis';
+import { BotPlatform, MessageDirection } from '@prisma/client';
 import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { TwilioService } from '../../common/services/twilio/twilio.service';
@@ -27,9 +28,22 @@ export class WhatsAppService {
     return this.twilioService.isConfigured();
   }
 
-  async sendTextMessage(phone: string, text: string): Promise<boolean> {
+  async sendTextMessage(
+    phone: string,
+    text: string,
+    profileId?: string,
+  ): Promise<boolean> {
     const sid = await this.twilioService.sendWhatsApp(phone, text);
-    return sid != null;
+    const sent = sid != null;
+
+    if (sent && profileId) {
+      await this.saveMessage(profileId, MessageDirection.OUTBOUND, text).catch(
+        (err) =>
+          this.logger.warn(`Failed to save outbound message for ${profileId}:`, err),
+      );
+    }
+
+    return sent;
   }
 
   async sendMediaMessage(
@@ -43,6 +57,21 @@ export class WhatsAppService {
       caption,
     );
     return sid != null;
+  }
+
+  async saveMessage(
+    profileId: string,
+    direction: MessageDirection,
+    body: string,
+  ): Promise<void> {
+    await this.prisma.message.create({
+      data: {
+        profile_id: profileId,
+        direction,
+        platform: BotPlatform.WHATSAPP,
+        body,
+      },
+    });
   }
 
   async verifyWhatsAppToken(token: string): Promise<void> {
@@ -78,11 +107,12 @@ export class WhatsAppService {
 
     if (this.isConfigured()) {
       const successMessage = verificationSuccessMessage(profile.first_name);
-      await this.sendTextMessage(profile.phone, successMessage).catch((err) =>
-        this.logger.warn(
-          `Failed to send WhatsApp success message to ${profile.phone}:`,
-          err,
-        ),
+      await this.sendTextMessage(profile.phone, successMessage, profileId).catch(
+        (err) =>
+          this.logger.warn(
+            `Failed to send WhatsApp success message to ${profile.phone}:`,
+            err,
+          ),
       );
     }
 
