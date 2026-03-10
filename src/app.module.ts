@@ -29,6 +29,7 @@ import { ConversationModule } from './modules/conversation/conversation.module';
 import { JobOfferModule } from './modules/job-offer/job-offer.module';
 import { ApplicationModule } from './modules/application/application.module';
 import { PenaltyModule } from './modules/penalty/penalty.module';
+import { PaymentRequestModule } from './modules/payment-request/payment-request.module';
 import { FileModule } from './modules/file/file.module';
 import { LogModule } from './modules/log/log.module';
 import { WalletModule } from './modules/wallet/wallet.module';
@@ -122,6 +123,7 @@ import { I18nExceptionFilter } from './common/filters/i18n-exception.filter';
     JobOfferModule,
     ApplicationModule,
     PenaltyModule,
+    PaymentRequestModule,
     StorageModule,
     ImageWatermarkModule,
     FileModule,

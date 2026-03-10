@@ -112,6 +112,13 @@ enum WalletTransactionType {
   CREDIT_COMMISSION
 }
 
+enum PaymentRequestStatus {
+  PENDING
+  SUBMITTED
+  APPROVED
+  REJECTED
+}
+
 model Profile {
   id                      String             @id @default(uuid()) @db.Uuid
   created_at              DateTime           @default(now())
@@ -135,6 +142,7 @@ model Profile {
 
   avatar_url String?
 
+  payment_requests       PaymentRequest[]
   kyc_documents          KycDocument[]
   kyc_verification_images KycVerificationImage[]
   applications           Application[]
@@ -389,7 +397,27 @@ model Conversation {
   profile Profile @relation(fields: [profile_id], references: [id], onDelete: Cascade)
 
   @@unique([profile_id, bot_session_id], name: "idx_conversation_unique")
+
   @@index([profile_id], name: "idx_conversation_profile")
   @@index([status], name: "idx_conversation_status")
   @@map("conversations")
+}
+
+model PaymentRequest {
+  id                String               @id @default(uuid()) @db.Uuid
+  created_at        DateTime             @default(now())
+  updated_at        DateTime             @updatedAt
+  profile_id        String               @db.Uuid
+  token             String               @unique
+  status            PaymentRequestStatus @default(PENDING)
+  payment_reference String?
+  proof_images      String[]
+  rejection_note    String?
+
+  profile Profile @relation(fields: [profile_id], references: [id], onDelete: Cascade)
+
+  @@index([profile_id], name: "idx_payment_request_profile")
+  @@index([token], name: "idx_payment_request_token")
+  @@index([status], name: "idx_payment_request_status")
+  @@map("payment_requests")
 }
