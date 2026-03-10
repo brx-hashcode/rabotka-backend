@@ -46,6 +46,26 @@ export type AdminApplicationListItem = {
   updatedAt: string;
 };
 
+export type AdminApplicationPenaltyItem = {
+  id: string;
+  amount: number;
+  reason: string | null;
+  appliedAt: string;
+  paidAt: string | null;
+};
+
+export type AdminApplicationDetailResponse = AdminApplicationListItem & {
+  jobScheduledAt: string;
+  jobAmount: number;
+  jobAddress: string;
+  jobPaymentFlow: string;
+  jobStatus: string;
+  jobQuantity: number;
+  workerReliabilityScore: number | null;
+  employerPhone: string;
+  penalties: AdminApplicationPenaltyItem[];
+};
+
 export type ApplicationListItem = {
   id: string;
   job_offer_id: string;
@@ -625,6 +645,101 @@ export class ApplicationService {
       },
     });
     return applications.map((a) => this.toApplicationWithOffer(a));
+  }
+
+  async getApplicationDetailForAdmin(
+    id: string,
+  ): Promise<AdminApplicationDetailResponse> {
+    const app = await this.prisma.application.findUnique({
+      where: { id },
+      include: {
+        worker: {
+          select: {
+            id: true,
+            first_name: true,
+            last_name: true,
+            email: true,
+            phone: true,
+            avatar_url: true,
+            reliability_score: true,
+          },
+        },
+        job_offer: {
+          select: {
+            id: true,
+            title: true,
+            scheduled_at: true,
+            amount: true,
+            address: true,
+            payment_flow: true,
+            status: true,
+            quantity: true,
+            employer_id: true,
+            employer: {
+              select: {
+                id: true,
+                first_name: true,
+                last_name: true,
+                email: true,
+                phone: true,
+                avatar_url: true,
+              },
+            },
+          },
+        },
+        penalties: {
+          orderBy: { created_at: 'desc' },
+        },
+      },
+    });
+
+    if (!app) {
+      throw new NotFoundException('Application not found');
+    }
+
+    return {
+      id: app.id,
+      jobTitle: app.job_offer.title,
+      jobOfferId: app.job_offer_id,
+      jobScheduledAt: app.job_offer.scheduled_at.toISOString(),
+      jobAmount: Number(app.job_offer.amount),
+      jobAddress: app.job_offer.address,
+      jobPaymentFlow: app.job_offer.payment_flow,
+      jobStatus: app.job_offer.status,
+      jobQuantity: app.job_offer.quantity,
+      workerName:
+        `${app.worker.first_name ?? ''} ${app.worker.last_name ?? ''}`.trim() ||
+        '—',
+      workerEmail: app.worker.email,
+      workerPhone: app.worker.phone,
+      workerAvatarUrl: app.worker.avatar_url ?? null,
+      workerId: app.worker_id,
+      workerReliabilityScore: app.worker.reliability_score
+        ? Number(app.worker.reliability_score)
+        : null,
+      employerName:
+        `${app.job_offer.employer?.first_name ?? ''} ${app.job_offer.employer?.last_name ?? ''}`.trim() ||
+        '—',
+      employerEmail: app.job_offer.employer?.email ?? '',
+      employerPhone: app.job_offer.employer?.phone ?? '',
+      employerAvatarUrl: app.job_offer.employer?.avatar_url ?? null,
+      employerId: app.job_offer.employer_id,
+      status: app.status,
+      penaltyApplied: app.penalty_applied,
+      penaltyAmount:
+        app.penalty_amount != null ? Number(app.penalty_amount) : null,
+      cancelledAt: app.cancelled_at?.toISOString() ?? null,
+      cancellationReason: app.cancellation_reason,
+      createdAt: app.created_at.toISOString(),
+      updatedAt: app.updated_at.toISOString(),
+      penalties: app.penalties.map((p) => ({
+        id: p.id,
+        amount: Number(p.amount),
+        reason: p.reason,
+        appliedAt: p.applied_at.toISOString(),
+        paidAt: p.paid_at?.toISOString() ?? null,
+      })),
+    };
   }
 
   async getApplicationsForAdmin(params: {

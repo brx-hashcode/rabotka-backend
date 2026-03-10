@@ -1,4 +1,4 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
@@ -35,5 +35,17 @@ export class AdminPenaltyController {
       q: dto.q,
       paymentStatus: dto.payment_status,
     });
+  }
+
+  @Get(':id')
+  @ApiOperation({
+    summary: 'Get penalty details (admin only)',
+    description:
+      'Returns full penalty details including worker, application, and job info.',
+  })
+  @ApiResponse({ status: 200, description: 'Penalty details' })
+  @ApiResponse({ status: 404, description: 'Penalty not found' })
+  async getById(@Param('id') id: string) {
+    return await this.penaltyService.getPenaltyDetailForAdmin(id);
   }
 }
