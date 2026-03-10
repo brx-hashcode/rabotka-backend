@@ -281,6 +281,16 @@ export class AdminProfileController {
     return result;
   }
 
+  @Post(':id/send-verification-link')
+  @ApiOperation({
+    summary: 'Resend WhatsApp verification link (admin only)',
+    description: 'Generates a new WhatsApp verification token and sends the link to the profile phone number.',
+  })
+  @ApiResponse({ status: 200, description: 'Verification link sent' })
+  async sendVerificationLink(@Param('id') id: string) {
+    return await this.profileService.requestWhatsAppVerification(id);
+  }
+
   @Patch(':id/confirm-payment')
   @ApiOperation({
     summary: 'Confirm payment for a profile (admin only)',
