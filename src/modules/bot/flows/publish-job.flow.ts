@@ -228,6 +228,19 @@ export async function runPublishJobFlow(
     };
   }
 
+  // Global exit — any step
+  if (
+    normalized === 'exit' ||
+    normalized === 'annuler' ||
+    normalized === 'quitter' ||
+    normalized === 'cancel'
+  ) {
+    return {
+      reply: ["Publication annulée. Tapez 'Menu' pour revenir au menu."],
+      clearState: true,
+    };
+  }
+
   const step9Modifier = handleStep9Modifier(state, payload, normalized);
   if (step9Modifier) return step9Modifier;
 
@@ -257,6 +270,8 @@ function handlePublishStep1(args: StepArgs): FlowResult {
           '*Quel est le titre de votre offre ?*',
           '',
           '*Exemple*: "_Plombier pour réparation urgente_"',
+          '',
+          '_Tapez "Annuler" à tout moment pour abandonner._',
         ].join('\n'),
       ],
       nextState: state,
@@ -655,5 +670,7 @@ export function getPublishJobFirstMessage(): string {
     '*Quel est le titre de votre offre ?*',
     '',
     '*Exemple*: "_Plombier pour réparation urgente_"',
+    '',
+    '_Tapez "Annuler" à tout moment pour abandonner._',
   ].join('\n');
 }

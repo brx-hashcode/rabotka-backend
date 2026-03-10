@@ -119,6 +119,26 @@ export class WhatsAppController {
     }
   }
 
+  /**
+   * Build the webhook URL for Twilio signature validation.
+   * Must match exactly the URL Twilio used when sending the request.
+   * When behind a proxy (ngrok, etc.), use X-Forwarded-* headers or TWILIO_WEBHOOK_BASE_URL.
+   */
+  private buildWebhookUrl(req: Request): string {
+    const baseUrl = this.configService.get<string>('TWILIO_WEBHOOK_BASE_URL');
+    if (baseUrl) {
+      const path = req.originalUrl.startsWith('/')
+        ? req.originalUrl
+        : `/${req.originalUrl}`;
+      return baseUrl.replace(/\/$/, '') + path;
+    }
+    const protocol =
+      (req.headers['x-forwarded-proto'] as string) || req.protocol || 'https';
+    const host =
+      (req.headers['x-forwarded-host'] as string) || req.get('host') || '';
+    return `${protocol}://${host}${req.originalUrl}`;
+  }
+
   @Get('verify')
   @ApiOperation({
     summary: 'Verify WhatsApp token',
@@ -146,26 +166,6 @@ export class WhatsAppController {
     status: 400,
     description: 'Invalid or expired token',
   })
-  /**
-   * Build the webhook URL for Twilio signature validation.
-   * Must match exactly the URL Twilio used when sending the request.
-   * When behind a proxy (ngrok, etc.), use X-Forwarded-* headers or TWILIO_WEBHOOK_BASE_URL.
-   */
-  private buildWebhookUrl(req: Request): string {
-    const baseUrl = this.configService.get<string>('TWILIO_WEBHOOK_BASE_URL');
-    if (baseUrl) {
-      const path = req.originalUrl.startsWith('/')
-        ? req.originalUrl
-        : `/${req.originalUrl}`;
-      return baseUrl.replace(/\/$/, '') + path;
-    }
-    const protocol =
-      (req.headers['x-forwarded-proto'] as string) || req.protocol || 'https';
-    const host =
-      (req.headers['x-forwarded-host'] as string) || req.get('host') || '';
-    return `${protocol}://${host}${req.originalUrl}`;
-  }
-
   async verifyWhatsApp(
     @Query() verifyWhatsAppDto: VerifyWhatsAppDto,
   ): Promise<{ success: boolean }> {
