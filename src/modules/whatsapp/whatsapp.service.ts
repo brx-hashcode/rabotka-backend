@@ -32,14 +32,22 @@ export class WhatsAppService {
     phone: string,
     text: string,
     profileId?: string,
+    sentById?: string,
   ): Promise<boolean> {
     const sid = await this.twilioService.sendWhatsApp(phone, text);
     const sent = sid != null;
 
     if (sent && profileId) {
-      await this.saveMessage(profileId, MessageDirection.OUTBOUND, text).catch(
-        (err) =>
-          this.logger.warn(`Failed to save outbound message for ${profileId}:`, err),
+      await this.saveMessage(
+        profileId,
+        MessageDirection.OUTBOUND,
+        text,
+        sentById,
+      ).catch((err) =>
+        this.logger.warn(
+          `Failed to save outbound message for ${profileId}:`,
+          err,
+        ),
       );
     }
 
@@ -63,6 +71,7 @@ export class WhatsAppService {
     profileId: string,
     direction: MessageDirection,
     body: string,
+    sentById?: string,
   ): Promise<void> {
     await this.prisma.message.create({
       data: {
@@ -70,6 +79,7 @@ export class WhatsAppService {
         direction,
         platform: BotPlatform.WHATSAPP,
         body,
+        ...(sentById ? { sent_by_id: sentById } : {}),
       },
     });
   }
@@ -107,12 +117,15 @@ export class WhatsAppService {
 
     if (this.isConfigured()) {
       const successMessage = verificationSuccessMessage(profile.first_name);
-      await this.sendTextMessage(profile.phone, successMessage, profileId).catch(
-        (err) =>
-          this.logger.warn(
-            `Failed to send WhatsApp success message to ${profile.phone}:`,
-            err,
-          ),
+      await this.sendTextMessage(
+        profile.phone,
+        successMessage,
+        profileId,
+      ).catch((err) =>
+        this.logger.warn(
+          `Failed to send WhatsApp success message to ${profile.phone}:`,
+          err,
+        ),
       );
     }
 

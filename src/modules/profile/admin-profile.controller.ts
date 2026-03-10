@@ -113,6 +113,7 @@ export class AdminProfileController {
         direction: true,
         platform: true,
         body: true,
+        sent_by: { select: { first_name: true, last_name: true } },
       },
     });
     return messages.map((m) => ({
@@ -121,6 +122,9 @@ export class AdminProfileController {
       platform: m.platform,
       body: m.body,
       createdAt: m.created_at,
+      sentByName: m.sent_by
+        ? `${m.sent_by.first_name} ${m.sent_by.last_name}`
+        : null,
     }));
   }
 
@@ -129,7 +133,9 @@ export class AdminProfileController {
   async sendMessage(
     @Param('id') id: string,
     @Body() body: { channel: 'WHATSAPP' | 'EMAIL'; message: string },
+    @Req() req: any,
   ) {
+    const adminUserId: string | undefined = req.user?.userId;
     const profile = await this.prisma.profile.findUnique({
       where: { id },
       select: { id: true, phone: true, email: true, first_name: true },
@@ -151,6 +157,7 @@ export class AdminProfileController {
         profile.phone,
         body.message.trim(),
         profile.id,
+        adminUserId,
       );
     } else {
       if (!profile.email) {
@@ -168,6 +175,7 @@ export class AdminProfileController {
           direction: MessageDirection.OUTBOUND,
           platform: BotPlatform.EMAIL,
           body: body.message.trim(),
+          ...(adminUserId ? { sent_by_id: adminUserId } : {}),
         },
       });
     }
