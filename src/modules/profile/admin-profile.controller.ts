@@ -22,6 +22,8 @@ import {
 import { ProfileService } from './profile.service';
 import { LogService } from '../log/log.service';
 import { AdminAuthGuard } from '../auth/guards/admin-auth.guard';
+import { PaymentRequestService } from '../payment-request/payment-request.service';
+import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { AdminListProfilesDto } from './dto/admin-list-profiles.dto';
 import {
   AdminVerifyProfileDto,
@@ -39,6 +41,8 @@ export class AdminProfileController {
   constructor(
     private readonly profileService: ProfileService,
     private readonly logService: LogService,
+    private readonly paymentRequestService: PaymentRequestService,
+    private readonly prisma: PrismaService,
   ) {}
 
   @Get()
@@ -81,6 +85,35 @@ export class AdminProfileController {
   @ApiResponse({ status: 200, description: 'List of log entries' })
   async getLogs(@Param('id') id: string) {
     return await this.logService.getByProfileId(id);
+  }
+
+  @Get(':id/payment-requests')
+  @ApiOperation({ summary: 'Get payment requests for a profile (admin only)' })
+  async getPaymentRequests(@Param('id') id: string) {
+    return await this.paymentRequestService.getByProfileId(id);
+  }
+
+  @Get(':id/messages')
+  @ApiOperation({ summary: 'Get WhatsApp messages for a profile (admin only)' })
+  async getMessages(@Param('id') id: string) {
+    const messages = await this.prisma.message.findMany({
+      where: { profile_id: id },
+      orderBy: { created_at: 'asc' },
+      select: {
+        id: true,
+        created_at: true,
+        direction: true,
+        platform: true,
+        body: true,
+      },
+    });
+    return messages.map((m) => ({
+      id: m.id,
+      direction: m.direction,
+      platform: m.platform,
+      body: m.body,
+      createdAt: m.created_at,
+    }));
   }
 
   @Patch(':id')

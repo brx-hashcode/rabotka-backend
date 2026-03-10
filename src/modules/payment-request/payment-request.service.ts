@@ -9,7 +9,7 @@ import { AccountStatus, PaymentRequestStatus } from '@prisma/client';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { LogService } from '../log/log.service';
-import { paymentApprovedMessage } from '../whatsapp/templates';
+import { paymentApprovedMessage, paymentLinkMessage } from '../whatsapp/templates';
 import { CreatePaymentLinkDto } from './dto/create-payment-link.dto';
 import { SubmitPaymentDto } from './dto/submit-payment.dto';
 import { RejectPaymentDto } from './dto/reject-payment.dto';
@@ -52,6 +52,7 @@ export class PaymentRequestService {
   async createPaymentLink(dto: CreatePaymentLinkDto, adminUserId: string) {
     const profile = await this.prisma.profile.findUnique({
       where: { id: dto.profileId },
+      select: { id: true, phone: true, first_name: true },
     });
 
     if (!profile) {
@@ -80,7 +81,26 @@ export class PaymentRequestService {
       metadata: { paymentUrl },
     });
 
+    // Send via WhatsApp if profile has a phone
+    if (profile.phone) {
+      const message = paymentLinkMessage(profile.first_name, paymentUrl);
+      await this.whatsApp
+        .sendTextMessage(profile.phone, message, profile.id)
+        .catch(() => null);
+    }
+
     return { ...this.formatRequest(request), paymentUrl };
+  }
+
+  // ─── Admin: Get payment requests by profile ──────────────────────────────
+
+  async getByProfileId(profileId: string) {
+    const requests = await this.prisma.paymentRequest.findMany({
+      where: { profile_id: profileId },
+      orderBy: { created_at: 'desc' },
+      select: PAYMENT_REQUEST_SELECT,
+    });
+    return requests.map((r) => this.formatRequest(r));
   }
 
   // ─── Public: Get payment info by token ──────────────────────────────────
