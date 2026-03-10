@@ -1,6 +1,7 @@
 import {
   Controller,
   Get,
+  Post,
   Patch,
   Param,
   Body,
@@ -9,6 +10,8 @@ import {
   Req,
   UseInterceptors,
   UploadedFiles,
+  BadRequestException,
+  NotFoundException,
 } from '@nestjs/common';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import {
@@ -24,6 +27,9 @@ import { LogService } from '../log/log.service';
 import { AdminAuthGuard } from '../auth/guards/admin-auth.guard';
 import { PaymentRequestService } from '../payment-request/payment-request.service';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
+import { WhatsAppService } from '../whatsapp/whatsapp.service';
+import { MailService } from '../mail/mail.service';
+import { MessageDirection, BotPlatform } from '@prisma/client';
 import { AdminListProfilesDto } from './dto/admin-list-profiles.dto';
 import {
   AdminVerifyProfileDto,
@@ -43,6 +49,8 @@ export class AdminProfileController {
     private readonly logService: LogService,
     private readonly paymentRequestService: PaymentRequestService,
     private readonly prisma: PrismaService,
+    private readonly whatsApp: WhatsAppService,
+    private readonly mail: MailService,
   ) {}
 
   @Get()
@@ -94,7 +102,7 @@ export class AdminProfileController {
   }
 
   @Get(':id/messages')
-  @ApiOperation({ summary: 'Get WhatsApp messages for a profile (admin only)' })
+  @ApiOperation({ summary: 'Get messages for a profile (admin only)' })
   async getMessages(@Param('id') id: string) {
     const messages = await this.prisma.message.findMany({
       where: { profile_id: id },
@@ -114,6 +122,57 @@ export class AdminProfileController {
       body: m.body,
       createdAt: m.created_at,
     }));
+  }
+
+  @Post(':id/messages')
+  @ApiOperation({ summary: 'Send a message to a profile (admin only)' })
+  async sendMessage(
+    @Param('id') id: string,
+    @Body() body: { channel: 'WHATSAPP' | 'EMAIL'; message: string },
+  ) {
+    const profile = await this.prisma.profile.findUnique({
+      where: { id },
+      select: { id: true, phone: true, email: true, first_name: true },
+    });
+
+    if (!profile) {
+      throw new NotFoundException('profile.errors.not_found');
+    }
+
+    if (!body.message?.trim()) {
+      throw new BadRequestException('Message cannot be empty.');
+    }
+
+    if (body.channel === 'WHATSAPP') {
+      if (!profile.phone) {
+        throw new BadRequestException('Profile has no phone number.');
+      }
+      await this.whatsApp.sendTextMessage(
+        profile.phone,
+        body.message.trim(),
+        profile.id,
+      );
+    } else {
+      if (!profile.email) {
+        throw new BadRequestException('Profile has no email address.');
+      }
+      await this.mail.sendMail({
+        to: profile.email,
+        subject: 'Message de Rabotka',
+        html: `<p>${body.message.trim().replace(/\n/g, '<br/>')}</p>`,
+      });
+      // Save outbound email message to history
+      await this.prisma.message.create({
+        data: {
+          profile_id: profile.id,
+          direction: MessageDirection.OUTBOUND,
+          platform: BotPlatform.EMAIL,
+          body: body.message.trim(),
+        },
+      });
+    }
+
+    return { success: true };
   }
 
   @Patch(':id')
