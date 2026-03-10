@@ -1,4 +1,4 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
@@ -36,5 +36,17 @@ export class AdminApplicationController {
       status: dto.status,
       penaltyApplied: dto.penalty_applied,
     });
+  }
+
+  @Get(':id')
+  @ApiOperation({
+    summary: 'Get application details (admin only)',
+    description:
+      'Returns full application details including worker, employer, job, and penalties.',
+  })
+  @ApiResponse({ status: 200, description: 'Application details' })
+  @ApiResponse({ status: 404, description: 'Application not found' })
+  async getById(@Param('id') id: string) {
+    return this.applicationService.getApplicationDetailForAdmin(id);
   }
 }
