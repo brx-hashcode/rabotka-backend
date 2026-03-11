@@ -10,7 +10,7 @@ import { PenaltyService } from './penalty.service';
 import { AdminAuthGuard } from '../auth/guards/admin-auth.guard';
 import { AdminListPenaltiesDto } from './dto/admin-list-penalties.dto';
 
-@ApiTags('Admin – Penalties')
+@ApiTags('Admin - Penalties')
 @Controller('admin/penalties')
 @UseGuards(AdminAuthGuard)
 @ApiBearerAuth()
