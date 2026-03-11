@@ -32,7 +32,8 @@ export async function seedPaymentTestProfiles(
       phone: '+24206600001',
       email: SEED_EMAIL_PENDING,
       address: '12 rue des Tests, Brazzaville',
-      description: 'Profil de test — statut PENDING_PAYMENT, lien de paiement envoyé.',
+      description:
+        'Profil de test — statut PENDING_PAYMENT, lien de paiement envoyé.',
       profile_type: ProfileType.WORKER,
       status: AccountStatus.PENDING_PAYMENT,
       verification_status: VerificationStatus.VERIFIED,
@@ -50,10 +51,22 @@ export async function seedPaymentTestProfiles(
   });
 
   await seedMessages(prisma, profilePending.id, [
-    { direction: MessageDirection.OUTBOUND, body: 'Bonjour Alice, bienvenue sur Rabotka ! Votre compte a été créé avec succès.' },
-    { direction: MessageDirection.OUTBOUND, body: 'Pour activer votre compte, veuillez effectuer le paiement via ce lien : https://app.rabotka.test/pay/seed-token-pending-alice-001' },
-    { direction: MessageDirection.INBOUND, body: 'Bonjour, j\'ai reçu le lien. Je vais procéder au paiement maintenant.' },
-    { direction: MessageDirection.OUTBOUND, body: 'Parfait ! Après validation de votre paiement, votre compte sera activé sous 24h.' },
+    {
+      direction: MessageDirection.OUTBOUND,
+      body: 'Bonjour Alice, bienvenue sur Rabotka ! Votre compte a été créé avec succès.',
+    },
+    {
+      direction: MessageDirection.OUTBOUND,
+      body: 'Pour activer votre compte, veuillez effectuer le paiement via ce lien : https://app.rabotka.test/pay/seed-token-pending-alice-001',
+    },
+    {
+      direction: MessageDirection.INBOUND,
+      body: "Bonjour, j'ai reçu le lien. Je vais procéder au paiement maintenant.",
+    },
+    {
+      direction: MessageDirection.OUTBOUND,
+      body: 'Parfait ! Après validation de votre paiement, votre compte sera activé sous 24h.',
+    },
   ]);
 
   console.log(
@@ -68,7 +81,8 @@ export async function seedPaymentTestProfiles(
       phone: '+24206600002',
       email: SEED_EMAIL_SUBMITTED,
       address: '45 avenue de la Paix, Pointe-Noire',
-      description: 'Profil de test — paiement soumis, en attente de validation admin.',
+      description:
+        'Profil de test — paiement soumis, en attente de validation admin.',
       profile_type: ProfileType.EMPLOYER,
       status: AccountStatus.PENDING_PAYMENT,
       verification_status: VerificationStatus.VERIFIED,
@@ -91,12 +105,30 @@ export async function seedPaymentTestProfiles(
   });
 
   await seedMessages(prisma, profileSubmitted.id, [
-    { direction: MessageDirection.OUTBOUND, body: 'Bonjour Bruno, votre lien de paiement : https://app.rabotka.test/pay/seed-token-submitted-bruno-001' },
-    { direction: MessageDirection.INBOUND, body: 'Merci, j\'ai effectué le virement. Référence : REF-20260310-BRUNO-001' },
-    { direction: MessageDirection.OUTBOUND, body: 'Nous avons bien reçu votre notification. Notre équipe va vérifier votre paiement.' },
-    { direction: MessageDirection.INBOUND, body: 'Combien de temps ça prend généralement ?' },
-    { direction: MessageDirection.OUTBOUND, body: 'La vérification prend généralement entre 2 et 24 heures ouvrables.' },
-    { direction: MessageDirection.INBOUND, body: 'D\'accord, merci pour l\'information.' },
+    {
+      direction: MessageDirection.OUTBOUND,
+      body: 'Bonjour Bruno, votre lien de paiement : https://app.rabotka.test/pay/seed-token-submitted-bruno-001',
+    },
+    {
+      direction: MessageDirection.INBOUND,
+      body: "Merci, j'ai effectué le virement. Référence : REF-20260310-BRUNO-001",
+    },
+    {
+      direction: MessageDirection.OUTBOUND,
+      body: 'Nous avons bien reçu votre notification. Notre équipe va vérifier votre paiement.',
+    },
+    {
+      direction: MessageDirection.INBOUND,
+      body: 'Combien de temps ça prend généralement ?',
+    },
+    {
+      direction: MessageDirection.OUTBOUND,
+      body: 'La vérification prend généralement entre 2 et 24 heures ouvrables.',
+    },
+    {
+      direction: MessageDirection.INBOUND,
+      body: "D'accord, merci pour l'information.",
+    },
   ]);
 
   console.log(
@@ -128,9 +160,7 @@ export async function seedPaymentTestProfiles(
       token: 'seed-token-approved-carole-001',
       status: PaymentRequestStatus.APPROVED,
       payment_reference: 'REF-20260307-CAROLE-001',
-      proof_images: [
-        'https://picsum.photos/seed/proof3/400/300',
-      ],
+      proof_images: ['https://picsum.photos/seed/proof3/400/300'],
       created_at: new Date(approvedAt.getTime() - 2 * 60 * 60 * 1000),
       updated_at: approvedAt,
     },
@@ -143,23 +173,45 @@ export async function seedPaymentTestProfiles(
       token: 'seed-token-rejected-carole-001',
       status: PaymentRequestStatus.REJECTED,
       payment_reference: 'REF-20260305-CAROLE-BAD',
-      proof_images: [
-        'https://picsum.photos/seed/proof4/400/300',
-      ],
-      rejection_note: 'Le justificatif fourni ne correspond pas au montant attendu. Merci de soumettre un nouveau justificatif.',
+      proof_images: ['https://picsum.photos/seed/proof4/400/300'],
+      rejection_note:
+        'Le justificatif fourni ne correspond pas au montant attendu. Merci de soumettre un nouveau justificatif.',
       created_at: new Date(approvedAt.getTime() - 2 * 24 * 60 * 60 * 1000),
-      updated_at: new Date(approvedAt.getTime() - 2 * 24 * 60 * 60 * 1000 + 60 * 60 * 1000),
+      updated_at: new Date(
+        approvedAt.getTime() - 2 * 24 * 60 * 60 * 1000 + 60 * 60 * 1000,
+      ),
     },
   });
 
   await seedMessages(prisma, profileApproved.id, [
-    { direction: MessageDirection.OUTBOUND, body: 'Bonjour Carole, votre lien de paiement : https://app.rabotka.test/pay/seed-token-rejected-carole-001' },
-    { direction: MessageDirection.INBOUND, body: 'J\'ai envoyé le justificatif.' },
-    { direction: MessageDirection.OUTBOUND, body: 'Votre paiement a été rejeté. Raison : Le justificatif fourni ne correspond pas au montant attendu. Merci de soumettre un nouveau justificatif.' },
-    { direction: MessageDirection.INBOUND, body: 'D\'accord, je vais envoyer le bon document.' },
-    { direction: MessageDirection.OUTBOUND, body: 'Voici un nouveau lien : https://app.rabotka.test/pay/seed-token-approved-carole-001' },
-    { direction: MessageDirection.INBOUND, body: 'C\'est bon, j\'ai soumis le bon justificatif cette fois.' },
-    { direction: MessageDirection.OUTBOUND, body: 'Félicitations Carole ! Votre paiement a été validé. Votre compte est maintenant actif et vous pouvez accéder à toutes les fonctionnalités de Rabotka.' },
+    {
+      direction: MessageDirection.OUTBOUND,
+      body: 'Bonjour Carole, votre lien de paiement : https://app.rabotka.test/pay/seed-token-rejected-carole-001',
+    },
+    {
+      direction: MessageDirection.INBOUND,
+      body: "J'ai envoyé le justificatif.",
+    },
+    {
+      direction: MessageDirection.OUTBOUND,
+      body: 'Votre paiement a été rejeté. Raison : Le justificatif fourni ne correspond pas au montant attendu. Merci de soumettre un nouveau justificatif.',
+    },
+    {
+      direction: MessageDirection.INBOUND,
+      body: "D'accord, je vais envoyer le bon document.",
+    },
+    {
+      direction: MessageDirection.OUTBOUND,
+      body: 'Voici un nouveau lien : https://app.rabotka.test/pay/seed-token-approved-carole-001',
+    },
+    {
+      direction: MessageDirection.INBOUND,
+      body: "C'est bon, j'ai soumis le bon justificatif cette fois.",
+    },
+    {
+      direction: MessageDirection.OUTBOUND,
+      body: 'Félicitations Carole ! Votre paiement a été validé. Votre compte est maintenant actif et vous pouvez accéder à toutes les fonctionnalités de Rabotka.',
+    },
     { direction: MessageDirection.INBOUND, body: 'Super, merci beaucoup !' },
   ]);
 
@@ -175,7 +227,8 @@ export async function seedPaymentTestProfiles(
       phone: '+24206600004',
       email: SEED_EMAIL_SUSPENDED,
       address: '99 impasse des Problèmes, Brazzaville',
-      description: 'Profil de test — compte suspendu pour comportement inapproprié.',
+      description:
+        'Profil de test — compte suspendu pour comportement inapproprié.',
       profile_type: ProfileType.WORKER,
       status: AccountStatus.SUSPENDED,
       verification_status: VerificationStatus.VERIFIED,
@@ -191,22 +244,38 @@ export async function seedPaymentTestProfiles(
       token: 'seed-token-approved-david-001',
       status: PaymentRequestStatus.APPROVED,
       payment_reference: 'REF-20260201-DAVID-001',
-      proof_images: [
-        'https://picsum.photos/seed/proof5/400/300',
-      ],
+      proof_images: ['https://picsum.photos/seed/proof5/400/300'],
       created_at: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
       updated_at: new Date(Date.now() - 29 * 24 * 60 * 60 * 1000),
     },
   });
 
   await seedMessages(prisma, profileSuspended.id, [
-    { direction: MessageDirection.OUTBOUND, body: 'Bonjour David, votre compte Rabotka est maintenant actif.' },
+    {
+      direction: MessageDirection.OUTBOUND,
+      body: 'Bonjour David, votre compte Rabotka est maintenant actif.',
+    },
     { direction: MessageDirection.INBOUND, body: 'Merci !' },
-    { direction: MessageDirection.INBOUND, body: 'Est-ce que je peux postuler à plusieurs offres en même temps ?' },
-    { direction: MessageDirection.OUTBOUND, body: 'Oui, vous pouvez postuler à plusieurs offres simultanément.' },
-    { direction: MessageDirection.INBOUND, body: 'J\'ai un problème, une offre n\'est plus disponible.' },
-    { direction: MessageDirection.OUTBOUND, body: 'Votre compte a été suspendu suite à plusieurs signalements. Pour toute contestation, contactez notre support.' },
-    { direction: MessageDirection.INBOUND, body: 'C\'est une erreur ! Je n\'ai rien fait de mal.' },
+    {
+      direction: MessageDirection.INBOUND,
+      body: 'Est-ce que je peux postuler à plusieurs offres en même temps ?',
+    },
+    {
+      direction: MessageDirection.OUTBOUND,
+      body: 'Oui, vous pouvez postuler à plusieurs offres simultanément.',
+    },
+    {
+      direction: MessageDirection.INBOUND,
+      body: "J'ai un problème, une offre n'est plus disponible.",
+    },
+    {
+      direction: MessageDirection.OUTBOUND,
+      body: 'Votre compte a été suspendu suite à plusieurs signalements. Pour toute contestation, contactez notre support.',
+    },
+    {
+      direction: MessageDirection.INBOUND,
+      body: "C'est une erreur ! Je n'ai rien fait de mal.",
+    },
   ]);
 
   console.log(
