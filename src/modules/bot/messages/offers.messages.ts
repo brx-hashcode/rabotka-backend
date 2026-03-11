@@ -12,6 +12,7 @@ export type OfferListItem = {
   quantity?: number;
   acceptedCount?: number;
   status: string;
+  employerScore?: number | null;
 };
 
 export function formatPaymentFlow(flow: string): string {
@@ -143,6 +144,18 @@ export function formatOfferDetail(offer: OfferListItem): string {
   return lines.join('\n');
 }
 
+function employerScoreStar(score: number): string {
+  if (score >= 90) return '⭐⭐⭐';
+  if (score >= 75) return '⭐⭐';
+  if (score >= 60) return '⭐';
+  return '⚠️';
+}
+
+function formatEmployerScore(score: number | null | undefined): string {
+  if (score == null) return '';
+  return `*Fiabilité employeur*: ${score}/100 ${employerScoreStar(score)}`;
+}
+
 /** Single offer view in list-offers flow with 4 actions */
 export function formatOfferDetailWithActions(offer: OfferListItem): string {
   const flow = formatPaymentFlow(offer.payment_flow);
@@ -150,6 +163,7 @@ export function formatOfferDetailWithActions(offer: OfferListItem): string {
     offer.description.length > 80
       ? offer.description.slice(0, 80) + '...'
       : offer.description;
+  const scoreLine = formatEmployerScore(offer.employerScore);
   return [
     `*OFFRE - ${offer.title}*`,
     '',
@@ -158,6 +172,7 @@ export function formatOfferDetailWithActions(offer: OfferListItem): string {
     `*Montant*: ${offer.amount.toLocaleString('fr-FR')} FCFA ${flow}`,
     `*Places disponibles*: ${Math.max(0, (offer.quantity ?? 1) - (offer.acceptedCount ?? 0))}/${offer.quantity ?? 1}`,
     `*Adresse*: ${offer.address.slice(0, 50)}${offer.address.length > 50 ? '...' : ''}`,
+    ...(scoreLine ? [scoreLine] : []),
     '',
     SEP,
     '',

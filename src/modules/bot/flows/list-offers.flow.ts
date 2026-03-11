@@ -249,6 +249,7 @@ function toOfferListItem(offer: {
   quantity: number;
   acceptedCount?: number;
   status: string;
+  employer?: { reliability_score?: number | null } | null;
 }): OfferListItem {
   return {
     id: offer.id,
@@ -262,6 +263,7 @@ function toOfferListItem(offer: {
     quantity: offer.quantity,
     acceptedCount: offer.acceptedCount ?? 0,
     status: offer.status,
+    employerScore: offer.employer?.reliability_score ?? null,
   };
 }
 
