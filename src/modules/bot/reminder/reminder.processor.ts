@@ -10,6 +10,10 @@ import {
   formatReminder2h,
 } from '../messages/notifications.messages';
 import { ApplicationStatus, JobOfferStatus } from '@prisma/client';
+import {
+  EMPLOYER_GHOST_SCORE_DEDUCTION,
+  RELIABILITY_SCORE_MIN,
+} from '../../application/application.constants';
 
 const REMINDER_24H_SENT_KEY = 'reminder:sent:24h:';
 const REMINDER_2H_SENT_KEY = 'reminder:sent:2h:';
@@ -116,7 +120,8 @@ export class ReminderProcessor {
   private async expireOverdueOffers(): Promise<void> {
     const now = new Date();
 
-    const overdueOffers = await this.prisma.jobOffer.findMany({
+    // Expire offers that are still open (no accepted worker) — no score deduction
+    const openOverdue = await this.prisma.jobOffer.findMany({
       where: {
         status: {
           in: [JobOfferStatus.ACTIVE, JobOfferStatus.PARTIALLY_FILLED],
@@ -131,27 +136,79 @@ export class ReminderProcessor {
       },
     });
 
-    if (overdueOffers.length === 0) return;
+    // Expire FILLED offers past their date — employer accepted but never completed (ghost)
+    const filledOverdue = await this.prisma.jobOffer.findMany({
+      where: {
+        status: JobOfferStatus.FILLED,
+        scheduled_at: { lt: now },
+      },
+      select: {
+        id: true,
+        title: true,
+        employer_id: true,
+        employer: {
+          select: { phone: true, first_name: true, reliability_score: true },
+        },
+      },
+    });
 
-    const ids = overdueOffers.map((o) => o.id);
+    const allOverdue = [...openOverdue, ...filledOverdue];
+    if (allOverdue.length === 0) return;
+
+    const allIds = allOverdue.map((o) => o.id);
     await this.prisma.jobOffer.updateMany({
-      where: { id: { in: ids } },
+      where: { id: { in: allIds } },
       data: { status: JobOfferStatus.EXPIRED },
     });
 
-    this.logger.log(`Expired ${ids.length} overdue job offer(s)`);
+    this.logger.log(
+      `Expired ${allIds.length} overdue job offer(s) (${filledOverdue.length} ghost)`,
+    );
 
-    for (const offer of overdueOffers) {
+    // Deduct score from ghost employers (had accepted worker, never completed)
+    for (const offer of filledOverdue) {
+      const currentScore = offer.employer?.reliability_score ?? 100;
+      const newScore = Math.max(
+        RELIABILITY_SCORE_MIN,
+        currentScore - EMPLOYER_GHOST_SCORE_DEDUCTION,
+      );
+      await this.prisma.profile
+        .update({
+          where: { id: offer.employer_id },
+          data: { reliability_score: newScore },
+        })
+        .catch((err) =>
+          this.logger.warn(
+            `Failed to deduct score for ghost employer ${offer.employer_id}`,
+            err,
+          ),
+        );
+    }
+
+    const ghostIds = new Set(filledOverdue.map((o) => o.id));
+
+    // Notify all expired employers
+    for (const offer of allOverdue) {
       const phone = offer.employer?.phone;
       if (!phone) continue;
       const firstName = offer.employer?.first_name ?? '';
-      const text = [
-        `*⏰ Offre expirée*`,
-        '',
-        `Bonjour ${firstName}, votre offre *"${offer.title}"* a expiré car la date programmée est passée sans qu'aucun travailleur ne soit assigné.`,
-        '',
-        `Tapez *MENU* pour publier une nouvelle offre.`,
-      ].join('\n');
+      const isGhost = ghostIds.has(offer.id);
+      const text = isGhost
+        ? [
+            `*⚠️ Mission non complétée*`,
+            '',
+            `Bonjour ${firstName}, votre offre *"${offer.title}"* a été marquée expirée car vous n'avez pas confirmé la fin de la mission.`,
+            `Votre score de fiabilité a été réduit.`,
+            '',
+            `Tapez *MENU* pour gérer vos offres.`,
+          ].join('\n')
+        : [
+            `*⏰ Offre expirée*`,
+            '',
+            `Bonjour ${firstName}, votre offre *"${offer.title}"* a expiré car la date est passée sans qu'un travailleur soit assigné.`,
+            '',
+            `Tapez *MENU* pour publier une nouvelle offre.`,
+          ].join('\n');
       await this.whatsApp
         .sendTextMessage(phone, text, offer.employer_id)
         .catch((err) =>

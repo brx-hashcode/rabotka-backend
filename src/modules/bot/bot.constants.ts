@@ -12,6 +12,7 @@ export const FLOW_IDS = {
   MY_APPLICATIONS: 'my_applications',
   PROFILE_SUBMENU: 'profile_submenu',
   MANAGE_FILLED_JOB: 'manage_filled_job',
+  PAY_PENALTIES: 'pay_penalties',
 } as const;
 
 export const WORKER_MENU_OPTIONS = {
@@ -40,3 +41,10 @@ export const CMD_FILLED_JOBS = ['missions pourvues', 'gérer missions pourvues']
 export const CMD_PROFILE = ['profil', 'mon profil', 'profile'];
 export const CMD_HISTORY = ['historique', 'history'];
 export const CMD_LIST_OFFERS = ['voir les offres', 'offres', 'list offres'];
+export const CMD_PAY = [
+  'payer',
+  'régler',
+  'regler',
+  'payer pénalités',
+  'payer penalites',
+];
