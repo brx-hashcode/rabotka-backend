@@ -11,7 +11,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { MailerModule } from '@nestjs-modules/mailer';
-import { I18nModule, AcceptLanguageResolver } from 'nestjs-i18n';
+import { I18nModule, AcceptLanguageResolver, QueryResolver } from 'nestjs-i18n';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { PrismaModule } from './common/services/prisma/prisma.module';
@@ -28,15 +28,19 @@ import { UserModule } from './modules/user/user.module';
 import { ConversationModule } from './modules/conversation/conversation.module';
 import { JobOfferModule } from './modules/job-offer/job-offer.module';
 import { ApplicationModule } from './modules/application/application.module';
+import { PenaltyModule } from './modules/penalty/penalty.module';
+import { PaymentRequestModule } from './modules/payment-request/payment-request.module';
 import { FileModule } from './modules/file/file.module';
 import { LogModule } from './modules/log/log.module';
+import { WalletModule } from './modules/wallet/wallet.module';
 import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
+import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { ReminderModule } from './modules/bot/reminder/reminder.module';
 import { StorageModule } from './common/services/storage/storage.module';
 import { ImageWatermarkModule } from './common/services/image-watermark/image-watermark.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
-import { I18nExceptionFilter } from './common/filters/i18n-exception.filter';
+import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 
 @Module({
   imports: [
@@ -80,10 +84,7 @@ import { I18nExceptionFilter } from './common/filters/i18n-exception.filter';
       }),
     }),
     I18nModule.forRoot({
-      fallbackLanguage: 'en',
-      fallbacks: {
-        'en-*': 'en',
-      },
+      fallbackLanguage: 'fr',
       loaderOptions: {
         path: (() => {
           const srcI18n = path.join(process.cwd(), 'src', 'i18n');
@@ -93,9 +94,8 @@ import { I18nExceptionFilter } from './common/filters/i18n-exception.filter';
         watch: true,
       },
       resolvers: [
-        new AcceptLanguageResolver({
-          matchType: 'strict',
-        }),
+        { use: QueryResolver, options: ['lang'] },
+        AcceptLanguageResolver,
       ],
     }),
     PrismaModule,
@@ -118,17 +118,21 @@ import { I18nExceptionFilter } from './common/filters/i18n-exception.filter';
     ConversationModule,
     JobOfferModule,
     ApplicationModule,
+    PenaltyModule,
+    PaymentRequestModule,
     StorageModule,
     ImageWatermarkModule,
     FileModule,
     LogModule,
+    WalletModule,
+    DashboardModule,
   ],
   controllers: [AppController],
   providers: [
     AppService,
     { provide: APP_GUARD, useClass: ArcjetGuard },
     { provide: APP_GUARD, useClass: ThrottlerGuard },
-    { provide: APP_FILTER, useClass: I18nExceptionFilter },
+    { provide: APP_FILTER, useClass: HttpExceptionFilter },
   ],
 })
 export class AppModule {}

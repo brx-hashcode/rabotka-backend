@@ -16,11 +16,11 @@ export class AdminAuthGuard extends JwtAuthGuard {
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
 
     if (request.user.type !== 'admin') {
-      throw new UnauthorizedException('auth.errors.admin_access_required');
+      throw new UnauthorizedException('Accès administrateur requis');
     }
 
     if (!request.user.userId) {
-      throw new UnauthorizedException('auth.errors.invalid_admin_token');
+      throw new UnauthorizedException("Token d'authentification administrateur invalide");
     }
 
     return true;

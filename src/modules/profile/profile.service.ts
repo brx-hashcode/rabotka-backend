@@ -19,7 +19,12 @@ import {
 import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
 import { CreateProfileDto } from './dto/create-profile.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
-import { AccountStatus, Prisma } from '@prisma/client';
+import {
+  AccountStatus,
+  Prisma,
+  ProfileType,
+  VerificationStatus,
+} from '@prisma/client';
 import { randomBytes } from 'node:crypto';
 
 export type ProfileMeResponse = {
@@ -37,6 +42,10 @@ export type ProfileMeResponse = {
   whatsappConnected: boolean;
   avatarUrl: string | null;
   createdAt: Date;
+  jobOffersCount: number;
+  applicationsCount: number;
+  penaltiesCount: number;
+  unpaidPenaltiesCount: number;
 };
 
 export type ProfilePenaltyItem = {
@@ -44,7 +53,7 @@ export type ProfilePenaltyItem = {
   amount: number;
   reason: string | null;
   appliedAt: Date;
-   paidAt: Date | null;
+  paidAt: Date | null;
   applicationId: string;
   jobOfferTitle?: string;
 };
@@ -68,6 +77,64 @@ export type ProfileApplicationsResponse = {
   total: number;
   page: number;
   limit: number;
+};
+
+export type AdminProfileListItem = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string;
+  address: string;
+  description: string;
+  status: string;
+  profileType: string;
+  whatsappConnected: boolean;
+  verificationStatus: string;
+  verifiedBy: string | null;
+  verifiedAt: Date | null;
+  rejectionReason: string | null;
+  reliabilityScore: number | null;
+  avatarUrl: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type AdminProfilesListResponse = {
+  data: AdminProfileListItem[];
+  total: number;
+  page: number;
+  limit: number;
+};
+
+export type AdminKycDocumentItem = {
+  id: string;
+  documentType: string | null;
+  documentCategory: string;
+  documentUrl: string;
+  verificationStatus: string;
+  verifiedAt: Date | null;
+  verifiedBy: string | null;
+  rejectionReason: string | null;
+  createdAt: Date;
+};
+
+export type AdminVerificationImageItem = {
+  id: string;
+  imageUrl: string;
+  uploadedBy: string | null;
+  createdAt: Date;
+};
+
+export type AdminProfileDetailResponse = AdminProfileListItem & {
+  phone: string;
+  description: string;
+  jobOffersCount: number;
+  applicationsCount: number;
+  penaltiesCount: number;
+  unpaidPenaltiesCount: number;
+  kycDocuments: AdminKycDocumentItem[];
+  verificationImages: AdminVerificationImageItem[];
 };
 
 type PrismaTransactionClient = Parameters<
@@ -108,12 +175,23 @@ export class ProfileService {
         whatsapp_connected: true,
         avatar_url: true,
         created_at: true,
+        _count: {
+          select: {
+            job_offers: true,
+            applications: true,
+            penalties: true,
+          },
+        },
       },
     });
 
     if (!profile) {
-      throw new NotFoundException('profile.errors.not_found');
+      throw new NotFoundException('Profil non trouvé');
     }
+
+    const unpaidPenaltiesCount = await this.prisma.penalty.count({
+      where: { worker_id: id, paid_at: null },
+    });
 
     return {
       id: profile.id,
@@ -130,6 +208,10 @@ export class ProfileService {
       whatsappConnected: profile.whatsapp_connected,
       avatarUrl: profile.avatar_url,
       createdAt: profile.created_at,
+      jobOffersCount: profile._count.job_offers,
+      applicationsCount: profile._count.applications,
+      penaltiesCount: profile._count.penalties,
+      unpaidPenaltiesCount,
     };
   }
 
@@ -143,7 +225,7 @@ export class ProfileService {
     });
 
     if (!existingProfile) {
-      throw new NotFoundException('profile.errors.not_found');
+      throw new NotFoundException('Profil non trouvé');
     }
 
     const previousStatus = existingProfile.status;
@@ -215,11 +297,11 @@ export class ProfileService {
     });
 
     if (!existingProfile) {
-      throw new NotFoundException('profile.errors.not_found');
+      throw new NotFoundException('Profil non trouvé');
     }
 
     if (!avatarFile) {
-      throw new BadRequestException('profile.errors.avatar.required');
+      throw new BadRequestException('La photo de profil est requise');
     }
 
     const uploadResult = await this.fileService.uploadToStorage(avatarFile, {
@@ -256,10 +338,7 @@ export class ProfileService {
     }));
   }
 
-  async markPenaltyPaid(
-    penaltyId: string,
-    profileId: string,
-  ): Promise<void> {
+  async markPenaltyPaid(penaltyId: string, profileId: string): Promise<void> {
     const penalty = await this.prisma.penalty.findUnique({
       where: { id: penaltyId },
     });
@@ -307,6 +386,377 @@ export class ProfileService {
     return { data, total, page, limit };
   }
 
+  async getProfileDetailForAdmin(
+    id: string,
+  ): Promise<AdminProfileDetailResponse> {
+    const profile = await this.prisma.profile.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        first_name: true,
+        last_name: true,
+        email: true,
+        phone: true,
+        address: true,
+        description: true,
+        status: true,
+        profile_type: true,
+        whatsapp_connected: true,
+        verification_status: true,
+        verified_by: true,
+        verified_at: true,
+        rejection_reason: true,
+        reliability_score: true,
+        avatar_url: true,
+        created_at: true,
+        updated_at: true,
+        kyc_documents: {
+          select: {
+            id: true,
+            document_type: true,
+            document_category: true,
+            document_url: true,
+            verification_status: true,
+            verified_at: true,
+            verified_by: true,
+            rejection_reason: true,
+            created_at: true,
+          },
+          orderBy: { created_at: 'asc' },
+        },
+        kyc_verification_images: {
+          select: {
+            id: true,
+            image_url: true,
+            uploaded_by: true,
+            created_at: true,
+          },
+          orderBy: { created_at: 'asc' },
+        },
+        _count: {
+          select: {
+            job_offers: true,
+            applications: true,
+            penalties: true,
+          },
+        },
+      },
+    });
+
+    if (!profile) {
+      throw new NotFoundException('Profil non trouvé');
+    }
+
+    const unpaidPenaltiesCount = await this.prisma.penalty.count({
+      where: { worker_id: id, paid_at: null },
+    });
+
+    // Resolve admin names for verified_by UUIDs
+    const verifierIds = new Set<string>();
+    if (profile.verified_by) verifierIds.add(profile.verified_by);
+    for (const doc of profile.kyc_documents) {
+      if (doc.verified_by) verifierIds.add(doc.verified_by);
+    }
+    for (const img of profile.kyc_verification_images) {
+      if (img.uploaded_by) verifierIds.add(img.uploaded_by);
+    }
+
+    const verifierNames = new Map<string, string>();
+    if (verifierIds.size > 0) {
+      const admins = await this.prisma.user.findMany({
+        where: { id: { in: [...verifierIds] } },
+        select: { id: true, first_name: true, last_name: true },
+      });
+      for (const admin of admins) {
+        verifierNames.set(admin.id, `${admin.first_name} ${admin.last_name}`);
+      }
+    }
+
+    return {
+      id: profile.id,
+      firstName: profile.first_name,
+      lastName: profile.last_name,
+      email: profile.email,
+      phone: profile.phone,
+      address: profile.address,
+      description: profile.description,
+      status: profile.status,
+      profileType: profile.profile_type,
+      whatsappConnected: profile.whatsapp_connected,
+      verificationStatus: profile.verification_status,
+      verifiedBy: profile.verified_by
+        ? (verifierNames.get(profile.verified_by) ?? profile.verified_by)
+        : null,
+      verifiedAt: profile.verified_at,
+      rejectionReason: profile.rejection_reason,
+      reliabilityScore: profile.reliability_score,
+      avatarUrl: profile.avatar_url,
+      createdAt: profile.created_at,
+      updatedAt: profile.updated_at,
+      jobOffersCount: profile._count.job_offers,
+      applicationsCount: profile._count.applications,
+      penaltiesCount: profile._count.penalties,
+      unpaidPenaltiesCount,
+      kycDocuments: profile.kyc_documents.map((doc) => ({
+        id: doc.id,
+        documentType: doc.document_type,
+        documentCategory: doc.document_category,
+        documentUrl: doc.document_url,
+        verificationStatus: doc.verification_status,
+        verifiedAt: doc.verified_at,
+        verifiedBy: doc.verified_by
+          ? (verifierNames.get(doc.verified_by) ?? doc.verified_by)
+          : null,
+        rejectionReason: doc.rejection_reason,
+        createdAt: doc.created_at,
+      })),
+      verificationImages: profile.kyc_verification_images.map((img) => ({
+        id: img.id,
+        imageUrl: img.image_url,
+        uploadedBy: img.uploaded_by
+          ? (verifierNames.get(img.uploaded_by) ?? img.uploaded_by)
+          : null,
+        createdAt: img.created_at,
+      })),
+    };
+  }
+
+  async verifyProfileKyc(
+    profileId: string,
+    adminUserId: string,
+    decision: 'VERIFIED' | 'REJECTED',
+    reason?: string,
+    files?: Express.Multer.File[],
+  ): Promise<AdminProfileDetailResponse> {
+    const profile = await this.prisma.profile.findUnique({
+      where: { id: profileId },
+      select: { id: true },
+    });
+    if (!profile) {
+      throw new NotFoundException('Profil non trouvé');
+    }
+
+    // Upload verification images
+    const uploadedUrls: string[] = [];
+    if (files && files.length > 0) {
+      for (const file of files) {
+        const result = await this.fileService.uploadToStorage(file, {
+          folder: 'kyc-verification',
+        });
+        uploadedUrls.push(result.url);
+      }
+    }
+
+    const now = new Date();
+    await this.prisma.$transaction([
+      this.prisma.profile.update({
+        where: { id: profileId },
+        data: {
+          verification_status: decision as VerificationStatus,
+          verified_by: adminUserId,
+          verified_at: now,
+          rejection_reason: decision === 'REJECTED' ? (reason ?? null) : null,
+        },
+      }),
+      this.prisma.kycDocument.updateMany({
+        where: { profile_id: profileId },
+        data: {
+          verification_status: decision as VerificationStatus,
+          verified_by: adminUserId,
+          verified_at: now,
+          rejection_reason: decision === 'REJECTED' ? (reason ?? null) : null,
+        },
+      }),
+      // Delete previous verification images for this profile
+      this.prisma.kycVerificationImage.deleteMany({
+        where: { profile_id: profileId },
+      }),
+      // Create new verification image records
+      ...uploadedUrls.map((url) =>
+        this.prisma.kycVerificationImage.create({
+          data: {
+            profile_id: profileId,
+            image_url: url,
+            uploaded_by: adminUserId !== 'system' ? adminUserId : null,
+          },
+        }),
+      ),
+    ]);
+
+    return this.getProfileDetailForAdmin(profileId);
+  }
+
+  async updateProfileStatusByAdmin(
+    profileId: string,
+    status: AccountStatus,
+  ): Promise<AdminProfileDetailResponse> {
+    const profile = await this.prisma.profile.findUnique({
+      where: { id: profileId },
+      select: {
+        id: true,
+        status: true,
+        phone: true,
+        first_name: true,
+        profile_type: true,
+      },
+    });
+    if (!profile) {
+      throw new NotFoundException('Profil non trouvé');
+    }
+
+    await this.prisma.profile.update({
+      where: { id: profileId },
+      data: { status },
+    });
+
+    if (
+      profile.status !== AccountStatus.ACTIVE &&
+      status === AccountStatus.ACTIVE
+    ) {
+      try {
+        if (profile.phone) {
+          const text = accountActivatedMessage(
+            profile.first_name,
+            profile.profile_type,
+          );
+          await this.whatsAppService.sendTextMessage(profile.phone, text);
+        }
+      } catch {
+        this.logger.warn(
+          `Failed to send activation message for profile ${profileId}`,
+        );
+      }
+    }
+
+    return this.getProfileDetailForAdmin(profileId);
+  }
+
+  async updateProfileByAdmin(
+    profileId: string,
+    dto: UpdateProfileDto,
+  ): Promise<AdminProfileDetailResponse> {
+    const profile = await this.prisma.profile.findUnique({
+      where: { id: profileId },
+      select: { id: true },
+    });
+    if (!profile) {
+      throw new NotFoundException('Profil non trouvé');
+    }
+
+    const dataToUpdate: Prisma.ProfileUpdateInput = {};
+    if (dto.firstName !== undefined) dataToUpdate.first_name = dto.firstName;
+    if (dto.lastName !== undefined) dataToUpdate.last_name = dto.lastName;
+    if (dto.description !== undefined)
+      dataToUpdate.description = dto.description;
+    if (dto.address !== undefined) dataToUpdate.address = dto.address;
+
+    await this.prisma.profile.update({
+      where: { id: profileId },
+      data: dataToUpdate,
+    });
+
+    return this.getProfileDetailForAdmin(profileId);
+  }
+
+  async getProfilesForAdmin(params: {
+    page: number;
+    limit: number;
+    q?: string;
+    status?: AccountStatus[];
+    profileType?: ProfileType[];
+    whatsappConnected?: boolean;
+    verificationStatus?: VerificationStatus[];
+  }): Promise<AdminProfilesListResponse> {
+    const {
+      page,
+      limit,
+      q,
+      status,
+      profileType,
+      whatsappConnected,
+      verificationStatus,
+    } = params;
+    const skip = (page - 1) * limit;
+
+    const where: Prisma.ProfileWhereInput = {};
+
+    const searchTrimmed = q?.trim() ?? '';
+    if (searchTrimmed.length > 0) {
+      where.OR = [
+        { first_name: { contains: searchTrimmed, mode: 'insensitive' } },
+        { last_name: { contains: searchTrimmed, mode: 'insensitive' } },
+        { email: { contains: searchTrimmed, mode: 'insensitive' } },
+        { phone: { contains: searchTrimmed, mode: 'insensitive' } },
+      ];
+    }
+
+    if (status != null && status.length > 0) {
+      where.status = { in: status };
+    }
+    if (profileType != null && profileType.length > 0) {
+      where.profile_type = { in: profileType };
+    }
+    if (whatsappConnected !== undefined) {
+      where.whatsapp_connected = whatsappConnected;
+    }
+    if (verificationStatus != null && verificationStatus.length > 0) {
+      where.verification_status = { in: verificationStatus };
+    }
+
+    const [profiles, total] = await Promise.all([
+      this.prisma.profile.findMany({
+        where,
+        orderBy: { created_at: 'desc' },
+        skip,
+        take: limit,
+        select: {
+          id: true,
+          first_name: true,
+          last_name: true,
+          email: true,
+          phone: true,
+          address: true,
+          description: true,
+          status: true,
+          profile_type: true,
+          whatsapp_connected: true,
+          verification_status: true,
+          verified_by: true,
+          verified_at: true,
+          rejection_reason: true,
+          reliability_score: true,
+          avatar_url: true,
+          created_at: true,
+          updated_at: true,
+        },
+      }),
+      this.prisma.profile.count({ where }),
+    ]);
+
+    const data: AdminProfileListItem[] = profiles.map((p) => ({
+      id: p.id,
+      firstName: p.first_name,
+      lastName: p.last_name,
+      email: p.email,
+      phone: p.phone,
+      address: p.address,
+      description: p.description,
+      status: p.status,
+      profileType: p.profile_type,
+      whatsappConnected: p.whatsapp_connected,
+      verificationStatus: p.verification_status,
+      verifiedBy: p.verified_by,
+      verifiedAt: p.verified_at,
+      rejectionReason: p.rejection_reason,
+      reliabilityScore: p.reliability_score,
+      avatarUrl: p.avatar_url,
+      createdAt: p.created_at,
+      updatedAt: p.updated_at,
+    }));
+
+    return { data, total, page, limit };
+  }
+
   async createProfile(
     createProfileDto: CreateProfileDto,
     kycDocument: Express.Multer.File,
@@ -322,7 +772,16 @@ export class ProfileService {
       );
 
       this.logger.log(`Profile created successfully: ${profile.id}`);
-      return { message: 'profile.created.success' };
+
+      // Auto-send WhatsApp verification link (non-blocking)
+      this.requestWhatsAppVerification(profile.id).catch((err) =>
+        this.logger.warn(
+          `Failed to auto-send WhatsApp verification link for ${profile.id}:`,
+          err,
+        ),
+      );
+
+      return { message: 'Profil créé avec succès' };
     } catch (error: any) {
       this.handleCreateProfileError(error);
     }
@@ -333,10 +792,10 @@ export class ProfileService {
     kycSelfie: Express.Multer.File,
   ): void {
     if (!kycDocument) {
-      throw new BadRequestException('KYC document is required');
+      throw new BadRequestException('Le document KYC est requis');
     }
     if (!kycSelfie) {
-      throw new BadRequestException('KYC selfie is required');
+      throw new BadRequestException('La photo KYC est requise');
     }
   }
 
@@ -479,10 +938,10 @@ export class ProfileService {
     }
 
     if (this.isPrismaError(error)) {
-      throw new BadRequestException('profile.errors.database');
+      throw new BadRequestException("Une erreur de base de données s'est produite. Veuillez réessayer plus tard");
     }
 
-    throw new BadRequestException('profile.errors.create.failed');
+    throw new BadRequestException('Échec de la création du profil. Veuillez réessayer');
   }
 
   private isKnownException(error: any): boolean {
@@ -512,12 +971,12 @@ export class ProfileService {
 
   private getConflictErrorKey(field: string | undefined): string {
     if (field === 'email') {
-      return 'profile.errors.email.exists';
+      return 'Un compte avec cette adresse e-mail existe déjà';
     }
     if (field === 'phone') {
-      return 'profile.errors.phone.exists';
+      return 'Un compte avec ce numéro de téléphone existe déjà';
     }
-    return 'profile.errors.unique.constraint';
+    return 'Un profil avec ces informations existe déjà';
   }
 
   private isPrismaError(error: any): boolean {
@@ -537,11 +996,11 @@ export class ProfileService {
     });
 
     if (!profile) {
-      throw new NotFoundException('profile.errors.not_found');
+      throw new NotFoundException('Profil non trouvé');
     }
 
     if (!this.whatsAppService.isConfigured()) {
-      throw new ServiceUnavailableException('whatsapp.errors.not_connected');
+      throw new ServiceUnavailableException('Le service WhatsApp n\'est pas configuré');
     }
 
     const token = randomBytes(32).toString('base64url');
@@ -571,7 +1030,7 @@ export class ProfileService {
 
     if (!sent) {
       await this.redis.del(redisKey);
-      throw new ServiceUnavailableException('whatsapp.errors.send_failed');
+      throw new ServiceUnavailableException('Échec de l\'envoi du message WhatsApp');
     }
 
     this.logger.log(`WhatsApp verification token sent to profile ${profileId}`);
