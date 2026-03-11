@@ -427,81 +427,77 @@ export class ApplicationService {
       (scheduledAt.getTime() - now.getTime()) / (60 * 60 * 1000);
     const isLateCancellation =
       hoursUntil < CANCELLATION_PENALTY_THRESHOLD_HOURS;
+    const isAccepted = application.status === ApplicationStatus.ACCEPTED;
+    const applyPenalty = isLateCancellation && isAccepted;
 
-    let penaltyApplied = false;
-    let penaltyAmount: number | null = null;
+    const penaltyApplied = applyPenalty;
+    const penaltyAmount: number | null = applyPenalty
+      ? LATE_CANCELLATION_PENALTY_FCFA
+      : null;
 
-    if (application.status === ApplicationStatus.ACCEPTED) {
-      await this.prisma.jobOffer.update({
-        where: { id: application.job_offer_id },
-        data: { status: JobOfferStatus.ACTIVE },
-      });
-    }
-
-    if (
-      isLateCancellation &&
-      application.status === ApplicationStatus.ACCEPTED
-    ) {
-      penaltyApplied = true;
-      penaltyAmount = LATE_CANCELLATION_PENALTY_FCFA;
-
-      await this.prisma.penalty.create({
-        data: {
-          worker_id: workerId,
-          application_id: applicationId,
-          amount: LATE_CANCELLATION_PENALTY_FCFA,
-          reason:
-            reason ??
-            `Annulation tardive (< ${CANCELLATION_PENALTY_THRESHOLD_HOURS}h avant le rendez-vous)`,
-        },
-      });
-
-      const profile = await this.prisma.profile.findUnique({
-        where: { id: workerId },
-        select: { reliability_score: true },
-      });
-      const currentScore = profile?.reliability_score ?? 100;
-      const newScore = Math.max(
-        RELIABILITY_SCORE_MIN,
-        Math.min(
-          RELIABILITY_SCORE_MAX,
-          currentScore - LATE_CANCELLATION_SCORE_DEDUCTION,
-        ),
-      );
-      await this.prisma.profile.update({
-        where: { id: workerId },
-        data: { reliability_score: newScore },
-      });
-    }
-
-    const updated = await this.prisma.application.update({
-      where: { id: applicationId },
-      data: {
-        status: ApplicationStatus.CANCELLED,
-        cancelled_at: now,
-        cancellation_reason: reason ?? null,
-        penalty_applied: penaltyApplied,
-        penalty_amount: penaltyAmount,
-      },
-      include: {
-        job_offer: {
-          include: {
-            employer: {
-              select: {
-                id: true,
-                first_name: true,
-                last_name: true,
-                phone: true,
-              },
-            },
+    await this.prisma.$transaction(async (tx) => {
+      if (isAccepted) {
+        await tx.jobOffer.update({
+          where: { id: application.job_offer_id },
+          data: { status: JobOfferStatus.ACTIVE },
+        });
+        await tx.assignment.updateMany({
+          where: { application_id: applicationId },
+          data: {
+            status: AssignmentStatus.CANCELLED_BY_WORKER,
+            cancelled_at: now,
           },
+        });
+      }
+
+      if (applyPenalty) {
+        await tx.penalty.create({
+          data: {
+            worker_id: workerId,
+            application_id: applicationId,
+            amount: LATE_CANCELLATION_PENALTY_FCFA,
+            reason:
+              reason ??
+              `Annulation tardive (< ${CANCELLATION_PENALTY_THRESHOLD_HOURS}h avant le rendez-vous)`,
+          },
+        });
+
+        const profile = await tx.profile.findUnique({
+          where: { id: workerId },
+          select: { reliability_score: true },
+        });
+        const currentScore = profile?.reliability_score ?? 100;
+        const newScore = Math.max(
+          RELIABILITY_SCORE_MIN,
+          Math.min(
+            RELIABILITY_SCORE_MAX,
+            currentScore - LATE_CANCELLATION_SCORE_DEDUCTION,
+          ),
+        );
+        await tx.profile.update({
+          where: { id: workerId },
+          data: { reliability_score: newScore },
+        });
+      }
+
+      await tx.application.update({
+        where: { id: applicationId },
+        data: {
+          status: ApplicationStatus.CANCELLED,
+          cancelled_at: now,
+          cancellation_reason: reason ?? null,
+          penalty_applied: penaltyApplied,
+          penalty_amount: penaltyAmount,
         },
-        worker: true,
-      },
+      });
     });
 
+    const updated = await this.findById(applicationId);
+    if (!updated)
+      throw new NotFoundException('Candidature introuvable après mise à jour');
+
     return {
-      application: this.toApplicationWithOffer(updated),
+      application: updated,
       penaltyApplied,
       penaltyAmount,
     };

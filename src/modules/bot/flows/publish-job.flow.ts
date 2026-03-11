@@ -241,6 +241,39 @@ export async function runPublishJobFlow(
     };
   }
 
+  // Step 0 — draft-resume decision (set by orchestrator when draft exists)
+  if (step === 0) {
+    const draftStep =
+      typeof payload._draftStep === 'number' ? payload._draftStep : 1;
+    const cleanPayload = { ...payload };
+    delete cleanPayload._draftStep;
+    if (trimmed === '1') {
+      // Resume from draft
+      const prompt = getStepPrompt(draftStep, cleanPayload);
+      return {
+        reply: [
+          `📝 *Reprise de votre brouillon*\n\nÉtape ${draftStep}/8 — ${prompt}`,
+        ],
+        nextState: {
+          ...state,
+          step: draftStep,
+          payload: cleanPayload,
+          updatedAt: new Date().toISOString(),
+        },
+      };
+    }
+    // '2' or anything else → start fresh
+    return {
+      reply: [getPublishJobFirstMessage()],
+      nextState: {
+        flowId: FLOW_IDS.PUBLISH_JOB,
+        step: 1,
+        payload: {},
+        updatedAt: new Date().toISOString(),
+      },
+    };
+  }
+
   const step9Modifier = handleStep9Modifier(state, payload, normalized);
   if (step9Modifier) return step9Modifier;
 
@@ -677,4 +710,35 @@ export function getPublishJobFirstMessage(): string {
     '',
     '_Tapez "Annuler" à tout moment pour abandonner._',
   ].join('\n');
+}
+
+export function getPublishJobResumeState(
+  step: number,
+  payload: Record<string, unknown>,
+): BotState {
+  return {
+    flowId: FLOW_IDS.PUBLISH_JOB,
+    step,
+    payload,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+export function getPublishJobDraftResumeMessage(
+  step: number,
+  payload: Record<string, unknown>,
+): string {
+  const title =
+    typeof payload.title === 'string' && payload.title ? payload.title : null;
+  const lines = [
+    `📝 *Brouillon enregistré — Reprendre la publication ?*`,
+    '',
+    title ? `Titre : *${title}*` : '',
+    '',
+    `Étape : ${step}/8`,
+    '',
+    `1 - Reprendre là où vous en étiez.`,
+    `2 - Recommencer depuis le début.`,
+  ].filter((l) => l !== '');
+  return lines.join('\n');
 }

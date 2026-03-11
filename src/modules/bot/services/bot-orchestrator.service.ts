@@ -8,6 +8,7 @@ import { BotRouterService } from '../router/bot-router.service';
 import { BotCommandsService } from './bot-commands.service';
 import { BotNotificationService } from './bot-notification.service';
 import { BotInboxService } from './bot-inbox.service';
+import { BotDraftService } from './bot-draft.service';
 import { handleMenuCommand } from '../commands/menu.command';
 import { handleHelpCommand } from '../commands/help.command';
 import { unknownCommandMessage } from '../messages/menu.messages';
@@ -17,6 +18,7 @@ import {
   runPublishJobFlow,
   getPublishJobInitialState,
   getPublishJobFirstMessage,
+  getPublishJobDraftResumeMessage,
 } from '../flows/publish-job.flow';
 import {
   runListOffersFlow,
@@ -64,6 +66,7 @@ export class BotOrchestratorService {
     private readonly prisma: PrismaService,
     private readonly botState: BotStateService,
     private readonly botInbox: BotInboxService,
+    private readonly botDraft: BotDraftService,
     private readonly router: BotRouterService,
     private readonly commands: BotCommandsService,
     private readonly jobOfferService: JobOfferService,
@@ -148,6 +151,21 @@ export class BotOrchestratorService {
     }
 
     if (result.clearState) {
+      // Save draft if employer exits publish-job mid-flow (step > 1)
+      if (
+        state.flowId === FLOW_IDS.PUBLISH_JOB &&
+        state.step > 1 &&
+        state.payload &&
+        Object.keys(state.payload).length > 0
+      ) {
+        await this.botDraft
+          .saveDraft(profileId, {
+            step: state.step,
+            payload: state.payload,
+            savedAt: new Date().toISOString(),
+          })
+          .catch(() => {});
+      }
       await this.botState.clear(profileId);
       // After clearing, check inbox for pending applications
       const nextInboxItem = await this.botInbox.shift(profileId);
@@ -286,6 +304,18 @@ export class BotOrchestratorService {
   private async handleStartPublishJobCommand(
     profileId: string,
   ): Promise<string[]> {
+    const draft = await this.botDraft.getDraft(profileId);
+    if (draft && draft.step > 1) {
+      // Offer to resume the saved draft — step 0 = draft-resume decision
+      const resumeState: BotState = {
+        flowId: FLOW_IDS.PUBLISH_JOB,
+        step: 0,
+        payload: { ...draft.payload, _draftStep: draft.step },
+        updatedAt: new Date().toISOString(),
+      };
+      await this.botState.set(profileId, resumeState);
+      return [getPublishJobDraftResumeMessage(draft.step, draft.payload)];
+    }
     const initialState = getPublishJobInitialState();
     await this.botState.set(profileId, initialState);
     return [getPublishJobFirstMessage()];

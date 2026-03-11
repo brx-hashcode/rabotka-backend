@@ -118,10 +118,17 @@ export class ReminderProcessor {
 
     const overdueOffers = await this.prisma.jobOffer.findMany({
       where: {
-        status: { in: [JobOfferStatus.ACTIVE, JobOfferStatus.PARTIALLY_FILLED] },
+        status: {
+          in: [JobOfferStatus.ACTIVE, JobOfferStatus.PARTIALLY_FILLED],
+        },
         scheduled_at: { lt: now },
       },
-      select: { id: true, title: true, employer_id: true, employer: { select: { phone: true, first_name: true } } },
+      select: {
+        id: true,
+        title: true,
+        employer_id: true,
+        employer: { select: { phone: true, first_name: true } },
+      },
     });
 
     if (overdueOffers.length === 0) return;
@@ -145,9 +152,14 @@ export class ReminderProcessor {
         '',
         `Tapez *MENU* pour publier une nouvelle offre.`,
       ].join('\n');
-      await this.whatsApp.sendTextMessage(phone, text, offer.employer_id).catch((err) =>
-        this.logger.warn(`Failed to notify employer ${offer.employer_id} of expired offer`, err),
-      );
+      await this.whatsApp
+        .sendTextMessage(phone, text, offer.employer_id)
+        .catch((err) =>
+          this.logger.warn(
+            `Failed to notify employer ${offer.employer_id} of expired offer`,
+            err,
+          ),
+        );
     }
   }
 

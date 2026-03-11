@@ -99,7 +99,14 @@ describe('ApplicationService', () => {
       },
       payment: { create: jest.fn() },
       assignment: { create: jest.fn(), updateMany: jest.fn() },
-      $transaction: jest.fn(),
+      $transaction: jest.fn().mockImplementation((arg: unknown) => {
+        if (typeof arg === 'function') {
+          // Interactive transaction: call with mockPrismaService as tx
+          return arg(mockPrismaService);
+        }
+        // Array transaction: resolve with empty results
+        return Promise.resolve([]);
+      }),
     };
 
     const module: TestingModule = await Test.createTestingModule({
