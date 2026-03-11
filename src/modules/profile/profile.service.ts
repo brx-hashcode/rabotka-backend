@@ -649,6 +649,8 @@ export class ProfileService {
     if (dto.description !== undefined)
       dataToUpdate.description = dto.description;
     if (dto.address !== undefined) dataToUpdate.address = dto.address;
+    if (dto.phone !== undefined) dataToUpdate.phone = dto.phone;
+    if (dto.email !== undefined) dataToUpdate.email = dto.email;
 
     await this.prisma.profile.update({
       where: { id: profileId },
@@ -938,10 +940,14 @@ export class ProfileService {
     }
 
     if (this.isPrismaError(error)) {
-      throw new BadRequestException("Une erreur de base de données s'est produite. Veuillez réessayer plus tard");
+      throw new BadRequestException(
+        "Une erreur de base de données s'est produite. Veuillez réessayer plus tard",
+      );
     }
 
-    throw new BadRequestException('Échec de la création du profil. Veuillez réessayer');
+    throw new BadRequestException(
+      'Échec de la création du profil. Veuillez réessayer',
+    );
   }
 
   private isKnownException(error: any): boolean {
@@ -1000,7 +1006,9 @@ export class ProfileService {
     }
 
     if (!this.whatsAppService.isConfigured()) {
-      throw new ServiceUnavailableException('Le service WhatsApp n\'est pas configuré');
+      throw new ServiceUnavailableException(
+        "Le service WhatsApp n'est pas configuré",
+      );
     }
 
     const token = randomBytes(32).toString('base64url');
@@ -1030,7 +1038,9 @@ export class ProfileService {
 
     if (!sent) {
       await this.redis.del(redisKey);
-      throw new ServiceUnavailableException('Échec de l\'envoi du message WhatsApp');
+      throw new ServiceUnavailableException(
+        "Échec de l'envoi du message WhatsApp",
+      );
     }
 
     this.logger.log(`WhatsApp verification token sent to profile ${profileId}`);
