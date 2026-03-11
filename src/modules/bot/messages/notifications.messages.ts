@@ -27,7 +27,7 @@ export function formatAccountActivatedMessage(params: {
     params.profileType === 'WORKER' ? workerActions : employerActions;
 
   return [
-    `🎉 Félicitations ${params.firstName} !`,
+    `Felicitations ${params.firstName} !`,
     '',
     'Votre compte Rabotka a été activé avec succès !',
     '',
