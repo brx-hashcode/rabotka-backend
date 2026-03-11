@@ -151,6 +151,24 @@ export function formatProfileStats(params: {
   ].join('\n');
 }
 
+export function formatPenaltyBlocked(totalAmount: number): string {
+  return [
+    '⛔ *Candidature bloquée — pénalité impayée*',
+    '',
+    `Vous avez *${totalAmount.toLocaleString('fr-FR')} FCFA* de pénalités impayées.`,
+    "Vous ne pouvez pas postuler tant qu'elles ne sont pas réglées.",
+    '',
+    '*Comment payer :*',
+    '📲 Orange Money : *06 000 0000*',
+    '📲 Airtel Money : *07 000 0000*',
+    '',
+    'Indiquez votre numéro de téléphone en référence lors du paiement.',
+    'Votre compte sera débloqué sous 24h après réception.',
+    '',
+    "Tapez *profil* pour voir le détail ou *menu* pour revenir.",
+  ].join('\n');
+}
+
 export function formatCancelApplicationNoPenalty(params: {
   offerTitle: string;
   scheduledAt: Date;
@@ -167,13 +185,14 @@ export function formatCancelApplicationNoPenalty(params: {
     '',
     'Aucune pénalité ne sera appliquée (annulation > 4h avant).',
     '',
-    'Souhaitez-vous indiquer une raison ? (optionnel).',
+    'Souhaitez-vous indiquer une raison ? (optionnel)',
     '',
-    "1️⃣ Confirmer l'annulation (ou tapez une raison puis validez)",
+    "1️⃣ Confirmer l'annulation sans raison",
+    '   ou tapez votre raison directement et envoyez',
     '2️⃣ Retour à la candidature',
     '3️⃣ Menu',
     '',
-    '*Tapez le numéro correspondant.*',
+    '*0 ou 1 – Confirmer sans raison | 2 – Annuler*',
   ].join('\n');
 }
 

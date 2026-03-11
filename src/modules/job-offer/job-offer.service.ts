@@ -76,6 +76,7 @@ export type JobOfferListItem = {
   address: string;
   note: string | null;
   quantity: number;
+  acceptedCount: number;
   status: string;
   employer_id: string;
   created_at: Date;
@@ -167,11 +168,18 @@ export class JobOfferService {
           : {}),
       },
       orderBy: [{ scheduled_at: 'asc' }, { created_at: 'desc' }],
+      include: {
+        _count: {
+          select: {
+            applications: { where: { status: 'ACCEPTED' } },
+          },
+        },
+      },
     });
 
     const hasMore = offers.length > limit;
     const data = (hasMore ? offers.slice(0, limit) : offers).map((o) =>
-      this.toListItem(o),
+      this.toListItem(o, o._count.applications),
     );
     const nextCursor = hasMore ? (data.at(-1)?.id ?? null) : null;
 
@@ -497,20 +505,23 @@ export class JobOfferService {
     return this.getJobOfferDetailForAdmin(id);
   }
 
-  private toListItem(offer: {
-    id: string;
-    title: string;
-    description: string;
-    scheduled_at: Date;
-    amount: unknown;
-    payment_flow: string;
-    address: string;
-    note: string | null;
-    quantity: number;
-    status: string;
-    employer_id: string;
-    created_at: Date;
-  }): JobOfferListItem {
+  private toListItem(
+    offer: {
+      id: string;
+      title: string;
+      description: string;
+      scheduled_at: Date;
+      amount: unknown;
+      payment_flow: string;
+      address: string;
+      note: string | null;
+      quantity: number;
+      status: string;
+      employer_id: string;
+      created_at: Date;
+    },
+    acceptedCount = 0,
+  ): JobOfferListItem {
     return {
       id: offer.id,
       title: offer.title,
@@ -521,6 +532,7 @@ export class JobOfferService {
       address: offer.address,
       note: offer.note,
       quantity: offer.quantity,
+      acceptedCount,
       status: offer.status,
       employer_id: offer.employer_id,
       created_at: offer.created_at,

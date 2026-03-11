@@ -9,6 +9,7 @@ import { PrismaService } from '../../common/services/prisma/prisma.service';
 import {
   AccountStatus,
   ApplicationStatus,
+  AssignmentStatus,
   JobOfferStatus,
   PaymentStatus,
   PaymentMethod,
@@ -297,7 +298,10 @@ export class ApplicationService {
         "Vous n'êtes pas l'employeur de cette offre",
       );
     }
-    if (application.status !== ApplicationStatus.PENDING) {
+    if (
+      application.status !== ApplicationStatus.PENDING &&
+      application.status !== ApplicationStatus.VIEWED
+    ) {
       throw new BadRequestException("Cette candidature n'est plus en attente");
     }
 
@@ -320,6 +324,14 @@ export class ApplicationService {
         where: { id: application.job_offer_id },
         data: {
           status: shouldFillJob ? JobOfferStatus.FILLED : JobOfferStatus.ACTIVE,
+        },
+      }),
+      this.prisma.assignment.create({
+        data: {
+          application_id: applicationId,
+          job_offer_id: application.job_offer_id,
+          worker_id: application.worker_id,
+          status: AssignmentStatus.CONFIRMED,
         },
       }),
     ]);
@@ -348,7 +360,10 @@ export class ApplicationService {
         "Vous n'êtes pas l'employeur de cette offre",
       );
     }
-    if (application.status !== ApplicationStatus.PENDING) {
+    if (
+      application.status !== ApplicationStatus.PENDING &&
+      application.status !== ApplicationStatus.VIEWED
+    ) {
       throw new BadRequestException("Cette candidature n'est plus en attente");
     }
 
@@ -501,7 +516,7 @@ export class ApplicationService {
       where: { id: applicationId },
       include: { job_offer: true },
     });
-    if (!app || app.worker_id !== workerId) return false;
+    if (app?.worker_id !== workerId) return false;
     if (
       app.status !== ApplicationStatus.ACCEPTED &&
       app.status !== ApplicationStatus.PENDING
@@ -547,6 +562,10 @@ export class ApplicationService {
       this.prisma.jobOffer.update({
         where: { id: application.job_offer_id },
         data: { status: JobOfferStatus.COMPLETED },
+      }),
+      this.prisma.assignment.updateMany({
+        where: { application_id: applicationId },
+        data: { status: AssignmentStatus.COMPLETED, completed_at: new Date() },
       }),
       this.prisma.payment.create({
         data: {
@@ -605,12 +624,46 @@ export class ApplicationService {
         where: { id: application.job_offer_id },
         data: { status: JobOfferStatus.ACTIVE },
       }),
+      this.prisma.assignment.updateMany({
+        where: { application_id: applicationId },
+        data: {
+          status: AssignmentStatus.CANCELLED_BY_EMPLOYER,
+          cancelled_at: now,
+        },
+      }),
     ]);
 
     const updated = await this.findById(applicationId);
     if (!updated)
       throw new NotFoundException('Candidature introuvable après mise à jour');
     return updated;
+  }
+
+  async markAsViewed(applicationId: string): Promise<void> {
+    await this.prisma.application.updateMany({
+      where: {
+        id: applicationId,
+        status: ApplicationStatus.PENDING,
+      },
+      data: {
+        status: ApplicationStatus.VIEWED,
+        viewed_at: new Date(),
+      },
+    });
+  }
+
+  async getUnpaidPenalties(
+    workerId: string,
+  ): Promise<{ count: number; total: number; ids: string[] }> {
+    const penalties = await this.prisma.penalty.findMany({
+      where: { worker_id: workerId, paid_at: null },
+      select: { id: true, amount: true },
+    });
+    return {
+      count: penalties.length,
+      total: penalties.reduce((sum, p) => sum + Number(p.amount), 0),
+      ids: penalties.map((p) => p.id),
+    };
   }
 
   /** Get applications with ACCEPTED status and scheduled_at in the given time window (for reminders) */
@@ -847,8 +900,7 @@ export class ApplicationService {
       employerId: a.job_offer.employer_id,
       status: a.status,
       penaltyApplied: a.penalty_applied,
-      penaltyAmount:
-        a.penalty_amount != null ? Number(a.penalty_amount) : null,
+      penaltyAmount: a.penalty_amount == null ? null : Number(a.penalty_amount),
       cancelledAt: a.cancelled_at?.toISOString() ?? null,
       cancellationReason: a.cancellation_reason,
       createdAt: a.created_at.toISOString(),
@@ -887,7 +939,7 @@ export class ApplicationService {
       cancellation_reason: app.cancellation_reason,
       penalty_applied: app.penalty_applied,
       penalty_amount:
-        app.penalty_amount != null ? Number(app.penalty_amount) : null,
+        app.penalty_amount == null ? null : Number(app.penalty_amount),
       created_at: app.created_at,
     };
     if (app.job_offer) {

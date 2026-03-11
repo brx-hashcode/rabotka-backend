@@ -60,6 +60,8 @@ export class BotCommandsService {
       payment_flow: o.payment_flow,
       address: o.address,
       note: o.note,
+      quantity: o.quantity,
+      acceptedCount: o.acceptedCount,
       status: o.status,
     }));
     const hasMore = !!nextCursor;
@@ -165,7 +167,9 @@ export class BotCommandsService {
       const applications = await this.applicationService.findByJobOffer(
         offer.id,
       );
-      const pending = applications.filter((a) => a.status === 'PENDING');
+      const pending = applications.filter(
+        (a) => a.status === 'PENDING' || a.status === 'VIEWED',
+      );
       for (const app of pending) {
         const firstName = app.worker?.first_name ?? '';
         const lastName = app.worker?.last_name ?? '';
@@ -185,6 +189,7 @@ export class BotCommandsService {
           email,
           status: verificationStatus ?? app.status,
           avatarUrl: avatarUrl ?? undefined,
+          offerTitle: offer.title,
         });
       }
     }

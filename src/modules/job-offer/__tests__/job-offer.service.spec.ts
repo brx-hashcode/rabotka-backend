@@ -36,6 +36,7 @@ const mockOffer = {
   status: 'ACTIVE',
   created_at: new Date(),
   updated_at: new Date(),
+  _count: { applications: 0 },
 };
 
 describe('JobOfferService', () => {
