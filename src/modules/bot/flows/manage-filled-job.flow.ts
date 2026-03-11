@@ -22,6 +22,172 @@ export type FlowResult = {
 
 const PAGE_SIZE = 5;
 
+function isMenuInput(trimmed: string, normalized: string): boolean {
+  return (
+    trimmed === '7' ||
+    CMD_MENU.some((c) => normalized === c || normalized.startsWith(c + ' '))
+  );
+}
+
+function buildListPage(
+  state: BotState,
+  items: FilledJobListItem[],
+  pageIndex: number,
+): FlowResult {
+  const slice = items.slice(
+    pageIndex * PAGE_SIZE,
+    pageIndex * PAGE_SIZE + PAGE_SIZE,
+  );
+  const hasMore = items.length > (pageIndex + 1) * PAGE_SIZE;
+  return {
+    reply: [formatFilledJobsListPage(slice, hasMore)],
+    nextState: {
+      ...state,
+      payload: {
+        ...state.payload,
+        pageIndex,
+        step: 'list',
+        selectedItem: undefined,
+      },
+      updatedAt: new Date().toISOString(),
+    },
+  };
+}
+
+async function handleDetailComplete(
+  applicationId: string,
+  selectedItem: FilledJobListItem,
+  ctx: ManageFilledJobContext,
+  profile: BotProfile,
+): Promise<FlowResult> {
+  try {
+    const updated = await ctx.applicationService.markJobCompleted(
+      applicationId,
+      profile.id,
+    );
+    await ctx.notificationService.sendJobCompletedToWorker(applicationId);
+    const amount = updated.job_offer?.amount ?? selectedItem.amount;
+    return {
+      reply: [
+        [
+          '*Mission marquée comme terminée !*',
+          '',
+          `Le gain de ${Number(amount).toLocaleString('fr-FR')} FCFA a été enregistré pour le worker.`,
+          '',
+          "Tapez 'Menu' pour revenir.",
+        ].join('\n'),
+      ],
+      clearState: true,
+    };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : '*IMPOSSIBLE.*';
+    return { reply: [`❌ ${msg}`] };
+  }
+}
+
+async function handleDetailCancel(
+  applicationId: string,
+  ctx: ManageFilledJobContext,
+  profile: BotProfile,
+  state: BotState,
+): Promise<FlowResult> {
+  try {
+    await ctx.applicationService.cancelAcceptedByEmployer(
+      applicationId,
+      profile.id,
+    );
+    await ctx.notificationService.sendJobCancelledByEmployerToWorker(
+      applicationId,
+    );
+    return {
+      reply: [
+        [
+          "*Mission annulée. L'offre est de nouveau ouverte aux candidatures.*",
+          '',
+          "Tapez 'Menu' pour revenir.",
+        ].join('\n'),
+      ],
+      clearState: true,
+    };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : '*IMPOSSIBLE.*';
+    return { reply: [`❌ ${msg}`], nextState: state };
+  }
+}
+
+async function handleDetailStep(
+  state: BotState,
+  trimmed: string,
+  items: FilledJobListItem[],
+  pageIndex: number,
+  selectedItem: FilledJobListItem | undefined,
+  ctx: ManageFilledJobContext,
+  profile: BotProfile,
+): Promise<FlowResult> {
+  if (trimmed === '3') return buildListPage(state, items, pageIndex);
+
+  const applicationId = selectedItem?.applicationId;
+  if (!applicationId) {
+    return { reply: ["*ERREUR. TAPEZ 'MENU'.*"], clearState: true };
+  }
+
+  // After the !applicationId guard, selectedItem is guaranteed non-undefined
+  if (trimmed === '1')
+    return handleDetailComplete(applicationId, selectedItem, ctx, profile);
+  if (trimmed === '2')
+    return handleDetailCancel(applicationId, ctx, profile, state);
+
+  return {
+    reply: [formatFilledJobDetail(selectedItem)],
+    nextState: state,
+  };
+}
+
+function handleListStep(
+  state: BotState,
+  trimmed: string,
+  items: FilledJobListItem[],
+  pageIndex: number,
+): FlowResult {
+  if (trimmed === '6') {
+    const hasMore = items.length > (pageIndex + 1) * PAGE_SIZE;
+    if (!hasMore) {
+      return {
+        reply: ['*RÉPONDEZ PAR UN NUMÉRO (1-5), 6 (VOIR PLUS) OU 7 (MENU).*'],
+        nextState: state,
+      };
+    }
+    return buildListPage(state, items, pageIndex + 1);
+  }
+
+  const choice = /^[1-5]$/.test(trimmed) ? Number.parseInt(trimmed, 10) : 0;
+  const slice = items.slice(
+    pageIndex * PAGE_SIZE,
+    pageIndex * PAGE_SIZE + PAGE_SIZE,
+  );
+
+  if (choice >= 1 && choice <= PAGE_SIZE && choice <= slice.length) {
+    const item = slice[choice - 1];
+    return {
+      reply: [formatFilledJobDetail(item)],
+      nextState: {
+        ...state,
+        payload: { ...state.payload, step: 'detail', selectedItem: item },
+        updatedAt: new Date().toISOString(),
+      },
+    };
+  }
+
+  const n = slice.length;
+  const hasMore = items.length > (pageIndex + 1) * PAGE_SIZE;
+  return {
+    reply: [
+      `*RÉPONDEZ PAR UN NUMÉRO (1-${n})${hasMore ? ', 6 (VOIR PLUS)' : ''} OU 7 (MENU).*`,
+    ],
+    nextState: state,
+  };
+}
+
 export async function runManageFilledJobFlow(
   state: BotState,
   input: string,
@@ -43,162 +209,27 @@ export async function runManageFilledJobFlow(
     };
   }
 
-  const goToMenu = (): FlowResult => ({
-    reply: [menuMessage(profile.profile_type)],
-    clearState: true,
-  });
+  if (isMenuInput(trimmed, normalized)) {
+    return { reply: [menuMessage(profile.profile_type)], clearState: true };
+  }
 
-  const isMenu =
-    trimmed === '7' ||
-    CMD_MENU.some((c) => normalized === c || normalized.startsWith(c + ' '));
-  if (isMenu) return goToMenu();
+  if (trimmed === '4' && step === 'detail') {
+    return { reply: [menuMessage(profile.profile_type)], clearState: true };
+  }
 
   if (step === 'detail') {
-    if (trimmed === '4') return goToMenu();
-
-    if (trimmed === '3') {
-      const slice = items.slice(
-        pageIndex * PAGE_SIZE,
-        pageIndex * PAGE_SIZE + PAGE_SIZE,
-      );
-      const hasMore = items.length > (pageIndex + 1) * PAGE_SIZE;
-      const message = formatFilledJobsListPage(slice, hasMore);
-      return {
-        reply: [message],
-        nextState: {
-          ...state,
-          payload: {
-            ...payload,
-            step: 'list',
-            selectedItem: undefined,
-          },
-          updatedAt: new Date().toISOString(),
-        },
-      };
-    }
-
-    if (trimmed === '1') {
-      const applicationId = selectedItem?.applicationId;
-      if (!applicationId) {
-        return { reply: ["*ERREUR. TAPEZ 'MENU'.*"], clearState: true };
-      }
-      try {
-        const updated = await ctx.applicationService.markJobCompleted(
-          applicationId,
-          profile.id,
-        );
-        await ctx.notificationService.sendJobCompletedToWorker(applicationId);
-        const amount = updated.job_offer?.amount ?? selectedItem.amount;
-        return {
-          reply: [
-            [
-              '*Mission marquée comme terminée !*',
-              '',
-              `Le gain de ${Number(amount).toLocaleString('fr-FR')} FCFA a été enregistré pour le worker.`,
-              '',
-              "Tapez 'Menu' pour revenir.",
-            ].join('\n'),
-          ],
-          clearState: true,
-        };
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : '*IMPOSSIBLE.*';
-        return { reply: [`❌ ${msg}`], nextState: state };
-      }
-    }
-
-    if (trimmed === '2') {
-      const applicationId = selectedItem?.applicationId;
-      if (!applicationId) {
-        return { reply: ["*ERREUR. TAPEZ 'MENU'.*"], clearState: true };
-      }
-      try {
-        await ctx.applicationService.cancelAcceptedByEmployer(
-          applicationId,
-          profile.id,
-        );
-        await ctx.notificationService.sendJobCancelledByEmployerToWorker(
-          applicationId,
-        );
-        return {
-          reply: [
-            [
-              "*Mission annulée. L'offre est de nouveau ouverte aux candidatures.*",
-              '',
-              "Tapez 'Menu' pour revenir.",
-            ].join('\n'),
-          ],
-          clearState: true,
-        };
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : '*IMPOSSIBLE.*';
-        return { reply: [`❌ ${msg}`], nextState: state };
-      }
-    }
-
-    if (selectedItem) {
-      return {
-        reply: [formatFilledJobDetail(selectedItem)],
-        nextState: state,
-      };
-    }
-    return { reply: ["*ERREUR. TAPEZ 'MENU'.*"], clearState: true };
-  }
-
-  if (trimmed === '6') {
-    const hasMore = items.length > (pageIndex + 1) * PAGE_SIZE;
-    if (!hasMore) {
-      return {
-        reply: ['*RÉPONDEZ PAR UN NUMÉRO (1-5), 6 (VOIR PLUS) OU 7 (MENU).*'],
-        nextState: state,
-      };
-    }
-    const nextPageIndex = pageIndex + 1;
-    const slice = items.slice(
-      nextPageIndex * PAGE_SIZE,
-      nextPageIndex * PAGE_SIZE + PAGE_SIZE,
+    return handleDetailStep(
+      state,
+      trimmed,
+      items,
+      pageIndex,
+      selectedItem,
+      ctx,
+      profile,
     );
-    const hasMoreNext = items.length > (nextPageIndex + 1) * PAGE_SIZE;
-    const message = formatFilledJobsListPage(slice, hasMoreNext);
-    return {
-      reply: [message],
-      nextState: {
-        ...state,
-        payload: { ...payload, pageIndex: nextPageIndex, step: 'list' },
-        updatedAt: new Date().toISOString(),
-      },
-    };
   }
 
-  const choice = /^[1-5]$/.test(trimmed) ? Number.parseInt(trimmed, 10) : 0;
-  const slice = items.slice(
-    pageIndex * PAGE_SIZE,
-    pageIndex * PAGE_SIZE + PAGE_SIZE,
-  );
-  if (choice >= 1 && choice <= PAGE_SIZE && choice <= slice.length) {
-    const item = slice[choice - 1];
-    return {
-      reply: [formatFilledJobDetail(item)],
-      nextState: {
-        ...state,
-        payload: {
-          ...payload,
-          step: 'detail',
-          selectedItem: item,
-        },
-        updatedAt: new Date().toISOString(),
-      },
-    };
-  }
-
-  const n = slice.length;
-  const hasMore = items.length > (pageIndex + 1) * PAGE_SIZE;
-  return {
-    reply: [
-      `*RÉPONDEZ PAR UN NUMÉRO (1-${n})${hasMore ? ', 6 (VOIR PLUS)' : ''} OU 7 (MENU).*`,
-    ],
-    nextState: state,
-  };
+  return handleListStep(state, trimmed, items, pageIndex);
 }
 
 export function getManageFilledJobInitialState(
