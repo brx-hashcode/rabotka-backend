@@ -98,6 +98,7 @@ describe('ApplicationService', () => {
         count: jest.fn(),
       },
       payment: { create: jest.fn() },
+      assignment: { create: jest.fn(), updateMany: jest.fn() },
       $transaction: jest.fn(),
     };
 

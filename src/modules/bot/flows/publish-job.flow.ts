@@ -473,7 +473,7 @@ function handlePublishStep6(args: StepArgs): FlowResult {
       [
         '*ÉTAPE 7/8*',
         '',
-        "*Combien de personnes sont nécessaires pour ce travail ?*",
+        '*Combien de personnes sont nécessaires pour ce travail ?*',
         `Entrez un nombre entre ${QUANTITY_MIN} et ${QUANTITY_MAX}.`,
         '',
         '*Exemple*: "_2_"',
@@ -520,7 +520,8 @@ function handlePublishStep7(args: StepArgs): FlowResult {
         '*Avez-vous une note complémentaire à ajouter ?*',
         '',
         '*Exemple*: "_Apporter vos propres outils_"',
-        '*Tapez "Non" ou "Passer" pour ignorer la note.*',
+        '',
+        '*Tapez 0 pour passer cette étape.*',
       ].join('\n'),
     ],
     nextState: {
@@ -536,7 +537,10 @@ function handlePublishStep7(args: StepArgs): FlowResult {
 function handlePublishStep8(args: StepArgs): FlowResult {
   const { state, payload, trimmed, normalized } = args;
   const note =
-    normalized === 'non' || normalized === 'passer' || normalized === 'skip'
+    normalized === 'non' ||
+    normalized === 'passer' ||
+    normalized === 'skip' ||
+    normalized === '0'
       ? null
       : trimmed;
   if (note != null && note.length > NOTE_MAX) {
@@ -589,7 +593,7 @@ function getStepPrompt(
     case 7:
       return `Combien de personnes sont nécessaires ? (${QUANTITY_MIN}-${QUANTITY_MAX})`;
     case 8:
-      return 'Note complémentaire (ou "Non" pour passer)';
+      return 'Note complémentaire (tapez 0 pour passer)';
     default:
       return '';
   }

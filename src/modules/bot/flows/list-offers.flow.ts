@@ -247,6 +247,7 @@ function toOfferListItem(offer: {
   address: string;
   note: string | null;
   quantity: number;
+  acceptedCount?: number;
   status: string;
 }): OfferListItem {
   return {
@@ -259,6 +260,7 @@ function toOfferListItem(offer: {
     address: offer.address,
     note: offer.note,
     quantity: offer.quantity,
+    acceptedCount: offer.acceptedCount ?? 0,
     status: offer.status,
   };
 }

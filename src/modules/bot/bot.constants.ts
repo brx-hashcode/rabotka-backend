@@ -32,7 +32,7 @@ export const EMPLOYER_MENU_OPTIONS = {
   HELP: '7',
 } as const;
 
-export const CMD_MENU = ['menu', 'aide', 'help', 'bonjour'];
+export const CMD_MENU = ['menu', 'aide', 'help', 'bonjour', '*'];
 export const CMD_PUBLISH = ['publier', 'publish'];
 export const CMD_MY_OFFERS = ['mes offres', 'mes offres publiées', 'my offers'];
 export const CMD_CANDIDATURES = ['candidatures', 'candidatures reçues'];

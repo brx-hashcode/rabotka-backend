@@ -9,7 +9,7 @@ import {
   formatReminder24h,
   formatReminder2h,
 } from '../messages/notifications.messages';
-import { ApplicationStatus } from '@prisma/client';
+import { ApplicationStatus, JobOfferStatus } from '@prisma/client';
 
 const REMINDER_24H_SENT_KEY = 'reminder:sent:24h:';
 const REMINDER_2H_SENT_KEY = 'reminder:sent:2h:';
@@ -54,6 +54,7 @@ export class ReminderProcessor {
   }
 
   private async runScan(): Promise<void> {
+    await this.expireOverdueOffers();
     const now = new Date();
     const window24hStart = new Date(now.getTime() + 23 * 60 * 60 * 1000);
     const window24hEnd = new Date(now.getTime() + 24 * 60 * 60 * 1000);
@@ -109,6 +110,44 @@ export class ReminderProcessor {
           { jobId: `2h-${app.id}` },
         );
       }
+    }
+  }
+
+  private async expireOverdueOffers(): Promise<void> {
+    const now = new Date();
+
+    const overdueOffers = await this.prisma.jobOffer.findMany({
+      where: {
+        status: { in: [JobOfferStatus.ACTIVE, JobOfferStatus.PARTIALLY_FILLED] },
+        scheduled_at: { lt: now },
+      },
+      select: { id: true, title: true, employer_id: true, employer: { select: { phone: true, first_name: true } } },
+    });
+
+    if (overdueOffers.length === 0) return;
+
+    const ids = overdueOffers.map((o) => o.id);
+    await this.prisma.jobOffer.updateMany({
+      where: { id: { in: ids } },
+      data: { status: JobOfferStatus.EXPIRED },
+    });
+
+    this.logger.log(`Expired ${ids.length} overdue job offer(s)`);
+
+    for (const offer of overdueOffers) {
+      const phone = offer.employer?.phone;
+      if (!phone) continue;
+      const firstName = offer.employer?.first_name ?? '';
+      const text = [
+        `*⏰ Offre expirée*`,
+        '',
+        `Bonjour ${firstName}, votre offre *"${offer.title}"* a expiré car la date programmée est passée sans qu'aucun travailleur ne soit assigné.`,
+        '',
+        `Tapez *MENU* pour publier une nouvelle offre.`,
+      ].join('\n');
+      await this.whatsApp.sendTextMessage(phone, text, offer.employer_id).catch((err) =>
+        this.logger.warn(`Failed to notify employer ${offer.employer_id} of expired offer`, err),
+      );
     }
   }
 

@@ -4,6 +4,7 @@ import {
   formatApplyConfirmation,
   formatApplicationSentSuccess,
 } from '../messages/application.messages';
+import { formatPenaltyBlocked } from '../messages/penalty.messages';
 import { menuMessage } from '../messages/menu.messages';
 import type { ApplicationService } from '../../application/application.service';
 import type { JobOfferService } from '../../job-offer/job-offer.service';
@@ -124,6 +125,14 @@ export async function runApplyJobFlow(
   if (profile.profile_type !== 'WORKER') {
     return {
       reply: ["*SEULS LES WORKERS PEUVENT POSTULER AUX OFFRES. TAPEZ 'MENU'.*"],
+      clearState: true,
+    };
+  }
+
+  const unpaid = await ctx.applicationService.getUnpaidPenalties(profile.id);
+  if (unpaid.count > 0) {
+    return {
+      reply: [formatPenaltyBlocked(unpaid.total)],
       clearState: true,
     };
   }

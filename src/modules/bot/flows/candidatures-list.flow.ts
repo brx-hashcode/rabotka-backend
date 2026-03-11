@@ -116,6 +116,7 @@ export async function runCandidaturesListFlow(
             status: selectedItem.status,
             score: selectedItem.score,
             avatarUrl: selectedItem.avatarUrl,
+            offerTitle: selectedItem.offerTitle,
           }),
         ],
         nextState: state,
@@ -161,6 +162,7 @@ export async function runCandidaturesListFlow(
   );
   if (choice >= 1 && choice <= PAGE_SIZE && choice <= slice.length) {
     const item = slice[choice - 1];
+    void ctx.applicationService.markAsViewed(item.id).catch(() => {});
     const detailMessage = formatCandidatureDetail({
       firstName: item.firstName,
       lastName: item.lastName,
@@ -168,6 +170,7 @@ export async function runCandidaturesListFlow(
       status: item.status,
       score: item.score,
       avatarUrl: item.avatarUrl,
+      offerTitle: item.offerTitle,
     });
     return {
       reply: [detailMessage],
