@@ -326,7 +326,7 @@ export class ApplicationService {
 
     const updated = await this.findById(applicationId);
     if (!updated)
-      throw new NotFoundException('Application not found after update');
+      throw new NotFoundException('Candidature introuvable après mise à jour');
     return updated;
   }
 
@@ -564,7 +564,7 @@ export class ApplicationService {
 
     const updated = await this.findById(applicationId);
     if (!updated)
-      throw new NotFoundException('Application not found after update');
+      throw new NotFoundException('Candidature introuvable après mise à jour');
     return updated;
   }
 
@@ -609,7 +609,7 @@ export class ApplicationService {
 
     const updated = await this.findById(applicationId);
     if (!updated)
-      throw new NotFoundException('Application not found after update');
+      throw new NotFoundException('Candidature introuvable après mise à jour');
     return updated;
   }
 
@@ -694,7 +694,7 @@ export class ApplicationService {
     });
 
     if (!app) {
-      throw new NotFoundException('Application not found');
+      throw new NotFoundException('Candidature introuvable');
     }
 
     return {

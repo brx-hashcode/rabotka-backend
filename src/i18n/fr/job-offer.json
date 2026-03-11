@@ -1,0 +1,9 @@
+{
+  "errors": {
+    "employer_not_found": "Employeur introuvable",
+    "profile_inactive": "Le profil doit être actif pour publier des offres",
+    "only_employers": "Seuls les employeurs peuvent publier des offres d'emploi",
+    "not_found": "Offre d'emploi introuvable",
+    "not_authorized": "Non autorisé à modifier cette offre"
+  }
+}

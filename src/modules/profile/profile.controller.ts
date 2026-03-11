@@ -26,7 +26,6 @@ import {
   ApiBearerAuth,
   ApiCookieAuth,
 } from '@nestjs/swagger';
-import { I18n, I18nContext } from 'nestjs-i18n';
 import {
   ProfileService,
   ProfileMeResponse,
@@ -155,21 +154,16 @@ export class ProfileController {
       kycDocument?: Express.Multer.File[];
       kycSelfie?: Express.Multer.File[];
     },
-    @I18n() i18n: I18nContext,
   ) {
     const kycDocument = files?.kycDocument?.[0];
     const kycSelfie = files?.kycSelfie?.[0];
 
     if (!kycDocument) {
-      throw new BadRequestException(
-        i18n.t('profile.errors.kyc.document.required'),
-      );
+      throw new BadRequestException('Le document KYC est requis');
     }
 
     if (!kycSelfie) {
-      throw new BadRequestException(
-        i18n.t('profile.errors.kyc.selfie.required'),
-      );
+      throw new BadRequestException('La photo KYC est requise');
     }
 
     const result = await this.profileService.createProfile(
@@ -180,16 +174,12 @@ export class ProfileController {
 
     await this.mailService.sendMail({
       to: createProfileDto.email,
-      subject: i18n.t('profile.errors.mail.subject'),
+      subject: 'Bienvenue sur Rabotka',
       html: sendWelcomeEmail(createProfileDto.firstName),
     });
 
-    const localizedMessage = i18n.t(result.message, {
-      lang: i18n.lang,
-    });
-
     return {
-      message: localizedMessage,
+      message: result.message,
     };
   }
 
@@ -466,10 +456,9 @@ export class ProfileController {
   async uploadAvatar(
     @Req() req: ProfileAuthenticatedRequest,
     @UploadedFile() avatar: Express.Multer.File,
-    @I18n() i18n: I18nContext,
   ): Promise<{ avatarUrl: string }> {
     if (!avatar) {
-      throw new BadRequestException(i18n.t('profile.errors.avatar.required'));
+      throw new BadRequestException('La photo de profil est requise');
     }
 
     return this.profileService.updateAvatar(req.user.profileId, avatar);

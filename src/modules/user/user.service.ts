@@ -24,11 +24,11 @@ export class UserService {
     });
 
     if (existingUser) {
-      throw new ConflictException('user.errors.email_already_exists');
+      throw new ConflictException('Un administrateur avec cette adresse email existe déjà');
     }
 
     if (data.role !== UserRole.ADMIN && data.role !== UserRole.SUPER_ADMIN) {
-      throw new BadRequestException('user.errors.invalid_role');
+      throw new BadRequestException('Le rôle doit être soit ADMIN soit SUPER_ADMIN');
     }
 
     const user = await this.prisma.user.create({
@@ -63,7 +63,7 @@ export class UserService {
     const user = await this.prisma.user.findUnique({ where: { id } });
 
     if (!user) {
-      throw new NotFoundException('user.errors.not_found');
+      throw new NotFoundException('Utilisateur non trouvé');
     }
 
     if (data.email !== user.email) {
@@ -72,12 +72,12 @@ export class UserService {
       });
 
       if (existingUser) {
-        throw new ConflictException('user.errors.email_already_exists');
+        throw new ConflictException('Un administrateur avec cette adresse email existe déjà');
       }
     }
 
     if (data.role !== UserRole.ADMIN && data.role !== UserRole.SUPER_ADMIN) {
-      throw new BadRequestException('user.errors.invalid_role');
+      throw new BadRequestException('Le rôle doit être soit ADMIN soit SUPER_ADMIN');
     }
 
     const updated = await this.prisma.user.update({
@@ -113,7 +113,7 @@ export class UserService {
     const user = await this.prisma.user.findUnique({ where: { id } });
 
     if (!user) {
-      throw new NotFoundException('user.errors.not_found');
+      throw new NotFoundException('Utilisateur non trouvé');
     }
 
     return this.prisma.user.update({
@@ -137,7 +137,7 @@ export class UserService {
     const user = await this.prisma.user.findUnique({ where: { id } });
 
     if (!user) {
-      throw new NotFoundException('user.errors.not_found');
+      throw new NotFoundException('Utilisateur non trouvé');
     }
 
     return this.prisma.user.update({
@@ -174,7 +174,7 @@ export class UserService {
     });
 
     if (!user) {
-      throw new NotFoundException('user.errors.not_found');
+      throw new NotFoundException('Utilisateur non trouvé');
     }
 
     return user;
@@ -244,7 +244,7 @@ export class UserService {
     const user = await this.prisma.user.findUnique({ where: { id } });
 
     if (!user) {
-      throw new NotFoundException('user.errors.not_found');
+      throw new NotFoundException('Utilisateur non trouvé');
     }
 
     await this.prisma.user.delete({ where: { id } });
@@ -267,7 +267,7 @@ export class UserService {
     });
 
     if (!user) {
-      throw new NotFoundException('user.errors.not_found');
+      throw new NotFoundException('Utilisateur non trouvé');
     }
 
     return user;
