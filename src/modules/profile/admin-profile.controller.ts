@@ -151,7 +151,9 @@ export class AdminProfileController {
 
     if (body.channel === 'WHATSAPP') {
       if (!profile.phone) {
-        throw new BadRequestException("Ce profil n'a pas de numéro de téléphone");
+        throw new BadRequestException(
+          "Ce profil n'a pas de numéro de téléphone",
+        );
       }
       await this.whatsApp.sendTextMessage(
         profile.phone,
@@ -166,7 +168,7 @@ export class AdminProfileController {
       await this.mail.sendMail({
         to: profile.email,
         subject: 'Message de Rabotka',
-        html: `<p>${body.message.trim().replace(/\n/g, '<br/>')}</p>`,
+        html: `<p>${body.message.trim().toString().replaceAll('\n', '<br/>')}</p>`,
       });
       // Save outbound email message to history
       await this.prisma.message.create({

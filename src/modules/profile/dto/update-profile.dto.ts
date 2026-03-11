@@ -35,4 +35,14 @@ export class UpdateProfileDto {
   @IsOptional()
   @IsEnum(AccountStatus)
   status?: AccountStatus;
+
+  @ApiPropertyOptional({ description: 'Phone number of the profile' })
+  @IsOptional()
+  @IsString()
+  phone?: string;
+
+  @ApiPropertyOptional({ description: 'Email of the profile' })
+  @IsOptional()
+  @IsString()
+  email?: string;
 }
