@@ -229,7 +229,7 @@ export class AdminProfileController {
     const adminUserId = req.user?.userId ?? 'system';
     const result = await this.profileService.verifyProfileKyc(
       id,
-      adminUserId,
+      adminUserId as string,
       dto.decision,
       dto.reason,
       files,
@@ -312,7 +312,7 @@ export class AdminProfileController {
       id,
       body.decision,
       body.reason,
-      adminUserId,
+      adminUserId as string,
     );
     return this.profileService.getProfileDetailForAdmin(id);
   }
