@@ -6,7 +6,13 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { CreateJobOfferDto } from './dto/create-job-offer.dto';
-import { AccountStatus, JobOfferStatus } from '@prisma/client';
+import { AdminUpdateJobOfferDto } from './dto/admin-update-job-offer.dto';
+import {
+  AccountStatus,
+  JobOfferStatus,
+  PaymentFlow,
+  Prisma,
+} from '@prisma/client';
 
 const MIN_SCHEDULED_HOURS_FROM_NOW = 4;
 const TITLE_MIN = 5;
@@ -17,6 +23,48 @@ const AMOUNT_MIN_FCFA = 1000;
 const AMOUNT_MAX_FCFA = 1_000_000;
 const ADDRESS_MIN = 10;
 const NOTE_MAX = 500;
+const QUANTITY_MIN = 1;
+const QUANTITY_MAX = 100;
+
+export type AdminJobOfferListItem = {
+  id: string;
+  title: string;
+  description: string;
+  scheduledAt: string;
+  amount: number;
+  paymentFlow: string;
+  address: string;
+  note: string | null;
+  quantity: number;
+  status: string;
+  employerName: string;
+  employerEmail: string;
+  employerPhone: string;
+  employerAvatarUrl: string | null;
+  employerId: string;
+  applicationsCount: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AdminJobOfferApplicationItem = {
+  id: string;
+  workerName: string;
+  workerEmail: string;
+  workerPhone: string;
+  workerAvatarUrl: string | null;
+  workerId: string;
+  status: string;
+  penaltyApplied: boolean;
+  penaltyAmount: number | null;
+  cancelledAt: string | null;
+  cancellationReason: string | null;
+  createdAt: string;
+};
+
+export type AdminJobOfferDetailResponse = AdminJobOfferListItem & {
+  applications: AdminJobOfferApplicationItem[];
+};
 
 export type JobOfferListItem = {
   id: string;
@@ -27,6 +75,7 @@ export type JobOfferListItem = {
   payment_flow: string;
   address: string;
   note: string | null;
+  quantity: number;
   status: string;
   employer_id: string;
   created_at: Date;
@@ -54,13 +103,13 @@ export class JobOfferService {
       select: { id: true, status: true, profile_type: true },
     });
     if (!employer) {
-      throw new NotFoundException('Employer not found');
+      throw new NotFoundException('Employeur introuvable');
     }
     if (employer.status !== AccountStatus.ACTIVE) {
-      throw new ForbiddenException('Profile must be active to publish offers');
+      throw new ForbiddenException('Le profil doit être actif pour publier des offres');
     }
     if (employer.profile_type !== 'EMPLOYER') {
-      throw new ForbiddenException('Only employers can publish job offers');
+      throw new ForbiddenException("Seuls les employeurs peuvent publier des offres d'emploi");
     }
 
     this.validateCreateDto(dto);
@@ -86,6 +135,7 @@ export class JobOfferService {
         payment_flow: dto.payment_flow,
         address: dto.address.trim(),
         note: dto.note?.trim() ?? null,
+        quantity: dto.quantity ?? 1,
         status: JobOfferStatus.ACTIVE,
       },
     });
@@ -174,10 +224,10 @@ export class JobOfferService {
       where: { id },
     });
     if (!offer) {
-      throw new NotFoundException('Job offer not found');
+      throw new NotFoundException("Offre d'emploi introuvable");
     }
     if (offer.employer_id !== actorProfileId) {
-      throw new ForbiddenException('Not authorized to update this offer');
+      throw new ForbiddenException('Non autorisé à modifier cette offre');
     }
 
     const updated = await this.prisma.jobOffer.update({
@@ -225,6 +275,226 @@ export class JobOfferService {
         `La note ne peut pas dépasser ${NOTE_MAX} caractères`,
       );
     }
+    if (
+      dto.quantity != null &&
+      (!Number.isInteger(dto.quantity) ||
+        dto.quantity < QUANTITY_MIN ||
+        dto.quantity > QUANTITY_MAX)
+    ) {
+      throw new BadRequestException(
+        `Le nombre de personnes doit être entre ${QUANTITY_MIN} et ${QUANTITY_MAX}`,
+      );
+    }
+  }
+
+  async getJobOffersForAdmin(params: {
+    page: number;
+    limit: number;
+    q?: string;
+    status?: JobOfferStatus[];
+    paymentFlow?: PaymentFlow[];
+  }): Promise<{
+    data: AdminJobOfferListItem[];
+    total: number;
+    page: number;
+    limit: number;
+  }> {
+    const { page, limit, q, status, paymentFlow } = params;
+    const skip = (page - 1) * limit;
+
+    const where: Prisma.JobOfferWhereInput = {};
+
+    const searchTrimmed = q?.trim() ?? '';
+    if (searchTrimmed.length > 0) {
+      where.OR = [
+        { title: { contains: searchTrimmed, mode: 'insensitive' } },
+        { description: { contains: searchTrimmed, mode: 'insensitive' } },
+        { address: { contains: searchTrimmed, mode: 'insensitive' } },
+      ];
+    }
+
+    if (status != null && status.length > 0) {
+      where.status = { in: status };
+    }
+    if (paymentFlow != null && paymentFlow.length > 0) {
+      where.payment_flow = { in: paymentFlow };
+    }
+
+    const [offers, total] = await Promise.all([
+      this.prisma.jobOffer.findMany({
+        where,
+        orderBy: { created_at: 'desc' },
+        skip,
+        take: limit,
+        include: {
+          employer: {
+            select: {
+              id: true,
+              first_name: true,
+              last_name: true,
+              email: true,
+              phone: true,
+              avatar_url: true,
+            },
+          },
+          _count: {
+            select: { applications: true },
+          },
+        },
+      }),
+      this.prisma.jobOffer.count({ where }),
+    ]);
+
+    const data: AdminJobOfferListItem[] = offers.map((o) => ({
+      id: o.id,
+      title: o.title,
+      description: o.description,
+      scheduledAt: o.scheduled_at.toISOString(),
+      amount: Number(o.amount),
+      paymentFlow: o.payment_flow,
+      address: o.address,
+      note: o.note,
+      quantity: o.quantity,
+      status: o.status,
+      employerName:
+        `${o.employer.first_name ?? ''} ${o.employer.last_name ?? ''}`.trim() ||
+        '—',
+      employerEmail: o.employer.email,
+      employerPhone: o.employer.phone,
+      employerAvatarUrl: o.employer.avatar_url ?? null,
+      employerId: o.employer_id,
+      applicationsCount: o._count.applications,
+      createdAt: o.created_at.toISOString(),
+      updatedAt: o.updated_at.toISOString(),
+    }));
+
+    return { data, total, page, limit };
+  }
+
+  async getJobOfferDetailForAdmin(
+    id: string,
+  ): Promise<AdminJobOfferDetailResponse> {
+    const offer = await this.prisma.jobOffer.findUnique({
+      where: { id },
+      include: {
+        employer: {
+          select: {
+            id: true,
+            first_name: true,
+            last_name: true,
+            email: true,
+            phone: true,
+            avatar_url: true,
+          },
+        },
+        applications: {
+          orderBy: { created_at: 'desc' },
+          include: {
+            worker: {
+              select: {
+                id: true,
+                first_name: true,
+                last_name: true,
+                email: true,
+                phone: true,
+                avatar_url: true,
+              },
+            },
+          },
+        },
+        _count: {
+          select: { applications: true },
+        },
+      },
+    });
+
+    if (!offer) {
+      throw new NotFoundException("Offre d'emploi introuvable");
+    }
+
+    return {
+      id: offer.id,
+      title: offer.title,
+      description: offer.description,
+      scheduledAt: offer.scheduled_at.toISOString(),
+      amount: Number(offer.amount),
+      paymentFlow: offer.payment_flow,
+      address: offer.address,
+      note: offer.note,
+      quantity: offer.quantity,
+      status: offer.status,
+      employerName:
+        `${offer.employer.first_name ?? ''} ${offer.employer.last_name ?? ''}`.trim() ||
+        '—',
+      employerEmail: offer.employer.email,
+      employerPhone: offer.employer.phone,
+      employerAvatarUrl: offer.employer.avatar_url ?? null,
+      employerId: offer.employer_id,
+      applicationsCount: offer._count.applications,
+      createdAt: offer.created_at.toISOString(),
+      updatedAt: offer.updated_at.toISOString(),
+      applications: offer.applications.map((a) => ({
+        id: a.id,
+        workerName:
+          `${a.worker.first_name ?? ''} ${a.worker.last_name ?? ''}`.trim() ||
+          '—',
+        workerEmail: a.worker.email,
+        workerPhone: a.worker.phone,
+        workerAvatarUrl: a.worker.avatar_url ?? null,
+        workerId: a.worker_id,
+        status: a.status,
+        penaltyApplied: a.penalty_applied,
+        penaltyAmount:
+          a.penalty_amount != null ? Number(a.penalty_amount) : null,
+        cancelledAt: a.cancelled_at?.toISOString() ?? null,
+        cancellationReason: a.cancellation_reason,
+        createdAt: a.created_at.toISOString(),
+      })),
+    };
+  }
+
+  async deleteJobOfferByAdmin(id: string): Promise<void> {
+    const offer = await this.prisma.jobOffer.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+    if (!offer) {
+      throw new NotFoundException("Offre d'emploi introuvable");
+    }
+
+    await this.prisma.jobOffer.delete({ where: { id } });
+  }
+
+  async updateJobOfferByAdmin(
+    id: string,
+    dto: AdminUpdateJobOfferDto,
+  ): Promise<AdminJobOfferDetailResponse> {
+    const offer = await this.prisma.jobOffer.findUnique({
+      where: { id },
+      select: { id: true, status: true },
+    });
+    if (!offer) {
+      throw new NotFoundException("Offre d'emploi introuvable");
+    }
+    if (offer.status !== JobOfferStatus.ACTIVE) {
+      throw new BadRequestException(
+        'Only active job offers can be edited',
+      );
+    }
+
+    const data: Prisma.JobOfferUpdateInput = {};
+    if (dto.title !== undefined) data.title = dto.title.trim();
+    if (dto.description !== undefined) data.description = dto.description.trim();
+    if (dto.scheduledAt !== undefined) data.scheduled_at = new Date(dto.scheduledAt);
+    if (dto.amount !== undefined) data.amount = dto.amount;
+    if (dto.paymentFlow !== undefined) data.payment_flow = dto.paymentFlow;
+    if (dto.address !== undefined) data.address = dto.address.trim();
+    if (dto.note !== undefined) data.note = dto.note.trim() || null;
+    if (dto.quantity !== undefined) data.quantity = dto.quantity;
+
+    await this.prisma.jobOffer.update({ where: { id }, data });
+
+    return this.getJobOfferDetailForAdmin(id);
   }
 
   private toListItem(offer: {
@@ -236,6 +506,7 @@ export class JobOfferService {
     payment_flow: string;
     address: string;
     note: string | null;
+    quantity: number;
     status: string;
     employer_id: string;
     created_at: Date;
@@ -249,6 +520,7 @@ export class JobOfferService {
       payment_flow: offer.payment_flow,
       address: offer.address,
       note: offer.note,
+      quantity: offer.quantity,
       status: offer.status,
       employer_id: offer.employer_id,
       created_at: offer.created_at,

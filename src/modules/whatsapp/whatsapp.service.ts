@@ -5,6 +5,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import Redis from 'ioredis';
+import { BotPlatform, MessageDirection } from '@prisma/client';
 import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { TwilioService } from '../../common/services/twilio/twilio.service';
@@ -27,9 +28,30 @@ export class WhatsAppService {
     return this.twilioService.isConfigured();
   }
 
-  async sendTextMessage(phone: string, text: string): Promise<boolean> {
+  async sendTextMessage(
+    phone: string,
+    text: string,
+    profileId?: string,
+    sentById?: string,
+  ): Promise<boolean> {
     const sid = await this.twilioService.sendWhatsApp(phone, text);
-    return sid != null;
+    const sent = sid != null;
+
+    if (sent && profileId) {
+      await this.saveMessage(
+        profileId,
+        MessageDirection.OUTBOUND,
+        text,
+        sentById,
+      ).catch((err) =>
+        this.logger.warn(
+          `Failed to save outbound message for ${profileId}:`,
+          err,
+        ),
+      );
+    }
+
+    return sent;
   }
 
   async sendMediaMessage(
@@ -45,16 +67,33 @@ export class WhatsAppService {
     return sid != null;
   }
 
+  async saveMessage(
+    profileId: string,
+    direction: MessageDirection,
+    body: string,
+    sentById?: string,
+  ): Promise<void> {
+    await this.prisma.message.create({
+      data: {
+        profile_id: profileId,
+        direction,
+        platform: BotPlatform.WHATSAPP,
+        body,
+        ...(sentById ? { sent_by_id: sentById } : {}),
+      },
+    });
+  }
+
   async verifyWhatsAppToken(token: string): Promise<void> {
     if (!token || token.trim().length === 0) {
-      throw new BadRequestException('Invalid verification token');
+      throw new BadRequestException('Token de vérification invalide');
     }
 
     const redisKey = `${VERIFICATION_TOKEN_KEY_PREFIX}${token}`;
     const profileId = await this.redis.get(redisKey);
 
     if (!profileId) {
-      throw new BadRequestException('Invalid or expired verification token');
+      throw new BadRequestException('Token de vérification invalide ou expiré');
     }
 
     const profile = await this.prisma.profile.findUnique({
@@ -66,7 +105,7 @@ export class WhatsAppService {
     });
 
     if (!profile) {
-      throw new BadRequestException('Profile not found');
+      throw new BadRequestException('Profil introuvable');
     }
 
     await this.prisma.profile.update({
@@ -78,7 +117,11 @@ export class WhatsAppService {
 
     if (this.isConfigured()) {
       const successMessage = verificationSuccessMessage(profile.first_name);
-      await this.sendTextMessage(profile.phone, successMessage).catch((err) =>
+      await this.sendTextMessage(
+        profile.phone,
+        successMessage,
+        profileId,
+      ).catch((err) =>
         this.logger.warn(
           `Failed to send WhatsApp success message to ${profile.phone}:`,
           err,

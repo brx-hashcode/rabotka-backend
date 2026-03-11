@@ -25,7 +25,7 @@ export class FileService {
     },
   ) {
     if (!file.buffer || !file.originalname) {
-      throw new Error('File buffer or originalname is missing');
+      throw new Error('Le buffer ou le nom du fichier est manquant');
     }
 
     const uploadOptions: UploadOptions = {

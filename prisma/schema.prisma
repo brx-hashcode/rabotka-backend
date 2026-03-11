@@ -32,6 +32,12 @@ enum StorageProvider {
 
 enum BotPlatform {
   WHATSAPP
+  EMAIL
+}
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
 }
 
 enum ConversationStatus {
@@ -89,10 +95,34 @@ enum PaymentMethod {
   OTHER
 }
 
+enum PaymentType {
+  REGISTRATION
+  JOB_POSTING
+  PENALTY
+}
+
 enum PaymentFlow {
   HOURLY
   DAILY
   MONTHLY
+}
+
+enum WalletOwnerType {
+  SYSTEM
+  USER
+  PROFILE
+}
+
+enum WalletTransactionType {
+  CREDIT_PENALTY
+  CREDIT_COMMISSION
+}
+
+enum PaymentRequestStatus {
+  PENDING
+  SUBMITTED
+  APPROVED
+  REJECTED
 }
 
 model Profile {
@@ -118,14 +148,18 @@ model Profile {
 
   avatar_url String?
 
-  kyc_documents KycDocument[]
-  applications  Application[]
+  payment_requests       PaymentRequest[]
+  kyc_documents          KycDocument[]
+  kyc_verification_images KycVerificationImage[]
+  applications           Application[]
   job_offers    JobOffer[]
   penalties     Penalty[]
   payments      Payment[]
   conversations Conversation[]
-  logs          Log[]
-  files         File[]
+  messages      Message[]
+  logs    Log[]
+  files   File[]
+  wallets Wallet[]
 
   @@index([email], name: "idx_profile_email")
   @@index([phone], name: "idx_profile_phone")
@@ -146,8 +180,10 @@ model User {
   is_active     Boolean   @default(true)
   last_login_at DateTime?
 
-  files File[]
-  logs  Log[]
+  files            File[]
+  logs             Log[]
+  wallets          Wallet[]
+  sent_messages    Message[]
 
   @@index([email], name: "idx_user_email")
   @@index([role], name: "idx_user_role")
@@ -175,6 +211,19 @@ model KycDocument {
   @@map("kyc_documents")
 }
 
+model KycVerificationImage {
+  id             String   @id @default(uuid()) @db.Uuid
+  created_at     DateTime @default(now())
+  profile_id     String   @db.Uuid
+  image_url      String
+  uploaded_by    String?  @db.Uuid
+
+  profile Profile @relation(fields: [profile_id], references: [id], onDelete: Cascade)
+
+  @@index([profile_id], name: "idx_kyc_verification_image_profile")
+  @@map("kyc_verification_images")
+}
+
 model JobOffer {
   id           String         @id @default(uuid()) @db.Uuid
   created_at   DateTime       @default(now())
@@ -187,6 +236,7 @@ model JobOffer {
   payment_flow PaymentFlow
   address      String
   note         String?
+  quantity     Int            @default(1)
   status       JobOfferStatus @default(ACTIVE)
 
   employer     Profile       @relation(fields: [employer_id], references: [id], onDelete: Cascade)
@@ -243,19 +293,58 @@ model Payment {
   id             String        @id @default(uuid()) @db.Uuid
   created_at     DateTime      @default(now())
   updated_at     DateTime      @updatedAt
+  type           PaymentType
   profile_id     String        @db.Uuid
   amount         Decimal       @db.Decimal(10, 2)
   payment_method PaymentMethod
   transaction_id String        @unique
   status         PaymentStatus @default(PENDING)
-  completed_at   DateTime?
+  paid_at        DateTime?
+  description    String?
 
   profile Profile @relation(fields: [profile_id], references: [id], onDelete: Cascade)
 
   @@index([transaction_id], name: "idx_payment_transaction")
   @@index([status], name: "idx_payment_status")
   @@index([profile_id], name: "idx_payment_profile")
+  @@index([type], name: "idx_payment_type")
   @@map("payments")
+}
+
+model Wallet {
+  id         String          @id @default(uuid()) @db.Uuid
+  created_at DateTime        @default(now())
+  updated_at DateTime        @updatedAt
+  owner_type WalletOwnerType
+  user_id    String?         @db.Uuid
+  profile_id String?         @db.Uuid
+  balance    Decimal         @default(0) @db.Decimal(12, 2)
+
+  user    User?               @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  profile Profile?            @relation(fields: [profile_id], references: [id], onDelete: Cascade)
+  transactions WalletTransaction[]
+
+  @@unique([owner_type, user_id], name: "idx_wallet_owner_user")
+  @@unique([owner_type, profile_id], name: "idx_wallet_owner_profile")
+  @@index([owner_type], name: "idx_wallet_owner_type")
+  @@map("wallets")
+}
+
+model WalletTransaction {
+  id             String                @id @default(uuid()) @db.Uuid
+  wallet_id      String                @db.Uuid
+  type          WalletTransactionType
+  amount         Decimal               @db.Decimal(10, 2)
+  reference_type String?
+  reference_id   String?               @db.Uuid
+  created_at     DateTime              @default(now())
+
+  wallet Wallet @relation(fields: [wallet_id], references: [id], onDelete: Cascade)
+
+  @@index([wallet_id], name: "idx_wallet_transaction_wallet")
+  @@index([created_at], name: "idx_wallet_transaction_created_at")
+  @@index([type], name: "idx_wallet_transaction_type")
+  @@map("wallet_transactions")
 }
 
 model File {
@@ -316,7 +405,44 @@ model Conversation {
   profile Profile @relation(fields: [profile_id], references: [id], onDelete: Cascade)
 
   @@unique([profile_id, bot_session_id], name: "idx_conversation_unique")
+
   @@index([profile_id], name: "idx_conversation_profile")
   @@index([status], name: "idx_conversation_status")
   @@map("conversations")
+}
+
+model Message {
+  id           String           @id @default(uuid()) @db.Uuid
+  created_at   DateTime         @default(now())
+  profile_id   String           @db.Uuid
+  direction    MessageDirection
+  platform     BotPlatform      @default(WHATSAPP)
+  body         String
+  sent_by_id   String?          @db.Uuid
+
+  profile  Profile @relation(fields: [profile_id], references: [id], onDelete: Cascade)
+  sent_by  User?   @relation(fields: [sent_by_id], references: [id], onDelete: SetNull)
+
+  @@index([profile_id], name: "idx_message_profile")
+  @@index([created_at], name: "idx_message_created_at")
+  @@map("messages")
+}
+
+model PaymentRequest {
+  id                String               @id @default(uuid()) @db.Uuid
+  created_at        DateTime             @default(now())
+  updated_at        DateTime             @updatedAt
+  profile_id        String               @db.Uuid
+  token             String               @unique
+  status            PaymentRequestStatus @default(PENDING)
+  payment_reference String?
+  proof_images      String[]
+  rejection_note    String?
+
+  profile Profile @relation(fields: [profile_id], references: [id], onDelete: Cascade)
+
+  @@index([profile_id], name: "idx_payment_request_profile")
+  @@index([token], name: "idx_payment_request_token")
+  @@index([status], name: "idx_payment_request_status")
+  @@map("payment_requests")
 }

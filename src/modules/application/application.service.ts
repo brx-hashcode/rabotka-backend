@@ -12,7 +12,10 @@ import {
   JobOfferStatus,
   PaymentStatus,
   PaymentMethod,
+  PaymentType,
+  Prisma,
 } from '@prisma/client';
+import { generatePaymentReference } from '../../common/utils/payment-reference';
 import {
   LATE_CANCELLATION_PENALTY_FCFA,
   LATE_CANCELLATION_SCORE_DEDUCTION,
@@ -20,6 +23,48 @@ import {
   RELIABILITY_SCORE_MIN,
   RELIABILITY_SCORE_MAX,
 } from './application.constants';
+
+export type AdminApplicationListItem = {
+  id: string;
+  jobTitle: string;
+  jobOfferId: string;
+  workerName: string;
+  workerEmail: string;
+  workerPhone: string;
+  workerAvatarUrl: string | null;
+  workerId: string;
+  employerName: string;
+  employerEmail: string;
+  employerAvatarUrl: string | null;
+  employerId: string;
+  status: string;
+  penaltyApplied: boolean;
+  penaltyAmount: number | null;
+  cancelledAt: string | null;
+  cancellationReason: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AdminApplicationPenaltyItem = {
+  id: string;
+  amount: number;
+  reason: string | null;
+  appliedAt: string;
+  paidAt: string | null;
+};
+
+export type AdminApplicationDetailResponse = AdminApplicationListItem & {
+  jobScheduledAt: string;
+  jobAmount: number;
+  jobAddress: string;
+  jobPaymentFlow: string;
+  jobStatus: string;
+  jobQuantity: number;
+  workerReliabilityScore: number | null;
+  employerPhone: string;
+  penalties: AdminApplicationPenaltyItem[];
+};
 
 export type ApplicationListItem = {
   id: string;
@@ -256,6 +301,16 @@ export class ApplicationService {
       throw new BadRequestException("Cette candidature n'est plus en attente");
     }
 
+    const currentAcceptedCount = await this.prisma.application.count({
+      where: {
+        job_offer_id: application.job_offer_id,
+        status: ApplicationStatus.ACCEPTED,
+      },
+    });
+
+    const quantityNeeded = application.job_offer.quantity ?? 1;
+    const shouldFillJob = currentAcceptedCount + 1 >= quantityNeeded;
+
     await this.prisma.$transaction([
       this.prisma.application.update({
         where: { id: applicationId },
@@ -263,13 +318,15 @@ export class ApplicationService {
       }),
       this.prisma.jobOffer.update({
         where: { id: application.job_offer_id },
-        data: { status: JobOfferStatus.FILLED },
+        data: {
+          status: shouldFillJob ? JobOfferStatus.FILLED : JobOfferStatus.ACTIVE,
+        },
       }),
     ]);
 
     const updated = await this.findById(applicationId);
     if (!updated)
-      throw new NotFoundException('Application not found after update');
+      throw new NotFoundException('Candidature introuvable après mise à jour');
     return updated;
   }
 
@@ -485,6 +542,7 @@ export class ApplicationService {
     }
 
     const amount = Number(application.job_offer.amount);
+    const transactionId = generatePaymentReference();
     await this.prisma.$transaction([
       this.prisma.jobOffer.update({
         where: { id: application.job_offer_id },
@@ -492,19 +550,21 @@ export class ApplicationService {
       }),
       this.prisma.payment.create({
         data: {
+          type: PaymentType.JOB_POSTING,
           profile_id: application.worker_id,
           amount,
           payment_method: PaymentMethod.OTHER,
-          transaction_id: `earn-${applicationId}`,
+          transaction_id: transactionId,
           status: PaymentStatus.COMPLETED,
-          completed_at: new Date(),
+          paid_at: new Date(),
+          description: `Job completion payment for job ${application.job_offer_id}`,
         },
       }),
     ]);
 
     const updated = await this.findById(applicationId);
     if (!updated)
-      throw new NotFoundException('Application not found after update');
+      throw new NotFoundException('Candidature introuvable après mise à jour');
     return updated;
   }
 
@@ -549,7 +609,7 @@ export class ApplicationService {
 
     const updated = await this.findById(applicationId);
     if (!updated)
-      throw new NotFoundException('Application not found after update');
+      throw new NotFoundException('Candidature introuvable après mise à jour');
     return updated;
   }
 
@@ -585,6 +645,217 @@ export class ApplicationService {
       },
     });
     return applications.map((a) => this.toApplicationWithOffer(a));
+  }
+
+  async getApplicationDetailForAdmin(
+    id: string,
+  ): Promise<AdminApplicationDetailResponse> {
+    const app = await this.prisma.application.findUnique({
+      where: { id },
+      include: {
+        worker: {
+          select: {
+            id: true,
+            first_name: true,
+            last_name: true,
+            email: true,
+            phone: true,
+            avatar_url: true,
+            reliability_score: true,
+          },
+        },
+        job_offer: {
+          select: {
+            id: true,
+            title: true,
+            scheduled_at: true,
+            amount: true,
+            address: true,
+            payment_flow: true,
+            status: true,
+            quantity: true,
+            employer_id: true,
+            employer: {
+              select: {
+                id: true,
+                first_name: true,
+                last_name: true,
+                email: true,
+                phone: true,
+                avatar_url: true,
+              },
+            },
+          },
+        },
+        penalties: {
+          orderBy: { created_at: 'desc' },
+        },
+      },
+    });
+
+    if (!app) {
+      throw new NotFoundException('Candidature introuvable');
+    }
+
+    return {
+      id: app.id,
+      jobTitle: app.job_offer.title,
+      jobOfferId: app.job_offer_id,
+      jobScheduledAt: app.job_offer.scheduled_at.toISOString(),
+      jobAmount: Number(app.job_offer.amount),
+      jobAddress: app.job_offer.address,
+      jobPaymentFlow: app.job_offer.payment_flow,
+      jobStatus: app.job_offer.status,
+      jobQuantity: app.job_offer.quantity,
+      workerName:
+        `${app.worker.first_name ?? ''} ${app.worker.last_name ?? ''}`.trim() ||
+        '—',
+      workerEmail: app.worker.email,
+      workerPhone: app.worker.phone,
+      workerAvatarUrl: app.worker.avatar_url ?? null,
+      workerId: app.worker_id,
+      workerReliabilityScore: app.worker.reliability_score
+        ? Number(app.worker.reliability_score)
+        : null,
+      employerName:
+        `${app.job_offer.employer?.first_name ?? ''} ${app.job_offer.employer?.last_name ?? ''}`.trim() ||
+        '—',
+      employerEmail: app.job_offer.employer?.email ?? '',
+      employerPhone: app.job_offer.employer?.phone ?? '',
+      employerAvatarUrl: app.job_offer.employer?.avatar_url ?? null,
+      employerId: app.job_offer.employer_id,
+      status: app.status,
+      penaltyApplied: app.penalty_applied,
+      penaltyAmount:
+        app.penalty_amount != null ? Number(app.penalty_amount) : null,
+      cancelledAt: app.cancelled_at?.toISOString() ?? null,
+      cancellationReason: app.cancellation_reason,
+      createdAt: app.created_at.toISOString(),
+      updatedAt: app.updated_at.toISOString(),
+      penalties: app.penalties.map((p) => ({
+        id: p.id,
+        amount: Number(p.amount),
+        reason: p.reason,
+        appliedAt: p.applied_at.toISOString(),
+        paidAt: p.paid_at?.toISOString() ?? null,
+      })),
+    };
+  }
+
+  async getApplicationsForAdmin(params: {
+    page: number;
+    limit: number;
+    q?: string;
+    status?: ApplicationStatus[];
+    penaltyApplied?: string[];
+  }): Promise<{
+    data: AdminApplicationListItem[];
+    total: number;
+    page: number;
+    limit: number;
+  }> {
+    const { page, limit, q, status, penaltyApplied } = params;
+    const skip = (page - 1) * limit;
+
+    const where: Prisma.ApplicationWhereInput = {};
+
+    const searchTrimmed = q?.trim() ?? '';
+    if (searchTrimmed.length > 0) {
+      where.OR = [
+        {
+          worker: {
+            first_name: { contains: searchTrimmed, mode: 'insensitive' },
+          },
+        },
+        {
+          worker: {
+            last_name: { contains: searchTrimmed, mode: 'insensitive' },
+          },
+        },
+        {
+          job_offer: {
+            title: { contains: searchTrimmed, mode: 'insensitive' },
+          },
+        },
+      ];
+    }
+
+    if (status != null && status.length > 0) {
+      where.status = { in: status };
+    }
+    if (penaltyApplied && penaltyApplied.length > 0) {
+      const boolValues = penaltyApplied.map((v) => v === 'true');
+      if (boolValues.length === 1) {
+        where.penalty_applied = boolValues[0];
+      }
+    }
+
+    const [applications, total] = await Promise.all([
+      this.prisma.application.findMany({
+        where,
+        orderBy: { created_at: 'desc' },
+        skip,
+        take: limit,
+        include: {
+          worker: {
+            select: {
+              id: true,
+              first_name: true,
+              last_name: true,
+              email: true,
+              phone: true,
+              avatar_url: true,
+            },
+          },
+          job_offer: {
+            select: {
+              id: true,
+              title: true,
+              employer_id: true,
+              employer: {
+                select: {
+                  id: true,
+                  first_name: true,
+                  last_name: true,
+                  email: true,
+                  avatar_url: true,
+                },
+              },
+            },
+          },
+        },
+      }),
+      this.prisma.application.count({ where }),
+    ]);
+
+    const data: AdminApplicationListItem[] = applications.map((a) => ({
+      id: a.id,
+      jobTitle: a.job_offer.title,
+      jobOfferId: a.job_offer_id,
+      workerName:
+        `${a.worker.first_name ?? ''} ${a.worker.last_name ?? ''}`.trim() ||
+        '—',
+      workerEmail: a.worker.email,
+      workerPhone: a.worker.phone,
+      workerAvatarUrl: a.worker.avatar_url ?? null,
+      workerId: a.worker_id,
+      employerName:
+        `${a.job_offer.employer?.first_name ?? ''} ${a.job_offer.employer?.last_name ?? ''}`.trim() ||
+        '—',
+      employerEmail: a.job_offer.employer?.email ?? '',
+      employerAvatarUrl: a.job_offer.employer?.avatar_url ?? null,
+      employerId: a.job_offer.employer_id,
+      status: a.status,
+      penaltyApplied: a.penalty_applied,
+      penaltyAmount:
+        a.penalty_amount != null ? Number(a.penalty_amount) : null,
+      cancelledAt: a.cancelled_at?.toISOString() ?? null,
+      cancellationReason: a.cancellation_reason,
+      createdAt: a.created_at.toISOString(),
+      updatedAt: a.updated_at.toISOString(),
+    }));
+
+    return { data, total, page, limit };
   }
 
   private toListItem(app: {

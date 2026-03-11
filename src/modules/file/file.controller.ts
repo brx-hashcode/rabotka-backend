@@ -54,7 +54,7 @@ export class FileController {
     @Query('is_multipl') isMultiple?: string,
   ) {
     if (!files || files.length === 0) {
-      throw new BadRequestException('No files provided');
+      throw new BadRequestException('Aucun fichier fourni');
     }
 
     const isMulti = isMultiple === 'true';
@@ -70,7 +70,7 @@ export class FileController {
         files.map(async (file) => {
           if (!file.buffer || !file.originalname) {
             throw new BadRequestException(
-              'File buffer or originalname is missing',
+              'Le buffer ou le nom du fichier est manquant',
             );
           }
 
@@ -102,7 +102,7 @@ export class FileController {
 
     const file = files[0];
     if (!file.buffer || !file.originalname) {
-      throw new BadRequestException('File buffer or originalname is missing');
+      throw new BadRequestException('Le buffer ou le nom du fichier est manquant');
     }
 
     const fileBuffer: Buffer = Buffer.isBuffer(file.buffer)

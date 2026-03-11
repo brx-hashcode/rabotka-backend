@@ -1,0 +1,6 @@
+{
+  "errors": {
+    "not_found": "Candidature introuvable",
+    "not_found_after_update": "Candidature introuvable après mise à jour"
+  }
+}

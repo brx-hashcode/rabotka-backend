@@ -60,7 +60,7 @@ export class JwtAuthGuard implements CanActivate {
     const token = this.extractToken(request);
 
     if (!token) {
-      throw new UnauthorizedException('auth.errors.no_token');
+      throw new UnauthorizedException('Authentification requise');
     }
 
     try {
@@ -79,7 +79,7 @@ export class JwtAuthGuard implements CanActivate {
 
       return true;
     } catch {
-      throw new UnauthorizedException('auth.errors.invalid_token');
+      throw new UnauthorizedException('Session invalide ou expirée');
     }
   }
 

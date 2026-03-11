@@ -56,19 +56,19 @@ export class WhatsAppController {
       'Receives incoming WhatsApp messages from Twilio. Configure this URL in your Twilio WhatsApp sandbox or number. Validates X-Twilio-Signature.',
   })
   @ApiResponse({ status: 200, description: 'Message handled' })
-  @ApiResponse({ status: 403, description: 'Invalid signature' })
+  @ApiResponse({ status: 403, description: 'Signature invalide' })
   async incomingWebhook(
     @Req() req: Request,
     @Body() body: Record<string, string>,
   ): Promise<void> {
     if (!this.twilioService.getAuthToken()) {
       this.logger.warn('TWILIO_AUTH_TOKEN not set; rejecting webhook');
-      throw new ForbiddenException('Webhook not configured');
+      throw new ForbiddenException('Webhook non configuré');
     }
 
     const signature = req.headers['x-twilio-signature'] as string | undefined;
     if (!signature) {
-      throw new ForbiddenException('Missing X-Twilio-Signature');
+      throw new ForbiddenException("En-tête X-Twilio-Signature manquant");
     }
 
     const url = this.buildWebhookUrl(req);
@@ -80,14 +80,14 @@ export class WhatsAppController {
     );
     if (!isValid) {
       this.logger.warn('Twilio webhook signature validation failed');
-      throw new ForbiddenException('Invalid signature');
+      throw new ForbiddenException('Signature invalide');
     }
 
     const from = body.From ?? '';
     const text = body.Body ?? '';
 
     if (!from) {
-      throw new BadRequestException('Missing From');
+      throw new BadRequestException("Champ 'From' manquant");
     }
 
     const phone = from.startsWith('whatsapp:')
@@ -119,6 +119,26 @@ export class WhatsAppController {
     }
   }
 
+  /**
+   * Build the webhook URL for Twilio signature validation.
+   * Must match exactly the URL Twilio used when sending the request.
+   * When behind a proxy (ngrok, etc.), use X-Forwarded-* headers or TWILIO_WEBHOOK_BASE_URL.
+   */
+  private buildWebhookUrl(req: Request): string {
+    const baseUrl = this.configService.get<string>('TWILIO_WEBHOOK_BASE_URL');
+    if (baseUrl) {
+      const path = req.originalUrl.startsWith('/')
+        ? req.originalUrl
+        : `/${req.originalUrl}`;
+      return baseUrl.replace(/\/$/, '') + path;
+    }
+    const protocol =
+      (req.headers['x-forwarded-proto'] as string) || req.protocol || 'https';
+    const host =
+      (req.headers['x-forwarded-host'] as string) || req.get('host') || '';
+    return `${protocol}://${host}${req.originalUrl}`;
+  }
+
   @Get('verify')
   @ApiOperation({
     summary: 'Verify WhatsApp token',
@@ -146,26 +166,6 @@ export class WhatsAppController {
     status: 400,
     description: 'Invalid or expired token',
   })
-  /**
-   * Build the webhook URL for Twilio signature validation.
-   * Must match exactly the URL Twilio used when sending the request.
-   * When behind a proxy (ngrok, etc.), use X-Forwarded-* headers or TWILIO_WEBHOOK_BASE_URL.
-   */
-  private buildWebhookUrl(req: Request): string {
-    const baseUrl = this.configService.get<string>('TWILIO_WEBHOOK_BASE_URL');
-    if (baseUrl) {
-      const path = req.originalUrl.startsWith('/')
-        ? req.originalUrl
-        : `/${req.originalUrl}`;
-      return baseUrl.replace(/\/$/, '') + path;
-    }
-    const protocol =
-      (req.headers['x-forwarded-proto'] as string) || req.protocol || 'https';
-    const host =
-      (req.headers['x-forwarded-host'] as string) || req.get('host') || '';
-    return `${protocol}://${host}${req.originalUrl}`;
-  }
-
   async verifyWhatsApp(
     @Query() verifyWhatsAppDto: VerifyWhatsAppDto,
   ): Promise<{ success: boolean }> {
@@ -177,7 +177,7 @@ export class WhatsAppController {
         throw error;
       }
       throw new BadRequestException(
-        error instanceof Error ? error.message : 'Invalid verification token',
+        error instanceof Error ? error.message : 'Token de vérification invalide',
       );
     }
   }
