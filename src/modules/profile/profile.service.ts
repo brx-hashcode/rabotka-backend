@@ -342,7 +342,7 @@ export class ProfileService {
     const penalty = await this.prisma.penalty.findUnique({
       where: { id: penaltyId },
     });
-    if (!penalty || penalty.worker_id !== profileId) {
+    if (penalty?.worker_id !== profileId) {
       throw new NotFoundException('Pénalité introuvable');
     }
     if (penalty.paid_at) {
@@ -451,7 +451,6 @@ export class ProfileService {
       where: { worker_id: id, paid_at: null },
     });
 
-    // Resolve admin names for verified_by UUIDs
     const verifierIds = new Set<string>();
     if (profile.verified_by) verifierIds.add(profile.verified_by);
     for (const doc of profile.kyc_documents) {
@@ -536,7 +535,6 @@ export class ProfileService {
       throw new NotFoundException('Profil non trouvé');
     }
 
-    // Upload verification images
     const uploadedUrls: string[] = [];
     if (files && files.length > 0) {
       for (const file of files) {
@@ -567,17 +565,15 @@ export class ProfileService {
           rejection_reason: decision === 'REJECTED' ? (reason ?? null) : null,
         },
       }),
-      // Delete previous verification images for this profile
       this.prisma.kycVerificationImage.deleteMany({
         where: { profile_id: profileId },
       }),
-      // Create new verification image records
       ...uploadedUrls.map((url) =>
         this.prisma.kycVerificationImage.create({
           data: {
             profile_id: profileId,
             image_url: url,
-            uploaded_by: adminUserId !== 'system' ? adminUserId : null,
+            uploaded_by: adminUserId === 'system' ? null : adminUserId,
           },
         }),
       ),
