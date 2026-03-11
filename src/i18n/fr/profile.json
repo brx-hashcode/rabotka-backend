@@ -27,6 +27,12 @@
       "selfie": {
         "required": "La photo KYC est requise"
       }
-    }
+    },
+    "avatar": {
+      "required": "La photo de profil est requise"
+    },
+    "message_empty": "Le message ne peut pas être vide",
+    "no_phone": "Ce profil n'a pas de numéro de téléphone",
+    "no_email": "Ce profil n'a pas d'adresse email"
   }
 }

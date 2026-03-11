@@ -43,7 +43,7 @@ export class AuthService {
     const isPhone = this.isPhone(normalized);
 
     if (!isEmail && !isPhone) {
-      throw new BadRequestException('auth.errors.invalid_email_or_phone');
+      throw new BadRequestException('Email ou numéro de téléphone invalide');
     }
 
     const profile = isEmail
@@ -51,7 +51,7 @@ export class AuthService {
       : await this.findProfileByPhone(normalized);
 
     if (!profile) {
-      throw new NotFoundException('auth.errors.profile_not_found');
+      throw new NotFoundException('Aucun compte trouvé pour cet email ou téléphone');
     }
 
     if (isPhone) {
@@ -62,7 +62,7 @@ export class AuthService {
         whatsapp_connected: boolean;
       };
       if (!phoneProfile.whatsapp_connected) {
-        throw new BadRequestException('auth.errors.whatsapp_not_verified');
+        throw new BadRequestException("Ce numéro WhatsApp n'est pas encore vérifié. Veuillez utiliser votre adresse e-mail pour continuer.");
       }
     }
 
@@ -86,7 +86,7 @@ export class AuthService {
     const isPhone = this.isPhone(normalized);
 
     if (!isEmail && !isPhone) {
-      throw new BadRequestException('auth.errors.invalid_email_or_phone');
+      throw new BadRequestException('Email ou numéro de téléphone invalide');
     }
 
     const profile = isEmail
@@ -94,7 +94,7 @@ export class AuthService {
       : await this.findProfileByPhone(normalized);
 
     if (!profile) {
-      throw new NotFoundException('auth.errors.profile_not_found');
+      throw new NotFoundException('Aucun compte trouvé pour cet email ou téléphone');
     }
 
     if (isPhone) {
@@ -105,7 +105,7 @@ export class AuthService {
         whatsapp_connected: boolean;
       };
       if (!phoneProfile.whatsapp_connected) {
-        throw new BadRequestException('auth.errors.whatsapp_not_verified');
+        throw new BadRequestException("Ce numéro WhatsApp n'est pas encore vérifié. Veuillez utiliser votre adresse e-mail pour continuer.");
       }
     }
 
@@ -113,7 +113,7 @@ export class AuthService {
     const cooldownActive = await this.redis.get(resendCooldownKey);
     if (cooldownActive) {
       throw new HttpException(
-        'auth.errors.resend_cooldown',
+        'Veuillez attendre avant de renvoyer le code',
         HttpStatus.TOO_MANY_REQUESTS,
       );
     }
@@ -145,7 +145,7 @@ export class AuthService {
     const storedOtp = await this.redis.get(redisKey);
 
     if (!storedOtp || storedOtp !== otp) {
-      throw new UnauthorizedException('auth.errors.invalid_or_expired_otp');
+      throw new UnauthorizedException('Code de vérification invalide ou expiré');
     }
 
     const profile = isEmail
@@ -153,7 +153,7 @@ export class AuthService {
       : await this.findProfileByPhone(normalized);
 
     if (!profile) {
-      throw new NotFoundException('auth.errors.profile_not_found');
+      throw new NotFoundException('Aucun compte trouvé pour cet email ou téléphone');
     }
 
     await this.redis.del(redisKey);
@@ -168,17 +168,17 @@ export class AuthService {
     const normalized = this.normalize(email);
 
     if (!this.isEmail(normalized)) {
-      throw new BadRequestException('auth.errors.invalid_email');
+      throw new BadRequestException('Adresse email invalide');
     }
 
     const user = await this.findUserByEmail(normalized);
 
     if (!user) {
-      throw new NotFoundException('auth.errors.user_not_found');
+      throw new NotFoundException('Aucun administrateur trouvé pour cet email');
     }
 
     if (!user.is_active) {
-      throw new UnauthorizedException('auth.errors.user_inactive');
+      throw new UnauthorizedException('Ce compte administrateur est inactif');
     }
 
     const otp = this.generateOtp();
@@ -195,24 +195,24 @@ export class AuthService {
     const normalized = this.normalize(email);
 
     if (!this.isEmail(normalized)) {
-      throw new BadRequestException('auth.errors.invalid_email');
+      throw new BadRequestException('Adresse email invalide');
     }
 
     const user = await this.findUserByEmail(normalized);
 
     if (!user) {
-      throw new NotFoundException('auth.errors.user_not_found');
+      throw new NotFoundException('Aucun administrateur trouvé pour cet email');
     }
 
     if (!user.is_active) {
-      throw new UnauthorizedException('auth.errors.user_inactive');
+      throw new UnauthorizedException('Ce compte administrateur est inactif');
     }
 
     const resendCooldownKey = `${ADMIN_RESEND_COOLDOWN_KEY_PREFIX}${normalized}`;
     const cooldownActive = await this.redis.get(resendCooldownKey);
     if (cooldownActive) {
       throw new HttpException(
-        'auth.errors.resend_cooldown',
+        'Veuillez attendre avant de renvoyer le code',
         HttpStatus.TOO_MANY_REQUESTS,
       );
     }
@@ -236,24 +236,24 @@ export class AuthService {
     const normalized = this.normalize(email);
 
     if (!this.isEmail(normalized)) {
-      throw new BadRequestException('auth.errors.invalid_email');
+      throw new BadRequestException('Adresse email invalide');
     }
 
     const redisKey = `${ADMIN_OTP_KEY_PREFIX}${normalized}`;
     const storedOtp = await this.redis.get(redisKey);
 
     if (!storedOtp || storedOtp !== otp) {
-      throw new UnauthorizedException('auth.errors.invalid_or_expired_otp');
+      throw new UnauthorizedException('Code de vérification invalide ou expiré');
     }
 
     const user = await this.findUserByEmail(normalized);
 
     if (!user) {
-      throw new NotFoundException('auth.errors.user_not_found');
+      throw new NotFoundException('Aucun administrateur trouvé pour cet email');
     }
 
     if (!user.is_active) {
-      throw new UnauthorizedException('auth.errors.user_inactive');
+      throw new UnauthorizedException('Ce compte administrateur est inactif');
     }
 
     await this.redis.del(redisKey);
@@ -279,7 +279,7 @@ export class AuthService {
       select: { id: true, first_name: true, last_name: true, email: true },
     });
     if (!user) {
-      throw new NotFoundException('auth.errors.user_not_found');
+      throw new NotFoundException('Aucun administrateur trouvé pour cet email');
     }
     return {
       id: user.id,

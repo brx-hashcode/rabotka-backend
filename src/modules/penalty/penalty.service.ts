@@ -76,7 +76,7 @@ export class PenaltyService {
     });
 
     if (!penalty) {
-      throw new NotFoundException('Penalty not found');
+      throw new NotFoundException('Pénalité introuvable');
     }
 
     return {

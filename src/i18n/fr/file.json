@@ -1,0 +1,6 @@
+{
+  "errors": {
+    "no_files": "Aucun fichier fourni",
+    "missing_buffer": "Le buffer ou le nom du fichier est manquant"
+  }
+}

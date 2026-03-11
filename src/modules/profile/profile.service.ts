@@ -186,7 +186,7 @@ export class ProfileService {
     });
 
     if (!profile) {
-      throw new NotFoundException('profile.errors.not_found');
+      throw new NotFoundException('Profil non trouvé');
     }
 
     const unpaidPenaltiesCount = await this.prisma.penalty.count({
@@ -225,7 +225,7 @@ export class ProfileService {
     });
 
     if (!existingProfile) {
-      throw new NotFoundException('profile.errors.not_found');
+      throw new NotFoundException('Profil non trouvé');
     }
 
     const previousStatus = existingProfile.status;
@@ -297,11 +297,11 @@ export class ProfileService {
     });
 
     if (!existingProfile) {
-      throw new NotFoundException('profile.errors.not_found');
+      throw new NotFoundException('Profil non trouvé');
     }
 
     if (!avatarFile) {
-      throw new BadRequestException('profile.errors.avatar.required');
+      throw new BadRequestException('La photo de profil est requise');
     }
 
     const uploadResult = await this.fileService.uploadToStorage(avatarFile, {
@@ -444,7 +444,7 @@ export class ProfileService {
     });
 
     if (!profile) {
-      throw new NotFoundException('profile.errors.not_found');
+      throw new NotFoundException('Profil non trouvé');
     }
 
     const unpaidPenaltiesCount = await this.prisma.penalty.count({
@@ -533,7 +533,7 @@ export class ProfileService {
       select: { id: true },
     });
     if (!profile) {
-      throw new NotFoundException('profile.errors.not_found');
+      throw new NotFoundException('Profil non trouvé');
     }
 
     // Upload verification images
@@ -601,7 +601,7 @@ export class ProfileService {
       },
     });
     if (!profile) {
-      throw new NotFoundException('profile.errors.not_found');
+      throw new NotFoundException('Profil non trouvé');
     }
 
     await this.prisma.profile.update({
@@ -640,7 +640,7 @@ export class ProfileService {
       select: { id: true },
     });
     if (!profile) {
-      throw new NotFoundException('profile.errors.not_found');
+      throw new NotFoundException('Profil non trouvé');
     }
 
     const dataToUpdate: Prisma.ProfileUpdateInput = {};
@@ -781,7 +781,7 @@ export class ProfileService {
         ),
       );
 
-      return { message: 'profile.created.success' };
+      return { message: 'Profil créé avec succès' };
     } catch (error: any) {
       this.handleCreateProfileError(error);
     }
@@ -792,10 +792,10 @@ export class ProfileService {
     kycSelfie: Express.Multer.File,
   ): void {
     if (!kycDocument) {
-      throw new BadRequestException('KYC document is required');
+      throw new BadRequestException('Le document KYC est requis');
     }
     if (!kycSelfie) {
-      throw new BadRequestException('KYC selfie is required');
+      throw new BadRequestException('La photo KYC est requise');
     }
   }
 
@@ -938,10 +938,10 @@ export class ProfileService {
     }
 
     if (this.isPrismaError(error)) {
-      throw new BadRequestException('profile.errors.database');
+      throw new BadRequestException("Une erreur de base de données s'est produite. Veuillez réessayer plus tard");
     }
 
-    throw new BadRequestException('profile.errors.create.failed');
+    throw new BadRequestException('Échec de la création du profil. Veuillez réessayer');
   }
 
   private isKnownException(error: any): boolean {
@@ -971,12 +971,12 @@ export class ProfileService {
 
   private getConflictErrorKey(field: string | undefined): string {
     if (field === 'email') {
-      return 'profile.errors.email.exists';
+      return 'Un compte avec cette adresse e-mail existe déjà';
     }
     if (field === 'phone') {
-      return 'profile.errors.phone.exists';
+      return 'Un compte avec ce numéro de téléphone existe déjà';
     }
-    return 'profile.errors.unique.constraint';
+    return 'Un profil avec ces informations existe déjà';
   }
 
   private isPrismaError(error: any): boolean {
@@ -996,11 +996,11 @@ export class ProfileService {
     });
 
     if (!profile) {
-      throw new NotFoundException('profile.errors.not_found');
+      throw new NotFoundException('Profil non trouvé');
     }
 
     if (!this.whatsAppService.isConfigured()) {
-      throw new ServiceUnavailableException('whatsapp.errors.not_connected');
+      throw new ServiceUnavailableException('Le service WhatsApp n\'est pas configuré');
     }
 
     const token = randomBytes(32).toString('base64url');
@@ -1030,7 +1030,7 @@ export class ProfileService {
 
     if (!sent) {
       await this.redis.del(redisKey);
-      throw new ServiceUnavailableException('whatsapp.errors.send_failed');
+      throw new ServiceUnavailableException('Échec de l\'envoi du message WhatsApp');
     }
 
     this.logger.log(`WhatsApp verification token sent to profile ${profileId}`);

@@ -1,5 +1,4 @@
 import { Controller, Get } from '@nestjs/common';
-import { I18n, I18nContext } from 'nestjs-i18n';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { AppService } from './app.service';
 
@@ -11,8 +10,7 @@ export class AppController {
   @Get()
   @ApiOperation({
     summary: 'Get index message',
-    description:
-      'Returns an index message from the API. Language is determined by ACCEPT-LANGUAGE header (defaults to "en").',
+    description: 'Returns an index message from the API.',
   })
   @ApiResponse({
     status: 200,
@@ -20,12 +18,11 @@ export class AppController {
     schema: {
       type: 'object',
       properties: {
-        message: { type: 'string', example: 'Welcome to Rabotka API!' },
-        language: { type: 'string', example: 'en' },
+        message: { type: 'string', example: "Bienvenue ! L'API Rabotka est prête à vous servir." },
       },
     },
   })
-  getIndex(@I18n() i18n: I18nContext) {
-    return this.appService.getIndex(i18n.lang);
+  getIndex() {
+    return this.appService.getIndex();
   }
 }

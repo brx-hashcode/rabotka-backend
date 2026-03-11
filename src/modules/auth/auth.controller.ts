@@ -12,7 +12,6 @@ import {
 import { ApiTags, ApiOperation, ApiResponse, ApiBody, ApiCookieAuth } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { ConfigService } from '@nestjs/config';
-import { I18n, I18nContext } from 'nestjs-i18n';
 import { AuthService } from './auth.service';
 import { AdminAuthGuard } from './guards/admin-auth.guard';
 import type { AdminAuthenticatedRequest } from './guards/jwt-auth.guard';
@@ -57,12 +56,11 @@ export class AuthController {
   @ApiResponse({ status: 404, description: 'Profile not found' })
   async sendOtp(
     @Body() sendOtpDto: SendOtpDto,
-    @I18n() i18n: I18nContext,
   ): Promise<{ success: boolean; message: string }> {
     const result = await this.authService.sendOtp(sendOtpDto.emailOrPhone);
     return {
       success: result.success,
-      message: i18n.t('auth.otp_sent'),
+      message: 'Code de vérification envoyé avec succès',
     };
   }
 
@@ -96,12 +94,11 @@ export class AuthController {
   })
   async resendOtp(
     @Body() sendOtpDto: SendOtpDto,
-    @I18n() i18n: I18nContext,
   ): Promise<{ success: boolean; message: string }> {
     const result = await this.authService.resendOtp(sendOtpDto.emailOrPhone);
     return {
       success: result.success,
-      message: i18n.t('auth.otp_sent'),
+      message: 'Code de vérification envoyé avec succès',
     };
   }
 
@@ -207,12 +204,11 @@ export class AuthController {
   @ApiResponse({ status: 401, description: 'User is inactive' })
   async sendAdminOtp(
     @Body() sendAdminOtpDto: SendAdminOtpDto,
-    @I18n() i18n: I18nContext,
   ): Promise<{ success: boolean; message: string }> {
     const result = await this.authService.sendAdminOtp(sendAdminOtpDto.email);
     return {
       success: result.success,
-      message: i18n.t('auth.otp_sent'),
+      message: 'Code de vérification envoyé avec succès',
     };
   }
 
@@ -244,12 +240,11 @@ export class AuthController {
   })
   async resendAdminOtp(
     @Body() sendAdminOtpDto: SendAdminOtpDto,
-    @I18n() i18n: I18nContext,
   ): Promise<{ success: boolean; message: string }> {
     const result = await this.authService.resendAdminOtp(sendAdminOtpDto.email);
     return {
       success: result.success,
-      message: i18n.t('auth.otp_sent'),
+      message: 'Code de vérification envoyé avec succès',
     };
   }
 

@@ -63,7 +63,7 @@ export class PaymentRequestService {
     });
 
     if (!profile) {
-      throw new NotFoundException('profile.errors.not_found');
+      throw new NotFoundException('Profil non trouvé');
     }
 
     const token = randomBytes(32).toString('hex');
@@ -126,14 +126,14 @@ export class PaymentRequestService {
     });
 
     if (!request) {
-      throw new NotFoundException('payment_request.errors.not_found');
+      throw new NotFoundException('Demande de paiement introuvable');
     }
 
     if (
       request.status === PaymentRequestStatus.APPROVED ||
       request.status === PaymentRequestStatus.REJECTED
     ) {
-      throw new BadRequestException('payment_request.errors.already_processed');
+      throw new BadRequestException('Cette demande a déjà été traitée');
     }
 
     return {
@@ -151,11 +151,11 @@ export class PaymentRequestService {
     });
 
     if (!request) {
-      throw new NotFoundException('payment_request.errors.not_found');
+      throw new NotFoundException('Demande de paiement introuvable');
     }
 
     if (request.status !== PaymentRequestStatus.PENDING) {
-      throw new BadRequestException('payment_request.errors.not_pending');
+      throw new BadRequestException("Cette demande n'est pas en attente");
     }
 
     await this.prisma.paymentRequest.update({
@@ -211,11 +211,11 @@ export class PaymentRequestService {
     });
 
     if (!request) {
-      throw new NotFoundException('payment_request.errors.not_found');
+      throw new NotFoundException('Demande de paiement introuvable');
     }
 
     if (request.status !== PaymentRequestStatus.SUBMITTED) {
-      throw new BadRequestException('payment_request.errors.not_submitted');
+      throw new BadRequestException("Cette demande n'a pas été soumise");
     }
 
     const [updated] = await this.prisma.$transaction([
@@ -260,11 +260,11 @@ export class PaymentRequestService {
     });
 
     if (!request) {
-      throw new NotFoundException('payment_request.errors.not_found');
+      throw new NotFoundException('Demande de paiement introuvable');
     }
 
     if (request.status !== PaymentRequestStatus.SUBMITTED) {
-      throw new BadRequestException('payment_request.errors.not_submitted');
+      throw new BadRequestException("Cette demande n'a pas été soumise");
     }
 
     const updated: PaymentRequestWithProfile =
