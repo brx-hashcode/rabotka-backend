@@ -1,0 +1,8 @@
+{
+  "errors": {
+    "not_found": "Demande de paiement introuvable",
+    "already_processed": "Cette demande a déjà été traitée",
+    "not_pending": "Cette demande n'est pas en attente",
+    "not_submitted": "Cette demande n'a pas été soumise"
+  }
+}

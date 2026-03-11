@@ -103,13 +103,13 @@ export class JobOfferService {
       select: { id: true, status: true, profile_type: true },
     });
     if (!employer) {
-      throw new NotFoundException('Employer not found');
+      throw new NotFoundException('Employeur introuvable');
     }
     if (employer.status !== AccountStatus.ACTIVE) {
-      throw new ForbiddenException('Profile must be active to publish offers');
+      throw new ForbiddenException('Le profil doit être actif pour publier des offres');
     }
     if (employer.profile_type !== 'EMPLOYER') {
-      throw new ForbiddenException('Only employers can publish job offers');
+      throw new ForbiddenException("Seuls les employeurs peuvent publier des offres d'emploi");
     }
 
     this.validateCreateDto(dto);
@@ -224,10 +224,10 @@ export class JobOfferService {
       where: { id },
     });
     if (!offer) {
-      throw new NotFoundException('Job offer not found');
+      throw new NotFoundException("Offre d'emploi introuvable");
     }
     if (offer.employer_id !== actorProfileId) {
-      throw new ForbiddenException('Not authorized to update this offer');
+      throw new ForbiddenException('Non autorisé à modifier cette offre');
     }
 
     const updated = await this.prisma.jobOffer.update({
@@ -409,7 +409,7 @@ export class JobOfferService {
     });
 
     if (!offer) {
-      throw new NotFoundException('Job offer not found');
+      throw new NotFoundException("Offre d'emploi introuvable");
     }
 
     return {
@@ -459,7 +459,7 @@ export class JobOfferService {
       select: { id: true },
     });
     if (!offer) {
-      throw new NotFoundException('Job offer not found');
+      throw new NotFoundException("Offre d'emploi introuvable");
     }
 
     await this.prisma.jobOffer.delete({ where: { id } });
@@ -474,7 +474,7 @@ export class JobOfferService {
       select: { id: true, status: true },
     });
     if (!offer) {
-      throw new NotFoundException('Job offer not found');
+      throw new NotFoundException("Offre d'emploi introuvable");
     }
     if (offer.status !== JobOfferStatus.ACTIVE) {
       throw new BadRequestException(

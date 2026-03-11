@@ -86,14 +86,14 @@ export class WhatsAppService {
 
   async verifyWhatsAppToken(token: string): Promise<void> {
     if (!token || token.trim().length === 0) {
-      throw new BadRequestException('Invalid verification token');
+      throw new BadRequestException('Token de vérification invalide');
     }
 
     const redisKey = `${VERIFICATION_TOKEN_KEY_PREFIX}${token}`;
     const profileId = await this.redis.get(redisKey);
 
     if (!profileId) {
-      throw new BadRequestException('Invalid or expired verification token');
+      throw new BadRequestException('Token de vérification invalide ou expiré');
     }
 
     const profile = await this.prisma.profile.findUnique({
@@ -105,7 +105,7 @@ export class WhatsAppService {
     });
 
     if (!profile) {
-      throw new BadRequestException('Profile not found');
+      throw new BadRequestException('Profil introuvable');
     }
 
     await this.prisma.profile.update({

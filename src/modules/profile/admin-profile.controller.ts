@@ -142,16 +142,16 @@ export class AdminProfileController {
     });
 
     if (!profile) {
-      throw new NotFoundException('profile.errors.not_found');
+      throw new NotFoundException('Profil non trouvé');
     }
 
     if (!body.message?.trim()) {
-      throw new BadRequestException('Message cannot be empty.');
+      throw new BadRequestException('Le message ne peut pas être vide');
     }
 
     if (body.channel === 'WHATSAPP') {
       if (!profile.phone) {
-        throw new BadRequestException('Profile has no phone number.');
+        throw new BadRequestException("Ce profil n'a pas de numéro de téléphone");
       }
       await this.whatsApp.sendTextMessage(
         profile.phone,
@@ -161,7 +161,7 @@ export class AdminProfileController {
       );
     } else {
       if (!profile.email) {
-        throw new BadRequestException('Profile has no email address.');
+        throw new BadRequestException("Ce profil n'a pas d'adresse email");
       }
       await this.mail.sendMail({
         to: profile.email,

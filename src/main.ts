@@ -1,4 +1,5 @@
 import { Logger, ValidationPipe } from '@nestjs/common';
+import { I18nMiddleware } from 'nestjs-i18n';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
@@ -66,6 +67,7 @@ async function bootstrap() {
     }),
   );
 
+  app.use(I18nMiddleware);
   app.use(cookieParser());
   app.use(csrfVisitorMiddleware);
 
