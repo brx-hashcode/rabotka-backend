@@ -7,6 +7,7 @@ import { BotStateService } from './bot-state.service';
 import { BotRouterService } from '../router/bot-router.service';
 import { BotCommandsService } from './bot-commands.service';
 import { BotNotificationService } from './bot-notification.service';
+import { BotInboxService } from './bot-inbox.service';
 import { handleMenuCommand } from '../commands/menu.command';
 import { handleHelpCommand } from '../commands/help.command';
 import { unknownCommandMessage } from '../messages/menu.messages';
@@ -22,7 +23,10 @@ import {
   getListOffersInitialState,
 } from '../flows/list-offers.flow';
 import { runApplyJobFlow } from '../flows/apply-job.flow';
-import { runAcceptRefuseCandidateFlow } from '../flows/accept-refuse-candidate.flow';
+import {
+  runAcceptRefuseCandidateFlow,
+  getAcceptRefuseInitialState,
+} from '../flows/accept-refuse-candidate.flow';
 import { runCancelApplicationFlow } from '../flows/cancel-application.flow';
 import {
   runMyApplicationsFlow,
@@ -41,14 +45,16 @@ import {
   getProfileSubmenuInitialState,
 } from '../flows/profile-submenu.flow';
 
-const INACTIVE_MESSAGE =
-  'Votre compte est créé mais pas encore activé. Cliquez sur le lien de confirmation que nous vous avons envoyé par WhatsApp pour l’activer.';
+const INACTIVE_MESSAGE = `Votre compte est créé mais pas encore activé. Cliquez sur le lien de confirmation que nous vous avons envoyé par WhatsApp pour l’activer.`;
 
-const NOT_FOUND_MESSAGE =
-  "Ce numéro n'est pas encore enregistré. Inscrivez-vous sur notre site pour créer votre compte.";
+const NOT_FOUND_MESSAGE = `Ce numéro n'est pas encore enregistré. Inscrivez-vous sur notre site pour créer votre compte.`;
 
-const ERROR_MESSAGE =
-  'Une erreur est survenue. Veuillez réessayer ou tapez « Menu ».';
+const ERROR_MESSAGE = `Une erreur est survenue. Veuillez réessayer ou tapez « Menu ».`;
+
+function looksLikeFlowInput(input: string): boolean {
+  const t = input.trim();
+  return /^\d+$/.test(t) || (t.length > 0 && t.length <= 20 && !/\s/.test(t));
+}
 
 @Injectable()
 export class BotOrchestratorService {
@@ -57,6 +63,7 @@ export class BotOrchestratorService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly botState: BotStateService,
+    private readonly botInbox: BotInboxService,
     private readonly router: BotRouterService,
     private readonly commands: BotCommandsService,
     private readonly jobOfferService: JobOfferService,
@@ -111,6 +118,15 @@ export class BotOrchestratorService {
         return this.handleCommandRoute(route, profile, profileId, botProfile);
       }
 
+      // No active state + no recognized command — show session expired if input
+      // looks like the user was mid-flow before Redis TTL expired.
+      if (!state && looksLikeFlowInput(text)) {
+        return [
+          '⏱ *Session expirée.* Votre conversation précédente a expiré.',
+          handleMenuCommand(botProfile),
+        ];
+      }
+
       return [unknownCommandMessage()];
     } catch (err) {
       this.logger.warn('Bot handling error', err);
@@ -130,9 +146,44 @@ export class BotOrchestratorService {
       this.logger.debug(`Flow ${flowId} not implemented`);
       return [unknownCommandMessage()];
     }
-    if (result.clearState) await this.botState.clear(profileId);
-    else if (result.nextState)
+
+    if (result.clearState) {
+      await this.botState.clear(profileId);
+      // After clearing, check inbox for pending applications
+      const nextInboxItem = await this.botInbox.shift(profileId);
+      if (nextInboxItem?.type === 'new_application') {
+        const nextState = getAcceptRefuseInitialState(
+          nextInboxItem.applicationId,
+        );
+        await this.botState.set(profileId, nextState);
+        const remaining = await this.botInbox.count(profileId);
+        const inboxNotice =
+          remaining > 0
+            ? `\n\n📬 Il vous reste *${remaining}* candidature(s) en attente.`
+            : '';
+        return [
+          ...result.reply,
+          `\n📬 *Nouvelle candidature en attente* : ${nextInboxItem.workerName} pour « ${nextInboxItem.offerTitle} ».` +
+            `\nRépondez par *1 – Accepter* ou *2 – Refuser*.` +
+            inboxNotice,
+        ];
+      }
+    } else if (result.nextState) {
       await this.botState.set(profileId, result.nextState);
+    }
+
+    // Append inbox badge if employer has pending items
+    if (profile.profile_type === 'EMPLOYER') {
+      const inboxCount = await this.botInbox.count(profileId);
+      if (inboxCount > 0) {
+        const last = result.reply.at(-1) ?? '';
+        const lastIdx = result.reply.length - 1;
+        result.reply[lastIdx] =
+          last +
+          `\n\n📬 *${inboxCount} candidature(s) en attente.* Tapez *candidatures* pour les traiter.`;
+      }
+    }
+
     return result.reply;
   }
 

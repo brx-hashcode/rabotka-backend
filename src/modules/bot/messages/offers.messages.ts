@@ -10,6 +10,7 @@ export type OfferListItem = {
   address: string;
   note: string | null;
   quantity?: number;
+  acceptedCount?: number;
   status: string;
 };
 
@@ -77,11 +78,20 @@ export function formatOfferListCompact(
   offers.forEach((o, i) => {
     const num = i + 1;
     const flowLabel = formatPaymentFlow(o.payment_flow);
+    const qty = o.quantity ?? 1;
+    const filled = o.acceptedCount ?? 0;
+    const remaining = Math.max(0, qty - filled);
+    const spotsLabel =
+      remaining === 0
+        ? '🔴 Complet'
+        : remaining === qty
+          ? `🟢 ${qty} place${qty > 1 ? 's' : ''}`
+          : `🟡 ${remaining}/${qty} place${qty > 1 ? 's' : ''} restante${remaining > 1 ? 's' : ''}`;
     lines.push(
       `${num}. ${o.title}`,
       `    Montant: ${o.amount.toLocaleString('fr-FR')} FCFA ${flowLabel}`,
       `    Date: ${formatDate(o.scheduled_at)}`,
-      `    Personnes: ${o.quantity ?? 1}`,
+      `    ${spotsLabel}`,
       `    Adresse: ${o.address.length > 40 ? o.address.slice(0, 40) + '...' : o.address}`,
       '',
     );
@@ -146,7 +156,7 @@ export function formatOfferDetailWithActions(offer: OfferListItem): string {
     `*Résumé*: ${summary}`,
     `*Date*: ${formatDate(offer.scheduled_at)}`,
     `*Montant*: ${offer.amount.toLocaleString('fr-FR')} FCFA ${flow}`,
-    `*Personnes requises*: ${offer.quantity ?? 1}`,
+    `*Places disponibles*: ${Math.max(0, (offer.quantity ?? 1) - (offer.acceptedCount ?? 0))}/${offer.quantity ?? 1}`,
     `*Adresse*: ${offer.address.slice(0, 50)}${offer.address.length > 50 ? '...' : ''}`,
     '',
     SEP,

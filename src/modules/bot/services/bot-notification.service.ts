@@ -2,6 +2,7 @@ import { Injectable, Logger, forwardRef, Inject } from '@nestjs/common';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { WhatsAppService } from '../../whatsapp/whatsapp.service';
 import { BotStateService } from './bot-state.service';
+import { BotInboxService } from './bot-inbox.service';
 import { getAcceptRefuseInitialState } from '../flows/accept-refuse-candidate.flow';
 import {
   formatNewApplicationToEmployer,
@@ -21,6 +22,7 @@ export class BotNotificationService {
     @Inject(forwardRef(() => WhatsAppService))
     private readonly whatsApp: WhatsAppService,
     private readonly botState: BotStateService,
+    private readonly botInbox: BotInboxService,
   ) {}
 
   async sendNewApplicationToEmployer(applicationId: string): Promise<void> {
@@ -60,10 +62,32 @@ export class BotNotificationService {
           `*${app.worker.first_name} ${app.worker.last_name} - CANDIDAT*`,
         );
       }
-      await this.whatsApp.sendTextMessage(app.job_offer.employer.phone, text);
       const employerProfileId = app.job_offer.employer_id;
-      const state = getAcceptRefuseInitialState(applicationId);
-      await this.botState.set(employerProfileId, state);
+      const activeState = await this.botState.get(employerProfileId);
+
+      if (activeState?.flowId) {
+        // Employer is mid-flow — queue into inbox instead of overwriting state
+        await this.botInbox.push(employerProfileId, {
+          type: 'new_application',
+          applicationId,
+          workerName: `${app.worker.first_name} ${app.worker.last_name}`,
+          offerTitle: app.job_offer.title,
+          createdAt: new Date().toISOString(),
+        });
+        const pendingCount = await this.botInbox.count(employerProfileId);
+        const inboxNotice =
+          `\n\n📬 *${pendingCount} candidature(s) en attente* dans votre boîte.` +
+          `\nTerminez votre action en cours, puis tapez *candidatures* pour les traiter.`;
+        await this.whatsApp.sendTextMessage(
+          app.job_offer.employer.phone,
+          text + inboxNotice,
+        );
+      } else {
+        // Employer is idle — set state directly so next message routes to accept/refuse
+        await this.whatsApp.sendTextMessage(app.job_offer.employer.phone, text);
+        const state = getAcceptRefuseInitialState(applicationId);
+        await this.botState.set(employerProfileId, state);
+      }
     } catch (err) {
       this.logger.warn(
         `Failed to send new application notification to employer: ${applicationId}`,

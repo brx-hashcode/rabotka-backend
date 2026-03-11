@@ -9,6 +9,7 @@ export type CandidatureListItem = {
   email: string;
   status: string;
   avatarUrl?: string | null;
+  offerTitle?: string;
 };
 
 export function formatCandidaturesListPage(
@@ -18,9 +19,11 @@ export function formatCandidaturesListPage(
   const lines = ['*CANDIDATURES REÇUES*', ''];
   items.forEach((app, i) => {
     const num = i + 1;
+    const offerLine = app.offerTitle ? `    Offre: ${app.offerTitle}` : '';
     lines.push(
-      `${num}. Nom complet: ${app.firstName} ${app.lastName}`,
+      `${num}. ${app.firstName} ${app.lastName}`,
       `    Score: ${app.score}/100`,
+      ...(offerLine ? [offerLine] : []),
     );
   });
   lines.push('');
@@ -52,6 +55,7 @@ export function formatCandidatureDetail(params: {
   status: string;
   score: string | number;
   avatarUrl?: string | null;
+  offerTitle?: string;
 }): string {
   const statusLabel = candidatureStatusLabel(params.status);
   const bodyLines = [
@@ -60,6 +64,7 @@ export function formatCandidatureDetail(params: {
     `Nom: ${params.lastName}`,
     `Prénom: ${params.firstName}`,
     `Email: ${params.email}`,
+    ...(params.offerTitle ? [`Offre: ${params.offerTitle}`] : []),
     `Statut: ${statusLabel}`,
     `Score: ${params.score}/100`,
     '',
@@ -104,6 +109,7 @@ function formatPaymentFlow(flow: string): string {
 function applicationStatusLabel(status: string): string {
   if (status === 'ACCEPTED') return '*ACCEPTÉE*';
   if (status === 'PENDING') return '*EN ATTENTE*';
+  if (status === 'VIEWED') return '*VUE PAR L\'EMPLOYEUR*';
   if (status === 'REJECTED') return '*REFUSÉE*';
   return '*ANNULÉE*';
 }

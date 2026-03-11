@@ -69,17 +69,41 @@ enum KycDocumentCategory {
 }
 
 enum JobOfferStatus {
+  DRAFT
   ACTIVE
+  PARTIALLY_FILLED
   FILLED
-  CANCELLED
+  IN_PROGRESS
   COMPLETED
+  CANCELLED
+  EXPIRED
 }
 
 enum ApplicationStatus {
   PENDING
+  VIEWED
   ACCEPTED
   REJECTED
   CANCELLED
+}
+
+enum BillingStatus {
+  CLEAR
+  PENDING_PAYMENT
+  BLOCKED
+}
+
+enum AssignmentStatus {
+  CONFIRMED
+  COMPLETED
+  NO_SHOW
+  CANCELLED_BY_WORKER
+  CANCELLED_BY_EMPLOYER
+}
+
+enum CancelledBy {
+  WORKER
+  EMPLOYER
 }
 
 enum PaymentStatus {
@@ -137,6 +161,7 @@ model Profile {
   description             String             @db.Text
   profile_type            ProfileType
   status                  AccountStatus      @default(PENDING_PAYMENT)
+  billing_status          BillingStatus      @default(CLEAR)
   reliability_score       Int?               @default(100)
   whatsapp_connected      Boolean            @default(false)
   payment_link            String?
@@ -159,7 +184,8 @@ model Profile {
   messages      Message[]
   logs    Log[]
   files   File[]
-  wallets Wallet[]
+  wallets     Wallet[]
+  assignments Assignment[]
 
   @@index([email], name: "idx_profile_email")
   @@index([phone], name: "idx_profile_phone")
@@ -241,6 +267,7 @@ model JobOffer {
 
   employer     Profile       @relation(fields: [employer_id], references: [id], onDelete: Cascade)
   applications Application[]
+  assignments  Assignment[]
 
   @@index([employer_id], name: "idx_job_offer_employer")
   @@index([status], name: "idx_job_offer_status")
@@ -260,15 +287,42 @@ model Application {
   penalty_applied     Boolean           @default(false)
   penalty_amount      Decimal?          @db.Decimal(10, 2)
 
-  job_offer JobOffer  @relation(fields: [job_offer_id], references: [id], onDelete: Cascade)
-  worker    Profile   @relation(fields: [worker_id], references: [id], onDelete: Cascade)
-  penalties Penalty[]
+  viewed_at DateTime?
+
+  job_offer  JobOffer    @relation(fields: [job_offer_id], references: [id], onDelete: Cascade)
+  worker     Profile     @relation(fields: [worker_id], references: [id], onDelete: Cascade)
+  penalties  Penalty[]
+  assignment Assignment?
 
   @@unique([job_offer_id, worker_id], name: "idx_application_unique")
   @@index([worker_id], name: "idx_application_worker")
   @@index([job_offer_id], name: "idx_application_job_offer")
   @@index([status], name: "idx_application_status")
   @@map("applications")
+}
+
+model Assignment {
+  id             String           @id @default(uuid()) @db.Uuid
+  created_at     DateTime         @default(now())
+  updated_at     DateTime         @updatedAt
+  application_id String           @unique @db.Uuid
+  job_offer_id   String           @db.Uuid
+  worker_id      String           @db.Uuid
+  status         AssignmentStatus @default(CONFIRMED)
+  cancelled_by   CancelledBy?
+  cancelled_at   DateTime?
+  completed_at   DateTime?
+  no_show_at     DateTime?
+  note           String?
+
+  application Application @relation(fields: [application_id], references: [id], onDelete: Cascade)
+  job_offer   JobOffer    @relation(fields: [job_offer_id], references: [id], onDelete: Cascade)
+  worker      Profile     @relation(fields: [worker_id], references: [id], onDelete: Cascade)
+
+  @@index([job_offer_id], name: "idx_assignment_job_offer")
+  @@index([worker_id], name: "idx_assignment_worker")
+  @@index([status], name: "idx_assignment_status")
+  @@map("assignments")
 }
 
 model Penalty {

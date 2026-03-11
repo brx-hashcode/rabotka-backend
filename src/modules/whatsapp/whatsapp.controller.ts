@@ -8,15 +8,20 @@ import {
   BadRequestException,
   ForbiddenException,
   Logger,
+  Inject,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
 import type { Request } from 'express';
+import Redis from 'ioredis';
 import { Public } from '../auth/decorators/public.decorator.js';
 import { WhatsAppService } from './whatsapp.service';
 import { VerifyWhatsAppDto } from './dto/verify-whatsapp.dto';
 import { ConversationService } from '../conversation/conversation.service';
 import { TwilioService } from '../../common/services/twilio/twilio.service';
+import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
+
+const MSG_IDEMPOTENCY_TTL = 5 * 60; // 5 minutes
 
 @ApiTags('WhatsApp')
 @Controller('whatsapp')
@@ -29,6 +34,7 @@ export class WhatsAppController {
     private readonly conversationService: ConversationService,
     private readonly twilioService: TwilioService,
     private readonly configService: ConfigService,
+    @Inject(REDIS_CONNECTION) private readonly redis: Redis,
   ) {}
 
   @Get('status')
@@ -85,9 +91,26 @@ export class WhatsAppController {
 
     const from = body.From ?? '';
     const text = body.Body ?? '';
+    const messageSid = body.MessageSid ?? '';
 
     if (!from) {
       throw new BadRequestException("Champ 'From' manquant");
+    }
+
+    // Idempotency: skip already-processed messages (Twilio retry protection)
+    if (messageSid) {
+      const idempotencyKey = `wa:msg:${messageSid}`;
+      const already = await this.redis.set(
+        idempotencyKey,
+        '1',
+        'EX',
+        MSG_IDEMPOTENCY_TTL,
+        'NX',
+      );
+      if (already === null) {
+        this.logger.debug(`Duplicate webhook ignored: ${messageSid}`);
+        return;
+      }
     }
 
     const phone = from.startsWith('whatsapp:')

@@ -85,24 +85,67 @@ async function handleAcceptRefuseStep1(args: StepArgs): Promise<FlowResult> {
 }
 
 async function handleAcceptRefuseStep2(args: StepArgs): Promise<FlowResult> {
-  const { state, applicationId, trimmed, normalized, profile, ctx } = args;
+  const { state, normalized, trimmed } = args;
   const reason =
-    normalized === 'aucune' || normalized === 'non' ? undefined : trimmed;
+    normalized === 'aucune' || normalized === '0' || normalized === 'non'
+      ? null
+      : trimmed;
+
+  // Store reason in payload and move to confirmation step
+  return {
+    reply: [
+      [
+        '*Confirmer le refus ?*',
+        '',
+        reason ? `Raison : ${reason}` : 'Aucune raison fournie.',
+        '',
+        '1️⃣ Oui, refuser le candidat',
+        '2️⃣ Annuler (garder la candidature en attente)',
+      ].join('\n'),
+    ],
+    nextState: {
+      ...state,
+      step: 3,
+      payload: { ...state.payload, refusalReason: reason ?? '' },
+      updatedAt: new Date().toISOString(),
+    },
+  };
+}
+
+async function handleAcceptRefuseStep3(args: StepArgs): Promise<FlowResult> {
+  const { state, applicationId, normalized, profile, ctx } = args;
+
+  if (normalized === '2' || normalized === 'annuler') {
+    return {
+      reply: [
+        "*Refus annulé.* La candidature reste en attente.\n\nTapez 'Menu' pour revenir.",
+      ],
+      clearState: true,
+    };
+  }
+
+  if (normalized !== '1' && normalized !== 'oui') {
+    return {
+      reply: ['*Répondez par 1 (confirmer le refus) ou 2 (annuler).*'],
+      nextState: state,
+    };
+  }
+
+  const reason =
+    typeof state.payload.refusalReason === 'string' &&
+    state.payload.refusalReason.length > 0
+      ? state.payload.refusalReason
+      : undefined;
+
   try {
-    await ctx.applicationService.reject(
-      applicationId,
-      profile.id,
-      reason ?? undefined,
-    );
-    await ctx.notificationService.sendApplicationRejectedToWorker(
-      applicationId,
-    );
+    await ctx.applicationService.reject(applicationId, profile.id, reason);
+    await ctx.notificationService.sendApplicationRejectedToWorker(applicationId);
     return {
       reply: [
         [
-          '*Candidature refusée*',
+          '*Candidature refusée.*',
           '',
-          "Le worker a été notifié poliment. Votre offre reste ouverte pour d'autres candidatures.",
+          "Le candidat a été notifié. Votre offre reste ouverte pour d'autres candidatures.",
           '',
           "*Tapez 'Menu' pour revenir.*",
         ].join('\n'),
@@ -157,6 +200,7 @@ export async function runAcceptRefuseCandidateFlow(
 
   if (state.step === 1) return handleAcceptRefuseStep1(args);
   if (state.step === 2) return handleAcceptRefuseStep2(args);
+  if (state.step === 3) return handleAcceptRefuseStep3(args);
 
   return {
     reply: ["*ERREUR. TAPEZ 'MENU' POUR REVENIR.*"],

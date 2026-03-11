@@ -121,7 +121,7 @@ async function handleCancelStep1(
   }
 
   // Non-late cancellation: interpret options 1, 2, 3 explicitly.
-  if (normalized === '1' || normalized === 'confirmer') {
+  if (normalized === '1' || normalized === '0' || normalized === 'confirmer') {
     try {
       const result = await ctx.applicationService.cancel(
         applicationId,
