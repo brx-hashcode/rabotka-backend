@@ -13,6 +13,8 @@ const AMOUNT_MIN = 1000;
 const AMOUNT_MAX = 1_000_000;
 const ADDRESS_MIN = 10;
 const NOTE_MAX = 500;
+const QUANTITY_MIN = 1;
+const QUANTITY_MAX = 100;
 const MIN_HOURS_FROM_NOW = 4;
 
 const PAYMENT_FLOW_LABELS: Record<string, string> = {
@@ -82,7 +84,8 @@ function toScheduledAtString(scheduledAt: unknown): string {
   return '';
 }
 
-async function handlePublishStep8(args: StepArgs): Promise<FlowResult> {
+// Step 9 — publish the offer (formerly step 8)
+async function handlePublishStep9(args: StepArgs): Promise<FlowResult> {
   const { state, payload, profile, ctx } = args;
   const scheduledStr = toScheduledAtString(payload.scheduled_at);
   const noteValue = typeof payload.note === 'string' ? payload.note : undefined;
@@ -94,6 +97,7 @@ async function handlePublishStep8(args: StepArgs): Promise<FlowResult> {
     payment_flow: payload.payment_flow as PaymentFlow,
     address: String(payload.address),
     note: noteValue,
+    quantity: Number(payload.quantity),
   };
   try {
     const offer = await ctx.jobOfferService.create(profile.id, dto);
@@ -108,37 +112,39 @@ async function handlePublishStep8(args: StepArgs): Promise<FlowResult> {
   }
 }
 
-function handleStep8Modifier(
+// Step 9 (confirmation screen) — "Modifier" branch → step 10
+function handleStep9Modifier(
   state: BotState,
   payload: Record<string, unknown>,
   normalized: string,
 ): FlowResult | null {
-  if (state.step !== 8 || (normalized !== '2' && normalized !== 'modifier'))
+  if (state.step !== 9 || (normalized !== '2' && normalized !== 'modifier'))
     return null;
   return {
     reply: [
       [
-        'Quelle étape souhaitez-vous modifier ? (1-7)',
-        '1=Titre, 2=Description, 3=Date/heure, 4=Montant, 5=Type rémunération, 6=Adresse, 7=Note',
+        'Quelle étape souhaitez-vous modifier ? (1-8)',
+        '1=Titre, 2=Description, 3=Date/heure, 4=Montant, 5=Type rémunération, 6=Adresse, 7=Nombre de personnes, 8=Note',
       ].join('\n'),
     ],
     nextState: {
       ...state,
-      step: 9,
+      step: 10,
       payload: { ...payload },
       updatedAt: new Date().toISOString(),
     },
   };
 }
 
-function handleStep9(
+// Step 10 — modifier selection (formerly step 9)
+function handleStep10(
   state: BotState,
   payload: Record<string, unknown>,
   trimmed: string,
 ): FlowResult | null {
-  if (state.step !== 9) return null;
+  if (state.step !== 10) return null;
   const num = Number.parseInt(trimmed, 10);
-  if (num >= 1 && num <= 7) {
+  if (num >= 1 && num <= 8) {
     return {
       reply: [getStepPrompt(num, payload)],
       nextState: {
@@ -150,22 +156,23 @@ function handleStep9(
     };
   }
   return {
-    reply: ['Numéro invalide. Tapez un nombre entre 1 et 7.'],
+    reply: ['Numéro invalide. Tapez un nombre entre 1 et 8.'],
     nextState: state,
   };
 }
 
-async function handleStep8Confirm(
+// Step 9 — confirmation screen handler
+async function handleStep9Confirm(
   args: StepArgs,
   normalized: string,
 ): Promise<FlowResult | null> {
-  if (args.state.step !== 8) return null;
+  if (args.state.step !== 9) return null;
   if (
     normalized === '1' ||
     normalized === 'oui' ||
     normalized === 'oui, publier'
   ) {
-    return handlePublishStep8(args);
+    return handlePublishStep9(args);
   }
   if (normalized === '3' || normalized === 'annuler') {
     return {
@@ -188,6 +195,7 @@ function getStepHandler(step: number): ((args: StepArgs) => FlowResult) | null {
     5: handlePublishStep5,
     6: handlePublishStep6,
     7: handlePublishStep7,
+    8: handlePublishStep8,
   };
   return handlers[step] ?? null;
 }
@@ -220,14 +228,27 @@ export async function runPublishJobFlow(
     };
   }
 
-  const step8Modifier = handleStep8Modifier(state, payload, normalized);
-  if (step8Modifier) return step8Modifier;
+  // Global exit — any step
+  if (
+    normalized === 'exit' ||
+    normalized === 'annuler' ||
+    normalized === 'quitter' ||
+    normalized === 'cancel'
+  ) {
+    return {
+      reply: ["Publication annulée. Tapez 'Menu' pour revenir au menu."],
+      clearState: true,
+    };
+  }
 
-  const step9Result = handleStep9(state, payload, trimmed);
+  const step9Modifier = handleStep9Modifier(state, payload, normalized);
+  if (step9Modifier) return step9Modifier;
+
+  const step10Result = handleStep10(state, payload, trimmed);
+  if (step10Result) return step10Result;
+
+  const step9Result = await handleStep9Confirm(args, normalized);
   if (step9Result) return step9Result;
-
-  const step8Result = await handleStep8Confirm(args, normalized);
-  if (step8Result) return step8Result;
 
   const stepHandler = getStepHandler(step);
   if (stepHandler) return stepHandler(args);
@@ -244,11 +265,13 @@ function handlePublishStep1(args: StepArgs): FlowResult {
     return {
       reply: [
         [
-          "*PUBLICATION D'OFFRE* - ÉTAPE 1/7",
+          "*PUBLICATION D'OFFRE* - ÉTAPE 1/8",
           '',
           '*Quel est le titre de votre offre ?*',
           '',
           '*Exemple*: "_Plombier pour réparation urgente_"',
+          '',
+          '_Tapez "Annuler" à tout moment pour abandonner._',
         ].join('\n'),
       ],
       nextState: state,
@@ -265,7 +288,7 @@ function handlePublishStep1(args: StepArgs): FlowResult {
   return {
     reply: [
       [
-        '*ÉTAPE 2/7*',
+        '*ÉTAPE 2/8*',
         '',
         '*Décrivez votre offre en détail. Soyez précis sur les tâches à réaliser.*',
         '',
@@ -302,7 +325,7 @@ function handlePublishStep2(args: StepArgs): FlowResult {
   return {
     reply: [
       [
-        '*ÉTAPE 3/7*',
+        '*ÉTAPE 3/8*',
         '',
         '*À quelle date et heure le travail doit-il commencer ?*',
         'Format: JJ/MM/AAAA HH:MM',
@@ -351,7 +374,7 @@ function handlePublishStep3(args: StepArgs): FlowResult {
   return {
     reply: [
       [
-        '*ÉTAPE 4/7*',
+        '*ÉTAPE 4/8*',
         '',
         '*Quel est le montant proposé (en FCFA) ?*',
         'Tapez uniquement le chiffre.',
@@ -388,7 +411,7 @@ function handlePublishStep4(args: StepArgs): FlowResult {
   return {
     reply: [
       [
-        '*ÉTAPE 5/7*',
+        '*ÉTAPE 5/8*',
         '',
         '*Type de rémunération ?*',
         '1️⃣ Par heure',
@@ -419,7 +442,7 @@ function handlePublishStep5(args: StepArgs): FlowResult {
   return {
     reply: [
       [
-        '*ÉTAPE 6/7*',
+        '*ÉTAPE 6/8*',
         '',
         "*Quelle est l'adresse complète du lieu de travail ?*",
         '',
@@ -448,12 +471,12 @@ function handlePublishStep6(args: StepArgs): FlowResult {
   return {
     reply: [
       [
-        '*ÉTAPE 7/7 (OPTIONNEL)*',
+        '*ÉTAPE 7/8*',
         '',
-        '*Avez-vous une note complémentaire à ajouter ?*',
+        "*Combien de personnes sont nécessaires pour ce travail ?*",
+        `Entrez un nombre entre ${QUANTITY_MIN} et ${QUANTITY_MAX}.`,
         '',
-        '*Exemple*: "_Apporter vos propres outils_"',
-        '*Tapez "Non" ou "Passer" pour ignorer la note.*',
+        '*Exemple*: "_2_"',
       ].join('\n'),
     ],
     nextState: {
@@ -465,7 +488,52 @@ function handlePublishStep6(args: StepArgs): FlowResult {
   };
 }
 
+// Step 7 — quantity (new step)
 function handlePublishStep7(args: StepArgs): FlowResult {
+  const { state, payload, trimmed } = args;
+  if (!trimmed) {
+    return {
+      reply: [
+        `*Entrez le nombre de personnes nécessaires (${QUANTITY_MIN}-${QUANTITY_MAX}).*`,
+      ],
+      nextState: state,
+    };
+  }
+  const quantity = Number.parseInt(trimmed, 10);
+  if (
+    Number.isNaN(quantity) ||
+    quantity < QUANTITY_MIN ||
+    quantity > QUANTITY_MAX
+  ) {
+    return {
+      reply: [
+        `*Nombre invalide. Entrez un nombre entre ${QUANTITY_MIN} et ${QUANTITY_MAX}.*`,
+      ],
+      nextState: state,
+    };
+  }
+  return {
+    reply: [
+      [
+        '*ÉTAPE 8/8 (OPTIONNEL)*',
+        '',
+        '*Avez-vous une note complémentaire à ajouter ?*',
+        '',
+        '*Exemple*: "_Apporter vos propres outils_"',
+        '*Tapez "Non" ou "Passer" pour ignorer la note.*',
+      ].join('\n'),
+    ],
+    nextState: {
+      ...state,
+      step: 8,
+      payload: { ...payload, quantity },
+      updatedAt: new Date().toISOString(),
+    },
+  };
+}
+
+// Step 8 — note (formerly step 7)
+function handlePublishStep8(args: StepArgs): FlowResult {
   const { state, payload, trimmed, normalized } = args;
   const note =
     normalized === 'non' || normalized === 'passer' || normalized === 'skip'
@@ -494,7 +562,7 @@ function handlePublishStep7(args: StepArgs): FlowResult {
     ],
     nextState: {
       ...state,
-      step: 8,
+      step: 9,
       payload: fullPayload,
       updatedAt: new Date().toISOString(),
     },
@@ -519,6 +587,8 @@ function getStepPrompt(
     case 6:
       return "Quelle est l'adresse du lieu de travail ?";
     case 7:
+      return `Combien de personnes sont nécessaires ? (${QUANTITY_MIN}-${QUANTITY_MAX})`;
+    case 8:
       return 'Note complémentaire (ou "Non" pour passer)';
     default:
       return '';
@@ -567,6 +637,8 @@ function buildSummary(payload: Record<string, unknown>): string {
   const desc = payload.description;
   const descStr = typeof desc === 'string' ? `${desc.slice(0, 80)}...` : '-';
   const address = toDisplayString(payload.address);
+  const quantity =
+    typeof payload.quantity === 'number' ? String(payload.quantity) : '1';
   const note =
     payload.note == null || typeof payload.note !== 'string'
       ? 'Aucune'
@@ -577,6 +649,7 @@ function buildSummary(payload: Record<string, unknown>): string {
     `*Date et heure*: ${scheduled}`,
     `*Montant*: ${Number(payload.amount ?? 0).toLocaleString('fr-FR')} FCFA ${flow}`,
     `*Adresse*: ${address}`,
+    `*Nombre de personnes*: ${quantity}`,
     `*Note*: ${note}`,
   ].join('\n');
 }
@@ -592,10 +665,12 @@ export function getPublishJobInitialState(): BotState {
 
 export function getPublishJobFirstMessage(): string {
   return [
-    "*PUBLICATION D'OFFRE* - ÉTAPE 1/7",
+    "*PUBLICATION D'OFFRE* - ÉTAPE 1/8",
     '',
     '*Quel est le titre de votre offre ?*',
     '',
     '*Exemple*: "_Plombier pour réparation urgente_"',
+    '',
+    '_Tapez "Annuler" à tout moment pour abandonner._',
   ].join('\n');
 }

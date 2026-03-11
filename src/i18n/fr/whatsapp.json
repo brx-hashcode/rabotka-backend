@@ -1,0 +1,11 @@
+{
+  "errors": {
+    "webhook_not_configured": "Webhook non configuré",
+    "missing_signature": "En-tête X-Twilio-Signature manquant",
+    "invalid_signature": "Signature invalide",
+    "missing_from": "Champ 'From' manquant",
+    "invalid_token": "Token de vérification invalide",
+    "expired_token": "Token de vérification invalide ou expiré",
+    "profile_not_found": "Profil introuvable"
+  }
+}

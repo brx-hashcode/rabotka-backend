@@ -1,7 +1,8 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
-import { BotPlatform, ConversationStatus } from '@prisma/client';
+import { BotPlatform, ConversationStatus, MessageDirection } from '@prisma/client';
 import { BotOrchestratorService } from '../bot/services/bot-orchestrator.service';
+import { WhatsAppService } from '../whatsapp/whatsapp.service';
 
 const DEFAULT_BOT_SESSION_ID = 'default';
 
@@ -12,6 +13,8 @@ export class ConversationService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly botOrchestrator: BotOrchestratorService,
+    @Inject(forwardRef(() => WhatsAppService))
+    private readonly whatsApp: WhatsAppService,
   ) {}
 
   /**
@@ -48,6 +51,16 @@ export class ConversationService {
       },
       update: {},
     });
+
+    // Save incoming message
+    await this.whatsApp
+      .saveMessage(profile.id, MessageDirection.INBOUND, text)
+      .catch((err) =>
+        this.logger.warn(
+          `Failed to save inbound message for ${profile.id}:`,
+          err,
+        ),
+      );
 
     this.logger.log(
       `Conversation (profile ${profile.id}): "${text.slice(0, 50)}${text.length > 50 ? '...' : ''}"`,
