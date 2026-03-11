@@ -10,6 +10,7 @@ import {
   AccountStatus,
   ApplicationStatus,
   AssignmentStatus,
+  BillingStatus,
   JobOfferStatus,
   PaymentStatus,
   PaymentMethod,
@@ -23,6 +24,8 @@ import {
   CANCELLATION_PENALTY_THRESHOLD_HOURS,
   RELIABILITY_SCORE_MIN,
   RELIABILITY_SCORE_MAX,
+  EMPLOYER_CANCEL_SCORE_DEDUCTION,
+  BILLING_BLOCK_THRESHOLD,
 } from './application.constants';
 
 export type AdminApplicationListItem = {
@@ -172,7 +175,7 @@ export class ApplicationService {
     });
     if (unpaidPenaltiesCount > 0) {
       throw new ForbiddenException(
-        'Vous avez des pénalités impayées. Réglez-les pour pouvoir postuler aux offres.',
+        'Vous avez des pénalités impayées. Tapez PAYER pour les régler et débloquer votre compte.',
       );
     }
 
@@ -313,7 +316,13 @@ export class ApplicationService {
     });
 
     const quantityNeeded = application.job_offer.quantity ?? 1;
-    const shouldFillJob = currentAcceptedCount + 1 >= quantityNeeded;
+    const newAcceptedCount = currentAcceptedCount + 1;
+    const offerStatus =
+      newAcceptedCount >= quantityNeeded
+        ? JobOfferStatus.FILLED
+        : newAcceptedCount > 0
+          ? JobOfferStatus.PARTIALLY_FILLED
+          : JobOfferStatus.ACTIVE;
 
     await this.prisma.$transaction([
       this.prisma.application.update({
@@ -322,9 +331,7 @@ export class ApplicationService {
       }),
       this.prisma.jobOffer.update({
         where: { id: application.job_offer_id },
-        data: {
-          status: shouldFillJob ? JobOfferStatus.FILLED : JobOfferStatus.ACTIVE,
-        },
+        data: { status: offerStatus },
       }),
       this.prisma.assignment.create({
         data: {
@@ -437,9 +444,21 @@ export class ApplicationService {
 
     await this.prisma.$transaction(async (tx) => {
       if (isAccepted) {
+        // Compute remaining accepted count (excluding this application)
+        const remainingAccepted = await tx.application.count({
+          where: {
+            job_offer_id: application.job_offer_id,
+            status: ApplicationStatus.ACCEPTED,
+            id: { not: applicationId },
+          },
+        });
+        const reopenStatus =
+          remainingAccepted > 0
+            ? JobOfferStatus.PARTIALLY_FILLED
+            : JobOfferStatus.ACTIVE;
         await tx.jobOffer.update({
           where: { id: application.job_offer_id },
-          data: { status: JobOfferStatus.ACTIVE },
+          data: { status: reopenStatus },
         });
         await tx.assignment.updateMany({
           where: { application_id: applicationId },
@@ -478,6 +497,7 @@ export class ApplicationService {
           where: { id: workerId },
           data: { reliability_score: newScore },
         });
+        await this.syncBillingStatus(workerId, tx);
       }
 
       await tx.application.update({
@@ -554,16 +574,17 @@ export class ApplicationService {
 
     const amount = Number(application.job_offer.amount);
     const transactionId = generatePaymentReference();
-    await this.prisma.$transaction([
-      this.prisma.jobOffer.update({
+    const now = new Date();
+    await this.prisma.$transaction(async (tx) => {
+      await tx.jobOffer.update({
         where: { id: application.job_offer_id },
         data: { status: JobOfferStatus.COMPLETED },
-      }),
-      this.prisma.assignment.updateMany({
+      });
+      await tx.assignment.updateMany({
         where: { application_id: applicationId },
-        data: { status: AssignmentStatus.COMPLETED, completed_at: new Date() },
-      }),
-      this.prisma.payment.create({
+        data: { status: AssignmentStatus.COMPLETED, completed_at: now },
+      });
+      await tx.payment.create({
         data: {
           type: PaymentType.JOB_POSTING,
           profile_id: application.worker_id,
@@ -571,11 +592,24 @@ export class ApplicationService {
           payment_method: PaymentMethod.OTHER,
           transaction_id: transactionId,
           status: PaymentStatus.COMPLETED,
-          paid_at: new Date(),
+          paid_at: now,
           description: `Job completion payment for job ${application.job_offer_id}`,
         },
-      }),
-    ]);
+      });
+      // Boost worker reliability score on successful completion
+      const worker = await tx.profile.findUnique({
+        where: { id: application.worker_id },
+        select: { reliability_score: true },
+      });
+      const currentScore = worker?.reliability_score ?? 100;
+      const boostedScore = Math.min(RELIABILITY_SCORE_MAX, currentScore + 2);
+      if (boostedScore > currentScore) {
+        await tx.profile.update({
+          where: { id: application.worker_id },
+          data: { reliability_score: boostedScore },
+        });
+      }
+    });
 
     const updated = await this.findById(applicationId);
     if (!updated)
@@ -607,27 +641,53 @@ export class ApplicationService {
     }
 
     const now = new Date();
-    await this.prisma.$transaction([
-      this.prisma.application.update({
+    await this.prisma.$transaction(async (tx) => {
+      await tx.application.update({
         where: { id: applicationId },
         data: {
           status: ApplicationStatus.CANCELLED,
           cancelled_at: now,
           cancellation_reason: "Annulée par l'employeur",
         },
-      }),
-      this.prisma.jobOffer.update({
+      });
+      const remainingAccepted = await tx.application.count({
+        where: {
+          job_offer_id: application.job_offer_id,
+          status: ApplicationStatus.ACCEPTED,
+          id: { not: applicationId },
+        },
+      });
+      await tx.jobOffer.update({
         where: { id: application.job_offer_id },
-        data: { status: JobOfferStatus.ACTIVE },
-      }),
-      this.prisma.assignment.updateMany({
+        data: {
+          status:
+            remainingAccepted > 0
+              ? JobOfferStatus.PARTIALLY_FILLED
+              : JobOfferStatus.ACTIVE,
+        },
+      });
+      await tx.assignment.updateMany({
         where: { application_id: applicationId },
         data: {
           status: AssignmentStatus.CANCELLED_BY_EMPLOYER,
           cancelled_at: now,
         },
-      }),
-    ]);
+      });
+      // Deduct employer reliability score
+      const employer = await tx.profile.findUnique({
+        where: { id: employerId },
+        select: { reliability_score: true },
+      });
+      const currentScore = employer?.reliability_score ?? 100;
+      const newScore = Math.max(
+        RELIABILITY_SCORE_MIN,
+        currentScore - EMPLOYER_CANCEL_SCORE_DEDUCTION,
+      );
+      await tx.profile.update({
+        where: { id: employerId },
+        data: { reliability_score: newScore },
+      });
+    });
 
     const updated = await this.findById(applicationId);
     if (!updated)
@@ -648,6 +708,27 @@ export class ApplicationService {
     });
   }
 
+  /** Update worker billing_status based on current unpaid penalty count. Call within a tx or after writes. */
+  private async syncBillingStatus(
+    workerId: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<void> {
+    const db = tx ?? this.prisma;
+    const unpaidCount = await db.penalty.count({
+      where: { worker_id: workerId, paid_at: null },
+    });
+    const newStatus =
+      unpaidCount === 0
+        ? BillingStatus.CLEAR
+        : unpaidCount >= BILLING_BLOCK_THRESHOLD
+          ? BillingStatus.BLOCKED
+          : BillingStatus.PENDING_PAYMENT;
+    await db.profile.update({
+      where: { id: workerId },
+      data: { billing_status: newStatus },
+    });
+  }
+
   async getUnpaidPenalties(
     workerId: string,
   ): Promise<{ count: number; total: number; ids: string[] }> {
@@ -660,6 +741,24 @@ export class ApplicationService {
       total: penalties.reduce((sum, p) => sum + Number(p.amount), 0),
       ids: penalties.map((p) => p.id),
     };
+  }
+
+  async markPenaltiesPaid(
+    workerId: string,
+  ): Promise<{ paidCount: number; totalAmount: number }> {
+    const unpaid = await this.getUnpaidPenalties(workerId);
+    if (unpaid.count === 0) {
+      return { paidCount: 0, totalAmount: 0 };
+    }
+    const now = new Date();
+    await this.prisma.$transaction([
+      this.prisma.penalty.updateMany({
+        where: { worker_id: workerId, paid_at: null },
+        data: { paid_at: now },
+      }),
+    ]);
+    await this.syncBillingStatus(workerId);
+    return { paidCount: unpaid.count, totalAmount: unpaid.total };
   }
 
   /** Get applications with ACCEPTED status and scheduled_at in the given time window (for reminders) */

@@ -280,7 +280,7 @@ describe('ApplicationService', () => {
       );
     });
 
-    it('quantity=4: first acceptance → offer stays ACTIVE', async () => {
+    it('quantity=4: first acceptance → offer becomes PARTIALLY_FILLED', async () => {
       const offerWithQty4 = { ...mockJobOffer, quantity: 4 };
       (prisma.application.findUnique as jest.Mock).mockResolvedValue({
         ...mockApplication,
@@ -289,7 +289,9 @@ describe('ApplicationService', () => {
       (prisma.application.count as jest.Mock).mockResolvedValue(0);
       await service.accept(APPLICATION_ID, EMPLOYER_ID);
       expect(prisma.jobOffer.update).toHaveBeenCalledWith(
-        expect.objectContaining({ data: { status: JobOfferStatus.ACTIVE } }),
+        expect.objectContaining({
+          data: { status: JobOfferStatus.PARTIALLY_FILLED },
+        }),
       );
     });
 

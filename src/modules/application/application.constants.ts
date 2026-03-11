@@ -12,3 +12,12 @@ export const RELIABILITY_SCORE_MIN = 50;
 
 /** Maximum reliability score */
 export const RELIABILITY_SCORE_MAX = 100;
+
+/** Employer score deduction when they cancel an accepted worker */
+export const EMPLOYER_CANCEL_SCORE_DEDUCTION = 5;
+
+/** Employer score deduction when job expires with an accepted worker (ghost) */
+export const EMPLOYER_GHOST_SCORE_DEDUCTION = 10;
+
+/** Number of unpaid penalties before billing_status becomes BLOCKED */
+export const BILLING_BLOCK_THRESHOLD = 2;

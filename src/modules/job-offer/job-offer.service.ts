@@ -88,6 +88,7 @@ export type JobOfferDetail = JobOfferListItem & {
     first_name: string;
     last_name: string;
     phone: string;
+    reliability_score: number | null;
   };
 };
 
@@ -196,6 +197,12 @@ export class JobOfferService {
             first_name: true,
             last_name: true,
             phone: true,
+            reliability_score: true,
+          },
+        },
+        _count: {
+          select: {
+            applications: { where: { status: 'ACCEPTED' } },
           },
         },
       },
@@ -203,13 +210,14 @@ export class JobOfferService {
     if (!offer) return null;
 
     return {
-      ...this.toListItem(offer),
+      ...this.toListItem(offer, offer._count.applications),
       employer: offer.employer
         ? {
             id: offer.employer.id,
             first_name: offer.employer.first_name,
             last_name: offer.employer.last_name,
             phone: offer.employer.phone,
+            reliability_score: offer.employer.reliability_score,
           }
         : undefined,
     };

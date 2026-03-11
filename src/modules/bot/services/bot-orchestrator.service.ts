@@ -46,6 +46,10 @@ import {
   runProfileSubmenuFlow,
   getProfileSubmenuInitialState,
 } from '../flows/profile-submenu.flow';
+import {
+  runPayPenaltiesFlow,
+  getPayPenaltiesInitialState,
+} from '../flows/pay-penalties.flow';
 
 const INACTIVE_MESSAGE = `Votre compte est créé mais pas encore activé. Cliquez sur le lien de confirmation que nous vous avons envoyé par WhatsApp pour l’activer.`;
 
@@ -264,6 +268,10 @@ export class BotOrchestratorService {
         runProfileSubmenuFlow(state, input, profile, {
           commands: this.commands,
         }),
+      [FLOW_IDS.PAY_PENALTIES]: () =>
+        runPayPenaltiesFlow(state, input, profile, {
+          applicationService: deps.applicationService,
+        }),
     };
     const runner = runners[flowId];
     return runner ? runner() : Promise.resolve(null);
@@ -277,14 +285,23 @@ export class BotOrchestratorService {
   ): Promise<string[]> {
     const commandHandlers: Record<string, () => Promise<string[]>> = {
       start_publish_job: () => this.handleStartPublishJobCommand(profileId),
+
       list_offers: () => this.handleListOffersCommand(profile, profileId),
+
       my_applications: () =>
         this.handleMyApplicationsCommand(profile, profileId),
+
       candidatures_received: () =>
         this.handleCandidaturesReceivedCommand(botProfile, profileId),
+
       filled_jobs: () => this.handleFilledJobsCommand(botProfile, profileId),
+
       profile: () => this.handleProfileCommand(profileId, botProfile),
+
+      pay_penalties: () =>
+        this.handlePayPenaltiesCommand(botProfile, profileId),
     };
+
     const handler = commandHandlers[route.commandId];
     if (handler) return handler();
     const reply = await this.runCommand(route.commandId, botProfile);
@@ -370,6 +387,24 @@ export class BotOrchestratorService {
       await this.botState.set(profileId, listState);
     }
     return [result.message];
+  }
+
+  private async handlePayPenaltiesCommand(
+    profile: BotProfile,
+    profileId: string,
+  ): Promise<string[]> {
+    const unpaid = await this.applicationService.getUnpaidPenalties(profile.id);
+    if (unpaid.count === 0) {
+      return [
+        `✅ *Aucune pénalité impayée.* Votre compte est en règle.\n\nTapez *MENU* pour continuer.`,
+      ];
+    }
+    const flowState = getPayPenaltiesInitialState(unpaid.count, unpaid.total);
+    await this.botState.set(profileId, flowState);
+    const result = await runPayPenaltiesFlow(flowState, '', profile, {
+      applicationService: this.applicationService,
+    });
+    return result.reply;
   }
 
   private async loadProfile(profileId: string) {

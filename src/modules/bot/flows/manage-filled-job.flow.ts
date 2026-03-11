@@ -4,8 +4,6 @@ import { menuMessage } from '../messages/menu.messages';
 import {
   formatFilledJobsListPage,
   formatFilledJobDetail,
-  formatJobCompletedToWorker,
-  formatJobCancelledByEmployerToWorker,
   type FilledJobListItem,
 } from '../messages/application.messages';
 import type { ApplicationService } from '../../application/application.service';
@@ -125,7 +123,7 @@ export async function runManageFilledJobFlow(
         return {
           reply: [
             [
-              '*Mission annulée. L\'offre est de nouveau ouverte aux candidatures.*',
+              "*Mission annulée. L'offre est de nouveau ouverte aux candidatures.*",
               '',
               "Tapez 'Menu' pour revenir.",
             ].join('\n'),
@@ -151,9 +149,7 @@ export async function runManageFilledJobFlow(
     const hasMore = items.length > (pageIndex + 1) * PAGE_SIZE;
     if (!hasMore) {
       return {
-        reply: [
-          "*RÉPONDEZ PAR UN NUMÉRO (1-5), 6 (VOIR PLUS) OU 7 (MENU).*",
-        ],
+        reply: ['*RÉPONDEZ PAR UN NUMÉRO (1-5), 6 (VOIR PLUS) OU 7 (MENU).*'],
         nextState: state,
       };
     }
