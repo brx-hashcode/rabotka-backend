@@ -284,7 +284,8 @@ export class AdminProfileController {
   @Post(':id/send-verification-link')
   @ApiOperation({
     summary: 'Resend WhatsApp verification link (admin only)',
-    description: 'Generates a new WhatsApp verification token and sends the link to the profile phone number.',
+    description:
+      'Generates a new WhatsApp verification token and sends the link to the profile phone number.',
   })
   @ApiResponse({ status: 200, description: 'Verification link sent' })
   async sendVerificationLink(@Param('id') id: string) {
@@ -294,7 +295,8 @@ export class AdminProfileController {
   @Patch(':id/confirm-payment')
   @ApiOperation({
     summary: 'Confirm or reject payment for a profile (admin only)',
-    description: 'Manually confirms or rejects a payment. Accepting activates the profile; rejecting keeps it in PENDING_PAYMENT.',
+    description:
+      'Manually confirms or rejects a payment. Accepting activates the profile; rejecting keeps it in PENDING_PAYMENT.',
   })
   @ApiResponse({ status: 200, description: 'Updated profile details' })
   @ApiResponse({ status: 404, description: 'Profile not found' })
