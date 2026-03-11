@@ -5,15 +5,16 @@ export function paymentApprovedMessage(
   const typeLabel = profileType === 'WORKER' ? 'Travailleur' : 'Employeur';
 
   return [
-    `✅ Bonjour ${firstName},`,
+    `Bonjour ${firstName} 👋`,
     '',
-    'Votre paiement a été approuvé et votre compte Rabotka est maintenant actif !',
+    '✅ Votre paiement a été confirmé.',
+    'Votre compte *Rabotka* est maintenant actif.',
     '',
-    `✅ Type de compte : ${typeLabel}`,
-    '✅ Statut : Actif',
+    `Type de compte : ${typeLabel}`,
+    'Statut : Actif',
     '',
-    'Tapez *Menu* pour commencer à utiliser la plateforme.',
+    '👉 Tapez *Menu* pour commencer à utiliser la plateforme.',
     '',
-    'Bienvenue dans la communauté Rabotka ! 🚀',
+    'Bienvenue dans la communauté Rabotka 🚀',
   ].join('\n');
 }
