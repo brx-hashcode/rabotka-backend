@@ -3,13 +3,19 @@ import { ProfileController } from '../profile.controller';
 
 function makeProfileService() {
   return {
-    createProfile: jest.fn().mockResolvedValue({ message: 'Profil créé avec succès' }),
+    createProfile: jest
+      .fn()
+      .mockResolvedValue({ message: 'Profil créé avec succès' }),
     findById: jest.fn().mockResolvedValue({ id: 'p-1', firstName: 'Alice' }),
     getPenaltiesByProfileId: jest.fn().mockResolvedValue([]),
     updateProfile: jest.fn().mockResolvedValue({ id: 'p-1' }),
-    updateAvatar: jest.fn().mockResolvedValue({ avatarUrl: 'https://cdn/avatar.jpg' }),
+    updateAvatar: jest
+      .fn()
+      .mockResolvedValue({ avatarUrl: 'https://cdn/avatar.jpg' }),
     requestWhatsAppVerification: jest.fn().mockResolvedValue({ success: true }),
-    getApplicationsByProfileId: jest.fn().mockResolvedValue({ data: [], total: 0, page: 1, limit: 10 }),
+    getApplicationsByProfileId: jest
+      .fn()
+      .mockResolvedValue({ data: [], total: 0, page: 1, limit: 10 }),
   };
 }
 
@@ -19,7 +25,9 @@ function makeMailService() {
 
 function makeWalletService() {
   return {
-    recordPenaltyPayment: jest.fn().mockResolvedValue({ reference: 'RBK-2026-abc123' }),
+    recordPenaltyPayment: jest
+      .fn()
+      .mockResolvedValue({ reference: 'RBK-2026-abc123' }),
   };
 }
 
@@ -67,7 +75,7 @@ describe('ProfileController', () => {
       }) as Express.Multer.File;
 
     it('creates a profile and sends welcome email', async () => {
-      const result = await controller.createProfile(dto, {
+      const result = await controller.createProfile(dto as any, {
         kycDocument: [makeFile('doc')],
         kycSelfie: [makeFile('selfie')],
       });
@@ -80,18 +88,22 @@ describe('ProfileController', () => {
 
     it('throws BadRequestException when kycDocument is missing', async () => {
       await expect(
-        controller.createProfile(dto, { kycSelfie: [makeFile('selfie')] }),
+        controller.createProfile(dto as any, {
+          kycSelfie: [makeFile('selfie')],
+        }),
       ).rejects.toThrow(BadRequestException);
     });
 
     it('throws BadRequestException when kycSelfie is missing', async () => {
       await expect(
-        controller.createProfile(dto, { kycDocument: [makeFile('doc')] }),
+        controller.createProfile(dto as any, {
+          kycDocument: [makeFile('doc')],
+        }),
       ).rejects.toThrow(BadRequestException);
     });
 
     it('throws BadRequestException when files object is empty', async () => {
-      await expect(controller.createProfile(dto, {})).rejects.toThrow(
+      await expect(controller.createProfile(dto as any, {})).rejects.toThrow(
         BadRequestException,
       );
     });
@@ -112,7 +124,9 @@ describe('ProfileController', () => {
   describe('getPenalties()', () => {
     it('returns penalties for authenticated user', async () => {
       const result = await controller.getPenalties(makeReq());
-      expect(profileService.getPenaltiesByProfileId).toHaveBeenCalledWith('p-1');
+      expect(profileService.getPenaltiesByProfileId).toHaveBeenCalledWith(
+        'p-1',
+      );
       expect(result).toEqual([]);
     });
   });
@@ -210,7 +224,10 @@ describe('ProfileController', () => {
 
     it('uploads avatar and returns URL', async () => {
       const result = await controller.uploadAvatar(makeReq(), avatarFile);
-      expect(profileService.updateAvatar).toHaveBeenCalledWith('p-1', avatarFile);
+      expect(profileService.updateAvatar).toHaveBeenCalledWith(
+        'p-1',
+        avatarFile,
+      );
       expect(result.avatarUrl).toBe('https://cdn/avatar.jpg');
     });
 
