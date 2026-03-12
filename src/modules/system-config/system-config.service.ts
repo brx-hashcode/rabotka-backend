@@ -3,7 +3,10 @@ import Redis from 'ioredis';
 import { ConfigCategory } from '@prisma/client';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
-import { DEFAULT_SYSTEM_CONFIGS } from './system-config.constants';
+import {
+  DEFAULT_SYSTEM_CONFIGS,
+  STORAGE_ENV_OVERRIDES,
+} from './system-config.constants';
 
 const CACHE_PREFIX = 'syscfg:';
 const CACHE_TTL_SECONDS = 300; // 5 minutes
@@ -40,7 +43,9 @@ export class SystemConfigService implements OnModuleInit {
         },
       });
     }
-    this.logger.log(`System config seeded (${DEFAULT_SYSTEM_CONFIGS.length} keys)`);
+    this.logger.log(
+      `System config seeded (${DEFAULT_SYSTEM_CONFIGS.length} keys)`,
+    );
   }
 
   // ── Core get/set ──────────────────────────────────────────────────────────
@@ -108,14 +113,22 @@ export class SystemConfigService implements OnModuleInit {
   }
 
   async getContactInfo() {
-    const [email, phone, address, orangeMoney, airtelMoney] = await Promise.all([
-      this.get('contact.email', 'contact@rabotka.com'),
-      this.get('contact.phone', ''),
-      this.get('contact.address', ''),
-      this.get('contact.orange_money_number', '06 000 0000'),
-      this.get('contact.airtel_money_number', '07 000 0000'),
-    ]);
-    return { email, phone, address, orangeMoneyNumber: orangeMoney, airtelMoneyNumber: airtelMoney };
+    const [email, phone, address, orangeMoney, airtelMoney] = await Promise.all(
+      [
+        this.get('contact.email', 'contact@rabotka.com'),
+        this.get('contact.phone', ''),
+        this.get('contact.address', ''),
+        this.get('contact.orange_money_number', '06 000 0000'),
+        this.get('contact.airtel_money_number', '07 000 0000'),
+      ],
+    );
+    return {
+      email,
+      phone,
+      address,
+      orangeMoneyNumber: orangeMoney,
+      airtelMoneyNumber: airtelMoney,
+    };
   }
 
   async getFees() {
@@ -161,8 +174,9 @@ export class SystemConfigService implements OnModuleInit {
    * Returns a map of env-var-name → db-value for the given storage driver.
    * Empty string values are omitted so the original ConfigService env var takes precedence.
    */
-  async getStorageEnvOverrides(driver: string): Promise<Record<string, string>> {
-    const { STORAGE_ENV_OVERRIDES } = await import('./system-config.constants');
+  async getStorageEnvOverrides(
+    driver: string,
+  ): Promise<Record<string, string>> {
     const mapping = STORAGE_ENV_OVERRIDES[driver.toUpperCase()] ?? {};
     const overrides: Record<string, string> = {};
     await Promise.all(
