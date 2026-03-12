@@ -13,14 +13,14 @@ export class StorageService implements OnModuleInit {
     private readonly factory: StorageProviderFactory,
   ) {}
 
-  onModuleInit() {
+  async onModuleInit(): Promise<void> {
     if (!this.factory) {
       this.logger.warn(
         'StorageProviderFactory not injected; storage operations will fail',
       );
       return;
     }
-    this.provider = this.factory.create();
+    this.provider = await this.factory.create();
     this.logger.log('Storage service initialized');
   }
 
