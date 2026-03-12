@@ -1,11 +1,21 @@
-import { runPublishJobFlow, getPublishJobFirstMessage, getPublishJobInitialState } from '../publish-job.flow';
+import {
+  runPublishJobFlow,
+  getPublishJobFirstMessage,
+} from '../publish-job.flow';
 import type { BotProfile, BotState } from '../../types/bot-state.types';
 import type { JobOfferService } from '../../../job-offer/job-offer.service';
 import { FLOW_IDS } from '../../bot.constants';
-import { PaymentFlow } from '@prisma/client';
 
-function makeState(step: number, payload: Record<string, unknown> = {}): BotState {
-  return { flowId: FLOW_IDS.PUBLISH_JOB, step, payload, updatedAt: new Date().toISOString() };
+function makeState(
+  step: number,
+  payload: Record<string, unknown> = {},
+): BotState {
+  return {
+    flowId: FLOW_IDS.PUBLISH_JOB,
+    step,
+    payload,
+    updatedAt: new Date().toISOString(),
+  };
 }
 
 const employerProfile: BotProfile = {
@@ -52,7 +62,12 @@ describe('runPublishJobFlow()', () => {
   describe('non-employer', () => {
     it('returns error and clears state', async () => {
       const state = makeState(1);
-      const result = await runPublishJobFlow(state, 'Titre test', workerProfile, ctx);
+      const result = await runPublishJobFlow(
+        state,
+        'Titre test',
+        workerProfile,
+        ctx,
+      );
       expect(result.clearState).toBe(true);
       expect(result.reply[0]).toContain('Seuls les employeurs');
     });
@@ -68,20 +83,35 @@ describe('runPublishJobFlow()', () => {
 
     it('rejects title that is too short', async () => {
       const state = makeState(1);
-      const result = await runPublishJobFlow(state, 'abc', employerProfile, ctx);
+      const result = await runPublishJobFlow(
+        state,
+        'abc',
+        employerProfile,
+        ctx,
+      );
       expect(result.reply[0]).toContain('titre doit contenir');
       expect(result.nextState?.step).toBe(1);
     });
 
     it('rejects title that is too long', async () => {
       const state = makeState(1);
-      const result = await runPublishJobFlow(state, 'x'.repeat(101), employerProfile, ctx);
+      const result = await runPublishJobFlow(
+        state,
+        'x'.repeat(101),
+        employerProfile,
+        ctx,
+      );
       expect(result.reply[0]).toContain('titre doit contenir');
     });
 
     it('accepts valid title and advances to step 2', async () => {
       const state = makeState(1);
-      const result = await runPublishJobFlow(state, 'Plombier pour urgence', employerProfile, ctx);
+      const result = await runPublishJobFlow(
+        state,
+        'Plombier pour urgence',
+        employerProfile,
+        ctx,
+      );
       expect(result.nextState?.step).toBe(2);
       expect(result.nextState?.payload.title).toBe('Plombier pour urgence');
     });
@@ -90,7 +120,12 @@ describe('runPublishJobFlow()', () => {
   describe('Step 2 — description', () => {
     it('rejects description that is too short', async () => {
       const state = makeState(2);
-      const result = await runPublishJobFlow(state, 'short', employerProfile, ctx);
+      const result = await runPublishJobFlow(
+        state,
+        'short',
+        employerProfile,
+        ctx,
+      );
       expect(result.reply[0]).toContain('description doit contenir');
       expect(result.nextState?.step).toBe(2);
     });
@@ -106,7 +141,12 @@ describe('runPublishJobFlow()', () => {
   describe('Step 3 — date', () => {
     it('rejects invalid date format', async () => {
       const state = makeState(3);
-      const result = await runPublishJobFlow(state, '2026-01-01', employerProfile, ctx);
+      const result = await runPublishJobFlow(
+        state,
+        '2026-01-01',
+        employerProfile,
+        ctx,
+      );
       expect(result.reply[0]).toContain('Format invalide');
     });
 
@@ -118,13 +158,23 @@ describe('runPublishJobFlow()', () => {
       const y = pastDate.getFullYear();
       const h = String(pastDate.getHours()).padStart(2, '0');
       const min = String(pastDate.getMinutes()).padStart(2, '0');
-      const result = await runPublishJobFlow(state, `${d}/${m}/${y} ${h}:${min}`, employerProfile, ctx);
+      const result = await runPublishJobFlow(
+        state,
+        `${d}/${m}/${y} ${h}:${min}`,
+        employerProfile,
+        ctx,
+      );
       expect(result.reply[0]).toContain('au moins');
     });
 
     it('accepts valid future date and advances to step 4', async () => {
       const state = makeState(3);
-      const result = await runPublishJobFlow(state, futureDate(5), employerProfile, ctx);
+      const result = await runPublishJobFlow(
+        state,
+        futureDate(5),
+        employerProfile,
+        ctx,
+      );
       expect(result.nextState?.step).toBe(4);
     });
   });
@@ -132,13 +182,23 @@ describe('runPublishJobFlow()', () => {
   describe('Step 4 — amount', () => {
     it('rejects amount below minimum', async () => {
       const state = makeState(4);
-      const result = await runPublishJobFlow(state, '500', employerProfile, ctx);
+      const result = await runPublishJobFlow(
+        state,
+        '500',
+        employerProfile,
+        ctx,
+      );
       expect(result.reply[0]).toContain('Montant invalide');
     });
 
     it('accepts valid amount and advances to step 5', async () => {
       const state = makeState(4);
-      const result = await runPublishJobFlow(state, '15000', employerProfile, ctx);
+      const result = await runPublishJobFlow(
+        state,
+        '15000',
+        employerProfile,
+        ctx,
+      );
       expect(result.nextState?.step).toBe(5);
       expect(result.nextState?.payload.amount).toBe(15000);
     });
@@ -174,13 +234,23 @@ describe('runPublishJobFlow()', () => {
   describe('Step 6 — address', () => {
     it('rejects address that is too short', async () => {
       const state = makeState(6);
-      const result = await runPublishJobFlow(state, 'short', employerProfile, ctx);
+      const result = await runPublishJobFlow(
+        state,
+        'short',
+        employerProfile,
+        ctx,
+      );
       expect(result.reply[0]).toContain('adresse doit contenir');
     });
 
     it('accepts valid address and advances to step 7 (quantity)', async () => {
       const state = makeState(6);
-      const result = await runPublishJobFlow(state, '123 Avenue de la Paix, Brazzaville', employerProfile, ctx);
+      const result = await runPublishJobFlow(
+        state,
+        '123 Avenue de la Paix, Brazzaville',
+        employerProfile,
+        ctx,
+      );
       expect(result.nextState?.step).toBe(7);
       expect(result.reply[0]).toContain('ÉTAPE 7/8');
       expect(result.reply[0]).toContain('personnes');
@@ -197,13 +267,23 @@ describe('runPublishJobFlow()', () => {
 
     it('rejects quantity > 100', async () => {
       const state = makeState(7);
-      const result = await runPublishJobFlow(state, '101', employerProfile, ctx);
+      const result = await runPublishJobFlow(
+        state,
+        '101',
+        employerProfile,
+        ctx,
+      );
       expect(result.reply[0]).toContain('Nombre invalide');
     });
 
     it('rejects non-numeric input', async () => {
       const state = makeState(7);
-      const result = await runPublishJobFlow(state, 'beaucoup', employerProfile, ctx);
+      const result = await runPublishJobFlow(
+        state,
+        'beaucoup',
+        employerProfile,
+        ctx,
+      );
       expect(result.reply[0]).toContain('Nombre invalide');
     });
 
@@ -224,27 +304,71 @@ describe('runPublishJobFlow()', () => {
 
   describe('Step 8 — note (formerly step 7)', () => {
     it('skips note with "Non" and shows confirmation', async () => {
-      const state = makeState(8, { title: 'Test', description: 'x'.repeat(30), quantity: 1, amount: 10000, payment_flow: 'DAILY', address: '123 Avenue test', scheduled_at: new Date(Date.now() + 5 * 3600000).toISOString() });
-      const result = await runPublishJobFlow(state, 'Non', employerProfile, ctx);
+      const state = makeState(8, {
+        title: 'Test',
+        description: 'x'.repeat(30),
+        quantity: 1,
+        amount: 10000,
+        payment_flow: 'DAILY',
+        address: '123 Avenue test',
+        scheduled_at: new Date(Date.now() + 5 * 3600000).toISOString(),
+      });
+      const result = await runPublishJobFlow(
+        state,
+        'Non',
+        employerProfile,
+        ctx,
+      );
       expect(result.nextState?.step).toBe(9);
       expect(result.reply[0]).toContain('RÉCAPITULATIF');
     });
 
     it('skips note with "Passer"', async () => {
-      const state = makeState(8, { title: 'Test', description: 'x'.repeat(30), quantity: 1, amount: 10000, payment_flow: 'DAILY', address: '123 Avenue test', scheduled_at: new Date(Date.now() + 5 * 3600000).toISOString() });
-      const result = await runPublishJobFlow(state, 'Passer', employerProfile, ctx);
+      const state = makeState(8, {
+        title: 'Test',
+        description: 'x'.repeat(30),
+        quantity: 1,
+        amount: 10000,
+        payment_flow: 'DAILY',
+        address: '123 Avenue test',
+        scheduled_at: new Date(Date.now() + 5 * 3600000).toISOString(),
+      });
+      const result = await runPublishJobFlow(
+        state,
+        'Passer',
+        employerProfile,
+        ctx,
+      );
       expect(result.nextState?.step).toBe(9);
     });
 
     it('rejects note that is too long', async () => {
       const state = makeState(8, {});
-      const result = await runPublishJobFlow(state, 'x'.repeat(501), employerProfile, ctx);
+      const result = await runPublishJobFlow(
+        state,
+        'x'.repeat(501),
+        employerProfile,
+        ctx,
+      );
       expect(result.reply[0]).toContain('note ne peut pas dépasser');
     });
 
     it('shows Nombre de personnes in summary', async () => {
-      const state = makeState(8, { title: 'T', description: 'x'.repeat(30), quantity: 3, amount: 10000, payment_flow: 'DAILY', address: '123 Avenue test', scheduled_at: new Date(Date.now() + 5 * 3600000).toISOString() });
-      const result = await runPublishJobFlow(state, 'Non', employerProfile, ctx);
+      const state = makeState(8, {
+        title: 'T',
+        description: 'x'.repeat(30),
+        quantity: 3,
+        amount: 10000,
+        payment_flow: 'DAILY',
+        address: '123 Avenue test',
+        scheduled_at: new Date(Date.now() + 5 * 3600000).toISOString(),
+      });
+      const result = await runPublishJobFlow(
+        state,
+        'Non',
+        employerProfile,
+        ctx,
+      );
       expect(result.reply[0]).toContain('Nombre de personnes');
       expect(result.reply[0]).toContain('3');
     });

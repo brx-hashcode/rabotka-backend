@@ -33,8 +33,7 @@ function matchCommandAlias(
   if (CMD_MY_OFFERS.includes(normalized) && isEmployer) return 'my_offers';
   if (CMD_CANDIDATURES.includes(normalized) && isEmployer)
     return 'candidatures_received';
-  if (CMD_FILLED_JOBS.includes(normalized) && isEmployer)
-    return 'filled_jobs';
+  if (CMD_FILLED_JOBS.includes(normalized) && isEmployer) return 'filled_jobs';
   if (CMD_PROFILE.includes(normalized)) return 'profile';
   if (CMD_HISTORY.includes(normalized)) return 'penalty_history';
   if (CMD_LIST_OFFERS.includes(normalized) && isWorker) return 'list_offers';
