@@ -298,7 +298,7 @@ export class AdminProfileController {
   @ApiOperation({
     summary: 'Confirm or reject payment for a profile (admin only)',
     description:
-      'Manually confirms or rejects a payment. Accepting activates the profile; rejecting keeps it in PENDING_PAYMENT.',
+      'Manually confirms or rejects a payment. Accepting activates the profile; rejecting keeps it in PENDING_ACTIVATION.',
   })
   @ApiResponse({ status: 200, description: 'Updated profile details' })
   @ApiResponse({ status: 404, description: 'Profile not found' })

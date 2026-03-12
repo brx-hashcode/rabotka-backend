@@ -208,7 +208,7 @@ export class ProfileController {
         profileType: { type: 'string', enum: ['WORKER', 'EMPLOYER'] },
         status: {
           type: 'string',
-          enum: ['PENDING_PAYMENT', 'ACTIVE', 'SUSPENDED', 'BANNED'],
+          enum: ['PENDING_ACTIVATION', 'ACTIVE', 'SUSPENDED', 'BANNED'],
         },
         verificationStatus: {
           type: 'string',
@@ -385,7 +385,7 @@ export class ProfileController {
         profileType: { type: 'string', enum: ['WORKER', 'EMPLOYER'] },
         status: {
           type: 'string',
-          enum: ['PENDING_PAYMENT', 'ACTIVE', 'SUSPENDED', 'BANNED'],
+          enum: ['PENDING_ACTIVATION', 'ACTIVE', 'SUSPENDED', 'BANNED'],
         },
         verificationStatus: {
           type: 'string',
