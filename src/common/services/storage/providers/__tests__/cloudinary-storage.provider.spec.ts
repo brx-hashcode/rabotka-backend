@@ -1,4 +1,8 @@
+import { Logger } from '@nestjs/common';
 import { StorageProvider } from '@prisma/client';
+
+jest.spyOn(Logger.prototype, 'log').mockImplementation(() => {});
+jest.spyOn(Logger.prototype, 'error').mockImplementation(() => {});
 
 const mockUploadStream = jest.fn();
 const mockDestroy = jest.fn();

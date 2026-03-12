@@ -51,9 +51,11 @@ function makePrisma() {
     user: {
       findMany: jest.fn().mockResolvedValue([]),
     },
-    $transaction: jest.fn().mockImplementation((calls) =>
-      Array.isArray(calls) ? Promise.resolve(calls) : calls(makePrisma()),
-    ),
+    $transaction: jest
+      .fn()
+      .mockImplementation((calls) =>
+        Array.isArray(calls) ? Promise.resolve(calls) : calls(makePrisma()),
+      ),
     kycDocument: {
       updateMany: jest.fn().mockResolvedValue({}),
       create: jest.fn().mockResolvedValue({}),
@@ -136,7 +138,9 @@ describe('ProfileService', () => {
 
     it('throws NotFoundException when profile not found', async () => {
       prisma.profile.findUnique.mockResolvedValueOnce(null);
-      await expect(service.findById('missing')).rejects.toThrow('Profil non trouvé');
+      await expect(service.findById('missing')).rejects.toThrow(
+        'Profil non trouvé',
+      );
     });
   });
 
@@ -149,7 +153,9 @@ describe('ProfileService', () => {
 
     it('throws NotFoundException when profile not found', async () => {
       prisma.profile.findUnique.mockResolvedValueOnce(null);
-      await expect(service.updateProfile('missing', {})).rejects.toThrow('Profil non trouvé');
+      await expect(service.updateProfile('missing', {})).rejects.toThrow(
+        'Profil non trouvé',
+      );
     });
 
     it('sends activation notification when status transitions to ACTIVE', async () => {
@@ -183,17 +189,23 @@ describe('ProfileService', () => {
       const result = await service.updateAvatar('p-1', avatarFile);
       expect(result.avatarUrl).toBe('https://cdn.example.com/file.jpg');
       expect(prisma.profile.update).toHaveBeenCalledWith(
-        expect.objectContaining({ data: { avatar_url: 'https://cdn.example.com/file.jpg' } }),
+        expect.objectContaining({
+          data: { avatar_url: 'https://cdn.example.com/file.jpg' },
+        }),
       );
     });
 
     it('throws NotFoundException when profile not found', async () => {
       prisma.profile.findUnique.mockResolvedValueOnce(null);
-      await expect(service.updateAvatar('missing', avatarFile)).rejects.toThrow('Profil non trouvé');
+      await expect(service.updateAvatar('missing', avatarFile)).rejects.toThrow(
+        'Profil non trouvé',
+      );
     });
 
     it('throws BadRequestException when no file provided', async () => {
-      await expect(service.updateAvatar('p-1', null as any)).rejects.toThrow('photo de profil est requise');
+      await expect(service.updateAvatar('p-1', null as any)).rejects.toThrow(
+        'photo de profil est requise',
+      );
     });
   });
 
@@ -235,8 +247,13 @@ describe('ProfileService', () => {
     });
 
     it('throws NotFoundException when penalty does not belong to profile', async () => {
-      prisma.penalty.findUnique.mockResolvedValue({ id: 'pen-1', worker_id: 'other' });
-      await expect(service.markPenaltyPaid('pen-1', 'p-1')).rejects.toThrow('Pénalité introuvable');
+      prisma.penalty.findUnique.mockResolvedValue({
+        id: 'pen-1',
+        worker_id: 'other',
+      });
+      await expect(service.markPenaltyPaid('pen-1', 'p-1')).rejects.toThrow(
+        'Pénalité introuvable',
+      );
     });
 
     it('does nothing when already paid', async () => {
@@ -283,7 +300,9 @@ describe('ProfileService', () => {
 
     it('throws NotFoundException when not found', async () => {
       prisma.profile.findUnique.mockResolvedValueOnce(null);
-      await expect(service.getProfileDetailForAdmin('missing')).rejects.toThrow('Profil non trouvé');
+      await expect(service.getProfileDetailForAdmin('missing')).rejects.toThrow(
+        'Profil non trouvé',
+      );
     });
   });
 
@@ -305,7 +324,11 @@ describe('ProfileService', () => {
     });
 
     it('applies status filter', async () => {
-      await service.getProfilesForAdmin({ page: 1, limit: 10, status: ['ACTIVE'] as any });
+      await service.getProfilesForAdmin({
+        page: 1,
+        limit: 10,
+        status: ['ACTIVE'] as any,
+      });
       expect(prisma.profile.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({ status: { in: ['ACTIVE'] } }),
@@ -324,17 +347,23 @@ describe('ProfileService', () => {
 
     it('throws NotFoundException when profile not found', async () => {
       prisma.profile.findUnique.mockResolvedValueOnce(null);
-      await expect(service.requestWhatsAppVerification('missing')).rejects.toThrow('Profil non trouvé');
+      await expect(
+        service.requestWhatsAppVerification('missing'),
+      ).rejects.toThrow('Profil non trouvé');
     });
 
     it('throws ServiceUnavailableException when WhatsApp not configured', async () => {
       whatsApp.isConfigured.mockReturnValue(false);
-      await expect(service.requestWhatsAppVerification('p-1')).rejects.toThrow('configuré');
+      await expect(service.requestWhatsAppVerification('p-1')).rejects.toThrow(
+        'configuré',
+      );
     });
 
     it('cleans up token and throws when message send fails', async () => {
       whatsApp.sendTextMessage.mockResolvedValue(null);
-      await expect(service.requestWhatsAppVerification('p-1')).rejects.toThrow("Échec");
+      await expect(service.requestWhatsAppVerification('p-1')).rejects.toThrow(
+        'Échec',
+      );
       expect(redis.del).toHaveBeenCalled();
     });
   });
@@ -350,25 +379,123 @@ describe('ProfileService', () => {
         profile_type: 'WORKER',
         ...baseProfile,
       });
-      const result = await service.updateProfileStatusByAdmin('p-1', 'ACTIVE' as any);
+      const result = await service.updateProfileStatusByAdmin(
+        'p-1',
+        'ACTIVE' as any,
+      );
       expect(prisma.profile.update).toHaveBeenCalled();
     });
 
     it('throws NotFoundException when profile not found', async () => {
       prisma.profile.findUnique.mockResolvedValueOnce(null);
-      await expect(service.updateProfileStatusByAdmin('missing', 'ACTIVE' as any)).rejects.toThrow('Profil non trouvé');
+      await expect(
+        service.updateProfileStatusByAdmin('missing', 'ACTIVE' as any),
+      ).rejects.toThrow('Profil non trouvé');
     });
   });
 
   describe('updateProfileByAdmin()', () => {
     it('updates and returns profile detail', async () => {
-      const result = await service.updateProfileByAdmin('p-1', { firstName: 'Bob' });
+      const result = await service.updateProfileByAdmin('p-1', {
+        firstName: 'Bob',
+      });
       expect(prisma.profile.update).toHaveBeenCalled();
     });
 
     it('throws NotFoundException when not found', async () => {
       prisma.profile.findUnique.mockResolvedValueOnce(null);
-      await expect(service.updateProfileByAdmin('missing', {})).rejects.toThrow('Profil non trouvé');
+      await expect(service.updateProfileByAdmin('missing', {})).rejects.toThrow(
+        'Profil non trouvé',
+      );
+    });
+
+    it('throws ConflictException on P2002 with phone field (array target)', async () => {
+      const { Prisma } = jest.requireActual('@prisma/client');
+      const prismaError = Object.assign(
+        new Prisma.PrismaClientKnownRequestError('Unique constraint', {
+          code: 'P2002',
+          clientVersion: '5.0.0',
+        }),
+        { meta: { target: ['phone'] } },
+      );
+      prisma.profile.update.mockRejectedValueOnce(prismaError);
+      await expect(
+        service.updateProfileByAdmin('p-1', { phone: '+242' }),
+      ).rejects.toMatchObject({
+        message: expect.stringContaining('numéro de téléphone'),
+      });
+    });
+
+    it('throws ConflictException on P2002 with email field (string target)', async () => {
+      const { Prisma } = jest.requireActual('@prisma/client');
+      const prismaError = Object.assign(
+        new Prisma.PrismaClientKnownRequestError('Unique constraint', {
+          code: 'P2002',
+          clientVersion: '5.0.0',
+        }),
+        { meta: { target: 'Profile_email_key' } },
+      );
+      prisma.profile.update.mockRejectedValueOnce(prismaError);
+      await expect(
+        service.updateProfileByAdmin('p-1', { email: 'x@x.com' }),
+      ).rejects.toMatchObject({
+        message: expect.stringContaining('email'),
+      });
+    });
+
+    it('rethrows non-P2002 errors', async () => {
+      prisma.profile.update.mockRejectedValueOnce(new Error('DB down'));
+      await expect(service.updateProfileByAdmin('p-1', {})).rejects.toThrow(
+        'DB down',
+      );
+    });
+  });
+
+  describe('verifyProfileKyc()', () => {
+    it('verifies KYC and returns profile detail', async () => {
+      const result = await service.verifyProfileKyc(
+        'p-1',
+        'admin-1',
+        'VERIFIED',
+      );
+      expect(prisma.$transaction).toHaveBeenCalled();
+      expect(result.id).toBe('p-1');
+    });
+
+    it('verifies KYC with file upload', async () => {
+      const file = {
+        fieldname: 'files',
+        originalname: 'verify.jpg',
+        mimetype: 'image/jpeg',
+        buffer: Buffer.from('data'),
+        size: 4,
+      } as Express.Multer.File;
+      const result = await service.verifyProfileKyc(
+        'p-1',
+        'admin-1',
+        'VERIFIED',
+        undefined,
+        [file],
+      );
+      expect(fileService.uploadToStorage).toHaveBeenCalled();
+      expect(result.id).toBe('p-1');
+    });
+
+    it('rejects KYC with a reason', async () => {
+      const result = await service.verifyProfileKyc(
+        'p-1',
+        'admin-1',
+        'REJECTED',
+        'Document flou',
+      );
+      expect(prisma.$transaction).toHaveBeenCalled();
+    });
+
+    it('throws NotFoundException when profile not found', async () => {
+      prisma.profile.findUnique.mockResolvedValueOnce(null);
+      await expect(
+        service.verifyProfileKyc('missing', 'admin-1', 'VERIFIED'),
+      ).rejects.toThrow('Profil non trouvé');
     });
   });
 
@@ -408,11 +535,15 @@ describe('ProfileService', () => {
     });
 
     it('throws BadRequestException when kycDocument missing', async () => {
-      await expect(service.createProfile(dto, null as any, kycSelfie)).rejects.toThrow('document KYC');
+      await expect(
+        service.createProfile(dto, null as any, kycSelfie),
+      ).rejects.toThrow('document KYC');
     });
 
     it('throws BadRequestException when kycSelfie missing', async () => {
-      await expect(service.createProfile(dto, kycDoc, null as any)).rejects.toThrow('photo KYC');
+      await expect(
+        service.createProfile(dto, kycDoc, null as any),
+      ).rejects.toThrow('photo KYC');
     });
   });
 });
