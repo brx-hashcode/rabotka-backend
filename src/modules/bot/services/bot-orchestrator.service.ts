@@ -11,6 +11,7 @@ import { BotInboxService } from './bot-inbox.service';
 import { BotDraftService } from './bot-draft.service';
 import { handleMenuCommand } from '../commands/menu.command';
 import { handleHelpCommand } from '../commands/help.command';
+import { SystemConfigService } from '../../system-config/system-config.service';
 import { unknownCommandMessage } from '../messages/menu.messages';
 import type { BotProfile, BotState } from '../types/bot-state.types';
 import { FLOW_IDS } from '../bot.constants';
@@ -76,6 +77,7 @@ export class BotOrchestratorService {
     private readonly jobOfferService: JobOfferService,
     private readonly applicationService: ApplicationService,
     private readonly notificationService: BotNotificationService,
+    private readonly systemConfig: SystemConfigService,
   ) {}
 
   /**
@@ -430,8 +432,10 @@ export class BotOrchestratorService {
     switch (commandId) {
       case 'menu':
         return handleMenuCommand(profile);
-      case 'help':
-        return handleHelpCommand(commandId);
+      case 'help': {
+        const contact = await this.systemConfig.getContactInfo();
+        return handleHelpCommand(commandId, contact);
+      }
       case 'my_offers':
         return this.commands.myOffers(profile);
       case 'profile':

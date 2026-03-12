@@ -1,26 +1,65 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import TwilioSDK from 'twilio';
+import { SystemConfigService } from '../../../modules/system-config/system-config.service';
 
 type TwilioClient = ReturnType<typeof TwilioSDK>;
 
 @Injectable()
-export class TwilioService {
+export class TwilioService implements OnModuleInit {
   private readonly logger = new Logger(TwilioService.name);
 
-  private readonly client: TwilioClient | null = null;
-  private readonly accountSid: string | null;
-  private readonly authToken: string | null;
-  private readonly whatsappFrom: string | null;
-  private readonly smsFrom: string | null;
+  private client: TwilioClient | null = null;
+  private accountSid: string | null;
+  private authToken: string | null;
+  private whatsappFrom: string | null;
+  private smsFrom: string | null;
 
-  constructor(private readonly config: ConfigService) {
+  constructor(
+    private readonly config: ConfigService,
+    @Optional() private readonly systemConfig?: SystemConfigService,
+  ) {
+    // Initialise from env vars immediately so the service works before onModuleInit
     this.accountSid = this.config.get<string>('TWILIO_ACCOUNT_SID') ?? null;
     this.authToken = this.config.get<string>('TWILIO_AUTH_TOKEN') ?? null;
     this.whatsappFrom = this.config.get<string>('TWILIO_WHATSAPP_FROM') ?? null;
     this.smsFrom = this.config.get<string>('TWILIO_SMS_FROM') ?? null;
+    this.initClient();
+  }
 
+  async onModuleInit(): Promise<void> {
+    if (!this.systemConfig) return;
+
+    try {
+      const [sid, token, waFrom, smsFrom] = await Promise.all([
+        this.systemConfig.getRaw('twilio.account_sid', ''),
+        this.systemConfig.getRaw('twilio.auth_token', ''),
+        this.systemConfig.getRaw('twilio.whatsapp_from', ''),
+        this.systemConfig.getRaw('twilio.sms_from', ''),
+      ]);
+
+      // DB values override env vars only when non-empty
+      if (sid) this.accountSid = sid;
+      if (token) this.authToken = token;
+      if (waFrom) this.whatsappFrom = waFrom;
+      if (smsFrom) this.smsFrom = smsFrom;
+
+      const credentialsChanged =
+        (sid && sid !== this.config.get('TWILIO_ACCOUNT_SID')) ||
+        (token && token !== this.config.get('TWILIO_AUTH_TOKEN'));
+
+      if (credentialsChanged) {
+        this.initClient();
+        this.logger.log('Twilio client re-initialised from system config (DB)');
+      }
+    } catch (e) {
+      this.logger.warn('Could not load Twilio config from DB, using env vars', e);
+    }
+  }
+
+  private initClient(): void {
     if (!this.accountSid || !this.authToken) {
+      this.client = null;
       this.logger.warn(
         'Twilio credentials not configured (TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN). Twilio sending will be disabled.',
       );
@@ -32,6 +71,7 @@ export class TwilioService {
       this.logger.log('Twilio client initialized successfully');
     } catch (e) {
       this.logger.error('Failed to initialize Twilio client', e);
+      this.client = null;
     }
   }
 
