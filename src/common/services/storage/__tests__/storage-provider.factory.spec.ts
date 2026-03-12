@@ -21,39 +21,39 @@ function makeConfig(driver: string) {
 describe('StorageProviderFactory', () => {
   beforeEach(() => jest.clearAllMocks());
 
-  it('creates S3StorageProvider for DRIVER=S3', () => {
+  it('creates S3StorageProvider for DRIVER=S3', async () => {
     const factory = new StorageProviderFactory(makeConfig('S3') as any);
-    factory.create();
+    await factory.create();
     expect(S3StorageProvider).toHaveBeenCalled();
   });
 
-  it('creates CloudinaryStorageProvider for DRIVER=CLOUDINARY', () => {
+  it('creates CloudinaryStorageProvider for DRIVER=CLOUDINARY', async () => {
     const factory = new StorageProviderFactory(makeConfig('CLOUDINARY') as any);
-    factory.create();
+    await factory.create();
     expect(CloudinaryStorageProvider).toHaveBeenCalled();
   });
 
-  it('creates VercelBlobStorageProvider for DRIVER=VERCEL_BLOB', () => {
+  it('creates VercelBlobStorageProvider for DRIVER=VERCEL_BLOB', async () => {
     const factory = new StorageProviderFactory(makeConfig('VERCEL_BLOB') as any);
-    factory.create();
+    await factory.create();
     expect(VercelBlobStorageProvider).toHaveBeenCalled();
   });
 
-  it('creates CloudflareStorageProvider for DRIVER=CLOUDFLARE', () => {
+  it('creates CloudflareStorageProvider for DRIVER=CLOUDFLARE', async () => {
     const factory = new StorageProviderFactory(makeConfig('CLOUDFLARE') as any);
-    factory.create();
+    await factory.create();
     expect(CloudflareStorageProvider).toHaveBeenCalled();
   });
 
-  it('falls back to S3 for unknown driver', () => {
+  it('falls back to S3 for unknown driver', async () => {
     const factory = new StorageProviderFactory(makeConfig('UNKNOWN_DRIVER') as any);
-    factory.create();
+    await factory.create();
     expect(S3StorageProvider).toHaveBeenCalled();
   });
 
-  it('is case-insensitive (lowercase driver name)', () => {
+  it('is case-insensitive (lowercase driver name)', async () => {
     const factory = new StorageProviderFactory(makeConfig('s3') as any);
-    factory.create();
+    await factory.create();
     expect(S3StorageProvider).toHaveBeenCalled();
   });
 });

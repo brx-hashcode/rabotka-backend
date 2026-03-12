@@ -36,6 +36,7 @@ import { WalletModule } from './modules/wallet/wallet.module';
 import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { ReminderModule } from './modules/bot/reminder/reminder.module';
+import { SystemConfigModule } from './modules/system-config/system-config.module';
 import { StorageModule } from './common/services/storage/storage.module';
 import { ImageWatermarkModule } from './common/services/image-watermark/image-watermark.module';
 import { AppController } from './app.controller';
@@ -120,6 +121,7 @@ import { HttpExceptionFilter } from './common/filters/http-exception.filter';
     ApplicationModule,
     PenaltyModule,
     PaymentRequestModule,
+    SystemConfigModule,
     StorageModule,
     ImageWatermarkModule,
     FileModule,

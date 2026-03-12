@@ -149,6 +149,29 @@ enum PaymentRequestStatus {
   REJECTED
 }
 
+enum ConfigCategory {
+  TWILIO
+  FEES
+  MATCHING
+  CONTACT
+  STORAGE
+  GENERAL
+}
+
+model SystemConfig {
+  id         String         @id @default(uuid()) @db.Uuid
+  key        String         @unique
+  value      String         @db.Text
+  category   ConfigCategory
+  label      String
+  is_secret  Boolean        @default(false)
+  updated_at DateTime       @updatedAt
+  updated_by String?        @db.Uuid
+
+  @@index([category], name: "idx_system_config_category")
+  @@map("system_configs")
+}
+
 model Profile {
   id                      String             @id @default(uuid()) @db.Uuid
   created_at              DateTime           @default(now())
