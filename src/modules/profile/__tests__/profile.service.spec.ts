@@ -372,12 +372,8 @@ describe('ProfileService', () => {
     it('updates status and returns profile detail', async () => {
       // findUnique for status check
       prisma.profile.findUnique.mockResolvedValue({
-        id: 'p-1',
-        status: 'PENDING_ACTIVATION',
-        phone: '+242000001',
-        first_name: 'Alice',
-        profile_type: 'WORKER',
         ...baseProfile,
+        status: 'PENDING_ACTIVATION',
       });
       const result = await service.updateProfileStatusByAdmin(
         'p-1',
