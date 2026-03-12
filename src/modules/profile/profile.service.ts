@@ -648,10 +648,23 @@ export class ProfileService {
     if (dto.phone !== undefined) dataToUpdate.phone = dto.phone;
     if (dto.email !== undefined) dataToUpdate.email = dto.email;
 
-    await this.prisma.profile.update({
-      where: { id: profileId },
-      data: dataToUpdate,
-    });
+    try {
+      await this.prisma.profile.update({
+        where: { id: profileId },
+        data: dataToUpdate,
+      });
+    } catch (err) {
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2002'
+      ) {
+        const fields = (err.meta?.target as string[]) ?? [];
+        throw new ConflictException(
+          `Ce ${fields.join(', ')} est déjà utilisé par un autre profil.`,
+        );
+      }
+      throw err;
+    }
 
     return this.getProfileDetailForAdmin(profileId);
   }
@@ -861,7 +874,7 @@ export class ProfileService {
         address: createProfileDto.address,
         description: createProfileDto.description || '',
         profile_type: createProfileDto.profileType,
-        status: 'PENDING_PAYMENT',
+        status: 'PENDING_ACTIVATION',
         verification_status: 'PENDING',
         reliability_score: 100,
       },

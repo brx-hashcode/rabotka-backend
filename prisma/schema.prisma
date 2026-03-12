@@ -47,7 +47,7 @@ enum ConversationStatus {
 }
 
 enum AccountStatus {
-  PENDING_PAYMENT
+  PENDING_ACTIVATION
   ACTIVE
   SUSPENDED
   BANNED
@@ -160,7 +160,7 @@ model Profile {
   address                 String
   description             String             @db.Text
   profile_type            ProfileType
-  status                  AccountStatus      @default(PENDING_PAYMENT)
+  status                  AccountStatus      @default(PENDING_ACTIVATION)
   billing_status          BillingStatus      @default(CLEAR)
   reliability_score       Int?               @default(100)
   whatsapp_connected      Boolean            @default(false)

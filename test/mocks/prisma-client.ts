@@ -3,7 +3,7 @@ export class PrismaClient {
 }
 
 export enum AccountStatus {
-  PENDING_PAYMENT = 'PENDING_PAYMENT',
+  PENDING_ACTIVATION = 'PENDING_ACTIVATION',
   ACTIVE = 'ACTIVE',
   SUSPENDED = 'SUSPENDED',
   BANNED = 'BANNED',
