@@ -1,5 +1,9 @@
+import { Logger } from '@nestjs/common';
 import { CloudflareStorageProvider } from '../cloudflare-storage.provider';
 import { StorageProvider } from '@prisma/client';
+
+jest.spyOn(Logger.prototype, 'log').mockImplementation(() => {});
+jest.spyOn(Logger.prototype, 'error').mockImplementation(() => {});
 
 const mockSend = jest.fn();
 jest.mock('@aws-sdk/client-s3', () => ({
