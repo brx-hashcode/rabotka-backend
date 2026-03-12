@@ -229,62 +229,58 @@ export class ProfileService {
     }
 
     const previousStatus = existingProfile.status;
-    const dataToUpdate: Prisma.ProfileUpdateInput = {};
+    const dataToUpdate = this.buildProfileUpdateData(updateProfileDto);
 
-    if (updateProfileDto.firstName !== undefined) {
-      dataToUpdate.first_name = updateProfileDto.firstName;
-    }
-    if (updateProfileDto.lastName !== undefined) {
-      dataToUpdate.last_name = updateProfileDto.lastName;
-    }
-    if (updateProfileDto.description !== undefined) {
-      dataToUpdate.description = updateProfileDto.description;
-    }
-    if (updateProfileDto.address !== undefined) {
-      dataToUpdate.address = updateProfileDto.address;
-    }
-    if (updateProfileDto.status !== undefined) {
-      dataToUpdate.status = updateProfileDto.status;
-    }
-
-    await this.prisma.profile.update({
-      where: { id },
-      data: dataToUpdate,
-    });
+    await this.prisma.profile.update({ where: { id }, data: dataToUpdate });
 
     const transitionedToActive =
       previousStatus !== AccountStatus.ACTIVE &&
       updateProfileDto.status === AccountStatus.ACTIVE;
     if (transitionedToActive) {
-      try {
-        const profile = await this.prisma.profile.findUnique({
-          where: { id },
-          select: { phone: true, first_name: true, profile_type: true },
-        });
-        if (profile?.phone) {
-          const text = accountActivatedMessage(
-            profile.first_name,
-            profile.profile_type,
-          );
-          await this.whatsAppService
-            .sendTextMessage(profile.phone, text)
-            .catch((err) =>
-              this.logger.warn(
-                `Failed to send account-activated WhatsApp to ${profile.phone}:`,
-                err,
-              ),
-            );
-        }
-      } catch (err) {
-        this.logger.warn(
-          `Failed to send account-activated WhatsApp for profile ${id}:`,
-          err,
-        );
-      }
+      await this.sendActivationNotification(id);
     }
 
     this.logger.log(`Profile updated successfully: ${id}`);
     return this.findById(id);
+  }
+
+  private buildProfileUpdateData(
+    dto: UpdateProfileDto,
+  ): Prisma.ProfileUpdateInput {
+    const data: Prisma.ProfileUpdateInput = {};
+    if (dto.firstName !== undefined) data.first_name = dto.firstName;
+    if (dto.lastName !== undefined) data.last_name = dto.lastName;
+    if (dto.description !== undefined) data.description = dto.description;
+    if (dto.address !== undefined) data.address = dto.address;
+    if (dto.status !== undefined) data.status = dto.status;
+    return data;
+  }
+
+  private async sendActivationNotification(profileId: string): Promise<void> {
+    try {
+      const profile = await this.prisma.profile.findUnique({
+        where: { id: profileId },
+        select: { phone: true, first_name: true, profile_type: true },
+      });
+      if (!profile?.phone) return;
+      const text = accountActivatedMessage(
+        profile.first_name,
+        profile.profile_type,
+      );
+      await this.whatsAppService
+        .sendTextMessage(profile.phone, text)
+        .catch((err) =>
+          this.logger.warn(
+            `Failed to send account-activated WhatsApp to ${profile.phone}:`,
+            err,
+          ),
+        );
+    } catch (err) {
+      this.logger.warn(
+        `Failed to send account-activated WhatsApp for profile ${profileId}:`,
+        err,
+      );
+    }
   }
 
   async updateAvatar(
@@ -639,34 +635,56 @@ export class ProfileService {
       throw new NotFoundException('Profil non trouvé');
     }
 
-    const dataToUpdate: Prisma.ProfileUpdateInput = {};
-    if (dto.firstName !== undefined) dataToUpdate.first_name = dto.firstName;
-    if (dto.lastName !== undefined) dataToUpdate.last_name = dto.lastName;
-    if (dto.description !== undefined)
-      dataToUpdate.description = dto.description;
-    if (dto.address !== undefined) dataToUpdate.address = dto.address;
-    if (dto.phone !== undefined) dataToUpdate.phone = dto.phone;
-    if (dto.email !== undefined) dataToUpdate.email = dto.email;
-
     try {
       await this.prisma.profile.update({
         where: { id: profileId },
-        data: dataToUpdate,
+        data: this.buildAdminProfileUpdateData(dto),
       });
     } catch (err) {
-      if (
-        err instanceof Prisma.PrismaClientKnownRequestError &&
-        err.code === 'P2002'
-      ) {
-        const fields = (err.meta?.target as string[]) ?? [];
-        throw new ConflictException(
-          `Ce ${fields.join(', ')} est déjà utilisé par un autre profil.`,
-        );
-      }
+      this.throwIfUniqueConstraintViolation(err);
       throw err;
     }
 
     return this.getProfileDetailForAdmin(profileId);
+  }
+
+  private buildAdminProfileUpdateData(
+    dto: UpdateProfileDto,
+  ): Prisma.ProfileUpdateInput {
+    const data: Prisma.ProfileUpdateInput = {};
+    if (dto.firstName !== undefined) data.first_name = dto.firstName;
+    if (dto.lastName !== undefined) data.last_name = dto.lastName;
+    if (dto.description !== undefined) data.description = dto.description;
+    if (dto.address !== undefined) data.address = dto.address;
+    if (dto.phone !== undefined) data.phone = dto.phone;
+    if (dto.email !== undefined) data.email = dto.email;
+    return data;
+  }
+
+  private throwIfUniqueConstraintViolation(err: unknown): void {
+    if (
+      !(err instanceof Prisma.PrismaClientKnownRequestError) ||
+      err.code !== 'P2002'
+    ) {
+      return;
+    }
+    const fieldLabels: Record<string, string> = {
+      phone: 'numéro de téléphone',
+      email: 'adresse email',
+    };
+    const raw = err.meta?.target;
+    let fields: string[];
+    if (Array.isArray(raw)) {
+      fields = raw as string[];
+    } else if (typeof raw === 'string') {
+      fields = [raw.replace(/^Profile_/, '').replace(/_key$/, '')];
+    } else {
+      fields = [];
+    }
+    const label = fields.map((f) => fieldLabels[f] ?? f).join(', ') || 'champ';
+    throw new ConflictException(
+      `Ce ${label} est déjà utilisé par un autre profil.`,
+    );
   }
 
   async getProfilesForAdmin(params: {
