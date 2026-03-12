@@ -35,7 +35,7 @@ export async function seedPaymentTestProfiles(
       description:
         'Profil de test — statut PENDING_PAYMENT, lien de paiement envoyé.',
       profile_type: ProfileType.WORKER,
-      status: AccountStatus.PENDING_PAYMENT,
+      status: AccountStatus.PENDING_ACTIVATION,
       verification_status: VerificationStatus.VERIFIED,
       reliability_score: 100,
       whatsapp_connected: true,
@@ -84,7 +84,7 @@ export async function seedPaymentTestProfiles(
       description:
         'Profil de test — paiement soumis, en attente de validation admin.',
       profile_type: ProfileType.EMPLOYER,
-      status: AccountStatus.PENDING_PAYMENT,
+      status: AccountStatus.PENDING_ACTIVATION,
       verification_status: VerificationStatus.VERIFIED,
       reliability_score: 100,
       whatsapp_connected: true,

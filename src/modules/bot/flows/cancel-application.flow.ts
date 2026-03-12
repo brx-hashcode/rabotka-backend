@@ -54,101 +54,157 @@ function formatTimeRemaining(ms: number): string {
   return `${hours} heure(s) ${minutes} min`;
 }
 
+function isMenuCommand(normalized: string): boolean {
+  return CMD_MENU.some(
+    (c) => normalized === c || normalized.startsWith(c + ' '),
+  );
+}
+
+function buildCancelledReply(penaltyAmount: number | null): string {
+  const penaltyMsg = penaltyAmount
+    ? `\nUne pénalité de ${penaltyAmount.toLocaleString('fr-FR')} FCFA a été appliquée.`
+    : '';
+  const title = penaltyAmount
+    ? '*Candidature annulée avec pénalité*'
+    : '*Candidature annulée*';
+  return [
+    title,
+    '',
+    'Votre candidature a été annulée.' + penaltyMsg,
+    '',
+    "L'employeur a été notifié.",
+    '',
+    "*Tapez 'Menu' pour revenir.*",
+  ].join('\n');
+}
+
+async function executeCancellation(
+  applicationId: string,
+  profile: BotProfile,
+  reason: string | undefined,
+  isLatePenalty: boolean,
+  ctx: CancelApplicationContext,
+  state: BotState,
+): Promise<FlowResult> {
+  try {
+    const result = await ctx.applicationService.cancel(
+      applicationId,
+      profile.id,
+      reason,
+    );
+    await ctx.notificationService.sendCancellationToEmployer(
+      applicationId,
+      reason ?? null,
+      isLatePenalty,
+    );
+    return {
+      reply: [buildCancelledReply(result.penaltyAmount)],
+      clearState: true,
+    };
+  } catch (err: unknown) {
+    const message =
+      err instanceof Error ? err.message : "*IMPOSSIBLE D'ANNULER.*";
+    return { reply: [`❌ ${message}`], nextState: state };
+  }
+}
+
+function showInitialCancelPrompt(
+  isLate: boolean,
+  app: AppWithOffer,
+  profile: BotProfile,
+  state: BotState,
+  timeRemainingStr: string,
+): FlowResult {
+  const scheduledAt = app.job_offer.scheduled_at;
+  if (isLate) {
+    const newScore = Math.max(
+      50,
+      (profile.reliability_score ?? 100) - LATE_CANCELLATION_SCORE_DEDUCTION,
+    );
+    const text = formatCancelApplicationWithPenalty({
+      offerTitle: app.job_offer.title,
+      scheduledAt,
+      amount: app.job_offer.amount,
+      timeRemaining: timeRemainingStr,
+      penaltyAmount: LATE_CANCELLATION_PENALTY_FCFA,
+      scoreDeduction: LATE_CANCELLATION_SCORE_DEDUCTION,
+      newScore,
+    });
+    return { reply: [text], nextState: state };
+  }
+  const text = formatCancelApplicationNoPenalty({
+    offerTitle: app.job_offer.title,
+    scheduledAt,
+    amount: app.job_offer.amount,
+    timeRemaining: timeRemainingStr,
+  });
+  return { reply: [text], nextState: state };
+}
+
+async function handleLateCancellationInput(
+  args: CancelStepArgs,
+): Promise<FlowResult> {
+  const { state, payload, trimmed, normalized } = args;
+  const reason = normalized === 'confirmer' ? undefined : trimmed;
+  if (!reason) {
+    return {
+      reply: [
+        '*La raison est obligatoire pour une annulation tardive. Tapez votre raison.*',
+      ],
+      nextState: state,
+    };
+  }
+  return {
+    reply: [
+      [
+        '*Êtes-vous certain de vouloir annuler ?*',
+        `*Pénalité*: ${LATE_CANCELLATION_PENALTY_FCFA.toLocaleString('fr-FR')} FCFA`,
+        '1️⃣ Oui, annuler malgré la pénalité',
+        '2️⃣ Non, maintenir ma candidature',
+        '',
+        '*Tapez le numéro correspondant.*',
+      ].join('\n'),
+    ],
+    nextState: {
+      ...state,
+      step: 2,
+      payload: { ...payload, reason },
+      updatedAt: new Date().toISOString(),
+    },
+  };
+}
+
 async function handleCancelStep1(
   args: CancelStepArgs,
   app: AppWithOffer,
   isLate: boolean,
   timeRemainingStr: string,
 ): Promise<FlowResult> {
-  const { state, payload, applicationId, trimmed, normalized, profile, ctx } =
-    args;
-  const scheduledAt = app.job_offer.scheduled_at;
+  const { state, applicationId, trimmed, normalized, profile, ctx } = args;
 
   if (!trimmed) {
-    if (isLate) {
-      const newScore = Math.max(
-        50,
-        (profile.reliability_score ?? 100) - LATE_CANCELLATION_SCORE_DEDUCTION,
-      );
-      const text = formatCancelApplicationWithPenalty({
-        offerTitle: app.job_offer.title,
-        scheduledAt,
-        amount: app.job_offer.amount,
-        timeRemaining: timeRemainingStr,
-        penaltyAmount: LATE_CANCELLATION_PENALTY_FCFA,
-        scoreDeduction: LATE_CANCELLATION_SCORE_DEDUCTION,
-        newScore,
-      });
-      return { reply: [text], nextState: state };
-    }
-    const text = formatCancelApplicationNoPenalty({
-      offerTitle: app.job_offer.title,
-      scheduledAt,
-      amount: app.job_offer.amount,
-      timeRemaining: timeRemainingStr,
-    });
-    return { reply: [text], nextState: state };
+    return showInitialCancelPrompt(
+      isLate,
+      app,
+      profile,
+      state,
+      timeRemainingStr,
+    );
   }
 
   if (isLate) {
-    const reason = normalized === 'confirmer' ? undefined : trimmed;
-    if (!reason) {
-      return {
-        reply: [
-          '*La raison est obligatoire pour une annulation tardive. Tapez votre raison.*',
-        ],
-        nextState: state,
-      };
-    }
-    return {
-      reply: [
-        [
-          '*Êtes-vous certain de vouloir annuler ?*',
-          `*Pénalité*: ${LATE_CANCELLATION_PENALTY_FCFA.toLocaleString('fr-FR')} FCFA`,
-          '1️⃣ Oui, annuler malgré la pénalité',
-          '2️⃣ Non, maintenir ma candidature',
-          '',
-          '*Tapez le numéro correspondant.*',
-        ].join('\n'),
-      ],
-      nextState: {
-        ...state,
-        step: 2,
-        payload: { ...payload, reason },
-        updatedAt: new Date().toISOString(),
-      },
-    };
+    return handleLateCancellationInput(args);
   }
 
-  // Non-late cancellation: interpret options 1, 2, 3 explicitly.
   if (normalized === '1' || normalized === '0' || normalized === 'confirmer') {
-    try {
-      const result = await ctx.applicationService.cancel(
-        applicationId,
-        profile.id,
-      );
-      await ctx.notificationService.sendCancellationToEmployer(
-        applicationId,
-        result.application.cancellation_reason ?? null,
-        false,
-      );
-      return {
-        reply: [
-          [
-            '*Candidature annulée*',
-            '',
-            "Votre candidature a été annulée. L'employeur a été notifié.",
-            '',
-            "*Tapez 'Menu' pour revenir.*",
-          ].join('\n'),
-        ],
-        clearState: true,
-      };
-    } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : "*IMPOSSIBLE D'ANNULER.*";
-      return { reply: [`❌ ${message}`], nextState: state };
-    }
+    return executeCancellation(
+      applicationId,
+      profile,
+      undefined,
+      false,
+      ctx,
+      state,
+    );
   }
 
   if (normalized === '2') {
@@ -160,84 +216,33 @@ async function handleCancelStep1(
     };
   }
 
-  if (
-    normalized === '3' ||
-    CMD_MENU.some((c) => normalized === c || normalized.startsWith(c + ' '))
-  ) {
-    return {
-      reply: [menuMessage(profile.profile_type)],
-      clearState: true,
-    };
+  if (normalized === '3' || isMenuCommand(normalized)) {
+    return { reply: [menuMessage(profile.profile_type)], clearState: true };
   }
 
-  // Any other text is treated as a free-text reason followed by immediate cancel.
-  try {
-    const result = await ctx.applicationService.cancel(
-      applicationId,
-      profile.id,
-      trimmed,
-    );
-    await ctx.notificationService.sendCancellationToEmployer(
-      applicationId,
-      result.application.cancellation_reason ?? null,
-      false,
-    );
-    return {
-      reply: [
-        [
-          '*Candidature annulée*',
-          '',
-          "Votre candidature a été annulée. L'employeur a été notifié.",
-          '',
-          "*Tapez 'Menu' pour revenir.*",
-        ].join('\n'),
-      ],
-      clearState: true,
-    };
-  } catch (err: unknown) {
-    const message =
-      err instanceof Error ? err.message : "*IMPOSSIBLE D'ANNULER.*";
-    return { reply: [`❌ ${message}`], nextState: state };
-  }
+  // Free-text reason → immediate cancellation
+  return executeCancellation(
+    applicationId,
+    profile,
+    trimmed,
+    false,
+    ctx,
+    state,
+  );
 }
 
 async function handleCancelStep2(args: CancelStepArgs): Promise<FlowResult> {
   const { state, payload, applicationId, normalized, profile, ctx } = args;
   if (normalized === '1' || normalized === 'oui') {
     const reason = (payload.reason as string) ?? undefined;
-    try {
-      const result = await ctx.applicationService.cancel(
-        applicationId,
-        profile.id,
-        reason,
-      );
-      await ctx.notificationService.sendCancellationToEmployer(
-        applicationId,
-        reason ?? null,
-        true,
-      );
-      const penaltyMsg = result.penaltyAmount
-        ? `\nUne pénalité de ${result.penaltyAmount.toLocaleString('fr-FR')} FCFA a été appliquée.`
-        : '';
-      return {
-        reply: [
-          [
-            '*Candidature annulée avec pénalité*',
-            '',
-            'Votre candidature a été annulée.' + penaltyMsg,
-            '',
-            "L'employeur a été notifié.",
-            '',
-            "*Tapez 'Menu' pour revenir.*",
-          ].join('\n'),
-        ],
-        clearState: true,
-      };
-    } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : "*IMPOSSIBLE D'ANNULER.*";
-      return { reply: [`❌ ${message}`], nextState: state };
-    }
+    return executeCancellation(
+      applicationId,
+      profile,
+      reason,
+      true,
+      ctx,
+      state,
+    );
   }
   if (normalized === '2' || normalized === 'non') {
     return {
@@ -264,13 +269,8 @@ export async function runCancelApplicationFlow(
   const trimmed = input.trim();
   const normalized = trimmed.toLowerCase();
 
-  if (
-    CMD_MENU.some((c) => normalized === c || normalized.startsWith(c + ' '))
-  ) {
-    return {
-      reply: [menuMessage(profile.profile_type)],
-      clearState: true,
-    };
+  if (isMenuCommand(normalized)) {
+    return { reply: [menuMessage(profile.profile_type)], clearState: true };
   }
 
   if (!applicationId) {
@@ -305,8 +305,7 @@ export async function runCancelApplicationFlow(
   }
 
   const now = new Date();
-  const scheduledAt = app.job_offer.scheduled_at;
-  const msUntil = scheduledAt.getTime() - now.getTime();
+  const msUntil = app.job_offer.scheduled_at.getTime() - now.getTime();
   const hoursUntil = msUntil / (60 * 60 * 1000);
   const isLate = hoursUntil < 4 && hoursUntil >= 0;
   const timeRemainingStr = formatTimeRemaining(msUntil);
@@ -331,10 +330,7 @@ export async function runCancelApplicationFlow(
   }
   if (state.step === 2) return handleCancelStep2(stepArgs);
 
-  return {
-    reply: ["*ERREUR. TAPEZ 'MENU'.*"],
-    clearState: true,
-  };
+  return { reply: ["*ERREUR. TAPEZ 'MENU'.*"], clearState: true };
 }
 
 export function getCancelApplicationInitialState(

@@ -153,19 +153,88 @@ export async function seedProfiles(prisma: PrismaClient): Promise<void> {
 }
 
 const BULK_FIRST_NAMES = [
-  'Jean', 'Marie', 'Pierre', 'Sophie', 'Thomas', 'Julie', 'Nicolas', 'Camille',
-  'Lucas', 'Léa', 'Hugo', 'Manon', 'Louis', 'Chloé', 'Gabriel', 'Sarah',
-  'Raphaël', 'Emma', 'Arthur', 'Laura', 'Jules', 'Pauline', 'Adam', 'Lucie',
-  'Nathan', 'Charlotte', 'Enzo', 'Clara', 'Théo', 'Margot', 'Noah', 'Jade',
-  'Léo', 'Anaïs', 'Romain', 'Marine', 'Antoine', 'Océane', 'Maxime', 'Inès',
+  'Jean',
+  'Marie',
+  'Pierre',
+  'Sophie',
+  'Thomas',
+  'Julie',
+  'Nicolas',
+  'Camille',
+  'Lucas',
+  'Léa',
+  'Hugo',
+  'Manon',
+  'Louis',
+  'Chloé',
+  'Gabriel',
+  'Sarah',
+  'Raphaël',
+  'Emma',
+  'Arthur',
+  'Laura',
+  'Jules',
+  'Pauline',
+  'Adam',
+  'Lucie',
+  'Nathan',
+  'Charlotte',
+  'Enzo',
+  'Clara',
+  'Théo',
+  'Margot',
+  'Noah',
+  'Jade',
+  'Léo',
+  'Anaïs',
+  'Romain',
+  'Marine',
+  'Antoine',
+  'Océane',
+  'Maxime',
+  'Inès',
 ];
 const BULK_LAST_NAMES = [
-  'Martin', 'Bernard', 'Dubois', 'Thomas', 'Robert', 'Richard', 'Petit',
-  'Durand', 'Leroy', 'Moreau', 'Simon', 'Laurent', 'Lefebvre', 'Michel',
-  'Garcia', 'David', 'Bertrand', 'Roux', 'Vincent', 'Fournier', 'Morel',
-  'Girard', 'André', 'Lefevre', 'Mercier', 'Dupont', 'Lambert', 'Bonnet',
-  'François', 'Martinez', 'Legrand', 'Garnier', 'Faure', 'Rousseau', 'Blanc',
-  'Guerin', 'Muller', 'Henry', 'Roussel', 'Nicolas',
+  'Martin',
+  'Bernard',
+  'Dubois',
+  'Thomas',
+  'Robert',
+  'Richard',
+  'Petit',
+  'Durand',
+  'Leroy',
+  'Moreau',
+  'Simon',
+  'Laurent',
+  'Lefebvre',
+  'Michel',
+  'Garcia',
+  'David',
+  'Bertrand',
+  'Roux',
+  'Vincent',
+  'Fournier',
+  'Morel',
+  'Girard',
+  'André',
+  'Lefevre',
+  'Mercier',
+  'Dupont',
+  'Lambert',
+  'Bonnet',
+  'François',
+  'Martinez',
+  'Legrand',
+  'Garnier',
+  'Faure',
+  'Rousseau',
+  'Blanc',
+  'Guerin',
+  'Muller',
+  'Henry',
+  'Roussel',
+  'Nicolas',
 ];
 const BULK_ADDRESSES = [
   '10 rue de la Paix, 75002 Paris',
@@ -181,13 +250,13 @@ const BULK_ADDRESSES = [
   '18 rue du Taur, 31000 Toulouse',
   '4 allée Jean Jaurès, 31000 Toulouse',
   '9 rue Sainte-Catherine, 33000 Bordeaux',
-  '20 cours de l\'Intendance, 33000 Bordeaux',
+  "20 cours de l'Intendance, 33000 Bordeaux",
   '14 place de la Bourse, 33000 Bordeaux',
   '2 rue de la Monnaie, 44000 Nantes',
   '11 place du Commerce, 44000 Nantes',
   '6 rue Crébillon, 44000 Nantes',
   '13 rue du Faubourg Saint-Antoine, 75011 Paris',
-  '30 avenue de l\'Opéra, 75001 Paris',
+  "30 avenue de l'Opéra, 75001 Paris",
 ];
 const BULK_DESCRIPTIONS = [
   'Disponible pour missions ponctuelles.',
@@ -196,7 +265,7 @@ const BULK_DESCRIPTIONS = [
   'Ouvrier qualifié, sérieux et ponctuel.',
   'Recrute pour chantiers et événements.',
   'Entreprise en croissance, besoin de renfort.',
-  'Profil polyvalent, prêt à s\'investir.',
+  "Profil polyvalent, prêt à s'investir.",
   'Spécialisé en inventaire et préparation de commandes.',
   'Recherche travailleurs motivés pour saisons.',
   'Disponible immédiatement, permis B.',
@@ -209,13 +278,15 @@ const BULK_DESCRIPTIONS = [
   'Recrute pour entrepôts et plateformes.',
   'Disponible semaine et week-end.',
   'Expérience en conditionnement et tri.',
-  'Recherche collaborateurs pour pic d\'activité.',
+  "Recherche collaborateurs pour pic d'activité.",
 ];
 
 export async function seedProfilesBulk(prisma: PrismaClient): Promise<void> {
   const count = await prisma.profile.count();
   if (count >= 100) {
-    console.log('[Profile bulk seed] Skipped (already have at least 100 profiles).');
+    console.log(
+      '[Profile bulk seed] Skipped (already have at least 100 profiles).',
+    );
     return;
   }
   const toCreate = 100 - count;
@@ -231,15 +302,24 @@ export async function seedProfilesBulk(prisma: PrismaClient): Promise<void> {
     const first = BULK_FIRST_NAMES[n % BULK_FIRST_NAMES.length];
     const last = BULK_LAST_NAMES[n % BULK_LAST_NAMES.length];
     const profileType = n % 2 === 0 ? ProfileType.WORKER : ProfileType.EMPLOYER;
-    const statuses = [AccountStatus.ACTIVE, AccountStatus.PENDING_PAYMENT, AccountStatus.SUSPENDED];
+    const statuses = [
+      AccountStatus.ACTIVE,
+      AccountStatus.PENDING_ACTIVATION,
+      AccountStatus.SUSPENDED,
+    ];
     const status = statuses[n % statuses.length];
-    const verificationStatuses = [VerificationStatus.PENDING, VerificationStatus.VERIFIED, VerificationStatus.REJECTED];
+    const verificationStatuses = [
+      VerificationStatus.PENDING,
+      VerificationStatus.VERIFIED,
+      VerificationStatus.REJECTED,
+    ];
     const verificationStatus = verificationStatuses[n % 3];
     const reliabilityScore = 70 + (n % 31);
     const whatsappConnected = n % 3 === 0;
-    const rejectionReason = verificationStatus === VerificationStatus.REJECTED
-      ? `Document non lisible (seed ${n}).`
-      : null;
+    const rejectionReason =
+      verificationStatus === VerificationStatus.REJECTED
+        ? `Document non lisible (seed ${n}).`
+        : null;
     await prisma.profile.create({
       data: {
         first_name: first,
@@ -258,5 +338,7 @@ export async function seedProfilesBulk(prisma: PrismaClient): Promise<void> {
     });
     created.push(`${first} ${last}`);
   }
-  console.log(`[Profile bulk seed] Created ${created.length} profiles (total target: 100).`);
+  console.log(
+    `[Profile bulk seed] Created ${created.length} profiles (total target: 100).`,
+  );
 }

@@ -24,11 +24,15 @@ export class UserService {
     });
 
     if (existingUser) {
-      throw new ConflictException('Un administrateur avec cette adresse email existe déjà');
+      throw new ConflictException(
+        'Un administrateur avec cette adresse email existe déjà',
+      );
     }
 
     if (data.role !== UserRole.ADMIN && data.role !== UserRole.SUPER_ADMIN) {
-      throw new BadRequestException('Le rôle doit être soit ADMIN soit SUPER_ADMIN');
+      throw new BadRequestException(
+        'Le rôle doit être soit ADMIN soit SUPER_ADMIN',
+      );
     }
 
     const user = await this.prisma.user.create({
@@ -72,12 +76,16 @@ export class UserService {
       });
 
       if (existingUser) {
-        throw new ConflictException('Un administrateur avec cette adresse email existe déjà');
+        throw new ConflictException(
+          'Un administrateur avec cette adresse email existe déjà',
+        );
       }
     }
 
     if (data.role !== UserRole.ADMIN && data.role !== UserRole.SUPER_ADMIN) {
-      throw new BadRequestException('Le rôle doit être soit ADMIN soit SUPER_ADMIN');
+      throw new BadRequestException(
+        'Le rôle doit être soit ADMIN soit SUPER_ADMIN',
+      );
     }
 
     const updated = await this.prisma.user.update({
