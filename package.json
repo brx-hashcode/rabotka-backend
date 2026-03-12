@@ -113,7 +113,19 @@
       "^(\\.{1,2}/.*)\\.js$": "$1"
     },
     "collectCoverageFrom": [
-      "**/*.(t|j)s"
+      "**/*.(t|j)s",
+      "!**/*.module.ts",
+      "!**/main.ts",
+      "!**/worker.ts",
+      "!**/*.dto.ts",
+      "!**/dto/**",
+      "!**/*.constants.ts",
+      "!**/*.types.ts",
+      "!**/*.interface.ts",
+      "!**/interfaces/**",
+      "!**/*.config.ts",
+      "!**/index.ts",
+      "!**/*.spec.ts"
     ],
     "coverageDirectory": "../coverage",
     "testEnvironment": "node"
