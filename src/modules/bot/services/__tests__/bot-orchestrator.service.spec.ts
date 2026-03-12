@@ -9,6 +9,7 @@ import { BotInboxService } from '../bot-inbox.service';
 import { BotDraftService } from '../bot-draft.service';
 import { JobOfferService } from '../../../job-offer/job-offer.service';
 import { ApplicationService } from '../../../application/application.service';
+import { SystemConfigService } from '../../../system-config/system-config.service';
 
 const PROFILE_ID = 'profile-uuid-1';
 const PHONE = '+242000000';
@@ -66,6 +67,13 @@ function makeDeps() {
       getUnpaidPenalties: jest.fn().mockResolvedValue({ count: 0, total: 0, ids: [] }),
     },
     notificationService: {},
+    systemConfig: {
+      getContactInfo: jest.fn().mockResolvedValue({
+        email: 'contact@rabotka.com',
+        phone: '+242 06 000 0000',
+        address: 'Brazzaville, Congo',
+      }),
+    },
   };
 }
 
@@ -88,6 +96,7 @@ describe('BotOrchestratorService', () => {
         { provide: JobOfferService, useValue: deps.jobOfferService },
         { provide: ApplicationService, useValue: deps.applicationService },
         { provide: BotNotificationService, useValue: deps.notificationService },
+        { provide: SystemConfigService, useValue: deps.systemConfig },
       ],
     }).compile();
 

@@ -1,5 +1,10 @@
 import type { BotProfileType } from '../types/bot-state.types';
-import { RABOTKA_CONTACT } from '../../../common/constants/rabotka-contact';
+
+export type ContactInfo = {
+  email: string;
+  phone: string;
+  address: string;
+};
 
 export function workerMenuMessage(): string {
   return [
@@ -35,13 +40,13 @@ export function menuMessage(profileType: BotProfileType): string {
   return profileType === 'WORKER' ? workerMenuMessage() : employerMenuMessage();
 }
 
-export function helpMessage(): string {
+export function helpMessage(contact: ContactInfo): string {
   return [
     '*CONTACT RABOTKA*',
     '',
-    `*Téléphone*: ${RABOTKA_CONTACT.phone}`,
-    `*Email*: ${RABOTKA_CONTACT.email}`,
-    `*Adresse*: _${RABOTKA_CONTACT.address}_`,
+    `*Téléphone*: ${contact.phone}`,
+    `*Email*: ${contact.email}`,
+    `*Adresse*: _${contact.address}_`,
     '',
     "*Tapez 'Menu' pour revenir.*",
   ].join('\n');
