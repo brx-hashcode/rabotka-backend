@@ -303,7 +303,23 @@ export class PaymentRequestService {
       select: PAYMENT_REQUEST_SELECT,
     });
 
-    if (!request) return null;
+    if (!request) {
+      if (decision === 'ACCEPTED') {
+        await this.prisma.profile.update({
+          where: { id: profileId },
+          data: { status: AccountStatus.ACTIVE },
+        });
+        await this.log.create({
+          action: 'PAYMENT_CONFIRMED',
+          entityType: 'Profile',
+          entityId: profileId,
+          userId: adminUserId,
+          profileId,
+          metadata: { note: 'Profile manually activated by admin (no payment request)' },
+        });
+      }
+      return null;
+    }
 
     if (decision === 'ACCEPTED') {
       const [updated] = await this.prisma.$transaction([
