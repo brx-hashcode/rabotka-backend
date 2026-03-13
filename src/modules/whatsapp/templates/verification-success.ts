@@ -1,10 +1,8 @@
-export function verificationSuccessMessage(firstName: string): string {
+export function verificationSuccessMessage(): string {
   return [
-    `Bonjour ${firstName} 👋`,
+    'Votre numéro WhatsApp a été vérifié avec succès.',
     '',
-    '✅ Votre numéro WhatsApp a été vérifié avec succès.',
-    '',
-    'Vous recevrez prochainement un lien pour activer votre compte Rabotka.',
+    'Vous recevrez prochainement un lien pour activer votre compte.',
     '',
     'Merci pour votre patience 🙏',
   ].join('\n');

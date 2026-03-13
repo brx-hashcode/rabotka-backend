@@ -1,11 +1,6 @@
-export function accountActivationMessage(
-  firstName: string,
-  paymentUrl: string,
-): string {
+export function accountActivationMessage(paymentUrl: string): string {
   return [
-    `Bonjour ${firstName} 👋`,
-    '',
-    '✅ Votre numéro WhatsApp a été vérifié avec succès.',
+    'Votre numéro WhatsApp a été vérifié avec succès.',
     '',
     'Pour activer votre compte Rabotka, veuillez finaliser votre paiement en cliquant sur le lien ci-dessous :',
     '',
