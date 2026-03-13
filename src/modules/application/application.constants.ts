@@ -21,3 +21,6 @@ export const EMPLOYER_GHOST_SCORE_DEDUCTION = 10;
 
 /** Number of unpaid penalties before billing_status becomes BLOCKED */
 export const BILLING_BLOCK_THRESHOLD = 2;
+
+/** Number of unpaid penalties that triggers account suspension */
+export const PENALTY_SUSPENSION_THRESHOLD = Number(process.env.PENALTY_THRESHOLD ?? 3);

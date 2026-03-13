@@ -1,9 +1,9 @@
 import { PaymentFlow } from '@prisma/client';
 import type { BotProfile, BotState } from '../types/bot-state.types';
 import { FLOW_IDS } from '../bot.constants';
-import { formatOfferPublishedSuccess } from '../messages/offers.messages';
 import type { JobOfferService } from '../../job-offer/job-offer.service';
 import { CreateJobOfferDto } from '../../job-offer/dto/create-job-offer.dto';
+import type { PaymentService } from '../../payments/payment.service';
 
 const TITLE_MIN = 5;
 const TITLE_MAX = 100;
@@ -25,6 +25,7 @@ const PAYMENT_FLOW_LABELS: Record<string, string> = {
 
 export type PublishJobContext = {
   jobOfferService: JobOfferService;
+  paymentService: PaymentService;
 };
 
 export type FlowResult = {
@@ -101,7 +102,23 @@ async function handlePublishStep9(args: StepArgs): Promise<FlowResult> {
   };
   try {
     const offer = await ctx.jobOfferService.create(profile.id, dto);
-    return { reply: [formatOfferPublishedSuccess(offer.id)], clearState: true };
+    const paymentLink = await ctx.paymentService.generateJobPostingPaymentLink(offer.id);
+    return {
+      reply: [
+        [
+          `✅ *Offre créée — Paiement requis*`,
+          ``,
+          `Votre offre "*${String(payload.title)}*" a été enregistrée.`,
+          ``,
+          `Pour la publier et la rendre visible aux travailleurs, veuillez effectuer le paiement de mise en ligne :`,
+          ``,
+          paymentLink,
+          ``,
+          `Une fois le paiement confirmé, votre offre sera publiée automatiquement.`,
+        ].join('\n'),
+      ],
+      clearState: true,
+    };
   } catch (err: unknown) {
     const message =
       err instanceof Error ? err.message : 'Erreur lors de la publication.';
