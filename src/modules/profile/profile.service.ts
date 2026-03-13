@@ -611,11 +611,12 @@ export class ProfileService {
     ) {
       try {
         if (profile.phone) {
-          const text = accountActivatedMessage(
+          const message = accountActivatedMessage(
             profile.first_name,
             profile.profile_type,
           );
-          await this.whatsAppService.sendTextMessage(profile.phone, text);
+
+          await this.whatsAppService.sendTextMessage(profile.phone, message);
         }
       } catch {
         this.logger.warn(

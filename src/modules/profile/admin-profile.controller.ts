@@ -296,6 +296,7 @@ export class AdminProfileController {
       id,
       dto.status,
     );
+
     const adminUserId = req.user?.userId;
     await this.logService.create({
       action: 'STATUS_CHANGED',
@@ -343,6 +344,7 @@ export class AdminProfileController {
       body.reason,
       adminUserId as string,
     );
+
     return this.profileService.getProfileDetailForAdmin(id);
   }
 }
