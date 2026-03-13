@@ -1,6 +1,14 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { randomBytes } from 'node:crypto';
+import Redis from 'ioredis';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
-import { BotNotificationService } from '../bot/services/bot-notification.service';
+import { WhatsAppService } from '../whatsapp/whatsapp.service';
+import { verificationLinkMessage } from '../whatsapp/templates';
+import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
+
+const VERIFICATION_TOKEN_KEY_PREFIX = 'wa:verify:';
+const VERIFICATION_TOKEN_TTL_SECONDS = 1800;
 
 @Injectable()
 export class KycService {
@@ -8,38 +16,50 @@ export class KycService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly botNotification: BotNotificationService,
+    private readonly whatsApp: WhatsAppService,
+    private readonly configService: ConfigService,
+    @Inject(REDIS_CONNECTION) private readonly redis: Redis,
   ) {}
 
   async approveKyc(profileId: string): Promise<void> {
     const profile = await this.prisma.profile.findUnique({
       where: { id: profileId },
-      select: { id: true, phone: true },
+      select: { id: true, first_name: true, phone: true },
     });
 
     if (!profile) {
       throw new NotFoundException('Profil introuvable');
     }
 
-    // Generate 6-digit OTP
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const token = randomBytes(32).toString('base64url');
+    const redisKey = `${VERIFICATION_TOKEN_KEY_PREFIX}${token}`;
 
-    const expiresAt = new Date();
-    expiresAt.setHours(expiresAt.getHours() + 24);
+    await this.redis.set(
+      redisKey,
+      profileId,
+      'EX',
+      VERIFICATION_TOKEN_TTL_SECONDS,
+    );
 
-    await this.prisma.verificationToken.create({
-      data: {
-        profile_id: profileId,
-        token: otp,
-        expires_at: expiresAt,
-      },
-    });
+    const frontendUrl = this.configService.get<string>(
+      'FRONTEND_URL',
+      'http://localhost:3000',
+    );
+    const verificationLink = `${frontendUrl}/verify/whatsapp?token=${token}`;
+    const message = verificationLinkMessage(
+      profile.first_name,
+      verificationLink,
+    );
 
-    this.logger.log(`KYC approved for profile ${profileId}, OTP generated`);
+    const sent = await this.whatsApp.sendTextMessage(profile.phone, message);
 
-    await this.botNotification.sendMessage(
-      profile.phone,
-      `✅ Votre identité a été vérifiée avec succès !\n\nPour activer votre compte Rabotka, veuillez confirmer votre numéro WhatsApp en tapant le code suivant :\n\n🔑 CODE : ${otp}\n\nCe code expire dans 24 heures.`,
+    if (!sent) {
+      await this.redis.del(redisKey);
+      throw new Error("Echec de l'envoi du message WhatsApp");
+    }
+
+    this.logger.log(
+      `KYC approved for profile ${profileId}, WhatsApp verification link sent`,
     );
   }
 }

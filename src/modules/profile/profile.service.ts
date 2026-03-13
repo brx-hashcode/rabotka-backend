@@ -527,6 +527,7 @@ export class ProfileService {
       where: { id: profileId },
       select: { id: true },
     });
+
     if (!profile) {
       throw new NotFoundException('Profil non trouvé');
     }
@@ -552,6 +553,7 @@ export class ProfileService {
           rejection_reason: decision === 'REJECTED' ? (reason ?? null) : null,
         },
       }),
+
       this.prisma.kycDocument.updateMany({
         where: { profile_id: profileId },
         data: {
@@ -561,9 +563,11 @@ export class ProfileService {
           rejection_reason: decision === 'REJECTED' ? (reason ?? null) : null,
         },
       }),
+
       this.prisma.kycVerificationImage.deleteMany({
         where: { profile_id: profileId },
       }),
+
       ...uploadedUrls.map((url) =>
         this.prisma.kycVerificationImage.create({
           data: {
