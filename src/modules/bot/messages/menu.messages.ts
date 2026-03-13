@@ -52,6 +52,29 @@ export function helpMessage(contact: ContactInfo): string {
   ].join('\n');
 }
 
+export function accountSuspendedBotMessage(contact: ContactInfo): string {
+  return [
+    '🚫 *Compte suspendu*',
+    '',
+    'Votre compte a été suspendu. Vous ne pouvez plus accéder aux fonctionnalités.',
+    '',
+    'Pour toute réclamation ou demande de réactivation, veuillez contacter notre équipe support :',
+    '',
+    `*Email* : ${contact.email}`,
+    `*Téléphone* : ${contact.phone}`,
+  ].join('\n');
+}
+
+export function hasPenaltiesBotMessage(): string {
+  return [
+    '⚠️ *Accès bloqué — Pénalités impayées*',
+    '',
+    "Vous avez des pénalités impayées. Vous ne pouvez pas accéder aux fonctionnalités tant qu'elles ne sont pas réglées.",
+    '',
+    "Tapez *PAYER* pour régler vos pénalités et réactiver l'accès.",
+  ].join('\n');
+}
+
 export function unknownCommandMessage(): string {
   return "Commande non reconnue. Tapez 'Menu' pour voir les options.";
 }

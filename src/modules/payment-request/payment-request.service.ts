@@ -397,7 +397,7 @@ export class PaymentRequestService {
       .sendMail({
         to: profile.email,
         subject: 'Votre demande de paiement Rabotka a été rejetée',
-        html: paymentRejectedEmail(profile.first_name, note),
+        html: paymentRejectedEmail(note),
       })
       .catch((err: unknown) =>
         this.logger.warn(

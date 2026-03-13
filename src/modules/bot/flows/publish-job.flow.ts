@@ -102,7 +102,9 @@ async function handlePublishStep9(args: StepArgs): Promise<FlowResult> {
   };
   try {
     const offer = await ctx.jobOfferService.create(profile.id, dto);
-    const paymentLink = await ctx.paymentService.generateJobPostingPaymentLink(offer.id);
+    const paymentLink = await ctx.paymentService.generateJobPostingPaymentLink(
+      offer.id,
+    );
     return {
       reply: [
         [
@@ -140,8 +142,18 @@ function handleStep9Modifier(
   return {
     reply: [
       [
-        'Quelle étape souhaitez-vous modifier ? (1-8)',
-        '1=Titre, 2=Description, 3=Date/heure, 4=Montant, 5=Type rémunération, 6=Adresse, 7=Nombre de personnes, 8=Note',
+        '*Quelle étape souhaitez-vous modifier ?* (1-8)',
+        '',
+        '1=Titre',
+        '2=Description',
+        '3=Date/heure',
+        '4=Montant',
+        '5=Type rémunération',
+        '6=Adresse',
+        '7=Nombre de personnes',
+        '8=Note',
+        '',
+        '*Tapez le numéro correspondant.*',
       ].join('\n'),
     ],
     nextState: {
@@ -699,11 +711,17 @@ function buildSummary(payload: Record<string, unknown>): string {
       : payload.note;
   return [
     `*Titre*: ${title}`,
-    `📝 Description: ${descStr}`,
+    '',
+    `*Description*: ${descStr}`,
+    '',
     `*Date et heure*: ${scheduled}`,
+    '',
     `*Montant*: ${Number(payload.amount ?? 0).toLocaleString('fr-FR')} FCFA ${flow}`,
+    '',
     `*Adresse*: ${address}`,
+    '',
     `*Nombre de personnes*: ${quantity}`,
+    '',
     `*Note*: ${note}`,
   ].join('\n');
 }

@@ -12,7 +12,11 @@ import { BotDraftService } from './bot-draft.service';
 import { handleMenuCommand } from '../commands/menu.command';
 import { handleHelpCommand } from '../commands/help.command';
 import { SystemConfigService } from '../../system-config/system-config.service';
-import { unknownCommandMessage } from '../messages/menu.messages';
+import {
+  unknownCommandMessage,
+  accountSuspendedBotMessage,
+  hasPenaltiesBotMessage,
+} from '../messages/menu.messages';
 import type { BotProfile, BotState } from '../types/bot-state.types';
 import { FLOW_IDS } from '../bot.constants';
 import {
@@ -51,10 +55,7 @@ import {
   runPayPenaltiesFlow,
   getPayPenaltiesInitialState,
 } from '../flows/pay-penalties.flow';
-import {
-  runResolvePenaltiesFlow,
-  getResolvePenaltiesInitialState,
-} from '../flows/resolve-penalties.flow';
+import { runResolvePenaltiesFlow } from '../flows/resolve-penalties.flow';
 import {
   runVerifyWhatsappFlow,
   getVerifyWhatsappInitialState,
@@ -122,18 +123,31 @@ export class BotOrchestratorService {
       reliability_score: profile.reliability_score,
     };
 
-    // Intercept suspended accounts — force resolve-penalties flow
+    // Intercept suspended accounts — inform and direct to support
     if (profile.status === AccountStatus.SUSPENDED) {
+      const contact = await this.systemConfig.getContactInfo();
+      return [accountSuspendedBotMessage(contact)];
+    }
+
+    // Intercept PENDING_ACTIVATION accounts — force verify-whatsapp flow
+    if (profile.status === AccountStatus.PENDING_ACTIVATION) {
       const state = await this.botState.get(profileId);
-      const isReturningToFlow = state?.flowId === FLOW_IDS.RESOLVE_PENALTIES;
-      const flowState = isReturningToFlow ? state : getResolvePenaltiesInitialState();
-      // On first contact pass empty string so the flow shows the summary;
+      const isReturningToFlow = state?.flowId === FLOW_IDS.VERIFY_WHATSAPP;
+      const flowState = isReturningToFlow
+        ? state
+        : getVerifyWhatsappInitialState();
+      // On first contact pass empty string so the flow shows the prompt;
       // on subsequent messages (already in the flow) pass the actual text.
       const flowInput = isReturningToFlow ? text : '';
-      const result = await runResolvePenaltiesFlow(flowState, flowInput, botProfile, {
-        prisma: this.prisma,
-        paymentService: this.paymentService,
-      });
+      const result = await runVerifyWhatsappFlow(
+        flowState,
+        flowInput,
+        botProfile,
+        {
+          prisma: this.prisma,
+          paymentService: this.paymentService,
+        },
+      );
       if (result.clearState) {
         await this.botState.clear(profileId);
       } else if (result.nextState) {
@@ -142,24 +156,13 @@ export class BotOrchestratorService {
       return result.reply;
     }
 
-    // Intercept PENDING_ACTIVATION accounts — force verify-whatsapp flow
-    if (profile.status === AccountStatus.PENDING_ACTIVATION) {
-      const state = await this.botState.get(profileId);
-      const isReturningToFlow = state?.flowId === FLOW_IDS.VERIFY_WHATSAPP;
-      const flowState = isReturningToFlow ? state : getVerifyWhatsappInitialState();
-      // On first contact pass empty string so the flow shows the prompt;
-      // on subsequent messages (already in the flow) pass the actual text.
-      const flowInput = isReturningToFlow ? text : '';
-      const result = await runVerifyWhatsappFlow(flowState, flowInput, botProfile, {
-        prisma: this.prisma,
-        paymentService: this.paymentService,
-      });
-      if (result.clearState) {
-        await this.botState.clear(profileId);
-      } else if (result.nextState) {
-        await this.botState.set(profileId, result.nextState);
+    // Intercept accounts with unpaid penalties — block all functionalities
+    if (profile.status === AccountStatus.ACTIVE) {
+      const unpaid =
+        await this.applicationService.getUnpaidPenalties(profileId);
+      if (unpaid.count > 0) {
+        return [hasPenaltiesBotMessage()];
       }
-      return result.reply;
     }
 
     try {
