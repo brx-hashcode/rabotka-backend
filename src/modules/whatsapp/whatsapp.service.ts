@@ -4,12 +4,14 @@ import {
   Logger,
   BadRequestException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { randomBytes } from 'node:crypto';
 import Redis from 'ioredis';
 import { BotPlatform, MessageDirection } from '@prisma/client';
 import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { TwilioService } from '../../common/services/twilio/twilio.service';
-import { verificationSuccessMessage } from './templates';
+import { accountActivationMessage } from './templates';
 
 const VERIFICATION_TOKEN_KEY_PREFIX = 'wa:verify:';
 
@@ -22,6 +24,7 @@ export class WhatsAppService {
     private readonly redis: Redis,
     private readonly prisma: PrismaService,
     private readonly twilioService: TwilioService,
+    private readonly config: ConfigService,
   ) {}
 
   isConfigured(): boolean {
@@ -116,17 +119,12 @@ export class WhatsAppService {
     await this.redis.del(redisKey);
 
     if (this.isConfigured()) {
-      const successMessage = verificationSuccessMessage(profile.first_name);
-      await this.sendTextMessage(
-        profile.phone,
-        successMessage,
-        profileId,
-      ).catch((err) =>
-        this.logger.warn(
-          `Failed to send WhatsApp success message to ${profile.phone}:`,
-          err,
-        ),
-      );
+      const paymentToken = randomBytes(32).toString('hex');
+      const frontendUrl = this.config.get<string>('FRONTEND_URL', '');
+      const paymentUrl = `${frontendUrl}/pay/${paymentToken}`;
+      const message = accountActivationMessage(profile.first_name, paymentUrl);
+
+      await this.sendTextMessage(profile.phone, message, profileId);
     }
 
     this.logger.log(`WhatsApp verified successfully for profile ${profileId}`);

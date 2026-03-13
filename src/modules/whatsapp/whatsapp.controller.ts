@@ -74,7 +74,7 @@ export class WhatsAppController {
 
     const signature = req.headers['x-twilio-signature'] as string | undefined;
     if (!signature) {
-      throw new ForbiddenException("En-tête X-Twilio-Signature manquant");
+      throw new ForbiddenException('En-tête X-Twilio-Signature manquant');
     }
 
     const url = this.buildWebhookUrl(req);
@@ -97,7 +97,6 @@ export class WhatsAppController {
       throw new BadRequestException("Champ 'From' manquant");
     }
 
-    // Idempotency: skip already-processed messages (Twilio retry protection)
     if (messageSid) {
       const idempotencyKey = `wa:msg:${messageSid}`;
       const already = await this.redis.set(
@@ -142,11 +141,6 @@ export class WhatsAppController {
     }
   }
 
-  /**
-   * Build the webhook URL for Twilio signature validation.
-   * Must match exactly the URL Twilio used when sending the request.
-   * When behind a proxy (ngrok, etc.), use X-Forwarded-* headers or TWILIO_WEBHOOK_BASE_URL.
-   */
   private buildWebhookUrl(req: Request): string {
     const baseUrl = this.configService.get<string>('TWILIO_WEBHOOK_BASE_URL');
     if (baseUrl) {
@@ -200,7 +194,9 @@ export class WhatsAppController {
         throw error;
       }
       throw new BadRequestException(
-        error instanceof Error ? error.message : 'Token de vérification invalide',
+        error instanceof Error
+          ? error.message
+          : 'Token de vérification invalide',
       );
     }
   }
