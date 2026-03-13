@@ -319,7 +319,7 @@ export class AuthController {
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   async getAdminMe(
     @Req() req: AdminAuthenticatedRequest,
-  ): Promise<{ id: string; email: string; name: string }> {
+  ): Promise<{ id: string; email: string; name: string; role: string }> {
     return this.authService.getAdminById(req.user.userId);
   }
 
