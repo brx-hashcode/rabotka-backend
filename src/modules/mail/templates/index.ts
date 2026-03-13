@@ -6,3 +6,4 @@ export { adminUpdatedEmail } from './admin-updated';
 export { kycApprovedEmail } from './kyc-approved';
 export { kycRejectedEmail } from './kyc-rejected';
 export { paymentRejectedEmail } from './payment-rejected';
+export { accountSuspendedEmail } from './account-suspended';

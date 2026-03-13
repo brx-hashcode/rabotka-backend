@@ -46,10 +46,7 @@ export class KycService {
       'http://localhost:3000',
     );
     const verificationLink = `${frontendUrl}/verify/whatsapp?token=${token}`;
-    const message = verificationLinkMessage(
-      profile.first_name,
-      verificationLink,
-    );
+    const message = verificationLinkMessage(verificationLink);
 
     const sent = await this.whatsApp.sendTextMessage(profile.phone, message);
 
