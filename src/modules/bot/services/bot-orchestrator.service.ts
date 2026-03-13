@@ -51,6 +51,15 @@ import {
   runPayPenaltiesFlow,
   getPayPenaltiesInitialState,
 } from '../flows/pay-penalties.flow';
+import {
+  runResolvePenaltiesFlow,
+  getResolvePenaltiesInitialState,
+} from '../flows/resolve-penalties.flow';
+import {
+  runVerifyWhatsappFlow,
+  getVerifyWhatsappInitialState,
+} from '../flows/verify-whatsapp.flow';
+import { PaymentService } from '../../payments/payment.service';
 
 const INACTIVE_MESSAGE = `Votre compte est créé mais pas encore activé. Cliquez sur le lien de confirmation que nous vous avons envoyé par WhatsApp pour l’activer.`;
 
@@ -78,6 +87,7 @@ export class BotOrchestratorService {
     private readonly applicationService: ApplicationService,
     private readonly notificationService: BotNotificationService,
     private readonly systemConfig: SystemConfigService,
+    private readonly paymentService: PaymentService,
   ) {}
 
   /**
@@ -93,7 +103,11 @@ export class BotOrchestratorService {
     if (!profile) {
       return [NOT_FOUND_MESSAGE];
     }
-    if (profile.status !== AccountStatus.ACTIVE) {
+    if (
+      profile.status !== AccountStatus.ACTIVE &&
+      profile.status !== AccountStatus.SUSPENDED &&
+      profile.status !== AccountStatus.PENDING_ACTIVATION
+    ) {
       return [INACTIVE_MESSAGE];
     }
 
@@ -107,6 +121,46 @@ export class BotOrchestratorService {
       status: profile.status,
       reliability_score: profile.reliability_score,
     };
+
+    // Intercept suspended accounts — force resolve-penalties flow
+    if (profile.status === AccountStatus.SUSPENDED) {
+      const state = await this.botState.get(profileId);
+      const isReturningToFlow = state?.flowId === FLOW_IDS.RESOLVE_PENALTIES;
+      const flowState = isReturningToFlow ? state : getResolvePenaltiesInitialState();
+      // On first contact pass empty string so the flow shows the summary;
+      // on subsequent messages (already in the flow) pass the actual text.
+      const flowInput = isReturningToFlow ? text : '';
+      const result = await runResolvePenaltiesFlow(flowState, flowInput, botProfile, {
+        prisma: this.prisma,
+        paymentService: this.paymentService,
+      });
+      if (result.clearState) {
+        await this.botState.clear(profileId);
+      } else if (result.nextState) {
+        await this.botState.set(profileId, result.nextState);
+      }
+      return result.reply;
+    }
+
+    // Intercept PENDING_ACTIVATION accounts — force verify-whatsapp flow
+    if (profile.status === AccountStatus.PENDING_ACTIVATION) {
+      const state = await this.botState.get(profileId);
+      const isReturningToFlow = state?.flowId === FLOW_IDS.VERIFY_WHATSAPP;
+      const flowState = isReturningToFlow ? state : getVerifyWhatsappInitialState();
+      // On first contact pass empty string so the flow shows the prompt;
+      // on subsequent messages (already in the flow) pass the actual text.
+      const flowInput = isReturningToFlow ? text : '';
+      const result = await runVerifyWhatsappFlow(flowState, flowInput, botProfile, {
+        prisma: this.prisma,
+        paymentService: this.paymentService,
+      });
+      if (result.clearState) {
+        await this.botState.clear(profileId);
+      } else if (result.nextState) {
+        await this.botState.set(profileId, result.nextState);
+      }
+      return result.reply;
+    }
 
     try {
       const state = await this.botState.get(profileId);
@@ -235,6 +289,7 @@ export class BotOrchestratorService {
       [FLOW_IDS.PUBLISH_JOB]: () =>
         runPublishJobFlow(state, input, profile, {
           jobOfferService: deps.jobOfferService,
+          paymentService: this.paymentService,
         }),
       [FLOW_IDS.LIST_OFFERS]: () =>
         runListOffersFlow(state, input, profile, {
@@ -273,6 +328,16 @@ export class BotOrchestratorService {
       [FLOW_IDS.PAY_PENALTIES]: () =>
         runPayPenaltiesFlow(state, input, profile, {
           applicationService: deps.applicationService,
+        }),
+      [FLOW_IDS.RESOLVE_PENALTIES]: () =>
+        runResolvePenaltiesFlow(state, input, profile, {
+          prisma: this.prisma,
+          paymentService: this.paymentService,
+        }),
+      [FLOW_IDS.VERIFY_WHATSAPP]: () =>
+        runVerifyWhatsappFlow(state, input, profile, {
+          prisma: this.prisma,
+          paymentService: this.paymentService,
         }),
     };
     const runner = runners[flowId];

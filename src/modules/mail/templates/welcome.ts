@@ -4,19 +4,19 @@ export function sendWelcomeEmail(name: string): string {
   const body = `
     <p>Bonjour ${escapeHtml(name)},</p>
 
-    <p>Votre profil a bien été créé avec succès 🎉</p>
+    <p>Votre profil a été créé avec succès 🎉</p>
 
     <p>
-      Pour profiter pleinement de nos services, nous vous invitons à compléter votre profil en ajoutant une photo et vos informations personnelles.
+      Pour activer votre compte, veuillez compléter votre profil
+      (photo et informations personnelles).
     </p>
 
     <p>
-      Une fois votre profil vérifié, vous recevrez un lien sur WhatsApp pour activer votre compte.
+      Un agent Rabotka pourra également vous appeler pour vérifier votre identité (KYC).
     </p>
 
     <p>
-      Si vous avez la moindre question ou besoin d'assistance,
-      n'hésitez pas à nous contacter. Nous sommes là pour vous accompagner.
+      Pour toute question, notre équipe reste à votre disposition.
     </p>
 
     <p>

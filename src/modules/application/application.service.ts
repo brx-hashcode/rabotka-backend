@@ -4,8 +4,11 @@ import {
   NotFoundException,
   ForbiddenException,
   ConflictException,
+  Inject,
+  forwardRef,
 } from '@nestjs/common';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
+import { BotNotificationService } from '../bot/services/bot-notification.service';
 import {
   AccountStatus,
   ApplicationStatus,
@@ -26,6 +29,7 @@ import {
   RELIABILITY_SCORE_MAX,
   EMPLOYER_CANCEL_SCORE_DEDUCTION,
   BILLING_BLOCK_THRESHOLD,
+  PENALTY_SUSPENSION_THRESHOLD,
 } from './application.constants';
 
 export type AdminApplicationListItem = {
@@ -125,7 +129,11 @@ export type ApplicationWithOffer = ApplicationListItem & {
 
 @Injectable()
 export class ApplicationService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Inject(forwardRef(() => BotNotificationService))
+    private readonly botNotification: BotNotificationService,
+  ) {}
 
   async create(
     jobOfferId: string,
@@ -511,6 +519,24 @@ export class ApplicationService {
         },
       });
     });
+
+    // Suspension check after penalty creation
+    if (applyPenalty) {
+      const unpaidCount = await this.prisma.penalty.count({
+        where: { worker_id: workerId, paid_at: null },
+      });
+      if (unpaidCount >= PENALTY_SUSPENSION_THRESHOLD) {
+        const workerProfile = await this.prisma.profile.update({
+          where: { id: workerId },
+          data: { status: AccountStatus.SUSPENDED },
+        });
+        const total = unpaidCount * LATE_CANCELLATION_PENALTY_FCFA;
+        await this.botNotification.sendMessage(
+          workerProfile.phone,
+          `⚠️ Compte suspendu\n\nVotre compte Rabotka a été suspendu en raison de ${unpaidCount} pénalités impayées\n(total : ${total.toLocaleString('fr-FR')} FCFA).\n\nVous ne pouvez plus accéder aux fonctionnalités tant que vos pénalités ne sont pas réglées.\n\n1 – Régler mes pénalités\n2 – Annuler`,
+        );
+      }
+    }
 
     const updated = await this.findById(applicationId);
     if (!updated)

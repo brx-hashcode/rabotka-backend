@@ -69,6 +69,7 @@ enum KycDocumentCategory {
 }
 
 enum JobOfferStatus {
+  PENDING_PAYMENT
   DRAFT
   ACTIVE
   PARTIALLY_FILLED
@@ -209,6 +210,7 @@ model Profile {
   files   File[]
   wallets     Wallet[]
   assignments Assignment[]
+  verification_tokens VerificationToken[]
 
   @@index([email], name: "idx_profile_email")
   @@index([phone], name: "idx_profile_phone")
@@ -503,6 +505,18 @@ model Message {
   @@index([profile_id], name: "idx_message_profile")
   @@index([created_at], name: "idx_message_created_at")
   @@map("messages")
+}
+
+model VerificationToken {
+  id         String    @id @default(cuid())
+  profile_id String    @db.Uuid
+  token      String    @unique
+  expires_at DateTime
+  used_at    DateTime?
+  created_at DateTime  @default(now())
+  profile    Profile   @relation(fields: [profile_id], references: [id])
+
+  @@map("verification_tokens")
 }
 
 model PaymentRequest {

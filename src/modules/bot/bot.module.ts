@@ -3,6 +3,8 @@ import { PrismaModule } from '../../common/services/prisma/prisma.module';
 import { JobOfferModule } from '../job-offer/job-offer.module';
 import { ApplicationModule } from '../application/application.module';
 import { WhatsAppModule } from '../whatsapp/whatsapp.module';
+import { PaymentsModule } from '../payments/payment.module';
+import { KycModule } from '../kyc/kyc.module';
 import { BotStateService } from './services/bot-state.service';
 import { BotInboxService } from './services/bot-inbox.service';
 import { BotDraftService } from './services/bot-draft.service';
@@ -15,8 +17,10 @@ import { BotNotificationService } from './services/bot-notification.service';
   imports: [
     PrismaModule,
     JobOfferModule,
-    ApplicationModule,
+    forwardRef(() => ApplicationModule),
     forwardRef(() => WhatsAppModule),
+    forwardRef(() => PaymentsModule),
+    forwardRef(() => KycModule),
   ],
   providers: [
     BotStateService,
@@ -27,6 +31,6 @@ import { BotNotificationService } from './services/bot-notification.service';
     BotNotificationService,
     BotOrchestratorService,
   ],
-  exports: [BotOrchestratorService],
+  exports: [BotOrchestratorService, BotNotificationService],
 })
 export class BotModule {}

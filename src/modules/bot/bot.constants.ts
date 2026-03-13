@@ -13,6 +13,8 @@ export const FLOW_IDS = {
   PROFILE_SUBMENU: 'profile_submenu',
   MANAGE_FILLED_JOB: 'manage_filled_job',
   PAY_PENALTIES: 'pay_penalties',
+  VERIFY_WHATSAPP: 'verify_whatsapp',
+  RESOLVE_PENALTIES: 'resolve_penalties',
 } as const;
 
 export const WORKER_MENU_OPTIONS = {

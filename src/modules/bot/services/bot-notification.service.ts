@@ -190,6 +190,10 @@ export class BotNotificationService {
     }
   }
 
+  async sendMessage(phone: string, text: string): Promise<void> {
+    await this.whatsApp.sendTextMessage(phone, text);
+  }
+
   async sendJobCancelledByEmployerToWorker(
     applicationId: string,
   ): Promise<void> {
