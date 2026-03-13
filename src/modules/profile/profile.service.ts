@@ -16,6 +16,8 @@ import {
   verificationLinkMessage,
   accountActivatedMessage,
 } from '../whatsapp/templates';
+import { MailService } from '../mail/mail.service';
+import { accountSuspendedEmail } from '../mail/templates';
 import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
 import { CreateProfileDto } from './dto/create-profile.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
@@ -155,6 +157,7 @@ export class ProfileService {
     private readonly redis: Redis,
     private readonly whatsAppService: WhatsAppService,
     private readonly configService: ConfigService,
+    private readonly mailService: MailService,
   ) {}
 
   async findById(id: string): Promise<ProfileMeResponse> {
@@ -592,6 +595,7 @@ export class ProfileService {
         id: true,
         status: true,
         phone: true,
+        email: true,
         first_name: true,
         profile_type: true,
       },
@@ -621,6 +625,25 @@ export class ProfileService {
       } catch {
         this.logger.warn(
           `Failed to send activation message for profile ${profileId}`,
+        );
+      }
+    }
+
+    if (
+      profile.status !== AccountStatus.SUSPENDED &&
+      status === AccountStatus.SUSPENDED
+    ) {
+      try {
+        if (profile.email) {
+          await this.mailService.sendMail({
+            to: profile.email,
+            subject: 'Votre compte a été suspendu',
+            html: accountSuspendedEmail(profile.first_name),
+          });
+        }
+      } catch {
+        this.logger.warn(
+          `Failed to send suspension email for profile ${profileId}`,
         );
       }
     }
@@ -1050,10 +1073,7 @@ export class ProfileService {
       'http://localhost:3000',
     );
     const verificationLink = `${frontendUrl}/verify/whatsapp?token=${token}`;
-    const message = verificationLinkMessage(
-      profile.first_name,
-      verificationLink,
-    );
+    const message = verificationLinkMessage(verificationLink);
 
     const sent = await this.whatsAppService.sendTextMessage(
       profile.phone,

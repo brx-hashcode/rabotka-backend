@@ -122,7 +122,7 @@ export class WhatsAppService {
       const paymentToken = randomBytes(32).toString('hex');
       const frontendUrl = this.config.get<string>('FRONTEND_URL', '');
       const paymentUrl = `${frontendUrl}/pay/${paymentToken}`;
-      const message = accountActivationMessage(profile.first_name, paymentUrl);
+      const message = accountActivationMessage(paymentUrl);
 
       await this.sendTextMessage(profile.phone, message, profileId);
     }

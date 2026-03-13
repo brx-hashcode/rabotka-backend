@@ -1,17 +1,9 @@
-export function paymentApprovedMessage(
-  firstName: string,
-  profileType: 'WORKER' | 'EMPLOYER',
-): string {
-  const typeLabel = profileType === 'WORKER' ? 'Travailleur' : 'Employeur';
-
+export function paymentApprovedMessage(firstName: string): string {
   return [
     `Bonjour ${firstName} 👋`,
     '',
-    '✅ Votre paiement a été confirmé.',
+    'Votre paiement a été confirmé.',
     'Votre compte *Rabotka* est maintenant actif.',
-    '',
-    `Type de compte : ${typeLabel.toUpperCase()}`,
-    'Statut : Actif',
     '',
     'Tapez *Menu* pour commencer à utiliser la plateforme.',
     '',

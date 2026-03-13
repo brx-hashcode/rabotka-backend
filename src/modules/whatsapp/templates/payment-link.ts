@@ -1,18 +1,12 @@
-export function paymentLinkMessage(
-  firstName: string,
-  paymentUrl: string,
-): string {
+export function paymentLinkMessage(paymentUrl: string): string {
   return [
-    `Bonjour ${firstName},`,
-    '',
-    'Votre lien de paiement Rabotka est prêt.',
+    'Votre lien de paiement est prêt.',
     'Cliquez sur le lien ci-dessous pour finaliser votre paiement et activer votre compte :',
     '',
-    `${paymentUrl}`,
+    paymentUrl,
     '',
     'Une fois le paiement confirmé, votre compte sera automatiquement activé.',
-    'Ce lien est personnel et sécurisé.',
     '',
-    'Merci et bienvenue sur Rabotka !',
+    'Merci et bienvenue !',
   ].join('\n');
 }
