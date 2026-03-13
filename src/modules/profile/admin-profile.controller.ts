@@ -29,6 +29,7 @@ import { PaymentRequestService } from '../payment-request/payment-request.servic
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { MailService } from '../mail/mail.service';
+import { kycApprovedEmail, kycRejectedEmail } from '../mail/templates';
 import { MessageDirection, BotPlatform } from '@prisma/client';
 import { AdminListProfilesDto } from './dto/admin-list-profiles.dto';
 import {
@@ -234,6 +235,7 @@ export class AdminProfileController {
       dto.reason,
       files,
     );
+
     await this.logService.create({
       action:
         dto.decision === VerifyDecision.VERIFIED
@@ -248,6 +250,32 @@ export class AdminProfileController {
         ...(dto.reason ? { reason: dto.reason } : {}),
       },
     });
+
+    const fullName = `${result.firstName} ${result.lastName}`.trim();
+
+    if (dto.decision === VerifyDecision.VERIFIED) {
+      await this.mail.sendMail({
+        to: result.email,
+        subject: 'Votre vérification KYC a été approuvée',
+        html: kycApprovedEmail(fullName),
+      });
+
+      this.profileService
+        .requestWhatsAppVerification(id)
+        .catch((err) =>
+          console.warn(
+            `Failed to send WhatsApp verification link for ${id}:`,
+            err,
+          ),
+        );
+    } else {
+      await this.mail.sendMail({
+        to: result.email,
+        subject: 'Votre vérification KYC a été rejetée',
+        html: kycRejectedEmail(fullName, dto.reason),
+      });
+    }
+
     return result;
   }
 
@@ -280,6 +308,7 @@ export class AdminProfileController {
         ...(dto.reason ? { reason: dto.reason } : {}),
       },
     });
+
     return result;
   }
 
