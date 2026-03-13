@@ -273,10 +273,11 @@ export class AuthService {
     id: string;
     email: string;
     name: string;
+    role: string;
   }> {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, first_name: true, last_name: true, email: true },
+      select: { id: true, first_name: true, last_name: true, email: true, role: true },
     });
     if (!user) {
       throw new NotFoundException('Aucun administrateur trouvé pour cet email');
@@ -285,6 +286,7 @@ export class AuthService {
       id: user.id,
       email: user.email,
       name: `${user.first_name} ${user.last_name}`.trim(),
+      role: user.role,
     };
   }
 
