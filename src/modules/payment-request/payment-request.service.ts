@@ -292,6 +292,21 @@ export class PaymentRequestService {
       metadata: { note: dto.note },
     });
 
+    if (request.profile.email) {
+      await this.mail
+        .sendMail({
+          to: request.profile.email,
+          subject: 'Votre demande de paiement Rabotka a été rejetée',
+          html: paymentRejectedEmail(request.profile.first_name, dto.note),
+        })
+        .catch((err: unknown) =>
+          this.logger.warn(
+            `Failed to send payment rejected email to ${request.profile.email}:`,
+            err,
+          ),
+        );
+    }
+
     return this.formatRequest(updated);
   }
 
@@ -309,10 +324,20 @@ export class PaymentRequestService {
 
     if (!request) {
       if (decision === 'ACCEPTED') {
-        await this.prisma.profile.update({
+        const profile = await this.prisma.profile.update({
           where: { id: profileId },
           data: { status: AccountStatus.ACTIVE },
         });
+
+        if (profile.phone) {
+          const message: string = paymentApprovedMessage(
+            profile.first_name,
+            profile.profile_type as 'WORKER' | 'EMPLOYER',
+          );
+
+          const phone: string = profile.phone;
+          await this.whatsApp.sendTextMessage(phone, message);
+        }
 
         await this.log.create({
           action: 'PAYMENT_CONFIRMED',
@@ -356,11 +381,14 @@ export class PaymentRequestService {
           request.profile.profile_type as 'WORKER' | 'EMPLOYER',
         );
         const phone: string = request.profile.phone;
-        await this.whatsApp.sendTextMessage(phone, message).catch(() => {
-          this.logger.warn(
-            `Failed to send payment approved message to ${phone}:`,
+        await this.whatsApp
+          .sendTextMessage(phone, message)
+          .catch((err: unknown) =>
+            this.logger.warn(
+              `Failed to send payment approved message to ${phone}:`,
+              err,
+            ),
           );
-        });
       }
 
       return this.formatRequest(updated as PaymentRequestWithProfile);
@@ -383,6 +411,21 @@ export class PaymentRequestService {
         profileId,
         metadata: { reason: reason ?? null },
       });
+
+      if (updated.profile.email) {
+        await this.mail
+          .sendMail({
+            to: updated.profile.email,
+            subject: 'Votre demande de paiement Rabotka a été rejetée',
+            html: paymentRejectedEmail(updated.profile.first_name, reason),
+          })
+          .catch((err: unknown) =>
+            this.logger.warn(
+              `Failed to send payment rejected email to ${updated.profile.email}:`,
+              err,
+            ),
+          );
+      }
 
       return this.formatRequest(updated);
     }
