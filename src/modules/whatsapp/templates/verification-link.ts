@@ -10,6 +10,7 @@ export function verificationLinkMessage(
     `${link}`,
     '',
     '⏱️ Ce lien est sécurisé et expirera dans *30 minutes*.',
+    '',
     `Si vous nêtes pas à l'origine de cette demande, vous pouvez ignorer ce message.`,
   ].join('\n');
 }
