@@ -10,10 +10,10 @@ export function paymentApprovedMessage(
     '✅ Votre paiement a été confirmé.',
     'Votre compte *Rabotka* est maintenant actif.',
     '',
-    `Type de compte : ${typeLabel}`,
+    `Type de compte : ${typeLabel.toUpperCase()}`,
     'Statut : Actif',
     '',
-    '👉 Tapez *Menu* pour commencer à utiliser la plateforme.',
+    'Tapez *Menu* pour commencer à utiliser la plateforme.',
     '',
     'Bienvenue dans la communauté Rabotka 🚀',
   ].join('\n');

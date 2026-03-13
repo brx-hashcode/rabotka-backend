@@ -37,7 +37,7 @@ import { UpdateProfileDto } from './dto/update-profile.dto';
 import { VerifyWhatsAppDto } from './dto/verify-whatsapp.dto';
 import { sendWelcomeEmail } from '../mail/templates';
 import { MailService } from '../mail/mail.service';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { ProfileAuthGuard } from '../auth/guards/profile-auth.guard';
 import type { ProfileAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
 import { WalletService } from '../wallet/wallet.service';
 import { PayPenaltyDto } from '../wallet/dto/pay-penalty.dto';
@@ -184,7 +184,7 @@ export class ProfileController {
   }
 
   @Get('me')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(ProfileAuthGuard)
   @ApiBearerAuth()
   @ApiCookieAuth()
   @ApiOperation({
@@ -228,7 +228,7 @@ export class ProfileController {
   }
 
   @Get('penalties')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(ProfileAuthGuard)
   @ApiBearerAuth()
   @ApiCookieAuth()
   @ApiOperation({
@@ -262,7 +262,7 @@ export class ProfileController {
   }
 
   @Patch('penalties/:id/pay')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(ProfileAuthGuard)
   @ApiBearerAuth()
   @ApiCookieAuth()
   @ApiOperation({
@@ -299,7 +299,7 @@ export class ProfileController {
   }
 
   @Get('applications')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(ProfileAuthGuard)
   @ApiBearerAuth()
   @ApiCookieAuth()
   @ApiOperation({
@@ -360,7 +360,7 @@ export class ProfileController {
   }
 
   @Patch()
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(ProfileAuthGuard)
   @ApiBearerAuth()
   @ApiCookieAuth()
   @ApiOperation({
@@ -411,7 +411,7 @@ export class ProfileController {
   }
 
   @Post('avatar')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(ProfileAuthGuard)
   @UseInterceptors(FileInterceptor('avatar'))
   @ApiBearerAuth()
   @ApiCookieAuth()
@@ -465,7 +465,7 @@ export class ProfileController {
   }
 
   @Post('verify-whatsapp')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(ProfileAuthGuard)
   @ApiBearerAuth()
   @ApiCookieAuth()
   @ApiOperation({

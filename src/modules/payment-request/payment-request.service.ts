@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  Logger,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomBytes } from 'node:crypto';
@@ -9,10 +10,12 @@ import { AccountStatus, PaymentRequestStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { LogService } from '../log/log.service';
+import { MailService } from '../mail/mail.service';
 import {
   paymentApprovedMessage,
   paymentLinkMessage,
 } from '../whatsapp/templates';
+import { paymentRejectedEmail } from '../mail/templates';
 import { CreatePaymentLinkDto } from './dto/create-payment-link.dto';
 import { SubmitPaymentDto } from './dto/submit-payment.dto';
 import { RejectPaymentDto } from './dto/reject-payment.dto';
@@ -47,11 +50,14 @@ type PaymentRequestWithProfile = Prisma.PaymentRequestGetPayload<{
 
 @Injectable()
 export class PaymentRequestService {
+  private readonly logger = new Logger(PaymentRequestService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
     private readonly whatsApp: WhatsAppService,
     private readonly log: LogService,
+    private readonly mail: MailService,
   ) {}
 
   // ─── Admin: Create payment link ─────────────────────────────────────────
@@ -289,8 +295,6 @@ export class PaymentRequestService {
     return this.formatRequest(updated);
   }
 
-  // ─── Admin: Manual decision (bypasses SUBMITTED check) ───────────────────
-
   async manualDecide(
     profileId: string,
     decision: 'ACCEPTED' | 'REJECTED',
@@ -309,13 +313,16 @@ export class PaymentRequestService {
           where: { id: profileId },
           data: { status: AccountStatus.ACTIVE },
         });
+
         await this.log.create({
           action: 'PAYMENT_CONFIRMED',
           entityType: 'Profile',
           entityId: profileId,
           userId: adminUserId,
           profileId,
-          metadata: { note: 'Profile manually activated by admin (no payment request)' },
+          metadata: {
+            note: 'Profile manually activated by admin (no payment request)',
+          },
         });
       }
       return null;
@@ -349,7 +356,11 @@ export class PaymentRequestService {
           request.profile.profile_type as 'WORKER' | 'EMPLOYER',
         );
         const phone: string = request.profile.phone;
-        await this.whatsApp.sendTextMessage(phone, message).catch(() => null);
+        await this.whatsApp.sendTextMessage(phone, message).catch(() => {
+          this.logger.warn(
+            `Failed to send payment approved message to ${phone}:`,
+          );
+        });
       }
 
       return this.formatRequest(updated as PaymentRequestWithProfile);
