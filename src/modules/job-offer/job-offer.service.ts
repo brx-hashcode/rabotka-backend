@@ -138,7 +138,7 @@ export class JobOfferService {
         address: dto.address.trim(),
         note: dto.note?.trim() ?? null,
         quantity: dto.quantity ?? 1,
-        status: JobOfferStatus.ACTIVE,
+        status: JobOfferStatus.PENDING_PAYMENT,
       },
     });
 
