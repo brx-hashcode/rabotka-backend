@@ -30,6 +30,20 @@ export class AdminDashboardController {
     return this.dashboardService.getMetrics();
   }
 
+  @Get('job-status-distribution')
+  @ApiOperation({
+    summary: 'Get job status distribution (admin only)',
+    description:
+      'Returns job offer counts grouped by status for the given time range.',
+  })
+  @ApiResponse({ status: 200, description: 'Job status distribution' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async getJobStatusDistribution(@Query() dto: JobActivityQueryDto) {
+    return this.dashboardService.getJobStatusDistribution(
+      dto.range ?? TimeRange.NINETY_DAYS,
+    );
+  }
+
   @Get('job-activity')
   @ApiOperation({
     summary: 'Get job activity chart data (admin only)',
