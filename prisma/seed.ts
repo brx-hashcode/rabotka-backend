@@ -1,11 +1,7 @@
 import { config } from 'dotenv';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '@prisma/client';
-import { seedProfiles, seedProfilesBulk } from './seed/profile.seed';
 import { seedSuperAdmin } from './seed/user.seed';
-import { seedWallet } from './seed/wallet.seed';
-import { seedJobOffersAndApplications } from './seed/job-offer.seed';
-import { seedPaymentTestProfiles } from './seed/payment-test.seed';
 
 config({ path: '.env.local' });
 config({ path: '.env' });
@@ -19,11 +15,6 @@ void run();
 async function run() {
   try {
     await seedSuperAdmin(prisma);
-    await seedProfiles(prisma);
-    await seedProfilesBulk(prisma);
-    await seedWallet(prisma);
-    await seedJobOffersAndApplications(prisma);
-    await seedPaymentTestProfiles(prisma);
   } catch (e) {
     console.error(e);
     process.exit(1);
