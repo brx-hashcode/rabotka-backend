@@ -109,6 +109,23 @@ export class DashboardService {
     };
   }
 
+  async getJobStatusDistribution(
+    range: TimeRange,
+  ): Promise<{ status: string; count: number }[]> {
+    const days = TIME_RANGE_DAYS[range];
+    const startDate = new Date();
+    startDate.setHours(0, 0, 0, 0);
+    startDate.setDate(startDate.getDate() - days);
+
+    const groups = await this.prisma.jobOffer.groupBy({
+      by: ['status'],
+      where: { created_at: { gte: startDate } },
+      _count: { status: true },
+    });
+
+    return groups.map((g) => ({ status: g.status, count: g._count.status }));
+  }
+
   private calcTrend(current: number, previous: number): number {
     if (previous === 0) return current > 0 ? 100 : 0;
     return Math.round(((current - previous) / previous) * 1000) / 10;
