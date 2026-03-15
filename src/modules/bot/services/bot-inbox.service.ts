@@ -25,6 +25,7 @@ export class BotInboxService {
     const raw = await this.redis.get(key);
     const items: InboxItem[] = raw ? (JSON.parse(raw) as InboxItem[]) : [];
     items.push(item);
+
     await this.redis.set(key, JSON.stringify(items), 'EX', INBOX_TTL_SECONDS);
   }
 
@@ -32,6 +33,7 @@ export class BotInboxService {
     const key = `${INBOX_KEY_PREFIX}${profileId}`;
     const raw = await this.redis.get(key);
     if (!raw) return [];
+
     try {
       return JSON.parse(raw) as InboxItem[];
     } catch {
@@ -45,6 +47,7 @@ export class BotInboxService {
     const raw = await this.redis.get(key);
     if (!raw) return null;
     let items: InboxItem[];
+
     try {
       items = JSON.parse(raw) as InboxItem[];
     } catch {
@@ -52,11 +55,13 @@ export class BotInboxService {
     }
     if (items.length === 0) return null;
     const first = items.shift()!;
+
     if (items.length === 0) {
       await this.redis.del(key);
     } else {
       await this.redis.set(key, JSON.stringify(items), 'EX', INBOX_TTL_SECONDS);
     }
+
     return first;
   }
 

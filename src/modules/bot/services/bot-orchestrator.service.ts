@@ -408,16 +408,17 @@ export class BotOrchestratorService {
   ): Promise<string[]> {
     const draft = await this.botDraft.getDraft(profileId);
     if (draft && draft.step > 1) {
-      // Offer to resume the saved draft — step 0 = draft-resume decision
       const resumeState: BotState = {
         flowId: FLOW_IDS.PUBLISH_JOB,
         step: 0,
         payload: { ...draft.payload, _draftStep: draft.step },
         updatedAt: new Date().toISOString(),
       };
+
       await this.botState.set(profileId, resumeState);
       return [getPublishJobDraftResumeMessage(draft.step, draft.payload)];
     }
+
     const initialState = getPublishJobInitialState();
     await this.botState.set(profileId, initialState);
     return [getPublishJobFirstMessage()];
@@ -459,6 +460,7 @@ export class BotOrchestratorService {
       const listState = getCandidaturesListInitialState(result.items);
       await this.botState.set(profileId, listState);
     }
+
     return [result.message];
   }
 
@@ -489,6 +491,7 @@ export class BotOrchestratorService {
     const result = await runPayPenaltiesFlow(flowState, '', profile, {
       applicationService: this.applicationService,
     });
+
     return result.reply;
   }
 

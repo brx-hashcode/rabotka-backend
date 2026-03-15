@@ -12,6 +12,12 @@ import {
   formatJobCompletedToWorker,
   formatJobCancelledByEmployerToWorker,
 } from '../messages/application.messages';
+import { formatNewJobOfferToWorker } from '../messages/notifications.messages';
+import { SystemConfigService } from '../../system-config/system-config.service';
+import {
+  QdrantService,
+  COLLECTION_PROFILES,
+} from '../../qdrant/qdrant.service';
 
 @Injectable()
 export class BotNotificationService {
@@ -23,6 +29,8 @@ export class BotNotificationService {
     private readonly whatsApp: WhatsAppService,
     private readonly botState: BotStateService,
     private readonly botInbox: BotInboxService,
+    private readonly systemConfig: SystemConfigService,
+    private readonly qdrant: QdrantService,
   ) {}
 
   async sendNewApplicationToEmployer(applicationId: string): Promise<void> {
@@ -208,6 +216,77 @@ export class BotNotificationService {
     } catch (err) {
       this.logger.warn(
         `Failed to send job cancelled by employer to worker: ${applicationId}`,
+        err,
+      );
+    }
+  }
+
+  async sendNewJobOfferToWorkers(jobOfferId: string): Promise<void> {
+    try {
+      const offer = await this.prisma.jobOffer.findUnique({
+        where: { id: jobOfferId },
+      });
+      if (!offer) return;
+
+      const message = formatNewJobOfferToWorker({
+        title: offer.title,
+        scheduledAt: offer.scheduled_at,
+        amount: Number(offer.amount),
+        paymentFlow: offer.payment_flow,
+        address: offer.address,
+        quantity: offer.quantity ?? 1,
+      });
+
+      const similarityEnabled = await this.systemConfig.isSimilarityEnabled();
+
+      let workerPhones: string[];
+
+      if (similarityEnabled) {
+        const text = [offer.title, offer.description, offer.address].join(' ');
+        const vector = await this.qdrant.embed(text);
+        const hits = await this.qdrant.searchSimilar(
+          COLLECTION_PROFILES,
+          vector,
+          50,
+          { must: [{ key: 'profile_type', match: { value: 'WORKER' } }] },
+        );
+        const workerIds = hits.map((h) => String(h.id));
+        if (workerIds.length === 0) return;
+
+        const workers = await this.prisma.profile.findMany({
+          where: {
+            id: { in: workerIds },
+            status: 'ACTIVE',
+            profile_type: 'WORKER',
+          },
+          select: { phone: true },
+        });
+        workerPhones = workers.map((w) => w.phone);
+      } else {
+        const workers = await this.prisma.profile.findMany({
+          where: { status: 'ACTIVE', profile_type: 'WORKER' },
+          select: { phone: true },
+        });
+        workerPhones = workers.map((w) => w.phone);
+      }
+
+      for (const phone of workerPhones) {
+        this.whatsApp
+          .sendTextMessage(phone, message)
+          .catch((err) =>
+            this.logger.warn(
+              `Failed to notify worker ${phone} of new offer`,
+              err,
+            ),
+          );
+      }
+
+      this.logger.log(
+        `New job offer ${jobOfferId} sent to ${workerPhones.length} worker(s) (similarity=${similarityEnabled})`,
+      );
+    } catch (err) {
+      this.logger.warn(
+        `Failed to broadcast new job offer ${jobOfferId} to workers`,
         err,
       );
     }

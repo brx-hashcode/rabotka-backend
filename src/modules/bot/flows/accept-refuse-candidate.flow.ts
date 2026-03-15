@@ -84,7 +84,7 @@ async function handleAcceptRefuseStep1(args: StepArgs): Promise<FlowResult> {
   };
 }
 
-async function handleAcceptRefuseStep2(args: StepArgs): Promise<FlowResult> {
+function handleAcceptRefuseStep2(args: StepArgs): FlowResult {
   const { state, normalized, trimmed } = args;
   const reason =
     normalized === 'aucune' || normalized === '0' || normalized === 'non'
@@ -139,7 +139,9 @@ async function handleAcceptRefuseStep3(args: StepArgs): Promise<FlowResult> {
 
   try {
     await ctx.applicationService.reject(applicationId, profile.id, reason);
-    await ctx.notificationService.sendApplicationRejectedToWorker(applicationId);
+    await ctx.notificationService.sendApplicationRejectedToWorker(
+      applicationId,
+    );
     return {
       reply: [
         [
