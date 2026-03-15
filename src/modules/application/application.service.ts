@@ -10,6 +10,7 @@ import {
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { BotNotificationService } from '../bot/services/bot-notification.service';
 import { SystemConfigService } from '../system-config/system-config.service';
+import { QdrantService, COLLECTION_JOB_OFFERS } from '../qdrant/qdrant.service';
 import {
   AccountStatus,
   ApplicationStatus,
@@ -134,6 +135,7 @@ export class ApplicationService {
     @Inject(forwardRef(() => BotNotificationService))
     private readonly botNotification: BotNotificationService,
     private readonly systemConfig: SystemConfigService,
+    private readonly qdrant: QdrantService,
   ) {}
 
   async create(
@@ -198,6 +200,28 @@ export class ApplicationService {
     });
     if (existing) {
       throw new ConflictException('Vous avez déjà postulé à cette offre');
+    }
+
+    const { maxConcurrentApplications } = await this.systemConfig.getFees();
+    const activeApplicationsCount = await this.prisma.application.count({
+      where: {
+        worker_id: workerId,
+        status: { in: [ApplicationStatus.PENDING, ApplicationStatus.ACCEPTED] },
+        job_offer: {
+          status: {
+            notIn: [
+              JobOfferStatus.COMPLETED,
+              JobOfferStatus.CANCELLED,
+              JobOfferStatus.EXPIRED,
+            ],
+          },
+        },
+      },
+    });
+    if (activeApplicationsCount >= maxConcurrentApplications) {
+      throw new ForbiddenException(
+        `Vous ne pouvez pas avoir plus de ${maxConcurrentApplications} candidature(s) active(s) simultanément. Attendez qu'une mission soit terminée avant de postuler à nouveau.`,
+      );
     }
 
     const application = await this.prisma.application.create({
@@ -353,6 +377,12 @@ export class ApplicationService {
         },
       }),
     ]);
+
+    this.qdrant
+      .setPayload(COLLECTION_JOB_OFFERS, application.job_offer_id, {
+        status: offerStatus,
+      })
+      .catch(() => undefined);
 
     const updated = await this.findById(applicationId);
     if (!updated)

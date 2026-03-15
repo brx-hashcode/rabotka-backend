@@ -198,9 +198,9 @@ export class JobOfferService {
     });
 
     const hasMore = offers.length > limit;
-    const data = (hasMore ? offers.slice(0, limit) : offers).map((o) =>
-      this.toListItem(o, o._count.applications),
-    );
+    const data = (hasMore ? offers.slice(0, limit) : offers)
+      .map((o) => this.toListItem(o, o._count.applications))
+      .filter((o) => (o.quantity ?? 1) - (o.acceptedCount ?? 0) > 0);
     const nextCursor = hasMore ? (data.at(-1)?.id ?? null) : null;
 
     return { data, nextCursor };
@@ -342,7 +342,8 @@ export class JobOfferService {
     return ids
       .map((id) => offerMap.get(id))
       .filter((o): o is NonNullable<typeof o> => o != null)
-      .map((o) => this.toListItem(o, o._count.applications));
+      .map((o) => this.toListItem(o, o._count.applications))
+      .filter((o) => (o.quantity ?? 1) - (o.acceptedCount ?? 0) > 0);
   }
 
   private async notifyJobOfferPublished(
