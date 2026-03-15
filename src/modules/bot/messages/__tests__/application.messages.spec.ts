@@ -240,6 +240,8 @@ describe('formatApplyConfirmation', () => {
       workerPhone: '06 000 000',
       workerEmail: 'jean@test.com',
       reliabilityScore: 90,
+      penaltyFcfa: 5000,
+      thresholdHours: 4,
     });
     expect(msg).toContain('Livreur');
     expect(msg).toContain('Jean Dupont');
@@ -258,6 +260,8 @@ describe('formatApplyConfirmation', () => {
       workerPhone: '0',
       workerEmail: 'z@test.com',
       reliabilityScore: null,
+      penaltyFcfa: 5000,
+      thresholdHours: 4,
     });
     expect(msg).toContain('100/100');
   });

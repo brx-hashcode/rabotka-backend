@@ -43,6 +43,39 @@ export class BotCommandsService {
     offerIds?: string[];
     nextCursor?: string | null;
   }> {
+    // On the first page (no cursor), try similarity-ranked results first.
+    if (!pageCursor) {
+      try {
+        const similar = await this.jobOfferService.findSimilarForWorker(
+          profile.id,
+          LIST_PAGE_SIZE,
+        );
+        if (similar.length > 0) {
+          const offers: OfferListItem[] = similar.map((o) => ({
+            id: o.id,
+            title: o.title,
+            description: o.description,
+            scheduled_at: o.scheduled_at,
+            amount: o.amount,
+            payment_flow: o.payment_flow,
+            address: o.address,
+            note: o.note,
+            quantity: o.quantity,
+            acceptedCount: o.acceptedCount,
+            status: o.status,
+          }));
+          return {
+            message: formatOfferListCompact(offers, false),
+            offerIds: similar.map((o) => o.id),
+            nextCursor: undefined,
+          };
+        }
+      } catch {
+        // Qdrant unavailable — fall through to findActive
+      }
+    }
+
+    // Fallback: chronological pagination
     const { data, nextCursor } = await this.jobOfferService.findActive(
       LIST_PAGE_SIZE,
       pageCursor,

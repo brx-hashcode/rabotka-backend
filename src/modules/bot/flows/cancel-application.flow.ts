@@ -4,10 +4,7 @@ import {
   formatCancelApplicationNoPenalty,
   formatCancelApplicationWithPenalty,
 } from '../messages/penalty.messages';
-import {
-  LATE_CANCELLATION_PENALTY_FCFA,
-  LATE_CANCELLATION_SCORE_DEDUCTION,
-} from '../../application/application.constants';
+import { LATE_CANCELLATION_SCORE_DEDUCTION } from '../../application/application.constants';
 import type { ApplicationService } from '../../application/application.service';
 import type { BotNotificationService } from '../services/bot-notification.service';
 import { menuMessage } from '../messages/menu.messages';
@@ -15,6 +12,7 @@ import { menuMessage } from '../messages/menu.messages';
 export type CancelApplicationContext = {
   applicationService: ApplicationService;
   notificationService: BotNotificationService;
+  cancellationSettings: { penaltyFcfa: number; thresholdHours: number };
 };
 
 export type FlowResult = {
@@ -114,6 +112,7 @@ function showInitialCancelPrompt(
   profile: BotProfile,
   state: BotState,
   timeRemainingStr: string,
+  ctx: CancelApplicationContext,
 ): FlowResult {
   const scheduledAt = app.job_offer.scheduled_at;
   if (isLate) {
@@ -126,7 +125,7 @@ function showInitialCancelPrompt(
       scheduledAt,
       amount: app.job_offer.amount,
       timeRemaining: timeRemainingStr,
-      penaltyAmount: LATE_CANCELLATION_PENALTY_FCFA,
+      penaltyAmount: ctx.cancellationSettings.penaltyFcfa,
       scoreDeduction: LATE_CANCELLATION_SCORE_DEDUCTION,
       newScore,
     });
@@ -144,7 +143,7 @@ function showInitialCancelPrompt(
 async function handleLateCancellationInput(
   args: CancelStepArgs,
 ): Promise<FlowResult> {
-  const { state, payload, trimmed, normalized } = args;
+  const { state, payload, trimmed, normalized, ctx } = args;
   const reason = normalized === 'confirmer' ? undefined : trimmed;
   if (!reason) {
     return {
@@ -158,7 +157,7 @@ async function handleLateCancellationInput(
     reply: [
       [
         '*Êtes-vous certain de vouloir annuler ?*',
-        `*Pénalité*: ${LATE_CANCELLATION_PENALTY_FCFA.toLocaleString('fr-FR')} FCFA`,
+        `*Pénalité*: ${ctx.cancellationSettings.penaltyFcfa.toLocaleString('fr-FR')} FCFA`,
         '1️⃣ Oui, annuler malgré la pénalité',
         '2️⃣ Non, maintenir ma candidature',
         '',
@@ -189,6 +188,7 @@ async function handleCancelStep1(
       profile,
       state,
       timeRemainingStr,
+      ctx,
     );
   }
 
@@ -307,7 +307,8 @@ export async function runCancelApplicationFlow(
   const now = new Date();
   const msUntil = app.job_offer.scheduled_at.getTime() - now.getTime();
   const hoursUntil = msUntil / (60 * 60 * 1000);
-  const isLate = hoursUntil < 4 && hoursUntil >= 0;
+  const isLate =
+    hoursUntil < ctx.cancellationSettings.thresholdHours && hoursUntil >= 0;
   const timeRemainingStr = formatTimeRemaining(msUntil);
 
   const stepArgs: CancelStepArgs = {

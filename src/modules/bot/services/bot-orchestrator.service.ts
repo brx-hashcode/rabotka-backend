@@ -268,7 +268,7 @@ export class BotOrchestratorService {
     return result.reply;
   }
 
-  private executeFlow(
+  private async executeFlow(
     flowId: string,
     state: BotState,
     input: string,
@@ -288,6 +288,14 @@ export class BotOrchestratorService {
       clearState?: boolean;
       nextState?: BotState;
     };
+
+    const { lateCancellationPenaltyFcfa, cancellationThresholdHours } =
+      await this.systemConfig.getCancellationSettings();
+    const cancellationSettings = {
+      penaltyFcfa: lateCancellationPenaltyFcfa,
+      thresholdHours: cancellationThresholdHours,
+    };
+
     const runners: Record<string, () => Promise<FlowResult>> = {
       [FLOW_IDS.PUBLISH_JOB]: () =>
         runPublishJobFlow(state, input, profile, {
@@ -297,8 +305,13 @@ export class BotOrchestratorService {
       [FLOW_IDS.LIST_OFFERS]: () =>
         runListOffersFlow(state, input, profile, {
           jobOfferService: deps.jobOfferService,
+          cancellationSettings,
         }),
-      [FLOW_IDS.APPLY_JOB]: () => runApplyJobFlow(state, input, profile, deps),
+      [FLOW_IDS.APPLY_JOB]: () =>
+        runApplyJobFlow(state, input, profile, {
+          ...deps,
+          cancellationSettings,
+        }),
       [FLOW_IDS.ACCEPT_REFUSE_CANDIDATE]: () =>
         runAcceptRefuseCandidateFlow(state, input, profile, {
           applicationService: deps.applicationService,
@@ -308,11 +321,13 @@ export class BotOrchestratorService {
         runCancelApplicationFlow(state, input, profile, {
           applicationService: deps.applicationService,
           notificationService: deps.notificationService,
+          cancellationSettings,
         }),
       [FLOW_IDS.MY_APPLICATIONS]: () =>
         runMyApplicationsFlow(state, input, profile, {
           applicationService: deps.applicationService,
           notificationService: deps.notificationService,
+          cancellationSettings,
         }),
       [FLOW_IDS.CANDIDATURES_LIST]: () =>
         runCandidaturesListFlow(state, input, profile, {

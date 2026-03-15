@@ -51,6 +51,8 @@ export function formatReminder24h(params: {
   amount: number;
   employerName: string;
   employerPhone: string;
+  penaltyFcfa: number;
+  thresholdHours: number;
 }): string {
   return [
     '*RAPPEL - MISSION DEMAIN*',
@@ -67,7 +69,7 @@ export function formatReminder24h(params: {
     `*Contact*: ${params.employerPhone}`,
     '',
     '*IMPORTANT*:',
-    '*Toute annulation < 4h = pénalité de 5,000 FCFA*',
+    `*Toute annulation < ${params.thresholdHours}h = pénalité de ${params.penaltyFcfa.toLocaleString('fr-FR')} FCFA*`,
     '*Soyez ponctuel pour maintenir votre score*',
     '',
     'Actions:',
