@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { QdrantService, COLLECTION_JOB_OFFERS } from '../qdrant/qdrant.service';
+import { SystemConfigService } from '../system-config/system-config.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { jobOfferPublishedMessage } from '../whatsapp/templates';
 import { CreateJobOfferDto } from './dto/create-job-offer.dto';
@@ -105,6 +106,7 @@ export class JobOfferService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly qdrant: QdrantService,
+    private readonly systemConfig: SystemConfigService,
     @Inject(forwardRef(() => WhatsAppService))
     private readonly whatsApp: WhatsAppService,
   ) {}
@@ -276,11 +278,14 @@ export class JobOfferService {
       );
     } else {
       // Keep Qdrant payload status in sync so similarity search filters stay accurate
-      this.qdrant
-        .setPayload(COLLECTION_JOB_OFFERS, id, { status })
-        .catch(() => {
-          /* point may not exist yet — safe to ignore */
-        });
+      void this.systemConfig.isSimilarityEnabled().then((enabled) => {
+        if (!enabled) return;
+        this.qdrant
+          .setPayload(COLLECTION_JOB_OFFERS, id, { status })
+          .catch(() => {
+            /* point may not exist yet — safe to ignore */
+          });
+      });
     }
 
     return this.toListItem(updated);
@@ -373,6 +378,8 @@ export class JobOfferService {
     payment_flow: string;
     quantity: number;
   }): Promise<void> {
+    if (!(await this.systemConfig.isSimilarityEnabled())) return;
+
     const parts = [offer.title, offer.description, offer.address];
     if (offer.note) parts.push(offer.note);
     const text = parts.join(' ');
