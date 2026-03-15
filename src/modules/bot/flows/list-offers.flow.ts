@@ -13,6 +13,7 @@ import { menuMessage } from '../messages/menu.messages';
 
 export type ListOffersContext = {
   jobOfferService: JobOfferService;
+  cancellationSettings: { penaltyFcfa: number; thresholdHours: number };
 };
 
 export type FlowResult = {
@@ -180,7 +181,7 @@ async function handleDetailApply(
     '*ENGAGEMENT IMPORTANT*:',
     "Vos informations seront partagées avec l'employeur",
     'Vous vous engagez à être présent et ponctuel',
-    '*Annulation < 4h avant = pénalité de 5,000 FCFA*',
+    `*Annulation < ${ctx.cancellationSettings.thresholdHours}h avant = pénalité de ${ctx.cancellationSettings.penaltyFcfa.toLocaleString('fr-FR')} FCFA*`,
     '',
     '*Confirmez-vous votre candidature ?*',
     '1️⃣ Oui, je postule',

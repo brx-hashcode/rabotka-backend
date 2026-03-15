@@ -166,6 +166,20 @@ export class SystemConfigService implements OnModuleInit {
     };
   }
 
+  /** Cancellation penalty and threshold for late-cancel logic and messaging. */
+  async getCancellationSettings(): Promise<{
+    lateCancellationPenaltyFcfa: number;
+    lateCancellationScoreDeduction: number;
+    cancellationThresholdHours: number;
+  }> {
+    const fees = await this.getFees();
+    return {
+      lateCancellationPenaltyFcfa: fees.lateCancellationPenaltyFcfa,
+      lateCancellationScoreDeduction: fees.lateCancellationScoreDeduction,
+      cancellationThresholdHours: fees.cancellationThresholdHours,
+    };
+  }
+
   async getStorageDriver(): Promise<string> {
     return this.get('storage.driver', 'S3');
   }

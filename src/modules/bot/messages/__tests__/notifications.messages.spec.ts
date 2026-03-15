@@ -38,6 +38,8 @@ describe('notifications.messages', () => {
         amount: 15000,
         employerName: 'M. Dupont',
         employerPhone: '06 123 456',
+        penaltyFcfa: 5000,
+        thresholdHours: 4,
       });
       expect(msg).toContain('Livreur');
       expect(msg).toContain('Kinshasa');
@@ -54,6 +56,8 @@ describe('notifications.messages', () => {
         amount: 5000,
         employerName: 'Z',
         employerPhone: '0',
+        penaltyFcfa: 5000,
+        thresholdHours: 4,
       });
       expect(msg).toContain('pénalité');
     });

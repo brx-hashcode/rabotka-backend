@@ -128,6 +128,21 @@ export class QdrantService implements OnModuleInit {
   }
 
   /**
+   * Update only the payload of an existing point (no re-embedding needed).
+   * No-ops silently if the point does not exist.
+   */
+  async setPayload(
+    collectionName: string,
+    id: string | number,
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    await this.client.setPayload(collectionName, {
+      points: [id],
+      payload,
+    });
+  }
+
+  /**
    * Upsert a single point (dense vector + payload) into a collection.
    */
   async upsertPoint(

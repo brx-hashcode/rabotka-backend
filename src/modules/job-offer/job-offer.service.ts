@@ -4,6 +4,8 @@ import {
   Logger,
   NotFoundException,
   ForbiddenException,
+  Inject,
+  forwardRef,
 } from '@nestjs/common';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { QdrantService, COLLECTION_JOB_OFFERS } from '../qdrant/qdrant.service';
@@ -103,6 +105,7 @@ export class JobOfferService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly qdrant: QdrantService,
+    @Inject(forwardRef(() => WhatsAppService))
     private readonly whatsApp: WhatsAppService,
   ) {}
 
@@ -171,7 +174,9 @@ export class JobOfferService {
       take: limit + 1,
       ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
       where: {
-        status: JobOfferStatus.ACTIVE,
+        status: {
+          in: [JobOfferStatus.ACTIVE, JobOfferStatus.PARTIALLY_FILLED],
+        },
         ...(excludeAppliedByWorkerId
           ? {
               applications: {
@@ -269,6 +274,13 @@ export class JobOfferService {
       this.indexJobOffer(updated).catch((err) =>
         this.logger.error(`Failed to index job offer ${id}`, err),
       );
+    } else {
+      // Keep Qdrant payload status in sync so similarity search filters stay accurate
+      this.qdrant
+        .setPayload(COLLECTION_JOB_OFFERS, id, { status })
+        .catch(() => {
+          /* point may not exist yet — safe to ignore */
+        });
     }
 
     return this.toListItem(updated);
@@ -292,12 +304,22 @@ export class JobOfferService {
       `${profile.first_name} ${profile.last_name} ${profile.description}`.trim();
     const vector = await this.qdrant.embed(text);
 
+    const workerVisibleStatuses = [
+      JobOfferStatus.ACTIVE,
+      JobOfferStatus.PARTIALLY_FILLED,
+    ];
+
     const hits = await this.qdrant.searchSimilar(
       COLLECTION_JOB_OFFERS,
       vector,
       limit,
       {
-        must: [{ key: 'status', match: { value: JobOfferStatus.ACTIVE } }],
+        must: [
+          {
+            key: 'status',
+            match: { any: workerVisibleStatuses },
+          },
+        ],
       },
     );
 
@@ -305,7 +327,11 @@ export class JobOfferService {
 
     const ids = hits.map((h) => String(h.id));
     const offers = await this.prisma.jobOffer.findMany({
-      where: { id: { in: ids }, status: JobOfferStatus.ACTIVE },
+      where: {
+        id: { in: ids },
+        status: { in: workerVisibleStatuses },
+        applications: { none: { worker_id: workerId } },
+      },
       include: {
         _count: { select: { applications: { where: { status: 'ACCEPTED' } } } },
       },

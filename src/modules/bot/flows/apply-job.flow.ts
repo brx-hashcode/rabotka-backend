@@ -14,6 +14,7 @@ export type ApplyJobContext = {
   applicationService: ApplicationService;
   jobOfferService: JobOfferService;
   notificationService: BotNotificationService;
+  cancellationSettings: { penaltyFcfa: number; thresholdHours: number };
 };
 
 export type FlowResult = {
@@ -56,6 +57,8 @@ async function handleApplyStep1(
       workerPhone: profile.phone,
       workerEmail: profile.email,
       reliabilityScore: profile.reliability_score,
+      penaltyFcfa: ctx.cancellationSettings.penaltyFcfa,
+      thresholdHours: ctx.cancellationSettings.thresholdHours,
     });
     return { reply: [text], nextState: state };
   }
