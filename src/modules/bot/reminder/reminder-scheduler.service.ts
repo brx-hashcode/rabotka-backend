@@ -13,6 +13,7 @@ export class ReminderSchedulerService implements OnModuleInit {
 
   onModuleInit(): void {
     const queue = this.queueService.getQueue(WHATSAPP_REMINDERS_QUEUE);
+
     queue
       .add('scan', { type: 'scan' } as ReminderJobData, {
         repeat: {

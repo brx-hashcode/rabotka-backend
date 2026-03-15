@@ -142,6 +142,7 @@ export class SystemConfigService implements OnModuleInit {
       billingBlock,
       jobFee,
       appFee,
+      maxConcurrent,
     ] = await Promise.all([
       this.get('fees.late_cancellation_penalty_fcfa', '5000'),
       this.get('fees.late_cancellation_score_deduction', '5'),
@@ -152,6 +153,7 @@ export class SystemConfigService implements OnModuleInit {
       this.get('fees.billing_block_threshold', '2'),
       this.get('fees.job_posting_fee_fcfa', '0'),
       this.get('fees.application_fee_fcfa', '0'),
+      this.get('fees.max_concurrent_applications', '2'),
     ]);
     return {
       lateCancellationPenaltyFcfa: Number(penalty),
@@ -163,6 +165,7 @@ export class SystemConfigService implements OnModuleInit {
       billingBlockThreshold: Number(billingBlock),
       jobPostingFeeFcfa: Number(jobFee),
       applicationFeeFcfa: Number(appFee),
+      maxConcurrentApplications: Number(maxConcurrent),
     };
   }
 
