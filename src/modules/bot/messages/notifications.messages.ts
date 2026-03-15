@@ -108,3 +108,31 @@ export function formatReminder2h(params: {
     '*BONNE MISSION ! 💪*',
   ].join('\n');
 }
+
+export function formatNewJobOfferToWorker(params: {
+  title: string;
+  scheduledAt: Date;
+  amount: number;
+  paymentFlow: string;
+  address: string;
+  quantity: number;
+}): string {
+  const flowMap: Record<string, string> = {
+    HOURLY: 'par heure',
+    DAILY: 'par jour',
+    MONTHLY: 'par mois',
+  };
+  const flowLabel = flowMap[params.paymentFlow] ?? params.paymentFlow;
+  const spots = params.quantity > 1 ? `${params.quantity} places` : '1 place';
+  return [
+    '🆕 *NOUVELLE OFFRE DISPONIBLE !*',
+    '',
+    `*Poste*: ${params.title}`,
+    `*Date*: ${formatDate(params.scheduledAt)}`,
+    `*Rémunération*: ${params.amount.toLocaleString('fr-FR')} FCFA ${flowLabel}`,
+    `*Adresse*: ${params.address}`,
+    `*Places*: ${spots}`,
+    '',
+    'Tapez *Menu* puis *1* pour voir toutes les offres et postuler.',
+  ].join('\n');
+}

@@ -3,7 +3,7 @@ import Redis from 'ioredis';
 import { REDIS_CONNECTION } from '../../../common/services/redis/redis.constants';
 
 const DRAFT_KEY_PREFIX = 'bot:draft:publish:';
-const DRAFT_TTL_SECONDS = 7 * 24 * 60 * 60; // 7 days
+const DRAFT_TTL_SECONDS = 5 * 24 * 60 * 60; // 7 days
 
 export type PublishJobDraft = {
   step: number;

@@ -140,11 +140,11 @@ function showInitialCancelPrompt(
   return { reply: [text], nextState: state };
 }
 
-async function handleLateCancellationInput(
-  args: CancelStepArgs,
-): Promise<FlowResult> {
+function handleLateCancellationInput(args: CancelStepArgs): FlowResult {
   const { state, payload, trimmed, normalized, ctx } = args;
+
   const reason = normalized === 'confirmer' ? undefined : trimmed;
+
   if (!reason) {
     return {
       reply: [
@@ -290,6 +290,7 @@ export async function runCancelApplicationFlow(
   }
 
   const app = await ctx.applicationService.findById(applicationId);
+
   if (!app || app.worker_id !== profile.id) {
     return {
       reply: ["*CANDIDATURE INTROUVABLE. TAPEZ 'MENU'.*"],

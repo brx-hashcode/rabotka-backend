@@ -10,6 +10,7 @@ import {
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { QdrantService, COLLECTION_JOB_OFFERS } from '../qdrant/qdrant.service';
 import { SystemConfigService } from '../system-config/system-config.service';
+import { BotNotificationService } from '../bot/services/bot-notification.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { jobOfferPublishedMessage } from '../whatsapp/templates';
 import { CreateJobOfferDto } from './dto/create-job-offer.dto';
@@ -109,6 +110,8 @@ export class JobOfferService {
     private readonly systemConfig: SystemConfigService,
     @Inject(forwardRef(() => WhatsAppService))
     private readonly whatsApp: WhatsAppService,
+    @Inject(forwardRef(() => BotNotificationService))
+    private readonly botNotification: BotNotificationService,
   ) {}
 
   async create(
@@ -277,14 +280,11 @@ export class JobOfferService {
         this.logger.error(`Failed to index job offer ${id}`, err),
       );
     } else {
-      // Keep Qdrant payload status in sync so similarity search filters stay accurate
       void this.systemConfig.isSimilarityEnabled().then((enabled) => {
         if (!enabled) return;
         this.qdrant
           .setPayload(COLLECTION_JOB_OFFERS, id, { status })
-          .catch(() => {
-            /* point may not exist yet — safe to ignore */
-          });
+          .catch(() => {});
       });
     }
 
@@ -342,7 +342,6 @@ export class JobOfferService {
       },
     });
 
-    // Preserve relevance order
     const offerMap = new Map(offers.map((o) => [o.id, o]));
     return ids
       .map((id) => offerMap.get(id))
@@ -361,8 +360,15 @@ export class JobOfferService {
     });
     if (!employer || !this.whatsApp.isConfigured()) return;
 
-    const message = jobOfferPublishedMessage(employer.first_name, jobTitle);
-    await this.whatsApp.sendTextMessage(employer.phone, message, employer.id);
+    const phone = typeof employer.phone === 'string' ? employer.phone : '';
+    if (!phone) return;
+
+    const message = jobOfferPublishedMessage(
+      String(employer.first_name),
+      jobTitle,
+    );
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
+    await this.whatsApp.sendTextMessage(phone, message, String(employer.id));
   }
 
   private async indexJobOffer(offer: {
@@ -638,6 +644,14 @@ export class JobOfferService {
       this.notifyJobOfferPublished(id, updated.title).catch((err) =>
         this.logger.error(`Failed to notify employer for job offer ${id}`, err),
       );
+      this.botNotification
+        .sendNewJobOfferToWorkers(id)
+        .catch((err) =>
+          this.logger.error(
+            `Failed to notify workers for job offer ${id}`,
+            err,
+          ),
+        );
     }
 
     return this.getJobOfferDetailForAdmin(id);
@@ -670,6 +684,14 @@ export class JobOfferService {
     this.notifyJobOfferPublished(id, updated.title).catch((err) =>
       this.logger.error(`Failed to notify employer for job offer ${id}`, err),
     );
+    this.botNotification
+      .sendNewJobOfferToWorkers(id)
+      .catch((err) =>
+        this.logger.error(
+          `Failed to notify workers for job offer ${id} after payment`,
+          err,
+        ),
+      );
 
     return this.getJobOfferDetailForAdmin(id);
   }
