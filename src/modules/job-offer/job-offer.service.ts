@@ -1,10 +1,14 @@
 import {
   Injectable,
   BadRequestException,
+  Logger,
   NotFoundException,
   ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
+import { QdrantService, COLLECTION_JOB_OFFERS } from '../qdrant/qdrant.service';
+import { WhatsAppService } from '../whatsapp/whatsapp.service';
+import { jobOfferPublishedMessage } from '../whatsapp/templates';
 import { CreateJobOfferDto } from './dto/create-job-offer.dto';
 import { AdminUpdateJobOfferDto } from './dto/admin-update-job-offer.dto';
 import {
@@ -94,7 +98,13 @@ export type JobOfferDetail = JobOfferListItem & {
 
 @Injectable()
 export class JobOfferService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(JobOfferService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly qdrant: QdrantService,
+    private readonly whatsApp: WhatsAppService,
+  ) {}
 
   async create(
     employerId: string,
@@ -108,10 +118,14 @@ export class JobOfferService {
       throw new NotFoundException('Employeur introuvable');
     }
     if (employer.status !== AccountStatus.ACTIVE) {
-      throw new ForbiddenException('Le profil doit être actif pour publier des offres');
+      throw new ForbiddenException(
+        'Le profil doit être actif pour publier des offres',
+      );
     }
     if (employer.profile_type !== 'EMPLOYER') {
-      throw new ForbiddenException("Seuls les employeurs peuvent publier des offres d'emploi");
+      throw new ForbiddenException(
+        "Seuls les employeurs peuvent publier des offres d'emploi",
+      );
     }
 
     this.validateCreateDto(dto);
@@ -250,7 +264,104 @@ export class JobOfferService {
       where: { id },
       data: { status },
     });
+
+    if (status === JobOfferStatus.ACTIVE) {
+      this.indexJobOffer(updated).catch((err) =>
+        this.logger.error(`Failed to index job offer ${id}`, err),
+      );
+    }
+
     return this.toListItem(updated);
+  }
+
+  /**
+   * Find job offers similar to a worker's profile using vector similarity.
+   * Returns up to `limit` active job offer IDs ranked by relevance.
+   */
+  async findSimilarForWorker(
+    workerId: string,
+    limit = 10,
+  ): Promise<JobOfferListItem[]> {
+    const profile = await this.prisma.profile.findUnique({
+      where: { id: workerId },
+      select: { first_name: true, last_name: true, description: true },
+    });
+    if (!profile) return [];
+
+    const text =
+      `${profile.first_name} ${profile.last_name} ${profile.description}`.trim();
+    const vector = await this.qdrant.embed(text);
+
+    const hits = await this.qdrant.searchSimilar(
+      COLLECTION_JOB_OFFERS,
+      vector,
+      limit,
+      {
+        must: [{ key: 'status', match: { value: JobOfferStatus.ACTIVE } }],
+      },
+    );
+
+    if (!hits.length) return [];
+
+    const ids = hits.map((h) => String(h.id));
+    const offers = await this.prisma.jobOffer.findMany({
+      where: { id: { in: ids }, status: JobOfferStatus.ACTIVE },
+      include: {
+        _count: { select: { applications: { where: { status: 'ACCEPTED' } } } },
+      },
+    });
+
+    // Preserve relevance order
+    const offerMap = new Map(offers.map((o) => [o.id, o]));
+    return ids
+      .map((id) => offerMap.get(id))
+      .filter((o): o is NonNullable<typeof o> => o != null)
+      .map((o) => this.toListItem(o, o._count.applications));
+  }
+
+  private async notifyJobOfferPublished(
+    offerId: string,
+    jobTitle: string,
+  ): Promise<void> {
+    const employer = await this.prisma.profile.findFirst({
+      where: { job_offers: { some: { id: offerId } } },
+      select: { id: true, first_name: true, phone: true },
+    });
+    if (!employer || !this.whatsApp.isConfigured()) return;
+
+    const message = jobOfferPublishedMessage(employer.first_name, jobTitle);
+    await this.whatsApp.sendTextMessage(employer.phone, message, employer.id);
+  }
+
+  private async indexJobOffer(offer: {
+    id: string;
+    title: string;
+    description: string;
+    address: string;
+    note: string | null;
+    status: string;
+    employer_id: string;
+    scheduled_at: Date;
+    amount: unknown;
+    payment_flow: string;
+    quantity: number;
+  }): Promise<void> {
+    const parts = [offer.title, offer.description, offer.address];
+    if (offer.note) parts.push(offer.note);
+    const text = parts.join(' ');
+
+    const vector = await this.qdrant.embed(text);
+    await this.qdrant.upsertPoint(COLLECTION_JOB_OFFERS, offer.id, vector, {
+      title: offer.title,
+      description: offer.description,
+      note: offer.note,
+      status: offer.status,
+      employer_id: offer.employer_id,
+      scheduled_at: offer.scheduled_at.toISOString(),
+      amount: Number(offer.amount),
+      payment_flow: offer.payment_flow,
+      quantity: offer.quantity,
+    });
   }
 
   validateCreateDto(dto: CreateJobOfferDto): void {
@@ -461,12 +572,72 @@ export class JobOfferService {
         status: a.status,
         penaltyApplied: a.penalty_applied,
         penaltyAmount:
-          a.penalty_amount != null ? Number(a.penalty_amount) : null,
+          a.penalty_amount == null ? null : Number(a.penalty_amount),
         cancelledAt: a.cancelled_at?.toISOString() ?? null,
         cancellationReason: a.cancellation_reason,
         createdAt: a.created_at.toISOString(),
       })),
     };
+  }
+
+  async updateJobOfferStatusByAdmin(
+    id: string,
+    status: JobOfferStatus,
+  ): Promise<AdminJobOfferDetailResponse> {
+    const offer = await this.prisma.jobOffer.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+    if (!offer) {
+      throw new NotFoundException("Offre d'emploi introuvable");
+    }
+
+    const updated = await this.prisma.jobOffer.update({
+      where: { id },
+      data: { status },
+    });
+
+    if (status === JobOfferStatus.ACTIVE) {
+      this.indexJobOffer(updated).catch((err) =>
+        this.logger.error(`Failed to index job offer ${id}`, err),
+      );
+      this.notifyJobOfferPublished(id, updated.title).catch((err) =>
+        this.logger.error(`Failed to notify employer for job offer ${id}`, err),
+      );
+    }
+
+    return this.getJobOfferDetailForAdmin(id);
+  }
+
+  async confirmJobPaymentByAdmin(
+    id: string,
+  ): Promise<AdminJobOfferDetailResponse> {
+    const offer = await this.prisma.jobOffer.findUnique({
+      where: { id },
+      select: { id: true, status: true },
+    });
+    if (!offer) {
+      throw new NotFoundException("Offre d'emploi introuvable");
+    }
+    if (offer.status !== JobOfferStatus.PENDING_PAYMENT) {
+      throw new BadRequestException(
+        'Only job offers with PENDING_PAYMENT status can be confirmed',
+      );
+    }
+
+    const updated = await this.prisma.jobOffer.update({
+      where: { id },
+      data: { status: JobOfferStatus.ACTIVE },
+    });
+
+    this.indexJobOffer(updated).catch((err) =>
+      this.logger.error(`Failed to index job offer ${id} after payment`, err),
+    );
+    this.notifyJobOfferPublished(id, updated.title).catch((err) =>
+      this.logger.error(`Failed to notify employer for job offer ${id}`, err),
+    );
+
+    return this.getJobOfferDetailForAdmin(id);
   }
 
   async deleteJobOfferByAdmin(id: string): Promise<void> {
@@ -493,22 +664,26 @@ export class JobOfferService {
       throw new NotFoundException("Offre d'emploi introuvable");
     }
     if (offer.status !== JobOfferStatus.ACTIVE) {
-      throw new BadRequestException(
-        'Only active job offers can be edited',
-      );
+      throw new BadRequestException('Only active job offers can be edited');
     }
 
     const data: Prisma.JobOfferUpdateInput = {};
     if (dto.title !== undefined) data.title = dto.title.trim();
-    if (dto.description !== undefined) data.description = dto.description.trim();
-    if (dto.scheduledAt !== undefined) data.scheduled_at = new Date(dto.scheduledAt);
+    if (dto.description !== undefined)
+      data.description = dto.description.trim();
+    if (dto.scheduledAt !== undefined)
+      data.scheduled_at = new Date(dto.scheduledAt);
     if (dto.amount !== undefined) data.amount = dto.amount;
     if (dto.paymentFlow !== undefined) data.payment_flow = dto.paymentFlow;
     if (dto.address !== undefined) data.address = dto.address.trim();
     if (dto.note !== undefined) data.note = dto.note.trim() || null;
     if (dto.quantity !== undefined) data.quantity = dto.quantity;
 
-    await this.prisma.jobOffer.update({ where: { id }, data });
+    const updated = await this.prisma.jobOffer.update({ where: { id }, data });
+
+    this.indexJobOffer(updated).catch((err) =>
+      this.logger.error(`Failed to re-index job offer ${id}`, err),
+    );
 
     return this.getJobOfferDetailForAdmin(id);
   }

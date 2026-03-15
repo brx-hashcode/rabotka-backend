@@ -28,6 +28,7 @@ import {
   VerificationStatus,
 } from '@prisma/client';
 import { randomBytes } from 'node:crypto';
+import { QdrantService, COLLECTION_PROFILES } from '../qdrant/qdrant.service';
 
 export type ProfileMeResponse = {
   id: string;
@@ -158,6 +159,7 @@ export class ProfileService {
     private readonly whatsAppService: WhatsAppService,
     private readonly configService: ConfigService,
     private readonly mailService: MailService,
+    private readonly qdrant: QdrantService,
   ) {}
 
   async findById(id: string): Promise<ProfileMeResponse> {
@@ -830,10 +832,35 @@ export class ProfileService {
 
       this.logger.log(`Profile created successfully: ${profile.id}`);
 
+      this.indexProfile(
+        profile.id,
+        createProfileDto.firstName,
+        createProfileDto.lastName,
+        createProfileDto.description ?? '',
+        createProfileDto.profileType,
+      ).catch((err) =>
+        this.logger.error(`Failed to index profile ${profile.id}`, err),
+      );
+
       return { message: 'Profil créé avec succès' };
     } catch (error: any) {
       this.handleCreateProfileError(error);
     }
+  }
+
+  private async indexProfile(
+    id: string,
+    firstName: string,
+    lastName: string,
+    description: string,
+    profileType: string,
+  ): Promise<void> {
+    const text = `${firstName} ${lastName} ${description}`.trim();
+    const vector = await this.qdrant.embed(text);
+    await this.qdrant.upsertPoint(COLLECTION_PROFILES, id, vector, {
+      profile_type: profileType,
+      description: description,
+    });
   }
 
   private validateFiles(
