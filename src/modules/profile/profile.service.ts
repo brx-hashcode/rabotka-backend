@@ -29,6 +29,7 @@ import {
 } from '@prisma/client';
 import { randomBytes } from 'node:crypto';
 import { QdrantService, COLLECTION_PROFILES } from '../qdrant/qdrant.service';
+import { SystemConfigService } from '../system-config/system-config.service';
 
 export type ProfileMeResponse = {
   id: string;
@@ -160,6 +161,7 @@ export class ProfileService {
     private readonly configService: ConfigService,
     private readonly mailService: MailService,
     private readonly qdrant: QdrantService,
+    private readonly systemConfig: SystemConfigService,
   ) {}
 
   async findById(id: string): Promise<ProfileMeResponse> {
@@ -855,6 +857,8 @@ export class ProfileService {
     description: string,
     profileType: string,
   ): Promise<void> {
+    if (!(await this.systemConfig.isSimilarityEnabled())) return;
+
     const text = `${firstName} ${lastName} ${description}`.trim();
     const vector = await this.qdrant.embed(text);
     await this.qdrant.upsertPoint(COLLECTION_PROFILES, id, vector, {
