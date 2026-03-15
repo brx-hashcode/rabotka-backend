@@ -404,6 +404,7 @@ export class BotCommandsService {
       totalPenalties,
       lateCancellations: lateCount,
     });
+
     if (profileData.avatar_url) {
       return `[IMG:${profileData.avatar_url}]${profileText}`;
     }
