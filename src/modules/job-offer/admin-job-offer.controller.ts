@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Patch,
+  Post,
   Delete,
   Param,
   Body,
@@ -9,7 +10,9 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
+  BadRequestException,
 } from '@nestjs/common';
+import { JobOfferStatus } from '@prisma/client';
 import {
   ApiTags,
   ApiOperation,
@@ -65,15 +68,48 @@ export class AdminJobOfferController {
   @Patch(':id')
   @ApiOperation({
     summary: 'Update job offer (admin only)',
-    description: 'Updates job offer fields like title, description, amount, etc.',
+    description:
+      'Updates job offer fields like title, description, amount, etc.',
   })
   @ApiResponse({ status: 200, description: 'Updated job offer details' })
   @ApiResponse({ status: 404, description: 'Job offer not found' })
-  async update(
-    @Param('id') id: string,
-    @Body() dto: AdminUpdateJobOfferDto,
-  ) {
+  async update(@Param('id') id: string, @Body() dto: AdminUpdateJobOfferDto) {
     return await this.jobOfferService.updateJobOfferByAdmin(id, dto);
+  }
+
+  @Patch(':id/status')
+  @ApiOperation({ summary: 'Update job offer status (admin only)' })
+  @ApiResponse({ status: 200, description: 'Updated job offer details' })
+  @ApiResponse({ status: 404, description: 'Job offer not found' })
+  async updateStatus(
+    @Param('id') id: string,
+    @Body() body: { status: string },
+  ) {
+    const allowed: JobOfferStatus[] = [
+      JobOfferStatus.ACTIVE,
+      JobOfferStatus.CANCELLED,
+      JobOfferStatus.EXPIRED,
+    ];
+    if (!allowed.includes(body.status as JobOfferStatus)) {
+      throw new BadRequestException(
+        `Status must be one of: ${allowed.join(', ')}`,
+      );
+    }
+    return this.jobOfferService.updateJobOfferStatusByAdmin(
+      id,
+      body.status as JobOfferStatus,
+    );
+  }
+
+  @Post(':id/confirm-payment')
+  @ApiOperation({
+    summary: 'Confirm payment and activate job offer (admin only)',
+  })
+  @ApiResponse({ status: 201, description: 'Job offer activated' })
+  @ApiResponse({ status: 400, description: 'Not in PENDING_PAYMENT status' })
+  @ApiResponse({ status: 404, description: 'Job offer not found' })
+  async confirmPayment(@Param('id') id: string) {
+    return this.jobOfferService.confirmJobPaymentByAdmin(id);
   }
 
   @Delete(':id')
