@@ -328,7 +328,7 @@ describe('JobOfferService (extended)', () => {
     it('deletes offer successfully', async () => {
       (prisma.jobOffer.findUnique as jest.Mock).mockResolvedValue({ id: OFFER_ID });
       (prisma.jobOffer.delete as jest.Mock).mockResolvedValue(mockOffer);
-      await expect(service.deleteJobOfferByAdmin(OFFER_ID)).resolves.toBeUndefined();
+      await expect(service.deleteJobOfferByAdmin(OFFER_ID)).resolves.toEqual({ success: true });
       expect(prisma.jobOffer.delete).toHaveBeenCalledWith({ where: { id: OFFER_ID } });
     });
 

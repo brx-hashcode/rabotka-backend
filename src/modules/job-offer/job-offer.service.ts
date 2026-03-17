@@ -367,7 +367,7 @@ export class JobOfferService {
       String(employer.first_name),
       jobTitle,
     );
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
+
     await this.whatsApp.sendTextMessage(phone, message, String(employer.id));
   }
 
@@ -696,16 +696,19 @@ export class JobOfferService {
     return this.getJobOfferDetailForAdmin(id);
   }
 
-  async deleteJobOfferByAdmin(id: string): Promise<void> {
+  async deleteJobOfferByAdmin(id: string): Promise<{ success: boolean }> {
     const offer = await this.prisma.jobOffer.findUnique({
       where: { id },
       select: { id: true },
     });
+
     if (!offer) {
       throw new NotFoundException("Offre d'emploi introuvable");
     }
 
     await this.prisma.jobOffer.delete({ where: { id } });
+
+    return { success: true };
   }
 
   async updateJobOfferByAdmin(
