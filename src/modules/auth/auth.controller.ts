@@ -9,7 +9,13 @@ import {
   HttpStatus,
   UseGuards,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBody, ApiCookieAuth } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBody,
+  ApiCookieAuth,
+} from '@nestjs/swagger';
 import type { Response } from 'express';
 import { ConfigService } from '@nestjs/config';
 import { AuthService } from './auth.service';
@@ -301,7 +307,8 @@ export class AuthController {
   @UseGuards(AdminAuthGuard)
   @ApiOperation({
     summary: 'Get current admin user',
-    description: 'Returns the authenticated admin user. Requires admin session cookie.',
+    description:
+      'Returns the authenticated admin user. Requires admin session cookie.',
   })
   @ApiCookieAuth()
   @ApiResponse({

@@ -51,7 +51,9 @@ export class AuthService {
       : await this.findProfileByPhone(normalized);
 
     if (!profile) {
-      throw new NotFoundException('Aucun compte trouvé pour cet email ou téléphone');
+      throw new NotFoundException(
+        'Aucun compte trouvé pour cet email ou téléphone',
+      );
     }
 
     if (isPhone) {
@@ -62,7 +64,9 @@ export class AuthService {
         whatsapp_connected: boolean;
       };
       if (!phoneProfile.whatsapp_connected) {
-        throw new BadRequestException("Ce numéro WhatsApp n'est pas encore vérifié. Veuillez utiliser votre adresse e-mail pour continuer.");
+        throw new BadRequestException(
+          "Ce numéro WhatsApp n'est pas encore vérifié. Veuillez utiliser votre adresse e-mail pour continuer.",
+        );
       }
     }
 
@@ -94,7 +98,9 @@ export class AuthService {
       : await this.findProfileByPhone(normalized);
 
     if (!profile) {
-      throw new NotFoundException('Aucun compte trouvé pour cet email ou téléphone');
+      throw new NotFoundException(
+        'Aucun compte trouvé pour cet email ou téléphone',
+      );
     }
 
     if (isPhone) {
@@ -105,7 +111,9 @@ export class AuthService {
         whatsapp_connected: boolean;
       };
       if (!phoneProfile.whatsapp_connected) {
-        throw new BadRequestException("Ce numéro WhatsApp n'est pas encore vérifié. Veuillez utiliser votre adresse e-mail pour continuer.");
+        throw new BadRequestException(
+          "Ce numéro WhatsApp n'est pas encore vérifié. Veuillez utiliser votre adresse e-mail pour continuer.",
+        );
       }
     }
 
@@ -145,7 +153,9 @@ export class AuthService {
     const storedOtp = await this.redis.get(redisKey);
 
     if (!storedOtp || storedOtp !== otp) {
-      throw new UnauthorizedException('Code de vérification invalide ou expiré');
+      throw new UnauthorizedException(
+        'Code de vérification invalide ou expiré',
+      );
     }
 
     const profile = isEmail
@@ -153,7 +163,9 @@ export class AuthService {
       : await this.findProfileByPhone(normalized);
 
     if (!profile) {
-      throw new NotFoundException('Aucun compte trouvé pour cet email ou téléphone');
+      throw new NotFoundException(
+        'Aucun compte trouvé pour cet email ou téléphone',
+      );
     }
 
     await this.redis.del(redisKey);
@@ -243,7 +255,9 @@ export class AuthService {
     const storedOtp = await this.redis.get(redisKey);
 
     if (!storedOtp || storedOtp !== otp) {
-      throw new UnauthorizedException('Code de vérification invalide ou expiré');
+      throw new UnauthorizedException(
+        'Code de vérification invalide ou expiré',
+      );
     }
 
     const user = await this.findUserByEmail(normalized);
@@ -277,7 +291,13 @@ export class AuthService {
   }> {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, first_name: true, last_name: true, email: true, role: true },
+      select: {
+        id: true,
+        first_name: true,
+        last_name: true,
+        email: true,
+        role: true,
+      },
     });
     if (!user) {
       throw new NotFoundException('Aucun administrateur trouvé pour cet email');
