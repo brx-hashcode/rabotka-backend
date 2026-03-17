@@ -113,14 +113,14 @@ export class AdminJobOfferController {
   }
 
   @Delete(':id')
-  @HttpCode(HttpStatus.NO_CONTENT)
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Delete job offer (admin only)',
     description: 'Permanently deletes a job offer and its related data.',
   })
-  @ApiResponse({ status: 204, description: 'Job offer deleted' })
+  @ApiResponse({ status: 200, description: 'Job offer deleted' })
   @ApiResponse({ status: 404, description: 'Job offer not found' })
   async remove(@Param('id') id: string) {
-    await this.jobOfferService.deleteJobOfferByAdmin(id);
+    return this.jobOfferService.deleteJobOfferByAdmin(id);
   }
 }
