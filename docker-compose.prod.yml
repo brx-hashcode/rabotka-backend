@@ -1,0 +1,49 @@
+services:
+  api:
+    image: ${BACKEND_IMAGE:-rabotka-backend:${IMAGE_TAG:-latest}}
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: rabotka_api_${APP_ENV:-prod}
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+      - RUN_QUEUE_WORKER=false
+    networks:
+      - public
+      - internal
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=hashcode-public"
+      - "traefik.http.routers.rabotka-api-${APP_ENV:-prod}.rule=Host(`${API_DOMAIN:-api.rabotka.co}`)"
+      - "traefik.http.routers.rabotka-api-${APP_ENV:-prod}.entrypoints=websecure"
+      - "traefik.http.routers.rabotka-api-${APP_ENV:-prod}.tls.certresolver=letsencrypt"
+      - "traefik.http.services.rabotka-api-${APP_ENV:-prod}.loadbalancer.server.port=${PORT:-8000}"
+
+  queue-worker:
+    image: ${BACKEND_IMAGE:-rabotka-backend:${IMAGE_TAG:-latest}}
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: rabotka_queue_worker_${APP_ENV:-prod}
+    command: node dist/src/worker.js
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+      - RUN_QUEUE_WORKER=true
+    networks:
+      - internal
+
+networks:
+  public:
+    name: hashcode-public
+    external: true
+  internal:
+    name: hashcode-internal
+    external: true
