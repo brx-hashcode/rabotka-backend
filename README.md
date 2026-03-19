@@ -305,6 +305,49 @@ Services:
 | pgAdmin | 5050 | Database management UI |
 | LocalStack | 4566 | Local AWS (S3, SQS, etc.) |
 
+### Hashcode Infra Deployment (Traefik + shared networks)
+
+This repository includes `docker-compose.prod.yml` for deployment behind the shared `hashcode-infra` Traefik stack.
+
+Requirements:
+
+- `hashcode-public` and `hashcode-internal` Docker networks already exist on the server (created by `hashcode-infra`)
+- A valid `.env` with production values
+- `API_DOMAIN` and `APP_ENV` set in `.env` (for Traefik host routing and unique router naming)
+
+Example `.env` values for infra:
+
+```env
+NODE_ENV=production
+PORT=8000
+APP_ENV=prod
+API_DOMAIN=api.rabotka.co
+DATABASE_URL=postgresql://rabotka:<password>@postgres:5432/rabotka_prod
+REDIS_HOST=redis
+REDIS_PORT=6379
+```
+
+Run on the VPS:
+
+```bash
+docker compose -f docker-compose.prod.yml up -d
+```
+
+Image source behavior:
+
+- By default, compose builds locally from the repository (`Dockerfile`, `target=production`)
+- To pull from GHCR instead, set `BACKEND_IMAGE`, for example:
+
+```env
+BACKEND_IMAGE=ghcr.io/brx-hashcode/rabotka-backend:latest
+```
+
+If GHCR package is private, authenticate first:
+
+```bash
+echo <GHCR_PAT> | docker login ghcr.io -u <github-username> --password-stdin
+```
+
 ### API and Queue Worker
 
 Build and run the API and queue worker:
@@ -364,6 +407,7 @@ When deploying to production:
 7. Run migrations: `pnpm prisma:migrate:deploy`
 8. Start API: `pnpm run start:prod`
 9. Start queue worker (separate process): `pnpm queue:worker`
+10. If deploying via shared `hashcode-infra`, use: `docker compose -f docker-compose.prod.yml up -d`
 
 ## License
 
