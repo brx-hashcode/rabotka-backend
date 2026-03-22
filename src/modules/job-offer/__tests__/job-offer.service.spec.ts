@@ -3,6 +3,10 @@ import { BadRequestException, ForbiddenException, NotFoundException } from '@nes
 import { JobOfferService } from '../job-offer.service';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { JobOfferStatus, PaymentFlow } from '@prisma/client';
+import { QdrantService } from '../../qdrant/qdrant.service';
+import { SystemConfigService } from '../../system-config/system-config.service';
+import { WhatsAppService } from '../../whatsapp/whatsapp.service';
+import { BotNotificationService } from '../../bot/services/bot-notification.service';
 
 const EMPLOYER_ID = 'employer-uuid-1';
 const OFFER_ID = 'offer-uuid-1';
@@ -60,6 +64,10 @@ describe('JobOfferService', () => {
       providers: [
         JobOfferService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: QdrantService, useValue: { search: jest.fn().mockResolvedValue([]), upsert: jest.fn(), delete: jest.fn() } },
+        { provide: SystemConfigService, useValue: { get: jest.fn().mockResolvedValue('0'), getFees: jest.fn().mockResolvedValue({ jobPostingFeeFcfa: 0, maxConcurrentApplications: 2 }) } },
+        { provide: WhatsAppService, useValue: { sendTextMessage: jest.fn().mockResolvedValue(true) } },
+        { provide: BotNotificationService, useValue: { notifyJobOfferCreated: jest.fn(), notifyJobOfferCancelled: jest.fn() } },
       ],
     }).compile();
 
