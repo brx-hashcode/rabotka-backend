@@ -2,27 +2,27 @@ import { escapeHtml, wrapEmailHtml } from './layout';
 
 export function kycRejectedEmail(name: string, reason?: string): string {
   const reasonBlock = reason
-    ? `<p><strong>Motif :</strong> ${escapeHtml(reason)}</p>`
+    ? `<p><strong>Reason:</strong> ${escapeHtml(reason)}</p>`
     : '';
 
   const body = `
-    <p>Bonjour ${escapeHtml(name)},</p>
+    <p>Hi ${escapeHtml(name)},</p>
 
     <p>
-      Après examen de votre dossier, nous avons le regret de vous informer que votre
-      vérification d'identité (KYC) a été <strong>rejetée</strong>.
+      After reviewing your application, we regret to inform you that your
+      identity verification (KYC) has been <strong>rejected</strong>.
     </p>
 
-    ${reasonBlock}
+   <p style="padding: 10px; background-color: #f0f0f0; border-radius: 5px;">${reasonBlock}</p>
 
     <p>
-      Si vous pensez qu'il s'agit d'une erreur ou souhaitez soumettre un nouveau dossier,
-      veuillez contacter notre équipe support.
+      If you believe this is an error or would like to submit a new application,
+      please contact our support team.
     </p>
 
     <p>
-      Merci de votre compréhension,<br />
-      <strong>L'équipe Rabotka</strong>
+      Thank you for your understanding,<br />
+      <strong>Rabotka Team</strong>
     </p>
   `;
 

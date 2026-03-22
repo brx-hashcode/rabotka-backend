@@ -2,22 +2,22 @@ import { escapeHtml, wrapEmailHtml } from './layout';
 
 export function adminUpdatedEmail(name: string): string {
   const body = `
-    <p>Bonjour ${escapeHtml(name)},</p>
+    <p>Hi ${escapeHtml(name)},</p>
 
-    <p>Les informations de votre compte administrateur ont été mises à jour.</p>
+    <p>Your administrator account information has been updated.</p>
 
     <p>
-      Si vous n'avez pas effectué cette modification ou si vous pensez qu'il s'agit
-      d'une erreur, veuillez contacter votre super administrateur immédiatement.
+      If you did not make this change or believe it was made in error,
+      please contact your super administrator immediately.
     </p>
 
     <p>
-      Cordialement,<br />
-      <strong>L'équipe Rabotka</strong>
+      Regards,<br />
+      <strong>Rabotka Team</strong>
     </p>
   `;
 
   return wrapEmailHtml(body, {
-    previewText: 'Les informations de votre compte ont été mises à jour.',
+    previewText: 'Your account information has been updated.',
   });
 }

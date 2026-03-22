@@ -14,6 +14,7 @@ import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
+import { SystemConfigService } from '../system-config/system-config.service';
 import { sendOtpEmail } from '../mail/templates';
 import { otpMessage } from '../whatsapp/templates';
 
@@ -35,6 +36,7 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly mailService: MailService,
     private readonly whatsAppService: WhatsAppService,
+    private readonly systemConfig: SystemConfigService,
   ) {}
 
   async sendOtp(emailOrPhone: string): Promise<{ success: boolean }> {
@@ -351,10 +353,14 @@ export class AuthService {
   }
 
   private async sendOtpByEmail(email: string, otp: string): Promise<void> {
+    const supportEmail = await this.systemConfig.get(
+      'contact.email',
+      'support@rabotka.com',
+    );
     await this.mailService.sendMail({
       to: email,
-      subject: 'Votre code de vérification Rabotka',
-      html: sendOtpEmail(otp),
+      subject: 'Your Rabotka one-time password',
+      html: sendOtpEmail(otp, supportEmail),
     });
     this.logger.log(`OTP email sent to ${email}`);
   }
