@@ -67,7 +67,7 @@ describe('NotificationService', () => {
 
   describe('notifyOtp()', () => {
     it('sends OTP email with correct subject', async () => {
-      await service.notifyOtp('user@example.com', '123456');
+      await service.notifyOtp('Alice', 'user@example.com', '123456');
 
       expect(mockMailService.sendMail).toHaveBeenCalledWith(
         expect.objectContaining({

@@ -1,8 +1,12 @@
 import { escapeHtml, wrapEmailHtml } from './layout';
 
-export function sendOtpEmail(code: string, supportEmail: string): string {
+export function sendOtpEmail(
+  first_name: string,
+  code: string,
+  supportEmail: string,
+): string {
   const body = `
-    <p>Hi,</p>
+    <p>Hi ${first_name}</p>
 
     <p>
       Use this one-time password to sign in to Rabotka: ${escapeHtml(code)}

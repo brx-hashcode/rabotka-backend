@@ -7,6 +7,10 @@ import {
 import { ApplicationService } from '../application.service';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { ApplicationStatus, JobOfferStatus, PaymentFlow } from '@prisma/client';
+import { BotNotificationService } from '../../bot/services/bot-notification.service';
+import { SystemConfigService } from '../../system-config/system-config.service';
+import { QdrantService } from '../../qdrant/qdrant.service';
+import { WhatsAppService } from '../../whatsapp/whatsapp.service';
 
 const JOB_OFFER_ID = 'offer-uuid-1';
 const WORKER_ID = 'worker-uuid-1';
@@ -103,6 +107,10 @@ describe('ApplicationService (extended)', () => {
       providers: [
         ApplicationService,
         { provide: PrismaService, useValue: mockPrismaService },
+        { provide: BotNotificationService, useValue: { notifyApplicationAccepted: jest.fn(), notifyApplicationRejected: jest.fn(), notifyApplicationCancelled: jest.fn(), notifyEmployerNewApplication: jest.fn() } },
+        { provide: SystemConfigService, useValue: { get: jest.fn().mockResolvedValue('0'), getFees: jest.fn().mockResolvedValue({ jobPostingFeeFcfa: 0, maxConcurrentApplications: 2 }), getCancellationSettings: jest.fn().mockResolvedValue({ lateCancellationPenaltyFcfa: 5000, lateCancellationScoreDeduction: 10, cancellationThresholdHours: 4 }) } },
+        { provide: QdrantService, useValue: { search: jest.fn().mockResolvedValue([]), upsert: jest.fn(), delete: jest.fn(), setPayload: jest.fn().mockResolvedValue(undefined) } },
+        { provide: WhatsAppService, useValue: { sendTextMessage: jest.fn().mockResolvedValue(true) } },
       ],
     }).compile();
 

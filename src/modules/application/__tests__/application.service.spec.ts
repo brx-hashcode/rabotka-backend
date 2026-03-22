@@ -117,8 +117,8 @@ describe('ApplicationService', () => {
         ApplicationService,
         { provide: PrismaService, useValue: mockPrismaService },
         { provide: BotNotificationService, useValue: { sendNewApplicationToEmployer: jest.fn(), sendApplicationCancelledToEmployer: jest.fn(), sendApplicationAccepted: jest.fn(), sendApplicationRejected: jest.fn() } },
-        { provide: SystemConfigService, useValue: { get: jest.fn().mockResolvedValue('5000'), getCancellationSettings: jest.fn().mockResolvedValue({ lateCancellationPenaltyFcfa: 5000, lateCancellationScoreDeduction: 5, cancellationThresholdHours: 4 }) } },
-        { provide: QdrantService, useValue: { search: jest.fn().mockResolvedValue([]), upsert: jest.fn(), delete: jest.fn() } },
+        { provide: SystemConfigService, useValue: { get: jest.fn().mockResolvedValue('5000'), getFees: jest.fn().mockResolvedValue({ maxConcurrentApplications: 2, jobPostingFeeFcfa: 0, applicationFeeFcfa: 0, lateCancellationPenaltyFcfa: 5000, lateCancellationScoreDeduction: 5, cancellationThresholdHours: 4, reliabilityScoreMin: 50, employerCancelScoreDeduction: 5, employerGhostScoreDeduction: 10, billingBlockThreshold: 2 }), getCancellationSettings: jest.fn().mockResolvedValue({ lateCancellationPenaltyFcfa: 5000, lateCancellationScoreDeduction: 5, cancellationThresholdHours: 4 }) } },
+        { provide: QdrantService, useValue: { search: jest.fn().mockResolvedValue([]), upsert: jest.fn(), delete: jest.fn(), setPayload: jest.fn().mockResolvedValue(undefined) } },
       ],
     }).compile();
 

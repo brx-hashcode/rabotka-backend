@@ -39,7 +39,7 @@ export class NotificationService {
     });
   }
 
-  async notifyOtp(to: string, code: string): Promise<void> {
+  async notifyOtp(name: string, to: string, code: string): Promise<void> {
     const supportEmail = await this.systemConfig.get(
       'contact.email',
       'support@rabotka.com',
@@ -48,7 +48,7 @@ export class NotificationService {
     await this.mail.sendMail({
       to,
       subject: 'Your Rabotka one-time password',
-      html: sendOtpEmail(code, supportEmail),
+      html: sendOtpEmail(name, code, supportEmail),
     });
   }
 }
