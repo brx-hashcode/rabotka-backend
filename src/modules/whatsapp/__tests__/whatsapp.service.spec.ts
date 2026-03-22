@@ -5,6 +5,7 @@ import { WhatsAppService } from '../whatsapp.service';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { TwilioService } from '../../../common/services/twilio/twilio.service';
 import { REDIS_CONNECTION } from '../../../common/services/redis/redis.constants';
+import { ConfigService } from '@nestjs/config';
 
 // Prevent the real Twilio SDK from being loaded in this test suite
 jest.mock('twilio', () => {
@@ -49,6 +50,7 @@ describe('WhatsAppService', () => {
         { provide: PrismaService, useValue: mockPrismaService },
         { provide: TwilioService, useValue: mockTwilioService },
         { provide: REDIS_CONNECTION, useValue: redis },
+        { provide: ConfigService, useValue: { get: jest.fn().mockReturnValue(undefined) } },
       ],
     }).compile();
 

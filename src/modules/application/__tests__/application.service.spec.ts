@@ -15,6 +15,9 @@ import {
   PaymentStatus,
 } from '@prisma/client';
 import { LATE_CANCELLATION_PENALTY_FCFA } from '../application.constants';
+import { BotNotificationService } from '../../bot/services/bot-notification.service';
+import { SystemConfigService } from '../../system-config/system-config.service';
+import { QdrantService } from '../../qdrant/qdrant.service';
 
 const JOB_OFFER_ID = 'offer-uuid-1';
 const WORKER_ID = 'worker-uuid-1';
@@ -113,6 +116,9 @@ describe('ApplicationService', () => {
       providers: [
         ApplicationService,
         { provide: PrismaService, useValue: mockPrismaService },
+        { provide: BotNotificationService, useValue: { sendNewApplicationToEmployer: jest.fn(), sendApplicationCancelledToEmployer: jest.fn(), sendApplicationAccepted: jest.fn(), sendApplicationRejected: jest.fn() } },
+        { provide: SystemConfigService, useValue: { get: jest.fn().mockResolvedValue('5000'), getCancellationSettings: jest.fn().mockResolvedValue({ lateCancellationPenaltyFcfa: 5000, lateCancellationScoreDeduction: 5, cancellationThresholdHours: 4 }) } },
+        { provide: QdrantService, useValue: { search: jest.fn().mockResolvedValue([]), upsert: jest.fn(), delete: jest.fn() } },
       ],
     }).compile();
 
