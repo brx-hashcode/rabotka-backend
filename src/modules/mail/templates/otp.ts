@@ -1,31 +1,27 @@
 import { escapeHtml, wrapEmailHtml } from './layout';
 
-export function sendOtpEmail(code: string): string {
+export function sendOtpEmail(code: string, supportEmail: string): string {
   const body = `
-
-    <p>Bonjour,</p>
+    <p>Hi,</p>
 
     <p>
-      Voici votre code de vérification :
-      <strong>${escapeHtml(code)}</strong>
+      Use this one-time password to sign in to Rabotka: ${escapeHtml(code)}
     </p>
 
     <p>
-      Pour des raisons de sécurité, ce code est valable pendant
-      <strong>5 minutes</strong>.
+      If you didn't request for a one-time password, your account may have been compromised
+      and you should take a few steps to make sure your account is secure.
     </p>
 
     <p>
-      Si vous n'avez pas demandé ce code, vous pouvez ignorer cet email.
+      Regards,<br />
+      <strong>Rabotka Team</strong>
     </p>
 
-    <p>
-      Cordialement,<br />
-      <strong>L'équipe Rabotka</strong>
-    </p>
+    <p>Email: <a href="mailto:${escapeHtml(supportEmail)}">${escapeHtml(supportEmail)}</a></p>
   `;
 
   return wrapEmailHtml(body, {
-    previewText: `Votre code de vérification Rabotka : ${code}`,
+    previewText: `Use this one-time password to sign in to Rabotka: ${code}`,
   });
 }

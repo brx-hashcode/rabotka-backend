@@ -2,19 +2,19 @@ import { escapeHtml, wrapEmailHtml } from './layout';
 
 export function kycApprovedEmail(name: string): string {
   const body = `
-    <p>Bonjour ${escapeHtml(name)},</p>
+    <p>Hi ${escapeHtml(name)},</p>
 
-    <p>Bonne nouvelle ! 🎉 Votre vérification d'identité (KYC) a été <strong>approuvée avec succès</strong>.</p>
+    <p>Great news! Your identity verification (KYC) has been <strong>successfully approved</strong>.</p>
 
     <p>
-      Pour finaliser l'activation de votre compte, vous allez recevoir un message WhatsApp
-      contenant un <strong>lien de vérification</strong> pour confirmer que votre numéro de téléphone
-      est bien connecté à WhatsApp.
+      To complete your account activation, you will receive a WhatsApp message
+      containing a <strong>verification link</strong> to confirm that your phone number
+      is connected to WhatsApp.
     </p>
 
     <p>
-      Merci de votre confiance,<br />
-      <strong>L'équipe Rabotka</strong>
+      Thank you for your trust,<br />
+      <strong>Rabotka Team</strong>
     </p>
   `;
 

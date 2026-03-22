@@ -2,25 +2,25 @@ import { escapeHtml, wrapEmailHtml } from './layout';
 
 export function paymentRejectedEmail(reason?: string): string {
   const reasonBlock = reason
-    ? `<p><strong>Motif :</strong> ${escapeHtml(reason)}</p>`
+    ? `<p><strong>Reason:</strong> ${escapeHtml(reason)}</p>`
     : '';
 
   const body = `
     <p>
-      Nous avons examiné votre demande de paiement et nous avons le regret de vous informer
-      qu'elle a été <strong>rejetée</strong>.
+      We have reviewed your payment request and regret to inform you
+      that it has been <strong>rejected</strong>.
     </p>
 
-    ${reasonBlock}
+   <p style="padding: 10px; background-color: #f0f0f0; border-radius: 5px;">${reasonBlock}</p>
 
     <p>
-      Si vous pensez qu'il s'agit d'une erreur ou souhaitez soumettre une nouvelle demande,
-      veuillez contacter notre équipe support ou réessayer via l'application.
+      If you believe this is an error or would like to submit a new request,
+      please contact our support team or try again through the app.
     </p>
 
     <p>
-      Merci de votre compréhension,<br />
-      <strong>L'équipe Rabotka</strong>
+      Thank you for your understanding,<br />
+      <strong>Rabotka Team</strong>
     </p>
   `;
 

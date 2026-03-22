@@ -2,26 +2,26 @@ import { escapeHtml, wrapEmailHtml } from './layout';
 
 export function sendWelcomeEmail(name: string): string {
   const body = `
-    <p>Bonjour ${escapeHtml(name)},</p>
+    <p>Hi ${escapeHtml(name)},</p>
 
-    <p>Votre profil a été créé avec succès 🎉</p>
+    <p>Your profile has been successfully created!</p>
 
     <p>
-      Pour activer votre compte, veuillez compléter votre profil
-      (photo et informations personnelles).
+      To activate your account, please complete your profile
+      (photo and personal information).
     </p>
 
     <p>
-      Un agent Rabotka pourra également vous appeler pour vérifier votre identité (KYC).
+      A Rabotka agent may also call you to verify your identity (KYC).
     </p>
 
     <p>
-      Pour toute question, notre équipe reste à votre disposition.
+      If you have any questions, our team is here to help.
     </p>
 
     <p>
-      Merci de votre confiance,<br />
-      <strong>L'équipe Rabotka</strong>
+      Thank you for your trust,<br />
+      <strong>Rabotka Team</strong>
     </p>
   `;
 
