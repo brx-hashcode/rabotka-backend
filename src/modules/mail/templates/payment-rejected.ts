@@ -2,7 +2,8 @@ import { escapeHtml, wrapEmailHtml } from './layout';
 
 export function paymentRejectedEmail(reason?: string): string {
   const reasonBlock = reason
-    ? `<p><strong>Reason:</strong> ${escapeHtml(reason)}</p>`
+    ? `
+  <p style="padding: 10px; background-color: #f0f0f0; border-radius: 5px;">${escapeHtml(reason)}</p>`
     : '';
 
   const body = `
@@ -11,7 +12,7 @@ export function paymentRejectedEmail(reason?: string): string {
       that it has been <strong>rejected</strong>.
     </p>
 
-   <p style="padding: 10px; background-color: #f0f0f0; border-radius: 5px;">${reasonBlock}</p>
+   ${reasonBlock}
 
     <p>
       If you believe this is an error or would like to submit a new request,
