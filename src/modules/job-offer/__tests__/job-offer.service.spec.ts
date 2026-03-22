@@ -65,7 +65,7 @@ describe('JobOfferService', () => {
         JobOfferService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: QdrantService, useValue: { search: jest.fn().mockResolvedValue([]), upsert: jest.fn(), delete: jest.fn() } },
-        { provide: SystemConfigService, useValue: { get: jest.fn().mockResolvedValue('0'), getFees: jest.fn().mockResolvedValue({ jobPostingFeeFcfa: 0, maxConcurrentApplications: 2 }) } },
+        { provide: SystemConfigService, useValue: { get: jest.fn().mockResolvedValue('0'), getFees: jest.fn().mockResolvedValue({ jobPostingFeeFcfa: 0, maxConcurrentApplications: 2 }), isSimilarityEnabled: jest.fn().mockResolvedValue(false) } },
         { provide: WhatsAppService, useValue: { sendTextMessage: jest.fn().mockResolvedValue(true) } },
         { provide: BotNotificationService, useValue: { notifyJobOfferCreated: jest.fn(), notifyJobOfferCancelled: jest.fn() } },
       ],
