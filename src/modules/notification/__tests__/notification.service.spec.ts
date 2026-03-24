@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { NotificationService } from '../notification.service';
 import { MailService } from '../../mail/mail.service';
+import { SystemConfigService } from '../../system-config/system-config.service';
 
 describe('NotificationService', () => {
   let service: NotificationService;
@@ -15,6 +16,10 @@ describe('NotificationService', () => {
       providers: [
         NotificationService,
         { provide: MailService, useValue: mockMailService },
+        {
+          provide: SystemConfigService,
+          useValue: { get: jest.fn().mockResolvedValue('support@rabotka.com') },
+        },
       ],
     }).compile();
 
@@ -28,7 +33,7 @@ describe('NotificationService', () => {
       expect(mockMailService.sendMail).toHaveBeenCalledWith(
         expect.objectContaining({
           to: 'admin@example.com',
-          subject: 'Bienvenue sur Rabotka – Votre compte administrateur',
+          subject: 'Welcome to Rabotka – Your administrator account',
         }),
       );
     });
@@ -41,7 +46,7 @@ describe('NotificationService', () => {
       expect(mockMailService.sendMail).toHaveBeenCalledWith(
         expect.objectContaining({
           to: 'admin@example.com',
-          subject: 'Rabotka – Vos informations ont été mises à jour',
+          subject: 'Rabotka – Your account information has been updated',
         }),
       );
     });
@@ -54,7 +59,7 @@ describe('NotificationService', () => {
       expect(mockMailService.sendMail).toHaveBeenCalledWith(
         expect.objectContaining({
           to: 'user@example.com',
-          subject: 'Bienvenue sur Rabotka',
+          subject: 'Welcome to Rabotka',
         }),
       );
     });
@@ -62,12 +67,12 @@ describe('NotificationService', () => {
 
   describe('notifyOtp()', () => {
     it('sends OTP email with correct subject', async () => {
-      await service.notifyOtp('user@example.com', '123456');
+      await service.notifyOtp('Alice', 'user@example.com', '123456');
 
       expect(mockMailService.sendMail).toHaveBeenCalledWith(
         expect.objectContaining({
           to: 'user@example.com',
-          subject: 'Votre code de vérification Rabotka',
+          subject: 'Your Rabotka one-time password',
         }),
       );
     });

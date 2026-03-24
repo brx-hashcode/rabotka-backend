@@ -17,6 +17,7 @@ import type { BotNotificationService } from '../services/bot-notification.servic
 export type MyApplicationsContext = {
   applicationService: ApplicationService;
   notificationService: BotNotificationService;
+  cancellationSettings: { penaltyFcfa: number; thresholdHours: number };
 };
 
 export type FlowResult = {

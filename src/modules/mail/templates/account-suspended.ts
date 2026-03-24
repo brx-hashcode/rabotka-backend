@@ -2,20 +2,20 @@ import { escapeHtml, wrapEmailHtml } from './layout';
 
 export function accountSuspendedEmail(name: string): string {
   const body = `
-    <p>Bonjour ${escapeHtml(name)},</p>
+    <p>Hi ${escapeHtml(name)},</p>
 
     <p>
-      Nous vous informons que votre compte a été <strong>suspendu</strong>.
+      We are writing to let you know that your account has been <strong>suspended</strong>.
     </p>
 
     <p>
-      Si vous pensez qu'il s'agit d'une erreur ou souhaitez obtenir plus d'informations,
-      veuillez contacter notre équipe support.
+      If you believe this is an error or would like more information,
+      please contact our support team.
     </p>
 
     <p>
-      Cordialement,<br />
-      <strong>L'équipe Rabotka</strong>
+      Regards,<br />
+      <strong>Rabotka Team</strong>
     </p>
   `;
 

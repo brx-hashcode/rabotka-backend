@@ -9,6 +9,8 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { BotNotificationService } from '../bot/services/bot-notification.service';
+import { SystemConfigService } from '../system-config/system-config.service';
+import { QdrantService, COLLECTION_JOB_OFFERS } from '../qdrant/qdrant.service';
 import {
   AccountStatus,
   ApplicationStatus,
@@ -24,7 +26,6 @@ import { generatePaymentReference } from '../../common/utils/payment-reference';
 import {
   LATE_CANCELLATION_PENALTY_FCFA,
   LATE_CANCELLATION_SCORE_DEDUCTION,
-  CANCELLATION_PENALTY_THRESHOLD_HOURS,
   RELIABILITY_SCORE_MIN,
   RELIABILITY_SCORE_MAX,
   EMPLOYER_CANCEL_SCORE_DEDUCTION,
@@ -133,6 +134,8 @@ export class ApplicationService {
     private readonly prisma: PrismaService,
     @Inject(forwardRef(() => BotNotificationService))
     private readonly botNotification: BotNotificationService,
+    private readonly systemConfig: SystemConfigService,
+    private readonly qdrant: QdrantService,
   ) {}
 
   async create(
@@ -197,6 +200,28 @@ export class ApplicationService {
     });
     if (existing) {
       throw new ConflictException('Vous avez déjà postulé à cette offre');
+    }
+
+    const { maxConcurrentApplications } = await this.systemConfig.getFees();
+    const activeApplicationsCount = await this.prisma.application.count({
+      where: {
+        worker_id: workerId,
+        status: { in: [ApplicationStatus.PENDING, ApplicationStatus.ACCEPTED] },
+        job_offer: {
+          status: {
+            notIn: [
+              JobOfferStatus.COMPLETED,
+              JobOfferStatus.CANCELLED,
+              JobOfferStatus.EXPIRED,
+            ],
+          },
+        },
+      },
+    });
+    if (activeApplicationsCount >= maxConcurrentApplications) {
+      throw new ForbiddenException(
+        `Vous ne pouvez pas avoir plus de ${maxConcurrentApplications} candidature(s) active(s) simultanément. Attendez qu'une mission soit terminée avant de postuler à nouveau.`,
+      );
     }
 
     const application = await this.prisma.application.create({
@@ -325,12 +350,14 @@ export class ApplicationService {
 
     const quantityNeeded = application.job_offer.quantity ?? 1;
     const newAcceptedCount = currentAcceptedCount + 1;
-    const offerStatus =
-      newAcceptedCount >= quantityNeeded
-        ? JobOfferStatus.FILLED
-        : newAcceptedCount > 0
-          ? JobOfferStatus.PARTIALLY_FILLED
-          : JobOfferStatus.ACTIVE;
+    let offerStatus: JobOfferStatus;
+    if (newAcceptedCount >= quantityNeeded) {
+      offerStatus = JobOfferStatus.FILLED;
+    } else if (newAcceptedCount > 0) {
+      offerStatus = JobOfferStatus.PARTIALLY_FILLED;
+    } else {
+      offerStatus = JobOfferStatus.ACTIVE;
+    }
 
     await this.prisma.$transaction([
       this.prisma.application.update({
@@ -350,6 +377,12 @@ export class ApplicationService {
         },
       }),
     ]);
+
+    this.qdrant
+      .setPayload(COLLECTION_JOB_OFFERS, application.job_offer_id, {
+        status: offerStatus,
+      })
+      .catch(() => undefined);
 
     const updated = await this.findById(applicationId);
     if (!updated)
@@ -436,18 +469,20 @@ export class ApplicationService {
       );
     }
 
+    const { lateCancellationPenaltyFcfa, cancellationThresholdHours } =
+      await this.systemConfig.getCancellationSettings();
+
     const now = new Date();
     const scheduledAt = application.job_offer.scheduled_at;
     const hoursUntil =
       (scheduledAt.getTime() - now.getTime()) / (60 * 60 * 1000);
-    const isLateCancellation =
-      hoursUntil < CANCELLATION_PENALTY_THRESHOLD_HOURS;
+    const isLateCancellation = hoursUntil < cancellationThresholdHours;
     const isAccepted = application.status === ApplicationStatus.ACCEPTED;
     const applyPenalty = isLateCancellation && isAccepted;
 
     const penaltyApplied = applyPenalty;
     const penaltyAmount: number | null = applyPenalty
-      ? LATE_CANCELLATION_PENALTY_FCFA
+      ? lateCancellationPenaltyFcfa
       : null;
 
     await this.prisma.$transaction(async (tx) => {
@@ -482,10 +517,10 @@ export class ApplicationService {
           data: {
             worker_id: workerId,
             application_id: applicationId,
-            amount: LATE_CANCELLATION_PENALTY_FCFA,
+            amount: lateCancellationPenaltyFcfa,
             reason:
               reason ??
-              `Annulation tardive (< ${CANCELLATION_PENALTY_THRESHOLD_HOURS}h avant le rendez-vous)`,
+              `Annulation tardive (< ${cancellationThresholdHours}h avant le rendez-vous)`,
           },
         });
 
@@ -567,7 +602,9 @@ export class ApplicationService {
     const now = new Date();
     const hoursUntil =
       (app.job_offer.scheduled_at.getTime() - now.getTime()) / (60 * 60 * 1000);
-    return hoursUntil < CANCELLATION_PENALTY_THRESHOLD_HOURS && hoursUntil >= 0;
+    const { cancellationThresholdHours } =
+      await this.systemConfig.getCancellationSettings();
+    return hoursUntil < cancellationThresholdHours && hoursUntil >= 0;
   }
 
   /** Employer marks job as completed: set JobOffer to COMPLETED and create Payment for worker */

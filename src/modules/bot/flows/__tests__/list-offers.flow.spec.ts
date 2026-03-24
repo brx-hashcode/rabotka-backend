@@ -45,7 +45,10 @@ const mockJobOfferService = {
   findById: jest.fn(),
 } as unknown as jest.Mocked<JobOfferService>;
 
-const ctx = { jobOfferService: mockJobOfferService };
+const ctx = {
+  jobOfferService: mockJobOfferService,
+  cancellationSettings: { thresholdHours: 4, penaltyFcfa: 5000 },
+};
 
 beforeEach(() => {
   jest.clearAllMocks();

@@ -268,7 +268,7 @@ export class BotOrchestratorService {
     return result.reply;
   }
 
-  private executeFlow(
+  private async executeFlow(
     flowId: string,
     state: BotState,
     input: string,
@@ -288,6 +288,14 @@ export class BotOrchestratorService {
       clearState?: boolean;
       nextState?: BotState;
     };
+
+    const { lateCancellationPenaltyFcfa, cancellationThresholdHours } =
+      await this.systemConfig.getCancellationSettings();
+    const cancellationSettings = {
+      penaltyFcfa: lateCancellationPenaltyFcfa,
+      thresholdHours: cancellationThresholdHours,
+    };
+
     const runners: Record<string, () => Promise<FlowResult>> = {
       [FLOW_IDS.PUBLISH_JOB]: () =>
         runPublishJobFlow(state, input, profile, {
@@ -297,8 +305,13 @@ export class BotOrchestratorService {
       [FLOW_IDS.LIST_OFFERS]: () =>
         runListOffersFlow(state, input, profile, {
           jobOfferService: deps.jobOfferService,
+          cancellationSettings,
         }),
-      [FLOW_IDS.APPLY_JOB]: () => runApplyJobFlow(state, input, profile, deps),
+      [FLOW_IDS.APPLY_JOB]: () =>
+        runApplyJobFlow(state, input, profile, {
+          ...deps,
+          cancellationSettings,
+        }),
       [FLOW_IDS.ACCEPT_REFUSE_CANDIDATE]: () =>
         runAcceptRefuseCandidateFlow(state, input, profile, {
           applicationService: deps.applicationService,
@@ -308,11 +321,13 @@ export class BotOrchestratorService {
         runCancelApplicationFlow(state, input, profile, {
           applicationService: deps.applicationService,
           notificationService: deps.notificationService,
+          cancellationSettings,
         }),
       [FLOW_IDS.MY_APPLICATIONS]: () =>
         runMyApplicationsFlow(state, input, profile, {
           applicationService: deps.applicationService,
           notificationService: deps.notificationService,
+          cancellationSettings,
         }),
       [FLOW_IDS.CANDIDATURES_LIST]: () =>
         runCandidaturesListFlow(state, input, profile, {
@@ -393,16 +408,17 @@ export class BotOrchestratorService {
   ): Promise<string[]> {
     const draft = await this.botDraft.getDraft(profileId);
     if (draft && draft.step > 1) {
-      // Offer to resume the saved draft — step 0 = draft-resume decision
       const resumeState: BotState = {
         flowId: FLOW_IDS.PUBLISH_JOB,
         step: 0,
         payload: { ...draft.payload, _draftStep: draft.step },
         updatedAt: new Date().toISOString(),
       };
+
       await this.botState.set(profileId, resumeState);
       return [getPublishJobDraftResumeMessage(draft.step, draft.payload)];
     }
+
     const initialState = getPublishJobInitialState();
     await this.botState.set(profileId, initialState);
     return [getPublishJobFirstMessage()];
@@ -444,6 +460,7 @@ export class BotOrchestratorService {
       const listState = getCandidaturesListInitialState(result.items);
       await this.botState.set(profileId, listState);
     }
+
     return [result.message];
   }
 
@@ -474,6 +491,7 @@ export class BotOrchestratorService {
     const result = await runPayPenaltiesFlow(flowState, '', profile, {
       applicationService: this.applicationService,
     });
+
     return result.reply;
   }
 

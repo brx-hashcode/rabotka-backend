@@ -43,6 +43,8 @@ function makeCtx(overrides: Record<string, unknown> = {}) {
     notificationService: {
       sendCancellationToEmployer: jest.fn().mockResolvedValue(undefined),
     } as any,
+    cancellationSettings: { penaltyFcfa: 5000, thresholdHours: 4 },
+    ...overrides,
   };
 }
 

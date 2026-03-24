@@ -11,6 +11,7 @@ import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { MailService } from '../../mail/mail.service';
 import { WhatsAppService } from '../../whatsapp/whatsapp.service';
 import { REDIS_CONNECTION } from '../../../common/services/redis/redis.constants';
+import { SystemConfigService } from '../../system-config/system-config.service';
 
 const PROFILE_ID = 'profile-uuid-1';
 const USER_ID = 'user-uuid-1';
@@ -68,6 +69,10 @@ describe('AuthService', () => {
         { provide: MailService, useValue: mockMailService },
         { provide: WhatsAppService, useValue: mockWhatsAppService },
         { provide: REDIS_CONNECTION, useValue: redis },
+        {
+          provide: SystemConfigService,
+          useValue: { get: jest.fn().mockResolvedValue('support@rabotka.com') },
+        },
       ],
     }).compile();
 

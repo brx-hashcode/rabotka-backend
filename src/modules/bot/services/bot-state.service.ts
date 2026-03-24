@@ -15,6 +15,7 @@ export class BotStateService {
     const key = `${BOT_STATE_KEY_PREFIX}${profileId}`;
     const raw = await this.redis.get(key);
     if (!raw) return null;
+
     try {
       const state = JSON.parse(raw) as BotState;
       return state?.flowId ? state : null;
@@ -29,6 +30,7 @@ export class BotStateService {
       ...state,
       updatedAt: new Date().toISOString(),
     });
+
     await this.redis.set(key, value, 'EX', BOT_STATE_TTL_SECONDS);
   }
 
