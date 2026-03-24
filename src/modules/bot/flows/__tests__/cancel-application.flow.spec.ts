@@ -51,6 +51,7 @@ function makeCtx(overrides: Partial<CancelApplicationContext> = {}): CancelAppli
     notificationService: {
       sendCancellationToEmployer: jest.fn().mockResolvedValue(undefined),
     } as unknown as CancelApplicationContext['notificationService'],
+    cancellationSettings: { penaltyFcfa: 5000, thresholdHours: 4 },
     ...overrides,
   };
 }

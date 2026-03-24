@@ -7,6 +7,10 @@ import {
 import { JobOfferService } from '../job-offer.service';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { JobOfferStatus, PaymentFlow } from '@prisma/client';
+import { QdrantService } from '../../qdrant/qdrant.service';
+import { SystemConfigService } from '../../system-config/system-config.service';
+import { WhatsAppService } from '../../whatsapp/whatsapp.service';
+import { BotNotificationService } from '../../bot/services/bot-notification.service';
 
 const EMPLOYER_ID = 'employer-uuid-1';
 const OFFER_ID = 'offer-uuid-1';
@@ -54,6 +58,10 @@ describe('JobOfferService (extended)', () => {
       providers: [
         JobOfferService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: QdrantService, useValue: { search: jest.fn().mockResolvedValue([]), upsert: jest.fn(), delete: jest.fn(), setPayload: jest.fn().mockResolvedValue(undefined) } },
+        { provide: SystemConfigService, useValue: { get: jest.fn().mockResolvedValue('0'), getFees: jest.fn().mockResolvedValue({ jobPostingFeeFcfa: 0, maxConcurrentApplications: 2 }), isSimilarityEnabled: jest.fn().mockResolvedValue(false) } },
+        { provide: WhatsAppService, useValue: { sendTextMessage: jest.fn().mockResolvedValue(true) } },
+        { provide: BotNotificationService, useValue: { notifyJobOfferCreated: jest.fn(), notifyJobOfferCancelled: jest.fn() } },
       ],
     }).compile();
 
@@ -328,7 +336,7 @@ describe('JobOfferService (extended)', () => {
     it('deletes offer successfully', async () => {
       (prisma.jobOffer.findUnique as jest.Mock).mockResolvedValue({ id: OFFER_ID });
       (prisma.jobOffer.delete as jest.Mock).mockResolvedValue(mockOffer);
-      await expect(service.deleteJobOfferByAdmin(OFFER_ID)).resolves.toBeUndefined();
+      await expect(service.deleteJobOfferByAdmin(OFFER_ID)).resolves.toEqual({ success: true });
       expect(prisma.jobOffer.delete).toHaveBeenCalledWith({ where: { id: OFFER_ID } });
     });
 

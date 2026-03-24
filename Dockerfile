@@ -1,76 +1,69 @@
 # Build stage
-FROM node:21-alpine AS builder
+FROM node:22-alpine AS builder
 
-# Set working directory
+# Install pnpm
+ENV PNPM_HOME="/pnpm"
+ENV PATH="$PNPM_HOME:$PATH"
+RUN corepack enable && corepack prepare pnpm@10 --activate
+
+# Create app directory
 WORKDIR /app
 
-# Update Alpine packages and install build dependencies and pnpm
-RUN apk update && apk upgrade && \
-    apk add --no-cache g++ make python3 && \
-    npm install -g pnpm
+# Install build dependencies for native modules (e.g. sharp)
+RUN apk add --no-cache g++ make python3
 
 # Copy package files
 COPY package.json pnpm-lock.yaml ./
 
-# Install dependencies with cache mount for faster builds
-RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
-    pnpm install --frozen-lockfile
+# Install all dependencies (including devDependencies for build)
+# Use --ignore-scripts because postinstall (prisma generate) needs prisma/ copied first
+RUN --mount=type=cache,id=pnpm-store-v2,target=/pnpm/store \
+    pnpm install --frozen-lockfile --ignore-scripts
 
-# Copy source code and config files
+# Copy Prisma schema
+COPY prisma ./prisma/
+COPY prisma.config.ts ./prisma.config.ts
+
+# Generate Prisma Client
+RUN pnpm prisma generate
+
+# Copy source code
 COPY . .
 
-# Build application
-RUN pnpm run build
+# Build the application
+RUN pnpm build
 
-# Production stage
-FROM node:21-alpine AS production
+# Runtime stage
+FROM node:22-alpine AS runner
 
-# Set working directory
+# Install tini for signal handling
+RUN apk add --no-cache tini netcat-openbsd
+
 WORKDIR /app
 
-# Update Alpine packages and install production dependencies and tini for proper signal handling
-RUN apk update && apk upgrade && \
-    apk add --no-cache curl postgresql-client redis tini && \
-    npm install -g pnpm
-
-# Create non-root user for security
-RUN addgroup -S nestjs && \
-    adduser -S nestjs -G nestjs && \
-    mkdir -p /home/nestjs/.local/share/pnpm
-
-# Copy package files
-COPY package.json pnpm-lock.yaml tsconfig.json nest-cli.json ./
-
-# Copy node_modules from builder
+# Copy everything built in the builder (node_modules includes generated Prisma client)
 COPY --from=builder /app/node_modules ./node_modules
-
-# Copy built application from builder stage
 COPY --from=builder /app/dist ./dist
-
-# Copy public assets (e.g. favicon for API docs)
+COPY --from=builder /app/prisma ./prisma
+COPY --from=builder /app/prisma.config.ts ./prisma.config.ts
 COPY --from=builder /app/public ./public
 
-# Copy entrypoint script, fix CRLF line endings (Windows), and set permissions
+# Copy entrypoint script, fix line endings, set permissions, and create non-root user
 COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh && chmod +x /usr/local/bin/docker-entrypoint.sh
+RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh 2>/dev/null || true && \
+    chmod +x /usr/local/bin/docker-entrypoint.sh && \
+    addgroup -S app && adduser -S app -G app && \
+    chown -R app:app /app
+USER app
 
-# Set environment variables
-ENV NODE_ENV=production \
-    PORT=3000 \
-    NODE_OPTIONS="--max-old-space-size=2048" \
-    PNPM_HOME="/home/nestjs/.local/share/pnpm"
-
-# Change ownership to non-root user
-RUN chown -R nestjs:nestjs /app /home/nestjs
-
-# Switch to non-root user
-USER nestjs
-
-# Expose port
+# Expose the application port
 EXPOSE 3000
 
-# Use tini as entrypoint for proper signal handling
-ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/docker-entrypoint.sh"]
+# Set environment variables
+ENV NODE_ENV=production
+ENV PORT=3000
+ENV NODE_OPTIONS="--max-old-space-size=2048"
 
-# Start the application
-CMD ["node", "dist/src/main"]
+# Use tini as entrypoint for proper signal handling, wait for DB/Redis, then run app
+ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/docker-entrypoint.sh"]
+CMD ["sh", "-c", "node dist/src/main"]

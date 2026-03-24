@@ -103,6 +103,13 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     label: 'Frais de candidature (FCFA)',
     isSecret: false,
   },
+  {
+    key: 'fees.max_concurrent_applications',
+    value: '2',
+    category: ConfigCategory.FEES,
+    label: 'Candidatures actives simultanées max (par worker)',
+    isSecret: false,
+  },
 
   // ── MATCHING ──────────────────────────────────────────────────────────────
   {

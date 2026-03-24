@@ -56,7 +56,8 @@ describe('ReminderProcessor', () => {
       get: jest.fn().mockResolvedValue(null),
       set: jest.fn().mockResolvedValue('OK'),
     };
-    processor = new ReminderProcessor(prisma, whatsApp, queueService, redis);
+    const systemConfig = { get: jest.fn().mockResolvedValue('5000'), getCancellationSettings: jest.fn().mockResolvedValue({ lateCancellationPenaltyFcfa: 5000, lateCancellationScoreDeduction: 5, cancellationThresholdHours: 4 }) };
+    processor = new ReminderProcessor(prisma, whatsApp, queueService, systemConfig as any, redis);
   });
 
   // ─── process() dispatch ───────────────────────────────────────────────────

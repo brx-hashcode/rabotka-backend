@@ -5,6 +5,7 @@ import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { WhatsAppService } from '../../whatsapp/whatsapp.service';
 import { QueueService } from '../../../common/services/queue/queue.service';
 import { WHATSAPP_REMINDERS_QUEUE } from '../../../common/services/queue/queue.module';
+import { SystemConfigService } from '../../system-config/system-config.service';
 import {
   formatReminder24h,
   formatReminder2h,
@@ -32,6 +33,7 @@ export class ReminderProcessor {
     private readonly prisma: PrismaService,
     private readonly whatsApp: WhatsAppService,
     private readonly queueService: QueueService,
+    private readonly systemConfig: SystemConfigService,
     @Inject(REDIS_CONNECTION)
     private readonly redis: Redis,
   ) {}
@@ -238,6 +240,8 @@ export class ReminderProcessor {
 
     if (!app?.worker?.phone || app.status !== 'ACCEPTED') return;
 
+    const { lateCancellationPenaltyFcfa, cancellationThresholdHours } =
+      await this.systemConfig.getCancellationSettings();
     const text = formatReminder24h({
       offerTitle: app.job_offer.title,
       scheduledAt: app.job_offer.scheduled_at,
@@ -245,6 +249,8 @@ export class ReminderProcessor {
       amount: Number(app.job_offer.amount),
       employerName: `${app.job_offer.employer.first_name} ${app.job_offer.employer.last_name}`,
       employerPhone: app.job_offer.employer.phone,
+      penaltyFcfa: lateCancellationPenaltyFcfa,
+      thresholdHours: cancellationThresholdHours,
     });
 
     await this.whatsApp.sendTextMessage(app.worker.phone, text);

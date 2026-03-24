@@ -37,7 +37,7 @@ describe('BotDraftService', () => {
         `bot:draft:publish:${PROFILE_ID}`,
         JSON.stringify(mockDraft),
         'EX',
-        7 * 24 * 60 * 60,
+        5 * 24 * 60 * 60,
       );
     });
   });

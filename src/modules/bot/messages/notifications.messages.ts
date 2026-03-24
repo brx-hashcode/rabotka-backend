@@ -51,6 +51,8 @@ export function formatReminder24h(params: {
   amount: number;
   employerName: string;
   employerPhone: string;
+  penaltyFcfa: number;
+  thresholdHours: number;
 }): string {
   return [
     '*RAPPEL - MISSION DEMAIN*',
@@ -67,7 +69,7 @@ export function formatReminder24h(params: {
     `*Contact*: ${params.employerPhone}`,
     '',
     '*IMPORTANT*:',
-    '*Toute annulation < 4h = pénalité de 5,000 FCFA*',
+    `*Toute annulation < ${params.thresholdHours}h = pénalité de ${params.penaltyFcfa.toLocaleString('fr-FR')} FCFA*`,
     '*Soyez ponctuel pour maintenir votre score*',
     '',
     'Actions:',
@@ -104,5 +106,33 @@ export function formatReminder2h(params: {
     '✓ Arrivez 5-10 minutes en avance',
     '',
     '*BONNE MISSION ! 💪*',
+  ].join('\n');
+}
+
+export function formatNewJobOfferToWorker(params: {
+  title: string;
+  scheduledAt: Date;
+  amount: number;
+  paymentFlow: string;
+  address: string;
+  quantity: number;
+}): string {
+  const flowMap: Record<string, string> = {
+    HOURLY: 'par heure',
+    DAILY: 'par jour',
+    MONTHLY: 'par mois',
+  };
+  const flowLabel = flowMap[params.paymentFlow] ?? params.paymentFlow;
+  const spots = params.quantity > 1 ? `${params.quantity} places` : '1 place';
+  return [
+    '🆕 *NOUVELLE OFFRE DISPONIBLE !*',
+    '',
+    `*Poste*: ${params.title}`,
+    `*Date*: ${formatDate(params.scheduledAt)}`,
+    `*Rémunération*: ${params.amount.toLocaleString('fr-FR')} FCFA ${flowLabel}`,
+    `*Adresse*: ${params.address}`,
+    `*Places*: ${spots}`,
+    '',
+    'Tapez *Menu* puis *1* pour voir toutes les offres et postuler.',
   ].join('\n');
 }

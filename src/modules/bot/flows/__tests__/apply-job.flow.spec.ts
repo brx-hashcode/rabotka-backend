@@ -38,6 +38,7 @@ function makeCtx(overrides: Partial<ApplyJobContext> = {}): ApplyJobContext {
     notificationService: {
       sendNewApplicationToEmployer: jest.fn().mockResolvedValue(undefined),
     } as unknown as ApplyJobContext['notificationService'],
+    cancellationSettings: { thresholdHours: 4, penaltyFcfa: 5000 },
     ...overrides,
   };
 }
