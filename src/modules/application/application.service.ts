@@ -325,12 +325,14 @@ export class ApplicationService {
 
     const quantityNeeded = application.job_offer.quantity ?? 1;
     const newAcceptedCount = currentAcceptedCount + 1;
-    const offerStatus =
-      newAcceptedCount >= quantityNeeded
-        ? JobOfferStatus.FILLED
-        : newAcceptedCount > 0
-          ? JobOfferStatus.PARTIALLY_FILLED
-          : JobOfferStatus.ACTIVE;
+    let offerStatus: JobOfferStatus;
+    if (newAcceptedCount >= quantityNeeded) {
+      offerStatus = JobOfferStatus.FILLED;
+    } else if (newAcceptedCount > 0) {
+      offerStatus = JobOfferStatus.PARTIALLY_FILLED;
+    } else {
+      offerStatus = JobOfferStatus.ACTIVE;
+    }
 
     await this.prisma.$transaction([
       this.prisma.application.update({
@@ -587,9 +589,12 @@ export class ApplicationService {
         "Vous n'êtes pas l'employeur de cette offre",
       );
     }
-    if (application.status !== ApplicationStatus.ACCEPTED) {
+    if (
+      application.status !== ApplicationStatus.ACCEPTED &&
+      application.status !== ApplicationStatus.STARTED
+    ) {
       throw new BadRequestException(
-        'Seule une candidature acceptée peut être marquée comme terminée',
+        'Seule une candidature acceptée ou démarrée peut être marquée comme terminée',
       );
     }
     if (application.job_offer.status === JobOfferStatus.COMPLETED) {
@@ -621,6 +626,16 @@ export class ApplicationService {
           paid_at: now,
           description: `Job completion payment for job ${application.job_offer_id}`,
         },
+      });
+      // Mark all accepted/started applications for this job as END
+      await tx.application.updateMany({
+        where: {
+          job_offer_id: application.job_offer_id,
+          status: {
+            in: [ApplicationStatus.ACCEPTED, ApplicationStatus.STARTED],
+          },
+        },
+        data: { status: ApplicationStatus.END },
       });
       // Boost worker reliability score on successful completion
       const worker = await tx.profile.findUnique({
@@ -743,12 +758,14 @@ export class ApplicationService {
     const unpaidCount = await db.penalty.count({
       where: { worker_id: workerId, paid_at: null },
     });
-    const newStatus =
-      unpaidCount === 0
-        ? BillingStatus.CLEAR
-        : unpaidCount >= BILLING_BLOCK_THRESHOLD
-          ? BillingStatus.BLOCKED
-          : BillingStatus.PENDING_PAYMENT;
+    let newStatus: BillingStatus;
+    if (unpaidCount === 0) {
+      newStatus = BillingStatus.CLEAR;
+    } else if (unpaidCount >= BILLING_BLOCK_THRESHOLD) {
+      newStatus = BillingStatus.BLOCKED;
+    } else {
+      newStatus = BillingStatus.PENDING_PAYMENT;
+    }
     await db.profile.update({
       where: { id: workerId },
       data: { billing_status: newStatus },
