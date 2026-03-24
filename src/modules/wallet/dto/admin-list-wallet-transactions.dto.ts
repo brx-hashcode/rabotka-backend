@@ -8,6 +8,7 @@ import {
   IsArray,
   IsDateString,
 } from 'class-validator';
+
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 function toArray(value: unknown): string[] {
@@ -36,6 +37,12 @@ export class AdminListWalletTransactionsDto {
   @Min(1)
   @Max(100)
   limit?: number = 20;
+
+  @ApiPropertyOptional({ description: 'Search in type, reference_type, reference_id' })
+  @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsString()
+  q?: string;
 
   @ApiPropertyOptional({
     description: 'Filter by transaction type(s)',

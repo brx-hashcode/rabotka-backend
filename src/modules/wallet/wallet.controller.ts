@@ -90,6 +90,7 @@ export class WalletController {
     return this.walletService.listTransactionsForAdmin({
       page: dto.page ?? 1,
       limit: dto.limit ?? 20,
+      q: dto.q,
       type: dto.type,
       created_from: dto.created_from,
       created_to: dto.created_to,
@@ -112,6 +113,7 @@ export class WalletController {
     return this.walletService.listPaymentsForAdmin({
       page: dto.page ?? 1,
       limit: dto.limit ?? 20,
+      q: dto.q,
       type: dto.type,
       status: dto.status,
       created_from: dto.created_from,

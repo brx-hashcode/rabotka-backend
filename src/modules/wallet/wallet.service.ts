@@ -217,6 +217,7 @@ export class WalletService {
   async listTransactionsForAdmin(params: {
     page: number;
     limit: number;
+    q?: string;
     type?: string[];
     created_from?: string;
     created_to?: string;
@@ -224,6 +225,13 @@ export class WalletService {
     const { page, limit } = params;
     const where: Record<string, unknown> = {};
 
+    if (params.q) {
+      where.OR = [
+        { type: { contains: params.q, mode: 'insensitive' } },
+        { reference_type: { contains: params.q, mode: 'insensitive' } },
+        { reference_id: { contains: params.q, mode: 'insensitive' } },
+      ];
+    }
     if (params.type?.length) {
       where.type = { in: params.type as WalletTransactionType[] };
     }
@@ -272,6 +280,7 @@ export class WalletService {
   async listPaymentsForAdmin(params: {
     page: number;
     limit: number;
+    q?: string;
     type?: string[];
     status?: string[];
     created_from?: string;
@@ -280,6 +289,21 @@ export class WalletService {
     const { page, limit } = params;
     const where: Record<string, unknown> = {};
 
+    if (params.q) {
+      where.OR = [
+        { transaction_id: { contains: params.q, mode: 'insensitive' } },
+        { description: { contains: params.q, mode: 'insensitive' } },
+        {
+          profile: {
+            OR: [
+              { first_name: { contains: params.q, mode: 'insensitive' } },
+              { last_name: { contains: params.q, mode: 'insensitive' } },
+              { email: { contains: params.q, mode: 'insensitive' } },
+            ],
+          },
+        },
+      ];
+    }
     if (params.type?.length) {
       where.type = { in: params.type as PaymentType[] };
     }
