@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { ApplicationService } from '../application.service';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
+import { BotNotificationService } from '../../bot/services/bot-notification.service';
 import { ApplicationStatus, JobOfferStatus, PaymentFlow } from '@prisma/client';
 
 const JOB_OFFER_ID = 'offer-uuid-1';
@@ -103,6 +104,17 @@ describe('ApplicationService (extended)', () => {
       providers: [
         ApplicationService,
         { provide: PrismaService, useValue: mockPrismaService },
+        {
+          provide: BotNotificationService,
+          useValue: {
+            sendNewApplicationToEmployer: jest.fn(),
+            sendApplicationAcceptedToWorker: jest.fn(),
+            sendApplicationRejectedToWorker: jest.fn(),
+            sendCancellationToEmployer: jest.fn(),
+            sendJobCompletedToWorker: jest.fn(),
+            sendJobCancelledByEmployerToWorker: jest.fn(),
+          },
+        },
       ],
     }).compile();
 
@@ -634,10 +646,10 @@ describe('ApplicationService (extended)', () => {
       ).rejects.toThrow(ForbiddenException);
     });
 
-    it('throws BadRequestException when application not ACCEPTED', async () => {
+    it('throws BadRequestException when application is not ACCEPTED or STARTED', async () => {
       (prisma.application.findUnique as jest.Mock).mockResolvedValue(
-        mockApplication,
-      ); // PENDING
+        mockApplication, // status: PENDING
+      );
       await expect(
         service.markJobCompleted(APPLICATION_ID, EMPLOYER_ID),
       ).rejects.toThrow(BadRequestException);
