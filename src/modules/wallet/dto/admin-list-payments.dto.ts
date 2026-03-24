@@ -37,6 +37,12 @@ export class AdminListPaymentsDto {
   @Max(100)
   limit?: number = 20;
 
+  @ApiPropertyOptional({ description: 'Search in profile name, email, transaction_id' })
+  @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsString()
+  q?: string;
+
   @ApiPropertyOptional({
     description: 'Filter by payment type(s)',
     isArray: true,
