@@ -201,16 +201,52 @@ export class WalletService {
   }
 
   /**
-   * Returns system revenue (balance of the system wallet) for admin reporting.
+   * Returns system revenue and payment stats for admin reporting.
    */
   async getSystemRevenue(): Promise<{
     totalRevenue: number;
     balance: number;
+    completedCount: number;
+    pendingCount: number;
+    failedCount: number;
+    revenueByType: { registration: number; jobPosting: number; penalty: number };
   }> {
-    const wallet = await this.getOrCreateSystemWallet();
+    const [completedAgg, pendingCount, failedCount, byType] = await Promise.all([
+      this.prisma.payment.aggregate({
+        where: { status: PaymentStatus.COMPLETED },
+        _sum: { amount: true },
+        _count: true,
+      }),
+      this.prisma.payment.count({ where: { status: PaymentStatus.PENDING } }),
+      this.prisma.payment.count({ where: { status: PaymentStatus.FAILED } }),
+      Promise.all([
+        this.prisma.payment.aggregate({
+          where: { status: PaymentStatus.COMPLETED, type: PaymentType.REGISTRATION },
+          _sum: { amount: true },
+        }),
+        this.prisma.payment.aggregate({
+          where: { status: PaymentStatus.COMPLETED, type: PaymentType.JOB_POSTING },
+          _sum: { amount: true },
+        }),
+        this.prisma.payment.aggregate({
+          where: { status: PaymentStatus.COMPLETED, type: PaymentType.PENALTY },
+          _sum: { amount: true },
+        }),
+      ]),
+    ]);
+
+    const totalRevenue = Number(completedAgg._sum.amount ?? 0);
     return {
-      totalRevenue: wallet.balance,
-      balance: wallet.balance,
+      totalRevenue,
+      balance: totalRevenue,
+      completedCount: completedAgg._count,
+      pendingCount,
+      failedCount,
+      revenueByType: {
+        registration: Number(byType[0]._sum.amount ?? 0),
+        jobPosting: Number(byType[1]._sum.amount ?? 0),
+        penalty: Number(byType[2]._sum.amount ?? 0),
+      },
     };
   }
 
