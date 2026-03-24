@@ -10,13 +10,13 @@ export type JobActivityDataPoint = {
 
 export type DashboardMetrics = {
   revenue: number;
-  revenueTrend: number;
+  revenueTrend: number | null;
   profilesCount: number;
-  profilesTrend: number;
+  profilesTrend: number | null;
   jobsCount: number;
-  jobsTrend: number;
+  jobsTrend: number | null;
   applicationsCount: number;
-  applicationsTrend: number;
+  applicationsTrend: number | null;
 };
 
 const TIME_RANGE_DAYS: Record<TimeRange, number> = {
@@ -126,8 +126,8 @@ export class DashboardService {
     return groups.map((g) => ({ status: g.status, count: g._count.status }));
   }
 
-  private calcTrend(current: number, previous: number): number {
-    if (previous === 0) return current > 0 ? 100 : 0;
+  private calcTrend(current: number, previous: number): number | null {
+    if (previous === 0) return null;
     return Math.round(((current - previous) / previous) * 1000) / 10;
   }
 

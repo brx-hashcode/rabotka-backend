@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, Optional, Inject, forwardRef } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import TwilioSDK from 'twilio';
 import { SystemConfigService } from '../../../modules/system-config/system-config.service';
@@ -17,7 +17,7 @@ export class TwilioService implements OnModuleInit {
 
   constructor(
     private readonly config: ConfigService,
-    @Optional() private readonly systemConfig?: SystemConfigService,
+    @Optional() @Inject(forwardRef(() => SystemConfigService)) private readonly systemConfig?: SystemConfigService,
   ) {
     // Initialise from env vars immediately so the service works before onModuleInit
     this.accountSid = this.config.get<string>('TWILIO_ACCOUNT_SID') ?? null;
