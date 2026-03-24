@@ -758,12 +758,14 @@ export class ApplicationService {
     const unpaidCount = await db.penalty.count({
       where: { worker_id: workerId, paid_at: null },
     });
-    const newStatus =
-      unpaidCount === 0
-        ? BillingStatus.CLEAR
-        : unpaidCount >= BILLING_BLOCK_THRESHOLD
-          ? BillingStatus.BLOCKED
-          : BillingStatus.PENDING_PAYMENT;
+    let newStatus: BillingStatus;
+    if (unpaidCount === 0) {
+      newStatus = BillingStatus.CLEAR;
+    } else if (unpaidCount >= BILLING_BLOCK_THRESHOLD) {
+      newStatus = BillingStatus.BLOCKED;
+    } else {
+      newStatus = BillingStatus.PENDING_PAYMENT;
+    }
     await db.profile.update({
       where: { id: workerId },
       data: { billing_status: newStatus },

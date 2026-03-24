@@ -8,13 +8,7 @@ import {
 import { ApplicationService } from '../application.service';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { BotNotificationService } from '../../bot/services/bot-notification.service';
-import {
-  ApplicationStatus,
-  JobOfferStatus,
-  PaymentFlow,
-  PaymentMethod,
-  PaymentStatus,
-} from '@prisma/client';
+import { ApplicationStatus, JobOfferStatus, PaymentFlow } from '@prisma/client';
 import { LATE_CANCELLATION_PENALTY_FCFA } from '../application.constants';
 
 const JOB_OFFER_ID = 'offer-uuid-1';
@@ -160,14 +154,18 @@ describe('ApplicationService', () => {
 
     it('throws BadRequestException when worker applies to own offer', async () => {
       const offerOwnedByWorker = { ...mockJobOffer, employer_id: WORKER_ID };
-      (prisma.jobOffer.findUnique as jest.Mock).mockResolvedValue(offerOwnedByWorker);
+      (prisma.jobOffer.findUnique as jest.Mock).mockResolvedValue(
+        offerOwnedByWorker,
+      );
       await expect(service.create(JOB_OFFER_ID, WORKER_ID)).rejects.toThrow(
         BadRequestException,
       );
     });
 
     it('throws ConflictException when worker already applied', async () => {
-      (prisma.application.findUnique as jest.Mock).mockResolvedValue(mockApplication);
+      (prisma.application.findUnique as jest.Mock).mockResolvedValue(
+        mockApplication,
+      );
       await expect(service.create(JOB_OFFER_ID, WORKER_ID)).rejects.toThrow(
         ConflictException,
       );
@@ -198,7 +196,9 @@ describe('ApplicationService', () => {
     };
 
     beforeEach(() => {
-      (prisma.application.findUnique as jest.Mock).mockResolvedValue(acceptedApplication);
+      (prisma.application.findUnique as jest.Mock).mockResolvedValue(
+        acceptedApplication,
+      );
       (prisma.jobOffer.update as jest.Mock).mockResolvedValue(mockJobOffer);
       (prisma.application.update as jest.Mock).mockResolvedValue({
         ...acceptedApplication,
@@ -230,7 +230,7 @@ describe('ApplicationService', () => {
       const result = await service.cancel(APPLICATION_ID, WORKER_ID);
       expect(result.penaltyApplied).toBe(false);
       expect(result.penaltyAmount).toBeNull();
-      expect(prisma.penalty.create).not.toHaveBeenCalled();
+      expect(prisma.penalty.create as jest.Mock).not.toHaveBeenCalled();
     });
 
     it('cancels ACCEPTED application < 4h before: penalty applied', async () => {
@@ -242,7 +242,7 @@ describe('ApplicationService', () => {
       const result = await service.cancel(APPLICATION_ID, WORKER_ID);
       expect(result.penaltyApplied).toBe(true);
       expect(result.penaltyAmount).toBe(LATE_CANCELLATION_PENALTY_FCFA);
-      expect(prisma.penalty.create).toHaveBeenCalled();
+      expect(prisma.penalty.create as jest.Mock).toHaveBeenCalled();
     });
 
     it('cancels PENDING application < 4h before: no penalty (only ACCEPTED triggers penalty)', async () => {
@@ -254,12 +254,12 @@ describe('ApplicationService', () => {
       });
       const result = await service.cancel(APPLICATION_ID, WORKER_ID);
       expect(result.penaltyApplied).toBe(false);
-      expect(prisma.penalty.create).not.toHaveBeenCalled();
+      expect(prisma.penalty.create as jest.Mock).not.toHaveBeenCalled();
     });
 
     it('reverts offer to ACTIVE when cancelling accepted application', async () => {
       await service.cancel(APPLICATION_ID, WORKER_ID);
-      expect(prisma.jobOffer.update).toHaveBeenCalledWith(
+      expect(prisma.jobOffer.update as jest.Mock).toHaveBeenCalledWith(
         expect.objectContaining({
           data: { status: JobOfferStatus.ACTIVE },
         }),
@@ -269,7 +269,9 @@ describe('ApplicationService', () => {
 
   describe('accept()', () => {
     beforeEach(() => {
-      (prisma.application.findUnique as jest.Mock).mockResolvedValue(mockApplication);
+      (prisma.application.findUnique as jest.Mock).mockResolvedValue(
+        mockApplication,
+      );
       (prisma.application.count as jest.Mock).mockResolvedValue(0);
       (prisma.$transaction as jest.Mock).mockResolvedValue([]);
       jest.spyOn(service, 'findById').mockResolvedValue({
@@ -288,7 +290,7 @@ describe('ApplicationService', () => {
     it('quantity=1: first acceptance → offer FILLED', async () => {
       // job has quantity=1, 0 already accepted → 0+1 >= 1 → FILLED
       await service.accept(APPLICATION_ID, EMPLOYER_ID);
-      expect(prisma.jobOffer.update).toHaveBeenCalledWith(
+      expect(prisma.jobOffer.update as jest.Mock).toHaveBeenCalledWith(
         expect.objectContaining({ data: { status: JobOfferStatus.FILLED } }),
       );
     });
@@ -301,7 +303,7 @@ describe('ApplicationService', () => {
       });
       (prisma.application.count as jest.Mock).mockResolvedValue(0);
       await service.accept(APPLICATION_ID, EMPLOYER_ID);
-      expect(prisma.jobOffer.update).toHaveBeenCalledWith(
+      expect(prisma.jobOffer.update as jest.Mock).toHaveBeenCalledWith(
         expect.objectContaining({
           data: { status: JobOfferStatus.PARTIALLY_FILLED },
         }),
@@ -316,7 +318,7 @@ describe('ApplicationService', () => {
       });
       (prisma.application.count as jest.Mock).mockResolvedValue(3);
       await service.accept(APPLICATION_ID, EMPLOYER_ID);
-      expect(prisma.jobOffer.update).toHaveBeenCalledWith(
+      expect(prisma.jobOffer.update as jest.Mock).toHaveBeenCalledWith(
         expect.objectContaining({ data: { status: JobOfferStatus.FILLED } }),
       );
     });
@@ -356,26 +358,51 @@ describe('ApplicationService', () => {
 
     it('marks offer as COMPLETED when application is ACCEPTED', async () => {
       setupMock(ApplicationStatus.ACCEPTED);
-      const result = await service.markJobCompleted(APPLICATION_ID, EMPLOYER_ID);
-      expect(prisma.$transaction).toHaveBeenCalled();
+      const result = await service.markJobCompleted(
+        APPLICATION_ID,
+        EMPLOYER_ID,
+      );
+      expect(prisma.$transaction as jest.Mock).toHaveBeenCalled();
       expect(result.job_offer.status).toBe(JobOfferStatus.COMPLETED);
     });
 
     it('marks offer as COMPLETED when application is STARTED', async () => {
       setupMock(ApplicationStatus.STARTED);
-      const result = await service.markJobCompleted(APPLICATION_ID, EMPLOYER_ID);
-      expect(prisma.$transaction).toHaveBeenCalled();
+      const result = await service.markJobCompleted(
+        APPLICATION_ID,
+        EMPLOYER_ID,
+      );
+      expect(prisma.$transaction as jest.Mock).toHaveBeenCalled();
       expect(result.job_offer.status).toBe(JobOfferStatus.COMPLETED);
     });
 
     it('sets applications to END status inside transaction', async () => {
       setupMock(ApplicationStatus.ACCEPTED);
+
+      let capturedTx: any;
+      (prisma.$transaction as jest.Mock).mockImplementationOnce((fn: any) => {
+        capturedTx = {
+          jobOffer: { update: jest.fn().mockResolvedValue({}) },
+          assignment: { updateMany: jest.fn().mockResolvedValue({}) },
+          payment: { create: jest.fn().mockResolvedValue({}) },
+          application: { updateMany: jest.fn().mockResolvedValue({}) },
+          profile: {
+            findUnique: jest.fn().mockResolvedValue({ reliability_score: 100 }),
+            update: jest.fn().mockResolvedValue({}),
+          },
+        };
+        return fn(capturedTx);
+      });
+
       await service.markJobCompleted(APPLICATION_ID, EMPLOYER_ID);
-      expect(prisma.application.updateMany).toHaveBeenCalledWith(
+
+      expect(capturedTx.application.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
             job_offer_id: JOB_OFFER_ID,
-            status: { in: [ApplicationStatus.ACCEPTED, ApplicationStatus.STARTED] },
+            status: {
+              in: [ApplicationStatus.ACCEPTED, ApplicationStatus.STARTED],
+            },
           }),
           data: { status: ApplicationStatus.END },
         }),

@@ -10,6 +10,7 @@ import { BotDraftService } from '../bot-draft.service';
 import { JobOfferService } from '../../../job-offer/job-offer.service';
 import { ApplicationService } from '../../../application/application.service';
 import { SystemConfigService } from '../../../system-config/system-config.service';
+import { PaymentService } from '../../../payments/payment.service';
 
 const PROFILE_ID = 'profile-uuid-1';
 const PHONE = '+242000000';
@@ -97,6 +98,7 @@ describe('BotOrchestratorService', () => {
         { provide: ApplicationService, useValue: deps.applicationService },
         { provide: BotNotificationService, useValue: deps.notificationService },
         { provide: SystemConfigService, useValue: deps.systemConfig },
+        { provide: PaymentService, useValue: {} },
       ],
     }).compile();
 
