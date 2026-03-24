@@ -587,9 +587,12 @@ export class ApplicationService {
         "Vous n'êtes pas l'employeur de cette offre",
       );
     }
-    if (application.status !== ApplicationStatus.ACCEPTED) {
+    if (
+      application.status !== ApplicationStatus.ACCEPTED &&
+      application.status !== ApplicationStatus.STARTED
+    ) {
       throw new BadRequestException(
-        'Seule une candidature acceptée peut être marquée comme terminée',
+        'Seule une candidature acceptée ou démarrée peut être marquée comme terminée',
       );
     }
     if (application.job_offer.status === JobOfferStatus.COMPLETED) {
@@ -621,6 +624,16 @@ export class ApplicationService {
           paid_at: now,
           description: `Job completion payment for job ${application.job_offer_id}`,
         },
+      });
+      // Mark all accepted/started applications for this job as END
+      await tx.application.updateMany({
+        where: {
+          job_offer_id: application.job_offer_id,
+          status: {
+            in: [ApplicationStatus.ACCEPTED, ApplicationStatus.STARTED],
+          },
+        },
+        data: { status: ApplicationStatus.END },
       });
       // Boost worker reliability score on successful completion
       const worker = await tx.profile.findUnique({
