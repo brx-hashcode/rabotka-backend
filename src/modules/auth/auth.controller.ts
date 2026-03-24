@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Patch,
   Body,
   Res,
   Req,
@@ -321,6 +322,26 @@ export class AuthController {
     @Req() req: AdminAuthenticatedRequest,
   ): Promise<{ id: string; email: string; name: string; role: string }> {
     return this.authService.getAdminById(req.user.userId);
+  }
+
+  @Patch('admin/me')
+  @UseGuards(AdminAuthGuard)
+  @ApiOperation({ summary: 'Update current admin profile' })
+  @ApiCookieAuth()
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: { name: { type: 'string' } },
+      required: ['name'],
+    },
+  })
+  @ApiResponse({ status: 200, description: 'Updated admin user' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async updateAdminMe(
+    @Req() req: AdminAuthenticatedRequest,
+    @Body() body: { name: string },
+  ): Promise<{ id: string; email: string; name: string; role: string }> {
+    return this.authService.updateAdminById(req.user.userId, body.name);
   }
 
   @Post('admin/logout')

@@ -4,6 +4,7 @@ import { QueueService } from './queue.service';
 
 export const EMAIL_QUEUE = 'email-queue';
 export const WHATSAPP_REMINDERS_QUEUE = 'whatsapp-reminders-queue';
+export const PAYMENT_QUEUE = 'payment-queue';
 
 @Module({})
 export class QueueModule {

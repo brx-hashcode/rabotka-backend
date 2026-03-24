@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomBytes } from 'node:crypto';
-import { AccountStatus, PaymentRequestStatus, Prisma } from '@prisma/client';
+import { AccountStatus, PaymentRequestStatus, PaymentType, Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { LogService } from '../log/log.service';
@@ -20,6 +20,8 @@ import { CreatePaymentLinkDto } from './dto/create-payment-link.dto';
 import { SubmitPaymentDto } from './dto/submit-payment.dto';
 import { RejectPaymentDto } from './dto/reject-payment.dto';
 import { ListPaymentRequestsDto } from './dto/list-payment-requests.dto';
+import { PaymentService } from '../payments/payment.service';
+import { SystemConfigService } from '../system-config/system-config.service';
 
 const PAYMENT_REQUEST_SELECT = {
   id: true,
@@ -64,6 +66,8 @@ export class PaymentRequestService {
     private readonly whatsApp: WhatsAppService,
     private readonly log: LogService,
     private readonly mail: MailService,
+    private readonly paymentService: PaymentService,
+    private readonly systemConfig: SystemConfigService,
   ) {}
 
   async createPaymentLink(dto: CreatePaymentLinkDto, adminUserId: string) {
@@ -209,6 +213,13 @@ export class PaymentRequestService {
       entityId: id,
       userId: adminUserId,
       profileId: request.profile_id,
+    });
+
+    const fee = await this.systemConfig.getRaw('fees.application_fee_fcfa', '0');
+    await this.paymentService.makePayment({
+      type: PaymentType.REGISTRATION,
+      profileId: request.profile_id,
+      amount: Number(fee),
     });
 
     await this.trySendApprovedWhatsApp(request.profile);

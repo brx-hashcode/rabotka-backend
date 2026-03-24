@@ -290,6 +290,25 @@ export class AuthService {
     };
   }
 
+  async updateAdminById(userId: string, name: string): Promise<{
+    id: string;
+    email: string;
+    name: string;
+    role: string;
+  }> {
+    const user = await this.prisma.user.update({
+      where: { id: userId },
+      data: { first_name: name, last_name: '' },
+      select: { id: true, first_name: true, last_name: true, email: true, role: true },
+    });
+    return {
+      id: user.id,
+      email: user.email,
+      name: `${user.first_name} ${user.last_name}`.trim(),
+      role: user.role,
+    };
+  }
+
   private normalize(value: string): string {
     return value.trim().toLowerCase();
   }

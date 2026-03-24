@@ -7,6 +7,7 @@ import { QueueModule } from './common/services/queue/queue.module';
 import { TwilioModule } from './common/services/twilio/twilio.module';
 import { MailModule } from './modules/mail/mail.module';
 import { ReminderModule } from './modules/bot/reminder/reminder.module';
+import { PaymentsModule } from './modules/payments/payment.module';
 import { getMailerTransportConfig } from './modules/mail/mailer-transport.config';
 
 const baseImports = [
@@ -25,6 +26,7 @@ const baseImports = [
   }),
   PrismaModule,
   MailModule,
+  PaymentsModule,
 ];
 
 /**
