@@ -7,7 +7,7 @@ import { PaymentProcessor } from './payment.processor';
 import { PaymentWebhookController } from './payment.webhook.controller';
 
 @Module({
-  imports: [PrismaModule, forwardRef(() => BotModule), SystemConfigModule],
+  imports: [PrismaModule, forwardRef(() => BotModule), forwardRef(() => SystemConfigModule)],
   controllers: [PaymentWebhookController],
   providers: [PaymentService, PaymentProcessor],
   exports: [PaymentService, PaymentProcessor],

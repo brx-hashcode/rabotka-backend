@@ -11,8 +11,10 @@ export class PaymentProcessor {
 
   async process(job: { id?: string; data: PaymentJobData }): Promise<void> {
     const { paymentId, type, amount, profileId, entityId } = job.data;
+    const entitySuffix = entityId ? ', entityId: ' + entityId : '';
+
     this.logger.log(
-      `Processing payment ${paymentId} — type: ${type}, amount: ${amount}, profileId: ${profileId}${entityId ? `, entityId: ${entityId}` : ''}`,
+      `Processing payment ${paymentId} — type: ${type}, amount: ${amount}, profileId: ${profileId}${entitySuffix}`,
     );
 
     await this.prisma.payment.update({

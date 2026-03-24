@@ -29,7 +29,6 @@ class WorkerLogger implements LoggerService {
     'RedisService',
     'ExceptionHandler',
     'NestFactory',
-    'InstanceLoader',
     'ReminderProcessor',
     'PaymentProcessor',
   ];
@@ -41,7 +40,6 @@ class WorkerLogger implements LoggerService {
   }
 
   error(message: unknown, trace?: string, context?: string) {
-    // Always show errors so startup failures are visible
     const msg =
       message instanceof Error
         ? `${message.message}\n${message.stack ?? ''}`

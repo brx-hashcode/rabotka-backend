@@ -16,7 +16,7 @@ import { BotNotificationService } from './services/bot-notification.service';
 @Module({
   imports: [
     PrismaModule,
-    JobOfferModule,
+    forwardRef(() => JobOfferModule),
     forwardRef(() => ApplicationModule),
     forwardRef(() => WhatsAppModule),
     forwardRef(() => PaymentsModule),
