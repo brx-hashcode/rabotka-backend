@@ -51,9 +51,6 @@ export class QdrantService implements OnModuleInit {
     return this.client;
   }
 
-  /**
-   * Embed a single text string into a dense vector (384-dim).
-   */
   async embed(text: string): Promise<number[]> {
     const results = this.embedder.embed([text]);
     const { value: batch, done } = await results[Symbol.asyncIterator]().next();
@@ -63,9 +60,6 @@ export class QdrantService implements OnModuleInit {
     return Array.from(batch[0]);
   }
 
-  /**
-   * Embed multiple texts at once.
-   */
   async embedBatch(texts: string[]): Promise<number[][]> {
     const vectors: number[][] = [];
     const results = this.embedder.embed(texts);
@@ -77,17 +71,11 @@ export class QdrantService implements OnModuleInit {
     return vectors;
   }
 
-  /**
-   * Embed a single text into a sparse vector (for hybrid search).
-   */
   async embedSparse(text: string): Promise<SparseVector> {
     const embedder = await this.getSparseEmbedder();
     return embedder.queryEmbed(text);
   }
 
-  /**
-   * Embed multiple texts into sparse vectors at once.
-   */
   async embedSparseBatch(texts: string[]): Promise<SparseVector[]> {
     const embedder = await this.getSparseEmbedder();
     const vectors: SparseVector[] = [];
@@ -100,10 +88,6 @@ export class QdrantService implements OnModuleInit {
     return vectors;
   }
 
-  /**
-   * Ensure a collection exists with hybrid vectors (dense cosine + sparse with IDF modifier).
-   * Creates it if absent; no-ops if it already exists.
-   */
   async ensureCollection(collectionName: string): Promise<void> {
     const collections = await this.client.getCollections();
     const exists = collections.collections.some(
@@ -127,10 +111,6 @@ export class QdrantService implements OnModuleInit {
     this.logger.log(`Collection created: ${collectionName}`);
   }
 
-  /**
-   * Update only the payload of an existing point (no re-embedding needed).
-   * No-ops silently if the point does not exist.
-   */
   async setPayload(
     collectionName: string,
     id: string | number,
@@ -142,9 +122,6 @@ export class QdrantService implements OnModuleInit {
     });
   }
 
-  /**
-   * Upsert a single point (dense vector + payload) into a collection.
-   */
   async upsertPoint(
     collectionName: string,
     id: string | number,
