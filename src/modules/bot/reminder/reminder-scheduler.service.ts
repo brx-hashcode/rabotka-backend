@@ -3,7 +3,7 @@ import { QueueService } from '../../../common/services/queue/queue.service';
 import { WHATSAPP_REMINDERS_QUEUE } from '../../../common/services/queue/queue.module';
 import type { ReminderJobData } from './reminder.processor';
 
-const SCAN_INTERVAL_MS = 15 * 60 * 1000; // 15 min
+const SCAN_INTERVAL_MS = 15 * 60 * 1000;
 
 @Injectable()
 export class ReminderSchedulerService implements OnModuleInit {
@@ -13,6 +13,7 @@ export class ReminderSchedulerService implements OnModuleInit {
 
   onModuleInit(): void {
     const queue = this.queueService.getQueue(WHATSAPP_REMINDERS_QUEUE);
+
     queue
       .add('scan', { type: 'scan' } as ReminderJobData, {
         repeat: {

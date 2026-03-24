@@ -79,6 +79,27 @@ export function formatReminder24h(params: {
   ].join('\n');
 }
 
+export function formatReminderStart(params: {
+  offerTitle: string;
+  scheduledAt: Date;
+  address: string;
+  employerName: string;
+  employerPhone: string;
+}): string {
+  return [
+    '*🚀 C\'EST L\'HEURE - VOTRE MISSION COMMENCE !*',
+    '',
+    `*Offre*: ${params.offerTitle}`,
+    `*Heure*: ${params.scheduledAt.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`,
+    `*Adresse*: ${params.address}`,
+    '',
+    `*Employeur*: ${params.employerName}`,
+    `*Contact*: ${params.employerPhone}`,
+    '',
+    '*Bonne mission ! Donnez le meilleur de vous-même 💪*',
+  ].join('\n');
+}
+
 export function formatReminder2h(params: {
   offerTitle: string;
   scheduledAt: Date;

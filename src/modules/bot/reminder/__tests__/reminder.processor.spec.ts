@@ -41,6 +41,7 @@ describe('ReminderProcessor', () => {
       application: {
         findMany: jest.fn().mockResolvedValue([]),
         findUnique: jest.fn().mockResolvedValue(null),
+        update: jest.fn().mockResolvedValue({}),
       },
       jobOffer: {
         findMany: jest.fn().mockResolvedValue([]),
@@ -79,6 +80,12 @@ describe('ReminderProcessor', () => {
       expect(whatsApp.sendTextMessage).toHaveBeenCalled();
     });
 
+    it('delegates to sendReminderStart for type=reminder_start', async () => {
+      prisma.application.findUnique.mockResolvedValue(buildApplication());
+      await processor.process({ data: { type: 'reminder_start', applicationId: 'app-1' } });
+      expect(whatsApp.sendTextMessage).toHaveBeenCalled();
+    });
+
     it('logs a warning for unknown job type', async () => {
       const warnSpy = jest.spyOn(Logger.prototype, 'warn');
       await processor.process({ data: { type: 'unknown' } as never });
@@ -92,7 +99,8 @@ describe('ReminderProcessor', () => {
     it('enqueues reminder_24h jobs for apps not yet notified', async () => {
       prisma.application.findMany
         .mockResolvedValueOnce([{ id: 'app-24h' }]) // 24h window
-        .mockResolvedValueOnce([]);                  // 2h window
+        .mockResolvedValueOnce([])                  // 2h window
+        .mockResolvedValueOnce([]);                 // start window
       redis.get.mockResolvedValue(null);
 
       await processor.process({ data: { type: 'scan' } });
@@ -107,6 +115,7 @@ describe('ReminderProcessor', () => {
     it('skips reminder_24h if redis key already set', async () => {
       prisma.application.findMany
         .mockResolvedValueOnce([{ id: 'app-24h' }])
+        .mockResolvedValueOnce([])
         .mockResolvedValueOnce([]);
       redis.get.mockResolvedValue('1');
 
@@ -117,7 +126,8 @@ describe('ReminderProcessor', () => {
     it('enqueues reminder_2h jobs for apps not yet notified', async () => {
       prisma.application.findMany
         .mockResolvedValueOnce([])                  // 24h window
-        .mockResolvedValueOnce([{ id: 'app-2h' }]); // 2h window
+        .mockResolvedValueOnce([{ id: 'app-2h' }]) // 2h window
+        .mockResolvedValueOnce([]);                 // start window
       redis.get.mockResolvedValue(null);
 
       await processor.process({ data: { type: 'scan' } });
@@ -127,6 +137,33 @@ describe('ReminderProcessor', () => {
         { type: 'reminder_2h', applicationId: 'app-2h' },
         { jobId: '2h-app-2h' },
       );
+    });
+
+    it('enqueues reminder_start jobs for apps whose scheduled_at just passed', async () => {
+      prisma.application.findMany
+        .mockResolvedValueOnce([])                    // 24h window
+        .mockResolvedValueOnce([])                    // 2h window
+        .mockResolvedValueOnce([{ id: 'app-start' }]); // start window
+      redis.get.mockResolvedValue(null);
+
+      await processor.process({ data: { type: 'scan' } });
+
+      expect(queueService.addJob).toHaveBeenCalledWith(
+        expect.any(String),
+        { type: 'reminder_start', applicationId: 'app-start' },
+        { jobId: 'start-app-start' },
+      );
+    });
+
+    it('skips reminder_start if redis key already set', async () => {
+      prisma.application.findMany
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{ id: 'app-start' }]);
+      redis.get.mockResolvedValue('1');
+
+      await processor.process({ data: { type: 'scan' } });
+      expect(queueService.addJob).not.toHaveBeenCalled();
     });
   });
 
@@ -144,7 +181,7 @@ describe('ReminderProcessor', () => {
           },
         ])
         .mockResolvedValueOnce([]); // no filled overdue
-      prisma.application.findMany.mockResolvedValue([]);
+      prisma.application.findMany.mockResolvedValue([] as never);
 
       await processor.process({ data: { type: 'scan' } });
 
@@ -166,7 +203,7 @@ describe('ReminderProcessor', () => {
             employer: { phone: '+2222', first_name: 'Alice', reliability_score: 100 },
           },
         ]);
-      prisma.application.findMany.mockResolvedValue([]);
+      prisma.application.findMany.mockResolvedValue([] as never);
 
       await processor.process({ data: { type: 'scan' } });
 
@@ -194,7 +231,7 @@ describe('ReminderProcessor', () => {
             employer: { phone: '+3333', first_name: 'Charlie', reliability_score: 51 },
           },
         ]);
-      prisma.application.findMany.mockResolvedValue([]);
+      prisma.application.findMany.mockResolvedValue([] as never);
 
       await processor.process({ data: { type: 'scan' } });
 
@@ -211,7 +248,7 @@ describe('ReminderProcessor', () => {
           { id: 'offer-3', title: 'No phone', employer_id: 'emp-3', employer: { phone: null, first_name: 'X' } },
         ])
         .mockResolvedValueOnce([]);
-      prisma.application.findMany.mockResolvedValue([]);
+      prisma.application.findMany.mockResolvedValue([] as never);
 
       await processor.process({ data: { type: 'scan' } });
       expect(whatsApp.sendTextMessage).not.toHaveBeenCalled();
@@ -228,7 +265,7 @@ describe('ReminderProcessor', () => {
             employer: { phone: '+4444', first_name: 'Dave', reliability_score: 80 },
           },
         ]);
-      prisma.application.findMany.mockResolvedValue([]);
+      prisma.application.findMany.mockResolvedValue([] as never);
       prisma.profile.update.mockRejectedValueOnce(new Error('DB error'));
       const warnSpy = jest.spyOn(Logger.prototype, 'warn');
 
@@ -240,7 +277,7 @@ describe('ReminderProcessor', () => {
 
     it('does nothing when there are no overdue offers', async () => {
       prisma.jobOffer.findMany.mockResolvedValue([]);
-      prisma.application.findMany.mockResolvedValue([]);
+      prisma.application.findMany.mockResolvedValue([] as never);
 
       await processor.process({ data: { type: 'scan' } });
       expect(prisma.jobOffer.updateMany).not.toHaveBeenCalled();
@@ -343,6 +380,63 @@ describe('ReminderProcessor', () => {
       );
 
       await processor.process({ data: { type: 'reminder_2h', applicationId: 'app-1' } });
+      expect(whatsApp.sendTextMessage).not.toHaveBeenCalled();
+    });
+  });
+
+  // ─── sendReminderStart() ──────────────────────────────────────────────────
+
+  describe('sendReminderStart()', () => {
+    it('marks application as STARTED, sends WhatsApp message and sets redis key', async () => {
+      prisma.application.findUnique.mockResolvedValue(buildApplication());
+      prisma.application.update = jest.fn().mockResolvedValue({});
+
+      await processor.process({ data: { type: 'reminder_start', applicationId: 'app-1' } });
+
+      expect(prisma.application.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'app-1' },
+          data: { status: ApplicationStatus.STARTED },
+        }),
+      );
+      expect(whatsApp.sendTextMessage).toHaveBeenCalledWith('+1234567890', expect.any(String));
+      expect(redis.set).toHaveBeenCalledWith(
+        expect.stringContaining('app-1'),
+        '1',
+        'EX',
+        expect.any(Number),
+      );
+    });
+
+    it('skips if redis key already set', async () => {
+      redis.get.mockResolvedValue('1');
+
+      await processor.process({ data: { type: 'reminder_start', applicationId: 'app-1' } });
+      expect(whatsApp.sendTextMessage).not.toHaveBeenCalled();
+    });
+
+    it('skips if application not found', async () => {
+      prisma.application.findUnique.mockResolvedValue(null);
+
+      await processor.process({ data: { type: 'reminder_start', applicationId: 'missing' } });
+      expect(whatsApp.sendTextMessage).not.toHaveBeenCalled();
+    });
+
+    it('skips if worker has no phone', async () => {
+      prisma.application.findUnique.mockResolvedValue(
+        buildApplication({ worker: { phone: null } }),
+      );
+
+      await processor.process({ data: { type: 'reminder_start', applicationId: 'app-1' } });
+      expect(whatsApp.sendTextMessage).not.toHaveBeenCalled();
+    });
+
+    it('skips if application status is not ACCEPTED', async () => {
+      prisma.application.findUnique.mockResolvedValue(
+        buildApplication({ status: ApplicationStatus.CANCELLED }),
+      );
+
+      await processor.process({ data: { type: 'reminder_start', applicationId: 'app-1' } });
       expect(whatsApp.sendTextMessage).not.toHaveBeenCalled();
     });
   });

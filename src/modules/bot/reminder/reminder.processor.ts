@@ -8,6 +8,7 @@ import { WHATSAPP_REMINDERS_QUEUE } from '../../../common/services/queue/queue.m
 import {
   formatReminder24h,
   formatReminder2h,
+  formatReminderStart,
 } from '../messages/notifications.messages';
 import { ApplicationStatus, JobOfferStatus } from '@prisma/client';
 import {
@@ -17,12 +18,15 @@ import {
 
 const REMINDER_24H_SENT_KEY = 'reminder:sent:24h:';
 const REMINDER_2H_SENT_KEY = 'reminder:sent:2h:';
+const REMINDER_START_SENT_KEY = 'reminder:sent:start:';
 const SENT_KEY_TTL = 48 * 60 * 60;
+const SCAN_INTERVAL_MS = 15 * 60 * 1000;
 
 export type ReminderJobData =
   | { type: 'scan' }
   | { type: 'reminder_24h'; applicationId: string }
-  | { type: 'reminder_2h'; applicationId: string };
+  | { type: 'reminder_2h'; applicationId: string }
+  | { type: 'reminder_start'; applicationId: string };
 
 @Injectable()
 export class ReminderProcessor {
@@ -51,6 +55,11 @@ export class ReminderProcessor {
 
     if (type === 'reminder_2h') {
       await this.sendReminder2h(job.data.applicationId);
+      return;
+    }
+
+    if (type === 'reminder_start') {
+      await this.sendReminderStart(job.data.applicationId);
       return;
     }
 
@@ -112,6 +121,33 @@ export class ReminderProcessor {
           WHATSAPP_REMINDERS_QUEUE,
           { type: 'reminder_2h', applicationId: app.id },
           { jobId: `2h-${app.id}` },
+        );
+      }
+    }
+
+    // "start" window: scheduled_at within the last 15 minutes (job is starting now)
+    const startWindowStart = new Date(now.getTime() - SCAN_INTERVAL_MS);
+    const appsStart = await this.prisma.application.findMany({
+      where: {
+        status: ApplicationStatus.ACCEPTED,
+        job_offer: {
+          scheduled_at: {
+            gte: startWindowStart,
+            lte: now,
+          },
+        },
+      },
+      select: { id: true },
+    });
+
+    for (const app of appsStart) {
+      const key = `${REMINDER_START_SENT_KEY}${app.id}`;
+      const sent = await this.redis.get(key);
+      if (!sent) {
+        await this.queueService.addJob<ReminderJobData>(
+          WHATSAPP_REMINDERS_QUEUE,
+          { type: 'reminder_start', applicationId: app.id },
+          { jobId: `start-${app.id}` },
         );
       }
     }
@@ -281,5 +317,41 @@ export class ReminderProcessor {
     await this.whatsApp.sendTextMessage(app.worker.phone, text);
     await this.redis.set(key, '1', 'EX', SENT_KEY_TTL);
     this.logger.log(`Reminder 2h sent for application ${applicationId}`);
+  }
+
+  private async sendReminderStart(applicationId: string): Promise<void> {
+    const key = `${REMINDER_START_SENT_KEY}${applicationId}`;
+    const sent = await this.redis.get(key);
+    if (sent) {
+      this.logger.debug(`Reminder start already sent for ${applicationId}`);
+      return;
+    }
+
+    const app = await this.prisma.application.findUnique({
+      where: { id: applicationId },
+      include: {
+        job_offer: { include: { employer: true } },
+        worker: true,
+      },
+    });
+
+    if (!app?.worker?.phone || app.status !== ApplicationStatus.ACCEPTED) return;
+
+    await this.prisma.application.update({
+      where: { id: applicationId },
+      data: { status: ApplicationStatus.STARTED },
+    });
+
+    const text = formatReminderStart({
+      offerTitle: app.job_offer.title,
+      scheduledAt: app.job_offer.scheduled_at,
+      address: app.job_offer.address,
+      employerName: `${app.job_offer.employer.first_name} ${app.job_offer.employer.last_name}`,
+      employerPhone: app.job_offer.employer.phone,
+    });
+
+    await this.whatsApp.sendTextMessage(app.worker.phone, text);
+    await this.redis.set(key, '1', 'EX', SENT_KEY_TTL);
+    this.logger.log(`Reminder start sent and application ${applicationId} marked as STARTED`);
   }
 }
