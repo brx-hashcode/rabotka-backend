@@ -47,7 +47,11 @@ const mockJobOfferService = {
   create: jest.fn(),
 } as unknown as jest.Mocked<JobOfferService>;
 
-const ctx = { jobOfferService: mockJobOfferService };
+const mockPaymentService = {
+  generateJobPostingPaymentLink: jest.fn().mockResolvedValue('https://pay.link/test'),
+};
+
+const ctx = { jobOfferService: mockJobOfferService, paymentService: mockPaymentService as any };
 
 beforeEach(() => jest.clearAllMocks());
 
@@ -397,7 +401,7 @@ describe('runPublishJobFlow()', () => {
       const state = makeState(9, fullPayload);
       const result = await runPublishJobFlow(state, '1', employerProfile, ctx);
       expect(result.clearState).toBe(true);
-      expect(result.reply[0]).toContain('publiée avec succès');
+      expect(result.reply[0]).toContain('Offre créée');
     });
 
     it('cancels when user inputs "3"', async () => {

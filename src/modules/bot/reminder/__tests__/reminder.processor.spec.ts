@@ -41,6 +41,7 @@ describe('ReminderProcessor', () => {
       application: {
         findMany: jest.fn().mockResolvedValue([]),
         findUnique: jest.fn().mockResolvedValue(null),
+        update: jest.fn().mockResolvedValue({}),
       },
       jobOffer: {
         findMany: jest.fn().mockResolvedValue([]),
