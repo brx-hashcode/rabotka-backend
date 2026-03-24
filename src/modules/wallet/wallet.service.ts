@@ -9,6 +9,7 @@ import {
   WalletTransactionType,
   PaymentStatus,
   PaymentType,
+  PaymentMethod,
 } from '@prisma/client';
 import { generatePaymentReference } from '../../common/utils/payment-reference';
 import type { PayPenaltyDto } from './dto/pay-penalty.dto';
@@ -102,6 +103,77 @@ export class WalletService {
     });
 
     return { reference };
+  }
+
+  async recordRegistrationPayment(
+    profileId: string,
+    amount: number,
+  ): Promise<void> {
+    const wallet = await this.getOrCreateSystemWallet();
+    const transactionId = generatePaymentReference();
+    await this.prisma.$transaction([
+      this.prisma.payment.create({
+        data: {
+          type: PaymentType.REGISTRATION,
+          profile_id: profileId,
+          amount,
+          payment_method: PaymentMethod.OTHER,
+          transaction_id: transactionId,
+          status: PaymentStatus.COMPLETED,
+          paid_at: new Date(),
+          description: `Account registration payment for profile ${profileId}`,
+        },
+      }),
+      this.prisma.walletTransaction.create({
+        data: {
+          wallet_id: wallet.id,
+          type: WalletTransactionType.CREDIT_REGISTRATION,
+          amount,
+          reference_type: 'profile',
+          reference_id: profileId,
+        },
+      }),
+      this.prisma.wallet.update({
+        where: { id: wallet.id },
+        data: { balance: { increment: amount } },
+      }),
+    ]);
+  }
+
+  async recordJobPostingPayment(
+    jobOfferId: string,
+    employerId: string,
+    amount: number,
+  ): Promise<void> {
+    const wallet = await this.getOrCreateSystemWallet();
+    const transactionId = generatePaymentReference();
+    await this.prisma.$transaction([
+      this.prisma.payment.create({
+        data: {
+          type: PaymentType.JOB_POSTING,
+          profile_id: employerId,
+          amount,
+          payment_method: PaymentMethod.OTHER,
+          transaction_id: transactionId,
+          status: PaymentStatus.COMPLETED,
+          paid_at: new Date(),
+          description: `Job posting fee for job offer ${jobOfferId}`,
+        },
+      }),
+      this.prisma.walletTransaction.create({
+        data: {
+          wallet_id: wallet.id,
+          type: WalletTransactionType.CREDIT_JOB_POSTING,
+          amount,
+          reference_type: 'job_offer',
+          reference_id: jobOfferId,
+        },
+      }),
+      this.prisma.wallet.update({
+        where: { id: wallet.id },
+        data: { balance: { increment: amount } },
+      }),
+    ]);
   }
 
   /**

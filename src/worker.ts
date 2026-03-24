@@ -14,6 +14,9 @@ import {
 import type { EmailJobData } from './common/services/queue/queue.service';
 import { ReminderProcessor } from './modules/bot/reminder/reminder.processor';
 import type { ReminderJobData } from './modules/bot/reminder/reminder.processor';
+import { PaymentProcessor } from './modules/payments/payment.processor';
+import type { PaymentJobData } from './modules/payments/payment.service';
+import { PAYMENT_QUEUE } from './common/services/queue/queue.module';
 
 loadEnv({ path: '.env.local' });
 loadEnv();
@@ -28,6 +31,7 @@ class WorkerLogger implements LoggerService {
     'NestFactory',
     'InstanceLoader',
     'ReminderProcessor',
+    'PaymentProcessor',
   ];
 
   log(message: string, context?: string) {
@@ -162,6 +166,13 @@ async function bootstrap(): Promise<void> {
       { concurrency: 2 },
     );
   }
+
+  const paymentProcessor = app.get(PaymentProcessor);
+  queueService.createWorker<PaymentJobData>(
+    PAYMENT_QUEUE,
+    (job) => paymentProcessor.process(job),
+    { concurrency: 5 },
+  );
 
   app.enableShutdownHooks();
 
