@@ -10,13 +10,13 @@ import { QueueService } from './common/services/queue/queue.service';
 import {
   EMAIL_QUEUE,
   WHATSAPP_REMINDERS_QUEUE,
+  PAYMENT_QUEUE,
 } from './common/services/queue/queue.module';
 import type { EmailJobData } from './common/services/queue/queue.service';
 import { ReminderProcessor } from './modules/bot/reminder/reminder.processor';
 import type { ReminderJobData } from './modules/bot/reminder/reminder.processor';
 import { PaymentProcessor } from './modules/payments/payment.processor';
 import type { PaymentJobData } from './modules/payments/payment.service';
-import { PAYMENT_QUEUE } from './common/services/queue/queue.module';
 
 loadEnv({ path: '.env.local' });
 loadEnv();
