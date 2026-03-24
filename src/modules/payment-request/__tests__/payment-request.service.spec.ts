@@ -9,6 +9,8 @@ import { WhatsAppService } from '../../whatsapp/whatsapp.service';
 import { LogService } from '../../log/log.service';
 import { ConfigService } from '@nestjs/config';
 import { MailService } from '../../mail/mail.service';
+import { PaymentService } from '../../payments/payment.service';
+import { SystemConfigService } from '../../system-config/system-config.service';
 import { PaymentRequestStatus } from '@prisma/client';
 
 const PROFILE_ID = 'profile-uuid-1';
@@ -85,6 +87,8 @@ describe('PaymentRequestService', () => {
         { provide: LogService, useValue: mockLog },
         { provide: ConfigService, useValue: mockConfig },
         { provide: MailService, useValue: { sendMail: jest.fn().mockResolvedValue(undefined), sendActivationEmail: jest.fn(), sendKycRejectedEmail: jest.fn(), sendKycApprovedEmail: jest.fn() } },
+        { provide: PaymentService, useValue: { makePayment: jest.fn().mockResolvedValue({ paymentId: 'pay-1' }) } },
+        { provide: SystemConfigService, useValue: { getRaw: jest.fn().mockResolvedValue('5000') } },
       ],
     }).compile();
 

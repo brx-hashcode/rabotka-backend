@@ -51,18 +51,22 @@ export class AuthService {
       : await this.findProfileByPhone(normalized);
 
     if (!profile) {
-      throw new NotFoundException('Aucun compte trouvé pour cet email ou téléphone');
+      throw new NotFoundException(
+        'Aucun compte trouvé pour cet email ou téléphone',
+      );
     }
 
     if (isPhone) {
-      const phoneProfile = profile as {
+      const phoneProfile = profile as unknown as {
         id: string;
         email: string;
         phone: string;
         whatsapp_connected: boolean;
       };
       if (!phoneProfile.whatsapp_connected) {
-        throw new BadRequestException("Ce numéro WhatsApp n'est pas encore vérifié. Veuillez utiliser votre adresse e-mail pour continuer.");
+        throw new BadRequestException(
+          "Ce numéro WhatsApp n'est pas encore vérifié. Veuillez utiliser votre adresse e-mail pour continuer.",
+        );
       }
     }
 
@@ -72,7 +76,11 @@ export class AuthService {
     await this.redis.set(redisKey, otp, 'EX', OTP_TTL_SECONDS);
 
     if (isEmail) {
-      await this.sendOtpByEmail(normalized, otp);
+      await this.sendOtpByEmail(
+        normalized,
+        otp,
+        profile.first_name ?? undefined,
+      );
     } else {
       await this.sendOtpByWhatsApp(normalized, otp);
     }
@@ -94,18 +102,22 @@ export class AuthService {
       : await this.findProfileByPhone(normalized);
 
     if (!profile) {
-      throw new NotFoundException('Aucun compte trouvé pour cet email ou téléphone');
+      throw new NotFoundException(
+        'Aucun compte trouvé pour cet email ou téléphone',
+      );
     }
 
     if (isPhone) {
-      const phoneProfile = profile as {
+      const phoneProfile = profile as unknown as {
         id: string;
         email: string;
         phone: string;
         whatsapp_connected: boolean;
       };
       if (!phoneProfile.whatsapp_connected) {
-        throw new BadRequestException("Ce numéro WhatsApp n'est pas encore vérifié. Veuillez utiliser votre adresse e-mail pour continuer.");
+        throw new BadRequestException(
+          "Ce numéro WhatsApp n'est pas encore vérifié. Veuillez utiliser votre adresse e-mail pour continuer.",
+        );
       }
     }
 
@@ -126,7 +138,11 @@ export class AuthService {
     await this.redis.set(resendCooldownKey, '1', 'EX', RESEND_COOLDOWN_SECONDS);
 
     if (isEmail) {
-      await this.sendOtpByEmail(normalized, otp);
+      await this.sendOtpByEmail(
+        normalized,
+        otp,
+        profile.first_name ?? undefined,
+      );
     } else {
       await this.sendOtpByWhatsApp(normalized, otp);
     }
@@ -145,7 +161,9 @@ export class AuthService {
     const storedOtp = await this.redis.get(redisKey);
 
     if (!storedOtp || storedOtp !== otp) {
-      throw new UnauthorizedException('Code de vérification invalide ou expiré');
+      throw new UnauthorizedException(
+        'Code de vérification invalide ou expiré',
+      );
     }
 
     const profile = isEmail
@@ -153,7 +171,9 @@ export class AuthService {
       : await this.findProfileByPhone(normalized);
 
     if (!profile) {
-      throw new NotFoundException('Aucun compte trouvé pour cet email ou téléphone');
+      throw new NotFoundException(
+        'Aucun compte trouvé pour cet email ou téléphone',
+      );
     }
 
     await this.redis.del(redisKey);
@@ -186,7 +206,7 @@ export class AuthService {
     const redisKey = `${ADMIN_OTP_KEY_PREFIX}${normalized}`;
     await this.redis.set(redisKey, otp, 'EX', OTP_TTL_SECONDS);
 
-    await this.sendOtpByEmail(normalized, otp);
+    await this.sendOtpByEmail(normalized, otp, user.first_name ?? undefined);
 
     return { success: true };
   }
@@ -224,7 +244,7 @@ export class AuthService {
     await this.redis.set(redisKey, otp, 'EX', OTP_TTL_SECONDS);
     await this.redis.set(resendCooldownKey, '1', 'EX', RESEND_COOLDOWN_SECONDS);
 
-    await this.sendOtpByEmail(normalized, otp);
+    await this.sendOtpByEmail(normalized, otp, user.first_name ?? undefined);
 
     return { success: true };
   }
@@ -243,7 +263,9 @@ export class AuthService {
     const storedOtp = await this.redis.get(redisKey);
 
     if (!storedOtp || storedOtp !== otp) {
-      throw new UnauthorizedException('Code de vérification invalide ou expiré');
+      throw new UnauthorizedException(
+        'Code de vérification invalide ou expiré',
+      );
     }
 
     const user = await this.findUserByEmail(normalized);
@@ -272,12 +294,19 @@ export class AuthService {
   async getAdminById(userId: string): Promise<{
     id: string;
     email: string;
-    name: string;
+    firstName: string;
+    lastName: string;
     role: string;
   }> {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, first_name: true, last_name: true, email: true, role: true },
+      select: {
+        id: true,
+        first_name: true,
+        last_name: true,
+        email: true,
+        role: true,
+      },
     });
     if (!user) {
       throw new NotFoundException('Aucun administrateur trouvé pour cet email');
@@ -285,7 +314,39 @@ export class AuthService {
     return {
       id: user.id,
       email: user.email,
-      name: `${user.first_name} ${user.last_name}`.trim(),
+      firstName: user.first_name,
+      lastName: user.last_name,
+      role: user.role,
+    };
+  }
+
+  async updateAdminById(
+    userId: string,
+    firstName: string,
+    lastName: string,
+  ): Promise<{
+    id: string;
+    email: string;
+    firstName: string;
+    lastName: string;
+    role: string;
+  }> {
+    const user = await this.prisma.user.update({
+      where: { id: userId },
+      data: { first_name: firstName, last_name: lastName },
+      select: {
+        id: true,
+        first_name: true,
+        last_name: true,
+        email: true,
+        role: true,
+      },
+    });
+    return {
+      id: user.id,
+      email: user.email,
+      firstName: user.first_name,
+      lastName: user.last_name,
       role: user.role,
     };
   }
@@ -312,29 +373,44 @@ export class AuthService {
   private async findProfileByEmail(email: string) {
     return this.prisma.profile.findUnique({
       where: { email },
-      select: { id: true, email: true, phone: true },
+      select: { id: true, email: true, phone: true, first_name: true },
     });
   }
 
   private async findProfileByPhone(phone: string) {
     return this.prisma.profile.findUnique({
       where: { phone },
-      select: { id: true, email: true, phone: true, whatsapp_connected: true },
+      select: {
+        id: true,
+        email: true,
+        phone: true,
+        first_name: true,
+        whatsapp_connected: true,
+      },
     });
   }
 
   private async findUserByEmail(email: string) {
     return this.prisma.user.findUnique({
       where: { email },
-      select: { id: true, email: true, is_active: true },
+      select: {
+        id: true,
+        email: true,
+        is_active: true,
+        first_name: true,
+      },
     });
   }
 
-  private async sendOtpByEmail(email: string, otp: string): Promise<void> {
+  private async sendOtpByEmail(
+    email: string,
+    otp: string,
+    first_name: string,
+  ): Promise<void> {
     await this.mailService.sendMail({
       to: email,
       subject: 'Votre code de vérification Rabotka',
-      html: sendOtpEmail(otp),
+      html: sendOtpEmail(otp, first_name),
     });
     this.logger.log(`OTP email sent to ${email}`);
   }

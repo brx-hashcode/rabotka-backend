@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Patch,
   Body,
   Res,
   Req,
@@ -312,15 +313,39 @@ export class AuthController {
       properties: {
         id: { type: 'string', format: 'uuid' },
         email: { type: 'string', format: 'email' },
-        name: { type: 'string' },
+        firstName: { type: 'string' },
+        lastName: { type: 'string' },
       },
     },
   })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   async getAdminMe(
     @Req() req: AdminAuthenticatedRequest,
-  ): Promise<{ id: string; email: string; name: string; role: string }> {
+  ): Promise<{ id: string; email: string; firstName: string; lastName: string; role: string }> {
     return this.authService.getAdminById(req.user.userId);
+  }
+
+  @Patch('admin/me')
+  @UseGuards(AdminAuthGuard)
+  @ApiOperation({ summary: 'Update current admin profile' })
+  @ApiCookieAuth()
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        firstName: { type: 'string' },
+        lastName: { type: 'string' },
+      },
+      required: ['firstName', 'lastName'],
+    },
+  })
+  @ApiResponse({ status: 200, description: 'Updated admin user' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async updateAdminMe(
+    @Req() req: AdminAuthenticatedRequest,
+    @Body() body: { firstName: string; lastName: string },
+  ): Promise<{ id: string; email: string; firstName: string; lastName: string; role: string }> {
+    return this.authService.updateAdminById(req.user.userId, body.firstName, body.lastName);
   }
 
   @Post('admin/logout')

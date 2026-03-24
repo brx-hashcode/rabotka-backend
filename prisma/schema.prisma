@@ -143,6 +143,8 @@ enum WalletOwnerType {
 enum WalletTransactionType {
   CREDIT_PENALTY
   CREDIT_COMMISSION
+  CREDIT_REGISTRATION
+  CREDIT_JOB_POSTING
 }
 
 enum PaymentRequestStatus {
