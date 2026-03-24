@@ -325,12 +325,14 @@ export class ApplicationService {
 
     const quantityNeeded = application.job_offer.quantity ?? 1;
     const newAcceptedCount = currentAcceptedCount + 1;
-    const offerStatus =
-      newAcceptedCount >= quantityNeeded
-        ? JobOfferStatus.FILLED
-        : newAcceptedCount > 0
-          ? JobOfferStatus.PARTIALLY_FILLED
-          : JobOfferStatus.ACTIVE;
+    let offerStatus: JobOfferStatus;
+    if (newAcceptedCount >= quantityNeeded) {
+      offerStatus = JobOfferStatus.FILLED;
+    } else if (newAcceptedCount > 0) {
+      offerStatus = JobOfferStatus.PARTIALLY_FILLED;
+    } else {
+      offerStatus = JobOfferStatus.ACTIVE;
+    }
 
     await this.prisma.$transaction([
       this.prisma.application.update({

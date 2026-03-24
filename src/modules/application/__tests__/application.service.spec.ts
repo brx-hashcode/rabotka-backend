@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { ApplicationService } from '../application.service';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
+import { BotNotificationService } from '../../bot/services/bot-notification.service';
 import {
   ApplicationStatus,
   JobOfferStatus,
@@ -95,6 +96,7 @@ describe('ApplicationService', () => {
         findMany: jest.fn(),
         create: jest.fn(),
         update: jest.fn(),
+        updateMany: jest.fn(),
         count: jest.fn(),
       },
       payment: { create: jest.fn() },
@@ -113,6 +115,17 @@ describe('ApplicationService', () => {
       providers: [
         ApplicationService,
         { provide: PrismaService, useValue: mockPrismaService },
+        {
+          provide: BotNotificationService,
+          useValue: {
+            sendNewApplicationToEmployer: jest.fn(),
+            sendApplicationAcceptedToWorker: jest.fn(),
+            sendApplicationRejectedToWorker: jest.fn(),
+            sendCancellationToEmployer: jest.fn(),
+            sendJobCompletedToWorker: jest.fn(),
+            sendJobCancelledByEmployerToWorker: jest.fn(),
+          },
+        },
       ],
     }).compile();
 
@@ -321,15 +334,15 @@ describe('ApplicationService', () => {
   });
 
   describe('markJobCompleted()', () => {
-    beforeEach(() => {
+    const setupMock = (status: ApplicationStatus) => {
       (prisma.application.findUnique as jest.Mock).mockResolvedValue({
         ...mockApplication,
-        status: ApplicationStatus.ACCEPTED,
+        status,
       });
       (prisma.$transaction as jest.Mock).mockResolvedValue([]);
       jest.spyOn(service, 'findById').mockResolvedValue({
         ...mockApplication,
-        status: ApplicationStatus.ACCEPTED,
+        status: ApplicationStatus.END,
         job_offer: {
           ...mockJobOffer,
           status: JobOfferStatus.COMPLETED,
@@ -339,12 +352,34 @@ describe('ApplicationService', () => {
         } as any,
         worker: mockApplication.worker as any,
       } as any);
-    });
+    };
 
-    it('marks offer as COMPLETED and creates payment record', async () => {
+    it('marks offer as COMPLETED when application is ACCEPTED', async () => {
+      setupMock(ApplicationStatus.ACCEPTED);
       const result = await service.markJobCompleted(APPLICATION_ID, EMPLOYER_ID);
       expect(prisma.$transaction).toHaveBeenCalled();
       expect(result.job_offer.status).toBe(JobOfferStatus.COMPLETED);
+    });
+
+    it('marks offer as COMPLETED when application is STARTED', async () => {
+      setupMock(ApplicationStatus.STARTED);
+      const result = await service.markJobCompleted(APPLICATION_ID, EMPLOYER_ID);
+      expect(prisma.$transaction).toHaveBeenCalled();
+      expect(result.job_offer.status).toBe(JobOfferStatus.COMPLETED);
+    });
+
+    it('sets applications to END status inside transaction', async () => {
+      setupMock(ApplicationStatus.ACCEPTED);
+      await service.markJobCompleted(APPLICATION_ID, EMPLOYER_ID);
+      expect(prisma.application.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            job_offer_id: JOB_OFFER_ID,
+            status: { in: [ApplicationStatus.ACCEPTED, ApplicationStatus.STARTED] },
+          }),
+          data: { status: ApplicationStatus.END },
+        }),
+      );
     });
   });
 });
