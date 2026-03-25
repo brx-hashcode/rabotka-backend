@@ -45,9 +45,9 @@ export class ClaimController {
   }
 
   @Delete(':id')
-  @HttpCode(HttpStatus.NO_CONTENT)
-  delete(@Param('id') id: string) {
-    return this.claimService.deleteForAdmin(id);
+  async delete(@Param('id') id: string) {
+    await this.claimService.deleteForAdmin(id);
+    return { success: true };
   }
 }
 
@@ -67,8 +67,8 @@ export class ClaimCommentController {
   }
 
   @Delete(':commentId')
-  @HttpCode(HttpStatus.NO_CONTENT)
-  remove(@Param('claimId') claimId: string, @Param('commentId') commentId: string) {
-    return this.claimService.deleteComment(claimId, commentId);
+  async remove(@Param('claimId') claimId: string, @Param('commentId') commentId: string) {
+    await this.claimService.deleteComment(claimId, commentId);
+    return { success: true };
   }
 }
