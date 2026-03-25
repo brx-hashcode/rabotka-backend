@@ -20,11 +20,22 @@ export function eventUpdatedEmail(
   title: string,
   startDate: string,
   endDate: string,
+  description?: string | null,
   location?: string | null,
 ): string {
   const date = formatDate(startDate);
   const start = formatTime(startDate);
   const end = formatTime(endDate);
+
+  const descriptionLine = description
+    ? `
+      <tr>
+        <td style="padding: 10px 0; border-bottom: 1px solid #f0f0f0;">
+          <span style="color: #888; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px;">Description</span><br/>
+          <span style="font-size: 15px; color: #222;">${escapeHtml(description)}</span>
+        </td>
+      </tr>`
+    : '';
 
   const locationLine = location
     ? `
@@ -56,6 +67,7 @@ export function eventUpdatedEmail(
           </td>
         </tr>
         ${locationLine}
+        ${descriptionLine}
       </table>
     </div>
 

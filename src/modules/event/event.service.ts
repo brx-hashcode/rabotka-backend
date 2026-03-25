@@ -114,6 +114,7 @@ export class EventService {
         dto.title,
         startDate,
         endDate,
+        dto.description,
         dto.location,
       );
     }
@@ -124,6 +125,7 @@ export class EventService {
         dto.title,
         startDate,
         endDate,
+        dto.description,
         dto.location,
       );
     }
@@ -174,6 +176,7 @@ export class EventService {
           title,
           startDate,
           endDate,
+          mapped.description,
           location,
         );
       }
@@ -184,6 +187,7 @@ export class EventService {
           title,
           startDate,
           endDate,
+          mapped.description,
           location,
         );
       }
