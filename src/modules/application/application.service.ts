@@ -72,6 +72,7 @@ export type AdminApplicationDetailResponse = AdminApplicationListItem & {
   workerReliabilityScore: number | null;
   employerPhone: string;
   penalties: AdminApplicationPenaltyItem[];
+  completionNote: string | null;
 };
 
 export type ApplicationListItem = {
@@ -576,6 +577,7 @@ export class ApplicationService {
   async markJobCompleted(
     applicationId: string,
     employerId: string,
+    note?: string,
   ): Promise<ApplicationWithOffer> {
     const application = await this.prisma.application.findUnique({
       where: { id: applicationId },
@@ -613,7 +615,7 @@ export class ApplicationService {
       });
       await tx.assignment.updateMany({
         where: { application_id: applicationId },
-        data: { status: AssignmentStatus.COMPLETED, completed_at: now },
+        data: { status: AssignmentStatus.COMPLETED, completed_at: now, note: note ?? null },
       });
       await tx.payment.create({
         data: {
@@ -881,6 +883,9 @@ export class ApplicationService {
         penalties: {
           orderBy: { created_at: 'desc' },
         },
+        assignment: {
+          select: { note: true },
+        },
       },
     });
 
@@ -930,6 +935,7 @@ export class ApplicationService {
         appliedAt: p.applied_at.toISOString(),
         paidAt: p.paid_at?.toISOString() ?? null,
       })),
+      completionNote: (app as any).assignment?.note ?? null,
     };
   }
 
