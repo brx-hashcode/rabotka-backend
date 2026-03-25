@@ -72,6 +72,7 @@ export type AdminApplicationDetailResponse = AdminApplicationListItem & {
   workerReliabilityScore: number | null;
   employerPhone: string;
   penalties: AdminApplicationPenaltyItem[];
+  completionNote: string | null;
 };
 
 export type ApplicationListItem = {
@@ -882,6 +883,9 @@ export class ApplicationService {
         penalties: {
           orderBy: { created_at: 'desc' },
         },
+        assignment: {
+          select: { note: true },
+        },
       },
     });
 
@@ -931,6 +935,7 @@ export class ApplicationService {
         appliedAt: p.applied_at.toISOString(),
         paidAt: p.paid_at?.toISOString() ?? null,
       })),
+      completionNote: (app as any).assignment?.note ?? null,
     };
   }
 
