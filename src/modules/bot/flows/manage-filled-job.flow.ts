@@ -165,7 +165,9 @@ async function handleNoteStep(
   ctx: ManageFilledJobContext,
   profile: BotProfile,
 ): Promise<FlowResult> {
-  const selectedItem = state.payload?.selectedItem as FilledJobListItem | undefined;
+  const selectedItem = state.payload?.selectedItem as
+    | FilledJobListItem
+    | undefined;
   const applicationId = selectedItem?.applicationId;
   if (!applicationId || !selectedItem) {
     return { reply: ["*ERREUR. TAPEZ 'MENU'.*"], clearState: true };
@@ -228,7 +230,7 @@ export async function runManageFilledJobFlow(
   const payload = state.payload ?? {};
   const items = (payload.items as FilledJobListItem[]) ?? [];
   const pageIndex = (payload.pageIndex as number) ?? 0;
-  const step = (payload.step as 'list' | 'detail') ?? 'list';
+  const step = (payload.step as 'list' | 'detail' | 'note') ?? 'list';
   const selectedItem = payload.selectedItem as FilledJobListItem | undefined;
   const trimmed = input.trim();
   const normalized = trimmed.toLowerCase();
