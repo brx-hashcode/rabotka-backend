@@ -16,6 +16,7 @@ import { ClaimService } from './claim.service';
 import { CreateClaimDto } from './dto/create-claim.dto';
 import { UpdateClaimDto } from './dto/update-claim.dto';
 import { AdminListClaimsDto } from './dto/admin-list-claims.dto';
+import { CreateCommentDto } from './dto/create-comment.dto';
 import { AdminAuthGuard } from '../auth/guards/admin-auth.guard';
 
 @Controller('admin/claims')
@@ -47,5 +48,27 @@ export class ClaimController {
   @HttpCode(HttpStatus.NO_CONTENT)
   delete(@Param('id') id: string) {
     return this.claimService.deleteForAdmin(id);
+  }
+}
+
+@Controller('admin/claims/:claimId/comments')
+@UseGuards(AdminAuthGuard)
+export class ClaimCommentController {
+  constructor(private readonly claimService: ClaimService) {}
+
+  @Get()
+  list(@Param('claimId') claimId: string) {
+    return this.claimService.listComments(claimId);
+  }
+
+  @Post()
+  add(@Param('claimId') claimId: string, @Req() req: any, @Body() dto: CreateCommentDto) {
+    return this.claimService.addComment(claimId, req.user.userId, dto);
+  }
+
+  @Delete(':commentId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  remove(@Param('claimId') claimId: string, @Param('commentId') commentId: string) {
+    return this.claimService.deleteComment(claimId, commentId);
   }
 }
