@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
+import { NotificationService } from '../notification/notification.service';
 import { CreateEventDto } from './dto/create-event.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
 import { ListEventsDto } from './dto/list-events.dto';
@@ -7,9 +8,9 @@ import { ListEventsDto } from './dto/list-events.dto';
 const eventInclude = {
   created_by: { select: { id: true, first_name: true, last_name: true } },
   profiles: {
-    select: { id: true, first_name: true, last_name: true, avatar_url: true },
+    select: { id: true, first_name: true, last_name: true, avatar_url: true, email: true },
   },
-  assigned_users: { select: { id: true, first_name: true, last_name: true } },
+  assigned_users: { select: { id: true, first_name: true, last_name: true, email: true } },
 } as const;
 
 function parseIsoDate(value: unknown): Date | undefined {
@@ -38,6 +39,7 @@ function mapEvent(event: any) {
     profiles: event.profiles.map((p: any) => ({
       id: p.id,
       name: `${p.first_name} ${p.last_name}`.trim(),
+      avatarUrl: p.avatar_url ?? null,
     })),
     assignedUsers: event.assigned_users.map((u: any) => ({
       id: u.id,
@@ -49,7 +51,10 @@ function mapEvent(event: any) {
 
 @Injectable()
 export class EventService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notification: NotificationService,
+  ) {}
 
   async list(dto: ListEventsDto) {
     const page = dto.page ?? 1;
@@ -97,22 +102,51 @@ export class EventService {
       },
       include: eventInclude,
     });
-    return mapEvent(event);
+
+    const mapped = mapEvent(event);
+    const startDate = mapped.startDate;
+    const endDate = mapped.endDate;
+
+    for (const p of event.profiles) {
+      void this.notification.notifyEventCreated(
+        p.email,
+        `${p.first_name} ${p.last_name}`.trim(),
+        dto.title,
+        startDate,
+        endDate,
+        dto.location,
+      );
+    }
+    for (const u of event.assigned_users) {
+      void this.notification.notifyEventCreated(
+        u.email,
+        `${u.first_name} ${u.last_name}`.trim(),
+        dto.title,
+        startDate,
+        endDate,
+        dto.location,
+      );
+    }
+
+    return mapped;
   }
 
   async update(id: number, dto: UpdateEventDto) {
-    await this.findOne(id);
+    const existing = await this.findOne(id);
+    const datesChanged =
+      (dto.startDate !== undefined && dto.startDate !== existing.startDate) ||
+      (dto.endDate !== undefined && dto.endDate !== existing.endDate);
 
-    const startDate = parseIsoDate(dto.startDate);
-    const endDate = parseIsoDate(dto.endDate);
+    const newStartDate = parseIsoDate(dto.startDate);
+    const newEndDate = parseIsoDate(dto.endDate);
 
     const event = await this.prisma.event.update({
       where: { id },
       data: {
         ...(dto.title !== undefined && { title: dto.title }),
         ...(dto.description !== undefined && { description: dto.description }),
-        ...(startDate !== undefined && { start_date: startDate }),
-        ...(endDate !== undefined && { end_date: endDate }),
+        ...(newStartDate !== undefined && { start_date: newStartDate }),
+        ...(newEndDate !== undefined && { end_date: newEndDate }),
         ...(dto.color !== undefined && { color: dto.color }),
         ...(dto.location !== undefined && { location: dto.location }),
         ...(dto.profileIds !== undefined && {
@@ -124,7 +158,38 @@ export class EventService {
       },
       include: eventInclude,
     });
-    return mapEvent(event);
+
+    const mapped = mapEvent(event);
+
+    if (datesChanged) {
+      const startDate = mapped.startDate;
+      const endDate = mapped.endDate;
+      const title = mapped.title;
+      const location = mapped.location;
+
+      for (const p of event.profiles) {
+        void this.notification.notifyEventUpdated(
+          p.email,
+          `${p.first_name} ${p.last_name}`.trim(),
+          title,
+          startDate,
+          endDate,
+          location,
+        );
+      }
+      for (const u of event.assigned_users) {
+        void this.notification.notifyEventUpdated(
+          u.email,
+          `${u.first_name} ${u.last_name}`.trim(),
+          title,
+          startDate,
+          endDate,
+          location,
+        );
+      }
+    }
+
+    return mapped;
   }
 
   async remove(id: number) {
