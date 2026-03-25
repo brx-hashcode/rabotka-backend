@@ -51,7 +51,11 @@ export class NotificationService {
     });
   }
 
-  async notifyClaimCreated(to: string, name: string, title: string): Promise<void> {
+  async notifyClaimCreated(
+    to: string,
+    name: string,
+    title: string,
+  ): Promise<void> {
     await this.mail.sendMail({
       to,
       subject: 'Rabotka – Votre réclamation a été créée',
@@ -59,7 +63,11 @@ export class NotificationService {
     });
   }
 
-  async notifyClaimInProgress(to: string, name: string, title: string): Promise<void> {
+  async notifyClaimInProgress(
+    to: string,
+    name: string,
+    title: string,
+  ): Promise<void> {
     await this.mail.sendMail({
       to,
       subject: 'Rabotka – Votre réclamation est en cours de traitement',
@@ -67,7 +75,11 @@ export class NotificationService {
     });
   }
 
-  async notifyClaimCompleted(to: string, name: string, title: string): Promise<void> {
+  async notifyClaimCompleted(
+    to: string,
+    name: string,
+    title: string,
+  ): Promise<void> {
     await this.mail.sendMail({
       to,
       subject: 'Rabotka – Votre réclamation a été résolue',
@@ -75,7 +87,11 @@ export class NotificationService {
     });
   }
 
-  async notifyClaimRejected(to: string, name: string, title: string): Promise<void> {
+  async notifyClaimRejected(
+    to: string,
+    name: string,
+    title: string,
+  ): Promise<void> {
     await this.mail.sendMail({
       to,
       subject: 'Rabotka – Votre réclamation a été rejetée',
@@ -83,7 +99,11 @@ export class NotificationService {
     });
   }
 
-  async notifyClaimAssigned(to: string, adminName: string, title: string): Promise<void> {
+  async notifyClaimAssigned(
+    to: string,
+    adminName: string,
+    title: string,
+  ): Promise<void> {
     await this.mail.sendMail({
       to,
       subject: 'Rabotka – Une réclamation vous a été assignée',
@@ -91,10 +111,14 @@ export class NotificationService {
     });
   }
 
-  async notifyClaimUnassigned(to: string, adminName: string, title: string): Promise<void> {
+  async notifyClaimUnassigned(
+    to: string,
+    adminName: string,
+    title: string,
+  ): Promise<void> {
     await this.mail.sendMail({
       to,
-      subject: 'Rabotka – Vous avez été retiré d\'une réclamation',
+      subject: "Rabotka – Vous avez été retiré d'une réclamation",
       html: claimUnassignedEmail(adminName, title),
     });
   }
@@ -105,12 +129,20 @@ export class NotificationService {
     title: string,
     startDate: string,
     endDate: string,
+    description?: string | null,
     location?: string | null,
   ): Promise<void> {
     await this.mail.sendMail({
       to,
       subject: `Rabotka – Nouvel événement : ${title}`,
-      html: eventCreatedEmail(name, title, startDate, endDate, location),
+      html: eventCreatedEmail(
+        name,
+        title,
+        startDate,
+        endDate,
+        description,
+        location,
+      ),
     });
   }
 
@@ -120,12 +152,20 @@ export class NotificationService {
     title: string,
     startDate: string,
     endDate: string,
+    description?: string | null,
     location?: string | null,
   ): Promise<void> {
     await this.mail.sendMail({
       to,
       subject: `Rabotka – Mise à jour de l'événement : ${title}`,
-      html: eventUpdatedEmail(name, title, startDate, endDate, location),
+      html: eventUpdatedEmail(
+        name,
+        title,
+        startDate,
+        endDate,
+        description,
+        location,
+      ),
     });
   }
 }
