@@ -7,3 +7,8 @@ export { kycApprovedEmail } from './kyc-approved';
 export { kycRejectedEmail } from './kyc-rejected';
 export { paymentRejectedEmail } from './payment-rejected';
 export { accountSuspendedEmail } from './account-suspended';
+export { claimCreatedEmail } from './claim-created';
+export { claimInProgressEmail } from './claim-in-progress';
+export { claimCompletedEmail } from './claim-completed';
+export { claimRejectedEmail } from './claim-rejected';
+export { claimAssignedEmail } from './claim-assigned';

@@ -1,11 +1,12 @@
 import { Module } from '@nestjs/common';
-import { ClaimController } from './claim.controller';
+import { ClaimController, ClaimCommentController } from './claim.controller';
 import { ClaimService } from './claim.service';
 import { AuthModule } from '../auth/auth.module';
+import { NotificationModule } from '../notification/notification.module';
 
 @Module({
-  imports: [AuthModule],
-  controllers: [ClaimController],
+  imports: [AuthModule, NotificationModule],
+  controllers: [ClaimController, ClaimCommentController],
   providers: [ClaimService],
   exports: [ClaimService],
 })
