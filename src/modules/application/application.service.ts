@@ -576,6 +576,7 @@ export class ApplicationService {
   async markJobCompleted(
     applicationId: string,
     employerId: string,
+    note?: string,
   ): Promise<ApplicationWithOffer> {
     const application = await this.prisma.application.findUnique({
       where: { id: applicationId },
@@ -613,7 +614,7 @@ export class ApplicationService {
       });
       await tx.assignment.updateMany({
         where: { application_id: applicationId },
-        data: { status: AssignmentStatus.COMPLETED, completed_at: now },
+        data: { status: AssignmentStatus.COMPLETED, completed_at: now, note: note ?? null },
       });
       await tx.payment.create({
         data: {

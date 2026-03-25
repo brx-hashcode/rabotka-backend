@@ -59,11 +59,13 @@ async function handleDetailComplete(
   selectedItem: FilledJobListItem,
   ctx: ManageFilledJobContext,
   profile: BotProfile,
+  note?: string,
 ): Promise<FlowResult> {
   try {
     const updated = await ctx.applicationService.markJobCompleted(
       applicationId,
       profile.id,
+      note,
     );
     await ctx.notificationService.sendJobCompletedToWorker(applicationId);
     const amount = updated.job_offer?.amount ?? selectedItem.amount;
@@ -132,8 +134,22 @@ async function handleDetailStep(
   }
 
   // After the !applicationId guard, selectedItem is guaranteed non-undefined
-  if (trimmed === '1')
-    return handleDetailComplete(applicationId, selectedItem, ctx, profile);
+  if (trimmed === '1') {
+    return {
+      reply: [
+        [
+          '*Laissez une note sur le worker (optionnel)*',
+          '',
+          'Envoyez votre commentaire, ou tapez *0* pour passer.',
+        ].join('\n'),
+      ],
+      nextState: {
+        ...state,
+        payload: { ...state.payload, step: 'note' },
+        updatedAt: new Date().toISOString(),
+      },
+    };
+  }
   if (trimmed === '2')
     return handleDetailCancel(applicationId, ctx, profile, state);
 
@@ -141,6 +157,21 @@ async function handleDetailStep(
     reply: [formatFilledJobDetail(selectedItem)],
     nextState: state,
   };
+}
+
+async function handleNoteStep(
+  state: BotState,
+  trimmed: string,
+  ctx: ManageFilledJobContext,
+  profile: BotProfile,
+): Promise<FlowResult> {
+  const selectedItem = state.payload?.selectedItem as FilledJobListItem | undefined;
+  const applicationId = selectedItem?.applicationId;
+  if (!applicationId || !selectedItem) {
+    return { reply: ["*ERREUR. TAPEZ 'MENU'.*"], clearState: true };
+  }
+  const note = trimmed === '0' ? undefined : trimmed;
+  return handleDetailComplete(applicationId, selectedItem, ctx, profile, note);
 }
 
 function handleListStep(
@@ -215,6 +246,10 @@ export async function runManageFilledJobFlow(
 
   if (trimmed === '4' && step === 'detail') {
     return { reply: [menuMessage(profile.profile_type)], clearState: true };
+  }
+
+  if (step === 'note') {
+    return handleNoteStep(state, trimmed, ctx, profile);
   }
 
   if (step === 'detail') {
