@@ -224,6 +224,7 @@ model Profile {
   verification_tokens VerificationToken[]
   claims               Claim[]  @relation("ClaimProfile")
   claims_created       Claim[]  @relation("ClaimCreatedByProfile")
+  events               Event[]  @relation("EventProfiles")
 
   @@index([email], name: "idx_profile_email")
   @@index([phone], name: "idx_profile_phone")
@@ -251,6 +252,8 @@ model User {
   claims_assigned  Claim[]  @relation("ClaimAssignedUser")
   claims_created   Claim[]  @relation("ClaimCreatedByUser")
   claim_comments   ClaimComment[] @relation("ClaimCommentUser")
+  events_created   Event[]  @relation("EventCreatedBy")
+  events           Event[]  @relation("EventAssignedUsers")
 
   @@index([email], name: "idx_user_email")
   @@index([role], name: "idx_user_role")
@@ -592,4 +595,25 @@ model ClaimComment {
 
   @@index([claim_id])
   @@map("claim_comments")
+}
+
+model Event {
+  id             Int       @id @default(autoincrement())
+  created_at     DateTime  @default(now())
+  updated_at     DateTime  @updatedAt
+  title          String
+  description    String    @db.Text
+  start_date     DateTime
+  end_date       DateTime
+  color          String
+  location       String?
+  created_by_id  String    @db.Uuid
+
+  created_by     User      @relation("EventCreatedBy", fields: [created_by_id], references: [id], onDelete: Cascade)
+  profiles       Profile[] @relation("EventProfiles")
+  assigned_users User[]    @relation("EventAssignedUsers")
+
+  @@index([created_by_id], name: "idx_event_created_by")
+  @@index([start_date], name: "idx_event_start_date")
+  @@map("events")
 }
