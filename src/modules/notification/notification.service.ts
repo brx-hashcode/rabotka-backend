@@ -10,6 +10,7 @@ import {
   claimCompletedEmail,
   claimRejectedEmail,
   claimAssignedEmail,
+  claimUnassignedEmail,
 } from '../mail/templates';
 
 @Injectable()
@@ -85,6 +86,14 @@ export class NotificationService {
       to,
       subject: 'Rabotka – Une réclamation vous a été assignée',
       html: claimAssignedEmail(adminName, title),
+    });
+  }
+
+  async notifyClaimUnassigned(to: string, adminName: string, title: string): Promise<void> {
+    await this.mail.sendMail({
+      to,
+      subject: 'Rabotka – Vous avez été retiré d\'une réclamation',
+      html: claimUnassignedEmail(adminName, title),
     });
   }
 }

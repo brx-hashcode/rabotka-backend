@@ -241,23 +241,35 @@ export class ClaimService {
       }
     }
 
-    if (
-      'assigned_user_id' in dto &&
-      dto.assigned_user_id &&
-      dto.assigned_user_id !== exists.assigned_user_id
-    ) {
-      const adminUser = await this.prisma.user.findUnique({
-        where: { id: dto.assigned_user_id },
-        select: { email: true, first_name: true, last_name: true },
-      });
-      if (adminUser?.email) {
-        void this.notifications
-          .notifyClaimAssigned(
-            adminUser.email,
-            `${adminUser.first_name} ${adminUser.last_name}`,
-            exists.title,
-          )
-          .catch(() => {});
+    if ('assigned_user_id' in dto && dto.assigned_user_id !== exists.assigned_user_id) {
+      if (dto.assigned_user_id) {
+        const adminUser = await this.prisma.user.findUnique({
+          where: { id: dto.assigned_user_id },
+          select: { email: true, first_name: true, last_name: true },
+        });
+        if (adminUser?.email) {
+          void this.notifications
+            .notifyClaimAssigned(
+              adminUser.email,
+              `${adminUser.first_name} ${adminUser.last_name}`,
+              exists.title,
+            )
+            .catch(() => {});
+        }
+      } else if (exists.assigned_user_id) {
+        const previousUser = await this.prisma.user.findUnique({
+          where: { id: exists.assigned_user_id },
+          select: { email: true, first_name: true, last_name: true },
+        });
+        if (previousUser?.email) {
+          void this.notifications
+            .notifyClaimUnassigned(
+              previousUser.email,
+              `${previousUser.first_name} ${previousUser.last_name}`,
+              exists.title,
+            )
+            .catch(() => {});
+        }
       }
     }
 

@@ -12,3 +12,4 @@ export { claimInProgressEmail } from './claim-in-progress';
 export { claimCompletedEmail } from './claim-completed';
 export { claimRejectedEmail } from './claim-rejected';
 export { claimAssignedEmail } from './claim-assigned';
+export { claimUnassignedEmail } from './claim-unassigned';
