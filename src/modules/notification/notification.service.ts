@@ -11,6 +11,8 @@ import {
   claimRejectedEmail,
   claimAssignedEmail,
   claimUnassignedEmail,
+  eventCreatedEmail,
+  eventUpdatedEmail,
 } from '../mail/templates';
 
 @Injectable()
@@ -94,6 +96,36 @@ export class NotificationService {
       to,
       subject: 'Rabotka – Vous avez été retiré d\'une réclamation',
       html: claimUnassignedEmail(adminName, title),
+    });
+  }
+
+  async notifyEventCreated(
+    to: string,
+    name: string,
+    title: string,
+    startDate: string,
+    endDate: string,
+    location?: string | null,
+  ): Promise<void> {
+    await this.mail.sendMail({
+      to,
+      subject: `Rabotka – Nouvel événement : ${title}`,
+      html: eventCreatedEmail(name, title, startDate, endDate, location),
+    });
+  }
+
+  async notifyEventUpdated(
+    to: string,
+    name: string,
+    title: string,
+    startDate: string,
+    endDate: string,
+    location?: string | null,
+  ): Promise<void> {
+    await this.mail.sendMail({
+      to,
+      subject: `Rabotka – Mise à jour de l'événement : ${title}`,
+      html: eventUpdatedEmail(name, title, startDate, endDate, location),
     });
   }
 }
