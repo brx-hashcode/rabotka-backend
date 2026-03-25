@@ -5,6 +5,11 @@ import {
   adminUpdatedEmail,
   sendOtpEmail,
   sendWelcomeEmail,
+  claimCreatedEmail,
+  claimInProgressEmail,
+  claimCompletedEmail,
+  claimRejectedEmail,
+  claimAssignedEmail,
 } from '../mail/templates';
 
 @Injectable()
@@ -40,6 +45,46 @@ export class NotificationService {
       to,
       subject: 'Votre code de vérification Rabotka',
       html: sendOtpEmail(code),
+    });
+  }
+
+  async notifyClaimCreated(to: string, name: string, title: string): Promise<void> {
+    await this.mail.sendMail({
+      to,
+      subject: 'Rabotka – Votre réclamation a été créée',
+      html: claimCreatedEmail(name, title),
+    });
+  }
+
+  async notifyClaimInProgress(to: string, name: string, title: string): Promise<void> {
+    await this.mail.sendMail({
+      to,
+      subject: 'Rabotka – Votre réclamation est en cours de traitement',
+      html: claimInProgressEmail(name, title),
+    });
+  }
+
+  async notifyClaimCompleted(to: string, name: string, title: string): Promise<void> {
+    await this.mail.sendMail({
+      to,
+      subject: 'Rabotka – Votre réclamation a été résolue',
+      html: claimCompletedEmail(name, title),
+    });
+  }
+
+  async notifyClaimRejected(to: string, name: string, title: string): Promise<void> {
+    await this.mail.sendMail({
+      to,
+      subject: 'Rabotka – Votre réclamation a été rejetée',
+      html: claimRejectedEmail(name, title),
+    });
+  }
+
+  async notifyClaimAssigned(to: string, adminName: string, title: string): Promise<void> {
+    await this.mail.sendMail({
+      to,
+      subject: 'Rabotka – Une réclamation vous a été assignée',
+      html: claimAssignedEmail(adminName, title),
     });
   }
 }

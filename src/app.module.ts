@@ -40,6 +40,7 @@ import { PaymentsModule } from './modules/payments/payment.module';
 import { KycModule } from './modules/kyc/kyc.module';
 import { SystemConfigModule } from './modules/system-config/system-config.module';
 import { QdrantModule } from './modules/qdrant/qdrant.module';
+import { ClaimModule } from './modules/claim/claim.module';
 import { StorageModule } from './common/services/storage/storage.module';
 import { ImageWatermarkModule } from './common/services/image-watermark/image-watermark.module';
 import { AppController } from './app.controller';
@@ -130,6 +131,7 @@ import { HttpExceptionFilter } from './common/filters/http-exception.filter';
     FileModule,
     LogModule,
     WalletModule,
+    ClaimModule,
     DashboardModule,
     PaymentsModule,
     KycModule,
