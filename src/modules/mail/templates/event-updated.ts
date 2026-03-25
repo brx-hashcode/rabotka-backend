@@ -27,52 +27,18 @@ export function eventUpdatedEmail(
   const start = formatTime(startDate);
   const end = formatTime(endDate);
 
-  const descriptionLine = description
-    ? `
-      <tr>
-        <td style="padding: 10px 0; border-bottom: 1px solid #f0f0f0;">
-          <span style="color: #888; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px;">Description</span><br/>
-          <span style="font-size: 15px; color: #222;">${escapeHtml(description)}</span>
-        </td>
-      </tr>`
-    : '';
-
-  const locationLine = location
-    ? `
-      <tr>
-        <td style="padding: 10px 0; border-bottom: 1px solid #f0f0f0;">
-          <span style="color: #888; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px;">Lieu</span><br/>
-          <span style="font-size: 15px; color: #222;">${escapeHtml(location)}</span>
-        </td>
-      </tr>`
-    : '';
-
   const body = `
-    <p style="font-size: 16px; color: #333;">Bonjour <strong>${escapeHtml(name)}</strong>,</p>
-    <p style="color: #555;">Les horaires de l'événement suivant ont été modifiés :</p>
+    <p>Bonjour <strong>${escapeHtml(name)}</strong>,</p>
+    <p>Les horaires de l'événement suivant ont été modifiés :</p>
 
-    <div style="background: #f9f9f9; border-left: 4px solid #f59e0b; border-radius: 6px; padding: 20px 24px; margin: 20px 0;">
-      <h2 style="margin: 0 0 16px 0; font-size: 20px; color: #111;">${escapeHtml(title)}</h2>
-      <table style="width: 100%; border-collapse: collapse;">
-        <tr>
-          <td style="padding: 10px 0; border-bottom: 1px solid #f0f0f0;">
-            <span style="color: #888; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px;">Nouvelle date</span><br/>
-            <span style="font-size: 15px; color: #222;">${escapeHtml(date)}</span>
-          </td>
-        </tr>
-        <tr>
-          <td style="padding: 10px 0; border-bottom: 1px solid #f0f0f0;">
-            <span style="color: #888; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px;">Nouvel horaire</span><br/>
-            <span style="font-size: 15px; color: #222;">${escapeHtml(start)} – ${escapeHtml(end)}</span>
-          </td>
-        </tr>
-        ${locationLine}
-        ${descriptionLine}
-      </table>
-    </div>
+    <p><strong>${escapeHtml(title)}</strong></p>
+    <p><strong>Nouvelle date :</strong> ${escapeHtml(date)}</p>
+    <p><strong>Nouvel horaire :</strong> ${escapeHtml(start)} – ${escapeHtml(end)}</p>
+    ${location ? `<p><strong>Lieu :</strong> ${escapeHtml(location)}</p>` : ''}
+    ${description ? `<p><strong>Description :</strong> ${escapeHtml(description)}</p>` : ''}
 
-    <p style="color: #555;">Merci de bien vouloir mettre à jour votre agenda.</p>
-    <p style="color: #333;">Cordialement,<br/><strong>L'équipe Rabotka</strong></p>
+    <p>Merci de bien vouloir mettre à jour votre agenda.</p>
+    <p>Cordialement,<br /><strong>L'équipe Rabotka</strong></p>
   `;
 
   return wrapEmailHtml(body, {
