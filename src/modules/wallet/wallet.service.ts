@@ -266,6 +266,18 @@ export class WalletService {
         { type: { contains: params.q, mode: 'insensitive' } },
         { reference_type: { contains: params.q, mode: 'insensitive' } },
         { reference_id: { contains: params.q, mode: 'insensitive' } },
+        {
+          wallet: {
+            profile: {
+              OR: [
+                { first_name: { contains: params.q, mode: 'insensitive' } },
+                { last_name: { contains: params.q, mode: 'insensitive' } },
+                { email: { contains: params.q, mode: 'insensitive' } },
+                { phone: { contains: params.q, mode: 'insensitive' } },
+              ],
+            },
+          },
+        },
       ];
     }
     if (params.type?.length) {

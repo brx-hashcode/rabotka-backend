@@ -154,6 +154,13 @@ enum PaymentRequestStatus {
   REJECTED
 }
 
+enum ClaimStatus {
+  CREATED
+  IN_PROGRESS
+  COMPLETED
+  REJECTED
+}
+
 enum ConfigCategory {
   TWILIO
   FEES
@@ -215,6 +222,8 @@ model Profile {
   wallets     Wallet[]
   assignments Assignment[]
   verification_tokens VerificationToken[]
+  claims               Claim[]  @relation("ClaimProfile")
+  claims_created       Claim[]  @relation("ClaimCreatedByProfile")
 
   @@index([email], name: "idx_profile_email")
   @@index([phone], name: "idx_profile_phone")
@@ -239,6 +248,8 @@ model User {
   logs             Log[]
   wallets          Wallet[]
   sent_messages    Message[]
+  claims_assigned  Claim[]  @relation("ClaimAssignedUser")
+  claims_created   Claim[]  @relation("ClaimCreatedByUser")
 
   @@index([email], name: "idx_user_email")
   @@index([role], name: "idx_user_role")
@@ -540,4 +551,28 @@ model PaymentRequest {
   @@index([token], name: "idx_payment_request_token")
   @@index([status], name: "idx_payment_request_status")
   @@map("payment_requests")
+}
+
+model Claim {
+  id                    String      @id @default(uuid()) @db.Uuid
+  created_at            DateTime    @default(now())
+  updated_at            DateTime    @updatedAt
+  title                 String
+  description           String      @db.Text
+  status                ClaimStatus @default(CREATED)
+  attachment_urls       String[]    @default([])
+  profile_id            String      @db.Uuid
+  assigned_user_id      String?     @db.Uuid
+  created_by_user_id    String?     @db.Uuid
+  created_by_profile_id String?     @db.Uuid
+
+  profile            Profile  @relation("ClaimProfile", fields: [profile_id], references: [id], onDelete: Cascade)
+  assigned_user      User?    @relation("ClaimAssignedUser", fields: [assigned_user_id], references: [id], onDelete: SetNull)
+  created_by_user    User?    @relation("ClaimCreatedByUser", fields: [created_by_user_id], references: [id], onDelete: SetNull)
+  created_by_profile Profile? @relation("ClaimCreatedByProfile", fields: [created_by_profile_id], references: [id], onDelete: SetNull)
+
+  @@index([profile_id])
+  @@index([status])
+  @@index([assigned_user_id])
+  @@map("claims")
 }
