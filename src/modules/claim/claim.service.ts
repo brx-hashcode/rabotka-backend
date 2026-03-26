@@ -34,6 +34,9 @@ export type AdminClaimCommentItem = {
   content: string;
   userId: string | null;
   userName: string | null;
+  profileId: string | null;
+  profileName: string | null;
+  createdByType: 'user' | 'profile';
   createdAt: string;
   updatedAt: string;
 };
@@ -76,6 +79,11 @@ function mapComment(c: any): AdminClaimCommentItem {
     content: c.content,
     userId: c.user_id,
     userName: c.user ? `${c.user.first_name} ${c.user.last_name}` : null,
+    profileId: c.profile_id,
+    profileName: c.profile
+      ? `${c.profile.first_name} ${c.profile.last_name}`
+      : null,
+    createdByType: c.created_by_type || 'user',
     createdAt: c.created_at.toISOString(),
     updatedAt: c.updated_at.toISOString(),
   };
@@ -114,7 +122,7 @@ export class ClaimService {
       data: {
         title: dto.title,
         description: dto.description,
-        profile_id: dto.profile_id,
+        profile_id: dto.profile_id as string,
         attachment_urls: dto.attachment_urls ?? [],
         assigned_user_id: dto.assigned_user_id ?? null,
         created_by_user_id: userId,
@@ -241,7 +249,10 @@ export class ClaimService {
       }
     }
 
-    if ('assigned_user_id' in dto && dto.assigned_user_id !== exists.assigned_user_id) {
+    if (
+      'assigned_user_id' in dto &&
+      dto.assigned_user_id !== exists.assigned_user_id
+    ) {
       if (dto.assigned_user_id) {
         const adminUser = await this.prisma.user.findUnique({
           where: { id: dto.assigned_user_id },
@@ -292,8 +303,16 @@ export class ClaimService {
     });
     if (!exists) throw new NotFoundException('Claim not found');
     const comment = await this.prisma.claimComment.create({
-      data: { claim_id: claimId, content: dto.content, user_id: userId },
-      include: { user: { select: { first_name: true, last_name: true } } },
+      data: {
+        claim_id: claimId,
+        content: dto.content,
+        user_id: userId,
+        created_by_type: 'user',
+      },
+      include: {
+        user: { select: { first_name: true, last_name: true } },
+        profile: { select: { first_name: true, last_name: true } },
+      },
     });
     return mapComment(comment);
   }
@@ -301,13 +320,158 @@ export class ClaimService {
   async listComments(claimId: string): Promise<AdminClaimCommentItem[]> {
     const comments = await this.prisma.claimComment.findMany({
       where: { claim_id: claimId },
-      include: { user: { select: { first_name: true, last_name: true } } },
+      include: {
+        user: { select: { first_name: true, last_name: true } },
+        profile: { select: { first_name: true, last_name: true } },
+      },
       orderBy: { created_at: 'asc' },
     });
     return comments.map(mapComment);
   }
 
   async deleteComment(claimId: string, commentId: string): Promise<void> {
+    const comment = await this.prisma.claimComment.findFirst({
+      where: { id: commentId, claim_id: claimId },
+    });
+    if (!comment) throw new NotFoundException('Comment not found');
+    await this.prisma.claimComment.delete({ where: { id: commentId } });
+  }
+
+  async createForProfile(
+    profileId: string,
+    dto: CreateClaimDto,
+  ): Promise<AdminClaimItem> {
+    const claim = await this.prisma.claim.create({
+      data: {
+        title: dto.title,
+        description: dto.description,
+        profile_id: profileId,
+        attachment_urls: dto.attachment_urls ?? [],
+        assigned_user_id: dto.assigned_user_id ?? null,
+      },
+      include: claimInclude,
+    });
+
+    const profile = await this.prisma.profile.findUnique({
+      where: { id: profileId },
+      select: { email: true, first_name: true, last_name: true },
+    });
+    if (profile?.email) {
+      void this.notifications
+        .notifyClaimCreated(
+          profile.email,
+          `${profile.first_name} ${profile.last_name}`,
+          dto.title,
+        )
+        .catch(() => {});
+    }
+
+    return mapClaim(claim);
+  }
+
+  async listForProfile(profileId: string): Promise<{
+    data: AdminClaimItem[];
+    total: number;
+    page: number;
+    limit: number;
+  }> {
+    const page = 1;
+    const limit = 10;
+    const skip = (page - 1) * limit;
+
+    const [claims, total] = await this.prisma.$transaction([
+      this.prisma.claim.findMany({
+        where: { profile_id: profileId },
+        include: claimInclude,
+        orderBy: { created_at: 'desc' },
+        skip,
+        take: limit,
+      }),
+      this.prisma.claim.count({ where: { profile_id: profileId } }),
+    ]);
+
+    return { data: claims.map(mapClaim), total, page, limit };
+  }
+
+  async getByIdForProfile(
+    id: string,
+    profileId: string,
+  ): Promise<AdminClaimItem> {
+    const claim = await this.prisma.claim.findUnique({
+      where: { id },
+      include: claimInclude,
+    });
+    if (!claim) throw new NotFoundException('Claim not found');
+    if (claim.profile_id !== profileId) {
+      throw new NotFoundException('Claim not found');
+    }
+    return mapClaim(claim);
+  }
+
+  async listCommentsForProfile(
+    claimId: string,
+    profileId: string,
+  ): Promise<AdminClaimCommentItem[]> {
+    const claim = await this.prisma.claim.findUnique({
+      where: { id: claimId },
+    });
+    if (!claim) throw new NotFoundException('Claim not found');
+    if (claim.profile_id !== profileId) {
+      throw new NotFoundException('Claim not found');
+    }
+
+    const comments = await this.prisma.claimComment.findMany({
+      where: { claim_id: claimId },
+      include: {
+        user: { select: { first_name: true, last_name: true } },
+        profile: { select: { first_name: true, last_name: true } },
+      },
+      orderBy: { created_at: 'asc' },
+    });
+    return comments.map(mapComment);
+  }
+
+  async addCommentAsProfile(
+    claimId: string,
+    profileId: string,
+    dto: CreateCommentDto,
+  ): Promise<AdminClaimCommentItem> {
+    const claim = await this.prisma.claim.findUnique({
+      where: { id: claimId },
+    });
+    if (!claim) throw new NotFoundException('Claim not found');
+    if (claim.profile_id !== profileId) {
+      throw new NotFoundException('Claim not found');
+    }
+
+    const comment = await this.prisma.claimComment.create({
+      data: {
+        claim_id: claimId,
+        content: dto.content,
+        profile_id: profileId,
+        created_by_type: 'profile',
+      },
+      include: {
+        user: { select: { first_name: true, last_name: true } },
+        profile: { select: { first_name: true, last_name: true } },
+      },
+    });
+    return mapComment(comment);
+  }
+
+  async deleteCommentAsProfile(
+    claimId: string,
+    commentId: string,
+    profileId: string,
+  ): Promise<void> {
+    const claim = await this.prisma.claim.findUnique({
+      where: { id: claimId },
+    });
+    if (!claim) throw new NotFoundException('Claim not found');
+    if (claim.profile_id !== profileId) {
+      throw new NotFoundException('Claim not found');
+    }
+
     const comment = await this.prisma.claimComment.findFirst({
       where: { id: commentId, claim_id: claimId },
     });
