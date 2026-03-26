@@ -18,6 +18,7 @@ import { UpdateClaimDto } from './dto/update-claim.dto';
 import { AdminListClaimsDto } from './dto/admin-list-claims.dto';
 import { CreateCommentDto } from './dto/create-comment.dto';
 import { AdminAuthGuard } from '../auth/guards/admin-auth.guard';
+import { ProfileAuthGuard } from '../auth/guards/profile-auth.guard';
 
 @Controller('admin/claims')
 @UseGuards(AdminAuthGuard)
@@ -69,6 +70,50 @@ export class ClaimCommentController {
   @Delete(':commentId')
   async remove(@Param('claimId') claimId: string, @Param('commentId') commentId: string) {
     await this.claimService.deleteComment(claimId, commentId);
+    return { success: true };
+  }
+}
+
+@Controller('profile/claims')
+@UseGuards(ProfileAuthGuard)
+export class ProfileClaimController {
+  constructor(private readonly claimService: ClaimService) {}
+
+  @Post()
+  create(@Req() req: any, @Body() dto: CreateClaimDto) {
+    return this.claimService.createForProfile(req.user.profileId, dto);
+  }
+
+  @Get()
+  list(@Req() req: any) {
+    return this.claimService.listForProfile(req.user.profileId);
+  }
+
+  @Get(':id')
+  getById(@Param('id') id: string, @Req() req: any) {
+    return this.claimService.getByIdForProfile(id, req.user.profileId);
+  }
+}
+
+@Controller('profile/claims/:claimId/comments')
+@UseGuards(ProfileAuthGuard)
+export class ProfileClaimCommentController {
+  constructor(private readonly claimService: ClaimService) {}
+
+  @Get()
+  list(@Param('claimId') claimId: string, @Req() req: any) {
+    return this.claimService.listCommentsForProfile(claimId, req.user.profileId);
+  }
+
+  @Post()
+  add(@Param('claimId') claimId: string, @Req() req: any, @Body() dto: CreateCommentDto) {
+    return this.claimService.addCommentAsProfile(claimId, req.user.profileId, dto);
+  }
+
+  @Delete(':commentId')
+  @HttpCode(HttpStatus.OK)
+  async remove(@Param('claimId') claimId: string, @Param('commentId') commentId: string, @Req() req: any) {
+    await this.claimService.deleteCommentAsProfile(claimId, commentId, req.user.profileId);
     return { success: true };
   }
 }

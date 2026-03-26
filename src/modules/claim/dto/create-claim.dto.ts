@@ -18,9 +18,10 @@ export class CreateClaimDto {
   @MinLength(1)
   description: string;
 
-  @ApiProperty()
+  @ApiPropertyOptional()
+  @IsOptional()
   @IsUUID()
-  profile_id: string;
+  profile_id?: string;
 
   @ApiPropertyOptional({ type: [String] })
   @IsOptional()
