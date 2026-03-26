@@ -224,6 +224,7 @@ model Profile {
   verification_tokens VerificationToken[]
   claims               Claim[]  @relation("ClaimProfile")
   claims_created       Claim[]  @relation("ClaimCreatedByProfile")
+  claim_comments       ClaimComment[] @relation("ClaimCommentProfile")
   events               Event[]  @relation("EventProfiles")
 
   @@index([email], name: "idx_profile_email")
@@ -583,15 +584,18 @@ model Claim {
 }
 
 model ClaimComment {
-  id         String   @id @default(uuid()) @db.Uuid
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
-  claim_id   String   @db.Uuid
-  content    String   @db.Text
-  user_id    String?  @db.Uuid
+  id              String   @id @default(uuid()) @db.Uuid
+  created_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt
+  claim_id        String   @db.Uuid
+  content         String   @db.Text
+  user_id         String?  @db.Uuid
+  profile_id      String?  @db.Uuid
+  created_by_type String   @default("user") // "user" or "profile"
 
-  claim Claim @relation(fields: [claim_id], references: [id], onDelete: Cascade)
-  user  User? @relation("ClaimCommentUser", fields: [user_id], references: [id], onDelete: SetNull)
+  claim   Claim    @relation(fields: [claim_id], references: [id], onDelete: Cascade)
+  user    User?    @relation("ClaimCommentUser", fields: [user_id], references: [id], onDelete: SetNull)
+  profile Profile? @relation("ClaimCommentProfile", fields: [profile_id], references: [id], onDelete: SetNull)
 
   @@index([claim_id])
   @@map("claim_comments")
