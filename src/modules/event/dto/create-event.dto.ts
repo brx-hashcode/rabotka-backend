@@ -2,11 +2,13 @@ import { Type } from 'class-transformer';
 import {
   IsArray,
   IsDateString,
+  IsEnum,
   IsNotEmpty,
   IsOptional,
   IsString,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { DeliveryChannel } from '../enums/delivery-channel.enum';
 
 export class CreateEventDto {
   @ApiProperty()
@@ -27,7 +29,9 @@ export class CreateEventDto {
   @IsDateString()
   endDate: string;
 
-  @ApiProperty({ description: 'Event color: blue | green | red | yellow | purple | orange' })
+  @ApiProperty({
+    description: 'Event color: blue | green | red | yellow | purple | orange',
+  })
   @IsString()
   @IsNotEmpty()
   color: string;
@@ -50,4 +54,12 @@ export class CreateEventDto {
   @IsString({ each: true })
   @Type(() => String)
   userIds?: string[];
+
+  @ApiPropertyOptional({
+    enum: DeliveryChannel,
+    default: DeliveryChannel.EMAIL,
+  })
+  @IsOptional()
+  @IsEnum(DeliveryChannel)
+  channel?: DeliveryChannel;
 }
