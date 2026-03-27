@@ -282,7 +282,7 @@ export class BotOrchestratorService {
       jobOfferService: this.jobOfferService,
       applicationService: this.applicationService,
       notificationService: this.notificationService,
-      systemConfigService: this.systemConfigService,
+      systemConfigService: this.systemConfig,
     };
     type FlowResult = {
       reply: string[];
