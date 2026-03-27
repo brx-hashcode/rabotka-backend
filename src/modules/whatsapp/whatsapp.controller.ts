@@ -22,6 +22,8 @@ import { TwilioService } from '../../common/services/twilio/twilio.service';
 import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
 
 const MSG_IDEMPOTENCY_TTL = 5 * 60; // 5 minutes
+const RATE_LIMIT_MAX = 30; // max messages per window
+const RATE_LIMIT_WINDOW = 60; // seconds
 
 @ApiTags('WhatsApp')
 @Controller('whatsapp')
@@ -116,18 +118,28 @@ export class WhatsAppController {
       ? from.slice('whatsapp:'.length)
       : from;
 
-    const replies = await this.conversationService.handleIncomingMessage(
+    // Per-phone rate limiting
+    const rateLimitKey = `wa:rate:${phone}`;
+    const count = await this.redis.incr(rateLimitKey);
+    if (count === 1) {
+      await this.redis.expire(rateLimitKey, RATE_LIMIT_WINDOW);
+    }
+    if (count > RATE_LIMIT_MAX) {
+      this.logger.warn(`Rate limit exceeded for ${phone}: ${count} msgs/min`);
+      return;
+    }
+
+    const result = await this.conversationService.handleIncomingMessage(
       phone,
       text,
     );
-    const MEDIA_PREFIX = '[IMG:';
-    const MEDIA_SUFFIX = ']';
-    for (const message of replies) {
+
+    for (const message of result.replies) {
       if (!message) continue;
-      if (message.startsWith(MEDIA_PREFIX) && message.includes(MEDIA_SUFFIX)) {
-        const end = message.indexOf(MEDIA_SUFFIX);
-        const mediaUrl = message.slice(MEDIA_PREFIX.length, end).trim();
-        const caption = message.slice(end + MEDIA_SUFFIX.length).trim();
+      if (message.startsWith('[IMG:') && message.includes(']')) {
+        const end = message.indexOf(']');
+        const mediaUrl = message.slice('[IMG:'.length, end).trim();
+        const caption = message.slice(end + 1).trim();
         if (mediaUrl) {
           await this.whatsAppService.sendMediaMessage(
             phone,
@@ -136,7 +148,11 @@ export class WhatsAppController {
           );
         }
       } else {
-        await this.whatsAppService.sendTextMessage(phone, message);
+        await this.whatsAppService.sendTextMessage(
+          phone,
+          message,
+          result.profileId ?? undefined,
+        );
       }
     }
   }
