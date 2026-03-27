@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
-import { AccountStatus } from '@prisma/client';
+import { AccountStatus, BillingStatus } from '@prisma/client';
 import { JobOfferService } from '../../job-offer/job-offer.service';
 import { ApplicationService } from '../../application/application.service';
 import { BotStateService } from './bot-state.service';
@@ -18,6 +18,7 @@ import {
   hasPenaltiesBotMessage,
 } from '../messages/menu.messages';
 import type { BotProfile, BotState } from '../types/bot-state.types';
+import type { FlowContext, FlowResult } from '../types/flow.types';
 import { FLOW_IDS } from '../bot.constants';
 import {
   runPublishJobFlow,
@@ -91,10 +92,6 @@ export class BotOrchestratorService {
     private readonly paymentService: PaymentService,
   ) {}
 
-  /**
-   * Handle incoming message and return reply lines to send.
-   * Caller (ConversationService) is responsible for sending via WhatsApp.
-   */
   async handle(
     profileId: string,
     _phone: string,
@@ -104,88 +101,83 @@ export class BotOrchestratorService {
     if (!profile) {
       return [NOT_FOUND_MESSAGE];
     }
-    if (
-      profile.status !== AccountStatus.ACTIVE &&
-      profile.status !== AccountStatus.SUSPENDED &&
-      profile.status !== AccountStatus.PENDING_ACTIVATION
-    ) {
+
+    const allowed: string[] = [
+      AccountStatus.ACTIVE,
+      AccountStatus.SUSPENDED,
+      AccountStatus.PENDING_ACTIVATION,
+    ];
+    if (!allowed.includes(profile.status)) {
       return [INACTIVE_MESSAGE];
     }
 
-    const botProfile: BotProfile = {
-      id: profile.id,
-      first_name: profile.first_name,
-      last_name: profile.last_name,
-      phone: profile.phone,
-      email: profile.email,
-      profile_type: profile.profile_type as BotProfile['profile_type'],
-      status: profile.status,
-      reliability_score: profile.reliability_score,
-    };
+    const botProfile = this.toBotProfile(profile);
 
-    // Intercept suspended accounts — inform and direct to support
     if (profile.status === AccountStatus.SUSPENDED) {
       const contact = await this.systemConfig.getContactInfo();
       return [accountSuspendedBotMessage(contact)];
     }
 
-    // Intercept PENDING_ACTIVATION accounts — force verify-whatsapp flow
     if (profile.status === AccountStatus.PENDING_ACTIVATION) {
-      const state = await this.botState.get(profileId);
-      const isReturningToFlow = state?.flowId === FLOW_IDS.VERIFY_WHATSAPP;
-      const flowState = isReturningToFlow
-        ? state
-        : getVerifyWhatsappInitialState();
-      // On first contact pass empty string so the flow shows the prompt;
-      // on subsequent messages (already in the flow) pass the actual text.
-      const flowInput = isReturningToFlow ? text : '';
-      const result = await runVerifyWhatsappFlow(
-        flowState,
-        flowInput,
-        botProfile,
-        {
-          prisma: this.prisma,
-          paymentService: this.paymentService,
-        },
-      );
-      if (result.clearState) {
-        await this.botState.clear(profileId);
-      } else if (result.nextState) {
-        await this.botState.set(profileId, result.nextState);
-      }
-      return result.reply;
+      return this.handlePendingActivation(profileId, text, botProfile);
     }
 
-    // Intercept accounts with unpaid penalties — block all functionalities
-    if (profile.status === AccountStatus.ACTIVE) {
-      const unpaid =
-        await this.applicationService.getUnpaidPenalties(profileId);
-      if (unpaid.count > 0) {
-        return [hasPenaltiesBotMessage()];
-      }
+    if (profile.billing_status !== BillingStatus.CLEAR) {
+      return [hasPenaltiesBotMessage()];
     }
 
+    return this.routeMessage(profileId, text, profile, botProfile);
+  }
+
+  private async handlePendingActivation(
+    profileId: string,
+    text: string,
+    botProfile: BotProfile,
+  ): Promise<string[]> {
+    const state = await this.botState.get(profileId);
+    const isReturningToFlow = state?.flowId === FLOW_IDS.VERIFY_WHATSAPP;
+    const flowState = isReturningToFlow
+      ? state
+      : getVerifyWhatsappInitialState();
+    const flowInput = isReturningToFlow ? text : '';
+    const result = await runVerifyWhatsappFlow(
+      flowState,
+      flowInput,
+      botProfile,
+      this.buildFlowContext(),
+    );
+    if (result.clearState) {
+      await this.botState.clear(profileId);
+    } else if (result.nextState) {
+      await this.botState.set(profileId, result.nextState);
+    }
+    return result.reply;
+  }
+
+  private async routeMessage(
+    profileId: string,
+    text: string,
+    profile: NonNullable<Awaited<ReturnType<typeof this.loadProfile>>>,
+    botProfile: BotProfile,
+  ): Promise<string[]> {
     try {
       const state = await this.botState.get(profileId);
       const route = this.router.route(text, botProfile, state);
 
       if (route.type === 'flow') {
-        const result = await this.runFlow(
+        return this.runFlow(
           route.flowId,
           route.state,
           text,
           botProfile,
           profileId,
         );
-        return result;
       }
 
       if (route.type === 'command') {
         return this.handleCommandRoute(route, profile, profileId, botProfile);
       }
 
-      // No active state + no recognized command — show session expired if input
-      // looks like the user was mid-flow before Redis TTL expired.
       if (!state && looksLikeFlowInput(text)) {
         return [
           '⏱ *Session expirée.* Votre conversation précédente a expiré.',
@@ -198,6 +190,21 @@ export class BotOrchestratorService {
       this.logger.warn('Bot handling error', err);
       return [ERROR_MESSAGE];
     }
+  }
+
+  private toBotProfile(
+    profile: NonNullable<Awaited<ReturnType<typeof this.loadProfile>>>,
+  ): BotProfile {
+    return {
+      id: profile.id,
+      first_name: profile.first_name,
+      last_name: profile.last_name,
+      phone: profile.phone,
+      email: profile.email,
+      profile_type: profile.profile_type as BotProfile['profile_type'],
+      status: profile.status,
+      reliability_score: profile.reliability_score,
+    };
   }
 
   private async runFlow(
@@ -214,7 +221,6 @@ export class BotOrchestratorService {
     }
 
     if (result.clearState) {
-      // Save draft if employer exits publish-job mid-flow (step > 1)
       if (
         state.flowId === FLOW_IDS.PUBLISH_JOB &&
         state.step > 1 &&
@@ -230,13 +236,13 @@ export class BotOrchestratorService {
           .catch(() => {});
       }
       await this.botState.clear(profileId);
-      // After clearing, check inbox for pending applications
-      const nextInboxItem = await this.botInbox.shift(profileId);
+      const nextInboxItem = await this.botInbox.peek(profileId);
       if (nextInboxItem?.type === 'new_application') {
         const nextState = getAcceptRefuseInitialState(
           nextInboxItem.applicationId,
         );
         await this.botState.set(profileId, nextState);
+        await this.botInbox.shift(profileId);
         const remaining = await this.botInbox.count(profileId);
         const inboxNotice =
           remaining > 0
@@ -253,7 +259,6 @@ export class BotOrchestratorService {
       await this.botState.set(profileId, result.nextState);
     }
 
-    // Append inbox badge if employer has pending items
     if (profile.profile_type === 'EMPLOYER') {
       const inboxCount = await this.botInbox.count(profileId);
       if (inboxCount > 0) {
@@ -268,82 +273,49 @@ export class BotOrchestratorService {
     return result.reply;
   }
 
+  private buildFlowContext(): FlowContext {
+    return {
+      prisma: this.prisma,
+      jobOfferService: this.jobOfferService,
+      applicationService: this.applicationService,
+      notificationService: this.notificationService,
+      systemConfigService: this.systemConfig,
+      paymentService: this.paymentService,
+      commands: this.commands,
+    };
+  }
+
   private executeFlow(
     flowId: string,
     state: BotState,
     input: string,
     profile: BotProfile,
-  ): Promise<{
-    reply: string[];
-    clearState?: boolean;
-    nextState?: BotState;
-  } | null> {
-    const deps = {
-      jobOfferService: this.jobOfferService,
-      applicationService: this.applicationService,
-      notificationService: this.notificationService,
-      systemConfigService: this.systemConfigService,
-    };
-    type FlowResult = {
-      reply: string[];
-      clearState?: boolean;
-      nextState?: BotState;
-    };
+  ): Promise<FlowResult | null> {
+    const ctx = this.buildFlowContext();
     const runners: Record<string, () => Promise<FlowResult>> = {
       [FLOW_IDS.PUBLISH_JOB]: () =>
-        runPublishJobFlow(state, input, profile, {
-          jobOfferService: deps.jobOfferService,
-          paymentService: this.paymentService,
-        }),
+        runPublishJobFlow(state, input, profile, ctx),
       [FLOW_IDS.LIST_OFFERS]: () =>
-        runListOffersFlow(state, input, profile, {
-          jobOfferService: deps.jobOfferService,
-          systemConfigService: deps.systemConfigService,
-        }),
-      [FLOW_IDS.APPLY_JOB]: () => runApplyJobFlow(state, input, profile, deps),
+        runListOffersFlow(state, input, profile, ctx),
+      [FLOW_IDS.APPLY_JOB]: () => runApplyJobFlow(state, input, profile, ctx),
       [FLOW_IDS.ACCEPT_REFUSE_CANDIDATE]: () =>
-        runAcceptRefuseCandidateFlow(state, input, profile, {
-          applicationService: deps.applicationService,
-          notificationService: deps.notificationService,
-        }),
+        runAcceptRefuseCandidateFlow(state, input, profile, ctx),
       [FLOW_IDS.CANCEL_APPLICATION]: () =>
-        runCancelApplicationFlow(state, input, profile, {
-          applicationService: deps.applicationService,
-          notificationService: deps.notificationService,
-        }),
+        runCancelApplicationFlow(state, input, profile, ctx),
       [FLOW_IDS.MY_APPLICATIONS]: () =>
-        runMyApplicationsFlow(state, input, profile, {
-          applicationService: deps.applicationService,
-          notificationService: deps.notificationService,
-        }),
+        runMyApplicationsFlow(state, input, profile, ctx),
       [FLOW_IDS.CANDIDATURES_LIST]: () =>
-        runCandidaturesListFlow(state, input, profile, {
-          applicationService: deps.applicationService,
-          notificationService: deps.notificationService,
-        }),
+        runCandidaturesListFlow(state, input, profile, ctx),
       [FLOW_IDS.MANAGE_FILLED_JOB]: () =>
-        runManageFilledJobFlow(state, input, profile, {
-          applicationService: deps.applicationService,
-          notificationService: deps.notificationService,
-        }),
+        runManageFilledJobFlow(state, input, profile, ctx),
       [FLOW_IDS.PROFILE_SUBMENU]: () =>
-        runProfileSubmenuFlow(state, input, profile, {
-          commands: this.commands,
-        }),
+        runProfileSubmenuFlow(state, input, profile, ctx),
       [FLOW_IDS.PAY_PENALTIES]: () =>
-        runPayPenaltiesFlow(state, input, profile, {
-          applicationService: deps.applicationService,
-        }),
+        runPayPenaltiesFlow(state, input, profile, ctx),
       [FLOW_IDS.RESOLVE_PENALTIES]: () =>
-        runResolvePenaltiesFlow(state, input, profile, {
-          prisma: this.prisma,
-          paymentService: this.paymentService,
-        }),
+        runResolvePenaltiesFlow(state, input, profile, ctx),
       [FLOW_IDS.VERIFY_WHATSAPP]: () =>
-        runVerifyWhatsappFlow(state, input, profile, {
-          prisma: this.prisma,
-          paymentService: this.paymentService,
-        }),
+        runVerifyWhatsappFlow(state, input, profile, ctx),
     };
     const runner = runners[flowId];
     return runner ? runner() : Promise.resolve(null);
@@ -395,7 +367,6 @@ export class BotOrchestratorService {
   ): Promise<string[]> {
     const draft = await this.botDraft.getDraft(profileId);
     if (draft && draft.step > 1) {
-      // Offer to resume the saved draft — step 0 = draft-resume decision
       const resumeState: BotState = {
         flowId: FLOW_IDS.PUBLISH_JOB,
         step: 0,
@@ -490,6 +461,7 @@ export class BotOrchestratorService {
         email: true,
         profile_type: true,
         status: true,
+        billing_status: true,
         reliability_score: true,
       },
     });
