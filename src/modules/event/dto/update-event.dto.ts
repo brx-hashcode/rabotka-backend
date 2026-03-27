@@ -2,10 +2,12 @@ import { Type } from 'class-transformer';
 import {
   IsArray,
   IsDateString,
+  IsEnum,
   IsOptional,
   IsString,
 } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { DeliveryChannel } from '../enums/delivery-channel.enum';
 
 export class UpdateEventDto {
   @ApiPropertyOptional()
@@ -51,4 +53,12 @@ export class UpdateEventDto {
   @IsString({ each: true })
   @Type(() => String)
   userIds?: string[];
+
+  @ApiPropertyOptional({
+    enum: DeliveryChannel,
+    default: DeliveryChannel.EMAIL,
+  })
+  @IsOptional()
+  @IsEnum(DeliveryChannel)
+  channel?: DeliveryChannel;
 }
