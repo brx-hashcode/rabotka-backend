@@ -19,9 +19,14 @@ import { WhatsAppService } from './whatsapp.service';
 import { VerifyWhatsAppDto } from './dto/verify-whatsapp.dto';
 import { ConversationService } from '../conversation/conversation.service';
 import { TwilioService } from '../../common/services/twilio/twilio.service';
+import { QueueService } from '../../common/services/queue/queue.service';
+import { WHATSAPP_OUTBOUND_QUEUE } from '../../common/services/queue/queue.module';
+import type { WhatsAppOutboundJobData } from './whatsapp-outbound.processor';
 import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
 
 const MSG_IDEMPOTENCY_TTL = 5 * 60; // 5 minutes
+const RATE_LIMIT_MAX = 30; // max messages per window
+const RATE_LIMIT_WINDOW = 60; // seconds
 
 @ApiTags('WhatsApp')
 @Controller('whatsapp')
@@ -34,6 +39,7 @@ export class WhatsAppController {
     private readonly conversationService: ConversationService,
     private readonly twilioService: TwilioService,
     private readonly configService: ConfigService,
+    private readonly queueService: QueueService,
     @Inject(REDIS_CONNECTION) private readonly redis: Redis,
   ) {}
 
@@ -116,29 +122,57 @@ export class WhatsAppController {
       ? from.slice('whatsapp:'.length)
       : from;
 
-    const replies = await this.conversationService.handleIncomingMessage(
+    // Per-phone rate limiting
+    const rateLimitKey = `wa:rate:${phone}`;
+    const count = await this.redis.incr(rateLimitKey);
+    if (count === 1) {
+      await this.redis.expire(rateLimitKey, RATE_LIMIT_WINDOW);
+    }
+    if (count > RATE_LIMIT_MAX) {
+      this.logger.warn(`Rate limit exceeded for ${phone}: ${count} msgs/min`);
+      return;
+    }
+
+    const result = await this.conversationService.handleIncomingMessage(
       phone,
       text,
     );
-    const MEDIA_PREFIX = '[IMG:';
-    const MEDIA_SUFFIX = ']';
-    for (const message of replies) {
+
+    for (const message of result.replies) {
       if (!message) continue;
-      if (message.startsWith(MEDIA_PREFIX) && message.includes(MEDIA_SUFFIX)) {
-        const end = message.indexOf(MEDIA_SUFFIX);
-        const mediaUrl = message.slice(MEDIA_PREFIX.length, end).trim();
-        const caption = message.slice(end + MEDIA_SUFFIX.length).trim();
-        if (mediaUrl) {
-          await this.whatsAppService.sendMediaMessage(
-            phone,
-            mediaUrl,
-            caption || undefined,
-          );
-        }
-      } else {
-        await this.whatsAppService.sendTextMessage(phone, message);
+      const job = this.parseReplyToJob(phone, result.profileId, message);
+      if (job) {
+        await this.queueService.addJob<WhatsAppOutboundJobData>(
+          WHATSAPP_OUTBOUND_QUEUE,
+          job,
+        );
       }
     }
+  }
+
+  private parseReplyToJob(
+    phone: string,
+    profileId: string | null,
+    message: string,
+  ): WhatsAppOutboundJobData | null {
+    const MEDIA_PREFIX = '[IMG:';
+    const MEDIA_SUFFIX = ']';
+
+    if (message.startsWith(MEDIA_PREFIX) && message.includes(MEDIA_SUFFIX)) {
+      const end = message.indexOf(MEDIA_SUFFIX);
+      const mediaUrl = message.slice(MEDIA_PREFIX.length, end).trim();
+      const caption = message.slice(end + MEDIA_SUFFIX.length).trim();
+      if (!mediaUrl) return null;
+      return {
+        type: 'media',
+        phone,
+        profileId: profileId ?? undefined,
+        mediaUrl,
+        caption: caption || undefined,
+      };
+    }
+
+    return { type: 'text', phone, profileId: profileId ?? undefined, text: message };
   }
 
   private buildWebhookUrl(req: Request): string {
