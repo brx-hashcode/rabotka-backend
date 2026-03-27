@@ -1,10 +1,14 @@
 import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
+import Redis from 'ioredis';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { BotPlatform, ConversationStatus, MessageDirection } from '@prisma/client';
 import { BotOrchestratorService } from '../bot/services/bot-orchestrator.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
+import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
 
 const DEFAULT_BOT_SESSION_ID = 'default';
+const USER_LOCK_TTL = 30; // seconds
+const USER_LOCK_PREFIX = 'bot:lock:';
 
 @Injectable()
 export class ConversationService {
@@ -15,13 +19,17 @@ export class ConversationService {
     private readonly botOrchestrator: BotOrchestratorService,
     @Inject(forwardRef(() => WhatsAppService))
     private readonly whatsApp: WhatsAppService,
+    @Inject(REDIS_CONNECTION) private readonly redis: Redis,
   ) {}
 
   /**
    * Handle incoming WhatsApp message and return reply messages to send.
    * Caller (WhatsAppController) sends each reply via WhatsApp.
    */
-  async handleIncomingMessage(phone: string, text: string): Promise<string[]> {
+  async handleIncomingMessage(
+    phone: string,
+    text: string,
+  ): Promise<{ profileId: string | null; replies: string[] }> {
     const profile = await this.prisma.profile.findUnique({
       where: { phone },
       select: { id: true },
@@ -29,44 +37,73 @@ export class ConversationService {
 
     if (profile == null) {
       this.logger.debug(
-        `Incoming message from unknown phone ${phone}; ignoring`,
+        `Incoming message from unknown phone ${phone}; not registered`,
       );
-      return [];
+      return {
+        profileId: null,
+        replies: [
+          `Ce numéro n'est pas encore enregistré sur Rabotka. Inscrivez-vous sur notre site pour créer votre compte.`,
+        ],
+      };
     }
 
-    const now = new Date();
-    await this.prisma.conversation.upsert({
-      where: {
-        idx_conversation_unique: {
+    // Acquire per-user lock to prevent concurrent message handling
+    const lockKey = `${USER_LOCK_PREFIX}${profile.id}`;
+    const acquired = await this.redis.set(
+      lockKey,
+      '1',
+      'EX',
+      USER_LOCK_TTL,
+      'NX',
+    );
+    if (acquired === null) {
+      this.logger.debug(
+        `User ${profile.id} locked — dropping concurrent message`,
+      );
+      return { profileId: profile.id, replies: [] };
+    }
+
+    try {
+      const now = new Date();
+      await this.prisma.conversation.upsert({
+        where: {
+          idx_conversation_unique: {
+            profile_id: profile.id,
+            bot_session_id: DEFAULT_BOT_SESSION_ID,
+          },
+        },
+        create: {
           profile_id: profile.id,
           bot_session_id: DEFAULT_BOT_SESSION_ID,
+          bot_platform: BotPlatform.WHATSAPP,
+          status: ConversationStatus.ACTIVE,
+          started_at: now,
         },
-      },
-      create: {
-        profile_id: profile.id,
-        bot_session_id: DEFAULT_BOT_SESSION_ID,
-        bot_platform: BotPlatform.WHATSAPP,
-        status: ConversationStatus.ACTIVE,
-        started_at: now,
-      },
-      update: {},
-    });
+        update: {},
+      });
 
-    // Save incoming message
-    await this.whatsApp
-      .saveMessage(profile.id, MessageDirection.INBOUND, text)
-      .catch((err) =>
-        this.logger.warn(
-          `Failed to save inbound message for ${profile.id}:`,
-          err,
-        ),
+      // Save incoming message
+      await this.whatsApp
+        .saveMessage(profile.id, MessageDirection.INBOUND, text)
+        .catch((err) =>
+          this.logger.warn(
+            `Failed to save inbound message for ${profile.id}:`,
+            err,
+          ),
+        );
+
+      this.logger.log(
+        `Conversation (profile ${profile.id}): "${text.slice(0, 50)}${text.length > 50 ? '...' : ''}"`,
       );
 
-    this.logger.log(
-      `Conversation (profile ${profile.id}): "${text.slice(0, 50)}${text.length > 50 ? '...' : ''}"`,
-    );
-
-    const replies = await this.botOrchestrator.handle(profile.id, phone, text);
-    return replies.filter(Boolean);
+      const replies = await this.botOrchestrator.handle(
+        profile.id,
+        phone,
+        text,
+      );
+      return { profileId: profile.id, replies: replies.filter(Boolean) };
+    } finally {
+      await this.redis.del(lockKey);
+    }
   }
 }

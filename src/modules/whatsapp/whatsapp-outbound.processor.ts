@@ -1,0 +1,94 @@
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { MessageDirection } from '@prisma/client';
+import { WhatsAppService } from './whatsapp.service';
+import { QueueService } from '../../common/services/queue/queue.service';
+import {
+  WHATSAPP_OUTBOUND_QUEUE,
+  WHATSAPP_OUTBOUND_DLQ,
+} from '../../common/services/queue/queue.module';
+
+export type WhatsAppOutboundJobData = {
+  phone: string;
+  profileId?: string;
+} & (
+  | { type: 'text'; text: string }
+  | { type: 'media'; mediaUrl: string; caption?: string }
+);
+
+@Injectable()
+export class WhatsAppOutboundProcessor implements OnModuleInit {
+  private readonly logger = new Logger(WhatsAppOutboundProcessor.name);
+
+  constructor(
+    private readonly whatsApp: WhatsAppService,
+    private readonly queueService: QueueService,
+  ) {}
+
+  onModuleInit() {
+    const worker = this.queueService.createWorker<WhatsAppOutboundJobData>(
+      WHATSAPP_OUTBOUND_QUEUE,
+      (job) => this.process(job),
+      { concurrency: 3 },
+    );
+
+    worker.on('failed', (job, err) => {
+      if (!job) return;
+      const maxAttempts = job.opts?.attempts ?? 3;
+      if (job.attemptsMade >= maxAttempts) {
+        this.logger.error(
+          `Job ${job.id} permanently failed after ${job.attemptsMade} attempts: ${err.message}`,
+        );
+        this.queueService
+          .addJob(WHATSAPP_OUTBOUND_DLQ, {
+            originalJobId: job.id,
+            data: job.data,
+            error: err.message,
+            failedAt: new Date().toISOString(),
+          })
+          .catch((dlqErr) =>
+            this.logger.error(
+              `Failed to move job ${job.id} to DLQ`,
+              dlqErr instanceof Error ? dlqErr.message : String(dlqErr),
+            ),
+          );
+      }
+    });
+  }
+
+  private async process(job: {
+    id?: string;
+    data: WhatsAppOutboundJobData;
+  }): Promise<void> {
+    const { data } = job;
+
+    if (data.type === 'text') {
+      const sent = await this.whatsApp.sendTextMessage(
+        data.phone,
+        data.text,
+        data.profileId,
+      );
+      if (!sent) {
+        throw new Error(`Twilio send failed for ${data.phone}`);
+      }
+    } else if (data.type === 'media') {
+      const sent = await this.whatsApp.sendMediaMessage(
+        data.phone,
+        data.mediaUrl,
+        data.caption,
+      );
+      if (!sent) {
+        throw new Error(`Twilio media send failed for ${data.phone}`);
+      }
+      if (data.profileId) {
+        const body = data.caption
+          ? `[IMG:${data.mediaUrl}] ${data.caption}`
+          : `[IMG:${data.mediaUrl}]`;
+        await this.whatsApp.saveMessage(
+          data.profileId,
+          MessageDirection.OUTBOUND,
+          body,
+        );
+      }
+    }
+  }
+}
