@@ -281,7 +281,9 @@ describe('AuthService', () => {
       const result = await service.getAdminById(USER_ID);
 
       expect(result.id).toBe(USER_ID);
-      expect(result.name).toBe('John Doe');
+      expect(result.firstName).toBe('John');
+      expect(result.lastName).toBe('Doe');
+      expect(result.email).toBe('admin@example.com');
     });
 
     it('throws NotFoundException when admin not found', async () => {

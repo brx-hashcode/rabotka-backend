@@ -94,6 +94,7 @@ export class MailProcessor implements OnModuleInit {
       subject,
       ...(text !== undefined && { text }),
       ...(html !== undefined && { html }),
+      ...(data.attachments?.length && { attachments: data.attachments }),
     };
 
     if (fromFormatted !== undefined) {

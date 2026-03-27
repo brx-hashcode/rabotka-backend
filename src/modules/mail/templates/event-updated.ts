@@ -22,6 +22,7 @@ export function eventUpdatedEmail(
   endDate: string,
   description?: string | null,
   location?: string | null,
+  googleCalendarUrl?: string,
 ): string {
   const date = formatDate(startDate);
   const start = formatTime(startDate);
@@ -36,6 +37,8 @@ export function eventUpdatedEmail(
     <p><strong>Nouvel horaire :</strong> ${escapeHtml(start)} – ${escapeHtml(end)}</p>
     ${location ? `<p><strong>Lieu :</strong> ${escapeHtml(location)}</p>` : ''}
     ${description ? `<p><strong>Description :</strong> ${escapeHtml(description)}</p>` : ''}
+
+    ${googleCalendarUrl ? `<p><a href="${escapeHtml(googleCalendarUrl)}" style="display: inline-block; padding: 10px 20px; background-color: #4285F4; color: white; text-decoration: none; border-radius: 4px; font-weight: bold;">📅 Mettre à jour dans Google Calendar</a></p>` : ''}
 
     <p>Merci de bien vouloir mettre à jour votre agenda.</p>
     <p>Cordialement,<br /><strong>L'équipe Rabotka</strong></p>

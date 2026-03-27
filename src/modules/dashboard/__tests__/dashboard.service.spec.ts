@@ -43,19 +43,31 @@ describe('DashboardService', () => {
       expect(metrics.revenue).toBe(50000);
     });
 
-    it('calculates trend as 100 when previous is 0 and current > 0', async () => {
-      // profiles: total=5, current=5, previous=0
+    it('calculates trend as null when previous is 0', async () => {
+      // Reset and setup for this test
+      prisma = makePrisma();
+      service = new DashboardService(prisma as any);
+
+      // payment.aggregate is called 3 times, profile.count 3 times, jobOffer.count 3 times, application.count 3 times
+      prisma.payment.aggregate.mockResolvedValue({ _sum: { amount: null } });
       prisma.profile.count
         .mockResolvedValueOnce(5)  // total
         .mockResolvedValueOnce(5)  // current 30d
-        .mockResolvedValueOnce(0); // previous 30d
+        .mockResolvedValueOnce(0); // previous 30d (calcTrend returns null when previous is 0)
+      prisma.jobOffer.count.mockResolvedValue(0);
+      prisma.application.count.mockResolvedValue(0);
+
       const metrics = await service.getMetrics();
-      expect(metrics.profilesTrend).toBe(100);
+      expect(metrics.profilesTrend).toBeNull();
     });
 
-    it('calculates trend as 0 when both current and previous are 0', async () => {
+    it('calculates trend as null when both current and previous are 0', async () => {
+      // Reset mocks for clean state
+      prisma = makePrisma();
+      service = new DashboardService(prisma as any);
+
       const metrics = await service.getMetrics();
-      expect(metrics.profilesTrend).toBe(0);
+      expect(metrics.profilesTrend).toBeNull(); // previous is 0, so trend is null
     });
 
     it('calculates trend percentage correctly', async () => {

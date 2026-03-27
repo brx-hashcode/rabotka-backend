@@ -45,7 +45,12 @@ const mockJobOfferService = {
   findById: jest.fn(),
 } as unknown as jest.Mocked<JobOfferService>;
 
-const ctx = { jobOfferService: mockJobOfferService };
+const ctx = {
+  jobOfferService: mockJobOfferService,
+  systemConfigService: {
+    getRaw: jest.fn().mockResolvedValue('5000'),
+  },
+};
 
 beforeEach(() => {
   jest.clearAllMocks();
