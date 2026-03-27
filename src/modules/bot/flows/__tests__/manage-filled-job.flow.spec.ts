@@ -109,12 +109,12 @@ describe('runManageFilledJobFlow()', () => {
       expect(result.nextState?.payload?.step).toBe('list');
     });
 
-    it('marks job completed on "1"', async () => {
+    it('transitions to note step on "1"', async () => {
       const ctx = makeCtx();
       const state = makeDetailState(makeItem());
       const result = await runManageFilledJobFlow(state, '1', employerProfile, ctx);
-      expect(ctx.applicationService.markJobCompleted).toHaveBeenCalledWith('app-1', 'e-1');
-      expect(result.clearState).toBe(true);
+      expect(result.nextState?.payload?.step).toBe('note');
+      expect(result.reply[0]).toContain('Laissez une note');
     });
 
     it('cancels accepted job on "2"', async () => {
@@ -125,11 +125,11 @@ describe('runManageFilledJobFlow()', () => {
       expect(result.clearState).toBe(true);
     });
 
-    it('returns error when markJobCompleted throws', async () => {
+    it('returns error when cancelAcceptedByEmployer throws', async () => {
       const ctx = makeCtx();
-      ctx.applicationService.markJobCompleted.mockRejectedValue(new Error('DB error'));
+      ctx.applicationService.cancelAcceptedByEmployer.mockRejectedValue(new Error('DB error'));
       const state = makeDetailState(makeItem());
-      const result = await runManageFilledJobFlow(state, '1', employerProfile, ctx);
+      const result = await runManageFilledJobFlow(state, '2', employerProfile, ctx);
       expect(result.reply[0]).toContain('DB error');
     });
 

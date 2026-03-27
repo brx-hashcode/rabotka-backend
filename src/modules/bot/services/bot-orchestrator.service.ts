@@ -282,6 +282,7 @@ export class BotOrchestratorService {
       jobOfferService: this.jobOfferService,
       applicationService: this.applicationService,
       notificationService: this.notificationService,
+      systemConfigService: this.systemConfigService,
     };
     type FlowResult = {
       reply: string[];
@@ -297,6 +298,7 @@ export class BotOrchestratorService {
       [FLOW_IDS.LIST_OFFERS]: () =>
         runListOffersFlow(state, input, profile, {
           jobOfferService: deps.jobOfferService,
+          systemConfigService: deps.systemConfigService,
         }),
       [FLOW_IDS.APPLY_JOB]: () => runApplyJobFlow(state, input, profile, deps),
       [FLOW_IDS.ACCEPT_REFUSE_CANDIDATE]: () =>

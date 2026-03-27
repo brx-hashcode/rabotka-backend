@@ -109,7 +109,7 @@ function formatPaymentFlow(flow: string): string {
 function applicationStatusLabel(status: string): string {
   if (status === 'ACCEPTED') return '*ACCEPTÉE*';
   if (status === 'PENDING') return '*EN ATTENTE*';
-  if (status === 'VIEWED') return '*VUE PAR L\'EMPLOYEUR*';
+  if (status === 'VIEWED') return "*VUE PAR L'EMPLOYEUR*";
   if (status === 'REJECTED') return '*REFUSÉE*';
   return '*ANNULÉE*';
 }
@@ -227,8 +227,10 @@ export function formatApplyConfirmation(params: {
   workerPhone: string;
   workerEmail: string;
   reliabilityScore: number | null;
+  lateCancellationPenalty?: number;
 }): string {
   const flow = formatPaymentFlow(params.payment_flow);
+  const penalty = params.lateCancellationPenalty ?? 5000;
   return [
     '*Vous êtes sur le point de postuler*',
     '',
@@ -240,7 +242,7 @@ export function formatApplyConfirmation(params: {
     '*ENGAGEMENT IMPORTANT*:',
     "Vos informations seront partagées avec l'employeur",
     'Vous vous engagez à être présent et ponctuel',
-    'Annulation < 4h avant = pénalité de *5,000 FCFA*',
+    `Annulation < 4h avant = pénalité de *${penalty.toLocaleString('fr-FR')} FCFA*`,
     'Impact sur votre score de fiabilité',
     '',
     '*Votre profil sera envoyé*:',
