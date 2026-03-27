@@ -3,7 +3,7 @@ import Redis from 'ioredis';
 import { REDIS_CONNECTION } from '../../../common/services/redis/redis.constants';
 
 const INBOX_KEY_PREFIX = 'bot:inbox:';
-const INBOX_TTL_SECONDS = 7 * 24 * 60 * 60; // 7 days
+const INBOX_TTL_SECONDS = 7 * 24 * 60 * 60;
 
 export type InboxItem = {
   type: 'new_application';
@@ -39,7 +39,18 @@ export class BotInboxService {
     }
   }
 
-  /** Remove and return the oldest item from the inbox. */
+  async peek(profileId: string): Promise<InboxItem | null> {
+    const key = `${INBOX_KEY_PREFIX}${profileId}`;
+    const raw = await this.redis.get(key);
+    if (!raw) return null;
+    try {
+      const items = JSON.parse(raw) as InboxItem[];
+      return items[0] ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   async shift(profileId: string): Promise<InboxItem | null> {
     const key = `${INBOX_KEY_PREFIX}${profileId}`;
     const raw = await this.redis.get(key);
