@@ -2,6 +2,7 @@ import type { BotProfile, BotState } from '../types/bot-state.types';
 import { FLOW_IDS, CMD_MENU } from '../bot.constants';
 import { getApplyJobInitialState } from './apply-job.flow';
 import type { JobOfferService } from '../../job-offer/job-offer.service';
+import type { SystemConfigService } from '../../system-config/system-config.service';
 import {
   formatOfferDetail,
   formatOfferDetailWithActions,
@@ -13,6 +14,7 @@ import { menuMessage } from '../messages/menu.messages';
 
 export type ListOffersContext = {
   jobOfferService: JobOfferService;
+  systemConfigService: SystemConfigService;
 };
 
 export type FlowResult = {
@@ -169,6 +171,11 @@ async function handleDetailApply(
     };
   }
   const flowLabel = formatPaymentFlow(offer.payment_flow);
+  const penaltyStr = await ctx.systemConfigService.getRaw(
+    'fees.late_cancellation_penalty_fcfa',
+    '5000',
+  );
+  const penalty = Number(penaltyStr) || 5000;
   const text = [
     '*Vous êtes sur le point de postuler*',
     '',
@@ -180,7 +187,8 @@ async function handleDetailApply(
     '*ENGAGEMENT IMPORTANT*:',
     "Vos informations seront partagées avec l'employeur",
     'Vous vous engagez à être présent et ponctuel',
-    '*Annulation < 4h avant = pénalité de 5,000 FCFA*',
+    `*Annulation < 4h avant = pénalité de ${penalty.toLocaleString('fr-FR')} FCFA*`,
+    'Impact sur votre score de fiabilité',
     '',
     '*Confirmez-vous votre candidature ?*',
     '1️⃣ Oui, je postule',

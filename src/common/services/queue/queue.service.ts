@@ -5,6 +5,12 @@ import Redis from 'ioredis';
 import { REDIS_CONNECTION } from '../redis/redis.constants';
 import { EMAIL_QUEUE } from './queue.module';
 
+export type MailAttachment = {
+  filename: string;
+  content: Buffer | string;
+  contentType?: string;
+};
+
 export type EmailJobData = {
   to: string;
   subject: string;
@@ -12,6 +18,7 @@ export type EmailJobData = {
   html?: string;
   from?: string;
   fromName?: string;
+  attachments?: MailAttachment[];
 };
 
 @Injectable()
