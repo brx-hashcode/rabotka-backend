@@ -1,6 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { QueueService } from '../../common/services/queue/queue.service';
 
+export type MailAttachment = {
+  filename: string;
+  content: Buffer | string;
+  contentType?: string;
+};
+
 export type SendMailOptions = {
   to: string;
   subject: string;
@@ -8,6 +14,7 @@ export type SendMailOptions = {
   html?: string;
   from?: string;
   fromName?: string;
+  attachments?: MailAttachment[];
 };
 
 @Injectable()
@@ -22,6 +29,7 @@ export class MailService {
       ...(options.html !== undefined && { html: options.html }),
       ...(options.from !== undefined && { from: options.from }),
       ...(options.fromName !== undefined && { fromName: options.fromName }),
+      ...(options.attachments?.length && { attachments: options.attachments }),
     });
 
     return { jobId: jobId ?? '' };

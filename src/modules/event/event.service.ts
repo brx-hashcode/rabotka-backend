@@ -1,20 +1,30 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
-import { NotificationService } from '../notification/notification.service';
 import { CreateEventDto } from './dto/create-event.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
 import { ListEventsDto } from './dto/list-events.dto';
+import { DeliveryChannel } from './enums/delivery-channel.enum';
+import { EventNotificationDispatcher } from './services/event-notification.dispatcher';
+import { EventNotificationRecipient } from './interfaces/event-notification.interfaces';
 
 const eventInclude = {
   created_by: { select: { id: true, first_name: true, last_name: true } },
   profiles: {
-    select: { id: true, first_name: true, last_name: true, avatar_url: true, email: true },
+    select: {
+      id: true,
+      first_name: true,
+      last_name: true,
+      avatar_url: true,
+      email: true,
+      phone: true,
+    },
   },
-  assigned_users: { select: { id: true, first_name: true, last_name: true, email: true } },
+  assigned_users: {
+    select: { id: true, first_name: true, last_name: true, email: true },
+  },
 } as const;
 
 function parseIsoDate(value: unknown): Date | undefined {
-  // DTOs are expected to provide ISO-8601 strings; this helper makes that explicit for TS/ESLint.
   if (typeof value !== 'string') return undefined;
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? undefined : date;
@@ -28,6 +38,7 @@ function mapEvent(event: any) {
     startDate: event.start_date.toISOString(),
     endDate: event.end_date.toISOString(),
     color: event.color,
+    channel: event.channel,
     location: event.location ?? null,
     createdAt: event.created_at.toISOString(),
     updatedAt: event.updated_at.toISOString(),
@@ -53,7 +64,7 @@ function mapEvent(event: any) {
 export class EventService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly notification: NotificationService,
+    private readonly dispatcher: EventNotificationDispatcher,
   ) {}
 
   async list(dto: ListEventsDto) {
@@ -91,6 +102,7 @@ export class EventService {
         start_date: parseIsoDate(dto.startDate) ?? new Date(dto.startDate),
         end_date: parseIsoDate(dto.endDate) ?? new Date(dto.endDate),
         color: dto.color,
+        channel: dto.channel ?? DeliveryChannel.EMAIL,
         location: dto.location ?? null,
         created_by_id: createdById,
         profiles: dto.profileIds?.length
@@ -104,31 +116,31 @@ export class EventService {
     });
 
     const mapped = mapEvent(event);
-    const startDate = mapped.startDate;
-    const endDate = mapped.endDate;
 
-    for (const p of event.profiles) {
-      void this.notification.notifyEventCreated(
-        p.email,
-        `${p.first_name} ${p.last_name}`.trim(),
-        dto.title,
-        startDate,
-        endDate,
-        dto.description,
-        dto.location,
-      );
-    }
-    for (const u of event.assigned_users) {
-      void this.notification.notifyEventCreated(
-        u.email,
-        `${u.first_name} ${u.last_name}`.trim(),
-        dto.title,
-        startDate,
-        endDate,
-        dto.description,
-        dto.location,
-      );
-    }
+    const recipients: EventNotificationRecipient[] = [
+      ...event.profiles.map((p: any) => ({
+        email: p.email,
+        phone: p.phone,
+        name: `${p.first_name} ${p.last_name}`.trim(),
+      })),
+      ...event.assigned_users.map((u: any) => ({
+        email: u.email,
+        name: `${u.first_name} ${u.last_name}`.trim(),
+      })),
+    ];
+
+    void this.dispatcher.dispatchEventCreated(
+      recipients,
+      {
+        eventId: String(event.id),
+        title: dto.title,
+        startDate: mapped.startDate,
+        endDate: mapped.endDate,
+        description: dto.description,
+        location: dto.location,
+      },
+      dto.channel ?? DeliveryChannel.EMAIL,
+    );
 
     return mapped;
   }
@@ -150,6 +162,7 @@ export class EventService {
         ...(newStartDate !== undefined && { start_date: newStartDate }),
         ...(newEndDate !== undefined && { end_date: newEndDate }),
         ...(dto.color !== undefined && { color: dto.color }),
+        ...(dto.channel !== undefined && { channel: dto.channel }),
         ...(dto.location !== undefined && { location: dto.location }),
         ...(dto.profileIds !== undefined && {
           profiles: { set: dto.profileIds.map((pid) => ({ id: pid })) },
@@ -164,33 +177,30 @@ export class EventService {
     const mapped = mapEvent(event);
 
     if (datesChanged) {
-      const startDate = mapped.startDate;
-      const endDate = mapped.endDate;
-      const title = mapped.title;
-      const location = mapped.location;
+      const recipients: EventNotificationRecipient[] = [
+        ...event.profiles.map((p: any) => ({
+          email: p.email,
+          phone: p.phone,
+          name: `${p.first_name} ${p.last_name}`.trim(),
+        })),
+        ...event.assigned_users.map((u: any) => ({
+          email: u.email,
+          name: `${u.first_name} ${u.last_name}`.trim(),
+        })),
+      ];
 
-      for (const p of event.profiles) {
-        void this.notification.notifyEventUpdated(
-          p.email,
-          `${p.first_name} ${p.last_name}`.trim(),
-          title,
-          startDate,
-          endDate,
-          mapped.description,
-          location,
-        );
-      }
-      for (const u of event.assigned_users) {
-        void this.notification.notifyEventUpdated(
-          u.email,
-          `${u.first_name} ${u.last_name}`.trim(),
-          title,
-          startDate,
-          endDate,
-          mapped.description,
-          location,
-        );
-      }
+      void this.dispatcher.dispatchEventUpdated(
+        recipients,
+        {
+          eventId: String(event.id),
+          title: mapped.title,
+          startDate: mapped.startDate,
+          endDate: mapped.endDate,
+          description: mapped.description,
+          location: mapped.location,
+        },
+        dto.channel ?? DeliveryChannel.EMAIL,
+      );
     }
 
     return mapped;

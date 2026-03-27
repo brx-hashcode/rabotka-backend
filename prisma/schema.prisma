@@ -35,6 +35,12 @@ enum BotPlatform {
   EMAIL
 }
 
+enum DeliveryChannel {
+  EMAIL
+  WHATSAPP
+  ALL
+}
+
 enum MessageDirection {
   INBOUND
   OUTBOUND
@@ -602,20 +608,21 @@ model ClaimComment {
 }
 
 model Event {
-  id             Int       @id @default(autoincrement())
-  created_at     DateTime  @default(now())
-  updated_at     DateTime  @updatedAt
+  id             Int              @id @default(autoincrement())
+  created_at     DateTime         @default(now())
+  updated_at     DateTime         @updatedAt
   title          String
-  description    String    @db.Text
+  description    String           @db.Text
   start_date     DateTime
   end_date       DateTime
   color          String
+  channel        DeliveryChannel  @default(EMAIL)
   location       String?
-  created_by_id  String    @db.Uuid
+  created_by_id  String           @db.Uuid
 
-  created_by     User      @relation("EventCreatedBy", fields: [created_by_id], references: [id], onDelete: Cascade)
-  profiles       Profile[] @relation("EventProfiles")
-  assigned_users User[]    @relation("EventAssignedUsers")
+  created_by     User             @relation("EventCreatedBy", fields: [created_by_id], references: [id], onDelete: Cascade)
+  profiles       Profile[]        @relation("EventProfiles")
+  assigned_users User[]           @relation("EventAssignedUsers")
 
   @@index([created_by_id], name: "idx_event_created_by")
   @@index([start_date], name: "idx_event_start_date")

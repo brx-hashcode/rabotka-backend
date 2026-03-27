@@ -4,7 +4,12 @@ import {
   NotFoundException,
   ForbiddenException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
+import { MailService } from '../mail/mail.service';
+import { SystemConfigService } from '../system-config/system-config.service';
+import { WalletService } from '../wallet/wallet.service';
+import { BotNotificationService } from '../bot/services/bot-notification.service';
 import { CreateJobOfferDto } from './dto/create-job-offer.dto';
 import { AdminUpdateJobOfferDto } from './dto/admin-update-job-offer.dto';
 import {
@@ -94,7 +99,13 @@ export type JobOfferDetail = JobOfferListItem & {
 
 @Injectable()
 export class JobOfferService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly mailService: MailService,
+    private readonly systemConfigService: SystemConfigService,
+    private readonly walletService: WalletService,
+    private readonly botNotification: BotNotificationService,
+  ) {}
 
   async create(
     employerId: string,
@@ -544,6 +555,168 @@ export class JobOfferService {
       status: offer.status,
       employer_id: offer.employer_id,
       created_at: offer.created_at,
+    };
+  }
+
+  async confirmPaymentByAdmin(
+    jobOfferId: string,
+    adminUserId: string,
+  ): Promise<AdminJobOfferDetailResponse> {
+    // Fetch the job offer
+    const jobOffer = await this.prisma.jobOffer.findUnique({
+      where: { id: jobOfferId },
+      include: {
+        employer: {
+          select: {
+            id: true,
+            first_name: true,
+            last_name: true,
+            email: true,
+            phone: true,
+            avatar_url: true,
+          },
+        },
+        applications: {
+          include: {
+            worker: {
+              select: {
+                id: true,
+                first_name: true,
+                last_name: true,
+                email: true,
+                phone: true,
+                avatar_url: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!jobOffer) {
+      throw new NotFoundException('Offre d\'emploi introuvable');
+    }
+
+    // Verify job is in PENDING_PAYMENT status
+    if (jobOffer.status !== JobOfferStatus.PENDING_PAYMENT) {
+      throw new BadRequestException(
+        "L'offre d'emploi n'est pas en attente de paiement",
+      );
+    }
+
+    // Get job posting fee from system config
+    const jobPostingFeeStr = await this.systemConfigService.getRaw(
+      'fees.job_posting_fee_fcfa',
+      '0',
+    );
+    const jobPostingFee = Number(jobPostingFeeStr) || 0;
+
+    // Update job offer status to ACTIVE
+    const updatedJobOffer = await this.prisma.jobOffer.update({
+      where: { id: jobOfferId },
+      data: { status: JobOfferStatus.ACTIVE },
+      include: {
+        employer: {
+          select: {
+            id: true,
+            first_name: true,
+            last_name: true,
+            email: true,
+            phone: true,
+            avatar_url: true,
+          },
+        },
+        applications: {
+          include: {
+            worker: {
+              select: {
+                id: true,
+                first_name: true,
+                last_name: true,
+                email: true,
+                phone: true,
+                avatar_url: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    // Record payment + credit system wallet (atomic via WalletService)
+    await this.walletService.recordJobPostingPayment(
+      jobOfferId,
+      jobOffer.employer_id,
+      jobPostingFee,
+    );
+
+    // Send WhatsApp notification (fire and forget)
+    void this.botNotification
+      .sendMessage(
+        updatedJobOffer.employer.phone,
+        `✅ Votre offre "${updatedJobOffer.title}" est maintenant publiée !\n\nLes travailleurs peuvent désormais y postuler.`,
+      )
+      .catch((err) => {
+        console.error(
+          `Failed to send WhatsApp to ${updatedJobOffer.employer.phone}:`,
+          err,
+        );
+      });
+
+    // Send email notification to employer (fire and forget)
+    void this.mailService
+      .sendMail({
+        to: updatedJobOffer.employer.email,
+        subject: `Votre offre d'emploi est maintenant active : ${updatedJobOffer.title}`,
+        html: `
+          <h2>Offre d'emploi activée</h2>
+          <p>Bonjour ${updatedJobOffer.employer.first_name},</p>
+          <p>Le paiement pour votre offre d'emploi a été confirmé et celle-ci est maintenant active et visible aux candidats.</p>
+          <p><strong>Offre:</strong> ${updatedJobOffer.title}</p>
+          <p><strong>Montant crédité:</strong> ${jobPostingFee} FCFA</p>
+          <p>Les candidats peuvent maintenant postuler à cette offre.</p>
+          <br/>
+          <p>Cordialement,<br/>L'équipe Rabotka</p>
+        `,
+      })
+      .catch((err) => {
+        console.error(`Failed to send email to ${updatedJobOffer.employer.email}:`, err);
+      });
+
+    // Return the updated job offer detail
+    return {
+      id: updatedJobOffer.id,
+      title: updatedJobOffer.title,
+      description: updatedJobOffer.description,
+      scheduledAt: updatedJobOffer.scheduled_at.toISOString(),
+      amount: Number(updatedJobOffer.amount),
+      paymentFlow: updatedJobOffer.payment_flow,
+      address: updatedJobOffer.address,
+      note: updatedJobOffer.note,
+      quantity: updatedJobOffer.quantity,
+      status: updatedJobOffer.status,
+      employerName: `${updatedJobOffer.employer.first_name} ${updatedJobOffer.employer.last_name}`.trim(),
+      employerEmail: updatedJobOffer.employer.email,
+      employerPhone: updatedJobOffer.employer.phone || '',
+      employerAvatarUrl: updatedJobOffer.employer.avatar_url,
+      employerId: updatedJobOffer.employer.id,
+      applicationsCount: updatedJobOffer.applications.length,
+      createdAt: updatedJobOffer.created_at.toISOString(),
+      updatedAt: updatedJobOffer.updated_at.toISOString(),
+      applications: updatedJobOffer.applications.map((app) => ({
+        id: app.id,
+        workerName: `${app.worker.first_name} ${app.worker.last_name}`.trim(),
+        workerEmail: app.worker.email,
+        workerPhone: app.worker.phone || '',
+        workerAvatarUrl: app.worker.avatar_url,
+        workerId: app.worker.id,
+        status: app.status,
+        penaltyApplied: app.penalty_applied,
+        penaltyAmount: app.penalty_amount ? Number(app.penalty_amount) : null,
+        cancelledAt: app.cancelled_at?.toISOString() ?? null,
+        cancellationReason: app.cancellation_reason,
+        createdAt: app.created_at.toISOString(),
+      })),
     };
   }
 }

@@ -9,11 +9,13 @@ import { menuMessage } from '../messages/menu.messages';
 import type { ApplicationService } from '../../application/application.service';
 import type { JobOfferService } from '../../job-offer/job-offer.service';
 import type { BotNotificationService } from '../services/bot-notification.service';
+import type { SystemConfigService } from '../../system-config/system-config.service';
 
 export type ApplyJobContext = {
   applicationService: ApplicationService;
   jobOfferService: JobOfferService;
   notificationService: BotNotificationService;
+  systemConfigService: SystemConfigService;
 };
 
 export type FlowResult = {
@@ -46,6 +48,11 @@ async function handleApplyStep1(
   const { state, jobOfferId, trimmed, normalized, profile, ctx } = args;
   if (!trimmed) {
     const workerName = `${profile.first_name} ${profile.last_name}`;
+    const penaltyStr = await ctx.systemConfigService.getRaw(
+      'fees.late_cancellation_penalty_fcfa',
+      '5000',
+    );
+    const penalty = Number(penaltyStr) || 5000;
     const text = formatApplyConfirmation({
       title: offer.title,
       scheduled_at: offer.scheduled_at,
@@ -56,6 +63,7 @@ async function handleApplyStep1(
       workerPhone: profile.phone,
       workerEmail: profile.email,
       reliabilityScore: profile.reliability_score,
+      lateCancellationPenalty: penalty,
     });
     return { reply: [text], nextState: state };
   }
