@@ -42,6 +42,8 @@ import { SystemConfigModule } from './modules/system-config/system-config.module
 import { QdrantModule } from './modules/qdrant/qdrant.module';
 import { ClaimModule } from './modules/claim/claim.module';
 import { EventModule } from './modules/event/event.module';
+import { EventEmitterModule } from '@nestjs/event-emitter';
+import { WsNotificationsModule } from './modules/ws-notifications/ws-notifications.module';
 import { StorageModule } from './common/services/storage/storage.module';
 import { ImageWatermarkModule } from './common/services/image-watermark/image-watermark.module';
 import { AppController } from './app.controller';
@@ -138,6 +140,8 @@ import { HttpExceptionFilter } from './common/filters/http-exception.filter';
     PaymentsModule,
     KycModule,
     QdrantModule,
+    EventEmitterModule.forRoot({ wildcard: true }),
+    WsNotificationsModule,
   ],
   controllers: [AppController],
   providers: [
