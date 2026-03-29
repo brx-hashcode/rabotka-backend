@@ -65,6 +65,8 @@ import { PaymentService } from '../../payments/payment.service';
 
 const INACTIVE_MESSAGE = `Votre compte est créé mais pas encore activé. Cliquez sur le lien de confirmation que nous vous avons envoyé par WhatsApp pour l’activer.`;
 
+const WHATSAPP_NOT_CONNECTED_MESSAGE = `⚠️ Votre numéro WhatsApp n’est pas encore vérifié. Veuillez d’abord vérifier votre numéro WhatsApp via le lien de vérification qui vous a été envoyé.`;
+
 const NOT_FOUND_MESSAGE = `Ce numéro n'est pas encore enregistré. Inscrivez-vous sur notre site pour créer votre compte.`;
 
 const ERROR_MESSAGE = `Une erreur est survenue. Veuillez réessayer ou tapez « Menu ».`;
@@ -116,6 +118,10 @@ export class BotOrchestratorService {
     if (profile.status === AccountStatus.SUSPENDED) {
       const contact = await this.systemConfig.getContactInfo();
       return [accountSuspendedBotMessage(contact)];
+    }
+
+    if (!profile.whatsapp_connected) {
+      return [WHATSAPP_NOT_CONNECTED_MESSAGE];
     }
 
     if (profile.status === AccountStatus.PENDING_ACTIVATION) {
@@ -463,6 +469,7 @@ export class BotOrchestratorService {
         status: true,
         billing_status: true,
         reliability_score: true,
+        whatsapp_connected: true,
       },
     });
   }

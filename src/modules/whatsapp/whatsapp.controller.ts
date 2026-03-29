@@ -95,6 +95,20 @@ export class WhatsAppController {
       throw new ForbiddenException('Signature invalide');
     }
 
+    // Ignore Twilio delivery status callbacks — real inbound messages have MessageStatus='received'
+    const deliveryStatuses = [
+      'sent',
+      'delivered',
+      'read',
+      'undelivered',
+      'failed',
+      'queued',
+      'sending',
+    ];
+    if (body.MessageStatus && deliveryStatuses.includes(body.MessageStatus)) {
+      return;
+    }
+
     const from = body.From ?? '';
     const text = body.Body ?? '';
     const messageSid = body.MessageSid ?? '';
@@ -121,6 +135,10 @@ export class WhatsAppController {
     const phone = from.startsWith('whatsapp:')
       ? from.slice('whatsapp:'.length)
       : from;
+
+    this.logger.log(
+      `Incoming WhatsApp from ${phone}: "${text.slice(0, 80)}${text.length > 80 ? '...' : ''}"`,
+    );
 
     // Per-phone rate limiting
     const rateLimitKey = `wa:rate:${phone}`;
@@ -172,7 +190,12 @@ export class WhatsAppController {
       };
     }
 
-    return { type: 'text', phone, profileId: profileId ?? undefined, text: message };
+    return {
+      type: 'text',
+      phone,
+      profileId: profileId ?? undefined,
+      text: message,
+    };
   }
 
   private buildWebhookUrl(req: Request): string {
