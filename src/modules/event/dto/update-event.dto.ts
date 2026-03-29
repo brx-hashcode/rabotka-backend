@@ -7,7 +7,7 @@ import {
   IsString,
 } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { DeliveryChannel } from '../enums/delivery-channel.enum';
+import { DeliveryChannel } from '@prisma/client';
 
 export class UpdateEventDto {
   @ApiPropertyOptional()
