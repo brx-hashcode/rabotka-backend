@@ -628,3 +628,19 @@ model Event {
   @@index([start_date], name: "idx_event_start_date")
   @@map("events")
 }
+
+model AdminNotification {
+  id          String   @id @default(uuid()) @db.Uuid
+  created_at  DateTime @default(now())
+  event       String
+  title       String
+  message     String
+  entity_type String
+  entity_id   String
+  metadata    Json?
+  read        Boolean  @default(false)
+
+  @@index([created_at], name: "idx_admin_notification_created_at")
+  @@index([read], name: "idx_admin_notification_read")
+  @@map("admin_notifications")
+}

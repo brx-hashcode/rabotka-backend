@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PaymentStatus, PaymentMethod, PaymentType } from '@prisma/client';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { BotNotificationService } from '../bot/services/bot-notification.service';
 import { QueueService } from '../../common/services/queue/queue.service';
@@ -13,7 +15,7 @@ export type PaymentJobData = {
   type: PaymentType;
   profileId: string;
   amount: number;
-  entityId?: string; // jobOfferId for JOB_POSTING; penaltyId for PENALTY
+  entityId?: string;
 };
 
 @Injectable()
@@ -26,13 +28,14 @@ export class PaymentService {
     private readonly config: ConfigService,
     private readonly queueService: QueueService,
     private readonly systemConfig: SystemConfigService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   private getFrontendUrl(): string {
     return this.config.get<string>('FRONTEND_URL', '');
   }
 
-  async generateActivationPaymentLink(profileId: string): Promise<string> {
+  generateActivationPaymentLink(profileId: string): string {
     this.logger.log(
       `Generating activation payment link for profile ${profileId}`,
     );
@@ -40,7 +43,7 @@ export class PaymentService {
     return `${this.getFrontendUrl()}/activation/${profileId}`;
   }
 
-  async generateJobPostingPaymentLink(jobOfferId: string): Promise<string> {
+  generateJobPostingPaymentLink(jobOfferId: string): string {
     this.logger.log(
       `Generating job posting payment link for job offer ${jobOfferId}`,
     );
@@ -48,10 +51,7 @@ export class PaymentService {
     return `${this.getFrontendUrl()}/job-posting/${jobOfferId}`;
   }
 
-  async generatePenaltyPaymentLink(
-    profileId: string,
-    amount: number,
-  ): Promise<string> {
+  generatePenaltyPaymentLink(profileId: string, amount: number): string {
     this.logger.log(
       `Generating penalty payment link for profile ${profileId}, amount ${amount}`,
     );
@@ -92,6 +92,7 @@ export class PaymentService {
     const profile = await this.prisma.profile.update({
       where: { id: profileId },
       data: { status: 'ACTIVE' },
+      select: { phone: true, first_name: true, last_name: true },
     });
 
     await this.botNotification.sendMessage(
@@ -99,8 +100,24 @@ export class PaymentService {
       `✅ Votre compte Rabotka est maintenant actif !\n\nBienvenue sur Rabotka 🎉\nVous pouvez dès maintenant explorer toutes les fonctionnalités :\n- Parcourir les offres d'emploi\n- Postuler aux missions\n- Gérer votre profil\n\nTapez n'importe quoi pour commencer.`,
     );
 
-    const fee = await this.systemConfig.getRaw('fees.application_fee_fcfa', '0');
-    await this.makePayment({ type: PaymentType.REGISTRATION, profileId, amount: Number(fee) });
+    this.eventEmitter.emit(AdminNotificationEvent.PAYMENT_ACTIVATION, {
+      event: AdminNotificationEvent.PAYMENT_ACTIVATION,
+      title: 'Paiement activation',
+      message: `Paiement d'activation réussi pour ${profile.first_name} ${profile.last_name}`,
+      entityType: 'payment',
+      entityId: String(profileId),
+      timestamp: new Date().toISOString(),
+    });
+
+    const fee = await this.systemConfig.getRaw(
+      'fees.application_fee_fcfa',
+      '0',
+    );
+    await this.makePayment({
+      type: PaymentType.REGISTRATION,
+      profileId,
+      amount: Number(fee),
+    });
   }
 
   async handleJobPostingPaymentSuccess(jobOfferId: string): Promise<void> {
@@ -115,7 +132,19 @@ export class PaymentService {
       `✅ Votre offre "${jobOffer.title}" est maintenant publiée !\n\nLes travailleurs peuvent désormais y postuler.`,
     );
 
-    const fee = await this.systemConfig.getRaw('fees.job_posting_fee_fcfa', '0');
+    this.eventEmitter.emit(AdminNotificationEvent.PAYMENT_JOB_POSTING, {
+      event: AdminNotificationEvent.PAYMENT_JOB_POSTING,
+      title: 'Paiement publication',
+      message: `Paiement de publication réussi pour l'offre "${jobOffer.title}" (employeur : ${jobOffer.employer.first_name} ${jobOffer.employer.last_name})`,
+      entityType: 'payment',
+      entityId: String(jobOfferId),
+      timestamp: new Date().toISOString(),
+    });
+
+    const fee = await this.systemConfig.getRaw(
+      'fees.job_posting_fee_fcfa',
+      '0',
+    );
     await this.makePayment({
       type: PaymentType.JOB_POSTING,
       profileId: jobOffer.employer_id,
@@ -134,17 +163,44 @@ export class PaymentService {
       where: { worker_id: profileId, paid_at: null },
     });
 
+    const penaltyProfile = await this.prisma.profile.findUnique({
+      where: { id: profileId },
+      select: { phone: true, first_name: true, last_name: true },
+    });
+    const penaltyProfileName = penaltyProfile
+      ? `${penaltyProfile.first_name} ${penaltyProfile.last_name}`
+      : profileId;
+
     if (remaining === 0) {
-      const profile = await this.prisma.profile.update({
+      const updatedProfile = await this.prisma.profile.update({
         where: { id: profileId },
         data: { status: 'ACTIVE' },
+        select: { phone: true },
       });
 
       await this.botNotification.sendMessage(
-        profile.phone,
+        updatedProfile.phone,
         `✅ Pénalités réglées — Compte réactivé !\n\nVos pénalités ont été payées avec succès.\nVotre compte Rabotka est de nouveau actif.\n\nVous pouvez maintenant explorer toutes les fonctionnalités.\nTapez n'importe quoi pour commencer.`,
       );
     }
+
+    this.eventEmitter.emit(AdminNotificationEvent.PAYMENT_PENALTY, {
+      event: AdminNotificationEvent.PAYMENT_PENALTY,
+      title: 'Paiement pénalité',
+      message: `Paiement de pénalité réussi pour ${penaltyProfileName}`,
+      entityType: 'payment',
+      entityId: String(profileId),
+      timestamp: new Date().toISOString(),
+    });
+
+    this.eventEmitter.emit(AdminNotificationEvent.PENALTY_SOLVED, {
+      event: AdminNotificationEvent.PENALTY_SOLVED,
+      title: 'Pénalité réglée',
+      message: `Les pénalités de ${penaltyProfileName} ont été réglées`,
+      entityType: 'penalty',
+      entityId: String(profileId),
+      timestamp: new Date().toISOString(),
+    });
 
     await this.makePayment({ type: PaymentType.PENALTY, profileId, amount: 0 });
   }

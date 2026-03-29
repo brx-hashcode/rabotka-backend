@@ -9,6 +9,8 @@ import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { WalletService } from '../wallet/wallet.service';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
 import { BotNotificationService } from '../bot/services/bot-notification.service';
 import { CreateJobOfferDto } from './dto/create-job-offer.dto';
 import { AdminUpdateJobOfferDto } from './dto/admin-update-job-offer.dto';
@@ -105,6 +107,7 @@ export class JobOfferService {
     private readonly systemConfigService: SystemConfigService,
     private readonly walletService: WalletService,
     private readonly botNotification: BotNotificationService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   async create(
@@ -151,6 +154,15 @@ export class JobOfferService {
         quantity: dto.quantity ?? 1,
         status: JobOfferStatus.PENDING_PAYMENT,
       },
+    });
+
+    this.eventEmitter.emit(AdminNotificationEvent.JOB_OFFER_CREATED, {
+      event: AdminNotificationEvent.JOB_OFFER_CREATED,
+      title: 'Nouvelle offre',
+      message: `Nouvelle offre d'emploi créée : ${offer.title}`,
+      entityType: 'job-offer',
+      entityId: String(offer.id),
+      timestamp: new Date().toISOString(),
     });
 
     return this.toListItem(offer);
@@ -261,6 +273,16 @@ export class JobOfferService {
       where: { id },
       data: { status },
     });
+
+    this.eventEmitter.emit(AdminNotificationEvent.JOB_OFFER_STATUS_CHANGED, {
+      event: AdminNotificationEvent.JOB_OFFER_STATUS_CHANGED,
+      title: 'Statut offre modifié',
+      message: `Le statut de l'offre "${updated.title}" a été changé en ${status}`,
+      entityType: 'job-offer',
+      entityId: String(updated.id),
+      timestamp: new Date().toISOString(),
+    });
+
     return this.toListItem(updated);
   }
 
@@ -483,13 +505,22 @@ export class JobOfferService {
   async deleteJobOfferByAdmin(id: string): Promise<void> {
     const offer = await this.prisma.jobOffer.findUnique({
       where: { id },
-      select: { id: true },
+      select: { id: true, title: true },
     });
     if (!offer) {
       throw new NotFoundException("Offre d'emploi introuvable");
     }
 
     await this.prisma.jobOffer.delete({ where: { id } });
+
+    this.eventEmitter.emit(AdminNotificationEvent.JOB_OFFER_DELETED, {
+      event: AdminNotificationEvent.JOB_OFFER_DELETED,
+      title: 'Offre supprimée',
+      message: `L'offre d'emploi "${offer.title}" a été supprimée`,
+      entityType: 'job-offer',
+      entityId: String(id),
+      timestamp: new Date().toISOString(),
+    });
   }
 
   async updateJobOfferByAdmin(
@@ -519,7 +550,16 @@ export class JobOfferService {
     if (dto.note !== undefined) data.note = dto.note.trim() || null;
     if (dto.quantity !== undefined) data.quantity = dto.quantity;
 
-    await this.prisma.jobOffer.update({ where: { id }, data });
+    const updatedOffer = await this.prisma.jobOffer.update({ where: { id }, data, select: { title: true } });
+
+    this.eventEmitter.emit(AdminNotificationEvent.JOB_OFFER_UPDATED, {
+      event: AdminNotificationEvent.JOB_OFFER_UPDATED,
+      title: 'Offre mise à jour',
+      message: `L'offre d'emploi "${updatedOffer.title}" a été mise à jour par un admin`,
+      entityType: 'job-offer',
+      entityId: String(id),
+      timestamp: new Date().toISOString(),
+    });
 
     return this.getJobOfferDetailForAdmin(id);
   }
