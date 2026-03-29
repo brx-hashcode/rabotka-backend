@@ -8,6 +8,8 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
 import Redis from 'ioredis';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { FileService } from '../file/file.service';
@@ -158,6 +160,7 @@ export class ProfileService {
     private readonly whatsAppService: WhatsAppService,
     private readonly configService: ConfigService,
     private readonly mailService: MailService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   async findById(id: string): Promise<ProfileMeResponse> {
@@ -224,7 +227,7 @@ export class ProfileService {
   ): Promise<ProfileMeResponse> {
     const existingProfile = await this.prisma.profile.findUnique({
       where: { id },
-      select: { id: true, status: true },
+      select: { id: true, status: true, first_name: true, last_name: true },
     });
 
     if (!existingProfile) {
@@ -242,6 +245,15 @@ export class ProfileService {
     if (transitionedToActive) {
       await this.sendActivationNotification(id);
     }
+
+    this.eventEmitter.emit(AdminNotificationEvent.PROFILE_UPDATED, {
+      event: AdminNotificationEvent.PROFILE_UPDATED,
+      title: 'Profil mis à jour',
+      message: `${existingProfile.first_name} ${existingProfile.last_name} a mis à jour son profil`,
+      entityType: 'profile',
+      entityId: String(id),
+      timestamp: new Date().toISOString(),
+    });
 
     this.logger.log(`Profile updated successfully: ${id}`);
     return this.findById(id);
@@ -582,6 +594,17 @@ export class ProfileService {
       ),
     ]);
 
+    const kycProfile = await this.prisma.profile.findUnique({ where: { id: profileId }, select: { first_name: true, last_name: true } });
+
+    this.eventEmitter.emit(AdminNotificationEvent.PROFILE_KYC_VERIFIED, {
+      event: AdminNotificationEvent.PROFILE_KYC_VERIFIED,
+      title: 'KYC vérifié',
+      message: `KYC de ${kycProfile?.first_name ?? ''} ${kycProfile?.last_name ?? ''} : ${decision}`,
+      entityType: 'profile',
+      entityId: String(profileId),
+      timestamp: new Date().toISOString(),
+    });
+
     return this.getProfileDetailForAdmin(profileId);
   }
 
@@ -607,6 +630,15 @@ export class ProfileService {
     await this.prisma.profile.update({
       where: { id: profileId },
       data: { status },
+    });
+
+    this.eventEmitter.emit(AdminNotificationEvent.PROFILE_STATUS_CHANGED, {
+      event: AdminNotificationEvent.PROFILE_STATUS_CHANGED,
+      title: 'Statut profil modifié',
+      message: `${profile.first_name} — statut changé en ${status}`,
+      entityType: 'profile',
+      entityId: String(profileId),
+      timestamp: new Date().toISOString(),
     });
 
     if (
@@ -657,7 +689,7 @@ export class ProfileService {
   ): Promise<AdminProfileDetailResponse> {
     const profile = await this.prisma.profile.findUnique({
       where: { id: profileId },
-      select: { id: true },
+      select: { id: true, first_name: true, last_name: true },
     });
     if (!profile) {
       throw new NotFoundException('Profil non trouvé');
@@ -672,6 +704,15 @@ export class ProfileService {
       this.throwIfUniqueConstraintViolation(err);
       throw err;
     }
+
+    this.eventEmitter.emit(AdminNotificationEvent.PROFILE_UPDATED, {
+      event: AdminNotificationEvent.PROFILE_UPDATED,
+      title: 'Profil mis à jour par admin',
+      message: `${profile.first_name} ${profile.last_name} — mis à jour par un administrateur`,
+      entityType: 'profile',
+      entityId: String(profileId),
+      timestamp: new Date().toISOString(),
+    });
 
     return this.getProfileDetailForAdmin(profileId);
   }
@@ -829,6 +870,15 @@ export class ProfileService {
       );
 
       this.logger.log(`Profile created successfully: ${profile.id}`);
+
+      this.eventEmitter.emit(AdminNotificationEvent.PROFILE_CREATED, {
+        event: AdminNotificationEvent.PROFILE_CREATED,
+        title: 'Nouveau profil',
+        message: `Nouveau profil créé : ${createProfileDto.firstName} ${createProfileDto.lastName}`,
+        entityType: 'profile',
+        entityId: String(profile.id),
+        timestamp: new Date().toISOString(),
+      });
 
       return { message: 'Profil créé avec succès' };
     } catch (error: any) {
