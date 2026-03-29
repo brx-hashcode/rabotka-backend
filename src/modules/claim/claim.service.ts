@@ -1,4 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { CreateClaimDto } from './dto/create-claim.dto';
 import { UpdateClaimDto } from './dto/update-claim.dto';
@@ -112,6 +114,7 @@ export class ClaimService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   async createForAdmin(
@@ -128,6 +131,15 @@ export class ClaimService {
         created_by_user_id: userId,
       },
       include: claimInclude,
+    });
+
+    this.eventEmitter.emit(AdminNotificationEvent.CLAIM_CREATED, {
+      event: AdminNotificationEvent.CLAIM_CREATED,
+      title: 'Nouvelle réclamation',
+      message: `Nouvelle réclamation "${dto.title}" créée par ${claim.profile ? `${claim.profile.first_name} ${claim.profile.last_name}` : 'un profil'}`,
+      entityType: 'claim',
+      entityId: String(claim.id),
+      timestamp: new Date().toISOString(),
     });
 
     const profile = await this.prisma.profile.findUnique({
@@ -226,6 +238,15 @@ export class ClaimService {
       include: claimInclude,
     });
 
+    this.eventEmitter.emit(AdminNotificationEvent.CLAIM_UPDATED, {
+      event: AdminNotificationEvent.CLAIM_UPDATED,
+      title: 'Réclamation mise à jour',
+      message: `La réclamation "${claim.title}" a été mise à jour${claim.profile ? ` (profil : ${claim.profile.first_name} ${claim.profile.last_name})` : ''}`,
+      entityType: 'claim',
+      entityId: String(claim.id),
+      timestamp: new Date().toISOString(),
+    });
+
     if (dto.status && dto.status !== exists.status) {
       const profile = await this.prisma.profile.findUnique({
         where: { id: exists.profile_id },
@@ -300,6 +321,7 @@ export class ClaimService {
   ): Promise<AdminClaimCommentItem> {
     const exists = await this.prisma.claim.findUnique({
       where: { id: claimId },
+      select: { id: true, title: true },
     });
     if (!exists) throw new NotFoundException('Claim not found');
     const comment = await this.prisma.claimComment.create({
@@ -314,6 +336,17 @@ export class ClaimService {
         profile: { select: { first_name: true, last_name: true } },
       },
     });
+
+    const authorName = `${comment.user?.first_name ?? ''} ${comment.user?.last_name ?? ''}`.trim();
+    this.eventEmitter.emit(AdminNotificationEvent.CLAIM_COMMENTED, {
+      event: AdminNotificationEvent.CLAIM_COMMENTED,
+      title: 'Nouveau commentaire (admin)',
+      message: `${authorName} a commenté la réclamation « ${exists.title} »`,
+      entityType: 'claim',
+      entityId: claimId,
+      timestamp: new Date().toISOString(),
+    });
+
     return mapComment(comment);
   }
 
@@ -350,6 +383,15 @@ export class ClaimService {
         assigned_user_id: dto.assigned_user_id ?? null,
       },
       include: claimInclude,
+    });
+
+    this.eventEmitter.emit(AdminNotificationEvent.CLAIM_CREATED, {
+      event: AdminNotificationEvent.CLAIM_CREATED,
+      title: 'Nouvelle réclamation',
+      message: `Nouvelle réclamation "${dto.title}" créée par ${claim.profile ? `${claim.profile.first_name} ${claim.profile.last_name}` : 'un profil'}`,
+      entityType: 'claim',
+      entityId: String(claim.id),
+      timestamp: new Date().toISOString(),
     });
 
     const profile = await this.prisma.profile.findUnique({
@@ -438,6 +480,7 @@ export class ClaimService {
   ): Promise<AdminClaimCommentItem> {
     const claim = await this.prisma.claim.findUnique({
       where: { id: claimId },
+      select: { id: true, title: true, profile_id: true },
     });
     if (!claim) throw new NotFoundException('Claim not found');
     if (claim.profile_id !== profileId) {
@@ -456,6 +499,17 @@ export class ClaimService {
         profile: { select: { first_name: true, last_name: true } },
       },
     });
+
+    const authorName = `${comment.profile?.first_name ?? ''} ${comment.profile?.last_name ?? ''}`.trim();
+    this.eventEmitter.emit(AdminNotificationEvent.CLAIM_COMMENTED, {
+      event: AdminNotificationEvent.CLAIM_COMMENTED,
+      title: 'Nouveau commentaire (client)',
+      message: `${authorName} a commenté la réclamation « ${claim.title} »`,
+      entityType: 'claim',
+      entityId: claimId,
+      timestamp: new Date().toISOString(),
+    });
+
     return mapComment(comment);
   }
 

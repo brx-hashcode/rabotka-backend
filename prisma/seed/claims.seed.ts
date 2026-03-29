@@ -14,11 +14,18 @@ export async function seedClaims(prisma: PrismaClient): Promise<void> {
   }
 
   // Grab any 2 profiles and 1 admin user to reference
-  const profiles = await prisma.profile.findMany({ take: 3, orderBy: { created_at: 'asc' } });
-  const adminUser = await prisma.user.findFirst({ orderBy: { created_at: 'asc' } });
+  const profiles = await prisma.profile.findMany({
+    take: 3,
+    orderBy: { created_at: 'asc' },
+  });
+  const adminUser = await prisma.user.findFirst({
+    orderBy: { created_at: 'asc' },
+  });
 
   if (profiles.length === 0) {
-    console.log('[Claims seed] Skipped (no profiles found — run profile seed first).');
+    console.log(
+      '[Claims seed] Skipped (no profiles found — run profile seed first).',
+    );
     return;
   }
 
@@ -69,7 +76,8 @@ export async function seedClaims(prisma: PrismaClient): Promise<void> {
       created_by_user_id: adminUser?.id,
     },
     {
-      title: '[SEED] Job offer cancelled without notice — employer refused to pay',
+      title:
+        '[SEED] Job offer cancelled without notice — employer refused to pay',
       description:
         'The employer cancelled the job offer 2 hours before the scheduled start time without notifying workers. Two assigned workers lost income. Requesting compensation.',
       status: ClaimStatus.REJECTED,

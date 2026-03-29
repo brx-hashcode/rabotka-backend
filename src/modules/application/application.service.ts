@@ -7,6 +7,8 @@ import {
   Inject,
   forwardRef,
 } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { BotNotificationService } from '../bot/services/bot-notification.service';
 import {
@@ -134,6 +136,7 @@ export class ApplicationService {
     private readonly prisma: PrismaService,
     @Inject(forwardRef(() => BotNotificationService))
     private readonly botNotification: BotNotificationService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   async create(
@@ -209,6 +212,15 @@ export class ApplicationService {
       include: {
         job_offer: true,
       },
+    });
+
+    this.eventEmitter.emit(AdminNotificationEvent.APPLICATION_CREATED, {
+      event: AdminNotificationEvent.APPLICATION_CREATED,
+      title: 'Nouvelle candidature',
+      message: `Nouvelle candidature pour l'offre "${application.job_offer.title}"`,
+      entityType: 'application',
+      entityId: String(application.id),
+      timestamp: new Date().toISOString(),
     });
 
     return this.toListItem(application);
@@ -357,6 +369,16 @@ export class ApplicationService {
     const updated = await this.findById(applicationId);
     if (!updated)
       throw new NotFoundException('Candidature introuvable après mise à jour');
+
+    this.eventEmitter.emit(AdminNotificationEvent.APPLICATION_ACCEPTED, {
+      event: AdminNotificationEvent.APPLICATION_ACCEPTED,
+      title: 'Candidature acceptée',
+      message: `La candidature de ${application.worker.first_name} ${application.worker.last_name} pour l'offre "${application.job_offer.title}" a été acceptée`,
+      entityType: 'application',
+      entityId: String(applicationId),
+      timestamp: new Date().toISOString(),
+    });
+
     return updated;
   }
 
@@ -403,6 +425,15 @@ export class ApplicationService {
         },
         worker: true,
       },
+    });
+
+    this.eventEmitter.emit(AdminNotificationEvent.APPLICATION_REJECTED, {
+      event: AdminNotificationEvent.APPLICATION_REJECTED,
+      title: 'Candidature refusée',
+      message: `La candidature de ${updated.worker.first_name} ${updated.worker.last_name} pour l'offre "${updated.job_offer.title}" a été refusée`,
+      entityType: 'application',
+      entityId: String(applicationId),
+      timestamp: new Date().toISOString(),
     });
 
     return this.toApplicationWithOffer(updated);
@@ -545,6 +576,26 @@ export class ApplicationService {
     if (!updated)
       throw new NotFoundException('Candidature introuvable après mise à jour');
 
+    this.eventEmitter.emit(AdminNotificationEvent.APPLICATION_CANCELLED, {
+      event: AdminNotificationEvent.APPLICATION_CANCELLED,
+      title: 'Candidature annulée',
+      message: `La candidature de ${application.worker.first_name} ${application.worker.last_name} pour l'offre "${application.job_offer.title}" a été annulée par le travailleur`,
+      entityType: 'application',
+      entityId: String(applicationId),
+      timestamp: new Date().toISOString(),
+    });
+
+    if (penaltyApplied) {
+      this.eventEmitter.emit(AdminNotificationEvent.PENALTY_CREATED, {
+        event: AdminNotificationEvent.PENALTY_CREATED,
+        title: 'Pénalité créée',
+        message: `Pénalité de ${penaltyAmount} FCFA créée pour annulation tardive de ${application.worker.first_name} ${application.worker.last_name} sur l'offre "${application.job_offer.title}"`,
+        entityType: 'penalty',
+        entityId: String(applicationId),
+        timestamp: new Date().toISOString(),
+      });
+    }
+
     return {
       application: updated,
       penaltyApplied,
@@ -657,6 +708,16 @@ export class ApplicationService {
     const updated = await this.findById(applicationId);
     if (!updated)
       throw new NotFoundException('Candidature introuvable après mise à jour');
+
+    this.eventEmitter.emit(AdminNotificationEvent.APPLICATION_COMPLETED, {
+      event: AdminNotificationEvent.APPLICATION_COMPLETED,
+      title: 'Travail terminé',
+      message: `Le travail de ${application.worker.first_name} ${application.worker.last_name} pour l'offre "${application.job_offer.title}" a été marqué comme terminé`,
+      entityType: 'application',
+      entityId: String(applicationId),
+      timestamp: new Date().toISOString(),
+    });
+
     return updated;
   }
 
@@ -735,6 +796,16 @@ export class ApplicationService {
     const updated = await this.findById(applicationId);
     if (!updated)
       throw new NotFoundException('Candidature introuvable après mise à jour');
+
+    this.eventEmitter.emit(AdminNotificationEvent.APPLICATION_CANCELLED, {
+      event: AdminNotificationEvent.APPLICATION_CANCELLED,
+      title: 'Candidature annulée par employeur',
+      message: `La candidature de ${application.worker.first_name} ${application.worker.last_name} pour l'offre "${application.job_offer.title}" a été annulée par l'employeur`,
+      entityType: 'application',
+      entityId: String(applicationId),
+      timestamp: new Date().toISOString(),
+    });
+
     return updated;
   }
 
