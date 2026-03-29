@@ -127,8 +127,9 @@ export class DashboardService {
   }
 
   private calcTrend(current: number, previous: number): number | null {
-    if (previous === 0) return null;
-    return Math.round(((current - previous) / previous) * 1000) / 10;
+    if (previous === 0) return current > 0 ? 100 : null;
+    const trend = Math.round(((current - previous) / previous) * 1000) / 10;
+    return Math.max(-100, Math.min(trend, 100));
   }
 
   async getJobActivity(range: TimeRange): Promise<JobActivityDataPoint[]> {

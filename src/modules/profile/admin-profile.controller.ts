@@ -150,6 +150,17 @@ export class AdminProfileController {
       throw new BadRequestException('Le message ne peut pas être vide');
     }
 
+    let adminFullName = "L'équipe Rabotka";
+    if (adminUserId) {
+      const admin = await this.prisma.user.findUnique({
+        where: { id: adminUserId },
+        select: { first_name: true, last_name: true },
+      });
+      if (admin) {
+        adminFullName = `${admin.first_name} ${admin.last_name}`.trim();
+      }
+    }
+
     if (body.channel === 'WHATSAPP') {
       if (!profile.phone) {
         throw new BadRequestException(
@@ -162,14 +173,28 @@ export class AdminProfileController {
         profile.id,
         adminUserId,
       );
+
+      // Save outbound WhatsApp message to history
+      await this.prisma.message.create({
+        data: {
+          profile_id: profile.id,
+          direction: MessageDirection.OUTBOUND,
+          platform: BotPlatform.WHATSAPP,
+          body: body.message.trim(),
+        },
+      });
     } else {
       if (!profile.email) {
         throw new BadRequestException("Ce profil n'a pas d'adresse email");
       }
+      const messageHtml = body.message
+        .trim()
+        .toString()
+        .replaceAll('\n', '<br/>');
       await this.mail.sendMail({
         to: profile.email,
         subject: 'Message de Rabotka',
-        html: `<p>${body.message.trim().toString().replaceAll('\n', '<br/>')}</p>`,
+        html: `<p>${messageHtml}</p><br/><p>${adminFullName}<br/>L'équipe Rabotka</p>`,
       });
       // Save outbound email message to history
       await this.prisma.message.create({
