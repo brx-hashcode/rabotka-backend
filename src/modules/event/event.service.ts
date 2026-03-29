@@ -1,11 +1,14 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { CreateEventDto } from './dto/create-event.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
 import { ListEventsDto } from './dto/list-events.dto';
-import { DeliveryChannel } from './enums/delivery-channel.enum';
+import { DeliveryChannel } from '@prisma/client';
+import { NotificationService } from '../notification/notification.service';
 import { EventNotificationDispatcher } from './services/event-notification.dispatcher';
-import { EventNotificationRecipient } from './interfaces/event-notification.interfaces';
+import type { EventNotificationRecipient } from './interfaces/event-notification.interfaces';
 
 const eventInclude = {
   created_by: { select: { id: true, first_name: true, last_name: true } },
@@ -64,7 +67,9 @@ function mapEvent(event: any) {
 export class EventService {
   constructor(
     private readonly prisma: PrismaService,
+    private readonly notification: NotificationService,
     private readonly dispatcher: EventNotificationDispatcher,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   async list(dto: ListEventsDto) {
@@ -116,6 +121,15 @@ export class EventService {
     });
 
     const mapped = mapEvent(event);
+
+    this.eventEmitter.emit(AdminNotificationEvent.EVENT_CREATED, {
+      event: AdminNotificationEvent.EVENT_CREATED,
+      title: 'Nouvel événement',
+      message: `Nouvel événement créé : ${dto.title}`,
+      entityType: 'event',
+      entityId: String(event.id),
+      timestamp: new Date().toISOString(),
+    });
 
     const recipients: EventNotificationRecipient[] = [
       ...event.profiles.map((p: any) => ({
@@ -175,6 +189,15 @@ export class EventService {
     });
 
     const mapped = mapEvent(event);
+
+    this.eventEmitter.emit(AdminNotificationEvent.EVENT_UPDATED, {
+      event: AdminNotificationEvent.EVENT_UPDATED,
+      title: 'Événement modifié',
+      message: `L'événement a été modifié : ${mapped.title}`,
+      entityType: 'event',
+      entityId: String(event.id),
+      timestamp: new Date().toISOString(),
+    });
 
     if (datesChanged) {
       const recipients: EventNotificationRecipient[] = [
