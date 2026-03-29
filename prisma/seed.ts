@@ -3,6 +3,9 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '@prisma/client';
 import { seedSuperAdmin } from './seed/user.seed';
 import { seedClaims } from './seed/claims.seed';
+import { seedProfiles } from './seed/profile.seed';
+import { seedJobOffersAndApplications } from './seed/job-offer.seed';
+import { seedPenalties } from './seed/penalty.seed';
 
 config({ path: '.env.local' });
 config({ path: '.env' });
@@ -16,6 +19,9 @@ void run();
 async function run() {
   try {
     await seedSuperAdmin(prisma);
+    await seedProfiles(prisma);
+    await seedJobOffersAndApplications(prisma);
+    await seedPenalties(prisma);
     await seedClaims(prisma);
   } catch (e) {
     console.error(e);

@@ -1,6 +1,7 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
-import { Prisma } from '@prisma/client';
+import { BillingStatus, Prisma, PaymentMethod } from '@prisma/client';
+import { WalletService } from '../wallet/wallet.service';
 
 export type AdminPenaltyListItem = {
   id: string;
@@ -37,7 +38,74 @@ export type AdminPenaltyDetailResponse = AdminPenaltyListItem & {
 
 @Injectable()
 export class PenaltyService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly walletService: WalletService,
+  ) {}
+
+  async confirmPenaltyPaymentByAdmin(
+    penaltyId: string,
+    adminUserId: string,
+  ): Promise<AdminPenaltyDetailResponse> {
+    const penalty = await this.prisma.penalty.findUnique({
+      where: { id: penaltyId },
+      select: { id: true, paid_at: true, worker_id: true },
+    });
+
+    if (!penalty) throw new NotFoundException('Pénalité introuvable');
+    if (penalty.paid_at) throw new BadRequestException('Cette pénalité a déjà été réglée');
+
+    await this.walletService.recordPenaltyPayment(penaltyId, penalty.worker_id, {
+      paymentMethod: PaymentMethod.OTHER,
+    });
+
+    // Sync billing_status based on remaining unpaid penalties
+    const unpaidCount = await this.prisma.penalty.count({
+      where: { worker_id: penalty.worker_id, paid_at: null },
+    });
+    const newBillingStatus =
+      unpaidCount === 0 ? BillingStatus.CLEAR : BillingStatus.PENDING_PAYMENT;
+    await this.prisma.profile.update({
+      where: { id: penalty.worker_id },
+      data: { billing_status: newBillingStatus },
+    });
+
+    await this.prisma.log.create({
+      data: {
+        action: 'PAYMENT_CONFIRMED',
+        entity_type: 'Penalty',
+        entity_id: penaltyId,
+        user_id: adminUserId,
+        profile_id: penalty.worker_id,
+        metadata: { note: 'Penalty manually confirmed by admin' },
+      },
+    });
+
+    return this.getPenaltyDetailForAdmin(penaltyId);
+  }
+
+  async deletePenalty(id: string): Promise<{ success: boolean }> {
+    const penalty = await this.prisma.penalty.findUnique({
+      where: { id },
+      select: { id: true, worker_id: true, paid_at: true },
+    });
+    if (!penalty) throw new NotFoundException('Pénalité introuvable');
+
+    await this.prisma.penalty.delete({ where: { id } });
+
+    // Re-sync billing_status after deletion
+    const unpaidCount = await this.prisma.penalty.count({
+      where: { worker_id: penalty.worker_id, paid_at: null },
+    });
+    const newBillingStatus =
+      unpaidCount === 0 ? BillingStatus.CLEAR : BillingStatus.PENDING_PAYMENT;
+    await this.prisma.profile.update({
+      where: { id: penalty.worker_id },
+      data: { billing_status: newBillingStatus },
+    });
+
+    return { success: true };
+  }
 
   async getPenaltyDetailForAdmin(
     id: string,

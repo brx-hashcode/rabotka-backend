@@ -22,6 +22,7 @@ import { RejectPaymentDto } from './dto/reject-payment.dto';
 import { ListPaymentRequestsDto } from './dto/list-payment-requests.dto';
 import { PaymentService } from '../payments/payment.service';
 import { SystemConfigService } from '../system-config/system-config.service';
+import { WalletService } from '../wallet/wallet.service';
 
 const PAYMENT_REQUEST_SELECT = {
   id: true,
@@ -68,6 +69,7 @@ export class PaymentRequestService {
     private readonly mail: MailService,
     private readonly paymentService: PaymentService,
     private readonly systemConfig: SystemConfigService,
+    private readonly walletService: WalletService,
   ) {}
 
   async createPaymentLink(dto: CreatePaymentLinkDto, adminUserId: string) {
@@ -300,6 +302,14 @@ export class PaymentRequestService {
 
     await this.trySendApprovedWhatsApp(request.profile);
 
+    const feeRaw = await this.systemConfig.getRaw('fees.registration_fee_fcfa', '0');
+    const fee = parseFloat(feeRaw) || 0;
+    if (fee > 0) {
+      await this.walletService.recordRegistrationPayment(profileId, fee).catch((err) =>
+        this.logger.warn(`Failed to record registration payment for ${profileId}: ${err?.message}`),
+      );
+    }
+
     return this.formatRequest(updated as PaymentRequestWithProfile);
   }
 
@@ -352,6 +362,14 @@ export class PaymentRequestService {
         note: 'Profile manually activated by admin (no payment request)',
       },
     });
+
+    const feeRaw = await this.systemConfig.getRaw('fees.registration_fee_fcfa', '0');
+    const fee = parseFloat(feeRaw) || 0;
+    if (fee > 0) {
+      await this.walletService.recordRegistrationPayment(profileId, fee).catch((err) =>
+        this.logger.warn(`Failed to record registration payment for ${profileId}: ${err?.message}`),
+      );
+    }
   }
 
   private async findProfileOrThrow(profileId: string) {

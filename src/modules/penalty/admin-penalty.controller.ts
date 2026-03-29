@@ -1,4 +1,13 @@
-import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
@@ -47,5 +56,33 @@ export class AdminPenaltyController {
   @ApiResponse({ status: 404, description: 'Penalty not found' })
   async getById(@Param('id') id: string) {
     return await this.penaltyService.getPenaltyDetailForAdmin(id);
+  }
+
+  @Post(':id/confirm-payment')
+  @ApiOperation({
+    summary: 'Manually confirm penalty payment (admin only)',
+    description:
+      'Records the penalty as paid, credits the system wallet, and updates the worker billing status.',
+  })
+  @ApiResponse({ status: 201, description: 'Penalty payment confirmed' })
+  @ApiResponse({ status: 400, description: 'Penalty already paid' })
+  @ApiResponse({ status: 404, description: 'Penalty not found' })
+  async confirmPayment(@Param('id') id: string, @Req() req: any) {
+    return await this.penaltyService.confirmPenaltyPaymentByAdmin(
+      id,
+      req.user.userId,
+    );
+  }
+
+  @Delete(':id')
+  @ApiOperation({
+    summary: 'Delete a penalty (admin only)',
+    description:
+      'Permanently deletes a penalty and re-syncs the worker billing status.',
+  })
+  @ApiResponse({ status: 200, description: 'Penalty deleted' })
+  @ApiResponse({ status: 404, description: 'Penalty not found' })
+  async deletePenalty(@Param('id') id: string) {
+    return await this.penaltyService.deletePenalty(id);
   }
 }
