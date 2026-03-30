@@ -6,6 +6,7 @@ import { WsNotificationsGateway } from './ws-notifications.gateway';
 import { WsNotificationsListener } from './ws-notifications.listener';
 import { AdminNotificationService } from './admin-notification.service';
 import { AdminNotificationController } from './admin-notification.controller';
+import { PaymentStatusGateway } from './payment-status.gateway';
 
 @Module({
   imports: [ConfigModule, AuthModule, PrismaModule],
@@ -14,7 +15,8 @@ import { AdminNotificationController } from './admin-notification.controller';
     WsNotificationsGateway,
     WsNotificationsListener,
     AdminNotificationService,
+    PaymentStatusGateway,
   ],
-  exports: [WsNotificationsGateway],
+  exports: [WsNotificationsGateway, PaymentStatusGateway],
 })
 export class WsNotificationsModule {}

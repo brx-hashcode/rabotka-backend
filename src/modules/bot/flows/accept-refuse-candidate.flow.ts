@@ -39,6 +39,7 @@ async function handleAcceptRefuseStep1(args: StepArgs): Promise<FlowResult> {
       reply: [
         [
           '*ACTIONS DISPONIBLES POUR CETTE CANDIDATURE:*',
+          '',
           '1️⃣ Accepter le candidat',
           '2️⃣ Refuser',
           '',
@@ -56,28 +57,33 @@ async function handleAcceptRefuseStep1(args: StepArgs): Promise<FlowResult> {
       );
 
       // Get unlock attempt and show contact unlock prompt
-      const attempt = await ctx.contactUnlockService.getByApplicationId(applicationId);
+      const attempt =
+        await ctx.contactUnlockService.getByApplicationId(applicationId);
       if (attempt) {
         const fees = await ctx.systemConfigService.getContactUnlockFees();
-        const workerData = await ctx.prisma.profile.findUnique({
-          where: { id: attempt.worker_id },
-          select: { first_name: true, last_name: true },
-        }).catch(() => null);
+        const workerData = await ctx.prisma.profile
+          .findUnique({
+            where: { id: attempt.worker_id },
+            select: { first_name: true, last_name: true },
+          })
+          .catch(() => null);
         const workerName = workerData
           ? `${workerData.first_name} ${workerData.last_name}`.trim()
           : 'le travailleur';
 
         // Check if employer already paid at job level (multi-person job)
-        const jobOffer = await ctx.prisma.jobOffer.findUnique({
-          where: { id: attempt.job_offer_id },
-          select: { quantity: true, employer_unlock_paid: true },
-        }).catch(() => null);
+        const jobOffer = await ctx.prisma.jobOffer
+          .findUnique({
+            where: { id: attempt.job_offer_id },
+            select: { quantity: true, employer_unlock_paid: true },
+          })
+          .catch(() => null);
 
         const isMultiPerson = (jobOffer?.quantity ?? 1) > 1;
-        const employerAlreadyPaid = isMultiPerson && jobOffer?.employer_unlock_paid;
+        const employerAlreadyPaid =
+          isMultiPerson && jobOffer?.employer_unlock_paid;
 
         if (employerAlreadyPaid) {
-          // Employer paid once at job level — no need to pay again
           return {
             reply: [
               [
@@ -95,7 +101,9 @@ async function handleAcceptRefuseStep1(args: StepArgs): Promise<FlowResult> {
           };
         }
 
-        const balance = await ctx.walletService.getProfileWalletBalance(profile.id);
+        const balance = await ctx.walletService.getProfileWalletBalance(
+          profile.id,
+        );
 
         const unlockPrompt = formatContactUnlockPrompt({
           name: workerName,
@@ -166,14 +174,13 @@ async function handleAcceptRefuseStep1(args: StepArgs): Promise<FlowResult> {
   };
 }
 
-async function handleAcceptRefuseStep2(args: StepArgs): Promise<FlowResult> {
+function handleAcceptRefuseStep2(args: StepArgs): FlowResult {
   const { state, normalized, trimmed } = args;
   const reason =
     normalized === 'aucune' || normalized === '0' || normalized === 'non'
       ? null
       : trimmed;
 
-  // Store reason in payload and move to confirmation step
   return {
     reply: [
       [
@@ -221,7 +228,9 @@ async function handleAcceptRefuseStep3(args: StepArgs): Promise<FlowResult> {
 
   try {
     await ctx.applicationService.reject(applicationId, profile.id, reason);
-    await ctx.notificationService.sendApplicationRejectedToWorker(applicationId);
+    await ctx.notificationService.sendApplicationRejectedToWorker(
+      applicationId,
+    );
     return {
       reply: [
         [
