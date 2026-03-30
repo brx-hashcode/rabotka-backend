@@ -125,6 +125,8 @@ describe('ProfileService', () => {
       redis as any,
       whatsApp as any,
       configService as any,
+      {} as any, // mailService
+      { emit: jest.fn() } as any, // eventEmitter
     );
   });
 

@@ -12,7 +12,8 @@ export type FlowId =
   | 'accept_refuse_candidate'
   | 'candidatures_list'
   | 'list_offers'
-  | 'my_applications';
+  | 'my_applications'
+  | 'unlock_contact';
 
 export type BotProfileType = 'WORKER' | 'EMPLOYER';
 

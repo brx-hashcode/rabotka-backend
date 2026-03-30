@@ -2,10 +2,19 @@ import type { BotProfile, BotState } from '../types/bot-state.types';
 import { FLOW_IDS } from '../bot.constants';
 import type { ApplicationService } from '../../application/application.service';
 import type { BotNotificationService } from '../services/bot-notification.service';
+import type { ContactUnlockService } from '../../contact-unlock/contact-unlock.service';
+import type { WalletService } from '../../wallet/wallet.service';
+import type { SystemConfigService } from '../../system-config/system-config.service';
+import type { PrismaService } from '../../../common/services/prisma/prisma.service';
+import { formatContactUnlockPrompt } from '../messages/contact-unlock.messages';
 
 export type AcceptRefuseContext = {
+  prisma: PrismaService;
   applicationService: ApplicationService;
   notificationService: BotNotificationService;
+  contactUnlockService: ContactUnlockService;
+  walletService: WalletService;
+  systemConfigService: SystemConfigService;
 };
 
 export type FlowResult = {
@@ -45,14 +54,57 @@ async function handleAcceptRefuseStep1(args: StepArgs): Promise<FlowResult> {
       await ctx.notificationService.sendApplicationAcceptedToWorker(
         applicationId,
       );
+
+      // Get unlock attempt and show contact unlock prompt
+      const attempt = await ctx.contactUnlockService.getByApplicationId(applicationId);
+      if (attempt) {
+        const fees = await ctx.systemConfigService.getContactUnlockFees();
+        const balance = await ctx.walletService.getProfileWalletBalance(profile.id);
+        const workerData = await ctx.prisma.profile.findUnique({
+          where: { id: attempt.worker_id },
+          select: { first_name: true, last_name: true },
+        }).catch(() => null);
+        const workerName = workerData
+          ? `${workerData.first_name} ${workerData.last_name}`.trim()
+          : 'le travailleur';
+
+        const unlockPrompt = formatContactUnlockPrompt({
+          name: workerName,
+          amount: fees.employerFeeFcfa,
+          balance,
+          profileType: 'EMPLOYER',
+        });
+
+        return {
+          reply: [
+            [
+              '*Candidature acceptée !*',
+              '',
+              'Le travailleur a été notifié.',
+            ].join('\n'),
+            unlockPrompt,
+          ],
+          nextState: {
+            flowId: FLOW_IDS.UNLOCK_CONTACT,
+            step: 1,
+            payload: {
+              attemptId: attempt.id,
+              otherName: workerName,
+              amount: fees.employerFeeFcfa,
+            },
+            updatedAt: new Date().toISOString(),
+          },
+        };
+      }
+
       return {
         reply: [
           [
             '*Candidature acceptée !*',
             '',
-            'Le worker a été notifié. Vous pouvez le contacter directement via les coordonnées fournies.',
+            'Le travailleur a été notifié.',
             '',
-            "Votre offre est maintenant marquée comme pourvue. Tapez 'Menu' pour revenir.",
+            "Tapez 'Menu' pour revenir.",
           ].join('\n'),
         ],
         clearState: true,

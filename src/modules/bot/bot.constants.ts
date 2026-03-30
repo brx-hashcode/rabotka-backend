@@ -15,6 +15,7 @@ export const FLOW_IDS = {
   PAY_PENALTIES: 'pay_penalties',
   VERIFY_WHATSAPP: 'verify_whatsapp',
   RESOLVE_PENALTIES: 'resolve_penalties',
+  UNLOCK_CONTACT: 'unlock_contact',
 } as const;
 
 export const WORKER_MENU_OPTIONS = {
@@ -50,3 +51,4 @@ export const CMD_PAY = [
   'payer pénalités',
   'payer penalites',
 ];
+export const CMD_UNLOCK = ['débloquer', 'debloquer', 'unlock', 'contact'];

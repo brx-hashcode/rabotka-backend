@@ -12,6 +12,7 @@ import {
   CMD_HISTORY,
   CMD_LIST_OFFERS,
   CMD_PAY,
+  CMD_UNLOCK,
 } from '../bot.constants';
 
 export type RouteResult =
@@ -38,6 +39,7 @@ function matchCommandAlias(
   if (CMD_HISTORY.includes(normalized)) return 'penalty_history';
   if (CMD_LIST_OFFERS.includes(normalized) && isWorker) return 'list_offers';
   if (CMD_PAY.includes(normalized) && isWorker) return 'pay_penalties';
+  if (CMD_UNLOCK.includes(normalized)) return 'unlock_contact';
   return null;
 }
 

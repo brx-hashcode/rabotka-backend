@@ -1,7 +1,6 @@
 import {
   Controller,
   Get,
-  Post,
   Patch,
   Delete,
   Param,
@@ -10,7 +9,6 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
-  Req,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -76,25 +74,6 @@ export class AdminJobOfferController {
     @Body() dto: AdminUpdateJobOfferDto,
   ) {
     return await this.jobOfferService.updateJobOfferByAdmin(id, dto);
-  }
-
-  @Post(':id/confirm-payment')
-  @ApiOperation({
-    summary: 'Confirm payment for job offer (admin only)',
-    description:
-      'Confirms payment for a pending job offer: credits the wallet with fees and publishes the job offer.',
-  })
-  @ApiResponse({ status: 200, description: 'Job offer published' })
-  @ApiResponse({ status: 404, description: 'Job offer not found' })
-  @ApiResponse({
-    status: 400,
-    description: 'Job offer is not in PENDING_PAYMENT status',
-  })
-  async confirmPayment(
-    @Param('id') id: string,
-    @Req() req: any,
-  ) {
-    return await this.jobOfferService.confirmPaymentByAdmin(id, req.user.userId);
   }
 
   @Delete(':id')

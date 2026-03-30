@@ -11,10 +11,7 @@ import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { LogService } from '../log/log.service';
 import { MailService } from '../mail/mail.service';
-import {
-  paymentApprovedMessage,
-  paymentLinkMessage,
-} from '../whatsapp/templates';
+import { paymentApprovedMessage } from '../whatsapp/templates';
 import { paymentRejectedEmail } from '../mail/templates';
 import { CreatePaymentLinkDto } from './dto/create-payment-link.dto';
 import { SubmitPaymentDto } from './dto/submit-payment.dto';
@@ -102,8 +99,7 @@ export class PaymentRequestService {
     });
 
     if (profile.phone) {
-      const message = paymentLinkMessage(paymentUrl);
-      await this.trySendWhatsApp(profile.phone, message, profile.id);
+      await this.trySendWhatsApp(profile.phone, paymentUrl, profile.id);
     }
 
     return { ...this.formatRequest(request), paymentUrl };

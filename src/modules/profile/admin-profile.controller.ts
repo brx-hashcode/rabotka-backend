@@ -349,27 +349,4 @@ export class AdminProfileController {
     return await this.profileService.requestWhatsAppVerification(id);
   }
 
-  @Patch(':id/confirm-payment')
-  @ApiOperation({
-    summary: 'Confirm or reject payment for a profile (admin only)',
-    description:
-      'Manually confirms or rejects a payment. Accepting activates the profile; rejecting keeps it in PENDING_ACTIVATION.',
-  })
-  @ApiResponse({ status: 200, description: 'Updated profile details' })
-  @ApiResponse({ status: 404, description: 'Profile not found' })
-  async confirmPayment(
-    @Param('id') id: string,
-    @Body() body: { decision: 'ACCEPTED' | 'REJECTED'; reason?: string },
-    @Req() req: any,
-  ) {
-    const adminUserId = req.user?.userId;
-    await this.paymentRequestService.manualDecide(
-      id,
-      body.decision,
-      body.reason,
-      adminUserId as string,
-    );
-
-    return this.profileService.getProfileDetailForAdmin(id);
-  }
 }

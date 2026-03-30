@@ -132,6 +132,7 @@ enum PaymentType {
   REGISTRATION
   JOB_POSTING
   PENALTY
+  CONTACT_UNLOCK
 }
 
 enum PaymentFlow {
@@ -151,6 +152,19 @@ enum WalletTransactionType {
   CREDIT_COMMISSION
   CREDIT_REGISTRATION
   CREDIT_JOB_POSTING
+  WELCOME_CREDIT
+  CONTACT_UNLOCK_DEBIT
+  CONTACT_UNLOCK_CREDIT_CONVERSION
+  PENALTY_DEBIT
+}
+
+enum ContactUnlockStatus {
+  PENDING_BOTH
+  PENDING_EMPLOYER
+  PENDING_WORKER
+  UNLOCKED
+  EXPIRED
+  CONVERTED_TO_CREDIT
 }
 
 enum PaymentRequestStatus {
@@ -204,9 +218,10 @@ model Profile {
   status                  AccountStatus      @default(PENDING_ACTIVATION)
   billing_status          BillingStatus      @default(CLEAR)
   reliability_score       Int?               @default(100)
-  whatsapp_connected      Boolean            @default(false)
-  payment_link            String?
-  payment_link_expires_at DateTime?
+  whatsapp_connected                Boolean            @default(false)
+  whatsapp_activation_bonus_granted Boolean            @default(false)
+  payment_link                      String?
+  payment_link_expires_at           DateTime?
   verification_status     VerificationStatus @default(PENDING)
   verified_by             String?            @db.Uuid
   verified_at             DateTime?
@@ -229,6 +244,8 @@ model Profile {
   assignments Assignment[]
   verification_tokens VerificationToken[]
   claims               Claim[]  @relation("ClaimProfile")
+  unlock_attempts_as_worker   ContactUnlockAttempt[] @relation("UnlockWorker")
+  unlock_attempts_as_employer ContactUnlockAttempt[] @relation("UnlockEmployer")
   claims_created       Claim[]  @relation("ClaimCreatedByProfile")
   claim_comments       ClaimComment[] @relation("ClaimCommentProfile")
   events               Event[]  @relation("EventProfiles")
@@ -316,9 +333,10 @@ model JobOffer {
   quantity     Int            @default(1)
   status       JobOfferStatus @default(ACTIVE)
 
-  employer     Profile       @relation(fields: [employer_id], references: [id], onDelete: Cascade)
-  applications Application[]
-  assignments  Assignment[]
+  employer                Profile                @relation(fields: [employer_id], references: [id], onDelete: Cascade)
+  applications            Application[]
+  assignments             Assignment[]
+  contact_unlock_attempts ContactUnlockAttempt[]
 
   @@index([employer_id], name: "idx_job_offer_employer")
   @@index([status], name: "idx_job_offer_status")
@@ -340,10 +358,11 @@ model Application {
 
   viewed_at DateTime?
 
-  job_offer  JobOffer    @relation(fields: [job_offer_id], references: [id], onDelete: Cascade)
-  worker     Profile     @relation(fields: [worker_id], references: [id], onDelete: Cascade)
-  penalties  Penalty[]
-  assignment Assignment?
+  job_offer              JobOffer             @relation(fields: [job_offer_id], references: [id], onDelete: Cascade)
+  worker                 Profile              @relation(fields: [worker_id], references: [id], onDelete: Cascade)
+  penalties              Penalty[]
+  assignment             Assignment?
+  contact_unlock_attempt ContactUnlockAttempt?
 
   @@unique([job_offer_id, worker_id], name: "idx_application_unique")
   @@index([worker_id], name: "idx_application_worker")
@@ -374,6 +393,36 @@ model Assignment {
   @@index([worker_id], name: "idx_assignment_worker")
   @@index([status], name: "idx_assignment_status")
   @@map("assignments")
+}
+
+model ContactUnlockAttempt {
+  id              String              @id @default(uuid()) @db.Uuid
+  created_at      DateTime            @default(now())
+  updated_at      DateTime            @updatedAt
+  application_id  String              @unique @db.Uuid
+  job_offer_id    String              @db.Uuid
+  worker_id       String              @db.Uuid
+  employer_id     String              @db.Uuid
+  status          ContactUnlockStatus @default(PENDING_BOTH)
+  employer_paid   Boolean             @default(false)
+  worker_paid     Boolean             @default(false)
+  employer_paid_at DateTime?
+  worker_paid_at   DateTime?
+  employer_amount  Decimal            @db.Decimal(10, 2)
+  worker_amount    Decimal            @db.Decimal(10, 2)
+  expires_at       DateTime
+  unlocked_at      DateTime?
+  converted_at     DateTime?
+
+  application Application @relation(fields: [application_id], references: [id], onDelete: Cascade)
+  job_offer   JobOffer    @relation(fields: [job_offer_id], references: [id], onDelete: Cascade)
+  worker      Profile     @relation("UnlockWorker", fields: [worker_id], references: [id], onDelete: Cascade)
+  employer    Profile     @relation("UnlockEmployer", fields: [employer_id], references: [id], onDelete: Cascade)
+
+  @@index([application_id], name: "idx_unlock_application")
+  @@index([status], name: "idx_unlock_status")
+  @@index([expires_at], name: "idx_unlock_expires_at")
+  @@map("contact_unlock_attempts")
 }
 
 model Penalty {
@@ -597,7 +646,7 @@ model ClaimComment {
   content         String   @db.Text
   user_id         String?  @db.Uuid
   profile_id      String?  @db.Uuid
-  created_by_type String   @default("user") // "user" or "profile"
+  created_by_type String   @default("user") 
 
   claim   Claim    @relation(fields: [claim_id], references: [id], onDelete: Cascade)
   user    User?    @relation("ClaimCommentUser", fields: [user_id], references: [id], onDelete: SetNull)

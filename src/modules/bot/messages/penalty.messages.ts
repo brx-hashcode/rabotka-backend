@@ -165,7 +165,7 @@ export function formatPenaltyBlocked(totalAmount: number): string {
     'Indiquez votre numéro de téléphone en référence lors du paiement.',
     'Votre compte sera débloqué sous 24h après réception.',
     '',
-    "Tapez *profil* pour voir le détail ou *menu* pour revenir.",
+    'Tapez *profil* pour voir le détail ou *menu* pour revenir.',
   ].join('\n');
 }
 

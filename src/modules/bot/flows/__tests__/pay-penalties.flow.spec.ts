@@ -14,6 +14,7 @@ const workerProfile: BotProfile = {
   email: 'alice@example.com',
   profile_type: 'WORKER',
   reliability_score: 80,
+  status: 'ACTIVE',
 };
 
 function makeCtx(

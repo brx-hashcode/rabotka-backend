@@ -101,6 +101,7 @@ describe('JobOfferService (extended)', () => {
       amount: 15000,
       payment_flow: PaymentFlow.DAILY,
       address: '123 Avenue de la Paix, Poto-Poto',
+      quantity: 1,
     };
 
     it('throws BadRequestException when note exceeds 500 chars', () => {

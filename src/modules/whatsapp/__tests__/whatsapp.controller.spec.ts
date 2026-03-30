@@ -67,6 +67,7 @@ describe('WhatsAppController', () => {
       conversationService as any,
       twilioService as any,
       configService as any,
+      {} as any, // queueService
       redis as any,
     );
   });

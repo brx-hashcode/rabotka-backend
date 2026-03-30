@@ -598,7 +598,8 @@ export class JobOfferService {
     };
   }
 
-  async confirmPaymentByAdmin(
+  /** @deprecated Job posting is free — this method is no longer called. Kept for reference only. */
+  private async confirmPaymentByAdmin(
     jobOfferId: string,
     adminUserId: string,
   ): Promise<AdminJobOfferDetailResponse> {

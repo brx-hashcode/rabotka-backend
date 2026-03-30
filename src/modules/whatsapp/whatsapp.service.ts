@@ -5,13 +5,13 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { randomBytes } from 'node:crypto';
 import Redis from 'ioredis';
-import { BotPlatform, MessageDirection } from '@prisma/client';
+import { AccountStatus, BotPlatform, MessageDirection } from '@prisma/client';
 import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { TwilioService } from '../../common/services/twilio/twilio.service';
-import { accountActivationMessage } from './templates';
+import { WalletService } from '../wallet/wallet.service';
+import { welcomeActivationMessage } from './templates';
 
 const VERIFICATION_TOKEN_KEY_PREFIX = 'wa:verify:';
 
@@ -25,6 +25,7 @@ export class WhatsAppService {
     private readonly prisma: PrismaService,
     private readonly twilioService: TwilioService,
     private readonly config: ConfigService,
+    private readonly walletService: WalletService,
   ) {}
 
   isConfigured(): boolean {
@@ -104,6 +105,7 @@ export class WhatsAppService {
       select: {
         phone: true,
         first_name: true,
+        profile_type: true,
       },
     });
 
@@ -111,22 +113,25 @@ export class WhatsAppService {
       throw new BadRequestException('Profil introuvable');
     }
 
+    // Activate the account
     await this.prisma.profile.update({
       where: { id: profileId },
-      data: { whatsapp_connected: true },
+      data: { whatsapp_connected: true, status: AccountStatus.ACTIVE },
     });
 
     await this.redis.del(redisKey);
 
-    if (this.isConfigured()) {
-      const paymentToken = randomBytes(32).toString('hex');
-      const frontendUrl = this.config.get<string>('FRONTEND_URL', '');
-      const paymentUrl = `${frontendUrl}/pay/${paymentToken}`;
-      const message = accountActivationMessage(paymentUrl);
+    // Grant welcome credit (idempotent)
+    const creditAmount = await this.walletService.grantWelcomeCredit(
+      profileId,
+      profile.profile_type,
+    );
 
+    if (this.isConfigured()) {
+      const message = welcomeActivationMessage(profile.first_name, creditAmount);
       await this.sendTextMessage(profile.phone, message, profileId);
     }
 
-    this.logger.log(`WhatsApp verified successfully for profile ${profileId}`);
+    this.logger.log(`WhatsApp verified and account activated for profile ${profileId}`);
   }
 }

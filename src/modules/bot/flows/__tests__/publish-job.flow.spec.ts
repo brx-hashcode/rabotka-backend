@@ -25,6 +25,8 @@ const employerProfile: BotProfile = {
   profile_type: 'EMPLOYER',
   status: 'ACTIVE',
   phone: '+242000000',
+  email: 'john@example.com',
+  reliability_score: 100,
 };
 
 const workerProfile: BotProfile = {

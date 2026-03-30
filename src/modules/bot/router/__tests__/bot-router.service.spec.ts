@@ -10,6 +10,7 @@ const workerProfile: BotProfile = {
   email: 'alice@example.com',
   profile_type: 'WORKER',
   reliability_score: 90,
+  status: 'ACTIVE',
 };
 
 const employerProfile: BotProfile = {
