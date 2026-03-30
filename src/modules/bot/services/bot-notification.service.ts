@@ -4,14 +4,21 @@ import { WhatsAppService } from '../../whatsapp/whatsapp.service';
 import { BotStateService } from './bot-state.service';
 import { BotInboxService } from './bot-inbox.service';
 import { getAcceptRefuseInitialState } from '../flows/accept-refuse-candidate.flow';
+import { getUnlockContactInitialState } from '../flows/unlock-contact.flow';
 import {
   formatNewApplicationToEmployer,
-  formatApplicationAcceptedToWorker,
   formatApplicationRejectedToWorker,
   formatCancellationToEmployer,
   formatJobCompletedToWorker,
   formatJobCancelledByEmployerToWorker,
 } from '../messages/application.messages';
+import {
+  formatContactUnlockedMessage,
+  formatContactUnlockExpiredConversion,
+} from '../messages/contact-unlock.messages';
+import { ContactUnlockService } from '../../contact-unlock/contact-unlock.service';
+import { SystemConfigService } from '../../system-config/system-config.service';
+import { WalletService } from '../../wallet/wallet.service';
 
 @Injectable()
 export class BotNotificationService {
@@ -23,6 +30,10 @@ export class BotNotificationService {
     private readonly whatsApp: WhatsAppService,
     private readonly botState: BotStateService,
     private readonly botInbox: BotInboxService,
+    @Inject(forwardRef(() => ContactUnlockService))
+    private readonly contactUnlock: ContactUnlockService,
+    private readonly systemConfig: SystemConfigService,
+    private readonly walletService: WalletService,
   ) {}
 
   async sendNewApplicationToEmployer(applicationId: string): Promise<void> {
@@ -107,15 +118,116 @@ export class BotNotificationService {
       });
       if (!app?.worker?.phone || !app.job_offer?.employer) return;
 
-      const employerName = `${app.job_offer.employer.first_name} ${app.job_offer.employer.last_name}`;
-      const text = formatApplicationAcceptedToWorker(
-        employerName,
-        app.job_offer.employer.phone,
-      );
-      await this.whatsApp.sendTextMessage(app.worker.phone, text);
+      const employerName = `${app.job_offer.employer.first_name} ${app.job_offer.employer.last_name}`.trim();
+
+      // Get the unlock attempt to pre-populate worker's unlock flow
+      const attempt = await this.contactUnlock.getByApplicationId(applicationId);
+      if (attempt) {
+        const fees = await this.systemConfig.getContactUnlockFees();
+        const balance = await this.walletService.getProfileWalletBalance(app.worker_id);
+        const text = [
+          `🎉 *Candidature acceptée !*`,
+          ``,
+          `*${employerName}* a accepté votre candidature pour l'offre "${app.job_offer.title}".`,
+          ``,
+          `Pour voir ses coordonnées, vous devez débloquer le contact (*${fees.workerFeeFcfa} FCFA*).`,
+          `Votre solde actuel : *${balance} FCFA*`,
+          ``,
+          `Tapez *DÉBLOQUER* pour accéder à ses coordonnées.`,
+        ].join('\n');
+
+        await this.whatsApp.sendTextMessage(app.worker.phone, text);
+
+        // Pre-load unlock flow state so DÉBLOQUER routes immediately
+        const unlockState = getUnlockContactInitialState({
+          attemptId: attempt.id,
+          otherName: employerName,
+          amount: fees.workerFeeFcfa,
+        });
+        await this.botState.set(app.worker_id, unlockState);
+      } else {
+        // Fallback (attempt not created yet — should not happen in normal flow)
+        await this.whatsApp.sendTextMessage(
+          app.worker.phone,
+          [
+            `🎉 *Candidature acceptée !*`,
+            ``,
+            `*${employerName}* a accepté votre candidature pour l'offre "${app.job_offer.title}".`,
+            ``,
+            `Tapez *DÉBLOQUER* pour accéder aux coordonnées de l'employeur.`,
+          ].join('\n'),
+        );
+      }
     } catch (err) {
       this.logger.warn(
         `Failed to send accepted notification to worker: ${String(applicationId)}`,
+        err,
+      );
+    }
+  }
+
+  async sendContactUnlockedNotification(attemptId: string): Promise<void> {
+    try {
+      const attempt = await this.prisma.contactUnlockAttempt.findUnique({
+        where: { id: attemptId },
+      });
+      if (!attempt) return;
+
+      const [employer, worker] = await Promise.all([
+        this.prisma.profile.findUnique({
+          where: { id: attempt.employer_id },
+          select: { phone: true, first_name: true, last_name: true, email: true },
+        }),
+        this.prisma.profile.findUnique({
+          where: { id: attempt.worker_id },
+          select: { phone: true, first_name: true, last_name: true, email: true },
+        }),
+      ]);
+
+      if (employer?.phone && worker) {
+        await this.whatsApp.sendTextMessage(
+          employer.phone,
+          formatContactUnlockedMessage({
+            name: `${worker.first_name} ${worker.last_name}`.trim(),
+            phone: worker.phone,
+            email: worker.email,
+          }),
+        );
+      }
+
+      if (worker?.phone && employer) {
+        await this.whatsApp.sendTextMessage(
+          worker.phone,
+          formatContactUnlockedMessage({
+            name: `${employer.first_name} ${employer.last_name}`.trim(),
+            phone: employer.phone,
+            email: employer.email,
+          }),
+        );
+      }
+    } catch (err) {
+      this.logger.warn(`Failed to send contact unlocked notification: ${attemptId}`, err);
+    }
+  }
+
+  async sendContactUnlockCreditConversionNotification(
+    profileId: string,
+    amount: number,
+  ): Promise<void> {
+    try {
+      const profile = await this.prisma.profile.findUnique({
+        where: { id: profileId },
+        select: { phone: true },
+      });
+      if (!profile?.phone) return;
+
+      await this.whatsApp.sendTextMessage(
+        profile.phone,
+        formatContactUnlockExpiredConversion(amount),
+      );
+    } catch (err) {
+      this.logger.warn(
+        `Failed to send credit conversion notification to ${profileId}`,
         err,
       );
     }

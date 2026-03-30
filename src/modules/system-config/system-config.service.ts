@@ -140,8 +140,6 @@ export class SystemConfigService implements OnModuleInit {
       empCancel,
       empGhost,
       billingBlock,
-      jobFee,
-      appFee,
     ] = await Promise.all([
       this.get('fees.late_cancellation_penalty_fcfa', '5000'),
       this.get('fees.late_cancellation_score_deduction', '5'),
@@ -150,8 +148,6 @@ export class SystemConfigService implements OnModuleInit {
       this.get('fees.employer_cancel_score_deduction', '5'),
       this.get('fees.employer_ghost_score_deduction', '10'),
       this.get('fees.billing_block_threshold', '2'),
-      this.get('fees.job_posting_fee_fcfa', '0'),
-      this.get('fees.application_fee_fcfa', '0'),
     ]);
     return {
       lateCancellationPenaltyFcfa: Number(penalty),
@@ -161,8 +157,30 @@ export class SystemConfigService implements OnModuleInit {
       employerCancelScoreDeduction: Number(empCancel),
       employerGhostScoreDeduction: Number(empGhost),
       billingBlockThreshold: Number(billingBlock),
-      jobPostingFeeFcfa: Number(jobFee),
-      applicationFeeFcfa: Number(appFee),
+    };
+  }
+
+  async getContactUnlockFees() {
+    const [employerFee, workerFee, expiryHours] = await Promise.all([
+      this.get('fees.contact_unlock_fee_employer', '500'),
+      this.get('fees.contact_unlock_fee_worker', '100'),
+      this.get('fees.contact_unlock_expiry_hours', '48'),
+    ]);
+    return {
+      employerFeeFcfa: Number(employerFee),
+      workerFeeFcfa: Number(workerFee),
+      expiryHours: Number(expiryHours),
+    };
+  }
+
+  async getWelcomeCredits() {
+    const [workerCredit, employerCredit] = await Promise.all([
+      this.get('fees.welcome_credit_worker', '100'),
+      this.get('fees.welcome_credit_employer', '500'),
+    ]);
+    return {
+      workerCreditFcfa: Number(workerCredit),
+      employerCreditFcfa: Number(employerCredit),
     };
   }
 

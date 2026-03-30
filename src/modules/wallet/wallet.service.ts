@@ -10,8 +10,10 @@ import {
   PaymentStatus,
   PaymentType,
   PaymentMethod,
+  ProfileType,
 } from '@prisma/client';
 import { generatePaymentReference } from '../../common/utils/payment-reference';
+import { SystemConfigService } from '../system-config/system-config.service';
 import type { PayPenaltyDto } from './dto/pay-penalty.dto';
 
 export type AdminWalletTransactionItem = {
@@ -40,7 +42,10 @@ export type AdminPaymentItem = {
 
 @Injectable()
 export class WalletService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly systemConfig: SystemConfigService,
+  ) {}
 
   /**
    * Returns the system wallet, creating it if it does not exist.
@@ -69,6 +74,194 @@ export class WalletService {
       balance: Number(wallet.balance),
     };
   }
+
+  // ── Per-profile wallet ──────────────────────────────────────────────────────
+
+  async getOrCreateProfileWallet(profileId: string): Promise<{ id: string; balance: number }> {
+    let wallet = await this.prisma.wallet.findFirst({
+      where: { owner_type: WalletOwnerType.PROFILE, profile_id: profileId },
+    });
+    if (!wallet) {
+      wallet = await this.prisma.wallet.create({
+        data: { owner_type: WalletOwnerType.PROFILE, profile_id: profileId, balance: 0 },
+      });
+    }
+    return { id: wallet.id, balance: Number(wallet.balance) };
+  }
+
+  async getProfileWalletBalance(profileId: string): Promise<number> {
+    const w = await this.getOrCreateProfileWallet(profileId);
+    return w.balance;
+  }
+
+  async creditProfileWallet(
+    profileId: string,
+    amount: number,
+    type: WalletTransactionType,
+    referenceType?: string,
+    referenceId?: string,
+  ): Promise<void> {
+    const wallet = await this.getOrCreateProfileWallet(profileId);
+    await this.prisma.$transaction(async (tx) => {
+      await tx.walletTransaction.create({
+        data: {
+          wallet_id: wallet.id,
+          type,
+          amount,
+          reference_type: referenceType ?? null,
+          reference_id: referenceId ?? null,
+        },
+      });
+      await tx.wallet.update({
+        where: { id: wallet.id },
+        data: { balance: { increment: amount } },
+      });
+    });
+  }
+
+  async debitProfileWallet(
+    profileId: string,
+    amount: number,
+    type: WalletTransactionType,
+    referenceType?: string,
+    referenceId?: string,
+  ): Promise<void> {
+    const wallet = await this.getOrCreateProfileWallet(profileId);
+    if (wallet.balance < amount) {
+      throw new BadRequestException('Solde insuffisant dans votre portefeuille');
+    }
+    await this.prisma.$transaction(async (tx) => {
+      await tx.walletTransaction.create({
+        data: {
+          wallet_id: wallet.id,
+          type,
+          amount,
+          reference_type: referenceType ?? null,
+          reference_id: referenceId ?? null,
+        },
+      });
+      await tx.wallet.update({
+        where: { id: wallet.id },
+        data: { balance: { decrement: amount } },
+      });
+    });
+  }
+
+  /**
+   * Grants welcome credit to a profile after WhatsApp activation.
+   * Idempotent: does nothing if whatsapp_activation_bonus_granted is already true.
+   */
+  async grantWelcomeCredit(profileId: string, profileType: ProfileType): Promise<number> {
+    const profile = await this.prisma.profile.findUnique({
+      where: { id: profileId },
+      select: { whatsapp_activation_bonus_granted: true },
+    });
+    if (!profile) throw new NotFoundException('Profil introuvable');
+    if (profile.whatsapp_activation_bonus_granted) return 0;
+
+    const credits = await this.systemConfig.getWelcomeCredits();
+    const amount =
+      profileType === ProfileType.WORKER
+        ? credits.workerCreditFcfa
+        : credits.employerCreditFcfa;
+
+    const wallet = await this.getOrCreateProfileWallet(profileId);
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.walletTransaction.create({
+        data: {
+          wallet_id: wallet.id,
+          type: WalletTransactionType.WELCOME_CREDIT,
+          amount,
+          reference_type: 'profile',
+          reference_id: profileId,
+        },
+      });
+      await tx.wallet.update({
+        where: { id: wallet.id },
+        data: { balance: { increment: amount } },
+      });
+      await tx.profile.update({
+        where: { id: profileId },
+        data: { whatsapp_activation_bonus_granted: true },
+      });
+    });
+
+    return amount;
+  }
+
+  /**
+   * Pays a penalty from the profile wallet.
+   * Debits the profile wallet and credits the system wallet atomically.
+   */
+  async payPenaltyFromWallet(penaltyId: string, profileId: string): Promise<{ reference: string }> {
+    const penalty = await this.prisma.penalty.findUnique({ where: { id: penaltyId } });
+    if (!penalty || penalty.worker_id !== profileId) {
+      throw new NotFoundException('Pénalité introuvable');
+    }
+    if (penalty.paid_at) {
+      throw new BadRequestException('Cette pénalité a déjà été réglée');
+    }
+
+    const profileWallet = await this.getOrCreateProfileWallet(profileId);
+    if (profileWallet.balance < Number(penalty.amount)) {
+      throw new BadRequestException('Solde insuffisant pour régler cette pénalité');
+    }
+
+    const systemWallet = await this.getOrCreateSystemWallet();
+    const reference = generatePaymentReference();
+
+    await this.prisma.$transaction(async (tx) => {
+      // Debit profile wallet
+      await tx.walletTransaction.create({
+        data: {
+          wallet_id: profileWallet.id,
+          type: WalletTransactionType.PENALTY_DEBIT,
+          amount: penalty.amount,
+          reference_type: 'penalty',
+          reference_id: penaltyId,
+        },
+      });
+      await tx.wallet.update({
+        where: { id: profileWallet.id },
+        data: { balance: { decrement: penalty.amount } },
+      });
+      // Credit system wallet
+      await tx.walletTransaction.create({
+        data: {
+          wallet_id: systemWallet.id,
+          type: WalletTransactionType.CREDIT_PENALTY,
+          amount: penalty.amount,
+          reference_type: 'penalty',
+          reference_id: penaltyId,
+        },
+      });
+      await tx.wallet.update({
+        where: { id: systemWallet.id },
+        data: { balance: { increment: penalty.amount } },
+      });
+      await tx.payment.create({
+        data: {
+          type: PaymentType.PENALTY,
+          profile_id: profileId,
+          amount: penalty.amount,
+          payment_method: PaymentMethod.OTHER,
+          transaction_id: reference,
+          status: PaymentStatus.COMPLETED,
+          paid_at: new Date(),
+          description: `Penalty ${penaltyId} paid via wallet`,
+        },
+      });
+      await tx.penalty.update({
+        where: { id: penaltyId },
+        data: { paid_at: new Date() },
+      });
+    });
+
+    return { reference };
+  }
+
+  // ── System wallet ────────────────────────────────────────────────────────────
 
   /**
    * Records a penalty payment: creates Payment, credits system wallet, and marks penalty as paid.

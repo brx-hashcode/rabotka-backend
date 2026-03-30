@@ -15,7 +15,7 @@ describe('WsNotificationsListener', () => {
       },
     } as unknown as WsNotificationsGateway;
 
-    listener = new WsNotificationsListener(gateway);
+    listener = new WsNotificationsListener(gateway, {} as any);
   });
 
   it('broadcasts notification to admins room', () => {
