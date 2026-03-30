@@ -27,6 +27,7 @@ import { LogService } from '../log/log.service';
 import { AdminAuthGuard } from '../auth/guards/admin-auth.guard';
 import { PaymentRequestService } from '../payment-request/payment-request.service';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
+import { WalletService } from '../wallet/wallet.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { MailService } from '../mail/mail.service';
 import { kycApprovedEmail, kycRejectedEmail } from '../mail/templates';
@@ -52,6 +53,7 @@ export class AdminProfileController {
     private readonly prisma: PrismaService,
     private readonly whatsApp: WhatsAppService,
     private readonly mail: MailService,
+    private readonly walletService: WalletService,
   ) {}
 
   @Get()
@@ -100,6 +102,12 @@ export class AdminProfileController {
   @ApiOperation({ summary: 'Get payment requests for a profile (admin only)' })
   async getPaymentRequests(@Param('id') id: string) {
     return await this.paymentRequestService.getByProfileId(id);
+  }
+
+  @Get(':id/wallet')
+  @ApiOperation({ summary: 'Get wallet balance and transactions for a profile (admin only)' })
+  async getWallet(@Param('id') id: string) {
+    return await this.walletService.getProfileWalletForAdmin(id);
   }
 
   @Get(':id/messages')

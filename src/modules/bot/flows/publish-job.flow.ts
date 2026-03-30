@@ -385,7 +385,7 @@ function handlePublishStep2(args: StepArgs): FlowResult {
         '*À quelle date et heure le travail doit-il commencer ?*',
         'Format: JJ/MM/AAAA HH:MM',
         '',
-        '*Exemple*: "_15/02/2026 09:00_"',
+        `*Exemple*: "_${new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })} ${new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', hour12: false })}_"`,
       ].join('\n'),
     ],
     nextState: {

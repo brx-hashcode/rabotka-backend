@@ -118,13 +118,16 @@ export class BotNotificationService {
       });
       if (!app?.worker?.phone || !app.job_offer?.employer) return;
 
-      const employerName = `${app.job_offer.employer.first_name} ${app.job_offer.employer.last_name}`.trim();
+      const employerName =
+        `${app.job_offer.employer.first_name} ${app.job_offer.employer.last_name}`.trim();
 
-      // Get the unlock attempt to pre-populate worker's unlock flow
-      const attempt = await this.contactUnlock.getByApplicationId(applicationId);
+      const attempt =
+        await this.contactUnlock.getByApplicationId(applicationId);
       if (attempt) {
         const fees = await this.systemConfig.getContactUnlockFees();
-        const balance = await this.walletService.getProfileWalletBalance(app.worker_id);
+        const balance = await this.walletService.getProfileWalletBalance(
+          app.worker_id,
+        );
         const text = [
           `🎉 *Candidature acceptée !*`,
           ``,
@@ -176,11 +179,21 @@ export class BotNotificationService {
       const [employer, worker] = await Promise.all([
         this.prisma.profile.findUnique({
           where: { id: attempt.employer_id },
-          select: { phone: true, first_name: true, last_name: true, email: true },
+          select: {
+            phone: true,
+            first_name: true,
+            last_name: true,
+            email: true,
+          },
         }),
         this.prisma.profile.findUnique({
           where: { id: attempt.worker_id },
-          select: { phone: true, first_name: true, last_name: true, email: true },
+          select: {
+            phone: true,
+            first_name: true,
+            last_name: true,
+            email: true,
+          },
         }),
       ]);
 
@@ -206,7 +219,10 @@ export class BotNotificationService {
         );
       }
     } catch (err) {
-      this.logger.warn(`Failed to send contact unlocked notification: ${attemptId}`, err);
+      this.logger.warn(
+        `Failed to send contact unlocked notification: ${attemptId}`,
+        err,
+      );
     }
   }
 

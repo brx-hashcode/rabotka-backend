@@ -523,6 +523,7 @@ export class BotOrchestratorService {
     await this.botState.set(profileId, flowState);
     const result = await runPayPenaltiesFlow(flowState, '', profile, {
       applicationService: this.applicationService,
+      walletService: this.walletService,
     });
     return result.reply;
   }

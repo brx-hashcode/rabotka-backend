@@ -34,7 +34,7 @@ export class AdminJobOfferController {
   @ApiOperation({
     summary: 'List job offers (admin only)',
     description:
-      'Returns paginated job offers with optional search and filters: status, payment_flow.',
+      'Returns paginated job offers with optional search and status filter.',
   })
   @ApiResponse({ status: 200, description: 'Paginated list of job offers' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
@@ -46,7 +46,6 @@ export class AdminJobOfferController {
       limit,
       q: dto.q,
       status: dto.status,
-      paymentFlow: dto.payment_flow,
     });
   }
 
