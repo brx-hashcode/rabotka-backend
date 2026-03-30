@@ -9,6 +9,7 @@ import { QueueService } from '../../common/services/queue/queue.service';
 import { PAYMENT_QUEUE } from '../../common/services/queue/queue.module';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { generatePaymentReference } from '../../common/utils/payment-reference';
+import { randomUUID } from 'crypto';
 
 export type PaymentJobData = {
   paymentId: string;
@@ -49,6 +50,25 @@ export class PaymentService {
     );
 
     return `${this.getFrontendUrl()}/job-posting/${jobOfferId}`;
+  }
+
+  async createPaymentUrl(
+    profileId: string,
+    amount: number,
+    description: string,
+    contactUnlockAttemptId?: string,
+  ): Promise<string> {
+    const token = randomUUID();
+    await this.prisma.paymentRequest.create({
+      data: {
+        profile_id: profileId,
+        token,
+        amount,
+        description,
+        ...(contactUnlockAttemptId && { contact_unlock_attempt_id: contactUnlockAttemptId }),
+      },
+    });
+    return `${this.getFrontendUrl()}/pay/${token}`;
   }
 
   generatePenaltyPaymentLink(profileId: string, amount: number): string {

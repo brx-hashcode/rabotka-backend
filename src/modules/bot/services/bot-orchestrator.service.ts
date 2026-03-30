@@ -333,7 +333,10 @@ export class BotOrchestratorService {
       [FLOW_IDS.VERIFY_WHATSAPP]: () =>
         runVerifyWhatsappFlow(state, input, profile, ctx),
       [FLOW_IDS.UNLOCK_CONTACT]: () =>
-        runUnlockContactFlow(state, input, profile, ctx),
+        runUnlockContactFlow(state, input, profile, {
+          ...ctx,
+          botNotification: this.notificationService,
+        }),
     };
     const runner = runners[flowId];
     return runner ? runner() : Promise.resolve(null);
@@ -463,6 +466,8 @@ export class BotOrchestratorService {
       const result = await runUnlockContactFlow(existingState, '', profile, {
         contactUnlockService: this.contactUnlockService,
         walletService: this.walletService,
+        paymentService: this.paymentService,
+        botNotification: this.notificationService,
       });
       if (result.nextState) {
         await this.botState.set(profileId, result.nextState);
@@ -502,6 +507,8 @@ export class BotOrchestratorService {
     const result = await runUnlockContactFlow(unlockState, '', profile, {
       contactUnlockService: this.contactUnlockService,
       walletService: this.walletService,
+      paymentService: this.paymentService,
+      botNotification: this.notificationService,
     });
     if (result.nextState) {
       await this.botState.set(profileId, result.nextState);

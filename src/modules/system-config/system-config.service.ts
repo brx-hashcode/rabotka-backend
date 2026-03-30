@@ -188,6 +188,17 @@ export class SystemConfigService implements OnModuleInit {
     return this.get('storage.driver', 'S3');
   }
 
+  async getMonetbilConfig(
+    operator: 'MTN' | 'AIRTEL',
+  ): Promise<{ serviceId: string; serviceSecret: string }> {
+    const prefix = operator === 'MTN' ? 'monetbil.mtn' : 'monetbil.airtel';
+    const [serviceId, serviceSecret] = await Promise.all([
+      this.get(`${prefix}_service_id`, ''),
+      this.getRaw(`${prefix}_service_secret`, ''),
+    ]);
+    return { serviceId, serviceSecret };
+  }
+
   /**
    * Returns a map of env-var-name → db-value for the given storage driver.
    * Empty string values are omitted so the original ConfigService env var takes precedence.

@@ -281,6 +281,36 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     label: 'Vercel Blob – Read/Write Token',
     isSecret: true,
   },
+
+  // ── MONETBIL ──────────────────────────────────────────────────────────────
+  {
+    key: 'monetbil.mtn_service_id',
+    value: '',
+    category: ConfigCategory.MONETBIL,
+    label: 'Monetbil – Service ID MTN',
+    isSecret: false,
+  },
+  {
+    key: 'monetbil.mtn_service_secret',
+    value: '',
+    category: ConfigCategory.MONETBIL,
+    label: 'Monetbil – Service Secret MTN',
+    isSecret: true,
+  },
+  {
+    key: 'monetbil.airtel_service_id',
+    value: '',
+    category: ConfigCategory.MONETBIL,
+    label: 'Monetbil – Service ID Airtel',
+    isSecret: false,
+  },
+  {
+    key: 'monetbil.airtel_service_secret',
+    value: '',
+    category: ConfigCategory.MONETBIL,
+    label: 'Monetbil – Service Secret Airtel',
+    isSecret: true,
+  },
 ];
 
 /** Maps system-config keys to the env var names each storage provider reads */

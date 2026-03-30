@@ -4,8 +4,22 @@ import {
   BadRequestException,
   Logger,
 } from '@nestjs/common';
-import { PaymentRequestStatus, Prisma } from '@prisma/client';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { ConfigService } from '@nestjs/config';
+import { PaymentRequestStatus, Prisma, WalletOwnerType, WalletTransactionType, PaymentType, PaymentMethod, PaymentStatus } from '@prisma/client';
+import { randomUUID } from 'crypto';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
+import { SystemConfigService } from '../system-config/system-config.service';
+import { WalletService } from '../wallet/wallet.service';
+import { WhatsAppService } from '../whatsapp/whatsapp.service';
+import { MailService } from '../mail/mail.service';
+import { paymentSuccessEmail } from '../mail/templates';
+import { MonetbilService } from './monetbil.service';
+import { PaymentStatusGateway } from '../ws-notifications/payment-status.gateway';
+import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
+import { BotNotificationService } from '../bot/services/bot-notification.service';
+import { ContactUnlockService } from '../contact-unlock/contact-unlock.service';
+import { generatePaymentReference } from '../../common/utils/payment-reference';
 import { ListPaymentRequestsDto } from './dto/list-payment-requests.dto';
 import { SubmitPaymentDto } from './dto/submit-payment.dto';
 
@@ -19,6 +33,12 @@ const PAYMENT_REQUEST_SELECT = {
   payment_reference: true,
   proof_images: true,
   rejection_note: true,
+  amount: true,
+  description: true,
+  phone: true,
+  operator: true,
+  monetbil_payment_ref: true,
+  contact_unlock_attempt_id: true,
   profile: {
     select: {
       id: true,
@@ -40,7 +60,43 @@ type PaymentRequestWithProfile = Prisma.PaymentRequestGetPayload<{
 export class PaymentRequestService {
   private readonly logger = new Logger(PaymentRequestService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly config: ConfigService,
+    private readonly systemConfig: SystemConfigService,
+    private readonly walletService: WalletService,
+    private readonly whatsAppService: WhatsAppService,
+    private readonly mailService: MailService,
+    private readonly monetbilService: MonetbilService,
+    private readonly paymentStatusGateway: PaymentStatusGateway,
+    private readonly eventEmitter: EventEmitter2,
+    private readonly botNotification: BotNotificationService,
+    private readonly contactUnlockService: ContactUnlockService,
+  ) {}
+
+  /**
+   * Creates a payment request token for the given profile and returns
+   * the public payment URL. Now requires amount + description.
+   */
+  async createPaymentUrl(
+    profileId: string,
+    amount: number,
+    description: string,
+    contactUnlockAttemptId?: string,
+  ): Promise<string> {
+    const token = randomUUID();
+    await this.prisma.paymentRequest.create({
+      data: {
+        profile_id: profileId,
+        token,
+        amount,
+        description,
+        ...(contactUnlockAttemptId && { contact_unlock_attempt_id: contactUnlockAttemptId }),
+      },
+    });
+    const frontendUrl = this.config.get<string>('FRONTEND_URL', '');
+    return `${frontendUrl}/pay/${token}`;
+  }
 
   async getByProfileId(profileId: string) {
     const requests = await this.prisma.paymentRequest.findMany({
@@ -73,9 +129,277 @@ export class PaymentRequestService {
       id: request.id,
       status: request.status,
       profileName: this.fullName(request.profile),
+      amount: request.amount !== null ? Number(request.amount) : null,
+      description: request.description ?? null,
     };
   }
 
+  /**
+   * Initiates a Monetbil USSD push for the given token.
+   * Updates the PaymentRequest to PROCESSING status.
+   */
+  async initiateMonetbilPayment(
+    token: string,
+    phone: string,
+    operator: 'MTN' | 'AIRTEL',
+  ): Promise<{ success: boolean }> {
+    const request = await this.prisma.paymentRequest.findUnique({
+      where: { token },
+    });
+
+    if (!request) {
+      throw new NotFoundException('Demande de paiement introuvable');
+    }
+
+    if (request.status !== PaymentRequestStatus.PENDING) {
+      throw new BadRequestException(
+        "Cette demande n'est pas en attente de paiement",
+      );
+    }
+
+    if (!request.amount) {
+      throw new BadRequestException('Montant non défini pour cette demande');
+    }
+
+    const { serviceId, serviceSecret } =
+      await this.systemConfig.getMonetbilConfig(operator);
+
+    if (!serviceId || !serviceSecret) {
+      throw new BadRequestException(
+        `Opérateur ${operator} non configuré pour les paiements en ligne`,
+      );
+    }
+
+    const paymentRef = generatePaymentReference();
+    const backendUrl = this.config.get<string>('BACKEND_URL', '');
+    const notifyUrl = `${backendUrl}/api/v1/webhooks/monetbil/callback`;
+
+    const result = await this.monetbilService.initiatePayment({
+      serviceId,
+      serviceSecret,
+      amount: Number(request.amount),
+      phone,
+      operator,
+      paymentRef,
+      notifyUrl,
+    });
+
+    if (!result.success) {
+      throw new BadRequestException(
+        result.message || "Échec de l'initiation du paiement",
+      );
+    }
+
+    await this.prisma.paymentRequest.update({
+      where: { id: request.id },
+      data: {
+        status: PaymentRequestStatus.PROCESSING,
+        phone,
+        operator,
+        monetbil_payment_ref: paymentRef,
+      },
+    });
+
+    return { success: true };
+  }
+
+  /**
+   * Handles the Monetbil webhook callback.
+   * On success: credits system wallet, sends notifications, pushes WebSocket update.
+   * On failure: marks rejected, pushes WebSocket update.
+   */
+  async handleMonetbilCallback(
+    payload: Record<string, string>,
+  ): Promise<{ received: boolean }> {
+    const { payment_ref, status, transaction_id } = payload;
+
+    if (!payment_ref) {
+      this.logger.warn('Monetbil callback missing payment_ref');
+      return { received: true };
+    }
+
+    const request = await this.prisma.paymentRequest.findUnique({
+      where: { monetbil_payment_ref: payment_ref },
+      select: { ...PAYMENT_REQUEST_SELECT, monetbil_payment_ref: true },
+    });
+
+    if (!request) {
+      this.logger.warn(`Monetbil callback: payment_ref not found: ${payment_ref}`);
+      return { received: true };
+    }
+
+    if (
+      request.status === PaymentRequestStatus.APPROVED ||
+      request.status === PaymentRequestStatus.REJECTED
+    ) {
+      // Already processed (duplicate callback)
+      return { received: true };
+    }
+
+    // Verify HMAC signature
+    const { serviceSecret } = await this.systemConfig.getMonetbilConfig(
+      (request.operator ?? 'MTN') as 'MTN' | 'AIRTEL',
+    );
+    if (serviceSecret && !this.monetbilService.verifyWebhookSignature(payload, serviceSecret)) {
+      this.logger.warn(`Monetbil callback: invalid signature for ref ${payment_ref}`);
+      return { received: true };
+    }
+
+    const isSuccess = status === '1';
+
+    if (isSuccess) {
+      await this.processSuccessfulPayment(request, transaction_id);
+    } else {
+      await this.prisma.paymentRequest.update({
+        where: { id: request.id },
+        data: {
+          status: PaymentRequestStatus.REJECTED,
+          ...(transaction_id && { monetbil_tx_id: transaction_id }),
+        },
+      });
+      this.logger.log(`Payment rejected for request ${request.id}`);
+    }
+
+    // Push real-time status to the browser via WebSocket
+    this.paymentStatusGateway.emitPaymentStatus(
+      request.token,
+      isSuccess ? 'APPROVED' : 'REJECTED',
+    );
+
+    return { received: true };
+  }
+
+  private async processSuccessfulPayment(
+    request: PaymentRequestWithProfile & {
+      monetbil_payment_ref: string | null;
+      contact_unlock_attempt_id: string | null;
+    },
+    transactionId?: string,
+  ): Promise<void> {
+    const amount = Number(request.amount ?? 0);
+    const transactionRef = generatePaymentReference();
+
+    // 1. Credit system wallet + create Payment record (atomic)
+    const systemWallet = await this.walletService.getOrCreateSystemWallet();
+    await this.prisma.$transaction([
+      this.prisma.payment.create({
+        data: {
+          type: PaymentType.PENALTY,
+          profile_id: request.profile_id,
+          amount,
+          payment_method: PaymentMethod.MOBILE_MONEY,
+          transaction_id: transactionRef,
+          status: PaymentStatus.COMPLETED,
+          paid_at: new Date(),
+          description: request.description ?? undefined,
+        },
+      }),
+      this.prisma.walletTransaction.create({
+        data: {
+          wallet_id: systemWallet.id,
+          type: WalletTransactionType.CREDIT_PENALTY,
+          amount,
+          reference_type: 'payment_request',
+          reference_id: request.id,
+        },
+      }),
+      this.prisma.wallet.update({
+        where: { id: systemWallet.id },
+        data: { balance: { increment: amount } },
+      }),
+      this.prisma.paymentRequest.update({
+        where: { id: request.id },
+        data: {
+          status: PaymentRequestStatus.APPROVED,
+          payment_reference: transactionRef,
+          ...(transactionId && { monetbil_tx_id: transactionId }),
+        },
+      }),
+    ]);
+
+    this.logger.log(
+      `Payment approved: ${request.id} — ${amount} FCFA credited to system wallet`,
+    );
+
+    const profileName = this.fullName(request.profile);
+    const description = request.description ?? 'Paiement';
+
+    // 2. Emit admin notification
+    this.eventEmitter.emit(AdminNotificationEvent.PAYMENT_PENALTY, {
+      event: AdminNotificationEvent.PAYMENT_PENALTY,
+      title: 'Paiement reçu',
+      message: `${profileName} a effectué un paiement de ${amount.toLocaleString('fr-FR')} FCFA — ${description}`,
+      entityType: 'profile',
+      entityId: request.profile_id,
+      timestamp: new Date().toISOString(),
+    });
+
+    // 3. Send WhatsApp notification
+    if (request.profile.phone) {
+      const text = [
+        `✅ *Paiement confirmé*`,
+        `Montant : *${amount.toLocaleString('fr-FR')} FCFA*`,
+        `Objet : ${description}`,
+        `Merci pour votre paiement !`,
+      ].join('\n');
+
+      await this.whatsAppService
+        .sendTextMessage(request.profile.phone, text)
+        .catch((err) =>
+          this.logger.warn(
+            `WhatsApp notification failed for ${request.profile.phone}:`,
+            err,
+          ),
+        );
+    }
+
+    // 4. Send email notification
+    if (request.profile.email) {
+      await this.mailService
+        .sendMail({
+          to: request.profile.email,
+          subject: `Paiement confirmé — ${description}`,
+          html: paymentSuccessEmail(profileName, description, amount),
+        })
+        .catch((err) =>
+          this.logger.warn(
+            `Email notification failed for ${request.profile.email}:`,
+            err,
+          ),
+        );
+    }
+
+    // 5. If this payment was for a contact unlock, mark the party as paid
+    //    and notify both parties if the attempt is now UNLOCKED
+    if (request.contact_unlock_attempt_id) {
+      try {
+        const result = await this.contactUnlockService.payUnlock(
+          request.contact_unlock_attempt_id,
+          request.profile_id,
+          false, // payment was via mobile money, not wallet credit
+        );
+        if (result.status === 'UNLOCKED' || result.newlyUnlocked.length > 0) {
+          const attemptIds = result.status === 'UNLOCKED'
+            ? [result.attemptId, ...result.newlyUnlocked]
+            : result.newlyUnlocked;
+          for (const id of [...new Set(attemptIds)]) {
+            await this.botNotification
+              .sendContactUnlockedNotification(id)
+              .catch((err) =>
+                this.logger.warn(`Contact unlock notification failed for ${id}:`, err),
+              );
+          }
+        }
+      } catch (err) {
+        this.logger.warn(
+          `Contact unlock processing failed for attempt ${request.contact_unlock_attempt_id}:`,
+          err,
+        );
+      }
+    }
+  }
+
+  /** Legacy manual proof submission — kept for backward compatibility */
   async submitPayment(token: string, dto: SubmitPaymentDto) {
     const request = await this.prisma.paymentRequest.findUnique({
       where: { token },
@@ -144,6 +468,8 @@ export class PaymentRequestService {
       profileStatus: r.profile.status,
       profileType: r.profile.profile_type,
       status: r.status,
+      amount: r.amount !== null ? Number(r.amount) : null,
+      description: r.description,
       paymentReference: r.payment_reference,
       proofImages: r.proof_images,
       rejectionNote: r.rejection_note,

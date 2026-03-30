@@ -168,6 +168,7 @@ enum ContactUnlockStatus {
 
 enum PaymentRequestStatus {
   PENDING
+  PROCESSING
   SUBMITTED
   APPROVED
   REJECTED
@@ -187,6 +188,7 @@ enum ConfigCategory {
   CONTACT
   STORAGE
   GENERAL
+  MONETBIL
 }
 
 model SystemConfig {
@@ -596,21 +598,29 @@ model VerificationToken {
 }
 
 model PaymentRequest {
-  id                String               @id @default(uuid()) @db.Uuid
-  created_at        DateTime             @default(now())
-  updated_at        DateTime             @updatedAt
-  profile_id        String               @db.Uuid
-  token             String               @unique
-  status            PaymentRequestStatus @default(PENDING)
-  payment_reference String?
-  proof_images      String[]
-  rejection_note    String?
+  id                   String               @id @default(uuid()) @db.Uuid
+  created_at           DateTime             @default(now())
+  updated_at           DateTime             @updatedAt
+  profile_id           String               @db.Uuid
+  token                String               @unique
+  status               PaymentRequestStatus @default(PENDING)
+  payment_reference    String?
+  proof_images         String[]
+  rejection_note       String?
+  amount               Decimal?             @db.Decimal(10, 2)
+  description          String?
+  phone                String?
+  operator             String?
+  monetbil_payment_ref        String?              @unique
+  monetbil_tx_id              String?
+  contact_unlock_attempt_id   String?              @db.Uuid
 
   profile Profile @relation(fields: [profile_id], references: [id], onDelete: Cascade)
 
   @@index([profile_id], name: "idx_payment_request_profile")
   @@index([token], name: "idx_payment_request_token")
   @@index([status], name: "idx_payment_request_status")
+  @@index([monetbil_payment_ref], name: "idx_payment_request_monetbil_ref")
   @@map("payment_requests")
 }
 
