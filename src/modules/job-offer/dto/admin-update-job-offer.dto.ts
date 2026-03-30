@@ -2,7 +2,6 @@ import {
   IsOptional,
   IsString,
   IsNumber,
-  IsEnum,
   IsInt,
   IsDateString,
   Min,
@@ -11,7 +10,6 @@ import {
   MaxLength,
 } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { PaymentFlow } from '@prisma/client';
 
 export class AdminUpdateJobOfferDto {
   @ApiPropertyOptional()
@@ -39,11 +37,6 @@ export class AdminUpdateJobOfferDto {
   @Min(1000)
   @Max(1000000)
   amount?: number;
-
-  @ApiPropertyOptional({ enum: PaymentFlow })
-  @IsOptional()
-  @IsEnum(PaymentFlow)
-  paymentFlow?: PaymentFlow;
 
   @ApiPropertyOptional()
   @IsOptional()

@@ -75,7 +75,6 @@ enum KycDocumentCategory {
 }
 
 enum JobOfferStatus {
-  PENDING_PAYMENT
   DRAFT
   ACTIVE
   PARTIALLY_FILLED
@@ -330,8 +329,10 @@ model JobOffer {
   payment_flow PaymentFlow
   address      String
   note         String?
-  quantity     Int            @default(1)
-  status       JobOfferStatus @default(ACTIVE)
+  quantity                Int            @default(1)
+  status                  JobOfferStatus @default(ACTIVE)
+  employer_unlock_paid    Boolean        @default(false)
+  employer_unlock_paid_at DateTime?
 
   employer                Profile                @relation(fields: [employer_id], references: [id], onDelete: Cascade)
   applications            Application[]

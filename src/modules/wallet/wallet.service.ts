@@ -26,6 +26,11 @@ export type AdminWalletTransactionItem = {
   createdAt: string;
 };
 
+export type AdminProfileWallet = {
+  balance: number;
+  transactions: AdminWalletTransactionItem[];
+};
+
 export type AdminPaymentItem = {
   id: string;
   type: string;
@@ -92,6 +97,27 @@ export class WalletService {
   async getProfileWalletBalance(profileId: string): Promise<number> {
     const w = await this.getOrCreateProfileWallet(profileId);
     return w.balance;
+  }
+
+  async getProfileWalletForAdmin(profileId: string): Promise<AdminProfileWallet> {
+    const wallet = await this.getOrCreateProfileWallet(profileId);
+    const txs = await this.prisma.walletTransaction.findMany({
+      where: { wallet_id: wallet.id },
+      orderBy: { created_at: 'desc' },
+      take: 100,
+    });
+    return {
+      balance: wallet.balance,
+      transactions: txs.map((t) => ({
+        id: t.id,
+        walletId: t.wallet_id,
+        type: t.type,
+        amount: Number(t.amount),
+        referenceType: t.reference_type ?? null,
+        referenceId: t.reference_id ?? null,
+        createdAt: t.created_at.toISOString(),
+      })),
+    };
   }
 
   async creditProfileWallet(

@@ -1,12 +1,12 @@
 import type { BotProfile, BotState } from '../types/bot-state.types';
 import { FLOW_IDS, CMD_MENU } from '../bot.constants';
 import { menuMessage } from '../messages/menu.messages';
-import type { PaymentService } from '../../payments/payment.service';
 import { PrismaService } from 'src/common/services/prisma/prisma.service';
+import type { SystemConfigService } from '../../system-config/system-config.service';
 
 export type ResolvePenaltiesContext = {
   prisma: PrismaService;
-  paymentService: PaymentService;
+  systemConfigService: SystemConfigService;
 };
 
 type FlowResult = {
@@ -78,7 +78,7 @@ export async function runResolvePenaltiesFlow(
           ``,
           `Pour réactiver votre compte, vous devez régler vos pénalités.`,
           ``,
-          `*1.* 💳 Régler mes pénalités`,
+          `*1.* 💳 Voir les instructions de paiement`,
           `*2.* ↩️ Annuler`,
         ].join('\n'),
       ],
@@ -95,23 +95,36 @@ export async function runResolvePenaltiesFlow(
   if (trimmed === '1') {
     const count = payload.count as number;
     const total = payload.total as number;
-    const paymentLink = await ctx.paymentService.generatePenaltyPaymentLink(
-      profile.id,
-      total,
+
+    const [mtnNumber, airtelNumber] = await Promise.all([
+      ctx.systemConfigService.getRaw('contact.orange_money_number', ''),
+      ctx.systemConfigService.getRaw('contact.airtel_money_number', ''),
+    ]);
+
+    const paymentLines: string[] = [
+      `💳 *Instructions de paiement*`,
+      ``,
+      `Montant à régler : *${total.toLocaleString('fr-FR')} FCFA* (${count} pénalité(s))`,
+      ``,
+      `Envoyez le montant exact via Mobile Money :`,
+    ];
+
+    if (mtnNumber) {
+      paymentLines.push(``, `📱 *MTN Money :* ${mtnNumber}`);
+    }
+    if (airtelNumber) {
+      paymentLines.push(``, `📱 *Airtel Money :* ${airtelNumber}`);
+    }
+
+    paymentLines.push(
+      ``,
+      `Après le virement, notre équipe vérifiera le paiement et réactivera votre compte dans les plus brefs délais.`,
+      ``,
+      `Tapez *MENU* pour revenir au menu principal.`,
     );
 
     return {
-      reply: [
-        [
-          `*Lien de paiement généré*`,
-          ``,
-          `Pour régler vos *${count} pénalité(s)* (${total.toLocaleString('fr-FR')} FCFA), cliquez sur le lien suivant :`,
-          ``,
-          paymentLink,
-          ``,
-          `Une fois le paiement confirmé, votre compte sera réactivé automatiquement.`,
-        ].join('\n'),
-      ],
+      reply: [paymentLines.join('\n')],
       clearState: true,
     };
   }
@@ -119,14 +132,16 @@ export async function runResolvePenaltiesFlow(
   if (trimmed === '2') {
     return {
       reply: [
-        `⚠️ *Compte toujours suspendu.*\n\nVotre compte restera suspendu jusqu'au règlement de vos pénalités.\nTapez *1* à tout moment pour générer le lien de paiement.`,
+        `⚠️ *Compte toujours suspendu.*\n\nVotre compte restera suspendu jusqu'au règlement de vos pénalités.\nTapez *1* à tout moment pour voir les instructions de paiement.`,
       ],
       clearState: true,
     };
   }
 
   return {
-    reply: ['Tapez *1* pour régler vos pénalités ou *2* pour annuler.'],
+    reply: [
+      'Tapez *1* pour voir les instructions de paiement ou *2* pour annuler.',
+    ],
     nextState: state,
   };
 }

@@ -3,10 +3,20 @@ export function formatContactUnlockPrompt(params: {
   amount: number;
   balance: number;
   profileType: 'WORKER' | 'EMPLOYER';
+  isJobLevel?: boolean;
 }): string {
-  const { name, amount, balance, profileType } = params;
+  const { name, amount, balance, profileType, isJobLevel } = params;
   const role = profileType === 'EMPLOYER' ? 'travailleur' : 'employeur';
   const hasFunds = balance >= amount;
+
+  const scopeNote =
+    profileType === 'EMPLOYER' && isJobLevel
+      ? [
+          '💡 Ce paiement *couvre tous les candidats acceptés* pour ce poste.',
+          "Vous ne payez qu'une seule fois, peu importe le nombre de candidats.",
+          '',
+        ]
+      : [];
 
   const fundOptions = hasFunds
     ? [
@@ -25,6 +35,7 @@ export function formatContactUnlockPrompt(params: {
     '',
     `Pour voir les coordonnées de votre ${role} *${name}*, vous devez débloquer le contact.`,
     '',
+    ...scopeNote,
     `*Frais de déverrouillage*: ${amount} FCFA`,
     `*Solde de votre portefeuille*: ${balance} FCFA`,
     '',

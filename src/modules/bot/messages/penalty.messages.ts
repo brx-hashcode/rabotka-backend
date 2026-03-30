@@ -151,7 +151,11 @@ export function formatProfileStats(params: {
   ].join('\n');
 }
 
-export function formatPenaltyBlocked(totalAmount: number): string {
+export function formatPenaltyBlocked(
+  totalAmount: number,
+  mtnNumber: string,
+  airtelNumber: string,
+): string {
   return [
     '⛔ *Candidature bloquée — pénalité impayée*',
     '',
@@ -159,8 +163,8 @@ export function formatPenaltyBlocked(totalAmount: number): string {
     "Vous ne pouvez pas postuler tant qu'elles ne sont pas réglées.",
     '',
     '*Comment payer :*',
-    '📲 Orange Money : *06 000 0000*',
-    '📲 Airtel Money : *07 000 0000*',
+    `📲 MTN Money : *${mtnNumber}*`,
+    `📲 Airtel Money : *${airtelNumber}*`,
     '',
     'Indiquez votre numéro de téléphone en référence lors du paiement.',
     'Votre compte sera débloqué sous 24h après réception.',

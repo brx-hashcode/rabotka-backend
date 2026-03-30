@@ -59,7 +59,6 @@ async function handleAcceptRefuseStep1(args: StepArgs): Promise<FlowResult> {
       const attempt = await ctx.contactUnlockService.getByApplicationId(applicationId);
       if (attempt) {
         const fees = await ctx.systemConfigService.getContactUnlockFees();
-        const balance = await ctx.walletService.getProfileWalletBalance(profile.id);
         const workerData = await ctx.prisma.profile.findUnique({
           where: { id: attempt.worker_id },
           select: { first_name: true, last_name: true },
@@ -68,11 +67,42 @@ async function handleAcceptRefuseStep1(args: StepArgs): Promise<FlowResult> {
           ? `${workerData.first_name} ${workerData.last_name}`.trim()
           : 'le travailleur';
 
+        // Check if employer already paid at job level (multi-person job)
+        const jobOffer = await ctx.prisma.jobOffer.findUnique({
+          where: { id: attempt.job_offer_id },
+          select: { quantity: true, employer_unlock_paid: true },
+        }).catch(() => null);
+
+        const isMultiPerson = (jobOffer?.quantity ?? 1) > 1;
+        const employerAlreadyPaid = isMultiPerson && jobOffer?.employer_unlock_paid;
+
+        if (employerAlreadyPaid) {
+          // Employer paid once at job level — no need to pay again
+          return {
+            reply: [
+              [
+                '*Candidature acceptée !*',
+                '',
+                'Le travailleur a été notifié.',
+                '',
+                `✅ Votre paiement couvre déjà tous les candidats de ce poste.`,
+                `Le contact avec *${workerName}* sera débloqué dès qu'il confirme de son côté.`,
+                '',
+                "*Tapez 'Menu' pour revenir.*",
+              ].join('\n'),
+            ],
+            clearState: true,
+          };
+        }
+
+        const balance = await ctx.walletService.getProfileWalletBalance(profile.id);
+
         const unlockPrompt = formatContactUnlockPrompt({
           name: workerName,
           amount: fees.employerFeeFcfa,
           balance,
           profileType: 'EMPLOYER',
+          isJobLevel: isMultiPerson,
         });
 
         return {
