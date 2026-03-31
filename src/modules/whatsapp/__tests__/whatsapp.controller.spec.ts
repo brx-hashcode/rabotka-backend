@@ -15,7 +15,7 @@ function makeWhatsAppService() {
 
 function makeConversationService() {
   return {
-    handleIncomingMessage: jest.fn().mockResolvedValue(['Hello back!']),
+    handleIncomingMessage: jest.fn().mockResolvedValue({ profileId: 'p-1', replies: ['Hello back!'] }),
   };
 }
 
@@ -35,6 +35,8 @@ function makeConfigService() {
 function makeRedis() {
   return {
     set: jest.fn().mockResolvedValue('OK'), // 'OK' = new key set
+    incr: jest.fn().mockResolvedValue(1),
+    expire: jest.fn().mockResolvedValue(1),
   };
 }
 
@@ -55,6 +57,7 @@ describe('WhatsAppController', () => {
   let twilioService: ReturnType<typeof makeTwilioService>;
   let configService: ReturnType<typeof makeConfigService>;
   let redis: ReturnType<typeof makeRedis>;
+  let queueService: { addJob: jest.Mock };
 
   beforeEach(() => {
     whatsAppService = makeWhatsAppService();
@@ -62,12 +65,13 @@ describe('WhatsAppController', () => {
     twilioService = makeTwilioService();
     configService = makeConfigService();
     redis = makeRedis();
+    queueService = { addJob: jest.fn().mockResolvedValue(undefined) };
     controller = new WhatsAppController(
       whatsAppService as any,
       conversationService as any,
       twilioService as any,
       configService as any,
-      {} as any, // queueService
+      queueService as any,
       redis as any,
     );
   });
@@ -91,7 +95,10 @@ describe('WhatsAppController', () => {
     it('processes webhook and sends reply', async () => {
       await controller.incomingWebhook(makeReq(), body);
       expect(conversationService.handleIncomingMessage).toHaveBeenCalledWith('+24200000001', 'Hello');
-      expect(whatsAppService.sendTextMessage).toHaveBeenCalledWith('+24200000001', 'Hello back!');
+      expect(queueService.addJob).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ type: 'text', phone: '+24200000001', text: 'Hello back!' }),
+      );
     });
 
     it('throws ForbiddenException when auth token not set', async () => {
@@ -122,14 +129,14 @@ describe('WhatsAppController', () => {
     });
 
     it('handles media reply messages with [IMG:...] prefix', async () => {
-      conversationService.handleIncomingMessage.mockResolvedValue([
-        '[IMG:https://cdn.example.com/photo.jpg]Caption text',
-      ]);
+      conversationService.handleIncomingMessage.mockResolvedValue({
+        profileId: 'p-1',
+        replies: ['[IMG:https://cdn.example.com/photo.jpg]Caption text'],
+      });
       await controller.incomingWebhook(makeReq(), body);
-      expect(whatsAppService.sendMediaMessage).toHaveBeenCalledWith(
-        '+24200000001',
-        'https://cdn.example.com/photo.jpg',
-        'Caption text',
+      expect(queueService.addJob).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ type: 'media', phone: '+24200000001', mediaUrl: 'https://cdn.example.com/photo.jpg', caption: 'Caption text' }),
       );
     });
 

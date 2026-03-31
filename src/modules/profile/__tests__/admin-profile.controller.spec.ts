@@ -32,6 +32,9 @@ function makePrisma(profile: any = null) {
     profile: {
       findUnique: jest.fn().mockResolvedValue(profile),
     },
+    user: {
+      findUnique: jest.fn().mockResolvedValue(null),
+    },
   };
 }
 

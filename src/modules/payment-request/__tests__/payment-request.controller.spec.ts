@@ -5,7 +5,8 @@ function makeService() {
   return {
     getList: jest.fn().mockResolvedValue({ data: [], total: 0 }),
     getByToken: jest.fn().mockResolvedValue({ id: 'pr1', token: 'tok' }),
-    submitPayment: jest.fn().mockResolvedValue({ id: 'pr1' }),
+    initiateMonetbilPayment: jest.fn().mockResolvedValue({ success: true }),
+    handleMonetbilCallback: jest.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -38,8 +39,8 @@ describe('PaymentRequestPublicController', () => {
     expect(service.getByToken).toHaveBeenCalledWith('tok');
   });
 
-  it('submitPayment() delegates to service', () => {
-    controller.submitPayment('tok', { proofUrl: 'http://img.jpg' } as any);
-    expect(service.submitPayment).toHaveBeenCalledWith('tok', { proofUrl: 'http://img.jpg' });
+  it('initiatePayment() delegates to service', () => {
+    controller.initiatePayment('tok', { phone: '237600000001', operator: 'MTN' } as any);
+    expect(service.initiateMonetbilPayment).toHaveBeenCalledWith('tok', '237600000001', 'MTN');
   });
 });

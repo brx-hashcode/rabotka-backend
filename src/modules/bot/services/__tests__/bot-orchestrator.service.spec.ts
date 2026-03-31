@@ -11,6 +11,8 @@ import { JobOfferService } from '../../../job-offer/job-offer.service';
 import { ApplicationService } from '../../../application/application.service';
 import { SystemConfigService } from '../../../system-config/system-config.service';
 import { PaymentService } from '../../../payments/payment.service';
+import { ContactUnlockService } from '../../../contact-unlock/contact-unlock.service';
+import { WalletService } from '../../../wallet/wallet.service';
 
 const PROFILE_ID = 'profile-uuid-1';
 const PHONE = '+242000000';
@@ -23,7 +25,9 @@ const mockActiveProfile = {
   email: 'jean@test.com',
   profile_type: 'WORKER',
   status: 'ACTIVE',
+  billing_status: 'CLEAR',
   reliability_score: 90,
+  whatsapp_connected: true,
 };
 
 const mockEmployerProfile = {
@@ -46,6 +50,7 @@ function makeDeps() {
     botInbox: {
       shift: jest.fn().mockResolvedValue(null),
       count: jest.fn().mockResolvedValue(0),
+      peek: jest.fn().mockResolvedValue(null),
     },
     botDraft: {
       getDraft: jest.fn().mockResolvedValue(null),
@@ -99,6 +104,8 @@ describe('BotOrchestratorService', () => {
         { provide: BotNotificationService, useValue: deps.notificationService },
         { provide: SystemConfigService, useValue: deps.systemConfig },
         { provide: PaymentService, useValue: {} },
+        { provide: ContactUnlockService, useValue: { findPendingAttemptForProfile: jest.fn(), getByApplicationId: jest.fn(), payUnlock: jest.fn() } },
+        { provide: WalletService, useValue: { getProfileWalletBalance: jest.fn().mockResolvedValue(0) } },
       ],
     }).compile();
 
@@ -419,7 +426,7 @@ describe('BotOrchestratorService', () => {
         reply: ['Done'],
         clearState: true,
       });
-      (deps.botInbox.shift as jest.Mock).mockResolvedValue({
+      (deps.botInbox.peek as jest.Mock).mockResolvedValue({
         type: 'new_application',
         applicationId: 'app-1',
         workerName: 'Jean',

@@ -6,7 +6,14 @@ import {
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ConfigService } from '@nestjs/config';
-import { PaymentRequestStatus, Prisma, WalletOwnerType, WalletTransactionType, PaymentType, PaymentMethod, PaymentStatus } from '@prisma/client';
+import {
+  PaymentRequestStatus,
+  Prisma,
+  WalletTransactionType,
+  PaymentType,
+  PaymentMethod,
+  PaymentStatus,
+} from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { SystemConfigService } from '../system-config/system-config.service';
@@ -91,7 +98,9 @@ export class PaymentRequestService {
         token,
         amount,
         description,
-        ...(contactUnlockAttemptId && { contact_unlock_attempt_id: contactUnlockAttemptId }),
+        ...(contactUnlockAttemptId && {
+          contact_unlock_attempt_id: contactUnlockAttemptId,
+        }),
       },
     });
     const frontendUrl = this.config.get<string>('FRONTEND_URL', '');
@@ -224,7 +233,9 @@ export class PaymentRequestService {
     });
 
     if (!request) {
-      this.logger.warn(`Monetbil callback: payment_ref not found: ${payment_ref}`);
+      this.logger.warn(
+        `Monetbil callback: payment_ref not found: ${payment_ref}`,
+      );
       return { received: true };
     }
 
@@ -240,8 +251,13 @@ export class PaymentRequestService {
     const { serviceSecret } = await this.systemConfig.getMonetbilConfig(
       (request.operator ?? 'MTN') as 'MTN' | 'AIRTEL',
     );
-    if (serviceSecret && !this.monetbilService.verifyWebhookSignature(payload, serviceSecret)) {
-      this.logger.warn(`Monetbil callback: invalid signature for ref ${payment_ref}`);
+    if (
+      typeof serviceSecret === 'string' &&
+      !this.monetbilService.verifyWebhookSignature(payload, serviceSecret)
+    ) {
+      this.logger.warn(
+        `Monetbil callback: invalid signature for ref ${payment_ref}`,
+      );
       return { received: true };
     }
 
@@ -270,10 +286,7 @@ export class PaymentRequestService {
   }
 
   private async processSuccessfulPayment(
-    request: PaymentRequestWithProfile & {
-      monetbil_payment_ref: string | null;
-      contact_unlock_attempt_id: string | null;
-    },
+    request: PaymentRequestWithProfile,
     transactionId?: string,
   ): Promise<void> {
     const amount = Number(request.amount ?? 0);
@@ -322,7 +335,7 @@ export class PaymentRequestService {
     );
 
     const profileName = this.fullName(request.profile);
-    const description = request.description ?? 'Paiement';
+    const description: string = request.description ?? 'Paiement';
 
     // 2. Emit admin notification
     this.eventEmitter.emit(AdminNotificationEvent.PAYMENT_PENALTY, {
@@ -369,30 +382,32 @@ export class PaymentRequestService {
         );
     }
 
-    // 5. If this payment was for a contact unlock, mark the party as paid
-    //    and notify both parties if the attempt is now UNLOCKED
     if (request.contact_unlock_attempt_id) {
       try {
         const result = await this.contactUnlockService.payUnlock(
           request.contact_unlock_attempt_id,
           request.profile_id,
-          false, // payment was via mobile money, not wallet credit
+          false,
         );
         if (result.status === 'UNLOCKED' || result.newlyUnlocked.length > 0) {
-          const attemptIds = result.status === 'UNLOCKED'
-            ? [result.attemptId, ...result.newlyUnlocked]
-            : result.newlyUnlocked;
-          for (const id of [...new Set(attemptIds)]) {
+          const attemptIds =
+            result.status === 'UNLOCKED'
+              ? [result.attemptId, ...result.newlyUnlocked]
+              : result.newlyUnlocked;
+          for (const id of new Set(attemptIds)) {
             await this.botNotification
               .sendContactUnlockedNotification(id)
               .catch((err) =>
-                this.logger.warn(`Contact unlock notification failed for ${id}:`, err),
+                this.logger.warn(
+                  `Contact unlock notification failed for ${id}:`,
+                  err,
+                ),
               );
           }
         }
       } catch (err) {
         this.logger.warn(
-          `Contact unlock processing failed for attempt ${request.contact_unlock_attempt_id}:`,
+          `Contact unlock processing failed for attempt ${String(request.contact_unlock_attempt_id)}:`,
           err,
         );
       }
@@ -453,7 +468,10 @@ export class PaymentRequestService {
   }
 
   private fullName(
-    profile: Pick<PaymentRequestWithProfile['profile'], 'first_name' | 'last_name'>,
+    profile: Pick<
+      PaymentRequestWithProfile['profile'],
+      'first_name' | 'last_name'
+    >,
   ) {
     return `${profile.first_name} ${profile.last_name}`;
   }

@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException, BadRequestException } from '@nestjs/common';
 import { WalletService } from '../wallet.service';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
+import { SystemConfigService } from '../../system-config/system-config.service';
 import { WalletOwnerType, WalletTransactionType, PaymentStatus, PaymentType, PaymentMethod } from '@prisma/client';
 import { generatePaymentReference } from '../../../common/utils/payment-reference';
 
@@ -59,6 +60,7 @@ describe('WalletService', () => {
       providers: [
         WalletService,
         { provide: PrismaService, useValue: mockPrismaService },
+        { provide: SystemConfigService, useValue: { get: jest.fn().mockResolvedValue('') } },
       ],
     }).compile();
 
