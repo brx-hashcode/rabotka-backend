@@ -4,6 +4,7 @@ import { WsNotificationsListener } from '../ws-notifications.listener';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { REDIS_CONNECTION } from '../../../common/services/redis/redis.constants';
+import { AdminNotificationService } from '../admin-notification.service';
 
 describe('WsNotificationsModule', () => {
   it('provides gateway and listener', async () => {
@@ -14,6 +15,7 @@ describe('WsNotificationsModule', () => {
         { provide: ConfigService, useValue: { get: jest.fn() } },
         { provide: JwtService, useValue: { verify: jest.fn() } },
         { provide: REDIS_CONNECTION, useValue: {} },
+        { provide: AdminNotificationService, useValue: { create: jest.fn() } },
       ],
     }).compile();
 

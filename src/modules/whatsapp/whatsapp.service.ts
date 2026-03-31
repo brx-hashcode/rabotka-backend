@@ -128,10 +128,15 @@ export class WhatsAppService {
     );
 
     if (this.isConfigured()) {
-      const message = welcomeActivationMessage(profile.first_name, creditAmount);
+      const message = welcomeActivationMessage(
+        profile.first_name,
+        creditAmount,
+      );
       await this.sendTextMessage(profile.phone, message, profileId);
     }
 
-    this.logger.log(`WhatsApp verified and account activated for profile ${profileId}`);
+    this.logger.log(
+      `WhatsApp verified and account activated for profile ${profileId}`,
+    );
   }
 }

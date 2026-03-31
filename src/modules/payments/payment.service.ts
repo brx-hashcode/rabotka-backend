@@ -9,7 +9,7 @@ import { QueueService } from '../../common/services/queue/queue.service';
 import { PAYMENT_QUEUE } from '../../common/services/queue/queue.module';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { generatePaymentReference } from '../../common/utils/payment-reference';
-import { randomUUID } from 'crypto';
+import { randomUUID } from 'node:crypto';
 
 export type PaymentJobData = {
   paymentId: string;
@@ -65,7 +65,9 @@ export class PaymentService {
         token,
         amount,
         description,
-        ...(contactUnlockAttemptId && { contact_unlock_attempt_id: contactUnlockAttemptId }),
+        ...(contactUnlockAttemptId && {
+          contact_unlock_attempt_id: contactUnlockAttemptId,
+        }),
       },
     });
     return `${this.getFrontendUrl()}/pay/${token}`;
@@ -98,6 +100,7 @@ export class PaymentService {
         description: data.description ?? `${data.type} payment`,
       },
     });
+
     await this.queueService.addJob<PaymentJobData>(PAYMENT_QUEUE, {
       paymentId: payment.id,
       type: data.type,
@@ -105,6 +108,7 @@ export class PaymentService {
       amount: data.amount,
       entityId: data.entityId,
     });
+
     return { paymentId: payment.id };
   }
 

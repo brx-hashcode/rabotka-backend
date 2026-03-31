@@ -111,7 +111,6 @@ async function handleStep1(args: StepArgs): Promise<FlowResult> {
   };
 }
 
-// Fix 1 & 4: after wallet credit, notify ALL newly unlocked parties via WhatsApp
 async function handleWalletCredit(args: {
   profile: BotProfile;
   attemptId: string;
@@ -125,7 +124,6 @@ async function handleWalletCredit(args: {
       true,
     );
 
-    // Notify all attempts that became UNLOCKED (handles multi-person cascade too)
     const unlockedIds =
       result.status === 'UNLOCKED'
         ? [...new Set([result.attemptId, ...result.newlyUnlocked])]
@@ -162,7 +160,6 @@ async function handleWalletCredit(args: {
   }
 }
 
-// Fix 2: mobile money path clears state immediately — webhook handles everything
 async function handleMobileMoney(args: {
   profile: BotProfile;
   otherName: string;

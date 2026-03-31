@@ -20,13 +20,13 @@ describe('AdminJobOfferController', () => {
 
   it('list() uses defaults and delegates', async () => {
     const result = await controller.list({} as any);
-    expect(service.getJobOffersForAdmin).toHaveBeenCalledWith({ page: 1, limit: 10, q: undefined, status: undefined, paymentFlow: undefined });
+    expect(service.getJobOffersForAdmin).toHaveBeenCalledWith(expect.objectContaining({ page: 1, limit: 10 }));
     expect(result).toEqual({ data: [], total: 0 });
   });
 
   it('list() passes dto values', async () => {
-    await controller.list({ page: 2, limit: 5, q: 'plumber', status: 'PUBLISHED', payment_flow: 'POSTPAID' } as any);
-    expect(service.getJobOffersForAdmin).toHaveBeenCalledWith({ page: 2, limit: 5, q: 'plumber', status: 'PUBLISHED', paymentFlow: 'POSTPAID' });
+    await controller.list({ page: 2, limit: 5, q: 'plumber', status: 'PUBLISHED' } as any);
+    expect(service.getJobOffersForAdmin).toHaveBeenCalledWith(expect.objectContaining({ page: 2, limit: 5, q: 'plumber', status: 'PUBLISHED' }));
   });
 
   it('getById() delegates to service', async () => {

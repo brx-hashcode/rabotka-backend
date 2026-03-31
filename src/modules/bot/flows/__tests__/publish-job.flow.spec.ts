@@ -403,7 +403,7 @@ describe('runPublishJobFlow()', () => {
       const state = makeState(9, fullPayload);
       const result = await runPublishJobFlow(state, '1', employerProfile, ctx);
       expect(result.clearState).toBe(true);
-      expect(result.reply[0]).toContain('Offre créée');
+      expect(result.reply[0]).toContain('publiée');
     });
 
     it('cancels when user inputs "3"', async () => {

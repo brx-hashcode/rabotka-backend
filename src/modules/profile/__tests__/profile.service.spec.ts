@@ -127,6 +127,7 @@ describe('ProfileService', () => {
       configService as any,
       {} as any, // mailService
       { emit: jest.fn() } as any, // eventEmitter
+      { getProfileWalletBalance: jest.fn().mockResolvedValue(0) } as any, // walletService
     );
   });
 

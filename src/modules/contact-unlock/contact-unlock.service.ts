@@ -116,7 +116,11 @@ export class ContactUnlockService {
     if (!attempt)
       throw new NotFoundException('Tentative de déverrouillage introuvable');
     if (attempt.status === ContactUnlockStatus.UNLOCKED) {
-      return { attemptId, status: ContactUnlockStatus.UNLOCKED, newlyUnlocked: [] };
+      return {
+        attemptId,
+        status: ContactUnlockStatus.UNLOCKED,
+        newlyUnlocked: [],
+      };
     }
     if (
       attempt.status === ContactUnlockStatus.EXPIRED ||
@@ -214,7 +218,8 @@ export class ContactUnlockService {
     return {
       attemptId: updated.id,
       status: updated.status,
-      newlyUnlocked: newStatus === ContactUnlockStatus.UNLOCKED ? [attemptId] : [],
+      newlyUnlocked:
+        newStatus === ContactUnlockStatus.UNLOCKED ? [attemptId] : [],
     };
   }
 
@@ -272,7 +277,10 @@ export class ContactUnlockService {
       ? ContactUnlockStatus.UNLOCKED
       : ContactUnlockStatus.PENDING_WORKER;
 
-    if (triggerAttempt.worker_paid && !newlyUnlocked.includes(triggerAttempt.id)) {
+    if (
+      triggerAttempt.worker_paid &&
+      !newlyUnlocked.includes(triggerAttempt.id)
+    ) {
       newlyUnlocked.push(triggerAttempt.id);
     }
 
@@ -363,7 +371,9 @@ export class ContactUnlockService {
         },
         expires_at: { lt: new Date() },
       },
-      include: { job_offer: { select: { quantity: true, employer_unlock_paid: true } } },
+      include: {
+        job_offer: { select: { quantity: true, employer_unlock_paid: true } },
+      },
     });
 
     const conversions: ExpiredConversionEvent[] = [];
@@ -374,7 +384,8 @@ export class ContactUnlockService {
         let newStatus: ContactUnlockStatus = ContactUnlockStatus.EXPIRED;
 
         const isMultiPerson = (attempt.job_offer.quantity ?? 1) > 1;
-        const employerPaidAtJobLevel = isMultiPerson && attempt.job_offer.employer_unlock_paid;
+        const employerPaidAtJobLevel =
+          isMultiPerson && attempt.job_offer.employer_unlock_paid;
 
         if (employerPaidAtJobLevel) {
           // Employer paid once for the whole job — do not refund employer.

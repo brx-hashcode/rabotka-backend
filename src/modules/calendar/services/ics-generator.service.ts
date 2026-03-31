@@ -34,10 +34,13 @@ export class IcsGeneratorService {
   }
 
   private formatDate(date: Date): string {
-    return date.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+    return date
+      .toISOString()
+      .replaceAll(/[-:]/g, '')
+      .replace(/\.\d{3}/, '');
   }
 
   private escape(text: string): string {
-    return text.replace(/[\\;,\n]/g, (ch) => (ch === '\n' ? '\\n' : `\\${ch}`));
+    return text.replaceAll(/[\\;,\n]/g, (ch) => (ch === '\n' ? '' : `\\${ch}`));
   }
 }

@@ -79,7 +79,7 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     key: 'fees.employer_ghost_score_deduction',
     value: '10',
     category: ConfigCategory.FEES,
-    label: "Déduction score employeur (offre expirée avec travailleur accepté)",
+    label: 'Déduction score employeur (offre expirée avec travailleur accepté)',
     isSecret: false,
   },
   {
@@ -313,7 +313,6 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
   },
 ];
 
-/** Maps system-config keys to the env var names each storage provider reads */
 export const STORAGE_ENV_OVERRIDES: Record<string, Record<string, string>> = {
   S3: {
     AWS_S3_BUCKET: 'storage.s3.bucket',
