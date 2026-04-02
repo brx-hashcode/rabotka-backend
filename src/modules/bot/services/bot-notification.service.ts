@@ -136,16 +136,17 @@ export class BotNotificationService {
           `Pour voir ses coordonnées, vous devez débloquer le contact (*${fees.workerFeeFcfa} FCFA*).`,
           `Votre solde actuel : *${balance} FCFA*`,
           ``,
-          `Tapez *DÉBLOQUER* pour accéder à ses coordonnées.`,
+          `Tapez *contact* pour accéder à ses coordonnées.`,
         ].join('\n');
 
         await this.whatsApp.sendTextMessage(app.worker.phone, text);
 
-        // Pre-load unlock flow state so DÉBLOQUER routes immediately
+        // Pre-load unlock flow state so "contact" routes immediately
         const unlockState = getUnlockContactInitialState({
           attemptId: attempt.id,
           otherName: employerName,
           amount: fees.workerFeeFcfa,
+          expiryHours: fees.expiryHours,
         });
         await this.botState.set(app.worker_id, unlockState);
       } else {
@@ -157,7 +158,7 @@ export class BotNotificationService {
             ``,
             `*${employerName}* a accepté votre candidature pour l'offre "${app.job_offer.title}".`,
             ``,
-            `Tapez *DÉBLOQUER* pour accéder aux coordonnées de l'employeur.`,
+            `Tapez *contact* pour accéder aux coordonnées de l'employeur.`,
           ].join('\n'),
         );
       }

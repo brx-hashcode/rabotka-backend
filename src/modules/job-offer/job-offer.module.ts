@@ -7,6 +7,7 @@ import { MailModule } from '../mail/mail.module';
 import { SystemConfigModule } from '../system-config/system-config.module';
 import { WalletModule } from '../wallet/wallet.module';
 import { BotModule } from '../bot/bot.module';
+import { LogModule } from '../log/log.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { BotModule } from '../bot/bot.module';
     MailModule,
     SystemConfigModule,
     WalletModule,
+    LogModule,
   ],
   controllers: [AdminJobOfferController],
   providers: [JobOfferService],

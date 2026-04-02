@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { JobOfferService } from '../../job-offer/job-offer.service';
 import { ApplicationService } from '../../application/application.service';
+import { WalletService } from '../../wallet/wallet.service';
 import type { BotProfile } from '../types/bot-state.types';
 import {
   formatOfferListCompact,
@@ -33,6 +34,7 @@ export class BotCommandsService {
     private readonly prisma: PrismaService,
     private readonly jobOfferService: JobOfferService,
     private readonly applicationService: ApplicationService,
+    private readonly walletService: WalletService,
   ) {}
 
   async listOffers(
@@ -269,6 +271,10 @@ export class BotCommandsService {
 
     if (!profileData) return "Profil non trouvé. Tapez 'Menu'.";
 
+    const walletBalance = await this.walletService
+      .getProfileWalletBalance(profile.id)
+      .catch(() => 0);
+
     if (profileData.profile_type === 'EMPLOYER') {
       const [offersCount, pendingCandidaturesCount] = await Promise.all([
         this.prisma.jobOffer.count({ where: { employer_id: profile.id } }),
@@ -293,8 +299,9 @@ export class BotCommandsService {
         offersCount,
         pendingCandidaturesCount,
         activeOffersCount,
+        walletBalance,
       });
-      if (profileData.avatar_url) {
+      if (profileData.avatar_url?.trim()) {
         return `[IMG:${profileData.avatar_url}]${profileText}`;
       }
       return profileText;
@@ -338,8 +345,9 @@ export class BotCommandsService {
       completionRate,
       totalPenalties,
       lateCancellations: lateCount,
+      walletBalance,
     });
-    if (profileData.avatar_url) {
+    if (profileData.avatar_url?.trim()) {
       return `[IMG:${profileData.avatar_url}]${profileText}`;
     }
     return profileText;

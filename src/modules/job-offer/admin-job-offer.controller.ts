@@ -9,6 +9,7 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
+  Req,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -21,6 +22,8 @@ import { JobOfferService } from './job-offer.service';
 import { AdminAuthGuard } from '../auth/guards/admin-auth.guard';
 import { AdminListJobOffersDto } from './dto/admin-list-job-offers.dto';
 import { AdminUpdateJobOfferDto } from './dto/admin-update-job-offer.dto';
+import { AdminUpdateJobOfferStatusDto } from './dto/admin-update-job-offer-status.dto';
+import { LogService } from '../log/log.service';
 
 @ApiTags('Admin – Job Offers')
 @Controller('admin/job-offers')
@@ -28,7 +31,10 @@ import { AdminUpdateJobOfferDto } from './dto/admin-update-job-offer.dto';
 @ApiBearerAuth()
 @ApiCookieAuth()
 export class AdminJobOfferController {
-  constructor(private readonly jobOfferService: JobOfferService) {}
+  constructor(
+    private readonly jobOfferService: JobOfferService,
+    private readonly logService: LogService,
+  ) {}
 
   @Get()
   @ApiOperation({
@@ -61,6 +67,29 @@ export class AdminJobOfferController {
     return await this.jobOfferService.getJobOfferDetailForAdmin(id);
   }
 
+  @Patch(':id/status')
+  @ApiOperation({
+    summary: 'Update job offer status (admin only)',
+    description: 'Updates the status of a job offer (e.g. ACTIVE, CANCELLED).',
+  })
+  @ApiResponse({ status: 200, description: 'Updated job offer' })
+  @ApiResponse({ status: 404, description: 'Job offer not found' })
+  async updateStatus(
+    @Param('id') id: string,
+    @Body() dto: AdminUpdateJobOfferStatusDto,
+    @Req() req: any,
+  ) {
+    const result = await this.jobOfferService.updateStatusByAdmin(id, dto.status);
+    await this.logService.create({
+      action: 'JOB_OFFER_STATUS_CHANGED',
+      entityType: 'JobOffer',
+      entityId: id,
+      userId: req.user?.userId,
+      metadata: { status: dto.status },
+    });
+    return result;
+  }
+
   @Patch(':id')
   @ApiOperation({
     summary: 'Update job offer (admin only)',
@@ -71,8 +100,17 @@ export class AdminJobOfferController {
   async update(
     @Param('id') id: string,
     @Body() dto: AdminUpdateJobOfferDto,
+    @Req() req: any,
   ) {
-    return await this.jobOfferService.updateJobOfferByAdmin(id, dto);
+    const result = await this.jobOfferService.updateJobOfferByAdmin(id, dto);
+    await this.logService.create({
+      action: 'JOB_OFFER_UPDATED',
+      entityType: 'JobOffer',
+      entityId: id,
+      userId: req.user?.userId,
+      metadata: { fields: dto },
+    });
+    return result;
   }
 
   @Delete(':id')
@@ -83,7 +121,13 @@ export class AdminJobOfferController {
   })
   @ApiResponse({ status: 204, description: 'Job offer deleted' })
   @ApiResponse({ status: 404, description: 'Job offer not found' })
-  async remove(@Param('id') id: string) {
+  async remove(@Param('id') id: string, @Req() req: any) {
     await this.jobOfferService.deleteJobOfferByAdmin(id);
+    await this.logService.create({
+      action: 'JOB_OFFER_DELETED',
+      entityType: 'JobOffer',
+      entityId: id,
+      userId: req.user?.userId,
+    });
   }
 }

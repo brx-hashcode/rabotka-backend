@@ -7,13 +7,15 @@ function makeService() {
   };
 }
 
+const mockLogService = { create: jest.fn().mockResolvedValue(undefined) };
+
 describe('AdminPenaltyController', () => {
   let controller: AdminPenaltyController;
   let service: ReturnType<typeof makeService>;
 
   beforeEach(() => {
     service = makeService();
-    controller = new AdminPenaltyController(service as any);
+    controller = new AdminPenaltyController(service as any, mockLogService as any);
   });
 
   it('list() uses defaults and delegates', async () => {

@@ -170,12 +170,12 @@ export class PaymentRequestService {
       throw new BadRequestException('Montant non défini pour cette demande');
     }
 
-    const { serviceId, serviceSecret } =
-      await this.systemConfig.getMonetbilConfig(operator);
+    const { serviceKey, serviceSecret, apiUrl } =
+      await this.systemConfig.getMonetbilConfig();
 
-    if (!serviceId || !serviceSecret) {
+    if (!serviceKey || !serviceSecret) {
       throw new BadRequestException(
-        `Opérateur ${operator} non configuré pour les paiements en ligne`,
+        'Monetbil non configuré pour les paiements en ligne',
       );
     }
 
@@ -184,13 +184,14 @@ export class PaymentRequestService {
     const notifyUrl = `${backendUrl}/api/v1/webhooks/monetbil/callback`;
 
     const result = await this.monetbilService.initiatePayment({
-      serviceId,
+      serviceId: serviceKey,
       serviceSecret,
       amount: Number(request.amount),
       phone,
       operator,
       paymentRef,
       notifyUrl,
+      apiUrl,
     });
 
     if (!result.success) {
@@ -248,9 +249,7 @@ export class PaymentRequestService {
     }
 
     // Verify HMAC signature
-    const { serviceSecret } = await this.systemConfig.getMonetbilConfig(
-      (request.operator ?? 'MTN') as 'MTN' | 'AIRTEL',
-    );
+    const { serviceSecret } = await this.systemConfig.getMonetbilConfig();
     if (
       typeof serviceSecret === 'string' &&
       !this.monetbilService.verifyWebhookSignature(payload, serviceSecret)
@@ -292,12 +291,14 @@ export class PaymentRequestService {
     const amount = Number(request.amount ?? 0);
     const transactionRef = generatePaymentReference();
 
+    const isContactUnlock = request.contact_unlock_attempt_id != null;
+
     // 1. Credit system wallet + create Payment record (atomic)
     const systemWallet = await this.walletService.getOrCreateSystemWallet();
     await this.prisma.$transaction([
       this.prisma.payment.create({
         data: {
-          type: PaymentType.PENALTY,
+          type: isContactUnlock ? PaymentType.CONTACT_UNLOCK : PaymentType.PENALTY,
           profile_id: request.profile_id,
           amount,
           payment_method: PaymentMethod.MOBILE_MONEY,
@@ -310,7 +311,9 @@ export class PaymentRequestService {
       this.prisma.walletTransaction.create({
         data: {
           wallet_id: systemWallet.id,
-          type: WalletTransactionType.CREDIT_PENALTY,
+          type: isContactUnlock
+            ? WalletTransactionType.CONTACT_UNLOCK_PAYMENT
+            : WalletTransactionType.CREDIT_PENALTY,
           amount,
           reference_type: 'payment_request',
           reference_id: request.id,

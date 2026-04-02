@@ -501,6 +501,7 @@ export class BotOrchestratorService {
       attemptId: attempt.id,
       otherName,
       amount,
+      expiryHours: fees.expiryHours,
     });
     await this.botState.set(profileId, unlockState);
 

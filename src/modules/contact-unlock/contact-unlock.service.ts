@@ -167,10 +167,11 @@ export class ContactUnlockService {
       : Number(attempt.worker_amount);
 
     if (useCredit) {
-      await this.walletService.debitProfileWallet(
+      await this.walletService.debitProfileAndCreditSystem(
         profileId,
         amount,
         WalletTransactionType.CONTACT_UNLOCK_DEBIT,
+        WalletTransactionType.CONTACT_UNLOCK_PAYMENT,
         'contact_unlock_attempt',
         attemptId,
       );

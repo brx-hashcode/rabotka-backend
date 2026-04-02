@@ -1,8 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { createHmac } from 'node:crypto';
 
-const MONETBIL_API_URL = 'https://api2.monetbil.com/payment/v1/placePayment';
-
 export type MonetbilInitiateResult = {
   success: boolean;
   paymentRef?: string;
@@ -21,6 +19,7 @@ export class MonetbilService {
     operator: string;
     paymentRef: string;
     notifyUrl: string;
+    apiUrl: string;
   }): Promise<MonetbilInitiateResult> {
     const body = new URLSearchParams({
       service: params.serviceId,
@@ -32,7 +31,7 @@ export class MonetbilService {
     });
 
     try {
-      const response = await fetch(MONETBIL_API_URL, {
+      const response = await fetch(params.apiUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: body.toString(),

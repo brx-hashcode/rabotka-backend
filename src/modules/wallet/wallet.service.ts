@@ -174,6 +174,56 @@ export class WalletService {
   }
 
   /**
+   * Atomically debits the profile wallet and credits the system wallet.
+   * Used for contact unlock payments made with wallet credit.
+   */
+  async debitProfileAndCreditSystem(
+    profileId: string,
+    amount: number,
+    debitType: WalletTransactionType,
+    creditType: WalletTransactionType,
+    referenceType: string,
+    referenceId: string,
+  ): Promise<void> {
+    const profileWallet = await this.getOrCreateProfileWallet(profileId);
+    if (Number(profileWallet.balance) < amount) {
+      throw new BadRequestException('Solde insuffisant dans votre portefeuille');
+    }
+    const systemWallet = await this.getOrCreateSystemWallet();
+
+    await this.prisma.$transaction(async (tx) => {
+      // Debit profile
+      await tx.walletTransaction.create({
+        data: {
+          wallet_id: profileWallet.id,
+          type: debitType,
+          amount,
+          reference_type: referenceType,
+          reference_id: referenceId,
+        },
+      });
+      await tx.wallet.update({
+        where: { id: profileWallet.id },
+        data: { balance: { decrement: amount } },
+      });
+      // Credit system
+      await tx.walletTransaction.create({
+        data: {
+          wallet_id: systemWallet.id,
+          type: creditType,
+          amount,
+          reference_type: referenceType,
+          reference_id: referenceId,
+        },
+      });
+      await tx.wallet.update({
+        where: { id: systemWallet.id },
+        data: { balance: { increment: amount } },
+      });
+    });
+  }
+
+  /**
    * Grants welcome credit to a profile after WhatsApp activation.
    * Idempotent: does nothing if whatsapp_activation_bonus_granted is already true.
    */
@@ -428,9 +478,11 @@ export class WalletService {
     completedCount: number;
     pendingCount: number;
     failedCount: number;
-    revenueByType: { registration: number; jobPosting: number; penalty: number };
+    revenueByType: { penalty: number; contactUnlock: number };
   }> {
-    const [completedAgg, pendingCount, failedCount, byType] = await Promise.all([
+    const systemWallet = await this.getOrCreateSystemWallet();
+
+    const [completedAgg, pendingCount, failedCount, penaltyAgg, contactUnlockPaymentAgg, contactUnlockWalletAgg] = await Promise.all([
       this.prisma.payment.aggregate({
         where: { status: PaymentStatus.COMPLETED },
         _sum: { amount: true },
@@ -438,23 +490,27 @@ export class WalletService {
       }),
       this.prisma.payment.count({ where: { status: PaymentStatus.PENDING } }),
       this.prisma.payment.count({ where: { status: PaymentStatus.FAILED } }),
-      Promise.all([
-        this.prisma.payment.aggregate({
-          where: { status: PaymentStatus.COMPLETED, type: PaymentType.REGISTRATION },
-          _sum: { amount: true },
-        }),
-        this.prisma.payment.aggregate({
-          where: { status: PaymentStatus.COMPLETED, type: PaymentType.JOB_POSTING },
-          _sum: { amount: true },
-        }),
-        this.prisma.payment.aggregate({
-          where: { status: PaymentStatus.COMPLETED, type: PaymentType.PENALTY },
-          _sum: { amount: true },
-        }),
-      ]),
+      this.prisma.payment.aggregate({
+        where: { status: PaymentStatus.COMPLETED, type: PaymentType.PENALTY },
+        _sum: { amount: true },
+      }),
+      // Mobile money contact unlock payments (Payment record)
+      this.prisma.payment.aggregate({
+        where: { status: PaymentStatus.COMPLETED, type: PaymentType.CONTACT_UNLOCK },
+        _sum: { amount: true },
+      }),
+      // Wallet-credit contact unlock payments (no Payment record — only WalletTransaction)
+      this.prisma.walletTransaction.aggregate({
+        where: {
+          wallet_id: systemWallet.id,
+          type: WalletTransactionType.CONTACT_UNLOCK_PAYMENT,
+        },
+        _sum: { amount: true },
+      }),
     ]);
 
-    const totalRevenue = Number(completedAgg._sum.amount ?? 0);
+    const totalRevenue = Number(systemWallet.balance);
+
     return {
       totalRevenue,
       balance: totalRevenue,
@@ -462,9 +518,8 @@ export class WalletService {
       pendingCount,
       failedCount,
       revenueByType: {
-        registration: Number(byType[0]._sum.amount ?? 0),
-        jobPosting: Number(byType[1]._sum.amount ?? 0),
-        penalty: Number(byType[2]._sum.amount ?? 0),
+        penalty: Number(penaltyAgg._sum.amount ?? 0),
+        contactUnlock: Number(contactUnlockPaymentAgg._sum.amount ?? 0) + Number(contactUnlockWalletAgg._sum.amount ?? 0),
       },
     };
   }
@@ -478,7 +533,9 @@ export class WalletService {
     created_to?: string;
   }): Promise<{ data: AdminWalletTransactionItem[]; total: number; page: number; limit: number }> {
     const { page, limit } = params;
-    const where: Record<string, unknown> = {};
+    const systemWallet = await this.getOrCreateSystemWallet();
+    // Only show system wallet transactions — profile debits are internal and irrelevant here
+    const where: Record<string, unknown> = { wallet_id: systemWallet.id };
 
     if (params.q) {
       where.OR = [

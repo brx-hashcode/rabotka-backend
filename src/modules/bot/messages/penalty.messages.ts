@@ -73,6 +73,7 @@ export function formatEmployerProfileStats(params: {
   offersCount: number;
   pendingCandidaturesCount: number;
   activeOffersCount?: number;
+  walletBalance?: number;
 }): string {
   const since = params.memberSince.toLocaleDateString('fr-FR', {
     day: '2-digit',
@@ -80,6 +81,7 @@ export function formatEmployerProfileStats(params: {
     year: 'numeric',
   });
   const activeOffers = params.activeOffersCount ?? params.offersCount;
+  const balance = params.walletBalance ?? 0;
   return [
     `*VOTRE PROFIL RABOTKA*`,
     '',
@@ -93,6 +95,7 @@ export function formatEmployerProfileStats(params: {
     `*Offres publiées*: ${params.offersCount}`,
     `*Offres actives*: ${activeOffers}`,
     `*Candidatures en attente*: ${params.pendingCandidaturesCount}`,
+    `*Solde portefeuille*: ${balance.toLocaleString('fr-FR')} FCFA`,
     SEP,
     '',
     '*Actions*',
@@ -115,6 +118,7 @@ export function formatProfileStats(params: {
   completionRate: number;
   totalPenalties: number;
   lateCancellations: number;
+  walletBalance?: number;
 }): string {
   const score = params.reliabilityScore ?? 100;
   const since = params.memberSince.toLocaleDateString('fr-FR', {
@@ -122,6 +126,7 @@ export function formatProfileStats(params: {
     month: '2-digit',
     year: 'numeric',
   });
+  const balance = params.walletBalance ?? 0;
   return [
     `*VOTRE PROFIL RABOTKA*`,
     '',
@@ -136,6 +141,7 @@ export function formatProfileStats(params: {
     `*Missions complétées*: ${params.completedMissions}`,
     `*Revenus totaux*: ${params.totalEarnings.toLocaleString('fr-FR')} FCFA`,
     `*Taux de complétion*: ${params.completionRate}%`,
+    `*Solde portefeuille*: ${balance.toLocaleString('fr-FR')} FCFA`,
     SEP,
     '',
     '*PÉNALITÉS*:',

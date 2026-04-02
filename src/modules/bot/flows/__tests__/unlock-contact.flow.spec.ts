@@ -148,7 +148,7 @@ describe('runUnlockContactFlow()', () => {
       const result = await runUnlockContactFlow(makeState(), '2', workerProfile, ctx);
       // option 2 with 0 balance is "later"
       expect(result.clearState).toBe(true);
-      expect(result.reply[0]).toMatch(/DÉBLOQUER/);
+      expect(result.reply[0]).toMatch(/contact/);
     });
   });
 
