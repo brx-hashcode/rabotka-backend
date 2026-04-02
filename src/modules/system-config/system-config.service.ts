@@ -5,11 +5,15 @@ import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
 import {
   DEFAULT_SYSTEM_CONFIGS,
+  MONETBIL_API_URLS,
+  MONETBIL_ENV_OVERRIDES,
   STORAGE_ENV_OVERRIDES,
 } from './system-config.constants';
 
 const CACHE_PREFIX = 'syscfg:';
 const CACHE_TTL_SECONDS = 300; // 5 minutes
+const SEED_MAX_RETRIES = 10;
+const SEED_RETRY_DELAY_MS = 2000;
 
 @Injectable()
 export class SystemConfigService implements OnModuleInit {
@@ -21,7 +25,40 @@ export class SystemConfigService implements OnModuleInit {
   ) {}
 
   async onModuleInit(): Promise<void> {
-    await this.seedDefaults();
+    await this.seedDefaultsWithRetry();
+  }
+
+  private async seedDefaultsWithRetry(): Promise<void> {
+    let attempt = 1;
+    // Postgres may not be ready yet when Nest modules initialize.
+    while (attempt <= SEED_MAX_RETRIES) {
+      try {
+        await this.seedDefaults();
+        return;
+      } catch (error: unknown) {
+        if (!this.isRetryableConnectionError(error) || attempt === SEED_MAX_RETRIES) {
+          throw error;
+        }
+        this.logger.warn(
+          `DB connection not ready while seeding system config (attempt ${attempt}/${SEED_MAX_RETRIES}). Retrying in ${SEED_RETRY_DELAY_MS}ms...`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, SEED_RETRY_DELAY_MS));
+        attempt += 1;
+      }
+    }
+  }
+
+  private isRetryableConnectionError(error: unknown): boolean {
+    if (!error || typeof error !== 'object') return false;
+    const record = error as { code?: string; message?: string };
+    const code = record.code ?? '';
+    const message = (record.message ?? '').toLowerCase();
+    return (
+      code === 'ECONNREFUSED' ||
+      code === 'P1001' ||
+      code === 'ETIMEDOUT' ||
+      message.includes("can't reach database server")
+    );
   }
 
   private async seedDefaults(): Promise<void> {
@@ -188,15 +225,29 @@ export class SystemConfigService implements OnModuleInit {
     return this.get('storage.driver', 'S3');
   }
 
-  async getMonetbilConfig(
-    operator: 'MTN' | 'AIRTEL',
-  ): Promise<{ serviceId: string; serviceSecret: string }> {
-    const prefix = operator === 'MTN' ? 'monetbil.mtn' : 'monetbil.airtel';
-    const [serviceId, serviceSecret] = await Promise.all([
-      this.get(`${prefix}_service_id`, ''),
-      this.getRaw(`${prefix}_service_secret`, ''),
+  async getMonetbilConfig(): Promise<{ serviceKey: string; serviceSecret: string; apiUrl: string; mode: string }> {
+    const [serviceKey, serviceSecret, mode] = await Promise.all([
+      this.get('monetbil.service_key', ''),
+      this.getRaw('monetbil.service_secret', ''),
+      this.get('monetbil.mode', 'SANDBOX'),
     ]);
-    return { serviceId, serviceSecret };
+    const apiUrl = MONETBIL_API_URLS[mode.toUpperCase()] ?? MONETBIL_API_URLS['SANDBOX'];
+    return { serviceKey, serviceSecret, apiUrl, mode };
+  }
+
+  /**
+   * Returns a map of env-var-name → db-value for Monetbil.
+   * Empty string values are omitted so the original env var takes precedence.
+   */
+  async getMonetbilEnvOverrides(): Promise<Record<string, string>> {
+    const overrides: Record<string, string> = {};
+    await Promise.all(
+      Object.entries(MONETBIL_ENV_OVERRIDES).map(async ([envKey, cfgKey]) => {
+        const val = await this.getRaw(cfgKey, '');
+        if (val !== '') overrides[envKey] = val;
+      }),
+    );
+    return overrides;
   }
 
   /**

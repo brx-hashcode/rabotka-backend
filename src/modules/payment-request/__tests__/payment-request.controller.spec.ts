@@ -25,13 +25,15 @@ describe('PaymentRequestController', () => {
   });
 });
 
+const mockLogService = { create: jest.fn().mockResolvedValue(undefined) };
+
 describe('PaymentRequestPublicController', () => {
   let controller: PaymentRequestPublicController;
   let service: ReturnType<typeof makeService>;
 
   beforeEach(() => {
     service = makeService();
-    controller = new PaymentRequestPublicController(service as any);
+    controller = new PaymentRequestPublicController(service as any, mockLogService as any);
   });
 
   it('getByToken() delegates to service', () => {

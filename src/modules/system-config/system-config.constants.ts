@@ -284,31 +284,24 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
 
   // ── MONETBIL ──────────────────────────────────────────────────────────────
   {
-    key: 'monetbil.mtn_service_id',
-    value: '',
+    key: 'monetbil.mode',
+    value: 'SANDBOX',
     category: ConfigCategory.MONETBIL,
-    label: 'Monetbil – Service ID MTN',
+    label: 'Monetbil – Mode (PRODUCTION | SANDBOX)',
     isSecret: false,
   },
   {
-    key: 'monetbil.mtn_service_secret',
+    key: 'monetbil.service_key',
     value: '',
     category: ConfigCategory.MONETBIL,
-    label: 'Monetbil – Service Secret MTN',
-    isSecret: true,
-  },
-  {
-    key: 'monetbil.airtel_service_id',
-    value: '',
-    category: ConfigCategory.MONETBIL,
-    label: 'Monetbil – Service ID Airtel',
+    label: 'Monetbil – Service Key',
     isSecret: false,
   },
   {
-    key: 'monetbil.airtel_service_secret',
+    key: 'monetbil.service_secret',
     value: '',
     category: ConfigCategory.MONETBIL,
-    label: 'Monetbil – Service Secret Airtel',
+    label: 'Monetbil – Service Secret',
     isSecret: true,
   },
 ];
@@ -335,4 +328,15 @@ export const STORAGE_ENV_OVERRIDES: Record<string, Record<string, string>> = {
   VERCEL_BLOB: {
     BLOB_READ_WRITE_TOKEN: 'storage.vercel_blob.token',
   },
+};
+
+export const MONETBIL_ENV_OVERRIDES: Record<string, string> = {
+  MONETBIL_MODE: 'monetbil.mode',
+  MONETBIL_SERVICE_KEY: 'monetbil.service_key',
+  MONETBIL_SERVICE_SECRET: 'monetbil.service_secret',
+};
+
+export const MONETBIL_API_URLS: Record<string, string> = {
+  PRODUCTION: 'https://api2.monetbil.com/payment/v1/placePayment',
+  SANDBOX: 'https://api.monetbil.com/payment/v1/placePayment',
 };

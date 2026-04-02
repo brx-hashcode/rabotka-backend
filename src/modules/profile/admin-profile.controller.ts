@@ -175,9 +175,15 @@ export class AdminProfileController {
           "Ce profil n'a pas de numéro de téléphone",
         );
       }
+      const whatsappBody = [
+        body.message.trim(),
+        '',
+        `— ${adminFullName}`,
+        `L'équipe Rabotka`,
+      ].join('\n');
       await this.whatsApp.sendTextMessage(
         profile.phone,
-        body.message.trim(),
+        whatsappBody,
         profile.id,
         adminUserId,
       );
@@ -188,7 +194,7 @@ export class AdminProfileController {
           profile_id: profile.id,
           direction: MessageDirection.OUTBOUND,
           platform: BotPlatform.WHATSAPP,
-          body: body.message.trim(),
+          body: whatsappBody,
         },
       });
     } else {

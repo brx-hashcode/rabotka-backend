@@ -285,6 +285,34 @@ export class JobOfferService {
     return this.toListItem(updated);
   }
 
+  async updateStatusByAdmin(
+    id: string,
+    status: JobOfferStatus,
+  ): Promise<JobOfferListItem> {
+    const offer = await this.prisma.jobOffer.findUnique({
+      where: { id },
+    });
+    if (!offer) {
+      throw new NotFoundException("Offre d'emploi introuvable");
+    }
+
+    const updated = await this.prisma.jobOffer.update({
+      where: { id },
+      data: { status },
+    });
+
+    this.eventEmitter.emit(AdminNotificationEvent.JOB_OFFER_STATUS_CHANGED, {
+      event: AdminNotificationEvent.JOB_OFFER_STATUS_CHANGED,
+      title: 'Statut offre modifié',
+      message: `Le statut de l'offre "${updated.title}" a été changé en ${status}`,
+      entityType: 'job-offer',
+      entityId: String(updated.id),
+      timestamp: new Date().toISOString(),
+    });
+
+    return this.toListItem(updated);
+  }
+
   validateCreateDto(dto: CreateJobOfferDto): void {
     if (
       !dto.title ||

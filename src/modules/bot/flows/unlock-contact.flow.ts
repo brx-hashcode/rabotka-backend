@@ -32,6 +32,7 @@ type StepArgs = {
   attemptId: string;
   otherName: string;
   amount: number;
+  expiryHours: number;
   ctx: UnlockContactContext;
 };
 
@@ -49,6 +50,7 @@ async function handleStep1(args: StepArgs): Promise<FlowResult> {
     attemptId,
     otherName,
     amount,
+    expiryHours,
     ctx,
   } = args;
 
@@ -92,7 +94,7 @@ async function handleStep1(args: StepArgs): Promise<FlowResult> {
   if (trimmed === laterOption) {
     return {
       reply: [
-        `D'accord. Tapez *DÉBLOQUER* quand vous êtes prêt(e) à débloquer ce contact.`,
+        `D'accord. Tapez *contact* quand vous êtes prêt(e) à débloquer ce contact.\n\n⚠️ La demande expire dans *${expiryHours}h*. Passé ce délai, si l'autre partie n'a pas payé, votre paiement sera recrédité sous forme de *crédit portefeuille*.`,
       ],
       clearState: true,
     };
@@ -209,6 +211,7 @@ export async function runUnlockContactFlow(
   const attemptId = payload.attemptId as string | undefined;
   const otherName = (payload.otherName as string) ?? 'votre contact';
   const amount = (payload.amount as number) ?? 0;
+  const expiryHours = (payload.expiryHours as number) ?? 48;
 
   if (!attemptId) {
     return {
@@ -228,6 +231,7 @@ export async function runUnlockContactFlow(
     attemptId,
     otherName,
     amount,
+    expiryHours,
     ctx,
   };
 
@@ -240,6 +244,7 @@ export function getUnlockContactInitialState(params: {
   attemptId: string;
   otherName: string;
   amount: number;
+  expiryHours?: number;
 }): BotState {
   return {
     flowId: FLOW_IDS.UNLOCK_CONTACT,
@@ -248,6 +253,7 @@ export function getUnlockContactInitialState(params: {
       attemptId: params.attemptId,
       otherName: params.otherName,
       amount: params.amount,
+      expiryHours: params.expiryHours ?? 48,
     },
     updatedAt: new Date().toISOString(),
   };

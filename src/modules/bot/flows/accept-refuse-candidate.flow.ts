@@ -119,8 +119,11 @@ async function handleAcceptRefuseStep1(args: StepArgs): Promise<FlowResult> {
               '*Candidature acceptée !*',
               '',
               'Le travailleur a été notifié.',
+              '',
+              '─────────────────────',
+              '',
+              unlockPrompt,
             ].join('\n'),
-            unlockPrompt,
           ],
           nextState: {
             flowId: FLOW_IDS.UNLOCK_CONTACT,

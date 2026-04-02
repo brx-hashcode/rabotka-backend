@@ -5,9 +5,10 @@ import { AdminApplicationController } from './admin-application.controller';
 import { AuthModule } from '../auth/auth.module';
 import { BotModule } from '../bot/bot.module';
 import { ContactUnlockModule } from '../contact-unlock/contact-unlock.module';
+import { LogModule } from '../log/log.module';
 
 @Module({
-  imports: [PrismaModule, forwardRef(() => AuthModule), forwardRef(() => BotModule), forwardRef(() => ContactUnlockModule)],
+  imports: [PrismaModule, forwardRef(() => AuthModule), forwardRef(() => BotModule), forwardRef(() => ContactUnlockModule), LogModule],
   controllers: [AdminApplicationController],
   providers: [ApplicationService],
   exports: [ApplicationService],

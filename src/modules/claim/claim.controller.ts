@@ -19,15 +19,27 @@ import { AdminListClaimsDto } from './dto/admin-list-claims.dto';
 import { CreateCommentDto } from './dto/create-comment.dto';
 import { AdminAuthGuard } from '../auth/guards/admin-auth.guard';
 import { ProfileAuthGuard } from '../auth/guards/profile-auth.guard';
+import { LogService } from '../log/log.service';
 
 @Controller('admin/claims')
 @UseGuards(AdminAuthGuard)
 export class ClaimController {
-  constructor(private readonly claimService: ClaimService) {}
+  constructor(
+    private readonly claimService: ClaimService,
+    private readonly logService: LogService,
+  ) {}
 
   @Post()
-  create(@Req() req: any, @Body() dto: CreateClaimDto) {
-    return this.claimService.createForAdmin(req.user.userId, dto);
+  async create(@Req() req: any, @Body() dto: CreateClaimDto) {
+    const result = await this.claimService.createForAdmin(req.user.userId, dto);
+    await this.logService.create({
+      action: 'CLAIM_CREATED',
+      entityType: 'Claim',
+      entityId: (result as any)?.id,
+      userId: req.user.userId,
+      metadata: { title: dto.title },
+    });
+    return result;
   }
 
   @Get()
@@ -41,13 +53,27 @@ export class ClaimController {
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateClaimDto) {
-    return this.claimService.updateForAdmin(id, dto);
+  async update(@Param('id') id: string, @Body() dto: UpdateClaimDto, @Req() req: any) {
+    const result = await this.claimService.updateForAdmin(id, dto);
+    await this.logService.create({
+      action: 'CLAIM_UPDATED',
+      entityType: 'Claim',
+      entityId: id,
+      userId: req.user?.userId,
+      metadata: { fields: dto },
+    });
+    return result;
   }
 
   @Delete(':id')
-  async delete(@Param('id') id: string) {
+  async delete(@Param('id') id: string, @Req() req: any) {
     await this.claimService.deleteForAdmin(id);
+    await this.logService.create({
+      action: 'CLAIM_DELETED',
+      entityType: 'Claim',
+      entityId: id,
+      userId: req.user?.userId,
+    });
     return { success: true };
   }
 }
@@ -55,7 +81,10 @@ export class ClaimController {
 @Controller('admin/claims/:claimId/comments')
 @UseGuards(AdminAuthGuard)
 export class ClaimCommentController {
-  constructor(private readonly claimService: ClaimService) {}
+  constructor(
+    private readonly claimService: ClaimService,
+    private readonly logService: LogService,
+  ) {}
 
   @Get()
   list(@Param('claimId') claimId: string) {
@@ -63,13 +92,26 @@ export class ClaimCommentController {
   }
 
   @Post()
-  add(@Param('claimId') claimId: string, @Req() req: any, @Body() dto: CreateCommentDto) {
-    return this.claimService.addComment(claimId, req.user.userId, dto);
+  async add(@Param('claimId') claimId: string, @Req() req: any, @Body() dto: CreateCommentDto) {
+    const result = await this.claimService.addComment(claimId, req.user.userId, dto);
+    await this.logService.create({
+      action: 'CLAIM_COMMENT_ADDED',
+      entityType: 'Claim',
+      entityId: claimId,
+      userId: req.user.userId,
+    });
+    return result;
   }
 
   @Delete(':commentId')
-  async remove(@Param('claimId') claimId: string, @Param('commentId') commentId: string) {
+  async remove(@Param('claimId') claimId: string, @Param('commentId') commentId: string, @Req() req: any) {
     await this.claimService.deleteComment(claimId, commentId);
+    await this.logService.create({
+      action: 'CLAIM_COMMENT_DELETED',
+      entityType: 'Claim',
+      entityId: claimId,
+      userId: req.user?.userId,
+    });
     return { success: true };
   }
 }
