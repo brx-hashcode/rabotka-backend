@@ -79,7 +79,7 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     key: 'fees.employer_ghost_score_deduction',
     value: '10',
     category: ConfigCategory.FEES,
-    label: "Déduction score employeur (offre expirée avec travailleur accepté)",
+    label: 'Déduction score employeur (offre expirée avec travailleur accepté)',
     isSecret: false,
   },
   {
@@ -90,17 +90,45 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     isSecret: false,
   },
   {
-    key: 'fees.job_posting_fee_fcfa',
-    value: '0',
+    key: 'fees.max_concurrent_applications',
+    value: '3',
     category: ConfigCategory.FEES,
-    label: "Frais de publication d'une offre (FCFA)",
+    label: 'Nombre max de candidatures simultanées (par travailleur)',
     isSecret: false,
   },
   {
-    key: 'fees.application_fee_fcfa',
-    value: '0',
+    key: 'fees.contact_unlock_fee_employer',
+    value: '500',
     category: ConfigCategory.FEES,
-    label: 'Frais de candidature (FCFA)',
+    label: 'Frais déverrouillage contact – Employeur (FCFA)',
+    isSecret: false,
+  },
+  {
+    key: 'fees.contact_unlock_fee_worker',
+    value: '100',
+    category: ConfigCategory.FEES,
+    label: 'Frais déverrouillage contact – Travailleur (FCFA)',
+    isSecret: false,
+  },
+  {
+    key: 'fees.contact_unlock_expiry_hours',
+    value: '48',
+    category: ConfigCategory.FEES,
+    label: 'Délai expiration déverrouillage contact (heures)',
+    isSecret: false,
+  },
+  {
+    key: 'fees.welcome_credit_worker',
+    value: '100',
+    category: ConfigCategory.FEES,
+    label: 'Crédit de bienvenue – Travailleur (FCFA)',
+    isSecret: false,
+  },
+  {
+    key: 'fees.welcome_credit_employer',
+    value: '500',
+    category: ConfigCategory.FEES,
+    label: 'Crédit de bienvenue – Employeur (FCFA)',
     isSecret: false,
   },
 
@@ -253,9 +281,31 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     label: 'Vercel Blob – Read/Write Token',
     isSecret: true,
   },
+
+  // ── MONETBIL ──────────────────────────────────────────────────────────────
+  {
+    key: 'monetbil.mode',
+    value: 'SANDBOX',
+    category: ConfigCategory.MONETBIL,
+    label: 'Monetbil – Mode (PRODUCTION | SANDBOX)',
+    isSecret: false,
+  },
+  {
+    key: 'monetbil.service_key',
+    value: '',
+    category: ConfigCategory.MONETBIL,
+    label: 'Monetbil – Service Key',
+    isSecret: false,
+  },
+  {
+    key: 'monetbil.service_secret',
+    value: '',
+    category: ConfigCategory.MONETBIL,
+    label: 'Monetbil – Service Secret',
+    isSecret: true,
+  },
 ];
 
-/** Maps system-config keys to the env var names each storage provider reads */
 export const STORAGE_ENV_OVERRIDES: Record<string, Record<string, string>> = {
   S3: {
     AWS_S3_BUCKET: 'storage.s3.bucket',
@@ -278,4 +328,15 @@ export const STORAGE_ENV_OVERRIDES: Record<string, Record<string, string>> = {
   VERCEL_BLOB: {
     BLOB_READ_WRITE_TOKEN: 'storage.vercel_blob.token',
   },
+};
+
+export const MONETBIL_ENV_OVERRIDES: Record<string, string> = {
+  MONETBIL_MODE: 'monetbil.mode',
+  MONETBIL_SERVICE_KEY: 'monetbil.service_key',
+  MONETBIL_SERVICE_SECRET: 'monetbil.service_secret',
+};
+
+export const MONETBIL_API_URLS: Record<string, string> = {
+  PRODUCTION: 'https://api2.monetbil.com/payment/v1/placePayment',
+  SANDBOX: 'https://api.monetbil.com/payment/v1/placePayment',
 };

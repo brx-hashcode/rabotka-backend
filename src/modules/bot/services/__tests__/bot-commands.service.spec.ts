@@ -9,6 +9,7 @@ const workerProfile: BotProfile = {
   email: 'alice@example.com',
   profile_type: 'WORKER',
   reliability_score: 90,
+  status: 'ACTIVE',
 };
 
 const employerProfile: BotProfile = { ...workerProfile, id: 'e-1', profile_type: 'EMPLOYER' };
@@ -174,6 +175,7 @@ describe('BotCommandsService', () => {
             first_name: 'Alice',
             last_name: 'Dupont',
             reliability_score: 90,
+  status: 'ACTIVE',
             email: 'alice@example.com',
             avatar_url: null,
             verification_status: 'VERIFIED',
@@ -224,6 +226,7 @@ describe('BotCommandsService', () => {
         last_name: 'Dupont',
         email: 'alice@example.com',
         reliability_score: 90,
+  status: 'ACTIVE',
         created_at: new Date(),
         avatar_url: null,
         profile_type: 'WORKER',
@@ -238,6 +241,7 @@ describe('BotCommandsService', () => {
         last_name: 'Patron',
         email: 'jean@example.com',
         reliability_score: null,
+  status: 'ACTIVE',
         created_at: new Date(),
         avatar_url: null,
         profile_type: 'EMPLOYER',

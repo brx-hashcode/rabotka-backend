@@ -6,6 +6,7 @@ import { MailService } from '../../mail/mail.service';
 import { SystemConfigService } from '../../system-config/system-config.service';
 import { WalletService } from '../../wallet/wallet.service';
 import { BotNotificationService } from '../../bot/services/bot-notification.service';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { JobOfferStatus, PaymentFlow } from '@prisma/client';
 
 const EMPLOYER_ID = 'employer-uuid-1';
@@ -88,6 +89,7 @@ describe('JobOfferService', () => {
         { provide: SystemConfigService, useValue: mockSystemConfigService },
         { provide: WalletService, useValue: mockWalletService },
         { provide: BotNotificationService, useValue: mockBotNotificationService },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
       ],
     }).compile();
 

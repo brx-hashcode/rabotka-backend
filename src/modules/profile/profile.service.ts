@@ -21,6 +21,7 @@ import {
 import { MailService } from '../mail/mail.service';
 import { accountSuspendedEmail } from '../mail/templates';
 import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
+import { WalletService } from '../wallet/wallet.service';
 import { CreateProfileDto } from './dto/create-profile.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import {
@@ -50,6 +51,7 @@ export type ProfileMeResponse = {
   applicationsCount: number;
   penaltiesCount: number;
   unpaidPenaltiesCount: number;
+  walletBalance: number;
 };
 
 export type ProfilePenaltyItem = {
@@ -161,6 +163,7 @@ export class ProfileService {
     private readonly configService: ConfigService,
     private readonly mailService: MailService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly walletService: WalletService,
   ) {}
 
   async findById(id: string): Promise<ProfileMeResponse> {
@@ -195,9 +198,10 @@ export class ProfileService {
       throw new NotFoundException('Profil non trouvé');
     }
 
-    const unpaidPenaltiesCount = await this.prisma.penalty.count({
-      where: { worker_id: id, paid_at: null },
-    });
+    const [unpaidPenaltiesCount, walletBalance] = await Promise.all([
+      this.prisma.penalty.count({ where: { worker_id: id, paid_at: null } }),
+      this.walletService.getProfileWalletBalance(id),
+    ]);
 
     return {
       id: profile.id,
@@ -218,6 +222,7 @@ export class ProfileService {
       applicationsCount: profile._count.applications,
       penaltiesCount: profile._count.penalties,
       unpaidPenaltiesCount,
+      walletBalance,
     };
   }
 

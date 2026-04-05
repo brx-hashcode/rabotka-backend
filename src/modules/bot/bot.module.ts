@@ -5,6 +5,9 @@ import { ApplicationModule } from '../application/application.module';
 import { WhatsAppModule } from '../whatsapp/whatsapp.module';
 import { PaymentsModule } from '../payments/payment.module';
 import { KycModule } from '../kyc/kyc.module';
+import { ContactUnlockModule } from '../contact-unlock/contact-unlock.module';
+import { WalletModule } from '../wallet/wallet.module';
+import { SystemConfigModule } from '../system-config/system-config.module';
 import { BotStateService } from './services/bot-state.service';
 import { BotInboxService } from './services/bot-inbox.service';
 import { BotDraftService } from './services/bot-draft.service';
@@ -16,11 +19,14 @@ import { BotNotificationService } from './services/bot-notification.service';
 @Module({
   imports: [
     PrismaModule,
+    SystemConfigModule,
     forwardRef(() => JobOfferModule),
     forwardRef(() => ApplicationModule),
     forwardRef(() => WhatsAppModule),
     forwardRef(() => PaymentsModule),
     forwardRef(() => KycModule),
+    forwardRef(() => ContactUnlockModule),
+    forwardRef(() => WalletModule),
   ],
   providers: [
     BotStateService,

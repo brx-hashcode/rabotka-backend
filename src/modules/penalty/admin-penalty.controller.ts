@@ -18,6 +18,7 @@ import {
 import { PenaltyService } from './penalty.service';
 import { AdminAuthGuard } from '../auth/guards/admin-auth.guard';
 import { AdminListPenaltiesDto } from './dto/admin-list-penalties.dto';
+import { LogService } from '../log/log.service';
 
 @ApiTags('Admin - Penalties')
 @Controller('admin/penalties')
@@ -25,7 +26,10 @@ import { AdminListPenaltiesDto } from './dto/admin-list-penalties.dto';
 @ApiBearerAuth()
 @ApiCookieAuth()
 export class AdminPenaltyController {
-  constructor(private readonly penaltyService: PenaltyService) {}
+  constructor(
+    private readonly penaltyService: PenaltyService,
+    private readonly logService: LogService,
+  ) {}
 
   @Get()
   @ApiOperation({
@@ -68,10 +72,17 @@ export class AdminPenaltyController {
   @ApiResponse({ status: 400, description: 'Penalty already paid' })
   @ApiResponse({ status: 404, description: 'Penalty not found' })
   async confirmPayment(@Param('id') id: string, @Req() req: any) {
-    return await this.penaltyService.confirmPenaltyPaymentByAdmin(
+    const result = await this.penaltyService.confirmPenaltyPaymentByAdmin(
       id,
       req.user.userId,
     );
+    await this.logService.create({
+      action: 'PAYMENT_CONFIRMED',
+      entityType: 'Penalty',
+      entityId: id,
+      userId: req.user.userId,
+    });
+    return result;
   }
 
   @Delete(':id')
@@ -82,7 +93,14 @@ export class AdminPenaltyController {
   })
   @ApiResponse({ status: 200, description: 'Penalty deleted' })
   @ApiResponse({ status: 404, description: 'Penalty not found' })
-  async deletePenalty(@Param('id') id: string) {
-    return await this.penaltyService.deletePenalty(id);
+  async deletePenalty(@Param('id') id: string, @Req() req: any) {
+    const result = await this.penaltyService.deletePenalty(id);
+    await this.logService.create({
+      action: 'PENALTY_DELETED',
+      entityType: 'Penalty',
+      entityId: id,
+      userId: req.user?.userId,
+    });
+    return result;
   }
 }

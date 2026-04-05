@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException } from '@nestjs/common';
 import { PenaltyService } from '../penalty.service';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
+import { WalletService } from '../../wallet/wallet.service';
 
 const PENALTY_ID = 'penalty-uuid-1';
 const WORKER_ID = 'worker-uuid-1';
@@ -57,6 +58,7 @@ describe('PenaltyService', () => {
       providers: [
         PenaltyService,
         { provide: PrismaService, useValue: mockPrismaService },
+        { provide: WalletService, useValue: { getProfileWalletBalance: jest.fn().mockResolvedValue(0) } },
       ],
     }).compile();
 

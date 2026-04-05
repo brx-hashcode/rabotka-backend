@@ -1,8 +1,8 @@
 import type { BotProfile, BotState } from '../types/bot-state.types';
 import { FLOW_IDS, CMD_MENU } from '../bot.constants';
 import { menuMessage } from '../messages/menu.messages';
-import type { PaymentService } from '../../payments/payment.service';
 import { PrismaService } from 'src/common/services/prisma/prisma.service';
+import type { PaymentService } from '../../payments/payment.service';
 
 export type ResolvePenaltiesContext = {
   prisma: PrismaService;
@@ -78,7 +78,7 @@ export async function runResolvePenaltiesFlow(
           ``,
           `Pour réactiver votre compte, vous devez régler vos pénalités.`,
           ``,
-          `*1.* 💳 Régler mes pénalités`,
+          `*1.* 💳 Obtenir un lien de paiement`,
           `*2.* ↩️ Annuler`,
         ].join('\n'),
       ],
@@ -95,21 +95,27 @@ export async function runResolvePenaltiesFlow(
   if (trimmed === '1') {
     const count = payload.count as number;
     const total = payload.total as number;
-    const paymentLink = await ctx.paymentService.generatePenaltyPaymentLink(
+
+    const paymentUrl = await ctx.paymentService.createPaymentUrl(
       profile.id,
       total,
+      `Règlement de pénalités (${count} pénalité(s))`,
     );
 
     return {
       reply: [
         [
-          `*Lien de paiement généré*`,
+          `💳 *Lien de paiement*`,
           ``,
-          `Pour régler vos *${count} pénalité(s)* (${total.toLocaleString('fr-FR')} FCFA), cliquez sur le lien suivant :`,
+          `Montant à régler : *${total.toLocaleString('fr-FR')} FCFA* (${count} pénalité(s))`,
           ``,
-          paymentLink,
+          `Cliquez sur le lien ci-dessous pour effectuer votre paiement en toute sécurité :`,
           ``,
-          `Une fois le paiement confirmé, votre compte sera réactivé automatiquement.`,
+          paymentUrl,
+          ``,
+          `Après le paiement, votre compte sera réactivé automatiquement.`,
+          ``,
+          `Tapez *MENU* pour revenir au menu principal.`,
         ].join('\n'),
       ],
       clearState: true,
@@ -119,14 +125,16 @@ export async function runResolvePenaltiesFlow(
   if (trimmed === '2') {
     return {
       reply: [
-        `⚠️ *Compte toujours suspendu.*\n\nVotre compte restera suspendu jusqu'au règlement de vos pénalités.\nTapez *1* à tout moment pour générer le lien de paiement.`,
+        `⚠️ *Compte toujours suspendu.*\n\nVotre compte restera suspendu jusqu'au règlement de vos pénalités.\nTapez *1* à tout moment pour voir les instructions de paiement.`,
       ],
       clearState: true,
     };
   }
 
   return {
-    reply: ['Tapez *1* pour régler vos pénalités ou *2* pour annuler.'],
+    reply: [
+      'Tapez *1* pour voir les instructions de paiement ou *2* pour annuler.',
+    ],
     nextState: state,
   };
 }

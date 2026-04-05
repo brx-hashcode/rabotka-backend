@@ -12,10 +12,18 @@ import {
 } from './accept-refuse-candidate.flow';
 import type { ApplicationService } from '../../application/application.service';
 import type { BotNotificationService } from '../services/bot-notification.service';
+import type { ContactUnlockService } from '../../contact-unlock/contact-unlock.service';
+import type { WalletService } from '../../wallet/wallet.service';
+import type { SystemConfigService } from '../../system-config/system-config.service';
+import type { PrismaService } from '../../../common/services/prisma/prisma.service';
 
 export type CandidaturesListContext = {
+  prisma: PrismaService;
   applicationService: ApplicationService;
   notificationService: BotNotificationService;
+  contactUnlockService: ContactUnlockService;
+  walletService: WalletService;
+  systemConfigService: SystemConfigService;
 };
 
 export type FlowResult = {

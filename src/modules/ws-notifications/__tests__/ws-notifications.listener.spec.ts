@@ -15,10 +15,10 @@ describe('WsNotificationsListener', () => {
       },
     } as unknown as WsNotificationsGateway;
 
-    listener = new WsNotificationsListener(gateway);
+    listener = new WsNotificationsListener(gateway, { create: jest.fn().mockResolvedValue(undefined) } as any);
   });
 
-  it('broadcasts notification to admins room', () => {
+  it('broadcasts notification to admins room', async () => {
     const payload: AdminNotificationPayload = {
       event: AdminNotificationEvent.PROFILE_CREATED,
       title: 'Nouveau profil',
@@ -28,7 +28,7 @@ describe('WsNotificationsListener', () => {
       timestamp: '2026-03-28T12:00:00.000Z',
     };
 
-    listener.handleAdminNotification(payload);
+    await listener.handleAdminNotification(payload);
 
     expect(
       (listener as any).gateway.server.to,
@@ -36,7 +36,7 @@ describe('WsNotificationsListener', () => {
     expect(emitMock).toHaveBeenCalledWith('notification', payload);
   });
 
-  it('handles payloads with metadata', () => {
+  it('handles payloads with metadata', async () => {
     const payload: AdminNotificationPayload = {
       event: AdminNotificationEvent.APPLICATION_CANCELLED,
       title: 'Candidature annulée',
@@ -47,12 +47,12 @@ describe('WsNotificationsListener', () => {
       timestamp: '2026-03-28T12:00:00.000Z',
     };
 
-    listener.handleAdminNotification(payload);
+    await listener.handleAdminNotification(payload);
 
     expect(emitMock).toHaveBeenCalledWith('notification', payload);
   });
 
-  it('handles different event types', () => {
+  it('handles different event types', async () => {
     const events = [
       AdminNotificationEvent.JOB_OFFER_CREATED,
       AdminNotificationEvent.CLAIM_UPDATED,
@@ -71,7 +71,7 @@ describe('WsNotificationsListener', () => {
         timestamp: new Date().toISOString(),
       };
 
-      listener.handleAdminNotification(payload);
+      await listener.handleAdminNotification(payload);
     }
 
     expect(emitMock).toHaveBeenCalledTimes(events.length);

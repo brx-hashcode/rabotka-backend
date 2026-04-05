@@ -25,6 +25,8 @@ const employerProfile: BotProfile = {
   profile_type: 'EMPLOYER',
   status: 'ACTIVE',
   phone: '+242000000',
+  email: 'john@example.com',
+  reliability_score: 100,
 };
 
 const workerProfile: BotProfile = {
@@ -401,7 +403,7 @@ describe('runPublishJobFlow()', () => {
       const state = makeState(9, fullPayload);
       const result = await runPublishJobFlow(state, '1', employerProfile, ctx);
       expect(result.clearState).toBe(true);
-      expect(result.reply[0]).toContain('Offre créée');
+      expect(result.reply[0]).toContain('publiée');
     });
 
     it('cancels when user inputs "3"', async () => {

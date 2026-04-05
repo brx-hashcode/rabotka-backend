@@ -9,6 +9,7 @@ import { QueueService } from '../../common/services/queue/queue.service';
 import { PAYMENT_QUEUE } from '../../common/services/queue/queue.module';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { generatePaymentReference } from '../../common/utils/payment-reference';
+import { randomUUID } from 'node:crypto';
 
 export type PaymentJobData = {
   paymentId: string;
@@ -51,6 +52,27 @@ export class PaymentService {
     return `${this.getFrontendUrl()}/job-posting/${jobOfferId}`;
   }
 
+  async createPaymentUrl(
+    profileId: string,
+    amount: number,
+    description: string,
+    contactUnlockAttemptId?: string,
+  ): Promise<string> {
+    const token = randomUUID();
+    await this.prisma.paymentRequest.create({
+      data: {
+        profile_id: profileId,
+        token,
+        amount,
+        description,
+        ...(contactUnlockAttemptId && {
+          contact_unlock_attempt_id: contactUnlockAttemptId,
+        }),
+      },
+    });
+    return `${this.getFrontendUrl()}/pay/${token}`;
+  }
+
   generatePenaltyPaymentLink(profileId: string, amount: number): string {
     this.logger.log(
       `Generating penalty payment link for profile ${profileId}, amount ${amount}`,
@@ -78,6 +100,7 @@ export class PaymentService {
         description: data.description ?? `${data.type} payment`,
       },
     });
+
     await this.queueService.addJob<PaymentJobData>(PAYMENT_QUEUE, {
       paymentId: payment.id,
       type: data.type,
@@ -85,72 +108,8 @@ export class PaymentService {
       amount: data.amount,
       entityId: data.entityId,
     });
+
     return { paymentId: payment.id };
-  }
-
-  async handleActivationPaymentSuccess(profileId: string): Promise<void> {
-    const profile = await this.prisma.profile.update({
-      where: { id: profileId },
-      data: { status: 'ACTIVE' },
-      select: { phone: true, first_name: true, last_name: true },
-    });
-
-    await this.botNotification.sendMessage(
-      profile.phone,
-      `✅ Votre compte Rabotka est maintenant actif !\n\nBienvenue sur Rabotka 🎉\nVous pouvez dès maintenant explorer toutes les fonctionnalités :\n- Parcourir les offres d'emploi\n- Postuler aux missions\n- Gérer votre profil\n\nTapez n'importe quoi pour commencer.`,
-    );
-
-    this.eventEmitter.emit(AdminNotificationEvent.PAYMENT_ACTIVATION, {
-      event: AdminNotificationEvent.PAYMENT_ACTIVATION,
-      title: 'Paiement activation',
-      message: `Paiement d'activation réussi pour ${profile.first_name} ${profile.last_name}`,
-      entityType: 'payment',
-      entityId: String(profileId),
-      timestamp: new Date().toISOString(),
-    });
-
-    const fee = await this.systemConfig.getRaw(
-      'fees.application_fee_fcfa',
-      '0',
-    );
-    await this.makePayment({
-      type: PaymentType.REGISTRATION,
-      profileId,
-      amount: Number(fee),
-    });
-  }
-
-  async handleJobPostingPaymentSuccess(jobOfferId: string): Promise<void> {
-    const jobOffer = await this.prisma.jobOffer.update({
-      where: { id: jobOfferId },
-      data: { status: 'ACTIVE' },
-      include: { employer: true },
-    });
-
-    await this.botNotification.sendMessage(
-      jobOffer.employer.phone,
-      `✅ Votre offre "${jobOffer.title}" est maintenant publiée !\n\nLes travailleurs peuvent désormais y postuler.`,
-    );
-
-    this.eventEmitter.emit(AdminNotificationEvent.PAYMENT_JOB_POSTING, {
-      event: AdminNotificationEvent.PAYMENT_JOB_POSTING,
-      title: 'Paiement publication',
-      message: `Paiement de publication réussi pour l'offre "${jobOffer.title}" (employeur : ${jobOffer.employer.first_name} ${jobOffer.employer.last_name})`,
-      entityType: 'payment',
-      entityId: String(jobOfferId),
-      timestamp: new Date().toISOString(),
-    });
-
-    const fee = await this.systemConfig.getRaw(
-      'fees.job_posting_fee_fcfa',
-      '0',
-    );
-    await this.makePayment({
-      type: PaymentType.JOB_POSTING,
-      profileId: jobOffer.employer_id,
-      amount: Number(fee),
-      entityId: jobOfferId,
-    });
   }
 
   async handlePenaltyPaymentSuccess(profileId: string): Promise<void> {

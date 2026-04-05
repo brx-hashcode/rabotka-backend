@@ -73,7 +73,6 @@ export async function seedPaymentTestProfiles(
     `[Payment test seed] Created PENDING_PAYMENT profile: ${profilePending.first_name} ${profilePending.last_name} (payment request: ${paymentRequestPending.id})`,
   );
 
-  // ── 2. Profile with PENDING_PAYMENT + SUBMITTED payment request ─────────────
   const profileSubmitted = await prisma.profile.create({
     data: {
       first_name: 'Bruno',

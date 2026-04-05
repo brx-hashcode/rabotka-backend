@@ -14,6 +14,7 @@ const employerProfile: BotProfile = {
   email: 'jean@example.com',
   profile_type: 'EMPLOYER',
   reliability_score: null,
+  status: 'ACTIVE',
 };
 
 function makeItem(id = 'app-1'): FilledJobListItem {

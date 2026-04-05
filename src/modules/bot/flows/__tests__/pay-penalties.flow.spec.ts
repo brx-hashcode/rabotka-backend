@@ -14,6 +14,7 @@ const workerProfile: BotProfile = {
   email: 'alice@example.com',
   profile_type: 'WORKER',
   reliability_score: 80,
+  status: 'ACTIVE',
 };
 
 function makeCtx(
@@ -23,6 +24,10 @@ function makeCtx(
     applicationService: {
       markPenaltiesPaid,
     } as unknown as PayPenaltiesContext['applicationService'],
+    walletService: {
+      getProfileWalletBalance: jest.fn().mockResolvedValue(0),
+      debitProfileWallet: jest.fn().mockResolvedValue(undefined),
+    } as unknown as PayPenaltiesContext['walletService'],
   };
 }
 
@@ -59,10 +64,10 @@ describe('runPayPenaltiesFlow()', () => {
     expect(result.clearState).toBe(true);
   });
 
-  it('goes to menu on "2" input', async () => {
+  it('goes to menu on "3" input', async () => {
     const ctx = makeCtx();
     const state = makeState();
-    const result = await runPayPenaltiesFlow(state, '2', workerProfile, ctx);
+    const result = await runPayPenaltiesFlow(state, '3', workerProfile, ctx);
     expect(result.clearState).toBe(true);
   });
 

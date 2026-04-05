@@ -2,10 +2,19 @@ import type { BotProfile, BotState } from '../types/bot-state.types';
 import { FLOW_IDS } from '../bot.constants';
 import type { ApplicationService } from '../../application/application.service';
 import type { BotNotificationService } from '../services/bot-notification.service';
+import type { ContactUnlockService } from '../../contact-unlock/contact-unlock.service';
+import type { WalletService } from '../../wallet/wallet.service';
+import type { SystemConfigService } from '../../system-config/system-config.service';
+import type { PrismaService } from '../../../common/services/prisma/prisma.service';
+import { formatContactUnlockPrompt } from '../messages/contact-unlock.messages';
 
 export type AcceptRefuseContext = {
+  prisma: PrismaService;
   applicationService: ApplicationService;
   notificationService: BotNotificationService;
+  contactUnlockService: ContactUnlockService;
+  walletService: WalletService;
+  systemConfigService: SystemConfigService;
 };
 
 export type FlowResult = {
@@ -30,6 +39,7 @@ async function handleAcceptRefuseStep1(args: StepArgs): Promise<FlowResult> {
       reply: [
         [
           '*ACTIONS DISPONIBLES POUR CETTE CANDIDATURE:*',
+          '',
           '1️⃣ Accepter le candidat',
           '2️⃣ Refuser',
           '',
@@ -45,14 +55,97 @@ async function handleAcceptRefuseStep1(args: StepArgs): Promise<FlowResult> {
       await ctx.notificationService.sendApplicationAcceptedToWorker(
         applicationId,
       );
+
+      // Get unlock attempt and show contact unlock prompt
+      const attempt =
+        await ctx.contactUnlockService.getByApplicationId(applicationId);
+      if (attempt) {
+        const fees = await ctx.systemConfigService.getContactUnlockFees();
+        const workerData = await ctx.prisma.profile
+          .findUnique({
+            where: { id: attempt.worker_id },
+            select: { first_name: true, last_name: true },
+          })
+          .catch(() => null);
+        const workerName = workerData
+          ? `${workerData.first_name} ${workerData.last_name}`.trim()
+          : 'le travailleur';
+
+        // Check if employer already paid at job level (multi-person job)
+        const jobOffer = await ctx.prisma.jobOffer
+          .findUnique({
+            where: { id: attempt.job_offer_id },
+            select: { quantity: true, employer_unlock_paid: true },
+          })
+          .catch(() => null);
+
+        const isMultiPerson = (jobOffer?.quantity ?? 1) > 1;
+        const employerAlreadyPaid =
+          isMultiPerson && jobOffer?.employer_unlock_paid;
+
+        if (employerAlreadyPaid) {
+          return {
+            reply: [
+              [
+                '*Candidature acceptée !*',
+                '',
+                'Le travailleur a été notifié.',
+                '',
+                `✅ Votre paiement couvre déjà tous les candidats de ce poste.`,
+                `Le contact avec *${workerName}* sera débloqué dès qu'il confirme de son côté.`,
+                '',
+                "*Tapez 'Menu' pour revenir.*",
+              ].join('\n'),
+            ],
+            clearState: true,
+          };
+        }
+
+        const balance = await ctx.walletService.getProfileWalletBalance(
+          profile.id,
+        );
+
+        const unlockPrompt = formatContactUnlockPrompt({
+          name: workerName,
+          amount: fees.employerFeeFcfa,
+          balance,
+          profileType: 'EMPLOYER',
+          isJobLevel: isMultiPerson,
+        });
+
+        return {
+          reply: [
+            [
+              '*Candidature acceptée !*',
+              '',
+              'Le travailleur a été notifié.',
+              '',
+              '─────────────────────',
+              '',
+              unlockPrompt,
+            ].join('\n'),
+          ],
+          nextState: {
+            flowId: FLOW_IDS.UNLOCK_CONTACT,
+            step: 1,
+            payload: {
+              attemptId: attempt.id,
+              otherName: workerName,
+              amount: fees.employerFeeFcfa,
+            },
+            updatedAt: new Date().toISOString(),
+          },
+        };
+      }
+
       return {
         reply: [
           [
             '*Candidature acceptée !*',
             '',
-            'Le worker a été notifié. Vous pouvez le contacter directement via les coordonnées fournies.',
+            'Le travailleur a été notifié.',
             '',
-            "Votre offre est maintenant marquée comme pourvue. Tapez 'Menu' pour revenir.",
+            "Tapez 'Menu' pour revenir.",
           ].join('\n'),
         ],
         clearState: true,
@@ -84,14 +177,13 @@ async function handleAcceptRefuseStep1(args: StepArgs): Promise<FlowResult> {
   };
 }
 
-async function handleAcceptRefuseStep2(args: StepArgs): Promise<FlowResult> {
+function handleAcceptRefuseStep2(args: StepArgs): FlowResult {
   const { state, normalized, trimmed } = args;
   const reason =
     normalized === 'aucune' || normalized === '0' || normalized === 'non'
       ? null
       : trimmed;
 
-  // Store reason in payload and move to confirmation step
   return {
     reply: [
       [
@@ -139,7 +231,9 @@ async function handleAcceptRefuseStep3(args: StepArgs): Promise<FlowResult> {
 
   try {
     await ctx.applicationService.reject(applicationId, profile.id, reason);
-    await ctx.notificationService.sendApplicationRejectedToWorker(applicationId);
+    await ctx.notificationService.sendApplicationRejectedToWorker(
+      applicationId,
+    );
     return {
       reply: [
         [

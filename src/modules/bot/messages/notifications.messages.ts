@@ -87,7 +87,7 @@ export function formatReminderStart(params: {
   employerPhone: string;
 }): string {
   return [
-    '*🚀 C\'EST L\'HEURE - VOTRE MISSION COMMENCE !*',
+    "*🚀 C'EST L'HEURE - VOTRE MISSION COMMENCE !*",
     '',
     `*Offre*: ${params.offerTitle}`,
     `*Heure*: ${params.scheduledAt.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`,
