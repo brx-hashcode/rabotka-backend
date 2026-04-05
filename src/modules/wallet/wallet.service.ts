@@ -82,13 +82,19 @@ export class WalletService {
 
   // ── Per-profile wallet ──────────────────────────────────────────────────────
 
-  async getOrCreateProfileWallet(profileId: string): Promise<{ id: string; balance: number }> {
+  async getOrCreateProfileWallet(
+    profileId: string,
+  ): Promise<{ id: string; balance: number }> {
     let wallet = await this.prisma.wallet.findFirst({
       where: { owner_type: WalletOwnerType.PROFILE, profile_id: profileId },
     });
     if (!wallet) {
       wallet = await this.prisma.wallet.create({
-        data: { owner_type: WalletOwnerType.PROFILE, profile_id: profileId, balance: 0 },
+        data: {
+          owner_type: WalletOwnerType.PROFILE,
+          profile_id: profileId,
+          balance: 0,
+        },
       });
     }
     return { id: wallet.id, balance: Number(wallet.balance) };
@@ -99,7 +105,9 @@ export class WalletService {
     return w.balance;
   }
 
-  async getProfileWalletForAdmin(profileId: string): Promise<AdminProfileWallet> {
+  async getProfileWalletForAdmin(
+    profileId: string,
+  ): Promise<AdminProfileWallet> {
     const wallet = await this.getOrCreateProfileWallet(profileId);
     const txs = await this.prisma.walletTransaction.findMany({
       where: { wallet_id: wallet.id },
@@ -154,7 +162,9 @@ export class WalletService {
   ): Promise<void> {
     const wallet = await this.getOrCreateProfileWallet(profileId);
     if (wallet.balance < amount) {
-      throw new BadRequestException('Solde insuffisant dans votre portefeuille');
+      throw new BadRequestException(
+        'Solde insuffisant dans votre portefeuille',
+      );
     }
     await this.prisma.$transaction(async (tx) => {
       await tx.walletTransaction.create({
@@ -187,7 +197,9 @@ export class WalletService {
   ): Promise<void> {
     const profileWallet = await this.getOrCreateProfileWallet(profileId);
     if (Number(profileWallet.balance) < amount) {
-      throw new BadRequestException('Solde insuffisant dans votre portefeuille');
+      throw new BadRequestException(
+        'Solde insuffisant dans votre portefeuille',
+      );
     }
     const systemWallet = await this.getOrCreateSystemWallet();
 
@@ -227,7 +239,10 @@ export class WalletService {
    * Grants welcome credit to a profile after WhatsApp activation.
    * Idempotent: does nothing if whatsapp_activation_bonus_granted is already true.
    */
-  async grantWelcomeCredit(profileId: string, profileType: ProfileType): Promise<number> {
+  async grantWelcomeCredit(
+    profileId: string,
+    profileType: ProfileType,
+  ): Promise<number> {
     const profile = await this.prisma.profile.findUnique({
       where: { id: profileId },
       select: { whatsapp_activation_bonus_granted: true },
@@ -270,8 +285,13 @@ export class WalletService {
    * Pays a penalty from the profile wallet.
    * Debits the profile wallet and credits the system wallet atomically.
    */
-  async payPenaltyFromWallet(penaltyId: string, profileId: string): Promise<{ reference: string }> {
-    const penalty = await this.prisma.penalty.findUnique({ where: { id: penaltyId } });
+  async payPenaltyFromWallet(
+    penaltyId: string,
+    profileId: string,
+  ): Promise<{ reference: string }> {
+    const penalty = await this.prisma.penalty.findUnique({
+      where: { id: penaltyId },
+    });
     if (!penalty || penalty.worker_id !== profileId) {
       throw new NotFoundException('Pénalité introuvable');
     }
@@ -281,7 +301,9 @@ export class WalletService {
 
     const profileWallet = await this.getOrCreateProfileWallet(profileId);
     if (profileWallet.balance < Number(penalty.amount)) {
-      throw new BadRequestException('Solde insuffisant pour régler cette pénalité');
+      throw new BadRequestException(
+        'Solde insuffisant pour régler cette pénalité',
+      );
     }
 
     const systemWallet = await this.getOrCreateSystemWallet();
@@ -482,7 +504,14 @@ export class WalletService {
   }> {
     const systemWallet = await this.getOrCreateSystemWallet();
 
-    const [completedAgg, pendingCount, failedCount, penaltyAgg, contactUnlockPaymentAgg, contactUnlockWalletAgg] = await Promise.all([
+    const [
+      completedAgg,
+      pendingCount,
+      failedCount,
+      penaltyAgg,
+      contactUnlockPaymentAgg,
+      contactUnlockWalletAgg,
+    ] = await Promise.all([
       this.prisma.payment.aggregate({
         where: { status: PaymentStatus.COMPLETED },
         _sum: { amount: true },
@@ -496,7 +525,10 @@ export class WalletService {
       }),
       // Mobile money contact unlock payments (Payment record)
       this.prisma.payment.aggregate({
-        where: { status: PaymentStatus.COMPLETED, type: PaymentType.CONTACT_UNLOCK },
+        where: {
+          status: PaymentStatus.COMPLETED,
+          type: PaymentType.CONTACT_UNLOCK,
+        },
         _sum: { amount: true },
       }),
       // Wallet-credit contact unlock payments (no Payment record — only WalletTransaction)
@@ -519,7 +551,9 @@ export class WalletService {
       failedCount,
       revenueByType: {
         penalty: Number(penaltyAgg._sum.amount ?? 0),
-        contactUnlock: Number(contactUnlockPaymentAgg._sum.amount ?? 0) + Number(contactUnlockWalletAgg._sum.amount ?? 0),
+        contactUnlock:
+          Number(contactUnlockPaymentAgg._sum.amount ?? 0) +
+          Number(contactUnlockWalletAgg._sum.amount ?? 0),
       },
     };
   }
@@ -531,7 +565,12 @@ export class WalletService {
     type?: string[];
     created_from?: string;
     created_to?: string;
-  }): Promise<{ data: AdminWalletTransactionItem[]; total: number; page: number; limit: number }> {
+  }): Promise<{
+    data: AdminWalletTransactionItem[];
+    total: number;
+    page: number;
+    limit: number;
+  }> {
     const { page, limit } = params;
     const systemWallet = await this.getOrCreateSystemWallet();
     // Only show system wallet transactions — profile debits are internal and irrelevant here
@@ -562,7 +601,9 @@ export class WalletService {
     if (params.created_from || params.created_to) {
       where.created_at = {
         ...(params.created_from ? { gte: new Date(params.created_from) } : {}),
-        ...(params.created_to ? { lte: new Date(params.created_to + 'T23:59:59.999Z') } : {}),
+        ...(params.created_to
+          ? { lte: new Date(params.created_to + 'T23:59:59.999Z') }
+          : {}),
       };
     }
 
@@ -609,7 +650,12 @@ export class WalletService {
     status?: string[];
     created_from?: string;
     created_to?: string;
-  }): Promise<{ data: AdminPaymentItem[]; total: number; page: number; limit: number }> {
+  }): Promise<{
+    data: AdminPaymentItem[];
+    total: number;
+    page: number;
+    limit: number;
+  }> {
     const { page, limit } = params;
     const where: Record<string, unknown> = {};
 
@@ -637,7 +683,9 @@ export class WalletService {
     if (params.created_from || params.created_to) {
       where.created_at = {
         ...(params.created_from ? { gte: new Date(params.created_from) } : {}),
-        ...(params.created_to ? { lte: new Date(params.created_to + 'T23:59:59.999Z') } : {}),
+        ...(params.created_to
+          ? { lte: new Date(params.created_to + 'T23:59:59.999Z') }
+          : {}),
       };
     }
 

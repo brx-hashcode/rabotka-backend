@@ -14,10 +14,16 @@ import {
   eventCreatedEmail,
   eventUpdatedEmail,
 } from '../mail/templates';
+import { CalendarLinkService } from '../calendar/services/calendar-link.service';
+import { IcsGeneratorService } from '../calendar/services/ics-generator.service';
 
 @Injectable()
 export class NotificationService {
-  constructor(private readonly mail: MailService) {}
+  constructor(
+    private readonly mail: MailService,
+    private readonly calendarLink: CalendarLinkService,
+    private readonly icsGenerator: IcsGeneratorService,
+  ) {}
 
   async notifyAdminCreated(to: string, name: string): Promise<void> {
     await this.mail.sendMail({
@@ -132,6 +138,10 @@ export class NotificationService {
     description?: string | null,
     location?: string | null,
   ): Promise<void> {
+    const eventData = { title, startDate, endDate, description, location };
+    const googleCalendarUrl = this.calendarLink.googleCalendarLink(eventData);
+    const icsContent = this.icsGenerator.generate(eventData);
+
     await this.mail.sendMail({
       to,
       subject: `Rabotka – Nouvel événement : ${title}`,
@@ -142,7 +152,15 @@ export class NotificationService {
         endDate,
         description,
         location,
+        googleCalendarUrl,
       ),
+      attachments: [
+        {
+          filename: 'event.ics',
+          content: icsContent,
+          contentType: 'text/calendar',
+        },
+      ],
     });
   }
 
@@ -155,6 +173,10 @@ export class NotificationService {
     description?: string | null,
     location?: string | null,
   ): Promise<void> {
+    const eventData = { title, startDate, endDate, description, location };
+    const googleCalendarUrl = this.calendarLink.googleCalendarLink(eventData);
+    const icsContent = this.icsGenerator.generate(eventData);
+
     await this.mail.sendMail({
       to,
       subject: `Rabotka – Mise à jour de l'événement : ${title}`,
@@ -165,7 +187,15 @@ export class NotificationService {
         endDate,
         description,
         location,
+        googleCalendarUrl,
       ),
+      attachments: [
+        {
+          filename: 'event.ics',
+          content: icsContent,
+          contentType: 'text/calendar',
+        },
+      ],
     });
   }
 }
