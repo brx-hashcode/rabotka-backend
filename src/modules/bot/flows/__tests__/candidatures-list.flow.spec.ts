@@ -14,6 +14,7 @@ const employerProfile: BotProfile = {
   email: 'jean@example.com',
   profile_type: 'EMPLOYER',
   reliability_score: null,
+  status: 'ACTIVE',
 };
 
 function makeItem(id: string, name = 'Alice Dupont'): CandidatureListItem {
@@ -36,6 +37,7 @@ function makeItems(count: number): CandidatureListItem[] {
 
 function makeCtx() {
   return {
+    prisma: {} as any,
     applicationService: {
       markAsViewed: jest.fn().mockResolvedValue(undefined),
       accept: jest.fn().mockResolvedValue(undefined),
@@ -45,6 +47,11 @@ function makeCtx() {
       sendApplicationAcceptedToWorker: jest.fn().mockResolvedValue(undefined),
       sendApplicationRejectedToWorker: jest.fn().mockResolvedValue(undefined),
     } as any,
+    contactUnlockService: {
+      getByApplicationId: jest.fn().mockResolvedValue(null),
+    } as any,
+    walletService: {} as any,
+    systemConfigService: {} as any,
   };
 }
 

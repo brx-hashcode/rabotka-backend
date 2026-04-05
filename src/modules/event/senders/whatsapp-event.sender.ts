@@ -3,7 +3,7 @@ import type {
   EventNotificationRecipient,
   EventNotificationPayload,
 } from '../interfaces/event-notification.interfaces';
-import { WhatsAppService } from 'src/modules/whatsapp/whatsapp.service';
+import { WhatsAppService } from '../../whatsapp/whatsapp.service';
 
 @Injectable()
 export class WhatsAppEventSender {

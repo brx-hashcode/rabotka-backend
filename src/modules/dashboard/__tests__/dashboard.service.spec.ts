@@ -15,6 +15,9 @@ function makePrisma() {
     application: {
       count: jest.fn().mockResolvedValue(0),
     },
+    assignment: {
+      count: jest.fn().mockResolvedValue(0),
+    },
     $queryRaw: jest.fn().mockResolvedValue([]),
   };
 }
@@ -31,34 +34,27 @@ describe('DashboardService', () => {
   describe('getMetrics()', () => {
     it('returns metrics with zero values when db returns nulls', async () => {
       const metrics = await service.getMetrics();
-      expect(metrics.revenue).toBe(0);
       expect(metrics.profilesCount).toBe(0);
       expect(metrics.jobsCount).toBe(0);
       expect(metrics.applicationsCount).toBe(0);
+      expect(metrics.assignmentsCount).toBe(0);
     });
 
-    it('calculates revenue from total sum', async () => {
-      prisma.payment.aggregate.mockResolvedValue({ _sum: { amount: 50000 } });
-      const metrics = await service.getMetrics();
-      expect(metrics.revenue).toBe(50000);
-    });
-
-    it('calculates trend as null when previous is 0', async () => {
+    it('calculates trend as 100 when previous is 0 and current > 0', async () => {
       // Reset and setup for this test
       prisma = makePrisma();
       service = new DashboardService(prisma as any);
 
-      // payment.aggregate is called 3 times, profile.count 3 times, jobOffer.count 3 times, application.count 3 times
-      prisma.payment.aggregate.mockResolvedValue({ _sum: { amount: null } });
+      // profile.count called 3 times: total, current 30d, previous 30d
       prisma.profile.count
         .mockResolvedValueOnce(5)  // total
         .mockResolvedValueOnce(5)  // current 30d
-        .mockResolvedValueOnce(0); // previous 30d (calcTrend returns null when previous is 0)
+        .mockResolvedValueOnce(0); // previous 30d → calcTrend returns 100 when current > 0
       prisma.jobOffer.count.mockResolvedValue(0);
       prisma.application.count.mockResolvedValue(0);
 
       const metrics = await service.getMetrics();
-      expect(metrics.profilesTrend).toBeNull();
+      expect(metrics.profilesTrend).toBe(100);
     });
 
     it('calculates trend as null when both current and previous are 0', async () => {

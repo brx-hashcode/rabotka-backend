@@ -17,6 +17,7 @@ const employerProfile: BotProfile = {
   email: 'bob@example.com',
   profile_type: 'EMPLOYER',
   reliability_score: 100,
+  status: 'ACTIVE',
 };
 
 const workerProfile: BotProfile = {
@@ -26,6 +27,7 @@ const workerProfile: BotProfile = {
 
 function makeCtx(overrides: Partial<AcceptRefuseContext> = {}): AcceptRefuseContext {
   return {
+    prisma: {} as AcceptRefuseContext['prisma'],
     applicationService: {
       accept: jest.fn().mockResolvedValue({}),
       reject: jest.fn().mockResolvedValue({}),
@@ -34,6 +36,11 @@ function makeCtx(overrides: Partial<AcceptRefuseContext> = {}): AcceptRefuseCont
       sendApplicationAcceptedToWorker: jest.fn().mockResolvedValue(undefined),
       sendApplicationRejectedToWorker: jest.fn().mockResolvedValue(undefined),
     } as unknown as AcceptRefuseContext['notificationService'],
+    contactUnlockService: {
+      getByApplicationId: jest.fn().mockResolvedValue(null),
+    } as unknown as AcceptRefuseContext['contactUnlockService'],
+    walletService: {} as AcceptRefuseContext['walletService'],
+    systemConfigService: {} as AcceptRefuseContext['systemConfigService'],
     ...overrides,
   };
 }

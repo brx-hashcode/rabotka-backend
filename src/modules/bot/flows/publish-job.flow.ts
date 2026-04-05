@@ -3,7 +3,6 @@ import type { BotProfile, BotState } from '../types/bot-state.types';
 import { FLOW_IDS } from '../bot.constants';
 import type { JobOfferService } from '../../job-offer/job-offer.service';
 import { CreateJobOfferDto } from '../../job-offer/dto/create-job-offer.dto';
-import type { PaymentService } from '../../payments/payment.service';
 
 const TITLE_MIN = 5;
 const TITLE_MAX = 100;
@@ -25,7 +24,6 @@ const PAYMENT_FLOW_LABELS: Record<string, string> = {
 
 export type PublishJobContext = {
   jobOfferService: JobOfferService;
-  paymentService: PaymentService;
 };
 
 export type FlowResult = {
@@ -85,7 +83,7 @@ function toScheduledAtString(scheduledAt: unknown): string {
   return '';
 }
 
-// Step 9 — publish the offer (formerly step 8)
+// Step 9 — publish the offer (free — activated immediately)
 async function handlePublishStep9(args: StepArgs): Promise<FlowResult> {
   const { state, payload, profile, ctx } = args;
   const scheduledStr = toScheduledAtString(payload.scheduled_at);
@@ -101,22 +99,17 @@ async function handlePublishStep9(args: StepArgs): Promise<FlowResult> {
     quantity: Number(payload.quantity),
   };
   try {
-    const offer = await ctx.jobOfferService.create(profile.id, dto);
-    const paymentLink = await ctx.paymentService.generateJobPostingPaymentLink(
-      offer.id,
-    );
+    await ctx.jobOfferService.create(profile.id, dto);
     return {
       reply: [
         [
-          `✅ *Offre créée — Paiement requis*`,
+          `✅ *Votre offre est publiée !*`,
           ``,
-          `Votre offre "*${String(payload.title)}*" a été enregistrée.`,
+          `Votre offre "*${String(payload.title)}*" est maintenant visible et les travailleurs peuvent y postuler.`,
           ``,
-          `Pour la publier et la rendre visible aux travailleurs, veuillez effectuer le paiement de mise en ligne :`,
+          `Vous serez notifié dès qu'une candidature est reçue.`,
           ``,
-          paymentLink,
-          ``,
-          `Une fois le paiement confirmé, votre offre sera publiée automatiquement.`,
+          `Tapez *MENU* pour revenir au menu principal.`,
         ].join('\n'),
       ],
       clearState: true,
@@ -392,7 +385,7 @@ function handlePublishStep2(args: StepArgs): FlowResult {
         '*À quelle date et heure le travail doit-il commencer ?*',
         'Format: JJ/MM/AAAA HH:MM',
         '',
-        '*Exemple*: "_15/02/2026 09:00_"',
+        `*Exemple*: "_${new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })} ${new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', hour12: false })}_"`,
       ].join('\n'),
     ],
     nextState: {

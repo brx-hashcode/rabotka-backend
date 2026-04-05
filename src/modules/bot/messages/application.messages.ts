@@ -63,7 +63,6 @@ export function formatCandidatureDetail(params: {
     '',
     `Nom: ${params.lastName}`,
     `Prénom: ${params.firstName}`,
-    `Email: ${params.email}`,
     ...(params.offerTitle ? [`Offre: ${params.offerTitle}`] : []),
     `Statut: ${statusLabel}`,
     `Score: ${params.score}/100`,

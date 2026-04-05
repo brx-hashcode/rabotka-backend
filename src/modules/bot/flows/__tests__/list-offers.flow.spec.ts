@@ -21,6 +21,8 @@ const workerProfile: BotProfile = {
   profile_type: 'WORKER',
   status: 'ACTIVE',
   phone: '+242111111',
+  email: 'jane@example.com',
+  reliability_score: 100,
 };
 
 function makeOffer(id: string) {
@@ -49,7 +51,7 @@ const ctx = {
   jobOfferService: mockJobOfferService,
   systemConfigService: {
     getRaw: jest.fn().mockResolvedValue('5000'),
-  },
+  } as any,
 };
 
 beforeEach(() => {

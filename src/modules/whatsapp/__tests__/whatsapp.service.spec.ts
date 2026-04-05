@@ -6,6 +6,7 @@ import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { TwilioService } from '../../../common/services/twilio/twilio.service';
 import { REDIS_CONNECTION } from '../../../common/services/redis/redis.constants';
 import { ConfigService } from '@nestjs/config';
+import { WalletService } from '../../wallet/wallet.service';
 
 // Prevent the real Twilio SDK from being loaded in this test suite
 jest.mock('twilio', () => {
@@ -51,6 +52,7 @@ describe('WhatsAppService', () => {
         { provide: TwilioService, useValue: mockTwilioService },
         { provide: REDIS_CONNECTION, useValue: redis },
         { provide: ConfigService, useValue: { get: jest.fn().mockReturnValue('test') } },
+        { provide: WalletService, useValue: { getProfileWalletBalance: jest.fn().mockResolvedValue(0), grantWelcomeCredit: jest.fn().mockResolvedValue(0) } },
       ],
     }).compile();
 
@@ -149,10 +151,12 @@ describe('WhatsAppService', () => {
 
       await service.verifyWhatsAppToken('valid-token');
 
-      expect(prisma.profile.update).toHaveBeenCalledWith({
-        where: { id: PROFILE_ID },
-        data: { whatsapp_connected: true },
-      });
+      expect(prisma.profile.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: PROFILE_ID },
+          data: expect.objectContaining({ whatsapp_connected: true }),
+        }),
+      );
       expect(redis.del).toHaveBeenCalled();
     });
 

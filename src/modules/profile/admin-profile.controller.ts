@@ -27,6 +27,7 @@ import { LogService } from '../log/log.service';
 import { AdminAuthGuard } from '../auth/guards/admin-auth.guard';
 import { PaymentRequestService } from '../payment-request/payment-request.service';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
+import { WalletService } from '../wallet/wallet.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { MailService } from '../mail/mail.service';
 import { kycApprovedEmail, kycRejectedEmail } from '../mail/templates';
@@ -52,6 +53,7 @@ export class AdminProfileController {
     private readonly prisma: PrismaService,
     private readonly whatsApp: WhatsAppService,
     private readonly mail: MailService,
+    private readonly walletService: WalletService,
   ) {}
 
   @Get()
@@ -100,6 +102,12 @@ export class AdminProfileController {
   @ApiOperation({ summary: 'Get payment requests for a profile (admin only)' })
   async getPaymentRequests(@Param('id') id: string) {
     return await this.paymentRequestService.getByProfileId(id);
+  }
+
+  @Get(':id/wallet')
+  @ApiOperation({ summary: 'Get wallet balance and transactions for a profile (admin only)' })
+  async getWallet(@Param('id') id: string) {
+    return await this.walletService.getProfileWalletForAdmin(id);
   }
 
   @Get(':id/messages')
@@ -167,9 +175,15 @@ export class AdminProfileController {
           "Ce profil n'a pas de numéro de téléphone",
         );
       }
+      const whatsappBody = [
+        body.message.trim(),
+        '',
+        `— ${adminFullName}`,
+        `L'équipe Rabotka`,
+      ].join('\n');
       await this.whatsApp.sendTextMessage(
         profile.phone,
-        body.message.trim(),
+        whatsappBody,
         profile.id,
         adminUserId,
       );
@@ -180,7 +194,7 @@ export class AdminProfileController {
           profile_id: profile.id,
           direction: MessageDirection.OUTBOUND,
           platform: BotPlatform.WHATSAPP,
-          body: body.message.trim(),
+          body: whatsappBody,
         },
       });
     } else {
@@ -349,27 +363,4 @@ export class AdminProfileController {
     return await this.profileService.requestWhatsAppVerification(id);
   }
 
-  @Patch(':id/confirm-payment')
-  @ApiOperation({
-    summary: 'Confirm or reject payment for a profile (admin only)',
-    description:
-      'Manually confirms or rejects a payment. Accepting activates the profile; rejecting keeps it in PENDING_ACTIVATION.',
-  })
-  @ApiResponse({ status: 200, description: 'Updated profile details' })
-  @ApiResponse({ status: 404, description: 'Profile not found' })
-  async confirmPayment(
-    @Param('id') id: string,
-    @Body() body: { decision: 'ACCEPTED' | 'REJECTED'; reason?: string },
-    @Req() req: any,
-  ) {
-    const adminUserId = req.user?.userId;
-    await this.paymentRequestService.manualDecide(
-      id,
-      body.decision,
-      body.reason,
-      adminUserId as string,
-    );
-
-    return this.profileService.getProfileDetailForAdmin(id);
-  }
 }

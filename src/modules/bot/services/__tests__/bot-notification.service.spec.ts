@@ -72,6 +72,9 @@ describe('BotNotificationService', () => {
       deps.whatsApp as any,
       deps.botState as any,
       deps.botInbox as any,
+      { getByApplicationId: jest.fn().mockResolvedValue(null) } as any,
+      { getContactUnlockFees: jest.fn().mockResolvedValue({ employerFeeFcfa: 500, workerFeeFcfa: 100, expiryHours: 48 }) } as any,
+      { getProfileWalletBalance: jest.fn().mockResolvedValue(0) } as any,
     );
   });
 

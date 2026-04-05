@@ -19,6 +19,7 @@ const workerProfile: BotProfile = {
   email: 'alice@example.com',
   profile_type: 'WORKER',
   reliability_score: 90,
+  status: 'ACTIVE',
 };
 
 const employerProfile: BotProfile = {
@@ -40,6 +41,7 @@ function makeCtx(overrides: Partial<ApplyJobContext> = {}): ApplyJobContext {
     } as unknown as ApplyJobContext['notificationService'],
     systemConfigService: {
       getRaw: jest.fn().mockResolvedValue('5000'),
+      getContactInfo: jest.fn().mockResolvedValue({ orangeMoneyNumber: '', airtelMoneyNumber: '' }),
     } as unknown as ApplyJobContext['systemConfigService'],
     ...overrides,
   };

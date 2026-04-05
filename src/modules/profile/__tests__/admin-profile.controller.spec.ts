@@ -32,6 +32,9 @@ function makePrisma(profile: any = null) {
     profile: {
       findUnique: jest.fn().mockResolvedValue(profile),
     },
+    user: {
+      findUnique: jest.fn().mockResolvedValue(null),
+    },
   };
 }
 
@@ -208,17 +211,4 @@ describe('AdminProfileController', () => {
     expect(result).toEqual({ token: 'tok' });
   });
 
-  it('confirmPayment() calls manualDecide and returns profile', async () => {
-    const profileService = makeProfileService();
-    const paymentRequestService = makePaymentRequestService();
-    const ctrl = new AdminProfileController(
-      profileService as any, makeLogService() as any,
-      paymentRequestService as any, makePrisma() as any,
-      makeWhatsApp() as any, makeMail() as any,
-    );
-    const result = await ctrl.confirmPayment('p1', { decision: 'ACCEPTED' }, { user: { userId: 'u1' } });
-    expect(paymentRequestService.manualDecide).toHaveBeenCalledWith('p1', 'ACCEPTED', undefined, 'u1');
-    expect(profileService.getProfileDetailForAdmin).toHaveBeenCalledWith('p1');
-    expect(result).toEqual({ id: 'p1' });
-  });
 });

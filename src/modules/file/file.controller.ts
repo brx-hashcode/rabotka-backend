@@ -1,11 +1,14 @@
 import {
   Controller,
   Post,
+  Get,
   UseInterceptors,
   UploadedFiles,
   BadRequestException,
   Query,
+  Res,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import {
   ApiTags,
@@ -21,6 +24,38 @@ import { StorageService } from '../../common/services/storage/storage.service';
 @Controller('file')
 export class FileController {
   constructor(private readonly storageService: StorageService) {}
+
+  @Get('proxy')
+  async proxyFile(
+    @Query('url') fileUrl: string,
+    @Res() res: Response,
+  ) {
+    if (!fileUrl) {
+      return res.status(400).json({ message: 'url query param is required' });
+    }
+
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(fileUrl);
+    } catch {
+      return res.status(400).json({ message: 'Invalid url' });
+    }
+
+    const upstream = await fetch(decoded);
+    if (!upstream.ok) {
+      return res.status(upstream.status).json({ message: 'Failed to fetch file' });
+    }
+
+    const contentType = upstream.headers.get('content-type') ?? 'application/octet-stream';
+    const contentLength = upstream.headers.get('content-length');
+
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    if (contentLength) res.setHeader('Content-Length', contentLength);
+
+    const buffer = await upstream.arrayBuffer();
+    return res.send(Buffer.from(buffer));
+  }
 
   @Post('upload')
   @UseInterceptors(FilesInterceptor('files', 10))

@@ -62,6 +62,12 @@ import {
   getVerifyWhatsappInitialState,
 } from '../flows/verify-whatsapp.flow';
 import { PaymentService } from '../../payments/payment.service';
+import { ContactUnlockService } from '../../contact-unlock/contact-unlock.service';
+import { WalletService } from '../../wallet/wallet.service';
+import {
+  runUnlockContactFlow,
+  getUnlockContactInitialState,
+} from '../flows/unlock-contact.flow';
 
 const INACTIVE_MESSAGE = `Votre compte est créé mais pas encore activé. Cliquez sur le lien de confirmation que nous vous avons envoyé par WhatsApp pour l’activer.`;
 
@@ -92,6 +98,8 @@ export class BotOrchestratorService {
     private readonly notificationService: BotNotificationService,
     private readonly systemConfig: SystemConfigService,
     private readonly paymentService: PaymentService,
+    private readonly contactUnlockService: ContactUnlockService,
+    private readonly walletService: WalletService,
   ) {}
 
   async handle(
@@ -288,6 +296,8 @@ export class BotOrchestratorService {
       systemConfigService: this.systemConfig,
       paymentService: this.paymentService,
       commands: this.commands,
+      contactUnlockService: this.contactUnlockService,
+      walletService: this.walletService,
     };
   }
 
@@ -322,6 +332,11 @@ export class BotOrchestratorService {
         runResolvePenaltiesFlow(state, input, profile, ctx),
       [FLOW_IDS.VERIFY_WHATSAPP]: () =>
         runVerifyWhatsappFlow(state, input, profile, ctx),
+      [FLOW_IDS.UNLOCK_CONTACT]: () =>
+        runUnlockContactFlow(state, input, profile, {
+          ...ctx,
+          botNotification: this.notificationService,
+        }),
     };
     const runner = runners[flowId];
     return runner ? runner() : Promise.resolve(null);
@@ -350,6 +365,9 @@ export class BotOrchestratorService {
 
       pay_penalties: () =>
         this.handlePayPenaltiesCommand(botProfile, profileId),
+
+      unlock_contact: () =>
+        this.handleUnlockContactCommand(botProfile, profileId),
     };
 
     const handler = commandHandlers[route.commandId];
@@ -438,6 +456,67 @@ export class BotOrchestratorService {
     return [result.message];
   }
 
+  private async handleUnlockContactCommand(
+    profile: BotProfile,
+    profileId: string,
+  ): Promise<string[]> {
+    // Check if there's already an unlock state pre-loaded (e.g. by notification)
+    const existingState = await this.botState.get(profileId);
+    if (existingState?.flowId === FLOW_IDS.UNLOCK_CONTACT) {
+      const result = await runUnlockContactFlow(existingState, '', profile, {
+        contactUnlockService: this.contactUnlockService,
+        walletService: this.walletService,
+        paymentService: this.paymentService,
+        botNotification: this.notificationService,
+      });
+      if (result.nextState) {
+        await this.botState.set(profileId, result.nextState);
+      }
+      return result.reply;
+    }
+
+    // Look up the most recent pending attempt via service
+    const attempt =
+      await this.contactUnlockService.findPendingAttemptForProfile(profileId);
+
+    if (!attempt) {
+      return [
+        `Aucune tentative de déverrouillage en cours.\n\nTapez *MENU* pour revenir.`,
+      ];
+    }
+
+    const fees = await this.systemConfig.getContactUnlockFees();
+    const isEmployer = attempt.employer_id === profileId;
+    const otherPartyId = isEmployer ? attempt.worker_id : attempt.employer_id;
+    const otherParty = await this.prisma.profile.findUnique({
+      where: { id: otherPartyId },
+      select: { first_name: true, last_name: true },
+    });
+    const otherName = otherParty
+      ? `${otherParty.first_name} ${otherParty.last_name}`.trim()
+      : 'votre contact';
+    const amount = isEmployer ? fees.employerFeeFcfa : fees.workerFeeFcfa;
+
+    const unlockState = getUnlockContactInitialState({
+      attemptId: attempt.id,
+      otherName,
+      amount,
+      expiryHours: fees.expiryHours,
+    });
+    await this.botState.set(profileId, unlockState);
+
+    const result = await runUnlockContactFlow(unlockState, '', profile, {
+      contactUnlockService: this.contactUnlockService,
+      walletService: this.walletService,
+      paymentService: this.paymentService,
+      botNotification: this.notificationService,
+    });
+    if (result.nextState) {
+      await this.botState.set(profileId, result.nextState);
+    }
+    return result.reply;
+  }
+
   private async handlePayPenaltiesCommand(
     profile: BotProfile,
     profileId: string,
@@ -452,6 +531,7 @@ export class BotOrchestratorService {
     await this.botState.set(profileId, flowState);
     const result = await runPayPenaltiesFlow(flowState, '', profile, {
       applicationService: this.applicationService,
+      walletService: this.walletService,
     });
     return result.reply;
   }

@@ -11,6 +11,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { BotNotificationService } from '../bot/services/bot-notification.service';
+import { ContactUnlockService } from '../contact-unlock/contact-unlock.service';
 import {
   AccountStatus,
   ApplicationStatus,
@@ -137,6 +138,8 @@ export class ApplicationService {
     @Inject(forwardRef(() => BotNotificationService))
     private readonly botNotification: BotNotificationService,
     private readonly eventEmitter: EventEmitter2,
+    @Inject(forwardRef(() => ContactUnlockService))
+    private readonly contactUnlock: ContactUnlockService,
   ) {}
 
   async create(
@@ -369,6 +372,13 @@ export class ApplicationService {
     const updated = await this.findById(applicationId);
     if (!updated)
       throw new NotFoundException('Candidature introuvable après mise à jour');
+
+    // Initiate contact unlock attempt — contacts are now gated behind payment/credit
+    this.contactUnlock
+      .initiateUnlock(applicationId, employerId)
+      .catch((err) =>
+        console.warn(`Failed to initiate contact unlock for ${applicationId}:`, err),
+      );
 
     this.eventEmitter.emit(AdminNotificationEvent.APPLICATION_ACCEPTED, {
       event: AdminNotificationEvent.APPLICATION_ACCEPTED,

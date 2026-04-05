@@ -5,6 +5,8 @@ import type { PaymentService } from '../../payments/payment.service';
 import type { SystemConfigService } from '../../system-config/system-config.service';
 import type { BotNotificationService } from '../services/bot-notification.service';
 import type { BotCommandsService } from '../services/bot-commands.service';
+import type { ContactUnlockService } from '../../contact-unlock/contact-unlock.service';
+import type { WalletService } from '../../wallet/wallet.service';
 import type { BotState } from './bot-state.types';
 
 /**
@@ -19,6 +21,8 @@ export type FlowContext = {
   systemConfigService: SystemConfigService;
   paymentService: PaymentService;
   commands: BotCommandsService;
+  contactUnlockService: ContactUnlockService;
+  walletService: WalletService;
 };
 
 export type FlowResult = {

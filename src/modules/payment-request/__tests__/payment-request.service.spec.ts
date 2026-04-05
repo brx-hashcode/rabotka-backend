@@ -12,6 +12,12 @@ import { MailService } from '../../mail/mail.service';
 import { PaymentService } from '../../payments/payment.service';
 import { SystemConfigService } from '../../system-config/system-config.service';
 import { PaymentRequestStatus } from '@prisma/client';
+import { WalletService } from '../../wallet/wallet.service';
+import { MonetbilService } from '../monetbil.service';
+import { PaymentStatusGateway } from '../../ws-notifications/payment-status.gateway';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { BotNotificationService } from '../../bot/services/bot-notification.service';
+import { ContactUnlockService } from '../../contact-unlock/contact-unlock.service';
 
 const PROFILE_ID = 'profile-uuid-1';
 const REQUEST_ID = 'req-uuid-1';
@@ -88,7 +94,13 @@ describe('PaymentRequestService', () => {
         { provide: ConfigService, useValue: mockConfig },
         { provide: MailService, useValue: { sendMail: jest.fn().mockResolvedValue(undefined), sendActivationEmail: jest.fn(), sendKycRejectedEmail: jest.fn(), sendKycApprovedEmail: jest.fn() } },
         { provide: PaymentService, useValue: { makePayment: jest.fn().mockResolvedValue({ paymentId: 'pay-1' }) } },
-        { provide: SystemConfigService, useValue: { getRaw: jest.fn().mockResolvedValue('5000') } },
+        { provide: SystemConfigService, useValue: { getRaw: jest.fn().mockResolvedValue('5000'), get: jest.fn().mockResolvedValue('') } },
+        { provide: WalletService, useValue: { getOrCreateSystemWallet: jest.fn().mockResolvedValue({ id: 'sys-wallet' }), getProfileWalletBalance: jest.fn().mockResolvedValue(0) } },
+        { provide: MonetbilService, useValue: { initiatePayment: jest.fn(), verifyWebhookSignature: jest.fn() } },
+        { provide: PaymentStatusGateway, useValue: { emitPaymentStatus: jest.fn() } },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+        { provide: BotNotificationService, useValue: { sendContactUnlockedNotification: jest.fn().mockResolvedValue(undefined) } },
+        { provide: ContactUnlockService, useValue: { payUnlock: jest.fn(), getContactsIfUnlocked: jest.fn() } },
       ],
     }).compile();
 
@@ -99,35 +111,19 @@ describe('PaymentRequestService', () => {
     configService = module.get(ConfigService);
   });
 
-  describe('createPaymentLink()', () => {
-    beforeEach(() => {
+  describe('createPaymentUrl()', () => {
+    it('creates payment request and returns URL', async () => {
       (prisma.profile.findUnique as jest.Mock).mockResolvedValue(mockProfile);
       (prisma.paymentRequest.create as jest.Mock).mockResolvedValue(
         makeRequest(PaymentRequestStatus.PENDING),
       );
-    });
 
-    it('creates payment request and sends WhatsApp', async () => {
-      const result = await service.createPaymentLink(
-        { profileId: PROFILE_ID },
-        ADMIN_ID,
-      );
+      const url = await service.createPaymentUrl(PROFILE_ID, 5000, 'Test payment');
 
       expect(prisma.paymentRequest.create).toHaveBeenCalled();
-      expect(whatsApp.sendTextMessage).toHaveBeenCalled();
-      expect(log.create).toHaveBeenCalledWith(
-        expect.objectContaining({ action: 'PAYMENT_LINK_CREATED' }),
-      );
-      expect(result.paymentUrl).toContain('/pay/');
+      expect(url).toContain('/pay/');
     });
 
-    it('throws NotFoundException when profile not found', async () => {
-      (prisma.profile.findUnique as jest.Mock).mockResolvedValue(null);
-
-      await expect(
-        service.createPaymentLink({ profileId: 'unknown' }, ADMIN_ID),
-      ).rejects.toThrow(NotFoundException);
-    });
   });
 
   describe('getByToken()', () => {
@@ -204,82 +200,33 @@ describe('PaymentRequestService', () => {
     });
   });
 
-  describe('approve()', () => {
-    it('approves request and sends WhatsApp notification', async () => {
-      (prisma.paymentRequest.findUnique as jest.Mock).mockResolvedValue(
-        makeRequest(PaymentRequestStatus.SUBMITTED),
-      );
-      (prisma.$transaction as jest.Mock).mockResolvedValue([
-        makeRequest(PaymentRequestStatus.APPROVED),
-      ]);
-
-      await service.approve(REQUEST_ID, ADMIN_ID);
-
-      expect(log.create).toHaveBeenCalledWith(
-        expect.objectContaining({ action: 'PAYMENT_APPROVED' }),
-      );
-      expect(whatsApp.sendTextMessage).toHaveBeenCalled();
-    });
-
-    it('throws NotFoundException when request not found', async () => {
-      (prisma.paymentRequest.findUnique as jest.Mock).mockResolvedValue(null);
-
-      await expect(service.approve(REQUEST_ID, ADMIN_ID)).rejects.toThrow(
-        NotFoundException,
-      );
-    });
-
-    it('throws BadRequestException when request is not SUBMITTED', async () => {
-      (prisma.paymentRequest.findUnique as jest.Mock).mockResolvedValue(
-        makeRequest(PaymentRequestStatus.PENDING),
-      );
-
-      await expect(service.approve(REQUEST_ID, ADMIN_ID)).rejects.toThrow(
-        BadRequestException,
-      );
-    });
-  });
-
-  describe('reject()', () => {
-    it('rejects request with note', async () => {
-      (prisma.paymentRequest.findUnique as jest.Mock).mockResolvedValue(
-        makeRequest(PaymentRequestStatus.SUBMITTED),
-      );
-      (prisma.paymentRequest.update as jest.Mock).mockResolvedValue(
-        makeRequest(PaymentRequestStatus.REJECTED, { rejection_note: 'Bad proof' }),
-      );
-
-      const result = await service.reject(REQUEST_ID, { note: 'Bad proof' }, ADMIN_ID);
-
-      expect(prisma.paymentRequest.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            status: PaymentRequestStatus.REJECTED,
-            rejection_note: 'Bad proof',
-          }),
-        }),
-      );
-      expect(log.create).toHaveBeenCalledWith(
-        expect.objectContaining({ action: 'PAYMENT_REJECTED' }),
-      );
-    });
-
-    it('throws NotFoundException when request not found', async () => {
+  describe('initiateMonetbilPayment()', () => {
+    it('throws NotFoundException when token not found', async () => {
       (prisma.paymentRequest.findUnique as jest.Mock).mockResolvedValue(null);
 
       await expect(
-        service.reject(REQUEST_ID, { note: 'x' }, ADMIN_ID),
+        service.initiateMonetbilPayment(TOKEN, '237600000001', 'MTN'),
       ).rejects.toThrow(NotFoundException);
     });
 
-    it('throws BadRequestException when request is not SUBMITTED', async () => {
+    it('throws BadRequestException when request is not PENDING', async () => {
       (prisma.paymentRequest.findUnique as jest.Mock).mockResolvedValue(
-        makeRequest(PaymentRequestStatus.PENDING),
+        makeRequest(PaymentRequestStatus.PROCESSING),
       );
 
       await expect(
-        service.reject(REQUEST_ID, { note: 'x' }, ADMIN_ID),
+        service.initiateMonetbilPayment(TOKEN, '237600000001', 'MTN'),
       ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('handleMonetbilCallback()', () => {
+    it('returns early when payment ref not found', async () => {
+      (prisma.paymentRequest.findFirst as jest.Mock).mockResolvedValue(null);
+
+      await expect(
+        service.handleMonetbilCallback({ payment_ref: 'unknown', status: '1', amount: '5000', phone: '237600000001' }),
+      ).resolves.not.toThrow();
     });
   });
 
