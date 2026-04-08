@@ -41,6 +41,10 @@ export class FileController {
       return res.status(400).json({ message: 'Invalid url' });
     }
 
+    if (decoded.startsWith('blob:')) {
+      return res.status(400).json({ message: 'Blob URLs cannot be proxied. The file was not properly uploaded to storage.' });
+    }
+
     const upstream = await fetch(decoded);
     if (!upstream.ok) {
       return res.status(upstream.status).json({ message: 'Failed to fetch file' });

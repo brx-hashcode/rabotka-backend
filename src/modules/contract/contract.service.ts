@@ -36,7 +36,10 @@ export class ContractService {
     return this.mapContract(contract);
   }
 
-  async download(contractId: string, requestingProfileId: string): Promise<{ buffer: Buffer; filename: string }> {
+  async download(
+    contractId: string,
+    requestingProfileId: string,
+  ): Promise<{ buffer: Buffer; filename: string }> {
     const contract = await this.prisma.contract.findUnique({
       where: { id: contractId },
       include: {
@@ -53,12 +56,12 @@ export class ContractService {
 
     const { application } = contract;
     const isWorker = application.worker_id === requestingProfileId;
-    const isEmployer = application.job_offer.employer_id === requestingProfileId;
+    const isEmployer =
+      application.job_offer.employer_id === requestingProfileId;
     if (!isWorker && !isEmployer) {
       throw new ForbiddenException('Not authorized to access this contract');
     }
 
-    // Find the active CONTRACT template
     const template = await this.prisma.document.findFirst({
       where: { category: DocumentCategory.CONTRACT },
       orderBy: { created_at: 'desc' },
@@ -69,38 +72,45 @@ export class ContractService {
     const worker = application.worker;
     const employer = application.job_offer.employer;
 
+    const s = (v: string | null | undefined) => v ?? '-';
     const data: Record<string, string> = {
-      CONTRACT_ID: contract.id,
-      WORKER_FIRST_NAME: worker.first_name,
-      WORKER_LAST_NAME: worker.last_name,
-      WORKER_EMAIL: worker.email,
-      WORKER_PHONE: worker.phone,
-      EMPLOYER_FIRST_NAME: employer.first_name,
-      EMPLOYER_LAST_NAME: employer.last_name,
-      EMPLOYER_EMAIL: employer.email,
-      EMPLOYER_PHONE: employer.phone,
-      JOB_TITLE: job.title,
-      JOB_DESCRIPTION: job.description,
-      JOB_ADDRESS: job.address,
-      JOB_AMOUNT: job.amount.toString(),
-      JOB_PAYMENT_FLOW: job.payment_flow,
-      JOB_DATE: new Date(job.scheduled_at).toLocaleDateString('fr-FR'),
+      CONTRACT_ID: s(contract.id),
+      WORKER_FIRST_NAME: s(worker.first_name),
+      WORKER_LAST_NAME: s(worker.last_name),
+      WORKER_EMAIL: s(worker.email),
+      WORKER_PHONE: s(worker.phone),
+      EMPLOYER_FIRST_NAME: s(employer.first_name),
+      EMPLOYER_LAST_NAME: s(employer.last_name),
+      EMPLOYER_EMAIL: s(employer.email),
+      EMPLOYER_PHONE: s(employer.phone),
+      JOB_TITLE: s(job.title),
+      JOB_DESCRIPTION: s(job.description),
+      JOB_ADDRESS: s(job.address),
+      JOB_AMOUNT: job.amount == null ? '-' : job.amount.toString(),
+      JOB_PAYMENT_FLOW: s(job.payment_flow),
+      JOB_DATE: job.scheduled_at
+        ? new Date(job.scheduled_at).toLocaleDateString('fr-FR')
+        : '-',
       GENERATED_DATE: new Date().toLocaleDateString('fr-FR'),
     };
 
-    const buffer = await this.documentService.fillDocumentTemplateAsPdf(template.id, data);
+    const buffer = await this.documentService.fillDocumentTemplateAsPdf(
+      template.id,
+      data,
+    );
 
-    // Mark as downloaded
     await this.prisma.contract.update({
       where: { id: contractId },
       data: { status: 'DOWNLOADED' },
     });
 
-    const filename = `contrat_${worker.last_name}_${job.title.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
+    const filename = `contrat_${worker.last_name}_${job.title.replaceAll(/[^a-zA-Z0-9]/g, '_')}.pdf`;
     return { buffer, filename };
   }
 
-  async downloadAsAdmin(contractId: string): Promise<{ buffer: Buffer; filename: string }> {
+  async downloadAsAdmin(
+    contractId: string,
+  ): Promise<{ buffer: Buffer; filename: string }> {
     const contract = await this.prisma.contract.findUnique({
       where: { id: contractId },
       include: {
@@ -126,27 +136,33 @@ export class ContractService {
     const worker = application.worker;
     const employer = application.job_offer.employer;
 
+    const s = (v: string | null | undefined) => v ?? '-';
     const data: Record<string, string> = {
-      CONTRACT_ID: contract.id,
-      WORKER_FIRST_NAME: worker.first_name,
-      WORKER_LAST_NAME: worker.last_name,
-      WORKER_EMAIL: worker.email,
-      WORKER_PHONE: worker.phone,
-      EMPLOYER_FIRST_NAME: employer.first_name,
-      EMPLOYER_LAST_NAME: employer.last_name,
-      EMPLOYER_EMAIL: employer.email,
-      EMPLOYER_PHONE: employer.phone,
-      JOB_TITLE: job.title,
-      JOB_DESCRIPTION: job.description,
-      JOB_ADDRESS: job.address,
-      JOB_AMOUNT: job.amount.toString(),
-      JOB_PAYMENT_FLOW: job.payment_flow,
-      JOB_DATE: new Date(job.scheduled_at).toLocaleDateString('fr-FR'),
+      CONTRACT_ID: s(contract.id),
+      WORKER_FIRST_NAME: s(worker.first_name),
+      WORKER_LAST_NAME: s(worker.last_name),
+      WORKER_EMAIL: s(worker.email),
+      WORKER_PHONE: s(worker.phone),
+      EMPLOYER_FIRST_NAME: s(employer.first_name),
+      EMPLOYER_LAST_NAME: s(employer.last_name),
+      EMPLOYER_EMAIL: s(employer.email),
+      EMPLOYER_PHONE: s(employer.phone),
+      JOB_TITLE: s(job.title),
+      JOB_DESCRIPTION: s(job.description),
+      JOB_ADDRESS: s(job.address),
+      JOB_AMOUNT: job.amount == null ? '-' : job.amount.toString(),
+      JOB_PAYMENT_FLOW: s(job.payment_flow),
+      JOB_DATE: job.scheduled_at
+        ? new Date(job.scheduled_at).toLocaleDateString('fr-FR')
+        : '-',
       GENERATED_DATE: new Date().toLocaleDateString('fr-FR'),
     };
 
-    const buffer = await this.documentService.fillDocumentTemplateAsPdf(template.id, data);
-    const filename = `contrat_${worker.last_name}_${job.title.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
+    const buffer = await this.documentService.fillDocumentTemplateAsPdf(
+      template.id,
+      data,
+    );
+    const filename = `contrat_${worker.last_name}_${job.title.replaceAll(/[^a-zA-Z0-9]/g, '_')}.pdf`;
     return { buffer, filename };
   }
 
