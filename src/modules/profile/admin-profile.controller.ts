@@ -8,11 +8,13 @@ import {
   Query,
   UseGuards,
   Req,
+  Res,
   UseInterceptors,
   UploadedFiles,
   BadRequestException,
   NotFoundException,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import {
   ApiTags,
@@ -108,6 +110,26 @@ export class AdminProfileController {
   @ApiOperation({ summary: 'Get wallet balance and transactions for a profile (admin only)' })
   async getWallet(@Param('id') id: string) {
     return await this.walletService.getProfileWalletForAdmin(id);
+  }
+
+  @Get(':id/invoices')
+  @ApiOperation({ summary: 'Get invoices for a profile (admin only)' })
+  async getInvoices(@Param('id') id: string) {
+    const invoices = await this.prisma.invoice.findMany({
+      where: { profile_id: id },
+      orderBy: { created_at: 'desc' },
+    });
+    return invoices.map((inv) => ({
+      id: inv.id,
+      profileId: inv.profile_id,
+      paymentRequestId: inv.payment_request_id,
+      amount: inv.amount.toString(),
+      reason: inv.reason,
+      relatedEntityType: inv.related_entity_type ?? null,
+      relatedEntityId: inv.related_entity_id ?? null,
+      status: inv.status,
+      createdAt: inv.created_at.toISOString(),
+    }));
   }
 
   @Get(':id/messages')
@@ -361,6 +383,20 @@ export class AdminProfileController {
   @ApiResponse({ status: 200, description: 'Verification link sent' })
   async sendVerificationLink(@Param('id') id: string) {
     return await this.profileService.requestWhatsAppVerification(id);
+  }
+
+  @Get(':id/agreement/download')
+  @ApiOperation({ summary: 'Download the platform agreement prefilled with profile data (admin only)' })
+  @ApiResponse({ status: 200, description: 'PDF file stream' })
+  @ApiResponse({ status: 404, description: 'No agreement template found or profile not found' })
+  async downloadProfileAgreement(
+    @Param('id') id: string,
+    @Res() res: Response,
+  ) {
+    const { buffer, filename } = await this.profileService.downloadAgreement(id);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(buffer);
   }
 
 }

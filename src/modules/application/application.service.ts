@@ -24,6 +24,7 @@ import {
   Prisma,
 } from '@prisma/client';
 import { generatePaymentReference } from '../../common/utils/payment-reference';
+import { ContractService } from '../contract/contract.service';
 import {
   LATE_CANCELLATION_PENALTY_FCFA,
   LATE_CANCELLATION_SCORE_DEDUCTION,
@@ -76,6 +77,7 @@ export type AdminApplicationDetailResponse = AdminApplicationListItem & {
   employerPhone: string;
   penalties: AdminApplicationPenaltyItem[];
   completionNote: string | null;
+  contractId: string | null;
 };
 
 export type ApplicationListItem = {
@@ -140,6 +142,7 @@ export class ApplicationService {
     private readonly eventEmitter: EventEmitter2,
     @Inject(forwardRef(() => ContactUnlockService))
     private readonly contactUnlock: ContactUnlockService,
+    private readonly contractService: ContractService,
   ) {}
 
   async create(
@@ -388,6 +391,11 @@ export class ApplicationService {
       entityId: String(applicationId),
       timestamp: new Date().toISOString(),
     });
+
+    // Create contract metadata (no PDF generated here — on-demand via GET /contracts/:id/download)
+    this.contractService
+      .create(applicationId)
+      .catch((err) => console.warn(`Failed to create contract metadata for ${applicationId}:`, err));
 
     return updated;
   }
@@ -967,6 +975,9 @@ export class ApplicationService {
         assignment: {
           select: { note: true },
         },
+        contract: {
+          select: { id: true },
+        },
       },
     });
 
@@ -1017,6 +1028,7 @@ export class ApplicationService {
         paidAt: p.paid_at?.toISOString() ?? null,
       })),
       completionNote: (app as any).assignment?.note ?? null,
+      contractId: (app as any).contract?.id ?? null,
     };
   }
 

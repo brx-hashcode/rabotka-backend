@@ -228,6 +228,7 @@ model Profile {
   verified_by             String?            @db.Uuid
   verified_at             DateTime?
   rejection_reason        String?
+  read_and_approved_policies Boolean @default(false)
 
   avatar_url String?
 
@@ -251,6 +252,8 @@ model Profile {
   claims_created       Claim[]  @relation("ClaimCreatedByProfile")
   claim_comments       ClaimComment[] @relation("ClaimCommentProfile")
   events               Event[]  @relation("EventProfiles")
+  profile_platform_document_links ProfilePlatformDocumentLink[]
+  invoices                        Invoice[]
 
   @@index([email], name: "idx_profile_email")
   @@index([phone], name: "idx_profile_phone")
@@ -367,6 +370,7 @@ model Application {
   penalties              Penalty[]
   assignment             Assignment?
   contact_unlock_attempt ContactUnlockAttempt?
+  contract               Contract?
 
   @@unique([job_offer_id, worker_id], name: "idx_application_unique")
   @@index([worker_id], name: "idx_application_worker")
@@ -616,7 +620,8 @@ model PaymentRequest {
   monetbil_tx_id              String?
   contact_unlock_attempt_id   String?              @db.Uuid
 
-  profile Profile @relation(fields: [profile_id], references: [id], onDelete: Cascade)
+  profile  Profile  @relation(fields: [profile_id], references: [id], onDelete: Cascade)
+  invoice  Invoice?
 
   @@index([profile_id], name: "idx_payment_request_profile")
   @@index([token], name: "idx_payment_request_token")
@@ -699,19 +704,44 @@ enum DocumentCategory {
   OTHER
 }
 
+enum DocumentSourceMode {
+  UPLOAD
+  GOOGLE_DOCS
+}
+
 model Document {
-  id         String           @id @default(uuid()) @db.Uuid
-  created_at DateTime         @default(now())
-  updated_at DateTime         @updatedAt
-  title      String
-  category   DocumentCategory
-  file_url   String
-  mime_type  String
-  created_by String?          @db.Uuid
+  id               String             @id @default(uuid()) @db.Uuid
+  created_at       DateTime           @default(now())
+  updated_at       DateTime           @updatedAt
+  title            String
+  category         DocumentCategory
+  file_url         String
+  mime_type        String
+  created_by       String?            @db.Uuid
+  source_mode      DocumentSourceMode @default(UPLOAD)
+  google_docs_id   String?
+  google_docs_url  String?
+  preview_url      String?
+  variables        String[]           @default([])
+
+  profile_platform_document_links ProfilePlatformDocumentLink[]
 
   @@index([category], name: "idx_document_category")
   @@index([created_at], name: "idx_document_created_at")
   @@map("documents")
+}
+
+model ProfilePlatformDocumentLink {
+  id          String   @id @default(uuid()) @db.Uuid
+  created_at  DateTime @default(now())
+  profile_id  String   @db.Uuid
+  document_id String   @db.Uuid
+
+  profile  Profile  @relation(fields: [profile_id], references: [id], onDelete: Cascade)
+  document Document @relation(fields: [document_id], references: [id], onDelete: Cascade)
+
+  @@unique([profile_id, document_id])
+  @@map("profile_platform_document_links")
 }
 
 model AdminNotification {
@@ -728,4 +758,54 @@ model AdminNotification {
   @@index([created_at], name: "idx_admin_notification_created_at")
   @@index([read], name: "idx_admin_notification_read")
   @@map("admin_notifications")
+}
+
+enum ContractStatus {
+  PENDING_DOWNLOAD
+  DOWNLOADED
+}
+
+model Contract {
+  id               String         @id @default(uuid()) @db.Uuid
+  created_at       DateTime       @default(now())
+  updated_at       DateTime       @updatedAt
+  application_id   String         @unique @db.Uuid
+  template_version Int            @default(1)
+  status           ContractStatus @default(PENDING_DOWNLOAD)
+
+  application Application @relation(fields: [application_id], references: [id], onDelete: Cascade)
+
+  @@index([application_id], name: "idx_contract_application")
+  @@map("contracts")
+}
+
+enum InvoiceStatus {
+  PENDING_DOWNLOAD
+  DOWNLOADED
+}
+
+enum InvoiceReason {
+  CONTACT_UNLOCK
+  PENALTY
+  OTHER
+}
+
+model Invoice {
+  id                  String        @id @default(uuid()) @db.Uuid
+  created_at          DateTime      @default(now())
+  updated_at          DateTime      @updatedAt
+  profile_id          String        @db.Uuid
+  payment_request_id  String        @unique @db.Uuid
+  amount              Decimal       @db.Decimal(10, 2)
+  reason              InvoiceReason @default(OTHER)
+  related_entity_type String?
+  related_entity_id   String?       @db.Uuid
+  status              InvoiceStatus @default(PENDING_DOWNLOAD)
+
+  profile         Profile        @relation(fields: [profile_id], references: [id], onDelete: Cascade)
+  payment_request PaymentRequest @relation(fields: [payment_request_id], references: [id], onDelete: Cascade)
+
+  @@index([profile_id], name: "idx_invoice_profile")
+  @@index([payment_request_id], name: "idx_invoice_payment_request")
+  @@map("invoices")
 }

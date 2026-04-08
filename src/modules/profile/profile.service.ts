@@ -22,6 +22,7 @@ import { MailService } from '../mail/mail.service';
 import { accountSuspendedEmail } from '../mail/templates';
 import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
 import { WalletService } from '../wallet/wallet.service';
+import { DocumentService } from '../document/document.service';
 import { CreateProfileDto } from './dto/create-profile.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import {
@@ -68,6 +69,7 @@ export type ProfileApplicationItem = {
   id: string;
   status: string;
   createdAt: Date;
+  contractId: string | null;
   jobOffer: {
     id: string;
     title: string;
@@ -164,6 +166,7 @@ export class ProfileService {
     private readonly mailService: MailService,
     private readonly eventEmitter: EventEmitter2,
     private readonly walletService: WalletService,
+    private readonly documentService: DocumentService,
   ) {}
 
   async findById(id: string): Promise<ProfileMeResponse> {
@@ -382,7 +385,7 @@ export class ProfileService {
         orderBy: { created_at: 'desc' },
         skip,
         take: limit,
-        include: { job_offer: true },
+        include: { job_offer: true, contract: { select: { id: true } } },
       }),
       this.prisma.application.count({ where: { worker_id: profileId } }),
     ]);
@@ -390,6 +393,7 @@ export class ProfileService {
       id: a.id,
       status: a.status,
       createdAt: a.created_at,
+      contractId: (a as any).contract?.id ?? null,
       jobOffer: {
         id: a.job_offer.id,
         title: a.job_offer.title,
@@ -599,7 +603,10 @@ export class ProfileService {
       ),
     ]);
 
-    const kycProfile = await this.prisma.profile.findUnique({ where: { id: profileId }, select: { first_name: true, last_name: true } });
+    const kycProfile = await this.prisma.profile.findUnique({
+      where: { id: profileId },
+      select: { first_name: true, last_name: true },
+    });
 
     this.eventEmitter.emit(AdminNotificationEvent.PROFILE_KYC_VERIFIED, {
       event: AdminNotificationEvent.PROFILE_KYC_VERIFIED,
@@ -664,6 +671,14 @@ export class ProfileService {
           `Failed to send activation message for profile ${profileId}`,
         );
       }
+
+      this.walletService
+        .grantWelcomeCredit(profileId, profile.profile_type)
+        .catch(() => {
+          this.logger.warn(
+            `Failed to grant welcome credit for profile ${profileId}`,
+          );
+        });
     }
 
     if (
@@ -950,6 +965,22 @@ export class ProfileService {
           selfieUploadResult.url,
         ),
       ]);
+
+      // Snapshot-link all current AGREEMENT/POLICY platform documents to this profile
+      const platformDocs = await tx.document.findMany({
+        where: { category: { in: ['AGREEMENT', 'POLICY'] } },
+        select: { id: true },
+      });
+      if (platformDocs.length > 0) {
+        await tx.profilePlatformDocumentLink.createMany({
+          data: platformDocs.map((doc) => ({
+            profile_id: createdProfile.id,
+            document_id: doc.id,
+          })),
+          skipDuplicates: true,
+        });
+      }
+
       return createdProfile;
     });
   }
@@ -970,6 +1001,7 @@ export class ProfileService {
         status: 'PENDING_ACTIVATION',
         verification_status: 'PENDING',
         reliability_score: 100,
+        read_and_approved_policies: true,
       },
       select: {
         id: true,
@@ -1144,5 +1176,44 @@ export class ProfileService {
 
     this.logger.log(`WhatsApp verification token sent to profile ${profileId}`);
     return { success: true };
+  }
+
+  async downloadAgreement(
+    profileId: string,
+  ): Promise<{ buffer: Buffer; filename: string }> {
+    const [template, profile] = await Promise.all([
+      this.prisma.document.findFirst({
+        where: { category: 'AGREEMENT' },
+        orderBy: { created_at: 'desc' },
+      }),
+      this.prisma.profile.findUnique({
+        where: { id: profileId },
+        select: { first_name: true, last_name: true, created_at: true },
+      }),
+    ]);
+
+    if (!template) {
+      throw new NotFoundException('Aucun modèle d\'accord trouvé');
+    }
+    if (!profile) {
+      throw new NotFoundException('Profil introuvable');
+    }
+
+    const data: Record<string, string> = {
+      FIRST_NAME: profile.first_name,
+      LAST_NAME: profile.last_name,
+      FULL_NAME: `${profile.first_name} ${profile.last_name}`,
+      DATE: profile.created_at.toLocaleDateString('fr-FR'),
+    };
+
+    const buffer = await this.documentService.fillDocumentTemplateAsPdf(
+      template.id,
+      data,
+    );
+    const safeName = `${profile.last_name}_accord`.replaceAll(
+      /[^a-zA-Z0-9_-]/g,
+      '_',
+    );
+    return { buffer, filename: `${safeName}.pdf` };
   }
 }

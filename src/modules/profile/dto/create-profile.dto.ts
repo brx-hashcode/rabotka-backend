@@ -5,6 +5,8 @@ import {
   IsEnum,
   IsNotEmpty,
   IsOptional,
+  IsBoolean,
+  Equals,
 } from 'class-validator';
 import { ProfileType, DocumentType } from '@prisma/client';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
@@ -65,4 +67,10 @@ export class CreateProfileDto {
   @IsEnum(DocumentType)
   @IsNotEmpty()
   documentType: DocumentType;
+
+  @ApiProperty({ description: 'User has read and approved platform policies' })
+  @Transform(({ value }) => value === true || value === 'true')
+  @IsBoolean()
+  @Equals(true, { message: 'You must accept the platform policies to register' })
+  readAndApprovedPolicies: boolean;
 }

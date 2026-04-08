@@ -10,6 +10,7 @@ import { WsNotificationsModule } from '../ws-notifications/ws-notifications.modu
 import { ContactUnlockModule } from '../contact-unlock/contact-unlock.module';
 import { BotModule } from '../bot/bot.module';
 import { LogModule } from '../log/log.module';
+import { InvoiceModule } from '../invoice/invoice.module';
 import { PaymentRequestService } from './payment-request.service';
 import { PaymentRequestController } from './payment-request.controller';
 import { PaymentRequestPublicController } from './payment-request-public.controller';
@@ -28,6 +29,7 @@ import { MonetbilService } from './monetbil.service';
     forwardRef(() => ContactUnlockModule),
     forwardRef(() => BotModule),
     LogModule,
+    InvoiceModule,
   ],
   controllers: [PaymentRequestController, PaymentRequestPublicController],
   providers: [PaymentRequestService, MonetbilService],

@@ -9,16 +9,24 @@ import {
   Query,
   UseGuards,
   Req,
+  Res,
   HttpCode,
   HttpStatus,
+  NotFoundException,
 } from '@nestjs/common';
+import type { Response } from 'express';
+import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { DocumentService } from './document.service';
-import { CreateDocumentDto } from './dto/create-document.dto';
 import { UpdateDocumentDto } from './dto/update-document.dto';
 import { ListDocumentsDto } from './dto/list-documents.dto';
+import { CreateDocumentFromUrlDto } from './dto/create-from-url.dto';
+import { CreateDocumentFromUploadDto } from './dto/create-from-upload.dto';
 import { AdminAuthGuard } from '../auth/guards/admin-auth.guard';
 import { LogService } from '../log/log.service';
+import { PrismaService } from '../../common/services/prisma/prisma.service';
+import { DocumentCategory } from '@prisma/client';
 
+@ApiTags('Admin – Documents')
 @Controller('admin/documents')
 @UseGuards(AdminAuthGuard)
 export class DocumentController {
@@ -27,29 +35,80 @@ export class DocumentController {
     private readonly logService: LogService,
   ) {}
 
-  @Post()
-  async create(@Req() req: any, @Body() dto: CreateDocumentDto) {
-    const result = await this.documentService.create({
-      ...dto,
-      created_by: req.user.userId,
+  /** Mode A — import from Google Docs URL */
+  @Post('from-url')
+  @ApiOperation({
+    summary: 'Create document by importing from a public Google Docs URL',
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'Document created from Google Docs',
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Invalid URL or document is private',
+  })
+  async createFromUrl(@Req() req: any, @Body() dto: CreateDocumentFromUrlDto) {
+    const result = await this.documentService.createFromGoogleDocs({
+      title: dto.title,
+      category: dto.category,
+      googleDocsUrl: dto.google_docs_url,
+      createdBy: req.user.userId,
     });
     await this.logService.create({
       action: 'DOCUMENT_CREATED',
       entityType: 'Document',
       entityId: result.id,
       userId: req.user.userId,
-      metadata: { title: dto.title, category: dto.category },
+      metadata: {
+        title: dto.title,
+        category: dto.category,
+        source: 'google_docs',
+      },
+    });
+    return result;
+  }
+
+  /** Mode B — direct .docx upload (file already uploaded to storage via /file/upload) */
+  @Post('from-upload')
+  @ApiOperation({
+    summary: 'Create document from an already-uploaded .docx file URL',
+  })
+  @ApiResponse({ status: 201, description: 'Document created from upload' })
+  async createFromUpload(
+    @Req() req: any,
+    @Body() dto: CreateDocumentFromUploadDto,
+  ) {
+    const result = await this.documentService.createFromUpload({
+      title: dto.title,
+      category: dto.category,
+      fileUrl: dto.file_url,
+      mimeType: dto.mime_type,
+      createdBy: req.user.userId,
+    });
+    await this.logService.create({
+      action: 'DOCUMENT_CREATED',
+      entityType: 'Document',
+      entityId: result.id,
+      userId: req.user.userId,
+      metadata: { title: dto.title, category: dto.category, source: 'upload' },
     });
     return result;
   }
 
   @Get()
+  @ApiOperation({ summary: 'List all documents' })
   list(@Query() dto: ListDocumentsDto) {
     return this.documentService.list(dto);
   }
 
   @Patch(':id')
-  async update(@Param('id') id: string, @Body() dto: UpdateDocumentDto, @Req() req: any) {
+  @ApiOperation({ summary: 'Update document title or category' })
+  async update(
+    @Param('id') id: string,
+    @Body() dto: UpdateDocumentDto,
+    @Req() req: any,
+  ) {
     const result = await this.documentService.update(id, dto);
     await this.logService.create({
       action: 'DOCUMENT_UPDATED',
@@ -63,6 +122,7 @@ export class DocumentController {
 
   @Delete(':id')
   @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Delete a document' })
   async delete(@Param('id') id: string, @Req() req: any) {
     await this.documentService.delete(id);
     await this.logService.create({
@@ -72,5 +132,97 @@ export class DocumentController {
       userId: req.user?.userId,
     });
     return { success: true };
+  }
+
+  @Post(':id/fill/docx')
+  @ApiOperation({ summary: 'Fill template and return as DOCX' })
+  async fillDocx(
+    @Param('id') id: string,
+    @Body() body: { data: Record<string, string> },
+    @Res() res: Response,
+  ) {
+    const buffer = await this.documentService.fillDocumentTemplate(
+      id,
+      body.data ?? {},
+    );
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    );
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="document_${id}_filled.docx"`,
+    );
+    res.send(buffer);
+  }
+
+  @Post(':id/fill/pdf')
+  @ApiOperation({ summary: 'Fill template and return as PDF' })
+  async fillPdf(
+    @Param('id') id: string,
+    @Body() body: { data: Record<string, string> },
+    @Res() res: Response,
+  ) {
+    const buffer = await this.documentService.fillDocumentTemplateAsPdf(
+      id,
+      body.data ?? {},
+    );
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="document_${id}_filled.pdf"`,
+    );
+    res.send(buffer);
+  }
+}
+
+@ApiTags('Public Documents')
+@Controller('public/documents')
+export class PublicDocumentController {
+  constructor(private readonly prisma: PrismaService) {}
+
+  @Get('policy')
+  @ApiOperation({
+    summary: 'Get the active POLICY document (no authentication required)',
+  })
+  @ApiResponse({ status: 200, description: 'Active policy document content' })
+  @ApiResponse({ status: 404, description: 'No active POLICY document found' })
+  async getActivePolicy(@Res() res: Response) {
+    const policy = await this.prisma.document.findFirst({
+      where: { category: DocumentCategory.POLICY },
+      orderBy: { created_at: 'desc' },
+    });
+
+    if (!policy) throw new NotFoundException('No active POLICY document found');
+
+    const isMd = policy.file_url.endsWith('.md');
+    const isPdf =
+      policy.mime_type === 'application/pdf' ||
+      policy.file_url.endsWith('.pdf');
+
+    if (isMd) {
+      const content = await fetch(policy.file_url).then((r) => r.text());
+      return res
+        .setHeader('Content-Type', 'text/markdown; charset=utf-8')
+        .send(content);
+    }
+
+    if (isPdf) {
+      const fileRes = await fetch(policy.file_url);
+      const buffer = Buffer.from(await fileRes.arrayBuffer());
+      return res
+        .setHeader('Content-Type', 'application/pdf')
+        .setHeader('Content-Disposition', `inline; filename="policy.pdf"`)
+        .send(buffer);
+    }
+
+    return res.json({
+      id: policy.id,
+      title: policy.title,
+      category: policy.category,
+      mimeType: policy.mime_type,
+      fileUrl: policy.file_url,
+      createdAt: policy.created_at,
+    });
   }
 }

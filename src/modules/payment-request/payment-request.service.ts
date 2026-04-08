@@ -26,6 +26,8 @@ import { PaymentStatusGateway } from '../ws-notifications/payment-status.gateway
 import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
 import { BotNotificationService } from '../bot/services/bot-notification.service';
 import { ContactUnlockService } from '../contact-unlock/contact-unlock.service';
+import { InvoiceService } from '../invoice/invoice.service';
+import { InvoiceReason } from '@prisma/client';
 import { generatePaymentReference } from '../../common/utils/payment-reference';
 import { ListPaymentRequestsDto } from './dto/list-payment-requests.dto';
 import { SubmitPaymentDto } from './dto/submit-payment.dto';
@@ -79,6 +81,7 @@ export class PaymentRequestService {
     private readonly eventEmitter: EventEmitter2,
     private readonly botNotification: BotNotificationService,
     private readonly contactUnlockService: ContactUnlockService,
+    private readonly invoiceService: InvoiceService,
   ) {}
 
   /**
@@ -384,6 +387,18 @@ export class PaymentRequestService {
           ),
         );
     }
+
+    // 5. Create invoice metadata (no PDF generated here — on-demand via GET /invoices/:id/download)
+    this.invoiceService
+      .create({
+        profileId: request.profile_id,
+        paymentRequestId: request.id,
+        amount,
+        reason: isContactUnlock ? InvoiceReason.CONTACT_UNLOCK : InvoiceReason.PENALTY,
+        relatedEntityType: request.contact_unlock_attempt_id ? 'contact_unlock_attempt' : undefined,
+        relatedEntityId: request.contact_unlock_attempt_id ?? undefined,
+      })
+      .catch((err) => this.logger.warn(`Failed to create invoice for payment request ${request.id}:`, err));
 
     if (request.contact_unlock_attempt_id) {
       try {

@@ -42,6 +42,8 @@ import { SystemConfigModule } from './modules/system-config/system-config.module
 import { QdrantModule } from './modules/qdrant/qdrant.module';
 import { ClaimModule } from './modules/claim/claim.module';
 import { DocumentModule } from './modules/document/document.module';
+import { ContractModule } from './modules/contract/contract.module';
+import { InvoiceModule } from './modules/invoice/invoice.module';
 import { EventModule } from './modules/event/event.module';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { WsNotificationsModule } from './modules/ws-notifications/ws-notifications.module';
@@ -138,6 +140,8 @@ import { HttpExceptionFilter } from './common/filters/http-exception.filter';
     WalletModule,
     ClaimModule,
     DocumentModule,
+    ContractModule,
+    InvoiceModule,
     EventModule,
     DashboardModule,
     PaymentsModule,
