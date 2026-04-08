@@ -1,76 +1,79 @@
-# Build stage
-FROM node:21-alpine AS builder
+# Both stages use Debian slim — single base image, no Alpine/apk DNS issues
+FROM node:22-slim AS builder
 
-# Set working directory
 WORKDIR /app
 
-# Update Alpine packages and install build dependencies and pnpm
-RUN apk update && apk upgrade && \
-    apk add --no-cache g++ make python3 && \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        python3 make g++ && \
+    rm -rf /var/lib/apt/lists/* && \
     npm install -g pnpm
 
-# Copy package files
 COPY package.json pnpm-lock.yaml ./
 
-# Install dependencies with cache mount for faster builds
+# --ignore-scripts skips postinstall (prisma generate) which crashes due to
+# a transitive ESM/CJS conflict in @prisma/dev bundled with prisma@7.x
 RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
-    pnpm install --frozen-lockfile
+    pnpm install --frozen-lockfile --ignore-scripts
 
-# Copy source code and config files
+# Rebuild native addons skipped by --ignore-scripts
+RUN pnpm rebuild sharp better-sqlite3
+
+# Copy prisma schema before generating client
+COPY prisma ./prisma/
+
+# Generate Prisma client explicitly
+RUN pnpm exec prisma generate
+
 COPY . .
 
-# Build application
 RUN pnpm run build
 
-# Production stage
-FROM node:21-alpine AS production
+# ─── Production ───────────────────────────────────────────────────────────────
+FROM node:22-slim AS production
 
-# Set working directory
 WORKDIR /app
 
-# Update Alpine packages and install production dependencies and tini for proper signal handling
-RUN apk update && apk upgrade && \
-    apk add --no-cache curl postgresql-client redis tini && \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl \
+        tini \
+        postgresql-client \
+        libreoffice-writer \
+        fonts-liberation \
+        fonts-dejavu-core \
+        fontconfig && \
+    fc-cache -f && \
+    rm -rf /var/lib/apt/lists/* && \
     npm install -g pnpm
 
-# Create non-root user for security
-RUN addgroup -S nestjs && \
-    adduser -S nestjs -G nestjs && \
+# LibreOffice needs a writable home when running as non-root
+ENV HOME=/tmp \
+    SAL_USE_VCLPLUGIN=svp \
+    DISPLAY=""
+
+RUN groupadd -r nestjs && \
+    useradd -r -g nestjs nestjs && \
     mkdir -p /home/nestjs/.local/share/pnpm
 
-# Copy package files
 COPY package.json pnpm-lock.yaml tsconfig.json nest-cli.json ./
-
-# Copy node_modules from builder
 COPY --from=builder /app/node_modules ./node_modules
-
-# Copy built application from builder stage
 COPY --from=builder /app/dist ./dist
-
-# Copy public assets (e.g. favicon for API docs)
 COPY --from=builder /app/public ./public
 
-# Copy entrypoint script, fix CRLF line endings (Windows), and set permissions
 COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh && chmod +x /usr/local/bin/docker-entrypoint.sh
+RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh && \
+    chmod +x /usr/local/bin/docker-entrypoint.sh
 
-# Set environment variables
 ENV NODE_ENV=production \
     PORT=3000 \
     NODE_OPTIONS="--max-old-space-size=2048" \
     PNPM_HOME="/home/nestjs/.local/share/pnpm"
 
-# Change ownership to non-root user
 RUN chown -R nestjs:nestjs /app /home/nestjs
 
-# Switch to non-root user
 USER nestjs
 
-# Expose port
 EXPOSE 3000
 
-# Use tini as entrypoint for proper signal handling
-ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/docker-entrypoint.sh"]
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/docker-entrypoint.sh"]
 
-# Start the application
 CMD ["node", "dist/src/main"]
