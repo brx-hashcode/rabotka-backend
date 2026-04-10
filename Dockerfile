@@ -54,10 +54,11 @@ RUN groupadd -r nestjs && \
     useradd -r -g nestjs nestjs && \
     mkdir -p /home/nestjs/.local/share/pnpm
 
-COPY package.json pnpm-lock.yaml tsconfig.json nest-cli.json ./
+COPY package.json pnpm-lock.yaml tsconfig.json nest-cli.json prisma.config.ts ./
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/public ./public
+COPY --from=builder /app/prisma ./prisma
 
 COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh && \

@@ -33,6 +33,11 @@ import {
 } from '@prisma/client';
 import { randomBytes } from 'node:crypto';
 
+const PROFILE_TYPE_LABELS: Record<ProfileType, string> = {
+  [ProfileType.WORKER]: 'Travailleur',
+  [ProfileType.EMPLOYER]: 'Employeur',
+};
+
 export type ProfileMeResponse = {
   id: string;
   firstName: string;
@@ -1188,21 +1193,29 @@ export class ProfileService {
       }),
       this.prisma.profile.findUnique({
         where: { id: profileId },
-        select: { first_name: true, last_name: true, created_at: true },
+        select: {
+          first_name: true,
+          last_name: true,
+          created_at: true,
+          email: true,
+          profile_type: true,
+        },
       }),
     ]);
 
     if (!template) {
-      throw new NotFoundException('Aucun modèle d\'accord trouvé');
+      throw new NotFoundException("Aucun modèle d'accord trouvé");
     }
     if (!profile) {
       throw new NotFoundException('Profil introuvable');
     }
 
     const data: Record<string, string> = {
-      FIRST_NAME: profile.first_name,
+      EMAIL: profile.email,
       LAST_NAME: profile.last_name,
+      FIRST_NAME: profile.first_name,
       FULL_NAME: `${profile.first_name} ${profile.last_name}`,
+      PROFILE_TYPE: this.getProfileTypeLabel(profile.profile_type),
       DATE: profile.created_at.toLocaleDateString('fr-FR'),
     };
 
@@ -1215,5 +1228,9 @@ export class ProfileService {
       '_',
     );
     return { buffer, filename: `${safeName}.pdf` };
+  }
+
+  private getProfileTypeLabel(profileType: ProfileType): string {
+    return PROFILE_TYPE_LABELS[profileType] ?? (profileType as string);
   }
 }

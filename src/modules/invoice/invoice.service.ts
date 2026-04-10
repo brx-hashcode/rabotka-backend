@@ -5,7 +5,23 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { DocumentService } from '../document/document.service';
-import { DocumentCategory, InvoiceReason } from '@prisma/client';
+import {
+  DocumentCategory,
+  InvoiceReason,
+  PaymentMethod,
+  ProfileType,
+} from '@prisma/client';
+
+const PROFILE_TYPE_LABELS: Record<ProfileType, string> = {
+  [ProfileType.WORKER]: 'Travailleur',
+  [ProfileType.EMPLOYER]: 'Employeur',
+};
+
+const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
+  [PaymentMethod.MOBILE_MONEY]: 'Mobile Money',
+  [PaymentMethod.CARD]: 'Carte bancaire',
+  [PaymentMethod.OTHER]: 'Portefeuille',
+};
 
 export type InvoiceItem = {
   id: string;
@@ -25,6 +41,12 @@ export class InvoiceService {
     private readonly prisma: PrismaService,
     private readonly documentService: DocumentService,
   ) {}
+
+  private invoiceRef(id: string, createdAt: Date): string {
+    const year = createdAt.getFullYear();
+    const short = id.replace(/-/g, '').slice(0, 8).toUpperCase();
+    return `RBT-${year}-${short}`;
+  }
 
   async create(params: {
     profileId: string;
@@ -66,7 +88,7 @@ export class InvoiceService {
   ): Promise<{ buffer: Buffer; filename: string }> {
     const invoice = await this.prisma.invoice.findUnique({
       where: { id: invoiceId },
-      include: { profile: true },
+      include: { profile: true, payment_request: true },
     });
 
     if (!invoice) throw new NotFoundException('Invoice not found');
@@ -86,18 +108,23 @@ export class InvoiceService {
       OTHER: 'Autre',
     };
 
+    const paymentMethod = await this.resolvePaymentMethod(
+      invoice.payment_request?.payment_reference,
+    );
+
     const data: Record<string, string> = {
-      INVOICE_ID: invoice.id,
+      INVOICE_ID: this.invoiceRef(invoice.id, invoice.created_at),
       INVOICE_DATE: new Date(invoice.created_at).toLocaleDateString('fr-FR'),
       FIRST_NAME: invoice.profile.first_name,
       LAST_NAME: invoice.profile.last_name,
+      PROFILE_TYPE: invoice.profile.profile_type,
       EMAIL: invoice.profile.email,
       PHONE: invoice.profile.phone,
       AMOUNT: invoice.amount.toString(),
       REASON: reasonLabel[invoice.reason] ?? invoice.reason,
-      RELATED_ENTITY: invoice.related_entity_type
-        ? `${invoice.related_entity_type} #${invoice.related_entity_id}`
-        : 'N/A',
+      PAYMENT_REF: invoice.payment_request?.payment_reference ?? '',
+      PAYMENT_METHOD: paymentMethod,
+      RELATED_ENTITY: invoice.related_entity_id ?? '',
       GENERATED_DATE: new Date().toLocaleDateString('fr-FR'),
     };
 
@@ -120,7 +147,7 @@ export class InvoiceService {
   ): Promise<{ buffer: Buffer; filename: string }> {
     const invoice = await this.prisma.invoice.findUnique({
       where: { id: invoiceId },
-      include: { profile: true },
+      include: { profile: true, payment_request: true },
     });
 
     if (!invoice) throw new NotFoundException('Invoice not found');
@@ -137,18 +164,23 @@ export class InvoiceService {
       OTHER: 'Autre',
     };
 
+    const paymentMethod = await this.resolvePaymentMethod(
+      invoice.payment_request?.payment_reference,
+    );
+
     const data: Record<string, string> = {
-      INVOICE_ID: invoice.id,
+      INVOICE_ID: this.invoiceRef(invoice.id, invoice.created_at),
       INVOICE_DATE: new Date(invoice.created_at).toLocaleDateString('fr-FR'),
       FIRST_NAME: invoice.profile.first_name,
       LAST_NAME: invoice.profile.last_name,
+      PROFILE_TYPE: this.getProfileTypeLabel(invoice.profile.profile_type),
       EMAIL: invoice.profile.email,
       PHONE: invoice.profile.phone,
       AMOUNT: invoice.amount.toString(),
       REASON: reasonLabel[invoice.reason] ?? invoice.reason,
-      RELATED_ENTITY: invoice.related_entity_type
-        ? `${invoice.related_entity_type} #${invoice.related_entity_id}`
-        : 'N/A',
+      PAYMENT_REF: invoice.payment_request?.payment_reference ?? '',
+      PAYMENT_METHOD: paymentMethod,
+      RELATED_ENTITY: invoice.related_entity_id ?? '',
       GENERATED_DATE: new Date().toLocaleDateString('fr-FR'),
     };
 
@@ -172,5 +204,23 @@ export class InvoiceService {
       status: inv.status,
       createdAt: inv.created_at.toISOString(),
     };
+  }
+
+  private getProfileTypeLabel(profileType: ProfileType): string {
+    return PROFILE_TYPE_LABELS[profileType] ?? (profileType as string);
+  }
+
+  private async resolvePaymentMethod(
+    paymentReference: string | null | undefined,
+  ): Promise<string> {
+    if (!paymentReference) return '';
+    const payment = await this.prisma.payment.findUnique({
+      where: { transaction_id: paymentReference },
+      select: { payment_method: true },
+    });
+    if (!payment) return '';
+    return (
+      PAYMENT_METHOD_LABELS[payment.payment_method] ?? payment.payment_method
+    );
   }
 }

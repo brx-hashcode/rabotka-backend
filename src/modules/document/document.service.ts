@@ -340,32 +340,28 @@ export class DocumentService {
   ): Promise<Buffer> {
     const docxBuffer = await this.fillDocumentTemplate(id, data);
 
-    // Try LibreOffice first — preserves images, fonts, headers/footers perfectly
     const libreOfficePdf = await this.convertWithLibreOffice(docxBuffer);
     if (libreOfficePdf) return libreOfficePdf;
 
-    // Fallback: mammoth → HTML → puppeteer PDF
     return this.convertWithPuppeteer(docxBuffer);
   }
 
-  /** Convert DOCX buffer to PDF using LibreOffice (soffice). Returns null if LibreOffice is not installed. */
   private async convertWithLibreOffice(
     docxBuffer: Buffer,
   ): Promise<Buffer | null> {
-    const { execFile } = await import('child_process');
-    const { promisify } = await import('util');
-    const { tmpdir } = await import('os');
-    const { join } = await import('path');
-    const { writeFile, readFile, unlink } = await import('fs/promises');
-    const execFileAsync = promisify(execFile);
+    const childProcess = await import('node:child_process');
+    const util = await import('node:util');
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const fs = await import('node:fs/promises');
+    const execFileAsync = util.promisify(childProcess.execFile);
 
-    // Find soffice binary
     const candidates = [
       'soffice',
       '/usr/bin/soffice',
       '/usr/local/bin/soffice',
-      'C:\\Program Files\\LibreOffice\\program\\soffice.exe',
-      'C:\\Program Files (x86)\\LibreOffice\\program\\soffice.exe',
+      String.raw`C:\Program Files\LibreOffice\program\soffice.exe`,
+      String.raw`C:\Program Files (x86)\LibreOffice\program\soffice.exe`,
     ];
 
     let soffice: string | null = null;
@@ -381,12 +377,12 @@ export class DocumentService {
 
     if (!soffice) return null;
 
-    const tmp = tmpdir();
-    const inputPath = join(tmp, `rabotka_${Date.now()}.docx`);
+    const tmp = os.tmpdir();
+    const inputPath = path.join(tmp, `rabotka_${Date.now()}.docx`);
     const outputPath = inputPath.replace('.docx', '.pdf');
 
     try {
-      await writeFile(inputPath, docxBuffer);
+      await fs.writeFile(inputPath, docxBuffer);
       await execFileAsync(soffice, [
         '--headless',
         '--convert-to',
@@ -395,15 +391,14 @@ export class DocumentService {
         tmp,
         inputPath,
       ]);
-      const pdfBuffer = await readFile(outputPath);
+      const pdfBuffer = await fs.readFile(outputPath);
       return pdfBuffer;
     } finally {
-      await unlink(inputPath).catch(() => {});
-      await unlink(outputPath).catch(() => {});
+      await fs.unlink(inputPath).catch(() => {});
+      await fs.unlink(outputPath).catch(() => {});
     }
   }
 
-  /** Convert DOCX buffer to PDF using mammoth → HTML → puppeteer. */
   private async convertWithPuppeteer(docxBuffer: Buffer): Promise<Buffer> {
     try {
       const mammoth = await import('mammoth');
