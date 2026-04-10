@@ -25,11 +25,11 @@ export function csrfVisitorMiddleware(
   const visitorId = randomUUID();
   req.csrfSessionId = visitorId;
 
-  const isProduction = process.env.NODE_ENV === 'production';
+  const secureCookies = process.env.SECURE_COOKIES === 'true';
   res.cookie(CSRF_VISITOR_COOKIE, visitorId, {
-    sameSite: 'strict',
+    sameSite: 'lax',
     path: '/',
-    secure: isProduction,
+    secure: secureCookies,
     httpOnly: true,
     maxAge: 60 * 60 * 24 * 365,
   });

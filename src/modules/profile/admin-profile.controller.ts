@@ -107,7 +107,9 @@ export class AdminProfileController {
   }
 
   @Get(':id/wallet')
-  @ApiOperation({ summary: 'Get wallet balance and transactions for a profile (admin only)' })
+  @ApiOperation({
+    summary: 'Get wallet balance and transactions for a profile (admin only)',
+  })
   async getWallet(@Param('id') id: string) {
     return await this.walletService.getProfileWalletForAdmin(id);
   }
@@ -161,9 +163,11 @@ export class AdminProfileController {
 
   @Post(':id/messages')
   @ApiOperation({ summary: 'Send a message to a profile (admin only)' })
+  @UseInterceptors(FilesInterceptor('attachments', 5))
   async sendMessage(
     @Param('id') id: string,
     @Body() body: { channel: 'WHATSAPP' | 'EMAIL'; message: string },
+    @UploadedFiles() files: Express.Multer.File[] | undefined,
     @Req() req: any,
   ) {
     const adminUserId: string | undefined = req.user?.userId;
@@ -223,6 +227,21 @@ export class AdminProfileController {
       if (!profile.email) {
         throw new BadRequestException("Ce profil n'a pas d'adresse email");
       }
+
+      const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
+      const oversized = files?.find((f) => f.size > MAX_FILE_SIZE);
+      if (oversized) {
+        throw new BadRequestException(
+          `File "${oversized.originalname}" exceeds the 10 MB limit`,
+        );
+      }
+
+      const attachments = files?.map((f) => ({
+        filename: f.originalname,
+        content: f.buffer,
+        contentType: f.mimetype,
+      })) ?? [];
+
       const messageHtml = body.message
         .trim()
         .toString()
@@ -231,6 +250,7 @@ export class AdminProfileController {
         to: profile.email,
         subject: 'Message de Rabotka',
         html: `<p>${messageHtml}</p><br/><p>${adminFullName}<br/>L'équipe Rabotka</p>`,
+        ...(attachments.length > 0 && { attachments }),
       });
       // Save outbound email message to history
       await this.prisma.message.create({
@@ -386,17 +406,23 @@ export class AdminProfileController {
   }
 
   @Get(':id/agreement/download')
-  @ApiOperation({ summary: 'Download the platform agreement prefilled with profile data (admin only)' })
+  @ApiOperation({
+    summary:
+      'Download the platform agreement prefilled with profile data (admin only)',
+  })
   @ApiResponse({ status: 200, description: 'PDF file stream' })
-  @ApiResponse({ status: 404, description: 'No agreement template found or profile not found' })
+  @ApiResponse({
+    status: 404,
+    description: 'No agreement template found or profile not found',
+  })
   async downloadProfileAgreement(
     @Param('id') id: string,
     @Res() res: Response,
   ) {
-    const { buffer, filename } = await this.profileService.downloadAgreement(id);
+    const { buffer, filename } =
+      await this.profileService.downloadAgreement(id);
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.send(buffer);
   }
-
 }

@@ -6,6 +6,7 @@ import { seedClaims } from './seed/claims.seed';
 import { seedProfiles } from './seed/profile.seed';
 import { seedJobOffersAndApplications } from './seed/job-offer.seed';
 import { seedPenalties } from './seed/penalty.seed';
+import { seedInvoices } from './seed/invoice.seed';
 
 config({ path: '.env.local' });
 config({ path: '.env' });
@@ -23,6 +24,7 @@ async function run() {
     await seedJobOffersAndApplications(prisma);
     await seedPenalties(prisma);
     await seedClaims(prisma);
+    await seedInvoices(prisma);
   } catch (e) {
     console.error(e);
     process.exit(1);

@@ -1,11 +1,4 @@
-import {
-  Controller,
-  Get,
-  Param,
-  Req,
-  Res,
-  UseGuards,
-} from '@nestjs/common';
+import { Controller, Get, Param, Req, Res, UseGuards } from '@nestjs/common';
 import type { Response } from 'express';
 import {
   ApiTags,
@@ -66,11 +59,9 @@ export class AdminInvoiceController {
   @ApiOperation({ summary: 'Download an invoice PDF (admin)' })
   @ApiResponse({ status: 200, description: 'PDF file stream' })
   @ApiResponse({ status: 404, description: 'Invoice or template not found' })
-  async download(
-    @Param('invoiceId') invoiceId: string,
-    @Res() res: Response,
-  ) {
-    const { buffer, filename } = await this.invoiceService.downloadAsAdmin(invoiceId);
+  async download(@Param('invoiceId') invoiceId: string, @Res() res: Response) {
+    const { buffer, filename } =
+      await this.invoiceService.downloadAsAdmin(invoiceId);
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.send(buffer);

@@ -33,6 +33,7 @@ export type AdminProfileWallet = {
 
 export type AdminPaymentItem = {
   id: string;
+  profileId: string;
   type: string;
   amount: number;
   paymentMethod: string;
@@ -52,9 +53,6 @@ export class WalletService {
     private readonly systemConfig: SystemConfigService,
   ) {}
 
-  /**
-   * Returns the system wallet, creating it if it does not exist.
-   */
   async getOrCreateSystemWallet(): Promise<{
     id: string;
     balance: number;
@@ -79,8 +77,6 @@ export class WalletService {
       balance: Number(wallet.balance),
     };
   }
-
-  // ── Per-profile wallet ──────────────────────────────────────────────────────
 
   async getOrCreateProfileWallet(
     profileId: string,
@@ -183,10 +179,6 @@ export class WalletService {
     });
   }
 
-  /**
-   * Atomically debits the profile wallet and credits the system wallet.
-   * Used for contact unlock payments made with wallet credit.
-   */
   async debitProfileAndCreditSystem(
     profileId: string,
     amount: number,
@@ -204,7 +196,6 @@ export class WalletService {
     const systemWallet = await this.getOrCreateSystemWallet();
 
     await this.prisma.$transaction(async (tx) => {
-      // Debit profile
       await tx.walletTransaction.create({
         data: {
           wallet_id: profileWallet.id,
@@ -218,7 +209,6 @@ export class WalletService {
         where: { id: profileWallet.id },
         data: { balance: { decrement: amount } },
       });
-      // Credit system
       await tx.walletTransaction.create({
         data: {
           wallet_id: systemWallet.id,
@@ -235,10 +225,6 @@ export class WalletService {
     });
   }
 
-  /**
-   * Grants welcome credit to a profile after WhatsApp activation.
-   * Idempotent: does nothing if whatsapp_activation_bonus_granted is already true.
-   */
   async grantWelcomeCredit(
     profileId: string,
     profileType: ProfileType,
@@ -281,10 +267,6 @@ export class WalletService {
     return amount;
   }
 
-  /**
-   * Pays a penalty from the profile wallet.
-   * Debits the profile wallet and credits the system wallet atomically.
-   */
   async payPenaltyFromWallet(
     penaltyId: string,
     profileId: string,
@@ -292,7 +274,7 @@ export class WalletService {
     const penalty = await this.prisma.penalty.findUnique({
       where: { id: penaltyId },
     });
-    if (!penalty || penalty.worker_id !== profileId) {
+    if (penalty?.worker_id !== profileId) {
       throw new NotFoundException('Pénalité introuvable');
     }
     if (penalty.paid_at) {
@@ -310,7 +292,6 @@ export class WalletService {
     const reference = generatePaymentReference();
 
     await this.prisma.$transaction(async (tx) => {
-      // Debit profile wallet
       await tx.walletTransaction.create({
         data: {
           wallet_id: profileWallet.id,
@@ -324,7 +305,6 @@ export class WalletService {
         where: { id: profileWallet.id },
         data: { balance: { decrement: penalty.amount } },
       });
-      // Credit system wallet
       await tx.walletTransaction.create({
         data: {
           wallet_id: systemWallet.id,
@@ -359,12 +339,6 @@ export class WalletService {
     return { reference };
   }
 
-  // ── System wallet ────────────────────────────────────────────────────────────
-
-  /**
-   * Records a penalty payment: creates Payment, credits system wallet, and marks penalty as paid.
-   * Returns the generated RBK reference. Caller must ensure the penalty exists, belongs to the profile, and is unpaid.
-   */
   async recordPenaltyPayment(
     penaltyId: string,
     profileId: string,
@@ -373,7 +347,7 @@ export class WalletService {
     const penalty = await this.prisma.penalty.findUnique({
       where: { id: penaltyId },
     });
-    if (!penalty || penalty.worker_id !== profileId) {
+    if (penalty?.worker_id !== profileId) {
       throw new NotFoundException('Pénalité introuvable');
     }
     if (penalty.paid_at) {
@@ -491,9 +465,6 @@ export class WalletService {
     ]);
   }
 
-  /**
-   * Returns system revenue and payment stats for admin reporting.
-   */
   async getSystemRevenue(): Promise<{
     totalRevenue: number;
     balance: number;
@@ -523,7 +494,6 @@ export class WalletService {
         where: { status: PaymentStatus.COMPLETED, type: PaymentType.PENALTY },
         _sum: { amount: true },
       }),
-      // Mobile money contact unlock payments (Payment record)
       this.prisma.payment.aggregate({
         where: {
           status: PaymentStatus.COMPLETED,
@@ -531,7 +501,6 @@ export class WalletService {
         },
         _sum: { amount: true },
       }),
-      // Wallet-credit contact unlock payments (no Payment record — only WalletTransaction)
       this.prisma.walletTransaction.aggregate({
         where: {
           wallet_id: systemWallet.id,
@@ -660,7 +629,7 @@ export class WalletService {
     const where: Record<string, unknown> = {};
 
     if (params.q) {
-      where.OR = [
+      const orClauses: unknown[] = [
         { transaction_id: { contains: params.q, mode: 'insensitive' } },
         { description: { contains: params.q, mode: 'insensitive' } },
         {
@@ -673,6 +642,42 @@ export class WalletService {
           },
         },
       ];
+
+      // Support searching by invoice reference (RBT-YYYY-XXXXXXXX)
+      const invoiceRefMatch = params.q
+        .trim()
+        .toUpperCase()
+        .match(/^RBT-\d{4}-([0-9A-F]{8})$/);
+      if (invoiceRefMatch) {
+        const shortHex = invoiceRefMatch[1].toLowerCase();
+        const matchingInvoices = await this.prisma.$queryRaw<
+          { id: string; payment_request_id: string }[]
+        >`SELECT id, payment_request_id FROM invoices WHERE id::text LIKE ${shortHex + '%'}`;
+        const filtered = matchingInvoices.filter(
+          (inv) =>
+            inv.id.replaceAll('-', '').slice(0, 8).toLowerCase() === shortHex,
+        );
+        if (filtered.length > 0) {
+          const paymentRequestIds = filtered.map(
+            (inv) => inv.payment_request_id,
+          );
+          const paymentRequests = await this.prisma.paymentRequest.findMany({
+            where: { id: { in: paymentRequestIds } },
+            select: { profile_id: true, amount: true },
+          });
+          for (const pr of paymentRequests) {
+            orClauses.push({
+              AND: [
+                { profile_id: pr.profile_id },
+                { amount: pr.amount },
+                { status: 'COMPLETED' },
+              ],
+            });
+          }
+        }
+      }
+
+      where.OR = orClauses;
     }
     if (params.type?.length) {
       where.type = { in: params.type as PaymentType[] };
@@ -694,6 +699,7 @@ export class WalletService {
         where,
         select: {
           id: true,
+          profile_id: true,
           type: true,
           amount: true,
           payment_method: true,
@@ -716,6 +722,7 @@ export class WalletService {
     return {
       data: rows.map((r) => ({
         id: r.id,
+        profileId: r.profile_id,
         type: r.type,
         amount: Number(r.amount),
         paymentMethod: r.payment_method,

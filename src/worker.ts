@@ -1,6 +1,10 @@
 import { createConnection } from 'node:net';
 import { config as loadEnv } from 'dotenv';
-import type { INestApplicationContext, LoggerService } from '@nestjs/common';
+import type {
+  INestApplicationContext,
+  LoggerService,
+  LogLevel,
+} from '@nestjs/common';
 import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { WorkerModule } from './worker.module';
@@ -22,6 +26,7 @@ loadEnv({ path: '.env.local' });
 loadEnv();
 
 class WorkerLogger implements LoggerService {
+  /** Include Nest/module init contexts so startup is not silent (looks "stuck" otherwise). */
   private readonly allowedContexts = [
     'Worker',
     'QueueService',
@@ -29,6 +34,13 @@ class WorkerLogger implements LoggerService {
     'RedisService',
     'ExceptionHandler',
     'NestFactory',
+    'InstanceLoader',
+    'PrismaService',
+    'SystemConfigService',
+    'WalletService',
+    'WhatsAppService',
+    'RedisModule',
+    'BullModule',
     'ReminderProcessor',
     'PaymentProcessor',
   ];
@@ -64,12 +76,17 @@ class WorkerLogger implements LoggerService {
   }
 }
 
-function checkRedis(host: string, port: number): Promise<void> {
+function checkTcp(
+  host: string,
+  port: number,
+  timeoutMs: number,
+): Promise<void> {
   return new Promise((resolve, reject) => {
-    const socket = createConnection({ host, port, timeout: 3000 }, () => {
+    const socket = createConnection({ host, port }, () => {
       socket.destroy();
       resolve();
     });
+    socket.setTimeout(timeoutMs);
     socket.on('error', (err) => reject(err));
     socket.on('timeout', () => {
       socket.destroy();
@@ -78,8 +95,57 @@ function checkRedis(host: string, port: number): Promise<void> {
   });
 }
 
-async function bootstrap(): Promise<void> {
-  const logger = new Logger('Worker');
+function checkRedis(host: string, port: number): Promise<void> {
+  return checkTcp(host, port, 3000);
+}
+
+function sanitizeDatabaseUrl(raw: string): string {
+  let s = raw.trim();
+  if (
+    (s.startsWith('"') && s.endsWith('"')) ||
+    (s.startsWith("'") && s.endsWith("'"))
+  ) {
+    s = s.slice(1, -1);
+  }
+  return s;
+}
+
+/**
+ * Host/port for TCP preflight. Uses URL first, then `...@host:port/` (handles tricky passwords).
+ */
+function parseDatabaseHostPort(): { host: string; port: number } | null {
+  const raw = sanitizeDatabaseUrl(
+    process.env.DATABASE_URL?.trim() ??
+      'postgresql://postgres:postgres@localhost:5433/rabotka',
+  );
+  try {
+    const normalized = raw.replace(/^postgres(ql)?:/i, 'http:');
+    const u = new URL(normalized);
+    const host = u.hostname;
+    const port = u.port ? Number(u.port) : 5432;
+    if (host) return { host, port };
+  } catch {
+    // fall through
+  }
+  const withoutQuery = raw.split('?')[0] ?? raw;
+  const atIdx = withoutQuery.lastIndexOf('@');
+  const hostPart =
+    atIdx >= 0
+      ? withoutQuery.slice(atIdx + 1)
+      : withoutQuery.replace(/^postgres(ql)?:\/\//i, '');
+  const beforePath = hostPart.split('/')[0] ?? hostPart;
+  const colon = beforePath.lastIndexOf(':');
+  if (colon <= 0) {
+    return beforePath ? { host: beforePath, port: 5432 } : null;
+  }
+  const host = beforePath.slice(0, colon);
+  const port = Number(beforePath.slice(colon + 1));
+  return host && Number.isFinite(port) && port > 0
+    ? { host, port }
+    : null;
+}
+
+async function ensureRedisAndPostgresReachable(logger: Logger): Promise<void> {
   const redisHost = process.env.REDIS_HOST ?? 'localhost';
   const redisPort = Number(process.env.REDIS_PORT ?? 6379);
 
@@ -94,6 +160,33 @@ async function bootstrap(): Promise<void> {
     process.exit(1);
   }
 
+  const dbTarget = parseDatabaseHostPort();
+  if (!dbTarget) {
+    logger.warn(
+      'Could not parse DATABASE_URL for a TCP preflight check; startup may hang if Postgres is down.',
+    );
+    return;
+  }
+
+  logger.log(
+    `Checking PostgreSQL reachability at ${dbTarget.host}:${dbTarget.port}...`,
+  );
+  try {
+    await checkTcp(dbTarget.host, dbTarget.port, 5000);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    logger.error(
+      `Cannot reach PostgreSQL at ${dbTarget.host}:${dbTarget.port}. ${message}. ` +
+        'Start Postgres (e.g. docker compose up -d postgres) and ensure DATABASE_URL matches.',
+    );
+    process.exit(1);
+  }
+}
+
+async function bootstrap(): Promise<void> {
+  const logger = new Logger('Worker');
+  await ensureRedisAndPostgresReachable(logger);
+
   process.env.RUN_QUEUE_WORKER = 'true';
 
   const reminderEnabled = process.env.RUN_REMINDER_WORKER !== 'false';
@@ -103,10 +196,15 @@ async function bootstrap(): Promise<void> {
       : '🚀 Starting queue worker process (email only, RUN_REMINDER_WORKER=false)...',
   );
 
+  const nestLogger: LogLevel[] | LoggerService =
+    process.env.WORKER_QUIET_LOGS === 'true'
+      ? new WorkerLogger()
+      : (['log', 'warn', 'error', 'debug', 'verbose'] as LogLevel[]);
+
   let app: INestApplicationContext;
   try {
     app = await NestFactory.createApplicationContext(WorkerModule.forRoot(), {
-      logger: new WorkerLogger(),
+      logger: nestLogger,
     });
     logger.log('Nest application context created');
   } catch (err: unknown) {

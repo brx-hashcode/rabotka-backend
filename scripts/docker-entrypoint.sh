@@ -9,13 +9,13 @@ until pg_isready -h "${DB_HOST:-postgres}" -p "${DB_PORT:-5432}" -U "${DB_USERNA
 done
 echo "Database is ready!"
 
-# Wait for Redis to be ready
-echo "Waiting for Redis to be ready..."
-until redis-cli -h "${REDIS_HOST:-redis}" -p "${REDIS_PORT:-6379}" ping > /dev/null 2>&1; do
-  echo "Redis is unavailable - sleeping"
-  sleep 1
-done
+# Redis is guaranteed healthy by Docker depends_on healthcheck
 echo "Redis is ready!"
+
+# Deploy pending migrations
+echo "Running Prisma migrations..."
+pnpm exec prisma migrate deploy
+echo "Migrations deployed!"
 
 # Execute the command
 exec "$@"

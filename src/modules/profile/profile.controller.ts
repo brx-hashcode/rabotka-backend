@@ -502,7 +502,9 @@ export class ProfileController {
 
   @Get('agreement/download')
   @UseGuards(ProfileAuthGuard)
-  @ApiOperation({ summary: 'Download the platform agreement prefilled with profile data' })
+  @ApiOperation({
+    summary: 'Download the platform agreement prefilled with profile data',
+  })
   @ApiCookieAuth()
   @ApiBearerAuth()
   @ApiResponse({ status: 200, description: 'PDF file stream' })

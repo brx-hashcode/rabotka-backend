@@ -14,6 +14,8 @@ import { REDIS_CONNECTION } from './common/services/redis/redis.constants';
 import type Redis from 'ioredis';
 import { PaymentProcessor } from './modules/payments/payment.processor';
 import { getMailerTransportConfig } from './modules/mail/mailer-transport.config';
+import { WalletService } from './modules/wallet/wallet.service';
+import { SystemConfigService } from './modules/system-config/system-config.service';
 
 /**
  * Worker module for the queue worker process.
@@ -57,6 +59,12 @@ export class WorkerModule {
             provide: TwilioService,
             useFactory: (config: ConfigService) => new TwilioService(config),
             inject: [ConfigService],
+          },
+          {
+            provide: WalletService,
+            useFactory: (prisma: PrismaService) =>
+              new WalletService(prisma, null as unknown as SystemConfigService),
+            inject: [PrismaService],
           },
           WhatsAppService,
           {
