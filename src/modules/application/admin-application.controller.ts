@@ -6,13 +6,17 @@ import {
   ApiBearerAuth,
   ApiCookieAuth,
 } from '@nestjs/swagger';
+import { UserRole } from '@prisma/client';
 import { ApplicationService } from './application.service';
 import { AdminAuthGuard } from '../auth/guards/admin-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 import { AdminListApplicationsDto } from './dto/admin-list-applications.dto';
 
 @ApiTags('Admin – Applications')
 @Controller('admin/applications')
-@UseGuards(AdminAuthGuard)
+@UseGuards(AdminAuthGuard, RolesGuard)
+@Roles(UserRole.MODERATOR)
 @ApiBearerAuth()
 @ApiCookieAuth()
 export class AdminApplicationController {

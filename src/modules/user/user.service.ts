@@ -2,10 +2,9 @@ import {
   Injectable,
   ConflictException,
   NotFoundException,
-  BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
-import { Prisma, UserRole } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { CreateAdminDto } from './dto/create-admin.dto';
 import { UpdateAdminDto } from './dto/update-admin.dto';
 import { AdminListUsersDto } from './dto/admin-list-users.dto';
@@ -26,12 +25,6 @@ export class UserService {
     if (existingUser) {
       throw new ConflictException(
         'Un administrateur avec cette adresse email existe déjà',
-      );
-    }
-
-    if (data.role !== UserRole.ADMIN && data.role !== UserRole.SUPER_ADMIN) {
-      throw new BadRequestException(
-        'Le rôle doit être soit ADMIN soit SUPER_ADMIN',
       );
     }
 
@@ -80,12 +73,6 @@ export class UserService {
           'Un administrateur avec cette adresse email existe déjà',
         );
       }
-    }
-
-    if (data.role !== UserRole.ADMIN && data.role !== UserRole.SUPER_ADMIN) {
-      throw new BadRequestException(
-        'Le rôle doit être soit ADMIN soit SUPER_ADMIN',
-      );
     }
 
     const updated = await this.prisma.user.update({

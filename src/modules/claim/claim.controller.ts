@@ -12,17 +12,20 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
+import { UserRole } from '@prisma/client';
 import { ClaimService } from './claim.service';
 import { CreateClaimDto } from './dto/create-claim.dto';
 import { UpdateClaimDto } from './dto/update-claim.dto';
 import { AdminListClaimsDto } from './dto/admin-list-claims.dto';
 import { CreateCommentDto } from './dto/create-comment.dto';
 import { AdminAuthGuard } from '../auth/guards/admin-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 import { ProfileAuthGuard } from '../auth/guards/profile-auth.guard';
 import { LogService } from '../log/log.service';
 
 @Controller('admin/claims')
-@UseGuards(AdminAuthGuard)
+@UseGuards(AdminAuthGuard, RolesGuard)
 export class ClaimController {
   constructor(
     private readonly claimService: ClaimService,
@@ -30,6 +33,7 @@ export class ClaimController {
   ) {}
 
   @Post()
+  @Roles(UserRole.MANAGER)
   async create(@Req() req: any, @Body() dto: CreateClaimDto) {
     const result = await this.claimService.createForAdmin(req.user.userId, dto);
     await this.logService.create({
@@ -43,16 +47,19 @@ export class ClaimController {
   }
 
   @Get()
+  @Roles(UserRole.MODERATOR)
   list(@Query() dto: AdminListClaimsDto) {
     return this.claimService.listForAdmin(dto);
   }
 
   @Get(':id')
+  @Roles(UserRole.MODERATOR)
   getById(@Param('id') id: string) {
     return this.claimService.getByIdForAdmin(id);
   }
 
   @Patch(':id')
+  @Roles(UserRole.MANAGER)
   async update(@Param('id') id: string, @Body() dto: UpdateClaimDto, @Req() req: any) {
     const result = await this.claimService.updateForAdmin(id, dto);
     await this.logService.create({
@@ -66,6 +73,7 @@ export class ClaimController {
   }
 
   @Delete(':id')
+  @Roles(UserRole.MANAGER)
   async delete(@Param('id') id: string, @Req() req: any) {
     await this.claimService.deleteForAdmin(id);
     await this.logService.create({
@@ -79,7 +87,7 @@ export class ClaimController {
 }
 
 @Controller('admin/claims/:claimId/comments')
-@UseGuards(AdminAuthGuard)
+@UseGuards(AdminAuthGuard, RolesGuard)
 export class ClaimCommentController {
   constructor(
     private readonly claimService: ClaimService,
@@ -87,11 +95,13 @@ export class ClaimCommentController {
   ) {}
 
   @Get()
+  @Roles(UserRole.MODERATOR)
   list(@Param('claimId') claimId: string) {
     return this.claimService.listComments(claimId);
   }
 
   @Post()
+  @Roles(UserRole.MANAGER)
   async add(@Param('claimId') claimId: string, @Req() req: any, @Body() dto: CreateCommentDto) {
     const result = await this.claimService.addComment(claimId, req.user.userId, dto);
     await this.logService.create({
@@ -104,6 +114,7 @@ export class ClaimCommentController {
   }
 
   @Delete(':commentId')
+  @Roles(UserRole.MANAGER)
   async remove(@Param('claimId') claimId: string, @Param('commentId') commentId: string, @Req() req: any) {
     await this.claimService.deleteComment(claimId, commentId);
     await this.logService.create({

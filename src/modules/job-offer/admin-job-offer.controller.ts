@@ -19,7 +19,10 @@ import {
   ApiCookieAuth,
 } from '@nestjs/swagger';
 import { JobOfferService } from './job-offer.service';
+import { UserRole } from '@prisma/client';
 import { AdminAuthGuard } from '../auth/guards/admin-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 import { AdminListJobOffersDto } from './dto/admin-list-job-offers.dto';
 import { AdminUpdateJobOfferDto } from './dto/admin-update-job-offer.dto';
 import { AdminUpdateJobOfferStatusDto } from './dto/admin-update-job-offer-status.dto';
@@ -27,7 +30,7 @@ import { LogService } from '../log/log.service';
 
 @ApiTags('Admin – Job Offers')
 @Controller('admin/job-offers')
-@UseGuards(AdminAuthGuard)
+@UseGuards(AdminAuthGuard, RolesGuard)
 @ApiBearerAuth()
 @ApiCookieAuth()
 export class AdminJobOfferController {
@@ -37,6 +40,7 @@ export class AdminJobOfferController {
   ) {}
 
   @Get()
+  @Roles(UserRole.MODERATOR)
   @ApiOperation({
     summary: 'List job offers (admin only)',
     description:
@@ -56,6 +60,7 @@ export class AdminJobOfferController {
   }
 
   @Get(':id')
+  @Roles(UserRole.MODERATOR)
   @ApiOperation({
     summary: 'Get job offer details (admin only)',
     description:
@@ -68,6 +73,7 @@ export class AdminJobOfferController {
   }
 
   @Patch(':id/status')
+  @Roles(UserRole.MANAGER)
   @ApiOperation({
     summary: 'Update job offer status (admin only)',
     description: 'Updates the status of a job offer (e.g. ACTIVE, CANCELLED).',
@@ -91,6 +97,7 @@ export class AdminJobOfferController {
   }
 
   @Patch(':id')
+  @Roles(UserRole.MANAGER)
   @ApiOperation({
     summary: 'Update job offer (admin only)',
     description: 'Updates job offer fields like title, description, amount, etc.',
@@ -114,6 +121,7 @@ export class AdminJobOfferController {
   }
 
   @Delete(':id')
+  @Roles(UserRole.MANAGER)
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({
     summary: 'Delete job offer (admin only)',
