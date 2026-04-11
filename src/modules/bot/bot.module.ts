@@ -8,6 +8,7 @@ import { KycModule } from '../kyc/kyc.module';
 import { ContactUnlockModule } from '../contact-unlock/contact-unlock.module';
 import { WalletModule } from '../wallet/wallet.module';
 import { SystemConfigModule } from '../system-config/system-config.module';
+import { MatchingModule } from '../matching/matching.module';
 import { BotStateService } from './services/bot-state.service';
 import { BotInboxService } from './services/bot-inbox.service';
 import { BotDraftService } from './services/bot-draft.service';
@@ -27,6 +28,7 @@ import { BotNotificationService } from './services/bot-notification.service';
     forwardRef(() => KycModule),
     forwardRef(() => ContactUnlockModule),
     forwardRef(() => WalletModule),
+    MatchingModule,
   ],
   providers: [
     BotStateService,

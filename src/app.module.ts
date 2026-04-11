@@ -27,6 +27,8 @@ import { ProfileModule } from './modules/profile/profile.module';
 import { UserModule } from './modules/user/user.module';
 import { ConversationModule } from './modules/conversation/conversation.module';
 import { JobOfferModule } from './modules/job-offer/job-offer.module';
+import { JobCategoryModule } from './modules/job-category/job-category.module';
+import { MatchingModule } from './modules/matching/matching.module';
 import { ApplicationModule } from './modules/application/application.module';
 import { PenaltyModule } from './modules/penalty/penalty.module';
 import { PaymentRequestModule } from './modules/payment-request/payment-request.module';
@@ -129,6 +131,8 @@ import { HttpExceptionFilter } from './common/filters/http-exception.filter';
     UserModule,
     ConversationModule,
     JobOfferModule,
+    JobCategoryModule,
+    MatchingModule,
     ApplicationModule,
     PenaltyModule,
     PaymentRequestModule,

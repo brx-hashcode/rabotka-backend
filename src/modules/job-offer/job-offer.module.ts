@@ -8,6 +8,7 @@ import { SystemConfigModule } from '../system-config/system-config.module';
 import { WalletModule } from '../wallet/wallet.module';
 import { BotModule } from '../bot/bot.module';
 import { LogModule } from '../log/log.module';
+import { MatchingModule } from '../matching/matching.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { LogModule } from '../log/log.module';
     SystemConfigModule,
     WalletModule,
     LogModule,
+    MatchingModule,
   ],
   controllers: [AdminJobOfferController],
   providers: [JobOfferService],

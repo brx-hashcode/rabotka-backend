@@ -13,6 +13,8 @@ import {
   CMD_LIST_OFFERS,
   CMD_PAY,
   CMD_UNLOCK,
+  CMD_RECOMMENDED_JOBS,
+  CMD_RECOMMENDED_PROFILES,
 } from '../bot.constants';
 
 export type RouteResult =
@@ -40,12 +42,15 @@ function matchCommandAlias(
   if (CMD_LIST_OFFERS.includes(normalized) && isWorker) return 'list_offers';
   if (CMD_PAY.includes(normalized) && isWorker) return 'pay_penalties';
   if (CMD_UNLOCK.includes(normalized)) return 'unlock_contact';
+  if (CMD_RECOMMENDED_JOBS.includes(normalized) && isWorker) return 'recommended_jobs';
+  if (CMD_RECOMMENDED_PROFILES.includes(normalized) && isEmployer) return 'recommended_profiles';
   return null;
 }
 
 function matchWorkerNumeric(trimmed: string): string | null {
   if (trimmed === WORKER_MENU_OPTIONS.LIST_OFFERS) return 'list_offers';
   if (trimmed === WORKER_MENU_OPTIONS.MY_APPLICATIONS) return 'my_applications';
+  if (trimmed === WORKER_MENU_OPTIONS.RECOMMENDED_JOBS) return 'recommended_jobs';
   if (trimmed === WORKER_MENU_OPTIONS.PROFILE) return 'profile';
   if (trimmed === WORKER_MENU_OPTIONS.HISTORY) return 'penalty_history';
   if (trimmed === WORKER_MENU_OPTIONS.HELP) return 'help';
@@ -59,6 +64,7 @@ function matchEmployerNumeric(trimmed: string): string | null {
   if (trimmed === EMPLOYER_MENU_OPTIONS.CANDIDATURES_RECEIVED)
     return 'candidatures_received';
   if (trimmed === EMPLOYER_MENU_OPTIONS.FILLED_JOBS) return 'filled_jobs';
+  if (trimmed === EMPLOYER_MENU_OPTIONS.RECOMMENDED_PROFILES) return 'recommended_profiles';
   if (trimmed === EMPLOYER_MENU_OPTIONS.PROFILE) return 'profile';
   if (trimmed === EMPLOYER_MENU_OPTIONS.HISTORY) return 'penalty_history';
   if (trimmed === EMPLOYER_MENU_OPTIONS.HELP) return 'help';

@@ -219,6 +219,7 @@ model Profile {
   address                 String
   description             String             @db.Text
   profile_type            ProfileType
+  category_id             String?            @db.Uuid
   status                  AccountStatus      @default(PENDING_ACTIVATION)
   billing_status          BillingStatus      @default(CLEAR)
   reliability_score       Int?               @default(100)
@@ -233,6 +234,8 @@ model Profile {
   read_and_approved_policies Boolean @default(false)
 
   avatar_url String?
+
+  category               JobCategory?       @relation(fields: [category_id], references: [id], onDelete: SetNull)
 
   payment_requests       PaymentRequest[]
   kyc_documents          KycDocument[]
@@ -262,6 +265,7 @@ model Profile {
   @@index([status], name: "idx_profile_status")
   @@index([profile_type], name: "idx_profile_type")
   @@index([reliability_score], name: "idx_profile_reliability")
+  @@index([category_id], name: "idx_profile_category")
   @@map("profiles")
 }
 
@@ -325,11 +329,27 @@ model KycVerificationImage {
   @@map("kyc_verification_images")
 }
 
+model JobCategory {
+  id          String     @id @default(uuid()) @db.Uuid
+  created_at  DateTime   @default(now())
+  name        String     @unique
+  slug        String     @unique
+  description String?
+  icon        String?
+
+  job_offers JobOffer[]
+  profiles   Profile[]
+
+  @@index([slug], name: "idx_job_category_slug")
+  @@map("job_categories")
+}
+
 model JobOffer {
   id           String         @id @default(uuid()) @db.Uuid
   created_at   DateTime       @default(now())
   updated_at   DateTime       @updatedAt
   employer_id  String         @db.Uuid
+  category_id  String?        @db.Uuid
   title        String
   description  String         @db.Text
   scheduled_at DateTime
@@ -343,6 +363,7 @@ model JobOffer {
   employer_unlock_paid_at DateTime?
 
   employer                Profile                @relation(fields: [employer_id], references: [id], onDelete: Cascade)
+  category                JobCategory?           @relation(fields: [category_id], references: [id], onDelete: SetNull)
   applications            Application[]
   assignments             Assignment[]
   contact_unlock_attempts ContactUnlockAttempt[]
@@ -350,6 +371,7 @@ model JobOffer {
   @@index([employer_id], name: "idx_job_offer_employer")
   @@index([status], name: "idx_job_offer_status")
   @@index([scheduled_at], name: "idx_job_offer_scheduled")
+  @@index([category_id], name: "idx_job_offer_category")
   @@map("job_offers")
 }
 

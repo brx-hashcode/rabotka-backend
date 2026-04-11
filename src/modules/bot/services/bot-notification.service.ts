@@ -323,6 +323,55 @@ export class BotNotificationService {
     await this.whatsApp.sendTextMessage(phone, text);
   }
 
+  async sendRecommendedJobNotification(
+    workerId: string,
+    jobOfferId: string,
+  ): Promise<void> {
+    try {
+      const [profile, offer] = await Promise.all([
+        this.prisma.profile.findUnique({
+          where: { id: workerId },
+          select: { phone: true, first_name: true },
+        }),
+        this.prisma.jobOffer.findUnique({
+          where: { id: jobOfferId },
+          select: {
+            title: true,
+            amount: true,
+            address: true,
+            scheduled_at: true,
+          },
+        }),
+      ]);
+      if (!profile?.phone || !offer) return;
+
+      const dateStr = offer.scheduled_at.toLocaleDateString('fr-FR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+      const text = [
+        `🎯 *Offre recommandée pour vous, ${profile.first_name}*`,
+        '',
+        `📌 *${offer.title}*`,
+        `💰 ${offer.amount.toLocaleString()} FCFA`,
+        `📍 ${offer.address}`,
+        `🗓 ${dateStr}`,
+        '',
+        `Tapez *OFFRES* pour voir toutes les offres disponibles.`,
+      ].join('\n');
+
+      await this.whatsApp.sendTextMessage(profile.phone, text);
+    } catch (err) {
+      this.logger.warn(
+        `Failed to send recommended job notification to worker ${workerId}`,
+        err,
+      );
+    }
+  }
+
   async sendJobCancelledByEmployerToWorker(
     applicationId: string,
   ): Promise<void> {

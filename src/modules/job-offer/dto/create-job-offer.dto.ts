@@ -57,6 +57,11 @@ export class CreateJobOfferDto {
   @MaxLength(500)
   note?: string;
 
+  @ApiPropertyOptional({ example: 'cuid-of-job-category', description: 'Optional job category' })
+  @IsOptional()
+  @IsString()
+  category_id?: string;
+
   @ApiProperty({ example: 2, description: 'Number of persons needed' })
   @IsInt()
   @Min(1, { message: 'Au moins 1 personne requise' })

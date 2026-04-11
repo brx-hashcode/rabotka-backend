@@ -23,6 +23,7 @@ import { accountSuspendedEmail } from '../mail/templates';
 import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
 import { WalletService } from '../wallet/wallet.service';
 import { DocumentService } from '../document/document.service';
+import { MatchingService } from '../matching/matching.service';
 import { CreateProfileDto } from './dto/create-profile.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import {
@@ -172,6 +173,7 @@ export class ProfileService {
     private readonly eventEmitter: EventEmitter2,
     private readonly walletService: WalletService,
     private readonly documentService: DocumentService,
+    private readonly matchingService: MatchingService,
   ) {}
 
   async findById(id: string): Promise<ProfileMeResponse> {
@@ -896,6 +898,9 @@ export class ProfileService {
 
       this.logger.log(`Profile created successfully: ${profile.id}`);
 
+      // Index worker profile asynchronously (fire-and-forget, gated by feature flag)
+      this.matchingService.indexWorkerProfile(profile.id).catch(() => {});
+
       this.eventEmitter.emit(AdminNotificationEvent.PROFILE_CREATED, {
         event: AdminNotificationEvent.PROFILE_CREATED,
         title: 'Nouveau profil',
@@ -1003,6 +1008,7 @@ export class ProfileService {
         address: createProfileDto.address,
         description: createProfileDto.description || '',
         profile_type: createProfileDto.profileType,
+        category_id: createProfileDto.profileType === 'WORKER' ? (createProfileDto.categoryId ?? null) : null,
         status: 'PENDING_ACTIVATION',
         verification_status: 'PENDING',
         reliability_score: 100,
