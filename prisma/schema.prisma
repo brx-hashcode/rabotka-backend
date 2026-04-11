@@ -231,6 +231,8 @@ model Profile {
   verified_by             String?            @db.Uuid
   verified_at             DateTime?
   rejection_reason        String?
+  /// Admin note from the latest KYC verify action (approve or reject).
+  kyc_verification_note   String?            @db.Text
   read_and_approved_policies Boolean @default(false)
 
   avatar_url String?

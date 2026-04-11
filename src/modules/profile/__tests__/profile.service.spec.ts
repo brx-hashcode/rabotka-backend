@@ -24,6 +24,7 @@ const baseProfile = {
   verified_by: null,
   verified_at: null,
   rejection_reason: null,
+  kyc_verification_note: null,
   _count: { job_offers: 0, applications: 2, penalties: 1 },
   kyc_documents: [],
   kyc_verification_images: [],
@@ -477,6 +478,7 @@ describe('ProfileService', () => {
         'p-1',
         'admin-1',
         'VERIFIED',
+        'Documents reviewed and match requirements.',
       );
       expect(prisma.$transaction).toHaveBeenCalled();
       expect(result.id).toBe('p-1');
@@ -494,7 +496,7 @@ describe('ProfileService', () => {
         'p-1',
         'admin-1',
         'VERIFIED',
-        undefined,
+        'Approved with additional supporting images.',
         [file],
       );
       expect(fileService.uploadToStorage).toHaveBeenCalled();
@@ -514,7 +516,7 @@ describe('ProfileService', () => {
     it('throws NotFoundException when profile not found', async () => {
       prisma.profile.findUnique.mockResolvedValueOnce(null);
       await expect(
-        service.verifyProfileKyc('missing', 'admin-1', 'VERIFIED'),
+        service.verifyProfileKyc('missing', 'admin-1', 'VERIFIED', 'Note'),
       ).rejects.toThrow('Profil non trouvé');
     });
   });

@@ -1,3 +1,6 @@
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { QdrantClient } from '@qdrant/js-client-rest';
@@ -13,16 +16,41 @@ export const DENSE_DIM = 384;
 export const SPARSE_MODEL = SparseEmbeddingModel.SpladePPEnV1;
 const SEARCH_LIMIT = 20;
 
+function removeIncompleteFastembedModelDir(
+  logger: Logger,
+  modelDir: string,
+  label: string,
+): void {
+  if (!fs.existsSync(modelDir)) return;
+  const tokenizer = path.join(modelDir, 'tokenizer.json');
+  if (fs.existsSync(tokenizer)) return;
+  logger.warn(
+    `Removing incomplete ${label} embedder cache (missing tokenizer.json): ${modelDir}`,
+  );
+  fs.rmSync(modelDir, { recursive: true, force: true });
+}
+
+function repairIncompleteFastembedCaches(
+  logger: Logger,
+  cacheDir: string,
+): void {
+  const denseDir = path.join(cacheDir, DENSE_MODEL);
+  const sparseDir = path.join(cacheDir, SPARSE_MODEL.replaceAll('/', '_'));
+  removeIncompleteFastembedModelDir(logger, denseDir, 'dense');
+  removeIncompleteFastembedModelDir(logger, sparseDir, 'sparse');
+}
+
 @Injectable()
 export class QdrantService implements OnModuleInit {
   private readonly logger = new Logger(QdrantService.name);
   private client: QdrantClient;
-  private embedder: FlagEmbedding;
-  private sparseEmbedder: SparseTextEmbedding;
+  private embedder: FlagEmbedding | undefined;
+  private sparseEmbedder: SparseTextEmbedding | undefined;
+  private embeddersPromise: Promise<void> | null = null;
 
   constructor(private readonly config: ConfigService) {}
 
-  async onModuleInit(): Promise<void> {
+  onModuleInit(): void {
     const url = this.config.get<string>('QDRANT_URL');
     if (!url) {
       throw new Error('QDRANT_URL is not set');
@@ -32,30 +60,58 @@ export class QdrantService implements OnModuleInit {
       throw new Error('QDRANT_API_KEY is not set');
     }
 
-    this.client = new QdrantClient({ url, apiKey });
-
-    this.logger.log('Initializing dense embedder (BGE Small EN v1.5)…');
-    this.embedder = await FlagEmbedding.init({ model: DENSE_MODEL });
-
-    this.logger.log('Initializing sparse embedder (SPLADE PP En v1)…');
-    this.sparseEmbedder = await SparseTextEmbedding.init({
-      model: SPARSE_MODEL,
+    this.client = new QdrantClient({
+      url,
+      apiKey,
+      checkCompatibility: false,
     });
 
-    this.logger.log(`Qdrant client initialized → ${url}`);
+    this.logger.log(
+      `Qdrant client ready → ${url} (fastembed models load in background)`,
+    );
+    void this.ensureEmbedders().catch((err: unknown) => {
+      this.logger.error('Fastembed initialization failed', err);
+    });
+  }
+
+  private getCacheDir(): string {
+    return (
+      this.config.get<string>('FASTEMBED_CACHE_DIR') ??
+      path.join(process.cwd(), 'local_cache')
+    );
+  }
+
+  private ensureEmbedders(): Promise<void> {
+    this.embeddersPromise ??= this.loadEmbedders();
+    return this.embeddersPromise;
+  }
+
+  private async loadEmbedders(): Promise<void> {
+    const cacheDir = this.getCacheDir();
+    repairIncompleteFastembedCaches(this.logger, cacheDir);
+
+    this.logger.log('Loading dense embedder (BGE Small EN v1.5)…');
+    this.embedder = await FlagEmbedding.init({
+      model: DENSE_MODEL,
+      cacheDir,
+    });
+
+    this.logger.log('Loading sparse embedder (SPLADE PP En v1)…');
+    this.sparseEmbedder = await SparseTextEmbedding.init({
+      model: SPARSE_MODEL,
+      cacheDir,
+    });
+
+    this.logger.log('Fastembed models ready');
   }
 
   getClient(): QdrantClient {
     return this.client;
   }
 
-  // ── Dense ──────────────────────────────────────────────────────────────────
-
-  /**
-   * Embed a single text string into a dense vector (384-dim).
-   */
   async embed(text: string): Promise<number[]> {
-    const results = this.embedder.embed([text]);
+    await this.ensureEmbedders();
+    const results = this.embedder!.embed([text]);
     const { value: batch, done } = await results[Symbol.asyncIterator]().next();
     if (done || !batch?.length) {
       throw new Error('Dense embedding produced no output');
@@ -63,12 +119,10 @@ export class QdrantService implements OnModuleInit {
     return Array.from(batch[0]);
   }
 
-  /**
-   * Embed multiple texts into dense vectors.
-   */
   async embedBatch(texts: string[]): Promise<number[][]> {
+    await this.ensureEmbedders();
     const vectors: number[][] = [];
-    for await (const batch of this.embedder.embed(texts)) {
+    for await (const batch of this.embedder!.embed(texts)) {
       for (const vec of batch) {
         vectors.push(Array.from(vec));
       }
@@ -76,15 +130,11 @@ export class QdrantService implements OnModuleInit {
     return vectors;
   }
 
-  // ── Sparse ─────────────────────────────────────────────────────────────────
-
-  /**
-   * Returns sparse indices + values for a single text (SPLADE).
-   */
   async sparseEmbed(
     text: string,
   ): Promise<{ indices: number[]; values: number[] }> {
-    const results = this.sparseEmbedder.embed([text]);
+    await this.ensureEmbedders();
+    const results = this.sparseEmbedder!.embed([text]);
     const { value: batch, done } = await results[Symbol.asyncIterator]().next();
     if (done || !batch?.length) {
       throw new Error('Sparse embedding produced no output');
@@ -96,11 +146,6 @@ export class QdrantService implements OnModuleInit {
     };
   }
 
-  // ── Hybrid ─────────────────────────────────────────────────────────────────
-
-  /**
-   * Returns both dense and sparse vectors in one call.
-   */
   async embedHybrid(text: string): Promise<{
     dense: number[];
     sparse: { indices: number[]; values: number[] };
@@ -112,9 +157,6 @@ export class QdrantService implements OnModuleInit {
     return { dense, sparse };
   }
 
-  /**
-   * Upsert a single point with hybrid (dense + sparse) vectors.
-   */
   async upsertHybrid(
     collectionName: string,
     id: string,
@@ -136,9 +178,6 @@ export class QdrantService implements OnModuleInit {
     });
   }
 
-  /**
-   * Hybrid search using prefetch + RRF fusion.
-   */
   async searchHybrid(
     collectionName: string,
     text: string,
@@ -171,12 +210,6 @@ export class QdrantService implements OnModuleInit {
     }));
   }
 
-  // ── Collection ─────────────────────────────────────────────────────────────
-
-  /**
-   * Ensure a hybrid collection exists (dense cosine + sparse SPLADE with IDF).
-   * Creates it if absent; no-ops if it already exists.
-   */
   async ensureCollection(collectionName: string): Promise<void> {
     const collections = await this.client.getCollections();
     const exists = collections.collections.some(

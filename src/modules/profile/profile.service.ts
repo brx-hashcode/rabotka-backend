@@ -108,6 +108,7 @@ export type AdminProfileListItem = {
   verifiedBy: string | null;
   verifiedAt: Date | null;
   rejectionReason: string | null;
+  kycVerificationNote: string | null;
   reliabilityScore: number | null;
   avatarUrl: string | null;
   createdAt: Date;
@@ -433,6 +434,7 @@ export class ProfileService {
         verified_by: true,
         verified_at: true,
         rejection_reason: true,
+        kyc_verification_note: true,
         reliability_score: true,
         avatar_url: true,
         created_at: true,
@@ -515,6 +517,7 @@ export class ProfileService {
         : null,
       verifiedAt: profile.verified_at,
       rejectionReason: profile.rejection_reason,
+      kycVerificationNote: profile.kyc_verification_note,
       reliabilityScore: profile.reliability_score,
       avatarUrl: profile.avatar_url,
       createdAt: profile.created_at,
@@ -551,9 +554,14 @@ export class ProfileService {
     profileId: string,
     adminUserId: string,
     decision: 'VERIFIED' | 'REJECTED',
-    reason?: string,
+    reason: string,
     files?: Express.Multer.File[],
   ): Promise<AdminProfileDetailResponse> {
+    const note = reason?.trim();
+    if (!note) {
+      throw new BadRequestException('La raison / la note est requise');
+    }
+
     const profile = await this.prisma.profile.findUnique({
       where: { id: profileId },
       select: { id: true },
@@ -581,7 +589,8 @@ export class ProfileService {
           verification_status: decision as VerificationStatus,
           verified_by: adminUserId,
           verified_at: now,
-          rejection_reason: decision === 'REJECTED' ? (reason ?? null) : null,
+          kyc_verification_note: note,
+          rejection_reason: decision === 'REJECTED' ? note : null,
         },
       }),
 
@@ -591,7 +600,7 @@ export class ProfileService {
           verification_status: decision as VerificationStatus,
           verified_by: adminUserId,
           verified_at: now,
-          rejection_reason: decision === 'REJECTED' ? (reason ?? null) : null,
+          rejection_reason: decision === 'REJECTED' ? note : null,
         },
       }),
 
@@ -849,6 +858,7 @@ export class ProfileService {
           verified_by: true,
           verified_at: true,
           rejection_reason: true,
+          kyc_verification_note: true,
           reliability_score: true,
           avatar_url: true,
           created_at: true,
@@ -873,6 +883,7 @@ export class ProfileService {
       verifiedBy: p.verified_by,
       verifiedAt: p.verified_at,
       rejectionReason: p.rejection_reason,
+      kycVerificationNote: p.kyc_verification_note,
       reliabilityScore: p.reliability_score,
       avatarUrl: p.avatar_url,
       createdAt: p.created_at,
