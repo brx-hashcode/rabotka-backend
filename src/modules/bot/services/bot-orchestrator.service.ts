@@ -68,6 +68,15 @@ import {
   runUnlockContactFlow,
   getUnlockContactInitialState,
 } from '../flows/unlock-contact.flow';
+import {
+  runRecommendedJobsFlow,
+  getRecommendedJobsInitialState,
+} from '../flows/recommended-jobs.flow';
+import {
+  runRecommendedProfilesFlow,
+  getRecommendedProfilesInitialState,
+} from '../flows/recommended-profiles.flow';
+import { MatchingService } from '../../matching/matching.service';
 
 const INACTIVE_MESSAGE = `Votre compte est créé mais pas encore activé. Cliquez sur le lien de confirmation que nous vous avons envoyé par WhatsApp pour l’activer.`;
 
@@ -100,6 +109,7 @@ export class BotOrchestratorService {
     private readonly paymentService: PaymentService,
     private readonly contactUnlockService: ContactUnlockService,
     private readonly walletService: WalletService,
+    private readonly matchingService: MatchingService,
   ) {}
 
   async handle(
@@ -337,6 +347,12 @@ export class BotOrchestratorService {
           ...ctx,
           botNotification: this.notificationService,
         }),
+      [FLOW_IDS.RECOMMENDED_JOBS]: () =>
+        runRecommendedJobsFlow(state, input, profile, ctx),
+      [FLOW_IDS.RECOMMENDED_PROFILES]: () =>
+        runRecommendedProfilesFlow(state, input, profile, {
+          prisma: this.prisma,
+        }),
     };
     const runner = runners[flowId];
     return runner ? runner() : Promise.resolve(null);
@@ -368,6 +384,12 @@ export class BotOrchestratorService {
 
       unlock_contact: () =>
         this.handleUnlockContactCommand(botProfile, profileId),
+
+      recommended_jobs: () =>
+        this.handleRecommendedJobsCommand(botProfile, profileId),
+
+      recommended_profiles: () =>
+        this.handleRecommendedProfilesCommand(botProfile, profileId),
     };
 
     const handler = commandHandlers[route.commandId];
@@ -534,6 +556,129 @@ export class BotOrchestratorService {
       walletService: this.walletService,
     });
     return result.reply;
+  }
+
+  private async handleRecommendedJobsCommand(
+    profile: BotProfile,
+    profileId: string,
+  ): Promise<string[]> {
+    const offerIds = await this.matchingService.findMatchingJobsForWorker(
+      profile.id,
+      10,
+    );
+
+    if (offerIds.length === 0) {
+      return [
+        [
+          '🎯 *Offres recommandées*',
+          '',
+          "Aucune offre recommandée pour l'instant. Complétez votre profil pour de meilleures recommandations.",
+          '',
+          '*Tapez 1 pour voir toutes les offres disponibles ou Menu pour revenir.*',
+        ].join('\n'),
+      ];
+    }
+
+    const flowState = getRecommendedJobsInitialState(offerIds);
+    await this.botState.set(profileId, flowState);
+
+    const pageIds = offerIds.slice(0, 5);
+    const offers = await this.prisma.jobOffer.findMany({
+      where: { id: { in: pageIds }, status: 'ACTIVE' },
+      select: {
+        id: true,
+        title: true,
+        amount: true,
+        address: true,
+        scheduled_at: true,
+      },
+    });
+    const offerMap = new Map(offers.map((o) => [o.id, o]));
+    const orderedOffers = pageIds
+      .map((id) => offerMap.get(id))
+      .filter(Boolean) as typeof offers;
+
+    const lines = [
+      '🎯 *OFFRES RECOMMANDÉES POUR VOUS*',
+      '',
+      ...orderedOffers.map((o, i) => {
+        const dateStr = o.scheduled_at.toLocaleDateString('fr-FR', {
+          day: '2-digit',
+          month: '2-digit',
+        });
+        return (
+          `${i + 1}. *${o.title}*\n` +
+          `   💰 ${Number(o.amount).toLocaleString('fr-FR')} FCFA | 📍 ${o.address.slice(0, 30)} | 🗓 ${dateStr}`
+        );
+      }),
+      '',
+      '*Tapez le numéro pour voir le détail ou 7 pour le menu.*',
+    ];
+    return [lines.join('\n')];
+  }
+
+  private async handleRecommendedProfilesCommand(
+    profile: BotProfile,
+    profileId: string,
+  ): Promise<string[]> {
+    const latestOffer = await this.prisma.jobOffer.findFirst({
+      where: { employer_id: profile.id, status: 'ACTIVE' },
+      orderBy: { created_at: 'desc' },
+      select: { id: true },
+    });
+
+    let workerIds: string[] = [];
+    if (latestOffer) {
+      workerIds = await this.matchingService.findMatchingWorkersForJob(
+        latestOffer.id,
+        10,
+      );
+    }
+
+    if (workerIds.length === 0) {
+      return [
+        [
+          '🎯 *Travailleurs recommandés*',
+          '',
+          "Aucun travailleur recommandé pour l'instant. Publiez une offre pour obtenir des recommandations.",
+          '',
+          '*Tapez 1 pour publier une offre ou Menu pour revenir.*',
+        ].join('\n'),
+      ];
+    }
+
+    const flowState = getRecommendedProfilesInitialState(workerIds);
+    await this.botState.set(profileId, flowState);
+
+    const pageIds = workerIds.slice(0, 5);
+    const workers = await this.prisma.profile.findMany({
+      where: { id: { in: pageIds } },
+      select: {
+        id: true,
+        first_name: true,
+        last_name: true,
+        reliability_score: true,
+        description: true,
+        category: { select: { name: true } },
+      },
+    });
+    const workerMap = new Map(workers.map((w) => [w.id, w]));
+    const ordered = pageIds
+      .map((id) => workerMap.get(id))
+      .filter(Boolean) as typeof workers;
+
+    const lines = [
+      '🎯 *TRAVAILLEURS RECOMMANDÉS*',
+      '',
+      ...ordered.map((w, i) => {
+        const name = `${w.first_name} ${w.last_name}`.trim();
+        const domain = w.category?.name ?? 'Non spécifié';
+        return `${i + 1}. *${name}*\n   ⭐ ${w.reliability_score ?? 100}/100 | 🏷 ${domain}`;
+      }),
+      '',
+      '*Tapez le numéro pour le profil complet ou 7 pour le menu.*',
+    ];
+    return [lines.join('\n')];
   }
 
   private async loadProfile(profileId: string) {

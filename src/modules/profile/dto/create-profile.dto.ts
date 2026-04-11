@@ -58,6 +58,12 @@ export class CreateProfileDto {
   @IsNotEmpty()
   profileType: ProfileType;
 
+  @ApiPropertyOptional({ description: 'Job category ID (required for WORKER profiles)' })
+  @Transform(({ value }) => value?.trim())
+  @IsOptional()
+  @IsString()
+  categoryId?: string;
+
   @ApiProperty({
     description: 'Document type for KYC verification',
     enum: DocumentType,

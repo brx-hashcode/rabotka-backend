@@ -7,6 +7,7 @@ import { seedProfiles } from './seed/profile.seed';
 import { seedJobOffersAndApplications } from './seed/job-offer.seed';
 import { seedPenalties } from './seed/penalty.seed';
 import { seedInvoices } from './seed/invoice.seed';
+import { seedJobCategories } from './seed/job-category.seed';
 
 config({ path: '.env.local' });
 config({ path: '.env' });
@@ -19,6 +20,7 @@ void run();
 
 async function run() {
   try {
+    await seedJobCategories(prisma);
     await seedSuperAdmin(prisma);
     await seedProfiles(prisma);
     await seedJobOffersAndApplications(prisma);

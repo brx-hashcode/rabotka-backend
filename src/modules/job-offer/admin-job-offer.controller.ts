@@ -85,7 +85,10 @@ export class AdminJobOfferController {
     @Body() dto: AdminUpdateJobOfferStatusDto,
     @Req() req: any,
   ) {
-    const result = await this.jobOfferService.updateStatusByAdmin(id, dto.status);
+    const result = await this.jobOfferService.updateStatusByAdmin(
+      id,
+      dto.status,
+    );
     await this.logService.create({
       action: 'JOB_OFFER_STATUS_CHANGED',
       entityType: 'JobOffer',
@@ -100,7 +103,8 @@ export class AdminJobOfferController {
   @Roles(UserRole.MANAGER)
   @ApiOperation({
     summary: 'Update job offer (admin only)',
-    description: 'Updates job offer fields like title, description, amount, etc.',
+    description:
+      'Updates job offer fields like title, description, amount, etc.',
   })
   @ApiResponse({ status: 200, description: 'Updated job offer details' })
   @ApiResponse({ status: 404, description: 'Job offer not found' })

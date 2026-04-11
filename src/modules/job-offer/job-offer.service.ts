@@ -4,7 +4,6 @@ import {
   NotFoundException,
   ForbiddenException,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
 import { SystemConfigService } from '../system-config/system-config.service';
@@ -12,13 +11,10 @@ import { WalletService } from '../wallet/wallet.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
 import { BotNotificationService } from '../bot/services/bot-notification.service';
+import { MatchingService } from '../matching/matching.service';
 import { CreateJobOfferDto } from './dto/create-job-offer.dto';
 import { AdminUpdateJobOfferDto } from './dto/admin-update-job-offer.dto';
-import {
-  AccountStatus,
-  JobOfferStatus,
-  Prisma,
-} from '@prisma/client';
+import { AccountStatus, JobOfferStatus, Prisma } from '@prisma/client';
 
 const MIN_SCHEDULED_HOURS_FROM_NOW = 4;
 const TITLE_MIN = 5;
@@ -107,6 +103,7 @@ export class JobOfferService {
     private readonly walletService: WalletService,
     private readonly botNotification: BotNotificationService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly matchingService: MatchingService,
   ) {}
 
   async create(
@@ -121,10 +118,14 @@ export class JobOfferService {
       throw new NotFoundException('Employeur introuvable');
     }
     if (employer.status !== AccountStatus.ACTIVE) {
-      throw new ForbiddenException('Le profil doit être actif pour publier des offres');
+      throw new ForbiddenException(
+        'Le profil doit être actif pour publier des offres',
+      );
     }
     if (employer.profile_type !== 'EMPLOYER') {
-      throw new ForbiddenException("Seuls les employeurs peuvent publier des offres d'emploi");
+      throw new ForbiddenException(
+        "Seuls les employeurs peuvent publier des offres d'emploi",
+      );
     }
 
     this.validateCreateDto(dto);
@@ -152,6 +153,7 @@ export class JobOfferService {
         note: dto.note?.trim() ?? null,
         quantity: dto.quantity ?? 1,
         status: JobOfferStatus.ACTIVE,
+        ...(dto.category_id ? { category_id: dto.category_id } : {}),
       },
     });
 
@@ -163,6 +165,22 @@ export class JobOfferService {
       entityId: String(offer.id),
       timestamp: new Date().toISOString(),
     });
+
+    // Index + notify matching workers asynchronously (fire-and-forget)
+    this.matchingService
+      .indexJobOffer(offer.id)
+      .then(async () => {
+        const workerIds = await this.matchingService.findMatchingWorkersForJob(
+          offer.id,
+          20,
+        );
+        for (const workerId of workerIds) {
+          this.botNotification
+            .sendRecommendedJobNotification(workerId, offer.id)
+            .catch(() => {});
+        }
+      })
+      .catch(() => {});
 
     return this.toListItem(offer);
   }
@@ -207,6 +225,45 @@ export class JobOfferService {
     const nextCursor = hasMore ? (data.at(-1)?.id ?? null) : null;
 
     return { data, nextCursor };
+  }
+
+  /**
+   * Returns recommended active job offers for a worker based on vector similarity.
+   * Falls back to latest active offers if matching is disabled or returns nothing.
+   */
+  async findRecommendedForWorker(
+    workerId: string,
+    limit = 10,
+  ): Promise<JobOfferListItem[]> {
+    const recommendedIds = await this.matchingService.findMatchingJobsForWorker(
+      workerId,
+      limit,
+    );
+
+    if (recommendedIds.length > 0) {
+      const offers = await this.prisma.jobOffer.findMany({
+        where: {
+          id: { in: recommendedIds },
+          status: JobOfferStatus.ACTIVE,
+          applications: { none: { worker_id: workerId } },
+        },
+        include: {
+          _count: {
+            select: { applications: { where: { status: 'ACCEPTED' } } },
+          },
+        },
+      });
+      // Preserve similarity ranking order
+      const offerMap = new Map(offers.map((o) => [o.id, o]));
+      return recommendedIds
+        .map((id) => offerMap.get(id))
+        .filter(Boolean)
+        .map((o) => this.toListItem(o!, o!._count.applications));
+    }
+
+    // Fallback: latest active offers not yet applied to
+    const { data } = await this.findActive(limit, undefined, workerId);
+    return data;
   }
 
   async findById(id: string): Promise<JobOfferDetail | null> {
@@ -517,7 +574,7 @@ export class JobOfferService {
         status: a.status,
         penaltyApplied: a.penalty_applied,
         penaltyAmount:
-          a.penalty_amount != null ? Number(a.penalty_amount) : null,
+          a.penalty_amount == null ? null : Number(a.penalty_amount),
         cancelledAt: a.cancelled_at?.toISOString() ?? null,
         cancellationReason: a.cancellation_reason,
         createdAt: a.created_at.toISOString(),
@@ -558,21 +615,25 @@ export class JobOfferService {
       throw new NotFoundException("Offre d'emploi introuvable");
     }
     if (offer.status !== JobOfferStatus.ACTIVE) {
-      throw new BadRequestException(
-        'Only active job offers can be edited',
-      );
+      throw new BadRequestException('Only active job offers can be edited');
     }
 
     const data: Prisma.JobOfferUpdateInput = {};
     if (dto.title !== undefined) data.title = dto.title.trim();
-    if (dto.description !== undefined) data.description = dto.description.trim();
-    if (dto.scheduledAt !== undefined) data.scheduled_at = new Date(dto.scheduledAt);
+    if (dto.description !== undefined)
+      data.description = dto.description.trim();
+    if (dto.scheduledAt !== undefined)
+      data.scheduled_at = new Date(dto.scheduledAt);
     if (dto.amount !== undefined) data.amount = dto.amount;
     if (dto.address !== undefined) data.address = dto.address.trim();
     if (dto.note !== undefined) data.note = dto.note.trim() || null;
     if (dto.quantity !== undefined) data.quantity = dto.quantity;
 
-    const updatedOffer = await this.prisma.jobOffer.update({ where: { id }, data, select: { title: true } });
+    const updatedOffer = await this.prisma.jobOffer.update({
+      where: { id },
+      data,
+      select: { title: true },
+    });
 
     this.eventEmitter.emit(AdminNotificationEvent.JOB_OFFER_UPDATED, {
       event: AdminNotificationEvent.JOB_OFFER_UPDATED,
@@ -619,5 +680,4 @@ export class JobOfferService {
       created_at: offer.created_at,
     };
   }
-
 }

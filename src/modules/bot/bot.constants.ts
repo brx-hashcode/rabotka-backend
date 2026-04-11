@@ -16,14 +16,17 @@ export const FLOW_IDS = {
   VERIFY_WHATSAPP: 'verify_whatsapp',
   RESOLVE_PENALTIES: 'resolve_penalties',
   UNLOCK_CONTACT: 'unlock_contact',
+  RECOMMENDED_JOBS: 'recommended_jobs',
+  RECOMMENDED_PROFILES: 'recommended_profiles',
 } as const;
 
 export const WORKER_MENU_OPTIONS = {
   LIST_OFFERS: '1',
   MY_APPLICATIONS: '2',
-  PROFILE: '3',
-  HISTORY: '4',
-  HELP: '5',
+  RECOMMENDED_JOBS: '3',
+  PROFILE: '4',
+  HISTORY: '5',
+  HELP: '6',
 } as const;
 
 export const EMPLOYER_MENU_OPTIONS = {
@@ -31,9 +34,10 @@ export const EMPLOYER_MENU_OPTIONS = {
   MY_OFFERS: '2',
   CANDIDATURES_RECEIVED: '3',
   FILLED_JOBS: '4',
-  PROFILE: '5',
-  HISTORY: '6',
-  HELP: '7',
+  RECOMMENDED_PROFILES: '5',
+  PROFILE: '6',
+  HISTORY: '7',
+  HELP: '8',
 } as const;
 
 export const CMD_MENU = ['menu', 'aide', 'help', 'bonjour', '*'];
@@ -52,3 +56,5 @@ export const CMD_PAY = [
   'payer penalites',
 ];
 export const CMD_UNLOCK = ['débloquer', 'debloquer', 'unlock', 'contact'];
+export const CMD_RECOMMENDED_JOBS = ['offres recommandées', 'recommandées', 'recommended'];
+export const CMD_RECOMMENDED_PROFILES = ['profils recommandés', 'travailleurs recommandés', 'recommended profiles'];
