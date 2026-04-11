@@ -341,7 +341,7 @@ export class AdminProfileController {
       profileId: id,
       metadata: {
         decision: dto.decision,
-        ...(dto.reason ? { reason: dto.reason } : {}),
+        reason: dto.reason,
       },
     });
 

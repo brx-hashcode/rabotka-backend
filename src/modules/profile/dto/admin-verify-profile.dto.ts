@@ -1,5 +1,5 @@
-import { IsEnum, IsOptional, IsString } from 'class-validator';
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsEnum, IsNotEmpty, IsString } from 'class-validator';
+import { ApiProperty } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 
 export enum VerifyDecision {
@@ -15,9 +15,14 @@ export class AdminVerifyProfileDto {
   @IsEnum(VerifyDecision)
   decision: VerifyDecision;
 
-  @ApiPropertyOptional({ description: 'Rejection reason (required when rejecting)' })
-  @Transform(({ value }) => value?.trim())
-  @IsOptional()
+  @ApiProperty({
+    description:
+      'Admin decision note (required for both approve and reject; stored on the profile)',
+  })
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.trim() : value,
+  )
   @IsString()
-  reason?: string;
+  @IsNotEmpty({ message: 'La raison / la note est requise' })
+  reason: string;
 }
