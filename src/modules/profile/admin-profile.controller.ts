@@ -26,7 +26,10 @@ import {
 } from '@nestjs/swagger';
 import { ProfileService } from './profile.service';
 import { LogService } from '../log/log.service';
+import { UserRole } from '@prisma/client';
 import { AdminAuthGuard } from '../auth/guards/admin-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 import { PaymentRequestService } from '../payment-request/payment-request.service';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { WalletService } from '../wallet/wallet.service';
@@ -44,7 +47,7 @@ import { UpdateProfileDto } from './dto/update-profile.dto';
 
 @ApiTags('Admin – Profiles')
 @Controller('admin/profiles')
-@UseGuards(AdminAuthGuard)
+@UseGuards(AdminAuthGuard, RolesGuard)
 @ApiBearerAuth()
 @ApiCookieAuth()
 export class AdminProfileController {
@@ -59,6 +62,7 @@ export class AdminProfileController {
   ) {}
 
   @Get()
+  @Roles(UserRole.MODERATOR)
   @ApiOperation({
     summary: 'List profiles (admin only)',
     description: 'Returns paginated profiles with optional search and filters.',
@@ -80,6 +84,7 @@ export class AdminProfileController {
   }
 
   @Get(':id')
+  @Roles(UserRole.MODERATOR)
   @ApiOperation({
     summary: 'Get profile details (admin only)',
     description: 'Returns full profile details including KYC documents.',
@@ -91,6 +96,7 @@ export class AdminProfileController {
   }
 
   @Get(':id/logs')
+  @Roles(UserRole.MODERATOR)
   @ApiOperation({
     summary: 'Get profile audit logs (admin only)',
     description: 'Returns the audit trail / timeline for a profile.',
@@ -101,12 +107,14 @@ export class AdminProfileController {
   }
 
   @Get(':id/payment-requests')
+  @Roles(UserRole.MODERATOR)
   @ApiOperation({ summary: 'Get payment requests for a profile (admin only)' })
   async getPaymentRequests(@Param('id') id: string) {
     return await this.paymentRequestService.getByProfileId(id);
   }
 
   @Get(':id/wallet')
+  @Roles(UserRole.MODERATOR)
   @ApiOperation({
     summary: 'Get wallet balance and transactions for a profile (admin only)',
   })
@@ -115,6 +123,7 @@ export class AdminProfileController {
   }
 
   @Get(':id/invoices')
+  @Roles(UserRole.MODERATOR)
   @ApiOperation({ summary: 'Get invoices for a profile (admin only)' })
   async getInvoices(@Param('id') id: string) {
     const invoices = await this.prisma.invoice.findMany({
@@ -135,6 +144,7 @@ export class AdminProfileController {
   }
 
   @Get(':id/messages')
+  @Roles(UserRole.MODERATOR)
   @ApiOperation({ summary: 'Get messages for a profile (admin only)' })
   async getMessages(@Param('id') id: string) {
     const messages = await this.prisma.message.findMany({
@@ -162,6 +172,7 @@ export class AdminProfileController {
   }
 
   @Post(':id/messages')
+  @Roles(UserRole.MANAGER)
   @ApiOperation({ summary: 'Send a message to a profile (admin only)' })
   @UseInterceptors(FilesInterceptor('attachments', 5))
   async sendMessage(
@@ -268,6 +279,7 @@ export class AdminProfileController {
   }
 
   @Patch(':id')
+  @Roles(UserRole.MANAGER)
   @ApiOperation({
     summary: 'Update profile fields (admin only)',
     description: 'Updates profile fields like name, description, address.',
@@ -293,6 +305,7 @@ export class AdminProfileController {
   }
 
   @Patch(':id/verify')
+  @Roles(UserRole.MANAGER)
   @UseInterceptors(FilesInterceptor('files', 10))
   @ApiConsumes('multipart/form-data')
   @ApiOperation({
@@ -361,6 +374,7 @@ export class AdminProfileController {
   }
 
   @Patch(':id/status')
+  @Roles(UserRole.MANAGER)
   @ApiOperation({
     summary: 'Update profile account status (admin only)',
     description:
@@ -395,6 +409,7 @@ export class AdminProfileController {
   }
 
   @Post(':id/send-verification-link')
+  @Roles(UserRole.MANAGER)
   @ApiOperation({
     summary: 'Resend WhatsApp verification link (admin only)',
     description:
@@ -406,6 +421,7 @@ export class AdminProfileController {
   }
 
   @Get(':id/agreement/download')
+  @Roles(UserRole.MODERATOR)
   @ApiOperation({
     summary:
       'Download the platform agreement prefilled with profile data (admin only)',

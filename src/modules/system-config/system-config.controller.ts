@@ -17,14 +17,17 @@ import {
   ApiCookieAuth,
   ApiQuery,
 } from '@nestjs/swagger';
-import { ConfigCategory } from '@prisma/client';
+import { ConfigCategory, UserRole } from '@prisma/client';
 import { AdminAuthGuard } from '../auth/guards/admin-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 import { SystemConfigService } from './system-config.service';
 import { UpdateSystemConfigDto } from './dto/update-system-config.dto';
 
 @ApiTags('Admin – System Config')
 @Controller('admin/system-configs')
-@UseGuards(AdminAuthGuard)
+@UseGuards(AdminAuthGuard, RolesGuard)
+@Roles(UserRole.SUPER_ADMIN)
 @ApiBearerAuth()
 @ApiCookieAuth()
 export class SystemConfigController {

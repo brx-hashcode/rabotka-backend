@@ -6,13 +6,17 @@ import {
   ApiBearerAuth,
   ApiCookieAuth,
 } from '@nestjs/swagger';
+import { UserRole } from '@prisma/client';
 import { AdminAuthGuard } from '../auth/guards/admin-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 import { DashboardService } from './dashboard.service';
 import { JobActivityQueryDto, TimeRange } from './dto/job-activity-query.dto';
 
 @ApiTags('Admin – Dashboard')
 @Controller('admin/dashboard')
-@UseGuards(AdminAuthGuard)
+@UseGuards(AdminAuthGuard, RolesGuard)
+@Roles(UserRole.MODERATOR)
 @ApiBearerAuth()
 @ApiCookieAuth()
 export class AdminDashboardController {

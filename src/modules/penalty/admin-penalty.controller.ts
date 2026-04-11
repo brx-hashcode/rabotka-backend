@@ -15,14 +15,17 @@ import {
   ApiBearerAuth,
   ApiCookieAuth,
 } from '@nestjs/swagger';
+import { UserRole } from '@prisma/client';
 import { PenaltyService } from './penalty.service';
 import { AdminAuthGuard } from '../auth/guards/admin-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 import { AdminListPenaltiesDto } from './dto/admin-list-penalties.dto';
 import { LogService } from '../log/log.service';
 
 @ApiTags('Admin - Penalties')
 @Controller('admin/penalties')
-@UseGuards(AdminAuthGuard)
+@UseGuards(AdminAuthGuard, RolesGuard)
 @ApiBearerAuth()
 @ApiCookieAuth()
 export class AdminPenaltyController {
@@ -32,6 +35,7 @@ export class AdminPenaltyController {
   ) {}
 
   @Get()
+  @Roles(UserRole.MODERATOR)
   @ApiOperation({
     summary: 'List penalties (admin only)',
     description:
@@ -51,6 +55,7 @@ export class AdminPenaltyController {
   }
 
   @Get(':id')
+  @Roles(UserRole.MODERATOR)
   @ApiOperation({
     summary: 'Get penalty details (admin only)',
     description:
@@ -63,6 +68,7 @@ export class AdminPenaltyController {
   }
 
   @Post(':id/confirm-payment')
+  @Roles(UserRole.MANAGER)
   @ApiOperation({
     summary: 'Manually confirm penalty payment (admin only)',
     description:
@@ -86,6 +92,7 @@ export class AdminPenaltyController {
   }
 
   @Delete(':id')
+  @Roles(UserRole.MANAGER)
   @ApiOperation({
     summary: 'Delete a penalty (admin only)',
     description:

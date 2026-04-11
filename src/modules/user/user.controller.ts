@@ -19,21 +19,25 @@ import {
   ApiBearerAuth,
   ApiCookieAuth,
 } from '@nestjs/swagger';
+import { UserRole } from '@prisma/client';
 import { UserService } from './user.service';
 import { CreateAdminDto } from './dto/create-admin.dto';
 import { UpdateAdminDto } from './dto/update-admin.dto';
 import { AdminListUsersDto } from './dto/admin-list-users.dto';
 import { AdminAuthGuard } from '../auth/guards/admin-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 
 @ApiTags('User')
 @Controller('user')
-@UseGuards(AdminAuthGuard)
+@UseGuards(AdminAuthGuard, RolesGuard)
 @ApiBearerAuth()
 @ApiCookieAuth()
 export class UserController {
   constructor(private readonly userService: UserService) {}
 
   @Get()
+  @Roles(UserRole.MODERATOR)
   @ApiOperation({
     summary: 'List admin users',
     description:
@@ -46,6 +50,7 @@ export class UserController {
   }
 
   @Post()
+  @Roles(UserRole.ADMIN)
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary: 'Create a new admin user',
@@ -75,6 +80,7 @@ export class UserController {
   }
 
   @Patch(':id')
+  @Roles(UserRole.ADMIN)
   @ApiOperation({ summary: 'Update an admin user' })
   @ApiBody({ type: UpdateAdminDto })
   @ApiResponse({ status: 200, description: 'Admin user updated successfully' })
@@ -99,6 +105,7 @@ export class UserController {
   }
 
   @Patch(':id/activate')
+  @Roles(UserRole.ADMIN)
   @ApiOperation({ summary: 'Activate an admin user' })
   @ApiResponse({ status: 200, description: 'User activated successfully' })
   @ApiResponse({ status: 404, description: 'User not found' })
@@ -118,6 +125,7 @@ export class UserController {
   }
 
   @Patch(':id/deactivate')
+  @Roles(UserRole.ADMIN)
   @ApiOperation({ summary: 'Deactivate an admin user' })
   @ApiResponse({ status: 200, description: 'User deactivated successfully' })
   @ApiResponse({ status: 404, description: 'User not found' })
@@ -137,6 +145,7 @@ export class UserController {
   }
 
   @Delete(':id')
+  @Roles(UserRole.SUPER_ADMIN)
   @ApiOperation({ summary: 'Delete an admin user' })
   @ApiResponse({ status: 200, description: 'User deleted successfully' })
   @ApiResponse({ status: 404, description: 'User not found' })

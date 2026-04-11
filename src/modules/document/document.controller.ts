@@ -16,19 +16,22 @@ import {
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { UserRole } from '@prisma/client';
 import { DocumentService } from './document.service';
 import { UpdateDocumentDto } from './dto/update-document.dto';
 import { ListDocumentsDto } from './dto/list-documents.dto';
 import { CreateDocumentFromUrlDto } from './dto/create-from-url.dto';
 import { CreateDocumentFromUploadDto } from './dto/create-from-upload.dto';
 import { AdminAuthGuard } from '../auth/guards/admin-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 import { LogService } from '../log/log.service';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { DocumentCategory } from '@prisma/client';
 
 @ApiTags('Admin – Documents')
 @Controller('admin/documents')
-@UseGuards(AdminAuthGuard)
+@UseGuards(AdminAuthGuard, RolesGuard)
 export class DocumentController {
   constructor(
     private readonly documentService: DocumentService,
@@ -37,6 +40,7 @@ export class DocumentController {
 
   /** Mode A — import from Google Docs URL */
   @Post('from-url')
+  @Roles(UserRole.MANAGER)
   @ApiOperation({
     summary: 'Create document by importing from a public Google Docs URL',
   })
@@ -71,6 +75,7 @@ export class DocumentController {
 
   /** Mode B — direct .docx upload (file already uploaded to storage via /file/upload) */
   @Post('from-upload')
+  @Roles(UserRole.MANAGER)
   @ApiOperation({
     summary: 'Create document from an already-uploaded .docx file URL',
   })
@@ -97,12 +102,14 @@ export class DocumentController {
   }
 
   @Get()
+  @Roles(UserRole.MODERATOR)
   @ApiOperation({ summary: 'List all documents' })
   list(@Query() dto: ListDocumentsDto) {
     return this.documentService.list(dto);
   }
 
   @Patch(':id')
+  @Roles(UserRole.MANAGER)
   @ApiOperation({ summary: 'Update document title or category' })
   async update(
     @Param('id') id: string,
@@ -121,6 +128,7 @@ export class DocumentController {
   }
 
   @Delete(':id')
+  @Roles(UserRole.MANAGER)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Delete a document' })
   async delete(@Param('id') id: string, @Req() req: any) {
@@ -135,6 +143,7 @@ export class DocumentController {
   }
 
   @Post(':id/fill/docx')
+  @Roles(UserRole.MODERATOR)
   @ApiOperation({ summary: 'Fill template and return as DOCX' })
   async fillDocx(
     @Param('id') id: string,
@@ -157,6 +166,7 @@ export class DocumentController {
   }
 
   @Post(':id/fill/pdf')
+  @Roles(UserRole.MODERATOR)
   @ApiOperation({ summary: 'Fill template and return as PDF' })
   async fillPdf(
     @Param('id') id: string,

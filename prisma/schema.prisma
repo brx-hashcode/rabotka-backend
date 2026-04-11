@@ -19,6 +19,8 @@ enum VerificationStatus {
 
 enum UserRole {
   ADMIN
+  MANAGER
+  MODERATOR
   SUPER_ADMIN
 }
 
