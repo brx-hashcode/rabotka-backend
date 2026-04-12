@@ -118,6 +118,13 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     isSecret: false,
   },
   {
+    key: 'fees.contact_recommendation_fee_employer',
+    value: '1000',
+    category: ConfigCategory.FEES,
+    label: 'Frais contact depuis recommandation – Employeur (FCFA)',
+    isSecret: false,
+  },
+  {
     key: 'fees.welcome_credit_worker',
     value: '100',
     category: ConfigCategory.FEES,
@@ -284,25 +291,11 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
 
   // ── MONETBIL ──────────────────────────────────────────────────────────────
   {
-    key: 'monetbil.mode',
-    value: 'SANDBOX',
-    category: ConfigCategory.MONETBIL,
-    label: 'Monetbil – Mode (PRODUCTION | SANDBOX)',
-    isSecret: false,
-  },
-  {
     key: 'monetbil.service_key',
     value: '',
     category: ConfigCategory.MONETBIL,
     label: 'Monetbil – Service Key',
     isSecret: false,
-  },
-  {
-    key: 'monetbil.service_secret',
-    value: '',
-    category: ConfigCategory.MONETBIL,
-    label: 'Monetbil – Service Secret',
-    isSecret: true,
   },
 ];
 
@@ -331,12 +324,5 @@ export const STORAGE_ENV_OVERRIDES: Record<string, Record<string, string>> = {
 };
 
 export const MONETBIL_ENV_OVERRIDES: Record<string, string> = {
-  MONETBIL_MODE: 'monetbil.mode',
   MONETBIL_SERVICE_KEY: 'monetbil.service_key',
-  MONETBIL_SERVICE_SECRET: 'monetbil.service_secret',
-};
-
-export const MONETBIL_API_URLS: Record<string, string> = {
-  PRODUCTION: 'https://api2.monetbil.com/payment/v1/placePayment',
-  SANDBOX: 'https://api.monetbil.com/payment/v1/placePayment',
 };

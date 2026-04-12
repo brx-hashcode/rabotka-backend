@@ -57,16 +57,18 @@ export function formatContactUnlockedMessage(params: {
   const { name, phone, email } = params;
 
   const contactLines = [
-    ...(phone ? [`📞 *Téléphone*: ${phone}`] : []),
-    ...(email ? [`✉️ *Email*: ${email}`] : []),
+    ...(phone ? [`*Téléphone*: ${phone}`] : []),
+    ...(email ? [`*Email*: ${email}`] : []),
   ];
 
   return [
-    '✅ *CONTACT DÉVERROUILLÉ !*',
+    '🔓 *CONTACT DÉVERROUILLÉ !*',
     '',
     `*${name}*`,
     '',
     ...contactLines,
+    '',
+    'Tapez *Menu* pour revenir au menu principal.',
   ].join('\n');
 }
 

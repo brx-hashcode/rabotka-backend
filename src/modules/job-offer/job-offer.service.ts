@@ -170,11 +170,9 @@ export class JobOfferService {
     this.matchingService
       .indexJobOffer(offer.id)
       .then(async () => {
-        const workerIds = await this.matchingService.findMatchingWorkersForJob(
-          offer.id,
-          20,
-        );
-        for (const workerId of workerIds) {
+        const workerResults: { id: string; score: number }[] =
+          await this.matchingService.findMatchingWorkersForJob(offer.id, 20);
+        for (const { id: workerId } of workerResults) {
           this.botNotification
             .sendRecommendedJobNotification(workerId, offer.id)
             .catch(() => {});
@@ -227,18 +225,13 @@ export class JobOfferService {
     return { data, nextCursor };
   }
 
-  /**
-   * Returns recommended active job offers for a worker based on vector similarity.
-   * Falls back to latest active offers if matching is disabled or returns nothing.
-   */
   async findRecommendedForWorker(
     workerId: string,
     limit = 10,
   ): Promise<JobOfferListItem[]> {
-    const recommendedIds = await this.matchingService.findMatchingJobsForWorker(
-      workerId,
-      limit,
-    );
+    const recommendedResults: { id: string; score: number }[] =
+      await this.matchingService.findMatchingJobsForWorker(workerId, limit);
+    const recommendedIds: string[] = recommendedResults.map((r) => r.id);
 
     if (recommendedIds.length > 0) {
       const offers = await this.prisma.jobOffer.findMany({
@@ -253,15 +246,13 @@ export class JobOfferService {
           },
         },
       });
-      // Preserve similarity ranking order
       const offerMap = new Map(offers.map((o) => [o.id, o]));
-      return recommendedIds
-        .map((id) => offerMap.get(id))
-        .filter(Boolean)
-        .map((o) => this.toListItem(o!, o!._count.applications));
+      return recommendedIds.flatMap((id) => {
+        const o = offerMap.get(id);
+        return o ? [this.toListItem(o, o._count.applications)] : [];
+      });
     }
 
-    // Fallback: latest active offers not yet applied to
     const { data } = await this.findActive(limit, undefined, workerId);
     return data;
   }

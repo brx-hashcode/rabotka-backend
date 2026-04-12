@@ -131,6 +131,7 @@ export class WhatsAppService {
       const message = welcomeActivationMessage(
         profile.first_name,
         creditAmount,
+        profile.profile_type as 'WORKER' | 'EMPLOYER',
       );
       await this.sendTextMessage(profile.phone, message, profileId);
     }

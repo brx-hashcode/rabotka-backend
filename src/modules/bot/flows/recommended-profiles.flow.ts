@@ -1,10 +1,24 @@
+import { WalletTransactionType, PaymentType, PaymentMethod, PaymentStatus } from '@prisma/client';
+import { generatePaymentReference } from '../../../common/utils/payment-reference';
 import type { BotProfile, BotState } from '../types/bot-state.types';
 import { FLOW_IDS, CMD_MENU } from '../bot.constants';
 import { menuMessage } from '../messages/menu.messages';
+import { formatContactUnlockedMessage } from '../messages/contact-unlock.messages';
 import type { PrismaService } from '../../../common/services/prisma/prisma.service';
+import type { SystemConfigService } from '../../system-config/system-config.service';
+import type { ContactUnlockService } from '../../contact-unlock/contact-unlock.service';
+import type { WalletService } from '../../wallet/wallet.service';
+import type { PaymentService } from '../../payments/payment.service';
+import type { BotNotificationService } from '../services/bot-notification.service';
 
 export type RecommendedProfilesContext = {
   prisma: PrismaService;
+  systemConfig: SystemConfigService;
+  contactUnlockService: ContactUnlockService;
+  walletService: WalletService;
+  paymentService: PaymentService;
+  botNotification: BotNotificationService;
+  employerProfileId: string;
 };
 
 export type FlowResult = {
@@ -16,12 +30,14 @@ export type FlowResult = {
 function formatWorkerCard(
   index: number,
   w: {
+    id: string;
     first_name: string;
     last_name: string;
     reliability_score: number | null;
     description: string | null;
     category?: { name: string } | null;
   },
+  aiScore: number,
 ): string {
   const name = `${w.first_name} ${w.last_name}`.trim();
   const score = w.reliability_score ?? 100;
@@ -29,7 +45,16 @@ function formatWorkerCard(
   const desc = w.description
     ? `\n_${w.description.slice(0, 80)}${w.description.length > 80 ? '…' : ''}_`
     : '';
-  return `${index}. *${name}*\n   ⭐ Score: ${score}/100 | 🏷 ${domain}${desc}`;
+  return `${index}. *${name}*\n   ⭐ ${score}/100 | 🤖 IA: ${aiScore}% | 🏷 ${domain}${desc}`;
+}
+
+function subMenu(): string {
+  return [
+    '',
+    '1️⃣ Contacter le candidat',
+    '2️⃣ Liste des candidats',
+    '3️⃣ Menu',
+  ].join('\n');
 }
 
 export async function runRecommendedProfilesFlow(
@@ -40,6 +65,8 @@ export async function runRecommendedProfilesFlow(
 ): Promise<FlowResult> {
   const payload = state.payload || {};
   const workerIds = (payload.workerIds as string[]) ?? [];
+  const workerScores = (payload.workerScores as Record<string, number>) ?? {};
+  const selectedWorkerId = payload.selectedWorkerId as string | undefined;
   const trimmed = input.trim();
   const normalized = trimmed.toLowerCase();
 
@@ -63,6 +90,131 @@ export async function runRecommendedProfilesFlow(
     };
   }
 
+  // ── Step 2: payment method choice ────────────────────────────────────────
+  if (state.step === 2 && selectedWorkerId) {
+    const fee = await ctx.systemConfig.getRecommendationContactFee();
+    const balance = await ctx.walletService.getProfileWalletBalance(profile.id);
+
+    if (trimmed === '3') {
+      // Cancel — go back to profile detail
+      return showWorkerDetail(selectedWorkerId, workerIds, workerScores, state, ctx);
+    }
+
+    if (trimmed === '1' && balance >= fee) {
+      // Pay with wallet
+      const worker = await ctx.prisma.profile.findUnique({
+        where: { id: selectedWorkerId },
+        select: { first_name: true, last_name: true, phone: true, email: true },
+      });
+      const workerName = worker
+        ? `${worker.first_name} ${worker.last_name}`.trim()
+        : 'ce candidat';
+      try {
+        await ctx.walletService.debitProfileWallet(
+          profile.id,
+          fee,
+          WalletTransactionType.CONTACT_UNLOCK_DEBIT,
+          'recommendation_contact',
+          selectedWorkerId,
+        );
+        // Record the payment so it appears in Payroll & Wallet
+        const txRef = generatePaymentReference();
+        await ctx.prisma.payment.create({
+          data: {
+            type: PaymentType.CONTACT_UNLOCK,
+            profile_id: profile.id,
+            amount: fee,
+            payment_method: PaymentMethod.WALLET,
+            transaction_id: txRef,
+            status: PaymentStatus.COMPLETED,
+            paid_at: new Date(),
+            description: `Contact recommandé — ${workerName} [worker:${selectedWorkerId}]`,
+          },
+        });
+        return {
+          reply: [
+            formatContactUnlockedMessage({
+              name: workerName,
+              phone: worker?.phone ?? null,
+              email: worker?.email ?? null,
+            }),
+          ],
+          clearState: true,
+        };
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : 'Erreur lors du paiement.';
+        return { reply: [`❌ ${msg}`], clearState: true };
+      }
+    }
+
+    const mobileMoneyOption = balance >= fee ? '2' : '1';
+    if (trimmed === mobileMoneyOption) {
+      // Pay with mobile money
+      return generateMobileMoneyLink(
+        selectedWorkerId,
+        profile,
+        fee,
+        workerIds,
+        workerScores,
+        ctx,
+      );
+    }
+
+    // Unknown input — re-show payment method prompt
+    return showPaymentMethodPrompt(
+      selectedWorkerId, fee, balance, workerIds, workerScores, state, ctx,
+    );
+  }
+
+  // ── Step 1: sub-menu after profile detail ─────────────────────────────────
+  if (state.step === 1 && selectedWorkerId) {
+    if (trimmed === '3') return goToMenu();
+
+    if (trimmed === '2') {
+      return showList(workerIds, workerScores, state, ctx);
+    }
+
+    if (trimmed === '1') {
+      // Show payment method choice
+      const fee = await ctx.systemConfig.getRecommendationContactFee();
+      const balance = await ctx.walletService.getProfileWalletBalance(profile.id);
+      return showPaymentMethodPrompt(
+        selectedWorkerId, fee, balance, workerIds, workerScores, state, ctx,
+      );
+    }
+
+    // Unknown input — re-show sub-menu
+    return {
+      reply: [`Tapez *1*, *2* ou *3*.\n${subMenu()}`],
+      nextState: {
+        ...state,
+        payload: { ...payload, workerIds, workerScores, selectedWorkerId },
+        updatedAt: new Date().toISOString(),
+      },
+    };
+  }
+
+  // ── Step 0: list + worker selection ───────────────────────────────────────
+  if (trimmed === '7') return goToMenu();
+
+  const pageWorkerIds = workerIds.slice(0, 5);
+  const choice = /^[1-5]$/.test(trimmed) ? Number.parseInt(trimmed, 10) : 0;
+
+  if (choice >= 1 && choice <= pageWorkerIds.length) {
+    const workerId = pageWorkerIds[choice - 1];
+    return showWorkerDetail(workerId, workerIds, workerScores, state, ctx);
+  }
+
+  // Default: show list
+  return showList(workerIds, workerScores, state, ctx);
+}
+
+async function showList(
+  workerIds: string[],
+  workerScores: Record<string, number>,
+  state: BotState,
+  ctx: RecommendedProfilesContext,
+): Promise<FlowResult> {
   const pageWorkerIds = workerIds.slice(0, 5);
   const workers = await ctx.prisma.profile.findMany({
     where: { id: { in: pageWorkerIds } },
@@ -76,68 +228,195 @@ export async function runRecommendedProfilesFlow(
     },
   });
 
-  // Preserve similarity order
   const workerMap = new Map(workers.map((w) => [w.id, w]));
   const orderedWorkers = pageWorkerIds
     .map((id) => workerMap.get(id))
     .filter(Boolean) as typeof workers;
 
-  if (normalized === '7') return goToMenu();
-
   const lines = [
     '🎯 *TRAVAILLEURS RECOMMANDÉS*',
     '',
-    ...orderedWorkers.map((w, i) => formatWorkerCard(i + 1, w)),
+    ...orderedWorkers.map((w, i) => {
+      const aiScore = Math.round((workerScores[w.id] ?? 0) * 100);
+      return formatWorkerCard(i + 1, w, aiScore);
+    }),
     '',
     '*Tapez le numéro pour voir le profil complet ou 7 pour le menu.*',
   ];
 
-  const choice = /^[1-5]$/.test(trimmed) ? Number.parseInt(trimmed, 10) : 0;
-  if (choice >= 1 && choice <= orderedWorkers.length) {
-    const worker = orderedWorkers[choice - 1];
-    const completedCount = await ctx.prisma.application.count({
-      where: {
-        worker_id: worker.id,
-        status: 'ACCEPTED',
-        job_offer: { status: 'COMPLETED' },
-      },
-    });
-    const domain = worker.category?.name ?? 'Non spécifié';
-    const detail = [
-      `👤 *${worker.first_name} ${worker.last_name}*`,
-      `⭐ Score fiabilité: ${worker.reliability_score ?? 100}/100`,
-      `🏷 Domaine: ${domain}`,
-      `✅ Missions complétées: ${completedCount}`,
-      worker.description ? `\n_${worker.description}_` : '',
-      '',
-      'Tapez *7* pour revenir au menu.',
-    ]
-      .filter(Boolean)
-      .join('\n');
+  return {
+    reply: [lines.join('\n')],
+    nextState: {
+      ...state,
+      step: 0,
+      payload: { workerIds, workerScores },
+      updatedAt: new Date().toISOString(),
+    },
+  };
+}
 
+async function showWorkerDetail(
+  workerId: string,
+  workerIds: string[],
+  workerScores: Record<string, number>,
+  state: BotState,
+  ctx: RecommendedProfilesContext,
+): Promise<FlowResult> {
+  const worker = await ctx.prisma.profile.findUnique({
+    where: { id: workerId },
+    select: {
+      id: true,
+      first_name: true,
+      last_name: true,
+      reliability_score: true,
+      description: true,
+      address: true,
+      avatar_url: true,
+      category: { select: { name: true } },
+    },
+  });
+
+  if (!worker) {
     return {
-      reply: [detail],
-      nextState: {
-        ...state,
-        payload: { ...payload, workerIds },
-        updatedAt: new Date().toISOString(),
-      },
+      reply: ['Profil introuvable. Tapez *7* pour le menu.'],
+      nextState: state,
     };
   }
 
+  const completedCount = await ctx.prisma.application.count({
+    where: {
+      worker_id: workerId,
+      status: 'ACCEPTED',
+      job_offer: { status: 'COMPLETED' },
+    },
+  });
+
+  const name = `${worker.first_name} ${worker.last_name}`.trim();
+  const domain = worker.category?.name ?? 'Non spécifié';
+  const aiScore = Math.round((workerScores[workerId] ?? 0) * 100);
+
+  const detailLines = [
+    `👤 *${name}*`,
+    `⭐ Score fiabilité: ${worker.reliability_score ?? 100}/100`,
+    `🤖 Score IA: ${aiScore}%`,
+    `🏷 Domaine: ${domain}`,
+    ...(worker.address ? [`📍 Adresse: ${worker.address}`] : []),
+    `✅ Missions complétées: ${completedCount}`,
+    ...(worker.description ? ['', `_${worker.description}_`] : []),
+    subMenu(),
+  ];
+
+  const detailText = detailLines.join('\n');
+  const reply = worker.avatar_url?.trim()
+    ? [`[IMG:${worker.avatar_url}]${detailText}`]
+    : [detailText];
+
   return {
-    reply: [lines.join('\n')],
-    nextState: state,
+    reply,
+    nextState: {
+      ...state,
+      step: 1,
+      payload: { workerIds, workerScores, selectedWorkerId: workerId },
+      updatedAt: new Date().toISOString(),
+    },
+  };
+}
+
+async function showPaymentMethodPrompt(
+  workerId: string,
+  fee: number,
+  balance: number,
+  workerIds: string[],
+  workerScores: Record<string, number>,
+  state: BotState,
+  ctx: RecommendedProfilesContext,
+): Promise<FlowResult> {
+  const hasFunds = balance >= fee;
+
+  const options = hasFunds
+    ? [
+        `1️⃣ Utiliser mon crédit (${fee.toLocaleString('fr-FR')} FCFA)`,
+        '2️⃣ Payer par mobile money',
+        '3️⃣ Annuler',
+      ]
+    : [
+        `1️⃣ Payer par mobile money`,
+        '2️⃣ Annuler',
+      ];
+
+  const balanceLine = hasFunds
+    ? `💰 Solde disponible : *${balance.toLocaleString('fr-FR')} FCFA*`
+    : `⚠️ Solde insuffisant (${balance.toLocaleString('fr-FR')} FCFA disponibles)`;
+
+  const text = [
+    `🔓 *Déverrouiller le contact*`,
+    '',
+    `Frais : *${fee.toLocaleString('fr-FR')} FCFA*`,
+    balanceLine,
+    '',
+    '*Comment souhaitez-vous payer ?*',
+    '',
+    ...options,
+  ].join('\n');
+
+  return {
+    reply: [text],
+    nextState: {
+      ...state,
+      step: 2,
+      payload: { workerIds, workerScores, selectedWorkerId: workerId },
+      updatedAt: new Date().toISOString(),
+    },
+  };
+}
+
+async function generateMobileMoneyLink(
+  workerId: string,
+  profile: BotProfile,
+  fee: number,
+  workerIds: string[],
+  workerScores: Record<string, number>,
+  ctx: RecommendedProfilesContext,
+): Promise<FlowResult> {
+  const worker = await ctx.prisma.profile.findUnique({
+    where: { id: workerId },
+    select: { first_name: true, last_name: true },
+  });
+  const workerName = worker
+    ? `${worker.first_name} ${worker.last_name}`.trim()
+    : 'ce candidat';
+
+  // Encode workerId in description so processSuccessfulPayment can reveal contacts via WhatsApp
+  const paymentUrl = await ctx.paymentService.createPaymentUrl(
+    profile.id,
+    fee,
+    `RECOMMENDATION_CONTACT:${workerId}`,
+  );
+
+  return {
+    reply: [
+      [
+        `📱 *Paiement par mobile money*`,
+        '',
+        `Pour voir les coordonnées de *${workerName}*, effectuez un paiement de *${fee.toLocaleString('fr-FR')} FCFA* via le lien ci-dessous :`,
+        '',
+        paymentUrl,
+        '',
+        '✅ Une fois le paiement confirmé, vous recevrez les coordonnées par WhatsApp.',
+      ].join('\n'),
+    ],
+    clearState: true,
   };
 }
 
 export function getRecommendedProfilesInitialState(
   workerIds: string[],
+  workerScores: Record<string, number> = {},
 ): BotState {
   return {
     flowId: FLOW_IDS.RECOMMENDED_PROFILES,
     step: 0,
-    payload: { workerIds },
+    payload: { workerIds, workerScores },
     updatedAt: new Date().toISOString(),
   };
 }
