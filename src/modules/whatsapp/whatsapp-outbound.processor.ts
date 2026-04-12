@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { MessageDirection } from '@prisma/client';
 import { WhatsAppService } from './whatsapp.service';
 import { QueueService } from '../../common/services/queue/queue.service';
@@ -16,16 +16,17 @@ export type WhatsAppOutboundJobData = {
 );
 
 @Injectable()
-export class WhatsAppOutboundProcessor implements OnModuleInit {
+export class WhatsAppOutboundProcessor {
   private readonly logger = new Logger(WhatsAppOutboundProcessor.name);
 
-  constructor(
-    private readonly whatsApp: WhatsAppService,
-    private readonly queueService: QueueService,
-  ) {}
+  constructor(private readonly whatsApp: WhatsAppService) {}
 
-  onModuleInit() {
-    const worker = this.queueService.createWorker<WhatsAppOutboundJobData>(
+  /**
+   * Called by worker.ts bootstrap to register the BullMQ worker.
+   * Not using onModuleInit to avoid DI ordering issues in the worker context.
+   */
+  register(queueService: QueueService): void {
+    const worker = queueService.createWorker<WhatsAppOutboundJobData>(
       WHATSAPP_OUTBOUND_QUEUE,
       (job) => this.process(job),
       { concurrency: 3 },
@@ -38,7 +39,7 @@ export class WhatsAppOutboundProcessor implements OnModuleInit {
         this.logger.error(
           `Job ${job.id} permanently failed after ${job.attemptsMade} attempts: ${err.message}`,
         );
-        this.queueService
+        queueService
           .addJob(WHATSAPP_OUTBOUND_DLQ, {
             originalJobId: job.id,
             data: job.data,
@@ -55,7 +56,7 @@ export class WhatsAppOutboundProcessor implements OnModuleInit {
     });
   }
 
-  private async process(job: {
+  async process(job: {
     id?: string;
     data: WhatsAppOutboundJobData;
   }): Promise<void> {

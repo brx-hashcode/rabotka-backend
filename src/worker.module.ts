@@ -13,6 +13,7 @@ import { QueueService } from './common/services/queue/queue.service';
 import { REDIS_CONNECTION } from './common/services/redis/redis.constants';
 import type Redis from 'ioredis';
 import { PaymentProcessor } from './modules/payments/payment.processor';
+import { WhatsAppOutboundProcessor } from './modules/whatsapp/whatsapp-outbound.processor';
 import { getMailerTransportConfig } from './modules/mail/mailer-transport.config';
 import { WalletService } from './modules/wallet/wallet.service';
 import { SystemConfigService } from './modules/system-config/system-config.service';
@@ -53,20 +54,24 @@ export class WorkerModule {
       MailModule,
     ];
 
+    // WhatsApp outbound always needed (not just for reminders)
+    const whatsAppProviders = [
+      {
+        provide: TwilioService,
+        useFactory: (config: ConfigService) => new TwilioService(config),
+        inject: [ConfigService],
+      },
+      {
+        provide: WalletService,
+        useFactory: (prisma: PrismaService) =>
+          new WalletService(prisma, null as unknown as SystemConfigService),
+        inject: [PrismaService],
+      },
+      WhatsAppService,
+    ];
+
     const reminderProviders = enableReminders
       ? [
-          {
-            provide: TwilioService,
-            useFactory: (config: ConfigService) => new TwilioService(config),
-            inject: [ConfigService],
-          },
-          {
-            provide: WalletService,
-            useFactory: (prisma: PrismaService) =>
-              new WalletService(prisma, null as unknown as SystemConfigService),
-            inject: [PrismaService],
-          },
-          WhatsAppService,
           {
             provide: ReminderProcessor,
             useFactory: (
@@ -94,7 +99,7 @@ export class WorkerModule {
     return {
       module: WorkerModule,
       imports: coreImports,
-      providers: [...reminderProviders, PaymentProcessor],
+      providers: [...whatsAppProviders, ...reminderProviders, PaymentProcessor, WhatsAppOutboundProcessor],
     };
   }
 }

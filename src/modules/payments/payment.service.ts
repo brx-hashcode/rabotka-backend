@@ -101,13 +101,26 @@ export class PaymentService {
       },
     });
 
-    await this.queueService.addJob<PaymentJobData>(PAYMENT_QUEUE, {
-      paymentId: payment.id,
-      type: data.type,
-      profileId: data.profileId,
-      amount: data.amount,
-      entityId: data.entityId,
-    });
+    try {
+      await this.queueService.addJob<PaymentJobData>(PAYMENT_QUEUE, {
+        paymentId: payment.id,
+        type: data.type,
+        profileId: data.profileId,
+        amount: data.amount,
+        entityId: data.entityId,
+      });
+    } catch (err) {
+      // Roll back the payment record — it would be stuck PENDING forever otherwise
+      await this.prisma.payment
+        .delete({ where: { id: payment.id } })
+        .catch((delErr) =>
+          this.logger.error(
+            `Failed to roll back payment ${payment.id} after enqueue failure`,
+            delErr,
+          ),
+        );
+      throw err;
+    }
 
     return { paymentId: payment.id };
   }

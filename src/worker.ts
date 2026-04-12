@@ -21,6 +21,7 @@ import { ReminderProcessor } from './modules/bot/reminder/reminder.processor';
 import type { ReminderJobData } from './modules/bot/reminder/reminder.processor';
 import { PaymentProcessor } from './modules/payments/payment.processor';
 import type { PaymentJobData } from './modules/payments/payment.service';
+import { WhatsAppOutboundProcessor } from './modules/whatsapp/whatsapp-outbound.processor';
 
 loadEnv({ path: '.env.local' });
 loadEnv();
@@ -43,6 +44,7 @@ class WorkerLogger implements LoggerService {
     'BullModule',
     'ReminderProcessor',
     'PaymentProcessor',
+    'WhatsAppOutboundProcessor',
   ];
 
   log(message: string, context?: string) {
@@ -269,6 +271,15 @@ async function bootstrap(): Promise<void> {
     (job) => paymentProcessor.process(job),
     { concurrency: 5 },
   );
+
+  try {
+    const outboundProcessor = app.get(WhatsAppOutboundProcessor);
+    outboundProcessor.register(queueService);
+    logger.log('WhatsApp outbound worker registered');
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.warn(`WhatsAppOutboundProcessor not found (${msg}); outbound WhatsApp jobs will not be processed`);
+  }
 
   app.enableShutdownHooks();
 

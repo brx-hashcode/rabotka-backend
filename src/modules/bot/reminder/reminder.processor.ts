@@ -192,34 +192,29 @@ export class ReminderProcessor {
     if (allOverdue.length === 0) return;
 
     const allIds = allOverdue.map((o) => o.id);
-    await this.prisma.jobOffer.updateMany({
-      where: { id: { in: allIds } },
-      data: { status: JobOfferStatus.EXPIRED },
-    });
 
-    this.logger.log(
-      `Expired ${allIds.length} overdue job offer(s) (${filledOverdue.length} ghost)`,
-    );
-
-    // Deduct score from ghost employers (had accepted worker, never completed)
-    for (const offer of filledOverdue) {
-      const currentScore = offer.employer?.reliability_score ?? 100;
-      const newScore = Math.max(
-        RELIABILITY_SCORE_MIN,
-        currentScore - EMPLOYER_GHOST_SCORE_DEDUCTION,
-      );
-      await this.prisma.profile
-        .update({
+    // Expire all offers + deduct scores for ghost employers atomically
+    await this.prisma.$transaction([
+      this.prisma.jobOffer.updateMany({
+        where: { id: { in: allIds } },
+        data: { status: JobOfferStatus.EXPIRED },
+      }),
+      ...filledOverdue.map((offer) => {
+        const currentScore = offer.employer?.reliability_score ?? 100;
+        const newScore = Math.max(
+          RELIABILITY_SCORE_MIN,
+          currentScore - EMPLOYER_GHOST_SCORE_DEDUCTION,
+        );
+        return this.prisma.profile.update({
           where: { id: offer.employer_id },
           data: { reliability_score: newScore },
-        })
-        .catch((err) =>
-          this.logger.warn(
-            `Failed to deduct score for ghost employer ${offer.employer_id}`,
-            err,
-          ),
-        );
-    }
+        });
+      }),
+    ]);
+
+    this.logger.log(
+      `Expired ${allIds.length} overdue job offer(s) (${filledOverdue.length} ghost, scores deducted)`,
+    );
 
     const ghostIds = new Set(filledOverdue.map((o) => o.id));
 
@@ -258,8 +253,9 @@ export class ReminderProcessor {
 
   private async sendReminder24h(applicationId: string): Promise<void> {
     const key = `${REMINDER_24H_SENT_KEY}${applicationId}`;
-    const sent = await this.redis.get(key);
-    if (sent) {
+    // Atomic SET NX EX — only one concurrent job can claim this key
+    const claimed = await this.redis.set(key, '1', 'EX', SENT_KEY_TTL, 'NX');
+    if (!claimed) {
       this.logger.debug(`Reminder 24h already sent for ${applicationId}`);
       return;
     }
@@ -284,14 +280,13 @@ export class ReminderProcessor {
     });
 
     await this.whatsApp.sendTextMessage(app.worker.phone, text);
-    await this.redis.set(key, '1', 'EX', SENT_KEY_TTL);
     this.logger.log(`Reminder 24h sent for application ${applicationId}`);
   }
 
   private async sendReminder2h(applicationId: string): Promise<void> {
     const key = `${REMINDER_2H_SENT_KEY}${applicationId}`;
-    const sent = await this.redis.get(key);
-    if (sent) {
+    const claimed = await this.redis.set(key, '1', 'EX', SENT_KEY_TTL, 'NX');
+    if (!claimed) {
       this.logger.debug(`Reminder 2h already sent for ${applicationId}`);
       return;
     }
@@ -315,14 +310,13 @@ export class ReminderProcessor {
     });
 
     await this.whatsApp.sendTextMessage(app.worker.phone, text);
-    await this.redis.set(key, '1', 'EX', SENT_KEY_TTL);
     this.logger.log(`Reminder 2h sent for application ${applicationId}`);
   }
 
   private async sendReminderStart(applicationId: string): Promise<void> {
     const key = `${REMINDER_START_SENT_KEY}${applicationId}`;
-    const sent = await this.redis.get(key);
-    if (sent) {
+    const claimed = await this.redis.set(key, '1', 'EX', SENT_KEY_TTL, 'NX');
+    if (!claimed) {
       this.logger.debug(`Reminder start already sent for ${applicationId}`);
       return;
     }
@@ -337,21 +331,31 @@ export class ReminderProcessor {
 
     if (!app?.worker?.phone || app.status !== ApplicationStatus.ACCEPTED) return;
 
+    // Update status + send message atomically: if message send fails, roll back the status
     await this.prisma.application.update({
       where: { id: applicationId },
       data: { status: ApplicationStatus.STARTED },
     });
 
-    const text = formatReminderStart({
-      offerTitle: app.job_offer.title,
-      scheduledAt: app.job_offer.scheduled_at,
-      address: app.job_offer.address,
-      employerName: `${app.job_offer.employer.first_name} ${app.job_offer.employer.last_name}`,
-      employerPhone: app.job_offer.employer.phone,
-    });
+    try {
+      const text = formatReminderStart({
+        offerTitle: app.job_offer.title,
+        scheduledAt: app.job_offer.scheduled_at,
+        address: app.job_offer.address,
+        employerName: `${app.job_offer.employer.first_name} ${app.job_offer.employer.last_name}`,
+        employerPhone: app.job_offer.employer.phone,
+      });
 
-    await this.whatsApp.sendTextMessage(app.worker.phone, text);
-    await this.redis.set(key, '1', 'EX', SENT_KEY_TTL);
-    this.logger.log(`Reminder start sent and application ${applicationId} marked as STARTED`);
+      await this.whatsApp.sendTextMessage(app.worker.phone, text);
+      this.logger.log(`Reminder start sent and application ${applicationId} marked as STARTED`);
+    } catch (err) {
+      // Roll back status if notification fails — job will retry and re-acquire the lock
+      await this.redis.del(key);
+      await this.prisma.application.update({
+        where: { id: applicationId },
+        data: { status: ApplicationStatus.ACCEPTED },
+      });
+      throw err;
+    }
   }
 }
