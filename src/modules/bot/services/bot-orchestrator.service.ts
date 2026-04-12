@@ -352,6 +352,12 @@ export class BotOrchestratorService {
       [FLOW_IDS.RECOMMENDED_PROFILES]: () =>
         runRecommendedProfilesFlow(state, input, profile, {
           prisma: this.prisma,
+          systemConfig: this.systemConfig,
+          contactUnlockService: this.contactUnlockService,
+          walletService: this.walletService,
+          paymentService: this.paymentService,
+          botNotification: this.notificationService,
+          employerProfileId: profile.id,
         }),
     };
     const runner = runners[flowId];
@@ -562,10 +568,9 @@ export class BotOrchestratorService {
     profile: BotProfile,
     profileId: string,
   ): Promise<string[]> {
-    const offerIds = await this.matchingService.findMatchingJobsForWorker(
-      profile.id,
-      10,
-    );
+    const offerResults: { id: string; score: number }[] =
+      await this.matchingService.findMatchingJobsForWorker(profile.id, 10);
+    const offerIds: string[] = offerResults.map((r) => r.id);
 
     if (offerIds.length === 0) {
       return [
@@ -627,15 +632,23 @@ export class BotOrchestratorService {
       select: { id: true },
     });
 
-    let workerIds: string[] = [];
+    let workerResults: { id: string; score: number }[] = [];
     if (latestOffer) {
-      workerIds = await this.matchingService.findMatchingWorkersForJob(
+      workerResults = await this.matchingService.findMatchingWorkersForJob(
         latestOffer.id,
         10,
       );
     }
+    // Fallback: use employer profile description when no job offer exists
+    if (workerResults.length === 0) {
+      workerResults =
+        await this.matchingService.findMatchingWorkersForEmployerProfile(
+          profile.id,
+          10,
+        );
+    }
 
-    if (workerIds.length === 0) {
+    if (workerResults.length === 0) {
       return [
         [
           '🎯 *Travailleurs recommandés*',
@@ -647,7 +660,15 @@ export class BotOrchestratorService {
       ];
     }
 
-    const flowState = getRecommendedProfilesInitialState(workerIds);
+    const workerIds = workerResults.map((r) => r.id);
+    const workerScores: Record<string, number> = Object.fromEntries(
+      workerResults.map((r) => [r.id, r.score]),
+    );
+
+    const flowState = getRecommendedProfilesInitialState(
+      workerIds,
+      workerScores,
+    );
     await this.botState.set(profileId, flowState);
 
     const pageIds = workerIds.slice(0, 5);
@@ -673,7 +694,8 @@ export class BotOrchestratorService {
       ...ordered.map((w, i) => {
         const name = `${w.first_name} ${w.last_name}`.trim();
         const domain = w.category?.name ?? 'Non spécifié';
-        return `${i + 1}. *${name}*\n   ⭐ ${w.reliability_score ?? 100}/100 | 🏷 ${domain}`;
+        const aiScore = Math.round((workerScores[w.id] ?? 0) * 100);
+        return `${i + 1}. *${name}*\n   ⭐ ${w.reliability_score ?? 100}/100 | 🤖 IA: ${aiScore}% | 🏷 ${domain}`;
       }),
       '',
       '*Tapez le numéro pour le profil complet ou 7 pour le menu.*',

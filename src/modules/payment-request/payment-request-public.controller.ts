@@ -24,7 +24,7 @@ export class PaymentRequestPublicController {
     @Param('token') token: string,
     @Body() dto: InitiatePaymentDto,
   ) {
-    const result = await this.service.initiateMonetbilPayment(token, dto.phone, dto.operator);
+    const result = await this.service.initiateMonetbilPayment(token, dto.phone, String(dto.operator));
     await this.logService.create({
       action: 'PAYMENT_INITIATED',
       entityType: 'PaymentRequest',

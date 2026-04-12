@@ -144,6 +144,8 @@ export type AdminVerificationImageItem = {
 export type AdminProfileDetailResponse = AdminProfileListItem & {
   phone: string;
   description: string;
+  categoryId: string | null;
+  categoryName: string | null;
   jobOffersCount: number;
   applicationsCount: number;
   penaltiesCount: number;
@@ -439,6 +441,9 @@ export class ProfileService {
         avatar_url: true,
         created_at: true,
         updated_at: true,
+        category: {
+          select: { id: true, name: true },
+        },
         kyc_documents: {
           select: {
             id: true,
@@ -522,6 +527,8 @@ export class ProfileService {
       avatarUrl: profile.avatar_url,
       createdAt: profile.created_at,
       updatedAt: profile.updated_at,
+      categoryId: profile.category?.id ?? null,
+      categoryName: profile.category?.name ?? null,
       jobOffersCount: profile._count.job_offers,
       applicationsCount: profile._count.applications,
       penaltiesCount: profile._count.penalties,
@@ -909,8 +916,12 @@ export class ProfileService {
 
       this.logger.log(`Profile created successfully: ${profile.id}`);
 
-      // Index worker profile asynchronously (fire-and-forget, gated by feature flag)
-      this.matchingService.indexWorkerProfile(profile.id).catch(() => {});
+      // Index profile asynchronously (fire-and-forget, gated by feature flag)
+      if (createProfileDto.profileType === 'WORKER') {
+        this.matchingService.indexWorkerProfile(profile.id).catch(() => {});
+      } else {
+        this.matchingService.indexEmployerProfile(profile.id).catch(() => {});
+      }
 
       this.eventEmitter.emit(AdminNotificationEvent.PROFILE_CREATED, {
         event: AdminNotificationEvent.PROFILE_CREATED,

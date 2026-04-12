@@ -20,7 +20,8 @@ const PROFILE_TYPE_LABELS: Record<ProfileType, string> = {
 const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
   [PaymentMethod.MOBILE_MONEY]: 'Mobile Money',
   [PaymentMethod.CARD]: 'Carte bancaire',
-  [PaymentMethod.OTHER]: 'Portefeuille',
+  [PaymentMethod.WALLET]: 'Crédit portefeuille',
+  [PaymentMethod.OTHER]: 'Autre',
 };
 
 export type InvoiceItem = {
@@ -44,7 +45,7 @@ export class InvoiceService {
 
   private invoiceRef(id: string, createdAt: Date): string {
     const year = createdAt.getFullYear();
-    const short = id.replace(/-/g, '').slice(0, 8).toUpperCase();
+    const short = id.replaceAll('-', '').slice(0, 8).toUpperCase();
     return `RBT-${year}-${short}`;
   }
 

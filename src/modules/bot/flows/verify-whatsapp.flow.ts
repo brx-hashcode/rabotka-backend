@@ -87,7 +87,7 @@ export async function runVerifyWhatsappFlow(
     .grantWelcomeCredit(profile.id, profileType)
     .catch(() => 0);
 
-  const message = welcomeActivationMessage(profile.first_name, creditAmount);
+  const message = welcomeActivationMessage(profile.first_name, creditAmount, profile.profile_type);
 
   return {
     reply: [message],

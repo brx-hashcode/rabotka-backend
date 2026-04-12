@@ -1,30 +1,18 @@
 import { MonetbilService } from '../monetbil.service';
-import { createHmac } from 'node:crypto';
 
 global.fetch = jest.fn();
 
-function makePayload(overrides: Record<string, string> = {}) {
-  return {
-    payment_ref: 'REF123',
-    amount: '5000',
-    phone: '237600000001',
-    ...overrides,
-  };
-}
-
-function signPayload(
-  payload: Record<string, string>,
-  secret: string,
-): Record<string, string> {
-  const { payment_ref, amount, phone } = payload;
-  const signature = createHmac('sha256', secret)
-    .update(`${payment_ref}${amount}${phone}`)
-    .digest('hex');
-  return { ...payload, signature };
-}
-
 describe('MonetbilService', () => {
   let service: MonetbilService;
+
+  const baseParams = {
+    serviceKey: 'svc-key',
+    amount: 5000,
+    phonenumber: '069917686',
+    operator: 'CG_MTNMOBILEMONEY',
+    user: 'Jean Dupont',
+    email: 'jean@example.com',
+  };
 
   beforeEach(() => {
     service = new MonetbilService();
@@ -32,33 +20,27 @@ describe('MonetbilService', () => {
   });
 
   describe('initiatePayment()', () => {
-    const baseParams = {
-      serviceId: 'svc-id',
-      serviceSecret: 'svc-secret',
-      amount: 5000,
-      phone: '237600000001',
-      operator: 'MTN',
-      paymentRef: 'REF123',
-      notifyUrl: 'https://example.com/webhook',
-    };
-
-    it('returns success when API responds OK', async () => {
+    it('returns success with paymentId when API responds REQUEST_ACCEPTED', async () => {
       (fetch as jest.Mock).mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ success: true }),
+        json: async () => ({
+          status: 'REQUEST_ACCEPTED',
+          message: 'payment pending',
+          paymentId: '26041200203011759687',
+        }),
       });
 
       const result = await service.initiatePayment(baseParams);
 
       expect(result.success).toBe(true);
-      expect(result.paymentRef).toBe('REF123');
+      expect(result.paymentId).toBe('26041200203011759687');
       expect(result.message).toBe('USSD push initiated');
     });
 
-    it('returns failure when API returns success=false', async () => {
+    it('returns failure when API returns REQUEST_FAILED', async () => {
       (fetch as jest.Mock).mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ success: false, message: 'Invalid phone' }),
+        json: async () => ({ status: 'REQUEST_FAILED', message: 'Invalid phone' }),
       });
 
       const result = await service.initiatePayment(baseParams);
@@ -91,51 +73,67 @@ describe('MonetbilService', () => {
     it('sends correct form body to Monetbil API', async () => {
       (fetch as jest.Mock).mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ success: true }),
+        json: async () => ({ status: 'REQUEST_ACCEPTED', paymentId: '123' }),
       });
 
       await service.initiatePayment(baseParams);
 
       const [url, options] = (fetch as jest.Mock).mock.calls[0] as [string, RequestInit];
-      expect(url).toBe('https://api2.monetbil.com/payment/v1/placePayment');
+      expect(url).toBe('https://api.monetbil.com/payment/v1/placePayment');
       expect(options.method).toBe('POST');
       const body = options.body as string;
-      expect(body).toContain('service=svc-id');
+      expect(body).toContain('service=svc-key');
       expect(body).toContain('amount=5000');
-      expect(body).toContain('phone=237600000001');
-      expect(body).toContain('operator=MTN');
-      expect(body).toContain('payment_ref=REF123');
+      expect(body).toContain('phonenumber=069917686');
+      expect(body).toContain('operator=CG_MTNMOBILEMONEY');
+      expect(body).toContain('country=CG');
+      expect(body).toContain('currency=XAF');
+      expect(body).toContain('user=Jean+Dupont');
+      expect(body).toContain('email=jean%40example.com');
+      expect(body).not.toContain('notify_url');
     });
   });
 
-  describe('verifyWebhookSignature()', () => {
-    const secret = 'my-secret';
-
-    it('returns true for a valid HMAC signature', () => {
-      const payload = signPayload(makePayload(), secret);
-      expect(service.verifyWebhookSignature(payload, secret)).toBe(true);
+  describe('checkPayment()', () => {
+    it('returns SUCCESS when transaction.status is "1"', async () => {
+      (fetch as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          transaction: { status: '1', transaction_id: 'TX123' },
+        }),
+      });
+      const result = await service.checkPayment('PAY123');
+      expect(result.status).toBe('SUCCESS');
+      expect(result.transactionId).toBe('TX123');
     });
 
-    it('returns false when signature does not match', () => {
-      const payload = signPayload(makePayload(), secret);
-      payload.signature = 'badsignature';
-      expect(service.verifyWebhookSignature(payload, secret)).toBe(false);
+    it('returns FAILED when transaction.status is "0"', async () => {
+      (fetch as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ transaction: { status: '0' } }),
+      });
+      expect((await service.checkPayment('PAY123')).status).toBe('FAILED');
     });
 
-    it('returns false when signature is missing', () => {
-      const payload = makePayload(); // no signature field
-      expect(service.verifyWebhookSignature(payload, secret)).toBe(false);
+    it('returns CANCELLED when transaction.status is "-1"', async () => {
+      (fetch as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ transaction: { status: '-1' } }),
+      });
+      expect((await service.checkPayment('PAY123')).status).toBe('CANCELLED');
     });
 
-    it('returns false when amount is tampered', () => {
-      const payload = signPayload(makePayload(), secret);
-      payload.amount = '9999'; // tampered
-      expect(service.verifyWebhookSignature(payload, secret)).toBe(false);
+    it('returns PENDING when no transaction status yet', async () => {
+      (fetch as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({}),
+      });
+      expect((await service.checkPayment('PAY123')).status).toBe('PENDING');
     });
 
-    it('returns false when wrong secret used', () => {
-      const payload = signPayload(makePayload(), 'wrong-secret');
-      expect(service.verifyWebhookSignature(payload, secret)).toBe(false);
+    it('returns PENDING on network error', async () => {
+      (fetch as jest.Mock).mockRejectedValueOnce(new Error('timeout'));
+      expect((await service.checkPayment('PAY123')).status).toBe('PENDING');
     });
   });
 });

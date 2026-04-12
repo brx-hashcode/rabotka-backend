@@ -153,10 +153,13 @@ export class PaymentRequestService {
   async initiateMonetbilPayment(
     token: string,
     phone: string,
-    operator: 'MTN' | 'AIRTEL',
+    operator: string,
   ): Promise<{ success: boolean }> {
     const request = await this.prisma.paymentRequest.findUnique({
       where: { token },
+      include: {
+        profile: { select: { first_name: true, last_name: true, email: true } },
+      },
     });
 
     if (!request) {
@@ -173,28 +176,26 @@ export class PaymentRequestService {
       throw new BadRequestException('Montant non défini pour cette demande');
     }
 
-    const { serviceKey, serviceSecret, apiUrl } =
-      await this.systemConfig.getMonetbilConfig();
+    const { serviceKey } = await this.systemConfig.getMonetbilConfig();
 
-    if (!serviceKey || !serviceSecret) {
+    if (!serviceKey) {
       throw new BadRequestException(
         'Monetbil non configuré pour les paiements en ligne',
       );
     }
 
-    const paymentRef = generatePaymentReference();
-    const backendUrl = this.config.get<string>('BACKEND_URL', '');
-    const notifyUrl = `${backendUrl}/api/v1/webhooks/monetbil/callback`;
+    const profileName = request.profile
+      ? `${request.profile.first_name} ${request.profile.last_name}`.trim()
+      : 'Utilisateur';
+    const profileEmail = request.profile?.email ?? '';
 
     const result = await this.monetbilService.initiatePayment({
-      serviceId: serviceKey,
-      serviceSecret,
+      serviceKey,
       amount: Number(request.amount),
-      phone,
+      phonenumber: phone,
       operator,
-      paymentRef,
-      notifyUrl,
-      apiUrl,
+      user: profileName,
+      email: profileEmail,
     });
 
     if (!result.success) {
@@ -203,17 +204,91 @@ export class PaymentRequestService {
       );
     }
 
+    const paymentId = result.paymentId ?? '';
+
     await this.prisma.paymentRequest.update({
       where: { id: request.id },
       data: {
         status: PaymentRequestStatus.PROCESSING,
         phone,
         operator,
-        monetbil_payment_ref: paymentRef,
+        monetbil_payment_ref: paymentId || null,
       },
     });
 
+    // Fire-and-forget polling loop — checks status every 5s, up to 10 attempts.
+    // On conclusive result: processes payment + emits WebSocket update to client.
+    if (paymentId) {
+      this.pollPaymentStatus(request.id, request.token, paymentId).catch(
+        (err) =>
+          this.logger.error(`Polling failed for request ${request.id}`, err),
+      );
+    }
+
     return { success: true };
+  }
+
+  private async pollPaymentStatus(
+    requestId: string,
+    token: string,
+    paymentId: string,
+    maxAttempts = 10,
+    intervalMs = 5000,
+  ): Promise<void> {
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      this.logger.log(
+        `Monetbil poll attempt ${attempt}/${maxAttempts} for paymentId ${paymentId}`,
+      );
+
+      const { status, transactionId } =
+        await this.monetbilService.checkPayment(paymentId);
+
+      if (status === 'SUCCESS') {
+        const request = await this.prisma.paymentRequest.findUnique({
+          where: { id: requestId },
+          select: {
+            ...PAYMENT_REQUEST_SELECT,
+            monetbil_payment_ref: true,
+          },
+        });
+        if (
+          request &&
+          request.status !== PaymentRequestStatus.APPROVED &&
+          request.status !== PaymentRequestStatus.REJECTED
+        ) {
+          await this.processSuccessfulPayment(request, transactionId);
+        }
+        this.paymentStatusGateway.emitPaymentStatus(token, 'APPROVED');
+        return;
+      }
+
+      if (status === 'FAILED' || status === 'CANCELLED') {
+        await this.prisma.paymentRequest.update({
+          where: { id: requestId },
+          data: {
+            status: PaymentRequestStatus.REJECTED,
+            ...(transactionId && { monetbil_tx_id: transactionId }),
+          },
+        });
+        this.paymentStatusGateway.emitPaymentStatus(token, 'REJECTED');
+        return;
+      }
+
+      // PENDING — wait before next attempt (skip wait on last attempt)
+      if (attempt < maxAttempts) {
+        await new Promise((resolve) => setTimeout(resolve, intervalMs));
+      }
+    }
+
+    // All attempts exhausted with no conclusive result — mark as rejected
+    this.logger.warn(
+      `Monetbil polling timed out for paymentId ${paymentId} after ${maxAttempts} attempts`,
+    );
+    await this.prisma.paymentRequest.update({
+      where: { id: requestId },
+      data: { status: PaymentRequestStatus.REJECTED },
+    });
+    this.paymentStatusGateway.emitPaymentStatus(token, 'REJECTED');
   }
 
   /**
@@ -224,22 +299,23 @@ export class PaymentRequestService {
   async handleMonetbilCallback(
     payload: Record<string, string>,
   ): Promise<{ received: boolean }> {
-    const { payment_ref, status, transaction_id } = payload;
+    // Monetbil callback sends paymentId (same value returned on initiation)
+    const paymentId = payload['paymentId'] ?? payload['payment_ref'];
+    const status = payload['status'];
+    const transaction_id = payload['transaction_id'];
 
-    if (!payment_ref) {
-      this.logger.warn('Monetbil callback missing payment_ref');
+    if (!paymentId) {
+      this.logger.warn('Monetbil callback missing paymentId');
       return { received: true };
     }
 
     const request = await this.prisma.paymentRequest.findUnique({
-      where: { monetbil_payment_ref: payment_ref },
+      where: { monetbil_payment_ref: paymentId },
       select: { ...PAYMENT_REQUEST_SELECT, monetbil_payment_ref: true },
     });
 
     if (!request) {
-      this.logger.warn(
-        `Monetbil callback: payment_ref not found: ${payment_ref}`,
-      );
+      this.logger.warn(`Monetbil callback: paymentId not found: ${paymentId}`);
       return { received: true };
     }
 
@@ -248,18 +324,6 @@ export class PaymentRequestService {
       request.status === PaymentRequestStatus.REJECTED
     ) {
       // Already processed (duplicate callback)
-      return { received: true };
-    }
-
-    // Verify HMAC signature
-    const { serviceSecret } = await this.systemConfig.getMonetbilConfig();
-    if (
-      typeof serviceSecret === 'string' &&
-      !this.monetbilService.verifyWebhookSignature(payload, serviceSecret)
-    ) {
-      this.logger.warn(
-        `Monetbil callback: invalid signature for ref ${payment_ref}`,
-      );
       return { received: true };
     }
 
@@ -295,28 +359,52 @@ export class PaymentRequestService {
     const transactionRef = generatePaymentReference();
 
     const isContactUnlock = request.contact_unlock_attempt_id != null;
+    const recommendationWorkerIdMatch = request.description?.match(
+      /^RECOMMENDATION_CONTACT:(.+)$/,
+    );
+    const recommendationWorkerId = recommendationWorkerIdMatch?.[1] ?? null;
+    const isRecommendationContact = recommendationWorkerId != null;
+
+    const paymentType =
+      isContactUnlock || isRecommendationContact
+        ? PaymentType.CONTACT_UNLOCK
+        : PaymentType.PENALTY;
+
+    // Resolve human-readable description for the Payment record
+    let paymentDescription: string = request.description ?? 'Paiement';
+    if (isRecommendationContact && recommendationWorkerId) {
+      const recWorker = await this.prisma.profile.findUnique({
+        where: { id: recommendationWorkerId },
+        select: { first_name: true, last_name: true },
+      });
+      if (recWorker) {
+        paymentDescription =
+          `Contact recommandé — ${recWorker.first_name} ${recWorker.last_name}`.trim();
+      }
+    }
 
     // 1. Credit system wallet + create Payment record (atomic)
     const systemWallet = await this.walletService.getOrCreateSystemWallet();
     await this.prisma.$transaction([
       this.prisma.payment.create({
         data: {
-          type: isContactUnlock ? PaymentType.CONTACT_UNLOCK : PaymentType.PENALTY,
+          type: paymentType,
           profile_id: request.profile_id,
           amount,
           payment_method: PaymentMethod.MOBILE_MONEY,
           transaction_id: transactionRef,
           status: PaymentStatus.COMPLETED,
           paid_at: new Date(),
-          description: request.description ?? undefined,
+          description: paymentDescription,
         },
       }),
       this.prisma.walletTransaction.create({
         data: {
           wallet_id: systemWallet.id,
-          type: isContactUnlock
-            ? WalletTransactionType.CONTACT_UNLOCK_PAYMENT
-            : WalletTransactionType.CREDIT_PENALTY,
+          type:
+            isContactUnlock || isRecommendationContact
+              ? WalletTransactionType.CONTACT_UNLOCK_PAYMENT
+              : WalletTransactionType.CREDIT_PENALTY,
           amount,
           reference_type: 'payment_request',
           reference_id: request.id,
@@ -341,7 +429,7 @@ export class PaymentRequestService {
     );
 
     const profileName = this.fullName(request.profile);
-    const description: string = request.description ?? 'Paiement';
+    const description: string = paymentDescription;
 
     // 2. Emit admin notification
     this.eventEmitter.emit(AdminNotificationEvent.PAYMENT_PENALTY, {
@@ -394,11 +482,21 @@ export class PaymentRequestService {
         profileId: request.profile_id,
         paymentRequestId: request.id,
         amount,
-        reason: isContactUnlock ? InvoiceReason.CONTACT_UNLOCK : InvoiceReason.PENALTY,
-        relatedEntityType: request.contact_unlock_attempt_id ? 'contact_unlock_attempt' : undefined,
+        reason:
+          isContactUnlock || isRecommendationContact
+            ? InvoiceReason.CONTACT_UNLOCK
+            : InvoiceReason.PENALTY,
+        relatedEntityType: request.contact_unlock_attempt_id
+          ? 'contact_unlock_attempt'
+          : undefined,
         relatedEntityId: request.contact_unlock_attempt_id ?? undefined,
       })
-      .catch((err) => this.logger.warn(`Failed to create invoice for payment request ${request.id}:`, err));
+      .catch((err) =>
+        this.logger.warn(
+          `Failed to create invoice for payment request ${request.id}:`,
+          err,
+        ),
+      );
 
     if (request.contact_unlock_attempt_id) {
       try {
@@ -426,6 +524,47 @@ export class PaymentRequestService {
       } catch (err) {
         this.logger.warn(
           `Contact unlock processing failed for attempt ${String(request.contact_unlock_attempt_id)}:`,
+          err,
+        );
+      }
+    }
+
+    // Recommendation contact fee paid via mobile money — send worker contacts to employer via WhatsApp
+    if (recommendationWorkerId && request.profile.phone) {
+      try {
+        const worker = await this.prisma.profile.findUnique({
+          where: { id: recommendationWorkerId },
+          select: {
+            first_name: true,
+            last_name: true,
+            phone: true,
+            email: true,
+          },
+        });
+        if (worker) {
+          const workerName = `${worker.first_name} ${worker.last_name}`.trim();
+          const contactLines = [
+            '🔓 *CONTACT DÉVERROUILLÉ !*',
+            '',
+            `*${workerName}*`,
+            '',
+            ...(worker.phone ? [`*Téléphone*: ${worker.phone}`] : []),
+            ...(worker.email ? [`*Email*: ${worker.email}`] : []),
+            '',
+            'Tapez *Menu* pour revenir au menu principal.',
+          ].join('\n');
+          await this.botNotification
+            .sendMessage(request.profile.phone, contactLines)
+            .catch((err) =>
+              this.logger.warn(
+                `Recommendation contact send failed for worker ${recommendationWorkerId}:`,
+                err,
+              ),
+            );
+        }
+      } catch (err) {
+        this.logger.warn(
+          `Failed to send recommendation contact for worker ${recommendationWorkerId}:`,
           err,
         );
       }

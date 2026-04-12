@@ -5,7 +5,6 @@ import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
 import {
   DEFAULT_SYSTEM_CONFIGS,
-  MONETBIL_API_URLS,
   MONETBIL_ENV_OVERRIDES,
   STORAGE_ENV_OVERRIDES,
 } from './system-config.constants';
@@ -36,13 +35,18 @@ export class SystemConfigService implements OnModuleInit {
         await this.seedDefaults();
         return;
       } catch (error: unknown) {
-        if (!this.isRetryableConnectionError(error) || attempt === SEED_MAX_RETRIES) {
+        if (
+          !this.isRetryableConnectionError(error) ||
+          attempt === SEED_MAX_RETRIES
+        ) {
           throw error;
         }
         this.logger.warn(
           `DB connection not ready while seeding system config (attempt ${attempt}/${SEED_MAX_RETRIES}). Retrying in ${SEED_RETRY_DELAY_MS}ms...`,
         );
-        await new Promise((resolve) => setTimeout(resolve, SEED_RETRY_DELAY_MS));
+        await new Promise((resolve) =>
+          setTimeout(resolve, SEED_RETRY_DELAY_MS),
+        );
         attempt += 1;
       }
     }
@@ -210,6 +214,14 @@ export class SystemConfigService implements OnModuleInit {
     };
   }
 
+  async getRecommendationContactFee(): Promise<number> {
+    const val = await this.get(
+      'fees.contact_recommendation_fee_employer',
+      '1000',
+    );
+    return Number(val);
+  }
+
   async getWelcomeCredits() {
     const [workerCredit, employerCredit] = await Promise.all([
       this.get('fees.welcome_credit_worker', '100'),
@@ -225,14 +237,9 @@ export class SystemConfigService implements OnModuleInit {
     return this.get('storage.driver', 'S3');
   }
 
-  async getMonetbilConfig(): Promise<{ serviceKey: string; serviceSecret: string; apiUrl: string; mode: string }> {
-    const [serviceKey, serviceSecret, mode] = await Promise.all([
-      this.get('monetbil.service_key', ''),
-      this.getRaw('monetbil.service_secret', ''),
-      this.get('monetbil.mode', 'SANDBOX'),
-    ]);
-    const apiUrl = MONETBIL_API_URLS[mode.toUpperCase()] ?? MONETBIL_API_URLS['SANDBOX'];
-    return { serviceKey, serviceSecret, apiUrl, mode };
+  async getMonetbilConfig(): Promise<{ serviceKey: string }> {
+    const serviceKey = await this.get('monetbil.service_key', '');
+    return { serviceKey };
   }
 
   /**

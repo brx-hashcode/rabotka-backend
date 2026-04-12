@@ -126,6 +126,7 @@ enum PaymentStatus {
 enum PaymentMethod {
   MOBILE_MONEY
   CARD
+  WALLET
   OTHER
 }
 
