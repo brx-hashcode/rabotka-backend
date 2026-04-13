@@ -33,6 +33,224 @@ export type FlowResult = {
 };
 
 const PAGE_SIZE = 5;
+type CandidaturesStep = 'list' | 'detail';
+
+function isMenuCommand(trimmedInput: string, normalizedInput: string): boolean {
+  return (
+    trimmedInput === '7' ||
+    normalizedInput === 'retour' ||
+    CMD_MENU.some(
+      (command) =>
+        normalizedInput === command ||
+        normalizedInput.startsWith(command + ' '),
+    )
+  );
+}
+
+function getPageSlice(items: CandidatureListItem[], pageIndex: number) {
+  return items.slice(pageIndex * PAGE_SIZE, pageIndex * PAGE_SIZE + PAGE_SIZE);
+}
+
+function hasMoreItems(
+  items: CandidatureListItem[],
+  pageIndex: number,
+): boolean {
+  return items.length > (pageIndex + 1) * PAGE_SIZE;
+}
+
+function buildListState(
+  state: BotState,
+  payload: Record<string, unknown>,
+  pageIndex: number,
+): BotState {
+  return {
+    ...state,
+    payload: { ...payload, pageIndex, step: 'list' },
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function buildDetailState(
+  state: BotState,
+  payload: Record<string, unknown>,
+  selectedItem: CandidatureListItem,
+): BotState {
+  return {
+    ...state,
+    payload: {
+      ...payload,
+      step: 'detail',
+      selectedApplicationId: selectedItem.id,
+      selectedItem,
+    },
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function buildBackToListState(
+  state: BotState,
+  payload: Record<string, unknown>,
+): BotState {
+  return {
+    ...state,
+    payload: {
+      ...payload,
+      step: 'list',
+      selectedApplicationId: undefined,
+      selectedItem: undefined,
+    },
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function formatSelectedItemDetail(item: CandidatureListItem): string {
+  return formatCandidatureDetail({
+    firstName: item.firstName,
+    lastName: item.lastName,
+    email: item.email,
+    status: item.status,
+    score: item.score,
+    avatarUrl: item.avatarUrl,
+    offerTitle: item.offerTitle,
+  });
+}
+
+function buildInvalidChoiceMessage(
+  items: CandidatureListItem[],
+  pageIndex: number,
+) {
+  const n = getPageSlice(items, pageIndex).length;
+  const hasMore = hasMoreItems(items, pageIndex);
+  return `*RÉPONDEZ PAR UN NUMÉRO (1-${n}) POUR SÉLECTIONNER UN CANDIDAT${hasMore ? ', 6 (VOIR PLUS)' : ''} OU 7 (MENU).*`;
+}
+
+type DetailStepParams = {
+  state: BotState;
+  payload: Record<string, unknown>;
+  items: CandidatureListItem[];
+  pageIndex: number;
+  selectedItem: CandidatureListItem | undefined;
+  trimmedInput: string;
+  profile: BotProfile;
+  ctx: CandidaturesListContext;
+  goToMenu: () => FlowResult;
+};
+
+async function handleDetailStep(params: DetailStepParams): Promise<FlowResult> {
+  const {
+    state,
+    payload,
+    items,
+    pageIndex,
+    selectedItem,
+    trimmedInput,
+    profile,
+    ctx,
+    goToMenu,
+  } = params;
+
+  if (trimmedInput === '4') return goToMenu();
+
+  if (trimmedInput === '3') {
+    const slice = getPageSlice(items, pageIndex);
+    const message = formatCandidaturesListPage(
+      slice,
+      hasMoreItems(items, pageIndex),
+    );
+    return {
+      reply: [message],
+      nextState: buildBackToListState(state, payload),
+    };
+  }
+
+  if (trimmedInput === '1' || trimmedInput === '2') {
+    const applicationId = selectedItem?.id;
+    if (!applicationId) {
+      return {
+        reply: ["*ERREUR. TAPEZ 'MENU'.*"],
+        clearState: true,
+      };
+    }
+    const acceptRefuseState = getAcceptRefuseInitialState(applicationId);
+    const result = await runAcceptRefuseCandidateFlow(
+      acceptRefuseState,
+      '',
+      profile,
+      ctx,
+    );
+    return {
+      reply: result.reply,
+      nextState: result.nextState ?? acceptRefuseState,
+    };
+  }
+
+  if (!selectedItem) {
+    return {
+      reply: ["*ERREUR. TAPEZ 'MENU'.*"],
+      clearState: true,
+    };
+  }
+
+  return {
+    reply: [formatSelectedItemDetail(selectedItem)],
+    nextState: state,
+  };
+}
+
+function handleNextPage(
+  state: BotState,
+  payload: Record<string, unknown>,
+  items: CandidatureListItem[],
+  pageIndex: number,
+): FlowResult {
+  if (!hasMoreItems(items, pageIndex)) {
+    return {
+      reply: [
+        '*RÉPONDEZ PAR UN NUMÉRO (1-5) POUR SÉLECTIONNER UN CANDIDAT, 6 (VOIR PLUS) OU 7 (MENU).*',
+      ],
+      nextState: state,
+    };
+  }
+
+  const nextPageIndex = pageIndex + 1;
+  const slice = getPageSlice(items, nextPageIndex);
+  const message = formatCandidaturesListPage(
+    slice,
+    hasMoreItems(items, nextPageIndex),
+  );
+  return {
+    reply: [message],
+    nextState: buildListState(state, payload, nextPageIndex),
+  };
+}
+
+function handleListSelection(
+  state: BotState,
+  payload: Record<string, unknown>,
+  items: CandidatureListItem[],
+  pageIndex: number,
+  trimmedInput: string,
+  ctx: CandidaturesListContext,
+): FlowResult {
+  const choice = /^[1-5]$/.test(trimmedInput)
+    ? Number.parseInt(trimmedInput, 10)
+    : 0;
+  const slice = getPageSlice(items, pageIndex);
+
+  if (!(choice >= 1 && choice <= PAGE_SIZE && choice <= slice.length)) {
+    return {
+      reply: [buildInvalidChoiceMessage(items, pageIndex)],
+      nextState: state,
+    };
+  }
+
+  const item = slice[choice - 1];
+  void ctx.applicationService.markAsViewed(item.id).catch(() => {});
+  return {
+    reply: [formatSelectedItemDetail(item)],
+    nextState: buildDetailState(state, payload, item),
+  };
+}
 
 export async function runCandidaturesListFlow(
   state: BotState,
@@ -43,7 +261,7 @@ export async function runCandidaturesListFlow(
   const payload = state.payload ?? {};
   const items = (payload.items as CandidatureListItem[]) ?? [];
   const pageIndex = (payload.pageIndex as number) ?? 0;
-  const step = (payload.step as 'list' | 'detail') ?? 'list';
+  const step = (payload.step as CandidaturesStep) ?? 'list';
   const selectedItem = payload.selectedItem as CandidatureListItem | undefined;
   const trimmed = input.trim();
   const normalized = trimmed.toLowerCase();
@@ -60,149 +278,29 @@ export async function runCandidaturesListFlow(
     clearState: true,
   });
 
-  if (
-    trimmed === '7' ||
-    CMD_MENU.some((c) => normalized === c || normalized.startsWith(c + ' ')) ||
-    normalized === 'retour'
-  ) {
+  if (isMenuCommand(trimmed, normalized)) {
     return goToMenu();
   }
 
   if (step === 'detail') {
-    if (trimmed === '4') return goToMenu();
-
-    if (trimmed === '3') {
-      const slice = items.slice(
-        pageIndex * PAGE_SIZE,
-        pageIndex * PAGE_SIZE + PAGE_SIZE,
-      );
-      const hasMore = items.length > (pageIndex + 1) * PAGE_SIZE;
-      const message = formatCandidaturesListPage(slice, hasMore);
-      return {
-        reply: [message],
-        nextState: {
-          ...state,
-          payload: {
-            ...payload,
-            step: 'list',
-            selectedApplicationId: undefined,
-            selectedItem: undefined,
-          },
-          updatedAt: new Date().toISOString(),
-        },
-      };
-    }
-
-    if (trimmed === '1' || trimmed === '2') {
-      const applicationId = selectedItem?.id;
-      if (!applicationId) {
-        return {
-          reply: ["*ERREUR. TAPEZ 'MENU'.*"],
-          clearState: true,
-        };
-      }
-      const acceptRefuseState = getAcceptRefuseInitialState(applicationId);
-      const result = await runAcceptRefuseCandidateFlow(
-        acceptRefuseState,
-        '',
-        profile,
-        ctx,
-      );
-      return {
-        reply: result.reply,
-        nextState: result.nextState ?? acceptRefuseState,
-      };
-    }
-
-    if (selectedItem) {
-      return {
-        reply: [
-          formatCandidatureDetail({
-            firstName: selectedItem.firstName,
-            lastName: selectedItem.lastName,
-            email: selectedItem.email,
-            status: selectedItem.status,
-            score: selectedItem.score,
-            avatarUrl: selectedItem.avatarUrl,
-            offerTitle: selectedItem.offerTitle,
-          }),
-        ],
-        nextState: state,
-      };
-    }
-    return {
-      reply: ["*ERREUR. TAPEZ 'MENU'.*"],
-      clearState: true,
-    };
+    return handleDetailStep({
+      state,
+      payload,
+      items,
+      pageIndex,
+      selectedItem,
+      trimmedInput: trimmed,
+      profile,
+      ctx,
+      goToMenu,
+    });
   }
 
   if (trimmed === '6') {
-    const hasMore = items.length > (pageIndex + 1) * PAGE_SIZE;
-    if (!hasMore) {
-      return {
-        reply: [
-          '*RÉPONDEZ PAR UN NUMÉRO (1-5) POUR SÉLECTIONNER UN CANDIDAT, 6 (VOIR PLUS) OU 7 (MENU).*',
-        ],
-        nextState: state,
-      };
-    }
-    const nextPageIndex = pageIndex + 1;
-    const slice = items.slice(
-      nextPageIndex * PAGE_SIZE,
-      nextPageIndex * PAGE_SIZE + PAGE_SIZE,
-    );
-    const hasMoreNext = items.length > (nextPageIndex + 1) * PAGE_SIZE;
-    const message = formatCandidaturesListPage(slice, hasMoreNext);
-    return {
-      reply: [message],
-      nextState: {
-        ...state,
-        payload: { ...payload, pageIndex: nextPageIndex, step: 'list' },
-        updatedAt: new Date().toISOString(),
-      },
-    };
+    return handleNextPage(state, payload, items, pageIndex);
   }
 
-  const choice = /^[1-5]$/.test(trimmed) ? Number.parseInt(trimmed, 10) : 0;
-  const slice = items.slice(
-    pageIndex * PAGE_SIZE,
-    pageIndex * PAGE_SIZE + PAGE_SIZE,
-  );
-  if (choice >= 1 && choice <= PAGE_SIZE && choice <= slice.length) {
-    const item = slice[choice - 1];
-    void ctx.applicationService.markAsViewed(item.id).catch(() => {});
-    const detailMessage = formatCandidatureDetail({
-      firstName: item.firstName,
-      lastName: item.lastName,
-      email: item.email,
-      status: item.status,
-      score: item.score,
-      avatarUrl: item.avatarUrl,
-      offerTitle: item.offerTitle,
-    });
-    return {
-      reply: [detailMessage],
-      nextState: {
-        ...state,
-        payload: {
-          ...payload,
-          step: 'detail',
-          selectedApplicationId: item.id,
-          selectedItem: item,
-        },
-        updatedAt: new Date().toISOString(),
-      },
-    };
-  }
-
-  const n = slice.length;
-  const hasMore = items.length > (pageIndex + 1) * PAGE_SIZE;
-  return {
-    reply: [
-      `*RÉPONDEZ PAR UN NUMÉRO (1-${n}) POUR SÉLECTIONNER UN CANDIDAT${hasMore ? ', 6 (VOIR PLUS)' : ''} OU 7 (MENU).*`,
-    ],
-    nextState: state,
-  };
+  return handleListSelection(state, payload, items, pageIndex, trimmed, ctx);
 }
 
 export function getCandidaturesListInitialState(

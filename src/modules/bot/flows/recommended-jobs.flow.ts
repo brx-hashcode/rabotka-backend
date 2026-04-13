@@ -19,6 +19,7 @@ export type FlowResult = {
 };
 
 const PAGE_SIZE = 5;
+type RecommendedStep = 'list' | 'detail';
 
 function toOfferListItem(o: {
   id: string;
@@ -49,6 +50,100 @@ function toOfferListItem(o: {
   };
 }
 
+function isMenuCommand(normalizedInput: string): boolean {
+  return CMD_MENU.some(
+    (command) =>
+      normalizedInput === command || normalizedInput.startsWith(command + ' '),
+  );
+}
+
+function buildRecommendedListPrompt(offerIdsCount: number): string {
+  return `*Tapez 1-${Math.min(offerIdsCount, PAGE_SIZE)} pour voir le détail ou 7 pour le menu.*`;
+}
+
+function buildListState(
+  state: BotState,
+  payload: Record<string, unknown>,
+): BotState {
+  return {
+    ...state,
+    payload: { ...payload, step: 'list' },
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function buildDetailState(
+  state: BotState,
+  payload: Record<string, unknown>,
+  selectedOfferId: string,
+): BotState {
+  return {
+    ...state,
+    payload: { ...payload, step: 'detail', selectedOfferId },
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+async function handleRecommendedJobsListStep(
+  state: BotState,
+  payload: Record<string, unknown>,
+  trimmedInput: string,
+  offerIds: string[],
+  ctx: RecommendedJobsContext,
+  goToMenu: () => FlowResult,
+): Promise<FlowResult> {
+  if (trimmedInput === '7') return goToMenu();
+
+  const choice = /^[1-5]$/.test(trimmedInput)
+    ? Number.parseInt(trimmedInput, 10)
+    : 0;
+  const maxChoice = Math.min(offerIds.length, PAGE_SIZE);
+
+  if (choice < 1 || choice > maxChoice) {
+    return {
+      reply: [buildRecommendedListPrompt(offerIds.length)],
+      nextState: state,
+    };
+  }
+
+  const offerId = offerIds[choice - 1];
+  const offer = await ctx.jobOfferService.findById(offerId);
+  if (!offer) {
+    return { reply: ['Offre introuvable.'], nextState: state };
+  }
+
+  const item = toOfferListItem({ ...offer, acceptedCount: 0 });
+  const detailMsg = formatOfferDetailWithActions(item);
+  return {
+    reply: [detailMsg],
+    nextState: buildDetailState(state, payload, offerId),
+  };
+}
+
+function handleRecommendedJobsDetailStep(
+  state: BotState,
+  payload: Record<string, unknown>,
+  normalizedInput: string,
+  goToMenu: () => FlowResult,
+): FlowResult {
+  const selectedOfferId = payload.selectedOfferId as string;
+
+  if (normalizedInput === '1' || normalizedInput === 'postuler') {
+    return { reply: [], nextState: getApplyJobInitialState(selectedOfferId) };
+  }
+
+  if (normalizedInput === '2' || normalizedInput === 'retour') {
+    return {
+      reply: [
+        '*Offres recommandées — tapez le numéro pour voir le détail ou 7 pour le menu.*',
+      ],
+      nextState: buildListState(state, payload),
+    };
+  }
+
+  return goToMenu();
+}
+
 export async function runRecommendedJobsFlow(
   state: BotState,
   input: string,
@@ -57,7 +152,7 @@ export async function runRecommendedJobsFlow(
 ): Promise<FlowResult> {
   const payload = state.payload || {};
   const offerIds = (payload.offerIds as string[]) ?? [];
-  const step = (payload.step as 'list' | 'detail') ?? 'list';
+  const step = (payload.step as RecommendedStep) ?? 'list';
   const trimmed = input.trim();
   const normalized = trimmed.toLowerCase();
 
@@ -66,9 +161,7 @@ export async function runRecommendedJobsFlow(
     clearState: true,
   });
 
-  if (
-    CMD_MENU.some((c) => normalized === c || normalized.startsWith(c + ' '))
-  ) {
+  if (isMenuCommand(normalized)) {
     return goToMenu();
   }
 
@@ -82,52 +175,23 @@ export async function runRecommendedJobsFlow(
   }
 
   if (step === 'list') {
-    if (trimmed === '7') return goToMenu();
-    const choice = /^[1-5]$/.test(trimmed) ? Number.parseInt(trimmed, 10) : 0;
-    if (choice >= 1 && choice <= Math.min(offerIds.length, 5)) {
-      const offerId = offerIds[choice - 1];
-      const offer = await ctx.jobOfferService.findById(offerId);
-      if (!offer) {
-        return { reply: ['Offre introuvable.'], nextState: state };
-      }
-      const item = toOfferListItem({ ...offer, acceptedCount: 0 });
-      const detailMsg = formatOfferDetailWithActions(item);
-      return {
-        reply: [detailMsg],
-        nextState: {
-          ...state,
-          payload: { ...payload, step: 'detail', selectedOfferId: offerId },
-          updatedAt: new Date().toISOString(),
-        },
-      };
-    }
-    return {
-      reply: [
-        `*Tapez 1-${Math.min(offerIds.length, 5)} pour voir le détail ou 7 pour le menu.*`,
-      ],
-      nextState: state,
-    };
+    return handleRecommendedJobsListStep(
+      state,
+      payload,
+      trimmed,
+      offerIds,
+      ctx,
+      goToMenu,
+    );
   }
 
   if (step === 'detail') {
-    const selectedOfferId = payload.selectedOfferId as string;
-    if (normalized === '1' || normalized === 'postuler') {
-      const applyState = getApplyJobInitialState(selectedOfferId);
-      return { reply: [], nextState: applyState };
-    }
-    if (normalized === '2' || normalized === 'retour') {
-      return {
-        reply: [
-          '*Offres recommandées — tapez le numéro pour voir le détail ou 7 pour le menu.*',
-        ],
-        nextState: {
-          ...state,
-          payload: { ...payload, step: 'list' },
-          updatedAt: new Date().toISOString(),
-        },
-      };
-    }
-    return goToMenu();
+    return handleRecommendedJobsDetailStep(
+      state,
+      payload,
+      normalized,
+      goToMenu,
+    );
   }
 
   return {
