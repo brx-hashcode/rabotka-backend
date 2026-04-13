@@ -38,7 +38,7 @@ async function handleAcceptRefuseStep1(args: StepArgs): Promise<FlowResult> {
     return {
       reply: [
         [
-          '*ACTIONS DISPONIBLES POUR CETTE CANDIDATURE:*',
+          '*Actions disponibles pour cette candidature :*',
           '',
           '1️⃣ Accepter le candidat',
           '2️⃣ Refuser',
@@ -56,7 +56,6 @@ async function handleAcceptRefuseStep1(args: StepArgs): Promise<FlowResult> {
         applicationId,
       );
 
-      // Get unlock attempt and show contact unlock prompt
       const attempt =
         await ctx.contactUnlockService.getByApplicationId(applicationId);
       if (attempt) {
@@ -71,7 +70,6 @@ async function handleAcceptRefuseStep1(args: StepArgs): Promise<FlowResult> {
           ? `${workerData.first_name} ${workerData.last_name}`.trim()
           : 'le travailleur';
 
-        // Check if employer already paid at job level (multi-person job)
         const jobOffer = await ctx.prisma.jobOffer
           .findUnique({
             where: { id: attempt.job_offer_id },

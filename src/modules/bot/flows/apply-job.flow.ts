@@ -141,7 +141,13 @@ export async function runApplyJobFlow(
   if (unpaid.count > 0) {
     const contact = await ctx.systemConfigService.getContactInfo();
     return {
-      reply: [formatPenaltyBlocked(unpaid.total, contact.orangeMoneyNumber, contact.airtelMoneyNumber)],
+      reply: [
+        formatPenaltyBlocked(
+          unpaid.total,
+          contact.orangeMoneyNumber,
+          contact.airtelMoneyNumber,
+        ),
+      ],
       clearState: true,
     };
   }

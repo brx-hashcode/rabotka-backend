@@ -3,6 +3,7 @@ import type { BotProfile, BotState } from '../types/bot-state.types';
 import { FLOW_IDS } from '../bot.constants';
 import type { JobOfferService } from '../../job-offer/job-offer.service';
 import { CreateJobOfferDto } from '../../job-offer/dto/create-job-offer.dto';
+import type { PrismaService } from '../../../common/services/prisma/prisma.service';
 
 const TITLE_MIN = 5;
 const TITLE_MAX = 100;
@@ -24,13 +25,10 @@ const PAYMENT_FLOW_LABELS: Record<string, string> = {
 
 export type PublishJobContext = {
   jobOfferService: JobOfferService;
+  prisma: PrismaService;
 };
 
-export type FlowResult = {
-  reply: string[];
-  nextState?: BotState;
-  clearState?: boolean;
-};
+import type { FlowResult } from '../types/flow.types';
 
 type StepArgs = {
   state: BotState;
@@ -83,11 +81,19 @@ function toScheduledAtString(scheduledAt: unknown): string {
   return '';
 }
 
-// Step 9 — publish the offer (free — activated immediately)
-async function handlePublishStep9(args: StepArgs): Promise<FlowResult> {
+function categoryIdFromPayload(value: unknown): string | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  return undefined;
+}
+
+// Step 10 — publish the offer (free — activated immediately)
+async function handlePublishStep10(args: StepArgs): Promise<FlowResult> {
   const { state, payload, profile, ctx } = args;
   const scheduledStr = toScheduledAtString(payload.scheduled_at);
   const noteValue = typeof payload.note === 'string' ? payload.note : undefined;
+  const categoryId = categoryIdFromPayload(payload.category_id);
   const dto: CreateJobOfferDto = {
     title: String(payload.title),
     description: String(payload.description),
@@ -97,6 +103,7 @@ async function handlePublishStep9(args: StepArgs): Promise<FlowResult> {
     address: String(payload.address),
     note: noteValue,
     quantity: Number(payload.quantity),
+    ...(categoryId === undefined ? {} : { category_id: categoryId }),
   };
   try {
     await ctx.jobOfferService.create(profile.id, dto);
@@ -124,49 +131,49 @@ async function handlePublishStep9(args: StepArgs): Promise<FlowResult> {
   }
 }
 
-// Step 9 (confirmation screen) — "Modifier" branch → step 10
-function handleStep9Modifier(
+function handleStep10Modifier(
   state: BotState,
   payload: Record<string, unknown>,
   normalized: string,
 ): FlowResult | null {
-  if (state.step !== 9 || (normalized !== '2' && normalized !== 'modifier'))
+  if (state.step !== 10 || (normalized !== '2' && normalized !== 'modifier'))
     return null;
   return {
     reply: [
       [
-        '*Quelle étape souhaitez-vous modifier ?* (1-8)',
+        '*Quelle étape souhaitez-vous modifier ?* (1-9)',
         '',
         '1=Titre',
-        '2=Description',
-        '3=Date/heure',
-        '4=Montant',
-        '5=Type rémunération',
-        '6=Adresse',
-        '7=Nombre de personnes',
-        '8=Note',
+        '2=Catégorie',
+        '3=Description',
+        '4=Date/heure',
+        '5=Montant',
+        '6=Type rémunération',
+        '7=Adresse',
+        '8=Nombre de personnes',
+        '9=Note',
         '',
         '*Tapez le numéro correspondant.*',
       ].join('\n'),
     ],
     nextState: {
       ...state,
-      step: 10,
+      step: 11,
       payload: { ...payload },
       updatedAt: new Date().toISOString(),
     },
   };
 }
 
-// Step 10 — modifier selection (formerly step 9)
-function handleStep10(
+// Step 11 — modifier selection
+function handleStep11(
   state: BotState,
   payload: Record<string, unknown>,
   trimmed: string,
 ): FlowResult | null {
-  if (state.step !== 10) return null;
+  if (state.step !== 11) return null;
   const num = Number.parseInt(trimmed, 10);
-  if (num >= 1 && num <= 8) {
+  if (num >= 1 && num <= 9) {
     return {
       reply: [getStepPrompt(num, payload)],
       nextState: {
@@ -178,23 +185,23 @@ function handleStep10(
     };
   }
   return {
-    reply: ['Numéro invalide. Tapez un nombre entre 1 et 8.'],
+    reply: ['Numéro invalide. Tapez un nombre entre 1 et 9.'],
     nextState: state,
   };
 }
 
-// Step 9 — confirmation screen handler
-async function handleStep9Confirm(
+// Step 10 — confirmation screen handler
+async function handleStep10Confirm(
   args: StepArgs,
   normalized: string,
 ): Promise<FlowResult | null> {
-  if (args.state.step !== 9) return null;
+  if (args.state.step !== 10) return null;
   if (
     normalized === '1' ||
     normalized === 'oui' ||
     normalized === 'oui, publier'
   ) {
-    return handlePublishStep9(args);
+    return handlePublishStep10(args);
   }
   if (normalized === '3' || normalized === 'annuler') {
     return {
@@ -208,8 +215,13 @@ async function handleStep9Confirm(
   };
 }
 
-function getStepHandler(step: number): ((args: StepArgs) => FlowResult) | null {
-  const handlers: Record<number, (args: StepArgs) => FlowResult> = {
+function getStepHandler(
+  step: number,
+): ((args: StepArgs) => FlowResult | Promise<FlowResult>) | null {
+  const handlers: Record<
+    number,
+    (args: StepArgs) => FlowResult | Promise<FlowResult>
+  > = {
     1: handlePublishStep1,
     2: handlePublishStep2,
     3: handlePublishStep3,
@@ -218,6 +230,7 @@ function getStepHandler(step: number): ((args: StepArgs) => FlowResult) | null {
     6: handlePublishStep6,
     7: handlePublishStep7,
     8: handlePublishStep8,
+    9: handlePublishStep9,
   };
   return handlers[step] ?? null;
 }
@@ -274,7 +287,7 @@ export async function runPublishJobFlow(
       const prompt = getStepPrompt(draftStep, cleanPayload);
       return {
         reply: [
-          `📝 *Reprise de votre brouillon*\n\nÉtape ${draftStep}/8 — ${prompt}`,
+          `📝 *Reprise de votre brouillon*\n\nÉtape ${draftStep}/9 — ${prompt}`,
         ],
         nextState: {
           ...state,
@@ -287,6 +300,7 @@ export async function runPublishJobFlow(
     // '2' or anything else → start fresh
     return {
       reply: [getPublishJobFirstMessage()],
+      clearDraft: true,
       nextState: {
         flowId: FLOW_IDS.PUBLISH_JOB,
         step: 1,
@@ -296,14 +310,14 @@ export async function runPublishJobFlow(
     };
   }
 
-  const step9Modifier = handleStep9Modifier(state, payload, normalized);
-  if (step9Modifier) return step9Modifier;
+  const step10Modifier = handleStep10Modifier(state, payload, normalized);
+  if (step10Modifier) return step10Modifier;
 
-  const step10Result = handleStep10(state, payload, trimmed);
+  const step11Result = handleStep11(state, payload, trimmed);
+  if (step11Result) return step11Result;
+
+  const step10Result = await handleStep10Confirm(args, normalized);
   if (step10Result) return step10Result;
-
-  const step9Result = await handleStep9Confirm(args, normalized);
-  if (step9Result) return step9Result;
 
   const stepHandler = getStepHandler(step);
   if (stepHandler) return stepHandler(args);
@@ -314,13 +328,13 @@ export async function runPublishJobFlow(
   };
 }
 
-function handlePublishStep1(args: StepArgs): FlowResult {
-  const { state, payload, trimmed } = args;
+async function handlePublishStep1(args: StepArgs): Promise<FlowResult> {
+  const { state, payload, trimmed, ctx } = args;
   if (!trimmed) {
     return {
       reply: [
         [
-          "*PUBLICATION D'OFFRE* - ÉTAPE 1/8",
+          "*PUBLICATION D'OFFRE* - ÉTAPE 1/9",
           '',
           '*Quel est le titre de votre offre ?*',
           '',
@@ -340,10 +354,106 @@ function handlePublishStep1(args: StepArgs): FlowResult {
       nextState: state,
     };
   }
+  const categories = await ctx.prisma.jobCategory.findMany({
+    orderBy: { name: 'asc' },
+    select: { id: true, name: true },
+  });
+  const list = categories.map((c, i) => `${i + 1}️⃣ ${c.name}`).join('\n');
   return {
     reply: [
       [
-        '*ÉTAPE 2/8*',
+        '*ÉTAPE 2/9 (OPTIONNEL)*',
+        '',
+        '*Quelle est la catégorie de votre offre ?*',
+        '',
+        list || '_(aucune catégorie disponible)_',
+        '',
+        '*Tapez le numéro correspondant ou 0 pour passer.*',
+      ].join('\n'),
+    ],
+    nextState: {
+      ...state,
+      step: 2,
+      payload: { ...payload, title: trimmed, _categories: categories },
+      updatedAt: new Date().toISOString(),
+    },
+  };
+}
+
+// Step 2 — category (optional)
+async function handlePublishStep2(args: StepArgs): Promise<FlowResult> {
+  const { state, payload, trimmed, ctx } = args;
+
+  // User responding with a choice
+  const storedCategories = Array.isArray(payload._categories)
+    ? (payload._categories as { id: string; name: string }[])
+    : await ctx.prisma.jobCategory.findMany({
+        orderBy: { name: 'asc' },
+        select: { id: true, name: true },
+      });
+
+  if (trimmed === '0' || trimmed.toLowerCase() === 'passer') {
+    const cleanPayload = { ...payload };
+    delete cleanPayload._categories;
+    delete cleanPayload.category_id;
+    return {
+      reply: [
+        [
+          '*ÉTAPE 3/9*',
+          '',
+          '*Décrivez votre offre en détail. Soyez précis sur les tâches à réaliser.*',
+          '',
+          '*Exemple*: "_Réparation fuite d\'eau cuisine, remplacement robinet, vérification tuyauterie_"',
+        ].join('\n'),
+      ],
+      nextState: {
+        ...state,
+        step: 3,
+        payload: cleanPayload,
+        updatedAt: new Date().toISOString(),
+      },
+    };
+  }
+
+  const num = Number.parseInt(trimmed, 10);
+  if (
+    Number.isNaN(num) ||
+    num < 1 ||
+    num > storedCategories.length ||
+    storedCategories.length === 0
+  ) {
+    // Re-fetch if no stored categories (e.g. direct access)
+    const categories =
+      storedCategories.length > 0
+        ? storedCategories
+        : await ctx.prisma.jobCategory.findMany({
+            orderBy: { name: 'asc' },
+            select: { id: true, name: true },
+          });
+    const list = categories.map((c, i) => `${i + 1}️⃣ ${c.name}`).join('\n');
+    return {
+      reply: [
+        [
+          `*Choix invalide. Tapez un numéro entre 1 et ${categories.length} ou 0 pour passer.*`,
+          '',
+          list,
+        ].join('\n'),
+      ],
+      nextState: {
+        ...state,
+        payload: { ...payload, _categories: categories },
+      },
+    };
+  }
+
+  const chosen = storedCategories[num - 1];
+  const cleanPayload = { ...payload };
+  delete cleanPayload._categories;
+
+  return {
+    reply: [
+      [
+        '*ÉTAPE 3/9*',
         '',
         '*Décrivez votre offre en détail. Soyez précis sur les tâches à réaliser.*',
         '',
@@ -352,14 +462,18 @@ function handlePublishStep1(args: StepArgs): FlowResult {
     ],
     nextState: {
       ...state,
-      step: 2,
-      payload: { ...payload, title: trimmed },
+      step: 3,
+      payload: {
+        ...cleanPayload,
+        category_id: chosen.id,
+        category_name: chosen.name,
+      },
       updatedAt: new Date().toISOString(),
     },
   };
 }
 
-function handlePublishStep2(args: StepArgs): FlowResult {
+function handlePublishStep3(args: StepArgs): FlowResult {
   const { state, payload, trimmed } = args;
   if (!trimmed) {
     return {
@@ -380,7 +494,7 @@ function handlePublishStep2(args: StepArgs): FlowResult {
   return {
     reply: [
       [
-        '*ÉTAPE 3/8*',
+        '*ÉTAPE 4/9*',
         '',
         '*À quelle date et heure le travail doit-il commencer ?*',
         'Format: JJ/MM/AAAA HH:MM',
@@ -390,14 +504,14 @@ function handlePublishStep2(args: StepArgs): FlowResult {
     ],
     nextState: {
       ...state,
-      step: 3,
+      step: 4,
       payload: { ...payload, description: trimmed },
       updatedAt: new Date().toISOString(),
     },
   };
 }
 
-function handlePublishStep3(args: StepArgs): FlowResult {
+function handlePublishStep4(args: StepArgs): FlowResult {
   const { state, payload, trimmed } = args;
   if (!trimmed) {
     return {
@@ -429,7 +543,7 @@ function handlePublishStep3(args: StepArgs): FlowResult {
   return {
     reply: [
       [
-        '*ÉTAPE 4/8*',
+        '*ÉTAPE 5/9*',
         '',
         '*Quel est le montant proposé (en FCFA) ?*',
         'Tapez uniquement le chiffre.',
@@ -439,14 +553,14 @@ function handlePublishStep3(args: StepArgs): FlowResult {
     ],
     nextState: {
       ...state,
-      step: 4,
+      step: 5,
       payload: { ...payload, scheduled_at: dt.toISOString() },
       updatedAt: new Date().toISOString(),
     },
   };
 }
 
-function handlePublishStep4(args: StepArgs): FlowResult {
+function handlePublishStep5(args: StepArgs): FlowResult {
   const { state, payload, trimmed } = args;
   if (!trimmed) {
     return {
@@ -466,7 +580,7 @@ function handlePublishStep4(args: StepArgs): FlowResult {
   return {
     reply: [
       [
-        '*ÉTAPE 5/8*',
+        '*ÉTAPE 6/9*',
         '',
         '*Type de rémunération ?*',
         '1️⃣ Par heure',
@@ -478,14 +592,14 @@ function handlePublishStep4(args: StepArgs): FlowResult {
     ],
     nextState: {
       ...state,
-      step: 5,
+      step: 6,
       payload: { ...payload, amount },
       updatedAt: new Date().toISOString(),
     },
   };
 }
 
-function handlePublishStep5(args: StepArgs): FlowResult {
+function handlePublishStep6(args: StepArgs): FlowResult {
   const { state, payload, trimmed } = args;
   const num = parsePaymentFlowChoice(trimmed);
   if (!num) {
@@ -497,7 +611,7 @@ function handlePublishStep5(args: StepArgs): FlowResult {
   return {
     reply: [
       [
-        '*ÉTAPE 6/8*',
+        '*ÉTAPE 7/9*',
         '',
         "*Quelle est l'adresse complète du lieu de travail ?*",
         '',
@@ -506,14 +620,14 @@ function handlePublishStep5(args: StepArgs): FlowResult {
     ],
     nextState: {
       ...state,
-      step: 6,
+      step: 7,
       payload: { ...payload, payment_flow: num },
       updatedAt: new Date().toISOString(),
     },
   };
 }
 
-function handlePublishStep6(args: StepArgs): FlowResult {
+function handlePublishStep7(args: StepArgs): FlowResult {
   const { state, payload, trimmed } = args;
   if (!trimmed || trimmed.length < ADDRESS_MIN) {
     return {
@@ -526,7 +640,7 @@ function handlePublishStep6(args: StepArgs): FlowResult {
   return {
     reply: [
       [
-        '*ÉTAPE 7/8*',
+        '*ÉTAPE 8/9*',
         '',
         '*Combien de personnes sont nécessaires pour ce travail ?*',
         `Entrez un nombre entre ${QUANTITY_MIN} et ${QUANTITY_MAX}.`,
@@ -536,15 +650,14 @@ function handlePublishStep6(args: StepArgs): FlowResult {
     ],
     nextState: {
       ...state,
-      step: 7,
+      step: 8,
       payload: { ...payload, address: trimmed },
       updatedAt: new Date().toISOString(),
     },
   };
 }
 
-// Step 7 — quantity (new step)
-function handlePublishStep7(args: StepArgs): FlowResult {
+function handlePublishStep8(args: StepArgs): FlowResult {
   const { state, payload, trimmed } = args;
   if (!trimmed) {
     return {
@@ -570,7 +683,7 @@ function handlePublishStep7(args: StepArgs): FlowResult {
   return {
     reply: [
       [
-        '*ÉTAPE 8/8 (OPTIONNEL)*',
+        '*ÉTAPE 9/9 (OPTIONNEL)*',
         '',
         '*Avez-vous une note complémentaire à ajouter ?*',
         '',
@@ -581,15 +694,14 @@ function handlePublishStep7(args: StepArgs): FlowResult {
     ],
     nextState: {
       ...state,
-      step: 8,
+      step: 9,
       payload: { ...payload, quantity },
       updatedAt: new Date().toISOString(),
     },
   };
 }
 
-// Step 8 — note (formerly step 7)
-function handlePublishStep8(args: StepArgs): FlowResult {
+function handlePublishStep9(args: StepArgs): FlowResult {
   const { state, payload, trimmed, normalized } = args;
   const note =
     normalized === 'non' ||
@@ -621,7 +733,7 @@ function handlePublishStep8(args: StepArgs): FlowResult {
     ],
     nextState: {
       ...state,
-      step: 9,
+      step: 10,
       payload: fullPayload,
       updatedAt: new Date().toISOString(),
     },
@@ -636,18 +748,20 @@ function getStepPrompt(
     case 1:
       return 'Quel est le titre de votre offre ? (5-100 caractères)';
     case 2:
-      return 'Décrivez votre offre en détail. (20-1000 caractères)';
+      return 'Catégorie de votre offre (tapez 0 pour passer)';
     case 3:
-      return 'À quelle date et heure ? Format JJ/MM/AAAA HH:MM';
+      return 'Décrivez votre offre en détail. (20-1000 caractères)';
     case 4:
-      return 'Quel est le montant en FCFA ? (1000-1000000)';
+      return 'À quelle date et heure ? Format JJ/MM/AAAA HH:MM';
     case 5:
-      return 'Type de rémunération : 1=Par heure, 2=Par jour, 3=Par mois';
+      return 'Quel est le montant en FCFA ? (1000-1000000)';
     case 6:
-      return "Quelle est l'adresse du lieu de travail ?";
+      return 'Type de rémunération : 1=Par heure, 2=Par jour, 3=Par mois';
     case 7:
-      return `Combien de personnes sont nécessaires ? (${QUANTITY_MIN}-${QUANTITY_MAX})`;
+      return "Quelle est l'adresse du lieu de travail ?";
     case 8:
+      return `Combien de personnes sont nécessaires ? (${QUANTITY_MIN}-${QUANTITY_MAX})`;
+    case 9:
       return 'Note complémentaire (tapez 0 pour passer)';
     default:
       return '';
@@ -672,7 +786,6 @@ function formatPaymentFlowLabel(paymentFlow: unknown): string {
   return '-';
 }
 
-/** Safe string for display; avoids [object Object] for non-primitive values. */
 function toDisplayString(v: unknown): string {
   if (v == null) return '-';
   if (typeof v === 'string') return v;
@@ -702,8 +815,14 @@ function buildSummary(payload: Record<string, unknown>): string {
     payload.note == null || typeof payload.note !== 'string'
       ? 'Aucune'
       : payload.note;
+  const category =
+    typeof payload.category_name === 'string' && payload.category_name
+      ? payload.category_name
+      : 'Non spécifiée';
   return [
     `*Titre*: ${title}`,
+    '',
+    `*Catégorie*: ${category}`,
     '',
     `*Description*: ${descStr}`,
     '',
@@ -730,7 +849,7 @@ export function getPublishJobInitialState(): BotState {
 
 export function getPublishJobFirstMessage(): string {
   return [
-    "*PUBLICATION D'OFFRE* - ÉTAPE 1/8",
+    "*PUBLICATION D'OFFRE* - ÉTAPE 1/9",
     '',
     '*Quel est le titre de votre offre ?*',
     '',
@@ -763,7 +882,7 @@ export function getPublishJobDraftResumeMessage(
     '',
     title ? `Titre : *${title}*` : '',
     '',
-    `Étape : ${step}/8`,
+    `Étape : ${step}/9`,
     '',
     `1 - Reprendre là où vous en étiez.`,
     `2 - Recommencer depuis le début.`,

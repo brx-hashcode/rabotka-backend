@@ -26,7 +26,6 @@ export async function runVerifyWhatsappFlow(
 ): Promise<FlowResult> {
   const trimmed = input.trim();
 
-  // Initial trigger — no input yet, prompt for code
   if (!trimmed) {
     return {
       reply: ['Veuillez entrer le code de vérification reçu par WhatsApp :'],
@@ -69,7 +68,6 @@ export async function runVerifyWhatsappFlow(
     };
   }
 
-  // Mark token used and activate profile
   await ctx.prisma.$transaction([
     ctx.prisma.verificationToken.update({
       where: { id: token.id },
@@ -81,13 +79,16 @@ export async function runVerifyWhatsappFlow(
     }),
   ] as const);
 
-  // Grant welcome credit (idempotent)
   const profileType = profile.profile_type as ProfileType;
   const creditAmount = await ctx.walletService
     .grantWelcomeCredit(profile.id, profileType)
     .catch(() => 0);
 
-  const message = welcomeActivationMessage(profile.first_name, creditAmount, profile.profile_type);
+  const message = welcomeActivationMessage(
+    profile.first_name,
+    creditAmount,
+    profile.profile_type,
+  );
 
   return {
     reply: [message],

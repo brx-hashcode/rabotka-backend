@@ -3,9 +3,7 @@ import { FLOW_IDS, CMD_MENU } from '../bot.constants';
 import { getApplyJobInitialState } from './apply-job.flow';
 import type { JobOfferService } from '../../job-offer/job-offer.service';
 import {
-  formatOfferDetail,
   formatOfferDetailWithActions,
-  formatOfferListCompact,
   type OfferListItem,
 } from '../messages/offers.messages';
 import { menuMessage } from '../messages/menu.messages';
@@ -68,13 +66,17 @@ export async function runRecommendedJobsFlow(
     clearState: true,
   });
 
-  if (CMD_MENU.some((c) => normalized === c || normalized.startsWith(c + ' '))) {
+  if (
+    CMD_MENU.some((c) => normalized === c || normalized.startsWith(c + ' '))
+  ) {
     return goToMenu();
   }
 
   if (offerIds.length === 0) {
     return {
-      reply: ["*Aucune offre recommandée pour le moment. Tapez 'Menu' pour revenir.*"],
+      reply: [
+        "*Aucune offre recommandée pour le moment. Tapez 'Menu' pour revenir.*",
+      ],
       clearState: true,
     };
   }
@@ -84,7 +86,7 @@ export async function runRecommendedJobsFlow(
     const choice = /^[1-5]$/.test(trimmed) ? Number.parseInt(trimmed, 10) : 0;
     if (choice >= 1 && choice <= Math.min(offerIds.length, 5)) {
       const offerId = offerIds[choice - 1];
-      const offer = await ctx.jobOfferService.findById(offerId!);
+      const offer = await ctx.jobOfferService.findById(offerId);
       if (!offer) {
         return { reply: ['Offre introuvable.'], nextState: state };
       }
@@ -100,7 +102,9 @@ export async function runRecommendedJobsFlow(
       };
     }
     return {
-      reply: [`*Tapez 1-${Math.min(offerIds.length, 5)} pour voir le détail ou 7 pour le menu.*`],
+      reply: [
+        `*Tapez 1-${Math.min(offerIds.length, 5)} pour voir le détail ou 7 pour le menu.*`,
+      ],
       nextState: state,
     };
   }
@@ -112,7 +116,6 @@ export async function runRecommendedJobsFlow(
       return { reply: [], nextState: applyState };
     }
     if (normalized === '2' || normalized === 'retour') {
-      // Back to list
       return {
         reply: [
           '*Offres recommandées — tapez le numéro pour voir le détail ou 7 pour le menu.*',

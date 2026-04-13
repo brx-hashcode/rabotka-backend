@@ -29,4 +29,5 @@ export type FlowResult = {
   reply: string[];
   nextState?: BotState;
   clearState?: boolean;
+  clearDraft?: boolean;
 };

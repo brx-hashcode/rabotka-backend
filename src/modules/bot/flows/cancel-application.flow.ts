@@ -141,9 +141,7 @@ function showInitialCancelPrompt(
   return { reply: [text], nextState: state };
 }
 
-async function handleLateCancellationInput(
-  args: CancelStepArgs,
-): Promise<FlowResult> {
+function handleLateCancellationInput(args: CancelStepArgs): FlowResult {
   const { state, payload, trimmed, normalized } = args;
   const reason = normalized === 'confirmer' ? undefined : trimmed;
   if (!reason) {
@@ -158,6 +156,7 @@ async function handleLateCancellationInput(
     reply: [
       [
         '*Êtes-vous certain de vouloir annuler ?*',
+        '',
         `*Pénalité*: ${LATE_CANCELLATION_PENALTY_FCFA.toLocaleString('fr-FR')} FCFA`,
         '1️⃣ Oui, annuler malgré la pénalité',
         '2️⃣ Non, maintenir ma candidature',
@@ -220,7 +219,6 @@ async function handleCancelStep1(
     return { reply: [menuMessage(profile.profile_type)], clearState: true };
   }
 
-  // Free-text reason → immediate cancellation
   return executeCancellation(
     applicationId,
     profile,

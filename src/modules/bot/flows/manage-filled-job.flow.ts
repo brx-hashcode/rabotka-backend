@@ -74,7 +74,7 @@ async function handleDetailComplete(
         [
           '*Mission marquée comme terminée !*',
           '',
-          `Le gain de ${Number(amount).toLocaleString('fr-FR')} FCFA a été enregistré pour le worker.`,
+          `Le gain de ${Number(amount).toLocaleString('fr-FR')} FCFA a été enregistré pour le travailleur.`,
           '',
           "Tapez 'Menu' pour revenir.",
         ].join('\n'),
@@ -133,7 +133,6 @@ async function handleDetailStep(
     return { reply: ["*ERREUR. TAPEZ 'MENU'.*"], clearState: true };
   }
 
-  // After the !applicationId guard, selectedItem is guaranteed non-undefined
   if (trimmed === '1') {
     return {
       reply: [
