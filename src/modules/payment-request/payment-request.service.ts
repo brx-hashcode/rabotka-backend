@@ -13,8 +13,9 @@ import {
   PaymentType,
   PaymentMethod,
   PaymentStatus,
+  InvoiceReason,
 } from '@prisma/client';
-import { randomUUID } from 'crypto';
+import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { WalletService } from '../wallet/wallet.service';
@@ -27,7 +28,6 @@ import { AdminNotificationEvent } from '../../common/events/admin-notification.e
 import { BotNotificationService } from '../bot/services/bot-notification.service';
 import { ContactUnlockService } from '../contact-unlock/contact-unlock.service';
 import { InvoiceService } from '../invoice/invoice.service';
-import { InvoiceReason } from '@prisma/client';
 import { generatePaymentReference } from '../../common/utils/payment-reference';
 import { ListPaymentRequestsDto } from './dto/list-payment-requests.dto';
 import { SubmitPaymentDto } from './dto/submit-payment.dto';
@@ -64,6 +64,16 @@ const PAYMENT_REQUEST_SELECT = {
 type PaymentRequestWithProfile = Prisma.PaymentRequestGetPayload<{
   select: typeof PAYMENT_REQUEST_SELECT;
 }>;
+
+type PaymentProcessingContext = {
+  amount: number;
+  transactionRef: string;
+  isContactUnlock: boolean;
+  isRecommendationContact: boolean;
+  recommendationWorkerId: string | null;
+  paymentType: PaymentType;
+  paymentDescription: string;
+};
 
 @Injectable()
 export class PaymentRequestService {
@@ -141,7 +151,7 @@ export class PaymentRequestService {
       id: request.id,
       status: request.status,
       profileName: this.fullName(request.profile),
-      amount: request.amount !== null ? Number(request.amount) : null,
+      amount: request.amount === null ? null : Number(request.amount),
       description: request.description ?? null,
     };
   }
@@ -204,7 +214,8 @@ export class PaymentRequestService {
       );
     }
 
-    const paymentId = result.paymentId ?? '';
+    const paymentId =
+      typeof result.paymentId === 'string' ? String(result.paymentId) : '';
 
     await this.prisma.paymentRequest.update({
       where: { id: request.id },
@@ -220,8 +231,11 @@ export class PaymentRequestService {
     // On conclusive result: processes payment + emits WebSocket update to client.
     if (paymentId) {
       this.pollPaymentStatus(request.id, request.token, paymentId).catch(
-        (err) =>
-          this.logger.error(`Polling failed for request ${request.id}`, err),
+        (err: unknown) =>
+          this.logger.error(
+            `Polling failed for request ${request.id}`,
+            err instanceof Error ? err.stack : String(err),
+          ),
       );
     }
 
@@ -242,6 +256,8 @@ export class PaymentRequestService {
 
       const { status, transactionId } =
         await this.monetbilService.checkPayment(paymentId);
+      const safeTransactionId =
+        typeof transactionId === 'string' ? transactionId : undefined;
 
       if (status === 'SUCCESS') {
         const request = await this.prisma.paymentRequest.findUnique({
@@ -256,7 +272,7 @@ export class PaymentRequestService {
           request.status !== PaymentRequestStatus.APPROVED &&
           request.status !== PaymentRequestStatus.REJECTED
         ) {
-          await this.processSuccessfulPayment(request, transactionId);
+          await this.processSuccessfulPayment(request, safeTransactionId);
         }
         this.paymentStatusGateway.emitPaymentStatus(token, 'APPROVED');
         return;
@@ -267,7 +283,7 @@ export class PaymentRequestService {
           where: { id: requestId },
           data: {
             status: PaymentRequestStatus.REJECTED,
-            ...(transactionId && { monetbil_tx_id: transactionId }),
+            ...(safeTransactionId && { monetbil_tx_id: safeTransactionId }),
           },
         });
         this.paymentStatusGateway.emitPaymentStatus(token, 'REJECTED');
@@ -299,7 +315,6 @@ export class PaymentRequestService {
   async handleMonetbilCallback(
     payload: Record<string, string>,
   ): Promise<{ received: boolean }> {
-    // Monetbil callback sends paymentId (same value returned on initiation)
     const paymentId = payload['paymentId'] ?? payload['payment_ref'];
     const status = payload['status'];
     const transaction_id = payload['transaction_id'];
@@ -323,7 +338,6 @@ export class PaymentRequestService {
       request.status === PaymentRequestStatus.APPROVED ||
       request.status === PaymentRequestStatus.REJECTED
     ) {
-      // Already processed (duplicate callback)
       return { received: true };
     }
 
@@ -342,7 +356,6 @@ export class PaymentRequestService {
       this.logger.log(`Payment rejected for request ${request.id}`);
     }
 
-    // Push real-time status to the browser via WebSocket
     this.paymentStatusGateway.emitPaymentStatus(
       request.token,
       isSuccess ? 'APPROVED' : 'REJECTED',
@@ -355,9 +368,25 @@ export class PaymentRequestService {
     request: PaymentRequestWithProfile,
     transactionId?: string,
   ): Promise<void> {
+    const context = await this.buildPaymentProcessingContext(request);
+    await this.persistApprovedPayment(request, context, transactionId);
+
+    this.logger.log(
+      `Payment approved: ${request.id} — ${context.amount} FCFA credited to system wallet`,
+    );
+
+    this.emitAdminPaymentNotification(request, context);
+    await this.sendPaymentSuccessNotifications(request, context);
+    this.createInvoiceForApprovedPayment(request, context);
+    await this.handleContactUnlockPostPayment(request);
+    await this.handleRecommendationContactPostPayment(request, context);
+  }
+
+  private async buildPaymentProcessingContext(
+    request: PaymentRequestWithProfile,
+  ): Promise<PaymentProcessingContext> {
     const amount = Number(request.amount ?? 0);
     const transactionRef = generatePaymentReference();
-
     const isContactUnlock = request.contact_unlock_attempt_id != null;
     const recommendationWorkerIdMatch = request.description?.match(
       /^RECOMMENDATION_CONTACT:(.+)$/,
@@ -365,13 +394,7 @@ export class PaymentRequestService {
     const recommendationWorkerId = recommendationWorkerIdMatch?.[1] ?? null;
     const isRecommendationContact = recommendationWorkerId != null;
 
-    const paymentType =
-      isContactUnlock || isRecommendationContact
-        ? PaymentType.CONTACT_UNLOCK
-        : PaymentType.PENALTY;
-
-    // Resolve human-readable description for the Payment record
-    let paymentDescription: string = request.description ?? 'Paiement';
+    let paymentDescription = request.description ?? 'Paiement';
     if (isRecommendationContact && recommendationWorkerId) {
       const recWorker = await this.prisma.profile.findUnique({
         where: { id: recommendationWorkerId },
@@ -383,73 +406,96 @@ export class PaymentRequestService {
       }
     }
 
-    // 1. Credit system wallet + create Payment record (atomic)
+    return {
+      amount,
+      transactionRef,
+      isContactUnlock,
+      isRecommendationContact,
+      recommendationWorkerId,
+      paymentType:
+        isContactUnlock || isRecommendationContact
+          ? PaymentType.CONTACT_UNLOCK
+          : PaymentType.PENALTY,
+      paymentDescription,
+    };
+  }
+
+  private async persistApprovedPayment(
+    request: PaymentRequestWithProfile,
+    context: PaymentProcessingContext,
+    transactionId?: string,
+  ): Promise<void> {
     const systemWallet = await this.walletService.getOrCreateSystemWallet();
     await this.prisma.$transaction([
       this.prisma.payment.create({
         data: {
-          type: paymentType,
+          type: context.paymentType,
           profile_id: request.profile_id,
-          amount,
+          amount: context.amount,
           payment_method: PaymentMethod.MOBILE_MONEY,
-          transaction_id: transactionRef,
+          transaction_id: context.transactionRef,
           status: PaymentStatus.COMPLETED,
           paid_at: new Date(),
-          description: paymentDescription,
+          description: context.paymentDescription,
         },
       }),
       this.prisma.walletTransaction.create({
         data: {
           wallet_id: systemWallet.id,
           type:
-            isContactUnlock || isRecommendationContact
+            context.isContactUnlock || context.isRecommendationContact
               ? WalletTransactionType.CONTACT_UNLOCK_PAYMENT
               : WalletTransactionType.CREDIT_PENALTY,
-          amount,
+          amount: context.amount,
           reference_type: 'payment_request',
           reference_id: request.id,
         },
       }),
       this.prisma.wallet.update({
         where: { id: systemWallet.id },
-        data: { balance: { increment: amount } },
+        data: { balance: { increment: context.amount } },
       }),
       this.prisma.paymentRequest.update({
         where: { id: request.id },
         data: {
           status: PaymentRequestStatus.APPROVED,
-          payment_reference: transactionRef,
+          payment_reference: context.transactionRef,
           ...(transactionId && { monetbil_tx_id: transactionId }),
         },
       }),
     ]);
+  }
 
-    this.logger.log(
-      `Payment approved: ${request.id} — ${amount} FCFA credited to system wallet`,
-    );
-
+  private emitAdminPaymentNotification(
+    request: PaymentRequestWithProfile,
+    context: PaymentProcessingContext,
+  ): void {
     const profileName = this.fullName(request.profile);
-    const description: string = paymentDescription;
-
-    // 2. Emit admin notification
     this.eventEmitter.emit(AdminNotificationEvent.PAYMENT_PENALTY, {
       event: AdminNotificationEvent.PAYMENT_PENALTY,
       title: 'Paiement reçu',
-      message: `${profileName} a effectué un paiement de ${amount.toLocaleString('fr-FR')} FCFA — ${description}`,
+      message: `${profileName} a effectué un paiement de ${context.amount.toLocaleString('fr-FR')} FCFA — ${context.paymentDescription}`,
       entityType: 'profile',
       entityId: request.profile_id,
       timestamp: new Date().toISOString(),
     });
+  }
 
-    // 3. Send WhatsApp notification
+  private async sendPaymentSuccessNotifications(
+    request: PaymentRequestWithProfile,
+    context: PaymentProcessingContext,
+  ): Promise<void> {
+    const profileName = this.fullName(request.profile);
+
     if (request.profile.phone) {
       const text = [
-        `✅ *Paiement confirmé*`,
-        `Montant : *${amount.toLocaleString('fr-FR')} FCFA*`,
-        `Objet : ${description}`,
+        `🎉 *Paiement confirmé*`,
+        '',
+        `Montant : *${context.amount.toLocaleString('fr-FR')} FCFA*`,
+        `Objet : ${context.paymentDescription}`,
+        '',
         `Merci pour votre paiement !`,
       ].join('\n');
-
       await this.whatsAppService
         .sendTextMessage(request.profile.phone, text)
         .catch((err) =>
@@ -460,13 +506,16 @@ export class PaymentRequestService {
         );
     }
 
-    // 4. Send email notification
     if (request.profile.email) {
       await this.mailService
         .sendMail({
           to: request.profile.email,
-          subject: `Paiement confirmé — ${description}`,
-          html: paymentSuccessEmail(profileName, description, amount),
+          subject: `Paiement confirmé — ${context.paymentDescription}`,
+          html: paymentSuccessEmail(
+            profileName,
+            context.paymentDescription,
+            context.amount,
+          ),
         })
         .catch((err) =>
           this.logger.warn(
@@ -475,15 +524,19 @@ export class PaymentRequestService {
           ),
         );
     }
+  }
 
-    // 5. Create invoice metadata (no PDF generated here — on-demand via GET /invoices/:id/download)
+  private createInvoiceForApprovedPayment(
+    request: PaymentRequestWithProfile,
+    context: PaymentProcessingContext,
+  ): void {
     this.invoiceService
       .create({
         profileId: request.profile_id,
         paymentRequestId: request.id,
-        amount,
+        amount: context.amount,
         reason:
-          isContactUnlock || isRecommendationContact
+          context.isContactUnlock || context.isRecommendationContact
             ? InvoiceReason.CONTACT_UNLOCK
             : InvoiceReason.PENALTY,
         relatedEntityType: request.contact_unlock_attempt_id
@@ -497,81 +550,90 @@ export class PaymentRequestService {
           err,
         ),
       );
+  }
 
-    if (request.contact_unlock_attempt_id) {
-      try {
-        const result = await this.contactUnlockService.payUnlock(
-          request.contact_unlock_attempt_id,
-          request.profile_id,
-          false,
-        );
-        if (result.status === 'UNLOCKED' || result.newlyUnlocked.length > 0) {
-          const attemptIds =
-            result.status === 'UNLOCKED'
-              ? [result.attemptId, ...result.newlyUnlocked]
-              : result.newlyUnlocked;
-          for (const id of new Set(attemptIds)) {
-            await this.botNotification
-              .sendContactUnlockedNotification(id)
-              .catch((err) =>
-                this.logger.warn(
-                  `Contact unlock notification failed for ${id}:`,
-                  err,
-                ),
-              );
-          }
-        }
-      } catch (err) {
-        this.logger.warn(
-          `Contact unlock processing failed for attempt ${String(request.contact_unlock_attempt_id)}:`,
-          err,
-        );
-      }
-    }
+  private async handleContactUnlockPostPayment(
+    request: PaymentRequestWithProfile,
+  ): Promise<void> {
+    if (!request.contact_unlock_attempt_id) return;
 
-    // Recommendation contact fee paid via mobile money — send worker contacts to employer via WhatsApp
-    if (recommendationWorkerId && request.profile.phone) {
-      try {
-        const worker = await this.prisma.profile.findUnique({
-          where: { id: recommendationWorkerId },
-          select: {
-            first_name: true,
-            last_name: true,
-            phone: true,
-            email: true,
-          },
-        });
-        if (worker) {
-          const workerName = `${worker.first_name} ${worker.last_name}`.trim();
-          const contactLines = [
-            '🔓 *CONTACT DÉVERROUILLÉ !*',
-            '',
-            `*${workerName}*`,
-            '',
-            ...(worker.phone ? [`*Téléphone*: ${worker.phone}`] : []),
-            ...(worker.email ? [`*Email*: ${worker.email}`] : []),
-            '',
-            'Tapez *Menu* pour revenir au menu principal.',
-          ].join('\n');
-          await this.botNotification
-            .sendMessage(request.profile.phone, contactLines)
-            .catch((err) =>
-              this.logger.warn(
-                `Recommendation contact send failed for worker ${recommendationWorkerId}:`,
-                err,
-              ),
-            );
-        }
-      } catch (err) {
-        this.logger.warn(
-          `Failed to send recommendation contact for worker ${recommendationWorkerId}:`,
-          err,
-        );
+    try {
+      const result = await this.contactUnlockService.payUnlock(
+        request.contact_unlock_attempt_id,
+        request.profile_id,
+        false,
+      );
+      if (result.status !== 'UNLOCKED' && result.newlyUnlocked.length === 0) {
+        return;
       }
+
+      const attemptIds =
+        result.status === 'UNLOCKED'
+          ? [result.attemptId, ...result.newlyUnlocked]
+          : result.newlyUnlocked;
+      for (const id of new Set(attemptIds)) {
+        await this.botNotification
+          .sendContactUnlockedNotification(id)
+          .catch((err) =>
+            this.logger.warn(
+              `Contact unlock notification failed for ${id}:`,
+              err,
+            ),
+          );
+      }
+    } catch (err) {
+      this.logger.warn(
+        `Contact unlock processing failed for attempt ${String(request.contact_unlock_attempt_id)}:`,
+        err,
+      );
     }
   }
 
-  /** Legacy manual proof submission — kept for backward compatibility */
+  private async handleRecommendationContactPostPayment(
+    request: PaymentRequestWithProfile,
+    context: PaymentProcessingContext,
+  ): Promise<void> {
+    if (!context.recommendationWorkerId || !request.profile.phone) return;
+
+    try {
+      const worker = await this.prisma.profile.findUnique({
+        where: { id: context.recommendationWorkerId },
+        select: {
+          first_name: true,
+          last_name: true,
+          phone: true,
+          email: true,
+        },
+      });
+      if (!worker) return;
+
+      const contactLines = [
+        '🔓 *Contact déverrouillé avec succès !*',
+        '',
+        '👤 *Informations du travailleur*',
+        `• *Prénom* : ${worker.first_name ?? '—'}`,
+        `• *Nom* : ${worker.last_name ?? '—'}`,
+        ...(worker.phone ? [`• *Téléphone* : ${worker.phone}`] : []),
+        ...(worker.email ? [`• *Email* : ${worker.email}`] : []),
+        '',
+        'Tapez *Menu* pour retourner au menu principal.',
+      ].join('\n');
+      await this.botNotification
+        .sendMessage(request.profile.phone, contactLines)
+        .catch((err) =>
+          this.logger.warn(
+            `Recommendation contact send failed for worker ${context.recommendationWorkerId}:`,
+            err,
+          ),
+        );
+    } catch (err) {
+      this.logger.warn(
+        `Failed to send recommendation contact for worker ${context.recommendationWorkerId}:`,
+        err,
+      );
+    }
+  }
+
   async submitPayment(token: string, dto: SubmitPaymentDto) {
     const request = await this.prisma.paymentRequest.findUnique({
       where: { token },
@@ -643,7 +705,7 @@ export class PaymentRequestService {
       profileStatus: r.profile.status,
       profileType: r.profile.profile_type,
       status: r.status,
-      amount: r.amount !== null ? Number(r.amount) : null,
+      amount: r.amount === null ? null : Number(r.amount),
       description: r.description,
       paymentReference: r.payment_reference,
       proofImages: r.proof_images,

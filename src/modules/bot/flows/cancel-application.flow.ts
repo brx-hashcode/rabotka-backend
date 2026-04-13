@@ -288,7 +288,7 @@ export async function runCancelApplicationFlow(
   }
 
   const app = await ctx.applicationService.findById(applicationId);
-  if (!app || app.worker_id !== profile.id) {
+  if (app?.worker_id !== profile.id) {
     return {
       reply: ["*CANDIDATURE INTROUVABLE. TAPEZ 'MENU'.*"],
       clearState: true,

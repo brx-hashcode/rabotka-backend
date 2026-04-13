@@ -16,141 +16,173 @@ type FlowResult = {
   clearState?: boolean;
 };
 
-export async function runPayPenaltiesFlow(
+function isMenuCommand(normalizedInput: string): boolean {
+  return (
+    normalizedInput === 'retour' ||
+    CMD_MENU.some(
+      (command) =>
+        normalizedInput === command ||
+        normalizedInput.startsWith(command + ' '),
+    )
+  );
+}
+
+function createWalletStepState(
   state: BotState,
-  input: string,
+  penaltyCount: number,
+  totalAmount: number,
+): BotState {
+  return {
+    ...state,
+    step: 2,
+    payload: { penaltyCount, totalAmount },
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function buildInsufficientFundsReply(
+  balance: number,
+  totalAmount: number,
+): string {
+  return [
+    `⚠️ *Solde insuffisant*`,
+    ``,
+    `Votre solde est de *${balance.toLocaleString('fr-FR')} FCFA*, mais le montant dû est de *${totalAmount.toLocaleString('fr-FR')} FCFA*.`,
+    ``,
+    `Tapez *MENU* pour revenir ou effectuez un rechargement mobile money d'abord.`,
+  ].join('\n');
+}
+
+function buildWalletPaymentSuccessReply(
+  paidCount: number,
+  totalAmount: number,
+): string {
+  return [
+    `🎉 *Paiement par crédit enregistré*`,
+    ``,
+    `*${paidCount} pénalité(s)* (${totalAmount.toLocaleString('fr-FR')} FCFA) ont été réglées depuis votre portefeuille.`,
+    ``,
+    `Votre compte est maintenant *débloqué*.`,
+    ``,
+    `Tapez *MENU* pour continuer.`,
+  ].join('\n');
+}
+
+function buildMobileMoneySuccessReply(
+  paidCount: number,
+  totalAmount: number,
+): string {
+  return [
+    `🎉 *Paiement enregistré*`,
+    ``,
+    `Merci ! Vos *${paidCount} pénalité(s)* (${totalAmount.toLocaleString('fr-FR')} FCFA) ont été marquées comme réglées.`,
+    ``,
+    `Votre compte est maintenant *débloqué* — vous pouvez de nouveau postuler aux offres.`,
+    ``,
+    `Tapez *MENU* pour continuer.`,
+  ].join('\n');
+}
+
+async function handleWalletConfirmationStep(
+  state: BotState,
+  trimmedInput: string,
+  normalizedInput: string,
   profile: BotProfile,
   ctx: PayPenaltiesContext,
+  totalAmount: number,
+  goToMenu: () => FlowResult,
 ): Promise<FlowResult> {
-  const trimmed = input.trim();
-  const normalized = trimmed.toLowerCase();
+  if (trimmedInput === '2' || normalizedInput === 'annuler') return goToMenu();
 
-  const goToMenu = (): FlowResult => ({
-    reply: [menuMessage(profile.profile_type)],
-    clearState: true,
-  });
-
-  if (
-    CMD_MENU.some((c) => normalized === c || normalized.startsWith(c + ' ')) ||
-    normalized === 'retour'
-  ) {
-    return goToMenu();
-  }
-
-  const payload = state.payload ?? {};
-  const totalAmount = payload.totalAmount as number;
-  const penaltyCount = payload.penaltyCount as number;
-
-  if (state.step === 2) {
-    if (trimmed === '2' || normalized === 'annuler') return goToMenu();
-
-    if (trimmed === '1' || normalized === 'oui') {
-      const balance = await ctx.walletService.getProfileWalletBalance(
-        profile.id,
-      );
-      if (balance < totalAmount) {
-        return {
-          reply: [
-            [
-              `⚠️ *Solde insuffisant*`,
-              ``,
-              `Votre solde est de *${balance.toLocaleString('fr-FR')} FCFA*, mais le montant dû est de *${totalAmount.toLocaleString('fr-FR')} FCFA*.`,
-              ``,
-              `Tapez *MENU* pour revenir ou effectuez un rechargement mobile money d'abord.`,
-            ].join('\n'),
-          ],
-          clearState: true,
-        };
-      }
-
-      await ctx.walletService.debitProfileWallet(
-        profile.id,
-        totalAmount,
-        WalletTransactionType.PENALTY_DEBIT,
-        'penalty_batch',
-        profile.id,
-      );
-      const result = await ctx.applicationService.markPenaltiesPaid(profile.id);
-
-      return {
-        reply: [
-          [
-            `🎉 *Paiement par crédit enregistré*`,
-            ``,
-            `*${result.paidCount} pénalité(s)* (${result.totalAmount.toLocaleString('fr-FR')} FCFA) ont été réglées depuis votre portefeuille.`,
-            ``,
-            `Votre compte est maintenant *débloqué*.`,
-            ``,
-            `Tapez *MENU* pour continuer.`,
-          ].join('\n'),
-        ],
-        clearState: true,
-      };
-    }
-
+  if (!(trimmedInput === '1' || normalizedInput === 'oui')) {
     return {
       reply: ['*Répondez par 1 (confirmer) ou 2 (annuler).*'],
       nextState: state,
     };
   }
 
-  if (trimmed === '1') {
-    const result = await ctx.applicationService.markPenaltiesPaid(profile.id);
-    if (result.paidCount === 0) {
-      return {
-        reply: [
-          `✅ *Aucune pénalité en attente.*\n\nVotre compte est en règle. Tapez *MENU* pour continuer.`,
-        ],
-        clearState: true,
-      };
-    }
+  const balance = await ctx.walletService.getProfileWalletBalance(profile.id);
+  if (balance < totalAmount) {
+    return {
+      reply: [buildInsufficientFundsReply(balance, totalAmount)],
+      clearState: true,
+    };
+  }
+
+  await ctx.walletService.debitProfileWallet(
+    profile.id,
+    totalAmount,
+    WalletTransactionType.PENALTY_DEBIT,
+    'penalty_batch',
+    profile.id,
+  );
+  const result = await ctx.applicationService.markPenaltiesPaid(profile.id);
+
+  return {
+    reply: [
+      buildWalletPaymentSuccessReply(result.paidCount, result.totalAmount),
+    ],
+    clearState: true,
+  };
+}
+
+async function handleMobileMoneyPayment(
+  profile: BotProfile,
+  ctx: PayPenaltiesContext,
+): Promise<FlowResult> {
+  const result = await ctx.applicationService.markPenaltiesPaid(profile.id);
+  if (result.paidCount === 0) {
     return {
       reply: [
-        [
-          `🎉 *Paiement enregistré*`,
-          ``,
-          `Merci ! Vos *${result.paidCount} pénalité(s)* (${result.totalAmount.toLocaleString('fr-FR')} FCFA) ont été marquées comme réglées.`,
-          ``,
-          `Votre compte est maintenant *débloqué* — vous pouvez de nouveau postuler aux offres.`,
-          ``,
-          `Tapez *MENU* pour continuer.`,
-        ].join('\n'),
+        `✅ *Aucune pénalité en attente.*\n\nVotre compte est en règle. Tapez *MENU* pour continuer.`,
       ],
       clearState: true,
     };
   }
 
-  if (trimmed === '2') {
-    const balance = await ctx.walletService.getProfileWalletBalance(profile.id);
-    const hasFunds = balance >= totalAmount;
+  return {
+    reply: [buildMobileMoneySuccessReply(result.paidCount, result.totalAmount)],
+    clearState: true,
+  };
+}
 
-    return {
-      reply: [
-        [
-          `💳 *Paiement par crédit portefeuille*`,
-          ``,
-          `Montant dû : *${totalAmount.toLocaleString('fr-FR')} FCFA*`,
-          `Solde disponible : *${balance.toLocaleString('fr-FR')} FCFA*`,
-          ``,
-          hasFunds
-            ? `1️⃣ Confirmer le débit de ${totalAmount.toLocaleString('fr-FR')} FCFA`
-            : `⚠️ Solde insuffisant — rechargez votre portefeuille d'abord.`,
-          `2️⃣ Annuler`,
-        ].join('\n'),
-      ],
-      nextState: hasFunds
-        ? {
-            ...state,
-            step: 2,
-            payload: { penaltyCount, totalAmount },
-            updatedAt: new Date().toISOString(),
-          }
-        : state,
-    };
-  }
+async function handleWalletOption(
+  state: BotState,
+  profile: BotProfile,
+  ctx: PayPenaltiesContext,
+  totalAmount: number,
+  penaltyCount: number,
+): Promise<FlowResult> {
+  const balance = await ctx.walletService.getProfileWalletBalance(profile.id);
+  const hasFunds = balance >= totalAmount;
 
-  if (trimmed === '3' || normalized === 'annuler') return goToMenu();
+  return {
+    reply: [
+      [
+        `💳 *Paiement par crédit portefeuille*`,
+        ``,
+        `Montant dû : *${totalAmount.toLocaleString('fr-FR')} FCFA*`,
+        `Solde disponible : *${balance.toLocaleString('fr-FR')} FCFA*`,
+        ``,
+        hasFunds
+          ? `1️⃣ Confirmer le débit de ${totalAmount.toLocaleString('fr-FR')} FCFA`
+          : `⚠️ Solde insuffisant — rechargez votre portefeuille d'abord.`,
+        `2️⃣ Annuler`,
+      ].join('\n'),
+    ],
+    nextState: hasFunds
+      ? createWalletStepState(state, penaltyCount, totalAmount)
+      : state,
+  };
+}
 
+async function buildMainPaymentPrompt(
+  state: BotState,
+  profile: BotProfile,
+  ctx: PayPenaltiesContext,
+  penaltyCount: number,
+  totalAmount: number,
+): Promise<FlowResult> {
   const balance = await ctx.walletService.getProfileWalletBalance(profile.id);
   const canUseWallet = balance >= totalAmount;
 
@@ -172,6 +204,52 @@ export async function runPayPenaltiesFlow(
     ],
     nextState: state,
   };
+}
+
+export async function runPayPenaltiesFlow(
+  state: BotState,
+  input: string,
+  profile: BotProfile,
+  ctx: PayPenaltiesContext,
+): Promise<FlowResult> {
+  const trimmed = input.trim();
+  const normalized = trimmed.toLowerCase();
+
+  const goToMenu = (): FlowResult => ({
+    reply: [menuMessage(profile.profile_type)],
+    clearState: true,
+  });
+
+  if (isMenuCommand(normalized)) {
+    return goToMenu();
+  }
+
+  const payload = state.payload ?? {};
+  const totalAmount = payload.totalAmount as number;
+  const penaltyCount = payload.penaltyCount as number;
+
+  if (state.step === 2) {
+    return handleWalletConfirmationStep(
+      state,
+      trimmed,
+      normalized,
+      profile,
+      ctx,
+      totalAmount,
+      goToMenu,
+    );
+  }
+
+  if (trimmed === '1') {
+    return handleMobileMoneyPayment(profile, ctx);
+  }
+
+  if (trimmed === '2') {
+    return handleWalletOption(state, profile, ctx, totalAmount, penaltyCount);
+  }
+
+  if (trimmed === '3' || normalized === 'annuler') return goToMenu();
+  return buildMainPaymentPrompt(state, profile, ctx, penaltyCount, totalAmount);
 }
 
 export function getPayPenaltiesInitialState(
