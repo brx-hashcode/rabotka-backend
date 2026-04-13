@@ -392,6 +392,9 @@ export class BotOrchestratorService {
 
     const handler = commandHandlers[route.commandId];
     if (handler) return handler();
+    if (route.commandId === 'menu') {
+      await this.botState.clear(profileId);
+    }
     const reply = await this.runCommand(route.commandId, botProfile);
     return [reply];
   }

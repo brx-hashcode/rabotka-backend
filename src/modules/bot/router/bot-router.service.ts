@@ -16,6 +16,7 @@ import {
   CMD_RECOMMENDED_JOBS,
   CMD_RECOMMENDED_PROFILES,
 } from '../bot.constants';
+import { stripChatFormattingChars } from '../utils/chat-input';
 
 export type RouteResult =
   | { type: 'flow'; flowId: string; state: BotState }
@@ -78,10 +79,16 @@ export class BotRouterService {
     profile: BotProfile,
     state: BotState | null,
   ): RouteResult {
-    const trimmed = input.trim();
+    const trimmed = stripChatFormattingChars(input.trim());
     const normalized = trimmed.toLowerCase();
     const isWorker = profile.profile_type === 'WORKER';
     const isEmployer = profile.profile_type === 'EMPLOYER';
+
+    // Exact menu keywords (not "menu …" phrases) exit any flow so users can
+    // always reach the main menu (e.g. publish-job / accept-refuse had no CMD_MENU).
+    if (state?.flowId && CMD_MENU.includes(normalized)) {
+      return { type: 'command', commandId: 'menu' };
+    }
 
     if (state?.flowId) {
       return { type: 'flow', flowId: state.flowId, state };

@@ -67,7 +67,23 @@ export class WorkerModule {
           new WalletService(prisma, null as unknown as SystemConfigService),
         inject: [PrismaService],
       },
-      WhatsAppService,
+      {
+        provide: WhatsAppService,
+        useFactory: (
+          redis: Redis,
+          prisma: PrismaService,
+          twilio: TwilioService,
+          config: ConfigService,
+          wallet: WalletService,
+        ) => new WhatsAppService(redis, prisma, twilio, config, wallet),
+        inject: [
+          REDIS_CONNECTION,
+          PrismaService,
+          TwilioService,
+          ConfigService,
+          WalletService,
+        ],
+      },
     ];
 
     const reminderProviders = enableReminders
@@ -99,7 +115,17 @@ export class WorkerModule {
     return {
       module: WorkerModule,
       imports: coreImports,
-      providers: [...whatsAppProviders, ...reminderProviders, PaymentProcessor, WhatsAppOutboundProcessor],
+      providers: [
+        ...whatsAppProviders,
+        ...reminderProviders,
+        PaymentProcessor,
+        {
+          provide: WhatsAppOutboundProcessor,
+          useFactory: (whatsApp: WhatsAppService) =>
+            new WhatsAppOutboundProcessor(whatsApp),
+          inject: [WhatsAppService],
+        },
+      ],
     };
   }
 }

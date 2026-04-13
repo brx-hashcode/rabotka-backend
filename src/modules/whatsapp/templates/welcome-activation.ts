@@ -2,6 +2,7 @@ export function welcomeActivationMessage(
   firstName: string,
   creditAmount: number,
   profileType: 'WORKER' | 'EMPLOYER',
+  walletBalance: number = 0,
 ): string {
   const actions =
     profileType === 'WORKER'
@@ -18,19 +19,24 @@ export function welcomeActivationMessage(
           '• Utiliser votre crédit pour vos prochaines actions',
         ];
 
+  const creditLine =
+    creditAmount > 0
+      ? `Vous avez reçu un crédit de bienvenue de *${creditAmount} FCFA* dans votre portefeuille 🎁\n\n`
+      : '';
+
+  const balanceLine =
+    creditAmount > 0 ? `Solde actuel : *${walletBalance} FCFA*\n\n` : '';
+
   return (
     `Bienvenue sur la plateforme, ${firstName} ! 🎉\n` +
     `\n` +
     `Votre numéro WhatsApp a bien été vérifié et votre profil est maintenant activé.\n` +
     `\n` +
-    `Vous avez reçu un crédit de bienvenue de *${creditAmount} FCFA* dans votre portefeuille 🎁\n` +
-    `\n` +
+    creditLine +
     `Vous pouvez maintenant :\n` +
     actions.join('\n') +
-    `\n` +
-    `\n` +
-    `Solde actuel : *${creditAmount} FCFA*\n` +
-    `\n` +
+    `\n\n` +
+    balanceLine +
     `Tapez *MENU* pour commencer.`
   );
 }
