@@ -179,7 +179,7 @@ async function handleMobileMoney(args: {
   return {
     reply: [
       [
-        `📱 *Paiement par mobile money*`,
+        `*PAIEMENT PAR MOBILE MONEY*`,
         ``,
         `Pour débloquer le contact de *${otherName}*, effectuez un paiement de *${amount} FCFA* via le lien ci-dessous :`,
         ``,

@@ -41,12 +41,13 @@ export async function runPayPenaltiesFlow(
   const totalAmount = payload.totalAmount as number;
   const penaltyCount = payload.penaltyCount as number;
 
-  // --- Step 2: wallet credit confirmation ---
   if (state.step === 2) {
     if (trimmed === '2' || normalized === 'annuler') return goToMenu();
 
     if (trimmed === '1' || normalized === 'oui') {
-      const balance = await ctx.walletService.getProfileWalletBalance(profile.id);
+      const balance = await ctx.walletService.getProfileWalletBalance(
+        profile.id,
+      );
       if (balance < totalAmount) {
         return {
           reply: [
@@ -62,7 +63,6 @@ export async function runPayPenaltiesFlow(
         };
       }
 
-      // Debit wallet and mark penalties paid
       await ctx.walletService.debitProfileWallet(
         profile.id,
         totalAmount,
@@ -75,7 +75,7 @@ export async function runPayPenaltiesFlow(
       return {
         reply: [
           [
-            `✅ *Paiement par crédit enregistré*`,
+            `🎉 *Paiement par crédit enregistré*`,
             ``,
             `*${result.paidCount} pénalité(s)* (${result.totalAmount.toLocaleString('fr-FR')} FCFA) ont été réglées depuis votre portefeuille.`,
             ``,
@@ -94,20 +94,20 @@ export async function runPayPenaltiesFlow(
     };
   }
 
-  // --- Step 1: choose payment method ---
   if (trimmed === '1') {
-    // Mobile money — confirm with external payment
     const result = await ctx.applicationService.markPenaltiesPaid(profile.id);
     if (result.paidCount === 0) {
       return {
-        reply: [`✅ *Aucune pénalité en attente.*\n\nVotre compte est en règle. Tapez *MENU* pour continuer.`],
+        reply: [
+          `✅ *Aucune pénalité en attente.*\n\nVotre compte est en règle. Tapez *MENU* pour continuer.`,
+        ],
         clearState: true,
       };
     }
     return {
       reply: [
         [
-          `✅ *Paiement enregistré*`,
+          `🎉 *Paiement enregistré*`,
           ``,
           `Merci ! Vos *${result.paidCount} pénalité(s)* (${result.totalAmount.toLocaleString('fr-FR')} FCFA) ont été marquées comme réglées.`,
           ``,
@@ -121,7 +121,6 @@ export async function runPayPenaltiesFlow(
   }
 
   if (trimmed === '2') {
-    // Wallet credit — ask for confirmation
     const balance = await ctx.walletService.getProfileWalletBalance(profile.id);
     const hasFunds = balance >= totalAmount;
 
@@ -152,7 +151,6 @@ export async function runPayPenaltiesFlow(
 
   if (trimmed === '3' || normalized === 'annuler') return goToMenu();
 
-  // Default: show payment options
   const balance = await ctx.walletService.getProfileWalletBalance(profile.id);
   const canUseWallet = balance >= totalAmount;
 

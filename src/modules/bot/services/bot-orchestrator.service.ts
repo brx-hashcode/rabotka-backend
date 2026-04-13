@@ -245,19 +245,8 @@ export class BotOrchestratorService {
     }
 
     if (result.clearState) {
-      if (
-        state.flowId === FLOW_IDS.PUBLISH_JOB &&
-        state.step > 1 &&
-        state.payload &&
-        Object.keys(state.payload).length > 0
-      ) {
-        await this.botDraft
-          .saveDraft(profileId, {
-            step: state.step,
-            payload: state.payload,
-            savedAt: new Date().toISOString(),
-          })
-          .catch(() => {});
+      if (state.flowId === FLOW_IDS.PUBLISH_JOB) {
+        await this.botDraft.clearDraft(profileId).catch(() => {});
       }
       await this.botState.clear(profileId);
       const nextInboxItem = await this.botInbox.peek(profileId);
@@ -280,6 +269,9 @@ export class BotOrchestratorService {
         ];
       }
     } else if (result.nextState) {
+      if (result.clearDraft) {
+        await this.botDraft.clearDraft(profileId).catch(() => {});
+      }
       await this.botState.set(profileId, result.nextState);
     }
 

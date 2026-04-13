@@ -1,4 +1,9 @@
-import { WalletTransactionType, PaymentType, PaymentMethod, PaymentStatus } from '@prisma/client';
+import {
+  WalletTransactionType,
+  PaymentType,
+  PaymentMethod,
+  PaymentStatus,
+} from '@prisma/client';
 import { generatePaymentReference } from '../../../common/utils/payment-reference';
 import type { BotProfile, BotState } from '../types/bot-state.types';
 import { FLOW_IDS, CMD_MENU } from '../bot.constants';
@@ -90,18 +95,21 @@ export async function runRecommendedProfilesFlow(
     };
   }
 
-  // ── Step 2: payment method choice ────────────────────────────────────────
   if (state.step === 2 && selectedWorkerId) {
     const fee = await ctx.systemConfig.getRecommendationContactFee();
     const balance = await ctx.walletService.getProfileWalletBalance(profile.id);
 
     if (trimmed === '3') {
-      // Cancel — go back to profile detail
-      return showWorkerDetail(selectedWorkerId, workerIds, workerScores, state, ctx);
+      return showWorkerDetail(
+        selectedWorkerId,
+        workerIds,
+        workerScores,
+        state,
+        ctx,
+      );
     }
 
     if (trimmed === '1' && balance >= fee) {
-      // Pay with wallet
       const worker = await ctx.prisma.profile.findUnique({
         where: { id: selectedWorkerId },
         select: { first_name: true, last_name: true, phone: true, email: true },
@@ -117,7 +125,6 @@ export async function runRecommendedProfilesFlow(
           'recommendation_contact',
           selectedWorkerId,
         );
-        // Record the payment so it appears in Payroll & Wallet
         const txRef = generatePaymentReference();
         await ctx.prisma.payment.create({
           data: {
@@ -142,14 +149,14 @@ export async function runRecommendedProfilesFlow(
           clearState: true,
         };
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : 'Erreur lors du paiement.';
+        const msg =
+          err instanceof Error ? err.message : 'Erreur lors du paiement.';
         return { reply: [`❌ ${msg}`], clearState: true };
       }
     }
 
     const mobileMoneyOption = balance >= fee ? '2' : '1';
     if (trimmed === mobileMoneyOption) {
-      // Pay with mobile money
       return generateMobileMoneyLink(
         selectedWorkerId,
         profile,
@@ -160,13 +167,17 @@ export async function runRecommendedProfilesFlow(
       );
     }
 
-    // Unknown input — re-show payment method prompt
     return showPaymentMethodPrompt(
-      selectedWorkerId, fee, balance, workerIds, workerScores, state, ctx,
+      selectedWorkerId,
+      fee,
+      balance,
+      workerIds,
+      workerScores,
+      state,
+      ctx,
     );
   }
 
-  // ── Step 1: sub-menu after profile detail ─────────────────────────────────
   if (state.step === 1 && selectedWorkerId) {
     if (trimmed === '3') return goToMenu();
 
@@ -175,15 +186,21 @@ export async function runRecommendedProfilesFlow(
     }
 
     if (trimmed === '1') {
-      // Show payment method choice
       const fee = await ctx.systemConfig.getRecommendationContactFee();
-      const balance = await ctx.walletService.getProfileWalletBalance(profile.id);
+      const balance = await ctx.walletService.getProfileWalletBalance(
+        profile.id,
+      );
       return showPaymentMethodPrompt(
-        selectedWorkerId, fee, balance, workerIds, workerScores, state, ctx,
+        selectedWorkerId,
+        fee,
+        balance,
+        workerIds,
+        workerScores,
+        state,
+        ctx,
       );
     }
 
-    // Unknown input — re-show sub-menu
     return {
       reply: [`Tapez *1*, *2* ou *3*.\n${subMenu()}`],
       nextState: {
@@ -194,7 +211,6 @@ export async function runRecommendedProfilesFlow(
     };
   }
 
-  // ── Step 0: list + worker selection ───────────────────────────────────────
   if (trimmed === '7') return goToMenu();
 
   const pageWorkerIds = workerIds.slice(0, 5);
@@ -205,7 +221,6 @@ export async function runRecommendedProfilesFlow(
     return showWorkerDetail(workerId, workerIds, workerScores, state, ctx);
   }
 
-  // Default: show list
   return showList(workerIds, workerScores, state, ctx);
 }
 
@@ -322,7 +337,7 @@ async function showWorkerDetail(
   };
 }
 
-async function showPaymentMethodPrompt(
+function showPaymentMethodPrompt(
   workerId: string,
   fee: number,
   balance: number,
@@ -330,7 +345,7 @@ async function showPaymentMethodPrompt(
   workerScores: Record<string, number>,
   state: BotState,
   ctx: RecommendedProfilesContext,
-): Promise<FlowResult> {
+): FlowResult {
   const hasFunds = balance >= fee;
 
   const options = hasFunds
@@ -339,10 +354,7 @@ async function showPaymentMethodPrompt(
         '2️⃣ Payer par mobile money',
         '3️⃣ Annuler',
       ]
-    : [
-        `1️⃣ Payer par mobile money`,
-        '2️⃣ Annuler',
-      ];
+    : [`1️⃣ Payer par mobile money`, '2️⃣ Annuler'];
 
   const balanceLine = hasFunds
     ? `💰 Solde disponible : *${balance.toLocaleString('fr-FR')} FCFA*`

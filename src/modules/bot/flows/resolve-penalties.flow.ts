@@ -24,7 +24,6 @@ export async function runResolvePenaltiesFlow(
   const trimmed = input.trim();
   const normalized = trimmed.toLowerCase();
 
-  // Allow menu exit only after acknowledging (not on first prompt)
   if (
     state.step > 1 &&
     (CMD_MENU.some((c) => normalized === c || normalized.startsWith(c + ' ')) ||
@@ -38,7 +37,6 @@ export async function runResolvePenaltiesFlow(
 
   const payload = state.payload ?? {};
 
-  // Step 1 — summary: show unpaid penalties and options
   if (state.step === 1 || !trimmed) {
     const penalties = await ctx.prisma.penalty.findMany({
       where: { worker_id: profile.id, paid_at: null },
@@ -50,7 +48,6 @@ export async function runResolvePenaltiesFlow(
     const total = penalties.reduce((sum, p) => sum + Number(p.amount), 0);
 
     if (count === 0) {
-      // No penalties — account should not be suspended, but handle gracefully
       return {
         reply: [
           `✅ *Aucune pénalité impayée.*\n\nVotre situation est régularisée. Tapez *MENU* pour continuer.`,
@@ -91,7 +88,6 @@ export async function runResolvePenaltiesFlow(
     };
   }
 
-  // Step 2 — awaiting choice
   if (trimmed === '1') {
     const count = payload.count as number;
     const total = payload.total as number;
