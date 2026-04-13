@@ -5,6 +5,7 @@ import { BotPlatform, ConversationStatus, MessageDirection } from '@prisma/clien
 import { BotOrchestratorService } from '../bot/services/bot-orchestrator.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
+import { stripChatFormattingChars } from '../bot/utils/chat-input';
 
 const DEFAULT_BOT_SESSION_ID = 'default';
 const USER_LOCK_TTL = 30; // seconds
@@ -63,6 +64,8 @@ export class ConversationService {
       return { profileId: profile.id, replies: [] };
     }
 
+    const textForBot = stripChatFormattingChars(text);
+
     try {
       const now = new Date();
       await this.prisma.conversation.upsert({
@@ -84,7 +87,7 @@ export class ConversationService {
 
       // Save incoming message
       await this.whatsApp
-        .saveMessage(profile.id, MessageDirection.INBOUND, text)
+        .saveMessage(profile.id, MessageDirection.INBOUND, textForBot)
         .catch((err) =>
           this.logger.warn(
             `Failed to save inbound message for ${profile.id}:`,
@@ -93,15 +96,19 @@ export class ConversationService {
         );
 
       this.logger.log(
-        `Conversation (profile ${profile.id}): "${text.slice(0, 50)}${text.length > 50 ? '...' : ''}"`,
+        `Conversation (profile ${profile.id}): "${textForBot.slice(0, 50)}${textForBot.length > 50 ? '...' : ''}"`,
       );
 
       const replies = await this.botOrchestrator.handle(
         profile.id,
         phone,
-        text,
+        textForBot,
       );
-      return { profileId: profile.id, replies: replies.filter(Boolean) };
+      const filtered = replies.filter(Boolean);
+      this.logger.log(
+        `BotOrchestrator returned ${filtered.length} reply message(s) for profile ${profile.id}`,
+      );
+      return { profileId: profile.id, replies: filtered };
     } finally {
       await this.redis.del(lockKey);
     }

@@ -41,6 +41,18 @@ describe('BotRouterService', () => {
       const result = service.route('hello', workerProfile, state);
       expect(result).toEqual({ type: 'flow', flowId: FLOW_IDS.PUBLISH_JOB, state });
     });
+
+    it('routes exact "menu" to menu command so user can exit publish flow', () => {
+      const state = makeState(FLOW_IDS.PUBLISH_JOB);
+      const result = service.route('menu', workerProfile, state);
+      expect(result).toEqual({ type: 'command', commandId: 'menu' });
+    });
+
+    it('strips LRM before menu so WhatsApp-prefixed Menu exits flow', () => {
+      const state = makeState(FLOW_IDS.PUBLISH_JOB);
+      const result = service.route('\u200eMenu', workerProfile, state);
+      expect(result).toEqual({ type: 'command', commandId: 'menu' });
+    });
   });
 
   describe('menu commands', () => {
@@ -91,9 +103,13 @@ describe('BotRouterService', () => {
   });
 
   describe('numeric menu options', () => {
-    it('routes worker numeric option for profile', () => {
-      // WORKER_MENU_OPTIONS.PROFILE
+    it('routes worker "3" to recommended_jobs', () => {
       const result = service.route('3', workerProfile, null);
+      expect(result).toEqual({ type: 'command', commandId: 'recommended_jobs' });
+    });
+
+    it('routes worker "4" to profile', () => {
+      const result = service.route('4', workerProfile, null);
       expect(result).toEqual({ type: 'command', commandId: 'profile' });
     });
 

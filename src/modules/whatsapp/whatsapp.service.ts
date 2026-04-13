@@ -128,10 +128,15 @@ export class WhatsAppService {
     );
 
     if (this.isConfigured()) {
+      const wallet = await this.walletService
+        .getOrCreateProfileWallet(profileId)
+        .catch(() => ({ balance: creditAmount }));
+
       const message = welcomeActivationMessage(
         profile.first_name,
         creditAmount,
         profile.profile_type as 'WORKER' | 'EMPLOYER',
+        wallet.balance,
       );
       await this.sendTextMessage(profile.phone, message, profileId);
     }

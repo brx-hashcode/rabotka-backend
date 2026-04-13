@@ -19,7 +19,11 @@ export type WhatsAppOutboundJobData = {
 export class WhatsAppOutboundProcessor {
   private readonly logger = new Logger(WhatsAppOutboundProcessor.name);
 
-  constructor(private readonly whatsApp: WhatsAppService) {}
+  constructor(private readonly whatsApp: WhatsAppService) {
+    this.logger.debug(
+      `WhatsAppOutboundProcessor constructed, whatsApp=${whatsApp?.constructor?.name ?? typeof whatsApp}`,
+    );
+  }
 
   /**
    * Called by worker.ts bootstrap to register the BullMQ worker.
@@ -61,6 +65,9 @@ export class WhatsAppOutboundProcessor {
     data: WhatsAppOutboundJobData;
   }): Promise<void> {
     const { data } = job;
+    this.logger.debug(
+      `whatsApp instance: ${this.whatsApp?.constructor?.name ?? typeof this.whatsApp}`,
+    );
 
     if (data.type === 'text') {
       const sent = await this.whatsApp.sendTextMessage(

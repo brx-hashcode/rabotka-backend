@@ -84,10 +84,15 @@ export async function runVerifyWhatsappFlow(
     .grantWelcomeCredit(profile.id, profileType)
     .catch(() => 0);
 
+  const wallet = await ctx.walletService
+    .getOrCreateProfileWallet(profile.id)
+    .catch(() => ({ balance: creditAmount }));
+
   const message = welcomeActivationMessage(
     profile.first_name,
     creditAmount,
     profile.profile_type,
+    wallet.balance,
   );
 
   return {
