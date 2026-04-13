@@ -78,7 +78,6 @@ export function formatCandidatureDetail(params: {
   const body = bodyLines.join('\n');
 
   if (params.avatarUrl) {
-    // Start with [IMG:...] so WhatsAppController sends it as media + caption
     const caption = body ? `\n${body}` : '';
     return `[IMG:${params.avatarUrl}]${caption}`;
   }
