@@ -567,7 +567,7 @@ export class BotOrchestratorService {
     if (offerIds.length === 0) {
       return [
         [
-          '🎯 *Offres recommandées*',
+          '*Offres recommandées*',
           '',
           "Aucune offre recommandée pour l'instant. Complétez votre profil pour de meilleures recommandations.",
           '',
@@ -596,20 +596,25 @@ export class BotOrchestratorService {
       .filter(Boolean) as typeof offers;
 
     const lines = [
-      '🎯 *OFFRES RECOMMANDÉES POUR VOUS*',
+      '*OFFRES RECOMMANDÉES POUR VOUS*',
       '',
-      ...orderedOffers.map((o, i) => {
+      ...orderedOffers.flatMap((o, i) => {
         const dateStr = o.scheduled_at.toLocaleDateString('fr-FR', {
           day: '2-digit',
           month: '2-digit',
+          year: 'numeric',
         });
-        return (
-          `${i + 1}. *${o.title}*\n` +
-          `   💰 ${Number(o.amount).toLocaleString('fr-FR')} FCFA | 📍 ${o.address.slice(0, 30)} | 🗓 ${dateStr}`
-        );
+        const shortAddr =
+          o.address.length > 40 ? o.address.slice(0, 40) + '…' : o.address;
+        return [
+          `${i + 1}- *${o.title}*`,
+          `    • 💰 Montant : ${Number(o.amount).toLocaleString('fr-FR')} FCFA`,
+          `    • 📅 Date : ${dateStr}`,
+          `    • 📍 Adresse : ${shortAddr}`,
+          '',
+        ];
       }),
-      '',
-      '*Tapez le numéro pour voir le détail ou 7 pour le menu.*',
+      'Tapez le numéro pour voir le détail ou *Menu* pour revenir au menu.',
     ];
     return [lines.join('\n')];
   }
@@ -631,7 +636,6 @@ export class BotOrchestratorService {
         10,
       );
     }
-    // Fallback: use employer profile description when no job offer exists
     if (workerResults.length === 0) {
       workerResults =
         await this.matchingService.findMatchingWorkersForEmployerProfile(
@@ -643,7 +647,7 @@ export class BotOrchestratorService {
     if (workerResults.length === 0) {
       return [
         [
-          '🎯 *Travailleurs recommandés*',
+          '*TRAVAILLEURS RECOMMANDÉS*',
           '',
           "Aucun travailleur recommandé pour l'instant. Publiez une offre pour obtenir des recommandations.",
           '',
@@ -681,16 +685,21 @@ export class BotOrchestratorService {
       .filter(Boolean) as typeof workers;
 
     const lines = [
-      '🎯 *TRAVAILLEURS RECOMMANDÉS*',
+      '*TRAVAILLEURS RECOMMANDÉS*',
       '',
-      ...ordered.map((w, i) => {
+      ...ordered.flatMap((w, i) => {
         const name = `${w.first_name} ${w.last_name}`.trim();
         const domain = w.category?.name ?? 'Non spécifié';
         const aiScore = Math.round((workerScores[w.id] ?? 0) * 100);
-        return `${i + 1}. *${name}*\n   ⭐ ${w.reliability_score ?? 100}/100 | 🤖 IA: ${aiScore}% | 🏷 ${domain}`;
+        return [
+          `${i + 1}- *${name}*`,
+          `    • ⭐ Fiabilité : ${w.reliability_score ?? 100}/100`,
+          `    • 🤖 Score IA : ${aiScore}%`,
+          `    • 🏷 Domaine : ${domain}`,
+          '',
+        ];
       }),
-      '',
-      '*Tapez le numéro pour le profil complet ou 7 pour le menu.*',
+      `Tapez le numéro pour voir le profil complet ou *Menu* pour revenir au menu.`,
     ];
     return [lines.join('\n')];
   }

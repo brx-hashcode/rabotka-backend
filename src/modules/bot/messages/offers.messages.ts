@@ -87,27 +87,27 @@ export function formatOfferListCompact(
         ? '🔴 Complet'
         : remaining === qty
           ? `🟢 ${qty} place${qty > 1 ? 's' : ''}`
-          : `🟡 ${remaining}/${qty} place${qty > 1 ? 's' : ''} restante${remaining > 1 ? 's' : ''}`;
+          : `🟡 ${remaining}/${qty} restante${remaining > 1 ? 's' : ''}`;
+    const shortAddr = o.address.length > 40 ? o.address.slice(0, 40) + '…' : o.address;
     lines.push(
-      `${num}. ${o.title}`,
-      `    Montant: ${o.amount.toLocaleString('fr-FR')} FCFA ${flowLabel}`,
-      `    Date: ${formatDate(o.scheduled_at)}`,
-      `    ${spotsLabel}`,
-      `    Adresse: ${o.address.length > 40 ? o.address.slice(0, 40) + '...' : o.address}`,
+      `${num}- *${o.title}*`,
+      `    • 💰 Montant : ${o.amount.toLocaleString('fr-FR')} FCFA ${flowLabel}`,
+      `    • 📅 Date : ${formatDate(o.scheduled_at)}`,
+      `    • 👥 Places : ${spotsLabel}`,
+      `    • 📍 Adresse : ${shortAddr}`,
       '',
     );
   });
   lines.push('');
   if (hasMore) {
     lines.push(
-      '6 - Voir plus',
-      '7 - Menu',
+      `${offers.length + 1} - Voir plus`,
       '',
-      "Veuillez taper un numéro (1-5) pour sélectionner une offre, 6 pour la suite, ou 7 / 'Menu' pour revenir au menu",
+      `Tapez un numéro (1-${offers.length}) pour sélectionner une offre, ${offers.length + 1} pour voir plus, ou *Menu* pour revenir au menu.`,
     );
   } else {
     lines.push(
-      "Veuillez taper un numéro pour sélectionner une offre ou 'Menu' pour revenir au menu",
+      "Tapez un numéro pour sélectionner une offre ou *Menu* pour revenir au menu.",
     );
   }
   return lines.join('\n');

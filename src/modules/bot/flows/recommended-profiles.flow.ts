@@ -249,7 +249,7 @@ async function showList(
     .filter(Boolean) as typeof workers;
 
   const lines = [
-    '🎯 *TRAVAILLEURS RECOMMANDÉS*',
+    '*TRAVAILLEURS RECOMMANDÉS*',
     '',
     ...orderedWorkers.map((w, i) => {
       const aiScore = Math.round((workerScores[w.id] ?? 0) * 100);
