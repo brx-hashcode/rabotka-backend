@@ -141,15 +141,15 @@ export class BotCommandsService {
         minute: '2-digit',
       });
       lines.push(
-        `${num}. ${o.title}`,
-        `    ID: #${o.id.slice(0, 8)}`,
-        `    Date: ${dateStr}`,
-        `    Montant: ${o.amount.toLocaleString('fr-FR')} FCFA`,
-        `    Statut: ${o.status}`,
+        `${num}- *${o.title}*`,
+        `    • 🆔 Réf : #${o.id.slice(0, 8)}`,
+        `    • 📅 Date : ${dateStr}`,
+        `    • 💰 Montant : ${o.amount.toLocaleString('fr-FR')} FCFA`,
+        `    • 📌 Statut : ${o.status}`,
         '',
       );
     });
-    lines.push("*Tapez 'Menu' pour revenir.*");
+    lines.push('Tapez *Menu* pour revenir au menu.');
     return lines.join('\n');
   }
 

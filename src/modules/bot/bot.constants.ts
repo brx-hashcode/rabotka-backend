@@ -56,5 +56,13 @@ export const CMD_PAY = [
   'payer penalites',
 ];
 export const CMD_UNLOCK = ['débloquer', 'debloquer', 'unlock', 'contact'];
-export const CMD_RECOMMENDED_JOBS = ['offres recommandées', 'recommandées', 'recommended'];
-export const CMD_RECOMMENDED_PROFILES = ['profils recommandés', 'travailleurs recommandés', 'recommended profiles'];
+export const CMD_RECOMMENDED_JOBS = [
+  'offres recommandées',
+  'recommandées',
+  'recommended',
+];
+export const CMD_RECOMMENDED_PROFILES = [
+  'profils recommandés',
+  'travailleurs recommandés',
+  'recommended profiles',
+];
