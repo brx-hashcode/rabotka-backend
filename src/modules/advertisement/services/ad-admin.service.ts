@@ -10,7 +10,7 @@ import {
   AdvertisementBundle,
 } from '@prisma/client';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
-import { CreateBundleDto } from '../dto/create-bundle.dto';
+import { CreateBundleDto, expandBundleChannels } from '../dto/create-bundle.dto';
 import { UpdateBundleDto } from '../dto/update-bundle.dto';
 
 @Injectable()
@@ -69,7 +69,7 @@ export class AdAdminService {
         max_reach: dto.maxReach,
         max_frequency_per_week: dto.maxFrequencyPerWeek,
         max_duration_days: dto.maxDurationDays,
-        allowed_channels: dto.allowedChannels,
+        allowed_channels: expandBundleChannels(dto.allowedChannels),
         is_active: dto.isActive ?? true,
       },
     });
@@ -98,7 +98,7 @@ export class AdAdminService {
         ...(dto.maxDurationDays !== undefined && {
           max_duration_days: dto.maxDurationDays,
         }),
-        ...(dto.allowedChannels && { allowed_channels: dto.allowedChannels }),
+        ...(dto.allowedChannels && { allowed_channels: expandBundleChannels(dto.allowedChannels) }),
         ...(dto.isActive !== undefined && { is_active: dto.isActive }),
       },
     });
@@ -108,5 +108,23 @@ export class AdAdminService {
     return this.prisma.advertisementBundle.findMany({
       orderBy: { created_at: 'asc' },
     });
+  }
+
+  async deleteBundle(id: string): Promise<void> {
+    const bundle = await this.prisma.advertisementBundle.findUnique({
+      where: { id },
+    });
+    if (!bundle) throw new NotFoundException('Bundle not found');
+
+    const hasAds = await this.prisma.advertisement.count({
+      where: { bundle_id: id },
+    });
+    if (hasAds > 0) {
+      throw new BadRequestException(
+        'Cannot delete a bundle that has advertisements attached to it.',
+      );
+    }
+
+    await this.prisma.advertisementBundle.delete({ where: { id } });
   }
 }

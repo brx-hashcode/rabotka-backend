@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Delete,
   Body,
   Param,
   Query,
@@ -58,6 +59,35 @@ export class AdAdminController {
   getDashboard() {
     return this.adAnalyticsService.getDashboard();
   }
+
+  // ─── Bundles (must be before :id wildcard) ───────────────────────────────
+
+  @Get('bundles')
+  @Roles(UserRole.MODERATOR)
+  listBundles() {
+    return this.adAdminService.listBundles();
+  }
+
+  @Post('bundles')
+  @Roles(UserRole.MANAGER)
+  createBundle(@Body() dto: CreateBundleDto) {
+    return this.adAdminService.createBundle(dto);
+  }
+
+  @Patch('bundles/:id')
+  @Roles(UserRole.MANAGER)
+  updateBundle(@Param('id') id: string, @Body() dto: UpdateBundleDto) {
+    return this.adAdminService.updateBundle(id, dto);
+  }
+
+  @Delete('bundles/:id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Roles(UserRole.MANAGER)
+  deleteBundle(@Param('id') id: string) {
+    return this.adAdminService.deleteBundle(id);
+  }
+
+  // ─── Advertisement by ID (wildcard — must come after all static routes) ──
 
   @Get(':id')
   @Roles(UserRole.MODERATOR)
@@ -119,23 +149,4 @@ export class AdAdminController {
     return this.adAnalyticsService.getStats(id);
   }
 
-  // ─── Bundles ─────────────────────────────────────────────────────────────
-
-  @Get('bundles')
-  @Roles(UserRole.MODERATOR)
-  listBundles() {
-    return this.adAdminService.listBundles();
-  }
-
-  @Post('bundles')
-  @Roles(UserRole.MANAGER)
-  createBundle(@Body() dto: CreateBundleDto) {
-    return this.adAdminService.createBundle(dto);
-  }
-
-  @Patch('bundles/:id')
-  @Roles(UserRole.MANAGER)
-  updateBundle(@Param('id') id: string, @Body() dto: UpdateBundleDto) {
-    return this.adAdminService.updateBundle(id, dto);
-  }
 }

@@ -11,6 +11,27 @@ import {
 } from 'class-validator';
 import { DeliveryChannel } from '@prisma/client';
 
+export enum BundleChannel {
+  EMAIL = 'EMAIL',
+  WHATSAPP = 'WHATSAPP',
+  BOTH = 'BOTH',
+}
+
+export function expandBundleChannels(
+  channels: BundleChannel[],
+): DeliveryChannel[] {
+  const result = new Set<DeliveryChannel>();
+  for (const ch of channels) {
+    if (ch === BundleChannel.BOTH) {
+      result.add(DeliveryChannel.EMAIL);
+      result.add(DeliveryChannel.WHATSAPP);
+    } else {
+      result.add(ch as unknown as DeliveryChannel);
+    }
+  }
+  return Array.from(result);
+}
+
 export class CreateBundleDto {
   @IsString()
   @MinLength(2)
@@ -41,8 +62,8 @@ export class CreateBundleDto {
   maxDurationDays: number;
 
   @IsArray()
-  @IsEnum(DeliveryChannel, { each: true })
-  allowedChannels: DeliveryChannel[];
+  @IsEnum(BundleChannel, { each: true })
+  allowedChannels: BundleChannel[];
 
   @IsOptional()
   @IsBoolean()
