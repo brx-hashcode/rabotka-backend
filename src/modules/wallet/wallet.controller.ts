@@ -5,6 +5,8 @@ import {
   ForbiddenException,
   UseGuards,
   Req,
+  ParseIntPipe,
+  DefaultValuePipe,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -72,6 +74,26 @@ export class WalletController {
       );
     }
     return this.walletService.getSystemRevenue();
+  }
+
+  @Get('monthly-revenue')
+  @ApiOperation({ summary: 'Get monthly revenue for the last N months (admin only)' })
+  @ApiResponse({
+    status: 200,
+    description: 'Array of { month: "YYYY-MM", revenue: number }',
+  })
+  async getMonthlyRevenue(
+    @Req() req: AdminAuthenticatedRequest,
+    @Query('months', new DefaultValuePipe(12), ParseIntPipe) months: number,
+  ): Promise<{ month: string; revenue: number }[]> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: req.user.userId },
+      select: { role: true },
+    });
+    if (!user || !ALLOWED_WALLET_ROLES.has(user.role)) {
+      throw new ForbiddenException('Only ADMIN or SUPER_ADMIN can access wallet data');
+    }
+    return this.walletService.getMonthlyRevenue(months);
   }
 
   @Get('transactions')

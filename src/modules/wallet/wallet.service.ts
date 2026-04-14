@@ -527,6 +527,35 @@ export class WalletService {
     };
   }
 
+  async getMonthlyRevenue(
+    months: number,
+  ): Promise<{ month: string; revenue: number }[]> {
+    const clampedMonths = Math.min(Math.max(1, months), 24);
+
+    const rows = await this.prisma.$queryRaw<
+      { month: Date; revenue: bigint }[]
+    >`
+      SELECT
+        d.month::date AS month,
+        COALESCE(SUM(p.amount), 0)::bigint AS revenue
+      FROM generate_series(
+        DATE_TRUNC('month', NOW() - (${clampedMonths - 1} || ' months')::interval),
+        DATE_TRUNC('month', NOW()),
+        '1 month'::interval
+      ) AS d(month)
+      LEFT JOIN "payments" p
+        ON DATE_TRUNC('month', p.paid_at) = d.month
+        AND p.status = 'COMPLETED'
+      GROUP BY d.month
+      ORDER BY d.month ASC
+    `;
+
+    return rows.map((row) => ({
+      month: new Date(row.month).toISOString().slice(0, 7),
+      revenue: Number(row.revenue),
+    }));
+  }
+
   async listTransactionsForAdmin(params: {
     page: number;
     limit: number;
