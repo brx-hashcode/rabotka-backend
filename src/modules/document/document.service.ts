@@ -350,7 +350,8 @@ export class DocumentService {
     const os = await import('node:os');
     const path = await import('node:path');
     const fs = await import('node:fs/promises');
-    const qpdf = await import('node-qpdf');
+    const qpdfModule = await import('node-qpdf');
+    const qpdf = (qpdfModule as any).default ?? qpdfModule;
 
     const ts = Date.now();
     const tmp = os.tmpdir();
@@ -375,6 +376,14 @@ export class DocumentService {
         outputFile: outputPath,
       });
       return await fs.readFile(outputPath);
+    } catch (err: any) {
+      if (err?.code === 'ENOENT') {
+        this.logger.warn(
+          'qpdf binary not found — returning unprotected PDF. Install qpdf for production use.',
+        );
+        return pdfBuffer;
+      }
+      throw err;
     } finally {
       await fs.unlink(inputPath).catch(() => {});
       await fs.unlink(outputPath).catch(() => {});
