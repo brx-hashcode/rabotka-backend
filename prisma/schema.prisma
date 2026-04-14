@@ -262,6 +262,7 @@ model Profile {
   events               Event[]  @relation("EventProfiles")
   profile_platform_document_links ProfilePlatformDocumentLink[]
   invoices                        Invoice[]
+  ad_delivery_logs                AdDeliveryLog[]
 
   @@index([email], name: "idx_profile_email")
   @@index([phone], name: "idx_profile_phone")
@@ -835,4 +836,132 @@ model Invoice {
   @@index([profile_id], name: "idx_invoice_profile")
   @@index([payment_request_id], name: "idx_invoice_payment_request")
   @@map("invoices")
+}
+
+// ─── Advertisement Module ────────────────────────────────────────────────────
+
+enum AdStatus {
+  DRAFT
+  PENDING_REVIEW
+  APPROVED
+  ACTIVE
+  PAUSED
+  COMPLETED
+  REJECTED
+  CANCELLED
+}
+
+enum AdPaymentStatus {
+  UNPAID
+  PAID
+  REFUNDED
+}
+
+enum AdvertiserType {
+  COMPANY
+  INDIVIDUAL
+}
+
+enum FrequencyUnit {
+  PER_WEEK
+  PER_MONTH
+}
+
+enum TargetAudience {
+  WORKERS
+  EMPLOYERS
+  BOTH
+}
+
+enum AdPriority {
+  NORMAL
+  HIGH
+}
+
+enum AdDeliveryStatus {
+  SENT
+  DELIVERED
+  OPENED
+  CLICKED
+  FAILED
+}
+
+model AdvertisementBundle {
+  id                     String          @id @default(uuid()) @db.Uuid
+  name                   String
+  description            String          @db.Text
+  price                  Decimal         @db.Decimal(10, 2)
+  currency               String          @default("XAF")
+  max_reach              Int
+  max_frequency_per_week Int
+  max_duration_days      Int
+  allowed_channels       DeliveryChannel[]
+  is_active              Boolean         @default(true)
+  created_at             DateTime        @default(now())
+  advertisements         Advertisement[]
+
+  @@map("advertisement_bundles")
+}
+
+model Advertisement {
+  id               String            @id @default(uuid()) @db.Uuid
+  bundle_id        String            @db.Uuid
+  title            String
+  description      String            @db.Text
+  call_to_action   String?
+  cta_url          String?
+  image_urls       String[]
+  video_url        String?
+  banner_url       String?
+  logo_url         String?
+  contact_phone    String?
+  sector           String?
+  advertiser_type  AdvertiserType
+  language         String            @default("fr")
+  tags             String[]
+  start_date       DateTime          @db.Date
+  end_date         DateTime          @db.Date
+  frequency_value  Int
+  frequency_unit   FrequencyUnit
+  channel          DeliveryChannel
+  target_reach     Int
+  target_audience  TargetAudience
+  target_filters   Json?
+  priority         AdPriority        @default(NORMAL)
+  status           AdStatus          @default(DRAFT)
+  rejection_reason String?
+  payment_status   AdPaymentStatus   @default(UNPAID)
+  invoice_id       String?
+  budget           Decimal?          @db.Decimal(10, 2)
+  total_sent       Int               @default(0)
+  total_opened     Int               @default(0)
+  total_clicks     Int               @default(0)
+  created_at       DateTime          @default(now())
+  updated_at       DateTime          @updatedAt
+
+  bundle        AdvertisementBundle @relation(fields: [bundle_id], references: [id])
+  delivery_logs AdDeliveryLog[]
+
+  @@index([status], name: "idx_advertisement_status")
+  @@index([bundle_id], name: "idx_advertisement_bundle")
+  @@map("advertisements")
+}
+
+model AdDeliveryLog {
+  id               String           @id @default(uuid()) @db.Uuid
+  advertisement_id String           @db.Uuid
+  profile_id       String           @db.Uuid
+  channel          DeliveryChannel
+  status           AdDeliveryStatus
+  sent_at          DateTime?
+  opened_at        DateTime?
+  clicked_at       DateTime?
+  failure_reason   String?
+
+  advertisement Advertisement @relation(fields: [advertisement_id], references: [id], onDelete: Cascade)
+  profile       Profile        @relation(fields: [profile_id], references: [id], onDelete: Cascade)
+
+  @@index([advertisement_id], name: "idx_ad_delivery_advertisement")
+  @@index([profile_id], name: "idx_ad_delivery_profile")
+  @@map("ad_delivery_logs")
 }

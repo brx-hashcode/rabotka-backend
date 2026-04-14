@@ -246,7 +246,7 @@ export class ProfileService {
   ): Promise<ProfileMeResponse> {
     const existingProfile = await this.prisma.profile.findUnique({
       where: { id },
-      select: { id: true, status: true, first_name: true, last_name: true },
+      select: { id: true, status: true, first_name: true, last_name: true, profile_type: true },
     });
 
     if (!existingProfile) {
@@ -256,6 +256,13 @@ export class ProfileService {
     const dataToUpdate = this.buildProfileUpdateData(updateProfileDto);
 
     await this.prisma.profile.update({ where: { id }, data: dataToUpdate });
+
+    // Re-index in Qdrant after update (fire-and-forget)
+    if (existingProfile.profile_type === ProfileType.WORKER) {
+      this.matchingService.indexWorkerProfile(id).catch(() => {});
+    } else {
+      this.matchingService.indexEmployerProfile(id).catch(() => {});
+    }
 
     this.eventEmitter.emit(AdminNotificationEvent.PROFILE_UPDATED, {
       event: AdminNotificationEvent.PROFILE_UPDATED,
@@ -724,7 +731,7 @@ export class ProfileService {
   ): Promise<AdminProfileDetailResponse> {
     const profile = await this.prisma.profile.findUnique({
       where: { id: profileId },
-      select: { id: true, first_name: true, last_name: true },
+      select: { id: true, first_name: true, last_name: true, profile_type: true },
     });
     if (!profile) {
       throw new NotFoundException('Profil non trouvé');
@@ -738,6 +745,13 @@ export class ProfileService {
     } catch (err) {
       this.throwIfUniqueConstraintViolation(err);
       throw err;
+    }
+
+    // Re-index in Qdrant after update (fire-and-forget)
+    if (profile.profile_type === ProfileType.WORKER) {
+      this.matchingService.indexWorkerProfile(profileId).catch(() => {});
+    } else {
+      this.matchingService.indexEmployerProfile(profileId).catch(() => {});
     }
 
     this.eventEmitter.emit(AdminNotificationEvent.PROFILE_UPDATED, {
