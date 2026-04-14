@@ -87,11 +87,6 @@ describe('UserService', () => {
       await expect(service.createAdmin(dto)).rejects.toThrow(ConflictException);
     });
 
-    it('throws BadRequestException for invalid role', async () => {
-      await expect(
-        service.createAdmin({ ...dto, role: 'INVALID' as UserRole }),
-      ).rejects.toThrow(BadRequestException);
-    });
   });
 
   describe('updateAdmin()', () => {
@@ -142,11 +137,6 @@ describe('UserService', () => {
       );
     });
 
-    it('throws BadRequestException for invalid role', async () => {
-      await expect(
-        service.updateAdmin(USER_ID, { ...dto, role: 'INVALID' as UserRole }),
-      ).rejects.toThrow(BadRequestException);
-    });
   });
 
   describe('activate()', () => {

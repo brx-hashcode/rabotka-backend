@@ -341,9 +341,44 @@ export class DocumentService {
     const docxBuffer = await this.fillDocumentTemplate(id, data);
 
     const libreOfficePdf = await this.convertWithLibreOffice(docxBuffer);
-    if (libreOfficePdf) return libreOfficePdf;
+    const pdfBuffer = libreOfficePdf ?? (await this.convertWithPuppeteer(docxBuffer));
 
-    return this.convertWithPuppeteer(docxBuffer);
+    return this.protectPdf(pdfBuffer);
+  }
+
+  private async protectPdf(pdfBuffer: Buffer): Promise<Buffer> {
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const fs = await import('node:fs/promises');
+    const qpdf = await import('node-qpdf');
+
+    const ts = Date.now();
+    const tmp = os.tmpdir();
+    const inputPath = path.join(tmp, `rabotka_${ts}_in.pdf`);
+    const outputPath = path.join(tmp, `rabotka_${ts}_out.pdf`);
+
+    try {
+      await fs.writeFile(inputPath, pdfBuffer);
+      await qpdf.encrypt(inputPath, {
+        keyLength: 128,
+        password: {
+          owner: process.env.PDF_OWNER_PASSWORD ?? 'rabotka-owner',
+          user: '',
+        },
+        restrictions: {
+          print: 'full',
+          modify: 'n',
+          copy: 'n',
+          useSubset: 'n',
+          modifyAnnotations: 'n',
+        },
+        outputFile: outputPath,
+      });
+      return await fs.readFile(outputPath);
+    } finally {
+      await fs.unlink(inputPath).catch(() => {});
+      await fs.unlink(outputPath).catch(() => {});
+    }
   }
 
   private async convertWithLibreOffice(

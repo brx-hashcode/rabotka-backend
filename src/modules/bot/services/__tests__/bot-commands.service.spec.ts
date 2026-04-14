@@ -66,7 +66,12 @@ describe('BotCommandsService', () => {
     jobOfferService = makeJobOfferService();
     applicationService = makeApplicationService();
     prisma = makePrisma();
-    service = new BotCommandsService(prisma as any, jobOfferService as any, applicationService as any);
+    service = new BotCommandsService(
+      prisma as any,
+      jobOfferService as any,
+      applicationService as any,
+      { getProfileWalletBalance: jest.fn().mockResolvedValue(0) } as any,
+    );
   });
 
   describe('listOffers()', () => {

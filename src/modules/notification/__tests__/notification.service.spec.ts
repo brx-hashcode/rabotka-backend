@@ -1,6 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { NotificationService } from '../notification.service';
 import { MailService } from '../../mail/mail.service';
+import { CalendarLinkService } from '../../calendar/services/calendar-link.service';
+import { IcsGeneratorService } from '../../calendar/services/ics-generator.service';
 
 describe('NotificationService', () => {
   let service: NotificationService;
@@ -15,6 +17,8 @@ describe('NotificationService', () => {
       providers: [
         NotificationService,
         { provide: MailService, useValue: mockMailService },
+        { provide: CalendarLinkService, useValue: { googleCalendarLink: jest.fn().mockReturnValue('') } },
+        { provide: IcsGeneratorService, useValue: { generate: jest.fn().mockReturnValue('') } },
       ],
     }).compile();
 

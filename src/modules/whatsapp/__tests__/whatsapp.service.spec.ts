@@ -52,7 +52,7 @@ describe('WhatsAppService', () => {
         { provide: TwilioService, useValue: mockTwilioService },
         { provide: REDIS_CONNECTION, useValue: redis },
         { provide: ConfigService, useValue: { get: jest.fn().mockReturnValue('test') } },
-        { provide: WalletService, useValue: { getProfileWalletBalance: jest.fn().mockResolvedValue(0), grantWelcomeCredit: jest.fn().mockResolvedValue(0) } },
+        { provide: WalletService, useValue: { getProfileWalletBalance: jest.fn().mockResolvedValue(0), grantWelcomeCredit: jest.fn().mockResolvedValue(0), getOrCreateProfileWallet: jest.fn().mockResolvedValue({ balance: 0 }) } },
       ],
     }).compile();
 

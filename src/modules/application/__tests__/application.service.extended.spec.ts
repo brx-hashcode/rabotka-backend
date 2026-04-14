@@ -9,6 +9,7 @@ import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { BotNotificationService } from '../../bot/services/bot-notification.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ContactUnlockService } from '../../contact-unlock/contact-unlock.service';
+import { ContractService } from '../../contract/contract.service';
 import { ApplicationStatus, JobOfferStatus, PaymentFlow } from '@prisma/client';
 
 const JOB_OFFER_ID = 'offer-uuid-1';
@@ -119,6 +120,7 @@ describe('ApplicationService (extended)', () => {
         },
         { provide: EventEmitter2, useValue: { emit: jest.fn() } },
         { provide: ContactUnlockService, useValue: { initiateUnlock: jest.fn().mockResolvedValue(undefined) } },
+        { provide: ContractService, useValue: { create: jest.fn().mockResolvedValue(undefined) } },
       ],
     }).compile();
 

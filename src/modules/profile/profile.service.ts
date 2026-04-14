@@ -26,6 +26,7 @@ import { DocumentService } from '../document/document.service';
 import { MatchingService } from '../matching/matching.service';
 import { CreateProfileDto } from './dto/create-profile.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import { AdminUpdateProfileDto } from './dto/admin-update-profile.dto';
 import {
   AccountStatus,
   Prisma,
@@ -252,17 +253,9 @@ export class ProfileService {
       throw new NotFoundException('Profil non trouvé');
     }
 
-    const previousStatus = existingProfile.status;
     const dataToUpdate = this.buildProfileUpdateData(updateProfileDto);
 
     await this.prisma.profile.update({ where: { id }, data: dataToUpdate });
-
-    const transitionedToActive =
-      previousStatus !== AccountStatus.ACTIVE &&
-      updateProfileDto.status === AccountStatus.ACTIVE;
-    if (transitionedToActive) {
-      await this.sendActivationNotification(id);
-    }
 
     this.eventEmitter.emit(AdminNotificationEvent.PROFILE_UPDATED, {
       event: AdminNotificationEvent.PROFILE_UPDATED,
@@ -285,7 +278,6 @@ export class ProfileService {
     if (dto.lastName !== undefined) data.last_name = dto.lastName;
     if (dto.description !== undefined) data.description = dto.description;
     if (dto.address !== undefined) data.address = dto.address;
-    if (dto.status !== undefined) data.status = dto.status;
     return data;
   }
 
@@ -728,7 +720,7 @@ export class ProfileService {
 
   async updateProfileByAdmin(
     profileId: string,
-    dto: UpdateProfileDto,
+    dto: AdminUpdateProfileDto,
   ): Promise<AdminProfileDetailResponse> {
     const profile = await this.prisma.profile.findUnique({
       where: { id: profileId },
@@ -761,7 +753,7 @@ export class ProfileService {
   }
 
   private buildAdminProfileUpdateData(
-    dto: UpdateProfileDto,
+    dto: AdminUpdateProfileDto,
   ): Prisma.ProfileUpdateInput {
     const data: Prisma.ProfileUpdateInput = {};
     if (dto.firstName !== undefined) data.first_name = dto.firstName;

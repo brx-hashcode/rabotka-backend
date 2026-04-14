@@ -13,6 +13,7 @@ import { SystemConfigService } from '../../../system-config/system-config.servic
 import { PaymentService } from '../../../payments/payment.service';
 import { ContactUnlockService } from '../../../contact-unlock/contact-unlock.service';
 import { WalletService } from '../../../wallet/wallet.service';
+import { MatchingService } from '../../../matching/matching.service';
 
 const PROFILE_ID = 'profile-uuid-1';
 const PHONE = '+242000000';
@@ -55,6 +56,7 @@ function makeDeps() {
     botDraft: {
       getDraft: jest.fn().mockResolvedValue(null),
       saveDraft: jest.fn().mockResolvedValue(undefined),
+      clearDraft: jest.fn().mockResolvedValue(undefined),
     },
     router: {
       route: jest.fn(),
@@ -106,6 +108,7 @@ describe('BotOrchestratorService', () => {
         { provide: PaymentService, useValue: {} },
         { provide: ContactUnlockService, useValue: { findPendingAttemptForProfile: jest.fn(), getByApplicationId: jest.fn(), payUnlock: jest.fn() } },
         { provide: WalletService, useValue: { getProfileWalletBalance: jest.fn().mockResolvedValue(0) } },
+        { provide: MatchingService, useValue: { findMatchingWorkersForJob: jest.fn().mockResolvedValue([]), findMatchingJobsForWorker: jest.fn().mockResolvedValue([]) } },
       ],
     }).compile();
 
@@ -439,7 +442,7 @@ describe('BotOrchestratorService', () => {
       expect(result.some((r) => r.includes('Nouvelle candidature'))).toBe(true);
     });
 
-    it('saves draft before clearing publish-job flow state', async () => {
+    it('clears draft when clearing publish-job flow state', async () => {
       const flowState = {
         flowId: 'publish_job',
         step: 3,
@@ -459,7 +462,7 @@ describe('BotOrchestratorService', () => {
       (deps.botInbox.shift as jest.Mock).mockResolvedValue(null);
 
       await service.handle(PROFILE_ID, PHONE, 'Menu');
-      expect(deps.botDraft.saveDraft).toHaveBeenCalled();
+      expect(deps.botDraft.clearDraft).toHaveBeenCalled();
     });
 
     it('appends inbox badge for EMPLOYER with pending items', async () => {

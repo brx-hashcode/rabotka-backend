@@ -45,7 +45,7 @@ describe('WalletService', () => {
         create: jest.fn(),
         update: jest.fn(),
       },
-      walletTransaction: { create: jest.fn() },
+      walletTransaction: { create: jest.fn(), aggregate: jest.fn().mockResolvedValue({ _sum: { amount: null } }) },
       penalty: { findUnique: jest.fn(), update: jest.fn() },
       payment: {
         create: jest.fn(),

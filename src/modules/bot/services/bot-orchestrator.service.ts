@@ -584,7 +584,10 @@ export class BotOrchestratorService {
 
     const pageIds = offerIds.slice(0, 5);
     const offers = await this.prisma.jobOffer.findMany({
-      where: { id: { in: pageIds }, status: 'ACTIVE' },
+      where: {
+        id: { in: pageIds },
+        status: { in: ['ACTIVE', 'PARTIALLY_FILLED'] },
+      },
       select: {
         id: true,
         title: true,
@@ -670,9 +673,14 @@ export class BotOrchestratorService {
     );
     await this.botState.set(profileId, flowState);
 
+    const { reliabilityScoreMin } = await this.systemConfig.getFees();
     const pageIds = workerIds.slice(0, 5);
     const workers = await this.prisma.profile.findMany({
-      where: { id: { in: pageIds } },
+      where: {
+        id: { in: pageIds },
+        verification_status: 'VERIFIED',
+        reliability_score: { gte: reliabilityScoreMin },
+      },
       select: {
         id: true,
         first_name: true,
