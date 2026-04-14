@@ -19,6 +19,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { BotNotificationService } from '../../bot/services/bot-notification.service';
 import { ContactUnlockService } from '../../contact-unlock/contact-unlock.service';
 import { InvoiceService } from '../../invoice/invoice.service';
+import { StorageService } from '../../../common/services/storage/storage.service';
 
 const PROFILE_ID = 'profile-uuid-1';
 const REQUEST_ID = 'req-uuid-1';
@@ -102,7 +103,8 @@ describe('PaymentRequestService', () => {
         { provide: EventEmitter2, useValue: { emit: jest.fn() } },
         { provide: BotNotificationService, useValue: { sendContactUnlockedNotification: jest.fn().mockResolvedValue(undefined) } },
         { provide: ContactUnlockService, useValue: { payUnlock: jest.fn(), getContactsIfUnlocked: jest.fn() } },
-        { provide: InvoiceService, useValue: { create: jest.fn().mockResolvedValue(undefined) } },
+        { provide: InvoiceService, useValue: { create: jest.fn().mockResolvedValue({ id: 'inv-1' }), downloadAsAdmin: jest.fn().mockResolvedValue({ buffer: Buffer.from('pdf'), filename: 'invoice.pdf' }) } },
+        { provide: StorageService, useValue: { upload: jest.fn().mockResolvedValue({ url: 'https://cdn.example.com/invoice.pdf' }) } },
       ],
     }).compile();
 

@@ -78,12 +78,10 @@ describe('TwilioService', () => {
       );
     });
 
-    it('returns null when Twilio throws an error', async () => {
+    it('throws when Twilio throws an error', async () => {
       getCreate().mockRejectedValue(new Error('Twilio error'));
 
-      const result = await service.sendWhatsApp('+24200000001', 'Hello');
-
-      expect(result).toBeNull();
+      await expect(service.sendWhatsApp('+24200000001', 'Hello')).rejects.toThrow();
     });
 
     it('returns null when not configured', async () => {

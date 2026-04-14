@@ -157,16 +157,18 @@ export class TwilioService implements OnModuleInit {
         this.logger.warn(
           `[Twilio] Daily sandbox limit reached (50 msg/day). Message to ${to} dropped.`,
         );
+        throw new Error(`[Twilio 63038] Daily sandbox limit reached — message to ${to} dropped`);
       } else if (twilioErr.code === 63031) {
         this.logger.warn(
           `[Twilio] To and From are the same number (${to}). Check webhook/status callback config.`,
         );
+        throw new Error(`[Twilio 63031] To and From are the same number (${to})`);
       } else {
         this.logger.error(
           `Twilio error sending WhatsApp message to ${to}: [${twilioErr.code ?? twilioErr.status}] ${twilioErr.message}`,
         );
+        throw new Error(`[Twilio ${twilioErr.code ?? twilioErr.status}] ${twilioErr.message ?? 'Unknown error'} — message to ${to} failed`);
       }
-      return null;
     }
   }
 
@@ -218,12 +220,13 @@ export class TwilioService implements OnModuleInit {
         this.logger.warn(
           `[Twilio] Daily sandbox limit reached (50 msg/day). Media to ${to} dropped.`,
         );
+        throw new Error(`[Twilio 63038] Daily sandbox limit reached — media to ${to} dropped`);
       } else {
         this.logger.error(
           `Twilio error sending WhatsApp media to ${to}: [${twilioErr.code ?? twilioErr.status}] ${twilioErr.message}`,
         );
+        throw new Error(`[Twilio ${twilioErr.code ?? twilioErr.status}] ${twilioErr.message ?? 'Unknown error'} — media to ${to} failed`);
       }
-      return null;
     }
   }
 
