@@ -28,6 +28,7 @@ import { AdminNotificationEvent } from '../../common/events/admin-notification.e
 import { BotNotificationService } from '../bot/services/bot-notification.service';
 import { ContactUnlockService } from '../contact-unlock/contact-unlock.service';
 import { InvoiceService } from '../invoice/invoice.service';
+import { StorageService } from '../../common/services/storage/storage.service';
 import { generatePaymentReference } from '../../common/utils/payment-reference';
 import { ListPaymentRequestsDto } from './dto/list-payment-requests.dto';
 import { SubmitPaymentDto } from './dto/submit-payment.dto';
@@ -92,6 +93,7 @@ export class PaymentRequestService {
     private readonly botNotification: BotNotificationService,
     private readonly contactUnlockService: ContactUnlockService,
     private readonly invoiceService: InvoiceService,
+    private readonly storageService: StorageService,
   ) {}
 
   /**
@@ -377,7 +379,12 @@ export class PaymentRequestService {
 
     this.emitAdminPaymentNotification(request, context);
     await this.sendPaymentSuccessNotifications(request, context);
-    this.createInvoiceForApprovedPayment(request, context);
+    await this.createAndSendInvoice(request, context).catch((err) =>
+      this.logger.warn(
+        `Invoice creation/sending failed for payment ${request.id}:`,
+        err,
+      ),
+    );
     await this.handleContactUnlockPostPayment(request);
     await this.handleRecommendationContactPostPayment(request, context);
   }
@@ -526,30 +533,77 @@ export class PaymentRequestService {
     }
   }
 
-  private createInvoiceForApprovedPayment(
+  private async createAndSendInvoice(
     request: PaymentRequestWithProfile,
     context: PaymentProcessingContext,
-  ): void {
-    this.invoiceService
-      .create({
-        profileId: request.profile_id,
-        paymentRequestId: request.id,
-        amount: context.amount,
-        reason:
-          context.isContactUnlock || context.isRecommendationContact
-            ? InvoiceReason.CONTACT_UNLOCK
-            : InvoiceReason.PENALTY,
-        relatedEntityType: request.contact_unlock_attempt_id
-          ? 'contact_unlock_attempt'
-          : undefined,
-        relatedEntityId: request.contact_unlock_attempt_id ?? undefined,
-      })
-      .catch((err) =>
-        this.logger.warn(
-          `Failed to create invoice for payment request ${request.id}:`,
-          err,
-        ),
-      );
+  ): Promise<void> {
+    // 1. Create invoice record
+    const invoice = await this.invoiceService.create({
+      profileId: request.profile_id,
+      paymentRequestId: request.id,
+      amount: context.amount,
+      reason:
+        context.isContactUnlock || context.isRecommendationContact
+          ? InvoiceReason.CONTACT_UNLOCK
+          : InvoiceReason.PENALTY,
+      relatedEntityType: request.contact_unlock_attempt_id
+        ? 'contact_unlock_attempt'
+        : undefined,
+      relatedEntityId: request.contact_unlock_attempt_id ?? undefined,
+    });
+
+    // 2. Generate PDF
+    const { buffer, filename } = await this.invoiceService.downloadAsAdmin(
+      invoice.id,
+    );
+
+    // 3. Send email with PDF attachment
+    if (request.profile.email) {
+      await this.mailService
+        .sendMail({
+          to: request.profile.email,
+          subject: `Votre facture — ${context.paymentDescription}`,
+          html: `<p>Bonjour,</p><p>Veuillez trouver ci-joint votre facture pour le paiement de <strong>${context.amount.toLocaleString('fr-FR')} FCFA</strong>.</p>`,
+          attachments: [
+            {
+              filename,
+              content: buffer,
+              contentType: 'application/pdf',
+            },
+          ],
+        })
+        .catch((err) =>
+          this.logger.warn(
+            `Invoice email failed for ${request.profile.email}:`,
+            err,
+          ),
+        );
+    }
+
+    // 4. Send WhatsApp media (upload to storage to get a public URL)
+    if (request.profile.phone) {
+      const uploaded = await this.storageService
+        .upload(buffer, filename, { folder: 'invoices' })
+        .catch((err) => {
+          this.logger.warn(`Invoice storage upload failed:`, err);
+          return null;
+        });
+
+      if (uploaded?.url) {
+        await this.whatsAppService
+          .sendMediaMessage(
+            request.profile.phone,
+            uploaded.url,
+            `📄 Votre facture de ${context.amount.toLocaleString('fr-FR')} FCFA`,
+          )
+          .catch((err) =>
+            this.logger.warn(
+              `Invoice WhatsApp send failed for ${request.profile.phone}:`,
+              err,
+            ),
+          );
+      }
+    }
   }
 
   private async handleContactUnlockPostPayment(
