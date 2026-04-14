@@ -46,6 +46,10 @@ function makeMail() {
   return { sendMail: jest.fn().mockResolvedValue(undefined) };
 }
 
+function makeWalletService() {
+  return { getProfileWalletForAdmin: jest.fn().mockResolvedValue({ balance: 0, transactions: [] }) };
+}
+
 function makeController(prismaProfile: any = null) {
   return new AdminProfileController(
     makeProfileService() as any,
@@ -54,6 +58,7 @@ function makeController(prismaProfile: any = null) {
     makePrisma(prismaProfile) as any,
     makeWhatsApp() as any,
     makeMail() as any,
+    makeWalletService() as any,
   );
 }
 
@@ -110,21 +115,21 @@ describe('AdminProfileController', () => {
     it('throws NotFoundException when profile not found', async () => {
       const ctrl = makeController(null);
       await expect(
-        ctrl.sendMessage('p1', { channel: 'WHATSAPP', message: 'hi' }, { user: { userId: 'u1' } }),
+        ctrl.sendMessage('p1', { channel: 'WHATSAPP', message: 'hi' }, undefined, { user: { userId: 'u1' } }),
       ).rejects.toThrow(NotFoundException);
     });
 
     it('throws BadRequestException when message is empty', async () => {
       const ctrl = makeController({ id: 'p1', phone: '+1234', email: null });
       await expect(
-        ctrl.sendMessage('p1', { channel: 'WHATSAPP', message: '   ' }, { user: { userId: 'u1' } }),
+        ctrl.sendMessage('p1', { channel: 'WHATSAPP', message: '   ' }, undefined, { user: { userId: 'u1' } }),
       ).rejects.toThrow(BadRequestException);
     });
 
     it('throws BadRequestException when WHATSAPP channel but no phone', async () => {
       const ctrl = makeController({ id: 'p1', phone: null, email: null });
       await expect(
-        ctrl.sendMessage('p1', { channel: 'WHATSAPP', message: 'hello' }, { user: { userId: 'u1' } }),
+        ctrl.sendMessage('p1', { channel: 'WHATSAPP', message: 'hello' }, undefined, { user: { userId: 'u1' } }),
       ).rejects.toThrow(BadRequestException);
     });
 
@@ -134,17 +139,17 @@ describe('AdminProfileController', () => {
       const ctrl = new AdminProfileController(
         makeProfileService() as any, makeLogService() as any,
         makePaymentRequestService() as any, prisma as any,
-        whatsApp as any, makeMail() as any,
+        whatsApp as any, makeMail() as any, makeWalletService() as any,
       );
-      const result = await ctrl.sendMessage('p1', { channel: 'WHATSAPP', message: 'hello' }, { user: { userId: 'u1' } });
-      expect(whatsApp.sendTextMessage).toHaveBeenCalledWith('+1234', 'hello', 'p1', 'u1');
+      const result = await ctrl.sendMessage('p1', { channel: 'WHATSAPP', message: 'hello' }, undefined, { user: { userId: 'u1' } });
+      expect(whatsApp.sendTextMessage).toHaveBeenCalledWith('+1234', expect.stringContaining('hello'), 'p1', 'u1');
       expect(result).toEqual({ success: true });
     });
 
     it('throws BadRequestException when EMAIL channel but no email', async () => {
       const ctrl = makeController({ id: 'p1', phone: null, email: null });
       await expect(
-        ctrl.sendMessage('p1', { channel: 'EMAIL', message: 'hello' }, { user: { userId: 'u1' } }),
+        ctrl.sendMessage('p1', { channel: 'EMAIL', message: 'hello' }, undefined, { user: { userId: 'u1' } }),
       ).rejects.toThrow(BadRequestException);
     });
 
@@ -154,9 +159,9 @@ describe('AdminProfileController', () => {
       const ctrl = new AdminProfileController(
         makeProfileService() as any, makeLogService() as any,
         makePaymentRequestService() as any, prisma as any,
-        makeWhatsApp() as any, mail as any,
+        makeWhatsApp() as any, mail as any, makeWalletService() as any,
       );
-      const result = await ctrl.sendMessage('p1', { channel: 'EMAIL', message: 'hello' }, { user: { userId: 'u1' } });
+      const result = await ctrl.sendMessage('p1', { channel: 'EMAIL', message: 'hello' }, undefined, { user: { userId: 'u1' } });
       expect(mail.sendMail).toHaveBeenCalled();
       expect(prisma.message.create).toHaveBeenCalled();
       expect(result).toEqual({ success: true });

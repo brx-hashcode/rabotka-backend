@@ -43,7 +43,7 @@ import {
   VerifyDecision,
 } from './dto/admin-verify-profile.dto';
 import { AdminUpdateStatusDto } from './dto/admin-update-status.dto';
-import { UpdateProfileDto } from './dto/update-profile.dto';
+import { AdminUpdateProfileDto } from './dto/admin-update-profile.dto';
 
 @ApiTags('Admin – Profiles')
 @Controller('admin/profiles')
@@ -288,7 +288,7 @@ export class AdminProfileController {
   @ApiResponse({ status: 404, description: 'Profile not found' })
   async update(
     @Param('id') id: string,
-    @Body() dto: UpdateProfileDto,
+    @Body() dto: AdminUpdateProfileDto,
     @Req() req: any,
   ) {
     const result = await this.profileService.updateProfileByAdmin(id, dto);

@@ -55,10 +55,24 @@ export class ProfileController {
 
   @Post()
   @UseInterceptors(
-    FileFieldsInterceptor([
-      { name: 'kycDocument', maxCount: 1 },
-      { name: 'kycSelfie', maxCount: 1 },
-    ]),
+    FileFieldsInterceptor(
+      [
+        { name: 'kycDocument', maxCount: 1 },
+        { name: 'kycSelfie', maxCount: 1 },
+      ],
+      {
+        limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+        fileFilter: (_req, file, cb) => {
+          const allowed = [
+            'image/jpeg',
+            'image/png',
+            'image/webp',
+            'application/pdf',
+          ];
+          cb(null, allowed.includes(file.mimetype));
+        },
+      },
+    ),
   )
   @ApiOperation({
     summary: 'Create a new profile with KYC documents',
@@ -414,7 +428,15 @@ export class ProfileController {
 
   @Post('avatar')
   @UseGuards(ProfileAuthGuard)
-  @UseInterceptors(FileInterceptor('avatar'))
+  @UseInterceptors(
+    FileInterceptor('avatar', {
+      limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+      fileFilter: (_req, file, cb) => {
+        const allowed = ['image/jpeg', 'image/png', 'image/webp'];
+        cb(null, allowed.includes(file.mimetype));
+      },
+    }),
+  )
   @ApiBearerAuth()
   @ApiCookieAuth()
   @ApiOperation({

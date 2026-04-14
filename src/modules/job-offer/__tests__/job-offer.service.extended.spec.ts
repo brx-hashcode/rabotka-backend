@@ -12,6 +12,7 @@ import { WalletService } from '../../wallet/wallet.service';
 import { BotNotificationService } from '../../bot/services/bot-notification.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { JobOfferStatus, PaymentFlow } from '@prisma/client';
+import { MatchingService } from '../../matching/matching.service';
 
 const EMPLOYER_ID = 'employer-uuid-1';
 const OFFER_ID = 'offer-uuid-1';
@@ -84,6 +85,7 @@ describe('JobOfferService (extended)', () => {
         { provide: WalletService, useValue: mockWalletService },
         { provide: BotNotificationService, useValue: mockBotNotificationService },
         { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+        { provide: MatchingService, useValue: { indexJobOffer: jest.fn().mockResolvedValue(undefined), findMatchingWorkersForJob: jest.fn().mockResolvedValue([]) } },
       ],
     }).compile();
 

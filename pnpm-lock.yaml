@@ -125,6 +125,9 @@ importers:
       nestjs-i18n:
         specifier: ^10.0.2
         version: 10.6.0(@nestjs/common@11.1.12(class-transformer@0.5.1)(class-validator@0.14.3)(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.12)(class-validator@0.14.3)(rxjs@7.8.2)
+      node-qpdf:
+        specifier: ^1.0.3
+        version: 1.0.3
       nodemailer:
         specifier: ^7.0.13
         version: 7.0.13
@@ -4907,6 +4910,9 @@ packages:
 
   node-int64@0.4.0:
     resolution: {integrity: sha512-O5lz91xSOeoXP6DulyHfllpq+Eg00MWitZIbtPfoSEvqIHdl5gfcY6hYzDWnj0qD5tz52PI08u9qUvSVeUBeHw==}
+
+  node-qpdf@1.0.3:
+    resolution: {integrity: sha512-M1Y5+7Ycm93Uwd7MhLUVTzRUTgHGiPiqjdYqNYoma9WGuiVvzwQ8EeyBKKwVbu3fK83lDxUBf+GX8G0S9Nx8ew==}
 
   node-releases@2.0.27:
     resolution: {integrity: sha512-nmh3lCkYZ3grZvqcCH+fjmQ7X+H0OeZgP40OierEaAptX4XofMh5kwNbWh7lBduUzCcV/8kZ+NDLCwm2iorIlA==}
@@ -12091,6 +12097,8 @@ snapshots:
     optional: true
 
   node-int64@0.4.0: {}
+
+  node-qpdf@1.0.3: {}
 
   node-releases@2.0.27: {}
 

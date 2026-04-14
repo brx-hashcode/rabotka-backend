@@ -18,6 +18,7 @@ import { PaymentStatusGateway } from '../../ws-notifications/payment-status.gate
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { BotNotificationService } from '../../bot/services/bot-notification.service';
 import { ContactUnlockService } from '../../contact-unlock/contact-unlock.service';
+import { InvoiceService } from '../../invoice/invoice.service';
 
 const PROFILE_ID = 'profile-uuid-1';
 const REQUEST_ID = 'req-uuid-1';
@@ -101,6 +102,7 @@ describe('PaymentRequestService', () => {
         { provide: EventEmitter2, useValue: { emit: jest.fn() } },
         { provide: BotNotificationService, useValue: { sendContactUnlockedNotification: jest.fn().mockResolvedValue(undefined) } },
         { provide: ContactUnlockService, useValue: { payUnlock: jest.fn(), getContactsIfUnlocked: jest.fn() } },
+        { provide: InvoiceService, useValue: { create: jest.fn().mockResolvedValue(undefined) } },
       ],
     }).compile();
 

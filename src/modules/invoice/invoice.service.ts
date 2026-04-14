@@ -125,7 +125,11 @@ export class InvoiceService {
       REASON: reasonLabel[invoice.reason] ?? invoice.reason,
       PAYMENT_REF: invoice.payment_request?.payment_reference ?? '',
       PAYMENT_METHOD: paymentMethod,
-      RELATED_ENTITY: invoice.related_entity_id ?? '',
+      RELATED_ENTITY: await this.resolveRelatedEntity(
+        invoice.related_entity_type,
+        invoice.related_entity_id,
+        invoice.profile_id,
+      ),
       GENERATED_DATE: new Date().toLocaleDateString('fr-FR'),
     };
 
@@ -181,7 +185,11 @@ export class InvoiceService {
       REASON: reasonLabel[invoice.reason] ?? invoice.reason,
       PAYMENT_REF: invoice.payment_request?.payment_reference ?? '',
       PAYMENT_METHOD: paymentMethod,
-      RELATED_ENTITY: invoice.related_entity_id ?? '',
+      RELATED_ENTITY: await this.resolveRelatedEntity(
+        invoice.related_entity_type,
+        invoice.related_entity_id,
+        invoice.profile_id,
+      ),
       GENERATED_DATE: new Date().toLocaleDateString('fr-FR'),
     };
 
@@ -209,6 +217,32 @@ export class InvoiceService {
 
   private getProfileTypeLabel(profileType: ProfileType): string {
     return PROFILE_TYPE_LABELS[profileType] ?? (profileType as string);
+  }
+
+  private async resolveRelatedEntity(
+    relatedEntityType: string | null,
+    relatedEntityId: string | null,
+    invoiceProfileId: string,
+  ): Promise<string> {
+    if (!relatedEntityId || !relatedEntityType) return '-';
+
+    if (relatedEntityType === 'contact_unlock_attempt') {
+      const attempt = await this.prisma.contactUnlockAttempt.findUnique({
+        where: { id: relatedEntityId },
+        include: {
+          worker: { select: { first_name: true, last_name: true, id: true } },
+          employer: { select: { first_name: true, last_name: true, id: true } },
+        },
+      });
+      if (!attempt) return '-';
+      const other =
+        attempt.worker_id === invoiceProfileId
+          ? attempt.employer
+          : attempt.worker;
+      return `${other.first_name} ${other.last_name}`;
+    }
+
+    return '-';
   }
 
   private async resolvePaymentMethod(

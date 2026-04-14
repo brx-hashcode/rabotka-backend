@@ -236,7 +236,7 @@ export class ApplicationService {
     workerId: string,
     options?: { status?: ApplicationStatus; limit?: number },
   ): Promise<ApplicationWithOffer[]> {
-    const limit = options?.limit ?? 50;
+    const limit = Math.min(options?.limit ?? 50, 100);
     const applications = await this.prisma.application.findMany({
       where: {
         worker_id: workerId,

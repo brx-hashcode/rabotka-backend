@@ -40,6 +40,12 @@ function makePrisma() {
     document: {
       findFirst: jest.fn().mockResolvedValue(baseTemplate),
     },
+    contactUnlockAttempt: {
+      findUnique: jest.fn().mockResolvedValue(null),
+    },
+    payment: {
+      findUnique: jest.fn().mockResolvedValue(null),
+    },
   };
 }
 
@@ -123,7 +129,7 @@ describe('InvoiceService', () => {
       expect(documentService.fillDocumentTemplateAsPdf).toHaveBeenCalledWith(
         'tpl-invoice-1',
         expect.objectContaining({
-          INVOICE_ID: 'inv-1',
+          INVOICE_ID: expect.stringContaining('RBT-'),
           FIRST_NAME: 'Alice',
           LAST_NAME: 'Dupont',
           AMOUNT: '5000',

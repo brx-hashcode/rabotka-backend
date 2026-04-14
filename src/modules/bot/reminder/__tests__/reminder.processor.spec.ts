@@ -50,6 +50,7 @@ describe('ReminderProcessor', () => {
       profile: {
         update: jest.fn().mockResolvedValue({}),
       },
+      $transaction: jest.fn((ops: Promise<unknown>[]) => Promise.all(ops)),
     };
     whatsApp = { sendTextMessage: jest.fn().mockResolvedValue(undefined) };
     queueService = { addJob: jest.fn().mockResolvedValue('job-1') };
@@ -266,13 +267,12 @@ describe('ReminderProcessor', () => {
           },
         ]);
       prisma.application.findMany.mockResolvedValue([] as never);
-      prisma.profile.update.mockRejectedValueOnce(new Error('DB error'));
+      prisma.$transaction.mockRejectedValueOnce(new Error('DB error'));
       const warnSpy = jest.spyOn(Logger.prototype, 'warn');
 
       await expect(
         processor.process({ data: { type: 'scan' } }),
-      ).resolves.not.toThrow();
-      expect(warnSpy).toHaveBeenCalled();
+      ).rejects.toThrow('DB error');
     });
 
     it('does nothing when there are no overdue offers', async () => {
@@ -298,6 +298,7 @@ describe('ReminderProcessor', () => {
         '1',
         'EX',
         expect.any(Number),
+        'NX',
       );
     });
 
@@ -348,6 +349,7 @@ describe('ReminderProcessor', () => {
         '1',
         'EX',
         expect.any(Number),
+        'NX',
       );
     });
 
@@ -405,6 +407,7 @@ describe('ReminderProcessor', () => {
         '1',
         'EX',
         expect.any(Number),
+        'NX',
       );
     });
 

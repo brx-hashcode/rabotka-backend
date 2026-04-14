@@ -195,7 +195,7 @@ export class JobOfferService {
       take: limit + 1,
       ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
       where: {
-        status: JobOfferStatus.ACTIVE,
+        status: { in: [JobOfferStatus.ACTIVE, JobOfferStatus.PARTIALLY_FILLED] },
         ...(excludeAppliedByWorkerId
           ? {
               applications: {
@@ -237,7 +237,7 @@ export class JobOfferService {
       const offers = await this.prisma.jobOffer.findMany({
         where: {
           id: { in: recommendedIds },
-          status: JobOfferStatus.ACTIVE,
+          status: { in: [JobOfferStatus.ACTIVE, JobOfferStatus.PARTIALLY_FILLED] },
           applications: { none: { worker_id: workerId } },
         },
         include: {

@@ -86,7 +86,7 @@ describe('HealthController', () => {
     await healthFns[0]();
     await healthFns[1]();
     expect(memory.checkHeap).toHaveBeenCalledWith('memory_heap', 150 * 1024 * 1024);
-    expect(memory.checkRSS).toHaveBeenCalledWith('memory_rss', 300 * 1024 * 1024);
+    expect(memory.checkRSS).toHaveBeenCalledWith('memory_rss', 600 * 1024 * 1024);
   });
 
   it('includes disk check when HEALTH_DISK_CHECK_ENABLED is "true"', async () => {

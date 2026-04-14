@@ -71,9 +71,11 @@ function makePrisma() {
     profilePlatformDocumentLink: {
       findMany: jest.fn().mockResolvedValue([]),
       findUnique: jest.fn().mockResolvedValue(null),
+      createMany: jest.fn().mockResolvedValue({ count: 0 }),
     },
     document: {
       findMany: jest.fn().mockResolvedValue([]),
+      findFirst: jest.fn().mockResolvedValue(null),
       findUnique: jest.fn().mockResolvedValue(null),
       create: jest.fn().mockResolvedValue({}),
       count: jest.fn().mockResolvedValue(0),
@@ -148,8 +150,9 @@ describe('ProfileService', () => {
       configService as any,
       {} as any, // mailService
       { emit: jest.fn() } as any, // eventEmitter
-      { getProfileWalletBalance: jest.fn().mockResolvedValue(0) } as any, // walletService
+      { getProfileWalletBalance: jest.fn().mockResolvedValue(0), grantWelcomeCredit: jest.fn().mockResolvedValue(undefined) } as any, // walletService
       documentService as any, // documentService
+      { indexWorkerProfile: jest.fn().mockResolvedValue(undefined), indexEmployerProfile: jest.fn().mockResolvedValue(undefined) } as any, // matchingService
     );
   });
 
@@ -183,20 +186,15 @@ describe('ProfileService', () => {
       );
     });
 
-    it('sends activation notification when status transitions to ACTIVE', async () => {
-      prisma.profile.findUnique.mockResolvedValueOnce({
-        ...baseProfile,
-        status: 'PENDING_ACTIVATION',
-      });
-      // Second call for findById
+    it('updates profile fields without allowing status change', async () => {
       prisma.profile.findUnique.mockResolvedValueOnce(baseProfile);
-      // Third call for sendActivationNotification
-      prisma.profile.findUnique.mockResolvedValueOnce({
-        ...baseProfile,
-        phone: '+242000001',
-      });
-      await service.updateProfile('p-1', { status: 'ACTIVE' as any });
-      // WhatsApp notification attempt is non-blocking; just ensure no crash
+      prisma.profile.findUnique.mockResolvedValueOnce(baseProfile);
+      await service.updateProfile('p-1', { firstName: 'Bob' });
+      expect(prisma.profile.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.not.objectContaining({ status: expect.anything() }),
+        }),
+      );
     });
   });
 
