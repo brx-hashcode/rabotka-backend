@@ -94,10 +94,10 @@ export class BotCommandsService {
   async myApplications(
     profile: BotProfile,
   ): Promise<{ message: string; applicationIds?: string[] }> {
-    const applications = await this.applicationService.findByWorker(
-      profile.id,
-      { limit: 20 },
-    );
+    const applications =
+      profile.profile_type === 'WORKER'
+        ? await this.applicationService.findByWorker(profile.id, { limit: 20 })
+        : await this.applicationService.findByEmployer(profile.id, { limit: 20 });
     if (applications.length === 0) {
       return {
         message: formatMyApplicationsList([]),
@@ -116,6 +116,47 @@ export class BotCommandsService {
         status: a.job_offer.status,
       },
     }));
+    return {
+      message: formatMyApplicationsList(list),
+      applicationIds: applications.map((a) => a.id),
+    };
+  }
+
+  async pendingPayments(
+    profile: BotProfile,
+  ): Promise<{ message: string; applicationIds?: string[] }> {
+    const applications =
+      profile.profile_type === 'WORKER'
+        ? await this.applicationService.findByWorker(profile.id, {
+            status: 'WAITING_PAYMENT' as ApplicationStatus,
+            limit: 20,
+          })
+        : await this.applicationService.findByEmployer(profile.id, {
+            status: 'WAITING_PAYMENT' as ApplicationStatus,
+            limit: 20,
+          });
+
+    if (applications.length === 0) {
+      return {
+        message:
+          "✅ *Aucun paiement en attente* pour le moment.\n\nTapez *Menu* pour revenir.",
+      };
+    }
+
+    const list: ApplicationForList[] = applications.map((a) => ({
+      id: a.id,
+      status: a.status,
+      job_offer: {
+        id: a.job_offer.id,
+        title: a.job_offer.title,
+        scheduled_at: a.job_offer.scheduled_at,
+        amount: a.job_offer.amount,
+        payment_flow: a.job_offer.payment_flow,
+        address: a.job_offer.address,
+        status: a.job_offer.status,
+      },
+    }));
+
     return {
       message: formatMyApplicationsList(list),
       applicationIds: applications.map((a) => a.id),

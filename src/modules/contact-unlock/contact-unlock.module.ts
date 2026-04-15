@@ -3,6 +3,7 @@ import { PrismaModule } from '../../common/services/prisma/prisma.module';
 import { SystemConfigModule } from '../system-config/system-config.module';
 import { WalletModule } from '../wallet/wallet.module';
 import { BotModule } from '../bot/bot.module';
+import { InvoiceModule } from '../invoice/invoice.module';
 import { ContactUnlockService } from './contact-unlock.service';
 import { ContactUnlockScheduler } from './contact-unlock.scheduler';
 
@@ -12,6 +13,7 @@ import { ContactUnlockScheduler } from './contact-unlock.scheduler';
     SystemConfigModule,
     forwardRef(() => WalletModule),
     forwardRef(() => BotModule),
+    InvoiceModule,
   ],
   providers: [ContactUnlockService, ContactUnlockScheduler],
   exports: [ContactUnlockService],

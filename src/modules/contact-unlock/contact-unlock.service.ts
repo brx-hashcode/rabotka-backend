@@ -8,13 +8,24 @@ import {
   Inject,
 } from '@nestjs/common';
 import {
+  ApplicationStatus,
+  AssignmentStatus,
   BillingStatus,
   ContactUnlockStatus,
+  InvoiceReason,
+  JobOfferStatus,
+  PaymentMethod,
+  PaymentRequestStatus,
+  PaymentStatus,
+  PaymentType,
   WalletTransactionType,
 } from '@prisma/client';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { WalletService } from '../wallet/wallet.service';
+import { InvoiceService } from '../invoice/invoice.service';
+import { generatePaymentReference } from '../../common/utils/payment-reference';
+import { randomUUID } from 'node:crypto';
 
 export type ContactDetails = {
   name: string;
@@ -44,6 +55,7 @@ export class ContactUnlockService {
     private readonly systemConfig: SystemConfigService,
     @Inject(forwardRef(() => WalletService))
     private readonly walletService: WalletService,
+    private readonly invoiceService: InvoiceService,
   ) {}
 
   /**
@@ -175,6 +187,7 @@ export class ContactUnlockService {
         'contact_unlock_attempt',
         attemptId,
       );
+      await this.recordWalletUnlockPayment(attemptId, profileId, amount);
     }
     // Cash payment path: payment record creation is handled externally
 
@@ -215,6 +228,9 @@ export class ContactUnlockService {
       where: { id: attemptId },
       data: updatedData,
     });
+    if (newStatus === ContactUnlockStatus.UNLOCKED) {
+      await this.markApplicationAcceptedAfterUnlock([updated.application_id]);
+    }
 
     return {
       attemptId: updated.id,
@@ -222,6 +238,62 @@ export class ContactUnlockService {
       newlyUnlocked:
         newStatus === ContactUnlockStatus.UNLOCKED ? [attemptId] : [],
     };
+  }
+
+  private async recordWalletUnlockPayment(
+    attemptId: string,
+    profileId: string,
+    amount: number,
+  ): Promise<void> {
+    const paymentReference = generatePaymentReference();
+    const token = randomUUID();
+
+    const paymentRequest = await this.prisma.paymentRequest.create({
+      data: {
+        profile_id: profileId,
+        token,
+        status: PaymentRequestStatus.APPROVED,
+        amount,
+        description: 'Déverrouillage de contact (wallet interne)',
+        payment_reference: paymentReference,
+        contact_unlock_attempt_id: attemptId,
+      },
+    });
+
+    await this.prisma.payment.create({
+      data: {
+        type: PaymentType.CONTACT_UNLOCK,
+        profile_id: profileId,
+        amount,
+        payment_method: PaymentMethod.WALLET,
+        transaction_id: paymentReference,
+        status: PaymentStatus.COMPLETED,
+        paid_at: new Date(),
+        description: 'Déverrouillage de contact (wallet interne)',
+      },
+    });
+
+    await this.invoiceService.create({
+      profileId,
+      paymentRequestId: paymentRequest.id,
+      amount,
+      reason: InvoiceReason.CONTACT_UNLOCK,
+      relatedEntityType: 'contact_unlock_attempt',
+      relatedEntityId: attemptId,
+    });
+  }
+
+  private async markApplicationAcceptedAfterUnlock(
+    applicationIds: string[],
+  ): Promise<void> {
+    if (applicationIds.length === 0) return;
+    await this.prisma.application.updateMany({
+      where: {
+        id: { in: applicationIds },
+        status: 'WAITING_PAYMENT' as ApplicationStatus,
+      },
+      data: { status: ApplicationStatus.ACCEPTED },
+    });
   }
 
   /**
@@ -254,6 +326,7 @@ export class ContactUnlockService {
     });
 
     const newlyUnlocked: string[] = [];
+    const unlockedApplicationIds: string[] = [];
 
     for (const a of pendingAttempts) {
       const willUnlock = a.worker_paid;
@@ -269,6 +342,7 @@ export class ContactUnlockService {
         },
       });
       if (willUnlock) newlyUnlocked.push(a.id);
+      if (willUnlock) unlockedApplicationIds.push(a.application_id);
     }
 
     // Also update PENDING_WORKER attempts for this job that didn't need employer pay
@@ -284,11 +358,158 @@ export class ContactUnlockService {
     ) {
       newlyUnlocked.push(triggerAttempt.id);
     }
+    if (triggerAttempt.worker_paid) {
+      const trigger = await this.prisma.contactUnlockAttempt.findUnique({
+        where: { id: triggerAttempt.id },
+        select: { application_id: true },
+      });
+      if (trigger?.application_id) unlockedApplicationIds.push(trigger.application_id);
+    }
+
+    await this.markApplicationAcceptedAfterUnlock([
+      ...new Set(unlockedApplicationIds),
+    ]);
 
     return {
       attemptId: triggerAttempt.id,
       status: triggerStatus,
       newlyUnlocked,
+    };
+  }
+
+  async rejectPendingAttemptByApplication(
+    applicationId: string,
+    profileId: string,
+  ): Promise<{
+    currentPartyMessage: string;
+    otherPartyMessage: string;
+    otherPhone: string;
+  }> {
+    const attempt = await this.prisma.contactUnlockAttempt.findUnique({
+      where: { application_id: applicationId },
+      include: {
+        worker: { select: { id: true, phone: true, first_name: true, last_name: true } },
+        employer: { select: { id: true, phone: true, first_name: true, last_name: true } },
+        job_offer: { select: { id: true, title: true, quantity: true } },
+      },
+    });
+    if (!attempt) {
+      throw new NotFoundException('Tentative de déverrouillage introuvable');
+    }
+    const isEmployer = attempt.employer_id === profileId;
+    const isWorker = attempt.worker_id === profileId;
+    if (!isEmployer && !isWorker) {
+      throw new ForbiddenException('Action non autorisée pour cette tentative');
+    }
+    if (
+      attempt.status !== ContactUnlockStatus.PENDING_BOTH &&
+      attempt.status !== ContactUnlockStatus.PENDING_EMPLOYER &&
+      attempt.status !== ContactUnlockStatus.PENDING_WORKER
+    ) {
+      throw new BadRequestException('Cette tentative ne peut plus être rejetée');
+    }
+
+    const now = new Date();
+    const rejectedByLabel = isEmployer ? 'employeur' : 'travailleur';
+    const assignmentStatus = isEmployer
+      ? AssignmentStatus.CANCELLED_BY_EMPLOYER
+      : AssignmentStatus.CANCELLED_BY_WORKER;
+
+    await this.prisma.$transaction(async (tx) => {
+      if (attempt.employer_paid) {
+        await this.walletService.creditProfileWallet(
+          attempt.employer_id,
+          Number(attempt.employer_amount),
+          WalletTransactionType.CONTACT_UNLOCK_CREDIT_CONVERSION,
+          'contact_unlock_attempt',
+          attempt.id,
+        );
+      }
+      if (attempt.worker_paid) {
+        await this.walletService.creditProfileWallet(
+          attempt.worker_id,
+          Number(attempt.worker_amount),
+          WalletTransactionType.CONTACT_UNLOCK_CREDIT_CONVERSION,
+          'contact_unlock_attempt',
+          attempt.id,
+        );
+      }
+
+      await tx.contactUnlockAttempt.update({
+        where: { id: attempt.id },
+        data: {
+          status: ContactUnlockStatus.CONVERTED_TO_CREDIT,
+          converted_at: now,
+        },
+      });
+      await tx.application.update({
+        where: { id: applicationId },
+        data: {
+          status: ApplicationStatus.REJECTED,
+          cancelled_at: now,
+          cancellation_reason: `Déverrouillage rejeté par ${rejectedByLabel}`,
+        },
+      });
+      await tx.assignment.updateMany({
+        where: { application_id: applicationId },
+        data: { status: assignmentStatus, cancelled_at: now },
+      });
+
+      const remainingAccepted = await tx.application.count({
+        where: {
+          job_offer_id: attempt.job_offer_id,
+          id: { not: applicationId },
+          status: {
+            in: [ApplicationStatus.ACCEPTED, 'WAITING_PAYMENT' as ApplicationStatus],
+          },
+        },
+      });
+      const quantity = attempt.job_offer.quantity ?? 1;
+      const offerStatus =
+        remainingAccepted >= quantity
+          ? JobOfferStatus.FILLED
+          : remainingAccepted > 0
+            ? JobOfferStatus.PARTIALLY_FILLED
+            : JobOfferStatus.ACTIVE;
+      await tx.jobOffer.update({
+        where: { id: attempt.job_offer_id },
+        data: { status: offerStatus },
+      });
+    });
+
+    const currentName = isEmployer
+      ? `${attempt.employer.first_name} ${attempt.employer.last_name}`.trim()
+      : `${attempt.worker.first_name} ${attempt.worker.last_name}`.trim();
+    const otherName = isEmployer
+      ? `${attempt.worker.first_name} ${attempt.worker.last_name}`.trim()
+      : `${attempt.employer.first_name} ${attempt.employer.last_name}`.trim();
+    const otherPhone = isEmployer ? attempt.worker.phone : attempt.employer.phone;
+
+    const refundLines: string[] = [];
+    if (attempt.employer_paid || attempt.worker_paid) {
+      refundLines.push(
+        'Le remboursement du paiement déjà effectué a été reversé immédiatement vers le wallet interne.',
+      );
+    }
+
+    return {
+      currentPartyMessage: [
+        '*Demande rejetée.*',
+        '',
+        `La mise en relation pour "${attempt.job_offer.title}" a été annulée.`,
+        ...refundLines,
+        '',
+        "Tapez 'Menu' pour revenir.",
+      ].join('\n'),
+      otherPartyMessage: [
+        '*Demande de paiement annulée*',
+        '',
+        `${currentName} a rejeté la mise en relation pour "${attempt.job_offer.title}".`,
+        ...refundLines,
+        '',
+        "Tapez 'Menu' pour revenir.",
+      ].join('\n'),
+      otherPhone,
     };
   }
 

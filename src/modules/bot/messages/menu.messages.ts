@@ -10,14 +10,17 @@ export function workerMenuMessage(): string {
   return [
     '*MENU RABOTKA*',
     '',
-    '1️⃣ Voir les offres disponibles',
-    '2️⃣ Mes candidatures',
-    '3️⃣ Offres recommandées',
-    '4️⃣ Mon profil',
-    '5️⃣ Historique',
-    '6️⃣ Aide',
+    `Bonjour 👋 Que voulez-vous faire aujourd'hui ?`,
     '',
-    '*Tapez le numéro correspondant.*',
+    '1️⃣ Trouver une mission',
+    '2️⃣ Mes candidatures',
+    '3️⃣ Paiements en attente',
+    '4️⃣ Offres recommandées',
+    '5️⃣ Mon profil',
+    '6️⃣ Historique',
+    '7️⃣ Aide',
+    '',
+    '*Répondez avec le numéro de votre choix.*',
   ].join('\n');
 }
 
@@ -25,16 +28,19 @@ export function employerMenuMessage(): string {
   return [
     '*MENU RABOTKA*',
     '',
+    'Bonjour 👋 Que voulez-vous gérer ?',
+    '',
     '1️⃣ Publier une offre',
     '2️⃣ Mes offres publiées',
     '3️⃣ Candidatures reçues',
-    '4️⃣ Missions pourvues',
-    '5️⃣ Travailleurs recommandés',
-    '6️⃣ Mon profil',
-    '7️⃣ Historique',
-    '8️⃣ Aide',
+    '4️⃣ Paiements en attente',
+    '5️⃣ Missions pourvues',
+    '6️⃣ Travailleurs recommandés',
+    '7️⃣ Mon profil',
+    '8️⃣ Historique',
+    '9️⃣ Aide',
     '',
-    '*Tapez le numéro correspondant.*',
+    '*Répondez avec le numéro de votre choix.*',
   ].join('\n');
 }
 

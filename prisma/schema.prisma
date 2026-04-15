@@ -90,6 +90,7 @@ enum JobOfferStatus {
 enum ApplicationStatus {
   PENDING
   VIEWED
+  WAITING_PAYMENT
   ACCEPTED
   REJECTED
   CANCELLED

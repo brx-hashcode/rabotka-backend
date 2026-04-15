@@ -264,6 +264,38 @@ export class ApplicationService {
     return applications.map((a) => this.toApplicationWithOffer(a));
   }
 
+  async findByEmployer(
+    employerId: string,
+    options?: { status?: ApplicationStatus; limit?: number },
+  ): Promise<ApplicationWithOffer[]> {
+    const limit = Math.min(options?.limit ?? 50, 100);
+    const applications = await this.prisma.application.findMany({
+      where: {
+        job_offer: { employer_id: employerId },
+        ...(options?.status ? { status: options.status } : {}),
+      },
+      take: limit,
+      orderBy: { created_at: 'desc' },
+      include: {
+        job_offer: {
+          include: {
+            employer: {
+              select: {
+                id: true,
+                first_name: true,
+                last_name: true,
+                phone: true,
+              },
+            },
+          },
+        },
+        worker: true,
+      },
+    });
+
+    return applications.map((a) => this.toApplicationWithOffer(a));
+  }
+
   async findByJobOffer(jobOfferId: string): Promise<ApplicationWithOffer[]> {
     const applications = await this.prisma.application.findMany({
       where: { job_offer_id: jobOfferId },
@@ -338,7 +370,7 @@ export class ApplicationService {
     const currentAcceptedCount = await this.prisma.application.count({
       where: {
         job_offer_id: application.job_offer_id,
-        status: ApplicationStatus.ACCEPTED,
+        status: { in: [ApplicationStatus.ACCEPTED, 'WAITING_PAYMENT' as ApplicationStatus] },
       },
     });
 
@@ -356,7 +388,7 @@ export class ApplicationService {
     await this.prisma.$transaction([
       this.prisma.application.update({
         where: { id: applicationId },
-        data: { status: ApplicationStatus.ACCEPTED },
+        data: { status: 'WAITING_PAYMENT' as ApplicationStatus },
       }),
       this.prisma.jobOffer.update({
         where: { id: application.job_offer_id },
@@ -376,12 +408,8 @@ export class ApplicationService {
     if (!updated)
       throw new NotFoundException('Candidature introuvable après mise à jour');
 
-    // Initiate contact unlock attempt — contacts are now gated behind payment/credit
-    this.contactUnlock
-      .initiateUnlock(applicationId, employerId)
-      .catch((err) =>
-        console.warn(`Failed to initiate contact unlock for ${applicationId}:`, err),
-      );
+    // Ensure unlock attempt exists before downstream notifications/flows.
+    await this.contactUnlock.initiateUnlock(applicationId, employerId);
 
     this.eventEmitter.emit(AdminNotificationEvent.APPLICATION_ACCEPTED, {
       event: AdminNotificationEvent.APPLICATION_ACCEPTED,
@@ -481,7 +509,8 @@ export class ApplicationService {
     }
     if (
       application.status !== ApplicationStatus.ACCEPTED &&
-      application.status !== ApplicationStatus.PENDING
+      application.status !== ApplicationStatus.PENDING &&
+      application.status !== ('WAITING_PAYMENT' as ApplicationStatus)
     ) {
       throw new BadRequestException(
         'Cette candidature ne peut plus être annulée',
@@ -633,7 +662,8 @@ export class ApplicationService {
     if (app?.worker_id !== workerId) return false;
     if (
       app.status !== ApplicationStatus.ACCEPTED &&
-      app.status !== ApplicationStatus.PENDING
+      app.status !== ApplicationStatus.PENDING &&
+      app.status !== ('WAITING_PAYMENT' as ApplicationStatus)
     )
       return false;
     const now = new Date();
@@ -756,9 +786,12 @@ export class ApplicationService {
         "Vous n'êtes pas l'employeur de cette offre",
       );
     }
-    if (application.status !== ApplicationStatus.ACCEPTED) {
+    if (
+      application.status !== ApplicationStatus.ACCEPTED &&
+      application.status !== ('WAITING_PAYMENT' as ApplicationStatus)
+    ) {
       throw new BadRequestException(
-        'Seule une candidature acceptée peut être annulée ici',
+        'Seule une candidature acceptée ou en attente de paiement peut être annulée ici',
       );
     }
 
@@ -775,7 +808,9 @@ export class ApplicationService {
       const remainingAccepted = await tx.application.count({
         where: {
           job_offer_id: application.job_offer_id,
-          status: ApplicationStatus.ACCEPTED,
+          status: {
+            in: [ApplicationStatus.ACCEPTED, 'WAITING_PAYMENT' as ApplicationStatus],
+          },
           id: { not: applicationId },
         },
       });

@@ -147,6 +147,23 @@ export class BotOrchestratorService {
     }
 
     if (profile.billing_status !== BillingStatus.CLEAR) {
+      const normalized = text.trim().toLowerCase();
+      const state = await this.botState.get(profileId);
+      const canContinueFlow =
+        state?.flowId === FLOW_IDS.PAY_PENALTIES ||
+        state?.flowId === FLOW_IDS.UNLOCK_CONTACT ||
+        state?.flowId === FLOW_IDS.MY_APPLICATIONS;
+      const canOpenPaymentRelatedCommand =
+        normalized === 'payer' ||
+        normalized === 'pay' ||
+        normalized === 'contact' ||
+        normalized === 'unlock' ||
+        normalized === 'mes candidatures' ||
+        normalized === 'mes applications' ||
+        normalized === 'paiements en attente';
+      if (canContinueFlow || canOpenPaymentRelatedCommand) {
+        return this.routeMessage(profileId, text, profile, botProfile);
+      }
       return [hasPenaltiesBotMessage()];
     }
 
@@ -370,6 +387,9 @@ export class BotOrchestratorService {
       my_applications: () =>
         this.handleMyApplicationsCommand(profile, profileId),
 
+      pending_payments: () =>
+        this.handlePendingPaymentsCommand(profile, profileId),
+
       candidatures_received: () =>
         this.handleCandidaturesReceivedCommand(botProfile, profileId),
 
@@ -451,6 +471,18 @@ export class BotOrchestratorService {
     if (result.applicationIds?.length) {
       const myAppState = getMyApplicationsInitialState(result.applicationIds);
       await this.botState.set(profileId, myAppState);
+    }
+    return [result.message];
+  }
+
+  private async handlePendingPaymentsCommand(
+    profile: NonNullable<Awaited<ReturnType<typeof this.loadProfile>>>,
+    profileId: string,
+  ): Promise<string[]> {
+    const result = await this.commands.pendingPayments(profile);
+    if (result.applicationIds?.length) {
+      const state = getMyApplicationsInitialState(result.applicationIds);
+      await this.botState.set(profileId, state);
     }
     return [result.message];
   }

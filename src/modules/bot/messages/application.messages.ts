@@ -115,6 +115,7 @@ function applicationStatusLabel(status: string): string {
   if (status === 'ACCEPTED') return '*ACCEPTÉE*';
   if (status === 'PENDING') return '*EN ATTENTE*';
   if (status === 'VIEWED') return "*VUE PAR L'EMPLOYEUR*";
+  if (status === 'WAITING_PAYMENT') return '*EN ATTENTE DE PAIEMENT*';
   if (status === 'REJECTED') return '*REFUSÉE*';
   return '*ANNULÉE*';
 }
@@ -214,6 +215,54 @@ export function formatMyApplicationDetailReadOnly(
     '*Actions:*',
     '1️⃣ Retour à la liste',
     "2️⃣ Menu (ou tapez 'Menu')",
+    '',
+    '*Tapez le numéro correspondant.*',
+  ].join('\n');
+}
+
+export function formatMyApplicationDetailWaitingPayment(
+  params: MyApplicationDetailParams,
+): string {
+  const statusText = applicationStatusLabel(params.status).replaceAll('*', '');
+  return [
+    '*CANDIDATURE SÉLECTIONNÉE*',
+    '',
+    `*Offre*: ${params.jobTitle}`,
+    `*Date*: ${formatDate(params.scheduled_at)}`,
+    `*Montant*: ${formatAmount(params.amount, params.payment_flow)}`,
+    `*Statut*: ${statusText}`,
+    `*Adresse*: ${params.address}`,
+    '',
+    '*Actions:*',
+    '1️⃣ Effectuer le paiement',
+    '2️⃣ Rejeter et annuler',
+    '3️⃣ Retour à la liste',
+    "4️⃣ Menu (ou tapez 'Menu')",
+    '',
+    '*Tapez le numéro correspondant.*',
+  ].join('\n');
+}
+
+export function formatMyApplicationDetailWaitingPaymentPaid(
+  params: MyApplicationDetailParams,
+): string {
+  const statusText = applicationStatusLabel(params.status).replaceAll('*', '');
+  return [
+    '*CANDIDATURE SÉLECTIONNÉE*',
+    '',
+    `*Offre*: ${params.jobTitle}`,
+    `*Date*: ${formatDate(params.scheduled_at)}`,
+    `*Montant*: ${formatAmount(params.amount, params.payment_flow)}`,
+    `*Statut*: ${statusText}`,
+    `*Adresse*: ${params.address}`,
+    '',
+    '✅ Votre paiement est déjà confirmé.',
+    "⏳ En attente du paiement de l'autre partie.",
+    '',
+    '*Actions:*',
+    '1️⃣ Rejeter et annuler',
+    '2️⃣ Retour à la liste',
+    "3️⃣ Menu (ou tapez 'Menu')",
     '',
     '*Tapez le numéro correspondant.*',
   ].join('\n');
