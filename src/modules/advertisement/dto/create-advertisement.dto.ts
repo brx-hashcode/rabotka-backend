@@ -5,23 +5,15 @@ import {
   IsArray,
   IsEnum,
   IsIn,
-  IsInt,
   IsUUID,
   IsDateString,
   MinLength,
   MaxLength,
-  Min,
   IsPhoneNumber,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import {
-  AdvertiserType,
-  FrequencyUnit,
-  DeliveryChannel,
-  TargetAudience,
-  AdPriority,
-} from '@prisma/client';
+import { AdvertiserType } from '@prisma/client';
 import { TargetFiltersDto } from './target-filters.dto';
 
 export class CreateAdvertisementDto {
@@ -86,32 +78,11 @@ export class CreateAdvertisementDto {
   @IsDateString()
   endDate: string;
 
-  @IsInt()
-  @Min(1)
-  frequencyValue: number;
-
-  @IsEnum(FrequencyUnit)
-  frequencyUnit: FrequencyUnit;
-
-  @IsEnum(DeliveryChannel)
-  channel: DeliveryChannel;
-
   @IsUUID()
   bundleId: string;
-
-  @IsInt()
-  @Min(1)
-  targetReach: number;
-
-  @IsEnum(TargetAudience)
-  targetAudience: TargetAudience;
 
   @IsOptional()
   @ValidateNested()
   @Type(() => TargetFiltersDto)
   targetFilters?: TargetFiltersDto;
-
-  @IsOptional()
-  @IsEnum(AdPriority)
-  priority?: AdPriority;
 }

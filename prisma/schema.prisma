@@ -357,8 +357,8 @@ model JobOffer {
   title        String
   description  String         @db.Text
   scheduled_at DateTime
-  amount       Decimal        @db.Decimal(10, 2)
-  payment_flow PaymentFlow
+  amount       Decimal?       @db.Decimal(10, 2)
+  payment_flow PaymentFlow?
   address      String
   note         String?
   quantity                Int            @default(1)
@@ -862,21 +862,6 @@ enum AdvertiserType {
   INDIVIDUAL
 }
 
-enum FrequencyUnit {
-  PER_WEEK
-  PER_MONTH
-}
-
-enum TargetAudience {
-  WORKERS
-  EMPLOYERS
-  BOTH
-}
-
-enum AdPriority {
-  NORMAL
-  HIGH
-}
 
 enum AdDeliveryStatus {
   SENT
@@ -921,13 +906,7 @@ model Advertisement {
   tags             String[]
   start_date       DateTime          @db.Date
   end_date         DateTime          @db.Date
-  frequency_value  Int
-  frequency_unit   FrequencyUnit
-  channel          DeliveryChannel
-  target_reach     Int
-  target_audience  TargetAudience
   target_filters   Json?
-  priority         AdPriority        @default(NORMAL)
   status           AdStatus          @default(DRAFT)
   rejection_reason String?
   payment_status   AdPaymentStatus   @default(UNPAID)

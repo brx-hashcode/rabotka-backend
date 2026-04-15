@@ -14,7 +14,7 @@ export interface AdDashboardItem {
   id: string;
   title: string;
   status: string;
-  channel: string;
+  channels: string[];
   startDate: Date;
   endDate: Date;
   stats: AdStats;
@@ -47,6 +47,7 @@ export class AdAnalyticsService {
   async getDashboard(): Promise<AdDashboardItem[]> {
     const ads = await this.prisma.advertisement.findMany({
       orderBy: { created_at: 'desc' },
+      include: { bundle: true },
     });
 
     const now = new Date();
@@ -59,7 +60,7 @@ export class AdAnalyticsService {
         id: ad.id,
         title: ad.title,
         status: ad.status,
-        channel: ad.channel,
+        channels: ad.bundle?.allowed_channels ?? [],
         startDate: ad.start_date,
         endDate: ad.end_date,
         stats: {

@@ -142,9 +142,7 @@ function parseDatabaseHostPort(): { host: string; port: number } | null {
   }
   const host = beforePath.slice(0, colon);
   const port = Number(beforePath.slice(colon + 1));
-  return host && Number.isFinite(port) && port > 0
-    ? { host, port }
-    : null;
+  return host && Number.isFinite(port) && port > 0 ? { host, port } : null;
 }
 
 async function ensureRedisAndPostgresReachable(logger: Logger): Promise<void> {
@@ -258,10 +256,12 @@ async function bootstrap(): Promise<void> {
   );
 
   if (reminderProcessor) {
+    const reminderLockMs =
+      Number(process.env.WHATSAPP_REMINDERS_LOCK_MS) || 600_000;
     queueService.createWorker<ReminderJobData>(
       WHATSAPP_REMINDERS_QUEUE,
       (job) => reminderProcessor.process(job),
-      { concurrency: 2 },
+      { concurrency: 2, lockDuration: reminderLockMs },
     );
   }
 
@@ -278,7 +278,9 @@ async function bootstrap(): Promise<void> {
     logger.log('WhatsApp outbound worker registered');
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    logger.warn(`WhatsAppOutboundProcessor not found (${msg}); outbound WhatsApp jobs will not be processed`);
+    logger.warn(
+      `WhatsAppOutboundProcessor not found (${msg}); outbound WhatsApp jobs will not be processed`,
+    );
   }
 
   app.enableShutdownHooks();

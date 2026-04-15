@@ -384,7 +384,7 @@ export class JobOfferService {
     if (Number.isNaN(scheduledAt.getTime())) {
       throw new BadRequestException('Format de date invalide');
     }
-    if (dto.amount < AMOUNT_MIN_FCFA || dto.amount > AMOUNT_MAX_FCFA) {
+    if (dto.amount != null && (dto.amount < AMOUNT_MIN_FCFA || dto.amount > AMOUNT_MAX_FCFA)) {
       throw new BadRequestException(
         `Le montant doit être entre ${AMOUNT_MIN_FCFA} et ${AMOUNT_MAX_FCFA} FCFA`,
       );
@@ -615,7 +615,8 @@ export class JobOfferService {
       data.description = dto.description.trim();
     if (dto.scheduledAt !== undefined)
       data.scheduled_at = new Date(dto.scheduledAt);
-    if (dto.amount !== undefined) data.amount = dto.amount;
+    if (dto.amount !== undefined) data.amount = dto.amount ?? null;
+    if (dto.paymentFlow !== undefined) data.payment_flow = dto.paymentFlow ?? null;
     if (dto.address !== undefined) data.address = dto.address.trim();
     if (dto.note !== undefined) data.note = dto.note.trim() || null;
     if (dto.quantity !== undefined) data.quantity = dto.quantity;

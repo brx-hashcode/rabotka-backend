@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { AdStatus, AdDeliveryStatus, Advertisement } from '@prisma/client';
+import { AdStatus, AdDeliveryStatus } from '@prisma/client';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { AdTargetingService } from './ad-targeting.service';
 import { AdvertisementService } from './advertisement.service';
@@ -7,6 +7,14 @@ import { EventNotificationDispatcher } from '../../event/services/event-notifica
 import type { EventNotificationRecipient } from '../../event/interfaces/event-notification.interfaces';
 
 export type AdJobData = { type: 'lifecycle' } | { type: 'dispatch' };
+
+type AdWithBundle = Awaited<ReturnType<PrismaService['advertisement']['findFirst']>> & {
+  bundle: {
+    allowed_channels: string[];
+    max_reach: number;
+    max_frequency_per_week: number;
+  };
+};
 
 @Injectable()
 export class AdProcessor {
@@ -60,6 +68,7 @@ export class AdProcessor {
   private async runDispatch(): Promise<void> {
     const activeAds = await this.prisma.advertisement.findMany({
       where: { status: AdStatus.ACTIVE },
+      include: { bundle: true },
     });
 
     for (const ad of activeAds) {
@@ -76,7 +85,13 @@ export class AdProcessor {
     }
   }
 
-  private async dispatchAd(ad: Advertisement): Promise<void> {
+  private async dispatchAd(ad: NonNullable<AdWithBundle>): Promise<void> {
+    const channel = ad.bundle.allowed_channels[0];
+    if (!channel) {
+      this.logger.warn(`Advertisement ${ad.id} bundle has no allowed channels — skipping`);
+      return;
+    }
+
     const profiles = await this.adTargeting.resolveRecipients(ad);
     if (profiles.length === 0) {
       this.logger.debug(`No recipients found for advertisement ${ad.id}`);
@@ -101,14 +116,14 @@ export class AdProcessor {
     await this.eventNotificationDispatcher.dispatchEventCreated(
       recipients,
       payload,
-      ad.channel,
+      channel as never,
     );
 
     await this.prisma.adDeliveryLog.createMany({
       data: profiles.map((p) => ({
         advertisement_id: ad.id,
         profile_id: p.id,
-        channel: ad.channel,
+        channel: channel as never,
         status: AdDeliveryStatus.SENT,
         sent_at: new Date(),
       })),
@@ -121,20 +136,15 @@ export class AdProcessor {
     );
   }
 
-  private async isDispatchDue(ad: Advertisement): Promise<boolean> {
+  private async isDispatchDue(ad: { id: string; start_date: Date; bundle: { max_frequency_per_week: number } }): Promise<boolean> {
     const now = new Date();
-    const start = ad.start_date;
     const daysSinceStart = Math.floor(
-      (now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24),
+      (now.getTime() - ad.start_date.getTime()) / (1000 * 60 * 60 * 24),
     );
 
-    let expectedSends: number;
-    if (ad.frequency_unit === 'PER_WEEK') {
-      expectedSends = Math.floor((daysSinceStart / 7) * ad.frequency_value) + 1;
-    } else {
-      expectedSends =
-        Math.floor((daysSinceStart / 30) * ad.frequency_value) + 1;
-    }
+    // Use bundle frequency: treat max_frequency_per_week as the weekly send rate
+    const expectedSends =
+      Math.floor((daysSinceStart / 7) * ad.bundle.max_frequency_per_week) + 1;
 
     const actualSends = await this.prisma.adDeliveryLog.count({
       where: {

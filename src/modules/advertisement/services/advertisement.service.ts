@@ -7,7 +7,6 @@ import {
 import {
   AdStatus,
   AdPaymentStatus,
-  FrequencyUnit,
   Advertisement,
   AdvertisementBundle,
   Prisma,
@@ -18,6 +17,11 @@ import { UpdateAdvertisementDto } from '../dto/update-advertisement.dto';
 import { ListAdvertisementsDto } from '../dto/list-advertisements.dto';
 
 const EDITABLE_STATUSES: AdStatus[] = [AdStatus.DRAFT, AdStatus.PAUSED];
+
+const BUNDLE_INCLUDE = {
+  bundle: true,
+  _count: { select: { delivery_logs: true } },
+} as const;
 
 @Injectable()
 export class AdvertisementService {
@@ -53,18 +57,12 @@ export class AdvertisementService {
         tags: dto.tags ?? [],
         start_date: new Date(dto.startDate),
         end_date: new Date(dto.endDate),
-        frequency_value: dto.frequencyValue,
-        frequency_unit: dto.frequencyUnit,
-        channel: dto.channel,
-        target_reach: dto.targetReach,
-        target_audience: dto.targetAudience,
         target_filters: dto.targetFilters
           ? (dto.targetFilters as unknown as Prisma.InputJsonValue)
           : undefined,
-        priority: dto.priority,
         status: AdStatus.DRAFT,
       },
-      include: { bundle: true },
+      include: BUNDLE_INCLUDE,
     });
   }
 
@@ -77,16 +75,12 @@ export class AdvertisementService {
 
     const where: Prisma.AdvertisementWhereInput = {
       ...(filters.status && { status: filters.status }),
-      ...(filters.channel && { channel: filters.channel }),
-      ...(filters.targetAudience && {
-        target_audience: filters.targetAudience,
-      }),
     };
 
     const [data, total] = await Promise.all([
       this.prisma.advertisement.findMany({
         where,
-        include: { bundle: true, _count: { select: { delivery_logs: true } } },
+        include: BUNDLE_INCLUDE,
         orderBy: { created_at: 'desc' },
         skip,
         take: limit,
@@ -100,10 +94,7 @@ export class AdvertisementService {
   async findOne(id: string): Promise<Advertisement> {
     const ad = await this.prisma.advertisement.findUnique({
       where: { id },
-      include: {
-        bundle: true,
-        _count: { select: { delivery_logs: true } },
-      },
+      include: BUNDLE_INCLUDE,
     });
     if (!ad) throw new NotFoundException('Advertisement not found');
     return ad;
@@ -126,23 +117,15 @@ export class AdvertisementService {
       if (!bundle.is_active)
         throw new BadRequestException('Bundle is not active');
       this.validateBundleConstraints(dto as CreateAdvertisementDto, bundle);
-    } else if (
-      dto.targetReach !== undefined ||
-      dto.startDate !== undefined ||
-      dto.endDate !== undefined ||
-      dto.frequencyValue !== undefined
-    ) {
+    } else if (dto.startDate !== undefined || dto.endDate !== undefined) {
       const bundle = await this.prisma.advertisementBundle.findUnique({
         where: { id: ad.bundle_id },
       });
       if (bundle) {
         this.validateBundleConstraints(
           {
-            targetReach: dto.targetReach ?? ad.target_reach,
             startDate: dto.startDate ?? ad.start_date.toISOString(),
             endDate: dto.endDate ?? ad.end_date.toISOString(),
-            frequencyValue: dto.frequencyValue ?? ad.frequency_value,
-            frequencyUnit: dto.frequencyUnit ?? ad.frequency_unit,
           } as CreateAdvertisementDto,
           bundle,
         );
@@ -172,17 +155,23 @@ export class AdvertisementService {
         ...(dto.tags && { tags: dto.tags }),
         ...(dto.startDate && { start_date: new Date(dto.startDate) }),
         ...(dto.endDate && { end_date: new Date(dto.endDate) }),
-        ...(dto.frequencyValue && { frequency_value: dto.frequencyValue }),
-        ...(dto.frequencyUnit && { frequency_unit: dto.frequencyUnit }),
-        ...(dto.channel && { channel: dto.channel }),
-        ...(dto.targetReach && { target_reach: dto.targetReach }),
-        ...(dto.targetAudience && { target_audience: dto.targetAudience }),
         ...(dto.targetFilters !== undefined && {
           target_filters: dto.targetFilters as unknown as Prisma.InputJsonValue,
         }),
-        ...(dto.priority && { priority: dto.priority }),
       },
-      include: { bundle: true },
+      include: BUNDLE_INCLUDE,
+    });
+  }
+
+  async confirmPayment(id: string): Promise<Advertisement> {
+    const ad = await this.findOne(id);
+    if (ad.payment_status === AdPaymentStatus.PAID) {
+      throw new BadRequestException('Payment is already confirmed for this advertisement');
+    }
+    return this.prisma.advertisement.update({
+      where: { id },
+      data: { payment_status: AdPaymentStatus.PAID },
+      include: BUNDLE_INCLUDE,
     });
   }
 
@@ -203,6 +192,7 @@ export class AdvertisementService {
     return this.prisma.advertisement.update({
       where: { id },
       data: { status: AdStatus.PENDING_REVIEW },
+      include: BUNDLE_INCLUDE,
     });
   }
 
@@ -214,6 +204,7 @@ export class AdvertisementService {
     return this.prisma.advertisement.update({
       where: { id },
       data: { status: AdStatus.PAUSED },
+      include: BUNDLE_INCLUDE,
     });
   }
 
@@ -227,6 +218,7 @@ export class AdvertisementService {
     return this.prisma.advertisement.update({
       where: { id },
       data: { status: AdStatus.APPROVED },
+      include: BUNDLE_INCLUDE,
     });
   }
 
@@ -238,7 +230,13 @@ export class AdvertisementService {
     return this.prisma.advertisement.update({
       where: { id },
       data: { status: AdStatus.CANCELLED },
+      include: BUNDLE_INCLUDE,
     });
+  }
+
+  async delete(id: string): Promise<void> {
+    await this.findOne(id);
+    await this.prisma.advertisement.delete({ where: { id } });
   }
 
   async updateMetrics(
@@ -252,22 +250,9 @@ export class AdvertisementService {
   }
 
   private validateBundleConstraints(
-    dto: Pick<
-      CreateAdvertisementDto,
-      | 'targetReach'
-      | 'startDate'
-      | 'endDate'
-      | 'frequencyValue'
-      | 'frequencyUnit'
-    >,
+    dto: Pick<CreateAdvertisementDto, 'startDate' | 'endDate'>,
     bundle: AdvertisementBundle,
   ): void {
-    if (dto.targetReach !== undefined && dto.targetReach > bundle.max_reach) {
-      throw new BadRequestException(
-        `targetReach (${dto.targetReach}) exceeds bundle maximum (${bundle.max_reach})`,
-      );
-    }
-
     if (dto.startDate && dto.endDate) {
       const start = new Date(dto.startDate);
       const end = new Date(dto.endDate);
@@ -284,16 +269,6 @@ export class AdvertisementService {
           `Campaign duration (${Math.floor(diffDays)} days) exceeds bundle maximum (${bundle.max_duration_days} days)`,
         );
       }
-    }
-
-    if (
-      dto.frequencyUnit === FrequencyUnit.PER_WEEK &&
-      dto.frequencyValue !== undefined &&
-      dto.frequencyValue > bundle.max_frequency_per_week
-    ) {
-      throw new BadRequestException(
-        `frequencyValue (${dto.frequencyValue}/week) exceeds bundle maximum (${bundle.max_frequency_per_week}/week)`,
-      );
     }
   }
 }

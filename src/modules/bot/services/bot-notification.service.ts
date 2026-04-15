@@ -352,11 +352,14 @@ export class BotNotificationService {
         hour: '2-digit',
         minute: '2-digit',
       });
+      const amountLine = offer.amount != null
+        ? `💰 ${Number(offer.amount).toLocaleString()} FCFA`
+        : `💰 Prix à négocier`;
       const text = [
         `🎯 *Offre recommandée pour vous, ${profile.first_name}*`,
         '',
         `📌 *${offer.title}*`,
-        `💰 ${offer.amount.toLocaleString()} FCFA`,
+        amountLine,
         `📍 ${offer.address}`,
         `🗓 ${dateStr}`,
         '',

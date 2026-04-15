@@ -101,6 +101,13 @@ export class AdAdminController {
     return this.advertisementService.update(id, dto);
   }
 
+  @Post(':id/confirm-payment')
+  @HttpCode(HttpStatus.OK)
+  @Roles(UserRole.MANAGER)
+  confirmPayment(@Param('id') id: string) {
+    return this.advertisementService.confirmPayment(id);
+  }
+
   @Post(':id/submit')
   @HttpCode(HttpStatus.OK)
   @Roles(UserRole.MANAGER)
@@ -141,6 +148,13 @@ export class AdAdminController {
   @Roles(UserRole.MANAGER)
   cancel(@Param('id') id: string) {
     return this.advertisementService.cancel(id);
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Roles(UserRole.MANAGER)
+  remove(@Param('id') id: string) {
+    return this.advertisementService.delete(id);
   }
 
   @Get(':id/stats')
