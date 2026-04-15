@@ -76,7 +76,13 @@ async function handleStep1(args: StepArgs): Promise<FlowResult> {
   }
 
   if (hasFunds && trimmed === '1') {
-    return handleWalletCredit({ profile, attemptId, ctx });
+    return handleWalletCredit({
+      profile,
+      attemptId,
+      otherName,
+      expiryHours,
+      ctx,
+    });
   }
 
   const mobileMoneyOption = hasFunds ? '2' : '1';
@@ -85,6 +91,7 @@ async function handleStep1(args: StepArgs): Promise<FlowResult> {
       profile,
       otherName,
       amount,
+      expiryHours,
       attemptId,
       ctx,
     });
@@ -116,9 +123,11 @@ async function handleStep1(args: StepArgs): Promise<FlowResult> {
 async function handleWalletCredit(args: {
   profile: BotProfile;
   attemptId: string;
+  otherName: string;
+  expiryHours: number;
   ctx: UnlockContactContext;
 }): Promise<FlowResult> {
-  const { profile, attemptId, ctx } = args;
+  const { profile, attemptId, otherName, expiryHours, ctx } = args;
   try {
     const result = await ctx.contactUnlockService.payUnlock(
       attemptId,
@@ -153,7 +162,13 @@ async function handleWalletCredit(args: {
     const waitingFor =
       profile.profile_type === 'EMPLOYER' ? 'worker' : 'employer';
     return {
-      reply: [formatContactUnlockPending(waitingFor)],
+      reply: [
+        formatContactUnlockPending({
+          waitingFor,
+          otherName,
+          expiryHours,
+        }),
+      ],
       clearState: true,
     };
   } catch (err: unknown) {
@@ -166,10 +181,11 @@ async function handleMobileMoney(args: {
   profile: BotProfile;
   otherName: string;
   amount: number;
+  expiryHours: number;
   attemptId: string;
   ctx: UnlockContactContext;
 }): Promise<FlowResult> {
-  const { profile, otherName, amount, attemptId, ctx } = args;
+  const { profile, otherName, amount, expiryHours, attemptId, ctx } = args;
   const paymentUrl = await ctx.paymentService.createPaymentUrl(
     profile.id,
     amount,
@@ -185,7 +201,9 @@ async function handleMobileMoney(args: {
         ``,
         paymentUrl,
         ``,
-        `✅ Une fois le paiement confirmé, vous recevrez automatiquement les coordonnées de contact.`,
+        `✅ Une fois le paiement confirmé des deux côtés (vous et *${otherName}*), vous recevrez les coordonnées.`,
+        '',
+        `ℹ️ Si une partie ne paie pas après *${expiryHours}h*, votre paiement sera reversé vers votre wallet interne.`,
       ].join('\n'),
     ],
     clearState: true,
