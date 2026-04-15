@@ -70,7 +70,7 @@ export type AdminApplicationDetailResponse = AdminApplicationListItem & {
   jobScheduledAt: string;
   jobAmount: number;
   jobAddress: string;
-  jobPaymentFlow: string;
+  jobPaymentFlow: string | null;
   jobStatus: string;
   jobQuantity: number;
   workerReliabilityScore: number | null;
@@ -118,8 +118,8 @@ export type ApplicationWithOffer = ApplicationListItem & {
     title: string;
     description: string;
     scheduled_at: Date;
-    amount: number;
-    payment_flow: string;
+    amount: number | null;
+    payment_flow: string | null;
     address: string;
     note: string | null;
     status: string;
@@ -1209,7 +1209,7 @@ export class ApplicationService {
       description: string;
       scheduled_at: Date;
       amount: unknown;
-      payment_flow: string;
+      payment_flow: string | null;
       address: string;
       note: string | null;
       status: string;

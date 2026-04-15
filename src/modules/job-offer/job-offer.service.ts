@@ -33,8 +33,8 @@ export type AdminJobOfferListItem = {
   title: string;
   description: string;
   scheduledAt: string;
-  amount: number;
-  paymentFlow: string;
+  amount: number | null;
+  paymentFlow: string | null;
   address: string;
   note: string | null;
   quantity: number;
@@ -73,8 +73,8 @@ export type JobOfferListItem = {
   title: string;
   description: string;
   scheduled_at: Date;
-  amount: number;
-  payment_flow: string;
+  amount: number | null;
+  payment_flow: string | null;
   address: string;
   note: string | null;
   quantity: number;
@@ -646,7 +646,7 @@ export class JobOfferService {
       description: string;
       scheduled_at: Date;
       amount: unknown;
-      payment_flow: string;
+      payment_flow: string | null;
       address: string;
       note: string | null;
       quantity: number;
@@ -661,7 +661,7 @@ export class JobOfferService {
       title: offer.title,
       description: offer.description,
       scheduled_at: offer.scheduled_at,
-      amount: Number(offer.amount),
+      amount: offer.amount != null ? Number(offer.amount) : null,
       payment_flow: offer.payment_flow,
       address: offer.address,
       note: offer.note,

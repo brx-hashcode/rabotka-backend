@@ -144,7 +144,7 @@ export class BotCommandsService {
         `${num}- *${o.title}*`,
         `    • 🆔 Réf : #${o.id.slice(0, 8)}`,
         `    • 📅 Date : ${dateStr}`,
-        `    • 💰 Montant : ${o.amount.toLocaleString('fr-FR')} FCFA`,
+        `    • 💰 Montant : ${o.amount != null ? `${o.amount.toLocaleString('fr-FR')} FCFA` : 'Prix à négocier'}`,
         `    • 📌 Statut : ${o.status}`,
         '',
       );

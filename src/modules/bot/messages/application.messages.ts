@@ -95,13 +95,20 @@ function formatDate(d: Date): string {
   });
 }
 
-function formatPaymentFlow(flow: string): string {
+function formatPaymentFlow(flow: string | null): string {
+  if (!flow) return '';
   const map: Record<string, string> = {
     HOURLY: 'par heure',
     DAILY: 'par jour',
     MONTHLY: 'par mois',
   };
   return map[flow] ?? flow;
+}
+
+function formatAmount(amount: number | null, flow: string | null): string {
+  if (amount == null) return 'Prix à négocier';
+  const flowLabel = formatPaymentFlow(flow);
+  return `${amount.toLocaleString('fr-FR')} FCFA${flowLabel ? ` ${flowLabel}` : ''}`;
 }
 
 function applicationStatusLabel(status: string): string {
@@ -119,8 +126,8 @@ export type ApplicationForList = {
     id: string;
     title: string;
     scheduled_at: Date;
-    amount: number;
-    payment_flow: string;
+    amount: number | null;
+    payment_flow: string | null;
     address: string;
     status: string;
   };
@@ -139,7 +146,6 @@ export function formatMyApplicationsList(
   for (let i = 0; i < applications.length; i++) {
     const app = applications[i];
     const num = i + 1;
-    const flowLabel = formatPaymentFlow(app.job_offer.payment_flow);
     const statusText = applicationStatusLabel(app.status).replaceAll('*', '');
     const address =
       app.job_offer.address.length > ADDRESS_MAX
@@ -147,7 +153,7 @@ export function formatMyApplicationsList(
         : app.job_offer.address;
     lines.push(
       `${num}. ${app.job_offer.title}`,
-      `    Montant: ${app.job_offer.amount.toLocaleString('fr-FR')} FCFA ${flowLabel}`,
+      `    Montant: ${formatAmount(app.job_offer.amount, app.job_offer.payment_flow)}`,
       `    Date: ${formatDate(app.job_offer.scheduled_at)}`,
       `    Statut: ${statusText}`,
       `    Adresse: ${address}`,
@@ -164,8 +170,8 @@ export function formatMyApplicationsList(
 export type MyApplicationDetailParams = {
   jobTitle: string;
   scheduled_at: Date;
-  amount: number;
-  payment_flow: string;
+  amount: number | null;
+  payment_flow: string | null;
   address: string;
   status: string;
 };
@@ -173,14 +179,13 @@ export type MyApplicationDetailParams = {
 export function formatMyApplicationDetailWithCancel(
   params: MyApplicationDetailParams,
 ): string {
-  const flowLabel = formatPaymentFlow(params.payment_flow);
   const statusText = applicationStatusLabel(params.status).replaceAll('*', '');
   return [
     '*CANDIDATURE SÉLECTIONNÉE*',
     '',
     `*Offre*: ${params.jobTitle}`,
     `*Date*: ${formatDate(params.scheduled_at)}`,
-    `*Montant*: ${params.amount.toLocaleString('fr-FR')} FCFA ${flowLabel}`,
+    `*Montant*: ${formatAmount(params.amount, params.payment_flow)}`,
     `*Statut*: ${statusText}`,
     `*Adresse*: ${params.address}`,
     '',
@@ -196,14 +201,13 @@ export function formatMyApplicationDetailWithCancel(
 export function formatMyApplicationDetailReadOnly(
   params: MyApplicationDetailParams,
 ): string {
-  const flowLabel = formatPaymentFlow(params.payment_flow);
   const statusText = applicationStatusLabel(params.status).replaceAll('*', '');
   return [
     '*CANDIDATURE SÉLECTIONNÉE*',
     '',
     `*Offre*: ${params.jobTitle}`,
     `*Date*: ${formatDate(params.scheduled_at)}`,
-    `*Montant*: ${params.amount.toLocaleString('fr-FR')} FCFA ${flowLabel}`,
+    `*Montant*: ${formatAmount(params.amount, params.payment_flow)}`,
     `*Statut*: ${statusText}`,
     `*Adresse*: ${params.address}`,
     '',
@@ -218,8 +222,8 @@ export function formatMyApplicationDetailReadOnly(
 export function formatApplyConfirmation(params: {
   title: string;
   scheduled_at: Date;
-  amount: number;
-  payment_flow: string;
+  amount: number | null;
+  payment_flow: string | null;
   address: string;
   workerName: string;
   workerPhone: string;
@@ -227,14 +231,13 @@ export function formatApplyConfirmation(params: {
   reliabilityScore: number | null;
   lateCancellationPenalty?: number;
 }): string {
-  const flow = formatPaymentFlow(params.payment_flow);
   const penalty = params.lateCancellationPenalty ?? 5000;
   return [
     '*Vous êtes sur le point de postuler*',
     '',
     `*Offre*: ${params.title}`,
     `*Date*: ${formatDate(params.scheduled_at)}`,
-    `*Montant*: ${params.amount.toLocaleString('fr-FR')} FCFA ${flow}`,
+    `*Montant*: ${formatAmount(params.amount, params.payment_flow)}`,
     `*Adresse*: ${params.address}`,
     '',
     '*ENGAGEMENT IMPORTANT*:',
@@ -391,8 +394,8 @@ export type FilledJobListItem = {
   title: string;
   workerName: string;
   scheduled_at: Date | string;
-  amount: number;
-  payment_flow: string;
+  amount: number | null;
+  payment_flow: string | null;
 };
 
 export function formatFilledJobsListPage(
@@ -408,12 +411,11 @@ export function formatFilledJobsListPage(
   }
   items.forEach((item, i) => {
     const num = i + 1;
-    const flowLabel = formatPaymentFlow(item.payment_flow);
     lines.push(
       `${num}. ${item.title}`,
       `    Worker: ${item.workerName}`,
       `    Date: ${formatDatePublic(item.scheduled_at)}`,
-      `    Montant: ${item.amount.toLocaleString('fr-FR')} FCFA ${flowLabel}`,
+      `    Montant: ${formatAmount(item.amount, item.payment_flow)}`,
       '',
     );
   });
@@ -427,14 +429,13 @@ export function formatFilledJobsListPage(
 }
 
 export function formatFilledJobDetail(params: FilledJobListItem): string {
-  const flowLabel = formatPaymentFlow(params.payment_flow);
   return [
     '*Mission sélectionnée*',
     '',
     `*Offre*: ${params.title}`,
     `*Worker*: ${params.workerName}`,
     `*Date*: ${formatDatePublic(params.scheduled_at)}`,
-    `*Montant*: ${params.amount.toLocaleString('fr-FR')} FCFA ${flowLabel}`,
+    `*Montant*: ${formatAmount(params.amount, params.payment_flow)}`,
     '',
     '*Actions:*',
     '1️⃣ Marquer comme terminée (verser le gain au worker)',

@@ -170,18 +170,26 @@ async function handleDetailApply(
       clearState: true,
     };
   }
-  const flowLabel = formatPaymentFlow(offer.payment_flow);
   const penaltyStr = await ctx.systemConfigService.getRaw(
     'fees.late_cancellation_penalty_fcfa',
     '5000',
   );
   const penalty = Number(penaltyStr) || 5000;
+  let amountStr = 'Prix à négocier';
+  if (offer.amount != null) {
+    const flowLabel = offer.payment_flow
+      ? formatPaymentFlow(offer.payment_flow)
+      : '';
+    amountStr = flowLabel
+      ? `${offer.amount.toLocaleString('fr-FR')} FCFA ${flowLabel}`
+      : `${offer.amount.toLocaleString('fr-FR')} FCFA`;
+  }
   const text = [
     '*Vous êtes sur le point de postuler*',
     '',
     `*Offre*: ${offer.title}`,
     `*Date*: ${formatOfferDate(offer.scheduled_at)}`,
-    `*Montant*: ${offer.amount.toLocaleString('fr-FR')} FCFA ${flowLabel}`,
+    `*Montant*: ${amountStr}`,
     `*Adresse*: ${offer.address}`,
     '',
     '*ENGAGEMENT IMPORTANT*:',
@@ -250,8 +258,8 @@ function toOfferListItem(offer: {
   title: string;
   description: string;
   scheduled_at: Date;
-  amount: number;
-  payment_flow: string;
+  amount: number | null;
+  payment_flow: string | null;
   address: string;
   note: string | null;
   quantity: number;

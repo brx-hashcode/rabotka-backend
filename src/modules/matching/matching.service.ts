@@ -150,7 +150,7 @@ export class MatchingService {
         title: job.title,
         description: job.description,
         address: job.address,
-        amount: job.amount.toString(),
+        amount: job.amount != null ? job.amount.toString() : '',
         note: job.note ?? '',
         categoryName: job.category?.name ?? '',
         categoryDescription: job.category?.description ?? '',
