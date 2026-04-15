@@ -385,31 +385,29 @@ export class ApplicationService {
       offerStatus = JobOfferStatus.ACTIVE;
     }
 
-    await this.prisma.$transaction([
-      this.prisma.application.update({
+    await this.prisma.$transaction(async (tx) => {
+      await tx.application.update({
         where: { id: applicationId },
-        data: { status: 'WAITING_PAYMENT' as ApplicationStatus },
-      }),
-      this.prisma.jobOffer.update({
+        data: { status: ApplicationStatus.WAITING_PAYMENT },
+      });
+      await tx.jobOffer.update({
         where: { id: application.job_offer_id },
         data: { status: offerStatus },
-      }),
-      this.prisma.assignment.create({
+      });
+      await tx.assignment.create({
         data: {
           application_id: applicationId,
           job_offer_id: application.job_offer_id,
           worker_id: application.worker_id,
           status: AssignmentStatus.CONFIRMED,
         },
-      }),
-    ]);
+      });
+      await this.contactUnlock.initiateUnlock(applicationId, employerId, tx);
+    });
 
     const updated = await this.findById(applicationId);
     if (!updated)
       throw new NotFoundException('Candidature introuvable après mise à jour');
-
-    // Ensure unlock attempt exists before downstream notifications/flows.
-    await this.contactUnlock.initiateUnlock(applicationId, employerId);
 
     this.eventEmitter.emit(AdminNotificationEvent.APPLICATION_ACCEPTED, {
       event: AdminNotificationEvent.APPLICATION_ACCEPTED,

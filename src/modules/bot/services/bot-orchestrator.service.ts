@@ -388,7 +388,7 @@ export class BotOrchestratorService {
         this.handleMyApplicationsCommand(profile, profileId),
 
       pending_payments: () =>
-        this.handlePendingPaymentsCommand(profile, profileId),
+        this.handlePendingPaymentsCommand(botProfile, profileId),
 
       candidatures_received: () =>
         this.handleCandidaturesReceivedCommand(botProfile, profileId),
@@ -476,12 +476,16 @@ export class BotOrchestratorService {
   }
 
   private async handlePendingPaymentsCommand(
-    profile: NonNullable<Awaited<ReturnType<typeof this.loadProfile>>>,
+    botProfile: BotProfile,
     profileId: string,
   ): Promise<string[]> {
-    const result = await this.commands.pendingPayments(profile);
-    if (result.applicationIds?.length) {
-      const state = getMyApplicationsInitialState(result.applicationIds);
+    const result = await this.commands.pendingPayments(botProfile);
+    const applicationIds: string[] | undefined = result.applicationIds;
+    if (applicationIds != null && applicationIds.length > 0) {
+      const state = getMyApplicationsInitialState(
+        applicationIds,
+        'pending_payments',
+      );
       await this.botState.set(profileId, state);
     }
     return [result.message];

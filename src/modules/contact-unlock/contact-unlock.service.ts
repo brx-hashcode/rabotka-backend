@@ -18,6 +18,7 @@ import {
   PaymentRequestStatus,
   PaymentStatus,
   PaymentType,
+  Prisma,
   WalletTransactionType,
 } from '@prisma/client';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
@@ -65,19 +66,24 @@ export class ContactUnlockService {
    * For multi-person jobs (quantity > 1): if the employer has already paid at the
    * job level, the new attempt is created with employer_paid = true immediately.
    */
-  async initiateUnlock(applicationId: string, employerId: string) {
-    const existing = await this.prisma.contactUnlockAttempt.findUnique({
+  async initiateUnlock(
+    applicationId: string,
+    employerId: string,
+    tx?: Prisma.TransactionClient,
+  ) {
+    const db = tx ?? this.prisma;
+    const existing = await db.contactUnlockAttempt.findUnique({
       where: { application_id: applicationId },
     });
     if (existing) return existing;
 
-    const app = await this.prisma.application.findUnique({
+    const app = await db.application.findUnique({
       where: { id: applicationId },
       select: { worker_id: true, job_offer_id: true },
     });
     if (!app) throw new NotFoundException('Candidature introuvable');
 
-    const jobOffer = await this.prisma.jobOffer.findUnique({
+    const jobOffer = await db.jobOffer.findUnique({
       where: { id: app.job_offer_id },
       select: { quantity: true, employer_unlock_paid: true },
     });
@@ -91,7 +97,7 @@ export class ContactUnlockService {
 
     const now = new Date();
 
-    return this.prisma.contactUnlockAttempt.create({
+    return db.contactUnlockAttempt.create({
       data: {
         application_id: applicationId,
         job_offer_id: app.job_offer_id,
@@ -106,6 +112,63 @@ export class ContactUnlockService {
         worker_amount: fees.workerFeeFcfa,
         expires_at: expiresAt,
       },
+    });
+  }
+
+  /**
+   * When an unlock attempt expires without UNLOCKED, the application must not
+   * stay WAITING_PAYMENT (slot + assignment are released like a failed unlock).
+   */
+  private async syncWaitingPaymentApplicationAfterUnlockExpiry(params: {
+    applicationId: string;
+    jobOfferId: string;
+    quantity: number;
+  }): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      const app = await tx.application.findUnique({
+        where: { id: params.applicationId },
+        select: { status: true },
+      });
+      if (!app || app.status !== ApplicationStatus.WAITING_PAYMENT) return;
+
+      const now = new Date();
+      await tx.application.update({
+        where: { id: params.applicationId },
+        data: {
+          status: ApplicationStatus.CANCELLED,
+          cancelled_at: now,
+          cancellation_reason:
+            'Délai de paiement pour le déverrouillage expiré (aucune coordonnée échangée)',
+        },
+      });
+      await tx.assignment.updateMany({
+        where: { application_id: params.applicationId },
+        data: {
+          status: AssignmentStatus.CANCELLED_BY_EMPLOYER,
+          cancelled_at: now,
+        },
+      });
+
+      const remainingAccepted = await tx.application.count({
+        where: {
+          job_offer_id: params.jobOfferId,
+          id: { not: params.applicationId },
+          status: {
+            in: [ApplicationStatus.ACCEPTED, ApplicationStatus.WAITING_PAYMENT],
+          },
+        },
+      });
+      const quantity = params.quantity;
+      const offerStatus =
+        remainingAccepted >= quantity
+          ? JobOfferStatus.FILLED
+          : remainingAccepted > 0
+            ? JobOfferStatus.PARTIALLY_FILLED
+            : JobOfferStatus.ACTIVE;
+      await tx.jobOffer.update({
+        where: { id: params.jobOfferId },
+        data: { status: offerStatus },
+      });
     });
   }
 
@@ -655,6 +718,12 @@ export class ContactUnlockService {
         await this.prisma.contactUnlockAttempt.update({
           where: { id: attempt.id },
           data: { status: newStatus, converted_at: now },
+        });
+
+        await this.syncWaitingPaymentApplicationAfterUnlockExpiry({
+          applicationId: attempt.application_id,
+          jobOfferId: attempt.job_offer_id,
+          quantity: attempt.job_offer.quantity ?? 1,
         });
 
         this.logger.log(
