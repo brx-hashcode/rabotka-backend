@@ -163,4 +163,10 @@ export class AdAdminController {
     return this.adAnalyticsService.getStats(id);
   }
 
+  @Get(':id/analytics')
+  @Roles(UserRole.MODERATOR)
+  getAnalytics(@Param('id') id: string) {
+    return this.adAnalyticsService.getAnalytics(id);
+  }
+
 }
