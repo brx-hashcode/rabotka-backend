@@ -142,7 +142,9 @@ async function handleWalletCredit(args: {
 
     for (const id of unlockedIds) {
       await ctx.botNotification
-        .sendContactUnlockedNotification(id)
+        .sendContactUnlockedNotification(id, {
+          skipNotifyProfileId: profile.id,
+        })
         .catch(() => null);
     }
 

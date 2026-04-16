@@ -170,12 +170,21 @@ export class BotNotificationService {
     }
   }
 
-  async sendContactUnlockedNotification(attemptId: string): Promise<void> {
+  /**
+   * Notifies both parties that contact details are visible.
+   * @param skipNotifyProfileId — Skip WhatsApp to this profile (e.g. payer already gets the same text in the bot flow reply).
+   */
+  async sendContactUnlockedNotification(
+    attemptId: string,
+    options?: { skipNotifyProfileId?: string },
+  ): Promise<void> {
     try {
       const attempt = await this.prisma.contactUnlockAttempt.findUnique({
         where: { id: attemptId },
       });
       if (!attempt) return;
+
+      const skipId = options?.skipNotifyProfileId;
 
       const [employer, worker] = await Promise.all([
         this.prisma.profile.findUnique({
@@ -198,7 +207,11 @@ export class BotNotificationService {
         }),
       ]);
 
-      if (employer?.phone && worker) {
+      if (
+        employer?.phone &&
+        worker &&
+        attempt.employer_id !== skipId
+      ) {
         await this.whatsApp.sendTextMessage(
           employer.phone,
           formatContactUnlockedMessage({
@@ -209,7 +222,11 @@ export class BotNotificationService {
         );
       }
 
-      if (worker?.phone && employer) {
+      if (
+        worker?.phone &&
+        employer &&
+        attempt.worker_id !== skipId
+      ) {
         await this.whatsApp.sendTextMessage(
           worker.phone,
           formatContactUnlockedMessage({
