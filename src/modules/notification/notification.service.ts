@@ -215,7 +215,7 @@ export class NotificationService {
 
     await this.mail.sendMail({
       to: params.to,
-      subject: `Rabotka – Nouvelle annonce : ${params.title}`,
+      subject: `Rabotka - Nouvelle annonce : ${params.title}`,
       html: advertisementCreatedEmail(params),
       ...(attachment ? { attachments: [attachment] } : {}),
     });

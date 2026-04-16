@@ -18,18 +18,16 @@ function toHtmlParagraphs(text: string): string {
     .join('<br />');
 }
 
-export function advertisementCreatedEmail(
-  params: {
-    name: string;
-    title: string;
-    startDate: string;
-    endDate: string;
-    description?: string | null;
-    callToAction?: string | null;
-    ctaUrl?: string | null;
-    imageUrl?: string | null;
-  },
-): string {
+export function advertisementCreatedEmail(params: {
+  name: string;
+  title: string;
+  startDate: string;
+  endDate: string;
+  description?: string | null;
+  callToAction?: string | null;
+  ctaUrl?: string | null;
+  imageUrl?: string | null;
+}): string {
   const start = formatDate(params.startDate);
   const end = formatDate(params.endDate);
   const safeCtaUrl = params.ctaUrl ? escapeHtml(params.ctaUrl) : null;
