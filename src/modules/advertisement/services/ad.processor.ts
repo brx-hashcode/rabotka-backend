@@ -1,10 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { AdStatus, AdDeliveryStatus } from '@prisma/client';
+import { AdStatus, AdDeliveryStatus, DeliveryChannel } from '@prisma/client';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { AdTargetingService } from './ad-targeting.service';
-import { EventNotificationDispatcher } from '../../event/services/event-notification.dispatcher';
-import type { EventNotificationRecipient } from '../../event/interfaces/event-notification.interfaces';
 import { AdLinkTrackingService } from './ad-link-tracking.service';
+import { AdNotificationService } from './ad-notification.service';
 
 export type AdJobData = { type: 'lifecycle' } | { type: 'dispatch' };
 
@@ -23,7 +22,7 @@ export class AdProcessor {
   constructor(
     private readonly prisma: PrismaService,
     private readonly adTargeting: AdTargetingService,
-    private readonly eventNotificationDispatcher: EventNotificationDispatcher,
+    private readonly adNotificationService: AdNotificationService,
     private readonly adLinkTracking: AdLinkTrackingService,
   ) {}
 
@@ -99,13 +98,14 @@ export class AdProcessor {
     }
 
     const basePayload = {
-      eventId: ad.id,
+      advertisementId: ad.id,
       title: ad.title,
       startDate: ad.start_date.toISOString(),
       endDate: ad.end_date.toISOString(),
       description: ad.description,
-      location: ad.cta_url ?? null,
+      ctaUrl: ad.cta_url ?? null,
       callToAction: ad.call_to_action ?? null,
+      imageUrl: ad.image_urls?.[0] ?? null,
     };
     let sentCount = 0;
 
@@ -125,15 +125,15 @@ export class AdProcessor {
         channel: channel as never,
         payload: basePayload,
       });
-      const recipient: EventNotificationRecipient = {
+      const recipient = {
         email: p.email,
         phone: p.phone ?? undefined,
         name: `${p.first_name} ${p.last_name}`,
       };
-      await this.eventNotificationDispatcher.dispatchEventCreated(
-        [recipient],
+      await this.adNotificationService.dispatchCreated(
+        recipient,
         payload,
-        channel as never,
+        channel as DeliveryChannel,
       );
       sentCount += 1;
     }

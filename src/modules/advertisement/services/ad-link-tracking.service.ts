@@ -7,13 +7,13 @@ import { ConfigService } from '@nestjs/config';
 import { DeliveryChannel, Prisma } from '@prisma/client';
 import { randomBytes } from 'node:crypto';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
-import type { EventNotificationPayload } from '../../event/interfaces/event-notification.interfaces';
+import type { AdNotificationPayload } from './ad-notification.service';
 
 type TrackedPayloadContext = {
   advertisementId: string;
   deliveryLogId: string;
   channel: DeliveryChannel;
-  payload: EventNotificationPayload;
+  payload: AdNotificationPayload;
 };
 
 const URL_REGEX = /\bhttps?:\/\/[^\s<>"')\]}]+/gi;
@@ -27,7 +27,7 @@ export class AdLinkTrackingService {
 
   async buildTrackedPayload(
     ctx: TrackedPayloadContext,
-  ): Promise<EventNotificationPayload> {
+  ): Promise<AdNotificationPayload> {
     const trackedByOriginal = new Map<string, string>();
     const rewrite = async (value: string | null | undefined) => {
       if (!value) return value;
@@ -55,7 +55,7 @@ export class AdLinkTrackingService {
       ...ctx.payload,
       title: (await rewrite(ctx.payload.title)) ?? ctx.payload.title,
       description: await rewrite(ctx.payload.description),
-      location: await rewrite(ctx.payload.location),
+      ctaUrl: await rewrite(ctx.payload.ctaUrl),
       callToAction: await rewrite(ctx.payload.callToAction),
     };
   }

@@ -54,21 +54,21 @@ describe('AdLinkTrackingService', () => {
       deliveryLogId: 'dl-1',
       channel: DeliveryChannel.EMAIL,
       payload: {
-        eventId: 'ad-1',
+        advertisementId: 'ad-1',
         title: 'Offer',
         startDate: new Date().toISOString(),
         endDate: new Date().toISOString(),
         description:
           'Read https://example.com/docs and visit https://example.com/docs',
-        location: 'https://example.com/apply',
+        ctaUrl: 'https://example.com/apply',
       },
     });
 
     expect(prisma.adTrackedLink.create).toHaveBeenCalledTimes(2);
     expect(result.description).toContain('https://app.rabotka.co/r/');
-    expect(result.location).toContain('https://app.rabotka.co/r/');
+    expect(result.ctaUrl).toContain('https://app.rabotka.co/r/');
     expect(result.description).not.toContain('https://example.com/docs');
-    expect(result.location).not.toContain('https://example.com/apply');
+    expect(result.ctaUrl).not.toContain('https://example.com/apply');
   });
 
   it('records click and returns original URL', async () => {
