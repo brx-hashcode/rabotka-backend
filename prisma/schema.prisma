@@ -921,6 +921,7 @@ model Advertisement {
 
   bundle        AdvertisementBundle @relation(fields: [bundle_id], references: [id])
   delivery_logs AdDeliveryLog[]
+  tracked_links AdTrackedLink[]
 
   @@index([status], name: "idx_advertisement_status")
   @@index([bundle_id], name: "idx_advertisement_bundle")
@@ -940,8 +941,31 @@ model AdDeliveryLog {
 
   advertisement Advertisement @relation(fields: [advertisement_id], references: [id], onDelete: Cascade)
   profile       Profile        @relation(fields: [profile_id], references: [id], onDelete: Cascade)
+  tracked_links AdTrackedLink[]
 
   @@index([advertisement_id], name: "idx_ad_delivery_advertisement")
   @@index([profile_id], name: "idx_ad_delivery_profile")
   @@map("ad_delivery_logs")
+}
+
+model AdTrackedLink {
+  id                 String          @id @default(uuid()) @db.Uuid
+  hash               String          @unique
+  advertisement_id   String          @db.Uuid
+  ad_delivery_log_id String          @db.Uuid
+  original_url       String
+  channel            DeliveryChannel
+  click_count        Int             @default(0)
+  last_clicked_at    DateTime?
+  last_click_ip      String?
+  last_click_ua      String?
+  created_at         DateTime        @default(now())
+  updated_at         DateTime        @updatedAt
+
+  advertisement Advertisement @relation(fields: [advertisement_id], references: [id], onDelete: Cascade)
+  delivery_log   AdDeliveryLog @relation(fields: [ad_delivery_log_id], references: [id], onDelete: Cascade)
+
+  @@index([advertisement_id], name: "idx_ad_tracked_link_advertisement")
+  @@index([ad_delivery_log_id], name: "idx_ad_tracked_link_delivery_log")
+  @@map("ad_tracked_links")
 }

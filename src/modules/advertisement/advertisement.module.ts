@@ -10,10 +10,12 @@ import { AdSchedulerService } from './services/ad-scheduler.service';
 import { AdProcessor } from './services/ad.processor';
 import { AdAnalyticsService } from './services/ad-analytics.service';
 import { AdAdminController } from './controllers/ad-admin.controller';
+import { AdTrackingController } from './controllers/ad-tracking.controller';
+import { AdLinkTrackingService } from './services/ad-link-tracking.service';
 
 @Module({
   imports: [PrismaModule, AuthModule, EventModule, QueueModule],
-  controllers: [AdAdminController],
+  controllers: [AdAdminController, AdTrackingController],
   providers: [
     AdvertisementService,
     AdAdminService,
@@ -21,6 +23,7 @@ import { AdAdminController } from './controllers/ad-admin.controller';
     AdSchedulerService,
     AdProcessor,
     AdAnalyticsService,
+    AdLinkTrackingService,
   ],
   exports: [AdvertisementService, AdAnalyticsService],
 })

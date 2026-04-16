@@ -7,7 +7,15 @@ export interface AdStats {
   totalClicks: number;
   openRate: number;
   clickRate: number;
+  clickedDeliveries: number;
+  clickThroughRate: number;
   remainingDays: number;
+  links: {
+    hash: string;
+    originalUrl: string;
+    clickCount: number;
+    lastClickedAt: Date | null;
+  }[];
 }
 
 export interface AdDashboardItem {
@@ -29,6 +37,24 @@ export class AdAnalyticsService {
       where: { id: advertisementId },
     });
     if (!ad) throw new NotFoundException('Advertisement not found');
+    const [clickedDeliveries, links] = await Promise.all([
+      this.prisma.adDeliveryLog.count({
+        where: {
+          advertisement_id: advertisementId,
+          clicked_at: { not: null },
+        },
+      }),
+      this.prisma.adTrackedLink.findMany({
+        where: { advertisement_id: advertisementId },
+        select: {
+          hash: true,
+          original_url: true,
+          click_count: true,
+          last_clicked_at: true,
+        },
+        orderBy: [{ click_count: 'desc' }, { created_at: 'asc' }],
+      }),
+    ]);
 
     const now = new Date();
     const remainingMs = Math.max(0, ad.end_date.getTime() - now.getTime());
@@ -40,7 +66,15 @@ export class AdAnalyticsService {
       totalClicks: ad.total_clicks,
       openRate: ad.total_sent > 0 ? ad.total_opened / ad.total_sent : 0,
       clickRate: ad.total_sent > 0 ? ad.total_clicks / ad.total_sent : 0,
+      clickedDeliveries,
+      clickThroughRate: ad.total_sent > 0 ? clickedDeliveries / ad.total_sent : 0,
       remainingDays,
+      links: links.map((l) => ({
+        hash: l.hash,
+        originalUrl: l.original_url,
+        clickCount: l.click_count,
+        lastClickedAt: l.last_clicked_at,
+      })),
     };
   }
 
@@ -69,7 +103,10 @@ export class AdAnalyticsService {
           totalClicks: ad.total_clicks,
           openRate: ad.total_sent > 0 ? ad.total_opened / ad.total_sent : 0,
           clickRate: ad.total_sent > 0 ? ad.total_clicks / ad.total_sent : 0,
+          clickedDeliveries: 0,
+          clickThroughRate: 0,
           remainingDays,
+          links: [],
         },
       };
     });

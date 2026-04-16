@@ -2,9 +2,9 @@ import { Injectable, Logger } from '@nestjs/common';
 import { AdStatus, AdDeliveryStatus } from '@prisma/client';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { AdTargetingService } from './ad-targeting.service';
-import { AdvertisementService } from './advertisement.service';
 import { EventNotificationDispatcher } from '../../event/services/event-notification.dispatcher';
 import type { EventNotificationRecipient } from '../../event/interfaces/event-notification.interfaces';
+import { AdLinkTrackingService } from './ad-link-tracking.service';
 
 export type AdJobData = { type: 'lifecycle' } | { type: 'dispatch' };
 
@@ -23,8 +23,8 @@ export class AdProcessor {
   constructor(
     private readonly prisma: PrismaService,
     private readonly adTargeting: AdTargetingService,
-    private readonly advertisementService: AdvertisementService,
     private readonly eventNotificationDispatcher: EventNotificationDispatcher,
+    private readonly adLinkTracking: AdLinkTrackingService,
   ) {}
 
   async process(job: { id?: string; data: AdJobData }): Promise<void> {
@@ -98,38 +98,49 @@ export class AdProcessor {
       return;
     }
 
-    const recipients: EventNotificationRecipient[] = profiles.map((p) => ({
-      email: p.email,
-      phone: p.phone ?? undefined,
-      name: `${p.first_name} ${p.last_name}`,
-    }));
-
-    const payload = {
+    const basePayload = {
       eventId: ad.id,
       title: ad.title,
       startDate: ad.start_date.toISOString(),
       endDate: ad.end_date.toISOString(),
       description: ad.description,
       location: ad.cta_url ?? null,
+      callToAction: ad.call_to_action ?? null,
     };
+    let sentCount = 0;
 
-    await this.eventNotificationDispatcher.dispatchEventCreated(
-      recipients,
-      payload,
-      channel as never,
-    );
-
-    await this.prisma.adDeliveryLog.createMany({
-      data: profiles.map((p) => ({
-        advertisement_id: ad.id,
-        profile_id: p.id,
+    for (const p of profiles) {
+      const deliveryLog = await this.prisma.adDeliveryLog.create({
+        data: {
+          advertisement_id: ad.id,
+          profile_id: p.id,
+          channel: channel as never,
+          status: AdDeliveryStatus.SENT,
+          sent_at: new Date(),
+        },
+      });
+      const payload = await this.adLinkTracking.buildTrackedPayload({
+        advertisementId: ad.id,
+        deliveryLogId: deliveryLog.id,
         channel: channel as never,
-        status: AdDeliveryStatus.SENT,
-        sent_at: new Date(),
-      })),
+        payload: basePayload,
+      });
+      const recipient: EventNotificationRecipient = {
+        email: p.email,
+        phone: p.phone ?? undefined,
+        name: `${p.first_name} ${p.last_name}`,
+      };
+      await this.eventNotificationDispatcher.dispatchEventCreated(
+        [recipient],
+        payload,
+        channel as never,
+      );
+      sentCount += 1;
+    }
+    await this.prisma.advertisement.update({
+      where: { id: ad.id },
+      data: { total_sent: { increment: sentCount } },
     });
-
-    await this.advertisementService.updateMetrics(ad.id, 'total_sent');
 
     this.logger.log(
       `Dispatched advertisement ${ad.id} to ${profiles.length} recipients`,
