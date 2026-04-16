@@ -5,6 +5,7 @@ import {
   IsInt,
   IsEnum,
   IsDateString,
+  IsUUID,
   Min,
   Max,
   MinLength,
@@ -44,6 +45,11 @@ export class AdminUpdateJobOfferDto {
   @IsOptional()
   @IsEnum(PaymentFlow)
   paymentFlow?: PaymentFlow | null;
+
+  @ApiPropertyOptional({ example: 'uuid-of-job-category', nullable: true })
+  @IsOptional()
+  @IsUUID()
+  categoryId?: string | null;
 
   @ApiPropertyOptional()
   @IsOptional()

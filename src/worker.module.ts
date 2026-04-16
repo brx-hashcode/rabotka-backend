@@ -54,12 +54,22 @@ export class WorkerModule {
       MailModule,
     ];
 
-    // WhatsApp outbound always needed (not just for reminders)
+    const systemConfigProvider = {
+      provide: SystemConfigService,
+      useFactory: (prisma: PrismaService, redis: Redis) =>
+        new SystemConfigService(prisma, redis),
+      inject: [PrismaService, REDIS_CONNECTION],
+    };
+
+    // WhatsApp outbound always needed (not just for reminders).
+    // TwilioService needs SystemConfigService so twilio.whatsapp_from (and optional DB credentials) load like the API.
     const whatsAppProviders = [
+      systemConfigProvider,
       {
         provide: TwilioService,
-        useFactory: (config: ConfigService) => new TwilioService(config),
-        inject: [ConfigService],
+        useFactory: (config: ConfigService, systemConfig: SystemConfigService) =>
+          new TwilioService(config, systemConfig),
+        inject: [ConfigService, SystemConfigService],
       },
       {
         provide: WalletService,
@@ -95,18 +105,21 @@ export class WorkerModule {
               whatsApp: WhatsAppService,
               queue: unknown,
               redis: Redis,
+              systemConfig: SystemConfigService,
             ) =>
               new ReminderProcessor(
                 prisma as never,
                 whatsApp,
                 queue as never,
                 redis,
+                systemConfig,
               ),
             inject: [
               PrismaService,
               WhatsAppService,
               QueueService,
               REDIS_CONNECTION,
+              SystemConfigService,
             ],
           },
         ]

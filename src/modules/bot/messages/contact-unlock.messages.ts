@@ -86,7 +86,9 @@ export function formatContactUnlockPending(params: {
     'Votre paiement a bien été enregistré.',
     '',
     `*En attente du paiement du ${party} (${otherName}).*`,
+    '',
     `Une fois le paiement confirmé des deux côtés (vous et ${otherName}), vous recevrez automatiquement les coordonnées.`,
+    '',
     `Si une partie ne paie pas après *${expiryHours}h*, votre paiement sera reversé vers votre wallet interne.`,
   ].join('\n');
 }

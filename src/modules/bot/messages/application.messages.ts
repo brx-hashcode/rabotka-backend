@@ -279,8 +279,15 @@ export function formatApplyConfirmation(params: {
   workerEmail: string;
   reliabilityScore: number | null;
   lateCancellationPenalty?: number;
+  /** Hours before mission start; below this, late cancellation rules apply (system: fees.cancellation_threshold_hours). */
+  lateCancellationThresholdHours?: number;
 }): string {
   const penalty = params.lateCancellationPenalty ?? 5000;
+  const thresholdHours =
+    params.lateCancellationThresholdHours != null &&
+    params.lateCancellationThresholdHours > 0
+      ? params.lateCancellationThresholdHours
+      : 4;
   return [
     '*Vous êtes sur le point de postuler*',
     '',
@@ -292,7 +299,7 @@ export function formatApplyConfirmation(params: {
     '*ENGAGEMENT IMPORTANT*:',
     "Vos informations seront partagées avec l'employeur",
     'Vous vous engagez à être présent et ponctuel',
-    `Annulation < 4h avant = pénalité de *${penalty.toLocaleString('fr-FR')} FCFA*`,
+    `Annulation < ${thresholdHours}h avant = pénalité de *${penalty.toLocaleString('fr-FR')} FCFA*`,
     'Impact sur votre score de fiabilité',
     '',
     '*Votre profil sera envoyé*:',
@@ -395,7 +402,14 @@ export function formatCancellationToEmployer(params: {
   scheduledAt: Date;
   reason: string | null;
   wasLatePenalty: boolean;
+  /** Same as fees.cancellation_threshold_hours; used when wasLatePenalty is true. */
+  lateCancellationThresholdHours?: number;
 }): string {
+  const thresholdHours =
+    params.lateCancellationThresholdHours != null &&
+    params.lateCancellationThresholdHours > 0
+      ? params.lateCancellationThresholdHours
+      : 4;
   const lines = [
     '*ANNULATION DE CANDIDATURE*',
     '',
@@ -408,7 +422,7 @@ export function formatCancellationToEmployer(params: {
   ];
   if (params.wasLatePenalty) {
     lines.push(
-      '*Note*: Cette annulation était tardive (< 4h). Une pénalité a été appliquée au worker.',
+      `*Note*: Cette annulation était tardive (< ${thresholdHours}h). Une pénalité a été appliquée au worker.`,
       '',
     );
   }

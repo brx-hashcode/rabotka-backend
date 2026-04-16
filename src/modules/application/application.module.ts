@@ -7,9 +7,18 @@ import { BotModule } from '../bot/bot.module';
 import { ContactUnlockModule } from '../contact-unlock/contact-unlock.module';
 import { LogModule } from '../log/log.module';
 import { ContractModule } from '../contract/contract.module';
+import { SystemConfigModule } from '../system-config/system-config.module';
 
 @Module({
-  imports: [PrismaModule, forwardRef(() => AuthModule), forwardRef(() => BotModule), forwardRef(() => ContactUnlockModule), LogModule, ContractModule],
+  imports: [
+    PrismaModule,
+    forwardRef(() => AuthModule),
+    forwardRef(() => BotModule),
+    forwardRef(() => ContactUnlockModule),
+    LogModule,
+    ContractModule,
+    SystemConfigModule,
+  ],
   controllers: [AdminApplicationController],
   providers: [ApplicationService],
   exports: [ApplicationService],

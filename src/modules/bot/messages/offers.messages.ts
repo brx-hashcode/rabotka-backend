@@ -15,6 +15,37 @@ export type OfferListItem = {
   employerScore?: number | null;
 };
 
+/** Map job-offer detail / list API shape to OfferListItem for bot formatters. */
+export function jobOfferToOfferListItem(offer: {
+  id: string;
+  title: string;
+  description: string;
+  scheduled_at: Date;
+  amount: number | null;
+  payment_flow: string | null;
+  address: string;
+  note: string | null;
+  quantity: number;
+  acceptedCount?: number;
+  status: string;
+  employer?: { reliability_score?: number | null } | null;
+}): OfferListItem {
+  return {
+    id: offer.id,
+    title: offer.title,
+    description: offer.description,
+    scheduled_at: offer.scheduled_at,
+    amount: offer.amount,
+    payment_flow: offer.payment_flow,
+    address: offer.address,
+    note: offer.note,
+    quantity: offer.quantity,
+    acceptedCount: offer.acceptedCount ?? 0,
+    status: offer.status,
+    employerScore: offer.employer?.reliability_score ?? null,
+  };
+}
+
 export function formatPaymentFlow(flow: string | null): string {
   if (!flow) return '';
   const map: Record<string, string> = {
@@ -28,7 +59,8 @@ export function formatPaymentFlow(flow: string | null): string {
 function formatAmount(amount: number | null, flow: string | null): string {
   if (amount == null) return 'Prix à négocier';
   const flowLabel = formatPaymentFlow(flow);
-  return `${amount.toLocaleString('fr-FR')} FCFA${flowLabel ? ` ${flowLabel}` : ''}`;
+  const flowSuffix = flowLabel ? ` ${flowLabel}` : '';
+  return `${amount.toLocaleString('fr-FR')} FCFA${flowSuffix}`;
 }
 
 function formatDate(d: Date): string {
@@ -88,13 +120,18 @@ export function formatOfferListCompact(
     const qty = o.quantity ?? 1;
     const filled = o.acceptedCount ?? 0;
     const remaining = Math.max(0, qty - filled);
-    const spotsLabel =
-      remaining === 0
-        ? '🔴 Complet'
-        : remaining === qty
-          ? `🟢 ${qty} place${qty > 1 ? 's' : ''}`
-          : `🟡 ${remaining}/${qty} restante${remaining > 1 ? 's' : ''}`;
-    const shortAddr = o.address.length > 40 ? o.address.slice(0, 40) + '…' : o.address;
+    let spotsLabel: string;
+    if (remaining === 0) {
+      spotsLabel = '🔴 Complet';
+    } else if (remaining === qty) {
+      const placeSuffix = qty > 1 ? 's' : '';
+      spotsLabel = `🟢 ${qty} place${placeSuffix}`;
+    } else {
+      const restanteSuffix = remaining > 1 ? 's' : '';
+      spotsLabel = `🟡 ${remaining}/${qty} restante${restanteSuffix}`;
+    }
+    const shortAddr =
+      o.address.length > 40 ? o.address.slice(0, 40) + '…' : o.address;
     lines.push(
       `${num}- *${o.title}*`,
       `    • 💰 Montant : ${formatAmount(o.amount, o.payment_flow)}`,
@@ -113,7 +150,7 @@ export function formatOfferListCompact(
     );
   } else {
     lines.push(
-      "Tapez un numéro pour sélectionner une offre ou *Menu* pour revenir au menu.",
+      'Tapez un numéro pour sélectionner une offre ou *Menu* pour revenir au menu.',
     );
   }
   return lines.join('\n');

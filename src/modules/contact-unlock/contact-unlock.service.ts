@@ -59,6 +59,21 @@ export class ContactUnlockService {
     private readonly invoiceService: InvoiceService,
   ) {}
 
+  private shouldReopenOffer(params: {
+    scheduledAt: Date;
+    currentStatus: JobOfferStatus;
+    now: Date;
+  }): boolean {
+    if (params.scheduledAt <= params.now) return false;
+    if (
+      params.currentStatus === JobOfferStatus.IN_PROGRESS ||
+      params.currentStatus === JobOfferStatus.COMPLETED
+    ) {
+      return false;
+    }
+    return true;
+  }
+
   /**
    * Creates a ContactUnlockAttempt when an employer accepts a candidate.
    * Idempotent: returns existing attempt if one already exists.
@@ -131,6 +146,12 @@ export class ContactUnlockService {
       });
       if (!app || app.status !== ApplicationStatus.WAITING_PAYMENT) return;
 
+      const offer = await tx.jobOffer.findUnique({
+        where: { id: params.jobOfferId },
+        select: { status: true, scheduled_at: true },
+      });
+      if (!offer) return;
+
       const now = new Date();
       await tx.application.update({
         where: { id: params.applicationId },
@@ -165,10 +186,18 @@ export class ContactUnlockService {
           : remainingAccepted > 0
             ? JobOfferStatus.PARTIALLY_FILLED
             : JobOfferStatus.ACTIVE;
-      await tx.jobOffer.update({
-        where: { id: params.jobOfferId },
-        data: { status: offerStatus },
-      });
+      if (
+        this.shouldReopenOffer({
+          scheduledAt: offer.scheduled_at,
+          currentStatus: offer.status,
+          now,
+        })
+      ) {
+        await tx.jobOffer.update({
+          where: { id: params.jobOfferId },
+          data: { status: offerStatus },
+        });
+      }
     });
   }
 
@@ -453,7 +482,15 @@ export class ContactUnlockService {
       include: {
         worker: { select: { id: true, phone: true, first_name: true, last_name: true } },
         employer: { select: { id: true, phone: true, first_name: true, last_name: true } },
-        job_offer: { select: { id: true, title: true, quantity: true } },
+        job_offer: {
+          select: {
+            id: true,
+            title: true,
+            quantity: true,
+            status: true,
+            scheduled_at: true,
+          },
+        },
       },
     });
     if (!attempt) {
@@ -534,10 +571,18 @@ export class ContactUnlockService {
           : remainingAccepted > 0
             ? JobOfferStatus.PARTIALLY_FILLED
             : JobOfferStatus.ACTIVE;
-      await tx.jobOffer.update({
-        where: { id: attempt.job_offer_id },
-        data: { status: offerStatus },
-      });
+      if (
+        this.shouldReopenOffer({
+          scheduledAt: attempt.job_offer.scheduled_at,
+          currentStatus: attempt.job_offer.status,
+          now,
+        })
+      ) {
+        await tx.jobOffer.update({
+          where: { id: attempt.job_offer_id },
+          data: { status: offerStatus },
+        });
+      }
     });
 
     const currentName = isEmployer

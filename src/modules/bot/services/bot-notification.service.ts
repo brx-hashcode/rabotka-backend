@@ -283,12 +283,14 @@ export class BotNotificationService {
       });
       if (!app?.job_offer?.employer?.phone || !app.worker) return;
 
+      const fees = await this.systemConfig.getFees();
       const text = formatCancellationToEmployer({
         workerName: `${app.worker.first_name} ${app.worker.last_name}`,
         offerTitle: app.job_offer.title,
         scheduledAt: app.job_offer.scheduled_at,
         reason,
         wasLatePenalty,
+        lateCancellationThresholdHours: fees.cancellationThresholdHours,
       });
       await this.whatsApp.sendTextMessage(app.job_offer.employer.phone, text);
     } catch (err) {

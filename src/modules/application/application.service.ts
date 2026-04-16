@@ -25,14 +25,9 @@ import {
 } from '@prisma/client';
 import { generatePaymentReference } from '../../common/utils/payment-reference';
 import { ContractService } from '../contract/contract.service';
+import { SystemConfigService } from '../system-config/system-config.service';
 import {
-  LATE_CANCELLATION_PENALTY_FCFA,
-  LATE_CANCELLATION_SCORE_DEDUCTION,
-  CANCELLATION_PENALTY_THRESHOLD_HOURS,
-  RELIABILITY_SCORE_MIN,
   RELIABILITY_SCORE_MAX,
-  EMPLOYER_CANCEL_SCORE_DEDUCTION,
-  BILLING_BLOCK_THRESHOLD,
   PENALTY_SUSPENSION_THRESHOLD,
 } from './application.constants';
 
@@ -143,6 +138,7 @@ export class ApplicationService {
     @Inject(forwardRef(() => ContactUnlockService))
     private readonly contactUnlock: ContactUnlockService,
     private readonly contractService: ContractService,
+    private readonly systemConfigService: SystemConfigService,
   ) {}
 
   async create(
@@ -360,6 +356,19 @@ export class ApplicationService {
         "Vous n'êtes pas l'employeur de cette offre",
       );
     }
+
+    const fees = await this.systemConfigService.getFees();
+    const employer = await this.prisma.profile.findUnique({
+      where: { id: employerId },
+      select: { reliability_score: true },
+    });
+    const employerScore = employer?.reliability_score ?? 100;
+    if (employerScore <= fees.reliabilityScoreMin) {
+      throw new ForbiddenException(
+        "Votre compte est pénalisé. Vous ne pouvez pas accepter de candidatures pour le moment.",
+      );
+    }
+
     if (
       application.status !== ApplicationStatus.PENDING &&
       application.status !== ApplicationStatus.VIEWED
@@ -519,14 +528,14 @@ export class ApplicationService {
     const scheduledAt = application.job_offer.scheduled_at;
     const hoursUntil =
       (scheduledAt.getTime() - now.getTime()) / (60 * 60 * 1000);
-    const isLateCancellation =
-      hoursUntil < CANCELLATION_PENALTY_THRESHOLD_HOURS;
+    const fees = await this.systemConfigService.getFees();
+    const isLateCancellation = hoursUntil < fees.cancellationThresholdHours;
     const isAccepted = application.status === ApplicationStatus.ACCEPTED;
     const applyPenalty = isLateCancellation && isAccepted;
 
     const penaltyApplied = applyPenalty;
     const penaltyAmount: number | null = applyPenalty
-      ? LATE_CANCELLATION_PENALTY_FCFA
+      ? fees.lateCancellationPenaltyFcfa
       : null;
 
     await this.prisma.$transaction(async (tx) => {
@@ -561,10 +570,10 @@ export class ApplicationService {
           data: {
             worker_id: workerId,
             application_id: applicationId,
-            amount: LATE_CANCELLATION_PENALTY_FCFA,
+            amount: fees.lateCancellationPenaltyFcfa,
             reason:
               reason ??
-              `Annulation tardive (< ${CANCELLATION_PENALTY_THRESHOLD_HOURS}h avant le rendez-vous)`,
+              `Annulation tardive (< ${fees.cancellationThresholdHours}h avant le rendez-vous)`,
           },
         });
 
@@ -574,10 +583,10 @@ export class ApplicationService {
         });
         const currentScore = profile?.reliability_score ?? 100;
         const newScore = Math.max(
-          RELIABILITY_SCORE_MIN,
+          fees.reliabilityScoreMin,
           Math.min(
             RELIABILITY_SCORE_MAX,
-            currentScore - LATE_CANCELLATION_SCORE_DEDUCTION,
+            currentScore - fees.lateCancellationScoreDeduction,
           ),
         );
         await tx.profile.update({
@@ -609,7 +618,7 @@ export class ApplicationService {
           where: { id: workerId },
           data: { status: AccountStatus.SUSPENDED },
         });
-        const total = unpaidCount * LATE_CANCELLATION_PENALTY_FCFA;
+        const total = unpaidCount * fees.lateCancellationPenaltyFcfa;
         await this.botNotification.sendMessage(
           workerProfile.phone,
           `⚠️ Compte suspendu\n\nVotre compte Rabotka a été suspendu en raison de ${unpaidCount} pénalités impayées\n(total : ${total.toLocaleString('fr-FR')} FCFA).\n\nVous ne pouvez plus accéder aux fonctionnalités tant que vos pénalités ne sont pas réglées.\n\n1 – Régler mes pénalités\n2 – Annuler`,
@@ -667,7 +676,8 @@ export class ApplicationService {
     const now = new Date();
     const hoursUntil =
       (app.job_offer.scheduled_at.getTime() - now.getTime()) / (60 * 60 * 1000);
-    return hoursUntil < CANCELLATION_PENALTY_THRESHOLD_HOURS && hoursUntil >= 0;
+    const fees = await this.systemConfigService.getFees();
+    return hoursUntil >= 0 && hoursUntil < fees.cancellationThresholdHours;
   }
 
   /** Employer marks job as completed: set JobOffer to COMPLETED and create Payment for worker */
@@ -829,14 +839,15 @@ export class ApplicationService {
         },
       });
       // Deduct employer reliability score
+      const fees = await this.systemConfigService.getFees();
       const employer = await tx.profile.findUnique({
         where: { id: employerId },
         select: { reliability_score: true },
       });
       const currentScore = employer?.reliability_score ?? 100;
       const newScore = Math.max(
-        RELIABILITY_SCORE_MIN,
-        currentScore - EMPLOYER_CANCEL_SCORE_DEDUCTION,
+        fees.reliabilityScoreMin,
+        currentScore - fees.employerCancelScoreDeduction,
       );
       await tx.profile.update({
         where: { id: employerId },
@@ -882,10 +893,11 @@ export class ApplicationService {
     const unpaidCount = await db.penalty.count({
       where: { worker_id: workerId, paid_at: null },
     });
+    const fees = await this.systemConfigService.getFees();
     let newStatus: BillingStatus;
     if (unpaidCount === 0) {
       newStatus = BillingStatus.CLEAR;
-    } else if (unpaidCount >= BILLING_BLOCK_THRESHOLD) {
+    } else if (unpaidCount >= fees.billingBlockThreshold) {
       newStatus = BillingStatus.BLOCKED;
     } else {
       newStatus = BillingStatus.PENDING_PAYMENT;
@@ -1048,7 +1060,7 @@ export class ApplicationService {
       status: app.status,
       penaltyApplied: app.penalty_applied,
       penaltyAmount:
-        app.penalty_amount != null ? Number(app.penalty_amount) : null,
+        app.penalty_amount == null ? null : Number(app.penalty_amount),
       cancelledAt: app.cancelled_at?.toISOString() ?? null,
       cancellationReason: app.cancellation_reason,
       createdAt: app.created_at.toISOString(),

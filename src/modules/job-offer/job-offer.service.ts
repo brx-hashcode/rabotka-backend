@@ -14,7 +14,12 @@ import { BotNotificationService } from '../bot/services/bot-notification.service
 import { MatchingService } from '../matching/matching.service';
 import { CreateJobOfferDto } from './dto/create-job-offer.dto';
 import { AdminUpdateJobOfferDto } from './dto/admin-update-job-offer.dto';
-import { AccountStatus, JobOfferStatus, Prisma } from '@prisma/client';
+import {
+  AccountStatus,
+  ApplicationStatus,
+  JobOfferStatus,
+  Prisma,
+} from '@prisma/client';
 
 const MIN_SCHEDULED_HOURS_FROM_NOW = 4;
 const TITLE_MIN = 5;
@@ -31,6 +36,7 @@ const QUANTITY_MAX = 100;
 export type AdminJobOfferListItem = {
   id: string;
   title: string;
+  category: { id: string; name: string } | null;
   description: string;
   scheduledAt: string;
   amount: number | null;
@@ -112,7 +118,12 @@ export class JobOfferService {
   ): Promise<JobOfferListItem> {
     const employer = await this.prisma.profile.findUnique({
       where: { id: employerId },
-      select: { id: true, status: true, profile_type: true },
+      select: {
+        id: true,
+        status: true,
+        profile_type: true,
+        reliability_score: true,
+      },
     });
     if (!employer) {
       throw new NotFoundException('Employeur introuvable');
@@ -125,6 +136,14 @@ export class JobOfferService {
     if (employer.profile_type !== 'EMPLOYER') {
       throw new ForbiddenException(
         "Seuls les employeurs peuvent publier des offres d'emploi",
+      );
+    }
+
+    const fees = await this.systemConfigService.getFees();
+    const employerScore = employer.reliability_score ?? 100;
+    if (employerScore <= fees.reliabilityScoreMin) {
+      throw new ForbiddenException(
+        "Votre compte est pénalisé. Vous ne pouvez pas publier d'offres pour le moment.",
       );
     }
 
@@ -183,25 +202,43 @@ export class JobOfferService {
     return this.toListItem(offer);
   }
 
-  async findActive(
-    limit = 20,
-    cursor?: string,
+  /**
+   * Worker-facing offers must still have at least one free slot.
+   * Status can lag (e.g. ACTIVE while acceptedCount === quantity); we filter on counts.
+   */
+  private offerHasOpenSlots(quantity: number, acceptedCount: number): boolean {
+    const accepted = Number.isFinite(acceptedCount) ? acceptedCount : 0;
+    return accepted < quantity;
+  }
+
+  private async queryOpenSlotCandidateBatch(
+    take: number,
+    dbCursor: string | undefined,
     excludeAppliedByWorkerId?: string,
-  ): Promise<{
-    data: JobOfferListItem[];
-    nextCursor: string | null;
-  }> {
-    const offers = await this.prisma.jobOffer.findMany({
-      take: limit + 1,
-      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+  ): Promise<
+    Prisma.JobOfferGetPayload<{
+      include: {
+        _count: {
+          select: {
+            applications: {
+              where: { status: typeof ApplicationStatus.ACCEPTED };
+            };
+          };
+        };
+      };
+    }>[]
+  > {
+    return this.prisma.jobOffer.findMany({
+      take,
+      ...(dbCursor ? { cursor: { id: dbCursor }, skip: 1 } : {}),
       where: {
-        status: { in: [JobOfferStatus.ACTIVE, JobOfferStatus.PARTIALLY_FILLED] },
+        status: {
+          in: [JobOfferStatus.ACTIVE, JobOfferStatus.PARTIALLY_FILLED],
+        },
         ...(excludeAppliedByWorkerId
           ? {
               applications: {
-                none: {
-                  worker_id: excludeAppliedByWorkerId,
-                },
+                none: { worker_id: excludeAppliedByWorkerId },
               },
             }
           : {}),
@@ -210,16 +247,66 @@ export class JobOfferService {
       include: {
         _count: {
           select: {
-            applications: { where: { status: 'ACCEPTED' } },
+            applications: { where: { status: ApplicationStatus.ACCEPTED } },
           },
         },
       },
     });
+  }
 
-    const hasMore = offers.length > limit;
-    const data = (hasMore ? offers.slice(0, limit) : offers).map((o) =>
-      this.toListItem(o, o._count.applications),
-    );
+  private mergeOpenSlotOffersIntoList(
+    offers: Prisma.JobOfferGetPayload<{
+      include: {
+        _count: {
+          select: {
+            applications: {
+              where: { status: typeof ApplicationStatus.ACCEPTED };
+            };
+          };
+        };
+      };
+    }>[],
+    listItems: JobOfferListItem[],
+    targetCount: number,
+  ): void {
+    for (const o of offers) {
+      const accepted = o._count.applications;
+      if (!this.offerHasOpenSlots(o.quantity, accepted)) continue;
+      listItems.push(this.toListItem(o, accepted));
+      if (listItems.length >= targetCount) break;
+    }
+  }
+
+  async findActive(
+    limit = 20,
+    cursor?: string,
+    excludeAppliedByWorkerId?: string,
+  ): Promise<{
+    data: JobOfferListItem[];
+    nextCursor: string | null;
+  }> {
+    const targetCount = limit + 1;
+    const listItems: JobOfferListItem[] = [];
+    let dbCursor: string | undefined = cursor;
+    const batchSize = Math.max(limit * 8, limit + 15);
+    const maxIterations = 25;
+
+    for (let i = 0; i < maxIterations && listItems.length < targetCount; i++) {
+      const offers = await this.queryOpenSlotCandidateBatch(
+        batchSize,
+        dbCursor,
+        excludeAppliedByWorkerId,
+      );
+      if (offers.length === 0) break;
+
+      this.mergeOpenSlotOffersIntoList(offers, listItems, targetCount);
+
+      dbCursor = offers.at(-1)!.id;
+      if (offers.length < batchSize) break;
+    }
+
+    const hasMore = listItems.length > limit;
+    const data = hasMore ? listItems.slice(0, limit) : listItems;
     const nextCursor = hasMore ? (data.at(-1)?.id ?? null) : null;
 
     return { data, nextCursor };
@@ -237,7 +324,9 @@ export class JobOfferService {
       const offers = await this.prisma.jobOffer.findMany({
         where: {
           id: { in: recommendedIds },
-          status: { in: [JobOfferStatus.ACTIVE, JobOfferStatus.PARTIALLY_FILLED] },
+          status: {
+            in: [JobOfferStatus.ACTIVE, JobOfferStatus.PARTIALLY_FILLED],
+          },
           applications: { none: { worker_id: workerId } },
         },
         include: {
@@ -249,7 +338,10 @@ export class JobOfferService {
       const offerMap = new Map(offers.map((o) => [o.id, o]));
       return recommendedIds.flatMap((id) => {
         const o = offerMap.get(id);
-        return o ? [this.toListItem(o, o._count.applications)] : [];
+        if (!o) return [];
+        const accepted = o._count.applications;
+        if (!this.offerHasOpenSlots(o.quantity, accepted)) return [];
+        return [this.toListItem(o, accepted)];
       });
     }
 
@@ -384,7 +476,10 @@ export class JobOfferService {
     if (Number.isNaN(scheduledAt.getTime())) {
       throw new BadRequestException('Format de date invalide');
     }
-    if (dto.amount != null && (dto.amount < AMOUNT_MIN_FCFA || dto.amount > AMOUNT_MAX_FCFA)) {
+    if (
+      dto.amount != null &&
+      (dto.amount < AMOUNT_MIN_FCFA || dto.amount > AMOUNT_MAX_FCFA)
+    ) {
       throw new BadRequestException(
         `Le montant doit être entre ${AMOUNT_MIN_FCFA} et ${AMOUNT_MAX_FCFA} FCFA`,
       );
@@ -447,6 +542,12 @@ export class JobOfferService {
         skip,
         take: limit,
         include: {
+          category: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
           employer: {
             select: {
               id: true,
@@ -468,6 +569,10 @@ export class JobOfferService {
     const data: AdminJobOfferListItem[] = offers.map((o) => ({
       id: o.id,
       title: o.title,
+      category:
+        o.category == null
+          ? null
+          : { id: o.category.id, name: o.category.name },
       description: o.description,
       scheduledAt: o.scheduled_at.toISOString(),
       amount: Number(o.amount),
@@ -497,6 +602,12 @@ export class JobOfferService {
     const offer = await this.prisma.jobOffer.findUnique({
       where: { id },
       include: {
+        category: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
         employer: {
           select: {
             id: true,
@@ -535,6 +646,10 @@ export class JobOfferService {
     return {
       id: offer.id,
       title: offer.title,
+      category:
+        offer.category == null
+          ? null
+          : { id: offer.category.id, name: offer.category.name },
       description: offer.description,
       scheduledAt: offer.scheduled_at.toISOString(),
       amount: Number(offer.amount),
@@ -616,7 +731,15 @@ export class JobOfferService {
     if (dto.scheduledAt !== undefined)
       data.scheduled_at = new Date(dto.scheduledAt);
     if (dto.amount !== undefined) data.amount = dto.amount ?? null;
-    if (dto.paymentFlow !== undefined) data.payment_flow = dto.paymentFlow ?? null;
+    if (dto.paymentFlow !== undefined)
+      data.payment_flow = dto.paymentFlow ?? null;
+    if (dto.categoryId !== undefined) {
+      if (dto.categoryId === null) {
+        data.category = { disconnect: true };
+      } else {
+        data.category = { connect: { id: dto.categoryId } };
+      }
+    }
     if (dto.address !== undefined) data.address = dto.address.trim();
     if (dto.note !== undefined) data.note = dto.note.trim() || null;
     if (dto.quantity !== undefined) data.quantity = dto.quantity;
@@ -661,7 +784,7 @@ export class JobOfferService {
       title: offer.title,
       description: offer.description,
       scheduled_at: offer.scheduled_at,
-      amount: offer.amount != null ? Number(offer.amount) : null,
+      amount: offer.amount == null ? null : Number(offer.amount),
       payment_flow: offer.payment_flow,
       address: offer.address,
       note: offer.note,

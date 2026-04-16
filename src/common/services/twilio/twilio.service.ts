@@ -126,7 +126,7 @@ export class TwilioService implements OnModuleInit {
 
     if (!client || !this.whatsappFrom) {
       this.logger.error(
-        'Twilio client or TWILIO_WHATSAPP_FROM not configured. Cannot send WhatsApp message.',
+        'Twilio client or WhatsApp sender not configured (set twilio.whatsapp_from in system config and TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN). Cannot send WhatsApp message.',
       );
       return null;
     }
@@ -181,7 +181,7 @@ export class TwilioService implements OnModuleInit {
 
     if (!client || !this.whatsappFrom) {
       this.logger.error(
-        'Twilio client or TWILIO_WHATSAPP_FROM not configured. Cannot send WhatsApp media.',
+        'Twilio client or WhatsApp sender not configured (set twilio.whatsapp_from in system config and TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN). Cannot send WhatsApp media.',
       );
       return null;
     }
