@@ -10,6 +10,7 @@ import {
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
+import { isWorkerHardBlocked } from '../penalty/penalty.utils';
 import { BotNotificationService } from '../bot/services/bot-notification.service';
 import { ContactUnlockService } from '../contact-unlock/contact-unlock.service';
 import {
@@ -188,6 +189,12 @@ export class ApplicationService {
       },
     });
     if (unpaidPenaltiesCount > 0) {
+      const hardBlocked = await isWorkerHardBlocked(this.prisma, workerId);
+      if (hardBlocked) {
+        throw new ForbiddenException(
+          '🚨 Votre compte est bloqué en raison de pénalités impayées depuis plus de 3 jours. Tapez PAYER pour régulariser votre situation.',
+        );
+      }
       throw new ForbiddenException(
         'Vous avez des pénalités impayées. Tapez PAYER pour les régler et débloquer votre compte.',
       );

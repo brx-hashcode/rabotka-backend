@@ -3,11 +3,13 @@ import { FLOW_IDS, CMD_MENU } from '../bot.constants';
 import { menuMessage } from '../messages/menu.messages';
 import type { ApplicationService } from '../../application/application.service';
 import type { WalletService } from '../../wallet/wallet.service';
+import type { PaymentService } from '../../payments/payment.service';
 import { WalletTransactionType } from '@prisma/client';
 
 export type PayPenaltiesContext = {
   applicationService: ApplicationService;
   walletService: WalletService;
+  paymentService: PaymentService;
 };
 
 type FlowResult = {
@@ -49,7 +51,7 @@ function buildInsufficientFundsReply(
     ``,
     `Votre solde est de *${balance.toLocaleString('fr-FR')} FCFA*, mais le montant dû est de *${totalAmount.toLocaleString('fr-FR')} FCFA*.`,
     ``,
-    `Tapez *MENU* pour revenir ou effectuez un rechargement mobile money d'abord.`,
+    `Tapez *MENU* pour revenir ou effectuez un rechargement d'abord.`,
   ].join('\n');
 }
 
@@ -63,21 +65,6 @@ function buildWalletPaymentSuccessReply(
     `*${paidCount} pénalité(s)* (${totalAmount.toLocaleString('fr-FR')} FCFA) ont été réglées depuis votre portefeuille.`,
     ``,
     `Votre compte est maintenant *débloqué*.`,
-    ``,
-    `Tapez *MENU* pour continuer.`,
-  ].join('\n');
-}
-
-function buildMobileMoneySuccessReply(
-  paidCount: number,
-  totalAmount: number,
-): string {
-  return [
-    `🎉 *Paiement enregistré*`,
-    ``,
-    `Merci ! Vos *${paidCount} pénalité(s)* (${totalAmount.toLocaleString('fr-FR')} FCFA) ont été marquées comme réglées.`,
-    ``,
-    `Votre compte est maintenant *débloqué* — vous pouvez de nouveau postuler aux offres.`,
     ``,
     `Tapez *MENU* pour continuer.`,
   ].join('\n');
@@ -126,22 +113,33 @@ async function handleWalletConfirmationStep(
   };
 }
 
-async function handleMobileMoneyPayment(
+async function handleMobileMoneyOption(
   profile: BotProfile,
   ctx: PayPenaltiesContext,
+  totalAmount: number,
+  penaltyCount: number,
 ): Promise<FlowResult> {
-  const result = await ctx.applicationService.markPenaltiesPaid(profile.id);
-  if (result.paidCount === 0) {
-    return {
-      reply: [
-        `✅ *Aucune pénalité en attente.*\n\nVotre compte est en règle. Tapez *MENU* pour continuer.`,
-      ],
-      clearState: true,
-    };
-  }
+  const description = `PENALTY_BATCH:${profile.id}`;
+  const paymentUrl = await ctx.paymentService.createPaymentUrl(
+    profile.id,
+    totalAmount,
+    description,
+  );
 
   return {
-    reply: [buildMobileMoneySuccessReply(result.paidCount, result.totalAmount)],
+    reply: [
+      [
+        `📲 *Paiement Mobile Money*`,
+        ``,
+        `Effectuez un paiement de *${totalAmount.toLocaleString('fr-FR')} FCFA* via le lien ci-dessous :`,
+        ``,
+        paymentUrl,
+        ``,
+        `Votre compte sera automatiquement débloqué dès réception du paiement.`,
+        ``,
+        `Tapez *MENU* pour revenir au menu principal.`,
+      ].join('\n'),
+    ],
     clearState: true,
   };
 }
@@ -195,7 +193,7 @@ async function buildMainPaymentPrompt(
         ``,
         `*Comment souhaitez-vous régler ?*`,
         ``,
-        `1️⃣ Mobile Money (confirmer après virement)`,
+        `1️⃣ Mobile Money (lien de paiement sécurisé)`,
         canUseWallet
           ? `2️⃣ Utiliser mon crédit portefeuille (${balance.toLocaleString('fr-FR')} FCFA disponibles)`
           : `2️⃣ Portefeuille *(solde insuffisant : ${balance.toLocaleString('fr-FR')} FCFA)*`,
@@ -241,7 +239,7 @@ export async function runPayPenaltiesFlow(
   }
 
   if (trimmed === '1') {
-    return handleMobileMoneyPayment(profile, ctx);
+    return handleMobileMoneyOption(profile, ctx, totalAmount, penaltyCount);
   }
 
   if (trimmed === '2') {

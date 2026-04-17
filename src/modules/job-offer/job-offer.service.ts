@@ -5,6 +5,7 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
+import { isWorkerHardBlocked } from '../penalty/penalty.utils';
 import { MailService } from '../mail/mail.service';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { WalletService } from '../wallet/wallet.service';
@@ -144,6 +145,13 @@ export class JobOfferService {
     if (employerScore <= fees.reliabilityScoreMin) {
       throw new ForbiddenException(
         "Votre compte est pénalisé. Vous ne pouvez pas publier d'offres pour le moment.",
+      );
+    }
+
+    const hardBlocked = await isWorkerHardBlocked(this.prisma, employerId);
+    if (hardBlocked) {
+      throw new ForbiddenException(
+        "🚨 Votre compte est bloqué en raison de pénalités impayées depuis plus de 3 jours. Tapez PAYER pour régulariser votre situation.",
       );
     }
 

@@ -28,6 +28,9 @@ function makeCtx(
       getProfileWalletBalance: jest.fn().mockResolvedValue(0),
       debitProfileWallet: jest.fn().mockResolvedValue(undefined),
     } as unknown as PayPenaltiesContext['walletService'],
+    paymentService: {
+      createPaymentUrl: jest.fn().mockResolvedValue('https://pay.example.com/pay/token123'),
+    } as unknown as PayPenaltiesContext['paymentService'],
   };
 }
 
