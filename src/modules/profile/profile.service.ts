@@ -334,6 +334,7 @@ export class ProfileService {
 
     const uploadResult = await this.fileService.uploadToStorage(avatarFile, {
       folder: 'avatars',
+      access: 'public',
     });
 
     await this.prisma.profile.update({
@@ -402,7 +403,7 @@ export class ProfileService {
       id: a.id,
       status: a.status,
       createdAt: a.created_at,
-      contractId: (a as any).contract?.id ?? null,
+      contractId: a.contract?.id ?? null,
       jobOffer: {
         id: a.job_offer.id,
         title: a.job_offer.title,
@@ -582,6 +583,7 @@ export class ProfileService {
       for (const file of files) {
         const result = await this.fileService.uploadToStorage(file, {
           folder: 'kyc-verification',
+          access: 'public',
         });
         uploadedUrls.push(result.url);
       }
@@ -963,9 +965,11 @@ export class ProfileService {
     return Promise.all([
       this.fileService.uploadToStorage(kycDocument, {
         folder: 'kyc-documents',
+        access: 'private',
       }),
       this.fileService.uploadToStorage(kycSelfie, {
         folder: 'kyc-documents',
+        access: 'private',
       }),
     ]);
   }

@@ -124,6 +124,9 @@ export class FileController {
             {
               mimeType: file.mimetype,
               folder: 'files',
+              access: file.mimetype.startsWith('image/')
+                ? 'public'
+                : 'private',
             },
           );
 
@@ -155,6 +158,7 @@ export class FileController {
       {
         mimeType: file.mimetype,
         folder: 'files',
+        access: file.mimetype.startsWith('image/') ? 'public' : 'private',
       },
     );
 

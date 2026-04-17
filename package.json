@@ -25,6 +25,7 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:migrate:deploy": "prisma migrate deploy",
     "prisma:studio": "prisma studio",
+    "prisma:backfill:public-image-urls": "tsx prisma/backfill-public-image-urls.ts",
     "db:reset": "docker exec rabotka_postgres psql -U postgres -c \"DROP DATABASE IF EXISTS rabotka;\" && docker exec rabotka_postgres psql -U postgres -c \"CREATE DATABASE rabotka;\" && pnpm prisma:migrate:deploy",
     "db:seed": "prisma db seed"
   },

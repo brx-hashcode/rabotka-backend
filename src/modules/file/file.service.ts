@@ -22,6 +22,7 @@ export class FileService {
     file: Express.Multer.File,
     options?: {
       folder?: string;
+      access?: 'public' | 'private';
     },
   ) {
     if (!file.buffer || !file.originalname) {
@@ -31,6 +32,7 @@ export class FileService {
     const uploadOptions: UploadOptions = {
       mimeType: file.mimetype,
       folder: options?.folder,
+      access: options?.access,
     };
 
     const fileBuffer: Buffer = Buffer.isBuffer(file.buffer)

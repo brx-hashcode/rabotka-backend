@@ -1,4 +1,8 @@
-import { UploadOptions, UploadResult } from '../types/storage.types';
+import {
+  GetUrlOptions,
+  UploadOptions,
+  UploadResult,
+} from '../types/storage.types';
 
 export interface IStorageProvider {
   /**
@@ -25,7 +29,7 @@ export interface IStorageProvider {
    * @param key - Storage key of the file
    * @returns Public URL of the file
    */
-  getUrl(key: string): Promise<string>;
+  getUrl(key: string, options?: GetUrlOptions): Promise<string>;
 
   /**
    * Check if a file exists in storage
