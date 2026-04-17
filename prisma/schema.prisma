@@ -903,6 +903,7 @@ model Advertisement {
   banner_url       String?
   logo_url         String?
   contact_phone    String?
+  contact_email    String?
   sector           String?
   advertiser_type  AdvertiserType
   language         String            @default("fr")

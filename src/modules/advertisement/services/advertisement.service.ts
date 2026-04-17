@@ -51,6 +51,7 @@ export class AdvertisementService {
         banner_url: dto.bannerUrl,
         logo_url: dto.logoUrl,
         contact_phone: dto.contactPhone,
+        contact_email: dto.contactEmail,
         sector: dto.sector,
         advertiser_type: dto.advertiserType,
         language: dto.language ?? 'fr',
@@ -148,6 +149,9 @@ export class AdvertisementService {
         ...(dto.logoUrl !== undefined && { logo_url: dto.logoUrl }),
         ...(dto.contactPhone !== undefined && {
           contact_phone: dto.contactPhone,
+        }),
+        ...(dto.contactEmail !== undefined && {
+          contact_email: dto.contactEmail,
         }),
         ...(dto.sector !== undefined && { sector: dto.sector }),
         ...(dto.advertiserType && { advertiser_type: dto.advertiserType }),

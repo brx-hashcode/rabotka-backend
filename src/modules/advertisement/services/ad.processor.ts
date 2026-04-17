@@ -7,7 +7,9 @@ import { AdNotificationService } from './ad-notification.service';
 
 export type AdJobData = { type: 'lifecycle' } | { type: 'dispatch' };
 
-type AdWithBundle = Awaited<ReturnType<PrismaService['advertisement']['findFirst']>> & {
+type AdWithBundle = Awaited<
+  ReturnType<PrismaService['advertisement']['findFirst']>
+> & {
   bundle: {
     allowed_channels: string[];
     max_reach: number;
@@ -87,7 +89,9 @@ export class AdProcessor {
   private async dispatchAd(ad: NonNullable<AdWithBundle>): Promise<void> {
     const channel = ad.bundle.allowed_channels[0];
     if (!channel) {
-      this.logger.warn(`Advertisement ${ad.id} bundle has no allowed channels — skipping`);
+      this.logger.warn(
+        `Advertisement ${ad.id} bundle has no allowed channels — skipping`,
+      );
       return;
     }
 
@@ -147,7 +151,11 @@ export class AdProcessor {
     );
   }
 
-  private async isDispatchDue(ad: { id: string; start_date: Date; bundle: { max_frequency_per_week: number } }): Promise<boolean> {
+  private async isDispatchDue(ad: {
+    id: string;
+    start_date: Date;
+    bundle: { max_frequency_per_week: number };
+  }): Promise<boolean> {
     const now = new Date();
     const daysSinceStart = Math.floor(
       (now.getTime() - ad.start_date.getTime()) / (1000 * 60 * 60 * 24),

@@ -10,6 +10,7 @@ import {
   MinLength,
   MaxLength,
   IsPhoneNumber,
+  IsEmail,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -55,6 +56,10 @@ export class CreateAdvertisementDto {
   @IsOptional()
   @IsPhoneNumber()
   contactPhone?: string;
+
+  @IsOptional()
+  @IsEmail()
+  contactEmail?: string;
 
   @IsOptional()
   @IsString()
