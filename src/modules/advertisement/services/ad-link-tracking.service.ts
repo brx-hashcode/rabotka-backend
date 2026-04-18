@@ -78,6 +78,15 @@ export class AdLinkTrackingService {
     }
 
     const now = new Date();
+
+    const deliveryLog = await this.prisma.adDeliveryLog.findUnique({
+      where: { id: tracked.ad_delivery_log_id },
+      select: { clicked_at: true, opened_at: true },
+    });
+
+    const isFirstClick = deliveryLog?.clicked_at === null;
+    const isFirstOpen = deliveryLog?.opened_at === null;
+
     await this.prisma.$transaction([
       this.prisma.adTrackedLink.update({
         where: { id: tracked.id },
@@ -90,14 +99,17 @@ export class AdLinkTrackingService {
       }),
       this.prisma.advertisement.update({
         where: { id: tracked.advertisement_id },
-        data: { total_clicks: { increment: 1 } },
-      }),
-      this.prisma.adDeliveryLog.updateMany({
-        where: {
-          id: tracked.ad_delivery_log_id,
-          clicked_at: null,
+        data: {
+          total_clicks: { increment: 1 },
+          ...(isFirstOpen && { total_opened: { increment: 1 } }),
         },
-        data: { clicked_at: now },
+      }),
+      this.prisma.adDeliveryLog.update({
+        where: { id: tracked.ad_delivery_log_id },
+        data: {
+          ...(isFirstClick && { clicked_at: now }),
+          ...(isFirstOpen && { opened_at: now }),
+        },
       }),
     ]);
 
