@@ -70,6 +70,7 @@ export class AdAdminService {
         max_frequency_per_week: dto.maxFrequencyPerWeek,
         max_duration_days: dto.maxDurationDays,
         allowed_channels: expandBundleChannels(dto.allowedChannels),
+        target_audience: dto.targetAudience ?? 'BOTH',
         is_active: dto.isActive ?? true,
       },
     });
@@ -99,6 +100,7 @@ export class AdAdminService {
           max_duration_days: dto.maxDurationDays,
         }),
         ...(dto.allowedChannels && { allowed_channels: expandBundleChannels(dto.allowedChannels) }),
+        ...(dto.targetAudience !== undefined && { target_audience: dto.targetAudience }),
         ...(dto.isActive !== undefined && { is_active: dto.isActive }),
       },
     });

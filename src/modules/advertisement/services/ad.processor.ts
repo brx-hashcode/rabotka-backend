@@ -14,6 +14,7 @@ type AdWithBundle = Awaited<
     allowed_channels: string[];
     max_reach: number;
     max_frequency_per_week: number;
+    target_audience: string;
   };
 };
 
@@ -154,24 +155,38 @@ export class AdProcessor {
   private async isDispatchDue(ad: {
     id: string;
     start_date: Date;
+    dispatch_time: string;
     bundle: { max_frequency_per_week: number };
   }): Promise<boolean> {
     const now = new Date();
+
+    // Parse the ad's configured dispatch time (HH:MM UTC)
+    const [dispatchHour, dispatchMinute] = ad.dispatch_time
+      .split(':')
+      .map(Number);
+    const dispatchTodayUtc = new Date();
+    dispatchTodayUtc.setUTCHours(dispatchHour, dispatchMinute, 0, 0);
+
+    // Don't dispatch before today's scheduled time
+    if (now < dispatchTodayUtc) return false;
+
     const daysSinceStart = Math.floor(
       (now.getTime() - ad.start_date.getTime()) / (1000 * 60 * 60 * 24),
     );
 
-    // Use bundle frequency: treat max_frequency_per_week as the weekly send rate
-    const expectedSends =
+    const expectedBatches =
       Math.floor((daysSinceStart / 7) * ad.bundle.max_frequency_per_week) + 1;
 
-    const actualSends = await this.prisma.adDeliveryLog.count({
-      where: {
-        advertisement_id: ad.id,
-        status: AdDeliveryStatus.SENT,
-      },
-    });
+    // Count distinct dispatch days (one batch per calendar day)
+    const rows = await this.prisma.$queryRaw<{ day: string }[]>`
+      SELECT DISTINCT DATE(sent_at) AS day
+      FROM "AdDeliveryLog"
+      WHERE advertisement_id = ${ad.id}::uuid
+        AND status = 'SENT'
+        AND sent_at IS NOT NULL
+    `;
+    const actualBatches = rows.length;
 
-    return actualSends < expectedSends;
+    return actualBatches < expectedBatches;
   }
 }

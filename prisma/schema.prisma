@@ -865,6 +865,12 @@ enum AdvertiserType {
   INDIVIDUAL
 }
 
+enum BundleTargetAudience {
+  WORKER
+  EMPLOYER
+  BOTH
+}
+
 
 enum AdDeliveryStatus {
   SENT
@@ -884,6 +890,7 @@ model AdvertisementBundle {
   max_frequency_per_week Int
   max_duration_days      Int
   allowed_channels       DeliveryChannel[]
+  target_audience        BundleTargetAudience @default(BOTH)
   is_active              Boolean         @default(true)
   created_at             DateTime        @default(now())
   advertisements         Advertisement[]
@@ -910,6 +917,7 @@ model Advertisement {
   tags             String[]
   start_date       DateTime          @db.Date
   end_date         DateTime          @db.Date
+  dispatch_time    String            @default("08:00")
   target_filters   Json?
   status           AdStatus          @default(DRAFT)
   rejection_reason String?

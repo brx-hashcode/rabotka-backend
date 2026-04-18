@@ -1,16 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
-import {
-  AccountStatus,
-  Profile,
-  ProfileType,
-  Prisma,
-} from '@prisma/client';
+import { AccountStatus, Profile, ProfileType, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 
 type AdForTargeting = {
   id: string;
   bundle: {
     max_reach: number;
+    target_audience: string;
   };
 };
 
@@ -22,11 +18,22 @@ export class AdTargetingService {
 
   async resolveRecipients(
     advertisement: AdForTargeting,
-  ): Promise<Pick<Profile, 'id' | 'first_name' | 'last_name' | 'email' | 'phone'>[]> {
+  ): Promise<
+    Pick<Profile, 'id' | 'first_name' | 'last_name' | 'email' | 'phone'>[]
+  > {
+    const audience = advertisement.bundle.target_audience;
+    let profileTypes: ProfileType[];
+    if (audience === 'WORKER') {
+      profileTypes = [ProfileType.WORKER];
+    } else if (audience === 'EMPLOYER') {
+      profileTypes = [ProfileType.EMPLOYER];
+    } else {
+      profileTypes = [ProfileType.WORKER, ProfileType.EMPLOYER];
+    }
+
     const where: Prisma.ProfileWhereInput = {
       status: AccountStatus.ACTIVE,
-      // Target all profile types — bundle-level targeting only by reach cap
-      profile_type: { in: [ProfileType.WORKER, ProfileType.EMPLOYER] },
+      profile_type: { in: profileTypes },
     };
 
     const profiles = await this.prisma.profile.findMany({

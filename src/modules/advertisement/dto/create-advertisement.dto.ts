@@ -12,6 +12,7 @@ import {
   IsPhoneNumber,
   IsEmail,
   ValidateNested,
+  Matches,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { AdvertiserType } from '@prisma/client';
@@ -82,6 +83,11 @@ export class CreateAdvertisementDto {
 
   @IsDateString()
   endDate: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, { message: 'dispatchTime must be HH:MM' })
+  dispatchTime?: string;
 
   @IsUUID()
   bundleId: string;

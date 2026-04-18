@@ -58,6 +58,7 @@ export class AdvertisementService {
         tags: dto.tags ?? [],
         start_date: new Date(dto.startDate),
         end_date: new Date(dto.endDate),
+        dispatch_time: dto.dispatchTime ?? '08:00',
         target_filters: dto.targetFilters
           ? (dto.targetFilters as unknown as Prisma.InputJsonValue)
           : undefined,
@@ -159,6 +160,7 @@ export class AdvertisementService {
         ...(dto.tags && { tags: dto.tags }),
         ...(dto.startDate && { start_date: new Date(dto.startDate) }),
         ...(dto.endDate && { end_date: new Date(dto.endDate) }),
+        ...(dto.dispatchTime !== undefined && { dispatch_time: dto.dispatchTime }),
         ...(dto.targetFilters !== undefined && {
           target_filters: dto.targetFilters as unknown as Prisma.InputJsonValue,
         }),

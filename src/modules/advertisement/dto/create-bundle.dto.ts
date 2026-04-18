@@ -9,7 +9,7 @@ import {
   Min,
   MinLength,
 } from 'class-validator';
-import { DeliveryChannel } from '@prisma/client';
+import { BundleTargetAudience, DeliveryChannel } from '@prisma/client';
 
 export enum BundleChannel {
   EMAIL = 'EMAIL',
@@ -64,6 +64,10 @@ export class CreateBundleDto {
   @IsArray()
   @IsEnum(BundleChannel, { each: true })
   allowedChannels: BundleChannel[];
+
+  @IsOptional()
+  @IsEnum(BundleTargetAudience)
+  targetAudience?: BundleTargetAudience;
 
   @IsOptional()
   @IsBoolean()

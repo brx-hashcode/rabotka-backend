@@ -23,15 +23,13 @@ export class AdSchedulerService implements OnModuleInit {
         { repeat: { pattern: '0 * * * *' } },
       );
 
-      // Daily at 08:00: dispatch ads to targeted profiles
-      await queue.add(
-        'ad-dispatch',
-        { type: 'dispatch' } satisfies AdJobData,
-        { repeat: { pattern: '0 8 * * *' } },
-      );
+      // Every 15 min: dispatch ads whose configured dispatch_time has passed today
+      await queue.add('ad-dispatch', { type: 'dispatch' } satisfies AdJobData, {
+        repeat: { pattern: '*/15 * * * *' },
+      });
 
       this.logger.log(
-        'Advertisement scheduler initialized: lifecycle (hourly) + dispatch (daily 08:00)',
+        'Advertisement scheduler initialized: lifecycle (hourly) + dispatch (every 15 min)',
       );
     } catch (err) {
       this.logger.error(
