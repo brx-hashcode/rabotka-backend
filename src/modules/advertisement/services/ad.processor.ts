@@ -4,6 +4,8 @@ import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { AdTargetingService } from './ad-targeting.service';
 import { AdLinkTrackingService } from './ad-link-tracking.service';
 import { AdNotificationService } from './ad-notification.service';
+import { AdReportService } from './ad-report.service';
+import { NotificationService } from '../../notification/notification.service';
 
 export type AdJobData = { type: 'lifecycle' } | { type: 'dispatch' };
 
@@ -27,6 +29,8 @@ export class AdProcessor {
     private readonly adTargeting: AdTargetingService,
     private readonly adNotificationService: AdNotificationService,
     private readonly adLinkTracking: AdLinkTrackingService,
+    private readonly adReport: AdReportService,
+    private readonly notificationService: NotificationService,
   ) {}
 
   async process(job: { id?: string; data: AdJobData }): Promise<void> {
@@ -64,6 +68,50 @@ export class AdProcessor {
       this.logger.log(
         `Lifecycle: ${activated.count} ads activated, ${completed.count} ads completed`,
       );
+    }
+
+    if (completed.count > 0) {
+      await this.sendCompletionReports(now);
+    }
+  }
+
+  private async sendCompletionReports(completedAt: Date): Promise<void> {
+    const windowStart = new Date(completedAt.getTime() - 2 * 60 * 1000);
+
+    const ads = await this.prisma.advertisement.findMany({
+      where: {
+        status: AdStatus.COMPLETED,
+        updated_at: { gte: windowStart },
+      },
+      select: {
+        id: true,
+        title: true,
+        start_date: true,
+        end_date: true,
+        contact_email: true,
+      },
+    });
+
+    for (const ad of ads) {
+      if (!ad.contact_email) continue;
+      try {
+        const excelBuffer = await this.adReport.generateExcel(ad.id, ad.title);
+        const stats = await this.adReport.getStats(ad.id);
+        await this.notificationService.notifyAdvertisementCompleted({
+          to: ad.contact_email,
+          adTitle: ad.title,
+          startDate: ad.start_date.toISOString(),
+          endDate: ad.end_date.toISOString(),
+          stats,
+          excelBuffer,
+        });
+        this.logger.log(`Completion report sent for advertisement ${ad.id} to ${ad.contact_email}`);
+      } catch (err) {
+        this.logger.error(
+          `Failed to send completion report for advertisement ${ad.id}:`,
+          err instanceof Error ? err.message : String(err),
+        );
+      }
     }
   }
 
@@ -181,7 +229,7 @@ export class AdProcessor {
     // Count distinct dispatch days (one batch per calendar day)
     const rows = await this.prisma.$queryRaw<{ day: string }[]>`
       SELECT DISTINCT DATE(sent_at) AS day
-      FROM "AdDeliveryLog"
+      FROM "ad_delivery_logs"
       WHERE advertisement_id = ${ad.id}::uuid
         AND status = 'SENT'
         AND sent_at IS NOT NULL

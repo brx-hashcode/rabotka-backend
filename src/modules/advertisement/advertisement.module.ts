@@ -14,6 +14,7 @@ import { AdAdminController } from './controllers/ad-admin.controller';
 import { AdTrackingController } from './controllers/ad-tracking.controller';
 import { AdLinkTrackingService } from './services/ad-link-tracking.service';
 import { AdNotificationService } from './services/ad-notification.service';
+import { AdReportService } from './services/ad-report.service';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { AdNotificationService } from './services/ad-notification.service';
     AdAnalyticsService,
     AdLinkTrackingService,
     AdNotificationService,
+    AdReportService,
   ],
   exports: [AdvertisementService, AdAnalyticsService],
 })

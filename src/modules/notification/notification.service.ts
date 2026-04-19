@@ -14,7 +14,9 @@ import {
   eventCreatedEmail,
   eventUpdatedEmail,
   advertisementCreatedEmail,
+  advertisementCompletedEmail,
 } from '../mail/templates';
+import { AdStats } from '../advertisement/services/ad-analytics.service';
 import { CalendarLinkService } from '../calendar/services/calendar-link.service';
 import { IcsGeneratorService } from '../calendar/services/ics-generator.service';
 
@@ -219,6 +221,34 @@ export class NotificationService {
       subject: `Rabotka - Nouvelle annonce : ${params.title}`,
       html: advertisementCreatedEmail(params),
       ...(attachment ? { attachments: [attachment] } : {}),
+    });
+  }
+
+  async notifyAdvertisementCompleted(params: {
+    to: string;
+    adTitle: string;
+    startDate: string;
+    endDate: string;
+    stats: AdStats;
+    excelBuffer: Buffer;
+  }): Promise<void> {
+    const slugTitle = params.adTitle
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/(^-|-$)/g, '');
+
+    await this.mail.sendMail({
+      to: params.to,
+      subject: `Rabotka – Rapport de campagne : ${params.adTitle}`,
+      html: advertisementCompletedEmail(params),
+      attachments: [
+        {
+          filename: `rapport-${slugTitle}.xlsx`,
+          content: params.excelBuffer,
+          contentType:
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        },
+      ],
     });
   }
 
