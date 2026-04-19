@@ -77,6 +77,13 @@ export class AdvertisementService {
 
     const where: Prisma.AdvertisementWhereInput = {
       ...(filters.status && { status: filters.status }),
+      ...(filters.bundleId && { bundle_id: filters.bundleId }),
+      ...(filters.targetAudience && {
+        bundle: { target_audience: filters.targetAudience },
+      }),
+      ...(filters.channel && {
+        bundle: { allowed_channels: { has: filters.channel } },
+      }),
     };
 
     const [data, total] = await Promise.all([
