@@ -35,7 +35,9 @@ export class AdTargetingService {
     todayStart.setUTCHours(0, 0, 0, 0);
 
     // Profiles already sent this ad today — exclude them to prevent re-delivery
-    const alreadySentRows = await this.prisma.$queryRaw<{ profile_id: string }[]>`
+    const alreadySentRows = await this.prisma.$queryRaw<
+      { profile_id: string }[]
+    >`
       SELECT DISTINCT profile_id::text
       FROM "ad_delivery_logs"
       WHERE advertisement_id = ${advertisement.id}::uuid
@@ -43,24 +45,26 @@ export class AdTargetingService {
     `;
     const excludedIds = alreadySentRows.map((r) => r.profile_id);
 
-    const where: Prisma.ProfileWhereInput = {
-      status: AccountStatus.ACTIVE,
-      profile_type: { in: profileTypes },
-      ...(excludedIds.length > 0 ? { id: { notIn: excludedIds } } : {}),
-    };
+    const excludedIdsLiteral =
+      excludedIds.length > 0
+        ? Prisma.sql`AND p.id NOT IN (${Prisma.join(excludedIds.map((id) => Prisma.sql`${id}::uuid`))})`
+        : Prisma.empty;
 
-    const profiles = await this.prisma.profile.findMany({
-      where,
-      select: {
-        id: true,
-        first_name: true,
-        last_name: true,
-        email: true,
-        phone: true,
-      },
-      orderBy: { created_at: 'desc' },
-      take: advertisement.bundle.max_reach,
-    });
+    const profileTypesLiteral = Prisma.join(
+      profileTypes.map((t) => Prisma.sql`${t}`),
+    );
+
+    const profiles = await this.prisma.$queryRaw<
+      Pick<Profile, 'id' | 'first_name' | 'last_name' | 'email' | 'phone'>[]
+    >`
+      SELECT p.id, p.first_name, p.last_name, p.email, p.phone
+      FROM profiles p
+      WHERE p.status = ${AccountStatus.ACTIVE}
+        AND p.profile_type IN (${profileTypesLiteral})
+        ${excludedIdsLiteral}
+      ORDER BY RANDOM()
+      LIMIT ${advertisement.bundle.max_reach}
+    `;
 
     this.logger.debug(
       `Resolved ${profiles.length} recipients for advertisement ${advertisement.id}`,

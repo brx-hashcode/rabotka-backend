@@ -98,8 +98,8 @@ async function handlePublishStep10(args: StepArgs): Promise<FlowResult> {
     title: String(payload.title),
     description: String(payload.description),
     scheduled_at: scheduledStr,
-    amount: Number(payload.amount),
-    payment_flow: payload.payment_flow as PaymentFlow,
+    ...(payload.amount ? { amount: Number(payload.amount) } : {}),
+    ...(payload.payment_flow ? { payment_flow: payload.payment_flow as PaymentFlow } : {}),
     address: String(payload.address),
     note: noteValue,
     quantity: Number(payload.quantity),
@@ -547,6 +547,7 @@ function handlePublishStep4(args: StepArgs): FlowResult {
         '',
         '*Quel est le montant proposé (en FCFA) ?*',
         'Tapez uniquement le chiffre.',
+        'Tapez *0* pour passer cette étape.',
         '',
         '*Exemple*: "_15000_"',
       ].join('\n'),
@@ -569,10 +570,10 @@ function handlePublishStep5(args: StepArgs): FlowResult {
     };
   }
   const amount = Number.parseInt(trimmed.replaceAll(/\s/g, ''), 10);
-  if (Number.isNaN(amount) || amount < AMOUNT_MIN || amount > AMOUNT_MAX) {
+  if (Number.isNaN(amount) || amount < 0 || (amount !== 0 && amount < AMOUNT_MIN) || amount > AMOUNT_MAX) {
     return {
       reply: [
-        `*Montant invalide. Entrez un montant entre ${AMOUNT_MIN.toLocaleString('fr-FR')} et ${AMOUNT_MAX.toLocaleString('fr-FR')} FCFA*`,
+        `*Montant invalide. Entrez un montant entre ${AMOUNT_MIN.toLocaleString('fr-FR')} et ${AMOUNT_MAX.toLocaleString('fr-FR')} FCFA, ou *0* pour passer cette étape.*`,
       ],
       nextState: state,
     };
@@ -588,6 +589,7 @@ function handlePublishStep5(args: StepArgs): FlowResult {
         '3️⃣ Par mois',
         '',
         '*Tapez le numéro correspondant.*',
+        'Tapez *0* pour passer cette étape.',
       ].join('\n'),
     ],
     nextState: {
@@ -601,10 +603,13 @@ function handlePublishStep5(args: StepArgs): FlowResult {
 
 function handlePublishStep6(args: StepArgs): FlowResult {
   const { state, payload, trimmed } = args;
-  const num = parsePaymentFlowChoice(trimmed);
-  if (!num) {
+
+  const skipped = trimmed === '0';
+  const num = skipped ? null : parsePaymentFlowChoice(trimmed);
+
+  if (!skipped && !num) {
     return {
-      reply: ['*Choix invalide. Tapez le numéro correspondant.*'],
+      reply: ['*Choix invalide. Tapez 1, 2 ou 3, ou *0* pour passer.*'],
       nextState: state,
     };
   }
@@ -754,9 +759,9 @@ function getStepPrompt(
     case 4:
       return 'À quelle date et heure ? Format JJ/MM/AAAA HH:MM';
     case 5:
-      return 'Quel est le montant en FCFA ? (1000-1000000)';
+      return 'Quel est le montant en FCFA ? (1000-1000000, ou 0 pour passer)';
     case 6:
-      return 'Type de rémunération : 1=Par heure, 2=Par jour, 3=Par mois';
+      return 'Type de rémunération : 1=Par heure, 2=Par jour, 3=Par mois, ou 0 pour passer';
     case 7:
       return "Quelle est l'adresse du lieu de travail ?";
     case 8:
