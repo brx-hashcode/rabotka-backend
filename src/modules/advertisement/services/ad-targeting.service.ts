@@ -31,9 +31,22 @@ export class AdTargetingService {
       profileTypes = [ProfileType.WORKER, ProfileType.EMPLOYER];
     }
 
+    const todayStart = new Date();
+    todayStart.setUTCHours(0, 0, 0, 0);
+
+    // Profiles already sent this ad today — exclude them to prevent re-delivery
+    const alreadySentRows = await this.prisma.$queryRaw<{ profile_id: string }[]>`
+      SELECT DISTINCT profile_id::text
+      FROM "ad_delivery_logs"
+      WHERE advertisement_id = ${advertisement.id}::uuid
+        AND sent_at >= ${todayStart}
+    `;
+    const excludedIds = alreadySentRows.map((r) => r.profile_id);
+
     const where: Prisma.ProfileWhereInput = {
       status: AccountStatus.ACTIVE,
       profile_type: { in: profileTypes },
+      ...(excludedIds.length > 0 ? { id: { notIn: excludedIds } } : {}),
     };
 
     const profiles = await this.prisma.profile.findMany({

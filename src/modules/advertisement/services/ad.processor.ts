@@ -219,6 +219,14 @@ export class AdProcessor {
     // Don't dispatch before today's scheduled time
     if (now < dispatchTodayUtc) return false;
 
+    // Guard: if any delivery already went out today, skip — prevents re-sending every 15 min
+    const todayStart = new Date();
+    todayStart.setUTCHours(0, 0, 0, 0);
+    const sentToday = await this.prisma.adDeliveryLog.count({
+      where: { advertisement_id: ad.id, sent_at: { gte: todayStart } },
+    });
+    if (sentToday > 0) return false;
+
     const daysSinceStart = Math.floor(
       (now.getTime() - ad.start_date.getTime()) / (1000 * 60 * 60 * 24),
     );
