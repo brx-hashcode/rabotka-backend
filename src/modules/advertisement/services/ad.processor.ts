@@ -111,6 +111,7 @@ export class AdProcessor {
       ctaUrl: ad.cta_url ?? null,
       callToAction: ad.call_to_action ?? null,
       imageUrl: ad.image_urls?.[0] ?? null,
+      tags: ad.tags ?? null,
     };
     let sentCount = 0;
 

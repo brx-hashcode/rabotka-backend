@@ -27,18 +27,21 @@ export function advertisementCreatedEmail(params: {
   callToAction?: string | null;
   ctaUrl?: string | null;
   imageUrl?: string | null;
+  tags?: string[] | null;
 }): string {
-  const start = formatDate(params.startDate);
-  const end = formatDate(params.endDate);
   const safeCtaUrl = params.ctaUrl ? escapeHtml(params.ctaUrl) : null;
+  const tagsHtml =
+    params.tags?.length
+      ? `<p style="margin: 8px 0;">${params.tags.map((t) => `<span style="display:inline-block;margin:2px 4px 2px 0;padding:2px 10px;border-radius:9999px;border:1px solid #6ee7b7;color:#059669;font-size:12px;">#${escapeHtml(t)}</span>`).join('')}</p>`
+      : '';
 
   const body = `
     <p>Bonjour <strong>${escapeHtml(params.name)}</strong>,</p>
     <p>Vous avez une nouvelle annonce sur Rabotka :</p>
     <p style="font-size: 18px; font-weight: 700; margin: 8px 0 4px;">${escapeHtml(params.title)}</p>
-    <p><strong>Du</strong> ${escapeHtml(start)} <strong>au</strong> ${escapeHtml(end)}</p>
     ${params.imageUrl ? `<p><img src="${escapeHtml(params.imageUrl)}" alt="${escapeHtml(params.title)}" style="max-width: 100%; border-radius: 8px; object-fit: cover;" /></p>` : ''}
     ${params.description ? `<p>${toHtmlParagraphs(params.description)}</p>` : ''}
+    ${tagsHtml}
     ${safeCtaUrl ? `<p>Pour plus d'informations : <a href="${safeCtaUrl}">${escapeHtml(params.callToAction?.trim() || 'En savoir plus')}</a></p>` : ''}
     <p>Si vous avez des questions, n'hésitez pas à nous contacter.</p>
     <p>Cordialement,<br /><strong>L'équipe Rabotka</strong></p>

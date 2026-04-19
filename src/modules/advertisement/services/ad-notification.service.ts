@@ -18,6 +18,7 @@ export type AdNotificationPayload = {
   ctaUrl?: string | null;
   callToAction?: string | null;
   imageUrl?: string | null;
+  tags?: string[] | null;
 };
 
 @Injectable()
@@ -53,6 +54,7 @@ export class AdNotificationService {
           callToAction: payload.callToAction,
           ctaUrl: payload.ctaUrl,
           imageUrl: payload.imageUrl,
+          tags: payload.tags,
         }),
       );
     }
@@ -90,8 +92,10 @@ export class AdNotificationService {
       '*Nouvelle annonce Rabotka*',
       '',
       `*${payload.title}*`,
-      `Du ${this.formatDate(payload.startDate)} au ${this.formatDate(payload.endDate)}`,
       payload.description ? `\n${payload.description}` : null,
+      payload.tags?.length
+        ? '\n' + payload.tags.map((t) => '#' + t).join('  ')
+        : null,
       payload.ctaUrl
         ? `\nPour plus d'informations :\n${payload.callToAction?.trim() || 'En savoir plus'} -> ${payload.ctaUrl}`
         : null,

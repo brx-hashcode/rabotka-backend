@@ -210,6 +210,7 @@ export class NotificationService {
     callToAction?: string | null;
     ctaUrl?: string | null;
     imageUrl?: string | null;
+    tags?: string[] | null;
   }): Promise<void> {
     const attachment = await this.downloadImageAttachment(params.imageUrl);
 
