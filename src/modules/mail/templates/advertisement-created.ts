@@ -36,10 +36,10 @@ export function advertisementCreatedEmail(params: {
       : '';
 
   const body = `
+    ${params.imageUrl ? `<p style="margin: 0 0 16px;"><img src="${escapeHtml(params.imageUrl)}" alt="${escapeHtml(params.title)}" style="max-width: 100%; border-radius: 8px; object-fit: cover; display: block;" /></p>` : ''}
     <p>Bonjour <strong>${escapeHtml(params.name)}</strong>,</p>
     <p>Vous avez une nouvelle annonce sur Rabotka :</p>
     <p style="font-size: 18px; font-weight: 700; margin: 8px 0 4px;">${escapeHtml(params.title)}</p>
-    ${params.imageUrl ? `<p><img src="${escapeHtml(params.imageUrl)}" alt="${escapeHtml(params.title)}" style="max-width: 100%; border-radius: 8px; object-fit: cover;" /></p>` : ''}
     ${params.description ? `<p>${toHtmlParagraphs(params.description)}</p>` : ''}
     ${tagsHtml}
     ${safeCtaUrl ? `<p>Pour plus d'informations : <a href="${safeCtaUrl}">${escapeHtml(params.callToAction?.trim() || 'En savoir plus')}</a></p>` : ''}

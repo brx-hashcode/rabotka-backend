@@ -61,6 +61,7 @@ export class CreateProfileDto {
   profileType: ProfileType;
 
   @ApiPropertyOptional({ description: 'Job category IDs (at least one required for all profiles)' })
+  @Transform(({ value }) => (Array.isArray(value) ? value : value != null ? [value] : undefined))
   @IsOptional()
   @IsArray()
   @IsUUID('4', { each: true })

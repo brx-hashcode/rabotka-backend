@@ -136,8 +136,8 @@ export class AdProcessor {
   }
 
   private async dispatchAd(ad: NonNullable<AdWithBundle>): Promise<void> {
-    const channel = ad.bundle.allowed_channels[0];
-    if (!channel) {
+    const channels = ad.bundle.allowed_channels;
+    if (channels.length === 0) {
       this.logger.warn(
         `Advertisement ${ad.id} bundle has no allowed channels — skipping`,
       );
@@ -164,40 +164,43 @@ export class AdProcessor {
     let sentCount = 0;
 
     for (const p of profiles) {
-      const deliveryLog = await this.prisma.adDeliveryLog.create({
-        data: {
-          advertisement_id: ad.id,
-          profile_id: p.id,
+      for (const channel of channels) {
+        const deliveryLog = await this.prisma.adDeliveryLog.create({
+          data: {
+            advertisement_id: ad.id,
+            profile_id: p.id,
+            channel: channel as never,
+            status: AdDeliveryStatus.SENT,
+            sent_at: new Date(),
+          },
+        });
+        const payload = await this.adLinkTracking.buildTrackedPayload({
+          advertisementId: ad.id,
+          deliveryLogId: deliveryLog.id,
           channel: channel as never,
-          status: AdDeliveryStatus.SENT,
-          sent_at: new Date(),
-        },
-      });
-      const payload = await this.adLinkTracking.buildTrackedPayload({
-        advertisementId: ad.id,
-        deliveryLogId: deliveryLog.id,
-        channel: channel as never,
-        payload: basePayload,
-      });
-      const recipient = {
-        email: p.email,
-        phone: p.phone ?? undefined,
-        name: `${p.first_name} ${p.last_name}`,
-      };
-      await this.adNotificationService.dispatchCreated(
-        recipient,
-        payload,
-        channel as DeliveryChannel,
-      );
-      sentCount += 1;
+          payload: basePayload,
+        });
+        const recipient = {
+          email: p.email,
+          phone: p.phone ?? undefined,
+          name: `${p.first_name} ${p.last_name}`,
+        };
+        await this.adNotificationService.dispatchCreated(
+          recipient,
+          payload,
+          channel as DeliveryChannel,
+        );
+        sentCount += 1;
+      }
     }
+
     await this.prisma.advertisement.update({
       where: { id: ad.id },
       data: { total_sent: { increment: sentCount } },
     });
 
     this.logger.log(
-      `Dispatched advertisement ${ad.id} to ${profiles.length} recipients`,
+      `Dispatched advertisement ${ad.id} to ${profiles.length} recipients via [${channels.join(', ')}]`,
     );
   }
 

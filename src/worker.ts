@@ -261,7 +261,7 @@ async function bootstrap(): Promise<void> {
     queueService.createWorker<ReminderJobData>(
       WHATSAPP_REMINDERS_QUEUE,
       (job) => reminderProcessor.process(job),
-      { concurrency: 2, lockDuration: reminderLockMs },
+      { concurrency: 2, lockDuration: reminderLockMs, stalledInterval: reminderLockMs / 2 },
     );
   }
 
