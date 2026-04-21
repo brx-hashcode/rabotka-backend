@@ -83,7 +83,7 @@ export class CloudflareStorageProvider implements IStorageProvider {
       await this.s3Client.send(command);
 
       const url = await this.getUrl(key, {
-        access: options?.access ?? 'private',
+        access: options?.access ?? 'public',
       });
 
       this.logger.log(`File uploaded successfully: ${key}`);

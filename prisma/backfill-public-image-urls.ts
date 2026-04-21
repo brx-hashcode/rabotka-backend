@@ -191,6 +191,34 @@ async function backfillAdvertisements(
   }
 }
 
+async function backfillKycDocuments(
+  publicBaseUrl: string,
+  bucketName: string | undefined,
+  apply: boolean,
+  counters: Counters,
+) {
+  const docs = await prisma.kycDocument.findMany({
+    select: { id: true, document_url: true },
+  });
+
+  for (const doc of docs) {
+    counters.scanned += 1;
+    const next = toPublicUrl(doc.document_url, publicBaseUrl, bucketName);
+    if (!next) {
+      counters.skipped += 1;
+      continue;
+    }
+
+    if (apply) {
+      await prisma.kycDocument.update({
+        where: { id: doc.id },
+        data: { document_url: next },
+      });
+    }
+    counters.updated += 1;
+  }
+}
+
 async function main() {
   const apply = process.argv.includes('--apply');
   const publicBaseUrl = normalizeBase(
@@ -202,6 +230,7 @@ async function main() {
 
   await backfillProfiles(publicBaseUrl, bucketName, apply, counters);
   await backfillVerificationImages(publicBaseUrl, bucketName, apply, counters);
+  await backfillKycDocuments(publicBaseUrl, bucketName, apply, counters);
   await backfillAdvertisements(publicBaseUrl, bucketName, apply, counters);
 
   // eslint-disable-next-line no-console

@@ -110,7 +110,7 @@ export class FileService {
       throw new NotFoundException(`File with ID ${id} not found`);
     }
 
-    const url = await this.storageService.getUrl(file.storage_key);
+    const url = await this.storageService.getUrl(file.storage_key, { access: 'public' });
 
     return {
       ...file,
@@ -148,7 +148,7 @@ export class FileService {
 
     const filesWithUrls = await Promise.all(
       files.map(async (file) => {
-        const url = await this.storageService.getUrl(file.storage_key);
+        const url = await this.storageService.getUrl(file.storage_key, { access: 'public' });
         return {
           ...file,
           url,
