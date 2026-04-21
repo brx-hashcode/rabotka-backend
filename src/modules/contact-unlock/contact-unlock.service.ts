@@ -27,6 +27,7 @@ import { isWorkerHardBlocked } from '../penalty/penalty.utils';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { WalletService } from '../wallet/wallet.service';
 import { InvoiceService } from '../invoice/invoice.service';
+import { MatchingService } from '../matching/matching.service';
 import { generatePaymentReference } from '../../common/utils/payment-reference';
 import { randomUUID } from 'node:crypto';
 
@@ -59,6 +60,7 @@ export class ContactUnlockService {
     @Inject(forwardRef(() => WalletService))
     private readonly walletService: WalletService,
     private readonly invoiceService: InvoiceService,
+    private readonly matchingService: MatchingService,
   ) {}
 
   private shouldReopenOffer(params: {
@@ -449,6 +451,10 @@ export class ContactUnlockService {
     applicationIds: string[],
   ): Promise<void> {
     if (applicationIds.length === 0) return;
+    const apps = await this.prisma.application.findMany({
+      where: { id: { in: applicationIds } },
+      select: { worker_id: true },
+    });
     await this.prisma.application.updateMany({
       where: {
         id: { in: applicationIds },
@@ -456,6 +462,11 @@ export class ContactUnlockService {
       },
       data: { status: ApplicationStatus.ACCEPTED },
     });
+    for (const app of apps) {
+      this.matchingService
+        .indexWorkerProfile(app.worker_id)
+        .catch((err) => console.warn(`Failed to re-index worker after unlock:`, err));
+    }
   }
 
   /**

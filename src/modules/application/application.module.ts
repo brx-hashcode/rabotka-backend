@@ -8,6 +8,7 @@ import { ContactUnlockModule } from '../contact-unlock/contact-unlock.module';
 import { LogModule } from '../log/log.module';
 import { ContractModule } from '../contract/contract.module';
 import { SystemConfigModule } from '../system-config/system-config.module';
+import { MatchingModule } from '../matching/matching.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { SystemConfigModule } from '../system-config/system-config.module';
     LogModule,
     ContractModule,
     SystemConfigModule,
+    MatchingModule,
   ],
   controllers: [AdminApplicationController],
   providers: [ApplicationService],

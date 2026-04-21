@@ -49,15 +49,35 @@ export class MatchingService {
     last_name: string;
     description: string | null;
     address: string | null;
-    category?: { name: string; description: string | null } | null;
+    categories?: Array<{ category: { name: string; description: string | null } }>;
+    applications?: Array<{ job_offer: { title: string; category: { name: string } | null } }>;
   }): string {
     const parts: string[] = [
       `${profile.first_name} ${profile.last_name}`.trim(),
     ];
-    if (profile.category?.name) parts.push(profile.category.name);
-    if (profile.category?.description) parts.push(profile.category.description);
+    if (profile.categories && profile.categories.length > 0) {
+      const names = profile.categories.map((pc) => pc.category.name).join(', ');
+      const descriptions = profile.categories
+        .map((pc) => pc.category.description)
+        .filter(Boolean)
+        .join(', ');
+      parts.push(names);
+      if (descriptions) parts.push(descriptions);
+    }
     if (profile.description) parts.push(profile.description);
     if (profile.address) parts.push(profile.address);
+    if (profile.applications && profile.applications.length > 0) {
+      const jobTitles = profile.applications.map((a) => a.job_offer.title).join(', ');
+      const jobCategories = [
+        ...new Set(
+          profile.applications
+            .map((a) => a.job_offer.category?.name)
+            .filter(Boolean),
+        ),
+      ].join(', ');
+      parts.push(`Travaux effectués: ${jobTitles}`);
+      if (jobCategories) parts.push(`Domaines travaillés: ${jobCategories}`);
+    }
     return parts.join('. ');
   }
 
@@ -92,7 +112,22 @@ export class MatchingService {
         description: true,
         address: true,
         profile_type: true,
-        category: { select: { name: true, description: true } },
+        categories: {
+          select: { category: { select: { name: true, description: true } } },
+        },
+        applications: {
+          where: { status: { in: ['ACCEPTED', 'END'] } },
+          select: {
+            job_offer: {
+              select: {
+                title: true,
+                category: { select: { name: true } },
+              },
+            },
+          },
+          orderBy: { created_at: 'desc' },
+          take: 10,
+        },
       },
     });
 
@@ -103,6 +138,7 @@ export class MatchingService {
       const text = this.buildWorkerText(profile);
       const fullName =
         `${profile.first_name} ${profile.last_name}`.trim() || profileId;
+      const categoryNames = profile.categories.map((pc) => pc.category.name).join(', ');
       await this.qdrant.upsertHybrid(COLLECTION_WORKERS, profileId, text, {
         profileId,
         firstName: profile.first_name,
@@ -110,8 +146,11 @@ export class MatchingService {
         fullName,
         description: profile.description ?? '',
         address: profile.address ?? '',
-        categoryName: profile.category?.name ?? '',
-        categoryDescription: profile.category?.description ?? '',
+        categoryName: categoryNames,
+        categoryDescription: profile.categories
+          .map((pc) => pc.category.description ?? '')
+          .filter(Boolean)
+          .join(', '),
         profileType: profile.profile_type,
       });
       this.logger.log(`Indexed worker profile ${profileId}`);
@@ -222,7 +261,22 @@ export class MatchingService {
         description: true,
         address: true,
         profile_type: true,
-        category: { select: { name: true, description: true } },
+        categories: {
+          select: { category: { select: { name: true, description: true } } },
+        },
+        applications: {
+          where: { status: { in: ['ACCEPTED', 'END'] } },
+          select: {
+            job_offer: {
+              select: {
+                title: true,
+                category: { select: { name: true } },
+              },
+            },
+          },
+          orderBy: { created_at: 'desc' },
+          take: 10,
+        },
       },
     });
     if (profile?.profile_type !== 'WORKER') return [];

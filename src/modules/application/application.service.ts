@@ -27,6 +27,7 @@ import {
 import { generatePaymentReference } from '../../common/utils/payment-reference';
 import { ContractService } from '../contract/contract.service';
 import { SystemConfigService } from '../system-config/system-config.service';
+import { MatchingService } from '../matching/matching.service';
 import {
   RELIABILITY_SCORE_MAX,
   PENALTY_SUSPENSION_THRESHOLD,
@@ -140,6 +141,7 @@ export class ApplicationService {
     private readonly contactUnlock: ContactUnlockService,
     private readonly contractService: ContractService,
     private readonly systemConfigService: SystemConfigService,
+    private readonly matchingService: MatchingService,
   ) {}
 
   async create(
@@ -780,6 +782,11 @@ export class ApplicationService {
       entityId: String(applicationId),
       timestamp: new Date().toISOString(),
     });
+
+    // Re-index worker to enrich their embedding with completed job history
+    this.matchingService
+      .indexWorkerProfile(application.worker_id)
+      .catch((err) => console.warn(`Failed to re-index worker after job completion:`, err));
 
     return updated;
   }

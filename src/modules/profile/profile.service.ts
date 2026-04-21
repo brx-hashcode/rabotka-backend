@@ -147,6 +147,8 @@ export type AdminProfileDetailResponse = AdminProfileListItem & {
   description: string;
   categoryId: string | null;
   categoryName: string | null;
+  categoryIds: string[];
+  categoryNames: string[];
   jobOffersCount: number;
   applicationsCount: number;
   penaltiesCount: number;
@@ -444,6 +446,9 @@ export class ProfileService {
         category: {
           select: { id: true, name: true },
         },
+        categories: {
+          select: { category: { select: { id: true, name: true } } },
+        },
         kyc_documents: {
           select: {
             id: true,
@@ -529,6 +534,8 @@ export class ProfileService {
       updatedAt: profile.updated_at,
       categoryId: profile.category?.id ?? null,
       categoryName: profile.category?.name ?? null,
+      categoryIds: profile.categories.map((pc) => pc.category.id),
+      categoryNames: profile.categories.map((pc) => pc.category.name),
       jobOffersCount: profile._count.job_offers,
       applicationsCount: profile._count.applications,
       penaltiesCount: profile._count.penalties,
@@ -986,6 +993,16 @@ export class ProfileService {
         createProfileDto,
       );
 
+      if (createProfileDto.categoryIds && createProfileDto.categoryIds.length > 0) {
+        await tx.profileCategory.createMany({
+          data: createProfileDto.categoryIds.map((categoryId) => ({
+            profile_id: createdProfile.id,
+            category_id: categoryId,
+          })),
+          skipDuplicates: true,
+        });
+      }
+
       await this.createFileRecords(tx, createdProfile.id, [
         documentUploadResult,
         selfieUploadResult,
@@ -1040,7 +1057,7 @@ export class ProfileService {
         address: createProfileDto.address,
         description: createProfileDto.description || '',
         profile_type: createProfileDto.profileType,
-        category_id: createProfileDto.profileType === 'WORKER' ? (createProfileDto.categoryId ?? null) : null,
+        category_id: null,
         status: 'PENDING_ACTIVATION',
         verification_status: 'PENDING',
         reliability_score: 100,

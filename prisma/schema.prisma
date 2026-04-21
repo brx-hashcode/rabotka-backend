@@ -240,6 +240,7 @@ model Profile {
   avatar_url String?
 
   category               JobCategory?       @relation(fields: [category_id], references: [id], onDelete: SetNull)
+  categories             ProfileCategory[]
 
   payment_requests       PaymentRequest[]
   kyc_documents          KycDocument[]
@@ -342,11 +343,22 @@ model JobCategory {
   description String?
   icon        String?
 
-  job_offers JobOffer[]
-  profiles   Profile[]
+  job_offers        JobOffer[]
+  profiles          Profile[]
+  profile_categories ProfileCategory[]
 
   @@index([slug], name: "idx_job_category_slug")
   @@map("job_categories")
+}
+
+model ProfileCategory {
+  profile_id  String      @db.Uuid
+  category_id String      @db.Uuid
+  profile     Profile     @relation(fields: [profile_id], references: [id], onDelete: Cascade)
+  category    JobCategory @relation(fields: [category_id], references: [id], onDelete: Cascade)
+
+  @@id([profile_id, category_id])
+  @@map("profile_categories")
 }
 
 model JobOffer {
