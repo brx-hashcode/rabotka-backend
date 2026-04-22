@@ -77,6 +77,7 @@ import {
   getRecommendedProfilesInitialState,
 } from '../flows/recommended-profiles.flow';
 import { MatchingService } from '../../matching/matching.service';
+import { runRepublishExpiredJobFlow } from '../flows/republish-expired-job.flow';
 
 const INACTIVE_MESSAGE = `Votre compte est créé mais pas encore activé. Cliquez sur le lien de confirmation que nous vous avons envoyé par WhatsApp pour l’activer.`;
 
@@ -219,7 +220,7 @@ export class BotOrchestratorService {
         return this.handleCommandRoute(route, profile, profileId, botProfile);
       }
 
-      if (!state && looksLikeFlowInput(text)) {
+      if (!state) {
         return [
           '⏱ *Session expirée.* Votre conversation précédente a expiré.',
           handleMenuCommand(botProfile),
@@ -358,6 +359,11 @@ export class BotOrchestratorService {
         }),
       [FLOW_IDS.RECOMMENDED_JOBS]: () =>
         runRecommendedJobsFlow(state, input, profile, ctx),
+      [FLOW_IDS.REPUBLISH_EXPIRED_JOB]: () =>
+        runRepublishExpiredJobFlow(state, input, profile, {
+          prisma: this.prisma,
+          jobOfferService: this.jobOfferService,
+        }),
       [FLOW_IDS.RECOMMENDED_PROFILES]: () =>
         runRecommendedProfilesFlow(state, input, profile, {
           prisma: this.prisma,

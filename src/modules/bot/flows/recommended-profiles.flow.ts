@@ -118,25 +118,38 @@ export async function runRecommendedProfilesFlow(
         ? `${worker.first_name} ${worker.last_name}`.trim()
         : 'ce candidat';
       try {
-        await ctx.walletService.debitProfileWallet(
-          profile.id,
-          fee,
-          WalletTransactionType.CONTACT_UNLOCK_DEBIT,
-          'recommendation_contact',
-          selectedWorkerId,
-        );
+        const profileWallet =
+          await ctx.walletService.getOrCreateProfileWallet(profile.id);
+        if (Number(profileWallet.balance) < fee) {
+          throw new Error('Solde insuffisant dans votre portefeuille');
+        }
         const txRef = generatePaymentReference();
-        await ctx.prisma.payment.create({
-          data: {
-            type: PaymentType.CONTACT_UNLOCK,
-            profile_id: profile.id,
-            amount: fee,
-            payment_method: PaymentMethod.WALLET,
-            transaction_id: txRef,
-            status: PaymentStatus.COMPLETED,
-            paid_at: new Date(),
-            description: `Contact recommandé — ${workerName} [worker:${selectedWorkerId}]`,
-          },
+        await ctx.prisma.$transaction(async (tx) => {
+          await tx.walletTransaction.create({
+            data: {
+              wallet_id: profileWallet.id,
+              type: WalletTransactionType.CONTACT_UNLOCK_DEBIT,
+              amount: fee,
+              reference_type: 'recommendation_contact',
+              reference_id: selectedWorkerId,
+            },
+          });
+          await tx.wallet.update({
+            where: { id: profileWallet.id },
+            data: { balance: { decrement: fee } },
+          });
+          await tx.payment.create({
+            data: {
+              type: PaymentType.CONTACT_UNLOCK,
+              profile_id: profile.id,
+              amount: fee,
+              payment_method: PaymentMethod.WALLET,
+              transaction_id: txRef,
+              status: PaymentStatus.COMPLETED,
+              paid_at: new Date(),
+              description: `Contact recommandé — ${workerName} [worker:${selectedWorkerId}]`,
+            },
+          });
         });
         return {
           reply: [
@@ -155,8 +168,7 @@ export async function runRecommendedProfilesFlow(
       }
     }
 
-    const mobileMoneyOption = balance >= fee ? '2' : '1';
-    if (trimmed === mobileMoneyOption) {
+    if (trimmed === '2') {
       return generateMobileMoneyLink(
         selectedWorkerId,
         profile,
@@ -348,13 +360,15 @@ function showPaymentMethodPrompt(
 ): FlowResult {
   const hasFunds = balance >= fee;
 
-  const options = hasFunds
-    ? [
-        `1️⃣ Utiliser mon crédit (${fee.toLocaleString('fr-FR')} FCFA)`,
-        '2️⃣ Payer par mobile money',
-        '3️⃣ Annuler',
-      ]
-    : [`1️⃣ Payer par mobile money`, '2️⃣ Annuler'];
+  const walletLine = hasFunds
+    ? `1️⃣ Utiliser mon crédit (${fee.toLocaleString('fr-FR')} FCFA)`
+    : `1️⃣ Crédit portefeuille _(solde insuffisant — ${balance.toLocaleString('fr-FR')} FCFA)_`;
+
+  const options = [
+    walletLine,
+    '2️⃣ Payer par mobile money',
+    '3️⃣ Annuler',
+  ];
 
   const balanceLine = hasFunds
     ? `💰 Solde disponible : *${balance.toLocaleString('fr-FR')} FCFA*`

@@ -67,7 +67,9 @@ async function handleDetailComplete(
       profile.id,
       note,
     );
-    await ctx.notificationService.sendJobCompletedToWorker(applicationId);
+    await ctx.notificationService
+      .sendJobCompletedToWorker(applicationId)
+      .catch(() => {});
     const amount = updated.job_offer?.amount ?? selectedItem.amount;
     return {
       reply: [
@@ -98,9 +100,9 @@ async function handleDetailCancel(
       applicationId,
       profile.id,
     );
-    await ctx.notificationService.sendJobCancelledByEmployerToWorker(
-      applicationId,
-    );
+    await ctx.notificationService
+      .sendJobCancelledByEmployerToWorker(applicationId)
+      .catch(() => {});
     return {
       reply: [
         [
@@ -149,8 +151,25 @@ async function handleDetailStep(
       },
     };
   }
-  if (trimmed === '2')
-    return handleDetailCancel(applicationId, ctx, profile, state);
+  if (trimmed === '2') {
+    return {
+      reply: [
+        [
+          `⚠️ *Êtes-vous sûr de vouloir annuler cette mission ?*`,
+          '',
+          'Le travailleur sera notifié et l\'offre sera rouverte aux candidatures.',
+          '',
+          '1️⃣ Oui, annuler la mission',
+          '2️⃣ Non, revenir',
+        ].join('\n'),
+      ],
+      nextState: {
+        ...state,
+        payload: { ...state.payload, step: 'cancel_confirm' },
+        updatedAt: new Date().toISOString(),
+      },
+    };
+  }
 
   return {
     reply: [formatFilledJobDetail(selectedItem)],
@@ -229,7 +248,7 @@ export async function runManageFilledJobFlow(
   const payload = state.payload ?? {};
   const items = (payload.items as FilledJobListItem[]) ?? [];
   const pageIndex = (payload.pageIndex as number) ?? 0;
-  const step = (payload.step as 'list' | 'detail' | 'note') ?? 'list';
+  const step = (payload.step as 'list' | 'detail' | 'note' | 'cancel_confirm') ?? 'list';
   const selectedItem = payload.selectedItem as FilledJobListItem | undefined;
   const trimmed = input.trim();
   const normalized = trimmed.toLowerCase();
@@ -247,6 +266,24 @@ export async function runManageFilledJobFlow(
 
   if (trimmed === '4' && step === 'detail') {
     return { reply: [menuMessage(profile.profile_type)], clearState: true };
+  }
+
+  if (step === 'cancel_confirm') {
+    const applicationId = selectedItem?.applicationId;
+    if (!applicationId) {
+      return { reply: ["*ERREUR. TAPEZ 'MENU'.*"], clearState: true };
+    }
+    if (trimmed === '1' || normalized === 'oui') {
+      return handleDetailCancel(applicationId, ctx, profile, state);
+    }
+    return {
+      reply: [formatFilledJobDetail(selectedItem)],
+      nextState: {
+        ...state,
+        payload: { ...state.payload, step: 'detail' },
+        updatedAt: new Date().toISOString(),
+      },
+    };
   }
 
   if (step === 'note') {

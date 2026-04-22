@@ -12,6 +12,11 @@ import {
 } from '../messages/notifications.messages';
 import { ApplicationStatus, JobOfferStatus } from '@prisma/client';
 import { SystemConfigService } from '../../system-config/system-config.service';
+import {
+  BOT_STATE_KEY_PREFIX,
+  BOT_STATE_TTL_SECONDS,
+  FLOW_IDS,
+} from '../bot.constants';
 
 const REMINDER_24H_SENT_KEY = 'reminder:sent:24h:';
 const REMINDER_2H_SENT_KEY = 'reminder:sent:2h:';
@@ -252,16 +257,41 @@ export class ReminderProcessor {
             '',
             `Bonjour ${firstName}, votre offre *"${offer.title}"* a expiré car la date est passée sans démarrage effectif de la mission.`,
             '',
-            `Tapez *MENU* pour publier une nouvelle offre.`,
+            `Que souhaitez-vous faire ?`,
+            '',
+            `1️⃣ Republier l'offre`,
+            `2️⃣ Menu`,
           ].join('\n');
-      await this.whatsApp
+
+      const sent = await this.whatsApp
         .sendTextMessage(phone, text, offer.employer_id)
-        .catch((err) =>
+        .then(() => true)
+        .catch((err) => {
           this.logger.warn(
             `Failed to notify employer ${offer.employer_id} of expired offer`,
             err,
-          ),
-        );
+          );
+          return false;
+        });
+
+      // For non-ghost offers: set flow state so the next employer reply enters the republish flow
+      if (!isGhost && sent) {
+        const stateKey = `${BOT_STATE_KEY_PREFIX}${offer.employer_id}`;
+        const stateValue = JSON.stringify({
+          flowId: FLOW_IDS.REPUBLISH_EXPIRED_JOB,
+          step: 0,
+          payload: { jobOfferId: offer.id },
+          updatedAt: new Date().toISOString(),
+        });
+        await this.redis
+          .set(stateKey, stateValue, 'EX', BOT_STATE_TTL_SECONDS)
+          .catch((err) =>
+            this.logger.warn(
+              `Failed to set republish flow state for employer ${offer.employer_id}`,
+              err,
+            ),
+          );
+      }
     }
   }
 

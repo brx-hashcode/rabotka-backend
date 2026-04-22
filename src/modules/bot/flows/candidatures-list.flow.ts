@@ -206,7 +206,7 @@ function handleNextPage(
   if (!hasMoreItems(items, pageIndex)) {
     return {
       reply: [
-        '*RÉPONDEZ PAR UN NUMÉRO (1-5) POUR SÉLECTIONNER UN CANDIDAT, 6 (VOIR PLUS) OU 7 (MENU).*',
+        '*RÉPONDEZ PAR UN NUMÉRO (1-5) POUR SÉLECTIONNER UN CANDIDAT OU 7 (MENU).*',
       ],
       nextState: state,
     };

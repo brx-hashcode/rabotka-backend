@@ -145,7 +145,9 @@ async function handleWalletCredit(args: {
         .sendContactUnlockedNotification(id, {
           skipNotifyProfileId: profile.id,
         })
-        .catch(() => null);
+        .catch((err) =>
+          console.warn(`[unlock-contact] notification failed for ${id}:`, err),
+        );
     }
 
     if (result.status === 'UNLOCKED') {
