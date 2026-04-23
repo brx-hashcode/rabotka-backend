@@ -1,6 +1,7 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { PrismaModule } from '../../common/services/prisma/prisma.module';
 import { JobOfferService } from './job-offer.service';
+import { JobOfferExpiryScheduler } from './job-offer-expiry.scheduler';
 import { AdminJobOfferController } from './admin-job-offer.controller';
 import { AuthModule } from '../auth/auth.module';
 import { MailModule } from '../mail/mail.module';
@@ -22,7 +23,7 @@ import { MatchingModule } from '../matching/matching.module';
     MatchingModule,
   ],
   controllers: [AdminJobOfferController],
-  providers: [JobOfferService],
+  providers: [JobOfferService, JobOfferExpiryScheduler],
   exports: [JobOfferService],
 })
 export class JobOfferModule {}
