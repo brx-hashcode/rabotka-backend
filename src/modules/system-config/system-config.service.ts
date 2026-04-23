@@ -214,6 +214,11 @@ export class SystemConfigService implements OnModuleInit {
     };
   }
 
+  async getMatchingReliabilityThreshold(): Promise<number> {
+    const val = await this.get('matching.reliability_threshold', '50');
+    return Number(val);
+  }
+
   async getRecommendationContactFee(): Promise<number> {
     const val = await this.get(
       'fees.contact_recommendation_fee_employer',

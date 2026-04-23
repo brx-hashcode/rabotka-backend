@@ -55,7 +55,7 @@ export class PaymentStatusGateway
    */
   emitPaymentStatus(
     token: string,
-    status: 'APPROVED' | 'REJECTED',
+    status: 'APPROVED' | 'REJECTED' | 'TIMEOUT',
   ): void {
     this.server.to(`payment:${token}`).emit('payment-status', { status });
   }
