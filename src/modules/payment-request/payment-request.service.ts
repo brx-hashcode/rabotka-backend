@@ -298,15 +298,17 @@ export class PaymentRequestService {
       }
     }
 
-    // All attempts exhausted with no conclusive result — mark as rejected
+    // All attempts exhausted with no conclusive result.
+    // Revert to PENDING so the Monetbil webhook can still finalize the payment
+    // if the mobile money transaction completes asynchronously.
     this.logger.warn(
-      `Monetbil polling timed out for paymentId ${paymentId} after ${maxAttempts} attempts`,
+      `Monetbil polling timed out for paymentId ${paymentId} after ${maxAttempts} attempts — reverting to PENDING`,
     );
     await this.prisma.paymentRequest.update({
       where: { id: requestId },
-      data: { status: PaymentRequestStatus.REJECTED },
+      data: { status: PaymentRequestStatus.PENDING },
     });
-    this.paymentStatusGateway.emitPaymentStatus(token, 'REJECTED');
+    this.paymentStatusGateway.emitPaymentStatus(token, 'TIMEOUT');
   }
 
   /**
