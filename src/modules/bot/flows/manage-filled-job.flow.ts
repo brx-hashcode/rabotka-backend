@@ -159,8 +159,8 @@ async function handleDetailStep(
           '',
           'Le travailleur sera notifié et l\'offre sera rouverte aux candidatures.',
           '',
-          '1️⃣ Oui, annuler la mission',
-          '2️⃣ Non, revenir',
+          '1- Oui, annuler la mission',
+          '2- Non, revenir',
         ].join('\n'),
       ],
       nextState: {

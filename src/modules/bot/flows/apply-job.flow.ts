@@ -47,7 +47,7 @@ type ApplyStepArgs = {
 type JobOfferForApply = {
   title: string;
   scheduled_at: Date;
-  amount: number;
+  amount: number | null;
   payment_flow: string | null;
   address: string;
 };

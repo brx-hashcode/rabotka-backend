@@ -71,9 +71,9 @@ export function formatReminder24h(params: {
     '*Soyez ponctuel pour maintenir votre score*',
     '',
     'Actions:',
-    '1️⃣ Confirmer ma présence',
-    '2️⃣ Annuler (sans pénalité pour le moment)',
-    "3️⃣ Contacter l'employeur",
+    '1- Confirmer ma présence',
+    '2- Annuler (sans pénalité pour le moment)',
+    "3- Contacter l'employeur",
     '',
     'Tapez le numéro correspondant.',
   ].join('\n');

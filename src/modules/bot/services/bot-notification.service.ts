@@ -88,11 +88,15 @@ export class BotNotificationService {
         });
         const pendingCount = await this.botInbox.count(employerProfileId);
         const inboxNotice =
-          `\n\n📬 *${pendingCount} candidature(s) en attente* dans votre boîte.` +
+          `📬 *${pendingCount} candidature(s) en attente* dans votre boîte.` +
           `\nTerminez votre action en cours, puis tapez *candidatures* pour les traiter.`;
         await this.whatsApp.sendTextMessage(
           app.job_offer.employer.phone,
-          text + inboxNotice,
+          text,
+        );
+        await this.whatsApp.sendTextMessage(
+          app.job_offer.employer.phone,
+          inboxNotice,
         );
       } else {
         // Employer is idle — set state directly so next message routes to accept/refuse

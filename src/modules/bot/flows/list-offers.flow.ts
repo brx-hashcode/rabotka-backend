@@ -10,6 +10,7 @@ import {
   formatNoOffersAvailable,
   formatPaymentFlow,
   jobOfferToOfferListItem,
+  type OfferListItem,
 } from '../messages/offers.messages';
 import { menuMessage } from '../messages/menu.messages';
 
@@ -198,8 +199,8 @@ async function handleDetailApply(
     'Impact sur votre score de fiabilité',
     '',
     '*Confirmez-vous votre candidature ?*',
-    '1️⃣ Oui, je postule',
-    '2️⃣ Non, retour',
+    '1- Oui, je postule',
+    '2- Non, retour',
     '',
     '*Tapez le numéro correspondant.*',
     '',
@@ -279,7 +280,7 @@ function toOfferListItem(offer: {
   title: string;
   description: string;
   scheduled_at: Date;
-  amount: number;
+  amount: number | null;
   payment_flow: string | null;
   address: string;
   note: string | null;

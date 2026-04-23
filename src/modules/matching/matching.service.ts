@@ -538,23 +538,6 @@ export class MatchingService {
   // ── Employer profile indexing ───────────────────────────────────────────────
 
   /**
-   * Build embedding text for an employer profile.
-   */
-  private buildEmployerText(profile: {
-    first_name: string;
-    last_name: string;
-    description: string | null;
-    address: string | null;
-  }): string {
-    const parts: string[] = [
-      `${profile.first_name} ${profile.last_name}`.trim(),
-    ];
-    if (profile.description) parts.push(profile.description);
-    if (profile.address) parts.push(profile.address);
-    return parts.join('. ');
-  }
-
-  /**
    * Embed and upsert an employer profile into the employers collection.
    * Gated by feature flag. Used to find matching workers when no job is published yet.
    */

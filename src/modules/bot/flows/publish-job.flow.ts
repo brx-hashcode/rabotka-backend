@@ -90,7 +90,9 @@ async function handlePublishStep9Confirm(args: StepArgs): Promise<FlowResult> {
     description: String(payload.description),
     scheduled_at: scheduledStr,
     ...(payload.amount ? { amount: Number(payload.amount) } : {}),
-    ...(payload.payment_flow ? { payment_flow: payload.payment_flow as PaymentFlow } : {}),
+    ...(payload.payment_flow
+      ? { payment_flow: payload.payment_flow as PaymentFlow }
+      : {}),
     address: String(payload.address),
     note: noteValue,
     quantity: Number(payload.quantity),
@@ -316,7 +318,7 @@ export async function runPublishJobFlow(
 }
 
 // Step 1 — title
-async function handlePublishStep1(args: StepArgs): Promise<FlowResult> {
+function handlePublishStep1(args: StepArgs): FlowResult {
   const { state, payload, trimmed } = args;
   if (!trimmed) {
     return {
@@ -436,8 +438,9 @@ function handlePublishStep3(args: StepArgs): FlowResult {
         `*ÉTAPE 4/${TOTAL_STEPS}*`,
         '',
         '*Quel est le montant proposé (en FCFA) ?*',
-        'Tapez uniquement le chiffre.',
-        'Tapez *0* pour passer cette étape.',
+        'Tapez uniquement le chiffre, sans le symbole FCFA.',
+        '',
+        'Ou bien tapez *0* pour passer cette étape.',
         '',
         '*Exemple*: "_15000_"',
       ].join('\n'),
@@ -461,7 +464,12 @@ function handlePublishStep4(args: StepArgs): FlowResult {
     };
   }
   const amount = Number.parseInt(trimmed.replaceAll(/\s/g, ''), 10);
-  if (Number.isNaN(amount) || amount < 0 || (amount !== 0 && amount < AMOUNT_MIN) || amount > AMOUNT_MAX) {
+  if (
+    Number.isNaN(amount) ||
+    amount < 0 ||
+    (amount !== 0 && amount < AMOUNT_MIN) ||
+    amount > AMOUNT_MAX
+  ) {
     return {
       reply: [
         `*Montant invalide. Entrez un montant entre ${AMOUNT_MIN.toLocaleString('fr-FR')} et ${AMOUNT_MAX.toLocaleString('fr-FR')} FCFA, ou *0* pour passer cette étape.*`,
@@ -475,12 +483,13 @@ function handlePublishStep4(args: StepArgs): FlowResult {
         `*ÉTAPE 5/${TOTAL_STEPS}*`,
         '',
         '*Type de rémunération ?*',
-        '1️⃣ Par heure',
-        '2️⃣ Par jour',
-        '3️⃣ Par mois',
+        '1- Par heure',
+        '2- Par jour',
+        '3- Par mois',
         '',
         '*Tapez le numéro correspondant.*',
-        'Tapez *0* pour passer cette étape.',
+        '',
+        'Ou bien tapez *0* pour passer cette étape.',
       ].join('\n'),
     ],
     nextState: {
@@ -626,9 +635,9 @@ function handlePublishStep8(args: StepArgs): FlowResult {
         summary,
         '',
         '*Confirmez-vous la publication de cette offre ?*',
-        '1️⃣ Oui, publier',
-        '2️⃣ Modifier',
-        '3️⃣ Annuler',
+        '1- Oui, publier',
+        '2- Modifier',
+        '3- Annuler',
       ].join('\n'),
     ],
     nextState: {

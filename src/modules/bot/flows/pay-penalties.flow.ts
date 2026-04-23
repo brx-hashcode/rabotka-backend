@@ -163,9 +163,9 @@ async function handleWalletOption(
         `Solde disponible : *${balance.toLocaleString('fr-FR')} FCFA*`,
         ``,
         hasFunds
-          ? `1️⃣ Confirmer le débit de ${totalAmount.toLocaleString('fr-FR')} FCFA`
+          ? `1- Confirmer le débit de ${totalAmount.toLocaleString('fr-FR')} FCFA`
           : `⚠️ Solde insuffisant — rechargez votre portefeuille d'abord.`,
-        `2️⃣ Annuler`,
+        `2- Annuler`,
       ].join('\n'),
     ],
     nextState: hasFunds
@@ -193,11 +193,11 @@ async function buildMainPaymentPrompt(
         ``,
         `*Comment souhaitez-vous régler ?*`,
         ``,
-        `1️⃣ Mobile Money (lien de paiement sécurisé)`,
+        `1- Mobile Money (lien de paiement sécurisé)`,
         canUseWallet
-          ? `2️⃣ Utiliser mon crédit portefeuille (${balance.toLocaleString('fr-FR')} FCFA disponibles)`
-          : `2️⃣ Portefeuille *(solde insuffisant : ${balance.toLocaleString('fr-FR')} FCFA)*`,
-        `3️⃣ Annuler`,
+          ? `2- Utiliser mon crédit portefeuille (${balance.toLocaleString('fr-FR')} FCFA disponibles)`
+          : `2- Portefeuille *(solde insuffisant : ${balance.toLocaleString('fr-FR')} FCFA)*`,
+        `3- Annuler`,
       ].join('\n'),
     ],
     nextState: state,

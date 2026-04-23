@@ -85,7 +85,10 @@ async function bootstrap() {
         'For integration support, contact api-support@rabotka.com',
     )
     .setVersion('1.0.0')
-    .addServer(`http://localhost:${port}`, 'Local Development Server')
+    .addServer(
+      configService.get<string>('APP_BASE_URL') ?? `http://localhost:${port}`,
+      configService.get<string>('APP_BASE_URL') ? 'Public Server' : 'Local Development Server',
+    )
     .addBearerAuth({
       type: 'http',
       scheme: 'bearer',
