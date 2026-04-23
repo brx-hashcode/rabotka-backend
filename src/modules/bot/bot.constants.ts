@@ -18,6 +18,7 @@ export const FLOW_IDS = {
   UNLOCK_CONTACT: 'unlock_contact',
   RECOMMENDED_JOBS: 'recommended_jobs',
   RECOMMENDED_PROFILES: 'recommended_profiles',
+  RATE_ASSIGNMENT: 'rate_assignment',
 } as const;
 
 export const WORKER_MENU_OPTIONS = {

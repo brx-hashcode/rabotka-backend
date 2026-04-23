@@ -5,6 +5,7 @@ import { BotStateService } from './bot-state.service';
 import { BotInboxService } from './bot-inbox.service';
 import { getAcceptRefuseInitialState } from '../flows/accept-refuse-candidate.flow';
 import { getUnlockContactInitialState } from '../flows/unlock-contact.flow';
+import { getRateAssignmentInitialState } from '../flows/rate-assignment.flow';
 import {
   formatNewApplicationToEmployer,
   formatApplicationRejectedToWorker,
@@ -370,6 +371,33 @@ export class BotNotificationService {
         err,
       );
     }
+  }
+
+  async sendRatingRequest(params: {
+    raterProfileId: string;
+    raterPhone: string;
+    rateeId: string;
+    assignmentId: string;
+    rateeLabel: string;
+    jobTitle: string;
+  }): Promise<void> {
+    const { raterProfileId, raterPhone, rateeId, assignmentId, rateeLabel, jobTitle } = params;
+    const state = getRateAssignmentInitialState(assignmentId, rateeId);
+    await this.botState.set(raterProfileId, state);
+    const text = [
+      `⭐ *Évaluez votre mission*`,
+      '',
+      `La mission *${jobTitle}* est terminée.`,
+      `Comment évaluez-vous *${rateeLabel}* ?`,
+      '',
+      'Répondez avec une note de *1* à *5* ⭐',
+    ].join('\n');
+    await this.whatsApp.sendTextMessage(raterPhone, text).catch((err) =>
+      this.logger.warn(
+        `Failed to send rating request to ${raterPhone}`,
+        err,
+      ),
+    );
   }
 
   async sendJobCancelledByEmployerToWorker(

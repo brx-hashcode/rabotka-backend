@@ -224,6 +224,8 @@ model Profile {
   status                  AccountStatus      @default(PENDING_ACTIVATION)
   billing_status          BillingStatus      @default(CLEAR)
   reliability_score       Int?               @default(100)
+  rating_avg              Float?
+  rating_count            Int                @default(0)
   whatsapp_connected                Boolean            @default(false)
   whatsapp_activation_bonus_granted Boolean            @default(false)
   payment_link                      String?
@@ -262,6 +264,8 @@ model Profile {
   events               Event[]  @relation("EventProfiles")
   profile_platform_document_links ProfilePlatformDocumentLink[]
   invoices                        Invoice[]
+  ratings_given                   Rating[]                       @relation("RatingRater")
+  ratings_received                Rating[]                       @relation("RatingRatee")
 
   @@index([email], name: "idx_profile_email")
   @@index([phone], name: "idx_profile_phone")
@@ -423,6 +427,7 @@ model Assignment {
   application Application @relation(fields: [application_id], references: [id], onDelete: Cascade)
   job_offer   JobOffer    @relation(fields: [job_offer_id], references: [id], onDelete: Cascade)
   worker      Profile     @relation(fields: [worker_id], references: [id], onDelete: Cascade)
+  ratings     Rating[]
 
   @@index([job_offer_id], name: "idx_assignment_job_offer")
   @@index([worker_id], name: "idx_assignment_worker")
@@ -835,4 +840,21 @@ model Invoice {
   @@index([profile_id], name: "idx_invoice_profile")
   @@index([payment_request_id], name: "idx_invoice_payment_request")
   @@map("invoices")
+}
+
+model Rating {
+  id            String   @id @default(uuid()) @db.Uuid
+  created_at    DateTime @default(now())
+  rater_id      String   @db.Uuid
+  ratee_id      String   @db.Uuid
+  assignment_id String   @db.Uuid
+  score         Int
+
+  rater      Profile    @relation("RatingRater", fields: [rater_id], references: [id], onDelete: Cascade)
+  ratee      Profile    @relation("RatingRatee", fields: [ratee_id], references: [id], onDelete: Cascade)
+  assignment Assignment @relation(fields: [assignment_id], references: [id], onDelete: Cascade)
+
+  @@unique([rater_id, assignment_id])
+  @@index([ratee_id], name: "idx_rating_ratee")
+  @@map("ratings")
 }
