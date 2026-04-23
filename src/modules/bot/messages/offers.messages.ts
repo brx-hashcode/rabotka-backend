@@ -6,7 +6,7 @@ export type OfferListItem = {
   description: string;
   scheduled_at: Date;
   amount: number;
-  payment_flow: string;
+  payment_flow: string | null;
   address: string;
   note: string | null;
   quantity?: number;
@@ -15,7 +15,8 @@ export type OfferListItem = {
   employerScore?: number | null;
 };
 
-export function formatPaymentFlow(flow: string): string {
+export function formatPaymentFlow(flow: string | null): string {
+  if (!flow) return '';
   const map: Record<string, string> = {
     HOURLY: 'par heure',
     DAILY: 'par jour',
@@ -88,7 +89,8 @@ export function formatOfferListCompact(
         : remaining === qty
           ? `🟢 ${qty} place${qty > 1 ? 's' : ''}`
           : `🟡 ${remaining}/${qty} restante${remaining > 1 ? 's' : ''}`;
-    const shortAddr = o.address.length > 40 ? o.address.slice(0, 40) + '…' : o.address;
+    const shortAddr =
+      o.address.length > 40 ? o.address.slice(0, 40) + '…' : o.address;
     lines.push(
       `${num}- *${o.title}*`,
       `    • 💰 Montant : ${o.amount.toLocaleString('fr-FR')} FCFA ${flowLabel}`,
@@ -107,7 +109,7 @@ export function formatOfferListCompact(
     );
   } else {
     lines.push(
-      "Tapez un numéro pour sélectionner une offre ou *Menu* pour revenir au menu.",
+      'Tapez un numéro pour sélectionner une offre ou *Menu* pour revenir au menu.',
     );
   }
   return lines.join('\n');
