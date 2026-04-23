@@ -75,8 +75,8 @@ export async function runResolvePenaltiesFlow(
           ``,
           `Pour réactiver votre compte, vous devez régler vos pénalités.`,
           ``,
-          `*1.* 💳 Obtenir un lien de paiement`,
-          `*2.* ↩️ Annuler`,
+          `*1.* Obtenir un lien de paiement`,
+          `*2.* Annuler`,
         ].join('\n'),
       ],
       nextState: {

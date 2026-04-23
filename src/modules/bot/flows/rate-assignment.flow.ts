@@ -35,7 +35,7 @@ export async function runRateAssignmentFlow(
   const score = Number.parseInt(trimmed, 10);
   if (Number.isNaN(score) || score < 1 || score > 5) {
     return {
-      reply: ['❌ Répondez avec une note entre *1* et *5* ⭐'],
+      reply: ['Répondez avec une note entre *1* et *5*.'],
       nextState: state,
     };
   }
@@ -62,9 +62,8 @@ export async function runRateAssignmentFlow(
       },
     });
 
-    const stars = '⭐'.repeat(score);
     return {
-      reply: [`✅ Merci pour votre évaluation ${stars} !\nVotre avis aide à améliorer la communauté Rabotka.`],
+      reply: [`✅ Merci pour votre évaluation (${score}/5) !\nVotre avis aide à améliorer la communauté Rabotka.`],
       clearState: true,
     };
   } catch {

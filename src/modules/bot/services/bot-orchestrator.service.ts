@@ -384,7 +384,9 @@ export class BotOrchestratorService {
           return { reply: [handleMenuCommand(profile)], clearState: true };
         }
         const PAGE_SIZE = 5;
-        const allOffers = await this.jobOfferService.findByEmployerId(profile.id);
+        const allOffers = await this.jobOfferService.findByEmployerId(
+          profile.id,
+        );
         const nextPage = currentPage + 1;
         const nextPageStart = nextPage * PAGE_SIZE;
         const hasMore = nextPageStart < allOffers.length;
@@ -703,9 +705,9 @@ export class BotOrchestratorService {
           o.address.length > 40 ? o.address.slice(0, 40) + '…' : o.address;
         return [
           `${i + 1}- *${o.title}*`,
-          `    • 💰 Montant : ${Number(o.amount).toLocaleString('fr-FR')} FCFA`,
-          `    • 📅 Date : ${dateStr}`,
-          `    • 📍 Adresse : ${shortAddr}`,
+          `    • Montant : ${Number(o.amount).toLocaleString('fr-FR')} FCFA`,
+          `    • Date : ${dateStr}`,
+          `    • Adresse : ${shortAddr}`,
           '',
         ];
       }),
@@ -793,9 +795,9 @@ export class BotOrchestratorService {
         const aiScore = Math.round((workerScores[w.id] ?? 0) * 100);
         return [
           `${i + 1}- *${name}*`,
-          `    • ⭐ Fiabilité : ${w.reliability_score ?? 100}/100`,
-          `    • 🤖 Score IA : ${aiScore}%`,
-          `    • 🏷 Domaine : ${domain}`,
+          `    • Fiabilité : ${w.reliability_score ?? 100}/100`,
+          `    • Score IA : ${aiScore}%`,
+          `    • Domaine : ${domain}`,
           '',
         ];
       }),

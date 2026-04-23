@@ -40,17 +40,20 @@ function formatWorkerCard(
     last_name: string;
     reliability_score: number | null;
     description: string | null;
-    category?: { name: string } | null;
   },
   aiScore: number,
 ): string {
   const name = `${w.first_name} ${w.last_name}`.trim();
   const score = w.reliability_score ?? 100;
-  const domain = w.category?.name ?? 'Non spécifié';
-  const desc = w.description
-    ? `\n_${w.description.slice(0, 80)}${w.description.length > 80 ? '…' : ''}_`
-    : '';
-  return `${index}. *${name}*\n   ⭐ ${score}/100 | 🤖 IA: ${aiScore}% | 🏷 ${domain}${desc}`;
+  let desc = '';
+  if (w.description) {
+    const body =
+      w.description.length > 80
+        ? `${w.description.slice(0, 80)}…`
+        : w.description;
+    desc = `\n_${body}_`;
+  }
+  return `${index}. *${name}*\n   Fiabilité: ${score}/100 | IA: ${aiScore}%${desc}`;
 }
 
 function subMenu(): string {
@@ -96,89 +99,68 @@ export async function runRecommendedProfilesFlow(
   }
 
   if (state.step === 2 && selectedWorkerId) {
+    return handlePaymentStep(
+      trimmed,
+      selectedWorkerId,
+      workerIds,
+      workerScores,
+      state,
+      profile,
+      ctx,
+    );
+  }
+
+  if (state.step === 1 && selectedWorkerId) {
+    return handleDetailStep(trimmed, selectedWorkerId, {
+      workerIds,
+      workerScores,
+      state,
+      payload,
+      profile,
+      ctx,
+      goToMenu,
+    });
+  }
+
+  if (trimmed === '7') return goToMenu();
+
+  const pageWorkerIds = workerIds.slice(0, 5);
+  const choice = /^[1-5]$/.test(trimmed) ? Number.parseInt(trimmed, 10) : 0;
+
+  if (choice >= 1 && choice <= pageWorkerIds.length) {
+    return showWorkerDetail(
+      pageWorkerIds[choice - 1],
+      workerIds,
+      workerScores,
+      state,
+      ctx,
+    );
+  }
+
+  return showList(workerIds, workerScores, state, ctx);
+}
+
+async function handleDetailStep(
+  trimmed: string,
+  selectedWorkerId: string,
+  opts: {
+    workerIds: string[];
+    workerScores: Record<string, number>;
+    state: BotState;
+    payload: Record<string, unknown>;
+    profile: BotProfile;
+    ctx: RecommendedProfilesContext;
+    goToMenu: () => FlowResult;
+  },
+): Promise<FlowResult> {
+  const { workerIds, workerScores, state, payload, profile, ctx, goToMenu } =
+    opts;
+  if (trimmed === '3') return goToMenu();
+  if (trimmed === '2') return showList(workerIds, workerScores, state, ctx);
+
+  if (trimmed === '1') {
     const fee = await ctx.systemConfig.getRecommendationContactFee();
     const balance = await ctx.walletService.getProfileWalletBalance(profile.id);
-
-    if (trimmed === '3') {
-      return showWorkerDetail(
-        selectedWorkerId,
-        workerIds,
-        workerScores,
-        state,
-        ctx,
-      );
-    }
-
-    if (trimmed === '1' && balance >= fee) {
-      const worker = await ctx.prisma.profile.findUnique({
-        where: { id: selectedWorkerId },
-        select: { first_name: true, last_name: true, phone: true, email: true },
-      });
-      const workerName = worker
-        ? `${worker.first_name} ${worker.last_name}`.trim()
-        : 'ce candidat';
-      try {
-        const profileWallet =
-          await ctx.walletService.getOrCreateProfileWallet(profile.id);
-        if (Number(profileWallet.balance) < fee) {
-          throw new Error('Solde insuffisant dans votre portefeuille');
-        }
-        const txRef = generatePaymentReference();
-        await ctx.prisma.$transaction(async (tx) => {
-          await tx.walletTransaction.create({
-            data: {
-              wallet_id: profileWallet.id,
-              type: WalletTransactionType.CONTACT_UNLOCK_DEBIT,
-              amount: fee,
-              reference_type: 'recommendation_contact',
-              reference_id: selectedWorkerId,
-            },
-          });
-          await tx.wallet.update({
-            where: { id: profileWallet.id },
-            data: { balance: { decrement: fee } },
-          });
-          await tx.payment.create({
-            data: {
-              type: PaymentType.CONTACT_UNLOCK,
-              profile_id: profile.id,
-              amount: fee,
-              payment_method: PaymentMethod.WALLET,
-              transaction_id: txRef,
-              status: PaymentStatus.COMPLETED,
-              paid_at: new Date(),
-              description: `Contact recommandé — ${workerName} [worker:${selectedWorkerId}]`,
-            },
-          });
-        });
-        return {
-          reply: [
-            formatContactUnlockedMessage({
-              name: workerName,
-              phone: worker?.phone ?? null,
-              email: worker?.email ?? null,
-            }),
-          ],
-          clearState: true,
-        };
-      } catch (err: unknown) {
-        const msg =
-          err instanceof Error ? err.message : 'Erreur lors du paiement.';
-        return { reply: [`❌ ${msg}`], clearState: true };
-      }
-    }
-
-    if (trimmed === '2') {
-      return generateMobileMoneyLink(
-        selectedWorkerId,
-        profile,
-        fee,
-        workerIds,
-        workerScores,
-        ctx,
-      );
-    }
-
     return showPaymentMethodPrompt(
       selectedWorkerId,
       fee,
@@ -190,50 +172,127 @@ export async function runRecommendedProfilesFlow(
     );
   }
 
-  if (state.step === 1 && selectedWorkerId) {
-    if (trimmed === '3') return goToMenu();
+  return {
+    reply: [`Tapez *1*, *2* ou *3*.\n${subMenu()}`],
+    nextState: {
+      ...state,
+      payload: { ...payload, workerIds, workerScores, selectedWorkerId },
+      updatedAt: new Date().toISOString(),
+    },
+  };
+}
 
-    if (trimmed === '2') {
-      return showList(workerIds, workerScores, state, ctx);
+async function handlePaymentStep(
+  trimmed: string,
+  selectedWorkerId: string,
+  workerIds: string[],
+  workerScores: Record<string, number>,
+  state: BotState,
+  profile: BotProfile,
+  ctx: RecommendedProfilesContext,
+): Promise<FlowResult> {
+  const fee = await ctx.systemConfig.getRecommendationContactFee();
+  const balance = await ctx.walletService.getProfileWalletBalance(profile.id);
+
+  if (trimmed === '3') {
+    return showWorkerDetail(
+      selectedWorkerId,
+      workerIds,
+      workerScores,
+      state,
+      ctx,
+    );
+  }
+
+  if (trimmed === '1' && balance >= fee) {
+    return processWalletPayment(selectedWorkerId, profile, fee, ctx);
+  }
+
+  if (trimmed === '2') {
+    return generateMobileMoneyLink(
+      selectedWorkerId,
+      profile,
+      fee,
+      workerIds,
+      workerScores,
+      ctx,
+    );
+  }
+
+  return showPaymentMethodPrompt(
+    selectedWorkerId,
+    fee,
+    balance,
+    workerIds,
+    workerScores,
+    state,
+    ctx,
+  );
+}
+
+async function processWalletPayment(
+  selectedWorkerId: string,
+  profile: BotProfile,
+  fee: number,
+  ctx: RecommendedProfilesContext,
+): Promise<FlowResult> {
+  const worker = await ctx.prisma.profile.findUnique({
+    where: { id: selectedWorkerId },
+    select: { first_name: true, last_name: true, phone: true, email: true },
+  });
+  const workerName = worker
+    ? `${worker.first_name} ${worker.last_name}`.trim()
+    : 'ce candidat';
+
+  try {
+    const profileWallet = await ctx.walletService.getOrCreateProfileWallet(
+      profile.id,
+    );
+    if (Number(profileWallet.balance) < fee) {
+      throw new Error('Solde insuffisant dans votre portefeuille');
     }
-
-    if (trimmed === '1') {
-      const fee = await ctx.systemConfig.getRecommendationContactFee();
-      const balance = await ctx.walletService.getProfileWalletBalance(
-        profile.id,
-      );
-      return showPaymentMethodPrompt(
-        selectedWorkerId,
-        fee,
-        balance,
-        workerIds,
-        workerScores,
-        state,
-        ctx,
-      );
-    }
-
+    const txRef = generatePaymentReference();
+    await ctx.prisma.$transaction(async (tx) => {
+      await tx.walletTransaction.create({
+        data: {
+          wallet_id: profileWallet.id,
+          type: WalletTransactionType.CONTACT_UNLOCK_DEBIT,
+          amount: fee,
+          reference_type: 'recommendation_contact',
+          reference_id: selectedWorkerId,
+        },
+      });
+      await tx.wallet.update({
+        where: { id: profileWallet.id },
+        data: { balance: { decrement: fee } },
+      });
+      await tx.payment.create({
+        data: {
+          type: PaymentType.CONTACT_UNLOCK,
+          profile_id: profile.id,
+          amount: fee,
+          payment_method: PaymentMethod.WALLET,
+          transaction_id: txRef,
+          status: PaymentStatus.COMPLETED,
+          paid_at: new Date(),
+          description: `Contact recommandé — ${workerName} [worker:${selectedWorkerId}]`,
+        },
+      });
+    });
     return {
-      reply: [`Tapez *1*, *2* ou *3*.\n${subMenu()}`],
-      nextState: {
-        ...state,
-        payload: { ...payload, workerIds, workerScores, selectedWorkerId },
-        updatedAt: new Date().toISOString(),
-      },
+      reply: [
+        formatContactUnlockedMessage({
+          name: workerName,
+          phone: worker?.phone ?? null,
+          email: worker?.email ?? null,
+        }),
+      ],
+      clearState: true,
     };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : 'Erreur lors du paiement.';
+    return { reply: [`❌ ${msg}`], clearState: true };
   }
-
-  if (trimmed === '7') return goToMenu();
-
-  const pageWorkerIds = workerIds.slice(0, 5);
-  const choice = /^[1-5]$/.test(trimmed) ? Number.parseInt(trimmed, 10) : 0;
-
-  if (choice >= 1 && choice <= pageWorkerIds.length) {
-    const workerId = pageWorkerIds[choice - 1];
-    return showWorkerDetail(workerId, workerIds, workerScores, state, ctx);
-  }
-
-  return showList(workerIds, workerScores, state, ctx);
 }
 
 async function showList(
@@ -251,7 +310,6 @@ async function showList(
       last_name: true,
       reliability_score: true,
       description: true,
-      category: { select: { name: true } },
     },
   });
 
@@ -299,7 +357,6 @@ async function showWorkerDetail(
       description: true,
       address: true,
       avatar_url: true,
-      category: { select: { name: true } },
     },
   });
 
@@ -319,16 +376,14 @@ async function showWorkerDetail(
   });
 
   const name = `${worker.first_name} ${worker.last_name}`.trim();
-  const domain = worker.category?.name ?? 'Non spécifié';
   const aiScore = Math.round((workerScores[workerId] ?? 0) * 100);
 
   const detailLines = [
-    `👤 *${name}*`,
-    `⭐ Score fiabilité: ${worker.reliability_score ?? 100}/100`,
-    `🤖 Score IA: ${aiScore}%`,
-    `🏷 Domaine: ${domain}`,
-    ...(worker.address ? [`📍 Adresse: ${worker.address}`] : []),
-    `✅ Missions complétées: ${completedCount}`,
+    `*${name}*`,
+    `Score fiabilité: ${worker.reliability_score ?? 100}/100`,
+    `Score IA: ${aiScore}%`,
+    ...(worker.address ? [`Adresse: ${worker.address}`] : []),
+    `Missions complétées: ${completedCount}`,
     ...(worker.description ? ['', `_${worker.description}_`] : []),
     subMenu(),
   ];
@@ -364,18 +419,14 @@ function showPaymentMethodPrompt(
     ? `1- Utiliser mon crédit (${fee.toLocaleString('fr-FR')} FCFA)`
     : `1- Crédit portefeuille _(solde insuffisant — ${balance.toLocaleString('fr-FR')} FCFA)_`;
 
-  const options = [
-    walletLine,
-    '2- Payer par mobile money',
-    '3- Annuler',
-  ];
+  const options = [walletLine, '2- Payer par mobile money', '3- Annuler'];
 
   const balanceLine = hasFunds
-    ? `💰 Solde disponible : *${balance.toLocaleString('fr-FR')} FCFA*`
+    ? `Solde disponible : *${balance.toLocaleString('fr-FR')} FCFA*`
     : `⚠️ Solde insuffisant (${balance.toLocaleString('fr-FR')} FCFA disponibles)`;
 
   const text = [
-    `🔓 *Déverrouiller le contact*`,
+    `*Déverrouiller le contact*`,
     '',
     `Frais : *${fee.toLocaleString('fr-FR')} FCFA*`,
     balanceLine,
@@ -422,7 +473,7 @@ async function generateMobileMoneyLink(
   return {
     reply: [
       [
-        `📱 *Paiement par mobile money*`,
+        `*Paiement par mobile money*`,
         '',
         `Pour voir les coordonnées de *${workerName}*, effectuez un paiement de *${fee.toLocaleString('fr-FR')} FCFA* via le lien ci-dessous :`,
         '',

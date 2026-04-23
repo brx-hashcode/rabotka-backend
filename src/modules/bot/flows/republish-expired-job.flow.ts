@@ -82,7 +82,7 @@ async function handleStep0(
   return {
     reply: [
       [
-        `*📅 Republication de l'offre*`,
+        `*Republication de l'offre*`,
         '',
         `Votre offre *"${job.title}"* sera republiée avec les mêmes informations.`,
         '',

@@ -53,14 +53,8 @@ export const CMD_FILLED_JOBS = ['missions pourvues', 'gérer missions pourvues']
 export const CMD_PROFILE = ['profil', 'mon profil', 'profile'];
 export const CMD_HISTORY = ['historique', 'history'];
 export const CMD_LIST_OFFERS = ['voir les offres', 'offres', 'list offres'];
-export const CMD_MY_APPLICATIONS = [
-  'mes candidatures',
-  'mes applications',
-];
-export const CMD_PENDING_PAYMENTS = [
-  'paiements en attente',
-  'waiting payment',
-];
+export const CMD_MY_APPLICATIONS = ['mes candidatures', 'mes applications'];
+export const CMD_PENDING_PAYMENTS = ['paiements en attente', 'waiting payment'];
 export const CMD_PAY = [
   'payer',
   'régler',
