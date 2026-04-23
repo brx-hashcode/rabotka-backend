@@ -92,6 +92,7 @@ export class MatchingService {
         description: true,
         address: true,
         profile_type: true,
+        reliability_score: true,
         category: { select: { name: true, description: true } },
       },
     });
@@ -113,6 +114,7 @@ export class MatchingService {
         categoryName: profile.category?.name ?? '',
         categoryDescription: profile.category?.description ?? '',
         profileType: profile.profile_type,
+        reliabilityScore: profile.reliability_score ?? 100,
       });
       this.logger.log(`Indexed worker profile ${profileId}`);
     } catch (err) {
@@ -187,12 +189,28 @@ export class MatchingService {
     try {
       await this.qdrant.ensureCollection(COLLECTION_WORKERS);
       const text = this.buildJobText(job);
+      const threshold =
+        await this.systemConfig.getMatchingReliabilityThreshold();
       const results = await this.qdrant.searchHybrid(
         COLLECTION_WORKERS,
         text,
         topN,
       );
-      return mapSearchHitsToScoredIds(results, 'profileId');
+      return results
+        .map((r) => {
+          const id = qdrantPayloadString(r.payload, 'profileId');
+          if (!id) return null;
+          const reliabilityScore =
+            typeof r.payload?.['reliabilityScore'] === 'number'
+              ? r.payload['reliabilityScore']
+              : 100;
+          if (reliabilityScore < threshold) return null;
+          // Boost score proportionally to reliability (max +20% at score=100)
+          const boosted = r.score * (1 + (reliabilityScore / 100) * 0.2);
+          return { id, score: boosted };
+        })
+        .filter((x): x is { id: string; score: number } => x !== null)
+        .sort((a, b) => b.score - a.score);
     } catch (err) {
       this.logger.error(
         `findMatchingWorkersForJob failed for ${jobOfferId}`,
