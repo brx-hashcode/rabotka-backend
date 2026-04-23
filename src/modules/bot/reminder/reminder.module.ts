@@ -3,9 +3,10 @@ import { PrismaModule } from '../../../common/services/prisma/prisma.module';
 import { WhatsAppModule } from '../../whatsapp/whatsapp.module';
 import { ReminderProcessor } from './reminder.processor';
 import { ReminderSchedulerService } from './reminder-scheduler.service';
+import { SystemConfigModule } from '../../system-config/system-config.module';
 
 @Module({
-  imports: [PrismaModule, forwardRef(() => WhatsAppModule)],
+  imports: [PrismaModule, forwardRef(() => WhatsAppModule), SystemConfigModule],
   providers: [ReminderProcessor, ReminderSchedulerService],
   exports: [ReminderProcessor],
 })

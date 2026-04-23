@@ -10,6 +10,7 @@ import {
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
+import { isWorkerHardBlocked } from '../penalty/penalty.utils';
 import { BotNotificationService } from '../bot/services/bot-notification.service';
 import { ContactUnlockService } from '../contact-unlock/contact-unlock.service';
 import {
@@ -25,14 +26,10 @@ import {
 } from '@prisma/client';
 import { generatePaymentReference } from '../../common/utils/payment-reference';
 import { ContractService } from '../contract/contract.service';
+import { SystemConfigService } from '../system-config/system-config.service';
+import { MatchingService } from '../matching/matching.service';
 import {
-  LATE_CANCELLATION_PENALTY_FCFA,
-  LATE_CANCELLATION_SCORE_DEDUCTION,
-  CANCELLATION_PENALTY_THRESHOLD_HOURS,
-  RELIABILITY_SCORE_MIN,
   RELIABILITY_SCORE_MAX,
-  EMPLOYER_CANCEL_SCORE_DEDUCTION,
-  BILLING_BLOCK_THRESHOLD,
   PENALTY_SUSPENSION_THRESHOLD,
 } from './application.constants';
 
@@ -118,7 +115,7 @@ export type ApplicationWithOffer = ApplicationListItem & {
     title: string;
     description: string;
     scheduled_at: Date;
-    amount: number;
+    amount: number | null;
     payment_flow: string | null;
     address: string;
     note: string | null;
@@ -143,6 +140,8 @@ export class ApplicationService {
     @Inject(forwardRef(() => ContactUnlockService))
     private readonly contactUnlock: ContactUnlockService,
     private readonly contractService: ContractService,
+    private readonly systemConfigService: SystemConfigService,
+    private readonly matchingService: MatchingService,
   ) {}
 
   async create(
@@ -192,6 +191,12 @@ export class ApplicationService {
       },
     });
     if (unpaidPenaltiesCount > 0) {
+      const hardBlocked = await isWorkerHardBlocked(this.prisma, workerId);
+      if (hardBlocked) {
+        throw new ForbiddenException(
+          '🚨 Votre compte est bloqué en raison de pénalités impayées depuis plus de 3 jours. Tapez PAYER pour régulariser votre situation.',
+        );
+      }
       throw new ForbiddenException(
         'Vous avez des pénalités impayées. Tapez PAYER pour les régler et débloquer votre compte.',
       );
@@ -240,6 +245,38 @@ export class ApplicationService {
     const applications = await this.prisma.application.findMany({
       where: {
         worker_id: workerId,
+        ...(options?.status ? { status: options.status } : {}),
+      },
+      take: limit,
+      orderBy: { created_at: 'desc' },
+      include: {
+        job_offer: {
+          include: {
+            employer: {
+              select: {
+                id: true,
+                first_name: true,
+                last_name: true,
+                phone: true,
+              },
+            },
+          },
+        },
+        worker: true,
+      },
+    });
+
+    return applications.map((a) => this.toApplicationWithOffer(a));
+  }
+
+  async findByEmployer(
+    employerId: string,
+    options?: { status?: ApplicationStatus; limit?: number },
+  ): Promise<ApplicationWithOffer[]> {
+    const limit = Math.min(options?.limit ?? 50, 100);
+    const applications = await this.prisma.application.findMany({
+      where: {
+        job_offer: { employer_id: employerId },
         ...(options?.status ? { status: options.status } : {}),
       },
       take: limit,
@@ -328,6 +365,19 @@ export class ApplicationService {
         "Vous n'êtes pas l'employeur de cette offre",
       );
     }
+
+    const fees = await this.systemConfigService.getFees();
+    const employer = await this.prisma.profile.findUnique({
+      where: { id: employerId },
+      select: { reliability_score: true },
+    });
+    const employerScore = employer?.reliability_score ?? 100;
+    if (employerScore <= fees.reliabilityScoreMin) {
+      throw new ForbiddenException(
+        "Votre compte est pénalisé. Vous ne pouvez pas accepter de candidatures pour le moment.",
+      );
+    }
+
     if (
       application.status !== ApplicationStatus.PENDING &&
       application.status !== ApplicationStatus.VIEWED
@@ -338,7 +388,7 @@ export class ApplicationService {
     const currentAcceptedCount = await this.prisma.application.count({
       where: {
         job_offer_id: application.job_offer_id,
-        status: ApplicationStatus.ACCEPTED,
+        status: { in: [ApplicationStatus.ACCEPTED, 'WAITING_PAYMENT' as ApplicationStatus] },
       },
     });
 
@@ -353,35 +403,29 @@ export class ApplicationService {
       offerStatus = JobOfferStatus.ACTIVE;
     }
 
-    await this.prisma.$transaction([
-      this.prisma.application.update({
+    await this.prisma.$transaction(async (tx) => {
+      await tx.application.update({
         where: { id: applicationId },
-        data: { status: ApplicationStatus.ACCEPTED },
-      }),
-      this.prisma.jobOffer.update({
+        data: { status: ApplicationStatus.WAITING_PAYMENT },
+      });
+      await tx.jobOffer.update({
         where: { id: application.job_offer_id },
         data: { status: offerStatus },
-      }),
-      this.prisma.assignment.create({
+      });
+      await tx.assignment.create({
         data: {
           application_id: applicationId,
           job_offer_id: application.job_offer_id,
           worker_id: application.worker_id,
           status: AssignmentStatus.CONFIRMED,
         },
-      }),
-    ]);
+      });
+      await this.contactUnlock.initiateUnlock(applicationId, employerId, tx);
+    });
 
     const updated = await this.findById(applicationId);
     if (!updated)
       throw new NotFoundException('Candidature introuvable après mise à jour');
-
-    // Initiate contact unlock attempt — contacts are now gated behind payment/credit
-    this.contactUnlock
-      .initiateUnlock(applicationId, employerId)
-      .catch((err) =>
-        console.warn(`Failed to initiate contact unlock for ${applicationId}:`, err),
-      );
 
     this.eventEmitter.emit(AdminNotificationEvent.APPLICATION_ACCEPTED, {
       event: AdminNotificationEvent.APPLICATION_ACCEPTED,
@@ -481,7 +525,8 @@ export class ApplicationService {
     }
     if (
       application.status !== ApplicationStatus.ACCEPTED &&
-      application.status !== ApplicationStatus.PENDING
+      application.status !== ApplicationStatus.PENDING &&
+      application.status !== ('WAITING_PAYMENT' as ApplicationStatus)
     ) {
       throw new BadRequestException(
         'Cette candidature ne peut plus être annulée',
@@ -492,14 +537,14 @@ export class ApplicationService {
     const scheduledAt = application.job_offer.scheduled_at;
     const hoursUntil =
       (scheduledAt.getTime() - now.getTime()) / (60 * 60 * 1000);
-    const isLateCancellation =
-      hoursUntil < CANCELLATION_PENALTY_THRESHOLD_HOURS;
+    const fees = await this.systemConfigService.getFees();
+    const isLateCancellation = hoursUntil < fees.cancellationThresholdHours;
     const isAccepted = application.status === ApplicationStatus.ACCEPTED;
     const applyPenalty = isLateCancellation && isAccepted;
 
     const penaltyApplied = applyPenalty;
     const penaltyAmount: number | null = applyPenalty
-      ? LATE_CANCELLATION_PENALTY_FCFA
+      ? fees.lateCancellationPenaltyFcfa
       : null;
 
     await this.prisma.$transaction(async (tx) => {
@@ -534,10 +579,10 @@ export class ApplicationService {
           data: {
             worker_id: workerId,
             application_id: applicationId,
-            amount: LATE_CANCELLATION_PENALTY_FCFA,
+            amount: fees.lateCancellationPenaltyFcfa,
             reason:
               reason ??
-              `Annulation tardive (< ${CANCELLATION_PENALTY_THRESHOLD_HOURS}h avant le rendez-vous)`,
+              `Annulation tardive (< ${fees.cancellationThresholdHours}h avant le rendez-vous)`,
           },
         });
 
@@ -547,10 +592,10 @@ export class ApplicationService {
         });
         const currentScore = profile?.reliability_score ?? 100;
         const newScore = Math.max(
-          RELIABILITY_SCORE_MIN,
+          fees.reliabilityScoreMin,
           Math.min(
             RELIABILITY_SCORE_MAX,
-            currentScore - LATE_CANCELLATION_SCORE_DEDUCTION,
+            currentScore - fees.lateCancellationScoreDeduction,
           ),
         );
         await tx.profile.update({
@@ -582,7 +627,7 @@ export class ApplicationService {
           where: { id: workerId },
           data: { status: AccountStatus.SUSPENDED },
         });
-        const total = unpaidCount * LATE_CANCELLATION_PENALTY_FCFA;
+        const total = unpaidCount * fees.lateCancellationPenaltyFcfa;
         await this.botNotification.sendMessage(
           workerProfile.phone,
           `⚠️ Compte suspendu\n\nVotre compte Rabotka a été suspendu en raison de ${unpaidCount} pénalités impayées\n(total : ${total.toLocaleString('fr-FR')} FCFA).\n\nVous ne pouvez plus accéder aux fonctionnalités tant que vos pénalités ne sont pas réglées.\n\n1 – Régler mes pénalités\n2 – Annuler`,
@@ -633,13 +678,15 @@ export class ApplicationService {
     if (app?.worker_id !== workerId) return false;
     if (
       app.status !== ApplicationStatus.ACCEPTED &&
-      app.status !== ApplicationStatus.PENDING
+      app.status !== ApplicationStatus.PENDING &&
+      app.status !== ('WAITING_PAYMENT' as ApplicationStatus)
     )
       return false;
     const now = new Date();
     const hoursUntil =
       (app.job_offer.scheduled_at.getTime() - now.getTime()) / (60 * 60 * 1000);
-    return hoursUntil < CANCELLATION_PENALTY_THRESHOLD_HOURS && hoursUntil >= 0;
+    const fees = await this.systemConfigService.getFees();
+    return hoursUntil >= 0 && hoursUntil < fees.cancellationThresholdHours;
   }
 
   /** Employer marks job as completed: set JobOffer to COMPLETED and create Payment for worker */
@@ -736,6 +783,10 @@ export class ApplicationService {
       timestamp: new Date().toISOString(),
     });
 
+    // Re-index worker to enrich their embedding with completed job history
+    this.matchingService
+      .indexWorkerProfile(application.worker_id)
+      .catch((err) => console.warn(`Failed to re-index worker after job completion:`, err));
     // Fire-and-forget: send rating requests to both parties via WhatsApp
     this.sendRatingRequests(applicationId, application).catch(() => {});
 
@@ -803,9 +854,12 @@ export class ApplicationService {
         "Vous n'êtes pas l'employeur de cette offre",
       );
     }
-    if (application.status !== ApplicationStatus.ACCEPTED) {
+    if (
+      application.status !== ApplicationStatus.ACCEPTED &&
+      application.status !== ('WAITING_PAYMENT' as ApplicationStatus)
+    ) {
       throw new BadRequestException(
-        'Seule une candidature acceptée peut être annulée ici',
+        'Seule une candidature acceptée ou en attente de paiement peut être annulée ici',
       );
     }
 
@@ -822,7 +876,9 @@ export class ApplicationService {
       const remainingAccepted = await tx.application.count({
         where: {
           job_offer_id: application.job_offer_id,
-          status: ApplicationStatus.ACCEPTED,
+          status: {
+            in: [ApplicationStatus.ACCEPTED, 'WAITING_PAYMENT' as ApplicationStatus],
+          },
           id: { not: applicationId },
         },
       });
@@ -843,14 +899,15 @@ export class ApplicationService {
         },
       });
       // Deduct employer reliability score
+      const fees = await this.systemConfigService.getFees();
       const employer = await tx.profile.findUnique({
         where: { id: employerId },
         select: { reliability_score: true },
       });
       const currentScore = employer?.reliability_score ?? 100;
       const newScore = Math.max(
-        RELIABILITY_SCORE_MIN,
-        currentScore - EMPLOYER_CANCEL_SCORE_DEDUCTION,
+        fees.reliabilityScoreMin,
+        currentScore - fees.employerCancelScoreDeduction,
       );
       await tx.profile.update({
         where: { id: employerId },
@@ -896,10 +953,11 @@ export class ApplicationService {
     const unpaidCount = await db.penalty.count({
       where: { worker_id: workerId, paid_at: null },
     });
+    const fees = await this.systemConfigService.getFees();
     let newStatus: BillingStatus;
     if (unpaidCount === 0) {
       newStatus = BillingStatus.CLEAR;
-    } else if (unpaidCount >= BILLING_BLOCK_THRESHOLD) {
+    } else if (unpaidCount >= fees.billingBlockThreshold) {
       newStatus = BillingStatus.BLOCKED;
     } else {
       newStatus = BillingStatus.PENDING_PAYMENT;
@@ -1062,7 +1120,7 @@ export class ApplicationService {
       status: app.status,
       penaltyApplied: app.penalty_applied,
       penaltyAmount:
-        app.penalty_amount != null ? Number(app.penalty_amount) : null,
+        app.penalty_amount == null ? null : Number(app.penalty_amount),
       cancelledAt: app.cancelled_at?.toISOString() ?? null,
       cancellationReason: app.cancellation_reason,
       createdAt: app.created_at.toISOString(),

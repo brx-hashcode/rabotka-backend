@@ -14,6 +14,7 @@ import {
   PaymentMethod,
   PaymentStatus,
   InvoiceReason,
+  BillingStatus,
 } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
@@ -26,6 +27,7 @@ import { MonetbilService } from './monetbil.service';
 import { PaymentStatusGateway } from '../ws-notifications/payment-status.gateway';
 import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
 import { BotNotificationService } from '../bot/services/bot-notification.service';
+import { formatPenaltyPaidSuccess } from '../bot/messages/penalty.messages';
 import { ContactUnlockService } from '../contact-unlock/contact-unlock.service';
 import { InvoiceService } from '../invoice/invoice.service';
 import { StorageService } from '../../common/services/storage/storage.service';
@@ -389,6 +391,7 @@ export class PaymentRequestService {
     );
     await this.handleContactUnlockPostPayment(request);
     await this.handleRecommendationContactPostPayment(request, context);
+    await this.handlePenaltyPostPayment(request);
   }
 
   private async buildPaymentProcessingContext(
@@ -769,5 +772,63 @@ export class PaymentRequestService {
       createdAt: r.created_at,
       updatedAt: r.updated_at,
     };
+  }
+
+  private async handlePenaltyPostPayment(
+    request: PaymentRequestWithProfile,
+  ): Promise<void> {
+    if (!request.description?.startsWith('PENALTY_BATCH:')) return;
+
+    const workerId = request.profile_id;
+
+    try {
+      const now = new Date();
+      await this.prisma.penalty.updateMany({
+        where: { worker_id: workerId, paid_at: null },
+        data: { paid_at: now },
+      });
+
+      const unpaidCount = await this.prisma.penalty.count({
+        where: { worker_id: workerId, paid_at: null },
+      });
+
+      const fees = await this.systemConfig.getFees();
+      let newStatus: BillingStatus;
+      if (unpaidCount === 0) {
+        newStatus = BillingStatus.CLEAR;
+      } else if (unpaidCount >= fees.billingBlockThreshold) {
+        newStatus = BillingStatus.BLOCKED;
+      } else {
+        newStatus = BillingStatus.PENDING_PAYMENT;
+      }
+
+      await this.prisma.profile.update({
+        where: { id: workerId },
+        data: { billing_status: newStatus },
+      });
+
+      if (request.profile.phone) {
+        await this.botNotification
+          .sendMessage(
+            request.profile.phone,
+            formatPenaltyPaidSuccess(request.profile.first_name ?? ''),
+          )
+          .catch((err) =>
+            this.logger.warn(
+              `Penalty paid success notification failed for profile ${workerId}:`,
+              err,
+            ),
+          );
+      }
+
+      this.logger.log(
+        `Penalties marked paid for worker ${workerId} via payment request ${request.id}. New billing status: ${newStatus}`,
+      );
+    } catch (err) {
+      this.logger.warn(
+        `Penalty post-payment processing failed for profile ${workerId}:`,
+        err,
+      );
+    }
   }
 }

@@ -171,12 +171,21 @@ export class BotNotificationService {
     }
   }
 
-  async sendContactUnlockedNotification(attemptId: string): Promise<void> {
+  /**
+   * Notifies both parties that contact details are visible.
+   * @param skipNotifyProfileId — Skip WhatsApp to this profile (e.g. payer already gets the same text in the bot flow reply).
+   */
+  async sendContactUnlockedNotification(
+    attemptId: string,
+    options?: { skipNotifyProfileId?: string },
+  ): Promise<void> {
     try {
       const attempt = await this.prisma.contactUnlockAttempt.findUnique({
         where: { id: attemptId },
       });
       if (!attempt) return;
+
+      const skipId = options?.skipNotifyProfileId;
 
       const [employer, worker] = await Promise.all([
         this.prisma.profile.findUnique({
@@ -199,7 +208,11 @@ export class BotNotificationService {
         }),
       ]);
 
-      if (employer?.phone && worker) {
+      if (
+        employer?.phone &&
+        worker &&
+        attempt.employer_id !== skipId
+      ) {
         await this.whatsApp.sendTextMessage(
           employer.phone,
           formatContactUnlockedMessage({
@@ -210,7 +223,11 @@ export class BotNotificationService {
         );
       }
 
-      if (worker?.phone && employer) {
+      if (
+        worker?.phone &&
+        employer &&
+        attempt.worker_id !== skipId
+      ) {
         await this.whatsApp.sendTextMessage(
           worker.phone,
           formatContactUnlockedMessage({
@@ -284,12 +301,14 @@ export class BotNotificationService {
       });
       if (!app?.job_offer?.employer?.phone || !app.worker) return;
 
+      const fees = await this.systemConfig.getFees();
       const text = formatCancellationToEmployer({
         workerName: `${app.worker.first_name} ${app.worker.last_name}`,
         offerTitle: app.job_offer.title,
         scheduledAt: app.job_offer.scheduled_at,
         reason,
         wasLatePenalty,
+        lateCancellationThresholdHours: fees.cancellationThresholdHours,
       });
       await this.whatsApp.sendTextMessage(app.job_offer.employer.phone, text);
     } catch (err) {
@@ -353,11 +372,14 @@ export class BotNotificationService {
         hour: '2-digit',
         minute: '2-digit',
       });
+      const amountLine = offer.amount != null
+        ? `💰 ${Number(offer.amount).toLocaleString()} FCFA`
+        : `💰 Prix à négocier`;
       const text = [
         `🎯 *Offre recommandée pour vous, ${profile.first_name}*`,
         '',
         `📌 *${offer.title}*`,
-        `💰 ${offer.amount?.toLocaleString() ?? '0'} FCFA`,
+        amountLine,
         `📍 ${offer.address}`,
         `🗓 ${dateStr}`,
         '',

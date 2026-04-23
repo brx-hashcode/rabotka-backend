@@ -11,10 +11,12 @@ import {
   formatReminderStart,
 } from '../messages/notifications.messages';
 import { ApplicationStatus, JobOfferStatus } from '@prisma/client';
+import { SystemConfigService } from '../../system-config/system-config.service';
 import {
-  EMPLOYER_GHOST_SCORE_DEDUCTION,
-  RELIABILITY_SCORE_MIN,
-} from '../../application/application.constants';
+  BOT_STATE_KEY_PREFIX,
+  BOT_STATE_TTL_SECONDS,
+  FLOW_IDS,
+} from '../bot.constants';
 
 const REMINDER_24H_SENT_KEY = 'reminder:sent:24h:';
 const REMINDER_2H_SENT_KEY = 'reminder:sent:2h:';
@@ -38,6 +40,7 @@ export class ReminderProcessor {
     private readonly queueService: QueueService,
     @Inject(REDIS_CONNECTION)
     private readonly redis: Redis,
+    private readonly systemConfigService: SystemConfigService,
   ) {}
 
   async process(job: { id?: string; data: ReminderJobData }): Promise<void> {
@@ -155,14 +158,23 @@ export class ReminderProcessor {
 
   private async expireOverdueOffers(): Promise<void> {
     const now = new Date();
+    const fees = await this.systemConfigService.getFees();
 
-    // Expire offers that are still open (no accepted worker) — no score deduction
+    // Expire overdue offers that never entered real execution.
+    // If at least one application has STARTED/END, the job must not become EXPIRED.
     const openOverdue = await this.prisma.jobOffer.findMany({
       where: {
         status: {
           in: [JobOfferStatus.ACTIVE, JobOfferStatus.PARTIALLY_FILLED],
         },
         scheduled_at: { lt: now },
+        applications: {
+          none: {
+            status: {
+              in: [ApplicationStatus.STARTED, ApplicationStatus.END],
+            },
+          },
+        },
       },
       select: {
         id: true,
@@ -177,6 +189,13 @@ export class ReminderProcessor {
       where: {
         status: JobOfferStatus.FILLED,
         scheduled_at: { lt: now },
+        applications: {
+          none: {
+            status: {
+              in: [ApplicationStatus.STARTED, ApplicationStatus.END],
+            },
+          },
+        },
       },
       select: {
         id: true,
@@ -202,8 +221,8 @@ export class ReminderProcessor {
       ...filledOverdue.map((offer) => {
         const currentScore = offer.employer?.reliability_score ?? 100;
         const newScore = Math.max(
-          RELIABILITY_SCORE_MIN,
-          currentScore - EMPLOYER_GHOST_SCORE_DEDUCTION,
+          fees.reliabilityScoreMin,
+          currentScore - fees.employerGhostScoreDeduction,
         );
         return this.prisma.profile.update({
           where: { id: offer.employer_id },
@@ -236,18 +255,43 @@ export class ReminderProcessor {
         : [
             `*⏰ Offre expirée*`,
             '',
-            `Bonjour ${firstName}, votre offre *"${offer.title}"* a expiré car la date est passée sans qu'un travailleur soit assigné.`,
+            `Bonjour ${firstName}, votre offre *"${offer.title}"* a expiré car la date est passée sans démarrage effectif de la mission.`,
             '',
-            `Tapez *MENU* pour publier une nouvelle offre.`,
+            `Que souhaitez-vous faire ?`,
+            '',
+            `1️⃣ Republier l'offre`,
+            `2️⃣ Menu`,
           ].join('\n');
-      await this.whatsApp
+
+      const sent = await this.whatsApp
         .sendTextMessage(phone, text, offer.employer_id)
-        .catch((err) =>
+        .then(() => true)
+        .catch((err) => {
           this.logger.warn(
             `Failed to notify employer ${offer.employer_id} of expired offer`,
             err,
-          ),
-        );
+          );
+          return false;
+        });
+
+      // For non-ghost offers: set flow state so the next employer reply enters the republish flow
+      if (!isGhost && sent) {
+        const stateKey = `${BOT_STATE_KEY_PREFIX}${offer.employer_id}`;
+        const stateValue = JSON.stringify({
+          flowId: FLOW_IDS.REPUBLISH_EXPIRED_JOB,
+          step: 0,
+          payload: { jobOfferId: offer.id },
+          updatedAt: new Date().toISOString(),
+        });
+        await this.redis
+          .set(stateKey, stateValue, 'EX', BOT_STATE_TTL_SECONDS)
+          .catch((err) =>
+            this.logger.warn(
+              `Failed to set republish flow state for employer ${offer.employer_id}`,
+              err,
+            ),
+          );
+      }
     }
   }
 
@@ -329,12 +373,31 @@ export class ReminderProcessor {
       },
     });
 
-    if (!app?.worker?.phone || app.status !== ApplicationStatus.ACCEPTED) return;
+    if (!app?.worker?.phone || app.status !== ApplicationStatus.ACCEPTED)
+      return;
 
-    // Update status + send message atomically: if message send fails, roll back the status
-    await this.prisma.application.update({
-      where: { id: applicationId },
-      data: { status: ApplicationStatus.STARTED },
+    const previousOfferStatus = app.job_offer.status;
+    const movableOfferStatuses: JobOfferStatus[] = [
+      JobOfferStatus.ACTIVE,
+      JobOfferStatus.PARTIALLY_FILLED,
+      JobOfferStatus.FILLED,
+      JobOfferStatus.EXPIRED,
+    ];
+    const shouldMoveOfferToInProgress =
+      movableOfferStatuses.includes(previousOfferStatus);
+
+    // Mark application started and move offer to IN_PROGRESS together.
+    await this.prisma.$transaction(async (tx) => {
+      await tx.application.update({
+        where: { id: applicationId },
+        data: { status: ApplicationStatus.STARTED },
+      });
+      if (shouldMoveOfferToInProgress) {
+        await tx.jobOffer.update({
+          where: { id: app.job_offer_id },
+          data: { status: JobOfferStatus.IN_PROGRESS },
+        });
+      }
     });
 
     try {
@@ -347,13 +410,23 @@ export class ReminderProcessor {
       });
 
       await this.whatsApp.sendTextMessage(app.worker.phone, text);
-      this.logger.log(`Reminder start sent and application ${applicationId} marked as STARTED`);
+      this.logger.log(
+        `Reminder start sent and application ${applicationId} marked as STARTED`,
+      );
     } catch (err) {
-      // Roll back status if notification fails — job will retry and re-acquire the lock
+      // Roll back status if notification fails — job will retry and re-acquire the lock.
       await this.redis.del(key);
-      await this.prisma.application.update({
-        where: { id: applicationId },
-        data: { status: ApplicationStatus.ACCEPTED },
+      await this.prisma.$transaction(async (tx) => {
+        await tx.application.update({
+          where: { id: applicationId },
+          data: { status: ApplicationStatus.ACCEPTED },
+        });
+        if (shouldMoveOfferToInProgress) {
+          await tx.jobOffer.update({
+            where: { id: app.job_offer_id },
+            data: { status: previousOfferStatus },
+          });
+        }
       });
       throw err;
     }

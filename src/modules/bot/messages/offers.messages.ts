@@ -25,6 +25,13 @@ export function formatPaymentFlow(flow: string | null): string {
   return map[flow] ?? flow;
 }
 
+function formatAmount(amount: number | null, flow: string | null): string {
+  if (amount == null) return 'Prix à négocier';
+  const flowLabel = formatPaymentFlow(flow);
+  const flowSuffix = flowLabel ? ` ${flowLabel}` : '';
+  return `${amount.toLocaleString('fr-FR')} FCFA${flowSuffix}`;
+}
+
 function formatDate(d: Date): string {
   return d.toLocaleDateString('fr-FR', {
     day: '2-digit',
@@ -53,7 +60,7 @@ export function formatOfferList(
       '',
       `*Résumé*: ${summary}`,
       `*Date*: ${formatDate(o.scheduled_at)}`,
-      `*Montant*: ${o.amount.toLocaleString('fr-FR')} FCFA ${formatPaymentFlow(o.payment_flow)}`,
+      `*Montant*: ${formatAmount(o.amount, o.payment_flow)}`,
       `*Adresse*: ${o.address.length > 40 ? o.address.slice(0, 40) + '...' : o.address}`,
       '',
       '1️⃣ Postuler',
@@ -79,7 +86,6 @@ export function formatOfferListCompact(
   const lines = ['*OFFRES DISPONIBLES*', ''];
   offers.forEach((o, i) => {
     const num = i + 1;
-    const flowLabel = formatPaymentFlow(o.payment_flow);
     const qty = o.quantity ?? 1;
     const filled = o.acceptedCount ?? 0;
     const remaining = Math.max(0, qty - filled);
@@ -93,7 +99,7 @@ export function formatOfferListCompact(
       o.address.length > 40 ? o.address.slice(0, 40) + '…' : o.address;
     lines.push(
       `${num}- *${o.title}*`,
-      `    • 💰 Montant : ${o.amount.toLocaleString('fr-FR')} FCFA ${flowLabel}`,
+      `    • 💰 Montant : ${formatAmount(o.amount, o.payment_flow)}`,
       `    • 📅 Date : ${formatDate(o.scheduled_at)}`,
       `    • 👥 Places : ${spotsLabel}`,
       `    • 📍 Adresse : ${shortAddr}`,
@@ -116,7 +122,6 @@ export function formatOfferListCompact(
 }
 
 export function formatOfferDetail(offer: OfferListItem): string {
-  const flow = formatPaymentFlow(offer.payment_flow);
   const lines = [
     `*OFFRE #${offer.id.slice(0, 8)} - DÉTAILS COMPLETS*`,
     '',
@@ -126,7 +131,7 @@ export function formatOfferDetail(offer: OfferListItem): string {
     offer.description,
     '',
     `*Date et heure*: ${formatDate(offer.scheduled_at)}`,
-    `*Rémunération*: ${offer.amount.toLocaleString('fr-FR')} FCFA ${flow}`,
+    `*Rémunération*: ${formatAmount(offer.amount, offer.payment_flow)}`,
     `*Personnes requises*: ${offer.quantity ?? 1}`,
     `*Adresse*: ${offer.address}`,
     '',
@@ -160,7 +165,6 @@ function formatEmployerScore(score: number | null | undefined): string {
 
 /** Single offer view in list-offers flow with 4 actions */
 export function formatOfferDetailWithActions(offer: OfferListItem): string {
-  const flow = formatPaymentFlow(offer.payment_flow);
   const summary =
     offer.description.length > 80
       ? offer.description.slice(0, 80) + '...'
@@ -171,7 +175,7 @@ export function formatOfferDetailWithActions(offer: OfferListItem): string {
     '',
     `*Résumé*: ${summary}`,
     `*Date*: ${formatDate(offer.scheduled_at)}`,
-    `*Montant*: ${offer.amount.toLocaleString('fr-FR')} FCFA ${flow}`,
+    `*Montant*: ${formatAmount(offer.amount, offer.payment_flow)}`,
     `*Places disponibles*: ${Math.max(0, (offer.quantity ?? 1) - (offer.acceptedCount ?? 0))}/${offer.quantity ?? 1}`,
     `*Adresse*: ${offer.address.slice(0, 50)}${offer.address.length > 50 ? '...' : ''}`,
     ...(scoreLine ? [scoreLine] : []),

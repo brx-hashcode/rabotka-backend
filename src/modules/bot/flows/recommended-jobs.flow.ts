@@ -112,7 +112,10 @@ async function handleRecommendedJobsListStep(
     return { reply: ['Offre introuvable.'], nextState: state };
   }
 
-  const item = toOfferListItem({ ...offer, acceptedCount: 0 });
+  const item = toOfferListItem({
+    ...offer,
+    acceptedCount: offer.acceptedCount ?? 0,
+  });
   const detailMsg = formatOfferDetailWithActions(item);
   return {
     reply: [detailMsg],

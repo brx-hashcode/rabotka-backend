@@ -9,6 +9,6 @@ import { EventNotificationDispatcher } from './services/event-notification.dispa
   imports: [AuthModule, NotificationModule],
   controllers: [EventController],
   providers: [EventService, EventNotificationDispatcher],
-  exports: [EventService],
+  exports: [EventService, EventNotificationDispatcher],
 })
 export class EventModule {}

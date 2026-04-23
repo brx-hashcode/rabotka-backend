@@ -10,7 +10,11 @@ import {
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { StorageProvider } from '@prisma/client';
 import { IStorageProvider } from '../interfaces/storage-provider.interface';
-import { UploadOptions, UploadResult } from '../types/storage.types';
+import {
+  GetUrlOptions,
+  UploadOptions,
+  UploadResult,
+} from '../types/storage.types';
 
 @Injectable()
 export class CloudflareStorageProvider implements IStorageProvider {
@@ -18,6 +22,7 @@ export class CloudflareStorageProvider implements IStorageProvider {
   private readonly s3Client: S3Client;
   private readonly bucket: string;
   private readonly accountId: string;
+  private readonly publicBaseUrl: string;
 
   constructor(private readonly configService: ConfigService) {
     this.accountId = this.configService.get<string>(
@@ -25,6 +30,10 @@ export class CloudflareStorageProvider implements IStorageProvider {
       '',
     );
     this.bucket = this.configService.get<string>('CLOUDFLARE_BUCKET_NAME', '');
+    this.publicBaseUrl = this.configService.get<string>(
+      'CLOUDFLARE_PUBLIC_BASE_URL',
+      '',
+    );
 
     if (!this.accountId || !this.bucket) {
       throw new Error(
@@ -73,7 +82,9 @@ export class CloudflareStorageProvider implements IStorageProvider {
 
       await this.s3Client.send(command);
 
-      const url = await this.getUrl(key);
+      const url = await this.getUrl(key, {
+        access: options?.access ?? 'public',
+      });
 
       this.logger.log(`File uploaded successfully: ${key}`);
 
@@ -105,8 +116,18 @@ export class CloudflareStorageProvider implements IStorageProvider {
     }
   }
 
-  async getUrl(key: string): Promise<string> {
+  async getUrl(key: string, options?: GetUrlOptions): Promise<string> {
     try {
+      if (options?.access === 'public') {
+        const normalizedBase = this.publicBaseUrl.trim().replace(/\/+$/, '');
+        if (!normalizedBase) {
+          throw new Error(
+            'CLOUDFLARE_PUBLIC_BASE_URL must be configured to generate public URLs',
+          );
+        }
+        return `${normalizedBase}/${encodeURI(key)}`;
+      }
+
       const command = new GetObjectCommand({
         Bucket: this.bucket,
         Key: key,

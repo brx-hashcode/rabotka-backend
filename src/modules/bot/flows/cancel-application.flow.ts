@@ -47,7 +47,7 @@ type AppWithOffer = {
 function formatTimeRemaining(ms: number): string {
   const hours = Math.floor(ms / (60 * 60 * 1000));
   const minutes = Math.floor((ms % (60 * 60 * 1000)) / (60 * 1000));
-  if (hours > 24) {
+  if (hours >= 24) {
     const days = Math.floor(hours / 24);
     return `${days} jour(s) ${hours % 24}h`;
   }
@@ -92,11 +92,9 @@ async function executeCancellation(
       profile.id,
       reason,
     );
-    await ctx.notificationService.sendCancellationToEmployer(
-      applicationId,
-      reason ?? null,
-      isLatePenalty,
-    );
+    await ctx.notificationService
+      .sendCancellationToEmployer(applicationId, reason ?? null, isLatePenalty)
+      .catch(() => {});
     return {
       reply: [buildCancelledReply(result.penaltyAmount)],
       clearState: true,
@@ -104,7 +102,7 @@ async function executeCancellation(
   } catch (err: unknown) {
     const message =
       err instanceof Error ? err.message : "*IMPOSSIBLE D'ANNULER.*";
-    return { reply: [`❌ ${message}`], nextState: state };
+    return { reply: [`❌ ${message}\n\nTapez *MENU* pour annuler.`], nextState: state };
   }
 }
 
@@ -142,12 +140,12 @@ function showInitialCancelPrompt(
 }
 
 function handleLateCancellationInput(args: CancelStepArgs): FlowResult {
-  const { state, payload, trimmed, normalized } = args;
-  const reason = normalized === 'confirmer' ? undefined : trimmed;
+  const { state, payload, trimmed } = args;
+  const reason = trimmed || undefined;
   if (!reason) {
     return {
       reply: [
-        '*La raison est obligatoire pour une annulation tardive. Tapez votre raison.*',
+        '*La raison est obligatoire pour une annulation tardive. Tapez votre raison d\'annulation.*',
       ],
       nextState: state,
     };
@@ -305,7 +303,15 @@ export async function runCancelApplicationFlow(
   const now = new Date();
   const msUntil = app.job_offer.scheduled_at.getTime() - now.getTime();
   const hoursUntil = msUntil / (60 * 60 * 1000);
-  const isLate = hoursUntil < 4 && hoursUntil >= 0;
+
+  if (hoursUntil < 0) {
+    return {
+      reply: ["*Cette offre est déjà passée. Impossible d'annuler.*"],
+      clearState: true,
+    };
+  }
+
+  const isLate = hoursUntil < 4;
   const timeRemainingStr = formatTimeRemaining(msUntil);
 
   const stepArgs: CancelStepArgs = {

@@ -6,6 +6,8 @@ import {
   IsNotEmpty,
   IsOptional,
   IsBoolean,
+  IsArray,
+  IsUUID,
   Equals,
 } from 'class-validator';
 import { ProfileType, DocumentType } from '@prisma/client';
@@ -58,11 +60,12 @@ export class CreateProfileDto {
   @IsNotEmpty()
   profileType: ProfileType;
 
-  @ApiPropertyOptional({ description: 'Job category ID (required for WORKER profiles)' })
-  @Transform(({ value }) => value?.trim())
+  @ApiPropertyOptional({ description: 'Job category IDs (at least one required for all profiles)' })
+  @Transform(({ value }) => (Array.isArray(value) ? value : value != null ? [value] : undefined))
   @IsOptional()
-  @IsString()
-  categoryId?: string;
+  @IsArray()
+  @IsUUID('4', { each: true })
+  categoryIds?: string[];
 
   @ApiProperty({
     description: 'Document type for KYC verification',

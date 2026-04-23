@@ -8,11 +8,17 @@ export enum StorageDriver {
   CLOUDFLARE = 'CLOUDFLARE',
 }
 
+export type UrlAccess = 'public' | 'private';
+
+export type GetUrlOptions = {
+  access?: UrlAccess;
+};
+
 export type UploadOptions = {
   mimeType?: string;
   folder?: string;
   metadata?: Record<string, string>;
-  access?: 'public' | 'private';
+  access?: UrlAccess;
   bucket?: string;
 };
 

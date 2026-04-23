@@ -14,7 +14,7 @@ import {
 export const DENSE_MODEL = EmbeddingModel.BGESmallENV15;
 export const DENSE_DIM = 384;
 export const SPARSE_MODEL = SparseEmbeddingModel.SpladePPEnV1;
-const SEARCH_LIMIT = 20;
+const SEARCH_LIMIT = 30;
 
 function removeIncompleteFastembedModelDir(
   logger: Logger,
@@ -197,6 +197,41 @@ export class QdrantService implements OnModuleInit {
           query: { indices: sparse.indices, values: sparse.values },
           using: 'sparse',
           limit: SEARCH_LIMIT,
+        },
+      ],
+      query: { fusion: 'rrf' },
+      limit,
+      with_payload: true,
+    });
+    return results.points.map((r) => ({
+      id: r.id,
+      score: r.score,
+      payload: r.payload as Record<string, unknown> | null,
+    }));
+  }
+
+  async searchHybridWithFilter(
+    collectionName: string,
+    text: string,
+    filter: Record<string, unknown>,
+    limit = 10,
+    prefetchLimit = SEARCH_LIMIT,
+  ): Promise<
+    Array<{
+      id: string | number;
+      score: number;
+      payload: Record<string, unknown> | null;
+    }>
+  > {
+    const { dense, sparse } = await this.embedHybrid(text);
+    const results = await this.client.query(collectionName, {
+      prefetch: [
+        { query: dense, using: 'dense', limit: prefetchLimit, filter },
+        {
+          query: { indices: sparse.indices, values: sparse.values },
+          using: 'sparse',
+          limit: prefetchLimit,
+          filter,
         },
       ],
       query: { fusion: 'rrf' },

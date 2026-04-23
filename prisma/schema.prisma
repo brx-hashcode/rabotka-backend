@@ -90,6 +90,7 @@ enum JobOfferStatus {
 enum ApplicationStatus {
   PENDING
   VIEWED
+  WAITING_PAYMENT
   ACCEPTED
   REJECTED
   CANCELLED
@@ -241,6 +242,7 @@ model Profile {
   avatar_url String?
 
   category               JobCategory?       @relation(fields: [category_id], references: [id], onDelete: SetNull)
+  categories             ProfileCategory[]
 
   payment_requests       PaymentRequest[]
   kyc_documents          KycDocument[]
@@ -264,6 +266,7 @@ model Profile {
   events               Event[]  @relation("EventProfiles")
   profile_platform_document_links ProfilePlatformDocumentLink[]
   invoices                        Invoice[]
+  ad_delivery_logs                AdDeliveryLog[]
   ratings_given                   Rating[]                       @relation("RatingRater")
   ratings_received                Rating[]                       @relation("RatingRatee")
 
@@ -344,11 +347,22 @@ model JobCategory {
   description String?
   icon        String?
 
-  job_offers JobOffer[]
-  profiles   Profile[]
+  job_offers        JobOffer[]
+  profiles          Profile[]
+  profile_categories ProfileCategory[]
 
   @@index([slug], name: "idx_job_category_slug")
   @@map("job_categories")
+}
+
+model ProfileCategory {
+  profile_id  String      @db.Uuid
+  category_id String      @db.Uuid
+  profile     Profile     @relation(fields: [profile_id], references: [id], onDelete: Cascade)
+  category    JobCategory @relation(fields: [category_id], references: [id], onDelete: Cascade)
+
+  @@id([profile_id, category_id])
+  @@map("profile_categories")
 }
 
 model JobOffer {
@@ -360,8 +374,8 @@ model JobOffer {
   title        String
   description  String         @db.Text
   scheduled_at DateTime
-  amount       Decimal        @db.Decimal(10, 2)
-  payment_flow PaymentFlow
+  amount       Decimal?       @db.Decimal(10, 2)
+  payment_flow PaymentFlow?
   address      String
   note         String?
   quantity                Int            @default(1)
@@ -472,8 +486,10 @@ model Penalty {
   application_id String   @db.Uuid
   amount         Decimal  @db.Decimal(10, 2)
   reason         String?
-  applied_at     DateTime @default(now())
-  paid_at        DateTime?
+  applied_at          DateTime  @default(now())
+  paid_at             DateTime?
+  notification_count  Int       @default(0)
+  last_notified_at    DateTime?
 
   worker      Profile     @relation(fields: [worker_id], references: [id], onDelete: Cascade)
   application Application @relation(fields: [application_id], references: [id], onDelete: Cascade)
@@ -840,6 +856,146 @@ model Invoice {
   @@index([profile_id], name: "idx_invoice_profile")
   @@index([payment_request_id], name: "idx_invoice_payment_request")
   @@map("invoices")
+}
+
+// ─── Advertisement Module ────────────────────────────────────────────────────
+
+enum AdStatus {
+  DRAFT
+  PENDING_REVIEW
+  APPROVED
+  ACTIVE
+  PAUSED
+  COMPLETED
+  REJECTED
+  CANCELLED
+}
+
+enum AdPaymentStatus {
+  UNPAID
+  PAID
+  REFUNDED
+}
+
+enum AdvertiserType {
+  COMPANY
+  INDIVIDUAL
+}
+
+enum BundleTargetAudience {
+  WORKER
+  EMPLOYER
+  BOTH
+}
+
+
+enum AdDeliveryStatus {
+  SENT
+  DELIVERED
+  OPENED
+  CLICKED
+  FAILED
+}
+
+model AdvertisementBundle {
+  id                     String          @id @default(uuid()) @db.Uuid
+  name                   String
+  description            String          @db.Text
+  price                  Decimal         @db.Decimal(10, 2)
+  currency               String          @default("XAF")
+  max_reach              Int
+  max_frequency_per_week Int
+  max_duration_days      Int
+  allowed_channels       DeliveryChannel[]
+  target_audience        BundleTargetAudience @default(BOTH)
+  is_active              Boolean         @default(true)
+  created_at             DateTime        @default(now())
+  advertisements         Advertisement[]
+
+  @@map("advertisement_bundles")
+}
+
+model Advertisement {
+  id               String            @id @default(uuid()) @db.Uuid
+  bundle_id        String            @db.Uuid
+  title            String
+  description      String            @db.Text
+  call_to_action   String?
+  cta_url          String?
+  image_urls       String[]
+  video_url        String?
+  banner_url       String?
+  logo_url         String?
+  contact_phone    String?
+  contact_email    String?
+  sector           String?
+  advertiser_type  AdvertiserType
+  language         String            @default("fr")
+  tags             String[]
+  start_date       DateTime          @db.Date
+  end_date         DateTime          @db.Date
+  dispatch_time    String            @default("08:00")
+  target_filters   Json?
+  status           AdStatus          @default(DRAFT)
+  rejection_reason String?
+  payment_status   AdPaymentStatus   @default(UNPAID)
+  invoice_id       String?
+  budget           Decimal?          @db.Decimal(10, 2)
+  total_sent       Int               @default(0)
+  total_opened     Int               @default(0)
+  total_clicks     Int               @default(0)
+  created_at       DateTime          @default(now())
+  updated_at       DateTime          @updatedAt
+
+  bundle        AdvertisementBundle @relation(fields: [bundle_id], references: [id])
+  delivery_logs AdDeliveryLog[]
+  tracked_links AdTrackedLink[]
+
+  @@index([status], name: "idx_advertisement_status")
+  @@index([bundle_id], name: "idx_advertisement_bundle")
+  @@map("advertisements")
+}
+
+model AdDeliveryLog {
+  id               String           @id @default(uuid()) @db.Uuid
+  advertisement_id String           @db.Uuid
+  profile_id       String           @db.Uuid
+  channel          DeliveryChannel
+  status           AdDeliveryStatus
+  sent_at          DateTime?
+  opened_at        DateTime?
+  clicked_at       DateTime?
+  failure_reason   String?
+
+  advertisement Advertisement @relation(fields: [advertisement_id], references: [id], onDelete: Cascade)
+  profile       Profile        @relation(fields: [profile_id], references: [id], onDelete: Cascade)
+  tracked_links AdTrackedLink[]
+
+  @@index([advertisement_id], name: "idx_ad_delivery_advertisement")
+  @@index([profile_id], name: "idx_ad_delivery_profile")
+  @@map("ad_delivery_logs")
+}
+
+model AdTrackedLink {
+  id                 String          @id @default(uuid()) @db.Uuid
+  hash               String          @unique
+  advertisement_id   String          @db.Uuid
+  ad_delivery_log_id String          @db.Uuid
+  original_url       String
+  channel            DeliveryChannel
+  click_count        Int             @default(0)
+  last_clicked_at    DateTime?
+  last_click_ip      String?
+  last_click_ua      String?
+  created_at         DateTime        @default(now())
+  updated_at         DateTime        @updatedAt
+
+  advertisement Advertisement @relation(fields: [advertisement_id], references: [id], onDelete: Cascade)
+  delivery_log   AdDeliveryLog @relation(fields: [ad_delivery_log_id], references: [id], onDelete: Cascade)
+
+  @@index([advertisement_id], name: "idx_ad_tracked_link_advertisement")
+  @@index([ad_delivery_log_id], name: "idx_ad_tracked_link_delivery_log")
+  @@map("ad_tracked_links")
 }
 
 model Rating {

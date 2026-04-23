@@ -147,6 +147,8 @@ export type AdminProfileDetailResponse = AdminProfileListItem & {
   description: string;
   categoryId: string | null;
   categoryName: string | null;
+  categoryIds: string[];
+  categoryNames: string[];
   jobOffersCount: number;
   applicationsCount: number;
   penaltiesCount: number;
@@ -246,7 +248,7 @@ export class ProfileService {
   ): Promise<ProfileMeResponse> {
     const existingProfile = await this.prisma.profile.findUnique({
       where: { id },
-      select: { id: true, status: true, first_name: true, last_name: true },
+      select: { id: true, status: true, first_name: true, last_name: true, profile_type: true },
     });
 
     if (!existingProfile) {
@@ -256,6 +258,13 @@ export class ProfileService {
     const dataToUpdate = this.buildProfileUpdateData(updateProfileDto);
 
     await this.prisma.profile.update({ where: { id }, data: dataToUpdate });
+
+    // Re-index in Qdrant after update (fire-and-forget)
+    if (existingProfile.profile_type === ProfileType.WORKER) {
+      this.matchingService.indexWorkerProfile(id).catch(() => {});
+    } else {
+      this.matchingService.indexEmployerProfile(id).catch(() => {});
+    }
 
     this.eventEmitter.emit(AdminNotificationEvent.PROFILE_UPDATED, {
       event: AdminNotificationEvent.PROFILE_UPDATED,
@@ -327,6 +336,7 @@ export class ProfileService {
 
     const uploadResult = await this.fileService.uploadToStorage(avatarFile, {
       folder: 'avatars',
+      access: 'public',
     });
 
     await this.prisma.profile.update({
@@ -395,7 +405,7 @@ export class ProfileService {
       id: a.id,
       status: a.status,
       createdAt: a.created_at,
-      contractId: (a as any).contract?.id ?? null,
+      contractId: a.contract?.id ?? null,
       jobOffer: {
         id: a.job_offer.id,
         title: a.job_offer.title,
@@ -435,6 +445,9 @@ export class ProfileService {
         updated_at: true,
         category: {
           select: { id: true, name: true },
+        },
+        categories: {
+          select: { category: { select: { id: true, name: true } } },
         },
         kyc_documents: {
           select: {
@@ -521,6 +534,8 @@ export class ProfileService {
       updatedAt: profile.updated_at,
       categoryId: profile.category?.id ?? null,
       categoryName: profile.category?.name ?? null,
+      categoryIds: profile.categories.map((pc) => pc.category.id),
+      categoryNames: profile.categories.map((pc) => pc.category.name),
       jobOffersCount: profile._count.job_offers,
       applicationsCount: profile._count.applications,
       penaltiesCount: profile._count.penalties,
@@ -575,6 +590,7 @@ export class ProfileService {
       for (const file of files) {
         const result = await this.fileService.uploadToStorage(file, {
           folder: 'kyc-verification',
+          access: 'public',
         });
         uploadedUrls.push(result.url);
       }
@@ -724,7 +740,7 @@ export class ProfileService {
   ): Promise<AdminProfileDetailResponse> {
     const profile = await this.prisma.profile.findUnique({
       where: { id: profileId },
-      select: { id: true, first_name: true, last_name: true },
+      select: { id: true, first_name: true, last_name: true, profile_type: true },
     });
     if (!profile) {
       throw new NotFoundException('Profil non trouvé');
@@ -738,6 +754,13 @@ export class ProfileService {
     } catch (err) {
       this.throwIfUniqueConstraintViolation(err);
       throw err;
+    }
+
+    // Re-index in Qdrant after update (fire-and-forget)
+    if (profile.profile_type === ProfileType.WORKER) {
+      this.matchingService.indexWorkerProfile(profileId).catch(() => {});
+    } else {
+      this.matchingService.indexEmployerProfile(profileId).catch(() => {});
     }
 
     this.eventEmitter.emit(AdminNotificationEvent.PROFILE_UPDATED, {
@@ -949,9 +972,11 @@ export class ProfileService {
     return Promise.all([
       this.fileService.uploadToStorage(kycDocument, {
         folder: 'kyc-documents',
+        access: 'private',
       }),
       this.fileService.uploadToStorage(kycSelfie, {
         folder: 'kyc-documents',
+        access: 'private',
       }),
     ]);
   }
@@ -967,6 +992,16 @@ export class ProfileService {
         tx,
         createProfileDto,
       );
+
+      if (createProfileDto.categoryIds && createProfileDto.categoryIds.length > 0) {
+        await tx.profileCategory.createMany({
+          data: createProfileDto.categoryIds.map((categoryId) => ({
+            profile_id: createdProfile.id,
+            category_id: categoryId,
+          })),
+          skipDuplicates: true,
+        });
+      }
 
       await this.createFileRecords(tx, createdProfile.id, [
         documentUploadResult,
@@ -1022,7 +1057,7 @@ export class ProfileService {
         address: createProfileDto.address,
         description: createProfileDto.description || '',
         profile_type: createProfileDto.profileType,
-        category_id: createProfileDto.profileType === 'WORKER' ? (createProfileDto.categoryId ?? null) : null,
+        category_id: null,
         status: 'PENDING_ACTIVATION',
         verification_status: 'PENDING',
         reliability_score: 100,

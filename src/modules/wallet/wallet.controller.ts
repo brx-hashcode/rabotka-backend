@@ -1,12 +1,11 @@
 import {
+  BadRequestException,
   Controller,
   Get,
   Query,
   ForbiddenException,
   UseGuards,
   Req,
-  ParseIntPipe,
-  DefaultValuePipe,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -77,14 +76,19 @@ export class WalletController {
   }
 
   @Get('monthly-revenue')
-  @ApiOperation({ summary: 'Get monthly revenue for the last N months (admin only)' })
+  @ApiOperation({
+    summary:
+      'Monthly revenue (admin): use `year` for Jan–Dec of that year, or `rollingMonths` for a rolling window ending this month',
+  })
   @ApiResponse({
     status: 200,
-    description: 'Array of { month: "YYYY-MM", revenue: number }',
+    description:
+      'Array of { month: "YYYY-MM", revenue: number }; length is 12 for `year`, or `rollingMonths` for rolling',
   })
   async getMonthlyRevenue(
     @Req() req: AdminAuthenticatedRequest,
-    @Query('months', new DefaultValuePipe(12), ParseIntPipe) months: number,
+    @Query('year') yearStr?: string,
+    @Query('rollingMonths') rollingMonthsStr?: string,
   ): Promise<{ month: string; revenue: number }[]> {
     const user = await this.prisma.user.findUnique({
       where: { id: req.user.userId },
@@ -93,7 +97,25 @@ export class WalletController {
     if (!user || !ALLOWED_WALLET_ROLES.has(user.role)) {
       throw new ForbiddenException('Only ADMIN or SUPER_ADMIN can access wallet data');
     }
-    return this.walletService.getMonthlyRevenue(months);
+
+    if (rollingMonthsStr !== undefined && rollingMonthsStr !== '') {
+      const parsed = Number.parseInt(rollingMonthsStr, 10);
+      if (!Number.isFinite(parsed)) {
+        throw new BadRequestException('Invalid rollingMonths');
+      }
+      return this.walletService.getMonthlyRevenueRollingMonths(parsed);
+    }
+
+    let year = new Date().getFullYear();
+    if (yearStr !== undefined && yearStr !== '') {
+      const parsed = Number.parseInt(yearStr, 10);
+      if (!Number.isFinite(parsed)) {
+        throw new BadRequestException('Invalid year');
+      }
+      year = Math.min(2100, Math.max(2000, parsed));
+    }
+
+    return this.walletService.getMonthlyRevenueForCalendarYear(year);
   }
 
   @Get('transactions')

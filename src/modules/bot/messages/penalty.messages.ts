@@ -206,6 +206,65 @@ export function formatCancelApplicationNoPenalty(params: {
   ].join('\n');
 }
 
+export function formatPenaltyReminderDay(params: {
+  firstName: string;
+  amount: number;
+  dayNumber: number;
+  totalUnpaid: number;
+}): string {
+  const { firstName, amount, dayNumber, totalUnpaid } = params;
+  const amountStr = amount.toLocaleString('fr-FR');
+  const totalStr = totalUnpaid.toLocaleString('fr-FR');
+
+  const urgencyLines: Record<number, string[]> = {
+    1: [
+      `Bonjour ${firstName}, vous avez une pénalité impayée de *${amountStr} FCFA* sur Rabotka.`,
+      '',
+      'Réglez cette pénalité pour continuer à postuler aux offres et publier.',
+    ],
+    2: [
+      `⚠️ *Rappel (Jour 2)* — Bonjour ${firstName}, votre pénalité de *${amountStr} FCFA* est toujours impayée.`,
+      '',
+      'Vous avez encore *1 jour* pour régler avant le blocage complet de votre compte.',
+    ],
+    3: [
+      `🚨 *Dernier avertissement* — Bonjour ${firstName}.`,
+      '',
+      `Votre pénalité de *${amountStr} FCFA* n'a pas été réglée depuis ${dayNumber} jours.`,
+      '',
+      '*Votre compte sera bloqué dans moins de 24h.* Vous ne pourrez plus postuler, publier des offres ni débloquer des contacts.',
+    ],
+  };
+
+  const header = urgencyLines[dayNumber] ?? urgencyLines[1];
+  const totalLine =
+    totalUnpaid !== amount
+      ? [`*Total impayé*: ${totalStr} FCFA`, '']
+      : [];
+
+  return [
+    ...header,
+    ...totalLine,
+    '',
+    '*Comment payer :*',
+    'Tapez *PAYER* pour régler vos pénalités directement depuis le bot.',
+    '',
+    'Tapez *PROFIL* pour voir le détail de vos pénalités.',
+  ].join('\n');
+}
+
+export function formatPenaltyPaidSuccess(firstName: string): string {
+  return [
+    `✅ *Paiement confirmé* — Merci ${firstName} !`,
+    '',
+    'Vos pénalités ont été réglées. Votre compte est maintenant *débloqué*.',
+    '',
+    'Vous pouvez à nouveau postuler aux offres et publier.',
+    '',
+    'Tapez *MENU* pour continuer.',
+  ].join('\n');
+}
+
 export function formatCancelApplicationWithPenalty(params: {
   offerTitle: string;
   scheduledAt: Date;

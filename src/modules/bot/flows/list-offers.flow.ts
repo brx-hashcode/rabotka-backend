@@ -7,8 +7,9 @@ import {
   formatOfferDetail,
   formatOfferDetailWithActions,
   formatOfferListCompact,
+  formatNoOffersAvailable,
   formatPaymentFlow,
-  type OfferListItem,
+  jobOfferToOfferListItem,
 } from '../messages/offers.messages';
 import { menuMessage } from '../messages/menu.messages';
 
@@ -77,7 +78,7 @@ async function handleLoadMore(params: FlowParams): Promise<FlowResult> {
     };
   }
   const newOfferIds = data.map((o) => o.id);
-  const offers = data.map((o) => toOfferListItem(o));
+  const offers = data.map((o) => jobOfferToOfferListItem(o));
   const message = formatOfferListCompact(offers, !!newCursor);
   return {
     reply: [message],
@@ -106,7 +107,7 @@ async function handleListSelectOffer(
       clearState: true,
     };
   }
-  const message = formatOfferDetailWithActions(toOfferListItem(offer));
+  const message = formatOfferDetailWithActions(jobOfferToOfferListItem(offer));
   return {
     reply: [message],
     nextState: {
@@ -170,24 +171,30 @@ async function handleDetailApply(
       clearState: true,
     };
   }
-  const flowLabel = formatPaymentFlow(offer.payment_flow);
-  const penaltyStr = await ctx.systemConfigService.getRaw(
-    'fees.late_cancellation_penalty_fcfa',
-    '5000',
-  );
-  const penalty = Number(penaltyStr) || 5000;
+  const fees = await ctx.systemConfigService.getFees();
+  const penalty = fees.lateCancellationPenaltyFcfa;
+  const cancellationThresholdHours = fees.cancellationThresholdHours;
+  let amountStr = 'Prix à négocier';
+  if (offer.amount != null) {
+    const flowLabel = offer.payment_flow
+      ? formatPaymentFlow(offer.payment_flow)
+      : '';
+    amountStr = flowLabel
+      ? `${offer.amount.toLocaleString('fr-FR')} FCFA ${flowLabel}`
+      : `${offer.amount.toLocaleString('fr-FR')} FCFA`;
+  }
   const text = [
     '*Vous êtes sur le point de postuler*',
     '',
     `*Offre*: ${offer.title}`,
     `*Date*: ${formatOfferDate(offer.scheduled_at)}`,
-    `*Montant*: ${offer.amount.toLocaleString('fr-FR')} FCFA ${flowLabel}`,
+    `*Montant*: ${amountStr}`,
     `*Adresse*: ${offer.address}`,
     '',
     '*ENGAGEMENT IMPORTANT*:',
     "Vos informations seront partagées avec l'employeur",
     'Vous vous engagez à être présent et ponctuel',
-    `*Annulation < 4h avant = pénalité de ${penalty.toLocaleString('fr-FR')} FCFA*`,
+    `*Annulation < ${cancellationThresholdHours}h avant = pénalité de ${penalty.toLocaleString('fr-FR')} FCFA*`,
     'Impact sur votre score de fiabilité',
     '',
     '*Confirmez-vous votre candidature ?*',
@@ -197,7 +204,19 @@ async function handleDetailApply(
     '*Tapez le numéro correspondant.*',
     '',
   ].join('\n');
-  const applyState = getApplyJobInitialState(offerId);
+  const pl = params.state.payload || {};
+  const offerIds = (pl.offerIds as string[]) ?? [];
+  const nextCursor = pl.nextCursor as string | undefined;
+  const selectedOfferIndex =
+    pl.selectedOfferIndex === undefined
+      ? Math.max(0, offerIds.indexOf(offerId))
+      : (pl.selectedOfferIndex as number);
+
+  const applyState = getApplyJobInitialState(offerId, {
+    offerIds,
+    nextCursor,
+    selectedOfferIndex,
+  });
   return { reply: [text], nextState: applyState };
 }
 
@@ -213,7 +232,7 @@ async function handleDetailViewDescription(
       clearState: true,
     };
   }
-  const text = formatOfferDetail(toOfferListItem(offer));
+  const text = formatOfferDetail(jobOfferToOfferListItem(offer));
   return { reply: [text], nextState: state };
 }
 
@@ -228,14 +247,24 @@ async function handleDetailBackToList(
   const validOffers = offers.filter(
     (o): o is NonNullable<typeof o> => o != null,
   );
-  const listItems = validOffers.map((o) => toOfferListItem(o));
+  const withOpenSlots = validOffers.filter((o) => {
+    const accepted = o.acceptedCount ?? 0;
+    return accepted < o.quantity;
+  });
+  if (withOpenSlots.length === 0) {
+    return {
+      reply: [formatNoOffersAvailable()],
+      clearState: true,
+    };
+  }
+  const listItems = withOpenSlots.map((o) => jobOfferToOfferListItem(o));
   const message = formatOfferListCompact(listItems, !!nextCursor);
   return {
     reply: [message],
     nextState: {
       ...state,
       payload: {
-        offerIds,
+        offerIds: withOpenSlots.map((o) => o.id),
         nextCursor,
         step: 'list',
         selectedOfferIndex: undefined,

@@ -245,6 +245,23 @@ describe('formatApplyConfirmation', () => {
     expect(msg).toContain('Jean Dupont');
     expect(msg).toContain('06 000 000');
     expect(msg).toContain('90/100');
+    expect(msg).toContain('Annulation < 4h avant');
+  });
+
+  it('uses lateCancellationThresholdHours from params', () => {
+    const msg = formatApplyConfirmation({
+      title: 'X',
+      scheduled_at: date,
+      amount: 1000,
+      payment_flow: 'DAILY',
+      address: 'Y',
+      workerName: 'Z',
+      workerPhone: '0',
+      workerEmail: 'z@test.com',
+      reliabilityScore: 80,
+      lateCancellationThresholdHours: 12,
+    });
+    expect(msg).toContain('Annulation < 12h avant');
   });
 
   it('defaults reliabilityScore to 100 when null', () => {
@@ -344,6 +361,19 @@ describe('formatCancellationToEmployer', () => {
     });
     expect(msg).toContain('tardive');
     expect(msg).toContain('Aucune raison donnée');
+    expect(msg).toContain('< 4h)');
+  });
+
+  it('uses lateCancellationThresholdHours in late penalty note', () => {
+    const msg = formatCancellationToEmployer({
+      workerName: 'Paul',
+      offerTitle: 'Livreur',
+      scheduledAt: date,
+      reason: null,
+      wasLatePenalty: true,
+      lateCancellationThresholdHours: 6,
+    });
+    expect(msg).toContain('< 6h)');
   });
 });
 

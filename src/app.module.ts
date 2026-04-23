@@ -51,6 +51,7 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
 import { WsNotificationsModule } from './modules/ws-notifications/ws-notifications.module';
 import { ContactUnlockModule } from './modules/contact-unlock/contact-unlock.module';
 import { StorageModule } from './common/services/storage/storage.module';
+import { AdvertisementModule } from './modules/advertisement/advertisement.module';
 import { ImageWatermarkModule } from './common/services/image-watermark/image-watermark.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -154,6 +155,7 @@ import { HttpExceptionFilter } from './common/filters/http-exception.filter';
     EventEmitterModule.forRoot({ wildcard: true }),
     ContactUnlockModule,
     WsNotificationsModule,
+    AdvertisementModule,
   ],
   controllers: [AppController],
   providers: [
