@@ -1,4 +1,4 @@
-import { Controller, Get, Post, UseGuards } from '@nestjs/common';
+import { Controller, Delete, Get, Param, Post, UseGuards } from '@nestjs/common';
 import { UserRole } from '@prisma/client';
 import { AdminAuthGuard } from '../auth/guards/admin-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -31,6 +31,13 @@ export class AdminNotificationController {
   @Roles(UserRole.MANAGER)
   async clear() {
     await this.service.clearAll();
+    return { ok: true };
+  }
+
+  @Delete(':id')
+  @Roles(UserRole.MODERATOR)
+  async deleteOne(@Param('id') id: string) {
+    await this.service.deleteOne(id);
     return { ok: true };
   }
 }

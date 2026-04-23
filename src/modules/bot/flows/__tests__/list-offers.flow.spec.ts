@@ -25,7 +25,7 @@ const workerProfile: BotProfile = {
   reliability_score: 100,
 };
 
-function makeOffer(id: string) {
+function makeOffer(id: string, acceptedCount = 0) {
   return {
     id,
     title: `Offre ${id}`,
@@ -36,9 +36,11 @@ function makeOffer(id: string) {
     address: '123 Avenue de la Paix, Brazzaville',
     note: null,
     quantity: 2,
+    acceptedCount,
     status: 'ACTIVE',
     employer_id: 'employer-1',
     created_at: new Date(),
+    employer: { reliability_score: 90 as number | null },
   };
 }
 
@@ -50,6 +52,15 @@ const mockJobOfferService = {
 const ctx = {
   jobOfferService: mockJobOfferService,
   systemConfigService: {
+    getFees: jest.fn().mockResolvedValue({
+      lateCancellationPenaltyFcfa: 5000,
+      lateCancellationScoreDeduction: 5,
+      cancellationThresholdHours: 4,
+      reliabilityScoreMin: 50,
+      employerCancelScoreDeduction: 5,
+      employerGhostScoreDeduction: 10,
+      billingBlockThreshold: 2,
+    }),
     getRaw: jest.fn().mockResolvedValue('5000'),
   } as any,
 };

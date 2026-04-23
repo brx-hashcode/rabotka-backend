@@ -193,7 +193,10 @@ describe('runUnlockContactFlow()', () => {
       });
       const result = await runUnlockContactFlow(makeState(), '1', workerProfile, ctx);
       expect(result.clearState).toBe(true);
-      expect(ctx.botNotification.sendContactUnlockedNotification).toHaveBeenCalledWith('attempt-1');
+      expect(ctx.botNotification.sendContactUnlockedNotification).toHaveBeenCalledWith(
+        'attempt-1',
+        { skipNotifyProfileId: workerProfile.id },
+      );
       expect(result.reply[0]).toContain('Marie Martin');
     });
 
@@ -216,12 +219,14 @@ describe('runUnlockContactFlow()', () => {
         } as unknown as UnlockContactContext['contactUnlockService'],
       });
       await runUnlockContactFlow(makeState(), '1', employerProfile, ctx);
-      const calls = (ctx.botNotification.sendContactUnlockedNotification as jest.Mock).mock.calls.map(
-        (c) => c[0],
-      );
-      expect(calls).toContain('attempt-1');
-      expect(calls).toContain('attempt-2');
-      expect(calls).toContain('attempt-3');
+      const calls = (ctx.botNotification.sendContactUnlockedNotification as jest.Mock).mock.calls;
+      const attemptIds = calls.map((c) => c[0] as string);
+      expect(attemptIds).toContain('attempt-1');
+      expect(attemptIds).toContain('attempt-2');
+      expect(attemptIds).toContain('attempt-3');
+      for (const c of calls) {
+        expect(c[1]).toEqual({ skipNotifyProfileId: employerProfile.id });
+      }
     });
 
     it('handles payUnlock error gracefully', async () => {

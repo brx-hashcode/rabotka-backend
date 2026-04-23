@@ -73,7 +73,20 @@ describe('BotNotificationService', () => {
       deps.botState as any,
       deps.botInbox as any,
       { getByApplicationId: jest.fn().mockResolvedValue(null) } as any,
-      { getContactUnlockFees: jest.fn().mockResolvedValue({ employerFeeFcfa: 500, workerFeeFcfa: 100, expiryHours: 48 }) } as any,
+      {
+        getContactUnlockFees: jest
+          .fn()
+          .mockResolvedValue({ employerFeeFcfa: 500, workerFeeFcfa: 100, expiryHours: 48 }),
+        getFees: jest.fn().mockResolvedValue({
+          lateCancellationPenaltyFcfa: 5000,
+          lateCancellationScoreDeduction: 5,
+          cancellationThresholdHours: 4,
+          reliabilityScoreMin: 50,
+          employerCancelScoreDeduction: 5,
+          employerGhostScoreDeduction: 10,
+          billingBlockThreshold: 2,
+        }),
+      } as any,
       { getProfileWalletBalance: jest.fn().mockResolvedValue(0) } as any,
     );
   });

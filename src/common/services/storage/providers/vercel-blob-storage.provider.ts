@@ -3,7 +3,11 @@ import { ConfigService } from '@nestjs/config';
 import { put, del, head } from '@vercel/blob';
 import { StorageProvider } from '@prisma/client';
 import { IStorageProvider } from '../interfaces/storage-provider.interface';
-import { UploadOptions, UploadResult } from '../types/storage.types';
+import {
+  GetUrlOptions,
+  UploadOptions,
+  UploadResult,
+} from '../types/storage.types';
 
 @Injectable()
 export class VercelBlobStorageProvider implements IStorageProvider {
@@ -67,7 +71,7 @@ export class VercelBlobStorageProvider implements IStorageProvider {
     }
   }
 
-  async getUrl(key: string): Promise<string> {
+  async getUrl(key: string, _options?: GetUrlOptions): Promise<string> {
     try {
       const result = await head(key, {
         token: this.token,

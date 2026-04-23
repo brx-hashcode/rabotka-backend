@@ -1,10 +1,7 @@
 import { Logger } from '@nestjs/common';
 import { ReminderProcessor } from '../reminder.processor';
 import { ApplicationStatus, JobOfferStatus } from '@prisma/client';
-import {
-  EMPLOYER_GHOST_SCORE_DEDUCTION,
-  RELIABILITY_SCORE_MIN,
-} from '../../../application/application.constants';
+import type { SystemConfigService } from '../../../system-config/system-config.service';
 
 jest.spyOn(Logger.prototype, 'log').mockImplementation(() => {});
 jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => {});
@@ -12,9 +9,12 @@ jest.spyOn(Logger.prototype, 'debug').mockImplementation(() => {});
 
 const buildApplication = (overrides: Record<string, unknown> = {}) => ({
   id: 'app-1',
+  job_offer_id: 'offer-1',
   status: 'ACCEPTED',
   worker: { phone: '+1234567890' },
   job_offer: {
+    id: 'offer-1',
+    status: JobOfferStatus.FILLED,
     title: 'Maçon',
     scheduled_at: new Date('2026-03-13T10:00:00Z'),
     address: '123 rue principale',
@@ -34,6 +34,7 @@ describe('ReminderProcessor', () => {
   let whatsApp: jest.Mocked<any>;
   let queueService: jest.Mocked<any>;
   let redis: jest.Mocked<any>;
+  let systemConfigService: jest.Mocked<SystemConfigService>;
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -46,11 +47,25 @@ describe('ReminderProcessor', () => {
       jobOffer: {
         findMany: jest.fn().mockResolvedValue([]),
         updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+        update: jest.fn().mockResolvedValue({}),
       },
       profile: {
         update: jest.fn().mockResolvedValue({}),
       },
-      $transaction: jest.fn((ops: Promise<unknown>[]) => Promise.all(ops)),
+      $transaction: jest.fn((arg: unknown) => {
+        if (typeof arg === 'function') {
+          const tx = {
+            application: {
+              update: prisma.application.update,
+            },
+            jobOffer: {
+              update: prisma.jobOffer.update,
+            },
+          };
+          return (arg as (tx: unknown) => Promise<unknown>)(tx);
+        }
+        return Promise.all(arg as Promise<unknown>[]);
+      }),
     };
     whatsApp = { sendTextMessage: jest.fn().mockResolvedValue(undefined) };
     queueService = { addJob: jest.fn().mockResolvedValue('job-1') };
@@ -58,7 +73,24 @@ describe('ReminderProcessor', () => {
       get: jest.fn().mockResolvedValue(null),
       set: jest.fn().mockResolvedValue('OK'),
     };
-    processor = new ReminderProcessor(prisma, whatsApp, queueService, redis);
+    systemConfigService = {
+      getFees: jest.fn().mockResolvedValue({
+        lateCancellationPenaltyFcfa: 5000,
+        lateCancellationScoreDeduction: 5,
+        cancellationThresholdHours: 4,
+        reliabilityScoreMin: 50,
+        employerCancelScoreDeduction: 5,
+        employerGhostScoreDeduction: 10,
+        billingBlockThreshold: 2,
+      }),
+    } as any;
+    processor = new ReminderProcessor(
+      prisma,
+      whatsApp,
+      queueService,
+      redis,
+      systemConfigService,
+    );
   });
 
   // ─── process() dispatch ───────────────────────────────────────────────────
@@ -213,8 +245,8 @@ describe('ReminderProcessor', () => {
           where: { id: 'emp-ghost' },
           data: {
             reliability_score: Math.max(
-              RELIABILITY_SCORE_MIN,
-              100 - EMPLOYER_GHOST_SCORE_DEDUCTION,
+              50,
+              100 - 10,
             ),
           },
         }),
@@ -238,7 +270,7 @@ describe('ReminderProcessor', () => {
 
       expect(prisma.profile.update).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: { reliability_score: RELIABILITY_SCORE_MIN },
+          data: { reliability_score: 50 },
         }),
       );
     });
@@ -268,7 +300,7 @@ describe('ReminderProcessor', () => {
         ]);
       prisma.application.findMany.mockResolvedValue([] as never);
       prisma.$transaction.mockRejectedValueOnce(new Error('DB error'));
-      const warnSpy = jest.spyOn(Logger.prototype, 'warn');
+      jest.spyOn(Logger.prototype, 'warn');
 
       await expect(
         processor.process({ data: { type: 'scan' } }),
@@ -392,6 +424,7 @@ describe('ReminderProcessor', () => {
     it('marks application as STARTED, sends WhatsApp message and sets redis key', async () => {
       prisma.application.findUnique.mockResolvedValue(buildApplication());
       prisma.application.update = jest.fn().mockResolvedValue({});
+      prisma.jobOffer.update = jest.fn().mockResolvedValue({});
 
       await processor.process({ data: { type: 'reminder_start', applicationId: 'app-1' } });
 
@@ -399,6 +432,12 @@ describe('ReminderProcessor', () => {
         expect.objectContaining({
           where: { id: 'app-1' },
           data: { status: ApplicationStatus.STARTED },
+        }),
+      );
+      expect(prisma.jobOffer.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'offer-1' },
+          data: { status: JobOfferStatus.IN_PROGRESS },
         }),
       );
       expect(whatsApp.sendTextMessage).toHaveBeenCalledWith('+1234567890', expect.any(String));

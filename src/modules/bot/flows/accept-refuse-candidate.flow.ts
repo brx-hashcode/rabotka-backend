@@ -118,8 +118,6 @@ async function handleAcceptRefuseStep1(args: StepArgs): Promise<FlowResult> {
               '',
               'Le travailleur a été notifié.',
               '',
-              '─────────────────────',
-              '',
               unlockPrompt,
             ].join('\n'),
           ],

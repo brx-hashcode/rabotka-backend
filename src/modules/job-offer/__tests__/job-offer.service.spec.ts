@@ -235,6 +235,17 @@ describe('JobOfferService', () => {
         }),
       );
     });
+
+    it('omits offers with no open slots (accepted >= quantity)', async () => {
+      (prisma.jobOffer.findMany as jest.Mock).mockResolvedValue([
+        { ...mockOffer, id: 'offer-full', quantity: 1, _count: { applications: 1 } },
+        { ...mockOffer, id: 'offer-open', quantity: 2, _count: { applications: 0 } },
+      ]);
+      const result = await service.findActive(5);
+      expect(result.data).toHaveLength(1);
+      expect(result.data[0]?.id).toBe('offer-open');
+      expect(result.nextCursor).toBeNull();
+    });
   });
 
   describe('validateCreateDto()', () => {

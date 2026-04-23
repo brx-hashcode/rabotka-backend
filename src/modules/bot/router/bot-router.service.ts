@@ -11,6 +11,8 @@ import {
   CMD_PROFILE,
   CMD_HISTORY,
   CMD_LIST_OFFERS,
+  CMD_MY_APPLICATIONS,
+  CMD_PENDING_PAYMENTS,
   CMD_PAY,
   CMD_UNLOCK,
   CMD_RECOMMENDED_JOBS,
@@ -40,18 +42,25 @@ function matchCommandAlias(
   if (CMD_FILLED_JOBS.includes(normalized) && isEmployer) return 'filled_jobs';
   if (CMD_PROFILE.includes(normalized)) return 'profile';
   if (CMD_HISTORY.includes(normalized)) return 'penalty_history';
+  if (CMD_MY_APPLICATIONS.includes(normalized)) return 'my_applications';
+  if (CMD_PENDING_PAYMENTS.includes(normalized)) return 'pending_payments';
   if (CMD_LIST_OFFERS.includes(normalized) && isWorker) return 'list_offers';
   if (CMD_PAY.includes(normalized) && isWorker) return 'pay_penalties';
   if (CMD_UNLOCK.includes(normalized)) return 'unlock_contact';
-  if (CMD_RECOMMENDED_JOBS.includes(normalized) && isWorker) return 'recommended_jobs';
-  if (CMD_RECOMMENDED_PROFILES.includes(normalized) && isEmployer) return 'recommended_profiles';
+  if (CMD_RECOMMENDED_JOBS.includes(normalized) && isWorker)
+    return 'recommended_jobs';
+  if (CMD_RECOMMENDED_PROFILES.includes(normalized) && isEmployer)
+    return 'recommended_profiles';
   return null;
 }
 
 function matchWorkerNumeric(trimmed: string): string | null {
   if (trimmed === WORKER_MENU_OPTIONS.LIST_OFFERS) return 'list_offers';
   if (trimmed === WORKER_MENU_OPTIONS.MY_APPLICATIONS) return 'my_applications';
-  if (trimmed === WORKER_MENU_OPTIONS.RECOMMENDED_JOBS) return 'recommended_jobs';
+  if (trimmed === WORKER_MENU_OPTIONS.WAITING_PAYMENTS)
+    return 'pending_payments';
+  if (trimmed === WORKER_MENU_OPTIONS.RECOMMENDED_JOBS)
+    return 'recommended_jobs';
   if (trimmed === WORKER_MENU_OPTIONS.PROFILE) return 'profile';
   if (trimmed === WORKER_MENU_OPTIONS.HISTORY) return 'penalty_history';
   if (trimmed === WORKER_MENU_OPTIONS.HELP) return 'help';
@@ -65,10 +74,13 @@ function matchEmployerNumeric(trimmed: string): string | null {
   if (trimmed === EMPLOYER_MENU_OPTIONS.CANDIDATURES_RECEIVED)
     return 'candidatures_received';
   if (trimmed === EMPLOYER_MENU_OPTIONS.FILLED_JOBS) return 'filled_jobs';
-  if (trimmed === EMPLOYER_MENU_OPTIONS.RECOMMENDED_PROFILES) return 'recommended_profiles';
+  if (trimmed === EMPLOYER_MENU_OPTIONS.RECOMMENDED_PROFILES)
+    return 'recommended_profiles';
   if (trimmed === EMPLOYER_MENU_OPTIONS.PROFILE) return 'profile';
   if (trimmed === EMPLOYER_MENU_OPTIONS.HISTORY) return 'penalty_history';
   if (trimmed === EMPLOYER_MENU_OPTIONS.HELP) return 'help';
+  if (trimmed === EMPLOYER_MENU_OPTIONS.WAITING_PAYMENTS)
+    return 'pending_payments';
   return null;
 }
 
@@ -84,8 +96,6 @@ export class BotRouterService {
     const isWorker = profile.profile_type === 'WORKER';
     const isEmployer = profile.profile_type === 'EMPLOYER';
 
-    // Exact menu keywords (not "menu …" phrases) exit any flow so users can
-    // always reach the main menu (e.g. publish-job / accept-refuse had no CMD_MENU).
     if (state?.flowId && CMD_MENU.includes(normalized)) {
       return { type: 'command', commandId: 'menu' };
     }

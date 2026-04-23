@@ -72,9 +72,12 @@ export function formatContactUnlockedMessage(params: {
   ].join('\n');
 }
 
-export function formatContactUnlockPending(
-  waitingFor: 'worker' | 'employer',
-): string {
+export function formatContactUnlockPending(params: {
+  waitingFor: 'worker' | 'employer';
+  otherName: string;
+  expiryHours: number;
+}): string {
+  const { waitingFor, otherName, expiryHours } = params;
   const party = waitingFor === 'worker' ? 'travailleur' : 'employeur';
 
   return [
@@ -82,8 +85,11 @@ export function formatContactUnlockPending(
     '',
     'Votre paiement a bien été enregistré.',
     '',
-    `*En attente du paiement du ${party}.*`,
-    `Dès qu'il/elle aura payé, vous recevrez automatiquement les coordonnées.`,
+    `*En attente du paiement du ${party} (${otherName}).*`,
+    '',
+    `Une fois le paiement confirmé des deux côtés (vous et ${otherName}), vous recevrez automatiquement les coordonnées.`,
+    '',
+    `Si une partie ne paie pas après *${expiryHours}h*, votre paiement sera reversé vers votre wallet interne.`,
   ].join('\n');
 }
 

@@ -20,7 +20,13 @@ export class WhatsAppEventSender {
 
     const verb =
       action === 'created' ? 'Nouvel événement' : 'Événement mis à jour';
-    const message = `${verb} : ${payload.title}\nDu ${payload.startDate} au ${payload.endDate}${payload.location ? `\nLieu : ${payload.location}` : ''}`;
+    let locationLine = '';
+    if (payload.location) {
+      locationLine = payload.callToAction
+        ? `\n${payload.callToAction} : ${payload.location}`
+        : `\nLien : ${payload.location}`;
+    }
+    const message = `${verb} : ${payload.title}\nDu ${payload.startDate} au ${payload.endDate}${locationLine}`;
 
     this.logger.log(
       `WhatsApp event notification to ${recipient.phone}: ${message.slice(0, 80)}`,

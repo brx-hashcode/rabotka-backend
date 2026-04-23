@@ -4,7 +4,11 @@ import { v2 as cloudinary } from 'cloudinary';
 import type { UploadApiOptions } from 'cloudinary';
 import { StorageProvider } from '@prisma/client';
 import { IStorageProvider } from '../interfaces/storage-provider.interface';
-import { UploadOptions, UploadResult } from '../types/storage.types';
+import {
+  GetUrlOptions,
+  UploadOptions,
+  UploadResult,
+} from '../types/storage.types';
 
 @Injectable()
 export class CloudinaryStorageProvider implements IStorageProvider {
@@ -47,11 +51,12 @@ export class CloudinaryStorageProvider implements IStorageProvider {
       const mime = options?.mimeType ?? '';
       const isImage = mime.startsWith('image/');
       const isVideo = mime.startsWith('video/');
-      const resourceType: 'image' | 'video' | 'raw' = isImage
-        ? 'image'
-        : isVideo
-          ? 'video'
-          : 'raw';
+      let resourceType: 'image' | 'video' | 'raw' = 'raw';
+      if (isImage) {
+        resourceType = 'image';
+      } else if (isVideo) {
+        resourceType = 'video';
+      }
 
       const uploadOptions: UploadApiOptions = {
         resource_type: resourceType,
@@ -112,7 +117,7 @@ export class CloudinaryStorageProvider implements IStorageProvider {
     }
   }
 
-  getUrl(key: string): Promise<string> {
+  getUrl(key: string, _options?: GetUrlOptions): Promise<string> {
     const url = cloudinary.url(key, {
       secure: true,
     });

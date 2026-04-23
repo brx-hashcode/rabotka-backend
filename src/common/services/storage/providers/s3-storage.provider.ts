@@ -10,7 +10,11 @@ import {
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { StorageProvider } from '@prisma/client';
 import { IStorageProvider } from '../interfaces/storage-provider.interface';
-import { UploadOptions, UploadResult } from '../types/storage.types';
+import {
+  GetUrlOptions,
+  UploadOptions,
+  UploadResult,
+} from '../types/storage.types';
 
 @Injectable()
 export class S3StorageProvider implements IStorageProvider {
@@ -70,7 +74,9 @@ export class S3StorageProvider implements IStorageProvider {
 
       await this.s3Client.send(command);
 
-      const url = await this.getUrl(key);
+      const url = await this.getUrl(key, {
+        access: options?.access ?? 'private',
+      });
 
       this.logger.log(`File uploaded successfully: ${key}`);
 
@@ -102,9 +108,12 @@ export class S3StorageProvider implements IStorageProvider {
     }
   }
 
-  async getUrl(key: string): Promise<string> {
+  async getUrl(key: string, options?: GetUrlOptions): Promise<string> {
     try {
       const endpoint = this.configService.get<string>('AWS_ENDPOINT_URL');
+      if (options?.access === 'public' && endpoint) {
+        return `${endpoint}/${this.bucket}/${key}`;
+      }
 
       if (endpoint) {
         return `${endpoint}/${this.bucket}/${key}`;

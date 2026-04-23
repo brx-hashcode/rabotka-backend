@@ -527,10 +527,14 @@ export class WalletService {
     };
   }
 
-  async getMonthlyRevenue(
-    months: number,
+  /**
+   * Revenue aggregated by calendar month for January–December of `year`
+   * (missing months still returned with revenue 0).
+   */
+  async getMonthlyRevenueForCalendarYear(
+    year: number,
   ): Promise<{ month: string; revenue: number }[]> {
-    const clampedMonths = Math.min(Math.max(1, months), 24);
+    const y = Math.min(2100, Math.max(2000, Math.floor(year)));
 
     const rows = await this.prisma.$queryRaw<
       { month: Date; revenue: bigint }[]
@@ -539,9 +543,43 @@ export class WalletService {
         d.month::date AS month,
         COALESCE(SUM(p.amount), 0)::bigint AS revenue
       FROM generate_series(
-        DATE_TRUNC('month', NOW() - (${clampedMonths - 1} || ' months')::interval),
-        DATE_TRUNC('month', NOW()),
+        DATE_TRUNC('month', make_date(${y}, 1, 1)),
+        DATE_TRUNC('month', make_date(${y}, 12, 1)),
         '1 month'::interval
+      ) AS d(month)
+      LEFT JOIN "payments" p
+        ON DATE_TRUNC('month', p.paid_at) = d.month
+        AND p.status = 'COMPLETED'
+      GROUP BY d.month
+      ORDER BY d.month ASC
+    `;
+
+    return rows.map((row) => ({
+      month: new Date(row.month).toISOString().slice(0, 7),
+      revenue: Number(row.revenue),
+    }));
+  }
+
+  /**
+   * Last `months` calendar months ending at the current month (e.g. months=6 in
+   * April → Nov … Apr), for rolling dashboards like the revenue radar.
+   */
+  async getMonthlyRevenueRollingMonths(
+    months: number,
+  ): Promise<{ month: string; revenue: number }[]> {
+    const clampedMonths = Math.min(Math.max(1, months), 24);
+    const span = clampedMonths - 1;
+
+    const rows = await this.prisma.$queryRaw<
+      { month: Date; revenue: bigint }[]
+    >`
+      SELECT
+        d.month::date AS month,
+        COALESCE(SUM(p.amount), 0)::bigint AS revenue
+      FROM generate_series(
+        DATE_TRUNC('month', NOW() - (${span} * INTERVAL '1 month')),
+        DATE_TRUNC('month', NOW()),
+        INTERVAL '1 month'
       ) AS d(month)
       LEFT JOIN "payments" p
         ON DATE_TRUNC('month', p.paid_at) = d.month

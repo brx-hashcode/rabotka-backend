@@ -279,7 +279,6 @@ describe('ApplicationService', () => {
         mockApplication,
       );
       (prisma.application.count as jest.Mock).mockResolvedValue(0);
-      (prisma.$transaction as jest.Mock).mockResolvedValue([]);
       jest.spyOn(service, 'findById').mockResolvedValue({
         ...mockApplication,
         status: ApplicationStatus.ACCEPTED,

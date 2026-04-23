@@ -78,6 +78,7 @@ import {
 } from '../flows/recommended-profiles.flow';
 import { runRateAssignmentFlow } from '../flows/rate-assignment.flow';
 import { MatchingService } from '../../matching/matching.service';
+import { runRepublishExpiredJobFlow } from '../flows/republish-expired-job.flow';
 
 const INACTIVE_MESSAGE = `Votre compte est créé mais pas encore activé. Cliquez sur le lien de confirmation que nous vous avons envoyé par WhatsApp pour l’activer.`;
 
@@ -148,6 +149,23 @@ export class BotOrchestratorService {
     }
 
     if (profile.billing_status !== BillingStatus.CLEAR) {
+      const normalized = text.trim().toLowerCase();
+      const state = await this.botState.get(profileId);
+      const canContinueFlow =
+        state?.flowId === FLOW_IDS.PAY_PENALTIES ||
+        state?.flowId === FLOW_IDS.UNLOCK_CONTACT ||
+        state?.flowId === FLOW_IDS.MY_APPLICATIONS;
+      const canOpenPaymentRelatedCommand =
+        normalized === 'payer' ||
+        normalized === 'pay' ||
+        normalized === 'contact' ||
+        normalized === 'unlock' ||
+        normalized === 'mes candidatures' ||
+        normalized === 'mes applications' ||
+        normalized === 'paiements en attente';
+      if (canContinueFlow || canOpenPaymentRelatedCommand) {
+        return this.routeMessage(profileId, text, profile, botProfile);
+      }
       return [hasPenaltiesBotMessage()];
     }
 
@@ -203,7 +221,7 @@ export class BotOrchestratorService {
         return this.handleCommandRoute(route, profile, profileId, botProfile);
       }
 
-      if (!state && looksLikeFlowInput(text)) {
+      if (!state) {
         return [
           '⏱ *Session expirée.* Votre conversation précédente a expiré.',
           handleMenuCommand(botProfile),
@@ -342,6 +360,11 @@ export class BotOrchestratorService {
         }),
       [FLOW_IDS.RECOMMENDED_JOBS]: () =>
         runRecommendedJobsFlow(state, input, profile, ctx),
+      [FLOW_IDS.REPUBLISH_EXPIRED_JOB]: () =>
+        runRepublishExpiredJobFlow(state, input, profile, {
+          prisma: this.prisma,
+          jobOfferService: this.jobOfferService,
+        }),
       [FLOW_IDS.RECOMMENDED_PROFILES]: () =>
         runRecommendedProfilesFlow(state, input, profile, {
           prisma: this.prisma,
@@ -372,6 +395,9 @@ export class BotOrchestratorService {
 
       my_applications: () =>
         this.handleMyApplicationsCommand(profile, profileId),
+
+      pending_payments: () =>
+        this.handlePendingPaymentsCommand(botProfile, profileId),
 
       candidatures_received: () =>
         this.handleCandidaturesReceivedCommand(botProfile, profileId),
@@ -454,6 +480,22 @@ export class BotOrchestratorService {
     if (result.applicationIds?.length) {
       const myAppState = getMyApplicationsInitialState(result.applicationIds);
       await this.botState.set(profileId, myAppState);
+    }
+    return [result.message];
+  }
+
+  private async handlePendingPaymentsCommand(
+    botProfile: BotProfile,
+    profileId: string,
+  ): Promise<string[]> {
+    const result = await this.commands.pendingPayments(botProfile);
+    const applicationIds: string[] | undefined = result.applicationIds;
+    if (applicationIds != null && applicationIds.length > 0) {
+      const state = getMyApplicationsInitialState(
+        applicationIds,
+        'pending_payments',
+      );
+      await this.botState.set(profileId, state);
     }
     return [result.message];
   }
@@ -558,6 +600,7 @@ export class BotOrchestratorService {
     const result = await runPayPenaltiesFlow(flowState, '', profile, {
       applicationService: this.applicationService,
       walletService: this.walletService,
+      paymentService: this.paymentService,
     });
     return result.reply;
   }

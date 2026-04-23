@@ -42,4 +42,10 @@ export class AdminNotificationService {
   async clearAll(): Promise<void> {
     await this.prisma.adminNotification.deleteMany();
   }
+
+  async deleteOne(id: string): Promise<void> {
+    await this.prisma.adminNotification.delete({
+      where: { id },
+    });
+  }
 }

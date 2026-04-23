@@ -1,5 +1,6 @@
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { ContractService } from '../contract.service';
+import { computeContractPublicReference } from '../contract-template.helpers';
 
 const baseContract = {
   id: 'contract-1',
@@ -35,6 +36,7 @@ const baseJobOffer = {
   amount: 50000,
   payment_flow: 'DAILY',
   scheduled_at: new Date('2026-02-01'),
+  note: null as string | null,
   employer: baseEmployer,
 };
 
@@ -111,9 +113,23 @@ describe('ContractService', () => {
 
     it('returns PDF buffer for worker', async () => {
       const result = await service.download('contract-1', 'worker-1');
+      const expectedRef = computeContractPublicReference({
+        contractId: baseContract.id,
+        createdAt: baseContract.created_at,
+      });
       expect(documentService.fillDocumentTemplateAsPdf).toHaveBeenCalledWith(
         'tpl-1',
         expect.objectContaining({
+          CONTRACT_ID: expectedRef,
+          CONTRACT_UUID: baseContract.id,
+          START_DATE: '01/02/2026',
+          END_DATE: '01/02/2026',
+          DURATION: '1 jour',
+          EMPLOYER_NAME: 'Bob Martin',
+          WORKER_FULLNAME: 'Alice Dupont',
+          JOB_LOCATION: '10 Rue Brazza',
+          AMOUNT: '50 000',
+          PAY_MODE: expect.stringContaining('journée'),
           WORKER_FIRST_NAME: 'Alice',
           EMPLOYER_FIRST_NAME: 'Bob',
           JOB_TITLE: 'Maçon',

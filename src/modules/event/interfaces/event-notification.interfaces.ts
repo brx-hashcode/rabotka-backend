@@ -11,4 +11,5 @@ export interface EventNotificationPayload {
   endDate: string;
   description?: string | null;
   location?: string | null;
+  callToAction?: string | null;
 }
