@@ -14,7 +14,12 @@ import { BotNotificationService } from '../bot/services/bot-notification.service
 import { MatchingService } from '../matching/matching.service';
 import { CreateJobOfferDto } from './dto/create-job-offer.dto';
 import { AdminUpdateJobOfferDto } from './dto/admin-update-job-offer.dto';
-import { AccountStatus, JobOfferStatus, Prisma } from '@prisma/client';
+import {
+  AccountStatus,
+  JobOfferStatus,
+  PaymentFlow,
+  Prisma,
+} from '@prisma/client';
 
 const MIN_SCHEDULED_HOURS_FROM_NOW = 4;
 const TITLE_MIN = 5;
@@ -34,7 +39,7 @@ export type AdminJobOfferListItem = {
   description: string;
   scheduledAt: string;
   amount: number;
-  paymentFlow: string | null;
+  paymentFlow: PaymentFlow | null;
   address: string;
   note: string | null;
   quantity: number;
@@ -74,7 +79,7 @@ export type JobOfferListItem = {
   description: string;
   scheduled_at: Date;
   amount: number;
-  payment_flow: string | null;
+  payment_flow: PaymentFlow | null;
   address: string;
   note: string | null;
   quantity: number;
@@ -649,7 +654,7 @@ export class JobOfferService {
       description: string;
       scheduled_at: Date;
       amount: unknown;
-      payment_flow: string | null;
+      payment_flow: PaymentFlow | null;
       address: string;
       note: string | null;
       quantity: number;

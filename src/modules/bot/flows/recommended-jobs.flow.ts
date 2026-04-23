@@ -27,7 +27,7 @@ function toOfferListItem(o: {
   description: string;
   scheduled_at: Date;
   amount: number;
-  payment_flow: string;
+  payment_flow: string | null;
   address: string;
   note: string | null;
   quantity: number;

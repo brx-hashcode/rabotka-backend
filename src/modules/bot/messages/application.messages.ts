@@ -95,7 +95,8 @@ function formatDate(d: Date): string {
   });
 }
 
-function formatPaymentFlow(flow: string): string {
+function formatPaymentFlow(flow: string | null): string {
+  if (!flow) return '';
   const map: Record<string, string> = {
     HOURLY: 'par heure',
     DAILY: 'par jour',
@@ -120,7 +121,7 @@ export type ApplicationForList = {
     title: string;
     scheduled_at: Date;
     amount: number;
-    payment_flow: string;
+    payment_flow: string | null;
     address: string;
     status: string;
   };
@@ -165,7 +166,7 @@ export type MyApplicationDetailParams = {
   jobTitle: string;
   scheduled_at: Date;
   amount: number;
-  payment_flow: string;
+  payment_flow: string | null;
   address: string;
   status: string;
 };
@@ -219,7 +220,7 @@ export function formatApplyConfirmation(params: {
   title: string;
   scheduled_at: Date;
   amount: number;
-  payment_flow: string;
+  payment_flow: string | null;
   address: string;
   workerName: string;
   workerPhone: string;
@@ -392,7 +393,7 @@ export type FilledJobListItem = {
   workerName: string;
   scheduled_at: Date | string;
   amount: number;
-  payment_flow: string;
+  payment_flow: string | null;
 };
 
 export function formatFilledJobsListPage(
@@ -408,7 +409,7 @@ export function formatFilledJobsListPage(
   }
   items.forEach((item, i) => {
     const num = i + 1;
-    const flowLabel = formatPaymentFlow(item.payment_flow);
+    const flowLabel = formatPaymentFlow(item.payment_flow ?? '');
     lines.push(
       `${num}. ${item.title}`,
       `    Worker: ${item.workerName}`,
@@ -427,7 +428,7 @@ export function formatFilledJobsListPage(
 }
 
 export function formatFilledJobDetail(params: FilledJobListItem): string {
-  const flowLabel = formatPaymentFlow(params.payment_flow);
+  const flowLabel = formatPaymentFlow(params.payment_flow ?? '');
   return [
     '*Mission sélectionnée*',
     '',
