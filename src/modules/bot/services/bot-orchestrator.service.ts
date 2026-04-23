@@ -76,6 +76,7 @@ import {
   runRecommendedProfilesFlow,
   getRecommendedProfilesInitialState,
 } from '../flows/recommended-profiles.flow';
+import { runRateAssignmentFlow } from '../flows/rate-assignment.flow';
 import { MatchingService } from '../../matching/matching.service';
 
 const INACTIVE_MESSAGE = `Votre compte est créé mais pas encore activé. Cliquez sur le lien de confirmation que nous vous avons envoyé par WhatsApp pour l’activer.`;
@@ -351,6 +352,8 @@ export class BotOrchestratorService {
           botNotification: this.notificationService,
           employerProfileId: profile.id,
         }),
+      [FLOW_IDS.RATE_ASSIGNMENT]: () =>
+        runRateAssignmentFlow(state, input, profile, { prisma: this.prisma }),
     };
     const runner = runners[flowId];
     return runner ? runner() : Promise.resolve(null);

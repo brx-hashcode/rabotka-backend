@@ -736,7 +736,54 @@ export class ApplicationService {
       timestamp: new Date().toISOString(),
     });
 
+    // Fire-and-forget: send rating requests to both parties via WhatsApp
+    this.sendRatingRequests(applicationId, application).catch(() => {});
+
     return updated;
+  }
+
+  private async sendRatingRequests(
+    applicationId: string,
+    application: { worker: { id: string; phone: string; first_name: string; last_name: string }; job_offer: { title: string; employer_id: string } },
+  ): Promise<void> {
+    const assignment = await this.prisma.assignment.findUnique({
+      where: { application_id: applicationId },
+      select: { id: true },
+    });
+    if (!assignment) return;
+
+    const employer = await this.prisma.profile.findUnique({
+      where: { id: application.job_offer.employer_id },
+      select: { id: true, phone: true, first_name: true, last_name: true, whatsapp_connected: true },
+    });
+
+    const jobTitle = application.job_offer.title;
+    const assignmentId = assignment.id;
+
+    // Ask worker to rate employer
+    if (application.worker.phone) {
+      await this.botNotification.sendRatingRequest({
+        raterProfileId: application.worker.id,
+        raterPhone: application.worker.phone,
+        rateeId: application.job_offer.employer_id,
+        assignmentId,
+        rateeLabel: employer ? `${employer.first_name} ${employer.last_name}`.trim() : 'l\'employeur',
+        jobTitle,
+      }).catch(() => {});
+    }
+
+    // Ask employer to rate worker
+    if (employer?.phone && employer.whatsapp_connected) {
+      const workerLabel = `${application.worker.first_name} ${application.worker.last_name}`.trim();
+      await this.botNotification.sendRatingRequest({
+        raterProfileId: employer.id,
+        raterPhone: employer.phone,
+        rateeId: application.worker.id,
+        assignmentId,
+        rateeLabel: workerLabel,
+        jobTitle,
+      }).catch(() => {});
+    }
   }
 
   /** Employer cancels accepted application: reopen job offer, cancel application */
