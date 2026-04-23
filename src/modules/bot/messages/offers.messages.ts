@@ -5,7 +5,7 @@ export type OfferListItem = {
   title: string;
   description: string;
   scheduled_at: Date;
-  amount: number | null;
+  amount: number;
   payment_flow: string | null;
   address: string;
   note: string | null;
@@ -14,37 +14,6 @@ export type OfferListItem = {
   status: string;
   employerScore?: number | null;
 };
-
-/** Map job-offer detail / list API shape to OfferListItem for bot formatters. */
-export function jobOfferToOfferListItem(offer: {
-  id: string;
-  title: string;
-  description: string;
-  scheduled_at: Date;
-  amount: number | null;
-  payment_flow: string | null;
-  address: string;
-  note: string | null;
-  quantity: number;
-  acceptedCount?: number;
-  status: string;
-  employer?: { reliability_score?: number | null } | null;
-}): OfferListItem {
-  return {
-    id: offer.id,
-    title: offer.title,
-    description: offer.description,
-    scheduled_at: offer.scheduled_at,
-    amount: offer.amount,
-    payment_flow: offer.payment_flow,
-    address: offer.address,
-    note: offer.note,
-    quantity: offer.quantity,
-    acceptedCount: offer.acceptedCount ?? 0,
-    status: offer.status,
-    employerScore: offer.employer?.reliability_score ?? null,
-  };
-}
 
 export function formatPaymentFlow(flow: string | null): string {
   if (!flow) return '';
@@ -120,16 +89,12 @@ export function formatOfferListCompact(
     const qty = o.quantity ?? 1;
     const filled = o.acceptedCount ?? 0;
     const remaining = Math.max(0, qty - filled);
-    let spotsLabel: string;
-    if (remaining === 0) {
-      spotsLabel = '🔴 Complet';
-    } else if (remaining === qty) {
-      const placeSuffix = qty > 1 ? 's' : '';
-      spotsLabel = `🟢 ${qty} place${placeSuffix}`;
-    } else {
-      const restanteSuffix = remaining > 1 ? 's' : '';
-      spotsLabel = `🟡 ${remaining}/${qty} restante${restanteSuffix}`;
-    }
+    const spotsLabel =
+      remaining === 0
+        ? '🔴 Complet'
+        : remaining === qty
+          ? `🟢 ${qty} place${qty > 1 ? 's' : ''}`
+          : `🟡 ${remaining}/${qty} restante${remaining > 1 ? 's' : ''}`;
     const shortAddr =
       o.address.length > 40 ? o.address.slice(0, 40) + '…' : o.address;
     lines.push(

@@ -127,7 +127,7 @@ export type ApplicationForList = {
     id: string;
     title: string;
     scheduled_at: Date;
-    amount: number | null;
+    amount: number;
     payment_flow: string | null;
     address: string;
     status: string;
@@ -171,7 +171,7 @@ export function formatMyApplicationsList(
 export type MyApplicationDetailParams = {
   jobTitle: string;
   scheduled_at: Date;
-  amount: number | null;
+  amount: number;
   payment_flow: string | null;
   address: string;
   status: string;
@@ -271,7 +271,7 @@ export function formatMyApplicationDetailWaitingPaymentPaid(
 export function formatApplyConfirmation(params: {
   title: string;
   scheduled_at: Date;
-  amount: number | null;
+  amount: number;
   payment_flow: string | null;
   address: string;
   workerName: string;
@@ -457,7 +457,7 @@ export type FilledJobListItem = {
   title: string;
   workerName: string;
   scheduled_at: Date | string;
-  amount: number | null;
+  amount: number;
   payment_flow: string | null;
 };
 
@@ -474,6 +474,7 @@ export function formatFilledJobsListPage(
   }
   items.forEach((item, i) => {
     const num = i + 1;
+    const flowLabel = formatPaymentFlow(item.payment_flow ?? '');
     lines.push(
       `${num}. ${item.title}`,
       `    Worker: ${item.workerName}`,
@@ -492,6 +493,7 @@ export function formatFilledJobsListPage(
 }
 
 export function formatFilledJobDetail(params: FilledJobListItem): string {
+  const flowLabel = formatPaymentFlow(params.payment_flow ?? '');
   return [
     '*Mission sélectionnée*',
     '',

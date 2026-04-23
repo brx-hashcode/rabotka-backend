@@ -76,6 +76,7 @@ import {
   runRecommendedProfilesFlow,
   getRecommendedProfilesInitialState,
 } from '../flows/recommended-profiles.flow';
+import { runRateAssignmentFlow } from '../flows/rate-assignment.flow';
 import { MatchingService } from '../../matching/matching.service';
 import { runRepublishExpiredJobFlow } from '../flows/republish-expired-job.flow';
 
@@ -374,6 +375,8 @@ export class BotOrchestratorService {
           botNotification: this.notificationService,
           employerProfileId: profile.id,
         }),
+      [FLOW_IDS.RATE_ASSIGNMENT]: () =>
+        runRateAssignmentFlow(state, input, profile, { prisma: this.prisma }),
     };
     const runner = runners[flowId];
     return runner ? runner() : Promise.resolve(null);

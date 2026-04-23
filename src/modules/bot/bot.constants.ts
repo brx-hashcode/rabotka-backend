@@ -19,6 +19,7 @@ export const FLOW_IDS = {
   RECOMMENDED_JOBS: 'recommended_jobs',
   RECOMMENDED_PROFILES: 'recommended_profiles',
   REPUBLISH_EXPIRED_JOB: 'republish_expired_job',
+  RATE_ASSIGNMENT: 'rate_assignment',
 } as const;
 
 export const WORKER_MENU_OPTIONS = {

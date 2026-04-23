@@ -274,6 +274,36 @@ async function handleDetailBackToList(
   };
 }
 
+function toOfferListItem(offer: {
+  id: string;
+  title: string;
+  description: string;
+  scheduled_at: Date;
+  amount: number;
+  payment_flow: string | null;
+  address: string;
+  note: string | null;
+  quantity: number;
+  acceptedCount?: number;
+  status: string;
+  employer?: { reliability_score?: number | null } | null;
+}): OfferListItem {
+  return {
+    id: offer.id,
+    title: offer.title,
+    description: offer.description,
+    scheduled_at: offer.scheduled_at,
+    amount: offer.amount,
+    payment_flow: offer.payment_flow,
+    address: offer.address,
+    note: offer.note,
+    quantity: offer.quantity,
+    acceptedCount: offer.acceptedCount ?? 0,
+    status: offer.status,
+    employerScore: offer.employer?.reliability_score ?? null,
+  };
+}
+
 export async function runListOffersFlow(
   state: BotState,
   input: string,

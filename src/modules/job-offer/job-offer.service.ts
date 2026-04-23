@@ -17,8 +17,8 @@ import { CreateJobOfferDto } from './dto/create-job-offer.dto';
 import { AdminUpdateJobOfferDto } from './dto/admin-update-job-offer.dto';
 import {
   AccountStatus,
-  ApplicationStatus,
   JobOfferStatus,
+  PaymentFlow,
   Prisma,
 } from '@prisma/client';
 
@@ -40,8 +40,8 @@ export type AdminJobOfferListItem = {
   category: { id: string; name: string } | null;
   description: string;
   scheduledAt: string;
-  amount: number | null;
-  paymentFlow: string | null;
+  amount: number;
+  paymentFlow: PaymentFlow | null;
   address: string;
   note: string | null;
   quantity: number;
@@ -80,8 +80,8 @@ export type JobOfferListItem = {
   title: string;
   description: string;
   scheduled_at: Date;
-  amount: number | null;
-  payment_flow: string | null;
+  amount: number;
+  payment_flow: PaymentFlow | null;
   address: string;
   note: string | null;
   quantity: number;
@@ -778,7 +778,7 @@ export class JobOfferService {
       description: string;
       scheduled_at: Date;
       amount: unknown;
-      payment_flow: string | null;
+      payment_flow: PaymentFlow | null;
       address: string;
       note: string | null;
       quantity: number;
