@@ -13,7 +13,8 @@ export type FlowId =
   | 'candidatures_list'
   | 'list_offers'
   | 'my_applications'
-  | 'unlock_contact';
+  | 'unlock_contact'
+  | 'my_offers';
 
 export type BotProfileType = 'WORKER' | 'EMPLOYER';
 

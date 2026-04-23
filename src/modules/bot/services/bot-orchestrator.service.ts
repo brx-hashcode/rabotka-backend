@@ -377,6 +377,32 @@ export class BotOrchestratorService {
         }),
       [FLOW_IDS.RATE_ASSIGNMENT]: () =>
         runRateAssignmentFlow(state, input, profile, { prisma: this.prisma }),
+      [FLOW_IDS.MY_OFFERS]: async () => {
+        const currentPage = (state.payload?.page as number) ?? 0;
+        const normalized = input.trim().toLowerCase();
+        if (normalized === 'menu' || normalized === 'aide') {
+          return { reply: [handleMenuCommand(profile)], clearState: true };
+        }
+        const PAGE_SIZE = 5;
+        const allOffers = await this.jobOfferService.findByEmployerId(profile.id);
+        const nextPage = currentPage + 1;
+        const nextPageStart = nextPage * PAGE_SIZE;
+        const hasMore = nextPageStart < allOffers.length;
+        const nextPageNum = nextPageStart + 1;
+        if (input.trim() === String(nextPageNum) && hasMore) {
+          const message = await this.commands.myOffers(profile, nextPage);
+          return {
+            reply: [message],
+            nextState: {
+              flowId: FLOW_IDS.MY_OFFERS,
+              step: 0,
+              payload: { page: nextPage },
+              updatedAt: new Date().toISOString(),
+            },
+          };
+        }
+        return { reply: [unknownCommandMessage()], nextState: state };
+      },
     };
     const runner = runners[flowId];
     return runner ? runner() : Promise.resolve(null);
@@ -403,6 +429,8 @@ export class BotOrchestratorService {
         this.handleCandidaturesReceivedCommand(botProfile, profileId),
 
       filled_jobs: () => this.handleFilledJobsCommand(botProfile, profileId),
+
+      my_offers: () => this.handleMyOffersCommand(botProfile, profileId, 0),
 
       profile: () => this.handleProfileCommand(profileId, botProfile),
 
@@ -522,6 +550,21 @@ export class BotOrchestratorService {
       await this.botState.set(profileId, listState);
     }
     return [result.message];
+  }
+
+  private async handleMyOffersCommand(
+    profile: BotProfile,
+    profileId: string,
+    page: number,
+  ): Promise<string[]> {
+    const message = await this.commands.myOffers(profile, page);
+    await this.botState.set(profileId, {
+      flowId: FLOW_IDS.MY_OFFERS,
+      step: 0,
+      payload: { page },
+      updatedAt: new Date().toISOString(),
+    });
+    return [message];
   }
 
   private async handleUnlockContactCommand(
@@ -790,8 +833,6 @@ export class BotOrchestratorService {
         const contact = await this.systemConfig.getContactInfo();
         return handleHelpCommand(commandId, contact);
       }
-      case 'my_offers':
-        return this.commands.myOffers(profile);
       case 'profile':
         return this.commands.profile(profile);
       case 'penalty_history':

@@ -29,10 +29,10 @@ export function formatCandidaturesListPage(
   lines.push('');
   if (hasMore) {
     lines.push(
-      '6️⃣ Voir plus',
-      '7️⃣ Menu',
+      '6- Voir plus',
+      '7- Menu',
       '',
-      "Veuillez taper un numéro (1-5), 6️⃣ pour la suite, ou 7️⃣ / 'Menu' pour revenir au menu",
+      "Veuillez taper un numéro (1-5), 6- pour la suite, ou 7- / 'Menu' pour revenir au menu",
     );
   } else {
     lines.push("Veuillez taper un numéro ou 'Menu' pour revenir au menu");
@@ -68,10 +68,10 @@ export function formatCandidatureDetail(params: {
     `Score: ${params.score}/100`,
     '',
     '*Actions:*',
-    '1️⃣ Accepter',
-    '2️⃣ Refuser',
-    '3️⃣ Retour',
-    "4️⃣ Menu (ou tapez 'Menu')",
+    '1- Accepter',
+    '2- Refuser',
+    '3- Retour',
+    "4- Menu (ou tapez 'Menu')",
     '',
     '*Tapez le numéro correspondant.*',
   ];
@@ -191,9 +191,9 @@ export function formatMyApplicationDetailWithCancel(
     `*Adresse*: ${params.address}`,
     '',
     '*Actions:*',
-    '1️⃣ Annuler cette candidature',
-    '2️⃣ Retour à la liste',
-    "3️⃣ Menu (ou tapez 'Menu')",
+    '1- Annuler cette candidature',
+    '2- Retour à la liste',
+    "3- Menu (ou tapez 'Menu')",
     '',
     '*Tapez le numéro correspondant.*',
   ].join('\n');
@@ -213,8 +213,8 @@ export function formatMyApplicationDetailReadOnly(
     `*Adresse*: ${params.address}`,
     '',
     '*Actions:*',
-    '1️⃣ Retour à la liste',
-    "2️⃣ Menu (ou tapez 'Menu')",
+    '1- Retour à la liste',
+    "2- Menu (ou tapez 'Menu')",
     '',
     '*Tapez le numéro correspondant.*',
   ].join('\n');
@@ -234,10 +234,10 @@ export function formatMyApplicationDetailWaitingPayment(
     `*Adresse*: ${params.address}`,
     '',
     '*Actions:*',
-    '1️⃣ Effectuer le paiement',
-    '2️⃣ Rejeter et annuler',
-    '3️⃣ Retour à la liste',
-    "4️⃣ Menu (ou tapez 'Menu')",
+    '1- Effectuer le paiement',
+    '2- Rejeter et annuler',
+    '3- Retour à la liste',
+    "4- Menu (ou tapez 'Menu')",
     '',
     '*Tapez le numéro correspondant.*',
   ].join('\n');
@@ -260,9 +260,9 @@ export function formatMyApplicationDetailWaitingPaymentPaid(
     "⏳ En attente du paiement de l'autre partie.",
     '',
     '*Actions:*',
-    '1️⃣ Rejeter et annuler',
-    '2️⃣ Retour à la liste',
-    "3️⃣ Menu (ou tapez 'Menu')",
+    '1- Rejeter et annuler',
+    '2- Retour à la liste',
+    "3- Menu (ou tapez 'Menu')",
     '',
     '*Tapez le numéro correspondant.*',
   ].join('\n');
@@ -271,7 +271,7 @@ export function formatMyApplicationDetailWaitingPaymentPaid(
 export function formatApplyConfirmation(params: {
   title: string;
   scheduled_at: Date;
-  amount: number;
+  amount: number | null;
   payment_flow: string | null;
   address: string;
   workerName: string;
@@ -309,8 +309,8 @@ export function formatApplyConfirmation(params: {
     `*Score*: ${params.reliabilityScore ?? 100}/100`,
     '',
     '*Confirmez-vous votre candidature ?*',
-    '1️⃣ Oui, je postule',
-    '2️⃣ Non, retour',
+    '1- Oui, je postule',
+    '2- Non, retour',
     '',
     '*Tapez le numéro correspondant.*',
   ].join('\n');
@@ -354,18 +354,18 @@ export function formatNewApplicationToEmployer(params: {
     `*Nom*: ${params.workerName}`,
     `*Téléphone*: ${params.workerPhone}`,
     `*Email*: ${params.workerEmail}`,
-    `*Description*: ${params.workerDescription.slice(0, 200)}${params.workerDescription.length > 200 ? '...' : ''}`,
+    `*Description*: ${params.workerDescription.slice(0, 150)}${params.workerDescription.length > 150 ? '...' : ''}`,
     SEP,
     `*Score de fiabilité*: ${score}/100`,
     `*Missions complétées*: ${params.completedMissions}`,
     '',
     `*Rendez-vous prévu*: ${formatDate(params.scheduledAt)}`,
-    `*Adresse*: ${params.address}`,
+    `*Adresse*: ${params.address.length > 80 ? params.address.slice(0, 80) + '...' : params.address}`,
     '',
     '*Actions*:',
-    '1️⃣ Accepter le candidat',
-    '2️⃣ Voir son profil complet',
-    '3️⃣ Refuser',
+    '1- Accepter le candidat',
+    '2- Voir son profil complet',
+    '3- Refuser',
     '',
     'Tapez le numéro correspondant.',
   ].join('\n');
@@ -430,9 +430,9 @@ export function formatCancellationToEmployer(params: {
     "*Votre offre est de nouveau disponible pour d'autres candidats.*",
     '',
     '*Actions*:',
-    '1️⃣ Voir les autres candidatures',
-    "2️⃣ Republier l'offre",
-    "3️⃣ Supprimer l'offre",
+    '1- Voir les autres candidatures',
+    "2- Republier l'offre",
+    "3- Supprimer l'offre",
     '',
     'Tapez le numéro correspondant.',
   );
@@ -457,7 +457,7 @@ export type FilledJobListItem = {
   title: string;
   workerName: string;
   scheduled_at: Date | string;
-  amount: number;
+  amount: number | null;
   payment_flow: string | null;
 };
 
@@ -484,7 +484,7 @@ export function formatFilledJobsListPage(
     );
   });
   if (hasMore) {
-    lines.push('6️⃣ Voir plus', '7️⃣ Menu', '');
+    lines.push('6- Voir plus', '7- Menu', '');
   }
   lines.push(
     "Tapez un numéro pour sélectionner une mission, ou 'Menu' pour revenir.",
@@ -503,10 +503,10 @@ export function formatFilledJobDetail(params: FilledJobListItem): string {
     `*Montant*: ${formatAmount(params.amount, params.payment_flow)}`,
     '',
     '*Actions:*',
-    '1️⃣ Marquer comme terminée (verser le gain au worker)',
-    "2️⃣ Annuler (réouvrir l'offre)",
-    '3️⃣ Retour',
-    '4️⃣ Menu',
+    '1- Marquer comme terminée (verser le gain au worker)',
+    "2- Annuler (réouvrir l'offre)",
+    '3- Retour',
+    '4- Menu',
     '',
     'Tapez le numéro correspondant.',
   ].join('\n');

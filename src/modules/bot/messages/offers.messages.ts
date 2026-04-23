@@ -5,7 +5,7 @@ export type OfferListItem = {
   title: string;
   description: string;
   scheduled_at: Date;
-  amount: number;
+  amount: number | null;
   payment_flow: string | null;
   address: string;
   note: string | null;
@@ -63,17 +63,17 @@ export function formatOfferList(
       `*Montant*: ${formatAmount(o.amount, o.payment_flow)}`,
       `*Adresse*: ${o.address.length > 40 ? o.address.slice(0, 40) + '...' : o.address}`,
       '',
-      '1️⃣ Postuler',
-      '2️⃣ Voir détails',
+      '1- Postuler',
+      '2- Voir détails',
       SEP,
       '',
     );
   }
 
   if (pageInfo?.hasNext) {
-    lines.push('3️⃣ *Offre suivante*');
+    lines.push('3- *Offre suivante*');
   }
-  lines.push('4️⃣ *Retour au menu*', '', '*Tapez le numéro correspondant.*');
+  lines.push('4- *Retour au menu*', '', '*Tapez le numéro correspondant.*');
 
   return lines.join('\n');
 }
@@ -143,8 +143,8 @@ export function formatOfferDetail(offer: OfferListItem): string {
     "*Employeur*: [Masqué jusqu'à acceptation]",
     '',
     'Actions:',
-    '1️⃣ Postuler à cette offre',
-    '2️⃣ Retour à la liste',
+    '1- Postuler à cette offre',
+    '2- Retour à la liste',
     '',
     'Tapez le numéro correspondant.',
   );
@@ -182,10 +182,10 @@ export function formatOfferDetailWithActions(offer: OfferListItem): string {
     '',
     SEP,
     '',
-    '1️⃣ *Postuler*',
-    '2️⃣ *Voir description complète*',
-    '3️⃣ *Retour à la liste des offres*',
-    "4️⃣ *Menu* (ou tapez 'Menu')",
+    '1- *Postuler*',
+    '2- *Voir description complète*',
+    '3- *Retour à la liste des offres*',
+    "4- *Menu* (ou tapez 'Menu')",
     '',
     '*Tapez le numéro correspondant.*',
   ].join('\n');
@@ -205,4 +205,34 @@ export function formatOfferPublishedSuccess(offerId: string): string {
 
 export function formatNoOffersAvailable(): string {
   return "Aucune offre disponible pour le moment. Tapez 'Menu' pour revenir.";
+}
+
+export function jobOfferToOfferListItem(offer: {
+  id: string;
+  title: string;
+  description: string;
+  scheduled_at: Date;
+  amount: number | null;
+  payment_flow: string | null;
+  address: string;
+  note: string | null;
+  quantity: number;
+  acceptedCount?: number;
+  status: string;
+  employer?: { reliability_score?: number | null } | null;
+}): OfferListItem {
+  return {
+    id: offer.id,
+    title: offer.title,
+    description: offer.description,
+    scheduled_at: offer.scheduled_at,
+    amount: offer.amount,
+    payment_flow: offer.payment_flow,
+    address: offer.address,
+    note: offer.note,
+    quantity: offer.quantity,
+    acceptedCount: offer.acceptedCount ?? 0,
+    status: offer.status,
+    employerScore: offer.employer?.reliability_score ?? null,
+  };
 }

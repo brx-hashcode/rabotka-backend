@@ -259,8 +259,8 @@ export class ReminderProcessor {
             '',
             `Que souhaitez-vous faire ?`,
             '',
-            `1️⃣ Republier l'offre`,
-            `2️⃣ Menu`,
+            `1- Republier l'offre`,
+            `2- Menu`,
           ].join('\n');
 
       const sent = await this.whatsApp

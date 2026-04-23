@@ -116,7 +116,7 @@ describe('formatProfileStats', () => {
 
 describe('formatPenaltyBlocked', () => {
   it('shows total amount', () => {
-    const msg = formatPenaltyBlocked(15000);
+    const msg = formatPenaltyBlocked(15000, '0700000000', '0800000000');
     expect(msg).toContain('15');
     expect(msg).toContain('FCFA');
     expect(msg).toContain('bloquée');

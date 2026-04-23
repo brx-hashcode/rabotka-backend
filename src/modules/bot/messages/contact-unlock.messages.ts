@@ -20,11 +20,11 @@ export function formatContactUnlockPrompt(params: {
 
   const fundOptions = hasFunds
     ? [
-        `1️⃣ Utiliser mon crédit (${amount} FCFA)`,
-        '2️⃣ Payer par mobile money',
-        '3️⃣ Décider plus tard',
+        `1- Utiliser mon crédit (${amount} FCFA)`,
+        '2- Payer par mobile money',
+        '3- Décider plus tard',
       ]
-    : ['1️⃣ Payer par mobile money', '2️⃣ Décider plus tard'];
+    : ['1- Payer par mobile money', '2- Décider plus tard'];
 
   const insufficientFundsWarning = hasFunds
     ? []

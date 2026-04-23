@@ -40,8 +40,8 @@ async function handleAcceptRefuseStep1(args: StepArgs): Promise<FlowResult> {
         [
           '*Actions disponibles pour cette candidature :*',
           '',
-          '1️⃣ Accepter le candidat',
-          '2️⃣ Refuser',
+          '1- Accepter le candidat',
+          '2- Refuser',
           '',
           '*Tapez le numéro correspondant.*',
         ].join('\n'),
@@ -187,8 +187,8 @@ function handleAcceptRefuseStep2(args: StepArgs): FlowResult {
         '',
         reason ? `Raison : ${reason}` : 'Aucune raison fournie.',
         '',
-        '1️⃣ Oui, refuser le candidat',
-        '2️⃣ Annuler (garder la candidature en attente)',
+        '1- Oui, refuser le candidat',
+        '2- Annuler (garder la candidature en attente)',
       ].join('\n'),
     ],
     nextState: {

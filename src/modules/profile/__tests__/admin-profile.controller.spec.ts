@@ -102,7 +102,7 @@ describe('AdminProfileController', () => {
       const ctrl = new AdminProfileController(
         makeProfileService() as any, makeLogService() as any,
         makePaymentRequestService() as any, prisma as any,
-        makeWhatsApp() as any, makeMail() as any,
+        makeWhatsApp() as any, makeMail() as any, makeWalletService() as any,
       );
       const result = await ctrl.getMessages('p1');
       expect(result).toHaveLength(2);
@@ -174,7 +174,7 @@ describe('AdminProfileController', () => {
     const ctrl = new AdminProfileController(
       profileService as any, logService as any,
       makePaymentRequestService() as any, makePrisma() as any,
-      makeWhatsApp() as any, makeMail() as any,
+      makeWhatsApp() as any, makeMail() as any, makeWalletService() as any,
     );
     const result = await ctrl.update('p1', { first_name: 'Jo' } as any, { user: { userId: 'u1' } });
     expect(profileService.updateProfileByAdmin).toHaveBeenCalledWith('p1', { first_name: 'Jo' });
@@ -188,9 +188,9 @@ describe('AdminProfileController', () => {
     const ctrl = new AdminProfileController(
       profileService as any, logService as any,
       makePaymentRequestService() as any, makePrisma() as any,
-      makeWhatsApp() as any, makeMail() as any,
+      makeWhatsApp() as any, makeMail() as any, makeWalletService() as any,
     );
-    const result = await ctrl.verify('p1', { decision: 'VERIFIED' as any, reason: undefined }, [], { user: { userId: 'u1' } });
+    const result = await ctrl.verify('p1', { decision: 'VERIFIED' as any, reason: 'approved' }, [], { user: { userId: 'u1' } });
     expect(profileService.verifyProfileKyc).toHaveBeenCalled();
     expect(logService.create).toHaveBeenCalled();
     expect(result).toEqual({ id: 'p1' });
@@ -202,7 +202,7 @@ describe('AdminProfileController', () => {
     const ctrl = new AdminProfileController(
       profileService as any, logService as any,
       makePaymentRequestService() as any, makePrisma() as any,
-      makeWhatsApp() as any, makeMail() as any,
+      makeWhatsApp() as any, makeMail() as any, makeWalletService() as any,
     );
     const result = await ctrl.updateStatus('p1', { status: 'ACTIVE' as any }, { user: { userId: 'u1' } });
     expect(profileService.updateProfileStatusByAdmin).toHaveBeenCalledWith('p1', 'ACTIVE');

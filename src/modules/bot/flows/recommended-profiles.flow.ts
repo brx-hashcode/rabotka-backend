@@ -56,9 +56,9 @@ function formatWorkerCard(
 function subMenu(): string {
   return [
     '',
-    '1️⃣ Contacter le candidat',
-    '2️⃣ Liste des candidats',
-    '3️⃣ Menu',
+    '1- Contacter le candidat',
+    '2- Liste des candidats',
+    '3- Menu',
   ].join('\n');
 }
 
@@ -361,13 +361,13 @@ function showPaymentMethodPrompt(
   const hasFunds = balance >= fee;
 
   const walletLine = hasFunds
-    ? `1️⃣ Utiliser mon crédit (${fee.toLocaleString('fr-FR')} FCFA)`
-    : `1️⃣ Crédit portefeuille _(solde insuffisant — ${balance.toLocaleString('fr-FR')} FCFA)_`;
+    ? `1- Utiliser mon crédit (${fee.toLocaleString('fr-FR')} FCFA)`
+    : `1- Crédit portefeuille _(solde insuffisant — ${balance.toLocaleString('fr-FR')} FCFA)_`;
 
   const options = [
     walletLine,
-    '2️⃣ Payer par mobile money',
-    '3️⃣ Annuler',
+    '2- Payer par mobile money',
+    '3- Annuler',
   ];
 
   const balanceLine = hasFunds
