@@ -377,15 +377,15 @@ export class BotNotificationService {
         minute: '2-digit',
       });
       const amountLine = offer.amount != null
-        ? `💰 ${Number(offer.amount).toLocaleString()} FCFA`
-        : `💰 Prix à négocier`;
+        ? `Montant : ${Number(offer.amount).toLocaleString()} FCFA`
+        : `Montant : Prix à négocier`;
       const text = [
-        `🎯 *Offre recommandée pour vous, ${profile.first_name}*`,
+        `*Offre recommandée pour vous, ${profile.first_name}*`,
         '',
-        `📌 *${offer.title}*`,
+        `*${offer.title}*`,
         amountLine,
-        `📍 ${offer.address}`,
-        `🗓 ${dateStr}`,
+        `Adresse : ${offer.address}`,
+        `Date : ${dateStr}`,
         '',
         `Tapez *OFFRES* pour voir toutes les offres disponibles.`,
       ].join('\n');
@@ -411,12 +411,12 @@ export class BotNotificationService {
     const state = getRateAssignmentInitialState(assignmentId, rateeId);
     await this.botState.set(raterProfileId, state);
     const text = [
-      `⭐ *Évaluez votre mission*`,
+      `*Évaluez votre mission*`,
       '',
       `La mission *${jobTitle}* est terminée.`,
       `Comment évaluez-vous *${rateeLabel}* ?`,
       '',
-      'Répondez avec une note de *1* à *5* ⭐',
+      'Répondez avec une note de *1* à *5*.',
     ].join('\n');
     await this.whatsApp.sendTextMessage(raterPhone, text).catch((err) =>
       this.logger.warn(

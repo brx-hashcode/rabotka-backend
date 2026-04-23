@@ -129,7 +129,7 @@ async function handleMobileMoneyOption(
   return {
     reply: [
       [
-        `📲 *Paiement Mobile Money*`,
+        `*Paiement Mobile Money*`,
         ``,
         `Effectuez un paiement de *${totalAmount.toLocaleString('fr-FR')} FCFA* via le lien ci-dessous :`,
         ``,

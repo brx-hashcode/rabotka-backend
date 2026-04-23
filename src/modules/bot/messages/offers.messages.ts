@@ -99,10 +99,10 @@ export function formatOfferListCompact(
       o.address.length > 40 ? o.address.slice(0, 40) + '…' : o.address;
     lines.push(
       `${num}- *${o.title}*`,
-      `    • 💰 Montant : ${formatAmount(o.amount, o.payment_flow)}`,
-      `    • 📅 Date : ${formatDate(o.scheduled_at)}`,
-      `    • 👥 Places : ${spotsLabel}`,
-      `    • 📍 Adresse : ${shortAddr}`,
+      `    • Montant : ${formatAmount(o.amount, o.payment_flow)}`,
+      `    • Date : ${formatDate(o.scheduled_at)}`,
+      `    • Places : ${spotsLabel}`,
+      `    • Adresse : ${shortAddr}`,
       '',
     );
   });
@@ -151,16 +151,16 @@ export function formatOfferDetail(offer: OfferListItem): string {
   return lines.join('\n');
 }
 
-function employerScoreStar(score: number): string {
-  if (score >= 90) return '⭐⭐⭐';
-  if (score >= 75) return '⭐⭐';
-  if (score >= 60) return '⭐';
-  return '⚠️';
+function employerScoreLabel(score: number): string {
+  if (score >= 90) return 'Excellent';
+  if (score >= 75) return 'Bon';
+  if (score >= 60) return 'Moyen';
+  return 'Faible';
 }
 
 function formatEmployerScore(score: number | null | undefined): string {
   if (score == null) return '';
-  return `*Fiabilité employeur*: ${score}/100 ${employerScoreStar(score)}`;
+  return `*Fiabilité employeur*: ${score}/100 (${employerScoreLabel(score)})`;
 }
 
 /** Single offer view in list-offers flow with 4 actions */

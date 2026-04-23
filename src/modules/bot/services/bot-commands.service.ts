@@ -188,9 +188,9 @@ export class BotCommandsService {
       });
       lines.push(
         `${num}- *${title}*`,
-        `    • 📅 Date : ${dateStr}`,
-        `    • 💰 Montant : ${o.amount != null ? `${o.amount.toLocaleString('fr-FR')} FCFA` : 'Prix à négocier'}`,
-        `    • 📌 Statut : ${o.status}`,
+        `    • Date : ${dateStr}`,
+        `    • Montant : ${o.amount != null ? `${o.amount.toLocaleString('fr-FR')} FCFA` : 'Prix à négocier'}`,
+        `    • Statut : ${o.status}`,
         '',
       );
     });

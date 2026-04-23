@@ -12,7 +12,7 @@ export function formatContactUnlockPrompt(params: {
   const scopeNote =
     profileType === 'EMPLOYER' && isJobLevel
       ? [
-          '💡 Ce paiement *couvre tous les candidats acceptés* pour ce poste.',
+          'Ce paiement *couvre tous les candidats acceptés* pour ce poste.',
           "Vous ne payez qu'une seule fois, peu importe le nombre de candidats.",
           '',
         ]
@@ -31,7 +31,7 @@ export function formatContactUnlockPrompt(params: {
     : [`⚠️ *Solde insuffisant* (${balance} FCFA disponibles)`];
 
   return [
-    `🔓 *DÉVERROUILLAGE DU CONTACT*`,
+    `*DÉVERROUILLAGE DU CONTACT*`,
     '',
     `Pour voir les coordonnées de votre ${role} *${name}*, vous devez débloquer le contact.`,
     '',
@@ -62,7 +62,7 @@ export function formatContactUnlockedMessage(params: {
   ];
 
   return [
-    '🔓 *CONTACT DÉVERROUILLÉ !*',
+    '*CONTACT DÉVERROUILLÉ !*',
     '',
     `*${name}*`,
     '',
@@ -81,7 +81,7 @@ export function formatContactUnlockPending(params: {
   const party = waitingFor === 'worker' ? 'travailleur' : 'employeur';
 
   return [
-    '⏳ *PAIEMENT ENREGISTRÉ*',
+    '*PAIEMENT ENREGISTRÉ*',
     '',
     'Votre paiement a bien été enregistré.',
     '',
@@ -95,7 +95,7 @@ export function formatContactUnlockPending(params: {
 
 export function formatContactUnlockExpiredConversion(amount: number): string {
   return [
-    'ℹ️ *DÉVERROUILLAGE EXPIRÉ*',
+    '*DÉVERROUILLAGE EXPIRÉ*',
     '',
     'Le délai de déverrouillage de contact a expiré.',
     '',

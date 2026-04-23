@@ -101,7 +101,7 @@ async function handleStep1(args: StepArgs): Promise<FlowResult> {
   if (trimmed === laterOption) {
     return {
       reply: [
-        `D'accord. Tapez *contact* quand vous êtes prêt(e) à débloquer ce contact.\n\n⚠️ La demande expire dans *${expiryHours}h*. Passé ce délai, si l'autre partie n'a pas payé, votre paiement sera recrédité sous forme de *crédit portefeuille*.`,
+        `D'accord. Tapez *contact* quand vous êtes prêt(e) à débloquer ce contact.\n\nLa demande expire dans *${expiryHours}h*. Passé ce délai, si l'autre partie n'a pas payé, votre paiement sera recrédité sous forme de *crédit portefeuille*.`,
       ],
       clearState: true,
     };
@@ -207,7 +207,7 @@ async function handleMobileMoney(args: {
         ``,
         `✅ Une fois le paiement confirmé des deux côtés (vous et *${otherName}*), vous recevrez les coordonnées.`,
         '',
-        `ℹ️ Si une partie ne paie pas après *${expiryHours}h*, votre paiement sera reversé vers votre wallet interne.`,
+        `Si une partie ne paie pas après *${expiryHours}h*, votre paiement sera reversé vers votre wallet interne.`,
       ].join('\n'),
     ],
     clearState: true,

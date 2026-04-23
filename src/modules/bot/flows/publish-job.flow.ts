@@ -276,7 +276,7 @@ export async function runPublishJobFlow(
       const prompt = getStepPrompt(draftStep, cleanPayload);
       return {
         reply: [
-          `📝 *Reprise de votre brouillon*\n\nÉtape ${draftStep}/${TOTAL_STEPS} — ${prompt}`,
+          `*Reprise de votre brouillon*\n\nÉtape ${draftStep}/${TOTAL_STEPS} — ${prompt}`,
         ],
         nextState: {
           ...state,
@@ -779,7 +779,7 @@ export function getPublishJobDraftResumeMessage(
   const title =
     typeof payload.title === 'string' && payload.title ? payload.title : null;
   const lines = [
-    `📝 *Brouillon enregistré — Reprendre la publication ?*`,
+    `*Brouillon enregistré — Reprendre la publication ?*`,
     '',
     title ? `Titre : *${title}*` : '',
     '',
