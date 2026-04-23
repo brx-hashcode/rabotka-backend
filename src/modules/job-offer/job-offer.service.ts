@@ -55,6 +55,7 @@ export type AdminJobOfferListItem = {
   applicationsCount: number;
   createdAt: string;
   updatedAt: string;
+  vectorIndexedAt: string | null;
 };
 
 export type AdminJobOfferApplicationItem = {
@@ -601,6 +602,7 @@ export class JobOfferService {
       applicationsCount: o._count.applications,
       createdAt: o.created_at.toISOString(),
       updatedAt: o.updated_at.toISOString(),
+      vectorIndexedAt: o.vector_indexed_at?.toISOString() ?? null,
     }));
 
     return { data, total, page, limit };
@@ -678,6 +680,7 @@ export class JobOfferService {
       applicationsCount: offer._count.applications,
       createdAt: offer.created_at.toISOString(),
       updatedAt: offer.updated_at.toISOString(),
+      vectorIndexedAt: offer.vector_indexed_at?.toISOString() ?? null,
       applications: offer.applications.map((a) => ({
         id: a.id,
         workerName:

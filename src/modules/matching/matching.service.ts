@@ -488,6 +488,10 @@ export class MatchingService {
         reliabilityScore: profile.reliability_score ?? 100,
         rejectedCategoryIds: negativeCategoryIds,
       });
+      await this.prisma.profile.update({
+        where: { id: profileId },
+        data: { vector_indexed_at: new Date() },
+      });
       this.logger.log(`Indexed worker profile ${profileId}`);
     } catch (err) {
       this.logger.error(`Failed to index worker profile ${profileId}`, err);
@@ -553,6 +557,10 @@ export class MatchingService {
         status: job.status,
         createdAt: job.created_at.toISOString(),
       });
+      await this.prisma.jobOffer.update({
+        where: { id: jobOfferId },
+        data: { vector_indexed_at: new Date() },
+      });
       this.logger.log(`Indexed job offer ${jobOfferId}`);
     } catch (err) {
       this.logger.error(`Failed to index job offer ${jobOfferId}`, err);
@@ -596,6 +604,10 @@ export class MatchingService {
         description: profile.description ?? '',
         address: profile.address ?? '',
         categoryIds: profile.categories.map((pc) => pc.category),
+      });
+      await this.prisma.profile.update({
+        where: { id: profileId },
+        data: { vector_indexed_at: new Date() },
       });
       this.logger.log(`Indexed employer profile ${profileId}`);
     } catch (err) {
@@ -808,6 +820,42 @@ export class MatchingService {
         err,
       );
       return [];
+    }
+  }
+
+  // ── Pending re-index ────────────────────────────────────────────────────────
+
+  async reindexPending(): Promise<void> {
+    const enabled = await this.systemConfig.isSimilarityEnabled();
+    if (!enabled) return;
+
+    const [jobs, workers, employers] = await Promise.all([
+      this.prisma.jobOffer.findMany({
+        where: { vector_indexed_at: null, status: { not: 'CANCELLED' } },
+        select: { id: true },
+      }),
+      this.prisma.profile.findMany({
+        where: { vector_indexed_at: null, profile_type: 'WORKER', status: 'ACTIVE' },
+        select: { id: true },
+      }),
+      this.prisma.profile.findMany({
+        where: { vector_indexed_at: null, profile_type: 'EMPLOYER', status: 'ACTIVE' },
+        select: { id: true },
+      }),
+    ]);
+
+    this.logger.log(
+      `reindexPending: ${jobs.length} jobs, ${workers.length} workers, ${employers.length} employers`,
+    );
+
+    for (const { id } of jobs) {
+      await this.indexJobOffer(id);
+    }
+    for (const { id } of workers) {
+      await this.indexWorkerProfile(id);
+    }
+    for (const { id } of employers) {
+      await this.indexEmployerProfile(id);
     }
   }
 }

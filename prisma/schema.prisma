@@ -239,7 +239,8 @@ model Profile {
   kyc_verification_note   String?            @db.Text
   read_and_approved_policies Boolean @default(false)
 
-  avatar_url String?
+  avatar_url              String?
+  vector_indexed_at       DateTime?
 
   category               JobCategory?       @relation(fields: [category_id], references: [id], onDelete: SetNull)
   categories             ProfileCategory[]
@@ -382,6 +383,7 @@ model JobOffer {
   status                  JobOfferStatus @default(ACTIVE)
   employer_unlock_paid    Boolean        @default(false)
   employer_unlock_paid_at DateTime?
+  vector_indexed_at       DateTime?
 
   employer                Profile                @relation(fields: [employer_id], references: [id], onDelete: Cascade)
   category                JobCategory?           @relation(fields: [category_id], references: [id], onDelete: SetNull)
