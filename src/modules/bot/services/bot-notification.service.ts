@@ -356,7 +356,7 @@ export class BotNotificationService {
         `🎯 *Offre recommandée pour vous, ${profile.first_name}*`,
         '',
         `📌 *${offer.title}*`,
-        `💰 ${offer.amount.toLocaleString()} FCFA`,
+        `💰 ${offer.amount?.toLocaleString() ?? '0'} FCFA`,
         `📍 ${offer.address}`,
         `🗓 ${dateStr}`,
         '',
