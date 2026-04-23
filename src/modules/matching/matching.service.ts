@@ -191,11 +191,19 @@ export class MatchingService {
     quantity?: number | null;
     note?: string | null;
     category?: { name: string; description: string | null } | null;
+    employerCategories?: Array<{ name: string; description: string | null }>;
   }): string {
     const parts: string[] = [job.title, job.description, job.address];
 
-    if (job.category?.name) parts.push(job.category.name);
-    if (job.category?.description) parts.push(job.category.description);
+    if (job.category?.name) {
+      parts.push(job.category.name);
+      if (job.category.description) parts.push(job.category.description);
+    } else if (job.employerCategories && job.employerCategories.length > 0) {
+      for (const cat of job.employerCategories) {
+        parts.push(cat.name);
+        if (cat.description) parts.push(cat.description);
+      }
+    }
 
     // Amount
     if (job.amount != null) {
@@ -494,6 +502,7 @@ export class MatchingService {
       where: { id: jobOfferId },
       select: {
         id: true,
+        employer_id: true,
         title: true,
         description: true,
         address: true,
@@ -510,9 +519,24 @@ export class MatchingService {
 
     if (!job) return;
 
+    // When the job has no explicit category, fall back to all of the employer's
+    // categories so the embedding text carries full domain signal for matching.
+    let employerCategories: Array<{ name: string; description: string | null }> = [];
+    if (!job.category_id && job.employer_id) {
+      const employer = await this.prisma.profile.findUnique({
+        where: { id: job.employer_id },
+        select: {
+          categories: {
+            select: { category: { select: { name: true, description: true } } },
+          },
+        },
+      });
+      employerCategories = employer?.categories.map((pc) => pc.category) ?? [];
+    }
+
     try {
       await this.qdrant.ensureCollection(COLLECTION_JOBS);
-      const text = this.buildJobText(job);
+      const text = this.buildJobText({ ...job, employerCategories });
       await this.qdrant.upsertHybrid(COLLECTION_JOBS, jobOfferId, text, {
         jobOfferId: job.id,
         title: job.title,
