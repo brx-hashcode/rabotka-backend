@@ -91,10 +91,18 @@ export class BotNotificationService {
         );
       }
       const employerProfileId = app.job_offer.employer_id;
-      const activeState = await this.botState.get(employerProfileId);
+      const acceptRefuseState = getAcceptRefuseInitialState(applicationId);
+      // CAS: only set state if no active flow; if blocked, employer is mid-conversation → inbox
+      const wrote = await this.botState.setIfFlowAbsentOrMatches(
+        employerProfileId,
+        acceptRefuseState,
+        null,
+      );
 
-      if (activeState?.flowId) {
-        // Employer is mid-flow — queue into inbox instead of overwriting state
+      await this.whatsApp.sendTextMessage(app.job_offer.employer.phone, text);
+
+      if (!wrote) {
+        // Employer is mid-flow — queue into inbox
         await this.botInbox.push(employerProfileId, {
           type: 'new_application',
           applicationId,
@@ -106,19 +114,7 @@ export class BotNotificationService {
         const inboxNotice =
           `📬 *${pendingCount} candidature(s) en attente* dans votre boîte.` +
           `\nTerminez votre action en cours, puis tapez *candidatures* pour les traiter.`;
-        await this.whatsApp.sendTextMessage(
-          app.job_offer.employer.phone,
-          text,
-        );
-        await this.whatsApp.sendTextMessage(
-          app.job_offer.employer.phone,
-          inboxNotice,
-        );
-      } else {
-        // Employer is idle — set state directly so next message routes to accept/refuse
-        await this.whatsApp.sendTextMessage(app.job_offer.employer.phone, text);
-        const state = getAcceptRefuseInitialState(applicationId);
-        await this.botState.set(employerProfileId, state);
+        await this.whatsApp.sendTextMessage(app.job_offer.employer.phone, inboxNotice);
       }
     } catch (err) {
       this.logger.warn(
@@ -168,18 +164,14 @@ export class BotNotificationService {
 
         await this.whatsApp.sendTextMessage(app.worker.phone, text);
 
-        // Pre-load unlock flow state so "contact" routes immediately
-        // Guard: don't overwrite an active flow mid-conversation
-        const currentState = await this.botState.get(app.worker_id);
-        if (!currentState?.flowId) {
-          const unlockState = getUnlockContactInitialState({
-            attemptId: attempt.id,
-            otherName: employerName,
-            amount: fees.workerFeeFcfa,
-            expiryHours: fees.expiryHours,
-          });
-          await this.botState.set(app.worker_id, unlockState);
-        }
+        // Pre-load unlock flow state so "contact" routes immediately (CAS: only if no active flow)
+        const unlockState = getUnlockContactInitialState({
+          attemptId: attempt.id,
+          otherName: employerName,
+          amount: fees.workerFeeFcfa,
+          expiryHours: fees.expiryHours,
+        });
+        await this.botState.setIfFlowAbsentOrMatches(app.worker_id, unlockState, null);
       } else {
         // Fallback (attempt not created yet — should not happen in normal flow)
         await this.whatsApp.sendTextMessage(
@@ -443,10 +435,9 @@ export class BotNotificationService {
     jobTitle: string;
   }): Promise<void> {
     const { raterProfileId, raterPhone, rateeId, assignmentId, rateeLabel, jobTitle } = params;
-    const currentState = await this.botState.get(raterProfileId);
-    if (currentState?.flowId) return;
     const state = getRateAssignmentInitialState(assignmentId, rateeId);
-    await this.botState.set(raterProfileId, state);
+    const written = await this.botState.setIfFlowAbsentOrMatches(raterProfileId, state, null);
+    if (!written) return;
     const text = [
       `*Évaluez votre mission*`,
       '',
