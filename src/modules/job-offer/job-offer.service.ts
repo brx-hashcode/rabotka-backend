@@ -396,12 +396,35 @@ export class JobOfferService {
     };
   }
 
-  async findByEmployerId(employerId: string): Promise<JobOfferListItem[]> {
-    const offers = await this.prisma.jobOffer.findMany({
-      where: { employer_id: employerId },
-      orderBy: [{ scheduled_at: 'asc' }, { created_at: 'desc' }],
-    });
-    return offers.map((o) => this.toListItem(o));
+  async findByEmployerId(employerId: string): Promise<JobOfferListItem[]>;
+  async findByEmployerId(
+    employerId: string,
+    pagination: { page: number; pageSize: number },
+  ): Promise<{ items: JobOfferListItem[]; total: number }>;
+  async findByEmployerId(
+    employerId: string,
+    pagination?: { page: number; pageSize: number },
+  ): Promise<JobOfferListItem[] | { items: JobOfferListItem[]; total: number }> {
+    if (!pagination) {
+      const offers = await this.prisma.jobOffer.findMany({
+        where: { employer_id: employerId },
+        orderBy: [{ scheduled_at: 'asc' }, { created_at: 'desc' }],
+      });
+      return offers.map((o) => this.toListItem(o));
+    }
+
+    const { page, pageSize } = pagination;
+    const skip = page * pageSize;
+    const [offers, total] = await Promise.all([
+      this.prisma.jobOffer.findMany({
+        where: { employer_id: employerId },
+        orderBy: [{ scheduled_at: 'asc' }, { created_at: 'desc' }],
+        skip,
+        take: pageSize,
+      }),
+      this.prisma.jobOffer.count({ where: { employer_id: employerId } }),
+    ]);
+    return { items: offers.map((o) => this.toListItem(o)), total };
   }
 
   async updateStatus(
