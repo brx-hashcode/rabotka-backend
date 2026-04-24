@@ -81,6 +81,7 @@ export class WsNotificationsGateway
       }
 
       void client.join('admins');
+      void client.join(`admin-${payload.sub}`);
       this.logger.log(`Admin ${payload.sub} connected via WebSocket`);
     } catch {
       this.logger.debug('WS client rejected: invalid token');
@@ -93,8 +94,8 @@ export class WsNotificationsGateway
   }
 
   emitToAdmin(userId: string, event: string, payload?: unknown): void {
-    this.server.to('admins').emit(event, payload ?? {});
-    this.logger.debug(`Emitted ${event} to admins room (triggered by ${userId})`);
+    this.server.to(`admin-${userId}`).emit(event, payload ?? {});
+    this.logger.debug(`Emitted ${event} to admin-${userId}`);
   }
 
   private extractToken(client: Socket): string | undefined {
