@@ -102,6 +102,32 @@ export class SystemConfigService implements OnModuleInit {
     return value;
   }
 
+  private async mgetBatch(entries: { key: string; fallback: string }[]): Promise<string[]> {
+    const cacheKeys = entries.map((e) => `${CACHE_PREFIX}${e.key}`);
+    const cached = await this.redis.mget(...cacheKeys);
+
+    const missIndices: number[] = [];
+    cached.forEach((v, i) => { if (v === null) missIndices.push(i); });
+
+    if (missIndices.length > 0) {
+      const missKeys = missIndices.map((i) => entries[i].key);
+      const rows = await this.prisma.systemConfig.findMany({
+        where: { key: { in: missKeys } },
+        select: { key: true, value: true },
+      });
+      const rowMap = new Map(rows.map((r) => [r.key, r.value]));
+      const pipeline = this.redis.pipeline();
+      for (const i of missIndices) {
+        const value = rowMap.get(entries[i].key) ?? entries[i].fallback;
+        cached[i] = value;
+        pipeline.set(cacheKeys[i], value, 'EX', CACHE_TTL_SECONDS);
+      }
+      await pipeline.exec();
+    }
+
+    return cached.map((v, i) => v ?? entries[i].fallback);
+  }
+
   async set(key: string, value: string, adminId?: string): Promise<void> {
     await this.prisma.systemConfig.update({
       where: { key },
@@ -154,15 +180,13 @@ export class SystemConfigService implements OnModuleInit {
   }
 
   async getContactInfo() {
-    const [email, phone, address, orangeMoney, airtelMoney] = await Promise.all(
-      [
-        this.get('contact.email', 'contact@rabotka.com'),
-        this.get('contact.phone', ''),
-        this.get('contact.address', ''),
-        this.get('contact.orange_money_number', '06 000 0000'),
-        this.get('contact.airtel_money_number', '07 000 0000'),
-      ],
-    );
+    const [email, phone, address, orangeMoney, airtelMoney] = await this.mgetBatch([
+      { key: 'contact.email', fallback: 'contact@rabotka.com' },
+      { key: 'contact.phone', fallback: '' },
+      { key: 'contact.address', fallback: '' },
+      { key: 'contact.orange_money_number', fallback: '06 000 0000' },
+      { key: 'contact.airtel_money_number', fallback: '07 000 0000' },
+    ]);
     return {
       email,
       phone,
@@ -173,23 +197,16 @@ export class SystemConfigService implements OnModuleInit {
   }
 
   async getFees() {
-    const [
-      penalty,
-      scoreDed,
-      threshold,
-      scoreMin,
-      empCancel,
-      empGhost,
-      billingBlock,
-    ] = await Promise.all([
-      this.get('fees.late_cancellation_penalty_fcfa', '5000'),
-      this.get('fees.late_cancellation_score_deduction', '5'),
-      this.get('fees.cancellation_threshold_hours', '4'),
-      this.get('fees.reliability_score_min', '50'),
-      this.get('fees.employer_cancel_score_deduction', '5'),
-      this.get('fees.employer_ghost_score_deduction', '10'),
-      this.get('fees.billing_block_threshold', '2'),
-    ]);
+    const [penalty, scoreDed, threshold, scoreMin, empCancel, empGhost, billingBlock] =
+      await this.mgetBatch([
+        { key: 'fees.late_cancellation_penalty_fcfa', fallback: '5000' },
+        { key: 'fees.late_cancellation_score_deduction', fallback: '5' },
+        { key: 'fees.cancellation_threshold_hours', fallback: '4' },
+        { key: 'fees.reliability_score_min', fallback: '50' },
+        { key: 'fees.employer_cancel_score_deduction', fallback: '5' },
+        { key: 'fees.employer_ghost_score_deduction', fallback: '10' },
+        { key: 'fees.billing_block_threshold', fallback: '2' },
+      ]);
     return {
       lateCancellationPenaltyFcfa: Number(penalty),
       lateCancellationScoreDeduction: Number(scoreDed),
@@ -202,10 +219,10 @@ export class SystemConfigService implements OnModuleInit {
   }
 
   async getContactUnlockFees() {
-    const [employerFee, workerFee, expiryHours] = await Promise.all([
-      this.get('fees.contact_unlock_fee_employer', '500'),
-      this.get('fees.contact_unlock_fee_worker', '100'),
-      this.get('fees.contact_unlock_expiry_hours', '48'),
+    const [employerFee, workerFee, expiryHours] = await this.mgetBatch([
+      { key: 'fees.contact_unlock_fee_employer', fallback: '500' },
+      { key: 'fees.contact_unlock_fee_worker', fallback: '100' },
+      { key: 'fees.contact_unlock_expiry_hours', fallback: '48' },
     ]);
     return {
       employerFeeFcfa: Number(employerFee),
