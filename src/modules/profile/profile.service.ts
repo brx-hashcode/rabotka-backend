@@ -455,6 +455,7 @@ export class ProfileService {
             document_type: true,
             document_category: true,
             document_url: true,
+            storage_key: true,
             verification_status: true,
             verified_at: true,
             verified_by: true,
@@ -540,19 +541,23 @@ export class ProfileService {
       applicationsCount: profile._count.applications,
       penaltiesCount: profile._count.penalties,
       unpaidPenaltiesCount,
-      kycDocuments: profile.kyc_documents.map((doc) => ({
-        id: doc.id,
-        documentType: doc.document_type,
-        documentCategory: doc.document_category,
-        documentUrl: doc.document_url,
-        verificationStatus: doc.verification_status,
-        verifiedAt: doc.verified_at,
-        verifiedBy: doc.verified_by
-          ? (verifierNames.get(doc.verified_by) ?? doc.verified_by)
-          : null,
-        rejectionReason: doc.rejection_reason,
-        createdAt: doc.created_at,
-      })),
+      kycDocuments: await Promise.all(
+        profile.kyc_documents.map(async (doc) => ({
+          id: doc.id,
+          documentType: doc.document_type,
+          documentCategory: doc.document_category,
+          documentUrl: doc.storage_key
+            ? await this.fileService.getPresignedUrl(doc.storage_key)
+            : await this.fileService.getPresignedUrlFromPublicUrl(doc.document_url ?? ''),
+          verificationStatus: doc.verification_status,
+          verifiedAt: doc.verified_at,
+          verifiedBy: doc.verified_by
+            ? (verifierNames.get(doc.verified_by) ?? doc.verified_by)
+            : null,
+          rejectionReason: doc.rejection_reason,
+          createdAt: doc.created_at,
+        })),
+      ),
       verificationImages: profile.kyc_verification_images.map((img) => ({
         id: img.id,
         imageUrl: img.image_url,
@@ -1015,6 +1020,7 @@ export class ProfileService {
           createProfileDto.documentType,
           'DOCUMENT',
           documentUploadResult.url,
+          documentUploadResult.key,
         ),
         this.createKycDocumentRecord(
           tx,
@@ -1022,6 +1028,7 @@ export class ProfileService {
           createProfileDto.documentType,
           'SELFIE',
           selfieUploadResult.url,
+          selfieUploadResult.key,
         ),
       ]);
 
@@ -1098,17 +1105,20 @@ export class ProfileService {
     documentType: CreateProfileDto['documentType'] | undefined,
     documentCategory: 'DOCUMENT' | 'SELFIE',
     documentUrl: string,
+    storageKey?: string,
   ) {
     const data: {
       profile_id: string;
       document_type?: CreateProfileDto['documentType'];
       document_category: 'DOCUMENT' | 'SELFIE';
       document_url: string;
+      storage_key?: string;
       verification_status: 'PENDING';
     } = {
       profile_id: profileId,
       document_category: documentCategory,
       document_url: documentUrl,
+      storage_key: storageKey,
       verification_status: 'PENDING',
     };
 

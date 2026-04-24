@@ -9,6 +9,7 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
 import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
@@ -35,6 +36,7 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly mailService: MailService,
     private readonly whatsAppService: WhatsAppService,
+    private readonly configService: ConfigService,
   ) {}
 
   async sendOtp(emailOrPhone: string): Promise<{ success: boolean }> {
@@ -297,6 +299,8 @@ export class AuthService {
     firstName: string;
     lastName: string;
     role: string;
+    phonePairedAt: string | null;
+    phoneName: string | null;
   }> {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
@@ -306,6 +310,8 @@ export class AuthService {
         last_name: true,
         email: true,
         role: true,
+        phone_paired_at: true,
+        phone_name: true,
       },
     });
     if (!user) {
@@ -317,6 +323,8 @@ export class AuthService {
       firstName: user.first_name,
       lastName: user.last_name,
       role: user.role,
+      phonePairedAt: user.phone_paired_at?.toISOString() ?? null,
+      phoneName: user.phone_name ?? null,
     };
   }
 
@@ -425,5 +433,167 @@ export class AuthService {
         `WhatsApp not connected or failed to send OTP to ${phone}; user may not receive the code`,
       );
     }
+  }
+
+  // ─── QR Login ────────────────────────────────────────────────────────────────
+
+  private readonly QR_TTL = 300;
+  private qrKey = (id: string) => `admin:qr:${id}`;
+
+  async initQrSession(): Promise<{
+    sessionId: string;
+    qrUrl: string;
+    expiresIn: number;
+  }> {
+    const sessionId = crypto.randomUUID();
+    await this.redis.set(
+      this.qrKey(sessionId),
+      JSON.stringify({ status: 'pending' }),
+      'EX',
+      this.QR_TTL,
+    );
+    const base = this.configService
+      .get<string>('ADMIN_BASE_URL', '')
+      .trim()
+      .replace(/\/+$/, '');
+    const qrUrl = `${base}/auth/qr-confirm?session=${sessionId}`;
+    return { sessionId, qrUrl, expiresIn: this.QR_TTL };
+  }
+
+  async pollQrSession(
+    sessionId: string,
+  ): Promise<{ status: 'pending' | 'confirmed' | 'expired' }> {
+    const raw = await this.redis.get(this.qrKey(sessionId));
+    if (!raw) return { status: 'expired' };
+    const data = JSON.parse(raw) as { status: string };
+    return { status: data.status as 'pending' | 'confirmed' };
+  }
+
+  async confirmQrSession(
+    sessionId: string,
+    phoneToken: string,
+  ): Promise<{ success: boolean }> {
+    const raw = await this.redis.get(this.qrKey(sessionId));
+    if (!raw) throw new UnauthorizedException('QR session expired');
+
+    const data = JSON.parse(raw) as { status: string };
+    if (data.status !== 'pending') {
+      throw new UnauthorizedException('QR session already used');
+    }
+
+    let payload: { sub: string; type: string };
+    try {
+      payload = this.jwtService.verify(phoneToken);
+    } catch {
+      throw new UnauthorizedException('Phone token invalid or expired');
+    }
+    if (payload.type !== 'admin-phone') {
+      throw new UnauthorizedException('Invalid phone token type');
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: payload.sub },
+      select: { id: true, is_active: true },
+    });
+    if (!user || !user.is_active) {
+      throw new UnauthorizedException('Admin account not found or inactive');
+    }
+
+    const jwtPayload = { sub: user.id, type: 'admin' };
+    const token = this.jwtService.sign(jwtPayload);
+
+    await this.redis.set(
+      this.qrKey(sessionId),
+      JSON.stringify({ status: 'confirmed', token }),
+      'EX',
+      60,
+    );
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { last_login_at: new Date() },
+    });
+
+    return { success: true };
+  }
+
+  async consumeQrSession(sessionId: string): Promise<{ token: string }> {
+    const raw = await this.redis.get(this.qrKey(sessionId));
+    if (!raw) throw new UnauthorizedException('QR session expired');
+
+    const data = JSON.parse(raw) as { status: string; token?: string };
+    if (data.status !== 'confirmed' || !data.token) {
+      throw new UnauthorizedException('QR session not confirmed yet');
+    }
+
+    await this.redis.del(this.qrKey(sessionId));
+    return { token: data.token };
+  }
+
+  // ─── Phone Pairing ───────────────────────────────────────────────────────────
+
+  private readonly PAIR_TTL = 300;
+  private pairOtpKey = (userId: string) => `admin:pair:otp:${userId}`;
+  private pairCooldownKey = (userId: string) => `admin:pair:resend:${userId}`;
+
+  async generatePhonePairingOtp(
+    userId: string,
+    phoneName: string,
+  ): Promise<{ otp: string; expiresIn: number; userId: string }> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, is_active: true },
+    });
+    if (!user || !user.is_active) {
+      throw new UnauthorizedException('Admin account not found or inactive');
+    }
+
+    const cooldown = await this.redis.get(this.pairCooldownKey(userId));
+    if (cooldown) {
+      throw new UnauthorizedException(
+        'Veuillez attendre avant de générer un nouveau code',
+      );
+    }
+
+    const otp = this.generateOtp();
+    await this.redis.set(
+      this.pairOtpKey(userId),
+      JSON.stringify({ otp, phoneName }),
+      'EX',
+      this.PAIR_TTL,
+    );
+    await this.redis.set(this.pairCooldownKey(userId), '1', 'EX', 60);
+
+    return { otp, expiresIn: this.PAIR_TTL, userId };
+  }
+
+  async verifyPhonePairingOtp(
+    userId: string,
+    otp: string,
+  ): Promise<{ token: string }> {
+    const raw = await this.redis.get(this.pairOtpKey(userId));
+    if (!raw) throw new UnauthorizedException('Pairing code expired or invalid');
+
+    const stored = JSON.parse(raw) as { otp: string; phoneName: string };
+    if (stored.otp !== otp) {
+      throw new UnauthorizedException('Pairing code incorrect');
+    }
+
+    await this.redis.del(this.pairOtpKey(userId));
+
+    const token = this.jwtService.sign(
+      { sub: userId, type: 'admin-phone', phoneName: stored.phoneName },
+      { expiresIn: '7d' },
+    );
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        phone_paired_at: new Date(),
+        phone_name: stored.phoneName,
+      },
+    });
+
+    return { token };
   }
 }

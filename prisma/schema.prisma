@@ -288,8 +288,10 @@ model User {
   last_name     String
   email         String    @unique
   role          UserRole  @default(ADMIN)
-  is_active     Boolean   @default(true)
-  last_login_at DateTime?
+  is_active       Boolean   @default(true)
+  last_login_at   DateTime?
+  phone_paired_at DateTime?
+  phone_name      String?
 
   files            File[]
   logs             Log[]
@@ -314,6 +316,7 @@ model KycDocument {
   document_type       DocumentType?
   document_category   KycDocumentCategory
   document_url        String
+  storage_key         String?
   verification_status VerificationStatus @default(PENDING)
   verified_at         DateTime?
   verified_by         String?            @db.Uuid

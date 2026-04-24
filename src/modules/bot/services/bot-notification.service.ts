@@ -332,7 +332,7 @@ export class BotNotificationService {
       if (!app?.worker?.phone || !app.job_offer) return;
       const text = formatJobCompletedToWorker({
         offerTitle: app.job_offer.title,
-        amount: Number(app.job_offer.amount),
+        amount: Number(app.job_offer.amount ?? 0),
       });
       await this.whatsApp.sendTextMessage(app.worker.phone, text);
     } catch (err) {
