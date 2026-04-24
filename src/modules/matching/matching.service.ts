@@ -848,14 +848,18 @@ export class MatchingService {
       `reindexPending: ${jobs.length} jobs, ${workers.length} workers, ${employers.length} employers`,
     );
 
-    for (const { id } of jobs) {
-      await this.indexJobOffer(id);
-    }
-    for (const { id } of workers) {
-      await this.indexWorkerProfile(id);
-    }
-    for (const { id } of employers) {
-      await this.indexEmployerProfile(id);
-    }
+    const BATCH_SIZE = 10;
+    const batchProcess = async <T extends { id: string }>(
+      items: T[],
+      fn: (id: string) => Promise<void>,
+    ) => {
+      for (let i = 0; i < items.length; i += BATCH_SIZE) {
+        await Promise.all(items.slice(i, i + BATCH_SIZE).map((item) => fn(item.id)));
+      }
+    };
+
+    await batchProcess(jobs, (id) => this.indexJobOffer(id));
+    await batchProcess(workers, (id) => this.indexWorkerProfile(id));
+    await batchProcess(employers, (id) => this.indexEmployerProfile(id));
   }
 }
