@@ -157,12 +157,16 @@ export class WalletService {
     referenceId?: string,
   ): Promise<void> {
     const wallet = await this.getOrCreateProfileWallet(profileId);
-    if (wallet.balance < amount) {
-      throw new BadRequestException(
-        'Solde insuffisant dans votre portefeuille',
-      );
-    }
     await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.wallet.updateMany({
+        where: { id: wallet.id, balance: { gte: amount } },
+        data: { balance: { decrement: amount } },
+      });
+      if (updated.count === 0) {
+        throw new BadRequestException(
+          'Solde insuffisant dans votre portefeuille',
+        );
+      }
       await tx.walletTransaction.create({
         data: {
           wallet_id: wallet.id,
@@ -171,10 +175,6 @@ export class WalletService {
           reference_type: referenceType ?? null,
           reference_id: referenceId ?? null,
         },
-      });
-      await tx.wallet.update({
-        where: { id: wallet.id },
-        data: { balance: { decrement: amount } },
       });
     });
   }
@@ -188,14 +188,16 @@ export class WalletService {
     referenceId: string,
   ): Promise<void> {
     const profileWallet = await this.getOrCreateProfileWallet(profileId);
-    if (Number(profileWallet.balance) < amount) {
-      throw new BadRequestException(
-        'Solde insuffisant dans votre portefeuille',
-      );
-    }
     const systemWallet = await this.getOrCreateSystemWallet();
 
     await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.wallet.updateMany({
+        where: { id: profileWallet.id, balance: { gte: amount } },
+        data: { balance: { decrement: amount } },
+      });
+      if (updated.count === 0) {
+        throw new BadRequestException('Solde insuffisant dans votre portefeuille');
+      }
       await tx.walletTransaction.create({
         data: {
           wallet_id: profileWallet.id,
@@ -206,8 +208,8 @@ export class WalletService {
         },
       });
       await tx.wallet.update({
-        where: { id: profileWallet.id },
-        data: { balance: { decrement: amount } },
+        where: { id: systemWallet.id },
+        data: { balance: { increment: amount } },
       });
       await tx.walletTransaction.create({
         data: {
@@ -217,10 +219,6 @@ export class WalletService {
           reference_type: referenceType,
           reference_id: referenceId,
         },
-      });
-      await tx.wallet.update({
-        where: { id: systemWallet.id },
-        data: { balance: { increment: amount } },
       });
     });
   }
