@@ -302,7 +302,7 @@ export class BotNotificationService {
     try {
       const app = await this.prisma.application.findUnique({
         where: { id: applicationId },
-        include: { worker: true },
+        select: { worker: { select: { phone: true } } },
       });
       if (!app?.worker?.phone) return;
 
@@ -324,9 +324,15 @@ export class BotNotificationService {
     try {
       const app = await this.prisma.application.findUnique({
         where: { id: applicationId },
-        include: {
-          job_offer: { include: { employer: true } },
-          worker: true,
+        select: {
+          job_offer: {
+            select: {
+              title: true,
+              scheduled_at: true,
+              employer: { select: { phone: true } },
+            },
+          },
+          worker: { select: { first_name: true, last_name: true } },
         },
       });
       if (!app?.job_offer?.employer?.phone || !app.worker) return;
@@ -353,7 +359,10 @@ export class BotNotificationService {
     try {
       const app = await this.prisma.application.findUnique({
         where: { id: applicationId },
-        include: { job_offer: true, worker: true },
+        select: {
+          job_offer: { select: { title: true, amount: true } },
+          worker: { select: { phone: true } },
+        },
       });
       if (!app?.worker?.phone || !app.job_offer) return;
       const text = formatJobCompletedToWorker({
@@ -460,7 +469,10 @@ export class BotNotificationService {
     try {
       const app = await this.prisma.application.findUnique({
         where: { id: applicationId },
-        include: { job_offer: true, worker: true },
+        select: {
+          job_offer: { select: { title: true } },
+          worker: { select: { phone: true } },
+        },
       });
       if (!app?.worker?.phone || !app.job_offer) return;
       const text = formatJobCancelledByEmployerToWorker(app.job_offer.title);
