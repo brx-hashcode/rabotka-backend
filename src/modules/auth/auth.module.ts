@@ -7,6 +7,7 @@ import { MailModule } from '../mail/mail.module';
 import { WhatsAppModule } from '../whatsapp/whatsapp.module';
 import { WsNotificationsModule } from '../ws-notifications/ws-notifications.module';
 import { PrismaModule } from '../../common/services/prisma/prisma.module';
+import { RedisModule } from '../../common/services/redis/redis.module';
 import { JwtAuthGuard, AdminAuthGuard, RolesGuard } from './guards';
 import { QrGateway } from '../ws-notifications/qr.gateway';
 
@@ -14,6 +15,7 @@ import { QrGateway } from '../ws-notifications/qr.gateway';
   imports: [
     ConfigModule,
     PrismaModule,
+    RedisModule.forRoot(),
     MailModule,
     forwardRef(() => WhatsAppModule),
     forwardRef(() => WsNotificationsModule),
