@@ -96,10 +96,23 @@ export class SystemConfigService implements OnModuleInit {
     const cached = await this.redis.get(cacheKey);
     if (cached !== null) return cached;
 
-    const row = await this.prisma.systemConfig.findUnique({ where: { key } });
-    const value = row?.value ?? fallback;
-    await this.redis.set(cacheKey, value, 'EX', CACHE_TTL_SECONDS);
-    return value;
+    // Stampede protection: only one caller fills the cache; others wait briefly then re-read
+    const lockKey = `${CACHE_PREFIX}lock:${key}`;
+    const acquired = await this.redis.set(lockKey, '1', 'EX', 2, 'NX');
+    if (!acquired) {
+      // Another caller is filling; wait and return whatever is cached (or fallback)
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      return (await this.redis.get(cacheKey)) ?? fallback;
+    }
+
+    try {
+      const row = await this.prisma.systemConfig.findUnique({ where: { key } });
+      const value = row?.value ?? fallback;
+      await this.redis.set(cacheKey, value, 'EX', CACHE_TTL_SECONDS);
+      return value;
+    } finally {
+      await this.redis.del(lockKey);
+    }
   }
 
   private async mgetBatch(entries: { key: string; fallback: string }[]): Promise<string[]> {
