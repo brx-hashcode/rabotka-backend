@@ -7,8 +7,8 @@ import { JwtAuthGuard, AuthenticatedRequest } from './jwt-auth.guard';
 
 @Injectable()
 export class AdminAuthGuard extends JwtAuthGuard {
-  canActivate(context: ExecutionContext): boolean {
-    const isValid = super.canActivate(context);
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    const isValid = await super.canActivate(context);
     if (!isValid) {
       return false;
     }

@@ -47,7 +47,8 @@ describe('JwtAuthGuard', () => {
       getAllAndOverride: jest.fn().mockReturnValue(false),
     } as unknown as jest.Mocked<Reflector>;
 
-    guard = new JwtAuthGuard(jwtService, configService, reflector);
+    const redis = { get: jest.fn().mockResolvedValue(null) } as any;
+    guard = new JwtAuthGuard(jwtService, configService, reflector, redis);
   });
 
   it('allows public routes without a token', () => {
