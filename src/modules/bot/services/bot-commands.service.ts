@@ -167,15 +167,17 @@ export class BotCommandsService {
     if (profile.profile_type !== 'EMPLOYER') {
       return "*SEULS LES EMPLOYEURS PEUVENT VOIR LEURS OFFRES. TAPEZ 'MENU' POUR REVENIR.*";
     }
-    const allOffers = await this.jobOfferService.findByEmployerId(profile.id);
-    if (allOffers.length === 0) {
+    const PAGE_SIZE = 5;
+    const { items: pageOffers, total } = await this.jobOfferService.findByEmployerId(
+      profile.id,
+      { page, pageSize: PAGE_SIZE },
+    );
+    if (total === 0) {
       return "*VOUS N'AVEZ PUBLIÉ AUCUNE OFFRE. TAPEZ 'MENU' POUR REVENIR.*";
     }
-    const PAGE_SIZE = 5;
     const start = page * PAGE_SIZE;
-    const pageOffers = allOffers.slice(start, start + PAGE_SIZE);
-    const hasMore = start + PAGE_SIZE < allOffers.length;
-    const lines = [`*MES OFFRES PUBLIÉES (${allOffers.length})*`, ''];
+    const hasMore = start + PAGE_SIZE < total;
+    const lines = [`*MES OFFRES PUBLIÉES (${total})*`, ''];
     pageOffers.forEach((o, i) => {
       const num = start + i + 1;
       const title = o.title.length > 40 ? o.title.slice(0, 40) + '...' : o.title;
