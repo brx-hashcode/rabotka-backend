@@ -435,20 +435,22 @@ export class AuthService {
     }
   }
 
-  // ─── QR Login ────────────────────────────────────────────────────────────────
-
   private readonly QR_TTL = 300;
-  private qrKey = (id: string) => `admin:qr:${id}`;
+  private readonly qrKey = (id: string) => `admin:qr:${id}`;
+  private readonly qrConfirmAttemptKey = (sessionId: string) =>
+    `admin:qr:attempts:${sessionId}`;
 
   async initQrSession(): Promise<{
     sessionId: string;
+    consumeNonce: string;
     qrUrl: string;
     expiresIn: number;
   }> {
     const sessionId = crypto.randomUUID();
+    const consumeNonce = crypto.randomUUID();
     await this.redis.set(
       this.qrKey(sessionId),
-      JSON.stringify({ status: 'pending' }),
+      JSON.stringify({ status: 'pending', consumeNonce }),
       'EX',
       this.QR_TTL,
     );
@@ -457,7 +459,7 @@ export class AuthService {
       .trim()
       .replace(/\/+$/, '');
     const qrUrl = `${base}/auth/qr-confirm?session=${sessionId}`;
-    return { sessionId, qrUrl, expiresIn: this.QR_TTL };
+    return { sessionId, consumeNonce, qrUrl, expiresIn: this.QR_TTL };
   }
 
   async pollQrSession(
@@ -473,10 +475,22 @@ export class AuthService {
     sessionId: string,
     phoneToken: string,
   ): Promise<{ success: boolean }> {
+    const attemptsKey = this.qrConfirmAttemptKey(sessionId);
+    const attempts = await this.redis.incr(attemptsKey);
+    if (attempts === 1) {
+      await this.redis.expire(attemptsKey, this.QR_TTL);
+    }
+    if (attempts > 5) {
+      throw new HttpException(
+        'Too many confirmation attempts for this QR session.',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
     const raw = await this.redis.get(this.qrKey(sessionId));
     if (!raw) throw new UnauthorizedException('QR session expired');
 
-    const data = JSON.parse(raw) as { status: string };
+    const data = JSON.parse(raw) as { status: string; consumeNonce?: string };
     if (data.status !== 'pending') {
       throw new UnauthorizedException('QR session already used');
     }
@@ -499,7 +513,9 @@ export class AuthService {
       throw new UnauthorizedException('Admin account not found or inactive');
     }
     if (!user.phone_paired_at) {
-      throw new UnauthorizedException('Phone pairing has been reset. Please re-pair your phone.');
+      throw new UnauthorizedException(
+        'Phone pairing has been reset. Please re-pair your phone.',
+      );
     }
 
     const jwtPayload = { sub: user.id, type: 'admin' };
@@ -507,7 +523,11 @@ export class AuthService {
 
     await this.redis.set(
       this.qrKey(sessionId),
-      JSON.stringify({ status: 'confirmed', token }),
+      JSON.stringify({
+        status: 'confirmed',
+        token,
+        consumeNonce: data.consumeNonce,
+      }),
       'EX',
       60,
     );
@@ -520,11 +540,21 @@ export class AuthService {
     return { success: true };
   }
 
-  async consumeQrSession(sessionId: string): Promise<{ token: string }> {
+  async consumeQrSession(
+    sessionId: string,
+    consumeNonce: string,
+  ): Promise<{ token: string }> {
     const raw = await this.redis.get(this.qrKey(sessionId));
     if (!raw) throw new UnauthorizedException('QR session expired');
 
-    const data = JSON.parse(raw) as { status: string; token?: string };
+    const data = JSON.parse(raw) as {
+      status: string;
+      token?: string;
+      consumeNonce?: string;
+    };
+    if (data.consumeNonce !== consumeNonce) {
+      throw new UnauthorizedException('Invalid consume nonce');
+    }
     if (data.status !== 'confirmed' || !data.token) {
       throw new UnauthorizedException('QR session not confirmed yet');
     }
@@ -538,6 +568,16 @@ export class AuthService {
   private readonly PAIR_TTL = 300;
   private pairOtpKey = (userId: string) => `admin:pair:otp:${userId}`;
   private pairCooldownKey = (userId: string) => `admin:pair:resend:${userId}`;
+  private pairAttemptKey = (userId: string) => `admin:pair:attempts:${userId}`;
+
+  async unpairPhone(userId: string): Promise<void> {
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { phone_paired_at: null, phone_name: null },
+    });
+    await this.redis.del(this.pairOtpKey(userId));
+    await this.redis.del(this.pairAttemptKey(userId));
+  }
 
   async generatePhonePairingOtp(
     userId: string,
@@ -564,7 +604,6 @@ export class AuthService {
 
     const otp = this.generateOtp();
 
-    // Clear existing pairing so old phone token is immediately invalidated
     await this.prisma.user.update({
       where: { id: userId },
       data: { phone_paired_at: null, phone_name: null },
@@ -585,13 +624,28 @@ export class AuthService {
     userId: string,
     otp: string,
   ): Promise<{ token: string }> {
+    const attemptsKey = this.pairAttemptKey(userId);
+    const attempts = await this.redis.incr(attemptsKey);
+    if (attempts === 1) {
+      await this.redis.expire(attemptsKey, this.PAIR_TTL);
+    }
+    if (attempts > 10) {
+      throw new HttpException(
+        'Too many incorrect attempts. Please generate a new pairing code.',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
     const raw = await this.redis.get(this.pairOtpKey(userId));
-    if (!raw) throw new UnauthorizedException('Pairing code expired or invalid');
+    if (!raw)
+      throw new UnauthorizedException('Pairing code expired or invalid');
 
     const stored = JSON.parse(raw) as { otp: string; phoneName: string };
     if (stored.otp !== otp) {
       throw new UnauthorizedException('Pairing code incorrect');
     }
+
+    await this.redis.del(attemptsKey);
 
     await this.redis.del(this.pairOtpKey(userId));
 

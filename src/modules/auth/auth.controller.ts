@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Delete,
   Body,
   Res,
   Req,
@@ -10,9 +11,10 @@ import {
   HttpCode,
   HttpStatus,
   UseGuards,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBody, ApiCookieAuth } from '@nestjs/swagger';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import { ConfigService } from '@nestjs/config';
 import { AuthService } from './auth.service';
 import { AdminAuthGuard } from './guards/admin-auth.guard';
@@ -387,6 +389,7 @@ export class AuthController {
   @ApiOperation({ summary: 'Initialize a QR login session' })
   async initQrSession(): Promise<{
     sessionId: string;
+    consumeNonce: string;
     qrUrl: string;
     expiresIn: number;
   }> {
@@ -403,14 +406,35 @@ export class AuthController {
 
   @Post('admin/qr/confirm')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Confirm QR session from phone using phone pairing token' })
+  @ApiOperation({ summary: 'Confirm QR session from phone using phone pairing cookie' })
   async confirmQrSession(
     @Body('sessionId') sessionId: string,
-    @Body('phoneToken') phoneToken: string,
+    @Req() req: Request,
   ): Promise<{ success: boolean }> {
+    const phoneToken = (req.cookies as Record<string, string>)['admin_phone_token'];
+    if (!phoneToken) {
+      throw new UnauthorizedException('Phone not paired — no phone token cookie found');
+    }
     const result = await this.authService.confirmQrSession(sessionId, phoneToken);
     this.qrGateway.emitConfirmed(sessionId);
     return result;
+  }
+
+  @Delete('admin/phone/pair')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(AdminAuthGuard)
+  @ApiCookieAuth()
+  @ApiOperation({ summary: 'Clear phone pairing without generating a new OTP' })
+  async unpairPhone(
+    @Req() req: AdminAuthenticatedRequest,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<{ success: boolean }> {
+    await this.authService.unpairPhone(req.user.userId);
+    // Expire the phone token cookie on the server response so the
+    // desktop browser's copy is also cleared if it holds one.
+    res.clearCookie('admin_phone_token', { path: '/' });
+    this.wsGateway.emitToAdmin(req.user.userId, 'phone:paired');
+    return { success: true };
   }
 
   @Post('admin/phone/pair/generate')
@@ -422,10 +446,7 @@ export class AuthController {
     @Req() req: AdminAuthenticatedRequest,
     @Body('phoneName') phoneName: string,
   ): Promise<{ otp: string; expiresIn: number; userId: string }> {
-    const result = await this.authService.generatePhonePairingOtp(req.user.userId, phoneName);
-    // Notify the profile page that pairing was cleared so it refetches immediately
-    this.wsGateway.emitToAdmin(req.user.userId, 'phone:paired');
-    return result;
+    return this.authService.generatePhonePairingOtp(req.user.userId, phoneName);
   }
 
   @Post('admin/phone/pair/verify')
@@ -434,10 +455,19 @@ export class AuthController {
   async verifyPhonePairingOtp(
     @Body('userId') userId: string,
     @Body('otp') otp: string,
-  ): Promise<{ token: string }> {
-    const result = await this.authService.verifyPhonePairingOtp(userId, otp);
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<{ success: boolean }> {
+    const { token } = await this.authService.verifyPhonePairingOtp(userId, otp);
+    const isProduction = this.configService.get<string>('NODE_ENV') === 'production';
+    res.cookie('admin_phone_token', token, {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: 'lax',
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+      path: '/',
+    });
     this.wsGateway.emitToAdmin(userId, 'phone:paired');
-    return result;
+    return { success: true };
   }
 
   @Post('admin/qr/consume')
@@ -445,9 +475,10 @@ export class AuthController {
   @ApiOperation({ summary: 'Consume confirmed QR session and set cookie' })
   async consumeQrSession(
     @Body('sessionId') sessionId: string,
+    @Body('consumeNonce') consumeNonce: string,
     @Res({ passthrough: true }) res: Response,
   ): Promise<{ success: boolean }> {
-    const { token } = await this.authService.consumeQrSession(sessionId);
+    const { token } = await this.authService.consumeQrSession(sessionId, consumeNonce);
 
     const isProduction = this.configService.get<string>('NODE_ENV') === 'production';
     const cookieName = this.configService.get<string>('AUTH_COOKIE_NAME');
