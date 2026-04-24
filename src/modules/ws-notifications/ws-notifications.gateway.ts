@@ -5,7 +5,7 @@ import {
   OnGatewayDisconnect,
   OnGatewayInit,
 } from '@nestjs/websockets';
-import { Logger, Inject } from '@nestjs/common';
+import { Logger, Inject, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { Server, Socket } from 'socket.io';
@@ -24,9 +24,11 @@ import type { JwtPayload } from '../auth/guards/jwt-auth.guard';
   },
 })
 export class WsNotificationsGateway
-  implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
+  implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect, OnModuleDestroy
 {
   private readonly logger = new Logger(WsNotificationsGateway.name);
+  private pubClient: Redis | null = null;
+  private subClient: Redis | null = null;
 
   @WebSocketServer()
   server!: Server;
@@ -44,32 +46,19 @@ export class WsNotificationsGateway
       return;
     }
 
-    const redisUrl = this.configService.get<string>('REDIS_URL');
-    const host = this.configService.get<string>('REDIS_HOST', 'localhost');
-    const port = this.configService.get<number>('REDIS_PORT', 6379);
-    const password = this.configService.get<string>('REDIS_PASSWORD');
-
     try {
-      let pubClient: Redis;
-      if (
-        redisUrl &&
-        (redisUrl.startsWith('redis://') || redisUrl.startsWith('rediss://'))
-      ) {
-        pubClient = new Redis(redisUrl);
-      } else {
-        pubClient = new Redis({
-          host,
-          port,
-          ...(password ? { password } : {}),
-        });
-      }
-
-      const subClient = pubClient.duplicate();
-      (rootServer as any).adapter(createAdapter(pubClient, subClient));
+      this.pubClient = this.redis.duplicate();
+      this.subClient = this.redis.duplicate();
+      (rootServer as any).adapter(createAdapter(this.pubClient, this.subClient));
       this.logger.log('Socket.IO Redis adapter attached');
     } catch (err) {
       this.logger.warn('Failed to attach Redis adapter, running single-instance:', err);
     }
+  }
+
+  onModuleDestroy(): void {
+    this.pubClient?.disconnect();
+    this.subClient?.disconnect();
   }
 
   handleConnection(client: Socket): void {
