@@ -140,12 +140,13 @@ export class WhatsAppController {
       `Incoming WhatsApp from ${phone}: "${text.slice(0, 80)}${text.length > 80 ? '...' : ''}"`,
     );
 
-    // Per-phone rate limiting
+    // Per-phone rate limiting — atomic INCR + EXPIRE NX avoids permanent lock on crash
     const rateLimitKey = `wa:rate:${phone}`;
-    const count = await this.redis.incr(rateLimitKey);
-    if (count === 1) {
-      await this.redis.expire(rateLimitKey, RATE_LIMIT_WINDOW);
-    }
+    const [[, count]] = (await this.redis
+      .pipeline()
+      .incr(rateLimitKey)
+      .expire(rateLimitKey, RATE_LIMIT_WINDOW, 'NX')
+      .exec()) as [[null, number], [null, number]];
     if (count > RATE_LIMIT_MAX) {
       this.logger.warn(`Rate limit exceeded for ${phone}: ${count} msgs/min`);
       return;
