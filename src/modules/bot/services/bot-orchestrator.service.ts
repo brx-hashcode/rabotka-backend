@@ -671,22 +671,24 @@ export class BotOrchestratorService {
     }
 
     const flowState = getRecommendedJobsInitialState(offerIds);
-    await this.botState.set(profileId, flowState);
-
     const pageIds = offerIds.slice(0, 5);
-    const offers = await this.prisma.jobOffer.findMany({
-      where: {
-        id: { in: pageIds },
-        status: { in: ['ACTIVE', 'PARTIALLY_FILLED'] },
-      },
-      select: {
-        id: true,
-        title: true,
-        amount: true,
-        address: true,
-        scheduled_at: true,
-      },
-    });
+
+    const [offers] = await Promise.all([
+      this.prisma.jobOffer.findMany({
+        where: {
+          id: { in: pageIds },
+          status: { in: ['ACTIVE', 'PARTIALLY_FILLED'] },
+        },
+        select: {
+          id: true,
+          title: true,
+          amount: true,
+          address: true,
+          scheduled_at: true,
+        },
+      }),
+      this.botState.set(profileId, flowState),
+    ]);
     const offerMap = new Map(offers.map((o) => [o.id, o]));
     const orderedOffers = pageIds
       .map((id) => offerMap.get(id))
