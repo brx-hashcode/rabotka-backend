@@ -18,6 +18,14 @@ function makeConfigService(env: Record<string, string> = {}) {
   };
 }
 
+function makeQrGateway() {
+  return { emitConfirmed: jest.fn() };
+}
+
+function makeWsGateway() {
+  return { emitToAdmin: jest.fn() };
+}
+
 function makeRes() {
   return {
     cookie: jest.fn(),
@@ -33,7 +41,7 @@ describe('AuthController', () => {
   beforeEach(() => {
     authService = makeAuthService();
     configService = makeConfigService({ AUTH_COOKIE_NAME: 'auth_token' });
-    controller = new AuthController(authService as any, configService as any);
+    controller = new AuthController(authService as any, configService as any, makeQrGateway() as any, makeWsGateway() as any);
   });
 
   describe('sendOtp()', () => {
