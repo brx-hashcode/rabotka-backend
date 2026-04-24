@@ -147,13 +147,17 @@ export class BotNotificationService {
         await this.whatsApp.sendTextMessage(app.worker.phone, text);
 
         // Pre-load unlock flow state so "contact" routes immediately
-        const unlockState = getUnlockContactInitialState({
-          attemptId: attempt.id,
-          otherName: employerName,
-          amount: fees.workerFeeFcfa,
-          expiryHours: fees.expiryHours,
-        });
-        await this.botState.set(app.worker_id, unlockState);
+        // Guard: don't overwrite an active flow mid-conversation
+        const currentState = await this.botState.get(app.worker_id);
+        if (!currentState?.flowId) {
+          const unlockState = getUnlockContactInitialState({
+            attemptId: attempt.id,
+            otherName: employerName,
+            amount: fees.workerFeeFcfa,
+            expiryHours: fees.expiryHours,
+          });
+          await this.botState.set(app.worker_id, unlockState);
+        }
       } else {
         // Fallback (attempt not created yet — should not happen in normal flow)
         await this.whatsApp.sendTextMessage(
@@ -408,6 +412,8 @@ export class BotNotificationService {
     jobTitle: string;
   }): Promise<void> {
     const { raterProfileId, raterPhone, rateeId, assignmentId, rateeLabel, jobTitle } = params;
+    const currentState = await this.botState.get(raterProfileId);
+    if (currentState?.flowId) return;
     const state = getRateAssignmentInitialState(assignmentId, rateeId);
     await this.botState.set(raterProfileId, state);
     const text = [
