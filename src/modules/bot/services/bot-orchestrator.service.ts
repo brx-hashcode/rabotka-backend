@@ -384,12 +384,13 @@ export class BotOrchestratorService {
           return { reply: [handleMenuCommand(profile)], clearState: true };
         }
         const PAGE_SIZE = 5;
-        const allOffers = await this.jobOfferService.findByEmployerId(
-          profile.id,
-        );
+        const { total } = await this.jobOfferService.findByEmployerId(profile.id, {
+          page: 0,
+          pageSize: 1,
+        });
         const nextPage = currentPage + 1;
         const nextPageStart = nextPage * PAGE_SIZE;
-        const hasMore = nextPageStart < allOffers.length;
+        const hasMore = nextPageStart < total;
         const nextPageNum = nextPageStart + 1;
         if (input.trim() === String(nextPageNum) && hasMore) {
           const message = await this.commands.myOffers(profile, nextPage);
