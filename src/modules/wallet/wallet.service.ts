@@ -259,21 +259,31 @@ export class WalletService {
     if (penalty?.worker_id !== profileId) {
       throw new NotFoundException('Pénalité introuvable');
     }
-    if (penalty.paid_at) {
-      throw new BadRequestException('Cette pénalité a déjà été réglée');
-    }
 
-    const profileWallet = await this.getOrCreateProfileWallet(profileId);
-    if (profileWallet.balance < Number(penalty.amount)) {
-      throw new BadRequestException(
-        'Solde insuffisant pour régler cette pénalité',
-      );
-    }
-
-    const systemWallet = await this.getOrCreateSystemWallet();
+    const [profileWallet, systemWallet] = await Promise.all([
+      this.getOrCreateProfileWallet(profileId),
+      this.getOrCreateSystemWallet(),
+    ]);
     const reference = generatePaymentReference();
 
     await this.prisma.$transaction(async (tx) => {
+      // Atomic idempotency guard + balance check: only proceeds if penalty unpaid and balance sufficient
+      const [penaltyUpdate, walletUpdate] = await Promise.all([
+        tx.penalty.updateMany({
+          where: { id: penaltyId, paid_at: null },
+          data: { paid_at: new Date() },
+        }),
+        tx.wallet.updateMany({
+          where: { id: profileWallet.id, balance: { gte: penalty.amount } },
+          data: { balance: { decrement: penalty.amount } },
+        }),
+      ]);
+      if (penaltyUpdate.count === 0) {
+        throw new BadRequestException('Cette pénalité a déjà été réglée');
+      }
+      if (walletUpdate.count === 0) {
+        throw new BadRequestException('Solde insuffisant pour régler cette pénalité');
+      }
       await tx.walletTransaction.create({
         data: {
           wallet_id: profileWallet.id,
@@ -284,8 +294,8 @@ export class WalletService {
         },
       });
       await tx.wallet.update({
-        where: { id: profileWallet.id },
-        data: { balance: { decrement: penalty.amount } },
+        where: { id: systemWallet.id },
+        data: { balance: { increment: penalty.amount } },
       });
       await tx.walletTransaction.create({
         data: {
@@ -295,10 +305,6 @@ export class WalletService {
           reference_type: 'penalty',
           reference_id: penaltyId,
         },
-      });
-      await tx.wallet.update({
-        where: { id: systemWallet.id },
-        data: { balance: { increment: penalty.amount } },
       });
       await tx.payment.create({
         data: {
@@ -311,10 +317,6 @@ export class WalletService {
           paid_at: new Date(),
           description: `Penalty ${penaltyId} paid via wallet`,
         },
-      });
-      await tx.penalty.update({
-        where: { id: penaltyId },
-        data: { paid_at: new Date() },
       });
     });
 
