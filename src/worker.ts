@@ -27,7 +27,6 @@ loadEnv({ path: '.env.local' });
 loadEnv();
 
 class WorkerLogger implements LoggerService {
-  /** Include Nest/module init contexts so startup is not silent (looks "stuck" otherwise). */
   private readonly allowedContexts = [
     'Worker',
     'QueueService',
@@ -261,7 +260,11 @@ async function bootstrap(): Promise<void> {
     queueService.createWorker<ReminderJobData>(
       WHATSAPP_REMINDERS_QUEUE,
       (job) => reminderProcessor.process(job),
-      { concurrency: 2, lockDuration: reminderLockMs, stalledInterval: reminderLockMs / 2 },
+      {
+        concurrency: 2,
+        lockDuration: reminderLockMs,
+        stalledInterval: reminderLockMs / 2,
+      },
     );
   }
 
