@@ -98,7 +98,7 @@ export class SystemConfigService implements OnModuleInit {
 
     // Stampede protection: only one caller fills the cache; others wait briefly then re-read
     const lockKey = `${CACHE_PREFIX}lock:${key}`;
-    const acquired = await this.redis.set(lockKey, '1', 'NX', 'EX', 2);
+    const acquired = await this.redis.set(lockKey, '1', 'EX', 2, 'NX');
     if (!acquired) {
       // Another caller is filling; wait and return whatever is cached (or fallback)
       await new Promise((resolve) => setTimeout(resolve, 50));
