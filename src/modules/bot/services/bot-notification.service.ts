@@ -41,18 +41,34 @@ export class BotNotificationService {
     try {
       const app = await this.prisma.application.findUnique({
         where: { id: applicationId },
-        include: {
-          job_offer: { include: { employer: true } },
-          worker: true,
+        select: {
+          worker_id: true,
+          job_offer: {
+            select: {
+              title: true,
+              scheduled_at: true,
+              address: true,
+              employer_id: true,
+              employer: { select: { phone: true, first_name: true, last_name: true } },
+            },
+          },
+          worker: {
+            select: {
+              phone: true,
+              first_name: true,
+              last_name: true,
+              email: true,
+              description: true,
+              reliability_score: true,
+              avatar_url: true,
+            },
+          },
         },
       });
       if (!app?.job_offer?.employer?.phone || !app.worker) return;
 
       const completedCount = await this.prisma.application.count({
-        where: {
-          worker_id: app.worker_id,
-          status: 'ACCEPTED',
-        },
+        where: { worker_id: app.worker_id, status: 'ACCEPTED' },
       });
 
       const text = formatNewApplicationToEmployer({
@@ -116,9 +132,15 @@ export class BotNotificationService {
     try {
       const app = await this.prisma.application.findUnique({
         where: { id: applicationId },
-        include: {
-          job_offer: { include: { employer: true } },
-          worker: true,
+        select: {
+          worker_id: true,
+          job_offer: {
+            select: {
+              title: true,
+              employer: { select: { first_name: true, last_name: true } },
+            },
+          },
+          worker: { select: { phone: true } },
         },
       });
       if (!app?.worker?.phone || !app.job_offer?.employer) return;
