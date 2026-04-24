@@ -493,10 +493,13 @@ export class AuthService {
 
     const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },
-      select: { id: true, is_active: true },
+      select: { id: true, is_active: true, phone_paired_at: true },
     });
     if (!user || !user.is_active) {
       throw new UnauthorizedException('Admin account not found or inactive');
+    }
+    if (!user.phone_paired_at) {
+      throw new UnauthorizedException('Phone pairing has been reset. Please re-pair your phone.');
     }
 
     const jwtPayload = { sub: user.id, type: 'admin' };
@@ -550,12 +553,23 @@ export class AuthService {
 
     const cooldown = await this.redis.get(this.pairCooldownKey(userId));
     if (cooldown) {
-      throw new UnauthorizedException(
-        'Veuillez attendre avant de générer un nouveau code',
+      const ttl = await this.redis.ttl(this.pairCooldownKey(userId));
+      throw new HttpException(
+        ttl > 0
+          ? `Veuillez attendre ${ttl}s avant de générer un nouveau code`
+          : 'Veuillez attendre avant de générer un nouveau code',
+        HttpStatus.TOO_MANY_REQUESTS,
       );
     }
 
     const otp = this.generateOtp();
+
+    // Clear existing pairing so old phone token is immediately invalidated
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { phone_paired_at: null, phone_name: null },
+    });
+
     await this.redis.set(
       this.pairOtpKey(userId),
       JSON.stringify({ otp, phoneName }),

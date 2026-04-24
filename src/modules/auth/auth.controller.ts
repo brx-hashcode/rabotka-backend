@@ -422,7 +422,10 @@ export class AuthController {
     @Req() req: AdminAuthenticatedRequest,
     @Body('phoneName') phoneName: string,
   ): Promise<{ otp: string; expiresIn: number; userId: string }> {
-    return this.authService.generatePhonePairingOtp(req.user.userId, phoneName);
+    const result = await this.authService.generatePhonePairingOtp(req.user.userId, phoneName);
+    // Notify the profile page that pairing was cleared so it refetches immediately
+    this.wsGateway.emitToAdmin(req.user.userId, 'phone:paired');
+    return result;
   }
 
   @Post('admin/phone/pair/verify')
