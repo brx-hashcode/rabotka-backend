@@ -23,6 +23,8 @@ import {
   SendAdminOtpDto,
   VerifyAdminOtpDto,
 } from './dto';
+import { QrGateway } from '../ws-notifications/qr.gateway';
+import { WsNotificationsGateway } from '../ws-notifications/ws-notifications.gateway';
 
 @ApiTags('Auth')
 @Controller('auth')
@@ -30,6 +32,8 @@ export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly configService: ConfigService,
+    private readonly qrGateway: QrGateway,
+    private readonly wsGateway: WsNotificationsGateway,
   ) {}
 
   @Post('send-otp')
@@ -404,7 +408,9 @@ export class AuthController {
     @Body('sessionId') sessionId: string,
     @Body('phoneToken') phoneToken: string,
   ): Promise<{ success: boolean }> {
-    return this.authService.confirmQrSession(sessionId, phoneToken);
+    const result = await this.authService.confirmQrSession(sessionId, phoneToken);
+    this.qrGateway.emitConfirmed(sessionId);
+    return result;
   }
 
   @Post('admin/phone/pair/generate')
@@ -426,7 +432,9 @@ export class AuthController {
     @Body('userId') userId: string,
     @Body('otp') otp: string,
   ): Promise<{ token: string }> {
-    return this.authService.verifyPhonePairingOtp(userId, otp);
+    const result = await this.authService.verifyPhonePairingOtp(userId, otp);
+    this.wsGateway.emitToAdmin(userId, 'phone:paired');
+    return result;
   }
 
   @Post('admin/qr/consume')

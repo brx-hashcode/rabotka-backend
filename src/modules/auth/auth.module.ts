@@ -5,8 +5,10 @@ import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { MailModule } from '../mail/mail.module';
 import { WhatsAppModule } from '../whatsapp/whatsapp.module';
+import { WsNotificationsModule } from '../ws-notifications/ws-notifications.module';
 import { PrismaModule } from '../../common/services/prisma/prisma.module';
 import { JwtAuthGuard, AdminAuthGuard, RolesGuard } from './guards';
+import { QrGateway } from '../ws-notifications/qr.gateway';
 
 @Module({
   imports: [
@@ -14,6 +16,7 @@ import { JwtAuthGuard, AdminAuthGuard, RolesGuard } from './guards';
     PrismaModule,
     MailModule,
     forwardRef(() => WhatsAppModule),
+    forwardRef(() => WsNotificationsModule),
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
@@ -28,7 +31,7 @@ import { JwtAuthGuard, AdminAuthGuard, RolesGuard } from './guards';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtAuthGuard, AdminAuthGuard, RolesGuard],
-  exports: [AuthService, JwtAuthGuard, AdminAuthGuard, RolesGuard, JwtModule],
+  providers: [AuthService, JwtAuthGuard, AdminAuthGuard, RolesGuard, QrGateway],
+  exports: [AuthService, JwtAuthGuard, AdminAuthGuard, RolesGuard, JwtModule, QrGateway],
 })
 export class AuthModule {}

@@ -103,6 +103,11 @@ export class WsNotificationsGateway
     this.logger.debug(`WS client disconnected: ${client.id}`);
   }
 
+  emitToAdmin(userId: string, event: string, payload?: unknown): void {
+    this.server.to('admins').emit(event, payload ?? {});
+    this.logger.debug(`Emitted ${event} to admins room (triggered by ${userId})`);
+  }
+
   private extractToken(client: Socket): string | undefined {
     const cookieName = this.configService.get<string>('AUTH_COOKIE_NAME');
     const cookieHeader = client.handshake.headers.cookie;
