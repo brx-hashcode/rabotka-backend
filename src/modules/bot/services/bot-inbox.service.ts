@@ -22,30 +22,31 @@ export class BotInboxService {
 
   async push(profileId: string, item: InboxItem): Promise<void> {
     const key = `${INBOX_KEY_PREFIX}${profileId}`;
-    const raw = await this.redis.get(key);
-    const items: InboxItem[] = raw ? (JSON.parse(raw) as InboxItem[]) : [];
-    items.push(item);
-    await this.redis.set(key, JSON.stringify(items), 'EX', INBOX_TTL_SECONDS);
+    await this.redis
+      .pipeline()
+      .rpush(key, JSON.stringify(item))
+      .expire(key, INBOX_TTL_SECONDS)
+      .exec();
   }
 
   async getAll(profileId: string): Promise<InboxItem[]> {
     const key = `${INBOX_KEY_PREFIX}${profileId}`;
-    const raw = await this.redis.get(key);
-    if (!raw) return [];
-    try {
-      return JSON.parse(raw) as InboxItem[];
-    } catch {
-      return [];
-    }
+    const raws = await this.redis.lrange(key, 0, -1);
+    return raws.flatMap((r) => {
+      try {
+        return [JSON.parse(r) as InboxItem];
+      } catch {
+        return [];
+      }
+    });
   }
 
   async peek(profileId: string): Promise<InboxItem | null> {
     const key = `${INBOX_KEY_PREFIX}${profileId}`;
-    const raw = await this.redis.get(key);
+    const raw = await this.redis.lindex(key, 0);
     if (!raw) return null;
     try {
-      const items = JSON.parse(raw) as InboxItem[];
-      return items[0] ?? null;
+      return JSON.parse(raw) as InboxItem;
     } catch {
       return null;
     }
@@ -53,26 +54,17 @@ export class BotInboxService {
 
   async shift(profileId: string): Promise<InboxItem | null> {
     const key = `${INBOX_KEY_PREFIX}${profileId}`;
-    const raw = await this.redis.get(key);
+    const raw = await this.redis.lpop(key);
     if (!raw) return null;
-    let items: InboxItem[];
     try {
-      items = JSON.parse(raw) as InboxItem[];
+      return JSON.parse(raw) as InboxItem;
     } catch {
       return null;
     }
-    if (items.length === 0) return null;
-    const first = items.shift()!;
-    if (items.length === 0) {
-      await this.redis.del(key);
-    } else {
-      await this.redis.set(key, JSON.stringify(items), 'EX', INBOX_TTL_SECONDS);
-    }
-    return first;
   }
 
   async count(profileId: string): Promise<number> {
-    const items = await this.getAll(profileId);
-    return items.length;
+    const key = `${INBOX_KEY_PREFIX}${profileId}`;
+    return this.redis.llen(key);
   }
 }
