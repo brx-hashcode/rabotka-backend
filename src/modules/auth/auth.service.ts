@@ -25,6 +25,18 @@ const RESEND_COOLDOWN_SECONDS = 60;
 const RESEND_COOLDOWN_KEY_PREFIX = 'otp:resend:';
 const ADMIN_RESEND_COOLDOWN_KEY_PREFIX = 'admin:otp:resend:';
 
+// Atomically verify and consume an OTP in a single round-trip.
+// Returns 1 on match+delete, 0 on mismatch or missing key.
+const LUA_VERIFY_AND_DELETE_OTP = `
+local v = redis.call('GET', KEYS[1])
+if v == false then return 0 end
+if v == ARGV[1] then
+  redis.call('DEL', KEYS[1])
+  return 1
+end
+return 0
+`;
+
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
@@ -160,9 +172,9 @@ export class AuthService {
     const isEmail = this.isEmail(normalized);
 
     const redisKey = `${OTP_KEY_PREFIX}${normalized}`;
-    const storedOtp = await this.redis.get(redisKey);
+    const matched = await this.redis.eval(LUA_VERIFY_AND_DELETE_OTP, 1, redisKey, otp);
 
-    if (!storedOtp || storedOtp !== otp) {
+    if (matched !== 1) {
       throw new UnauthorizedException(
         'Code de vérification invalide ou expiré',
       );
@@ -177,8 +189,6 @@ export class AuthService {
         'Aucun compte trouvé pour cet email ou téléphone',
       );
     }
-
-    await this.redis.del(redisKey);
 
     const payload = { sub: profile.id, type: 'profile' };
     const token = this.jwtService.sign(payload);
@@ -262,9 +272,9 @@ export class AuthService {
     }
 
     const redisKey = `${ADMIN_OTP_KEY_PREFIX}${normalized}`;
-    const storedOtp = await this.redis.get(redisKey);
+    const matched = await this.redis.eval(LUA_VERIFY_AND_DELETE_OTP, 1, redisKey, otp);
 
-    if (!storedOtp || storedOtp !== otp) {
+    if (matched !== 1) {
       throw new UnauthorizedException(
         'Code de vérification invalide ou expiré',
       );
@@ -279,8 +289,6 @@ export class AuthService {
     if (!user.is_active) {
       throw new UnauthorizedException('Ce compte administrateur est inactif');
     }
-
-    await this.redis.del(redisKey);
 
     const payload = { sub: user.id, type: 'admin' };
     const token = this.jwtService.sign(payload);
