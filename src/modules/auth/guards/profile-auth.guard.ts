@@ -8,7 +8,8 @@ import { JwtAuthGuard, AuthenticatedRequest } from './jwt-auth.guard';
 @Injectable()
 export class ProfileAuthGuard extends JwtAuthGuard {
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const isValid = await super.canActivate(context);
+    const isValid = await Promise.resolve(super.canActivate(context));
+
     if (!isValid) {
       return false;
     }
