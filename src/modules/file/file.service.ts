@@ -1,4 +1,5 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { StorageService } from '../../common/services/storage/storage.service';
 import { ImageWatermarkService } from '../../common/services/image-watermark/image-watermark.service';
@@ -12,6 +13,7 @@ export class FileService {
     private readonly prisma: PrismaService,
     private readonly storageService: StorageService,
     private readonly imageWatermarkService: ImageWatermarkService,
+    private readonly configService: ConfigService,
   ) {}
 
   /**
@@ -99,6 +101,22 @@ export class FileService {
       this.logger.error(`Failed to upload file: ${error.message}`, error.stack);
       throw error;
     }
+  }
+
+  async getPresignedUrl(storageKey: string): Promise<string> {
+    return this.storageService.getUrl(storageKey, { access: 'private' });
+  }
+
+  async getPresignedUrlFromPublicUrl(publicUrl: string): Promise<string> {
+    const base = this.configService
+      .get<string>('CLOUDFLARE_PUBLIC_BASE_URL', '')
+      .trim()
+      .replace(/\/+$/, '');
+    if (base && publicUrl.startsWith(base + '/')) {
+      const key = decodeURI(publicUrl.slice(base.length + 1));
+      return this.storageService.getUrl(key, { access: 'private' });
+    }
+    return publicUrl;
   }
 
   async getFile(id: string) {

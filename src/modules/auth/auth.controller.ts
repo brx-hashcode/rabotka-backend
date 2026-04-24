@@ -6,6 +6,7 @@ import {
   Body,
   Res,
   Req,
+  Param,
   HttpCode,
   HttpStatus,
   UseGuards,
@@ -321,7 +322,15 @@ export class AuthController {
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   async getAdminMe(
     @Req() req: AdminAuthenticatedRequest,
-  ): Promise<{ id: string; email: string; firstName: string; lastName: string; role: string }> {
+  ): Promise<{
+    id: string;
+    email: string;
+    firstName: string;
+    lastName: string;
+    role: string;
+    phonePairedAt: string | null;
+    phoneName: string | null;
+  }> {
     return this.authService.getAdminById(req.user.userId);
   }
 
@@ -366,6 +375,81 @@ export class AuthController {
   })
   adminLogout(@Res({ passthrough: true }) res: Response): { success: boolean } {
     this.clearAuthCookie(res);
+    return { success: true };
+  }
+
+  @Post('admin/qr/init')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Initialize a QR login session' })
+  async initQrSession(): Promise<{
+    sessionId: string;
+    qrUrl: string;
+    expiresIn: number;
+  }> {
+    return this.authService.initQrSession();
+  }
+
+  @Get('admin/qr/poll/:sessionId')
+  @ApiOperation({ summary: 'Poll QR session status' })
+  async pollQrSession(
+    @Param('sessionId') sessionId: string,
+  ): Promise<{ status: 'pending' | 'confirmed' | 'expired' }> {
+    return this.authService.pollQrSession(sessionId);
+  }
+
+  @Post('admin/qr/confirm')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Confirm QR session from phone using phone pairing token' })
+  async confirmQrSession(
+    @Body('sessionId') sessionId: string,
+    @Body('phoneToken') phoneToken: string,
+  ): Promise<{ success: boolean }> {
+    return this.authService.confirmQrSession(sessionId, phoneToken);
+  }
+
+  @Post('admin/phone/pair/generate')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(AdminAuthGuard)
+  @ApiOperation({ summary: 'Generate OTP for phone pairing (displayed on desktop)' })
+  @ApiCookieAuth()
+  async generatePhonePairingOtp(
+    @Req() req: AdminAuthenticatedRequest,
+    @Body('phoneName') phoneName: string,
+  ): Promise<{ otp: string; expiresIn: number; userId: string }> {
+    return this.authService.generatePhonePairingOtp(req.user.userId, phoneName);
+  }
+
+  @Post('admin/phone/pair/verify')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Verify phone pairing OTP from phone (public)' })
+  async verifyPhonePairingOtp(
+    @Body('userId') userId: string,
+    @Body('otp') otp: string,
+  ): Promise<{ token: string }> {
+    return this.authService.verifyPhonePairingOtp(userId, otp);
+  }
+
+  @Post('admin/qr/consume')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Consume confirmed QR session and set cookie' })
+  async consumeQrSession(
+    @Body('sessionId') sessionId: string,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<{ success: boolean }> {
+    const { token } = await this.authService.consumeQrSession(sessionId);
+
+    const isProduction = this.configService.get<string>('NODE_ENV') === 'production';
+    const cookieName = this.configService.get<string>('AUTH_COOKIE_NAME');
+    if (!cookieName) throw new Error('AUTH_COOKIE_NAME is not set');
+
+    res.cookie(cookieName, token, {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: 'lax',
+      maxAge: 24 * 60 * 60 * 1000,
+      path: '/',
+    });
+
     return { success: true };
   }
 }
