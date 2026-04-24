@@ -57,42 +57,26 @@ export class WalletService {
     id: string;
     balance: number;
   }> {
-    let wallet = await this.prisma.wallet.findFirst({
-      where: {
-        owner_type: WalletOwnerType.SYSTEM,
-        user_id: null,
-        profile_id: null,
-      },
+    // Use raw INSERT ON CONFLICT DO NOTHING to avoid race on singleton system wallet
+    await this.prisma.$queryRaw`
+      INSERT INTO wallets (id, owner_type, balance, created_at, updated_at)
+      VALUES (gen_random_uuid(), 'SYSTEM', 0, now(), now())
+      ON CONFLICT DO NOTHING
+    `;
+    const wallet = await this.prisma.wallet.findFirstOrThrow({
+      where: { owner_type: WalletOwnerType.SYSTEM, user_id: null, profile_id: null },
     });
-    if (!wallet) {
-      wallet = await this.prisma.wallet.create({
-        data: {
-          owner_type: WalletOwnerType.SYSTEM,
-          balance: 0,
-        },
-      });
-    }
-    return {
-      id: wallet.id,
-      balance: Number(wallet.balance),
-    };
+    return { id: wallet.id, balance: Number(wallet.balance) };
   }
 
   async getOrCreateProfileWallet(
     profileId: string,
   ): Promise<{ id: string; balance: number }> {
-    let wallet = await this.prisma.wallet.findFirst({
-      where: { owner_type: WalletOwnerType.PROFILE, profile_id: profileId },
+    const wallet = await this.prisma.wallet.upsert({
+      where: { idx_wallet_owner_profile: { owner_type: WalletOwnerType.PROFILE, profile_id: profileId } },
+      update: {},
+      create: { owner_type: WalletOwnerType.PROFILE, profile_id: profileId, balance: 0 },
     });
-    if (!wallet) {
-      wallet = await this.prisma.wallet.create({
-        data: {
-          owner_type: WalletOwnerType.PROFILE,
-          profile_id: profileId,
-          balance: 0,
-        },
-      });
-    }
     return { id: wallet.id, balance: Number(wallet.balance) };
   }
 
