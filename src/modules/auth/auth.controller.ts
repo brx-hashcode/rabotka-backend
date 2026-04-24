@@ -175,7 +175,13 @@ export class AuthController {
       },
     },
   })
-  logout(@Res({ passthrough: true }) res: Response): { success: boolean } {
+  async logout(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<{ success: boolean }> {
+    const cookieName = this.configService.get<string>('AUTH_COOKIE_NAME');
+    const token = cookieName ? req.cookies?.[cookieName] : undefined;
+    if (token) await this.authService.revokeToken(token);
     this.clearAuthCookie(res);
     return { success: true };
   }
@@ -379,7 +385,13 @@ export class AuthController {
       },
     },
   })
-  adminLogout(@Res({ passthrough: true }) res: Response): { success: boolean } {
+  async adminLogout(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<{ success: boolean }> {
+    const cookieName = this.configService.get<string>('AUTH_COOKIE_NAME');
+    const token = cookieName ? req.cookies?.[cookieName] : undefined;
+    if (token) await this.authService.revokeToken(token);
     this.clearAuthCookie(res);
     return { success: true };
   }

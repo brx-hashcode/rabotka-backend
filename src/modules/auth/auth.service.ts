@@ -10,8 +10,11 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
+import { randomUUID } from 'crypto';
 import Redis from 'ioredis';
 import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
+
+const JWT_BLOCKLIST_PREFIX = 'jwtblocklist:';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
@@ -190,7 +193,7 @@ export class AuthService {
       );
     }
 
-    const payload = { sub: profile.id, type: 'profile' };
+    const payload = { sub: profile.id, type: 'profile', jti: randomUUID() };
     const token = this.jwtService.sign(payload);
 
     return { success: true, token };
@@ -290,7 +293,7 @@ export class AuthService {
       throw new UnauthorizedException('Ce compte administrateur est inactif');
     }
 
-    const payload = { sub: user.id, type: 'admin' };
+    const payload = { sub: user.id, type: 'admin', jti: randomUUID() };
     const token = this.jwtService.sign(payload);
 
     await this.prisma.user.update({
@@ -577,6 +580,19 @@ export class AuthService {
   private pairOtpKey = (userId: string) => `admin:pair:otp:${userId}`;
   private pairCooldownKey = (userId: string) => `admin:pair:resend:${userId}`;
   private pairAttemptKey = (userId: string) => `admin:pair:attempts:${userId}`;
+
+  async revokeToken(token: string): Promise<void> {
+    try {
+      const payload = this.jwtService.decode(token) as { jti?: string; exp?: number } | null;
+      if (!payload?.jti || !payload.exp) return;
+      const ttl = payload.exp - Math.floor(Date.now() / 1000);
+      if (ttl > 0) {
+        await this.redis.set(`${JWT_BLOCKLIST_PREFIX}${payload.jti}`, '1', 'EX', ttl);
+      }
+    } catch {
+      // Ignore decode errors — token is already invalid
+    }
+  }
 
   async unpairPhone(userId: string): Promise<void> {
     await this.prisma.user.update({

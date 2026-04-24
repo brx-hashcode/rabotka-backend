@@ -9,6 +9,7 @@ function makeAuthService() {
     resendAdminOtp: jest.fn().mockResolvedValue({ success: true }),
     verifyAdminOtp: jest.fn().mockResolvedValue({ token: 'admin-jwt' }),
     getAdminById: jest.fn().mockResolvedValue({ id: 'u-1', email: 'admin@example.com', name: 'Admin' }),
+    revokeToken: jest.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -87,9 +88,10 @@ describe('AuthController', () => {
   });
 
   describe('logout()', () => {
-    it('clears cookie and returns success', () => {
+    it('clears cookie and returns success', async () => {
       const res = makeRes();
-      const result = controller.logout(res);
+      const req = { cookies: { auth_token: 'jwt-token' } } as any;
+      const result = await controller.logout(req, res);
       expect(res.clearCookie).toHaveBeenCalledWith('auth_token', { path: '/' });
       expect(result.success).toBe(true);
     });
@@ -136,9 +138,10 @@ describe('AuthController', () => {
   });
 
   describe('adminLogout()', () => {
-    it('clears cookie', () => {
+    it('clears cookie', async () => {
       const res = makeRes();
-      const result = controller.adminLogout(res);
+      const req = { cookies: {} } as any;
+      const result = await controller.adminLogout(req, res);
       expect(res.clearCookie).toHaveBeenCalled();
       expect(result.success).toBe(true);
     });

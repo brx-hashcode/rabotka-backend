@@ -26,7 +26,7 @@ function makeContext(payload: { sub: string; type?: string } | null): ExecutionC
     getAllAndOverride: jest.fn().mockReturnValue(false),
   } as unknown as Reflector;
 
-  const guard = new AdminAuthGuard(jwtService, configService, reflector);
+  const guard = new AdminAuthGuard(jwtService, configService, reflector, { get: jest.fn().mockResolvedValue(null) } as any);
 
   const ctx = {
     getHandler: () => ({}),
@@ -77,7 +77,7 @@ describe('AdminAuthGuard', () => {
       getAllAndOverride: jest.fn().mockReturnValue(false),
     } as unknown as jest.Mocked<Reflector>;
 
-    const guard = new AdminAuthGuard(jwtService, configService, reflector);
+    const guard = new AdminAuthGuard(jwtService, configService, reflector, { get: jest.fn().mockResolvedValue(null) } as any);
 
     const ctx = {
       getHandler: () => ({}),
@@ -132,7 +132,7 @@ describe('AdminAuthGuard', () => {
       getAllAndOverride: jest.fn().mockReturnValue(false),
     } as unknown as jest.Mocked<Reflector>;
 
-    const guard = new AdminAuthGuard(jwtService, configService, reflector);
+    const guard = new AdminAuthGuard(jwtService, configService, reflector, { get: jest.fn().mockResolvedValue(null) } as any);
 
     const ctx = {
       getHandler: () => ({}),
