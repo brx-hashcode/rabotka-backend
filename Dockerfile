@@ -28,27 +28,17 @@ COPY . .
 
 RUN pnpm run build
 
-# ─── Production ───────────────────────────────────────────────────────────────
-FROM node:22-slim AS production
+# ─── api target — slim, no LibreOffice ────────────────────────────────────────
+FROM node:22-slim AS api
 
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
         tini \
-        postgresql-client \
-        libreoffice-writer \
-        fonts-liberation \
-        fonts-dejavu-core \
-        fontconfig && \
-    fc-cache -f && \
+        postgresql-client && \
     rm -rf /var/lib/apt/lists/* && \
     npm install -g pnpm
-
-# LibreOffice needs a writable home when running as non-root
-ENV HOME=/tmp \
-    SAL_USE_VCLPLUGIN=svp \
-    DISPLAY=""
 
 RUN groupadd -r nestjs && \
     useradd -r -g nestjs nestjs && \
@@ -78,3 +68,57 @@ EXPOSE 3000
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/docker-entrypoint.sh"]
 
 CMD ["node", "dist/src/main"]
+
+# ─── worker target — includes LibreOffice for PDF generation ──────────────────
+FROM node:22-bookworm-slim AS worker
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        tini \
+        postgresql-client \
+        libreoffice-writer \
+        fonts-liberation \
+        fonts-dejavu-core \
+        fontconfig && \
+    fc-cache -f && \
+    rm -rf /var/lib/apt/lists/* && \
+    npm install -g pnpm
+
+# LibreOffice needs a writable home when running as non-root
+ENV HOME=/tmp \
+    SAL_USE_VCLPLUGIN=svp \
+    DISPLAY=""
+
+RUN groupadd -r nestjs && \
+    useradd -r -g nestjs nestjs && \
+    mkdir -p /home/nestjs/.local/share/pnpm
+
+COPY package.json pnpm-lock.yaml tsconfig.json nest-cli.json prisma.config.ts ./
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/public ./public
+COPY --from=builder /app/prisma ./prisma
+
+COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh && \
+    chmod +x /usr/local/bin/docker-entrypoint.sh
+
+# 512 MB heap — leaves headroom for LibreOffice within the 700 MB compose cap
+ENV NODE_ENV=production \
+    PORT=3000 \
+    NODE_OPTIONS="--max-old-space-size=512" \
+    PNPM_HOME="/home/nestjs/.local/share/pnpm"
+
+RUN chown -R nestjs:nestjs /app /home/nestjs
+
+USER nestjs
+
+EXPOSE 3000
+
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/docker-entrypoint.sh"]
+
+CMD ["node", "dist/src/worker"]
+
+# ─── production — kept as default target for backwards compatibility ───────────
+FROM api AS production
