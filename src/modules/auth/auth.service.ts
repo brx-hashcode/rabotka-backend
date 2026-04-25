@@ -148,7 +148,7 @@ export class AuthService {
     }
 
     const otp = this.generateOtp();
-    this.logger.log(`[OTP resend] : ${otp}`);
+    this.logger.debug(`[OTP resend] generated for ${normalized}`);
 
     const redisKey = `${OTP_KEY_PREFIX}${normalized}`;
     await this.redis.set(redisKey, otp, 'EX', OTP_TTL_SECONDS);
@@ -253,7 +253,7 @@ export class AuthService {
     }
 
     const otp = this.generateOtp();
-    this.logger.log(`[Admin OTP resend] : ${otp}`);
+    this.logger.debug(`[Admin OTP resend] generated for ${normalized}`);
 
     const redisKey = `${ADMIN_OTP_KEY_PREFIX}${normalized}`;
     await this.redis.set(redisKey, otp, 'EX', OTP_TTL_SECONDS);
