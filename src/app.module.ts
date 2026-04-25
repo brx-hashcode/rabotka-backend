@@ -87,7 +87,7 @@ import { HttpExceptionFilter } from './common/filters/http-exception.filter';
           key: config.get<string>('ARCJET_KEY') ?? '',
           log: createArcjetLoggerAdapter(),
           rules: [
-            shield({ mode: 'DRY_RUN' }),
+            shield({ mode: isDev ? 'DRY_RUN' : 'LIVE' }),
             detectBot({
               mode: 'DRY_RUN',
               allow: ['CATEGORY:SEARCH_ENGINE'],
