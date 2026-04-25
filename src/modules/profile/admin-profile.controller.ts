@@ -207,76 +207,95 @@ export class AdminProfileController {
     }
 
     if (body.channel === 'WHATSAPP') {
-      if (!profile.phone) {
-        throw new BadRequestException(
-          "Ce profil n'a pas de numéro de téléphone",
-        );
-      }
-      const whatsappBody = [
-        body.message.trim(),
-        '',
-        `_${adminFullName}_`,
-        `_L'équipe Rabotka_`,
-      ].join('\n');
-      await this.whatsApp.sendTextMessage(
-        profile.phone,
-        whatsappBody,
-        profile.id,
+      await this.sendWhatsAppMessage(
+        profile,
+        body.message,
+        adminFullName,
         adminUserId,
       );
-
-      // Save outbound WhatsApp message to history
-      await this.prisma.message.create({
-        data: {
-          profile_id: profile.id,
-          direction: MessageDirection.OUTBOUND,
-          platform: BotPlatform.WHATSAPP,
-          body: whatsappBody,
-        },
-      });
     } else {
-      if (!profile.email) {
-        throw new BadRequestException("Ce profil n'a pas d'adresse email");
-      }
-
-      const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
-      const oversized = files?.find((f) => f.size > MAX_FILE_SIZE);
-      if (oversized) {
-        throw new BadRequestException(
-          `File "${oversized.originalname}" exceeds the 10 MB limit`,
-        );
-      }
-
-      const attachments =
-        files?.map((f) => ({
-          filename: f.originalname,
-          content: f.buffer,
-          contentType: f.mimetype,
-        })) ?? [];
-
-      const messageHtml = body.message
-        .trim()
-        .toString()
-        .replaceAll('\n', '<br/>');
-      await this.mail.sendMail({
-        to: profile.email,
-        subject: 'Message de Rabotka',
-        html: `<p>${messageHtml}</p><br/><p>${adminFullName}<br/>L'équipe Rabotka</p>`,
-        ...(attachments.length > 0 && { attachments }),
-      });
-      // Save outbound email message to history
-      await this.prisma.message.create({
-        data: {
-          profile_id: profile.id,
-          direction: MessageDirection.OUTBOUND,
-          platform: BotPlatform.EMAIL,
-          body: body.message.trim(),
-          ...(adminUserId ? { sent_by_id: adminUserId } : {}),
-        },
-      });
+      await this.sendEmailMessage(
+        profile,
+        body.message,
+        adminFullName,
+        files,
+        adminUserId,
+      );
     }
 
     return { success: true };
+  }
+
+  private async sendWhatsAppMessage(
+    profile: { id: string; phone: string | null },
+    message: string,
+    adminFullName: string,
+    adminUserId: string | undefined,
+  ): Promise<void> {
+    if (!profile.phone) {
+      throw new BadRequestException("Ce profil n'a pas de numéro de téléphone");
+    }
+    const whatsappBody = [
+      message.trim(),
+      '',
+      `_${adminFullName}_`,
+      `_L'équipe Rabotka_`,
+    ].join('\n');
+    await this.whatsApp.sendTextMessage(
+      profile.phone,
+      whatsappBody,
+      profile.id,
+      adminUserId,
+    );
+    await this.prisma.message.create({
+      data: {
+        profile_id: profile.id,
+        direction: MessageDirection.OUTBOUND,
+        platform: BotPlatform.WHATSAPP,
+        body: whatsappBody,
+      },
+    });
+  }
+
+  private async sendEmailMessage(
+    profile: { id: string; email: string | null },
+    message: string,
+    adminFullName: string,
+    files: Express.Multer.File[] | undefined,
+    adminUserId: string | undefined,
+  ): Promise<void> {
+    if (!profile.email) {
+      throw new BadRequestException("Ce profil n'a pas d'adresse email");
+    }
+    const MAX_FILE_SIZE = 10 * 1024 * 1024;
+    const oversized = files?.find((f) => f.size > MAX_FILE_SIZE);
+    if (oversized) {
+      throw new BadRequestException(
+        `File "${oversized.originalname}" exceeds the 10 MB limit`,
+      );
+    }
+    const attachments =
+      files?.map((f) => ({
+        filename: f.originalname,
+        content: f.buffer,
+        contentType: f.mimetype,
+      })) ?? [];
+    const messageHtml = message.trim().replaceAll('\n', '<br/>');
+    await this.mail.sendMail({
+      to: profile.email,
+      subject: 'Message de Rabotka',
+      html: `<p>${messageHtml}</p><br/><p>${adminFullName}<br/>L'équipe Rabotka</p>`,
+      ...(attachments.length > 0 && { attachments }),
+    });
+    await this.prisma.message.create({
+      data: {
+        profile_id: profile.id,
+        direction: MessageDirection.OUTBOUND,
+        platform: BotPlatform.EMAIL,
+        body: message.trim(),
+        ...(adminUserId ? { sent_by_id: adminUserId } : {}),
+      },
+    });
   }
 
   @Patch(':id')
