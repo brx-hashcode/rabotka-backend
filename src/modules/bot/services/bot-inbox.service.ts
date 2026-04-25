@@ -5,6 +5,15 @@ import { REDIS_CONNECTION } from '../../../common/services/redis/redis.constants
 const INBOX_KEY_PREFIX = 'bot:inbox:';
 const INBOX_TTL_SECONDS = 7 * 24 * 60 * 60;
 
+// Atomically reads the head item and removes it in a single round-trip.
+// Returns nil if the list is empty, the raw JSON string otherwise.
+const LUA_PEEK_AND_SHIFT = `
+local val = redis.call('LINDEX', KEYS[1], 0)
+if val == false then return false end
+redis.call('LPOP', KEYS[1])
+return val
+`;
+
 export type InboxItem = {
   type: 'new_application';
   applicationId: string;
@@ -55,6 +64,19 @@ export class BotInboxService {
   async shift(profileId: string): Promise<InboxItem | null> {
     const key = `${INBOX_KEY_PREFIX}${profileId}`;
     const raw = await this.redis.lpop(key);
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as InboxItem;
+    } catch {
+      return null;
+    }
+  }
+
+  async peekAndShift(profileId: string): Promise<InboxItem | null> {
+    const key = `${INBOX_KEY_PREFIX}${profileId}`;
+    const raw = (await this.redis.eval(LUA_PEEK_AND_SHIFT, 1, key)) as
+      | string
+      | null;
     if (!raw) return null;
     try {
       return JSON.parse(raw) as InboxItem;
