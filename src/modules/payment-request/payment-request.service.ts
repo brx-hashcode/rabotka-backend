@@ -785,29 +785,34 @@ export class PaymentRequestService {
     const workerId = request.profile_id;
 
     try {
-      const now = new Date();
-      await this.prisma.penalty.updateMany({
-        where: { worker_id: workerId, paid_at: null },
-        data: { paid_at: now },
-      });
-
-      const unpaidCount = await this.prisma.penalty.count({
-        where: { worker_id: workerId, paid_at: null },
-      });
-
       const fees = await this.systemConfig.getFees();
-      let newStatus: BillingStatus;
-      if (unpaidCount === 0) {
-        newStatus = BillingStatus.CLEAR;
-      } else if (unpaidCount >= fees.billingBlockThreshold) {
-        newStatus = BillingStatus.BLOCKED;
-      } else {
-        newStatus = BillingStatus.PENDING_PAYMENT;
-      }
+      const now = new Date();
 
-      await this.prisma.profile.update({
-        where: { id: workerId },
-        data: { billing_status: newStatus },
+      const newStatus = await this.prisma.$transaction(async (tx) => {
+        await tx.penalty.updateMany({
+          where: { worker_id: workerId, paid_at: null },
+          data: { paid_at: now },
+        });
+
+        const unpaidCount = await tx.penalty.count({
+          where: { worker_id: workerId, paid_at: null },
+        });
+
+        let status: BillingStatus;
+        if (unpaidCount === 0) {
+          status = BillingStatus.CLEAR;
+        } else if (unpaidCount >= fees.billingBlockThreshold) {
+          status = BillingStatus.BLOCKED;
+        } else {
+          status = BillingStatus.PENDING_PAYMENT;
+        }
+
+        await tx.profile.update({
+          where: { id: workerId },
+          data: { billing_status: status },
+        });
+
+        return status;
       });
 
       if (request.profile.phone) {
