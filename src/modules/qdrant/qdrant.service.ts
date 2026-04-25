@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { QdrantClient } from '@qdrant/js-client-rest';
+import { QDRANT_COLLECTION_PREFIX } from './qdrant.config';
 import {
   EmbeddingModel,
   FlagEmbedding,
@@ -163,6 +164,7 @@ export class QdrantService implements OnModuleInit {
     text: string,
     payload: Record<string, unknown>,
   ): Promise<void> {
+    this.assertPrefix(collectionName);
     const { dense, sparse } = await this.embedHybrid(text);
     await this.client.upsert(collectionName, {
       points: [
@@ -189,6 +191,7 @@ export class QdrantService implements OnModuleInit {
       payload: Record<string, unknown> | null;
     }>
   > {
+    this.assertPrefix(collectionName);
     const { dense, sparse } = await this.embedHybrid(text);
     const results = await this.client.query(collectionName, {
       prefetch: [
@@ -223,6 +226,7 @@ export class QdrantService implements OnModuleInit {
       payload: Record<string, unknown> | null;
     }>
   > {
+    this.assertPrefix(collectionName);
     const { dense, sparse } = await this.embedHybrid(text);
     const results = await this.client.query(collectionName, {
       prefetch: [
@@ -245,7 +249,16 @@ export class QdrantService implements OnModuleInit {
     }));
   }
 
+  private assertPrefix(collectionName: string): void {
+    if (!collectionName.startsWith(QDRANT_COLLECTION_PREFIX)) {
+      throw new Error(
+        `Refusing to operate on collection "${collectionName}" — must start with "${QDRANT_COLLECTION_PREFIX}"`,
+      );
+    }
+  }
+
   async ensureCollection(collectionName: string): Promise<void> {
+    this.assertPrefix(collectionName);
     const collections = await this.client.getCollections();
     const exists = collections.collections.some(
       (c) => c.name === collectionName,

@@ -2,10 +2,11 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { QdrantService } from '../qdrant/qdrant.service';
 import { SystemConfigService } from '../system-config/system-config.service';
+import { COLLECTIONS } from '../qdrant/qdrant.config';
 
-const COLLECTION_WORKERS = 'workers';
-const COLLECTION_JOBS = 'jobs';
-const COLLECTION_EMPLOYERS = 'employers';
+const COLLECTION_WORKERS = COLLECTIONS.WORKERS;
+const COLLECTION_JOBS = COLLECTIONS.JOBS;
+const COLLECTION_EMPLOYERS = COLLECTIONS.EMPLOYERS;
 
 // Score thresholds
 const MIN_MATCH_SCORE = 0.5;
