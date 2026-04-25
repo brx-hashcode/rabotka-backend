@@ -215,8 +215,8 @@ export class AdminProfileController {
       const whatsappBody = [
         body.message.trim(),
         '',
-        `— ${adminFullName}`,
-        `L'équipe Rabotka`,
+        `_${adminFullName}_`,
+        `_L'équipe Rabotka_`,
       ].join('\n');
       await this.whatsApp.sendTextMessage(
         profile.phone,
@@ -247,11 +247,12 @@ export class AdminProfileController {
         );
       }
 
-      const attachments = files?.map((f) => ({
-        filename: f.originalname,
-        content: f.buffer,
-        contentType: f.mimetype,
-      })) ?? [];
+      const attachments =
+        files?.map((f) => ({
+          filename: f.originalname,
+          content: f.buffer,
+          contentType: f.mimetype,
+        })) ?? [];
 
       const messageHtml = body.message
         .trim()
