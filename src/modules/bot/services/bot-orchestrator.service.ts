@@ -268,13 +268,12 @@ export class BotOrchestratorService {
         await this.botDraft.clearDraft(profileId).catch(() => {});
       }
       await this.botState.clear(profileId);
-      const nextInboxItem = await this.botInbox.peek(profileId);
+      const nextInboxItem = await this.botInbox.peekAndShift(profileId);
       if (nextInboxItem?.type === 'new_application') {
         const nextState = getAcceptRefuseInitialState(
           nextInboxItem.applicationId,
         );
         await this.botState.set(profileId, nextState);
-        await this.botInbox.shift(profileId);
         const remaining = await this.botInbox.count(profileId);
         const inboxNotice =
           remaining > 0
