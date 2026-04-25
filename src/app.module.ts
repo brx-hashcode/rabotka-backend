@@ -81,22 +81,25 @@ import { HttpExceptionFilter } from './common/filters/http-exception.filter';
       isGlobal: true,
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
-        key: config.get<string>('ARCJET_KEY') ?? '',
-        log: createArcjetLoggerAdapter(),
-        rules: [
-          shield({ mode: 'DRY_RUN' }),
-          detectBot({
-            mode: 'DRY_RUN',
-            allow: ['CATEGORY:SEARCH_ENGINE'],
-          }),
-          fixedWindow({
-            mode: 'LIVE',
-            window: '60s',
-            max: 100,
-          }),
-        ],
-      }),
+      useFactory: (config: ConfigService) => {
+        const isDev = config.get<string>('NODE_ENV') !== 'production';
+        return {
+          key: config.get<string>('ARCJET_KEY') ?? '',
+          log: createArcjetLoggerAdapter(),
+          rules: [
+            shield({ mode: 'DRY_RUN' }),
+            detectBot({
+              mode: 'DRY_RUN',
+              allow: ['CATEGORY:SEARCH_ENGINE'],
+            }),
+            fixedWindow({
+              mode: isDev ? 'DRY_RUN' : 'LIVE',
+              window: '60s',
+              max: 100,
+            }),
+          ],
+        };
+      },
     }),
     I18nModule.forRoot({
       fallbackLanguage: 'fr',
