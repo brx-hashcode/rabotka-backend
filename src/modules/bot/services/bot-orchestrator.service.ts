@@ -383,10 +383,13 @@ export class BotOrchestratorService {
           return { reply: [handleMenuCommand(profile)], clearState: true };
         }
         const PAGE_SIZE = 5;
-        const { total } = await this.jobOfferService.findByEmployerId(profile.id, {
-          page: 0,
-          pageSize: 1,
-        });
+        const { total } = await this.jobOfferService.findByEmployerId(
+          profile.id,
+          {
+            page: 0,
+            pageSize: 1,
+          },
+        );
         const nextPage = currentPage + 1;
         const nextPageStart = nextPage * PAGE_SIZE;
         const hasMore = nextPageStart < total;
@@ -693,6 +696,18 @@ export class BotOrchestratorService {
     const orderedOffers = pageIds
       .map((id) => offerMap.get(id))
       .filter(Boolean) as typeof offers;
+
+    if (orderedOffers.length === 0) {
+      return [
+        [
+          '*Offres recommandées*',
+          '',
+          "Aucune offre recommandée pour l'instant. Complétez votre profil pour de meilleures recommandations.",
+          '',
+          '*Tapez 1 pour voir toutes les offres disponibles ou Menu pour revenir.*',
+        ].join('\n'),
+      ];
+    }
 
     const lines = [
       '*OFFRES RECOMMANDÉES POUR VOUS*',
