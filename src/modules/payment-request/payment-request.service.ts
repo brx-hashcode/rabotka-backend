@@ -383,12 +383,15 @@ export class PaymentRequestService {
 
     this.emitAdminPaymentNotification(request, context);
     await this.sendPaymentSuccessNotifications(request, context);
-    await this.createAndSendInvoice(request, context).catch((err) =>
-      this.logger.warn(
+    try {
+      await this.createAndSendInvoice(request, context);
+    } catch (err) {
+      this.logger.error(
         `Invoice creation/sending failed for payment ${request.id}:`,
         err,
-      ),
-    );
+      );
+      throw err;
+    }
     await this.handleContactUnlockPostPayment(request);
     await this.handleRecommendationContactPostPayment(request, context);
     await this.handlePenaltyPostPayment(request);
