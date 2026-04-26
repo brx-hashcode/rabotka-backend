@@ -5,6 +5,8 @@ import Redis from 'ioredis';
 import { REDIS_CONNECTION } from '../redis/redis.constants';
 import { EMAIL_QUEUE } from './queue.module';
 
+const BULLMQ_PREFIX = 'bull:rabotka';
+
 export type MailAttachment = {
   filename: string;
   content: Buffer | string;
@@ -59,6 +61,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
 
     const queue = new Queue(name, {
       connection: queueConn,
+      prefix: BULLMQ_PREFIX,
       defaultJobOptions: {
         attempts: 3,
         backoff: {
@@ -119,6 +122,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       },
       {
         connection: workerConnection,
+        prefix: BULLMQ_PREFIX,
         concurrency: validConcurrency,
         ...restOptions,
       },
