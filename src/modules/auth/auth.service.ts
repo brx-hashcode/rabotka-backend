@@ -14,7 +14,9 @@ import { randomUUID } from 'crypto';
 import Redis from 'ioredis';
 import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
 
-const JWT_BLOCKLIST_PREFIX = 'jwtblocklist:';
+import { REDIS_KEY_PREFIX } from '../../common/services/redis/redis.constants';
+
+const JWT_BLOCKLIST_PREFIX = `${REDIS_KEY_PREFIX}jwtblocklist:`;
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
@@ -22,11 +24,11 @@ import { sendOtpEmail } from '../mail/templates';
 import { otpMessage } from '../whatsapp/templates';
 
 const OTP_TTL_SECONDS = 300;
-const OTP_KEY_PREFIX = 'otp:';
-const ADMIN_OTP_KEY_PREFIX = 'admin:otp:';
+const OTP_KEY_PREFIX = `${REDIS_KEY_PREFIX}otp:`;
+const ADMIN_OTP_KEY_PREFIX = `${REDIS_KEY_PREFIX}admin:otp:`;
 const RESEND_COOLDOWN_SECONDS = 60;
-const RESEND_COOLDOWN_KEY_PREFIX = 'otp:resend:';
-const ADMIN_RESEND_COOLDOWN_KEY_PREFIX = 'admin:otp:resend:';
+const RESEND_COOLDOWN_KEY_PREFIX = `${REDIS_KEY_PREFIX}otp:resend:`;
+const ADMIN_RESEND_COOLDOWN_KEY_PREFIX = `${REDIS_KEY_PREFIX}admin:otp:resend:`;
 
 // Atomically verify and consume an OTP in a single round-trip.
 // Returns 1 on match+delete, 0 on mismatch or missing key.

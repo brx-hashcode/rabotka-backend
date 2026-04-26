@@ -2,14 +2,14 @@ import { Injectable, Logger, OnModuleInit, Inject } from '@nestjs/common';
 import Redis from 'ioredis';
 import { ConfigCategory } from '@prisma/client';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
-import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
+import { REDIS_CONNECTION, REDIS_KEY_PREFIX } from '../../common/services/redis/redis.constants';
 import {
   DEFAULT_SYSTEM_CONFIGS,
   MONETBIL_ENV_OVERRIDES,
   STORAGE_ENV_OVERRIDES,
 } from './system-config.constants';
 
-const CACHE_PREFIX = 'syscfg:';
+const CACHE_PREFIX = `${REDIS_KEY_PREFIX}syscfg:`;
 const CACHE_TTL_SECONDS = 300; // 5 minutes
 const SEED_MAX_RETRIES = 10;
 const SEED_RETRY_DELAY_MS = 2000;

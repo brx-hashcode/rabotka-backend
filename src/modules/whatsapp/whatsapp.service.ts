@@ -7,13 +7,13 @@ import {
 import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
 import { AccountStatus, BotPlatform, MessageDirection } from '@prisma/client';
-import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
+import { REDIS_CONNECTION, REDIS_KEY_PREFIX } from '../../common/services/redis/redis.constants';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { TwilioService } from '../../common/services/twilio/twilio.service';
 import { WalletService } from '../wallet/wallet.service';
 import { welcomeActivationMessage } from './templates';
 
-const VERIFICATION_TOKEN_KEY_PREFIX = 'wa:verify:';
+const VERIFICATION_TOKEN_KEY_PREFIX = `${REDIS_KEY_PREFIX}wa:verify:`;
 
 @Injectable()
 export class WhatsAppService {
