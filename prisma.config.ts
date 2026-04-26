@@ -10,10 +10,8 @@ export default defineConfig({
   migrations: {
     seed: 'tsx prisma/seed.ts',
   },
-  datasource: {
-    url: process.env.DATABASE_URL,
-    // Used by prisma migrate deploy to bypass PgBouncer (transaction mode
-    // breaks prepared statements). Falls back to DATABASE_URL when not set.
-    directUrl: process.env.DATABASE_DIRECT_URL ?? process.env.DATABASE_URL,
-  },
+  // When running behind PgBouncer, set DATABASE_URL with ?pgbouncer=true for
+  // runtime and run migrations with DATABASE_DIRECT_URL exported separately:
+  //   DATABASE_URL=$DATABASE_DIRECT_URL pnpm prisma migrate deploy
+  datasource: { url: process.env.DATABASE_URL },
 });
