@@ -12,6 +12,7 @@ import Docxtemplater from 'docxtemplater';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { StorageService } from '../../common/services/storage/storage.service';
 import { RedisService } from '../../common/services/redis/redis.service';
+import { REDIS_KEY_PREFIX } from '../../common/services/redis/redis.constants';
 import { GoogleDocsService } from './google-docs.service';
 import { UpdateDocumentDto } from './dto/update-document.dto';
 import { ListDocumentsDto } from './dto/list-documents.dto';
@@ -84,7 +85,7 @@ function extractGoogleDocsId(url: string): string | null {
   return match?.[1] ?? null;
 }
 
-const CACHE_PREFIX = 'docs:list:';
+const CACHE_PREFIX = `${REDIS_KEY_PREFIX}docs:list:`;
 const CACHE_TTL_SEC = 5 * 24 * 60 * 60; // 5 days
 
 @Injectable()
