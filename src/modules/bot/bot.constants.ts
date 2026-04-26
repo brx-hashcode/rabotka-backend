@@ -1,4 +1,6 @@
-export const BOT_STATE_KEY_PREFIX = 'bot:state:';
+import { REDIS_KEY_PREFIX } from '../../../common/services/redis/redis.constants';
+
+export const BOT_STATE_KEY_PREFIX = `${REDIS_KEY_PREFIX}bot:state:`;
 
 export const BOT_STATE_TTL_SECONDS = 86400;
 

@@ -22,7 +22,7 @@ import { TwilioService } from '../../common/services/twilio/twilio.service';
 import { QueueService } from '../../common/services/queue/queue.service';
 import { WHATSAPP_OUTBOUND_QUEUE } from '../../common/services/queue/queue.module';
 import type { WhatsAppOutboundJobData } from './whatsapp-outbound.processor';
-import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
+import { REDIS_CONNECTION, REDIS_KEY_PREFIX } from '../../common/services/redis/redis.constants';
 
 const MSG_IDEMPOTENCY_TTL = 5 * 60; // 5 minutes
 const RATE_LIMIT_MAX = 30; // max messages per window
@@ -118,7 +118,7 @@ export class WhatsAppController {
     }
 
     if (messageSid) {
-      const idempotencyKey = `wa:msg:${messageSid}`;
+      const idempotencyKey = `${REDIS_KEY_PREFIX}wa:msg:${messageSid}`;
       const already = await this.redis.set(
         idempotencyKey,
         '1',
@@ -141,7 +141,7 @@ export class WhatsAppController {
     );
 
     // Per-phone rate limiting — atomic INCR + EXPIRE NX avoids permanent lock on crash
-    const rateLimitKey = `wa:rate:${phone}`;
+    const rateLimitKey = `${REDIS_KEY_PREFIX}wa:rate:${phone}`;
     const [[, count]] = (await this.redis
       .pipeline()
       .incr(rateLimitKey)

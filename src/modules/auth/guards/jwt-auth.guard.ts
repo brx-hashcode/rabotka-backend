@@ -11,7 +11,7 @@ import { ConfigService } from '@nestjs/config';
 import { Request } from 'express';
 import Redis from 'ioredis';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator.js';
-import { REDIS_CONNECTION } from '../../../common/services/redis/redis.constants';
+import { REDIS_CONNECTION, REDIS_KEY_PREFIX } from '../../../common/services/redis/redis.constants';
 
 export interface JwtPayload {
   sub: string;
@@ -74,7 +74,7 @@ export class JwtAuthGuard implements CanActivate {
       });
 
       if (payload.jti) {
-        const blocked = await this.redis.get(`jwtblocklist:${payload.jti}`);
+        const blocked = await this.redis.get(`${REDIS_KEY_PREFIX}jwtblocklist:${payload.jti}`);
         if (blocked) throw new UnauthorizedException('Session invalide ou expirée');
       }
 

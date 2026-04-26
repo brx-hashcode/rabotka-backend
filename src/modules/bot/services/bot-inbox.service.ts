@@ -1,8 +1,8 @@
 import { Injectable, Inject } from '@nestjs/common';
 import Redis from 'ioredis';
-import { REDIS_CONNECTION } from '../../../common/services/redis/redis.constants';
+import { REDIS_CONNECTION, REDIS_KEY_PREFIX } from '../../../common/services/redis/redis.constants';
 
-const INBOX_KEY_PREFIX = 'bot:inbox:';
+const INBOX_KEY_PREFIX = `${REDIS_KEY_PREFIX}bot:inbox:`;
 const INBOX_TTL_SECONDS = 7 * 24 * 60 * 60;
 
 // Atomically reads the head item and removes it in a single round-trip.
