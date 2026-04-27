@@ -802,6 +802,8 @@ export class PaymentRequestService {
       profileStatus: r.profile.status,
       profileType: r.profile.profile_type,
       status: r.status,
+      gateway: r.gateway ?? null,
+      gatewayPaymentRef: r.gateway_payment_ref ?? null,
       amount: r.amount === null ? null : Number(r.amount),
       description: r.description,
       paymentReference: r.payment_reference,
