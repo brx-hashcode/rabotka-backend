@@ -15,7 +15,6 @@ import { StorageModule } from '../../common/services/storage/storage.module';
 import { PaymentRequestService } from './payment-request.service';
 import { PaymentRequestController } from './payment-request.controller';
 import { PaymentRequestPublicController } from './payment-request-public.controller';
-import { MonetbilService } from './monetbil.service';
 
 @Module({
   imports: [
@@ -34,7 +33,7 @@ import { MonetbilService } from './monetbil.service';
     StorageModule,
   ],
   controllers: [PaymentRequestController, PaymentRequestPublicController],
-  providers: [PaymentRequestService, MonetbilService],
+  providers: [PaymentRequestService],
   exports: [PaymentRequestService],
 })
 export class PaymentRequestModule {}
