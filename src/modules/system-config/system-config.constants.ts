@@ -297,6 +297,66 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     label: 'Monetbil – Service Key',
     isSecret: false,
   },
+
+  // ── PAYMENT GATEWAY ───────────────────────────────────────────────────────
+  {
+    key: 'payment.gateway_driver',
+    value: 'MONETBIL',
+    category: ConfigCategory.PAYMENT,
+    label: 'Payment – Active Gateway Driver (MONETBIL | MTN_MOMO)',
+    isSecret: false,
+  },
+  // Monetbil credentials (mirrored from legacy monetbil.* for gateway abstraction)
+  {
+    key: 'payment.monetbil.service_key',
+    value: '',
+    category: ConfigCategory.PAYMENT,
+    label: 'Payment – Monetbil Service Key',
+    isSecret: false,
+  },
+  // MTN MoMo credentials
+  {
+    key: 'payment.mtn_momo.base_url',
+    value: '',
+    category: ConfigCategory.PAYMENT,
+    label: 'Payment – MTN MoMo Base URL',
+    isSecret: false,
+  },
+  {
+    key: 'payment.mtn_momo.collection_api_user',
+    value: '',
+    category: ConfigCategory.PAYMENT,
+    label: 'Payment – MTN MoMo Collection API User',
+    isSecret: false,
+  },
+  {
+    key: 'payment.mtn_momo.collection_api_key',
+    value: '',
+    category: ConfigCategory.PAYMENT,
+    label: 'Payment – MTN MoMo Collection API Key',
+    isSecret: true,
+  },
+  {
+    key: 'payment.mtn_momo.collection_primary_key',
+    value: '',
+    category: ConfigCategory.PAYMENT,
+    label: 'Payment – MTN MoMo Collection Primary Key (Ocp-Apim-Subscription-Key)',
+    isSecret: true,
+  },
+  {
+    key: 'payment.mtn_momo.environment',
+    value: 'sandbox',
+    category: ConfigCategory.PAYMENT,
+    label: 'Payment – MTN MoMo Environment (sandbox | production)',
+    isSecret: false,
+  },
+  {
+    key: 'payment.mtn_momo.callback_url',
+    value: '',
+    category: ConfigCategory.PAYMENT,
+    label: 'Payment – MTN MoMo Webhook Callback URL',
+    isSecret: false,
+  },
 ];
 
 export const STORAGE_ENV_OVERRIDES: Record<string, Record<string, string>> = {
@@ -325,4 +385,18 @@ export const STORAGE_ENV_OVERRIDES: Record<string, Record<string, string>> = {
 
 export const MONETBIL_ENV_OVERRIDES: Record<string, string> = {
   MONETBIL_SERVICE_KEY: 'monetbil.service_key',
+};
+
+export const PAYMENT_ENV_OVERRIDES: Record<string, Record<string, string>> = {
+  MONETBIL: {
+    MONETBIL_SERVICE_KEY: 'payment.monetbil.service_key',
+  },
+  MTN_MOMO: {
+    MTN_MOMO_BASE_URL: 'payment.mtn_momo.base_url',
+    MTN_MOMO_COLLECTION_API_USER: 'payment.mtn_momo.collection_api_user',
+    MTN_MOMO_COLLECTION_API_KEY: 'payment.mtn_momo.collection_api_key',
+    MTN_MOMO_COLLECTION_PRIMARY_KEY: 'payment.mtn_momo.collection_primary_key',
+    MTN_MOMO_ENVIRONMENT: 'payment.mtn_momo.environment',
+    MTN_MOMO_CALLBACK_URL: 'payment.mtn_momo.callback_url',
+  },
 };

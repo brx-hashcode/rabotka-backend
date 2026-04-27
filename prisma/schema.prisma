@@ -194,6 +194,7 @@ enum ConfigCategory {
   STORAGE
   GENERAL
   MONETBIL
+  PAYMENT
 }
 
 model SystemConfig {
@@ -669,6 +670,9 @@ model PaymentRequest {
   description          String?
   phone                String?
   operator             String?
+  gateway              String?
+  gateway_payment_ref  String?              @unique
+  gateway_tx_id        String?
   monetbil_payment_ref        String?              @unique
   monetbil_tx_id              String?
   contact_unlock_attempt_id   String?              @db.Uuid

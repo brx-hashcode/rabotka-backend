@@ -23,7 +23,7 @@ import { WalletService } from '../wallet/wallet.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { MailService } from '../mail/mail.service';
 import { paymentSuccessEmail } from '../mail/templates';
-import { MonetbilService } from './monetbil.service';
+import { PaymentGatewayService } from '../../common/services/payment/payment-gateway.service';
 import { PaymentStatusGateway } from '../ws-notifications/payment-status.gateway';
 import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
 import { BotNotificationService } from '../bot/services/bot-notification.service';
@@ -49,6 +49,8 @@ const PAYMENT_REQUEST_SELECT = {
   description: true,
   phone: true,
   operator: true,
+  gateway: true,
+  gateway_payment_ref: true,
   monetbil_payment_ref: true,
   contact_unlock_attempt_id: true,
   profile: {
@@ -89,7 +91,7 @@ export class PaymentRequestService {
     private readonly walletService: WalletService,
     private readonly whatsAppService: WhatsAppService,
     private readonly mailService: MailService,
-    private readonly monetbilService: MonetbilService,
+    private readonly paymentGateway: PaymentGatewayService,
     private readonly paymentStatusGateway: PaymentStatusGateway,
     private readonly eventEmitter: EventEmitter2,
     private readonly botNotification: BotNotificationService,
@@ -164,7 +166,7 @@ export class PaymentRequestService {
    * Initiates a Monetbil USSD push for the given token.
    * Updates the PaymentRequest to PROCESSING status.
    */
-  async initiateMonetbilPayment(
+  async initiatePayment(
     token: string,
     phone: string,
     operator: string,
@@ -184,15 +186,7 @@ export class PaymentRequestService {
       throw new BadRequestException('Montant non défini pour cette demande');
     }
 
-    const { serviceKey } = await this.systemConfig.getMonetbilConfig();
-
-    if (!serviceKey) {
-      throw new BadRequestException(
-        'Monetbil non configuré pour les paiements en ligne',
-      );
-    }
-
-    // Atomically claim PENDING → PROCESSING before calling Monetbil.
+    // Atomically claim PENDING → PROCESSING before calling the gateway.
     // Concurrent double-taps both attempt this; only one succeeds (count === 1).
     const locked = await this.prisma.paymentRequest.updateMany({
       where: { id: request.id, status: PaymentRequestStatus.PENDING },
@@ -210,38 +204,40 @@ export class PaymentRequestService {
       : 'Utilisateur';
     const profileEmail = request.profile?.email ?? '';
 
-    const result = await this.monetbilService.initiatePayment({
-      serviceKey,
-      amount: Number(request.amount),
-      phonenumber: phone,
-      operator,
-      user: profileName,
-      email: profileEmail,
-    });
-
-    if (!result.success) {
+    let gatewayRef: string;
+    try {
+      const result = await this.paymentGateway.initiatePayment({
+        amount: Number(request.amount),
+        currency: 'XAF',
+        externalId: request.id,
+        phone,
+        description: request.description ?? undefined,
+        metadata: { operator, userName: profileName, email: profileEmail },
+      });
+      gatewayRef = result.gatewayRef;
+    } catch (err) {
       // Revert to PENDING so the user can retry
       await this.prisma.paymentRequest.updateMany({
         where: { id: request.id, status: PaymentRequestStatus.PROCESSING },
         data: { status: PaymentRequestStatus.PENDING, phone: null, operator: null },
       });
       throw new BadRequestException(
-        result.message || "Échec de l'initiation du paiement",
+        err instanceof Error ? err.message : "Échec de l'initiation du paiement",
       );
     }
 
-    const paymentId =
-      typeof result.paymentId === 'string' ? String(result.paymentId) : '';
-
     await this.prisma.paymentRequest.update({
       where: { id: request.id },
-      data: { monetbil_payment_ref: paymentId || null },
+      data: {
+        gateway_payment_ref: gatewayRef || null,
+        monetbil_payment_ref: gatewayRef || null, // keep for backward compat during transition
+      },
     });
 
     // Fire-and-forget polling loop — checks status every 5s, up to 10 attempts.
     // On conclusive result: processes payment + emits WebSocket update to client.
-    if (paymentId) {
-      this.pollPaymentStatus(request.id, request.token, paymentId).catch(
+    if (gatewayRef) {
+      this.pollPaymentStatus(request.id, request.token, gatewayRef).catch(
         (err: unknown) =>
           this.logger.error(
             `Polling failed for request ${request.id}`,
@@ -266,15 +262,14 @@ export class PaymentRequestService {
       );
 
       const { status, transactionId } =
-        await this.monetbilService.checkPayment(paymentId);
-      const safeTransactionId =
-        typeof transactionId === 'string' ? transactionId : undefined;
+        await this.paymentGateway.checkPaymentStatus(paymentId);
 
-      if (status === 'SUCCESS') {
+      if (status === 'COMPLETED') {
         const request = await this.prisma.paymentRequest.findUnique({
           where: { id: requestId },
           select: {
             ...PAYMENT_REQUEST_SELECT,
+            gateway_payment_ref: true,
             monetbil_payment_ref: true,
           },
         });
@@ -283,7 +278,7 @@ export class PaymentRequestService {
           request.status !== PaymentRequestStatus.APPROVED &&
           request.status !== PaymentRequestStatus.REJECTED
         ) {
-          await this.processSuccessfulPayment(request, safeTransactionId);
+          await this.processSuccessfulPayment(request, transactionId);
         }
         this.paymentStatusGateway.emitPaymentStatus(token, 'APPROVED');
         return;
@@ -294,7 +289,7 @@ export class PaymentRequestService {
           where: { id: requestId },
           data: {
             status: PaymentRequestStatus.REJECTED,
-            ...(safeTransactionId && { monetbil_tx_id: safeTransactionId }),
+            ...(transactionId && { gateway_tx_id: transactionId }),
           },
         });
         this.paymentStatusGateway.emitPaymentStatus(token, 'REJECTED');
@@ -321,27 +316,34 @@ export class PaymentRequestService {
   }
 
   /**
-   * Handles the Monetbil webhook callback.
+   * Handles a payment gateway webhook callback.
+   * Delegates payload parsing and status verification to the active gateway.
    * On success: credits system wallet, sends notifications, pushes WebSocket update.
    * On failure: marks rejected, pushes WebSocket update.
    */
-  async handleMonetbilCallback(
+  async handlePaymentCallback(
     payload: Record<string, string>,
   ): Promise<{ received: boolean }> {
-    const paymentId = payload['paymentId'] ?? payload['payment_ref'];
+    const { gatewayRef, status, transactionId } =
+      await this.paymentGateway.handleWebhookPayload(payload);
 
-    if (!paymentId) {
-      this.logger.warn('Monetbil callback missing paymentId');
+    if (!gatewayRef) {
+      this.logger.warn('Payment callback missing gatewayRef');
       return { received: true };
     }
 
-    const request = await this.prisma.paymentRequest.findUnique({
-      where: { monetbil_payment_ref: paymentId },
-      select: { ...PAYMENT_REQUEST_SELECT, monetbil_payment_ref: true },
+    const request = await this.prisma.paymentRequest.findFirst({
+      where: {
+        OR: [
+          { gateway_payment_ref: gatewayRef },
+          { monetbil_payment_ref: gatewayRef },
+        ],
+      },
+      select: { ...PAYMENT_REQUEST_SELECT, gateway_payment_ref: true, monetbil_payment_ref: true },
     });
 
     if (!request) {
-      this.logger.warn(`Monetbil callback: paymentId not found: ${paymentId}`);
+      this.logger.warn(`Payment callback: gatewayRef not found: ${gatewayRef}`);
       return { received: true };
     }
 
@@ -352,30 +354,23 @@ export class PaymentRequestService {
       return { received: true };
     }
 
-    // Ignore the status field from the webhook body — treat the callback as a
-    // trigger only. Re-verify with the Monetbil API so forged callbacks cannot
-    // cause wallet credits.
-    const { status: verified, transactionId: verifiedTxId } =
-      await this.monetbilService.checkPayment(paymentId);
-
-    if (verified === 'SUCCESS') {
-      await this.processSuccessfulPayment(request, verifiedTxId);
+    // status and transactionId already re-verified by the gateway's handleWebhookPayload
+    if (status === 'COMPLETED') {
+      await this.processSuccessfulPayment(request, transactionId);
       this.paymentStatusGateway.emitPaymentStatus(request.token, 'APPROVED');
-    } else if (verified === 'FAILED' || verified === 'CANCELLED') {
+    } else if (status === 'FAILED' || status === 'CANCELLED') {
       await this.prisma.paymentRequest.update({
         where: { id: request.id },
         data: {
           status: PaymentRequestStatus.REJECTED,
-          ...(verifiedTxId && { monetbil_tx_id: verifiedTxId }),
+          ...(transactionId && { gateway_tx_id: transactionId }),
         },
       });
-      this.logger.log(`Payment rejected for request ${request.id} (verified status: ${verified})`);
+      this.logger.log(`Payment rejected for request ${request.id} (status: ${status})`);
       this.paymentStatusGateway.emitPaymentStatus(request.token, 'REJECTED');
     } else {
-      // PENDING — Monetbil sent a callback but the transaction isn't conclusive yet.
-      // The polling loop or a future callback will resolve it.
       this.logger.warn(
-        `Monetbil callback for ${paymentId} re-verified as PENDING — no action taken`,
+        `Payment callback for ${gatewayRef} re-verified as PENDING — no action taken`,
       );
     }
 
@@ -478,7 +473,7 @@ export class PaymentRequestService {
         data: {
           status: PaymentRequestStatus.APPROVED,
           payment_reference: context.transactionRef,
-          ...(transactionId && { monetbil_tx_id: transactionId }),
+          ...(transactionId && { gateway_tx_id: transactionId }),
         },
       });
 
