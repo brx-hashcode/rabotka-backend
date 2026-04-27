@@ -322,8 +322,6 @@ export class PaymentRequestService {
     payload: Record<string, string>,
   ): Promise<{ received: boolean }> {
     const paymentId = payload['paymentId'] ?? payload['payment_ref'];
-    const status = payload['status'];
-    const transaction_id = payload['transaction_id'];
 
     if (!paymentId) {
       this.logger.warn('Monetbil callback missing paymentId');
@@ -347,25 +345,32 @@ export class PaymentRequestService {
       return { received: true };
     }
 
-    const isSuccess = status === '1';
+    // Ignore the status field from the webhook body — treat the callback as a
+    // trigger only. Re-verify with the Monetbil API so forged callbacks cannot
+    // cause wallet credits.
+    const { status: verified, transactionId: verifiedTxId } =
+      await this.monetbilService.checkPayment(paymentId);
 
-    if (isSuccess) {
-      await this.processSuccessfulPayment(request, transaction_id);
-    } else {
+    if (verified === 'SUCCESS') {
+      await this.processSuccessfulPayment(request, verifiedTxId);
+      this.paymentStatusGateway.emitPaymentStatus(request.token, 'APPROVED');
+    } else if (verified === 'FAILED' || verified === 'CANCELLED') {
       await this.prisma.paymentRequest.update({
         where: { id: request.id },
         data: {
           status: PaymentRequestStatus.REJECTED,
-          ...(transaction_id && { monetbil_tx_id: transaction_id }),
+          ...(verifiedTxId && { monetbil_tx_id: verifiedTxId }),
         },
       });
-      this.logger.log(`Payment rejected for request ${request.id}`);
+      this.logger.log(`Payment rejected for request ${request.id} (verified status: ${verified})`);
+      this.paymentStatusGateway.emitPaymentStatus(request.token, 'REJECTED');
+    } else {
+      // PENDING — Monetbil sent a callback but the transaction isn't conclusive yet.
+      // The polling loop or a future callback will resolve it.
+      this.logger.warn(
+        `Monetbil callback for ${paymentId} re-verified as PENDING — no action taken`,
+      );
     }
-
-    this.paymentStatusGateway.emitPaymentStatus(
-      request.token,
-      isSuccess ? 'APPROVED' : 'REJECTED',
-    );
 
     return { received: true };
   }
