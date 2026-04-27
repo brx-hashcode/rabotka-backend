@@ -375,7 +375,14 @@ export class PaymentRequestService {
     transactionId?: string,
   ): Promise<void> {
     const context = await this.buildPaymentProcessingContext(request);
-    await this.persistApprovedPayment(request, context, transactionId);
+    const claimed = await this.persistApprovedPayment(request, context, transactionId);
+
+    if (!claimed) {
+      this.logger.warn(
+        `Payment ${request.id} already processed by another thread — skipping side-effects`,
+      );
+      return;
+    }
 
     this.logger.log(
       `Payment approved: ${request.id} — ${context.amount} FCFA credited to system wallet`,
@@ -435,14 +442,39 @@ export class PaymentRequestService {
     };
   }
 
+  /**
+   * Atomically claims the payment request by transitioning it from a
+   * non-terminal status to APPROVED inside a single DB transaction.
+   * Returns true if this call won the race (and wallet/payment records were
+   * created), false if another thread already processed it.
+   */
   private async persistApprovedPayment(
     request: PaymentRequestWithProfile,
     context: PaymentProcessingContext,
     transactionId?: string,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const systemWallet = await this.walletService.getOrCreateSystemWallet();
-    await this.prisma.$transaction([
-      this.prisma.payment.create({
+
+    return this.prisma.$transaction(async (tx) => {
+      const claimed = await tx.paymentRequest.updateMany({
+        where: {
+          id: request.id,
+          status: {
+            notIn: [PaymentRequestStatus.APPROVED, PaymentRequestStatus.REJECTED],
+          },
+        },
+        data: {
+          status: PaymentRequestStatus.APPROVED,
+          payment_reference: context.transactionRef,
+          ...(transactionId && { monetbil_tx_id: transactionId }),
+        },
+      });
+
+      if (claimed.count === 0) {
+        return false;
+      }
+
+      await tx.payment.create({
         data: {
           type: context.paymentType,
           profile_id: request.profile_id,
@@ -453,8 +485,9 @@ export class PaymentRequestService {
           paid_at: new Date(),
           description: context.paymentDescription,
         },
-      }),
-      this.prisma.walletTransaction.create({
+      });
+
+      await tx.walletTransaction.create({
         data: {
           wallet_id: systemWallet.id,
           type:
@@ -465,20 +498,15 @@ export class PaymentRequestService {
           reference_type: 'payment_request',
           reference_id: request.id,
         },
-      }),
-      this.prisma.wallet.update({
+      });
+
+      await tx.wallet.update({
         where: { id: systemWallet.id },
         data: { balance: { increment: context.amount } },
-      }),
-      this.prisma.paymentRequest.update({
-        where: { id: request.id },
-        data: {
-          status: PaymentRequestStatus.APPROVED,
-          payment_reference: context.transactionRef,
-          ...(transactionId && { monetbil_tx_id: transactionId }),
-        },
-      }),
-    ]);
+      });
+
+      return true;
+    });
   }
 
   private emitAdminPaymentNotification(
