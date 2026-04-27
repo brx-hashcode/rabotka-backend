@@ -180,12 +180,6 @@ export class PaymentRequestService {
       throw new NotFoundException('Demande de paiement introuvable');
     }
 
-    if (request.status !== PaymentRequestStatus.PENDING) {
-      throw new BadRequestException(
-        "Cette demande n'est pas en attente de paiement",
-      );
-    }
-
     if (!request.amount) {
       throw new BadRequestException('Montant non défini pour cette demande');
     }
@@ -195,6 +189,19 @@ export class PaymentRequestService {
     if (!serviceKey) {
       throw new BadRequestException(
         'Monetbil non configuré pour les paiements en ligne',
+      );
+    }
+
+    // Atomically claim PENDING → PROCESSING before calling Monetbil.
+    // Concurrent double-taps both attempt this; only one succeeds (count === 1).
+    const locked = await this.prisma.paymentRequest.updateMany({
+      where: { id: request.id, status: PaymentRequestStatus.PENDING },
+      data: { status: PaymentRequestStatus.PROCESSING, phone, operator },
+    });
+
+    if (locked.count === 0) {
+      throw new BadRequestException(
+        "Cette demande n'est pas en attente de paiement",
       );
     }
 
@@ -213,6 +220,11 @@ export class PaymentRequestService {
     });
 
     if (!result.success) {
+      // Revert to PENDING so the user can retry
+      await this.prisma.paymentRequest.updateMany({
+        where: { id: request.id, status: PaymentRequestStatus.PROCESSING },
+        data: { status: PaymentRequestStatus.PENDING, phone: null, operator: null },
+      });
       throw new BadRequestException(
         result.message || "Échec de l'initiation du paiement",
       );
@@ -223,12 +235,7 @@ export class PaymentRequestService {
 
     await this.prisma.paymentRequest.update({
       where: { id: request.id },
-      data: {
-        status: PaymentRequestStatus.PROCESSING,
-        phone,
-        operator,
-        monetbil_payment_ref: paymentId || null,
-      },
+      data: { monetbil_payment_ref: paymentId || null },
     });
 
     // Fire-and-forget polling loop — checks status every 5s, up to 10 attempts.
