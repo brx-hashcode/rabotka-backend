@@ -281,4 +281,67 @@ export class QdrantService implements OnModuleInit {
 
     this.logger.log(`Collection created: ${collectionName}`);
   }
+
+  async ensureDenseCollection(collectionName: string): Promise<void> {
+    this.assertPrefix(collectionName);
+    const collections = await this.client.getCollections();
+    const exists = collections.collections.some(
+      (c) => c.name === collectionName,
+    );
+    if (exists) return;
+
+    await this.client.createCollection(collectionName, {
+      vectors: {
+        dense: { size: DENSE_DIM, distance: 'Cosine' },
+      },
+    });
+
+    this.logger.log(`Dense collection created: ${collectionName}`);
+  }
+
+  async upsertDense(
+    collectionName: string,
+    id: string,
+    vector: number[],
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    this.assertPrefix(collectionName);
+    await this.client.upsert(collectionName, {
+      points: [{ id, vector: { dense: vector }, payload }],
+    });
+  }
+
+  async recommendDense(
+    collectionName: string,
+    positiveVectors: number[][],
+    negativeVectors: number[][],
+    filter: Record<string, unknown> | undefined,
+    limit: number,
+  ): Promise<
+    Array<{
+      id: string | number;
+      score: number;
+      payload: Record<string, unknown> | null;
+    }>
+  > {
+    this.assertPrefix(collectionName);
+    const results = await this.client.query(collectionName, {
+      query: {
+        recommend: {
+          positive: positiveVectors,
+          negative: negativeVectors,
+          strategy: 'average_vector',
+        },
+      },
+      using: 'dense',
+      filter,
+      limit,
+      with_payload: true,
+    });
+    return results.points.map((r) => ({
+      id: r.id,
+      score: r.score,
+      payload: r.payload as Record<string, unknown> | null,
+    }));
+  }
 }

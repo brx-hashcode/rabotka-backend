@@ -9,6 +9,7 @@ import { ContactUnlockModule } from '../contact-unlock/contact-unlock.module';
 import { WalletModule } from '../wallet/wallet.module';
 import { SystemConfigModule } from '../system-config/system-config.module';
 import { MatchingModule } from '../matching/matching.module';
+import { InterestGraphModule } from '../interest-graph/interest-graph.module';
 import { BotStateService } from './services/bot-state.service';
 import { BotInboxService } from './services/bot-inbox.service';
 import { BotDraftService } from './services/bot-draft.service';
@@ -29,6 +30,7 @@ import { BotNotificationService } from './services/bot-notification.service';
     forwardRef(() => ContactUnlockModule),
     forwardRef(() => WalletModule),
     MatchingModule,
+    InterestGraphModule,
   ],
   providers: [
     BotStateService,
