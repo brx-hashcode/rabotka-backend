@@ -380,6 +380,7 @@ export class BotOrchestratorService {
           paymentService: this.paymentService,
           botNotification: this.notificationService,
           employerProfileId: profile.id,
+          interestSignalService: this.interestSignalService,
         }),
       [FLOW_IDS.RATE_ASSIGNMENT]: () =>
         runRateAssignmentFlow(state, input, profile, { prisma: this.prisma }),
@@ -785,6 +786,7 @@ export class BotOrchestratorService {
     const flowState = getRecommendedProfilesInitialState(
       workerIds,
       workerScores,
+      latestOffer?.id,
     );
     await this.botState.set(profileId, flowState);
 
