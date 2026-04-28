@@ -1,7 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { QdrantService } from '../qdrant/qdrant.service';
+import { QueueService } from '../../common/services/queue/queue.service';
 import { COLLECTIONS } from '../qdrant/qdrant.config';
+import Redis from 'ioredis';
+import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
 
 export type SignalType =
   | 'apply'
@@ -9,37 +12,44 @@ export type SignalType =
   | 'save'
   | 'question'
   | 'view'
+  | 'profile_view'  // employer opens a worker's profile card
   | 'skip'
   | 'dislike'
   | 'cancel';
 
-const SIGNAL_WEIGHTS: Record<SignalType, number> = {
+export const SIGNAL_WEIGHTS: Record<SignalType, number> = {
   apply: 1.0,
   share: 0.9,
   save: 0.8,
   question: 0.6,
+  profile_view: 0.5, // external validation — employer saw fit for a job
   view: 0.3,
   skip: -0.3,
   dislike: -0.8,
   cancel: -0.5,
 };
 
-// Signals older than 90 days are excluded; decay applied at 30/60 day thresholds
-function temporalWeight(recordedAt: Date): number {
-  const ageMs = Date.now() - recordedAt.getTime();
-  const ageDays = ageMs / (1000 * 60 * 60 * 24);
+// Strongly positive signals trigger immediate recluster (don't wait for threshold)
+const IMMEDIATE_RECLUSTER_SIGNALS: Set<SignalType> = new Set([
+  'apply',
+  'cancel',
+  'dislike',
+]);
+
+export const INTEREST_RECLUSTER_QUEUE = 'interest-recluster-queue';
+
+// Redis key for per-user interaction counter (survives pod restarts)
+const counterKey = (userId: string) =>
+  `interest:counter:${userId}`;
+
+// Temporal decay: signals older than 90 days excluded
+export function temporalWeight(recordedAt: Date): number {
+  const ageDays =
+    (Date.now() - recordedAt.getTime()) / (1000 * 60 * 60 * 24);
   if (ageDays > 90) return 0;
   if (ageDays > 60) return 0.4;
   if (ageDays > 30) return 0.7;
   return 1.0;
-}
-
-export interface RecordedSignal {
-  userId: string;
-  jobId: string;
-  type: SignalType;
-  weight: number;
-  jobCategory: string | null;
 }
 
 @Injectable()
@@ -49,6 +59,8 @@ export class InterestSignalService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly qdrant: QdrantService,
+    private readonly queue: QueueService,
+    @Inject(REDIS_CONNECTION) private readonly redis: Redis,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -67,29 +79,35 @@ export class InterestSignalService {
 
     const job = await this.prisma.jobOffer.findUnique({
       where: { id: jobId },
-      select: { category: true, title: true, description: true },
+      select: {
+        category: { select: { name: true } },
+        title: true,
+        description: true,
+      },
     });
     if (!job) return;
 
     const jobText = `${job.title} ${job.description ?? ''}`.trim();
     const vector = await this.qdrant.embed(jobText);
 
+    // One point per (user, job, type) — upsert prevents duplicate embeddings
     const pointId = `${userId}__${jobId}__${type}`;
-    const now = new Date();
 
     await this.qdrant.upsertDense(COLLECTIONS.SIGNALS, pointId, vector, {
       user_id: userId,
       job_id: jobId,
       type,
       weight: baseWeight,
-      category: job.category ?? null,
-      recorded_at: now.toISOString(),
+      category: job.category?.name ?? null,
+      recorded_at: new Date().toISOString(),
       session_id: context?.sessionId ?? null,
     });
 
     this.logger.debug(
       `Signal recorded: user=${userId} job=${jobId} type=${type} w=${baseWeight}`,
     );
+
+    await this.maybeEnqueueRecluster(userId, type);
   }
 
   async getRecentSignals(userId: string): Promise<
@@ -102,16 +120,15 @@ export class InterestSignalService {
       effectiveWeight: number;
     }>
   > {
-    const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+    const cutoff = new Date(
+      Date.now() - 90 * 24 * 60 * 60 * 1000,
+    ).toISOString();
 
     const result = await this.qdrant.getClient().scroll(COLLECTIONS.SIGNALS, {
       filter: {
         must: [
           { key: 'user_id', match: { value: userId } },
-          {
-            key: 'recorded_at',
-            range: { gte: cutoff.toISOString() },
-          },
+          { key: 'recorded_at', range: { gte: cutoff } },
         ],
       },
       limit: 500,
@@ -124,20 +141,53 @@ export class InterestSignalService {
         const payload = p.payload as Record<string, unknown>;
         const recordedAt = new Date(payload.recorded_at as string);
         const tw = temporalWeight(recordedAt);
-        const weight = (payload.weight as number) * tw;
+        const effectiveWeight = (payload.weight as number) * tw;
         return {
           jobId: payload.job_id as string,
           type: payload.type as SignalType,
-          weight,
+          weight: payload.weight as number,
           category: payload.category as string | null,
           recordedAt,
-          effectiveWeight: weight,
+          effectiveWeight,
         };
       })
       .filter((s) => s.effectiveWeight !== 0);
   }
 
-  getSignalWeight(type: SignalType): number {
-    return SIGNAL_WEIGHTS[type] ?? 0;
+  // ── Recluster scheduling ──────────────────────────────────────────────────
+
+  private async maybeEnqueueRecluster(
+    userId: string,
+    type: SignalType,
+  ): Promise<void> {
+    // High-value signals always trigger immediate recluster
+    if (IMMEDIATE_RECLUSTER_SIGNALS.has(type)) {
+      await this.enqueueRecluster(userId, 0);
+      return;
+    }
+
+    // Increment persistent counter in Redis; recluster every 10 interactions
+    const key = counterKey(userId);
+    const count = await this.redis.incr(key);
+    await this.redis.expire(key, 60 * 60 * 24 * 30); // 30-day TTL
+
+    if (count % 10 === 0) {
+      await this.enqueueRecluster(userId, 0);
+    }
+  }
+
+  private async enqueueRecluster(
+    userId: string,
+    delayMs: number,
+  ): Promise<void> {
+    // jobId deduplication: one pending recluster per user at a time
+    await this.queue.addJob<{ userId: string }>(
+      INTEREST_RECLUSTER_QUEUE,
+      { userId },
+      {
+        delay: delayMs,
+        jobId: `recluster:${userId}`, // BullMQ deduplication key
+      },
+    );
   }
 }

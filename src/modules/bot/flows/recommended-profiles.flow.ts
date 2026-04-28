@@ -377,10 +377,11 @@ async function showWorkerDetail(
     };
   }
 
-  // Record profile view signal on the worker for the linked job (fire-and-forget)
+  // Record profile_view signal on the worker for the linked job (fire-and-forget)
+  // profile_view (0.5) is external validation — distinct from worker self-view (0.3)
   if (jobOfferId) {
     void ctx.interestSignalService
-      .record(workerId, jobOfferId, 'view')
+      .record(workerId, jobOfferId, 'profile_view')
       .catch(() => undefined);
   }
 
