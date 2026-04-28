@@ -58,31 +58,12 @@ export class InterestRecommendationService {
     const seen = new Set<string>();
     const results: RecommendedJob[] = [];
 
-    for (const r of exploited) {
-      if (!seen.has(r.jobId)) {
-        seen.add(r.jobId);
-        results.push(r);
-      }
-    }
+    mergeUnique(exploited, seen, results);
+    mergeUnique(explored, seen, results);
 
-    for (const r of explored) {
-      if (!seen.has(r.jobId)) {
-        seen.add(r.jobId);
-        results.push(r);
-      }
-    }
-
-    // If exploit returned fewer than expected, fill from fallback
     if (results.length < limit) {
-      const gap = limit - results.length;
-      const extra = await this.fallback(workerId, gap * 2);
-      for (const r of extra) {
-        if (!seen.has(r.jobId)) {
-          seen.add(r.jobId);
-          results.push(r);
-          if (results.length >= limit) break;
-        }
-      }
+      const extra = await this.fallback(workerId, (limit - results.length) * 2);
+      mergeUnique(extra, seen, results, limit);
     }
 
     return results.slice(0, limit);
@@ -115,7 +96,10 @@ export class InterestRecommendationService {
         source: 'interest' as const,
       }));
     } catch (err) {
-      this.logger.warn('Qdrant recommend() failed, continuing with fallback', err);
+      this.logger.warn(
+        'Qdrant recommend() failed, continuing with fallback',
+        err,
+      );
       return [];
     }
   }
@@ -150,9 +134,7 @@ export class InterestRecommendationService {
       );
 
       // Shuffle the pool so explore doesn't always return the same top-N
-      const shuffled = results
-        .sort(() => Math.random() - 0.5)
-        .slice(0, limit);
+      const shuffled = results.sort(() => Math.random() - 0.5).slice(0, limit);
 
       return shuffled.map((r) => ({
         jobId: r.id as string,
@@ -239,9 +221,7 @@ export class InterestRecommendationService {
     workerId: string,
     excludeCategories?: string[],
   ): Record<string, unknown> {
-    const must: unknown[] = [
-      { key: 'status', match: { value: 'ACTIVE' } },
-    ];
+    const must: unknown[] = [{ key: 'status', match: { value: 'ACTIVE' } }];
     const must_not: unknown[] = [
       { key: 'applied_worker_ids', match: { any: [workerId] } },
     ];
@@ -259,6 +239,22 @@ export class InterestRecommendationService {
   }
 }
 
+// ── Pure helpers ──────────────────────────────────────────────────────────────
+
+function mergeUnique(
+  items: RecommendedJob[],
+  seen: Set<string>,
+  out: RecommendedJob[],
+  cap?: number,
+): void {
+  for (const r of items) {
+    if (seen.has(r.jobId)) continue;
+    seen.add(r.jobId);
+    out.push(r);
+    if (cap !== undefined && out.length >= cap) break;
+  }
+}
+
 // ── Pure math helpers ─────────────────────────────────────────────────────────
 
 function blendVectors(vectors: number[][]): number[] {
@@ -266,7 +262,7 @@ function blendVectors(vectors: number[][]): number[] {
   const sum = new Array<number>(dim).fill(0);
   for (const v of vectors) {
     for (let i = 0; i < dim; i++) {
-      sum[i] += v[i]!;
+      sum[i] += v[i];
     }
   }
   return sum.map((v) => v / vectors.length);
