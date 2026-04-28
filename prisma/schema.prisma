@@ -501,6 +501,7 @@ model Penalty {
   worker      Profile     @relation(fields: [worker_id], references: [id], onDelete: Cascade)
   application Application @relation(fields: [application_id], references: [id], onDelete: Cascade)
 
+  @@unique([application_id], name: "idx_penalty_application_unique")
   @@index([worker_id], name: "idx_penalty_worker")
   @@index([applied_at], name: "idx_penalty_applied_at")
   @@map("penalties")
