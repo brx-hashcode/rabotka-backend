@@ -15,6 +15,7 @@ import type { ContactUnlockService } from '../../contact-unlock/contact-unlock.s
 import type { WalletService } from '../../wallet/wallet.service';
 import type { PaymentService } from '../../payments/payment.service';
 import type { BotNotificationService } from '../services/bot-notification.service';
+import type { InterestSignalService } from '../../interest-graph/interest-signal.service';
 
 export type RecommendedProfilesContext = {
   prisma: PrismaService;
@@ -24,6 +25,7 @@ export type RecommendedProfilesContext = {
   paymentService: PaymentService;
   botNotification: BotNotificationService;
   employerProfileId: string;
+  interestSignalService: InterestSignalService;
 };
 
 export type FlowResult = {
@@ -75,6 +77,7 @@ export async function runRecommendedProfilesFlow(
   const workerIds = (payload.workerIds as string[]) ?? [];
   const workerScores = (payload.workerScores as Record<string, number>) ?? {};
   const selectedWorkerId = payload.selectedWorkerId as string | undefined;
+  const jobOfferId = payload.jobOfferId as string | undefined;
   const trimmed = input.trim();
   const normalized = trimmed.toLowerCase();
 
@@ -107,6 +110,7 @@ export async function runRecommendedProfilesFlow(
       state,
       profile,
       ctx,
+      jobOfferId,
     );
   }
 
@@ -119,6 +123,7 @@ export async function runRecommendedProfilesFlow(
       profile,
       ctx,
       goToMenu,
+      jobOfferId,
     });
   }
 
@@ -134,6 +139,7 @@ export async function runRecommendedProfilesFlow(
       workerScores,
       state,
       ctx,
+      jobOfferId,
     );
   }
 
@@ -151,9 +157,10 @@ async function handleDetailStep(
     profile: BotProfile;
     ctx: RecommendedProfilesContext;
     goToMenu: () => FlowResult;
+    jobOfferId?: string;
   },
 ): Promise<FlowResult> {
-  const { workerIds, workerScores, state, payload, profile, ctx, goToMenu } =
+  const { workerIds, workerScores, state, payload, profile, ctx, goToMenu, jobOfferId } =
     opts;
   if (trimmed === '3') return goToMenu();
   if (trimmed === '2') return showList(workerIds, workerScores, state, ctx);
@@ -161,22 +168,22 @@ async function handleDetailStep(
   if (trimmed === '1') {
     const fee = await ctx.systemConfig.getRecommendationContactFee();
     const balance = await ctx.walletService.getProfileWalletBalance(profile.id);
-    return showPaymentMethodPrompt(
-      selectedWorkerId,
+    return showPaymentMethodPrompt({
+      workerId: selectedWorkerId,
       fee,
       balance,
       workerIds,
       workerScores,
       state,
-      ctx,
-    );
+      jobOfferId,
+    });
   }
 
   return {
     reply: [`Tapez *1*, *2* ou *3*.\n${subMenu()}`],
     nextState: {
       ...state,
-      payload: { ...payload, workerIds, workerScores, selectedWorkerId },
+      payload: { ...payload, workerIds, workerScores, selectedWorkerId, jobOfferId },
       updatedAt: new Date().toISOString(),
     },
   };
@@ -190,6 +197,7 @@ async function handlePaymentStep(
   state: BotState,
   profile: BotProfile,
   ctx: RecommendedProfilesContext,
+  jobOfferId?: string,
 ): Promise<FlowResult> {
   const fee = await ctx.systemConfig.getRecommendationContactFee();
   const balance = await ctx.walletService.getProfileWalletBalance(profile.id);
@@ -201,6 +209,7 @@ async function handlePaymentStep(
       workerScores,
       state,
       ctx,
+      jobOfferId,
     );
   }
 
@@ -219,15 +228,15 @@ async function handlePaymentStep(
     );
   }
 
-  return showPaymentMethodPrompt(
-    selectedWorkerId,
+  return showPaymentMethodPrompt({
+    workerId: selectedWorkerId,
     fee,
     balance,
     workerIds,
     workerScores,
     state,
-    ctx,
-  );
+    jobOfferId,
+  });
 }
 
 async function processWalletPayment(
@@ -334,7 +343,7 @@ async function showList(
     nextState: {
       ...state,
       step: 0,
-      payload: { workerIds, workerScores },
+      payload: { workerIds, workerScores, jobOfferId: state.payload?.jobOfferId },
       updatedAt: new Date().toISOString(),
     },
   };
@@ -346,6 +355,7 @@ async function showWorkerDetail(
   workerScores: Record<string, number>,
   state: BotState,
   ctx: RecommendedProfilesContext,
+  jobOfferId?: string,
 ): Promise<FlowResult> {
   const worker = await ctx.prisma.profile.findUnique({
     where: { id: workerId },
@@ -365,6 +375,13 @@ async function showWorkerDetail(
       reply: ['Profil introuvable. Tapez *7* pour le menu.'],
       nextState: state,
     };
+  }
+
+  // Record profile view signal on the worker for the linked job (fire-and-forget)
+  if (jobOfferId) {
+    void ctx.interestSignalService
+      .record(workerId, jobOfferId, 'view')
+      .catch(() => undefined);
   }
 
   const completedCount = await ctx.prisma.application.count({
@@ -398,21 +415,25 @@ async function showWorkerDetail(
     nextState: {
       ...state,
       step: 1,
-      payload: { workerIds, workerScores, selectedWorkerId: workerId },
+      payload: { workerIds, workerScores, selectedWorkerId: workerId, jobOfferId },
       updatedAt: new Date().toISOString(),
     },
   };
 }
 
-function showPaymentMethodPrompt(
-  workerId: string,
-  fee: number,
-  balance: number,
-  workerIds: string[],
-  workerScores: Record<string, number>,
-  state: BotState,
-  ctx: RecommendedProfilesContext,
-): FlowResult {
+type PaymentPromptOpts = {
+  workerId: string;
+  fee: number;
+  balance: number;
+  workerIds: string[];
+  workerScores: Record<string, number>;
+  state: BotState;
+  jobOfferId?: string;
+};
+
+function showPaymentMethodPrompt(opts: PaymentPromptOpts): FlowResult {
+  const { workerId, fee, balance, workerIds, workerScores, state, jobOfferId } =
+    opts;
   const hasFunds = balance >= fee;
 
   const walletLine = hasFunds
@@ -441,7 +462,7 @@ function showPaymentMethodPrompt(
     nextState: {
       ...state,
       step: 2,
-      payload: { workerIds, workerScores, selectedWorkerId: workerId },
+      payload: { workerIds, workerScores, selectedWorkerId: workerId, jobOfferId },
       updatedAt: new Date().toISOString(),
     },
   };
@@ -489,11 +510,12 @@ async function generateMobileMoneyLink(
 export function getRecommendedProfilesInitialState(
   workerIds: string[],
   workerScores: Record<string, number> = {},
+  jobOfferId?: string,
 ): BotState {
   return {
     flowId: FLOW_IDS.RECOMMENDED_PROFILES,
     step: 0,
-    payload: { workerIds, workerScores },
+    payload: { workerIds, workerScores, jobOfferId },
     updatedAt: new Date().toISOString(),
   };
 }
