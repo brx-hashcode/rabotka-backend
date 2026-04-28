@@ -1,5 +1,5 @@
-import { IsString, IsIn } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
+import { IsString, IsIn, IsOptional } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export const MONETBIL_OPERATORS = [
   'CG_MTNMOBILEMONEY',
@@ -13,7 +13,8 @@ export class InitiatePaymentDto {
   @IsString()
   phone!: string;
 
-  @ApiProperty({ enum: MONETBIL_OPERATORS, example: 'CG_MTNMOBILEMONEY' })
+  @ApiPropertyOptional({ enum: MONETBIL_OPERATORS, example: 'CG_MTNMOBILEMONEY' })
+  @IsOptional()
   @IsIn(MONETBIL_OPERATORS)
-  operator!: MonetbilOperator;
+  operator?: MonetbilOperator;
 }
