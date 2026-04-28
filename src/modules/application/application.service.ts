@@ -575,8 +575,9 @@ export class ApplicationService {
       }
 
       if (applyPenalty) {
-        await tx.penalty.create({
-          data: {
+        await tx.penalty.upsert({
+          where: { idx_penalty_application_unique: { application_id: applicationId } },
+          create: {
             worker_id: workerId,
             application_id: applicationId,
             amount: fees.lateCancellationPenaltyFcfa,
@@ -584,6 +585,7 @@ export class ApplicationService {
               reason ??
               `Annulation tardive (< ${fees.cancellationThresholdHours}h avant le rendez-vous)`,
           },
+          update: {},
         });
 
         const profile = await tx.profile.findUnique({
