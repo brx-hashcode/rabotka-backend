@@ -581,7 +581,7 @@ export class ApplicationService {
 
       if (applyPenalty) {
         await tx.penalty.upsert({
-          where: { idx_penalty_application_unique: { application_id: applicationId } },
+          where: { application_id: applicationId },
           create: {
             worker_id: workerId,
             application_id: applicationId,

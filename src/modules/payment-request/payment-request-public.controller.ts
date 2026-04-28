@@ -26,7 +26,7 @@ export class PaymentRequestPublicController {
     @Param('token') token: string,
     @Body() dto: InitiatePaymentDto,
   ) {
-    const result = await this.service.initiateMonetbilPayment(token, dto.phone, String(dto.operator));
+    const result = await this.service.initiatePayment(token, dto.phone, String(dto.operator));
     await this.logService.create({
       action: 'PAYMENT_INITIATED',
       entityType: 'PaymentRequest',
@@ -35,14 +35,14 @@ export class PaymentRequestPublicController {
     return result;
   }
 
-  @Post('webhooks/monetbil/callback')
-  @ApiOperation({ summary: 'Monetbil payment webhook callback' })
-  async monetbilCallback(@Body() payload: Record<string, string>) {
-    const result = await this.service.handleMonetbilCallback(payload);
+  @Post('webhooks/payment/callback')
+  @ApiOperation({ summary: 'Payment gateway webhook callback' })
+  async paymentCallback(@Body() payload: Record<string, string>) {
+    const result = await this.service.handlePaymentCallback(payload);
     await this.logService.create({
       action: 'PAYMENT_WEBHOOK_RECEIVED',
       entityType: 'PaymentRequest',
-      metadata: { status: payload['status'], payment_ref: payload['payment_ref'] },
+      metadata: { payload },
     });
     return result;
   }
