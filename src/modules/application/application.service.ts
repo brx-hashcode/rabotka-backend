@@ -385,25 +385,30 @@ export class ApplicationService {
       throw new BadRequestException("Cette candidature n'est plus en attente");
     }
 
-    const currentAcceptedCount = await this.prisma.application.count({
-      where: {
-        job_offer_id: application.job_offer_id,
-        status: { in: [ApplicationStatus.ACCEPTED, 'WAITING_PAYMENT' as ApplicationStatus] },
-      },
-    });
-
-    const quantityNeeded = application.job_offer.quantity ?? 1;
-    const newAcceptedCount = currentAcceptedCount + 1;
-    let offerStatus: JobOfferStatus;
-    if (newAcceptedCount >= quantityNeeded) {
-      offerStatus = JobOfferStatus.FILLED;
-    } else if (newAcceptedCount > 0) {
-      offerStatus = JobOfferStatus.PARTIALLY_FILLED;
-    } else {
-      offerStatus = JobOfferStatus.ACTIVE;
-    }
-
     await this.prisma.$transaction(async (tx) => {
+      // Lock the job offer row to prevent concurrent over-acceptance
+      await tx.$executeRaw`SELECT id FROM "job_offers" WHERE id = ${application.job_offer_id}::uuid FOR UPDATE`;
+
+      const currentAcceptedCount = await tx.application.count({
+        where: {
+          job_offer_id: application.job_offer_id,
+          status: { in: [ApplicationStatus.ACCEPTED, 'WAITING_PAYMENT' as ApplicationStatus] },
+        },
+      });
+
+      const quantityNeeded = application.job_offer.quantity ?? 1;
+      if (currentAcceptedCount >= quantityNeeded) {
+        throw new ConflictException("Cette offre a déjà atteint sa capacité maximale de candidats acceptés");
+      }
+
+      const newAcceptedCount = currentAcceptedCount + 1;
+      let offerStatus: JobOfferStatus;
+      if (newAcceptedCount >= quantityNeeded) {
+        offerStatus = JobOfferStatus.FILLED;
+      } else {
+        offerStatus = JobOfferStatus.PARTIALLY_FILLED;
+      }
+
       await tx.application.update({
         where: { id: applicationId },
         data: { status: ApplicationStatus.WAITING_PAYMENT },
