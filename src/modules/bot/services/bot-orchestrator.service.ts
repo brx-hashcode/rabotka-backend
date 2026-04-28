@@ -80,7 +80,6 @@ import { runRateAssignmentFlow } from '../flows/rate-assignment.flow';
 import { MatchingService } from '../../matching/matching.service';
 import { runRepublishExpiredJobFlow } from '../flows/republish-expired-job.flow';
 import { InterestSignalService } from '../../interest-graph/interest-signal.service';
-import { InterestClusterService } from '../../interest-graph/interest-cluster.service';
 import { InterestRecommendationService } from '../../interest-graph/interest-recommendation.service';
 
 const INACTIVE_MESSAGE = `Votre compte est créé mais pas encore activé. Cliquez sur le lien de confirmation que nous vous avons envoyé par WhatsApp pour l’activer.`;
@@ -116,7 +115,6 @@ export class BotOrchestratorService {
     private readonly walletService: WalletService,
     private readonly matchingService: MatchingService,
     private readonly interestSignalService: InterestSignalService,
-    private readonly interestClusterService: InterestClusterService,
     private readonly interestRecommendationService: InterestRecommendationService,
   ) {}
 
@@ -665,7 +663,6 @@ export class BotOrchestratorService {
     profile: BotProfile,
     profileId: string,
   ): Promise<string[]> {
-    void this.interestClusterService.maybeRecluster(profile.id).catch(() => undefined);
     const offerResults = await this.interestRecommendationService.recommend(profile.id, 10);
     const offerIds: string[] = offerResults.map((r) => r.jobId);
 
