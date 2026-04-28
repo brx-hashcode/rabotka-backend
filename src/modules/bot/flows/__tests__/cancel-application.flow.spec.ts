@@ -34,6 +34,7 @@ function makeApp(scheduledAt: Date, overrides: Record<string, unknown> = {}) {
     id: APP_ID,
     worker_id: WORKER_ID,
     status: 'ACCEPTED',
+    job_offer_id: 'job-offer-id-mock',
     job_offer: {
       title: 'Plombier',
       scheduled_at: scheduledAt,
@@ -52,6 +53,9 @@ function makeCtx(overrides: Partial<CancelApplicationContext> = {}): CancelAppli
     notificationService: {
       sendCancellationToEmployer: jest.fn().mockResolvedValue(undefined),
     } as unknown as CancelApplicationContext['notificationService'],
+    interestSignalService: {
+      record: jest.fn().mockResolvedValue(undefined),
+    } as unknown as CancelApplicationContext['interestSignalService'],
     ...overrides,
   };
 }

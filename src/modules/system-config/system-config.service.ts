@@ -6,6 +6,7 @@ import { REDIS_CONNECTION, REDIS_KEY_PREFIX } from '../../common/services/redis/
 import {
   DEFAULT_SYSTEM_CONFIGS,
   MONETBIL_ENV_OVERRIDES,
+  PAYMENT_ENV_OVERRIDES,
   STORAGE_ENV_OVERRIDES,
 } from './system-config.constants';
 
@@ -270,6 +271,24 @@ export class SystemConfigService implements OnModuleInit {
 
   async getStorageDriver(): Promise<string> {
     return this.get('storage.driver', 'S3');
+  }
+
+  async getPaymentGatewayDriver(): Promise<string> {
+    return this.get('payment.gateway_driver', 'MONETBIL');
+  }
+
+  async getPaymentEnvOverrides(
+    driver: string,
+  ): Promise<Record<string, string>> {
+    const mapping = PAYMENT_ENV_OVERRIDES[driver.toUpperCase()] ?? {};
+    const overrides: Record<string, string> = {};
+    await Promise.all(
+      Object.entries(mapping).map(async ([envKey, cfgKey]) => {
+        const val = await this.get(cfgKey, '');
+        if (val !== '') overrides[envKey] = val;
+      }),
+    );
+    return overrides;
   }
 
   async getMonetbilConfig(): Promise<{ serviceKey: string }> {

@@ -204,12 +204,12 @@ describe('PaymentRequestService', () => {
     });
   });
 
-  describe('initiateMonetbilPayment()', () => {
+  describe('initiatePayment()', () => {
     it('throws NotFoundException when token not found', async () => {
       (prisma.paymentRequest.findUnique as jest.Mock).mockResolvedValue(null);
 
       await expect(
-        service.initiateMonetbilPayment(TOKEN, '237600000001', 'MTN'),
+        service.initiatePayment(TOKEN, '237600000001', 'MTN'),
       ).rejects.toThrow(NotFoundException);
     });
 
@@ -219,17 +219,17 @@ describe('PaymentRequestService', () => {
       );
 
       await expect(
-        service.initiateMonetbilPayment(TOKEN, '237600000001', 'MTN'),
+        service.initiatePayment(TOKEN, '237600000001', 'MTN'),
       ).rejects.toThrow(BadRequestException);
     });
   });
 
-  describe('handleMonetbilCallback()', () => {
+  describe('handlePaymentCallback()', () => {
     it('returns early when payment ref not found', async () => {
       (prisma.paymentRequest.findFirst as jest.Mock).mockResolvedValue(null);
 
       await expect(
-        service.handleMonetbilCallback({ payment_ref: 'unknown', status: '1', amount: '5000', phone: '237600000001' }),
+        service.handlePaymentCallback({ payment_ref: 'unknown', status: '1', amount: '5000', phone: '237600000001' }),
       ).resolves.not.toThrow();
     });
   });
