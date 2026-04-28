@@ -193,9 +193,21 @@ export class ContactUnlockService {
     }
     updatedData['status'] = newStatus;
 
-    const updated = await this.prisma.contactUnlockAttempt.update({
-      where: { id: attemptId },
+    // Atomic idempotency guard: only update if the party has not already paid.
+    // This prevents a double-charge if two concurrent requests both pass the
+    // in-memory assertPayUnlockPartyNotAlreadyPaid check.
+    const guardCondition = isEmployer
+      ? { employer_paid: false }
+      : { worker_paid: false };
+    const guardResult = await this.prisma.contactUnlockAttempt.updateMany({
+      where: { id: attemptId, ...guardCondition },
       data: updatedData,
+    });
+    if (guardResult.count === 0) {
+      throw new BadRequestException('Ce paiement a déjà été enregistré pour cette partie');
+    }
+    const updated = await this.prisma.contactUnlockAttempt.findUniqueOrThrow({
+      where: { id: attemptId },
     });
     if (newStatus === ContactUnlockStatus.UNLOCKED) {
       await this.markApplicationAcceptedAfterUnlock([updated.application_id]);
