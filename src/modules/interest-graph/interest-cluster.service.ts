@@ -1,12 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { QdrantService } from '../qdrant/qdrant.service';
-import { COLLECTIONS, QDRANT_COLLECTION_PREFIX } from '../qdrant/qdrant.config';
 import { InterestSignalService } from './interest-signal.service';
 
 // Recluster every N interactions to avoid thrashing
 const RECLUSTER_THRESHOLD = 10;
 const POSITIVE_THRESHOLD = 0.1;
 const NEGATIVE_THRESHOLD = -0.1;
+const USER_INTERESTS_COLLECTION: string = 'rabotka_user_interests';
+const SIGNALS_COLLECTION: string = 'rabotka_signals';
 
 export interface UserInterestProfile {
   positiveVectors: number[][];
@@ -26,8 +27,10 @@ export class InterestClusterService {
   ) {}
 
   async onModuleInit(): Promise<void> {
-    await this.qdrant.ensureDenseCollection(COLLECTIONS.USER_INTERESTS);
-    this.logger.log(`User interests collection ready: ${COLLECTIONS.USER_INTERESTS}`);
+    await this.qdrant.ensureDenseCollection(USER_INTERESTS_COLLECTION);
+    this.logger.log(
+      `User interests collection ready: ${USER_INTERESTS_COLLECTION}`,
+    );
   }
 
   async maybeRecluster(userId: string): Promise<void> {
@@ -43,8 +46,14 @@ export class InterestClusterService {
     const recentSignals = await this.signals.getRecentSignals(userId);
     if (recentSignals.length === 0) return;
 
-    const positiveByCategory = new Map<string, { vectors: number[][]; totalWeight: number }>();
-    const negativeByCategory = new Map<string, { vectors: number[][]; totalWeight: number }>();
+    const positiveByCategory = new Map<
+      string,
+      { vectors: number[][]; totalWeight: number }
+    >();
+    const negativeByCategory = new Map<
+      string,
+      { vectors: number[][]; totalWeight: number }
+    >();
 
     // Fetch vectors for all signal job IDs in one scroll
     const jobIds = [...new Set(recentSignals.map((s) => s.jobId))];
@@ -56,9 +65,15 @@ export class InterestClusterService {
 
       const category = signal.category ?? '__uncategorized__';
       const weight = Math.abs(signal.effectiveWeight);
-      const map = signal.effectiveWeight >= POSITIVE_THRESHOLD ? positiveByCategory : negativeByCategory;
+      const map =
+        signal.effectiveWeight >= POSITIVE_THRESHOLD
+          ? positiveByCategory
+          : negativeByCategory;
 
-      if (signal.effectiveWeight <= NEGATIVE_THRESHOLD || signal.effectiveWeight >= POSITIVE_THRESHOLD) {
+      if (
+        signal.effectiveWeight <= NEGATIVE_THRESHOLD ||
+        signal.effectiveWeight >= POSITIVE_THRESHOLD
+      ) {
         const entry = map.get(category) ?? { vectors: [], totalWeight: 0 };
         entry.vectors.push(this.scaleVector(vector, weight));
         entry.totalWeight += weight;
@@ -84,7 +99,7 @@ export class InterestClusterService {
 
     const profilePointId = `interest__${userId}`;
     await this.qdrant.upsertDense(
-      COLLECTIONS.USER_INTERESTS,
+      USER_INTERESTS_COLLECTION,
       profilePointId,
       positiveVectors[0] ?? new Array(384).fill(0),
       {
@@ -104,11 +119,13 @@ export class InterestClusterService {
 
   async getProfile(userId: string): Promise<UserInterestProfile | null> {
     const pointId = `interest__${userId}`;
-    const result = await this.qdrant.getClient().retrieve(COLLECTIONS.USER_INTERESTS, {
-      ids: [pointId],
-      with_payload: true,
-      with_vector: false,
-    });
+    const result = await this.qdrant
+      .getClient()
+      .retrieve(USER_INTERESTS_COLLECTION, {
+        ids: [pointId],
+        with_payload: true,
+        with_vector: false,
+      });
 
     if (!result.length) return null;
 
@@ -125,7 +142,10 @@ export class InterestClusterService {
     return vec.map((v) => v * scale);
   }
 
-  private averageVectors(scaledVecs: number[][], totalWeight: number): number[] {
+  private averageVectors(
+    scaledVecs: number[][],
+    totalWeight: number,
+  ): number[] {
     const dim = scaledVecs[0]?.length ?? 384;
     const sum = new Array<number>(dim).fill(0);
     for (const v of scaledVecs) {
@@ -150,7 +170,7 @@ export class InterestClusterService {
     const altIds = jobIds.map((jid) => `${userId}__${jid}__apply`);
     const all = [...pointIds, ...altIds];
 
-    const results = await this.qdrant.getClient().retrieve(COLLECTIONS.SIGNALS, {
+    const results = await this.qdrant.getClient().retrieve(SIGNALS_COLLECTION, {
       ids: all,
       with_payload: true,
       with_vector: true,
@@ -158,9 +178,12 @@ export class InterestClusterService {
 
     for (const point of results) {
       const payload = point.payload as Record<string, unknown>;
-      const jobId = payload.job_id as string;
-      if (!map.has(jobId) && Array.isArray((point as unknown as { vector: { dense: number[] } }).vector?.dense)) {
-        map.set(jobId, (point as unknown as { vector: { dense: number[] } }).vector.dense);
+      const jobId = payload.job_id;
+      if (typeof jobId !== 'string') continue;
+      const dense = (point as unknown as { vector: { dense: number[] } }).vector
+        ?.dense;
+      if (!map.has(jobId) && Array.isArray(dense)) {
+        map.set(jobId, dense);
       }
     }
 
