@@ -10,11 +10,13 @@ import {
 } from '../../application/application.constants';
 import type { ApplicationService } from '../../application/application.service';
 import type { BotNotificationService } from '../services/bot-notification.service';
+import type { InterestSignalService } from '../../interest-graph/interest-signal.service';
 import { menuMessage } from '../messages/menu.messages';
 
 export type CancelApplicationContext = {
   applicationService: ApplicationService;
   notificationService: BotNotificationService;
+  interestSignalService: InterestSignalService;
 };
 
 export type FlowResult = {
@@ -27,6 +29,7 @@ type CancelStepArgs = {
   state: BotState;
   payload: Record<string, unknown>;
   applicationId: string;
+  jobOfferId: string;
   trimmed: string;
   normalized: string;
   profile: BotProfile;
@@ -37,6 +40,7 @@ type AppWithOffer = {
   id: string;
   worker_id: string;
   status: string;
+  job_offer_id: string;
   job_offer: {
     title: string;
     scheduled_at: Date;
@@ -85,6 +89,7 @@ async function executeCancellation(
   isLatePenalty: boolean,
   ctx: CancelApplicationContext,
   state: BotState,
+  jobOfferId?: string,
 ): Promise<FlowResult> {
   try {
     const result = await ctx.applicationService.cancel(
@@ -92,6 +97,11 @@ async function executeCancellation(
       profile.id,
       reason,
     );
+    if (jobOfferId) {
+      void ctx.interestSignalService
+        .record(profile.id, jobOfferId, 'cancel')
+        .catch(() => undefined);
+    }
     await ctx.notificationService
       .sendCancellationToEmployer(applicationId, reason ?? null, isLatePenalty)
       .catch(() => {});
@@ -201,6 +211,7 @@ async function handleCancelStep1(
       false,
       ctx,
       state,
+      args.jobOfferId,
     );
   }
 
@@ -224,11 +235,12 @@ async function handleCancelStep1(
     false,
     ctx,
     state,
+    args.jobOfferId,
   );
 }
 
 async function handleCancelStep2(args: CancelStepArgs): Promise<FlowResult> {
-  const { state, payload, applicationId, normalized, profile, ctx } = args;
+  const { state, payload, applicationId, normalized, profile, ctx, jobOfferId } = args;
   if (normalized === '1' || normalized === 'oui') {
     const reason = (payload.reason as string) ?? undefined;
     return executeCancellation(
@@ -238,6 +250,7 @@ async function handleCancelStep2(args: CancelStepArgs): Promise<FlowResult> {
       true,
       ctx,
       state,
+      jobOfferId,
     );
   }
   if (normalized === '2' || normalized === 'non') {
@@ -318,6 +331,7 @@ export async function runCancelApplicationFlow(
     state,
     payload,
     applicationId,
+    jobOfferId: app.job_offer_id,
     trimmed,
     normalized,
     profile,
