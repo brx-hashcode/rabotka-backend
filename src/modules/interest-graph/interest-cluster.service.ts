@@ -1,13 +1,15 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { QdrantService } from '../qdrant/qdrant.service';
-import { InterestSignalService } from './interest-signal.service';
+import { COLLECTIONS } from '../qdrant/qdrant.config';
+import { QueueService } from '../../common/services/queue/queue.service';
+import {
+  InterestSignalService,
+  INTEREST_RECLUSTER_QUEUE,
+  type SignalType,
+} from './interest-signal.service';
 
-// Recluster every N interactions to avoid thrashing
-const RECLUSTER_THRESHOLD = 10;
 const POSITIVE_THRESHOLD = 0.1;
 const NEGATIVE_THRESHOLD = -0.1;
-const USER_INTERESTS_COLLECTION: string = 'rabotka_user_interests';
-const SIGNALS_COLLECTION: string = 'rabotka_signals';
 
 export interface UserInterestProfile {
   positiveVectors: number[][];
@@ -17,34 +19,75 @@ export interface UserInterestProfile {
 }
 
 @Injectable()
-export class InterestClusterService {
+export class InterestClusterService implements OnModuleInit {
   private readonly logger = new Logger(InterestClusterService.name);
-  private readonly interactionCounts = new Map<string, number>();
 
   constructor(
     private readonly qdrant: QdrantService,
     private readonly signals: InterestSignalService,
+    private readonly queue: QueueService,
   ) {}
 
   async onModuleInit(): Promise<void> {
-    await this.qdrant.ensureDenseCollection(USER_INTERESTS_COLLECTION);
+    await this.qdrant.ensureDenseCollection(COLLECTIONS.USER_INTERESTS);
     this.logger.log(
-      `User interests collection ready: ${USER_INTERESTS_COLLECTION}`,
+      `User interests collection ready: ${COLLECTIONS.USER_INTERESTS}`,
     );
+    this.registerReclusterWorker();
   }
 
-  async maybeRecluster(userId: string): Promise<void> {
-    const count = (this.interactionCounts.get(userId) ?? 0) + 1;
-    this.interactionCounts.set(userId, count);
+  // ── BullMQ worker ─────────────────────────────────────────────────────────
 
-    if (count % RECLUSTER_THRESHOLD !== 0) return;
-
-    await this.recluster(userId);
+  private registerReclusterWorker(): void {
+    this.queue.createWorker<{ userId: string }>(
+      INTEREST_RECLUSTER_QUEUE,
+      async (job) => {
+        await this.recluster(job.data.userId);
+      },
+      { concurrency: 3 },
+    );
+    this.logger.log(`Recluster worker registered on ${INTEREST_RECLUSTER_QUEUE}`);
   }
+
+  // ── Core recluster logic ──────────────────────────────────────────────────
 
   async recluster(userId: string): Promise<void> {
     const recentSignals = await this.signals.getRecentSignals(userId);
     if (recentSignals.length === 0) return;
+
+    // Deduplicate: keep strongest (highest |effectiveWeight|) signal per job
+    const byJob = new Map<
+      string,
+      { effectiveWeight: number; category: string | null; type: SignalType }
+    >();
+    for (const s of recentSignals) {
+      const existing = byJob.get(s.jobId);
+      if (
+        !existing ||
+        Math.abs(s.effectiveWeight) > Math.abs(existing.effectiveWeight)
+      ) {
+        byJob.set(s.jobId, {
+          effectiveWeight: s.effectiveWeight,
+          category: s.category,
+          type: s.type,
+        });
+      }
+    }
+
+    const deduplicated = [...byJob.entries()].map(
+      ([jobId, { effectiveWeight, category, type }]) => ({
+        jobId,
+        effectiveWeight,
+        category,
+        type,
+      }),
+    );
+
+    // Fetch vectors for deduplicated job IDs
+    const vectorMap = await this.fetchSignalVectors(
+      userId,
+      deduplicated.map((s) => s.jobId),
+    );
 
     const positiveByCategory = new Map<
       string,
@@ -55,51 +98,49 @@ export class InterestClusterService {
       { vectors: number[][]; totalWeight: number }
     >();
 
-    // Fetch vectors for all signal job IDs in one scroll
-    const jobIds = [...new Set(recentSignals.map((s) => s.jobId))];
-    const signalPoints = await this.scrollSignalVectorsByJobIds(userId, jobIds);
-
-    for (const signal of recentSignals) {
-      const vector = signalPoints.get(signal.jobId);
+    for (const signal of deduplicated) {
+      const vector = vectorMap.get(signal.jobId);
       if (!vector) continue;
 
       const category = signal.category ?? '__uncategorized__';
-      const weight = Math.abs(signal.effectiveWeight);
-      const map =
-        signal.effectiveWeight >= POSITIVE_THRESHOLD
-          ? positiveByCategory
-          : negativeByCategory;
+      const absWeight = Math.abs(signal.effectiveWeight);
 
-      if (
-        signal.effectiveWeight <= NEGATIVE_THRESHOLD ||
-        signal.effectiveWeight >= POSITIVE_THRESHOLD
-      ) {
-        const entry = map.get(category) ?? { vectors: [], totalWeight: 0 };
-        entry.vectors.push(this.scaleVector(vector, weight));
-        entry.totalWeight += weight;
-        map.set(category, entry);
+      if (signal.effectiveWeight >= POSITIVE_THRESHOLD) {
+        const entry = positiveByCategory.get(category) ?? {
+          vectors: [],
+          totalWeight: 0,
+        };
+        entry.vectors.push(scaleVector(vector, absWeight));
+        entry.totalWeight += absWeight;
+        positiveByCategory.set(category, entry);
+      } else if (signal.effectiveWeight <= NEGATIVE_THRESHOLD) {
+        const entry = negativeByCategory.get(category) ?? {
+          vectors: [],
+          totalWeight: 0,
+        };
+        entry.vectors.push(scaleVector(vector, absWeight));
+        entry.totalWeight += absWeight;
+        negativeByCategory.set(category, entry);
       }
     }
 
-    // Build weighted-average medoid per category
     const positiveVectors: number[][] = [];
     const negativeVectors: number[][] = [];
     const seenCategories = new Set<string>();
 
     for (const [cat, { vectors, totalWeight }] of positiveByCategory) {
       if (totalWeight === 0) continue;
-      positiveVectors.push(this.averageVectors(vectors, totalWeight));
+      positiveVectors.push(averageVectors(vectors, totalWeight));
       seenCategories.add(cat);
     }
-
     for (const [, { vectors, totalWeight }] of negativeByCategory) {
       if (totalWeight === 0) continue;
-      negativeVectors.push(this.averageVectors(vectors, totalWeight));
+      negativeVectors.push(averageVectors(vectors, totalWeight));
     }
 
     const profilePointId = `interest__${userId}`;
     await this.qdrant.upsertDense(
-      USER_INTERESTS_COLLECTION,
+      COLLECTIONS.USER_INTERESTS,
       profilePointId,
       positiveVectors[0] ?? new Array(384).fill(0),
       {
@@ -107,13 +148,13 @@ export class InterestClusterService {
         positive_vectors: positiveVectors,
         negative_vectors: negativeVectors,
         categories: [...seenCategories],
-        total_signals: recentSignals.length,
+        total_signals: deduplicated.length,
         updated_at: new Date().toISOString(),
       },
     );
 
     this.logger.debug(
-      `Reclustered user=${userId}: ${positiveVectors.length} positive, ${negativeVectors.length} negative medoids`,
+      `Reclustered user=${userId}: ${positiveVectors.length} positive, ${negativeVectors.length} negative medoids from ${deduplicated.length} unique jobs`,
     );
   }
 
@@ -121,7 +162,7 @@ export class InterestClusterService {
     const pointId = `interest__${userId}`;
     const result = await this.qdrant
       .getClient()
-      .retrieve(USER_INTERESTS_COLLECTION, {
+      .retrieve(COLLECTIONS.USER_INTERESTS, {
         ids: [pointId],
         with_payload: true,
         with_vector: false,
@@ -138,55 +179,64 @@ export class InterestClusterService {
     };
   }
 
-  private scaleVector(vec: number[], scale: number): number[] {
-    return vec.map((v) => v * scale);
-  }
+  // ── Vector helpers ────────────────────────────────────────────────────────
 
-  private averageVectors(
-    scaledVecs: number[][],
-    totalWeight: number,
-  ): number[] {
-    const dim = scaledVecs[0]?.length ?? 384;
-    const sum = new Array<number>(dim).fill(0);
-    for (const v of scaledVecs) {
-      for (let i = 0; i < dim; i++) {
-        sum[i] += v[i];
-      }
-    }
-    return sum.map((v) => v / totalWeight);
-  }
-
-  private async scrollSignalVectorsByJobIds(
+  private async fetchSignalVectors(
     userId: string,
     jobIds: string[],
   ): Promise<Map<string, number[]>> {
-    // Signals are keyed as `${userId}__${jobId}__${type}` — grab most positive per job
-    // We'll fetch all user signals and pick the first per jobId for the vector
     const map = new Map<string, number[]>();
     if (!jobIds.length) return map;
 
-    // Retrieve a sample point per job (use 'view' type as canonical vector source)
-    const pointIds = jobIds.map((jid) => `${userId}__${jid}__view`);
-    const altIds = jobIds.map((jid) => `${userId}__${jid}__apply`);
-    const all = [...pointIds, ...altIds];
+    // Try signal types in priority order: apply > view > skip etc.
+    // We stored one point per (user, job, type) — pick the highest-weight one
+    const signalTypes: SignalType[] = [
+      'apply', 'share', 'save', 'question', 'profile_view', 'view', 'skip', 'cancel', 'dislike',
+    ];
 
-    const results = await this.qdrant.getClient().retrieve(SIGNALS_COLLECTION, {
-      ids: all,
-      with_payload: true,
-      with_vector: true,
-    });
+    const candidateIds = jobIds.flatMap((jid) =>
+      signalTypes.map((t) => `${userId}__${jid}__${t}`),
+    );
+
+    const results = await this.qdrant
+      .getClient()
+      .retrieve(COLLECTIONS.SIGNALS, {
+        ids: candidateIds,
+        with_payload: true,
+        with_vector: true,
+      });
 
     for (const point of results) {
       const payload = point.payload as Record<string, unknown>;
       const jobId = payload.job_id;
       if (typeof jobId !== 'string') continue;
-      const dense = (point as unknown as { vector: { dense: number[] } }).vector
-        ?.dense;
-      if (!map.has(jobId) && Array.isArray(dense)) {
+      // First hit per jobId wins (apply comes before view in our order above)
+      if (map.has(jobId)) continue;
+      const dense = (
+        point as unknown as { vector: { dense: number[] } }
+      ).vector?.dense;
+      if (Array.isArray(dense)) {
         map.set(jobId, dense);
       }
     }
 
     return map;
   }
+}
+
+// ── Pure math helpers ───────────────────────────────────────────────────────
+
+function scaleVector(vec: number[], scale: number): number[] {
+  return vec.map((v) => v * scale);
+}
+
+function averageVectors(scaledVecs: number[][], totalWeight: number): number[] {
+  const dim = scaledVecs[0]?.length ?? 384;
+  const sum = new Array<number>(dim).fill(0);
+  for (const v of scaledVecs) {
+    for (let i = 0; i < dim; i++) {
+      sum[i] += v[i]!;
+    }
+  }
+  return sum.map((v) => v / totalWeight);
 }
