@@ -133,8 +133,7 @@ export class AdAnalyticsService {
     const { openRate, clickRate } = this.toRates(totalSent, totalOpened, totalClicks);
 
     const now = new Date();
-    const remainingMs = Math.max(0, ad.end_date.getTime() - now.getTime());
-    const remainingDays = Math.floor(remainingMs / (1000 * 60 * 60 * 24));
+    const remainingDays = Math.floor((ad.end_date.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
 
     return {
       totalSent,
@@ -215,8 +214,7 @@ export class AdAnalyticsService {
     const { openRate, clickRate } = this.toRates(totalSent, totalOpened, totalClicks);
 
     const now = new Date();
-    const remainingMs = Math.max(0, ad.end_date.getTime() - now.getTime());
-    const remainingDays = Math.floor(remainingMs / (1000 * 60 * 60 * 24));
+    const remainingDays = Math.floor((ad.end_date.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
 
     return {
       totalSent,
@@ -263,8 +261,7 @@ export class AdAnalyticsService {
     const now = new Date();
 
     return ads.map((ad) => {
-      const remainingMs = Math.max(0, ad.end_date.getTime() - now.getTime());
-      const remainingDays = Math.floor(remainingMs / (1000 * 60 * 60 * 24));
+      const remainingDays = Math.floor((ad.end_date.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
 
       return {
         id: ad.id,
