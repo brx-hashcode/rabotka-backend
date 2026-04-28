@@ -722,16 +722,19 @@ export class ApplicationService {
         'Seule une candidature acceptée ou démarrée peut être marquée comme terminée',
       );
     }
-    if (application.job_offer.status === JobOfferStatus.COMPLETED) {
-      throw new BadRequestException(
-        'Cette mission est déjà marquée comme terminée',
-      );
-    }
-
     const amount = Number(application.job_offer.amount);
     const transactionId = generatePaymentReference();
     const now = new Date();
     await this.prisma.$transaction(async (tx) => {
+      // Lock and re-check job status inside the transaction to prevent duplicate completions
+      await tx.$executeRaw`SELECT id FROM "job_offers" WHERE id = ${application.job_offer_id}::uuid FOR UPDATE`;
+      const freshOffer = await tx.jobOffer.findUnique({
+        where: { id: application.job_offer_id },
+        select: { status: true },
+      });
+      if (freshOffer?.status === JobOfferStatus.COMPLETED) {
+        throw new BadRequestException('Cette mission est déjà marquée comme terminée');
+      }
       await tx.jobOffer.update({
         where: { id: application.job_offer_id },
         data: { status: JobOfferStatus.COMPLETED },
