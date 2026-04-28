@@ -21,6 +21,7 @@ import type { ContactUnlockService } from '../../contact-unlock/contact-unlock.s
 import type { WalletService } from '../../wallet/wallet.service';
 import type { PaymentService } from '../../payments/payment.service';
 import type { SystemConfigService } from '../../system-config/system-config.service';
+import type { InterestSignalService } from '../../interest-graph/interest-signal.service';
 import {
   getUnlockContactInitialState,
   runUnlockContactFlow,
@@ -33,6 +34,7 @@ export type MyApplicationsContext = {
   walletService: WalletService;
   paymentService: PaymentService;
   systemConfigService: SystemConfigService;
+  interestSignalService: InterestSignalService;
 };
 
 export type FlowResult = {

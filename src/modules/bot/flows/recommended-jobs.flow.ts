@@ -2,6 +2,7 @@ import type { BotProfile, BotState } from '../types/bot-state.types';
 import { FLOW_IDS, CMD_MENU } from '../bot.constants';
 import { getApplyJobInitialState } from './apply-job.flow';
 import type { JobOfferService } from '../../job-offer/job-offer.service';
+import type { InterestSignalService } from '../../interest-graph/interest-signal.service';
 import {
   formatOfferDetailWithActions,
   type OfferListItem,
@@ -10,6 +11,7 @@ import { menuMessage } from '../messages/menu.messages';
 
 export type RecommendedJobsContext = {
   jobOfferService: JobOfferService;
+  interestSignalService: InterestSignalService;
 };
 
 export type FlowResult = {
@@ -89,6 +91,7 @@ async function handleRecommendedJobsListStep(
   payload: Record<string, unknown>,
   trimmedInput: string,
   offerIds: string[],
+  profile: BotProfile,
   ctx: RecommendedJobsContext,
   goToMenu: () => FlowResult,
 ): Promise<FlowResult> {
@@ -112,6 +115,11 @@ async function handleRecommendedJobsListStep(
     return { reply: ['Offre introuvable.'], nextState: state };
   }
 
+  // Record view signal (fire-and-forget)
+  void ctx.interestSignalService
+    .record(profile.id, offerId, 'view')
+    .catch(() => undefined);
+
   const item = toOfferListItem({
     ...offer,
     acceptedCount: offer.acceptedCount ?? 0,
@@ -127,15 +135,25 @@ function handleRecommendedJobsDetailStep(
   state: BotState,
   payload: Record<string, unknown>,
   normalizedInput: string,
+  profile: BotProfile,
+  ctx: RecommendedJobsContext,
   goToMenu: () => FlowResult,
 ): FlowResult {
   const selectedOfferId = payload.selectedOfferId as string;
 
   if (normalizedInput === '1' || normalizedInput === 'postuler') {
+    // Record apply intent signal (fire-and-forget)
+    void ctx.interestSignalService
+      .record(profile.id, selectedOfferId, 'apply')
+      .catch(() => undefined);
     return { reply: [], nextState: getApplyJobInitialState(selectedOfferId) };
   }
 
   if (normalizedInput === '2' || normalizedInput === 'retour') {
+    // Record skip signal for previously viewed job (fire-and-forget)
+    void ctx.interestSignalService
+      .record(profile.id, selectedOfferId, 'skip')
+      .catch(() => undefined);
     return {
       reply: [
         '*Offres recommandées — tapez le numéro pour voir le détail ou 7 pour le menu.*',
@@ -183,6 +201,7 @@ export async function runRecommendedJobsFlow(
       payload,
       trimmed,
       offerIds,
+      profile,
       ctx,
       goToMenu,
     );
@@ -193,6 +212,8 @@ export async function runRecommendedJobsFlow(
       state,
       payload,
       normalized,
+      profile,
+      ctx,
       goToMenu,
     );
   }
