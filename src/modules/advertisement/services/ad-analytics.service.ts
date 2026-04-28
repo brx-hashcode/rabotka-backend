@@ -38,7 +38,13 @@ export interface AdDeliveryLogItem {
   failureReason: string | null;
 }
 
+export interface AdDispatchEvent {
+  day: string;         // "YYYY-MM-DD" UTC
+  dispatchedAt: string; // ISO UTC timestamp of the first delivery in that batch
+}
+
 export interface AdAnalytics extends AdStats {
+  dispatchEvents: AdDispatchEvent[];
   timeline: AdTimelinePoint[];
   deliveryLogs: AdDeliveryLogItem[];
 }
@@ -154,7 +160,7 @@ export class AdAnalyticsService {
     });
     if (!ad) throw new NotFoundException('Advertisement not found');
 
-    const [links, deliveryLogs] = await Promise.all([
+    const [links, deliveryLogs, dispatchEvents] = await Promise.all([
       this.prisma.adTrackedLink.findMany({
         where: { advertisement_id: advertisementId },
         select: {
@@ -186,6 +192,17 @@ export class AdAnalyticsService {
         },
         orderBy: [{ sent_at: 'desc' }, { id: 'desc' }],
       }),
+      this.prisma.$queryRaw<{ day: string; dispatched_at: string }[]>`
+        SELECT
+          TO_CHAR(DATE_TRUNC('day', sent_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS day,
+          TO_CHAR(MIN(sent_at) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS dispatched_at
+        FROM "ad_delivery_logs"
+        WHERE advertisement_id = ${advertisementId}::uuid
+          AND status IN ('SENT', 'DELIVERED', 'OPENED', 'CLICKED')
+          AND sent_at IS NOT NULL
+        GROUP BY DATE_TRUNC('day', sent_at AT TIME ZONE 'UTC')
+        ORDER BY 1
+      `,
     ]);
 
     const successfulStatuses = new Set(['SENT', 'DELIVERED', 'OPENED', 'CLICKED']);
@@ -215,6 +232,10 @@ export class AdAnalyticsService {
         originalUrl: l.original_url,
         clickCount: l.click_count,
         lastClickedAt: l.last_clicked_at,
+      })),
+      dispatchEvents: dispatchEvents.map((e) => ({
+        day: e.day,
+        dispatchedAt: e.dispatched_at,
       })),
       timeline: this.buildTimeline(deliveryLogs),
       deliveryLogs: deliveryLogs.map((log) => ({
