@@ -159,7 +159,7 @@ export class AdAnalyticsService {
     });
     if (!ad) throw new NotFoundException('Advertisement not found');
 
-    const [links, deliveryLogs, dispatchEvents] = await Promise.all([
+    const [links, deliveryLogs, dispatchEvents, aggregates] = await Promise.all([
       this.prisma.adTrackedLink.findMany({
         where: { advertisement_id: advertisementId },
         select: {
@@ -202,14 +202,20 @@ export class AdAnalyticsService {
         GROUP BY DATE_TRUNC('day', sent_at AT TIME ZONE 'UTC')
         ORDER BY 1
       `,
+      this.prisma.$queryRaw<[{ total_sent: bigint; total_opened: bigint; clicked_deliveries: bigint }]>`
+        SELECT
+          COUNT(*) FILTER (WHERE status IN ('SENT', 'DELIVERED', 'OPENED', 'CLICKED')) AS total_sent,
+          COUNT(*) FILTER (WHERE opened_at IS NOT NULL)                                AS total_opened,
+          COUNT(*) FILTER (WHERE clicked_at IS NOT NULL)                               AS clicked_deliveries
+        FROM "ad_delivery_logs"
+        WHERE advertisement_id = ${advertisementId}::uuid
+      `,
     ]);
 
-    const successfulStatuses = new Set(['SENT', 'DELIVERED', 'OPENED', 'CLICKED']);
-    const totalSent = deliveryLogs.filter((l) =>
-      successfulStatuses.has(l.status),
-    ).length;
-    const totalOpened = deliveryLogs.filter((l) => l.opened_at != null).length;
-    const clickedDeliveries = deliveryLogs.filter((l) => l.clicked_at != null).length;
+    const { total_sent, total_opened, clicked_deliveries } = aggregates[0];
+    const totalSent = Number(total_sent);
+    const totalOpened = Number(total_opened);
+    const clickedDeliveries = Number(clicked_deliveries);
     const totalClicks = links.reduce((sum, l) => sum + l.click_count, 0);
     const { openRate, clickRate } = this.toRates(totalSent, totalOpened, totalClicks);
 
