@@ -426,6 +426,7 @@ model Application {
   @@index([worker_id], name: "idx_application_worker")
   @@index([job_offer_id], name: "idx_application_job_offer")
   @@index([status], name: "idx_application_status")
+  @@index([job_offer_id, status], name: "idx_application_job_offer_status")
   @@map("applications")
 }
 
@@ -978,6 +979,8 @@ model AdDeliveryLog {
 
   @@index([advertisement_id], name: "idx_ad_delivery_advertisement")
   @@index([profile_id], name: "idx_ad_delivery_profile")
+  @@index([sent_at], name: "idx_ad_delivery_sent_at")
+  @@index([advertisement_id, sent_at], name: "idx_ad_delivery_advertisement_sent_at")
   @@map("ad_delivery_logs")
 }
 
