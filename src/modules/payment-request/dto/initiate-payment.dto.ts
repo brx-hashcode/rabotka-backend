@@ -1,4 +1,4 @@
-import { IsString, IsIn, IsOptional } from 'class-validator';
+import { IsString, IsOptional } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export const MONETBIL_OPERATORS = [
@@ -14,10 +14,10 @@ export class InitiatePaymentDto {
   phone!: string;
 
   @ApiPropertyOptional({
-    enum: MONETBIL_OPERATORS,
+    description: 'Monetbil operator code — required for MONETBIL gateway, omit for MTN_MOMO',
     example: 'CG_MTNMOBILEMONEY',
   })
   @IsOptional()
-  @IsIn(MONETBIL_OPERATORS)
-  operator?: MonetbilOperator;
+  @IsString()
+  operator?: string;
 }
