@@ -515,23 +515,24 @@ export class AuthController {
 
   @Post('admin/qr/consume')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Consume confirmed QR session and set cookie' })
+  @ApiOperation({ summary: 'Consume confirmed QR session and set cookie (or return TOTP gate)' })
   async consumeQrSession(
     @Body('sessionId') sessionId: string,
     @Body('consumeNonce') consumeNonce: string,
     @Res({ passthrough: true }) res: Response,
-  ): Promise<{ success: boolean }> {
-    const { token } = await this.authService.consumeQrSession(
-      sessionId,
-      consumeNonce,
-    );
+  ): Promise<{ success: boolean; totpRequired?: boolean; pendingToken?: string }> {
+    const result = await this.authService.consumeQrSession(sessionId, consumeNonce);
+
+    if (result.totpRequired && result.pendingToken) {
+      return { success: true, totpRequired: true, pendingToken: result.pendingToken };
+    }
 
     const isProduction =
       this.configService.get<string>('NODE_ENV') === 'production';
     const cookieName = this.configService.get<string>('AUTH_COOKIE_NAME');
     if (!cookieName) throw new Error('AUTH_COOKIE_NAME is not set');
 
-    res.cookie(cookieName, token, {
+    res.cookie(cookieName, result.token!, {
       httpOnly: true,
       secure: isProduction,
       sameSite: 'lax',
