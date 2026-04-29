@@ -33,6 +33,9 @@ import { ContactUnlockService } from '../contact-unlock/contact-unlock.service';
 import { InvoiceService } from '../invoice/invoice.service';
 import { StorageService } from '../../common/services/storage/storage.service';
 import { generatePaymentReference } from '../../common/utils/payment-reference';
+import { QueueService } from '../../common/services/queue/queue.service';
+import { POLL_PAYMENT_STATUS_QUEUE } from '../../common/services/queue/queue.module';
+import type { PollPaymentStatusJobData } from './poll-payment-status.processor';
 import { ListPaymentRequestsDto } from './dto/list-payment-requests.dto';
 import { SubmitPaymentDto } from './dto/submit-payment.dto';
 
@@ -101,6 +104,7 @@ export class PaymentRequestService {
     private readonly contactUnlockService: ContactUnlockService,
     private readonly invoiceService: InvoiceService,
     private readonly storageService: StorageService,
+    private readonly queueService: QueueService,
   ) {}
 
   /**
@@ -261,85 +265,22 @@ export class PaymentRequestService {
       },
     });
 
-    // Fire-and-forget polling loop — checks status every 5s, up to 10 attempts.
-    // On conclusive result: processes payment + emits WebSocket update to client.
     if (gatewayRef) {
-      this.pollPaymentStatus(request.id, request.token, gatewayRef).catch(
-        (err: unknown) =>
-          this.logger.error(
-            `Polling failed for request ${request.id}`,
-            err instanceof Error ? err.stack : String(err),
-          ),
+      await this.queueService.addJob<PollPaymentStatusJobData>(
+        POLL_PAYMENT_STATUS_QUEUE,
+        {
+          requestId: request.id,
+          token: request.token,
+          gatewayRef,
+          attempt: 1,
+          maxAttempts: 10,
+          intervalMs: 5000,
+        },
+        { delay: 5000 },
       );
     }
 
     return { success: true };
-  }
-
-  private async pollPaymentStatus(
-    requestId: string,
-    token: string,
-    paymentId: string,
-    maxAttempts = 10,
-    intervalMs = 5000,
-  ): Promise<void> {
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      this.logger.log(
-        `Monetbil poll attempt ${attempt}/${maxAttempts} for paymentId ${paymentId}`,
-      );
-
-      const { status, transactionId } =
-        await this.paymentGateway.checkPaymentStatus(paymentId);
-
-      if (status === 'COMPLETED') {
-        const request = await this.prisma.paymentRequest.findUnique({
-          where: { id: requestId },
-          select: {
-            ...PAYMENT_REQUEST_SELECT,
-            gateway_payment_ref: true,
-            monetbil_payment_ref: true,
-          },
-        });
-        if (
-          request &&
-          request.status !== PaymentRequestStatus.APPROVED &&
-          request.status !== PaymentRequestStatus.REJECTED
-        ) {
-          await this.processSuccessfulPayment(request, transactionId);
-        }
-        this.paymentStatusGateway.emitPaymentStatus(token, 'APPROVED');
-        return;
-      }
-
-      if (status === 'FAILED' || status === 'CANCELLED') {
-        await this.prisma.paymentRequest.update({
-          where: { id: requestId },
-          data: {
-            status: PaymentRequestStatus.REJECTED,
-            ...(transactionId && { gateway_tx_id: transactionId }),
-          },
-        });
-        this.paymentStatusGateway.emitPaymentStatus(token, 'REJECTED');
-        return;
-      }
-
-      // PENDING — wait before next attempt (skip wait on last attempt)
-      if (attempt < maxAttempts) {
-        await new Promise((resolve) => setTimeout(resolve, intervalMs));
-      }
-    }
-
-    // All attempts exhausted with no conclusive result.
-    // Revert to PENDING so the Monetbil webhook can still finalize the payment
-    // if the mobile money transaction completes asynchronously.
-    this.logger.warn(
-      `Monetbil polling timed out for paymentId ${paymentId} after ${maxAttempts} attempts — reverting to PENDING`,
-    );
-    await this.prisma.paymentRequest.update({
-      where: { id: requestId },
-      data: { status: PaymentRequestStatus.PENDING },
-    });
-    this.paymentStatusGateway.emitPaymentStatus(token, 'TIMEOUT');
   }
 
   /**
@@ -408,6 +349,28 @@ export class PaymentRequestService {
     }
 
     return { received: true };
+  }
+
+  async processApprovedPaymentById(
+    requestId: string,
+    transactionId?: string,
+  ): Promise<void> {
+    const request = await this.prisma.paymentRequest.findUnique({
+      where: { id: requestId },
+      select: {
+        ...PAYMENT_REQUEST_SELECT,
+        gateway_payment_ref: true,
+        monetbil_payment_ref: true,
+      },
+    });
+    if (
+      !request ||
+      request.status === PaymentRequestStatus.APPROVED ||
+      request.status === PaymentRequestStatus.REJECTED
+    ) {
+      return;
+    }
+    await this.processSuccessfulPayment(request, transactionId);
   }
 
   private async processSuccessfulPayment(
