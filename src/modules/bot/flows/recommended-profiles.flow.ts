@@ -160,8 +160,16 @@ async function handleDetailStep(
     jobOfferId?: string;
   },
 ): Promise<FlowResult> {
-  const { workerIds, workerScores, state, payload, profile, ctx, goToMenu, jobOfferId } =
-    opts;
+  const {
+    workerIds,
+    workerScores,
+    state,
+    payload,
+    profile,
+    ctx,
+    goToMenu,
+    jobOfferId,
+  } = opts;
   if (trimmed === '3') return goToMenu();
   if (trimmed === '2') return showList(workerIds, workerScores, state, ctx);
 
@@ -183,7 +191,13 @@ async function handleDetailStep(
     reply: [`Tapez *1*, *2* ou *3*.\n${subMenu()}`],
     nextState: {
       ...state,
-      payload: { ...payload, workerIds, workerScores, selectedWorkerId, jobOfferId },
+      payload: {
+        ...payload,
+        workerIds,
+        workerScores,
+        selectedWorkerId,
+        jobOfferId,
+      },
       updatedAt: new Date().toISOString(),
     },
   };
@@ -343,7 +357,11 @@ async function showList(
     nextState: {
       ...state,
       step: 0,
-      payload: { workerIds, workerScores, jobOfferId: state.payload?.jobOfferId },
+      payload: {
+        workerIds,
+        workerScores,
+        jobOfferId: state.payload?.jobOfferId,
+      },
       updatedAt: new Date().toISOString(),
     },
   };
@@ -416,7 +434,12 @@ async function showWorkerDetail(
     nextState: {
       ...state,
       step: 1,
-      payload: { workerIds, workerScores, selectedWorkerId: workerId, jobOfferId },
+      payload: {
+        workerIds,
+        workerScores,
+        selectedWorkerId: workerId,
+        jobOfferId,
+      },
       updatedAt: new Date().toISOString(),
     },
   };
@@ -463,7 +486,12 @@ function showPaymentMethodPrompt(opts: PaymentPromptOpts): FlowResult {
     nextState: {
       ...state,
       step: 2,
-      payload: { workerIds, workerScores, selectedWorkerId: workerId, jobOfferId },
+      payload: {
+        workerIds,
+        workerScores,
+        selectedWorkerId: workerId,
+        jobOfferId,
+      },
       updatedAt: new Date().toISOString(),
     },
   };

@@ -1,10 +1,4 @@
-import {
-  Controller,
-  Get,
-  Param,
-  Req,
-  Res,
-} from '@nestjs/common';
+import { Controller, Get, Param, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { Public } from '../../auth/decorators/public.decorator';
 import { AdLinkTrackingService } from '../services/ad-link-tracking.service';
@@ -22,9 +16,7 @@ export class AdTrackingController {
   ): Promise<void> {
     const forwarded = req.headers['x-forwarded-for'];
     const ip =
-      typeof forwarded === 'string'
-        ? forwarded.split(',')[0]?.trim()
-        : req.ip;
+      typeof forwarded === 'string' ? forwarded.split(',')[0]?.trim() : req.ip;
     const target = await this.tracking.resolveAndTrackClick(hash, {
       ip,
       userAgent: req.get('user-agent') ?? undefined,

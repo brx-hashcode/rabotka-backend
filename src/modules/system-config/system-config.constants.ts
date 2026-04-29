@@ -340,7 +340,8 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     key: 'payment.mtn_momo.collection_primary_key',
     value: '',
     category: ConfigCategory.PAYMENT,
-    label: 'Payment – MTN MoMo Collection Primary Key (Ocp-Apim-Subscription-Key)',
+    label:
+      'Payment – MTN MoMo Collection Primary Key (Ocp-Apim-Subscription-Key)',
     isSecret: true,
   },
   {

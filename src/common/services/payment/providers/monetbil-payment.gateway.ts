@@ -31,9 +31,9 @@ export class MonetbilPaymentGateway implements IPaymentGateway {
       phonenumber: params.phone,
       country: 'CG',
       currency: params.currency,
-      operator: params.metadata?.['operator'] as string ?? '',
-      user: params.metadata?.['userName'] as string ?? '',
-      email: params.metadata?.['email'] as string ?? '',
+      operator: (params.metadata?.['operator'] as string) ?? '',
+      user: (params.metadata?.['userName'] as string) ?? '',
+      email: (params.metadata?.['email'] as string) ?? '',
     });
 
     try {
@@ -90,7 +90,10 @@ export class MonetbilPaymentGateway implements IPaymentGateway {
           return { gatewayRef, status: 'PENDING' };
       }
     } catch (err) {
-      this.logger.warn(`Monetbil checkPaymentStatus error for ${gatewayRef}`, err);
+      this.logger.warn(
+        `Monetbil checkPaymentStatus error for ${gatewayRef}`,
+        err,
+      );
       return { gatewayRef, status: 'PENDING' };
     }
   }

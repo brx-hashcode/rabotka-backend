@@ -39,7 +39,11 @@ describe('BotRouterService', () => {
     it('returns flow type with the current state', () => {
       const state = makeState(FLOW_IDS.PUBLISH_JOB);
       const result = service.route('hello', workerProfile, state);
-      expect(result).toEqual({ type: 'flow', flowId: FLOW_IDS.PUBLISH_JOB, state });
+      expect(result).toEqual({
+        type: 'flow',
+        flowId: FLOW_IDS.PUBLISH_JOB,
+        state,
+      });
     });
 
     it('routes exact "menu" to menu command so user can exit publish flow', () => {
@@ -88,12 +92,18 @@ describe('BotRouterService', () => {
   describe('employer commands', () => {
     it('routes "publier" to start_publish_job for employer', () => {
       const result = service.route('publier', employerProfile, null);
-      expect(result).toEqual({ type: 'command', commandId: 'start_publish_job' });
+      expect(result).toEqual({
+        type: 'command',
+        commandId: 'start_publish_job',
+      });
     });
 
     it('routes "candidatures" to candidatures_received for employer', () => {
       const result = service.route('candidatures', employerProfile, null);
-      expect(result).toEqual({ type: 'command', commandId: 'candidatures_received' });
+      expect(result).toEqual({
+        type: 'command',
+        commandId: 'candidatures_received',
+      });
     });
 
     it('does not route "publier" for worker', () => {
@@ -105,7 +115,10 @@ describe('BotRouterService', () => {
   describe('numeric menu options', () => {
     it('routes worker "3" to recommended_jobs', () => {
       const result = service.route('3', workerProfile, null);
-      expect(result).toEqual({ type: 'command', commandId: 'recommended_jobs' });
+      expect(result).toEqual({
+        type: 'command',
+        commandId: 'recommended_jobs',
+      });
     });
 
     it('routes worker "4" to profile', () => {

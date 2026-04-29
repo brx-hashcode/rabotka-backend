@@ -2,7 +2,10 @@ import { Injectable, Logger, OnModuleInit, Inject } from '@nestjs/common';
 import Redis from 'ioredis';
 import { ConfigCategory } from '@prisma/client';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
-import { REDIS_CONNECTION, REDIS_KEY_PREFIX } from '../../common/services/redis/redis.constants';
+import {
+  REDIS_CONNECTION,
+  REDIS_KEY_PREFIX,
+} from '../../common/services/redis/redis.constants';
 import {
   DEFAULT_SYSTEM_CONFIGS,
   MONETBIL_ENV_OVERRIDES,
@@ -116,12 +119,16 @@ export class SystemConfigService implements OnModuleInit {
     }
   }
 
-  private async mgetBatch(entries: { key: string; fallback: string }[]): Promise<string[]> {
+  private async mgetBatch(
+    entries: { key: string; fallback: string }[],
+  ): Promise<string[]> {
     const cacheKeys = entries.map((e) => `${CACHE_PREFIX}${e.key}`);
     const cached = await this.redis.mget(...cacheKeys);
 
     const missIndices: number[] = [];
-    cached.forEach((v, i) => { if (v === null) missIndices.push(i); });
+    cached.forEach((v, i) => {
+      if (v === null) missIndices.push(i);
+    });
 
     if (missIndices.length > 0) {
       const missKeys = missIndices.map((i) => entries[i].key);
@@ -194,13 +201,14 @@ export class SystemConfigService implements OnModuleInit {
   }
 
   async getContactInfo() {
-    const [email, phone, address, orangeMoney, airtelMoney] = await this.mgetBatch([
-      { key: 'contact.email', fallback: 'contact@rabotka.com' },
-      { key: 'contact.phone', fallback: '' },
-      { key: 'contact.address', fallback: '' },
-      { key: 'contact.orange_money_number', fallback: '06 000 0000' },
-      { key: 'contact.airtel_money_number', fallback: '07 000 0000' },
-    ]);
+    const [email, phone, address, orangeMoney, airtelMoney] =
+      await this.mgetBatch([
+        { key: 'contact.email', fallback: 'contact@rabotka.com' },
+        { key: 'contact.phone', fallback: '' },
+        { key: 'contact.address', fallback: '' },
+        { key: 'contact.orange_money_number', fallback: '06 000 0000' },
+        { key: 'contact.airtel_money_number', fallback: '07 000 0000' },
+      ]);
     return {
       email,
       phone,
@@ -211,16 +219,23 @@ export class SystemConfigService implements OnModuleInit {
   }
 
   async getFees() {
-    const [penalty, scoreDed, threshold, scoreMin, empCancel, empGhost, billingBlock] =
-      await this.mgetBatch([
-        { key: 'fees.late_cancellation_penalty_fcfa', fallback: '5000' },
-        { key: 'fees.late_cancellation_score_deduction', fallback: '5' },
-        { key: 'fees.cancellation_threshold_hours', fallback: '4' },
-        { key: 'fees.reliability_score_min', fallback: '50' },
-        { key: 'fees.employer_cancel_score_deduction', fallback: '5' },
-        { key: 'fees.employer_ghost_score_deduction', fallback: '10' },
-        { key: 'fees.billing_block_threshold', fallback: '2' },
-      ]);
+    const [
+      penalty,
+      scoreDed,
+      threshold,
+      scoreMin,
+      empCancel,
+      empGhost,
+      billingBlock,
+    ] = await this.mgetBatch([
+      { key: 'fees.late_cancellation_penalty_fcfa', fallback: '5000' },
+      { key: 'fees.late_cancellation_score_deduction', fallback: '5' },
+      { key: 'fees.cancellation_threshold_hours', fallback: '4' },
+      { key: 'fees.reliability_score_min', fallback: '50' },
+      { key: 'fees.employer_cancel_score_deduction', fallback: '5' },
+      { key: 'fees.employer_ghost_score_deduction', fallback: '10' },
+      { key: 'fees.billing_block_threshold', fallback: '2' },
+    ]);
     return {
       lateCancellationPenaltyFcfa: Number(penalty),
       lateCancellationScoreDeduction: Number(scoreDed),

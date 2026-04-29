@@ -30,10 +30,9 @@ export function advertisementCreatedEmail(params: {
   tags?: string[] | null;
 }): string {
   const safeCtaUrl = params.ctaUrl ? escapeHtml(params.ctaUrl) : null;
-  const tagsHtml =
-    params.tags?.length
-      ? `<p style="margin: 8px 0;">${params.tags.map((t) => `<span style="display:inline-block;margin:2px 4px 2px 0;padding:2px 10px;border-radius:9999px;border:1px solid #6ee7b7;color:#059669;font-size:12px;">#${escapeHtml(t)}</span>`).join('')}</p>`
-      : '';
+  const tagsHtml = params.tags?.length
+    ? `<p style="margin: 8px 0;">${params.tags.map((t) => `<span style="display:inline-block;margin:2px 4px 2px 0;padding:2px 10px;border-radius:9999px;border:1px solid #6ee7b7;color:#059669;font-size:12px;">#${escapeHtml(t)}</span>`).join('')}</p>`
+    : '';
 
   const body = `
     ${params.imageUrl ? `<p style="margin: 0 0 16px;"><img src="${escapeHtml(params.imageUrl)}" alt="${escapeHtml(params.title)}" style="max-width: 100%; border-radius: 8px; object-fit: cover; display: block;" /></p>` : ''}

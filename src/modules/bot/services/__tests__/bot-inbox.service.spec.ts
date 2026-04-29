@@ -40,7 +40,7 @@ describe('BotInboxService', () => {
     it('appends item to empty inbox', async () => {
       redis.get.mockResolvedValue(null);
       await service.push(PROFILE_ID, makeItem('app-1'));
-      const stored = JSON.parse((redis.set as jest.Mock).mock.calls[0][1]);
+      const stored = JSON.parse(redis.set.mock.calls[0][1]);
       expect(stored).toHaveLength(1);
       expect(stored[0].applicationId).toBe('app-1');
     });
@@ -48,7 +48,7 @@ describe('BotInboxService', () => {
     it('appends item to existing inbox', async () => {
       redis.get.mockResolvedValue(JSON.stringify([makeItem('app-1')]));
       await service.push(PROFILE_ID, makeItem('app-2'));
-      const stored = JSON.parse((redis.set as jest.Mock).mock.calls[0][1]);
+      const stored = JSON.parse(redis.set.mock.calls[0][1]);
       expect(stored).toHaveLength(2);
       expect(stored[1].applicationId).toBe('app-2');
     });
@@ -66,7 +66,9 @@ describe('BotInboxService', () => {
 
   describe('getAll()', () => {
     it('returns all items in inbox', async () => {
-      redis.get.mockResolvedValue(JSON.stringify([makeItem('app-1'), makeItem('app-2')]));
+      redis.get.mockResolvedValue(
+        JSON.stringify([makeItem('app-1'), makeItem('app-2')]),
+      );
       const items = await service.getAll(PROFILE_ID);
       expect(items).toHaveLength(2);
     });
@@ -86,7 +88,9 @@ describe('BotInboxService', () => {
 
   describe('shift()', () => {
     it('removes and returns the first item', async () => {
-      redis.get.mockResolvedValue(JSON.stringify([makeItem('app-1'), makeItem('app-2')]));
+      redis.get.mockResolvedValue(
+        JSON.stringify([makeItem('app-1'), makeItem('app-2')]),
+      );
       const item = await service.shift(PROFILE_ID);
       expect(item?.applicationId).toBe('app-1');
       // Should update redis with remaining items
@@ -121,7 +125,9 @@ describe('BotInboxService', () => {
 
   describe('count()', () => {
     it('returns number of items in inbox', async () => {
-      redis.get.mockResolvedValue(JSON.stringify([makeItem('a'), makeItem('b'), makeItem('c')]));
+      redis.get.mockResolvedValue(
+        JSON.stringify([makeItem('a'), makeItem('b'), makeItem('c')]),
+      );
       const count = await service.count(PROFILE_ID);
       expect(count).toBe(3);
     });

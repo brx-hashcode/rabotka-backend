@@ -1,11 +1,4 @@
-import {
-  Controller,
-  Get,
-  Param,
-  Req,
-  Res,
-  UseGuards,
-} from '@nestjs/common';
+import { Controller, Get, Param, Req, Res, UseGuards } from '@nestjs/common';
 import type { Response } from 'express';
 import {
   ApiTags,
@@ -28,7 +21,9 @@ export class ContractController {
   constructor(private readonly contractService: ContractService) {}
 
   @Get(':contractId/download')
-  @ApiOperation({ summary: 'Download a contract PDF (worker or employer only)' })
+  @ApiOperation({
+    summary: 'Download a contract PDF (worker or employer only)',
+  })
   @ApiResponse({ status: 200, description: 'PDF file stream' })
   @ApiResponse({ status: 403, description: 'Not authorized' })
   @ApiResponse({ status: 404, description: 'Contract or template not found' })
@@ -63,7 +58,8 @@ export class AdminContractController {
     @Param('contractId') contractId: string,
     @Res() res: Response,
   ) {
-    const { buffer, filename } = await this.contractService.downloadAsAdmin(contractId);
+    const { buffer, filename } =
+      await this.contractService.downloadAsAdmin(contractId);
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.send(buffer);

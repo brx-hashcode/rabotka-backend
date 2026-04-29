@@ -33,7 +33,10 @@ describe('PaymentRequestPublicController', () => {
 
   beforeEach(() => {
     service = makeService();
-    controller = new PaymentRequestPublicController(service as any, mockLogService as any);
+    controller = new PaymentRequestPublicController(
+      service as any,
+      mockLogService as any,
+    );
   });
 
   it('getByToken() delegates to service', () => {
@@ -42,7 +45,14 @@ describe('PaymentRequestPublicController', () => {
   });
 
   it('initiatePayment() delegates to service', () => {
-    controller.initiatePayment('tok', { phone: '237600000001', operator: 'MTN' } as any);
-    expect(service.initiateMonetbilPayment).toHaveBeenCalledWith('tok', '237600000001', 'MTN');
+    controller.initiatePayment('tok', {
+      phone: '237600000001',
+      operator: 'MTN',
+    } as any);
+    expect(service.initiateMonetbilPayment).toHaveBeenCalledWith(
+      'tok',
+      '237600000001',
+      'MTN',
+    );
   });
 });

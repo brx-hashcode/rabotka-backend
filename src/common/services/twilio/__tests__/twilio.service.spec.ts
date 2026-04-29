@@ -19,8 +19,12 @@ jest.mock('twilio', () => {
   (globalThis as Record<string, unknown>).__twilioCreate = create;
   const mockClient = { messages: { create } };
   const factory = jest.fn().mockReturnValue(mockClient);
-  (factory as unknown as Record<string, unknown>).validateRequest = jest.fn().mockReturnValue(true);
-  (globalThis as Record<string, unknown>).__twilioValidateRequest = (factory as unknown as Record<string, unknown>).validateRequest;
+  (factory as unknown as Record<string, unknown>).validateRequest = jest
+    .fn()
+    .mockReturnValue(true);
+  (globalThis as Record<string, unknown>).__twilioValidateRequest = (
+    factory as unknown as Record<string, unknown>
+  ).validateRequest;
   return factory;
 });
 
@@ -28,7 +32,8 @@ function getCreate(): jest.Mock {
   return (globalThis as Record<string, unknown>).__twilioCreate as jest.Mock;
 }
 function getValidateRequest(): jest.Mock {
-  return (globalThis as Record<string, unknown>).__twilioValidateRequest as jest.Mock;
+  return (globalThis as Record<string, unknown>)
+    .__twilioValidateRequest as jest.Mock;
 }
 
 describe('TwilioService', () => {
@@ -81,7 +86,9 @@ describe('TwilioService', () => {
     it('throws when Twilio throws an error', async () => {
       getCreate().mockRejectedValue(new Error('Twilio error'));
 
-      await expect(service.sendWhatsApp('+24200000001', 'Hello')).rejects.toThrow();
+      await expect(
+        service.sendWhatsApp('+24200000001', 'Hello'),
+      ).rejects.toThrow();
     });
 
     it('returns null when not configured', async () => {
@@ -135,7 +142,10 @@ describe('TwilioService', () => {
     it('returns null when not configured', async () => {
       buildService({});
 
-      const result = await service.sendWhatsAppMedia('+242', 'https://x.com/img.jpg');
+      const result = await service.sendWhatsAppMedia(
+        '+242',
+        'https://x.com/img.jpg',
+      );
 
       expect(result).toBeNull();
     });
@@ -181,7 +191,10 @@ describe('TwilioService', () => {
     });
 
     it('returns false when not configured (no auth token)', () => {
-      buildService({ TWILIO_ACCOUNT_SID: undefined, TWILIO_AUTH_TOKEN: undefined });
+      buildService({
+        TWILIO_ACCOUNT_SID: undefined,
+        TWILIO_AUTH_TOKEN: undefined,
+      });
 
       const result = service.validateWebhookSignature('sig', 'url', {});
       expect(result).toBe(false);

@@ -1,6 +1,9 @@
 import { Injectable, Inject } from '@nestjs/common';
 import Redis from 'ioredis';
-import { REDIS_CONNECTION, REDIS_KEY_PREFIX } from '../../../common/services/redis/redis.constants';
+import {
+  REDIS_CONNECTION,
+  REDIS_KEY_PREFIX,
+} from '../../../common/services/redis/redis.constants';
 
 const DRAFT_KEY_PREFIX = `${REDIS_KEY_PREFIX}bot:draft:publish:`;
 const DRAFT_TTL_SECONDS = 7 * 24 * 60 * 60; // 7 days

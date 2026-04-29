@@ -374,7 +374,7 @@ export class ApplicationService {
     const employerScore = employer?.reliability_score ?? 100;
     if (employerScore <= fees.reliabilityScoreMin) {
       throw new ForbiddenException(
-        "Votre compte est pénalisé. Vous ne pouvez pas accepter de candidatures pour le moment.",
+        'Votre compte est pénalisé. Vous ne pouvez pas accepter de candidatures pour le moment.',
       );
     }
 
@@ -392,13 +392,20 @@ export class ApplicationService {
       const currentAcceptedCount = await tx.application.count({
         where: {
           job_offer_id: application.job_offer_id,
-          status: { in: [ApplicationStatus.ACCEPTED, 'WAITING_PAYMENT' as ApplicationStatus] },
+          status: {
+            in: [
+              ApplicationStatus.ACCEPTED,
+              'WAITING_PAYMENT' as ApplicationStatus,
+            ],
+          },
         },
       });
 
       const quantityNeeded = application.job_offer.quantity ?? 1;
       if (currentAcceptedCount >= quantityNeeded) {
-        throw new ConflictException("Cette offre a déjà atteint sa capacité maximale de candidats acceptés");
+        throw new ConflictException(
+          'Cette offre a déjà atteint sa capacité maximale de candidats acceptés',
+        );
       }
 
       const newAcceptedCount = currentAcceptedCount + 1;
@@ -444,7 +451,12 @@ export class ApplicationService {
     // Create contract metadata (no PDF generated here — on-demand via GET /contracts/:id/download)
     this.contractService
       .create(applicationId)
-      .catch((err) => console.warn(`Failed to create contract metadata for ${applicationId}:`, err));
+      .catch((err) =>
+        console.warn(
+          `Failed to create contract metadata for ${applicationId}:`,
+          err,
+        ),
+      );
 
     return updated;
   }
@@ -733,7 +745,9 @@ export class ApplicationService {
         select: { status: true },
       });
       if (freshOffer?.status === JobOfferStatus.COMPLETED) {
-        throw new BadRequestException('Cette mission est déjà marquée comme terminée');
+        throw new BadRequestException(
+          'Cette mission est déjà marquée comme terminée',
+        );
       }
       await tx.jobOffer.update({
         where: { id: application.job_offer_id },
@@ -741,7 +755,11 @@ export class ApplicationService {
       });
       await tx.assignment.updateMany({
         where: { application_id: applicationId },
-        data: { status: AssignmentStatus.COMPLETED, completed_at: now, note: note ?? null },
+        data: {
+          status: AssignmentStatus.COMPLETED,
+          completed_at: now,
+          note: note ?? null,
+        },
       });
       await tx.payment.create({
         data: {
@@ -796,7 +814,9 @@ export class ApplicationService {
     // Re-index worker to enrich their embedding with completed job history
     this.matchingService
       .indexWorkerProfile(application.worker_id)
-      .catch((err) => console.warn(`Failed to re-index worker after job completion:`, err));
+      .catch((err) =>
+        console.warn(`Failed to re-index worker after job completion:`, err),
+      );
     // Fire-and-forget: send rating requests to both parties via WhatsApp
     this.sendRatingRequests(applicationId, application).catch(() => {});
 
@@ -805,7 +825,15 @@ export class ApplicationService {
 
   private async sendRatingRequests(
     applicationId: string,
-    application: { worker: { id: string; phone: string; first_name: string; last_name: string }; job_offer: { title: string; employer_id: string } },
+    application: {
+      worker: {
+        id: string;
+        phone: string;
+        first_name: string;
+        last_name: string;
+      };
+      job_offer: { title: string; employer_id: string };
+    },
   ): Promise<void> {
     const assignment = await this.prisma.assignment.findUnique({
       where: { application_id: applicationId },
@@ -815,7 +843,13 @@ export class ApplicationService {
 
     const employer = await this.prisma.profile.findUnique({
       where: { id: application.job_offer.employer_id },
-      select: { id: true, phone: true, first_name: true, last_name: true, whatsapp_connected: true },
+      select: {
+        id: true,
+        phone: true,
+        first_name: true,
+        last_name: true,
+        whatsapp_connected: true,
+      },
     });
 
     const jobTitle = application.job_offer.title;
@@ -823,27 +857,34 @@ export class ApplicationService {
 
     // Ask worker to rate employer
     if (application.worker.phone) {
-      await this.botNotification.sendRatingRequest({
-        raterProfileId: application.worker.id,
-        raterPhone: application.worker.phone,
-        rateeId: application.job_offer.employer_id,
-        assignmentId,
-        rateeLabel: employer ? `${employer.first_name} ${employer.last_name}`.trim() : 'l\'employeur',
-        jobTitle,
-      }).catch(() => {});
+      await this.botNotification
+        .sendRatingRequest({
+          raterProfileId: application.worker.id,
+          raterPhone: application.worker.phone,
+          rateeId: application.job_offer.employer_id,
+          assignmentId,
+          rateeLabel: employer
+            ? `${employer.first_name} ${employer.last_name}`.trim()
+            : "l'employeur",
+          jobTitle,
+        })
+        .catch(() => {});
     }
 
     // Ask employer to rate worker
     if (employer?.phone && employer.whatsapp_connected) {
-      const workerLabel = `${application.worker.first_name} ${application.worker.last_name}`.trim();
-      await this.botNotification.sendRatingRequest({
-        raterProfileId: employer.id,
-        raterPhone: employer.phone,
-        rateeId: application.worker.id,
-        assignmentId,
-        rateeLabel: workerLabel,
-        jobTitle,
-      }).catch(() => {});
+      const workerLabel =
+        `${application.worker.first_name} ${application.worker.last_name}`.trim();
+      await this.botNotification
+        .sendRatingRequest({
+          raterProfileId: employer.id,
+          raterPhone: employer.phone,
+          rateeId: application.worker.id,
+          assignmentId,
+          rateeLabel: workerLabel,
+          jobTitle,
+        })
+        .catch(() => {});
     }
   }
 
@@ -887,7 +928,10 @@ export class ApplicationService {
         where: {
           job_offer_id: application.job_offer_id,
           status: {
-            in: [ApplicationStatus.ACCEPTED, 'WAITING_PAYMENT' as ApplicationStatus],
+            in: [
+              ApplicationStatus.ACCEPTED,
+              'WAITING_PAYMENT' as ApplicationStatus,
+            ],
           },
           id: { not: applicationId },
         },

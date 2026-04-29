@@ -21,7 +21,11 @@ export class PaymentGatewayFactory {
       .catch(() => undefined);
 
     const driver = (
-      dbDriver ?? this.configService.get<string>('PAYMENT_GATEWAY_DRIVER', PaymentGatewayDriver.MONETBIL)
+      dbDriver ??
+      this.configService.get<string>(
+        'PAYMENT_GATEWAY_DRIVER',
+        PaymentGatewayDriver.MONETBIL,
+      )
     ).toUpperCase() as PaymentGatewayDriver;
 
     this.logger.log(`Creating payment gateway: ${driver}`);
@@ -35,7 +39,9 @@ export class PaymentGatewayFactory {
       case PaymentGatewayDriver.MONETBIL:
       default:
         if (driver !== PaymentGatewayDriver.MONETBIL) {
-          this.logger.warn(`Unknown payment driver: ${driver}. Falling back to MONETBIL`);
+          this.logger.warn(
+            `Unknown payment driver: ${driver}. Falling back to MONETBIL`,
+          );
         }
         return new MonetbilPaymentGateway(config as ConfigService);
     }

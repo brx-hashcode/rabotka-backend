@@ -3,11 +3,15 @@ import { FileController } from '../file.controller';
 
 function makeStorage() {
   return {
-    upload: jest.fn().mockResolvedValue({ url: 'https://cdn.example.com/file.jpg' }),
+    upload: jest
+      .fn()
+      .mockResolvedValue({ url: 'https://cdn.example.com/file.jpg' }),
   };
 }
 
-function makeFile(overrides: Partial<Express.Multer.File> = {}): Express.Multer.File {
+function makeFile(
+  overrides: Partial<Express.Multer.File> = {},
+): Express.Multer.File {
   return {
     buffer: Buffer.from('data'),
     originalname: 'test.jpg',
@@ -33,18 +37,24 @@ describe('FileController', () => {
   });
 
   it('throws when no files provided', async () => {
-    await expect(controller.uploadFile([], undefined)).rejects.toThrow(BadRequestException);
+    await expect(controller.uploadFile([], undefined)).rejects.toThrow(
+      BadRequestException,
+    );
   });
 
   it('throws when files is null', async () => {
-    await expect(controller.uploadFile(null as any, undefined)).rejects.toThrow(BadRequestException);
+    await expect(controller.uploadFile(null as any, undefined)).rejects.toThrow(
+      BadRequestException,
+    );
   });
 
   it('uploads single file and returns file_url', async () => {
     const result = await controller.uploadFile([makeFile()], undefined);
     expect(result).toEqual({ file_url: 'https://cdn.example.com/file.jpg' });
     expect(storage.upload).toHaveBeenCalledWith(
-      expect.any(Buffer), 'test.jpg', { mimeType: 'image/jpeg', folder: 'files' },
+      expect.any(Buffer),
+      'test.jpg',
+      { mimeType: 'image/jpeg', folder: 'files' },
     );
   });
 
@@ -55,7 +65,10 @@ describe('FileController', () => {
   });
 
   it('uploads multiple files when is_multipl=true', async () => {
-    const result = await controller.uploadFile([makeFile(), makeFile({ originalname: 'b.jpg' })], 'true');
+    const result = await controller.uploadFile(
+      [makeFile(), makeFile({ originalname: 'b.jpg' })],
+      'true',
+    );
     expect(result).toHaveProperty('files');
     expect((result as any).files).toHaveLength(2);
     expect(storage.upload).toHaveBeenCalledTimes(2);
@@ -69,7 +82,10 @@ describe('FileController', () => {
 
   it('throws when file buffer missing (single mode)', async () => {
     await expect(
-      controller.uploadFile([makeFile({ buffer: undefined as any })], undefined),
+      controller.uploadFile(
+        [makeFile({ buffer: undefined as any })],
+        undefined,
+      ),
     ).rejects.toThrow(BadRequestException);
   });
 });

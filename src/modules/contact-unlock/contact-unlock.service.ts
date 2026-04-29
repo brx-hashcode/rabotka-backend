@@ -204,7 +204,9 @@ export class ContactUnlockService {
       data: updatedData,
     });
     if (guardResult.count === 0) {
-      throw new BadRequestException('Ce paiement a déjà été enregistré pour cette partie');
+      throw new BadRequestException(
+        'Ce paiement a déjà été enregistré pour cette partie',
+      );
     }
     const updated = await this.prisma.contactUnlockAttempt.findUniqueOrThrow({
       where: { id: attemptId },
@@ -477,7 +479,9 @@ export class ContactUnlockService {
     for (const app of apps) {
       this.matchingService
         .indexWorkerProfile(app.worker_id)
-        .catch((err) => console.warn(`Failed to re-index worker after unlock:`, err));
+        .catch((err) =>
+          console.warn(`Failed to re-index worker after unlock:`, err),
+        );
     }
   }
 

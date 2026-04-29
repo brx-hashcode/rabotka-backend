@@ -1,4 +1,10 @@
-import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+  OnModuleInit,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Queue, QueueOptions, Worker, WorkerOptions } from 'bullmq';
 import Redis from 'ioredis';
@@ -56,7 +62,9 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       return this.queues.get(name)!;
     }
 
-    const queueConn = this.redisConnection.duplicate({ maxRetriesPerRequest: null });
+    const queueConn = this.redisConnection.duplicate({
+      maxRetriesPerRequest: null,
+    });
     this.queueConnections.push(queueConn);
 
     const queue = new Queue(name, {

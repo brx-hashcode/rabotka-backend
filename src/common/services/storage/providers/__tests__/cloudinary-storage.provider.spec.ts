@@ -45,7 +45,9 @@ describe('CloudinaryStorageProvider', () => {
   });
 
   it('creates successfully with valid config', () => {
-    expect(() => new CloudinaryStorageProvider(makeConfig(baseConfig))).not.toThrow();
+    expect(
+      () => new CloudinaryStorageProvider(makeConfig(baseConfig)),
+    ).not.toThrow();
   });
 
   describe('upload', () => {
@@ -166,7 +168,10 @@ describe('CloudinaryStorageProvider', () => {
     });
 
     it('rejects on non-404 error', async () => {
-      mockApiResource.mockRejectedValue({ http_code: 500, message: 'server error' });
+      mockApiResource.mockRejectedValue({
+        http_code: 500,
+        message: 'server error',
+      });
       const provider = new CloudinaryStorageProvider(makeConfig(baseConfig));
       await expect(provider.exists('img')).rejects.toThrow(
         'Cloudinary exists check failed: server error',

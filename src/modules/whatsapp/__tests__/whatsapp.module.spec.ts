@@ -10,17 +10,26 @@ describe('WhatsAppModule', () => {
   });
 
   it('provides WhatsAppService', () => {
-    const providers: unknown[] = Reflect.getMetadata(MODULE_METADATA.PROVIDERS, WhatsAppModule);
+    const providers: unknown[] = Reflect.getMetadata(
+      MODULE_METADATA.PROVIDERS,
+      WhatsAppModule,
+    );
     expect(providers).toContain(WhatsAppService);
   });
 
   it('registers WhatsAppController', () => {
-    const controllers: unknown[] = Reflect.getMetadata(MODULE_METADATA.CONTROLLERS, WhatsAppModule);
+    const controllers: unknown[] = Reflect.getMetadata(
+      MODULE_METADATA.CONTROLLERS,
+      WhatsAppModule,
+    );
     expect(controllers).toContain(WhatsAppController);
   });
 
   it('exports WhatsAppService', () => {
-    const exports: unknown[] = Reflect.getMetadata(MODULE_METADATA.EXPORTS, WhatsAppModule);
+    const exports: unknown[] = Reflect.getMetadata(
+      MODULE_METADATA.EXPORTS,
+      WhatsAppModule,
+    );
     expect(exports).toContain(WhatsAppService);
   });
 });

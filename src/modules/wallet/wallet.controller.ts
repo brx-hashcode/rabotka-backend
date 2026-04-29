@@ -15,7 +15,11 @@ import {
   ApiCookieAuth,
 } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
-import { WalletService, type AdminWalletTransactionItem, type AdminPaymentItem } from './wallet.service';
+import {
+  WalletService,
+  type AdminWalletTransactionItem,
+  type AdminPaymentItem,
+} from './wallet.service';
 import { AdminAuthGuard } from '../auth/guards/admin-auth.guard';
 import type { AdminAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
@@ -95,7 +99,9 @@ export class WalletController {
       select: { role: true },
     });
     if (!user || !ALLOWED_WALLET_ROLES.has(user.role)) {
-      throw new ForbiddenException('Only ADMIN or SUPER_ADMIN can access wallet data');
+      throw new ForbiddenException(
+        'Only ADMIN or SUPER_ADMIN can access wallet data',
+      );
     }
 
     if (rollingMonthsStr !== undefined && rollingMonthsStr !== '') {
@@ -123,13 +129,20 @@ export class WalletController {
   async listTransactions(
     @Req() req: AdminAuthenticatedRequest,
     @Query() dto: AdminListWalletTransactionsDto,
-  ): Promise<{ data: AdminWalletTransactionItem[]; total: number; page: number; limit: number }> {
+  ): Promise<{
+    data: AdminWalletTransactionItem[];
+    total: number;
+    page: number;
+    limit: number;
+  }> {
     const user = await this.prisma.user.findUnique({
       where: { id: req.user.userId },
       select: { role: true },
     });
     if (!user || !ALLOWED_WALLET_ROLES.has(user.role)) {
-      throw new ForbiddenException('Only ADMIN or SUPER_ADMIN can access wallet data');
+      throw new ForbiddenException(
+        'Only ADMIN or SUPER_ADMIN can access wallet data',
+      );
     }
     return this.walletService.listTransactionsForAdmin({
       page: dto.page ?? 1,
@@ -146,13 +159,20 @@ export class WalletController {
   async listPayments(
     @Req() req: AdminAuthenticatedRequest,
     @Query() dto: AdminListPaymentsDto,
-  ): Promise<{ data: AdminPaymentItem[]; total: number; page: number; limit: number }> {
+  ): Promise<{
+    data: AdminPaymentItem[];
+    total: number;
+    page: number;
+    limit: number;
+  }> {
     const user = await this.prisma.user.findUnique({
       where: { id: req.user.userId },
       select: { role: true },
     });
     if (!user || !ALLOWED_WALLET_ROLES.has(user.role)) {
-      throw new ForbiddenException('Only ADMIN or SUPER_ADMIN can access wallet data');
+      throw new ForbiddenException(
+        'Only ADMIN or SUPER_ADMIN can access wallet data',
+      );
     }
     return this.walletService.listPaymentsForAdmin({
       page: dto.page ?? 1,

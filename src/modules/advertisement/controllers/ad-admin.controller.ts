@@ -168,5 +168,4 @@ export class AdAdminController {
   getAnalytics(@Param('id') id: string) {
     return this.adAnalyticsService.getAnalytics(id);
   }
-
 }

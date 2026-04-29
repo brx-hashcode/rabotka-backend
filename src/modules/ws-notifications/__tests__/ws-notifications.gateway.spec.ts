@@ -2,11 +2,13 @@ import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { WsNotificationsGateway } from '../ws-notifications.gateway';
 
-function makeClient(overrides: {
-  cookie?: string;
-  authorization?: string;
-  auth?: Record<string, string>;
-} = {}) {
+function makeClient(
+  overrides: {
+    cookie?: string;
+    authorization?: string;
+    auth?: Record<string, string>;
+  } = {},
+) {
   return {
     id: 'socket-1',
     handshake: {
@@ -47,33 +49,48 @@ describe('WsNotificationsGateway', () => {
 
   describe('handleConnection', () => {
     it('accepts admin with valid cookie token and joins admins room', () => {
-      jwtService.verify.mockReturnValue({ sub: 'admin-1', type: 'admin' } as any);
+      jwtService.verify.mockReturnValue({
+        sub: 'admin-1',
+        type: 'admin',
+      } as any);
       const client = makeClient({ cookie: 'auth-token=valid-jwt; other=val' });
 
       gateway.handleConnection(client);
 
-      expect(jwtService.verify).toHaveBeenCalledWith('valid-jwt', { secret: 'test-secret' });
+      expect(jwtService.verify).toHaveBeenCalledWith('valid-jwt', {
+        secret: 'test-secret',
+      });
       expect(client.join).toHaveBeenCalledWith('admins');
       expect(client.disconnect).not.toHaveBeenCalled();
     });
 
     it('accepts admin with Bearer authorization header', () => {
-      jwtService.verify.mockReturnValue({ sub: 'admin-2', type: 'admin' } as any);
+      jwtService.verify.mockReturnValue({
+        sub: 'admin-2',
+        type: 'admin',
+      } as any);
       const client = makeClient({ authorization: 'Bearer my-token' });
 
       gateway.handleConnection(client);
 
-      expect(jwtService.verify).toHaveBeenCalledWith('my-token', { secret: 'test-secret' });
+      expect(jwtService.verify).toHaveBeenCalledWith('my-token', {
+        secret: 'test-secret',
+      });
       expect(client.join).toHaveBeenCalledWith('admins');
     });
 
     it('accepts admin with handshake auth token', () => {
-      jwtService.verify.mockReturnValue({ sub: 'admin-3', type: 'admin' } as any);
+      jwtService.verify.mockReturnValue({
+        sub: 'admin-3',
+        type: 'admin',
+      } as any);
       const client = makeClient({ auth: { token: 'raw-token' } });
 
       gateway.handleConnection(client);
 
-      expect(jwtService.verify).toHaveBeenCalledWith('raw-token', { secret: 'test-secret' });
+      expect(jwtService.verify).toHaveBeenCalledWith('raw-token', {
+        secret: 'test-secret',
+      });
       expect(client.join).toHaveBeenCalledWith('admins');
     });
 
@@ -87,7 +104,10 @@ describe('WsNotificationsGateway', () => {
     });
 
     it('disconnects non-admin user', () => {
-      jwtService.verify.mockReturnValue({ sub: 'profile-1', type: 'profile' } as any);
+      jwtService.verify.mockReturnValue({
+        sub: 'profile-1',
+        type: 'profile',
+      } as any);
       const client = makeClient({ cookie: 'auth-token=profile-jwt' });
 
       gateway.handleConnection(client);
@@ -108,12 +128,17 @@ describe('WsNotificationsGateway', () => {
     });
 
     it('handles cookie with = in value', () => {
-      jwtService.verify.mockReturnValue({ sub: 'admin-4', type: 'admin' } as any);
+      jwtService.verify.mockReturnValue({
+        sub: 'admin-4',
+        type: 'admin',
+      } as any);
       const client = makeClient({ cookie: 'auth-token=abc=def=ghi' });
 
       gateway.handleConnection(client);
 
-      expect(jwtService.verify).toHaveBeenCalledWith('abc=def=ghi', { secret: 'test-secret' });
+      expect(jwtService.verify).toHaveBeenCalledWith('abc=def=ghi', {
+        secret: 'test-secret',
+      });
       expect(client.join).toHaveBeenCalledWith('admins');
     });
   });

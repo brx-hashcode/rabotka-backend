@@ -64,7 +64,11 @@ export class WalletService {
       ON CONFLICT DO NOTHING
     `;
     const wallet = await this.prisma.wallet.findFirstOrThrow({
-      where: { owner_type: WalletOwnerType.SYSTEM, user_id: null, profile_id: null },
+      where: {
+        owner_type: WalletOwnerType.SYSTEM,
+        user_id: null,
+        profile_id: null,
+      },
     });
     return { id: wallet.id, balance: Number(wallet.balance) };
   }
@@ -73,9 +77,18 @@ export class WalletService {
     profileId: string,
   ): Promise<{ id: string; balance: number }> {
     const wallet = await this.prisma.wallet.upsert({
-      where: { idx_wallet_owner_profile: { owner_type: WalletOwnerType.PROFILE, profile_id: profileId } },
+      where: {
+        idx_wallet_owner_profile: {
+          owner_type: WalletOwnerType.PROFILE,
+          profile_id: profileId,
+        },
+      },
       update: {},
-      create: { owner_type: WalletOwnerType.PROFILE, profile_id: profileId, balance: 0 },
+      create: {
+        owner_type: WalletOwnerType.PROFILE,
+        profile_id: profileId,
+        balance: 0,
+      },
     });
     return { id: wallet.id, balance: Number(wallet.balance) };
   }
@@ -180,7 +193,9 @@ export class WalletService {
         data: { balance: { decrement: amount } },
       });
       if (updated.count === 0) {
-        throw new BadRequestException('Solde insuffisant dans votre portefeuille');
+        throw new BadRequestException(
+          'Solde insuffisant dans votre portefeuille',
+        );
       }
       await tx.walletTransaction.create({
         data: {
@@ -282,7 +297,9 @@ export class WalletService {
         throw new BadRequestException('Cette pénalité a déjà été réglée');
       }
       if (walletUpdate.count === 0) {
-        throw new BadRequestException('Solde insuffisant pour régler cette pénalité');
+        throw new BadRequestException(
+          'Solde insuffisant pour régler cette pénalité',
+        );
       }
       await tx.walletTransaction.create({
         data: {

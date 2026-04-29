@@ -238,9 +238,7 @@ export function formatPenaltyReminderDay(params: {
 
   const header = urgencyLines[dayNumber] ?? urgencyLines[1];
   const totalLine =
-    totalUnpaid !== amount
-      ? [`*Total impayé*: ${totalStr} FCFA`, '']
-      : [];
+    totalUnpaid !== amount ? [`*Total impayé*: ${totalStr} FCFA`, ''] : [];
 
   return [
     ...header,

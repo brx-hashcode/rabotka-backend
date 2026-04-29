@@ -54,7 +54,9 @@ describe('CloudflareStorageProvider', () => {
   });
 
   it('creates successfully with valid config', () => {
-    expect(() => new CloudflareStorageProvider(makeConfig(baseConfig))).not.toThrow();
+    expect(
+      () => new CloudflareStorageProvider(makeConfig(baseConfig)),
+    ).not.toThrow();
   });
 
   describe('upload', () => {

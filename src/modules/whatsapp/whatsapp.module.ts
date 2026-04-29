@@ -8,7 +8,12 @@ import { PrismaModule } from '../../common/services/prisma/prisma.module';
 import { WalletModule } from '../wallet/wallet.module';
 
 @Module({
-  imports: [forwardRef(() => ConversationModule), PrismaModule, ConfigModule, forwardRef(() => WalletModule)],
+  imports: [
+    forwardRef(() => ConversationModule),
+    PrismaModule,
+    ConfigModule,
+    forwardRef(() => WalletModule),
+  ],
   controllers: [WhatsAppController],
   providers: [WhatsAppService, WhatsAppOutboundProcessor],
   exports: [WhatsAppService],

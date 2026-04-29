@@ -134,7 +134,9 @@ export class InterestRecommendationService {
       );
 
       // Shuffle the pool so explore doesn't always return the same top-N
-      const shuffled = results.sort(() => Math.random() - 0.5).slice(0, limit);
+      const shuffled = results
+        .toSorted(() => Math.random() - 0.5)
+        .slice(0, limit);
 
       return shuffled.map((r) => ({
         jobId: r.id as string,
@@ -166,7 +168,7 @@ export class InterestRecommendationService {
     });
 
     return jobs
-      .sort(() => Math.random() - 0.5)
+      .toSorted(() => Math.random() - 0.5)
       .slice(0, limit)
       .map((j) => ({ jobId: j.id, score: 0, source: 'explore' as const }));
   }

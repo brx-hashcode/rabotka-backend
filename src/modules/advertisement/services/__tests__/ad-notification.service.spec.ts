@@ -33,9 +33,9 @@ describe('AdNotificationService', () => {
   });
 
   it('sends email announcement with ad image payload', async () => {
-    (notificationService.notifyAdvertisementCreated as jest.Mock).mockResolvedValue(
-      undefined,
-    );
+    (
+      notificationService.notifyAdvertisementCreated as jest.Mock
+    ).mockResolvedValue(undefined);
 
     await service.dispatchCreated(
       { email: 'john@example.com', name: 'John Doe' },
@@ -52,17 +52,19 @@ describe('AdNotificationService', () => {
       DeliveryChannel.EMAIL,
     );
 
-    expect(notificationService.notifyAdvertisementCreated).toHaveBeenCalledWith({
-      to: 'john@example.com',
-      name: 'John Doe',
-      title: 'Offre',
-      startDate: expect.any(String),
-      endDate: expect.any(String),
-      description: 'Description',
-      callToAction: 'Plus de detail',
-      ctaUrl: 'https://example.com/apply',
-      imageUrl: 'https://cdn.example.com/ad.jpg',
-    });
+    expect(notificationService.notifyAdvertisementCreated).toHaveBeenCalledWith(
+      {
+        to: 'john@example.com',
+        name: 'John Doe',
+        title: 'Offre',
+        startDate: expect.any(String),
+        endDate: expect.any(String),
+        description: 'Description',
+        callToAction: 'Plus de detail',
+        ctaUrl: 'https://example.com/apply',
+        imageUrl: 'https://cdn.example.com/ad.jpg',
+      },
+    );
   });
 
   it('sends WhatsApp media and falls back to text when media fails', async () => {
@@ -95,7 +97,7 @@ describe('AdNotificationService', () => {
     );
     expect(whatsAppService.sendTextMessage).toHaveBeenCalledWith(
       '+242055000000',
-      expect.stringContaining('Pour plus d\'informations'),
+      expect.stringContaining("Pour plus d'informations"),
     );
   });
 });

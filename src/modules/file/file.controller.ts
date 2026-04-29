@@ -26,10 +26,7 @@ export class FileController {
   constructor(private readonly storageService: StorageService) {}
 
   @Get('proxy')
-  async proxyFile(
-    @Query('url') fileUrl: string,
-    @Res() res: Response,
-  ) {
+  async proxyFile(@Query('url') fileUrl: string, @Res() res: Response) {
     if (!fileUrl) {
       return res.status(400).json({ message: 'url query param is required' });
     }
@@ -42,15 +39,21 @@ export class FileController {
     }
 
     if (decoded.startsWith('blob:')) {
-      return res.status(400).json({ message: 'Blob URLs cannot be proxied. The file was not properly uploaded to storage.' });
+      return res.status(400).json({
+        message:
+          'Blob URLs cannot be proxied. The file was not properly uploaded to storage.',
+      });
     }
 
     const upstream = await fetch(decoded);
     if (!upstream.ok) {
-      return res.status(upstream.status).json({ message: 'Failed to fetch file' });
+      return res
+        .status(upstream.status)
+        .json({ message: 'Failed to fetch file' });
     }
 
-    const contentType = upstream.headers.get('content-type') ?? 'application/octet-stream';
+    const contentType =
+      upstream.headers.get('content-type') ?? 'application/octet-stream';
     const contentLength = upstream.headers.get('content-length');
 
     res.setHeader('Content-Type', contentType);
@@ -124,9 +127,7 @@ export class FileController {
             {
               mimeType: file.mimetype,
               folder: 'files',
-              access: file.mimetype.startsWith('image/')
-                ? 'public'
-                : 'private',
+              access: file.mimetype.startsWith('image/') ? 'public' : 'private',
             },
           );
 
@@ -144,7 +145,9 @@ export class FileController {
 
     const file = files[0];
     if (!file.buffer || !file.originalname) {
-      throw new BadRequestException('Le buffer ou le nom du fichier est manquant');
+      throw new BadRequestException(
+        'Le buffer ou le nom du fichier est manquant',
+      );
     }
 
     const fileBuffer: Buffer = Buffer.isBuffer(file.buffer)

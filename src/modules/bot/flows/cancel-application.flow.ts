@@ -112,7 +112,10 @@ async function executeCancellation(
   } catch (err: unknown) {
     const message =
       err instanceof Error ? err.message : "*IMPOSSIBLE D'ANNULER.*";
-    return { reply: [`❌ ${message}\n\nTapez *MENU* pour annuler.`], nextState: state };
+    return {
+      reply: [`❌ ${message}\n\nTapez *MENU* pour annuler.`],
+      nextState: state,
+    };
   }
 }
 
@@ -155,7 +158,7 @@ function handleLateCancellationInput(args: CancelStepArgs): FlowResult {
   if (!reason) {
     return {
       reply: [
-        '*La raison est obligatoire pour une annulation tardive. Tapez votre raison d\'annulation.*',
+        "*La raison est obligatoire pour une annulation tardive. Tapez votre raison d'annulation.*",
       ],
       nextState: state,
     };
@@ -240,7 +243,15 @@ async function handleCancelStep1(
 }
 
 async function handleCancelStep2(args: CancelStepArgs): Promise<FlowResult> {
-  const { state, payload, applicationId, normalized, profile, ctx, jobOfferId } = args;
+  const {
+    state,
+    payload,
+    applicationId,
+    normalized,
+    profile,
+    ctx,
+    jobOfferId,
+  } = args;
   if (normalized === '1' || normalized === 'oui') {
     const reason = (payload.reason as string) ?? undefined;
     return executeCancellation(

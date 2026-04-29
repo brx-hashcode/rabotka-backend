@@ -1,5 +1,8 @@
 import { Module, forwardRef } from '@nestjs/common';
-import { InvoiceController, AdminInvoiceController } from './invoice.controller';
+import {
+  InvoiceController,
+  AdminInvoiceController,
+} from './invoice.controller';
 import { InvoiceService } from './invoice.service';
 import { PrismaModule } from '../../common/services/prisma/prisma.module';
 import { AuthModule } from '../auth/auth.module';

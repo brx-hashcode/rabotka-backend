@@ -9,6 +9,8 @@ import {
 } from './interest-signal.service';
 
 const VECTOR_DIM = 384;
+const INTEREST_RECLUSTER_QUEUE_NAME: string = INTEREST_RECLUSTER_QUEUE;
+const USER_INTERESTS_COLLECTION: string = COLLECTIONS.USER_INTERESTS;
 
 export interface UserInterestProfile {
   positiveVectors: number[][];
@@ -38,14 +40,14 @@ export class InterestClusterService implements OnModuleInit {
 
   private registerReclusterWorker(): void {
     this.queue.createWorker<{ userId: string }>(
-      INTEREST_RECLUSTER_QUEUE,
+      INTEREST_RECLUSTER_QUEUE_NAME,
       async (job) => {
         await this.recluster(job.data.userId);
       },
       { concurrency: 3 },
     );
     this.logger.log(
-      `Recluster worker registered on ${INTEREST_RECLUSTER_QUEUE}`,
+      `Recluster worker registered on ${INTEREST_RECLUSTER_QUEUE_NAME}`,
     );
   }
 
@@ -75,7 +77,7 @@ export class InterestClusterService implements OnModuleInit {
       positiveVectors[0] ?? Array.from<number>({ length: VECTOR_DIM }).fill(0);
 
     await this.qdrant.upsertDense(
-      COLLECTIONS.USER_INTERESTS,
+      USER_INTERESTS_COLLECTION,
       `interest__${userId}`,
       anchor,
       {
@@ -98,7 +100,7 @@ export class InterestClusterService implements OnModuleInit {
     const pointId = `interest__${userId}`;
     const result = await this.qdrant
       .getClient()
-      .retrieve(COLLECTIONS.USER_INTERESTS, {
+      .retrieve(USER_INTERESTS_COLLECTION, {
         ids: [pointId],
         with_payload: true,
         with_vector: false,
@@ -132,6 +134,7 @@ export class InterestClusterService implements OnModuleInit {
     const map = new Map<string, number[]>();
     if (!jobIds.length) return map;
 
+    const signalsCollection: string = COLLECTIONS.SIGNALS;
     const signalTypes: SignalType[] = [
       'apply',
       'share',
@@ -148,13 +151,11 @@ export class InterestClusterService implements OnModuleInit {
       signalTypes.map((t) => `${userId}__${jid}__${t}`),
     );
 
-    const results = await this.qdrant
-      .getClient()
-      .retrieve(COLLECTIONS.SIGNALS, {
-        ids: candidateIds,
-        with_payload: true,
-        with_vector: true,
-      });
+    const results = await this.qdrant.getClient().retrieve(signalsCollection, {
+      ids: candidateIds,
+      with_payload: true,
+      with_vector: true,
+    });
 
     for (const point of results) {
       const raw = point.payload;

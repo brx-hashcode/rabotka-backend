@@ -37,7 +37,9 @@ export class AdminListPaymentsDto {
   @Max(100)
   limit?: number = 20;
 
-  @ApiPropertyOptional({ description: 'Search in profile name, email, transaction_id' })
+  @ApiPropertyOptional({
+    description: 'Search in profile name, email, transaction_id',
+  })
   @IsOptional()
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
@@ -63,12 +65,16 @@ export class AdminListPaymentsDto {
   @IsString({ each: true })
   status?: string[];
 
-  @ApiPropertyOptional({ description: 'Filter payments created from this date (ISO 8601)' })
+  @ApiPropertyOptional({
+    description: 'Filter payments created from this date (ISO 8601)',
+  })
   @IsOptional()
   @IsDateString()
   created_from?: string;
 
-  @ApiPropertyOptional({ description: 'Filter payments created up to this date (ISO 8601)' })
+  @ApiPropertyOptional({
+    description: 'Filter payments created up to this date (ISO 8601)',
+  })
   @IsOptional()
   @IsDateString()
   created_to?: string;

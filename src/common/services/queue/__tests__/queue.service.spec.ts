@@ -34,7 +34,9 @@ describe('QueueService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     redis = { duplicate: mockRedisDuplicate };
-    configService = { get: jest.fn().mockReturnValue(5) } as unknown as jest.Mocked<ConfigService>;
+    configService = {
+      get: jest.fn().mockReturnValue(5),
+    } as unknown as jest.Mocked<ConfigService>;
     service = new QueueService(redis as never, configService);
   });
 
@@ -64,7 +66,11 @@ describe('QueueService', () => {
     it('adds a job to the queue and returns job id', async () => {
       const id = await service.addJob('my-queue', { foo: 'bar' });
       expect(id).toBe('job-1');
-      expect(mockJobAdd).toHaveBeenCalledWith('my-queue', { foo: 'bar' }, expect.any(Object));
+      expect(mockJobAdd).toHaveBeenCalledWith(
+        'my-queue',
+        { foo: 'bar' },
+        expect.any(Object),
+      );
     });
 
     it('passes delay and priority options to queue.add', async () => {
@@ -116,7 +122,10 @@ describe('QueueService', () => {
       const processor = jest.fn().mockResolvedValue(undefined);
       const worker = service.createWorker('test-queue', processor);
       expect(worker).toBeDefined();
-      expect(mockWorkerOn).toHaveBeenCalledWith('completed', expect.any(Function));
+      expect(mockWorkerOn).toHaveBeenCalledWith(
+        'completed',
+        expect.any(Function),
+      );
       expect(mockWorkerOn).toHaveBeenCalledWith('failed', expect.any(Function));
       expect(mockWorkerOn).toHaveBeenCalledWith('error', expect.any(Function));
     });

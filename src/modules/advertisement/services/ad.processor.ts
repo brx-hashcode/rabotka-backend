@@ -105,7 +105,9 @@ export class AdProcessor {
           stats,
           excelBuffer,
         });
-        this.logger.log(`Completion report sent for advertisement ${ad.id} to ${ad.contact_email}`);
+        this.logger.log(
+          `Completion report sent for advertisement ${ad.id} to ${ad.contact_email}`,
+        );
       } catch (err) {
         this.logger.error(
           `Failed to send completion report for advertisement ${ad.id}:`,

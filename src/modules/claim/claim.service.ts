@@ -337,7 +337,8 @@ export class ClaimService {
       },
     });
 
-    const authorName = `${comment.user?.first_name ?? ''} ${comment.user?.last_name ?? ''}`.trim();
+    const authorName =
+      `${comment.user?.first_name ?? ''} ${comment.user?.last_name ?? ''}`.trim();
     this.eventEmitter.emit(AdminNotificationEvent.CLAIM_COMMENTED, {
       event: AdminNotificationEvent.CLAIM_COMMENTED,
       title: 'Nouveau commentaire (admin)',
@@ -500,7 +501,8 @@ export class ClaimService {
       },
     });
 
-    const authorName = `${comment.profile?.first_name ?? ''} ${comment.profile?.last_name ?? ''}`.trim();
+    const authorName =
+      `${comment.profile?.first_name ?? ''} ${comment.profile?.last_name ?? ''}`.trim();
     this.eventEmitter.emit(AdminNotificationEvent.CLAIM_COMMENTED, {
       event: AdminNotificationEvent.CLAIM_COMMENTED,
       title: 'Nouveau commentaire (client)',

@@ -663,7 +663,10 @@ export class BotOrchestratorService {
     profile: BotProfile,
     profileId: string,
   ): Promise<string[]> {
-    const offerResults = await this.interestRecommendationService.recommend(profile.id, 10);
+    const offerResults = await this.interestRecommendationService.recommend(
+      profile.id,
+      10,
+    );
     const offerIds: string[] = offerResults.map((r) => r.jobId);
 
     if (offerIds.length === 0) {

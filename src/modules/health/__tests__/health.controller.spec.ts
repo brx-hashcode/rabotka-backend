@@ -33,14 +33,20 @@ describe('HealthController', () => {
         {
           provide: MemoryHealthIndicator,
           useValue: {
-            checkHeap: jest.fn().mockResolvedValue({ memory_heap: { status: 'up' } }),
-            checkRSS: jest.fn().mockResolvedValue({ memory_rss: { status: 'up' } }),
+            checkHeap: jest
+              .fn()
+              .mockResolvedValue({ memory_heap: { status: 'up' } }),
+            checkRSS: jest
+              .fn()
+              .mockResolvedValue({ memory_rss: { status: 'up' } }),
           },
         },
         {
           provide: DiskHealthIndicator,
           useValue: {
-            checkStorage: jest.fn().mockResolvedValue({ disk: { status: 'up' } }),
+            checkStorage: jest
+              .fn()
+              .mockResolvedValue({ disk: { status: 'up' } }),
           },
         },
         {
@@ -85,8 +91,14 @@ describe('HealthController', () => {
     // Call the first two health check functions
     await healthFns[0]();
     await healthFns[1]();
-    expect(memory.checkHeap).toHaveBeenCalledWith('memory_heap', 150 * 1024 * 1024);
-    expect(memory.checkRSS).toHaveBeenCalledWith('memory_rss', 600 * 1024 * 1024);
+    expect(memory.checkHeap).toHaveBeenCalledWith(
+      'memory_heap',
+      150 * 1024 * 1024,
+    );
+    expect(memory.checkRSS).toHaveBeenCalledWith(
+      'memory_rss',
+      600 * 1024 * 1024,
+    );
   });
 
   it('includes disk check when HEALTH_DISK_CHECK_ENABLED is "true"', async () => {

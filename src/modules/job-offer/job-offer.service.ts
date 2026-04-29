@@ -12,7 +12,10 @@ import { WalletService } from '../wallet/wallet.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
 import { BotNotificationService } from '../bot/services/bot-notification.service';
-import { MatchingService, MIN_NOTIFICATION_SCORE } from '../matching/matching.service';
+import {
+  MatchingService,
+  MIN_NOTIFICATION_SCORE,
+} from '../matching/matching.service';
 import { CreateJobOfferDto } from './dto/create-job-offer.dto';
 import { AdminUpdateJobOfferDto } from './dto/admin-update-job-offer.dto';
 import {
@@ -153,7 +156,7 @@ export class JobOfferService {
     const hardBlocked = await isWorkerHardBlocked(this.prisma, employerId);
     if (hardBlocked) {
       throw new ForbiddenException(
-        "🚨 Votre compte est bloqué en raison de pénalités impayées depuis plus de 3 jours. Tapez PAYER pour régulariser votre situation.",
+        '🚨 Votre compte est bloqué en raison de pénalités impayées depuis plus de 3 jours. Tapez PAYER pour régulariser votre situation.',
       );
     }
 
@@ -404,7 +407,9 @@ export class JobOfferService {
   async findByEmployerId(
     employerId: string,
     pagination?: { page: number; pageSize: number },
-  ): Promise<JobOfferListItem[] | { items: JobOfferListItem[]; total: number }> {
+  ): Promise<
+    JobOfferListItem[] | { items: JobOfferListItem[]; total: number }
+  > {
     if (!pagination) {
       const offers = await this.prisma.jobOffer.findMany({
         where: { employer_id: employerId },

@@ -35,7 +35,9 @@ function makePrisma() {
       findUnique: jest.fn().mockResolvedValue(null),
       create: jest.fn().mockResolvedValue(baseInvoice),
       findMany: jest.fn().mockResolvedValue([baseInvoice]),
-      update: jest.fn().mockResolvedValue({ ...baseInvoice, status: 'DOWNLOADED' }),
+      update: jest
+        .fn()
+        .mockResolvedValue({ ...baseInvoice, status: 'DOWNLOADED' }),
     },
     document: {
       findFirst: jest.fn().mockResolvedValue(baseTemplate),
@@ -121,7 +123,10 @@ describe('InvoiceService', () => {
 
   describe('download()', () => {
     beforeEach(() => {
-      prisma.invoice.findUnique.mockResolvedValue({ ...baseInvoice, profile: baseProfile });
+      prisma.invoice.findUnique.mockResolvedValue({
+        ...baseInvoice,
+        profile: baseProfile,
+      });
     });
 
     it('returns PDF buffer for invoice owner', async () => {
@@ -141,12 +146,16 @@ describe('InvoiceService', () => {
     });
 
     it('throws ForbiddenException for wrong profile', async () => {
-      await expect(service.download('inv-1', 'stranger-99')).rejects.toThrow(ForbiddenException);
+      await expect(service.download('inv-1', 'stranger-99')).rejects.toThrow(
+        ForbiddenException,
+      );
     });
 
     it('throws NotFoundException when invoice does not exist', async () => {
       prisma.invoice.findUnique.mockResolvedValue(null);
-      await expect(service.download('missing', 'profile-1')).rejects.toThrow(NotFoundException);
+      await expect(service.download('missing', 'profile-1')).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('throws NotFoundException when no INVOICE template exists', async () => {

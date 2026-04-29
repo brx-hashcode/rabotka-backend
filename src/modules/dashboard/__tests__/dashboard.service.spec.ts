@@ -47,8 +47,8 @@ describe('DashboardService', () => {
 
       // profile.count called 3 times: total, current 30d, previous 30d
       prisma.profile.count
-        .mockResolvedValueOnce(5)  // total
-        .mockResolvedValueOnce(5)  // current 30d
+        .mockResolvedValueOnce(5) // total
+        .mockResolvedValueOnce(5) // current 30d
         .mockResolvedValueOnce(0); // previous 30d → calcTrend returns 100 when current > 0
       prisma.jobOffer.count.mockResolvedValue(0);
       prisma.application.count.mockResolvedValue(0);

@@ -342,7 +342,8 @@ export class DocumentService {
     const docxBuffer = await this.fillDocumentTemplate(id, data);
 
     const libreOfficePdf = await this.convertWithLibreOffice(docxBuffer);
-    const pdfBuffer = libreOfficePdf ?? (await this.convertWithPuppeteer(docxBuffer));
+    const pdfBuffer =
+      libreOfficePdf ?? (await this.convertWithPuppeteer(docxBuffer));
 
     return this.protectPdf(pdfBuffer);
   }
@@ -352,7 +353,7 @@ export class DocumentService {
     const path = await import('node:path');
     const fs = await import('node:fs/promises');
     const qpdfModule = await import('node-qpdf');
-    const qpdf = (qpdfModule as any).default ?? qpdfModule;
+    const qpdf = qpdfModule.default ?? qpdfModule;
 
     const ts = Date.now();
     const tmp = os.tmpdir();

@@ -74,9 +74,11 @@ describe('BotNotificationService', () => {
       deps.botInbox as any,
       { getByApplicationId: jest.fn().mockResolvedValue(null) } as any,
       {
-        getContactUnlockFees: jest
-          .fn()
-          .mockResolvedValue({ employerFeeFcfa: 500, workerFeeFcfa: 100, expiryHours: 48 }),
+        getContactUnlockFees: jest.fn().mockResolvedValue({
+          employerFeeFcfa: 500,
+          workerFeeFcfa: 100,
+          expiryHours: 48,
+        }),
         getFees: jest.fn().mockResolvedValue({
           lateCancellationPenaltyFcfa: 5000,
           lateCancellationScoreDeduction: 5,
@@ -103,14 +105,24 @@ describe('BotNotificationService', () => {
     });
 
     it('pushes to inbox when employer has active flow', async () => {
-      deps.botState.get.mockResolvedValue({ flowId: 'PUBLISH_JOB', step: 1, payload: {}, updatedAt: '' });
+      deps.botState.get.mockResolvedValue({
+        flowId: 'PUBLISH_JOB',
+        step: 1,
+        payload: {},
+        updatedAt: '',
+      });
       await service.sendNewApplicationToEmployer('app-1');
       expect(deps.botInbox.push).toHaveBeenCalled();
     });
 
     it('sends media message when worker has avatar', async () => {
       deps.prisma.application.findUnique.mockResolvedValue(
-        makeApp({ worker: { ...makeApp().worker, avatar_url: 'https://cdn.example.com/avatar.jpg' } }),
+        makeApp({
+          worker: {
+            ...makeApp().worker,
+            avatar_url: 'https://cdn.example.com/avatar.jpg',
+          },
+        }),
       );
       await service.sendNewApplicationToEmployer('app-1');
       expect(deps.whatsApp.sendMediaMessage).toHaveBeenCalled();
@@ -124,15 +136,24 @@ describe('BotNotificationService', () => {
 
     it('does nothing when employer has no phone', async () => {
       deps.prisma.application.findUnique.mockResolvedValue(
-        makeApp({ job_offer: { ...makeApp().job_offer, employer: { ...makeApp().job_offer.employer, phone: null } } }),
+        makeApp({
+          job_offer: {
+            ...makeApp().job_offer,
+            employer: { ...makeApp().job_offer.employer, phone: null },
+          },
+        }),
       );
       await service.sendNewApplicationToEmployer('app-1');
       expect(deps.whatsApp.sendTextMessage).not.toHaveBeenCalled();
     });
 
     it('swallows errors gracefully', async () => {
-      deps.prisma.application.findUnique.mockRejectedValue(new Error('DB error'));
-      await expect(service.sendNewApplicationToEmployer('app-1')).resolves.toBeUndefined();
+      deps.prisma.application.findUnique.mockRejectedValue(
+        new Error('DB error'),
+      );
+      await expect(
+        service.sendNewApplicationToEmployer('app-1'),
+      ).resolves.toBeUndefined();
     });
   });
 
@@ -154,8 +175,12 @@ describe('BotNotificationService', () => {
     });
 
     it('swallows errors gracefully', async () => {
-      deps.prisma.application.findUnique.mockRejectedValue(new Error('DB error'));
-      await expect(service.sendApplicationAcceptedToWorker('app-1')).resolves.toBeUndefined();
+      deps.prisma.application.findUnique.mockRejectedValue(
+        new Error('DB error'),
+      );
+      await expect(
+        service.sendApplicationAcceptedToWorker('app-1'),
+      ).resolves.toBeUndefined();
     });
   });
 
@@ -170,7 +195,9 @@ describe('BotNotificationService', () => {
 
     it('swallows errors gracefully', async () => {
       deps.prisma.application.findUnique.mockRejectedValue(new Error('fail'));
-      await expect(service.sendApplicationRejectedToWorker('app-1')).resolves.toBeUndefined();
+      await expect(
+        service.sendApplicationRejectedToWorker('app-1'),
+      ).resolves.toBeUndefined();
     });
   });
 
@@ -190,7 +217,9 @@ describe('BotNotificationService', () => {
 
     it('swallows errors gracefully', async () => {
       deps.prisma.application.findUnique.mockRejectedValue(new Error('fail'));
-      await expect(service.sendCancellationToEmployer('app-1', null, false)).resolves.toBeUndefined();
+      await expect(
+        service.sendCancellationToEmployer('app-1', null, false),
+      ).resolves.toBeUndefined();
     });
   });
 
@@ -205,7 +234,9 @@ describe('BotNotificationService', () => {
 
     it('swallows errors gracefully', async () => {
       deps.prisma.application.findUnique.mockRejectedValue(new Error('fail'));
-      await expect(service.sendJobCompletedToWorker('app-1')).resolves.toBeUndefined();
+      await expect(
+        service.sendJobCompletedToWorker('app-1'),
+      ).resolves.toBeUndefined();
     });
   });
 
@@ -220,7 +251,9 @@ describe('BotNotificationService', () => {
 
     it('swallows errors gracefully', async () => {
       deps.prisma.application.findUnique.mockRejectedValue(new Error('fail'));
-      await expect(service.sendJobCancelledByEmployerToWorker('app-1')).resolves.toBeUndefined();
+      await expect(
+        service.sendJobCancelledByEmployerToWorker('app-1'),
+      ).resolves.toBeUndefined();
     });
   });
 });

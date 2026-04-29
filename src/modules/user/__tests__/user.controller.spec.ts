@@ -4,20 +4,47 @@ function makeService() {
   return {
     getList: jest.fn().mockResolvedValue({ data: [], total: 0 }),
     createAdmin: jest.fn().mockResolvedValue({
-      id: '1', first_name: 'John', last_name: 'Doe', email: 'j@d.com',
-      role: 'ADMIN', is_active: true, created_at: new Date(), updated_at: new Date(),
+      id: '1',
+      first_name: 'John',
+      last_name: 'Doe',
+      email: 'j@d.com',
+      role: 'ADMIN',
+      is_active: true,
+      created_at: new Date(),
+      updated_at: new Date(),
     }),
     updateAdmin: jest.fn().mockResolvedValue({
-      id: '1', first_name: 'John', last_name: 'Doe', email: 'j@d.com',
-      role: 'ADMIN', is_active: true, last_login_at: null, created_at: new Date(), updated_at: new Date(),
+      id: '1',
+      first_name: 'John',
+      last_name: 'Doe',
+      email: 'j@d.com',
+      role: 'ADMIN',
+      is_active: true,
+      last_login_at: null,
+      created_at: new Date(),
+      updated_at: new Date(),
     }),
     activate: jest.fn().mockResolvedValue({
-      id: '1', first_name: 'John', last_name: 'Doe', email: 'j@d.com',
-      role: 'ADMIN', is_active: true, last_login_at: null, created_at: new Date(), updated_at: new Date(),
+      id: '1',
+      first_name: 'John',
+      last_name: 'Doe',
+      email: 'j@d.com',
+      role: 'ADMIN',
+      is_active: true,
+      last_login_at: null,
+      created_at: new Date(),
+      updated_at: new Date(),
     }),
     deactivate: jest.fn().mockResolvedValue({
-      id: '1', first_name: 'John', last_name: 'Doe', email: 'j@d.com',
-      role: 'ADMIN', is_active: false, last_login_at: null, created_at: new Date(), updated_at: new Date(),
+      id: '1',
+      first_name: 'John',
+      last_name: 'Doe',
+      email: 'j@d.com',
+      role: 'ADMIN',
+      is_active: false,
+      last_login_at: null,
+      created_at: new Date(),
+      updated_at: new Date(),
     }),
     deleteAdmin: jest.fn().mockResolvedValue(undefined),
   };
@@ -39,12 +66,23 @@ describe('UserController', () => {
   });
 
   it('createAdmin() returns formatted user', async () => {
-    const result = await controller.createAdmin({ email: 'j@d.com', password: 'pw', role: 'ADMIN' } as any);
-    expect(result).toMatchObject({ id: '1', firstName: 'John', lastName: 'Doe', email: 'j@d.com' });
+    const result = await controller.createAdmin({
+      email: 'j@d.com',
+      password: 'pw',
+      role: 'ADMIN',
+    } as any);
+    expect(result).toMatchObject({
+      id: '1',
+      firstName: 'John',
+      lastName: 'Doe',
+      email: 'j@d.com',
+    });
   });
 
   it('updateAdmin() returns formatted user', async () => {
-    const result = await controller.updateAdmin('1', { email: 'j@d.com' } as any);
+    const result = await controller.updateAdmin('1', {
+      email: 'j@d.com',
+    } as any);
     expect(result).toMatchObject({ id: '1', firstName: 'John' });
     expect(service.updateAdmin).toHaveBeenCalledWith('1', { email: 'j@d.com' });
   });

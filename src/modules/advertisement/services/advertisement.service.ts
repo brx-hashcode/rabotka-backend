@@ -109,7 +109,10 @@ export class AdvertisementService {
     return ad;
   }
 
-  async update(id: string, dto: UpdateAdvertisementDto): Promise<Advertisement> {
+  async update(
+    id: string,
+    dto: UpdateAdvertisementDto,
+  ): Promise<Advertisement> {
     const ad = await this.findOne(id);
 
     if (!EDITABLE_STATUSES.includes(ad.status)) {
@@ -167,7 +170,9 @@ export class AdvertisementService {
         ...(dto.tags && { tags: dto.tags }),
         ...(dto.startDate && { start_date: new Date(dto.startDate) }),
         ...(dto.endDate && { end_date: new Date(dto.endDate) }),
-        ...(dto.dispatchTime !== undefined && { dispatch_time: dto.dispatchTime }),
+        ...(dto.dispatchTime !== undefined && {
+          dispatch_time: dto.dispatchTime,
+        }),
         ...(dto.targetFilters !== undefined && {
           target_filters: dto.targetFilters as unknown as Prisma.InputJsonValue,
         }),
@@ -179,7 +184,9 @@ export class AdvertisementService {
   async confirmPayment(id: string): Promise<Advertisement> {
     const ad = await this.findOne(id);
     if (ad.payment_status === AdPaymentStatus.PAID) {
-      throw new BadRequestException('Payment is already confirmed for this advertisement');
+      throw new BadRequestException(
+        'Payment is already confirmed for this advertisement',
+      );
     }
     return this.prisma.advertisement.update({
       where: { id },

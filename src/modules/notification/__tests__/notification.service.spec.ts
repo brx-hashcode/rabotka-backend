@@ -17,8 +17,14 @@ describe('NotificationService', () => {
       providers: [
         NotificationService,
         { provide: MailService, useValue: mockMailService },
-        { provide: CalendarLinkService, useValue: { googleCalendarLink: jest.fn().mockReturnValue('') } },
-        { provide: IcsGeneratorService, useValue: { generate: jest.fn().mockReturnValue('') } },
+        {
+          provide: CalendarLinkService,
+          useValue: { googleCalendarLink: jest.fn().mockReturnValue('') },
+        },
+        {
+          provide: IcsGeneratorService,
+          useValue: { generate: jest.fn().mockReturnValue('') },
+        },
       ],
     }).compile();
 

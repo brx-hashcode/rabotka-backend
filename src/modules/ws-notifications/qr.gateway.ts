@@ -13,7 +13,10 @@ import { Server, Socket } from 'socket.io';
 @WebSocketGateway({
   namespace: '/qr',
   cors: {
-    origin: (_origin: string, callback: (err: Error | null, allow?: boolean) => void) => {
+    origin: (
+      _origin: string,
+      callback: (err: Error | null, allow?: boolean) => void,
+    ) => {
       callback(null, true);
     },
     credentials: false,

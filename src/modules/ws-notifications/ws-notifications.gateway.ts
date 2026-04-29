@@ -17,14 +17,21 @@ import type { JwtPayload } from '../auth/guards/jwt-auth.guard';
 @WebSocketGateway({
   namespace: '/admin-notifications',
   cors: {
-    origin: (origin: string, callback: (err: Error | null, allow?: boolean) => void) => {
+    origin: (
+      origin: string,
+      callback: (err: Error | null, allow?: boolean) => void,
+    ) => {
       callback(null, true);
     },
     credentials: true,
   },
 })
 export class WsNotificationsGateway
-  implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect, OnModuleDestroy
+  implements
+    OnGatewayInit,
+    OnGatewayConnection,
+    OnGatewayDisconnect,
+    OnModuleDestroy
 {
   private readonly logger = new Logger(WsNotificationsGateway.name);
   private pubClient: Redis | null = null;
@@ -42,17 +49,22 @@ export class WsNotificationsGateway
   afterInit(): void {
     const rootServer = (this.server as any)?.server ?? this.server;
     if (!rootServer?.adapter) {
-      this.logger.debug('Socket.IO server not ready for Redis adapter, skipping');
+      this.logger.debug(
+        'Socket.IO server not ready for Redis adapter, skipping',
+      );
       return;
     }
 
     try {
       this.pubClient = this.redis.duplicate();
       this.subClient = this.redis.duplicate();
-      (rootServer as any).adapter(createAdapter(this.pubClient, this.subClient));
+      rootServer.adapter(createAdapter(this.pubClient, this.subClient));
       this.logger.log('Socket.IO Redis adapter attached');
     } catch (err) {
-      this.logger.warn('Failed to attach Redis adapter, running single-instance:', err);
+      this.logger.warn(
+        'Failed to attach Redis adapter, running single-instance:',
+        err,
+      );
     }
   }
 

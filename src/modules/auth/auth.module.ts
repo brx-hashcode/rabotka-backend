@@ -40,6 +40,13 @@ import { QrGateway } from '../ws-notifications/qr.gateway';
   ],
   controllers: [AuthController],
   providers: [AuthService, JwtAuthGuard, AdminAuthGuard, RolesGuard, QrGateway],
-  exports: [AuthService, JwtAuthGuard, AdminAuthGuard, RolesGuard, JwtModule, QrGateway],
+  exports: [
+    AuthService,
+    JwtAuthGuard,
+    AdminAuthGuard,
+    RolesGuard,
+    JwtModule,
+    QrGateway,
+  ],
 })
 export class AuthModule {}

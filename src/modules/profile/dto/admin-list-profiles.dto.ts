@@ -15,7 +15,10 @@ import { AccountStatus, ProfileType, VerificationStatus } from '@prisma/client';
 function toArray(value: unknown): string[] {
   if (Array.isArray(value)) return value.filter((v) => typeof v === 'string');
   if (typeof value === 'string' && value.trim()) {
-    return value.split(',').map((s) => s.trim()).filter(Boolean);
+    return value
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
   }
   return [];
 }
@@ -55,14 +58,22 @@ export class AdminListProfilesDto {
   @IsString()
   q?: string;
 
-  @ApiPropertyOptional({ description: 'Filter by account status', enum: AccountStatus, isArray: true })
+  @ApiPropertyOptional({
+    description: 'Filter by account status',
+    enum: AccountStatus,
+    isArray: true,
+  })
   @IsOptional()
   @Transform(({ value }) => toArray(value))
   @IsArray()
   @IsEnum(AccountStatus, { each: true })
   status?: AccountStatus[];
 
-  @ApiPropertyOptional({ description: 'Filter by profile type', enum: ProfileType, isArray: true })
+  @ApiPropertyOptional({
+    description: 'Filter by profile type',
+    enum: ProfileType,
+    isArray: true,
+  })
   @IsOptional()
   @Transform(({ value }) => toArray(value))
   @IsArray()

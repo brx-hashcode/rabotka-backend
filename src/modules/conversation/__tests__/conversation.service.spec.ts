@@ -34,7 +34,10 @@ describe('ConversationService', () => {
         { provide: PrismaService, useValue: mockPrismaService },
         { provide: BotOrchestratorService, useValue: mockBotOrchestrator },
         { provide: WhatsAppService, useValue: mockWhatsApp },
-        { provide: REDIS_CONNECTION, useValue: { get: jest.fn(), set: jest.fn(), del: jest.fn() } },
+        {
+          provide: REDIS_CONNECTION,
+          useValue: { get: jest.fn(), set: jest.fn(), del: jest.fn() },
+        },
       ],
     }).compile();
 
@@ -56,7 +59,9 @@ describe('ConversationService', () => {
     });
 
     it('upserts conversation, saves message, and calls bot orchestrator', async () => {
-      (prisma.profile.findUnique as jest.Mock).mockResolvedValue({ id: PROFILE_ID });
+      (prisma.profile.findUnique as jest.Mock).mockResolvedValue({
+        id: PROFILE_ID,
+      });
 
       const result = await service.handleIncomingMessage(PHONE, 'Hello');
 
@@ -66,13 +71,24 @@ describe('ConversationService', () => {
         'INBOUND',
         'Hello',
       );
-      expect(botOrchestrator.handle).toHaveBeenCalledWith(PROFILE_ID, PHONE, 'Hello');
+      expect(botOrchestrator.handle).toHaveBeenCalledWith(
+        PROFILE_ID,
+        PHONE,
+        'Hello',
+      );
       expect(result.replies).toEqual(['Hello from bot']);
     });
 
     it('filters out empty/falsy replies from bot', async () => {
-      (prisma.profile.findUnique as jest.Mock).mockResolvedValue({ id: PROFILE_ID });
-      (botOrchestrator.handle as jest.Mock).mockResolvedValue(['Valid reply', '', null, 'Another reply']);
+      (prisma.profile.findUnique as jest.Mock).mockResolvedValue({
+        id: PROFILE_ID,
+      });
+      (botOrchestrator.handle as jest.Mock).mockResolvedValue([
+        'Valid reply',
+        '',
+        null,
+        'Another reply',
+      ]);
 
       const result = await service.handleIncomingMessage(PHONE, 'Hello');
 
@@ -80,8 +96,12 @@ describe('ConversationService', () => {
     });
 
     it('still processes message even if saveMessage throws', async () => {
-      (prisma.profile.findUnique as jest.Mock).mockResolvedValue({ id: PROFILE_ID });
-      (whatsApp.saveMessage as jest.Mock).mockRejectedValue(new Error('DB error'));
+      (prisma.profile.findUnique as jest.Mock).mockResolvedValue({
+        id: PROFILE_ID,
+      });
+      (whatsApp.saveMessage as jest.Mock).mockRejectedValue(
+        new Error('DB error'),
+      );
 
       const result = await service.handleIncomingMessage(PHONE, 'Hello');
 

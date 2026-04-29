@@ -6,10 +6,20 @@ import { LoggingInterceptor } from '../logging.interceptor';
 jest.spyOn(Logger.prototype, 'log').mockImplementation(() => {});
 jest.spyOn(Logger.prototype, 'error').mockImplementation(() => {});
 
-function makeContext(method = 'GET', url = '/api/test', ip = '127.0.0.1', statusCode = 200): ExecutionContext {
+function makeContext(
+  method = 'GET',
+  url = '/api/test',
+  ip = '127.0.0.1',
+  statusCode = 200,
+): ExecutionContext {
   return {
     switchToHttp: () => ({
-      getRequest: () => ({ method, url, ip, get: jest.fn().mockReturnValue('Mozilla/5.0') }),
+      getRequest: () => ({
+        method,
+        url,
+        ip,
+        get: jest.fn().mockReturnValue('Mozilla/5.0'),
+      }),
       getResponse: () => ({ statusCode }),
     }),
   } as unknown as ExecutionContext;
@@ -29,7 +39,9 @@ describe('LoggingInterceptor', () => {
 
     interceptor.intercept(ctx, handler).subscribe({
       next: () => {
-        expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('GET /health'));
+        expect(logSpy).toHaveBeenCalledWith(
+          expect.stringContaining('GET /health'),
+        );
         done();
       },
     });
@@ -43,7 +55,9 @@ describe('LoggingInterceptor', () => {
 
     interceptor.intercept(ctx, handler).subscribe({
       error: () => {
-        expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('POST /api/fail'));
+        expect(errorSpy).toHaveBeenCalledWith(
+          expect.stringContaining('POST /api/fail'),
+        );
         done();
       },
     });

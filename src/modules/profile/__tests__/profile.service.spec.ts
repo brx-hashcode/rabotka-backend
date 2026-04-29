@@ -121,7 +121,9 @@ function makeConfigService() {
 
 function makeDocumentService() {
   return {
-    fillDocumentTemplateAsPdf: jest.fn().mockResolvedValue(Buffer.from('pdf-content')),
+    fillDocumentTemplateAsPdf: jest
+      .fn()
+      .mockResolvedValue(Buffer.from('pdf-content')),
   };
 }
 
@@ -150,9 +152,15 @@ describe('ProfileService', () => {
       configService as any,
       {} as any, // mailService
       { emit: jest.fn() } as any, // eventEmitter
-      { getProfileWalletBalance: jest.fn().mockResolvedValue(0), grantWelcomeCredit: jest.fn().mockResolvedValue(undefined) } as any, // walletService
+      {
+        getProfileWalletBalance: jest.fn().mockResolvedValue(0),
+        grantWelcomeCredit: jest.fn().mockResolvedValue(undefined),
+      } as any, // walletService
       documentService as any, // documentService
-      { indexWorkerProfile: jest.fn().mockResolvedValue(undefined), indexEmployerProfile: jest.fn().mockResolvedValue(undefined) } as any, // matchingService
+      {
+        indexWorkerProfile: jest.fn().mockResolvedValue(undefined),
+        indexEmployerProfile: jest.fn().mockResolvedValue(undefined),
+      } as any, // matchingService
     );
   });
 
@@ -573,7 +581,8 @@ describe('ProfileService', () => {
       id: 'doc-1',
       title: 'Accord Plateforme',
       category: 'AGREEMENT',
-      mime_type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      mime_type:
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       created_at: new Date(),
     };
     const profile = {

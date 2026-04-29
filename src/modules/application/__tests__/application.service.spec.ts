@@ -124,8 +124,14 @@ describe('ApplicationService', () => {
           },
         },
         { provide: EventEmitter2, useValue: { emit: jest.fn() } },
-        { provide: ContactUnlockService, useValue: { initiateUnlock: jest.fn().mockResolvedValue(undefined) } },
-        { provide: ContractService, useValue: { create: jest.fn().mockResolvedValue(undefined) } },
+        {
+          provide: ContactUnlockService,
+          useValue: { initiateUnlock: jest.fn().mockResolvedValue(undefined) },
+        },
+        {
+          provide: ContractService,
+          useValue: { create: jest.fn().mockResolvedValue(undefined) },
+        },
       ],
     }).compile();
 

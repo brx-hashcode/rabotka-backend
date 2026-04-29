@@ -63,7 +63,9 @@ function makePrisma() {
     contract: {
       findUnique: jest.fn().mockResolvedValue(null),
       create: jest.fn().mockResolvedValue(baseContract),
-      update: jest.fn().mockResolvedValue({ ...baseContract, status: 'DOWNLOADED' }),
+      update: jest
+        .fn()
+        .mockResolvedValue({ ...baseContract, status: 'DOWNLOADED' }),
     },
     document: {
       findFirst: jest.fn().mockResolvedValue(baseTemplate),
@@ -145,14 +147,16 @@ describe('ContractService', () => {
     });
 
     it('throws ForbiddenException for unrelated profile', async () => {
-      await expect(service.download('contract-1', 'stranger-99')).rejects.toThrow(
-        ForbiddenException,
-      );
+      await expect(
+        service.download('contract-1', 'stranger-99'),
+      ).rejects.toThrow(ForbiddenException);
     });
 
     it('throws NotFoundException when contract does not exist', async () => {
       prisma.contract.findUnique.mockResolvedValue(null);
-      await expect(service.download('missing', 'worker-1')).rejects.toThrow(NotFoundException);
+      await expect(service.download('missing', 'worker-1')).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('throws NotFoundException when no CONTRACT template exists', async () => {

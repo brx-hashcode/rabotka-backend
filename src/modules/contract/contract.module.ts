@@ -1,5 +1,8 @@
 import { Module, forwardRef } from '@nestjs/common';
-import { ContractController, AdminContractController } from './contract.controller';
+import {
+  ContractController,
+  AdminContractController,
+} from './contract.controller';
 import { ContractService } from './contract.service';
 import { PrismaModule } from '../../common/services/prisma/prisma.module';
 import { AuthModule } from '../auth/auth.module';

@@ -45,7 +45,10 @@ export class BotStateService {
    */
   async set(profileId: string, state: BotState): Promise<void> {
     const key = `${BOT_STATE_KEY_PREFIX}${profileId}`;
-    const value = JSON.stringify({ ...state, updatedAt: new Date().toISOString() });
+    const value = JSON.stringify({
+      ...state,
+      updatedAt: new Date().toISOString(),
+    });
     await this.redis.set(key, value, 'EX', BOT_STATE_TTL_SECONDS);
   }
 
@@ -60,7 +63,10 @@ export class BotStateService {
     expectedFlowId: string | null,
   ): Promise<boolean> {
     const key = `${BOT_STATE_KEY_PREFIX}${profileId}`;
-    const value = JSON.stringify({ ...state, updatedAt: new Date().toISOString() });
+    const value = JSON.stringify({
+      ...state,
+      updatedAt: new Date().toISOString(),
+    });
     const result = await this.redis.eval(
       LUA_CAS_SET,
       1,

@@ -112,7 +112,11 @@ export class QdrantService implements OnModuleInit {
 
   async embed(text: string): Promise<number[]> {
     await this.ensureEmbedders();
-    const results = this.embedder!.embed([text]);
+    const embedder = this.embedder;
+    if (!embedder) {
+      throw new Error('Dense embedder not initialized');
+    }
+    const results = embedder.embed([text]);
     const { value: batch, done } = await results[Symbol.asyncIterator]().next();
     if (done || !batch?.length) {
       throw new Error('Dense embedding produced no output');
@@ -122,8 +126,12 @@ export class QdrantService implements OnModuleInit {
 
   async embedBatch(texts: string[]): Promise<number[][]> {
     await this.ensureEmbedders();
+    const embedder = this.embedder;
+    if (!embedder) {
+      throw new Error('Dense embedder not initialized');
+    }
     const vectors: number[][] = [];
-    for await (const batch of this.embedder!.embed(texts)) {
+    for await (const batch of embedder.embed(texts)) {
       for (const vec of batch) {
         vectors.push(Array.from(vec));
       }
@@ -135,7 +143,11 @@ export class QdrantService implements OnModuleInit {
     text: string,
   ): Promise<{ indices: number[]; values: number[] }> {
     await this.ensureEmbedders();
-    const results = this.sparseEmbedder!.embed([text]);
+    const sparseEmbedder = this.sparseEmbedder;
+    if (!sparseEmbedder) {
+      throw new Error('Sparse embedder not initialized');
+    }
+    const results = sparseEmbedder.embed([text]);
     const { value: batch, done } = await results[Symbol.asyncIterator]().next();
     if (done || !batch?.length) {
       throw new Error('Sparse embedding produced no output');

@@ -11,7 +11,9 @@ jest.mock('nestjs-i18n', () => ({
 }));
 
 function makeI18n() {
-  return { t: jest.fn().mockImplementation((key: string) => `translated:${key}`) };
+  return {
+    t: jest.fn().mockImplementation((key: string) => `translated:${key}`),
+  };
 }
 
 function makeHost(overrides: Record<string, unknown> = {}) {
@@ -56,7 +58,10 @@ describe('I18nExceptionFilter', () => {
   it('handles HttpException with object response', () => {
     const host = makeHost();
     filter.catch(
-      new HttpException({ message: 'Validation failed', error: 'Bad Request' }, 400),
+      new HttpException(
+        { message: 'Validation failed', error: 'Bad Request' },
+        400,
+      ),
       host as any,
     );
     expect(host.response.status).toHaveBeenCalledWith(400);
@@ -65,7 +70,10 @@ describe('I18nExceptionFilter', () => {
   it('handles HttpException with array message', () => {
     const host = makeHost();
     filter.catch(
-      new HttpException({ message: ['field is required', 'name too short'] }, 422),
+      new HttpException(
+        { message: ['field is required', 'name too short'] },
+        422,
+      ),
       host as any,
     );
     expect(host.response.json).toHaveBeenCalledWith(
@@ -78,7 +86,10 @@ describe('I18nExceptionFilter', () => {
     filter.catch(new Error('Unexpected failure'), host as any);
     expect(host.response.status).toHaveBeenCalledWith(500);
     expect(host.response.json).toHaveBeenCalledWith(
-      expect.objectContaining({ statusCode: 500, message: 'Unexpected failure' }),
+      expect.objectContaining({
+        statusCode: 500,
+        message: 'Unexpected failure',
+      }),
     );
   });
 
@@ -99,12 +110,18 @@ describe('I18nExceptionFilter', () => {
     const host = makeHost({ url: '/api/v1/test' });
     filter.catch(new HttpException('Error', 500), host as any);
     expect(host.response.json).toHaveBeenCalledWith(
-      expect.objectContaining({ path: '/api/v1/test', timestamp: expect.any(String) }),
+      expect.objectContaining({
+        path: '/api/v1/test',
+        timestamp: expect.any(String),
+      }),
     );
   });
 
   it('reads accept-language header for language', () => {
-    const host = makeHost({ url: '/api/test', headers: { 'accept-language': 'fr-FR,fr;q=0.9' } });
+    const host = makeHost({
+      url: '/api/test',
+      headers: { 'accept-language': 'fr-FR,fr;q=0.9' },
+    });
     filter.catch(new HttpException('Error', 400), host as any);
     expect(host.response.status).toHaveBeenCalledWith(400);
   });
@@ -123,7 +140,9 @@ describe('I18nExceptionFilter', () => {
   });
 
   it('falls back to original message when translation throws', () => {
-    i18n.t.mockImplementationOnce(() => { throw new Error('i18n error'); });
+    i18n.t.mockImplementationOnce(() => {
+      throw new Error('i18n error');
+    });
     const host = makeHost();
     filter.catch(new HttpException('errors.some_key', 400), host as any);
     // Should not throw — falls back to original key

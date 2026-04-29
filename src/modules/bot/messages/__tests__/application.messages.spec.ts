@@ -53,7 +53,9 @@ function makeApplication(overrides = {}): ApplicationForList {
   };
 }
 
-function makeFilledJob(overrides: Partial<FilledJobListItem> = {}): FilledJobListItem {
+function makeFilledJob(
+  overrides: Partial<FilledJobListItem> = {},
+): FilledJobListItem {
   return {
     applicationId: 'a1',
     title: 'Livreur',
@@ -176,22 +178,30 @@ describe('formatMyApplicationsList', () => {
   });
 
   it('renders ACCEPTED status', () => {
-    const msg = formatMyApplicationsList([makeApplication({ status: 'ACCEPTED' })]);
+    const msg = formatMyApplicationsList([
+      makeApplication({ status: 'ACCEPTED' }),
+    ]);
     expect(msg).toContain('ACCEPTÉE');
   });
 
   it('renders VIEWED status', () => {
-    const msg = formatMyApplicationsList([makeApplication({ status: 'VIEWED' })]);
+    const msg = formatMyApplicationsList([
+      makeApplication({ status: 'VIEWED' }),
+    ]);
     expect(msg).toContain("VUE PAR L'EMPLOYEUR");
   });
 
   it('renders REJECTED status', () => {
-    const msg = formatMyApplicationsList([makeApplication({ status: 'REJECTED' })]);
+    const msg = formatMyApplicationsList([
+      makeApplication({ status: 'REJECTED' }),
+    ]);
     expect(msg).toContain('REFUSÉE');
   });
 
   it('renders CANCELLED status', () => {
-    const msg = formatMyApplicationsList([makeApplication({ status: 'CANCELLED' })]);
+    const msg = formatMyApplicationsList([
+      makeApplication({ status: 'CANCELLED' }),
+    ]);
     expect(msg).toContain('ANNULÉE');
   });
 });
@@ -422,7 +432,10 @@ describe('formatFilledJobDetail', () => {
 
 describe('formatJobCompletedToWorker', () => {
   it('includes offer title and amount', () => {
-    const msg = formatJobCompletedToWorker({ offerTitle: 'Livreur', amount: 12000 });
+    const msg = formatJobCompletedToWorker({
+      offerTitle: 'Livreur',
+      amount: 12000,
+    });
     expect(msg).toContain('Livreur');
     expect(msg).toContain('12');
   });

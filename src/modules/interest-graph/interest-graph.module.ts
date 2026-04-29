@@ -8,7 +8,15 @@ import { InterestRecommendationService } from './interest-recommendation.service
 
 @Module({
   imports: [QdrantModule, MatchingModule, PrismaModule],
-  providers: [InterestSignalService, InterestClusterService, InterestRecommendationService],
-  exports: [InterestSignalService, InterestClusterService, InterestRecommendationService],
+  providers: [
+    InterestSignalService,
+    InterestClusterService,
+    InterestRecommendationService,
+  ],
+  exports: [
+    InterestSignalService,
+    InterestClusterService,
+    InterestRecommendationService,
+  ],
 })
 export class InterestGraphModule {}

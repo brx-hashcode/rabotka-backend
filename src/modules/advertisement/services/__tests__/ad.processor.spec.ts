@@ -29,9 +29,18 @@ describe('AdProcessor', () => {
       providers: [
         AdProcessor,
         { provide: PrismaService, useValue: mockPrismaService },
-        { provide: AdTargetingService, useValue: { resolveRecipients: jest.fn() } },
-        { provide: AdLinkTrackingService, useValue: { buildTrackedPayload: jest.fn() } },
-        { provide: AdNotificationService, useValue: { dispatchCreated: jest.fn() } },
+        {
+          provide: AdTargetingService,
+          useValue: { resolveRecipients: jest.fn() },
+        },
+        {
+          provide: AdLinkTrackingService,
+          useValue: { buildTrackedPayload: jest.fn() },
+        },
+        {
+          provide: AdNotificationService,
+          useValue: { dispatchCreated: jest.fn() },
+        },
       ],
     }).compile();
 
@@ -74,14 +83,18 @@ describe('AdProcessor', () => {
         phone: '+242055000000',
       },
     ]);
-    (prisma.adDeliveryLog.create as jest.Mock).mockResolvedValue({ id: 'dl-1' });
+    (prisma.adDeliveryLog.create as jest.Mock).mockResolvedValue({
+      id: 'dl-1',
+    });
     (adLinkTracking.buildTrackedPayload as jest.Mock).mockImplementation(
       async ({ payload }) => ({
         ...payload,
         ctaUrl: 'https://app.rabotka.co/r/tracked',
       }),
     );
-    (adNotificationService.dispatchCreated as jest.Mock).mockResolvedValue(undefined);
+    (adNotificationService.dispatchCreated as jest.Mock).mockResolvedValue(
+      undefined,
+    );
     (prisma.advertisement.update as jest.Mock).mockResolvedValue({});
 
     await service.process({ data: { type: 'dispatch' } });

@@ -1,5 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { JobOfferService } from '../job-offer.service';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { MailService } from '../../mail/mail.service';
@@ -20,7 +24,8 @@ function futureDate(hoursFromNow = 5): string {
 
 const baseDto = {
   title: 'Plombier pour urgence',
-  description: 'Réparation fuite eau cuisine, remplacement robinet, vérification tuyauterie.',
+  description:
+    'Réparation fuite eau cuisine, remplacement robinet, vérification tuyauterie.',
   scheduled_at: futureDate(5),
   amount: 15000,
   payment_flow: PaymentFlow.DAILY,
@@ -89,9 +94,18 @@ describe('JobOfferService', () => {
         { provide: MailService, useValue: mockMailService },
         { provide: SystemConfigService, useValue: mockSystemConfigService },
         { provide: WalletService, useValue: mockWalletService },
-        { provide: BotNotificationService, useValue: mockBotNotificationService },
+        {
+          provide: BotNotificationService,
+          useValue: mockBotNotificationService,
+        },
         { provide: EventEmitter2, useValue: { emit: jest.fn() } },
-        { provide: MatchingService, useValue: { indexJobOffer: jest.fn().mockResolvedValue(undefined), findMatchingWorkersForJob: jest.fn().mockResolvedValue([]) } },
+        {
+          provide: MatchingService,
+          useValue: {
+            indexJobOffer: jest.fn().mockResolvedValue(undefined),
+            findMatchingWorkersForJob: jest.fn().mockResolvedValue([]),
+          },
+        },
       ],
     }).compile();
 
@@ -117,13 +131,18 @@ describe('JobOfferService', () => {
       const result = await service.create(EMPLOYER_ID, { ...baseDto });
       expect(result.quantity).toBe(2);
       expect(prisma.jobOffer.create).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.objectContaining({ quantity: 2 }) }),
+        expect.objectContaining({
+          data: expect.objectContaining({ quantity: 2 }),
+        }),
       );
     });
 
     it('defaults quantity to 1 when not provided', async () => {
       const dtoWithoutQuantity = { ...baseDto, quantity: undefined as any };
-      (prisma.jobOffer.create as jest.Mock).mockResolvedValue({ ...mockOffer, quantity: 1 });
+      (prisma.jobOffer.create as jest.Mock).mockResolvedValue({
+        ...mockOffer,
+        quantity: 1,
+      });
       const result = await service.create(EMPLOYER_ID, dtoWithoutQuantity);
       expect(result.quantity).toBe(1);
     });
@@ -238,8 +257,18 @@ describe('JobOfferService', () => {
 
     it('omits offers with no open slots (accepted >= quantity)', async () => {
       (prisma.jobOffer.findMany as jest.Mock).mockResolvedValue([
-        { ...mockOffer, id: 'offer-full', quantity: 1, _count: { applications: 1 } },
-        { ...mockOffer, id: 'offer-open', quantity: 2, _count: { applications: 0 } },
+        {
+          ...mockOffer,
+          id: 'offer-full',
+          quantity: 1,
+          _count: { applications: 1 },
+        },
+        {
+          ...mockOffer,
+          id: 'offer-open',
+          quantity: 2,
+          _count: { applications: 0 },
+        },
       ]);
       const result = await service.findActive(5);
       expect(result.data).toHaveLength(1);
@@ -269,7 +298,10 @@ describe('JobOfferService', () => {
 
     it('throws when description is too long', () => {
       expect(() =>
-        service.validateCreateDto({ ...baseDto, description: 'x'.repeat(1001) }),
+        service.validateCreateDto({
+          ...baseDto,
+          description: 'x'.repeat(1001),
+        }),
       ).toThrow(BadRequestException);
     });
 

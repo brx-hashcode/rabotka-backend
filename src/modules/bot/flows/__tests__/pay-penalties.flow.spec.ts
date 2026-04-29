@@ -18,7 +18,9 @@ const workerProfile: BotProfile = {
 };
 
 function makeCtx(
-  markPenaltiesPaid: jest.Mock = jest.fn().mockResolvedValue({ paidCount: 2, totalAmount: 10000 }),
+  markPenaltiesPaid: jest.Mock = jest
+    .fn()
+    .mockResolvedValue({ paidCount: 2, totalAmount: 10000 }),
 ): PayPenaltiesContext {
   return {
     applicationService: {
@@ -29,7 +31,9 @@ function makeCtx(
       debitProfileWallet: jest.fn().mockResolvedValue(undefined),
     } as unknown as PayPenaltiesContext['walletService'],
     paymentService: {
-      createPaymentUrl: jest.fn().mockResolvedValue('https://pay.example.com/pay/token123'),
+      createPaymentUrl: jest
+        .fn()
+        .mockResolvedValue('https://pay.example.com/pay/token123'),
     } as unknown as PayPenaltiesContext['paymentService'],
   };
 }
@@ -63,7 +67,12 @@ describe('runPayPenaltiesFlow()', () => {
   it('goes to menu on "retour" input', async () => {
     const ctx = makeCtx();
     const state = makeState();
-    const result = await runPayPenaltiesFlow(state, 'retour', workerProfile, ctx);
+    const result = await runPayPenaltiesFlow(
+      state,
+      'retour',
+      workerProfile,
+      ctx,
+    );
     expect(result.clearState).toBe(true);
   });
 
@@ -79,12 +88,16 @@ describe('runPayPenaltiesFlow()', () => {
     const state = makeState();
     const result = await runPayPenaltiesFlow(state, '1', workerProfile, ctx);
     expect(result.clearState).toBe(true);
-    expect(ctx.applicationService.markPenaltiesPaid).toHaveBeenCalledWith('worker-1');
+    expect(ctx.applicationService.markPenaltiesPaid).toHaveBeenCalledWith(
+      'worker-1',
+    );
     expect(result.reply[0]).toContain('Paiement enregistré');
   });
 
   it('returns clear account message when no penalties found', async () => {
-    const ctx = makeCtx(jest.fn().mockResolvedValue({ paidCount: 0, totalAmount: 0 }));
+    const ctx = makeCtx(
+      jest.fn().mockResolvedValue({ paidCount: 0, totalAmount: 0 }),
+    );
     const state = makeState();
     const result = await runPayPenaltiesFlow(state, '1', workerProfile, ctx);
     expect(result.clearState).toBe(true);

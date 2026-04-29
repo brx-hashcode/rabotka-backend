@@ -13,7 +13,10 @@ export class InitiatePaymentDto {
   @IsString()
   phone!: string;
 
-  @ApiPropertyOptional({ enum: MONETBIL_OPERATORS, example: 'CG_MTNMOBILEMONEY' })
+  @ApiPropertyOptional({
+    enum: MONETBIL_OPERATORS,
+    example: 'CG_MTNMOBILEMONEY',
+  })
   @IsOptional()
   @IsIn(MONETBIL_OPERATORS)
   operator?: MonetbilOperator;

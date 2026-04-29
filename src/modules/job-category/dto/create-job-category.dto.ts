@@ -13,7 +13,9 @@ export class CreateJobCategoryDto {
   @Transform(({ value }) => value?.trim().toLowerCase())
   @IsString()
   @IsNotEmpty()
-  @Matches(/^[a-z0-9-]+$/, { message: 'Slug must contain only lowercase letters, numbers and hyphens' })
+  @Matches(/^[a-z0-9-]+$/, {
+    message: 'Slug must contain only lowercase letters, numbers and hyphens',
+  })
   slug: string;
 
   @ApiPropertyOptional({ description: 'Short description' })
@@ -22,7 +24,10 @@ export class CreateJobCategoryDto {
   @IsString()
   description?: string;
 
-  @ApiPropertyOptional({ description: 'Emoji or icon identifier', example: '🧹' })
+  @ApiPropertyOptional({
+    description: 'Emoji or icon identifier',
+    example: '🧹',
+  })
   @Transform(({ value }) => value?.trim())
   @IsOptional()
   @IsString()

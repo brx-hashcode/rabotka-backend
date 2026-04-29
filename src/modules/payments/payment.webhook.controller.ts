@@ -7,7 +7,9 @@ export class PaymentWebhookController {
 
   @Post('penalties/:profileId')
   @HttpCode(HttpStatus.OK)
-  async penaltySuccess(@Param('profileId') profileId: string): Promise<{ ok: boolean }> {
+  async penaltySuccess(
+    @Param('profileId') profileId: string,
+  ): Promise<{ ok: boolean }> {
     await this.paymentService.handlePenaltyPaymentSuccess(profileId);
     return { ok: true };
   }

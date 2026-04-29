@@ -129,9 +129,7 @@ async function handleStep1(
     };
   }
 
-  const minDate = new Date(
-    Date.now() + MIN_HOURS_FROM_NOW * 60 * 60 * 1000,
-  );
+  const minDate = new Date(Date.now() + MIN_HOURS_FROM_NOW * 60 * 60 * 1000);
   if (dt < minDate) {
     return {
       reply: [
@@ -147,9 +145,7 @@ async function handleStep1(
       title: String(payload.title),
       description: String(payload.description),
       scheduled_at: toScheduledAtString(dt),
-      ...(payload.amount != null
-        ? { amount: Number(payload.amount) }
-        : {}),
+      ...(payload.amount != null ? { amount: Number(payload.amount) } : {}),
       ...(payload.payment_flow
         ? { payment_flow: payload.payment_flow as PaymentFlow }
         : {}),

@@ -67,9 +67,11 @@ function computeReliabilityBucket(score: number | null | undefined): string {
   return 'Faible';
 }
 
-function computeAmountBucket(amount: { toNumber?: () => number } | number | null | undefined): string {
+function computeAmountBucket(
+  amount: { toNumber?: () => number } | number | null | undefined,
+): string {
   if (amount == null) return 'inconnu';
-  const n = typeof amount === 'number' ? amount : amount.toNumber?.() ?? 0;
+  const n = typeof amount === 'number' ? amount : (amount.toNumber?.() ?? 0);
   if (n <= 0) return 'inconnu';
   if (n < 5000) return 'petit budget';
   if (n <= 20000) return 'budget moyen';
@@ -118,8 +120,12 @@ export class MatchingService {
     description: string | null;
     address: string | null;
     reliability_score?: number | null;
-    categories?: Array<{ category: { name: string; description: string | null } }>;
-    applications?: Array<{ job_offer: { title: string; category: { name: string } | null } }>;
+    categories?: Array<{
+      category: { name: string; description: string | null };
+    }>;
+    applications?: Array<{
+      job_offer: { title: string; category: { name: string } | null };
+    }>;
     completed_count?: number;
     total_terminal_count?: number;
     rejected_categories?: string[];
@@ -153,7 +159,9 @@ export class MatchingService {
       profile.total_terminal_count > 0 &&
       completedCount > 0
     ) {
-      const rate = Math.round((completedCount / profile.total_terminal_count) * 100);
+      const rate = Math.round(
+        (completedCount / profile.total_terminal_count) * 100,
+      );
       parts.push(`Taux de réussite: ${rate}%`);
     }
 
@@ -163,7 +171,9 @@ export class MatchingService {
 
     // Accepted/completed job history
     if (profile.applications && profile.applications.length > 0) {
-      const jobTitles = profile.applications.map((a) => a.job_offer.title).join(', ');
+      const jobTitles = profile.applications
+        .map((a) => a.job_offer.title)
+        .join(', ');
       const jobCategories = [
         ...new Set(
           profile.applications
@@ -208,7 +218,10 @@ export class MatchingService {
 
     // Amount
     if (job.amount != null) {
-      const n = typeof job.amount === 'number' ? job.amount : job.amount.toNumber?.() ?? 0;
+      const n =
+        typeof job.amount === 'number'
+          ? job.amount
+          : (job.amount.toNumber?.() ?? 0);
       if (n > 0) {
         parts.push(`Rémunération: ${n.toLocaleString('fr-FR')} FCFA`);
         parts.push(computeAmountBucket(n));
@@ -217,7 +230,7 @@ export class MatchingService {
 
     // Payment flow in French
     const flowLabels: Record<string, string> = {
-      HOURLY: 'paiement à l\'heure',
+      HOURLY: "paiement à l'heure",
       DAILY: 'paiement journalier',
       MONTHLY: 'paiement mensuel',
     };
@@ -238,7 +251,9 @@ export class MatchingService {
     last_name: string;
     description: string | null;
     address: string | null;
-    categories?: Array<{ category: { name: string; description: string | null } }>;
+    categories?: Array<{
+      category: { name: string; description: string | null };
+    }>;
   }): string {
     const parts: string[] = [
       `${profile.first_name} ${profile.last_name}`.trim(),
@@ -277,7 +292,7 @@ export class MatchingService {
 
     const ranked: ScoredHitWithCategory[] = hits.map((hit) => {
       const profile = profileMap.get(hit.id);
-      const reliabilityFactor = ((profile?.reliability_score ?? 100) / 100);
+      const reliabilityFactor = (profile?.reliability_score ?? 100) / 100;
       const categoryExactMatch =
         jobCategoryId != null &&
         profile?.categories.some((c) => c.category_id === jobCategoryId)
@@ -324,7 +339,9 @@ export class MatchingService {
     ]);
 
     const jobMap = new Map(jobs.map((j) => [j.id, j]));
-    const negativeJobIds = new Set(negativeApplications.map((a) => a.job_offer_id));
+    const negativeJobIds = new Set(
+      negativeApplications.map((a) => a.job_offer_id),
+    );
 
     const ranked: ScoredHitWithCategory[] = hits.map((hit) => {
       const job = jobMap.get(hit.id);
@@ -393,7 +410,10 @@ export class MatchingService {
 
     const negatives: string[] = [];
     for (const [catId, count] of rejectionCounts.entries()) {
-      if (count >= NEGATIVE_CATEGORY_THRESHOLD && !successCategoryIds.has(catId)) {
+      if (
+        count >= NEGATIVE_CATEGORY_THRESHOLD &&
+        !successCategoryIds.has(catId)
+      ) {
         negatives.push(catId);
       }
     }
@@ -418,7 +438,10 @@ export class MatchingService {
           profile_type: true,
           reliability_score: true,
           categories: {
-            select: { category_id: true, category: { select: { name: true, description: true } } },
+            select: {
+              category_id: true,
+              category: { select: { name: true, description: true } },
+            },
           },
           applications: {
             where: { status: { in: ['ACCEPTED', 'END'] } },
@@ -439,14 +462,18 @@ export class MatchingService {
         where: { worker_id: profileId, status: 'END' },
       }),
       this.prisma.application.count({
-        where: { worker_id: profileId, status: { in: ['ACCEPTED', 'END', 'REJECTED', 'CANCELLED'] } },
+        where: {
+          worker_id: profileId,
+          status: { in: ['ACCEPTED', 'END', 'REJECTED', 'CANCELLED'] },
+        },
       }),
     ]);
 
     if (profile?.profile_type !== 'WORKER') return;
 
     try {
-      const negativeCategoryIds = await this.computeNegativeCategoryIds(profileId);
+      const negativeCategoryIds =
+        await this.computeNegativeCategoryIds(profileId);
 
       // Fetch negative category names for embedding text
       const negativeCategoryNames =
@@ -467,9 +494,12 @@ export class MatchingService {
         rejected_categories: negativeCategoryNames,
       });
 
-      const fullName = `${profile.first_name} ${profile.last_name}`.trim() || profileId;
+      const fullName =
+        `${profile.first_name} ${profile.last_name}`.trim() || profileId;
       const categoryIds = profile.categories.map((pc) => pc.category_id);
-      const categoryNames = profile.categories.map((pc) => pc.category.name).join(', ');
+      const categoryNames = profile.categories
+        .map((pc) => pc.category.name)
+        .join(', ');
 
       await this.qdrant.upsertHybrid(COLLECTION_WORKERS, profileId, text, {
         profileId,
@@ -526,7 +556,10 @@ export class MatchingService {
 
     // When the job has no explicit category, fall back to all of the employer's
     // categories so the embedding text carries full domain signal for matching.
-    let employerCategories: Array<{ name: string; description: string | null }> = [];
+    let employerCategories: Array<{
+      name: string;
+      description: string | null;
+    }> = [];
     if (!job.category_id && job.employer_id) {
       const employer = await this.prisma.profile.findUnique({
         where: { id: job.employer_id },
@@ -684,10 +717,17 @@ export class MatchingService {
       const filtered = reRanked.filter((r) => r.score >= MIN_MATCH_SCORE);
 
       // Phase 6: diversity then slice to topN
-      const diverse = diversifyByCategory(filtered, MAX_PER_CATEGORY_WORKERS, topN);
+      const diverse = diversifyByCategory(
+        filtered,
+        MAX_PER_CATEGORY_WORKERS,
+        topN,
+      );
       return diverse;
     } catch (err) {
-      this.logger.error(`findMatchingWorkersForJob failed for ${jobOfferId}`, err);
+      this.logger.error(
+        `findMatchingWorkersForJob failed for ${jobOfferId}`,
+        err,
+      );
       return [];
     }
   }
@@ -710,7 +750,10 @@ export class MatchingService {
         profile_type: true,
         reliability_score: true,
         categories: {
-          select: { category_id: true, category: { select: { name: true, description: true } } },
+          select: {
+            category_id: true,
+            category: { select: { name: true, description: true } },
+          },
         },
         applications: {
           where: { status: { in: ['ACCEPTED', 'END'] } },
@@ -762,16 +805,27 @@ export class MatchingService {
       }
 
       // Phase 3: re-rank with recency, category exact match, negative history
-      const reRanked = await this.reRankJobs(hits, profileId, workerCategoryIds);
+      const reRanked = await this.reRankJobs(
+        hits,
+        profileId,
+        workerCategoryIds,
+      );
 
       // Phase 4: score threshold
       const filtered = reRanked.filter((r) => r.score >= MIN_MATCH_SCORE);
 
       // Phase 6: diversity then slice
-      const diverse = diversifyByCategory(filtered, MAX_PER_CATEGORY_JOBS, topN);
+      const diverse = diversifyByCategory(
+        filtered,
+        MAX_PER_CATEGORY_JOBS,
+        topN,
+      );
       return diverse;
     } catch (err) {
-      this.logger.error(`findMatchingJobsForWorker failed for ${profileId}`, err);
+      this.logger.error(
+        `findMatchingJobsForWorker failed for ${profileId}`,
+        err,
+      );
       return [];
     }
   }
@@ -810,7 +864,11 @@ export class MatchingService {
     try {
       await this.qdrant.ensureCollection(COLLECTION_WORKERS);
       const text = this.buildEmployerText(profile);
-      const results = await this.qdrant.searchHybrid(COLLECTION_WORKERS, text, topN * 2);
+      const results = await this.qdrant.searchHybrid(
+        COLLECTION_WORKERS,
+        text,
+        topN * 2,
+      );
       const hits = mapSearchHitsToScoredIds(results, 'profileId');
       const reRanked = await this.reRankWorkers(hits, null);
       const filtered = reRanked.filter((r) => r.score >= MIN_MATCH_SCORE);
@@ -836,11 +894,19 @@ export class MatchingService {
         select: { id: true },
       }),
       this.prisma.profile.findMany({
-        where: { vector_indexed_at: null, profile_type: 'WORKER', status: 'ACTIVE' },
+        where: {
+          vector_indexed_at: null,
+          profile_type: 'WORKER',
+          status: 'ACTIVE',
+        },
         select: { id: true },
       }),
       this.prisma.profile.findMany({
-        where: { vector_indexed_at: null, profile_type: 'EMPLOYER', status: 'ACTIVE' },
+        where: {
+          vector_indexed_at: null,
+          profile_type: 'EMPLOYER',
+          status: 'ACTIVE',
+        },
         select: { id: true },
       }),
     ]);
@@ -855,7 +921,9 @@ export class MatchingService {
       fn: (id: string) => Promise<void>,
     ) => {
       for (let i = 0; i < items.length; i += BATCH_SIZE) {
-        await Promise.all(items.slice(i, i + BATCH_SIZE).map((item) => fn(item.id)));
+        await Promise.all(
+          items.slice(i, i + BATCH_SIZE).map((item) => fn(item.id)),
+        );
       }
     };
 

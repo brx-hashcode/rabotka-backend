@@ -26,4 +26,6 @@ export const EMPLOYER_GHOST_SCORE_DEDUCTION = 10;
 export const BILLING_BLOCK_THRESHOLD = 2;
 
 /** Number of unpaid penalties that triggers account suspension */
-export const PENALTY_SUSPENSION_THRESHOLD = Number(process.env.PENALTY_THRESHOLD ?? 3);
+export const PENALTY_SUSPENSION_THRESHOLD = Number(
+  process.env.PENALTY_THRESHOLD ?? 3,
+);

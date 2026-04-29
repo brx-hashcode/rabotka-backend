@@ -178,7 +178,9 @@ describe('formatOfferDetailWithActions', () => {
   });
 
   it('does not render score line when employerScore is null', () => {
-    const msg = formatOfferDetailWithActions(makeOffer({ employerScore: null }));
+    const msg = formatOfferDetailWithActions(
+      makeOffer({ employerScore: null }),
+    );
     expect(msg).not.toContain('Fiabilité employeur');
   });
 
@@ -199,7 +201,9 @@ describe('formatOfferDetailWithActions', () => {
 
 describe('formatOfferPublishedSuccess', () => {
   it('includes truncated offer ID', () => {
-    const msg = formatOfferPublishedSuccess('abc12345-xxxx-xxxx-xxxx-xxxxxxxxxxxx');
+    const msg = formatOfferPublishedSuccess(
+      'abc12345-xxxx-xxxx-xxxx-xxxxxxxxxxxx',
+    );
     expect(msg).toContain('#abc12345');
   });
 });

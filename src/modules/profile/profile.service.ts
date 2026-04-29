@@ -248,7 +248,13 @@ export class ProfileService {
   ): Promise<ProfileMeResponse> {
     const existingProfile = await this.prisma.profile.findUnique({
       where: { id },
-      select: { id: true, status: true, first_name: true, last_name: true, profile_type: true },
+      select: {
+        id: true,
+        status: true,
+        first_name: true,
+        last_name: true,
+        profile_type: true,
+      },
     });
 
     if (!existingProfile) {
@@ -548,7 +554,9 @@ export class ProfileService {
           documentCategory: doc.document_category,
           documentUrl: doc.storage_key
             ? await this.fileService.getPresignedUrl(doc.storage_key)
-            : await this.fileService.getPresignedUrlFromPublicUrl(doc.document_url ?? ''),
+            : await this.fileService.getPresignedUrlFromPublicUrl(
+                doc.document_url ?? '',
+              ),
           verificationStatus: doc.verification_status,
           verifiedAt: doc.verified_at,
           verifiedBy: doc.verified_by
@@ -745,7 +753,12 @@ export class ProfileService {
   ): Promise<AdminProfileDetailResponse> {
     const profile = await this.prisma.profile.findUnique({
       where: { id: profileId },
-      select: { id: true, first_name: true, last_name: true, profile_type: true },
+      select: {
+        id: true,
+        first_name: true,
+        last_name: true,
+        profile_type: true,
+      },
     });
     if (!profile) {
       throw new NotFoundException('Profil non trouvé');
@@ -998,7 +1011,10 @@ export class ProfileService {
         createProfileDto,
       );
 
-      if (createProfileDto.categoryIds && createProfileDto.categoryIds.length > 0) {
+      if (
+        createProfileDto.categoryIds &&
+        createProfileDto.categoryIds.length > 0
+      ) {
         await tx.profileCategory.createMany({
           data: createProfileDto.categoryIds.map((categoryId) => ({
             profile_id: createdProfile.id,

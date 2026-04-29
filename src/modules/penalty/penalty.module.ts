@@ -12,7 +12,11 @@ import { PenaltyNotificationProcessor } from './penalty-notification.processor';
 @Module({
   imports: [PrismaModule, AuthModule, WalletModule, LogModule, BotModule],
   controllers: [AdminPenaltyController],
-  providers: [PenaltyService, PenaltyNotificationScheduler, PenaltyNotificationProcessor],
+  providers: [
+    PenaltyService,
+    PenaltyNotificationScheduler,
+    PenaltyNotificationProcessor,
+  ],
   exports: [PenaltyService],
 })
 export class PenaltyModule {}

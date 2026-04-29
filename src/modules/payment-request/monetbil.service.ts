@@ -13,10 +13,10 @@ export type MonetbilInitiateResult = {
 
 /** Status returned by checkPayment */
 export type MonetbilPaymentStatus =
-  | 'SUCCESS'   // transaction.status === "1"
-  | 'FAILED'    // transaction.status === "0"
+  | 'SUCCESS' // transaction.status === "1"
+  | 'FAILED' // transaction.status === "0"
   | 'CANCELLED' // transaction.status === "-1"
-  | 'PENDING';  // no conclusive status yet
+  | 'PENDING'; // no conclusive status yet
 
 export type MonetbilCheckResult = {
   status: MonetbilPaymentStatus;
