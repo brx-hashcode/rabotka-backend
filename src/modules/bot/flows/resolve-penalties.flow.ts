@@ -3,6 +3,7 @@ import { FLOW_IDS, CMD_MENU } from '../bot.constants';
 import { menuMessage } from '../messages/menu.messages';
 import { PrismaService } from 'src/common/services/prisma/prisma.service';
 import type { PaymentService } from '../../payments/payment.service';
+import { PaymentRequestType } from '@prisma/client';
 
 export type ResolvePenaltiesContext = {
   prisma: PrismaService;
@@ -96,6 +97,7 @@ export async function runResolvePenaltiesFlow(
       profile.id,
       total,
       `Règlement de pénalités (${count} pénalité(s))`,
+      PaymentRequestType.PENALTY_RESOLUTION,
     );
 
     return {
