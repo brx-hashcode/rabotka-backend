@@ -7,6 +7,7 @@ import { WsNotificationsListener } from './ws-notifications.listener';
 import { AdminNotificationService } from './admin-notification.service';
 import { AdminNotificationController } from './admin-notification.controller';
 import { PaymentStatusGateway } from './payment-status.gateway';
+import { ClaimCommentsGateway } from './claim-comments.gateway';
 
 @Module({
   imports: [ConfigModule, forwardRef(() => AuthModule), PrismaModule],
@@ -16,7 +17,8 @@ import { PaymentStatusGateway } from './payment-status.gateway';
     WsNotificationsListener,
     AdminNotificationService,
     PaymentStatusGateway,
+    ClaimCommentsGateway,
   ],
-  exports: [WsNotificationsGateway, PaymentStatusGateway],
+  exports: [WsNotificationsGateway, PaymentStatusGateway, ClaimCommentsGateway],
 })
 export class WsNotificationsModule {}

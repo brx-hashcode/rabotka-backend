@@ -8,6 +8,7 @@ import { AdminListClaimsDto } from './dto/admin-list-claims.dto';
 import { CreateCommentDto } from './dto/create-comment.dto';
 import { ClaimStatus } from '@prisma/client';
 import { NotificationService } from '../notification/notification.service';
+import { ClaimCommentsGateway } from '../ws-notifications/claim-comments.gateway';
 
 export type AdminClaimItem = {
   id: string;
@@ -115,6 +116,7 @@ export class ClaimService {
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly claimCommentsGateway: ClaimCommentsGateway,
   ) {}
 
   async createForAdmin(
@@ -348,7 +350,9 @@ export class ClaimService {
       timestamp: new Date().toISOString(),
     });
 
-    return mapComment(comment);
+    const mapped = mapComment(comment);
+    this.claimCommentsGateway.emitNewComment(claimId, mapped as unknown as Record<string, unknown>);
+    return mapped;
   }
 
   async listComments(claimId: string): Promise<AdminClaimCommentItem[]> {
@@ -369,6 +373,7 @@ export class ClaimService {
     });
     if (!comment) throw new NotFoundException('Comment not found');
     await this.prisma.claimComment.delete({ where: { id: commentId } });
+    this.claimCommentsGateway.emitDeletedComment(claimId, commentId);
   }
 
   async createForProfile(
@@ -512,7 +517,9 @@ export class ClaimService {
       timestamp: new Date().toISOString(),
     });
 
-    return mapComment(comment);
+    const mapped = mapComment(comment);
+    this.claimCommentsGateway.emitNewComment(claimId, mapped as unknown as Record<string, unknown>);
+    return mapped;
   }
 
   async deleteCommentAsProfile(
@@ -533,5 +540,6 @@ export class ClaimService {
     });
     if (!comment) throw new NotFoundException('Comment not found');
     await this.prisma.claimComment.delete({ where: { id: commentId } });
+    this.claimCommentsGateway.emitDeletedComment(claimId, commentId);
   }
 }

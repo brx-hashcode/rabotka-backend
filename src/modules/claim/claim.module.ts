@@ -9,9 +9,10 @@ import { ClaimService } from './claim.service';
 import { AuthModule } from '../auth/auth.module';
 import { NotificationModule } from '../notification/notification.module';
 import { LogModule } from '../log/log.module';
+import { WsNotificationsModule } from '../ws-notifications/ws-notifications.module';
 
 @Module({
-  imports: [AuthModule, NotificationModule, LogModule],
+  imports: [AuthModule, NotificationModule, LogModule, WsNotificationsModule],
   controllers: [
     ClaimController,
     ClaimCommentController,
