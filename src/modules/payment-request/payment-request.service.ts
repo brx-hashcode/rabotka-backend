@@ -153,9 +153,14 @@ export class PaymentRequestService {
       throw new BadRequestException('Cette demande a déjà été traitée');
     }
 
+    const activeGateway = await this.systemConfig
+      .getPaymentGatewayDriver()
+      .catch(() => 'MONETBIL');
+
     return {
       id: request.id,
       status: request.status,
+      gateway: activeGateway,
       profileName: this.fullName(request.profile),
       amount: request.amount === null ? null : Number(request.amount),
       description: request.description ?? null,
@@ -232,9 +237,14 @@ export class PaymentRequestService {
       );
     }
 
+    const activeGateway = await this.systemConfig
+      .getPaymentGatewayDriver()
+      .catch(() => 'MONETBIL');
+
     await this.prisma.paymentRequest.update({
       where: { id: request.id },
       data: {
+        gateway: activeGateway,
         gateway_payment_ref: gatewayRef || null,
         monetbil_payment_ref: gatewayRef || null, // keep for backward compat during transition
       },
