@@ -293,6 +293,8 @@ model User {
   last_login_at   DateTime?
   phone_paired_at DateTime?
   phone_name      String?
+  totp_secret     String?
+  totp_enabled    Boolean   @default(false)
 
   files            File[]
   logs             Log[]

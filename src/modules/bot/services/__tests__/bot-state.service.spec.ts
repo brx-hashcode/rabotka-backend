@@ -1,7 +1,10 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { BotStateService } from '../bot-state.service';
 import { REDIS_CONNECTION } from '../../../../common/services/redis/redis.constants';
-import { BOT_STATE_KEY_PREFIX, BOT_STATE_TTL_SECONDS } from '../../bot.constants';
+import {
+  BOT_STATE_KEY_PREFIX,
+  BOT_STATE_TTL_SECONDS,
+} from '../../bot.constants';
 import { FLOW_IDS } from '../../bot.constants';
 
 const PROFILE_ID = 'profile-1';
@@ -62,7 +65,9 @@ describe('BotStateService', () => {
 
     it('uses correct Redis key', async () => {
       await service.get(PROFILE_ID);
-      expect(redis.get).toHaveBeenCalledWith(`${BOT_STATE_KEY_PREFIX}${PROFILE_ID}`);
+      expect(redis.get).toHaveBeenCalledWith(
+        `${BOT_STATE_KEY_PREFIX}${PROFILE_ID}`,
+      );
     });
   });
 
@@ -79,14 +84,14 @@ describe('BotStateService', () => {
 
     it('stored JSON contains flowId and step', async () => {
       await service.set(PROFILE_ID, mockState);
-      const stored = JSON.parse((redis.set as jest.Mock).mock.calls[0][1]);
+      const stored = JSON.parse(redis.set.mock.calls[0][1]);
       expect(stored.flowId).toBe(FLOW_IDS.LIST_OFFERS);
       expect(stored.step).toBe(1);
     });
 
     it('adds/updates updatedAt field', async () => {
       await service.set(PROFILE_ID, mockState);
-      const stored = JSON.parse((redis.set as jest.Mock).mock.calls[0][1]);
+      const stored = JSON.parse(redis.set.mock.calls[0][1]);
       expect(stored.updatedAt).toBeDefined();
     });
   });
@@ -94,7 +99,9 @@ describe('BotStateService', () => {
   describe('clear()', () => {
     it('deletes the Redis key', async () => {
       await service.clear(PROFILE_ID);
-      expect(redis.del).toHaveBeenCalledWith(`${BOT_STATE_KEY_PREFIX}${PROFILE_ID}`);
+      expect(redis.del).toHaveBeenCalledWith(
+        `${BOT_STATE_KEY_PREFIX}${PROFILE_ID}`,
+      );
     });
   });
 });

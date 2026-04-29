@@ -38,7 +38,9 @@ function makeState(overrides: Partial<BotState> = {}): BotState {
   };
 }
 
-function makeCtx(overrides: Partial<UnlockContactContext> = {}): UnlockContactContext {
+function makeCtx(
+  overrides: Partial<UnlockContactContext> = {},
+): UnlockContactContext {
   return {
     contactUnlockService: {
       payUnlock: jest.fn().mockResolvedValue({
@@ -83,7 +85,12 @@ describe('runUnlockContactFlow()', () => {
         payload: {},
         updatedAt: new Date().toISOString(),
       };
-      const result = await runUnlockContactFlow(state, '', workerProfile, makeCtx());
+      const result = await runUnlockContactFlow(
+        state,
+        '',
+        workerProfile,
+        makeCtx(),
+      );
       expect(result.clearState).toBe(true);
       expect(result.reply[0]).toContain('introuvable');
     });
@@ -92,10 +99,17 @@ describe('runUnlockContactFlow()', () => {
   describe('step 1 — no input (prompt)', () => {
     it('shows unlock prompt when balance is 0', async () => {
       const ctx = makeCtx();
-      const result = await runUnlockContactFlow(makeState(), '', workerProfile, ctx);
+      const result = await runUnlockContactFlow(
+        makeState(),
+        '',
+        workerProfile,
+        ctx,
+      );
       expect(result.nextState).toBeDefined();
       expect(result.clearState).toBeFalsy();
-      expect(ctx.walletService.getProfileWalletBalance).toHaveBeenCalledWith('worker-1');
+      expect(ctx.walletService.getProfileWalletBalance).toHaveBeenCalledWith(
+        'worker-1',
+      );
     });
 
     it('shows wallet option when balance is sufficient', async () => {
@@ -104,7 +118,12 @@ describe('runUnlockContactFlow()', () => {
           getProfileWalletBalance: jest.fn().mockResolvedValue(5000),
         } as unknown as UnlockContactContext['walletService'],
       });
-      const result = await runUnlockContactFlow(makeState(), '', workerProfile, ctx);
+      const result = await runUnlockContactFlow(
+        makeState(),
+        '',
+        workerProfile,
+        ctx,
+      );
       expect(result.nextState).toBeDefined();
       expect(result.reply[0]).toContain('1'); // wallet option
     });
@@ -117,7 +136,12 @@ describe('runUnlockContactFlow()', () => {
           getProfileWalletBalance: jest.fn().mockResolvedValue(0),
         } as unknown as UnlockContactContext['walletService'],
       });
-      const result = await runUnlockContactFlow(makeState(), '1', workerProfile, ctx);
+      const result = await runUnlockContactFlow(
+        makeState(),
+        '1',
+        workerProfile,
+        ctx,
+      );
       expect(ctx.paymentService.createPaymentUrl).toHaveBeenCalledWith(
         'worker-1',
         3000,
@@ -134,7 +158,12 @@ describe('runUnlockContactFlow()', () => {
           getProfileWalletBalance: jest.fn().mockResolvedValue(5000),
         } as unknown as UnlockContactContext['walletService'],
       });
-      const result = await runUnlockContactFlow(makeState(), '2', workerProfile, ctx);
+      const result = await runUnlockContactFlow(
+        makeState(),
+        '2',
+        workerProfile,
+        ctx,
+      );
       expect(ctx.paymentService.createPaymentUrl).toHaveBeenCalled();
       expect(result.clearState).toBe(true);
     });
@@ -145,7 +174,12 @@ describe('runUnlockContactFlow()', () => {
           getProfileWalletBalance: jest.fn().mockResolvedValue(0),
         } as unknown as UnlockContactContext['walletService'],
       });
-      const result = await runUnlockContactFlow(makeState(), '2', workerProfile, ctx);
+      const result = await runUnlockContactFlow(
+        makeState(),
+        '2',
+        workerProfile,
+        ctx,
+      );
       // option 2 with 0 balance is "later"
       expect(result.clearState).toBe(true);
       expect(result.reply[0]).toMatch(/contact/);
@@ -167,10 +201,17 @@ describe('runUnlockContactFlow()', () => {
           getContactsIfUnlocked: jest.fn().mockResolvedValue(null),
         } as unknown as UnlockContactContext['contactUnlockService'],
       });
-      const result = await runUnlockContactFlow(makeState(), '1', workerProfile, ctx);
+      const result = await runUnlockContactFlow(
+        makeState(),
+        '1',
+        workerProfile,
+        ctx,
+      );
       expect(result.clearState).toBe(true);
       expect(result.reply[0]).toMatch(/employeur|travailleur/i);
-      expect(ctx.botNotification.sendContactUnlockedNotification).not.toHaveBeenCalled();
+      expect(
+        ctx.botNotification.sendContactUnlockedNotification,
+      ).not.toHaveBeenCalled();
     });
 
     it('pays by wallet, status UNLOCKED → shows contacts inline and notifies', async () => {
@@ -191,12 +232,18 @@ describe('runUnlockContactFlow()', () => {
           }),
         } as unknown as UnlockContactContext['contactUnlockService'],
       });
-      const result = await runUnlockContactFlow(makeState(), '1', workerProfile, ctx);
-      expect(result.clearState).toBe(true);
-      expect(ctx.botNotification.sendContactUnlockedNotification).toHaveBeenCalledWith(
-        'attempt-1',
-        { skipNotifyProfileId: workerProfile.id },
+      const result = await runUnlockContactFlow(
+        makeState(),
+        '1',
+        workerProfile,
+        ctx,
       );
+      expect(result.clearState).toBe(true);
+      expect(
+        ctx.botNotification.sendContactUnlockedNotification,
+      ).toHaveBeenCalledWith('attempt-1', {
+        skipNotifyProfileId: workerProfile.id,
+      });
       expect(result.reply[0]).toContain('Marie Martin');
     });
 
@@ -219,7 +266,9 @@ describe('runUnlockContactFlow()', () => {
         } as unknown as UnlockContactContext['contactUnlockService'],
       });
       await runUnlockContactFlow(makeState(), '1', employerProfile, ctx);
-      const calls = (ctx.botNotification.sendContactUnlockedNotification as jest.Mock).mock.calls;
+      const calls = (
+        ctx.botNotification.sendContactUnlockedNotification as jest.Mock
+      ).mock.calls;
       const attemptIds = calls.map((c) => c[0] as string);
       expect(attemptIds).toContain('attempt-1');
       expect(attemptIds).toContain('attempt-2');
@@ -235,11 +284,18 @@ describe('runUnlockContactFlow()', () => {
           getProfileWalletBalance: jest.fn().mockResolvedValue(5000),
         } as unknown as UnlockContactContext['walletService'],
         contactUnlockService: {
-          payUnlock: jest.fn().mockRejectedValue(new Error('Insufficient funds')),
+          payUnlock: jest
+            .fn()
+            .mockRejectedValue(new Error('Insufficient funds')),
           getContactsIfUnlocked: jest.fn(),
         } as unknown as UnlockContactContext['contactUnlockService'],
       });
-      const result = await runUnlockContactFlow(makeState(), '1', workerProfile, ctx);
+      const result = await runUnlockContactFlow(
+        makeState(),
+        '1',
+        workerProfile,
+        ctx,
+      );
       expect(result.clearState).toBe(true);
       expect(result.reply[0]).toContain('Insufficient funds');
     });
@@ -248,7 +304,12 @@ describe('runUnlockContactFlow()', () => {
   describe('step 1 — unknown input re-prompts', () => {
     it('re-prompts on unrecognised input', async () => {
       const ctx = makeCtx();
-      const result = await runUnlockContactFlow(makeState(), 'xyz', workerProfile, ctx);
+      const result = await runUnlockContactFlow(
+        makeState(),
+        'xyz',
+        workerProfile,
+        ctx,
+      );
       expect(result.nextState).toBeDefined();
       expect(result.clearState).toBeFalsy();
     });

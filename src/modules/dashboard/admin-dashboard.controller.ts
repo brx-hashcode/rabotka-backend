@@ -60,6 +60,8 @@ export class AdminDashboardController {
   })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   async getJobActivity(@Query() dto: JobActivityQueryDto) {
-    return this.dashboardService.getJobActivity(dto.range ?? TimeRange.NINETY_DAYS);
+    return this.dashboardService.getJobActivity(
+      dto.range ?? TimeRange.NINETY_DAYS,
+    );
   }
 }

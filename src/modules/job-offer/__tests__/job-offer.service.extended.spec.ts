@@ -83,9 +83,18 @@ describe('JobOfferService (extended)', () => {
         { provide: MailService, useValue: mockMailService },
         { provide: SystemConfigService, useValue: mockSystemConfigService },
         { provide: WalletService, useValue: mockWalletService },
-        { provide: BotNotificationService, useValue: mockBotNotificationService },
+        {
+          provide: BotNotificationService,
+          useValue: mockBotNotificationService,
+        },
         { provide: EventEmitter2, useValue: { emit: jest.fn() } },
-        { provide: MatchingService, useValue: { indexJobOffer: jest.fn().mockResolvedValue(undefined), findMatchingWorkersForJob: jest.fn().mockResolvedValue([]) } },
+        {
+          provide: MatchingService,
+          useValue: {
+            indexJobOffer: jest.fn().mockResolvedValue(undefined),
+            findMatchingWorkersForJob: jest.fn().mockResolvedValue([]),
+          },
+        },
       ],
     }).compile();
 
@@ -357,10 +366,16 @@ describe('JobOfferService (extended)', () => {
 
   describe('deleteJobOfferByAdmin()', () => {
     it('deletes offer successfully', async () => {
-      (prisma.jobOffer.findUnique as jest.Mock).mockResolvedValue({ id: OFFER_ID });
+      (prisma.jobOffer.findUnique as jest.Mock).mockResolvedValue({
+        id: OFFER_ID,
+      });
       (prisma.jobOffer.delete as jest.Mock).mockResolvedValue(mockOffer);
-      await expect(service.deleteJobOfferByAdmin(OFFER_ID)).resolves.toBeUndefined();
-      expect(prisma.jobOffer.delete).toHaveBeenCalledWith({ where: { id: OFFER_ID } });
+      await expect(
+        service.deleteJobOfferByAdmin(OFFER_ID),
+      ).resolves.toBeUndefined();
+      expect(prisma.jobOffer.delete).toHaveBeenCalledWith({
+        where: { id: OFFER_ID },
+      });
     });
 
     it('throws NotFoundException when not found', async () => {
@@ -411,7 +426,9 @@ describe('JobOfferService (extended)', () => {
       (prisma.jobOffer.update as jest.Mock).mockResolvedValue(mockOffer);
       await service.updateJobOfferByAdmin(OFFER_ID, { note: '' });
       expect(prisma.jobOffer.update).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.objectContaining({ note: null }) }),
+        expect.objectContaining({
+          data: expect.objectContaining({ note: null }),
+        }),
       );
     });
 

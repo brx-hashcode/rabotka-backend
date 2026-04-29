@@ -56,5 +56,4 @@ export class AdminListJobOffersDto {
   @IsArray()
   @IsEnum(JobOfferStatus, { each: true })
   status?: JobOfferStatus[];
-
 }

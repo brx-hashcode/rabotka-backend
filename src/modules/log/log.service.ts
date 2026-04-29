@@ -68,7 +68,12 @@ export class LogService {
     entity_type?: string[];
     created_from?: string;
     created_to?: string;
-  }): Promise<{ data: AdminLogItem[]; total: number; page: number; limit: number }> {
+  }): Promise<{
+    data: AdminLogItem[];
+    total: number;
+    page: number;
+    limit: number;
+  }> {
     const { page, limit, q, entity_type, created_from, created_to } = params;
     const skip = (page - 1) * limit;
 
@@ -90,7 +95,9 @@ export class LogService {
     if (created_from || created_to) {
       where.created_at = {
         ...(created_from ? { gte: new Date(created_from) } : {}),
-        ...(created_to ? { lte: new Date(new Date(created_to).setHours(23, 59, 59, 999)) } : {}),
+        ...(created_to
+          ? { lte: new Date(new Date(created_to).setHours(23, 59, 59, 999)) }
+          : {}),
       };
     }
 
@@ -124,7 +131,9 @@ export class LogService {
       entityType: log.entity_type,
       entityId: log.entity_id,
       userId: log.user_id,
-      userName: log.user ? `${log.user.first_name} ${log.user.last_name}`.trim() : null,
+      userName: log.user
+        ? `${log.user.first_name} ${log.user.last_name}`.trim()
+        : null,
       profileId: log.profile_id,
       profileName: log.profile
         ? `${log.profile.first_name} ${log.profile.last_name}`.trim()

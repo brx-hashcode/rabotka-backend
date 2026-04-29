@@ -40,7 +40,10 @@ describe('MonetbilService', () => {
     it('returns failure when API returns REQUEST_FAILED', async () => {
       (fetch as jest.Mock).mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ status: 'REQUEST_FAILED', message: 'Invalid phone' }),
+        json: async () => ({
+          status: 'REQUEST_FAILED',
+          message: 'Invalid phone',
+        }),
       });
 
       const result = await service.initiatePayment(baseParams);
@@ -78,7 +81,10 @@ describe('MonetbilService', () => {
 
       await service.initiatePayment(baseParams);
 
-      const [url, options] = (fetch as jest.Mock).mock.calls[0] as [string, RequestInit];
+      const [url, options] = (fetch as jest.Mock).mock.calls[0] as [
+        string,
+        RequestInit,
+      ];
       expect(url).toBe('https://api.monetbil.com/payment/v1/placePayment');
       expect(options.method).toBe('POST');
       const body = options.body as string;

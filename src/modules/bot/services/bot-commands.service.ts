@@ -97,7 +97,9 @@ export class BotCommandsService {
     const applications =
       profile.profile_type === 'WORKER'
         ? await this.applicationService.findByWorker(profile.id, { limit: 20 })
-        : await this.applicationService.findByEmployer(profile.id, { limit: 20 });
+        : await this.applicationService.findByEmployer(profile.id, {
+            limit: 20,
+          });
     if (applications.length === 0) {
       return {
         message: formatMyApplicationsList([]),
@@ -139,7 +141,7 @@ export class BotCommandsService {
     if (applications.length === 0) {
       return {
         message:
-          "✅ *Aucun paiement en attente* pour le moment.\n\nTapez *Menu* pour revenir.",
+          '✅ *Aucun paiement en attente* pour le moment.\n\nTapez *Menu* pour revenir.',
       };
     }
 
@@ -168,10 +170,11 @@ export class BotCommandsService {
       return "*SEULS LES EMPLOYEURS PEUVENT VOIR LEURS OFFRES. TAPEZ 'MENU' POUR REVENIR.*";
     }
     const PAGE_SIZE = 5;
-    const { items: pageOffers, total } = await this.jobOfferService.findByEmployerId(
-      profile.id,
-      { page, pageSize: PAGE_SIZE },
-    );
+    const { items: pageOffers, total } =
+      await this.jobOfferService.findByEmployerId(profile.id, {
+        page,
+        pageSize: PAGE_SIZE,
+      });
     if (total === 0) {
       return "*VOUS N'AVEZ PUBLIÉ AUCUNE OFFRE. TAPEZ 'MENU' POUR REVENIR.*";
     }
@@ -180,7 +183,8 @@ export class BotCommandsService {
     const lines = [`*MES OFFRES PUBLIÉES (${total})*`, ''];
     pageOffers.forEach((o, i) => {
       const num = start + i + 1;
-      const title = o.title.length > 40 ? o.title.slice(0, 40) + '...' : o.title;
+      const title =
+        o.title.length > 40 ? o.title.slice(0, 40) + '...' : o.title;
       const dateStr = o.scheduled_at.toLocaleDateString('fr-FR', {
         day: '2-digit',
         month: '2-digit',

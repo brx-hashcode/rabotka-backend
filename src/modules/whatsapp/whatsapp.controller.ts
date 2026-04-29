@@ -22,7 +22,10 @@ import { TwilioService } from '../../common/services/twilio/twilio.service';
 import { QueueService } from '../../common/services/queue/queue.service';
 import { WHATSAPP_OUTBOUND_QUEUE } from '../../common/services/queue/queue.module';
 import type { WhatsAppOutboundJobData } from './whatsapp-outbound.processor';
-import { REDIS_CONNECTION, REDIS_KEY_PREFIX } from '../../common/services/redis/redis.constants';
+import {
+  REDIS_CONNECTION,
+  REDIS_KEY_PREFIX,
+} from '../../common/services/redis/redis.constants';
 
 const MSG_IDEMPOTENCY_TTL = 5 * 60; // 5 minutes
 const RATE_LIMIT_MAX = 30; // max messages per window

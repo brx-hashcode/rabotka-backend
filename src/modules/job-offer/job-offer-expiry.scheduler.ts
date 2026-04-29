@@ -26,7 +26,9 @@ export class JobOfferExpiryScheduler implements OnModuleInit {
     const expired = await this.prisma.jobOffer.findMany({
       where: {
         scheduled_at: { lt: now },
-        status: { in: [JobOfferStatus.ACTIVE, JobOfferStatus.PARTIALLY_FILLED] },
+        status: {
+          in: [JobOfferStatus.ACTIVE, JobOfferStatus.PARTIALLY_FILLED],
+        },
       },
       select: {
         id: true,
@@ -65,7 +67,7 @@ export class JobOfferExpiryScheduler implements OnModuleInit {
           `⏰ *Offre expirée*`,
           '',
           `Votre offre *${job.title}* n'a pas été pourvue et a expiré.`,
-          'Vous pouvez la republier depuis l\'application.',
+          "Vous pouvez la republier depuis l'application.",
         ].join('\n');
         await this.botNotification
           .sendMessage(job.employer.phone, msg)

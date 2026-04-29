@@ -13,7 +13,10 @@ function makeProfileService() {
 }
 
 function makeLogService() {
-  return { getByProfileId: jest.fn().mockResolvedValue([]), create: jest.fn().mockResolvedValue(undefined) };
+  return {
+    getByProfileId: jest.fn().mockResolvedValue([]),
+    create: jest.fn().mockResolvedValue(undefined),
+  };
 }
 
 function makePaymentRequestService() {
@@ -47,7 +50,11 @@ function makeMail() {
 }
 
 function makeWalletService() {
-  return { getProfileWalletForAdmin: jest.fn().mockResolvedValue({ balance: 0, transactions: [] }) };
+  return {
+    getProfileWalletForAdmin: jest
+      .fn()
+      .mockResolvedValue({ balance: 0, transactions: [] }),
+  };
 }
 
 function makeController(prismaProfile: any = null) {
@@ -96,13 +103,31 @@ describe('AdminProfileController', () => {
     it('returns mapped messages', async () => {
       const prisma = makePrisma();
       prisma.message.findMany.mockResolvedValue([
-        { id: 'm1', direction: 'INBOUND', platform: 'WHATSAPP', body: 'hi', created_at: new Date(), sent_by: null },
-        { id: 'm2', direction: 'OUTBOUND', platform: 'WHATSAPP', body: 'bye', created_at: new Date(), sent_by: { first_name: 'A', last_name: 'B' } },
+        {
+          id: 'm1',
+          direction: 'INBOUND',
+          platform: 'WHATSAPP',
+          body: 'hi',
+          created_at: new Date(),
+          sent_by: null,
+        },
+        {
+          id: 'm2',
+          direction: 'OUTBOUND',
+          platform: 'WHATSAPP',
+          body: 'bye',
+          created_at: new Date(),
+          sent_by: { first_name: 'A', last_name: 'B' },
+        },
       ]);
       const ctrl = new AdminProfileController(
-        makeProfileService() as any, makeLogService() as any,
-        makePaymentRequestService() as any, prisma as any,
-        makeWhatsApp() as any, makeMail() as any, makeWalletService() as any,
+        makeProfileService() as any,
+        makeLogService() as any,
+        makePaymentRequestService() as any,
+        prisma as any,
+        makeWhatsApp() as any,
+        makeMail() as any,
+        makeWalletService() as any,
       );
       const result = await ctrl.getMessages('p1');
       expect(result).toHaveLength(2);
@@ -115,21 +140,36 @@ describe('AdminProfileController', () => {
     it('throws NotFoundException when profile not found', async () => {
       const ctrl = makeController(null);
       await expect(
-        ctrl.sendMessage('p1', { channel: 'WHATSAPP', message: 'hi' }, undefined, { user: { userId: 'u1' } }),
+        ctrl.sendMessage(
+          'p1',
+          { channel: 'WHATSAPP', message: 'hi' },
+          undefined,
+          { user: { userId: 'u1' } },
+        ),
       ).rejects.toThrow(NotFoundException);
     });
 
     it('throws BadRequestException when message is empty', async () => {
       const ctrl = makeController({ id: 'p1', phone: '+1234', email: null });
       await expect(
-        ctrl.sendMessage('p1', { channel: 'WHATSAPP', message: '   ' }, undefined, { user: { userId: 'u1' } }),
+        ctrl.sendMessage(
+          'p1',
+          { channel: 'WHATSAPP', message: '   ' },
+          undefined,
+          { user: { userId: 'u1' } },
+        ),
       ).rejects.toThrow(BadRequestException);
     });
 
     it('throws BadRequestException when WHATSAPP channel but no phone', async () => {
       const ctrl = makeController({ id: 'p1', phone: null, email: null });
       await expect(
-        ctrl.sendMessage('p1', { channel: 'WHATSAPP', message: 'hello' }, undefined, { user: { userId: 'u1' } }),
+        ctrl.sendMessage(
+          'p1',
+          { channel: 'WHATSAPP', message: 'hello' },
+          undefined,
+          { user: { userId: 'u1' } },
+        ),
       ).rejects.toThrow(BadRequestException);
     });
 
@@ -137,19 +177,38 @@ describe('AdminProfileController', () => {
       const whatsApp = makeWhatsApp();
       const prisma = makePrisma({ id: 'p1', phone: '+1234', email: null });
       const ctrl = new AdminProfileController(
-        makeProfileService() as any, makeLogService() as any,
-        makePaymentRequestService() as any, prisma as any,
-        whatsApp as any, makeMail() as any, makeWalletService() as any,
+        makeProfileService() as any,
+        makeLogService() as any,
+        makePaymentRequestService() as any,
+        prisma as any,
+        whatsApp as any,
+        makeMail() as any,
+        makeWalletService() as any,
       );
-      const result = await ctrl.sendMessage('p1', { channel: 'WHATSAPP', message: 'hello' }, undefined, { user: { userId: 'u1' } });
-      expect(whatsApp.sendTextMessage).toHaveBeenCalledWith('+1234', expect.stringContaining('hello'), 'p1', 'u1');
+      const result = await ctrl.sendMessage(
+        'p1',
+        { channel: 'WHATSAPP', message: 'hello' },
+        undefined,
+        { user: { userId: 'u1' } },
+      );
+      expect(whatsApp.sendTextMessage).toHaveBeenCalledWith(
+        '+1234',
+        expect.stringContaining('hello'),
+        'p1',
+        'u1',
+      );
       expect(result).toEqual({ success: true });
     });
 
     it('throws BadRequestException when EMAIL channel but no email', async () => {
       const ctrl = makeController({ id: 'p1', phone: null, email: null });
       await expect(
-        ctrl.sendMessage('p1', { channel: 'EMAIL', message: 'hello' }, undefined, { user: { userId: 'u1' } }),
+        ctrl.sendMessage(
+          'p1',
+          { channel: 'EMAIL', message: 'hello' },
+          undefined,
+          { user: { userId: 'u1' } },
+        ),
       ).rejects.toThrow(BadRequestException);
     });
 
@@ -157,11 +216,20 @@ describe('AdminProfileController', () => {
       const mail = makeMail();
       const prisma = makePrisma({ id: 'p1', phone: null, email: 'u@e.com' });
       const ctrl = new AdminProfileController(
-        makeProfileService() as any, makeLogService() as any,
-        makePaymentRequestService() as any, prisma as any,
-        makeWhatsApp() as any, mail as any, makeWalletService() as any,
+        makeProfileService() as any,
+        makeLogService() as any,
+        makePaymentRequestService() as any,
+        prisma as any,
+        makeWhatsApp() as any,
+        mail as any,
+        makeWalletService() as any,
       );
-      const result = await ctrl.sendMessage('p1', { channel: 'EMAIL', message: 'hello' }, undefined, { user: { userId: 'u1' } });
+      const result = await ctrl.sendMessage(
+        'p1',
+        { channel: 'EMAIL', message: 'hello' },
+        undefined,
+        { user: { userId: 'u1' } },
+      );
       expect(mail.sendMail).toHaveBeenCalled();
       expect(prisma.message.create).toHaveBeenCalled();
       expect(result).toEqual({ success: true });
@@ -172,12 +240,20 @@ describe('AdminProfileController', () => {
     const profileService = makeProfileService();
     const logService = makeLogService();
     const ctrl = new AdminProfileController(
-      profileService as any, logService as any,
-      makePaymentRequestService() as any, makePrisma() as any,
-      makeWhatsApp() as any, makeMail() as any, makeWalletService() as any,
+      profileService as any,
+      logService as any,
+      makePaymentRequestService() as any,
+      makePrisma() as any,
+      makeWhatsApp() as any,
+      makeMail() as any,
+      makeWalletService() as any,
     );
-    const result = await ctrl.update('p1', { first_name: 'Jo' } as any, { user: { userId: 'u1' } });
-    expect(profileService.updateProfileByAdmin).toHaveBeenCalledWith('p1', { first_name: 'Jo' });
+    const result = await ctrl.update('p1', { first_name: 'Jo' } as any, {
+      user: { userId: 'u1' },
+    });
+    expect(profileService.updateProfileByAdmin).toHaveBeenCalledWith('p1', {
+      first_name: 'Jo',
+    });
     expect(logService.create).toHaveBeenCalled();
     expect(result).toEqual({ id: 'p1' });
   });
@@ -186,11 +262,20 @@ describe('AdminProfileController', () => {
     const profileService = makeProfileService();
     const logService = makeLogService();
     const ctrl = new AdminProfileController(
-      profileService as any, logService as any,
-      makePaymentRequestService() as any, makePrisma() as any,
-      makeWhatsApp() as any, makeMail() as any, makeWalletService() as any,
+      profileService as any,
+      logService as any,
+      makePaymentRequestService() as any,
+      makePrisma() as any,
+      makeWhatsApp() as any,
+      makeMail() as any,
+      makeWalletService() as any,
     );
-    const result = await ctrl.verify('p1', { decision: 'VERIFIED' as any, reason: 'approved' }, [], { user: { userId: 'u1' } });
+    const result = await ctrl.verify(
+      'p1',
+      { decision: 'VERIFIED' as any, reason: 'approved' },
+      [],
+      { user: { userId: 'u1' } },
+    );
     expect(profileService.verifyProfileKyc).toHaveBeenCalled();
     expect(logService.create).toHaveBeenCalled();
     expect(result).toEqual({ id: 'p1' });
@@ -200,12 +285,23 @@ describe('AdminProfileController', () => {
     const profileService = makeProfileService();
     const logService = makeLogService();
     const ctrl = new AdminProfileController(
-      profileService as any, logService as any,
-      makePaymentRequestService() as any, makePrisma() as any,
-      makeWhatsApp() as any, makeMail() as any, makeWalletService() as any,
+      profileService as any,
+      logService as any,
+      makePaymentRequestService() as any,
+      makePrisma() as any,
+      makeWhatsApp() as any,
+      makeMail() as any,
+      makeWalletService() as any,
     );
-    const result = await ctrl.updateStatus('p1', { status: 'ACTIVE' as any }, { user: { userId: 'u1' } });
-    expect(profileService.updateProfileStatusByAdmin).toHaveBeenCalledWith('p1', 'ACTIVE');
+    const result = await ctrl.updateStatus(
+      'p1',
+      { status: 'ACTIVE' as any },
+      { user: { userId: 'u1' } },
+    );
+    expect(profileService.updateProfileStatusByAdmin).toHaveBeenCalledWith(
+      'p1',
+      'ACTIVE',
+    );
     expect(logService.create).toHaveBeenCalled();
     expect(result).toEqual({ id: 'p1' });
   });
@@ -215,5 +311,4 @@ describe('AdminProfileController', () => {
     const result = await ctrl.sendVerificationLink('p1');
     expect(result).toEqual({ token: 'tok' });
   });
-
 });

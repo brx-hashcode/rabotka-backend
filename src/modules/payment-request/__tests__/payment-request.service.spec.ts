@@ -1,8 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import {
-  BadRequestException,
-  NotFoundException,
-} from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { PaymentRequestService } from '../payment-request.service';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { WhatsAppService } from '../../whatsapp/whatsapp.service';
@@ -36,7 +33,10 @@ const mockProfile = {
   profile_type: 'WORKER',
 };
 
-function makeRequest(status: PaymentRequestStatus, overrides: Record<string, unknown> = {}) {
+function makeRequest(
+  status: PaymentRequestStatus,
+  overrides: Record<string, unknown> = {},
+) {
   return {
     id: REQUEST_ID,
     profile_id: PROFILE_ID,
@@ -70,9 +70,11 @@ describe('PaymentRequestService', () => {
         update: jest.fn(),
         count: jest.fn(),
       },
-      $transaction: jest.fn().mockImplementation((ops: unknown[]) =>
-        Promise.resolve(ops.map(() => ({}))),
-      ),
+      $transaction: jest
+        .fn()
+        .mockImplementation((ops: unknown[]) =>
+          Promise.resolve(ops.map(() => ({}))),
+        ),
     };
 
     const mockWhatsApp = {
@@ -94,17 +96,79 @@ describe('PaymentRequestService', () => {
         { provide: WhatsAppService, useValue: mockWhatsApp },
         { provide: LogService, useValue: mockLog },
         { provide: ConfigService, useValue: mockConfig },
-        { provide: MailService, useValue: { sendMail: jest.fn().mockResolvedValue(undefined), sendActivationEmail: jest.fn(), sendKycRejectedEmail: jest.fn(), sendKycApprovedEmail: jest.fn() } },
-        { provide: PaymentService, useValue: { makePayment: jest.fn().mockResolvedValue({ paymentId: 'pay-1' }) } },
-        { provide: SystemConfigService, useValue: { getRaw: jest.fn().mockResolvedValue('5000'), get: jest.fn().mockResolvedValue('') } },
-        { provide: WalletService, useValue: { getOrCreateSystemWallet: jest.fn().mockResolvedValue({ id: 'sys-wallet' }), getProfileWalletBalance: jest.fn().mockResolvedValue(0) } },
-        { provide: MonetbilService, useValue: { initiatePayment: jest.fn(), verifyWebhookSignature: jest.fn() } },
-        { provide: PaymentStatusGateway, useValue: { emitPaymentStatus: jest.fn() } },
+        {
+          provide: MailService,
+          useValue: {
+            sendMail: jest.fn().mockResolvedValue(undefined),
+            sendActivationEmail: jest.fn(),
+            sendKycRejectedEmail: jest.fn(),
+            sendKycApprovedEmail: jest.fn(),
+          },
+        },
+        {
+          provide: PaymentService,
+          useValue: {
+            makePayment: jest.fn().mockResolvedValue({ paymentId: 'pay-1' }),
+          },
+        },
+        {
+          provide: SystemConfigService,
+          useValue: {
+            getRaw: jest.fn().mockResolvedValue('5000'),
+            get: jest.fn().mockResolvedValue(''),
+          },
+        },
+        {
+          provide: WalletService,
+          useValue: {
+            getOrCreateSystemWallet: jest
+              .fn()
+              .mockResolvedValue({ id: 'sys-wallet' }),
+            getProfileWalletBalance: jest.fn().mockResolvedValue(0),
+          },
+        },
+        {
+          provide: MonetbilService,
+          useValue: {
+            initiatePayment: jest.fn(),
+            verifyWebhookSignature: jest.fn(),
+          },
+        },
+        {
+          provide: PaymentStatusGateway,
+          useValue: { emitPaymentStatus: jest.fn() },
+        },
         { provide: EventEmitter2, useValue: { emit: jest.fn() } },
-        { provide: BotNotificationService, useValue: { sendContactUnlockedNotification: jest.fn().mockResolvedValue(undefined) } },
-        { provide: ContactUnlockService, useValue: { payUnlock: jest.fn(), getContactsIfUnlocked: jest.fn() } },
-        { provide: InvoiceService, useValue: { create: jest.fn().mockResolvedValue({ id: 'inv-1' }), downloadAsAdmin: jest.fn().mockResolvedValue({ buffer: Buffer.from('pdf'), filename: 'invoice.pdf' }) } },
-        { provide: StorageService, useValue: { upload: jest.fn().mockResolvedValue({ url: 'https://cdn.example.com/invoice.pdf' }) } },
+        {
+          provide: BotNotificationService,
+          useValue: {
+            sendContactUnlockedNotification: jest
+              .fn()
+              .mockResolvedValue(undefined),
+          },
+        },
+        {
+          provide: ContactUnlockService,
+          useValue: { payUnlock: jest.fn(), getContactsIfUnlocked: jest.fn() },
+        },
+        {
+          provide: InvoiceService,
+          useValue: {
+            create: jest.fn().mockResolvedValue({ id: 'inv-1' }),
+            downloadAsAdmin: jest.fn().mockResolvedValue({
+              buffer: Buffer.from('pdf'),
+              filename: 'invoice.pdf',
+            }),
+          },
+        },
+        {
+          provide: StorageService,
+          useValue: {
+            upload: jest.fn().mockResolvedValue({
+              url: 'https://cdn.example.com/invoice.pdf',
+            }),
+          },
+        },
       ],
     }).compile();
 
@@ -122,12 +186,15 @@ describe('PaymentRequestService', () => {
         makeRequest(PaymentRequestStatus.PENDING),
       );
 
-      const url = await service.createPaymentUrl(PROFILE_ID, 5000, 'Test payment');
+      const url = await service.createPaymentUrl(
+        PROFILE_ID,
+        5000,
+        'Test payment',
+      );
 
       expect(prisma.paymentRequest.create).toHaveBeenCalled();
       expect(url).toContain('/pay/');
     });
-
   });
 
   describe('getByToken()', () => {
@@ -145,7 +212,9 @@ describe('PaymentRequestService', () => {
     it('throws NotFoundException when token not found', async () => {
       (prisma.paymentRequest.findUnique as jest.Mock).mockResolvedValue(null);
 
-      await expect(service.getByToken('invalid')).rejects.toThrow(NotFoundException);
+      await expect(service.getByToken('invalid')).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('throws BadRequestException when request is already APPROVED', async () => {
@@ -153,7 +222,9 @@ describe('PaymentRequestService', () => {
         makeRequest(PaymentRequestStatus.APPROVED),
       );
 
-      await expect(service.getByToken(TOKEN)).rejects.toThrow(BadRequestException);
+      await expect(service.getByToken(TOKEN)).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('throws BadRequestException when request is already REJECTED', async () => {
@@ -161,7 +232,9 @@ describe('PaymentRequestService', () => {
         makeRequest(PaymentRequestStatus.REJECTED),
       );
 
-      await expect(service.getByToken(TOKEN)).rejects.toThrow(BadRequestException);
+      await expect(service.getByToken(TOKEN)).rejects.toThrow(
+        BadRequestException,
+      );
     });
   });
 
@@ -190,9 +263,9 @@ describe('PaymentRequestService', () => {
     it('throws NotFoundException when token not found', async () => {
       (prisma.paymentRequest.findUnique as jest.Mock).mockResolvedValue(null);
 
-      await expect(
-        service.submitPayment('bad-token', {}),
-      ).rejects.toThrow(NotFoundException);
+      await expect(service.submitPayment('bad-token', {})).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('throws BadRequestException when not PENDING', async () => {
@@ -200,7 +273,9 @@ describe('PaymentRequestService', () => {
         makeRequest(PaymentRequestStatus.SUBMITTED),
       );
 
-      await expect(service.submitPayment(TOKEN, {})).rejects.toThrow(BadRequestException);
+      await expect(service.submitPayment(TOKEN, {})).rejects.toThrow(
+        BadRequestException,
+      );
     });
   });
 
@@ -229,7 +304,12 @@ describe('PaymentRequestService', () => {
       (prisma.paymentRequest.findFirst as jest.Mock).mockResolvedValue(null);
 
       await expect(
-        service.handlePaymentCallback({ payment_ref: 'unknown', status: '1', amount: '5000', phone: '237600000001' }),
+        service.handlePaymentCallback({
+          payment_ref: 'unknown',
+          status: '1',
+          amount: '5000',
+          phone: '237600000001',
+        }),
       ).resolves.not.toThrow();
     });
   });

@@ -60,8 +60,12 @@ export class CreateProfileDto {
   @IsNotEmpty()
   profileType: ProfileType;
 
-  @ApiPropertyOptional({ description: 'Job category IDs (at least one required for all profiles)' })
-  @Transform(({ value }) => (Array.isArray(value) ? value : value != null ? [value] : undefined))
+  @ApiPropertyOptional({
+    description: 'Job category IDs (at least one required for all profiles)',
+  })
+  @Transform(({ value }) =>
+    Array.isArray(value) ? value : value != null ? [value] : undefined,
+  )
   @IsOptional()
   @IsArray()
   @IsUUID('4', { each: true })
@@ -80,6 +84,8 @@ export class CreateProfileDto {
   @ApiProperty({ description: 'User has read and approved platform policies' })
   @Transform(({ value }) => value === true || value === 'true')
   @IsBoolean()
-  @Equals(true, { message: 'You must accept the platform policies to register' })
+  @Equals(true, {
+    message: 'You must accept the platform policies to register',
+  })
   readAndApprovedPolicies: boolean;
 }

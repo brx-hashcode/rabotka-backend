@@ -10,7 +10,10 @@ export class AdReportService {
     return this.analytics.getStats(advertisementId);
   }
 
-  async generateExcel(advertisementId: string, adTitle: string): Promise<Buffer> {
+  async generateExcel(
+    advertisementId: string,
+    adTitle: string,
+  ): Promise<Buffer> {
     const data = await this.analytics.getAnalytics(advertisementId);
     const workbook = new ExcelJS.Workbook();
     workbook.creator = 'Rabotka';
@@ -47,7 +50,12 @@ export class AdReportService {
     ];
     this.styleHeaderRow(timeline, 1);
     for (const pt of data.timeline) {
-      timeline.addRow({ date: pt.date, sent: pt.sent, clicked: pt.clicked, failed: pt.failed });
+      timeline.addRow({
+        date: pt.date,
+        sent: pt.sent,
+        clicked: pt.clicked,
+        failed: pt.failed,
+      });
     }
 
     // ── Sheet 3: Delivery Logs ────────────────────────────────────────────────
@@ -82,7 +90,11 @@ export class AdReportService {
     const row = sheet.getRow(rowNumber);
     row.eachCell((cell) => {
       cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF059669' } };
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FF059669' },
+      };
       cell.alignment = { vertical: 'middle', horizontal: 'center' };
     });
     row.height = 22;

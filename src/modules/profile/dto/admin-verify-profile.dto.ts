@@ -19,9 +19,7 @@ export class AdminVerifyProfileDto {
     description:
       'Admin decision note (required for both approve and reject; stored on the profile)',
   })
-  @Transform(({ value }) =>
-    typeof value === 'string' ? value.trim() : value,
-  )
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
   @IsNotEmpty({ message: 'La raison / la note est requise' })
   reason: string;

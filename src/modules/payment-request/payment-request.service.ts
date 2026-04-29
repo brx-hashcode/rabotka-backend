@@ -219,10 +219,16 @@ export class PaymentRequestService {
       // Revert to PENDING so the user can retry
       await this.prisma.paymentRequest.updateMany({
         where: { id: request.id, status: PaymentRequestStatus.PROCESSING },
-        data: { status: PaymentRequestStatus.PENDING, phone: null, operator: null },
+        data: {
+          status: PaymentRequestStatus.PENDING,
+          phone: null,
+          operator: null,
+        },
       });
       throw new BadRequestException(
-        err instanceof Error ? err.message : "Échec de l'initiation du paiement",
+        err instanceof Error
+          ? err.message
+          : "Échec de l'initiation du paiement",
       );
     }
 
@@ -339,7 +345,11 @@ export class PaymentRequestService {
           { monetbil_payment_ref: gatewayRef },
         ],
       },
-      select: { ...PAYMENT_REQUEST_SELECT, gateway_payment_ref: true, monetbil_payment_ref: true },
+      select: {
+        ...PAYMENT_REQUEST_SELECT,
+        gateway_payment_ref: true,
+        monetbil_payment_ref: true,
+      },
     });
 
     if (!request) {
@@ -366,7 +376,9 @@ export class PaymentRequestService {
           ...(transactionId && { gateway_tx_id: transactionId }),
         },
       });
-      this.logger.log(`Payment rejected for request ${request.id} (status: ${status})`);
+      this.logger.log(
+        `Payment rejected for request ${request.id} (status: ${status})`,
+      );
       this.paymentStatusGateway.emitPaymentStatus(request.token, 'REJECTED');
     } else {
       this.logger.warn(
@@ -382,7 +394,11 @@ export class PaymentRequestService {
     transactionId?: string,
   ): Promise<void> {
     const context = await this.buildPaymentProcessingContext(request);
-    const claimed = await this.persistApprovedPayment(request, context, transactionId);
+    const claimed = await this.persistApprovedPayment(
+      request,
+      context,
+      transactionId,
+    );
 
     if (!claimed) {
       this.logger.warn(
@@ -467,7 +483,10 @@ export class PaymentRequestService {
         where: {
           id: request.id,
           status: {
-            notIn: [PaymentRequestStatus.APPROVED, PaymentRequestStatus.REJECTED],
+            notIn: [
+              PaymentRequestStatus.APPROVED,
+              PaymentRequestStatus.REJECTED,
+            ],
           },
         },
         data: {

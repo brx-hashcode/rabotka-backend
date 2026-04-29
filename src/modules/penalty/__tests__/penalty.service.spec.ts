@@ -58,7 +58,10 @@ describe('PenaltyService', () => {
       providers: [
         PenaltyService,
         { provide: PrismaService, useValue: mockPrismaService },
-        { provide: WalletService, useValue: { getProfileWalletBalance: jest.fn().mockResolvedValue(0) } },
+        {
+          provide: WalletService,
+          useValue: { getProfileWalletBalance: jest.fn().mockResolvedValue(0) },
+        },
       ],
     }).compile();
 
@@ -68,7 +71,9 @@ describe('PenaltyService', () => {
 
   describe('getPenaltyDetailForAdmin()', () => {
     it('returns formatted penalty detail', async () => {
-      (prisma.penalty.findUnique as jest.Mock).mockResolvedValue(mockPenaltyFull);
+      (prisma.penalty.findUnique as jest.Mock).mockResolvedValue(
+        mockPenaltyFull,
+      );
 
       const result = await service.getPenaltyDetailForAdmin(PENALTY_ID);
 
@@ -85,15 +90,19 @@ describe('PenaltyService', () => {
     it('throws NotFoundException when penalty not found', async () => {
       (prisma.penalty.findUnique as jest.Mock).mockResolvedValue(null);
 
-      await expect(service.getPenaltyDetailForAdmin(PENALTY_ID)).rejects.toThrow(
-        NotFoundException,
-      );
+      await expect(
+        service.getPenaltyDetailForAdmin(PENALTY_ID),
+      ).rejects.toThrow(NotFoundException);
     });
 
     it('formats workerName as "—" when no name', async () => {
       (prisma.penalty.findUnique as jest.Mock).mockResolvedValue({
         ...mockPenaltyFull,
-        worker: { ...mockPenaltyFull.worker, first_name: null, last_name: null },
+        worker: {
+          ...mockPenaltyFull.worker,
+          first_name: null,
+          last_name: null,
+        },
       });
 
       const result = await service.getPenaltyDetailForAdmin(PENALTY_ID);
@@ -137,7 +146,9 @@ describe('PenaltyService', () => {
     };
 
     beforeEach(() => {
-      (prisma.penalty.findMany as jest.Mock).mockResolvedValue([mockPenaltyListItem]);
+      (prisma.penalty.findMany as jest.Mock).mockResolvedValue([
+        mockPenaltyListItem,
+      ]);
       (prisma.penalty.count as jest.Mock).mockResolvedValue(1);
     });
 

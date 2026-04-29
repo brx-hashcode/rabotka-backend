@@ -34,9 +34,7 @@ export class MatchingController {
   })
   async reindex(): Promise<{ message: string }> {
     // Fire-and-forget — runs in background, returns immediately
-    this.runReindex().catch((err) =>
-      this.logger.error('Re-index failed', err),
-    );
+    this.runReindex().catch((err) => this.logger.error('Re-index failed', err));
     return { message: 'Re-indexing started in background' };
   }
 

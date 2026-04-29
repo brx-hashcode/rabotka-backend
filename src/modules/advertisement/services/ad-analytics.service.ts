@@ -39,7 +39,7 @@ export interface AdDeliveryLogItem {
 }
 
 export interface AdDispatchEvent {
-  day: string;         // "YYYY-MM-DD" UTC
+  day: string; // "YYYY-MM-DD" UTC
   dispatchedAt: string; // ISO UTC timestamp of the first delivery in that batch
 }
 
@@ -83,7 +83,12 @@ export class AdAnalyticsService {
       if (!log.sent_at) continue;
 
       const date = log.sent_at.toISOString().slice(0, 10);
-      const point = grouped.get(date) ?? { date, sent: 0, clicked: 0, failed: 0 };
+      const point = grouped.get(date) ?? {
+        date,
+        sent: 0,
+        clicked: 0,
+        failed: 0,
+      };
 
       point.sent += 1;
       if (log.clicked_at) point.clicked += 1;
@@ -123,17 +128,30 @@ export class AdAnalyticsService {
       }),
     ]);
 
-    const successfulStatuses = new Set(['SENT', 'DELIVERED', 'OPENED', 'CLICKED']);
+    const successfulStatuses = new Set([
+      'SENT',
+      'DELIVERED',
+      'OPENED',
+      'CLICKED',
+    ]);
     const totalSent = deliveryLogs.filter((l) =>
       successfulStatuses.has(l.status),
     ).length;
     const totalOpened = deliveryLogs.filter((l) => l.opened_at != null).length;
-    const clickedDeliveries = deliveryLogs.filter((l) => l.clicked_at != null).length;
+    const clickedDeliveries = deliveryLogs.filter(
+      (l) => l.clicked_at != null,
+    ).length;
     const totalClicks = links.reduce((sum, l) => sum + l.click_count, 0);
-    const { openRate, clickRate } = this.toRates(totalSent, totalOpened, totalClicks);
+    const { openRate, clickRate } = this.toRates(
+      totalSent,
+      totalOpened,
+      totalClicks,
+    );
 
     const now = new Date();
-    const remainingDays = Math.floor((ad.end_date.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+    const remainingDays = Math.floor(
+      (ad.end_date.getTime() - now.getTime()) / (1000 * 60 * 60 * 24),
+    );
 
     return {
       totalSent,
@@ -159,39 +177,40 @@ export class AdAnalyticsService {
     });
     if (!ad) throw new NotFoundException('Advertisement not found');
 
-    const [links, deliveryLogs, dispatchEvents, aggregates] = await Promise.all([
-      this.prisma.adTrackedLink.findMany({
-        where: { advertisement_id: advertisementId },
-        select: {
-          hash: true,
-          original_url: true,
-          click_count: true,
-          last_clicked_at: true,
-        },
-        orderBy: [{ click_count: 'desc' }, { created_at: 'asc' }],
-      }),
-      this.prisma.adDeliveryLog.findMany({
-        where: { advertisement_id: advertisementId },
-        select: {
-          id: true,
-          profile_id: true,
-          channel: true,
-          status: true,
-          sent_at: true,
-          opened_at: true,
-          clicked_at: true,
-          failure_reason: true,
-          profile: {
-            select: {
-              first_name: true,
-              last_name: true,
-              email: true,
+    const [links, deliveryLogs, dispatchEvents, aggregates] = await Promise.all(
+      [
+        this.prisma.adTrackedLink.findMany({
+          where: { advertisement_id: advertisementId },
+          select: {
+            hash: true,
+            original_url: true,
+            click_count: true,
+            last_clicked_at: true,
+          },
+          orderBy: [{ click_count: 'desc' }, { created_at: 'asc' }],
+        }),
+        this.prisma.adDeliveryLog.findMany({
+          where: { advertisement_id: advertisementId },
+          select: {
+            id: true,
+            profile_id: true,
+            channel: true,
+            status: true,
+            sent_at: true,
+            opened_at: true,
+            clicked_at: true,
+            failure_reason: true,
+            profile: {
+              select: {
+                first_name: true,
+                last_name: true,
+                email: true,
+              },
             },
           },
-        },
-        orderBy: [{ sent_at: 'desc' }, { id: 'desc' }],
-      }),
-      this.prisma.$queryRaw<{ day: string; dispatched_at: string }[]>`
+          orderBy: [{ sent_at: 'desc' }, { id: 'desc' }],
+        }),
+        this.prisma.$queryRaw<{ day: string; dispatched_at: string }[]>`
         SELECT
           TO_CHAR(DATE_TRUNC('day', sent_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS day,
           TO_CHAR(MIN(sent_at) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS dispatched_at
@@ -202,7 +221,15 @@ export class AdAnalyticsService {
         GROUP BY DATE_TRUNC('day', sent_at AT TIME ZONE 'UTC')
         ORDER BY 1
       `,
-      this.prisma.$queryRaw<[{ total_sent: bigint; total_opened: bigint; clicked_deliveries: bigint }]>`
+        this.prisma.$queryRaw<
+          [
+            {
+              total_sent: bigint;
+              total_opened: bigint;
+              clicked_deliveries: bigint;
+            },
+          ]
+        >`
         SELECT
           COUNT(*) FILTER (WHERE status IN ('SENT', 'DELIVERED', 'OPENED', 'CLICKED')) AS total_sent,
           COUNT(*) FILTER (WHERE opened_at IS NOT NULL)                                AS total_opened,
@@ -210,17 +237,24 @@ export class AdAnalyticsService {
         FROM "ad_delivery_logs"
         WHERE advertisement_id = ${advertisementId}::uuid
       `,
-    ]);
+      ],
+    );
 
     const { total_sent, total_opened, clicked_deliveries } = aggregates[0];
     const totalSent = Number(total_sent);
     const totalOpened = Number(total_opened);
     const clickedDeliveries = Number(clicked_deliveries);
     const totalClicks = links.reduce((sum, l) => sum + l.click_count, 0);
-    const { openRate, clickRate } = this.toRates(totalSent, totalOpened, totalClicks);
+    const { openRate, clickRate } = this.toRates(
+      totalSent,
+      totalOpened,
+      totalClicks,
+    );
 
     const now = new Date();
-    const remainingDays = Math.floor((ad.end_date.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+    const remainingDays = Math.floor(
+      (ad.end_date.getTime() - now.getTime()) / (1000 * 60 * 60 * 24),
+    );
 
     return {
       totalSent,
@@ -267,7 +301,9 @@ export class AdAnalyticsService {
     const now = new Date();
 
     return ads.map((ad) => {
-      const remainingDays = Math.floor((ad.end_date.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+      const remainingDays = Math.floor(
+        (ad.end_date.getTime() - now.getTime()) / (1000 * 60 * 60 * 24),
+      );
 
       return {
         id: ad.id,

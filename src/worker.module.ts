@@ -67,8 +67,10 @@ export class WorkerModule {
       systemConfigProvider,
       {
         provide: TwilioService,
-        useFactory: (config: ConfigService, systemConfig: SystemConfigService) =>
-          new TwilioService(config, systemConfig),
+        useFactory: (
+          config: ConfigService,
+          systemConfig: SystemConfigService,
+        ) => new TwilioService(config, systemConfig),
         inject: [ConfigService, SystemConfigService],
       },
       {

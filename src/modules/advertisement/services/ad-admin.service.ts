@@ -4,13 +4,12 @@ import {
   BadRequestException,
   Logger,
 } from '@nestjs/common';
-import {
-  AdStatus,
-  Advertisement,
-  AdvertisementBundle,
-} from '@prisma/client';
+import { AdStatus, Advertisement, AdvertisementBundle } from '@prisma/client';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
-import { CreateBundleDto, expandBundleChannels } from '../dto/create-bundle.dto';
+import {
+  CreateBundleDto,
+  expandBundleChannels,
+} from '../dto/create-bundle.dto';
 import { UpdateBundleDto } from '../dto/update-bundle.dto';
 
 @Injectable()
@@ -99,8 +98,12 @@ export class AdAdminService {
         ...(dto.maxDurationDays !== undefined && {
           max_duration_days: dto.maxDurationDays,
         }),
-        ...(dto.allowedChannels && { allowed_channels: expandBundleChannels(dto.allowedChannels) }),
-        ...(dto.targetAudience !== undefined && { target_audience: dto.targetAudience }),
+        ...(dto.allowedChannels && {
+          allowed_channels: expandBundleChannels(dto.allowedChannels),
+        }),
+        ...(dto.targetAudience !== undefined && {
+          target_audience: dto.targetAudience,
+        }),
         ...(dto.isActive !== undefined && { is_active: dto.isActive }),
       },
     });

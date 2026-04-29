@@ -24,7 +24,10 @@ export class ReminderSchedulerService implements OnModuleInit {
     } catch (err) {
       // Fatal: without the scan job the entire reminder system is non-functional.
       // Re-throw so NestJS startup fails loudly rather than silently degrading.
-      this.logger.error('Failed to add repeatable reminder scan job — reminder system will not run', err);
+      this.logger.error(
+        'Failed to add repeatable reminder scan job — reminder system will not run',
+        err,
+      );
       throw err;
     }
   }

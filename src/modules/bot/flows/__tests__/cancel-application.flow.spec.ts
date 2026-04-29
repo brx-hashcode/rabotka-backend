@@ -44,11 +44,15 @@ function makeApp(scheduledAt: Date, overrides: Record<string, unknown> = {}) {
   };
 }
 
-function makeCtx(overrides: Partial<CancelApplicationContext> = {}): CancelApplicationContext {
+function makeCtx(
+  overrides: Partial<CancelApplicationContext> = {},
+): CancelApplicationContext {
   return {
     applicationService: {
       findById: jest.fn().mockResolvedValue(makeApp(hoursFromNow(10))),
-      cancel: jest.fn().mockResolvedValue({ penaltyAmount: null, penaltyApplied: false }),
+      cancel: jest
+        .fn()
+        .mockResolvedValue({ penaltyAmount: null, penaltyApplied: false }),
     } as unknown as CancelApplicationContext['applicationService'],
     notificationService: {
       sendCancellationToEmployer: jest.fn().mockResolvedValue(undefined),
@@ -60,7 +64,11 @@ function makeCtx(overrides: Partial<CancelApplicationContext> = {}): CancelAppli
   };
 }
 
-function makeState(applicationId: string, step = 1, extraPayload: Record<string, unknown> = {}): BotState {
+function makeState(
+  applicationId: string,
+  step = 1,
+  extraPayload: Record<string, unknown> = {},
+): BotState {
   return {
     flowId: FLOW_IDS.CANCEL_APPLICATION,
     step,
@@ -74,7 +82,12 @@ describe('runCancelApplicationFlow()', () => {
     it('returns menu on "menu" input', async () => {
       const ctx = makeCtx();
       const state = makeState(APP_ID);
-      const result = await runCancelApplicationFlow(state, 'menu', workerProfile, ctx);
+      const result = await runCancelApplicationFlow(
+        state,
+        'menu',
+        workerProfile,
+        ctx,
+      );
       expect(result.clearState).toBe(true);
     });
 
@@ -86,7 +99,12 @@ describe('runCancelApplicationFlow()', () => {
         payload: {},
         updatedAt: new Date().toISOString(),
       };
-      const result = await runCancelApplicationFlow(state, '', workerProfile, ctx);
+      const result = await runCancelApplicationFlow(
+        state,
+        '',
+        workerProfile,
+        ctx,
+      );
       expect(result.clearState).toBe(true);
       expect(result.reply[0]).toContain('CANDIDATURE NON TROUVÉE');
     });
@@ -94,7 +112,12 @@ describe('runCancelApplicationFlow()', () => {
     it('blocks employer', async () => {
       const ctx = makeCtx();
       const state = makeState(APP_ID);
-      const result = await runCancelApplicationFlow(state, '', employerProfile, ctx);
+      const result = await runCancelApplicationFlow(
+        state,
+        '',
+        employerProfile,
+        ctx,
+      );
       expect(result.clearState).toBe(true);
       expect(result.reply[0]).toContain('WORKERS');
     });
@@ -106,7 +129,12 @@ describe('runCancelApplicationFlow()', () => {
         } as unknown as CancelApplicationContext['applicationService'],
       });
       const state = makeState(APP_ID);
-      const result = await runCancelApplicationFlow(state, '', workerProfile, ctx);
+      const result = await runCancelApplicationFlow(
+        state,
+        '',
+        workerProfile,
+        ctx,
+      );
       expect(result.clearState).toBe(true);
       expect(result.reply[0]).toContain('CANDIDATURE INTROUVABLE');
     });
@@ -121,18 +149,32 @@ describe('runCancelApplicationFlow()', () => {
         } as unknown as CancelApplicationContext['applicationService'],
       });
       const state = makeState(APP_ID);
-      const result = await runCancelApplicationFlow(state, '', workerProfile, ctx);
+      const result = await runCancelApplicationFlow(
+        state,
+        '',
+        workerProfile,
+        ctx,
+      );
       expect(result.clearState).toBe(true);
     });
 
     it('returns error when application is not PENDING or ACCEPTED', async () => {
       const ctx = makeCtx({
         applicationService: {
-          findById: jest.fn().mockResolvedValue(makeApp(hoursFromNow(10), { status: 'CANCELLED' })),
+          findById: jest
+            .fn()
+            .mockResolvedValue(
+              makeApp(hoursFromNow(10), { status: 'CANCELLED' }),
+            ),
         } as unknown as CancelApplicationContext['applicationService'],
       });
       const state = makeState(APP_ID);
-      const result = await runCancelApplicationFlow(state, '', workerProfile, ctx);
+      const result = await runCancelApplicationFlow(
+        state,
+        '',
+        workerProfile,
+        ctx,
+      );
       expect(result.clearState).toBe(true);
       expect(result.reply[0]).toContain('NE PEUT PLUS');
     });
@@ -142,7 +184,12 @@ describe('runCancelApplicationFlow()', () => {
     it('shows initial cancel prompt on empty input', async () => {
       const ctx = makeCtx();
       const state = makeState(APP_ID);
-      const result = await runCancelApplicationFlow(state, '', workerProfile, ctx);
+      const result = await runCancelApplicationFlow(
+        state,
+        '',
+        workerProfile,
+        ctx,
+      );
       expect(result.nextState).toBeDefined();
       expect(result.reply[0]).toContain('Plombier');
     });
@@ -150,22 +197,41 @@ describe('runCancelApplicationFlow()', () => {
     it('cancels immediately on "1" input', async () => {
       const ctx = makeCtx();
       const state = makeState(APP_ID);
-      const result = await runCancelApplicationFlow(state, '1', workerProfile, ctx);
+      const result = await runCancelApplicationFlow(
+        state,
+        '1',
+        workerProfile,
+        ctx,
+      );
       expect(result.clearState).toBe(true);
-      expect(ctx.applicationService.cancel).toHaveBeenCalledWith(APP_ID, WORKER_ID, undefined);
+      expect(ctx.applicationService.cancel).toHaveBeenCalledWith(
+        APP_ID,
+        WORKER_ID,
+        undefined,
+      );
     });
 
     it('cancels on "confirmer" input', async () => {
       const ctx = makeCtx();
       const state = makeState(APP_ID);
-      const result = await runCancelApplicationFlow(state, 'confirmer', workerProfile, ctx);
+      const result = await runCancelApplicationFlow(
+        state,
+        'confirmer',
+        workerProfile,
+        ctx,
+      );
       expect(result.clearState).toBe(true);
     });
 
     it('keeps candidature on "2" input', async () => {
       const ctx = makeCtx();
       const state = makeState(APP_ID);
-      const result = await runCancelApplicationFlow(state, '2', workerProfile, ctx);
+      const result = await runCancelApplicationFlow(
+        state,
+        '2',
+        workerProfile,
+        ctx,
+      );
       expect(result.clearState).toBe(true);
       expect(result.reply[0]).toContain('maintenue');
     });
@@ -173,9 +239,18 @@ describe('runCancelApplicationFlow()', () => {
     it('cancels with custom reason on free text', async () => {
       const ctx = makeCtx();
       const state = makeState(APP_ID);
-      const result = await runCancelApplicationFlow(state, 'Urgence familiale', workerProfile, ctx);
+      const result = await runCancelApplicationFlow(
+        state,
+        'Urgence familiale',
+        workerProfile,
+        ctx,
+      );
       expect(result.clearState).toBe(true);
-      expect(ctx.applicationService.cancel).toHaveBeenCalledWith(APP_ID, WORKER_ID, 'Urgence familiale');
+      expect(ctx.applicationService.cancel).toHaveBeenCalledWith(
+        APP_ID,
+        WORKER_ID,
+        'Urgence familiale',
+      );
     });
   });
 
@@ -184,11 +259,18 @@ describe('runCancelApplicationFlow()', () => {
       const ctx = makeCtx({
         applicationService: {
           findById: jest.fn().mockResolvedValue(makeApp(hoursFromNow(2))),
-          cancel: jest.fn().mockResolvedValue({ penaltyAmount: 5000, penaltyApplied: true }),
+          cancel: jest
+            .fn()
+            .mockResolvedValue({ penaltyAmount: 5000, penaltyApplied: true }),
         } as unknown as CancelApplicationContext['applicationService'],
       });
       const state = makeState(APP_ID);
-      const result = await runCancelApplicationFlow(state, '', workerProfile, ctx);
+      const result = await runCancelApplicationFlow(
+        state,
+        '',
+        workerProfile,
+        ctx,
+      );
       expect(result.nextState).toBeDefined();
       expect(result.reply[0]).toContain('pénalité');
     });
@@ -200,7 +282,12 @@ describe('runCancelApplicationFlow()', () => {
         } as unknown as CancelApplicationContext['applicationService'],
       });
       const state = makeState(APP_ID);
-      const result = await runCancelApplicationFlow(state, '1', workerProfile, ctx);
+      const result = await runCancelApplicationFlow(
+        state,
+        '1',
+        workerProfile,
+        ctx,
+      );
       // '1' is not recognized as reason in late mode — it moves to step 2 or asks for reason
       expect(result.reply).toBeDefined();
     });
@@ -211,11 +298,18 @@ describe('runCancelApplicationFlow()', () => {
       const ctx = makeCtx({
         applicationService: {
           findById: jest.fn().mockResolvedValue(makeApp(hoursFromNow(2))),
-          cancel: jest.fn().mockResolvedValue({ penaltyAmount: 5000, penaltyApplied: true }),
+          cancel: jest
+            .fn()
+            .mockResolvedValue({ penaltyAmount: 5000, penaltyApplied: true }),
         } as unknown as CancelApplicationContext['applicationService'],
       });
       const state = makeState(APP_ID, 2, { reason: 'Emergency' });
-      const result = await runCancelApplicationFlow(state, '1', workerProfile, ctx);
+      const result = await runCancelApplicationFlow(
+        state,
+        '1',
+        workerProfile,
+        ctx,
+      );
       expect(result.clearState).toBe(true);
     });
 
@@ -226,7 +320,12 @@ describe('runCancelApplicationFlow()', () => {
         } as unknown as CancelApplicationContext['applicationService'],
       });
       const state = makeState(APP_ID, 2, { reason: 'Emergency' });
-      const result = await runCancelApplicationFlow(state, '2', workerProfile, ctx);
+      const result = await runCancelApplicationFlow(
+        state,
+        '2',
+        workerProfile,
+        ctx,
+      );
       expect(result.clearState).toBe(true);
       expect(result.reply[0]).toContain('maintenue');
     });
@@ -238,7 +337,12 @@ describe('runCancelApplicationFlow()', () => {
         } as unknown as CancelApplicationContext['applicationService'],
       });
       const state = makeState(APP_ID, 2, { reason: 'Emergency' });
-      const result = await runCancelApplicationFlow(state, 'maybe', workerProfile, ctx);
+      const result = await runCancelApplicationFlow(
+        state,
+        'maybe',
+        workerProfile,
+        ctx,
+      );
       expect(result.nextState).toBeDefined();
       expect(result.clearState).toBeUndefined();
     });

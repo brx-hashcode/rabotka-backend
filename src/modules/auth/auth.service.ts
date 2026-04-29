@@ -22,6 +22,11 @@ import { MailService } from '../mail/mail.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { sendOtpEmail } from '../mail/templates';
 import { otpMessage } from '../whatsapp/templates';
+import * as otplib from 'otplib';
+import * as QRCode from 'qrcode';
+
+const TOTP_PENDING_PREFIX = `${REDIS_KEY_PREFIX}admin:totp:pending:`; // email → JWT after email OTP
+const TOTP_PENDING_TTL = 300; // 5 min to enter TOTP code
 
 const OTP_TTL_SECONDS = 300;
 const OTP_KEY_PREFIX = `${REDIS_KEY_PREFIX}otp:`;
@@ -177,7 +182,12 @@ export class AuthService {
     const isEmail = this.isEmail(normalized);
 
     const redisKey = `${OTP_KEY_PREFIX}${normalized}`;
-    const matched = await this.redis.eval(LUA_VERIFY_AND_DELETE_OTP, 1, redisKey, otp);
+    const matched = await this.redis.eval(
+      LUA_VERIFY_AND_DELETE_OTP,
+      1,
+      redisKey,
+      otp,
+    );
 
     if (matched !== 1) {
       throw new UnauthorizedException(
@@ -269,7 +279,7 @@ export class AuthService {
   async verifyAdminOtp(
     email: string,
     otp: string,
-  ): Promise<{ success: boolean; token: string }> {
+  ): Promise<{ success: boolean; token: string; totpRequired?: boolean }> {
     const normalized = this.normalize(email);
 
     if (!this.isEmail(normalized)) {
@@ -277,7 +287,12 @@ export class AuthService {
     }
 
     const redisKey = `${ADMIN_OTP_KEY_PREFIX}${normalized}`;
-    const matched = await this.redis.eval(LUA_VERIFY_AND_DELETE_OTP, 1, redisKey, otp);
+    const matched = await this.redis.eval(
+      LUA_VERIFY_AND_DELETE_OTP,
+      1,
+      redisKey,
+      otp,
+    );
 
     if (matched !== 1) {
       throw new UnauthorizedException(
@@ -285,7 +300,10 @@ export class AuthService {
       );
     }
 
-    const user = await this.findUserByEmail(normalized);
+    const user = await this.prisma.user.findUnique({
+      where: { email: normalized },
+      select: { id: true, is_active: true, totp_enabled: true },
+    });
 
     if (!user) {
       throw new NotFoundException('Aucun administrateur trouvé pour cet email');
@@ -293,6 +311,19 @@ export class AuthService {
 
     if (!user.is_active) {
       throw new UnauthorizedException('Ce compte administrateur est inactif');
+    }
+
+    // If TOTP is enabled, issue a short-lived intermediate token stored in Redis
+    // The actual session cookie is only set after the TOTP code is verified.
+    if (user.totp_enabled) {
+      const pendingToken = randomUUID();
+      await this.redis.set(
+        `${TOTP_PENDING_PREFIX}${pendingToken}`,
+        user.id,
+        'EX',
+        TOTP_PENDING_TTL,
+      );
+      return { success: true, token: pendingToken, totpRequired: true };
     }
 
     const payload = { sub: user.id, type: 'admin', jti: randomUUID() };
@@ -314,6 +345,7 @@ export class AuthService {
     role: string;
     phonePairedAt: string | null;
     phoneName: string | null;
+    totpEnabled: boolean;
   }> {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
@@ -325,6 +357,7 @@ export class AuthService {
         role: true,
         phone_paired_at: true,
         phone_name: true,
+        totp_enabled: true,
       },
     });
     if (!user) {
@@ -338,6 +371,7 @@ export class AuthService {
       role: user.role,
       phonePairedAt: user.phone_paired_at?.toISOString() ?? null,
       phoneName: user.phone_name ?? null,
+      totpEnabled: user.totp_enabled,
     };
   }
 
@@ -585,11 +619,16 @@ export class AuthService {
 
   async revokeToken(token: string): Promise<void> {
     try {
-      const payload = this.jwtService.decode(token) as { jti?: string; exp?: number } | null;
+      const payload = this.jwtService.decode(token);
       if (!payload?.jti || !payload.exp) return;
       const ttl = payload.exp - Math.floor(Date.now() / 1000);
       if (ttl > 0) {
-        await this.redis.set(`${JWT_BLOCKLIST_PREFIX}${payload.jti}`, '1', 'EX', ttl);
+        await this.redis.set(
+          `${JWT_BLOCKLIST_PREFIX}${payload.jti}`,
+          '1',
+          'EX',
+          ttl,
+        );
       }
     } catch {
       // Ignore decode errors — token is already invalid
@@ -689,5 +728,124 @@ export class AuthService {
     });
 
     return { token };
+  }
+
+  // ── TOTP ──────────────────────────────────────────────────────────────────
+
+  async setupTotp(
+    userId: string,
+  ): Promise<{ secret: string; qrDataUrl: string }> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { email: true, totp_enabled: true },
+    });
+    if (!user) throw new NotFoundException('Admin not found');
+    if (user.totp_enabled) {
+      throw new BadRequestException('TOTP is already enabled');
+    }
+
+    const secret = otplib.generateSecret();
+    const otpauthUrl = otplib.generateURI({
+      secret,
+      label: `Rabotka Admin:${user.email}`,
+      issuer: 'Rabotka Admin',
+      algorithm: 'sha1',
+      digits: 6,
+      period: 30,
+    });
+    const qrDataUrl = await QRCode.toDataURL(otpauthUrl);
+
+    // Store the pending secret temporarily — only persisted after confirmation
+    await this.redis.set(
+      `${REDIS_KEY_PREFIX}admin:totp:setup:${userId}`,
+      secret,
+      'EX',
+      600,
+    );
+
+    return { secret, qrDataUrl };
+  }
+
+  async enableTotp(userId: string, code: string): Promise<{ success: boolean }> {
+    const pendingSecret = await this.redis.get(
+      `${REDIS_KEY_PREFIX}admin:totp:setup:${userId}`,
+    );
+    if (!pendingSecret) {
+      throw new BadRequestException('No pending TOTP setup found. Start setup again.');
+    }
+
+    const { valid } = await otplib.verify({ token: code, secret: pendingSecret });
+    if (!valid) {
+      throw new UnauthorizedException('Invalid TOTP code');
+    }
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { totp_secret: pendingSecret, totp_enabled: true },
+    });
+    await this.redis.del(`${REDIS_KEY_PREFIX}admin:totp:setup:${userId}`);
+
+    return { success: true };
+  }
+
+  async disableTotp(userId: string, code: string): Promise<{ success: boolean }> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { totp_secret: true, totp_enabled: true },
+    });
+    if (!user?.totp_enabled || !user.totp_secret) {
+      throw new BadRequestException('TOTP is not enabled');
+    }
+
+    const { valid } = await otplib.verify({ token: code, secret: user.totp_secret });
+    if (!valid) {
+      throw new UnauthorizedException('Invalid TOTP code');
+    }
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { totp_secret: null, totp_enabled: false },
+    });
+
+    return { success: true };
+  }
+
+  async verifyTotpLogin(
+    pendingToken: string,
+    code: string,
+  ): Promise<{ success: boolean; token: string }> {
+    const userId = await this.redis.get(`${TOTP_PENDING_PREFIX}${pendingToken}`);
+    if (!userId) {
+      throw new UnauthorizedException('Session expired. Please sign in again.');
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { totp_secret: true, totp_enabled: true, is_active: true },
+    });
+
+    if (!user?.totp_enabled || !user.totp_secret) {
+      throw new UnauthorizedException('TOTP not configured');
+    }
+    if (!user.is_active) {
+      throw new UnauthorizedException('Ce compte administrateur est inactif');
+    }
+
+    const { valid } = await otplib.verify({ token: code, secret: user.totp_secret });
+    if (!valid) {
+      throw new UnauthorizedException('Invalid authenticator code');
+    }
+
+    await this.redis.del(`${TOTP_PENDING_PREFIX}${pendingToken}`);
+
+    const payload = { sub: userId, type: 'admin', jti: randomUUID() };
+    const token = this.jwtService.sign(payload);
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { last_login_at: new Date() },
+    });
+
+    return { success: true, token };
   }
 }

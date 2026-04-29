@@ -49,7 +49,9 @@ export class BotNotificationService {
               scheduled_at: true,
               address: true,
               employer_id: true,
-              employer: { select: { phone: true, first_name: true, last_name: true } },
+              employer: {
+                select: { phone: true, first_name: true, last_name: true },
+              },
             },
           },
           worker: {
@@ -114,7 +116,10 @@ export class BotNotificationService {
         const inboxNotice =
           `📬 *${pendingCount} candidature(s) en attente* dans votre boîte.` +
           `\nTerminez votre action en cours, puis tapez *candidatures* pour les traiter.`;
-        await this.whatsApp.sendTextMessage(app.job_offer.employer.phone, inboxNotice);
+        await this.whatsApp.sendTextMessage(
+          app.job_offer.employer.phone,
+          inboxNotice,
+        );
       }
     } catch (err) {
       this.logger.warn(
@@ -171,7 +176,11 @@ export class BotNotificationService {
           amount: fees.workerFeeFcfa,
           expiryHours: fees.expiryHours,
         });
-        await this.botState.setIfFlowAbsentOrMatches(app.worker_id, unlockState, null);
+        await this.botState.setIfFlowAbsentOrMatches(
+          app.worker_id,
+          unlockState,
+          null,
+        );
       } else {
         // Fallback (attempt not created yet — should not happen in normal flow)
         await this.whatsApp.sendTextMessage(
@@ -230,11 +239,7 @@ export class BotNotificationService {
         }),
       ]);
 
-      if (
-        employer?.phone &&
-        worker &&
-        attempt.employer_id !== skipId
-      ) {
+      if (employer?.phone && worker && attempt.employer_id !== skipId) {
         await this.whatsApp.sendTextMessage(
           employer.phone,
           formatContactUnlockedMessage({
@@ -245,11 +250,7 @@ export class BotNotificationService {
         );
       }
 
-      if (
-        worker?.phone &&
-        employer &&
-        attempt.worker_id !== skipId
-      ) {
+      if (worker?.phone && employer && attempt.worker_id !== skipId) {
         await this.whatsApp.sendTextMessage(
           worker.phone,
           formatContactUnlockedMessage({
@@ -403,9 +404,10 @@ export class BotNotificationService {
         hour: '2-digit',
         minute: '2-digit',
       });
-      const amountLine = offer.amount != null
-        ? `Montant : ${Number(offer.amount).toLocaleString()} FCFA`
-        : `Montant : Prix à négocier`;
+      const amountLine =
+        offer.amount != null
+          ? `Montant : ${Number(offer.amount).toLocaleString()} FCFA`
+          : `Montant : Prix à négocier`;
       const text = [
         `*Offre recommandée pour vous, ${profile.first_name}*`,
         '',
@@ -434,9 +436,20 @@ export class BotNotificationService {
     rateeLabel: string;
     jobTitle: string;
   }): Promise<void> {
-    const { raterProfileId, raterPhone, rateeId, assignmentId, rateeLabel, jobTitle } = params;
+    const {
+      raterProfileId,
+      raterPhone,
+      rateeId,
+      assignmentId,
+      rateeLabel,
+      jobTitle,
+    } = params;
     const state = getRateAssignmentInitialState(assignmentId, rateeId);
-    const written = await this.botState.setIfFlowAbsentOrMatches(raterProfileId, state, null);
+    const written = await this.botState.setIfFlowAbsentOrMatches(
+      raterProfileId,
+      state,
+      null,
+    );
     if (!written) return;
     const text = [
       `*Évaluez votre mission*`,
@@ -446,12 +459,11 @@ export class BotNotificationService {
       '',
       'Répondez avec une note de *1* à *5*.',
     ].join('\n');
-    await this.whatsApp.sendTextMessage(raterPhone, text).catch((err) =>
-      this.logger.warn(
-        `Failed to send rating request to ${raterPhone}`,
-        err,
-      ),
-    );
+    await this.whatsApp
+      .sendTextMessage(raterPhone, text)
+      .catch((err) =>
+        this.logger.warn(`Failed to send rating request to ${raterPhone}`, err),
+      );
   }
 
   async sendJobCancelledByEmployerToWorker(

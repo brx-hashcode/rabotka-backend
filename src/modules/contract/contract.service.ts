@@ -180,9 +180,7 @@ export class ContractService {
       : '-';
 
     const amountFormatted =
-      job.amount == null
-        ? '-'
-        : Number(job.amount).toLocaleString('fr-FR');
+      job.amount == null ? '-' : Number(job.amount).toLocaleString('fr-FR');
 
     const employerName =
       `${employer.first_name} ${employer.last_name}`.trim() || '-';

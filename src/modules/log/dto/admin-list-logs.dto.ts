@@ -37,7 +37,9 @@ export class AdminListLogsDto {
   @Max(100)
   limit?: number = 20;
 
-  @ApiPropertyOptional({ description: 'Search in action, entity_type, ip_address' })
+  @ApiPropertyOptional({
+    description: 'Search in action, entity_type, ip_address',
+  })
   @IsOptional()
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
@@ -53,12 +55,16 @@ export class AdminListLogsDto {
   @IsString({ each: true })
   entity_type?: string[];
 
-  @ApiPropertyOptional({ description: 'Filter logs created from this date (ISO 8601)' })
+  @ApiPropertyOptional({
+    description: 'Filter logs created from this date (ISO 8601)',
+  })
   @IsOptional()
   @IsDateString()
   created_from?: string;
 
-  @ApiPropertyOptional({ description: 'Filter logs created up to this date (ISO 8601)' })
+  @ApiPropertyOptional({
+    description: 'Filter logs created up to this date (ISO 8601)',
+  })
   @IsOptional()
   @IsDateString()
   created_to?: string;

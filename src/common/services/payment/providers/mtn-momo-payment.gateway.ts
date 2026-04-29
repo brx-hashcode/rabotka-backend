@@ -31,7 +31,10 @@ export class MtnMomoPaymentGateway implements IPaymentGateway {
   }
 
   private get primaryKey(): string {
-    return this.configService.get<string>('MTN_MOMO_COLLECTION_PRIMARY_KEY', '');
+    return this.configService.get<string>(
+      'MTN_MOMO_COLLECTION_PRIMARY_KEY',
+      '',
+    );
   }
 
   private get environment(): string {
@@ -62,7 +65,9 @@ export class MtnMomoPaymentGateway implements IPaymentGateway {
 
     if (!response.ok) {
       const text = await response.text();
-      throw new Error(`MTN MoMo token fetch failed: ${response.status} — ${text}`);
+      throw new Error(
+        `MTN MoMo token fetch failed: ${response.status} — ${text}`,
+      );
     }
 
     const data = (await response.json()) as {
@@ -164,7 +169,10 @@ export class MtnMomoPaymentGateway implements IPaymentGateway {
           return { gatewayRef, status: 'PENDING' };
       }
     } catch (err) {
-      this.logger.warn(`MTN MoMo checkPaymentStatus error for ${gatewayRef}`, err);
+      this.logger.warn(
+        `MTN MoMo checkPaymentStatus error for ${gatewayRef}`,
+        err,
+      );
       return { gatewayRef, status: 'PENDING' };
     }
   }
@@ -172,9 +180,7 @@ export class MtnMomoPaymentGateway implements IPaymentGateway {
   async handleWebhookPayload(payload: unknown): Promise<WebhookHandleResult> {
     const body = payload as Record<string, unknown>;
     const gatewayRef =
-      (body['externalId'] as string) ??
-      (body['referenceId'] as string) ??
-      '';
+      (body['externalId'] as string) ?? (body['referenceId'] as string) ?? '';
 
     // Re-verify via API — don't trust webhook body alone
     const verified = await this.checkPaymentStatus(gatewayRef);

@@ -1,7 +1,11 @@
 import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { StorageProviderFactory } from './storage-provider.factory';
 import { IStorageProvider } from './interfaces/storage-provider.interface';
-import { GetUrlOptions, UploadOptions, UploadResult } from './types/storage.types';
+import {
+  GetUrlOptions,
+  UploadOptions,
+  UploadResult,
+} from './types/storage.types';
 
 @Injectable()
 export class StorageService implements OnModuleInit {

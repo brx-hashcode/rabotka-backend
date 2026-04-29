@@ -12,7 +12,7 @@ export type SignalType =
   | 'save'
   | 'question'
   | 'view'
-  | 'profile_view'  // employer opens a worker's profile card
+  | 'profile_view' // employer opens a worker's profile card
   | 'skip'
   | 'dislike'
   | 'cancel';
@@ -39,13 +39,11 @@ const IMMEDIATE_RECLUSTER_SIGNALS: Set<SignalType> = new Set([
 export const INTEREST_RECLUSTER_QUEUE = 'interest-recluster-queue';
 
 // Redis key for per-user interaction counter (survives pod restarts)
-const counterKey = (userId: string) =>
-  `interest:counter:${userId}`;
+const counterKey = (userId: string) => `interest:counter:${userId}`;
 
 // Temporal decay: signals older than 90 days excluded
 export function temporalWeight(recordedAt: Date): number {
-  const ageDays =
-    (Date.now() - recordedAt.getTime()) / (1000 * 60 * 60 * 24);
+  const ageDays = (Date.now() - recordedAt.getTime()) / (1000 * 60 * 60 * 24);
   if (ageDays > 90) return 0;
   if (ageDays > 60) return 0.4;
   if (ageDays > 30) return 0.7;

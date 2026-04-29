@@ -12,7 +12,11 @@ const workerProfile: BotProfile = {
   status: 'ACTIVE',
 };
 
-const employerProfile: BotProfile = { ...workerProfile, id: 'e-1', profile_type: 'EMPLOYER' };
+const employerProfile: BotProfile = {
+  ...workerProfile,
+  id: 'e-1',
+  profile_type: 'EMPLOYER',
+};
 
 const mockOffer = {
   id: 'offer-1',
@@ -30,7 +34,9 @@ const mockOffer = {
 
 function makeJobOfferService(overrides = {}) {
   return {
-    findActive: jest.fn().mockResolvedValue({ data: [mockOffer], nextCursor: null }),
+    findActive: jest
+      .fn()
+      .mockResolvedValue({ data: [mockOffer], nextCursor: null }),
     findById: jest.fn().mockResolvedValue(mockOffer),
     findByEmployerId: jest.fn().mockResolvedValue([]),
     ...overrides,
@@ -82,7 +88,10 @@ describe('BotCommandsService', () => {
     });
 
     it('returns no-offers message when empty', async () => {
-      jobOfferService.findActive.mockResolvedValue({ data: [], nextCursor: null });
+      jobOfferService.findActive.mockResolvedValue({
+        data: [],
+        nextCursor: null,
+      });
       const result = await service.listOffers(workerProfile);
       expect(result.message).toBeDefined();
       expect(result.offerIds).toBeUndefined();
@@ -180,7 +189,7 @@ describe('BotCommandsService', () => {
             first_name: 'Alice',
             last_name: 'Dupont',
             reliability_score: 90,
-  status: 'ACTIVE',
+            status: 'ACTIVE',
             email: 'alice@example.com',
             avatar_url: null,
             verification_status: 'VERIFIED',
@@ -231,7 +240,7 @@ describe('BotCommandsService', () => {
         last_name: 'Dupont',
         email: 'alice@example.com',
         reliability_score: 90,
-  status: 'ACTIVE',
+        status: 'ACTIVE',
         created_at: new Date(),
         avatar_url: null,
         profile_type: 'WORKER',
@@ -246,7 +255,7 @@ describe('BotCommandsService', () => {
         last_name: 'Patron',
         email: 'jean@example.com',
         reliability_score: null,
-  status: 'ACTIVE',
+        status: 'ACTIVE',
         created_at: new Date(),
         avatar_url: null,
         profile_type: 'EMPLOYER',

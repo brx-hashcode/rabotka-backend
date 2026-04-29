@@ -15,7 +15,9 @@ describe('WsNotificationsListener', () => {
       },
     } as unknown as WsNotificationsGateway;
 
-    listener = new WsNotificationsListener(gateway, { create: jest.fn().mockResolvedValue(undefined) } as any);
+    listener = new WsNotificationsListener(gateway, {
+      create: jest.fn().mockResolvedValue(undefined),
+    } as any);
   });
 
   it('broadcasts notification to admins room', async () => {
@@ -30,9 +32,7 @@ describe('WsNotificationsListener', () => {
 
     await listener.handleAdminNotification(payload);
 
-    expect(
-      (listener as any).gateway.server.to,
-    ).toHaveBeenCalledWith('admins');
+    expect((listener as any).gateway.server.to).toHaveBeenCalledWith('admins');
     expect(emitMock).toHaveBeenCalledWith('notification', payload);
   });
 

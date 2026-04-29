@@ -1,5 +1,12 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsString, MinLength, IsEnum, IsOptional, IsUUID, IsUrl } from 'class-validator';
+import {
+  IsString,
+  MinLength,
+  IsEnum,
+  IsOptional,
+  IsUUID,
+  IsUrl,
+} from 'class-validator';
 import { DocumentCategory } from '@prisma/client';
 
 export class CreateDocumentFromUploadDto {

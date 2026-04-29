@@ -1,5 +1,9 @@
 import { handleHelpCommand } from '../help.command';
-import { helpMessage, unknownCommandMessage, type ContactInfo } from '../../messages/menu.messages';
+import {
+  helpMessage,
+  unknownCommandMessage,
+  type ContactInfo,
+} from '../../messages/menu.messages';
 
 const contact: ContactInfo = {
   email: 'contact@rabotka.com',

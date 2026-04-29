@@ -34,7 +34,10 @@ export class CreateJobOfferDto {
   @IsString()
   scheduled_at!: string;
 
-  @ApiPropertyOptional({ example: 15000, description: 'Amount in FCFA (0 or omitted = not specified)' })
+  @ApiPropertyOptional({
+    example: 15000,
+    description: 'Amount in FCFA (0 or omitted = not specified)',
+  })
   @IsOptional()
   @IsNumber()
   @Min(0, { message: 'Le montant minimum est 0 FCFA' })
@@ -59,7 +62,10 @@ export class CreateJobOfferDto {
   @MaxLength(500)
   note?: string;
 
-  @ApiPropertyOptional({ example: 'cuid-of-job-category', description: 'Optional job category' })
+  @ApiPropertyOptional({
+    example: 'cuid-of-job-category',
+    description: 'Optional job category',
+  })
   @IsOptional()
   @IsString()
   category_id?: string;

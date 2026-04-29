@@ -3,7 +3,13 @@ import { NotFoundException, BadRequestException } from '@nestjs/common';
 import { WalletService } from '../wallet.service';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { SystemConfigService } from '../../system-config/system-config.service';
-import { WalletOwnerType, WalletTransactionType, PaymentStatus, PaymentType, PaymentMethod } from '@prisma/client';
+import {
+  WalletOwnerType,
+  WalletTransactionType,
+  PaymentStatus,
+  PaymentType,
+  PaymentMethod,
+} from '@prisma/client';
 import { generatePaymentReference } from '../../../common/utils/payment-reference';
 
 jest.mock('../../../common/utils/payment-reference', () => ({
@@ -45,7 +51,10 @@ describe('WalletService', () => {
         create: jest.fn(),
         update: jest.fn(),
       },
-      walletTransaction: { create: jest.fn(), aggregate: jest.fn().mockResolvedValue({ _sum: { amount: null } }) },
+      walletTransaction: {
+        create: jest.fn(),
+        aggregate: jest.fn().mockResolvedValue({ _sum: { amount: null } }),
+      },
       penalty: { findUnique: jest.fn(), update: jest.fn() },
       payment: {
         create: jest.fn(),
@@ -53,14 +62,19 @@ describe('WalletService', () => {
         count: jest.fn(),
         findMany: jest.fn(),
       },
-      $transaction: jest.fn((cb) => (typeof cb === 'function' ? cb(mockPrismaService) : Promise.resolve())),
+      $transaction: jest.fn((cb) =>
+        typeof cb === 'function' ? cb(mockPrismaService) : Promise.resolve(),
+      ),
     };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         WalletService,
         { provide: PrismaService, useValue: mockPrismaService },
-        { provide: SystemConfigService, useValue: { get: jest.fn().mockResolvedValue('') } },
+        {
+          provide: SystemConfigService,
+          useValue: { get: jest.fn().mockResolvedValue('') },
+        },
       ],
     }).compile();
 
@@ -70,7 +84,9 @@ describe('WalletService', () => {
 
   describe('getOrCreateSystemWallet()', () => {
     it('returns existing system wallet when found', async () => {
-      (prisma.wallet.findFirst as jest.Mock).mockResolvedValue(mockSystemWallet);
+      (prisma.wallet.findFirst as jest.Mock).mockResolvedValue(
+        mockSystemWallet,
+      );
 
       const result = await service.getOrCreateSystemWallet();
 
@@ -109,15 +125,17 @@ describe('WalletService', () => {
 
     beforeEach(() => {
       (prisma.penalty.findUnique as jest.Mock).mockResolvedValue(mockPenalty);
-      (prisma.wallet.findFirst as jest.Mock).mockResolvedValue(mockSystemWallet);
+      (prisma.wallet.findFirst as jest.Mock).mockResolvedValue(
+        mockSystemWallet,
+      );
       transactionTx = {
         payment: { create: jest.fn().mockResolvedValue({}) },
         walletTransaction: { create: jest.fn().mockResolvedValue({}) },
         wallet: { update: jest.fn().mockResolvedValue({}) },
         penalty: { update: jest.fn().mockResolvedValue({}) },
       };
-      (prisma.$transaction as jest.Mock).mockImplementation(async (cb: (tx: unknown) => Promise<unknown>) =>
-        cb(transactionTx),
+      (prisma.$transaction as jest.Mock).mockImplementation(
+        async (cb: (tx: unknown) => Promise<unknown>) => cb(transactionTx),
       );
     });
 
@@ -152,7 +170,11 @@ describe('WalletService', () => {
     });
 
     it('runs transaction: creates payment with RBK reference, wallet transaction, updates wallet and penalty', async () => {
-      const result = await service.recordPenaltyPayment(PENALTY_ID, PROFILE_ID, dto);
+      const result = await service.recordPenaltyPayment(
+        PENALTY_ID,
+        PROFILE_ID,
+        dto,
+      );
 
       const expectedReference = (generatePaymentReference as jest.Mock)();
       expect(result.reference).toBe(expectedReference);

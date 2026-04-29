@@ -34,7 +34,9 @@ describe('StorageProviderFactory', () => {
   });
 
   it('creates VercelBlobStorageProvider for DRIVER=VERCEL_BLOB', async () => {
-    const factory = new StorageProviderFactory(makeConfig('VERCEL_BLOB') as any);
+    const factory = new StorageProviderFactory(
+      makeConfig('VERCEL_BLOB') as any,
+    );
     await factory.create();
     expect(VercelBlobStorageProvider).toHaveBeenCalled();
   });
@@ -46,7 +48,9 @@ describe('StorageProviderFactory', () => {
   });
 
   it('falls back to S3 for unknown driver', async () => {
-    const factory = new StorageProviderFactory(makeConfig('UNKNOWN_DRIVER') as any);
+    const factory = new StorageProviderFactory(
+      makeConfig('UNKNOWN_DRIVER') as any,
+    );
     await factory.create();
     expect(S3StorageProvider).toHaveBeenCalled();
   });

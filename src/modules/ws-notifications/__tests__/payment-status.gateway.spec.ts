@@ -61,14 +61,18 @@ describe('PaymentStatusGateway', () => {
       const { gateway, mockRoom } = makeGateway();
       gateway.emitPaymentStatus('tok-1', 'APPROVED');
       expect(gateway.server.to).toHaveBeenCalledWith('payment:tok-1');
-      expect(mockRoom.emit).toHaveBeenCalledWith('payment-status', { status: 'APPROVED' });
+      expect(mockRoom.emit).toHaveBeenCalledWith('payment-status', {
+        status: 'APPROVED',
+      });
     });
 
     it('emits REJECTED status to the correct room', () => {
       const { gateway, mockRoom } = makeGateway();
       gateway.emitPaymentStatus('tok-2', 'REJECTED');
       expect(gateway.server.to).toHaveBeenCalledWith('payment:tok-2');
-      expect(mockRoom.emit).toHaveBeenCalledWith('payment-status', { status: 'REJECTED' });
+      expect(mockRoom.emit).toHaveBeenCalledWith('payment-status', {
+        status: 'REJECTED',
+      });
     });
   });
 });

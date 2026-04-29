@@ -76,7 +76,9 @@ export class WhatsAppOutboundProcessor {
         data.profileId,
       );
       if (!sent) {
-        throw new Error(`WhatsApp text message to ${data.phone} returned no SID (unknown Twilio failure)`);
+        throw new Error(
+          `WhatsApp text message to ${data.phone} returned no SID (unknown Twilio failure)`,
+        );
       }
     } else if (data.type === 'media') {
       const sent = await this.whatsApp.sendMediaMessage(
@@ -85,7 +87,9 @@ export class WhatsAppOutboundProcessor {
         data.caption,
       );
       if (!sent) {
-        throw new Error(`WhatsApp media message to ${data.phone} returned no SID (unknown Twilio failure)`);
+        throw new Error(
+          `WhatsApp media message to ${data.phone} returned no SID (unknown Twilio failure)`,
+        );
       }
       if (data.profileId) {
         const body = data.caption

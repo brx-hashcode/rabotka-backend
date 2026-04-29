@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { BillingStatus, Prisma, PaymentMethod } from '@prisma/client';
 import { WalletService } from '../wallet/wallet.service';
@@ -53,11 +57,16 @@ export class PenaltyService {
     });
 
     if (!penalty) throw new NotFoundException('Pénalité introuvable');
-    if (penalty.paid_at) throw new BadRequestException('Cette pénalité a déjà été réglée');
+    if (penalty.paid_at)
+      throw new BadRequestException('Cette pénalité a déjà été réglée');
 
-    await this.walletService.recordPenaltyPayment(penaltyId, penalty.worker_id, {
-      paymentMethod: PaymentMethod.OTHER,
-    });
+    await this.walletService.recordPenaltyPayment(
+      penaltyId,
+      penalty.worker_id,
+      {
+        paymentMethod: PaymentMethod.OTHER,
+      },
+    );
 
     // Sync billing_status based on remaining unpaid penalties
     const unpaidCount = await this.prisma.penalty.count({

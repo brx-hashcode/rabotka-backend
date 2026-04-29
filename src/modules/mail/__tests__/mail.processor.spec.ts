@@ -41,8 +41,12 @@ describe('MailProcessor', () => {
 
   describe('processEmailJob()', () => {
     describe('mock mode', () => {
-      beforeEach(() => { process.env.SMTP_MOCK = 'true'; });
-      afterEach(() => { delete process.env.SMTP_MOCK; });
+      beforeEach(() => {
+        process.env.SMTP_MOCK = 'true';
+      });
+      afterEach(() => {
+        delete process.env.SMTP_MOCK;
+      });
 
       it('logs mock email without sending', async () => {
         await processor.processEmailJob(makeJob(validData()) as any);
@@ -50,7 +54,9 @@ describe('MailProcessor', () => {
       });
 
       it('logs html email mock', async () => {
-        await processor.processEmailJob(makeJob({ ...validData(), html: '<p>Hello</p>' }) as any);
+        await processor.processEmailJob(
+          makeJob({ ...validData(), html: '<p>Hello</p>' }) as any,
+        );
         expect(mailerService.sendMail).not.toHaveBeenCalled();
       });
     });
@@ -73,11 +79,13 @@ describe('MailProcessor', () => {
       });
 
       it('sends with from + fromName formatted', async () => {
-        await processor.processEmailJob(makeJob({
-          ...validData(),
-          from: 'no-reply@example.com',
-          fromName: 'Rabotka',
-        }) as any);
+        await processor.processEmailJob(
+          makeJob({
+            ...validData(),
+            from: 'no-reply@example.com',
+            fromName: 'Rabotka',
+          }) as any,
+        );
         expect(mailerService.sendMail).toHaveBeenCalledWith(
           expect.objectContaining({ from: '"Rabotka" <no-reply@example.com>' }),
         );
@@ -102,25 +110,37 @@ describe('MailProcessor', () => {
     describe('validation', () => {
       it('throws when "to" is missing', async () => {
         await expect(
-          processor.processEmailJob(makeJob({ subject: 'Hello', text: 'Body' }) as any),
+          processor.processEmailJob(
+            makeJob({ subject: 'Hello', text: 'Body' }) as any,
+          ),
         ).rejects.toThrow('recipient');
       });
 
       it('throws when "subject" is missing', async () => {
         await expect(
-          processor.processEmailJob(makeJob({ to: 'user@example.com', text: 'Body' }) as any),
+          processor.processEmailJob(
+            makeJob({ to: 'user@example.com', text: 'Body' }) as any,
+          ),
         ).rejects.toThrow('subject');
       });
 
       it('throws when neither text nor html is provided', async () => {
         await expect(
-          processor.processEmailJob(makeJob({ to: 'user@example.com', subject: 'Hello' }) as any),
+          processor.processEmailJob(
+            makeJob({ to: 'user@example.com', subject: 'Hello' }) as any,
+          ),
         ).rejects.toThrow('body is required');
       });
 
       it('throws when email format is invalid', async () => {
         await expect(
-          processor.processEmailJob(makeJob({ to: 'not-an-email', subject: 'Hello', text: 'Body' }) as any),
+          processor.processEmailJob(
+            makeJob({
+              to: 'not-an-email',
+              subject: 'Hello',
+              text: 'Body',
+            }) as any,
+          ),
         ).rejects.toThrow('Invalid email format');
       });
     });

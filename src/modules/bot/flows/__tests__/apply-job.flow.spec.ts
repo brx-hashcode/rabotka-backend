@@ -1,7 +1,4 @@
-import {
-  runApplyJobFlow,
-  getApplyJobInitialState,
-} from '../apply-job.flow';
+import { runApplyJobFlow, getApplyJobInitialState } from '../apply-job.flow';
 import type { BotProfile, BotState } from '../../types/bot-state.types';
 import type { ApplyJobContext } from '../apply-job.flow';
 import { FLOW_IDS } from '../../bot.constants';
@@ -115,7 +112,9 @@ describe('runApplyJobFlow()', () => {
       const ctx = makeCtx({
         applicationService: {
           create: jest.fn(),
-          getUnpaidPenalties: jest.fn().mockResolvedValue({ count: 2, total: 10000 }),
+          getUnpaidPenalties: jest
+            .fn()
+            .mockResolvedValue({ count: 2, total: 10000 }),
         } as unknown as ApplyJobContext['applicationService'],
       });
       const state = makeState('offer-1');
@@ -150,8 +149,13 @@ describe('runApplyJobFlow()', () => {
       const state = makeState('offer-1', 1);
       const result = await runApplyJobFlow(state, '1', workerProfile, ctx);
       expect(result.clearState).toBe(true);
-      expect(ctx.applicationService.create).toHaveBeenCalledWith('offer-1', 'worker-1');
-      expect(ctx.notificationService.sendNewApplicationToEmployer).toHaveBeenCalledWith('app-1');
+      expect(ctx.applicationService.create).toHaveBeenCalledWith(
+        'offer-1',
+        'worker-1',
+      );
+      expect(
+        ctx.notificationService.sendNewApplicationToEmployer,
+      ).toHaveBeenCalledWith('app-1');
     });
 
     it('creates application on "oui" input', async () => {
@@ -210,7 +214,12 @@ describe('runApplyJobFlow()', () => {
     it('asks again for unknown input', async () => {
       const ctx = makeCtx();
       const state = makeState('offer-1', 1);
-      const result = await runApplyJobFlow(state, 'whatever', workerProfile, ctx);
+      const result = await runApplyJobFlow(
+        state,
+        'whatever',
+        workerProfile,
+        ctx,
+      );
       expect(result.nextState).toBeDefined();
       expect(result.clearState).toBeUndefined();
     });
@@ -219,7 +228,9 @@ describe('runApplyJobFlow()', () => {
       const ctx = makeCtx({
         applicationService: {
           create: jest.fn().mockRejectedValue(new Error('Already applied')),
-          getUnpaidPenalties: jest.fn().mockResolvedValue({ count: 0, total: 0 }),
+          getUnpaidPenalties: jest
+            .fn()
+            .mockResolvedValue({ count: 0, total: 0 }),
         } as unknown as ApplyJobContext['applicationService'],
       });
       const state = makeState('offer-1', 1);

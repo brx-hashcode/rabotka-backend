@@ -157,7 +157,7 @@ async function handleDetailStep(
         [
           `⚠️ *Êtes-vous sûr de vouloir annuler cette mission ?*`,
           '',
-          'Le travailleur sera notifié et l\'offre sera rouverte aux candidatures.',
+          "Le travailleur sera notifié et l'offre sera rouverte aux candidatures.",
           '',
           '1- Oui, annuler la mission',
           '2- Non, revenir',
@@ -248,7 +248,8 @@ export async function runManageFilledJobFlow(
   const payload = state.payload ?? {};
   const items = (payload.items as FilledJobListItem[]) ?? [];
   const pageIndex = (payload.pageIndex as number) ?? 0;
-  const step = (payload.step as 'list' | 'detail' | 'note' | 'cancel_confirm') ?? 'list';
+  const step =
+    (payload.step as 'list' | 'detail' | 'note' | 'cancel_confirm') ?? 'list';
   const selectedItem = payload.selectedItem as FilledJobListItem | undefined;
   const trimmed = input.trim();
   const normalized = trimmed.toLowerCase();

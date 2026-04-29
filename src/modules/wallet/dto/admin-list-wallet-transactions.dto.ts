@@ -38,7 +38,9 @@ export class AdminListWalletTransactionsDto {
   @Max(100)
   limit?: number = 20;
 
-  @ApiPropertyOptional({ description: 'Search in type, reference_type, reference_id' })
+  @ApiPropertyOptional({
+    description: 'Search in type, reference_type, reference_id',
+  })
   @IsOptional()
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
@@ -54,12 +56,16 @@ export class AdminListWalletTransactionsDto {
   @IsString({ each: true })
   type?: string[];
 
-  @ApiPropertyOptional({ description: 'Filter transactions created from this date (ISO 8601)' })
+  @ApiPropertyOptional({
+    description: 'Filter transactions created from this date (ISO 8601)',
+  })
   @IsOptional()
   @IsDateString()
   created_from?: string;
 
-  @ApiPropertyOptional({ description: 'Filter transactions created up to this date (ISO 8601)' })
+  @ApiPropertyOptional({
+    description: 'Filter transactions created up to this date (ISO 8601)',
+  })
   @IsOptional()
   @IsDateString()
   created_to?: string;

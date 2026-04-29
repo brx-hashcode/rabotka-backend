@@ -4,7 +4,9 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { AdminAuthGuard } from '../guards/admin-auth.guard';
 
-function makeContext(payload: { sub: string; type?: string } | null): ExecutionContext {
+function makeContext(
+  payload: { sub: string; type?: string } | null,
+): ExecutionContext {
   const request: Record<string, unknown> = {
     cookies: { 'auth-token': 'token' },
     headers: {},
@@ -26,7 +28,9 @@ function makeContext(payload: { sub: string; type?: string } | null): ExecutionC
     getAllAndOverride: jest.fn().mockReturnValue(false),
   } as unknown as Reflector;
 
-  const guard = new AdminAuthGuard(jwtService, configService, reflector, { get: jest.fn().mockResolvedValue(null) } as any);
+  const guard = new AdminAuthGuard(jwtService, configService, reflector, {
+    get: jest.fn().mockResolvedValue(null),
+  } as any);
 
   const ctx = {
     getHandler: () => ({}),
@@ -35,7 +39,7 @@ function makeContext(payload: { sub: string; type?: string } | null): ExecutionC
       getRequest: () => {
         // Simulate super.canActivate setting req.user
         if (payload) {
-          (request as Record<string, unknown>).user = {
+          request.user = {
             ...(payload.type === 'admin'
               ? { userId: payload.sub }
               : { profileId: payload.sub }),
@@ -55,7 +59,9 @@ describe('AdminAuthGuard', () => {
   let jwtService: jest.Mocked<JwtService>;
   let configService: jest.Mocked<ConfigService>;
 
-  function buildGuardAndContext(payload: { sub: string; type?: string } | null) {
+  function buildGuardAndContext(
+    payload: { sub: string; type?: string } | null,
+  ) {
     const request: Record<string, unknown> = {
       cookies: { 'auth-token': 'token' },
       headers: {},
@@ -77,7 +83,9 @@ describe('AdminAuthGuard', () => {
       getAllAndOverride: jest.fn().mockReturnValue(false),
     } as unknown as jest.Mocked<Reflector>;
 
-    const guard = new AdminAuthGuard(jwtService, configService, reflector, { get: jest.fn().mockResolvedValue(null) } as any);
+    const guard = new AdminAuthGuard(jwtService, configService, reflector, {
+      get: jest.fn().mockResolvedValue(null),
+    } as any);
 
     const ctx = {
       getHandler: () => ({}),
@@ -101,12 +109,18 @@ describe('AdminAuthGuard', () => {
   }
 
   it('allows admin users with valid token', () => {
-    const { guard, ctx } = buildGuardAndContext({ sub: 'admin-1', type: 'admin' });
+    const { guard, ctx } = buildGuardAndContext({
+      sub: 'admin-1',
+      type: 'admin',
+    });
     expect(guard.canActivate(ctx)).toBe(true);
   });
 
   it('throws UnauthorizedException when user type is profile', () => {
-    const { guard, ctx } = buildGuardAndContext({ sub: 'profile-1', type: 'profile' });
+    const { guard, ctx } = buildGuardAndContext({
+      sub: 'profile-1',
+      type: 'profile',
+    });
     expect(() => guard.canActivate(ctx)).toThrow(UnauthorizedException);
   });
 
@@ -132,7 +146,9 @@ describe('AdminAuthGuard', () => {
       getAllAndOverride: jest.fn().mockReturnValue(false),
     } as unknown as jest.Mocked<Reflector>;
 
-    const guard = new AdminAuthGuard(jwtService, configService, reflector, { get: jest.fn().mockResolvedValue(null) } as any);
+    const guard = new AdminAuthGuard(jwtService, configService, reflector, {
+      get: jest.fn().mockResolvedValue(null),
+    } as any);
 
     const ctx = {
       getHandler: () => ({}),

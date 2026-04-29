@@ -15,18 +15,36 @@ describe('AdminPenaltyController', () => {
 
   beforeEach(() => {
     service = makeService();
-    controller = new AdminPenaltyController(service as any, mockLogService as any);
+    controller = new AdminPenaltyController(
+      service as any,
+      mockLogService as any,
+    );
   });
 
   it('list() uses defaults and delegates', async () => {
     const result = await controller.list({} as any);
-    expect(service.getPenaltiesForAdmin).toHaveBeenCalledWith({ page: 1, limit: 10, q: undefined, paymentStatus: undefined });
+    expect(service.getPenaltiesForAdmin).toHaveBeenCalledWith({
+      page: 1,
+      limit: 10,
+      q: undefined,
+      paymentStatus: undefined,
+    });
     expect(result).toEqual({ data: [], total: 0 });
   });
 
   it('list() passes through dto values', async () => {
-    await controller.list({ page: 2, limit: 5, q: 'x', payment_status: 'PAID' } as any);
-    expect(service.getPenaltiesForAdmin).toHaveBeenCalledWith({ page: 2, limit: 5, q: 'x', paymentStatus: 'PAID' });
+    await controller.list({
+      page: 2,
+      limit: 5,
+      q: 'x',
+      payment_status: 'PAID',
+    } as any);
+    expect(service.getPenaltiesForAdmin).toHaveBeenCalledWith({
+      page: 2,
+      limit: 5,
+      q: 'x',
+      paymentStatus: 'PAID',
+    });
   });
 
   it('getById() delegates to service', async () => {

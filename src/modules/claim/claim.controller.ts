@@ -60,7 +60,11 @@ export class ClaimController {
 
   @Patch(':id')
   @Roles(UserRole.MANAGER)
-  async update(@Param('id') id: string, @Body() dto: UpdateClaimDto, @Req() req: any) {
+  async update(
+    @Param('id') id: string,
+    @Body() dto: UpdateClaimDto,
+    @Req() req: any,
+  ) {
     const result = await this.claimService.updateForAdmin(id, dto);
     await this.logService.create({
       action: 'CLAIM_UPDATED',
@@ -102,8 +106,16 @@ export class ClaimCommentController {
 
   @Post()
   @Roles(UserRole.MANAGER)
-  async add(@Param('claimId') claimId: string, @Req() req: any, @Body() dto: CreateCommentDto) {
-    const result = await this.claimService.addComment(claimId, req.user.userId, dto);
+  async add(
+    @Param('claimId') claimId: string,
+    @Req() req: any,
+    @Body() dto: CreateCommentDto,
+  ) {
+    const result = await this.claimService.addComment(
+      claimId,
+      req.user.userId,
+      dto,
+    );
     await this.logService.create({
       action: 'CLAIM_COMMENT_ADDED',
       entityType: 'Claim',
@@ -115,7 +127,11 @@ export class ClaimCommentController {
 
   @Delete(':commentId')
   @Roles(UserRole.MANAGER)
-  async remove(@Param('claimId') claimId: string, @Param('commentId') commentId: string, @Req() req: any) {
+  async remove(
+    @Param('claimId') claimId: string,
+    @Param('commentId') commentId: string,
+    @Req() req: any,
+  ) {
     await this.claimService.deleteComment(claimId, commentId);
     await this.logService.create({
       action: 'CLAIM_COMMENT_DELETED',
@@ -155,18 +171,37 @@ export class ProfileClaimCommentController {
 
   @Get()
   list(@Param('claimId') claimId: string, @Req() req: any) {
-    return this.claimService.listCommentsForProfile(claimId, req.user.profileId);
+    return this.claimService.listCommentsForProfile(
+      claimId,
+      req.user.profileId,
+    );
   }
 
   @Post()
-  add(@Param('claimId') claimId: string, @Req() req: any, @Body() dto: CreateCommentDto) {
-    return this.claimService.addCommentAsProfile(claimId, req.user.profileId, dto);
+  add(
+    @Param('claimId') claimId: string,
+    @Req() req: any,
+    @Body() dto: CreateCommentDto,
+  ) {
+    return this.claimService.addCommentAsProfile(
+      claimId,
+      req.user.profileId,
+      dto,
+    );
   }
 
   @Delete(':commentId')
   @HttpCode(HttpStatus.OK)
-  async remove(@Param('claimId') claimId: string, @Param('commentId') commentId: string, @Req() req: any) {
-    await this.claimService.deleteCommentAsProfile(claimId, commentId, req.user.profileId);
+  async remove(
+    @Param('claimId') claimId: string,
+    @Param('commentId') commentId: string,
+    @Req() req: any,
+  ) {
+    await this.claimService.deleteCommentAsProfile(
+      claimId,
+      commentId,
+      req.user.profileId,
+    );
     return { success: true };
   }
 }

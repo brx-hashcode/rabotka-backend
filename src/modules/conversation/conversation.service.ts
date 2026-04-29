@@ -1,7 +1,11 @@
 import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import Redis from 'ioredis';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
-import { BotPlatform, ConversationStatus, MessageDirection } from '@prisma/client';
+import {
+  BotPlatform,
+  ConversationStatus,
+  MessageDirection,
+} from '@prisma/client';
 import { BotOrchestratorService } from '../bot/services/bot-orchestrator.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';

@@ -1,4 +1,7 @@
-import { runListOffersFlow, getListOffersInitialState } from '../list-offers.flow';
+import {
+  runListOffersFlow,
+  getListOffersInitialState,
+} from '../list-offers.flow';
 import type { BotProfile, BotState } from '../../types/bot-state.types';
 import type { JobOfferService } from '../../../job-offer/job-offer.service';
 import { FLOW_IDS } from '../../bot.constants';
@@ -29,7 +32,7 @@ function makeOffer(id: string, acceptedCount = 0) {
   return {
     id,
     title: `Offre ${id}`,
-    description: 'Description de l\'offre disponible pour test',
+    description: "Description de l'offre disponible pour test",
     scheduled_at: new Date(Date.now() + 5 * 3600000),
     amount: 15000,
     payment_flow: 'DAILY',
@@ -68,7 +71,9 @@ const ctx = {
 beforeEach(() => {
   jest.clearAllMocks();
   OFFER_IDS.forEach((id) => {
-    (mockJobOfferService.findById as jest.Mock).mockResolvedValue(makeOffer(id));
+    (mockJobOfferService.findById as jest.Mock).mockResolvedValue(
+      makeOffer(id),
+    );
   });
 });
 
@@ -113,7 +118,12 @@ describe('runListOffersFlow()', () => {
         data: [makeOffer('offer-6')],
         nextCursor: null,
       });
-      const result = await runListOffersFlow(stateWithCursor, '6', workerProfile, ctx);
+      const result = await runListOffersFlow(
+        stateWithCursor,
+        '6',
+        workerProfile,
+        ctx,
+      );
       expect(mockJobOfferService.findActive).toHaveBeenCalledWith(
         5,
         'cursor-abc',
@@ -170,7 +180,9 @@ describe('runListOffersFlow()', () => {
 
     it('shows quantity in offer detail', async () => {
       const state = makeState(detailPayload);
-      (mockJobOfferService.findById as jest.Mock).mockResolvedValue(makeOffer('offer-1'));
+      (mockJobOfferService.findById as jest.Mock).mockResolvedValue(
+        makeOffer('offer-1'),
+      );
       const result = await runListOffersFlow(state, '2', workerProfile, ctx);
       expect(result.reply[0]).toContain('Personnes requises');
       expect(result.reply[0]).toContain('2');

@@ -110,9 +110,7 @@ export class PenaltyNotificationProcessor implements OnModuleInit {
       penalty.last_notified_at &&
       penalty.last_notified_at > twentyThreeHoursAgo
     ) {
-      this.logger.debug(
-        `Penalty ${penaltyId} notified too recently, skipping`,
-      );
+      this.logger.debug(`Penalty ${penaltyId} notified too recently, skipping`);
       return;
     }
 

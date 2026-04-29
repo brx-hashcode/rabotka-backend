@@ -50,7 +50,9 @@ const mockJobOfferService = {
 } as unknown as jest.Mocked<JobOfferService>;
 
 const mockPaymentService = {
-  generateJobPostingPaymentLink: jest.fn().mockResolvedValue('https://pay.link/test'),
+  generateJobPostingPaymentLink: jest
+    .fn()
+    .mockResolvedValue('https://pay.link/test'),
 };
 
 const mockPrisma = {
@@ -62,7 +64,11 @@ const mockPrisma = {
   },
 };
 
-const ctx = { jobOfferService: mockJobOfferService, paymentService: mockPaymentService as any, prisma: mockPrisma as any };
+const ctx = {
+  jobOfferService: mockJobOfferService,
+  paymentService: mockPaymentService as any,
+  prisma: mockPrisma as any,
+};
 
 beforeEach(() => jest.clearAllMocks());
 

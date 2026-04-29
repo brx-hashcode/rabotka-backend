@@ -20,7 +20,9 @@ export class AdminAuthGuard extends JwtAuthGuard {
     }
 
     if (!request.user.userId) {
-      throw new UnauthorizedException("Token d'authentification administrateur invalide");
+      throw new UnauthorizedException(
+        "Token d'authentification administrateur invalide",
+      );
     }
 
     return true;

@@ -68,7 +68,9 @@ describe('JwtAuthGuard', () => {
     const result = guard.canActivate(ctx);
 
     expect(result).toBe(true);
-    const req = ctx.switchToHttp().getRequest<{ user: { profileId: string; type: string } }>();
+    const req = ctx
+      .switchToHttp()
+      .getRequest<{ user: { profileId: string; type: string } }>();
     expect(req.user.profileId).toBe('profile-1');
     expect(req.user.type).toBe('profile');
   });
@@ -83,7 +85,9 @@ describe('JwtAuthGuard', () => {
     const result = guard.canActivate(ctx);
 
     expect(result).toBe(true);
-    const req = ctx.switchToHttp().getRequest<{ user: { userId: string; type: string } }>();
+    const req = ctx
+      .switchToHttp()
+      .getRequest<{ user: { userId: string; type: string } }>();
     expect(req.user.userId).toBe('admin-1');
     expect(req.user.type).toBe('admin');
   });

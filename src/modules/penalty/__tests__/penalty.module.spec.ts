@@ -10,17 +10,26 @@ describe('PenaltyModule', () => {
   });
 
   it('provides PenaltyService', () => {
-    const providers: unknown[] = Reflect.getMetadata(MODULE_METADATA.PROVIDERS, PenaltyModule);
+    const providers: unknown[] = Reflect.getMetadata(
+      MODULE_METADATA.PROVIDERS,
+      PenaltyModule,
+    );
     expect(providers).toContain(PenaltyService);
   });
 
   it('registers AdminPenaltyController', () => {
-    const controllers: unknown[] = Reflect.getMetadata(MODULE_METADATA.CONTROLLERS, PenaltyModule);
+    const controllers: unknown[] = Reflect.getMetadata(
+      MODULE_METADATA.CONTROLLERS,
+      PenaltyModule,
+    );
     expect(controllers).toContain(AdminPenaltyController);
   });
 
   it('exports PenaltyService', () => {
-    const exports: unknown[] = Reflect.getMetadata(MODULE_METADATA.EXPORTS, PenaltyModule);
+    const exports: unknown[] = Reflect.getMetadata(
+      MODULE_METADATA.EXPORTS,
+      PenaltyModule,
+    );
     expect(exports).toContain(PenaltyService);
   });
 });

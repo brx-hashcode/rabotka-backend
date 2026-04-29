@@ -10,17 +10,26 @@ describe('FileModule', () => {
   });
 
   it('provides FileService', () => {
-    const providers: unknown[] = Reflect.getMetadata(MODULE_METADATA.PROVIDERS, FileModule);
+    const providers: unknown[] = Reflect.getMetadata(
+      MODULE_METADATA.PROVIDERS,
+      FileModule,
+    );
     expect(providers).toContain(FileService);
   });
 
   it('registers FileController', () => {
-    const controllers: unknown[] = Reflect.getMetadata(MODULE_METADATA.CONTROLLERS, FileModule);
+    const controllers: unknown[] = Reflect.getMetadata(
+      MODULE_METADATA.CONTROLLERS,
+      FileModule,
+    );
     expect(controllers).toContain(FileController);
   });
 
   it('exports FileService', () => {
-    const exports: unknown[] = Reflect.getMetadata(MODULE_METADATA.EXPORTS, FileModule);
+    const exports: unknown[] = Reflect.getMetadata(
+      MODULE_METADATA.EXPORTS,
+      FileModule,
+    );
     expect(exports).toContain(FileService);
   });
 });

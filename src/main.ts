@@ -87,7 +87,9 @@ async function bootstrap() {
     .setVersion('1.0.0')
     .addServer(
       configService.get<string>('APP_BASE_URL') ?? `http://localhost:${port}`,
-      configService.get<string>('APP_BASE_URL') ? 'Public Server' : 'Local Development Server',
+      configService.get<string>('APP_BASE_URL')
+        ? 'Public Server'
+        : 'Local Development Server',
     )
     .addBearerAuth({
       type: 'http',

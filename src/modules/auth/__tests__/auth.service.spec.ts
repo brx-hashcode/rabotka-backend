@@ -233,7 +233,10 @@ describe('AuthService', () => {
       (prisma.user.findUnique as jest.Mock).mockResolvedValue(mockUser);
       (prisma.user.update as jest.Mock).mockResolvedValue(mockUser);
 
-      const result = await service.verifyAdminOtp('admin@example.com', '654321');
+      const result = await service.verifyAdminOtp(
+        'admin@example.com',
+        '654321',
+      );
 
       expect(result.success).toBe(true);
       expect(result.token).toBe('jwt-token-abc');

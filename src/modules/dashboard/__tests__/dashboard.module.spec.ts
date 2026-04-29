@@ -10,12 +10,18 @@ describe('DashboardModule', () => {
   });
 
   it('provides DashboardService', () => {
-    const providers: unknown[] = Reflect.getMetadata(MODULE_METADATA.PROVIDERS, DashboardModule);
+    const providers: unknown[] = Reflect.getMetadata(
+      MODULE_METADATA.PROVIDERS,
+      DashboardModule,
+    );
     expect(providers).toContain(DashboardService);
   });
 
   it('registers AdminDashboardController', () => {
-    const controllers: unknown[] = Reflect.getMetadata(MODULE_METADATA.CONTROLLERS, DashboardModule);
+    const controllers: unknown[] = Reflect.getMetadata(
+      MODULE_METADATA.CONTROLLERS,
+      DashboardModule,
+    );
     expect(controllers).toContain(AdminDashboardController);
   });
 });

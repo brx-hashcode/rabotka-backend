@@ -1,6 +1,10 @@
 import { IsOptional, IsEnum, IsInt, IsUUID, Min, Max } from 'class-validator';
 import { Type } from 'class-transformer';
-import { AdStatus, BundleTargetAudience, DeliveryChannel } from '@prisma/client';
+import {
+  AdStatus,
+  BundleTargetAudience,
+  DeliveryChannel,
+} from '@prisma/client';
 
 export class ListAdvertisementsDto {
   @IsOptional()

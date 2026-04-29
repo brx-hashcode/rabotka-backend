@@ -21,15 +21,23 @@ export async function runRateAssignmentFlow(
   const trimmed = input.trim();
   const normalized = trimmed.toLowerCase();
 
-  if (CMD_MENU.some((c) => normalized === c || normalized.startsWith(c + ' '))) {
-    return { reply: ["*Menu annulé. Tapez 'Menu' pour revenir.*"], clearState: true };
+  if (
+    CMD_MENU.some((c) => normalized === c || normalized.startsWith(c + ' '))
+  ) {
+    return {
+      reply: ["*Menu annulé. Tapez 'Menu' pour revenir.*"],
+      clearState: true,
+    };
   }
 
   const assignmentId = state.payload?.assignmentId as string | undefined;
   const rateeId = state.payload?.rateeId as string | undefined;
 
   if (!assignmentId || !rateeId) {
-    return { reply: ["*Erreur d'évaluation. Tapez 'Menu'.*"], clearState: true };
+    return {
+      reply: ["*Erreur d'évaluation. Tapez 'Menu'.*"],
+      clearState: true,
+    };
   }
 
   const score = Number.parseInt(trimmed, 10);
@@ -43,8 +51,18 @@ export async function runRateAssignmentFlow(
   try {
     // Upsert rating (idempotent — unique on rater_id + assignment_id)
     await ctx.prisma.rating.upsert({
-      where: { rater_id_assignment_id: { rater_id: profile.id, assignment_id: assignmentId } },
-      create: { rater_id: profile.id, ratee_id: rateeId, assignment_id: assignmentId, score },
+      where: {
+        rater_id_assignment_id: {
+          rater_id: profile.id,
+          assignment_id: assignmentId,
+        },
+      },
+      create: {
+        rater_id: profile.id,
+        ratee_id: rateeId,
+        assignment_id: assignmentId,
+        score,
+      },
       update: { score },
     });
 
@@ -63,7 +81,9 @@ export async function runRateAssignmentFlow(
     });
 
     return {
-      reply: [`✅ Merci pour votre évaluation (${score}/5) !\nVotre avis aide à améliorer la communauté Rabotka.`],
+      reply: [
+        `✅ Merci pour votre évaluation (${score}/5) !\nVotre avis aide à améliorer la communauté Rabotka.`,
+      ],
       clearState: true,
     };
   } catch {
