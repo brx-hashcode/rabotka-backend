@@ -554,7 +554,7 @@ export class AuthService {
 
     const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },
-      select: { id: true, is_active: true, phone_paired_at: true },
+      select: { id: true, is_active: true, phone_paired_at: true, totp_enabled: true },
     });
     if (!user || !user.is_active) {
       throw new UnauthorizedException('Admin account not found or inactive');
@@ -565,7 +565,31 @@ export class AuthService {
       );
     }
 
-    const jwtPayload = { sub: user.id, type: 'admin' };
+    // If TOTP is enabled, store a pending token instead of the real JWT.
+    // The browser will prompt for the TOTP code before the session cookie is set.
+    if (user.totp_enabled) {
+      const pendingToken = randomUUID();
+      await this.redis.set(
+        `${TOTP_PENDING_PREFIX}${pendingToken}`,
+        user.id,
+        'EX',
+        TOTP_PENDING_TTL,
+      );
+      await this.redis.set(
+        this.qrKey(sessionId),
+        JSON.stringify({
+          status: 'confirmed',
+          totpRequired: true,
+          pendingToken,
+          consumeNonce: data.consumeNonce,
+        }),
+        'EX',
+        60,
+      );
+      return { success: true };
+    }
+
+    const jwtPayload = { sub: user.id, type: 'admin', jti: randomUUID() };
     const token = this.jwtService.sign(jwtPayload);
 
     await this.redis.set(
@@ -590,23 +614,31 @@ export class AuthService {
   async consumeQrSession(
     sessionId: string,
     consumeNonce: string,
-  ): Promise<{ token: string }> {
+  ): Promise<{ token?: string; totpRequired?: boolean; pendingToken?: string }> {
     const raw = await this.redis.get(this.qrKey(sessionId));
     if (!raw) throw new UnauthorizedException('QR session expired');
 
     const data = JSON.parse(raw) as {
       status: string;
       token?: string;
+      totpRequired?: boolean;
+      pendingToken?: string;
       consumeNonce?: string;
     };
     if (data.consumeNonce !== consumeNonce) {
       throw new UnauthorizedException('Invalid consume nonce');
     }
-    if (data.status !== 'confirmed' || !data.token) {
+    if (data.status !== 'confirmed') {
       throw new UnauthorizedException('QR session not confirmed yet');
     }
 
     await this.redis.del(this.qrKey(sessionId));
+
+    if (data.totpRequired && data.pendingToken) {
+      return { totpRequired: true, pendingToken: data.pendingToken };
+    }
+
+    if (!data.token) throw new UnauthorizedException('QR session invalid');
     return { token: data.token };
   }
 
@@ -650,10 +682,15 @@ export class AuthService {
   ): Promise<{ otp: string; expiresIn: number; userId: string }> {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, is_active: true },
+      select: { id: true, is_active: true, totp_enabled: true },
     });
     if (!user || !user.is_active) {
       throw new UnauthorizedException('Admin account not found or inactive');
+    }
+    if (!user.totp_enabled) {
+      throw new BadRequestException(
+        'Two-factor authentication must be enabled before pairing a phone.',
+      );
     }
 
     const cooldown = await this.redis.get(this.pairCooldownKey(userId));
@@ -804,7 +841,14 @@ export class AuthService {
 
     await this.prisma.user.update({
       where: { id: userId },
-      data: { totp_secret: null, totp_enabled: false },
+      data: {
+        totp_secret: null,
+        totp_enabled: false,
+        // Auto-unpair phone — phone login requires TOTP, so disabling TOTP
+        // would leave phone pairing as a security bypass.
+        phone_paired_at: null,
+        phone_name: null,
+      },
     });
 
     return { success: true };
