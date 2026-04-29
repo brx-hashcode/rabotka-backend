@@ -8,6 +8,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ConfigService } from '@nestjs/config';
 import {
   PaymentRequestStatus,
+  PaymentRequestType,
   Prisma,
   WalletTransactionType,
   PaymentType,
@@ -52,6 +53,8 @@ const PAYMENT_REQUEST_SELECT = {
   gateway: true,
   gateway_payment_ref: true,
   monetbil_payment_ref: true,
+  request_type: true,
+  recommendation_worker_id: true,
   contact_unlock_attempt_id: true,
   profile: {
     select: {
@@ -108,7 +111,11 @@ export class PaymentRequestService {
     profileId: string,
     amount: number,
     description: string,
-    contactUnlockAttemptId?: string,
+    requestType: PaymentRequestType,
+    options: {
+      contactUnlockAttemptId?: string;
+      recommendationWorkerId?: string;
+    } = {},
   ): Promise<string> {
     const token = randomUUID();
     await this.prisma.paymentRequest.create({
@@ -117,8 +124,12 @@ export class PaymentRequestService {
         token,
         amount,
         description,
-        ...(contactUnlockAttemptId && {
-          contact_unlock_attempt_id: contactUnlockAttemptId,
+        request_type: requestType,
+        ...(options.contactUnlockAttemptId && {
+          contact_unlock_attempt_id: options.contactUnlockAttemptId,
+        }),
+        ...(options.recommendationWorkerId && {
+          recommendation_worker_id: options.recommendationWorkerId,
         }),
       },
     });
@@ -442,12 +453,15 @@ export class PaymentRequestService {
   ): Promise<PaymentProcessingContext> {
     const amount = Number(request.amount ?? 0);
     const transactionRef = generatePaymentReference();
-    const isContactUnlock = request.contact_unlock_attempt_id != null;
-    const recommendationWorkerIdMatch = request.description?.match(
-      /^RECOMMENDATION_CONTACT:(.+)$/,
-    );
-    const recommendationWorkerId = recommendationWorkerIdMatch?.[1] ?? null;
-    const isRecommendationContact = recommendationWorkerId != null;
+
+    const requestType = request.request_type;
+    const isContactUnlock =
+      requestType === PaymentRequestType.CONTACT_UNLOCK ||
+      request.contact_unlock_attempt_id != null;
+    const isRecommendationContact =
+      requestType === PaymentRequestType.RECOMMENDATION_CONTACT;
+    const recommendationWorkerId =
+      request.recommendation_worker_id ?? null;
 
     let paymentDescription = request.description ?? 'Paiement';
     if (isRecommendationContact && recommendationWorkerId) {
@@ -831,6 +845,7 @@ export class PaymentRequestService {
       profileStatus: r.profile.status,
       profileType: r.profile.profile_type,
       status: r.status,
+      requestType: r.request_type ?? null,
       gateway: r.gateway ?? null,
       gatewayPaymentRef: r.gateway_payment_ref ?? null,
       amount: r.amount === null ? null : Number(r.amount),
@@ -846,7 +861,10 @@ export class PaymentRequestService {
   private async handlePenaltyPostPayment(
     request: PaymentRequestWithProfile,
   ): Promise<void> {
-    if (!request.description?.startsWith('PENALTY_BATCH:')) return;
+    if (
+      request.request_type !== PaymentRequestType.PENALTY_BATCH &&
+      request.request_type !== PaymentRequestType.PENALTY_RESOLUTION
+    ) return;
 
     const workerId = request.profile_id;
 

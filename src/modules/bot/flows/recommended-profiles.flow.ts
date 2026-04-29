@@ -3,6 +3,7 @@ import {
   PaymentType,
   PaymentMethod,
   PaymentStatus,
+  PaymentRequestType,
 } from '@prisma/client';
 import { generatePaymentReference } from '../../../common/utils/payment-reference';
 import type { BotProfile, BotState } from '../types/bot-state.types';
@@ -513,11 +514,12 @@ async function generateMobileMoneyLink(
     ? `${worker.first_name} ${worker.last_name}`.trim()
     : 'ce candidat';
 
-  // Encode workerId in description so processSuccessfulPayment can reveal contacts via WhatsApp
   const paymentUrl = await ctx.paymentService.createPaymentUrl(
     profile.id,
     fee,
-    `RECOMMENDATION_CONTACT:${workerId}`,
+    `Déverrouillage contact recommandé — ${workerName}`,
+    PaymentRequestType.RECOMMENDATION_CONTACT,
+    { recommendationWorkerId: workerId },
   );
 
   return {

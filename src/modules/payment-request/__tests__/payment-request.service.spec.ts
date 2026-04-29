@@ -8,7 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import { MailService } from '../../mail/mail.service';
 import { PaymentService } from '../../payments/payment.service';
 import { SystemConfigService } from '../../system-config/system-config.service';
-import { PaymentRequestStatus } from '@prisma/client';
+import { PaymentRequestStatus, PaymentRequestType } from '@prisma/client';
 import { WalletService } from '../../wallet/wallet.service';
 import { MonetbilService } from '../monetbil.service';
 import { PaymentStatusGateway } from '../../ws-notifications/payment-status.gateway';
@@ -190,6 +190,7 @@ describe('PaymentRequestService', () => {
         PROFILE_ID,
         5000,
         'Test payment',
+        PaymentRequestType.PENALTY_BATCH,
       );
 
       expect(prisma.paymentRequest.create).toHaveBeenCalled();
