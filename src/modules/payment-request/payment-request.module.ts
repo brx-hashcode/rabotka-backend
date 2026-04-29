@@ -16,6 +16,8 @@ import { PaymentGatewayModule } from '../../common/services/payment/payment-gate
 import { PaymentRequestService } from './payment-request.service';
 import { PaymentRequestController } from './payment-request.controller';
 import { PaymentRequestPublicController } from './payment-request-public.controller';
+import { PollPaymentStatusProcessor } from './poll-payment-status.processor';
+import { PollPaymentStatusWorkerService } from './poll-payment-status.worker.service';
 
 @Module({
   imports: [
@@ -35,7 +37,7 @@ import { PaymentRequestPublicController } from './payment-request-public.control
     PaymentGatewayModule,
   ],
   controllers: [PaymentRequestController, PaymentRequestPublicController],
-  providers: [PaymentRequestService],
-  exports: [PaymentRequestService],
+  providers: [PaymentRequestService, PollPaymentStatusProcessor, PollPaymentStatusWorkerService],
+  exports: [PaymentRequestService, PollPaymentStatusProcessor],
 })
 export class PaymentRequestModule {}
