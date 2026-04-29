@@ -40,13 +40,25 @@ export class PaymentRequestPublicController {
   }
 
   @Post('webhooks/payment/callback')
-  @ApiOperation({ summary: 'Payment gateway webhook callback' })
+  @ApiOperation({ summary: 'Payment gateway webhook callback (Monetbil)' })
   async paymentCallback(@Body() payload: Record<string, string>) {
     const result = await this.service.handlePaymentCallback(payload);
     await this.logService.create({
       action: 'PAYMENT_WEBHOOK_RECEIVED',
       entityType: 'PaymentRequest',
       metadata: { payload },
+    });
+    return result;
+  }
+
+  @Post('webhooks/payment/mtn-momo')
+  @ApiOperation({ summary: 'MTN MoMo payment webhook callback' })
+  async mtnMomoCallback(@Body() payload: Record<string, string>) {
+    const result = await this.service.handlePaymentCallback(payload);
+    await this.logService.create({
+      action: 'PAYMENT_WEBHOOK_RECEIVED',
+      entityType: 'PaymentRequest',
+      metadata: { gateway: 'MTN_MOMO', payload },
     });
     return result;
   }

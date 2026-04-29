@@ -12,6 +12,7 @@ import { BotModule } from '../bot/bot.module';
 import { LogModule } from '../log/log.module';
 import { InvoiceModule } from '../invoice/invoice.module';
 import { StorageModule } from '../../common/services/storage/storage.module';
+import { PaymentGatewayModule } from '../../common/services/payment/payment-gateway.module';
 import { PaymentRequestService } from './payment-request.service';
 import { PaymentRequestController } from './payment-request.controller';
 import { PaymentRequestPublicController } from './payment-request-public.controller';
@@ -31,6 +32,7 @@ import { PaymentRequestPublicController } from './payment-request-public.control
     LogModule,
     InvoiceModule,
     StorageModule,
+    PaymentGatewayModule,
   ],
   controllers: [PaymentRequestController, PaymentRequestPublicController],
   providers: [PaymentRequestService],
