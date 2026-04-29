@@ -4,7 +4,7 @@ import { menuMessage } from '../messages/menu.messages';
 import type { ApplicationService } from '../../application/application.service';
 import type { WalletService } from '../../wallet/wallet.service';
 import type { PaymentService } from '../../payments/payment.service';
-import { WalletTransactionType } from '@prisma/client';
+import { WalletTransactionType, PaymentRequestType } from '@prisma/client';
 
 export type PayPenaltiesContext = {
   applicationService: ApplicationService;
@@ -119,11 +119,11 @@ async function handleMobileMoneyOption(
   totalAmount: number,
   penaltyCount: number,
 ): Promise<FlowResult> {
-  const description = `PENALTY_BATCH:${profile.id}`;
   const paymentUrl = await ctx.paymentService.createPaymentUrl(
     profile.id,
     totalAmount,
-    description,
+    `Paiement de pénalités (${penaltyCount} pénalité(s))`,
+    PaymentRequestType.PENALTY_BATCH,
   );
 
   return {

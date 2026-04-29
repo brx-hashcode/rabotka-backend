@@ -179,6 +179,13 @@ enum PaymentRequestStatus {
   REJECTED
 }
 
+enum PaymentRequestType {
+  PENALTY_BATCH
+  PENALTY_RESOLUTION
+  CONTACT_UNLOCK
+  RECOMMENDATION_CONTACT
+}
+
 enum ClaimStatus {
   CREATED
   IN_PROGRESS
@@ -679,6 +686,8 @@ model PaymentRequest {
   gateway_tx_id        String?
   monetbil_payment_ref        String?              @unique
   monetbil_tx_id              String?
+  request_type                PaymentRequestType?
+  recommendation_worker_id    String?              @db.Uuid
   contact_unlock_attempt_id   String?              @db.Uuid
 
   profile  Profile  @relation(fields: [profile_id], references: [id], onDelete: Cascade)
@@ -688,6 +697,7 @@ model PaymentRequest {
   @@index([token], name: "idx_payment_request_token")
   @@index([status], name: "idx_payment_request_status")
   @@index([monetbil_payment_ref], name: "idx_payment_request_monetbil_ref")
+  @@index([request_type], name: "idx_payment_request_type")
   @@map("payment_requests")
 }
 

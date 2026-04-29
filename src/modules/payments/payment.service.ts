@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { PaymentStatus, PaymentMethod, PaymentType } from '@prisma/client';
+import { PaymentStatus, PaymentMethod, PaymentType, PaymentRequestType } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
@@ -56,7 +56,11 @@ export class PaymentService {
     profileId: string,
     amount: number,
     description: string,
-    contactUnlockAttemptId?: string,
+    requestType: PaymentRequestType,
+    options: {
+      contactUnlockAttemptId?: string;
+      recommendationWorkerId?: string;
+    } = {},
   ): Promise<string> {
     const token = randomUUID();
     await this.prisma.paymentRequest.create({
@@ -65,8 +69,12 @@ export class PaymentService {
         token,
         amount,
         description,
-        ...(contactUnlockAttemptId && {
-          contact_unlock_attempt_id: contactUnlockAttemptId,
+        request_type: requestType,
+        ...(options.contactUnlockAttemptId && {
+          contact_unlock_attempt_id: options.contactUnlockAttemptId,
+        }),
+        ...(options.recommendationWorkerId && {
+          recommendation_worker_id: options.recommendationWorkerId,
         }),
       },
     });

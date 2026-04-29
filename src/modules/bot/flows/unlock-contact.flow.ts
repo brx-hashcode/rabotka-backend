@@ -5,6 +5,7 @@ import {
   formatContactUnlockedMessage,
   formatContactUnlockPending,
 } from '../messages/contact-unlock.messages';
+import { PaymentRequestType } from '@prisma/client';
 import type { ContactUnlockService } from '../../contact-unlock/contact-unlock.service';
 import type { WalletService } from '../../wallet/wallet.service';
 import type { PaymentService } from '../../payments/payment.service';
@@ -193,8 +194,9 @@ async function handleMobileMoney(args: {
   const paymentUrl = await ctx.paymentService.createPaymentUrl(
     profile.id,
     amount,
-    'Déverrouillage de contact',
-    attemptId,
+    `Déverrouillage de contact — ${otherName}`,
+    PaymentRequestType.CONTACT_UNLOCK,
+    { contactUnlockAttemptId: attemptId },
   );
   return {
     reply: [
