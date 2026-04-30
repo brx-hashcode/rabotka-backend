@@ -1,10 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { PaymentRequestStatus } from '@prisma/client';
+import { PaymentRequestStatus, PaymentStatus, PaymentMethod, PaymentType } from '@prisma/client';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { PaymentGatewayService } from '../../common/services/payment/payment-gateway.service';
 import { PaymentStatusGateway } from '../ws-notifications/payment-status.gateway';
 import { QueueService } from '../../common/services/queue/queue.service';
 import { POLL_PAYMENT_STATUS_QUEUE } from '../../common/services/queue/queue.module';
+import { LogService } from '../log/log.service';
+import { generatePaymentReference } from '../../common/utils/payment-reference';
 
 export type PollPaymentStatusJobData = {
   requestId: string;
@@ -13,6 +15,13 @@ export type PollPaymentStatusJobData = {
   attempt: number;
   maxAttempts: number;
   intervalMs: number;
+  // context for audit trail on failure
+  profileId: string;
+  amount: number;
+  phone?: string;
+  operator?: string;
+  requestType?: string;
+  gateway?: string;
 };
 
 // Minimal interface to break the circular dep: processor → service (without service → processor)
@@ -33,6 +42,7 @@ export class PollPaymentStatusProcessor {
     private readonly paymentGateway: PaymentGatewayService,
     private readonly paymentStatusGateway: PaymentStatusGateway,
     private readonly queueService: QueueService,
+    private readonly logService: LogService,
   ) {}
 
   setPaymentRequestService(service: IProcessApprovedPayment): void {
@@ -70,6 +80,12 @@ export class PollPaymentStatusProcessor {
           ...(transactionId && { gateway_tx_id: transactionId }),
         },
       });
+      await this.recordFailure(job.data, {
+        reason: status === 'FAILED' ? 'GATEWAY_FAILED' : 'GATEWAY_CANCELLED',
+        gatewayStatus: status,
+        transactionId,
+        attempt,
+      });
       this.paymentStatusGateway.emitPaymentStatus(token, 'REJECTED');
       return;
     }
@@ -78,7 +94,7 @@ export class PollPaymentStatusProcessor {
     if (attempt < maxAttempts) {
       await this.queueService.addJob<PollPaymentStatusJobData>(
         POLL_PAYMENT_STATUS_QUEUE,
-        { requestId, token, gatewayRef, attempt: attempt + 1, maxAttempts, intervalMs },
+        { ...job.data, attempt: attempt + 1 },
         { delay: intervalMs },
       );
       return;
@@ -92,6 +108,71 @@ export class PollPaymentStatusProcessor {
       where: { id: requestId },
       data: { status: PaymentRequestStatus.PENDING },
     });
+    await this.recordFailure(job.data, {
+      reason: 'POLL_TIMEOUT',
+      attempt,
+    });
     this.paymentStatusGateway.emitPaymentStatus(token, 'TIMEOUT');
+  }
+
+  private async recordFailure(
+    jobData: PollPaymentStatusJobData,
+    options: {
+      reason: 'GATEWAY_FAILED' | 'GATEWAY_CANCELLED' | 'POLL_TIMEOUT';
+      gatewayStatus?: string;
+      transactionId?: string;
+      attempt: number;
+    },
+  ): Promise<void> {
+    const { requestId, profileId, amount, phone, operator, requestType, gateway, gatewayRef } = jobData;
+
+    try {
+      await this.prisma.payment.create({
+        data: {
+          type: PaymentType.PENALTY,
+          profile_id: profileId,
+          amount,
+          payment_method: PaymentMethod.MOBILE_MONEY,
+          transaction_id: generatePaymentReference(),
+          status: PaymentStatus.FAILED,
+          description: `Paiement échoué — ${options.reason}`,
+        },
+      });
+    } catch (err) {
+      this.logger.warn(
+        `Could not create FAILED payment record for request ${requestId}`,
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+
+    this.logService
+      .create({
+        action: 'PAYMENT_FAILED',
+        entityType: 'payment_request',
+        entityId: requestId,
+        profileId,
+        metadata: {
+          reason: options.reason,
+          gatewayStatus: options.gatewayStatus ?? null,
+          transactionId: options.transactionId ?? null,
+          gatewayRef,
+          gateway: gateway ?? null,
+          requestType: requestType ?? null,
+          amount,
+          phone: phone ?? null,
+          operator: operator ?? null,
+          pollAttempt: options.attempt,
+        },
+      })
+      .catch((err: unknown) =>
+        this.logger.warn(
+          `Could not write PAYMENT_FAILED log for request ${requestId}`,
+          err instanceof Error ? err.message : String(err),
+        ),
+      );
+
+    this.logger.warn(
+      `Payment FAILED — request ${requestId} | reason: ${options.reason} | amount: ${amount} FCFA | phone: ${phone ?? 'n/a'} | gatewayRef: ${gatewayRef} | attempt: ${options.attempt}`,
+    );
   }
 }
