@@ -8,13 +8,13 @@ import {
 import { PaymentRequestType } from '@prisma/client';
 import type { ContactUnlockService } from '../../contact-unlock/contact-unlock.service';
 import type { WalletService } from '../../wallet/wallet.service';
-import type { PaymentService } from '../../payments/payment.service';
+import type { IPaymentUrlService } from '../types/payment-url.types';
 import type { BotNotificationService } from '../services/bot-notification.service';
 
 export type UnlockContactContext = {
   contactUnlockService: ContactUnlockService;
   walletService: WalletService;
-  paymentService: PaymentService;
+  paymentService: IPaymentUrlService;
   botNotification: BotNotificationService;
 };
 

@@ -49,35 +49,37 @@ export async function runRateAssignmentFlow(
   }
 
   try {
-    // Upsert rating (idempotent — unique on rater_id + assignment_id)
-    await ctx.prisma.rating.upsert({
-      where: {
-        rater_id_assignment_id: {
-          rater_id: profile.id,
-          assignment_id: assignmentId,
+    await ctx.prisma.$transaction(async (tx) => {
+      // Upsert rating (idempotent — unique on rater_id + assignment_id)
+      await tx.rating.upsert({
+        where: {
+          rater_id_assignment_id: {
+            rater_id: profile.id,
+            assignment_id: assignmentId,
+          },
         },
-      },
-      create: {
-        rater_id: profile.id,
-        ratee_id: rateeId,
-        assignment_id: assignmentId,
-        score,
-      },
-      update: { score },
-    });
+        create: {
+          rater_id: profile.id,
+          ratee_id: rateeId,
+          assignment_id: assignmentId,
+          score,
+        },
+        update: { score },
+      });
 
-    // Recompute ratee's avg
-    const agg = await ctx.prisma.rating.aggregate({
-      where: { ratee_id: rateeId },
-      _avg: { score: true },
-      _count: { score: true },
-    });
-    await ctx.prisma.profile.update({
-      where: { id: rateeId },
-      data: {
-        rating_avg: agg._avg.score ?? null,
-        rating_count: agg._count.score,
-      },
+      // Recompute ratee's avg inside the same transaction to avoid read-then-write race
+      const agg = await tx.rating.aggregate({
+        where: { ratee_id: rateeId },
+        _avg: { score: true },
+        _count: { score: true },
+      });
+      await tx.profile.update({
+        where: { id: rateeId },
+        data: {
+          rating_avg: agg._avg.score ?? null,
+          rating_count: agg._count.score,
+        },
+      });
     });
 
     return {

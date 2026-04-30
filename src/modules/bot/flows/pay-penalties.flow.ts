@@ -3,13 +3,13 @@ import { FLOW_IDS, CMD_MENU } from '../bot.constants';
 import { menuMessage } from '../messages/menu.messages';
 import type { ApplicationService } from '../../application/application.service';
 import type { WalletService } from '../../wallet/wallet.service';
-import type { PaymentService } from '../../payments/payment.service';
+import type { IPaymentUrlService } from '../types/payment-url.types';
 import { WalletTransactionType, PaymentRequestType } from '@prisma/client';
 
 export type PayPenaltiesContext = {
   applicationService: ApplicationService;
   walletService: WalletService;
-  paymentService: PaymentService;
+  paymentService: IPaymentUrlService;
 };
 
 type FlowResult = {

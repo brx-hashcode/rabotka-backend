@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, forwardRef, Inject } from '@nestjs/common';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { AccountStatus, BillingStatus } from '@prisma/client';
 import { JobOfferService } from '../../job-offer/job-offer.service';
@@ -61,7 +61,7 @@ import {
   runVerifyWhatsappFlow,
   getVerifyWhatsappInitialState,
 } from '../flows/verify-whatsapp.flow';
-import { PaymentService } from '../../payments/payment.service';
+import { PaymentRequestService } from '../../payment-request/payment-request.service';
 import { ContactUnlockService } from '../../contact-unlock/contact-unlock.service';
 import { WalletService } from '../../wallet/wallet.service';
 import {
@@ -110,7 +110,8 @@ export class BotOrchestratorService {
     private readonly applicationService: ApplicationService,
     private readonly notificationService: BotNotificationService,
     private readonly systemConfig: SystemConfigService,
-    private readonly paymentService: PaymentService,
+    @Inject(forwardRef(() => PaymentRequestService))
+    private readonly paymentService: PaymentRequestService,
     private readonly contactUnlockService: ContactUnlockService,
     private readonly walletService: WalletService,
     private readonly matchingService: MatchingService,
