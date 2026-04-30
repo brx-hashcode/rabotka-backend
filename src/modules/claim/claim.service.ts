@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
@@ -112,6 +112,8 @@ const claimInclude = {
 
 @Injectable()
 export class ClaimService {
+  private readonly logger = new Logger(ClaimService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationService,
@@ -155,7 +157,7 @@ export class ClaimService {
           `${profile.first_name} ${profile.last_name}`,
           dto.title,
         )
-        .catch(() => {});
+        .catch((err: unknown) => this.logger.warn(`Notification failed`, err instanceof Error ? err.message : String(err)));
     }
 
     return mapClaim(claim);
@@ -259,15 +261,15 @@ export class ClaimService {
         if (dto.status === 'IN_PROGRESS') {
           void this.notifications
             .notifyClaimInProgress(profile.email, name, exists.title)
-            .catch(() => {});
+            .catch((err: unknown) => this.logger.warn(`Notification failed`, err instanceof Error ? err.message : String(err)));
         } else if (dto.status === 'COMPLETED') {
           void this.notifications
             .notifyClaimCompleted(profile.email, name, exists.title)
-            .catch(() => {});
+            .catch((err: unknown) => this.logger.warn(`Notification failed`, err instanceof Error ? err.message : String(err)));
         } else if (dto.status === 'REJECTED') {
           void this.notifications
             .notifyClaimRejected(profile.email, name, exists.title)
-            .catch(() => {});
+            .catch((err: unknown) => this.logger.warn(`Notification failed`, err instanceof Error ? err.message : String(err)));
         }
       }
     }
@@ -288,7 +290,7 @@ export class ClaimService {
               `${adminUser.first_name} ${adminUser.last_name}`,
               exists.title,
             )
-            .catch(() => {});
+            .catch((err: unknown) => this.logger.warn(`Notification failed`, err instanceof Error ? err.message : String(err)));
         }
       } else if (exists.assigned_user_id) {
         const previousUser = await this.prisma.user.findUnique({
@@ -302,7 +304,7 @@ export class ClaimService {
               `${previousUser.first_name} ${previousUser.last_name}`,
               exists.title,
             )
-            .catch(() => {});
+            .catch((err: unknown) => this.logger.warn(`Notification failed`, err instanceof Error ? err.message : String(err)));
         }
       }
     }
@@ -411,7 +413,7 @@ export class ClaimService {
           `${profile.first_name} ${profile.last_name}`,
           dto.title,
         )
-        .catch(() => {});
+        .catch((err: unknown) => this.logger.warn(`Notification failed`, err instanceof Error ? err.message : String(err)));
     }
 
     return mapClaim(claim);

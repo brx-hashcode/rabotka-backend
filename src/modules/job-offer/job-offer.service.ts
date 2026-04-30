@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   BadRequestException,
   NotFoundException,
   ForbiddenException,
@@ -108,6 +109,8 @@ export type JobOfferDetail = JobOfferListItem & {
 
 @Injectable()
 export class JobOfferService {
+  private readonly logger = new Logger(JobOfferService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly mailService: MailService,
@@ -208,10 +211,14 @@ export class JobOfferService {
           if (score < MIN_NOTIFICATION_SCORE) continue;
           this.botNotification
             .sendRecommendedJobNotification(workerId, offer.id)
-            .catch(() => {});
+            .catch((err: unknown) =>
+              this.logger.warn(`sendRecommendedJobNotification failed for worker ${workerId}`, err instanceof Error ? err.message : String(err)),
+            );
         }
       })
-      .catch(() => {});
+      .catch((err: unknown) =>
+        this.logger.warn(`indexJobOffer/matchingNotify failed for offer ${offer.id}`, err instanceof Error ? err.message : String(err)),
+      );
 
     return this.toListItem(offer);
   }
