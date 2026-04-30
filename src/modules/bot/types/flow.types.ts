@@ -1,7 +1,7 @@
 import type { PrismaService } from '../../../common/services/prisma/prisma.service';
 import type { JobOfferService } from '../../job-offer/job-offer.service';
 import type { ApplicationService } from '../../application/application.service';
-import type { PaymentService } from '../../payments/payment.service';
+import type { IPaymentUrlService } from './payment-url.types';
 import type { SystemConfigService } from '../../system-config/system-config.service';
 import type { BotNotificationService } from '../services/bot-notification.service';
 import type { BotCommandsService } from '../services/bot-commands.service';
@@ -20,7 +20,7 @@ export type FlowContext = {
   applicationService: ApplicationService;
   notificationService: BotNotificationService;
   systemConfigService: SystemConfigService;
-  paymentService: PaymentService;
+  paymentService: IPaymentUrlService;
   commands: BotCommandsService;
   contactUnlockService: ContactUnlockService;
   walletService: WalletService;

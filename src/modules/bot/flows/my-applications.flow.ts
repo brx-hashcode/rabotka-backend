@@ -19,7 +19,7 @@ import type { ApplicationService } from '../../application/application.service';
 import type { BotNotificationService } from '../services/bot-notification.service';
 import type { ContactUnlockService } from '../../contact-unlock/contact-unlock.service';
 import type { WalletService } from '../../wallet/wallet.service';
-import type { PaymentService } from '../../payments/payment.service';
+import type { IPaymentUrlService } from '../types/payment-url.types';
 import type { SystemConfigService } from '../../system-config/system-config.service';
 import type { InterestSignalService } from '../../interest-graph/interest-signal.service';
 import {
@@ -32,7 +32,7 @@ export type MyApplicationsContext = {
   notificationService: BotNotificationService;
   contactUnlockService: ContactUnlockService;
   walletService: WalletService;
-  paymentService: PaymentService;
+  paymentService: IPaymentUrlService;
   systemConfigService: SystemConfigService;
   interestSignalService: InterestSignalService;
 };
