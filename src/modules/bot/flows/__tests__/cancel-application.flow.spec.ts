@@ -60,6 +60,7 @@ function makeCtx(
     interestSignalService: {
       record: jest.fn().mockResolvedValue(undefined),
     } as unknown as CancelApplicationContext['interestSignalService'],
+    cancellationThresholdHours: 4,
     ...overrides,
   };
 }

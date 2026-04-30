@@ -17,6 +17,7 @@ export type CancelApplicationContext = {
   applicationService: ApplicationService;
   notificationService: BotNotificationService;
   interestSignalService: InterestSignalService;
+  cancellationThresholdHours: number;
 };
 
 export type FlowResult = {
@@ -127,6 +128,7 @@ function showInitialCancelPrompt(
   profile: BotProfile,
   state: BotState,
   timeRemainingStr: string,
+  thresholdHours: number,
 ): FlowResult {
   const scheduledAt = app.job_offer.scheduled_at;
   if (isLate) {
@@ -150,6 +152,7 @@ function showInitialCancelPrompt(
     scheduledAt,
     amount: app.job_offer.amount,
     timeRemaining: timeRemainingStr,
+    thresholdHours,
   });
   return { reply: [text], nextState: state };
 }
@@ -201,6 +204,7 @@ async function handleCancelStep1(
       profile,
       state,
       timeRemainingStr,
+      args.ctx.cancellationThresholdHours,
     );
   }
 

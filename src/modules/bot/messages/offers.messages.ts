@@ -26,7 +26,7 @@ export function formatPaymentFlow(flow: string | null): string {
 }
 
 function formatAmount(amount: number | null, flow: string | null): string {
-  if (amount == null) return 'Prix à négocier';
+  if (amount == null || amount === 0) return 'A négocier';
   const flowLabel = formatPaymentFlow(flow);
   const flowSuffix = flowLabel ? ` ${flowLabel}` : '';
   return `${amount.toLocaleString('fr-FR')} FCFA${flowSuffix}`;
@@ -161,6 +161,39 @@ function employerScoreLabel(score: number): string {
 function formatEmployerScore(score: number | null | undefined): string {
   if (score == null) return '';
   return `*Fiabilité employeur*: ${score}/100 (${employerScoreLabel(score)})`;
+}
+
+/** Numbered list for recommended-jobs flow: shows up to 5 offers, 7 = menu */
+export function formatRecommendedList(offers: OfferListItem[]): string {
+  const lines = ['*Offres recommandées pour vous*', '', SEP, ''];
+  offers.forEach((o, i) => {
+    const qty = o.quantity ?? 1;
+    const filled = o.acceptedCount ?? 0;
+    const remaining = Math.max(0, qty - filled);
+    const spotsLabel =
+      remaining === 0
+        ? 'Complet'
+        : remaining === qty
+          ? `${qty} place${qty > 1 ? 's' : ''}`
+          : `${remaining}/${qty} restante${remaining > 1 ? 's' : ''}`;
+    const shortAddr =
+      o.address.length > 35 ? o.address.slice(0, 35) + '…' : o.address;
+    lines.push(
+      `*${i + 1}-* ${o.title}`,
+      `    • Montant : ${formatAmount(o.amount, o.payment_flow)}`,
+      `    • Date : ${formatDate(o.scheduled_at)}`,
+      `    • Places : ${spotsLabel}`,
+      `    • Adresse : ${shortAddr}`,
+      '',
+    );
+  });
+  lines.push(
+    SEP,
+    '',
+    `_Tapez 1-${offers.length} pour voir le détail._`,
+    `_Tapez 7 pour revenir au menu._`,
+  );
+  return lines.join('\n');
 }
 
 /** Single offer view in list-offers flow with 4 actions */

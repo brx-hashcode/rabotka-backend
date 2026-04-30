@@ -73,6 +73,10 @@ import {
   getRecommendedJobsInitialState,
 } from '../flows/recommended-jobs.flow';
 import {
+  formatRecommendedList,
+  jobOfferToOfferListItem,
+} from '../messages/offers.messages';
+import {
   runRecommendedProfilesFlow,
   getRecommendedProfilesInitialState,
 } from '../flows/recommended-profiles.flow';
@@ -346,8 +350,13 @@ export class BotOrchestratorService {
       [FLOW_IDS.APPLY_JOB]: () => runApplyJobFlow(state, input, profile, ctx),
       [FLOW_IDS.ACCEPT_REFUSE_CANDIDATE]: () =>
         runAcceptRefuseCandidateFlow(state, input, profile, ctx),
-      [FLOW_IDS.CANCEL_APPLICATION]: () =>
-        runCancelApplicationFlow(state, input, profile, ctx),
+      [FLOW_IDS.CANCEL_APPLICATION]: async () => {
+        const { cancellationThresholdHours } = await this.systemConfig.getFees();
+        return runCancelApplicationFlow(state, input, profile, {
+          ...ctx,
+          cancellationThresholdHours,
+        });
+      },
       [FLOW_IDS.MY_APPLICATIONS]: () =>
         runMyApplicationsFlow(state, input, profile, ctx),
       [FLOW_IDS.CANDIDATURES_LIST]: () =>
@@ -668,82 +677,62 @@ export class BotOrchestratorService {
     profile: BotProfile,
     profileId: string,
   ): Promise<string[]> {
+    const noOffersMsg = [
+      '*Offres recommandées*',
+      '',
+      "Aucune offre recommandée pour l'instant. Complétez votre profil pour de meilleures recommandations.",
+      '',
+      "*Tapez 'Menu' pour revenir au menu principal.*",
+    ].join('\n');
+
     const offerResults = await this.interestRecommendationService.recommend(
       profile.id,
       10,
     );
-    const offerIds: string[] = offerResults.map((r) => r.jobId);
+    const offerIds = offerResults.map((r) => r.jobId).slice(0, 5);
 
-    if (offerIds.length === 0) {
-      return [
-        [
-          '*Offres recommandées*',
-          '',
-          "Aucune offre recommandée pour l'instant. Complétez votre profil pour de meilleures recommandations.",
-          '',
-          '*Tapez 1 pour voir toutes les offres disponibles ou Menu pour revenir.*',
-        ].join('\n'),
-      ];
-    }
+    if (offerIds.length === 0) return [noOffersMsg];
 
-    const flowState = getRecommendedJobsInitialState(offerIds);
-    const pageIds = offerIds.slice(0, 5);
+    const rows = await this.prisma.jobOffer.findMany({
+      where: {
+        id: { in: offerIds },
+        status: { in: ['ACTIVE', 'PARTIALLY_FILLED'] },
+      },
+      select: {
+        id: true,
+        title: true,
+        description: true,
+        amount: true,
+        payment_flow: true,
+        address: true,
+        note: true,
+        scheduled_at: true,
+        quantity: true,
+        status: true,
+        employer: { select: { reliability_score: true } },
+        _count: { select: { applications: { where: { status: 'ACCEPTED' } } } },
+      },
+    });
 
-    const [offers] = await Promise.all([
-      this.prisma.jobOffer.findMany({
-        where: {
-          id: { in: pageIds },
-          status: { in: ['ACTIVE', 'PARTIALLY_FILLED'] },
-        },
-        select: {
-          id: true,
-          title: true,
-          amount: true,
-          address: true,
-          scheduled_at: true,
-        },
-      }),
-      this.botState.set(profileId, flowState),
-    ]);
-    const offerMap = new Map(offers.map((o) => [o.id, o]));
-    const orderedOffers = pageIds
+    const offerMap = new Map(rows.map((o) => [o.id, o]));
+    const orderedRows = offerIds
       .map((id) => offerMap.get(id))
-      .filter(Boolean) as typeof offers;
+      .filter(Boolean) as typeof rows;
 
-    if (orderedOffers.length === 0) {
-      return [
-        [
-          '*Offres recommandées*',
-          '',
-          "Aucune offre recommandée pour l'instant. Complétez votre profil pour de meilleures recommandations.",
-          '',
-          '*Tapez 1 pour voir toutes les offres disponibles ou Menu pour revenir.*',
-        ].join('\n'),
-      ];
-    }
+    if (orderedRows.length === 0) return [noOffersMsg];
 
-    const lines = [
-      '*OFFRES RECOMMANDÉES POUR VOUS*',
-      '',
-      ...orderedOffers.flatMap((o, i) => {
-        const dateStr = o.scheduled_at.toLocaleDateString('fr-FR', {
-          day: '2-digit',
-          month: '2-digit',
-          year: 'numeric',
-        });
-        const shortAddr =
-          o.address.length > 40 ? o.address.slice(0, 40) + '…' : o.address;
-        return [
-          `${i + 1}- *${o.title}*`,
-          `    • Montant : ${Number(o.amount).toLocaleString('fr-FR')} FCFA`,
-          `    • Date : ${dateStr}`,
-          `    • Adresse : ${shortAddr}`,
-          '',
-        ];
+    const offerItems = orderedRows.map((o) =>
+      jobOfferToOfferListItem({
+        ...o,
+        amount: o.amount != null ? Number(o.amount) : null,
+        acceptedCount: o._count.applications,
       }),
-      'Tapez le numéro pour voir le détail ou *Menu* pour revenir au menu.',
-    ];
-    return [lines.join('\n')];
+    );
+
+    const flowState = getRecommendedJobsInitialState(offerIds, offerItems);
+    await this.botState.set(profileId, flowState);
+
+    return [formatRecommendedList(offerItems)];
   }
 
   private async handleRecommendedProfilesCommand(

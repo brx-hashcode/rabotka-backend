@@ -12,7 +12,7 @@ const date = new Date('2026-03-15T10:00:00');
 
 describe('formatPenaltyHistory', () => {
   it('shows empty state when no penalties', () => {
-    const msg = formatPenaltyHistory([], 0, 0, 100, 5);
+    const msg = formatPenaltyHistory([], 0, 0, 100, 5, 4);
     expect(msg).toContain('Aucune pénalité enregistrée');
   });
 
@@ -26,7 +26,7 @@ describe('formatPenaltyHistory', () => {
         jobOfferTitle: 'Livreur',
       },
     ];
-    const msg = formatPenaltyHistory(items, 5000, 1, 80, 3);
+    const msg = formatPenaltyHistory(items, 5000, 1, 80, 3, 4);
     expect(msg).toContain('Livreur');
     expect(msg).toContain('Annulation tardive');
     expect(msg).toContain('5');
@@ -41,13 +41,13 @@ describe('formatPenaltyHistory', () => {
         appliedAt: date,
       },
     ];
-    const msg = formatPenaltyHistory(items, 5000, 1, 90, 2);
+    const msg = formatPenaltyHistory(items, 5000, 1, 90, 2, 4);
     expect(msg).toContain('5');
     expect(msg).not.toContain('undefined');
   });
 
   it('includes score and stats in summary', () => {
-    const msg = formatPenaltyHistory([], 0, 2, 75, 10);
+    const msg = formatPenaltyHistory([], 0, 2, 75, 10, 4);
     expect(msg).toContain('75/100');
     expect(msg).toContain('10');
     expect(msg).toContain('2');
@@ -130,6 +130,7 @@ describe('formatCancelApplicationNoPenalty', () => {
       scheduledAt: date,
       amount: 8000,
       timeRemaining: '6h',
+      thresholdHours: 4,
     });
     expect(msg).toContain('Manutentionnaire');
     expect(msg).toContain('6h');

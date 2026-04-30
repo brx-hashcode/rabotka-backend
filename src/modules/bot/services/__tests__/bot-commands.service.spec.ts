@@ -77,6 +77,7 @@ describe('BotCommandsService', () => {
       jobOfferService as any,
       applicationService as any,
       { getProfileWalletBalance: jest.fn().mockResolvedValue(0) } as any,
+      { getFees: jest.fn().mockResolvedValue({ cancellationThresholdHours: 4 }) } as any,
     );
   });
 
