@@ -14,7 +14,7 @@ import type { PrismaService } from '../../../common/services/prisma/prisma.servi
 import type { SystemConfigService } from '../../system-config/system-config.service';
 import type { ContactUnlockService } from '../../contact-unlock/contact-unlock.service';
 import type { WalletService } from '../../wallet/wallet.service';
-import type { PaymentService } from '../../payments/payment.service';
+import type { IPaymentUrlService } from '../types/payment-url.types';
 import type { BotNotificationService } from '../services/bot-notification.service';
 import type { InterestSignalService } from '../../interest-graph/interest-signal.service';
 
@@ -23,7 +23,7 @@ export type RecommendedProfilesContext = {
   systemConfig: SystemConfigService;
   contactUnlockService: ContactUnlockService;
   walletService: WalletService;
-  paymentService: PaymentService;
+  paymentService: IPaymentUrlService;
   botNotification: BotNotificationService;
   employerProfileId: string;
   interestSignalService: InterestSignalService;

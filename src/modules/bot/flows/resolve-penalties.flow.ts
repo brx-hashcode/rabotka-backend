@@ -2,12 +2,12 @@ import type { BotProfile, BotState } from '../types/bot-state.types';
 import { FLOW_IDS, CMD_MENU } from '../bot.constants';
 import { menuMessage } from '../messages/menu.messages';
 import { PrismaService } from 'src/common/services/prisma/prisma.service';
-import type { PaymentService } from '../../payments/payment.service';
+import type { IPaymentUrlService } from '../types/payment-url.types';
 import { PaymentRequestType } from '@prisma/client';
 
 export type ResolvePenaltiesContext = {
   prisma: PrismaService;
-  paymentService: PaymentService;
+  paymentService: IPaymentUrlService;
 };
 
 type FlowResult = {

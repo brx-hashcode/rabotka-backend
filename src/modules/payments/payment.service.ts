@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { PaymentStatus, PaymentMethod, PaymentType, PaymentRequestType } from '@prisma/client';
+import { PaymentStatus, PaymentMethod, PaymentType } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
@@ -9,7 +9,6 @@ import { QueueService } from '../../common/services/queue/queue.service';
 import { PAYMENT_QUEUE } from '../../common/services/queue/queue.module';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { generatePaymentReference } from '../../common/utils/payment-reference';
-import { randomUUID } from 'node:crypto';
 
 export type PaymentJobData = {
   paymentId: string;
@@ -50,35 +49,6 @@ export class PaymentService {
     );
 
     return `${this.getFrontendUrl()}/job-posting/${jobOfferId}`;
-  }
-
-  async createPaymentUrl(
-    profileId: string,
-    amount: number,
-    description: string,
-    requestType: PaymentRequestType,
-    options: {
-      contactUnlockAttemptId?: string;
-      recommendationWorkerId?: string;
-    } = {},
-  ): Promise<string> {
-    const token = randomUUID();
-    await this.prisma.paymentRequest.create({
-      data: {
-        profile_id: profileId,
-        token,
-        amount,
-        description,
-        request_type: requestType,
-        ...(options.contactUnlockAttemptId && {
-          contact_unlock_attempt_id: options.contactUnlockAttemptId,
-        }),
-        ...(options.recommendationWorkerId && {
-          recommendation_worker_id: options.recommendationWorkerId,
-        }),
-      },
-    });
-    return `${this.getFrontendUrl()}/pay/${token}`;
   }
 
   generatePenaltyPaymentLink(profileId: string, amount: number): string {
