@@ -33,6 +33,7 @@ import { ContactUnlockService } from '../contact-unlock/contact-unlock.service';
 import { InvoiceService } from '../invoice/invoice.service';
 import { StorageService } from '../../common/services/storage/storage.service';
 import { generatePaymentReference } from '../../common/utils/payment-reference';
+import { LogService } from '../log/log.service';
 import { QueueService } from '../../common/services/queue/queue.service';
 import { POLL_PAYMENT_STATUS_QUEUE } from '../../common/services/queue/queue.module';
 import type { PollPaymentStatusJobData } from './poll-payment-status.processor';
@@ -105,6 +106,7 @@ export class PaymentRequestService {
     private readonly invoiceService: InvoiceService,
     private readonly storageService: StorageService,
     private readonly queueService: QueueService,
+    private readonly logService: LogService,
   ) {}
 
   /**
@@ -245,11 +247,33 @@ export class PaymentRequestService {
           operator: null,
         },
       });
-      throw new BadRequestException(
-        err instanceof Error
-          ? err.message
-          : "Échec de l'initiation du paiement",
+      const errorMessage = err instanceof Error ? err.message : "Échec de l'initiation du paiement";
+      this.logger.warn(
+        `Gateway init failed for request ${request.id} — profile: ${profileName} | phone: ${phone} | amount: ${Number(request.amount)} FCFA | error: ${errorMessage}`,
       );
+      this.logService
+        .create({
+          action: 'PAYMENT_GATEWAY_INIT_FAILED',
+          entityType: 'payment_request',
+          entityId: request.id,
+          profileId: request.profile_id,
+          metadata: {
+            reason: 'GATEWAY_INIT_ERROR',
+            errorMessage,
+            amount: Number(request.amount),
+            phone,
+            operator,
+            profileName,
+            requestType: request.request_type ?? null,
+          },
+        })
+        .catch((logErr: unknown) =>
+          this.logger.warn(
+            `Could not write PAYMENT_GATEWAY_INIT_FAILED log for request ${request.id}`,
+            logErr instanceof Error ? logErr.message : String(logErr),
+          ),
+        );
+      throw new BadRequestException(errorMessage);
     }
 
     const activeGateway = await this.systemConfig
@@ -275,6 +299,12 @@ export class PaymentRequestService {
           attempt: 1,
           maxAttempts: 10,
           intervalMs: 5000,
+          profileId: request.profile_id,
+          amount: Number(request.amount),
+          phone,
+          operator,
+          requestType: request.request_type ?? undefined,
+          gateway: activeGateway,
         },
         { delay: 5000 },
       );
@@ -338,9 +368,12 @@ export class PaymentRequestService {
           ...(transactionId && { gateway_tx_id: transactionId }),
         },
       });
-      this.logger.log(
-        `Payment rejected for request ${request.id} (status: ${status})`,
-      );
+      await this.persistFailedPayment(request, {
+        reason: status === 'FAILED' ? 'GATEWAY_FAILED' : 'GATEWAY_CANCELLED',
+        gatewayStatus: status,
+        transactionId,
+        gatewayRef,
+      });
       this.paymentStatusGateway.emitPaymentStatus(request.token, 'REJECTED');
     } else {
       this.logger.warn(
@@ -520,6 +553,72 @@ export class PaymentRequestService {
 
       return true;
     });
+  }
+
+  private async persistFailedPayment(
+    request: PaymentRequestWithProfile,
+    options: {
+      reason: 'GATEWAY_FAILED' | 'GATEWAY_CANCELLED' | 'POLL_TIMEOUT' | 'GATEWAY_INIT_ERROR';
+      gatewayStatus?: string;
+      transactionId?: string;
+      gatewayRef?: string;
+      errorMessage?: string;
+      pollAttempt?: number;
+    },
+  ): Promise<void> {
+    const transactionRef = generatePaymentReference();
+    const profileName = this.fullName(request.profile);
+
+    try {
+      await this.prisma.payment.create({
+        data: {
+          type: PaymentType.PENALTY, // best-effort; actual type from context not available here
+          profile_id: request.profile_id,
+          amount: Number(request.amount ?? 0),
+          payment_method: PaymentMethod.MOBILE_MONEY,
+          transaction_id: transactionRef,
+          status: PaymentStatus.FAILED,
+          description: request.description ?? 'Paiement échoué',
+        },
+      });
+    } catch (err) {
+      this.logger.warn(
+        `Could not create FAILED payment record for request ${request.id}`,
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+
+    this.logService
+      .create({
+        action: 'PAYMENT_FAILED',
+        entityType: 'payment_request',
+        entityId: request.id,
+        profileId: request.profile_id,
+        metadata: {
+          reason: options.reason,
+          gatewayStatus: options.gatewayStatus ?? null,
+          transactionId: options.transactionId ?? null,
+          gatewayRef: options.gatewayRef ?? request.gateway_payment_ref ?? null,
+          gateway: request.gateway ?? null,
+          requestType: request.request_type ?? null,
+          amount: Number(request.amount ?? 0),
+          phone: request.phone ?? null,
+          operator: request.operator ?? null,
+          profileName,
+          pollAttempt: options.pollAttempt ?? null,
+          errorMessage: options.errorMessage ?? null,
+        },
+      })
+      .catch((err: unknown) =>
+        this.logger.warn(
+          `Could not write PAYMENT_FAILED log for request ${request.id}`,
+          err instanceof Error ? err.message : String(err),
+        ),
+      );
+
+    this.logger.warn(
+      `Payment FAILED — request ${request.id} | reason: ${options.reason} | profile: ${profileName} | amount: ${Number(request.amount ?? 0)} FCFA | phone: ${request.phone ?? 'n/a'} | gatewayRef: ${options.gatewayRef ?? request.gateway_payment_ref ?? 'n/a'}`,
+    );
   }
 
   private emitAdminPaymentNotification(
