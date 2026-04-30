@@ -333,43 +333,6 @@ export class JobOfferService {
     return { data, nextCursor };
   }
 
-  async findRecommendedForWorker(
-    workerId: string,
-    limit = 10,
-  ): Promise<JobOfferListItem[]> {
-    const recommendedResults: { id: string; score: number }[] =
-      await this.matchingService.findMatchingJobsForWorker(workerId, limit);
-    const recommendedIds: string[] = recommendedResults.map((r) => r.id);
-
-    if (recommendedIds.length > 0) {
-      const offers = await this.prisma.jobOffer.findMany({
-        where: {
-          id: { in: recommendedIds },
-          status: {
-            in: [JobOfferStatus.ACTIVE, JobOfferStatus.PARTIALLY_FILLED],
-          },
-          applications: { none: { worker_id: workerId } },
-        },
-        include: {
-          _count: {
-            select: { applications: { where: { status: 'ACCEPTED' } } },
-          },
-        },
-      });
-      const offerMap = new Map(offers.map((o) => [o.id, o]));
-      return recommendedIds.flatMap((id) => {
-        const o = offerMap.get(id);
-        if (!o) return [];
-        const accepted = o._count.applications;
-        if (!this.offerHasOpenSlots(o.quantity, accepted)) return [];
-        return [this.toListItem(o, accepted)];
-      });
-    }
-
-    const { data } = await this.findActive(limit, undefined, workerId);
-    return data;
-  }
-
   async findById(id: string): Promise<JobOfferDetail | null> {
     const offer = await this.prisma.jobOffer.findUnique({
       where: { id },

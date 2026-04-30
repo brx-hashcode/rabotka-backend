@@ -61,7 +61,7 @@ import {
   runVerifyWhatsappFlow,
   getVerifyWhatsappInitialState,
 } from '../flows/verify-whatsapp.flow';
-import { PaymentRequestService } from '../../payment-request/payment-request.service';
+import { PaymentService } from '../../payments/payment.service';
 import { ContactUnlockService } from '../../contact-unlock/contact-unlock.service';
 import { WalletService } from '../../wallet/wallet.service';
 import {
@@ -110,8 +110,8 @@ export class BotOrchestratorService {
     private readonly applicationService: ApplicationService,
     private readonly notificationService: BotNotificationService,
     private readonly systemConfig: SystemConfigService,
-    @Inject(forwardRef(() => PaymentRequestService))
-    private readonly paymentService: PaymentRequestService,
+    @Inject(forwardRef(() => PaymentService))
+    private readonly paymentService: PaymentService,
     private readonly contactUnlockService: ContactUnlockService,
     private readonly walletService: WalletService,
     private readonly matchingService: MatchingService,
