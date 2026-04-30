@@ -98,13 +98,18 @@ export class InterestClusterService implements OnModuleInit {
 
   async getProfile(userId: string): Promise<UserInterestProfile | null> {
     const pointId = `interest__${userId}`;
-    const result = await this.qdrant
-      .getClient()
-      .retrieve(USER_INTERESTS_COLLECTION, {
-        ids: [pointId],
-        with_payload: true,
-        with_vector: false,
-      });
+    let result: { id: string | number; payload?: Record<string, unknown> | null }[];
+    try {
+      result = await this.qdrant
+        .getClient()
+        .retrieve(USER_INTERESTS_COLLECTION, {
+          ids: [pointId],
+          with_payload: true,
+          with_vector: false,
+        });
+    } catch {
+      return null;
+    }
 
     if (!result.length) return null;
 

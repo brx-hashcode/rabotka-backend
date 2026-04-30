@@ -5,6 +5,7 @@ import type { JobOfferService } from '../../job-offer/job-offer.service';
 import type { InterestSignalService } from '../../interest-graph/interest-signal.service';
 import {
   formatOfferDetailWithActions,
+  formatRecommendedList,
   type OfferListItem,
 } from '../messages/offers.messages';
 import { menuMessage } from '../messages/menu.messages';
@@ -59,10 +60,6 @@ function isMenuCommand(normalizedInput: string): boolean {
   );
 }
 
-function buildRecommendedListPrompt(offerIdsCount: number): string {
-  return `*Tapez 1-${Math.min(offerIdsCount, PAGE_SIZE)} pour voir le détail ou 7 pour le menu.*`;
-}
-
 function buildListState(
   state: BotState,
   payload: Record<string, unknown>,
@@ -90,78 +87,102 @@ async function handleRecommendedJobsListStep(
   state: BotState,
   payload: Record<string, unknown>,
   trimmedInput: string,
-  offerIds: string[],
+  offers: OfferListItem[],
   profile: BotProfile,
   ctx: RecommendedJobsContext,
   goToMenu: () => FlowResult,
 ): Promise<FlowResult> {
   if (trimmedInput === '7') return goToMenu();
 
-  const choice = /^[1-5]$/.test(trimmedInput)
+  const maxChoice = Math.min(offers.length, PAGE_SIZE);
+  const choiceRe = new RegExp(`^[1-${maxChoice}]$`);
+  const choice = choiceRe.test(trimmedInput)
     ? Number.parseInt(trimmedInput, 10)
     : 0;
-  const maxChoice = Math.min(offerIds.length, PAGE_SIZE);
 
   if (choice < 1 || choice > maxChoice) {
     return {
-      reply: [buildRecommendedListPrompt(offerIds.length)],
+      reply: [formatRecommendedList(offers.slice(0, PAGE_SIZE))],
       nextState: state,
     };
   }
 
-  const offerId = offerIds[choice - 1];
-  const offer = await ctx.jobOfferService.findById(offerId);
-  if (!offer) {
-    return { reply: ['Offre introuvable.'], nextState: state };
-  }
+  const item = offers[choice - 1];
 
-  // Record view signal (fire-and-forget)
+  // Fetch fresh detail for the full description
+  const fresh = await ctx.jobOfferService.findById(item.id);
+  if (!fresh) return { reply: ['Offre introuvable.'], nextState: state };
+
+  const freshItem = toOfferListItem({
+    ...fresh,
+    acceptedCount: fresh.acceptedCount ?? 0,
+  });
+
   void ctx.interestSignalService
-    .record(profile.id, offerId, 'view')
+    .record(profile.id, item.id, 'view')
     .catch(() => undefined);
 
-  const item = toOfferListItem({
-    ...offer,
-    acceptedCount: offer.acceptedCount ?? 0,
-  });
-  const detailMsg = formatOfferDetailWithActions(item);
   return {
-    reply: [detailMsg],
-    nextState: buildDetailState(state, payload, offerId),
+    reply: [formatOfferDetailWithActions(freshItem)],
+    nextState: buildDetailState(state, payload, item.id),
   };
 }
 
-function handleRecommendedJobsDetailStep(
+async function handleRecommendedJobsDetailStep(
   state: BotState,
   payload: Record<string, unknown>,
   normalizedInput: string,
   profile: BotProfile,
   ctx: RecommendedJobsContext,
   goToMenu: () => FlowResult,
-): FlowResult {
+): Promise<FlowResult> {
   const selectedOfferId = payload.selectedOfferId as string;
 
+  // 1 — Postuler
   if (normalizedInput === '1' || normalizedInput === 'postuler') {
-    // Record apply intent signal (fire-and-forget)
     void ctx.interestSignalService
       .record(profile.id, selectedOfferId, 'apply')
       .catch(() => undefined);
     return { reply: [], nextState: getApplyJobInitialState(selectedOfferId) };
   }
 
-  if (normalizedInput === '2' || normalizedInput === 'retour') {
-    // Record skip signal for previously viewed job (fire-and-forget)
+  // 2 — Voir description complète
+  if (normalizedInput === '2') {
+    const offer = await ctx.jobOfferService.findById(selectedOfferId);
+    if (!offer) return { reply: ['Offre introuvable.'], nextState: state };
+    return {
+      reply: [
+        [
+          `*${offer.title}*`,
+          '',
+          offer.description,
+          '',
+          '━━━━━━━━━━━━━━━━━━',
+          '',
+          '1- *Postuler à cette offre*',
+          '3- *Retour à la liste*',
+          '4- *Menu principal*',
+          '',
+          '_Tapez le numéro correspondant._',
+        ].join('\n'),
+      ],
+      nextState: state,
+    };
+  }
+
+  // 3 — Retour à la liste
+  if (normalizedInput === '3' || normalizedInput === 'retour') {
     void ctx.interestSignalService
       .record(profile.id, selectedOfferId, 'skip')
       .catch(() => undefined);
+    const offers = (payload.offers as OfferListItem[] | undefined) ?? [];
     return {
-      reply: [
-        '*Offres recommandées — tapez le numéro pour voir le détail ou 7 pour le menu.*',
-      ],
+      reply: [formatRecommendedList(offers.slice(0, PAGE_SIZE))],
       nextState: buildListState(state, payload),
     };
   }
 
+  // 4 / Menu
   return goToMenu();
 }
 
@@ -172,7 +193,7 @@ export async function runRecommendedJobsFlow(
   ctx: RecommendedJobsContext,
 ): Promise<FlowResult> {
   const payload = state.payload || {};
-  const offerIds = (payload.offerIds as string[]) ?? [];
+  const offers = (payload.offers as OfferListItem[] | undefined) ?? [];
   const step = (payload.step as RecommendedStep) ?? 'list';
   const trimmed = input.trim();
   const normalized = trimmed.toLowerCase();
@@ -182,11 +203,9 @@ export async function runRecommendedJobsFlow(
     clearState: true,
   });
 
-  if (isMenuCommand(normalized)) {
-    return goToMenu();
-  }
+  if (isMenuCommand(normalized)) return goToMenu();
 
-  if (offerIds.length === 0) {
+  if (offers.length === 0) {
     return {
       reply: [
         "*Aucune offre recommandée pour le moment. Tapez 'Menu' pour revenir.*",
@@ -200,7 +219,7 @@ export async function runRecommendedJobsFlow(
       state,
       payload,
       trimmed,
-      offerIds,
+      offers,
       profile,
       ctx,
       goToMenu,
@@ -208,7 +227,7 @@ export async function runRecommendedJobsFlow(
   }
 
   if (step === 'detail') {
-    return handleRecommendedJobsDetailStep(
+    return await handleRecommendedJobsDetailStep(
       state,
       payload,
       normalized,
@@ -224,11 +243,14 @@ export async function runRecommendedJobsFlow(
   };
 }
 
-export function getRecommendedJobsInitialState(offerIds: string[]): BotState {
+export function getRecommendedJobsInitialState(
+  offerIds: string[],
+  offers: OfferListItem[],
+): BotState {
   return {
     flowId: FLOW_IDS.RECOMMENDED_JOBS,
     step: 0,
-    payload: { offerIds, step: 'list' },
+    payload: { offerIds, offers, step: 'list' },
     updatedAt: new Date().toISOString(),
   };
 }

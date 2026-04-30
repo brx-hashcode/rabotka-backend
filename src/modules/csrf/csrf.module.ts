@@ -45,13 +45,9 @@ import { CsrfController } from './csrf.controller';
           },
           ignoredMethods: ['GET', 'HEAD', 'OPTIONS'],
           skipCsrfProtection: (req) => {
-            const path =
-              (req.route?.path as string | undefined) ?? req.path ?? req.url;
-            const full = req.originalUrl ?? req.url ?? path;
-            return (
-              path === '/api/v1/whatsapp/incoming' ||
-              full.startsWith('/api/v1/whatsapp/incoming')
-            );
+            const url: string =
+              req.originalUrl ?? req.url ?? req.path ?? '';
+            return url.includes('/whatsapp/incoming');
           },
         });
       },

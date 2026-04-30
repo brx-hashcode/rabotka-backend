@@ -3,6 +3,7 @@ import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { JobOfferService } from '../../job-offer/job-offer.service';
 import { ApplicationService } from '../../application/application.service';
 import { WalletService } from '../../wallet/wallet.service';
+import { SystemConfigService } from '../../system-config/system-config.service';
 import type { BotProfile } from '../types/bot-state.types';
 import {
   formatOfferListCompact,
@@ -35,6 +36,7 @@ export class BotCommandsService {
     private readonly jobOfferService: JobOfferService,
     private readonly applicationService: ApplicationService,
     private readonly walletService: WalletService,
+    private readonly systemConfig: SystemConfigService,
   ) {}
 
   async listOffers(
@@ -435,12 +437,15 @@ export class BotCommandsService {
       jobOfferTitle: p.application?.job_offer?.title,
     }));
 
+    const { cancellationThresholdHours } = await this.systemConfig.getFees();
+
     return formatPenaltyHistory(
       items,
       totalAmount,
       penalties.length,
       score,
       completed,
+      cancellationThresholdHours,
     );
   }
 }
