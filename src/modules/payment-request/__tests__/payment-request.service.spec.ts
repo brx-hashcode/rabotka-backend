@@ -17,6 +17,8 @@ import { BotNotificationService } from '../../bot/services/bot-notification.serv
 import { ContactUnlockService } from '../../contact-unlock/contact-unlock.service';
 import { InvoiceService } from '../../invoice/invoice.service';
 import { StorageService } from '../../../common/services/storage/storage.service';
+import { QueueService } from '../../../common/services/queue/queue.service';
+import { PaymentGatewayService } from '../../../common/services/payment/payment-gateway.service';
 
 const PROFILE_ID = 'profile-uuid-1';
 const REQUEST_ID = 'req-uuid-1';
@@ -116,6 +118,7 @@ describe('PaymentRequestService', () => {
           useValue: {
             getRaw: jest.fn().mockResolvedValue('5000'),
             get: jest.fn().mockResolvedValue(''),
+            getPaymentGatewayDriver: jest.fn().mockResolvedValue('MONETBIL'),
           },
         },
         {
@@ -132,6 +135,14 @@ describe('PaymentRequestService', () => {
           useValue: {
             initiatePayment: jest.fn(),
             verifyWebhookSignature: jest.fn(),
+          },
+        },
+        {
+          provide: PaymentGatewayService,
+          useValue: {
+            initiatePayment: jest.fn(),
+            checkPaymentStatus: jest.fn(),
+            handleWebhookPayload: jest.fn().mockResolvedValue({ gatewayRef: null, status: 'PENDING', transactionId: null }),
           },
         },
         {
@@ -168,6 +179,10 @@ describe('PaymentRequestService', () => {
               url: 'https://cdn.example.com/invoice.pdf',
             }),
           },
+        },
+        {
+          provide: QueueService,
+          useValue: { addJob: jest.fn().mockResolvedValue('job-1') },
         },
       ],
     }).compile();
