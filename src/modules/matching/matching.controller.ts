@@ -56,14 +56,20 @@ export class MatchingController {
     );
 
     for (const id of jobIds) {
-      await this.matchingService.indexJobOffer(id).catch(() => {});
+      await this.matchingService.indexJobOffer(id).catch((err: unknown) =>
+        this.logger.warn(`indexJobOffer failed for ${id}`, err instanceof Error ? err.message : String(err)),
+      );
     }
 
     for (const { id, profile_type } of profiles) {
       if (profile_type === 'WORKER') {
-        await this.matchingService.indexWorkerProfile(id).catch(() => {});
+        await this.matchingService.indexWorkerProfile(id).catch((err: unknown) =>
+          this.logger.warn(`indexWorkerProfile failed for ${id}`, err instanceof Error ? err.message : String(err)),
+        );
       } else {
-        await this.matchingService.indexEmployerProfile(id).catch(() => {});
+        await this.matchingService.indexEmployerProfile(id).catch((err: unknown) =>
+          this.logger.warn(`indexEmployerProfile failed for ${id}`, err instanceof Error ? err.message : String(err)),
+        );
       }
     }
 

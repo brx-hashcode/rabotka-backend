@@ -245,7 +245,9 @@ function handleListSelection(
   }
 
   const item = slice[choice - 1];
-  void ctx.applicationService.markAsViewed(item.id).catch(() => {});
+  void ctx.applicationService.markAsViewed(item.id).catch((err: unknown) =>
+    console.warn(`[candidatures-list] markAsViewed failed for ${item.id}:`, err),
+  );
   return {
     reply: [formatSelectedItemDetail(item)],
     nextState: buildDetailState(state, payload, item),

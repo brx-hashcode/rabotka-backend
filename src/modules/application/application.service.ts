@@ -818,7 +818,9 @@ export class ApplicationService {
         console.warn(`Failed to re-index worker after job completion:`, err),
       );
     // Fire-and-forget: send rating requests to both parties via WhatsApp
-    this.sendRatingRequests(applicationId, application).catch(() => {});
+    this.sendRatingRequests(applicationId, application).catch((err: unknown) =>
+      console.warn(`[ApplicationService] sendRatingRequests failed for ${applicationId}:`, err),
+    );
 
     return updated;
   }
@@ -868,7 +870,9 @@ export class ApplicationService {
             : "l'employeur",
           jobTitle,
         })
-        .catch(() => {});
+        .catch((err: unknown) =>
+          console.warn(`[ApplicationService] sendRatingRequest (worker) failed:`, err),
+        );
     }
 
     // Ask employer to rate worker
@@ -884,7 +888,9 @@ export class ApplicationService {
           rateeLabel: workerLabel,
           jobTitle,
         })
-        .catch(() => {});
+        .catch((err: unknown) =>
+          console.warn(`[ApplicationService] sendRatingRequest (employer) failed:`, err),
+        );
     }
   }
 

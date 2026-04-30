@@ -69,7 +69,9 @@ async function handleDetailComplete(
     );
     await ctx.notificationService
       .sendJobCompletedToWorker(applicationId)
-      .catch(() => {});
+      .catch((err: unknown) =>
+        console.warn(`[manage-filled-job] sendJobCompletedToWorker failed for ${applicationId}:`, err),
+      );
     const amount = updated.job_offer?.amount ?? selectedItem.amount;
     return {
       reply: [
@@ -102,7 +104,9 @@ async function handleDetailCancel(
     );
     await ctx.notificationService
       .sendJobCancelledByEmployerToWorker(applicationId)
-      .catch(() => {});
+      .catch((err: unknown) =>
+        console.warn(`[manage-filled-job] sendJobCancelledByEmployerToWorker failed for ${applicationId}:`, err),
+      );
     return {
       reply: [
         [

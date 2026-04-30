@@ -269,7 +269,9 @@ export class BotOrchestratorService {
 
     if (result.clearState) {
       if (state.flowId === FLOW_IDS.PUBLISH_JOB) {
-        await this.botDraft.clearDraft(profileId).catch(() => {});
+        await this.botDraft.clearDraft(profileId).catch((err: unknown) =>
+          this.logger.warn(`clearDraft failed for profile ${profileId}`, err instanceof Error ? err.message : String(err)),
+        );
       }
       await this.botState.clear(profileId);
       const nextInboxItem = await this.botInbox.peekAndShift(profileId);
@@ -292,7 +294,9 @@ export class BotOrchestratorService {
       }
     } else if (result.nextState) {
       if (result.clearDraft) {
-        await this.botDraft.clearDraft(profileId).catch(() => {});
+        await this.botDraft.clearDraft(profileId).catch((err: unknown) =>
+          this.logger.warn(`clearDraft failed for profile ${profileId}`, err instanceof Error ? err.message : String(err)),
+        );
       }
       await this.botState.set(profileId, result.nextState);
     }
