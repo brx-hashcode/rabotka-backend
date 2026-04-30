@@ -3,7 +3,7 @@ import { PrismaModule } from '../../common/services/prisma/prisma.module';
 import { JobOfferModule } from '../job-offer/job-offer.module';
 import { ApplicationModule } from '../application/application.module';
 import { WhatsAppModule } from '../whatsapp/whatsapp.module';
-import { PaymentRequestModule } from '../payment-request/payment-request.module';
+import { PaymentsModule } from '../payments/payment.module';
 import { KycModule } from '../kyc/kyc.module';
 import { ContactUnlockModule } from '../contact-unlock/contact-unlock.module';
 import { WalletModule } from '../wallet/wallet.module';
@@ -25,7 +25,7 @@ import { BotNotificationService } from './services/bot-notification.service';
     forwardRef(() => JobOfferModule),
     forwardRef(() => ApplicationModule),
     forwardRef(() => WhatsAppModule),
-    forwardRef(() => PaymentRequestModule),
+    forwardRef(() => PaymentsModule),
     forwardRef(() => KycModule),
     forwardRef(() => ContactUnlockModule),
     forwardRef(() => WalletModule),
