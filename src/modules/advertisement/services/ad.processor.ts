@@ -196,13 +196,18 @@ export class AdProcessor {
       }
     }
 
-    await this.prisma.advertisement.update({
-      where: { id: ad.id },
-      data: { total_sent: { increment: sentCount } },
-    });
+    if (sentCount > 0) {
+      const totalDelivered = await this.prisma.adDeliveryLog.count({
+        where: { advertisement_id: ad.id },
+      });
+      await this.prisma.advertisement.update({
+        where: { id: ad.id },
+        data: { total_sent: totalDelivered },
+      });
+    }
 
     this.logger.log(
-      `Dispatched advertisement ${ad.id} to ${profiles.length} recipients via [${channels.join(', ')}]`,
+      `Dispatched advertisement ${ad.id} to ${profiles.length} recipients (${sentCount} sends) via [${channels.join(', ')}]`,
     );
   }
 
