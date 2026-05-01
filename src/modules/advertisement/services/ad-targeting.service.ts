@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { AccountStatus, Profile, ProfileType, Prisma } from '@prisma/client';
+import { Profile, ProfileType, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 
 type AdForTargeting = {
@@ -19,7 +19,15 @@ export class AdTargetingService {
   async resolveRecipients(
     advertisement: AdForTargeting,
   ): Promise<
-    Pick<Profile, 'id' | 'first_name' | 'last_name' | 'email' | 'phone'>[]
+    Pick<
+      Profile,
+      | 'id'
+      | 'first_name'
+      | 'last_name'
+      | 'email'
+      | 'phone'
+      | 'whatsapp_connected'
+    >[]
   > {
     const audience = advertisement.bundle.target_audience;
     let profileTypes: ProfileType[];
@@ -51,13 +59,23 @@ export class AdTargetingService {
         : Prisma.empty;
 
     const profileTypesLiteral = Prisma.join(
-      profileTypes.map((t) => Prisma.sql`${Prisma.raw(`'${t}'::"ProfileType"`)}`),
+      profileTypes.map(
+        (t) => Prisma.sql`${Prisma.raw(`'${t}'::"ProfileType"`)}`,
+      ),
     );
 
     const profiles = await this.prisma.$queryRaw<
-      Pick<Profile, 'id' | 'first_name' | 'last_name' | 'email' | 'phone'>[]
+      Pick<
+        Profile,
+        | 'id'
+        | 'first_name'
+        | 'last_name'
+        | 'email'
+        | 'phone'
+        | 'whatsapp_connected'
+      >[]
     >`
-      SELECT p.id, p.first_name, p.last_name, p.email, p.phone
+      SELECT p.id, p.first_name, p.last_name, p.email, p.phone, p.whatsapp_connected
       FROM profiles p
       WHERE p.status = 'ACTIVE'::"AccountStatus"
         AND p.profile_type IN (${profileTypesLiteral})

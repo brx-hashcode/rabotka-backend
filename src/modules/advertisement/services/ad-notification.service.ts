@@ -66,6 +66,51 @@ export class AdNotificationService {
     await Promise.all(tasks);
   }
 
+  /**
+   * Sends to a single concrete channel (EMAIL or WHATSAPP). Returns true on success,
+   * false if the send failed in a recoverable way (e.g. Twilio rejected the message).
+   * Throws on unexpected errors so the caller can record FAILED with the reason.
+   */
+  async sendOnChannel(
+    recipient: AdRecipient,
+    payload: AdNotificationPayload,
+    channel: 'EMAIL' | 'WHATSAPP',
+  ): Promise<boolean> {
+    if (channel === DeliveryChannel.EMAIL) {
+      if (!recipient.email) return false;
+      await this.notificationService.notifyAdvertisementCreated({
+        to: recipient.email,
+        name: recipient.name,
+        title: payload.title,
+        startDate: payload.startDate,
+        endDate: payload.endDate,
+        description: payload.description,
+        callToAction: payload.callToAction,
+        ctaUrl: payload.ctaUrl,
+        imageUrl: payload.imageUrl,
+        tags: payload.tags,
+      });
+      return true;
+    }
+
+    if (!recipient.phone) return false;
+    const message = this.buildWhatsAppMessage(payload);
+
+    if (payload.imageUrl) {
+      const sent = await this.whatsAppService.sendMediaMessage(
+        recipient.phone,
+        payload.imageUrl,
+        message,
+      );
+      if (sent) return true;
+      this.logger.warn(
+        `Failed to send ad media message to ${recipient.phone}, falling back to text`,
+      );
+    }
+
+    return this.whatsAppService.sendTextMessage(recipient.phone, message);
+  }
+
   private async sendWhatsAppCreated(
     phone: string,
     payload: AdNotificationPayload,

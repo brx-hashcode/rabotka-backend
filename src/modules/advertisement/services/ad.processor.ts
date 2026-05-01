@@ -3,11 +3,16 @@ import { AdStatus, AdDeliveryStatus, DeliveryChannel } from '@prisma/client';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { AdTargetingService } from './ad-targeting.service';
 import { AdLinkTrackingService } from './ad-link-tracking.service';
-import { AdNotificationService } from './ad-notification.service';
+import {
+  AdNotificationService,
+  type AdNotificationPayload,
+} from './ad-notification.service';
 import { AdReportService } from './ad-report.service';
 import { NotificationService } from '../../notification/notification.service';
 
 export type AdJobData = { type: 'lifecycle' } | { type: 'dispatch' };
+
+type ConcreteChannel = 'EMAIL' | 'WHATSAPP';
 
 type AdWithBundle = Awaited<
   ReturnType<PrismaService['advertisement']['findFirst']>
@@ -148,8 +153,8 @@ export class AdProcessor {
   }
 
   private async dispatchAd(ad: NonNullable<AdWithBundle>): Promise<void> {
-    const channels = ad.bundle.allowed_channels;
-    if (channels.length === 0) {
+    const allowedChannels = this.normalizeChannels(ad.bundle.allowed_channels);
+    if (allowedChannels.length === 0) {
       this.logger.warn(
         `Advertisement ${ad.id} bundle has no allowed channels — skipping`,
       );
@@ -174,41 +179,36 @@ export class AdProcessor {
       tags: ad.tags ?? null,
     };
     let sentCount = 0;
+    let failedCount = 0;
+    let reachedProfiles = 0;
 
     for (const p of profiles) {
-      for (const channel of channels) {
-        const deliveryLog = await this.prisma.adDeliveryLog.create({
-          data: {
-            advertisement_id: ad.id,
-            profile_id: p.id,
-            channel: channel as never,
-            status: AdDeliveryStatus.SENT,
-            sent_at: new Date(),
-          },
-        });
-        const payload = await this.adLinkTracking.buildTrackedPayload({
-          advertisementId: ad.id,
-          deliveryLogId: deliveryLog.id,
-          channel: channel as never,
-          payload: basePayload,
-        });
-        const recipient = {
-          email: p.email,
-          phone: p.phone ?? undefined,
-          name: `${p.first_name} ${p.last_name}`,
-        };
-        await this.adNotificationService.dispatchCreated(
+      const deliverable = this.deliverableChannels(allowedChannels, p);
+      if (deliverable.length === 0) continue;
+      reachedProfiles += 1;
+
+      const recipient = {
+        email: p.email,
+        phone: p.phone ?? undefined,
+        name: `${p.first_name} ${p.last_name}`,
+      };
+
+      for (const channel of deliverable) {
+        const result = await this.sendOnChannel(
+          ad.id,
+          channel,
           recipient,
-          payload,
-          channel as DeliveryChannel,
+          basePayload,
+          p.id,
         );
-        sentCount += 1;
+        if (result === 'sent') sentCount += 1;
+        else if (result === 'failed') failedCount += 1;
       }
     }
 
     if (sentCount > 0) {
       const totalDelivered = await this.prisma.adDeliveryLog.count({
-        where: { advertisement_id: ad.id },
+        where: { advertisement_id: ad.id, status: AdDeliveryStatus.SENT },
       });
       await this.prisma.advertisement.update({
         where: { id: ad.id },
@@ -217,8 +217,92 @@ export class AdProcessor {
     }
 
     this.logger.log(
-      `Dispatched advertisement ${ad.id} to ${profiles.length} recipients (${sentCount} sends) via [${channels.join(', ')}]`,
+      `Dispatched advertisement ${ad.id}: ${sentCount} sends to ${reachedProfiles}/${profiles.length} recipients (failed: ${failedCount}) via [${allowedChannels.join(', ')}]`,
     );
+  }
+
+  private normalizeChannels(channels: string[]): ConcreteChannel[] {
+    const set = new Set<ConcreteChannel>();
+    for (const c of channels) {
+      if (c === DeliveryChannel.EMAIL) set.add('EMAIL');
+      else if (c === DeliveryChannel.WHATSAPP) set.add('WHATSAPP');
+      else if (c === DeliveryChannel.ALL) {
+        set.add('EMAIL');
+        set.add('WHATSAPP');
+      }
+    }
+    return Array.from(set);
+  }
+
+  private deliverableChannels(
+    allowed: ConcreteChannel[],
+    profile: { email: string; phone: string | null; whatsapp_connected: boolean },
+  ): ConcreteChannel[] {
+    return allowed.filter((c) => {
+      if (c === 'EMAIL') return Boolean(profile.email);
+      // WhatsApp requires both a phone and a connected WhatsApp session
+      return Boolean(profile.phone) && profile.whatsapp_connected;
+    });
+  }
+
+  private async sendOnChannel(
+    advertisementId: string,
+    channel: ConcreteChannel,
+    recipient: { email: string; phone?: string; name: string },
+    basePayload: AdNotificationPayload,
+    profileId: string,
+  ): Promise<'sent' | 'failed' | 'skipped'> {
+    // Pre-create the log so tracked links can reference it; mark as FAILED first
+    // and flip to SENT only after the carrier confirms.
+    const deliveryLog = await this.prisma.adDeliveryLog.create({
+      data: {
+        advertisement_id: advertisementId,
+        profile_id: profileId,
+        channel,
+        status: AdDeliveryStatus.FAILED,
+      },
+    });
+
+    try {
+      const payload = await this.adLinkTracking.buildTrackedPayload({
+        advertisementId,
+        deliveryLogId: deliveryLog.id,
+        channel,
+        payload: basePayload,
+      });
+
+      const ok = await this.adNotificationService.sendOnChannel(
+        recipient,
+        payload,
+        channel,
+      );
+
+      if (!ok) {
+        await this.prisma.adDeliveryLog.update({
+          where: { id: deliveryLog.id },
+          data: { failure_reason: 'CARRIER_REJECTED' },
+        });
+        return 'failed';
+      }
+
+      await this.prisma.adDeliveryLog.update({
+        where: { id: deliveryLog.id },
+        data: { status: AdDeliveryStatus.SENT, sent_at: new Date() },
+      });
+      return 'sent';
+    } catch (err) {
+      await this.prisma.adDeliveryLog.update({
+        where: { id: deliveryLog.id },
+        data: {
+          failure_reason: err instanceof Error ? err.message.slice(0, 500) : 'UNKNOWN',
+        },
+      });
+      this.logger.error(
+        `Send failed (ad=${advertisementId} profile=${profileId} channel=${channel}):`,
+        err instanceof Error ? err.message : String(err),
+      );
+      return 'failed';
+    }
   }
 
   private async isDispatchDue(ad: {
