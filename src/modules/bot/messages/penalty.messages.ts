@@ -42,26 +42,23 @@ export function formatPenaltyHistory(
     '*HISTORIQUE DES PENALITES*',
     '',
     '*RECAPITULATIF*',
-    SEP,
     `*Total penalites*: ${fcfa(totalAmount)}`,
     `*Annulations tardives*: ${lateCancellationsCount}`,
     `*Score actuel*: ${currentScore}/100`,
     `*Missions completees*: ${completedMissions}`,
-    SEP,
     '',
   ];
 
   if (penalties.length === 0) {
     lines.push('Aucune penalite enregistree.', '');
   } else {
-    lines.push('Detail des penalites :', '', SEP);
+    lines.push('Detail des penalites :', '');
     for (const p of penalties) {
       lines.push(
         `Date : ${formatDate(p.appliedAt)}`,
         p.jobOfferTitle ? `*Offre*: ${p.jobOfferTitle}` : '',
         `*Penalite*: ${fcfa(p.amount)}`,
         p.reason ? `*Raison*: ${p.reason}` : '',
-        SEP,
         '',
       );
     }
