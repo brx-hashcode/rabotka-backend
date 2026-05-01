@@ -51,7 +51,7 @@ export class AdTargetingService {
         : Prisma.empty;
 
     const profileTypesLiteral = Prisma.join(
-      profileTypes.map((t) => Prisma.sql`${t}`),
+      profileTypes.map((t) => Prisma.sql`${Prisma.raw(`'${t}'::"ProfileType"`)}`),
     );
 
     const profiles = await this.prisma.$queryRaw<
@@ -59,7 +59,7 @@ export class AdTargetingService {
     >`
       SELECT p.id, p.first_name, p.last_name, p.email, p.phone
       FROM profiles p
-      WHERE p.status = ${AccountStatus.ACTIVE}
+      WHERE p.status = 'ACTIVE'::"AccountStatus"
         AND p.profile_type IN (${profileTypesLiteral})
         ${excludedIdsLiteral}
       ORDER BY RANDOM()
