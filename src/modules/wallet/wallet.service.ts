@@ -57,19 +57,18 @@ export class WalletService {
     id: string;
     balance: number;
   }> {
-    // Use raw INSERT ON CONFLICT DO NOTHING to avoid race on singleton system wallet
-    await this.prisma.$queryRaw`
-      INSERT INTO wallets (id, owner_type, balance, created_at, updated_at)
-      VALUES (gen_random_uuid(), 'SYSTEM', 0, now(), now())
-      ON CONFLICT DO NOTHING
-    `;
-    const wallet = await this.prisma.wallet.findFirstOrThrow({
-      where: {
-        owner_type: WalletOwnerType.SYSTEM,
-        user_id: null,
-        profile_id: null,
-      },
+    // Always return the oldest system wallet (canonical singleton).
+    // The DB has no unique constraint on owner_type=SYSTEM with null user/profile,
+    // so we never INSERT — we just find the first-created one deterministically.
+    let wallet = await this.prisma.wallet.findFirst({
+      where: { owner_type: WalletOwnerType.SYSTEM, user_id: null, profile_id: null },
+      orderBy: { created_at: 'asc' },
     });
+    if (!wallet) {
+      wallet = await this.prisma.wallet.create({
+        data: { owner_type: WalletOwnerType.SYSTEM },
+      });
+    }
     return { id: wallet.id, balance: Number(wallet.balance) };
   }
 
@@ -481,8 +480,7 @@ export class WalletService {
       pendingCount,
       failedCount,
       penaltyAgg,
-      contactUnlockPaymentAgg,
-      contactUnlockWalletAgg,
+      contactUnlockAgg,
     ] = await Promise.all([
       this.prisma.payment.aggregate({
         where: { status: PaymentStatus.COMPLETED },
@@ -496,34 +494,23 @@ export class WalletService {
         _sum: { amount: true },
       }),
       this.prisma.payment.aggregate({
-        where: {
-          status: PaymentStatus.COMPLETED,
-          type: PaymentType.CONTACT_UNLOCK,
-        },
-        _sum: { amount: true },
-      }),
-      this.prisma.walletTransaction.aggregate({
-        where: {
-          wallet_id: systemWallet.id,
-          type: WalletTransactionType.CONTACT_UNLOCK_PAYMENT,
-        },
+        where: { status: PaymentStatus.COMPLETED, type: PaymentType.CONTACT_UNLOCK },
         _sum: { amount: true },
       }),
     ]);
 
-    const totalRevenue = Number(systemWallet.balance);
+    const totalRevenue = Number(completedAgg._sum.amount ?? 0);
+    const balance = Number(systemWallet.balance);
 
     return {
       totalRevenue,
-      balance: totalRevenue,
+      balance,
       completedCount: completedAgg._count,
       pendingCount,
       failedCount,
       revenueByType: {
         penalty: Number(penaltyAgg._sum.amount ?? 0),
-        contactUnlock:
-          Number(contactUnlockPaymentAgg._sum.amount ?? 0) +
-          Number(contactUnlockWalletAgg._sum.amount ?? 0),
+        contactUnlock: Number(contactUnlockAgg._sum.amount ?? 0),
       },
     };
   }

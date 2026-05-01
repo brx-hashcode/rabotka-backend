@@ -56,8 +56,13 @@ export function formatContactUnlockedMessage(params: {
 }): string {
   const { name, phone, email } = params;
 
+  // Normalize phone to digits only (strip +, spaces, dashes) for WhatsApp link
+  const waPhone = phone ? phone.replace(/\D/g, '') : null;
+  const waLink = waPhone ? `https://wa.me/${waPhone}` : null;
+
   const contactLines = [
     ...(phone ? [`*Téléphone*: ${phone}`] : []),
+    ...(waLink ? [`*WhatsApp*: ${waLink}`] : []),
     ...(email ? [`*Email*: ${email}`] : []),
   ];
 

@@ -122,6 +122,41 @@ export class AdminProfileController {
     return await this.walletService.getProfileWalletForAdmin(id);
   }
 
+  @Post(':id/wallet/credit')
+  @Roles(UserRole.MANAGER)
+  @ApiOperation({ summary: 'Manually credit a profile wallet (admin only)' })
+  async creditWallet(
+    @Param('id') id: string,
+    @Body() body: { amount: number; note?: string },
+    @Req() req: any,
+  ) {
+    const { amount, note } = body;
+    if (!amount || amount <= 0) {
+      throw new BadRequestException('amount must be a positive number');
+    }
+    const profile = await this.prisma.profile.findUnique({ where: { id } });
+    if (!profile) throw new NotFoundException('Profile not found');
+
+    const refType = note ? `admin_manual — ${note}` : 'admin_manual';
+    await this.walletService.creditProfileWallet(
+      id,
+      amount,
+      'MANUAL_CREDIT' as any,
+      refType,
+    );
+
+    await this.logService.create({
+      action: 'WALLET_MANUAL_CREDIT',
+      entityType: 'Profile',
+      entityId: id,
+      userId: req.user?.userId,
+      profileId: id,
+      metadata: { amount, note: note ?? null },
+    });
+
+    return { success: true };
+  }
+
   @Get(':id/invoices')
   @Roles(UserRole.MODERATOR)
   @ApiOperation({ summary: 'Get invoices for a profile (admin only)' })
