@@ -350,12 +350,12 @@ async function handleStep1(
 
   if (isCancellable && trimmed === '1') {
     const cancelState = getCancelApplicationInitialState(applicationId);
-    const result = await runCancelApplicationFlow(
-      cancelState,
-      '',
-      profile,
-      ctx,
-    );
+    const { cancellationThresholdHours } =
+      await ctx.systemConfigService.getFees();
+    const result = await runCancelApplicationFlow(cancelState, '', profile, {
+      ...ctx,
+      cancellationThresholdHours,
+    });
     return { reply: result.reply, nextState: result.nextState ?? cancelState };
   }
 

@@ -156,6 +156,7 @@ enum WalletTransactionType {
   CREDIT_REGISTRATION
   CREDIT_JOB_POSTING
   WELCOME_CREDIT
+  MANUAL_CREDIT
   CONTACT_UNLOCK_DEBIT
   CONTACT_UNLOCK_PAYMENT
   CONTACT_UNLOCK_CREDIT_CONVERSION
@@ -529,7 +530,8 @@ model Payment {
   paid_at        DateTime?
   description    String?
 
-  profile Profile @relation(fields: [profile_id], references: [id], onDelete: Cascade)
+  profile Profile   @relation(fields: [profile_id], references: [id], onDelete: Cascade)
+  invoice Invoice?
 
   @@index([transaction_id], name: "idx_payment_transaction")
   @@index([status], name: "idx_payment_status")
@@ -866,15 +868,17 @@ model Invoice {
   created_at          DateTime      @default(now())
   updated_at          DateTime      @updatedAt
   profile_id          String        @db.Uuid
-  payment_request_id  String        @unique @db.Uuid
+  payment_request_id  String?       @unique @db.Uuid
+  payment_id          String?       @unique @db.Uuid
   amount              Decimal       @db.Decimal(10, 2)
   reason              InvoiceReason @default(OTHER)
   related_entity_type String?
   related_entity_id   String?       @db.Uuid
   status              InvoiceStatus @default(PENDING_DOWNLOAD)
 
-  profile         Profile        @relation(fields: [profile_id], references: [id], onDelete: Cascade)
-  payment_request PaymentRequest @relation(fields: [payment_request_id], references: [id], onDelete: Cascade)
+  profile         Profile         @relation(fields: [profile_id], references: [id], onDelete: Cascade)
+  payment_request PaymentRequest? @relation(fields: [payment_request_id], references: [id], onDelete: Cascade)
+  payment         Payment?        @relation(fields: [payment_id], references: [id], onDelete: Cascade)
 
   @@index([profile_id], name: "idx_invoice_profile")
   @@index([payment_request_id], name: "idx_invoice_payment_request")

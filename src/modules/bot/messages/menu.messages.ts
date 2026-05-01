@@ -10,8 +10,6 @@ export function workerMenuMessage(): string {
   return [
     '*MENU RABOTKA*',
     '',
-    `Hello 👋 Que voulez-vous faire aujourd'hui ?`,
-    '',
     '1- Trouver une mission',
     '2- Mes candidatures',
     '3- Paiements en attente',
@@ -27,8 +25,6 @@ export function workerMenuMessage(): string {
 export function employerMenuMessage(): string {
   return [
     '*MENU RABOTKA*',
-    '',
-    'Hello 👋 Que voulez-vous gérer ?',
     '',
     '1- Publier une offre',
     '2- Mes offres publiées',

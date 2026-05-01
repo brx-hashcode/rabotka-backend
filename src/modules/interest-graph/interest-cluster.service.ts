@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { QdrantService } from '../qdrant/qdrant.service';
 import { COLLECTIONS } from '../qdrant/qdrant.config';
@@ -9,6 +10,11 @@ import {
 } from './interest-signal.service';
 
 const VECTOR_DIM = 384;
+
+function toPointId(key: string): string {
+  const hex = createHash('sha256').update(key).digest('hex').slice(0, 32);
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+}
 const INTEREST_RECLUSTER_QUEUE_NAME: string = INTEREST_RECLUSTER_QUEUE;
 const USER_INTERESTS_COLLECTION: string = COLLECTIONS.USER_INTERESTS;
 
@@ -78,7 +84,7 @@ export class InterestClusterService implements OnModuleInit {
 
     await this.qdrant.upsertDense(
       USER_INTERESTS_COLLECTION,
-      `interest__${userId}`,
+      toPointId(`interest__${userId}`),
       anchor,
       {
         user_id: userId,
@@ -97,7 +103,7 @@ export class InterestClusterService implements OnModuleInit {
   }
 
   async getProfile(userId: string): Promise<UserInterestProfile | null> {
-    const pointId = `interest__${userId}`;
+    const pointId = toPointId(`interest__${userId}`);
     let result: { id: string | number; payload?: Record<string, unknown> | null }[];
     try {
       result = await this.qdrant
@@ -153,7 +159,7 @@ export class InterestClusterService implements OnModuleInit {
     ];
 
     const candidateIds = jobIds.flatMap((jid) =>
-      signalTypes.map((t) => `${userId}__${jid}__${t}`),
+      signalTypes.map((t) => toPointId(`${userId}__${jid}__${t}`)),
     );
 
     const results = await this.qdrant.getClient().retrieve(signalsCollection, {
