@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { QdrantService } from '../qdrant/qdrant.service';
@@ -5,6 +6,13 @@ import { QueueService } from '../../common/services/queue/queue.service';
 import { COLLECTIONS } from '../qdrant/qdrant.config';
 import Redis from 'ioredis';
 import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
+
+// Qdrant requires point IDs to be UUIDs or unsigned integers.
+// We derive a deterministic UUID from a composite key using SHA-256.
+function toPointId(key: string): string {
+  const hex = createHash('sha256').update(key).digest('hex').slice(0, 32);
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+}
 
 export type SignalType =
   | 'apply'
@@ -77,19 +85,35 @@ export class InterestSignalService {
 
     const job = await this.prisma.jobOffer.findUnique({
       where: { id: jobId },
-      select: {
-        category: { select: { name: true } },
-        title: true,
-        description: true,
-      },
+      select: { category: { select: { name: true } }, title: true },
     });
     if (!job) return;
 
-    const jobText = `${job.title} ${job.description ?? ''}`.trim();
-    const vector = await this.qdrant.embed(jobText);
+    // Reuse the pre-computed dense vector from the jobs collection — no re-embedding
+    let vector: number[] | null = null;
+    try {
+      const points = await this.qdrant.getClient().retrieve(COLLECTIONS.JOBS, {
+        ids: [jobId],
+        with_vector: ['dense'],
+        with_payload: false,
+      });
+      const raw = points[0] as unknown as { vector?: { dense?: unknown } } | undefined;
+      const dense = raw?.vector?.dense;
+      if (Array.isArray(dense) && dense.length > 0) {
+        vector = dense as number[];
+      }
+    } catch {
+      // fall through to on-demand embedding
+    }
 
-    // One point per (user, job, type) — upsert prevents duplicate embeddings
-    const pointId = `${userId}__${jobId}__${type}`;
+    if (!vector) {
+      // Job not yet indexed — embed on demand (first signal for this job)
+      const jobText = `${job.title}`.trim();
+      vector = await this.qdrant.embed(jobText);
+    }
+
+    // One point per (user, job, type) — deterministic UUID from composite key
+    const pointId = toPointId(`${userId}__${jobId}__${type}`);
 
     await this.qdrant.upsertDense(COLLECTIONS.SIGNALS, pointId, vector, {
       user_id: userId,

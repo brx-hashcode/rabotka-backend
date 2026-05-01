@@ -4,6 +4,7 @@ import {
   PaymentMethod,
   PaymentStatus,
   PaymentRequestType,
+  InvoiceReason,
 } from '@prisma/client';
 import { generatePaymentReference } from '../../../common/utils/payment-reference';
 import type { BotProfile, BotState } from '../types/bot-state.types';
@@ -17,6 +18,7 @@ import type { WalletService } from '../../wallet/wallet.service';
 import type { IPaymentUrlService } from '../types/payment-url.types';
 import type { BotNotificationService } from '../services/bot-notification.service';
 import type { InterestSignalService } from '../../interest-graph/interest-signal.service';
+import type { InvoiceService } from '../../invoice/invoice.service';
 
 export type RecommendedProfilesContext = {
   prisma: PrismaService;
@@ -27,6 +29,7 @@ export type RecommendedProfilesContext = {
   botNotification: BotNotificationService;
   employerProfileId: string;
   interestSignalService: InterestSignalService;
+  invoiceService: InvoiceService;
 };
 
 export type FlowResult = {
@@ -130,12 +133,16 @@ export async function runRecommendedProfilesFlow(
 
   if (trimmed === '7') return goToMenu();
 
-  const pageWorkerIds = workerIds.slice(0, 5);
+  // Use renderedWorkerIds when available (set by showList) so selection always
+  // maps to the displayed position, even if some IDs were not found in the DB.
+  const renderedWorkerIds =
+    (payload.renderedWorkerIds as string[] | undefined) ??
+    workerIds.slice(0, 5);
   const choice = /^[1-5]$/.test(trimmed) ? Number.parseInt(trimmed, 10) : 0;
 
-  if (choice >= 1 && choice <= pageWorkerIds.length) {
+  if (choice >= 1 && choice <= renderedWorkerIds.length) {
     return showWorkerDetail(
-      pageWorkerIds[choice - 1],
+      renderedWorkerIds[choice - 1],
       workerIds,
       workerScores,
       state,
@@ -260,13 +267,23 @@ async function processWalletPayment(
   fee: number,
   ctx: RecommendedProfilesContext,
 ): Promise<FlowResult> {
-  const worker = await ctx.prisma.profile.findUnique({
-    where: { id: selectedWorkerId },
+  const worker = await ctx.prisma.profile.findFirst({
+    where: {
+      id: selectedWorkerId,
+      status: 'ACTIVE',
+      verification_status: 'VERIFIED',
+    },
     select: { first_name: true, last_name: true, phone: true, email: true },
   });
-  const workerName = worker
-    ? `${worker.first_name} ${worker.last_name}`.trim()
-    : 'ce candidat';
+
+  if (!worker) {
+    return {
+      reply: ["*Ce profil n'est plus actif ou vérifié. Le paiement n'a pas été effectué.*"],
+      clearState: true,
+    };
+  }
+
+  const workerName = `${worker.first_name} ${worker.last_name}`.trim();
 
   try {
     const profileWallet = await ctx.walletService.getOrCreateProfileWallet(
@@ -276,6 +293,8 @@ async function processWalletPayment(
       throw new Error('Solde insuffisant dans votre portefeuille');
     }
     const txRef = generatePaymentReference();
+    const systemWallet = await ctx.walletService.getOrCreateSystemWallet();
+    let paymentId: string | undefined;
     await ctx.prisma.$transaction(async (tx) => {
       await tx.walletTransaction.create({
         data: {
@@ -290,7 +309,20 @@ async function processWalletPayment(
         where: { id: profileWallet.id },
         data: { balance: { decrement: fee } },
       });
-      await tx.payment.create({
+      await tx.walletTransaction.create({
+        data: {
+          wallet_id: systemWallet.id,
+          type: WalletTransactionType.CONTACT_UNLOCK_PAYMENT,
+          amount: fee,
+          reference_type: 'recommendation_contact',
+          reference_id: selectedWorkerId,
+        },
+      });
+      await tx.wallet.update({
+        where: { id: systemWallet.id },
+        data: { balance: { increment: fee } },
+      });
+      const payment = await tx.payment.create({
         data: {
           type: PaymentType.CONTACT_UNLOCK,
           profile_id: profile.id,
@@ -302,7 +334,23 @@ async function processWalletPayment(
           description: `Contact recommandé — ${workerName} [worker:${selectedWorkerId}]`,
         },
       });
+      paymentId = payment.id;
     });
+
+    // Create invoice for wallet payment (fire-and-forget, non-blocking)
+    if (paymentId) {
+      void ctx.invoiceService
+        .create({
+          profileId: profile.id,
+          paymentId,
+          amount: fee,
+          reason: InvoiceReason.CONTACT_UNLOCK,
+          relatedEntityType: 'worker',
+          relatedEntityId: selectedWorkerId,
+        })
+        .catch(() => undefined);
+    }
+
     return {
       reply: [
         formatContactUnlockedMessage({
@@ -327,7 +375,11 @@ async function showList(
 ): Promise<FlowResult> {
   const pageWorkerIds = workerIds.slice(0, 5);
   const workers = await ctx.prisma.profile.findMany({
-    where: { id: { in: pageWorkerIds } },
+    where: {
+      id: { in: pageWorkerIds },
+      status: 'ACTIVE',
+      verification_status: 'VERIFIED',
+    },
     select: {
       id: true,
       first_name: true,
@@ -353,6 +405,9 @@ async function showList(
     '*Tapez le numéro pour voir le profil complet ou 7 pour le menu.*',
   ];
 
+  // Store the rendered order explicitly so selection always maps to the displayed item
+  const renderedWorkerIds = orderedWorkers.map((w) => w.id);
+
   return {
     reply: [lines.join('\n')],
     nextState: {
@@ -360,6 +415,7 @@ async function showList(
       step: 0,
       payload: {
         workerIds,
+        renderedWorkerIds,
         workerScores,
         jobOfferId: state.payload?.jobOfferId,
       },
@@ -376,8 +432,12 @@ async function showWorkerDetail(
   ctx: RecommendedProfilesContext,
   jobOfferId?: string,
 ): Promise<FlowResult> {
-  const worker = await ctx.prisma.profile.findUnique({
-    where: { id: workerId },
+  const worker = await ctx.prisma.profile.findFirst({
+    where: {
+      id: workerId,
+      status: 'ACTIVE',
+      verification_status: 'VERIFIED',
+    },
     select: {
       id: true,
       first_name: true,
@@ -391,16 +451,16 @@ async function showWorkerDetail(
 
   if (!worker) {
     return {
-      reply: ['Profil introuvable. Tapez *7* pour le menu.'],
-      nextState: state,
+      reply: ["*Ce profil n'est plus disponible. Tapez *7* pour revenir.*"],
+      nextState: { ...state, step: 0, payload: { workerIds, workerScores, jobOfferId }, updatedAt: new Date().toISOString() },
     };
   }
 
-  // Record profile_view signal on the worker for the linked job (fire-and-forget)
-  // profile_view (0.5) is external validation — distinct from worker self-view (0.3)
+  // Record profile_view signal on the employer — they are the one browsing worker profiles.
+  // This populates the employer's interest graph so future recommendations improve.
   if (jobOfferId) {
     void ctx.interestSignalService
-      .record(workerId, jobOfferId, 'profile_view')
+      .record(ctx.employerProfileId, jobOfferId, 'profile_view')
       .catch(() => undefined);
   }
 
@@ -506,13 +566,17 @@ async function generateMobileMoneyLink(
   workerScores: Record<string, number>,
   ctx: RecommendedProfilesContext,
 ): Promise<FlowResult> {
-  const worker = await ctx.prisma.profile.findUnique({
-    where: { id: workerId },
+  const worker = await ctx.prisma.profile.findFirst({
+    where: { id: workerId, status: 'ACTIVE', verification_status: 'VERIFIED' },
     select: { first_name: true, last_name: true },
   });
-  const workerName = worker
-    ? `${worker.first_name} ${worker.last_name}`.trim()
-    : 'ce candidat';
+  if (!worker) {
+    return {
+      reply: ["*Ce profil n'est plus actif ou vérifié. Le paiement n'a pas été effectué.*"],
+      clearState: true,
+    };
+  }
+  const workerName = `${worker.first_name} ${worker.last_name}`.trim();
 
   const paymentUrl = await ctx.paymentService.createPaymentUrl(
     profile.id,

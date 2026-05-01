@@ -85,6 +85,7 @@ import { MatchingService } from '../../matching/matching.service';
 import { runRepublishExpiredJobFlow } from '../flows/republish-expired-job.flow';
 import { InterestSignalService } from '../../interest-graph/interest-signal.service';
 import { InterestRecommendationService } from '../../interest-graph/interest-recommendation.service';
+import { InvoiceService } from '../../invoice/invoice.service';
 
 const INACTIVE_MESSAGE = `Votre compte est créé mais pas encore activé. Cliquez sur le lien de confirmation que nous vous avons envoyé par WhatsApp pour l’activer.`;
 
@@ -121,6 +122,7 @@ export class BotOrchestratorService {
     private readonly matchingService: MatchingService,
     private readonly interestSignalService: InterestSignalService,
     private readonly interestRecommendationService: InterestRecommendationService,
+    private readonly invoiceService: InvoiceService,
   ) {}
 
   async handle(
@@ -393,6 +395,7 @@ export class BotOrchestratorService {
           botNotification: this.notificationService,
           employerProfileId: profile.id,
           interestSignalService: this.interestSignalService,
+          invoiceService: this.invoiceService,
         }),
       [FLOW_IDS.RATE_ASSIGNMENT]: () =>
         runRateAssignmentFlow(state, input, profile, { prisma: this.prisma }),
@@ -697,6 +700,7 @@ export class BotOrchestratorService {
       where: {
         id: { in: offerIds },
         status: { in: ['ACTIVE', 'PARTIALLY_FILLED'] },
+        applications: { none: { worker_id: profile.id } },
       },
       select: {
         id: true,
@@ -739,11 +743,18 @@ export class BotOrchestratorService {
     profile: BotProfile,
     profileId: string,
   ): Promise<string[]> {
-    const latestOffer = await this.prisma.jobOffer.findFirst({
-      where: { employer_id: profile.id, status: 'ACTIVE' },
-      orderBy: { created_at: 'desc' },
-      select: { id: true },
-    });
+    // Prefer active offer; fall back to any recent offer so signals can always be recorded
+    const latestOffer =
+      (await this.prisma.jobOffer.findFirst({
+        where: { employer_id: profile.id, status: 'ACTIVE' },
+        orderBy: { created_at: 'desc' },
+        select: { id: true },
+      })) ??
+      (await this.prisma.jobOffer.findFirst({
+        where: { employer_id: profile.id },
+        orderBy: { created_at: 'desc' },
+        select: { id: true },
+      }));
 
     let workerResults: { id: string; score: number }[] = [];
     if (latestOffer) {
@@ -772,9 +783,39 @@ export class BotOrchestratorService {
       ];
     }
 
-    const workerIds = workerResults.map((r) => r.id);
+    const { reliabilityScoreMin } = await this.systemConfig.getFees();
+
+    // Pre-filter: only keep active, verified workers meeting the score threshold
+    const candidateIds = workerResults.map((r) => r.id);
+    const eligibleProfiles = await this.prisma.profile.findMany({
+      where: {
+        id: { in: candidateIds },
+        status: 'ACTIVE',
+        verification_status: 'VERIFIED',
+        reliability_score: { gte: reliabilityScoreMin },
+      },
+      select: { id: true },
+    });
+    const eligibleSet = new Set(eligibleProfiles.map((p) => p.id));
+    const eligibleResults = workerResults.filter(
+      (r) => eligibleSet.has(r.id) && r.score > 0.5,
+    );
+
+    if (eligibleResults.length === 0) {
+      return [
+        [
+          '*TRAVAILLEURS RECOMMANDÉS*',
+          '',
+          "Aucun travailleur qualifié disponible pour le moment.",
+          '',
+          "*Tapez 'Menu' pour revenir.*",
+        ].join('\n'),
+      ];
+    }
+
+    const workerIds = eligibleResults.map((r) => r.id);
     const workerScores: Record<string, number> = Object.fromEntries(
-      workerResults.map((r) => [r.id, r.score]),
+      eligibleResults.map((r) => [r.id, r.score]),
     );
 
     const flowState = getRecommendedProfilesInitialState(
@@ -784,11 +825,11 @@ export class BotOrchestratorService {
     );
     await this.botState.set(profileId, flowState);
 
-    const { reliabilityScoreMin } = await this.systemConfig.getFees();
     const pageIds = workerIds.slice(0, 5);
     const workers = await this.prisma.profile.findMany({
       where: {
         id: { in: pageIds },
+        status: 'ACTIVE',
         verification_status: 'VERIFIED',
         reliability_score: { gte: reliabilityScoreMin },
       },

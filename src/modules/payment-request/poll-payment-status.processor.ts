@@ -126,10 +126,13 @@ export class PollPaymentStatusProcessor {
   ): Promise<void> {
     const { requestId, profileId, amount, phone, operator, requestType, gateway, gatewayRef } = jobData;
 
+    const isContactType =
+      requestType === 'CONTACT_UNLOCK' || requestType === 'RECOMMENDATION_CONTACT';
+
     try {
       await this.prisma.payment.create({
         data: {
-          type: PaymentType.PENALTY,
+          type: isContactType ? PaymentType.CONTACT_UNLOCK : PaymentType.PENALTY,
           profile_id: profileId,
           amount,
           payment_method: PaymentMethod.MOBILE_MONEY,

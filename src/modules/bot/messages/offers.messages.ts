@@ -91,10 +91,10 @@ export function formatOfferListCompact(
     const remaining = Math.max(0, qty - filled);
     const spotsLabel =
       remaining === 0
-        ? '🔴 Complet'
+        ? 'Complet'
         : remaining === qty
-          ? `🟢 ${qty} place${qty > 1 ? 's' : ''}`
-          : `🟡 ${remaining}/${qty} restante${remaining > 1 ? 's' : ''}`;
+          ? `${qty} place${qty > 1 ? 's' : ''}`
+          : `${remaining}/${qty} restante${remaining > 1 ? 's' : ''}`;
     const shortAddr =
       o.address.length > 40 ? o.address.slice(0, 40) + '…' : o.address;
     lines.push(
@@ -165,7 +165,7 @@ function formatEmployerScore(score: number | null | undefined): string {
 
 /** Numbered list for recommended-jobs flow: shows up to 5 offers, 7 = menu */
 export function formatRecommendedList(offers: OfferListItem[]): string {
-  const lines = ['*Offres recommandées pour vous*', '', SEP, ''];
+  const lines = ['*OFFRES RECOMMANDÉES*', ''];
   offers.forEach((o, i) => {
     const qty = o.quantity ?? 1;
     const filled = o.acceptedCount ?? 0;
@@ -177,9 +177,9 @@ export function formatRecommendedList(offers: OfferListItem[]): string {
           ? `${qty} place${qty > 1 ? 's' : ''}`
           : `${remaining}/${qty} restante${remaining > 1 ? 's' : ''}`;
     const shortAddr =
-      o.address.length > 35 ? o.address.slice(0, 35) + '…' : o.address;
+      o.address.length > 40 ? o.address.slice(0, 40) + '…' : o.address;
     lines.push(
-      `*${i + 1}-* ${o.title}`,
+      `${i + 1}- *${o.title}*`,
       `    • Montant : ${formatAmount(o.amount, o.payment_flow)}`,
       `    • Date : ${formatDate(o.scheduled_at)}`,
       `    • Places : ${spotsLabel}`,
@@ -188,10 +188,7 @@ export function formatRecommendedList(offers: OfferListItem[]): string {
     );
   });
   lines.push(
-    SEP,
-    '',
-    `_Tapez 1-${offers.length} pour voir le détail._`,
-    `_Tapez 7 pour revenir au menu._`,
+    `Tapez un numéro pour voir le détail ou *Menu* pour revenir au menu.`,
   );
   return lines.join('\n');
 }
@@ -213,14 +210,12 @@ export function formatOfferDetailWithActions(offer: OfferListItem): string {
     `*Adresse*: ${offer.address.slice(0, 50)}${offer.address.length > 50 ? '...' : ''}`,
     ...(scoreLine ? [scoreLine] : []),
     '',
-    SEP,
+    '1- Postuler',
+    '2- Voir description complète',
+    '3- Retour à la liste des offres',
+    "4- Menu",
     '',
-    '1- *Postuler*',
-    '2- *Voir description complète*',
-    '3- *Retour à la liste des offres*',
-    "4- *Menu* (ou tapez 'Menu')",
-    '',
-    '*Tapez le numéro correspondant.*',
+    'Tapez le numéro correspondant.',
   ].join('\n');
 }
 

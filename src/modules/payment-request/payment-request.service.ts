@@ -570,9 +570,13 @@ export class PaymentRequestService {
     const profileName = this.fullName(request.profile);
 
     try {
+      const isContactType =
+        request.request_type === PaymentRequestType.CONTACT_UNLOCK ||
+        request.request_type === PaymentRequestType.RECOMMENDATION_CONTACT ||
+        request.contact_unlock_attempt_id != null;
       await this.prisma.payment.create({
         data: {
-          type: PaymentType.PENALTY, // best-effort; actual type from context not available here
+          type: isContactType ? PaymentType.CONTACT_UNLOCK : PaymentType.PENALTY,
           profile_id: request.profile_id,
           amount: Number(request.amount ?? 0),
           payment_method: PaymentMethod.MOBILE_MONEY,

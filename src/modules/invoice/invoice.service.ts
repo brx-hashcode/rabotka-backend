@@ -27,7 +27,7 @@ const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
 export type InvoiceItem = {
   id: string;
   profileId: string;
-  paymentRequestId: string;
+  paymentRequestId: string | null;
   amount: string;
   reason: string;
   relatedEntityType: string | null;
@@ -51,21 +51,31 @@ export class InvoiceService {
 
   async create(params: {
     profileId: string;
-    paymentRequestId: string;
+    paymentRequestId?: string;
+    paymentId?: string;
     amount: number;
     reason: InvoiceReason;
     relatedEntityType?: string;
     relatedEntityId?: string;
   }): Promise<InvoiceItem> {
-    const existing = await this.prisma.invoice.findUnique({
-      where: { payment_request_id: params.paymentRequestId },
-    });
-    if (existing) return this.mapInvoice(existing);
+    // Check idempotency by whichever key is provided
+    if (params.paymentRequestId) {
+      const existing = await this.prisma.invoice.findUnique({
+        where: { payment_request_id: params.paymentRequestId },
+      });
+      if (existing) return this.mapInvoice(existing);
+    } else if (params.paymentId) {
+      const existing = await this.prisma.invoice.findUnique({
+        where: { payment_id: params.paymentId },
+      });
+      if (existing) return this.mapInvoice(existing);
+    }
 
     const invoice = await this.prisma.invoice.create({
       data: {
         profile_id: params.profileId,
-        payment_request_id: params.paymentRequestId,
+        payment_request_id: params.paymentRequestId ?? null,
+        payment_id: params.paymentId ?? null,
         amount: params.amount,
         reason: params.reason,
         related_entity_type: params.relatedEntityType ?? null,
@@ -89,7 +99,7 @@ export class InvoiceService {
   ): Promise<{ buffer: Buffer; filename: string }> {
     const invoice = await this.prisma.invoice.findUnique({
       where: { id: invoiceId },
-      include: { profile: true, payment_request: true },
+      include: { profile: true, payment_request: true, payment: true },
     });
 
     if (!invoice) throw new NotFoundException('Invoice not found');
@@ -109,9 +119,9 @@ export class InvoiceService {
       OTHER: 'Autre',
     };
 
-    const paymentMethod = await this.resolvePaymentMethod(
-      invoice.payment_request?.payment_reference,
-    );
+    const paymentMethod = invoice.payment
+      ? (PAYMENT_METHOD_LABELS[invoice.payment.payment_method] ?? invoice.payment.payment_method)
+      : await this.resolvePaymentMethod(invoice.payment_request?.payment_reference);
 
     const data: Record<string, string> = {
       INVOICE_ID: this.invoiceRef(invoice.id, invoice.created_at),
@@ -123,7 +133,7 @@ export class InvoiceService {
       PHONE: invoice.profile.phone,
       AMOUNT: invoice.amount.toString(),
       REASON: reasonLabel[invoice.reason] ?? invoice.reason,
-      PAYMENT_REF: invoice.payment_request?.payment_reference ?? '',
+      PAYMENT_REF: invoice.payment?.transaction_id ?? invoice.payment_request?.payment_reference ?? '',
       PAYMENT_METHOD: paymentMethod,
       RELATED_ENTITY: await this.resolveRelatedEntity(
         invoice.related_entity_type,
@@ -152,7 +162,7 @@ export class InvoiceService {
   ): Promise<{ buffer: Buffer; filename: string }> {
     const invoice = await this.prisma.invoice.findUnique({
       where: { id: invoiceId },
-      include: { profile: true, payment_request: true },
+      include: { profile: true, payment_request: true, payment: true },
     });
 
     if (!invoice) throw new NotFoundException('Invoice not found');
@@ -169,9 +179,9 @@ export class InvoiceService {
       OTHER: 'Autre',
     };
 
-    const paymentMethod = await this.resolvePaymentMethod(
-      invoice.payment_request?.payment_reference,
-    );
+    const paymentMethod = invoice.payment
+      ? (PAYMENT_METHOD_LABELS[invoice.payment.payment_method] ?? invoice.payment.payment_method)
+      : await this.resolvePaymentMethod(invoice.payment_request?.payment_reference);
 
     const data: Record<string, string> = {
       INVOICE_ID: this.invoiceRef(invoice.id, invoice.created_at),
@@ -183,7 +193,7 @@ export class InvoiceService {
       PHONE: invoice.profile.phone,
       AMOUNT: invoice.amount.toString(),
       REASON: reasonLabel[invoice.reason] ?? invoice.reason,
-      PAYMENT_REF: invoice.payment_request?.payment_reference ?? '',
+      PAYMENT_REF: invoice.payment?.transaction_id ?? invoice.payment_request?.payment_reference ?? '',
       PAYMENT_METHOD: paymentMethod,
       RELATED_ENTITY: await this.resolveRelatedEntity(
         invoice.related_entity_type,
@@ -225,6 +235,15 @@ export class InvoiceService {
     invoiceProfileId: string,
   ): Promise<string> {
     if (!relatedEntityId || !relatedEntityType) return '-';
+
+    if (relatedEntityType === 'worker') {
+      const worker = await this.prisma.profile.findUnique({
+        where: { id: relatedEntityId },
+        select: { first_name: true, last_name: true },
+      });
+      if (!worker) return '-';
+      return `${worker.first_name} ${worker.last_name}`;
+    }
 
     if (relatedEntityType === 'contact_unlock_attempt') {
       const attempt = await this.prisma.contactUnlockAttempt.findUnique({
