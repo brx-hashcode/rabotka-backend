@@ -118,6 +118,16 @@ export class AdProcessor {
   }
 
   private async runDispatch(): Promise<void> {
+    // Activate any APPROVED ads whose start_date has passed — don't wait for the hourly lifecycle tick
+    const now = new Date();
+    const activated = await this.prisma.advertisement.updateMany({
+      where: { status: AdStatus.APPROVED, start_date: { lte: now } },
+      data: { status: AdStatus.ACTIVE },
+    });
+    if (activated.count > 0) {
+      this.logger.log(`Dispatch: activated ${activated.count} ads inline before dispatch run`);
+    }
+
     const activeAds = await this.prisma.advertisement.findMany({
       where: { status: AdStatus.ACTIVE },
       include: { bundle: true },
