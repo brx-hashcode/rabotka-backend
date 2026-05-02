@@ -1,11 +1,9 @@
 import { createHash } from 'node:crypto';
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { forwardRef, Inject, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { QdrantService } from '../qdrant/qdrant.service';
-import { QueueService } from '../../common/services/queue/queue.service';
 import { COLLECTIONS } from '../qdrant/qdrant.config';
-import Redis from 'ioredis';
-import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
+import { InterestClusterService } from './interest-cluster.service';
 
 // Qdrant requires point IDs to be UUIDs or unsigned integers.
 // We derive a deterministic UUID from a composite key using SHA-256.
@@ -20,7 +18,7 @@ export type SignalType =
   | 'save'
   | 'question'
   | 'view'
-  | 'profile_view' // employer opens a worker's profile card
+  | 'profile_view'
   | 'skip'
   | 'dislike'
   | 'cancel';
@@ -30,24 +28,15 @@ export const SIGNAL_WEIGHTS: Record<SignalType, number> = {
   share: 0.9,
   save: 0.8,
   question: 0.6,
-  profile_view: 0.5, // external validation — employer saw fit for a job
+  profile_view: 0.5,
   view: 0.3,
   skip: -0.3,
   dislike: -0.8,
   cancel: -0.5,
 };
 
-// Strongly positive signals trigger immediate recluster (don't wait for threshold)
-const IMMEDIATE_RECLUSTER_SIGNALS: Set<SignalType> = new Set([
-  'apply',
-  'cancel',
-  'dislike',
-]);
-
+// Kept for backward compat — queue name referenced by admin controller
 export const INTEREST_RECLUSTER_QUEUE = 'interest-recluster-queue';
-
-// Redis key for per-user interaction counter (survives pod restarts)
-const counterKey = (userId: string) => `interest:counter:${userId}`;
 
 // Temporal decay: signals older than 90 days excluded
 export function temporalWeight(recordedAt: Date): number {
@@ -65,8 +54,8 @@ export class InterestSignalService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly qdrant: QdrantService,
-    private readonly queue: QueueService,
-    @Inject(REDIS_CONNECTION) private readonly redis: Redis,
+    @Inject(forwardRef(() => InterestClusterService))
+    private readonly clusters: InterestClusterService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -107,7 +96,6 @@ export class InterestSignalService {
     }
 
     if (!vector) {
-      // Job not yet indexed — embed on demand (first signal for this job)
       const jobText = `${job.title}`.trim();
       vector = await this.qdrant.embed(jobText);
     }
@@ -129,7 +117,10 @@ export class InterestSignalService {
       `Signal recorded: user=${userId} job=${jobId} type=${type} w=${baseWeight}`,
     );
 
-    await this.maybeEnqueueRecluster(userId, type);
+    // EMA update — fires on every signal, no batching
+    await this.clusters.applySignal(userId, jobId, vector, baseWeight).catch((err) => {
+      this.logger.warn(`EMA update failed for user=${userId}`, err);
+    });
   }
 
   async getRecentSignals(userId: string): Promise<
@@ -174,42 +165,5 @@ export class InterestSignalService {
         };
       })
       .filter((s) => s.effectiveWeight !== 0);
-  }
-
-  // ── Recluster scheduling ──────────────────────────────────────────────────
-
-  private async maybeEnqueueRecluster(
-    userId: string,
-    type: SignalType,
-  ): Promise<void> {
-    // High-value signals always trigger immediate recluster
-    if (IMMEDIATE_RECLUSTER_SIGNALS.has(type)) {
-      await this.enqueueRecluster(userId, 0);
-      return;
-    }
-
-    // Increment persistent counter in Redis; recluster every 10 interactions
-    const key = counterKey(userId);
-    const count = await this.redis.incr(key);
-    await this.redis.expire(key, 60 * 60 * 24 * 30); // 30-day TTL
-
-    if (count % 10 === 0) {
-      await this.enqueueRecluster(userId, 0);
-    }
-  }
-
-  private async enqueueRecluster(
-    userId: string,
-    delayMs: number,
-  ): Promise<void> {
-    // jobId deduplication: one pending recluster per user at a time
-    await this.queue.addJob<{ userId: string }>(
-      INTEREST_RECLUSTER_QUEUE,
-      { userId },
-      {
-        delay: delayMs,
-        jobId: `recluster:${userId}`, // BullMQ deduplication key
-      },
-    );
   }
 }

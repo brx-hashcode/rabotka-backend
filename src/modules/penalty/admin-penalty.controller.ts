@@ -1,4 +1,5 @@
 import {
+  Body,
   Controller,
   Delete,
   Get,
@@ -33,6 +34,26 @@ export class AdminPenaltyController {
     private readonly penaltyService: PenaltyService,
     private readonly logService: LogService,
   ) {}
+
+  @Post()
+  @Roles(UserRole.MANAGER)
+  @ApiOperation({ summary: 'Create a penalty manually (admin only)' })
+  @ApiResponse({ status: 201, description: 'Penalty created' })
+  async createPenalty(
+    @Body()
+    body: {
+      workerId: string;
+      applicationId: string;
+      amount: number;
+      reason: string;
+    },
+    @Req() req: any,
+  ) {
+    return this.penaltyService.createPenaltyByAdmin({
+      ...body,
+      adminUserId: req.user.userId,
+    });
+  }
 
   @Get()
   @Roles(UserRole.MODERATOR)

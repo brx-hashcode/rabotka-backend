@@ -174,13 +174,14 @@ async function handleDetailStep(params: DetailStepParams): Promise<FlowResult> {
     const acceptRefuseState = getAcceptRefuseInitialState(applicationId);
     const result = await runAcceptRefuseCandidateFlow(
       acceptRefuseState,
-      '',
+      trimmedInput,
       profile,
       ctx,
     );
     return {
       reply: result.reply,
-      nextState: result.nextState ?? acceptRefuseState,
+      nextState: result.clearState ? undefined : (result.nextState ?? acceptRefuseState),
+      clearState: result.clearState,
     };
   }
 
