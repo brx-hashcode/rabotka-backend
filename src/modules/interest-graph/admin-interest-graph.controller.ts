@@ -44,11 +44,11 @@ export class AdminInterestGraphController {
     return this.signals.getRecentSignals(userId);
   }
 
-  @Post(':userId/recluster')
+  @Post(':userId/reseed')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Trigger immediate recluster for a user' })
-  async recluster(@Param('userId') userId: string): Promise<void> {
-    this.logger.log(`Manual recluster triggered for user ${userId}`);
-    await this.clusters.recluster(userId);
+  @ApiOperation({ summary: 'Re-seed interest vector from profile for a user' })
+  async reseed(@Param('userId') userId: string): Promise<void> {
+    this.logger.log(`Manual re-seed triggered for user ${userId}`);
+    await this.clusters.reseedFromProfile(userId);
   }
 }

@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  ConflictException,
 } from '@nestjs/common';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { BillingStatus, Prisma, PaymentMethod } from '@prisma/client';
@@ -46,6 +47,60 @@ export class PenaltyService {
     private readonly prisma: PrismaService,
     private readonly walletService: WalletService,
   ) {}
+
+  async createPenaltyByAdmin(params: {
+    workerId: string;
+    applicationId: string;
+    amount: number;
+    reason: string;
+    adminUserId: string;
+  }): Promise<AdminPenaltyDetailResponse> {
+    const { workerId, applicationId, amount, reason, adminUserId } = params;
+
+    const application = await this.prisma.application.findUnique({
+      where: { id: applicationId },
+      select: { id: true, worker_id: true, job_offer: { select: { employer_id: true } } },
+    });
+    if (!application) throw new NotFoundException('Candidature introuvable');
+    const isWorker = application.worker_id === workerId;
+    const isEmployer = application.job_offer?.employer_id === workerId;
+    if (!isWorker && !isEmployer)
+      throw new BadRequestException('Cette candidature n\'est pas associée à ce profil');
+
+    const existing = await this.prisma.penalty.findUnique({
+      where: { idx_penalty_application_unique: { application_id: applicationId } },
+      select: { id: true },
+    });
+    if (existing) throw new ConflictException('Une pénalité existe déjà pour cette candidature');
+
+    const penalty = await this.prisma.penalty.create({
+      data: {
+        worker_id: workerId,
+        application_id: applicationId,
+        amount,
+        reason,
+        applied_at: new Date(),
+      },
+    });
+
+    await this.prisma.profile.update({
+      where: { id: workerId },
+      data: { billing_status: BillingStatus.PENDING_PAYMENT },
+    });
+
+    await this.prisma.log.create({
+      data: {
+        action: 'PENALTY_CREATED',
+        entity_type: 'Penalty',
+        entity_id: penalty.id,
+        user_id: adminUserId,
+        profile_id: workerId,
+        metadata: { amount, reason, note: 'Penalty manually created by admin' },
+      },
+    });
+
+    return this.getPenaltyDetailForAdmin(penalty.id);
+  }
 
   async confirmPenaltyPaymentByAdmin(
     penaltyId: string,

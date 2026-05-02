@@ -4,9 +4,15 @@ import { QdrantService } from '../qdrant/qdrant.service';
 import { COLLECTIONS } from '../qdrant/qdrant.config';
 import { InterestClusterService } from './interest-cluster.service';
 
-const EXPLOIT_RATIO = 0.7;
 const DEFAULT_LIMIT = 10;
-const MIN_SIGNALS_FOR_PERSONALIZATION = 3;
+
+// Cold  (0)      → attribute-only fallback (profile text hybrid search)
+// Warm  (1–4)    → 40% vector exploit + 60% fallback
+// Hot   (5+)     → 70% exploit + 30% explore
+const WARM_THRESHOLD = 1;
+const HOT_THRESHOLD = 5;
+const HOT_EXPLOIT_RATIO = 0.7;
+const WARM_EXPLOIT_RATIO = 0.4;
 
 // How many candidate explore jobs to fetch before sampling
 const EXPLORE_POOL_FACTOR = 5;
@@ -32,27 +38,23 @@ export class InterestRecommendationService {
     limit = DEFAULT_LIMIT,
   ): Promise<RecommendedJob[]> {
     const profile = await this.clusters.getProfile(workerId);
+    const signals = profile?.totalSignals ?? 0;
 
-    if (!profile || profile.totalSignals < MIN_SIGNALS_FOR_PERSONALIZATION) {
+    // Cold start — no signals yet, pure profile-text search
+    if (signals < WARM_THRESHOLD || !profile) {
       return this.fallback(workerId, limit);
     }
 
-    const exploitCount = Math.round(limit * EXPLOIT_RATIO);
+    const exploitRatio = signals >= HOT_THRESHOLD ? HOT_EXPLOIT_RATIO : WARM_EXPLOIT_RATIO;
+    const exploitCount = Math.round(limit * exploitRatio);
     const exploreCount = limit - exploitCount;
 
-    const [exploited, explored] = await Promise.all([
-      this.exploit(
-        workerId,
-        profile.positiveVectors,
-        profile.negativeVectors,
-        exploitCount,
-      ),
-      this.explore(
-        workerId,
-        profile.positiveVectors,
-        profile.categories,
-        exploreCount,
-      ),
+    const [exploited, explored, fallbackResults] = await Promise.all([
+      this.exploit(workerId, profile.positiveVectors, profile.negativeVectors, exploitCount),
+      exploreCount > 0
+        ? this.explore(workerId, profile.positiveVectors, profile.categories, exploreCount)
+        : Promise.resolve([]),
+      this.fallback(workerId, limit),
     ]);
 
     const seen = new Set<string>();
@@ -60,11 +62,7 @@ export class InterestRecommendationService {
 
     mergeUnique(exploited, seen, results);
     mergeUnique(explored, seen, results);
-
-    if (results.length < limit) {
-      const extra = await this.fallback(workerId, (limit - results.length) * 2);
-      mergeUnique(extra, seen, results, limit);
-    }
+    mergeUnique(fallbackResults, seen, results, limit);
 
     return results.slice(0, limit);
   }

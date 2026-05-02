@@ -1203,13 +1203,15 @@ export class ApplicationService {
     q?: string;
     status?: ApplicationStatus[];
     penaltyApplied?: string[];
+    workerId?: string;
+    employerId?: string;
   }): Promise<{
     data: AdminApplicationListItem[];
     total: number;
     page: number;
     limit: number;
   }> {
-    const { page, limit, q, status, penaltyApplied } = params;
+    const { page, limit, q, status, penaltyApplied, workerId, employerId } = params;
     const skip = (page - 1) * limit;
 
     const where: Prisma.ApplicationWhereInput = {};
@@ -1243,6 +1245,12 @@ export class ApplicationService {
       if (boolValues.length === 1) {
         where.penalty_applied = boolValues[0];
       }
+    }
+    if (workerId) {
+      where.worker_id = workerId;
+    }
+    if (employerId) {
+      where.job_offer = { employer_id: employerId };
     }
 
     const [applications, total] = await Promise.all([

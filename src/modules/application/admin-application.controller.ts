@@ -39,6 +39,8 @@ export class AdminApplicationController {
       q: dto.q,
       status: dto.status,
       penaltyApplied: dto.penalty_applied,
+      workerId: dto.worker_id,
+      employerId: dto.employer_id,
     });
   }
 
