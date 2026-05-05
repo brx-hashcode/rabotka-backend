@@ -58,6 +58,7 @@ const checks: [string, boolean][] = [
   ['Contains campaign title', html.includes('Rabotka ads test')],
   ['Contains brand bar', html.includes('Rabotka') && html.includes('Ads')],
   ['Contains open rate (9.1 %)', html.includes('9.1')],
+  ['Contains CTR section', html.includes('CTR')],
   ['Contains sent count', html.includes('>11<')],
   ['Contains funnel bar', html.includes('RÉPARTITION DE LA LIVRAISON')],
   ['Contains timeline section', html.includes('CHRONOLOGIE QUOTIDIENNE')],
