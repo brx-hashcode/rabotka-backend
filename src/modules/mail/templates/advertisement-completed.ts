@@ -238,7 +238,7 @@ export function advertisementCompletedEmail(params: {
           <td style="padding:22px 0 22px 24px;width:50%;vertical-align:top;border-left:1px solid #e6e8e4;">
             <div style="font-size:10.5px;letter-spacing:0.14em;text-transform:uppercase;color:#6b7570;font-weight:500;margin-bottom:6px;">TAUX DE CLIC (CTR)</div>
             <div style="font-family:Georgia,'Times New Roman',serif;font-size:56px;line-height:1;letter-spacing:-0.02em;color:#0e1411;">${ctrPct.replace(' %', '')}<span style="font-size:22px;color:#6b7570;margin-left:2px;vertical-align:middle;"> %</span></div>
-            <div style="font-size:12px;color:#6b7570;margin-top:6px;">${stats.clickedDeliveries} destinataire${stats.clickedDeliveries !== 1 ? 's' : ''} sur ${totalSent} envois &middot; benchmark secteur 2,6 %</div>
+            <div style="font-size:12px;color:#6b7570;margin-top:6px;">${clickedDeliveries} destinataire${clickedDeliveries !== 1 ? 's' : ''} ayant cliqué sur ${totalSent} envois &middot; benchmark secteur 2,6 %</div>
           </td>
         </tr>
       </table>
@@ -306,7 +306,7 @@ export function advertisementCompletedEmail(params: {
           </td>
           <td style="padding-top:12px;width:25%;vertical-align:top;padding-right:8px;">
             <div style="font-size:10.5px;letter-spacing:0.1em;text-transform:uppercase;color:#6b7570;font-weight:500;margin-bottom:4px;"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#0e1411;margin-right:4px;vertical-align:middle;"></span>Cliqués</div>
-            <div style="font-size:18px;font-weight:500;color:#0e1411;letter-spacing:-0.01em;">${totalClicks} <span style="font-size:11px;color:#9aa39d;font-weight:400;">${pctOf(totalClicks, totalSent)}</span></div>
+            <div style="font-size:18px;font-weight:500;color:#0e1411;letter-spacing:-0.01em;">${clickedDeliveries} <span style="font-size:11px;color:#9aa39d;font-weight:400;">${pctOf(clickedDeliveries, totalAttempts)}</span></div>
           </td>
           <td style="padding-top:12px;width:25%;vertical-align:top;">
             <div style="font-size:10.5px;letter-spacing:0.1em;text-transform:uppercase;color:#6b7570;font-weight:500;margin-bottom:4px;"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#d9b066;margin-right:4px;vertical-align:middle;"></span>Échecs</div>
