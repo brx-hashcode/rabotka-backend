@@ -100,14 +100,17 @@ export class AdProcessor {
     for (const ad of ads) {
       if (!ad.contact_email) continue;
       try {
-        const excelBuffer = await this.adReport.generateExcel(ad.id, ad.title);
-        const stats = await this.adReport.getStats(ad.id);
+        const [excelBuffer, analytics] = await Promise.all([
+          this.adReport.generateExcel(ad.id, ad.title),
+          this.adReport.getAnalytics(ad.id),
+        ]);
         await this.notificationService.notifyAdvertisementCompleted({
           to: ad.contact_email,
           adTitle: ad.title,
           startDate: ad.start_date.toISOString(),
           endDate: ad.end_date.toISOString(),
-          stats,
+          stats: analytics,
+          timeline: analytics.timeline,
           excelBuffer,
         });
         this.logger.log(

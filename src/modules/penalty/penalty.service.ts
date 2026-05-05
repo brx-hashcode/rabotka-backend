@@ -68,7 +68,7 @@ export class PenaltyService {
       throw new BadRequestException('Cette candidature n\'est pas associée à ce profil');
 
     const existing = await this.prisma.penalty.findUnique({
-      where: { idx_penalty_application_unique: { application_id: applicationId } },
+      where: { application_id: applicationId },
       select: { id: true },
     });
     if (existing) throw new ConflictException('Une pénalité existe déjà pour cette candidature');

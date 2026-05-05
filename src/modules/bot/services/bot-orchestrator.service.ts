@@ -690,9 +690,9 @@ export class BotOrchestratorService {
 
     const offerResults = await this.interestRecommendationService.recommend(
       profile.id,
-      10,
+      20,
     );
-    const offerIds = offerResults.map((r) => r.jobId).slice(0, 5);
+    const offerIds = offerResults.map((r) => r.jobId);
 
     if (offerIds.length === 0) return [noOffersMsg];
 

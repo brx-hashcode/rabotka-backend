@@ -10,6 +10,10 @@ export class AdReportService {
     return this.analytics.getStats(advertisementId);
   }
 
+  async getAnalytics(advertisementId: string) {
+    return this.analytics.getAnalytics(advertisementId);
+  }
+
   async generateExcel(
     advertisementId: string,
     adTitle: string,

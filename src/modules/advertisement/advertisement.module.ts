@@ -12,6 +12,7 @@ import { AdProcessor } from './services/ad.processor';
 import { AdAnalyticsService } from './services/ad-analytics.service';
 import { AdAdminController } from './controllers/ad-admin.controller';
 import { AdTrackingController } from './controllers/ad-tracking.controller';
+import { AdDevController } from './controllers/ad-dev.controller';
 import { AdLinkTrackingService } from './services/ad-link-tracking.service';
 import { AdNotificationService } from './services/ad-notification.service';
 import { AdReportService } from './services/ad-report.service';
@@ -24,7 +25,7 @@ import { AdReportService } from './services/ad-report.service';
     NotificationModule,
     WhatsAppModule,
   ],
-  controllers: [AdAdminController, AdTrackingController],
+  controllers: [AdAdminController, AdTrackingController, AdDevController],
   providers: [
     AdvertisementService,
     AdAdminService,

@@ -16,7 +16,7 @@ import {
   advertisementCreatedEmail,
   advertisementCompletedEmail,
 } from '../mail/templates';
-import { AdStats } from '../advertisement/services/ad-analytics.service';
+import { AdStats, AdTimelinePoint } from '../advertisement/services/ad-analytics.service';
 import { CalendarLinkService } from '../calendar/services/calendar-link.service';
 import { IcsGeneratorService } from '../calendar/services/ics-generator.service';
 
@@ -230,6 +230,7 @@ export class NotificationService {
     startDate: string;
     endDate: string;
     stats: AdStats;
+    timeline?: AdTimelinePoint[];
     excelBuffer: Buffer;
   }): Promise<void> {
     const slugTitle = params.adTitle
@@ -240,7 +241,7 @@ export class NotificationService {
     await this.mail.sendMail({
       to: params.to,
       subject: `Rabotka – Rapport de campagne : ${params.adTitle}`,
-      html: advertisementCompletedEmail(params),
+      html: advertisementCompletedEmail({ ...params, timeline: params.timeline }),
       attachments: [
         {
           filename: `rapport-${slugTitle}.xlsx`,
