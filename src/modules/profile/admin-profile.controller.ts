@@ -11,11 +11,12 @@ import {
   Res,
   UseInterceptors,
   UploadedFiles,
+  UploadedFile,
   BadRequestException,
   NotFoundException,
 } from '@nestjs/common';
 import type { Response } from 'express';
-import { FilesInterceptor } from '@nestjs/platform-express';
+import { FilesInterceptor, FileInterceptor } from '@nestjs/platform-express';
 import {
   ApiTags,
   ApiOperation,
@@ -355,6 +356,40 @@ export class AdminProfileController {
       userId: adminUserId,
       profileId: id,
       metadata: { fields: dto },
+    });
+    return result;
+  }
+
+  @Patch(':id/avatar')
+  @Roles(UserRole.MANAGER)
+  @UseInterceptors(FileInterceptor('avatar', {
+    limits: { fileSize: 5 * 1024 * 1024 },
+    fileFilter: (_req, file, cb) => {
+      if (['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype)) {
+        cb(null, true);
+      } else {
+        cb(new BadRequestException('Only JPEG, PNG or WEBP images are allowed'), false);
+      }
+    },
+  }))
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({ summary: 'Update profile avatar (admin only)' })
+  @ApiResponse({ status: 200, description: 'Avatar updated' })
+  async updateAvatar(
+    @Param('id') id: string,
+    @UploadedFile() file: Express.Multer.File | undefined,
+    @Req() req: any,
+  ) {
+    if (!file) throw new BadRequestException('No avatar file provided');
+    const result = await this.profileService.updateAvatar(id, file);
+    const adminUserId = req.user?.userId;
+    await this.logService.create({
+      action: 'AVATAR_UPDATED',
+      entityType: 'Profile',
+      entityId: id,
+      userId: adminUserId,
+      profileId: id,
+      metadata: {},
     });
     return result;
   }

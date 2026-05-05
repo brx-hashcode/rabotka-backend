@@ -51,28 +51,43 @@ export class MatchingController {
       }),
     ]);
 
+    const workerIds = profiles.filter((p) => p.profile_type === 'WORKER').map((p) => p.id);
+    const employerIds = profiles.filter((p) => p.profile_type === 'EMPLOYER').map((p) => p.id);
+
     this.logger.log(
-      `Re-indexing ${jobIds.length} jobs and ${profiles.length} profiles`,
+      `Re-indexing ${jobIds.length} jobs, ${workerIds.length} workers, ${employerIds.length} employers`,
     );
 
-    for (const id of jobIds) {
-      await this.matchingService.indexJobOffer(id).catch((err: unknown) =>
-        this.logger.warn(`indexJobOffer failed for ${id}`, err instanceof Error ? err.message : String(err)),
-      );
-    }
-
-    for (const { id, profile_type } of profiles) {
-      if (profile_type === 'WORKER') {
-        await this.matchingService.indexWorkerProfile(id).catch((err: unknown) =>
-          this.logger.warn(`indexWorkerProfile failed for ${id}`, err instanceof Error ? err.message : String(err)),
-        );
-      } else {
-        await this.matchingService.indexEmployerProfile(id).catch((err: unknown) =>
-          this.logger.warn(`indexEmployerProfile failed for ${id}`, err instanceof Error ? err.message : String(err)),
-        );
-      }
-    }
+    await this.batchIndex('job', jobIds, (id) => this.matchingService.indexJobOffer(id));
+    await this.batchIndex('worker', workerIds, (id) => this.matchingService.indexWorkerProfile(id));
+    await this.batchIndex('employer', employerIds, (id) => this.matchingService.indexEmployerProfile(id));
 
     this.logger.log('Re-index complete');
+  }
+
+  private async batchIndex(
+    label: string,
+    ids: string[],
+    fn: (id: string) => Promise<void>,
+    concurrency = 5,
+  ): Promise<void> {
+    let done = 0;
+    for (let i = 0; i < ids.length; i += concurrency) {
+      const batch = ids.slice(i, i + concurrency);
+      await Promise.all(
+        batch.map((id) =>
+          fn(id).catch((err: unknown) =>
+            this.logger.warn(
+              `index ${label} failed for ${id}`,
+              err instanceof Error ? err.message : String(err),
+            ),
+          ),
+        ),
+      );
+      done += batch.length;
+      this.logger.log(`Re-index ${label}: ${done}/${ids.length}`);
+      // Yield to the event loop between batches so other requests are not starved
+      await new Promise((r) => setImmediate(r));
+    }
   }
 }

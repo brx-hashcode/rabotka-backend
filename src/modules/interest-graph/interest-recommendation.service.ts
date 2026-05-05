@@ -42,6 +42,9 @@ export class InterestRecommendationService {
 
     // Cold start — no signals yet, pure profile-text search
     if (signals < WARM_THRESHOLD || !profile) {
+      if (!profile) {
+        void this.clusters.reseedFromProfile(workerId).catch(() => undefined);
+      }
       return this.fallback(workerId, limit);
     }
 
@@ -50,9 +53,9 @@ export class InterestRecommendationService {
     const exploreCount = limit - exploitCount;
 
     const [exploited, explored, fallbackResults] = await Promise.all([
-      this.exploit(workerId, profile.positiveVectors, profile.negativeVectors, exploitCount),
+      this.exploit(workerId, profile.positiveVectors, profile.negativeVectors, profile.seenJobIds, exploitCount),
       exploreCount > 0
-        ? this.explore(workerId, profile.positiveVectors, profile.categories, exploreCount)
+        ? this.explore(workerId, profile.positiveVectors, profile.categories, profile.seenJobIds, exploreCount)
         : Promise.resolve([]),
       this.fallback(workerId, limit),
     ]);
@@ -73,11 +76,12 @@ export class InterestRecommendationService {
     workerId: string,
     positiveVectors: number[][],
     negativeVectors: number[][],
+    seenJobIds: string[],
     limit: number,
   ): Promise<RecommendedJob[]> {
     if (!positiveVectors.length) return [];
 
-    const filter = this.buildJobFilter(workerId);
+    const filter = this.buildJobFilter(seenJobIds);
 
     try {
       const results = await this.qdrant.recommendDense(
@@ -87,6 +91,8 @@ export class InterestRecommendationService {
         filter,
         limit,
       );
+
+      this.logger.debug(`exploit() returned ${results.length} results for user=${workerId}`);
 
       return results.map((r) => ({
         jobId: r.id as string,
@@ -108,19 +114,20 @@ export class InterestRecommendationService {
     workerId: string,
     positiveVectors: number[][],
     knownCategories: string[],
+    seenJobIds: string[],
     limit: number,
   ): Promise<RecommendedJob[]> {
     if (!limit) return [];
 
     // No positive vectors yet → pure DB sample from unknown categories
     if (!positiveVectors.length) {
-      return this.exploreByDb(workerId, knownCategories, limit);
+      return this.exploreByDb(workerId, knownCategories, seenJobIds, limit);
     }
 
     // Use a blended positive medoid to find jobs in semantically adjacent space
     // but exclude jobs in categories the worker has already seen
     const blendedVector = blendVectors(positiveVectors);
-    const filter = this.buildJobFilter(workerId, knownCategories);
+    const filter = this.buildJobFilter(seenJobIds, knownCategories);
 
     try {
       const results = await this.qdrant.recommendDense(
@@ -136,13 +143,15 @@ export class InterestRecommendationService {
         .toSorted(() => Math.random() - 0.5)
         .slice(0, limit);
 
+      this.logger.debug(`explore() returned ${shuffled.length} results for user=${workerId} (pool=${results.length})`);
+
       return shuffled.map((r) => ({
         jobId: r.id as string,
         score: r.score,
         source: 'explore' as const,
       }));
     } catch {
-      return this.exploreByDb(workerId, knownCategories, limit);
+      return this.exploreByDb(workerId, knownCategories, seenJobIds, limit);
     }
   }
 
@@ -150,12 +159,14 @@ export class InterestRecommendationService {
   private async exploreByDb(
     workerId: string,
     knownCategories: string[],
+    seenJobIds: string[],
     limit: number,
   ): Promise<RecommendedJob[]> {
     const jobs = await this.prisma.jobOffer.findMany({
       where: {
         status: 'ACTIVE',
         applications: { none: { worker_id: workerId } },
+        ...(seenJobIds.length > 0 ? { id: { notIn: seenJobIds } } : {}),
         ...(knownCategories.length > 0
           ? { category: { name: { notIn: knownCategories } } }
           : {}),
@@ -196,7 +207,7 @@ export class InterestRecommendationService {
 
     if (!queryText) return [];
 
-    const filter = this.buildJobFilter(workerId);
+    const filter = this.buildJobFilter([]);
 
     try {
       const results = await this.qdrant.searchHybridWithFilter(
@@ -218,24 +229,23 @@ export class InterestRecommendationService {
   // ── Shared filter builder ─────────────────────────────────────────────────
 
   private buildJobFilter(
-    workerId: string,
+    seenJobIds: string[],
     excludeCategories?: string[],
   ): Record<string, unknown> {
     const must: unknown[] = [{ key: 'status', match: { value: 'ACTIVE' } }];
-    const must_not: unknown[] = [
-      { key: 'applied_worker_ids', match: { any: [workerId] } },
-    ];
+    const must_not: unknown[] = [];
 
-    if (excludeCategories?.length) {
-      must_not.push(
-        ...excludeCategories.map((cat) => ({
-          key: 'category_name',
-          match: { value: cat },
-        })),
-      );
+    // Exclude jobs the user has already seen/interacted with
+    if (seenJobIds.length) {
+      must_not.push({ key: 'jobOfferId', match: { any: seenJobIds } });
     }
 
-    return { must, must_not };
+    // Exclude known categories (explore phase diversity)
+    if (excludeCategories?.length) {
+      must_not.push({ key: 'categoryName', match: { any: excludeCategories } });
+    }
+
+    return must_not.length ? { must, must_not } : { must };
   }
 }
 

@@ -5,6 +5,7 @@ export interface AdStats {
   totalSent: number;
   totalOpened: number;
   totalClicks: number;
+  totalFailed: number;
   openRate: number;
   clickRate: number;
   clickedDeliveries: number;
@@ -21,6 +22,7 @@ export interface AdStats {
 export interface AdTimelinePoint {
   date: string;
   sent: number;
+  opened: number;
   clicked: number;
   failed: number;
 }
@@ -73,6 +75,7 @@ export class AdAnalyticsService {
   private buildTimeline(
     deliveryLogs: Array<{
       sent_at: Date | null;
+      opened_at: Date | null;
       clicked_at: Date | null;
       status: string;
     }>,
@@ -86,11 +89,13 @@ export class AdAnalyticsService {
       const point = grouped.get(date) ?? {
         date,
         sent: 0,
+        opened: 0,
         clicked: 0,
         failed: 0,
       };
 
       point.sent += 1;
+      if (log.opened_at) point.opened += 1;
       if (log.clicked_at) point.clicked += 1;
       if (log.status === 'FAILED') point.failed += 1;
 
@@ -137,6 +142,9 @@ export class AdAnalyticsService {
     const totalSent = deliveryLogs.filter((l) =>
       successfulStatuses.has(l.status),
     ).length;
+    const totalFailed = deliveryLogs.filter(
+      (l) => l.status === 'FAILED',
+    ).length;
     const totalOpened = deliveryLogs.filter((l) => l.opened_at != null).length;
     const clickedDeliveries = deliveryLogs.filter(
       (l) => l.clicked_at != null,
@@ -157,6 +165,7 @@ export class AdAnalyticsService {
       totalSent,
       totalOpened,
       totalClicks,
+      totalFailed,
       openRate,
       clickRate,
       clickedDeliveries,
@@ -227,23 +236,26 @@ export class AdAnalyticsService {
               total_sent: bigint;
               total_opened: bigint;
               clicked_deliveries: bigint;
+              total_failed: bigint;
             },
           ]
         >`
         SELECT
           COUNT(*) FILTER (WHERE status IN ('SENT', 'DELIVERED', 'OPENED', 'CLICKED')) AS total_sent,
           COUNT(*) FILTER (WHERE opened_at IS NOT NULL)                                AS total_opened,
-          COUNT(*) FILTER (WHERE clicked_at IS NOT NULL)                               AS clicked_deliveries
+          COUNT(*) FILTER (WHERE clicked_at IS NOT NULL)                               AS clicked_deliveries,
+          COUNT(*) FILTER (WHERE status = 'FAILED')                                    AS total_failed
         FROM "ad_delivery_logs"
         WHERE advertisement_id = ${advertisementId}::uuid
       `,
       ],
     );
 
-    const { total_sent, total_opened, clicked_deliveries } = aggregates[0];
+    const { total_sent, total_opened, clicked_deliveries, total_failed } = aggregates[0];
     const totalSent = Number(total_sent);
     const totalOpened = Number(total_opened);
     const clickedDeliveries = Number(clicked_deliveries);
+    const totalFailed = Number(total_failed);
     const totalClicks = links.reduce((sum, l) => sum + l.click_count, 0);
     const { openRate, clickRate } = this.toRates(
       totalSent,
@@ -260,6 +272,7 @@ export class AdAnalyticsService {
       totalSent,
       totalOpened,
       totalClicks,
+      totalFailed,
       openRate,
       clickRate,
       clickedDeliveries,
@@ -316,6 +329,7 @@ export class AdAnalyticsService {
           totalSent: ad.total_sent,
           totalOpened: ad.total_opened,
           totalClicks: ad.total_clicks,
+          totalFailed: 0,
           openRate: ad.total_sent > 0 ? ad.total_opened / ad.total_sent : 0,
           clickRate: ad.total_sent > 0 ? ad.total_clicks / ad.total_sent : 0,
           clickedDeliveries: 0,

@@ -7,6 +7,11 @@ import { InterestSignalService } from './interest-signal.service';
 
 const VECTOR_DIM = 384;
 const DEFAULT_ALPHA = 0.85;
+// Signals before the profile is considered "mature" — alpha adapts below this
+const ALPHA_MATURE_THRESHOLD = 10;
+// Maximum seen/interacted job IDs tracked per user for exclusion
+const MAX_SEEN_JOB_IDS = 100;
+const MAX_TRACKED_CATEGORIES = 50;
 
 function toPointId(key: string): string {
   const hex = createHash('sha256').update(key).digest('hex').slice(0, 32);
@@ -17,6 +22,7 @@ export interface UserInterestProfile {
   positiveVectors: number[][];
   negativeVectors: number[][];
   categories: string[];
+  seenJobIds: string[];
   totalSignals: number;
 }
 
@@ -46,6 +52,7 @@ export class InterestClusterService implements OnModuleInit {
     jobId: string,
     jobVector: number[],
     weight: number,
+    category: string | null,
   ): Promise<void> {
     const pointId = toPointId(`interest__${userId}`);
 
@@ -53,14 +60,31 @@ export class InterestClusterService implements OnModuleInit {
       (await this.retrievePoint(pointId)) ??
       (await this.seedFromProfile(userId, pointId));
 
-    const a = this.alpha;
+    const signalCount = ((existing.payload.total_signals as number) ?? 0) + 1;
+
+    // Adaptive alpha: learn faster early on, stabilize when mature
+    const maturity = Math.min(signalCount, ALPHA_MATURE_THRESHOLD) / ALPHA_MATURE_THRESHOLD;
+    const a = DEFAULT_ALPHA * maturity + 0.5 * (1 - maturity);
+
     const updated = existing.vector.map(
       (v, i) => a * v + (1 - a) * weight * (jobVector[i] ?? 0),
     );
     const norm = Math.sqrt(updated.reduce((s, x) => s + x * x, 0)) || 1;
     const normalized = updated.map((x) => x / norm);
 
-    const signalCount = ((existing.payload.total_signals as number) ?? 0) + 1;
+    // Track seen job IDs (capped) so they can be excluded from future recommendations
+    const prevSeen = isStringArray(existing.payload.seen_job_ids)
+      ? existing.payload.seen_job_ids
+      : [];
+    const seenJobIds = [...new Set([...prevSeen, jobId])].slice(-MAX_SEEN_JOB_IDS);
+
+    // Track interacted categories (capped)
+    const prevCats = isStringArray(existing.payload.categories)
+      ? existing.payload.categories
+      : [];
+    const categories = category && !prevCats.includes(category)
+      ? [...prevCats, category].slice(-MAX_TRACKED_CATEGORIES)
+      : prevCats;
 
     await this.qdrant.upsertDense(
       USER_INTERESTS_COLLECTION,
@@ -71,11 +95,13 @@ export class InterestClusterService implements OnModuleInit {
         user_id: userId,
         total_signals: signalCount,
         last_signal_at: new Date().toISOString(),
+        seen_job_ids: seenJobIds,
+        categories,
       },
     );
 
     this.logger.debug(
-      `EMA update user=${userId} job=${jobId} w=${weight} signals=${signalCount}`,
+      `EMA update user=${userId} job=${jobId} w=${weight} alpha=${a.toFixed(2)} signals=${signalCount}`,
     );
   }
 
@@ -88,10 +114,10 @@ export class InterestClusterService implements OnModuleInit {
 
     const p = point.payload;
     return {
-      // Legacy fields kept for recommendation service compat
       positiveVectors: isMatrix(p.positive_vectors) ? p.positive_vectors : [point.vector],
       negativeVectors: isMatrix(p.negative_vectors) ? p.negative_vectors : [],
       categories: isStringArray(p.categories) ? p.categories : [],
+      seenJobIds: isStringArray(p.seen_job_ids) ? p.seen_job_ids : [],
       totalSignals: typeof p.total_signals === 'number' ? p.total_signals : 0,
     };
   }
