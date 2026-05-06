@@ -19,7 +19,7 @@ import {
 } from '../messages/menu.messages';
 import type { BotProfile, BotState } from '../types/bot-state.types';
 import type { FlowContext, FlowResult } from '../types/flow.types';
-import { FLOW_IDS } from '../bot.constants';
+import { FLOW_IDS, CMD_MENU } from '../bot.constants';
 import {
   runPublishJobFlow,
   getPublishJobInitialState,
@@ -334,6 +334,7 @@ export class BotOrchestratorService {
       contactUnlockService: this.contactUnlockService,
       walletService: this.walletService,
       interestSignalService: this.interestSignalService,
+      invoiceService: this.invoiceService,
     };
   }
 
@@ -402,22 +403,17 @@ export class BotOrchestratorService {
       [FLOW_IDS.MY_OFFERS]: async () => {
         const currentPage = (state.payload?.page as number) ?? 0;
         const normalized = input.trim().toLowerCase();
-        if (normalized === 'menu' || normalized === 'aide') {
+        if (CMD_MENU.some((c) => normalized === c || normalized === 'm')) {
           return { reply: [handleMenuCommand(profile)], clearState: true };
         }
         const PAGE_SIZE = 5;
         const { total } = await this.jobOfferService.findByEmployerId(
           profile.id,
-          {
-            page: 0,
-            pageSize: 1,
-          },
+          { page: 0, pageSize: 1 },
         );
-        const nextPage = currentPage + 1;
-        const nextPageStart = nextPage * PAGE_SIZE;
-        const hasMore = nextPageStart < total;
-        const nextPageNum = nextPageStart + 1;
-        if (input.trim() === String(nextPageNum) && hasMore) {
+        const totalPages = Math.ceil(total / PAGE_SIZE);
+        if (normalized === 's' && currentPage < totalPages - 1) {
+          const nextPage = currentPage + 1;
           const message = await this.commands.myOffers(profile, nextPage);
           return {
             reply: [message],
@@ -425,6 +421,19 @@ export class BotOrchestratorService {
               flowId: FLOW_IDS.MY_OFFERS,
               step: 0,
               payload: { page: nextPage },
+              updatedAt: new Date().toISOString(),
+            },
+          };
+        }
+        if (normalized === 'p' && currentPage > 0) {
+          const prevPage = currentPage - 1;
+          const message = await this.commands.myOffers(profile, prevPage);
+          return {
+            reply: [message],
+            nextState: {
+              flowId: FLOW_IDS.MY_OFFERS,
+              step: 0,
+              payload: { page: prevPage },
               updatedAt: new Date().toISOString(),
             },
           };
@@ -640,7 +649,7 @@ export class BotOrchestratorService {
       attemptId: attempt.id,
       otherName,
       amount,
-      expiryHours: fees.expiryHours,
+      expiresAt: attempt.expires_at,
     });
     await this.botState.set(profileId, unlockState);
 
@@ -672,6 +681,8 @@ export class BotOrchestratorService {
       applicationService: this.applicationService,
       walletService: this.walletService,
       paymentService: this.paymentService,
+      invoiceService: this.invoiceService,
+      prisma: this.prisma,
     });
     return result.reply;
   }
@@ -736,7 +747,8 @@ export class BotOrchestratorService {
     const flowState = getRecommendedJobsInitialState(offerIds, offerItems);
     await this.botState.set(profileId, flowState);
 
-    return [formatRecommendedList(offerItems)];
+    const totalPages = Math.ceil(offerItems.length / 3);
+    return [formatRecommendedList(offerItems.slice(0, 3), 0, totalPages)];
   }
 
   private async handleRecommendedProfilesCommand(

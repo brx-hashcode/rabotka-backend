@@ -497,22 +497,22 @@ model ContactUnlockAttempt {
 }
 
 model Penalty {
-  id             String   @id @default(uuid()) @db.Uuid
-  created_at     DateTime @default(now())
-  worker_id      String   @db.Uuid
-  application_id String   @db.Uuid
-  amount         Decimal  @db.Decimal(10, 2)
+  id             String    @id @default(uuid()) @db.Uuid
+  created_at     DateTime  @default(now())
+  profile_id     String    @db.Uuid
+  application_id String?   @db.Uuid
+  amount         Decimal   @db.Decimal(10, 2)
   reason         String?
   applied_at          DateTime  @default(now())
   paid_at             DateTime?
   notification_count  Int       @default(0)
   last_notified_at    DateTime?
 
-  worker      Profile     @relation(fields: [worker_id], references: [id], onDelete: Cascade)
-  application Application @relation(fields: [application_id], references: [id], onDelete: Cascade)
+  profile     Profile      @relation(fields: [profile_id], references: [id], onDelete: Cascade)
+  application Application? @relation(fields: [application_id], references: [id], onDelete: Cascade)
 
   @@unique([application_id], name: "idx_penalty_application_unique")
-  @@index([worker_id], name: "idx_penalty_worker")
+  @@index([profile_id], name: "idx_penalty_profile")
   @@index([applied_at], name: "idx_penalty_applied_at")
   @@map("penalties")
 }

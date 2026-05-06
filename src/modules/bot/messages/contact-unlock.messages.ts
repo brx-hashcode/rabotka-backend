@@ -80,10 +80,17 @@ export function formatContactUnlockedMessage(params: {
 export function formatContactUnlockPending(params: {
   waitingFor: 'worker' | 'employer';
   otherName: string;
-  expiryHours: number;
+  expiresAt: Date | string;
 }): string {
-  const { waitingFor, otherName, expiryHours } = params;
+  const { waitingFor, otherName, expiresAt } = params;
   const party = waitingFor === 'worker' ? 'travailleur' : 'employeur';
+  const deadline = new Date(expiresAt).toLocaleString('fr-FR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 
   return [
     '*PAIEMENT ENREGISTRÉ*',
@@ -94,7 +101,7 @@ export function formatContactUnlockPending(params: {
     '',
     `Une fois le paiement confirmé des deux côtés (vous et ${otherName}), vous recevrez automatiquement les coordonnées.`,
     '',
-    `Si une partie ne paie pas après *${expiryHours}h*, votre paiement sera reversé vers votre wallet interne.`,
+    `Si l'autre partie ne paie pas avant le *${deadline}*, votre paiement sera reversé vers votre wallet interne.`,
   ].join('\n');
 }
 

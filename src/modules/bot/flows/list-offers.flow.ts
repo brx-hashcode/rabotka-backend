@@ -42,16 +42,16 @@ type FlowParams = {
 };
 
 function handleListStep(params: FlowParams): Promise<FlowResult> | FlowResult {
-  const { state, offerIds, nextCursor, trimmed, goToMenu } = params;
-  if (trimmed === '7') return goToMenu();
-  if (trimmed === '6') return handleLoadMore(params);
-  const choice = /^[1-5]$/.test(trimmed) ? Number.parseInt(trimmed, 10) : 0;
+  const { state, offerIds, nextCursor, trimmed, normalized, goToMenu } = params;
+  if (normalized === 'm') return goToMenu();
+  if (normalized === 's') return handleLoadMore(params);
+  const choice = /^\d+$/.test(trimmed) ? Number.parseInt(trimmed, 10) : 0;
   if (choice >= 1 && choice <= offerIds.length) {
     return handleListSelectOffer(choice - 1, params);
   }
   return {
     reply: [
-      `*RÉPONDEZ PAR 1-5 POUR SÉLECTIONNER UNE OFFRE${nextCursor ? ', 6 (VOIR PLUS)' : ''} OU 7 (MENU).*`,
+      `*TAPEZ UN NUMÉRO (1-${offerIds.length}) POUR SÉLECTIONNER UNE OFFRE${nextCursor ? ', S (suite)' : ''}, M (menu).*`,
     ],
     nextState: state,
   };
@@ -80,7 +80,8 @@ async function handleLoadMore(params: FlowParams): Promise<FlowResult> {
   }
   const newOfferIds = data.map((o) => o.id);
   const offers = data.map((o) => jobOfferToOfferListItem(o));
-  const message = formatOfferListCompact(offers, !!newCursor);
+  const nextPage = ((params.payload.page as number | undefined) ?? 0) + 1;
+  const message = formatOfferListCompact(offers, !!newCursor, nextPage);
   return {
     reply: [message],
     nextState: {
@@ -89,6 +90,7 @@ async function handleLoadMore(params: FlowParams): Promise<FlowResult> {
         offerIds: newOfferIds,
         nextCursor: newCursor ?? undefined,
         step: 'list',
+        page: nextPage,
       },
       updatedAt: new Date().toISOString(),
     },
@@ -259,7 +261,8 @@ async function handleDetailBackToList(
     };
   }
   const listItems = withOpenSlots.map((o) => jobOfferToOfferListItem(o));
-  const message = formatOfferListCompact(listItems, !!nextCursor);
+  const currentPage = (params.payload.page as number | undefined) ?? 0;
+  const message = formatOfferListCompact(listItems, !!nextCursor, currentPage);
   return {
     reply: [message],
     nextState: {
@@ -332,6 +335,7 @@ export async function runListOffersFlow(
   });
 
   if (
+    normalized === 'm' ||
     CMD_MENU.some((c) => normalized === c || normalized.startsWith(c + ' '))
   ) {
     return goToMenu();

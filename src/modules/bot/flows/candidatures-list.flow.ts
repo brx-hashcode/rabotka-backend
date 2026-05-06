@@ -37,7 +37,7 @@ type CandidaturesStep = 'list' | 'detail';
 
 function isMenuCommand(trimmedInput: string, normalizedInput: string): boolean {
   return (
-    trimmedInput === '7' ||
+    normalizedInput === 'm' ||
     normalizedInput === 'retour' ||
     CMD_MENU.some(
       (command) =>
@@ -120,8 +120,7 @@ function buildInvalidChoiceMessage(
   pageIndex: number,
 ) {
   const n = getPageSlice(items, pageIndex).length;
-  const hasMore = hasMoreItems(items, pageIndex);
-  return `*RÉPONDEZ PAR UN NUMÉRO (1-${n}) POUR SÉLECTIONNER UN CANDIDAT${hasMore ? ', 6 (VOIR PLUS)' : ''} OU 7 (MENU).*`;
+  return `*TAPEZ UN NUMÉRO (1-${n}) POUR SÉLECTIONNER UN CANDIDAT, S/P POUR NAVIGUER, M POUR LE MENU.*`;
 }
 
 type DetailStepParams = {
@@ -152,10 +151,13 @@ async function handleDetailStep(params: DetailStepParams): Promise<FlowResult> {
   if (trimmedInput === '4') return goToMenu();
 
   if (trimmedInput === '3') {
+    const totalPages = Math.ceil(items.length / PAGE_SIZE);
     const slice = getPageSlice(items, pageIndex);
     const message = formatCandidaturesListPage(
       slice,
       hasMoreItems(items, pageIndex),
+      pageIndex,
+      totalPages,
     );
     return {
       reply: [message],
@@ -198,30 +200,28 @@ async function handleDetailStep(params: DetailStepParams): Promise<FlowResult> {
   };
 }
 
-function handleNextPage(
+function handlePageNav(
   state: BotState,
   payload: Record<string, unknown>,
   items: CandidatureListItem[],
   pageIndex: number,
+  direction: 's' | 'p',
 ): FlowResult {
-  if (!hasMoreItems(items, pageIndex)) {
-    return {
-      reply: [
-        '*RÉPONDEZ PAR UN NUMÉRO (1-5) POUR SÉLECTIONNER UN CANDIDAT OU 7 (MENU).*',
-      ],
-      nextState: state,
-    };
-  }
-
-  const nextPageIndex = pageIndex + 1;
-  const slice = getPageSlice(items, nextPageIndex);
+  const totalPages = Math.ceil(items.length / PAGE_SIZE);
+  const targetPage =
+    direction === 's'
+      ? Math.min(pageIndex + 1, totalPages - 1)
+      : Math.max(pageIndex - 1, 0);
+  const slice = getPageSlice(items, targetPage);
   const message = formatCandidaturesListPage(
     slice,
-    hasMoreItems(items, nextPageIndex),
+    hasMoreItems(items, targetPage),
+    targetPage,
+    totalPages,
   );
   return {
     reply: [message],
-    nextState: buildListState(state, payload, nextPageIndex),
+    nextState: buildListState(state, payload, targetPage),
   };
 }
 
@@ -238,7 +238,7 @@ function handleListSelection(
     : 0;
   const slice = getPageSlice(items, pageIndex);
 
-  if (!(choice >= 1 && choice <= PAGE_SIZE && choice <= slice.length)) {
+  if (!(choice >= 1 && choice <= slice.length)) {
     return {
       reply: [buildInvalidChoiceMessage(items, pageIndex)],
       nextState: state,
@@ -299,8 +299,8 @@ export async function runCandidaturesListFlow(
     });
   }
 
-  if (trimmed === '6') {
-    return handleNextPage(state, payload, items, pageIndex);
+  if (normalized === 's' || normalized === 'p') {
+    return handlePageNav(state, payload, items, pageIndex, normalized);
   }
 
   return handleListSelection(state, payload, items, pageIndex, trimmed, ctx);

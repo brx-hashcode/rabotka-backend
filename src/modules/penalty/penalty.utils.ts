@@ -11,7 +11,7 @@ export async function isWorkerHardBlocked(
 
   const count = await prisma.penalty.count({
     where: {
-      worker_id: workerId,
+      profile_id: workerId,
       paid_at: null,
       applied_at: { lte: threshold },
     },

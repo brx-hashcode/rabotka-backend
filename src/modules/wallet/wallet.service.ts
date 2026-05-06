@@ -14,6 +14,9 @@ import {
 } from '@prisma/client';
 import { generatePaymentReference } from '../../common/utils/payment-reference';
 import { SystemConfigService } from '../system-config/system-config.service';
+import { InvoiceService } from '../invoice/invoice.service';
+import { InvoiceReason, PaymentRequestStatus } from '@prisma/client';
+import { randomUUID } from 'crypto';
 import type { PayPenaltyDto } from './dto/pay-penalty.dto';
 
 export type AdminWalletTransactionItem = {
@@ -51,6 +54,7 @@ export class WalletService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly systemConfig: SystemConfigService,
+    private readonly invoiceService: InvoiceService,
   ) {}
 
   async getOrCreateSystemWallet(): Promise<{
@@ -270,7 +274,7 @@ export class WalletService {
     const penalty = await this.prisma.penalty.findUnique({
       where: { id: penaltyId },
     });
-    if (penalty?.worker_id !== profileId) {
+    if (penalty?.profile_id !== profileId) {
       throw new NotFoundException('Pénalité introuvable');
     }
 
@@ -336,6 +340,26 @@ export class WalletService {
       });
     });
 
+    // Create payment request and invoice outside transaction (non-critical)
+    const paymentRequest = await this.prisma.paymentRequest.create({
+      data: {
+        profile_id: profileId,
+        token: randomUUID(),
+        status: PaymentRequestStatus.APPROVED,
+        amount: penalty.amount,
+        description: `Pénalité réglée via wallet`,
+        payment_reference: reference,
+      },
+    });
+    await this.invoiceService.create({
+      profileId,
+      paymentRequestId: paymentRequest.id,
+      amount: Number(penalty.amount),
+      reason: InvoiceReason.PENALTY,
+      relatedEntityType: 'penalty',
+      relatedEntityId: penaltyId,
+    });
+
     return { reference };
   }
 
@@ -347,7 +371,7 @@ export class WalletService {
     const penalty = await this.prisma.penalty.findUnique({
       where: { id: penaltyId },
     });
-    if (penalty?.worker_id !== profileId) {
+    if (penalty?.profile_id !== profileId) {
       throw new NotFoundException('Pénalité introuvable');
     }
     if (penalty.paid_at) {
@@ -381,14 +405,31 @@ export class WalletService {
       });
       await tx.wallet.update({
         where: { id: systemWallet.id },
-        data: {
-          balance: { increment: penalty.amount },
-        },
+        data: { balance: { increment: penalty.amount } },
       });
       await tx.penalty.update({
         where: { id: penaltyId },
         data: { paid_at: new Date() },
       });
+    });
+
+    const paymentRequest = await this.prisma.paymentRequest.create({
+      data: {
+        profile_id: profileId,
+        token: randomUUID(),
+        status: PaymentRequestStatus.APPROVED,
+        amount: penalty.amount,
+        description: `Pénalité réglée`,
+        payment_reference: reference,
+      },
+    });
+    await this.invoiceService.create({
+      profileId,
+      paymentRequestId: paymentRequest.id,
+      amount: Number(penalty.amount),
+      reason: InvoiceReason.PENALTY,
+      relatedEntityType: 'penalty',
+      relatedEntityId: penaltyId,
     });
 
     return { reference };

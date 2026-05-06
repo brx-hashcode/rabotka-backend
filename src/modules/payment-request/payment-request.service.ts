@@ -940,12 +940,12 @@ export class PaymentRequestService {
 
       const newStatus = await this.prisma.$transaction(async (tx) => {
         await tx.penalty.updateMany({
-          where: { worker_id: workerId, paid_at: null },
+          where: { profile_id: workerId, paid_at: null },
           data: { paid_at: now },
         });
 
         const unpaidCount = await tx.penalty.count({
-          where: { worker_id: workerId, paid_at: null },
+          where: { profile_id: workerId, paid_at: null },
         });
 
         let status: BillingStatus;

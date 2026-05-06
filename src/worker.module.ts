@@ -17,6 +17,7 @@ import { WhatsAppOutboundProcessor } from './modules/whatsapp/whatsapp-outbound.
 import { getMailerTransportConfig } from './modules/mail/mailer-transport.config';
 import { WalletService } from './modules/wallet/wallet.service';
 import { SystemConfigService } from './modules/system-config/system-config.service';
+import { InvoiceService } from './modules/invoice/invoice.service';
 
 /**
  * Worker module for the queue worker process.
@@ -76,7 +77,7 @@ export class WorkerModule {
       {
         provide: WalletService,
         useFactory: (prisma: PrismaService) =>
-          new WalletService(prisma, null as unknown as SystemConfigService),
+          new WalletService(prisma, null as unknown as SystemConfigService, null as unknown as InvoiceService),
         inject: [PrismaService],
       },
       {

@@ -42,8 +42,8 @@ export class AdminPenaltyController {
   async createPenalty(
     @Body()
     body: {
-      workerId: string;
-      applicationId: string;
+      profileId: string;
+      applicationId?: string;
       amount: number;
       reason: string;
     },

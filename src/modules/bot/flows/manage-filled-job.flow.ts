@@ -24,7 +24,7 @@ const PAGE_SIZE = 5;
 
 function isMenuInput(trimmed: string, normalized: string): boolean {
   return (
-    trimmed === '7' ||
+    normalized === 'm' ||
     CMD_MENU.some((c) => normalized === c || normalized.startsWith(c + ' '))
   );
 }
@@ -34,13 +34,14 @@ function buildListPage(
   items: FilledJobListItem[],
   pageIndex: number,
 ): FlowResult {
+  const totalPages = Math.ceil(items.length / PAGE_SIZE);
   const slice = items.slice(
     pageIndex * PAGE_SIZE,
     pageIndex * PAGE_SIZE + PAGE_SIZE,
   );
   const hasMore = items.length > (pageIndex + 1) * PAGE_SIZE;
   return {
-    reply: [formatFilledJobsListPage(slice, hasMore)],
+    reply: [formatFilledJobsListPage(slice, hasMore, pageIndex, totalPages)],
     nextState: {
       ...state,
       payload: {
@@ -204,24 +205,23 @@ function handleListStep(
   items: FilledJobListItem[],
   pageIndex: number,
 ): FlowResult {
-  if (trimmed === '6') {
-    const hasMore = items.length > (pageIndex + 1) * PAGE_SIZE;
-    if (!hasMore) {
-      return {
-        reply: ['*RÉPONDEZ PAR UN NUMÉRO (1-5), 6 (VOIR PLUS) OU 7 (MENU).*'],
-        nextState: state,
-      };
-    }
+  const normalized = trimmed.toLowerCase();
+  const totalPages = Math.ceil(items.length / PAGE_SIZE);
+
+  if (normalized === 's' && pageIndex < totalPages - 1) {
     return buildListPage(state, items, pageIndex + 1);
   }
+  if (normalized === 'p' && pageIndex > 0) {
+    return buildListPage(state, items, pageIndex - 1);
+  }
 
-  const choice = /^[1-5]$/.test(trimmed) ? Number.parseInt(trimmed, 10) : 0;
+  const choice = /^\d+$/.test(trimmed) ? Number.parseInt(trimmed, 10) : 0;
   const slice = items.slice(
     pageIndex * PAGE_SIZE,
     pageIndex * PAGE_SIZE + PAGE_SIZE,
   );
 
-  if (choice >= 1 && choice <= PAGE_SIZE && choice <= slice.length) {
+  if (choice >= 1 && choice <= slice.length) {
     const item = slice[choice - 1];
     return {
       reply: [formatFilledJobDetail(item)],
@@ -237,7 +237,7 @@ function handleListStep(
   const hasMore = items.length > (pageIndex + 1) * PAGE_SIZE;
   return {
     reply: [
-      `*RÉPONDEZ PAR UN NUMÉRO (1-${n})${hasMore ? ', 6 (VOIR PLUS)' : ''} OU 7 (MENU).*`,
+      `*TAPEZ UN NUMÉRO (1-${n})${pageIndex > 0 ? ', P (page préc.)' : ''}${hasMore ? ', S (page suiv.)' : ''}, M (menu).*`,
     ],
     nextState: state,
   };

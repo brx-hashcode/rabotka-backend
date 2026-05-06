@@ -25,16 +25,31 @@ function makeCtx(
   return {
     applicationService: {
       markPenaltiesPaid,
+      getUnpaidPenalties: jest
+        .fn()
+        .mockResolvedValue({ count: 2, total: 10000, ids: ['p1', 'p2'] }),
     } as unknown as PayPenaltiesContext['applicationService'],
     walletService: {
       getProfileWalletBalance: jest.fn().mockResolvedValue(0),
       debitProfileWallet: jest.fn().mockResolvedValue(undefined),
+      getOrCreateSystemWallet: jest.fn().mockResolvedValue({ id: 'sys-wallet' }),
+      getOrCreateProfileWallet: jest.fn().mockResolvedValue({ id: 'profile-wallet' }),
     } as unknown as PayPenaltiesContext['walletService'],
     paymentService: {
       createPaymentUrl: jest
         .fn()
         .mockResolvedValue('https://pay.example.com/pay/token123'),
     } as unknown as PayPenaltiesContext['paymentService'],
+    invoiceService: {
+      create: jest.fn().mockResolvedValue({}),
+    } as unknown as PayPenaltiesContext['invoiceService'],
+    prisma: {
+      $transaction: jest.fn().mockResolvedValue([]),
+      walletTransaction: { create: jest.fn().mockResolvedValue({}) },
+      wallet: { update: jest.fn().mockResolvedValue({}) },
+      paymentRequest: { create: jest.fn().mockResolvedValue({ id: 'pr-1' }) },
+      payment: { create: jest.fn().mockResolvedValue({}) },
+    } as unknown as PayPenaltiesContext['prisma'],
   };
 }
 

@@ -68,8 +68,8 @@ export type ProfilePenaltyItem = {
   reason: string | null;
   appliedAt: Date;
   paidAt: Date | null;
-  applicationId: string;
-  jobOfferTitle?: string;
+  applicationId: string | null;
+  jobOfferTitle?: string | null;
 };
 
 export type ProfileApplicationItem = {
@@ -215,7 +215,7 @@ export class ProfileService {
     }
 
     const [unpaidPenaltiesCount, walletBalance] = await Promise.all([
-      this.prisma.penalty.count({ where: { worker_id: id, paid_at: null } }),
+      this.prisma.penalty.count({ where: { profile_id: id, paid_at: null } }),
       this.walletService.getProfileWalletBalance(id),
     ]);
 
@@ -358,7 +358,7 @@ export class ProfileService {
     profileId: string,
   ): Promise<ProfilePenaltyItem[]> {
     const penalties = await this.prisma.penalty.findMany({
-      where: { worker_id: profileId },
+      where: { profile_id: profileId },
       orderBy: { applied_at: 'desc' },
       include: {
         application: { include: { job_offer: true } },
@@ -371,7 +371,7 @@ export class ProfileService {
       appliedAt: p.applied_at,
       paidAt: p.paid_at,
       applicationId: p.application_id,
-      jobOfferTitle: p.application?.job_offer?.title,
+      jobOfferTitle: p.application?.job_offer?.title ?? null,
     }));
   }
 
@@ -379,7 +379,7 @@ export class ProfileService {
     const penalty = await this.prisma.penalty.findUnique({
       where: { id: penaltyId },
     });
-    if (penalty?.worker_id !== profileId) {
+    if (penalty?.profile_id !== profileId) {
       throw new NotFoundException('Pénalité introuvable');
     }
     if (penalty.paid_at) {
@@ -494,7 +494,7 @@ export class ProfileService {
     }
 
     const unpaidPenaltiesCount = await this.prisma.penalty.count({
-      where: { worker_id: id, paid_at: null },
+      where: { profile_id: id, paid_at: null },
     });
 
     const verifierIds = new Set<string>();

@@ -250,7 +250,7 @@ export async function seedJobOffersAndApplications(
         const isPaid = penaltyCount % 3 === 0;
         await prisma.penalty.create({
           data: {
-            worker_id: worker.id,
+            profile_id: worker.id,
             application_id: app.id,
             amount: 15,
             reason: PENALTY_REASONS[penaltyCount % PENALTY_REASONS.length],

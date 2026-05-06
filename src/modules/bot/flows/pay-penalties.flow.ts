@@ -3,13 +3,27 @@ import { FLOW_IDS, CMD_MENU } from '../bot.constants';
 import { menuMessage } from '../messages/menu.messages';
 import type { ApplicationService } from '../../application/application.service';
 import type { WalletService } from '../../wallet/wallet.service';
+import type { InvoiceService } from '../../invoice/invoice.service';
 import type { IPaymentUrlService } from '../types/payment-url.types';
-import { WalletTransactionType, PaymentRequestType } from '@prisma/client';
+import {
+  WalletTransactionType,
+  PaymentRequestType,
+  PaymentType,
+  PaymentMethod,
+  PaymentStatus,
+  PaymentRequestStatus,
+  InvoiceReason,
+} from '@prisma/client';
+import { generatePaymentReference } from '../../../common/utils/payment-reference';
+import { randomUUID } from 'crypto';
+import type { PrismaService } from '../../../common/services/prisma/prisma.service';
 
 export type PayPenaltiesContext = {
   applicationService: ApplicationService;
   walletService: WalletService;
   paymentService: IPaymentUrlService;
+  invoiceService: InvoiceService;
+  prisma: PrismaService;
 };
 
 type FlowResult = {
@@ -96,6 +110,9 @@ async function handleWalletConfirmationStep(
     };
   }
 
+  // Fetch penalty IDs before marking paid so we can link them to the invoice
+  const unpaid = await ctx.applicationService.getUnpaidPenalties(profile.id);
+
   await ctx.walletService.debitProfileWallet(
     profile.id,
     totalAmount,
@@ -104,6 +121,64 @@ async function handleWalletConfirmationStep(
     profile.id,
   );
   const result = await ctx.applicationService.markPenaltiesPaid(profile.id);
+
+  // Create Payment record, credit system wallet, and issue invoice
+  const reference = generatePaymentReference();
+  const token = randomUUID();
+
+  const systemWallet = await ctx.walletService.getOrCreateSystemWallet();
+  const profileWallet =
+    await ctx.walletService.getOrCreateProfileWallet(profile.id);
+
+  await ctx.prisma.$transaction([
+    ctx.prisma.walletTransaction.create({
+      data: {
+        wallet_id: systemWallet.id,
+        type: WalletTransactionType.CREDIT_PENALTY,
+        amount: totalAmount,
+        reference_type: 'penalty_batch',
+        reference_id: profile.id,
+      },
+    }),
+    ctx.prisma.wallet.update({
+      where: { id: systemWallet.id },
+      data: { balance: { increment: totalAmount } },
+    }),
+  ]);
+
+  const paymentRequest =
+    await ctx.prisma.paymentRequest.create({
+      data: {
+        profile_id: profile.id,
+        token,
+        status: PaymentRequestStatus.APPROVED,
+        amount: totalAmount,
+        description: `Paiement de ${result.paidCount} pénalité(s) (wallet interne)`,
+        payment_reference: reference,
+      },
+    });
+
+  await ctx.prisma.payment.create({
+    data: {
+      type: PaymentType.PENALTY,
+      profile_id: profile.id,
+      amount: totalAmount,
+      payment_method: PaymentMethod.WALLET,
+      transaction_id: reference,
+      status: PaymentStatus.COMPLETED,
+      paid_at: new Date(),
+      description: `Paiement de ${result.paidCount} pénalité(s) via wallet`,
+    },
+  });
+
+  await ctx.invoiceService.create({
+    profileId: profile.id,
+    paymentRequestId: paymentRequest.id,
+    amount: totalAmount,
+    reason: InvoiceReason.PENALTY,
+    relatedEntityType: 'penalty_batch',
+    relatedEntityId: unpaid.ids[0] ?? profile.id,
+  });
 
   return {
     reply: [

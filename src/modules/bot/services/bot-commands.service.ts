@@ -69,7 +69,7 @@ export class BotCommandsService {
       status: o.status,
     }));
     const hasMore = !!nextCursor;
-    const message = formatOfferListCompact(offers, hasMore);
+    const message = formatOfferListCompact(offers, hasMore, 0);
     return {
       message,
       offerIds: data.map((o) => o.id),
@@ -180,9 +180,11 @@ export class BotCommandsService {
     if (total === 0) {
       return "*VOUS N'AVEZ PUBLIÉ AUCUNE OFFRE. TAPEZ 'MENU' POUR REVENIR.*";
     }
+    const totalPages = Math.ceil(total / PAGE_SIZE);
     const start = page * PAGE_SIZE;
     const hasMore = start + PAGE_SIZE < total;
-    const lines = [`*MES OFFRES PUBLIÉES (${total})*`, ''];
+    const pageLabel = totalPages > 1 ? ` — page ${page + 1}/${totalPages}` : '';
+    const lines = [`*MES OFFRES PUBLIÉES (${total})${pageLabel}*`, ''];
     pageOffers.forEach((o, i) => {
       const num = start + i + 1;
       const title =
@@ -202,10 +204,11 @@ export class BotCommandsService {
         '',
       );
     });
-    if (hasMore) {
-      lines.push(`${start + PAGE_SIZE + 1} - Voir plus`, '');
-    }
-    lines.push('Tapez *Menu* pour revenir au menu.');
+    const actions: string[] = [];
+    if (page > 0) actions.push('P- Page précédente');
+    if (hasMore) actions.push('S- Page suivante');
+    actions.push('M- Menu principal');
+    lines.push(...actions);
     return lines.join('\n');
   }
 
@@ -366,7 +369,7 @@ export class BotCommandsService {
     const [applications, penalties] = await Promise.all([
       this.applicationService.findByWorker(profile.id, { limit: 500 }),
       this.prisma.penalty.findMany({
-        where: { worker_id: profile.id },
+        where: { profile_id: profile.id },
         orderBy: { applied_at: 'desc' },
         include: {
           application: { include: { job_offer: true } },
@@ -412,7 +415,7 @@ export class BotCommandsService {
   async penaltyHistory(profile: BotProfile): Promise<string> {
     const [penalties, applications] = await Promise.all([
       this.prisma.penalty.findMany({
-        where: { worker_id: profile.id },
+        where: { profile_id: profile.id },
         orderBy: { applied_at: 'desc' },
         include: {
           application: { include: { job_offer: true } },

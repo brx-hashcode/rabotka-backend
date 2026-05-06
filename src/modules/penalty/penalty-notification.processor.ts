@@ -88,7 +88,7 @@ export class PenaltyNotificationProcessor implements OnModuleInit {
     const penalty = await this.prisma.penalty.findUnique({
       where: { id: penaltyId },
       include: {
-        worker: { select: { phone: true, first_name: true } },
+        profile: { select: { phone: true, first_name: true } },
       },
     });
 
@@ -115,20 +115,20 @@ export class PenaltyNotificationProcessor implements OnModuleInit {
     }
 
     const totalUnpaid = await this.prisma.penalty.aggregate({
-      where: { worker_id: penalty.worker_id, paid_at: null },
+      where: { profile_id: penalty.profile_id, paid_at: null },
       _sum: { amount: true },
     });
 
     const dayNumber = penalty.notification_count + 1;
     const text = formatPenaltyReminderDay({
-      firstName: penalty.worker.first_name ?? '',
+      firstName: penalty.profile.first_name ?? '',
       amount: Number(penalty.amount),
       dayNumber,
       totalUnpaid: Number(totalUnpaid._sum.amount ?? penalty.amount),
     });
 
     try {
-      await this.botNotification.sendMessage(penalty.worker.phone, text);
+      await this.botNotification.sendMessage(penalty.profile.phone, text);
 
       await this.prisma.penalty.update({
         where: { id: penaltyId },
@@ -139,7 +139,7 @@ export class PenaltyNotificationProcessor implements OnModuleInit {
       });
 
       this.logger.log(
-        `Penalty reminder day ${dayNumber} sent for penalty ${penaltyId} to worker ${penalty.worker_id}`,
+        `Penalty reminder day ${dayNumber} sent for penalty ${penaltyId} to profile ${penalty.profile_id}`,
       );
     } catch (err) {
       this.logger.error(

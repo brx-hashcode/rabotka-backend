@@ -3,7 +3,7 @@ services:
     image: postgres:17-alpine
     container_name: rabotka_postgres
     ports:
-      - "5433:5432"
+      - "5800:5432"
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
