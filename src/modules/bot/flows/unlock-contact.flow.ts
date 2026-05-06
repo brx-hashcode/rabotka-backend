@@ -33,7 +33,7 @@ type StepArgs = {
   attemptId: string;
   otherName: string;
   amount: number;
-  expiryHours: number;
+  expiresAt: Date;
   ctx: UnlockContactContext;
 };
 
@@ -51,7 +51,7 @@ async function handleStep1(args: StepArgs): Promise<FlowResult> {
     attemptId,
     otherName,
     amount,
-    expiryHours,
+    expiresAt,
     ctx,
   } = args;
 
@@ -81,7 +81,7 @@ async function handleStep1(args: StepArgs): Promise<FlowResult> {
       profile,
       attemptId,
       otherName,
-      expiryHours,
+      expiresAt,
       ctx,
     });
   }
@@ -92,7 +92,7 @@ async function handleStep1(args: StepArgs): Promise<FlowResult> {
       profile,
       otherName,
       amount,
-      expiryHours,
+      expiresAt,
       attemptId,
       ctx,
     });
@@ -100,9 +100,16 @@ async function handleStep1(args: StepArgs): Promise<FlowResult> {
 
   const laterOption = hasFunds ? '3' : '2';
   if (trimmed === laterOption) {
+    const deadline = expiresAt.toLocaleString('fr-FR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
     return {
       reply: [
-        `D'accord. Tapez *contact* quand vous êtes prêt(e) à débloquer ce contact.\n\nLa demande expire dans *${expiryHours}h*. Passé ce délai, si l'autre partie n'a pas payé, votre paiement sera recrédité sous forme de *crédit portefeuille*.`,
+        `D'accord. Tapez *contact* quand vous êtes prêt(e) à débloquer ce contact.\n\nLa demande expire le *${deadline}*. Passé ce délai, si l'autre partie n'a pas payé, votre paiement sera recrédité sous forme de *crédit portefeuille*.`,
       ],
       clearState: true,
     };
@@ -125,10 +132,10 @@ async function handleWalletCredit(args: {
   profile: BotProfile;
   attemptId: string;
   otherName: string;
-  expiryHours: number;
+  expiresAt: Date;
   ctx: UnlockContactContext;
 }): Promise<FlowResult> {
-  const { profile, attemptId, otherName, expiryHours, ctx } = args;
+  const { profile, attemptId, otherName, expiresAt, ctx } = args;
   try {
     const result = await ctx.contactUnlockService.payUnlock(
       attemptId,
@@ -171,7 +178,7 @@ async function handleWalletCredit(args: {
         formatContactUnlockPending({
           waitingFor,
           otherName,
-          expiryHours,
+          expiresAt,
         }),
       ],
       clearState: true,
@@ -186,11 +193,11 @@ async function handleMobileMoney(args: {
   profile: BotProfile;
   otherName: string;
   amount: number;
-  expiryHours: number;
+  expiresAt: Date;
   attemptId: string;
   ctx: UnlockContactContext;
 }): Promise<FlowResult> {
-  const { profile, otherName, amount, expiryHours, attemptId, ctx } = args;
+  const { profile, otherName, amount, expiresAt, attemptId, ctx } = args;
   const paymentUrl = await ctx.paymentService.createPaymentUrl(
     profile.id,
     amount,
@@ -209,7 +216,7 @@ async function handleMobileMoney(args: {
         ``,
         `✅ Une fois le paiement confirmé des deux côtés (vous et *${otherName}*), vous recevrez les coordonnées.`,
         '',
-        `Si une partie ne paie pas après *${expiryHours}h*, votre paiement sera reversé vers votre wallet interne.`,
+        `Si l'autre partie ne paie pas avant le *${new Date(expiresAt).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}*, votre paiement sera reversé vers votre wallet interne.`,
       ].join('\n'),
     ],
     clearState: true,
@@ -235,7 +242,7 @@ export async function runUnlockContactFlow(
   const attemptId = payload.attemptId as string | undefined;
   const otherName = (payload.otherName as string) ?? 'votre contact';
   const amount = (payload.amount as number) ?? 0;
-  const expiryHours = (payload.expiryHours as number) ?? 48;
+  const expiresAt = new Date((payload.expiresAt as string) ?? Date.now());
 
   if (!attemptId) {
     return {
@@ -255,7 +262,7 @@ export async function runUnlockContactFlow(
     attemptId,
     otherName,
     amount,
-    expiryHours,
+    expiresAt,
     ctx,
   };
 
@@ -268,7 +275,7 @@ export function getUnlockContactInitialState(params: {
   attemptId: string;
   otherName: string;
   amount: number;
-  expiryHours?: number;
+  expiresAt: Date | string;
 }): BotState {
   return {
     flowId: FLOW_IDS.UNLOCK_CONTACT,
@@ -277,7 +284,7 @@ export function getUnlockContactInitialState(params: {
       attemptId: params.attemptId,
       otherName: params.otherName,
       amount: params.amount,
-      expiryHours: params.expiryHours ?? 48,
+      expiresAt: new Date(params.expiresAt).toISOString(),
     },
     updatedAt: new Date().toISOString(),
   };

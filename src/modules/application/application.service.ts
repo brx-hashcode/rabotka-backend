@@ -186,7 +186,7 @@ export class ApplicationService {
 
     const unpaidPenaltiesCount = await this.prisma.penalty.count({
       where: {
-        worker_id: workerId,
+        profile_id: workerId,
         paid_at: null,
       },
     });
@@ -595,7 +595,7 @@ export class ApplicationService {
         await tx.penalty.upsert({
           where: { application_id: applicationId },
           create: {
-            worker_id: workerId,
+            profile_id: workerId,
             application_id: applicationId,
             amount: fees.lateCancellationPenaltyFcfa,
             reason:
@@ -639,7 +639,7 @@ export class ApplicationService {
     // Suspension check after penalty creation
     if (applyPenalty) {
       const unpaidCount = await this.prisma.penalty.count({
-        where: { worker_id: workerId, paid_at: null },
+        where: { profile_id: workerId, paid_at: null },
       });
       if (unpaidCount >= PENALTY_SUSPENSION_THRESHOLD) {
         const workerProfile = await this.prisma.profile.update({
@@ -1011,7 +1011,7 @@ export class ApplicationService {
   ): Promise<void> {
     const db = tx ?? this.prisma;
     const unpaidCount = await db.penalty.count({
-      where: { worker_id: workerId, paid_at: null },
+      where: { profile_id: workerId, paid_at: null },
     });
     const fees = await this.systemConfigService.getFees();
     let newStatus: BillingStatus;
@@ -1032,7 +1032,7 @@ export class ApplicationService {
     workerId: string,
   ): Promise<{ count: number; total: number; ids: string[] }> {
     const penalties = await this.prisma.penalty.findMany({
-      where: { worker_id: workerId, paid_at: null },
+      where: { profile_id: workerId, paid_at: null },
       select: { id: true, amount: true },
     });
     return {
@@ -1052,7 +1052,7 @@ export class ApplicationService {
     const now = new Date();
     await this.prisma.$transaction([
       this.prisma.penalty.updateMany({
-        where: { worker_id: workerId, paid_at: null },
+        where: { profile_id: workerId, paid_at: null },
         data: { paid_at: now },
       }),
     ]);

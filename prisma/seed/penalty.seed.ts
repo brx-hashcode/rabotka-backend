@@ -61,7 +61,7 @@ export async function seedPenalties(prisma: PrismaClient): Promise<void> {
       }),
       prisma.penalty.create({
         data: {
-          worker_id: app.worker_id,
+          profile_id: app.worker_id,
           application_id: app.id,
           amount,
           reason: PENALTY_REASONS[i % PENALTY_REASONS.length],

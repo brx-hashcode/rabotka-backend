@@ -123,7 +123,7 @@ export async function seedProfiles(prisma: PrismaClient): Promise<void> {
 
   const penalty1 = await prisma.penalty.create({
     data: {
-      worker_id: worker.id,
+      profile_id: worker.id,
       application_id: application2.id,
       amount: 20,
       reason: 'Absence non justifiée au poste.',
@@ -136,8 +136,7 @@ export async function seedProfiles(prisma: PrismaClient): Promise<void> {
 
   const penalty2 = await prisma.penalty.create({
     data: {
-      worker_id: worker.id,
-      application_id: application2.id,
+      profile_id: worker.id,
       amount: 10,
       reason: 'Retard supérieur à 30 minutes.',
       applied_at: new Date(Date.now() - 86400000),

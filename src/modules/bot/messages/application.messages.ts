@@ -15,28 +15,25 @@ export type CandidatureListItem = {
 export function formatCandidaturesListPage(
   items: CandidatureListItem[],
   hasMore: boolean,
+  page = 0,
+  totalPages = 1,
 ): string {
-  const lines = ['*CANDIDATURES REÇUES*', ''];
+  const pageLabel = totalPages > 1 ? ` (page ${page + 1}/${totalPages})` : '';
+  const lines = [`*CANDIDATURES REÇUES*${pageLabel}`, ''];
   items.forEach((app, i) => {
-    const num = i + 1;
     const offerLine = app.offerTitle ? `    Offre: ${app.offerTitle}` : '';
     lines.push(
-      `${num}. ${app.firstName} ${app.lastName}`,
+      `${i + 1}. ${app.firstName} ${app.lastName}`,
       `    Score: ${app.score}/100`,
       ...(offerLine ? [offerLine] : []),
     );
   });
   lines.push('');
-  if (hasMore) {
-    lines.push(
-      '6- Voir plus',
-      '7- Menu',
-      '',
-      "Veuillez taper un numéro (1-5), 6- pour la suite, ou 7- / 'Menu' pour revenir au menu",
-    );
-  } else {
-    lines.push("Veuillez taper un numéro ou 'Menu' pour revenir au menu");
-  }
+  const actions: string[] = [];
+  if (page > 0) actions.push('P- Page précédente');
+  if (hasMore) actions.push('S- Page suivante');
+  actions.push('M- Menu principal');
+  lines.push(...actions, '', 'Tapez un numéro pour voir le détail.');
   return lines.join('\n');
 }
 
@@ -464,8 +461,11 @@ export type FilledJobListItem = {
 export function formatFilledJobsListPage(
   items: FilledJobListItem[],
   hasMore: boolean,
+  page = 0,
+  totalPages = 1,
 ): string {
-  const lines = ['*MISSIONS POURVUES*', ''];
+  const pageLabel = totalPages > 1 ? ` (page ${page + 1}/${totalPages})` : '';
+  const lines = [`*MISSIONS POURVUES*${pageLabel}`, ''];
   if (items.length === 0) {
     lines.push(
       "Aucune mission pourvue pour le moment. Tapez 'Menu' pour revenir.",
@@ -473,22 +473,19 @@ export function formatFilledJobsListPage(
     return lines.join('\n');
   }
   items.forEach((item, i) => {
-    const num = i + 1;
-    const flowLabel = formatPaymentFlow(item.payment_flow ?? '');
     lines.push(
-      `${num}. ${item.title}`,
+      `${i + 1}. ${item.title}`,
       `    Worker: ${item.workerName}`,
       `    Date: ${formatDatePublic(item.scheduled_at)}`,
       `    Montant: ${formatAmount(item.amount, item.payment_flow)}`,
       '',
     );
   });
-  if (hasMore) {
-    lines.push('6- Voir plus', '7- Menu', '');
-  }
-  lines.push(
-    "Tapez un numéro pour sélectionner une mission, ou 'Menu' pour revenir.",
-  );
+  const actions: string[] = [];
+  if (page > 0) actions.push('P- Page précédente');
+  if (hasMore) actions.push('S- Page suivante');
+  actions.push('M- Menu principal');
+  lines.push(...actions, '', 'Tapez un numéro pour sélectionner une mission.');
   return lines.join('\n');
 }
 

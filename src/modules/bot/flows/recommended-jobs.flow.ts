@@ -21,7 +21,7 @@ export type FlowResult = {
   clearState?: boolean;
 };
 
-const PAGE_SIZE = 5;
+const PAGE_SIZE = 3;
 type RecommendedStep = 'list' | 'detail';
 
 function toOfferListItem(o: {
@@ -83,6 +83,19 @@ function buildDetailState(
   };
 }
 
+function buildPagedListReply(
+  offers: OfferListItem[],
+  page: number,
+): { reply: string[]; page: number } {
+  const totalPages = Math.ceil(offers.length / PAGE_SIZE);
+  const safePage = Math.max(0, Math.min(page, totalPages - 1));
+  const pageOffers = offers.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
+  return {
+    reply: [formatRecommendedList(pageOffers, safePage, totalPages)],
+    page: safePage,
+  };
+}
+
 async function handleRecommendedJobsListStep(
   state: BotState,
   payload: Record<string, unknown>,
@@ -92,22 +105,38 @@ async function handleRecommendedJobsListStep(
   ctx: RecommendedJobsContext,
   goToMenu: () => FlowResult,
 ): Promise<FlowResult> {
-  if (trimmedInput === '7') return goToMenu();
+  const normalized = trimmedInput.toLowerCase();
+  if (normalized === 'm' || normalized === 'menu') return goToMenu();
 
-  const maxChoice = Math.min(offers.length, PAGE_SIZE);
-  const choiceRe = new RegExp(`^[1-${maxChoice}]$`);
-  const choice = choiceRe.test(trimmedInput)
-    ? Number.parseInt(trimmedInput, 10)
-    : 0;
+  const currentPage = typeof payload.page === 'number' ? payload.page : 0;
+  const totalPages = Math.ceil(offers.length / PAGE_SIZE);
 
-  if (choice < 1 || choice > maxChoice) {
+  // Pagination navigation
+  if (normalized === 's' && currentPage < totalPages - 1) {
+    const { reply, page } = buildPagedListReply(offers, currentPage + 1);
     return {
-      reply: [formatRecommendedList(offers.slice(0, PAGE_SIZE))],
-      nextState: state,
+      reply,
+      nextState: buildListState(state, { ...payload, page }),
+    };
+  }
+  if (normalized === 'p' && currentPage > 0) {
+    const { reply, page } = buildPagedListReply(offers, currentPage - 1);
+    return {
+      reply,
+      nextState: buildListState(state, { ...payload, page }),
     };
   }
 
-  const item = offers[choice - 1];
+  const pageOffers = offers.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);
+  const maxChoice = pageOffers.length;
+  const choice = /^\d+$/.test(trimmedInput) ? Number.parseInt(trimmedInput, 10) : 0;
+
+  if (choice < 1 || choice > maxChoice) {
+    const { reply } = buildPagedListReply(offers, currentPage);
+    return { reply, nextState: state };
+  }
+
+  const item = pageOffers[choice - 1];
 
   // Fetch fresh detail for the full description
   const fresh = await ctx.jobOfferService.findById(item.id);
@@ -174,8 +203,10 @@ async function handleRecommendedJobsDetailStep(
       .record(profile.id, selectedOfferId, 'skip')
       .catch(() => undefined);
     const offers = (payload.offers as OfferListItem[] | undefined) ?? [];
+    const currentPage = typeof payload.page === 'number' ? payload.page : 0;
+    const { reply } = buildPagedListReply(offers, currentPage);
     return {
-      reply: [formatRecommendedList(offers.slice(0, PAGE_SIZE))],
+      reply,
       nextState: buildListState(state, payload),
     };
   }

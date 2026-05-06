@@ -249,12 +249,15 @@ export class ContactUnlockService {
 
     const jobOffer = await db.jobOffer.findUnique({
       where: { id: app.job_offer_id },
-      select: { quantity: true, employer_unlock_paid: true },
+      select: { quantity: true, employer_unlock_paid: true, scheduled_at: true },
     });
     if (!jobOffer) throw new NotFoundException('Offre introuvable');
 
     const fees = await this.systemConfig.getContactUnlockFees();
-    const expiresAt = new Date(Date.now() + fees.expiryHours * 60 * 60 * 1000);
+    // Target: 2h before the job starts. If that's less than 2h away, fall back to now + 4h.
+    const twoHBeforeJob = new Date(jobOffer.scheduled_at.getTime() - 2 * 60 * 60 * 1000);
+    const minExpiry = new Date(Date.now() + 2 * 60 * 60 * 1000);
+    const expiresAt = twoHBeforeJob > minExpiry ? twoHBeforeJob : new Date(Date.now() + 4 * 60 * 60 * 1000);
 
     const isMultiPerson = (jobOffer.quantity ?? 1) > 1;
     const employerAlreadyPaid = isMultiPerson && jobOffer.employer_unlock_paid;

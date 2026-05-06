@@ -8,6 +8,7 @@ import type { BotCommandsService } from '../services/bot-commands.service';
 import type { ContactUnlockService } from '../../contact-unlock/contact-unlock.service';
 import type { WalletService } from '../../wallet/wallet.service';
 import type { InterestSignalService } from '../../interest-graph/interest-signal.service';
+import type { InvoiceService } from '../../invoice/invoice.service';
 import type { BotState } from './bot-state.types';
 
 /**
@@ -25,6 +26,7 @@ export type FlowContext = {
   contactUnlockService: ContactUnlockService;
   walletService: WalletService;
   interestSignalService: InterestSignalService;
+  invoiceService: InvoiceService;
 };
 
 export type FlowResult = {

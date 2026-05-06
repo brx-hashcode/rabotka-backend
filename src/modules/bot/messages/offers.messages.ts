@@ -32,8 +32,8 @@ function formatAmount(amount: number | null, flow: string | null): string {
   return `${amount.toLocaleString('fr-FR')} FCFA${flowSuffix}`;
 }
 
-function formatDate(d: Date): string {
-  return d.toLocaleDateString('fr-FR', {
+function formatDate(d: Date | string): string {
+  return new Date(d).toLocaleDateString('fr-FR', {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
@@ -78,14 +78,16 @@ export function formatOfferList(
   return lines.join('\n');
 }
 
-/** Compact numbered list for list-offers flow: two lines per offer, 1-5 select, 6 Voir plus, 7 Menu */
+/** Compact numbered list for list-offers flow */
 export function formatOfferListCompact(
   offers: OfferListItem[],
   hasMore: boolean,
+  page = 0,
+  totalPages = 1,
 ): string {
-  const lines = ['*OFFRES DISPONIBLES*', ''];
+  const pageLabel = totalPages > 1 ? ` (page ${page + 1}/${totalPages})` : '';
+  const lines = [`*OFFRES DISPONIBLES*${pageLabel}`, ''];
   offers.forEach((o, i) => {
-    const num = i + 1;
     const qty = o.quantity ?? 1;
     const filled = o.acceptedCount ?? 0;
     const remaining = Math.max(0, qty - filled);
@@ -98,7 +100,7 @@ export function formatOfferListCompact(
     const shortAddr =
       o.address.length > 40 ? o.address.slice(0, 40) + '…' : o.address;
     lines.push(
-      `${num}- *${o.title}*`,
+      `${i + 1}- *${o.title}*`,
       `    • Montant : ${formatAmount(o.amount, o.payment_flow)}`,
       `    • Date : ${formatDate(o.scheduled_at)}`,
       `    • Places : ${spotsLabel}`,
@@ -106,18 +108,11 @@ export function formatOfferListCompact(
       '',
     );
   });
-  lines.push('');
-  if (hasMore) {
-    lines.push(
-      `${offers.length + 1} - Voir plus`,
-      '',
-      `Tapez un numéro (1-${offers.length}) pour sélectionner une offre, ${offers.length + 1} pour voir plus, ou *Menu* pour revenir au menu.`,
-    );
-  } else {
-    lines.push(
-      'Tapez un numéro pour sélectionner une offre ou *Menu* pour revenir au menu.',
-    );
-  }
+  const actions: string[] = [];
+  if (page > 0) actions.push('P- Page précédente');
+  if (hasMore) actions.push('S- Page suivante');
+  actions.push('M- Menu principal');
+  lines.push(...actions, '', 'Tapez un numéro pour sélectionner une offre.');
   return lines.join('\n');
 }
 
@@ -163,10 +158,14 @@ function formatEmployerScore(score: number | null | undefined): string {
   return `*Fiabilité employeur*: ${score}/100 (${employerScoreLabel(score)})`;
 }
 
-/** Numbered list for recommended-jobs flow: shows up to 5 offers, 7 = menu */
-export function formatRecommendedList(offers: OfferListItem[]): string {
-  const lines = ['*OFFRES RECOMMANDÉES*', ''];
-  offers.forEach((o, i) => {
+/** Numbered list for recommended-jobs flow with pagination support */
+export function formatRecommendedList(
+  pageOffers: OfferListItem[],
+  page: number,
+  totalPages: number,
+): string {
+  const lines = [`*OFFRES RECOMMANDÉES* (page ${page + 1}/${totalPages})`, ''];
+  pageOffers.forEach((o, i) => {
     const qty = o.quantity ?? 1;
     const filled = o.acceptedCount ?? 0;
     const remaining = Math.max(0, qty - filled);
@@ -187,9 +186,11 @@ export function formatRecommendedList(offers: OfferListItem[]): string {
       '',
     );
   });
-  lines.push(
-    `Tapez un numéro pour voir le détail ou *Menu* pour revenir au menu.`,
-  );
+  const actions: string[] = [];
+  if (page > 0) actions.push('P- Page précédente');
+  if (page < totalPages - 1) actions.push('S- Page suivante');
+  actions.push('M- Menu principal');
+  lines.push(...actions, '', 'Tapez un numéro pour voir le détail.');
   return lines.join('\n');
 }
 

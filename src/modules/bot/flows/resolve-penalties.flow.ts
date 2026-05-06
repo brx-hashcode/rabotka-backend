@@ -40,7 +40,7 @@ export async function runResolvePenaltiesFlow(
 
   if (state.step === 1 || !trimmed) {
     const penalties = await ctx.prisma.penalty.findMany({
-      where: { worker_id: profile.id, paid_at: null },
+      where: { profile_id: profile.id, paid_at: null },
       select: { id: true, amount: true, reason: true, applied_at: true },
       orderBy: { applied_at: 'desc' },
     });

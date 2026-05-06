@@ -799,7 +799,7 @@ export async function seedRecommendationTest(
 
   await prisma.penalty.create({
     data: {
-      worker_id: w11.id,
+      profile_id: w11.id,
       application_id: appW11a.id,
       amount: 2500,
       reason: 'Annulation tardive à moins de 4h du début de mission.',
@@ -823,7 +823,7 @@ export async function seedRecommendationTest(
 
   await prisma.penalty.create({
     data: {
-      worker_id: w11.id,
+      profile_id: w11.id,
       application_id: appW11b.id,
       amount: 3500,
       reason: 'Absence non justifiée au poste.',
@@ -851,7 +851,7 @@ export async function seedRecommendationTest(
 
   await prisma.penalty.create({
     data: {
-      worker_id: w12.id,
+      profile_id: w12.id,
       application_id: appW12a.id,
       amount: 5000,
       reason: 'Annulation le matin même de la mission.',
@@ -875,7 +875,7 @@ export async function seedRecommendationTest(
 
   await prisma.penalty.create({
     data: {
-      worker_id: w12.id,
+      profile_id: w12.id,
       application_id: appW12b.id,
       amount: 5000,
       reason: 'No-show le jour de la mission.',
@@ -899,7 +899,7 @@ export async function seedRecommendationTest(
 
   await prisma.penalty.create({
     data: {
-      worker_id: w12.id,
+      profile_id: w12.id,
       application_id: appW12c.id,
       amount: 7500,
       reason: 'Abandon de poste en cours de mission.',

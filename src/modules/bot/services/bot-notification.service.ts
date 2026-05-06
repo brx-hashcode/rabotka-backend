@@ -174,7 +174,7 @@ export class BotNotificationService {
           attemptId: attempt.id,
           otherName: employerName,
           amount: fees.workerFeeFcfa,
-          expiryHours: fees.expiryHours,
+          expiresAt: attempt.expires_at,
         });
         await this.botState.setIfFlowAbsentOrMatches(
           app.worker_id,

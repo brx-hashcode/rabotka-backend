@@ -188,7 +188,7 @@ async function tryHandleStep1WaitingPaymentPay(params: {
     attemptId: attempt.id,
     otherName,
     amount,
-    expiryHours: fees.expiryHours,
+    expiresAt: attempt.expires_at,
   });
   const result = await runUnlockContactFlow(unlockState, '', profile, {
     contactUnlockService: ctx.contactUnlockService,
