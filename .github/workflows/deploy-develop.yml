@@ -150,6 +150,7 @@ jobs:
           SMTP_MOCK=false
           SMTP_FROM_NAME=Rabotka
           PDF_OWNER_PASSWORD=password
+          PORT=$(echo "$VAULT_SECRET" | jq -r '.PORT')
           APP_ENV=develop
           API_DOMAIN=api-rabotka.${{ secrets.INFRA_DOMAIN }}
           # --- SystemConfig-overridden placeholders ---
@@ -166,8 +167,8 @@ jobs:
           TWILIO_WHATSAPP_FROM=placeholder
           TWILIO_SMS_FROM=placeholder
           TWILIO_WEBHOOK_BASE_URL=placeholder
-          QDRANT_URL=placeholder
-          QDRANT_API_KEY=placeholder
+          QDRANT_URL=$(echo "$VAULT_SECRET" | jq -r '.QDRANT_URL')
+          QDRANT_API_KEY=$(echo "$VAULT_SECRET" | jq -r '.QDRANT_API_KEY')
           EOF
           sed -i 's/^[[:space:]]*//' /tmp/deploy.env
 
