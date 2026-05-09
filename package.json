@@ -29,6 +29,7 @@
     "prisma:restore:wallet-transactions": "tsx prisma/restore-wallet-transactions.ts",
     "db:reset": "docker exec rabotka_postgres psql -U postgres -c \"DROP DATABASE IF EXISTS rabotka;\" && docker exec rabotka_postgres psql -U postgres -c \"CREATE DATABASE rabotka;\" && pnpm prisma:migrate:deploy",
     "db:seed": "prisma db seed",
+    "db:seed:prod": "tsx prisma/seed-prod.ts",
     "db:seed:reco-test": "tsx prisma/seed-reco-test.ts"
   },
   "prisma": {
