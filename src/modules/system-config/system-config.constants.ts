@@ -258,6 +258,13 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     label: 'Cloudflare R2 – Secret Access Key',
     isSecret: true,
   },
+  {
+    key: 'storage.cloudflare.public_base_url',
+    value: '',
+    category: ConfigCategory.STORAGE,
+    label: 'Cloudflare R2 – Public Base URL (ex: https://pub-xxx.r2.dev)',
+    isSecret: false,
+  },
   // Cloudinary
   {
     key: 'storage.cloudinary.cloud_name',
@@ -373,6 +380,7 @@ export const STORAGE_ENV_OVERRIDES: Record<string, Record<string, string>> = {
     CLOUDFLARE_BUCKET_NAME: 'storage.cloudflare.bucket_name',
     CLOUDFLARE_ACCESS_KEY_ID: 'storage.cloudflare.access_key_id',
     CLOUDFLARE_SECRET_ACCESS_KEY: 'storage.cloudflare.secret_access_key',
+    CLOUDFLARE_PUBLIC_BASE_URL: 'storage.cloudflare.public_base_url',
   },
   CLOUDINARY: {
     CLOUDINARY_CLOUD_NAME: 'storage.cloudinary.cloud_name',
