@@ -36,11 +36,15 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
         tini \
-        postgresql-client && \
+        postgresql-client \
+        libreoffice-writer \
+        fonts-liberation \
+        fonts-dejavu-core \
+        fontconfig && \
+    fc-cache -f && \
     rm -rf /var/lib/apt/lists/* && \
-    npm install -g pnpm
-
-RUN groupadd -r nestjs && \
+    npm install -g pnpm && \
+    groupadd -r nestjs && \
     useradd -r -g nestjs nestjs && \
     mkdir -p /home/nestjs/.local/share/pnpm
 
@@ -57,7 +61,10 @@ RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh && \
 ENV NODE_ENV=production \
     PORT=3000 \
     NODE_OPTIONS="--max-old-space-size=2048" \
-    PNPM_HOME="/home/nestjs/.local/share/pnpm"
+    PNPM_HOME="/home/nestjs/.local/share/pnpm" \
+    HOME=/tmp \
+    SAL_USE_VCLPLUGIN=svp \
+    DISPLAY=""
 
 RUN chown -R nestjs:nestjs /app /home/nestjs
 
