@@ -277,6 +277,7 @@ export class QdrantService implements OnModuleInit {
     );
     if (exists) return;
 
+    try {
     await this.client.createCollection(collectionName, {
       vectors: {
         dense: {
@@ -290,8 +291,11 @@ export class QdrantService implements OnModuleInit {
         },
       },
     });
-
     this.logger.log(`Collection created: ${collectionName}`);
+    } catch (err: any) {
+      if (err?.status === 409) return; // already exists — concurrent creation race
+      throw err;
+    }
   }
 
   async ensureDenseCollection(collectionName: string): Promise<void> {
@@ -302,13 +306,17 @@ export class QdrantService implements OnModuleInit {
     );
     if (exists) return;
 
-    await this.client.createCollection(collectionName, {
-      vectors: {
-        dense: { size: DENSE_DIM, distance: 'Cosine' },
-      },
-    });
-
-    this.logger.log(`Dense collection created: ${collectionName}`);
+    try {
+      await this.client.createCollection(collectionName, {
+        vectors: {
+          dense: { size: DENSE_DIM, distance: 'Cosine' },
+        },
+      });
+      this.logger.log(`Dense collection created: ${collectionName}`);
+    } catch (err: any) {
+      if (err?.status === 409) return; // already exists — concurrent creation race
+      throw err;
+    }
   }
 
   async upsertDense(
