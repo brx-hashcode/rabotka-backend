@@ -149,6 +149,7 @@ jobs:
           PDF_OWNER_PASSWORD=password
           PORT=$(echo "$VAULT_SECRET" | jq -r '.PORT')
           APP_ENV=develop
+          ARCJET_ENV=development
           API_DOMAIN=api-rabotka.${{ secrets.INFRA_DOMAIN }}
           # --- SystemConfig-overridden placeholders ---
           DRIVER=S3
