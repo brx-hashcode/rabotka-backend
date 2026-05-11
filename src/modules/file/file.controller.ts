@@ -78,7 +78,8 @@ export class FileController {
     name: 'access',
     required: false,
     enum: ['public', 'private'],
-    description: 'Override storage access level (default: public for images, private for others)',
+    description:
+      'Override storage access level (default: public for images, private for others)',
   })
   @ApiBody({
     schema: {
