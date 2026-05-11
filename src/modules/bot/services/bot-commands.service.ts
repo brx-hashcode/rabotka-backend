@@ -167,9 +167,16 @@ export class BotCommandsService {
     };
   }
 
-  async myOffers(profile: BotProfile, page = 0): Promise<string> {
+  async myOffers(
+    profile: BotProfile,
+    page = 0,
+  ): Promise<{ message: string; offerIds: string[] }> {
     if (profile.profile_type !== 'EMPLOYER') {
-      return "*SEULS LES EMPLOYEURS PEUVENT VOIR LEURS OFFRES. TAPEZ 'MENU' POUR REVENIR.*";
+      return {
+        message:
+          "*SEULS LES EMPLOYEURS PEUVENT VOIR LEURS OFFRES. TAPEZ 'MENU' POUR REVENIR.*",
+        offerIds: [],
+      };
     }
     const PAGE_SIZE = 5;
     const { items: pageOffers, total } =
@@ -178,7 +185,10 @@ export class BotCommandsService {
         pageSize: PAGE_SIZE,
       });
     if (total === 0) {
-      return "*VOUS N'AVEZ PUBLIÉ AUCUNE OFFRE. TAPEZ 'MENU' POUR REVENIR.*";
+      return {
+        message: "*VOUS N'AVEZ PUBLIÉ AUCUNE OFFRE. TAPEZ 'MENU' POUR REVENIR.*",
+        offerIds: [],
+      };
     }
     const totalPages = Math.ceil(total / PAGE_SIZE);
     const start = page * PAGE_SIZE;
@@ -209,7 +219,7 @@ export class BotCommandsService {
     if (hasMore) actions.push('S- Page suivante');
     actions.push('M- Menu principal');
     lines.push(...actions);
-    return lines.join('\n');
+    return { message: lines.join('\n'), offerIds: pageOffers.map((o) => o.id) };
   }
 
   async candidaturesReceived(profile: BotProfile): Promise<{
