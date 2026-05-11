@@ -163,7 +163,7 @@ jobs:
           TWILIO_AUTH_TOKEN=placeholder
           TWILIO_WHATSAPP_FROM=placeholder
           TWILIO_SMS_FROM=placeholder
-          TWILIO_WEBHOOK_BASE_URL=placeholder
+          TWILIO_WEBHOOK_BASE_URL=$(echo "$VAULT_SECRET" | jq -r '.TWILIO_WEBHOOK_BASE_URL')
           QDRANT_URL=$(echo "$VAULT_SECRET" | jq -r '.QDRANT_URL')
           QDRANT_API_KEY=$(echo "$VAULT_SECRET" | jq -r '.QDRANT_API_KEY')
           EOF
