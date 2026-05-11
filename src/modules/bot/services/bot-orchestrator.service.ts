@@ -402,7 +402,9 @@ export class BotOrchestratorService {
         runRateAssignmentFlow(state, input, profile, { prisma: this.prisma }),
       [FLOW_IDS.MY_OFFERS]: async () => {
         const currentPage = (state.payload?.page as number) ?? 0;
-        const normalized = input.trim().toLowerCase();
+        const offerIds = (state.payload?.offerIds as string[]) ?? [];
+        const trimmed = input.trim();
+        const normalized = trimmed.toLowerCase();
         if (CMD_MENU.some((c) => normalized === c || normalized === 'm')) {
           return { reply: [handleMenuCommand(profile)], clearState: true };
         }
@@ -414,29 +416,104 @@ export class BotOrchestratorService {
         const totalPages = Math.ceil(total / PAGE_SIZE);
         if (normalized === 's' && currentPage < totalPages - 1) {
           const nextPage = currentPage + 1;
-          const message = await this.commands.myOffers(profile, nextPage);
+          const { message, offerIds: newOfferIds } =
+            await this.commands.myOffers(profile, nextPage);
           return {
             reply: [message],
             nextState: {
               flowId: FLOW_IDS.MY_OFFERS,
               step: 0,
-              payload: { page: nextPage },
+              payload: { page: nextPage, offerIds: newOfferIds },
               updatedAt: new Date().toISOString(),
             },
           };
         }
         if (normalized === 'p' && currentPage > 0) {
           const prevPage = currentPage - 1;
-          const message = await this.commands.myOffers(profile, prevPage);
+          const { message, offerIds: newOfferIds } =
+            await this.commands.myOffers(profile, prevPage);
           return {
             reply: [message],
             nextState: {
               flowId: FLOW_IDS.MY_OFFERS,
               step: 0,
-              payload: { page: prevPage },
+              payload: { page: prevPage, offerIds: newOfferIds },
               updatedAt: new Date().toISOString(),
             },
           };
+        }
+        const choice = /^\d+$/.test(trimmed)
+          ? Number.parseInt(trimmed, 10)
+          : 0;
+        const pageStart = currentPage * PAGE_SIZE;
+        const localIndex = choice - pageStart - 1;
+        if (
+          choice >= pageStart + 1 &&
+          choice <= pageStart + offerIds.length &&
+          localIndex >= 0 &&
+          localIndex < offerIds.length
+        ) {
+          const offerId = offerIds[localIndex];
+          const offer = await this.jobOfferService.findById(offerId);
+          if (!offer) {
+            return {
+              reply: ["*Cette offre n'existe plus. Tapez 'Menu'.*"],
+              clearState: true,
+            };
+          }
+          const dateStr = offer.scheduled_at.toLocaleDateString('fr-FR', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+          });
+          const amountStr =
+            offer.amount != null
+              ? `${offer.amount.toLocaleString('fr-FR')} FCFA`
+              : 'Prix à négocier';
+          const detail = [
+            `*${offer.title}*`,
+            '',
+            `• Date : ${dateStr}`,
+            `• Montant : ${amountStr}`,
+            `• Adresse : ${offer.address}`,
+            `• Statut : ${offer.status}`,
+            `• Candidatures : ${offer.acceptedCount ?? 0}/${offer.quantity}`,
+            offer.description ? `• Description : ${offer.description}` : '',
+            '',
+            'R- Retour à la liste',
+            'M- Menu principal',
+          ]
+            .filter((l) => l !== '')
+            .join('\n');
+          return {
+            reply: [detail],
+            nextState: {
+              ...state,
+              payload: {
+                ...state.payload,
+                step: 'detail',
+                selectedOfferId: offerId,
+              },
+              updatedAt: new Date().toISOString(),
+            },
+          };
+        }
+        if ((state.payload?.step as string) === 'detail') {
+          if (normalized === 'r') {
+            const { message, offerIds: refreshedIds } =
+              await this.commands.myOffers(profile, currentPage);
+            return {
+              reply: [message],
+              nextState: {
+                flowId: FLOW_IDS.MY_OFFERS,
+                step: 0,
+                payload: { page: currentPage, offerIds: refreshedIds },
+                updatedAt: new Date().toISOString(),
+              },
+            };
+          }
         }
         return { reply: [unknownCommandMessage()], nextState: state };
       },
@@ -594,11 +671,11 @@ export class BotOrchestratorService {
     profileId: string,
     page: number,
   ): Promise<string[]> {
-    const message = await this.commands.myOffers(profile, page);
+    const { message, offerIds } = await this.commands.myOffers(profile, page);
     await this.botState.set(profileId, {
       flowId: FLOW_IDS.MY_OFFERS,
       step: 0,
-      payload: { page },
+      payload: { page, offerIds },
       updatedAt: new Date().toISOString(),
     });
     return [message];

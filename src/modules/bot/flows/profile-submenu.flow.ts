@@ -41,7 +41,7 @@ export async function runProfileSubmenuFlow(
 
   if (profileType === 'EMPLOYER') {
     if (trimmed === '1') {
-      const message = await ctx.commands.myOffers(profile);
+      const { message } = await ctx.commands.myOffers(profile);
       return { reply: [message], clearState: true };
     }
     if (trimmed === '2') {
