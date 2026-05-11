@@ -553,7 +553,7 @@ export class ProfileService {
           documentType: doc.document_type,
           documentCategory: doc.document_category,
           documentUrl: doc.storage_key
-            ? await this.fileService.getPresignedUrl(doc.storage_key)
+            ? await this.fileService.getPublicUrl(doc.storage_key)
             : await this.fileService.getPresignedUrlFromPublicUrl(
                 doc.document_url ?? '',
               ),
