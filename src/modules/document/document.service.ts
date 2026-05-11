@@ -151,6 +151,7 @@ export class DocumentService {
     const filename = `documents/${googleDocsId}_${Date.now()}.docx`;
     const uploadResult = await this.storage.upload(docxBuffer, filename, {
       mimeType: DOCX_MIME,
+      access: 'public',
     });
 
     const variables = extractVariables(docxBuffer);
