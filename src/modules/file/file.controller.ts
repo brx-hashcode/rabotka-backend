@@ -74,6 +74,12 @@ export class FileController {
     type: Boolean,
     description: 'Set to true to upload multiple files',
   })
+  @ApiQuery({
+    name: 'access',
+    required: false,
+    enum: ['public', 'private'],
+    description: 'Override storage access level (default: public for images, private for others)',
+  })
   @ApiBody({
     schema: {
       type: 'object',
@@ -94,6 +100,7 @@ export class FileController {
   async uploadFile(
     @UploadedFiles() files: Express.Multer.File[],
     @Query('is_multipl') isMultiple?: string,
+    @Query('access') accessOverride?: string,
   ) {
     if (!files || files.length === 0) {
       throw new BadRequestException('Aucun fichier fourni');
@@ -106,6 +113,12 @@ export class FileController {
         'Multiple files provided but is_multipl is not set to true',
       );
     }
+
+    const resolveAccess = (mimetype: string): 'public' | 'private' => {
+      if (accessOverride === 'public') return 'public';
+      if (accessOverride === 'private') return 'private';
+      return mimetype.startsWith('image/') ? 'public' : 'private';
+    };
 
     if (isMulti) {
       const uploadResults = await Promise.all(
@@ -127,7 +140,7 @@ export class FileController {
             {
               mimeType: file.mimetype,
               folder: 'files',
-              access: file.mimetype.startsWith('image/') ? 'public' : 'private',
+              access: resolveAccess(file.mimetype),
             },
           );
 
@@ -161,7 +174,7 @@ export class FileController {
       {
         mimeType: file.mimetype,
         folder: 'files',
-        access: file.mimetype.startsWith('image/') ? 'public' : 'private',
+        access: resolveAccess(file.mimetype),
       },
     );
 
