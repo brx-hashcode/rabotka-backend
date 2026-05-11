@@ -1,14 +1,16 @@
-import { Injectable, type CanActivate, type ExecutionContext } from '@nestjs/common';
-import { ArcjetGuard } from '@arcjet/nest';
+import { Injectable, type ExecutionContext, Inject } from '@nestjs/common';
+import { ArcjetGuard, ARCJET } from '@arcjet/nest';
 
 @Injectable()
-export class HttpOnlyArcjetGuard implements CanActivate {
-  constructor(private readonly arcjetGuard: InstanceType<typeof ArcjetGuard>) {}
+export class HttpOnlyArcjetGuard extends ArcjetGuard {
+  constructor(@Inject(ARCJET) aj: unknown) {
+    super(aj as ConstructorParameters<typeof ArcjetGuard>[0]);
+  }
 
-  canActivate(context: ExecutionContext): boolean | Promise<boolean> {
+  override canActivate(context: ExecutionContext): Promise<boolean> {
     if (context.getType() !== 'http') {
-      return true;
+      return Promise.resolve(true);
     }
-    return this.arcjetGuard.canActivate(context) as Promise<boolean>;
+    return super.canActivate(context);
   }
 }
