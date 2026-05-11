@@ -57,6 +57,7 @@ import { ImageWatermarkModule } from './common/services/image-watermark/image-wa
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
+import { HttpOnlyArcjetGuard } from './common/guards/http-only-arcjet.guard';
 
 @Module({
   imports: [
@@ -165,7 +166,8 @@ import { HttpExceptionFilter } from './common/filters/http-exception.filter';
   controllers: [AppController],
   providers: [
     AppService,
-    { provide: APP_GUARD, useClass: ArcjetGuard },
+    ArcjetGuard,
+    { provide: APP_GUARD, useClass: HttpOnlyArcjetGuard },
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_FILTER, useClass: HttpExceptionFilter },
   ],
