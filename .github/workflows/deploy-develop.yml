@@ -87,6 +87,15 @@ jobs:
           mkdir -p ~/.ssh
           echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
+
+      - name: Debug connectivity
+        run: |
+          echo "Host: ${{ secrets.VPS_HOST }}"
+          echo "Port: ${{ secrets.VPS_PORT }}"
+          nc -zv -w 5 "${{ secrets.VPS_HOST }}" "${{ secrets.VPS_PORT }}" || echo "Port unreachable"
+
+      - name: Set up known hosts
+        run: |
           ssh-keyscan -p "${{ secrets.VPS_PORT }}" -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts
 
       - name: Pull image on VPS
