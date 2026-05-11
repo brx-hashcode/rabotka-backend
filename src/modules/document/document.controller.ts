@@ -212,6 +212,7 @@ export class PublicDocumentController {
 
     if (isMd) {
       const content = await fetch(policy.file_url).then((r) => r.text());
+
       return res
         .setHeader('Content-Type', 'text/markdown; charset=utf-8')
         .send(content);
