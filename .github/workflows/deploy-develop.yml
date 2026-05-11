@@ -205,16 +205,21 @@ jobs:
 
     steps:
       - name: Wait for container to stabilize
-        run: sleep 30
+        run: sleep 60
 
       - name: Check health endpoint
         run: |
-          STATUS=$(curl -o /tmp/health_response.txt -s -w "%{http_code}" \
-            --max-time 30 \
-            "https://api-rabotka.${{ secrets.INFRA_DOMAIN }}/api/v1/health")
-          echo "HTTP status: $STATUS"
-          cat /tmp/health_response.txt
-          [ "$STATUS" = "200" ]
+          for i in 1 2 3 4 5; do
+            STATUS=$(curl -o /tmp/health_response.txt -s -w "%{http_code}" \
+              --max-time 30 \
+              "https://api-rabotka.${{ secrets.INFRA_DOMAIN }}/api/v1/health")
+            echo "Attempt $i — HTTP status: $STATUS"
+            cat /tmp/health_response.txt
+            [ "$STATUS" = "200" ] && exit 0
+            sleep 15
+          done
+          echo "Health check failed after 5 attempts"
+          exit 1
 
       - name: Slack notify success
         if: success()
