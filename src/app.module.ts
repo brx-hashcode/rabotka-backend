@@ -1,5 +1,4 @@
 import {
-  ArcjetGuard,
   ArcjetModule,
   detectBot,
   fixedWindow,
@@ -166,7 +165,6 @@ import { HttpOnlyArcjetGuard } from './common/guards/http-only-arcjet.guard';
   controllers: [AppController],
   providers: [
     AppService,
-    ArcjetGuard,
     { provide: APP_GUARD, useClass: HttpOnlyArcjetGuard },
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_FILTER, useClass: HttpExceptionFilter },
