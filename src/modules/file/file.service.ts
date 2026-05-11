@@ -107,6 +107,10 @@ export class FileService {
     return this.storageService.getUrl(storageKey, { access: 'private' });
   }
 
+  async getPublicUrl(storageKey: string): Promise<string> {
+    return this.storageService.getUrl(storageKey, { access: 'public' });
+  }
+
   async getPresignedUrlFromPublicUrl(publicUrl: string): Promise<string> {
     const base = this.configService
       .get<string>('CLOUDFLARE_PUBLIC_BASE_URL', '')
@@ -114,7 +118,7 @@ export class FileService {
       .replace(/\/+$/, '');
     if (base && publicUrl.startsWith(base + '/')) {
       const key = decodeURI(publicUrl.slice(base.length + 1));
-      return this.storageService.getUrl(key, { access: 'private' });
+      return this.storageService.getUrl(key, { access: 'public' });
     }
     return publicUrl;
   }
