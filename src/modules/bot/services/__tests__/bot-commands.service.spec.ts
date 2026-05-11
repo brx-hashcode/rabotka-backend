@@ -38,7 +38,11 @@ function makeJobOfferService(overrides = {}) {
       .fn()
       .mockResolvedValue({ data: [mockOffer], nextCursor: null }),
     findById: jest.fn().mockResolvedValue(mockOffer),
-    findByEmployerId: jest.fn().mockResolvedValue([]),
+    findByEmployerId: jest.fn().mockImplementation((_, opts) =>
+      opts
+        ? Promise.resolve({ items: [], total: 0 })
+        : Promise.resolve([]),
+    ),
     ...overrides,
   };
 }
@@ -152,20 +156,28 @@ describe('BotCommandsService', () => {
   describe('myOffers()', () => {
     it('blocks non-employer', async () => {
       const result = await service.myOffers(workerProfile);
-      expect(result).toContain('EMPLOYEURS');
+      expect(result.message).toContain('EMPLOYEURS');
     });
 
     it('returns no-offers message when employer has none', async () => {
       const result = await service.myOffers(employerProfile);
-      expect(result).toContain('AUCUNE OFFRE');
+      expect(result.message).toContain('AUCUNE OFFRE');
     });
 
     it('returns formatted offer list for employer', async () => {
-      jobOfferService.findByEmployerId.mockResolvedValue([
-        { ...mockOffer, amount: { toLocaleString: () => '15 000' } },
-      ]);
+      jobOfferService.findByEmployerId.mockImplementation((_, opts) =>
+        opts
+          ? Promise.resolve({
+              items: [
+                { ...mockOffer, amount: { toLocaleString: () => '15 000' } },
+              ],
+              total: 1,
+            })
+          : Promise.resolve([mockOffer]),
+      );
       const result = await service.myOffers(employerProfile);
-      expect(result).toContain('MES OFFRES');
+      expect(result.message).toContain('MES OFFRES');
+      expect(result.offerIds).toHaveLength(1);
     });
   });
 

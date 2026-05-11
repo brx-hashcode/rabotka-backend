@@ -67,7 +67,9 @@ function makeDeps() {
       candidaturesReceived: jest.fn(),
       filledJobs: jest.fn(),
       profile: jest.fn().mockResolvedValue('Profile message'),
-      myOffers: jest.fn().mockResolvedValue('My offers message'),
+      myOffers: jest
+        .fn()
+        .mockResolvedValue({ message: 'My offers message', offerIds: [] }),
       penaltyHistory: jest.fn().mockResolvedValue('Penalty history'),
     },
     jobOfferService: {},
