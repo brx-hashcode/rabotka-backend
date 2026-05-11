@@ -11,6 +11,7 @@ import PizZip from 'pizzip';
 import Docxtemplater from 'docxtemplater';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { StorageService } from '../../common/services/storage/storage.service';
+import { FileService } from '../file/file.service';
 import { RedisService } from '../../common/services/redis/redis.service';
 import { REDIS_KEY_PREFIX } from '../../common/services/redis/redis.constants';
 import { GoogleDocsService } from './google-docs.service';
@@ -38,23 +39,6 @@ export type AdminDocumentItem = {
   variables: string[];
 };
 
-function mapDocument(doc: any): AdminDocumentItem {
-  return {
-    id: doc.id,
-    title: doc.title,
-    category: doc.category,
-    fileUrl: doc.file_url,
-    mimeType: doc.mime_type,
-    createdBy: doc.created_by ?? null,
-    createdAt: doc.created_at.toISOString(),
-    updatedAt: doc.updated_at.toISOString(),
-    sourceMode: doc.source_mode,
-    googleDocsUrl: doc.google_docs_url ?? null,
-    googleDocsId: doc.google_docs_id ?? null,
-    previewUrl: doc.preview_url ?? null,
-    variables: doc.variables ?? [],
-  };
-}
 
 const DOCX_MIME =
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
@@ -95,9 +79,30 @@ export class DocumentService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
+    private readonly fileService: FileService,
     private readonly redis: RedisService,
     private readonly googleDocs: GoogleDocsService,
   ) {}
+
+  private async mapDocument(doc: any): Promise<AdminDocumentItem> {
+    return {
+      id: doc.id,
+      title: doc.title,
+      category: doc.category,
+      fileUrl: await this.fileService.getPresignedUrlFromPublicUrl(
+        doc.file_url ?? '',
+      ),
+      mimeType: doc.mime_type,
+      createdBy: doc.created_by ?? null,
+      createdAt: doc.created_at.toISOString(),
+      updatedAt: doc.updated_at.toISOString(),
+      sourceMode: doc.source_mode,
+      googleDocsUrl: doc.google_docs_url ?? null,
+      googleDocsId: doc.google_docs_id ?? null,
+      previewUrl: doc.preview_url ?? null,
+      variables: doc.variables ?? [],
+    };
+  }
 
   private cacheKey(dto: ListDocumentsDto): string {
     const page = dto.page ?? 1;
@@ -151,7 +156,6 @@ export class DocumentService {
     const filename = `documents/${googleDocsId}_${Date.now()}.docx`;
     const uploadResult = await this.storage.upload(docxBuffer, filename, {
       mimeType: DOCX_MIME,
-      access: 'public',
     });
 
     const variables = extractVariables(docxBuffer);
@@ -173,7 +177,7 @@ export class DocumentService {
       },
     });
 
-    return mapDocument(doc);
+    return this.mapDocument(doc);
   }
 
   async createFromUpload(opts: {
@@ -210,7 +214,7 @@ export class DocumentService {
     });
 
     await this.invalidateListCache();
-    return mapDocument(doc);
+    return this.mapDocument(doc);
   }
 
   async list(dto: ListDocumentsDto): Promise<{
@@ -234,7 +238,7 @@ export class DocumentService {
       this.prisma.document.count({ where }),
     ]);
 
-    return { data: docs.map(mapDocument), total, page, limit };
+    return { data: await Promise.all(docs.map((d) => this.mapDocument(d))), total, page, limit };
   }
 
   async update(id: string, dto: UpdateDocumentDto): Promise<AdminDocumentItem> {
@@ -249,7 +253,7 @@ export class DocumentService {
       },
     });
     await this.invalidateListCache();
-    return mapDocument(doc);
+    return this.mapDocument(doc);
   }
 
   async delete(id: string): Promise<void> {
