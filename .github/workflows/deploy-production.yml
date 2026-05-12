@@ -14,8 +14,8 @@ on:
 
 jobs:
   # ───────────────────────────────────────────────────────────────────────────
-  # JOB 1: Run test suite
-  # Blocks the deploy if any test fails.
+  # JOB 1: Run test suite with coverage gate (≥ 80%)
+  # Blocks the deploy if any test fails or coverage drops below threshold.
   # ───────────────────────────────────────────────────────────────────────────
   test:
     name: Test Suite
@@ -38,11 +38,9 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --ignore-scripts
-        working-directory: rabotka-backend
 
       - name: Run tests with coverage
         run: pnpm test:cov
-        working-directory: rabotka-backend
 
   # ───────────────────────────────────────────────────────────────────────────
   # JOB 2: Deploy to production
@@ -243,8 +241,20 @@ jobs:
           echo "Health check failed after 5 attempts"
           exit 1
 
+  # ───────────────────────────────────────────────────────────────────────────
+  # JOB 4: Slack notification — always runs, reports success or failure
+  # ───────────────────────────────────────────────────────────────────────────
+  notify:
+    name: Slack Notification (production)
+    runs-on: ubuntu-latest
+    needs: [test, deploy, smoke-test]
+    if: always()
+    permissions:
+      contents: read
+
+    steps:
       - name: Slack notify success
-        if: success()
+        if: ${{ !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
         uses: slackapi/slack-github-action@v2.0.0
         with:
           webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
@@ -260,7 +270,7 @@ jobs:
             }
 
       - name: Slack notify failure
-        if: failure()
+        if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
         uses: slackapi/slack-github-action@v2.0.0
         with:
           webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
