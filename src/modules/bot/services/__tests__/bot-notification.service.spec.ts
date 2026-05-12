@@ -51,6 +51,7 @@ function makeDeps() {
   const botState = {
     get: jest.fn().mockResolvedValue(null),
     set: jest.fn().mockResolvedValue(undefined),
+    setIfFlowAbsentOrMatches: jest.fn().mockResolvedValue(true),
   };
 
   const botInbox = {
@@ -101,16 +102,11 @@ describe('BotNotificationService', () => {
         '+24200000002',
         expect.any(String),
       );
-      expect(deps.botState.set).toHaveBeenCalled();
+      expect(deps.botState.setIfFlowAbsentOrMatches).toHaveBeenCalled();
     });
 
     it('pushes to inbox when employer has active flow', async () => {
-      deps.botState.get.mockResolvedValue({
-        flowId: 'PUBLISH_JOB',
-        step: 1,
-        payload: {},
-        updatedAt: '',
-      });
+      deps.botState.setIfFlowAbsentOrMatches.mockResolvedValue(false);
       await service.sendNewApplicationToEmployer('app-1');
       expect(deps.botInbox.push).toHaveBeenCalled();
     });

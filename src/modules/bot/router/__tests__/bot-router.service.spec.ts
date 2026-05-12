@@ -113,17 +113,17 @@ describe('BotRouterService', () => {
   });
 
   describe('numeric menu options', () => {
-    it('routes worker "3" to recommended_jobs', () => {
+    it('routes worker "3" to pending_payments', () => {
       const result = service.route('3', workerProfile, null);
       expect(result).toEqual({
         type: 'command',
-        commandId: 'recommended_jobs',
+        commandId: 'pending_payments',
       });
     });
 
-    it('routes worker "4" to profile', () => {
+    it('routes worker "4" to recommended_jobs', () => {
       const result = service.route('4', workerProfile, null);
-      expect(result).toEqual({ type: 'command', commandId: 'profile' });
+      expect(result).toEqual({ type: 'command', commandId: 'recommended_jobs' });
     });
 
     it('routes employer numeric option for my_offers', () => {

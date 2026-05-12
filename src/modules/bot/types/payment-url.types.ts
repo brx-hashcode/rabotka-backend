@@ -5,7 +5,7 @@ export interface IPaymentUrlService {
     profileId: string,
     amount: number,
     description: string,
-    requestType: PaymentRequestType,
+    requestTypeOrAttemptId: PaymentRequestType | string,
     options?: {
       contactUnlockAttemptId?: string;
       recommendationWorkerId?: string;

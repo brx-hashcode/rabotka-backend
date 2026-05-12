@@ -35,10 +35,16 @@ function makeConfigService() {
 }
 
 function makeRedis() {
+  const pipelineObj = {
+    incr: jest.fn().mockReturnThis(),
+    expire: jest.fn().mockReturnThis(),
+    exec: jest.fn().mockResolvedValue([[null, 1], [null, 1]]),
+  };
   return {
     set: jest.fn().mockResolvedValue('OK'), // 'OK' = new key set
     incr: jest.fn().mockResolvedValue(1),
     expire: jest.fn().mockResolvedValue(1),
+    pipeline: jest.fn().mockReturnValue(pipelineObj),
   };
 }
 

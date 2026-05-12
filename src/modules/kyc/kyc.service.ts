@@ -5,9 +5,12 @@ import Redis from 'ioredis';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { verificationLinkMessage } from '../whatsapp/templates';
-import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
+import {
+  REDIS_CONNECTION,
+  REDIS_KEY_PREFIX,
+} from '../../common/services/redis/redis.constants';
 
-const VERIFICATION_TOKEN_KEY_PREFIX = 'wa:verify:';
+const VERIFICATION_TOKEN_KEY_PREFIX = `${REDIS_KEY_PREFIX}wa:verify:`;
 const VERIFICATION_TOKEN_TTL_SECONDS = 1800;
 
 @Injectable()

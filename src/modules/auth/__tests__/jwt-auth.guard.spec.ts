@@ -51,21 +51,21 @@ describe('JwtAuthGuard', () => {
     guard = new JwtAuthGuard(jwtService, configService, reflector, redis);
   });
 
-  it('allows public routes without a token', () => {
+  it('allows public routes without a token', async () => {
     (reflector.getAllAndOverride as jest.Mock).mockReturnValue(true);
     const ctx = makeContext();
 
-    expect(guard.canActivate(ctx)).toBe(true);
+    await expect(guard.canActivate(ctx)).resolves.toBe(true);
   });
 
-  it('authenticates profile user from cookie', () => {
+  it('authenticates profile user from cookie', async () => {
     (jwtService.verify as jest.Mock).mockReturnValue({
       sub: 'profile-1',
       type: 'profile',
     });
 
     const ctx = makeContext('valid-token');
-    const result = guard.canActivate(ctx);
+    const result = await guard.canActivate(ctx);
 
     expect(result).toBe(true);
     const req = ctx
@@ -75,14 +75,14 @@ describe('JwtAuthGuard', () => {
     expect(req.user.type).toBe('profile');
   });
 
-  it('authenticates admin user from bearer token', () => {
+  it('authenticates admin user from bearer token', async () => {
     (jwtService.verify as jest.Mock).mockReturnValue({
       sub: 'admin-1',
       type: 'admin',
     });
 
     const ctx = makeContext(undefined, 'Bearer valid-admin-token');
-    const result = guard.canActivate(ctx);
+    const result = await guard.canActivate(ctx);
 
     expect(result).toBe(true);
     const req = ctx
@@ -92,25 +92,25 @@ describe('JwtAuthGuard', () => {
     expect(req.user.type).toBe('admin');
   });
 
-  it('throws UnauthorizedException when no token', () => {
+  it('throws UnauthorizedException when no token', async () => {
     const ctx = makeContext();
-    expect(() => guard.canActivate(ctx)).toThrow(UnauthorizedException);
+    await expect(guard.canActivate(ctx)).rejects.toThrow(UnauthorizedException);
   });
 
-  it('throws UnauthorizedException when token is invalid', () => {
+  it('throws UnauthorizedException when token is invalid', async () => {
     (jwtService.verify as jest.Mock).mockImplementation(() => {
       throw new Error('invalid token');
     });
 
     const ctx = makeContext('bad-token');
-    expect(() => guard.canActivate(ctx)).toThrow(UnauthorizedException);
+    await expect(guard.canActivate(ctx)).rejects.toThrow(UnauthorizedException);
   });
 
-  it('defaults type to "profile" when payload.type is missing', () => {
+  it('defaults type to "profile" when payload.type is missing', async () => {
     (jwtService.verify as jest.Mock).mockReturnValue({ sub: 'profile-1' });
 
     const ctx = makeContext('token');
-    guard.canActivate(ctx);
+    await guard.canActivate(ctx);
 
     const req = ctx.switchToHttp().getRequest<{ user: { type: string } }>();
     expect(req.user.type).toBe('profile');

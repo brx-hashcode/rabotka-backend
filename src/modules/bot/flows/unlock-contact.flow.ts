@@ -5,7 +5,6 @@ import {
   formatContactUnlockedMessage,
   formatContactUnlockPending,
 } from '../messages/contact-unlock.messages';
-import { PaymentRequestType } from '@prisma/client';
 import type { ContactUnlockService } from '../../contact-unlock/contact-unlock.service';
 import type { WalletService } from '../../wallet/wallet.service';
 import type { IPaymentUrlService } from '../types/payment-url.types';
@@ -201,9 +200,8 @@ async function handleMobileMoney(args: {
   const paymentUrl = await ctx.paymentService.createPaymentUrl(
     profile.id,
     amount,
-    `Déverrouillage de contact — ${otherName}`,
-    PaymentRequestType.CONTACT_UNLOCK,
-    { contactUnlockAttemptId: attemptId },
+    'Déverrouillage de contact',
+    attemptId,
   );
   return {
     reply: [
@@ -275,17 +273,20 @@ export function getUnlockContactInitialState(params: {
   attemptId: string;
   otherName: string;
   amount: number;
-  expiresAt: Date | string;
+  expiresAt?: Date | string;
 }): BotState {
+  const payload: Record<string, unknown> = {
+    attemptId: params.attemptId,
+    otherName: params.otherName,
+    amount: params.amount,
+  };
+  if (params.expiresAt != null) {
+    payload.expiresAt = new Date(params.expiresAt).toISOString();
+  }
   return {
     flowId: FLOW_IDS.UNLOCK_CONTACT,
     step: 1,
-    payload: {
-      attemptId: params.attemptId,
-      otherName: params.otherName,
-      amount: params.amount,
-      expiresAt: new Date(params.expiresAt).toISOString(),
-    },
+    payload,
     updatedAt: new Date().toISOString(),
   };
 }

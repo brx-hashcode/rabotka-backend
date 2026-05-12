@@ -91,12 +91,13 @@ export function formatOfferListCompact(
     const qty = o.quantity ?? 1;
     const filled = o.acceptedCount ?? 0;
     const remaining = Math.max(0, qty - filled);
+    const spotsEmoji = remaining === 0 ? '🔴' : remaining === qty ? '🟢' : '🟡';
     const spotsLabel =
       remaining === 0
-        ? 'Complet'
+        ? `${spotsEmoji} Complet`
         : remaining === qty
-          ? `${qty} place${qty > 1 ? 's' : ''}`
-          : `${remaining}/${qty} restante${remaining > 1 ? 's' : ''}`;
+          ? `${spotsEmoji} ${qty} place${qty > 1 ? 's' : ''}`
+          : `${spotsEmoji} ${remaining}/${qty} restante${remaining > 1 ? 's' : ''}`;
     const shortAddr =
       o.address.length > 40 ? o.address.slice(0, 40) + '…' : o.address;
     lines.push(
@@ -108,9 +109,10 @@ export function formatOfferListCompact(
       '',
     );
   });
+  const nextIdx = offers.length + 1;
   const actions: string[] = [];
   if (page > 0) actions.push('P- Page précédente');
-  if (hasMore) actions.push('S- Page suivante');
+  if (hasMore) actions.push(`${nextIdx} - Voir plus`);
   actions.push('M- Menu principal');
   lines.push(...actions, '', 'Tapez un numéro pour sélectionner une offre.');
   return lines.join('\n');
@@ -146,16 +148,16 @@ export function formatOfferDetail(offer: OfferListItem): string {
   return lines.join('\n');
 }
 
-function employerScoreLabel(score: number): string {
-  if (score >= 90) return 'Excellent';
-  if (score >= 75) return 'Bon';
-  if (score >= 60) return 'Moyen';
-  return 'Faible';
+function employerScoreStars(score: number): string {
+  if (score >= 90) return '⭐⭐⭐';
+  if (score >= 75) return '⭐⭐';
+  if (score >= 60) return '⭐';
+  return '⚠️';
 }
 
 function formatEmployerScore(score: number | null | undefined): string {
   if (score == null) return '';
-  return `*Fiabilité employeur*: ${score}/100 (${employerScoreLabel(score)})`;
+  return `*Fiabilité employeur*: ${employerScoreStars(score)} (${score}/100)`;
 }
 
 /** Numbered list for recommended-jobs flow with pagination support */

@@ -124,14 +124,14 @@ describe('PenaltyService', () => {
   describe('getPenaltiesForAdmin()', () => {
     const mockPenaltyListItem = {
       id: PENALTY_ID,
-      worker_id: WORKER_ID,
+      profile_id: WORKER_ID,
       application_id: APPLICATION_ID,
       amount: 5000,
       reason: 'Late cancellation',
       applied_at: new Date('2026-01-01T10:00:00Z'),
       paid_at: null,
       created_at: new Date('2026-01-01T10:00:00Z'),
-      worker: {
+      profile: {
         id: WORKER_ID,
         first_name: 'Jane',
         last_name: 'Doe',
