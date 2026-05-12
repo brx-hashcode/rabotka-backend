@@ -45,7 +45,7 @@ export function getMobileMoneyInitialPayload(params: {
   amount: number;
   description: string;
   requestType: PaymentRequestType;
-  options?: { contactUnlockAttemptId?: string };
+  options?: { contactUnlockAttemptId?: string; recommendationWorkerId?: string };
 }): Record<string, unknown> {
   return {
     _mm_step: 'use_registered_number',
