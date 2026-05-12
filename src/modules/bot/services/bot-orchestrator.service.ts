@@ -974,7 +974,6 @@ export class BotOrchestratorService {
         last_name: true,
         reliability_score: true,
         description: true,
-        category: { select: { name: true } },
       },
     });
     const workerMap = new Map(workers.map((w) => [w.id, w]));
@@ -987,13 +986,11 @@ export class BotOrchestratorService {
       '',
       ...ordered.flatMap((w, i) => {
         const name = `${w.first_name} ${w.last_name}`.trim();
-        const domain = w.category?.name ?? 'Non spécifié';
         const aiScore = Math.round((workerScores[w.id] ?? 0) * 100);
         return [
           `${i + 1}- *${name}*`,
           `    • Fiabilité : ${w.reliability_score ?? 100}/100`,
           `    • Score IA : ${aiScore}%`,
-          `    • Domaine : ${domain}`,
           '',
         ];
       }),
