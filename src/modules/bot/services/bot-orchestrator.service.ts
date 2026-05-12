@@ -1,6 +1,6 @@
 import { Injectable, Logger, forwardRef, Inject } from '@nestjs/common';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
-import { AccountStatus, BillingStatus, ProfileType } from '@prisma/client';
+import { AccountStatus, BillingStatus } from '@prisma/client';
 import { JobOfferService } from '../../job-offer/job-offer.service';
 import { ApplicationService } from '../../application/application.service';
 import { BotStateService } from './bot-state.service';
@@ -91,10 +91,9 @@ import { InterestSignalService } from '../../interest-graph/interest-signal.serv
 import { InterestRecommendationService } from '../../interest-graph/interest-recommendation.service';
 import { InvoiceService } from '../../invoice/invoice.service';
 
-const INACTIVE_MESSAGE = `Votre compte est créé mais pas encore activé. Cliquez sur le lien de confirmation que nous vous avons envoyé par WhatsApp pour l’activer.`;
+const INACTIVE_MESSAGE = `Votre compte est créé mais pas encore activé. Cliquez sur le lien de confirmation que nous vous avons envoyé par WhatsApp pour l'activer.`;
 
-const WHATSAPP_NOT_CONNECTED_MESSAGE =
-  `⚠️ *Compte non activé*\n\nVotre numéro WhatsApp n’a pas encore été vérifié. Sans vérification, vous ne pouvez pas accéder à la plateforme.\n\nTapez *VERIFIER* pour activer votre compte instantanément.`;
+const WHATSAPP_NOT_CONNECTED_MESSAGE = `⚠️ *Compte non active*\n\nVotre numéro WhatsApp n'a pas encore été vérifié. Sans vérification, vous ne pouvez pas accéder à la plateforme.\n\nTapez *VERIFIER* pour activer votre compte instantanément.`;
 
 const NOT_FOUND_MESSAGE = `Ce numéro n'est pas encore enregistré. Inscrivez-vous sur notre site pour créer votre compte.`;
 
@@ -166,14 +165,21 @@ export class BotOrchestratorService {
           where: { id: profileId },
           data: { whatsapp_connected: true, status: AccountStatus.ACTIVE },
         });
-        const profileType = profile.profile_type as ProfileType;
+        const profileType = profile.profile_type;
         const creditAmount = await this.walletService
           .grantWelcomeCredit(profileId, profileType)
           .catch(() => 0);
         const wallet = await this.walletService
           .getOrCreateProfileWallet(profileId)
           .catch(() => ({ balance: creditAmount }));
-        return [welcomeActivationMessage(profile.first_name, creditAmount, profile.profile_type, wallet.balance)];
+        return [
+          welcomeActivationMessage(
+            profile.first_name,
+            creditAmount,
+            profile.profile_type,
+            wallet.balance,
+          ),
+        ];
       }
       await this.prisma.profile.update({
         where: { id: profileId },
@@ -307,9 +313,14 @@ export class BotOrchestratorService {
 
     if (result.clearState) {
       if (state.flowId === FLOW_IDS.PUBLISH_JOB) {
-        await this.botDraft.clearDraft(profileId).catch((err: unknown) =>
-          this.logger.warn(`clearDraft failed for profile ${profileId}`, err instanceof Error ? err.message : String(err)),
-        );
+        await this.botDraft
+          .clearDraft(profileId)
+          .catch((err: unknown) =>
+            this.logger.warn(
+              `clearDraft failed for profile ${profileId}`,
+              err instanceof Error ? err.message : String(err),
+            ),
+          );
       }
       await this.botState.clear(profileId);
       const nextInboxItem = await this.botInbox.peekAndShift(profileId);
@@ -332,9 +343,14 @@ export class BotOrchestratorService {
       }
     } else if (result.nextState) {
       if (result.clearDraft) {
-        await this.botDraft.clearDraft(profileId).catch((err: unknown) =>
-          this.logger.warn(`clearDraft failed for profile ${profileId}`, err instanceof Error ? err.message : String(err)),
-        );
+        await this.botDraft
+          .clearDraft(profileId)
+          .catch((err: unknown) =>
+            this.logger.warn(
+              `clearDraft failed for profile ${profileId}`,
+              err instanceof Error ? err.message : String(err),
+            ),
+          );
       }
       await this.botState.set(profileId, result.nextState);
     }
@@ -385,7 +401,8 @@ export class BotOrchestratorService {
       [FLOW_IDS.ACCEPT_REFUSE_CANDIDATE]: () =>
         runAcceptRefuseCandidateFlow(state, input, profile, ctx),
       [FLOW_IDS.CANCEL_APPLICATION]: async () => {
-        const { cancellationThresholdHours } = await this.systemConfig.getFees();
+        const { cancellationThresholdHours } =
+          await this.systemConfig.getFees();
         return runCancelApplicationFlow(state, input, profile, {
           ...ctx,
           cancellationThresholdHours,
@@ -473,9 +490,7 @@ export class BotOrchestratorService {
             },
           };
         }
-        const choice = /^\d+$/.test(trimmed)
-          ? Number.parseInt(trimmed, 10)
-          : 0;
+        const choice = /^\d+$/.test(trimmed) ? Number.parseInt(trimmed, 10) : 0;
         const pageStart = currentPage * PAGE_SIZE;
         const localIndex = choice - pageStart - 1;
         if (
@@ -926,7 +941,7 @@ export class BotOrchestratorService {
         [
           '*TRAVAILLEURS RECOMMANDÉS*',
           '',
-          "Aucun travailleur qualifié disponible pour le moment.",
+          'Aucun travailleur qualifié disponible pour le moment.',
           '',
           "*Tapez 'Menu' pour revenir.*",
         ].join('\n'),
