@@ -5,7 +5,6 @@ import type { ApplicationService } from '../../application/application.service';
 import type { WalletService } from '../../wallet/wallet.service';
 import type { InvoiceService } from '../../invoice/invoice.service';
 import type { IPaymentUrlService } from '../types/payment-url.types';
-import type { PaymentService } from '../../payments/payment.service';
 import {
   WalletTransactionType,
   PaymentRequestType,
@@ -26,7 +25,7 @@ import {
 export type PayPenaltiesContext = {
   applicationService: ApplicationService;
   walletService: WalletService;
-  paymentService: IPaymentUrlService & Pick<PaymentService, 'initiateDirectPayment'>;
+  paymentService: IPaymentUrlService;
   invoiceService: InvoiceService;
   prisma: PrismaService;
 };
@@ -212,7 +211,7 @@ async function enterMobileMoneySubFlow(
     updatedAt: new Date().toISOString(),
   };
   return runMobileMoneySubFlow(nextState, '', profile, {
-    paymentService: ctx.paymentService as PaymentService,
+    paymentService: ctx.paymentService,
     getFallbackUrl: () =>
       ctx.paymentService.createPaymentUrl(
         profile.id,
@@ -320,7 +319,7 @@ export async function runPayPenaltiesFlow(
   // In mobile money sub-flow
   if (payload._mm_step) {
     return runMobileMoneySubFlow(state, input, profile, {
-      paymentService: ctx.paymentService as PaymentService,
+      paymentService: ctx.paymentService,
       getFallbackUrl: () =>
         ctx.paymentService.createPaymentUrl(
           profile.id,

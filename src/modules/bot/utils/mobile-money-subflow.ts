@@ -1,6 +1,6 @@
 import type { BotProfile, BotState } from '../types/bot-state.types';
 import type { PaymentRequestType } from '@prisma/client';
-import type { PaymentService } from '../../payments/payment.service';
+import type { IPaymentUrlService } from '../types/payment-url.types';
 import {
   paymentUseRegisteredNumberPrompt,
   paymentEnterPhonePrompt,
@@ -16,7 +16,7 @@ type FlowResult = {
 };
 
 type MobileMoneyContext = {
-  paymentService: PaymentService;
+  paymentService: IPaymentUrlService;
   getFallbackUrl: () => Promise<string>;
 };
 
