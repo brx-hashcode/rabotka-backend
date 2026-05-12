@@ -5,10 +5,20 @@ export interface IPaymentUrlService {
     profileId: string,
     amount: number,
     description: string,
-    requestTypeOrAttemptId: PaymentRequestType | string,
+    requestType: PaymentRequestType,
     options?: {
       contactUnlockAttemptId?: string;
       recommendationWorkerId?: string;
     },
   ): Promise<string>;
+
+  initiateDirectPayment(params: {
+    profileId: string;
+    amount: number;
+    phone: string;
+    operator: string;
+    description: string;
+    requestType: PaymentRequestType;
+    options?: { contactUnlockAttemptId?: string };
+  }): Promise<{ success: boolean; gatewayRef?: string; error?: string }>;
 }
