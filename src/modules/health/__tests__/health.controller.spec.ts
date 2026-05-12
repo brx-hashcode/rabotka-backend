@@ -83,22 +83,17 @@ describe('HealthController', () => {
     expect(healthService.formatResponse).toHaveBeenCalledWith(mockCheckResult);
   });
 
-  it('includes memory heap and RSS checks', async () => {
+  it('includes memory heap check', async () => {
     await controller.check();
     const [healthFns] = (healthCheck.check as jest.Mock).mock.calls[0];
     expect(Array.isArray(healthFns)).toBe(true);
-    expect(healthFns.length).toBeGreaterThanOrEqual(2);
-    // Call the first two health check functions
+    expect(healthFns.length).toBeGreaterThanOrEqual(1);
     await healthFns[0]();
-    await healthFns[1]();
     expect(memory.checkHeap).toHaveBeenCalledWith(
       'memory_heap',
       150 * 1024 * 1024,
     );
-    expect(memory.checkRSS).toHaveBeenCalledWith(
-      'memory_rss',
-      600 * 1024 * 1024,
-    );
+    expect(memory.checkRSS).not.toHaveBeenCalled();
   });
 
   it('includes disk check when HEALTH_DISK_CHECK_ENABLED is "true"', async () => {
@@ -108,8 +103,8 @@ describe('HealthController', () => {
     });
     await controller.check();
     const [healthFns] = (healthCheck.check as jest.Mock).mock.calls[0];
-    expect(healthFns.length).toBe(3);
-    await healthFns[2]();
+    expect(healthFns.length).toBe(2);
+    await healthFns[1]();
     expect(disk.checkStorage).toHaveBeenCalled();
   });
 
@@ -120,7 +115,7 @@ describe('HealthController', () => {
     });
     await controller.check();
     const [healthFns] = (healthCheck.check as jest.Mock).mock.calls[0];
-    expect(healthFns.length).toBe(2);
+    expect(healthFns.length).toBe(1);
     expect(disk.checkStorage).not.toHaveBeenCalled();
   });
 });
