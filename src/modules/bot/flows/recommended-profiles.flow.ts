@@ -598,6 +598,7 @@ async function enterMobileMoneySubFlow(
     amount: fee,
     description,
     requestType: PaymentRequestType.RECOMMENDATION_CONTACT,
+    options: { recommendationWorkerId: workerId },
   });
   const nextState: BotState = {
     ...state,

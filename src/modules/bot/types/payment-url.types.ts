@@ -19,6 +19,6 @@ export interface IPaymentUrlService {
     operator: string;
     description: string;
     requestType: PaymentRequestType;
-    options?: { contactUnlockAttemptId?: string };
+    options?: { contactUnlockAttemptId?: string; recommendationWorkerId?: string };
   }): Promise<{ success: boolean; gatewayRef?: string; error?: string }>;
 }

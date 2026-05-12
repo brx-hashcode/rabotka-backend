@@ -142,7 +142,7 @@ export class PaymentService {
     operator: string;
     description: string;
     requestType: PaymentRequestType;
-    options?: { contactUnlockAttemptId?: string };
+    options?: { contactUnlockAttemptId?: string; recommendationWorkerId?: string };
   }): Promise<{ success: boolean; gatewayRef?: string; error?: string }> {
     const token = randomUUID();
     const paymentRequest = await this.prisma.paymentRequest.create({
@@ -154,6 +154,9 @@ export class PaymentService {
         request_type: params.requestType,
         ...(params.options?.contactUnlockAttemptId && {
           contact_unlock_attempt_id: params.options.contactUnlockAttemptId,
+        }),
+        ...(params.options?.recommendationWorkerId && {
+          recommendation_worker_id: params.options.recommendationWorkerId,
         }),
       },
     });
