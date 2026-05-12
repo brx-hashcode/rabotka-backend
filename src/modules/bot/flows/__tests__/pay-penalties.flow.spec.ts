@@ -39,6 +39,9 @@ function makeCtx(
       createPaymentUrl: jest
         .fn()
         .mockResolvedValue('https://pay.example.com/pay/token123'),
+      initiateDirectPayment: jest
+        .fn()
+        .mockResolvedValue({ success: true, gatewayRef: 'gw-ref-123' }),
     } as unknown as PayPenaltiesContext['paymentService'],
     invoiceService: {
       create: jest.fn().mockResolvedValue({}),
@@ -98,12 +101,14 @@ describe('runPayPenaltiesFlow()', () => {
     expect(result.clearState).toBe(true);
   });
 
-  it('sends mobile money link on "1" input', async () => {
+  it('enters mobile money sub-flow on "1" input', async () => {
     const ctx = makeCtx();
     const state = makeState();
     const result = await runPayPenaltiesFlow(state, '1', workerProfile, ctx);
-    expect(result.clearState).toBe(true);
+    // Sub-flow starts: asks whether to use registered number
     expect(result.reply[0]).toContain('Mobile Money');
+    expect(result.nextState).toBeDefined();
+    expect(result.clearState).toBeUndefined();
   });
 
   it('shows wallet payment option on "2" input', async () => {
