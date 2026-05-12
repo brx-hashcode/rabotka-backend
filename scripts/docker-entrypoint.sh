@@ -14,7 +14,7 @@ echo "Redis is ready!"
 
 # Deploy pending migrations using direct connection (bypasses PgBouncer)
 echo "Running Prisma migrations..."
-DATABASE_URL="${DIRECT_DATABASE_URL:-$DATABASE_URL}" pnpm exec prisma migrate deploy
+pnpm exec prisma migrate deploy
 echo "Migrations deployed!"
 
 # Execute the command
