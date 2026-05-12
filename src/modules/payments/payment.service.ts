@@ -7,8 +7,9 @@ import { AdminNotificationEvent } from '../../common/events/admin-notification.e
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { BotNotificationService } from '../bot/services/bot-notification.service';
 import { QueueService } from '../../common/services/queue/queue.service';
-import { PAYMENT_QUEUE } from '../../common/services/queue/queue.module';
+import { PAYMENT_QUEUE, POLL_PAYMENT_STATUS_QUEUE } from '../../common/services/queue/queue.module';
 import { SystemConfigService } from '../system-config/system-config.service';
+import type { PollPaymentStatusJobData } from '../payment-request/poll-payment-status.processor';
 import { generatePaymentReference } from '../../common/utils/payment-reference';
 import { PaymentGatewayService } from '../../common/services/payment/payment-gateway.service';
 
@@ -152,6 +153,9 @@ export class PaymentService {
         amount: params.amount,
         description: params.description,
         request_type: params.requestType,
+        status: 'PROCESSING',
+        phone: params.phone,
+        operator: params.operator,
         ...(params.options?.contactUnlockAttemptId && {
           contact_unlock_attempt_id: params.options.contactUnlockAttemptId,
         }),
@@ -161,6 +165,7 @@ export class PaymentService {
       },
     });
 
+    let gatewayRef: string;
     try {
       const result = await this.paymentGateway.initiatePayment({
         amount: params.amount,
@@ -170,18 +175,58 @@ export class PaymentService {
         description: params.description,
         metadata: { operator: params.operator },
       });
-
+      gatewayRef = result.gatewayRef;
+    } catch (err) {
+      // Revert to PENDING so webhook can still resolve if gateway call failed but USSD was triggered
       await this.prisma.paymentRequest.update({
         where: { id: paymentRequest.id },
-        data: { gateway_payment_ref: result.gatewayRef },
+        data: { status: 'PENDING' },
       });
-
-      return { success: true, gatewayRef: result.gatewayRef };
-    } catch (err) {
       const error = err instanceof Error ? err.message : 'Gateway error';
       this.logger.error(`initiateDirectPayment failed for ${params.profileId}: ${error}`);
       return { success: false, error };
     }
+
+    const activeGateway = await this.systemConfig
+      .getPaymentGatewayDriver()
+      .catch(() => 'MONETBIL');
+
+    await this.prisma.paymentRequest.update({
+      where: { id: paymentRequest.id },
+      data: {
+        gateway: activeGateway,
+        gateway_payment_ref: gatewayRef,
+        monetbil_payment_ref: gatewayRef,
+      },
+    });
+
+    // Enqueue polling — same as web UI path; webhook is primary but polling is the safety net
+    await this.queueService
+      .addJob<PollPaymentStatusJobData>(
+        POLL_PAYMENT_STATUS_QUEUE,
+        {
+          requestId: paymentRequest.id,
+          token: paymentRequest.token,
+          gatewayRef,
+          attempt: 1,
+          maxAttempts: 10,
+          intervalMs: 5000,
+          profileId: params.profileId,
+          amount: params.amount,
+          phone: params.phone,
+          operator: params.operator,
+          requestType: params.requestType,
+          gateway: activeGateway,
+        },
+        { delay: 5000 },
+      )
+      .catch((err) =>
+        this.logger.warn(
+          `Failed to enqueue poll job for request ${paymentRequest.id}: ${err instanceof Error ? err.message : String(err)}`,
+        ),
+      );
+
+    return { success: true, gatewayRef };
   }
 
   async handlePenaltyPaymentSuccess(profileId: string): Promise<void> {
