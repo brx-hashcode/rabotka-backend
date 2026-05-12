@@ -16,8 +16,8 @@ services:
       test: ["CMD", "wget", "-qO-", "http://localhost:${PORT:-8000}/api/v1/health"]
       interval: 10s
       timeout: 5s
-      retries: 6
-      start_period: 30s
+      retries: 12
+      start_period: 120s
     networks:
       - public
       - internal
