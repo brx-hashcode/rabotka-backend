@@ -98,25 +98,19 @@ describe('runPayPenaltiesFlow()', () => {
     expect(result.clearState).toBe(true);
   });
 
-  it('marks penalties paid on "1" input and returns success', async () => {
+  it('sends mobile money link on "1" input', async () => {
     const ctx = makeCtx();
     const state = makeState();
     const result = await runPayPenaltiesFlow(state, '1', workerProfile, ctx);
     expect(result.clearState).toBe(true);
-    expect(ctx.applicationService.markPenaltiesPaid).toHaveBeenCalledWith(
-      'worker-1',
-    );
-    expect(result.reply[0]).toContain('Paiement enregistré');
+    expect(result.reply[0]).toContain('Mobile Money');
   });
 
-  it('returns clear account message when no penalties found', async () => {
-    const ctx = makeCtx(
-      jest.fn().mockResolvedValue({ paidCount: 0, totalAmount: 0 }),
-    );
+  it('shows wallet payment option on "2" input', async () => {
+    const ctx = makeCtx();
     const state = makeState();
-    const result = await runPayPenaltiesFlow(state, '1', workerProfile, ctx);
-    expect(result.clearState).toBe(true);
-    expect(result.reply[0]).toContain('Aucune pénalité');
+    const result = await runPayPenaltiesFlow(state, '2', workerProfile, ctx);
+    expect(result.reply[0]).toContain('portefeuille');
   });
 });
 

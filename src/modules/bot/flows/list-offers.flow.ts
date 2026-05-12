@@ -49,9 +49,13 @@ function handleListStep(params: FlowParams): Promise<FlowResult> | FlowResult {
   if (choice >= 1 && choice <= offerIds.length) {
     return handleListSelectOffer(choice - 1, params);
   }
+  const nextPageIdx = offerIds.length + 1;
+  const menuIdx = offerIds.length + 2;
+  if (choice === nextPageIdx && nextCursor) return handleLoadMore(params);
+  if (choice === menuIdx) return goToMenu();
   return {
     reply: [
-      `*TAPEZ UN NUMÉRO (1-${offerIds.length}) POUR SÉLECTIONNER UNE OFFRE${nextCursor ? ', S (suite)' : ''}, M (menu).*`,
+      `*TAPEZ UN NUMÉRO (1-${offerIds.length}) POUR SÉLECTIONNER UNE OFFRE${nextCursor ? `, ${nextPageIdx} (voir plus)` : ''}, ${menuIdx} (menu).*`,
     ],
     nextState: state,
   };

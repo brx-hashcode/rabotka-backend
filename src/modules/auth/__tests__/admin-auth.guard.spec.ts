@@ -108,23 +108,23 @@ describe('AdminAuthGuard', () => {
     return { guard, ctx };
   }
 
-  it('allows admin users with valid token', () => {
+  it('allows admin users with valid token', async () => {
     const { guard, ctx } = buildGuardAndContext({
       sub: 'admin-1',
       type: 'admin',
     });
-    expect(guard.canActivate(ctx)).toBe(true);
+    await expect(guard.canActivate(ctx)).resolves.toBe(true);
   });
 
-  it('throws UnauthorizedException when user type is profile', () => {
+  it('throws UnauthorizedException when user type is profile', async () => {
     const { guard, ctx } = buildGuardAndContext({
       sub: 'profile-1',
       type: 'profile',
     });
-    expect(() => guard.canActivate(ctx)).toThrow(UnauthorizedException);
+    await expect(guard.canActivate(ctx)).rejects.toThrow(UnauthorizedException);
   });
 
-  it('throws UnauthorizedException when user type is missing userId', () => {
+  it('throws UnauthorizedException when user type is missing userId', async () => {
     const request: Record<string, unknown> = {
       cookies: { 'auth-token': 'token' },
       headers: {},
@@ -162,6 +162,6 @@ describe('AdminAuthGuard', () => {
       }),
     } as unknown as ExecutionContext;
 
-    expect(() => guard.canActivate(ctx)).toThrow(UnauthorizedException);
+    await expect(guard.canActivate(ctx)).rejects.toThrow(UnauthorizedException);
   });
 });

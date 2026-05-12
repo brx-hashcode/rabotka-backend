@@ -303,6 +303,17 @@ export async function runCandidaturesListFlow(
     return handlePageNav(state, payload, items, pageIndex, normalized);
   }
 
+  // Also accept numeric for Voir plus / menu (matches formatted button output)
+  const numericInput = /^\d+$/.test(trimmed) ? Number.parseInt(trimmed, 10) : 0;
+  const nextPageIdx = PAGE_SIZE + 1;
+  const menuIdx = PAGE_SIZE + 2;
+  if (numericInput === nextPageIdx && hasMoreItems(items, pageIndex)) {
+    return handlePageNav(state, payload, items, pageIndex, 's');
+  }
+  if (numericInput === menuIdx) {
+    return { reply: [menuMessage(profile.profile_type)], clearState: true };
+  }
+
   return handleListSelection(state, payload, items, pageIndex, trimmed, ctx);
 }
 

@@ -135,7 +135,7 @@ describe('runCandidaturesListFlow()', () => {
       makeCtx(),
     );
     expect(result.nextState).toBe(state);
-    expect(result.reply[0]).toContain('RÉPONDEZ');
+    expect(result.reply[0]).toContain('TAPEZ');
   });
 
   describe('step: detail', () => {

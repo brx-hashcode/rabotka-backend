@@ -273,7 +273,7 @@ describe('runCancelApplicationFlow()', () => {
         ctx,
       );
       expect(result.nextState).toBeDefined();
-      expect(result.reply[0]).toContain('pénalité');
+      expect(result.reply[0]).toContain('Pénalité');
     });
 
     it('requires reason for late cancellation', async () => {

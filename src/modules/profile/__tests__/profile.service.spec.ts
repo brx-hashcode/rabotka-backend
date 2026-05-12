@@ -28,6 +28,8 @@ const baseProfile = {
   _count: { job_offers: 0, applications: 2, penalties: 1 },
   kyc_documents: [],
   kyc_verification_images: [],
+  categories: [],
+  category: null,
 };
 
 function makePrisma() {
@@ -270,7 +272,7 @@ describe('ProfileService', () => {
     it('marks penalty as paid', async () => {
       prisma.penalty.findUnique.mockResolvedValue({
         id: 'pen-1',
-        worker_id: 'p-1',
+        profile_id: 'p-1',
         paid_at: null,
       });
       await service.markPenaltyPaid('pen-1', 'p-1');
@@ -280,7 +282,7 @@ describe('ProfileService', () => {
     it('throws NotFoundException when penalty does not belong to profile', async () => {
       prisma.penalty.findUnique.mockResolvedValue({
         id: 'pen-1',
-        worker_id: 'other',
+        profile_id: 'other',
       });
       await expect(service.markPenaltyPaid('pen-1', 'p-1')).rejects.toThrow(
         'Pénalité introuvable',
@@ -290,7 +292,7 @@ describe('ProfileService', () => {
     it('does nothing when already paid', async () => {
       prisma.penalty.findUnique.mockResolvedValue({
         id: 'pen-1',
-        worker_id: 'p-1',
+        profile_id: 'p-1',
         paid_at: new Date(),
       });
       await service.markPenaltyPaid('pen-1', 'p-1');

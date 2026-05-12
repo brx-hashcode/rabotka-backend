@@ -134,7 +134,7 @@ describe('FileService', () => {
     it('returns file with url', async () => {
       const result = await service.getFile('file-1');
       expect(result.url).toBeDefined();
-      expect(storage.getUrl).toHaveBeenCalledWith('key/file.jpg');
+      expect(storage.getUrl).toHaveBeenCalledWith('key/file.jpg', expect.any(Object));
     });
 
     it('throws NotFoundException when file not found', async () => {

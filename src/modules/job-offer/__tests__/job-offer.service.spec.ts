@@ -69,6 +69,9 @@ describe('JobOfferService', () => {
         findUnique: jest.fn(),
         update: jest.fn(),
       },
+      penalty: {
+        count: jest.fn().mockResolvedValue(0),
+      },
     };
 
     const mockMailService = {
@@ -77,6 +80,12 @@ describe('JobOfferService', () => {
 
     const mockSystemConfigService = {
       getRaw: jest.fn().mockResolvedValue('0'),
+      getFees: jest.fn().mockResolvedValue({
+        reliabilityScoreMin: 0,
+        jobPostingFeeFcfa: 0,
+        cancellationThresholdHours: 4,
+        lateCancellationPenaltyFcfa: 5000,
+      }),
     };
 
     const mockWalletService = {
