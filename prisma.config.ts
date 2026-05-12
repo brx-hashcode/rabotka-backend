@@ -13,5 +13,5 @@ export default defineConfig({
   // When running behind PgBouncer, set DATABASE_URL with ?pgbouncer=true for
   // runtime and run migrations with DATABASE_DIRECT_URL exported separately:
   //   DATABASE_URL=$DATABASE_DIRECT_URL pnpm prisma migrate deploy
-  datasource: { url: process.env.DATABASE_URL },
+  datasource: { url: process.env.DIRECT_DATABASE_URL ?? process.env.DATABASE_URL },
 });
