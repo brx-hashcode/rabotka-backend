@@ -6,5 +6,12 @@ export {
 export { verificationLinkMessage } from './verification-link';
 export { otpMessage } from './otp';
 export { accountActivatedMessage } from './account-activated';
+export {
+  paymentUseRegisteredNumberPrompt,
+  paymentEnterPhonePrompt,
+  paymentChooseOperatorPrompt,
+  paymentPendingMessage,
+  paymentDirectFailedMessage,
+} from './payment-direct';
 export { paymentApprovedMessage } from './payment-approved';
 export { welcomeActivationMessage } from './welcome-activation';

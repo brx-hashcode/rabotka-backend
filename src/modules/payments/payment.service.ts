@@ -10,6 +10,7 @@ import { QueueService } from '../../common/services/queue/queue.service';
 import { PAYMENT_QUEUE } from '../../common/services/queue/queue.module';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { generatePaymentReference } from '../../common/utils/payment-reference';
+import { PaymentGatewayService } from '../../common/services/payment/payment-gateway.service';
 
 export type PaymentJobData = {
   paymentId: string;
@@ -30,6 +31,7 @@ export class PaymentService {
     private readonly queueService: QueueService,
     private readonly systemConfig: SystemConfigService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly paymentGateway: PaymentGatewayService,
   ) {}
 
   private getFrontendUrl(): string {
@@ -131,6 +133,52 @@ export class PaymentService {
     }
 
     return { paymentId: payment.id };
+  }
+
+  async initiateDirectPayment(params: {
+    profileId: string;
+    amount: number;
+    phone: string;
+    operator: string;
+    description: string;
+    requestType: PaymentRequestType;
+    options?: { contactUnlockAttemptId?: string };
+  }): Promise<{ success: boolean; gatewayRef?: string; error?: string }> {
+    const token = randomUUID();
+    const paymentRequest = await this.prisma.paymentRequest.create({
+      data: {
+        profile_id: params.profileId,
+        token,
+        amount: params.amount,
+        description: params.description,
+        request_type: params.requestType,
+        ...(params.options?.contactUnlockAttemptId && {
+          contact_unlock_attempt_id: params.options.contactUnlockAttemptId,
+        }),
+      },
+    });
+
+    try {
+      const result = await this.paymentGateway.initiatePayment({
+        amount: params.amount,
+        currency: 'XAF',
+        externalId: paymentRequest.id,
+        phone: params.phone,
+        description: params.description,
+        metadata: { operator: params.operator },
+      });
+
+      await this.prisma.paymentRequest.update({
+        where: { id: paymentRequest.id },
+        data: { gateway_payment_ref: result.gatewayRef },
+      });
+
+      return { success: true, gatewayRef: result.gatewayRef };
+    } catch (err) {
+      const error = err instanceof Error ? err.message : 'Gateway error';
+      this.logger.error(`initiateDirectPayment failed for ${params.profileId}: ${error}`);
+      return { success: false, error };
+    }
   }
 
   async handlePenaltyPaymentSuccess(profileId: string): Promise<void> {

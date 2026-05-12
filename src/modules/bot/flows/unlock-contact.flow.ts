@@ -8,12 +8,18 @@ import {
 import type { ContactUnlockService } from '../../contact-unlock/contact-unlock.service';
 import type { WalletService } from '../../wallet/wallet.service';
 import type { IPaymentUrlService } from '../types/payment-url.types';
+import type { PaymentService } from '../../payments/payment.service';
 import type { BotNotificationService } from '../services/bot-notification.service';
+import {
+  getMobileMoneyInitialPayload,
+  runMobileMoneySubFlow,
+} from '../utils/mobile-money-subflow';
+import { PaymentRequestType } from '@prisma/client';
 
 export type UnlockContactContext = {
   contactUnlockService: ContactUnlockService;
   walletService: WalletService;
-  paymentService: IPaymentUrlService;
+  paymentService: IPaymentUrlService & Pick<PaymentService, 'initiateDirectPayment'>;
   botNotification: BotNotificationService;
 };
 
@@ -87,14 +93,7 @@ async function handleStep1(args: StepArgs): Promise<FlowResult> {
 
   const mobileMoneyOption = hasFunds ? '2' : '1';
   if (trimmed === mobileMoneyOption) {
-    return handleMobileMoney({
-      profile,
-      otherName,
-      amount,
-      expiresAt,
-      attemptId,
-      ctx,
-    });
+    return enterMobileMoneySubFlow({ state, profile, amount, attemptId, ctx });
   }
 
   const laterOption = hasFunds ? '3' : '2';
@@ -188,37 +187,36 @@ async function handleWalletCredit(args: {
   }
 }
 
-async function handleMobileMoney(args: {
+async function enterMobileMoneySubFlow(args: {
+  state: BotState;
   profile: BotProfile;
-  otherName: string;
   amount: number;
-  expiresAt: Date;
   attemptId: string;
   ctx: UnlockContactContext;
 }): Promise<FlowResult> {
-  const { profile, otherName, amount, expiresAt, attemptId, ctx } = args;
-  const paymentUrl = await ctx.paymentService.createPaymentUrl(
-    profile.id,
+  const { state, profile, amount, attemptId, ctx } = args;
+  const description = 'Déverrouillage de contact';
+  const mmPayload = getMobileMoneyInitialPayload({
     amount,
-    'Déverrouillage de contact',
-    attemptId,
-  );
-  return {
-    reply: [
-      [
-        `*PAIEMENT PAR MOBILE MONEY*`,
-        ``,
-        `Pour débloquer le contact de *${otherName}*, effectuez un paiement de *${amount} FCFA* via le lien ci-dessous :`,
-        ``,
-        paymentUrl,
-        ``,
-        `✅ Une fois le paiement confirmé des deux côtés (vous et *${otherName}*), vous recevrez les coordonnées.`,
-        '',
-        `Si l'autre partie ne paie pas avant le *${new Date(expiresAt).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}*, votre paiement sera reversé vers votre wallet interne.`,
-      ].join('\n'),
-    ],
-    clearState: true,
+    description,
+    requestType: PaymentRequestType.CONTACT_UNLOCK,
+    options: { contactUnlockAttemptId: attemptId },
+  });
+  const nextState: BotState = {
+    ...state,
+    payload: { ...state.payload, ...mmPayload },
+    updatedAt: new Date().toISOString(),
   };
+  return runMobileMoneySubFlow(nextState, '', profile, {
+    paymentService: ctx.paymentService as PaymentService,
+    getFallbackUrl: () =>
+      ctx.paymentService.createPaymentUrl(
+        profile.id,
+        amount,
+        description,
+        attemptId,
+      ),
+  });
 }
 
 export async function runUnlockContactFlow(
@@ -237,6 +235,23 @@ export async function runUnlockContactFlow(
   }
 
   const payload = state.payload ?? {};
+
+  // In mobile money sub-flow
+  if (payload._mm_step) {
+    const attemptIdForFallback = payload.attemptId as string;
+    const amountForFallback = (payload._mm_amount as number) ?? 0;
+    return runMobileMoneySubFlow(state, input, profile, {
+      paymentService: ctx.paymentService as PaymentService,
+      getFallbackUrl: () =>
+        ctx.paymentService.createPaymentUrl(
+          profile.id,
+          amountForFallback,
+          'Déverrouillage de contact',
+          attemptIdForFallback,
+        ),
+    });
+  }
+
   const attemptId = payload.attemptId as string | undefined;
   const otherName = (payload.otherName as string) ?? 'votre contact';
   const amount = (payload.amount as number) ?? 0;

@@ -5,6 +5,7 @@ import type { ApplicationService } from '../../application/application.service';
 import type { WalletService } from '../../wallet/wallet.service';
 import type { InvoiceService } from '../../invoice/invoice.service';
 import type { IPaymentUrlService } from '../types/payment-url.types';
+import type { PaymentService } from '../../payments/payment.service';
 import {
   WalletTransactionType,
   PaymentRequestType,
@@ -17,11 +18,15 @@ import {
 import { generatePaymentReference } from '../../../common/utils/payment-reference';
 import { randomUUID } from 'crypto';
 import type { PrismaService } from '../../../common/services/prisma/prisma.service';
+import {
+  getMobileMoneyInitialPayload,
+  runMobileMoneySubFlow,
+} from '../utils/mobile-money-subflow';
 
 export type PayPenaltiesContext = {
   applicationService: ApplicationService;
   walletService: WalletService;
-  paymentService: IPaymentUrlService;
+  paymentService: IPaymentUrlService & Pick<PaymentService, 'initiateDirectPayment'>;
   invoiceService: InvoiceService;
   prisma: PrismaService;
 };
@@ -188,35 +193,34 @@ async function handleWalletConfirmationStep(
   };
 }
 
-async function handleMobileMoneyOption(
+async function enterMobileMoneySubFlow(
+  state: BotState,
   profile: BotProfile,
   ctx: PayPenaltiesContext,
   totalAmount: number,
   penaltyCount: number,
 ): Promise<FlowResult> {
-  const paymentUrl = await ctx.paymentService.createPaymentUrl(
-    profile.id,
-    totalAmount,
-    `Paiement de pénalités (${penaltyCount} pénalité(s))`,
-    PaymentRequestType.PENALTY_BATCH,
-  );
-
-  return {
-    reply: [
-      [
-        `*Paiement Mobile Money*`,
-        ``,
-        `Effectuez un paiement de *${totalAmount.toLocaleString('fr-FR')} FCFA* via le lien ci-dessous :`,
-        ``,
-        paymentUrl,
-        ``,
-        `Votre compte sera automatiquement débloqué dès réception du paiement.`,
-        ``,
-        `Tapez *MENU* pour revenir au menu principal.`,
-      ].join('\n'),
-    ],
-    clearState: true,
+  const description = `Paiement de pénalités (${penaltyCount} pénalité(s))`;
+  const mmPayload = getMobileMoneyInitialPayload({
+    amount: totalAmount,
+    description,
+    requestType: PaymentRequestType.PENALTY_BATCH,
+  });
+  const nextState: BotState = {
+    ...state,
+    payload: { ...state.payload, ...mmPayload },
+    updatedAt: new Date().toISOString(),
   };
+  return runMobileMoneySubFlow(nextState, '', profile, {
+    paymentService: ctx.paymentService as PaymentService,
+    getFallbackUrl: () =>
+      ctx.paymentService.createPaymentUrl(
+        profile.id,
+        totalAmount,
+        description,
+        PaymentRequestType.PENALTY_BATCH,
+      ),
+  });
 }
 
 async function handleWalletOption(
@@ -268,7 +272,7 @@ async function buildMainPaymentPrompt(
         ``,
         `*Comment souhaitez-vous régler ?*`,
         ``,
-        `1- Mobile Money (lien de paiement sécurisé)`,
+        `1- Mobile Money`,
         canUseWallet
           ? `2- Utiliser mon crédit portefeuille (${balance.toLocaleString('fr-FR')} FCFA disponibles)`
           : `2- Portefeuille *(solde insuffisant : ${balance.toLocaleString('fr-FR')} FCFA)*`,
@@ -313,8 +317,22 @@ export async function runPayPenaltiesFlow(
     );
   }
 
+  // In mobile money sub-flow
+  if (payload._mm_step) {
+    return runMobileMoneySubFlow(state, input, profile, {
+      paymentService: ctx.paymentService as PaymentService,
+      getFallbackUrl: () =>
+        ctx.paymentService.createPaymentUrl(
+          profile.id,
+          totalAmount,
+          `Paiement de pénalités (${penaltyCount} pénalité(s))`,
+          PaymentRequestType.PENALTY_BATCH,
+        ),
+    });
+  }
+
   if (trimmed === '1') {
-    return handleMobileMoneyOption(profile, ctx, totalAmount, penaltyCount);
+    return enterMobileMoneySubFlow(state, profile, ctx, totalAmount, penaltyCount);
   }
 
   if (trimmed === '2') {
