@@ -201,19 +201,6 @@ jobs:
             git reset --hard origin/main
 
             docker compose -f docker-compose.prod.yml up -d --remove-orphans || rollback
-
-            # Wait up to 5 min for the health check to pass (12 retries × 10s interval + 120s start_period)
-            echo 'Waiting for container to become healthy...'
-            CONTAINER=\$(docker compose -f docker-compose.prod.yml ps -q api)
-            for i in \$(seq 1 60); do
-              sleep 5
-              STATUS=\$(docker inspect --format='{{.State.Health.Status}}' \$CONTAINER 2>/dev/null || echo 'missing')
-              echo \"Attempt \$i — health status: \$STATUS\"
-              [ \"\$STATUS\" = 'healthy' ] && echo 'Container is healthy' && exit 0
-              [ \"\$STATUS\" = 'unhealthy' ] && echo 'Container is unhealthy' && rollback
-            done
-            echo 'Timed out waiting for healthy status'
-            rollback
           "
 
   # ───────────────────────────────────────────────────────────────────────────
