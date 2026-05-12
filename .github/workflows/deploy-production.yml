@@ -103,6 +103,7 @@ jobs:
           cat > /tmp/deploy.env << EOF
           # --- from Vault ---
           DATABASE_URL=$(echo "$VAULT_SECRET" | jq -r '.DATABASE_URL')
+          DIRECT_DATABASE_URL=$(echo "$VAULT_SECRET" | jq -r '.DIRECT_DATABASE_URL')
           REDIS_HOST=$(echo "$VAULT_SECRET" | jq -r '.REDIS_HOST')
           REDIS_PORT=$(echo "$VAULT_SECRET" | jq -r '.REDIS_PORT')
           REDIS_PASSWORD=$(echo "$VAULT_SECRET" | jq -r '.REDIS_PASSWORD')

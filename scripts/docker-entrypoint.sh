@@ -12,9 +12,9 @@ echo "Database is ready!"
 # Redis is guaranteed healthy by Docker depends_on healthcheck
 echo "Redis is ready!"
 
-# Deploy pending migrations
+# Deploy pending migrations using direct connection (bypasses PgBouncer)
 echo "Running Prisma migrations..."
-pnpm exec prisma migrate deploy
+DATABASE_URL="${DIRECT_DATABASE_URL:-$DATABASE_URL}" pnpm exec prisma migrate deploy
 echo "Migrations deployed!"
 
 # Execute the command
