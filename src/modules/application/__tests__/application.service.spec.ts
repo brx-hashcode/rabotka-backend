@@ -99,7 +99,7 @@ describe('ApplicationService', () => {
         count: jest.fn(),
       },
       payment: { create: jest.fn() },
-      assignment: { create: jest.fn(), updateMany: jest.fn() },
+      assignment: { create: jest.fn(), updateMany: jest.fn(), findUnique: jest.fn().mockResolvedValue(null) },
       $executeRaw: jest.fn().mockResolvedValue(0),
       $transaction: jest.fn().mockImplementation((arg: unknown) => {
         if (typeof arg === 'function') {
