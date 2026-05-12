@@ -57,6 +57,9 @@ function makeCtx(
       createPaymentUrl: jest
         .fn()
         .mockResolvedValue('https://example.com/pay/token-abc'),
+      initiateDirectPayment: jest
+        .fn()
+        .mockResolvedValue({ success: true, gatewayRef: 'gw-ref-123' }),
     } as unknown as UnlockContactContext['paymentService'],
     botNotification: {
       sendContactUnlockedNotification: jest.fn().mockResolvedValue(undefined),
@@ -130,7 +133,7 @@ describe('runUnlockContactFlow()', () => {
   });
 
   describe('step 1 — mobile money selection', () => {
-    it('worker with no balance selects option 1 → gets payment URL and state clears', async () => {
+    it('worker with no balance selects option 1 → enters mobile money sub-flow', async () => {
       const ctx = makeCtx({
         walletService: {
           getProfileWalletBalance: jest.fn().mockResolvedValue(0),
@@ -142,17 +145,13 @@ describe('runUnlockContactFlow()', () => {
         workerProfile,
         ctx,
       );
-      expect(ctx.paymentService.createPaymentUrl).toHaveBeenCalledWith(
-        'worker-1',
-        3000,
-        'Déverrouillage de contact',
-        'attempt-1',
-      );
-      expect(result.reply[0]).toContain('https://example.com/pay/token-abc');
-      expect(result.clearState).toBe(true);
+      // Sub-flow starts: asks whether to use registered number
+      expect(result.reply[0]).toContain('Mobile Money');
+      expect(result.nextState).toBeDefined();
+      expect(result.clearState).toBeUndefined();
     });
 
-    it('worker with balance selects option 2 → gets payment URL', async () => {
+    it('worker with balance selects option 2 → enters mobile money sub-flow', async () => {
       const ctx = makeCtx({
         walletService: {
           getProfileWalletBalance: jest.fn().mockResolvedValue(5000),
@@ -164,8 +163,10 @@ describe('runUnlockContactFlow()', () => {
         workerProfile,
         ctx,
       );
-      expect(ctx.paymentService.createPaymentUrl).toHaveBeenCalled();
-      expect(result.clearState).toBe(true);
+      // Sub-flow starts: asks whether to use registered number
+      expect(result.reply[0]).toContain('Mobile Money');
+      expect(result.nextState).toBeDefined();
+      expect(result.clearState).toBeUndefined();
     });
 
     it('worker selects "later" option → clears state with reminder', async () => {
