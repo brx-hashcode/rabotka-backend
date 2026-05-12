@@ -7,14 +7,14 @@ export function welcomeActivationMessage(
   const actions =
     profileType === 'WORKER'
       ? [
-          "• Consulter les offres d'emploi disponibles",
-          '• Postuler à une mission',
-          '• Voir vos offres recommandées (tapez *3* au menu)',
+          "• Consulter les offres d'emploi",
+          '• Postuler à une offre',
+          '• Voir vos offres recommandées',
           '• Utiliser votre crédit pour vos prochaines actions',
         ]
       : [
           "• Publier une offre d'emploi",
-          '• Consulter les profils de travailleurs recommandés (tapez *5* au menu)',
+          '• Consulter les profils de travailleurs recommandés',
           '• Gérer vos candidatures reçues',
           '• Utiliser votre crédit pour vos prochaines actions',
         ];
