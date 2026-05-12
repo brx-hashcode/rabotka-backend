@@ -1,6 +1,6 @@
 import { Injectable, Logger, forwardRef, Inject } from '@nestjs/common';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
-import { AccountStatus, BillingStatus } from '@prisma/client';
+import { AccountStatus, BillingStatus, ProfileType } from '@prisma/client';
 import { JobOfferService } from '../../job-offer/job-offer.service';
 import { ApplicationService } from '../../application/application.service';
 import { BotStateService } from './bot-state.service';
@@ -17,9 +17,13 @@ import {
   accountSuspendedBotMessage,
   hasPenaltiesBotMessage,
 } from '../messages/menu.messages';
+import {
+  whatsappAlreadyVerifiedMessage,
+  welcomeActivationMessage,
+} from '../../whatsapp/templates';
 import type { BotProfile, BotState } from '../types/bot-state.types';
 import type { FlowContext, FlowResult } from '../types/flow.types';
-import { FLOW_IDS, CMD_MENU } from '../bot.constants';
+import { FLOW_IDS, CMD_MENU, CMD_VERIFY_WHATSAPP } from '../bot.constants';
 import {
   runPublishJobFlow,
   getPublishJobInitialState,
@@ -89,7 +93,8 @@ import { InvoiceService } from '../../invoice/invoice.service';
 
 const INACTIVE_MESSAGE = `Votre compte est créé mais pas encore activé. Cliquez sur le lien de confirmation que nous vous avons envoyé par WhatsApp pour l’activer.`;
 
-const WHATSAPP_NOT_CONNECTED_MESSAGE = `⚠️ Votre numéro WhatsApp n’est pas encore vérifié. Veuillez d’abord vérifier votre numéro WhatsApp via le lien de vérification qui vous a été envoyé.`;
+const WHATSAPP_NOT_CONNECTED_MESSAGE =
+  `⚠️ *Compte non activé*\n\nVotre numéro WhatsApp n’a pas encore été vérifié. Sans vérification, vous ne pouvez pas accéder à la plateforme.\n\nTapez *VERIFIER* pour activer votre compte instantanément.`;
 
 const NOT_FOUND_MESSAGE = `Ce numéro n'est pas encore enregistré. Inscrivez-vous sur notre site pour créer votre compte.`;
 
@@ -149,6 +154,32 @@ export class BotOrchestratorService {
     if (profile.status === AccountStatus.SUSPENDED) {
       const contact = await this.systemConfig.getContactInfo();
       return [accountSuspendedBotMessage(contact)];
+    }
+
+    const normalizedInput = text.trim().toLowerCase();
+    if (CMD_VERIFY_WHATSAPP.includes(normalizedInput)) {
+      if (profile.whatsapp_connected) {
+        return [whatsappAlreadyVerifiedMessage()];
+      }
+      if (profile.status === AccountStatus.PENDING_ACTIVATION) {
+        await this.prisma.profile.update({
+          where: { id: profileId },
+          data: { whatsapp_connected: true, status: AccountStatus.ACTIVE },
+        });
+        const profileType = profile.profile_type as ProfileType;
+        const creditAmount = await this.walletService
+          .grantWelcomeCredit(profileId, profileType)
+          .catch(() => 0);
+        const wallet = await this.walletService
+          .getOrCreateProfileWallet(profileId)
+          .catch(() => ({ balance: creditAmount }));
+        return [welcomeActivationMessage(profile.first_name, creditAmount, profile.profile_type, wallet.balance)];
+      }
+      await this.prisma.profile.update({
+        where: { id: profileId },
+        data: { whatsapp_connected: true },
+      });
+      return [whatsappAlreadyVerifiedMessage()];
     }
 
     if (!profile.whatsapp_connected) {
