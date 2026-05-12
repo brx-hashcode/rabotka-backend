@@ -74,6 +74,27 @@ async function bootstrap() {
   const csrfUtilities = app.get(CSRF_UTILITIES);
   app.use(csrfUtilities.doubleCsrfProtection);
 
+  // Ensure CSRF validation failures return JSON 403 (not Express HTML)
+  app.use(
+    (
+      err: unknown,
+      _req: import('express').Request,
+      res: import('express').Response,
+      next: import('express').NextFunction,
+    ) => {
+      const isCsrfError =
+        err instanceof Error &&
+        (err.message.toLowerCase().includes('csrf') ||
+          err.message.toLowerCase().includes('invalid') ||
+          (err as { code?: string }).code === 'EBADCSRFTOKEN');
+      if (isCsrfError) {
+        res.status(403).json({ statusCode: 403, message: 'Invalid CSRF token' });
+        return;
+      }
+      next(err);
+    },
+  );
+
   app.useGlobalInterceptors(new LoggingInterceptor());
 
   const config = new DocumentBuilder()
