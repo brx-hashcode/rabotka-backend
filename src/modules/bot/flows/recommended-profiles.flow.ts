@@ -16,6 +16,10 @@ import type { SystemConfigService } from '../../system-config/system-config.serv
 import type { ContactUnlockService } from '../../contact-unlock/contact-unlock.service';
 import type { WalletService } from '../../wallet/wallet.service';
 import type { IPaymentUrlService } from '../types/payment-url.types';
+import {
+  getMobileMoneyInitialPayload,
+  runMobileMoneySubFlow,
+} from '../utils/mobile-money-subflow';
 import type { BotNotificationService } from '../services/bot-notification.service';
 import type { InterestSignalService } from '../../interest-graph/interest-signal.service';
 import type { InvoiceService } from '../../invoice/invoice.service';
@@ -103,6 +107,23 @@ export async function runRecommendedProfilesFlow(
       ],
       clearState: true,
     };
+  }
+
+  // In mobile money sub-flow
+  if (payload._mm_step) {
+    const fee = (payload._mm_amount as number) ?? 0;
+    const workerId = payload._mm_worker_id as string;
+    return runMobileMoneySubFlow(state, input, profile, {
+      paymentService: ctx.paymentService,
+      getFallbackUrl: () =>
+        ctx.paymentService.createPaymentUrl(
+          profile.id,
+          fee,
+          (payload._mm_description as string) ?? 'Déverrouillage contact recommandé',
+          PaymentRequestType.RECOMMENDATION_CONTACT,
+          { recommendationWorkerId: workerId },
+        ),
+    });
   }
 
   if (state.step === 2 && selectedWorkerId) {
@@ -240,14 +261,7 @@ async function handlePaymentStep(
   }
 
   if (trimmed === '2') {
-    return generateMobileMoneyLink(
-      selectedWorkerId,
-      profile,
-      fee,
-      workerIds,
-      workerScores,
-      ctx,
-    );
+    return enterMobileMoneySubFlow(selectedWorkerId, profile, fee, workerIds, workerScores, state, ctx);
   }
 
   return showPaymentMethodPrompt({
@@ -558,12 +572,13 @@ function showPaymentMethodPrompt(opts: PaymentPromptOpts): FlowResult {
   };
 }
 
-async function generateMobileMoneyLink(
+async function enterMobileMoneySubFlow(
   workerId: string,
   profile: BotProfile,
   fee: number,
   workerIds: string[],
   workerScores: Record<string, number>,
+  state: BotState,
   ctx: RecommendedProfilesContext,
 ): Promise<FlowResult> {
   const worker = await ctx.prisma.profile.findFirst({
@@ -577,29 +592,35 @@ async function generateMobileMoneyLink(
     };
   }
   const workerName = `${worker.first_name} ${worker.last_name}`.trim();
+  const description = `Déverrouillage contact recommandé — ${workerName}`;
 
-  const paymentUrl = await ctx.paymentService.createPaymentUrl(
-    profile.id,
-    fee,
-    `Déverrouillage contact recommandé — ${workerName}`,
-    PaymentRequestType.RECOMMENDATION_CONTACT,
-    { recommendationWorkerId: workerId },
-  );
-
-  return {
-    reply: [
-      [
-        `*Paiement par mobile money*`,
-        '',
-        `Pour voir les coordonnées de *${workerName}*, effectuez un paiement de *${fee.toLocaleString('fr-FR')} FCFA* via le lien ci-dessous :`,
-        '',
-        paymentUrl,
-        '',
-        '✅ Une fois le paiement confirmé, vous recevrez les coordonnées par WhatsApp.',
-      ].join('\n'),
-    ],
-    clearState: true,
+  const mmPayload = getMobileMoneyInitialPayload({
+    amount: fee,
+    description,
+    requestType: PaymentRequestType.RECOMMENDATION_CONTACT,
+  });
+  const nextState: BotState = {
+    ...state,
+    payload: {
+      workerIds,
+      workerScores,
+      selectedWorkerId: workerId,
+      _mm_worker_id: workerId,
+      ...mmPayload,
+    },
+    updatedAt: new Date().toISOString(),
   };
+  return runMobileMoneySubFlow(nextState, '', profile, {
+    paymentService: ctx.paymentService,
+    getFallbackUrl: () =>
+      ctx.paymentService.createPaymentUrl(
+        profile.id,
+        fee,
+        description,
+        PaymentRequestType.RECOMMENDATION_CONTACT,
+        { recommendationWorkerId: workerId },
+      ),
+  });
 }
 
 export function getRecommendedProfilesInitialState(
