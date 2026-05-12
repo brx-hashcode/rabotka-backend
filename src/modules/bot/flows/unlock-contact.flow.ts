@@ -7,19 +7,18 @@ import {
 } from '../messages/contact-unlock.messages';
 import type { ContactUnlockService } from '../../contact-unlock/contact-unlock.service';
 import type { WalletService } from '../../wallet/wallet.service';
-import type { IPaymentUrlService } from '../types/payment-url.types';
-import type { PaymentService } from '../../payments/payment.service';
 import type { BotNotificationService } from '../services/bot-notification.service';
 import {
   getMobileMoneyInitialPayload,
   runMobileMoneySubFlow,
 } from '../utils/mobile-money-subflow';
 import { PaymentRequestType } from '@prisma/client';
+import type { IPaymentUrlService } from '../types/payment-url.types';
 
 export type UnlockContactContext = {
   contactUnlockService: ContactUnlockService;
   walletService: WalletService;
-  paymentService: IPaymentUrlService & Pick<PaymentService, 'initiateDirectPayment'>;
+  paymentService: IPaymentUrlService;
   botNotification: BotNotificationService;
 };
 
@@ -208,13 +207,14 @@ async function enterMobileMoneySubFlow(args: {
     updatedAt: new Date().toISOString(),
   };
   return runMobileMoneySubFlow(nextState, '', profile, {
-    paymentService: ctx.paymentService as PaymentService,
+    paymentService: ctx.paymentService,
     getFallbackUrl: () =>
       ctx.paymentService.createPaymentUrl(
         profile.id,
         amount,
         description,
-        attemptId,
+        PaymentRequestType.CONTACT_UNLOCK,
+        { contactUnlockAttemptId: attemptId },
       ),
   });
 }
@@ -241,13 +241,14 @@ export async function runUnlockContactFlow(
     const attemptIdForFallback = payload.attemptId as string;
     const amountForFallback = (payload._mm_amount as number) ?? 0;
     return runMobileMoneySubFlow(state, input, profile, {
-      paymentService: ctx.paymentService as PaymentService,
+      paymentService: ctx.paymentService,
       getFallbackUrl: () =>
         ctx.paymentService.createPaymentUrl(
           profile.id,
           amountForFallback,
           'Déverrouillage de contact',
-          attemptIdForFallback,
+          PaymentRequestType.CONTACT_UNLOCK,
+          { contactUnlockAttemptId: attemptIdForFallback },
         ),
     });
   }
