@@ -15,8 +15,6 @@ import Redis from 'ioredis';
 import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
 
 import { REDIS_KEY_PREFIX } from '../../common/services/redis/redis.constants';
-
-const JWT_BLOCKLIST_PREFIX = `${REDIS_KEY_PREFIX}jwtblocklist:`;
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
@@ -24,6 +22,8 @@ import { sendOtpEmail } from '../mail/templates';
 import { otpMessage } from '../whatsapp/templates';
 import * as otplib from 'otplib';
 import * as QRCode from 'qrcode';
+
+const JWT_BLOCKLIST_PREFIX = `${REDIS_KEY_PREFIX}jwtblocklist:`;
 
 const TOTP_PENDING_PREFIX = `${REDIS_KEY_PREFIX}admin:totp:pending:`; // email → JWT after email OTP
 const TOTP_PENDING_TTL = 300; // 5 min to enter TOTP code
@@ -554,7 +554,12 @@ export class AuthService {
 
     const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },
-      select: { id: true, is_active: true, phone_paired_at: true, totp_enabled: true },
+      select: {
+        id: true,
+        is_active: true,
+        phone_paired_at: true,
+        totp_enabled: true,
+      },
     });
     if (!user || !user.is_active) {
       throw new UnauthorizedException('Admin account not found or inactive');
@@ -614,7 +619,11 @@ export class AuthService {
   async consumeQrSession(
     sessionId: string,
     consumeNonce: string,
-  ): Promise<{ token?: string; totpRequired?: boolean; pendingToken?: string }> {
+  ): Promise<{
+    token?: string;
+    totpRequired?: boolean;
+    pendingToken?: string;
+  }> {
     const raw = await this.redis.get(this.qrKey(sessionId));
     if (!raw) throw new UnauthorizedException('QR session expired');
 
@@ -803,15 +812,23 @@ export class AuthService {
     return { secret, qrDataUrl };
   }
 
-  async enableTotp(userId: string, code: string): Promise<{ success: boolean }> {
+  async enableTotp(
+    userId: string,
+    code: string,
+  ): Promise<{ success: boolean }> {
     const pendingSecret = await this.redis.get(
       `${REDIS_KEY_PREFIX}admin:totp:setup:${userId}`,
     );
     if (!pendingSecret) {
-      throw new BadRequestException('No pending TOTP setup found. Start setup again.');
+      throw new BadRequestException(
+        'No pending TOTP setup found. Start setup again.',
+      );
     }
 
-    const { valid } = await otplib.verify({ token: code, secret: pendingSecret });
+    const { valid } = await otplib.verify({
+      token: code,
+      secret: pendingSecret,
+    });
     if (!valid) {
       throw new UnauthorizedException('Invalid TOTP code');
     }
@@ -825,7 +842,10 @@ export class AuthService {
     return { success: true };
   }
 
-  async disableTotp(userId: string, code: string): Promise<{ success: boolean }> {
+  async disableTotp(
+    userId: string,
+    code: string,
+  ): Promise<{ success: boolean }> {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: { totp_secret: true, totp_enabled: true },
@@ -834,7 +854,10 @@ export class AuthService {
       throw new BadRequestException('TOTP is not enabled');
     }
 
-    const { valid } = await otplib.verify({ token: code, secret: user.totp_secret });
+    const { valid } = await otplib.verify({
+      token: code,
+      secret: user.totp_secret,
+    });
     if (!valid) {
       throw new UnauthorizedException('Invalid TOTP code');
     }
@@ -858,7 +881,9 @@ export class AuthService {
     pendingToken: string,
     code: string,
   ): Promise<{ success: boolean; token: string }> {
-    const userId = await this.redis.get(`${TOTP_PENDING_PREFIX}${pendingToken}`);
+    const userId = await this.redis.get(
+      `${TOTP_PENDING_PREFIX}${pendingToken}`,
+    );
     if (!userId) {
       throw new UnauthorizedException('Session expired. Please sign in again.');
     }
@@ -875,7 +900,10 @@ export class AuthService {
       throw new UnauthorizedException('Ce compte administrateur est inactif');
     }
 
-    const { valid } = await otplib.verify({ token: code, secret: user.totp_secret });
+    const { valid } = await otplib.verify({
+      token: code,
+      secret: user.totp_secret,
+    });
     if (!valid) {
       throw new UnauthorizedException('Invalid authenticator code');
     }
