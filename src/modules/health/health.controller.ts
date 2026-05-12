@@ -53,6 +53,7 @@ export class HealthController {
 
     const healthChecks: Array<() => Promise<any>> = [
       () => this.memory.checkHeap('memory_heap', 150 * 1024 * 1024),
+      () => this.memory.checkRSS('memory_rss', 600 * 1024 * 1024),
     ];
 
     if (enableDiskCheck) {

@@ -2,6 +2,8 @@ name: Deploy — Production
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/rabotka-backend
 
 on:
   pull_request:
@@ -12,14 +14,46 @@ on:
 
 jobs:
   # ───────────────────────────────────────────────────────────────────────────
-  # JOB 1: Deploy to production
+  # JOB 1: Run test suite
+  # Blocks the deploy if any test fails.
+  # ───────────────────────────────────────────────────────────────────────────
+  test:
+    name: Test Suite
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.2.2
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: latest
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+        working-directory: rabotka-backend
+
+      - name: Run tests with coverage
+        run: pnpm test:cov
+        working-directory: rabotka-backend
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # JOB 2: Deploy to production
   # No build step — reuses the latest image already built by the develop workflow.
   # Vault secrets are fetched on the runner, written to .env, then scp'd to
   # the VPS. No secrets are passed over SSH env vars.
+  # On failure, the VPS rolls back to the previous container state.
   # ───────────────────────────────────────────────────────────────────────────
   deploy:
     name: Deploy to VPS (production)
-    if: github.event.pull_request.merged == true
+    needs: test
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -138,17 +172,51 @@ jobs:
             -p "${{ secrets.VPS_PORT }}" "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
             "chmod 600 ~/rabotka-backend-prod/.env"
 
-      - name: Deploy on VPS
+      - name: Deploy on VPS (with rollback on failure)
         run: |
-          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+          SSH_CMD="ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
             -o ServerAliveInterval=60 \
             -o ServerAliveCountMax=10 \
-            -p "${{ secrets.VPS_PORT }}" "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
-            "cd ~/rabotka-backend-prod && git fetch origin main && git reset --hard origin/main && \
-             docker compose -f docker-compose.prod.yml up -d --remove-orphans"
+            -p ${{ secrets.VPS_PORT }} ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}"
+
+          $SSH_CMD "
+            set -e
+            cd ~/rabotka-backend-prod
+
+            # Save the image tag currently in use so we can restore it on failure
+            PREVIOUS_IMAGE=\$(docker inspect --format='{{.Config.Image}}' \$(docker compose -f docker-compose.prod.yml ps -q api 2>/dev/null) 2>/dev/null | head -1 || echo '')
+            echo \"Previous image: \$PREVIOUS_IMAGE\"
+
+            rollback() {
+              echo 'Rolling back to previous image...'
+              if [ -n \"\$PREVIOUS_IMAGE\" ]; then
+                sed -i \"s|BACKEND_IMAGE=.*|BACKEND_IMAGE=\$PREVIOUS_IMAGE|\" .env
+                docker compose -f docker-compose.prod.yml up -d --remove-orphans
+              fi
+              exit 1
+            }
+
+            git fetch origin main
+            git reset --hard origin/main
+
+            docker compose -f docker-compose.prod.yml up -d --remove-orphans || rollback
+
+            # Wait up to 90s for the health check to pass (6 retries × 10s interval + 30s start_period)
+            echo 'Waiting for container to become healthy...'
+            CONTAINER=\$(docker compose -f docker-compose.prod.yml ps -q api)
+            for i in \$(seq 1 18); do
+              sleep 5
+              STATUS=\$(docker inspect --format='{{.State.Health.Status}}' \$CONTAINER 2>/dev/null || echo 'missing')
+              echo \"Attempt \$i — health status: \$STATUS\"
+              [ \"\$STATUS\" = 'healthy' ] && echo 'Container is healthy' && exit 0
+              [ \"\$STATUS\" = 'unhealthy' ] && echo 'Container is unhealthy' && rollback
+            done
+            echo 'Timed out waiting for healthy status'
+            rollback
+          "
 
   # ───────────────────────────────────────────────────────────────────────────
-  # JOB 2: Smoke tests
+  # JOB 3: Smoke tests
   # ───────────────────────────────────────────────────────────────────────────
   smoke-test:
     name: Smoke Test (production)

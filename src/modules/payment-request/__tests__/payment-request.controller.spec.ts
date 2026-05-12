@@ -6,6 +6,7 @@ function makeService() {
     getList: jest.fn().mockResolvedValue({ data: [], total: 0 }),
     getByToken: jest.fn().mockResolvedValue({ id: 'pr1', token: 'tok' }),
     initiateMonetbilPayment: jest.fn().mockResolvedValue({ success: true }),
+    initiatePayment: jest.fn().mockResolvedValue({ success: true }),
     handleMonetbilCallback: jest.fn().mockResolvedValue(undefined),
   };
 }
@@ -49,7 +50,7 @@ describe('PaymentRequestPublicController', () => {
       phone: '237600000001',
       operator: 'MTN',
     } as any);
-    expect(service.initiateMonetbilPayment).toHaveBeenCalledWith(
+    expect(service.initiatePayment).toHaveBeenCalledWith(
       'tok',
       '237600000001',
       'MTN',

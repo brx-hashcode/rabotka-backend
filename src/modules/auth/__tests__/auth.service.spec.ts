@@ -11,6 +11,7 @@ import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { MailService } from '../../mail/mail.service';
 import { WhatsAppService } from '../../whatsapp/whatsapp.service';
 import { REDIS_CONNECTION } from '../../../common/services/redis/redis.constants';
+import { ConfigService } from '@nestjs/config';
 
 const PROFILE_ID = 'profile-uuid-1';
 const USER_ID = 'user-uuid-1';
@@ -34,13 +35,14 @@ describe('AuthService', () => {
   let jwtService: jest.Mocked<JwtService>;
   let mailService: jest.Mocked<MailService>;
   let whatsAppService: jest.Mocked<WhatsAppService>;
-  let redis: { get: jest.Mock; set: jest.Mock; del: jest.Mock };
+  let redis: { get: jest.Mock; set: jest.Mock; del: jest.Mock; eval: jest.Mock };
 
   beforeEach(async () => {
     redis = {
       get: jest.fn().mockResolvedValue(null),
       set: jest.fn().mockResolvedValue('OK'),
       del: jest.fn().mockResolvedValue(1),
+      eval: jest.fn().mockResolvedValue(1),
     };
 
     const mockPrismaService = {
@@ -68,6 +70,7 @@ describe('AuthService', () => {
         { provide: MailService, useValue: mockMailService },
         { provide: WhatsAppService, useValue: mockWhatsAppService },
         { provide: REDIS_CONNECTION, useValue: redis },
+        { provide: ConfigService, useValue: { get: jest.fn().mockReturnValue(undefined) } },
       ],
     }).compile();
 
@@ -160,22 +163,21 @@ describe('AuthService', () => {
 
   describe('verifyOtp()', () => {
     it('returns token when OTP matches', async () => {
-      redis.get.mockResolvedValue('123456');
+      redis.eval.mockResolvedValue(1);
       (prisma.profile.findUnique as jest.Mock).mockResolvedValue(mockProfile);
 
       const result = await service.verifyOtp('user@example.com', '123456');
 
       expect(result.success).toBe(true);
       expect(result.token).toBe('jwt-token-abc');
-      expect(redis.del).toHaveBeenCalled();
-      expect(jwtService.sign).toHaveBeenCalledWith({
-        sub: PROFILE_ID,
-        type: 'profile',
-      });
+      expect(redis.eval).toHaveBeenCalled();
+      expect(jwtService.sign).toHaveBeenCalledWith(
+        expect.objectContaining({ sub: PROFILE_ID, type: 'profile' }),
+      );
     });
 
     it('throws UnauthorizedException when OTP does not match', async () => {
-      redis.get.mockResolvedValue('111111');
+      redis.eval.mockResolvedValue(0);
 
       await expect(
         service.verifyOtp('user@example.com', '999999'),
@@ -183,7 +185,7 @@ describe('AuthService', () => {
     });
 
     it('throws UnauthorizedException when OTP expired (null in redis)', async () => {
-      redis.get.mockResolvedValue(null);
+      redis.eval.mockResolvedValue(0);
 
       await expect(
         service.verifyOtp('user@example.com', '123456'),
@@ -229,7 +231,7 @@ describe('AuthService', () => {
 
   describe('verifyAdminOtp()', () => {
     it('returns token and updates last_login_at when OTP matches', async () => {
-      redis.get.mockResolvedValue('654321');
+      redis.eval.mockResolvedValue(1);
       (prisma.user.findUnique as jest.Mock).mockResolvedValue(mockUser);
       (prisma.user.update as jest.Mock).mockResolvedValue(mockUser);
 
@@ -240,10 +242,9 @@ describe('AuthService', () => {
 
       expect(result.success).toBe(true);
       expect(result.token).toBe('jwt-token-abc');
-      expect(jwtService.sign).toHaveBeenCalledWith({
-        sub: USER_ID,
-        type: 'admin',
-      });
+      expect(jwtService.sign).toHaveBeenCalledWith(
+        expect.objectContaining({ sub: USER_ID, type: 'admin' }),
+      );
       expect(prisma.user.update).toHaveBeenCalledWith(
         expect.objectContaining({
           data: { last_login_at: expect.any(Date) },
@@ -252,7 +253,7 @@ describe('AuthService', () => {
     });
 
     it('throws UnauthorizedException when admin OTP does not match', async () => {
-      redis.get.mockResolvedValue('111111');
+      redis.eval.mockResolvedValue(0);
 
       await expect(
         service.verifyAdminOtp('admin@example.com', '999999'),
@@ -260,7 +261,7 @@ describe('AuthService', () => {
     });
 
     it('throws UnauthorizedException when admin is inactive', async () => {
-      redis.get.mockResolvedValue('654321');
+      redis.eval.mockResolvedValue(1);
       (prisma.user.findUnique as jest.Mock).mockResolvedValue({
         ...mockUser,
         is_active: false,

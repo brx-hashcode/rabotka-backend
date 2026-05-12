@@ -3,6 +3,7 @@ import { BotInboxService, InboxItem } from '../bot-inbox.service';
 import { REDIS_CONNECTION } from '../../../../common/services/redis/redis.constants';
 
 const PROFILE_ID = 'profile-1';
+const KEY = `rabotka:bot:inbox:${PROFILE_ID}`;
 const TTL = 7 * 24 * 60 * 60;
 
 function makeItem(id: string): InboxItem {
@@ -17,13 +18,30 @@ function makeItem(id: string): InboxItem {
 
 describe('BotInboxService', () => {
   let service: BotInboxService;
-  let redis: { get: jest.Mock; set: jest.Mock; del: jest.Mock };
+  let redis: {
+    pipeline: jest.Mock;
+    lrange: jest.Mock;
+    lindex: jest.Mock;
+    lpop: jest.Mock;
+    llen: jest.Mock;
+    eval: jest.Mock;
+  };
+  let pipelineMock: { rpush: jest.Mock; expire: jest.Mock; exec: jest.Mock };
 
   beforeEach(async () => {
+    pipelineMock = {
+      rpush: jest.fn().mockReturnThis(),
+      expire: jest.fn().mockReturnThis(),
+      exec: jest.fn().mockResolvedValue([[null, 1], [null, 1]]),
+    };
+
     redis = {
-      get: jest.fn().mockResolvedValue(null),
-      set: jest.fn().mockResolvedValue('OK'),
-      del: jest.fn().mockResolvedValue(1),
+      pipeline: jest.fn().mockReturnValue(pipelineMock),
+      lrange: jest.fn().mockResolvedValue([]),
+      lindex: jest.fn().mockResolvedValue(null),
+      lpop: jest.fn().mockResolvedValue(null),
+      llen: jest.fn().mockResolvedValue(0),
+      eval: jest.fn().mockResolvedValue(null),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -37,87 +55,61 @@ describe('BotInboxService', () => {
   });
 
   describe('push()', () => {
-    it('appends item to empty inbox', async () => {
-      redis.get.mockResolvedValue(null);
+    it('appends item to inbox via pipeline', async () => {
       await service.push(PROFILE_ID, makeItem('app-1'));
-      const stored = JSON.parse(redis.set.mock.calls[0][1]);
-      expect(stored).toHaveLength(1);
-      expect(stored[0].applicationId).toBe('app-1');
+      expect(redis.pipeline).toHaveBeenCalled();
+      expect(pipelineMock.rpush).toHaveBeenCalledWith(KEY, expect.any(String));
+      expect(pipelineMock.expire).toHaveBeenCalledWith(KEY, TTL);
+      expect(pipelineMock.exec).toHaveBeenCalled();
     });
 
-    it('appends item to existing inbox', async () => {
-      redis.get.mockResolvedValue(JSON.stringify([makeItem('app-1')]));
-      await service.push(PROFILE_ID, makeItem('app-2'));
-      const stored = JSON.parse(redis.set.mock.calls[0][1]);
-      expect(stored).toHaveLength(2);
-      expect(stored[1].applicationId).toBe('app-2');
-    });
-
-    it('saves with 7-day TTL', async () => {
-      await service.push(PROFILE_ID, makeItem('app-1'));
-      expect(redis.set).toHaveBeenCalledWith(
-        `bot:inbox:${PROFILE_ID}`,
-        expect.any(String),
-        'EX',
-        TTL,
-      );
+    it('serializes item as JSON', async () => {
+      const item = makeItem('app-1');
+      await service.push(PROFILE_ID, item);
+      const serialized = pipelineMock.rpush.mock.calls[0][1];
+      expect(JSON.parse(serialized).applicationId).toBe('app-1');
     });
   });
 
   describe('getAll()', () => {
     it('returns all items in inbox', async () => {
-      redis.get.mockResolvedValue(
-        JSON.stringify([makeItem('app-1'), makeItem('app-2')]),
-      );
+      redis.lrange.mockResolvedValue([
+        JSON.stringify(makeItem('app-1')),
+        JSON.stringify(makeItem('app-2')),
+      ]);
       const items = await service.getAll(PROFILE_ID);
       expect(items).toHaveLength(2);
     });
 
     it('returns empty array when inbox is empty', async () => {
-      redis.get.mockResolvedValue(null);
+      redis.lrange.mockResolvedValue([]);
       const items = await service.getAll(PROFILE_ID);
       expect(items).toEqual([]);
     });
 
-    it('returns empty array for malformed JSON', async () => {
-      redis.get.mockResolvedValue('{bad}');
+    it('skips malformed JSON entries', async () => {
+      redis.lrange.mockResolvedValue(['{bad}', JSON.stringify(makeItem('app-1'))]);
       const items = await service.getAll(PROFILE_ID);
-      expect(items).toEqual([]);
+      expect(items).toHaveLength(1);
     });
   });
 
   describe('shift()', () => {
     it('removes and returns the first item', async () => {
-      redis.get.mockResolvedValue(
-        JSON.stringify([makeItem('app-1'), makeItem('app-2')]),
-      );
+      redis.lpop.mockResolvedValue(JSON.stringify(makeItem('app-1')));
       const item = await service.shift(PROFILE_ID);
       expect(item?.applicationId).toBe('app-1');
-      // Should update redis with remaining items
-      expect(redis.set).toHaveBeenCalled();
-    });
-
-    it('deletes Redis key when inbox becomes empty after shift', async () => {
-      redis.get.mockResolvedValue(JSON.stringify([makeItem('app-1')]));
-      const item = await service.shift(PROFILE_ID);
-      expect(item?.applicationId).toBe('app-1');
-      expect(redis.del).toHaveBeenCalledWith(`bot:inbox:${PROFILE_ID}`);
+      expect(redis.lpop).toHaveBeenCalledWith(KEY);
     });
 
     it('returns null when inbox is empty', async () => {
-      redis.get.mockResolvedValue(null);
-      const item = await service.shift(PROFILE_ID);
-      expect(item).toBeNull();
-    });
-
-    it('returns null for empty array', async () => {
-      redis.get.mockResolvedValue(JSON.stringify([]));
+      redis.lpop.mockResolvedValue(null);
       const item = await service.shift(PROFILE_ID);
       expect(item).toBeNull();
     });
 
     it('returns null for malformed JSON', async () => {
-      redis.get.mockResolvedValue('{bad}');
+      redis.lpop.mockResolvedValue('{bad}');
       const item = await service.shift(PROFILE_ID);
       expect(item).toBeNull();
     });
@@ -125,15 +117,13 @@ describe('BotInboxService', () => {
 
   describe('count()', () => {
     it('returns number of items in inbox', async () => {
-      redis.get.mockResolvedValue(
-        JSON.stringify([makeItem('a'), makeItem('b'), makeItem('c')]),
-      );
+      redis.llen.mockResolvedValue(3);
       const count = await service.count(PROFILE_ID);
       expect(count).toBe(3);
     });
 
     it('returns 0 when inbox is empty', async () => {
-      redis.get.mockResolvedValue(null);
+      redis.llen.mockResolvedValue(0);
       const count = await service.count(PROFILE_ID);
       expect(count).toBe(0);
     });

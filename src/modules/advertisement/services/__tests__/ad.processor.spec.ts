@@ -5,6 +5,8 @@ import { AdTargetingService } from '../ad-targeting.service';
 import { AdProcessor } from '../ad.processor';
 import { AdLinkTrackingService } from '../ad-link-tracking.service';
 import { AdNotificationService } from '../ad-notification.service';
+import { AdReportService } from '../ad-report.service';
+import { NotificationService } from '../../../notification/notification.service';
 
 describe('AdProcessor', () => {
   let service: AdProcessor;
@@ -18,10 +20,13 @@ describe('AdProcessor', () => {
       advertisement: {
         findMany: jest.fn(),
         update: jest.fn(),
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
       },
+      $queryRaw: jest.fn().mockResolvedValue([]),
       adDeliveryLog: {
         count: jest.fn(),
         create: jest.fn(),
+        update: jest.fn().mockResolvedValue({}),
       },
     };
 
@@ -39,7 +44,15 @@ describe('AdProcessor', () => {
         },
         {
           provide: AdNotificationService,
-          useValue: { dispatchCreated: jest.fn() },
+          useValue: { dispatchCreated: jest.fn(), sendOnChannel: jest.fn().mockResolvedValue(true) },
+        },
+        {
+          provide: AdReportService,
+          useValue: { generateForAd: jest.fn().mockResolvedValue(undefined) },
+        },
+        {
+          provide: NotificationService,
+          useValue: { send: jest.fn().mockResolvedValue(undefined) },
         },
       ],
     }).compile();
@@ -64,6 +77,7 @@ describe('AdProcessor', () => {
         cta_url: 'https://example.com/apply',
         start_date: start,
         end_date: end,
+        dispatch_time: '00:00',
         image_urls: ['https://cdn.example.com/ad.jpg'],
         status: AdStatus.ACTIVE,
         bundle: {
@@ -104,10 +118,10 @@ describe('AdProcessor', () => {
         advertisement_id: 'ad-1',
         profile_id: 'profile-1',
         channel: DeliveryChannel.EMAIL,
-        status: AdDeliveryStatus.SENT,
+        status: AdDeliveryStatus.FAILED,
       }),
     });
-    expect(adNotificationService.dispatchCreated).toHaveBeenCalledWith(
+    expect(adNotificationService.sendOnChannel).toHaveBeenCalledWith(
       {
         email: 'john@example.com',
         phone: '+242055000000',
@@ -116,13 +130,13 @@ describe('AdProcessor', () => {
       expect.objectContaining({
         advertisementId: 'ad-1',
         ctaUrl: 'https://app.rabotka.co/r/tracked',
-        imageUrl: 'https://cdn.example.com/ad.jpg',
       }),
       DeliveryChannel.EMAIL,
     );
-    expect(prisma.advertisement.update).toHaveBeenCalledWith({
-      where: { id: 'ad-1' },
-      data: { total_sent: { increment: 1 } },
-    });
+    expect(prisma.adDeliveryLog.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: AdDeliveryStatus.SENT }),
+      }),
+    );
   });
 });

@@ -10,6 +10,8 @@ import { BotNotificationService } from '../../bot/services/bot-notification.serv
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ContactUnlockService } from '../../contact-unlock/contact-unlock.service';
 import { ContractService } from '../../contract/contract.service';
+import { SystemConfigService } from '../../system-config/system-config.service';
+import { MatchingService } from '../../matching/matching.service';
 import { ApplicationStatus, JobOfferStatus, PaymentFlow } from '@prisma/client';
 
 const JOB_OFFER_ID = 'offer-uuid-1';
@@ -82,6 +84,7 @@ describe('ApplicationService (extended)', () => {
       penalty: {
         count: jest.fn(),
         create: jest.fn(),
+        upsert: jest.fn().mockResolvedValue({}),
         findMany: jest.fn(),
         updateMany: jest.fn(),
       },
@@ -95,6 +98,7 @@ describe('ApplicationService (extended)', () => {
       },
       payment: { create: jest.fn() },
       assignment: { create: jest.fn(), updateMany: jest.fn() },
+      $executeRaw: jest.fn().mockResolvedValue(0),
       $transaction: jest.fn().mockImplementation((arg: unknown) => {
         if (typeof arg === 'function') {
           return arg(mockPrismaService);
@@ -126,6 +130,19 @@ describe('ApplicationService (extended)', () => {
         {
           provide: ContractService,
           useValue: { create: jest.fn().mockResolvedValue(undefined) },
+        },
+        {
+          provide: SystemConfigService,
+          useValue: {
+            getFees: jest.fn().mockResolvedValue({
+              cancellationThresholdHours: 4,
+              lateCancellationPenaltyFcfa: 5000,
+            }),
+          },
+        },
+        {
+          provide: MatchingService,
+          useValue: { indexWorkerProfile: jest.fn().mockResolvedValue(undefined) },
         },
       ],
     }).compile();
@@ -697,6 +714,9 @@ describe('ApplicationService (extended)', () => {
           ...mockJobOffer,
           status: JobOfferStatus.COMPLETED,
         },
+      });
+      (prisma.jobOffer.findUnique as jest.Mock).mockResolvedValue({
+        status: JobOfferStatus.COMPLETED,
       });
       await expect(
         service.markJobCompleted(APPLICATION_ID, EMPLOYER_ID),

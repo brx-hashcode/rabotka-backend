@@ -235,9 +235,14 @@ function handleListStep(
 
   const n = slice.length;
   const hasMore = items.length > (pageIndex + 1) * PAGE_SIZE;
+  const nextPageIdx = PAGE_SIZE + 1;
+  const menuIdx = PAGE_SIZE + 2;
+  if (choice === nextPageIdx && hasMore) return buildListPage(state, items, pageIndex + 1);
+  if (choice === menuIdx) return { reply: ['OK'], clearState: true };
+
   return {
     reply: [
-      `*TAPEZ UN NUMÉRO (1-${n})${pageIndex > 0 ? ', P (page préc.)' : ''}${hasMore ? ', S (page suiv.)' : ''}, M (menu).*`,
+      `*TAPEZ UN NUMÉRO (1-${n})${pageIndex > 0 ? ', P (page préc.)' : ''}${hasMore ? `, ${nextPageIdx} (voir plus)` : ''}, ${menuIdx} (menu).*`,
     ],
     nextState: state,
   };

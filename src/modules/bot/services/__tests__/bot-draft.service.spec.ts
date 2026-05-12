@@ -34,7 +34,7 @@ describe('BotDraftService', () => {
     it('saves draft as JSON with 7-day TTL', async () => {
       await service.saveDraft(PROFILE_ID, mockDraft);
       expect(redis.set).toHaveBeenCalledWith(
-        `bot:draft:publish:${PROFILE_ID}`,
+        `rabotka:bot:draft:publish:${PROFILE_ID}`,
         JSON.stringify(mockDraft),
         'EX',
         7 * 24 * 60 * 60,
@@ -66,7 +66,7 @@ describe('BotDraftService', () => {
   describe('clearDraft()', () => {
     it('deletes the draft key from Redis', async () => {
       await service.clearDraft(PROFILE_ID);
-      expect(redis.del).toHaveBeenCalledWith(`bot:draft:publish:${PROFILE_ID}`);
+      expect(redis.del).toHaveBeenCalledWith(`rabotka:bot:draft:publish:${PROFILE_ID}`);
     });
   });
 });

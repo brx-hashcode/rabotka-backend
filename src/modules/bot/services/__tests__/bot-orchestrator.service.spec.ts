@@ -14,6 +14,9 @@ import { PaymentService } from '../../../payments/payment.service';
 import { ContactUnlockService } from '../../../contact-unlock/contact-unlock.service';
 import { WalletService } from '../../../wallet/wallet.service';
 import { MatchingService } from '../../../matching/matching.service';
+import { InterestSignalService } from '../../../interest-graph/interest-signal.service';
+import { InterestRecommendationService } from '../../../interest-graph/interest-recommendation.service';
+import { InvoiceService } from '../../../invoice/invoice.service';
 
 const PROFILE_ID = 'profile-uuid-1';
 const PHONE = '+242000000';
@@ -52,6 +55,7 @@ function makeDeps() {
       shift: jest.fn().mockResolvedValue(null),
       count: jest.fn().mockResolvedValue(0),
       peek: jest.fn().mockResolvedValue(null),
+      peekAndShift: jest.fn().mockResolvedValue(null),
     },
     botDraft: {
       getDraft: jest.fn().mockResolvedValue(null),
@@ -129,6 +133,18 @@ describe('BotOrchestratorService', () => {
             findMatchingJobsForWorker: jest.fn().mockResolvedValue([]),
           },
         },
+        {
+          provide: InterestSignalService,
+          useValue: { recordSignal: jest.fn().mockResolvedValue(undefined) },
+        },
+        {
+          provide: InterestRecommendationService,
+          useValue: { getRecommendedJobs: jest.fn().mockResolvedValue([]) },
+        },
+        {
+          provide: InvoiceService,
+          useValue: { create: jest.fn().mockResolvedValue({ id: 'inv-1' }) },
+        },
       ],
     }).compile();
 
@@ -162,14 +178,14 @@ describe('BotOrchestratorService', () => {
       deps.prisma.profile.findUnique.mockResolvedValue(mockActiveProfile);
     });
 
-    it('returns unknownCommandMessage for unrecognized input without state', async () => {
+    it('returns session-expired message for unrecognized input without state', async () => {
       deps.router.route.mockReturnValue({ type: 'unknown' });
       const result = await service.handle(
         PROFILE_ID,
         PHONE,
         'bonjour le monde',
       );
-      expect(result[0]).toContain('Commande non reconnue');
+      expect(result[0]).toContain('Session expirée');
     });
 
     it('returns session-expired message when no state and input looks like flow input', async () => {
@@ -453,7 +469,7 @@ describe('BotOrchestratorService', () => {
         reply: ['Done'],
         clearState: true,
       });
-      deps.botInbox.peek.mockResolvedValue({
+      deps.botInbox.peekAndShift.mockResolvedValue({
         type: 'new_application',
         applicationId: 'app-1',
         workerName: 'Jean',

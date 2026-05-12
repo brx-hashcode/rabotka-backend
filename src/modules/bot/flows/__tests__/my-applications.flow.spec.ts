@@ -58,6 +58,10 @@ function makeCtx(overrides: Record<string, unknown> = {}) {
         workerFeeFcfa: 500,
         expiryHours: 24,
       }),
+      getFees: jest.fn().mockResolvedValue({
+        cancellationThresholdHours: 4,
+        lateCancellationPenaltyFcfa: 5000,
+      }),
     },
     ...overrides,
   } as any;

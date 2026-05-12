@@ -31,7 +31,7 @@ export function formatCandidaturesListPage(
   lines.push('');
   const actions: string[] = [];
   if (page > 0) actions.push('P- Page précédente');
-  if (hasMore) actions.push('S- Page suivante');
+  if (hasMore) actions.push('Voir plus');
   actions.push('M- Menu principal');
   lines.push(...actions, '', 'Tapez un numéro pour voir le détail.');
   return lines.join('\n');
@@ -483,7 +483,7 @@ export function formatFilledJobsListPage(
   });
   const actions: string[] = [];
   if (page > 0) actions.push('P- Page précédente');
-  if (hasMore) actions.push('S- Page suivante');
+  if (hasMore) actions.push('Voir plus');
   actions.push('M- Menu principal');
   lines.push(...actions, '', 'Tapez un numéro pour sélectionner une mission.');
   return lines.join('\n');

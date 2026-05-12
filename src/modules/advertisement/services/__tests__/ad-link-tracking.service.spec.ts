@@ -20,6 +20,8 @@ describe('AdLinkTrackingService', () => {
         update: jest.fn(),
       },
       adDeliveryLog: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        update: jest.fn().mockResolvedValue({}),
         updateMany: jest.fn(),
       },
       $transaction: jest.fn().mockResolvedValue([]),
@@ -88,7 +90,7 @@ describe('AdLinkTrackingService', () => {
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
     expect(prisma.adTrackedLink.update).toHaveBeenCalledTimes(1);
     expect(prisma.advertisement.update).toHaveBeenCalledTimes(1);
-    expect(prisma.adDeliveryLog.updateMany).toHaveBeenCalledTimes(1);
+    expect(prisma.adDeliveryLog.update).toHaveBeenCalledTimes(1);
   });
 
   it('throws when tracking hash does not exist', async () => {

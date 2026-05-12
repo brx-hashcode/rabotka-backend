@@ -3,6 +3,7 @@ import { NotFoundException, BadRequestException } from '@nestjs/common';
 import { WalletService } from '../wallet.service';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { SystemConfigService } from '../../system-config/system-config.service';
+import { InvoiceService } from '../../invoice/invoice.service';
 import {
   WalletOwnerType,
   WalletTransactionType,
@@ -32,7 +33,7 @@ const mockSystemWallet = {
 
 const mockPenalty = {
   id: PENALTY_ID,
-  worker_id: PROFILE_ID,
+  profile_id: PROFILE_ID,
   application_id: 'app-1',
   amount: 5000,
   reason: 'Late cancellation',
@@ -62,6 +63,7 @@ describe('WalletService', () => {
         count: jest.fn(),
         findMany: jest.fn(),
       },
+      paymentRequest: { create: jest.fn().mockResolvedValue({ id: 'pr-1' }) },
       $transaction: jest.fn((cb) =>
         typeof cb === 'function' ? cb(mockPrismaService) : Promise.resolve(),
       ),
@@ -74,6 +76,10 @@ describe('WalletService', () => {
         {
           provide: SystemConfigService,
           useValue: { get: jest.fn().mockResolvedValue('') },
+        },
+        {
+          provide: InvoiceService,
+          useValue: { createInvoice: jest.fn().mockResolvedValue({ id: 'inv-1' }), create: jest.fn().mockResolvedValue({ id: 'inv-1' }) },
         },
       ],
     }).compile();
@@ -105,7 +111,6 @@ describe('WalletService', () => {
       expect(prisma.wallet.create).toHaveBeenCalledWith({
         data: {
           owner_type: WalletOwnerType.SYSTEM,
-          balance: 0,
         },
       });
     });
@@ -150,7 +155,7 @@ describe('WalletService', () => {
     it('throws NotFoundException when penalty belongs to another profile', async () => {
       (prisma.penalty.findUnique as jest.Mock).mockResolvedValue({
         ...mockPenalty,
-        worker_id: 'other-profile-id',
+        profile_id: 'other-profile-id',
       });
 
       await expect(

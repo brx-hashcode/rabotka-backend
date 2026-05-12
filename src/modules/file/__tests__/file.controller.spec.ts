@@ -54,7 +54,7 @@ describe('FileController', () => {
     expect(storage.upload).toHaveBeenCalledWith(
       expect.any(Buffer),
       'test.jpg',
-      { mimeType: 'image/jpeg', folder: 'files' },
+      expect.objectContaining({ mimeType: 'image/jpeg', folder: 'files' }),
     );
   });
 

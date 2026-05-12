@@ -11,6 +11,8 @@ import { BotNotificationService } from '../../bot/services/bot-notification.serv
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ContactUnlockService } from '../../contact-unlock/contact-unlock.service';
 import { ContractService } from '../../contract/contract.service';
+import { SystemConfigService } from '../../system-config/system-config.service';
+import { MatchingService } from '../../matching/matching.service';
 import { ApplicationStatus, JobOfferStatus, PaymentFlow } from '@prisma/client';
 import { LATE_CANCELLATION_PENALTY_FCFA } from '../application.constants';
 
@@ -87,7 +89,7 @@ describe('ApplicationService', () => {
     const mockPrismaService = {
       jobOffer: { findUnique: jest.fn(), update: jest.fn() },
       profile: { findUnique: jest.fn(), update: jest.fn() },
-      penalty: { count: jest.fn(), create: jest.fn() },
+      penalty: { count: jest.fn(), create: jest.fn(), upsert: jest.fn().mockResolvedValue({}) },
       application: {
         findUnique: jest.fn(),
         findMany: jest.fn(),
@@ -98,6 +100,7 @@ describe('ApplicationService', () => {
       },
       payment: { create: jest.fn() },
       assignment: { create: jest.fn(), updateMany: jest.fn() },
+      $executeRaw: jest.fn().mockResolvedValue(0),
       $transaction: jest.fn().mockImplementation((arg: unknown) => {
         if (typeof arg === 'function') {
           // Interactive transaction: call with mockPrismaService as tx
@@ -131,6 +134,28 @@ describe('ApplicationService', () => {
         {
           provide: ContractService,
           useValue: { create: jest.fn().mockResolvedValue(undefined) },
+        },
+        {
+          provide: SystemConfigService,
+          useValue: {
+            getFees: jest.fn().mockResolvedValue({
+              contactUnlockFee: 500,
+              cancellationThresholdHours: 4,
+              lateCancellationPenaltyFcfa: LATE_CANCELLATION_PENALTY_FCFA,
+              lateCancellationScoreDeduction: 5,
+              reliabilityScoreMin: 50,
+              employerCancelScoreDeduction: 5,
+              employerGhostScoreDeduction: 10,
+              billingBlockThreshold: 2,
+            }),
+          },
+        },
+        {
+          provide: MatchingService,
+          useValue: {
+            refreshMatchesForJobOffer: jest.fn().mockResolvedValue(undefined),
+            indexWorkerProfile: jest.fn().mockResolvedValue(undefined),
+          },
         },
       ],
     }).compile();
@@ -254,7 +279,7 @@ describe('ApplicationService', () => {
       const result = await service.cancel(APPLICATION_ID, WORKER_ID);
       expect(result.penaltyApplied).toBe(true);
       expect(result.penaltyAmount).toBe(LATE_CANCELLATION_PENALTY_FCFA);
-      expect(prisma.penalty.create as jest.Mock).toHaveBeenCalled();
+      expect(prisma.penalty.upsert as jest.Mock).toHaveBeenCalled();
     });
 
     it('cancels PENDING application < 4h before: no penalty (only ACCEPTED triggers penalty)', async () => {
@@ -266,7 +291,7 @@ describe('ApplicationService', () => {
       });
       const result = await service.cancel(APPLICATION_ID, WORKER_ID);
       expect(result.penaltyApplied).toBe(false);
-      expect(prisma.penalty.create as jest.Mock).not.toHaveBeenCalled();
+      expect(prisma.penalty.upsert as jest.Mock).not.toHaveBeenCalled();
     });
 
     it('reverts offer to ACTIVE when cancelling accepted application', async () => {
@@ -393,7 +418,7 @@ describe('ApplicationService', () => {
       let capturedTx: any;
       (prisma.$transaction as jest.Mock).mockImplementationOnce((fn: any) => {
         capturedTx = {
-          jobOffer: { update: jest.fn().mockResolvedValue({}) },
+          jobOffer: { update: jest.fn().mockResolvedValue({}), findUnique: jest.fn().mockResolvedValue({ status: JobOfferStatus.ACTIVE }) },
           assignment: { updateMany: jest.fn().mockResolvedValue({}) },
           payment: { create: jest.fn().mockResolvedValue({}) },
           application: { updateMany: jest.fn().mockResolvedValue({}) },
@@ -401,6 +426,7 @@ describe('ApplicationService', () => {
             findUnique: jest.fn().mockResolvedValue({ reliability_score: 100 }),
             update: jest.fn().mockResolvedValue({}),
           },
+          $executeRaw: jest.fn().mockResolvedValue(0),
         };
         return fn(capturedTx);
       });

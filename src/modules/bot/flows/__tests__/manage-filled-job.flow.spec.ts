@@ -101,7 +101,7 @@ describe('runManageFilledJobFlow()', () => {
       makeCtx(),
     );
     expect(result.nextState).toBe(state);
-    expect(result.reply[0]).toContain('RÉPONDEZ');
+    expect(result.reply[0]).toContain('TAPEZ');
   });
 
   it('paginates on "6" when more items', async () => {
@@ -177,7 +177,7 @@ describe('runManageFilledJobFlow()', () => {
       expect(result.reply[0]).toContain('Laissez une note');
     });
 
-    it('cancels accepted job on "2"', async () => {
+    it('shows cancel confirmation on "2"', async () => {
       const ctx = makeCtx();
       const state = makeDetailState(makeItem());
       const result = await runManageFilledJobFlow(
@@ -186,9 +186,21 @@ describe('runManageFilledJobFlow()', () => {
         employerProfile,
         ctx,
       );
-      expect(
-        ctx.applicationService.cancelAcceptedByEmployer,
-      ).toHaveBeenCalledWith('app-1', 'e-1');
+      expect(result.nextState?.payload?.step).toBe('cancel_confirm');
+      expect(result.reply[0]).toContain('annuler');
+    });
+
+    it('cancels accepted job after confirming on "1" in cancel_confirm step', async () => {
+      const ctx = makeCtx();
+      const item = makeItem();
+      const state = {
+        flowId: FLOW_IDS.MANAGE_FILLED_JOB,
+        step: 1,
+        payload: { items: [item], pageIndex: 0, step: 'cancel_confirm', selectedItem: item },
+        updatedAt: new Date().toISOString(),
+      };
+      const result = await runManageFilledJobFlow(state, '1', employerProfile, ctx);
+      expect(ctx.applicationService.cancelAcceptedByEmployer).toHaveBeenCalledWith('app-1', 'e-1');
       expect(result.clearState).toBe(true);
     });
 
@@ -197,13 +209,14 @@ describe('runManageFilledJobFlow()', () => {
       ctx.applicationService.cancelAcceptedByEmployer.mockRejectedValue(
         new Error('DB error'),
       );
-      const state = makeDetailState(makeItem());
-      const result = await runManageFilledJobFlow(
-        state,
-        '2',
-        employerProfile,
-        ctx,
-      );
+      const item = makeItem();
+      const state = {
+        flowId: FLOW_IDS.MANAGE_FILLED_JOB,
+        step: 1,
+        payload: { items: [item], pageIndex: 0, step: 'cancel_confirm', selectedItem: item },
+        updatedAt: new Date().toISOString(),
+      };
+      const result = await runManageFilledJobFlow(state, '1', employerProfile, ctx);
       expect(result.reply[0]).toContain('DB error');
     });
 

@@ -20,7 +20,10 @@ import {
 } from '../whatsapp/templates';
 import { MailService } from '../mail/mail.service';
 import { accountSuspendedEmail } from '../mail/templates';
-import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
+import {
+  REDIS_CONNECTION,
+  REDIS_KEY_PREFIX,
+} from '../../common/services/redis/redis.constants';
 import { WalletService } from '../wallet/wallet.service';
 import { DocumentService } from '../document/document.service';
 import { MatchingService } from '../matching/matching.service';
@@ -162,7 +165,7 @@ type PrismaTransactionClient = Parameters<
 >[0];
 
 const VERIFICATION_TOKEN_TTL_SECONDS = 1800;
-const VERIFICATION_TOKEN_KEY_PREFIX = 'wa:verify:';
+const VERIFICATION_TOKEN_KEY_PREFIX = `${REDIS_KEY_PREFIX}wa:verify:`;
 
 @Injectable()
 export class ProfileService {

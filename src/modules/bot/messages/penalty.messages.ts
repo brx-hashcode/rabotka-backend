@@ -50,9 +50,9 @@ export function formatPenaltyHistory(
   ];
 
   if (penalties.length === 0) {
-    lines.push('Aucune penalite enregistree.', '');
+    lines.push('Aucune pénalité enregistrée.', '');
   } else {
-    lines.push('Detail des penalites :', '');
+    lines.push('Détail des pénalités :', '');
     for (const p of penalties) {
       lines.push(
         `Date : ${formatDate(p.appliedAt)}`,
@@ -165,9 +165,9 @@ export function formatPenaltyBlocked(
   airtelNumber: string,
 ): string {
   return [
-    '*Candidature bloquee — penalite impayee*',
+    '*Candidature bloquée — pénalité impayée*',
     '',
-    `Vous avez *${fcfa(totalAmount)}* de penalites impayees.`,
+    `Vous avez *${fcfa(totalAmount)}* de pénalités impayées.`,
     "Vous ne pouvez pas postuler tant qu'elles ne sont pas reglees.",
     '',
     '*Comment payer :*',
@@ -199,7 +199,7 @@ export function formatCancelApplicationNoPenalty(params: {
     `*Montant*: ${montant}`,
     `*Temps restant*: ${params.timeRemaining}`,
     '',
-    `Aucune penalite — annulation effectuee plus de ${threshold}h avant.`,
+    `Aucune pénalité — annulation effectuée plus de ${threshold}h avant.`,
     '',
     'Souhaitez-vous indiquer une raison ? (optionnel)',
     '',
@@ -290,7 +290,7 @@ export function formatCancelApplicationWithPenalty(params: {
     '',
     SEP,
     '',
-    '*Penalite applicable*',
+    '*Pénalité applicable*',
     `*Montant*: ${fcfa(params.penaltyAmount)}`,
     `*Impact score*: -${params.scoreDeduction} points`,
     `*Nouveau score*: ${params.newScore}/100`,
