@@ -40,6 +40,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --ignore-scripts
 
+      - name: Generate Prisma client
+        run: pnpm prisma:generate
+
       - name: Run tests
         run: pnpm test --no-coverage
 
