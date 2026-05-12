@@ -75,3 +75,4 @@ export const CMD_RECOMMENDED_PROFILES = [
   'travailleurs recommandés',
   'recommended profiles',
 ];
+export const CMD_VERIFY_WHATSAPP = ['verifier', 'verify', 'vérifier'];
