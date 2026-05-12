@@ -202,10 +202,10 @@ jobs:
 
             docker compose -f docker-compose.prod.yml up -d --remove-orphans || rollback
 
-            # Wait up to 90s for the health check to pass (6 retries × 10s interval + 30s start_period)
+            # Wait up to 5 min for the health check to pass (12 retries × 10s interval + 120s start_period)
             echo 'Waiting for container to become healthy...'
             CONTAINER=\$(docker compose -f docker-compose.prod.yml ps -q api)
-            for i in \$(seq 1 18); do
+            for i in \$(seq 1 60); do
               sleep 5
               STATUS=\$(docker inspect --format='{{.State.Health.Status}}' \$CONTAINER 2>/dev/null || echo 'missing')
               echo \"Attempt \$i — health status: \$STATUS\"
