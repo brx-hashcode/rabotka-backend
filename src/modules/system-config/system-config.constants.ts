@@ -69,17 +69,10 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     isSecret: false,
   },
   {
-    key: 'fees.employer_cancel_score_deduction',
+    key: 'fees.employer_late_cancel_score_deduction',
     value: '5',
     category: ConfigCategory.FEES,
-    label: "Déduction score employeur (annulation d'un travailleur accepté)",
-    isSecret: false,
-  },
-  {
-    key: 'fees.employer_ghost_score_deduction',
-    value: '10',
-    category: ConfigCategory.FEES,
-    label: 'Déduction score employeur (offre expirée avec travailleur accepté)',
+    label: 'Déduction score employeur (annulation tardive ou offre non démarrée avec travailleur accepté)',
     isSecret: false,
   },
   {

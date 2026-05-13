@@ -86,7 +86,11 @@ import {
 } from '../flows/recommended-profiles.flow';
 import { runRateAssignmentFlow } from '../flows/rate-assignment.flow';
 import { MatchingService } from '../../matching/matching.service';
+import { QueueService } from '../../../common/services/queue/queue.service';
 import { runRepublishExpiredJobFlow } from '../flows/republish-expired-job.flow';
+import {
+  runJobStatusCheckFlow,
+} from '../flows/job-status-check.flow';
 import { InterestSignalService } from '../../interest-graph/interest-signal.service';
 import { InterestRecommendationService } from '../../interest-graph/interest-recommendation.service';
 import { InvoiceService } from '../../invoice/invoice.service';
@@ -127,6 +131,7 @@ export class BotOrchestratorService {
     private readonly interestSignalService: InterestSignalService,
     private readonly interestRecommendationService: InterestRecommendationService,
     private readonly invoiceService: InvoiceService,
+    private readonly queueService: QueueService,
   ) {}
 
   async handle(
@@ -433,6 +438,13 @@ export class BotOrchestratorService {
         runRepublishExpiredJobFlow(state, input, profile, {
           prisma: this.prisma,
           jobOfferService: this.jobOfferService,
+        }),
+      [FLOW_IDS.JOB_STATUS_CHECK]: () =>
+        runJobStatusCheckFlow(state, input, profile, {
+          applicationService: this.applicationService,
+          notificationService: this.notificationService,
+          queueService: this.queueService,
+          employerId: profile.id,
         }),
       [FLOW_IDS.RECOMMENDED_PROFILES]: () =>
         runRecommendedProfilesFlow(state, input, profile, {

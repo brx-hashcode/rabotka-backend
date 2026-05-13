@@ -43,6 +43,7 @@ describe('ReminderProcessor', () => {
         findMany: jest.fn().mockResolvedValue([]),
         findUnique: jest.fn().mockResolvedValue(null),
         update: jest.fn().mockResolvedValue({}),
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
       },
       jobOffer: {
         findMany: jest.fn().mockResolvedValue([]),
@@ -79,10 +80,15 @@ describe('ReminderProcessor', () => {
         lateCancellationScoreDeduction: 5,
         cancellationThresholdHours: 4,
         reliabilityScoreMin: 50,
-        employerCancelScoreDeduction: 5,
-        employerGhostScoreDeduction: 10,
+        employerLateCancelScoreDeduction: 5,
         billingBlockThreshold: 2,
       }),
+    } as any;
+    const contactUnlockService = {
+      expirePendingAttemptsForJob: jest.fn().mockResolvedValue([]),
+    } as any;
+    const botNotification = {
+      sendContactUnlockCreditConversionNotification: jest.fn().mockResolvedValue(undefined),
     } as any;
     processor = new ReminderProcessor(
       prisma,
@@ -90,6 +96,8 @@ describe('ReminderProcessor', () => {
       queueService,
       redis,
       systemConfigService,
+      contactUnlockService,
+      botNotification,
     );
   });
 
@@ -138,8 +146,8 @@ describe('ReminderProcessor', () => {
     it('enqueues reminder_24h jobs for apps not yet notified', async () => {
       prisma.application.findMany
         .mockResolvedValueOnce([{ id: 'app-24h' }]) // 24h window
-        .mockResolvedValueOnce([]) // 2h window
-        .mockResolvedValueOnce([]); // start window
+        .mockResolvedValueOnce([]); // 2h window
+      // start window uses jobOffer.findMany (already mocked to return [])
       redis.get.mockResolvedValue(null);
 
       await processor.process({ data: { type: 'scan' } });
@@ -154,7 +162,6 @@ describe('ReminderProcessor', () => {
     it('skips reminder_24h if redis key already set', async () => {
       prisma.application.findMany
         .mockResolvedValueOnce([{ id: 'app-24h' }])
-        .mockResolvedValueOnce([])
         .mockResolvedValueOnce([]);
       redis.get.mockResolvedValue('1');
 
@@ -165,8 +172,7 @@ describe('ReminderProcessor', () => {
     it('enqueues reminder_2h jobs for apps not yet notified', async () => {
       prisma.application.findMany
         .mockResolvedValueOnce([]) // 24h window
-        .mockResolvedValueOnce([{ id: 'app-2h' }]) // 2h window
-        .mockResolvedValueOnce([]); // start window
+        .mockResolvedValueOnce([{ id: 'app-2h' }]); // 2h window
       redis.get.mockResolvedValue(null);
 
       await processor.process({ data: { type: 'scan' } });
@@ -179,10 +185,11 @@ describe('ReminderProcessor', () => {
     });
 
     it('enqueues reminder_start jobs for apps whose scheduled_at just passed', async () => {
-      prisma.application.findMany
-        .mockResolvedValueOnce([]) // 24h window
-        .mockResolvedValueOnce([]) // 2h window
-        .mockResolvedValueOnce([{ id: 'app-start' }]); // start window
+      // expireOverdueOffers runs first (2 jobOffer.findMany calls), then start window
+      prisma.jobOffer.findMany
+        .mockResolvedValueOnce([]) // offersToAutoStart (FILLED/PARTIALLY_FILLED with workers)
+        .mockResolvedValueOnce([]) // openOverdue (ACTIVE/PARTIALLY_FILLED empty)
+        .mockResolvedValueOnce([{ id: 'offer-1', applications: [{ id: 'app-start' }] }]); // start window
       redis.get.mockResolvedValue(null);
 
       await processor.process({ data: { type: 'scan' } });
@@ -195,10 +202,10 @@ describe('ReminderProcessor', () => {
     });
 
     it('skips reminder_start if redis key already set', async () => {
-      prisma.application.findMany
-        .mockResolvedValueOnce([])
-        .mockResolvedValueOnce([])
-        .mockResolvedValueOnce([{ id: 'app-start' }]);
+      prisma.jobOffer.findMany
+        .mockResolvedValueOnce([]) // offersToAutoStart
+        .mockResolvedValueOnce([]) // openOverdue
+        .mockResolvedValueOnce([{ id: 'offer-1', applications: [{ id: 'app-start' }] }]);
       redis.get.mockResolvedValue('1');
 
       await processor.process({ data: { type: 'scan' } });
@@ -209,21 +216,17 @@ describe('ReminderProcessor', () => {
   // ─── expireOverdueOffers() ────────────────────────────────────────────────
 
   describe('expireOverdueOffers() via scan', () => {
-    it('marks overdue open offers as EXPIRED', async () => {
+    it('marks overdue ACTIVE offers with no workers as EXPIRED', async () => {
       prisma.jobOffer.findMany
+        .mockResolvedValueOnce([]) // offersToAutoStart (FILLED/PARTIALLY_FILLED with workers)
         .mockResolvedValueOnce([
           {
             id: 'offer-1',
             title: 'Test',
             employer_id: 'emp-1',
-            employer: {
-              phone: '+1111',
-              first_name: 'Bob',
-              reliability_score: 100,
-            },
+            employer: { phone: '+1111', first_name: 'Bob' },
           },
-        ])
-        .mockResolvedValueOnce([]); // no filled overdue
+        ]); // openOverdue (ACTIVE/PARTIALLY_FILLED empty)
       prisma.application.findMany.mockResolvedValue([] as never);
 
       await processor.process({ data: { type: 'scan' } });
@@ -235,61 +238,80 @@ describe('ReminderProcessor', () => {
       );
     });
 
-    it('deducts reliability score for ghost employers (FILLED overdue)', async () => {
+    it('auto-starts FILLED offers that have accepted workers', async () => {
       prisma.jobOffer.findMany
-        .mockResolvedValueOnce([]) // open overdue
         .mockResolvedValueOnce([
           {
-            id: 'offer-ghost',
-            title: 'Ghost',
-            employer_id: 'emp-ghost',
-            employer: {
-              phone: '+2222',
-              first_name: 'Alice',
-              reliability_score: 100,
-            },
+            id: 'offer-filled',
+            title: 'Filled',
+            employer_id: 'emp-filled',
+            employer: { phone: '+5555', first_name: 'Marie' },
+            applications: [{ id: 'app-filled-1' }],
           },
-        ]);
+        ]) // offersToAutoStart
+        .mockResolvedValueOnce([]); // openOverdue
       prisma.application.findMany.mockResolvedValue([] as never);
+      redis.get.mockResolvedValue(null);
 
       await processor.process({ data: { type: 'scan' } });
 
-      expect(prisma.profile.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { id: 'emp-ghost' },
-          data: {
-            reliability_score: Math.max(50, 100 - 10),
-          },
-        }),
+      expect(prisma.jobOffer.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { status: JobOfferStatus.IN_PROGRESS } }),
+      );
+      expect(prisma.application.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { status: ApplicationStatus.STARTED } }),
+      );
+      expect(whatsApp.sendTextMessage).toHaveBeenCalledWith(
+        '+5555',
+        expect.stringContaining('Mission démarrée'),
+        'emp-filled',
       );
     });
 
-    it('does not deduct below RELIABILITY_SCORE_MIN', async () => {
-      prisma.jobOffer.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([
-        {
-          id: 'offer-2',
-          title: 'Low',
-          employer_id: 'emp-2',
-          employer: {
-            phone: '+3333',
-            first_name: 'Charlie',
-            reliability_score: 51,
+    it('auto-starts PARTIALLY_FILLED offers that have accepted workers', async () => {
+      prisma.jobOffer.findMany
+        .mockResolvedValueOnce([
+          {
+            id: 'offer-partial',
+            title: 'Partial',
+            employer_id: 'emp-partial',
+            employer: { phone: '+6666', first_name: 'Paul' },
+            applications: [{ id: 'app-partial-1' }],
           },
-        },
-      ]);
+        ]) // offersToAutoStart
+        .mockResolvedValueOnce([]); // openOverdue
+      prisma.application.findMany.mockResolvedValue([] as never);
+      redis.get.mockResolvedValue(null);
+
+      await processor.process({ data: { type: 'scan' } });
+
+      expect(prisma.jobOffer.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { status: JobOfferStatus.IN_PROGRESS } }),
+      );
+    });
+
+    it('does NOT deduct reliability score when FILLED offer reaches scheduled_at', async () => {
+      prisma.jobOffer.findMany
+        .mockResolvedValueOnce([
+          {
+            id: 'offer-filled',
+            title: 'Filled',
+            employer_id: 'emp-filled',
+            employer: { phone: '+2222', first_name: 'Alice' },
+            applications: [{ id: 'app-1' }],
+          },
+        ]) // offersToAutoStart — no penalty
+        .mockResolvedValueOnce([]); // openOverdue
       prisma.application.findMany.mockResolvedValue([] as never);
 
       await processor.process({ data: { type: 'scan' } });
 
-      expect(prisma.profile.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: { reliability_score: 50 },
-        }),
-      );
+      expect(prisma.profile.update).not.toHaveBeenCalled();
     });
 
     it('skips notification if employer phone is missing', async () => {
       prisma.jobOffer.findMany
+        .mockResolvedValueOnce([]) // offersToAutoStart
         .mockResolvedValueOnce([
           {
             id: 'offer-3',
@@ -297,30 +319,26 @@ describe('ReminderProcessor', () => {
             employer_id: 'emp-3',
             employer: { phone: null, first_name: 'X' },
           },
-        ])
-        .mockResolvedValueOnce([]);
+        ]); // openOverdue
       prisma.application.findMany.mockResolvedValue([] as never);
 
       await processor.process({ data: { type: 'scan' } });
       expect(whatsApp.sendTextMessage).not.toHaveBeenCalled();
     });
 
-    it('handles gracefully when score deduction fails', async () => {
-      prisma.jobOffer.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([
-        {
-          id: 'offer-fail',
-          title: 'Fail',
-          employer_id: 'emp-fail',
-          employer: {
-            phone: '+4444',
-            first_name: 'Dave',
-            reliability_score: 80,
+    it('handles transaction failure gracefully', async () => {
+      prisma.jobOffer.findMany
+        .mockResolvedValueOnce([]) // offersToAutoStart
+        .mockResolvedValueOnce([
+          {
+            id: 'offer-fail',
+            title: 'Fail',
+            employer_id: 'emp-fail',
+            employer: { phone: '+4444', first_name: 'Dave' },
           },
-        },
-      ]);
+        ]); // openOverdue
       prisma.application.findMany.mockResolvedValue([] as never);
       prisma.$transaction.mockRejectedValueOnce(new Error('DB error'));
-      jest.spyOn(Logger.prototype, 'warn');
 
       await expect(
         processor.process({ data: { type: 'scan' } }),
