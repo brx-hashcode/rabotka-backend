@@ -109,14 +109,20 @@ export class WorkerModule {
               queue: unknown,
               redis: Redis,
               systemConfig: SystemConfigService,
-            ) =>
-              new ReminderProcessor(
+            ) => {
+              // Minimal stubs for services only needed in full bot context
+              const contactUnlockStub = { expirePendingAttemptsForJob: async () => [] } as never;
+              const botNotificationStub = { sendContactUnlockCreditConversionNotification: async () => {} } as never;
+              return new ReminderProcessor(
                 prisma as never,
                 whatsApp,
                 queue as never,
                 redis,
                 systemConfig,
-              ),
+                contactUnlockStub,
+                botNotificationStub,
+              );
+            },
             inject: [
               PrismaService,
               WhatsAppService,
