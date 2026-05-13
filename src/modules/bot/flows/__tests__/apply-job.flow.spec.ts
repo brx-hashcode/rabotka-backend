@@ -4,11 +4,20 @@ import type { ApplyJobContext } from '../apply-job.flow';
 import { FLOW_IDS } from '../../bot.constants';
 
 const mockOffer = {
+  id: 'offer-1',
   title: 'Plombier',
+  description: 'Réparation fuite eau cuisine, remplacement robinet.',
   scheduled_at: new Date('2026-06-01T10:00:00Z'),
   amount: 15000,
   payment_flow: 'DAILY',
   address: '10 Rue de la Paix',
+  note: null as string | null,
+  quantity: 1,
+  status: 'ACTIVE',
+  acceptedCount: 0,
+  employer_id: 'emp-1',
+  created_at: new Date(),
+  employer: { reliability_score: 80 as number | null },
 };
 
 const workerProfile: BotProfile = {
@@ -19,6 +28,7 @@ const workerProfile: BotProfile = {
   email: 'alice@example.com',
   profile_type: 'WORKER',
   reliability_score: 90,
+  status: 'ACTIVE',
 };
 
 const employerProfile: BotProfile = {
@@ -38,6 +48,21 @@ function makeCtx(overrides: Partial<ApplyJobContext> = {}): ApplyJobContext {
     notificationService: {
       sendNewApplicationToEmployer: jest.fn().mockResolvedValue(undefined),
     } as unknown as ApplyJobContext['notificationService'],
+    systemConfigService: {
+      getFees: jest.fn().mockResolvedValue({
+        lateCancellationPenaltyFcfa: 5000,
+        lateCancellationScoreDeduction: 5,
+        cancellationThresholdHours: 4,
+        reliabilityScoreMin: 50,
+        employerLateCancelScoreDeduction: 5,
+        billingBlockThreshold: 2,
+      }),
+      getRaw: jest.fn().mockResolvedValue('5000'),
+      getContactInfo: jest.fn().mockResolvedValue({
+        orangeMoneyNumber: '',
+        airtelMoneyNumber: '',
+      }),
+    } as unknown as ApplyJobContext['systemConfigService'],
     ...overrides,
   };
 }
@@ -86,7 +111,9 @@ describe('runApplyJobFlow()', () => {
       const ctx = makeCtx({
         applicationService: {
           create: jest.fn(),
-          getUnpaidPenalties: jest.fn().mockResolvedValue({ count: 2, total: 10000 }),
+          getUnpaidPenalties: jest
+            .fn()
+            .mockResolvedValue({ count: 2, total: 10000 }),
         } as unknown as ApplyJobContext['applicationService'],
       });
       const state = makeState('offer-1');
@@ -121,8 +148,13 @@ describe('runApplyJobFlow()', () => {
       const state = makeState('offer-1', 1);
       const result = await runApplyJobFlow(state, '1', workerProfile, ctx);
       expect(result.clearState).toBe(true);
-      expect(ctx.applicationService.create).toHaveBeenCalledWith('offer-1', 'worker-1');
-      expect(ctx.notificationService.sendNewApplicationToEmployer).toHaveBeenCalledWith('app-1');
+      expect(ctx.applicationService.create).toHaveBeenCalledWith(
+        'offer-1',
+        'worker-1',
+      );
+      expect(
+        ctx.notificationService.sendNewApplicationToEmployer,
+      ).toHaveBeenCalledWith('app-1');
     });
 
     it('creates application on "oui" input', async () => {
@@ -133,25 +165,60 @@ describe('runApplyJobFlow()', () => {
       expect(ctx.applicationService.create).toHaveBeenCalled();
     });
 
-    it('cancels on "2" input', async () => {
+    it('returns without applying on "2" (no prior candidature)', async () => {
       const ctx = makeCtx();
       const state = makeState('offer-1', 1);
       const result = await runApplyJobFlow(state, '2', workerProfile, ctx);
       expect(result.clearState).toBe(true);
-      expect(result.reply[0]).toContain('ANNULÉE');
+      expect(result.reply[0]).toContain('pas postulé');
+      expect(result.reply[0]).not.toContain('ANNULÉE');
     });
 
-    it('cancels on "non" input', async () => {
+    it('returns without applying on "non" input', async () => {
       const ctx = makeCtx();
       const state = makeState('offer-1', 1);
       const result = await runApplyJobFlow(state, 'non', workerProfile, ctx);
       expect(result.clearState).toBe(true);
+      expect(result.reply[0]).toContain('pas postulé');
+    });
+
+    it('on "2" restores list-offers detail when returnToListOffers is set', async () => {
+      const ctx = makeCtx();
+      const state: BotState = {
+        flowId: FLOW_IDS.APPLY_JOB,
+        step: 1,
+        payload: {
+          jobOfferId: 'offer-1',
+          returnToListOffers: {
+            offerIds: ['x', 'y', 'offer-1'],
+            nextCursor: 'c1',
+            selectedOfferIndex: 2,
+          },
+        },
+        updatedAt: new Date().toISOString(),
+      };
+      const result = await runApplyJobFlow(state, '2', workerProfile, ctx);
+      expect(result.clearState).toBeUndefined();
+      expect(result.nextState?.flowId).toBe(FLOW_IDS.LIST_OFFERS);
+      expect(result.nextState?.payload).toMatchObject({
+        step: 'detail',
+        selectedOfferIndex: 2,
+        offerIds: ['x', 'y', 'offer-1'],
+        nextCursor: 'c1',
+      });
+      expect(result.reply[0]).toContain('Plombier');
+      expect(result.reply[0]).toContain('Postuler');
     });
 
     it('asks again for unknown input', async () => {
       const ctx = makeCtx();
       const state = makeState('offer-1', 1);
-      const result = await runApplyJobFlow(state, 'whatever', workerProfile, ctx);
+      const result = await runApplyJobFlow(
+        state,
+        'whatever',
+        workerProfile,
+        ctx,
+      );
       expect(result.nextState).toBeDefined();
       expect(result.clearState).toBeUndefined();
     });
@@ -160,7 +227,9 @@ describe('runApplyJobFlow()', () => {
       const ctx = makeCtx({
         applicationService: {
           create: jest.fn().mockRejectedValue(new Error('Already applied')),
-          getUnpaidPenalties: jest.fn().mockResolvedValue({ count: 0, total: 0 }),
+          getUnpaidPenalties: jest
+            .fn()
+            .mockResolvedValue({ count: 0, total: 0 }),
         } as unknown as ApplyJobContext['applicationService'],
       });
       const state = makeState('offer-1', 1);
@@ -176,6 +245,16 @@ describe('runApplyJobFlow()', () => {
       expect(state.flowId).toBe(FLOW_IDS.APPLY_JOB);
       expect(state.step).toBe(1);
       expect(state.payload?.jobOfferId).toBe('offer-99');
+    });
+
+    it('stores returnToListOffers when provided', () => {
+      const ret = {
+        offerIds: ['a', 'b'],
+        nextCursor: 'c',
+        selectedOfferIndex: 1,
+      };
+      const state = getApplyJobInitialState('offer-99', ret);
+      expect(state.payload?.returnToListOffers).toEqual(ret);
     });
   });
 });

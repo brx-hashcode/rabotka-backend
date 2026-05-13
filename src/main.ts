@@ -72,7 +72,26 @@ async function bootstrap() {
   app.use(csrfVisitorMiddleware);
 
   const csrfUtilities = app.get(CSRF_UTILITIES);
-  app.use(csrfUtilities.doubleCsrfProtection);
+
+  // Wrap doubleCsrfProtection so CSRF failures always return JSON 403 directly,
+  // bypassing Express/NestJS error handler chains that may produce HTML.
+  app.use(
+    (
+      req: import('express').Request,
+      res: import('express').Response,
+      next: import('express').NextFunction,
+    ) => {
+      csrfUtilities.doubleCsrfProtection(req, res, (err?: unknown) => {
+        if (err) {
+          res
+            .status(403)
+            .json({ statusCode: 403, message: 'Invalid CSRF token' });
+          return;
+        }
+        next();
+      });
+    },
+  );
 
   app.useGlobalInterceptors(new LoggingInterceptor());
 
@@ -85,7 +104,12 @@ async function bootstrap() {
         'For integration support, contact api-support@rabotka.com',
     )
     .setVersion('1.0.0')
-    .addServer(`http://localhost:${port}`, 'Local Development Server')
+    .addServer(
+      configService.get<string>('APP_BASE_URL') ?? `http://localhost:${port}`,
+      configService.get<string>('APP_BASE_URL')
+        ? 'Public Server'
+        : 'Local Development Server',
+    )
     .addBearerAuth({
       type: 'http',
       scheme: 'bearer',

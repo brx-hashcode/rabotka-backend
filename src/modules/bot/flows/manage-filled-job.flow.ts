@@ -24,7 +24,7 @@ const PAGE_SIZE = 5;
 
 function isMenuInput(trimmed: string, normalized: string): boolean {
   return (
-    trimmed === '7' ||
+    normalized === 'm' ||
     CMD_MENU.some((c) => normalized === c || normalized.startsWith(c + ' '))
   );
 }
@@ -34,13 +34,14 @@ function buildListPage(
   items: FilledJobListItem[],
   pageIndex: number,
 ): FlowResult {
+  const totalPages = Math.ceil(items.length / PAGE_SIZE);
   const slice = items.slice(
     pageIndex * PAGE_SIZE,
     pageIndex * PAGE_SIZE + PAGE_SIZE,
   );
   const hasMore = items.length > (pageIndex + 1) * PAGE_SIZE;
   return {
-    reply: [formatFilledJobsListPage(slice, hasMore)],
+    reply: [formatFilledJobsListPage(slice, hasMore, pageIndex, totalPages)],
     nextState: {
       ...state,
       payload: {
@@ -59,20 +60,26 @@ async function handleDetailComplete(
   selectedItem: FilledJobListItem,
   ctx: ManageFilledJobContext,
   profile: BotProfile,
+  note?: string,
 ): Promise<FlowResult> {
   try {
     const updated = await ctx.applicationService.markJobCompleted(
       applicationId,
       profile.id,
+      note,
     );
-    await ctx.notificationService.sendJobCompletedToWorker(applicationId);
+    await ctx.notificationService
+      .sendJobCompletedToWorker(applicationId)
+      .catch((err: unknown) =>
+        console.warn(`[manage-filled-job] sendJobCompletedToWorker failed for ${applicationId}:`, err),
+      );
     const amount = updated.job_offer?.amount ?? selectedItem.amount;
     return {
       reply: [
         [
           '*Mission marquée comme terminée !*',
           '',
-          `Le gain de ${Number(amount).toLocaleString('fr-FR')} FCFA a été enregistré pour le worker.`,
+          `Le gain de ${Number(amount).toLocaleString('fr-FR')} FCFA a été enregistré pour le travailleur.`,
           '',
           "Tapez 'Menu' pour revenir.",
         ].join('\n'),
@@ -96,9 +103,11 @@ async function handleDetailCancel(
       applicationId,
       profile.id,
     );
-    await ctx.notificationService.sendJobCancelledByEmployerToWorker(
-      applicationId,
-    );
+    await ctx.notificationService
+      .sendJobCancelledByEmployerToWorker(applicationId)
+      .catch((err: unknown) =>
+        console.warn(`[manage-filled-job] sendJobCancelledByEmployerToWorker failed for ${applicationId}:`, err),
+      );
     return {
       reply: [
         [
@@ -131,16 +140,63 @@ async function handleDetailStep(
     return { reply: ["*ERREUR. TAPEZ 'MENU'.*"], clearState: true };
   }
 
-  // After the !applicationId guard, selectedItem is guaranteed non-undefined
-  if (trimmed === '1')
-    return handleDetailComplete(applicationId, selectedItem, ctx, profile);
-  if (trimmed === '2')
-    return handleDetailCancel(applicationId, ctx, profile, state);
+  if (trimmed === '1') {
+    return {
+      reply: [
+        [
+          '*Laissez une note sur le worker (optionnel)*',
+          '',
+          'Envoyez votre commentaire, ou tapez *0* pour passer.',
+        ].join('\n'),
+      ],
+      nextState: {
+        ...state,
+        payload: { ...state.payload, step: 'note' },
+        updatedAt: new Date().toISOString(),
+      },
+    };
+  }
+  if (trimmed === '2') {
+    return {
+      reply: [
+        [
+          `⚠️ *Êtes-vous sûr de vouloir annuler cette mission ?*`,
+          '',
+          "Le travailleur sera notifié et l'offre sera rouverte aux candidatures.",
+          '',
+          '1- Oui, annuler la mission',
+          '2- Non, revenir',
+        ].join('\n'),
+      ],
+      nextState: {
+        ...state,
+        payload: { ...state.payload, step: 'cancel_confirm' },
+        updatedAt: new Date().toISOString(),
+      },
+    };
+  }
 
   return {
     reply: [formatFilledJobDetail(selectedItem)],
     nextState: state,
   };
+}
+
+async function handleNoteStep(
+  state: BotState,
+  trimmed: string,
+  ctx: ManageFilledJobContext,
+  profile: BotProfile,
+): Promise<FlowResult> {
+  const selectedItem = state.payload?.selectedItem as
+    | FilledJobListItem
+    | undefined;
+  const applicationId = selectedItem?.applicationId;
+  if (!applicationId || !selectedItem) {
+    return { reply: ["*ERREUR. TAPEZ 'MENU'.*"], clearState: true };
+  }
+  const note = trimmed === '0' ? undefined : trimmed;
+  return handleDetailComplete(applicationId, selectedItem, ctx, profile, note);
 }
 
 function handleListStep(
@@ -149,24 +205,23 @@ function handleListStep(
   items: FilledJobListItem[],
   pageIndex: number,
 ): FlowResult {
-  if (trimmed === '6') {
-    const hasMore = items.length > (pageIndex + 1) * PAGE_SIZE;
-    if (!hasMore) {
-      return {
-        reply: ['*RÉPONDEZ PAR UN NUMÉRO (1-5), 6 (VOIR PLUS) OU 7 (MENU).*'],
-        nextState: state,
-      };
-    }
+  const normalized = trimmed.toLowerCase();
+  const totalPages = Math.ceil(items.length / PAGE_SIZE);
+
+  if (normalized === 's' && pageIndex < totalPages - 1) {
     return buildListPage(state, items, pageIndex + 1);
   }
+  if (normalized === 'p' && pageIndex > 0) {
+    return buildListPage(state, items, pageIndex - 1);
+  }
 
-  const choice = /^[1-5]$/.test(trimmed) ? Number.parseInt(trimmed, 10) : 0;
+  const choice = /^\d+$/.test(trimmed) ? Number.parseInt(trimmed, 10) : 0;
   const slice = items.slice(
     pageIndex * PAGE_SIZE,
     pageIndex * PAGE_SIZE + PAGE_SIZE,
   );
 
-  if (choice >= 1 && choice <= PAGE_SIZE && choice <= slice.length) {
+  if (choice >= 1 && choice <= slice.length) {
     const item = slice[choice - 1];
     return {
       reply: [formatFilledJobDetail(item)],
@@ -180,9 +235,14 @@ function handleListStep(
 
   const n = slice.length;
   const hasMore = items.length > (pageIndex + 1) * PAGE_SIZE;
+  const nextPageIdx = PAGE_SIZE + 1;
+  const menuIdx = PAGE_SIZE + 2;
+  if (choice === nextPageIdx && hasMore) return buildListPage(state, items, pageIndex + 1);
+  if (choice === menuIdx) return { reply: ['OK'], clearState: true };
+
   return {
     reply: [
-      `*RÉPONDEZ PAR UN NUMÉRO (1-${n})${hasMore ? ', 6 (VOIR PLUS)' : ''} OU 7 (MENU).*`,
+      `*TAPEZ UN NUMÉRO (1-${n})${pageIndex > 0 ? ', P (page préc.)' : ''}${hasMore ? `, ${nextPageIdx} (voir plus)` : ''}, ${menuIdx} (menu).*`,
     ],
     nextState: state,
   };
@@ -197,7 +257,8 @@ export async function runManageFilledJobFlow(
   const payload = state.payload ?? {};
   const items = (payload.items as FilledJobListItem[]) ?? [];
   const pageIndex = (payload.pageIndex as number) ?? 0;
-  const step = (payload.step as 'list' | 'detail') ?? 'list';
+  const step =
+    (payload.step as 'list' | 'detail' | 'note' | 'cancel_confirm') ?? 'list';
   const selectedItem = payload.selectedItem as FilledJobListItem | undefined;
   const trimmed = input.trim();
   const normalized = trimmed.toLowerCase();
@@ -215,6 +276,28 @@ export async function runManageFilledJobFlow(
 
   if (trimmed === '4' && step === 'detail') {
     return { reply: [menuMessage(profile.profile_type)], clearState: true };
+  }
+
+  if (step === 'cancel_confirm') {
+    const applicationId = selectedItem?.applicationId;
+    if (!applicationId) {
+      return { reply: ["*ERREUR. TAPEZ 'MENU'.*"], clearState: true };
+    }
+    if (trimmed === '1' || normalized === 'oui') {
+      return handleDetailCancel(applicationId, ctx, profile, state);
+    }
+    return {
+      reply: [formatFilledJobDetail(selectedItem)],
+      nextState: {
+        ...state,
+        payload: { ...state.payload, step: 'detail' },
+        updatedAt: new Date().toISOString(),
+      },
+    };
+  }
+
+  if (step === 'note') {
+    return handleNoteStep(state, trimmed, ctx, profile);
   }
 
   if (step === 'detail') {

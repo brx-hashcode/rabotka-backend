@@ -1,9 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { v2 as cloudinary } from 'cloudinary';
+import type { UploadApiOptions } from 'cloudinary';
 import { StorageProvider } from '@prisma/client';
 import { IStorageProvider } from '../interfaces/storage-provider.interface';
-import { UploadOptions, UploadResult } from '../types/storage.types';
+import {
+  GetUrlOptions,
+  UploadOptions,
+  UploadResult,
+} from '../types/storage.types';
 
 @Injectable()
 export class CloudinaryStorageProvider implements IStorageProvider {
@@ -28,22 +33,37 @@ export class CloudinaryStorageProvider implements IStorageProvider {
     });
   }
 
+  private sanitizePublicId(filename: string): string {
+    return filename
+      .replace(/\.[^/.]+$/, '')
+      .replaceAll(/[^a-zA-Z0-9\-_/]/g, '_')
+      .replaceAll(/_+/g, '_')
+      .replaceAll(/^_|_$/g, '');
+  }
+
   async upload(
     file: Buffer,
     filename: string,
     options?: UploadOptions,
   ): Promise<UploadResult> {
     try {
-      const uploadOptions: any = {
-        resource_type: 'auto',
-        public_id: options?.folder
-          ? `${options.folder}/${filename.replace(/\.[^/.]+$/, '')}`
-          : filename.replace(/\.[^/.]+$/, ''),
-      };
-
-      if (options?.metadata) {
-        uploadOptions.context = options.metadata;
+      const safeId = this.sanitizePublicId(filename);
+      const mime = options?.mimeType ?? '';
+      const isImage = mime.startsWith('image/');
+      const isVideo = mime.startsWith('video/');
+      let resourceType: 'image' | 'video' | 'raw' = 'raw';
+      if (isImage) {
+        resourceType = 'image';
+      } else if (isVideo) {
+        resourceType = 'video';
       }
+
+      const uploadOptions: UploadApiOptions = {
+        resource_type: resourceType,
+        public_id: options?.folder ? `${options.folder}/${safeId}` : safeId,
+        access_mode: 'public',
+        ...(options?.metadata ? { context: options.metadata } : {}),
+      };
 
       return new Promise((resolve, reject) => {
         const uploadStream = cloudinary.uploader.upload_stream(
@@ -83,29 +103,21 @@ export class CloudinaryStorageProvider implements IStorageProvider {
   }
 
   async delete(key: string): Promise<void> {
-    return new Promise((resolve, reject) => {
-      cloudinary.uploader.destroy(key, (error, result) => {
-        if (error) {
-          this.logger.error(
-            `Failed to delete file: ${error.message}`,
-            error.stack,
-          );
-          reject(new Error(`Cloudinary delete failed: ${error.message}`));
-          return;
-        }
-
-        if (result?.result === 'not found') {
-          this.logger.warn(`File not found: ${key}`);
-        } else {
-          this.logger.log(`File deleted successfully: ${key}`);
-        }
-
-        resolve();
-      });
-    });
+    try {
+      const result = await cloudinary.uploader.destroy(key);
+      if (result?.result === 'not found') {
+        this.logger.warn(`File not found: ${key}`);
+      } else {
+        this.logger.log(`File deleted successfully: ${key}`);
+      }
+    } catch (error: unknown) {
+      const err = error as { message?: string; stack?: string };
+      this.logger.error(`Failed to delete file: ${err.message}`, err.stack);
+      throw new Error(`Cloudinary delete failed: ${err.message}`);
+    }
   }
 
-  getUrl(key: string): Promise<string> {
+  getUrl(key: string, _options?: GetUrlOptions): Promise<string> {
     const url = cloudinary.url(key, {
       secure: true,
     });
@@ -113,23 +125,23 @@ export class CloudinaryStorageProvider implements IStorageProvider {
   }
 
   async exists(key: string): Promise<boolean> {
-    return new Promise((resolve, reject) => {
-      cloudinary.api.resource(key, (error, result) => {
-        if (error) {
-          if (error.http_code === 404) {
-            resolve(false);
-            return;
-          }
-          this.logger.error(
-            `Failed to check file existence: ${error.message}`,
-            error.stack,
-          );
-          reject(new Error(`Cloudinary exists check failed: ${error.message}`));
-          return;
-        }
-
-        resolve(!!result);
-      });
-    });
+    try {
+      const result = await cloudinary.api.resource(key);
+      return !!result;
+    } catch (error: unknown) {
+      const err = error as {
+        http_code?: number;
+        message?: string;
+        stack?: string;
+      };
+      if (err.http_code === 404) {
+        return false;
+      }
+      this.logger.error(
+        `Failed to check file existence: ${err.message}`,
+        err.stack,
+      );
+      throw new Error(`Cloudinary exists check failed: ${err.message}`);
+    }
   }
 }

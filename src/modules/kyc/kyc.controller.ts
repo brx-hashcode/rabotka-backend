@@ -12,7 +12,10 @@ export class KycController {
   @ApiOperation({
     summary: 'Admin: approve KYC and send WhatsApp verification link',
   })
-  @ApiResponse({ status: 200, description: 'Verification link sent via WhatsApp' })
+  @ApiResponse({
+    status: 200,
+    description: 'Verification link sent via WhatsApp',
+  })
   @ApiResponse({ status: 404, description: 'Profile not found' })
   async approveKyc(
     @Param('profileId') profileId: string,

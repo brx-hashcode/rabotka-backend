@@ -10,6 +10,8 @@ import { WalletModule } from '../wallet/wallet.module';
 import { LogModule } from '../log/log.module';
 import { PrismaModule } from '../../common/services/prisma/prisma.module';
 import { PaymentRequestModule } from '../payment-request/payment-request.module';
+import { DocumentModule } from '../document/document.module';
+import { MatchingModule } from '../matching/matching.module';
 
 @Module({
   imports: [
@@ -21,6 +23,8 @@ import { PaymentRequestModule } from '../payment-request/payment-request.module'
     LogModule,
     PrismaModule,
     PaymentRequestModule,
+    DocumentModule,
+    MatchingModule,
   ],
   controllers: [ProfileController, AdminProfileController],
   providers: [ProfileService],

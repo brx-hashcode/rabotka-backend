@@ -10,17 +10,26 @@ describe('JobOfferModule', () => {
   });
 
   it('provides JobOfferService', () => {
-    const providers: unknown[] = Reflect.getMetadata(MODULE_METADATA.PROVIDERS, JobOfferModule);
+    const providers: unknown[] = Reflect.getMetadata(
+      MODULE_METADATA.PROVIDERS,
+      JobOfferModule,
+    );
     expect(providers).toContain(JobOfferService);
   });
 
   it('registers AdminJobOfferController', () => {
-    const controllers: unknown[] = Reflect.getMetadata(MODULE_METADATA.CONTROLLERS, JobOfferModule);
+    const controllers: unknown[] = Reflect.getMetadata(
+      MODULE_METADATA.CONTROLLERS,
+      JobOfferModule,
+    );
     expect(controllers).toContain(AdminJobOfferController);
   });
 
   it('exports JobOfferService', () => {
-    const exports: unknown[] = Reflect.getMetadata(MODULE_METADATA.EXPORTS, JobOfferModule);
+    const exports: unknown[] = Reflect.getMetadata(
+      MODULE_METADATA.EXPORTS,
+      JobOfferModule,
+    );
     expect(exports).toContain(JobOfferService);
   });
 });

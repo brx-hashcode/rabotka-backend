@@ -5,11 +5,17 @@ import { WhatsAppService } from '../whatsapp.service';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { TwilioService } from '../../../common/services/twilio/twilio.service';
 import { REDIS_CONNECTION } from '../../../common/services/redis/redis.constants';
+import { ConfigService } from '@nestjs/config';
+import { WalletService } from '../../wallet/wallet.service';
 
 // Prevent the real Twilio SDK from being loaded in this test suite
 jest.mock('twilio', () => {
-  const factory = jest.fn().mockReturnValue({ messages: { create: jest.fn() } });
-  (factory as unknown as Record<string, unknown>).validateRequest = jest.fn().mockReturnValue(true);
+  const factory = jest
+    .fn()
+    .mockReturnValue({ messages: { create: jest.fn() } });
+  (factory as unknown as Record<string, unknown>).validateRequest = jest
+    .fn()
+    .mockReturnValue(true);
   return factory;
 });
 
@@ -49,6 +55,20 @@ describe('WhatsAppService', () => {
         { provide: PrismaService, useValue: mockPrismaService },
         { provide: TwilioService, useValue: mockTwilioService },
         { provide: REDIS_CONNECTION, useValue: redis },
+        {
+          provide: ConfigService,
+          useValue: { get: jest.fn().mockReturnValue('test') },
+        },
+        {
+          provide: WalletService,
+          useValue: {
+            getProfileWalletBalance: jest.fn().mockResolvedValue(0),
+            grantWelcomeCredit: jest.fn().mockResolvedValue(0),
+            getOrCreateProfileWallet: jest
+              .fn()
+              .mockResolvedValue({ balance: 0 }),
+          },
+        },
       ],
     }).compile();
 
@@ -97,7 +117,11 @@ describe('WhatsAppService', () => {
 
   describe('sendMediaMessage()', () => {
     it('sends media message and returns true', async () => {
-      const result = await service.sendMediaMessage(PHONE, 'https://x.com/img.jpg', 'caption');
+      const result = await service.sendMediaMessage(
+        PHONE,
+        'https://x.com/img.jpg',
+        'caption',
+      );
       expect(result).toBe(true);
       expect(twilioService.sendWhatsAppMedia).toHaveBeenCalledWith(
         PHONE,
@@ -109,14 +133,21 @@ describe('WhatsAppService', () => {
     it('returns false when twilio returns null', async () => {
       (twilioService.sendWhatsAppMedia as jest.Mock).mockResolvedValue(null);
 
-      const result = await service.sendMediaMessage(PHONE, 'https://x.com/img.jpg');
+      const result = await service.sendMediaMessage(
+        PHONE,
+        'https://x.com/img.jpg',
+      );
       expect(result).toBe(false);
     });
   });
 
   describe('saveMessage()', () => {
     it('creates message in DB', async () => {
-      await service.saveMessage(PROFILE_ID, MessageDirection.INBOUND, 'Hi there');
+      await service.saveMessage(
+        PROFILE_ID,
+        MessageDirection.INBOUND,
+        'Hi there',
+      );
 
       expect(prisma.message.create).toHaveBeenCalledWith({
         data: {
@@ -129,7 +160,12 @@ describe('WhatsAppService', () => {
     });
 
     it('includes sentById when provided', async () => {
-      await service.saveMessage(PROFILE_ID, MessageDirection.OUTBOUND, 'Hello', 'admin-1');
+      await service.saveMessage(
+        PROFILE_ID,
+        MessageDirection.OUTBOUND,
+        'Hello',
+        'admin-1',
+      );
 
       expect(prisma.message.create).toHaveBeenCalledWith({
         data: expect.objectContaining({ sent_by_id: 'admin-1' }),
@@ -147,23 +183,27 @@ describe('WhatsAppService', () => {
 
       await service.verifyWhatsAppToken('valid-token');
 
-      expect(prisma.profile.update).toHaveBeenCalledWith({
-        where: { id: PROFILE_ID },
-        data: { whatsapp_connected: true },
-      });
+      expect(prisma.profile.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: PROFILE_ID },
+          data: expect.objectContaining({ whatsapp_connected: true }),
+        }),
+      );
       expect(redis.del).toHaveBeenCalled();
     });
 
     it('throws BadRequestException for empty token', async () => {
-      await expect(service.verifyWhatsAppToken('')).rejects.toThrow(BadRequestException);
+      await expect(service.verifyWhatsAppToken('')).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('throws BadRequestException when token not found in redis', async () => {
       redis.get.mockResolvedValue(null);
 
-      await expect(service.verifyWhatsAppToken('unknown-token')).rejects.toThrow(
-        BadRequestException,
-      );
+      await expect(
+        service.verifyWhatsAppToken('unknown-token'),
+      ).rejects.toThrow(BadRequestException);
     });
 
     it('throws BadRequestException when profile not found', async () => {

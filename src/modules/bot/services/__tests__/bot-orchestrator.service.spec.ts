@@ -10,6 +10,14 @@ import { BotDraftService } from '../bot-draft.service';
 import { JobOfferService } from '../../../job-offer/job-offer.service';
 import { ApplicationService } from '../../../application/application.service';
 import { SystemConfigService } from '../../../system-config/system-config.service';
+import { PaymentService } from '../../../payments/payment.service';
+import { ContactUnlockService } from '../../../contact-unlock/contact-unlock.service';
+import { WalletService } from '../../../wallet/wallet.service';
+import { MatchingService } from '../../../matching/matching.service';
+import { InterestSignalService } from '../../../interest-graph/interest-signal.service';
+import { InterestRecommendationService } from '../../../interest-graph/interest-recommendation.service';
+import { InvoiceService } from '../../../invoice/invoice.service';
+import { QueueService } from '../../../../common/services/queue/queue.service';
 
 const PROFILE_ID = 'profile-uuid-1';
 const PHONE = '+242000000';
@@ -22,7 +30,9 @@ const mockActiveProfile = {
   email: 'jean@test.com',
   profile_type: 'WORKER',
   status: 'ACTIVE',
+  billing_status: 'CLEAR',
   reliability_score: 90,
+  whatsapp_connected: true,
 };
 
 const mockEmployerProfile = {
@@ -45,10 +55,13 @@ function makeDeps() {
     botInbox: {
       shift: jest.fn().mockResolvedValue(null),
       count: jest.fn().mockResolvedValue(0),
+      peek: jest.fn().mockResolvedValue(null),
+      peekAndShift: jest.fn().mockResolvedValue(null),
     },
     botDraft: {
       getDraft: jest.fn().mockResolvedValue(null),
       saveDraft: jest.fn().mockResolvedValue(undefined),
+      clearDraft: jest.fn().mockResolvedValue(undefined),
     },
     router: {
       route: jest.fn(),
@@ -59,12 +72,16 @@ function makeDeps() {
       candidaturesReceived: jest.fn(),
       filledJobs: jest.fn(),
       profile: jest.fn().mockResolvedValue('Profile message'),
-      myOffers: jest.fn().mockResolvedValue('My offers message'),
+      myOffers: jest
+        .fn()
+        .mockResolvedValue({ message: 'My offers message', offerIds: [] }),
       penaltyHistory: jest.fn().mockResolvedValue('Penalty history'),
     },
     jobOfferService: {},
     applicationService: {
-      getUnpaidPenalties: jest.fn().mockResolvedValue({ count: 0, total: 0, ids: [] }),
+      getUnpaidPenalties: jest
+        .fn()
+        .mockResolvedValue({ count: 0, total: 0, ids: [] }),
     },
     notificationService: {},
     systemConfig: {
@@ -97,6 +114,42 @@ describe('BotOrchestratorService', () => {
         { provide: ApplicationService, useValue: deps.applicationService },
         { provide: BotNotificationService, useValue: deps.notificationService },
         { provide: SystemConfigService, useValue: deps.systemConfig },
+        { provide: PaymentService, useValue: {} },
+        {
+          provide: ContactUnlockService,
+          useValue: {
+            findPendingAttemptForProfile: jest.fn(),
+            getByApplicationId: jest.fn(),
+            payUnlock: jest.fn(),
+          },
+        },
+        {
+          provide: WalletService,
+          useValue: { getProfileWalletBalance: jest.fn().mockResolvedValue(0) },
+        },
+        {
+          provide: MatchingService,
+          useValue: {
+            findMatchingWorkersForJob: jest.fn().mockResolvedValue([]),
+            findMatchingJobsForWorker: jest.fn().mockResolvedValue([]),
+          },
+        },
+        {
+          provide: InterestSignalService,
+          useValue: { recordSignal: jest.fn().mockResolvedValue(undefined) },
+        },
+        {
+          provide: InterestRecommendationService,
+          useValue: { getRecommendedJobs: jest.fn().mockResolvedValue([]) },
+        },
+        {
+          provide: InvoiceService,
+          useValue: { create: jest.fn().mockResolvedValue({ id: 'inv-1' }) },
+        },
+        {
+          provide: QueueService,
+          useValue: { addJob: jest.fn().mockResolvedValue('job-1') },
+        },
       ],
     }).compile();
 
@@ -105,18 +158,18 @@ describe('BotOrchestratorService', () => {
 
   describe('handle() — profile loading', () => {
     it('returns NOT_FOUND_MESSAGE when profile is null', async () => {
-      (deps.prisma.profile.findUnique as jest.Mock).mockResolvedValue(null);
+      deps.prisma.profile.findUnique.mockResolvedValue(null);
       const result = await service.handle(PROFILE_ID, PHONE, 'Menu');
       expect(result).toHaveLength(1);
       expect(result[0]).toContain("n'est pas encore enregistré");
     });
 
     it('returns INACTIVE_MESSAGE when account is not ACTIVE', async () => {
-      (deps.prisma.profile.findUnique as jest.Mock).mockResolvedValue({
+      deps.prisma.profile.findUnique.mockResolvedValue({
         ...mockActiveProfile,
         status: 'PENDING',
       });
-      (deps.router.route as jest.Mock).mockReturnValue({
+      deps.router.route.mockReturnValue({
         type: 'unknown',
         commandId: 'none',
       });
@@ -127,26 +180,28 @@ describe('BotOrchestratorService', () => {
 
   describe('handle() — routing', () => {
     beforeEach(() => {
-      (deps.prisma.profile.findUnique as jest.Mock).mockResolvedValue(
-        mockActiveProfile,
-      );
+      deps.prisma.profile.findUnique.mockResolvedValue(mockActiveProfile);
     });
 
-    it('returns unknownCommandMessage for unrecognized input without state', async () => {
-      (deps.router.route as jest.Mock).mockReturnValue({ type: 'unknown' });
-      const result = await service.handle(PROFILE_ID, PHONE, 'bonjour le monde');
-      expect(result[0]).toContain('Commande non reconnue');
+    it('returns session-expired message for unrecognized input without state', async () => {
+      deps.router.route.mockReturnValue({ type: 'unknown' });
+      const result = await service.handle(
+        PROFILE_ID,
+        PHONE,
+        'bonjour le monde',
+      );
+      expect(result[0]).toContain('Session expirée');
     });
 
     it('returns session-expired message when no state and input looks like flow input', async () => {
-      (deps.router.route as jest.Mock).mockReturnValue({ type: 'unknown' });
+      deps.router.route.mockReturnValue({ type: 'unknown' });
       const result = await service.handle(PROFILE_ID, PHONE, '3');
       expect(result[0]).toContain('Session expirée');
       expect(result[1]).toContain('MENU');
     });
 
     it('returns ERROR_MESSAGE on exception', async () => {
-      (deps.router.route as jest.Mock).mockImplementation(() => {
+      deps.router.route.mockImplementation(() => {
         throw new Error('unexpected error');
       });
       const result = await service.handle(PROFILE_ID, PHONE, 'Menu');
@@ -154,18 +209,28 @@ describe('BotOrchestratorService', () => {
     });
 
     it('handles flow route', async () => {
-      const flowState = { flowId: 'list_offers', step: 1, payload: {}, updatedAt: '' };
-      (deps.router.route as jest.Mock).mockReturnValue({
+      const flowState = {
+        flowId: 'list_offers',
+        step: 1,
+        payload: {},
+        updatedAt: '',
+      };
+      deps.router.route.mockReturnValue({
         type: 'flow',
         flowId: 'list_offers',
         state: flowState,
       });
-      (deps.botState.get as jest.Mock).mockResolvedValue(flowState);
+      deps.botState.get.mockResolvedValue(flowState);
 
       // Mock flow execution to return reply without clearState
       jest.spyOn(service as any, 'executeFlow').mockResolvedValue({
         reply: ['Offers list'],
-        nextState: { flowId: 'list_offers', step: 2, payload: {}, updatedAt: '' },
+        nextState: {
+          flowId: 'list_offers',
+          step: 2,
+          payload: {},
+          updatedAt: '',
+        },
       });
 
       const result = await service.handle(PROFILE_ID, PHONE, '2');
@@ -175,13 +240,11 @@ describe('BotOrchestratorService', () => {
 
   describe('handle() — command routing', () => {
     beforeEach(() => {
-      (deps.prisma.profile.findUnique as jest.Mock).mockResolvedValue(
-        mockActiveProfile,
-      );
+      deps.prisma.profile.findUnique.mockResolvedValue(mockActiveProfile);
     });
 
     it('handles "menu" command', async () => {
-      (deps.router.route as jest.Mock).mockReturnValue({
+      deps.router.route.mockReturnValue({
         type: 'command',
         commandId: 'menu',
       });
@@ -190,7 +253,7 @@ describe('BotOrchestratorService', () => {
     });
 
     it('handles "help" command', async () => {
-      (deps.router.route as jest.Mock).mockReturnValue({
+      deps.router.route.mockReturnValue({
         type: 'command',
         commandId: 'help',
       });
@@ -199,7 +262,7 @@ describe('BotOrchestratorService', () => {
     });
 
     it('handles "my_offers" command', async () => {
-      (deps.router.route as jest.Mock).mockReturnValue({
+      deps.router.route.mockReturnValue({
         type: 'command',
         commandId: 'my_offers',
       });
@@ -208,7 +271,7 @@ describe('BotOrchestratorService', () => {
     });
 
     it('handles "profile" command via runCommand', async () => {
-      (deps.router.route as jest.Mock).mockReturnValue({
+      deps.router.route.mockReturnValue({
         type: 'command',
         commandId: 'profile',
       });
@@ -217,7 +280,7 @@ describe('BotOrchestratorService', () => {
     });
 
     it('handles "penalty_history" command', async () => {
-      (deps.router.route as jest.Mock).mockReturnValue({
+      deps.router.route.mockReturnValue({
         type: 'command',
         commandId: 'penalty_history',
       });
@@ -226,7 +289,7 @@ describe('BotOrchestratorService', () => {
     });
 
     it('handles unknown commandId via default', async () => {
-      (deps.router.route as jest.Mock).mockReturnValue({
+      deps.router.route.mockReturnValue({
         type: 'command',
         commandId: 'totally_unknown',
       });
@@ -235,7 +298,7 @@ describe('BotOrchestratorService', () => {
     });
 
     it('handles "start_publish_job" command (no draft)', async () => {
-      (deps.router.route as jest.Mock).mockReturnValue({
+      deps.router.route.mockReturnValue({
         type: 'command',
         commandId: 'start_publish_job',
       });
@@ -245,11 +308,11 @@ describe('BotOrchestratorService', () => {
     });
 
     it('handles "start_publish_job" command with existing draft', async () => {
-      (deps.router.route as jest.Mock).mockReturnValue({
+      deps.router.route.mockReturnValue({
         type: 'command',
         commandId: 'start_publish_job',
       });
-      (deps.botDraft.getDraft as jest.Mock).mockResolvedValue({
+      deps.botDraft.getDraft.mockResolvedValue({
         step: 3,
         payload: { title: 'Draft title' },
         savedAt: new Date().toISOString(),
@@ -260,11 +323,11 @@ describe('BotOrchestratorService', () => {
     });
 
     it('handles "list_offers" command', async () => {
-      (deps.router.route as jest.Mock).mockReturnValue({
+      deps.router.route.mockReturnValue({
         type: 'command',
         commandId: 'list_offers',
       });
-      (deps.commands.listOffers as jest.Mock).mockResolvedValue({
+      deps.commands.listOffers.mockResolvedValue({
         message: 'Offers available',
         offerIds: ['o1', 'o2'],
         nextCursor: null,
@@ -275,11 +338,11 @@ describe('BotOrchestratorService', () => {
     });
 
     it('handles "list_offers" with no offers (no state set)', async () => {
-      (deps.router.route as jest.Mock).mockReturnValue({
+      deps.router.route.mockReturnValue({
         type: 'command',
         commandId: 'list_offers',
       });
-      (deps.commands.listOffers as jest.Mock).mockResolvedValue({
+      deps.commands.listOffers.mockResolvedValue({
         message: 'No offers',
         offerIds: [],
       });
@@ -288,11 +351,11 @@ describe('BotOrchestratorService', () => {
     });
 
     it('handles "my_applications" command', async () => {
-      (deps.router.route as jest.Mock).mockReturnValue({
+      deps.router.route.mockReturnValue({
         type: 'command',
         commandId: 'my_applications',
       });
-      (deps.commands.myApplications as jest.Mock).mockResolvedValue({
+      deps.commands.myApplications.mockResolvedValue({
         message: 'My apps',
         applicationIds: ['a1'],
       });
@@ -301,14 +364,12 @@ describe('BotOrchestratorService', () => {
     });
 
     it('handles "candidatures_received" command', async () => {
-      (deps.prisma.profile.findUnique as jest.Mock).mockResolvedValue(
-        mockEmployerProfile,
-      );
-      (deps.router.route as jest.Mock).mockReturnValue({
+      deps.prisma.profile.findUnique.mockResolvedValue(mockEmployerProfile);
+      deps.router.route.mockReturnValue({
         type: 'command',
         commandId: 'candidatures_received',
       });
-      (deps.commands.candidaturesReceived as jest.Mock).mockResolvedValue({
+      deps.commands.candidaturesReceived.mockResolvedValue({
         message: 'Candidatures list',
         items: [{ applicationId: 'a1' }],
       });
@@ -317,14 +378,12 @@ describe('BotOrchestratorService', () => {
     });
 
     it('handles "filled_jobs" command', async () => {
-      (deps.prisma.profile.findUnique as jest.Mock).mockResolvedValue(
-        mockEmployerProfile,
-      );
-      (deps.router.route as jest.Mock).mockReturnValue({
+      deps.prisma.profile.findUnique.mockResolvedValue(mockEmployerProfile);
+      deps.router.route.mockReturnValue({
         type: 'command',
         commandId: 'filled_jobs',
       });
-      (deps.commands.filledJobs as jest.Mock).mockResolvedValue({
+      deps.commands.filledJobs.mockResolvedValue({
         message: 'Filled jobs',
         items: [{ applicationId: 'a1' }],
       });
@@ -333,7 +392,7 @@ describe('BotOrchestratorService', () => {
     });
 
     it('handles "profile" command route (sets state)', async () => {
-      (deps.router.route as jest.Mock).mockReturnValue({
+      deps.router.route.mockReturnValue({
         type: 'command',
         commandId: 'profile',
       });
@@ -343,7 +402,7 @@ describe('BotOrchestratorService', () => {
     });
 
     it('handles "pay_penalties" command with no unpaid penalties', async () => {
-      (deps.router.route as jest.Mock).mockReturnValue({
+      deps.router.route.mockReturnValue({
         type: 'command',
         commandId: 'pay_penalties',
       });
@@ -352,12 +411,12 @@ describe('BotOrchestratorService', () => {
     });
 
     it('handles "pay_penalties" command with unpaid penalties', async () => {
-      (deps.applicationService.getUnpaidPenalties as jest.Mock).mockResolvedValue({
+      deps.applicationService.getUnpaidPenalties.mockResolvedValue({
         count: 2,
         total: 10000,
         ids: ['p1', 'p2'],
       });
-      (deps.router.route as jest.Mock).mockReturnValue({
+      deps.router.route.mockReturnValue({
         type: 'command',
         commandId: 'pay_penalties',
       });
@@ -373,9 +432,7 @@ describe('BotOrchestratorService', () => {
 
   describe('runFlow() — state management', () => {
     beforeEach(() => {
-      (deps.prisma.profile.findUnique as jest.Mock).mockResolvedValue(
-        mockActiveProfile,
-      );
+      deps.prisma.profile.findUnique.mockResolvedValue(mockActiveProfile);
     });
 
     it('clears state and checks inbox when clearState=true and no pending inbox', async () => {
@@ -385,7 +442,7 @@ describe('BotOrchestratorService', () => {
         payload: {},
         updatedAt: '',
       };
-      (deps.router.route as jest.Mock).mockReturnValue({
+      deps.router.route.mockReturnValue({
         type: 'flow',
         flowId: 'list_offers',
         state: flowState,
@@ -394,7 +451,7 @@ describe('BotOrchestratorService', () => {
         reply: ['Done'],
         clearState: true,
       });
-      (deps.botInbox.shift as jest.Mock).mockResolvedValue(null);
+      deps.botInbox.shift.mockResolvedValue(null);
 
       const result = await service.handle(PROFILE_ID, PHONE, 'Menu');
       expect(deps.botState.clear).toHaveBeenCalled();
@@ -408,7 +465,7 @@ describe('BotOrchestratorService', () => {
         payload: {},
         updatedAt: '',
       };
-      (deps.router.route as jest.Mock).mockReturnValue({
+      deps.router.route.mockReturnValue({
         type: 'flow',
         flowId: 'list_offers',
         state: flowState,
@@ -417,62 +474,65 @@ describe('BotOrchestratorService', () => {
         reply: ['Done'],
         clearState: true,
       });
-      (deps.botInbox.shift as jest.Mock).mockResolvedValue({
+      deps.botInbox.peekAndShift.mockResolvedValue({
         type: 'new_application',
         applicationId: 'app-1',
         workerName: 'Jean',
         offerTitle: 'Livreur',
       });
-      (deps.botInbox.count as jest.Mock).mockResolvedValue(2);
+      deps.botInbox.count.mockResolvedValue(2);
 
       const result = await service.handle(PROFILE_ID, PHONE, 'Menu');
       expect(deps.botState.set).toHaveBeenCalled();
       expect(result.some((r) => r.includes('Nouvelle candidature'))).toBe(true);
     });
 
-    it('saves draft before clearing publish-job flow state', async () => {
+    it('clears draft when clearing publish-job flow state', async () => {
       const flowState = {
         flowId: 'publish_job',
         step: 3,
         payload: { title: 'My offer' },
         updatedAt: '',
       };
-      (deps.router.route as jest.Mock).mockReturnValue({
+      deps.router.route.mockReturnValue({
         type: 'flow',
         flowId: 'publish_job',
         state: flowState,
       });
-      (deps.botState.get as jest.Mock).mockResolvedValue(flowState);
+      deps.botState.get.mockResolvedValue(flowState);
       jest.spyOn(service as any, 'executeFlow').mockResolvedValue({
         reply: ['Exited'],
         clearState: true,
       });
-      (deps.botInbox.shift as jest.Mock).mockResolvedValue(null);
+      deps.botInbox.shift.mockResolvedValue(null);
 
       await service.handle(PROFILE_ID, PHONE, 'Menu');
-      expect(deps.botDraft.saveDraft).toHaveBeenCalled();
+      expect(deps.botDraft.clearDraft).toHaveBeenCalled();
     });
 
     it('appends inbox badge for EMPLOYER with pending items', async () => {
-      (deps.prisma.profile.findUnique as jest.Mock).mockResolvedValue(
-        mockEmployerProfile,
-      );
+      deps.prisma.profile.findUnique.mockResolvedValue(mockEmployerProfile);
       const flowState = {
         flowId: 'list_offers',
         step: 1,
         payload: {},
         updatedAt: '',
       };
-      (deps.router.route as jest.Mock).mockReturnValue({
+      deps.router.route.mockReturnValue({
         type: 'flow',
         flowId: 'list_offers',
         state: flowState,
       });
       jest.spyOn(service as any, 'executeFlow').mockResolvedValue({
         reply: ['Offers list'],
-        nextState: { flowId: 'list_offers', step: 2, payload: {}, updatedAt: '' },
+        nextState: {
+          flowId: 'list_offers',
+          step: 2,
+          payload: {},
+          updatedAt: '',
+        },
       });
-      (deps.botInbox.count as jest.Mock).mockResolvedValue(3);
+      deps.botInbox.count.mockResolvedValue(3);
 
       const result = await service.handle('employer-uuid-1', PHONE, '2');
       expect(result[0]).toContain('candidature(s) en attente');
@@ -485,7 +545,7 @@ describe('BotOrchestratorService', () => {
         payload: {},
         updatedAt: '',
       };
-      (deps.router.route as jest.Mock).mockReturnValue({
+      deps.router.route.mockReturnValue({
         type: 'flow',
         flowId: 'unknown_flow',
         state: flowState,

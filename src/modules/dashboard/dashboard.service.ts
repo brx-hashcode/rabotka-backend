@@ -9,14 +9,14 @@ export type JobActivityDataPoint = {
 };
 
 export type DashboardMetrics = {
-  revenue: number;
-  revenueTrend: number;
+  assignmentsCount: number;
+  assignmentsTrend: number | null;
   profilesCount: number;
-  profilesTrend: number;
+  profilesTrend: number | null;
   jobsCount: number;
-  jobsTrend: number;
+  jobsTrend: number | null;
   applicationsCount: number;
-  applicationsTrend: number;
+  applicationsTrend: number | null;
 };
 
 const TIME_RANGE_DAYS: Record<TimeRange, number> = {
@@ -37,9 +37,9 @@ export class DashboardService {
     sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
 
     const [
-      totalRevenue,
-      revenueCurrent,
-      revenuePrevious,
+      assignmentsTotal,
+      assignmentsCurrent,
+      assignmentsPrevious,
       profilesTotal,
       profilesCurrent,
       profilesPrevious,
@@ -50,23 +50,15 @@ export class DashboardService {
       applicationsCurrent,
       applicationsPrevious,
     ] = await Promise.all([
-      // Total revenue: all completed payments
-      this.prisma.payment.aggregate({
-        where: { status: 'COMPLETED' },
-        _sum: { amount: true },
+      // Total assignments (placements made)
+      this.prisma.assignment.count(),
+      // Assignments last 30 days
+      this.prisma.assignment.count({
+        where: { created_at: { gte: thirtyDaysAgo } },
       }),
-      // Revenue last 30 days
-      this.prisma.payment.aggregate({
-        where: { status: 'COMPLETED', paid_at: { gte: thirtyDaysAgo } },
-        _sum: { amount: true },
-      }),
-      // Revenue previous 30 days
-      this.prisma.payment.aggregate({
-        where: {
-          status: 'COMPLETED',
-          paid_at: { gte: sixtyDaysAgo, lt: thirtyDaysAgo },
-        },
-        _sum: { amount: true },
+      // Assignments previous 30 days
+      this.prisma.assignment.count({
+        where: { created_at: { gte: sixtyDaysAgo, lt: thirtyDaysAgo } },
       }),
       this.prisma.profile.count(),
       this.prisma.profile.count({
@@ -92,11 +84,8 @@ export class DashboardService {
     ]);
 
     return {
-      revenue: Number(totalRevenue._sum.amount ?? 0),
-      revenueTrend: this.calcTrend(
-        Number(revenueCurrent._sum.amount ?? 0),
-        Number(revenuePrevious._sum.amount ?? 0),
-      ),
+      assignmentsCount: assignmentsTotal,
+      assignmentsTrend: this.calcTrend(assignmentsCurrent, assignmentsPrevious),
       profilesCount: profilesTotal,
       profilesTrend: this.calcTrend(profilesCurrent, profilesPrevious),
       jobsCount: jobsTotal,
@@ -126,9 +115,10 @@ export class DashboardService {
     return groups.map((g) => ({ status: g.status, count: g._count.status }));
   }
 
-  private calcTrend(current: number, previous: number): number {
-    if (previous === 0) return current > 0 ? 100 : 0;
-    return Math.round(((current - previous) / previous) * 1000) / 10;
+  private calcTrend(current: number, previous: number): number | null {
+    if (previous === 0) return current > 0 ? 100 : null;
+    const trend = Math.round(((current - previous) / previous) * 1000) / 10;
+    return Math.max(-100, Math.min(trend, 100));
   }
 
   async getJobActivity(range: TimeRange): Promise<JobActivityDataPoint[]> {

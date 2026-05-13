@@ -1,4 +1,7 @@
-import { runListOffersFlow, getListOffersInitialState } from '../list-offers.flow';
+import {
+  runListOffersFlow,
+  getListOffersInitialState,
+} from '../list-offers.flow';
 import type { BotProfile, BotState } from '../../types/bot-state.types';
 import type { JobOfferService } from '../../../job-offer/job-offer.service';
 import { FLOW_IDS } from '../../bot.constants';
@@ -21,22 +24,26 @@ const workerProfile: BotProfile = {
   profile_type: 'WORKER',
   status: 'ACTIVE',
   phone: '+242111111',
+  email: 'jane@example.com',
+  reliability_score: 100,
 };
 
-function makeOffer(id: string) {
+function makeOffer(id: string, acceptedCount = 0) {
   return {
     id,
     title: `Offre ${id}`,
-    description: 'Description de l\'offre disponible pour test',
+    description: "Description de l'offre disponible pour test",
     scheduled_at: new Date(Date.now() + 5 * 3600000),
     amount: 15000,
     payment_flow: 'DAILY',
     address: '123 Avenue de la Paix, Brazzaville',
     note: null,
     quantity: 2,
+    acceptedCount,
     status: 'ACTIVE',
     employer_id: 'employer-1',
     created_at: new Date(),
+    employer: { reliability_score: 90 as number | null },
   };
 }
 
@@ -45,12 +52,27 @@ const mockJobOfferService = {
   findById: jest.fn(),
 } as unknown as jest.Mocked<JobOfferService>;
 
-const ctx = { jobOfferService: mockJobOfferService };
+const ctx = {
+  jobOfferService: mockJobOfferService,
+  systemConfigService: {
+    getFees: jest.fn().mockResolvedValue({
+      lateCancellationPenaltyFcfa: 5000,
+      lateCancellationScoreDeduction: 5,
+      cancellationThresholdHours: 4,
+      reliabilityScoreMin: 50,
+      employerLateCancelScoreDeduction: 5,
+      billingBlockThreshold: 2,
+    }),
+    getRaw: jest.fn().mockResolvedValue('5000'),
+  } as any,
+};
 
 beforeEach(() => {
   jest.clearAllMocks();
   OFFER_IDS.forEach((id) => {
-    (mockJobOfferService.findById as jest.Mock).mockResolvedValue(makeOffer(id));
+    (mockJobOfferService.findById as jest.Mock).mockResolvedValue(
+      makeOffer(id),
+    );
   });
 });
 
@@ -95,7 +117,12 @@ describe('runListOffersFlow()', () => {
         data: [makeOffer('offer-6')],
         nextCursor: null,
       });
-      const result = await runListOffersFlow(stateWithCursor, '6', workerProfile, ctx);
+      const result = await runListOffersFlow(
+        stateWithCursor,
+        '6',
+        workerProfile,
+        ctx,
+      );
       expect(mockJobOfferService.findActive).toHaveBeenCalledWith(
         5,
         'cursor-abc',
@@ -152,7 +179,9 @@ describe('runListOffersFlow()', () => {
 
     it('shows quantity in offer detail', async () => {
       const state = makeState(detailPayload);
-      (mockJobOfferService.findById as jest.Mock).mockResolvedValue(makeOffer('offer-1'));
+      (mockJobOfferService.findById as jest.Mock).mockResolvedValue(
+        makeOffer('offer-1'),
+      );
       const result = await runListOffersFlow(state, '2', workerProfile, ctx);
       expect(result.reply[0]).toContain('Personnes requises');
       expect(result.reply[0]).toContain('2');

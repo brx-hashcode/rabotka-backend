@@ -1,48 +1,33 @@
 import { Transform } from 'class-transformer';
-import { IsString, IsOptional, IsEnum } from 'class-validator';
+import { IsString, IsOptional, MaxLength } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { AccountStatus } from '@prisma/client';
 
 export class UpdateProfileDto {
   @ApiPropertyOptional({ description: 'First name of the profile' })
   @Transform(({ value }) => value?.trim())
   @IsOptional()
   @IsString()
+  @MaxLength(50)
   firstName?: string;
 
   @ApiPropertyOptional({ description: 'Last name of the profile' })
   @Transform(({ value }) => value?.trim())
   @IsOptional()
   @IsString()
+  @MaxLength(50)
   lastName?: string;
 
   @ApiPropertyOptional({ description: 'Profile description / About me' })
   @Transform(({ value }) => value?.trim())
   @IsOptional()
   @IsString()
+  @MaxLength(500)
   description?: string;
 
   @ApiPropertyOptional({ description: 'Address of the profile' })
   @Transform(({ value }) => value?.trim())
   @IsOptional()
   @IsString()
+  @MaxLength(200)
   address?: string;
-
-  @ApiPropertyOptional({
-    description: 'Account status',
-    enum: AccountStatus,
-  })
-  @IsOptional()
-  @IsEnum(AccountStatus)
-  status?: AccountStatus;
-
-  @ApiPropertyOptional({ description: 'Phone number of the profile' })
-  @IsOptional()
-  @IsString()
-  phone?: string;
-
-  @ApiPropertyOptional({ description: 'Email of the profile' })
-  @IsOptional()
-  @IsString()
-  email?: string;
 }

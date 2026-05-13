@@ -15,7 +15,9 @@ function makeWhatsAppService() {
 
 function makeConversationService() {
   return {
-    handleIncomingMessage: jest.fn().mockResolvedValue(['Hello back!']),
+    handleIncomingMessage: jest
+      .fn()
+      .mockResolvedValue({ profileId: 'p-1', replies: ['Hello back!'] }),
   };
 }
 
@@ -33,8 +35,16 @@ function makeConfigService() {
 }
 
 function makeRedis() {
+  const pipelineObj = {
+    incr: jest.fn().mockReturnThis(),
+    expire: jest.fn().mockReturnThis(),
+    exec: jest.fn().mockResolvedValue([[null, 1], [null, 1]]),
+  };
   return {
     set: jest.fn().mockResolvedValue('OK'), // 'OK' = new key set
+    incr: jest.fn().mockResolvedValue(1),
+    expire: jest.fn().mockResolvedValue(1),
+    pipeline: jest.fn().mockReturnValue(pipelineObj),
   };
 }
 
@@ -55,6 +65,7 @@ describe('WhatsAppController', () => {
   let twilioService: ReturnType<typeof makeTwilioService>;
   let configService: ReturnType<typeof makeConfigService>;
   let redis: ReturnType<typeof makeRedis>;
+  let queueService: { addJob: jest.Mock };
 
   beforeEach(() => {
     whatsAppService = makeWhatsAppService();
@@ -62,11 +73,13 @@ describe('WhatsAppController', () => {
     twilioService = makeTwilioService();
     configService = makeConfigService();
     redis = makeRedis();
+    queueService = { addJob: jest.fn().mockResolvedValue(undefined) };
     controller = new WhatsAppController(
       whatsAppService as any,
       conversationService as any,
       twilioService as any,
       configService as any,
+      queueService as any,
       redis as any,
     );
   });
@@ -85,32 +98,55 @@ describe('WhatsAppController', () => {
   });
 
   describe('incomingWebhook()', () => {
-    const body = { From: 'whatsapp:+24200000001', Body: 'Hello', MessageSid: 'SM123' };
+    const body = {
+      From: 'whatsapp:+24200000001',
+      Body: 'Hello',
+      MessageSid: 'SM123',
+    };
 
     it('processes webhook and sends reply', async () => {
       await controller.incomingWebhook(makeReq(), body);
-      expect(conversationService.handleIncomingMessage).toHaveBeenCalledWith('+24200000001', 'Hello');
-      expect(whatsAppService.sendTextMessage).toHaveBeenCalledWith('+24200000001', 'Hello back!');
+      expect(conversationService.handleIncomingMessage).toHaveBeenCalledWith(
+        '+24200000001',
+        'Hello',
+      );
+      expect(queueService.addJob).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          type: 'text',
+          phone: '+24200000001',
+          text: 'Hello back!',
+        }),
+      );
     });
 
     it('throws ForbiddenException when auth token not set', async () => {
       twilioService.getAuthToken.mockReturnValue(null);
-      await expect(controller.incomingWebhook(makeReq(), body)).rejects.toThrow('configuré');
+      await expect(controller.incomingWebhook(makeReq(), body)).rejects.toThrow(
+        'configuré',
+      );
     });
 
     it('throws ForbiddenException when signature header missing', async () => {
       const req = makeReq({ headers: {} });
-      await expect(controller.incomingWebhook(req, body)).rejects.toThrow('Signature');
+      await expect(controller.incomingWebhook(req, body)).rejects.toThrow(
+        'Signature',
+      );
     });
 
     it('throws ForbiddenException when signature invalid', async () => {
       twilioService.validateWebhookSignature.mockReturnValue(false);
-      await expect(controller.incomingWebhook(makeReq(), body)).rejects.toThrow('Signature invalide');
+      await expect(controller.incomingWebhook(makeReq(), body)).rejects.toThrow(
+        'Signature invalide',
+      );
     });
 
     it('throws BadRequestException when From is missing', async () => {
       await expect(
-        controller.incomingWebhook(makeReq(), { Body: 'test', MessageSid: 'SM001' }),
+        controller.incomingWebhook(makeReq(), {
+          Body: 'test',
+          MessageSid: 'SM001',
+        }),
       ).rejects.toThrow("'From' manquant");
     });
 
@@ -121,25 +157,42 @@ describe('WhatsAppController', () => {
     });
 
     it('handles media reply messages with [IMG:...] prefix', async () => {
-      conversationService.handleIncomingMessage.mockResolvedValue([
-        '[IMG:https://cdn.example.com/photo.jpg]Caption text',
-      ]);
+      conversationService.handleIncomingMessage.mockResolvedValue({
+        profileId: 'p-1',
+        replies: ['[IMG:https://cdn.example.com/photo.jpg]Caption text'],
+      });
       await controller.incomingWebhook(makeReq(), body);
-      expect(whatsAppService.sendMediaMessage).toHaveBeenCalledWith(
-        '+24200000001',
-        'https://cdn.example.com/photo.jpg',
-        'Caption text',
+      expect(queueService.addJob).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          type: 'media',
+          phone: '+24200000001',
+          mediaUrl: 'https://cdn.example.com/photo.jpg',
+          caption: 'Caption text',
+        }),
       );
     });
 
     it('strips whatsapp: prefix from From field', async () => {
-      await controller.incomingWebhook(makeReq(), { ...body, From: 'whatsapp:+24200000001' });
-      expect(conversationService.handleIncomingMessage).toHaveBeenCalledWith('+24200000001', 'Hello');
+      await controller.incomingWebhook(makeReq(), {
+        ...body,
+        From: 'whatsapp:+24200000001',
+      });
+      expect(conversationService.handleIncomingMessage).toHaveBeenCalledWith(
+        '+24200000001',
+        'Hello',
+      );
     });
 
     it('handles From without whatsapp: prefix', async () => {
-      await controller.incomingWebhook(makeReq(), { ...body, From: '+24200000001' });
-      expect(conversationService.handleIncomingMessage).toHaveBeenCalledWith('+24200000001', 'Hello');
+      await controller.incomingWebhook(makeReq(), {
+        ...body,
+        From: '+24200000001',
+      });
+      expect(conversationService.handleIncomingMessage).toHaveBeenCalledWith(
+        '+24200000001',
+        'Hello',
+      );
     });
 
     it('uses TWILIO_WEBHOOK_BASE_URL from config when set', async () => {
@@ -155,7 +208,9 @@ describe('WhatsAppController', () => {
 
   describe('verifyWhatsApp()', () => {
     it('returns success when token is valid', async () => {
-      const result = await controller.verifyWhatsApp({ token: 'valid-token' } as any);
+      const result = await controller.verifyWhatsApp({
+        token: 'valid-token',
+      } as any);
       expect(result.success).toBe(true);
     });
 
@@ -163,12 +218,18 @@ describe('WhatsAppController', () => {
       whatsAppService.verifyWhatsAppToken.mockRejectedValue(
         new BadRequestException('Token expiré'),
       );
-      await expect(controller.verifyWhatsApp({ token: 'bad' } as any)).rejects.toThrow('Token expiré');
+      await expect(
+        controller.verifyWhatsApp({ token: 'bad' } as any),
+      ).rejects.toThrow('Token expiré');
     });
 
     it('wraps other errors in BadRequestException', async () => {
-      whatsAppService.verifyWhatsAppToken.mockRejectedValue(new Error('DB error'));
-      await expect(controller.verifyWhatsApp({ token: 'bad' } as any)).rejects.toThrow('DB error');
+      whatsAppService.verifyWhatsAppToken.mockRejectedValue(
+        new Error('DB error'),
+      );
+      await expect(
+        controller.verifyWhatsApp({ token: 'bad' } as any),
+      ).rejects.toThrow('DB error');
     });
   });
 });

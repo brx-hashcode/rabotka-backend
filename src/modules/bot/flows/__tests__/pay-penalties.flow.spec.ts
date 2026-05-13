@@ -14,15 +14,45 @@ const workerProfile: BotProfile = {
   email: 'alice@example.com',
   profile_type: 'WORKER',
   reliability_score: 80,
+  status: 'ACTIVE',
 };
 
 function makeCtx(
-  markPenaltiesPaid: jest.Mock = jest.fn().mockResolvedValue({ paidCount: 2, totalAmount: 10000 }),
+  markPenaltiesPaid: jest.Mock = jest
+    .fn()
+    .mockResolvedValue({ paidCount: 2, totalAmount: 10000 }),
 ): PayPenaltiesContext {
   return {
     applicationService: {
       markPenaltiesPaid,
+      getUnpaidPenalties: jest
+        .fn()
+        .mockResolvedValue({ count: 2, total: 10000, ids: ['p1', 'p2'] }),
     } as unknown as PayPenaltiesContext['applicationService'],
+    walletService: {
+      getProfileWalletBalance: jest.fn().mockResolvedValue(0),
+      debitProfileWallet: jest.fn().mockResolvedValue(undefined),
+      getOrCreateSystemWallet: jest.fn().mockResolvedValue({ id: 'sys-wallet' }),
+      getOrCreateProfileWallet: jest.fn().mockResolvedValue({ id: 'profile-wallet' }),
+    } as unknown as PayPenaltiesContext['walletService'],
+    paymentService: {
+      createPaymentUrl: jest
+        .fn()
+        .mockResolvedValue('https://pay.example.com/pay/token123'),
+      initiateDirectPayment: jest
+        .fn()
+        .mockResolvedValue({ success: true, gatewayRef: 'gw-ref-123' }),
+    } as unknown as PayPenaltiesContext['paymentService'],
+    invoiceService: {
+      create: jest.fn().mockResolvedValue({}),
+    } as unknown as PayPenaltiesContext['invoiceService'],
+    prisma: {
+      $transaction: jest.fn().mockResolvedValue([]),
+      walletTransaction: { create: jest.fn().mockResolvedValue({}) },
+      wallet: { update: jest.fn().mockResolvedValue({}) },
+      paymentRequest: { create: jest.fn().mockResolvedValue({ id: 'pr-1' }) },
+      payment: { create: jest.fn().mockResolvedValue({}) },
+    } as unknown as PayPenaltiesContext['prisma'],
   };
 }
 
@@ -55,32 +85,37 @@ describe('runPayPenaltiesFlow()', () => {
   it('goes to menu on "retour" input', async () => {
     const ctx = makeCtx();
     const state = makeState();
-    const result = await runPayPenaltiesFlow(state, 'retour', workerProfile, ctx);
+    const result = await runPayPenaltiesFlow(
+      state,
+      'retour',
+      workerProfile,
+      ctx,
+    );
     expect(result.clearState).toBe(true);
   });
 
-  it('goes to menu on "2" input', async () => {
+  it('goes to menu on "3" input', async () => {
+    const ctx = makeCtx();
+    const state = makeState();
+    const result = await runPayPenaltiesFlow(state, '3', workerProfile, ctx);
+    expect(result.clearState).toBe(true);
+  });
+
+  it('enters mobile money sub-flow on "1" input', async () => {
+    const ctx = makeCtx();
+    const state = makeState();
+    const result = await runPayPenaltiesFlow(state, '1', workerProfile, ctx);
+    // Sub-flow starts: asks whether to use registered number
+    expect(result.reply[0]).toContain('Mobile Money');
+    expect(result.nextState).toBeDefined();
+    expect(result.clearState).toBeUndefined();
+  });
+
+  it('shows wallet payment option on "2" input', async () => {
     const ctx = makeCtx();
     const state = makeState();
     const result = await runPayPenaltiesFlow(state, '2', workerProfile, ctx);
-    expect(result.clearState).toBe(true);
-  });
-
-  it('marks penalties paid on "1" input and returns success', async () => {
-    const ctx = makeCtx();
-    const state = makeState();
-    const result = await runPayPenaltiesFlow(state, '1', workerProfile, ctx);
-    expect(result.clearState).toBe(true);
-    expect(ctx.applicationService.markPenaltiesPaid).toHaveBeenCalledWith('worker-1');
-    expect(result.reply[0]).toContain('Paiement enregistré');
-  });
-
-  it('returns clear account message when no penalties found', async () => {
-    const ctx = makeCtx(jest.fn().mockResolvedValue({ paidCount: 0, totalAmount: 0 }));
-    const state = makeState();
-    const result = await runPayPenaltiesFlow(state, '1', workerProfile, ctx);
-    expect(result.clearState).toBe(true);
-    expect(result.reply[0]).toContain('Aucune pénalité');
+    expect(result.reply[0]).toContain('portefeuille');
   });
 });
 

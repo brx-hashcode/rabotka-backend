@@ -16,14 +16,20 @@ jest.mock('sharp', () => {
   const chainFn = () => jest.fn().mockReturnValue(sharpInstance);
 
   sharpInstance.rotate = chainFn();
-  sharpInstance.metadata = jest.fn().mockResolvedValue({ width: 800, height: 600 });
+  sharpInstance.metadata = jest
+    .fn()
+    .mockResolvedValue({ width: 800, height: 600 });
   sharpInstance.composite = chainFn();
   sharpInstance.toFormat = chainFn();
   sharpInstance.toBuffer = toBufferMain;
   sharpInstance.resize = chainFn();
   sharpInstance.ensureAlpha = chainFn();
-  sharpInstance.png = jest.fn().mockReturnValue({ ...sharpInstance, toBuffer: toBufferRaw });
-  sharpInstance.raw = jest.fn().mockReturnValue({ ...sharpInstance, toBuffer: toBufferRaw });
+  sharpInstance.png = jest
+    .fn()
+    .mockReturnValue({ ...sharpInstance, toBuffer: toBufferRaw });
+  sharpInstance.raw = jest
+    .fn()
+    .mockReturnValue({ ...sharpInstance, toBuffer: toBufferRaw });
 
   (globalThis as Record<string, unknown>).__sharpInstance = sharpInstance;
 
@@ -37,7 +43,10 @@ jest.mock('node:fs', () => ({
 }));
 
 function getSharpInstance(): Record<string, jest.Mock> {
-  return (globalThis as Record<string, unknown>).__sharpInstance as Record<string, jest.Mock>;
+  return (globalThis as Record<string, unknown>).__sharpInstance as Record<
+    string,
+    jest.Mock
+  >;
 }
 
 describe('ImageWatermarkService', () => {
@@ -122,7 +131,10 @@ describe('ImageWatermarkService', () => {
       configService.get.mockReturnValue(undefined);
       const { existsSync } = require('node:fs') as { existsSync: jest.Mock };
       existsSync.mockReturnValue(false);
-      const result = await service.addWatermark(Buffer.from('img'), 'image/png');
+      const result = await service.addWatermark(
+        Buffer.from('img'),
+        'image/png',
+      );
       expect(result).toBeDefined();
     });
 
@@ -130,7 +142,10 @@ describe('ImageWatermarkService', () => {
       configService.get.mockReturnValue('not-a-number');
       const { existsSync } = require('node:fs') as { existsSync: jest.Mock };
       existsSync.mockReturnValue(false);
-      const result = await service.addWatermark(Buffer.from('img'), 'image/png');
+      const result = await service.addWatermark(
+        Buffer.from('img'),
+        'image/png',
+      );
       expect(result).toBeDefined();
     });
 
@@ -138,7 +153,10 @@ describe('ImageWatermarkService', () => {
       configService.get.mockReturnValue('1.5');
       const { existsSync } = require('node:fs') as { existsSync: jest.Mock };
       existsSync.mockReturnValue(false);
-      const result = await service.addWatermark(Buffer.from('img'), 'image/png');
+      const result = await service.addWatermark(
+        Buffer.from('img'),
+        'image/png',
+      );
       expect(result).toBeDefined();
     });
   });

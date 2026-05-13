@@ -9,7 +9,7 @@ import {
   IsEnum,
 } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { JobOfferStatus, PaymentFlow } from '@prisma/client';
+import { JobOfferStatus } from '@prisma/client';
 
 function toArray(value: unknown): string[] {
   if (Array.isArray(value)) return value.filter((v) => typeof v === 'string');
@@ -56,15 +56,4 @@ export class AdminListJobOffersDto {
   @IsArray()
   @IsEnum(JobOfferStatus, { each: true })
   status?: JobOfferStatus[];
-
-  @ApiPropertyOptional({
-    description: 'Filter by payment flow',
-    enum: PaymentFlow,
-    isArray: true,
-  })
-  @IsOptional()
-  @Transform(({ value }) => toArray(value))
-  @IsArray()
-  @IsEnum(PaymentFlow, { each: true })
-  payment_flow?: PaymentFlow[];
 }

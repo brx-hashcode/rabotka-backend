@@ -3,7 +3,7 @@ import { QueueService } from '../../../common/services/queue/queue.service';
 import { WHATSAPP_REMINDERS_QUEUE } from '../../../common/services/queue/queue.module';
 import type { ReminderJobData } from './reminder.processor';
 
-const SCAN_INTERVAL_MS = 15 * 60 * 1000; // 15 min
+const SCAN_INTERVAL_MS = 15 * 60 * 1000;
 
 @Injectable()
 export class ReminderSchedulerService implements OnModuleInit {
@@ -11,21 +11,24 @@ export class ReminderSchedulerService implements OnModuleInit {
 
   constructor(private readonly queueService: QueueService) {}
 
-  onModuleInit(): void {
+  async onModuleInit(): Promise<void> {
     const queue = this.queueService.getQueue(WHATSAPP_REMINDERS_QUEUE);
-    queue
-      .add('scan', { type: 'scan' } as ReminderJobData, {
-        repeat: {
-          every: SCAN_INTERVAL_MS,
-        },
-      })
-      .then(() => {
-        this.logger.log(
-          `Repeatable scan job added to ${WHATSAPP_REMINDERS_QUEUE} (every ${SCAN_INTERVAL_MS / 60000} min)`,
-        );
-      })
-      .catch((err) => {
-        this.logger.warn('Failed to add repeatable reminder scan job', err);
+
+    try {
+      await queue.add('scan', { type: 'scan' } as ReminderJobData, {
+        repeat: { every: SCAN_INTERVAL_MS },
       });
+      this.logger.log(
+        `Repeatable scan job added to ${WHATSAPP_REMINDERS_QUEUE} (every ${SCAN_INTERVAL_MS / 60000} min)`,
+      );
+    } catch (err) {
+      // Fatal: without the scan job the entire reminder system is non-functional.
+      // Re-throw so NestJS startup fails loudly rather than silently degrading.
+      this.logger.error(
+        'Failed to add repeatable reminder scan job — reminder system will not run',
+        err,
+      );
+      throw err;
+    }
   }
 }

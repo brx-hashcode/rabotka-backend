@@ -55,7 +55,10 @@ describe('VercelBlobStorageProvider', () => {
     });
 
     it('uploads with folder', async () => {
-      mockPut.mockResolvedValue({ pathname: 'imgs/photo.png', url: 'https://url' });
+      mockPut.mockResolvedValue({
+        pathname: 'imgs/photo.png',
+        url: 'https://url',
+      });
       const provider = new VercelBlobStorageProvider(
         makeConfig({ BLOB_READ_WRITE_TOKEN: 'tok' }),
       );

@@ -7,8 +7,12 @@ import {
   Inject,
   forwardRef,
 } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
+import { isWorkerHardBlocked } from '../penalty/penalty.utils';
 import { BotNotificationService } from '../bot/services/bot-notification.service';
+import { ContactUnlockService } from '../contact-unlock/contact-unlock.service';
 import {
   AccountStatus,
   ApplicationStatus,
@@ -21,14 +25,11 @@ import {
   Prisma,
 } from '@prisma/client';
 import { generatePaymentReference } from '../../common/utils/payment-reference';
+import { ContractService } from '../contract/contract.service';
+import { SystemConfigService } from '../system-config/system-config.service';
+import { MatchingService } from '../matching/matching.service';
 import {
-  LATE_CANCELLATION_PENALTY_FCFA,
-  LATE_CANCELLATION_SCORE_DEDUCTION,
-  CANCELLATION_PENALTY_THRESHOLD_HOURS,
-  RELIABILITY_SCORE_MIN,
   RELIABILITY_SCORE_MAX,
-  EMPLOYER_CANCEL_SCORE_DEDUCTION,
-  BILLING_BLOCK_THRESHOLD,
   PENALTY_SUSPENSION_THRESHOLD,
 } from './application.constants';
 
@@ -66,12 +67,14 @@ export type AdminApplicationDetailResponse = AdminApplicationListItem & {
   jobScheduledAt: string;
   jobAmount: number;
   jobAddress: string;
-  jobPaymentFlow: string;
+  jobPaymentFlow: string | null;
   jobStatus: string;
   jobQuantity: number;
   workerReliabilityScore: number | null;
   employerPhone: string;
   penalties: AdminApplicationPenaltyItem[];
+  completionNote: string | null;
+  contractId: string | null;
 };
 
 export type ApplicationListItem = {
@@ -112,8 +115,8 @@ export type ApplicationWithOffer = ApplicationListItem & {
     title: string;
     description: string;
     scheduled_at: Date;
-    amount: number;
-    payment_flow: string;
+    amount: number | null;
+    payment_flow: string | null;
     address: string;
     note: string | null;
     status: string;
@@ -133,6 +136,12 @@ export class ApplicationService {
     private readonly prisma: PrismaService,
     @Inject(forwardRef(() => BotNotificationService))
     private readonly botNotification: BotNotificationService,
+    private readonly eventEmitter: EventEmitter2,
+    @Inject(forwardRef(() => ContactUnlockService))
+    private readonly contactUnlock: ContactUnlockService,
+    private readonly contractService: ContractService,
+    private readonly systemConfigService: SystemConfigService,
+    private readonly matchingService: MatchingService,
   ) {}
 
   async create(
@@ -177,11 +186,17 @@ export class ApplicationService {
 
     const unpaidPenaltiesCount = await this.prisma.penalty.count({
       where: {
-        worker_id: workerId,
+        profile_id: workerId,
         paid_at: null,
       },
     });
     if (unpaidPenaltiesCount > 0) {
+      const hardBlocked = await isWorkerHardBlocked(this.prisma, workerId);
+      if (hardBlocked) {
+        throw new ForbiddenException(
+          '🚨 Votre compte est bloqué en raison de pénalités impayées depuis plus de 3 jours. Tapez PAYER pour régulariser votre situation.',
+        );
+      }
       throw new ForbiddenException(
         'Vous avez des pénalités impayées. Tapez PAYER pour les régler et débloquer votre compte.',
       );
@@ -199,6 +214,19 @@ export class ApplicationService {
       throw new ConflictException('Vous avez déjà postulé à cette offre');
     }
 
+    const fees = await this.systemConfigService.getFees();
+    const activeCount = await this.prisma.application.count({
+      where: {
+        worker_id: workerId,
+        status: { in: [ApplicationStatus.PENDING, ApplicationStatus.ACCEPTED] },
+      },
+    });
+    if (activeCount >= fees.maxConcurrentApplications) {
+      throw new ForbiddenException(
+        `Vous avez déjà ${activeCount} candidature(s) active(s). Maximum autorisé : ${fees.maxConcurrentApplications}.`,
+      );
+    }
+
     const application = await this.prisma.application.create({
       data: {
         job_offer_id: jobOfferId,
@@ -210,6 +238,15 @@ export class ApplicationService {
       },
     });
 
+    this.eventEmitter.emit(AdminNotificationEvent.APPLICATION_CREATED, {
+      event: AdminNotificationEvent.APPLICATION_CREATED,
+      title: 'Nouvelle candidature',
+      message: `Nouvelle candidature pour l'offre "${application.job_offer.title}"`,
+      entityType: 'application',
+      entityId: String(application.id),
+      timestamp: new Date().toISOString(),
+    });
+
     return this.toListItem(application);
   }
 
@@ -217,10 +254,42 @@ export class ApplicationService {
     workerId: string,
     options?: { status?: ApplicationStatus; limit?: number },
   ): Promise<ApplicationWithOffer[]> {
-    const limit = options?.limit ?? 50;
+    const limit = Math.min(options?.limit ?? 50, 100);
     const applications = await this.prisma.application.findMany({
       where: {
         worker_id: workerId,
+        ...(options?.status ? { status: options.status } : {}),
+      },
+      take: limit,
+      orderBy: { created_at: 'desc' },
+      include: {
+        job_offer: {
+          include: {
+            employer: {
+              select: {
+                id: true,
+                first_name: true,
+                last_name: true,
+                phone: true,
+              },
+            },
+          },
+        },
+        worker: true,
+      },
+    });
+
+    return applications.map((a) => this.toApplicationWithOffer(a));
+  }
+
+  async findByEmployer(
+    employerId: string,
+    options?: { status?: ApplicationStatus; limit?: number },
+  ): Promise<ApplicationWithOffer[]> {
+    const limit = Math.min(options?.limit ?? 50, 100);
+    const applications = await this.prisma.application.findMany({
+      where: {
+        job_offer: { employer_id: employerId },
         ...(options?.status ? { status: options.status } : {}),
       },
       take: limit,
@@ -309,6 +378,19 @@ export class ApplicationService {
         "Vous n'êtes pas l'employeur de cette offre",
       );
     }
+
+    const fees = await this.systemConfigService.getFees();
+    const employer = await this.prisma.profile.findUnique({
+      where: { id: employerId },
+      select: { reliability_score: true },
+    });
+    const employerScore = employer?.reliability_score ?? 100;
+    if (employerScore <= fees.reliabilityScoreMin) {
+      throw new ForbiddenException(
+        'Votre compte est pénalisé. Vous ne pouvez pas accepter de candidatures pour le moment.',
+      );
+    }
+
     if (
       application.status !== ApplicationStatus.PENDING &&
       application.status !== ApplicationStatus.VIEWED
@@ -316,44 +398,79 @@ export class ApplicationService {
       throw new BadRequestException("Cette candidature n'est plus en attente");
     }
 
-    const currentAcceptedCount = await this.prisma.application.count({
-      where: {
-        job_offer_id: application.job_offer_id,
-        status: ApplicationStatus.ACCEPTED,
-      },
-    });
+    await this.prisma.$transaction(async (tx) => {
+      // Lock the job offer row to prevent concurrent over-acceptance
+      await tx.$executeRaw`SELECT id FROM "job_offers" WHERE id = ${application.job_offer_id}::uuid FOR UPDATE`;
 
-    const quantityNeeded = application.job_offer.quantity ?? 1;
-    const newAcceptedCount = currentAcceptedCount + 1;
-    const offerStatus =
-      newAcceptedCount >= quantityNeeded
-        ? JobOfferStatus.FILLED
-        : newAcceptedCount > 0
-          ? JobOfferStatus.PARTIALLY_FILLED
-          : JobOfferStatus.ACTIVE;
+      const currentAcceptedCount = await tx.application.count({
+        where: {
+          job_offer_id: application.job_offer_id,
+          status: {
+            in: [
+              ApplicationStatus.ACCEPTED,
+              'WAITING_PAYMENT' as ApplicationStatus,
+            ],
+          },
+        },
+      });
 
-    await this.prisma.$transaction([
-      this.prisma.application.update({
+      const quantityNeeded = application.job_offer.quantity ?? 1;
+      if (currentAcceptedCount >= quantityNeeded) {
+        throw new ConflictException(
+          'Cette offre a déjà atteint sa capacité maximale de candidats acceptés',
+        );
+      }
+
+      const newAcceptedCount = currentAcceptedCount + 1;
+      let offerStatus: JobOfferStatus;
+      if (newAcceptedCount >= quantityNeeded) {
+        offerStatus = JobOfferStatus.FILLED;
+      } else {
+        offerStatus = JobOfferStatus.PARTIALLY_FILLED;
+      }
+
+      await tx.application.update({
         where: { id: applicationId },
-        data: { status: ApplicationStatus.ACCEPTED },
-      }),
-      this.prisma.jobOffer.update({
+        data: { status: ApplicationStatus.WAITING_PAYMENT },
+      });
+      await tx.jobOffer.update({
         where: { id: application.job_offer_id },
         data: { status: offerStatus },
-      }),
-      this.prisma.assignment.create({
+      });
+      await tx.assignment.create({
         data: {
           application_id: applicationId,
           job_offer_id: application.job_offer_id,
           worker_id: application.worker_id,
           status: AssignmentStatus.CONFIRMED,
         },
-      }),
-    ]);
+      });
+      await this.contactUnlock.initiateUnlock(applicationId, employerId, tx);
+    });
 
     const updated = await this.findById(applicationId);
     if (!updated)
       throw new NotFoundException('Candidature introuvable après mise à jour');
+
+    this.eventEmitter.emit(AdminNotificationEvent.APPLICATION_ACCEPTED, {
+      event: AdminNotificationEvent.APPLICATION_ACCEPTED,
+      title: 'Candidature acceptée',
+      message: `La candidature de ${application.worker.first_name} ${application.worker.last_name} pour l'offre "${application.job_offer.title}" a été acceptée`,
+      entityType: 'application',
+      entityId: String(applicationId),
+      timestamp: new Date().toISOString(),
+    });
+
+    // Create contract metadata (no PDF generated here — on-demand via GET /contracts/:id/download)
+    this.contractService
+      .create(applicationId)
+      .catch((err) =>
+        console.warn(
+          `Failed to create contract metadata for ${applicationId}:`,
+          err,
+        ),
+      );
+
     return updated;
   }
 
@@ -402,6 +519,15 @@ export class ApplicationService {
       },
     });
 
+    this.eventEmitter.emit(AdminNotificationEvent.APPLICATION_REJECTED, {
+      event: AdminNotificationEvent.APPLICATION_REJECTED,
+      title: 'Candidature refusée',
+      message: `La candidature de ${updated.worker.first_name} ${updated.worker.last_name} pour l'offre "${updated.job_offer.title}" a été refusée`,
+      entityType: 'application',
+      entityId: String(applicationId),
+      timestamp: new Date().toISOString(),
+    });
+
     return this.toApplicationWithOffer(updated);
   }
 
@@ -429,7 +555,8 @@ export class ApplicationService {
     }
     if (
       application.status !== ApplicationStatus.ACCEPTED &&
-      application.status !== ApplicationStatus.PENDING
+      application.status !== ApplicationStatus.PENDING &&
+      application.status !== ('WAITING_PAYMENT' as ApplicationStatus)
     ) {
       throw new BadRequestException(
         'Cette candidature ne peut plus être annulée',
@@ -440,14 +567,14 @@ export class ApplicationService {
     const scheduledAt = application.job_offer.scheduled_at;
     const hoursUntil =
       (scheduledAt.getTime() - now.getTime()) / (60 * 60 * 1000);
-    const isLateCancellation =
-      hoursUntil < CANCELLATION_PENALTY_THRESHOLD_HOURS;
+    const fees = await this.systemConfigService.getFees();
+    const isLateCancellation = hoursUntil < fees.cancellationThresholdHours;
     const isAccepted = application.status === ApplicationStatus.ACCEPTED;
     const applyPenalty = isLateCancellation && isAccepted;
 
     const penaltyApplied = applyPenalty;
     const penaltyAmount: number | null = applyPenalty
-      ? LATE_CANCELLATION_PENALTY_FCFA
+      ? fees.lateCancellationPenaltyFcfa
       : null;
 
     await this.prisma.$transaction(async (tx) => {
@@ -478,15 +605,17 @@ export class ApplicationService {
       }
 
       if (applyPenalty) {
-        await tx.penalty.create({
-          data: {
-            worker_id: workerId,
+        await tx.penalty.upsert({
+          where: { application_id: applicationId },
+          create: {
+            profile_id: workerId,
             application_id: applicationId,
-            amount: LATE_CANCELLATION_PENALTY_FCFA,
+            amount: fees.lateCancellationPenaltyFcfa,
             reason:
               reason ??
-              `Annulation tardive (< ${CANCELLATION_PENALTY_THRESHOLD_HOURS}h avant le rendez-vous)`,
+              `Annulation tardive (< ${fees.cancellationThresholdHours}h avant le rendez-vous)`,
           },
+          update: {},
         });
 
         const profile = await tx.profile.findUnique({
@@ -495,10 +624,10 @@ export class ApplicationService {
         });
         const currentScore = profile?.reliability_score ?? 100;
         const newScore = Math.max(
-          RELIABILITY_SCORE_MIN,
+          fees.reliabilityScoreMin,
           Math.min(
             RELIABILITY_SCORE_MAX,
-            currentScore - LATE_CANCELLATION_SCORE_DEDUCTION,
+            currentScore - fees.lateCancellationScoreDeduction,
           ),
         );
         await tx.profile.update({
@@ -523,14 +652,14 @@ export class ApplicationService {
     // Suspension check after penalty creation
     if (applyPenalty) {
       const unpaidCount = await this.prisma.penalty.count({
-        where: { worker_id: workerId, paid_at: null },
+        where: { profile_id: workerId, paid_at: null },
       });
       if (unpaidCount >= PENALTY_SUSPENSION_THRESHOLD) {
         const workerProfile = await this.prisma.profile.update({
           where: { id: workerId },
           data: { status: AccountStatus.SUSPENDED },
         });
-        const total = unpaidCount * LATE_CANCELLATION_PENALTY_FCFA;
+        const total = unpaidCount * fees.lateCancellationPenaltyFcfa;
         await this.botNotification.sendMessage(
           workerProfile.phone,
           `⚠️ Compte suspendu\n\nVotre compte Rabotka a été suspendu en raison de ${unpaidCount} pénalités impayées\n(total : ${total.toLocaleString('fr-FR')} FCFA).\n\nVous ne pouvez plus accéder aux fonctionnalités tant que vos pénalités ne sont pas réglées.\n\n1 – Régler mes pénalités\n2 – Annuler`,
@@ -541,6 +670,26 @@ export class ApplicationService {
     const updated = await this.findById(applicationId);
     if (!updated)
       throw new NotFoundException('Candidature introuvable après mise à jour');
+
+    this.eventEmitter.emit(AdminNotificationEvent.APPLICATION_CANCELLED, {
+      event: AdminNotificationEvent.APPLICATION_CANCELLED,
+      title: 'Candidature annulée',
+      message: `La candidature de ${application.worker.first_name} ${application.worker.last_name} pour l'offre "${application.job_offer.title}" a été annulée par le travailleur`,
+      entityType: 'application',
+      entityId: String(applicationId),
+      timestamp: new Date().toISOString(),
+    });
+
+    if (penaltyApplied) {
+      this.eventEmitter.emit(AdminNotificationEvent.PENALTY_CREATED, {
+        event: AdminNotificationEvent.PENALTY_CREATED,
+        title: 'Pénalité créée',
+        message: `Pénalité de ${penaltyAmount} FCFA créée pour annulation tardive de ${application.worker.first_name} ${application.worker.last_name} sur l'offre "${application.job_offer.title}"`,
+        entityType: 'penalty',
+        entityId: String(applicationId),
+        timestamp: new Date().toISOString(),
+      });
+    }
 
     return {
       application: updated,
@@ -561,19 +710,22 @@ export class ApplicationService {
     if (app?.worker_id !== workerId) return false;
     if (
       app.status !== ApplicationStatus.ACCEPTED &&
-      app.status !== ApplicationStatus.PENDING
+      app.status !== ApplicationStatus.PENDING &&
+      app.status !== ('WAITING_PAYMENT' as ApplicationStatus)
     )
       return false;
     const now = new Date();
     const hoursUntil =
       (app.job_offer.scheduled_at.getTime() - now.getTime()) / (60 * 60 * 1000);
-    return hoursUntil < CANCELLATION_PENALTY_THRESHOLD_HOURS && hoursUntil >= 0;
+    const fees = await this.systemConfigService.getFees();
+    return hoursUntil >= 0 && hoursUntil < fees.cancellationThresholdHours;
   }
 
   /** Employer marks job as completed: set JobOffer to COMPLETED and create Payment for worker */
   async markJobCompleted(
     applicationId: string,
     employerId: string,
+    note?: string,
   ): Promise<ApplicationWithOffer> {
     const application = await this.prisma.application.findUnique({
       where: { id: applicationId },
@@ -587,28 +739,40 @@ export class ApplicationService {
         "Vous n'êtes pas l'employeur de cette offre",
       );
     }
-    if (application.status !== ApplicationStatus.ACCEPTED) {
+    if (
+      application.status !== ApplicationStatus.ACCEPTED &&
+      application.status !== ApplicationStatus.STARTED
+    ) {
       throw new BadRequestException(
-        'Seule une candidature acceptée peut être marquée comme terminée',
+        'Seule une candidature acceptée ou démarrée peut être marquée comme terminée',
       );
     }
-    if (application.job_offer.status === JobOfferStatus.COMPLETED) {
-      throw new BadRequestException(
-        'Cette mission est déjà marquée comme terminée',
-      );
-    }
-
     const amount = Number(application.job_offer.amount);
     const transactionId = generatePaymentReference();
     const now = new Date();
     await this.prisma.$transaction(async (tx) => {
+      // Lock and re-check job status inside the transaction to prevent duplicate completions
+      await tx.$executeRaw`SELECT id FROM "job_offers" WHERE id = ${application.job_offer_id}::uuid FOR UPDATE`;
+      const freshOffer = await tx.jobOffer.findUnique({
+        where: { id: application.job_offer_id },
+        select: { status: true },
+      });
+      if (freshOffer?.status === JobOfferStatus.COMPLETED) {
+        throw new BadRequestException(
+          'Cette mission est déjà marquée comme terminée',
+        );
+      }
       await tx.jobOffer.update({
         where: { id: application.job_offer_id },
         data: { status: JobOfferStatus.COMPLETED },
       });
       await tx.assignment.updateMany({
         where: { application_id: applicationId },
-        data: { status: AssignmentStatus.COMPLETED, completed_at: now },
+        data: {
+          status: AssignmentStatus.COMPLETED,
+          completed_at: now,
+          note: note ?? null,
+        },
       });
       await tx.payment.create({
         data: {
@@ -621,6 +785,16 @@ export class ApplicationService {
           paid_at: now,
           description: `Job completion payment for job ${application.job_offer_id}`,
         },
+      });
+      // Mark all accepted/started applications for this job as END
+      await tx.application.updateMany({
+        where: {
+          job_offer_id: application.job_offer_id,
+          status: {
+            in: [ApplicationStatus.ACCEPTED, ApplicationStatus.STARTED],
+          },
+        },
+        data: { status: ApplicationStatus.END },
       });
       // Boost worker reliability score on successful completion
       const worker = await tx.profile.findUnique({
@@ -640,7 +814,97 @@ export class ApplicationService {
     const updated = await this.findById(applicationId);
     if (!updated)
       throw new NotFoundException('Candidature introuvable après mise à jour');
+
+    this.eventEmitter.emit(AdminNotificationEvent.APPLICATION_COMPLETED, {
+      event: AdminNotificationEvent.APPLICATION_COMPLETED,
+      title: 'Travail terminé',
+      message: `Le travail de ${application.worker.first_name} ${application.worker.last_name} pour l'offre "${application.job_offer.title}" a été marqué comme terminé`,
+      entityType: 'application',
+      entityId: String(applicationId),
+      timestamp: new Date().toISOString(),
+    });
+
+    // Re-index worker to enrich their embedding with completed job history
+    this.matchingService
+      .indexWorkerProfile(application.worker_id)
+      .catch((err) =>
+        console.warn(`Failed to re-index worker after job completion:`, err),
+      );
+    // Fire-and-forget: send rating requests to both parties via WhatsApp
+    this.sendRatingRequests(applicationId, application).catch((err: unknown) =>
+      console.warn(`[ApplicationService] sendRatingRequests failed for ${applicationId}:`, err),
+    );
+
     return updated;
+  }
+
+  private async sendRatingRequests(
+    applicationId: string,
+    application: {
+      worker: {
+        id: string;
+        phone: string;
+        first_name: string;
+        last_name: string;
+      };
+      job_offer: { title: string; employer_id: string };
+    },
+  ): Promise<void> {
+    const assignment = await this.prisma.assignment.findUnique({
+      where: { application_id: applicationId },
+      select: { id: true },
+    });
+    if (!assignment) return;
+
+    const employer = await this.prisma.profile.findUnique({
+      where: { id: application.job_offer.employer_id },
+      select: {
+        id: true,
+        phone: true,
+        first_name: true,
+        last_name: true,
+        whatsapp_connected: true,
+      },
+    });
+
+    const jobTitle = application.job_offer.title;
+    const assignmentId = assignment.id;
+
+    // Ask worker to rate employer
+    if (application.worker.phone) {
+      await this.botNotification
+        .sendRatingRequest({
+          raterProfileId: application.worker.id,
+          raterPhone: application.worker.phone,
+          rateeId: application.job_offer.employer_id,
+          assignmentId,
+          rateeLabel: employer
+            ? `${employer.first_name} ${employer.last_name}`.trim()
+            : "l'employeur",
+          jobTitle,
+        })
+        .catch((err: unknown) =>
+          console.warn(`[ApplicationService] sendRatingRequest (worker) failed:`, err),
+        );
+    }
+
+    // Ask employer to rate worker
+    if (employer?.phone && employer.whatsapp_connected) {
+      const workerLabel =
+        `${application.worker.first_name} ${application.worker.last_name}`.trim();
+      await this.botNotification
+        .sendRatingRequest({
+          raterProfileId: employer.id,
+          raterPhone: employer.phone,
+          rateeId: application.worker.id,
+          assignmentId,
+          rateeLabel: workerLabel,
+          jobTitle,
+        })
+        .catch((err: unknown) =>
+          console.warn(`[ApplicationService] sendRatingRequest (employer) failed:`, err),
+        );
+    }
   }
 
   /** Employer cancels accepted application: reopen job offer, cancel application */
@@ -660,9 +924,12 @@ export class ApplicationService {
         "Vous n'êtes pas l'employeur de cette offre",
       );
     }
-    if (application.status !== ApplicationStatus.ACCEPTED) {
+    if (
+      application.status !== ApplicationStatus.ACCEPTED &&
+      application.status !== ('WAITING_PAYMENT' as ApplicationStatus)
+    ) {
       throw new BadRequestException(
-        'Seule une candidature acceptée peut être annulée ici',
+        'Seule une candidature acceptée ou en attente de paiement peut être annulée ici',
       );
     }
 
@@ -679,7 +946,12 @@ export class ApplicationService {
       const remainingAccepted = await tx.application.count({
         where: {
           job_offer_id: application.job_offer_id,
-          status: ApplicationStatus.ACCEPTED,
+          status: {
+            in: [
+              ApplicationStatus.ACCEPTED,
+              'WAITING_PAYMENT' as ApplicationStatus,
+            ],
+          },
           id: { not: applicationId },
         },
       });
@@ -699,25 +971,42 @@ export class ApplicationService {
           cancelled_at: now,
         },
       });
-      // Deduct employer reliability score
-      const employer = await tx.profile.findUnique({
-        where: { id: employerId },
-        select: { reliability_score: true },
-      });
-      const currentScore = employer?.reliability_score ?? 100;
-      const newScore = Math.max(
-        RELIABILITY_SCORE_MIN,
-        currentScore - EMPLOYER_CANCEL_SCORE_DEDUCTION,
-      );
-      await tx.profile.update({
-        where: { id: employerId },
-        data: { reliability_score: newScore },
-      });
+      // Deduct employer reliability score only for late cancellations (within threshold window)
+      const fees = await this.systemConfigService.getFees();
+      const hoursUntilJob =
+        (application.job_offer.scheduled_at.getTime() - now.getTime()) /
+        (60 * 60 * 1000);
+      const isLateCancel = hoursUntilJob < fees.cancellationThresholdHours;
+      if (isLateCancel) {
+        const employer = await tx.profile.findUnique({
+          where: { id: employerId },
+          select: { reliability_score: true },
+        });
+        const currentScore = employer?.reliability_score ?? 100;
+        const newScore = Math.max(
+          fees.reliabilityScoreMin,
+          currentScore - fees.employerLateCancelScoreDeduction,
+        );
+        await tx.profile.update({
+          where: { id: employerId },
+          data: { reliability_score: newScore },
+        });
+      }
     });
 
     const updated = await this.findById(applicationId);
     if (!updated)
       throw new NotFoundException('Candidature introuvable après mise à jour');
+
+    this.eventEmitter.emit(AdminNotificationEvent.APPLICATION_CANCELLED, {
+      event: AdminNotificationEvent.APPLICATION_CANCELLED,
+      title: 'Candidature annulée par employeur',
+      message: `La candidature de ${application.worker.first_name} ${application.worker.last_name} pour l'offre "${application.job_offer.title}" a été annulée par l'employeur`,
+      entityType: 'application',
+      entityId: String(applicationId),
+      timestamp: new Date().toISOString(),
+    });
+
     return updated;
   }
 
@@ -741,14 +1030,17 @@ export class ApplicationService {
   ): Promise<void> {
     const db = tx ?? this.prisma;
     const unpaidCount = await db.penalty.count({
-      where: { worker_id: workerId, paid_at: null },
+      where: { profile_id: workerId, paid_at: null },
     });
-    const newStatus =
-      unpaidCount === 0
-        ? BillingStatus.CLEAR
-        : unpaidCount >= BILLING_BLOCK_THRESHOLD
-          ? BillingStatus.BLOCKED
-          : BillingStatus.PENDING_PAYMENT;
+    const fees = await this.systemConfigService.getFees();
+    let newStatus: BillingStatus;
+    if (unpaidCount === 0) {
+      newStatus = BillingStatus.CLEAR;
+    } else if (unpaidCount >= fees.billingBlockThreshold) {
+      newStatus = BillingStatus.BLOCKED;
+    } else {
+      newStatus = BillingStatus.PENDING_PAYMENT;
+    }
     await db.profile.update({
       where: { id: workerId },
       data: { billing_status: newStatus },
@@ -759,7 +1051,7 @@ export class ApplicationService {
     workerId: string,
   ): Promise<{ count: number; total: number; ids: string[] }> {
     const penalties = await this.prisma.penalty.findMany({
-      where: { worker_id: workerId, paid_at: null },
+      where: { profile_id: workerId, paid_at: null },
       select: { id: true, amount: true },
     });
     return {
@@ -779,7 +1071,7 @@ export class ApplicationService {
     const now = new Date();
     await this.prisma.$transaction([
       this.prisma.penalty.updateMany({
-        where: { worker_id: workerId, paid_at: null },
+        where: { profile_id: workerId, paid_at: null },
         data: { paid_at: now },
       }),
     ]);
@@ -864,6 +1156,12 @@ export class ApplicationService {
         penalties: {
           orderBy: { created_at: 'desc' },
         },
+        assignment: {
+          select: { note: true },
+        },
+        contract: {
+          select: { id: true },
+        },
       },
     });
 
@@ -901,7 +1199,7 @@ export class ApplicationService {
       status: app.status,
       penaltyApplied: app.penalty_applied,
       penaltyAmount:
-        app.penalty_amount != null ? Number(app.penalty_amount) : null,
+        app.penalty_amount == null ? null : Number(app.penalty_amount),
       cancelledAt: app.cancelled_at?.toISOString() ?? null,
       cancellationReason: app.cancellation_reason,
       createdAt: app.created_at.toISOString(),
@@ -913,6 +1211,8 @@ export class ApplicationService {
         appliedAt: p.applied_at.toISOString(),
         paidAt: p.paid_at?.toISOString() ?? null,
       })),
+      completionNote: (app as any).assignment?.note ?? null,
+      contractId: (app as any).contract?.id ?? null,
     };
   }
 
@@ -922,13 +1222,15 @@ export class ApplicationService {
     q?: string;
     status?: ApplicationStatus[];
     penaltyApplied?: string[];
+    workerId?: string;
+    employerId?: string;
   }): Promise<{
     data: AdminApplicationListItem[];
     total: number;
     page: number;
     limit: number;
   }> {
-    const { page, limit, q, status, penaltyApplied } = params;
+    const { page, limit, q, status, penaltyApplied, workerId, employerId } = params;
     const skip = (page - 1) * limit;
 
     const where: Prisma.ApplicationWhereInput = {};
@@ -962,6 +1264,12 @@ export class ApplicationService {
       if (boolValues.length === 1) {
         where.penalty_applied = boolValues[0];
       }
+    }
+    if (workerId) {
+      where.worker_id = workerId;
+    }
+    if (employerId) {
+      where.job_offer = { employer_id: employerId };
     }
 
     const [applications, total] = await Promise.all([
@@ -1093,7 +1401,7 @@ export class ApplicationService {
       description: string;
       scheduled_at: Date;
       amount: unknown;
-      payment_flow: string;
+      payment_flow: string | null;
       address: string;
       note: string | null;
       status: string;

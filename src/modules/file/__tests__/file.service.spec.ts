@@ -7,8 +7,12 @@ jest.spyOn(Logger.prototype, 'error').mockImplementation(() => {});
 function makePrisma() {
   return {
     file: {
-      create: jest.fn().mockResolvedValue({ id: 'file-1', storage_key: 'key/file.jpg' }),
-      findUnique: jest.fn().mockResolvedValue({ id: 'file-1', storage_key: 'key/file.jpg' }),
+      create: jest
+        .fn()
+        .mockResolvedValue({ id: 'file-1', storage_key: 'key/file.jpg' }),
+      findUnique: jest
+        .fn()
+        .mockResolvedValue({ id: 'file-1', storage_key: 'key/file.jpg' }),
       findMany: jest.fn().mockResolvedValue([]),
       delete: jest.fn().mockResolvedValue({}),
     },
@@ -30,11 +34,15 @@ function makeStorageService() {
 
 function makeWatermarkService() {
   return {
-    addWatermark: jest.fn().mockImplementation((buf: Buffer) => Promise.resolve(buf)),
+    addWatermark: jest
+      .fn()
+      .mockImplementation((buf: Buffer) => Promise.resolve(buf)),
   };
 }
 
-function makeFile(overrides: Partial<Express.Multer.File> = {}): Express.Multer.File {
+function makeFile(
+  overrides: Partial<Express.Multer.File> = {},
+): Express.Multer.File {
   return {
     fieldname: 'file',
     originalname: 'photo.jpg',
@@ -67,7 +75,10 @@ describe('FileService', () => {
     it('applies watermark for image files', async () => {
       const file = makeFile({ mimetype: 'image/jpeg' });
       await service.uploadToStorage(file);
-      expect(watermark.addWatermark).toHaveBeenCalledWith(file.buffer, 'image/jpeg');
+      expect(watermark.addWatermark).toHaveBeenCalledWith(
+        file.buffer,
+        'image/jpeg',
+      );
     });
 
     it('does not apply watermark for non-image files', async () => {
@@ -82,7 +93,11 @@ describe('FileService', () => {
     });
 
     it('returns upload result with originalFilename and mimeType', async () => {
-      const file = makeFile({ mimetype: 'image/png', originalname: 'test.png', size: 100 });
+      const file = makeFile({
+        mimetype: 'image/png',
+        originalname: 'test.png',
+        size: 100,
+      });
       const result = await service.uploadToStorage(file);
       expect(result.originalFilename).toBe('test.png');
       expect(result.mimeType).toBe('image/png');
@@ -119,7 +134,7 @@ describe('FileService', () => {
     it('returns file with url', async () => {
       const result = await service.getFile('file-1');
       expect(result.url).toBeDefined();
-      expect(storage.getUrl).toHaveBeenCalledWith('key/file.jpg');
+      expect(storage.getUrl).toHaveBeenCalledWith('key/file.jpg', expect.any(Object));
     });
 
     it('throws NotFoundException when file not found', async () => {
@@ -132,7 +147,9 @@ describe('FileService', () => {
     it('deletes from storage and db', async () => {
       await service.deleteFile('file-1');
       expect(storage.delete).toHaveBeenCalledWith('key/file.jpg');
-      expect(prisma.file.delete).toHaveBeenCalledWith({ where: { id: 'file-1' } });
+      expect(prisma.file.delete).toHaveBeenCalledWith({
+        where: { id: 'file-1' },
+      });
     });
 
     it('throws NotFoundException when file not found', async () => {
@@ -142,7 +159,9 @@ describe('FileService', () => {
 
     it('rethrows storage error', async () => {
       storage.delete.mockRejectedValueOnce(new Error('Delete failed'));
-      await expect(service.deleteFile('file-1')).rejects.toThrow('Delete failed');
+      await expect(service.deleteFile('file-1')).rejects.toThrow(
+        'Delete failed',
+      );
     });
   });
 

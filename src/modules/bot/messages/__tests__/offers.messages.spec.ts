@@ -98,17 +98,17 @@ describe('formatOfferListCompact', () => {
       [makeOffer({ quantity: 4, acceptedCount: 2 })],
       false,
     );
-    expect(msg).toContain('🟡 2/4 places');
+    expect(msg).toContain('🟡 2/4 restantes');
   });
 
   it('shows "Voir plus" when hasMore=true', () => {
     const msg = formatOfferListCompact([makeOffer()], true);
-    expect(msg).toContain('6 - Voir plus');
+    expect(msg).toContain('2 - Voir plus');
   });
 
   it('does not show "Voir plus" when hasMore=false', () => {
     const msg = formatOfferListCompact([makeOffer()], false);
-    expect(msg).not.toContain('6 - Voir plus');
+    expect(msg).not.toContain('2 - Voir plus');
   });
 
   it('truncates long address', () => {
@@ -116,7 +116,7 @@ describe('formatOfferListCompact', () => {
       [makeOffer({ address: 'A'.repeat(50) })],
       false,
     );
-    expect(msg).toContain('...');
+    expect(msg).toContain('…');
   });
 
   it('uses quantity=1 when not set', () => {
@@ -131,7 +131,7 @@ describe('formatOfferListCompact', () => {
       [makeOffer({ quantity: 3, acceptedCount: 2 })],
       false,
     );
-    expect(msg).toContain('🟡 1/3 place');
+    expect(msg).toContain('🟡 1/3 restante');
   });
 });
 
@@ -178,7 +178,9 @@ describe('formatOfferDetailWithActions', () => {
   });
 
   it('does not render score line when employerScore is null', () => {
-    const msg = formatOfferDetailWithActions(makeOffer({ employerScore: null }));
+    const msg = formatOfferDetailWithActions(
+      makeOffer({ employerScore: null }),
+    );
     expect(msg).not.toContain('Fiabilité employeur');
   });
 
@@ -199,7 +201,9 @@ describe('formatOfferDetailWithActions', () => {
 
 describe('formatOfferPublishedSuccess', () => {
   it('includes truncated offer ID', () => {
-    const msg = formatOfferPublishedSuccess('abc12345-xxxx-xxxx-xxxx-xxxxxxxxxxxx');
+    const msg = formatOfferPublishedSuccess(
+      'abc12345-xxxx-xxxx-xxxx-xxxxxxxxxxxx',
+    );
     expect(msg).toContain('#abc12345');
   });
 });

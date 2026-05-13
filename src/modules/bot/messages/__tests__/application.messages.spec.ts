@@ -53,7 +53,9 @@ function makeApplication(overrides = {}): ApplicationForList {
   };
 }
 
-function makeFilledJob(overrides: Partial<FilledJobListItem> = {}): FilledJobListItem {
+function makeFilledJob(
+  overrides: Partial<FilledJobListItem> = {},
+): FilledJobListItem {
   return {
     applicationId: 'a1',
     title: 'Livreur',
@@ -176,22 +178,30 @@ describe('formatMyApplicationsList', () => {
   });
 
   it('renders ACCEPTED status', () => {
-    const msg = formatMyApplicationsList([makeApplication({ status: 'ACCEPTED' })]);
+    const msg = formatMyApplicationsList([
+      makeApplication({ status: 'ACCEPTED' }),
+    ]);
     expect(msg).toContain('ACCEPTÉE');
   });
 
   it('renders VIEWED status', () => {
-    const msg = formatMyApplicationsList([makeApplication({ status: 'VIEWED' })]);
+    const msg = formatMyApplicationsList([
+      makeApplication({ status: 'VIEWED' }),
+    ]);
     expect(msg).toContain("VUE PAR L'EMPLOYEUR");
   });
 
   it('renders REJECTED status', () => {
-    const msg = formatMyApplicationsList([makeApplication({ status: 'REJECTED' })]);
+    const msg = formatMyApplicationsList([
+      makeApplication({ status: 'REJECTED' }),
+    ]);
     expect(msg).toContain('REFUSÉE');
   });
 
   it('renders CANCELLED status', () => {
-    const msg = formatMyApplicationsList([makeApplication({ status: 'CANCELLED' })]);
+    const msg = formatMyApplicationsList([
+      makeApplication({ status: 'CANCELLED' }),
+    ]);
     expect(msg).toContain('ANNULÉE');
   });
 });
@@ -245,6 +255,23 @@ describe('formatApplyConfirmation', () => {
     expect(msg).toContain('Jean Dupont');
     expect(msg).toContain('06 000 000');
     expect(msg).toContain('90/100');
+    expect(msg).toContain('Annulation < 4h avant');
+  });
+
+  it('uses lateCancellationThresholdHours from params', () => {
+    const msg = formatApplyConfirmation({
+      title: 'X',
+      scheduled_at: date,
+      amount: 1000,
+      payment_flow: 'DAILY',
+      address: 'Y',
+      workerName: 'Z',
+      workerPhone: '0',
+      workerEmail: 'z@test.com',
+      reliabilityScore: 80,
+      lateCancellationThresholdHours: 12,
+    });
+    expect(msg).toContain('Annulation < 12h avant');
   });
 
   it('defaults reliabilityScore to 100 when null', () => {
@@ -271,12 +298,10 @@ describe('formatApplicationSentSuccess', () => {
 });
 
 describe('formatNewApplicationToEmployer', () => {
-  it('renders notification to employer', () => {
+  it('renders notification to employer without contact details', () => {
     const msg = formatNewApplicationToEmployer({
       offerTitle: 'Manutentionnaire',
       workerName: 'Ali Bakr',
-      workerPhone: '07 111 222',
-      workerEmail: 'ali@test.com',
       workerDescription: 'Expérimenté',
       reliabilityScore: 80,
       completedMissions: 7,
@@ -287,14 +312,14 @@ describe('formatNewApplicationToEmployer', () => {
     expect(msg).toContain('Ali Bakr');
     expect(msg).toContain('80/100');
     expect(msg).toContain('7');
+    expect(msg).not.toContain('07 111 222');
+    expect(msg).not.toContain('@');
   });
 
   it('truncates long description', () => {
     const msg = formatNewApplicationToEmployer({
       offerTitle: 'X',
       workerName: 'Y',
-      workerPhone: '0',
-      workerEmail: 'y@test.com',
       workerDescription: 'D'.repeat(250),
       reliabilityScore: null,
       completedMissions: 0,
@@ -344,6 +369,19 @@ describe('formatCancellationToEmployer', () => {
     });
     expect(msg).toContain('tardive');
     expect(msg).toContain('Aucune raison donnée');
+    expect(msg).toContain('< 4h)');
+  });
+
+  it('uses lateCancellationThresholdHours in late penalty note', () => {
+    const msg = formatCancellationToEmployer({
+      workerName: 'Paul',
+      offerTitle: 'Livreur',
+      scheduledAt: date,
+      reason: null,
+      wasLatePenalty: true,
+      lateCancellationThresholdHours: 6,
+    });
+    expect(msg).toContain('< 6h)');
   });
 });
 
@@ -392,7 +430,10 @@ describe('formatFilledJobDetail', () => {
 
 describe('formatJobCompletedToWorker', () => {
   it('includes offer title and amount', () => {
-    const msg = formatJobCompletedToWorker({ offerTitle: 'Livreur', amount: 12000 });
+    const msg = formatJobCompletedToWorker({
+      offerTitle: 'Livreur',
+      amount: 12000,
+    });
     expect(msg).toContain('Livreur');
     expect(msg).toContain('12');
   });

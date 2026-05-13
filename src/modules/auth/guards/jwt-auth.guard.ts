@@ -3,16 +3,23 @@ import {
   CanActivate,
   ExecutionContext,
   UnauthorizedException,
+  Inject,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { Request } from 'express';
+import Redis from 'ioredis';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator.js';
+import {
+  REDIS_CONNECTION,
+  REDIS_KEY_PREFIX,
+} from '../../../common/services/redis/redis.constants';
 
 export interface JwtPayload {
   sub: string;
   type?: 'profile' | 'admin';
+  jti?: string;
   iat?: number;
   exp?: number;
 }
@@ -45,9 +52,10 @@ export class JwtAuthGuard implements CanActivate {
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly reflector: Reflector,
+    @Inject(REDIS_CONNECTION) private readonly redis: Redis,
   ) {}
 
-  canActivate(context: ExecutionContext): boolean {
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
       context.getHandler(),
       context.getClass(),
@@ -68,6 +76,14 @@ export class JwtAuthGuard implements CanActivate {
         secret: this.configService.get<string>('JWT_SECRET'),
       });
 
+      if (payload.jti) {
+        const blocked = await this.redis.get(
+          `${REDIS_KEY_PREFIX}jwtblocklist:${payload.jti}`,
+        );
+        if (blocked)
+          throw new UnauthorizedException('Session invalide ou expirée');
+      }
+
       const tokenType = payload.type || 'profile';
 
       (request as AuthenticatedRequest).user = {
@@ -78,7 +94,8 @@ export class JwtAuthGuard implements CanActivate {
       };
 
       return true;
-    } catch {
+    } catch (err) {
+      if (err instanceof UnauthorizedException) throw err;
       throw new UnauthorizedException('Session invalide ou expirée');
     }
   }

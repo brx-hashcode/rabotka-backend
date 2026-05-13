@@ -40,7 +40,7 @@ export function formatAccountActivatedMessage(params: {
     '',
     '*Pour commencer, tapez "Menu" pour voir toutes les options disponibles.*',
     '',
-    '*BIENVENUE SUR RABOTKA ! 🚀*',
+    '*BIENVENUE SUR RABOTKA !*',
   ].join('\n');
 }
 
@@ -71,11 +71,32 @@ export function formatReminder24h(params: {
     '*Soyez ponctuel pour maintenir votre score*',
     '',
     'Actions:',
-    '1️⃣ Confirmer ma présence',
-    '2️⃣ Annuler (sans pénalité pour le moment)',
-    "3️⃣ Contacter l'employeur",
+    '1- Confirmer ma présence',
+    '2- Annuler (sans pénalité pour le moment)',
+    "3- Contacter l'employeur",
     '',
     'Tapez le numéro correspondant.',
+  ].join('\n');
+}
+
+export function formatReminderStart(params: {
+  offerTitle: string;
+  scheduledAt: Date;
+  address: string;
+  employerName: string;
+  employerPhone: string;
+}): string {
+  return [
+    "*C'EST L'HEURE - VOTRE MISSION COMMENCE !*",
+    '',
+    `*Offre*: ${params.offerTitle}`,
+    `*Heure*: ${params.scheduledAt.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`,
+    `*Adresse*: ${params.address}`,
+    '',
+    `*Employeur*: ${params.employerName}`,
+    `*Contact*: ${params.employerPhone}`,
+    '',
+    '*Bonne mission ! Donnez le meilleur de vous-même 💪*',
   ].join('\n');
 }
 

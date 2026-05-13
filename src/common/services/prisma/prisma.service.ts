@@ -26,7 +26,11 @@ export class PrismaService
       configService?.get<string>('DATABASE_URL') ??
       process.env.DATABASE_URL ??
       DEFAULT_DATABASE_URL;
-    const adapter = new PrismaPg({ connectionString });
+    const adapter = new PrismaPg({
+      connectionString,
+      connectionTimeoutMillis: 15_000,
+      max: 10,
+    });
     super({ adapter });
   }
 

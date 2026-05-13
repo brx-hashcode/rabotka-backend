@@ -1,11 +1,15 @@
 import type { BotProfile, BotState } from '../types/bot-state.types';
 import { FLOW_IDS } from '../bot.constants';
-import type { PaymentService } from '../../payments/payment.service';
-import { PrismaService } from 'src/common/services/prisma/prisma.service';
+import type { PrismaService } from 'src/common/services/prisma/prisma.service';
+import type { WalletService } from '../../wallet/wallet.service';
+import type { SystemConfigService } from '../../system-config/system-config.service';
+import { AccountStatus, ProfileType } from '@prisma/client';
+import { welcomeActivationMessage } from '../../whatsapp/templates';
 
 export type VerifyWhatsappContext = {
   prisma: PrismaService;
-  paymentService: PaymentService;
+  walletService: WalletService;
+  systemConfigService: SystemConfigService;
 };
 
 type FlowResult = {
@@ -22,7 +26,6 @@ export async function runVerifyWhatsappFlow(
 ): Promise<FlowResult> {
   const trimmed = input.trim();
 
-  // Initial trigger — no input yet, prompt for code
   if (!trimmed) {
     return {
       reply: ['Veuillez entrer le code de vérification reçu par WhatsApp :'],
@@ -35,7 +38,6 @@ export async function runVerifyWhatsappFlow(
     };
   }
 
-  // step 1 — await_code
   const now = new Date();
 
   const token = await ctx.prisma.verificationToken.findFirst({
@@ -66,20 +68,35 @@ export async function runVerifyWhatsappFlow(
     };
   }
 
-  // Valid token — mark used, generate payment link
-  await ctx.prisma.verificationToken.update({
-    where: { id: token.id },
-    data: { used_at: now },
-  });
+  await ctx.prisma.$transaction([
+    ctx.prisma.verificationToken.update({
+      where: { id: token.id },
+      data: { used_at: now },
+    }),
+    ctx.prisma.profile.update({
+      where: { id: profile.id },
+      data: { whatsapp_connected: true, status: AccountStatus.ACTIVE },
+    }),
+  ] as const);
 
-  const paymentLink = await ctx.paymentService.generateActivationPaymentLink(
-    profile.id,
+  const profileType = profile.profile_type as ProfileType;
+  const creditAmount = await ctx.walletService
+    .grantWelcomeCredit(profile.id, profileType)
+    .catch(() => 0);
+
+  const wallet = await ctx.walletService
+    .getOrCreateProfileWallet(profile.id)
+    .catch(() => ({ balance: creditAmount }));
+
+  const message = welcomeActivationMessage(
+    profile.first_name,
+    creditAmount,
+    profile.profile_type,
+    wallet.balance,
   );
 
   return {
-    reply: [
-      `✅ Code vérifié !\n\nPour finaliser l'activation de votre compte Rabotka, veuillez effectuer le paiement d'activation via le lien suivant :\n\n${paymentLink}\n\nUne fois le paiement confirmé, votre compte sera activé automatiquement.`,
-    ],
+    reply: [message],
     clearState: true,
   };
 }

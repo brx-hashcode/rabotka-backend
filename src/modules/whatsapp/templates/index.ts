@@ -1,7 +1,17 @@
 export { verificationSuccessMessage } from './verification-success';
+export {
+  whatsappVerifyPromptMessage,
+  whatsappAlreadyVerifiedMessage,
+} from './verify-whatsapp';
 export { verificationLinkMessage } from './verification-link';
 export { otpMessage } from './otp';
 export { accountActivatedMessage } from './account-activated';
+export {
+  paymentUseRegisteredNumberPrompt,
+  paymentEnterPhonePrompt,
+  paymentChooseOperatorPrompt,
+  paymentPendingMessage,
+  paymentDirectFailedMessage,
+} from './payment-direct';
 export { paymentApprovedMessage } from './payment-approved';
-export { paymentLinkMessage } from './payment-link';
-export { accountActivationMessage } from './account-activation-message';
+export { welcomeActivationMessage } from './welcome-activation';

@@ -13,6 +13,7 @@ const workerProfile: BotProfile = {
   email: 'alice@example.com',
   profile_type: 'WORKER',
   reliability_score: 90,
+  status: 'ACTIVE',
 };
 
 function makeApp(status = 'PENDING') {
@@ -36,14 +37,34 @@ function makeCtx(overrides: Record<string, unknown> = {}) {
   return {
     applicationService: {
       findByWorker: jest.fn().mockResolvedValue([makeApp()]),
+      findByEmployer: jest.fn().mockResolvedValue([makeApp()]),
       findById: jest.fn().mockResolvedValue(makeApp()),
       cancel: jest.fn().mockResolvedValue({ penaltyAmount: null }),
       ...overrides,
-    } as any,
+    },
     notificationService: {
       sendCancellationToEmployer: jest.fn().mockResolvedValue(undefined),
-    } as any,
-  };
+      sendMessage: jest.fn().mockResolvedValue(undefined),
+    },
+    contactUnlockService: {
+      getByApplicationId: jest.fn().mockResolvedValue(null),
+      rejectPendingAttemptByApplication: jest.fn(),
+    },
+    walletService: {},
+    paymentService: {},
+    systemConfigService: {
+      getContactUnlockFees: jest.fn().mockResolvedValue({
+        employerFeeFcfa: 1000,
+        workerFeeFcfa: 500,
+        expiryHours: 24,
+      }),
+      getFees: jest.fn().mockResolvedValue({
+        cancellationThresholdHours: 4,
+        lateCancellationPenaltyFcfa: 5000,
+      }),
+    },
+    ...overrides,
+  } as any;
 }
 
 function makeState(applicationIds: string[], step = 0) {
@@ -59,7 +80,12 @@ describe('runMyApplicationsFlow()', () => {
   it('exits to menu on "menu" input', async () => {
     const ctx = makeCtx();
     const state = makeState(['app-1']);
-    const result = await runMyApplicationsFlow(state, 'menu', workerProfile, ctx);
+    const result = await runMyApplicationsFlow(
+      state,
+      'menu',
+      workerProfile,
+      ctx,
+    );
     expect(result.clearState).toBe(true);
     expect(result.reply[0]).toMatch(/MENU/i);
   });
@@ -76,23 +102,40 @@ describe('runMyApplicationsFlow()', () => {
     it('shows list when input is not a valid number', async () => {
       const ctx = makeCtx();
       const state = makeState(['app-1'], 0);
-      const result = await runMyApplicationsFlow(state, 'abc', workerProfile, ctx);
+      const result = await runMyApplicationsFlow(
+        state,
+        'abc',
+        workerProfile,
+        ctx,
+      );
       expect(result.reply).toBeDefined();
     });
 
     it('shows application detail when valid index selected', async () => {
       const ctx = makeCtx();
       const state = makeState(['app-1'], 0);
-      const result = await runMyApplicationsFlow(state, '1', workerProfile, ctx);
+      const result = await runMyApplicationsFlow(
+        state,
+        '1',
+        workerProfile,
+        ctx,
+      );
       expect(result.nextState?.step).toBe(1);
     });
 
     it('returns not-found when application belongs to different worker', async () => {
       const ctx = makeCtx({
-        findById: jest.fn().mockResolvedValue({ ...makeApp(), worker_id: 'other' }),
+        findById: jest
+          .fn()
+          .mockResolvedValue({ ...makeApp(), worker_id: 'other' }),
       });
       const state = makeState(['app-1'], 0);
-      const result = await runMyApplicationsFlow(state, '1', workerProfile, ctx);
+      const result = await runMyApplicationsFlow(
+        state,
+        '1',
+        workerProfile,
+        ctx,
+      );
       expect(result.clearState).toBe(true);
     });
   });
@@ -110,7 +153,12 @@ describe('runMyApplicationsFlow()', () => {
     it('initiates cancellation on "1" for PENDING application', async () => {
       const ctx = makeCtx();
       const state = makeStep1State('app-1');
-      const result = await runMyApplicationsFlow(state, '1', workerProfile, ctx);
+      const result = await runMyApplicationsFlow(
+        state,
+        '1',
+        workerProfile,
+        ctx,
+      );
       // Should transition to cancel flow
       expect(result.reply.length).toBeGreaterThan(0);
     });
@@ -118,21 +166,36 @@ describe('runMyApplicationsFlow()', () => {
     it('returns to list on "2" for cancellable app', async () => {
       const ctx = makeCtx();
       const state = makeStep1State('app-1');
-      const result = await runMyApplicationsFlow(state, '2', workerProfile, ctx);
+      const result = await runMyApplicationsFlow(
+        state,
+        '2',
+        workerProfile,
+        ctx,
+      );
       expect(result.reply).toBeDefined();
     });
 
     it('returns to menu on "3" for cancellable app', async () => {
       const ctx = makeCtx();
       const state = makeStep1State('app-1');
-      const result = await runMyApplicationsFlow(state, '3', workerProfile, ctx);
+      const result = await runMyApplicationsFlow(
+        state,
+        '3',
+        workerProfile,
+        ctx,
+      );
       expect(result.clearState).toBe(true);
     });
 
     it('shows detail again for unrecognized input', async () => {
       const ctx = makeCtx();
       const state = makeStep1State('app-1');
-      const result = await runMyApplicationsFlow(state, 'xyz', workerProfile, ctx);
+      const result = await runMyApplicationsFlow(
+        state,
+        'xyz',
+        workerProfile,
+        ctx,
+      );
       expect(result.nextState).toBe(state);
     });
 
@@ -144,7 +207,12 @@ describe('runMyApplicationsFlow()', () => {
         payload: { applicationIds: ['app-1'] },
         updatedAt: new Date().toISOString(),
       };
-      const result = await runMyApplicationsFlow(state, '1', workerProfile, ctx);
+      const result = await runMyApplicationsFlow(
+        state,
+        '1',
+        workerProfile,
+        ctx,
+      );
       expect(result.clearState).toBe(true);
     });
   });
@@ -155,6 +223,38 @@ describe('runMyApplicationsFlow()', () => {
       expect(state.flowId).toBe(FLOW_IDS.MY_APPLICATIONS);
       expect(state.step).toBe(0);
       expect(state.payload?.applicationIds).toEqual(['app-1', 'app-2']);
+      expect(state.payload?.listMode).toBe('all');
+    });
+
+    it('sets pending_payments list mode when requested', () => {
+      const state = getMyApplicationsInitialState(
+        ['app-1'],
+        'pending_payments',
+      );
+      expect(state.payload?.listMode).toBe('pending_payments');
+    });
+  });
+
+  describe('step 0 — multi-digit index', () => {
+    it('selects the 10th application when user types 10', async () => {
+      const ids = Array.from({ length: 10 }, (_, i) => `app-${i + 1}`);
+      const ctx = makeCtx({
+        findById: jest.fn().mockResolvedValue({ ...makeApp(), id: 'app-10' }),
+      });
+      const state = {
+        flowId: FLOW_IDS.MY_APPLICATIONS,
+        step: 0,
+        payload: { applicationIds: ids },
+        updatedAt: new Date().toISOString(),
+      };
+      const result = await runMyApplicationsFlow(
+        state,
+        '10',
+        workerProfile,
+        ctx,
+      );
+      expect(result.nextState?.step).toBe(1);
+      expect(ctx.applicationService.findById).toHaveBeenCalledWith('app-10');
     });
   });
 });

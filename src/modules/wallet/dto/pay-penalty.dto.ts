@@ -4,7 +4,8 @@ import { PaymentMethod } from '@prisma/client';
 
 export class PayPenaltyDto {
   @ApiProperty({
-    description: 'Optional external/gateway reference for client reconciliation. Backend generates RBK reference as transaction_id.',
+    description:
+      'Optional external/gateway reference for client reconciliation. Backend generates RBK reference as transaction_id.',
     example: 'gateway_txn_abc123',
     required: false,
   })

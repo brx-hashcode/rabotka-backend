@@ -2,6 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { JobOfferService } from '../../job-offer/job-offer.service';
 import { ApplicationService } from '../../application/application.service';
+import { WalletService } from '../../wallet/wallet.service';
+import { SystemConfigService } from '../../system-config/system-config.service';
 import type { BotProfile } from '../types/bot-state.types';
 import {
   formatOfferListCompact,
@@ -33,6 +35,8 @@ export class BotCommandsService {
     private readonly prisma: PrismaService,
     private readonly jobOfferService: JobOfferService,
     private readonly applicationService: ApplicationService,
+    private readonly walletService: WalletService,
+    private readonly systemConfig: SystemConfigService,
   ) {}
 
   async listOffers(
@@ -65,7 +69,7 @@ export class BotCommandsService {
       status: o.status,
     }));
     const hasMore = !!nextCursor;
-    const message = formatOfferListCompact(offers, hasMore);
+    const message = formatOfferListCompact(offers, hasMore, 0);
     return {
       message,
       offerIds: data.map((o) => o.id),
@@ -92,10 +96,12 @@ export class BotCommandsService {
   async myApplications(
     profile: BotProfile,
   ): Promise<{ message: string; applicationIds?: string[] }> {
-    const applications = await this.applicationService.findByWorker(
-      profile.id,
-      { limit: 20 },
-    );
+    const applications =
+      profile.profile_type === 'WORKER'
+        ? await this.applicationService.findByWorker(profile.id, { limit: 20 })
+        : await this.applicationService.findByEmployer(profile.id, {
+            limit: 20,
+          });
     if (applications.length === 0) {
       return {
         message: formatMyApplicationsList([]),
@@ -120,17 +126,79 @@ export class BotCommandsService {
     };
   }
 
-  async myOffers(profile: BotProfile): Promise<string> {
+  async pendingPayments(
+    profile: BotProfile,
+  ): Promise<{ message: string; applicationIds?: string[] }> {
+    const applications =
+      profile.profile_type === 'WORKER'
+        ? await this.applicationService.findByWorker(profile.id, {
+            status: 'WAITING_PAYMENT' as ApplicationStatus,
+            limit: 20,
+          })
+        : await this.applicationService.findByEmployer(profile.id, {
+            status: 'WAITING_PAYMENT' as ApplicationStatus,
+            limit: 20,
+          });
+
+    if (applications.length === 0) {
+      return {
+        message:
+          '✅ *Aucun paiement en attente* pour le moment.\n\nTapez *Menu* pour revenir.',
+      };
+    }
+
+    const list: ApplicationForList[] = applications.map((a) => ({
+      id: a.id,
+      status: a.status,
+      job_offer: {
+        id: a.job_offer.id,
+        title: a.job_offer.title,
+        scheduled_at: a.job_offer.scheduled_at,
+        amount: a.job_offer.amount,
+        payment_flow: a.job_offer.payment_flow,
+        address: a.job_offer.address,
+        status: a.job_offer.status,
+      },
+    }));
+
+    return {
+      message: formatMyApplicationsList(list),
+      applicationIds: applications.map((a) => a.id),
+    };
+  }
+
+  async myOffers(
+    profile: BotProfile,
+    page = 0,
+  ): Promise<{ message: string; offerIds: string[] }> {
     if (profile.profile_type !== 'EMPLOYER') {
-      return "*SEULS LES EMPLOYEURS PEUVENT VOIR LEURS OFFRES. TAPEZ 'MENU' POUR REVENIR.*";
+      return {
+        message:
+          "*SEULS LES EMPLOYEURS PEUVENT VOIR LEURS OFFRES. TAPEZ 'MENU' POUR REVENIR.*",
+        offerIds: [],
+      };
     }
-    const offers = await this.jobOfferService.findByEmployerId(profile.id);
-    if (offers.length === 0) {
-      return "*VOUS N'AVEZ PUBLIÉ AUCUNE OFFRE. TAPEZ 'MENU' POUR REVENIR.*";
+    const PAGE_SIZE = 5;
+    const { items: pageOffers, total } =
+      await this.jobOfferService.findByEmployerId(profile.id, {
+        page,
+        pageSize: PAGE_SIZE,
+      });
+    if (total === 0) {
+      return {
+        message: "*VOUS N'AVEZ PUBLIÉ AUCUNE OFFRE. TAPEZ 'MENU' POUR REVENIR.*",
+        offerIds: [],
+      };
     }
-    const lines = [`*MES OFFRES PUBLIÉES (${offers.length})*`, ''];
-    offers.forEach((o, i) => {
-      const num = i + 1;
+    const totalPages = Math.ceil(total / PAGE_SIZE);
+    const start = page * PAGE_SIZE;
+    const hasMore = start + PAGE_SIZE < total;
+    const pageLabel = totalPages > 1 ? ` — page ${page + 1}/${totalPages}` : '';
+    const lines = [`*MES OFFRES PUBLIÉES (${total})${pageLabel}*`, ''];
+    pageOffers.forEach((o, i) => {
+      const num = start + i + 1;
+      const title =
+        o.title.length > 40 ? o.title.slice(0, 40) + '...' : o.title;
       const dateStr = o.scheduled_at.toLocaleDateString('fr-FR', {
         day: '2-digit',
         month: '2-digit',
@@ -139,16 +207,19 @@ export class BotCommandsService {
         minute: '2-digit',
       });
       lines.push(
-        `${num}. ${o.title}`,
-        `    ID: #${o.id.slice(0, 8)}`,
-        `    Date: ${dateStr}`,
-        `    Montant: ${o.amount.toLocaleString('fr-FR')} FCFA`,
-        `    Statut: ${o.status}`,
+        `${num}- *${title}*`,
+        `    • Date : ${dateStr}`,
+        `    • Montant : ${o.amount != null ? `${o.amount.toLocaleString('fr-FR')} FCFA` : 'Prix à négocier'}`,
+        `    • Statut : ${o.status}`,
         '',
       );
     });
-    lines.push("*Tapez 'Menu' pour revenir.*");
-    return lines.join('\n');
+    const actions: string[] = [];
+    if (page > 0) actions.push('P- Page précédente');
+    if (hasMore) actions.push('S- Page suivante');
+    actions.push('M- Menu principal');
+    lines.push(...actions);
+    return { message: lines.join('\n'), offerIds: pageOffers.map((o) => o.id) };
   }
 
   async candidaturesReceived(profile: BotProfile): Promise<{
@@ -269,6 +340,10 @@ export class BotCommandsService {
 
     if (!profileData) return "Profil non trouvé. Tapez 'Menu'.";
 
+    const walletBalance = await this.walletService
+      .getProfileWalletBalance(profile.id)
+      .catch(() => 0);
+
     if (profileData.profile_type === 'EMPLOYER') {
       const [offersCount, pendingCandidaturesCount] = await Promise.all([
         this.prisma.jobOffer.count({ where: { employer_id: profile.id } }),
@@ -293,8 +368,9 @@ export class BotCommandsService {
         offersCount,
         pendingCandidaturesCount,
         activeOffersCount,
+        walletBalance,
       });
-      if (profileData.avatar_url) {
+      if (profileData.avatar_url?.trim()) {
         return `[IMG:${profileData.avatar_url}]${profileText}`;
       }
       return profileText;
@@ -303,7 +379,7 @@ export class BotCommandsService {
     const [applications, penalties] = await Promise.all([
       this.applicationService.findByWorker(profile.id, { limit: 500 }),
       this.prisma.penalty.findMany({
-        where: { worker_id: profile.id },
+        where: { profile_id: profile.id },
         orderBy: { applied_at: 'desc' },
         include: {
           application: { include: { job_offer: true } },
@@ -338,8 +414,9 @@ export class BotCommandsService {
       completionRate,
       totalPenalties,
       lateCancellations: lateCount,
+      walletBalance,
     });
-    if (profileData.avatar_url) {
+    if (profileData.avatar_url?.trim()) {
       return `[IMG:${profileData.avatar_url}]${profileText}`;
     }
     return profileText;
@@ -348,7 +425,7 @@ export class BotCommandsService {
   async penaltyHistory(profile: BotProfile): Promise<string> {
     const [penalties, applications] = await Promise.all([
       this.prisma.penalty.findMany({
-        where: { worker_id: profile.id },
+        where: { profile_id: profile.id },
         orderBy: { applied_at: 'desc' },
         include: {
           application: { include: { job_offer: true } },
@@ -373,12 +450,15 @@ export class BotCommandsService {
       jobOfferTitle: p.application?.job_offer?.title,
     }));
 
+    const { cancellationThresholdHours } = await this.systemConfig.getFees();
+
     return formatPenaltyHistory(
       items,
       totalAmount,
       penalties.length,
       score,
       completed,
+      cancellationThresholdHours,
     );
   }
 }

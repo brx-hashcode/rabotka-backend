@@ -14,6 +14,7 @@ const employerProfile: BotProfile = {
   email: 'jean@example.com',
   profile_type: 'EMPLOYER',
   reliability_score: null,
+  status: 'ACTIVE',
 };
 
 function makeItem(id: string, name = 'Alice Dupont'): CandidatureListItem {
@@ -31,11 +32,14 @@ function makeItem(id: string, name = 'Alice Dupont'): CandidatureListItem {
 }
 
 function makeItems(count: number): CandidatureListItem[] {
-  return Array.from({ length: count }, (_, i) => makeItem(`app-${i + 1}`, `Worker${i + 1} Nom`));
+  return Array.from({ length: count }, (_, i) =>
+    makeItem(`app-${i + 1}`, `Worker${i + 1} Nom`),
+  );
 }
 
 function makeCtx() {
   return {
+    prisma: {} as any,
     applicationService: {
       markAsViewed: jest.fn().mockResolvedValue(undefined),
       accept: jest.fn().mockResolvedValue(undefined),
@@ -45,53 +49,93 @@ function makeCtx() {
       sendApplicationAcceptedToWorker: jest.fn().mockResolvedValue(undefined),
       sendApplicationRejectedToWorker: jest.fn().mockResolvedValue(undefined),
     } as any,
+    contactUnlockService: {
+      getByApplicationId: jest.fn().mockResolvedValue(null),
+    } as any,
+    walletService: {} as any,
+    systemConfigService: {} as any,
   };
 }
 
 describe('runCandidaturesListFlow()', () => {
   it('returns no-items message when items list is empty', async () => {
     const state = getCandidaturesListInitialState([]);
-    const result = await runCandidaturesListFlow(state, '', employerProfile, makeCtx());
+    const result = await runCandidaturesListFlow(
+      state,
+      '',
+      employerProfile,
+      makeCtx(),
+    );
     expect(result.clearState).toBe(true);
     expect(result.reply[0]).toContain('AUCUNE');
   });
 
   it('exits to menu on "menu" command', async () => {
     const state = getCandidaturesListInitialState(makeItems(3));
-    const result = await runCandidaturesListFlow(state, 'menu', employerProfile, makeCtx());
+    const result = await runCandidaturesListFlow(
+      state,
+      'menu',
+      employerProfile,
+      makeCtx(),
+    );
     expect(result.clearState).toBe(true);
   });
 
   it('exits to menu on "7"', async () => {
     const state = getCandidaturesListInitialState(makeItems(3));
-    const result = await runCandidaturesListFlow(state, '7', employerProfile, makeCtx());
+    const result = await runCandidaturesListFlow(
+      state,
+      '7',
+      employerProfile,
+      makeCtx(),
+    );
     expect(result.clearState).toBe(true);
   });
 
   it('shows detail on selecting item "1"', async () => {
     const state = getCandidaturesListInitialState(makeItems(3));
-    const result = await runCandidaturesListFlow(state, '1', employerProfile, makeCtx());
+    const result = await runCandidaturesListFlow(
+      state,
+      '1',
+      employerProfile,
+      makeCtx(),
+    );
     expect(result.nextState?.payload?.step).toBe('detail');
     expect(result.nextState?.payload?.selectedApplicationId).toBe('app-1');
   });
 
   it('shows error for out-of-range selection', async () => {
     const state = getCandidaturesListInitialState(makeItems(3));
-    const result = await runCandidaturesListFlow(state, '9', employerProfile, makeCtx());
+    const result = await runCandidaturesListFlow(
+      state,
+      '9',
+      employerProfile,
+      makeCtx(),
+    );
     expect(result.nextState).toBe(state);
   });
 
   it('paginates to next page on "6"', async () => {
     const state = getCandidaturesListInitialState(makeItems(8));
-    const result = await runCandidaturesListFlow(state, '6', employerProfile, makeCtx());
+    const result = await runCandidaturesListFlow(
+      state,
+      '6',
+      employerProfile,
+      makeCtx(),
+    );
     expect(result.nextState?.payload?.pageIndex).toBe(1);
   });
 
   it('shows error when "6" pressed but no more items', async () => {
     const state = getCandidaturesListInitialState(makeItems(3));
-    const result = await runCandidaturesListFlow(state, '6', employerProfile, makeCtx());
+    const result = await runCandidaturesListFlow(
+      state,
+      '6',
+      employerProfile,
+      makeCtx(),
+    );
     expect(result.nextState).toBe(state);
-    expect(result.reply[0]).toContain('RÉPONDEZ');
+    expect(result.reply[0]).toContain('TAPEZ');
   });
 
   describe('step: detail', () => {
@@ -113,21 +157,36 @@ describe('runCandidaturesListFlow()', () => {
     it('exits to menu on "4"', async () => {
       const item = makeItem('app-1');
       const state = makeDetailState(item);
-      const result = await runCandidaturesListFlow(state, '4', employerProfile, makeCtx());
+      const result = await runCandidaturesListFlow(
+        state,
+        '4',
+        employerProfile,
+        makeCtx(),
+      );
       expect(result.clearState).toBe(true);
     });
 
     it('returns to list on "3"', async () => {
       const item = makeItem('app-1');
       const state = makeDetailState(item);
-      const result = await runCandidaturesListFlow(state, '3', employerProfile, makeCtx());
+      const result = await runCandidaturesListFlow(
+        state,
+        '3',
+        employerProfile,
+        makeCtx(),
+      );
       expect(result.nextState?.payload?.step).toBe('list');
     });
 
     it('initiates accept/refuse on "1"', async () => {
       const item = makeItem('app-1');
       const state = makeDetailState(item);
-      const result = await runCandidaturesListFlow(state, '1', employerProfile, makeCtx());
+      const result = await runCandidaturesListFlow(
+        state,
+        '1',
+        employerProfile,
+        makeCtx(),
+      );
       expect(result.reply.length).toBeGreaterThan(0);
     });
   });

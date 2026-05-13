@@ -11,18 +11,27 @@ describe('ProfileModule', () => {
   });
 
   it('provides ProfileService', () => {
-    const providers: unknown[] = Reflect.getMetadata(MODULE_METADATA.PROVIDERS, ProfileModule);
+    const providers: unknown[] = Reflect.getMetadata(
+      MODULE_METADATA.PROVIDERS,
+      ProfileModule,
+    );
     expect(providers).toContain(ProfileService);
   });
 
   it('registers both controllers', () => {
-    const controllers: unknown[] = Reflect.getMetadata(MODULE_METADATA.CONTROLLERS, ProfileModule);
+    const controllers: unknown[] = Reflect.getMetadata(
+      MODULE_METADATA.CONTROLLERS,
+      ProfileModule,
+    );
     expect(controllers).toContain(ProfileController);
     expect(controllers).toContain(AdminProfileController);
   });
 
   it('exports ProfileService', () => {
-    const exports: unknown[] = Reflect.getMetadata(MODULE_METADATA.EXPORTS, ProfileModule);
+    const exports: unknown[] = Reflect.getMetadata(
+      MODULE_METADATA.EXPORTS,
+      ProfileModule,
+    );
     expect(exports).toContain(ProfileService);
   });
 });

@@ -1,11 +1,13 @@
 import { config } from 'dotenv';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '@prisma/client';
-import { seedProfiles, seedProfilesBulk } from './seed/profile.seed';
 import { seedSuperAdmin } from './seed/user.seed';
-import { seedWallet } from './seed/wallet.seed';
+import { seedClaims } from './seed/claims.seed';
+import { seedProfiles } from './seed/profile.seed';
 import { seedJobOffersAndApplications } from './seed/job-offer.seed';
-import { seedPaymentTestProfiles } from './seed/payment-test.seed';
+import { seedPenalties } from './seed/penalty.seed';
+import { seedInvoices } from './seed/invoice.seed';
+import { seedJobCategories } from './seed/job-category.seed';
 
 config({ path: '.env.local' });
 config({ path: '.env' });
@@ -18,12 +20,13 @@ void run();
 
 async function run() {
   try {
+    await seedJobCategories(prisma);
     await seedSuperAdmin(prisma);
     await seedProfiles(prisma);
-    await seedProfilesBulk(prisma);
-    await seedWallet(prisma);
     await seedJobOffersAndApplications(prisma);
-    await seedPaymentTestProfiles(prisma);
+    await seedPenalties(prisma);
+    await seedClaims(prisma);
+    await seedInvoices(prisma);
   } catch (e) {
     console.error(e);
     process.exit(1);

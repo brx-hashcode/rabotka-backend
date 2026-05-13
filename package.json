@@ -25,8 +25,12 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:migrate:deploy": "prisma migrate deploy",
     "prisma:studio": "prisma studio",
+    "prisma:backfill:public-image-urls": "tsx prisma/backfill-public-image-urls.ts",
+    "prisma:restore:wallet-transactions": "tsx prisma/restore-wallet-transactions.ts",
     "db:reset": "docker exec rabotka_postgres psql -U postgres -c \"DROP DATABASE IF EXISTS rabotka;\" && docker exec rabotka_postgres psql -U postgres -c \"CREATE DATABASE rabotka;\" && pnpm prisma:migrate:deploy",
-    "db:seed": "prisma db seed"
+    "db:seed": "prisma db seed",
+    "db:seed:prod": "tsx prisma/seed-prod.ts",
+    "db:seed:reco-test": "tsx prisma/seed-reco-test.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
@@ -40,15 +44,20 @@
     "@nestjs/common": "^11.0.1",
     "@nestjs/config": "^4.0.2",
     "@nestjs/core": "^11.0.1",
+    "@nestjs/event-emitter": "^3.0.1",
     "@nestjs/jwt": "^11.0.2",
     "@nestjs/platform-express": "^11.0.1",
+    "@nestjs/platform-socket.io": "^11.1.17",
     "@nestjs/swagger": "^11.2.0",
     "@nestjs/terminus": "^11.0.0",
     "@nestjs/throttler": "^6.5.0",
+    "@nestjs/websockets": "^11.1.17",
     "@prisma/adapter-pg": "^7.0.0",
-    "@prisma/client": "^7.0.0",
+    "@prisma/client": "^7.6.0",
     "@qdrant/js-client-rest": "^1.17.0",
     "@scalar/nestjs-api-reference": "^0.5.11",
+    "@socket.io/redis-adapter": "^8.3.0",
+    "@types/qrcode": "^1.5.6",
     "@vercel/blob": "^0.25.0",
     "bullmq": "^5.67.2",
     "class-transformer": "^0.5.1",
@@ -56,17 +65,29 @@
     "cloudinary": "^2.0.0",
     "cookie-parser": "^1.4.7",
     "csrf-csrf": "^4.0.3",
+    "docxtemplater": "^3.68.3",
     "dotenv": "^17.2.3",
+    "exceljs": "^4.4.0",
+    "express": "^5.2.1",
     "fastembed": "^2.1.0",
+    "googleapis": "^171.4.0",
     "handlebars": "^4.7.8",
     "ioredis": "^5.9.2",
+    "libreoffice-convert": "^1.8.1",
+    "mammoth": "^1.12.0",
     "mjml": "^4.15.3",
     "nestjs-i18n": "^10.0.2",
+    "node-qpdf": "^1.0.3",
     "nodemailer": "^7.0.13",
+    "otplib": "^13.4.0",
     "pg": "^8.13.0",
+    "pizzip": "^3.2.0",
+    "puppeteer": "^24.40.0",
+    "qrcode": "^1.5.4",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
     "sharp": "^0.33.5",
+    "socket.io": "^4.8.3",
     "twilio": "^5.3.0"
   },
   "devDependencies": {
@@ -89,7 +110,7 @@
     "globals": "^16.0.0",
     "jest": "^30.0.0",
     "prettier": "^3.4.2",
-    "prisma": "^7.0.0",
+    "prisma": "^7.6.0",
     "source-map-support": "^0.5.21",
     "supertest": "^7.0.0",
     "ts-jest": "^29.2.5",
@@ -130,6 +151,17 @@
       "!**/*.spec.ts"
     ],
     "coverageDirectory": "../coverage",
-    "testEnvironment": "node"
+    "coverageThreshold": {
+      "global": {
+        "lines": 80,
+        "functions": 80,
+        "branches": 80,
+        "statements": 80
+      }
+    },
+    "testEnvironment": "node",
+    "transformIgnorePatterns": [
+      "node_modules[\\\\/](?!\\.pnpm[\\\\/](@otplib|@scure|@noble)|(@otplib|@scure|@noble))"
+    ]
   }
 }

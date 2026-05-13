@@ -28,6 +28,7 @@ const baseConfig = {
   CLOUDFLARE_BUCKET_NAME: 'my-bucket',
   CLOUDFLARE_ACCESS_KEY_ID: 'access-key',
   CLOUDFLARE_SECRET_ACCESS_KEY: 'secret-key',
+  CLOUDFLARE_PUBLIC_BASE_URL: 'https://cdn.example.com',
 };
 
 describe('CloudflareStorageProvider', () => {
@@ -54,7 +55,9 @@ describe('CloudflareStorageProvider', () => {
   });
 
   it('creates successfully with valid config', () => {
-    expect(() => new CloudflareStorageProvider(makeConfig(baseConfig))).not.toThrow();
+    expect(
+      () => new CloudflareStorageProvider(makeConfig(baseConfig)),
+    ).not.toThrow();
   });
 
   describe('upload', () => {

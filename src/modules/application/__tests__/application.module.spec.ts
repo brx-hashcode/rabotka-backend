@@ -10,17 +10,26 @@ describe('ApplicationModule', () => {
   });
 
   it('provides ApplicationService', () => {
-    const providers: unknown[] = Reflect.getMetadata(MODULE_METADATA.PROVIDERS, ApplicationModule);
+    const providers: unknown[] = Reflect.getMetadata(
+      MODULE_METADATA.PROVIDERS,
+      ApplicationModule,
+    );
     expect(providers).toContain(ApplicationService);
   });
 
   it('registers AdminApplicationController', () => {
-    const controllers: unknown[] = Reflect.getMetadata(MODULE_METADATA.CONTROLLERS, ApplicationModule);
+    const controllers: unknown[] = Reflect.getMetadata(
+      MODULE_METADATA.CONTROLLERS,
+      ApplicationModule,
+    );
     expect(controllers).toContain(AdminApplicationController);
   });
 
   it('exports ApplicationService', () => {
-    const exports: unknown[] = Reflect.getMetadata(MODULE_METADATA.EXPORTS, ApplicationModule);
+    const exports: unknown[] = Reflect.getMetadata(
+      MODULE_METADATA.EXPORTS,
+      ApplicationModule,
+    );
     expect(exports).toContain(ApplicationService);
   });
 });
