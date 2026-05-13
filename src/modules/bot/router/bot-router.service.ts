@@ -45,7 +45,7 @@ function matchCommandAlias(
   if (CMD_MY_APPLICATIONS.includes(normalized)) return 'my_applications';
   if (CMD_PENDING_PAYMENTS.includes(normalized)) return 'pending_payments';
   if (CMD_LIST_OFFERS.includes(normalized) && isWorker) return 'list_offers';
-  if (CMD_PAY.includes(normalized) && isWorker) return 'pay_penalties';
+  if (CMD_PAY.includes(normalized)) return 'pay_penalties';
   if (CMD_UNLOCK.includes(normalized)) return 'unlock_contact';
   if (CMD_RECOMMENDED_JOBS.includes(normalized) && isWorker)
     return 'recommended_jobs';
@@ -98,6 +98,11 @@ export class BotRouterService {
 
     if (state?.flowId && CMD_MENU.includes(normalized)) {
       return { type: 'command', commandId: 'menu' };
+    }
+
+    // "PAYER" must always launch the pay_penalties flow regardless of active state
+    if (state?.flowId && CMD_PAY.includes(normalized)) {
+      return { type: 'command', commandId: 'pay_penalties' };
     }
 
     if (state?.flowId) {
