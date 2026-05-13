@@ -146,6 +146,7 @@ describe('ApplicationService', () => {
               reliabilityScoreMin: 50,
               employerLateCancelScoreDeduction: 5,
               billingBlockThreshold: 2,
+              maxConcurrentApplications: 3,
             }),
           },
         },
@@ -169,6 +170,7 @@ describe('ApplicationService', () => {
       (prisma.profile.findUnique as jest.Mock).mockResolvedValue(mockWorker);
       (prisma.penalty.count as jest.Mock).mockResolvedValue(0);
       (prisma.application.findUnique as jest.Mock).mockResolvedValue(null);
+      (prisma.application.count as jest.Mock).mockResolvedValue(0);
       (prisma.application.create as jest.Mock).mockResolvedValue({
         ...mockApplication,
         job_offer: mockJobOffer,
@@ -204,6 +206,13 @@ describe('ApplicationService', () => {
       );
       await expect(service.create(JOB_OFFER_ID, WORKER_ID)).rejects.toThrow(
         ConflictException,
+      );
+    });
+
+    it('throws ForbiddenException when worker has reached max concurrent applications', async () => {
+      (prisma.application.count as jest.Mock).mockResolvedValue(3);
+      await expect(service.create(JOB_OFFER_ID, WORKER_ID)).rejects.toThrow(
+        ForbiddenException,
       );
     });
 

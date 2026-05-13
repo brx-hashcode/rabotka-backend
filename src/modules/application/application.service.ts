@@ -214,6 +214,19 @@ export class ApplicationService {
       throw new ConflictException('Vous avez déjà postulé à cette offre');
     }
 
+    const fees = await this.systemConfigService.getFees();
+    const activeCount = await this.prisma.application.count({
+      where: {
+        worker_id: workerId,
+        status: { in: [ApplicationStatus.PENDING, ApplicationStatus.ACCEPTED] },
+      },
+    });
+    if (activeCount >= fees.maxConcurrentApplications) {
+      throw new ForbiddenException(
+        `Vous avez déjà ${activeCount} candidature(s) active(s). Maximum autorisé : ${fees.maxConcurrentApplications}.`,
+      );
+    }
+
     const application = await this.prisma.application.create({
       data: {
         job_offer_id: jobOfferId,
