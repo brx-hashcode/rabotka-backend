@@ -157,7 +157,7 @@ export class BotOrchestratorService {
 
     if (profile.status === AccountStatus.SUSPENDED) {
       const contact = await this.systemConfig.getContactInfo();
-      return [accountSuspendedBotMessage(contact)];
+      return [accountSuspendedBotMessage({ email: contact.email ?? '', phone: contact.phone ?? '', address: contact.address ?? '' })];
     }
 
     const normalizedInput = text.trim().toLowerCase();
@@ -1038,7 +1038,7 @@ export class BotOrchestratorService {
         return handleMenuCommand(profile);
       case 'help': {
         const contact = await this.systemConfig.getContactInfo();
-        return handleHelpCommand(commandId, contact);
+        return handleHelpCommand(commandId, { email: contact.email ?? '', phone: contact.phone ?? '', address: contact.address ?? '' });
       }
       case 'profile':
         return this.commands.profile(profile);
