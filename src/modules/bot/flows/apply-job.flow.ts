@@ -187,8 +187,8 @@ export async function runApplyJobFlow(
       reply: [
         formatPenaltyBlocked(
           unpaid.total,
-          contact.orangeMoneyNumber,
-          contact.airtelMoneyNumber,
+          contact.orangeMoneyNumber ?? '',
+          contact.airtelMoneyNumber ?? '',
         ),
       ],
       clearState: true,

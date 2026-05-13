@@ -236,7 +236,7 @@ export class ReminderProcessor {
   private async notifyAutoStartedOffer(offer: {
     id: string;
     title: string;
-    payment_flow: string;
+    payment_flow: string | null;
     employer_id: string;
     employer?: { phone?: string | null; first_name?: string | null } | null;
     applications: { id: string }[];
@@ -254,7 +254,7 @@ export class ReminderProcessor {
         `La mission est maintenant marquée comme démarrée.`,
       ].join('\n');
 
-      const statusCheckText = jobStatusCheckPromptMessage(offer.title, offer.payment_flow);
+      const statusCheckText = jobStatusCheckPromptMessage(offer.title, offer.payment_flow ?? 'DAILY');
 
       const sent = await this.whatsApp
         .sendTextMessage(phone, autoStartText, offer.employer_id)
@@ -273,7 +273,7 @@ export class ReminderProcessor {
         const stateValue = JSON.stringify({
           flowId: FLOW_IDS.JOB_STATUS_CHECK,
           step: 0,
-          payload: { jobOfferId: offer.id, jobTitle: offer.title, applicationId: firstApp.id, paymentFlow: offer.payment_flow, snoozeCount: 0 },
+          payload: { jobOfferId: offer.id, jobTitle: offer.title, applicationId: firstApp.id, paymentFlow: offer.payment_flow ?? 'DAILY', snoozeCount: 0 },
           updatedAt: new Date().toISOString(),
         });
         await this.redis
