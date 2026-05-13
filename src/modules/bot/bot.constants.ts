@@ -23,6 +23,7 @@ export const FLOW_IDS = {
   REPUBLISH_EXPIRED_JOB: 'republish_expired_job',
   RATE_ASSIGNMENT: 'rate_assignment',
   MY_OFFERS: 'my_offers',
+  JOB_STATUS_CHECK: 'job_status_check',
 } as const;
 
 export const WORKER_MENU_OPTIONS = {

@@ -429,19 +429,16 @@ export class PaymentRequestService {
     );
 
     this.emitAdminPaymentNotification(request, context);
-    await this.sendPaymentSuccessNotifications(request, context);
-    try {
-      await this.createAndSendInvoice(request, context);
-    } catch (err) {
+    const unlockResult = await this.handleContactUnlockPostPayment(request);
+    await this.handleRecommendationContactPostPayment(request, context);
+    await this.handlePenaltyPostPayment(request);
+    await this.sendPaymentSuccessNotifications(request, context, unlockResult);
+    this.createAndSendInvoice(request, context).catch((err) =>
       this.logger.error(
         `Invoice creation/sending failed for payment ${request.id}:`,
         err,
-      );
-      throw err;
-    }
-    await this.handleContactUnlockPostPayment(request);
-    await this.handleRecommendationContactPostPayment(request, context);
-    await this.handlePenaltyPostPayment(request);
+      ),
+    );
   }
 
   private async buildPaymentProcessingContext(
@@ -643,6 +640,7 @@ export class PaymentRequestService {
   private async sendPaymentSuccessNotifications(
     request: PaymentRequestWithProfile,
     context: PaymentProcessingContext,
+    unlockResult?: { nowUnlocked: boolean },
   ): Promise<void> {
     const profileName = this.fullName(request.profile);
 
@@ -659,7 +657,11 @@ export class PaymentRequestService {
       if (context.isRecommendationContact) {
         lines.push('', '📞 *Les coordonnées du travailleur vous seront envoyées dans le message suivant.*');
       } else if (context.isContactUnlock) {
-        lines.push('', '⏳ *Les coordonnées seront révélées dès que les deux parties auront payé.*');
+        if (unlockResult?.nowUnlocked) {
+          lines.push('', '✅ *Les deux parties ont payé — les coordonnées vous ont été envoyées.*');
+        } else {
+          lines.push('', '⏳ *En attente du paiement de l\'autre partie. Les coordonnées seront révélées dès que les deux parties auront payé.*');
+        }
       }
 
       const text = lines.join('\n');
@@ -768,8 +770,8 @@ export class PaymentRequestService {
 
   private async handleContactUnlockPostPayment(
     request: PaymentRequestWithProfile,
-  ): Promise<void> {
-    if (!request.contact_unlock_attempt_id) return;
+  ): Promise<{ nowUnlocked: boolean }> {
+    if (!request.contact_unlock_attempt_id) return { nowUnlocked: false };
 
     try {
       const result = await this.contactUnlockService.payUnlock(
@@ -777,9 +779,10 @@ export class PaymentRequestService {
         request.profile_id,
         false,
       );
-      if (result.status !== 'UNLOCKED' && result.newlyUnlocked.length === 0) {
-        return;
-      }
+      const nowUnlocked =
+        result.status === 'UNLOCKED' || result.newlyUnlocked.length > 0;
+
+      if (!nowUnlocked) return { nowUnlocked: false };
 
       const attemptIds =
         result.status === 'UNLOCKED'
@@ -795,11 +798,13 @@ export class PaymentRequestService {
             ),
           );
       }
+      return { nowUnlocked: true };
     } catch (err) {
-      this.logger.warn(
+      this.logger.error(
         `Contact unlock processing failed for attempt ${String(request.contact_unlock_attempt_id)}:`,
         err,
       );
+      return { nowUnlocked: false };
     }
   }
 

@@ -254,10 +254,14 @@ export class ContactUnlockService {
     if (!jobOffer) throw new NotFoundException('Offre introuvable');
 
     const fees = await this.systemConfig.getContactUnlockFees();
-    // Target: 2h before the job starts. If that's less than 2h away, fall back to now + 4h.
+    // Hard deadline: 2h before job starts (so both parties can exchange contacts in time).
+    // Soft window: expiryHours from SystemConfig (default 48h) from now.
+    // Whichever is sooner is used; minimum 2h from now if job is imminent.
     const twoHBeforeJob = new Date(jobOffer.scheduled_at.getTime() - 2 * 60 * 60 * 1000);
+    const configWindow = new Date(Date.now() + fees.expiryHours * 60 * 60 * 1000);
     const minExpiry = new Date(Date.now() + 2 * 60 * 60 * 1000);
-    const expiresAt = twoHBeforeJob > minExpiry ? twoHBeforeJob : new Date(Date.now() + 4 * 60 * 60 * 1000);
+    const preferredExpiry = twoHBeforeJob < configWindow ? twoHBeforeJob : configWindow;
+    const expiresAt = preferredExpiry > minExpiry ? preferredExpiry : minExpiry;
 
     const isMultiPerson = (jobOffer.quantity ?? 1) > 1;
     const employerAlreadyPaid = isMultiPerson && jobOffer.employer_unlock_paid;
@@ -880,5 +884,30 @@ export class ContactUnlockService {
     }
 
     return conversions;
+  }
+
+  /**
+   * Forces expiry of all pending unlock attempts for a specific job offer.
+   * Called when a job starts (scheduled_at reached) so WAITING_PAYMENT applications
+   * are released immediately rather than waiting for the hourly scheduler.
+   */
+  async expirePendingAttemptsForJob(
+    jobOfferId: string,
+  ): Promise<ExpiredConversionEvent[]> {
+    await this.prisma.contactUnlockAttempt.updateMany({
+      where: {
+        job_offer_id: jobOfferId,
+        status: {
+          in: [
+            ContactUnlockStatus.PENDING_BOTH,
+            ContactUnlockStatus.PENDING_EMPLOYER,
+            ContactUnlockStatus.PENDING_WORKER,
+          ],
+        },
+        expires_at: { gt: new Date() },
+      },
+      data: { expires_at: new Date() },
+    });
+    return this.processExpiredAttempts();
   }
 }

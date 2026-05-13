@@ -120,8 +120,8 @@ export class SystemConfigService implements OnModuleInit {
   }
 
   private async mgetBatch(
-    entries: { key: string; fallback: string }[],
-  ): Promise<string[]> {
+    entries: { key: string; fallback?: string }[],
+  ): Promise<(string | null)[]> {
     const cacheKeys = entries.map((e) => `${CACHE_PREFIX}${e.key}`);
     const cached = await this.redis.mget(...cacheKeys);
 
@@ -139,14 +139,16 @@ export class SystemConfigService implements OnModuleInit {
       const rowMap = new Map(rows.map((r) => [r.key, r.value]));
       const pipeline = this.redis.pipeline();
       for (const i of missIndices) {
-        const value = rowMap.get(entries[i].key) ?? entries[i].fallback;
+        const value = rowMap.get(entries[i].key) ?? entries[i].fallback ?? null;
         cached[i] = value;
-        pipeline.set(cacheKeys[i], value, 'EX', CACHE_TTL_SECONDS);
+        if (value !== null) {
+          pipeline.set(cacheKeys[i], value, 'EX', CACHE_TTL_SECONDS);
+        }
       }
       await pipeline.exec();
     }
 
-    return cached.map((v, i) => v ?? entries[i].fallback);
+    return cached.map((v, i) => v ?? entries[i].fallback ?? null);
   }
 
   async set(key: string, value: string, adminId?: string): Promise<void> {
@@ -224,16 +226,14 @@ export class SystemConfigService implements OnModuleInit {
       scoreDed,
       threshold,
       scoreMin,
-      empCancel,
-      empGhost,
+      empLateCancelDed,
       billingBlock,
     ] = await this.mgetBatch([
       { key: 'fees.late_cancellation_penalty_fcfa', fallback: '5000' },
       { key: 'fees.late_cancellation_score_deduction', fallback: '5' },
       { key: 'fees.cancellation_threshold_hours', fallback: '4' },
       { key: 'fees.reliability_score_min', fallback: '50' },
-      { key: 'fees.employer_cancel_score_deduction', fallback: '5' },
-      { key: 'fees.employer_ghost_score_deduction', fallback: '10' },
+      { key: 'fees.employer_late_cancel_score_deduction', fallback: '5' },
       { key: 'fees.billing_block_threshold', fallback: '2' },
     ]);
     return {
@@ -241,8 +241,7 @@ export class SystemConfigService implements OnModuleInit {
       lateCancellationScoreDeduction: Number(scoreDed),
       cancellationThresholdHours: Number(threshold),
       reliabilityScoreMin: Number(scoreMin),
-      employerCancelScoreDeduction: Number(empCancel),
-      employerGhostScoreDeduction: Number(empGhost),
+      employerLateCancelScoreDeduction: Number(empLateCancelDed),
       billingBlockThreshold: Number(billingBlock),
     };
   }
@@ -251,8 +250,13 @@ export class SystemConfigService implements OnModuleInit {
     const [employerFee, workerFee, expiryHours] = await this.mgetBatch([
       { key: 'fees.contact_unlock_fee_employer', fallback: '500' },
       { key: 'fees.contact_unlock_fee_worker', fallback: '100' },
-      { key: 'fees.contact_unlock_expiry_hours', fallback: '48' },
+      { key: 'fees.contact_unlock_expiry_hours' },
     ]);
+    if (!expiryHours) {
+      throw new Error(
+        'fees.contact_unlock_expiry_hours is not configured in SystemConfig',
+      );
+    }
     return {
       employerFeeFcfa: Number(employerFee),
       workerFeeFcfa: Number(workerFee),

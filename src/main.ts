@@ -72,26 +72,24 @@ async function bootstrap() {
   app.use(csrfVisitorMiddleware);
 
   const csrfUtilities = app.get(CSRF_UTILITIES);
-  app.use(csrfUtilities.doubleCsrfProtection);
 
-  // Ensure CSRF validation failures return JSON 403 (not Express HTML)
+  // Wrap doubleCsrfProtection so CSRF failures always return JSON 403 directly,
+  // bypassing Express/NestJS error handler chains that may produce HTML.
   app.use(
     (
-      err: unknown,
-      _req: import('express').Request,
+      req: import('express').Request,
       res: import('express').Response,
       next: import('express').NextFunction,
     ) => {
-      const isCsrfError =
-        err instanceof Error &&
-        (err.message.toLowerCase().includes('csrf') ||
-          err.message.toLowerCase().includes('invalid') ||
-          (err as { code?: string }).code === 'EBADCSRFTOKEN');
-      if (isCsrfError) {
-        res.status(403).json({ statusCode: 403, message: 'Invalid CSRF token' });
-        return;
-      }
-      next(err);
+      csrfUtilities.doubleCsrfProtection(req, res, (err?: unknown) => {
+        if (err) {
+          res
+            .status(403)
+            .json({ statusCode: 403, message: 'Invalid CSRF token' });
+          return;
+        }
+        next();
+      });
     },
   );
 
