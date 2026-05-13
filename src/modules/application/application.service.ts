@@ -958,21 +958,27 @@ export class ApplicationService {
           cancelled_at: now,
         },
       });
-      // Deduct employer reliability score
+      // Deduct employer reliability score only for late cancellations (within threshold window)
       const fees = await this.systemConfigService.getFees();
-      const employer = await tx.profile.findUnique({
-        where: { id: employerId },
-        select: { reliability_score: true },
-      });
-      const currentScore = employer?.reliability_score ?? 100;
-      const newScore = Math.max(
-        fees.reliabilityScoreMin,
-        currentScore - fees.employerCancelScoreDeduction,
-      );
-      await tx.profile.update({
-        where: { id: employerId },
-        data: { reliability_score: newScore },
-      });
+      const hoursUntilJob =
+        (application.job_offer.scheduled_at.getTime() - now.getTime()) /
+        (60 * 60 * 1000);
+      const isLateCancel = hoursUntilJob < fees.cancellationThresholdHours;
+      if (isLateCancel) {
+        const employer = await tx.profile.findUnique({
+          where: { id: employerId },
+          select: { reliability_score: true },
+        });
+        const currentScore = employer?.reliability_score ?? 100;
+        const newScore = Math.max(
+          fees.reliabilityScoreMin,
+          currentScore - fees.employerLateCancelScoreDeduction,
+        );
+        await tx.profile.update({
+          where: { id: employerId },
+          data: { reliability_score: newScore },
+        });
+      }
     });
 
     const updated = await this.findById(applicationId);

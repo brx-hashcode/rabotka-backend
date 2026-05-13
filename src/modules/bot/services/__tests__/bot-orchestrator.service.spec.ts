@@ -17,6 +17,7 @@ import { MatchingService } from '../../../matching/matching.service';
 import { InterestSignalService } from '../../../interest-graph/interest-signal.service';
 import { InterestRecommendationService } from '../../../interest-graph/interest-recommendation.service';
 import { InvoiceService } from '../../../invoice/invoice.service';
+import { QueueService } from '../../../../common/services/queue/queue.service';
 
 const PROFILE_ID = 'profile-uuid-1';
 const PHONE = '+242000000';
@@ -144,6 +145,10 @@ describe('BotOrchestratorService', () => {
         {
           provide: InvoiceService,
           useValue: { create: jest.fn().mockResolvedValue({ id: 'inv-1' }) },
+        },
+        {
+          provide: QueueService,
+          useValue: { addJob: jest.fn().mockResolvedValue('job-1') },
         },
       ],
     }).compile();
