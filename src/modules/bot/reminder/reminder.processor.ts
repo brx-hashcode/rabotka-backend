@@ -492,7 +492,8 @@ export class ReminderProcessor {
       },
     });
 
-    if (!app?.worker?.phone || app.status !== ApplicationStatus.ACCEPTED)
+    const alreadyStarted = app?.status === ApplicationStatus.STARTED;
+    if (!app?.worker?.phone || (app.status !== ApplicationStatus.ACCEPTED && !alreadyStarted))
       return;
 
     const previousOfferStatus = app.job_offer.status;
@@ -503,21 +504,23 @@ export class ReminderProcessor {
       JobOfferStatus.EXPIRED,
     ];
     const shouldMoveOfferToInProgress =
-      movableOfferStatuses.includes(previousOfferStatus);
+      !alreadyStarted && movableOfferStatuses.includes(previousOfferStatus);
 
-    // Mark application started and move offer to IN_PROGRESS together.
-    await this.prisma.$transaction(async (tx) => {
-      await tx.application.update({
-        where: { id: applicationId },
-        data: { status: ApplicationStatus.STARTED },
-      });
-      if (shouldMoveOfferToInProgress) {
-        await tx.jobOffer.update({
-          where: { id: app.job_offer_id },
-          data: { status: JobOfferStatus.IN_PROGRESS },
+    // Only transition status when not already done by autoStartOffersWithWorkers.
+    if (!alreadyStarted) {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.application.update({
+          where: { id: applicationId },
+          data: { status: ApplicationStatus.STARTED },
         });
-      }
-    });
+        if (shouldMoveOfferToInProgress) {
+          await tx.jobOffer.update({
+            where: { id: app.job_offer_id },
+            data: { status: JobOfferStatus.IN_PROGRESS },
+          });
+        }
+      });
+    }
 
     try {
       const text = formatReminderStart({
@@ -530,23 +533,25 @@ export class ReminderProcessor {
 
       await this.whatsApp.sendTextMessage(app.worker.phone, text);
       this.logger.log(
-        `Reminder start sent and application ${applicationId} marked as STARTED`,
+        `Reminder start sent for application ${applicationId} (alreadyStarted=${alreadyStarted})`,
       );
     } catch (err) {
-      // Roll back status if notification fails — job will retry and re-acquire the lock.
+      // Roll back status and release lock so the job retries — only when we made the transition.
       await this.redis.del(key);
-      await this.prisma.$transaction(async (tx) => {
-        await tx.application.update({
-          where: { id: applicationId },
-          data: { status: ApplicationStatus.ACCEPTED },
-        });
-        if (shouldMoveOfferToInProgress) {
-          await tx.jobOffer.update({
-            where: { id: app.job_offer_id },
-            data: { status: previousOfferStatus },
+      if (!alreadyStarted) {
+        await this.prisma.$transaction(async (tx) => {
+          await tx.application.update({
+            where: { id: applicationId },
+            data: { status: ApplicationStatus.ACCEPTED },
           });
-        }
-      });
+          if (shouldMoveOfferToInProgress) {
+            await tx.jobOffer.update({
+              where: { id: app.job_offer_id },
+              data: { status: previousOfferStatus },
+            });
+          }
+        });
+      }
       throw err;
     }
   }
