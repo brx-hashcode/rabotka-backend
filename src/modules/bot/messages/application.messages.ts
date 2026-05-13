@@ -331,8 +331,6 @@ export function formatApplicationSentSuccess(offerTitle: string): string {
 export function formatNewApplicationToEmployer(params: {
   offerTitle: string;
   workerName: string;
-  workerPhone: string;
-  workerEmail: string;
   workerDescription: string;
   reliabilityScore: number | null;
   completedMissions: number;
@@ -349,15 +347,17 @@ export function formatNewApplicationToEmployer(params: {
     '*CANDIDAT*:',
     SEP,
     `*Nom*: ${params.workerName}`,
-    `*Téléphone*: ${params.workerPhone}`,
-    `*Email*: ${params.workerEmail}`,
-    `*Description*: ${params.workerDescription.slice(0, 150)}${params.workerDescription.length > 150 ? '...' : ''}`,
-    SEP,
     `*Score de fiabilité*: ${score}/100`,
     `*Missions complétées*: ${params.completedMissions}`,
+    ...(params.workerDescription
+      ? [`*Description*: ${params.workerDescription.slice(0, 150)}${params.workerDescription.length > 150 ? '...' : ''}`]
+      : []),
+    SEP,
     '',
     `*Rendez-vous prévu*: ${formatDate(params.scheduledAt)}`,
     `*Adresse*: ${params.address.length > 80 ? params.address.slice(0, 80) + '...' : params.address}`,
+    '',
+    '📞 *Les coordonnées du candidat seront révélées après le paiement du déverrouillage.*',
     '',
     '*Actions*:',
     '1- Accepter le candidat',
