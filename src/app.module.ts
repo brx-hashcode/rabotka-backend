@@ -1,5 +1,4 @@
 import {
-  ArcjetGuard,
   ArcjetModule,
   detectBot,
   fixedWindow,
@@ -27,6 +26,8 @@ import { ProfileModule } from './modules/profile/profile.module';
 import { UserModule } from './modules/user/user.module';
 import { ConversationModule } from './modules/conversation/conversation.module';
 import { JobOfferModule } from './modules/job-offer/job-offer.module';
+import { JobCategoryModule } from './modules/job-category/job-category.module';
+import { MatchingModule } from './modules/matching/matching.module';
 import { ApplicationModule } from './modules/application/application.module';
 import { PenaltyModule } from './modules/penalty/penalty.module';
 import { PaymentRequestModule } from './modules/payment-request/payment-request.module';
@@ -40,11 +41,22 @@ import { PaymentsModule } from './modules/payments/payment.module';
 import { KycModule } from './modules/kyc/kyc.module';
 import { SystemConfigModule } from './modules/system-config/system-config.module';
 import { QdrantModule } from './modules/qdrant/qdrant.module';
+import { ClaimModule } from './modules/claim/claim.module';
+import { DocumentModule } from './modules/document/document.module';
+import { ContractModule } from './modules/contract/contract.module';
+import { InvoiceModule } from './modules/invoice/invoice.module';
+import { EventModule } from './modules/event/event.module';
+import { EventEmitterModule } from '@nestjs/event-emitter';
+import { WsNotificationsModule } from './modules/ws-notifications/ws-notifications.module';
+import { ContactUnlockModule } from './modules/contact-unlock/contact-unlock.module';
 import { StorageModule } from './common/services/storage/storage.module';
+import { PaymentGatewayModule } from './common/services/payment/payment-gateway.module';
+import { AdvertisementModule } from './modules/advertisement/advertisement.module';
 import { ImageWatermarkModule } from './common/services/image-watermark/image-watermark.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
+import { HttpOnlyArcjetGuard } from './common/guards/http-only-arcjet.guard';
 
 @Module({
   imports: [
@@ -70,22 +82,25 @@ import { HttpExceptionFilter } from './common/filters/http-exception.filter';
       isGlobal: true,
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
-        key: config.get<string>('ARCJET_KEY') ?? '',
-        log: createArcjetLoggerAdapter(),
-        rules: [
-          shield({ mode: 'LIVE' }),
-          detectBot({
-            mode: 'LIVE',
-            allow: ['CATEGORY:SEARCH_ENGINE'],
-          }),
-          fixedWindow({
-            mode: 'LIVE',
-            window: '60s',
-            max: 100,
-          }),
-        ],
-      }),
+      useFactory: (config: ConfigService) => {
+        const isDev = config.get<string>('NODE_ENV') !== 'production';
+        return {
+          key: config.get<string>('ARCJET_KEY') ?? '',
+          log: createArcjetLoggerAdapter(),
+          rules: [
+            shield({ mode: isDev ? 'DRY_RUN' : 'LIVE' }),
+            detectBot({
+              mode: 'DRY_RUN',
+              allow: ['CATEGORY:SEARCH_ENGINE'],
+            }),
+            fixedWindow({
+              mode: isDev ? 'DRY_RUN' : 'LIVE',
+              window: '60s',
+              max: 100,
+            }),
+          ],
+        };
+      },
     }),
     I18nModule.forRoot({
       fallbackLanguage: 'fr',
@@ -121,24 +136,36 @@ import { HttpExceptionFilter } from './common/filters/http-exception.filter';
     UserModule,
     ConversationModule,
     JobOfferModule,
+    JobCategoryModule,
+    MatchingModule,
     ApplicationModule,
     PenaltyModule,
     PaymentRequestModule,
     SystemConfigModule,
     StorageModule,
+    PaymentGatewayModule,
     ImageWatermarkModule,
     FileModule,
     LogModule,
     WalletModule,
+    ClaimModule,
+    DocumentModule,
+    ContractModule,
+    InvoiceModule,
+    EventModule,
     DashboardModule,
     PaymentsModule,
     KycModule,
     QdrantModule,
+    EventEmitterModule.forRoot({ wildcard: true }),
+    ContactUnlockModule,
+    WsNotificationsModule,
+    AdvertisementModule,
   ],
   controllers: [AppController],
   providers: [
     AppService,
-    { provide: APP_GUARD, useClass: ArcjetGuard },
+    { provide: APP_GUARD, useClass: HttpOnlyArcjetGuard },
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_FILTER, useClass: HttpExceptionFilter },
   ],

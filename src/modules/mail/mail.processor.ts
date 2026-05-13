@@ -94,6 +94,19 @@ export class MailProcessor implements OnModuleInit {
       subject,
       ...(text !== undefined && { text }),
       ...(html !== undefined && { html }),
+      ...(data.attachments?.length && {
+        attachments: data.attachments.map((a) => ({
+          ...a,
+          // BullMQ serializes Buffer → { type: 'Buffer', data: [...] } via JSON.
+          // Restore it so nodemailer receives an actual Buffer instance.
+          content:
+            !Buffer.isBuffer(a.content) &&
+            typeof a.content === 'object' &&
+            (a.content as any).type === 'Buffer'
+              ? Buffer.from((a.content as any).data)
+              : a.content,
+        })),
+      }),
     };
 
     if (fromFormatted !== undefined) {

@@ -1,12 +1,13 @@
 import type { BotProfile, BotState } from '../types/bot-state.types';
 import { FLOW_IDS, CMD_MENU } from '../bot.constants';
 import { menuMessage } from '../messages/menu.messages';
-import type { PaymentService } from '../../payments/payment.service';
 import { PrismaService } from 'src/common/services/prisma/prisma.service';
+import type { IPaymentUrlService } from '../types/payment-url.types';
+import { PaymentRequestType } from '@prisma/client';
 
 export type ResolvePenaltiesContext = {
   prisma: PrismaService;
-  paymentService: PaymentService;
+  paymentService: IPaymentUrlService;
 };
 
 type FlowResult = {
@@ -24,7 +25,6 @@ export async function runResolvePenaltiesFlow(
   const trimmed = input.trim();
   const normalized = trimmed.toLowerCase();
 
-  // Allow menu exit only after acknowledging (not on first prompt)
   if (
     state.step > 1 &&
     (CMD_MENU.some((c) => normalized === c || normalized.startsWith(c + ' ')) ||
@@ -38,10 +38,9 @@ export async function runResolvePenaltiesFlow(
 
   const payload = state.payload ?? {};
 
-  // Step 1 — summary: show unpaid penalties and options
   if (state.step === 1 || !trimmed) {
     const penalties = await ctx.prisma.penalty.findMany({
-      where: { worker_id: profile.id, paid_at: null },
+      where: { profile_id: profile.id, paid_at: null },
       select: { id: true, amount: true, reason: true, applied_at: true },
       orderBy: { applied_at: 'desc' },
     });
@@ -50,7 +49,6 @@ export async function runResolvePenaltiesFlow(
     const total = penalties.reduce((sum, p) => sum + Number(p.amount), 0);
 
     if (count === 0) {
-      // No penalties — account should not be suspended, but handle gracefully
       return {
         reply: [
           `✅ *Aucune pénalité impayée.*\n\nVotre situation est régularisée. Tapez *MENU* pour continuer.`,
@@ -78,8 +76,8 @@ export async function runResolvePenaltiesFlow(
           ``,
           `Pour réactiver votre compte, vous devez régler vos pénalités.`,
           ``,
-          `*1.* 💳 Régler mes pénalités`,
-          `*2.* ↩️ Annuler`,
+          `*1.* Obtenir un lien de paiement`,
+          `*2.* Annuler`,
         ].join('\n'),
       ],
       nextState: {
@@ -91,25 +89,31 @@ export async function runResolvePenaltiesFlow(
     };
   }
 
-  // Step 2 — awaiting choice
   if (trimmed === '1') {
     const count = payload.count as number;
     const total = payload.total as number;
-    const paymentLink = await ctx.paymentService.generatePenaltyPaymentLink(
+
+    const paymentUrl = await ctx.paymentService.createPaymentUrl(
       profile.id,
       total,
+      `Règlement de pénalités (${count} pénalité(s))`,
+      PaymentRequestType.PENALTY_RESOLUTION,
     );
 
     return {
       reply: [
         [
-          `*Lien de paiement généré*`,
+          `💳 *Lien de paiement*`,
           ``,
-          `Pour régler vos *${count} pénalité(s)* (${total.toLocaleString('fr-FR')} FCFA), cliquez sur le lien suivant :`,
+          `Montant à régler : *${total.toLocaleString('fr-FR')} FCFA* (${count} pénalité(s))`,
           ``,
-          paymentLink,
+          `Cliquez sur le lien ci-dessous pour effectuer votre paiement en toute sécurité :`,
           ``,
-          `Une fois le paiement confirmé, votre compte sera réactivé automatiquement.`,
+          paymentUrl,
+          ``,
+          `Après le paiement, votre compte sera réactivé automatiquement.`,
+          ``,
+          `Tapez *MENU* pour revenir au menu principal.`,
         ].join('\n'),
       ],
       clearState: true,
@@ -119,14 +123,16 @@ export async function runResolvePenaltiesFlow(
   if (trimmed === '2') {
     return {
       reply: [
-        `⚠️ *Compte toujours suspendu.*\n\nVotre compte restera suspendu jusqu'au règlement de vos pénalités.\nTapez *1* à tout moment pour générer le lien de paiement.`,
+        `⚠️ *Compte toujours suspendu.*\n\nVotre compte restera suspendu jusqu'au règlement de vos pénalités.\nTapez *1* à tout moment pour voir les instructions de paiement.`,
       ],
       clearState: true,
     };
   }
 
   return {
-    reply: ['Tapez *1* pour régler vos pénalités ou *2* pour annuler.'],
+    reply: [
+      'Tapez *1* pour voir les instructions de paiement ou *2* pour annuler.',
+    ],
     nextState: state,
   };
 }

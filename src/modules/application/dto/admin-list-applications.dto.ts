@@ -65,4 +65,14 @@ export class AdminListApplicationsDto {
   @Transform(({ value }) => toArray(value))
   @IsArray()
   penalty_applied?: string[];
+
+  @ApiPropertyOptional({ description: 'Filter by worker profile ID' })
+  @IsOptional()
+  @IsString()
+  worker_id?: string;
+
+  @ApiPropertyOptional({ description: 'Filter by employer profile ID' })
+  @IsOptional()
+  @IsString()
+  employer_id?: string;
 }

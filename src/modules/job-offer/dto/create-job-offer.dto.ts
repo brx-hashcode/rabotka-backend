@@ -34,15 +34,20 @@ export class CreateJobOfferDto {
   @IsString()
   scheduled_at!: string;
 
-  @ApiProperty({ example: 15000, description: 'Amount in FCFA' })
+  @ApiPropertyOptional({
+    example: 15000,
+    description: 'Amount in FCFA (0 or omitted = not specified)',
+  })
+  @IsOptional()
   @IsNumber()
-  @Min(1000, { message: 'Le montant minimum est 1 000 FCFA' })
+  @Min(0, { message: 'Le montant minimum est 0 FCFA' })
   @Max(1_000_000, { message: 'Le montant maximum est 1 000 000 FCFA' })
-  amount!: number;
+  amount?: number;
 
-  @ApiProperty({ enum: PaymentFlow })
+  @ApiPropertyOptional({ enum: PaymentFlow })
+  @IsOptional()
   @IsEnum(PaymentFlow)
-  payment_flow!: PaymentFlow;
+  payment_flow?: PaymentFlow | null;
 
   @ApiProperty({
     example: '123 Avenue de la Paix, Poto-Poto, Brazzaville',
@@ -56,6 +61,14 @@ export class CreateJobOfferDto {
   @IsString()
   @MaxLength(500)
   note?: string;
+
+  @ApiPropertyOptional({
+    example: 'cuid-of-job-category',
+    description: 'Optional job category',
+  })
+  @IsOptional()
+  @IsString()
+  category_id?: string;
 
   @ApiProperty({ example: 2, description: 'Number of persons needed' })
   @IsInt()

@@ -16,11 +16,10 @@ import { CsrfController } from './csrf.controller';
     {
       provide: CSRF_UTILITIES,
       useFactory: (configService: ConfigService) => {
-        const environment = configService.get<string>(
-          'NODE_ENV',
-          'development',
-        );
-        const isProduction = environment === 'production';
+        const isProduction =
+          configService.get<string>('NODE_ENV') === 'production';
+        const secureCookies =
+          configService.get<string>('SECURE_COOKIES') === 'true';
 
         return doubleCsrf({
           getSecret: () => configService.get<string>('CSRF_SECRET') ?? '',
@@ -31,25 +30,24 @@ import { CsrfController } from './csrf.controller';
               'anonymous'
             );
           },
-          cookieName: isProduction
-            ? CSRF_TOKEN_COOKIE_PROD
-            : CSRF_TOKEN_COOKIE_DEV,
+          // Use __Host- prefix only when secure cookies are enabled (HTTPS).
+          // The __Host- prefix requires Secure flag + HTTPS; using it over HTTP
+          // causes browsers to silently drop the cookie.
+          cookieName:
+            isProduction && secureCookies
+              ? CSRF_TOKEN_COOKIE_PROD
+              : CSRF_TOKEN_COOKIE_DEV,
           cookieOptions: {
-            sameSite: 'strict',
+            sameSite: 'lax',
             path: '/',
-            secure: isProduction,
+            secure: secureCookies,
             httpOnly: true,
           },
           ignoredMethods: ['GET', 'HEAD', 'OPTIONS'],
-          //NOTE: Skip CSRF for external webhooks (e.g. Twilio WhatsApp) that cannot send a token
           skipCsrfProtection: (req) => {
-            const path =
-              (req.route?.path as string | undefined) ?? req.path ?? req.url;
-            const full = req.originalUrl ?? req.url ?? path;
-            return (
-              path === '/api/v1/whatsapp/incoming' ||
-              full.startsWith('/api/v1/whatsapp/incoming')
-            );
+            const url: string =
+              req.originalUrl ?? req.url ?? req.path ?? '';
+            return url.includes('/whatsapp/incoming');
           },
         });
       },

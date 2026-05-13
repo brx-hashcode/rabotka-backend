@@ -70,8 +70,12 @@ export class HttpExceptionFilter implements ExceptionFilter {
     if (typeof exceptionResponse === 'object' && exceptionResponse !== null) {
       const responseObj = exceptionResponse as Record<string, unknown>;
       const message =
-        responseObj['message'] || exception.message || 'Une erreur est survenue';
-      return Array.isArray(message) ? (message[0] as string) : (message as string);
+        responseObj['message'] ||
+        exception.message ||
+        'Une erreur est survenue';
+      return Array.isArray(message)
+        ? (message[0] as string)
+        : (message as string);
     }
 
     return exception.message;

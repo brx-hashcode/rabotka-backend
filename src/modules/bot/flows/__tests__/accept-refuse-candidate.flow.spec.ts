@@ -17,6 +17,7 @@ const employerProfile: BotProfile = {
   email: 'bob@example.com',
   profile_type: 'EMPLOYER',
   reliability_score: 100,
+  status: 'ACTIVE',
 };
 
 const workerProfile: BotProfile = {
@@ -24,8 +25,11 @@ const workerProfile: BotProfile = {
   profile_type: 'WORKER',
 };
 
-function makeCtx(overrides: Partial<AcceptRefuseContext> = {}): AcceptRefuseContext {
+function makeCtx(
+  overrides: Partial<AcceptRefuseContext> = {},
+): AcceptRefuseContext {
   return {
+    prisma: {} as AcceptRefuseContext['prisma'],
     applicationService: {
       accept: jest.fn().mockResolvedValue({}),
       reject: jest.fn().mockResolvedValue({}),
@@ -34,11 +38,20 @@ function makeCtx(overrides: Partial<AcceptRefuseContext> = {}): AcceptRefuseCont
       sendApplicationAcceptedToWorker: jest.fn().mockResolvedValue(undefined),
       sendApplicationRejectedToWorker: jest.fn().mockResolvedValue(undefined),
     } as unknown as AcceptRefuseContext['notificationService'],
+    contactUnlockService: {
+      getByApplicationId: jest.fn().mockResolvedValue(null),
+    } as unknown as AcceptRefuseContext['contactUnlockService'],
+    walletService: {} as AcceptRefuseContext['walletService'],
+    systemConfigService: {} as AcceptRefuseContext['systemConfigService'],
     ...overrides,
   };
 }
 
-function makeState(applicationId: string, step = 1, extraPayload: Record<string, unknown> = {}): BotState {
+function makeState(
+  applicationId: string,
+  step = 1,
+  extraPayload: Record<string, unknown> = {},
+): BotState {
   return {
     flowId: FLOW_IDS.ACCEPT_REFUSE_CANDIDATE,
     step,
@@ -57,7 +70,12 @@ describe('runAcceptRefuseCandidateFlow()', () => {
         payload: {},
         updatedAt: new Date().toISOString(),
       };
-      const result = await runAcceptRefuseCandidateFlow(state, '', employerProfile, ctx);
+      const result = await runAcceptRefuseCandidateFlow(
+        state,
+        '',
+        employerProfile,
+        ctx,
+      );
       expect(result.clearState).toBe(true);
       expect(result.reply[0]).toContain('CANDIDATURE NON TROUVÉE');
     });
@@ -65,7 +83,12 @@ describe('runAcceptRefuseCandidateFlow()', () => {
     it('blocks worker from accepting/refusing', async () => {
       const ctx = makeCtx();
       const state = makeState(APP_ID);
-      const result = await runAcceptRefuseCandidateFlow(state, '', workerProfile, ctx);
+      const result = await runAcceptRefuseCandidateFlow(
+        state,
+        '',
+        workerProfile,
+        ctx,
+      );
       expect(result.clearState).toBe(true);
       expect(result.reply[0]).toContain('EMPLOYEURS');
     });
@@ -75,7 +98,12 @@ describe('runAcceptRefuseCandidateFlow()', () => {
     it('shows action menu on empty input', async () => {
       const ctx = makeCtx();
       const state = makeState(APP_ID, 1);
-      const result = await runAcceptRefuseCandidateFlow(state, '', employerProfile, ctx);
+      const result = await runAcceptRefuseCandidateFlow(
+        state,
+        '',
+        employerProfile,
+        ctx,
+      );
       expect(result.nextState).toBeDefined();
       expect(result.reply[0]).toContain('Accepter');
     });
@@ -83,41 +111,73 @@ describe('runAcceptRefuseCandidateFlow()', () => {
     it('accepts on "1" input', async () => {
       const ctx = makeCtx();
       const state = makeState(APP_ID, 1);
-      const result = await runAcceptRefuseCandidateFlow(state, '1', employerProfile, ctx);
+      const result = await runAcceptRefuseCandidateFlow(
+        state,
+        '1',
+        employerProfile,
+        ctx,
+      );
       expect(result.clearState).toBe(true);
-      expect(ctx.applicationService.accept).toHaveBeenCalledWith(APP_ID, EMPLOYER_ID);
-      expect(ctx.notificationService.sendApplicationAcceptedToWorker).toHaveBeenCalledWith(APP_ID);
+      expect(ctx.applicationService.accept).toHaveBeenCalledWith(
+        APP_ID,
+        EMPLOYER_ID,
+      );
+      expect(
+        ctx.notificationService.sendApplicationAcceptedToWorker,
+      ).toHaveBeenCalledWith(APP_ID);
     });
 
     it('accepts on "accepter" input', async () => {
       const ctx = makeCtx();
       const state = makeState(APP_ID, 1);
-      const result = await runAcceptRefuseCandidateFlow(state, 'Accepter', employerProfile, ctx);
+      const result = await runAcceptRefuseCandidateFlow(
+        state,
+        'Accepter',
+        employerProfile,
+        ctx,
+      );
       expect(result.clearState).toBe(true);
     });
 
     it('moves to step 2 on "2" (refuse)', async () => {
       const ctx = makeCtx();
       const state = makeState(APP_ID, 1);
-      const result = await runAcceptRefuseCandidateFlow(state, '2', employerProfile, ctx);
+      const result = await runAcceptRefuseCandidateFlow(
+        state,
+        '2',
+        employerProfile,
+        ctx,
+      );
       expect(result.nextState?.step).toBe(2);
     });
 
     it('asks again for invalid input', async () => {
       const ctx = makeCtx();
       const state = makeState(APP_ID, 1);
-      const result = await runAcceptRefuseCandidateFlow(state, 'xyz', employerProfile, ctx);
+      const result = await runAcceptRefuseCandidateFlow(
+        state,
+        'xyz',
+        employerProfile,
+        ctx,
+      );
       expect(result.nextState?.step).toBe(1);
     });
 
     it('returns error message when accept throws', async () => {
       const ctx = makeCtx({
         applicationService: {
-          accept: jest.fn().mockRejectedValue(new Error('Offer already filled')),
+          accept: jest
+            .fn()
+            .mockRejectedValue(new Error('Offer already filled')),
         } as unknown as AcceptRefuseContext['applicationService'],
       });
       const state = makeState(APP_ID, 1);
-      const result = await runAcceptRefuseCandidateFlow(state, '1', employerProfile, ctx);
+      const result = await runAcceptRefuseCandidateFlow(
+        state,
+        '1',
+        employerProfile,
+        ctx,
+      );
       expect(result.reply[0]).toContain('Offer already filled');
     });
   });
@@ -126,7 +186,12 @@ describe('runAcceptRefuseCandidateFlow()', () => {
     it('moves to step 3 with reason', async () => {
       const ctx = makeCtx();
       const state = makeState(APP_ID, 2);
-      const result = await runAcceptRefuseCandidateFlow(state, 'Profil incomplet', employerProfile, ctx);
+      const result = await runAcceptRefuseCandidateFlow(
+        state,
+        'Profil incomplet',
+        employerProfile,
+        ctx,
+      );
       expect(result.nextState?.step).toBe(3);
       expect(result.nextState?.payload.refusalReason).toBe('Profil incomplet');
     });
@@ -134,7 +199,12 @@ describe('runAcceptRefuseCandidateFlow()', () => {
     it('moves to step 3 with null reason on "aucune"', async () => {
       const ctx = makeCtx();
       const state = makeState(APP_ID, 2);
-      const result = await runAcceptRefuseCandidateFlow(state, 'aucune', employerProfile, ctx);
+      const result = await runAcceptRefuseCandidateFlow(
+        state,
+        'aucune',
+        employerProfile,
+        ctx,
+      );
       expect(result.nextState?.step).toBe(3);
       expect(result.nextState?.payload.refusalReason).toBe('');
     });
@@ -144,23 +214,43 @@ describe('runAcceptRefuseCandidateFlow()', () => {
     it('rejects on "1" input', async () => {
       const ctx = makeCtx();
       const state = makeState(APP_ID, 3, { refusalReason: 'Not qualified' });
-      const result = await runAcceptRefuseCandidateFlow(state, '1', employerProfile, ctx);
+      const result = await runAcceptRefuseCandidateFlow(
+        state,
+        '1',
+        employerProfile,
+        ctx,
+      );
       expect(result.clearState).toBe(true);
-      expect(ctx.applicationService.reject).toHaveBeenCalledWith(APP_ID, EMPLOYER_ID, 'Not qualified');
-      expect(ctx.notificationService.sendApplicationRejectedToWorker).toHaveBeenCalledWith(APP_ID);
+      expect(ctx.applicationService.reject).toHaveBeenCalledWith(
+        APP_ID,
+        EMPLOYER_ID,
+        'Not qualified',
+      );
+      expect(
+        ctx.notificationService.sendApplicationRejectedToWorker,
+      ).toHaveBeenCalledWith(APP_ID);
     });
 
     it('rejects with undefined reason when refusalReason is empty', async () => {
       const ctx = makeCtx();
       const state = makeState(APP_ID, 3, { refusalReason: '' });
       await runAcceptRefuseCandidateFlow(state, '1', employerProfile, ctx);
-      expect(ctx.applicationService.reject).toHaveBeenCalledWith(APP_ID, EMPLOYER_ID, undefined);
+      expect(ctx.applicationService.reject).toHaveBeenCalledWith(
+        APP_ID,
+        EMPLOYER_ID,
+        undefined,
+      );
     });
 
     it('cancels refusal on "2" input', async () => {
       const ctx = makeCtx();
       const state = makeState(APP_ID, 3, { refusalReason: '' });
-      const result = await runAcceptRefuseCandidateFlow(state, '2', employerProfile, ctx);
+      const result = await runAcceptRefuseCandidateFlow(
+        state,
+        '2',
+        employerProfile,
+        ctx,
+      );
       expect(result.clearState).toBe(true);
       expect(result.reply[0]).toContain('reste en attente');
     });
@@ -168,7 +258,12 @@ describe('runAcceptRefuseCandidateFlow()', () => {
     it('asks again for invalid input', async () => {
       const ctx = makeCtx();
       const state = makeState(APP_ID, 3, { refusalReason: '' });
-      const result = await runAcceptRefuseCandidateFlow(state, 'maybe', employerProfile, ctx);
+      const result = await runAcceptRefuseCandidateFlow(
+        state,
+        'maybe',
+        employerProfile,
+        ctx,
+      );
       expect(result.nextState).toBeDefined();
       expect(result.clearState).toBeUndefined();
     });
@@ -180,7 +275,12 @@ describe('runAcceptRefuseCandidateFlow()', () => {
         } as unknown as AcceptRefuseContext['applicationService'],
       });
       const state = makeState(APP_ID, 3, { refusalReason: 'reason' });
-      const result = await runAcceptRefuseCandidateFlow(state, '1', employerProfile, ctx);
+      const result = await runAcceptRefuseCandidateFlow(
+        state,
+        '1',
+        employerProfile,
+        ctx,
+      );
       expect(result.reply[0]).toContain('Cannot reject');
     });
   });

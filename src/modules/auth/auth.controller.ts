@@ -2,15 +2,25 @@ import {
   Controller,
   Get,
   Post,
+  Patch,
+  Delete,
   Body,
   Res,
   Req,
+  Param,
   HttpCode,
   HttpStatus,
   UseGuards,
+  UnauthorizedException,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBody, ApiCookieAuth } from '@nestjs/swagger';
-import type { Response } from 'express';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBody,
+  ApiCookieAuth,
+} from '@nestjs/swagger';
+import type { Request, Response } from 'express';
 import { ConfigService } from '@nestjs/config';
 import { AuthService } from './auth.service';
 import { AdminAuthGuard } from './guards/admin-auth.guard';
@@ -21,6 +31,8 @@ import {
   SendAdminOtpDto,
   VerifyAdminOtpDto,
 } from './dto';
+import { QrGateway } from '../ws-notifications/qr.gateway';
+import { WsNotificationsGateway } from '../ws-notifications/ws-notifications.gateway';
 
 @ApiTags('Auth')
 @Controller('auth')
@@ -28,6 +40,8 @@ export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly configService: ConfigService,
+    private readonly qrGateway: QrGateway,
+    private readonly wsGateway: WsNotificationsGateway,
   ) {}
 
   @Post('send-otp')
@@ -167,7 +181,13 @@ export class AuthController {
       },
     },
   })
-  logout(@Res({ passthrough: true }) res: Response): { success: boolean } {
+  async logout(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<{ success: boolean }> {
+    const cookieName = this.configService.get<string>('AUTH_COOKIE_NAME');
+    const token = cookieName ? req.cookies?.[cookieName] : undefined;
+    if (token) await this.authService.revokeToken(token);
     this.clearAuthCookie(res);
     return { success: true };
   }
@@ -271,11 +291,15 @@ export class AuthController {
   async verifyAdminOtp(
     @Body() verifyAdminOtpDto: VerifyAdminOtpDto,
     @Res({ passthrough: true }) res: Response,
-  ): Promise<{ success: boolean }> {
+  ): Promise<{ success: boolean; totpRequired?: boolean; pendingToken?: string }> {
     const result = await this.authService.verifyAdminOtp(
       verifyAdminOtpDto.email,
       verifyAdminOtpDto.otp,
     );
+
+    if (result.totpRequired) {
+      return { success: true, totpRequired: true, pendingToken: result.token };
+    }
 
     const isProduction =
       this.configService.get<string>('NODE_ENV') === 'production';
@@ -301,7 +325,8 @@ export class AuthController {
   @UseGuards(AdminAuthGuard)
   @ApiOperation({
     summary: 'Get current admin user',
-    description: 'Returns the authenticated admin user. Requires admin session cookie.',
+    description:
+      'Returns the authenticated admin user. Requires admin session cookie.',
   })
   @ApiCookieAuth()
   @ApiResponse({
@@ -312,15 +337,55 @@ export class AuthController {
       properties: {
         id: { type: 'string', format: 'uuid' },
         email: { type: 'string', format: 'email' },
-        name: { type: 'string' },
+        firstName: { type: 'string' },
+        lastName: { type: 'string' },
       },
     },
   })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  async getAdminMe(
-    @Req() req: AdminAuthenticatedRequest,
-  ): Promise<{ id: string; email: string; name: string; role: string }> {
+  async getAdminMe(@Req() req: AdminAuthenticatedRequest): Promise<{
+    id: string;
+    email: string;
+    firstName: string;
+    lastName: string;
+    role: string;
+    phonePairedAt: string | null;
+    phoneName: string | null;
+  }> {
     return this.authService.getAdminById(req.user.userId);
+  }
+
+  @Patch('admin/me')
+  @UseGuards(AdminAuthGuard)
+  @ApiOperation({ summary: 'Update current admin profile' })
+  @ApiCookieAuth()
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        firstName: { type: 'string' },
+        lastName: { type: 'string' },
+      },
+      required: ['firstName', 'lastName'],
+    },
+  })
+  @ApiResponse({ status: 200, description: 'Updated admin user' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async updateAdminMe(
+    @Req() req: AdminAuthenticatedRequest,
+    @Body() body: { firstName: string; lastName: string },
+  ): Promise<{
+    id: string;
+    email: string;
+    firstName: string;
+    lastName: string;
+    role: string;
+  }> {
+    return this.authService.updateAdminById(
+      req.user.userId,
+      body.firstName,
+      body.lastName,
+    );
   }
 
   @Post('admin/logout')
@@ -339,8 +404,204 @@ export class AuthController {
       },
     },
   })
-  adminLogout(@Res({ passthrough: true }) res: Response): { success: boolean } {
+  async adminLogout(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<{ success: boolean }> {
+    const cookieName = this.configService.get<string>('AUTH_COOKIE_NAME');
+    const token = cookieName ? req.cookies?.[cookieName] : undefined;
+    if (token) await this.authService.revokeToken(token);
     this.clearAuthCookie(res);
+    return { success: true };
+  }
+
+  @Post('admin/qr/init')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Initialize a QR login session' })
+  async initQrSession(): Promise<{
+    sessionId: string;
+    consumeNonce: string;
+    qrUrl: string;
+    expiresIn: number;
+  }> {
+    return this.authService.initQrSession();
+  }
+
+  @Get('admin/qr/poll/:sessionId')
+  @ApiOperation({ summary: 'Poll QR session status' })
+  async pollQrSession(
+    @Param('sessionId') sessionId: string,
+  ): Promise<{ status: 'pending' | 'confirmed' | 'expired' }> {
+    return this.authService.pollQrSession(sessionId);
+  }
+
+  @Post('admin/qr/confirm')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Confirm QR session from phone using phone pairing cookie',
+  })
+  async confirmQrSession(
+    @Body('sessionId') sessionId: string,
+    @Req() req: Request,
+  ): Promise<{ success: boolean }> {
+    const phoneToken = (req.cookies as Record<string, string>)[
+      'admin_phone_token'
+    ];
+    if (!phoneToken) {
+      throw new UnauthorizedException(
+        'Phone not paired — no phone token cookie found',
+      );
+    }
+    const result = await this.authService.confirmQrSession(
+      sessionId,
+      phoneToken,
+    );
+    this.qrGateway.emitConfirmed(sessionId);
+    return result;
+  }
+
+  @Delete('admin/phone/pair')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(AdminAuthGuard)
+  @ApiCookieAuth()
+  @ApiOperation({ summary: 'Clear phone pairing without generating a new OTP' })
+  async unpairPhone(
+    @Req() req: AdminAuthenticatedRequest,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<{ success: boolean }> {
+    await this.authService.unpairPhone(req.user.userId);
+    // Expire the phone token cookie on the server response so the
+    // desktop browser's copy is also cleared if it holds one.
+    res.clearCookie('admin_phone_token', { path: '/' });
+    this.wsGateway.emitToAdmin(req.user.userId, 'phone:paired');
+    return { success: true };
+  }
+
+  @Post('admin/phone/pair/generate')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(AdminAuthGuard)
+  @ApiOperation({
+    summary: 'Generate OTP for phone pairing (displayed on desktop)',
+  })
+  @ApiCookieAuth()
+  async generatePhonePairingOtp(
+    @Req() req: AdminAuthenticatedRequest,
+    @Body('phoneName') phoneName: string,
+  ): Promise<{ otp: string; expiresIn: number; userId: string }> {
+    return this.authService.generatePhonePairingOtp(req.user.userId, phoneName);
+  }
+
+  @Post('admin/phone/pair/verify')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Verify phone pairing OTP from phone (public)' })
+  async verifyPhonePairingOtp(
+    @Body('userId') userId: string,
+    @Body('otp') otp: string,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<{ success: boolean }> {
+    const { token } = await this.authService.verifyPhonePairingOtp(userId, otp);
+    const isProduction =
+      this.configService.get<string>('NODE_ENV') === 'production';
+    res.cookie('admin_phone_token', token, {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: 'lax',
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+      path: '/',
+    });
+    this.wsGateway.emitToAdmin(userId, 'phone:paired');
+    return { success: true };
+  }
+
+  @Post('admin/qr/consume')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Consume confirmed QR session and set cookie (or return TOTP gate)' })
+  async consumeQrSession(
+    @Body('sessionId') sessionId: string,
+    @Body('consumeNonce') consumeNonce: string,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<{ success: boolean; totpRequired?: boolean; pendingToken?: string }> {
+    const result = await this.authService.consumeQrSession(sessionId, consumeNonce);
+
+    if (result.totpRequired && result.pendingToken) {
+      return { success: true, totpRequired: true, pendingToken: result.pendingToken };
+    }
+
+    const isProduction =
+      this.configService.get<string>('NODE_ENV') === 'production';
+    const cookieName = this.configService.get<string>('AUTH_COOKIE_NAME');
+    if (!cookieName) throw new Error('AUTH_COOKIE_NAME is not set');
+
+    res.cookie(cookieName, result.token!, {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: 'lax',
+      maxAge: 24 * 60 * 60 * 1000,
+      path: '/',
+    });
+
+    return { success: true };
+  }
+
+  // ── TOTP endpoints ────────────────────────────────────────────────────────
+
+  @Post('admin/totp/setup')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(AdminAuthGuard)
+  @ApiCookieAuth()
+  @ApiOperation({ summary: 'Generate a TOTP secret and QR code for enrollment' })
+  async totpSetup(
+    @Req() req: AdminAuthenticatedRequest,
+  ): Promise<{ secret: string; qrDataUrl: string }> {
+    return this.authService.setupTotp(req.user.userId);
+  }
+
+  @Post('admin/totp/enable')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(AdminAuthGuard)
+  @ApiCookieAuth()
+  @ApiOperation({ summary: 'Confirm TOTP enrollment by verifying first code' })
+  async totpEnable(
+    @Req() req: AdminAuthenticatedRequest,
+    @Body('code') code: string,
+  ): Promise<{ success: boolean }> {
+    return this.authService.enableTotp(req.user.userId, code);
+  }
+
+  @Post('admin/totp/disable')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(AdminAuthGuard)
+  @ApiCookieAuth()
+  @ApiOperation({ summary: 'Disable TOTP after verifying current code' })
+  async totpDisable(
+    @Req() req: AdminAuthenticatedRequest,
+    @Body('code') code: string,
+  ): Promise<{ success: boolean }> {
+    return this.authService.disableTotp(req.user.userId, code);
+  }
+
+  @Post('admin/totp/login')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Complete login by verifying TOTP code (sets session cookie)' })
+  async totpLogin(
+    @Body('pendingToken') pendingToken: string,
+    @Body('code') code: string,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<{ success: boolean }> {
+    const result = await this.authService.verifyTotpLogin(pendingToken, code);
+
+    const isProduction = this.configService.get<string>('NODE_ENV') === 'production';
+    const cookieName = this.configService.get<string>('AUTH_COOKIE_NAME');
+    if (!cookieName) throw new Error('AUTH_COOKIE_NAME is not set');
+
+    res.cookie(cookieName, result.token, {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: 'lax',
+      maxAge: 24 * 60 * 60 * 1000,
+      path: '/',
+    });
+
     return { success: true };
   }
 }

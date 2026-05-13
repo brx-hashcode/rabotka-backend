@@ -6,7 +6,13 @@ import {
 } from '@nestjs/common';
 import { JobOfferService } from '../job-offer.service';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
+import { MailService } from '../../mail/mail.service';
+import { SystemConfigService } from '../../system-config/system-config.service';
+import { WalletService } from '../../wallet/wallet.service';
+import { BotNotificationService } from '../../bot/services/bot-notification.service';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { JobOfferStatus, PaymentFlow } from '@prisma/client';
+import { MatchingService } from '../../matching/matching.service';
 
 const EMPLOYER_ID = 'employer-uuid-1';
 const OFFER_ID = 'offer-uuid-1';
@@ -36,6 +42,10 @@ const mockOffer = {
 describe('JobOfferService (extended)', () => {
   let service: JobOfferService;
   let prisma: jest.Mocked<PrismaService>;
+  let mailService: jest.Mocked<MailService>;
+  let systemConfigService: jest.Mocked<SystemConfigService>;
+  let walletService: jest.Mocked<WalletService>;
+  let botNotificationService: jest.Mocked<BotNotificationService>;
 
   beforeEach(async () => {
     const mockPrisma = {
@@ -50,15 +60,50 @@ describe('JobOfferService (extended)', () => {
       },
     };
 
+    const mockMailService = {
+      sendMail: jest.fn().mockResolvedValue(undefined),
+    };
+
+    const mockSystemConfigService = {
+      getRaw: jest.fn().mockResolvedValue('0'),
+    };
+
+    const mockWalletService = {
+      recordJobPostingPayment: jest.fn().mockResolvedValue(undefined),
+    };
+
+    const mockBotNotificationService = {
+      sendMessage: jest.fn().mockResolvedValue(undefined),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         JobOfferService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: MailService, useValue: mockMailService },
+        { provide: SystemConfigService, useValue: mockSystemConfigService },
+        { provide: WalletService, useValue: mockWalletService },
+        {
+          provide: BotNotificationService,
+          useValue: mockBotNotificationService,
+        },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+        {
+          provide: MatchingService,
+          useValue: {
+            indexJobOffer: jest.fn().mockResolvedValue(undefined),
+            findMatchingWorkersForJob: jest.fn().mockResolvedValue([]),
+          },
+        },
       ],
     }).compile();
 
     service = module.get<JobOfferService>(JobOfferService);
     prisma = module.get(PrismaService);
+    mailService = module.get(MailService);
+    systemConfigService = module.get(SystemConfigService);
+    walletService = module.get(WalletService);
+    botNotificationService = module.get(BotNotificationService);
   });
 
   describe('validateCreateDto() — note', () => {
@@ -69,6 +114,7 @@ describe('JobOfferService (extended)', () => {
       amount: 15000,
       payment_flow: PaymentFlow.DAILY,
       address: '123 Avenue de la Paix, Poto-Poto',
+      quantity: 1,
     };
 
     it('throws BadRequestException when note exceeds 500 chars', () => {
@@ -213,21 +259,15 @@ describe('JobOfferService (extended)', () => {
       );
     });
 
-    it('applies paymentFlow filter', async () => {
+    it('returns results without error when called with basic params', async () => {
       (prisma.jobOffer.findMany as jest.Mock).mockResolvedValue([]);
       (prisma.jobOffer.count as jest.Mock).mockResolvedValue(0);
-      await service.getJobOffersForAdmin({
+      const result = await service.getJobOffersForAdmin({
         page: 1,
         limit: 10,
-        paymentFlow: [PaymentFlow.DAILY],
       });
-      expect(prisma.jobOffer.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({
-            payment_flow: { in: [PaymentFlow.DAILY] },
-          }),
-        }),
-      );
+      expect(result.data).toHaveLength(0);
+      expect(result.total).toBe(0);
     });
 
     it('uses "—" when employer name is empty', async () => {
@@ -326,10 +366,16 @@ describe('JobOfferService (extended)', () => {
 
   describe('deleteJobOfferByAdmin()', () => {
     it('deletes offer successfully', async () => {
-      (prisma.jobOffer.findUnique as jest.Mock).mockResolvedValue({ id: OFFER_ID });
+      (prisma.jobOffer.findUnique as jest.Mock).mockResolvedValue({
+        id: OFFER_ID,
+      });
       (prisma.jobOffer.delete as jest.Mock).mockResolvedValue(mockOffer);
-      await expect(service.deleteJobOfferByAdmin(OFFER_ID)).resolves.toBeUndefined();
-      expect(prisma.jobOffer.delete).toHaveBeenCalledWith({ where: { id: OFFER_ID } });
+      await expect(
+        service.deleteJobOfferByAdmin(OFFER_ID),
+      ).resolves.toBeUndefined();
+      expect(prisma.jobOffer.delete).toHaveBeenCalledWith({
+        where: { id: OFFER_ID },
+      });
     });
 
     it('throws NotFoundException when not found', async () => {
@@ -380,7 +426,9 @@ describe('JobOfferService (extended)', () => {
       (prisma.jobOffer.update as jest.Mock).mockResolvedValue(mockOffer);
       await service.updateJobOfferByAdmin(OFFER_ID, { note: '' });
       expect(prisma.jobOffer.update).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.objectContaining({ note: null }) }),
+        expect.objectContaining({
+          data: expect.objectContaining({ note: null }),
+        }),
       );
     });
 

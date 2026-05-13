@@ -1,14 +1,27 @@
 import {
   Injectable,
+  Logger,
   BadRequestException,
   NotFoundException,
   ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
+import { isWorkerHardBlocked } from '../penalty/penalty.utils';
+import { MailService } from '../mail/mail.service';
+import { SystemConfigService } from '../system-config/system-config.service';
+import { WalletService } from '../wallet/wallet.service';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
+import { BotNotificationService } from '../bot/services/bot-notification.service';
+import {
+  MatchingService,
+  MIN_NOTIFICATION_SCORE,
+} from '../matching/matching.service';
 import { CreateJobOfferDto } from './dto/create-job-offer.dto';
 import { AdminUpdateJobOfferDto } from './dto/admin-update-job-offer.dto';
 import {
   AccountStatus,
+  ApplicationStatus,
   JobOfferStatus,
   PaymentFlow,
   Prisma,
@@ -29,10 +42,11 @@ const QUANTITY_MAX = 100;
 export type AdminJobOfferListItem = {
   id: string;
   title: string;
+  category: { id: string; name: string } | null;
   description: string;
   scheduledAt: string;
   amount: number;
-  paymentFlow: string;
+  paymentFlow: PaymentFlow | null;
   address: string;
   note: string | null;
   quantity: number;
@@ -45,6 +59,7 @@ export type AdminJobOfferListItem = {
   applicationsCount: number;
   createdAt: string;
   updatedAt: string;
+  vectorIndexedAt: string | null;
 };
 
 export type AdminJobOfferApplicationItem = {
@@ -71,8 +86,8 @@ export type JobOfferListItem = {
   title: string;
   description: string;
   scheduled_at: Date;
-  amount: number;
-  payment_flow: string;
+  amount: number | null;
+  payment_flow: PaymentFlow | null;
   address: string;
   note: string | null;
   quantity: number;
@@ -94,7 +109,17 @@ export type JobOfferDetail = JobOfferListItem & {
 
 @Injectable()
 export class JobOfferService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(JobOfferService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly mailService: MailService,
+    private readonly systemConfigService: SystemConfigService,
+    private readonly walletService: WalletService,
+    private readonly botNotification: BotNotificationService,
+    private readonly eventEmitter: EventEmitter2,
+    private readonly matchingService: MatchingService,
+  ) {}
 
   async create(
     employerId: string,
@@ -102,16 +127,40 @@ export class JobOfferService {
   ): Promise<JobOfferListItem> {
     const employer = await this.prisma.profile.findUnique({
       where: { id: employerId },
-      select: { id: true, status: true, profile_type: true },
+      select: {
+        id: true,
+        status: true,
+        profile_type: true,
+        reliability_score: true,
+      },
     });
     if (!employer) {
       throw new NotFoundException('Employeur introuvable');
     }
     if (employer.status !== AccountStatus.ACTIVE) {
-      throw new ForbiddenException('Le profil doit être actif pour publier des offres');
+      throw new ForbiddenException(
+        'Le profil doit être actif pour publier des offres',
+      );
     }
     if (employer.profile_type !== 'EMPLOYER') {
-      throw new ForbiddenException("Seuls les employeurs peuvent publier des offres d'emploi");
+      throw new ForbiddenException(
+        "Seuls les employeurs peuvent publier des offres d'emploi",
+      );
+    }
+
+    const fees = await this.systemConfigService.getFees();
+    const employerScore = employer.reliability_score ?? 100;
+    if (employerScore <= fees.reliabilityScoreMin) {
+      throw new ForbiddenException(
+        "Votre compte est pénalisé. Vous ne pouvez pas publier d'offres pour le moment.",
+      );
+    }
+
+    const hardBlocked = await isWorkerHardBlocked(this.prisma, employerId);
+    if (hardBlocked) {
+      throw new ForbiddenException(
+        '🚨 Votre compte est bloqué en raison de pénalités impayées depuis plus de 3 jours. Tapez PAYER pour régulariser votre situation.',
+      );
     }
 
     this.validateCreateDto(dto);
@@ -138,11 +187,115 @@ export class JobOfferService {
         address: dto.address.trim(),
         note: dto.note?.trim() ?? null,
         quantity: dto.quantity ?? 1,
-        status: JobOfferStatus.PENDING_PAYMENT,
+        status: JobOfferStatus.ACTIVE,
+        ...(dto.category_id ? { category_id: dto.category_id } : {}),
       },
     });
 
+    this.eventEmitter.emit(AdminNotificationEvent.JOB_OFFER_CREATED, {
+      event: AdminNotificationEvent.JOB_OFFER_CREATED,
+      title: 'Nouvelle offre',
+      message: `Nouvelle offre d'emploi créée : ${offer.title}`,
+      entityType: 'job-offer',
+      entityId: String(offer.id),
+      timestamp: new Date().toISOString(),
+    });
+
+    // Index + notify matching workers asynchronously (fire-and-forget)
+    this.matchingService
+      .indexJobOffer(offer.id)
+      .then(async () => {
+        const workerResults: { id: string; score: number }[] =
+          await this.matchingService.findMatchingWorkersForJob(offer.id, 20);
+        for (const { id: workerId, score } of workerResults) {
+          if (score < MIN_NOTIFICATION_SCORE) continue;
+          this.botNotification
+            .sendRecommendedJobNotification(workerId, offer.id)
+            .catch((err: unknown) =>
+              this.logger.warn(`sendRecommendedJobNotification failed for worker ${workerId}`, err instanceof Error ? err.message : String(err)),
+            );
+        }
+      })
+      .catch((err: unknown) =>
+        this.logger.warn(`indexJobOffer/matchingNotify failed for offer ${offer.id}`, err instanceof Error ? err.message : String(err)),
+      );
+
     return this.toListItem(offer);
+  }
+
+  /**
+   * Worker-facing offers must still have at least one free slot.
+   * Status can lag (e.g. ACTIVE while acceptedCount === quantity); we filter on counts.
+   */
+  private offerHasOpenSlots(quantity: number, acceptedCount: number): boolean {
+    const accepted = Number.isFinite(acceptedCount) ? acceptedCount : 0;
+    return accepted < quantity;
+  }
+
+  private async queryOpenSlotCandidateBatch(
+    take: number,
+    dbCursor: string | undefined,
+    excludeAppliedByWorkerId?: string,
+  ): Promise<
+    Prisma.JobOfferGetPayload<{
+      include: {
+        _count: {
+          select: {
+            applications: {
+              where: { status: typeof ApplicationStatus.ACCEPTED };
+            };
+          };
+        };
+      };
+    }>[]
+  > {
+    return this.prisma.jobOffer.findMany({
+      take,
+      ...(dbCursor ? { cursor: { id: dbCursor }, skip: 1 } : {}),
+      where: {
+        status: {
+          in: [JobOfferStatus.ACTIVE, JobOfferStatus.PARTIALLY_FILLED],
+        },
+        ...(excludeAppliedByWorkerId
+          ? {
+              applications: {
+                none: { worker_id: excludeAppliedByWorkerId },
+              },
+            }
+          : {}),
+      },
+      orderBy: [{ scheduled_at: 'asc' }, { created_at: 'desc' }],
+      include: {
+        _count: {
+          select: {
+            applications: { where: { status: ApplicationStatus.ACCEPTED } },
+          },
+        },
+      },
+    });
+  }
+
+  private mergeOpenSlotOffersIntoList(
+    offers: Prisma.JobOfferGetPayload<{
+      include: {
+        _count: {
+          select: {
+            applications: {
+              where: { status: typeof ApplicationStatus.ACCEPTED };
+            };
+          };
+        };
+      };
+    }>[],
+    listItems: JobOfferListItem[],
+    targetCount: number,
+  ): void {
+    for (const o of offers) {
+      const accepted = o._count.applications;
+      if (!this.offerHasOpenSlots(o.quantity, accepted)) continue;
+      listItems.push(this.toListItem(o, accepted));
+      if (listItems.length >= targetCount) break;
+    }
   }
 
   async findActive(
@@ -153,35 +306,28 @@ export class JobOfferService {
     data: JobOfferListItem[];
     nextCursor: string | null;
   }> {
-    const offers = await this.prisma.jobOffer.findMany({
-      take: limit + 1,
-      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-      where: {
-        status: JobOfferStatus.ACTIVE,
-        ...(excludeAppliedByWorkerId
-          ? {
-              applications: {
-                none: {
-                  worker_id: excludeAppliedByWorkerId,
-                },
-              },
-            }
-          : {}),
-      },
-      orderBy: [{ scheduled_at: 'asc' }, { created_at: 'desc' }],
-      include: {
-        _count: {
-          select: {
-            applications: { where: { status: 'ACCEPTED' } },
-          },
-        },
-      },
-    });
+    const targetCount = limit + 1;
+    const listItems: JobOfferListItem[] = [];
+    let dbCursor: string | undefined = cursor;
+    const batchSize = Math.max(limit * 8, limit + 15);
+    const maxIterations = 25;
 
-    const hasMore = offers.length > limit;
-    const data = (hasMore ? offers.slice(0, limit) : offers).map((o) =>
-      this.toListItem(o, o._count.applications),
-    );
+    for (let i = 0; i < maxIterations && listItems.length < targetCount; i++) {
+      const offers = await this.queryOpenSlotCandidateBatch(
+        batchSize,
+        dbCursor,
+        excludeAppliedByWorkerId,
+      );
+      if (offers.length === 0) break;
+
+      this.mergeOpenSlotOffersIntoList(offers, listItems, targetCount);
+
+      dbCursor = offers.at(-1)!.id;
+      if (offers.length < batchSize) break;
+    }
+
+    const hasMore = listItems.length > limit;
+    const data = hasMore ? listItems.slice(0, limit) : listItems;
     const nextCursor = hasMore ? (data.at(-1)?.id ?? null) : null;
 
     return { data, nextCursor };
@@ -223,12 +369,37 @@ export class JobOfferService {
     };
   }
 
-  async findByEmployerId(employerId: string): Promise<JobOfferListItem[]> {
-    const offers = await this.prisma.jobOffer.findMany({
-      where: { employer_id: employerId },
-      orderBy: [{ scheduled_at: 'asc' }, { created_at: 'desc' }],
-    });
-    return offers.map((o) => this.toListItem(o));
+  async findByEmployerId(employerId: string): Promise<JobOfferListItem[]>;
+  async findByEmployerId(
+    employerId: string,
+    pagination: { page: number; pageSize: number },
+  ): Promise<{ items: JobOfferListItem[]; total: number }>;
+  async findByEmployerId(
+    employerId: string,
+    pagination?: { page: number; pageSize: number },
+  ): Promise<
+    JobOfferListItem[] | { items: JobOfferListItem[]; total: number }
+  > {
+    if (!pagination) {
+      const offers = await this.prisma.jobOffer.findMany({
+        where: { employer_id: employerId },
+        orderBy: [{ scheduled_at: 'asc' }, { created_at: 'desc' }],
+      });
+      return offers.map((o) => this.toListItem(o));
+    }
+
+    const { page, pageSize } = pagination;
+    const skip = page * pageSize;
+    const [offers, total] = await Promise.all([
+      this.prisma.jobOffer.findMany({
+        where: { employer_id: employerId },
+        orderBy: [{ scheduled_at: 'asc' }, { created_at: 'desc' }],
+        skip,
+        take: pageSize,
+      }),
+      this.prisma.jobOffer.count({ where: { employer_id: employerId } }),
+    ]);
+    return { items: offers.map((o) => this.toListItem(o)), total };
   }
 
   async updateStatus(
@@ -250,6 +421,44 @@ export class JobOfferService {
       where: { id },
       data: { status },
     });
+
+    this.eventEmitter.emit(AdminNotificationEvent.JOB_OFFER_STATUS_CHANGED, {
+      event: AdminNotificationEvent.JOB_OFFER_STATUS_CHANGED,
+      title: 'Statut offre modifié',
+      message: `Le statut de l'offre "${updated.title}" a été changé en ${status}`,
+      entityType: 'job-offer',
+      entityId: String(updated.id),
+      timestamp: new Date().toISOString(),
+    });
+
+    return this.toListItem(updated);
+  }
+
+  async updateStatusByAdmin(
+    id: string,
+    status: JobOfferStatus,
+  ): Promise<JobOfferListItem> {
+    const offer = await this.prisma.jobOffer.findUnique({
+      where: { id },
+    });
+    if (!offer) {
+      throw new NotFoundException("Offre d'emploi introuvable");
+    }
+
+    const updated = await this.prisma.jobOffer.update({
+      where: { id },
+      data: { status },
+    });
+
+    this.eventEmitter.emit(AdminNotificationEvent.JOB_OFFER_STATUS_CHANGED, {
+      event: AdminNotificationEvent.JOB_OFFER_STATUS_CHANGED,
+      title: 'Statut offre modifié',
+      message: `Le statut de l'offre "${updated.title}" a été changé en ${status}`,
+      entityType: 'job-offer',
+      entityId: String(updated.id),
+      timestamp: new Date().toISOString(),
+    });
+
     return this.toListItem(updated);
   }
 
@@ -276,7 +485,10 @@ export class JobOfferService {
     if (Number.isNaN(scheduledAt.getTime())) {
       throw new BadRequestException('Format de date invalide');
     }
-    if (dto.amount < AMOUNT_MIN_FCFA || dto.amount > AMOUNT_MAX_FCFA) {
+    if (
+      dto.amount != null &&
+      (dto.amount < AMOUNT_MIN_FCFA || dto.amount > AMOUNT_MAX_FCFA)
+    ) {
       throw new BadRequestException(
         `Le montant doit être entre ${AMOUNT_MIN_FCFA} et ${AMOUNT_MAX_FCFA} FCFA`,
       );
@@ -308,14 +520,13 @@ export class JobOfferService {
     limit: number;
     q?: string;
     status?: JobOfferStatus[];
-    paymentFlow?: PaymentFlow[];
   }): Promise<{
     data: AdminJobOfferListItem[];
     total: number;
     page: number;
     limit: number;
   }> {
-    const { page, limit, q, status, paymentFlow } = params;
+    const { page, limit, q, status } = params;
     const skip = (page - 1) * limit;
 
     const where: Prisma.JobOfferWhereInput = {};
@@ -332,9 +543,6 @@ export class JobOfferService {
     if (status != null && status.length > 0) {
       where.status = { in: status };
     }
-    if (paymentFlow != null && paymentFlow.length > 0) {
-      where.payment_flow = { in: paymentFlow };
-    }
 
     const [offers, total] = await Promise.all([
       this.prisma.jobOffer.findMany({
@@ -343,6 +551,12 @@ export class JobOfferService {
         skip,
         take: limit,
         include: {
+          category: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
           employer: {
             select: {
               id: true,
@@ -364,6 +578,10 @@ export class JobOfferService {
     const data: AdminJobOfferListItem[] = offers.map((o) => ({
       id: o.id,
       title: o.title,
+      category:
+        o.category == null
+          ? null
+          : { id: o.category.id, name: o.category.name },
       description: o.description,
       scheduledAt: o.scheduled_at.toISOString(),
       amount: Number(o.amount),
@@ -382,6 +600,7 @@ export class JobOfferService {
       applicationsCount: o._count.applications,
       createdAt: o.created_at.toISOString(),
       updatedAt: o.updated_at.toISOString(),
+      vectorIndexedAt: o.vector_indexed_at?.toISOString() ?? null,
     }));
 
     return { data, total, page, limit };
@@ -393,6 +612,12 @@ export class JobOfferService {
     const offer = await this.prisma.jobOffer.findUnique({
       where: { id },
       include: {
+        category: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
         employer: {
           select: {
             id: true,
@@ -431,6 +656,10 @@ export class JobOfferService {
     return {
       id: offer.id,
       title: offer.title,
+      category:
+        offer.category == null
+          ? null
+          : { id: offer.category.id, name: offer.category.name },
       description: offer.description,
       scheduledAt: offer.scheduled_at.toISOString(),
       amount: Number(offer.amount),
@@ -449,6 +678,7 @@ export class JobOfferService {
       applicationsCount: offer._count.applications,
       createdAt: offer.created_at.toISOString(),
       updatedAt: offer.updated_at.toISOString(),
+      vectorIndexedAt: offer.vector_indexed_at?.toISOString() ?? null,
       applications: offer.applications.map((a) => ({
         id: a.id,
         workerName:
@@ -461,7 +691,7 @@ export class JobOfferService {
         status: a.status,
         penaltyApplied: a.penalty_applied,
         penaltyAmount:
-          a.penalty_amount != null ? Number(a.penalty_amount) : null,
+          a.penalty_amount == null ? null : Number(a.penalty_amount),
         cancelledAt: a.cancelled_at?.toISOString() ?? null,
         cancellationReason: a.cancellation_reason,
         createdAt: a.created_at.toISOString(),
@@ -472,13 +702,22 @@ export class JobOfferService {
   async deleteJobOfferByAdmin(id: string): Promise<void> {
     const offer = await this.prisma.jobOffer.findUnique({
       where: { id },
-      select: { id: true },
+      select: { id: true, title: true },
     });
     if (!offer) {
       throw new NotFoundException("Offre d'emploi introuvable");
     }
 
     await this.prisma.jobOffer.delete({ where: { id } });
+
+    this.eventEmitter.emit(AdminNotificationEvent.JOB_OFFER_DELETED, {
+      event: AdminNotificationEvent.JOB_OFFER_DELETED,
+      title: 'Offre supprimée',
+      message: `L'offre d'emploi "${offer.title}" a été supprimée`,
+      entityType: 'job-offer',
+      entityId: String(id),
+      timestamp: new Date().toISOString(),
+    });
   }
 
   async updateJobOfferByAdmin(
@@ -493,22 +732,43 @@ export class JobOfferService {
       throw new NotFoundException("Offre d'emploi introuvable");
     }
     if (offer.status !== JobOfferStatus.ACTIVE) {
-      throw new BadRequestException(
-        'Only active job offers can be edited',
-      );
+      throw new BadRequestException('Only active job offers can be edited');
     }
 
     const data: Prisma.JobOfferUpdateInput = {};
     if (dto.title !== undefined) data.title = dto.title.trim();
-    if (dto.description !== undefined) data.description = dto.description.trim();
-    if (dto.scheduledAt !== undefined) data.scheduled_at = new Date(dto.scheduledAt);
-    if (dto.amount !== undefined) data.amount = dto.amount;
-    if (dto.paymentFlow !== undefined) data.payment_flow = dto.paymentFlow;
+    if (dto.description !== undefined)
+      data.description = dto.description.trim();
+    if (dto.scheduledAt !== undefined)
+      data.scheduled_at = new Date(dto.scheduledAt);
+    if (dto.amount !== undefined) data.amount = dto.amount ?? null;
+    if (dto.paymentFlow !== undefined)
+      data.payment_flow = dto.paymentFlow ?? null;
+    if (dto.categoryId !== undefined) {
+      if (dto.categoryId === null) {
+        data.category = { disconnect: true };
+      } else {
+        data.category = { connect: { id: dto.categoryId } };
+      }
+    }
     if (dto.address !== undefined) data.address = dto.address.trim();
     if (dto.note !== undefined) data.note = dto.note.trim() || null;
     if (dto.quantity !== undefined) data.quantity = dto.quantity;
 
-    await this.prisma.jobOffer.update({ where: { id }, data });
+    const updatedOffer = await this.prisma.jobOffer.update({
+      where: { id },
+      data,
+      select: { title: true },
+    });
+
+    this.eventEmitter.emit(AdminNotificationEvent.JOB_OFFER_UPDATED, {
+      event: AdminNotificationEvent.JOB_OFFER_UPDATED,
+      title: 'Offre mise à jour',
+      message: `L'offre d'emploi "${updatedOffer.title}" a été mise à jour par un admin`,
+      entityType: 'job-offer',
+      entityId: String(id),
+      timestamp: new Date().toISOString(),
+    });
 
     return this.getJobOfferDetailForAdmin(id);
   }
@@ -520,7 +780,7 @@ export class JobOfferService {
       description: string;
       scheduled_at: Date;
       amount: unknown;
-      payment_flow: string;
+      payment_flow: PaymentFlow | null;
       address: string;
       note: string | null;
       quantity: number;
@@ -535,7 +795,7 @@ export class JobOfferService {
       title: offer.title,
       description: offer.description,
       scheduled_at: offer.scheduled_at,
-      amount: Number(offer.amount),
+      amount: offer.amount == null ? null : Number(offer.amount),
       payment_flow: offer.payment_flow,
       address: offer.address,
       note: offer.note,

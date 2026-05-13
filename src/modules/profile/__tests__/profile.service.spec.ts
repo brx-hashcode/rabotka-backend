@@ -24,9 +24,12 @@ const baseProfile = {
   verified_by: null,
   verified_at: null,
   rejection_reason: null,
+  kyc_verification_note: null,
   _count: { job_offers: 0, applications: 2, penalties: 1 },
   kyc_documents: [],
   kyc_verification_images: [],
+  categories: [],
+  category: null,
 };
 
 function makePrisma() {
@@ -67,6 +70,20 @@ function makePrisma() {
     file: {
       create: jest.fn().mockResolvedValue({}),
     },
+    profilePlatformDocumentLink: {
+      findMany: jest.fn().mockResolvedValue([]),
+      findUnique: jest.fn().mockResolvedValue(null),
+      createMany: jest.fn().mockResolvedValue({ count: 0 }),
+    },
+    document: {
+      findMany: jest.fn().mockResolvedValue([]),
+      findFirst: jest.fn().mockResolvedValue(null),
+      findUnique: jest.fn().mockResolvedValue(null),
+      create: jest.fn().mockResolvedValue({}),
+      count: jest.fn().mockResolvedValue(0),
+      delete: jest.fn().mockResolvedValue({}),
+      update: jest.fn().mockResolvedValue({}),
+    },
   };
 }
 
@@ -104,6 +121,14 @@ function makeConfigService() {
   };
 }
 
+function makeDocumentService() {
+  return {
+    fillDocumentTemplateAsPdf: jest
+      .fn()
+      .mockResolvedValue(Buffer.from('pdf-content')),
+  };
+}
+
 describe('ProfileService', () => {
   let service: ProfileService;
   let prisma: ReturnType<typeof makePrisma>;
@@ -111,6 +136,7 @@ describe('ProfileService', () => {
   let redis: ReturnType<typeof makeRedis>;
   let whatsApp: ReturnType<typeof makeWhatsApp>;
   let configService: ReturnType<typeof makeConfigService>;
+  let documentService: ReturnType<typeof makeDocumentService>;
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -119,12 +145,24 @@ describe('ProfileService', () => {
     redis = makeRedis();
     whatsApp = makeWhatsApp();
     configService = makeConfigService();
+    documentService = makeDocumentService();
     service = new ProfileService(
       prisma as any,
       fileService as any,
       redis as any,
       whatsApp as any,
       configService as any,
+      {} as any, // mailService
+      { emit: jest.fn() } as any, // eventEmitter
+      {
+        getProfileWalletBalance: jest.fn().mockResolvedValue(0),
+        grantWelcomeCredit: jest.fn().mockResolvedValue(undefined),
+      } as any, // walletService
+      documentService as any, // documentService
+      {
+        indexWorkerProfile: jest.fn().mockResolvedValue(undefined),
+        indexEmployerProfile: jest.fn().mockResolvedValue(undefined),
+      } as any, // matchingService
     );
   });
 
@@ -158,20 +196,15 @@ describe('ProfileService', () => {
       );
     });
 
-    it('sends activation notification when status transitions to ACTIVE', async () => {
-      prisma.profile.findUnique.mockResolvedValueOnce({
-        ...baseProfile,
-        status: 'PENDING_ACTIVATION',
-      });
-      // Second call for findById
+    it('updates profile fields without allowing status change', async () => {
       prisma.profile.findUnique.mockResolvedValueOnce(baseProfile);
-      // Third call for sendActivationNotification
-      prisma.profile.findUnique.mockResolvedValueOnce({
-        ...baseProfile,
-        phone: '+242000001',
-      });
-      await service.updateProfile('p-1', { status: 'ACTIVE' as any });
-      // WhatsApp notification attempt is non-blocking; just ensure no crash
+      prisma.profile.findUnique.mockResolvedValueOnce(baseProfile);
+      await service.updateProfile('p-1', { firstName: 'Bob' });
+      expect(prisma.profile.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.not.objectContaining({ status: expect.anything() }),
+        }),
+      );
     });
   });
 
@@ -239,7 +272,7 @@ describe('ProfileService', () => {
     it('marks penalty as paid', async () => {
       prisma.penalty.findUnique.mockResolvedValue({
         id: 'pen-1',
-        worker_id: 'p-1',
+        profile_id: 'p-1',
         paid_at: null,
       });
       await service.markPenaltyPaid('pen-1', 'p-1');
@@ -249,7 +282,7 @@ describe('ProfileService', () => {
     it('throws NotFoundException when penalty does not belong to profile', async () => {
       prisma.penalty.findUnique.mockResolvedValue({
         id: 'pen-1',
-        worker_id: 'other',
+        profile_id: 'other',
       });
       await expect(service.markPenaltyPaid('pen-1', 'p-1')).rejects.toThrow(
         'Pénalité introuvable',
@@ -259,7 +292,7 @@ describe('ProfileService', () => {
     it('does nothing when already paid', async () => {
       prisma.penalty.findUnique.mockResolvedValue({
         id: 'pen-1',
-        worker_id: 'p-1',
+        profile_id: 'p-1',
         paid_at: new Date(),
       });
       await service.markPenaltyPaid('pen-1', 'p-1');
@@ -453,6 +486,7 @@ describe('ProfileService', () => {
         'p-1',
         'admin-1',
         'VERIFIED',
+        'Documents reviewed and match requirements.',
       );
       expect(prisma.$transaction).toHaveBeenCalled();
       expect(result.id).toBe('p-1');
@@ -470,7 +504,7 @@ describe('ProfileService', () => {
         'p-1',
         'admin-1',
         'VERIFIED',
-        undefined,
+        'Approved with additional supporting images.',
         [file],
       );
       expect(fileService.uploadToStorage).toHaveBeenCalled();
@@ -490,7 +524,7 @@ describe('ProfileService', () => {
     it('throws NotFoundException when profile not found', async () => {
       prisma.profile.findUnique.mockResolvedValueOnce(null);
       await expect(
-        service.verifyProfileKyc('missing', 'admin-1', 'VERIFIED'),
+        service.verifyProfileKyc('missing', 'admin-1', 'VERIFIED', 'Note'),
       ).rejects.toThrow('Profil non trouvé');
     });
   });
@@ -520,6 +554,7 @@ describe('ProfileService', () => {
       description: 'Expert',
       profileType: 'WORKER' as any,
       documentType: 'CNI' as any,
+      readAndApprovedPolicies: true,
     };
 
     it('creates profile and returns success message', async () => {
@@ -540,6 +575,50 @@ describe('ProfileService', () => {
       await expect(
         service.createProfile(dto, kycDoc, null as any),
       ).rejects.toThrow('photo KYC');
+    });
+  });
+
+  describe('downloadAgreement()', () => {
+    const template = {
+      id: 'doc-1',
+      title: 'Accord Plateforme',
+      category: 'AGREEMENT',
+      mime_type:
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      created_at: new Date(),
+    };
+    const profile = {
+      first_name: 'Alice',
+      last_name: 'Dupont',
+      created_at: new Date('2026-01-01T10:00:00Z'),
+    };
+
+    it('returns a PDF buffer and filename', async () => {
+      prisma.document.findFirst.mockResolvedValue(template);
+      prisma.profile.findUnique.mockResolvedValue(profile);
+      const result = await service.downloadAgreement('p-1');
+      expect(documentService.fillDocumentTemplateAsPdf).toHaveBeenCalledWith(
+        'doc-1',
+        expect.objectContaining({
+          FIRST_NAME: 'Alice',
+          LAST_NAME: 'Dupont',
+          FULL_NAME: 'Alice Dupont',
+        }),
+      );
+      expect(result.buffer).toBeInstanceOf(Buffer);
+      expect(result.filename).toMatch(/Dupont.*\.pdf$/);
+    });
+
+    it('throws NotFoundException when no AGREEMENT template exists', async () => {
+      prisma.document.findFirst.mockResolvedValue(null);
+      prisma.profile.findUnique.mockResolvedValue(profile);
+      await expect(service.downloadAgreement('p-1')).rejects.toThrow('accord');
+    });
+
+    it('throws NotFoundException when profile does not exist', async () => {
+      prisma.document.findFirst.mockResolvedValue(template);
+      prisma.profile.findUnique.mockResolvedValue(null);
+      await expect(service.downloadAgreement('p-1')).rejects.toThrow('Profil');
     });
   });
 });

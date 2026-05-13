@@ -9,9 +9,14 @@ const workerProfile: BotProfile = {
   email: 'alice@example.com',
   profile_type: 'WORKER',
   reliability_score: 90,
+  status: 'ACTIVE',
 };
 
-const employerProfile: BotProfile = { ...workerProfile, id: 'e-1', profile_type: 'EMPLOYER' };
+const employerProfile: BotProfile = {
+  ...workerProfile,
+  id: 'e-1',
+  profile_type: 'EMPLOYER',
+};
 
 const mockOffer = {
   id: 'offer-1',
@@ -29,9 +34,15 @@ const mockOffer = {
 
 function makeJobOfferService(overrides = {}) {
   return {
-    findActive: jest.fn().mockResolvedValue({ data: [mockOffer], nextCursor: null }),
+    findActive: jest
+      .fn()
+      .mockResolvedValue({ data: [mockOffer], nextCursor: null }),
     findById: jest.fn().mockResolvedValue(mockOffer),
-    findByEmployerId: jest.fn().mockResolvedValue([]),
+    findByEmployerId: jest.fn().mockImplementation((_, opts) =>
+      opts
+        ? Promise.resolve({ items: [], total: 0 })
+        : Promise.resolve([]),
+    ),
     ...overrides,
   };
 }
@@ -65,7 +76,13 @@ describe('BotCommandsService', () => {
     jobOfferService = makeJobOfferService();
     applicationService = makeApplicationService();
     prisma = makePrisma();
-    service = new BotCommandsService(prisma as any, jobOfferService as any, applicationService as any);
+    service = new BotCommandsService(
+      prisma as any,
+      jobOfferService as any,
+      applicationService as any,
+      { getProfileWalletBalance: jest.fn().mockResolvedValue(0) } as any,
+      { getFees: jest.fn().mockResolvedValue({ cancellationThresholdHours: 4 }) } as any,
+    );
   });
 
   describe('listOffers()', () => {
@@ -76,7 +93,10 @@ describe('BotCommandsService', () => {
     });
 
     it('returns no-offers message when empty', async () => {
-      jobOfferService.findActive.mockResolvedValue({ data: [], nextCursor: null });
+      jobOfferService.findActive.mockResolvedValue({
+        data: [],
+        nextCursor: null,
+      });
       const result = await service.listOffers(workerProfile);
       expect(result.message).toBeDefined();
       expect(result.offerIds).toBeUndefined();
@@ -136,20 +156,28 @@ describe('BotCommandsService', () => {
   describe('myOffers()', () => {
     it('blocks non-employer', async () => {
       const result = await service.myOffers(workerProfile);
-      expect(result).toContain('EMPLOYEURS');
+      expect(result.message).toContain('EMPLOYEURS');
     });
 
     it('returns no-offers message when employer has none', async () => {
       const result = await service.myOffers(employerProfile);
-      expect(result).toContain('AUCUNE OFFRE');
+      expect(result.message).toContain('AUCUNE OFFRE');
     });
 
     it('returns formatted offer list for employer', async () => {
-      jobOfferService.findByEmployerId.mockResolvedValue([
-        { ...mockOffer, amount: { toLocaleString: () => '15 000' } },
-      ]);
+      jobOfferService.findByEmployerId.mockImplementation((_, opts) =>
+        opts
+          ? Promise.resolve({
+              items: [
+                { ...mockOffer, amount: { toLocaleString: () => '15 000' } },
+              ],
+              total: 1,
+            })
+          : Promise.resolve([mockOffer]),
+      );
       const result = await service.myOffers(employerProfile);
-      expect(result).toContain('MES OFFRES');
+      expect(result.message).toContain('MES OFFRES');
+      expect(result.offerIds).toHaveLength(1);
     });
   });
 
@@ -174,6 +202,7 @@ describe('BotCommandsService', () => {
             first_name: 'Alice',
             last_name: 'Dupont',
             reliability_score: 90,
+            status: 'ACTIVE',
             email: 'alice@example.com',
             avatar_url: null,
             verification_status: 'VERIFIED',
@@ -224,6 +253,7 @@ describe('BotCommandsService', () => {
         last_name: 'Dupont',
         email: 'alice@example.com',
         reliability_score: 90,
+        status: 'ACTIVE',
         created_at: new Date(),
         avatar_url: null,
         profile_type: 'WORKER',
@@ -238,6 +268,7 @@ describe('BotCommandsService', () => {
         last_name: 'Patron',
         email: 'jean@example.com',
         reliability_score: null,
+        status: 'ACTIVE',
         created_at: new Date(),
         avatar_url: null,
         profile_type: 'EMPLOYER',

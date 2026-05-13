@@ -4,22 +4,35 @@ import {
   formatApplyConfirmation,
   formatApplicationSentSuccess,
 } from '../messages/application.messages';
+import {
+  formatOfferDetailWithActions,
+  jobOfferToOfferListItem,
+} from '../messages/offers.messages';
 import { formatPenaltyBlocked } from '../messages/penalty.messages';
 import { menuMessage } from '../messages/menu.messages';
 import type { ApplicationService } from '../../application/application.service';
 import type { JobOfferService } from '../../job-offer/job-offer.service';
 import type { BotNotificationService } from '../services/bot-notification.service';
+import type { SystemConfigService } from '../../system-config/system-config.service';
 
 export type ApplyJobContext = {
   applicationService: ApplicationService;
   jobOfferService: JobOfferService;
   notificationService: BotNotificationService;
+  systemConfigService: SystemConfigService;
 };
 
 export type FlowResult = {
   reply: string[];
   nextState?: BotState;
   clearState?: boolean;
+};
+
+/** When set, choosing « Non, retour » on apply confirmation restores list-offers detail. */
+export type ApplyJobReturnToListOffersPayload = {
+  offerIds: string[];
+  nextCursor?: string;
+  selectedOfferIndex: number;
 };
 
 type ApplyStepArgs = {
@@ -34,8 +47,8 @@ type ApplyStepArgs = {
 type JobOfferForApply = {
   title: string;
   scheduled_at: Date;
-  amount: number;
-  payment_flow: string;
+  amount: number | null;
+  payment_flow: string | null;
   address: string;
 };
 
@@ -46,6 +59,7 @@ async function handleApplyStep1(
   const { state, jobOfferId, trimmed, normalized, profile, ctx } = args;
   if (!trimmed) {
     const workerName = `${profile.first_name} ${profile.last_name}`;
+    const fees = await ctx.systemConfigService.getFees();
     const text = formatApplyConfirmation({
       title: offer.title,
       scheduled_at: offer.scheduled_at,
@@ -56,6 +70,8 @@ async function handleApplyStep1(
       workerPhone: profile.phone,
       workerEmail: profile.email,
       reliabilityScore: profile.reliability_score,
+      lateCancellationPenalty: fees.lateCancellationPenaltyFcfa,
+      lateCancellationThresholdHours: fees.cancellationThresholdHours,
     });
     return { reply: [text], nextState: state };
   }
@@ -84,8 +100,43 @@ async function handleApplyStep1(
     }
   }
   if (normalized === '2' || normalized === 'non') {
+    const ret = state.payload?.returnToListOffers as
+      | ApplyJobReturnToListOffersPayload
+      | undefined;
+
+    if (ret?.offerIds?.length) {
+      const fullOffer = await ctx.jobOfferService.findById(jobOfferId);
+      if (!fullOffer) {
+        return {
+          reply: [
+            "*Cette offre n'est plus disponible.* Tapez *Menu* pour revenir.",
+          ],
+          clearState: true,
+        };
+      }
+      const detailMsg = formatOfferDetailWithActions(
+        jobOfferToOfferListItem(fullOffer),
+      );
+      return {
+        reply: [detailMsg],
+        nextState: {
+          flowId: FLOW_IDS.LIST_OFFERS,
+          step: 0,
+          payload: {
+            offerIds: ret.offerIds,
+            nextCursor: ret.nextCursor,
+            step: 'detail',
+            selectedOfferIndex: ret.selectedOfferIndex,
+          },
+          updatedAt: new Date().toISOString(),
+        },
+      };
+    }
+
     return {
-      reply: ["*CANDIDATURE ANNULÉE. TAPEZ 'MENU' POUR REVENIR.*"],
+      reply: [
+        "*Retour sans envoi de candidature.*\n\nVous n'avez pas postulé à cette offre.\n\n- Tapez *offres* pour voir la liste des offres\n- Tapez *MENU* pour le menu principal",
+      ],
       clearState: true,
     };
   }
@@ -131,8 +182,15 @@ export async function runApplyJobFlow(
 
   const unpaid = await ctx.applicationService.getUnpaidPenalties(profile.id);
   if (unpaid.count > 0) {
+    const contact = await ctx.systemConfigService.getContactInfo();
     return {
-      reply: [formatPenaltyBlocked(unpaid.total)],
+      reply: [
+        formatPenaltyBlocked(
+          unpaid.total,
+          contact.orangeMoneyNumber ?? '',
+          contact.airtelMoneyNumber ?? '',
+        ),
+      ],
       clearState: true,
     };
   }
@@ -158,11 +216,17 @@ export async function runApplyJobFlow(
   };
 }
 
-export function getApplyJobInitialState(jobOfferId: string): BotState {
+export function getApplyJobInitialState(
+  jobOfferId: string,
+  returnToListOffers?: ApplyJobReturnToListOffersPayload,
+): BotState {
   return {
     flowId: FLOW_IDS.APPLY_JOB,
     step: 1,
-    payload: { jobOfferId },
+    payload: {
+      jobOfferId,
+      ...(returnToListOffers ? { returnToListOffers } : {}),
+    },
     updatedAt: new Date().toISOString(),
   };
 }

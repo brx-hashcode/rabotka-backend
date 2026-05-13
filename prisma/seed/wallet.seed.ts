@@ -1,13 +1,16 @@
 import type { PrismaClient } from '@prisma/client';
-import { WalletOwnerType, WalletTransactionType, PaymentStatus, PaymentMethod, PaymentType } from '@prisma/client';
+import {
+  WalletOwnerType,
+  WalletTransactionType,
+  PaymentStatus,
+  PaymentMethod,
+  PaymentType,
+} from '@prisma/client';
 
 function seedPaymentReference(index: number): string {
   const now = new Date();
   const year = now.getFullYear();
-  const date =
-    year * 10000 +
-    (now.getMonth() + 1) * 100 +
-    now.getDate();
+  const date = year * 10000 + (now.getMonth() + 1) * 100 + now.getDate();
   const shortId = `seed${String(index).padStart(2, '0')}`;
   return `RBK-${year}-${date}-${shortId}`;
 }
@@ -40,7 +43,9 @@ export async function seedWallet(prisma: PrismaClient): Promise<void> {
   });
 
   if (penalties.length === 0) {
-    console.log('[Wallet seed] No unpaid penalties to seed wallet transactions.');
+    console.log(
+      '[Wallet seed] No unpaid penalties to seed wallet transactions.',
+    );
     return;
   }
 
@@ -54,7 +59,7 @@ export async function seedWallet(prisma: PrismaClient): Promise<void> {
       prisma.payment.create({
         data: {
           type: PaymentType.PENALTY,
-          profile_id: penalty.worker_id,
+          profile_id: penalty.profile_id,
           amount: penalty.amount,
           payment_method: PaymentMethod.OTHER,
           transaction_id: transactionId,

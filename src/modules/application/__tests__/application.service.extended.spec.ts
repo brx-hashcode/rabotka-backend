@@ -6,6 +6,12 @@ import {
 } from '@nestjs/common';
 import { ApplicationService } from '../application.service';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
+import { BotNotificationService } from '../../bot/services/bot-notification.service';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { ContactUnlockService } from '../../contact-unlock/contact-unlock.service';
+import { ContractService } from '../../contract/contract.service';
+import { SystemConfigService } from '../../system-config/system-config.service';
+import { MatchingService } from '../../matching/matching.service';
 import { ApplicationStatus, JobOfferStatus, PaymentFlow } from '@prisma/client';
 
 const JOB_OFFER_ID = 'offer-uuid-1';
@@ -78,6 +84,7 @@ describe('ApplicationService (extended)', () => {
       penalty: {
         count: jest.fn(),
         create: jest.fn(),
+        upsert: jest.fn().mockResolvedValue({}),
         findMany: jest.fn(),
         updateMany: jest.fn(),
       },
@@ -91,6 +98,7 @@ describe('ApplicationService (extended)', () => {
       },
       payment: { create: jest.fn() },
       assignment: { create: jest.fn(), updateMany: jest.fn() },
+      $executeRaw: jest.fn().mockResolvedValue(0),
       $transaction: jest.fn().mockImplementation((arg: unknown) => {
         if (typeof arg === 'function') {
           return arg(mockPrismaService);
@@ -103,6 +111,39 @@ describe('ApplicationService (extended)', () => {
       providers: [
         ApplicationService,
         { provide: PrismaService, useValue: mockPrismaService },
+        {
+          provide: BotNotificationService,
+          useValue: {
+            sendNewApplicationToEmployer: jest.fn(),
+            sendApplicationAcceptedToWorker: jest.fn(),
+            sendApplicationRejectedToWorker: jest.fn(),
+            sendCancellationToEmployer: jest.fn(),
+            sendJobCompletedToWorker: jest.fn(),
+            sendJobCancelledByEmployerToWorker: jest.fn(),
+          },
+        },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+        {
+          provide: ContactUnlockService,
+          useValue: { initiateUnlock: jest.fn().mockResolvedValue(undefined) },
+        },
+        {
+          provide: ContractService,
+          useValue: { create: jest.fn().mockResolvedValue(undefined) },
+        },
+        {
+          provide: SystemConfigService,
+          useValue: {
+            getFees: jest.fn().mockResolvedValue({
+              cancellationThresholdHours: 4,
+              lateCancellationPenaltyFcfa: 5000,
+            }),
+          },
+        },
+        {
+          provide: MatchingService,
+          useValue: { indexWorkerProfile: jest.fn().mockResolvedValue(undefined) },
+        },
       ],
     }).compile();
 
@@ -128,9 +169,9 @@ describe('ApplicationService (extended)', () => {
 
     it('throws NotFoundException when application not found', async () => {
       (prisma.application.findUnique as jest.Mock).mockResolvedValue(null);
-      await expect(
-        service.reject(APPLICATION_ID, EMPLOYER_ID),
-      ).rejects.toThrow(NotFoundException);
+      await expect(service.reject(APPLICATION_ID, EMPLOYER_ID)).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('throws ForbiddenException when not the employer', async () => {
@@ -144,9 +185,9 @@ describe('ApplicationService (extended)', () => {
         ...mockApplication,
         status: ApplicationStatus.ACCEPTED,
       });
-      await expect(
-        service.reject(APPLICATION_ID, EMPLOYER_ID),
-      ).rejects.toThrow(BadRequestException);
+      await expect(service.reject(APPLICATION_ID, EMPLOYER_ID)).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('rejects VIEWED application', async () => {
@@ -229,7 +270,9 @@ describe('ApplicationService (extended)', () => {
   describe('wouldPenalizeCancellation()', () => {
     it('returns false when application not found (worker mismatch)', async () => {
       (prisma.application.findUnique as jest.Mock).mockResolvedValue(null);
-      expect(await service.wouldPenalizeCancellation(APPLICATION_ID, WORKER_ID)).toBe(false);
+      expect(
+        await service.wouldPenalizeCancellation(APPLICATION_ID, WORKER_ID),
+      ).toBe(false);
     });
 
     it('returns false when worker_id does not match', async () => {
@@ -237,7 +280,9 @@ describe('ApplicationService (extended)', () => {
         ...mockApplication,
         worker_id: 'other-worker',
       });
-      expect(await service.wouldPenalizeCancellation(APPLICATION_ID, WORKER_ID)).toBe(false);
+      expect(
+        await service.wouldPenalizeCancellation(APPLICATION_ID, WORKER_ID),
+      ).toBe(false);
     });
 
     it('returns false when status is not ACCEPTED or PENDING', async () => {
@@ -245,7 +290,9 @@ describe('ApplicationService (extended)', () => {
         ...mockApplication,
         status: ApplicationStatus.CANCELLED,
       });
-      expect(await service.wouldPenalizeCancellation(APPLICATION_ID, WORKER_ID)).toBe(false);
+      expect(
+        await service.wouldPenalizeCancellation(APPLICATION_ID, WORKER_ID),
+      ).toBe(false);
     });
 
     it('returns true when ACCEPTED and < 4h before', async () => {
@@ -254,7 +301,9 @@ describe('ApplicationService (extended)', () => {
         status: ApplicationStatus.ACCEPTED,
         job_offer: { ...mockJobOffer, scheduled_at: hoursFromNow(2) },
       });
-      expect(await service.wouldPenalizeCancellation(APPLICATION_ID, WORKER_ID)).toBe(true);
+      expect(
+        await service.wouldPenalizeCancellation(APPLICATION_ID, WORKER_ID),
+      ).toBe(true);
     });
 
     it('returns false when > 4h before', async () => {
@@ -263,7 +312,9 @@ describe('ApplicationService (extended)', () => {
         status: ApplicationStatus.ACCEPTED,
         job_offer: { ...mockJobOffer, scheduled_at: hoursFromNow(5) },
       });
-      expect(await service.wouldPenalizeCancellation(APPLICATION_ID, WORKER_ID)).toBe(false);
+      expect(
+        await service.wouldPenalizeCancellation(APPLICATION_ID, WORKER_ID),
+      ).toBe(false);
     });
   });
 
@@ -274,7 +325,9 @@ describe('ApplicationService (extended)', () => {
     };
 
     beforeEach(() => {
-      (prisma.application.findUnique as jest.Mock).mockResolvedValue(acceptedApp);
+      (prisma.application.findUnique as jest.Mock).mockResolvedValue(
+        acceptedApp,
+      );
       (prisma.application.count as jest.Mock).mockResolvedValue(0);
       (prisma.application.update as jest.Mock).mockResolvedValue({
         ...acceptedApp,
@@ -331,7 +384,9 @@ describe('ApplicationService (extended)', () => {
 
   describe('markAsViewed()', () => {
     it('calls updateMany on application', async () => {
-      (prisma.application.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+      (prisma.application.updateMany as jest.Mock).mockResolvedValue({
+        count: 1,
+      });
       await service.markAsViewed(APPLICATION_ID);
       expect(prisma.application.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -421,7 +476,10 @@ describe('ApplicationService (extended)', () => {
     it('returns paginated applications', async () => {
       (prisma.application.findMany as jest.Mock).mockResolvedValue([adminApp]);
       (prisma.application.count as jest.Mock).mockResolvedValue(1);
-      const result = await service.getApplicationsForAdmin({ page: 1, limit: 10 });
+      const result = await service.getApplicationsForAdmin({
+        page: 1,
+        limit: 10,
+      });
       expect(result.data).toHaveLength(1);
       expect(result.total).toBe(1);
       expect(result.data[0].workerName).toBe('Jane Doe');
@@ -477,7 +535,10 @@ describe('ApplicationService (extended)', () => {
       };
       (prisma.application.findMany as jest.Mock).mockResolvedValue([noNameApp]);
       (prisma.application.count as jest.Mock).mockResolvedValue(1);
-      const result = await service.getApplicationsForAdmin({ page: 1, limit: 10 });
+      const result = await service.getApplicationsForAdmin({
+        page: 1,
+        limit: 10,
+      });
       expect(result.data[0].workerName).toBe('—');
     });
   });
@@ -563,7 +624,9 @@ describe('ApplicationService (extended)', () => {
         ...adminApp,
         worker: { ...adminApp.worker, reliability_score: null },
       };
-      (prisma.application.findUnique as jest.Mock).mockResolvedValue(noScoreApp);
+      (prisma.application.findUnique as jest.Mock).mockResolvedValue(
+        noScoreApp,
+      );
       const result = await service.getApplicationDetailForAdmin(APPLICATION_ID);
       expect(result.workerReliabilityScore).toBeNull();
     });
@@ -634,10 +697,10 @@ describe('ApplicationService (extended)', () => {
       ).rejects.toThrow(ForbiddenException);
     });
 
-    it('throws BadRequestException when application not ACCEPTED', async () => {
+    it('throws BadRequestException when application is not ACCEPTED or STARTED', async () => {
       (prisma.application.findUnique as jest.Mock).mockResolvedValue(
-        mockApplication,
-      ); // PENDING
+        mockApplication, // status: PENDING
+      );
       await expect(
         service.markJobCompleted(APPLICATION_ID, EMPLOYER_ID),
       ).rejects.toThrow(BadRequestException);
@@ -651,6 +714,9 @@ describe('ApplicationService (extended)', () => {
           ...mockJobOffer,
           status: JobOfferStatus.COMPLETED,
         },
+      });
+      (prisma.jobOffer.findUnique as jest.Mock).mockResolvedValue({
+        status: JobOfferStatus.COMPLETED,
       });
       await expect(
         service.markJobCompleted(APPLICATION_ID, EMPLOYER_ID),

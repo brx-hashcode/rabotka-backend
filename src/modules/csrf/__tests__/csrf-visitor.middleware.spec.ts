@@ -12,6 +12,7 @@ function makeNext() {
 describe('csrfVisitorMiddleware', () => {
   afterEach(() => {
     delete process.env.NODE_ENV;
+    delete process.env.SECURE_COOKIES;
   });
 
   it('calls next without setting cookie when visitor cookie already exists', () => {
@@ -38,7 +39,7 @@ describe('csrfVisitorMiddleware', () => {
       CSRF_VISITOR_COOKIE,
       expect.any(String),
       expect.objectContaining({
-        sameSite: 'strict',
+        sameSite: 'lax',
         httpOnly: true,
         path: '/',
       }),
@@ -46,8 +47,8 @@ describe('csrfVisitorMiddleware', () => {
     expect(next).toHaveBeenCalled();
   });
 
-  it('sets secure=false in non-production', () => {
-    process.env.NODE_ENV = 'development';
+  it('sets secure=false when SECURE_COOKIES is not set', () => {
+    delete process.env.SECURE_COOKIES;
     const req = { cookies: {} } as any;
     const res = makeResMock();
     const next = makeNext();
@@ -61,8 +62,8 @@ describe('csrfVisitorMiddleware', () => {
     );
   });
 
-  it('sets secure=true in production', () => {
-    process.env.NODE_ENV = 'production';
+  it('sets secure=true when SECURE_COOKIES=true', () => {
+    process.env.SECURE_COOKIES = 'true';
     const req = { cookies: {} } as any;
     const res = makeResMock();
     const next = makeNext();

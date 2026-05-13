@@ -1,9 +1,10 @@
 import { escapeHtml, wrapEmailHtml } from './layout';
 
-export function sendOtpEmail(code: string): string {
+export function sendOtpEmail(code: string, first_name?: string): string {
+  const greeting = first_name ? `Bonjour ${first_name},` : 'Bonjour,';
   const body = `
 
-    <p>Bonjour,</p>
+    <p>${greeting}</p>
 
     <p>
       Voici votre code de vérification :

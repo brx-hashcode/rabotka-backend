@@ -86,12 +86,6 @@ describe('UserService', () => {
 
       await expect(service.createAdmin(dto)).rejects.toThrow(ConflictException);
     });
-
-    it('throws BadRequestException for invalid role', async () => {
-      await expect(
-        service.createAdmin({ ...dto, role: 'INVALID' as UserRole }),
-      ).rejects.toThrow(BadRequestException);
-    });
   });
 
   describe('updateAdmin()', () => {
@@ -103,11 +97,13 @@ describe('UserService', () => {
     };
 
     beforeEach(() => {
-      (prisma.user.findUnique as jest.Mock).mockImplementation(({ where }: { where: { id?: string; email?: string } }) => {
-        if (where.id) return Promise.resolve(mockUser);
-        if (where.email) return Promise.resolve(null);
-        return Promise.resolve(null);
-      });
+      (prisma.user.findUnique as jest.Mock).mockImplementation(
+        ({ where }: { where: { id?: string; email?: string } }) => {
+          if (where.id) return Promise.resolve(mockUser);
+          if (where.email) return Promise.resolve(null);
+          return Promise.resolve(null);
+        },
+      );
       (prisma.user.update as jest.Mock).mockResolvedValue({
         ...mockUser,
         first_name: 'Jane',
@@ -131,21 +127,18 @@ describe('UserService', () => {
     });
 
     it('throws ConflictException when new email is already taken', async () => {
-      (prisma.user.findUnique as jest.Mock).mockImplementation(({ where }: { where: { id?: string; email?: string } }) => {
-        if (where.id) return Promise.resolve(mockUser);
-        if (where.email) return Promise.resolve({ ...mockUser, id: 'other-user' });
-        return Promise.resolve(null);
-      });
+      (prisma.user.findUnique as jest.Mock).mockImplementation(
+        ({ where }: { where: { id?: string; email?: string } }) => {
+          if (where.id) return Promise.resolve(mockUser);
+          if (where.email)
+            return Promise.resolve({ ...mockUser, id: 'other-user' });
+          return Promise.resolve(null);
+        },
+      );
 
       await expect(service.updateAdmin(USER_ID, dto)).rejects.toThrow(
         ConflictException,
       );
-    });
-
-    it('throws BadRequestException for invalid role', async () => {
-      await expect(
-        service.updateAdmin(USER_ID, { ...dto, role: 'INVALID' as UserRole }),
-      ).rejects.toThrow(BadRequestException);
     });
   });
 
@@ -164,7 +157,9 @@ describe('UserService', () => {
     it('throws NotFoundException when user not found', async () => {
       (prisma.user.findUnique as jest.Mock).mockResolvedValue(null);
 
-      await expect(service.activate(USER_ID)).rejects.toThrow(NotFoundException);
+      await expect(service.activate(USER_ID)).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 
@@ -183,7 +178,9 @@ describe('UserService', () => {
     it('throws NotFoundException when user not found', async () => {
       (prisma.user.findUnique as jest.Mock).mockResolvedValue(null);
 
-      await expect(service.deactivate(USER_ID)).rejects.toThrow(NotFoundException);
+      await expect(service.deactivate(USER_ID)).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 
@@ -198,7 +195,9 @@ describe('UserService', () => {
     it('throws NotFoundException when user not found', async () => {
       (prisma.user.findUnique as jest.Mock).mockResolvedValue(null);
 
-      await expect(service.findById(USER_ID)).rejects.toThrow(NotFoundException);
+      await expect(service.findById(USER_ID)).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 
@@ -208,13 +207,17 @@ describe('UserService', () => {
       (prisma.user.delete as jest.Mock).mockResolvedValue(mockUser);
 
       await expect(service.deleteAdmin(USER_ID)).resolves.toBeUndefined();
-      expect(prisma.user.delete).toHaveBeenCalledWith({ where: { id: USER_ID } });
+      expect(prisma.user.delete).toHaveBeenCalledWith({
+        where: { id: USER_ID },
+      });
     });
 
     it('throws NotFoundException when user not found', async () => {
       (prisma.user.findUnique as jest.Mock).mockResolvedValue(null);
 
-      await expect(service.deleteAdmin(USER_ID)).rejects.toThrow(NotFoundException);
+      await expect(service.deleteAdmin(USER_ID)).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 

@@ -9,12 +9,18 @@ describe('NotificationModule', () => {
   });
 
   it('provides NotificationService', () => {
-    const providers: unknown[] = Reflect.getMetadata(MODULE_METADATA.PROVIDERS, NotificationModule);
+    const providers: unknown[] = Reflect.getMetadata(
+      MODULE_METADATA.PROVIDERS,
+      NotificationModule,
+    );
     expect(providers).toContain(NotificationService);
   });
 
   it('exports NotificationService', () => {
-    const exports: unknown[] = Reflect.getMetadata(MODULE_METADATA.EXPORTS, NotificationModule);
+    const exports: unknown[] = Reflect.getMetadata(
+      MODULE_METADATA.EXPORTS,
+      NotificationModule,
+    );
     expect(exports).toContain(NotificationService);
   });
 });

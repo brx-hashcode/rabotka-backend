@@ -1,0 +1,341 @@
+name: Build and Deploy — Develop
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/rabotka-backend
+
+on:
+  pull_request:
+    branches:
+      - develop
+    types:
+      - closed
+
+jobs:
+  # ───────────────────────────────────────────────────────────────────────────
+  # JOB 1: Run test suite
+  # Blocks the build if any test fails — prevents a broken image from ever
+  # reaching GHCR or the VPS.
+  # ───────────────────────────────────────────────────────────────────────────
+  test:
+    name: Test Suite
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.2.2
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: latest
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Generate Prisma client
+        run: pnpm prisma:generate
+
+      - name: Run tests
+        run: pnpm test --no-coverage
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # JOB 2: Build Docker image in CI and push to GHCR
+  # Only runs when the PR was actually merged (not just closed).
+  # Building here (not on VPS) avoids spending VPS compute on builds.
+  # Layer caching via GitHub Actions cache cuts subsequent build times
+  # from ~3 min to under 60 s for typical code-only changes.
+  # ───────────────────────────────────────────────────────────────────────────
+  build-and-push:
+    name: Build and Push Image
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    outputs:
+      image-digest: ${{ steps.push.outputs.digest }}
+      image-sha-tag: ${{ steps.sha-tag.outputs.value }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.2.2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest
+            type=sha,prefix=sha-,format=short
+
+      - name: Extract short SHA tag
+        id: sha-tag
+        run: echo "value=sha-$(echo ${{ github.sha }} | cut -c1-7)" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: production
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # JOB 3: Deploy pre-built image to VPS
+  # Vault secrets are fetched on the runner, written to .env, then scp'd to
+  # the VPS. No secrets are passed over SSH env vars.
+  # On failure, the VPS rolls back to the previous container state.
+  # ───────────────────────────────────────────────────────────────────────────
+  deploy:
+    name: Deploy to VPS (develop)
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.2.2
+
+      - name: Set up SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+
+      - name: Debug connectivity
+        run: |
+          echo "Host: ${{ secrets.VPS_HOST }}"
+          echo "Port: ${{ secrets.VPS_PORT }}"
+          nc -zv -w 5 "${{ secrets.VPS_HOST }}" "${{ secrets.VPS_PORT }}" || echo "Port unreachable"
+
+      - name: Set up known hosts
+        run: |
+          ssh-keyscan -p "${{ secrets.VPS_PORT }}" -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Pull image on VPS
+        run: |
+          IMAGE="ghcr.io/${{ github.repository_owner }}/rabotka-backend:${{ needs.build-and-push.outputs.image-sha-tag }}"
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            -o ServerAliveInterval=60 \
+            -o ServerAliveCountMax=10 \
+            -p "${{ secrets.VPS_PORT }}" "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
+            "docker pull $IMAGE"
+
+      - name: Fetch secrets from Vault and write .env
+        run: |
+          LOGIN_RESPONSE=$(curl -s --request POST \
+            --data "{\"role_id\":\"${{ secrets.VAULT_ROLE_ID }}\",\"secret_id\":\"${{ secrets.VAULT_SECRET_ID }}\"}" \
+            "${{ secrets.VAULT_ADDR }}/v1/auth/approle/login")
+          TOKEN=$(echo "$LOGIN_RESPONSE" | jq -r '.auth.client_token')
+
+          SECRET_RESPONSE=$(curl -s \
+            --header "X-Vault-Token: $TOKEN" \
+            "${{ secrets.VAULT_ADDR }}/v1/secret/data/apps/rabotka-backend-develop")
+          VAULT_SECRET=$(echo "$SECRET_RESPONSE" | jq -r '.data.data')
+
+          cat > /tmp/deploy.env << EOF
+          # --- from Vault ---
+          DATABASE_URL=$(echo "$VAULT_SECRET" | jq -r '.DATABASE_URL')
+          DIRECT_DATABASE_URL=$(echo "$VAULT_SECRET" | jq -r '.DIRECT_DATABASE_URL')
+          REDIS_HOST=$(echo "$VAULT_SECRET" | jq -r '.REDIS_HOST')
+          REDIS_PORT=$(echo "$VAULT_SECRET" | jq -r '.REDIS_PORT')
+          REDIS_PASSWORD=$(echo "$VAULT_SECRET" | jq -r '.REDIS_PASSWORD')
+          JWT_SECRET=$(echo "$VAULT_SECRET" | jq -r '.JWT_SECRET')
+          JWT_EXPIRES_IN=$(echo "$VAULT_SECRET" | jq -r '.JWT_EXPIRES_IN')
+          CSRF_SECRET=$(echo "$VAULT_SECRET" | jq -r '.CSRF_SECRET')
+          ARCJET_KEY=$(echo "$VAULT_SECRET" | jq -r '.ARCJET_KEY')
+          SMTP_HOST=$(echo "$VAULT_SECRET" | jq -r '.SMTP_HOST')
+          SMTP_PORT=$(echo "$VAULT_SECRET" | jq -r '.SMTP_PORT')
+          SMTP_SECURE=$(echo "$VAULT_SECRET" | jq -r '.SMTP_SECURE')
+          SMTP_USER=$(echo "$VAULT_SECRET" | jq -r '.SMTP_USER')
+          SMTP_PASSWORD=$(echo "$VAULT_SECRET" | jq -r '.SMTP_PASSWORD')
+          SMTP_FROM_ADDRESS=$(echo "$VAULT_SECRET" | jq -r '.SMTP_FROM_ADDRESS')
+          FRONTEND_URL=$(echo "$VAULT_SECRET" | jq -r '.FRONTEND_URL')
+          ADMIN_BASE_URL=$(echo "$VAULT_SECRET" | jq -r '.ADMIN_BASE_URL')
+          ALLOW_ORIGINS=$(echo "$VAULT_SECRET" | jq -r '.ALLOW_ORIGINS')
+          SUPER_ADMIN_EMAIL=$(echo "$VAULT_SECRET" | jq -r '.SUPER_ADMIN_EMAIL')
+          # --- static values ---
+          BACKEND_IMAGE=ghcr.io/${{ github.repository_owner }}/rabotka-backend:${{ needs.build-and-push.outputs.image-sha-tag }}
+          NODE_ENV=production
+          AUTH_COOKIE_NAME=access_token
+          LOG_LEVEL=info
+          HEALTH_DISK_CHECK_ENABLED=true
+          HEALTH_DISK_THRESHOLD_PERCENT=0.98
+          THROTTLE_TTL=60000
+          THROTTLE_LIMIT=100
+          RUN_QUEUE_WORKER=false
+          RUN_REMINDER_WORKER=true
+          WHATSAPP_REMINDERS_LOCK_MS=1800000
+          WATERMARK_LOGO_PATH=assets/rabotka-logo.png
+          WATERMARK_OPACITY=0.3
+          SMTP_MOCK=false
+          SMTP_FROM_NAME=Rabotka
+          PDF_OWNER_PASSWORD=password
+          PORT=$(echo "$VAULT_SECRET" | jq -r '.PORT')
+          APP_ENV=develop
+          ARCJET_ENV=development
+          API_DOMAIN=api-rabotka.${{ secrets.INFRA_DOMAIN }}
+          # --- SystemConfig-overridden placeholders ---
+          DRIVER=S3
+          AWS_REGION=placeholder
+          AWS_ACCESS_KEY_ID=placeholder
+          AWS_SECRET_ACCESS_KEY=placeholder
+          AWS_S3_BUCKET=placeholder
+          CLOUDINARY_CLOUD_NAME=placeholder
+          CLOUDINARY_API_KEY=placeholder
+          CLOUDINARY_API_SECRET=placeholder
+          TWILIO_ACCOUNT_SID=placeholder
+          TWILIO_AUTH_TOKEN=placeholder
+          TWILIO_WHATSAPP_FROM=placeholder
+          TWILIO_SMS_FROM=placeholder
+          TWILIO_WEBHOOK_BASE_URL=$(echo "$VAULT_SECRET" | jq -r '.TWILIO_WEBHOOK_BASE_URL')
+          QDRANT_URL=$(echo "$VAULT_SECRET" | jq -r '.QDRANT_URL')
+          QDRANT_API_KEY=$(echo "$VAULT_SECRET" | jq -r '.QDRANT_API_KEY')
+          EOF
+          sed -i 's/^[[:space:]]*//' /tmp/deploy.env
+
+          curl -sf --request POST \
+            --header "X-Vault-Token: $TOKEN" \
+            "${{ secrets.VAULT_ADDR }}/v1/auth/token/revoke-self" > /dev/null || true
+
+      - name: Copy .env to VPS
+        run: |
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o ServerAliveInterval=60 -o ServerAliveCountMax=10 \
+            -P "${{ secrets.VPS_PORT }}" \
+            /tmp/deploy.env "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:~/rabotka-backend/.env"
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            -o ServerAliveInterval=60 \
+            -o ServerAliveCountMax=10 \
+            -p "${{ secrets.VPS_PORT }}" "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
+            "chmod 600 ~/rabotka-backend/.env"
+
+      - name: Deploy on VPS (with rollback on failure)
+        run: |
+          SSH_CMD="ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            -o ServerAliveInterval=60 \
+            -o ServerAliveCountMax=10 \
+            -p ${{ secrets.VPS_PORT }} ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}"
+          NEW_IMAGE="ghcr.io/${{ github.repository_owner }}/rabotka-backend:${{ needs.build-and-push.outputs.image-sha-tag }}"
+
+          $SSH_CMD "
+            set -e
+            cd ~/rabotka-backend
+
+            # Save the image tag currently in use so we can restore it on failure
+            PREVIOUS_IMAGE=\$(docker inspect --format='{{.Config.Image}}' \$(docker compose -f docker-compose.prod.yml ps -q api 2>/dev/null) 2>/dev/null | head -1 || echo '')
+            echo \"Previous image: \$PREVIOUS_IMAGE\"
+
+            rollback() {
+              echo 'Rolling back to previous image...'
+              if [ -n \"\$PREVIOUS_IMAGE\" ]; then
+                sed -i \"s|BACKEND_IMAGE=.*|BACKEND_IMAGE=\$PREVIOUS_IMAGE|\" .env
+                docker compose -f docker-compose.prod.yml up -d --remove-orphans
+              fi
+              exit 1
+            }
+
+            git fetch origin develop
+            git reset --hard origin/develop
+
+            # Swap BACKEND_IMAGE to the immutable SHA tag for this deploy
+            sed -i \"s|BACKEND_IMAGE=.*|BACKEND_IMAGE=$NEW_IMAGE|\" .env
+
+            docker compose -f docker-compose.prod.yml up -d --remove-orphans || rollback
+          "
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # JOB 4: Smoke tests
+  # ───────────────────────────────────────────────────────────────────────────
+  smoke-test:
+    name: Smoke Test (develop)
+    runs-on: ubuntu-latest
+    needs: deploy
+    permissions:
+      contents: read
+
+    steps:
+      - name: Wait for container to stabilize
+        run: sleep 60
+
+      - name: Check health endpoint
+        run: |
+          for i in 1 2 3 4 5; do
+            STATUS=$(curl -o /tmp/health_response.txt -s -w "%{http_code}" \
+              --max-time 30 \
+              "https://api-rabotka.${{ secrets.INFRA_DOMAIN }}/api/v1/health")
+            echo "Attempt $i — HTTP status: $STATUS"
+            cat /tmp/health_response.txt
+            [ "$STATUS" = "200" ] && exit 0
+            sleep 15
+          done
+          echo "Health check failed after 5 attempts"
+          exit 1
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # JOB 5: Slack notification — always runs, reports success or failure
+  # ───────────────────────────────────────────────────────────────────────────
+  notify:
+    name: Slack Notification (develop)
+    runs-on: ubuntu-latest
+    needs: [test, build-and-push, deploy, smoke-test]
+    if: always()
+    permissions:
+      contents: read
+
+    steps:
+      - name: Slack notify success
+        if: ${{ !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
+        uses: slackapi/slack-github-action@v2.0.0
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            {
+              "attachments": [
+                {
+                  "color": "#00B32C",
+                  "text": "Deployment Succeeded (develop)\n${{ github.event.pull_request.title }}\nBranch: ${{ github.ref_name }}\nAuthor: ${{ github.actor }}\nRun: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                }
+              ]
+            }
+
+      - name: Slack notify failure
+        if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
+        uses: slackapi/slack-github-action@v2.0.0
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            {
+              "attachments": [
+                {
+                  "color": "#B3000C",
+                  "text": "Deployment Failed (develop)\n${{ github.event.pull_request.title }}\nBranch: ${{ github.ref_name }}\nAuthor: ${{ github.actor }}\nRun: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                }
+              ]
+            }

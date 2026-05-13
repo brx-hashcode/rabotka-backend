@@ -8,6 +8,8 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
 import Redis from 'ioredis';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { FileService } from '../file/file.service';
@@ -18,9 +20,16 @@ import {
 } from '../whatsapp/templates';
 import { MailService } from '../mail/mail.service';
 import { accountSuspendedEmail } from '../mail/templates';
-import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
+import {
+  REDIS_CONNECTION,
+  REDIS_KEY_PREFIX,
+} from '../../common/services/redis/redis.constants';
+import { WalletService } from '../wallet/wallet.service';
+import { DocumentService } from '../document/document.service';
+import { MatchingService } from '../matching/matching.service';
 import { CreateProfileDto } from './dto/create-profile.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import { AdminUpdateProfileDto } from './dto/admin-update-profile.dto';
 import {
   AccountStatus,
   Prisma,
@@ -28,6 +37,11 @@ import {
   VerificationStatus,
 } from '@prisma/client';
 import { randomBytes } from 'node:crypto';
+
+const PROFILE_TYPE_LABELS: Record<ProfileType, string> = {
+  [ProfileType.WORKER]: 'Travailleur',
+  [ProfileType.EMPLOYER]: 'Employeur',
+};
 
 export type ProfileMeResponse = {
   id: string;
@@ -48,6 +62,7 @@ export type ProfileMeResponse = {
   applicationsCount: number;
   penaltiesCount: number;
   unpaidPenaltiesCount: number;
+  walletBalance: number;
 };
 
 export type ProfilePenaltyItem = {
@@ -56,14 +71,15 @@ export type ProfilePenaltyItem = {
   reason: string | null;
   appliedAt: Date;
   paidAt: Date | null;
-  applicationId: string;
-  jobOfferTitle?: string;
+  applicationId: string | null;
+  jobOfferTitle?: string | null;
 };
 
 export type ProfileApplicationItem = {
   id: string;
   status: string;
   createdAt: Date;
+  contractId: string | null;
   jobOffer: {
     id: string;
     title: string;
@@ -96,6 +112,7 @@ export type AdminProfileListItem = {
   verifiedBy: string | null;
   verifiedAt: Date | null;
   rejectionReason: string | null;
+  kycVerificationNote: string | null;
   reliabilityScore: number | null;
   avatarUrl: string | null;
   createdAt: Date;
@@ -131,6 +148,10 @@ export type AdminVerificationImageItem = {
 export type AdminProfileDetailResponse = AdminProfileListItem & {
   phone: string;
   description: string;
+  categoryId: string | null;
+  categoryName: string | null;
+  categoryIds: string[];
+  categoryNames: string[];
   jobOffersCount: number;
   applicationsCount: number;
   penaltiesCount: number;
@@ -144,7 +165,7 @@ type PrismaTransactionClient = Parameters<
 >[0];
 
 const VERIFICATION_TOKEN_TTL_SECONDS = 1800;
-const VERIFICATION_TOKEN_KEY_PREFIX = 'wa:verify:';
+const VERIFICATION_TOKEN_KEY_PREFIX = `${REDIS_KEY_PREFIX}wa:verify:`;
 
 @Injectable()
 export class ProfileService {
@@ -158,6 +179,10 @@ export class ProfileService {
     private readonly whatsAppService: WhatsAppService,
     private readonly configService: ConfigService,
     private readonly mailService: MailService,
+    private readonly eventEmitter: EventEmitter2,
+    private readonly walletService: WalletService,
+    private readonly documentService: DocumentService,
+    private readonly matchingService: MatchingService,
   ) {}
 
   async findById(id: string): Promise<ProfileMeResponse> {
@@ -192,9 +217,10 @@ export class ProfileService {
       throw new NotFoundException('Profil non trouvé');
     }
 
-    const unpaidPenaltiesCount = await this.prisma.penalty.count({
-      where: { worker_id: id, paid_at: null },
-    });
+    const [unpaidPenaltiesCount, walletBalance] = await Promise.all([
+      this.prisma.penalty.count({ where: { profile_id: id, paid_at: null } }),
+      this.walletService.getProfileWalletBalance(id),
+    ]);
 
     return {
       id: profile.id,
@@ -215,6 +241,7 @@ export class ProfileService {
       applicationsCount: profile._count.applications,
       penaltiesCount: profile._count.penalties,
       unpaidPenaltiesCount,
+      walletBalance,
     };
   }
 
@@ -224,24 +251,38 @@ export class ProfileService {
   ): Promise<ProfileMeResponse> {
     const existingProfile = await this.prisma.profile.findUnique({
       where: { id },
-      select: { id: true, status: true },
+      select: {
+        id: true,
+        status: true,
+        first_name: true,
+        last_name: true,
+        profile_type: true,
+      },
     });
 
     if (!existingProfile) {
       throw new NotFoundException('Profil non trouvé');
     }
 
-    const previousStatus = existingProfile.status;
     const dataToUpdate = this.buildProfileUpdateData(updateProfileDto);
 
     await this.prisma.profile.update({ where: { id }, data: dataToUpdate });
 
-    const transitionedToActive =
-      previousStatus !== AccountStatus.ACTIVE &&
-      updateProfileDto.status === AccountStatus.ACTIVE;
-    if (transitionedToActive) {
-      await this.sendActivationNotification(id);
+    // Re-index in Qdrant after update (fire-and-forget)
+    if (existingProfile.profile_type === ProfileType.WORKER) {
+      this.matchingService.indexWorkerProfile(id).catch((err: unknown) => this.logger.warn(`indexWorkerProfile failed for id`, err instanceof Error ? err.message : String(err)));
+    } else {
+      this.matchingService.indexEmployerProfile(id).catch((err: unknown) => this.logger.warn(`indexEmployerProfile failed for id`, err instanceof Error ? err.message : String(err)));
     }
+
+    this.eventEmitter.emit(AdminNotificationEvent.PROFILE_UPDATED, {
+      event: AdminNotificationEvent.PROFILE_UPDATED,
+      title: 'Profil mis à jour',
+      message: `${existingProfile.first_name} ${existingProfile.last_name} a mis à jour son profil`,
+      entityType: 'profile',
+      entityId: String(id),
+      timestamp: new Date().toISOString(),
+    });
 
     this.logger.log(`Profile updated successfully: ${id}`);
     return this.findById(id);
@@ -255,7 +296,6 @@ export class ProfileService {
     if (dto.lastName !== undefined) data.last_name = dto.lastName;
     if (dto.description !== undefined) data.description = dto.description;
     if (dto.address !== undefined) data.address = dto.address;
-    if (dto.status !== undefined) data.status = dto.status;
     return data;
   }
 
@@ -305,6 +345,7 @@ export class ProfileService {
 
     const uploadResult = await this.fileService.uploadToStorage(avatarFile, {
       folder: 'avatars',
+      access: 'public',
     });
 
     await this.prisma.profile.update({
@@ -320,7 +361,7 @@ export class ProfileService {
     profileId: string,
   ): Promise<ProfilePenaltyItem[]> {
     const penalties = await this.prisma.penalty.findMany({
-      where: { worker_id: profileId },
+      where: { profile_id: profileId },
       orderBy: { applied_at: 'desc' },
       include: {
         application: { include: { job_offer: true } },
@@ -333,7 +374,7 @@ export class ProfileService {
       appliedAt: p.applied_at,
       paidAt: p.paid_at,
       applicationId: p.application_id,
-      jobOfferTitle: p.application?.job_offer?.title,
+      jobOfferTitle: p.application?.job_offer?.title ?? null,
     }));
   }
 
@@ -341,7 +382,7 @@ export class ProfileService {
     const penalty = await this.prisma.penalty.findUnique({
       where: { id: penaltyId },
     });
-    if (penalty?.worker_id !== profileId) {
+    if (penalty?.profile_id !== profileId) {
       throw new NotFoundException('Pénalité introuvable');
     }
     if (penalty.paid_at) {
@@ -365,7 +406,7 @@ export class ProfileService {
         orderBy: { created_at: 'desc' },
         skip,
         take: limit,
-        include: { job_offer: true },
+        include: { job_offer: true, contract: { select: { id: true } } },
       }),
       this.prisma.application.count({ where: { worker_id: profileId } }),
     ]);
@@ -373,6 +414,7 @@ export class ProfileService {
       id: a.id,
       status: a.status,
       createdAt: a.created_at,
+      contractId: a.contract?.id ?? null,
       jobOffer: {
         id: a.job_offer.id,
         title: a.job_offer.title,
@@ -405,16 +447,24 @@ export class ProfileService {
         verified_by: true,
         verified_at: true,
         rejection_reason: true,
+        kyc_verification_note: true,
         reliability_score: true,
         avatar_url: true,
         created_at: true,
         updated_at: true,
+        category: {
+          select: { id: true, name: true },
+        },
+        categories: {
+          select: { category: { select: { id: true, name: true } } },
+        },
         kyc_documents: {
           select: {
             id: true,
             document_type: true,
             document_category: true,
             document_url: true,
+            storage_key: true,
             verification_status: true,
             verified_at: true,
             verified_by: true,
@@ -447,7 +497,7 @@ export class ProfileService {
     }
 
     const unpaidPenaltiesCount = await this.prisma.penalty.count({
-      where: { worker_id: id, paid_at: null },
+      where: { profile_id: id, paid_at: null },
     });
 
     const verifierIds = new Set<string>();
@@ -487,27 +537,38 @@ export class ProfileService {
         : null,
       verifiedAt: profile.verified_at,
       rejectionReason: profile.rejection_reason,
+      kycVerificationNote: profile.kyc_verification_note,
       reliabilityScore: profile.reliability_score,
       avatarUrl: profile.avatar_url,
       createdAt: profile.created_at,
       updatedAt: profile.updated_at,
+      categoryId: profile.category?.id ?? null,
+      categoryName: profile.category?.name ?? null,
+      categoryIds: profile.categories.map((pc) => pc.category.id),
+      categoryNames: profile.categories.map((pc) => pc.category.name),
       jobOffersCount: profile._count.job_offers,
       applicationsCount: profile._count.applications,
       penaltiesCount: profile._count.penalties,
       unpaidPenaltiesCount,
-      kycDocuments: profile.kyc_documents.map((doc) => ({
-        id: doc.id,
-        documentType: doc.document_type,
-        documentCategory: doc.document_category,
-        documentUrl: doc.document_url,
-        verificationStatus: doc.verification_status,
-        verifiedAt: doc.verified_at,
-        verifiedBy: doc.verified_by
-          ? (verifierNames.get(doc.verified_by) ?? doc.verified_by)
-          : null,
-        rejectionReason: doc.rejection_reason,
-        createdAt: doc.created_at,
-      })),
+      kycDocuments: await Promise.all(
+        profile.kyc_documents.map(async (doc) => ({
+          id: doc.id,
+          documentType: doc.document_type,
+          documentCategory: doc.document_category,
+          documentUrl: doc.storage_key
+            ? await this.fileService.getPublicUrl(doc.storage_key)
+            : await this.fileService.getPresignedUrlFromPublicUrl(
+                doc.document_url ?? '',
+              ),
+          verificationStatus: doc.verification_status,
+          verifiedAt: doc.verified_at,
+          verifiedBy: doc.verified_by
+            ? (verifierNames.get(doc.verified_by) ?? doc.verified_by)
+            : null,
+          rejectionReason: doc.rejection_reason,
+          createdAt: doc.created_at,
+        })),
+      ),
       verificationImages: profile.kyc_verification_images.map((img) => ({
         id: img.id,
         imageUrl: img.image_url,
@@ -523,9 +584,14 @@ export class ProfileService {
     profileId: string,
     adminUserId: string,
     decision: 'VERIFIED' | 'REJECTED',
-    reason?: string,
+    reason: string,
     files?: Express.Multer.File[],
   ): Promise<AdminProfileDetailResponse> {
+    const note = reason?.trim();
+    if (!note) {
+      throw new BadRequestException('La raison / la note est requise');
+    }
+
     const profile = await this.prisma.profile.findUnique({
       where: { id: profileId },
       select: { id: true },
@@ -540,6 +606,7 @@ export class ProfileService {
       for (const file of files) {
         const result = await this.fileService.uploadToStorage(file, {
           folder: 'kyc-verification',
+          access: 'public',
         });
         uploadedUrls.push(result.url);
       }
@@ -553,7 +620,8 @@ export class ProfileService {
           verification_status: decision as VerificationStatus,
           verified_by: adminUserId,
           verified_at: now,
-          rejection_reason: decision === 'REJECTED' ? (reason ?? null) : null,
+          kyc_verification_note: note,
+          rejection_reason: decision === 'REJECTED' ? note : null,
         },
       }),
 
@@ -563,7 +631,7 @@ export class ProfileService {
           verification_status: decision as VerificationStatus,
           verified_by: adminUserId,
           verified_at: now,
-          rejection_reason: decision === 'REJECTED' ? (reason ?? null) : null,
+          rejection_reason: decision === 'REJECTED' ? note : null,
         },
       }),
 
@@ -581,6 +649,20 @@ export class ProfileService {
         }),
       ),
     ]);
+
+    const kycProfile = await this.prisma.profile.findUnique({
+      where: { id: profileId },
+      select: { first_name: true, last_name: true },
+    });
+
+    this.eventEmitter.emit(AdminNotificationEvent.PROFILE_KYC_VERIFIED, {
+      event: AdminNotificationEvent.PROFILE_KYC_VERIFIED,
+      title: 'KYC vérifié',
+      message: `KYC de ${kycProfile?.first_name ?? ''} ${kycProfile?.last_name ?? ''} : ${decision}`,
+      entityType: 'profile',
+      entityId: String(profileId),
+      timestamp: new Date().toISOString(),
+    });
 
     return this.getProfileDetailForAdmin(profileId);
   }
@@ -609,6 +691,15 @@ export class ProfileService {
       data: { status },
     });
 
+    this.eventEmitter.emit(AdminNotificationEvent.PROFILE_STATUS_CHANGED, {
+      event: AdminNotificationEvent.PROFILE_STATUS_CHANGED,
+      title: 'Statut profil modifié',
+      message: `${profile.first_name} — statut changé en ${status}`,
+      entityType: 'profile',
+      entityId: String(profileId),
+      timestamp: new Date().toISOString(),
+    });
+
     if (
       profile.status !== AccountStatus.ACTIVE &&
       status === AccountStatus.ACTIVE
@@ -627,6 +718,14 @@ export class ProfileService {
           `Failed to send activation message for profile ${profileId}`,
         );
       }
+
+      this.walletService
+        .grantWelcomeCredit(profileId, profile.profile_type)
+        .catch(() => {
+          this.logger.warn(
+            `Failed to grant welcome credit for profile ${profileId}`,
+          );
+        });
     }
 
     if (
@@ -653,11 +752,16 @@ export class ProfileService {
 
   async updateProfileByAdmin(
     profileId: string,
-    dto: UpdateProfileDto,
+    dto: AdminUpdateProfileDto,
   ): Promise<AdminProfileDetailResponse> {
     const profile = await this.prisma.profile.findUnique({
       where: { id: profileId },
-      select: { id: true },
+      select: {
+        id: true,
+        first_name: true,
+        last_name: true,
+        profile_type: true,
+      },
     });
     if (!profile) {
       throw new NotFoundException('Profil non trouvé');
@@ -673,11 +777,27 @@ export class ProfileService {
       throw err;
     }
 
+    // Re-index in Qdrant after update (fire-and-forget)
+    if (profile.profile_type === ProfileType.WORKER) {
+      this.matchingService.indexWorkerProfile(profileId).catch((err: unknown) => this.logger.warn(`indexWorkerProfile failed for profileId`, err instanceof Error ? err.message : String(err)));
+    } else {
+      this.matchingService.indexEmployerProfile(profileId).catch((err: unknown) => this.logger.warn(`indexEmployerProfile failed for profileId`, err instanceof Error ? err.message : String(err)));
+    }
+
+    this.eventEmitter.emit(AdminNotificationEvent.PROFILE_UPDATED, {
+      event: AdminNotificationEvent.PROFILE_UPDATED,
+      title: 'Profil mis à jour par admin',
+      message: `${profile.first_name} ${profile.last_name} — mis à jour par un administrateur`,
+      entityType: 'profile',
+      entityId: String(profileId),
+      timestamp: new Date().toISOString(),
+    });
+
     return this.getProfileDetailForAdmin(profileId);
   }
 
   private buildAdminProfileUpdateData(
-    dto: UpdateProfileDto,
+    dto: AdminUpdateProfileDto,
   ): Prisma.ProfileUpdateInput {
     const data: Prisma.ProfileUpdateInput = {};
     if (dto.firstName !== undefined) data.first_name = dto.firstName;
@@ -781,6 +901,7 @@ export class ProfileService {
           verified_by: true,
           verified_at: true,
           rejection_reason: true,
+          kyc_verification_note: true,
           reliability_score: true,
           avatar_url: true,
           created_at: true,
@@ -805,6 +926,7 @@ export class ProfileService {
       verifiedBy: p.verified_by,
       verifiedAt: p.verified_at,
       rejectionReason: p.rejection_reason,
+      kycVerificationNote: p.kyc_verification_note,
       reliabilityScore: p.reliability_score,
       avatarUrl: p.avatar_url,
       createdAt: p.created_at,
@@ -829,6 +951,22 @@ export class ProfileService {
       );
 
       this.logger.log(`Profile created successfully: ${profile.id}`);
+
+      // Index profile asynchronously (fire-and-forget, gated by feature flag)
+      if (createProfileDto.profileType === 'WORKER') {
+        this.matchingService.indexWorkerProfile(profile.id).catch((err: unknown) => this.logger.warn(`indexWorkerProfile failed for profile.id`, err instanceof Error ? err.message : String(err)));
+      } else {
+        this.matchingService.indexEmployerProfile(profile.id).catch((err: unknown) => this.logger.warn(`indexEmployerProfile failed for profile.id`, err instanceof Error ? err.message : String(err)));
+      }
+
+      this.eventEmitter.emit(AdminNotificationEvent.PROFILE_CREATED, {
+        event: AdminNotificationEvent.PROFILE_CREATED,
+        title: 'Nouveau profil',
+        message: `Nouveau profil créé : ${createProfileDto.firstName} ${createProfileDto.lastName}`,
+        entityType: 'profile',
+        entityId: String(profile.id),
+        timestamp: new Date().toISOString(),
+      });
 
       return { message: 'Profil créé avec succès' };
     } catch (error: any) {
@@ -855,9 +993,11 @@ export class ProfileService {
     return Promise.all([
       this.fileService.uploadToStorage(kycDocument, {
         folder: 'kyc-documents',
+        access: 'private',
       }),
       this.fileService.uploadToStorage(kycSelfie, {
         folder: 'kyc-documents',
+        access: 'private',
       }),
     ]);
   }
@@ -874,6 +1014,19 @@ export class ProfileService {
         createProfileDto,
       );
 
+      if (
+        createProfileDto.categoryIds &&
+        createProfileDto.categoryIds.length > 0
+      ) {
+        await tx.profileCategory.createMany({
+          data: createProfileDto.categoryIds.map((categoryId) => ({
+            profile_id: createdProfile.id,
+            category_id: categoryId,
+          })),
+          skipDuplicates: true,
+        });
+      }
+
       await this.createFileRecords(tx, createdProfile.id, [
         documentUploadResult,
         selfieUploadResult,
@@ -886,6 +1039,7 @@ export class ProfileService {
           createProfileDto.documentType,
           'DOCUMENT',
           documentUploadResult.url,
+          documentUploadResult.key,
         ),
         this.createKycDocumentRecord(
           tx,
@@ -893,8 +1047,25 @@ export class ProfileService {
           createProfileDto.documentType,
           'SELFIE',
           selfieUploadResult.url,
+          selfieUploadResult.key,
         ),
       ]);
+
+      // Snapshot-link all current AGREEMENT/POLICY platform documents to this profile
+      const platformDocs = await tx.document.findMany({
+        where: { category: { in: ['AGREEMENT', 'POLICY'] } },
+        select: { id: true },
+      });
+      if (platformDocs.length > 0) {
+        await tx.profilePlatformDocumentLink.createMany({
+          data: platformDocs.map((doc) => ({
+            profile_id: createdProfile.id,
+            document_id: doc.id,
+          })),
+          skipDuplicates: true,
+        });
+      }
+
       return createdProfile;
     });
   }
@@ -912,9 +1083,11 @@ export class ProfileService {
         address: createProfileDto.address,
         description: createProfileDto.description || '',
         profile_type: createProfileDto.profileType,
+        category_id: null,
         status: 'PENDING_ACTIVATION',
         verification_status: 'PENDING',
         reliability_score: 100,
+        read_and_approved_policies: true,
       },
       select: {
         id: true,
@@ -951,17 +1124,20 @@ export class ProfileService {
     documentType: CreateProfileDto['documentType'] | undefined,
     documentCategory: 'DOCUMENT' | 'SELFIE',
     documentUrl: string,
+    storageKey?: string,
   ) {
     const data: {
       profile_id: string;
       document_type?: CreateProfileDto['documentType'];
       document_category: 'DOCUMENT' | 'SELFIE';
       document_url: string;
+      storage_key?: string;
       verification_status: 'PENDING';
     } = {
       profile_id: profileId,
       document_category: documentCategory,
       document_url: documentUrl,
+      storage_key: storageKey,
       verification_status: 'PENDING',
     };
 
@@ -1089,5 +1265,56 @@ export class ProfileService {
 
     this.logger.log(`WhatsApp verification token sent to profile ${profileId}`);
     return { success: true };
+  }
+
+  async downloadAgreement(
+    profileId: string,
+  ): Promise<{ buffer: Buffer; filename: string }> {
+    const [template, profile] = await Promise.all([
+      this.prisma.document.findFirst({
+        where: { category: 'AGREEMENT' },
+        orderBy: { created_at: 'desc' },
+      }),
+      this.prisma.profile.findUnique({
+        where: { id: profileId },
+        select: {
+          first_name: true,
+          last_name: true,
+          created_at: true,
+          email: true,
+          profile_type: true,
+        },
+      }),
+    ]);
+
+    if (!template) {
+      throw new NotFoundException("Aucun modèle d'accord trouvé");
+    }
+    if (!profile) {
+      throw new NotFoundException('Profil introuvable');
+    }
+
+    const data: Record<string, string> = {
+      EMAIL: profile.email,
+      LAST_NAME: profile.last_name,
+      FIRST_NAME: profile.first_name,
+      FULL_NAME: `${profile.first_name} ${profile.last_name}`,
+      PROFILE_TYPE: this.getProfileTypeLabel(profile.profile_type),
+      DATE: profile.created_at.toLocaleDateString('fr-FR'),
+    };
+
+    const buffer = await this.documentService.fillDocumentTemplateAsPdf(
+      template.id,
+      data,
+    );
+    const safeName = `${profile.last_name}_accord`.replaceAll(
+      /[^a-zA-Z0-9_-]/g,
+      '_',
+    );
+    return { buffer, filename: `${safeName}.pdf` };
+  }
+
+  private getProfileTypeLabel(profileType: ProfileType): string {
+    return PROFILE_TYPE_LABELS[profileType] ?? (profileType as string);
   }
 }

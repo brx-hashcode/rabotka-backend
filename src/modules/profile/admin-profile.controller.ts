@@ -8,12 +8,15 @@ import {
   Query,
   UseGuards,
   Req,
+  Res,
   UseInterceptors,
   UploadedFiles,
+  UploadedFile,
   BadRequestException,
   NotFoundException,
 } from '@nestjs/common';
-import { FilesInterceptor } from '@nestjs/platform-express';
+import type { Response } from 'express';
+import { FilesInterceptor, FileInterceptor } from '@nestjs/platform-express';
 import {
   ApiTags,
   ApiOperation,
@@ -24,9 +27,13 @@ import {
 } from '@nestjs/swagger';
 import { ProfileService } from './profile.service';
 import { LogService } from '../log/log.service';
+import { UserRole } from '@prisma/client';
 import { AdminAuthGuard } from '../auth/guards/admin-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 import { PaymentRequestService } from '../payment-request/payment-request.service';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
+import { WalletService } from '../wallet/wallet.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { MailService } from '../mail/mail.service';
 import { kycApprovedEmail, kycRejectedEmail } from '../mail/templates';
@@ -37,11 +44,11 @@ import {
   VerifyDecision,
 } from './dto/admin-verify-profile.dto';
 import { AdminUpdateStatusDto } from './dto/admin-update-status.dto';
-import { UpdateProfileDto } from './dto/update-profile.dto';
+import { AdminUpdateProfileDto } from './dto/admin-update-profile.dto';
 
 @ApiTags('Admin – Profiles')
 @Controller('admin/profiles')
-@UseGuards(AdminAuthGuard)
+@UseGuards(AdminAuthGuard, RolesGuard)
 @ApiBearerAuth()
 @ApiCookieAuth()
 export class AdminProfileController {
@@ -52,9 +59,11 @@ export class AdminProfileController {
     private readonly prisma: PrismaService,
     private readonly whatsApp: WhatsAppService,
     private readonly mail: MailService,
+    private readonly walletService: WalletService,
   ) {}
 
   @Get()
+  @Roles(UserRole.MODERATOR)
   @ApiOperation({
     summary: 'List profiles (admin only)',
     description: 'Returns paginated profiles with optional search and filters.',
@@ -76,6 +85,7 @@ export class AdminProfileController {
   }
 
   @Get(':id')
+  @Roles(UserRole.MODERATOR)
   @ApiOperation({
     summary: 'Get profile details (admin only)',
     description: 'Returns full profile details including KYC documents.',
@@ -87,6 +97,7 @@ export class AdminProfileController {
   }
 
   @Get(':id/logs')
+  @Roles(UserRole.MODERATOR)
   @ApiOperation({
     summary: 'Get profile audit logs (admin only)',
     description: 'Returns the audit trail / timeline for a profile.',
@@ -97,12 +108,79 @@ export class AdminProfileController {
   }
 
   @Get(':id/payment-requests')
+  @Roles(UserRole.MODERATOR)
   @ApiOperation({ summary: 'Get payment requests for a profile (admin only)' })
   async getPaymentRequests(@Param('id') id: string) {
     return await this.paymentRequestService.getByProfileId(id);
   }
 
+  @Get(':id/wallet')
+  @Roles(UserRole.MODERATOR)
+  @ApiOperation({
+    summary: 'Get wallet balance and transactions for a profile (admin only)',
+  })
+  async getWallet(@Param('id') id: string) {
+    return await this.walletService.getProfileWalletForAdmin(id);
+  }
+
+  @Post(':id/wallet/credit')
+  @Roles(UserRole.MANAGER)
+  @ApiOperation({ summary: 'Manually credit a profile wallet (admin only)' })
+  async creditWallet(
+    @Param('id') id: string,
+    @Body() body: { amount: number; note?: string },
+    @Req() req: any,
+  ) {
+    const { amount, note } = body;
+    if (!amount || amount <= 0) {
+      throw new BadRequestException('amount must be a positive number');
+    }
+    const profile = await this.prisma.profile.findUnique({ where: { id } });
+    if (!profile) throw new NotFoundException('Profile not found');
+
+    const refType = note ? `admin_manual — ${note}` : 'admin_manual';
+    await this.walletService.creditProfileWallet(
+      id,
+      amount,
+      'MANUAL_CREDIT' as any,
+      refType,
+    );
+
+    await this.logService.create({
+      action: 'WALLET_MANUAL_CREDIT',
+      entityType: 'Profile',
+      entityId: id,
+      userId: req.user?.userId,
+      profileId: id,
+      metadata: { amount, note: note ?? null },
+    });
+
+    return { success: true };
+  }
+
+  @Get(':id/invoices')
+  @Roles(UserRole.MODERATOR)
+  @ApiOperation({ summary: 'Get invoices for a profile (admin only)' })
+  async getInvoices(@Param('id') id: string) {
+    const invoices = await this.prisma.invoice.findMany({
+      where: { profile_id: id },
+      orderBy: { created_at: 'desc' },
+    });
+    return invoices.map((inv) => ({
+      id: inv.id,
+      profileId: inv.profile_id,
+      paymentRequestId: inv.payment_request_id,
+      amount: inv.amount.toString(),
+      reason: inv.reason,
+      relatedEntityType: inv.related_entity_type ?? null,
+      relatedEntityId: inv.related_entity_id ?? null,
+      status: inv.status,
+      createdAt: inv.created_at.toISOString(),
+    }));
+  }
+
   @Get(':id/messages')
+  @Roles(UserRole.MODERATOR)
   @ApiOperation({ summary: 'Get messages for a profile (admin only)' })
   async getMessages(@Param('id') id: string) {
     const messages = await this.prisma.message.findMany({
@@ -130,10 +208,13 @@ export class AdminProfileController {
   }
 
   @Post(':id/messages')
+  @Roles(UserRole.MANAGER)
   @ApiOperation({ summary: 'Send a message to a profile (admin only)' })
+  @UseInterceptors(FilesInterceptor('attachments', 5))
   async sendMessage(
     @Param('id') id: string,
     @Body() body: { channel: 'WHATSAPP' | 'EMAIL'; message: string },
+    @UploadedFiles() files: Express.Multer.File[] | undefined,
     @Req() req: any,
   ) {
     const adminUserId: string | undefined = req.user?.userId;
@@ -150,43 +231,111 @@ export class AdminProfileController {
       throw new BadRequestException('Le message ne peut pas être vide');
     }
 
-    if (body.channel === 'WHATSAPP') {
-      if (!profile.phone) {
-        throw new BadRequestException(
-          "Ce profil n'a pas de numéro de téléphone",
-        );
+    let adminFullName = "L'équipe Rabotka";
+    if (adminUserId) {
+      const admin = await this.prisma.user.findUnique({
+        where: { id: adminUserId },
+        select: { first_name: true, last_name: true },
+      });
+      if (admin) {
+        adminFullName = `${admin.first_name} ${admin.last_name}`.trim();
       }
-      await this.whatsApp.sendTextMessage(
-        profile.phone,
-        body.message.trim(),
-        profile.id,
+    }
+
+    if (body.channel === 'WHATSAPP') {
+      await this.sendWhatsAppMessage(
+        profile,
+        body.message,
+        adminFullName,
         adminUserId,
       );
     } else {
-      if (!profile.email) {
-        throw new BadRequestException("Ce profil n'a pas d'adresse email");
-      }
-      await this.mail.sendMail({
-        to: profile.email,
-        subject: 'Message de Rabotka',
-        html: `<p>${body.message.trim().toString().replaceAll('\n', '<br/>')}</p>`,
-      });
-      // Save outbound email message to history
-      await this.prisma.message.create({
-        data: {
-          profile_id: profile.id,
-          direction: MessageDirection.OUTBOUND,
-          platform: BotPlatform.EMAIL,
-          body: body.message.trim(),
-          ...(adminUserId ? { sent_by_id: adminUserId } : {}),
-        },
-      });
+      await this.sendEmailMessage(
+        profile,
+        body.message,
+        adminFullName,
+        files,
+        adminUserId,
+      );
     }
 
     return { success: true };
   }
 
+  private async sendWhatsAppMessage(
+    profile: { id: string; phone: string | null },
+    message: string,
+    adminFullName: string,
+    adminUserId: string | undefined,
+  ): Promise<void> {
+    if (!profile.phone) {
+      throw new BadRequestException("Ce profil n'a pas de numéro de téléphone");
+    }
+    const whatsappBody = [
+      message.trim(),
+      '',
+      `_${adminFullName}_`,
+      `_L'équipe Rabotka_`,
+    ].join('\n');
+    await this.whatsApp.sendTextMessage(
+      profile.phone,
+      whatsappBody,
+      profile.id,
+      adminUserId,
+    );
+    await this.prisma.message.create({
+      data: {
+        profile_id: profile.id,
+        direction: MessageDirection.OUTBOUND,
+        platform: BotPlatform.WHATSAPP,
+        body: whatsappBody,
+      },
+    });
+  }
+
+  private async sendEmailMessage(
+    profile: { id: string; email: string | null },
+    message: string,
+    adminFullName: string,
+    files: Express.Multer.File[] | undefined,
+    adminUserId: string | undefined,
+  ): Promise<void> {
+    if (!profile.email) {
+      throw new BadRequestException("Ce profil n'a pas d'adresse email");
+    }
+    const MAX_FILE_SIZE = 10 * 1024 * 1024;
+    const oversized = files?.find((f) => f.size > MAX_FILE_SIZE);
+    if (oversized) {
+      throw new BadRequestException(
+        `File "${oversized.originalname}" exceeds the 10 MB limit`,
+      );
+    }
+    const attachments =
+      files?.map((f) => ({
+        filename: f.originalname,
+        content: f.buffer,
+        contentType: f.mimetype,
+      })) ?? [];
+    const messageHtml = message.trim().replaceAll('\n', '<br/>');
+    await this.mail.sendMail({
+      to: profile.email,
+      subject: 'Message de Rabotka',
+      html: `<p>${messageHtml}</p><br/><p>${adminFullName}<br/>L'équipe Rabotka</p>`,
+      ...(attachments.length > 0 && { attachments }),
+    });
+    await this.prisma.message.create({
+      data: {
+        profile_id: profile.id,
+        direction: MessageDirection.OUTBOUND,
+        platform: BotPlatform.EMAIL,
+        body: message.trim(),
+        ...(adminUserId ? { sent_by_id: adminUserId } : {}),
+      },
+    });
+  }
+
   @Patch(':id')
+  @Roles(UserRole.MANAGER)
   @ApiOperation({
     summary: 'Update profile fields (admin only)',
     description: 'Updates profile fields like name, description, address.',
@@ -195,7 +344,7 @@ export class AdminProfileController {
   @ApiResponse({ status: 404, description: 'Profile not found' })
   async update(
     @Param('id') id: string,
-    @Body() dto: UpdateProfileDto,
+    @Body() dto: AdminUpdateProfileDto,
     @Req() req: any,
   ) {
     const result = await this.profileService.updateProfileByAdmin(id, dto);
@@ -211,7 +360,42 @@ export class AdminProfileController {
     return result;
   }
 
+  @Patch(':id/avatar')
+  @Roles(UserRole.MANAGER)
+  @UseInterceptors(FileInterceptor('avatar', {
+    limits: { fileSize: 5 * 1024 * 1024 },
+    fileFilter: (_req, file, cb) => {
+      if (['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype)) {
+        cb(null, true);
+      } else {
+        cb(new BadRequestException('Only JPEG, PNG or WEBP images are allowed'), false);
+      }
+    },
+  }))
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({ summary: 'Update profile avatar (admin only)' })
+  @ApiResponse({ status: 200, description: 'Avatar updated' })
+  async updateAvatar(
+    @Param('id') id: string,
+    @UploadedFile() file: Express.Multer.File | undefined,
+    @Req() req: any,
+  ) {
+    if (!file) throw new BadRequestException('No avatar file provided');
+    const result = await this.profileService.updateAvatar(id, file);
+    const adminUserId = req.user?.userId;
+    await this.logService.create({
+      action: 'AVATAR_UPDATED',
+      entityType: 'Profile',
+      entityId: id,
+      userId: adminUserId,
+      profileId: id,
+      metadata: {},
+    });
+    return result;
+  }
+
   @Patch(':id/verify')
+  @Roles(UserRole.MANAGER)
   @UseInterceptors(FilesInterceptor('files', 10))
   @ApiConsumes('multipart/form-data')
   @ApiOperation({
@@ -247,7 +431,7 @@ export class AdminProfileController {
       profileId: id,
       metadata: {
         decision: dto.decision,
-        ...(dto.reason ? { reason: dto.reason } : {}),
+        reason: dto.reason,
       },
     });
 
@@ -280,6 +464,7 @@ export class AdminProfileController {
   }
 
   @Patch(':id/status')
+  @Roles(UserRole.MANAGER)
   @ApiOperation({
     summary: 'Update profile account status (admin only)',
     description:
@@ -314,6 +499,7 @@ export class AdminProfileController {
   }
 
   @Post(':id/send-verification-link')
+  @Roles(UserRole.MANAGER)
   @ApiOperation({
     summary: 'Resend WhatsApp verification link (admin only)',
     description:
@@ -324,27 +510,25 @@ export class AdminProfileController {
     return await this.profileService.requestWhatsAppVerification(id);
   }
 
-  @Patch(':id/confirm-payment')
+  @Get(':id/agreement/download')
+  @Roles(UserRole.MODERATOR)
   @ApiOperation({
-    summary: 'Confirm or reject payment for a profile (admin only)',
-    description:
-      'Manually confirms or rejects a payment. Accepting activates the profile; rejecting keeps it in PENDING_ACTIVATION.',
+    summary:
+      'Download the platform agreement prefilled with profile data (admin only)',
   })
-  @ApiResponse({ status: 200, description: 'Updated profile details' })
-  @ApiResponse({ status: 404, description: 'Profile not found' })
-  async confirmPayment(
+  @ApiResponse({ status: 200, description: 'PDF file stream' })
+  @ApiResponse({
+    status: 404,
+    description: 'No agreement template found or profile not found',
+  })
+  async downloadProfileAgreement(
     @Param('id') id: string,
-    @Body() body: { decision: 'ACCEPTED' | 'REJECTED'; reason?: string },
-    @Req() req: any,
+    @Res() res: Response,
   ) {
-    const adminUserId = req.user?.userId;
-    await this.paymentRequestService.manualDecide(
-      id,
-      body.decision,
-      body.reason,
-      adminUserId as string,
-    );
-
-    return this.profileService.getProfileDetailForAdmin(id);
+    const { buffer, filename } =
+      await this.profileService.downloadAgreement(id);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(buffer);
   }
 }

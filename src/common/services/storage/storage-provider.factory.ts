@@ -56,10 +56,13 @@ export class StorageProviderFactory {
    * Returns a ConfigService-compatible proxy where non-empty DB values
    * override env vars for the active storage driver.
    */
-  private async buildConfigProxy(driver: string): Promise<Pick<ConfigService, 'get'>> {
-    const overrides = (await this.systemConfigService
-      ?.getStorageEnvOverrides(driver)
-      .catch(() => undefined)) ?? {};
+  private async buildConfigProxy(
+    driver: string,
+  ): Promise<Pick<ConfigService, 'get'>> {
+    const overrides =
+      (await this.systemConfigService
+        ?.getStorageEnvOverrides(driver)
+        .catch(() => undefined)) ?? {};
 
     return {
       get: <T = string>(key: string, defaultValue?: T): T => {

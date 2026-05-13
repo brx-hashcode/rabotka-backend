@@ -15,28 +15,25 @@ export type CandidatureListItem = {
 export function formatCandidaturesListPage(
   items: CandidatureListItem[],
   hasMore: boolean,
+  page = 0,
+  totalPages = 1,
 ): string {
-  const lines = ['*CANDIDATURES REÇUES*', ''];
+  const pageLabel = totalPages > 1 ? ` (page ${page + 1}/${totalPages})` : '';
+  const lines = [`*CANDIDATURES REÇUES*${pageLabel}`, ''];
   items.forEach((app, i) => {
-    const num = i + 1;
     const offerLine = app.offerTitle ? `    Offre: ${app.offerTitle}` : '';
     lines.push(
-      `${num}. ${app.firstName} ${app.lastName}`,
+      `${i + 1}. ${app.firstName} ${app.lastName}`,
       `    Score: ${app.score}/100`,
       ...(offerLine ? [offerLine] : []),
     );
   });
   lines.push('');
-  if (hasMore) {
-    lines.push(
-      '6️⃣ Voir plus',
-      '7️⃣ Menu',
-      '',
-      "Veuillez taper un numéro (1-5), 6️⃣ pour la suite, ou 7️⃣ / 'Menu' pour revenir au menu",
-    );
-  } else {
-    lines.push("Veuillez taper un numéro ou 'Menu' pour revenir au menu");
-  }
+  const actions: string[] = [];
+  if (page > 0) actions.push('P- Page précédente');
+  if (hasMore) actions.push('Voir plus');
+  actions.push('M- Menu principal');
+  lines.push(...actions, '', 'Tapez un numéro pour voir le détail.');
   return lines.join('\n');
 }
 
@@ -63,23 +60,21 @@ export function formatCandidatureDetail(params: {
     '',
     `Nom: ${params.lastName}`,
     `Prénom: ${params.firstName}`,
-    `Email: ${params.email}`,
     ...(params.offerTitle ? [`Offre: ${params.offerTitle}`] : []),
     `Statut: ${statusLabel}`,
     `Score: ${params.score}/100`,
     '',
     '*Actions:*',
-    '1️⃣ Accepter',
-    '2️⃣ Refuser',
-    '3️⃣ Retour',
-    "4️⃣ Menu (ou tapez 'Menu')",
+    '1- Accepter',
+    '2- Refuser',
+    '3- Retour',
+    "4- Menu (ou tapez 'Menu')",
     '',
     '*Tapez le numéro correspondant.*',
   ];
   const body = bodyLines.join('\n');
 
   if (params.avatarUrl) {
-    // Start with [IMG:...] so WhatsAppController sends it as media + caption
     const caption = body ? `\n${body}` : '';
     return `[IMG:${params.avatarUrl}]${caption}`;
   }
@@ -97,7 +92,8 @@ function formatDate(d: Date): string {
   });
 }
 
-function formatPaymentFlow(flow: string): string {
+function formatPaymentFlow(flow: string | null): string {
+  if (!flow) return '';
   const map: Record<string, string> = {
     HOURLY: 'par heure',
     DAILY: 'par jour',
@@ -106,10 +102,17 @@ function formatPaymentFlow(flow: string): string {
   return map[flow] ?? flow;
 }
 
+function formatAmount(amount: number | null, flow: string | null): string {
+  if (amount == null) return 'Prix à négocier';
+  const flowLabel = formatPaymentFlow(flow);
+  return `${amount.toLocaleString('fr-FR')} FCFA${flowLabel ? ` ${flowLabel}` : ''}`;
+}
+
 function applicationStatusLabel(status: string): string {
   if (status === 'ACCEPTED') return '*ACCEPTÉE*';
   if (status === 'PENDING') return '*EN ATTENTE*';
-  if (status === 'VIEWED') return '*VUE PAR L\'EMPLOYEUR*';
+  if (status === 'VIEWED') return "*VUE PAR L'EMPLOYEUR*";
+  if (status === 'WAITING_PAYMENT') return '*EN ATTENTE DE PAIEMENT*';
   if (status === 'REJECTED') return '*REFUSÉE*';
   return '*ANNULÉE*';
 }
@@ -122,7 +125,7 @@ export type ApplicationForList = {
     title: string;
     scheduled_at: Date;
     amount: number;
-    payment_flow: string;
+    payment_flow: string | null;
     address: string;
     status: string;
   };
@@ -141,7 +144,6 @@ export function formatMyApplicationsList(
   for (let i = 0; i < applications.length; i++) {
     const app = applications[i];
     const num = i + 1;
-    const flowLabel = formatPaymentFlow(app.job_offer.payment_flow);
     const statusText = applicationStatusLabel(app.status).replaceAll('*', '');
     const address =
       app.job_offer.address.length > ADDRESS_MAX
@@ -149,7 +151,7 @@ export function formatMyApplicationsList(
         : app.job_offer.address;
     lines.push(
       `${num}. ${app.job_offer.title}`,
-      `    Montant: ${app.job_offer.amount.toLocaleString('fr-FR')} FCFA ${flowLabel}`,
+      `    Montant: ${formatAmount(app.job_offer.amount, app.job_offer.payment_flow)}`,
       `    Date: ${formatDate(app.job_offer.scheduled_at)}`,
       `    Statut: ${statusText}`,
       `    Adresse: ${address}`,
@@ -167,7 +169,7 @@ export type MyApplicationDetailParams = {
   jobTitle: string;
   scheduled_at: Date;
   amount: number;
-  payment_flow: string;
+  payment_flow: string | null;
   address: string;
   status: string;
 };
@@ -175,21 +177,20 @@ export type MyApplicationDetailParams = {
 export function formatMyApplicationDetailWithCancel(
   params: MyApplicationDetailParams,
 ): string {
-  const flowLabel = formatPaymentFlow(params.payment_flow);
   const statusText = applicationStatusLabel(params.status).replaceAll('*', '');
   return [
     '*CANDIDATURE SÉLECTIONNÉE*',
     '',
     `*Offre*: ${params.jobTitle}`,
     `*Date*: ${formatDate(params.scheduled_at)}`,
-    `*Montant*: ${params.amount.toLocaleString('fr-FR')} FCFA ${flowLabel}`,
+    `*Montant*: ${formatAmount(params.amount, params.payment_flow)}`,
     `*Statut*: ${statusText}`,
     `*Adresse*: ${params.address}`,
     '',
     '*Actions:*',
-    '1️⃣ Annuler cette candidature',
-    '2️⃣ Retour à la liste',
-    "3️⃣ Menu (ou tapez 'Menu')",
+    '1- Annuler cette candidature',
+    '2- Retour à la liste',
+    "3- Menu (ou tapez 'Menu')",
     '',
     '*Tapez le numéro correspondant.*',
   ].join('\n');
@@ -198,20 +199,67 @@ export function formatMyApplicationDetailWithCancel(
 export function formatMyApplicationDetailReadOnly(
   params: MyApplicationDetailParams,
 ): string {
-  const flowLabel = formatPaymentFlow(params.payment_flow);
   const statusText = applicationStatusLabel(params.status).replaceAll('*', '');
   return [
     '*CANDIDATURE SÉLECTIONNÉE*',
     '',
     `*Offre*: ${params.jobTitle}`,
     `*Date*: ${formatDate(params.scheduled_at)}`,
-    `*Montant*: ${params.amount.toLocaleString('fr-FR')} FCFA ${flowLabel}`,
+    `*Montant*: ${formatAmount(params.amount, params.payment_flow)}`,
     `*Statut*: ${statusText}`,
     `*Adresse*: ${params.address}`,
     '',
     '*Actions:*',
-    '1️⃣ Retour à la liste',
-    "2️⃣ Menu (ou tapez 'Menu')",
+    '1- Retour à la liste',
+    "2- Menu (ou tapez 'Menu')",
+    '',
+    '*Tapez le numéro correspondant.*',
+  ].join('\n');
+}
+
+export function formatMyApplicationDetailWaitingPayment(
+  params: MyApplicationDetailParams,
+): string {
+  const statusText = applicationStatusLabel(params.status).replaceAll('*', '');
+  return [
+    '*CANDIDATURE SÉLECTIONNÉE*',
+    '',
+    `*Offre*: ${params.jobTitle}`,
+    `*Date*: ${formatDate(params.scheduled_at)}`,
+    `*Montant*: ${formatAmount(params.amount, params.payment_flow)}`,
+    `*Statut*: ${statusText}`,
+    `*Adresse*: ${params.address}`,
+    '',
+    '*Actions:*',
+    '1- Effectuer le paiement',
+    '2- Rejeter et annuler',
+    '3- Retour à la liste',
+    "4- Menu (ou tapez 'Menu')",
+    '',
+    '*Tapez le numéro correspondant.*',
+  ].join('\n');
+}
+
+export function formatMyApplicationDetailWaitingPaymentPaid(
+  params: MyApplicationDetailParams,
+): string {
+  const statusText = applicationStatusLabel(params.status).replaceAll('*', '');
+  return [
+    '*CANDIDATURE SÉLECTIONNÉE*',
+    '',
+    `*Offre*: ${params.jobTitle}`,
+    `*Date*: ${formatDate(params.scheduled_at)}`,
+    `*Montant*: ${formatAmount(params.amount, params.payment_flow)}`,
+    `*Statut*: ${statusText}`,
+    `*Adresse*: ${params.address}`,
+    '',
+    '✅ Votre paiement est déjà confirmé.',
+    "⏳ En attente du paiement de l'autre partie.",
+    '',
+    '*Actions:*',
+    '1- Rejeter et annuler',
+    '2- Retour à la liste',
+    "3- Menu (ou tapez 'Menu')",
     '',
     '*Tapez le numéro correspondant.*',
   ].join('\n');
@@ -220,27 +268,35 @@ export function formatMyApplicationDetailReadOnly(
 export function formatApplyConfirmation(params: {
   title: string;
   scheduled_at: Date;
-  amount: number;
-  payment_flow: string;
+  amount: number | null;
+  payment_flow: string | null;
   address: string;
   workerName: string;
   workerPhone: string;
   workerEmail: string;
   reliabilityScore: number | null;
+  lateCancellationPenalty?: number;
+  /** Hours before mission start; below this, late cancellation rules apply (system: fees.cancellation_threshold_hours). */
+  lateCancellationThresholdHours?: number;
 }): string {
-  const flow = formatPaymentFlow(params.payment_flow);
+  const penalty = params.lateCancellationPenalty ?? 5000;
+  const thresholdHours =
+    params.lateCancellationThresholdHours != null &&
+    params.lateCancellationThresholdHours > 0
+      ? params.lateCancellationThresholdHours
+      : 4;
   return [
     '*Vous êtes sur le point de postuler*',
     '',
     `*Offre*: ${params.title}`,
     `*Date*: ${formatDate(params.scheduled_at)}`,
-    `*Montant*: ${params.amount.toLocaleString('fr-FR')} FCFA ${flow}`,
+    `*Montant*: ${formatAmount(params.amount, params.payment_flow)}`,
     `*Adresse*: ${params.address}`,
     '',
     '*ENGAGEMENT IMPORTANT*:',
     "Vos informations seront partagées avec l'employeur",
     'Vous vous engagez à être présent et ponctuel',
-    'Annulation < 4h avant = pénalité de *5,000 FCFA*',
+    `Annulation < ${thresholdHours}h avant = pénalité de *${penalty.toLocaleString('fr-FR')} FCFA*`,
     'Impact sur votre score de fiabilité',
     '',
     '*Votre profil sera envoyé*:',
@@ -250,8 +306,8 @@ export function formatApplyConfirmation(params: {
     `*Score*: ${params.reliabilityScore ?? 100}/100`,
     '',
     '*Confirmez-vous votre candidature ?*',
-    '1️⃣ Oui, je postule',
-    '2️⃣ Non, retour',
+    '1- Oui, je postule',
+    '2- Non, retour',
     '',
     '*Tapez le numéro correspondant.*',
   ].join('\n');
@@ -275,8 +331,6 @@ export function formatApplicationSentSuccess(offerTitle: string): string {
 export function formatNewApplicationToEmployer(params: {
   offerTitle: string;
   workerName: string;
-  workerPhone: string;
-  workerEmail: string;
   workerDescription: string;
   reliabilityScore: number | null;
   completedMissions: number;
@@ -293,20 +347,22 @@ export function formatNewApplicationToEmployer(params: {
     '*CANDIDAT*:',
     SEP,
     `*Nom*: ${params.workerName}`,
-    `*Téléphone*: ${params.workerPhone}`,
-    `*Email*: ${params.workerEmail}`,
-    `*Description*: ${params.workerDescription.slice(0, 200)}${params.workerDescription.length > 200 ? '...' : ''}`,
-    SEP,
     `*Score de fiabilité*: ${score}/100`,
     `*Missions complétées*: ${params.completedMissions}`,
+    ...(params.workerDescription
+      ? [`*Description*: ${params.workerDescription.slice(0, 150)}${params.workerDescription.length > 150 ? '...' : ''}`]
+      : []),
+    SEP,
     '',
     `*Rendez-vous prévu*: ${formatDate(params.scheduledAt)}`,
-    `*Adresse*: ${params.address}`,
+    `*Adresse*: ${params.address.length > 80 ? params.address.slice(0, 80) + '...' : params.address}`,
+    '',
+    '📞 *Les coordonnées du candidat seront révélées après le paiement du déverrouillage.*',
     '',
     '*Actions*:',
-    '1️⃣ Accepter le candidat',
-    '2️⃣ Voir son profil complet',
-    '3️⃣ Refuser',
+    '1- Accepter le candidat',
+    '2- Voir son profil complet',
+    '3- Refuser',
     '',
     'Tapez le numéro correspondant.',
   ].join('\n');
@@ -343,7 +399,14 @@ export function formatCancellationToEmployer(params: {
   scheduledAt: Date;
   reason: string | null;
   wasLatePenalty: boolean;
+  /** Same as fees.cancellation_threshold_hours; used when wasLatePenalty is true. */
+  lateCancellationThresholdHours?: number;
 }): string {
+  const thresholdHours =
+    params.lateCancellationThresholdHours != null &&
+    params.lateCancellationThresholdHours > 0
+      ? params.lateCancellationThresholdHours
+      : 4;
   const lines = [
     '*ANNULATION DE CANDIDATURE*',
     '',
@@ -356,7 +419,7 @@ export function formatCancellationToEmployer(params: {
   ];
   if (params.wasLatePenalty) {
     lines.push(
-      '*Note*: Cette annulation était tardive (< 4h). Une pénalité a été appliquée au worker.',
+      `*Note*: Cette annulation était tardive (< ${thresholdHours}h). Une pénalité a été appliquée au worker.`,
       '',
     );
   }
@@ -364,9 +427,9 @@ export function formatCancellationToEmployer(params: {
     "*Votre offre est de nouveau disponible pour d'autres candidats.*",
     '',
     '*Actions*:',
-    '1️⃣ Voir les autres candidatures',
-    "2️⃣ Republier l'offre",
-    "3️⃣ Supprimer l'offre",
+    '1- Voir les autres candidatures',
+    "2- Republier l'offre",
+    "3- Supprimer l'offre",
     '',
     'Tapez le numéro correspondant.',
   );
@@ -391,15 +454,18 @@ export type FilledJobListItem = {
   title: string;
   workerName: string;
   scheduled_at: Date | string;
-  amount: number;
-  payment_flow: string;
+  amount: number | null;
+  payment_flow: string | null;
 };
 
 export function formatFilledJobsListPage(
   items: FilledJobListItem[],
   hasMore: boolean,
+  page = 0,
+  totalPages = 1,
 ): string {
-  const lines = ['*MISSIONS POURVUES*', ''];
+  const pageLabel = totalPages > 1 ? ` (page ${page + 1}/${totalPages})` : '';
+  const lines = [`*MISSIONS POURVUES*${pageLabel}`, ''];
   if (items.length === 0) {
     lines.push(
       "Aucune mission pourvue pour le moment. Tapez 'Menu' pour revenir.",
@@ -407,40 +473,37 @@ export function formatFilledJobsListPage(
     return lines.join('\n');
   }
   items.forEach((item, i) => {
-    const num = i + 1;
-    const flowLabel = formatPaymentFlow(item.payment_flow);
     lines.push(
-      `${num}. ${item.title}`,
+      `${i + 1}. ${item.title}`,
       `    Worker: ${item.workerName}`,
       `    Date: ${formatDatePublic(item.scheduled_at)}`,
-      `    Montant: ${item.amount.toLocaleString('fr-FR')} FCFA ${flowLabel}`,
+      `    Montant: ${formatAmount(item.amount, item.payment_flow)}`,
       '',
     );
   });
-  if (hasMore) {
-    lines.push('6️⃣ Voir plus', '7️⃣ Menu', '');
-  }
-  lines.push(
-    "Tapez un numéro pour sélectionner une mission, ou 'Menu' pour revenir.",
-  );
+  const actions: string[] = [];
+  if (page > 0) actions.push('P- Page précédente');
+  if (hasMore) actions.push('Voir plus');
+  actions.push('M- Menu principal');
+  lines.push(...actions, '', 'Tapez un numéro pour sélectionner une mission.');
   return lines.join('\n');
 }
 
 export function formatFilledJobDetail(params: FilledJobListItem): string {
-  const flowLabel = formatPaymentFlow(params.payment_flow);
+  const flowLabel = formatPaymentFlow(params.payment_flow ?? '');
   return [
     '*Mission sélectionnée*',
     '',
     `*Offre*: ${params.title}`,
     `*Worker*: ${params.workerName}`,
     `*Date*: ${formatDatePublic(params.scheduled_at)}`,
-    `*Montant*: ${params.amount.toLocaleString('fr-FR')} FCFA ${flowLabel}`,
+    `*Montant*: ${formatAmount(params.amount, params.payment_flow)}`,
     '',
     '*Actions:*',
-    '1️⃣ Marquer comme terminée (verser le gain au worker)',
-    "2️⃣ Annuler (réouvrir l'offre)",
-    '3️⃣ Retour',
-    '4️⃣ Menu',
+    '1- Marquer comme terminée (verser le gain au worker)',
+    "2- Annuler (réouvrir l'offre)",
+    '3- Retour',
+    '4- Menu',
     '',
     'Tapez le numéro correspondant.',
   ].join('\n');

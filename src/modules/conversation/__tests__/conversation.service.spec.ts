@@ -3,6 +3,7 @@ import { ConversationService } from '../conversation.service';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { BotOrchestratorService } from '../../bot/services/bot-orchestrator.service';
 import { WhatsAppService } from '../../whatsapp/whatsapp.service';
+import { REDIS_CONNECTION } from '../../../common/services/redis/redis.constants';
 
 const PROFILE_ID = 'profile-uuid-1';
 const PHONE = '+24200000001';
@@ -33,6 +34,10 @@ describe('ConversationService', () => {
         { provide: PrismaService, useValue: mockPrismaService },
         { provide: BotOrchestratorService, useValue: mockBotOrchestrator },
         { provide: WhatsAppService, useValue: mockWhatsApp },
+        {
+          provide: REDIS_CONNECTION,
+          useValue: { get: jest.fn(), set: jest.fn(), del: jest.fn() },
+        },
       ],
     }).compile();
 
@@ -43,19 +48,22 @@ describe('ConversationService', () => {
   });
 
   describe('handleIncomingMessage()', () => {
-    it('returns empty array for unknown phone', async () => {
+    it('returns registration message for unknown phone', async () => {
       (prisma.profile.findUnique as jest.Mock).mockResolvedValue(null);
 
-      const replies = await service.handleIncomingMessage(PHONE, 'Hello');
+      const result = await service.handleIncomingMessage(PHONE, 'Hello');
 
-      expect(replies).toEqual([]);
+      expect(result.profileId).toBeNull();
+      expect(result.replies).toHaveLength(1);
       expect(botOrchestrator.handle).not.toHaveBeenCalled();
     });
 
     it('upserts conversation, saves message, and calls bot orchestrator', async () => {
-      (prisma.profile.findUnique as jest.Mock).mockResolvedValue({ id: PROFILE_ID });
+      (prisma.profile.findUnique as jest.Mock).mockResolvedValue({
+        id: PROFILE_ID,
+      });
 
-      const replies = await service.handleIncomingMessage(PHONE, 'Hello');
+      const result = await service.handleIncomingMessage(PHONE, 'Hello');
 
       expect(prisma.conversation.upsert).toHaveBeenCalled();
       expect(whatsApp.saveMessage).toHaveBeenCalledWith(
@@ -63,26 +71,41 @@ describe('ConversationService', () => {
         'INBOUND',
         'Hello',
       );
-      expect(botOrchestrator.handle).toHaveBeenCalledWith(PROFILE_ID, PHONE, 'Hello');
-      expect(replies).toEqual(['Hello from bot']);
+      expect(botOrchestrator.handle).toHaveBeenCalledWith(
+        PROFILE_ID,
+        PHONE,
+        'Hello',
+      );
+      expect(result.replies).toEqual(['Hello from bot']);
     });
 
     it('filters out empty/falsy replies from bot', async () => {
-      (prisma.profile.findUnique as jest.Mock).mockResolvedValue({ id: PROFILE_ID });
-      (botOrchestrator.handle as jest.Mock).mockResolvedValue(['Valid reply', '', null, 'Another reply']);
+      (prisma.profile.findUnique as jest.Mock).mockResolvedValue({
+        id: PROFILE_ID,
+      });
+      (botOrchestrator.handle as jest.Mock).mockResolvedValue([
+        'Valid reply',
+        '',
+        null,
+        'Another reply',
+      ]);
 
-      const replies = await service.handleIncomingMessage(PHONE, 'Hello');
+      const result = await service.handleIncomingMessage(PHONE, 'Hello');
 
-      expect(replies).toEqual(['Valid reply', 'Another reply']);
+      expect(result.replies).toEqual(['Valid reply', 'Another reply']);
     });
 
     it('still processes message even if saveMessage throws', async () => {
-      (prisma.profile.findUnique as jest.Mock).mockResolvedValue({ id: PROFILE_ID });
-      (whatsApp.saveMessage as jest.Mock).mockRejectedValue(new Error('DB error'));
+      (prisma.profile.findUnique as jest.Mock).mockResolvedValue({
+        id: PROFILE_ID,
+      });
+      (whatsApp.saveMessage as jest.Mock).mockRejectedValue(
+        new Error('DB error'),
+      );
 
-      const replies = await service.handleIncomingMessage(PHONE, 'Hello');
+      const result = await service.handleIncomingMessage(PHONE, 'Hello');
 
-      expect(replies).toEqual(['Hello from bot']);
+      expect(result.replies).toEqual(['Hello from bot']);
     });
   });
 });

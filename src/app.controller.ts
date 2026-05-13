@@ -18,7 +18,10 @@ export class AppController {
     schema: {
       type: 'object',
       properties: {
-        message: { type: 'string', example: "Bienvenue ! L'API Rabotka est prête à vous servir." },
+        message: {
+          type: 'string',
+          example: "Bienvenue ! L'API Rabotka est prête à vous servir.",
+        },
       },
     },
   })

@@ -1,13 +1,14 @@
-import { Global, Module } from '@nestjs/common';
+import { Global, Module, forwardRef } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
 import { SystemConfigService } from './system-config.service';
 import { SystemConfigController } from './system-config.controller';
+import { SystemConfigPublicController } from './system-config-public.controller';
 
 @Global()
 @Module({
-  imports: [AuthModule],
+  imports: [forwardRef(() => AuthModule)],
   providers: [SystemConfigService],
-  controllers: [SystemConfigController],
+  controllers: [SystemConfigController, SystemConfigPublicController],
   exports: [SystemConfigService],
 })
 export class SystemConfigModule {}

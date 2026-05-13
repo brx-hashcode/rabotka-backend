@@ -1,4 +1,5 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { StorageService } from '../../common/services/storage/storage.service';
 import { ImageWatermarkService } from '../../common/services/image-watermark/image-watermark.service';
@@ -12,6 +13,7 @@ export class FileService {
     private readonly prisma: PrismaService,
     private readonly storageService: StorageService,
     private readonly imageWatermarkService: ImageWatermarkService,
+    private readonly configService: ConfigService,
   ) {}
 
   /**
@@ -22,6 +24,7 @@ export class FileService {
     file: Express.Multer.File,
     options?: {
       folder?: string;
+      access?: 'public' | 'private';
     },
   ) {
     if (!file.buffer || !file.originalname) {
@@ -31,6 +34,7 @@ export class FileService {
     const uploadOptions: UploadOptions = {
       mimeType: file.mimetype,
       folder: options?.folder,
+      access: options?.access,
     };
 
     const fileBuffer: Buffer = Buffer.isBuffer(file.buffer)
@@ -99,6 +103,26 @@ export class FileService {
     }
   }
 
+  async getPresignedUrl(storageKey: string): Promise<string> {
+    return this.storageService.getUrl(storageKey, { access: 'private' });
+  }
+
+  async getPublicUrl(storageKey: string): Promise<string> {
+    return this.storageService.getUrl(storageKey, { access: 'public' });
+  }
+
+  async getPresignedUrlFromPublicUrl(publicUrl: string): Promise<string> {
+    const base = this.configService
+      .get<string>('CLOUDFLARE_PUBLIC_BASE_URL', '')
+      .trim()
+      .replace(/\/+$/, '');
+    if (base && publicUrl.startsWith(base + '/')) {
+      const key = decodeURI(publicUrl.slice(base.length + 1));
+      return this.storageService.getUrl(key, { access: 'public' });
+    }
+    return publicUrl;
+  }
+
   async getFile(id: string) {
     const file = await this.prisma.file.findUnique({
       where: { id },
@@ -108,7 +132,9 @@ export class FileService {
       throw new NotFoundException(`File with ID ${id} not found`);
     }
 
-    const url = await this.storageService.getUrl(file.storage_key);
+    const url = await this.storageService.getUrl(file.storage_key, {
+      access: 'public',
+    });
 
     return {
       ...file,
@@ -146,7 +172,9 @@ export class FileService {
 
     const filesWithUrls = await Promise.all(
       files.map(async (file) => {
-        const url = await this.storageService.getUrl(file.storage_key);
+        const url = await this.storageService.getUrl(file.storage_key, {
+          access: 'public',
+        });
         return {
           ...file,
           url,

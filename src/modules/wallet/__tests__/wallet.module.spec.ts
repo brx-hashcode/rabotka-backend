@@ -10,17 +10,26 @@ describe('WalletModule', () => {
   });
 
   it('provides WalletService', () => {
-    const providers: unknown[] = Reflect.getMetadata(MODULE_METADATA.PROVIDERS, WalletModule);
+    const providers: unknown[] = Reflect.getMetadata(
+      MODULE_METADATA.PROVIDERS,
+      WalletModule,
+    );
     expect(providers).toContain(WalletService);
   });
 
   it('registers WalletController', () => {
-    const controllers: unknown[] = Reflect.getMetadata(MODULE_METADATA.CONTROLLERS, WalletModule);
+    const controllers: unknown[] = Reflect.getMetadata(
+      MODULE_METADATA.CONTROLLERS,
+      WalletModule,
+    );
     expect(controllers).toContain(WalletController);
   });
 
   it('exports WalletService', () => {
-    const exports: unknown[] = Reflect.getMetadata(MODULE_METADATA.EXPORTS, WalletModule);
+    const exports: unknown[] = Reflect.getMetadata(
+      MODULE_METADATA.EXPORTS,
+      WalletModule,
+    );
     expect(exports).toContain(WalletService);
   });
 });

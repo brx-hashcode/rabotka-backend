@@ -1,6 +1,6 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, forwardRef, Inject } from '@nestjs/common';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
-import { AccountStatus } from '@prisma/client';
+import { AccountStatus, BillingStatus } from '@prisma/client';
 import { JobOfferService } from '../../job-offer/job-offer.service';
 import { ApplicationService } from '../../application/application.service';
 import { BotStateService } from './bot-state.service';
@@ -17,8 +17,13 @@ import {
   accountSuspendedBotMessage,
   hasPenaltiesBotMessage,
 } from '../messages/menu.messages';
+import {
+  whatsappAlreadyVerifiedMessage,
+  welcomeActivationMessage,
+} from '../../whatsapp/templates';
 import type { BotProfile, BotState } from '../types/bot-state.types';
-import { FLOW_IDS } from '../bot.constants';
+import type { FlowContext, FlowResult } from '../types/flow.types';
+import { FLOW_IDS, CMD_MENU, CMD_VERIFY_WHATSAPP } from '../bot.constants';
 import {
   runPublishJobFlow,
   getPublishJobInitialState,
@@ -61,8 +66,38 @@ import {
   getVerifyWhatsappInitialState,
 } from '../flows/verify-whatsapp.flow';
 import { PaymentService } from '../../payments/payment.service';
+import { ContactUnlockService } from '../../contact-unlock/contact-unlock.service';
+import { WalletService } from '../../wallet/wallet.service';
+import {
+  runUnlockContactFlow,
+  getUnlockContactInitialState,
+} from '../flows/unlock-contact.flow';
+import {
+  runRecommendedJobsFlow,
+  getRecommendedJobsInitialState,
+} from '../flows/recommended-jobs.flow';
+import {
+  formatRecommendedList,
+  jobOfferToOfferListItem,
+} from '../messages/offers.messages';
+import {
+  runRecommendedProfilesFlow,
+  getRecommendedProfilesInitialState,
+} from '../flows/recommended-profiles.flow';
+import { runRateAssignmentFlow } from '../flows/rate-assignment.flow';
+import { MatchingService } from '../../matching/matching.service';
+import { QueueService } from '../../../common/services/queue/queue.service';
+import { runRepublishExpiredJobFlow } from '../flows/republish-expired-job.flow';
+import {
+  runJobStatusCheckFlow,
+} from '../flows/job-status-check.flow';
+import { InterestSignalService } from '../../interest-graph/interest-signal.service';
+import { InterestRecommendationService } from '../../interest-graph/interest-recommendation.service';
+import { InvoiceService } from '../../invoice/invoice.service';
 
-const INACTIVE_MESSAGE = `Votre compte est créé mais pas encore activé. Cliquez sur le lien de confirmation que nous vous avons envoyé par WhatsApp pour l’activer.`;
+const INACTIVE_MESSAGE = `Votre compte est créé mais pas encore activé. Cliquez sur le lien de confirmation que nous vous avons envoyé par WhatsApp pour l'activer.`;
+
+const WHATSAPP_NOT_CONNECTED_MESSAGE = `⚠️ *Compte non active*\n\nVotre numéro WhatsApp n'a pas encore été vérifié. Sans vérification, vous ne pouvez pas accéder à la plateforme.\n\nTapez *VERIFIER* pour activer votre compte instantanément.`;
 
 const NOT_FOUND_MESSAGE = `Ce numéro n'est pas encore enregistré. Inscrivez-vous sur notre site pour créer votre compte.`;
 
@@ -88,13 +123,17 @@ export class BotOrchestratorService {
     private readonly applicationService: ApplicationService,
     private readonly notificationService: BotNotificationService,
     private readonly systemConfig: SystemConfigService,
+    @Inject(forwardRef(() => PaymentService))
     private readonly paymentService: PaymentService,
+    private readonly contactUnlockService: ContactUnlockService,
+    private readonly walletService: WalletService,
+    private readonly matchingService: MatchingService,
+    private readonly interestSignalService: InterestSignalService,
+    private readonly interestRecommendationService: InterestRecommendationService,
+    private readonly invoiceService: InvoiceService,
+    private readonly queueService: QueueService,
   ) {}
 
-  /**
-   * Handle incoming message and return reply lines to send.
-   * Caller (ConversationService) is responsible for sending via WhatsApp.
-   */
   async handle(
     profileId: string,
     _phone: string,
@@ -104,89 +143,138 @@ export class BotOrchestratorService {
     if (!profile) {
       return [NOT_FOUND_MESSAGE];
     }
-    if (
-      profile.status !== AccountStatus.ACTIVE &&
-      profile.status !== AccountStatus.SUSPENDED &&
-      profile.status !== AccountStatus.PENDING_ACTIVATION
-    ) {
+
+    const allowed: string[] = [
+      AccountStatus.ACTIVE,
+      AccountStatus.SUSPENDED,
+      AccountStatus.PENDING_ACTIVATION,
+    ];
+    if (!allowed.includes(profile.status)) {
       return [INACTIVE_MESSAGE];
     }
 
-    const botProfile: BotProfile = {
-      id: profile.id,
-      first_name: profile.first_name,
-      last_name: profile.last_name,
-      phone: profile.phone,
-      email: profile.email,
-      profile_type: profile.profile_type as BotProfile['profile_type'],
-      status: profile.status,
-      reliability_score: profile.reliability_score,
-    };
+    const botProfile = this.toBotProfile(profile);
 
-    // Intercept suspended accounts — inform and direct to support
     if (profile.status === AccountStatus.SUSPENDED) {
       const contact = await this.systemConfig.getContactInfo();
-      return [accountSuspendedBotMessage(contact)];
+      return [accountSuspendedBotMessage({ email: contact.email ?? '', phone: contact.phone ?? '', address: contact.address ?? '' })];
     }
 
-    // Intercept PENDING_ACTIVATION accounts — force verify-whatsapp flow
+    const normalizedInput = text.trim().toLowerCase();
+    if (CMD_VERIFY_WHATSAPP.includes(normalizedInput)) {
+      if (profile.whatsapp_connected) {
+        return [whatsappAlreadyVerifiedMessage()];
+      }
+      if (profile.status === AccountStatus.PENDING_ACTIVATION) {
+        await this.prisma.profile.update({
+          where: { id: profileId },
+          data: { whatsapp_connected: true, status: AccountStatus.ACTIVE },
+        });
+        const profileType = profile.profile_type;
+        const creditAmount = await this.walletService
+          .grantWelcomeCredit(profileId, profileType)
+          .catch(() => 0);
+        const wallet = await this.walletService
+          .getOrCreateProfileWallet(profileId)
+          .catch(() => ({ balance: creditAmount }));
+        return [
+          welcomeActivationMessage(
+            profile.first_name,
+            creditAmount,
+            profile.profile_type,
+            wallet.balance,
+          ),
+        ];
+      }
+      await this.prisma.profile.update({
+        where: { id: profileId },
+        data: { whatsapp_connected: true },
+      });
+      return [whatsappAlreadyVerifiedMessage()];
+    }
+
+    if (!profile.whatsapp_connected) {
+      return [WHATSAPP_NOT_CONNECTED_MESSAGE];
+    }
+
     if (profile.status === AccountStatus.PENDING_ACTIVATION) {
+      return this.handlePendingActivation(profileId, text, botProfile);
+    }
+
+    if (profile.billing_status !== BillingStatus.CLEAR) {
+      const normalized = text.trim().toLowerCase();
       const state = await this.botState.get(profileId);
-      const isReturningToFlow = state?.flowId === FLOW_IDS.VERIFY_WHATSAPP;
-      const flowState = isReturningToFlow
-        ? state
-        : getVerifyWhatsappInitialState();
-      // On first contact pass empty string so the flow shows the prompt;
-      // on subsequent messages (already in the flow) pass the actual text.
-      const flowInput = isReturningToFlow ? text : '';
-      const result = await runVerifyWhatsappFlow(
-        flowState,
-        flowInput,
-        botProfile,
-        {
-          prisma: this.prisma,
-          paymentService: this.paymentService,
-        },
-      );
-      if (result.clearState) {
-        await this.botState.clear(profileId);
-      } else if (result.nextState) {
-        await this.botState.set(profileId, result.nextState);
+      const canContinueFlow =
+        state?.flowId === FLOW_IDS.PAY_PENALTIES ||
+        state?.flowId === FLOW_IDS.UNLOCK_CONTACT ||
+        state?.flowId === FLOW_IDS.MY_APPLICATIONS;
+      const canOpenPaymentRelatedCommand =
+        normalized === 'payer' ||
+        normalized === 'pay' ||
+        normalized === 'contact' ||
+        normalized === 'unlock' ||
+        normalized === 'mes candidatures' ||
+        normalized === 'mes applications' ||
+        normalized === 'paiements en attente';
+      if (canContinueFlow || canOpenPaymentRelatedCommand) {
+        return this.routeMessage(profileId, text, profile, botProfile);
       }
-      return result.reply;
+      return [hasPenaltiesBotMessage()];
     }
 
-    // Intercept accounts with unpaid penalties — block all functionalities
-    if (profile.status === AccountStatus.ACTIVE) {
-      const unpaid =
-        await this.applicationService.getUnpaidPenalties(profileId);
-      if (unpaid.count > 0) {
-        return [hasPenaltiesBotMessage()];
-      }
-    }
+    return this.routeMessage(profileId, text, profile, botProfile);
+  }
 
+  private async handlePendingActivation(
+    profileId: string,
+    text: string,
+    botProfile: BotProfile,
+  ): Promise<string[]> {
+    const state = await this.botState.get(profileId);
+    const isReturningToFlow = state?.flowId === FLOW_IDS.VERIFY_WHATSAPP;
+    const flowState = isReturningToFlow
+      ? state
+      : getVerifyWhatsappInitialState();
+    const flowInput = isReturningToFlow ? text : '';
+    const result = await runVerifyWhatsappFlow(
+      flowState,
+      flowInput,
+      botProfile,
+      this.buildFlowContext(),
+    );
+    if (result.clearState) {
+      await this.botState.clear(profileId);
+    } else if (result.nextState) {
+      await this.botState.set(profileId, result.nextState);
+    }
+    return result.reply;
+  }
+
+  private async routeMessage(
+    profileId: string,
+    text: string,
+    profile: NonNullable<Awaited<ReturnType<typeof this.loadProfile>>>,
+    botProfile: BotProfile,
+  ): Promise<string[]> {
     try {
       const state = await this.botState.get(profileId);
       const route = this.router.route(text, botProfile, state);
 
       if (route.type === 'flow') {
-        const result = await this.runFlow(
+        return this.runFlow(
           route.flowId,
           route.state,
           text,
           botProfile,
           profileId,
         );
-        return result;
       }
 
       if (route.type === 'command') {
         return this.handleCommandRoute(route, profile, profileId, botProfile);
       }
 
-      // No active state + no recognized command — show session expired if input
-      // looks like the user was mid-flow before Redis TTL expired.
-      if (!state && looksLikeFlowInput(text)) {
+      if (!state) {
         return [
           '⏱ *Session expirée.* Votre conversation précédente a expiré.',
           handleMenuCommand(botProfile),
@@ -198,6 +286,21 @@ export class BotOrchestratorService {
       this.logger.warn('Bot handling error', err);
       return [ERROR_MESSAGE];
     }
+  }
+
+  private toBotProfile(
+    profile: NonNullable<Awaited<ReturnType<typeof this.loadProfile>>>,
+  ): BotProfile {
+    return {
+      id: profile.id,
+      first_name: profile.first_name,
+      last_name: profile.last_name,
+      phone: profile.phone,
+      email: profile.email,
+      profile_type: profile.profile_type as BotProfile['profile_type'],
+      status: profile.status,
+      reliability_score: profile.reliability_score,
+    };
   }
 
   private async runFlow(
@@ -214,24 +317,18 @@ export class BotOrchestratorService {
     }
 
     if (result.clearState) {
-      // Save draft if employer exits publish-job mid-flow (step > 1)
-      if (
-        state.flowId === FLOW_IDS.PUBLISH_JOB &&
-        state.step > 1 &&
-        state.payload &&
-        Object.keys(state.payload).length > 0
-      ) {
+      if (state.flowId === FLOW_IDS.PUBLISH_JOB) {
         await this.botDraft
-          .saveDraft(profileId, {
-            step: state.step,
-            payload: state.payload,
-            savedAt: new Date().toISOString(),
-          })
-          .catch(() => {});
+          .clearDraft(profileId)
+          .catch((err: unknown) =>
+            this.logger.warn(
+              `clearDraft failed for profile ${profileId}`,
+              err instanceof Error ? err.message : String(err),
+            ),
+          );
       }
       await this.botState.clear(profileId);
-      // After clearing, check inbox for pending applications
-      const nextInboxItem = await this.botInbox.shift(profileId);
+      const nextInboxItem = await this.botInbox.peekAndShift(profileId);
       if (nextInboxItem?.type === 'new_application') {
         const nextState = getAcceptRefuseInitialState(
           nextInboxItem.applicationId,
@@ -250,10 +347,19 @@ export class BotOrchestratorService {
         ];
       }
     } else if (result.nextState) {
+      if (result.clearDraft) {
+        await this.botDraft
+          .clearDraft(profileId)
+          .catch((err: unknown) =>
+            this.logger.warn(
+              `clearDraft failed for profile ${profileId}`,
+              err instanceof Error ? err.message : String(err),
+            ),
+          );
+      }
       await this.botState.set(profileId, result.nextState);
     }
 
-    // Append inbox badge if employer has pending items
     if (profile.profile_type === 'EMPLOYER') {
       const inboxCount = await this.botInbox.count(profileId);
       if (inboxCount > 0) {
@@ -268,80 +374,207 @@ export class BotOrchestratorService {
     return result.reply;
   }
 
+  private buildFlowContext(): FlowContext {
+    return {
+      prisma: this.prisma,
+      jobOfferService: this.jobOfferService,
+      applicationService: this.applicationService,
+      notificationService: this.notificationService,
+      systemConfigService: this.systemConfig,
+      paymentService: this.paymentService,
+      commands: this.commands,
+      contactUnlockService: this.contactUnlockService,
+      walletService: this.walletService,
+      interestSignalService: this.interestSignalService,
+      invoiceService: this.invoiceService,
+    };
+  }
+
   private executeFlow(
     flowId: string,
     state: BotState,
     input: string,
     profile: BotProfile,
-  ): Promise<{
-    reply: string[];
-    clearState?: boolean;
-    nextState?: BotState;
-  } | null> {
-    const deps = {
-      jobOfferService: this.jobOfferService,
-      applicationService: this.applicationService,
-      notificationService: this.notificationService,
-    };
-    type FlowResult = {
-      reply: string[];
-      clearState?: boolean;
-      nextState?: BotState;
-    };
+  ): Promise<FlowResult | null> {
+    const ctx = this.buildFlowContext();
     const runners: Record<string, () => Promise<FlowResult>> = {
       [FLOW_IDS.PUBLISH_JOB]: () =>
-        runPublishJobFlow(state, input, profile, {
-          jobOfferService: deps.jobOfferService,
-          paymentService: this.paymentService,
-        }),
+        runPublishJobFlow(state, input, profile, ctx),
       [FLOW_IDS.LIST_OFFERS]: () =>
-        runListOffersFlow(state, input, profile, {
-          jobOfferService: deps.jobOfferService,
-        }),
-      [FLOW_IDS.APPLY_JOB]: () => runApplyJobFlow(state, input, profile, deps),
+        runListOffersFlow(state, input, profile, ctx),
+      [FLOW_IDS.APPLY_JOB]: () => runApplyJobFlow(state, input, profile, ctx),
       [FLOW_IDS.ACCEPT_REFUSE_CANDIDATE]: () =>
-        runAcceptRefuseCandidateFlow(state, input, profile, {
-          applicationService: deps.applicationService,
-          notificationService: deps.notificationService,
-        }),
-      [FLOW_IDS.CANCEL_APPLICATION]: () =>
-        runCancelApplicationFlow(state, input, profile, {
-          applicationService: deps.applicationService,
-          notificationService: deps.notificationService,
-        }),
+        runAcceptRefuseCandidateFlow(state, input, profile, ctx),
+      [FLOW_IDS.CANCEL_APPLICATION]: async () => {
+        const { cancellationThresholdHours } =
+          await this.systemConfig.getFees();
+        return runCancelApplicationFlow(state, input, profile, {
+          ...ctx,
+          cancellationThresholdHours,
+        });
+      },
       [FLOW_IDS.MY_APPLICATIONS]: () =>
-        runMyApplicationsFlow(state, input, profile, {
-          applicationService: deps.applicationService,
-          notificationService: deps.notificationService,
-        }),
+        runMyApplicationsFlow(state, input, profile, ctx),
       [FLOW_IDS.CANDIDATURES_LIST]: () =>
-        runCandidaturesListFlow(state, input, profile, {
-          applicationService: deps.applicationService,
-          notificationService: deps.notificationService,
-        }),
+        runCandidaturesListFlow(state, input, profile, ctx),
       [FLOW_IDS.MANAGE_FILLED_JOB]: () =>
-        runManageFilledJobFlow(state, input, profile, {
-          applicationService: deps.applicationService,
-          notificationService: deps.notificationService,
-        }),
+        runManageFilledJobFlow(state, input, profile, ctx),
       [FLOW_IDS.PROFILE_SUBMENU]: () =>
-        runProfileSubmenuFlow(state, input, profile, {
-          commands: this.commands,
-        }),
+        runProfileSubmenuFlow(state, input, profile, ctx),
       [FLOW_IDS.PAY_PENALTIES]: () =>
-        runPayPenaltiesFlow(state, input, profile, {
-          applicationService: deps.applicationService,
-        }),
+        runPayPenaltiesFlow(state, input, profile, ctx),
       [FLOW_IDS.RESOLVE_PENALTIES]: () =>
-        runResolvePenaltiesFlow(state, input, profile, {
-          prisma: this.prisma,
-          paymentService: this.paymentService,
-        }),
+        runResolvePenaltiesFlow(state, input, profile, ctx),
       [FLOW_IDS.VERIFY_WHATSAPP]: () =>
-        runVerifyWhatsappFlow(state, input, profile, {
-          prisma: this.prisma,
-          paymentService: this.paymentService,
+        runVerifyWhatsappFlow(state, input, profile, ctx),
+      [FLOW_IDS.UNLOCK_CONTACT]: () =>
+        runUnlockContactFlow(state, input, profile, {
+          ...ctx,
+          botNotification: this.notificationService,
         }),
+      [FLOW_IDS.RECOMMENDED_JOBS]: () =>
+        runRecommendedJobsFlow(state, input, profile, ctx),
+      [FLOW_IDS.REPUBLISH_EXPIRED_JOB]: () =>
+        runRepublishExpiredJobFlow(state, input, profile, {
+          prisma: this.prisma,
+          jobOfferService: this.jobOfferService,
+        }),
+      [FLOW_IDS.JOB_STATUS_CHECK]: () =>
+        runJobStatusCheckFlow(state, input, profile, {
+          applicationService: this.applicationService,
+          notificationService: this.notificationService,
+          queueService: this.queueService,
+          employerId: profile.id,
+        }),
+      [FLOW_IDS.RECOMMENDED_PROFILES]: () =>
+        runRecommendedProfilesFlow(state, input, profile, {
+          prisma: this.prisma,
+          systemConfig: this.systemConfig,
+          contactUnlockService: this.contactUnlockService,
+          walletService: this.walletService,
+          paymentService: this.paymentService,
+          botNotification: this.notificationService,
+          employerProfileId: profile.id,
+          interestSignalService: this.interestSignalService,
+          invoiceService: this.invoiceService,
+        }),
+      [FLOW_IDS.RATE_ASSIGNMENT]: () =>
+        runRateAssignmentFlow(state, input, profile, { prisma: this.prisma }),
+      [FLOW_IDS.MY_OFFERS]: async () => {
+        const currentPage = (state.payload?.page as number) ?? 0;
+        const offerIds = (state.payload?.offerIds as string[]) ?? [];
+        const trimmed = input.trim();
+        const normalized = trimmed.toLowerCase();
+        if (CMD_MENU.some((c) => normalized === c || normalized === 'm')) {
+          return { reply: [handleMenuCommand(profile)], clearState: true };
+        }
+        const PAGE_SIZE = 5;
+        const { total } = await this.jobOfferService.findByEmployerId(
+          profile.id,
+          { page: 0, pageSize: 1 },
+        );
+        const totalPages = Math.ceil(total / PAGE_SIZE);
+        if (normalized === 's' && currentPage < totalPages - 1) {
+          const nextPage = currentPage + 1;
+          const { message, offerIds: newOfferIds } =
+            await this.commands.myOffers(profile, nextPage);
+          return {
+            reply: [message],
+            nextState: {
+              flowId: FLOW_IDS.MY_OFFERS,
+              step: 0,
+              payload: { page: nextPage, offerIds: newOfferIds },
+              updatedAt: new Date().toISOString(),
+            },
+          };
+        }
+        if (normalized === 'p' && currentPage > 0) {
+          const prevPage = currentPage - 1;
+          const { message, offerIds: newOfferIds } =
+            await this.commands.myOffers(profile, prevPage);
+          return {
+            reply: [message],
+            nextState: {
+              flowId: FLOW_IDS.MY_OFFERS,
+              step: 0,
+              payload: { page: prevPage, offerIds: newOfferIds },
+              updatedAt: new Date().toISOString(),
+            },
+          };
+        }
+        const choice = /^\d+$/.test(trimmed) ? Number.parseInt(trimmed, 10) : 0;
+        const pageStart = currentPage * PAGE_SIZE;
+        const localIndex = choice - pageStart - 1;
+        if (
+          choice >= pageStart + 1 &&
+          choice <= pageStart + offerIds.length &&
+          localIndex >= 0 &&
+          localIndex < offerIds.length
+        ) {
+          const offerId = offerIds[localIndex];
+          const offer = await this.jobOfferService.findById(offerId);
+          if (!offer) {
+            return {
+              reply: ["*Cette offre n'existe plus. Tapez 'Menu'.*"],
+              clearState: true,
+            };
+          }
+          const dateStr = offer.scheduled_at.toLocaleDateString('fr-FR', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+          });
+          const amountStr =
+            offer.amount != null
+              ? `${offer.amount.toLocaleString('fr-FR')} FCFA`
+              : 'Prix à négocier';
+          const detail = [
+            `*${offer.title}*`,
+            '',
+            `• Date : ${dateStr}`,
+            `• Montant : ${amountStr}`,
+            `• Adresse : ${offer.address}`,
+            `• Statut : ${offer.status}`,
+            `• Candidatures : ${offer.acceptedCount ?? 0}/${offer.quantity}`,
+            offer.description ? `• Description : ${offer.description}` : '',
+            '',
+            'R- Retour à la liste',
+            'M- Menu principal',
+          ]
+            .filter((l) => l !== '')
+            .join('\n');
+          return {
+            reply: [detail],
+            nextState: {
+              ...state,
+              payload: {
+                ...state.payload,
+                step: 'detail',
+                selectedOfferId: offerId,
+              },
+              updatedAt: new Date().toISOString(),
+            },
+          };
+        }
+        if ((state.payload?.step as string) === 'detail') {
+          if (normalized === 'r') {
+            const { message, offerIds: refreshedIds } =
+              await this.commands.myOffers(profile, currentPage);
+            return {
+              reply: [message],
+              nextState: {
+                flowId: FLOW_IDS.MY_OFFERS,
+                step: 0,
+                payload: { page: currentPage, offerIds: refreshedIds },
+                updatedAt: new Date().toISOString(),
+              },
+            };
+          }
+        }
+        return { reply: [unknownCommandMessage()], nextState: state };
+      },
     };
     const runner = runners[flowId];
     return runner ? runner() : Promise.resolve(null);
@@ -361,19 +594,36 @@ export class BotOrchestratorService {
       my_applications: () =>
         this.handleMyApplicationsCommand(profile, profileId),
 
+      pending_payments: () =>
+        this.handlePendingPaymentsCommand(botProfile, profileId),
+
       candidatures_received: () =>
         this.handleCandidaturesReceivedCommand(botProfile, profileId),
 
       filled_jobs: () => this.handleFilledJobsCommand(botProfile, profileId),
 
+      my_offers: () => this.handleMyOffersCommand(botProfile, profileId, 0),
+
       profile: () => this.handleProfileCommand(profileId, botProfile),
 
       pay_penalties: () =>
         this.handlePayPenaltiesCommand(botProfile, profileId),
+
+      unlock_contact: () =>
+        this.handleUnlockContactCommand(botProfile, profileId),
+
+      recommended_jobs: () =>
+        this.handleRecommendedJobsCommand(botProfile, profileId),
+
+      recommended_profiles: () =>
+        this.handleRecommendedProfilesCommand(botProfile, profileId),
     };
 
     const handler = commandHandlers[route.commandId];
     if (handler) return handler();
+    if (route.commandId === 'menu') {
+      await this.botState.clear(profileId);
+    }
     const reply = await this.runCommand(route.commandId, botProfile);
     return [reply];
   }
@@ -393,7 +643,6 @@ export class BotOrchestratorService {
   ): Promise<string[]> {
     const draft = await this.botDraft.getDraft(profileId);
     if (draft && draft.step > 1) {
-      // Offer to resume the saved draft — step 0 = draft-resume decision
       const resumeState: BotState = {
         flowId: FLOW_IDS.PUBLISH_JOB,
         step: 0,
@@ -435,6 +684,22 @@ export class BotOrchestratorService {
     return [result.message];
   }
 
+  private async handlePendingPaymentsCommand(
+    botProfile: BotProfile,
+    profileId: string,
+  ): Promise<string[]> {
+    const result = await this.commands.pendingPayments(botProfile);
+    const applicationIds: string[] | undefined = result.applicationIds;
+    if (applicationIds != null && applicationIds.length > 0) {
+      const state = getMyApplicationsInitialState(
+        applicationIds,
+        'pending_payments',
+      );
+      await this.botState.set(profileId, state);
+    }
+    return [result.message];
+  }
+
   private async handleCandidaturesReceivedCommand(
     profile: BotProfile,
     profileId: string,
@@ -459,6 +724,82 @@ export class BotOrchestratorService {
     return [result.message];
   }
 
+  private async handleMyOffersCommand(
+    profile: BotProfile,
+    profileId: string,
+    page: number,
+  ): Promise<string[]> {
+    const { message, offerIds } = await this.commands.myOffers(profile, page);
+    await this.botState.set(profileId, {
+      flowId: FLOW_IDS.MY_OFFERS,
+      step: 0,
+      payload: { page, offerIds },
+      updatedAt: new Date().toISOString(),
+    });
+    return [message];
+  }
+
+  private async handleUnlockContactCommand(
+    profile: BotProfile,
+    profileId: string,
+  ): Promise<string[]> {
+    // Check if there's already an unlock state pre-loaded (e.g. by notification)
+    const existingState = await this.botState.get(profileId);
+    if (existingState?.flowId === FLOW_IDS.UNLOCK_CONTACT) {
+      const result = await runUnlockContactFlow(existingState, '', profile, {
+        contactUnlockService: this.contactUnlockService,
+        walletService: this.walletService,
+        paymentService: this.paymentService,
+        botNotification: this.notificationService,
+      });
+      if (result.nextState) {
+        await this.botState.set(profileId, result.nextState);
+      }
+      return result.reply;
+    }
+
+    // Look up the most recent pending attempt via service
+    const attempt =
+      await this.contactUnlockService.findPendingAttemptForProfile(profileId);
+
+    if (!attempt) {
+      return [
+        `Aucune tentative de déverrouillage en cours.\n\nTapez *MENU* pour revenir.`,
+      ];
+    }
+
+    const fees = await this.systemConfig.getContactUnlockFees();
+    const isEmployer = attempt.employer_id === profileId;
+    const otherPartyId = isEmployer ? attempt.worker_id : attempt.employer_id;
+    const otherParty = await this.prisma.profile.findUnique({
+      where: { id: otherPartyId },
+      select: { first_name: true, last_name: true },
+    });
+    const otherName = otherParty
+      ? `${otherParty.first_name} ${otherParty.last_name}`.trim()
+      : 'votre contact';
+    const amount = isEmployer ? fees.employerFeeFcfa : fees.workerFeeFcfa;
+
+    const unlockState = getUnlockContactInitialState({
+      attemptId: attempt.id,
+      otherName,
+      amount,
+      expiresAt: attempt.expires_at,
+    });
+    await this.botState.set(profileId, unlockState);
+
+    const result = await runUnlockContactFlow(unlockState, '', profile, {
+      contactUnlockService: this.contactUnlockService,
+      walletService: this.walletService,
+      paymentService: this.paymentService,
+      botNotification: this.notificationService,
+    });
+    if (result.nextState) {
+      await this.botState.set(profileId, result.nextState);
+    }
+    return result.reply;
+  }
+
   private async handlePayPenaltiesCommand(
     profile: BotProfile,
     profileId: string,
@@ -473,8 +814,201 @@ export class BotOrchestratorService {
     await this.botState.set(profileId, flowState);
     const result = await runPayPenaltiesFlow(flowState, '', profile, {
       applicationService: this.applicationService,
+      walletService: this.walletService,
+      paymentService: this.paymentService,
+      invoiceService: this.invoiceService,
+      prisma: this.prisma,
     });
     return result.reply;
+  }
+
+  private async handleRecommendedJobsCommand(
+    profile: BotProfile,
+    profileId: string,
+  ): Promise<string[]> {
+    const noOffersMsg = [
+      '*Offres recommandées*',
+      '',
+      "Aucune offre recommandée pour l'instant. Complétez votre profil pour de meilleures recommandations.",
+      '',
+      "*Tapez 'Menu' pour revenir au menu principal.*",
+    ].join('\n');
+
+    const offerResults = await this.interestRecommendationService.recommend(
+      profile.id,
+      20,
+    );
+    const offerIds = offerResults.map((r) => r.jobId);
+
+    if (offerIds.length === 0) return [noOffersMsg];
+
+    const rows = await this.prisma.jobOffer.findMany({
+      where: {
+        id: { in: offerIds },
+        status: { in: ['ACTIVE', 'PARTIALLY_FILLED'] },
+        applications: { none: { worker_id: profile.id } },
+      },
+      select: {
+        id: true,
+        title: true,
+        description: true,
+        amount: true,
+        payment_flow: true,
+        address: true,
+        note: true,
+        scheduled_at: true,
+        quantity: true,
+        status: true,
+        employer: { select: { reliability_score: true } },
+        _count: { select: { applications: { where: { status: 'ACCEPTED' } } } },
+      },
+    });
+
+    const offerMap = new Map(rows.map((o) => [o.id, o]));
+    const orderedRows = offerIds
+      .map((id) => offerMap.get(id))
+      .filter(Boolean) as typeof rows;
+
+    if (orderedRows.length === 0) return [noOffersMsg];
+
+    const offerItems = orderedRows.map((o) =>
+      jobOfferToOfferListItem({
+        ...o,
+        amount: o.amount != null ? Number(o.amount) : null,
+        acceptedCount: o._count.applications,
+      }),
+    );
+
+    const flowState = getRecommendedJobsInitialState(offerIds, offerItems);
+    await this.botState.set(profileId, flowState);
+
+    const totalPages = Math.ceil(offerItems.length / 3);
+    return [formatRecommendedList(offerItems.slice(0, 3), 0, totalPages)];
+  }
+
+  private async handleRecommendedProfilesCommand(
+    profile: BotProfile,
+    profileId: string,
+  ): Promise<string[]> {
+    // Prefer active offer; fall back to any recent offer so signals can always be recorded
+    const latestOffer =
+      (await this.prisma.jobOffer.findFirst({
+        where: { employer_id: profile.id, status: 'ACTIVE' },
+        orderBy: { created_at: 'desc' },
+        select: { id: true },
+      })) ??
+      (await this.prisma.jobOffer.findFirst({
+        where: { employer_id: profile.id },
+        orderBy: { created_at: 'desc' },
+        select: { id: true },
+      }));
+
+    let workerResults: { id: string; score: number }[] = [];
+    if (latestOffer) {
+      workerResults = await this.matchingService.findMatchingWorkersForJob(
+        latestOffer.id,
+        10,
+      );
+    }
+    if (workerResults.length === 0) {
+      workerResults =
+        await this.matchingService.findMatchingWorkersForEmployerProfile(
+          profile.id,
+          10,
+        );
+    }
+
+    if (workerResults.length === 0) {
+      return [
+        [
+          '*TRAVAILLEURS RECOMMANDÉS*',
+          '',
+          "Aucun travailleur recommandé pour l'instant. Publiez une offre pour obtenir des recommandations.",
+          '',
+          '*Tapez 1 pour publier une offre ou Menu pour revenir.*',
+        ].join('\n'),
+      ];
+    }
+
+    const { reliabilityScoreMin } = await this.systemConfig.getFees();
+
+    // Pre-filter: only keep active, verified workers meeting the score threshold
+    const candidateIds = workerResults.map((r) => r.id);
+    const eligibleProfiles = await this.prisma.profile.findMany({
+      where: {
+        id: { in: candidateIds },
+        status: 'ACTIVE',
+        verification_status: 'VERIFIED',
+        reliability_score: { gte: reliabilityScoreMin },
+      },
+      select: { id: true },
+    });
+    const eligibleSet = new Set(eligibleProfiles.map((p) => p.id));
+    const eligibleResults = workerResults.filter(
+      (r) => eligibleSet.has(r.id) && r.score > 0.5,
+    );
+
+    if (eligibleResults.length === 0) {
+      return [
+        [
+          '*TRAVAILLEURS RECOMMANDÉS*',
+          '',
+          'Aucun travailleur qualifié disponible pour le moment.',
+          '',
+          "*Tapez 'Menu' pour revenir.*",
+        ].join('\n'),
+      ];
+    }
+
+    const workerIds = eligibleResults.map((r) => r.id);
+    const workerScores: Record<string, number> = Object.fromEntries(
+      eligibleResults.map((r) => [r.id, r.score]),
+    );
+
+    const flowState = getRecommendedProfilesInitialState(
+      workerIds,
+      workerScores,
+      latestOffer?.id,
+    );
+    await this.botState.set(profileId, flowState);
+
+    const pageIds = workerIds.slice(0, 5);
+    const workers = await this.prisma.profile.findMany({
+      where: {
+        id: { in: pageIds },
+        status: 'ACTIVE',
+        verification_status: 'VERIFIED',
+        reliability_score: { gte: reliabilityScoreMin },
+      },
+      select: {
+        id: true,
+        first_name: true,
+        last_name: true,
+        reliability_score: true,
+        description: true,
+      },
+    });
+    const workerMap = new Map(workers.map((w) => [w.id, w]));
+    const ordered = pageIds
+      .map((id) => workerMap.get(id))
+      .filter(Boolean) as typeof workers;
+
+    const lines = [
+      '*TRAVAILLEURS RECOMMANDÉS*',
+      '',
+      ...ordered.flatMap((w, i) => {
+        const name = `${w.first_name} ${w.last_name}`.trim();
+        const aiScore = Math.round((workerScores[w.id] ?? 0) * 100);
+        return [
+          `${i + 1}- *${name}*`,
+          `    • Fiabilité : ${w.reliability_score ?? 100}/100`,
+          `    • Score IA : ${aiScore}%`,
+          '',
+        ];
+      }),
+      `Tapez le numéro pour voir le profil complet ou *Menu* pour revenir au menu.`,
+    ];
+    return [lines.join('\n')];
   }
 
   private async loadProfile(profileId: string) {
@@ -488,7 +1022,9 @@ export class BotOrchestratorService {
         email: true,
         profile_type: true,
         status: true,
+        billing_status: true,
         reliability_score: true,
+        whatsapp_connected: true,
       },
     });
   }
@@ -502,10 +1038,8 @@ export class BotOrchestratorService {
         return handleMenuCommand(profile);
       case 'help': {
         const contact = await this.systemConfig.getContactInfo();
-        return handleHelpCommand(commandId, contact);
+        return handleHelpCommand(commandId, { email: contact.email ?? '', phone: contact.phone ?? '', address: contact.address ?? '' });
       }
-      case 'my_offers':
-        return this.commands.myOffers(profile);
       case 'profile':
         return this.commands.profile(profile);
       case 'penalty_history':

@@ -10,12 +10,18 @@ describe('HealthModule', () => {
   });
 
   it('provides HealthService', () => {
-    const providers: unknown[] = Reflect.getMetadata(MODULE_METADATA.PROVIDERS, HealthModule);
+    const providers: unknown[] = Reflect.getMetadata(
+      MODULE_METADATA.PROVIDERS,
+      HealthModule,
+    );
     expect(providers).toContain(HealthService);
   });
 
   it('registers HealthController', () => {
-    const controllers: unknown[] = Reflect.getMetadata(MODULE_METADATA.CONTROLLERS, HealthModule);
+    const controllers: unknown[] = Reflect.getMetadata(
+      MODULE_METADATA.CONTROLLERS,
+      HealthModule,
+    );
     expect(controllers).toContain(HealthController);
   });
 });

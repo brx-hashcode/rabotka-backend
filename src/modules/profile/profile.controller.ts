@@ -9,10 +9,12 @@ import {
   UploadedFile,
   Body,
   Req,
+  Res,
   Query,
   BadRequestException,
   Param,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import {
   FileFieldsInterceptor,
   FileInterceptor,
@@ -53,10 +55,24 @@ export class ProfileController {
 
   @Post()
   @UseInterceptors(
-    FileFieldsInterceptor([
-      { name: 'kycDocument', maxCount: 1 },
-      { name: 'kycSelfie', maxCount: 1 },
-    ]),
+    FileFieldsInterceptor(
+      [
+        { name: 'kycDocument', maxCount: 1 },
+        { name: 'kycSelfie', maxCount: 1 },
+      ],
+      {
+        limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+        fileFilter: (_req, file, cb) => {
+          const allowed = [
+            'image/jpeg',
+            'image/png',
+            'image/webp',
+            'application/pdf',
+          ];
+          cb(null, allowed.includes(file.mimetype));
+        },
+      },
+    ),
   )
   @ApiOperation({
     summary: 'Create a new profile with KYC documents',
@@ -412,7 +428,15 @@ export class ProfileController {
 
   @Post('avatar')
   @UseGuards(ProfileAuthGuard)
-  @UseInterceptors(FileInterceptor('avatar'))
+  @UseInterceptors(
+    FileInterceptor('avatar', {
+      limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+      fileFilter: (_req, file, cb) => {
+        const allowed = ['image/jpeg', 'image/png', 'image/webp'];
+        cb(null, allowed.includes(file.mimetype));
+      },
+    }),
+  )
   @ApiBearerAuth()
   @ApiCookieAuth()
   @ApiOperation({
@@ -496,5 +520,26 @@ export class ProfileController {
     return this.profileService.requestWhatsAppVerification(
       verifyWhatsAppDto.profileId,
     );
+  }
+
+  @Get('agreement/download')
+  @UseGuards(ProfileAuthGuard)
+  @ApiOperation({
+    summary: 'Download the platform agreement prefilled with profile data',
+  })
+  @ApiCookieAuth()
+  @ApiBearerAuth()
+  @ApiResponse({ status: 200, description: 'PDF file stream' })
+  @ApiResponse({ status: 404, description: 'No agreement template found' })
+  async downloadAgreement(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Res() res: Response,
+  ) {
+    const { buffer, filename } = await this.profileService.downloadAgreement(
+      req.user.profileId,
+    );
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(buffer);
   }
 }

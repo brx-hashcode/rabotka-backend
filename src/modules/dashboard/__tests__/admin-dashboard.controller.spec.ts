@@ -4,7 +4,9 @@ import { TimeRange } from '../dto/job-activity-query.dto';
 function makeService() {
   return {
     getMetrics: jest.fn().mockResolvedValue({ totalProfiles: 10 }),
-    getJobActivity: jest.fn().mockResolvedValue([{ date: '2026-01-01', created: 5, filled: 2 }]),
+    getJobActivity: jest
+      .fn()
+      .mockResolvedValue([{ date: '2026-01-01', created: 5, filled: 2 }]),
   };
 }
 
@@ -24,7 +26,9 @@ describe('AdminDashboardController', () => {
   });
 
   it('getJobActivity() uses provided range', async () => {
-    const result = await controller.getJobActivity({ range: TimeRange.THIRTY_DAYS } as any);
+    const result = await controller.getJobActivity({
+      range: TimeRange.THIRTY_DAYS,
+    } as any);
     expect(service.getJobActivity).toHaveBeenCalledWith(TimeRange.THIRTY_DAYS);
     expect(result).toHaveLength(1);
   });

@@ -1,9 +1,23 @@
-import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+  OnModuleInit,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Queue, QueueOptions, Worker, WorkerOptions } from 'bullmq';
 import Redis from 'ioredis';
 import { REDIS_CONNECTION } from '../redis/redis.constants';
 import { EMAIL_QUEUE } from './queue.module';
+
+const BULLMQ_PREFIX = 'bull:rabotka';
+
+export type MailAttachment = {
+  filename: string;
+  content: Buffer | string;
+  contentType?: string;
+};
 
 export type EmailJobData = {
   to: string;
@@ -12,13 +26,15 @@ export type EmailJobData = {
   html?: string;
   from?: string;
   fromName?: string;
+  attachments?: MailAttachment[];
 };
 
 @Injectable()
-export class QueueService implements OnModuleInit {
+export class QueueService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(QueueService.name);
   private readonly queues: Map<string, Queue> = new Map();
   private readonly workers: Map<string, Worker> = new Map();
+  private readonly queueConnections: Redis[] = [];
   private readonly redisConnection: Redis;
 
   constructor(
@@ -33,13 +49,27 @@ export class QueueService implements OnModuleInit {
     this.logger.log('✅ Queue service initialized');
   }
 
+  async onModuleDestroy() {
+    await Promise.all([
+      ...Array.from(this.workers.values()).map((w) => w.close()),
+      ...Array.from(this.queues.values()).map((q) => q.close()),
+    ]);
+    this.queueConnections.forEach((c) => c.disconnect());
+  }
+
   getQueue(name: string, options?: QueueOptions): Queue {
     if (this.queues.has(name)) {
       return this.queues.get(name)!;
     }
 
+    const queueConn = this.redisConnection.duplicate({
+      maxRetriesPerRequest: null,
+    });
+    this.queueConnections.push(queueConn);
+
     const queue = new Queue(name, {
-      connection: this.redisConnection,
+      connection: queueConn,
+      prefix: BULLMQ_PREFIX,
       defaultJobOptions: {
         attempts: 3,
         backoff: {
@@ -100,6 +130,7 @@ export class QueueService implements OnModuleInit {
       },
       {
         connection: workerConnection,
+        prefix: BULLMQ_PREFIX,
         concurrency: validConcurrency,
         ...restOptions,
       },

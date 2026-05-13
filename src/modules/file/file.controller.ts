@@ -1,11 +1,14 @@
 import {
   Controller,
   Post,
+  Get,
   UseInterceptors,
   UploadedFiles,
   BadRequestException,
   Query,
+  Res,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import {
   ApiTags,
@@ -22,6 +25,45 @@ import { StorageService } from '../../common/services/storage/storage.service';
 export class FileController {
   constructor(private readonly storageService: StorageService) {}
 
+  @Get('proxy')
+  async proxyFile(@Query('url') fileUrl: string, @Res() res: Response) {
+    if (!fileUrl) {
+      return res.status(400).json({ message: 'url query param is required' });
+    }
+
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(fileUrl);
+    } catch {
+      return res.status(400).json({ message: 'Invalid url' });
+    }
+
+    if (decoded.startsWith('blob:')) {
+      return res.status(400).json({
+        message:
+          'Blob URLs cannot be proxied. The file was not properly uploaded to storage.',
+      });
+    }
+
+    const upstream = await fetch(decoded);
+    if (!upstream.ok) {
+      return res
+        .status(upstream.status)
+        .json({ message: 'Failed to fetch file' });
+    }
+
+    const contentType =
+      upstream.headers.get('content-type') ?? 'application/octet-stream';
+    const contentLength = upstream.headers.get('content-length');
+
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    if (contentLength) res.setHeader('Content-Length', contentLength);
+
+    const buffer = await upstream.arrayBuffer();
+    return res.send(Buffer.from(buffer));
+  }
+
   @Post('upload')
   @UseInterceptors(FilesInterceptor('files', 10))
   @ApiOperation({ summary: 'Upload file(s)' })
@@ -31,6 +73,13 @@ export class FileController {
     required: false,
     type: Boolean,
     description: 'Set to true to upload multiple files',
+  })
+  @ApiQuery({
+    name: 'access',
+    required: false,
+    enum: ['public', 'private'],
+    description:
+      'Override storage access level (default: public for images, private for others)',
   })
   @ApiBody({
     schema: {
@@ -52,6 +101,7 @@ export class FileController {
   async uploadFile(
     @UploadedFiles() files: Express.Multer.File[],
     @Query('is_multipl') isMultiple?: string,
+    @Query('access') accessOverride?: string,
   ) {
     if (!files || files.length === 0) {
       throw new BadRequestException('Aucun fichier fourni');
@@ -64,6 +114,12 @@ export class FileController {
         'Multiple files provided but is_multipl is not set to true',
       );
     }
+
+    const resolveAccess = (mimetype: string): 'public' | 'private' => {
+      if (accessOverride === 'public') return 'public';
+      if (accessOverride === 'private') return 'private';
+      return mimetype.startsWith('image/') ? 'public' : 'private';
+    };
 
     if (isMulti) {
       const uploadResults = await Promise.all(
@@ -85,6 +141,7 @@ export class FileController {
             {
               mimeType: file.mimetype,
               folder: 'files',
+              access: resolveAccess(file.mimetype),
             },
           );
 
@@ -102,7 +159,9 @@ export class FileController {
 
     const file = files[0];
     if (!file.buffer || !file.originalname) {
-      throw new BadRequestException('Le buffer ou le nom du fichier est manquant');
+      throw new BadRequestException(
+        'Le buffer ou le nom du fichier est manquant',
+      );
     }
 
     const fileBuffer: Buffer = Buffer.isBuffer(file.buffer)
@@ -116,6 +175,7 @@ export class FileController {
       {
         mimeType: file.mimetype,
         folder: 'files',
+        access: resolveAccess(file.mimetype),
       },
     );
 

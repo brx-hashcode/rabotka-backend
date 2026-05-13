@@ -10,6 +10,7 @@ const workerProfile: BotProfile = {
   email: 'alice@example.com',
   profile_type: 'WORKER',
   reliability_score: 90,
+  status: 'ACTIVE',
 };
 
 const employerProfile: BotProfile = {
@@ -38,7 +39,23 @@ describe('BotRouterService', () => {
     it('returns flow type with the current state', () => {
       const state = makeState(FLOW_IDS.PUBLISH_JOB);
       const result = service.route('hello', workerProfile, state);
-      expect(result).toEqual({ type: 'flow', flowId: FLOW_IDS.PUBLISH_JOB, state });
+      expect(result).toEqual({
+        type: 'flow',
+        flowId: FLOW_IDS.PUBLISH_JOB,
+        state,
+      });
+    });
+
+    it('routes exact "menu" to menu command so user can exit publish flow', () => {
+      const state = makeState(FLOW_IDS.PUBLISH_JOB);
+      const result = service.route('menu', workerProfile, state);
+      expect(result).toEqual({ type: 'command', commandId: 'menu' });
+    });
+
+    it('strips LRM before menu so WhatsApp-prefixed Menu exits flow', () => {
+      const state = makeState(FLOW_IDS.PUBLISH_JOB);
+      const result = service.route('\u200eMenu', workerProfile, state);
+      expect(result).toEqual({ type: 'command', commandId: 'menu' });
     });
   });
 
@@ -65,6 +82,17 @@ describe('BotRouterService', () => {
       expect(result).toEqual({ type: 'command', commandId: 'pay_penalties' });
     });
 
+    it('routes "payer" to pay_penalties for employer (employers can have penalties too)', () => {
+      const result = service.route('payer', employerProfile, null);
+      expect(result).toEqual({ type: 'command', commandId: 'pay_penalties' });
+    });
+
+    it('routes "PAYER" to pay_penalties even with an active flow state', () => {
+      const state = { flowId: 'some_flow', step: 1, payload: {}, updatedAt: new Date().toISOString() };
+      const result = service.route('PAYER', employerProfile, state);
+      expect(result).toEqual({ type: 'command', commandId: 'pay_penalties' });
+    });
+
     it('does not route "offres" to list_offers for employer', () => {
       const result = service.route('offres', employerProfile, null);
       // employers can't list_offers
@@ -75,12 +103,18 @@ describe('BotRouterService', () => {
   describe('employer commands', () => {
     it('routes "publier" to start_publish_job for employer', () => {
       const result = service.route('publier', employerProfile, null);
-      expect(result).toEqual({ type: 'command', commandId: 'start_publish_job' });
+      expect(result).toEqual({
+        type: 'command',
+        commandId: 'start_publish_job',
+      });
     });
 
     it('routes "candidatures" to candidatures_received for employer', () => {
       const result = service.route('candidatures', employerProfile, null);
-      expect(result).toEqual({ type: 'command', commandId: 'candidatures_received' });
+      expect(result).toEqual({
+        type: 'command',
+        commandId: 'candidatures_received',
+      });
     });
 
     it('does not route "publier" for worker', () => {
@@ -90,10 +124,17 @@ describe('BotRouterService', () => {
   });
 
   describe('numeric menu options', () => {
-    it('routes worker numeric option for profile', () => {
-      // WORKER_MENU_OPTIONS.PROFILE
+    it('routes worker "3" to pending_payments', () => {
       const result = service.route('3', workerProfile, null);
-      expect(result).toEqual({ type: 'command', commandId: 'profile' });
+      expect(result).toEqual({
+        type: 'command',
+        commandId: 'pending_payments',
+      });
+    });
+
+    it('routes worker "4" to recommended_jobs', () => {
+      const result = service.route('4', workerProfile, null);
+      expect(result).toEqual({ type: 'command', commandId: 'recommended_jobs' });
     });
 
     it('routes employer numeric option for my_offers', () => {

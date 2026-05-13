@@ -45,7 +45,9 @@ describe('CloudinaryStorageProvider', () => {
   });
 
   it('creates successfully with valid config', () => {
-    expect(() => new CloudinaryStorageProvider(makeConfig(baseConfig))).not.toThrow();
+    expect(
+      () => new CloudinaryStorageProvider(makeConfig(baseConfig)),
+    ).not.toThrow();
   });
 
   describe('upload', () => {
@@ -124,25 +126,19 @@ describe('CloudinaryStorageProvider', () => {
 
   describe('delete', () => {
     it('deletes successfully', async () => {
-      mockDestroy.mockImplementation((_key: string, callback: Function) => {
-        callback(null, { result: 'ok' });
-      });
+      mockDestroy.mockResolvedValue({ result: 'ok' });
       const provider = new CloudinaryStorageProvider(makeConfig(baseConfig));
       await expect(provider.delete('file')).resolves.toBeUndefined();
     });
 
     it('resolves when file not found (not-found result)', async () => {
-      mockDestroy.mockImplementation((_key: string, callback: Function) => {
-        callback(null, { result: 'not found' });
-      });
+      mockDestroy.mockResolvedValue({ result: 'not found' });
       const provider = new CloudinaryStorageProvider(makeConfig(baseConfig));
       await expect(provider.delete('file')).resolves.toBeUndefined();
     });
 
     it('rejects on error', async () => {
-      mockDestroy.mockImplementation((_key: string, callback: Function) => {
-        callback(new Error('delete error'), null);
-      });
+      mockDestroy.mockRejectedValue(new Error('delete error'));
       const provider = new CloudinaryStorageProvider(makeConfig(baseConfig));
       await expect(provider.delete('file')).rejects.toThrow(
         'Cloudinary delete failed: delete error',
@@ -160,24 +156,21 @@ describe('CloudinaryStorageProvider', () => {
 
   describe('exists', () => {
     it('returns true when resource exists', async () => {
-      mockApiResource.mockImplementation((_key: string, callback: Function) => {
-        callback(null, { public_id: 'img' });
-      });
+      mockApiResource.mockResolvedValue({ public_id: 'img' });
       const provider = new CloudinaryStorageProvider(makeConfig(baseConfig));
       expect(await provider.exists('img')).toBe(true);
     });
 
     it('returns false on 404 error', async () => {
-      mockApiResource.mockImplementation((_key: string, callback: Function) => {
-        callback({ http_code: 404 }, null);
-      });
+      mockApiResource.mockRejectedValue({ http_code: 404 });
       const provider = new CloudinaryStorageProvider(makeConfig(baseConfig));
       expect(await provider.exists('img')).toBe(false);
     });
 
     it('rejects on non-404 error', async () => {
-      mockApiResource.mockImplementation((_key: string, callback: Function) => {
-        callback({ http_code: 500, message: 'server error' }, null);
+      mockApiResource.mockRejectedValue({
+        http_code: 500,
+        message: 'server error',
       });
       const provider = new CloudinaryStorageProvider(makeConfig(baseConfig));
       await expect(provider.exists('img')).rejects.toThrow(

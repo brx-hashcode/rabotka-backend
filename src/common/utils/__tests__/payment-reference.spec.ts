@@ -17,7 +17,9 @@ describe('generatePaymentReference()', () => {
   });
 
   it('generates unique references each call', () => {
-    const refs = new Set(Array.from({ length: 100 }, () => generatePaymentReference()));
+    const refs = new Set(
+      Array.from({ length: 100 }, () => generatePaymentReference()),
+    );
     expect(refs.size).toBe(100);
   });
 

@@ -4,6 +4,7 @@ import { WHATSAPP_REMINDERS_QUEUE } from '../../../../common/services/queue/queu
 
 jest.spyOn(Logger.prototype, 'log').mockImplementation(() => {});
 jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => {});
+jest.spyOn(Logger.prototype, 'error').mockImplementation(() => {});
 
 describe('ReminderSchedulerService', () => {
   let service: ReminderSchedulerService;
@@ -37,13 +38,11 @@ describe('ReminderSchedulerService', () => {
       expect(logSpy).toHaveBeenCalled();
     });
 
-    it('logs a warning if queue.add rejects', async () => {
-      const warnSpy = jest.spyOn(Logger.prototype, 'warn');
+    it('logs error and rethrows if queue.add rejects', async () => {
+      const errorSpy = jest.spyOn(Logger.prototype, 'error');
       mockQueueAdd.mockRejectedValueOnce(new Error('Redis down'));
-      service.onModuleInit();
-      await Promise.resolve();
-      await Promise.resolve();
-      expect(warnSpy).toHaveBeenCalled();
+      await expect(service.onModuleInit()).rejects.toThrow('Redis down');
+      expect(errorSpy).toHaveBeenCalled();
     });
   });
 });

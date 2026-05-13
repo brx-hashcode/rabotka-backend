@@ -5,7 +5,6 @@ import {
   PaymentFlow,
   AccountStatus,
   ProfileType,
-  VerificationStatus,
 } from '@prisma/client';
 
 const JOB_TITLES = [
@@ -23,7 +22,7 @@ const JOB_TITLES = [
   'Caissier grande surface',
   'Réceptionniste hôtel',
   'Plongeur restaurant',
-  'Agent d\'entretien espaces verts',
+  "Agent d'entretien espaces verts",
   'Conducteur chariot élévateur',
   'Technicien maintenance bâtiment',
   'Animateur événement',
@@ -33,24 +32,24 @@ const JOB_TITLES = [
 
 const JOB_DESCRIPTIONS = [
   'Chargement et déchargement de palettes dans un entrepôt logistique. Manutention manuelle et mécanique. Port de charges lourdes.',
-  'Surveillance d\'un événement en intérieur. Contrôle des accès et gestion des flux de visiteurs. Expérience préférable.',
+  "Surveillance d'un événement en intérieur. Contrôle des accès et gestion des flux de visiteurs. Expérience préférable.",
   'Préparation de commandes selon bons de livraison. Utilisation de scanner et filmage de palettes. Travail en équipe.',
-  'Nettoyage et entretien de locaux professionnels. Passage de l\'aspirateur, lavage des sols et désinfection des sanitaires.',
-  'Comptage et vérification de l\'ensemble des stocks en entrepôt. Saisie sur tablette numérique. Rigueur exigée.',
+  "Nettoyage et entretien de locaux professionnels. Passage de l'aspirateur, lavage des sols et désinfection des sanitaires.",
+  "Comptage et vérification de l'ensemble des stocks en entrepôt. Saisie sur tablette numérique. Rigueur exigée.",
   'Aide en cuisine pour un restaurant en forte activité. Épluchage, découpe et préparation des ingrédients. Cadence soutenue.',
   'Montage et démontage de stands pour une exposition. Port de matériaux et assemblage selon plan. Travail en équipe.',
   'Livraison de colis en vélo ou scooter dans la zone urbaine. Connaissance des arrondissements requise. Permis souhaité.',
-  'Surveillance nocturne d\'un chantier de construction. Rondes régulières et rapport d\'activité. Sérieux et ponctualité.',
+  "Surveillance nocturne d'un chantier de construction. Rondes régulières et rapport d'activité. Sérieux et ponctualité.",
   'Tri et distribution de courrier en centre postal. Travail debout en horaires décalés. Rapidité et précision indispensables.',
-  'Aide au déménagement de particuliers. Port de meubles et cartons. Conduite d\'un camion de déménagement si permis.',
+  "Aide au déménagement de particuliers. Port de meubles et cartons. Conduite d'un camion de déménagement si permis.",
   'Tenue de caisse dans une grande surface. Accueil clients, scanning articles et encaissement. Esprit de service.',
   'Accueil et orientation des clients à la réception. Gestion des réservations et remise des clés. Anglais apprécié.',
   'Plonge en restauration rapide et traditionnelle. Lavage de la vaisselle et entretien de la cuisine.',
-  'Tonte, taille et désherbage d\'espaces verts municipaux. Utilisation d\'engins de jardinage. Résistance physique.',
+  "Tonte, taille et désherbage d'espaces verts municipaux. Utilisation d'engins de jardinage. Résistance physique.",
   'Conduite de chariot élévateur dans un entrepôt. Chargement et déchargement de camions. CACES obligatoire.',
   'Petits travaux de maintenance dans un immeuble résidentiel. Plomberie, électricité et peinture de base.',
-  'Animation d\'activités lors d\'un événement d\'entreprise. Accueil, jeux et interactions avec le public.',
-  'Support à l\'équipe logistique pour la gestion des flux de marchandises. Saisie dans WMS et suivi des expéditions.',
+  "Animation d'activités lors d'un événement d'entreprise. Accueil, jeux et interactions avec le public.",
+  "Support à l'équipe logistique pour la gestion des flux de marchandises. Saisie dans WMS et suivi des expéditions.",
   'Poste en atelier de production industrielle. Assemblage de pièces, contrôle qualité et conditionnement.',
 ];
 
@@ -106,9 +105,7 @@ export async function seedJobOffersAndApplications(
 ): Promise<void> {
   const existing = await prisma.jobOffer.count();
   if (existing >= 20) {
-    console.log(
-      '[Job seed] Skipped (already have 20+ job offers).',
-    );
+    console.log('[Job seed] Skipped (already have 20+ job offers).');
     return;
   }
 
@@ -149,9 +146,15 @@ export async function seedJobOffersAndApplications(
     PaymentFlow.MONTHLY,
   ];
 
-  const amounts = [80, 100, 120, 150, 200, 250, 300, 400, 500, 1000, 1500, 2000];
+  const amounts = [
+    80, 100, 120, 150, 200, 250, 300, 400, 500, 1000, 1500, 2000,
+  ];
 
-  const createdJobs: Array<{ id: string; status: string; employer_id: string }> = [];
+  const createdJobs: Array<{
+    id: string;
+    status: string;
+    employer_id: string;
+  }> = [];
 
   for (let i = 0; i < 20; i++) {
     const employer = employers[i % employers.length];
@@ -175,7 +178,11 @@ export async function seedJobOffersAndApplications(
         status,
       },
     });
-    createdJobs.push({ id: job.id, status: job.status, employer_id: job.employer_id });
+    createdJobs.push({
+      id: job.id,
+      status: job.status,
+      employer_id: job.employer_id,
+    });
   }
 
   console.log(`[Job seed] Created ${createdJobs.length} job offers.`);
@@ -243,7 +250,7 @@ export async function seedJobOffersAndApplications(
         const isPaid = penaltyCount % 3 === 0;
         await prisma.penalty.create({
           data: {
-            worker_id: worker.id,
+            profile_id: worker.id,
             application_id: app.id,
             amount: 15,
             reason: PENALTY_REASONS[penaltyCount % PENALTY_REASONS.length],

@@ -69,17 +69,10 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     isSecret: false,
   },
   {
-    key: 'fees.employer_cancel_score_deduction',
+    key: 'fees.employer_late_cancel_score_deduction',
     value: '5',
     category: ConfigCategory.FEES,
-    label: "Déduction score employeur (annulation d'un travailleur accepté)",
-    isSecret: false,
-  },
-  {
-    key: 'fees.employer_ghost_score_deduction',
-    value: '10',
-    category: ConfigCategory.FEES,
-    label: "Déduction score employeur (offre expirée avec travailleur accepté)",
+    label: 'Déduction score employeur (annulation tardive ou offre non démarrée avec travailleur accepté)',
     isSecret: false,
   },
   {
@@ -90,17 +83,52 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     isSecret: false,
   },
   {
-    key: 'fees.job_posting_fee_fcfa',
-    value: '0',
+    key: 'fees.max_concurrent_applications',
+    value: '3',
     category: ConfigCategory.FEES,
-    label: "Frais de publication d'une offre (FCFA)",
+    label: 'Nombre max de candidatures simultanées (par travailleur)',
     isSecret: false,
   },
   {
-    key: 'fees.application_fee_fcfa',
-    value: '0',
+    key: 'fees.contact_unlock_fee_employer',
+    value: '500',
     category: ConfigCategory.FEES,
-    label: 'Frais de candidature (FCFA)',
+    label: 'Frais déverrouillage contact – Employeur (FCFA)',
+    isSecret: false,
+  },
+  {
+    key: 'fees.contact_unlock_fee_worker',
+    value: '100',
+    category: ConfigCategory.FEES,
+    label: 'Frais déverrouillage contact – Travailleur (FCFA)',
+    isSecret: false,
+  },
+  {
+    key: 'fees.contact_unlock_expiry_hours',
+    value: '48',
+    category: ConfigCategory.FEES,
+    label: 'Délai expiration déverrouillage contact (heures)',
+    isSecret: false,
+  },
+  {
+    key: 'fees.contact_recommendation_fee_employer',
+    value: '1000',
+    category: ConfigCategory.FEES,
+    label: 'Frais contact depuis recommandation – Employeur (FCFA)',
+    isSecret: false,
+  },
+  {
+    key: 'fees.welcome_credit_worker',
+    value: '100',
+    category: ConfigCategory.FEES,
+    label: 'Crédit de bienvenue – Travailleur (FCFA)',
+    isSecret: false,
+  },
+  {
+    key: 'fees.welcome_credit_employer',
+    value: '500',
+    category: ConfigCategory.FEES,
+    label: 'Crédit de bienvenue – Employeur (FCFA)',
     isSecret: false,
   },
 
@@ -223,6 +251,13 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     label: 'Cloudflare R2 – Secret Access Key',
     isSecret: true,
   },
+  {
+    key: 'storage.cloudflare.public_base_url',
+    value: '',
+    category: ConfigCategory.STORAGE,
+    label: 'Cloudflare R2 – Public Base URL (ex: https://pub-xxx.r2.dev)',
+    isSecret: false,
+  },
   // Cloudinary
   {
     key: 'storage.cloudinary.cloud_name',
@@ -253,9 +288,78 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     label: 'Vercel Blob – Read/Write Token',
     isSecret: true,
   },
+
+  // ── MONETBIL ──────────────────────────────────────────────────────────────
+  {
+    key: 'monetbil.service_key',
+    value: '',
+    category: ConfigCategory.MONETBIL,
+    label: 'Monetbil – Service Key',
+    isSecret: false,
+  },
+
+  // ── PAYMENT GATEWAY ───────────────────────────────────────────────────────
+  {
+    key: 'payment.gateway_driver',
+    value: 'MONETBIL',
+    category: ConfigCategory.PAYMENT,
+    label: 'Payment – Active Gateway Driver (MONETBIL | MTN_MOMO)',
+    isSecret: false,
+  },
+  // Monetbil credentials (mirrored from legacy monetbil.* for gateway abstraction)
+  {
+    key: 'payment.monetbil.service_key',
+    value: '',
+    category: ConfigCategory.PAYMENT,
+    label: 'Payment – Monetbil Service Key',
+    isSecret: false,
+  },
+  // MTN MoMo credentials
+  {
+    key: 'payment.mtn_momo.base_url',
+    value: '',
+    category: ConfigCategory.PAYMENT,
+    label: 'Payment – MTN MoMo Base URL',
+    isSecret: false,
+  },
+  {
+    key: 'payment.mtn_momo.collection_api_user',
+    value: '',
+    category: ConfigCategory.PAYMENT,
+    label: 'Payment – MTN MoMo Collection API User',
+    isSecret: false,
+  },
+  {
+    key: 'payment.mtn_momo.collection_api_key',
+    value: '',
+    category: ConfigCategory.PAYMENT,
+    label: 'Payment – MTN MoMo Collection API Key',
+    isSecret: true,
+  },
+  {
+    key: 'payment.mtn_momo.collection_primary_key',
+    value: '',
+    category: ConfigCategory.PAYMENT,
+    label:
+      'Payment – MTN MoMo Collection Primary Key (Ocp-Apim-Subscription-Key)',
+    isSecret: true,
+  },
+  {
+    key: 'payment.mtn_momo.environment',
+    value: 'sandbox',
+    category: ConfigCategory.PAYMENT,
+    label: 'Payment – MTN MoMo Environment (sandbox | production)',
+    isSecret: false,
+  },
+  {
+    key: 'payment.mtn_momo.callback_url',
+    value: '',
+    category: ConfigCategory.PAYMENT,
+    label: 'Payment – MTN MoMo Webhook Callback URL',
+    isSecret: false,
+  },
 ];
 
-/** Maps system-config keys to the env var names each storage provider reads */
 export const STORAGE_ENV_OVERRIDES: Record<string, Record<string, string>> = {
   S3: {
     AWS_S3_BUCKET: 'storage.s3.bucket',
@@ -269,6 +373,7 @@ export const STORAGE_ENV_OVERRIDES: Record<string, Record<string, string>> = {
     CLOUDFLARE_BUCKET_NAME: 'storage.cloudflare.bucket_name',
     CLOUDFLARE_ACCESS_KEY_ID: 'storage.cloudflare.access_key_id',
     CLOUDFLARE_SECRET_ACCESS_KEY: 'storage.cloudflare.secret_access_key',
+    CLOUDFLARE_PUBLIC_BASE_URL: 'storage.cloudflare.public_base_url',
   },
   CLOUDINARY: {
     CLOUDINARY_CLOUD_NAME: 'storage.cloudinary.cloud_name',
@@ -277,5 +382,23 @@ export const STORAGE_ENV_OVERRIDES: Record<string, Record<string, string>> = {
   },
   VERCEL_BLOB: {
     BLOB_READ_WRITE_TOKEN: 'storage.vercel_blob.token',
+  },
+};
+
+export const MONETBIL_ENV_OVERRIDES: Record<string, string> = {
+  MONETBIL_SERVICE_KEY: 'monetbil.service_key',
+};
+
+export const PAYMENT_ENV_OVERRIDES: Record<string, Record<string, string>> = {
+  MONETBIL: {
+    MONETBIL_SERVICE_KEY: 'payment.monetbil.service_key',
+  },
+  MTN_MOMO: {
+    MTN_MOMO_BASE_URL: 'payment.mtn_momo.base_url',
+    MTN_MOMO_COLLECTION_API_USER: 'payment.mtn_momo.collection_api_user',
+    MTN_MOMO_COLLECTION_API_KEY: 'payment.mtn_momo.collection_api_key',
+    MTN_MOMO_COLLECTION_PRIMARY_KEY: 'payment.mtn_momo.collection_primary_key',
+    MTN_MOMO_ENVIRONMENT: 'payment.mtn_momo.environment',
+    MTN_MOMO_CALLBACK_URL: 'payment.mtn_momo.callback_url',
   },
 };

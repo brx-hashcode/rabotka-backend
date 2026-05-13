@@ -1,8 +1,18 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { JobOfferService } from '../job-offer.service';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
+import { MailService } from '../../mail/mail.service';
+import { SystemConfigService } from '../../system-config/system-config.service';
+import { WalletService } from '../../wallet/wallet.service';
+import { BotNotificationService } from '../../bot/services/bot-notification.service';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { JobOfferStatus, PaymentFlow } from '@prisma/client';
+import { MatchingService } from '../../matching/matching.service';
 
 const EMPLOYER_ID = 'employer-uuid-1';
 const OFFER_ID = 'offer-uuid-1';
@@ -14,7 +24,8 @@ function futureDate(hoursFromNow = 5): string {
 
 const baseDto = {
   title: 'Plombier pour urgence',
-  description: 'Réparation fuite eau cuisine, remplacement robinet, vérification tuyauterie.',
+  description:
+    'Réparation fuite eau cuisine, remplacement robinet, vérification tuyauterie.',
   scheduled_at: futureDate(5),
   amount: 15000,
   payment_flow: PaymentFlow.DAILY,
@@ -42,6 +53,10 @@ const mockOffer = {
 describe('JobOfferService', () => {
   let service: JobOfferService;
   let prisma: jest.Mocked<PrismaService>;
+  let mailService: jest.Mocked<MailService>;
+  let systemConfigService: jest.Mocked<SystemConfigService>;
+  let walletService: jest.Mocked<WalletService>;
+  let botNotificationService: jest.Mocked<BotNotificationService>;
 
   beforeEach(async () => {
     const mockPrisma = {
@@ -54,17 +69,61 @@ describe('JobOfferService', () => {
         findUnique: jest.fn(),
         update: jest.fn(),
       },
+      penalty: {
+        count: jest.fn().mockResolvedValue(0),
+      },
+    };
+
+    const mockMailService = {
+      sendMail: jest.fn().mockResolvedValue(undefined),
+    };
+
+    const mockSystemConfigService = {
+      getRaw: jest.fn().mockResolvedValue('0'),
+      getFees: jest.fn().mockResolvedValue({
+        reliabilityScoreMin: 0,
+        jobPostingFeeFcfa: 0,
+        cancellationThresholdHours: 4,
+        lateCancellationPenaltyFcfa: 5000,
+      }),
+    };
+
+    const mockWalletService = {
+      recordJobPostingPayment: jest.fn().mockResolvedValue(undefined),
+    };
+
+    const mockBotNotificationService = {
+      sendMessage: jest.fn().mockResolvedValue(undefined),
     };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         JobOfferService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: MailService, useValue: mockMailService },
+        { provide: SystemConfigService, useValue: mockSystemConfigService },
+        { provide: WalletService, useValue: mockWalletService },
+        {
+          provide: BotNotificationService,
+          useValue: mockBotNotificationService,
+        },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+        {
+          provide: MatchingService,
+          useValue: {
+            indexJobOffer: jest.fn().mockResolvedValue(undefined),
+            findMatchingWorkersForJob: jest.fn().mockResolvedValue([]),
+          },
+        },
       ],
     }).compile();
 
     service = module.get<JobOfferService>(JobOfferService);
     prisma = module.get(PrismaService);
+    mailService = module.get(MailService);
+    systemConfigService = module.get(SystemConfigService);
+    walletService = module.get(WalletService);
+    botNotificationService = module.get(BotNotificationService);
   });
 
   describe('create()', () => {
@@ -81,13 +140,18 @@ describe('JobOfferService', () => {
       const result = await service.create(EMPLOYER_ID, { ...baseDto });
       expect(result.quantity).toBe(2);
       expect(prisma.jobOffer.create).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.objectContaining({ quantity: 2 }) }),
+        expect.objectContaining({
+          data: expect.objectContaining({ quantity: 2 }),
+        }),
       );
     });
 
     it('defaults quantity to 1 when not provided', async () => {
       const dtoWithoutQuantity = { ...baseDto, quantity: undefined as any };
-      (prisma.jobOffer.create as jest.Mock).mockResolvedValue({ ...mockOffer, quantity: 1 });
+      (prisma.jobOffer.create as jest.Mock).mockResolvedValue({
+        ...mockOffer,
+        quantity: 1,
+      });
       const result = await service.create(EMPLOYER_ID, dtoWithoutQuantity);
       expect(result.quantity).toBe(1);
     });
@@ -199,6 +263,27 @@ describe('JobOfferService', () => {
         }),
       );
     });
+
+    it('omits offers with no open slots (accepted >= quantity)', async () => {
+      (prisma.jobOffer.findMany as jest.Mock).mockResolvedValue([
+        {
+          ...mockOffer,
+          id: 'offer-full',
+          quantity: 1,
+          _count: { applications: 1 },
+        },
+        {
+          ...mockOffer,
+          id: 'offer-open',
+          quantity: 2,
+          _count: { applications: 0 },
+        },
+      ]);
+      const result = await service.findActive(5);
+      expect(result.data).toHaveLength(1);
+      expect(result.data[0]?.id).toBe('offer-open');
+      expect(result.nextCursor).toBeNull();
+    });
   });
 
   describe('validateCreateDto()', () => {
@@ -222,7 +307,10 @@ describe('JobOfferService', () => {
 
     it('throws when description is too long', () => {
       expect(() =>
-        service.validateCreateDto({ ...baseDto, description: 'x'.repeat(1001) }),
+        service.validateCreateDto({
+          ...baseDto,
+          description: 'x'.repeat(1001),
+        }),
       ).toThrow(BadRequestException);
     });
 

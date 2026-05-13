@@ -3,7 +3,7 @@ services:
     image: postgres:17-alpine
     container_name: rabotka_postgres
     ports:
-      - "5433:5432"
+      - "5800:5432"
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -37,20 +37,16 @@ services:
     networks:
       - rabotka_network
 
-  mailhog:
-    image: mailhog/mailhog:latest
-    container_name: rabotka_mailhog
-    ports:
-      - "1025:1025"
-      - "8025:8025"
-    networks:
-      - rabotka_network
-
   redis:
     image: redis:7-alpine
     container_name: rabotka_redis
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
     networks:
       - rabotka_network
 
@@ -65,30 +61,6 @@ services:
     networks:
       - rabotka_network
 
-  localstack:
-    image: localstack/localstack:latest
-    container_name: rabotka_localstack
-    ports:
-      - "4566:4566"
-      - "4510-4559:4510-4559"
-    environment:
-      - SERVICES=s3,sqs,sns,lambda,dynamodb,ses,cloudwatch,logs,events,iam,sts,secretsmanager,ssm
-      - DEBUG=1
-      - DATA_DIR=/var/lib/localstack
-      - PERSISTENCE=1
-      - LAMBDA_EXECUTOR=docker
-      - DOCKER_HOST=unix:///var/run/docker.sock
-    volumes:
-      - localstack_data:/var/lib/localstack
-      - /var/run/docker.sock:/var/run/docker.sock
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - rabotka_network
-
   api:
     build:
       context: .
@@ -97,19 +69,23 @@ services:
     container_name: rabotka_api
     ports:
       - "${PORT:-3000}:${PORT:-3000}"
+    volumes:
+      - ./scripts/docker-entrypoint.sh:/usr/local/bin/docker-entrypoint.sh
+      - ./prisma.config.ts:/app/prisma.config.ts
+      - ./prisma:/app/prisma
     env_file:
       - .env
     environment:
       - NODE_ENV=production
+      - ARCJET_ENV=development
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/rabotka
+      - REDIS_HOST=redis
+      - QDRANT_URL=http://qdrant:6333
     depends_on:
       postgres:
         condition: service_healthy
-      localstack:
-        condition: service_healthy
-      mailhog:
-        condition: service_started
       redis:
-        condition: service_started
+        condition: service_healthy
     healthcheck:
       test:
         [
@@ -131,30 +107,24 @@ services:
       target: production
     container_name: rabotka_queue_worker
     command: node dist/src/worker.js
+    volumes:
+      - ./scripts/docker-entrypoint.sh:/usr/local/bin/docker-entrypoint.sh
+      - ./prisma.config.ts:/app/prisma.config.ts
+      - ./prisma:/app/prisma
     env_file:
       - .env
     environment:
       - NODE_ENV=production
-      - DB_HOST=postgres
-      - DB_PORT=5432
-      - DB_USERNAME=postgres
-      - DB_PASSWORD=postgres
-      - DB_DATABASE=rabotka
-      - AWS_ENDPOINT_URL=http://localstack:4566
-      - SMTP_HOST=mailhog
-      - SMTP_PORT=1025
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/rabotka
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - QDRANT_URL=http://qdrant:6333
       - RUN_QUEUE_WORKER=true
     depends_on:
       postgres:
         condition: service_healthy
-      localstack:
-        condition: service_healthy
-      mailhog:
-        condition: service_started
       redis:
-        condition: service_started
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - rabotka_network
@@ -162,7 +132,6 @@ services:
 volumes:
   postgres_data:
   pgadmin_data:
-  localstack_data:
   qdrant_data:
 
 networks:

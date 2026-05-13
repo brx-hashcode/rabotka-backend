@@ -5,7 +5,7 @@ import { BotModule } from '../bot/bot.module';
 import { WhatsAppModule } from '../whatsapp/whatsapp.module';
 
 @Module({
-  imports: [BotModule, forwardRef(() => WhatsAppModule)],
+  imports: [forwardRef(() => BotModule), forwardRef(() => WhatsAppModule)],
   controllers: [ConversationController],
   providers: [ConversationService],
   exports: [ConversationService],

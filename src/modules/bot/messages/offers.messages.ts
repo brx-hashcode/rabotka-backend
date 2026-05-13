@@ -5,8 +5,8 @@ export type OfferListItem = {
   title: string;
   description: string;
   scheduled_at: Date;
-  amount: number;
-  payment_flow: string;
+  amount: number | null;
+  payment_flow: string | null;
   address: string;
   note: string | null;
   quantity?: number;
@@ -15,7 +15,8 @@ export type OfferListItem = {
   employerScore?: number | null;
 };
 
-export function formatPaymentFlow(flow: string): string {
+export function formatPaymentFlow(flow: string | null): string {
+  if (!flow) return '';
   const map: Record<string, string> = {
     HOURLY: 'par heure',
     DAILY: 'par jour',
@@ -24,8 +25,15 @@ export function formatPaymentFlow(flow: string): string {
   return map[flow] ?? flow;
 }
 
-function formatDate(d: Date): string {
-  return d.toLocaleDateString('fr-FR', {
+function formatAmount(amount: number | null, flow: string | null): string {
+  if (amount == null || amount === 0) return 'A négocier';
+  const flowLabel = formatPaymentFlow(flow);
+  const flowSuffix = flowLabel ? ` ${flowLabel}` : '';
+  return `${amount.toLocaleString('fr-FR')} FCFA${flowSuffix}`;
+}
+
+function formatDate(d: Date | string): string {
+  return new Date(d).toLocaleDateString('fr-FR', {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
@@ -52,69 +60,65 @@ export function formatOfferList(
       '',
       `*Résumé*: ${summary}`,
       `*Date*: ${formatDate(o.scheduled_at)}`,
-      `*Montant*: ${o.amount.toLocaleString('fr-FR')} FCFA ${formatPaymentFlow(o.payment_flow)}`,
+      `*Montant*: ${formatAmount(o.amount, o.payment_flow)}`,
       `*Adresse*: ${o.address.length > 40 ? o.address.slice(0, 40) + '...' : o.address}`,
       '',
-      '1️⃣ Postuler',
-      '2️⃣ Voir détails',
+      '1- Postuler',
+      '2- Voir détails',
       SEP,
       '',
     );
   }
 
   if (pageInfo?.hasNext) {
-    lines.push('3️⃣ *Offre suivante*');
+    lines.push('3- *Offre suivante*');
   }
-  lines.push('4️⃣ *Retour au menu*', '', '*Tapez le numéro correspondant.*');
+  lines.push('4- *Retour au menu*', '', '*Tapez le numéro correspondant.*');
 
   return lines.join('\n');
 }
 
-/** Compact numbered list for list-offers flow: two lines per offer, 1-5 select, 6 Voir plus, 7 Menu */
+/** Compact numbered list for list-offers flow */
 export function formatOfferListCompact(
   offers: OfferListItem[],
   hasMore: boolean,
+  page = 0,
+  totalPages = 1,
 ): string {
-  const lines = ['*OFFRES DISPONIBLES*', ''];
+  const pageLabel = totalPages > 1 ? ` (page ${page + 1}/${totalPages})` : '';
+  const lines = [`*OFFRES DISPONIBLES*${pageLabel}`, ''];
   offers.forEach((o, i) => {
-    const num = i + 1;
-    const flowLabel = formatPaymentFlow(o.payment_flow);
     const qty = o.quantity ?? 1;
     const filled = o.acceptedCount ?? 0;
     const remaining = Math.max(0, qty - filled);
+    const spotsEmoji = remaining === 0 ? '🔴' : remaining === qty ? '🟢' : '🟡';
     const spotsLabel =
       remaining === 0
-        ? '🔴 Complet'
+        ? `${spotsEmoji} Complet`
         : remaining === qty
-          ? `🟢 ${qty} place${qty > 1 ? 's' : ''}`
-          : `🟡 ${remaining}/${qty} place${qty > 1 ? 's' : ''} restante${remaining > 1 ? 's' : ''}`;
+          ? `${spotsEmoji} ${qty} place${qty > 1 ? 's' : ''}`
+          : `${spotsEmoji} ${remaining}/${qty} restante${remaining > 1 ? 's' : ''}`;
+    const shortAddr =
+      o.address.length > 40 ? o.address.slice(0, 40) + '…' : o.address;
     lines.push(
-      `${num}. ${o.title}`,
-      `    Montant: ${o.amount.toLocaleString('fr-FR')} FCFA ${flowLabel}`,
-      `    Date: ${formatDate(o.scheduled_at)}`,
-      `    ${spotsLabel}`,
-      `    Adresse: ${o.address.length > 40 ? o.address.slice(0, 40) + '...' : o.address}`,
+      `${i + 1}- *${o.title}*`,
+      `    • Montant : ${formatAmount(o.amount, o.payment_flow)}`,
+      `    • Date : ${formatDate(o.scheduled_at)}`,
+      `    • Places : ${spotsLabel}`,
+      `    • Adresse : ${shortAddr}`,
       '',
     );
   });
-  lines.push('');
-  if (hasMore) {
-    lines.push(
-      '6 - Voir plus',
-      '7 - Menu',
-      '',
-      "Veuillez taper un numéro (1-5) pour sélectionner une offre, 6 pour la suite, ou 7 / 'Menu' pour revenir au menu",
-    );
-  } else {
-    lines.push(
-      "Veuillez taper un numéro pour sélectionner une offre ou 'Menu' pour revenir au menu",
-    );
-  }
+  const nextIdx = offers.length + 1;
+  const actions: string[] = [];
+  if (page > 0) actions.push('P- Page précédente');
+  if (hasMore) actions.push(`${nextIdx} - Voir plus`);
+  actions.push('M- Menu principal');
+  lines.push(...actions, '', 'Tapez un numéro pour sélectionner une offre.');
   return lines.join('\n');
 }
 
 export function formatOfferDetail(offer: OfferListItem): string {
-  const flow = formatPaymentFlow(offer.payment_flow);
   const lines = [
     `*OFFRE #${offer.id.slice(0, 8)} - DÉTAILS COMPLETS*`,
     '',
@@ -124,7 +128,7 @@ export function formatOfferDetail(offer: OfferListItem): string {
     offer.description,
     '',
     `*Date et heure*: ${formatDate(offer.scheduled_at)}`,
-    `*Rémunération*: ${offer.amount.toLocaleString('fr-FR')} FCFA ${flow}`,
+    `*Rémunération*: ${formatAmount(offer.amount, offer.payment_flow)}`,
     `*Personnes requises*: ${offer.quantity ?? 1}`,
     `*Adresse*: ${offer.address}`,
     '',
@@ -136,15 +140,15 @@ export function formatOfferDetail(offer: OfferListItem): string {
     "*Employeur*: [Masqué jusqu'à acceptation]",
     '',
     'Actions:',
-    '1️⃣ Postuler à cette offre',
-    '2️⃣ Retour à la liste',
+    '1- Postuler à cette offre',
+    '2- Retour à la liste',
     '',
     'Tapez le numéro correspondant.',
   );
   return lines.join('\n');
 }
 
-function employerScoreStar(score: number): string {
+function employerScoreStars(score: number): string {
   if (score >= 90) return '⭐⭐⭐';
   if (score >= 75) return '⭐⭐';
   if (score >= 60) return '⭐';
@@ -153,12 +157,47 @@ function employerScoreStar(score: number): string {
 
 function formatEmployerScore(score: number | null | undefined): string {
   if (score == null) return '';
-  return `*Fiabilité employeur*: ${score}/100 ${employerScoreStar(score)}`;
+  return `*Fiabilité employeur*: ${employerScoreStars(score)} (${score}/100)`;
+}
+
+/** Numbered list for recommended-jobs flow with pagination support */
+export function formatRecommendedList(
+  pageOffers: OfferListItem[],
+  page: number,
+  totalPages: number,
+): string {
+  const lines = [`*OFFRES RECOMMANDÉES* (page ${page + 1}/${totalPages})`, ''];
+  pageOffers.forEach((o, i) => {
+    const qty = o.quantity ?? 1;
+    const filled = o.acceptedCount ?? 0;
+    const remaining = Math.max(0, qty - filled);
+    const spotsLabel =
+      remaining === 0
+        ? 'Complet'
+        : remaining === qty
+          ? `${qty} place${qty > 1 ? 's' : ''}`
+          : `${remaining}/${qty} restante${remaining > 1 ? 's' : ''}`;
+    const shortAddr =
+      o.address.length > 40 ? o.address.slice(0, 40) + '…' : o.address;
+    lines.push(
+      `${i + 1}- *${o.title}*`,
+      `    • Montant : ${formatAmount(o.amount, o.payment_flow)}`,
+      `    • Date : ${formatDate(o.scheduled_at)}`,
+      `    • Places : ${spotsLabel}`,
+      `    • Adresse : ${shortAddr}`,
+      '',
+    );
+  });
+  const actions: string[] = [];
+  if (page > 0) actions.push('P- Page précédente');
+  if (page < totalPages - 1) actions.push('S- Page suivante');
+  actions.push('M- Menu principal');
+  lines.push(...actions, '', 'Tapez un numéro pour voir le détail.');
+  return lines.join('\n');
 }
 
 /** Single offer view in list-offers flow with 4 actions */
 export function formatOfferDetailWithActions(offer: OfferListItem): string {
-  const flow = formatPaymentFlow(offer.payment_flow);
   const summary =
     offer.description.length > 80
       ? offer.description.slice(0, 80) + '...'
@@ -169,19 +208,17 @@ export function formatOfferDetailWithActions(offer: OfferListItem): string {
     '',
     `*Résumé*: ${summary}`,
     `*Date*: ${formatDate(offer.scheduled_at)}`,
-    `*Montant*: ${offer.amount.toLocaleString('fr-FR')} FCFA ${flow}`,
+    `*Montant*: ${formatAmount(offer.amount, offer.payment_flow)}`,
     `*Places disponibles*: ${Math.max(0, (offer.quantity ?? 1) - (offer.acceptedCount ?? 0))}/${offer.quantity ?? 1}`,
     `*Adresse*: ${offer.address.slice(0, 50)}${offer.address.length > 50 ? '...' : ''}`,
     ...(scoreLine ? [scoreLine] : []),
     '',
-    SEP,
+    '1- Postuler',
+    '2- Voir description complète',
+    '3- Retour à la liste des offres',
+    "4- Menu",
     '',
-    '1️⃣ *Postuler*',
-    '2️⃣ *Voir description complète*',
-    '3️⃣ *Retour à la liste des offres*',
-    "4️⃣ *Menu* (ou tapez 'Menu')",
-    '',
-    '*Tapez le numéro correspondant.*',
+    'Tapez le numéro correspondant.',
   ].join('\n');
 }
 
@@ -199,4 +236,34 @@ export function formatOfferPublishedSuccess(offerId: string): string {
 
 export function formatNoOffersAvailable(): string {
   return "Aucune offre disponible pour le moment. Tapez 'Menu' pour revenir.";
+}
+
+export function jobOfferToOfferListItem(offer: {
+  id: string;
+  title: string;
+  description: string;
+  scheduled_at: Date;
+  amount: number | null;
+  payment_flow: string | null;
+  address: string;
+  note: string | null;
+  quantity: number;
+  acceptedCount?: number;
+  status: string;
+  employer?: { reliability_score?: number | null } | null;
+}): OfferListItem {
+  return {
+    id: offer.id,
+    title: offer.title,
+    description: offer.description,
+    scheduled_at: offer.scheduled_at,
+    amount: offer.amount,
+    payment_flow: offer.payment_flow,
+    address: offer.address,
+    note: offer.note,
+    quantity: offer.quantity,
+    acceptedCount: offer.acceptedCount ?? 0,
+    status: offer.status,
+    employerScore: offer.employer?.reliability_score ?? null,
+  };
 }

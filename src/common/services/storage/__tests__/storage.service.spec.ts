@@ -6,7 +6,12 @@ jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => {});
 
 function makeProvider() {
   return {
-    upload: jest.fn().mockResolvedValue({ url: 'https://cdn.example.com/file.jpg', key: 'file.jpg', bucket: 'b', provider: 'S3' }),
+    upload: jest.fn().mockResolvedValue({
+      url: 'https://cdn.example.com/file.jpg',
+      key: 'file.jpg',
+      bucket: 'b',
+      provider: 'S3',
+    }),
     delete: jest.fn().mockResolvedValue(undefined),
     getUrl: jest.fn().mockResolvedValue('https://cdn.example.com/file.jpg'),
     exists: jest.fn().mockResolvedValue(true),
@@ -46,7 +51,9 @@ describe('StorageService', () => {
     it('upload() delegates to provider', async () => {
       const buf = Buffer.from('data');
       await service.upload(buf, 'file.jpg', { mimeType: 'image/jpeg' });
-      expect(provider.upload).toHaveBeenCalledWith(buf, 'file.jpg', { mimeType: 'image/jpeg' });
+      expect(provider.upload).toHaveBeenCalledWith(buf, 'file.jpg', {
+        mimeType: 'image/jpeg',
+      });
     });
 
     it('delete() delegates to provider', async () => {
@@ -67,9 +74,13 @@ describe('StorageService', () => {
 
   describe('when not initialized', () => {
     it('upload() throws if provider not initialized', async () => {
-      const service = new StorageService({ create: jest.fn().mockReturnValue(null) } as any);
+      const service = new StorageService({
+        create: jest.fn().mockReturnValue(null),
+      } as any);
       // Not calling onModuleInit — provider stays null
-      await expect(service.upload(Buffer.from('x'), 'f.jpg')).rejects.toThrow('not initialized');
+      await expect(service.upload(Buffer.from('x'), 'f.jpg')).rejects.toThrow(
+        'not initialized',
+      );
     });
   });
 });

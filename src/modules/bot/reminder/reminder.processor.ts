@@ -1,4 +1,4 @@
-import { Injectable, Logger, Inject } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import Redis from 'ioredis';
 import { REDIS_CONNECTION } from '../../../common/services/redis/redis.constants';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
@@ -8,21 +8,31 @@ import { WHATSAPP_REMINDERS_QUEUE } from '../../../common/services/queue/queue.m
 import {
   formatReminder24h,
   formatReminder2h,
+  formatReminderStart,
 } from '../messages/notifications.messages';
 import { ApplicationStatus, JobOfferStatus } from '@prisma/client';
+import { SystemConfigService } from '../../system-config/system-config.service';
 import {
-  EMPLOYER_GHOST_SCORE_DEDUCTION,
-  RELIABILITY_SCORE_MIN,
-} from '../../application/application.constants';
+  BOT_STATE_KEY_PREFIX,
+  BOT_STATE_TTL_SECONDS,
+  FLOW_IDS,
+} from '../bot.constants';
+import { ContactUnlockService } from '../../contact-unlock/contact-unlock.service';
+import { BotNotificationService } from '../services/bot-notification.service';
+import { jobStatusCheckPromptMessage } from '../flows/job-status-check.flow';
 
 const REMINDER_24H_SENT_KEY = 'reminder:sent:24h:';
 const REMINDER_2H_SENT_KEY = 'reminder:sent:2h:';
+const REMINDER_START_SENT_KEY = 'reminder:sent:start:';
 const SENT_KEY_TTL = 48 * 60 * 60;
+const SCAN_INTERVAL_MS = 15 * 60 * 1000;
 
 export type ReminderJobData =
   | { type: 'scan' }
   | { type: 'reminder_24h'; applicationId: string }
-  | { type: 'reminder_2h'; applicationId: string };
+  | { type: 'reminder_2h'; applicationId: string }
+  | { type: 'reminder_start'; applicationId: string }
+  | { type: 'reminder_job_status'; jobOfferId: string; employerId: string; applicationId: string; paymentFlow: string };
 
 @Injectable()
 export class ReminderProcessor {
@@ -34,6 +44,11 @@ export class ReminderProcessor {
     private readonly queueService: QueueService,
     @Inject(REDIS_CONNECTION)
     private readonly redis: Redis,
+    private readonly systemConfigService: SystemConfigService,
+    @Inject(forwardRef(() => ContactUnlockService))
+    private readonly contactUnlockService: ContactUnlockService,
+    @Inject(forwardRef(() => BotNotificationService))
+    private readonly botNotification: BotNotificationService,
   ) {}
 
   async process(job: { id?: string; data: ReminderJobData }): Promise<void> {
@@ -51,6 +66,17 @@ export class ReminderProcessor {
 
     if (type === 'reminder_2h') {
       await this.sendReminder2h(job.data.applicationId);
+      return;
+    }
+
+    if (type === 'reminder_start') {
+      await this.sendReminderStart(job.data.applicationId);
+      return;
+    }
+
+    if (type === 'reminder_job_status') {
+      const { jobOfferId, employerId, applicationId, paymentFlow } = job.data;
+      await this.sendJobStatusCheckReminder(jobOfferId, employerId, applicationId, paymentFlow);
       return;
     }
 
@@ -115,18 +141,168 @@ export class ReminderProcessor {
         );
       }
     }
+
+    // "start" window: scheduled_at within the last 15 minutes (job is starting now)
+    const startWindowStart = new Date(now.getTime() - SCAN_INTERVAL_MS);
+    const startingOffers = await this.prisma.jobOffer.findMany({
+      where: {
+        scheduled_at: { gte: startWindowStart, lte: now },
+        status: {
+          in: [
+            JobOfferStatus.ACTIVE,
+            JobOfferStatus.PARTIALLY_FILLED,
+            JobOfferStatus.FILLED,
+            JobOfferStatus.EXPIRED,
+          ],
+        },
+      },
+      select: { id: true, applications: { where: { status: ApplicationStatus.ACCEPTED }, select: { id: true } } },
+    });
+
+    for (const offer of startingOffers) {
+      // Expire any pending unlock attempts so WAITING_PAYMENT apps are released immediately
+      const conversions = await this.contactUnlockService
+        .expirePendingAttemptsForJob(offer.id)
+        .catch((err) => {
+          this.logger.warn(`Failed to expire unlock attempts for offer ${offer.id}:`, err);
+          return [];
+        });
+      for (const { profileId, amount } of conversions) {
+        await this.botNotification
+          .sendContactUnlockCreditConversionNotification(profileId, amount)
+          .catch((err) => this.logger.warn(`Credit conversion notify failed for ${profileId}:`, err));
+      }
+
+      for (const app of offer.applications) {
+        const key = `${REMINDER_START_SENT_KEY}${app.id}`;
+        const sent = await this.redis.get(key);
+        if (!sent) {
+          await this.queueService.addJob<ReminderJobData>(
+            WHATSAPP_REMINDERS_QUEUE,
+            { type: 'reminder_start', applicationId: app.id },
+            { jobId: `start-${app.id}` },
+          );
+        }
+      }
+    }
   }
 
   private async expireOverdueOffers(): Promise<void> {
     const now = new Date();
+    await this.autoStartOffersWithWorkers(now);
+    await this.expireEmptyOverdueOffers(now);
+  }
 
-    // Expire offers that are still open (no accepted worker) — no score deduction
-    const openOverdue = await this.prisma.jobOffer.findMany({
+  private async autoStartOffersWithWorkers(now: Date): Promise<void> {
+    const offers = await this.prisma.jobOffer.findMany({
       where: {
-        status: {
-          in: [JobOfferStatus.ACTIVE, JobOfferStatus.PARTIALLY_FILLED],
-        },
+        status: { in: [JobOfferStatus.FILLED, JobOfferStatus.PARTIALLY_FILLED] },
         scheduled_at: { lt: now },
+        applications: {
+          some: { status: ApplicationStatus.ACCEPTED },
+          none: { status: { in: [ApplicationStatus.STARTED, ApplicationStatus.END] } },
+        },
+      },
+      select: {
+        id: true,
+        title: true,
+        payment_flow: true,
+        employer_id: true,
+        employer: { select: { phone: true, first_name: true } },
+        applications: { where: { status: ApplicationStatus.ACCEPTED }, select: { id: true } },
+      },
+    });
+
+    if (offers.length === 0) return;
+
+    await this.prisma.$transaction([
+      this.prisma.jobOffer.updateMany({
+        where: { id: { in: offers.map((o) => o.id) } },
+        data: { status: JobOfferStatus.IN_PROGRESS },
+      }),
+      this.prisma.application.updateMany({
+        where: { job_offer_id: { in: offers.map((o) => o.id) }, status: ApplicationStatus.ACCEPTED },
+        data: { status: ApplicationStatus.STARTED },
+      }),
+    ]);
+
+    for (const offer of offers) {
+      await this.notifyAutoStartedOffer(offer);
+    }
+
+    this.logger.log(`Auto-started ${offers.length} offer(s) (FILLED/PARTIALLY_FILLED) that reached scheduled_at`);
+  }
+
+  private async notifyAutoStartedOffer(offer: {
+    id: string;
+    title: string;
+    payment_flow: string | null;
+    employer_id: string;
+    employer?: { phone?: string | null; first_name?: string | null } | null;
+    applications: { id: string }[];
+  }): Promise<void> {
+    const phone = offer.employer?.phone;
+    const firstName = offer.employer?.first_name ?? '';
+    const firstApp = offer.applications[0];
+
+    if (phone) {
+      const autoStartText = [
+        `🚀 *Mission démarrée automatiquement*`,
+        ``,
+        `Bonjour ${firstName}, votre offre *"${offer.title}"* a atteint l'heure prévue avec des travailleurs acceptés.`,
+        ``,
+        `La mission est maintenant marquée comme démarrée.`,
+      ].join('\n');
+
+      const statusCheckText = jobStatusCheckPromptMessage(offer.title, offer.payment_flow ?? 'DAILY');
+
+      const sent = await this.whatsApp
+        .sendTextMessage(phone, autoStartText, offer.employer_id)
+        .then(() => true)
+        .catch((err) => {
+          this.logger.warn(`Failed to notify employer ${offer.employer_id} of auto-started mission`, err);
+          return false;
+        });
+
+      if (sent && firstApp) {
+        await this.whatsApp
+          .sendTextMessage(phone, statusCheckText, offer.employer_id)
+          .catch((err) => this.logger.warn(`Failed to send status check prompt to employer ${offer.employer_id}`, err));
+
+        const stateKey = `${BOT_STATE_KEY_PREFIX}${offer.employer_id}`;
+        const stateValue = JSON.stringify({
+          flowId: FLOW_IDS.JOB_STATUS_CHECK,
+          step: 0,
+          payload: { jobOfferId: offer.id, jobTitle: offer.title, applicationId: firstApp.id, paymentFlow: offer.payment_flow ?? 'DAILY', snoozeCount: 0 },
+          updatedAt: new Date().toISOString(),
+        });
+        await this.redis
+          .set(stateKey, stateValue, 'EX', BOT_STATE_TTL_SECONDS)
+          .catch((err) => this.logger.warn(`Failed to set job status check state for employer ${offer.employer_id}`, err));
+      }
+    }
+
+    for (const app of offer.applications) {
+      const key = `${REMINDER_START_SENT_KEY}${app.id}`;
+      const alreadySent = await this.redis.get(key);
+      if (!alreadySent) {
+        await this.queueService.addJob<ReminderJobData>(
+          WHATSAPP_REMINDERS_QUEUE,
+          { type: 'reminder_start', applicationId: app.id },
+          { jobId: `start-${app.id}` },
+        );
+      }
+    }
+  }
+
+  private async expireEmptyOverdueOffers(now: Date): Promise<void> {
+    const overdue = await this.prisma.jobOffer.findMany({
+      where: {
+        status: { in: [JobOfferStatus.ACTIVE, JobOfferStatus.PARTIALLY_FILLED] },
+        scheduled_at: { lt: now },
+        applications: {
+          none: { status: { in: [ApplicationStatus.ACCEPTED, ApplicationStatus.STARTED, ApplicationStatus.END] } },
+        },
       },
       select: {
         id: true,
@@ -136,94 +312,113 @@ export class ReminderProcessor {
       },
     });
 
-    // Expire FILLED offers past their date — employer accepted but never completed (ghost)
-    const filledOverdue = await this.prisma.jobOffer.findMany({
-      where: {
-        status: JobOfferStatus.FILLED,
-        scheduled_at: { lt: now },
-      },
-      select: {
-        id: true,
-        title: true,
-        employer_id: true,
-        employer: {
-          select: { phone: true, first_name: true, reliability_score: true },
-        },
-      },
-    });
+    if (overdue.length === 0) return;
 
-    const allOverdue = [...openOverdue, ...filledOverdue];
-    if (allOverdue.length === 0) return;
+    await this.prisma.$transaction([
+      this.prisma.jobOffer.updateMany({
+        where: { id: { in: overdue.map((o) => o.id) } },
+        data: { status: JobOfferStatus.EXPIRED },
+      }),
+    ]);
 
-    const allIds = allOverdue.map((o) => o.id);
-    await this.prisma.jobOffer.updateMany({
-      where: { id: { in: allIds } },
-      data: { status: JobOfferStatus.EXPIRED },
-    });
+    this.logger.log(`Expired ${overdue.length} overdue job offer(s) with no accepted workers`);
 
-    this.logger.log(
-      `Expired ${allIds.length} overdue job offer(s) (${filledOverdue.length} ghost)`,
-    );
-
-    // Deduct score from ghost employers (had accepted worker, never completed)
-    for (const offer of filledOverdue) {
-      const currentScore = offer.employer?.reliability_score ?? 100;
-      const newScore = Math.max(
-        RELIABILITY_SCORE_MIN,
-        currentScore - EMPLOYER_GHOST_SCORE_DEDUCTION,
-      );
-      await this.prisma.profile
-        .update({
-          where: { id: offer.employer_id },
-          data: { reliability_score: newScore },
-        })
-        .catch((err) =>
-          this.logger.warn(
-            `Failed to deduct score for ghost employer ${offer.employer_id}`,
-            err,
-          ),
-        );
+    for (const offer of overdue) {
+      await this.notifyExpiredOffer(offer);
     }
+  }
 
-    const ghostIds = new Set(filledOverdue.map((o) => o.id));
+  private async notifyExpiredOffer(offer: {
+    id: string;
+    title: string;
+    employer_id: string;
+    employer?: { phone?: string | null; first_name?: string | null } | null;
+  }): Promise<void> {
+    const phone = offer.employer?.phone;
+    if (!phone) return;
+    const firstName = offer.employer?.first_name ?? '';
+    const text = [
+      `*⏰ Offre expirée*`,
+      '',
+      `Bonjour ${firstName}, votre offre *"${offer.title}"* a expiré car la date est passée sans démarrage effectif de la mission.`,
+      '',
+      `Que souhaitez-vous faire ?`,
+      '',
+      `1- Republier l'offre`,
+      `2- Menu`,
+    ].join('\n');
 
-    // Notify all expired employers
-    for (const offer of allOverdue) {
-      const phone = offer.employer?.phone;
-      if (!phone) continue;
-      const firstName = offer.employer?.first_name ?? '';
-      const isGhost = ghostIds.has(offer.id);
-      const text = isGhost
-        ? [
-            `*⚠️ Mission non complétée*`,
-            '',
-            `Bonjour ${firstName}, votre offre *"${offer.title}"* a été marquée expirée car vous n'avez pas confirmé la fin de la mission.`,
-            `Votre score de fiabilité a été réduit.`,
-            '',
-            `Tapez *MENU* pour gérer vos offres.`,
-          ].join('\n')
-        : [
-            `*⏰ Offre expirée*`,
-            '',
-            `Bonjour ${firstName}, votre offre *"${offer.title}"* a expiré car la date est passée sans qu'un travailleur soit assigné.`,
-            '',
-            `Tapez *MENU* pour publier une nouvelle offre.`,
-          ].join('\n');
-      await this.whatsApp
-        .sendTextMessage(phone, text, offer.employer_id)
+    const sent = await this.whatsApp
+      .sendTextMessage(phone, text, offer.employer_id)
+      .then(() => true)
+      .catch((err) => {
+        this.logger.warn(`Failed to notify employer ${offer.employer_id} of expired offer`, err);
+        return false;
+      });
+
+    if (sent) {
+      const stateKey = `${BOT_STATE_KEY_PREFIX}${offer.employer_id}`;
+      const stateValue = JSON.stringify({
+        flowId: FLOW_IDS.REPUBLISH_EXPIRED_JOB,
+        step: 0,
+        payload: { jobOfferId: offer.id },
+        updatedAt: new Date().toISOString(),
+      });
+      await this.redis
+        .set(stateKey, stateValue, 'EX', BOT_STATE_TTL_SECONDS)
         .catch((err) =>
-          this.logger.warn(
-            `Failed to notify employer ${offer.employer_id} of expired offer`,
-            err,
-          ),
+          this.logger.warn(`Failed to set republish flow state for employer ${offer.employer_id}`, err),
         );
     }
   }
 
+  private async sendJobStatusCheckReminder(
+    jobOfferId: string,
+    employerId: string,
+    applicationId: string,
+    paymentFlow: string,
+  ): Promise<void> {
+    // Check the offer is still IN_PROGRESS — skip if already completed/expired
+    const offer = await this.prisma.jobOffer.findUnique({
+      where: { id: jobOfferId },
+      select: { status: true, title: true, employer: { select: { phone: true } } },
+    });
+    if (!offer || offer.status !== JobOfferStatus.IN_PROGRESS) return;
+
+    const phone = offer.employer?.phone;
+    if (!phone) return;
+
+    const text = jobStatusCheckPromptMessage(offer.title, paymentFlow);
+    const sent = await this.whatsApp
+      .sendTextMessage(phone, text, employerId)
+      .then(() => true)
+      .catch((err) => {
+        this.logger.warn(`Failed to send job status check reminder to employer ${employerId}`, err);
+        return false;
+      });
+
+    if (sent) {
+      // Refresh the bot state so the employer's reply still routes to the flow
+      const stateKey = `${BOT_STATE_KEY_PREFIX}${employerId}`;
+      const stateValue = JSON.stringify({
+        flowId: FLOW_IDS.JOB_STATUS_CHECK,
+        step: 0,
+        payload: { jobOfferId, jobTitle: offer.title, applicationId, paymentFlow, snoozeCount: 0 },
+        updatedAt: new Date().toISOString(),
+      });
+      await this.redis
+        .set(stateKey, stateValue, 'EX', BOT_STATE_TTL_SECONDS)
+        .catch((err) => this.logger.warn(`Failed to refresh job status check state for employer ${employerId}`, err));
+    }
+
+    this.logger.log(`Job status check reminder sent to employer ${employerId} for offer ${jobOfferId}`);
+  }
+
   private async sendReminder24h(applicationId: string): Promise<void> {
     const key = `${REMINDER_24H_SENT_KEY}${applicationId}`;
-    const sent = await this.redis.get(key);
-    if (sent) {
+    // Atomic SET NX EX — only one concurrent job can claim this key
+    const claimed = await this.redis.set(key, '1', 'EX', SENT_KEY_TTL, 'NX');
+    if (!claimed) {
       this.logger.debug(`Reminder 24h already sent for ${applicationId}`);
       return;
     }
@@ -248,14 +443,13 @@ export class ReminderProcessor {
     });
 
     await this.whatsApp.sendTextMessage(app.worker.phone, text);
-    await this.redis.set(key, '1', 'EX', SENT_KEY_TTL);
     this.logger.log(`Reminder 24h sent for application ${applicationId}`);
   }
 
   private async sendReminder2h(applicationId: string): Promise<void> {
     const key = `${REMINDER_2H_SENT_KEY}${applicationId}`;
-    const sent = await this.redis.get(key);
-    if (sent) {
+    const claimed = await this.redis.set(key, '1', 'EX', SENT_KEY_TTL, 'NX');
+    if (!claimed) {
       this.logger.debug(`Reminder 2h already sent for ${applicationId}`);
       return;
     }
@@ -279,7 +473,86 @@ export class ReminderProcessor {
     });
 
     await this.whatsApp.sendTextMessage(app.worker.phone, text);
-    await this.redis.set(key, '1', 'EX', SENT_KEY_TTL);
     this.logger.log(`Reminder 2h sent for application ${applicationId}`);
+  }
+
+  private async sendReminderStart(applicationId: string): Promise<void> {
+    const key = `${REMINDER_START_SENT_KEY}${applicationId}`;
+    const claimed = await this.redis.set(key, '1', 'EX', SENT_KEY_TTL, 'NX');
+    if (!claimed) {
+      this.logger.debug(`Reminder start already sent for ${applicationId}`);
+      return;
+    }
+
+    const app = await this.prisma.application.findUnique({
+      where: { id: applicationId },
+      include: {
+        job_offer: { include: { employer: true } },
+        worker: true,
+      },
+    });
+
+    const alreadyStarted = app?.status === ApplicationStatus.STARTED;
+    if (!app?.worker?.phone || (app.status !== ApplicationStatus.ACCEPTED && !alreadyStarted))
+      return;
+
+    const previousOfferStatus = app.job_offer.status;
+    const movableOfferStatuses: JobOfferStatus[] = [
+      JobOfferStatus.ACTIVE,
+      JobOfferStatus.PARTIALLY_FILLED,
+      JobOfferStatus.FILLED,
+      JobOfferStatus.EXPIRED,
+    ];
+    const shouldMoveOfferToInProgress =
+      !alreadyStarted && movableOfferStatuses.includes(previousOfferStatus);
+
+    // Only transition status when not already done by autoStartOffersWithWorkers.
+    if (!alreadyStarted) {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.application.update({
+          where: { id: applicationId },
+          data: { status: ApplicationStatus.STARTED },
+        });
+        if (shouldMoveOfferToInProgress) {
+          await tx.jobOffer.update({
+            where: { id: app.job_offer_id },
+            data: { status: JobOfferStatus.IN_PROGRESS },
+          });
+        }
+      });
+    }
+
+    try {
+      const text = formatReminderStart({
+        offerTitle: app.job_offer.title,
+        scheduledAt: app.job_offer.scheduled_at,
+        address: app.job_offer.address,
+        employerName: `${app.job_offer.employer.first_name} ${app.job_offer.employer.last_name}`,
+        employerPhone: app.job_offer.employer.phone,
+      });
+
+      await this.whatsApp.sendTextMessage(app.worker.phone, text);
+      this.logger.log(
+        `Reminder start sent for application ${applicationId} (alreadyStarted=${alreadyStarted})`,
+      );
+    } catch (err) {
+      // Roll back status and release lock so the job retries — only when we made the transition.
+      await this.redis.del(key);
+      if (!alreadyStarted) {
+        await this.prisma.$transaction(async (tx) => {
+          await tx.application.update({
+            where: { id: applicationId },
+            data: { status: ApplicationStatus.ACCEPTED },
+          });
+          if (shouldMoveOfferToInProgress) {
+            await tx.jobOffer.update({
+              where: { id: app.job_offer_id },
+              data: { status: previousOfferStatus },
+            });
+          }
+        });
+      }
+      throw err;
+    }
   }
 }
