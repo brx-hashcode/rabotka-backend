@@ -88,7 +88,7 @@ describe('BotRouterService', () => {
     });
 
     it('routes "PAYER" to pay_penalties even with an active flow state', () => {
-      const state = { flowId: 'some_flow', step: 'start', payload: {}, updatedAt: new Date().toISOString() };
+      const state = { flowId: 'some_flow', step: 1, payload: {}, updatedAt: new Date().toISOString() };
       const result = service.route('PAYER', employerProfile, state);
       expect(result).toEqual({ type: 'command', commandId: 'pay_penalties' });
     });

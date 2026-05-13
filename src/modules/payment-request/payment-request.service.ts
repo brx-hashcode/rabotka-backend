@@ -647,14 +647,22 @@ export class PaymentRequestService {
     const profileName = this.fullName(request.profile);
 
     if (request.profile.phone) {
-      const text = [
+      const lines = [
         `🎉 *Paiement confirmé*`,
         '',
         `Montant : *${context.amount.toLocaleString('fr-FR')} FCFA*`,
         `Objet : ${context.paymentDescription}`,
         '',
         `Merci pour votre paiement !`,
-      ].join('\n');
+      ];
+
+      if (context.isRecommendationContact) {
+        lines.push('', '📞 *Les coordonnées du travailleur vous seront envoyées dans le message suivant.*');
+      } else if (context.isContactUnlock) {
+        lines.push('', '⏳ *Les coordonnées seront révélées dès que les deux parties auront payé.*');
+      }
+
+      const text = lines.join('\n');
       await this.whatsAppService
         .sendTextMessage(request.profile.phone, text)
         .catch((err) =>

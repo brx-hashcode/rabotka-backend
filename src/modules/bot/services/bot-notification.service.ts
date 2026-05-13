@@ -56,10 +56,8 @@ export class BotNotificationService {
           },
           worker: {
             select: {
-              phone: true,
               first_name: true,
               last_name: true,
-              email: true,
               description: true,
               reliability_score: true,
               avatar_url: true,
@@ -76,8 +74,6 @@ export class BotNotificationService {
       const text = formatNewApplicationToEmployer({
         offerTitle: app.job_offer.title,
         workerName: `${app.worker.first_name} ${app.worker.last_name}`,
-        workerPhone: app.worker.phone,
-        workerEmail: app.worker.email,
         workerDescription: app.worker.description ?? '',
         reliabilityScore: app.worker.reliability_score,
         completedMissions: completedCount,
