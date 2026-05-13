@@ -82,6 +82,17 @@ describe('BotRouterService', () => {
       expect(result).toEqual({ type: 'command', commandId: 'pay_penalties' });
     });
 
+    it('routes "payer" to pay_penalties for employer (employers can have penalties too)', () => {
+      const result = service.route('payer', employerProfile, null);
+      expect(result).toEqual({ type: 'command', commandId: 'pay_penalties' });
+    });
+
+    it('routes "PAYER" to pay_penalties even with an active flow state', () => {
+      const state = { flowId: 'some_flow', step: 'start', payload: {}, updatedAt: new Date().toISOString() };
+      const result = service.route('PAYER', employerProfile, state);
+      expect(result).toEqual({ type: 'command', commandId: 'pay_penalties' });
+    });
+
     it('does not route "offres" to list_offers for employer', () => {
       const result = service.route('offres', employerProfile, null);
       // employers can't list_offers
