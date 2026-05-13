@@ -228,6 +228,7 @@ export class SystemConfigService implements OnModuleInit {
       scoreMin,
       empLateCancelDed,
       billingBlock,
+      maxConcurrentApps,
     ] = await this.mgetBatch([
       { key: 'fees.late_cancellation_penalty_fcfa', fallback: '5000' },
       { key: 'fees.late_cancellation_score_deduction', fallback: '5' },
@@ -235,6 +236,7 @@ export class SystemConfigService implements OnModuleInit {
       { key: 'fees.reliability_score_min', fallback: '50' },
       { key: 'fees.employer_late_cancel_score_deduction', fallback: '5' },
       { key: 'fees.billing_block_threshold', fallback: '2' },
+      { key: 'fees.max_concurrent_applications', fallback: '3' },
     ]);
     return {
       lateCancellationPenaltyFcfa: Number(penalty),
@@ -243,6 +245,7 @@ export class SystemConfigService implements OnModuleInit {
       reliabilityScoreMin: Number(scoreMin),
       employerLateCancelScoreDeduction: Number(empLateCancelDed),
       billingBlockThreshold: Number(billingBlock),
+      maxConcurrentApplications: Number(maxConcurrentApps),
     };
   }
 
