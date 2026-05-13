@@ -298,12 +298,10 @@ describe('formatApplicationSentSuccess', () => {
 });
 
 describe('formatNewApplicationToEmployer', () => {
-  it('renders notification to employer', () => {
+  it('renders notification to employer without contact details', () => {
     const msg = formatNewApplicationToEmployer({
       offerTitle: 'Manutentionnaire',
       workerName: 'Ali Bakr',
-      workerPhone: '07 111 222',
-      workerEmail: 'ali@test.com',
       workerDescription: 'Expérimenté',
       reliabilityScore: 80,
       completedMissions: 7,
@@ -314,14 +312,14 @@ describe('formatNewApplicationToEmployer', () => {
     expect(msg).toContain('Ali Bakr');
     expect(msg).toContain('80/100');
     expect(msg).toContain('7');
+    expect(msg).not.toContain('07 111 222');
+    expect(msg).not.toContain('@');
   });
 
   it('truncates long description', () => {
     const msg = formatNewApplicationToEmployer({
       offerTitle: 'X',
       workerName: 'Y',
-      workerPhone: '0',
-      workerEmail: 'y@test.com',
       workerDescription: 'D'.repeat(250),
       reliabilityScore: null,
       completedMissions: 0,
