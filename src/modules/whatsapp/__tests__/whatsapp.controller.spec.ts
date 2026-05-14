@@ -38,7 +38,10 @@ function makeRedis() {
   const pipelineObj = {
     incr: jest.fn().mockReturnThis(),
     expire: jest.fn().mockReturnThis(),
-    exec: jest.fn().mockResolvedValue([[null, 1], [null, 1]]),
+    exec: jest.fn().mockResolvedValue([
+      [null, 1],
+      [null, 1],
+    ]),
   };
   return {
     set: jest.fn().mockResolvedValue('OK'), // 'OK' = new key set

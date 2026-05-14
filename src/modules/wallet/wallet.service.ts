@@ -65,7 +65,11 @@ export class WalletService {
     // The DB has no unique constraint on owner_type=SYSTEM with null user/profile,
     // so we never INSERT — we just find the first-created one deterministically.
     let wallet = await this.prisma.wallet.findFirst({
-      where: { owner_type: WalletOwnerType.SYSTEM, user_id: null, profile_id: null },
+      where: {
+        owner_type: WalletOwnerType.SYSTEM,
+        user_id: null,
+        profile_id: null,
+      },
       orderBy: { created_at: 'asc' },
     });
     if (!wallet) {
@@ -535,7 +539,10 @@ export class WalletService {
         _sum: { amount: true },
       }),
       this.prisma.payment.aggregate({
-        where: { status: PaymentStatus.COMPLETED, type: PaymentType.CONTACT_UNLOCK },
+        where: {
+          status: PaymentStatus.COMPLETED,
+          type: PaymentType.CONTACT_UNLOCK,
+        },
         _sum: { amount: true },
       }),
     ]);

@@ -212,12 +212,18 @@ export class JobOfferService {
           this.botNotification
             .sendRecommendedJobNotification(workerId, offer.id)
             .catch((err: unknown) =>
-              this.logger.warn(`sendRecommendedJobNotification failed for worker ${workerId}`, err instanceof Error ? err.message : String(err)),
+              this.logger.warn(
+                `sendRecommendedJobNotification failed for worker ${workerId}`,
+                err instanceof Error ? err.message : String(err),
+              ),
             );
         }
       })
       .catch((err: unknown) =>
-        this.logger.warn(`indexJobOffer/matchingNotify failed for offer ${offer.id}`, err instanceof Error ? err.message : String(err)),
+        this.logger.warn(
+          `indexJobOffer/matchingNotify failed for offer ${offer.id}`,
+          err instanceof Error ? err.message : String(err),
+        ),
       );
 
     return this.toListItem(offer);

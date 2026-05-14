@@ -48,14 +48,27 @@ export class InterestRecommendationService {
       return this.fallback(workerId, limit);
     }
 
-    const exploitRatio = signals >= HOT_THRESHOLD ? HOT_EXPLOIT_RATIO : WARM_EXPLOIT_RATIO;
+    const exploitRatio =
+      signals >= HOT_THRESHOLD ? HOT_EXPLOIT_RATIO : WARM_EXPLOIT_RATIO;
     const exploitCount = Math.round(limit * exploitRatio);
     const exploreCount = limit - exploitCount;
 
     const [exploited, explored, fallbackResults] = await Promise.all([
-      this.exploit(workerId, profile.positiveVectors, profile.negativeVectors, profile.seenJobIds, exploitCount),
+      this.exploit(
+        workerId,
+        profile.positiveVectors,
+        profile.negativeVectors,
+        profile.seenJobIds,
+        exploitCount,
+      ),
       exploreCount > 0
-        ? this.explore(workerId, profile.positiveVectors, profile.categories, profile.seenJobIds, exploreCount)
+        ? this.explore(
+            workerId,
+            profile.positiveVectors,
+            profile.categories,
+            profile.seenJobIds,
+            exploreCount,
+          )
         : Promise.resolve([]),
       this.fallback(workerId, limit),
     ]);
@@ -92,7 +105,9 @@ export class InterestRecommendationService {
         limit,
       );
 
-      this.logger.debug(`exploit() returned ${results.length} results for user=${workerId}`);
+      this.logger.debug(
+        `exploit() returned ${results.length} results for user=${workerId}`,
+      );
 
       return results.map((r) => ({
         jobId: r.id as string,
@@ -143,7 +158,9 @@ export class InterestRecommendationService {
         .toSorted(() => Math.random() - 0.5)
         .slice(0, limit);
 
-      this.logger.debug(`explore() returned ${shuffled.length} results for user=${workerId} (pool=${results.length})`);
+      this.logger.debug(
+        `explore() returned ${shuffled.length} results for user=${workerId} (pool=${results.length})`,
+      );
 
       return shuffled.map((r) => ({
         jobId: r.id as string,

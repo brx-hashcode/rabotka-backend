@@ -183,9 +183,7 @@ export async function runApplyJobFlow(
   const unpaid = await ctx.applicationService.getUnpaidPenalties(profile.id);
   if (unpaid.count > 0) {
     return {
-      reply: [
-        formatPenaltyBlocked(unpaid.total, '', ''),
-      ],
+      reply: [formatPenaltyBlocked(unpaid.total, '', '')],
       clearState: true,
     };
   }

@@ -485,26 +485,46 @@ describe('runPublishJobFlow()', () => {
   describe('Global exit keywords', () => {
     it('exits on "exit"', async () => {
       const state = makeState(3, { title: 'test' });
-      const result = await runPublishJobFlow(state, 'exit', employerProfile, ctx);
+      const result = await runPublishJobFlow(
+        state,
+        'exit',
+        employerProfile,
+        ctx,
+      );
       expect(result.clearState).toBe(true);
       expect(result.reply[0]).toContain('annulée');
     });
 
     it('exits on "annuler" mid-flow (non-step-10)', async () => {
       const state = makeState(3, { title: 'test' });
-      const result = await runPublishJobFlow(state, 'annuler', employerProfile, ctx);
+      const result = await runPublishJobFlow(
+        state,
+        'annuler',
+        employerProfile,
+        ctx,
+      );
       expect(result.clearState).toBe(true);
     });
 
     it('exits on "quitter"', async () => {
       const state = makeState(5);
-      const result = await runPublishJobFlow(state, 'quitter', employerProfile, ctx);
+      const result = await runPublishJobFlow(
+        state,
+        'quitter',
+        employerProfile,
+        ctx,
+      );
       expect(result.clearState).toBe(true);
     });
 
     it('exits on "cancel"', async () => {
       const state = makeState(5);
-      const result = await runPublishJobFlow(state, 'cancel', employerProfile, ctx);
+      const result = await runPublishJobFlow(
+        state,
+        'cancel',
+        employerProfile,
+        ctx,
+      );
       expect(result.clearState).toBe(true);
     });
   });
@@ -526,7 +546,12 @@ describe('runPublishJobFlow()', () => {
 
     it('restarts fresh when user inputs anything else', async () => {
       const state = makeState(0, { _draftStep: 2 });
-      const result = await runPublishJobFlow(state, 'xyz', employerProfile, ctx);
+      const result = await runPublishJobFlow(
+        state,
+        'xyz',
+        employerProfile,
+        ctx,
+      );
       expect(result.nextState?.step).toBe(1);
     });
 
@@ -555,7 +580,12 @@ describe('runPublishJobFlow()', () => {
 
     it('rejects description too long', async () => {
       const state = makeState(3);
-      const result = await runPublishJobFlow(state, 'x'.repeat(1001), employerProfile, ctx);
+      const result = await runPublishJobFlow(
+        state,
+        'x'.repeat(1001),
+        employerProfile,
+        ctx,
+      );
       expect(result.reply[0]).toContain('description doit contenir');
     });
   });
@@ -584,13 +614,23 @@ describe('runPublishJobFlow()', () => {
 
     it('rejects NaN amount', async () => {
       const state = makeState(5);
-      const result = await runPublishJobFlow(state, 'abc', employerProfile, ctx);
+      const result = await runPublishJobFlow(
+        state,
+        'abc',
+        employerProfile,
+        ctx,
+      );
       expect(result.reply[0]).toContain('Montant invalide');
     });
 
     it('rejects amount above maximum', async () => {
       const state = makeState(5);
-      const result = await runPublishJobFlow(state, '2000000', employerProfile, ctx);
+      const result = await runPublishJobFlow(
+        state,
+        '2000000',
+        employerProfile,
+        ctx,
+      );
       expect(result.reply[0]).toContain('Montant invalide');
     });
   });
@@ -623,7 +663,12 @@ describe('runPublishJobFlow()', () => {
         address: '123 Avenue test',
         scheduled_at: new Date(Date.now() + 5 * 3600000).toISOString(),
       });
-      const result = await runPublishJobFlow(state, 'Apporter vos outils', employerProfile, ctx);
+      const result = await runPublishJobFlow(
+        state,
+        'Apporter vos outils',
+        employerProfile,
+        ctx,
+      );
       expect(result.nextState?.step).toBe(10);
       expect(result.nextState?.payload.note).toBe('Apporter vos outils');
     });
@@ -638,7 +683,12 @@ describe('runPublishJobFlow()', () => {
         address: '123 Avenue test',
         scheduled_at: new Date(Date.now() + 5 * 3600000).toISOString(),
       });
-      const result = await runPublishJobFlow(state, 'skip', employerProfile, ctx);
+      const result = await runPublishJobFlow(
+        state,
+        'skip',
+        employerProfile,
+        ctx,
+      );
       expect(result.nextState?.step).toBe(10);
     });
 
@@ -665,7 +715,10 @@ describe('runPublishJobFlow()', () => {
     });
 
     it('publishes on "oui"', async () => {
-      (mockJobOfferService.create as jest.Mock).mockResolvedValue({ id: 'x', quantity: 1 });
+      (mockJobOfferService.create as jest.Mock).mockResolvedValue({
+        id: 'x',
+        quantity: 1,
+      });
       const state = makeState(10, {
         title: 'Plombier',
         description: 'x'.repeat(30),
@@ -676,12 +729,20 @@ describe('runPublishJobFlow()', () => {
         quantity: 1,
         note: '',
       });
-      const result = await runPublishJobFlow(state, 'oui', employerProfile, ctx);
+      const result = await runPublishJobFlow(
+        state,
+        'oui',
+        employerProfile,
+        ctx,
+      );
       expect(result.clearState).toBe(true);
     });
 
     it('publishes on "oui, publier"', async () => {
-      (mockJobOfferService.create as jest.Mock).mockResolvedValue({ id: 'x', quantity: 1 });
+      (mockJobOfferService.create as jest.Mock).mockResolvedValue({
+        id: 'x',
+        quantity: 1,
+      });
       const state = makeState(10, {
         title: 'Plombier',
         description: 'x'.repeat(30),
@@ -692,26 +753,43 @@ describe('runPublishJobFlow()', () => {
         quantity: 1,
         note: '',
       });
-      const result = await runPublishJobFlow(state, 'oui, publier', employerProfile, ctx);
+      const result = await runPublishJobFlow(
+        state,
+        'oui, publier',
+        employerProfile,
+        ctx,
+      );
       expect(result.clearState).toBe(true);
     });
 
     it('cancels on "annuler"', async () => {
       const state = makeState(10, {});
-      const result = await runPublishJobFlow(state, 'annuler', employerProfile, ctx);
+      const result = await runPublishJobFlow(
+        state,
+        'annuler',
+        employerProfile,
+        ctx,
+      );
       expect(result.clearState).toBe(true);
     });
 
     it('goes to modifier on "modifier"', async () => {
       const state = makeState(10, {});
-      const result = await runPublishJobFlow(state, 'modifier', employerProfile, ctx);
+      const result = await runPublishJobFlow(
+        state,
+        'modifier',
+        employerProfile,
+        ctx,
+      );
       expect(result.nextState?.step).toBe(11);
     });
   });
 
   describe('Step 10 — error handling', () => {
     it('handles error from jobOfferService.create', async () => {
-      (mockJobOfferService.create as jest.Mock).mockRejectedValueOnce(new Error('Service error'));
+      (mockJobOfferService.create as jest.Mock).mockRejectedValueOnce(
+        new Error('Service error'),
+      );
       const state = makeState(10, {
         title: 'Plombier',
         description: 'x'.repeat(30),
@@ -727,7 +805,9 @@ describe('runPublishJobFlow()', () => {
     });
 
     it('handles non-Error thrown from jobOfferService.create', async () => {
-      (mockJobOfferService.create as jest.Mock).mockRejectedValueOnce('raw error string');
+      (mockJobOfferService.create as jest.Mock).mockRejectedValueOnce(
+        'raw error string',
+      );
       const state = makeState(10, {
         title: 'Plombier',
         description: 'x'.repeat(30),
@@ -746,7 +826,12 @@ describe('runPublishJobFlow()', () => {
   describe('Unknown step — fallback', () => {
     it('returns error for unknown step', async () => {
       const state = makeState(99);
-      const result = await runPublishJobFlow(state, 'anything', employerProfile, ctx);
+      const result = await runPublishJobFlow(
+        state,
+        'anything',
+        employerProfile,
+        ctx,
+      );
       expect(result.clearState).toBe(true);
       expect(result.reply[0]).toContain("Erreur d'étape");
     });

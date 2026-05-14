@@ -89,7 +89,11 @@ describe('ApplicationService', () => {
     const mockPrismaService = {
       jobOffer: { findUnique: jest.fn(), update: jest.fn() },
       profile: { findUnique: jest.fn(), update: jest.fn() },
-      penalty: { count: jest.fn(), create: jest.fn(), upsert: jest.fn().mockResolvedValue({}) },
+      penalty: {
+        count: jest.fn(),
+        create: jest.fn(),
+        upsert: jest.fn().mockResolvedValue({}),
+      },
       application: {
         findUnique: jest.fn(),
         findMany: jest.fn(),
@@ -99,7 +103,11 @@ describe('ApplicationService', () => {
         count: jest.fn(),
       },
       payment: { create: jest.fn() },
-      assignment: { create: jest.fn(), updateMany: jest.fn(), findUnique: jest.fn().mockResolvedValue(null) },
+      assignment: {
+        create: jest.fn(),
+        updateMany: jest.fn(),
+        findUnique: jest.fn().mockResolvedValue(null),
+      },
       $executeRaw: jest.fn().mockResolvedValue(0),
       $transaction: jest.fn().mockImplementation((arg: unknown) => {
         if (typeof arg === 'function') {
@@ -391,51 +399,73 @@ describe('ApplicationService', () => {
     it('throws NotFoundException when worker not found', async () => {
       (prisma.jobOffer.findUnique as jest.Mock).mockResolvedValue(mockJobOffer);
       (prisma.profile.findUnique as jest.Mock).mockResolvedValue(null);
-      await expect(service.create(JOB_OFFER_ID, WORKER_ID)).rejects.toThrow(NotFoundException);
+      await expect(service.create(JOB_OFFER_ID, WORKER_ID)).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('throws ForbiddenException when worker account not ACTIVE', async () => {
-      (prisma.profile.findUnique as jest.Mock).mockResolvedValue({ ...mockWorker, status: 'SUSPENDED' });
-      await expect(service.create(JOB_OFFER_ID, WORKER_ID)).rejects.toThrow(ForbiddenException);
+      (prisma.profile.findUnique as jest.Mock).mockResolvedValue({
+        ...mockWorker,
+        status: 'SUSPENDED',
+      });
+      await expect(service.create(JOB_OFFER_ID, WORKER_ID)).rejects.toThrow(
+        ForbiddenException,
+      );
     });
 
     it('throws ForbiddenException when profile_type is not WORKER', async () => {
-      (prisma.profile.findUnique as jest.Mock).mockResolvedValue({ ...mockWorker, profile_type: 'EMPLOYER' });
-      await expect(service.create(JOB_OFFER_ID, WORKER_ID)).rejects.toThrow(ForbiddenException);
+      (prisma.profile.findUnique as jest.Mock).mockResolvedValue({
+        ...mockWorker,
+        profile_type: 'EMPLOYER',
+      });
+      await expect(service.create(JOB_OFFER_ID, WORKER_ID)).rejects.toThrow(
+        ForbiddenException,
+      );
     });
   });
 
   describe('findByWorker()', () => {
     it('returns applications for worker', async () => {
-      (prisma.application.findMany as jest.Mock).mockResolvedValue([mockApplication]);
+      (prisma.application.findMany as jest.Mock).mockResolvedValue([
+        mockApplication,
+      ]);
       const result = await service.findByWorker(WORKER_ID);
       expect(Array.isArray(result)).toBe(true);
     });
 
     it('filters by status', async () => {
       (prisma.application.findMany as jest.Mock).mockResolvedValue([]);
-      await service.findByWorker(WORKER_ID, { status: ApplicationStatus.PENDING });
+      await service.findByWorker(WORKER_ID, {
+        status: ApplicationStatus.PENDING,
+      });
       expect(prisma.application.findMany as jest.Mock).toHaveBeenCalled();
     });
   });
 
   describe('findByEmployer()', () => {
     it('returns applications for employer', async () => {
-      (prisma.application.findMany as jest.Mock).mockResolvedValue([mockApplication]);
+      (prisma.application.findMany as jest.Mock).mockResolvedValue([
+        mockApplication,
+      ]);
       const result = await service.findByEmployer(EMPLOYER_ID);
       expect(Array.isArray(result)).toBe(true);
     });
 
     it('filters by status for employer', async () => {
       (prisma.application.findMany as jest.Mock).mockResolvedValue([]);
-      await service.findByEmployer(EMPLOYER_ID, { status: ApplicationStatus.ACCEPTED });
+      await service.findByEmployer(EMPLOYER_ID, {
+        status: ApplicationStatus.ACCEPTED,
+      });
       expect(prisma.application.findMany as jest.Mock).toHaveBeenCalled();
     });
   });
 
   describe('findByJobOffer()', () => {
     it('returns applications for job offer', async () => {
-      (prisma.application.findMany as jest.Mock).mockResolvedValue([mockApplication]);
+      (prisma.application.findMany as jest.Mock).mockResolvedValue([
+        mockApplication,
+      ]);
       const result = await service.findByJobOffer(JOB_OFFER_ID);
       expect(Array.isArray(result)).toBe(true);
     });
@@ -443,29 +473,54 @@ describe('ApplicationService', () => {
 
   describe('accept() - additional branches', () => {
     beforeEach(() => {
-      (prisma.application.findUnique as jest.Mock).mockResolvedValue(mockApplication);
+      (prisma.application.findUnique as jest.Mock).mockResolvedValue(
+        mockApplication,
+      );
       (prisma.application.count as jest.Mock).mockResolvedValue(0);
-      jest.spyOn(service, 'findById').mockResolvedValue({ ...mockApplication, status: ApplicationStatus.ACCEPTED, job_offer: { ...mockJobOffer, description: 'desc', payment_flow: 'DAILY', note: null } as any, worker: mockApplication.worker as any } as any);
+      jest.spyOn(service, 'findById').mockResolvedValue({
+        ...mockApplication,
+        status: ApplicationStatus.ACCEPTED,
+        job_offer: {
+          ...mockJobOffer,
+          description: 'desc',
+          payment_flow: 'DAILY',
+          note: null,
+        } as any,
+        worker: mockApplication.worker as any,
+      } as any);
     });
 
     it('throws BadRequestException when application status is not PENDING or VIEWED', async () => {
-      (prisma.application.findUnique as jest.Mock).mockResolvedValue({ ...mockApplication, status: ApplicationStatus.ACCEPTED });
+      (prisma.application.findUnique as jest.Mock).mockResolvedValue({
+        ...mockApplication,
+        status: ApplicationStatus.ACCEPTED,
+      });
       let error: any;
-      try { await service.accept(APPLICATION_ID, EMPLOYER_ID); } catch (e) { error = e; }
+      try {
+        await service.accept(APPLICATION_ID, EMPLOYER_ID);
+      } catch (e) {
+        error = e;
+      }
       expect(error?.status).toBe(400);
     });
 
     it('throws ConflictException when capacity is already full', async () => {
       (prisma.application.count as jest.Mock).mockResolvedValue(1); // already 1, quantity is 1
       let error: any;
-      try { await service.accept(APPLICATION_ID, EMPLOYER_ID); } catch (e) { error = e; }
+      try {
+        await service.accept(APPLICATION_ID, EMPLOYER_ID);
+      } catch (e) {
+        error = e;
+      }
       expect(error?.status).toBe(409);
     });
   });
 
   describe('markAsViewed()', () => {
     it('marks application as viewed', async () => {
-      (prisma.application.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+      (prisma.application.updateMany as jest.Mock).mockResolvedValue({
+        count: 1,
+      });
       await service.markAsViewed(APPLICATION_ID);
       expect(prisma.application.updateMany as jest.Mock).toHaveBeenCalled();
     });
@@ -537,7 +592,12 @@ describe('ApplicationService', () => {
       let capturedTx: any;
       (prisma.$transaction as jest.Mock).mockImplementationOnce((fn: any) => {
         capturedTx = {
-          jobOffer: { update: jest.fn().mockResolvedValue({}), findUnique: jest.fn().mockResolvedValue({ status: JobOfferStatus.ACTIVE }) },
+          jobOffer: {
+            update: jest.fn().mockResolvedValue({}),
+            findUnique: jest
+              .fn()
+              .mockResolvedValue({ status: JobOfferStatus.ACTIVE }),
+          },
           assignment: { updateMany: jest.fn().mockResolvedValue({}) },
           payment: { create: jest.fn().mockResolvedValue({}) },
           application: { updateMany: jest.fn().mockResolvedValue({}) },

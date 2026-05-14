@@ -103,14 +103,17 @@ describe('EventService', () => {
     it('creates an event', async () => {
       mockPrisma.event.create.mockResolvedValue(baseEvent);
 
-      const result = await service.create({
-        title: 'Test Event',
-        description: 'Description',
-        startDate: now.toISOString(),
-        endDate: new Date(now.getTime() + 3600000).toISOString(),
-        color: '#FF0000',
-        channel: DeliveryChannel.EMAIL,
-      }, 'user-1');
+      const result = await service.create(
+        {
+          title: 'Test Event',
+          description: 'Description',
+          startDate: now.toISOString(),
+          endDate: new Date(now.getTime() + 3600000).toISOString(),
+          color: '#FF0000',
+          channel: DeliveryChannel.EMAIL,
+        },
+        'user-1',
+      );
 
       expect(result.id).toBe(1);
       expect(mockEventEmitter.emit).toHaveBeenCalled();
@@ -119,20 +122,39 @@ describe('EventService', () => {
     it('creates event with profiles and userIds', async () => {
       const eventWithRecipients = {
         ...baseEvent,
-        profiles: [{ id: 'p1', first_name: 'John', last_name: 'Doe', avatar_url: null, email: 'john@test.com', phone: '+123' }],
-        assigned_users: [{ id: 'u1', first_name: 'Admin', last_name: 'User', email: 'admin@test.com' }],
+        profiles: [
+          {
+            id: 'p1',
+            first_name: 'John',
+            last_name: 'Doe',
+            avatar_url: null,
+            email: 'john@test.com',
+            phone: '+123',
+          },
+        ],
+        assigned_users: [
+          {
+            id: 'u1',
+            first_name: 'Admin',
+            last_name: 'User',
+            email: 'admin@test.com',
+          },
+        ],
       };
       mockPrisma.event.create.mockResolvedValue(eventWithRecipients);
 
-      await service.create({
-        title: 'Test Event',
-        description: 'Description',
-        startDate: now.toISOString(),
-        endDate: new Date(now.getTime() + 3600000).toISOString(),
-        color: '#FF0000',
-        profileIds: ['p1'],
-        userIds: ['u1'],
-      }, 'user-1');
+      await service.create(
+        {
+          title: 'Test Event',
+          description: 'Description',
+          startDate: now.toISOString(),
+          endDate: new Date(now.getTime() + 3600000).toISOString(),
+          color: '#FF0000',
+          profileIds: ['p1'],
+          userIds: ['u1'],
+        },
+        'user-1',
+      );
 
       expect(mockDispatcher.dispatchEventCreated).toHaveBeenCalled();
     });
@@ -152,7 +174,10 @@ describe('EventService', () => {
     it('dispatches update notification when dates change', async () => {
       const newStart = new Date(now.getTime() + 7200000);
       mockPrisma.event.findUnique.mockResolvedValue(baseEvent);
-      mockPrisma.event.update.mockResolvedValue({ ...baseEvent, start_date: newStart });
+      mockPrisma.event.update.mockResolvedValue({
+        ...baseEvent,
+        start_date: newStart,
+      });
 
       await service.update(1, {
         startDate: newStart.toISOString(),
@@ -163,7 +188,9 @@ describe('EventService', () => {
 
     it('throws NotFoundException if event not found', async () => {
       mockPrisma.event.findUnique.mockResolvedValue(null);
-      await expect(service.update(999, { title: 'x' })).rejects.toThrow(NotFoundException);
+      await expect(service.update(999, { title: 'x' })).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 

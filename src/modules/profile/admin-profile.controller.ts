@@ -363,16 +363,23 @@ export class AdminProfileController {
 
   @Patch(':id/avatar')
   @Roles(UserRole.MANAGER)
-  @UseInterceptors(FileInterceptor('avatar', {
-    limits: { fileSize: 5 * 1024 * 1024 },
-    fileFilter: (_req, file, cb) => {
-      if (['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype)) {
-        cb(null, true);
-      } else {
-        cb(new BadRequestException('Only JPEG, PNG or WEBP images are allowed'), false);
-      }
-    },
-  }))
+  @UseInterceptors(
+    FileInterceptor('avatar', {
+      limits: { fileSize: 5 * 1024 * 1024 },
+      fileFilter: (_req, file, cb) => {
+        if (['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype)) {
+          cb(null, true);
+        } else {
+          cb(
+            new BadRequestException(
+              'Only JPEG, PNG or WEBP images are allowed',
+            ),
+            false,
+          );
+        }
+      },
+    }),
+  )
   @ApiConsumes('multipart/form-data')
   @ApiOperation({ summary: 'Update profile avatar (admin only)' })
   @ApiResponse({ status: 200, description: 'Avatar updated' })
@@ -454,7 +461,10 @@ export class AdminProfileController {
           ),
         )
         .catch((err) =>
-          console.warn(`Failed to send KYC validated WhatsApp message for ${id}:`, err),
+          console.warn(
+            `Failed to send KYC validated WhatsApp message for ${id}:`,
+            err,
+          ),
         );
     } else {
       await this.mail.sendMail({

@@ -182,7 +182,9 @@ async function handleDetailStep(params: DetailStepParams): Promise<FlowResult> {
     );
     return {
       reply: result.reply,
-      nextState: result.clearState ? undefined : (result.nextState ?? acceptRefuseState),
+      nextState: result.clearState
+        ? undefined
+        : (result.nextState ?? acceptRefuseState),
       clearState: result.clearState,
     };
   }
@@ -246,9 +248,14 @@ function handleListSelection(
   }
 
   const item = slice[choice - 1];
-  void ctx.applicationService.markAsViewed(item.id).catch((err: unknown) =>
-    console.warn(`[candidatures-list] markAsViewed failed for ${item.id}:`, err),
-  );
+  void ctx.applicationService
+    .markAsViewed(item.id)
+    .catch((err: unknown) =>
+      console.warn(
+        `[candidatures-list] markAsViewed failed for ${item.id}:`,
+        err,
+      ),
+    );
   return {
     reply: [formatSelectedItemDetail(item)],
     nextState: buildDetailState(state, payload, item),

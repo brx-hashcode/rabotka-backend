@@ -62,7 +62,9 @@ describe('SystemConfigService', () => {
     it('fetches from DB when cache miss and lock acquired', async () => {
       mockRedis.get.mockResolvedValue(null);
       mockRedis.set.mockResolvedValueOnce('OK'); // lock acquired
-      mockPrisma.systemConfig.findUnique.mockResolvedValue({ value: 'db-value' });
+      mockPrisma.systemConfig.findUnique.mockResolvedValue({
+        value: 'db-value',
+      });
 
       const result = await service.get('some.key', 'fallback');
       expect(result).toBe('db-value');
@@ -70,7 +72,7 @@ describe('SystemConfigService', () => {
 
     it('returns fallback when lock not acquired', async () => {
       mockRedis.get
-        .mockResolvedValueOnce(null)  // cache miss
+        .mockResolvedValueOnce(null) // cache miss
         .mockResolvedValueOnce(null); // after waiting, still not cached
       mockRedis.set.mockResolvedValue(null); // lock not acquired
 
@@ -100,7 +102,15 @@ describe('SystemConfigService', () => {
   describe('getAll', () => {
     it('returns all config entries', async () => {
       mockPrisma.systemConfig.findMany.mockResolvedValue([
-        { key: 'test.key', value: 'value', category: 'FEES', label: 'Test', is_secret: false, updated_at: new Date(), updated_by: null },
+        {
+          key: 'test.key',
+          value: 'value',
+          category: 'FEES',
+          label: 'Test',
+          is_secret: false,
+          updated_at: new Date(),
+          updated_by: null,
+        },
       ]);
       const result = await service.getAll();
       expect(result).toHaveLength(1);
@@ -109,7 +119,15 @@ describe('SystemConfigService', () => {
 
     it('masks secret values', async () => {
       mockPrisma.systemConfig.findMany.mockResolvedValue([
-        { key: 'secret.key', value: 'secret', category: 'FEES', label: 'Secret', is_secret: true, updated_at: new Date(), updated_by: null },
+        {
+          key: 'secret.key',
+          value: 'secret',
+          category: 'FEES',
+          label: 'Secret',
+          is_secret: true,
+          updated_at: new Date(),
+          updated_by: null,
+        },
       ]);
       const result = await service.getAll();
       expect(result[0].value).toBe('***');
@@ -118,9 +136,11 @@ describe('SystemConfigService', () => {
     it('filters by category', async () => {
       mockPrisma.systemConfig.findMany.mockResolvedValue([]);
       await service.getAll('FEES' as any);
-      expect(mockPrisma.systemConfig.findMany).toHaveBeenCalledWith(expect.objectContaining({
-        where: { category: 'FEES' },
-      }));
+      expect(mockPrisma.systemConfig.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { category: 'FEES' },
+        }),
+      );
     });
   });
 
@@ -133,7 +153,13 @@ describe('SystemConfigService', () => {
 
     it('returns config entry', async () => {
       mockPrisma.systemConfig.findUnique.mockResolvedValue({
-        key: 'test.key', value: 'value', category: 'FEES', label: 'Test', is_secret: false, updated_at: new Date(), updated_by: null,
+        key: 'test.key',
+        value: 'value',
+        category: 'FEES',
+        label: 'Test',
+        is_secret: false,
+        updated_at: new Date(),
+        updated_by: null,
       });
       const result = await service.getOne('test.key');
       expect(result?.key).toBe('test.key');
@@ -174,7 +200,15 @@ describe('SystemConfigService', () => {
 
   describe('getFees', () => {
     it('returns fees with defaults', async () => {
-      mockRedis.mget.mockResolvedValue([null, null, null, null, null, null, null]);
+      mockRedis.mget.mockResolvedValue([
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+      ]);
       mockPrisma.systemConfig.findMany.mockResolvedValue([]);
       const result = await service.getFees();
       expect(result.lateCancellationPenaltyFcfa).toBe(5000);
@@ -194,7 +228,9 @@ describe('SystemConfigService', () => {
     it('throws when expiryHours not configured', async () => {
       mockRedis.mget.mockResolvedValue(['500', '100', null]);
       mockPrisma.systemConfig.findMany.mockResolvedValueOnce([]);
-      await expect(service.getContactUnlockFees()).rejects.toThrow('fees.contact_unlock_expiry_hours');
+      await expect(service.getContactUnlockFees()).rejects.toThrow(
+        'fees.contact_unlock_expiry_hours',
+      );
     });
   });
 
@@ -283,7 +319,9 @@ describe('SystemConfigService', () => {
 
   describe('onModuleInit retry', () => {
     it('throws immediately on non-retryable error', async () => {
-      mockPrisma.systemConfig.upsert.mockRejectedValue(new Error('permission denied'));
+      mockPrisma.systemConfig.upsert.mockRejectedValue(
+        new Error('permission denied'),
+      );
       await expect(service.onModuleInit()).rejects.toThrow('permission denied');
     });
   });
@@ -293,7 +331,9 @@ describe('SystemConfigService', () => {
       mockPrisma.systemConfig.update.mockResolvedValue({});
       await service.set('test.key', 'new-val');
       expect(mockPrisma.systemConfig.update).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.objectContaining({ updated_by: null }) })
+        expect.objectContaining({
+          data: expect.objectContaining({ updated_by: null }),
+        }),
       );
     });
   });

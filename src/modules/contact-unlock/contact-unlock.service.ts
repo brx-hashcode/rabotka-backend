@@ -249,7 +249,11 @@ export class ContactUnlockService {
 
     const jobOffer = await db.jobOffer.findUnique({
       where: { id: app.job_offer_id },
-      select: { quantity: true, employer_unlock_paid: true, scheduled_at: true },
+      select: {
+        quantity: true,
+        employer_unlock_paid: true,
+        scheduled_at: true,
+      },
     });
     if (!jobOffer) throw new NotFoundException('Offre introuvable');
 
@@ -257,10 +261,15 @@ export class ContactUnlockService {
     // Hard deadline: 2h before job starts (so both parties can exchange contacts in time).
     // Soft window: expiryHours from SystemConfig (default 48h) from now.
     // Whichever is sooner is used; minimum 2h from now if job is imminent.
-    const twoHBeforeJob = new Date(jobOffer.scheduled_at.getTime() - 2 * 60 * 60 * 1000);
-    const configWindow = new Date(Date.now() + fees.expiryHours * 60 * 60 * 1000);
+    const twoHBeforeJob = new Date(
+      jobOffer.scheduled_at.getTime() - 2 * 60 * 60 * 1000,
+    );
+    const configWindow = new Date(
+      Date.now() + fees.expiryHours * 60 * 60 * 1000,
+    );
     const minExpiry = new Date(Date.now() + 2 * 60 * 60 * 1000);
-    const preferredExpiry = twoHBeforeJob < configWindow ? twoHBeforeJob : configWindow;
+    const preferredExpiry =
+      twoHBeforeJob < configWindow ? twoHBeforeJob : configWindow;
     const expiresAt = preferredExpiry > minExpiry ? preferredExpiry : minExpiry;
 
     const isMultiPerson = (jobOffer.quantity ?? 1) > 1;

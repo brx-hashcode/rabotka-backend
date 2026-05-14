@@ -51,16 +51,26 @@ export class MatchingController {
       }),
     ]);
 
-    const workerIds = profiles.filter((p) => p.profile_type === 'WORKER').map((p) => p.id);
-    const employerIds = profiles.filter((p) => p.profile_type === 'EMPLOYER').map((p) => p.id);
+    const workerIds = profiles
+      .filter((p) => p.profile_type === 'WORKER')
+      .map((p) => p.id);
+    const employerIds = profiles
+      .filter((p) => p.profile_type === 'EMPLOYER')
+      .map((p) => p.id);
 
     this.logger.log(
       `Re-indexing ${jobIds.length} jobs, ${workerIds.length} workers, ${employerIds.length} employers`,
     );
 
-    await this.batchIndex('job', jobIds, (id) => this.matchingService.indexJobOffer(id));
-    await this.batchIndex('worker', workerIds, (id) => this.matchingService.indexWorkerProfile(id));
-    await this.batchIndex('employer', employerIds, (id) => this.matchingService.indexEmployerProfile(id));
+    await this.batchIndex('job', jobIds, (id) =>
+      this.matchingService.indexJobOffer(id),
+    );
+    await this.batchIndex('worker', workerIds, (id) =>
+      this.matchingService.indexWorkerProfile(id),
+    );
+    await this.batchIndex('employer', employerIds, (id) =>
+      this.matchingService.indexEmployerProfile(id),
+    );
 
     this.logger.log('Re-index complete');
   }
