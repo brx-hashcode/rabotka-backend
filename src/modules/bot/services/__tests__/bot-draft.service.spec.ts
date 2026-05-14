@@ -3,6 +3,7 @@ import { BotDraftService, PublishJobDraft } from '../bot-draft.service';
 import { REDIS_CONNECTION } from '../../../../common/services/redis/redis.constants';
 
 const PROFILE_ID = 'profile-1';
+const ENV = process.env.IS_PROD === 'true' ? 'prod' : 'dev';
 const mockDraft: PublishJobDraft = {
   step: 3,
   payload: { title: 'Plombier', amount: 15000 },
@@ -34,7 +35,7 @@ describe('BotDraftService', () => {
     it('saves draft as JSON with 7-day TTL', async () => {
       await service.saveDraft(PROFILE_ID, mockDraft);
       expect(redis.set).toHaveBeenCalledWith(
-        `rabotka:bot:draft:publish:${PROFILE_ID}`,
+        `rabotka:${ENV}:bot:draft:publish:${PROFILE_ID}`,
         JSON.stringify(mockDraft),
         'EX',
         7 * 24 * 60 * 60,
@@ -66,7 +67,7 @@ describe('BotDraftService', () => {
   describe('clearDraft()', () => {
     it('deletes the draft key from Redis', async () => {
       await service.clearDraft(PROFILE_ID);
-      expect(redis.del).toHaveBeenCalledWith(`rabotka:bot:draft:publish:${PROFILE_ID}`);
+      expect(redis.del).toHaveBeenCalledWith(`rabotka:${ENV}:bot:draft:publish:${PROFILE_ID}`);
     });
   });
 });

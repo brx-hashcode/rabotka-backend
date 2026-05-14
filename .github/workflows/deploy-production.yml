@@ -164,6 +164,7 @@ jobs:
           TWILIO_WEBHOOK_BASE_URL=$(echo "$VAULT_SECRET" | jq -r '.TWILIO_WEBHOOK_BASE_URL')
           QDRANT_URL=$(echo "$VAULT_SECRET" | jq -r '.QDRANT_URL')
           QDRANT_API_KEY=$(echo "$VAULT_SECRET" | jq -r '.QDRANT_API_KEY')
+          IS_PROD=$(echo "$VAULT_SECRET" | jq -r '.IS_PROD // "false"')
           EOF
           sed -i 's/^[[:space:]]*//' /tmp/deploy.env
 
