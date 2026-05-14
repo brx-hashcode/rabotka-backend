@@ -37,6 +37,7 @@ import { WalletService } from '../wallet/wallet.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { MailService } from '../mail/mail.service';
 import { kycApprovedEmail, kycRejectedEmail } from '../mail/templates';
+import { formatKycValidatedMessage } from '../bot/messages/notifications.messages';
 import { MessageDirection, BotPlatform } from '@prisma/client';
 import { AdminListProfilesDto } from './dto/admin-list-profiles.dto';
 import {
@@ -444,13 +445,16 @@ export class AdminProfileController {
         html: kycApprovedEmail(fullName),
       });
 
-      this.profileService
-        .requestWhatsAppVerification(id)
-        .catch((err) =>
-          console.warn(
-            `Failed to send WhatsApp verification link for ${id}:`,
-            err,
+      this.whatsApp
+        .sendTextMessage(
+          result.phone,
+          formatKycValidatedMessage(
+            result.firstName,
+            result.profileType as 'WORKER' | 'EMPLOYER',
           ),
+        )
+        .catch((err) =>
+          console.warn(`Failed to send KYC validated WhatsApp message for ${id}:`, err),
         );
     } else {
       await this.mail.sendMail({
