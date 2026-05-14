@@ -89,7 +89,10 @@ function buildPagedListReply(
 ): { reply: string[]; page: number } {
   const totalPages = Math.ceil(offers.length / PAGE_SIZE);
   const safePage = Math.max(0, Math.min(page, totalPages - 1));
-  const pageOffers = offers.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
+  const pageOffers = offers.slice(
+    safePage * PAGE_SIZE,
+    (safePage + 1) * PAGE_SIZE,
+  );
   return {
     reply: [formatRecommendedList(pageOffers, safePage, totalPages)],
     page: safePage,
@@ -127,9 +130,14 @@ async function handleRecommendedJobsListStep(
     };
   }
 
-  const pageOffers = offers.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);
+  const pageOffers = offers.slice(
+    currentPage * PAGE_SIZE,
+    (currentPage + 1) * PAGE_SIZE,
+  );
   const maxChoice = pageOffers.length;
-  const choice = /^\d+$/.test(trimmedInput) ? Number.parseInt(trimmedInput, 10) : 0;
+  const choice = /^\d+$/.test(trimmedInput)
+    ? Number.parseInt(trimmedInput, 10)
+    : 0;
 
   if (choice < 1 || choice > maxChoice) {
     const { reply } = buildPagedListReply(offers, currentPage);

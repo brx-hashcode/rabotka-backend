@@ -49,8 +49,10 @@ describe('AdAdminController', () => {
         { provide: AdAnalyticsService, useValue: mockAdAnalyticsService },
       ],
     })
-      .overrideGuard(AdminAuthGuard).useValue({ canActivate: () => true })
-      .overrideGuard(RolesGuard).useValue({ canActivate: () => true })
+      .overrideGuard(AdminAuthGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(RolesGuard)
+      .useValue({ canActivate: () => true })
       .compile();
     controller = module.get<AdAdminController>(AdAdminController);
   });
@@ -62,7 +64,12 @@ describe('AdAdminController', () => {
   });
 
   it('create creates an advertisement', async () => {
-    const dto = { title: 'New Ad', bundleId: 'bundle-1', startDate: '2026-07-01', endDate: '2026-07-31' } as any;
+    const dto = {
+      title: 'New Ad',
+      bundleId: 'bundle-1',
+      startDate: '2026-07-01',
+      endDate: '2026-07-31',
+    } as any;
     const result = await controller.create(dto);
     expect(result.id).toBe('ad-1');
   });
@@ -94,7 +101,10 @@ describe('AdAdminController', () => {
   it('updateBundle updates a bundle', async () => {
     const dto = { name: 'Updated' } as any;
     const result = await controller.updateBundle('bundle-1', dto);
-    expect(mockAdAdminService.updateBundle).toHaveBeenCalledWith('bundle-1', dto);
+    expect(mockAdAdminService.updateBundle).toHaveBeenCalledWith(
+      'bundle-1',
+      dto,
+    );
     expect(result.id).toBe('bundle-1');
   });
 
@@ -115,7 +125,9 @@ describe('AdAdminController', () => {
 
   it('confirmPayment confirms payment', async () => {
     const result = await controller.confirmPayment('ad-1');
-    expect(mockAdvertisementService.confirmPayment).toHaveBeenCalledWith('ad-1');
+    expect(mockAdvertisementService.confirmPayment).toHaveBeenCalledWith(
+      'ad-1',
+    );
   });
 
   it('submit submits an ad for review', async () => {
@@ -130,7 +142,10 @@ describe('AdAdminController', () => {
 
   it('reject rejects an advertisement', async () => {
     const result = await controller.reject('ad-1', { reason: 'Bad content' });
-    expect(mockAdAdminService.reject).toHaveBeenCalledWith('ad-1', 'Bad content');
+    expect(mockAdAdminService.reject).toHaveBeenCalledWith(
+      'ad-1',
+      'Bad content',
+    );
   });
 
   it('pause pauses an advertisement', async () => {

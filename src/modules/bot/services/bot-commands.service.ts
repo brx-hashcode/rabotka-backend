@@ -186,7 +186,8 @@ export class BotCommandsService {
       });
     if (total === 0) {
       return {
-        message: "*VOUS N'AVEZ PUBLIÉ AUCUNE OFFRE. TAPEZ 'MENU' POUR REVENIR.*",
+        message:
+          "*VOUS N'AVEZ PUBLIÉ AUCUNE OFFRE. TAPEZ 'MENU' POUR REVENIR.*",
         offerIds: [],
       };
     }

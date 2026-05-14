@@ -8,7 +8,9 @@ const mockContactUnlockService = {
 };
 
 const mockBotNotification = {
-  sendContactUnlockCreditConversionNotification: jest.fn().mockResolvedValue(undefined),
+  sendContactUnlockCreditConversionNotification: jest
+    .fn()
+    .mockResolvedValue(undefined),
 };
 
 describe('ContactUnlockScheduler', () => {
@@ -36,7 +38,9 @@ describe('ContactUnlockScheduler', () => {
     mockContactUnlockService.processExpiredAttempts.mockResolvedValueOnce([]);
     await scheduler.handleExpiredUnlocks();
     expect(mockContactUnlockService.processExpiredAttempts).toHaveBeenCalled();
-    expect(mockBotNotification.sendContactUnlockCreditConversionNotification).not.toHaveBeenCalled();
+    expect(
+      mockBotNotification.sendContactUnlockCreditConversionNotification,
+    ).not.toHaveBeenCalled();
   });
 
   it('handleExpiredUnlocks sends notifications for each conversion', async () => {
@@ -45,13 +49,21 @@ describe('ContactUnlockScheduler', () => {
       { profileId: 'p-2', amount: 500 },
     ]);
     await scheduler.handleExpiredUnlocks();
-    expect(mockBotNotification.sendContactUnlockCreditConversionNotification).toHaveBeenCalledWith('p-1', 1000);
-    expect(mockBotNotification.sendContactUnlockCreditConversionNotification).toHaveBeenCalledWith('p-2', 500);
+    expect(
+      mockBotNotification.sendContactUnlockCreditConversionNotification,
+    ).toHaveBeenCalledWith('p-1', 1000);
+    expect(
+      mockBotNotification.sendContactUnlockCreditConversionNotification,
+    ).toHaveBeenCalledWith('p-2', 500);
   });
 
   it('handleExpiredUnlocks swallows notification errors', async () => {
-    mockContactUnlockService.processExpiredAttempts.mockResolvedValueOnce([{ profileId: 'p-1', amount: 1000 }]);
-    mockBotNotification.sendContactUnlockCreditConversionNotification.mockRejectedValueOnce(new Error('send fail'));
+    mockContactUnlockService.processExpiredAttempts.mockResolvedValueOnce([
+      { profileId: 'p-1', amount: 1000 },
+    ]);
+    mockBotNotification.sendContactUnlockCreditConversionNotification.mockRejectedValueOnce(
+      new Error('send fail'),
+    );
     await expect(scheduler.handleExpiredUnlocks()).resolves.not.toThrow();
   });
 });

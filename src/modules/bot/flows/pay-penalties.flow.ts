@@ -131,8 +131,9 @@ async function handleWalletConfirmationStep(
   const token = randomUUID();
 
   const systemWallet = await ctx.walletService.getOrCreateSystemWallet();
-  const profileWallet =
-    await ctx.walletService.getOrCreateProfileWallet(profile.id);
+  const profileWallet = await ctx.walletService.getOrCreateProfileWallet(
+    profile.id,
+  );
 
   await ctx.prisma.$transaction([
     ctx.prisma.walletTransaction.create({
@@ -150,17 +151,16 @@ async function handleWalletConfirmationStep(
     }),
   ]);
 
-  const paymentRequest =
-    await ctx.prisma.paymentRequest.create({
-      data: {
-        profile_id: profile.id,
-        token,
-        status: PaymentRequestStatus.APPROVED,
-        amount: totalAmount,
-        description: `Paiement de ${result.paidCount} pénalité(s) (wallet interne)`,
-        payment_reference: reference,
-      },
-    });
+  const paymentRequest = await ctx.prisma.paymentRequest.create({
+    data: {
+      profile_id: profile.id,
+      token,
+      status: PaymentRequestStatus.APPROVED,
+      amount: totalAmount,
+      description: `Paiement de ${result.paidCount} pénalité(s) (wallet interne)`,
+      payment_reference: reference,
+    },
+  });
 
   await ctx.prisma.payment.create({
     data: {
@@ -331,7 +331,13 @@ export async function runPayPenaltiesFlow(
   }
 
   if (trimmed === '1') {
-    return enterMobileMoneySubFlow(state, profile, ctx, totalAmount, penaltyCount);
+    return enterMobileMoneySubFlow(
+      state,
+      profile,
+      ctx,
+      totalAmount,
+      penaltyCount,
+    );
   }
 
   if (trimmed === '2') {

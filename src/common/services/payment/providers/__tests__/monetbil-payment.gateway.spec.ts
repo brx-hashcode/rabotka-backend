@@ -41,31 +41,43 @@ describe('MonetbilPaymentGateway', () => {
     };
 
     it('returns gatewayRef and PENDING on success', async () => {
-      fetchSpy.mockResolvedValueOnce(makeFetchResponse({ paymentId: 'gw-123', status: 'REQUEST_ACCEPTED' }));
+      fetchSpy.mockResolvedValueOnce(
+        makeFetchResponse({ paymentId: 'gw-123', status: 'REQUEST_ACCEPTED' }),
+      );
       const result = await gateway.initiatePayment(params);
       expect(result.status).toBe('PENDING');
       expect(result.gatewayRef).toBe('gw-123');
     });
 
     it('uses externalId when no paymentId in response', async () => {
-      fetchSpy.mockResolvedValueOnce(makeFetchResponse({ status: 'REQUEST_ACCEPTED' }));
+      fetchSpy.mockResolvedValueOnce(
+        makeFetchResponse({ status: 'REQUEST_ACCEPTED' }),
+      );
       const result = await gateway.initiatePayment(params);
       expect(result.gatewayRef).toBe('ext-1');
     });
 
     it('throws when status is REQUEST_FAILED', async () => {
-      fetchSpy.mockResolvedValueOnce(makeFetchResponse({ status: 'REQUEST_FAILED', message: 'Invalid key' }));
-      await expect(gateway.initiatePayment(params)).rejects.toThrow('Invalid key');
+      fetchSpy.mockResolvedValueOnce(
+        makeFetchResponse({ status: 'REQUEST_FAILED', message: 'Invalid key' }),
+      );
+      await expect(gateway.initiatePayment(params)).rejects.toThrow(
+        'Invalid key',
+      );
     });
 
     it('throws when response is not ok', async () => {
-      fetchSpy.mockResolvedValueOnce(makeFetchResponse({ message: 'Server error' }, false));
+      fetchSpy.mockResolvedValueOnce(
+        makeFetchResponse({ message: 'Server error' }, false),
+      );
       await expect(gateway.initiatePayment(params)).rejects.toThrow();
     });
 
     it('rethrows fetch errors', async () => {
       fetchSpy.mockRejectedValueOnce(new Error('network error'));
-      await expect(gateway.initiatePayment(params)).rejects.toThrow('network error');
+      await expect(gateway.initiatePayment(params)).rejects.toThrow(
+        'network error',
+      );
     });
 
     it('wraps non-Error fetch failures', async () => {
@@ -76,26 +88,36 @@ describe('MonetbilPaymentGateway', () => {
 
   describe('checkPaymentStatus', () => {
     it('returns COMPLETED for status 1', async () => {
-      fetchSpy.mockResolvedValueOnce(makeFetchResponse({ transaction: { status: '1', transaction_id: 'tx-1' } }));
+      fetchSpy.mockResolvedValueOnce(
+        makeFetchResponse({
+          transaction: { status: '1', transaction_id: 'tx-1' },
+        }),
+      );
       const result = await gateway.checkPaymentStatus('gw-1');
       expect(result.status).toBe('COMPLETED');
       expect(result.transactionId).toBe('tx-1');
     });
 
     it('returns FAILED for status 0', async () => {
-      fetchSpy.mockResolvedValueOnce(makeFetchResponse({ transaction: { status: '0' } }));
+      fetchSpy.mockResolvedValueOnce(
+        makeFetchResponse({ transaction: { status: '0' } }),
+      );
       const result = await gateway.checkPaymentStatus('gw-1');
       expect(result.status).toBe('FAILED');
     });
 
     it('returns CANCELLED for status -1', async () => {
-      fetchSpy.mockResolvedValueOnce(makeFetchResponse({ transaction: { status: '-1' } }));
+      fetchSpy.mockResolvedValueOnce(
+        makeFetchResponse({ transaction: { status: '-1' } }),
+      );
       const result = await gateway.checkPaymentStatus('gw-1');
       expect(result.status).toBe('CANCELLED');
     });
 
     it('returns PENDING for unknown status', async () => {
-      fetchSpy.mockResolvedValueOnce(makeFetchResponse({ transaction: { status: '99' } }));
+      fetchSpy.mockResolvedValueOnce(
+        makeFetchResponse({ transaction: { status: '99' } }),
+      );
       const result = await gateway.checkPaymentStatus('gw-1');
       expect(result.status).toBe('PENDING');
     });
@@ -115,15 +137,26 @@ describe('MonetbilPaymentGateway', () => {
 
   describe('handleWebhookPayload', () => {
     it('re-verifies and returns status', async () => {
-      fetchSpy.mockResolvedValueOnce(makeFetchResponse({ transaction: { status: '1', transaction_id: 'tx-42' } }));
-      const result = await gateway.handleWebhookPayload({ paymentId: 'gw-1', transaction_id: 'tx-42' });
+      fetchSpy.mockResolvedValueOnce(
+        makeFetchResponse({
+          transaction: { status: '1', transaction_id: 'tx-42' },
+        }),
+      );
+      const result = await gateway.handleWebhookPayload({
+        paymentId: 'gw-1',
+        transaction_id: 'tx-42',
+      });
       expect(result.status).toBe('COMPLETED');
       expect(result.gatewayRef).toBe('gw-1');
     });
 
     it('uses payment_ref when no paymentId', async () => {
-      fetchSpy.mockResolvedValueOnce(makeFetchResponse({ transaction: { status: '0' } }));
-      const result = await gateway.handleWebhookPayload({ payment_ref: 'gw-ref-2' });
+      fetchSpy.mockResolvedValueOnce(
+        makeFetchResponse({ transaction: { status: '0' } }),
+      );
+      const result = await gateway.handleWebhookPayload({
+        payment_ref: 'gw-ref-2',
+      });
       expect(result.gatewayRef).toBe('gw-ref-2');
     });
 

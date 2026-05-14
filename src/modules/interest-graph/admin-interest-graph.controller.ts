@@ -34,7 +34,8 @@ export class AdminInterestGraphController {
   @ApiOperation({ summary: 'Get interest profile for a user' })
   async getProfile(@Param('userId') userId: string) {
     const profile = await this.clusters.getProfile(userId);
-    if (!profile) throw new NotFoundException('No interest profile found for this user');
+    if (!profile)
+      throw new NotFoundException('No interest profile found for this user');
     return profile;
   }
 

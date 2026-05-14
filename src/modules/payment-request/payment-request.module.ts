@@ -37,7 +37,11 @@ import { PollPaymentStatusWorkerService } from './poll-payment-status.worker.ser
     PaymentGatewayModule,
   ],
   controllers: [PaymentRequestController, PaymentRequestPublicController],
-  providers: [PaymentRequestService, PollPaymentStatusProcessor, PollPaymentStatusWorkerService],
+  providers: [
+    PaymentRequestService,
+    PollPaymentStatusProcessor,
+    PollPaymentStatusWorkerService,
+  ],
   exports: [PaymentRequestService, PollPaymentStatusProcessor],
 })
 export class PaymentRequestModule {}

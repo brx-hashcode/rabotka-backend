@@ -44,7 +44,9 @@ describe('InterestRecommendationService', () => {
         { provide: InterestClusterService, useValue: mockClusters },
       ],
     }).compile();
-    service = module.get<InterestRecommendationService>(InterestRecommendationService);
+    service = module.get<InterestRecommendationService>(
+      InterestRecommendationService,
+    );
   });
 
   it('returns fallback for cold start (no profile)', async () => {
@@ -54,7 +56,9 @@ describe('InterestRecommendationService', () => {
       category: { name: 'Plomberie' },
       categories: [],
     });
-    mockQdrant.searchHybridWithFilter.mockResolvedValueOnce([{ id: 'job-1', score: 0.8 }]);
+    mockQdrant.searchHybridWithFilter.mockResolvedValueOnce([
+      { id: 'job-1', score: 0.8 },
+    ]);
 
     const results = await service.recommend('worker-1');
     expect(mockClusters.reseedFromProfile).toHaveBeenCalledWith('worker-1');
@@ -69,7 +73,9 @@ describe('InterestRecommendationService', () => {
       category: { name: 'Plomberie' },
       categories: [],
     });
-    mockQdrant.searchHybridWithFilter.mockResolvedValueOnce([{ id: 'job-2', score: 0.7 }]);
+    mockQdrant.searchHybridWithFilter.mockResolvedValueOnce([
+      { id: 'job-2', score: 0.7 },
+    ]);
 
     const results = await service.recommend('worker-1');
     expect(results[0].source).toBe('fallback');
@@ -93,7 +99,9 @@ describe('InterestRecommendationService', () => {
       category: { name: 'Plomberie' },
       categories: [],
     });
-    mockQdrant.searchHybridWithFilter.mockResolvedValueOnce([{ id: 'job-fallback', score: 0.5 }]);
+    mockQdrant.searchHybridWithFilter.mockResolvedValueOnce([
+      { id: 'job-fallback', score: 0.5 },
+    ]);
 
     const results = await service.recommend('worker-1');
     expect(results.length).toBeGreaterThan(0);
@@ -101,7 +109,9 @@ describe('InterestRecommendationService', () => {
 
   it('uses hot exploit ratio for hot user (5+ signals)', async () => {
     mockClusters.getProfile.mockResolvedValueOnce(makeProfile(10));
-    mockQdrant.recommendDense.mockResolvedValue([{ id: 'job-hot', score: 0.95 }]);
+    mockQdrant.recommendDense.mockResolvedValue([
+      { id: 'job-hot', score: 0.95 },
+    ]);
     mockPrisma.profile.findUnique.mockResolvedValueOnce({
       description: 'plumber',
       category: { name: 'Plomberie' },
@@ -121,7 +131,9 @@ describe('InterestRecommendationService', () => {
       category: { name: 'Plomberie' },
       categories: [],
     });
-    mockQdrant.searchHybridWithFilter.mockResolvedValueOnce([{ id: 'job-fb', score: 0.5 }]);
+    mockQdrant.searchHybridWithFilter.mockResolvedValueOnce([
+      { id: 'job-fb', score: 0.5 },
+    ]);
 
     const results = await service.recommend('worker-1');
     // Should get fallback results despite exploit failure

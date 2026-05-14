@@ -6,8 +6,12 @@ import { AdminAuthGuard } from '../../auth/guards/admin-auth.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
 
 const mockSystemConfigService = {
-  getAll: jest.fn().mockResolvedValue([{ key: 'ENABLE_SIMILARITY', value: 'true' }]),
-  getOne: jest.fn().mockResolvedValue({ key: 'ENABLE_SIMILARITY', value: 'true' }),
+  getAll: jest
+    .fn()
+    .mockResolvedValue([{ key: 'ENABLE_SIMILARITY', value: 'true' }]),
+  getOne: jest
+    .fn()
+    .mockResolvedValue({ key: 'ENABLE_SIMILARITY', value: 'true' }),
   set: jest.fn().mockResolvedValue(undefined),
 };
 
@@ -18,10 +22,14 @@ describe('SystemConfigController', () => {
     jest.clearAllMocks();
     const module: TestingModule = await Test.createTestingModule({
       controllers: [SystemConfigController],
-      providers: [{ provide: SystemConfigService, useValue: mockSystemConfigService }],
+      providers: [
+        { provide: SystemConfigService, useValue: mockSystemConfigService },
+      ],
     })
-      .overrideGuard(AdminAuthGuard).useValue({ canActivate: () => true })
-      .overrideGuard(RolesGuard).useValue({ canActivate: () => true })
+      .overrideGuard(AdminAuthGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(RolesGuard)
+      .useValue({ canActivate: () => true })
       .compile();
     controller = module.get<SystemConfigController>(SystemConfigController);
   });
@@ -44,19 +52,31 @@ describe('SystemConfigController', () => {
 
   it('getOne throws NotFoundException when key not found', async () => {
     mockSystemConfigService.getOne.mockResolvedValueOnce(null);
-    await expect(controller.getOne('UNKNOWN_KEY')).rejects.toThrow(NotFoundException);
+    await expect(controller.getOne('UNKNOWN_KEY')).rejects.toThrow(
+      NotFoundException,
+    );
   });
 
   it('update updates config entry', async () => {
     const req = { user: { userId: 'admin-1' } };
-    const result = await controller.update('ENABLE_SIMILARITY', { value: 'false' }, req);
-    expect(mockSystemConfigService.set).toHaveBeenCalledWith('ENABLE_SIMILARITY', 'false', 'admin-1');
+    const result = await controller.update(
+      'ENABLE_SIMILARITY',
+      { value: 'false' },
+      req,
+    );
+    expect(mockSystemConfigService.set).toHaveBeenCalledWith(
+      'ENABLE_SIMILARITY',
+      'false',
+      'admin-1',
+    );
     expect(result).toEqual({ success: true });
   });
 
   it('update throws NotFoundException when key not found', async () => {
     mockSystemConfigService.getOne.mockResolvedValueOnce(null);
     const req = { user: { userId: 'admin-1' } };
-    await expect(controller.update('UNKNOWN_KEY', { value: 'val' }, req)).rejects.toThrow(NotFoundException);
+    await expect(
+      controller.update('UNKNOWN_KEY', { value: 'val' }, req),
+    ).rejects.toThrow(NotFoundException);
   });
 });

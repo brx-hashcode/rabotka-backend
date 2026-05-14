@@ -1,5 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { JobCategoryController, AdminJobCategoryController } from '../job-category.controller';
+import {
+  JobCategoryController,
+  AdminJobCategoryController,
+} from '../job-category.controller';
 import { JobCategoryService } from '../job-category.service';
 import { AdminAuthGuard } from '../../auth/guards/admin-auth.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
@@ -38,10 +41,14 @@ describe('AdminJobCategoryController', () => {
       controllers: [AdminJobCategoryController],
       providers: [{ provide: JobCategoryService, useValue: mockService }],
     })
-      .overrideGuard(AdminAuthGuard).useValue({ canActivate: () => true })
-      .overrideGuard(RolesGuard).useValue({ canActivate: () => true })
+      .overrideGuard(AdminAuthGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(RolesGuard)
+      .useValue({ canActivate: () => true })
       .compile();
-    controller = module.get<AdminJobCategoryController>(AdminJobCategoryController);
+    controller = module.get<AdminJobCategoryController>(
+      AdminJobCategoryController,
+    );
   });
 
   it('lists all categories', async () => {
@@ -50,7 +57,10 @@ describe('AdminJobCategoryController', () => {
   });
 
   it('creates a category', async () => {
-    const result = await controller.create({ name: 'Plomberie', slug: 'plomberie' });
+    const result = await controller.create({
+      name: 'Plomberie',
+      slug: 'plomberie',
+    });
     expect(result.id).toBe('cat-1');
   });
 

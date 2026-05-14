@@ -42,7 +42,11 @@ describe('VectorIndexProcessor', () => {
   it('onModuleInit creates worker and schedules scan', () => {
     processor.onModuleInit();
     expect(mockQueueService.createWorker).toHaveBeenCalled();
-    expect(mockQueue.add).toHaveBeenCalledWith('scan', { type: 'scan' }, expect.objectContaining({ delay: expect.any(Number) }));
+    expect(mockQueue.add).toHaveBeenCalledWith(
+      'scan',
+      { type: 'scan' },
+      expect.objectContaining({ delay: expect.any(Number) }),
+    );
   });
 
   it('worker handles scan job', async () => {
@@ -53,35 +57,52 @@ describe('VectorIndexProcessor', () => {
 
   it('worker handles index_job', async () => {
     processor.onModuleInit();
-    await capturedWorkerFn!({ data: { type: 'index_job', jobOfferId: 'jo-1' } });
+    await capturedWorkerFn!({
+      data: { type: 'index_job', jobOfferId: 'jo-1' },
+    });
     expect(mockMatchingService.indexJobOffer).toHaveBeenCalledWith('jo-1');
   });
 
   it('worker handles index_worker', async () => {
     processor.onModuleInit();
-    await capturedWorkerFn!({ data: { type: 'index_worker', profileId: 'p-1' } });
+    await capturedWorkerFn!({
+      data: { type: 'index_worker', profileId: 'p-1' },
+    });
     expect(mockMatchingService.indexWorkerProfile).toHaveBeenCalledWith('p-1');
   });
 
   it('worker handles index_employer', async () => {
     processor.onModuleInit();
-    await capturedWorkerFn!({ data: { type: 'index_employer', profileId: 'p-2' } });
-    expect(mockMatchingService.indexEmployerProfile).toHaveBeenCalledWith('p-2');
+    await capturedWorkerFn!({
+      data: { type: 'index_employer', profileId: 'p-2' },
+    });
+    expect(mockMatchingService.indexEmployerProfile).toHaveBeenCalledWith(
+      'p-2',
+    );
   });
 
   it('enqueueJob adds job to queue', async () => {
     await processor.enqueueJob('jo-1');
-    expect(mockQueue.add).toHaveBeenCalledWith('index_job', { type: 'index_job', jobOfferId: 'jo-1' });
+    expect(mockQueue.add).toHaveBeenCalledWith('index_job', {
+      type: 'index_job',
+      jobOfferId: 'jo-1',
+    });
   });
 
   it('enqueueWorker adds worker to queue', async () => {
     await processor.enqueueWorker('p-1');
-    expect(mockQueue.add).toHaveBeenCalledWith('index_worker', { type: 'index_worker', profileId: 'p-1' });
+    expect(mockQueue.add).toHaveBeenCalledWith('index_worker', {
+      type: 'index_worker',
+      profileId: 'p-1',
+    });
   });
 
   it('enqueueEmployer adds employer to queue', async () => {
     await processor.enqueueEmployer('p-2');
-    expect(mockQueue.add).toHaveBeenCalledWith('index_employer', { type: 'index_employer', profileId: 'p-2' });
+    expect(mockQueue.add).toHaveBeenCalledWith('index_employer', {
+      type: 'index_employer',
+      profileId: 'p-2',
+    });
   });
 
   it('scheduleScan swallows queue errors', async () => {

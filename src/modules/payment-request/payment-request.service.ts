@@ -247,7 +247,10 @@ export class PaymentRequestService {
           operator: null,
         },
       });
-      const errorMessage = err instanceof Error ? err.message : "Échec de l'initiation du paiement";
+      const errorMessage =
+        err instanceof Error
+          ? err.message
+          : "Échec de l'initiation du paiement";
       this.logger.warn(
         `Gateway init failed for request ${request.id} — profile: ${profileName} | phone: ${phone} | amount: ${Number(request.amount)} FCFA | error: ${errorMessage}`,
       );
@@ -453,8 +456,7 @@ export class PaymentRequestService {
       request.contact_unlock_attempt_id != null;
     const isRecommendationContact =
       requestType === PaymentRequestType.RECOMMENDATION_CONTACT;
-    const recommendationWorkerId =
-      request.recommendation_worker_id ?? null;
+    const recommendationWorkerId = request.recommendation_worker_id ?? null;
 
     let paymentDescription = request.description ?? 'Paiement';
     if (isRecommendationContact && recommendationWorkerId) {
@@ -555,7 +557,11 @@ export class PaymentRequestService {
   private async persistFailedPayment(
     request: PaymentRequestWithProfile,
     options: {
-      reason: 'GATEWAY_FAILED' | 'GATEWAY_CANCELLED' | 'POLL_TIMEOUT' | 'GATEWAY_INIT_ERROR';
+      reason:
+        | 'GATEWAY_FAILED'
+        | 'GATEWAY_CANCELLED'
+        | 'POLL_TIMEOUT'
+        | 'GATEWAY_INIT_ERROR';
       gatewayStatus?: string;
       transactionId?: string;
       gatewayRef?: string;
@@ -573,7 +579,9 @@ export class PaymentRequestService {
         request.contact_unlock_attempt_id != null;
       await this.prisma.payment.create({
         data: {
-          type: isContactType ? PaymentType.CONTACT_UNLOCK : PaymentType.PENALTY,
+          type: isContactType
+            ? PaymentType.CONTACT_UNLOCK
+            : PaymentType.PENALTY,
           profile_id: request.profile_id,
           amount: Number(request.amount ?? 0),
           payment_method: PaymentMethod.MOBILE_MONEY,
@@ -655,12 +663,21 @@ export class PaymentRequestService {
       ];
 
       if (context.isRecommendationContact) {
-        lines.push('', '📞 *Les coordonnées du travailleur vous seront envoyées dans le message suivant.*');
+        lines.push(
+          '',
+          '📞 *Les coordonnées du travailleur vous seront envoyées dans le message suivant.*',
+        );
       } else if (context.isContactUnlock) {
         if (unlockResult?.nowUnlocked) {
-          lines.push('', '✅ *Les deux parties ont payé — les coordonnées vous ont été envoyées.*');
+          lines.push(
+            '',
+            '✅ *Les deux parties ont payé — les coordonnées vous ont été envoyées.*',
+          );
         } else {
-          lines.push('', '⏳ *En attente du paiement de l\'autre partie. Les coordonnées seront révélées dès que les deux parties auront payé.*');
+          lines.push(
+            '',
+            "⏳ *En attente du paiement de l'autre partie. Les coordonnées seront révélées dès que les deux parties auront payé.*",
+          );
         }
       }
 
@@ -943,7 +960,8 @@ export class PaymentRequestService {
     if (
       request.request_type !== PaymentRequestType.PENALTY_BATCH &&
       request.request_type !== PaymentRequestType.PENALTY_RESOLUTION
-    ) return;
+    )
+      return;
 
     const workerId = request.profile_id;
 

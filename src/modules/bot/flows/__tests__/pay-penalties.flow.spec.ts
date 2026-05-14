@@ -32,8 +32,12 @@ function makeCtx(
     walletService: {
       getProfileWalletBalance: jest.fn().mockResolvedValue(0),
       debitProfileWallet: jest.fn().mockResolvedValue(undefined),
-      getOrCreateSystemWallet: jest.fn().mockResolvedValue({ id: 'sys-wallet' }),
-      getOrCreateProfileWallet: jest.fn().mockResolvedValue({ id: 'profile-wallet' }),
+      getOrCreateSystemWallet: jest
+        .fn()
+        .mockResolvedValue({ id: 'sys-wallet' }),
+      getOrCreateProfileWallet: jest
+        .fn()
+        .mockResolvedValue({ id: 'profile-wallet' }),
     } as unknown as PayPenaltiesContext['walletService'],
     paymentService: {
       createPaymentUrl: jest
@@ -85,7 +89,12 @@ describe('runPayPenaltiesFlow() - step 1 main prompt', () => {
   it('goes to menu on "retour" input', async () => {
     const ctx = makeCtx();
     const state = makeState();
-    const result = await runPayPenaltiesFlow(state, 'retour', workerProfile, ctx);
+    const result = await runPayPenaltiesFlow(
+      state,
+      'retour',
+      workerProfile,
+      ctx,
+    );
     expect(result.clearState).toBe(true);
   });
 
@@ -99,7 +108,12 @@ describe('runPayPenaltiesFlow() - step 1 main prompt', () => {
   it('goes to menu on "annuler" input', async () => {
     const ctx = makeCtx();
     const state = makeState();
-    const result = await runPayPenaltiesFlow(state, 'annuler', workerProfile, ctx);
+    const result = await runPayPenaltiesFlow(
+      state,
+      'annuler',
+      workerProfile,
+      ctx,
+    );
     expect(result.clearState).toBe(true);
   });
 
@@ -114,7 +128,9 @@ describe('runPayPenaltiesFlow() - step 1 main prompt', () => {
 
   it('shows wallet payment option with sufficient funds on "2"', async () => {
     const ctx = makeCtx();
-    (ctx.walletService.getProfileWalletBalance as jest.Mock).mockResolvedValue(20000);
+    (ctx.walletService.getProfileWalletBalance as jest.Mock).mockResolvedValue(
+      20000,
+    );
     const state = makeState();
     const result = await runPayPenaltiesFlow(state, '2', workerProfile, ctx);
     expect(result.reply[0]).toContain('portefeuille');
@@ -123,7 +139,9 @@ describe('runPayPenaltiesFlow() - step 1 main prompt', () => {
 
   it('shows wallet option with insufficient funds on "2"', async () => {
     const ctx = makeCtx();
-    (ctx.walletService.getProfileWalletBalance as jest.Mock).mockResolvedValue(100);
+    (ctx.walletService.getProfileWalletBalance as jest.Mock).mockResolvedValue(
+      100,
+    );
     const state = makeState();
     const result = await runPayPenaltiesFlow(state, '2', workerProfile, ctx);
     expect(result.reply[0]).toContain('insuffisant');
@@ -152,7 +170,12 @@ describe('runPayPenaltiesFlow() - step 2 wallet confirmation', () => {
   it('cancels on "annuler"', async () => {
     const ctx = makeCtx();
     const state = makeStep2State();
-    const result = await runPayPenaltiesFlow(state, 'annuler', workerProfile, ctx);
+    const result = await runPayPenaltiesFlow(
+      state,
+      'annuler',
+      workerProfile,
+      ctx,
+    );
     expect(result.clearState).toBe(true);
   });
 
@@ -166,7 +189,9 @@ describe('runPayPenaltiesFlow() - step 2 wallet confirmation', () => {
 
   it('confirms payment on "1" with sufficient balance', async () => {
     const ctx = makeCtx();
-    (ctx.walletService.getProfileWalletBalance as jest.Mock).mockResolvedValue(20000);
+    (ctx.walletService.getProfileWalletBalance as jest.Mock).mockResolvedValue(
+      20000,
+    );
     const state = makeStep2State();
     const result = await runPayPenaltiesFlow(state, '1', workerProfile, ctx);
     expect(ctx.walletService.debitProfileWallet).toHaveBeenCalled();
@@ -177,7 +202,9 @@ describe('runPayPenaltiesFlow() - step 2 wallet confirmation', () => {
 
   it('confirms payment on "oui"', async () => {
     const ctx = makeCtx();
-    (ctx.walletService.getProfileWalletBalance as jest.Mock).mockResolvedValue(20000);
+    (ctx.walletService.getProfileWalletBalance as jest.Mock).mockResolvedValue(
+      20000,
+    );
     const state = makeStep2State();
     const result = await runPayPenaltiesFlow(state, 'oui', workerProfile, ctx);
     expect(result.clearState).toBe(true);
@@ -185,7 +212,9 @@ describe('runPayPenaltiesFlow() - step 2 wallet confirmation', () => {
 
   it('returns insufficient funds when balance < totalAmount', async () => {
     const ctx = makeCtx();
-    (ctx.walletService.getProfileWalletBalance as jest.Mock).mockResolvedValue(100);
+    (ctx.walletService.getProfileWalletBalance as jest.Mock).mockResolvedValue(
+      100,
+    );
     const state = makeStep2State();
     const result = await runPayPenaltiesFlow(state, '1', workerProfile, ctx);
     expect(result.clearState).toBe(true);

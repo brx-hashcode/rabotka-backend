@@ -65,38 +65,67 @@ describe('PollPaymentStatusProcessor', () => {
         { provide: LogService, useValue: mockLogService },
       ],
     }).compile();
-    processor = module.get<PollPaymentStatusProcessor>(PollPaymentStatusProcessor);
+    processor = module.get<PollPaymentStatusProcessor>(
+      PollPaymentStatusProcessor,
+    );
     processor.setPaymentRequestService(mockPaymentRequestService);
   });
 
   it('setPaymentRequestService sets the service', () => {
     processor.setPaymentRequestService(mockPaymentRequestService);
-    expect((processor as any).paymentRequestService).toBe(mockPaymentRequestService);
+    expect((processor as any).paymentRequestService).toBe(
+      mockPaymentRequestService,
+    );
   });
 
   it('processes COMPLETED payment', async () => {
-    mockPaymentGateway.checkPaymentStatus.mockResolvedValueOnce({ status: 'COMPLETED', transactionId: 'tx-1' });
+    mockPaymentGateway.checkPaymentStatus.mockResolvedValueOnce({
+      status: 'COMPLETED',
+      transactionId: 'tx-1',
+    });
     await processor.process({ data: baseJobData });
-    expect(mockPaymentRequestService.processApprovedPaymentById).toHaveBeenCalledWith('req-1', 'tx-1');
-    expect(mockPaymentStatusGateway.emitPaymentStatus).toHaveBeenCalledWith('tok-1', 'APPROVED');
+    expect(
+      mockPaymentRequestService.processApprovedPaymentById,
+    ).toHaveBeenCalledWith('req-1', 'tx-1');
+    expect(mockPaymentStatusGateway.emitPaymentStatus).toHaveBeenCalledWith(
+      'tok-1',
+      'APPROVED',
+    );
   });
 
   it('processes FAILED payment', async () => {
-    mockPaymentGateway.checkPaymentStatus.mockResolvedValueOnce({ status: 'FAILED', transactionId: 'tx-1' });
+    mockPaymentGateway.checkPaymentStatus.mockResolvedValueOnce({
+      status: 'FAILED',
+      transactionId: 'tx-1',
+    });
     await processor.process({ data: baseJobData });
-    expect(mockPrisma.paymentRequest.update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'req-1' } }));
-    expect(mockPaymentStatusGateway.emitPaymentStatus).toHaveBeenCalledWith('tok-1', 'REJECTED');
+    expect(mockPrisma.paymentRequest.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'req-1' } }),
+    );
+    expect(mockPaymentStatusGateway.emitPaymentStatus).toHaveBeenCalledWith(
+      'tok-1',
+      'REJECTED',
+    );
   });
 
   it('processes CANCELLED payment', async () => {
-    mockPaymentGateway.checkPaymentStatus.mockResolvedValueOnce({ status: 'CANCELLED' });
+    mockPaymentGateway.checkPaymentStatus.mockResolvedValueOnce({
+      status: 'CANCELLED',
+    });
     await processor.process({ data: baseJobData });
-    expect(mockPaymentStatusGateway.emitPaymentStatus).toHaveBeenCalledWith('tok-1', 'REJECTED');
+    expect(mockPaymentStatusGateway.emitPaymentStatus).toHaveBeenCalledWith(
+      'tok-1',
+      'REJECTED',
+    );
   });
 
   it('re-enqueues when still PENDING and not at max attempts', async () => {
-    mockPaymentGateway.checkPaymentStatus.mockResolvedValueOnce({ status: 'PENDING' });
-    await processor.process({ data: { ...baseJobData, attempt: 1, maxAttempts: 3 } });
+    mockPaymentGateway.checkPaymentStatus.mockResolvedValueOnce({
+      status: 'PENDING',
+    });
+    await processor.process({
+      data: { ...baseJobData, attempt: 1, maxAttempts: 3 },
+    });
     expect(mockQueueService.addJob).toHaveBeenCalledWith(
       expect.any(String),
       expect.objectContaining({ attempt: 2 }),
@@ -105,15 +134,28 @@ describe('PollPaymentStatusProcessor', () => {
   });
 
   it('times out and reverts to PENDING when max attempts reached', async () => {
-    mockPaymentGateway.checkPaymentStatus.mockResolvedValueOnce({ status: 'PENDING' });
-    await processor.process({ data: { ...baseJobData, attempt: 3, maxAttempts: 3 } });
-    expect(mockPrisma.paymentRequest.update).toHaveBeenCalledWith(expect.objectContaining({ data: { status: 'PENDING' } }));
-    expect(mockPaymentStatusGateway.emitPaymentStatus).toHaveBeenCalledWith('tok-1', 'TIMEOUT');
+    mockPaymentGateway.checkPaymentStatus.mockResolvedValueOnce({
+      status: 'PENDING',
+    });
+    await processor.process({
+      data: { ...baseJobData, attempt: 3, maxAttempts: 3 },
+    });
+    expect(mockPrisma.paymentRequest.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { status: 'PENDING' } }),
+    );
+    expect(mockPaymentStatusGateway.emitPaymentStatus).toHaveBeenCalledWith(
+      'tok-1',
+      'TIMEOUT',
+    );
   });
 
   it('handles payment create failure gracefully during recordFailure', async () => {
-    mockPaymentGateway.checkPaymentStatus.mockResolvedValueOnce({ status: 'FAILED' });
+    mockPaymentGateway.checkPaymentStatus.mockResolvedValueOnce({
+      status: 'FAILED',
+    });
     mockPrisma.payment.create.mockRejectedValueOnce(new Error('DB error'));
-    await expect(processor.process({ data: baseJobData })).resolves.not.toThrow();
+    await expect(
+      processor.process({ data: baseJobData }),
+    ).resolves.not.toThrow();
   });
 });

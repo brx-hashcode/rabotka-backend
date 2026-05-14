@@ -1,5 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { PaymentRequestStatus, PaymentStatus, PaymentMethod, PaymentType } from '@prisma/client';
+import {
+  PaymentRequestStatus,
+  PaymentStatus,
+  PaymentMethod,
+  PaymentType,
+} from '@prisma/client';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { PaymentGatewayService } from '../../common/services/payment/payment-gateway.service';
 import { PaymentStatusGateway } from '../ws-notifications/payment-status.gateway';
@@ -124,15 +129,27 @@ export class PollPaymentStatusProcessor {
       attempt: number;
     },
   ): Promise<void> {
-    const { requestId, profileId, amount, phone, operator, requestType, gateway, gatewayRef } = jobData;
+    const {
+      requestId,
+      profileId,
+      amount,
+      phone,
+      operator,
+      requestType,
+      gateway,
+      gatewayRef,
+    } = jobData;
 
     const isContactType =
-      requestType === 'CONTACT_UNLOCK' || requestType === 'RECOMMENDATION_CONTACT';
+      requestType === 'CONTACT_UNLOCK' ||
+      requestType === 'RECOMMENDATION_CONTACT';
 
     try {
       await this.prisma.payment.create({
         data: {
-          type: isContactType ? PaymentType.CONTACT_UNLOCK : PaymentType.PENALTY,
+          type: isContactType
+            ? PaymentType.CONTACT_UNLOCK
+            : PaymentType.PENALTY,
           profile_id: profileId,
           amount,
           payment_method: PaymentMethod.MOBILE_MONEY,

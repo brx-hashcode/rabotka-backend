@@ -226,9 +226,14 @@ describe('PenaltyService', () => {
     };
 
     it('creates penalty without applicationId', async () => {
-      (prisma.penalty.create as jest.Mock).mockResolvedValue({ id: PENALTY_ID, profile_id: WORKER_ID });
+      (prisma.penalty.create as jest.Mock).mockResolvedValue({
+        id: PENALTY_ID,
+        profile_id: WORKER_ID,
+      });
       (prisma.profile.update as jest.Mock).mockResolvedValue({});
-      (prisma.penalty.findUnique as jest.Mock).mockResolvedValue(mockPenaltyFull);
+      (prisma.penalty.findUnique as jest.Mock).mockResolvedValue(
+        mockPenaltyFull,
+      );
 
       const result = await service.createPenaltyByAdmin(baseParams);
       expect(result.id).toBe(PENALTY_ID);
@@ -241,18 +246,27 @@ describe('PenaltyService', () => {
         job_offer: { employer_id: 'employer-1' },
       });
       (prisma.penalty.findFirst as jest.Mock).mockResolvedValue(null);
-      (prisma.penalty.create as jest.Mock).mockResolvedValue({ id: PENALTY_ID, profile_id: WORKER_ID });
+      (prisma.penalty.create as jest.Mock).mockResolvedValue({
+        id: PENALTY_ID,
+        profile_id: WORKER_ID,
+      });
       (prisma.profile.update as jest.Mock).mockResolvedValue({});
-      (prisma.penalty.findUnique as jest.Mock).mockResolvedValue(mockPenaltyFull);
+      (prisma.penalty.findUnique as jest.Mock).mockResolvedValue(
+        mockPenaltyFull,
+      );
 
-      const result = await service.createPenaltyByAdmin({ ...baseParams, applicationId: APPLICATION_ID });
+      const result = await service.createPenaltyByAdmin({
+        ...baseParams,
+        applicationId: APPLICATION_ID,
+      });
       expect(result.id).toBe(PENALTY_ID);
     });
 
     it('throws NotFoundException when application not found', async () => {
       (prisma.application.findUnique as jest.Mock).mockResolvedValue(null);
-      await expect(service.createPenaltyByAdmin({ ...baseParams, applicationId: 'x' }))
-        .rejects.toThrow(NotFoundException);
+      await expect(
+        service.createPenaltyByAdmin({ ...baseParams, applicationId: 'x' }),
+      ).rejects.toThrow(NotFoundException);
     });
 
     it('throws BadRequestException when profile not in application', async () => {
@@ -261,8 +275,12 @@ describe('PenaltyService', () => {
         worker_id: 'other-worker',
         job_offer: { employer_id: 'other-employer' },
       });
-      await expect(service.createPenaltyByAdmin({ ...baseParams, applicationId: APPLICATION_ID }))
-        .rejects.toThrow();
+      await expect(
+        service.createPenaltyByAdmin({
+          ...baseParams,
+          applicationId: APPLICATION_ID,
+        }),
+      ).rejects.toThrow();
     });
 
     it('throws ConflictException when penalty already exists for application', async () => {
@@ -271,38 +289,63 @@ describe('PenaltyService', () => {
         worker_id: WORKER_ID,
         job_offer: { employer_id: 'employer-1' },
       });
-      (prisma.penalty.findFirst as jest.Mock).mockResolvedValue({ id: 'existing-penalty' });
-      await expect(service.createPenaltyByAdmin({ ...baseParams, applicationId: APPLICATION_ID }))
-        .rejects.toThrow();
+      (prisma.penalty.findFirst as jest.Mock).mockResolvedValue({
+        id: 'existing-penalty',
+      });
+      await expect(
+        service.createPenaltyByAdmin({
+          ...baseParams,
+          applicationId: APPLICATION_ID,
+        }),
+      ).rejects.toThrow();
     });
   });
 
   describe('confirmPenaltyPaymentByAdmin()', () => {
     it('confirms payment successfully', async () => {
       (prisma.penalty.findUnique as jest.Mock)
-        .mockResolvedValueOnce({ id: PENALTY_ID, paid_at: null, profile_id: WORKER_ID })
+        .mockResolvedValueOnce({
+          id: PENALTY_ID,
+          paid_at: null,
+          profile_id: WORKER_ID,
+        })
         .mockResolvedValue(mockPenaltyFull);
       (prisma.penalty.count as jest.Mock).mockResolvedValue(0);
       (prisma.profile.update as jest.Mock).mockResolvedValue({});
 
-      const result = await service.confirmPenaltyPaymentByAdmin(PENALTY_ID, 'admin-1');
+      const result = await service.confirmPenaltyPaymentByAdmin(
+        PENALTY_ID,
+        'admin-1',
+      );
       expect(result.id).toBe(PENALTY_ID);
     });
 
     it('throws NotFoundException when penalty not found', async () => {
       (prisma.penalty.findUnique as jest.Mock).mockResolvedValue(null);
-      await expect(service.confirmPenaltyPaymentByAdmin('x', 'admin-1')).rejects.toThrow(NotFoundException);
+      await expect(
+        service.confirmPenaltyPaymentByAdmin('x', 'admin-1'),
+      ).rejects.toThrow(NotFoundException);
     });
 
     it('throws BadRequestException when already paid', async () => {
-      (prisma.penalty.findUnique as jest.Mock).mockResolvedValue({ id: PENALTY_ID, paid_at: new Date(), profile_id: WORKER_ID });
-      await expect(service.confirmPenaltyPaymentByAdmin(PENALTY_ID, 'admin-1')).rejects.toThrow();
+      (prisma.penalty.findUnique as jest.Mock).mockResolvedValue({
+        id: PENALTY_ID,
+        paid_at: new Date(),
+        profile_id: WORKER_ID,
+      });
+      await expect(
+        service.confirmPenaltyPaymentByAdmin(PENALTY_ID, 'admin-1'),
+      ).rejects.toThrow();
     });
   });
 
   describe('deletePenalty()', () => {
     it('deletes penalty successfully', async () => {
-      (prisma.penalty.findUnique as jest.Mock).mockResolvedValue({ id: PENALTY_ID, profile_id: WORKER_ID, paid_at: null });
+      (prisma.penalty.findUnique as jest.Mock).mockResolvedValue({
+        id: PENALTY_ID,
+        profile_id: WORKER_ID,
+        paid_at: null,
+      });
       (prisma.penalty.delete as jest.Mock).mockResolvedValue({});
       (prisma.penalty.count as jest.Mock).mockResolvedValue(0);
       (prisma.profile.update as jest.Mock).mockResolvedValue({});
@@ -313,7 +356,9 @@ describe('PenaltyService', () => {
 
     it('throws NotFoundException when penalty not found', async () => {
       (prisma.penalty.findUnique as jest.Mock).mockResolvedValue(null);
-      await expect(service.deletePenalty('x')).rejects.toThrow(NotFoundException);
+      await expect(service.deletePenalty('x')).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 });

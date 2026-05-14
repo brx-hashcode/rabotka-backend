@@ -66,11 +66,40 @@ describe('AdProcessor', () => {
       providers: [
         AdProcessor,
         { provide: PrismaService, useValue: mockPrismaService },
-        { provide: AdTargetingService, useValue: { resolveRecipients: jest.fn().mockResolvedValue([]) } },
-        { provide: AdLinkTrackingService, useValue: { buildTrackedPayload: jest.fn().mockImplementation(async ({ payload }) => payload) } },
-        { provide: AdNotificationService, useValue: { dispatchCreated: jest.fn(), sendOnChannel: jest.fn().mockResolvedValue(true) } },
-        { provide: AdReportService, useValue: { generateExcel: jest.fn().mockResolvedValue(Buffer.from('xlsx')), getAnalytics: jest.fn().mockResolvedValue({ timeline: [] }) } },
-        { provide: NotificationService, useValue: { notifyAdvertisementCompleted: jest.fn().mockResolvedValue(undefined) } },
+        {
+          provide: AdTargetingService,
+          useValue: { resolveRecipients: jest.fn().mockResolvedValue([]) },
+        },
+        {
+          provide: AdLinkTrackingService,
+          useValue: {
+            buildTrackedPayload: jest
+              .fn()
+              .mockImplementation(async ({ payload }) => payload),
+          },
+        },
+        {
+          provide: AdNotificationService,
+          useValue: {
+            dispatchCreated: jest.fn(),
+            sendOnChannel: jest.fn().mockResolvedValue(true),
+          },
+        },
+        {
+          provide: AdReportService,
+          useValue: {
+            generateExcel: jest.fn().mockResolvedValue(Buffer.from('xlsx')),
+            getAnalytics: jest.fn().mockResolvedValue({ timeline: [] }),
+          },
+        },
+        {
+          provide: NotificationService,
+          useValue: {
+            notifyAdvertisementCompleted: jest
+              .fn()
+              .mockResolvedValue(undefined),
+          },
+        },
       ],
     }).compile();
 
@@ -98,7 +127,9 @@ describe('AdProcessor', () => {
 
     it('logs warn for unknown type', async () => {
       // Should not throw for unknown type
-      await expect(service.process({ data: { type: 'unknown' as any } })).resolves.not.toThrow();
+      await expect(
+        service.process({ data: { type: 'unknown' as any } }),
+      ).resolves.not.toThrow();
     });
   });
 
@@ -142,12 +173,20 @@ describe('AdProcessor', () => {
         .mockResolvedValueOnce({ count: 0 })
         .mockResolvedValueOnce({ count: 1 });
       prisma.advertisement.findMany.mockResolvedValue([
-        { id: 'ad-1', title: 'Test', contact_email: null, start_date: new Date(), end_date: new Date() },
+        {
+          id: 'ad-1',
+          title: 'Test',
+          contact_email: null,
+          start_date: new Date(),
+          end_date: new Date(),
+        },
       ]);
 
       await service.process({ data: { type: 'lifecycle' } });
 
-      expect(notificationService.notifyAdvertisementCompleted).not.toHaveBeenCalled();
+      expect(
+        notificationService.notifyAdvertisementCompleted,
+      ).not.toHaveBeenCalled();
     });
 
     it('sends completion report for ads with contact_email', async () => {
@@ -166,8 +205,13 @@ describe('AdProcessor', () => {
 
       await service.process({ data: { type: 'lifecycle' } });
 
-      expect(notificationService.notifyAdvertisementCompleted).toHaveBeenCalledWith(
-        expect.objectContaining({ to: 'advertiser@example.com', adTitle: 'Test Ad' }),
+      expect(
+        notificationService.notifyAdvertisementCompleted,
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          to: 'advertiser@example.com',
+          adTitle: 'Test Ad',
+        }),
       );
     });
 
@@ -186,8 +230,12 @@ describe('AdProcessor', () => {
       ]);
       adReport.generateExcel.mockRejectedValueOnce(new Error('Excel failure'));
 
-      await expect(service.process({ data: { type: 'lifecycle' } })).resolves.not.toThrow();
-      expect(notificationService.notifyAdvertisementCompleted).not.toHaveBeenCalled();
+      await expect(
+        service.process({ data: { type: 'lifecycle' } }),
+      ).resolves.not.toThrow();
+      expect(
+        notificationService.notifyAdvertisementCompleted,
+      ).not.toHaveBeenCalled();
     });
   });
 
@@ -204,7 +252,9 @@ describe('AdProcessor', () => {
     });
 
     it('skips ads where isDispatchDue returns false (already sent today)', async () => {
-      prisma.advertisement.findMany.mockResolvedValue([makeAd({ dispatch_time: '23:59' })]);
+      prisma.advertisement.findMany.mockResolvedValue([
+        makeAd({ dispatch_time: '23:59' }),
+      ]);
       // sentToday > 0 means dispatch is not due
       prisma.adDeliveryLog.count.mockResolvedValueOnce(1);
 
@@ -218,15 +268,26 @@ describe('AdProcessor', () => {
       prisma.advertisement.findMany.mockResolvedValue([ad]);
       prisma.adDeliveryLog.count.mockResolvedValue(0);
       prisma.$queryRaw.mockResolvedValue([]); // 0 batches dispatched so far → due
-      adTargeting.resolveRecipients.mockRejectedValueOnce(new Error('targeting failed'));
+      adTargeting.resolveRecipients.mockRejectedValueOnce(
+        new Error('targeting failed'),
+      );
 
-      await expect(service.process({ data: { type: 'dispatch' } })).resolves.not.toThrow();
+      await expect(
+        service.process({ data: { type: 'dispatch' } }),
+      ).resolves.not.toThrow();
     });
   });
 
   describe('dispatchAd()', () => {
     it('skips when bundle has no allowed channels', async () => {
-      const ad = makeAd({ bundle: { allowed_channels: [], max_reach: 10, max_frequency_per_week: 1, target_audience: 'ALL' } });
+      const ad = makeAd({
+        bundle: {
+          allowed_channels: [],
+          max_reach: 10,
+          max_frequency_per_week: 1,
+          target_audience: 'ALL',
+        },
+      });
       prisma.advertisement.findMany.mockResolvedValue([ad]);
       prisma.adDeliveryLog.count.mockResolvedValue(0);
       prisma.$queryRaw.mockResolvedValue([]);
@@ -264,7 +325,9 @@ describe('AdProcessor', () => {
       prisma.adDeliveryLog.count.mockResolvedValue(0);
       prisma.$queryRaw.mockResolvedValue([]);
       // email='' → EMAIL not deliverable
-      adTargeting.resolveRecipients.mockResolvedValue([makeProfile({ email: '', whatsapp_connected: false })]);
+      adTargeting.resolveRecipients.mockResolvedValue([
+        makeProfile({ email: '', whatsapp_connected: false }),
+      ]);
 
       await service.process({ data: { type: 'dispatch' } });
 
@@ -273,11 +336,20 @@ describe('AdProcessor', () => {
 
     it('dispatches via WHATSAPP when profile has phone and whatsapp_connected', async () => {
       prisma.advertisement.findMany.mockResolvedValue([
-        makeAd({ bundle: { allowed_channels: [DeliveryChannel.WHATSAPP], max_reach: 10, max_frequency_per_week: 3, target_audience: 'ALL' } }),
+        makeAd({
+          bundle: {
+            allowed_channels: [DeliveryChannel.WHATSAPP],
+            max_reach: 10,
+            max_frequency_per_week: 3,
+            target_audience: 'ALL',
+          },
+        }),
       ]);
       prisma.adDeliveryLog.count.mockResolvedValue(0);
       prisma.$queryRaw.mockResolvedValue([]);
-      adTargeting.resolveRecipients.mockResolvedValue([makeProfile({ whatsapp_connected: true })]);
+      adTargeting.resolveRecipients.mockResolvedValue([
+        makeProfile({ whatsapp_connected: true }),
+      ]);
       prisma.adDeliveryLog.count.mockResolvedValue(0);
 
       await service.process({ data: { type: 'dispatch' } });
@@ -291,11 +363,20 @@ describe('AdProcessor', () => {
 
     it('dispatches via ALL channels (EMAIL + WHATSAPP)', async () => {
       prisma.advertisement.findMany.mockResolvedValue([
-        makeAd({ bundle: { allowed_channels: [DeliveryChannel.ALL], max_reach: 10, max_frequency_per_week: 3, target_audience: 'ALL' } }),
+        makeAd({
+          bundle: {
+            allowed_channels: [DeliveryChannel.ALL],
+            max_reach: 10,
+            max_frequency_per_week: 3,
+            target_audience: 'ALL',
+          },
+        }),
       ]);
       prisma.adDeliveryLog.count.mockResolvedValue(0);
       prisma.$queryRaw.mockResolvedValue([]);
-      adTargeting.resolveRecipients.mockResolvedValue([makeProfile({ whatsapp_connected: true })]);
+      adTargeting.resolveRecipients.mockResolvedValue([
+        makeProfile({ whatsapp_connected: true }),
+      ]);
       prisma.adDeliveryLog.count.mockResolvedValue(0);
 
       await service.process({ data: { type: 'dispatch' } });
@@ -313,7 +394,9 @@ describe('AdProcessor', () => {
       await service.process({ data: { type: 'dispatch' } });
 
       expect(prisma.adDeliveryLog.update).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.objectContaining({ failure_reason: 'CARRIER_REJECTED' }) }),
+        expect.objectContaining({
+          data: expect.objectContaining({ failure_reason: 'CARRIER_REJECTED' }),
+        }),
       );
     });
 
@@ -322,12 +405,18 @@ describe('AdProcessor', () => {
       prisma.adDeliveryLog.count.mockResolvedValue(0);
       prisma.$queryRaw.mockResolvedValue([]);
       adTargeting.resolveRecipients.mockResolvedValue([makeProfile()]);
-      adLinkTracking.buildTrackedPayload.mockRejectedValueOnce(new Error('link error'));
+      adLinkTracking.buildTrackedPayload.mockRejectedValueOnce(
+        new Error('link error'),
+      );
 
       await service.process({ data: { type: 'dispatch' } });
 
       expect(prisma.adDeliveryLog.update).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.objectContaining({ failure_reason: expect.stringContaining('link error') }) }),
+        expect.objectContaining({
+          data: expect.objectContaining({
+            failure_reason: expect.stringContaining('link error'),
+          }),
+        }),
       );
     });
 
@@ -341,7 +430,9 @@ describe('AdProcessor', () => {
       await service.process({ data: { type: 'dispatch' } });
 
       expect(prisma.adDeliveryLog.update).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.objectContaining({ failure_reason: 'UNKNOWN' }) }),
+        expect.objectContaining({
+          data: expect.objectContaining({ failure_reason: 'UNKNOWN' }),
+        }),
       );
     });
 
@@ -366,7 +457,9 @@ describe('AdProcessor', () => {
       prisma.adDeliveryLog.count.mockResolvedValue(0);
       prisma.$queryRaw.mockResolvedValue([]);
       // Profile with no deliverable channels
-      adTargeting.resolveRecipients.mockResolvedValue([makeProfile({ email: '', whatsapp_connected: false })]);
+      adTargeting.resolveRecipients.mockResolvedValue([
+        makeProfile({ email: '', whatsapp_connected: false }),
+      ]);
 
       await service.process({ data: { type: 'dispatch' } });
 
@@ -410,7 +503,10 @@ describe('AdProcessor', () => {
     });
 
     it('returns true if actualBatches < expectedBatches', async () => {
-      const ad = makeAd({ dispatch_time: '00:00', start_date: new Date('2026-01-01T00:00:00Z') });
+      const ad = makeAd({
+        dispatch_time: '00:00',
+        start_date: new Date('2026-01-01T00:00:00Z'),
+      });
       prisma.advertisement.findMany.mockResolvedValue([ad]);
       prisma.adDeliveryLog.count.mockResolvedValue(0); // sentToday = 0
       prisma.$queryRaw.mockResolvedValue([]); // actualBatches = 0, expectedBatches >= 1

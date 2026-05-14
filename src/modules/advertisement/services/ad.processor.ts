@@ -133,7 +133,9 @@ export class AdProcessor {
       data: { status: AdStatus.ACTIVE },
     });
     if (activated.count > 0) {
-      this.logger.log(`Dispatch: activated ${activated.count} ads inline before dispatch run`);
+      this.logger.log(
+        `Dispatch: activated ${activated.count} ads inline before dispatch run`,
+      );
     }
 
     const activeAds = await this.prisma.advertisement.findMany({
@@ -239,7 +241,11 @@ export class AdProcessor {
 
   private deliverableChannels(
     allowed: ConcreteChannel[],
-    profile: { email: string; phone: string | null; whatsapp_connected: boolean },
+    profile: {
+      email: string;
+      phone: string | null;
+      whatsapp_connected: boolean;
+    },
   ): ConcreteChannel[] {
     return allowed.filter((c) => {
       if (c === 'EMAIL') return Boolean(profile.email);
@@ -297,7 +303,8 @@ export class AdProcessor {
       await this.prisma.adDeliveryLog.update({
         where: { id: deliveryLog.id },
         data: {
-          failure_reason: err instanceof Error ? err.message.slice(0, 500) : 'UNKNOWN',
+          failure_reason:
+            err instanceof Error ? err.message.slice(0, 500) : 'UNKNOWN',
         },
       });
       this.logger.error(

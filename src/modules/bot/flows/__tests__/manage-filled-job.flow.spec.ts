@@ -196,11 +196,23 @@ describe('runManageFilledJobFlow()', () => {
       const state = {
         flowId: FLOW_IDS.MANAGE_FILLED_JOB,
         step: 1,
-        payload: { items: [item], pageIndex: 0, step: 'cancel_confirm', selectedItem: item },
+        payload: {
+          items: [item],
+          pageIndex: 0,
+          step: 'cancel_confirm',
+          selectedItem: item,
+        },
         updatedAt: new Date().toISOString(),
       };
-      const result = await runManageFilledJobFlow(state, '1', employerProfile, ctx);
-      expect(ctx.applicationService.cancelAcceptedByEmployer).toHaveBeenCalledWith('app-1', 'e-1');
+      const result = await runManageFilledJobFlow(
+        state,
+        '1',
+        employerProfile,
+        ctx,
+      );
+      expect(
+        ctx.applicationService.cancelAcceptedByEmployer,
+      ).toHaveBeenCalledWith('app-1', 'e-1');
       expect(result.clearState).toBe(true);
     });
 
@@ -213,10 +225,20 @@ describe('runManageFilledJobFlow()', () => {
       const state = {
         flowId: FLOW_IDS.MANAGE_FILLED_JOB,
         step: 1,
-        payload: { items: [item], pageIndex: 0, step: 'cancel_confirm', selectedItem: item },
+        payload: {
+          items: [item],
+          pageIndex: 0,
+          step: 'cancel_confirm',
+          selectedItem: item,
+        },
         updatedAt: new Date().toISOString(),
       };
-      const result = await runManageFilledJobFlow(state, '1', employerProfile, ctx);
+      const result = await runManageFilledJobFlow(
+        state,
+        '1',
+        employerProfile,
+        ctx,
+      );
       expect(result.reply[0]).toContain('DB error');
     });
 
@@ -233,30 +255,52 @@ describe('runManageFilledJobFlow()', () => {
 
     it('returns error when markJobCompleted throws (Error instance)', async () => {
       const ctx = makeCtx();
-      (ctx.applicationService.markJobCompleted as jest.Mock).mockRejectedValueOnce(
-        new Error('DB failure'),
-      );
+      (
+        ctx.applicationService.markJobCompleted as jest.Mock
+      ).mockRejectedValueOnce(new Error('DB failure'));
       // Go to note step first
       const noteState = {
         flowId: FLOW_IDS.MANAGE_FILLED_JOB,
         step: 1,
-        payload: { items: [makeItem()], pageIndex: 0, step: 'note', selectedItem: makeItem() },
+        payload: {
+          items: [makeItem()],
+          pageIndex: 0,
+          step: 'note',
+          selectedItem: makeItem(),
+        },
         updatedAt: new Date().toISOString(),
       };
-      const result = await runManageFilledJobFlow(noteState, '0', employerProfile, ctx);
+      const result = await runManageFilledJobFlow(
+        noteState,
+        '0',
+        employerProfile,
+        ctx,
+      );
       expect(result.reply[0]).toContain('DB failure');
     });
 
     it('returns error when markJobCompleted throws (non-Error)', async () => {
       const ctx = makeCtx();
-      (ctx.applicationService.markJobCompleted as jest.Mock).mockRejectedValueOnce('bad');
+      (
+        ctx.applicationService.markJobCompleted as jest.Mock
+      ).mockRejectedValueOnce('bad');
       const noteState = {
         flowId: FLOW_IDS.MANAGE_FILLED_JOB,
         step: 1,
-        payload: { items: [makeItem()], pageIndex: 0, step: 'note', selectedItem: makeItem() },
+        payload: {
+          items: [makeItem()],
+          pageIndex: 0,
+          step: 'note',
+          selectedItem: makeItem(),
+        },
         updatedAt: new Date().toISOString(),
       };
-      const result = await runManageFilledJobFlow(noteState, '0', employerProfile, ctx);
+      const result = await runManageFilledJobFlow(
+        noteState,
+        '0',
+        employerProfile,
+        ctx,
+      );
       expect(result.reply[0]).toContain('IMPOSSIBLE');
     });
 
@@ -264,7 +308,12 @@ describe('runManageFilledJobFlow()', () => {
       const item = { ...makeItem(), applicationId: undefined as any };
       const state = makeDetailState(item);
       // input '1' triggers applicationId check
-      const result = await runManageFilledJobFlow(state, '1', employerProfile, makeCtx());
+      const result = await runManageFilledJobFlow(
+        state,
+        '1',
+        employerProfile,
+        makeCtx(),
+      );
       expect(result.clearState).toBe(true);
       expect(result.reply[0]).toContain('ERREUR');
     });
@@ -273,10 +322,20 @@ describe('runManageFilledJobFlow()', () => {
       const noteState = {
         flowId: FLOW_IDS.MANAGE_FILLED_JOB,
         step: 1,
-        payload: { items: [makeItem()], pageIndex: 0, step: 'note', selectedItem: undefined },
+        payload: {
+          items: [makeItem()],
+          pageIndex: 0,
+          step: 'note',
+          selectedItem: undefined,
+        },
         updatedAt: new Date().toISOString(),
       };
-      const result = await runManageFilledJobFlow(noteState, 'some note', employerProfile, makeCtx());
+      const result = await runManageFilledJobFlow(
+        noteState,
+        'some note',
+        employerProfile,
+        makeCtx(),
+      );
       expect(result.clearState).toBe(true);
       expect(result.reply[0]).toContain('ERREUR');
     });
@@ -286,11 +345,25 @@ describe('runManageFilledJobFlow()', () => {
       const noteState = {
         flowId: FLOW_IDS.MANAGE_FILLED_JOB,
         step: 1,
-        payload: { items: [makeItem()], pageIndex: 0, step: 'note', selectedItem: makeItem() },
+        payload: {
+          items: [makeItem()],
+          pageIndex: 0,
+          step: 'note',
+          selectedItem: makeItem(),
+        },
         updatedAt: new Date().toISOString(),
       };
-      const result = await runManageFilledJobFlow(noteState, 'Great job!', employerProfile, ctx);
-      expect(ctx.applicationService.markJobCompleted).toHaveBeenCalledWith('app-1', 'e-1', 'Great job!');
+      const result = await runManageFilledJobFlow(
+        noteState,
+        'Great job!',
+        employerProfile,
+        ctx,
+      );
+      expect(ctx.applicationService.markJobCompleted).toHaveBeenCalledWith(
+        'app-1',
+        'e-1',
+        'Great job!',
+      );
       expect(result.clearState).toBe(true);
     });
 
@@ -299,10 +372,20 @@ describe('runManageFilledJobFlow()', () => {
       const state = {
         flowId: FLOW_IDS.MANAGE_FILLED_JOB,
         step: 1,
-        payload: { items: [makeItem()], pageIndex: 0, step: 'cancel_confirm', selectedItem: item },
+        payload: {
+          items: [makeItem()],
+          pageIndex: 0,
+          step: 'cancel_confirm',
+          selectedItem: item,
+        },
         updatedAt: new Date().toISOString(),
       };
-      const result = await runManageFilledJobFlow(state, '1', employerProfile, makeCtx());
+      const result = await runManageFilledJobFlow(
+        state,
+        '1',
+        employerProfile,
+        makeCtx(),
+      );
       expect(result.clearState).toBe(true);
       expect(result.reply[0]).toContain('ERREUR');
     });
@@ -313,11 +396,23 @@ describe('runManageFilledJobFlow()', () => {
       const state = {
         flowId: FLOW_IDS.MANAGE_FILLED_JOB,
         step: 1,
-        payload: { items: [item], pageIndex: 0, step: 'cancel_confirm', selectedItem: item },
+        payload: {
+          items: [item],
+          pageIndex: 0,
+          step: 'cancel_confirm',
+          selectedItem: item,
+        },
         updatedAt: new Date().toISOString(),
       };
-      const result = await runManageFilledJobFlow(state, 'oui', employerProfile, ctx);
-      expect(ctx.applicationService.cancelAcceptedByEmployer).toHaveBeenCalled();
+      const result = await runManageFilledJobFlow(
+        state,
+        'oui',
+        employerProfile,
+        ctx,
+      );
+      expect(
+        ctx.applicationService.cancelAcceptedByEmployer,
+      ).toHaveBeenCalled();
       expect(result.clearState).toBe(true);
     });
 
@@ -326,10 +421,20 @@ describe('runManageFilledJobFlow()', () => {
       const state = {
         flowId: FLOW_IDS.MANAGE_FILLED_JOB,
         step: 1,
-        payload: { items: [item], pageIndex: 0, step: 'cancel_confirm', selectedItem: item },
+        payload: {
+          items: [item],
+          pageIndex: 0,
+          step: 'cancel_confirm',
+          selectedItem: item,
+        },
         updatedAt: new Date().toISOString(),
       };
-      const result = await runManageFilledJobFlow(state, '2', employerProfile, makeCtx());
+      const result = await runManageFilledJobFlow(
+        state,
+        '2',
+        employerProfile,
+        makeCtx(),
+      );
       expect(result.nextState?.payload?.step).toBe('detail');
     });
   });
@@ -343,7 +448,12 @@ describe('runManageFilledJobFlow()', () => {
         payload: { items, pageIndex: 0, step: 'list' },
         updatedAt: new Date().toISOString(),
       };
-      const result = await runManageFilledJobFlow(state, 's', employerProfile, makeCtx());
+      const result = await runManageFilledJobFlow(
+        state,
+        's',
+        employerProfile,
+        makeCtx(),
+      );
       expect(result.nextState?.payload?.pageIndex).toBe(1);
     });
 
@@ -355,7 +465,12 @@ describe('runManageFilledJobFlow()', () => {
         payload: { items, pageIndex: 1, step: 'list' },
         updatedAt: new Date().toISOString(),
       };
-      const result = await runManageFilledJobFlow(state, 'p', employerProfile, makeCtx());
+      const result = await runManageFilledJobFlow(
+        state,
+        'p',
+        employerProfile,
+        makeCtx(),
+      );
       expect(result.nextState?.payload?.pageIndex).toBe(0);
     });
 
@@ -367,7 +482,12 @@ describe('runManageFilledJobFlow()', () => {
         payload: { items, pageIndex: 0, step: 'list' },
         updatedAt: new Date().toISOString(),
       };
-      const result = await runManageFilledJobFlow(state, 's', employerProfile, makeCtx());
+      const result = await runManageFilledJobFlow(
+        state,
+        's',
+        employerProfile,
+        makeCtx(),
+      );
       // stays on same state (invalid input)
       expect(result.nextState?.payload?.pageIndex).toBe(0);
     });
@@ -380,7 +500,12 @@ describe('runManageFilledJobFlow()', () => {
         payload: { items, pageIndex: 0, step: 'list' },
         updatedAt: new Date().toISOString(),
       };
-      const result = await runManageFilledJobFlow(state, 'p', employerProfile, makeCtx());
+      const result = await runManageFilledJobFlow(
+        state,
+        'p',
+        employerProfile,
+        makeCtx(),
+      );
       // no prev page, should show error
       expect(result.nextState?.payload?.pageIndex).toBe(0);
     });
@@ -394,7 +519,12 @@ describe('runManageFilledJobFlow()', () => {
         updatedAt: new Date().toISOString(),
       };
       // menuIdx = PAGE_SIZE + 2 = 7
-      const result = await runManageFilledJobFlow(state, '7', employerProfile, makeCtx());
+      const result = await runManageFilledJobFlow(
+        state,
+        '7',
+        employerProfile,
+        makeCtx(),
+      );
       expect(result.clearState).toBe(true);
     });
 
@@ -407,7 +537,12 @@ describe('runManageFilledJobFlow()', () => {
         updatedAt: new Date().toISOString(),
       };
       // nextPageIdx = PAGE_SIZE + 1 = 6, hasMore = true (7 items > 5)
-      const result = await runManageFilledJobFlow(state, '6', employerProfile, makeCtx());
+      const result = await runManageFilledJobFlow(
+        state,
+        '6',
+        employerProfile,
+        makeCtx(),
+      );
       expect(result.nextState?.payload?.pageIndex).toBe(1);
     });
   });

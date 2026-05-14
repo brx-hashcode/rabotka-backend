@@ -1,5 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { InterestSignalService, temporalWeight, SIGNAL_WEIGHTS } from '../interest-signal.service';
+import {
+  InterestSignalService,
+  temporalWeight,
+  SIGNAL_WEIGHTS,
+} from '../interest-signal.service';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { QdrantService } from '../../qdrant/qdrant.service';
 import { InterestClusterService } from '../interest-cluster.service';
@@ -18,7 +22,9 @@ const mockQdrant = {
 
 const mockPrisma = {
   jobOffer: {
-    findUnique: jest.fn().mockResolvedValue({ title: 'Plumber', category: { name: 'Plomberie' } }),
+    findUnique: jest
+      .fn()
+      .mockResolvedValue({ title: 'Plumber', category: { name: 'Plomberie' } }),
   },
 };
 
@@ -86,7 +92,9 @@ describe('InterestSignalService', () => {
   });
 
   it('record uses vector from jobs collection when available', async () => {
-    mockQdrantClient.retrieve.mockResolvedValueOnce([{ vector: { dense: [0.5, 0.6] } }]);
+    mockQdrantClient.retrieve.mockResolvedValueOnce([
+      { vector: { dense: [0.5, 0.6] } },
+    ]);
     await service.record('user-1', 'job-1', 'save');
     expect(mockQdrant.upsertDense).toHaveBeenCalled();
     // embed should not be called if vector retrieved
@@ -107,7 +115,9 @@ describe('InterestSignalService', () => {
 
   it('record handles cluster applySignal failure gracefully', async () => {
     mockClusters.applySignal.mockRejectedValueOnce(new Error('Cluster error'));
-    await expect(service.record('user-1', 'job-1', 'apply')).resolves.not.toThrow();
+    await expect(
+      service.record('user-1', 'job-1', 'apply'),
+    ).resolves.not.toThrow();
   });
 
   it('record qdrant retrieve failure falls back to embed', async () => {
@@ -120,14 +130,32 @@ describe('InterestSignalService', () => {
     const recentDate = new Date().toISOString();
     mockQdrantClient.scroll.mockResolvedValueOnce({
       points: [
-        { payload: { job_id: 'job-1', type: 'apply', weight: 1.0, category: 'Plomberie', recorded_at: recentDate } },
-        { payload: { job_id: 'job-2', type: 'skip', weight: -0.3, category: null, recorded_at: new Date(Date.now() - 100 * 24 * 60 * 60 * 1000).toISOString() } },
+        {
+          payload: {
+            job_id: 'job-1',
+            type: 'apply',
+            weight: 1.0,
+            category: 'Plomberie',
+            recorded_at: recentDate,
+          },
+        },
+        {
+          payload: {
+            job_id: 'job-2',
+            type: 'skip',
+            weight: -0.3,
+            category: null,
+            recorded_at: new Date(
+              Date.now() - 100 * 24 * 60 * 60 * 1000,
+            ).toISOString(),
+          },
+        },
       ],
     });
 
     const result = await service.getRecentSignals('user-1');
     // The expired skip signal has temporal weight 0, effective = -0.3 * 0 = 0, so it's filtered out
-    expect(result.some(s => s.jobId === 'job-1')).toBe(true);
-    expect(result.some(s => s.jobId === 'job-2')).toBe(false);
+    expect(result.some((s) => s.jobId === 'job-1')).toBe(true);
+    expect(result.some((s) => s.jobId === 'job-2')).toBe(false);
   });
 });

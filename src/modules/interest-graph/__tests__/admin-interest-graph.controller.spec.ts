@@ -12,7 +12,9 @@ const mockClusters = {
 };
 
 const mockSignals = {
-  getRecentSignals: jest.fn().mockResolvedValue([{ jobId: 'job-1', type: 'apply' }]),
+  getRecentSignals: jest
+    .fn()
+    .mockResolvedValue([{ jobId: 'job-1', type: 'apply' }]),
 };
 
 describe('AdminInterestGraphController', () => {
@@ -27,14 +29,24 @@ describe('AdminInterestGraphController', () => {
         { provide: InterestSignalService, useValue: mockSignals },
       ],
     })
-      .overrideGuard(AdminAuthGuard).useValue({ canActivate: () => true })
-      .overrideGuard(RolesGuard).useValue({ canActivate: () => true })
+      .overrideGuard(AdminAuthGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(RolesGuard)
+      .useValue({ canActivate: () => true })
       .compile();
-    controller = module.get<AdminInterestGraphController>(AdminInterestGraphController);
+    controller = module.get<AdminInterestGraphController>(
+      AdminInterestGraphController,
+    );
   });
 
   it('getProfile returns profile when found', async () => {
-    const profile = { positiveVectors: [], negativeVectors: [], categories: [], seenJobIds: [], totalSignals: 5 };
+    const profile = {
+      positiveVectors: [],
+      negativeVectors: [],
+      categories: [],
+      seenJobIds: [],
+      totalSignals: 5,
+    };
     mockClusters.getProfile.mockResolvedValueOnce(profile);
     const result = await controller.getProfile('user-1');
     expect(result).toEqual(profile);
@@ -42,7 +54,9 @@ describe('AdminInterestGraphController', () => {
 
   it('getProfile throws NotFoundException when not found', async () => {
     mockClusters.getProfile.mockResolvedValueOnce(null);
-    await expect(controller.getProfile('user-1')).rejects.toThrow(NotFoundException);
+    await expect(controller.getProfile('user-1')).rejects.toThrow(
+      NotFoundException,
+    );
   });
 
   it('getSignals returns recent signals', async () => {

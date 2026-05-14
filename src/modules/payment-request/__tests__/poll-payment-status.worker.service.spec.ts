@@ -28,12 +28,16 @@ describe('PollPaymentStatusWorkerService', () => {
         { provide: PaymentRequestService, useValue: mockPaymentRequestService },
       ],
     }).compile();
-    service = module.get<PollPaymentStatusWorkerService>(PollPaymentStatusWorkerService);
+    service = module.get<PollPaymentStatusWorkerService>(
+      PollPaymentStatusWorkerService,
+    );
   });
 
   it('onModuleInit sets payment request service and creates worker', () => {
     service.onModuleInit();
-    expect(mockProcessor.setPaymentRequestService).toHaveBeenCalledWith(mockPaymentRequestService);
+    expect(mockProcessor.setPaymentRequestService).toHaveBeenCalledWith(
+      mockPaymentRequestService,
+    );
     expect(mockQueueService.createWorker).toHaveBeenCalledWith(
       expect.any(String),
       expect.any(Function),

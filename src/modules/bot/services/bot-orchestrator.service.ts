@@ -85,9 +85,7 @@ import { runRateAssignmentFlow } from '../flows/rate-assignment.flow';
 import { MatchingService } from '../../matching/matching.service';
 import { QueueService } from '../../../common/services/queue/queue.service';
 import { runRepublishExpiredJobFlow } from '../flows/republish-expired-job.flow';
-import {
-  runJobStatusCheckFlow,
-} from '../flows/job-status-check.flow';
+import { runJobStatusCheckFlow } from '../flows/job-status-check.flow';
 import { InterestSignalService } from '../../interest-graph/interest-signal.service';
 import { InterestRecommendationService } from '../../interest-graph/interest-recommendation.service';
 import { InvoiceService } from '../../invoice/invoice.service';
@@ -154,7 +152,13 @@ export class BotOrchestratorService {
 
     if (profile.status === AccountStatus.SUSPENDED) {
       const contact = await this.systemConfig.getContactInfo();
-      return [accountSuspendedBotMessage({ email: contact.email ?? '', phone: contact.phone ?? '', address: contact.address ?? '' })];
+      return [
+        accountSuspendedBotMessage({
+          email: contact.email ?? '',
+          phone: contact.phone ?? '',
+          address: contact.address ?? '',
+        }),
+      ];
     }
 
     const normalizedInput = text.trim().toLowerCase();
@@ -1036,7 +1040,11 @@ export class BotOrchestratorService {
         return handleMenuCommand(profile);
       case 'help': {
         const contact = await this.systemConfig.getContactInfo();
-        return handleHelpCommand(commandId, { email: contact.email ?? '', phone: contact.phone ?? '', address: contact.address ?? '' });
+        return handleHelpCommand(commandId, {
+          email: contact.email ?? '',
+          phone: contact.phone ?? '',
+          address: contact.address ?? '',
+        });
       }
       case 'profile':
         return this.commands.profile(profile);

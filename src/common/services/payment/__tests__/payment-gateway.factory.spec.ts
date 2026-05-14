@@ -48,14 +48,18 @@ describe('PaymentGatewayFactory', () => {
   });
 
   it('falls back to env config when systemConfig is unavailable', async () => {
-    mockSystemConfig.getPaymentGatewayDriver.mockRejectedValueOnce(new Error('DB error'));
+    mockSystemConfig.getPaymentGatewayDriver.mockRejectedValueOnce(
+      new Error('DB error'),
+    );
     mockConfig.get.mockReturnValueOnce('MONETBIL');
     const gateway = await factory.create();
     expect(gateway).toBeDefined();
   });
 
   it('uses DB overrides when available', async () => {
-    mockSystemConfig.getPaymentEnvOverrides.mockResolvedValueOnce({ MONETBIL_SERVICE_KEY: 'db-key' });
+    mockSystemConfig.getPaymentEnvOverrides.mockResolvedValueOnce({
+      MONETBIL_SERVICE_KEY: 'db-key',
+    });
     const gateway = await factory.create();
     expect(gateway).toBeDefined();
   });

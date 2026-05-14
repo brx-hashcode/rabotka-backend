@@ -106,7 +106,10 @@ async function executeCancellation(
     await ctx.notificationService
       .sendCancellationToEmployer(applicationId, reason ?? null, isLatePenalty)
       .catch((err: unknown) =>
-        console.warn(`[cancel-application] sendCancellationToEmployer failed for ${applicationId}:`, err),
+        console.warn(
+          `[cancel-application] sendCancellationToEmployer failed for ${applicationId}:`,
+          err,
+        ),
       );
     return {
       reply: [buildCancelledReply(result.penaltyAmount)],

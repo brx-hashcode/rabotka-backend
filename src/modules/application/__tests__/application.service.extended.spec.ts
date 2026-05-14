@@ -142,7 +142,9 @@ describe('ApplicationService (extended)', () => {
         },
         {
           provide: MatchingService,
-          useValue: { indexWorkerProfile: jest.fn().mockResolvedValue(undefined) },
+          useValue: {
+            indexWorkerProfile: jest.fn().mockResolvedValue(undefined),
+          },
         },
       ],
     }).compile();

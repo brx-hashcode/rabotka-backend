@@ -4,7 +4,9 @@ import { PaymentRequestService } from '../payment-request.service';
 import { LogService } from '../../log/log.service';
 
 const mockService = {
-  getByToken: jest.fn().mockResolvedValue({ id: 'pr-1', token: 'tok-1', status: 'PENDING' }),
+  getByToken: jest
+    .fn()
+    .mockResolvedValue({ id: 'pr-1', token: 'tok-1', status: 'PENDING' }),
   initiatePayment: jest.fn().mockResolvedValue({ success: true }),
   handlePaymentCallback: jest.fn().mockResolvedValue({ status: 'COMPLETED' }),
 };
@@ -25,7 +27,9 @@ describe('PaymentRequestPublicController', () => {
         { provide: LogService, useValue: mockLogService },
       ],
     }).compile();
-    controller = module.get<PaymentRequestPublicController>(PaymentRequestPublicController);
+    controller = module.get<PaymentRequestPublicController>(
+      PaymentRequestPublicController,
+    );
   });
 
   it('getByToken returns payment request data', async () => {
@@ -35,23 +39,41 @@ describe('PaymentRequestPublicController', () => {
   });
 
   it('initiatePayment calls service and logs', async () => {
-    const result = await controller.initiatePayment('tok-1', { phone: '+242001', operator: 'MTN' } as any);
-    expect(mockService.initiatePayment).toHaveBeenCalledWith('tok-1', '+242001', 'MTN');
-    expect(mockLogService.create).toHaveBeenCalledWith(expect.objectContaining({ action: 'PAYMENT_INITIATED' }));
+    const result = await controller.initiatePayment('tok-1', {
+      phone: '+242001',
+      operator: 'MTN',
+    } as any);
+    expect(mockService.initiatePayment).toHaveBeenCalledWith(
+      'tok-1',
+      '+242001',
+      'MTN',
+    );
+    expect(mockLogService.create).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'PAYMENT_INITIATED' }),
+    );
     expect(result).toEqual({ success: true });
   });
 
   it('paymentCallback handles Monetbil callback', async () => {
-    const result = await controller.paymentCallback({ paymentId: 'gw-1', status: '1' });
+    const result = await controller.paymentCallback({
+      paymentId: 'gw-1',
+      status: '1',
+    });
     expect(mockService.handlePaymentCallback).toHaveBeenCalled();
-    expect(mockLogService.create).toHaveBeenCalledWith(expect.objectContaining({ action: 'PAYMENT_WEBHOOK_RECEIVED' }));
+    expect(mockLogService.create).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'PAYMENT_WEBHOOK_RECEIVED' }),
+    );
     expect(result).toEqual({ status: 'COMPLETED' });
   });
 
   it('mtnMomoCallback handles MTN webhook', async () => {
     const result = await controller.mtnMomoCallback({ externalId: 'gw-ref-1' });
     expect(mockService.handlePaymentCallback).toHaveBeenCalled();
-    expect(mockLogService.create).toHaveBeenCalledWith(expect.objectContaining({ metadata: expect.objectContaining({ gateway: 'MTN_MOMO' }) }));
+    expect(mockLogService.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({ gateway: 'MTN_MOMO' }),
+      }),
+    );
     expect(result).toEqual({ status: 'COMPLETED' });
   });
 });

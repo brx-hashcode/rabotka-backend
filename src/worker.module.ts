@@ -77,7 +77,11 @@ export class WorkerModule {
       {
         provide: WalletService,
         useFactory: (prisma: PrismaService) =>
-          new WalletService(prisma, null as unknown as SystemConfigService, null as unknown as InvoiceService),
+          new WalletService(
+            prisma,
+            null as unknown as SystemConfigService,
+            null as unknown as InvoiceService,
+          ),
         inject: [PrismaService],
       },
       {
@@ -111,8 +115,12 @@ export class WorkerModule {
               systemConfig: SystemConfigService,
             ) => {
               // Minimal stubs for services only needed in full bot context
-              const contactUnlockStub = { expirePendingAttemptsForJob: async () => [] } as never;
-              const botNotificationStub = { sendContactUnlockCreditConversionNotification: async () => {} } as never;
+              const contactUnlockStub = {
+                expirePendingAttemptsForJob: async () => [],
+              } as never;
+              const botNotificationStub = {
+                sendContactUnlockCreditConversionNotification: async () => {},
+              } as never;
               return new ReminderProcessor(
                 prisma as never,
                 whatsApp,

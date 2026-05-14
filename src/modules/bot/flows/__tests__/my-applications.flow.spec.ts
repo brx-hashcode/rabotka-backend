@@ -50,8 +50,12 @@ function makeCtx(overrides: Record<string, unknown> = {}) {
       getByApplicationId: jest.fn().mockResolvedValue(null),
       rejectPendingAttemptByApplication: jest.fn(),
     },
-    walletService: { getProfileWalletBalance: jest.fn().mockResolvedValue(5000) },
-    paymentService: { createPaymentUrl: jest.fn().mockResolvedValue('http://pay.url') },
+    walletService: {
+      getProfileWalletBalance: jest.fn().mockResolvedValue(5000),
+    },
+    paymentService: {
+      createPaymentUrl: jest.fn().mockResolvedValue('http://pay.url'),
+    },
     systemConfigService: {
       getContactUnlockFees: jest.fn().mockResolvedValue({
         employerFeeFcfa: 1000,
@@ -274,12 +278,20 @@ describe('runMyApplicationsFlow()', () => {
           cancel: jest.fn(),
         },
         contactUnlockService: {
-          getByApplicationId: jest.fn().mockResolvedValue({ id: 'attempt-1', expires_at: new Date(Date.now() + 3600000) }),
+          getByApplicationId: jest.fn().mockResolvedValue({
+            id: 'attempt-1',
+            expires_at: new Date(Date.now() + 3600000),
+          }),
           rejectPendingAttemptByApplication: jest.fn(),
         },
       });
       const state = makeStep1StateWP('app-1');
-      const result = await runMyApplicationsFlow(state, '1', workerProfile, ctx);
+      const result = await runMyApplicationsFlow(
+        state,
+        '1',
+        workerProfile,
+        ctx,
+      );
       expect(result.reply.length).toBeGreaterThan(0);
     });
 
@@ -297,7 +309,12 @@ describe('runMyApplicationsFlow()', () => {
         },
       });
       const state = makeStep1StateWP('app-1');
-      const result = await runMyApplicationsFlow(state, '1', workerProfile, ctx);
+      const result = await runMyApplicationsFlow(
+        state,
+        '1',
+        workerProfile,
+        ctx,
+      );
       expect(result.clearState).toBe(true);
     });
 
@@ -311,11 +328,20 @@ describe('runMyApplicationsFlow()', () => {
         },
         contactUnlockService: {
           getByApplicationId: jest.fn().mockResolvedValue(null),
-          rejectPendingAttemptByApplication: jest.fn().mockResolvedValue({ otherPhone: '+242', otherPartyMessage: 'cancelled', currentPartyMessage: 'done' }),
+          rejectPendingAttemptByApplication: jest.fn().mockResolvedValue({
+            otherPhone: '+242',
+            otherPartyMessage: 'cancelled',
+            currentPartyMessage: 'done',
+          }),
         },
       });
       const state = makeStep1StateWP('app-1');
-      const result = await runMyApplicationsFlow(state, '2', workerProfile, ctx);
+      const result = await runMyApplicationsFlow(
+        state,
+        '2',
+        workerProfile,
+        ctx,
+      );
       expect(result.reply.length).toBeGreaterThan(0);
     });
 
@@ -333,7 +359,12 @@ describe('runMyApplicationsFlow()', () => {
         },
       });
       const state = makeStep1StateWP('app-1');
-      const result = await runMyApplicationsFlow(state, '3', workerProfile, ctx);
+      const result = await runMyApplicationsFlow(
+        state,
+        '3',
+        workerProfile,
+        ctx,
+      );
       expect(result.reply.length).toBeGreaterThan(0);
     });
 
@@ -351,7 +382,12 @@ describe('runMyApplicationsFlow()', () => {
         },
       });
       const state = makeStep1StateWP('app-1');
-      const result = await runMyApplicationsFlow(state, '4', workerProfile, ctx);
+      const result = await runMyApplicationsFlow(
+        state,
+        '4',
+        workerProfile,
+        ctx,
+      );
       expect(result.clearState).toBe(true);
     });
   });
@@ -392,7 +428,12 @@ describe('runMyApplicationsFlow()', () => {
         payload: { applicationIds: ['app-1'], selectedIndex: 0 },
         updatedAt: new Date().toISOString(),
       };
-      const result = await runMyApplicationsFlow(state, '1', workerProfile, ctx);
+      const result = await runMyApplicationsFlow(
+        state,
+        '1',
+        workerProfile,
+        ctx,
+      );
       expect(result.reply.length).toBeGreaterThan(0);
     });
   });
@@ -433,7 +474,12 @@ describe('runMyApplicationsFlow()', () => {
         payload: { applicationIds: ['app-1'], selectedIndex: 0 },
         updatedAt: new Date().toISOString(),
       };
-      const result = await runMyApplicationsFlow(state, '1', workerProfile, ctx);
+      const result = await runMyApplicationsFlow(
+        state,
+        '1',
+        workerProfile,
+        ctx,
+      );
       expect(result.reply.length).toBeGreaterThan(0);
     });
 
@@ -452,7 +498,12 @@ describe('runMyApplicationsFlow()', () => {
         payload: { applicationIds: ['app-1'], selectedIndex: 0 },
         updatedAt: new Date().toISOString(),
       };
-      const result = await runMyApplicationsFlow(state, '2', workerProfile, ctx);
+      const result = await runMyApplicationsFlow(
+        state,
+        '2',
+        workerProfile,
+        ctx,
+      );
       expect(result.clearState).toBe(true);
     });
   });
