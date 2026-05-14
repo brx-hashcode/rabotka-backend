@@ -7,9 +7,8 @@ export function kycApprovedEmail(name: string): string {
     <p>Bonne nouvelle ! 🎉 Votre vérification d'identité (KYC) a été <strong>approuvée avec succès</strong>.</p>
 
     <p>
-      Pour finaliser l'activation de votre compte, vous allez recevoir un message WhatsApp
-      contenant un <strong>lien de vérification</strong> pour confirmer que votre numéro de téléphone
-      est bien connecté à WhatsApp.
+      Pour accéder à la plateforme, ouvrez WhatsApp et tapez <strong>Menu</strong> dans votre conversation
+      avec Rabotka. Votre compte sera activé instantanément.
     </p>
 
     <p>
