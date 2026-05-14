@@ -88,4 +88,73 @@ describe('FileController', () => {
       ),
     ).rejects.toThrow(BadRequestException);
   });
+
+  it('uploads single non-image file with private access', async () => {
+    const result = await controller.uploadFile([makeFile({ mimetype: 'application/pdf', originalname: 'doc.pdf' })], undefined);
+    expect(storage.upload).toHaveBeenCalledWith(
+      expect.any(Buffer), 'doc.pdf', expect.objectContaining({ access: 'private' })
+    );
+  });
+
+  it('uses public access override', async () => {
+    await controller.uploadFile([makeFile({ mimetype: 'application/pdf' })], undefined, 'public');
+    expect(storage.upload).toHaveBeenCalledWith(
+      expect.any(Buffer), expect.any(String), expect.objectContaining({ access: 'public' })
+    );
+  });
+
+  it('uses private access override', async () => {
+    await controller.uploadFile([makeFile({ mimetype: 'image/png' })], undefined, 'private');
+    expect(storage.upload).toHaveBeenCalledWith(
+      expect.any(Buffer), expect.any(String), expect.objectContaining({ access: 'private' })
+    );
+  });
+
+  describe('proxyFile()', () => {
+    let fetchSpy: jest.SpyInstance;
+
+    afterEach(() => {
+      fetchSpy?.mockRestore();
+    });
+
+    it('returns 400 when no url provided', async () => {
+      const res = { status: jest.fn().mockReturnThis(), json: jest.fn() } as any;
+      await controller.proxyFile('', res);
+      expect(res.status).toHaveBeenCalledWith(400);
+    });
+
+    it('returns 400 for blob: url', async () => {
+      const res = { status: jest.fn().mockReturnThis(), json: jest.fn() } as any;
+      await controller.proxyFile('blob:http://localhost/something', res);
+      expect(res.status).toHaveBeenCalledWith(400);
+    });
+
+    it('proxies file successfully', async () => {
+      fetchSpy = jest.spyOn(global, 'fetch' as any).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: { get: jest.fn().mockImplementation((h: string) => h === 'content-type' ? 'image/jpeg' : null) },
+        arrayBuffer: jest.fn().mockResolvedValue(new ArrayBuffer(10)),
+      } as any);
+      const res = {
+        setHeader: jest.fn(),
+        send: jest.fn(),
+        status: jest.fn().mockReturnThis(),
+        json: jest.fn(),
+      } as any;
+      await controller.proxyFile('https://cdn.example.com/img.jpg', res);
+      expect(res.send).toHaveBeenCalled();
+    });
+
+    it('returns error status when upstream fails', async () => {
+      fetchSpy = jest.spyOn(global, 'fetch' as any).mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+        headers: { get: jest.fn() },
+      } as any);
+      const res = { status: jest.fn().mockReturnThis(), json: jest.fn(), setHeader: jest.fn() } as any;
+      await controller.proxyFile('https://cdn.example.com/notfound.jpg', res);
+      expect(res.status).toHaveBeenCalledWith(404);
+    });
+  });
 });

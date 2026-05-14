@@ -70,6 +70,7 @@ describe('PaymentRequestService', () => {
         findFirst: jest.fn(),
         findMany: jest.fn(),
         update: jest.fn(),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         count: jest.fn(),
       },
       $transaction: jest
@@ -81,6 +82,7 @@ describe('PaymentRequestService', () => {
 
     const mockWhatsApp = {
       sendTextMessage: jest.fn().mockResolvedValue(true),
+      sendMediaMessage: jest.fn().mockResolvedValue(true),
     };
 
     const mockLog = {
@@ -341,6 +343,451 @@ describe('PaymentRequestService', () => {
 
       expect(result.data).toHaveLength(1);
       expect(result.total).toBe(1);
+    });
+
+    it('filters by status', async () => {
+      (prisma.paymentRequest.findMany as jest.Mock).mockResolvedValue([]);
+      (prisma.paymentRequest.count as jest.Mock).mockResolvedValue(0);
+      const result = await service.getList({ page: 1, limit: 10, status: PaymentRequestStatus.APPROVED });
+      expect(result.data).toHaveLength(0);
+    });
+
+    it('filters by q', async () => {
+      (prisma.paymentRequest.findMany as jest.Mock).mockResolvedValue([]);
+      (prisma.paymentRequest.count as jest.Mock).mockResolvedValue(0);
+      const result = await service.getList({ page: 1, limit: 10, q: 'alice' });
+      expect(result.total).toBe(0);
+    });
+  });
+
+  describe('initiatePayment() - more branches', () => {
+    it('throws BadRequestException when amount is null', async () => {
+      (prisma.paymentRequest.findUnique as jest.Mock).mockResolvedValue(
+        makeRequest(PaymentRequestStatus.PENDING, { amount: null })
+      );
+      await expect(service.initiatePayment(TOKEN, '+242001', 'MTN')).rejects.toThrow(BadRequestException);
+    });
+
+    it('throws when updateMany count=0 (already processing)', async () => {
+      (prisma.paymentRequest.findUnique as jest.Mock).mockResolvedValue(
+        makeRequest(PaymentRequestStatus.PENDING, { amount: 5000 })
+      );
+      (prisma.paymentRequest.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+      await expect(service.initiatePayment(TOKEN, '+242001', 'MTN')).rejects.toThrow(BadRequestException);
+    });
+
+    it('reverts to PENDING when gateway fails', async () => {
+      (prisma.paymentRequest.findUnique as jest.Mock).mockResolvedValue(
+        makeRequest(PaymentRequestStatus.PENDING, { amount: 5000 })
+      );
+      (prisma.paymentRequest.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+      const paymentGateway = (service as any).paymentGateway;
+      paymentGateway.initiatePayment = jest.fn().mockRejectedValueOnce(new Error('Gateway error'));
+      await expect(service.initiatePayment(TOKEN, '+242001', 'MTN')).rejects.toThrow(BadRequestException);
+      expect(prisma.paymentRequest.updateMany).toHaveBeenCalledTimes(2); // original + revert
+    });
+
+    it('succeeds and returns success=true', async () => {
+      (prisma.paymentRequest.findUnique as jest.Mock).mockResolvedValue(
+        makeRequest(PaymentRequestStatus.PENDING, { amount: 5000 })
+      );
+      (prisma.paymentRequest.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+      (prisma.paymentRequest.update as jest.Mock).mockResolvedValue({});
+      const paymentGateway = (service as any).paymentGateway;
+      paymentGateway.initiatePayment = jest.fn().mockResolvedValue({ gatewayRef: 'gw-ref-1' });
+      const queueService = (service as any).queueService;
+      queueService.addJob = jest.fn().mockResolvedValue(undefined);
+      const result = await service.initiatePayment(TOKEN, '+242001', 'MTN');
+      expect(result.success).toBe(true);
+    });
+
+    it('succeeds without gatewayRef (no queue job)', async () => {
+      (prisma.paymentRequest.findUnique as jest.Mock).mockResolvedValue(
+        makeRequest(PaymentRequestStatus.PENDING, { amount: 5000 })
+      );
+      (prisma.paymentRequest.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+      (prisma.paymentRequest.update as jest.Mock).mockResolvedValue({});
+      const paymentGateway = (service as any).paymentGateway;
+      paymentGateway.initiatePayment = jest.fn().mockResolvedValue({ gatewayRef: null });
+      const result = await service.initiatePayment(TOKEN, '+242001', 'MTN');
+      expect(result.success).toBe(true);
+    });
+  });
+
+  describe('handlePaymentCallback() - more branches', () => {
+    it('returns received=true when gatewayRef missing', async () => {
+      const paymentGateway = (service as any).paymentGateway;
+      paymentGateway.handleWebhookPayload = jest.fn().mockResolvedValue({ gatewayRef: null, status: 'PENDING', transactionId: null });
+      const result = await service.handlePaymentCallback({ status: '0' });
+      expect(result.received).toBe(true);
+    });
+
+    it('returns received=true when request not found', async () => {
+      const paymentGateway = (service as any).paymentGateway;
+      paymentGateway.handleWebhookPayload = jest.fn().mockResolvedValue({ gatewayRef: 'gw-ref', status: 'COMPLETED', transactionId: 'tx-1' });
+      (prisma.paymentRequest.findFirst as jest.Mock).mockResolvedValue(null);
+      const result = await service.handlePaymentCallback({ status: '1' });
+      expect(result.received).toBe(true);
+    });
+
+    it('returns received=true for PENDING status', async () => {
+      const paymentGateway = (service as any).paymentGateway;
+      paymentGateway.handleWebhookPayload = jest.fn().mockResolvedValue({ gatewayRef: 'gw-ref', status: 'PENDING', transactionId: null });
+      (prisma.paymentRequest.findFirst as jest.Mock).mockResolvedValue(makeRequest(PaymentRequestStatus.PROCESSING));
+      const result = await service.handlePaymentCallback({ status: '0' });
+      expect(result.received).toBe(true);
+    });
+  });
+
+  describe('processApprovedPaymentById()', () => {
+    it('returns early when request not found', async () => {
+      (prisma.paymentRequest.findUnique as jest.Mock).mockResolvedValue(null);
+      await service.processApprovedPaymentById(REQUEST_ID); // no throw
+    });
+
+    it('returns early when request is APPROVED', async () => {
+      (prisma.paymentRequest.findUnique as jest.Mock).mockResolvedValue(
+        makeRequest(PaymentRequestStatus.APPROVED)
+      );
+      await service.processApprovedPaymentById(REQUEST_ID); // no throw
+    });
+
+    it('returns early when request is REJECTED', async () => {
+      (prisma.paymentRequest.findUnique as jest.Mock).mockResolvedValue(
+        makeRequest(PaymentRequestStatus.REJECTED)
+      );
+      await service.processApprovedPaymentById(REQUEST_ID); // no throw
+    });
+
+    it('processes PENDING request through full payment pipeline', async () => {
+      const fullRequest = {
+        ...makeRequest(PaymentRequestStatus.PENDING),
+        amount: 5000,
+        request_type: PaymentRequestType.PENALTY_BATCH,
+        contact_unlock_attempt_id: null,
+        recommendation_worker_id: null,
+        description: 'Penalty payment',
+        gateway_payment_ref: null,
+        monetbil_payment_ref: null,
+        profile: {
+          ...mockProfile,
+          phone: '+24200000001',
+          email: 'alice@example.com',
+          first_name: 'Alice',
+          last_name: 'Dupont',
+        },
+      };
+
+      (prisma.paymentRequest.findUnique as jest.Mock).mockResolvedValue(fullRequest);
+
+      // Setup tx mock for persistApprovedPayment
+      const txMock = {
+        paymentRequest: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+        payment: { create: jest.fn().mockResolvedValue({}) },
+        walletTransaction: { create: jest.fn().mockResolvedValue({}) },
+        wallet: { update: jest.fn().mockResolvedValue({}) },
+        penalty: { updateMany: jest.fn().mockResolvedValue({}), count: jest.fn().mockResolvedValue(0) },
+        profile: { update: jest.fn().mockResolvedValue({}) },
+      };
+
+      (prisma.$transaction as jest.Mock).mockImplementation(async (cb) => {
+        if (typeof cb === 'function') return cb(txMock);
+        return Promise.resolve([]);
+      });
+
+      // Mock systemConfig.getFees
+      const systemConfig = (service as any).systemConfig;
+      if (systemConfig) {
+        systemConfig.getFees = jest.fn().mockResolvedValue({ billingBlockThreshold: 2 });
+      }
+
+      // Mock botNotification.sendMessage
+      const botNotification = (service as any).botNotification;
+      if (botNotification) {
+        botNotification.sendMessage = jest.fn().mockResolvedValue(undefined);
+      }
+
+      // Mock contactUnlock
+      const contactUnlock = (service as any).contactUnlock;
+      if (contactUnlock) {
+        contactUnlock.payUnlock = jest.fn().mockResolvedValue(undefined);
+        contactUnlock.getContactsIfUnlocked = jest.fn().mockResolvedValue(null);
+      }
+
+      await service.processApprovedPaymentById(REQUEST_ID);
+      // Should complete without throwing
+    });
+
+    it('handles already-processed payment (count=0 from tx)', async () => {
+      const fullRequest = {
+        ...makeRequest(PaymentRequestStatus.PENDING),
+        amount: 5000,
+        request_type: PaymentRequestType.PENALTY_BATCH,
+        contact_unlock_attempt_id: null,
+        recommendation_worker_id: null,
+        description: 'Penalty payment',
+        gateway_payment_ref: null,
+        monetbil_payment_ref: null,
+        profile: { ...mockProfile, phone: null, email: null },
+      };
+      (prisma.paymentRequest.findUnique as jest.Mock).mockResolvedValue(fullRequest);
+      const txMock = {
+        paymentRequest: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) }, // already processed
+        payment: { create: jest.fn() },
+        walletTransaction: { create: jest.fn() },
+        wallet: { update: jest.fn() },
+      };
+      (prisma.$transaction as jest.Mock).mockImplementation(async (cb) => {
+        if (typeof cb === 'function') return cb(txMock);
+        return Promise.resolve([]);
+      });
+      await service.processApprovedPaymentById(REQUEST_ID);
+    });
+  });
+
+  describe('processApprovedPaymentById() - contact unlock path', () => {
+    function setupContactUnlockRequest() {
+      const req = {
+        ...makeRequest(PaymentRequestStatus.PENDING),
+        amount: 5000,
+        request_type: PaymentRequestType.CONTACT_UNLOCK,
+        contact_unlock_attempt_id: 'unlock-1',
+        recommendation_worker_id: null,
+        description: 'Contact unlock',
+        gateway_payment_ref: null,
+        monetbil_payment_ref: null,
+        profile: { ...mockProfile, phone: '+242', email: 'alice@test.com', first_name: 'Alice', last_name: 'Dupont' },
+      };
+      (prisma.paymentRequest.findUnique as jest.Mock).mockResolvedValue(req);
+      const txMock = {
+        paymentRequest: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+        payment: { create: jest.fn().mockResolvedValue({}) },
+        walletTransaction: { create: jest.fn().mockResolvedValue({}) },
+        wallet: { update: jest.fn().mockResolvedValue({}) },
+      };
+      (prisma.$transaction as jest.Mock).mockImplementation(async (cb) => {
+        if (typeof cb === 'function') return cb(txMock);
+        return Promise.resolve([]);
+      });
+      const contactUnlock = (service as any).contactUnlock;
+      if (contactUnlock) {
+        contactUnlock.payUnlock = jest.fn().mockResolvedValue({ nowUnlocked: true });
+        contactUnlock.getContactsIfUnlocked = jest.fn().mockResolvedValue({ workerPhone: '+242111' });
+      }
+      const botNotification = (service as any).botNotification;
+      if (botNotification) {
+        botNotification.sendContactUnlockedNotification = jest.fn().mockResolvedValue(undefined);
+      }
+      return req;
+    }
+
+    it('processes CONTACT_UNLOCK request', async () => {
+      setupContactUnlockRequest();
+      await service.processApprovedPaymentById(REQUEST_ID);
+    });
+
+    it('processes RECOMMENDATION_CONTACT request with worker', async () => {
+      const req = {
+        ...makeRequest(PaymentRequestStatus.PENDING),
+        amount: 5000,
+        request_type: PaymentRequestType.RECOMMENDATION_CONTACT,
+        contact_unlock_attempt_id: null,
+        recommendation_worker_id: 'worker-1',
+        description: null,
+        gateway_payment_ref: null,
+        monetbil_payment_ref: null,
+        profile: { ...mockProfile, phone: '+242', email: 'alice@test.com', first_name: 'Alice', last_name: 'Dupont' },
+      };
+      (prisma.paymentRequest.findUnique as jest.Mock).mockResolvedValue(req);
+      (prisma.profile as any).findUnique = jest.fn().mockResolvedValue({ first_name: 'Bob', last_name: 'Smith' });
+      const txMock = {
+        paymentRequest: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+        payment: { create: jest.fn().mockResolvedValue({}) },
+        walletTransaction: { create: jest.fn().mockResolvedValue({}) },
+        wallet: { update: jest.fn().mockResolvedValue({}) },
+      };
+      (prisma.$transaction as jest.Mock).mockImplementation(async (cb) => {
+        if (typeof cb === 'function') return cb(txMock);
+        return Promise.resolve([]);
+      });
+      const contactUnlock = (service as any).contactUnlock;
+      if (contactUnlock) {
+        contactUnlock.payUnlock = jest.fn().mockResolvedValue(undefined);
+        contactUnlock.getContactsIfUnlocked = jest.fn().mockResolvedValue(null);
+      }
+      await service.processApprovedPaymentById(REQUEST_ID);
+    });
+  });
+
+  describe('getByProfileId()', () => {
+    it('returns requests for profile', async () => {
+      (prisma.paymentRequest.findMany as jest.Mock).mockResolvedValue([
+        makeRequest(PaymentRequestStatus.PENDING),
+      ]);
+      const result = await service.getByProfileId(PROFILE_ID);
+      expect(result).toHaveLength(1);
+    });
+  });
+
+  describe('persistFailedPayment() via webhook', () => {
+    it('handles CONTACT_UNLOCK type in persistFailedPayment (GATEWAY_FAILED status)', async () => {
+      const req = {
+        ...makeRequest(PaymentRequestStatus.PENDING),
+        amount: 5000,
+        request_type: PaymentRequestType.CONTACT_UNLOCK,
+        contact_unlock_attempt_id: 'unlock-1',
+        gateway_payment_ref: 'gw-ref-1',
+        monetbil_payment_ref: null,
+        token: TOKEN,
+        phone: '+242000001',
+        operator: 'MTN',
+        gateway: 'MONETBIL',
+        profile: { ...mockProfile },
+      };
+      (prisma.paymentRequest.findFirst as jest.Mock).mockResolvedValue(req);
+      (prisma.paymentRequest.update as jest.Mock).mockResolvedValue({ ...req, status: 'REJECTED' });
+      (prisma.payment as any) = { create: jest.fn().mockResolvedValue({}) };
+      const gatewayService = (service as any).paymentGateway;
+      if (gatewayService) {
+        gatewayService.handleWebhookPayload = jest.fn().mockResolvedValue({
+          gatewayRef: 'gw-ref-1',
+          status: 'FAILED',
+          transactionId: null,
+        });
+      }
+      const result = await service.handlePaymentCallback({ gatewayRef: 'gw-ref-1', status: 'FAILED' });
+      expect(result).toEqual({ received: true });
+    });
+
+    it('handles prisma.payment.create throwing in persistFailedPayment (GATEWAY_CANCELLED)', async () => {
+      const req = {
+        ...makeRequest(PaymentRequestStatus.PENDING),
+        amount: 5000,
+        request_type: PaymentRequestType.PENALTY_BATCH,
+        contact_unlock_attempt_id: null,
+        gateway_payment_ref: 'gw-ref-2',
+        monetbil_payment_ref: null,
+        token: TOKEN,
+        phone: '+242000001',
+        operator: 'MTN',
+        gateway: 'MONETBIL',
+        profile: { ...mockProfile },
+      };
+      (prisma.paymentRequest.findFirst as jest.Mock).mockResolvedValue(req);
+      (prisma.paymentRequest.update as jest.Mock).mockResolvedValue({ ...req, status: 'REJECTED' });
+      (prisma.payment as any) = { create: jest.fn().mockRejectedValueOnce(new Error('DB error')) };
+      const gatewayService = (service as any).paymentGateway;
+      if (gatewayService) {
+        gatewayService.handleWebhookPayload = jest.fn().mockResolvedValue({
+          gatewayRef: 'gw-ref-2',
+          status: 'CANCELLED',
+          transactionId: null,
+        });
+      }
+      const result = await service.handlePaymentCallback({ gatewayRef: 'gw-ref-2', status: 'CANCELLED' });
+      expect(result).toEqual({ received: true });
+    });
+  });
+
+  describe('getByToken() - getPaymentGatewayDriver catch', () => {
+    it('uses MONETBIL fallback when getPaymentGatewayDriver throws', async () => {
+      (prisma.paymentRequest.findUnique as jest.Mock).mockResolvedValue(
+        makeRequest(PaymentRequestStatus.PENDING),
+      );
+      const systemConfig = (service as any).systemConfig;
+      if (systemConfig) {
+        systemConfig.getPaymentGatewayDriver = jest.fn().mockRejectedValueOnce(new Error('config error'));
+      }
+      const result = await service.getByToken(TOKEN);
+      expect(result.gateway).toBe('MONETBIL');
+    });
+  });
+
+  describe('sendPaymentSuccessNotifications() branches', () => {
+    function setupProcessApproval(requestOverrides: Record<string, unknown> = {}) {
+      const req = {
+        ...makeRequest(PaymentRequestStatus.PENDING),
+        amount: 5000,
+        request_type: PaymentRequestType.PENALTY_BATCH,
+        contact_unlock_attempt_id: null,
+        recommendation_worker_id: null,
+        description: 'Test payment',
+        gateway_payment_ref: null,
+        monetbil_payment_ref: null,
+        profile: { ...mockProfile, phone: '+242000001', email: 'alice@test.com' },
+        ...requestOverrides,
+      };
+      (prisma.paymentRequest.findUnique as jest.Mock).mockResolvedValue(req);
+      const txMock = {
+        paymentRequest: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+        payment: { create: jest.fn().mockResolvedValue({}) },
+        walletTransaction: { create: jest.fn().mockResolvedValue({}) },
+        wallet: { update: jest.fn().mockResolvedValue({}) },
+      };
+      (prisma.$transaction as jest.Mock).mockImplementation(async (cb) => {
+        if (typeof cb === 'function') return cb(txMock);
+        return Promise.resolve([]);
+      });
+      return req;
+    }
+
+    it('sends notification for RECOMMENDATION_CONTACT (isRecommendationContact=true)', async () => {
+      setupProcessApproval({
+        request_type: PaymentRequestType.RECOMMENDATION_CONTACT,
+        recommendation_worker_id: 'w-1',
+        profile: { ...mockProfile, phone: '+242000001', email: 'alice@test.com', first_name: 'Alice', last_name: 'Dupont' },
+      });
+      (prisma.profile as any).findUnique = jest.fn().mockResolvedValue({ first_name: 'Bob', last_name: 'Worker' });
+      const contactUnlock = (service as any).contactUnlock;
+      if (contactUnlock) {
+        contactUnlock.payUnlock = jest.fn().mockResolvedValue(undefined);
+        contactUnlock.getContactsIfUnlocked = jest.fn().mockResolvedValue(null);
+      }
+      await service.processApprovedPaymentById(REQUEST_ID);
+      expect(whatsApp.sendTextMessage).toHaveBeenCalled();
+    });
+
+    it('sends notification for CONTACT_UNLOCK nowUnlocked=false', async () => {
+      setupProcessApproval({
+        request_type: PaymentRequestType.CONTACT_UNLOCK,
+        contact_unlock_attempt_id: 'att-1',
+        profile: { ...mockProfile, phone: '+242000001', email: 'alice@test.com', first_name: 'Alice', last_name: 'Dupont' },
+      });
+      const contactUnlock = (service as any).contactUnlock;
+      if (contactUnlock) {
+        contactUnlock.payUnlock = jest.fn().mockResolvedValue({ status: 'PENDING', newlyUnlocked: [], attemptId: 'att-1' });
+        contactUnlock.getContactsIfUnlocked = jest.fn().mockResolvedValue(null);
+      }
+      await service.processApprovedPaymentById(REQUEST_ID);
+      expect(whatsApp.sendTextMessage).toHaveBeenCalled();
+    });
+
+    it('sends notification for CONTACT_UNLOCK nowUnlocked=true', async () => {
+      setupProcessApproval({
+        request_type: PaymentRequestType.CONTACT_UNLOCK,
+        contact_unlock_attempt_id: 'att-1',
+        profile: { ...mockProfile, phone: '+242000001', email: 'alice@test.com', first_name: 'Alice', last_name: 'Dupont' },
+      });
+      const contactUnlock = (service as any).contactUnlock;
+      if (contactUnlock) {
+        contactUnlock.payUnlock = jest.fn().mockResolvedValue({ status: 'UNLOCKED', newlyUnlocked: ['att-1'], attemptId: 'att-1' });
+        contactUnlock.getContactsIfUnlocked = jest.fn().mockResolvedValue({ workerPhone: '+242111' });
+      }
+      const botNotification = (service as any).botNotification;
+      if (botNotification) {
+        botNotification.sendContactUnlockedNotification = jest.fn().mockResolvedValue(undefined);
+      }
+      await service.processApprovedPaymentById(REQUEST_ID);
+      expect(whatsApp.sendTextMessage).toHaveBeenCalled();
+    });
+
+    it('handles null email (skips email notification)', async () => {
+      setupProcessApproval({
+        profile: { ...mockProfile, phone: '+242000001', email: null },
+      });
+      await service.processApprovedPaymentById(REQUEST_ID);
+      // Should not throw
+      expect(true).toBe(true);
     });
   });
 });

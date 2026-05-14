@@ -65,7 +65,7 @@ function makeState(penaltyCount = 2, totalAmount = 10000): BotState {
   };
 }
 
-describe('runPayPenaltiesFlow()', () => {
+describe('runPayPenaltiesFlow() - step 1 main prompt', () => {
   it('shows penalty summary on default (no recognized input)', async () => {
     const ctx = makeCtx();
     const state = makeState();
@@ -85,12 +85,7 @@ describe('runPayPenaltiesFlow()', () => {
   it('goes to menu on "retour" input', async () => {
     const ctx = makeCtx();
     const state = makeState();
-    const result = await runPayPenaltiesFlow(
-      state,
-      'retour',
-      workerProfile,
-      ctx,
-    );
+    const result = await runPayPenaltiesFlow(state, 'retour', workerProfile, ctx);
     expect(result.clearState).toBe(true);
   });
 
@@ -101,21 +96,142 @@ describe('runPayPenaltiesFlow()', () => {
     expect(result.clearState).toBe(true);
   });
 
+  it('goes to menu on "annuler" input', async () => {
+    const ctx = makeCtx();
+    const state = makeState();
+    const result = await runPayPenaltiesFlow(state, 'annuler', workerProfile, ctx);
+    expect(result.clearState).toBe(true);
+  });
+
   it('enters mobile money sub-flow on "1" input', async () => {
     const ctx = makeCtx();
     const state = makeState();
     const result = await runPayPenaltiesFlow(state, '1', workerProfile, ctx);
-    // Sub-flow starts: asks whether to use registered number
     expect(result.reply[0]).toContain('Mobile Money');
     expect(result.nextState).toBeDefined();
     expect(result.clearState).toBeUndefined();
   });
 
-  it('shows wallet payment option on "2" input', async () => {
+  it('shows wallet payment option with sufficient funds on "2"', async () => {
     const ctx = makeCtx();
+    (ctx.walletService.getProfileWalletBalance as jest.Mock).mockResolvedValue(20000);
     const state = makeState();
     const result = await runPayPenaltiesFlow(state, '2', workerProfile, ctx);
     expect(result.reply[0]).toContain('portefeuille');
+    expect(result.nextState?.step).toBe(2);
+  });
+
+  it('shows wallet option with insufficient funds on "2"', async () => {
+    const ctx = makeCtx();
+    (ctx.walletService.getProfileWalletBalance as jest.Mock).mockResolvedValue(100);
+    const state = makeState();
+    const result = await runPayPenaltiesFlow(state, '2', workerProfile, ctx);
+    expect(result.reply[0]).toContain('insuffisant');
+    // stays at step 1
+    expect(result.nextState?.step).toBe(1);
+  });
+});
+
+describe('runPayPenaltiesFlow() - step 2 wallet confirmation', () => {
+  function makeStep2State() {
+    return {
+      flowId: FLOW_IDS.PAY_PENALTIES,
+      step: 2,
+      payload: { penaltyCount: 2, totalAmount: 10000 },
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  it('cancels on "2"', async () => {
+    const ctx = makeCtx();
+    const state = makeStep2State();
+    const result = await runPayPenaltiesFlow(state, '2', workerProfile, ctx);
+    expect(result.clearState).toBe(true);
+  });
+
+  it('cancels on "annuler"', async () => {
+    const ctx = makeCtx();
+    const state = makeStep2State();
+    const result = await runPayPenaltiesFlow(state, 'annuler', workerProfile, ctx);
+    expect(result.clearState).toBe(true);
+  });
+
+  it('shows error for invalid input', async () => {
+    const ctx = makeCtx();
+    const state = makeStep2State();
+    const result = await runPayPenaltiesFlow(state, 'blah', workerProfile, ctx);
+    expect(result.reply[0]).toContain('1');
+    expect(result.nextState).toBe(state);
+  });
+
+  it('confirms payment on "1" with sufficient balance', async () => {
+    const ctx = makeCtx();
+    (ctx.walletService.getProfileWalletBalance as jest.Mock).mockResolvedValue(20000);
+    const state = makeStep2State();
+    const result = await runPayPenaltiesFlow(state, '1', workerProfile, ctx);
+    expect(ctx.walletService.debitProfileWallet).toHaveBeenCalled();
+    expect(ctx.applicationService.markPenaltiesPaid).toHaveBeenCalled();
+    expect(result.clearState).toBe(true);
+    expect(result.reply[0]).toContain('Paiement par crédit');
+  });
+
+  it('confirms payment on "oui"', async () => {
+    const ctx = makeCtx();
+    (ctx.walletService.getProfileWalletBalance as jest.Mock).mockResolvedValue(20000);
+    const state = makeStep2State();
+    const result = await runPayPenaltiesFlow(state, 'oui', workerProfile, ctx);
+    expect(result.clearState).toBe(true);
+  });
+
+  it('returns insufficient funds when balance < totalAmount', async () => {
+    const ctx = makeCtx();
+    (ctx.walletService.getProfileWalletBalance as jest.Mock).mockResolvedValue(100);
+    const state = makeStep2State();
+    const result = await runPayPenaltiesFlow(state, '1', workerProfile, ctx);
+    expect(result.clearState).toBe(true);
+    expect(result.reply[0]).toContain('insuffisant');
+  });
+});
+
+describe('runPayPenaltiesFlow() - mobile money sub-flow continuation', () => {
+  it('continues when _mm_step is present with "3" (fallback URL)', async () => {
+    const state: BotState = {
+      flowId: FLOW_IDS.PAY_PENALTIES,
+      step: 1,
+      payload: {
+        penaltyCount: 2,
+        totalAmount: 10000,
+        _mm_step: 'use_registered_number',
+        _mm_amount: 10000,
+        _mm_description: 'Test penalties',
+        _mm_requestType: 'PENALTY_BATCH',
+        _mm_options: {},
+      },
+      updatedAt: new Date().toISOString(),
+    };
+    const ctx = makeCtx();
+    const result = await runPayPenaltiesFlow(state, '3', workerProfile, ctx);
+    expect(result.clearState).toBe(true);
+  });
+
+  it('continues mobile money with "1" (use registered number)', async () => {
+    const state: BotState = {
+      flowId: FLOW_IDS.PAY_PENALTIES,
+      step: 1,
+      payload: {
+        penaltyCount: 2,
+        totalAmount: 10000,
+        _mm_step: 'use_registered_number',
+        _mm_amount: 10000,
+        _mm_description: 'Test penalties',
+        _mm_requestType: 'PENALTY_BATCH',
+        _mm_options: {},
+      },
+      updatedAt: new Date().toISOString(),
+    };
+    const ctx = makeCtx();
+    const result = await runPayPenaltiesFlow(state, '1', workerProfile, ctx);
+    expect(result.nextState?.payload?._mm_step).toBe('choose_operator');
   });
 });
 

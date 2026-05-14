@@ -41,6 +41,12 @@ function makeDeps() {
       findUnique: jest.fn().mockResolvedValue(makeApp()),
       count: jest.fn().mockResolvedValue(5),
     },
+    contactUnlockAttempt: {
+      findUnique: jest.fn().mockResolvedValue(null),
+    },
+    profile: {
+      findUnique: jest.fn().mockResolvedValue(null),
+    },
   };
 
   const whatsApp = {
@@ -143,7 +149,7 @@ describe('BotNotificationService', () => {
     });
 
     it('swallows errors gracefully', async () => {
-      deps.prisma.application.findUnique.mockRejectedValue(
+      deps.prisma.application.findUnique.mockRejectedValueOnce(
         new Error('DB error'),
       );
       await expect(
@@ -170,7 +176,7 @@ describe('BotNotificationService', () => {
     });
 
     it('swallows errors gracefully', async () => {
-      deps.prisma.application.findUnique.mockRejectedValue(
+      deps.prisma.application.findUnique.mockRejectedValueOnce(
         new Error('DB error'),
       );
       await expect(
@@ -189,7 +195,7 @@ describe('BotNotificationService', () => {
     });
 
     it('swallows errors gracefully', async () => {
-      deps.prisma.application.findUnique.mockRejectedValue(new Error('fail'));
+      deps.prisma.application.findUnique.mockRejectedValueOnce(new Error('fail'));
       await expect(
         service.sendApplicationRejectedToWorker('app-1'),
       ).resolves.toBeUndefined();
@@ -211,7 +217,7 @@ describe('BotNotificationService', () => {
     });
 
     it('swallows errors gracefully', async () => {
-      deps.prisma.application.findUnique.mockRejectedValue(new Error('fail'));
+      deps.prisma.application.findUnique.mockRejectedValueOnce(new Error('fail'));
       await expect(
         service.sendCancellationToEmployer('app-1', null, false),
       ).resolves.toBeUndefined();
@@ -228,7 +234,7 @@ describe('BotNotificationService', () => {
     });
 
     it('swallows errors gracefully', async () => {
-      deps.prisma.application.findUnique.mockRejectedValue(new Error('fail'));
+      deps.prisma.application.findUnique.mockRejectedValueOnce(new Error('fail'));
       await expect(
         service.sendJobCompletedToWorker('app-1'),
       ).resolves.toBeUndefined();
@@ -245,10 +251,102 @@ describe('BotNotificationService', () => {
     });
 
     it('swallows errors gracefully', async () => {
-      deps.prisma.application.findUnique.mockRejectedValue(new Error('fail'));
+      deps.prisma.application.findUnique.mockRejectedValueOnce(new Error('fail'));
       await expect(
         service.sendJobCancelledByEmployerToWorker('app-1'),
       ).resolves.toBeUndefined();
+    });
+  });
+
+  describe('sendContactUnlockedNotification()', () => {
+    it('does nothing when attempt not found', async () => {
+      deps.prisma.contactUnlockAttempt.findUnique.mockResolvedValue(null);
+      await service.sendContactUnlockedNotification('attempt-1');
+      expect(deps.whatsApp.sendTextMessage).not.toHaveBeenCalled();
+    });
+
+    it('sends notifications to both parties when found', async () => {
+      deps.prisma.contactUnlockAttempt.findUnique.mockResolvedValue({
+        id: 'attempt-1', employer_id: 'emp-1', worker_id: 'worker-1',
+      });
+      deps.prisma.profile.findUnique
+        .mockResolvedValueOnce({ phone: '+242001', first_name: 'Alice', last_name: 'Smith', email: 'alice@test.com' }) // employer
+        .mockResolvedValueOnce({ phone: '+242002', first_name: 'Bob', last_name: 'Jones', email: 'bob@test.com' }); // worker
+      await service.sendContactUnlockedNotification('attempt-1');
+      expect(deps.whatsApp.sendTextMessage).toHaveBeenCalledTimes(2);
+    });
+
+    it('skips notifying skipNotifyProfileId', async () => {
+      deps.prisma.contactUnlockAttempt.findUnique.mockResolvedValue({
+        id: 'attempt-1', employer_id: 'emp-1', worker_id: 'worker-1',
+      });
+      deps.prisma.profile.findUnique
+        .mockResolvedValueOnce({ phone: '+242001', first_name: 'Alice', last_name: 'Smith', email: 'alice@test.com' })
+        .mockResolvedValueOnce({ phone: '+242002', first_name: 'Bob', last_name: 'Jones', email: 'bob@test.com' });
+      await service.sendContactUnlockedNotification('attempt-1', { skipNotifyProfileId: 'emp-1' });
+      expect(deps.whatsApp.sendTextMessage).toHaveBeenCalledTimes(1); // only worker notified
+    });
+
+  });
+
+  describe('sendContactUnlockCreditConversionNotification()', () => {
+    it('does nothing when profile has no phone', async () => {
+      deps.prisma.profile.findUnique.mockResolvedValue({ phone: null });
+      await service.sendContactUnlockCreditConversionNotification('profile-1', 500);
+      expect(deps.whatsApp.sendTextMessage).not.toHaveBeenCalled();
+    });
+
+    it('sends message when profile has phone', async () => {
+      deps.prisma.profile.findUnique.mockResolvedValue({ phone: '+242001' });
+      await service.sendContactUnlockCreditConversionNotification('profile-1', 500);
+      expect(deps.whatsApp.sendTextMessage).toHaveBeenCalledWith('+242001', expect.any(String));
+    });
+  });
+
+  describe('sendMessage()', () => {
+    it('sends a text message', async () => {
+      await service.sendMessage('+242001', 'Hello');
+      expect(deps.whatsApp.sendTextMessage).toHaveBeenCalledWith('+242001', 'Hello');
+    });
+  });
+
+  describe('sendRecommendedJobNotification()', () => {
+    it('does nothing when profile not found', async () => {
+      deps.prisma.profile.findUnique.mockResolvedValue(null);
+      (deps.prisma as any).jobOffer = { findUnique: jest.fn().mockResolvedValue(null) };
+      await service.sendRecommendedJobNotification('worker-1', 'jo-1');
+      expect(deps.whatsApp.sendTextMessage).not.toHaveBeenCalled();
+    });
+
+    it('sends message when profile and offer found', async () => {
+      deps.prisma.profile.findUnique.mockResolvedValue({ phone: '+242001', first_name: 'Alice' });
+      (deps.prisma as any).jobOffer = { findUnique: jest.fn().mockResolvedValue({
+        title: 'Plombier', amount: 5000, address: '10 Rue Paris',
+        scheduled_at: new Date('2026-06-01T10:00:00Z'),
+      }) };
+      await service.sendRecommendedJobNotification('worker-1', 'jo-1');
+      expect(deps.whatsApp.sendTextMessage).toHaveBeenCalledWith('+242001', expect.stringContaining('Plombier'));
+    });
+
+  });
+
+  describe('sendRatingRequest()', () => {
+    it('sends rating request when state written', async () => {
+      deps.botState.setIfFlowAbsentOrMatches.mockResolvedValue(true);
+      await service.sendRatingRequest({
+        raterProfileId: 'p-1', raterPhone: '+242001', rateeId: 'p-2',
+        assignmentId: 'asgn-1', rateeLabel: 'Alice', jobTitle: 'Plombier',
+      });
+      expect(deps.whatsApp.sendTextMessage).toHaveBeenCalledWith('+242001', expect.stringContaining('Plombier'));
+    });
+
+    it('skips when state not written', async () => {
+      deps.botState.setIfFlowAbsentOrMatches.mockResolvedValue(false);
+      await service.sendRatingRequest({
+        raterProfileId: 'p-1', raterPhone: '+242001', rateeId: 'p-2',
+        assignmentId: 'asgn-1', rateeLabel: 'Alice', jobTitle: 'Plombier',
+      });
+      expect(deps.whatsApp.sendTextMessage).not.toHaveBeenCalled();
     });
   });
 });
