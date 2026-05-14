@@ -33,6 +33,7 @@ const mockActiveProfile = {
   billing_status: 'CLEAR',
   reliability_score: 90,
   whatsapp_connected: true,
+  whatsapp_activation_bonus_granted: false,
 };
 
 const mockEmployerProfile = {
@@ -642,103 +643,70 @@ describe('BotOrchestratorService', () => {
     });
   });
 
-  describe('handle() — PENDING_ACTIVATION', () => {
-    it('returns WHATSAPP_NOT_CONNECTED when account not connected and input is not VERIFIER', async () => {
-      deps.prisma.profile.findUnique.mockResolvedValue({
-        ...mockActiveProfile,
-        status: 'ACTIVE',
-        whatsapp_connected: false,
-      });
-      deps.router.route.mockReturnValue({ type: 'command', commandId: 'menu' });
-      const result = await service.handle(PROFILE_ID, PHONE, 'Menu');
-      expect(result[0]).toContain('non active');
+  describe('handle() — whatsapp_connected=false (KYC onboarding)', () => {
+    const pendingProfile = {
+      ...mockActiveProfile,
+      status: 'PENDING_ACTIVATION',
+      whatsapp_connected: false,
+      whatsapp_activation_bonus_granted: false,
+    };
+
+    it('returns KYC prompt when PENDING_ACTIVATION and input is not Menu', async () => {
+      deps.prisma.profile.findUnique.mockResolvedValue(pendingProfile);
+      const result = await service.handle(PROFILE_ID, PHONE, 'hello');
+      expect(result[0]).toContain('Menu');
     });
 
-    it('returns alreadyVerified when VERIFIER input and already connected', async () => {
-      deps.prisma.profile.findUnique.mockResolvedValue({
-        ...mockActiveProfile,
-        status: 'ACTIVE',
-        whatsapp_connected: true,
-      });
-      const result = await service.handle(PROFILE_ID, PHONE, 'verifier');
-      expect(result[0]).toContain('déjà vérifié');
-    });
-
-    it('activates account when VERIFIER input on PENDING_ACTIVATION', async () => {
-      const profileWithUpdate = {
-        ...mockActiveProfile,
-        status: 'PENDING_ACTIVATION',
-        whatsapp_connected: false,
-      };
-      deps.prisma.profile.findUnique.mockResolvedValue(profileWithUpdate);
+    it('activates account and shows menu when PENDING_ACTIVATION types Menu', async () => {
+      deps.prisma.profile.findUnique.mockResolvedValue(pendingProfile);
       (deps.walletService2 as any).grantWelcomeCredit = jest
         .fn()
         .mockResolvedValue(500);
-      (deps.walletService2 as any).getOrCreateProfileWallet = jest
-        .fn()
-        .mockResolvedValue({ balance: 500 });
-      const result = await service.handle(PROFILE_ID, PHONE, 'verifier');
-      expect(result[0]).toContain('activé');
-    });
-
-    it('connects whatsapp when VERIFIER input on ACTIVE but not connected', async () => {
-      deps.prisma.profile.findUnique.mockResolvedValue({
-        ...mockActiveProfile,
-        status: 'ACTIVE',
-        whatsapp_connected: false,
-      });
-      const result = await service.handle(PROFILE_ID, PHONE, 'verifier');
-      // After update, returns whatsappAlreadyVerifiedMessage
-      expect(result[0]).toContain('vérifié');
-    });
-
-    it('handles PENDING_ACTIVATION with pending verify state', async () => {
-      deps.prisma.profile.findUnique.mockResolvedValue({
-        ...mockActiveProfile,
-        status: 'PENDING_ACTIVATION',
-        whatsapp_connected: false,
-      });
-      deps.botState.get.mockResolvedValue({
-        flowId: 'verify_whatsapp',
-        step: 1,
-        payload: {},
-        updatedAt: '',
-      });
-      // Route without VERIFIER keyword
-      const result = await service.handle(PROFILE_ID, PHONE, 'hello');
+      deps.router.route.mockReturnValue({ type: 'command', commandId: 'menu' });
+      const result = await service.handle(PROFILE_ID, PHONE, 'menu');
+      expect(deps.prisma.profile.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            whatsapp_connected: true,
+            status: 'ACTIVE',
+            whatsapp_activation_bonus_granted: true,
+          }),
+        }),
+      );
       expect(Array.isArray(result)).toBe(true);
     });
 
-    it('handles VERIFIER on PENDING_ACTIVATION when grantWelcomeCredit throws', async () => {
+    it('does not double-grant credit when bonus already granted', async () => {
       deps.prisma.profile.findUnique.mockResolvedValue({
-        ...mockActiveProfile,
-        status: 'PENDING_ACTIVATION',
-        whatsapp_connected: false,
+        ...pendingProfile,
+        whatsapp_activation_bonus_granted: true,
       });
-      (deps.walletService2 as any).grantWelcomeCredit = jest
-        .fn()
-        .mockRejectedValueOnce(new Error('wallet error'));
-      (deps.walletService2 as any).getOrCreateProfileWallet = jest
-        .fn()
-        .mockResolvedValue({ balance: 0 });
-      const result = await service.handle(PROFILE_ID, PHONE, 'verifier');
-      expect(result[0]).toContain('activé');
+      const grantCredit = jest.fn().mockResolvedValue(0);
+      (deps.walletService2 as any).grantWelcomeCredit = grantCredit;
+      deps.router.route.mockReturnValue({ type: 'command', commandId: 'menu' });
+      await service.handle(PROFILE_ID, PHONE, 'menu');
+      expect(grantCredit).not.toHaveBeenCalled();
     });
 
-    it('handles VERIFIER on PENDING_ACTIVATION when getOrCreateProfileWallet throws', async () => {
+    it('shows support message when whatsapp_connected=false and status is not PENDING_ACTIVATION', async () => {
       deps.prisma.profile.findUnique.mockResolvedValue({
         ...mockActiveProfile,
-        status: 'PENDING_ACTIVATION',
+        status: 'ACTIVE',
         whatsapp_connected: false,
       });
+      deps.systemConfig.getContactInfo.mockResolvedValue({ email: 'e@e.com', phone: '123', address: 'addr' });
+      const result = await service.handle(PROFILE_ID, PHONE, 'menu');
+      expect(result[0]).toContain('suspendu');
+    });
+
+    it('activation succeeds even when grantWelcomeCredit throws', async () => {
+      deps.prisma.profile.findUnique.mockResolvedValue(pendingProfile);
       (deps.walletService2 as any).grantWelcomeCredit = jest
         .fn()
-        .mockResolvedValue(500);
-      (deps.walletService2 as any).getOrCreateProfileWallet = jest
-        .fn()
         .mockRejectedValueOnce(new Error('wallet error'));
-      const result = await service.handle(PROFILE_ID, PHONE, 'verifier');
-      expect(result[0]).toContain('activé');
+      deps.router.route.mockReturnValue({ type: 'command', commandId: 'menu' });
+      const result = await service.handle(PROFILE_ID, PHONE, 'menu');
+      expect(Array.isArray(result)).toBe(true);
     });
   });
 

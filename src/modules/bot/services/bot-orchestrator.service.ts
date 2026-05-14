@@ -16,14 +16,11 @@ import {
   unknownCommandMessage,
   accountSuspendedBotMessage,
   hasPenaltiesBotMessage,
+  menuMessage,
 } from '../messages/menu.messages';
-import {
-  whatsappAlreadyVerifiedMessage,
-  welcomeActivationMessage,
-} from '../../whatsapp/templates';
 import type { BotProfile, BotState } from '../types/bot-state.types';
 import type { FlowContext, FlowResult } from '../types/flow.types';
-import { FLOW_IDS, CMD_MENU, CMD_VERIFY_WHATSAPP } from '../bot.constants';
+import { FLOW_IDS, CMD_MENU } from '../bot.constants';
 import {
   runPublishJobFlow,
   getPublishJobInitialState,
@@ -97,7 +94,7 @@ import { InvoiceService } from '../../invoice/invoice.service';
 
 const INACTIVE_MESSAGE = `Votre compte est créé mais pas encore activé. Cliquez sur le lien de confirmation que nous vous avons envoyé par WhatsApp pour l'activer.`;
 
-const WHATSAPP_NOT_CONNECTED_MESSAGE = `⚠️ *Compte non active*\n\nVotre numéro WhatsApp n'a pas encore été vérifié. Sans vérification, vous ne pouvez pas accéder à la plateforme.\n\nTapez *VERIFIER* pour activer votre compte instantanément.`;
+const KYC_APPROVED_PROMPT_MESSAGE = `✅ Votre vérification KYC a été validée !\n\nTapez *Menu* pour accéder à la plateforme et commencer.`;
 
 const NOT_FOUND_MESSAGE = `Ce numéro n'est pas encore enregistré. Inscrivez-vous sur notre site pour créer votre compte.`;
 
@@ -161,44 +158,44 @@ export class BotOrchestratorService {
     }
 
     const normalizedInput = text.trim().toLowerCase();
-    if (CMD_VERIFY_WHATSAPP.includes(normalizedInput)) {
-      if (profile.whatsapp_connected) {
-        return [whatsappAlreadyVerifiedMessage()];
-      }
-      if (profile.status === AccountStatus.PENDING_ACTIVATION) {
-        await this.prisma.profile.update({
-          where: { id: profileId },
-          data: { whatsapp_connected: true, status: AccountStatus.ACTIVE },
-        });
-        const profileType = profile.profile_type;
-        const creditAmount = await this.walletService
-          .grantWelcomeCredit(profileId, profileType)
-          .catch(() => 0);
-        const wallet = await this.walletService
-          .getOrCreateProfileWallet(profileId)
-          .catch(() => ({ balance: creditAmount }));
-        return [
-          welcomeActivationMessage(
-            profile.first_name,
-            creditAmount,
-            profile.profile_type,
-            wallet.balance,
-          ),
-        ];
-      }
-      await this.prisma.profile.update({
-        where: { id: profileId },
-        data: { whatsapp_connected: true },
-      });
-      return [whatsappAlreadyVerifiedMessage()];
-    }
 
     if (!profile.whatsapp_connected) {
-      return [WHATSAPP_NOT_CONNECTED_MESSAGE];
-    }
+      // Account blocked/suspended without WhatsApp connection → contact support
+      if (profile.status !== AccountStatus.PENDING_ACTIVATION) {
+        const contact = await this.systemConfig.getContactInfo();
+        return [
+          accountSuspendedBotMessage({
+            email: contact.email ?? '',
+            phone: contact.phone ?? '',
+            address: contact.address ?? '',
+          }),
+        ];
+      }
 
-    if (profile.status === AccountStatus.PENDING_ACTIVATION) {
-      return this.handlePendingActivation(profileId, text, botProfile);
+      // KYC approved (PENDING_ACTIVATION) + user types Menu → activate account
+      if (
+        CMD_MENU.some(
+          (c) => normalizedInput === c || normalizedInput.startsWith(c + ' '),
+        )
+      ) {
+        await this.prisma.profile.update({
+          where: { id: profileId },
+          data: {
+            whatsapp_connected: true,
+            status: AccountStatus.ACTIVE,
+            whatsapp_activation_bonus_granted: true,
+          },
+        });
+        if (!profile.whatsapp_activation_bonus_granted) {
+          await this.walletService
+            .grantWelcomeCredit(profileId, profile.profile_type)
+            .catch(() => 0);
+        }
+        return [menuMessage(profile.profile_type)];
+      }
+
+      // PENDING_ACTIVATION + any other input → remind to type Menu
+      return [KYC_APPROVED_PROMPT_MESSAGE];
     }
 
     if (profile.billing_status !== BillingStatus.CLEAR) {
@@ -1025,6 +1022,7 @@ export class BotOrchestratorService {
         billing_status: true,
         reliability_score: true,
         whatsapp_connected: true,
+        whatsapp_activation_bonus_granted: true,
       },
     });
   }
