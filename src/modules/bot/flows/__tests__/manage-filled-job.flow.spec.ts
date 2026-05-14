@@ -230,6 +230,186 @@ describe('runManageFilledJobFlow()', () => {
       );
       expect(result.nextState).toBe(state);
     });
+
+    it('returns error when markJobCompleted throws (Error instance)', async () => {
+      const ctx = makeCtx();
+      (ctx.applicationService.markJobCompleted as jest.Mock).mockRejectedValueOnce(
+        new Error('DB failure'),
+      );
+      // Go to note step first
+      const noteState = {
+        flowId: FLOW_IDS.MANAGE_FILLED_JOB,
+        step: 1,
+        payload: { items: [makeItem()], pageIndex: 0, step: 'note', selectedItem: makeItem() },
+        updatedAt: new Date().toISOString(),
+      };
+      const result = await runManageFilledJobFlow(noteState, '0', employerProfile, ctx);
+      expect(result.reply[0]).toContain('DB failure');
+    });
+
+    it('returns error when markJobCompleted throws (non-Error)', async () => {
+      const ctx = makeCtx();
+      (ctx.applicationService.markJobCompleted as jest.Mock).mockRejectedValueOnce('bad');
+      const noteState = {
+        flowId: FLOW_IDS.MANAGE_FILLED_JOB,
+        step: 1,
+        payload: { items: [makeItem()], pageIndex: 0, step: 'note', selectedItem: makeItem() },
+        updatedAt: new Date().toISOString(),
+      };
+      const result = await runManageFilledJobFlow(noteState, '0', employerProfile, ctx);
+      expect(result.reply[0]).toContain('IMPOSSIBLE');
+    });
+
+    it('returns error when detail step has no applicationId', async () => {
+      const item = { ...makeItem(), applicationId: undefined as any };
+      const state = makeDetailState(item);
+      // input '1' triggers applicationId check
+      const result = await runManageFilledJobFlow(state, '1', employerProfile, makeCtx());
+      expect(result.clearState).toBe(true);
+      expect(result.reply[0]).toContain('ERREUR');
+    });
+
+    it('returns error in note step when no selectedItem', async () => {
+      const noteState = {
+        flowId: FLOW_IDS.MANAGE_FILLED_JOB,
+        step: 1,
+        payload: { items: [makeItem()], pageIndex: 0, step: 'note', selectedItem: undefined },
+        updatedAt: new Date().toISOString(),
+      };
+      const result = await runManageFilledJobFlow(noteState, 'some note', employerProfile, makeCtx());
+      expect(result.clearState).toBe(true);
+      expect(result.reply[0]).toContain('ERREUR');
+    });
+
+    it('note step sends note text (not 0)', async () => {
+      const ctx = makeCtx();
+      const noteState = {
+        flowId: FLOW_IDS.MANAGE_FILLED_JOB,
+        step: 1,
+        payload: { items: [makeItem()], pageIndex: 0, step: 'note', selectedItem: makeItem() },
+        updatedAt: new Date().toISOString(),
+      };
+      const result = await runManageFilledJobFlow(noteState, 'Great job!', employerProfile, ctx);
+      expect(ctx.applicationService.markJobCompleted).toHaveBeenCalledWith('app-1', 'e-1', 'Great job!');
+      expect(result.clearState).toBe(true);
+    });
+
+    it('cancel_confirm step returns error when no applicationId', async () => {
+      const item = { ...makeItem(), applicationId: undefined as any };
+      const state = {
+        flowId: FLOW_IDS.MANAGE_FILLED_JOB,
+        step: 1,
+        payload: { items: [makeItem()], pageIndex: 0, step: 'cancel_confirm', selectedItem: item },
+        updatedAt: new Date().toISOString(),
+      };
+      const result = await runManageFilledJobFlow(state, '1', employerProfile, makeCtx());
+      expect(result.clearState).toBe(true);
+      expect(result.reply[0]).toContain('ERREUR');
+    });
+
+    it('cancel_confirm with "oui" input cancels job', async () => {
+      const ctx = makeCtx();
+      const item = makeItem();
+      const state = {
+        flowId: FLOW_IDS.MANAGE_FILLED_JOB,
+        step: 1,
+        payload: { items: [item], pageIndex: 0, step: 'cancel_confirm', selectedItem: item },
+        updatedAt: new Date().toISOString(),
+      };
+      const result = await runManageFilledJobFlow(state, 'oui', employerProfile, ctx);
+      expect(ctx.applicationService.cancelAcceptedByEmployer).toHaveBeenCalled();
+      expect(result.clearState).toBe(true);
+    });
+
+    it('cancel_confirm with "2" input returns to detail', async () => {
+      const item = makeItem();
+      const state = {
+        flowId: FLOW_IDS.MANAGE_FILLED_JOB,
+        step: 1,
+        payload: { items: [item], pageIndex: 0, step: 'cancel_confirm', selectedItem: item },
+        updatedAt: new Date().toISOString(),
+      };
+      const result = await runManageFilledJobFlow(state, '2', employerProfile, makeCtx());
+      expect(result.nextState?.payload?.step).toBe('detail');
+    });
+  });
+
+  describe('list step pagination', () => {
+    it('goes to next page with "s" when more pages exist', async () => {
+      const items = Array.from({ length: 7 }, (_, i) => makeItem(`app-${i}`));
+      const state = {
+        flowId: FLOW_IDS.MANAGE_FILLED_JOB,
+        step: 1,
+        payload: { items, pageIndex: 0, step: 'list' },
+        updatedAt: new Date().toISOString(),
+      };
+      const result = await runManageFilledJobFlow(state, 's', employerProfile, makeCtx());
+      expect(result.nextState?.payload?.pageIndex).toBe(1);
+    });
+
+    it('goes to prev page with "p" when on page 1', async () => {
+      const items = Array.from({ length: 7 }, (_, i) => makeItem(`app-${i}`));
+      const state = {
+        flowId: FLOW_IDS.MANAGE_FILLED_JOB,
+        step: 1,
+        payload: { items, pageIndex: 1, step: 'list' },
+        updatedAt: new Date().toISOString(),
+      };
+      const result = await runManageFilledJobFlow(state, 'p', employerProfile, makeCtx());
+      expect(result.nextState?.payload?.pageIndex).toBe(0);
+    });
+
+    it('stays on same page when "s" with no more pages', async () => {
+      const items = Array.from({ length: 3 }, (_, i) => makeItem(`app-${i}`));
+      const state = {
+        flowId: FLOW_IDS.MANAGE_FILLED_JOB,
+        step: 1,
+        payload: { items, pageIndex: 0, step: 'list' },
+        updatedAt: new Date().toISOString(),
+      };
+      const result = await runManageFilledJobFlow(state, 's', employerProfile, makeCtx());
+      // stays on same state (invalid input)
+      expect(result.nextState?.payload?.pageIndex).toBe(0);
+    });
+
+    it('stays on page 0 when "p" pressed on first page', async () => {
+      const items = Array.from({ length: 7 }, (_, i) => makeItem(`app-${i}`));
+      const state = {
+        flowId: FLOW_IDS.MANAGE_FILLED_JOB,
+        step: 1,
+        payload: { items, pageIndex: 0, step: 'list' },
+        updatedAt: new Date().toISOString(),
+      };
+      const result = await runManageFilledJobFlow(state, 'p', employerProfile, makeCtx());
+      // no prev page, should show error
+      expect(result.nextState?.payload?.pageIndex).toBe(0);
+    });
+
+    it('shows menu exit when menuIdx (7) is chosen', async () => {
+      const items = Array.from({ length: 3 }, (_, i) => makeItem(`app-${i}`));
+      const state = {
+        flowId: FLOW_IDS.MANAGE_FILLED_JOB,
+        step: 1,
+        payload: { items, pageIndex: 0, step: 'list' },
+        updatedAt: new Date().toISOString(),
+      };
+      // menuIdx = PAGE_SIZE + 2 = 7
+      const result = await runManageFilledJobFlow(state, '7', employerProfile, makeCtx());
+      expect(result.clearState).toBe(true);
+    });
+
+    it('goes to next page via nextPageIdx (6) when hasMore', async () => {
+      const items = Array.from({ length: 7 }, (_, i) => makeItem(`app-${i}`));
+      const state = {
+        flowId: FLOW_IDS.MANAGE_FILLED_JOB,
+        step: 1,
+        payload: { items, pageIndex: 0, step: 'list' },
+        updatedAt: new Date().toISOString(),
+      };
+      // nextPageIdx = PAGE_SIZE + 1 = 6, hasMore = true (7 items > 5)
+      const result = await runManageFilledJobFlow(state, '6', employerProfile, makeCtx());
+      expect(result.nextState?.payload?.pageIndex).toBe(1);
+    });
   });
 });
 

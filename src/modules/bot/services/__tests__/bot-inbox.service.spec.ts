@@ -115,6 +115,47 @@ describe('BotInboxService', () => {
     });
   });
 
+  describe('peek()', () => {
+    it('returns the first item without removing it', async () => {
+      redis.lindex.mockResolvedValue(JSON.stringify(makeItem('app-1')));
+      const item = await service.peek(PROFILE_ID);
+      expect(item?.applicationId).toBe('app-1');
+      expect(redis.lindex).toHaveBeenCalledWith(KEY, 0);
+    });
+
+    it('returns null when inbox is empty', async () => {
+      redis.lindex.mockResolvedValue(null);
+      const item = await service.peek(PROFILE_ID);
+      expect(item).toBeNull();
+    });
+
+    it('returns null for malformed JSON', async () => {
+      redis.lindex.mockResolvedValue('{bad}');
+      const item = await service.peek(PROFILE_ID);
+      expect(item).toBeNull();
+    });
+  });
+
+  describe('peekAndShift()', () => {
+    it('atomically reads and removes the first item', async () => {
+      redis.eval.mockResolvedValue(JSON.stringify(makeItem('app-1')));
+      const item = await service.peekAndShift(PROFILE_ID);
+      expect(item?.applicationId).toBe('app-1');
+    });
+
+    it('returns null when inbox is empty', async () => {
+      redis.eval.mockResolvedValue(null);
+      const item = await service.peekAndShift(PROFILE_ID);
+      expect(item).toBeNull();
+    });
+
+    it('returns null for malformed JSON', async () => {
+      redis.eval.mockResolvedValue('{bad}');
+      const item = await service.peekAndShift(PROFILE_ID);
+      expect(item).toBeNull();
+    });
+  });
+
   describe('count()', () => {
     it('returns number of items in inbox', async () => {
       redis.llen.mockResolvedValue(3);

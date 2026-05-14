@@ -18,7 +18,7 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=hashcode-public"
-      - "traefik.http.routers.rabotka-api-${APP_ENV:-prod}.rule=Host(`${API_DOMAIN:-api.rabotka.co}`)"
+      - "traefik.http.routers.rabotka-api-${APP_ENV:-prod}.rule=Host(`${API_DOMAIN:-api.rabotka.work}`)"
       - "traefik.http.routers.rabotka-api-${APP_ENV:-prod}.entrypoints=websecure"
       - "traefik.http.routers.rabotka-api-${APP_ENV:-prod}.tls.certresolver=letsencrypt"
       - "traefik.http.services.rabotka-api-${APP_ENV:-prod}.loadbalancer.server.port=${PORT:-8000}"

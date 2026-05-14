@@ -1,4 +1,4 @@
-import { ForbiddenException } from '@nestjs/common';
+import { ForbiddenException, BadRequestException } from '@nestjs/common';
 import { WalletController } from '../wallet.controller';
 
 function makeService() {
@@ -58,5 +58,70 @@ describe('WalletController', () => {
     await expect(controller.getRevenue(makeReq() as any)).rejects.toThrow(
       ForbiddenException,
     );
+  });
+
+  it('getMonthlyRevenue with rollingMonths param', async () => {
+    const service = {
+      ...makeService(),
+      getMonthlyRevenueRollingMonths: jest.fn().mockResolvedValue([]),
+      getMonthlyRevenueForCalendarYear: jest.fn().mockResolvedValue([]),
+    };
+    const controller = new WalletController(service as any, makePrisma('ADMIN') as any);
+    await controller.getMonthlyRevenue(makeReq() as any, undefined, '6');
+    expect(service.getMonthlyRevenueRollingMonths).toHaveBeenCalledWith(6);
+  });
+
+  it('getMonthlyRevenue with year param', async () => {
+    const service = {
+      ...makeService(),
+      getMonthlyRevenueRollingMonths: jest.fn().mockResolvedValue([]),
+      getMonthlyRevenueForCalendarYear: jest.fn().mockResolvedValue([]),
+    };
+    const controller = new WalletController(service as any, makePrisma('ADMIN') as any);
+    await controller.getMonthlyRevenue(makeReq() as any, '2026');
+    expect(service.getMonthlyRevenueForCalendarYear).toHaveBeenCalledWith(2026);
+  });
+
+  it('getMonthlyRevenue throws BadRequestException for invalid rollingMonths', async () => {
+    const service = { ...makeService() };
+    const controller = new WalletController(service as any, makePrisma('ADMIN') as any);
+    // BadRequestException is already imported
+    await expect(controller.getMonthlyRevenue(makeReq() as any, undefined, 'invalid')).rejects.toThrow(BadRequestException);
+  });
+
+  it('getMonthlyRevenue throws BadRequestException for invalid year', async () => {
+    const service = { ...makeService() };
+    const controller = new WalletController(service as any, makePrisma('ADMIN') as any);
+    // BadRequestException is already imported
+    await expect(controller.getMonthlyRevenue(makeReq() as any, 'invalid')).rejects.toThrow(BadRequestException);
+  });
+
+  it('listTransactions returns paginated data', async () => {
+    const service = {
+      ...makeService(),
+      listTransactionsForAdmin: jest.fn().mockResolvedValue({ data: [], total: 0, page: 1, limit: 20 }),
+    };
+    const controller = new WalletController(service as any, makePrisma('ADMIN') as any);
+    const result = await controller.listTransactions(makeReq() as any, {});
+    expect(service.listTransactionsForAdmin).toHaveBeenCalledWith(expect.objectContaining({ page: 1, limit: 20 }));
+    expect(result.total).toBe(0);
+  });
+
+  it('listPayments returns paginated data', async () => {
+    const service = {
+      ...makeService(),
+      listPaymentsForAdmin: jest.fn().mockResolvedValue({ data: [], total: 0, page: 1, limit: 20 }),
+    };
+    const controller = new WalletController(service as any, makePrisma('ADMIN') as any);
+    const result = await controller.listPayments(makeReq() as any, {});
+    expect(service.listPaymentsForAdmin).toHaveBeenCalled();
+    expect(result.total).toBe(0);
+  });
+
+  it('listTransactions throws ForbiddenException for non-admin', async () => {
+    const service = { ...makeService(), listTransactionsForAdmin: jest.fn() };
+    const controller = new WalletController(service as any, makePrisma('VIEWER') as any);
+    // ForbiddenException is already imported
+    await expect(controller.listTransactions(makeReq() as any, {})).rejects.toThrow(ForbiddenException);
   });
 });

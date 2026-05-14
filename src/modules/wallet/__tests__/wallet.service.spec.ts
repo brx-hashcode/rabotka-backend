@@ -51,11 +51,14 @@ describe('WalletService', () => {
         findFirst: jest.fn(),
         create: jest.fn(),
         update: jest.fn(),
+        upsert: jest.fn().mockResolvedValue({ id: 'wallet-profile-1', balance: 200 }),
       },
       walletTransaction: {
         create: jest.fn(),
+        findMany: jest.fn().mockResolvedValue([]),
         aggregate: jest.fn().mockResolvedValue({ _sum: { amount: null } }),
       },
+      profile: { findUnique: jest.fn() },
       penalty: { findUnique: jest.fn(), update: jest.fn() },
       payment: {
         create: jest.fn(),
@@ -236,6 +239,324 @@ describe('WalletService', () => {
 
       expect(result.totalRevenue).toBeDefined();
       expect(result.balance).toBeDefined();
+    });
+  });
+
+  describe('getOrCreateProfileWallet()', () => {
+    it('upserts and returns profile wallet', async () => {
+      const mockProfileWallet = { id: 'wallet-profile-1', balance: 200 };
+      (prisma.wallet as any).upsert = jest.fn().mockResolvedValue(mockProfileWallet);
+
+      const result = await service.getOrCreateProfileWallet('profile-1');
+      expect(result.id).toBe('wallet-profile-1');
+      expect(result.balance).toBe(200);
+    });
+  });
+
+  describe('getProfileWalletBalance()', () => {
+    it('returns balance for profile', async () => {
+      const mockProfileWallet = { id: 'wallet-profile-1', balance: 500 };
+      (prisma.wallet as any).upsert = jest.fn().mockResolvedValue(mockProfileWallet);
+      const balance = await service.getProfileWalletBalance('profile-1');
+      expect(balance).toBe(500);
+    });
+  });
+
+  describe('getProfileWalletForAdmin()', () => {
+    it('returns wallet with empty transactions list', async () => {
+      (prisma.wallet as any).upsert = jest.fn().mockResolvedValue({ id: 'w1', balance: 300 });
+      (prisma.walletTransaction as any).findMany = jest.fn().mockResolvedValue([]);
+
+      const result = await service.getProfileWalletForAdmin('profile-1');
+      expect(result.balance).toBe(300);
+      expect(result.transactions).toEqual([]);
+    });
+
+    it('maps transaction fields', async () => {
+      (prisma.wallet as any).upsert = jest.fn().mockResolvedValue({ id: 'w1', balance: 300 });
+      (prisma.walletTransaction as any).findMany = jest.fn().mockResolvedValue([
+        { id: 'tx-1', wallet_id: 'w1', type: 'CREDIT_PENALTY', amount: 1000, reference_type: 'penalty', reference_id: 'p1', created_at: new Date('2026-01-01') },
+      ]);
+
+      const result = await service.getProfileWalletForAdmin('profile-1');
+      expect(result.transactions).toHaveLength(1);
+      expect(result.transactions[0]).toMatchObject({ id: 'tx-1', amount: 1000, referenceType: 'penalty' });
+    });
+  });
+
+  describe('creditProfileWallet()', () => {
+    it('credits wallet via transaction', async () => {
+      (prisma.wallet as any).upsert = jest.fn().mockResolvedValue({ id: 'w1', balance: 0 });
+      const txMock = {
+        walletTransaction: { create: jest.fn().mockResolvedValue({}) },
+        wallet: { update: jest.fn().mockResolvedValue({}) },
+      };
+      (prisma.$transaction as jest.Mock).mockImplementationOnce((cb: any) => cb(txMock));
+
+      await service.creditProfileWallet('profile-1', 200, WalletTransactionType.WELCOME_CREDIT);
+      expect(txMock.walletTransaction.create).toHaveBeenCalled();
+      expect(txMock.wallet.update).toHaveBeenCalled();
+    });
+  });
+
+  describe('debitProfileWallet()', () => {
+    it('debits wallet when balance is sufficient', async () => {
+      (prisma.wallet as any).upsert = jest.fn().mockResolvedValue({ id: 'w1', balance: 500 });
+      const txMock = {
+        wallet: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+        walletTransaction: { create: jest.fn().mockResolvedValue({}) },
+      };
+      (prisma.$transaction as jest.Mock).mockImplementationOnce((cb: any) => cb(txMock));
+
+      await service.debitProfileWallet('profile-1', 100, WalletTransactionType.PENALTY_DEBIT);
+      expect(txMock.wallet.updateMany).toHaveBeenCalled();
+    });
+
+    it('throws BadRequestException when balance insufficient', async () => {
+      (prisma.wallet as any).upsert = jest.fn().mockResolvedValue({ id: 'w1', balance: 50 });
+      const txMock = {
+        wallet: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
+        walletTransaction: { create: jest.fn() },
+      };
+      (prisma.$transaction as jest.Mock).mockImplementationOnce((cb: any) => cb(txMock));
+
+      await expect(service.debitProfileWallet('profile-1', 500, WalletTransactionType.PENALTY_DEBIT)).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('grantWelcomeCredit()', () => {
+    beforeEach(() => {
+      (prisma.wallet as any).upsert = jest.fn().mockResolvedValue({ id: 'w1', balance: 0 });
+      const txMock = {
+        walletTransaction: { create: jest.fn().mockResolvedValue({}) },
+        wallet: { update: jest.fn().mockResolvedValue({}) },
+        profile: { update: jest.fn().mockResolvedValue({}) },
+      };
+      (prisma.$transaction as jest.Mock).mockImplementation((cb: any) => {
+        if (typeof cb === 'function') return cb(txMock);
+        return Promise.resolve();
+      });
+    });
+
+    it('grants WORKER credit', async () => {
+      (prisma.profile.findUnique as jest.Mock).mockResolvedValue({ whatsapp_activation_bonus_granted: false });
+      // grantWelcomeCredit calls systemConfig.getWelcomeCredits — the mock has get() not getWelcomeCredits()
+      // so calling service will fail unless we stub it:
+      const sysConfig = (service as any).systemConfig;
+      sysConfig.getWelcomeCredits = jest.fn().mockResolvedValue({ workerCreditFcfa: 500, employerCreditFcfa: 1000 });
+      const amount = await service.grantWelcomeCredit('profile-1', 'WORKER' as any);
+      expect(amount).toBe(500);
+    });
+
+    it('returns 0 if bonus already granted', async () => {
+      (prisma.profile.findUnique as jest.Mock).mockResolvedValue({ whatsapp_activation_bonus_granted: true });
+      const amount = await service.grantWelcomeCredit('profile-1', 'WORKER' as any);
+      expect(amount).toBe(0);
+    });
+
+    it('throws NotFoundException if profile not found', async () => {
+      (prisma.profile.findUnique as jest.Mock).mockResolvedValue(null);
+      await expect(service.grantWelcomeCredit('missing', 'WORKER' as any)).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('payPenaltyFromWallet()', () => {
+    it('throws NotFoundException when penalty not found', async () => {
+      (prisma.penalty.findUnique as jest.Mock).mockResolvedValue(null);
+      await expect(service.payPenaltyFromWallet('pen-1', 'p-1')).rejects.toThrow(NotFoundException);
+    });
+
+    it('throws NotFoundException when penalty belongs to another profile', async () => {
+      (prisma.penalty.findUnique as jest.Mock).mockResolvedValue({ id: 'pen-1', profile_id: 'other', amount: 500 });
+      await expect(service.payPenaltyFromWallet('pen-1', 'p-1')).rejects.toThrow(NotFoundException);
+    });
+
+    it('throws when penalty already paid (count=0)', async () => {
+      (prisma.penalty.findUnique as jest.Mock).mockResolvedValue({ id: 'pen-1', profile_id: 'p-1', amount: 500 });
+      (prisma.wallet as any).upsert = jest.fn().mockResolvedValue({ id: 'w-profile', balance: 1000 });
+      (prisma.wallet.findFirst as jest.Mock).mockResolvedValue({ id: 'w-system', balance: 0 });
+      const txMock = {
+        penalty: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
+        wallet: { updateMany: jest.fn().mockResolvedValue({ count: 1 }), update: jest.fn() },
+        walletTransaction: { create: jest.fn() },
+        payment: { create: jest.fn() },
+      };
+      (prisma.$transaction as jest.Mock).mockImplementationOnce((cb: any) => cb(txMock));
+      await expect(service.payPenaltyFromWallet('pen-1', 'p-1')).rejects.toThrow(BadRequestException);
+    });
+
+    it('throws when wallet balance insufficient (count=0)', async () => {
+      (prisma.penalty.findUnique as jest.Mock).mockResolvedValue({ id: 'pen-1', profile_id: 'p-1', amount: 500 });
+      (prisma.wallet as any).upsert = jest.fn().mockResolvedValue({ id: 'w-profile', balance: 0 });
+      (prisma.wallet.findFirst as jest.Mock).mockResolvedValue({ id: 'w-system', balance: 0 });
+      const txMock = {
+        penalty: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+        wallet: { updateMany: jest.fn().mockResolvedValue({ count: 0 }), update: jest.fn() },
+        walletTransaction: { create: jest.fn() },
+        payment: { create: jest.fn() },
+      };
+      (prisma.$transaction as jest.Mock).mockImplementationOnce((cb: any) => cb(txMock));
+      await expect(service.payPenaltyFromWallet('pen-1', 'p-1')).rejects.toThrow(BadRequestException);
+    });
+
+    it('succeeds and returns reference', async () => {
+      (prisma.penalty.findUnique as jest.Mock).mockResolvedValue({ id: 'pen-1', profile_id: 'p-1', amount: 500 });
+      (prisma.wallet as any).upsert = jest.fn().mockResolvedValue({ id: 'w-profile', balance: 1000 });
+      (prisma.wallet.findFirst as jest.Mock).mockResolvedValue({ id: 'w-system', balance: 0 });
+      const txMock = {
+        penalty: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+        wallet: { updateMany: jest.fn().mockResolvedValue({ count: 1 }), update: jest.fn().mockResolvedValue({}) },
+        walletTransaction: { create: jest.fn().mockResolvedValue({}) },
+        payment: { create: jest.fn().mockResolvedValue({}) },
+      };
+      (prisma.$transaction as jest.Mock).mockImplementationOnce((cb: any) => cb(txMock));
+      (prisma.paymentRequest.create as jest.Mock).mockResolvedValue({ id: 'pr-1' });
+      const result = await service.payPenaltyFromWallet('pen-1', 'p-1');
+      expect(result.reference).toBeDefined();
+    });
+  });
+
+  describe('recordRegistrationPayment()', () => {
+    it('creates payment, wallet tx, and increments system wallet', async () => {
+      (prisma.wallet.findFirst as jest.Mock).mockResolvedValue({ id: 'w-sys', balance: 0 });
+      (prisma.$transaction as jest.Mock).mockResolvedValue(undefined);
+      await service.recordRegistrationPayment('profile-1', 2000);
+      expect(prisma.$transaction).toHaveBeenCalled();
+    });
+  });
+
+  describe('recordJobPostingPayment()', () => {
+    it('creates payment for job posting', async () => {
+      (prisma.wallet.findFirst as jest.Mock).mockResolvedValue({ id: 'w-sys', balance: 0 });
+      (prisma.$transaction as jest.Mock).mockResolvedValue(undefined);
+      await service.recordJobPostingPayment('jo-1', 'emp-1', 5000);
+      expect(prisma.$transaction).toHaveBeenCalled();
+    });
+  });
+
+  describe('getMonthlyRevenueForCalendarYear()', () => {
+    it('queries and maps monthly revenue', async () => {
+      (prisma as any).$queryRaw = jest.fn().mockResolvedValue([
+        { month: new Date('2026-01-01'), revenue: BigInt(10000) },
+        { month: new Date('2026-02-01'), revenue: BigInt(5000) },
+      ]);
+      const result = await service.getMonthlyRevenueForCalendarYear(2026);
+      expect(result).toHaveLength(2);
+      expect(result[0].revenue).toBe(10000);
+      expect(result[0].month).toBe('2026-01');
+    });
+  });
+
+  describe('getMonthlyRevenueRollingMonths()', () => {
+    it('queries and maps rolling months', async () => {
+      (prisma as any).$queryRaw = jest.fn().mockResolvedValue([
+        { month: new Date('2026-01-01'), revenue: BigInt(3000) },
+      ]);
+      const result = await service.getMonthlyRevenueRollingMonths(6);
+      expect(result).toHaveLength(1);
+      expect(result[0].revenue).toBe(3000);
+    });
+  });
+
+  describe('listTransactionsForAdmin()', () => {
+    beforeEach(() => {
+      (prisma.wallet.findFirst as jest.Mock).mockResolvedValue({ id: 'w-sys', balance: 0 });
+      (prisma.walletTransaction as any).findMany = jest.fn().mockResolvedValue([
+        { id: 'tx-1', wallet_id: 'w-sys', type: 'CREDIT_PENALTY', amount: 500, reference_type: 'penalty', reference_id: 'pen-1', created_at: new Date('2026-01-01') },
+      ]);
+      (prisma.walletTransaction as any).count = jest.fn().mockResolvedValue(1);
+    });
+
+    it('returns paginated transactions', async () => {
+      const result = await service.listTransactionsForAdmin({ page: 1, limit: 10 });
+      expect(result.total).toBe(1);
+      expect(result.data).toHaveLength(1);
+    });
+
+    it('applies query filter', async () => {
+      (prisma.walletTransaction as any).findMany = jest.fn().mockResolvedValue([]);
+      (prisma.walletTransaction as any).count = jest.fn().mockResolvedValue(0);
+      const result = await service.listTransactionsForAdmin({ page: 1, limit: 10, q: 'penalty' });
+      expect(result.data).toHaveLength(0);
+    });
+
+    it('applies type filter', async () => {
+      const result = await service.listTransactionsForAdmin({ page: 1, limit: 10, type: ['CREDIT_PENALTY'] });
+      expect(prisma.walletTransaction.findMany).toHaveBeenCalled();
+    });
+
+    it('applies date range filter', async () => {
+      const result = await service.listTransactionsForAdmin({ page: 1, limit: 10, created_from: '2026-01-01', created_to: '2026-12-31' });
+      expect(result.total).toBe(1);
+    });
+  });
+
+  describe('listPaymentsForAdmin()', () => {
+    beforeEach(() => {
+      (prisma.payment.findMany as jest.Mock).mockResolvedValue([
+        {
+          id: 'pay-1', profile_id: 'p-1', type: 'PENALTY', amount: 5000, payment_method: 'MOBILE_MONEY',
+          transaction_id: 'tx-1', status: 'COMPLETED', paid_at: new Date(), description: 'Test', created_at: new Date(),
+          profile: { first_name: 'Alice', last_name: 'Dupont', email: 'alice@test.com' },
+        },
+      ]);
+      (prisma.payment.count as jest.Mock).mockResolvedValue(1);
+    });
+
+    it('returns paginated payments', async () => {
+      const result = await service.listPaymentsForAdmin({ page: 1, limit: 10 });
+      expect(result.total).toBe(1);
+      expect(result.data[0].type).toBe('PENALTY');
+    });
+
+    it('applies query filter', async () => {
+      (prisma.payment.findMany as jest.Mock).mockResolvedValue([]);
+      (prisma.payment.count as jest.Mock).mockResolvedValue(0);
+      (prisma as any).$queryRaw = jest.fn().mockResolvedValue([]);
+      const result = await service.listPaymentsForAdmin({ page: 1, limit: 10, q: 'alice' });
+      expect(result.data).toHaveLength(0);
+    });
+
+    it('applies type and status filters', async () => {
+      const result = await service.listPaymentsForAdmin({ page: 1, limit: 10, type: ['PENALTY'], status: ['COMPLETED'] });
+      expect(result.total).toBe(1);
+    });
+
+    it('applies date range filter', async () => {
+      const result = await service.listPaymentsForAdmin({ page: 1, limit: 10, created_from: '2026-01-01', created_to: '2026-12-31' });
+      expect(result.total).toBe(1);
+    });
+  });
+
+  describe('debitProfileAndCreditSystem()', () => {
+    it('transfers from profile to system', async () => {
+      (prisma.wallet as any).upsert = jest.fn().mockResolvedValue({ id: 'w-profile', balance: 1000 });
+      (prisma.wallet.findFirst as jest.Mock).mockResolvedValue({ id: 'w-system', balance: 0 });
+      const txMock = {
+        wallet: {
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+          update: jest.fn().mockResolvedValue({}),
+        },
+        walletTransaction: { create: jest.fn().mockResolvedValue({}) },
+      };
+      (prisma.$transaction as jest.Mock).mockImplementationOnce((cb: any) => cb(txMock));
+
+      await service.debitProfileAndCreditSystem('profile-1', 100, WalletTransactionType.PENALTY_DEBIT, WalletTransactionType.CREDIT_PENALTY, 'penalty', 'pen-1');
+      expect(txMock.wallet.updateMany).toHaveBeenCalled();
+    });
+
+    it('throws BadRequestException when profile balance insufficient', async () => {
+      (prisma.wallet as any).upsert = jest.fn().mockResolvedValue({ id: 'w-profile', balance: 10 });
+      (prisma.wallet.findFirst as jest.Mock).mockResolvedValue({ id: 'w-system', balance: 0 });
+      const txMock = {
+        wallet: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
+        walletTransaction: { create: jest.fn() },
+      };
+      (prisma.$transaction as jest.Mock).mockImplementationOnce((cb: any) => cb(txMock));
+
+      await expect(
+        service.debitProfileAndCreditSystem('profile-1', 99999, WalletTransactionType.PENALTY_DEBIT, WalletTransactionType.CREDIT_PENALTY, 'penalty', 'pen-1'),
+      ).rejects.toThrow(BadRequestException);
     });
   });
 });
