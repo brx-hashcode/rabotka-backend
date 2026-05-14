@@ -1,4 +1,5 @@
-export const QDRANT_COLLECTION_PREFIX = 'rabotka_';
+const env = process.env.IS_PROD === 'true' ? 'prod' : 'dev';
+export const QDRANT_COLLECTION_PREFIX = `rabotka_${env}_`;
 
 export const COLLECTIONS = {
   WORKERS: `${QDRANT_COLLECTION_PREFIX}workers`,
