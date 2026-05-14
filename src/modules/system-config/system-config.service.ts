@@ -203,19 +203,12 @@ export class SystemConfigService implements OnModuleInit {
   }
 
   async getContactInfo() {
-    const [email, phone, address, orangeMoney, airtelMoney] =
-      await this.mgetBatch([
-        { key: 'contact.email', fallback: 'contact@rabotka.com' },
-        { key: 'contact.phone', fallback: '' },
-        { key: 'contact.address', fallback: '' },
-      ]);
-    return {
-      email,
-      phone,
-      address,
-      orangeMoneyNumber: orangeMoney,
-      airtelMoneyNumber: airtelMoney,
-    };
+    const [email, phone, address] = await this.mgetBatch([
+      { key: 'contact.email', fallback: 'contact@rabotka.com' },
+      { key: 'contact.phone', fallback: '' },
+      { key: 'contact.address', fallback: '' },
+    ]);
+    return { email, phone, address };
   }
 
   async getFees() {
