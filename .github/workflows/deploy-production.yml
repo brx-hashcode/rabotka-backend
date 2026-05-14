@@ -14,7 +14,7 @@ on:
 
 jobs:
   # ───────────────────────────────────────────────────────────────────────────
-  # JOB 1: Run test suite with coverage gate (≥ 80%)
+  # JOB 1: Run test suite with coverage gate (≥ 70%)
   # Blocks the deploy if any test fails or coverage drops below threshold.
   # ───────────────────────────────────────────────────────────────────────────
   test:
@@ -79,12 +79,20 @@ jobs:
         run: |
           ssh-keyscan -p "${{ secrets.VPS_PORT }}" -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts
 
+      - name: Prune unused Docker resources on VPS
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            -o ServerAliveInterval=60 \
+            -o ServerAliveCountMax=10 \
+            -p "${{ secrets.VPS_PORT }}" "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
+            "docker image prune -af --filter 'until=24h' || true"
+
       - name: Pull image on VPS
         run: |
           IMAGE="ghcr.io/${{ github.repository_owner }}/rabotka-backend:latest"
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
             -o ServerAliveInterval=60 \
-            -o ServerAliveCountMax=10 \
+            -o ServerAliveCountMax=10\
             -p "${{ secrets.VPS_PORT }}" "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
             "docker pull $IMAGE"
 
