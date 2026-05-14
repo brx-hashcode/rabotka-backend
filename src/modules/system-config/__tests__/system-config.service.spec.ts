@@ -164,7 +164,7 @@ describe('SystemConfigService', () => {
 
   describe('getContactInfo', () => {
     it('returns contact info with defaults', async () => {
-      mockRedis.mget.mockResolvedValue([null, null, null, null, null]);
+      mockRedis.mget.mockResolvedValue([null, null, null]);
       mockPrisma.systemConfig.findMany.mockResolvedValue([]);
       const result = await service.getContactInfo();
       expect(result).toHaveProperty('email');
