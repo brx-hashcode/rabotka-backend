@@ -208,8 +208,6 @@ export class SystemConfigService implements OnModuleInit {
         { key: 'contact.email', fallback: 'contact@rabotka.com' },
         { key: 'contact.phone', fallback: '' },
         { key: 'contact.address', fallback: '' },
-        { key: 'contact.orange_money_number', fallback: '06 000 0000' },
-        { key: 'contact.airtel_money_number', fallback: '07 000 0000' },
       ]);
     return {
       email,
