@@ -17,6 +17,7 @@ import {
   formatContactUnlockedMessage,
   formatContactUnlockExpiredConversion,
 } from '../messages/contact-unlock.messages';
+import { formatKycValidatedMessage } from '../messages/notifications.messages';
 import { ContactUnlockService } from '../../contact-unlock/contact-unlock.service';
 import { SystemConfigService } from '../../system-config/system-config.service';
 import { WalletService } from '../../wallet/wallet.service';
@@ -369,6 +370,15 @@ export class BotNotificationService {
 
   async sendMessage(phone: string, text: string): Promise<void> {
     await this.whatsApp.sendTextMessage(phone, text);
+  }
+
+  async sendKycValidatedMessage(
+    phone: string,
+    firstName: string,
+    profileType: 'WORKER' | 'EMPLOYER',
+  ): Promise<void> {
+    const message = formatKycValidatedMessage(firstName, profileType);
+    await this.whatsApp.sendTextMessage(phone, message);
   }
 
   async sendRecommendedJobNotification(
