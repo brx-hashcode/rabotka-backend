@@ -59,8 +59,9 @@ function makeCtx(overrides: Partial<ApplyJobContext> = {}): ApplyJobContext {
       }),
       getRaw: jest.fn().mockResolvedValue('5000'),
       getContactInfo: jest.fn().mockResolvedValue({
-        orangeMoneyNumber: '',
-        airtelMoneyNumber: '',
+        email: '',
+        phone: '',
+        address: '',
       }),
     } as unknown as ApplyJobContext['systemConfigService'],
     ...overrides,
