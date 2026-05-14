@@ -3,7 +3,8 @@ import { BotInboxService, InboxItem } from '../bot-inbox.service';
 import { REDIS_CONNECTION } from '../../../../common/services/redis/redis.constants';
 
 const PROFILE_ID = 'profile-1';
-const KEY = `rabotka:bot:inbox:${PROFILE_ID}`;
+const ENV = process.env.IS_PROD === 'true' ? 'prod' : 'dev';
+const KEY = `rabotka:${ENV}:bot:inbox:${PROFILE_ID}`;
 const TTL = 7 * 24 * 60 * 60;
 
 function makeItem(id: string): InboxItem {
