@@ -182,14 +182,9 @@ export async function runApplyJobFlow(
 
   const unpaid = await ctx.applicationService.getUnpaidPenalties(profile.id);
   if (unpaid.count > 0) {
-    const contact = await ctx.systemConfigService.getContactInfo();
     return {
       reply: [
-        formatPenaltyBlocked(
-          unpaid.total,
-          contact.orangeMoneyNumber ?? '',
-          contact.airtelMoneyNumber ?? '',
-        ),
+        formatPenaltyBlocked(unpaid.total, '', ''),
       ],
       clearState: true,
     };
