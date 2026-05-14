@@ -28,6 +28,18 @@ COPY . .
 
 RUN pnpm run build
 
+# Pre-download fastembed models at build time so the container never needs
+# outbound internet access to HuggingFace at runtime.
+RUN node -e " \
+  const { FlagEmbedding, EmbeddingModel, SparseTextEmbedding, SparseEmbeddingModel } = require('fastembed'); \
+  const cacheDir = '/app/fastembed_cache'; \
+  Promise.all([ \
+    FlagEmbedding.init({ model: EmbeddingModel.BGESmallENV15, cacheDir }), \
+    SparseTextEmbedding.init({ model: SparseEmbeddingModel.SpladePPEnV1, cacheDir }), \
+  ]).then(() => { console.log('fastembed models cached'); process.exit(0); }) \
+    .catch(e => { console.error(e); process.exit(1); }); \
+"
+
 # ─── api target — slim, no LibreOffice ────────────────────────────────────────
 FROM node:22-slim AS api
 
@@ -53,6 +65,7 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/prisma ./prisma
+COPY --from=builder /app/fastembed_cache ./fastembed_cache
 
 COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh && \
@@ -64,7 +77,8 @@ ENV NODE_ENV=production \
     PNPM_HOME="/home/nestjs/.local/share/pnpm" \
     HOME=/tmp \
     SAL_USE_VCLPLUGIN=svp \
-    DISPLAY=""
+    DISPLAY="" \
+    FASTEMBED_CACHE_DIR=/app/fastembed_cache
 
 RUN chown -R nestjs:nestjs /app /home/nestjs
 
@@ -106,6 +120,7 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/prisma ./prisma
+COPY --from=builder /app/fastembed_cache ./fastembed_cache
 
 COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh && \
@@ -115,7 +130,8 @@ RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh && \
 ENV NODE_ENV=production \
     PORT=3000 \
     NODE_OPTIONS="--max-old-space-size=512" \
-    PNPM_HOME="/home/nestjs/.local/share/pnpm"
+    PNPM_HOME="/home/nestjs/.local/share/pnpm" \
+    FASTEMBED_CACHE_DIR=/app/fastembed_cache
 
 RUN chown -R nestjs:nestjs /app /home/nestjs
 
