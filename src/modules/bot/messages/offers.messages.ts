@@ -216,7 +216,7 @@ export function formatOfferDetailWithActions(offer: OfferListItem): string {
     '1- Postuler',
     '2- Voir description complète',
     '3- Retour à la liste des offres',
-    "4- Menu",
+    '4- Menu',
     '',
     'Tapez le numéro correspondant.',
   ].join('\n');

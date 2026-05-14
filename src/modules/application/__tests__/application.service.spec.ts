@@ -379,6 +379,117 @@ describe('ApplicationService', () => {
     });
   });
 
+  describe('create() - additional branches', () => {
+    beforeEach(() => {
+      (prisma.jobOffer.findUnique as jest.Mock).mockResolvedValue(mockJobOffer);
+      (prisma.profile.findUnique as jest.Mock).mockResolvedValue(mockWorker);
+      (prisma.penalty.count as jest.Mock).mockResolvedValue(0);
+      (prisma.application.findUnique as jest.Mock).mockResolvedValue(null);
+      (prisma.application.count as jest.Mock).mockResolvedValue(0);
+    });
+
+    it('throws NotFoundException when worker not found', async () => {
+      (prisma.jobOffer.findUnique as jest.Mock).mockResolvedValue(mockJobOffer);
+      (prisma.profile.findUnique as jest.Mock).mockResolvedValue(null);
+      await expect(service.create(JOB_OFFER_ID, WORKER_ID)).rejects.toThrow(NotFoundException);
+    });
+
+    it('throws ForbiddenException when worker account not ACTIVE', async () => {
+      (prisma.profile.findUnique as jest.Mock).mockResolvedValue({ ...mockWorker, status: 'SUSPENDED' });
+      await expect(service.create(JOB_OFFER_ID, WORKER_ID)).rejects.toThrow(ForbiddenException);
+    });
+
+    it('throws ForbiddenException when profile_type is not WORKER', async () => {
+      (prisma.profile.findUnique as jest.Mock).mockResolvedValue({ ...mockWorker, profile_type: 'EMPLOYER' });
+      await expect(service.create(JOB_OFFER_ID, WORKER_ID)).rejects.toThrow(ForbiddenException);
+    });
+  });
+
+  describe('findByWorker()', () => {
+    it('returns applications for worker', async () => {
+      (prisma.application.findMany as jest.Mock).mockResolvedValue([mockApplication]);
+      const result = await service.findByWorker(WORKER_ID);
+      expect(Array.isArray(result)).toBe(true);
+    });
+
+    it('filters by status', async () => {
+      (prisma.application.findMany as jest.Mock).mockResolvedValue([]);
+      await service.findByWorker(WORKER_ID, { status: ApplicationStatus.PENDING });
+      expect(prisma.application.findMany as jest.Mock).toHaveBeenCalled();
+    });
+  });
+
+  describe('findByEmployer()', () => {
+    it('returns applications for employer', async () => {
+      (prisma.application.findMany as jest.Mock).mockResolvedValue([mockApplication]);
+      const result = await service.findByEmployer(EMPLOYER_ID);
+      expect(Array.isArray(result)).toBe(true);
+    });
+
+    it('filters by status for employer', async () => {
+      (prisma.application.findMany as jest.Mock).mockResolvedValue([]);
+      await service.findByEmployer(EMPLOYER_ID, { status: ApplicationStatus.ACCEPTED });
+      expect(prisma.application.findMany as jest.Mock).toHaveBeenCalled();
+    });
+  });
+
+  describe('findByJobOffer()', () => {
+    it('returns applications for job offer', async () => {
+      (prisma.application.findMany as jest.Mock).mockResolvedValue([mockApplication]);
+      const result = await service.findByJobOffer(JOB_OFFER_ID);
+      expect(Array.isArray(result)).toBe(true);
+    });
+  });
+
+  describe('accept() - additional branches', () => {
+    beforeEach(() => {
+      (prisma.application.findUnique as jest.Mock).mockResolvedValue(mockApplication);
+      (prisma.application.count as jest.Mock).mockResolvedValue(0);
+      jest.spyOn(service, 'findById').mockResolvedValue({ ...mockApplication, status: ApplicationStatus.ACCEPTED, job_offer: { ...mockJobOffer, description: 'desc', payment_flow: 'DAILY', note: null } as any, worker: mockApplication.worker as any } as any);
+    });
+
+    it('throws BadRequestException when application status is not PENDING or VIEWED', async () => {
+      (prisma.application.findUnique as jest.Mock).mockResolvedValue({ ...mockApplication, status: ApplicationStatus.ACCEPTED });
+      let error: any;
+      try { await service.accept(APPLICATION_ID, EMPLOYER_ID); } catch (e) { error = e; }
+      expect(error?.status).toBe(400);
+    });
+
+    it('throws ConflictException when capacity is already full', async () => {
+      (prisma.application.count as jest.Mock).mockResolvedValue(1); // already 1, quantity is 1
+      let error: any;
+      try { await service.accept(APPLICATION_ID, EMPLOYER_ID); } catch (e) { error = e; }
+      expect(error?.status).toBe(409);
+    });
+  });
+
+  describe('markAsViewed()', () => {
+    it('marks application as viewed', async () => {
+      (prisma.application.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+      await service.markAsViewed(APPLICATION_ID);
+      expect(prisma.application.updateMany as jest.Mock).toHaveBeenCalled();
+    });
+  });
+
+  describe('getUnpaidPenalties()', () => {
+    it('returns count, total, and ids', async () => {
+      (prisma.penalty as any).findMany = jest.fn().mockResolvedValue([
+        { id: 'p-1', amount: 5000 },
+        { id: 'p-2', amount: 3000 },
+      ]);
+      const result = await service.getUnpaidPenalties(WORKER_ID);
+      expect(result.count).toBe(2);
+      expect(result.total).toBe(8000);
+    });
+
+    it('returns zeros when no penalties', async () => {
+      (prisma.penalty as any).findMany = jest.fn().mockResolvedValue([]);
+      const result = await service.getUnpaidPenalties(WORKER_ID);
+      expect(result.count).toBe(0);
+      expect(result.total).toBe(0);
+    });
+  });
+
   describe('markJobCompleted()', () => {
     const setupMock = (status: ApplicationStatus) => {
       (prisma.application.findUnique as jest.Mock).mockResolvedValue({

@@ -51,31 +51,31 @@ export function formatReminder24h(params: {
   amount: number;
   employerName: string;
   employerPhone: string;
+  cancellationThresholdHours: number;
+  penaltyFcfa: number;
 }): string {
   return [
-    '*RAPPEL - MISSION DEMAIN*',
+    '*RAPPEL DE MISSION*',
     '',
-    '*Vous avez une mission prévue demain* :',
+    'Votre mission est prévue demain.',
     '',
-    `*Offre*: ${params.offerTitle}`,
-    `*Date*: ${formatDate(params.scheduledAt)} (demain matin)`,
-    `*Adresse*: ${params.address}`,
-    '',
-    `*Rémunération*: ${params.amount.toLocaleString('fr-FR')} FCFA`,
+    `*Mission*: ${params.offerTitle}`,
+    `*Date*: ${formatDate(params.scheduledAt)}`,
+    `*Lieu*: ${params.address}`,
+    `*Montant*: ${params.amount.toLocaleString('fr-FR')} FCFA`,
     '',
     `*Employeur*: ${params.employerName}`,
     `*Contact*: ${params.employerPhone}`,
     '',
-    '*IMPORTANT*:',
-    '*Toute annulation < 4h = pénalité de 5,000 FCFA*',
-    '*Soyez ponctuel pour maintenir votre score*',
+    '*Important*',
+    `• Annulation < ${params.cancellationThresholdHours}h : pénalité de ${params.penaltyFcfa.toLocaleString('fr-FR')} FCFA`,
+    '• Soyez ponctuel pour garder un bon score',
     '',
-    'Actions:',
-    '1- Confirmer ma présence',
-    '2- Annuler (sans pénalité pour le moment)',
+    '1- Confirmer',
+    '2- Annuler',
     "3- Contacter l'employeur",
     '',
-    'Tapez le numéro correspondant.',
+    'Répondez avec le numéro correspondant.',
   ].join('\n');
 }
 
