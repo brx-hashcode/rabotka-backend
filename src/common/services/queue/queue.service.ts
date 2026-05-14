@@ -11,7 +11,8 @@ import Redis from 'ioredis';
 import { REDIS_CONNECTION } from '../redis/redis.constants';
 import { EMAIL_QUEUE } from './queue.module';
 
-const BULLMQ_PREFIX = 'bull:rabotka';
+const env = process.env.IS_PROD === 'true' ? 'prod' : 'dev';
+const BULLMQ_PREFIX = `bull:rabotka:${env}`;
 
 export type MailAttachment = {
   filename: string;
