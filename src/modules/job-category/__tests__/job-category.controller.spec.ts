@@ -1,0 +1,66 @@
+import { Test, TestingModule } from '@nestjs/testing';
+import { JobCategoryController, AdminJobCategoryController } from '../job-category.controller';
+import { JobCategoryService } from '../job-category.service';
+import { AdminAuthGuard } from '../../auth/guards/admin-auth.guard';
+import { RolesGuard } from '../../auth/guards/roles.guard';
+
+const mockService = {
+  findAll: jest.fn().mockResolvedValue([{ id: 'cat-1', name: 'Plomberie' }]),
+  create: jest.fn().mockResolvedValue({ id: 'cat-1', name: 'Plomberie' }),
+  update: jest.fn().mockResolvedValue({ id: 'cat-1', name: 'Updated' }),
+  remove: jest.fn().mockResolvedValue(undefined),
+};
+
+describe('JobCategoryController (public)', () => {
+  let controller: JobCategoryController;
+
+  beforeEach(async () => {
+    jest.clearAllMocks();
+    const module: TestingModule = await Test.createTestingModule({
+      controllers: [JobCategoryController],
+      providers: [{ provide: JobCategoryService, useValue: mockService }],
+    }).compile();
+    controller = module.get<JobCategoryController>(JobCategoryController);
+  });
+
+  it('lists all categories', async () => {
+    const result = await controller.findAll();
+    expect(result).toHaveLength(1);
+  });
+});
+
+describe('AdminJobCategoryController', () => {
+  let controller: AdminJobCategoryController;
+
+  beforeEach(async () => {
+    jest.clearAllMocks();
+    const module: TestingModule = await Test.createTestingModule({
+      controllers: [AdminJobCategoryController],
+      providers: [{ provide: JobCategoryService, useValue: mockService }],
+    })
+      .overrideGuard(AdminAuthGuard).useValue({ canActivate: () => true })
+      .overrideGuard(RolesGuard).useValue({ canActivate: () => true })
+      .compile();
+    controller = module.get<AdminJobCategoryController>(AdminJobCategoryController);
+  });
+
+  it('lists all categories', async () => {
+    const result = await controller.findAll();
+    expect(result).toHaveLength(1);
+  });
+
+  it('creates a category', async () => {
+    const result = await controller.create({ name: 'Plomberie', slug: 'plomberie' });
+    expect(result.id).toBe('cat-1');
+  });
+
+  it('updates a category', async () => {
+    const result = await controller.update('cat-1', { name: 'Updated' });
+    expect(result.name).toBe('Updated');
+  });
+
+  it('removes a category', async () => {
+    await controller.remove('cat-1');
+    expect(mockService.remove).toHaveBeenCalledWith('cat-1');
+  });
+});

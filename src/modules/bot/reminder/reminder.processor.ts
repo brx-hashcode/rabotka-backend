@@ -433,6 +433,7 @@ export class ReminderProcessor {
 
     if (!app?.worker?.phone || app.status !== 'ACCEPTED') return;
 
+    const fees = await this.systemConfigService.getFees();
     const text = formatReminder24h({
       offerTitle: app.job_offer.title,
       scheduledAt: app.job_offer.scheduled_at,
@@ -440,6 +441,8 @@ export class ReminderProcessor {
       amount: Number(app.job_offer.amount),
       employerName: `${app.job_offer.employer.first_name} ${app.job_offer.employer.last_name}`,
       employerPhone: app.job_offer.employer.phone,
+      cancellationThresholdHours: fees.cancellationThresholdHours,
+      penaltyFcfa: fees.lateCancellationPenaltyFcfa,
     });
 
     await this.whatsApp.sendTextMessage(app.worker.phone, text);

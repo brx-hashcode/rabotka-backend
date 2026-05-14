@@ -578,6 +578,186 @@ describe('ProfileService', () => {
     });
   });
 
+  describe('updateProfile() - EMPLOYER branch', () => {
+    it('calls indexEmployerProfile for EMPLOYER profile', async () => {
+      prisma.profile.findUnique.mockResolvedValue({ ...baseProfile, profile_type: 'EMPLOYER' });
+      await service.updateProfile('p-1', { firstName: 'Jean' });
+      const matchingService = (service as any).matchingService;
+      expect(matchingService.indexEmployerProfile).toHaveBeenCalledWith('p-1');
+    });
+  });
+
+  describe('updateProfileByAdmin() - EMPLOYER branch', () => {
+    it('calls indexEmployerProfile for EMPLOYER profile', async () => {
+      prisma.profile.findUnique.mockResolvedValue({ ...baseProfile, profile_type: 'EMPLOYER' });
+      await service.updateProfileByAdmin('p-1', { firstName: 'Jean' });
+      const matchingService = (service as any).matchingService;
+      expect(matchingService.indexEmployerProfile).toHaveBeenCalledWith('p-1');
+    });
+  });
+
+  describe('updateProfileStatusByAdmin() - SUSPENDED branch', () => {
+    it('sends suspension email when transitioning to SUSPENDED', async () => {
+      const mailService = { sendMail: jest.fn().mockResolvedValue(undefined) };
+      (service as any).mailService = mailService;
+      prisma.profile.findUnique.mockResolvedValue({
+        ...baseProfile,
+        status: 'ACTIVE',
+        email: 'alice@example.com',
+      });
+      await service.updateProfileStatusByAdmin('p-1', 'SUSPENDED' as any);
+      expect(mailService.sendMail).toHaveBeenCalled();
+    });
+
+    it('handles suspension email failure gracefully', async () => {
+      const mailService = { sendMail: jest.fn().mockRejectedValueOnce(new Error('mail fail')) };
+      (service as any).mailService = mailService;
+      prisma.profile.findUnique.mockResolvedValue({
+        ...baseProfile,
+        status: 'ACTIVE',
+        email: 'alice@example.com',
+      });
+      await service.updateProfileStatusByAdmin('p-1', 'SUSPENDED' as any);
+      // Should not throw
+    });
+
+    it('sends activation WhatsApp when transitioning to ACTIVE', async () => {
+      prisma.profile.findUnique.mockResolvedValue({
+        ...baseProfile,
+        status: 'PENDING_ACTIVATION',
+        phone: '+242000001',
+      });
+      await service.updateProfileStatusByAdmin('p-1', 'ACTIVE' as any);
+      expect(whatsApp.sendTextMessage).toHaveBeenCalled();
+    });
+
+    it('handles activation notification without phone', async () => {
+      prisma.profile.findUnique.mockResolvedValue({
+        ...baseProfile,
+        status: 'PENDING_ACTIVATION',
+        phone: null,
+      });
+      await service.updateProfileStatusByAdmin('p-1', 'ACTIVE' as any);
+      // Should not throw - just skips sendTextMessage
+    });
+  });
+
+  describe('getProfileDetailForAdmin() - verifiers', () => {
+    it('fetches verifier names when verified_by is set', async () => {
+      prisma.profile.findUnique.mockResolvedValue({
+        ...baseProfile,
+        verified_by: 'admin-1',
+        kyc_documents: [{ id: 'doc-1', document_type: 'CNI', document_category: 'ID', document_url: 'http://x', storage_key: null, verification_status: 'VERIFIED', verified_at: new Date(), verified_by: 'admin-1', rejection_reason: null, created_at: new Date() }],
+        kyc_verification_images: [{ id: 'img-1', image_url: 'http://img', uploaded_by: 'admin-1', created_at: new Date() }],
+        _count: { job_offers: 0, applications: 0, penalties: 0 },
+        category: null,
+        categories: [],
+      });
+      prisma.user.findMany.mockResolvedValue([{ id: 'admin-1', first_name: 'Admin', last_name: 'User' }]);
+      (service as any).fileService.getPresignedUrlFromPublicUrl = jest.fn().mockResolvedValue('http://presigned');
+      const result = await service.getProfileDetailForAdmin('p-1');
+      expect(result.verifiedBy).toBe('Admin User');
+    });
+
+    it('returns null verifiedBy when no verified_by', async () => {
+      prisma.profile.findUnique.mockResolvedValue({
+        ...baseProfile,
+        verified_by: null,
+        kyc_documents: [],
+        kyc_verification_images: [],
+        _count: { job_offers: 0, applications: 0, penalties: 0 },
+        category: null,
+        categories: [],
+      });
+      const result = await service.getProfileDetailForAdmin('p-1');
+      expect(result.verifiedBy).toBeNull();
+    });
+
+    it('uses storage_key for presigned url when available', async () => {
+      const getPublicUrl = jest.fn().mockResolvedValue('http://public-url');
+      (service as any).fileService.getPublicUrl = getPublicUrl;
+      prisma.profile.findUnique.mockResolvedValue({
+        ...baseProfile,
+        verified_by: null,
+        kyc_documents: [{ id: 'doc-1', document_type: 'CNI', document_category: 'ID', document_url: null, storage_key: 'folder/file.jpg', verification_status: 'VERIFIED', verified_at: null, verified_by: null, rejection_reason: null, created_at: new Date() }],
+        kyc_verification_images: [],
+        _count: { job_offers: 0, applications: 0, penalties: 0 },
+        category: null,
+        categories: [],
+      });
+      const result = await service.getProfileDetailForAdmin('p-1');
+      expect(getPublicUrl).toHaveBeenCalledWith('folder/file.jpg');
+    });
+  });
+
+  describe('createProfile() - EMPLOYER branch', () => {
+    const kycDoc = { fieldname: 'kycDocument', originalname: 'id.jpg', encoding: '7bit', mimetype: 'image/jpeg', buffer: Buffer.from('id'), size: 2 } as Express.Multer.File;
+    const kycSelfie = { ...kycDoc, fieldname: 'kycSelfie', originalname: 'selfie.jpg' };
+
+    it('calls indexEmployerProfile for EMPLOYER profileType', async () => {
+      const txPrisma = makePrisma();
+      txPrisma.profile.create.mockResolvedValue({ id: 'new-p-1' });
+      prisma.$transaction.mockImplementation((fn: any) => fn(txPrisma));
+      await service.createProfile({ firstName: 'Jean', lastName: 'Patron', email: 'j@x.com', phone: '+242', address: '1 Rue', description: 'Boss', profileType: 'EMPLOYER' as any, documentType: 'CNI' as any, readAndApprovedPolicies: true }, kycDoc, kycSelfie);
+      const matchingService = (service as any).matchingService;
+      expect(matchingService.indexEmployerProfile).toHaveBeenCalledWith('new-p-1');
+    });
+
+    it('handles P2002 conflict on phone during createProfile', async () => {
+      const { Prisma } = jest.requireActual('@prisma/client');
+      const prismaError = Object.assign(
+        new Prisma.PrismaClientKnownRequestError('Unique constraint', { code: 'P2002', clientVersion: '5.0.0' }),
+        { meta: { target: ['phone'] } },
+      );
+      fileService.uploadToStorage.mockRejectedValueOnce(prismaError);
+      let error: any;
+      try { await service.createProfile({ firstName: 'Jean', lastName: 'Patron', email: 'j@x.com', phone: '+242', address: '1 Rue', description: 'Boss', profileType: 'WORKER' as any, documentType: 'CNI' as any, readAndApprovedPolicies: true }, kycDoc, kycSelfie); } catch (e) { error = e; }
+      expect(error?.status).toBe(409);
+    });
+
+    it('handles P2002 conflict on email during createProfile', async () => {
+      const { Prisma } = jest.requireActual('@prisma/client');
+      const prismaError = Object.assign(
+        new Prisma.PrismaClientKnownRequestError('Unique constraint', { code: 'P2002', clientVersion: '5.0.0' }),
+        { meta: { target: ['email'] } },
+      );
+      fileService.uploadToStorage.mockRejectedValueOnce(prismaError);
+      let error: any;
+      try { await service.createProfile({ firstName: 'Jean', lastName: 'Patron', email: 'j@x.com', phone: '+242', address: '1 Rue', description: 'Boss', profileType: 'WORKER' as any, documentType: 'CNI' as any, readAndApprovedPolicies: true }, kycDoc, kycSelfie); } catch (e) { error = e; }
+      expect(error?.status).toBe(409);
+    });
+
+    it('handles generic error during createProfile', async () => {
+      fileService.uploadToStorage.mockRejectedValueOnce(new Error('unexpected'));
+      let error: any;
+      try { await service.createProfile({ firstName: 'Jean', lastName: 'Patron', email: 'j@x.com', phone: '+242', address: '1 Rue', description: 'Boss', profileType: 'WORKER' as any, documentType: 'CNI' as any, readAndApprovedPolicies: true }, kycDoc, kycSelfie); } catch (e) { error = e; }
+      expect(error?.status).toBe(400);
+    });
+  });
+
+  describe('getProfilesForAdmin() - additional filters', () => {
+    it('applies profileType filter', async () => {
+      await service.getProfilesForAdmin({ page: 1, limit: 10, profileType: ['WORKER'] as any });
+      expect(prisma.profile.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ profile_type: { in: ['WORKER'] } }) }),
+      );
+    });
+
+    it('applies whatsappConnected filter', async () => {
+      await service.getProfilesForAdmin({ page: 1, limit: 10, whatsappConnected: true });
+      expect(prisma.profile.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ whatsapp_connected: true }) }),
+      );
+    });
+
+    it('applies verificationStatus filter', async () => {
+      await service.getProfilesForAdmin({ page: 1, limit: 10, verificationStatus: ['VERIFIED'] as any });
+      expect(prisma.profile.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ verification_status: { in: ['VERIFIED'] } }) }),
+      );
+    });
+  });
+
   describe('downloadAgreement()', () => {
     const template = {
       id: 'doc-1',

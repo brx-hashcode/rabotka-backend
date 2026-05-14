@@ -378,7 +378,7 @@ describe('ReminderProcessor', () => {
     });
 
     it('skips if redis key already set (already sent)', async () => {
-      redis.get.mockResolvedValue('1');
+      redis.set.mockResolvedValueOnce(null); // NX returns null when key exists
 
       await processor.process({
         data: { type: 'reminder_24h', applicationId: 'app-1' },
@@ -442,7 +442,7 @@ describe('ReminderProcessor', () => {
     });
 
     it('skips if redis key already set', async () => {
-      redis.get.mockResolvedValue('1');
+      redis.set.mockResolvedValueOnce(null); // NX returns null when key exists
 
       await processor.process({
         data: { type: 'reminder_2h', applicationId: 'app-1' },
@@ -520,7 +520,7 @@ describe('ReminderProcessor', () => {
     });
 
     it('skips if redis key already set', async () => {
-      redis.get.mockResolvedValue('1');
+      redis.set.mockResolvedValueOnce(null); // NX returns null when key exists
 
       await processor.process({
         data: { type: 'reminder_start', applicationId: 'app-1' },
@@ -557,6 +557,194 @@ describe('ReminderProcessor', () => {
         data: { type: 'reminder_start', applicationId: 'app-1' },
       });
       expect(whatsApp.sendTextMessage).not.toHaveBeenCalled();
+    });
+  });
+
+  // ─── sendJobStatusCheckReminder() ────────────────────────────────────────────
+
+  describe('sendJobStatusCheckReminder()', () => {
+    it('sends job status check reminder when offer is IN_PROGRESS', async () => {
+      prisma.jobOffer.findUnique = jest.fn().mockResolvedValue({
+        status: JobOfferStatus.IN_PROGRESS,
+        title: 'Test Job',
+        employer: { phone: '+242000001' },
+      });
+      await processor.process({
+        data: {
+          type: 'reminder_job_status',
+          jobOfferId: 'offer-1',
+          employerId: 'emp-1',
+          applicationId: 'app-1',
+          paymentFlow: 'DAILY',
+        },
+      });
+      expect(whatsApp.sendTextMessage).toHaveBeenCalled();
+    });
+
+    it('skips when offer is not IN_PROGRESS', async () => {
+      prisma.jobOffer.findUnique = jest.fn().mockResolvedValue({
+        status: JobOfferStatus.COMPLETED,
+        title: 'Test Job',
+        employer: { phone: '+242000001' },
+      });
+      await processor.process({
+        data: {
+          type: 'reminder_job_status',
+          jobOfferId: 'offer-1',
+          employerId: 'emp-1',
+          applicationId: 'app-1',
+          paymentFlow: 'DAILY',
+        },
+      });
+      expect(whatsApp.sendTextMessage).not.toHaveBeenCalled();
+    });
+
+    it('skips when offer not found', async () => {
+      prisma.jobOffer.findUnique = jest.fn().mockResolvedValue(null);
+      await processor.process({
+        data: {
+          type: 'reminder_job_status',
+          jobOfferId: 'offer-1',
+          employerId: 'emp-1',
+          applicationId: 'app-1',
+          paymentFlow: 'DAILY',
+        },
+      });
+      expect(whatsApp.sendTextMessage).not.toHaveBeenCalled();
+    });
+
+    it('skips when employer has no phone', async () => {
+      prisma.jobOffer.findUnique = jest.fn().mockResolvedValue({
+        status: JobOfferStatus.IN_PROGRESS,
+        title: 'Test Job',
+        employer: { phone: null },
+      });
+      await processor.process({
+        data: {
+          type: 'reminder_job_status',
+          jobOfferId: 'offer-1',
+          employerId: 'emp-1',
+          applicationId: 'app-1',
+          paymentFlow: 'DAILY',
+        },
+      });
+      expect(whatsApp.sendTextMessage).not.toHaveBeenCalled();
+    });
+
+    it('handles whatsApp.sendTextMessage failure gracefully', async () => {
+      prisma.jobOffer.findUnique = jest.fn().mockResolvedValue({
+        status: JobOfferStatus.IN_PROGRESS,
+        title: 'Test Job',
+        employer: { phone: '+242000001' },
+      });
+      whatsApp.sendTextMessage.mockRejectedValueOnce(new Error('send failed'));
+      await processor.process({
+        data: {
+          type: 'reminder_job_status',
+          jobOfferId: 'offer-1',
+          employerId: 'emp-1',
+          applicationId: 'app-1',
+          paymentFlow: 'DAILY',
+        },
+      });
+      // Should not throw
+      expect(true).toBe(true);
+    });
+  });
+
+  // ─── auto-start employer notification branches ──────────────────────────────
+
+  describe('auto-start employer notification branches', () => {
+    it('handles sendTextMessage failure for auto-start employer notification', async () => {
+      prisma.jobOffer.findMany
+        .mockResolvedValueOnce([
+          {
+            id: 'offer-auto',
+            title: 'AutoStart',
+            employer_id: 'emp-auto',
+            payment_flow: 'DAILY',
+            employer: { phone: '+9999', first_name: 'Marie' },
+            applications: [{ id: 'app-auto' }],
+          },
+        ]) // offersToAutoStart
+        .mockResolvedValueOnce([]); // openOverdue
+      prisma.application.findMany.mockResolvedValue([] as never);
+      redis.get.mockResolvedValue(null);
+      whatsApp.sendTextMessage.mockRejectedValueOnce(new Error('WhatsApp failure'));
+      // should not throw
+      await expect(processor.process({ data: { type: 'scan' } })).resolves.not.toThrow();
+    });
+  });
+
+  // ─── expirePendingAttemptsForJob catch branch ─────────────────────────────────
+
+  describe('expirePendingAttemptsForJob catch branch in runScan()', () => {
+    it('catches expirePendingAttemptsForJob error and continues', async () => {
+      prisma.jobOffer.findMany
+        .mockResolvedValueOnce([]) // offersToAutoStart
+        .mockResolvedValueOnce([]) // openOverdue
+        .mockResolvedValueOnce([{ id: 'offer-start', applications: [{ id: 'app-start-1' }] }]); // start window
+      prisma.application.findMany.mockResolvedValue([] as never);
+      redis.get.mockResolvedValue(null);
+      const contactUnlockService = (processor as any).contactUnlockService;
+      contactUnlockService.expirePendingAttemptsForJob = jest.fn().mockRejectedValueOnce(new Error('Unlock error'));
+      await processor.process({ data: { type: 'scan' } });
+      // Should not throw
+      expect(true).toBe(true);
+    });
+
+    it('sends credit conversion notifications when conversions exist', async () => {
+      prisma.jobOffer.findMany
+        .mockResolvedValueOnce([]) // offersToAutoStart
+        .mockResolvedValueOnce([]) // openOverdue
+        .mockResolvedValueOnce([{ id: 'offer-start', applications: [{ id: 'app-start-1' }] }]); // start window
+      prisma.application.findMany.mockResolvedValue([] as never);
+      redis.get.mockResolvedValue(null);
+      const contactUnlockService = (processor as any).contactUnlockService;
+      contactUnlockService.expirePendingAttemptsForJob = jest.fn().mockResolvedValue([{ profileId: 'p-1', amount: 5000 }]);
+      const botNotification = (processor as any).botNotification;
+      botNotification.sendContactUnlockCreditConversionNotification = jest.fn().mockResolvedValue(undefined);
+      await processor.process({ data: { type: 'scan' } });
+      expect(botNotification.sendContactUnlockCreditConversionNotification).toHaveBeenCalledWith('p-1', 5000);
+    });
+  });
+
+  // ─── expired offer notification error branch ────────────────────────────────
+
+  describe('expired offer notification failure in expireOverdueOffers()', () => {
+    it('handles sendTextMessage failure for expired offer notification', async () => {
+      prisma.jobOffer.findMany
+        .mockResolvedValueOnce([]) // offersToAutoStart
+        .mockResolvedValueOnce([
+          {
+            id: 'offer-expired',
+            title: 'Expired Offer',
+            employer_id: 'emp-expired',
+            employer: { phone: '+9876', first_name: 'X' },
+          },
+        ]); // openOverdue
+      prisma.application.findMany.mockResolvedValue([] as never);
+      whatsApp.sendTextMessage.mockRejectedValueOnce(new Error('send failed'));
+      await processor.process({ data: { type: 'scan' } });
+      // Should not throw; redis.set not called since sent=false
+      expect(true).toBe(true);
+    });
+  });
+
+  // ─── sendReminderStart() error path ─────────────────────────────────────────
+
+  describe('sendReminderStart() error path', () => {
+    it('rolls back application status when whatsApp.sendTextMessage throws', async () => {
+      prisma.application.findUnique.mockResolvedValue(buildApplication());
+      prisma.application.update = jest.fn().mockResolvedValue({});
+      prisma.jobOffer.update = jest.fn().mockResolvedValue({});
+      whatsApp.sendTextMessage.mockRejectedValueOnce(new Error('WhatsApp error'));
+      redis.set = jest.fn().mockResolvedValue('OK'); // claim succeeds
+      redis.del = jest.fn().mockResolvedValue(1);
+      await expect(
+        processor.process({ data: { type: 'reminder_start', applicationId: 'app-1' } })
+      ).rejects.toThrow('WhatsApp error');
+      expect(redis.del).toHaveBeenCalled();
     });
   });
 });

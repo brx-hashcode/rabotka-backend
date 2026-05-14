@@ -119,7 +119,8 @@ export async function runRecommendedProfilesFlow(
         ctx.paymentService.createPaymentUrl(
           profile.id,
           fee,
-          (payload._mm_description as string) ?? 'Déverrouillage contact recommandé',
+          (payload._mm_description as string) ??
+            'Déverrouillage contact recommandé',
           PaymentRequestType.RECOMMENDATION_CONTACT,
           { recommendationWorkerId: workerId },
         ),
@@ -261,7 +262,15 @@ async function handlePaymentStep(
   }
 
   if (trimmed === '2') {
-    return enterMobileMoneySubFlow(selectedWorkerId, profile, fee, workerIds, workerScores, state, ctx);
+    return enterMobileMoneySubFlow(
+      selectedWorkerId,
+      profile,
+      fee,
+      workerIds,
+      workerScores,
+      state,
+      ctx,
+    );
   }
 
   return showPaymentMethodPrompt({
@@ -292,7 +301,9 @@ async function processWalletPayment(
 
   if (!worker) {
     return {
-      reply: ["*Ce profil n'est plus actif ou vérifié. Le paiement n'a pas été effectué.*"],
+      reply: [
+        "*Ce profil n'est plus actif ou vérifié. Le paiement n'a pas été effectué.*",
+      ],
       clearState: true,
     };
   }
@@ -466,7 +477,12 @@ async function showWorkerDetail(
   if (!worker) {
     return {
       reply: ["*Ce profil n'est plus disponible. Tapez *7* pour revenir.*"],
-      nextState: { ...state, step: 0, payload: { workerIds, workerScores, jobOfferId }, updatedAt: new Date().toISOString() },
+      nextState: {
+        ...state,
+        step: 0,
+        payload: { workerIds, workerScores, jobOfferId },
+        updatedAt: new Date().toISOString(),
+      },
     };
   }
 
@@ -587,7 +603,9 @@ async function enterMobileMoneySubFlow(
   });
   if (!worker) {
     return {
-      reply: ["*Ce profil n'est plus actif ou vérifié. Le paiement n'a pas été effectué.*"],
+      reply: [
+        "*Ce profil n'est plus actif ou vérifié. Le paiement n'a pas été effectué.*",
+      ],
       clearState: true,
     };
   }

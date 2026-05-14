@@ -90,6 +90,83 @@ describe('LogService', () => {
     });
   });
 
+  describe('listForAdmin()', () => {
+    beforeEach(() => {
+      (prisma.log as any).count = jest.fn().mockResolvedValue(1);
+      (prisma.log.findMany as jest.Mock).mockResolvedValue([
+        {
+          ...mockLog,
+          ip_address: '10.0.0.1',
+          user_agent: 'Jest',
+          profile: { first_name: 'Jane', last_name: 'Doe' },
+        },
+      ]);
+    });
+
+    it('returns paginated logs with user and profile names', async () => {
+      const result = await service.listForAdmin({ page: 1, limit: 20 });
+      expect(result.data).toHaveLength(1);
+      expect(result.total).toBe(1);
+      expect(result.data[0].userName).toBe('John Doe');
+      expect(result.data[0].profileName).toBe('Jane Doe');
+    });
+
+    it('filters by query string', async () => {
+      (prisma.log.findMany as jest.Mock).mockResolvedValueOnce([]);
+      (prisma.log as any).count.mockResolvedValueOnce(0);
+      await service.listForAdmin({ page: 1, limit: 10, q: 'LOGIN' });
+      const call = (prisma.log.findMany as jest.Mock).mock.calls[0][0];
+      expect(call.where.OR).toBeDefined();
+    });
+
+    it('filters by entity_type array', async () => {
+      (prisma.log.findMany as jest.Mock).mockResolvedValueOnce([]);
+      (prisma.log as any).count.mockResolvedValueOnce(0);
+      await service.listForAdmin({
+        page: 1,
+        limit: 10,
+        entity_type: ['Profile'],
+      });
+      const call = (prisma.log.findMany as jest.Mock).mock.calls[0][0];
+      expect(call.where.entity_type).toBeDefined();
+    });
+
+    it('filters by date range', async () => {
+      (prisma.log.findMany as jest.Mock).mockResolvedValueOnce([]);
+      (prisma.log as any).count.mockResolvedValueOnce(0);
+      await service.listForAdmin({
+        page: 1,
+        limit: 10,
+        created_from: '2026-01-01',
+        created_to: '2026-12-31',
+      });
+      const call = (prisma.log.findMany as jest.Mock).mock.calls[0][0];
+      expect(call.where.created_at).toBeDefined();
+    });
+
+    it('filters only created_from (no created_to)', async () => {
+      (prisma.log.findMany as jest.Mock).mockResolvedValueOnce([]);
+      (prisma.log as any).count.mockResolvedValueOnce(0);
+      await service.listForAdmin({
+        page: 1,
+        limit: 10,
+        created_from: '2026-01-01',
+      });
+      const call = (prisma.log.findMany as jest.Mock).mock.calls[0][0];
+      expect(call.where.created_at.gte).toBeDefined();
+    });
+
+    it('maps null user and profile to null names', async () => {
+      (prisma.log.findMany as jest.Mock).mockResolvedValueOnce([
+        { ...mockLog, user: null, profile: null },
+      ]);
+      (prisma.log as any).count.mockResolvedValueOnce(1);
+      const result = await service.listForAdmin({ page: 1, limit: 20 });
+      expect(result.data[0].userName).toBeNull();
+      expect(result.data[0].profileName).toBeNull();
+    });
+  });
+
   describe('getByProfileId()', () => {
     it('returns formatted log entries for a profile', async () => {
       const result = await service.getByProfileId(PROFILE_ID);

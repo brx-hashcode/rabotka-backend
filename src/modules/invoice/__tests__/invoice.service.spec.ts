@@ -172,5 +172,120 @@ describe('InvoiceService', () => {
         data: { status: 'DOWNLOADED' },
       });
     });
+
+    it('resolves related entity for worker type', async () => {
+      prisma.invoice.findUnique.mockResolvedValue({
+        ...baseInvoice,
+        profile: baseProfile,
+        related_entity_type: 'worker',
+        related_entity_id: 'worker-1',
+        payment: null,
+        payment_request: null,
+      });
+      (prisma as any).profile = {
+        findUnique: jest.fn().mockResolvedValue({ first_name: 'Bob', last_name: 'Smith' }),
+      };
+      const result = await service.download('inv-1', 'profile-1');
+      expect(result.buffer).toBeInstanceOf(Buffer);
+    });
+
+    it('resolves related entity for contact_unlock_attempt type', async () => {
+      prisma.invoice.findUnique.mockResolvedValue({
+        ...baseInvoice,
+        profile: baseProfile,
+        related_entity_type: 'contact_unlock_attempt',
+        related_entity_id: 'unlock-1',
+        payment: null,
+        payment_request: null,
+      });
+      prisma.contactUnlockAttempt.findUnique.mockResolvedValue({
+        worker_id: 'worker-2',
+        worker: { first_name: 'Bob', last_name: 'Smith', id: 'worker-2' },
+        employer: { first_name: 'Employer', last_name: 'One', id: 'emp-1' },
+      });
+      const result = await service.download('inv-1', 'profile-1');
+      expect(result.buffer).toBeInstanceOf(Buffer);
+    });
+
+    it('resolves payment method via payment reference when no payment object', async () => {
+      prisma.invoice.findUnique.mockResolvedValue({
+        ...baseInvoice,
+        profile: baseProfile,
+        payment: null,
+        payment_request: { payment_reference: 'tx-ref-1' },
+        related_entity_type: null,
+        related_entity_id: null,
+      });
+      prisma.payment.findUnique.mockResolvedValue({ payment_method: 'MOBILE_MONEY' });
+      const result = await service.download('inv-1', 'profile-1');
+      expect(result.buffer).toBeInstanceOf(Buffer);
+    });
+
+    it('uses payment method label from payment object', async () => {
+      prisma.invoice.findUnique.mockResolvedValue({
+        ...baseInvoice,
+        profile: baseProfile,
+        payment: { payment_method: 'WALLET', transaction_id: 'tx-1' },
+        payment_request: null,
+        related_entity_type: null,
+        related_entity_id: null,
+      });
+      const result = await service.download('inv-1', 'profile-1');
+      expect(result.buffer).toBeInstanceOf(Buffer);
+    });
+  });
+
+  describe('downloadAsAdmin()', () => {
+    beforeEach(() => {
+      prisma.invoice.findUnique.mockResolvedValue({
+        ...baseInvoice,
+        profile: { ...baseProfile, profile_type: 'WORKER' },
+        payment: null,
+        payment_request: null,
+        related_entity_type: null,
+        related_entity_id: null,
+      });
+    });
+
+    it('returns PDF buffer for admin', async () => {
+      const result = await service.downloadAsAdmin('inv-1');
+      expect(documentService.fillDocumentTemplateAsPdf).toHaveBeenCalled();
+      expect(result.buffer).toBeInstanceOf(Buffer);
+      expect(result.filename).toMatch(/\.pdf$/);
+    });
+
+    it('throws NotFoundException when invoice not found', async () => {
+      prisma.invoice.findUnique.mockResolvedValue(null);
+      await expect(service.downloadAsAdmin('missing')).rejects.toThrow(NotFoundException);
+    });
+
+    it('throws NotFoundException when no template found', async () => {
+      prisma.document.findFirst.mockResolvedValue(null);
+      await expect(service.downloadAsAdmin('inv-1')).rejects.toThrow('No INVOICE template found');
+    });
+  });
+
+  describe('create() with paymentId idempotency', () => {
+    it('returns existing invoice by paymentId without creating a new one', async () => {
+      prisma.invoice.findUnique.mockResolvedValue(baseInvoice);
+      await service.create({
+        profileId: 'profile-1',
+        paymentId: 'pay-1',
+        amount: 5000,
+        reason: InvoiceReason.PENALTY,
+      });
+      expect(prisma.invoice.create).not.toHaveBeenCalled();
+    });
+
+    it('creates when no existing by paymentId', async () => {
+      prisma.invoice.findUnique.mockResolvedValue(null);
+      await service.create({
+        profileId: 'profile-1',
+        paymentId: 'pay-new',
+        amount: 3000,
+        reason: InvoiceReason.OTHER,
+      });
+      expect(prisma.invoice.create).toHaveBeenCalled();
+    });
   });
 });
