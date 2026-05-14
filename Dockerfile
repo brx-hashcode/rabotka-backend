@@ -67,6 +67,7 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/prisma ./prisma
+COPY --from=builder /app/assets ./assets
 COPY --from=builder /app/fastembed_cache ./fastembed_cache
 
 COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
@@ -122,6 +123,7 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/prisma ./prisma
+COPY --from=builder /app/assets ./assets
 COPY --from=builder /app/fastembed_cache ./fastembed_cache
 
 COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
