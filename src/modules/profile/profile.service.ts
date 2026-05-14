@@ -270,9 +270,23 @@ export class ProfileService {
 
     // Re-index in Qdrant after update (fire-and-forget)
     if (existingProfile.profile_type === ProfileType.WORKER) {
-      this.matchingService.indexWorkerProfile(id).catch((err: unknown) => this.logger.warn(`indexWorkerProfile failed for id`, err instanceof Error ? err.message : String(err)));
+      this.matchingService
+        .indexWorkerProfile(id)
+        .catch((err: unknown) =>
+          this.logger.warn(
+            `indexWorkerProfile failed for id`,
+            err instanceof Error ? err.message : String(err),
+          ),
+        );
     } else {
-      this.matchingService.indexEmployerProfile(id).catch((err: unknown) => this.logger.warn(`indexEmployerProfile failed for id`, err instanceof Error ? err.message : String(err)));
+      this.matchingService
+        .indexEmployerProfile(id)
+        .catch((err: unknown) =>
+          this.logger.warn(
+            `indexEmployerProfile failed for id`,
+            err instanceof Error ? err.message : String(err),
+          ),
+        );
     }
 
     this.eventEmitter.emit(AdminNotificationEvent.PROFILE_UPDATED, {
@@ -779,9 +793,23 @@ export class ProfileService {
 
     // Re-index in Qdrant after update (fire-and-forget)
     if (profile.profile_type === ProfileType.WORKER) {
-      this.matchingService.indexWorkerProfile(profileId).catch((err: unknown) => this.logger.warn(`indexWorkerProfile failed for profileId`, err instanceof Error ? err.message : String(err)));
+      this.matchingService
+        .indexWorkerProfile(profileId)
+        .catch((err: unknown) =>
+          this.logger.warn(
+            `indexWorkerProfile failed for profileId`,
+            err instanceof Error ? err.message : String(err),
+          ),
+        );
     } else {
-      this.matchingService.indexEmployerProfile(profileId).catch((err: unknown) => this.logger.warn(`indexEmployerProfile failed for profileId`, err instanceof Error ? err.message : String(err)));
+      this.matchingService
+        .indexEmployerProfile(profileId)
+        .catch((err: unknown) =>
+          this.logger.warn(
+            `indexEmployerProfile failed for profileId`,
+            err instanceof Error ? err.message : String(err),
+          ),
+        );
     }
 
     this.eventEmitter.emit(AdminNotificationEvent.PROFILE_UPDATED, {
@@ -954,9 +982,23 @@ export class ProfileService {
 
       // Index profile asynchronously (fire-and-forget, gated by feature flag)
       if (createProfileDto.profileType === 'WORKER') {
-        this.matchingService.indexWorkerProfile(profile.id).catch((err: unknown) => this.logger.warn(`indexWorkerProfile failed for profile.id`, err instanceof Error ? err.message : String(err)));
+        this.matchingService
+          .indexWorkerProfile(profile.id)
+          .catch((err: unknown) =>
+            this.logger.warn(
+              `indexWorkerProfile failed for profile.id`,
+              err instanceof Error ? err.message : String(err),
+            ),
+          );
       } else {
-        this.matchingService.indexEmployerProfile(profile.id).catch((err: unknown) => this.logger.warn(`indexEmployerProfile failed for profile.id`, err instanceof Error ? err.message : String(err)));
+        this.matchingService
+          .indexEmployerProfile(profile.id)
+          .catch((err: unknown) =>
+            this.logger.warn(
+              `indexEmployerProfile failed for profile.id`,
+              err instanceof Error ? err.message : String(err),
+            ),
+          );
       }
 
       this.eventEmitter.emit(AdminNotificationEvent.PROFILE_CREATED, {

@@ -58,16 +58,18 @@ describe('InterestClusterService', () => {
 
   it('getProfile returns profile when point exists', async () => {
     const vector = Array.from({ length: 384 }, () => 0.1);
-    mockQdrantClient.retrieve.mockResolvedValueOnce([{
-      vector,
-      payload: {
-        positive_vectors: [vector],
-        negative_vectors: [],
-        categories: ['Plomberie'],
-        seen_job_ids: ['job-1'],
-        total_signals: 5,
+    mockQdrantClient.retrieve.mockResolvedValueOnce([
+      {
+        vector,
+        payload: {
+          positive_vectors: [vector],
+          negative_vectors: [],
+          categories: ['Plomberie'],
+          seen_job_ids: ['job-1'],
+          total_signals: 5,
+        },
       },
-    }]);
+    ]);
     const profile = await service.getProfile('user-1');
     expect(profile).not.toBeNull();
     expect(profile!.totalSignals).toBe(5);
@@ -89,15 +91,17 @@ describe('InterestClusterService', () => {
 
   it('applySignal updates existing point with EMA', async () => {
     const existingVector = Array.from({ length: 384 }, () => 0.5);
-    mockQdrantClient.retrieve.mockResolvedValueOnce([{
-      vector: existingVector,
-      payload: {
-        user_id: 'user-1',
-        total_signals: 3,
-        seen_job_ids: ['job-old'],
-        categories: ['Electricite'],
+    mockQdrantClient.retrieve.mockResolvedValueOnce([
+      {
+        vector: existingVector,
+        payload: {
+          user_id: 'user-1',
+          total_signals: 3,
+          seen_job_ids: ['job-old'],
+          categories: ['Electricite'],
+        },
       },
-    }]);
+    ]);
     const jobVector = Array.from({ length: 384 }, () => 0.2);
     await service.applySignal('user-1', 'job-1', jobVector, 1.0, 'Plomberie');
     expect(mockQdrant.upsertDense).toHaveBeenCalled();

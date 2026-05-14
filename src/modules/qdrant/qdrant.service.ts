@@ -278,20 +278,20 @@ export class QdrantService implements OnModuleInit {
     if (exists) return;
 
     try {
-    await this.client.createCollection(collectionName, {
-      vectors: {
-        dense: {
-          size: DENSE_DIM,
-          distance: 'Cosine',
+      await this.client.createCollection(collectionName, {
+        vectors: {
+          dense: {
+            size: DENSE_DIM,
+            distance: 'Cosine',
+          },
         },
-      },
-      sparse_vectors: {
-        sparse: {
-          modifier: 'idf',
+        sparse_vectors: {
+          sparse: {
+            modifier: 'idf',
+          },
         },
-      },
-    });
-    this.logger.log(`Collection created: ${collectionName}`);
+      });
+      this.logger.log(`Collection created: ${collectionName}`);
     } catch (err: any) {
       if (err?.status === 409) return; // already exists — concurrent creation race
       throw err;

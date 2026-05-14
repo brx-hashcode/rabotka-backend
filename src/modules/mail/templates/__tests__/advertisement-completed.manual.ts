@@ -79,4 +79,6 @@ for (const [label, passed] of checks) {
 if (!allPassed) {
   process.exit(1);
 }
-console.log('\nAll checks passed. Open the file in a browser to visually verify.');
+console.log(
+  '\nAll checks passed. Open the file in a browser to visually verify.',
+);

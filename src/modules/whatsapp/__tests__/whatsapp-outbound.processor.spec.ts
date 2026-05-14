@@ -27,7 +27,9 @@ describe('WhatsAppOutboundProcessor', () => {
         { provide: WhatsAppService, useValue: mockWhatsApp },
       ],
     }).compile();
-    processor = module.get<WhatsAppOutboundProcessor>(WhatsAppOutboundProcessor);
+    processor = module.get<WhatsAppOutboundProcessor>(
+      WhatsAppOutboundProcessor,
+    );
   });
 
   it('register creates worker with queue service', () => {
@@ -38,34 +40,81 @@ describe('WhatsAppOutboundProcessor', () => {
   });
 
   it('process sends text message', async () => {
-    await processor.process({ data: { type: 'text', phone: '+242001', text: 'Hello', profileId: 'p1' } });
-    expect(mockWhatsApp.sendTextMessage).toHaveBeenCalledWith('+242001', 'Hello', 'p1');
+    await processor.process({
+      data: { type: 'text', phone: '+242001', text: 'Hello', profileId: 'p1' },
+    });
+    expect(mockWhatsApp.sendTextMessage).toHaveBeenCalledWith(
+      '+242001',
+      'Hello',
+      'p1',
+    );
   });
 
   it('process throws when text message returns no SID', async () => {
     mockWhatsApp.sendTextMessage.mockResolvedValueOnce(null);
-    await expect(processor.process({ data: { type: 'text', phone: '+242001', text: 'Hello' } })).rejects.toThrow('returned no SID');
+    await expect(
+      processor.process({
+        data: { type: 'text', phone: '+242001', text: 'Hello' },
+      }),
+    ).rejects.toThrow('returned no SID');
   });
 
   it('process sends media message', async () => {
-    await processor.process({ data: { type: 'media', phone: '+242001', mediaUrl: 'https://img.com/1.jpg', caption: 'Caption', profileId: 'p1' } });
-    expect(mockWhatsApp.sendMediaMessage).toHaveBeenCalledWith('+242001', 'https://img.com/1.jpg', 'Caption');
+    await processor.process({
+      data: {
+        type: 'media',
+        phone: '+242001',
+        mediaUrl: 'https://img.com/1.jpg',
+        caption: 'Caption',
+        profileId: 'p1',
+      },
+    });
+    expect(mockWhatsApp.sendMediaMessage).toHaveBeenCalledWith(
+      '+242001',
+      'https://img.com/1.jpg',
+      'Caption',
+    );
     expect(mockWhatsApp.saveMessage).toHaveBeenCalled();
   });
 
   it('process sends media without caption saves proper body', async () => {
-    await processor.process({ data: { type: 'media', phone: '+242001', mediaUrl: 'https://img.com/1.jpg', profileId: 'p1' } });
-    expect(mockWhatsApp.saveMessage).toHaveBeenCalledWith('p1', expect.any(String), '[IMG:https://img.com/1.jpg]');
+    await processor.process({
+      data: {
+        type: 'media',
+        phone: '+242001',
+        mediaUrl: 'https://img.com/1.jpg',
+        profileId: 'p1',
+      },
+    });
+    expect(mockWhatsApp.saveMessage).toHaveBeenCalledWith(
+      'p1',
+      expect.any(String),
+      '[IMG:https://img.com/1.jpg]',
+    );
   });
 
   it('process sends media without profileId does not save message', async () => {
-    await processor.process({ data: { type: 'media', phone: '+242001', mediaUrl: 'https://img.com/1.jpg' } });
+    await processor.process({
+      data: {
+        type: 'media',
+        phone: '+242001',
+        mediaUrl: 'https://img.com/1.jpg',
+      },
+    });
     expect(mockWhatsApp.saveMessage).not.toHaveBeenCalled();
   });
 
   it('process throws when media message returns no SID', async () => {
     mockWhatsApp.sendMediaMessage.mockResolvedValueOnce(null);
-    await expect(processor.process({ data: { type: 'media', phone: '+242001', mediaUrl: 'https://img.com/1.jpg' } })).rejects.toThrow('returned no SID');
+    await expect(
+      processor.process({
+        data: {
+          type: 'media',
+          phone: '+242001',
+          mediaUrl: 'https://img.com/1.jpg',
+        },
+      }),
+    ).rejects.toThrow('returned no SID');
   });
 
   it('register - failed handler triggers DLQ when max attempts reached', async () => {

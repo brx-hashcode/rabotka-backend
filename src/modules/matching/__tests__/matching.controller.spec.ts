@@ -35,8 +35,10 @@ describe('MatchingController', () => {
         { provide: PrismaService, useValue: mockPrisma },
       ],
     })
-      .overrideGuard(AdminAuthGuard).useValue({ canActivate: () => true })
-      .overrideGuard(RolesGuard).useValue({ canActivate: () => true })
+      .overrideGuard(AdminAuthGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(RolesGuard)
+      .useValue({ canActivate: () => true })
       .compile();
     controller = module.get<MatchingController>(MatchingController);
   });

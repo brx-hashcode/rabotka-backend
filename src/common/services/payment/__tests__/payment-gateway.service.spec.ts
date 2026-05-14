@@ -5,7 +5,9 @@ import { PaymentGatewayFactory } from '../payment-gateway.factory';
 const mockGateway = {
   initiatePayment: jest.fn().mockResolvedValue({ gatewayRef: 'gw-1' }),
   checkPaymentStatus: jest.fn().mockResolvedValue({ status: 'PENDING' }),
-  handleWebhookPayload: jest.fn().mockResolvedValue({ status: 'COMPLETED', gatewayRef: 'gw-1' }),
+  handleWebhookPayload: jest
+    .fn()
+    .mockResolvedValue({ status: 'COMPLETED', gatewayRef: 'gw-1' }),
 };
 
 const mockFactory = {
@@ -33,7 +35,13 @@ describe('PaymentGatewayService', () => {
 
   it('initiatePayment delegates to gateway', async () => {
     await service.onModuleInit();
-    const result = await service.initiatePayment({ amount: 5000, currency: 'XAF', externalId: 'ext-1', phone: '+242001', description: 'Test' });
+    const result = await service.initiatePayment({
+      amount: 5000,
+      currency: 'XAF',
+      externalId: 'ext-1',
+      phone: '+242001',
+      description: 'Test',
+    });
     expect(mockGateway.initiatePayment).toHaveBeenCalled();
     expect(result.gatewayRef).toBe('gw-1');
   });
@@ -47,13 +55,23 @@ describe('PaymentGatewayService', () => {
 
   it('handleWebhookPayload delegates to gateway', async () => {
     await service.onModuleInit();
-    const result = await service.handleWebhookPayload({ event: 'PAYMENT_SUCCESS' });
+    const result = await service.handleWebhookPayload({
+      event: 'PAYMENT_SUCCESS',
+    });
     expect(mockGateway.handleWebhookPayload).toHaveBeenCalled();
     expect(result.status).toBe('COMPLETED');
   });
 
   it('throws when gateway not initialized', async () => {
     // Do not call onModuleInit
-    await expect(service.initiatePayment({ amount: 1000, currency: 'XAF', externalId: 'x', phone: '+242', description: 'x' })).rejects.toThrow('not initialized');
+    await expect(
+      service.initiatePayment({
+        amount: 1000,
+        currency: 'XAF',
+        externalId: 'x',
+        phone: '+242',
+        description: 'x',
+      }),
+    ).rejects.toThrow('not initialized');
   });
 });

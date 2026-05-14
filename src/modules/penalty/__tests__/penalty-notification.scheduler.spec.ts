@@ -21,7 +21,9 @@ describe('PenaltyNotificationScheduler', () => {
         { provide: QueueService, useValue: mockQueueService },
       ],
     }).compile();
-    scheduler = module.get<PenaltyNotificationScheduler>(PenaltyNotificationScheduler);
+    scheduler = module.get<PenaltyNotificationScheduler>(
+      PenaltyNotificationScheduler,
+    );
   });
 
   it('onModuleInit adds repeatable scan job', async () => {
@@ -30,7 +32,9 @@ describe('PenaltyNotificationScheduler', () => {
     expect(mockQueue.add).toHaveBeenCalledWith(
       'scan',
       { type: 'scan' },
-      expect.objectContaining({ repeat: expect.objectContaining({ every: expect.any(Number) }) }),
+      expect.objectContaining({
+        repeat: expect.objectContaining({ every: expect.any(Number) }),
+      }),
     );
   });
 

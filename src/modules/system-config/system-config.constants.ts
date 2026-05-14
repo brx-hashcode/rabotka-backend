@@ -72,7 +72,8 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     key: 'fees.employer_late_cancel_score_deduction',
     value: '5',
     category: ConfigCategory.FEES,
-    label: 'Déduction score employeur (annulation tardive ou offre non démarrée avec travailleur accepté)',
+    label:
+      'Déduction score employeur (annulation tardive ou offre non démarrée avec travailleur accepté)',
     isSecret: false,
   },
   {

@@ -694,7 +694,11 @@ describe('BotOrchestratorService', () => {
         status: 'ACTIVE',
         whatsapp_connected: false,
       });
-      deps.systemConfig.getContactInfo.mockResolvedValue({ email: 'e@e.com', phone: '123', address: 'addr' });
+      deps.systemConfig.getContactInfo.mockResolvedValue({
+        email: 'e@e.com',
+        phone: '123',
+        address: 'addr',
+      });
       const result = await service.handle(PROFILE_ID, PHONE, 'menu');
       expect(result[0]).toContain('suspendu');
     });

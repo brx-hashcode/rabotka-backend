@@ -1,6 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException } from '@nestjs/common';
-import { DocumentController, PublicDocumentController } from '../document.controller';
+import {
+  DocumentController,
+  PublicDocumentController,
+} from '../document.controller';
 import { DocumentService } from '../document.service';
 import { LogService } from '../../log/log.service';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
@@ -35,22 +38,35 @@ describe('DocumentController', () => {
         { provide: LogService, useValue: mockLogService },
       ],
     })
-      .overrideGuard(AdminAuthGuard).useValue({ canActivate: () => true })
-      .overrideGuard(RolesGuard).useValue({ canActivate: () => true })
+      .overrideGuard(AdminAuthGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(RolesGuard)
+      .useValue({ canActivate: () => true })
       .compile();
     controller = module.get<DocumentController>(DocumentController);
   });
 
   it('createFromUrl creates document from Google Docs', async () => {
-    const dto = { title: 'Policy', category: 'POLICY' as any, google_docs_url: 'https://docs.google.com/doc' };
+    const dto = {
+      title: 'Policy',
+      category: 'POLICY' as any,
+      google_docs_url: 'https://docs.google.com/doc',
+    };
     const result = await controller.createFromUrl(adminReq, dto);
     expect(mockDocumentService.createFromGoogleDocs).toHaveBeenCalled();
-    expect(mockLogService.create).toHaveBeenCalledWith(expect.objectContaining({ action: 'DOCUMENT_CREATED' }));
+    expect(mockLogService.create).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'DOCUMENT_CREATED' }),
+    );
     expect(result.id).toBe('doc-1');
   });
 
   it('createFromUpload creates document from uploaded file', async () => {
-    const dto = { title: 'Contract', category: 'CONTRACT' as any, file_url: 'https://storage/file.docx', mime_type: 'application/vnd.openxmlformats' };
+    const dto = {
+      title: 'Contract',
+      category: 'CONTRACT' as any,
+      file_url: 'https://storage/file.docx',
+      mime_type: 'application/vnd.openxmlformats',
+    };
     const result = await controller.createFromUpload(adminReq, dto);
     expect(mockDocumentService.createFromUpload).toHaveBeenCalled();
     expect(mockLogService.create).toHaveBeenCalled();
@@ -64,32 +80,54 @@ describe('DocumentController', () => {
   });
 
   it('update updates a document and logs action', async () => {
-    const result = await controller.update('doc-1', { title: 'Updated' }, adminReq);
-    expect(mockDocumentService.update).toHaveBeenCalledWith('doc-1', { title: 'Updated' });
-    expect(mockLogService.create).toHaveBeenCalledWith(expect.objectContaining({ action: 'DOCUMENT_UPDATED' }));
+    const result = await controller.update(
+      'doc-1',
+      { title: 'Updated' },
+      adminReq,
+    );
+    expect(mockDocumentService.update).toHaveBeenCalledWith('doc-1', {
+      title: 'Updated',
+    });
+    expect(mockLogService.create).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'DOCUMENT_UPDATED' }),
+    );
     expect(result.title).toBe('Updated');
   });
 
   it('delete deletes document and logs action', async () => {
     const result = await controller.delete('doc-1', adminReq);
     expect(mockDocumentService.delete).toHaveBeenCalledWith('doc-1');
-    expect(mockLogService.create).toHaveBeenCalledWith(expect.objectContaining({ action: 'DOCUMENT_DELETED' }));
+    expect(mockLogService.create).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'DOCUMENT_DELETED' }),
+    );
     expect(result).toEqual({ success: true });
   });
 
   it('fillDocx fills template and sends docx', async () => {
     const res = { setHeader: jest.fn(), send: jest.fn() } as any;
     await controller.fillDocx('doc-1', { data: { name: 'Alice' } }, res);
-    expect(mockDocumentService.fillDocumentTemplate).toHaveBeenCalledWith('doc-1', { name: 'Alice' });
-    expect(res.setHeader).toHaveBeenCalledWith('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    expect(mockDocumentService.fillDocumentTemplate).toHaveBeenCalledWith(
+      'doc-1',
+      { name: 'Alice' },
+    );
+    expect(res.setHeader).toHaveBeenCalledWith(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    );
     expect(res.send).toHaveBeenCalled();
   });
 
   it('fillPdf fills template and sends pdf', async () => {
     const res = { setHeader: jest.fn(), send: jest.fn() } as any;
     await controller.fillPdf('doc-1', { data: {} }, res);
-    expect(mockDocumentService.fillDocumentTemplateAsPdf).toHaveBeenCalledWith('doc-1', {});
-    expect(res.setHeader).toHaveBeenCalledWith('Content-Type', 'application/pdf');
+    expect(mockDocumentService.fillDocumentTemplateAsPdf).toHaveBeenCalledWith(
+      'doc-1',
+      {},
+    );
+    expect(res.setHeader).toHaveBeenCalledWith(
+      'Content-Type',
+      'application/pdf',
+    );
     expect(res.send).toHaveBeenCalled();
   });
 });
@@ -114,8 +152,14 @@ describe('PublicDocumentController', () => {
 
   it('getActivePolicy throws NotFoundException when no policy found', async () => {
     prisma.document.findFirst.mockResolvedValue(null);
-    const res = { setHeader: jest.fn(), send: jest.fn(), json: jest.fn() } as any;
-    await expect(controller.getActivePolicy(res)).rejects.toThrow(NotFoundException);
+    const res = {
+      setHeader: jest.fn(),
+      send: jest.fn(),
+      json: jest.fn(),
+    } as any;
+    await expect(controller.getActivePolicy(res)).rejects.toThrow(
+      NotFoundException,
+    );
   });
 
   it('getActivePolicy returns JSON for non-pdf/md files', async () => {
@@ -127,9 +171,15 @@ describe('PublicDocumentController', () => {
       file_url: 'https://storage/policy.html',
       created_at: new Date(),
     });
-    const res = { setHeader: jest.fn(), send: jest.fn(), json: jest.fn() } as any;
+    const res = {
+      setHeader: jest.fn(),
+      send: jest.fn(),
+      json: jest.fn(),
+    } as any;
     await controller.getActivePolicy(res);
-    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ id: 'doc-1' }));
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'doc-1' }),
+    );
   });
 
   it('getActivePolicy fetches and returns markdown content', async () => {
@@ -144,9 +194,15 @@ describe('PublicDocumentController', () => {
     global.fetch = jest.fn().mockResolvedValue({
       text: () => Promise.resolve('# Policy'),
     }) as any;
-    const res = { setHeader: jest.fn().mockReturnThis(), send: jest.fn() } as any;
+    const res = {
+      setHeader: jest.fn().mockReturnThis(),
+      send: jest.fn(),
+    } as any;
     await controller.getActivePolicy(res);
-    expect(res.setHeader).toHaveBeenCalledWith('Content-Type', 'text/markdown; charset=utf-8');
+    expect(res.setHeader).toHaveBeenCalledWith(
+      'Content-Type',
+      'text/markdown; charset=utf-8',
+    );
     expect(res.send).toHaveBeenCalledWith('# Policy');
   });
 
@@ -162,8 +218,14 @@ describe('PublicDocumentController', () => {
     global.fetch = jest.fn().mockResolvedValue({
       arrayBuffer: () => Promise.resolve(new ArrayBuffer(100)),
     }) as any;
-    const res = { setHeader: jest.fn().mockReturnThis(), send: jest.fn() } as any;
+    const res = {
+      setHeader: jest.fn().mockReturnThis(),
+      send: jest.fn(),
+    } as any;
     await controller.getActivePolicy(res);
-    expect(res.setHeader).toHaveBeenCalledWith('Content-Type', 'application/pdf');
+    expect(res.setHeader).toHaveBeenCalledWith(
+      'Content-Type',
+      'application/pdf',
+    );
   });
 });

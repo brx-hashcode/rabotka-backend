@@ -19,12 +19,12 @@ describe('EventController', () => {
     jest.clearAllMocks();
     const module: TestingModule = await Test.createTestingModule({
       controllers: [EventController],
-      providers: [
-        { provide: EventService, useValue: mockEventService },
-      ],
+      providers: [{ provide: EventService, useValue: mockEventService }],
     })
-      .overrideGuard(AdminAuthGuard).useValue({ canActivate: () => true })
-      .overrideGuard(RolesGuard).useValue({ canActivate: () => true })
+      .overrideGuard(AdminAuthGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(RolesGuard)
+      .useValue({ canActivate: () => true })
       .compile();
 
     controller = module.get<EventController>(EventController);

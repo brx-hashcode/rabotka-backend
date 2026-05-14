@@ -419,7 +419,11 @@ async function handlePublishStep2Category(args: StepArgs): Promise<FlowResult> {
     nextState: {
       ...state,
       step: 3,
-      payload: { ...payload, categoryId: category!.id, categoryName: category!.name },
+      payload: {
+        ...payload,
+        categoryId: category.id,
+        categoryName: category.name,
+      },
       updatedAt: new Date().toISOString(),
     },
   };

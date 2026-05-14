@@ -62,9 +62,18 @@ const baseClaim = {
   created_by_profile_id: null,
   created_at: now,
   updated_at: now,
-  profile: { first_name: 'John', last_name: 'Doe', email: 'john@test.com', avatar_url: null },
+  profile: {
+    first_name: 'John',
+    last_name: 'Doe',
+    email: 'john@test.com',
+    avatar_url: null,
+  },
   assigned_user: null,
-  created_by_user: { first_name: 'Admin', last_name: 'User', email: 'admin@test.com' },
+  created_by_user: {
+    first_name: 'Admin',
+    last_name: 'User',
+    email: 'admin@test.com',
+  },
   created_by_profile: null,
 };
 
@@ -145,7 +154,12 @@ describe('ClaimService', () => {
     it('applies search filter', async () => {
       mockPrisma.$transaction.mockResolvedValue([[], 0]);
 
-      const result = await service.listForAdmin({ q: 'test', status: ['OPEN' as any], profile_id: 'p1', assigned_user_id: 'u1' });
+      const result = await service.listForAdmin({
+        q: 'test',
+        status: ['OPEN' as any],
+        profile_id: 'p1',
+        assigned_user_id: 'u1',
+      });
 
       expect(result.total).toBe(0);
     });
@@ -160,30 +174,47 @@ describe('ClaimService', () => {
 
     it('throws NotFoundException if not found', async () => {
       mockPrisma.claim.findUnique.mockResolvedValue(null);
-      await expect(service.getByIdForAdmin('claim-x')).rejects.toThrow(NotFoundException);
+      await expect(service.getByIdForAdmin('claim-x')).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 
   describe('updateForAdmin', () => {
     it('updates a claim', async () => {
       mockPrisma.claim.findUnique.mockResolvedValue(baseClaim);
-      mockPrisma.claim.update.mockResolvedValue({ ...baseClaim, title: 'Updated' });
+      mockPrisma.claim.update.mockResolvedValue({
+        ...baseClaim,
+        title: 'Updated',
+      });
       mockPrisma.profile.findUnique.mockResolvedValue(null);
 
-      const result = await service.updateForAdmin('claim-1', { title: 'Updated' });
+      const result = await service.updateForAdmin('claim-1', {
+        title: 'Updated',
+      });
       expect(result.title).toBe('Updated');
     });
 
     it('throws if claim not found', async () => {
       mockPrisma.claim.findUnique.mockResolvedValue(null);
-      await expect(service.updateForAdmin('x', {})).rejects.toThrow(NotFoundException);
+      await expect(service.updateForAdmin('x', {})).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('notifies profile on status change to IN_PROGRESS', async () => {
-      mockPrisma.claim.findUnique.mockResolvedValue({ ...baseClaim, status: 'OPEN' });
-      mockPrisma.claim.update.mockResolvedValue({ ...baseClaim, status: 'IN_PROGRESS' });
+      mockPrisma.claim.findUnique.mockResolvedValue({
+        ...baseClaim,
+        status: 'OPEN',
+      });
+      mockPrisma.claim.update.mockResolvedValue({
+        ...baseClaim,
+        status: 'IN_PROGRESS',
+      });
       mockPrisma.profile.findUnique.mockResolvedValue({
-        email: 'john@test.com', first_name: 'John', last_name: 'Doe',
+        email: 'john@test.com',
+        first_name: 'John',
+        last_name: 'Doe',
       });
 
       await service.updateForAdmin('claim-1', { status: 'IN_PROGRESS' as any });
@@ -191,10 +222,18 @@ describe('ClaimService', () => {
     });
 
     it('notifies profile on status change to COMPLETED', async () => {
-      mockPrisma.claim.findUnique.mockResolvedValue({ ...baseClaim, status: 'OPEN' });
-      mockPrisma.claim.update.mockResolvedValue({ ...baseClaim, status: 'COMPLETED' });
+      mockPrisma.claim.findUnique.mockResolvedValue({
+        ...baseClaim,
+        status: 'OPEN',
+      });
+      mockPrisma.claim.update.mockResolvedValue({
+        ...baseClaim,
+        status: 'COMPLETED',
+      });
       mockPrisma.profile.findUnique.mockResolvedValue({
-        email: 'john@test.com', first_name: 'John', last_name: 'Doe',
+        email: 'john@test.com',
+        first_name: 'John',
+        last_name: 'Doe',
       });
 
       await service.updateForAdmin('claim-1', { status: 'COMPLETED' as any });
@@ -202,10 +241,18 @@ describe('ClaimService', () => {
     });
 
     it('notifies profile on status change to REJECTED', async () => {
-      mockPrisma.claim.findUnique.mockResolvedValue({ ...baseClaim, status: 'OPEN' });
-      mockPrisma.claim.update.mockResolvedValue({ ...baseClaim, status: 'REJECTED' });
+      mockPrisma.claim.findUnique.mockResolvedValue({
+        ...baseClaim,
+        status: 'OPEN',
+      });
+      mockPrisma.claim.update.mockResolvedValue({
+        ...baseClaim,
+        status: 'REJECTED',
+      });
       mockPrisma.profile.findUnique.mockResolvedValue({
-        email: 'john@test.com', first_name: 'John', last_name: 'Doe',
+        email: 'john@test.com',
+        first_name: 'John',
+        last_name: 'Doe',
       });
 
       await service.updateForAdmin('claim-1', { status: 'REJECTED' as any });
@@ -213,11 +260,16 @@ describe('ClaimService', () => {
     });
 
     it('notifies assigned user when assigned_user_id changes', async () => {
-      mockPrisma.claim.findUnique.mockResolvedValue({ ...baseClaim, assigned_user_id: null });
+      mockPrisma.claim.findUnique.mockResolvedValue({
+        ...baseClaim,
+        assigned_user_id: null,
+      });
       mockPrisma.claim.update.mockResolvedValue(baseClaim);
       mockPrisma.profile.findUnique.mockResolvedValue(null);
       mockPrisma.user.findUnique.mockResolvedValue({
-        email: 'admin@test.com', first_name: 'Admin', last_name: 'User',
+        email: 'admin@test.com',
+        first_name: 'Admin',
+        last_name: 'User',
       });
 
       await service.updateForAdmin('claim-1', { assigned_user_id: 'user-2' });
@@ -225,11 +277,16 @@ describe('ClaimService', () => {
     });
 
     it('notifies unassigned user when assigned_user_id removed', async () => {
-      mockPrisma.claim.findUnique.mockResolvedValue({ ...baseClaim, assigned_user_id: 'user-2' });
+      mockPrisma.claim.findUnique.mockResolvedValue({
+        ...baseClaim,
+        assigned_user_id: 'user-2',
+      });
       mockPrisma.claim.update.mockResolvedValue(baseClaim);
       mockPrisma.profile.findUnique.mockResolvedValue(null);
       mockPrisma.user.findUnique.mockResolvedValue({
-        email: 'admin@test.com', first_name: 'Admin', last_name: 'User',
+        email: 'admin@test.com',
+        first_name: 'Admin',
+        last_name: 'User',
       });
 
       await service.updateForAdmin('claim-1', { assigned_user_id: null });
@@ -248,23 +305,32 @@ describe('ClaimService', () => {
 
     it('throws if claim not found', async () => {
       mockPrisma.claim.findUnique.mockResolvedValue(null);
-      await expect(service.deleteForAdmin('x')).rejects.toThrow(NotFoundException);
+      await expect(service.deleteForAdmin('x')).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 
   describe('addComment', () => {
     it('adds a comment', async () => {
-      mockPrisma.claim.findUnique.mockResolvedValue({ id: 'claim-1', title: 'Test' });
+      mockPrisma.claim.findUnique.mockResolvedValue({
+        id: 'claim-1',
+        title: 'Test',
+      });
       mockPrisma.claimComment.create.mockResolvedValue(baseComment);
 
-      const result = await service.addComment('claim-1', 'user-1', { content: 'Test comment' });
+      const result = await service.addComment('claim-1', 'user-1', {
+        content: 'Test comment',
+      });
       expect(result.id).toBe('comment-1');
       expect(mockGateway.emitNewComment).toHaveBeenCalled();
     });
 
     it('throws if claim not found', async () => {
       mockPrisma.claim.findUnique.mockResolvedValue(null);
-      await expect(service.addComment('x', 'u', { content: 'c' })).rejects.toThrow(NotFoundException);
+      await expect(
+        service.addComment('x', 'u', { content: 'c' }),
+      ).rejects.toThrow(NotFoundException);
     });
   });
 
@@ -287,7 +353,9 @@ describe('ClaimService', () => {
 
     it('throws if comment not found', async () => {
       mockPrisma.claimComment.findFirst.mockResolvedValue(null);
-      await expect(service.deleteComment('claim-1', 'x')).rejects.toThrow(NotFoundException);
+      await expect(service.deleteComment('claim-1', 'x')).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 
@@ -295,7 +363,9 @@ describe('ClaimService', () => {
     it('creates claim as profile', async () => {
       mockPrisma.claim.create.mockResolvedValue(baseClaim);
       mockPrisma.profile.findUnique.mockResolvedValue({
-        email: 'john@test.com', first_name: 'John', last_name: 'Doe',
+        email: 'john@test.com',
+        first_name: 'John',
+        last_name: 'Doe',
       });
 
       const result = await service.createForProfile('profile-1', {
@@ -323,12 +393,19 @@ describe('ClaimService', () => {
 
     it('throws if claim not found', async () => {
       mockPrisma.claim.findUnique.mockResolvedValue(null);
-      await expect(service.getByIdForProfile('x', 'p')).rejects.toThrow(NotFoundException);
+      await expect(service.getByIdForProfile('x', 'p')).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('throws if claim belongs to different profile', async () => {
-      mockPrisma.claim.findUnique.mockResolvedValue({ ...baseClaim, profile_id: 'other' });
-      await expect(service.getByIdForProfile('claim-1', 'profile-1')).rejects.toThrow(NotFoundException);
+      mockPrisma.claim.findUnique.mockResolvedValue({
+        ...baseClaim,
+        profile_id: 'other',
+      });
+      await expect(
+        service.getByIdForProfile('claim-1', 'profile-1'),
+      ).rejects.toThrow(NotFoundException);
     });
   });
 
@@ -336,24 +413,38 @@ describe('ClaimService', () => {
     it('returns comments for claim owned by profile', async () => {
       mockPrisma.claim.findUnique.mockResolvedValue(baseClaim);
       mockPrisma.claimComment.findMany.mockResolvedValue([baseComment]);
-      const result = await service.listCommentsForProfile('claim-1', 'profile-1');
+      const result = await service.listCommentsForProfile(
+        'claim-1',
+        'profile-1',
+      );
       expect(result).toHaveLength(1);
     });
 
     it('throws if claim not found', async () => {
       mockPrisma.claim.findUnique.mockResolvedValue(null);
-      await expect(service.listCommentsForProfile('x', 'p')).rejects.toThrow(NotFoundException);
+      await expect(service.listCommentsForProfile('x', 'p')).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('throws if claim belongs to different profile', async () => {
-      mockPrisma.claim.findUnique.mockResolvedValue({ ...baseClaim, profile_id: 'other' });
-      await expect(service.listCommentsForProfile('claim-1', 'profile-1')).rejects.toThrow(NotFoundException);
+      mockPrisma.claim.findUnique.mockResolvedValue({
+        ...baseClaim,
+        profile_id: 'other',
+      });
+      await expect(
+        service.listCommentsForProfile('claim-1', 'profile-1'),
+      ).rejects.toThrow(NotFoundException);
     });
   });
 
   describe('addCommentAsProfile', () => {
     it('adds comment as profile', async () => {
-      mockPrisma.claim.findUnique.mockResolvedValue({ id: 'claim-1', title: 'Test', profile_id: 'profile-1' });
+      mockPrisma.claim.findUnique.mockResolvedValue({
+        id: 'claim-1',
+        title: 'Test',
+        profile_id: 'profile-1',
+      });
       mockPrisma.claimComment.create.mockResolvedValue({
         ...baseComment,
         profile_id: 'profile-1',
@@ -363,19 +454,29 @@ describe('ClaimService', () => {
         profile: { first_name: 'John', last_name: 'Doe' },
       });
 
-      const result = await service.addCommentAsProfile('claim-1', 'profile-1', { content: 'Test' });
+      const result = await service.addCommentAsProfile('claim-1', 'profile-1', {
+        content: 'Test',
+      });
       expect(result.id).toBe('comment-1');
       expect(mockGateway.emitNewComment).toHaveBeenCalled();
     });
 
     it('throws if claim not found', async () => {
       mockPrisma.claim.findUnique.mockResolvedValue(null);
-      await expect(service.addCommentAsProfile('x', 'p', { content: 'c' })).rejects.toThrow(NotFoundException);
+      await expect(
+        service.addCommentAsProfile('x', 'p', { content: 'c' }),
+      ).rejects.toThrow(NotFoundException);
     });
 
     it('throws if claim belongs to different profile', async () => {
-      mockPrisma.claim.findUnique.mockResolvedValue({ id: 'claim-1', title: 'T', profile_id: 'other' });
-      await expect(service.addCommentAsProfile('claim-1', 'profile-1', { content: 'c' })).rejects.toThrow(NotFoundException);
+      mockPrisma.claim.findUnique.mockResolvedValue({
+        id: 'claim-1',
+        title: 'T',
+        profile_id: 'other',
+      });
+      await expect(
+        service.addCommentAsProfile('claim-1', 'profile-1', { content: 'c' }),
+      ).rejects.toThrow(NotFoundException);
     });
   });
 
@@ -391,18 +492,27 @@ describe('ClaimService', () => {
 
     it('throws if claim not found', async () => {
       mockPrisma.claim.findUnique.mockResolvedValue(null);
-      await expect(service.deleteCommentAsProfile('x', 'c', 'p')).rejects.toThrow(NotFoundException);
+      await expect(
+        service.deleteCommentAsProfile('x', 'c', 'p'),
+      ).rejects.toThrow(NotFoundException);
     });
 
     it('throws if claim belongs to different profile', async () => {
-      mockPrisma.claim.findUnique.mockResolvedValue({ ...baseClaim, profile_id: 'other' });
-      await expect(service.deleteCommentAsProfile('claim-1', 'c', 'profile-1')).rejects.toThrow(NotFoundException);
+      mockPrisma.claim.findUnique.mockResolvedValue({
+        ...baseClaim,
+        profile_id: 'other',
+      });
+      await expect(
+        service.deleteCommentAsProfile('claim-1', 'c', 'profile-1'),
+      ).rejects.toThrow(NotFoundException);
     });
 
     it('throws if comment not found', async () => {
       mockPrisma.claim.findUnique.mockResolvedValue(baseClaim);
       mockPrisma.claimComment.findFirst.mockResolvedValue(null);
-      await expect(service.deleteCommentAsProfile('claim-1', 'x', 'profile-1')).rejects.toThrow(NotFoundException);
+      await expect(
+        service.deleteCommentAsProfile('claim-1', 'x', 'profile-1'),
+      ).rejects.toThrow(NotFoundException);
     });
   });
 });

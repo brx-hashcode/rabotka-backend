@@ -1,4 +1,7 @@
-import { runRateAssignmentFlow, getRateAssignmentInitialState } from '../rate-assignment.flow';
+import {
+  runRateAssignmentFlow,
+  getRateAssignmentInitialState,
+} from '../rate-assignment.flow';
 import type { BotProfile, BotState } from '../../types/bot-state.types';
 import { FLOW_IDS } from '../../bot.constants';
 
@@ -27,7 +30,9 @@ function makeCtx(txOverrides: any = {}) {
   const tx = {
     rating: {
       upsert: jest.fn().mockResolvedValue({}),
-      aggregate: jest.fn().mockResolvedValue({ _avg: { score: 4.5 }, _count: { score: 10 } }),
+      aggregate: jest
+        .fn()
+        .mockResolvedValue({ _avg: { score: 4.5 }, _count: { score: 10 } }),
     },
     profile: {
       update: jest.fn().mockResolvedValue({}),
@@ -45,7 +50,12 @@ function makeCtx(txOverrides: any = {}) {
 describe('runRateAssignmentFlow', () => {
   it('cancels when menu command received', async () => {
     const ctx = makeCtx();
-    const result = await runRateAssignmentFlow(makeState(), 'menu', workerProfile, ctx);
+    const result = await runRateAssignmentFlow(
+      makeState(),
+      'menu',
+      workerProfile,
+      ctx,
+    );
     expect(result.clearState).toBe(true);
     expect(result.reply[0]).toContain('Menu');
   });
@@ -66,40 +76,70 @@ describe('runRateAssignmentFlow', () => {
 
   it('returns error for invalid score (NaN)', async () => {
     const ctx = makeCtx();
-    const result = await runRateAssignmentFlow(makeState(), 'abc', workerProfile, ctx);
+    const result = await runRateAssignmentFlow(
+      makeState(),
+      'abc',
+      workerProfile,
+      ctx,
+    );
     expect(result.nextState).toBeDefined();
     expect(result.reply[0]).toContain('1');
   });
 
   it('returns error for score out of range (0)', async () => {
     const ctx = makeCtx();
-    const result = await runRateAssignmentFlow(makeState(), '0', workerProfile, ctx);
+    const result = await runRateAssignmentFlow(
+      makeState(),
+      '0',
+      workerProfile,
+      ctx,
+    );
     expect(result.nextState).toBeDefined();
   });
 
   it('returns error for score out of range (6)', async () => {
     const ctx = makeCtx();
-    const result = await runRateAssignmentFlow(makeState(), '6', workerProfile, ctx);
+    const result = await runRateAssignmentFlow(
+      makeState(),
+      '6',
+      workerProfile,
+      ctx,
+    );
     expect(result.nextState).toBeDefined();
   });
 
   it('saves rating successfully with score 4', async () => {
     const ctx = makeCtx();
-    const result = await runRateAssignmentFlow(makeState(), '4', workerProfile, ctx);
+    const result = await runRateAssignmentFlow(
+      makeState(),
+      '4',
+      workerProfile,
+      ctx,
+    );
     expect(result.clearState).toBe(true);
     expect(result.reply[0]).toContain('4/5');
   });
 
   it('saves rating successfully with score 1', async () => {
     const ctx = makeCtx();
-    const result = await runRateAssignmentFlow(makeState(), '1', workerProfile, ctx);
+    const result = await runRateAssignmentFlow(
+      makeState(),
+      '1',
+      workerProfile,
+      ctx,
+    );
     expect(result.clearState).toBe(true);
     expect(result.reply[0]).toContain('1/5');
   });
 
   it('saves rating successfully with score 5', async () => {
     const ctx = makeCtx();
-    const result = await runRateAssignmentFlow(makeState(), '5', workerProfile, ctx);
+    const result = await runRateAssignmentFlow(
+      makeState(),
+      '5',
+      workerProfile,
+      ctx,
+    );
     expect(result.clearState).toBe(true);
     expect(result.reply[0]).toContain('5/5');
   });
@@ -110,9 +150,14 @@ describe('runRateAssignmentFlow', () => {
         $transaction: jest.fn().mockRejectedValue(new Error('DB error')),
       } as any,
     };
-    const result = await runRateAssignmentFlow(makeState(), '3', workerProfile, ctx);
+    const result = await runRateAssignmentFlow(
+      makeState(),
+      '3',
+      workerProfile,
+      ctx,
+    );
     expect(result.clearState).toBe(true);
-    expect(result.reply[0]).toContain("Menu");
+    expect(result.reply[0]).toContain('Menu');
   });
 });
 

@@ -43,9 +43,14 @@ describe('AdDevController', () => {
   it('sendTestReport sends a test report and returns info', async () => {
     const result = await controller.sendTestReport('ad-1');
     expect(mockAdvertisementService.findOne).toHaveBeenCalledWith('ad-1');
-    expect(mockAdReportService.generateExcel).toHaveBeenCalledWith('ad-1', 'Test Ad');
+    expect(mockAdReportService.generateExcel).toHaveBeenCalledWith(
+      'ad-1',
+      'Test Ad',
+    );
     expect(mockAdReportService.getAnalytics).toHaveBeenCalledWith('ad-1');
-    expect(mockNotificationService.notifyAdvertisementCompleted).toHaveBeenCalled();
+    expect(
+      mockNotificationService.notifyAdvertisementCompleted,
+    ).toHaveBeenCalled();
     expect(result.sent).toBe(true);
     expect(result.adTitle).toBe('Test Ad');
   });

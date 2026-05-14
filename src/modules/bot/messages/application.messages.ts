@@ -353,7 +353,9 @@ export function formatNewApplicationToEmployer(params: {
     `*Score de fiabilité*: ${score}/100`,
     `*Missions complétées*: ${params.completedMissions}`,
     ...(params.workerDescription
-      ? [`*Description*: ${params.workerDescription.slice(0, 150)}${params.workerDescription.length > 150 ? '...' : ''}`]
+      ? [
+          `*Description*: ${params.workerDescription.slice(0, 150)}${params.workerDescription.length > 150 ? '...' : ''}`,
+        ]
       : []),
     SEP,
     '',

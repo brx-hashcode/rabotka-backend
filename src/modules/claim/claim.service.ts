@@ -157,7 +157,12 @@ export class ClaimService {
           `${profile.first_name} ${profile.last_name}`,
           dto.title,
         )
-        .catch((err: unknown) => this.logger.warn(`Notification failed`, err instanceof Error ? err.message : String(err)));
+        .catch((err: unknown) =>
+          this.logger.warn(
+            `Notification failed`,
+            err instanceof Error ? err.message : String(err),
+          ),
+        );
     }
 
     return mapClaim(claim);
@@ -261,15 +266,30 @@ export class ClaimService {
         if (dto.status === 'IN_PROGRESS') {
           void this.notifications
             .notifyClaimInProgress(profile.email, name, exists.title)
-            .catch((err: unknown) => this.logger.warn(`Notification failed`, err instanceof Error ? err.message : String(err)));
+            .catch((err: unknown) =>
+              this.logger.warn(
+                `Notification failed`,
+                err instanceof Error ? err.message : String(err),
+              ),
+            );
         } else if (dto.status === 'COMPLETED') {
           void this.notifications
             .notifyClaimCompleted(profile.email, name, exists.title)
-            .catch((err: unknown) => this.logger.warn(`Notification failed`, err instanceof Error ? err.message : String(err)));
+            .catch((err: unknown) =>
+              this.logger.warn(
+                `Notification failed`,
+                err instanceof Error ? err.message : String(err),
+              ),
+            );
         } else if (dto.status === 'REJECTED') {
           void this.notifications
             .notifyClaimRejected(profile.email, name, exists.title)
-            .catch((err: unknown) => this.logger.warn(`Notification failed`, err instanceof Error ? err.message : String(err)));
+            .catch((err: unknown) =>
+              this.logger.warn(
+                `Notification failed`,
+                err instanceof Error ? err.message : String(err),
+              ),
+            );
         }
       }
     }
@@ -290,7 +310,12 @@ export class ClaimService {
               `${adminUser.first_name} ${adminUser.last_name}`,
               exists.title,
             )
-            .catch((err: unknown) => this.logger.warn(`Notification failed`, err instanceof Error ? err.message : String(err)));
+            .catch((err: unknown) =>
+              this.logger.warn(
+                `Notification failed`,
+                err instanceof Error ? err.message : String(err),
+              ),
+            );
         }
       } else if (exists.assigned_user_id) {
         const previousUser = await this.prisma.user.findUnique({
@@ -304,7 +329,12 @@ export class ClaimService {
               `${previousUser.first_name} ${previousUser.last_name}`,
               exists.title,
             )
-            .catch((err: unknown) => this.logger.warn(`Notification failed`, err instanceof Error ? err.message : String(err)));
+            .catch((err: unknown) =>
+              this.logger.warn(
+                `Notification failed`,
+                err instanceof Error ? err.message : String(err),
+              ),
+            );
         }
       }
     }
@@ -353,7 +383,10 @@ export class ClaimService {
     });
 
     const mapped = mapComment(comment);
-    this.claimCommentsGateway.emitNewComment(claimId, mapped as unknown as Record<string, unknown>);
+    this.claimCommentsGateway.emitNewComment(
+      claimId,
+      mapped as unknown as Record<string, unknown>,
+    );
     return mapped;
   }
 
@@ -413,7 +446,12 @@ export class ClaimService {
           `${profile.first_name} ${profile.last_name}`,
           dto.title,
         )
-        .catch((err: unknown) => this.logger.warn(`Notification failed`, err instanceof Error ? err.message : String(err)));
+        .catch((err: unknown) =>
+          this.logger.warn(
+            `Notification failed`,
+            err instanceof Error ? err.message : String(err),
+          ),
+        );
     }
 
     return mapClaim(claim);
@@ -520,7 +558,10 @@ export class ClaimService {
     });
 
     const mapped = mapComment(comment);
-    this.claimCommentsGateway.emitNewComment(claimId, mapped as unknown as Record<string, unknown>);
+    this.claimCommentsGateway.emitNewComment(
+      claimId,
+      mapped as unknown as Record<string, unknown>,
+    );
     return mapped;
   }
 

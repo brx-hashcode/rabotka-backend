@@ -9,7 +9,9 @@ describe('ClaimCommentsGateway', () => {
       providers: [ClaimCommentsGateway],
     }).compile();
     gateway = module.get<ClaimCommentsGateway>(ClaimCommentsGateway);
-    (gateway as any).server = { to: jest.fn().mockReturnValue({ emit: jest.fn() }) };
+    (gateway as any).server = {
+      to: jest.fn().mockReturnValue({ emit: jest.fn() }),
+    };
   });
 
   it('handleConnection does not throw', () => {
@@ -40,7 +42,9 @@ describe('ClaimCommentsGateway', () => {
 
   it('emitNewComment emits to the claim room', () => {
     const emitMock = jest.fn();
-    (gateway as any).server = { to: jest.fn().mockReturnValue({ emit: emitMock }) };
+    (gateway as any).server = {
+      to: jest.fn().mockReturnValue({ emit: emitMock }),
+    };
     gateway.emitNewComment('claim-1', { text: 'hello' });
     expect((gateway as any).server.to).toHaveBeenCalledWith('claim:claim-1');
     expect(emitMock).toHaveBeenCalledWith('comment:new', { text: 'hello' });
@@ -48,8 +52,12 @@ describe('ClaimCommentsGateway', () => {
 
   it('emitDeletedComment emits to the claim room', () => {
     const emitMock = jest.fn();
-    (gateway as any).server = { to: jest.fn().mockReturnValue({ emit: emitMock }) };
+    (gateway as any).server = {
+      to: jest.fn().mockReturnValue({ emit: emitMock }),
+    };
     gateway.emitDeletedComment('claim-1', 'cmt-42');
-    expect(emitMock).toHaveBeenCalledWith('comment:deleted', { commentId: 'cmt-42' });
+    expect(emitMock).toHaveBeenCalledWith('comment:deleted', {
+      commentId: 'cmt-42',
+    });
   });
 });

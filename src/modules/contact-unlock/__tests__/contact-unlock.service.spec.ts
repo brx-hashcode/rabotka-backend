@@ -1,4 +1,8 @@
-import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { ContactUnlockService } from '../contact-unlock.service';
 import {
   ApplicationStatus,
@@ -130,19 +134,29 @@ describe('ContactUnlockService', () => {
     it('throws NotFoundException when app not found', async () => {
       prisma.contactUnlockAttempt.findUnique.mockResolvedValue(null);
       prisma.application.findUnique.mockResolvedValue(null);
-      await expect(service.initiateUnlock('app-1', 'emp-1')).rejects.toThrow(NotFoundException);
+      await expect(service.initiateUnlock('app-1', 'emp-1')).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('throws NotFoundException when job offer not found', async () => {
       prisma.contactUnlockAttempt.findUnique.mockResolvedValue(null);
-      prisma.application.findUnique.mockResolvedValue({ worker_id: 'w-1', job_offer_id: 'jo-1' });
+      prisma.application.findUnique.mockResolvedValue({
+        worker_id: 'w-1',
+        job_offer_id: 'jo-1',
+      });
       prisma.jobOffer.findUnique.mockResolvedValue(null);
-      await expect(service.initiateUnlock('app-1', 'emp-1')).rejects.toThrow(NotFoundException);
+      await expect(service.initiateUnlock('app-1', 'emp-1')).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('creates a new attempt for single-person job', async () => {
       prisma.contactUnlockAttempt.findUnique.mockResolvedValue(null);
-      prisma.application.findUnique.mockResolvedValue({ worker_id: 'w-1', job_offer_id: 'jo-1' });
+      prisma.application.findUnique.mockResolvedValue({
+        worker_id: 'w-1',
+        job_offer_id: 'jo-1',
+      });
       prisma.jobOffer.findUnique.mockResolvedValue({
         quantity: 1,
         employer_unlock_paid: false,
@@ -151,29 +165,50 @@ describe('ContactUnlockService', () => {
       prisma.contactUnlockAttempt.create.mockResolvedValue(makeAttempt());
       const result = await service.initiateUnlock('app-1', 'emp-1');
       expect(prisma.contactUnlockAttempt.create).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.objectContaining({ status: ContactUnlockStatus.PENDING_BOTH, employer_paid: false }) })
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: ContactUnlockStatus.PENDING_BOTH,
+            employer_paid: false,
+          }),
+        }),
       );
       expect(result).toBeDefined();
     });
 
     it('creates attempt with employer_paid=true for multi-person job where employer already paid', async () => {
       prisma.contactUnlockAttempt.findUnique.mockResolvedValue(null);
-      prisma.application.findUnique.mockResolvedValue({ worker_id: 'w-1', job_offer_id: 'jo-1' });
+      prisma.application.findUnique.mockResolvedValue({
+        worker_id: 'w-1',
+        job_offer_id: 'jo-1',
+      });
       prisma.jobOffer.findUnique.mockResolvedValue({
         quantity: 3,
         employer_unlock_paid: true,
         scheduled_at: new Date(Date.now() + 100 * 60 * 60 * 1000),
       });
-      prisma.contactUnlockAttempt.create.mockResolvedValue(makeAttempt({ employer_paid: true, status: ContactUnlockStatus.PENDING_WORKER }));
+      prisma.contactUnlockAttempt.create.mockResolvedValue(
+        makeAttempt({
+          employer_paid: true,
+          status: ContactUnlockStatus.PENDING_WORKER,
+        }),
+      );
       await service.initiateUnlock('app-1', 'emp-1');
       expect(prisma.contactUnlockAttempt.create).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.objectContaining({ employer_paid: true, status: ContactUnlockStatus.PENDING_WORKER }) })
+        expect.objectContaining({
+          data: expect.objectContaining({
+            employer_paid: true,
+            status: ContactUnlockStatus.PENDING_WORKER,
+          }),
+        }),
       );
     });
 
     it('uses twoHBeforeJob expiry when scheduled_at is soon', async () => {
       prisma.contactUnlockAttempt.findUnique.mockResolvedValue(null);
-      prisma.application.findUnique.mockResolvedValue({ worker_id: 'w-1', job_offer_id: 'jo-1' });
+      prisma.application.findUnique.mockResolvedValue({
+        worker_id: 'w-1',
+        job_offer_id: 'jo-1',
+      });
       // scheduled_at = 3 hours from now (2h before = 1h from now < 48h configWindow)
       prisma.jobOffer.findUnique.mockResolvedValue({
         quantity: 1,
@@ -189,12 +224,14 @@ describe('ContactUnlockService', () => {
   describe('payUnlock()', () => {
     it('throws NotFoundException when attempt not found', async () => {
       prisma.contactUnlockAttempt.findUnique.mockResolvedValue(null);
-      await expect(service.payUnlock('attempt-1', 'emp-1', false)).rejects.toThrow(NotFoundException);
+      await expect(
+        service.payUnlock('attempt-1', 'emp-1', false),
+      ).rejects.toThrow(NotFoundException);
     });
 
     it('returns early exit when already UNLOCKED', async () => {
       prisma.contactUnlockAttempt.findUnique.mockResolvedValue(
-        makeAttempt({ status: ContactUnlockStatus.UNLOCKED })
+        makeAttempt({ status: ContactUnlockStatus.UNLOCKED }),
       );
       const result = await service.payUnlock('attempt-1', 'emp-1', false);
       expect(result.status).toBe(ContactUnlockStatus.UNLOCKED);
@@ -203,60 +240,92 @@ describe('ContactUnlockService', () => {
 
     it('throws BadRequestException when attempt is EXPIRED', async () => {
       prisma.contactUnlockAttempt.findUnique.mockResolvedValue(
-        makeAttempt({ status: ContactUnlockStatus.EXPIRED })
+        makeAttempt({ status: ContactUnlockStatus.EXPIRED }),
       );
-      await expect(service.payUnlock('attempt-1', 'emp-1', false)).rejects.toThrow(BadRequestException);
+      await expect(
+        service.payUnlock('attempt-1', 'emp-1', false),
+      ).rejects.toThrow(BadRequestException);
     });
 
     it('throws BadRequestException when attempt is CONVERTED_TO_CREDIT', async () => {
       prisma.contactUnlockAttempt.findUnique.mockResolvedValue(
-        makeAttempt({ status: ContactUnlockStatus.CONVERTED_TO_CREDIT })
+        makeAttempt({ status: ContactUnlockStatus.CONVERTED_TO_CREDIT }),
       );
-      await expect(service.payUnlock('attempt-1', 'emp-1', false)).rejects.toThrow(BadRequestException);
+      await expect(
+        service.payUnlock('attempt-1', 'emp-1', false),
+      ).rejects.toThrow(BadRequestException);
     });
 
     it('throws ForbiddenException when not a participant', async () => {
       prisma.contactUnlockAttempt.findUnique.mockResolvedValue(makeAttempt());
-      prisma.profile.findUnique.mockResolvedValue({ billing_status: BillingStatus.ACTIVE });
-      await expect(service.payUnlock('attempt-1', 'stranger', false)).rejects.toThrow(ForbiddenException);
+      prisma.profile.findUnique.mockResolvedValue({
+        billing_status: BillingStatus.ACTIVE,
+      });
+      await expect(
+        service.payUnlock('attempt-1', 'stranger', false),
+      ).rejects.toThrow(ForbiddenException);
     });
 
     it('throws ForbiddenException when billing is BLOCKED', async () => {
       prisma.contactUnlockAttempt.findUnique.mockResolvedValue(makeAttempt());
-      prisma.profile.findUnique.mockResolvedValue({ billing_status: BillingStatus.BLOCKED });
-      await expect(service.payUnlock('attempt-1', 'emp-1', false)).rejects.toThrow(ForbiddenException);
+      prisma.profile.findUnique.mockResolvedValue({
+        billing_status: BillingStatus.BLOCKED,
+      });
+      await expect(
+        service.payUnlock('attempt-1', 'emp-1', false),
+      ).rejects.toThrow(ForbiddenException);
     });
 
     it('throws ForbiddenException when hard blocked', async () => {
       prisma.contactUnlockAttempt.findUnique.mockResolvedValue(makeAttempt());
-      prisma.profile.findUnique.mockResolvedValue({ billing_status: BillingStatus.ACTIVE });
+      prisma.profile.findUnique.mockResolvedValue({
+        billing_status: BillingStatus.ACTIVE,
+      });
       mockIsWorkerHardBlocked.mockResolvedValueOnce(true);
-      await expect(service.payUnlock('attempt-1', 'emp-1', false)).rejects.toThrow(ForbiddenException);
+      await expect(
+        service.payUnlock('attempt-1', 'emp-1', false),
+      ).rejects.toThrow(ForbiddenException);
     });
 
     it('throws BadRequestException when employer already paid', async () => {
       prisma.contactUnlockAttempt.findUnique.mockResolvedValue(
-        makeAttempt({ employer_paid: true })
+        makeAttempt({ employer_paid: true }),
       );
-      prisma.profile.findUnique.mockResolvedValue({ billing_status: BillingStatus.ACTIVE });
-      await expect(service.payUnlock('attempt-1', 'emp-1', false)).rejects.toThrow(BadRequestException);
+      prisma.profile.findUnique.mockResolvedValue({
+        billing_status: BillingStatus.ACTIVE,
+      });
+      await expect(
+        service.payUnlock('attempt-1', 'emp-1', false),
+      ).rejects.toThrow(BadRequestException);
     });
 
     it('throws BadRequestException when worker already paid', async () => {
       prisma.contactUnlockAttempt.findUnique.mockResolvedValue(
-        makeAttempt({ worker_paid: true })
+        makeAttempt({ worker_paid: true }),
       );
-      prisma.profile.findUnique.mockResolvedValue({ billing_status: BillingStatus.ACTIVE });
-      await expect(service.payUnlock('attempt-1', 'worker-1', false)).rejects.toThrow(BadRequestException);
+      prisma.profile.findUnique.mockResolvedValue({
+        billing_status: BillingStatus.ACTIVE,
+      });
+      await expect(
+        service.payUnlock('attempt-1', 'worker-1', false),
+      ).rejects.toThrow(BadRequestException);
     });
 
     it('employer pays with credit for single-person job', async () => {
       prisma.contactUnlockAttempt.findUnique.mockResolvedValue(makeAttempt());
-      prisma.profile.findUnique.mockResolvedValue({ billing_status: BillingStatus.ACTIVE });
-      prisma.jobOffer.findUnique.mockResolvedValue({ quantity: 1, employer_unlock_paid: false });
+      prisma.profile.findUnique.mockResolvedValue({
+        billing_status: BillingStatus.ACTIVE,
+      });
+      prisma.jobOffer.findUnique.mockResolvedValue({
+        quantity: 1,
+        employer_unlock_paid: false,
+      });
       prisma.contactUnlockAttempt.updateMany.mockResolvedValue({ count: 1 });
       prisma.contactUnlockAttempt.findUniqueOrThrow.mockResolvedValue(
-        makeAttempt({ employer_paid: true, status: ContactUnlockStatus.PENDING_WORKER })
+        makeAttempt({
+          employer_paid: true,
+          status: ContactUnlockStatus.PENDING_WORKER,
+        }),
       );
       prisma.paymentRequest.create.mockResolvedValue({ id: 'pr-1' });
       prisma.payment.create.mockResolvedValue({ id: 'pay-1' });
@@ -267,14 +336,30 @@ describe('ContactUnlockService', () => {
 
     it('both parties pay → UNLOCKED status', async () => {
       prisma.contactUnlockAttempt.findUnique.mockResolvedValue(
-        makeAttempt({ worker_paid: true, status: ContactUnlockStatus.PENDING_EMPLOYER })
+        makeAttempt({
+          worker_paid: true,
+          status: ContactUnlockStatus.PENDING_EMPLOYER,
+        }),
       );
-      prisma.profile.findUnique.mockResolvedValue({ billing_status: BillingStatus.ACTIVE });
-      prisma.jobOffer.findUnique.mockResolvedValue({ quantity: 1, employer_unlock_paid: false });
+      prisma.profile.findUnique.mockResolvedValue({
+        billing_status: BillingStatus.ACTIVE,
+      });
+      prisma.jobOffer.findUnique.mockResolvedValue({
+        quantity: 1,
+        employer_unlock_paid: false,
+      });
       prisma.contactUnlockAttempt.updateMany.mockResolvedValue({ count: 1 });
-      const unlockedAttempt = makeAttempt({ employer_paid: true, worker_paid: true, status: ContactUnlockStatus.UNLOCKED });
-      prisma.contactUnlockAttempt.findUniqueOrThrow.mockResolvedValue(unlockedAttempt);
-      prisma.application.findMany.mockResolvedValue([{ worker_id: 'worker-1' }]);
+      const unlockedAttempt = makeAttempt({
+        employer_paid: true,
+        worker_paid: true,
+        status: ContactUnlockStatus.UNLOCKED,
+      });
+      prisma.contactUnlockAttempt.findUniqueOrThrow.mockResolvedValue(
+        unlockedAttempt,
+      );
+      prisma.application.findMany.mockResolvedValue([
+        { worker_id: 'worker-1' },
+      ]);
       prisma.application.updateMany.mockResolvedValue({ count: 1 });
       const result = await service.payUnlock('attempt-1', 'emp-1', false);
       expect(result.status).toBe(ContactUnlockStatus.UNLOCKED);
@@ -283,21 +368,32 @@ describe('ContactUnlockService', () => {
 
     it('throws when concurrent payment guard fails (count=0)', async () => {
       prisma.contactUnlockAttempt.findUnique.mockResolvedValue(makeAttempt());
-      prisma.profile.findUnique.mockResolvedValue({ billing_status: BillingStatus.ACTIVE });
+      prisma.profile.findUnique.mockResolvedValue({
+        billing_status: BillingStatus.ACTIVE,
+      });
       prisma.jobOffer.findUnique.mockResolvedValue({ quantity: 1 });
       prisma.contactUnlockAttempt.updateMany.mockResolvedValue({ count: 0 });
-      await expect(service.payUnlock('attempt-1', 'emp-1', false)).rejects.toThrow(BadRequestException);
+      await expect(
+        service.payUnlock('attempt-1', 'emp-1', false),
+      ).rejects.toThrow(BadRequestException);
     });
 
     it('employer pays multi-person job', async () => {
       prisma.contactUnlockAttempt.findUnique.mockResolvedValue(makeAttempt());
-      prisma.profile.findUnique.mockResolvedValue({ billing_status: BillingStatus.ACTIVE });
-      prisma.jobOffer.findUnique.mockResolvedValue({ quantity: 3, employer_unlock_paid: false });
+      prisma.profile.findUnique.mockResolvedValue({
+        billing_status: BillingStatus.ACTIVE,
+      });
+      prisma.jobOffer.findUnique.mockResolvedValue({
+        quantity: 3,
+        employer_unlock_paid: false,
+      });
       prisma.jobOffer.update.mockResolvedValue({});
       prisma.contactUnlockAttempt.findMany.mockResolvedValue([]);
       const result = await service.payUnlock('attempt-1', 'emp-1', false);
       expect(prisma.jobOffer.update).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.objectContaining({ employer_unlock_paid: true }) })
+        expect.objectContaining({
+          data: expect.objectContaining({ employer_unlock_paid: true }),
+        }),
       );
       expect(result.attemptId).toBe('attempt-1');
     });
@@ -305,15 +401,21 @@ describe('ContactUnlockService', () => {
     it('employer pays multi-person: cascades UNLOCKED when worker already paid', async () => {
       const attempt = makeAttempt({ worker_paid: true });
       prisma.contactUnlockAttempt.findUnique.mockResolvedValue(attempt);
-      prisma.profile.findUnique.mockResolvedValue({ billing_status: BillingStatus.ACTIVE });
-      prisma.jobOffer.findUnique.mockResolvedValue({ quantity: 3, employer_unlock_paid: false });
+      prisma.profile.findUnique.mockResolvedValue({
+        billing_status: BillingStatus.ACTIVE,
+      });
+      prisma.jobOffer.findUnique.mockResolvedValue({
+        quantity: 3,
+        employer_unlock_paid: false,
+      });
       prisma.jobOffer.update.mockResolvedValue({});
       // pendingAttempts includes a worker_paid=true attempt
       prisma.contactUnlockAttempt.findMany.mockResolvedValue([
         makeAttempt({ id: 'attempt-2', worker_paid: true }),
       ]);
       prisma.contactUnlockAttempt.update.mockResolvedValue({});
-      prisma.contactUnlockAttempt.findUnique.mockResolvedValueOnce(attempt)
+      prisma.contactUnlockAttempt.findUnique
+        .mockResolvedValueOnce(attempt)
         .mockResolvedValueOnce({ application_id: 'app-trigger' });
       prisma.application.findMany.mockResolvedValue([{ worker_id: 'w-1' }]);
       prisma.application.updateMany.mockResolvedValue({ count: 1 });
@@ -325,64 +427,114 @@ describe('ContactUnlockService', () => {
   describe('rejectPendingAttemptByApplication()', () => {
     const fullAttempt = {
       ...makeAttempt({ status: ContactUnlockStatus.PENDING_BOTH }),
-      worker: { id: 'worker-1', phone: '+242001', first_name: 'Bob', last_name: 'Jones' },
-      employer: { id: 'emp-1', phone: '+242002', first_name: 'Jean', last_name: 'Patron' },
-      job_offer: { id: 'jo-1', title: 'Plombier', quantity: 1, status: JobOfferStatus.ACTIVE, scheduled_at: new Date(Date.now() + 48 * 60 * 60 * 1000) },
+      worker: {
+        id: 'worker-1',
+        phone: '+242001',
+        first_name: 'Bob',
+        last_name: 'Jones',
+      },
+      employer: {
+        id: 'emp-1',
+        phone: '+242002',
+        first_name: 'Jean',
+        last_name: 'Patron',
+      },
+      job_offer: {
+        id: 'jo-1',
+        title: 'Plombier',
+        quantity: 1,
+        status: JobOfferStatus.ACTIVE,
+        scheduled_at: new Date(Date.now() + 48 * 60 * 60 * 1000),
+      },
     };
 
     it('throws NotFoundException when attempt not found', async () => {
       prisma.contactUnlockAttempt.findUnique.mockResolvedValue(null);
-      await expect(service.rejectPendingAttemptByApplication('app-1', 'emp-1')).rejects.toThrow(NotFoundException);
+      await expect(
+        service.rejectPendingAttemptByApplication('app-1', 'emp-1'),
+      ).rejects.toThrow(NotFoundException);
     });
 
     it('throws ForbiddenException when not a participant', async () => {
       prisma.contactUnlockAttempt.findUnique.mockResolvedValue(fullAttempt);
-      await expect(service.rejectPendingAttemptByApplication('app-1', 'stranger')).rejects.toThrow(ForbiddenException);
+      await expect(
+        service.rejectPendingAttemptByApplication('app-1', 'stranger'),
+      ).rejects.toThrow(ForbiddenException);
     });
 
     it('throws BadRequestException when attempt is UNLOCKED', async () => {
       prisma.contactUnlockAttempt.findUnique.mockResolvedValue({
-        ...fullAttempt, status: ContactUnlockStatus.UNLOCKED,
+        ...fullAttempt,
+        status: ContactUnlockStatus.UNLOCKED,
       });
-      await expect(service.rejectPendingAttemptByApplication('app-1', 'emp-1')).rejects.toThrow(BadRequestException);
+      await expect(
+        service.rejectPendingAttemptByApplication('app-1', 'emp-1'),
+      ).rejects.toThrow(BadRequestException);
     });
 
     it('rejects by employer and refunds worker', async () => {
-      const attempt = { ...fullAttempt, employer_paid: false, worker_paid: true };
+      const attempt = {
+        ...fullAttempt,
+        employer_paid: false,
+        worker_paid: true,
+      };
       prisma.contactUnlockAttempt.findUnique.mockResolvedValue(attempt);
       const txMock = prisma._txMock;
       txMock.application.count.mockResolvedValue(0);
-      txMock.jobOffer.findUnique.mockResolvedValue({ status: JobOfferStatus.ACTIVE, scheduled_at: new Date(Date.now() + 48 * 60 * 60 * 1000) });
+      txMock.jobOffer.findUnique.mockResolvedValue({
+        status: JobOfferStatus.ACTIVE,
+        scheduled_at: new Date(Date.now() + 48 * 60 * 60 * 1000),
+      });
       txMock.contactUnlockAttempt.update.mockResolvedValue({});
       txMock.application.update.mockResolvedValue({});
       txMock.assignment.updateMany.mockResolvedValue({ count: 1 });
       txMock.jobOffer.update.mockResolvedValue({});
-      const result = await service.rejectPendingAttemptByApplication('app-1', 'emp-1');
+      const result = await service.rejectPendingAttemptByApplication(
+        'app-1',
+        'emp-1',
+      );
       expect(walletService.creditProfileWallet).toHaveBeenCalled(); // worker refunded
       expect(result.otherPhone).toBe('+242001'); // worker phone
     });
 
     it('rejects by worker and refunds employer', async () => {
-      const attempt = { ...fullAttempt, employer_paid: true, worker_paid: false };
+      const attempt = {
+        ...fullAttempt,
+        employer_paid: true,
+        worker_paid: false,
+      };
       prisma.contactUnlockAttempt.findUnique.mockResolvedValue(attempt);
       const txMock = prisma._txMock;
       txMock.application.count.mockResolvedValue(0);
-      txMock.jobOffer.findUnique.mockResolvedValue({ status: JobOfferStatus.ACTIVE, scheduled_at: new Date(Date.now() + 48 * 60 * 60 * 1000) });
+      txMock.jobOffer.findUnique.mockResolvedValue({
+        status: JobOfferStatus.ACTIVE,
+        scheduled_at: new Date(Date.now() + 48 * 60 * 60 * 1000),
+      });
       txMock.contactUnlockAttempt.update.mockResolvedValue({});
       txMock.application.update.mockResolvedValue({});
       txMock.assignment.updateMany.mockResolvedValue({ count: 1 });
       txMock.jobOffer.update.mockResolvedValue({});
-      const result = await service.rejectPendingAttemptByApplication('app-1', 'worker-1');
+      const result = await service.rejectPendingAttemptByApplication(
+        'app-1',
+        'worker-1',
+      );
       expect(walletService.creditProfileWallet).toHaveBeenCalled(); // employer refunded
       expect(result.otherPhone).toBe('+242002'); // employer phone
     });
 
     it('no refund when neither party has paid', async () => {
-      const attempt = { ...fullAttempt, employer_paid: false, worker_paid: false };
+      const attempt = {
+        ...fullAttempt,
+        employer_paid: false,
+        worker_paid: false,
+      };
       prisma.contactUnlockAttempt.findUnique.mockResolvedValue(attempt);
       const txMock = prisma._txMock;
       txMock.application.count.mockResolvedValue(0);
-      txMock.jobOffer.findUnique.mockResolvedValue({ status: JobOfferStatus.ACTIVE, scheduled_at: new Date(Date.now() + 48 * 60 * 60 * 1000) });
+      txMock.jobOffer.findUnique.mockResolvedValue({
+        status: JobOfferStatus.ACTIVE,
+        scheduled_at: new Date(Date.now() + 48 * 60 * 60 * 1000),
+      });
       txMock.contactUnlockAttempt.update.mockResolvedValue({});
       txMock.application.update.mockResolvedValue({});
       txMock.assignment.updateMany.mockResolvedValue({ count: 1 });
@@ -400,35 +552,61 @@ describe('ContactUnlockService', () => {
     });
 
     it('returns null when attempt not UNLOCKED', async () => {
-      prisma.contactUnlockAttempt.findUnique.mockResolvedValue(makeAttempt({ status: ContactUnlockStatus.PENDING_BOTH }));
+      prisma.contactUnlockAttempt.findUnique.mockResolvedValue(
+        makeAttempt({ status: ContactUnlockStatus.PENDING_BOTH }),
+      );
       const result = await service.getContactsIfUnlocked('attempt-1', 'emp-1');
       expect(result).toBeNull();
     });
 
     it('returns null when requester is not a participant', async () => {
-      prisma.contactUnlockAttempt.findUnique.mockResolvedValue(makeAttempt({ status: ContactUnlockStatus.UNLOCKED }));
-      const result = await service.getContactsIfUnlocked('attempt-1', 'stranger');
+      prisma.contactUnlockAttempt.findUnique.mockResolvedValue(
+        makeAttempt({ status: ContactUnlockStatus.UNLOCKED }),
+      );
+      const result = await service.getContactsIfUnlocked(
+        'attempt-1',
+        'stranger',
+      );
       expect(result).toBeNull();
     });
 
     it('returns null when other party profile not found', async () => {
-      prisma.contactUnlockAttempt.findUnique.mockResolvedValue(makeAttempt({ status: ContactUnlockStatus.UNLOCKED }));
+      prisma.contactUnlockAttempt.findUnique.mockResolvedValue(
+        makeAttempt({ status: ContactUnlockStatus.UNLOCKED }),
+      );
       prisma.profile.findUnique.mockResolvedValue(null);
       const result = await service.getContactsIfUnlocked('attempt-1', 'emp-1');
       expect(result).toBeNull();
     });
 
     it('returns contact details for employer requesting', async () => {
-      prisma.contactUnlockAttempt.findUnique.mockResolvedValue(makeAttempt({ status: ContactUnlockStatus.UNLOCKED }));
-      prisma.profile.findUnique.mockResolvedValue({ first_name: 'Bob', last_name: 'Jones', phone: '+242001', email: 'bob@test.com' });
+      prisma.contactUnlockAttempt.findUnique.mockResolvedValue(
+        makeAttempt({ status: ContactUnlockStatus.UNLOCKED }),
+      );
+      prisma.profile.findUnique.mockResolvedValue({
+        first_name: 'Bob',
+        last_name: 'Jones',
+        phone: '+242001',
+        email: 'bob@test.com',
+      });
       const result = await service.getContactsIfUnlocked('attempt-1', 'emp-1');
       expect(result).toMatchObject({ name: 'Bob Jones', phone: '+242001' });
     });
 
     it('returns contact details for worker requesting', async () => {
-      prisma.contactUnlockAttempt.findUnique.mockResolvedValue(makeAttempt({ status: ContactUnlockStatus.UNLOCKED }));
-      prisma.profile.findUnique.mockResolvedValue({ first_name: 'Jean', last_name: 'Patron', phone: '+242002', email: 'jean@test.com' });
-      const result = await service.getContactsIfUnlocked('attempt-1', 'worker-1');
+      prisma.contactUnlockAttempt.findUnique.mockResolvedValue(
+        makeAttempt({ status: ContactUnlockStatus.UNLOCKED }),
+      );
+      prisma.profile.findUnique.mockResolvedValue({
+        first_name: 'Jean',
+        last_name: 'Patron',
+        phone: '+242002',
+        email: 'jean@test.com',
+      });
+      const result = await service.getContactsIfUnlocked(
+        'attempt-1',
+        'worker-1',
+      );
       expect(result).toMatchObject({ name: 'Jean Patron' });
     });
   });
@@ -466,8 +644,13 @@ describe('ContactUnlockService', () => {
       prisma.contactUnlockAttempt.findMany.mockResolvedValue([attempt]);
       prisma.contactUnlockAttempt.update.mockResolvedValue({});
       prisma.$transaction.mockImplementation(async (cb) => cb(prisma._txMock));
-      prisma._txMock.application.findUnique.mockResolvedValue({ status: 'WAITING_PAYMENT' });
-      prisma._txMock.jobOffer.findUnique.mockResolvedValue({ status: JobOfferStatus.ACTIVE, scheduled_at: new Date(Date.now() + 48 * 60 * 60 * 1000) });
+      prisma._txMock.application.findUnique.mockResolvedValue({
+        status: 'WAITING_PAYMENT',
+      });
+      prisma._txMock.jobOffer.findUnique.mockResolvedValue({
+        status: JobOfferStatus.ACTIVE,
+        scheduled_at: new Date(Date.now() + 48 * 60 * 60 * 1000),
+      });
       prisma._txMock.application.update.mockResolvedValue({});
       prisma._txMock.assignment.updateMany.mockResolvedValue({ count: 1 });
       prisma._txMock.application.count.mockResolvedValue(0);
@@ -517,7 +700,11 @@ describe('ContactUnlockService', () => {
       expect(walletService.creditProfileWallet).not.toHaveBeenCalled();
       expect(result).toHaveLength(0);
       expect(prisma.contactUnlockAttempt.update).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.objectContaining({ status: ContactUnlockStatus.EXPIRED }) })
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: ContactUnlockStatus.EXPIRED,
+          }),
+        }),
       );
     });
 
@@ -532,7 +719,11 @@ describe('ContactUnlockService', () => {
       prisma._txMock.application.findUnique.mockResolvedValue(null);
       const result = await service.processExpiredAttempts();
       expect(walletService.creditProfileWallet).toHaveBeenCalledWith(
-        'worker-1', expect.any(Number), expect.any(String), expect.any(String), expect.any(String)
+        'worker-1',
+        expect.any(Number),
+        expect.any(String),
+        expect.any(String),
+        expect.any(String),
       );
       expect(result[0].profileId).toBe('worker-1');
     });
@@ -543,7 +734,9 @@ describe('ContactUnlockService', () => {
         job_offer: { quantity: 1, employer_unlock_paid: false },
       };
       prisma.contactUnlockAttempt.findMany.mockResolvedValue([attempt]);
-      walletService.creditProfileWallet.mockRejectedValueOnce(new Error('wallet fail'));
+      walletService.creditProfileWallet.mockRejectedValueOnce(
+        new Error('wallet fail'),
+      );
       prisma.contactUnlockAttempt.update.mockResolvedValue({});
       prisma.$transaction.mockImplementation(async (cb) => cb(prisma._txMock));
       prisma._txMock.application.findUnique.mockResolvedValue(null);
@@ -559,7 +752,9 @@ describe('ContactUnlockService', () => {
       prisma.contactUnlockAttempt.findMany.mockResolvedValue([]);
       await service.expirePendingAttemptsForJob('jo-1');
       expect(prisma.contactUnlockAttempt.updateMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: expect.objectContaining({ job_offer_id: 'jo-1' }) })
+        expect.objectContaining({
+          where: expect.objectContaining({ job_offer_id: 'jo-1' }),
+        }),
       );
     });
   });
