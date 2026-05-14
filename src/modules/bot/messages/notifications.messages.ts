@@ -1,3 +1,5 @@
+import { APP_TIMEZONE } from '../utils/parse-date-time';
+
 function formatDate(d: Date): string {
   return d.toLocaleDateString('fr-FR', {
     day: '2-digit',
@@ -5,6 +7,7 @@ function formatDate(d: Date): string {
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
+    timeZone: APP_TIMEZONE,
   });
 }
 
@@ -90,7 +93,7 @@ export function formatReminderStart(params: {
     "*C'EST L'HEURE - VOTRE MISSION COMMENCE !*",
     '',
     `*Offre*: ${params.offerTitle}`,
-    `*Heure*: ${params.scheduledAt.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`,
+    `*Heure*: ${params.scheduledAt.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', timeZone: APP_TIMEZONE })}`,
     `*Adresse*: ${params.address}`,
     '',
     `*Employeur*: ${params.employerName}`,
@@ -111,7 +114,7 @@ export function formatReminder2h(params: {
     '*Votre mission commence dans 2 heures !*',
     '',
     `*Offre*: ${params.offerTitle}`,
-    `*Date*: Aujourd'hui à ${params.scheduledAt.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`,
+    `*Date*: Aujourd'hui à ${params.scheduledAt.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', timeZone: APP_TIMEZONE })}`,
     `*Adresse*: ${params.address}`,
     '',
     `*Employeur*: ${params.employerName}`,

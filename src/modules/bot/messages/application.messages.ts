@@ -1,3 +1,5 @@
+import { APP_TIMEZONE } from '../utils/parse-date-time';
+
 export const SEP = '━━━━━━━━━━━━━━━';
 
 export type CandidatureListItem = {
@@ -89,6 +91,7 @@ function formatDate(d: Date): string {
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
+    timeZone: APP_TIMEZONE,
   });
 }
 
@@ -446,6 +449,7 @@ function formatDatePublic(d: Date | string | null | undefined): string {
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
+    timeZone: APP_TIMEZONE,
   });
 }
 
