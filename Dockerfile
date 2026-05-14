@@ -30,15 +30,17 @@ RUN pnpm run build
 
 # Pre-download fastembed models at build time so the container never needs
 # outbound internet access to HuggingFace at runtime.
-RUN node -e " \
-  const { FlagEmbedding, EmbeddingModel, SparseTextEmbedding, SparseEmbeddingModel } = require('fastembed'); \
-  const cacheDir = '/app/fastembed_cache'; \
-  Promise.all([ \
-    FlagEmbedding.init({ model: EmbeddingModel.BGESmallENV15, cacheDir }), \
-    SparseTextEmbedding.init({ model: SparseEmbeddingModel.SpladePPEnV1, cacheDir }), \
-  ]).then(() => { console.log('fastembed models cached'); process.exit(0); }) \
-    .catch(e => { console.error(e); process.exit(1); }); \
-"
+RUN for i in 1 2 3; do \
+    node -e " \
+      const { FlagEmbedding, EmbeddingModel, SparseTextEmbedding, SparseEmbeddingModel } = require('fastembed'); \
+      const cacheDir = '/app/fastembed_cache'; \
+      Promise.all([ \
+        FlagEmbedding.init({ model: EmbeddingModel.BGESmallENV15, cacheDir }), \
+        SparseTextEmbedding.init({ model: SparseEmbeddingModel.SpladePPEnV1, cacheDir }), \
+      ]).then(() => { console.log('fastembed models cached'); process.exit(0); }) \
+        .catch(e => { console.error(e); process.exit(1); }); \
+    " && break || { echo "Attempt $i failed, retrying in 10s..."; sleep 10; }; \
+  done
 
 # ─── api target — slim, no LibreOffice ────────────────────────────────────────
 FROM node:22-slim AS api
