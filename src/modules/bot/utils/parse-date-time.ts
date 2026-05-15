@@ -28,6 +28,8 @@ export function toScheduledAtString(scheduledAt: unknown): string {
   return '';
 }
 
+export const APP_TIMEZONE = 'Africa/Brazzaville';
+
 export function formatDateTime(d: Date): string {
   return d.toLocaleDateString('fr-FR', {
     day: '2-digit',
@@ -35,5 +37,6 @@ export function formatDateTime(d: Date): string {
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
+    timeZone: APP_TIMEZONE,
   });
 }

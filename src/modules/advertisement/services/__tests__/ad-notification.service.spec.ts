@@ -102,11 +102,18 @@ describe('AdNotificationService', () => {
   });
 
   it('dispatches to ALL channels (email + whatsapp)', async () => {
-    (notificationService.notifyAdvertisementCreated as jest.Mock).mockResolvedValue(undefined);
+    (
+      notificationService.notifyAdvertisementCreated as jest.Mock
+    ).mockResolvedValue(undefined);
     (whatsAppService.sendTextMessage as jest.Mock).mockResolvedValue(true);
     await service.dispatchCreated(
       { email: 'john@example.com', phone: '+242001', name: 'John' },
-      { advertisementId: 'ad-1', title: 'Title', startDate: '2026-01-01', endDate: '2026-01-07' },
+      {
+        advertisementId: 'ad-1',
+        title: 'Title',
+        startDate: '2026-01-01',
+        endDate: '2026-01-07',
+      },
       DeliveryChannel.ALL,
     );
     expect(notificationService.notifyAdvertisementCreated).toHaveBeenCalled();
@@ -114,10 +121,17 @@ describe('AdNotificationService', () => {
   });
 
   it('skips whatsapp in ALL channel when no phone', async () => {
-    (notificationService.notifyAdvertisementCreated as jest.Mock).mockResolvedValue(undefined);
+    (
+      notificationService.notifyAdvertisementCreated as jest.Mock
+    ).mockResolvedValue(undefined);
     await service.dispatchCreated(
       { email: 'john@example.com', name: 'John' },
-      { advertisementId: 'ad-1', title: 'Title', startDate: '2026-01-01', endDate: '2026-01-07' },
+      {
+        advertisementId: 'ad-1',
+        title: 'Title',
+        startDate: '2026-01-01',
+        endDate: '2026-01-07',
+      },
       DeliveryChannel.ALL,
     );
     expect(notificationService.notifyAdvertisementCreated).toHaveBeenCalled();
@@ -126,22 +140,39 @@ describe('AdNotificationService', () => {
 
   describe('sendOnChannel', () => {
     const basePayload = {
-      advertisementId: 'ad-1', title: 'Title', startDate: '2026-01-01', endDate: '2026-01-07',
+      advertisementId: 'ad-1',
+      title: 'Title',
+      startDate: '2026-01-01',
+      endDate: '2026-01-07',
     };
 
     it('sends email on EMAIL channel and returns true', async () => {
-      (notificationService.notifyAdvertisementCreated as jest.Mock).mockResolvedValue(undefined);
-      const result = await service.sendOnChannel({ email: 'a@test.com', name: 'Alice' }, basePayload, 'EMAIL');
+      (
+        notificationService.notifyAdvertisementCreated as jest.Mock
+      ).mockResolvedValue(undefined);
+      const result = await service.sendOnChannel(
+        { email: 'a@test.com', name: 'Alice' },
+        basePayload,
+        'EMAIL',
+      );
       expect(result).toBe(true);
     });
 
     it('returns false when no email on EMAIL channel', async () => {
-      const result = await service.sendOnChannel({ email: '', name: 'No Email' }, basePayload, 'EMAIL');
+      const result = await service.sendOnChannel(
+        { email: '', name: 'No Email' },
+        basePayload,
+        'EMAIL',
+      );
       expect(result).toBe(false);
     });
 
     it('returns false when no phone on WHATSAPP channel', async () => {
-      const result = await service.sendOnChannel({ email: 'a@test.com', name: 'Alice' }, basePayload, 'WHATSAPP');
+      const result = await service.sendOnChannel(
+        { email: 'a@test.com', name: 'Alice' },
+        basePayload,
+        'WHATSAPP',
+      );
       expect(result).toBe(false);
     });
 
@@ -170,7 +201,12 @@ describe('AdNotificationService', () => {
       (whatsAppService.sendTextMessage as jest.Mock).mockResolvedValue(true);
       const result = await service.sendOnChannel(
         { email: 'a@test.com', phone: '+242001', name: 'Alice' },
-        { ...basePayload, tags: ['marketing', 'jobs'], ctaUrl: 'https://example.com', callToAction: 'Voir' },
+        {
+          ...basePayload,
+          tags: ['marketing', 'jobs'],
+          ctaUrl: 'https://example.com',
+          callToAction: 'Voir',
+        },
         'WHATSAPP',
       );
       expect(result).toBe(true);

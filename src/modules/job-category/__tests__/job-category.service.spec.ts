@@ -50,13 +50,18 @@ describe('JobCategoryService', () => {
       mockPrisma.jobCategory.findUnique.mockResolvedValue(null);
       mockPrisma.jobCategory.create.mockResolvedValue(mockCategory);
 
-      const result = await service.create({ name: 'Plomberie', slug: 'plomberie' });
+      const result = await service.create({
+        name: 'Plomberie',
+        slug: 'plomberie',
+      });
       expect(result.id).toBe('cat-1');
     });
 
     it('throws ConflictException if slug already exists', async () => {
       mockPrisma.jobCategory.findUnique.mockResolvedValue(mockCategory);
-      await expect(service.create({ name: 'X', slug: 'plomberie' })).rejects.toThrow(ConflictException);
+      await expect(
+        service.create({ name: 'X', slug: 'plomberie' }),
+      ).rejects.toThrow(ConflictException);
     });
   });
 
@@ -64,7 +69,10 @@ describe('JobCategoryService', () => {
     it('updates a category', async () => {
       mockPrisma.jobCategory.findUnique.mockResolvedValue(mockCategory);
       mockPrisma.jobCategory.findFirst.mockResolvedValue(null);
-      mockPrisma.jobCategory.update.mockResolvedValue({ ...mockCategory, name: 'Updated' });
+      mockPrisma.jobCategory.update.mockResolvedValue({
+        ...mockCategory,
+        name: 'Updated',
+      });
 
       const result = await service.update('cat-1', { name: 'Updated' });
       expect(result.name).toBe('Updated');
@@ -72,13 +80,20 @@ describe('JobCategoryService', () => {
 
     it('throws NotFoundException if not found', async () => {
       mockPrisma.jobCategory.findUnique.mockResolvedValue(null);
-      await expect(service.update('x', { name: 'X' })).rejects.toThrow(NotFoundException);
+      await expect(service.update('x', { name: 'X' })).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('throws ConflictException if slug conflict', async () => {
       mockPrisma.jobCategory.findUnique.mockResolvedValue(mockCategory);
-      mockPrisma.jobCategory.findFirst.mockResolvedValue({ id: 'other', slug: 'new-slug' });
-      await expect(service.update('cat-1', { slug: 'new-slug' })).rejects.toThrow(ConflictException);
+      mockPrisma.jobCategory.findFirst.mockResolvedValue({
+        id: 'other',
+        slug: 'new-slug',
+      });
+      await expect(
+        service.update('cat-1', { slug: 'new-slug' }),
+      ).rejects.toThrow(ConflictException);
     });
   });
 

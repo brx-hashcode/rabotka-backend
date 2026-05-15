@@ -1,3 +1,18 @@
+import { APP_TIMEZONE } from '../utils/parse-date-time';
+
+export function formatKycValidatedMessage(
+  firstName: string,
+  _profileType: 'WORKER' | 'EMPLOYER',
+): string {
+  return [
+    `Bonjour ${firstName},`,
+    '',
+    "Bonne nouvelle ! 🎉 Votre vérification d'identité (KYC) a été approuvée avec succès.",
+    '',
+    'Tapez *Menu* pour commencer',
+  ].join('\n');
+}
+
 function formatDate(d: Date): string {
   return d.toLocaleDateString('fr-FR', {
     day: '2-digit',
@@ -5,6 +20,7 @@ function formatDate(d: Date): string {
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
+    timeZone: APP_TIMEZONE,
   });
 }
 
@@ -40,7 +56,7 @@ export function formatAccountActivatedMessage(params: {
     '',
     '*Pour commencer, tapez "Menu" pour voir toutes les options disponibles.*',
     '',
-    '*BIENVENUE SUR RABOTKA !*',
+    '*Bienvenue sur Rabotka !*',
   ].join('\n');
 }
 
@@ -55,7 +71,7 @@ export function formatReminder24h(params: {
   penaltyFcfa: number;
 }): string {
   return [
-    '*RAPPEL DE MISSION*',
+    '*Rappel de mission*',
     '',
     'Votre mission est prévue demain.',
     '',
@@ -87,10 +103,10 @@ export function formatReminderStart(params: {
   employerPhone: string;
 }): string {
   return [
-    "*C'EST L'HEURE - VOTRE MISSION COMMENCE !*",
+    "*C'est l'heure — votre mission commence !*",
     '',
     `*Offre*: ${params.offerTitle}`,
-    `*Heure*: ${params.scheduledAt.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`,
+    `*Heure*: ${params.scheduledAt.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', timeZone: APP_TIMEZONE })}`,
     `*Adresse*: ${params.address}`,
     '',
     `*Employeur*: ${params.employerName}`,
@@ -111,7 +127,7 @@ export function formatReminder2h(params: {
     '*Votre mission commence dans 2 heures !*',
     '',
     `*Offre*: ${params.offerTitle}`,
-    `*Date*: Aujourd'hui à ${params.scheduledAt.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`,
+    `*Date*: Aujourd'hui à ${params.scheduledAt.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', timeZone: APP_TIMEZONE })}`,
     `*Adresse*: ${params.address}`,
     '',
     `*Employeur*: ${params.employerName}`,
@@ -119,11 +135,11 @@ export function formatReminder2h(params: {
     '',
     "*Dernier délai d'annulation sans pénalité dépassé.*",
     '',
-    '*CONSEILS*:',
-    '*✓ Prévoyez votre trajet*',
+    '*Conseils*:',
+    '✓ Prévoyez votre trajet',
     '✓ Vérifiez que vous avez tout votre matériel',
     '✓ Arrivez 5-10 minutes en avance',
     '',
-    '*BONNE MISSION ! 💪*',
+    '*Bonne mission ! 💪*',
   ].join('\n');
 }

@@ -1,7 +1,10 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { QueueService } from '../../common/services/queue/queue.service';
 import { POLL_PAYMENT_STATUS_QUEUE } from '../../common/services/queue/queue.module';
-import { PollPaymentStatusProcessor, PollPaymentStatusJobData } from './poll-payment-status.processor';
+import {
+  PollPaymentStatusProcessor,
+  PollPaymentStatusJobData,
+} from './poll-payment-status.processor';
 import { PaymentRequestService } from './payment-request.service';
 
 @Injectable()

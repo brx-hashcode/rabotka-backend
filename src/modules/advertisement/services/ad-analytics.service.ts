@@ -251,7 +251,8 @@ export class AdAnalyticsService {
       ],
     );
 
-    const { total_sent, total_opened, clicked_deliveries, total_failed } = aggregates[0];
+    const { total_sent, total_opened, clicked_deliveries, total_failed } =
+      aggregates[0];
     const totalSent = Number(total_sent);
     const totalOpened = Number(total_opened);
     const clickedDeliveries = Number(clicked_deliveries);

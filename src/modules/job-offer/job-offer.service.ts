@@ -13,10 +13,7 @@ import { WalletService } from '../wallet/wallet.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
 import { BotNotificationService } from '../bot/services/bot-notification.service';
-import {
-  MatchingService,
-  MIN_NOTIFICATION_SCORE,
-} from '../matching/matching.service';
+import { MatchingService } from '../matching/matching.service';
 import { CreateJobOfferDto } from './dto/create-job-offer.dto';
 import { AdminUpdateJobOfferDto } from './dto/admin-update-job-offer.dto';
 import {
@@ -205,19 +202,31 @@ export class JobOfferService {
     this.matchingService
       .indexJobOffer(offer.id)
       .then(async () => {
+        const [enabled, minScore] = await Promise.all([
+          this.systemConfigService.isRecommendationEnabled(),
+          this.systemConfigService.getMinNotificationScore(),
+        ]);
+        if (!enabled) return;
+
         const workerResults: { id: string; score: number }[] =
           await this.matchingService.findMatchingWorkersForJob(offer.id, 20);
         for (const { id: workerId, score } of workerResults) {
-          if (score < MIN_NOTIFICATION_SCORE) continue;
+          if (score < minScore) continue;
           this.botNotification
             .sendRecommendedJobNotification(workerId, offer.id)
             .catch((err: unknown) =>
-              this.logger.warn(`sendRecommendedJobNotification failed for worker ${workerId}`, err instanceof Error ? err.message : String(err)),
+              this.logger.warn(
+                `sendRecommendedJobNotification failed for worker ${workerId}`,
+                err instanceof Error ? err.message : String(err),
+              ),
             );
         }
       })
       .catch((err: unknown) =>
-        this.logger.warn(`indexJobOffer/matchingNotify failed for offer ${offer.id}`, err instanceof Error ? err.message : String(err)),
+        this.logger.warn(
+          `indexJobOffer/matchingNotify failed for offer ${offer.id}`,
+          err instanceof Error ? err.message : String(err),
+        ),
       );
 
     return this.toListItem(offer);
@@ -256,6 +265,7 @@ export class JobOfferService {
         status: {
           in: [JobOfferStatus.ACTIVE, JobOfferStatus.PARTIALLY_FILLED],
         },
+        scheduled_at: { gt: new Date(Date.now() + 2 * 60 * 60 * 1000) },
         ...(excludeAppliedByWorkerId
           ? {
               applications: {

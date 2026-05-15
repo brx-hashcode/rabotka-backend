@@ -38,11 +38,11 @@ function makeJobOfferService(overrides = {}) {
       .fn()
       .mockResolvedValue({ data: [mockOffer], nextCursor: null }),
     findById: jest.fn().mockResolvedValue(mockOffer),
-    findByEmployerId: jest.fn().mockImplementation((_, opts) =>
-      opts
-        ? Promise.resolve({ items: [], total: 0 })
-        : Promise.resolve([]),
-    ),
+    findByEmployerId: jest
+      .fn()
+      .mockImplementation((_, opts) =>
+        opts ? Promise.resolve({ items: [], total: 0 }) : Promise.resolve([]),
+      ),
     ...overrides,
   };
 }
@@ -51,6 +51,7 @@ function makeApplicationService(overrides = {}) {
   return {
     findByWorker: jest.fn().mockResolvedValue([]),
     findByJobOffer: jest.fn().mockResolvedValue([]),
+    findByEmployer: jest.fn().mockResolvedValue([]),
     markAsViewed: jest.fn().mockResolvedValue(undefined),
     ...overrides,
   };
@@ -81,7 +82,9 @@ describe('BotCommandsService', () => {
       jobOfferService as any,
       applicationService as any,
       { getProfileWalletBalance: jest.fn().mockResolvedValue(0) } as any,
-      { getFees: jest.fn().mockResolvedValue({ cancellationThresholdHours: 4 }) } as any,
+      {
+        getFees: jest.fn().mockResolvedValue({ cancellationThresholdHours: 4 }),
+      } as any,
     );
   });
 
@@ -160,8 +163,13 @@ describe('BotCommandsService', () => {
           id: 'app-e1',
           status: 'PENDING',
           job_offer: {
-            id: 'jo-e1', title: 'Electrician', scheduled_at: new Date(),
-            amount: 20000, payment_flow: 'DAILY', address: 'Brazza', status: 'ACTIVE',
+            id: 'jo-e1',
+            title: 'Electrician',
+            scheduled_at: new Date(),
+            amount: 20000,
+            payment_flow: 'DAILY',
+            address: 'Brazza',
+            status: 'ACTIVE',
           },
         },
       ]);
@@ -173,12 +181,12 @@ describe('BotCommandsService', () => {
   describe('myOffers()', () => {
     it('blocks non-employer', async () => {
       const result = await service.myOffers(workerProfile);
-      expect(result.message).toContain('EMPLOYEURS');
+      expect(result.message).toContain('employeurs');
     });
 
     it('returns no-offers message when employer has none', async () => {
       const result = await service.myOffers(employerProfile);
-      expect(result.message).toContain('AUCUNE OFFRE');
+      expect(result.message).toContain('aucune offre');
     });
 
     it('returns formatted offer list for employer', async () => {
@@ -193,7 +201,7 @@ describe('BotCommandsService', () => {
           : Promise.resolve([mockOffer]),
       );
       const result = await service.myOffers(employerProfile);
-      expect(result.message).toContain('MES OFFRES');
+      expect(result.message).toContain('Mes offres publiées');
       expect(result.offerIds).toHaveLength(1);
     });
 
@@ -202,7 +210,13 @@ describe('BotCommandsService', () => {
       jobOfferService.findByEmployerId.mockImplementation((_, opts) =>
         opts
           ? Promise.resolve({
-              items: [{ ...mockOffer, title: longTitle, amount: { toLocaleString: () => '15 000' } }],
+              items: [
+                {
+                  ...mockOffer,
+                  title: longTitle,
+                  amount: { toLocaleString: () => '15 000' },
+                },
+              ],
               total: 1,
             })
           : Promise.resolve([mockOffer]),
@@ -260,7 +274,7 @@ describe('BotCommandsService', () => {
   describe('candidaturesReceived()', () => {
     it('blocks non-employer', async () => {
       const result = await service.candidaturesReceived(workerProfile);
-      expect(result.message).toContain('EMPLOYEURS');
+      expect(result.message).toContain('employeurs');
     });
 
     it('returns no-pending message when no offers', async () => {
@@ -328,7 +342,14 @@ describe('BotCommandsService', () => {
         Array.from({ length: 7 }, (_, i) => ({
           id: `app-${i}`,
           status: 'PENDING',
-          worker: { first_name: `W${i}`, last_name: 'X', reliability_score: 80, email: `w${i}@test.com`, avatar_url: null, verification_status: 'VERIFIED' },
+          worker: {
+            first_name: `W${i}`,
+            last_name: 'X',
+            reliability_score: 80,
+            email: `w${i}@test.com`,
+            avatar_url: null,
+            verification_status: 'VERIFIED',
+          },
         })),
       );
       const result = await service.candidaturesReceived(employerProfile);
@@ -339,7 +360,7 @@ describe('BotCommandsService', () => {
   describe('filledJobs()', () => {
     it('blocks non-employer', async () => {
       const result = await service.filledJobs(workerProfile);
-      expect(result.message).toContain('EMPLOYEURS');
+      expect(result.message).toContain('employeurs');
     });
 
     it('returns no-filled message when no filled offers', async () => {
@@ -378,7 +399,11 @@ describe('BotCommandsService', () => {
         { ...mockOffer, status: 'FILLED' },
       ]);
       applicationService.findByJobOffer.mockResolvedValue([
-        { id: 'app-1', status: 'ACCEPTED', worker: { first_name: '', last_name: '' } },
+        {
+          id: 'app-1',
+          status: 'ACCEPTED',
+          worker: { first_name: '', last_name: '' },
+        },
       ]);
       const result = await service.filledJobs(employerProfile);
       expect(result.items?.[0].workerName).toBe('Inconnu');
@@ -434,8 +459,13 @@ describe('BotCommandsService', () => {
           id: 'app-2',
           status: 'WAITING_PAYMENT',
           job_offer: {
-            id: 'jo-2', title: 'Maçon', scheduled_at: new Date(),
-            amount: 20000, payment_flow: 'DAILY', address: 'Pointe-Noire', status: 'ACTIVE',
+            id: 'jo-2',
+            title: 'Maçon',
+            scheduled_at: new Date(),
+            amount: 20000,
+            payment_flow: 'DAILY',
+            address: 'Pointe-Noire',
+            status: 'ACTIVE',
           },
         },
       ]);
@@ -455,8 +485,13 @@ describe('BotCommandsService', () => {
           id: 'app-3',
           status: 'WAITING_PAYMENT',
           job_offer: {
-            id: 'jo-3', title: 'Électricien', scheduled_at: new Date(),
-            amount: 25000, payment_flow: 'HOURLY', address: 'Brazzaville', status: 'ACTIVE',
+            id: 'jo-3',
+            title: 'Électricien',
+            scheduled_at: new Date(),
+            amount: 25000,
+            payment_flow: 'HOURLY',
+            address: 'Brazzaville',
+            status: 'ACTIVE',
           },
         },
       ]);
@@ -468,8 +503,12 @@ describe('BotCommandsService', () => {
   describe('profile() - avatar_url and EMPLOYER stats', () => {
     it('returns employer profile with avatar_url', async () => {
       prisma.profile.findUnique.mockResolvedValue({
-        first_name: 'Jean', last_name: 'Patron', email: 'jean@example.com',
-        reliability_score: null, status: 'ACTIVE', created_at: new Date(),
+        first_name: 'Jean',
+        last_name: 'Patron',
+        email: 'jean@example.com',
+        reliability_score: null,
+        status: 'ACTIVE',
+        created_at: new Date(),
         avatar_url: 'http://example.com/avatar.jpg',
         profile_type: 'EMPLOYER',
       });
@@ -479,15 +518,25 @@ describe('BotCommandsService', () => {
 
     it('returns worker profile with avatar_url', async () => {
       prisma.profile.findUnique.mockResolvedValue({
-        first_name: 'Alice', last_name: 'Dupont', email: 'alice@example.com',
-        reliability_score: 85, status: 'ACTIVE', created_at: new Date(),
+        first_name: 'Alice',
+        last_name: 'Dupont',
+        email: 'alice@example.com',
+        reliability_score: 85,
+        status: 'ACTIVE',
+        created_at: new Date(),
         avatar_url: 'http://example.com/avatar2.jpg',
         profile_type: 'WORKER',
       });
       applicationService.findByWorker.mockResolvedValue([
         {
-          id: 'app-1', status: 'ACCEPTED',
-          job_offer: { id: 'jo-1', title: 'Job', status: 'COMPLETED', amount: 15000 },
+          id: 'app-1',
+          status: 'ACCEPTED',
+          job_offer: {
+            id: 'jo-1',
+            title: 'Job',
+            status: 'COMPLETED',
+            amount: 15000,
+          },
         },
       ]);
       const result = await service.profile(workerProfile);
@@ -496,18 +545,35 @@ describe('BotCommandsService', () => {
 
     it('returns worker stats with completed applications', async () => {
       prisma.profile.findUnique.mockResolvedValue({
-        first_name: 'Alice', last_name: 'Dupont', email: 'alice@example.com',
-        reliability_score: 90, status: 'ACTIVE', created_at: new Date(),
-        avatar_url: null, profile_type: 'WORKER',
+        first_name: 'Alice',
+        last_name: 'Dupont',
+        email: 'alice@example.com',
+        reliability_score: 90,
+        status: 'ACTIVE',
+        created_at: new Date(),
+        avatar_url: null,
+        profile_type: 'WORKER',
       });
       applicationService.findByWorker.mockResolvedValue([
         {
-          id: 'app-1', status: 'ACCEPTED',
-          job_offer: { id: 'jo-1', title: 'Job', status: 'COMPLETED', amount: 15000 },
+          id: 'app-1',
+          status: 'ACCEPTED',
+          job_offer: {
+            id: 'jo-1',
+            title: 'Job',
+            status: 'COMPLETED',
+            amount: 15000,
+          },
         },
         {
-          id: 'app-2', status: 'PENDING',
-          job_offer: { id: 'jo-2', title: 'Job2', status: 'ACTIVE', amount: 10000 },
+          id: 'app-2',
+          status: 'PENDING',
+          job_offer: {
+            id: 'jo-2',
+            title: 'Job2',
+            status: 'ACTIVE',
+            amount: 10000,
+          },
         },
       ]);
       const result = await service.profile(workerProfile);
@@ -538,12 +604,24 @@ describe('BotCommandsService', () => {
     it('calculates completed stats from applications', async () => {
       applicationService.findByWorker.mockResolvedValue([
         {
-          id: 'app-1', status: 'ACCEPTED',
-          job_offer: { id: 'jo-1', title: 'Job', status: 'COMPLETED', amount: 15000 },
+          id: 'app-1',
+          status: 'ACCEPTED',
+          job_offer: {
+            id: 'jo-1',
+            title: 'Job',
+            status: 'COMPLETED',
+            amount: 15000,
+          },
         },
         {
-          id: 'app-2', status: 'PENDING',
-          job_offer: { id: 'jo-2', title: 'Job2', status: 'ACTIVE', amount: 10000 },
+          id: 'app-2',
+          status: 'PENDING',
+          job_offer: {
+            id: 'jo-2',
+            title: 'Job2',
+            status: 'ACTIVE',
+            amount: 10000,
+          },
         },
       ]);
       const result = await service.penaltyHistory(workerProfile);
@@ -554,16 +632,31 @@ describe('BotCommandsService', () => {
   describe('profile() - wallet error handling', () => {
     it('catches wallet error gracefully', async () => {
       prisma.profile.findUnique.mockResolvedValue({
-        first_name: 'Alice', last_name: 'Dupont', email: 'alice@example.com',
-        reliability_score: 90, status: 'ACTIVE', created_at: new Date(),
-        avatar_url: null, profile_type: 'WORKER',
+        first_name: 'Alice',
+        last_name: 'Dupont',
+        email: 'alice@example.com',
+        reliability_score: 90,
+        status: 'ACTIVE',
+        created_at: new Date(),
+        avatar_url: null,
+        profile_type: 'WORKER',
       });
       // Create a new service with a wallet that throws
-      const errorWallet = { getProfileWalletBalance: jest.fn().mockRejectedValue(new Error('wallet error')) };
+      const errorWallet = {
+        getProfileWalletBalance: jest
+          .fn()
+          .mockRejectedValue(new Error('wallet error')),
+      };
       const svc = new BotCommandsService(
-        prisma as any, jobOfferService as any, applicationService as any,
+        prisma as any,
+        jobOfferService as any,
+        applicationService as any,
         errorWallet as any,
-        { getFees: jest.fn().mockResolvedValue({ cancellationThresholdHours: 4 }) } as any,
+        {
+          getFees: jest
+            .fn()
+            .mockResolvedValue({ cancellationThresholdHours: 4 }),
+        } as any,
       );
       const result = await svc.profile(workerProfile);
       expect(result).toBeDefined();

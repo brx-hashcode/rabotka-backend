@@ -39,7 +39,6 @@ export type AdminDocumentItem = {
   variables: string[];
 };
 
-
 const DOCX_MIME =
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
@@ -238,7 +237,12 @@ export class DocumentService {
       this.prisma.document.count({ where }),
     ]);
 
-    return { data: await Promise.all(docs.map((d) => this.mapDocument(d))), total, page, limit };
+    return {
+      data: await Promise.all(docs.map((d) => this.mapDocument(d))),
+      total,
+      page,
+      limit,
+    };
   }
 
   async update(id: string, dto: UpdateDocumentDto): Promise<AdminDocumentItem> {

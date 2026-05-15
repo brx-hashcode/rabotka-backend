@@ -86,11 +86,17 @@ describe('NotificationService', () => {
   describe('claim notifications', () => {
     it('notifyClaimCreated sends email', async () => {
       await service.notifyClaimCreated('user@example.com', 'Bob', 'My Claim');
-      expect(mockMailService.sendMail).toHaveBeenCalledWith(expect.objectContaining({ to: 'user@example.com' }));
+      expect(mockMailService.sendMail).toHaveBeenCalledWith(
+        expect.objectContaining({ to: 'user@example.com' }),
+      );
     });
 
     it('notifyClaimInProgress sends email', async () => {
-      await service.notifyClaimInProgress('user@example.com', 'Bob', 'My Claim');
+      await service.notifyClaimInProgress(
+        'user@example.com',
+        'Bob',
+        'My Claim',
+      );
       expect(mockMailService.sendMail).toHaveBeenCalled();
     });
 
@@ -105,12 +111,20 @@ describe('NotificationService', () => {
     });
 
     it('notifyClaimAssigned sends email', async () => {
-      await service.notifyClaimAssigned('admin@example.com', 'Alice', 'My Claim');
+      await service.notifyClaimAssigned(
+        'admin@example.com',
+        'Alice',
+        'My Claim',
+      );
       expect(mockMailService.sendMail).toHaveBeenCalled();
     });
 
     it('notifyClaimUnassigned sends email', async () => {
-      await service.notifyClaimUnassigned('admin@example.com', 'Alice', 'My Claim');
+      await service.notifyClaimUnassigned(
+        'admin@example.com',
+        'Alice',
+        'My Claim',
+      );
       expect(mockMailService.sendMail).toHaveBeenCalled();
     });
   });
@@ -128,7 +142,9 @@ describe('NotificationService', () => {
       );
       expect(mockMailService.sendMail).toHaveBeenCalledWith(
         expect.objectContaining({
-          attachments: expect.arrayContaining([expect.objectContaining({ filename: 'event.ics' })]),
+          attachments: expect.arrayContaining([
+            expect.objectContaining({ filename: 'event.ics' }),
+          ]),
         }),
       );
     });
@@ -158,7 +174,9 @@ describe('NotificationService', () => {
     });
 
     it('notifyAdvertisementCreated with failed image fetch still sends', async () => {
-      global.fetch = jest.fn().mockRejectedValue(new Error('Network error')) as any;
+      global.fetch = jest
+        .fn()
+        .mockRejectedValue(new Error('Network error')) as any;
       await service.notifyAdvertisementCreated({
         to: 'client@example.com',
         name: 'Client',
@@ -171,7 +189,11 @@ describe('NotificationService', () => {
     });
 
     it('notifyAdvertisementCreated with non-ok image response does not attach', async () => {
-      global.fetch = jest.fn().mockResolvedValue({ ok: false, headers: { get: () => null }, arrayBuffer: () => Promise.resolve(new ArrayBuffer(0)) }) as any;
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: false,
+        headers: { get: () => null },
+        arrayBuffer: () => Promise.resolve(new ArrayBuffer(0)),
+      }) as any;
       await service.notifyAdvertisementCreated({
         to: 'client@example.com',
         name: 'Client',
@@ -199,7 +221,11 @@ describe('NotificationService', () => {
         imageUrl: 'https://example.com/image.png',
       });
       expect(mockMailService.sendMail).toHaveBeenCalledWith(
-        expect.objectContaining({ attachments: expect.arrayContaining([expect.objectContaining({ filename: 'advertisement-image.png' })]) }),
+        expect.objectContaining({
+          attachments: expect.arrayContaining([
+            expect.objectContaining({ filename: 'advertisement-image.png' }),
+          ]),
+        }),
       );
     });
 
@@ -218,7 +244,11 @@ describe('NotificationService', () => {
         imageUrl: 'https://example.com/image.jpeg',
       });
       expect(mockMailService.sendMail).toHaveBeenCalledWith(
-        expect.objectContaining({ attachments: expect.arrayContaining([expect.objectContaining({ filename: 'advertisement-image.jpg' })]) }),
+        expect.objectContaining({
+          attachments: expect.arrayContaining([
+            expect.objectContaining({ filename: 'advertisement-image.jpg' }),
+          ]),
+        }),
       );
     });
 
@@ -228,13 +258,29 @@ describe('NotificationService', () => {
         adTitle: 'My Campaign',
         startDate: '2026-07-01',
         endDate: '2026-07-31',
-        stats: { totalSent: 100, totalOpened: 50, totalClicks: 20, totalFailed: 5, openRate: 50, clickRate: 20, clickedDeliveries: 20, clickThroughRate: 40, remainingDays: 0, links: [] },
+        stats: {
+          totalSent: 100,
+          totalOpened: 50,
+          totalClicks: 20,
+          totalFailed: 5,
+          openRate: 50,
+          clickRate: 20,
+          clickedDeliveries: 20,
+          clickThroughRate: 40,
+          remainingDays: 0,
+          links: [],
+        },
         timeline: [],
         excelBuffer: Buffer.from('excel'),
       });
       expect(mockMailService.sendMail).toHaveBeenCalledWith(
         expect.objectContaining({
-          attachments: expect.arrayContaining([expect.objectContaining({ contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })]),
+          attachments: expect.arrayContaining([
+            expect.objectContaining({
+              contentType:
+                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            }),
+          ]),
         }),
       );
     });

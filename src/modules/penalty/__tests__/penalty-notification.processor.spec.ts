@@ -35,7 +35,9 @@ describe('PenaltyNotificationProcessor', () => {
         { provide: BotNotificationService, useValue: mockBotNotification },
       ],
     }).compile();
-    processor = module.get<PenaltyNotificationProcessor>(PenaltyNotificationProcessor);
+    processor = module.get<PenaltyNotificationProcessor>(
+      PenaltyNotificationProcessor,
+    );
   });
 
   it('onModuleInit creates queue worker', () => {
@@ -44,7 +46,10 @@ describe('PenaltyNotificationProcessor', () => {
   });
 
   it('process(scan) runs scan and adds jobs for each penalty', async () => {
-    mockPrisma.penalty.findMany.mockResolvedValueOnce([{ id: 'pen-1' }, { id: 'pen-2' }]);
+    mockPrisma.penalty.findMany.mockResolvedValueOnce([
+      { id: 'pen-1' },
+      { id: 'pen-2' },
+    ]);
     await processor.process({ data: { type: 'scan' } });
     expect(mockQueueService.addJob).toHaveBeenCalledTimes(2);
   });
@@ -65,17 +70,23 @@ describe('PenaltyNotificationProcessor', () => {
       last_notified_at: null,
       profile: { phone: '+242001', first_name: 'Alice' },
     });
-    await processor.process({ data: { type: 'notify_penalty', penaltyId: 'pen-1' } });
+    await processor.process({
+      data: { type: 'notify_penalty', penaltyId: 'pen-1' },
+    });
     expect(mockBotNotification.sendMessage).toHaveBeenCalled();
-    expect(mockPrisma.penalty.update).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: 'pen-1' },
-      data: expect.objectContaining({ notification_count: { increment: 1 } }),
-    }));
+    expect(mockPrisma.penalty.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'pen-1' },
+        data: expect.objectContaining({ notification_count: { increment: 1 } }),
+      }),
+    );
   });
 
   it('process(notify_penalty) skips when penalty not found', async () => {
     mockPrisma.penalty.findUnique.mockResolvedValueOnce(null);
-    await processor.process({ data: { type: 'notify_penalty', penaltyId: 'missing' } });
+    await processor.process({
+      data: { type: 'notify_penalty', penaltyId: 'missing' },
+    });
     expect(mockBotNotification.sendMessage).not.toHaveBeenCalled();
   });
 
@@ -86,7 +97,9 @@ describe('PenaltyNotificationProcessor', () => {
       notification_count: 0,
       profile: { phone: '+242', first_name: 'Bob' },
     });
-    await processor.process({ data: { type: 'notify_penalty', penaltyId: 'pen-1' } });
+    await processor.process({
+      data: { type: 'notify_penalty', penaltyId: 'pen-1' },
+    });
     expect(mockBotNotification.sendMessage).not.toHaveBeenCalled();
   });
 
@@ -98,7 +111,9 @@ describe('PenaltyNotificationProcessor', () => {
       last_notified_at: null,
       profile: { phone: '+242', first_name: 'Bob' },
     });
-    await processor.process({ data: { type: 'notify_penalty', penaltyId: 'pen-1' } });
+    await processor.process({
+      data: { type: 'notify_penalty', penaltyId: 'pen-1' },
+    });
     expect(mockBotNotification.sendMessage).not.toHaveBeenCalled();
   });
 
@@ -110,7 +125,9 @@ describe('PenaltyNotificationProcessor', () => {
       last_notified_at: new Date(), // just now
       profile: { phone: '+242', first_name: 'Bob' },
     });
-    await processor.process({ data: { type: 'notify_penalty', penaltyId: 'pen-1' } });
+    await processor.process({
+      data: { type: 'notify_penalty', penaltyId: 'pen-1' },
+    });
     expect(mockBotNotification.sendMessage).not.toHaveBeenCalled();
   });
 
@@ -124,8 +141,14 @@ describe('PenaltyNotificationProcessor', () => {
       last_notified_at: null,
       profile: { phone: '+242001', first_name: 'Alice' },
     });
-    mockBotNotification.sendMessage.mockRejectedValueOnce(new Error('WA error'));
-    await expect(processor.process({ data: { type: 'notify_penalty', penaltyId: 'pen-1' } })).rejects.toThrow('WA error');
+    mockBotNotification.sendMessage.mockRejectedValueOnce(
+      new Error('WA error'),
+    );
+    await expect(
+      processor.process({
+        data: { type: 'notify_penalty', penaltyId: 'pen-1' },
+      }),
+    ).rejects.toThrow('WA error');
   });
 
   it('process with unknown type logs warning', async () => {

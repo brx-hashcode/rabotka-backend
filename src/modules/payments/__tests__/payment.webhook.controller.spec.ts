@@ -20,7 +20,9 @@ describe('PaymentWebhookController', () => {
 
   it('penaltySuccess calls handlePenaltyPaymentSuccess and returns ok', async () => {
     const result = await controller.penaltySuccess('profile-1');
-    expect(mockPaymentService.handlePenaltyPaymentSuccess).toHaveBeenCalledWith('profile-1');
+    expect(mockPaymentService.handlePenaltyPaymentSuccess).toHaveBeenCalledWith(
+      'profile-1',
+    );
     expect(result).toEqual({ ok: true });
   });
 });

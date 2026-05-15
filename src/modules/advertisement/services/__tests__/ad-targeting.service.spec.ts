@@ -3,7 +3,14 @@ import { AdTargetingService } from '../ad-targeting.service';
 import { PrismaService } from '../../../../common/services/prisma/prisma.service';
 
 const mockProfiles = [
-  { id: 'p-1', first_name: 'Alice', last_name: 'Smith', email: 'alice@test.com', phone: '+242001', whatsapp_connected: true },
+  {
+    id: 'p-1',
+    first_name: 'Alice',
+    last_name: 'Smith',
+    email: 'alice@test.com',
+    phone: '+242001',
+    whatsapp_connected: true,
+  },
 ];
 
 const mockPrisma = {

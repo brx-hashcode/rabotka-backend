@@ -57,7 +57,7 @@ describe('JobOfferExpiryScheduler', () => {
     ]);
     await scheduler.handleExpiredJobOffers();
     expect(mockPrisma.jobOffer.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: { in: ['jo-1'] } } })
+      expect.objectContaining({ where: { id: { in: ['jo-1'] } } }),
     );
     expect(mockBotNotification.sendMessage).toHaveBeenCalledTimes(2); // employer + 1 worker
   });
@@ -65,19 +65,25 @@ describe('JobOfferExpiryScheduler', () => {
   it('swallows employer notification errors', async () => {
     mockPrisma.jobOffer.findMany.mockResolvedValueOnce([
       {
-        id: 'jo-1', title: 'Cuisinier', employer_id: 'emp-1',
+        id: 'jo-1',
+        title: 'Cuisinier',
+        employer_id: 'emp-1',
         employer: { phone: '+242001', first_name: 'Alice' },
         applications: [],
       },
     ]);
-    mockBotNotification.sendMessage.mockRejectedValueOnce(new Error('send failed'));
+    mockBotNotification.sendMessage.mockRejectedValueOnce(
+      new Error('send failed'),
+    );
     await expect(scheduler.handleExpiredJobOffers()).resolves.not.toThrow();
   });
 
   it('handles expired offer with no employer phone', async () => {
     mockPrisma.jobOffer.findMany.mockResolvedValueOnce([
       {
-        id: 'jo-2', title: 'Vendeur', employer_id: 'emp-2',
+        id: 'jo-2',
+        title: 'Vendeur',
+        employer_id: 'emp-2',
         employer: { phone: null, first_name: 'Carol' },
         applications: [],
       },

@@ -1,9 +1,9 @@
 export function paymentUseRegisteredNumberPrompt(phone: string): string {
   return [
-    `💳 *Paiement Mobile Money*`,
+    `*Paiement Mobile Money*`,
     ``,
     `Voulez-vous payer avec votre numéro enregistré ?`,
-    `📱 *${phone}*`,
+    `*${phone}*`,
     ``,
     `1 — Oui, utiliser ce numéro`,
     `2 — Non, utiliser un autre numéro`,
@@ -13,7 +13,7 @@ export function paymentUseRegisteredNumberPrompt(phone: string): string {
 
 export function paymentEnterPhonePrompt(): string {
   return [
-    `📱 *Entrez le numéro Mobile Money*`,
+    `*Entrez le numéro Mobile Money*`,
     ``,
     `Saisissez le numéro à débiter (avec l'indicatif pays) :`,
     `Exemple : *242XXXXXXXX*`,
@@ -22,7 +22,7 @@ export function paymentEnterPhonePrompt(): string {
 
 export function paymentChooseOperatorPrompt(): string {
   return [
-    `📶 *Choisissez votre opérateur*`,
+    `*Choisissez votre opérateur*`,
     ``,
     `1 — MTN Mobile Money`,
     `2 — Airtel Money`,
@@ -35,7 +35,7 @@ export function paymentPendingMessage(
   phone: string,
 ): string {
   return [
-    `⏳ *Paiement en cours…*`,
+    `*Paiement en cours…*`,
     ``,
     `Un paiement de *${amount.toLocaleString('fr-FR')} FCFA* va être déclenché sur le *${operator}* (*${phone}*).`,
     ``,
