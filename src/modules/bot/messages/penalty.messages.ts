@@ -39,9 +39,9 @@ export function formatPenaltyHistory(
   thresholdHours: number,
 ): string {
   const lines = [
-    '*HISTORIQUE DES PENALITES*',
+    '*Historique des pénalités*',
     '',
-    '*RECAPITULATIF*',
+    '*Récapitulatif*',
     `*Total penalites*: ${fcfa(totalAmount)}`,
     `*Annulations tardives*: ${lateCancellationsCount}`,
     `*Score actuel*: ${currentScore}/100`,
@@ -65,7 +65,7 @@ export function formatPenaltyHistory(
   }
 
   lines.push(
-    '*CONSEILS POUR AMELIORER VOTRE SCORE*',
+    '*Conseils pour améliorer votre score*',
     `- Completez vos missions sans annulation`,
     `- Maintenez un score > 90 pour plus de visibilite`,
     `- Annulez toujours plus de ${thresholdHours}h avant si necessaire`,
@@ -89,7 +89,7 @@ export function formatEmployerProfileStats(params: {
   const activeOffers = params.activeOffersCount ?? params.offersCount;
   const balance = params.walletBalance ?? 0;
   return [
-    '*VOTRE PROFIL RABOTKA*',
+    '*Votre profil Rabotka*',
     '',
     `*Nom*: ${params.lastName}`,
     `*Prenom*: ${params.firstName}`,
@@ -130,13 +130,13 @@ export function formatProfileStats(params: {
   const since = formatDateShort(params.memberSince);
   const balance = params.walletBalance ?? 0;
   return [
-    '*VOTRE PROFIL RABOTKA*',
+    '*Votre profil Rabotka*',
     '',
     `*Nom*: ${params.lastName}`,
     `*Prenom*: ${params.firstName}`,
     `*Email*: ${params.email}`,
     '',
-    '*STATISTIQUES GENERALES*',
+    '*Statistiques générales*',
     SEP,
     `*Score de fiabilite*: ${score}/100`,
     `*Membre depuis*: ${since}`,
@@ -146,11 +146,11 @@ export function formatProfileStats(params: {
     `*Solde portefeuille*: ${fcfa(balance)}`,
     SEP,
     '',
-    '*PENALITES*',
+    '*Pénalités*',
     `*Total penalites*: ${fcfa(params.totalPenalties)}`,
     `*Annulations tardives*: ${params.lateCancellations}`,
     '',
-    '*ACTIONS*',
+    '*Actions*',
     "1- Voir l'historique complet",
     '2- Historique des penalites',
     '3- Retour au menu',
