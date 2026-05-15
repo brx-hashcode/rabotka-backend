@@ -27,6 +27,7 @@ import {
 import { WalletService } from '../wallet/wallet.service';
 import { DocumentService } from '../document/document.service';
 import { MatchingService } from '../matching/matching.service';
+import { InterestClusterService } from '../interest-graph/interest-cluster.service';
 import { CreateProfileDto } from './dto/create-profile.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { AdminUpdateProfileDto } from './dto/admin-update-profile.dto';
@@ -183,6 +184,7 @@ export class ProfileService {
     private readonly walletService: WalletService,
     private readonly documentService: DocumentService,
     private readonly matchingService: MatchingService,
+    private readonly interestClusters: InterestClusterService,
   ) {}
 
   async findById(id: string): Promise<ProfileMeResponse> {
@@ -677,6 +679,16 @@ export class ProfileService {
       entityId: String(profileId),
       timestamp: new Date().toISOString(),
     });
+
+    // Seed interest vector immediately on approval so first recommendation isn't cold-start
+    if (decision === 'VERIFIED') {
+      void this.interestClusters.reseedFromProfile(profileId).catch((err) => {
+        this.logger.warn(
+          `Interest vector reseed failed for profile=${profileId}`,
+          err,
+        );
+      });
+    }
 
     return this.getProfileDetailForAdmin(profileId);
   }

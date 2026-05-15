@@ -119,15 +119,9 @@ export class InterestSignalService {
       `Signal recorded: user=${userId} job=${jobId} type=${type} w=${baseWeight}`,
     );
 
-    // EMA update — fires on every signal, no batching
-    await this.clusters
-      .applySignal(
-        userId,
-        jobId,
-        vector,
-        baseWeight,
-        job.category?.name ?? null,
-      )
+    // Fire-and-forget — EMA update must not block the signal recording response
+    void this.clusters
+      .applySignal(userId, jobId, vector, baseWeight, job.category?.name ?? null)
       .catch((err) => {
         this.logger.warn(`EMA update failed for user=${userId}`, err);
       });
