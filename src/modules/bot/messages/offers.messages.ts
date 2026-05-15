@@ -1,6 +1,5 @@
 import { APP_TIMEZONE } from '../utils/parse-date-time';
 
-const SEP = '━━━━━━━━━━━━━━━━━━';
 
 export type OfferListItem = {
   id: string;
@@ -50,7 +49,7 @@ export function formatOfferList(
   total: number,
   pageInfo?: { hasNext: boolean },
 ): string {
-  const lines = [`*OFFRES DISPONIBLES (${total} offres)*`, '', SEP];
+  const lines = [`*Offres disponibles (${total} offres)*`, '', ''];
 
   for (const o of offers) {
     const summary =
@@ -68,7 +67,7 @@ export function formatOfferList(
       '',
       '1- Postuler',
       '2- Voir détails',
-      SEP,
+      '',
       '',
     );
   }
@@ -89,7 +88,7 @@ export function formatOfferListCompact(
   totalPages = 1,
 ): string {
   const pageLabel = totalPages > 1 ? ` (page ${page + 1}/${totalPages})` : '';
-  const lines = [`*OFFRES DISPONIBLES*${pageLabel}`, ''];
+  const lines = [`*Offres disponibles*${pageLabel}`, ''];
   offers.forEach((o, i) => {
     const qty = o.quantity ?? 1;
     const filled = o.acceptedCount ?? 0;
@@ -123,7 +122,7 @@ export function formatOfferListCompact(
 
 export function formatOfferDetail(offer: OfferListItem): string {
   const lines = [
-    `*OFFRE #${offer.id.slice(0, 8)} - DÉTAILS COMPLETS*`,
+    `*Offre #${offer.id.slice(0, 8)} — détails*`,
     '',
     `*Titre*: ${offer.title}`,
     '',
@@ -169,7 +168,7 @@ export function formatRecommendedList(
   page: number,
   totalPages: number,
 ): string {
-  const lines = [`*OFFRES RECOMMANDÉES* (page ${page + 1}/${totalPages})`, ''];
+  const lines = [`*Offres recommandées* (page ${page + 1}/${totalPages})`, ''];
   pageOffers.forEach((o, i) => {
     const qty = o.quantity ?? 1;
     const filled = o.acceptedCount ?? 0;
@@ -207,7 +206,7 @@ export function formatOfferDetailWithActions(offer: OfferListItem): string {
       : offer.description;
   const scoreLine = formatEmployerScore(offer.employerScore);
   return [
-    `*OFFRE - ${offer.title}*`,
+    `*${offer.title}*`,
     '',
     `*Résumé*: ${summary}`,
     `*Date*: ${formatDate(offer.scheduled_at)}`,
