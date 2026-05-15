@@ -181,12 +181,12 @@ describe('BotCommandsService', () => {
   describe('myOffers()', () => {
     it('blocks non-employer', async () => {
       const result = await service.myOffers(workerProfile);
-      expect(result.message).toContain('EMPLOYEURS');
+      expect(result.message).toContain('employeurs');
     });
 
     it('returns no-offers message when employer has none', async () => {
       const result = await service.myOffers(employerProfile);
-      expect(result.message).toContain('AUCUNE OFFRE');
+      expect(result.message).toContain('aucune offre');
     });
 
     it('returns formatted offer list for employer', async () => {
@@ -201,7 +201,7 @@ describe('BotCommandsService', () => {
           : Promise.resolve([mockOffer]),
       );
       const result = await service.myOffers(employerProfile);
-      expect(result.message).toContain('MES OFFRES');
+      expect(result.message).toContain('Mes offres publiées');
       expect(result.offerIds).toHaveLength(1);
     });
 
@@ -274,7 +274,7 @@ describe('BotCommandsService', () => {
   describe('candidaturesReceived()', () => {
     it('blocks non-employer', async () => {
       const result = await service.candidaturesReceived(workerProfile);
-      expect(result.message).toContain('EMPLOYEURS');
+      expect(result.message).toContain('employeurs');
     });
 
     it('returns no-pending message when no offers', async () => {
@@ -360,7 +360,7 @@ describe('BotCommandsService', () => {
   describe('filledJobs()', () => {
     it('blocks non-employer', async () => {
       const result = await service.filledJobs(workerProfile);
-      expect(result.message).toContain('EMPLOYEURS');
+      expect(result.message).toContain('employeurs');
     });
 
     it('returns no-filled message when no filled offers', async () => {

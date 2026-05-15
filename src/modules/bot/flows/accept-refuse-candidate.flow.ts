@@ -156,7 +156,7 @@ async function handleAcceptRefuseStep1(args: StepArgs): Promise<FlowResult> {
     return {
       reply: [
         [
-          "*RAISON DU REFUS ? (OPTIONNEL). TAPEZ LA RAISON OU 'AUCUNE' POUR REFUSER SANS RAISON.*",
+          "Raison du refus ? (optionnel). Tapez la raison ou 'Aucune' pour refuser sans raison.",
         ].join('\n'),
       ],
       nextState: {
@@ -168,7 +168,7 @@ async function handleAcceptRefuseStep1(args: StepArgs): Promise<FlowResult> {
     };
   }
   return {
-    reply: ['*RÉPONDEZ PAR 1 (ACCEPTER) OU 2 (REFUSER).*'],
+    reply: ['Répondez par 1 (Accepter) ou 2 (Refuser).'],
     nextState: state,
   };
 }
@@ -265,16 +265,14 @@ export async function runAcceptRefuseCandidateFlow(
 
   if (!applicationId) {
     return {
-      reply: ["*ERREUR: CANDIDATURE NON TROUVÉE. TAPEZ 'MENU'.*"],
+      reply: ["❌ Candidature non trouvée. Tapez *Menu*."],
       clearState: true,
     };
   }
 
   if (profile.profile_type !== 'EMPLOYER') {
     return {
-      reply: [
-        "*SEULS LES EMPLOYEURS PEUVENT GÉRER LES CANDIDATURES. TAPEZ 'MENU'.*",
-      ],
+      reply: ["❌ Seuls les employeurs peuvent gérer les candidatures. Tapez *Menu*."],
       clearState: true,
     };
   }
@@ -293,7 +291,7 @@ export async function runAcceptRefuseCandidateFlow(
   if (state.step === 3) return handleAcceptRefuseStep3(args);
 
   return {
-    reply: ["*ERREUR. TAPEZ 'MENU' POUR REVENIR.*"],
+    reply: ["❌ Erreur. Tapez *Menu* pour revenir."],
     clearState: true,
   };
 }

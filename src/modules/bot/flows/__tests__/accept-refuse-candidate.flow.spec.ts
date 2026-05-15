@@ -77,7 +77,7 @@ describe('runAcceptRefuseCandidateFlow()', () => {
         ctx,
       );
       expect(result.clearState).toBe(true);
-      expect(result.reply[0]).toContain('CANDIDATURE NON TROUVÉE');
+      expect(result.reply[0]).toContain('Candidature non trouvée');
     });
 
     it('blocks worker from accepting/refusing', async () => {
@@ -90,7 +90,7 @@ describe('runAcceptRefuseCandidateFlow()', () => {
         ctx,
       );
       expect(result.clearState).toBe(true);
-      expect(result.reply[0]).toContain('EMPLOYEURS');
+      expect(result.reply[0]).toContain('employeurs');
     });
   });
 

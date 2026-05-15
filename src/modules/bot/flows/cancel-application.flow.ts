@@ -117,9 +117,9 @@ async function executeCancellation(
     };
   } catch (err: unknown) {
     const message =
-      err instanceof Error ? err.message : "*IMPOSSIBLE D'ANNULER.*";
+      err instanceof Error ? err.message : "Impossible d'annuler.";
     return {
-      reply: [`❌ ${message}\n\nTapez *MENU* pour annuler.`],
+      reply: [`❌ ${message}\n\nTapez *Menu* pour annuler.`],
       nextState: state,
     };
   }
@@ -282,7 +282,7 @@ async function handleCancelStep2(args: CancelStepArgs): Promise<FlowResult> {
     };
   }
   return {
-    reply: ['*RÉPONDEZ PAR 1 (OUI, ANNULER) OU 2 (NON, MAINTENIR).*'],
+    reply: ['Répondez par 1 (Oui, annuler) ou 2 (Non, maintenir).'],
     nextState: state,
   };
 }
@@ -304,16 +304,14 @@ export async function runCancelApplicationFlow(
 
   if (!applicationId) {
     return {
-      reply: ["*ERREUR: CANDIDATURE NON TROUVÉE. TAPEZ 'MENU'.*"],
+      reply: ["❌ Candidature non trouvée. Tapez *Menu*."],
       clearState: true,
     };
   }
 
   if (profile.profile_type !== 'WORKER') {
     return {
-      reply: [
-        "*SEULS LES WORKERS PEUVENT ANNULER LEURS CANDIDATURES. TAPEZ 'MENU'.*",
-      ],
+      reply: ["❌ Seuls les travailleurs peuvent annuler leurs candidatures. Tapez *Menu*."],
       clearState: true,
     };
   }
@@ -321,14 +319,14 @@ export async function runCancelApplicationFlow(
   const app = await ctx.applicationService.findById(applicationId);
   if (app?.worker_id !== profile.id) {
     return {
-      reply: ["*CANDIDATURE INTROUVABLE. TAPEZ 'MENU'.*"],
+      reply: ["❌ Candidature introuvable. Tapez *Menu*."],
       clearState: true,
     };
   }
 
   if (app.status !== 'PENDING' && app.status !== 'ACCEPTED') {
     return {
-      reply: ["*CETTE CANDIDATURE NE PEUT PLUS ÊTRE ANNULÉE. TAPEZ 'MENU'.*"],
+      reply: ["❌ Cette candidature ne peut plus être annulée. Tapez *Menu*."],
       clearState: true,
     };
   }
@@ -368,7 +366,7 @@ export async function runCancelApplicationFlow(
   }
   if (state.step === 2) return handleCancelStep2(stepArgs);
 
-  return { reply: ["*ERREUR. TAPEZ 'MENU'.*"], clearState: true };
+  return { reply: ["❌ Erreur. Tapez *Menu*."], clearState: true };
 }
 
 export function getCancelApplicationInitialState(

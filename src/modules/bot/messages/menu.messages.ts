@@ -8,7 +8,7 @@ export type ContactInfo = {
 
 export function workerMenuMessage(): string {
   return [
-    '*MENU RABOTKA*',
+    '*Menu Rabotka*',
     '',
     '1- Trouver une mission',
     '2- Mes candidatures',
@@ -24,7 +24,7 @@ export function workerMenuMessage(): string {
 
 export function employerMenuMessage(): string {
   return [
-    '*MENU RABOTKA*',
+    '*Menu Rabotka*',
     '',
     '1- Publier une offre',
     '2- Mes offres publiées',
@@ -46,7 +46,7 @@ export function menuMessage(profileType: BotProfileType): string {
 
 export function helpMessage(contact: ContactInfo): string {
   return [
-    '*CONTACT RABOTKA*',
+    '*Contact Rabotka*',
     '',
     `*Téléphone*: ${contact.phone}`,
     `*Email*: ${contact.email}`,

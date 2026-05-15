@@ -272,7 +272,7 @@ describe('BotOrchestratorService', () => {
       deps.router.route.mockReturnValue({ type: 'unknown' });
       const result = await service.handle(PROFILE_ID, PHONE, '3');
       expect(result[0]).toContain('Session expirée');
-      expect(result[1]).toContain('MENU');
+      expect(result[1]).toContain('Menu');
     });
 
     it('returns ERROR_MESSAGE on exception', async () => {
@@ -324,7 +324,7 @@ describe('BotOrchestratorService', () => {
         commandId: 'menu',
       });
       const result = await service.handle(PROFILE_ID, PHONE, 'Menu');
-      expect(result[0]).toContain('MENU');
+      expect(result[0]).toContain('Menu');
     });
 
     it('handles "help" command', async () => {
@@ -333,7 +333,7 @@ describe('BotOrchestratorService', () => {
         commandId: 'help',
       });
       const result = await service.handle(PROFILE_ID, PHONE, 'aide');
-      expect(result[0]).toContain('CONTACT');
+      expect(result[0]).toContain('Contact');
     });
 
     it('handles "my_offers" command', async () => {
@@ -1388,7 +1388,7 @@ describe('BotOrchestratorService', () => {
       });
       deps.botState.get.mockResolvedValue(flowState);
       const result = await service.handle('employer-uuid-1', PHONE, 'menu');
-      expect(result[0]).toContain('MENU');
+      expect(result[0]).toContain('Menu');
     });
 
     it('shows offer detail when selecting valid offer number', async () => {
