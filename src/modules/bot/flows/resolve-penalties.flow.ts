@@ -103,7 +103,7 @@ export async function runResolvePenaltiesFlow(
     return {
       reply: [
         [
-          `💳 *Lien de paiement*`,
+          `*Lien de paiement*`,
           ``,
           `Montant à régler : *${total.toLocaleString('fr-FR')} FCFA* (${count} pénalité(s))`,
           ``,

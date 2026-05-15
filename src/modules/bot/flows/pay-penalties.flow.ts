@@ -235,7 +235,7 @@ async function handleWalletOption(
   return {
     reply: [
       [
-        `💳 *Paiement par crédit portefeuille*`,
+        `*Paiement par crédit portefeuille*`,
         ``,
         `Montant dû : *${totalAmount.toLocaleString('fr-FR')} FCFA*`,
         `Solde disponible : *${balance.toLocaleString('fr-FR')} FCFA*`,
@@ -265,7 +265,7 @@ async function buildMainPaymentPrompt(
   return {
     reply: [
       [
-        `💳 *Règlement de pénalités*`,
+        `*Règlement de pénalités*`,
         ``,
         `Vous avez *${penaltyCount} pénalité(s) impayée(s)* pour un total de *${totalAmount.toLocaleString('fr-FR')} FCFA*.`,
         ``,
