@@ -71,7 +71,10 @@ async function handleDetailComplete(
     await ctx.notificationService
       .sendJobCompletedToWorker(applicationId)
       .catch((err: unknown) =>
-        console.warn(`[manage-filled-job] sendJobCompletedToWorker failed for ${applicationId}:`, err),
+        console.warn(
+          `[manage-filled-job] sendJobCompletedToWorker failed for ${applicationId}:`,
+          err,
+        ),
       );
     const amount = updated.job_offer?.amount ?? selectedItem.amount;
     return {
@@ -81,7 +84,7 @@ async function handleDetailComplete(
           '',
           `Le gain de ${Number(amount).toLocaleString('fr-FR')} FCFA a été enregistré pour le travailleur.`,
           '',
-          "Tapez 'Menu' pour revenir.",
+          "Tapez *Menu* pour revenir.",
         ].join('\n'),
       ],
       clearState: true,
@@ -106,14 +109,17 @@ async function handleDetailCancel(
     await ctx.notificationService
       .sendJobCancelledByEmployerToWorker(applicationId)
       .catch((err: unknown) =>
-        console.warn(`[manage-filled-job] sendJobCancelledByEmployerToWorker failed for ${applicationId}:`, err),
+        console.warn(
+          `[manage-filled-job] sendJobCancelledByEmployerToWorker failed for ${applicationId}:`,
+          err,
+        ),
       );
     return {
       reply: [
         [
           "*Mission annulée. L'offre est de nouveau ouverte aux candidatures.*",
           '',
-          "Tapez 'Menu' pour revenir.",
+          "Tapez *Menu* pour revenir.",
         ].join('\n'),
       ],
       clearState: true,
@@ -237,7 +243,8 @@ function handleListStep(
   const hasMore = items.length > (pageIndex + 1) * PAGE_SIZE;
   const nextPageIdx = PAGE_SIZE + 1;
   const menuIdx = PAGE_SIZE + 2;
-  if (choice === nextPageIdx && hasMore) return buildListPage(state, items, pageIndex + 1);
+  if (choice === nextPageIdx && hasMore)
+    return buildListPage(state, items, pageIndex + 1);
   if (choice === menuIdx) return { reply: ['OK'], clearState: true };
 
   return {

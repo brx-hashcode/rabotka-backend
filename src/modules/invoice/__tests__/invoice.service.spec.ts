@@ -183,7 +183,9 @@ describe('InvoiceService', () => {
         payment_request: null,
       });
       (prisma as any).profile = {
-        findUnique: jest.fn().mockResolvedValue({ first_name: 'Bob', last_name: 'Smith' }),
+        findUnique: jest
+          .fn()
+          .mockResolvedValue({ first_name: 'Bob', last_name: 'Smith' }),
       };
       const result = await service.download('inv-1', 'profile-1');
       expect(result.buffer).toBeInstanceOf(Buffer);
@@ -216,7 +218,9 @@ describe('InvoiceService', () => {
         related_entity_type: null,
         related_entity_id: null,
       });
-      prisma.payment.findUnique.mockResolvedValue({ payment_method: 'MOBILE_MONEY' });
+      prisma.payment.findUnique.mockResolvedValue({
+        payment_method: 'MOBILE_MONEY',
+      });
       const result = await service.download('inv-1', 'profile-1');
       expect(result.buffer).toBeInstanceOf(Buffer);
     });
@@ -256,12 +260,16 @@ describe('InvoiceService', () => {
 
     it('throws NotFoundException when invoice not found', async () => {
       prisma.invoice.findUnique.mockResolvedValue(null);
-      await expect(service.downloadAsAdmin('missing')).rejects.toThrow(NotFoundException);
+      await expect(service.downloadAsAdmin('missing')).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('throws NotFoundException when no template found', async () => {
       prisma.document.findFirst.mockResolvedValue(null);
-      await expect(service.downloadAsAdmin('inv-1')).rejects.toThrow('No INVOICE template found');
+      await expect(service.downloadAsAdmin('inv-1')).rejects.toThrow(
+        'No INVOICE template found',
+      );
     });
   });
 

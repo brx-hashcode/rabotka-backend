@@ -1,4 +1,7 @@
-import { runRecommendedJobsFlow, getRecommendedJobsInitialState } from '../recommended-jobs.flow';
+import {
+  runRecommendedJobsFlow,
+  getRecommendedJobsInitialState,
+} from '../recommended-jobs.flow';
 import type { BotProfile, BotState } from '../../types/bot-state.types';
 import { FLOW_IDS } from '../../bot.constants';
 import type { OfferListItem } from '../../messages/offers.messages';
@@ -51,7 +54,12 @@ function makeState(step: string = 'list', payload: any = {}): BotState {
     flowId: FLOW_IDS.RECOMMENDED_JOBS,
     step: 0,
     payload: {
-      offers: [mockOffer, makeOffer('offer-2'), makeOffer('offer-3'), makeOffer('offer-4')],
+      offers: [
+        mockOffer,
+        makeOffer('offer-2'),
+        makeOffer('offer-3'),
+        makeOffer('offer-4'),
+      ],
       step,
       page: 0,
       ...payload,
@@ -74,7 +82,12 @@ function makeCtx() {
 describe('runRecommendedJobsFlow', () => {
   it('returns menu when menu command', async () => {
     const ctx = makeCtx();
-    const result = await runRecommendedJobsFlow(makeState(), 'menu', profile, ctx);
+    const result = await runRecommendedJobsFlow(
+      makeState(),
+      'menu',
+      profile,
+      ctx,
+    );
     expect(result.clearState).toBe(true);
   });
 
@@ -94,45 +107,80 @@ describe('runRecommendedJobsFlow', () => {
   describe('list step', () => {
     it('returns list for unknown input', async () => {
       const ctx = makeCtx();
-      const result = await runRecommendedJobsFlow(makeState(), 'xyz', profile, ctx);
+      const result = await runRecommendedJobsFlow(
+        makeState(),
+        'xyz',
+        profile,
+        ctx,
+      );
       expect(result.nextState).toBeDefined();
     });
 
     it('selects offer with valid number', async () => {
       const ctx = makeCtx();
-      const result = await runRecommendedJobsFlow(makeState(), '1', profile, ctx);
+      const result = await runRecommendedJobsFlow(
+        makeState(),
+        '1',
+        profile,
+        ctx,
+      );
       expect(result.nextState?.payload?.step).toBe('detail');
     });
 
     it('returns not found when offer no longer exists', async () => {
       const ctx = makeCtx();
       ctx.jobOfferService.findById.mockResolvedValue(null);
-      const result = await runRecommendedJobsFlow(makeState(), '1', profile, ctx);
+      const result = await runRecommendedJobsFlow(
+        makeState(),
+        '1',
+        profile,
+        ctx,
+      );
       expect(result.reply[0]).toContain('introuvable');
     });
 
     it('navigates to next page with s', async () => {
       const ctx = makeCtx();
-      const result = await runRecommendedJobsFlow(makeState('list', { page: 0 }), 's', profile, ctx);
+      const result = await runRecommendedJobsFlow(
+        makeState('list', { page: 0 }),
+        's',
+        profile,
+        ctx,
+      );
       expect(result.nextState?.payload?.page).toBe(1);
     });
 
     it('stays on same page when s at last page', async () => {
       const ctx = makeCtx();
-      const result = await runRecommendedJobsFlow(makeState('list', { page: 1 }), 's', profile, ctx);
+      const result = await runRecommendedJobsFlow(
+        makeState('list', { page: 1 }),
+        's',
+        profile,
+        ctx,
+      );
       // Should show list again - result.nextState still exists
       expect(result).toBeDefined();
     });
 
     it('navigates to previous page with p', async () => {
       const ctx = makeCtx();
-      const result = await runRecommendedJobsFlow(makeState('list', { page: 1 }), 'p', profile, ctx);
+      const result = await runRecommendedJobsFlow(
+        makeState('list', { page: 1 }),
+        'p',
+        profile,
+        ctx,
+      );
       expect(result.nextState?.payload?.page).toBe(0);
     });
 
     it('stays when p at first page', async () => {
       const ctx = makeCtx();
-      const result = await runRecommendedJobsFlow(makeState('list', { page: 0 }), 'p', profile, ctx);
+      const result = await runRecommendedJobsFlow(
+        makeState('list', { page: 0 }),
+        'p',
+        profile,
+        ctx,
+      );
       expect(result).toBeDefined();
     });
   });
@@ -148,7 +196,12 @@ describe('runRecommendedJobsFlow', () => {
     it('starts apply flow when postuler entered', async () => {
       const ctx = makeCtx();
       const state = makeState('detail', { selectedOfferId: 'offer-1' });
-      const result = await runRecommendedJobsFlow(state, 'postuler', profile, ctx);
+      const result = await runRecommendedJobsFlow(
+        state,
+        'postuler',
+        profile,
+        ctx,
+      );
       expect(result.nextState?.flowId).toBe(FLOW_IDS.APPLY_JOB);
     });
 
@@ -178,7 +231,12 @@ describe('runRecommendedJobsFlow', () => {
     it('returns to list when retour entered', async () => {
       const ctx = makeCtx();
       const state = makeState('detail', { selectedOfferId: 'offer-1' });
-      const result = await runRecommendedJobsFlow(state, 'retour', profile, ctx);
+      const result = await runRecommendedJobsFlow(
+        state,
+        'retour',
+        profile,
+        ctx,
+      );
       expect(result.nextState?.payload?.step).toBe('list');
     });
 

@@ -1,5 +1,11 @@
 import { createHash } from 'node:crypto';
-import { forwardRef, Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import {
+  forwardRef,
+  Inject,
+  Injectable,
+  Logger,
+  OnModuleInit,
+} from '@nestjs/common';
 import { QdrantService } from '../qdrant/qdrant.service';
 import { COLLECTIONS } from '../qdrant/qdrant.config';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
@@ -9,9 +15,9 @@ const VECTOR_DIM = 384;
 const DEFAULT_ALPHA = 0.85;
 // Signals before the profile is considered "mature" — alpha adapts below this
 const ALPHA_MATURE_THRESHOLD = 10;
-// Maximum seen/interacted job IDs tracked per user for exclusion
-const MAX_SEEN_JOB_IDS = 100;
-const MAX_TRACKED_CATEGORIES = 50;
+// Keep a tighter window — Qdrant must_not filter degrades with large arrays
+const MAX_SEEN_JOB_IDS = 50;
+const MAX_TRACKED_CATEGORIES = 30;
 
 function toPointId(key: string): string {
   const hex = createHash('sha256').update(key).digest('hex').slice(0, 32);
@@ -31,7 +37,9 @@ const USER_INTERESTS_COLLECTION: string = COLLECTIONS.USER_INTERESTS;
 @Injectable()
 export class InterestClusterService implements OnModuleInit {
   private readonly logger = new Logger(InterestClusterService.name);
-  private readonly alpha = Number(process.env.INTEREST_GRAPH_ALPHA ?? DEFAULT_ALPHA);
+  private readonly alpha = Number(
+    process.env.INTEREST_GRAPH_ALPHA ?? DEFAULT_ALPHA,
+  );
 
   constructor(
     private readonly qdrant: QdrantService,
@@ -42,7 +50,9 @@ export class InterestClusterService implements OnModuleInit {
 
   async onModuleInit(): Promise<void> {
     await this.qdrant.ensureDenseCollection(USER_INTERESTS_COLLECTION);
-    this.logger.log(`User interests collection ready: ${USER_INTERESTS_COLLECTION}`);
+    this.logger.log(
+      `User interests collection ready: ${USER_INTERESTS_COLLECTION}`,
+    );
   }
 
   // ── EMA update — called after every signal ────────────────────────────────
@@ -63,7 +73,8 @@ export class InterestClusterService implements OnModuleInit {
     const signalCount = ((existing.payload.total_signals as number) ?? 0) + 1;
 
     // Adaptive alpha: learn faster early on, stabilize when mature
-    const maturity = Math.min(signalCount, ALPHA_MATURE_THRESHOLD) / ALPHA_MATURE_THRESHOLD;
+    const maturity =
+      Math.min(signalCount, ALPHA_MATURE_THRESHOLD) / ALPHA_MATURE_THRESHOLD;
     const a = DEFAULT_ALPHA * maturity + 0.5 * (1 - maturity);
 
     const updated = existing.vector.map(
@@ -76,15 +87,18 @@ export class InterestClusterService implements OnModuleInit {
     const prevSeen = isStringArray(existing.payload.seen_job_ids)
       ? existing.payload.seen_job_ids
       : [];
-    const seenJobIds = [...new Set([...prevSeen, jobId])].slice(-MAX_SEEN_JOB_IDS);
+    const seenJobIds = [...new Set([...prevSeen, jobId])].slice(
+      -MAX_SEEN_JOB_IDS,
+    );
 
     // Track interacted categories (capped)
     const prevCats = isStringArray(existing.payload.categories)
       ? existing.payload.categories
       : [];
-    const categories = category && !prevCats.includes(category)
-      ? [...prevCats, category].slice(-MAX_TRACKED_CATEGORIES)
-      : prevCats;
+    const categories =
+      category && !prevCats.includes(category)
+        ? [...prevCats, category].slice(-MAX_TRACKED_CATEGORIES)
+        : prevCats;
 
     await this.qdrant.upsertDense(
       USER_INTERESTS_COLLECTION,
@@ -114,7 +128,9 @@ export class InterestClusterService implements OnModuleInit {
 
     const p = point.payload;
     return {
-      positiveVectors: isMatrix(p.positive_vectors) ? p.positive_vectors : [point.vector],
+      positiveVectors: isMatrix(p.positive_vectors)
+        ? p.positive_vectors
+        : [point.vector],
       negativeVectors: isMatrix(p.negative_vectors) ? p.negative_vectors : [],
       categories: isStringArray(p.categories) ? p.categories : [],
       seenJobIds: isStringArray(p.seen_job_ids) ? p.seen_job_ids : [],
@@ -164,7 +180,12 @@ export class InterestClusterService implements OnModuleInit {
       seeded_at: new Date().toISOString(),
     };
 
-    await this.qdrant.upsertDense(USER_INTERESTS_COLLECTION, pointId, normalized, payload);
+    await this.qdrant.upsertDense(
+      USER_INTERESTS_COLLECTION,
+      pointId,
+      normalized,
+      payload,
+    );
 
     return { vector: normalized, payload };
   }
@@ -175,11 +196,13 @@ export class InterestClusterService implements OnModuleInit {
     pointId: string,
   ): Promise<{ vector: number[]; payload: Record<string, unknown> } | null> {
     try {
-      const results = await this.qdrant.getClient().retrieve(USER_INTERESTS_COLLECTION, {
-        ids: [pointId],
-        with_payload: true,
-        with_vector: true,
-      });
+      const results = await this.qdrant
+        .getClient()
+        .retrieve(USER_INTERESTS_COLLECTION, {
+          ids: [pointId],
+          with_payload: true,
+          with_vector: true,
+        });
       if (!results.length) return null;
 
       const raw = results[0] as unknown as {

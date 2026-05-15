@@ -67,7 +67,9 @@ describe('BotDraftService', () => {
   describe('clearDraft()', () => {
     it('deletes the draft key from Redis', async () => {
       await service.clearDraft(PROFILE_ID);
-      expect(redis.del).toHaveBeenCalledWith(`rabotka:${ENV}:bot:draft:publish:${PROFILE_ID}`);
+      expect(redis.del).toHaveBeenCalledWith(
+        `rabotka:${ENV}:bot:draft:publish:${PROFILE_ID}`,
+      );
     });
   });
 });

@@ -19,13 +19,48 @@ const mockAd = {
 };
 
 const mockDeliveryLogs = [
-  { id: 'log-1', profile_id: 'p1', channel: 'WHATSAPP', status: 'SENT', sent_at: new Date('2026-06-01'), opened_at: new Date('2026-06-01'), clicked_at: null, failure_reason: null, profile: { first_name: 'Alice', last_name: 'Doe', email: 'alice@test.com' } },
-  { id: 'log-2', profile_id: 'p2', channel: 'EMAIL', status: 'FAILED', sent_at: new Date('2026-06-02'), opened_at: null, clicked_at: null, failure_reason: 'Send error', profile: { first_name: 'Bob', last_name: 'Smith', email: 'bob@test.com' } },
-  { id: 'log-3', profile_id: 'p3', channel: 'WHATSAPP', status: 'CLICKED', sent_at: new Date('2026-06-01'), opened_at: new Date('2026-06-01'), clicked_at: new Date('2026-06-01'), failure_reason: null, profile: { first_name: 'Charlie', last_name: 'Brown', email: 'c@test.com' } },
+  {
+    id: 'log-1',
+    profile_id: 'p1',
+    channel: 'WHATSAPP',
+    status: 'SENT',
+    sent_at: new Date('2026-06-01'),
+    opened_at: new Date('2026-06-01'),
+    clicked_at: null,
+    failure_reason: null,
+    profile: { first_name: 'Alice', last_name: 'Doe', email: 'alice@test.com' },
+  },
+  {
+    id: 'log-2',
+    profile_id: 'p2',
+    channel: 'EMAIL',
+    status: 'FAILED',
+    sent_at: new Date('2026-06-02'),
+    opened_at: null,
+    clicked_at: null,
+    failure_reason: 'Send error',
+    profile: { first_name: 'Bob', last_name: 'Smith', email: 'bob@test.com' },
+  },
+  {
+    id: 'log-3',
+    profile_id: 'p3',
+    channel: 'WHATSAPP',
+    status: 'CLICKED',
+    sent_at: new Date('2026-06-01'),
+    opened_at: new Date('2026-06-01'),
+    clicked_at: new Date('2026-06-01'),
+    failure_reason: null,
+    profile: { first_name: 'Charlie', last_name: 'Brown', email: 'c@test.com' },
+  },
 ];
 
 const mockLinks = [
-  { hash: 'abc', original_url: 'https://example.com', click_count: 15, last_clicked_at: new Date() },
+  {
+    hash: 'abc',
+    original_url: 'https://example.com',
+    click_count: 15,
+    last_clicked_at: new Date(),
+  },
 ];
 
 const mockPrisma = {
@@ -59,7 +94,9 @@ describe('AdAnalyticsService', () => {
   describe('getStats', () => {
     it('throws NotFoundException when ad not found', async () => {
       mockPrisma.advertisement.findUnique.mockResolvedValueOnce(null);
-      await expect(service.getStats('missing')).rejects.toThrow(NotFoundException);
+      await expect(service.getStats('missing')).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('returns stats for an advertisement', async () => {
@@ -93,7 +130,9 @@ describe('AdAnalyticsService', () => {
   describe('getAnalytics', () => {
     it('throws NotFoundException when ad not found', async () => {
       mockPrisma.advertisement.findUnique.mockResolvedValueOnce(null);
-      await expect(service.getAnalytics('missing')).rejects.toThrow(NotFoundException);
+      await expect(service.getAnalytics('missing')).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('returns full analytics', async () => {
@@ -101,8 +140,17 @@ describe('AdAnalyticsService', () => {
       mockPrisma.adTrackedLink.findMany.mockResolvedValueOnce(mockLinks);
       mockPrisma.adDeliveryLog.findMany.mockResolvedValueOnce(mockDeliveryLogs);
       mockPrisma.$queryRaw
-        .mockResolvedValueOnce([{ day: '2026-06-01', dispatched_at: '2026-06-01T10:00:00Z' }]) // dispatchEvents
-        .mockResolvedValueOnce([{ total_sent: BigInt(2), total_opened: BigInt(1), clicked_deliveries: BigInt(1), total_failed: BigInt(1) }]); // aggregates
+        .mockResolvedValueOnce([
+          { day: '2026-06-01', dispatched_at: '2026-06-01T10:00:00Z' },
+        ]) // dispatchEvents
+        .mockResolvedValueOnce([
+          {
+            total_sent: BigInt(2),
+            total_opened: BigInt(1),
+            clicked_deliveries: BigInt(1),
+            total_failed: BigInt(1),
+          },
+        ]); // aggregates
 
       const analytics = await service.getAnalytics('ad-1');
       expect(analytics.totalSent).toBe(2);
@@ -130,7 +178,9 @@ describe('AdAnalyticsService', () => {
     });
 
     it('handles ad without bundle', async () => {
-      mockPrisma.advertisement.findMany.mockResolvedValueOnce([{ ...mockAd, bundle: null }]);
+      mockPrisma.advertisement.findMany.mockResolvedValueOnce([
+        { ...mockAd, bundle: null },
+      ]);
       const dashboard = await service.getDashboard();
       expect(dashboard[0].channels).toEqual([]);
     });

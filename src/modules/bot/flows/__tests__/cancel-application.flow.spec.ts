@@ -107,7 +107,7 @@ describe('runCancelApplicationFlow()', () => {
         ctx,
       );
       expect(result.clearState).toBe(true);
-      expect(result.reply[0]).toContain('CANDIDATURE NON TROUVÉE');
+      expect(result.reply[0]).toContain('Candidature non trouvée');
     });
 
     it('blocks employer', async () => {
@@ -120,7 +120,7 @@ describe('runCancelApplicationFlow()', () => {
         ctx,
       );
       expect(result.clearState).toBe(true);
-      expect(result.reply[0]).toContain('WORKERS');
+      expect(result.reply[0]).toContain('travailleurs');
     });
 
     it('returns error when application not found', async () => {
@@ -137,7 +137,7 @@ describe('runCancelApplicationFlow()', () => {
         ctx,
       );
       expect(result.clearState).toBe(true);
-      expect(result.reply[0]).toContain('CANDIDATURE INTROUVABLE');
+      expect(result.reply[0]).toContain('introuvable');
     });
 
     it('returns error when application belongs to another worker', async () => {
@@ -177,7 +177,7 @@ describe('runCancelApplicationFlow()', () => {
         ctx,
       );
       expect(result.clearState).toBe(true);
-      expect(result.reply[0]).toContain('NE PEUT PLUS');
+      expect(result.reply[0]).toContain('ne peut plus');
     });
   });
 

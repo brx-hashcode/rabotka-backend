@@ -17,6 +17,7 @@ import {
   formatContactUnlockedMessage,
   formatContactUnlockExpiredConversion,
 } from '../messages/contact-unlock.messages';
+import { formatKycValidatedMessage } from '../messages/notifications.messages';
 import { ContactUnlockService } from '../../contact-unlock/contact-unlock.service';
 import { SystemConfigService } from '../../system-config/system-config.service';
 import { WalletService } from '../../wallet/wallet.service';
@@ -81,13 +82,6 @@ export class BotNotificationService {
         address: app.job_offer.address,
       });
 
-      if (app.worker.avatar_url) {
-        await this.whatsApp.sendMediaMessage(
-          app.job_offer.employer.phone,
-          app.worker.avatar_url,
-          `*${app.worker.first_name} ${app.worker.last_name} - CANDIDAT*`,
-        );
-      }
       const employerProfileId = app.job_offer.employer_id;
       const acceptRefuseState = getAcceptRefuseInitialState(applicationId);
       // CAS: only set state if no active flow; if blocked, employer is mid-conversation → inbox
@@ -110,8 +104,8 @@ export class BotNotificationService {
         });
         const pendingCount = await this.botInbox.count(employerProfileId);
         const inboxNotice =
-          `📬 *${pendingCount} candidature(s) en attente* dans votre boîte.` +
-          `\nTerminez votre action en cours, puis tapez *candidatures* pour les traiter.`;
+          `*${pendingCount} candidature(s) en attente* dans votre boîte.` +
+          `\nTerminez votre action en cours, puis tapez *3* (Candidatures reçues) pour les traiter.`;
         await this.whatsApp.sendTextMessage(
           app.job_offer.employer.phone,
           inboxNotice,
@@ -160,12 +154,11 @@ export class BotNotificationService {
           `Pour voir ses coordonnées, vous devez débloquer le contact (*${fees.workerFeeFcfa} FCFA*).`,
           `Votre solde actuel : *${balance} FCFA*`,
           ``,
-          `Tapez *contact* pour accéder à ses coordonnées.`,
+          `Tapez *1* pour débloquer le contact maintenant, ou *Menu* pour revenir plus tard.`,
         ].join('\n');
 
         await this.whatsApp.sendTextMessage(app.worker.phone, text);
 
-        // Pre-load unlock flow state so "contact" routes immediately (CAS: only if no active flow)
         const unlockState = getUnlockContactInitialState({
           attemptId: attempt.id,
           otherName: employerName,
@@ -178,7 +171,6 @@ export class BotNotificationService {
           null,
         );
       } else {
-        // Fallback (attempt not created yet — should not happen in normal flow)
         await this.whatsApp.sendTextMessage(
           app.worker.phone,
           [
@@ -186,7 +178,7 @@ export class BotNotificationService {
             ``,
             `*${employerName}* a accepté votre candidature pour l'offre "${app.job_offer.title}".`,
             ``,
-            `Tapez *contact* pour accéder aux coordonnées de l'employeur.`,
+            `Tapez *Menu* pour accéder à vos candidatures et suivre votre mission.`,
           ].join('\n'),
         );
       }
@@ -371,6 +363,15 @@ export class BotNotificationService {
     await this.whatsApp.sendTextMessage(phone, text);
   }
 
+  async sendKycValidatedMessage(
+    phone: string,
+    firstName: string,
+    profileType: 'WORKER' | 'EMPLOYER',
+  ): Promise<void> {
+    const message = formatKycValidatedMessage(firstName, profileType);
+    await this.whatsApp.sendTextMessage(phone, message);
+  }
+
   async sendRecommendedJobNotification(
     workerId: string,
     jobOfferId: string,
@@ -412,7 +413,7 @@ export class BotNotificationService {
         `Adresse : ${offer.address}`,
         `Date : ${dateStr}`,
         '',
-        `Tapez *OFFRES* pour voir toutes les offres disponibles.`,
+        `Tapez *1* (Trouver une mission) pour voir toutes les offres disponibles.`,
       ].join('\n');
 
       await this.whatsApp.sendTextMessage(profile.phone, text);

@@ -13,15 +13,21 @@ import { ProfileAuthGuard } from '../../auth/guards/profile-auth.guard';
 
 const mockClaimService = {
   createForAdmin: jest.fn().mockResolvedValue({ id: 'claim-1', title: 'Test' }),
-  listForAdmin: jest.fn().mockResolvedValue({ data: [], total: 0, page: 1, limit: 20 }),
+  listForAdmin: jest
+    .fn()
+    .mockResolvedValue({ data: [], total: 0, page: 1, limit: 20 }),
   getByIdForAdmin: jest.fn().mockResolvedValue({ id: 'claim-1' }),
-  updateForAdmin: jest.fn().mockResolvedValue({ id: 'claim-1', title: 'Updated' }),
+  updateForAdmin: jest
+    .fn()
+    .mockResolvedValue({ id: 'claim-1', title: 'Updated' }),
   deleteForAdmin: jest.fn().mockResolvedValue(undefined),
   listComments: jest.fn().mockResolvedValue([]),
   addComment: jest.fn().mockResolvedValue({ id: 'comment-1' }),
   deleteComment: jest.fn().mockResolvedValue(undefined),
   createForProfile: jest.fn().mockResolvedValue({ id: 'claim-1' }),
-  listForProfile: jest.fn().mockResolvedValue({ data: [], total: 0, page: 1, limit: 10 }),
+  listForProfile: jest
+    .fn()
+    .mockResolvedValue({ data: [], total: 0, page: 1, limit: 10 }),
   getByIdForProfile: jest.fn().mockResolvedValue({ id: 'claim-1' }),
   listCommentsForProfile: jest.fn().mockResolvedValue([]),
   addCommentAsProfile: jest.fn().mockResolvedValue({ id: 'comment-1' }),
@@ -47,14 +53,19 @@ describe('ClaimController', () => {
         { provide: LogService, useValue: mockLogService },
       ],
     })
-      .overrideGuard(AdminAuthGuard).useValue({ canActivate: () => true })
-      .overrideGuard(RolesGuard).useValue({ canActivate: () => true })
+      .overrideGuard(AdminAuthGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(RolesGuard)
+      .useValue({ canActivate: () => true })
       .compile();
     controller = module.get<ClaimController>(ClaimController);
   });
 
   it('creates claim', async () => {
-    const result = await controller.create(adminReq, { title: 'Test', description: 'Desc' });
+    const result = await controller.create(adminReq, {
+      title: 'Test',
+      description: 'Desc',
+    });
     expect(result.id).toBe('claim-1');
     expect(mockLogService.create).toHaveBeenCalled();
   });
@@ -70,7 +81,11 @@ describe('ClaimController', () => {
   });
 
   it('updates claim', async () => {
-    const result = await controller.update('claim-1', { title: 'Updated' }, adminReq);
+    const result = await controller.update(
+      'claim-1',
+      { title: 'Updated' },
+      adminReq,
+    );
     expect(result.title).toBe('Updated');
     expect(mockLogService.create).toHaveBeenCalled();
   });
@@ -94,8 +109,10 @@ describe('ClaimCommentController', () => {
         { provide: LogService, useValue: mockLogService },
       ],
     })
-      .overrideGuard(AdminAuthGuard).useValue({ canActivate: () => true })
-      .overrideGuard(RolesGuard).useValue({ canActivate: () => true })
+      .overrideGuard(AdminAuthGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(RolesGuard)
+      .useValue({ canActivate: () => true })
       .compile();
     controller = module.get<ClaimCommentController>(ClaimCommentController);
   });
@@ -106,7 +123,9 @@ describe('ClaimCommentController', () => {
   });
 
   it('adds comment', async () => {
-    const result = await controller.add('claim-1', adminReq, { content: 'Test' });
+    const result = await controller.add('claim-1', adminReq, {
+      content: 'Test',
+    });
     expect(result.id).toBe('comment-1');
   });
 
@@ -123,17 +142,19 @@ describe('ProfileClaimController', () => {
     jest.clearAllMocks();
     const module: TestingModule = await Test.createTestingModule({
       controllers: [ProfileClaimController],
-      providers: [
-        { provide: ClaimService, useValue: mockClaimService },
-      ],
+      providers: [{ provide: ClaimService, useValue: mockClaimService }],
     })
-      .overrideGuard(ProfileAuthGuard).useValue({ canActivate: () => true })
+      .overrideGuard(ProfileAuthGuard)
+      .useValue({ canActivate: () => true })
       .compile();
     controller = module.get<ProfileClaimController>(ProfileClaimController);
   });
 
   it('creates claim as profile', async () => {
-    const result = await controller.create(profileReq, { title: 'Test', description: 'Desc' });
+    const result = await controller.create(profileReq, {
+      title: 'Test',
+      description: 'Desc',
+    });
     expect(result.id).toBe('claim-1');
   });
 
@@ -155,13 +176,14 @@ describe('ProfileClaimCommentController', () => {
     jest.clearAllMocks();
     const module: TestingModule = await Test.createTestingModule({
       controllers: [ProfileClaimCommentController],
-      providers: [
-        { provide: ClaimService, useValue: mockClaimService },
-      ],
+      providers: [{ provide: ClaimService, useValue: mockClaimService }],
     })
-      .overrideGuard(ProfileAuthGuard).useValue({ canActivate: () => true })
+      .overrideGuard(ProfileAuthGuard)
+      .useValue({ canActivate: () => true })
       .compile();
-    controller = module.get<ProfileClaimCommentController>(ProfileClaimCommentController);
+    controller = module.get<ProfileClaimCommentController>(
+      ProfileClaimCommentController,
+    );
   });
 
   it('lists comments as profile', async () => {
@@ -170,7 +192,9 @@ describe('ProfileClaimCommentController', () => {
   });
 
   it('adds comment as profile', async () => {
-    const result = await controller.add('claim-1', profileReq, { content: 'Test' });
+    const result = await controller.add('claim-1', profileReq, {
+      content: 'Test',
+    });
     expect(result.id).toBe('comment-1');
   });
 

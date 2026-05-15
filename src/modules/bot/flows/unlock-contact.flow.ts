@@ -106,7 +106,7 @@ async function handleStep1(args: StepArgs): Promise<FlowResult> {
     });
     return {
       reply: [
-        `D'accord. Tapez *contact* quand vous êtes prêt(e) à débloquer ce contact.\n\nLa demande expire le *${deadline}*. Passé ce délai, si l'autre partie n'a pas payé, votre paiement sera recrédité sous forme de *crédit portefeuille*.`,
+        `D'accord. Tapez *Menu* puis choisissez *3* (Paiements en attente) quand vous êtes prêt(e) à débloquer ce contact.\n\nLa demande expire le *${deadline}*. Passé ce délai, si l'autre partie n'a pas payé, votre paiement sera recrédité sous forme de *crédit portefeuille*.`,
       ],
       clearState: true,
     };
@@ -261,7 +261,7 @@ export async function runUnlockContactFlow(
   if (!attemptId) {
     return {
       reply: [
-        "*Erreur : tentative de déverrouillage introuvable. Tapez 'MENU'.*",
+        "*Erreur : tentative de déverrouillage introuvable. Tapez *Menu*.*",
       ],
       clearState: true,
     };

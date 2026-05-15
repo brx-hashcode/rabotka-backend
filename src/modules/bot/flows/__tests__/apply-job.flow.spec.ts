@@ -97,7 +97,7 @@ describe('runApplyJobFlow()', () => {
       };
       const result = await runApplyJobFlow(state, '', workerProfile, ctx);
       expect(result.clearState).toBe(true);
-      expect(result.reply[0]).toContain('OFFRE NON TROUVÉE');
+      expect(result.reply[0]).toContain('Offre non trouvée');
     });
 
     it('blocks employer from applying', async () => {
@@ -105,7 +105,7 @@ describe('runApplyJobFlow()', () => {
       const state = makeState('offer-1');
       const result = await runApplyJobFlow(state, '', employerProfile, ctx);
       expect(result.clearState).toBe(true);
-      expect(result.reply[0]).toContain('WORKERS');
+      expect(result.reply[0]).toContain('travailleurs');
     });
 
     it('blocks worker with unpaid penalties', async () => {
@@ -131,7 +131,7 @@ describe('runApplyJobFlow()', () => {
       const state = makeState('offer-1');
       const result = await runApplyJobFlow(state, '', workerProfile, ctx);
       expect(result.clearState).toBe(true);
-      expect(result.reply[0]).toContain("N'EXISTE PLUS");
+      expect(result.reply[0]).toContain("n'existe plus");
     });
   });
 

@@ -1,4 +1,3 @@
-import { SEP } from './application.messages';
 
 function formatDate(d: Date): string {
   return d.toLocaleDateString('fr-FR', {
@@ -39,9 +38,9 @@ export function formatPenaltyHistory(
   thresholdHours: number,
 ): string {
   const lines = [
-    '*HISTORIQUE DES PENALITES*',
+    '*Historique des pénalités*',
     '',
-    '*RECAPITULATIF*',
+    '*Récapitulatif*',
     `*Total penalites*: ${fcfa(totalAmount)}`,
     `*Annulations tardives*: ${lateCancellationsCount}`,
     `*Score actuel*: ${currentScore}/100`,
@@ -65,12 +64,12 @@ export function formatPenaltyHistory(
   }
 
   lines.push(
-    '*CONSEILS POUR AMELIORER VOTRE SCORE*',
+    '*Conseils pour améliorer votre score*',
     `- Completez vos missions sans annulation`,
     `- Maintenez un score > 90 pour plus de visibilite`,
     `- Annulez toujours plus de ${thresholdHours}h avant si necessaire`,
     '',
-    "Tapez 'Menu' pour revenir.",
+    "Tapez *Menu* pour revenir.",
   );
   return lines.join('\n');
 }
@@ -89,20 +88,20 @@ export function formatEmployerProfileStats(params: {
   const activeOffers = params.activeOffersCount ?? params.offersCount;
   const balance = params.walletBalance ?? 0;
   return [
-    '*VOTRE PROFIL RABOTKA*',
+    '*Votre profil Rabotka*',
     '',
     `*Nom*: ${params.lastName}`,
     `*Prenom*: ${params.firstName}`,
     `*Email*: ${params.email}`,
     '',
     '*Statistiques*',
-    SEP,
+    '',
     `*Membre depuis*: ${since}`,
     `*Offres publiees*: ${params.offersCount}`,
     `*Offres actives*: ${activeOffers}`,
     `*Candidatures en attente*: ${params.pendingCandidaturesCount}`,
     `*Solde portefeuille*: ${fcfa(balance)}`,
-    SEP,
+    '',
     '',
     '*Actions*',
     '1- Voir mes offres',
@@ -130,27 +129,27 @@ export function formatProfileStats(params: {
   const since = formatDateShort(params.memberSince);
   const balance = params.walletBalance ?? 0;
   return [
-    '*VOTRE PROFIL RABOTKA*',
+    '*Votre profil Rabotka*',
     '',
     `*Nom*: ${params.lastName}`,
     `*Prenom*: ${params.firstName}`,
     `*Email*: ${params.email}`,
     '',
-    '*STATISTIQUES GENERALES*',
-    SEP,
+    '*Statistiques générales*',
+    '',
     `*Score de fiabilite*: ${score}/100`,
     `*Membre depuis*: ${since}`,
     `*Missions completees*: ${params.completedMissions}`,
     `*Revenus totaux*: ${fcfa(params.totalEarnings)}`,
     `*Taux de completion*: ${params.completionRate}%`,
     `*Solde portefeuille*: ${fcfa(balance)}`,
-    SEP,
     '',
-    '*PENALITES*',
+    '',
+    '*Pénalités*',
     `*Total penalites*: ${fcfa(params.totalPenalties)}`,
     `*Annulations tardives*: ${params.lateCancellations}`,
     '',
-    '*ACTIONS*',
+    '*Actions*',
     "1- Voir l'historique complet",
     '2- Historique des penalites',
     '3- Retour au menu',
@@ -177,7 +176,7 @@ export function formatPenaltyBlocked(
     'Indiquez votre numero de telephone en reference lors du paiement.',
     'Votre compte sera debloque sous 24h apres reception.',
     '',
-    "Tapez 'Profil' pour voir le detail ou 'Menu' pour revenir.",
+    "Tapez *Menu* puis *5* (Mon profil) pour voir le detail ou 'Menu' pour revenir.",
   ].join('\n');
 }
 
@@ -251,9 +250,9 @@ export function formatPenaltyReminderDay(params: {
     ...totalLine,
     '',
     '*Comment payer :*',
-    'Tapez *PAYER* pour regler vos penalites directement depuis le bot.',
+    'Tapez *3* (Paiements en attente) pour régler vos pénalités.',
     '',
-    'Tapez *PROFIL* pour voir le detail de vos penalites.',
+    'Tapez *5* (Mon profil) pour voir le détail de vos pénalités.',
   ].join('\n');
 }
 
@@ -288,14 +287,14 @@ export function formatCancelApplicationWithPenalty(params: {
     `*Montant*: ${montant}`,
     `*Temps restant*: ${params.timeRemaining}`,
     '',
-    SEP,
+    '',
     '',
     '*Pénalité applicable*',
     `*Montant*: ${fcfa(params.penaltyAmount)}`,
     `*Impact score*: -${params.scoreDeduction} points`,
     `*Nouveau score*: ${params.newScore}/100`,
     '',
-    SEP,
+    '',
     '',
     "Raison de l'annulation ? (obligatoire pour annulation tardive)",
     '',

@@ -1,4 +1,7 @@
-import { runResolvePenaltiesFlow, getResolvePenaltiesInitialState } from '../resolve-penalties.flow';
+import {
+  runResolvePenaltiesFlow,
+  getResolvePenaltiesInitialState,
+} from '../resolve-penalties.flow';
 import type { BotProfile, BotState } from '../../types/bot-state.types';
 import { FLOW_IDS } from '../../bot.constants';
 
@@ -37,7 +40,9 @@ function makeCtx(penalties: any[] = [mockPenalty]) {
       },
     } as any,
     paymentService: {
-      createPaymentUrl: jest.fn().mockResolvedValue('https://payment.example.com/pay123'),
+      createPaymentUrl: jest
+        .fn()
+        .mockResolvedValue('https://payment.example.com/pay123'),
     } as any,
   };
 }
@@ -45,47 +50,82 @@ function makeCtx(penalties: any[] = [mockPenalty]) {
 describe('runResolvePenaltiesFlow', () => {
   it('returns menu message when menu command sent at step 2', async () => {
     const ctx = makeCtx();
-    const result = await runResolvePenaltiesFlow(makeState(2), 'menu', profile, ctx);
+    const result = await runResolvePenaltiesFlow(
+      makeState(2),
+      'menu',
+      profile,
+      ctx,
+    );
     expect(result.clearState).toBe(true);
   });
 
   it('returns menu message when retour sent at step 2', async () => {
     const ctx = makeCtx();
-    const result = await runResolvePenaltiesFlow(makeState(2), 'retour', profile, ctx);
+    const result = await runResolvePenaltiesFlow(
+      makeState(2),
+      'retour',
+      profile,
+      ctx,
+    );
     expect(result.clearState).toBe(true);
   });
 
   it('shows no penalties message at step 1 with no penalties', async () => {
     const ctx = makeCtx([]);
-    const result = await runResolvePenaltiesFlow(makeState(1), '1', profile, ctx);
+    const result = await runResolvePenaltiesFlow(
+      makeState(1),
+      '1',
+      profile,
+      ctx,
+    );
     expect(result.clearState).toBe(true);
     expect(result.reply[0]).toContain('Aucune pénalité');
   });
 
   it('shows penalties list at step 1 with penalties', async () => {
     const ctx = makeCtx([mockPenalty]);
-    const result = await runResolvePenaltiesFlow(makeState(1), '', profile, ctx);
+    const result = await runResolvePenaltiesFlow(
+      makeState(1),
+      '',
+      profile,
+      ctx,
+    );
     expect(result.nextState?.step).toBe(2);
     expect(result.reply[0]).toContain('pénalité');
   });
 
   it('returns payment link when user selects 1 at step 2', async () => {
     const ctx = makeCtx();
-    const result = await runResolvePenaltiesFlow(makeState(2, { count: 1, total: 5000 }), '1', profile, ctx);
+    const result = await runResolvePenaltiesFlow(
+      makeState(2, { count: 1, total: 5000 }),
+      '1',
+      profile,
+      ctx,
+    );
     expect(result.clearState).toBe(true);
     expect(result.reply[0]).toContain('payment.example.com');
   });
 
   it('returns cancel message when user selects 2 at step 2', async () => {
     const ctx = makeCtx();
-    const result = await runResolvePenaltiesFlow(makeState(2, { count: 1, total: 5000 }), '2', profile, ctx);
+    const result = await runResolvePenaltiesFlow(
+      makeState(2, { count: 1, total: 5000 }),
+      '2',
+      profile,
+      ctx,
+    );
     expect(result.clearState).toBe(true);
     expect(result.reply[0]).toContain('suspendu');
   });
 
   it('returns invalid option message at step 2 with unknown input', async () => {
     const ctx = makeCtx();
-    const result = await runResolvePenaltiesFlow(makeState(2, { count: 1, total: 5000 }), 'invalid', profile, ctx);
+    const result = await runResolvePenaltiesFlow(
+      makeState(2, { count: 1, total: 5000 }),
+      'invalid',
+      profile,
+      ctx,
+    );
     expect(result.nextState).toBeDefined();
   });
 
@@ -97,7 +137,12 @@ describe('runResolvePenaltiesFlow', () => {
       applied_at: new Date(),
     }));
     const ctx = makeCtx(manyPenalties);
-    const result = await runResolvePenaltiesFlow(makeState(1), '', profile, ctx);
+    const result = await runResolvePenaltiesFlow(
+      makeState(1),
+      '',
+      profile,
+      ctx,
+    );
     expect(result.nextState?.step).toBe(2);
   });
 });

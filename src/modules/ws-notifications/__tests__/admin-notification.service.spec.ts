@@ -63,6 +63,8 @@ describe('AdminNotificationService', () => {
 
   it('deletes one', async () => {
     await service.deleteOne('notif-1');
-    expect(mockPrisma.adminNotification.delete).toHaveBeenCalledWith({ where: { id: 'notif-1' } });
+    expect(mockPrisma.adminNotification.delete).toHaveBeenCalledWith({
+      where: { id: 'notif-1' },
+    });
   });
 });

@@ -175,7 +175,10 @@ export class ApplicationService {
         'Seuls les workers peuvent postuler aux offres',
       );
     }
-    if (jobOffer.status !== JobOfferStatus.ACTIVE) {
+    if (
+      jobOffer.status !== JobOfferStatus.ACTIVE &&
+      jobOffer.status !== JobOfferStatus.PARTIALLY_FILLED
+    ) {
       throw new BadRequestException("Cette offre n'est plus disponible");
     }
     if (jobOffer.employer_id === workerId) {
@@ -832,7 +835,10 @@ export class ApplicationService {
       );
     // Fire-and-forget: send rating requests to both parties via WhatsApp
     this.sendRatingRequests(applicationId, application).catch((err: unknown) =>
-      console.warn(`[ApplicationService] sendRatingRequests failed for ${applicationId}:`, err),
+      console.warn(
+        `[ApplicationService] sendRatingRequests failed for ${applicationId}:`,
+        err,
+      ),
     );
 
     return updated;
@@ -884,7 +890,10 @@ export class ApplicationService {
           jobTitle,
         })
         .catch((err: unknown) =>
-          console.warn(`[ApplicationService] sendRatingRequest (worker) failed:`, err),
+          console.warn(
+            `[ApplicationService] sendRatingRequest (worker) failed:`,
+            err,
+          ),
         );
     }
 
@@ -902,7 +911,10 @@ export class ApplicationService {
           jobTitle,
         })
         .catch((err: unknown) =>
-          console.warn(`[ApplicationService] sendRatingRequest (employer) failed:`, err),
+          console.warn(
+            `[ApplicationService] sendRatingRequest (employer) failed:`,
+            err,
+          ),
         );
     }
   }
@@ -1230,7 +1242,8 @@ export class ApplicationService {
     page: number;
     limit: number;
   }> {
-    const { page, limit, q, status, penaltyApplied, workerId, employerId } = params;
+    const { page, limit, q, status, penaltyApplied, workerId, employerId } =
+      params;
     const skip = (page - 1) * limit;
 
     const where: Prisma.ApplicationWhereInput = {};

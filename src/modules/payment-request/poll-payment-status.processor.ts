@@ -1,5 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { PaymentRequestStatus, PaymentStatus, PaymentMethod, PaymentType } from '@prisma/client';
+import {
+  PaymentRequestStatus,
+  PaymentStatus,
+  PaymentMethod,
+  PaymentType,
+} from '@prisma/client';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { PaymentGatewayService } from '../../common/services/payment/payment-gateway.service';
 import { PaymentStatusGateway } from '../ws-notifications/payment-status.gateway';
@@ -7,6 +12,7 @@ import { QueueService } from '../../common/services/queue/queue.service';
 import { POLL_PAYMENT_STATUS_QUEUE } from '../../common/services/queue/queue.module';
 import { LogService } from '../log/log.service';
 import { generatePaymentReference } from '../../common/utils/payment-reference';
+import { WhatsAppService } from '../whatsapp/whatsapp.service';
 
 export type PollPaymentStatusJobData = {
   requestId: string;
@@ -43,6 +49,7 @@ export class PollPaymentStatusProcessor {
     private readonly paymentStatusGateway: PaymentStatusGateway,
     private readonly queueService: QueueService,
     private readonly logService: LogService,
+    private readonly whatsApp: WhatsAppService,
   ) {}
 
   setPaymentRequestService(service: IProcessApprovedPayment): void {
@@ -87,6 +94,7 @@ export class PollPaymentStatusProcessor {
         attempt,
       });
       this.paymentStatusGateway.emitPaymentStatus(token, 'REJECTED');
+      await this.notifyPaymentFailed(job.data);
       return;
     }
 
@@ -124,15 +132,27 @@ export class PollPaymentStatusProcessor {
       attempt: number;
     },
   ): Promise<void> {
-    const { requestId, profileId, amount, phone, operator, requestType, gateway, gatewayRef } = jobData;
+    const {
+      requestId,
+      profileId,
+      amount,
+      phone,
+      operator,
+      requestType,
+      gateway,
+      gatewayRef,
+    } = jobData;
 
     const isContactType =
-      requestType === 'CONTACT_UNLOCK' || requestType === 'RECOMMENDATION_CONTACT';
+      requestType === 'CONTACT_UNLOCK' ||
+      requestType === 'RECOMMENDATION_CONTACT';
 
     try {
       await this.prisma.payment.create({
         data: {
-          type: isContactType ? PaymentType.CONTACT_UNLOCK : PaymentType.PENALTY,
+          type: isContactType
+            ? PaymentType.CONTACT_UNLOCK
+            : PaymentType.PENALTY,
           profile_id: profileId,
           amount,
           payment_method: PaymentMethod.MOBILE_MONEY,
@@ -177,5 +197,33 @@ export class PollPaymentStatusProcessor {
     this.logger.warn(
       `Payment FAILED — request ${requestId} | reason: ${options.reason} | amount: ${amount} FCFA | phone: ${phone ?? 'n/a'} | gatewayRef: ${gatewayRef} | attempt: ${options.attempt}`,
     );
+  }
+
+  private async notifyPaymentFailed(
+    jobData: PollPaymentStatusJobData,
+  ): Promise<void> {
+    try {
+      const profile = await this.prisma.profile.findUnique({
+        where: { id: jobData.profileId },
+        select: { phone: true },
+      });
+      if (!profile?.phone) return;
+
+      const amountStr = jobData.amount.toLocaleString('fr-FR');
+      const message = [
+        `❌ *Paiement échoué*`,
+        ``,
+        `Votre paiement de *${amountStr} FCFA* via Mobile Money n'a pas abouti.`,
+        ``,
+        `Vous pouvez réessayer en tapant la commande correspondante, ou choisir un autre mode de paiement.`,
+      ].join('\n');
+
+      await this.whatsApp.sendTextMessage(profile.phone, message);
+    } catch (err) {
+      this.logger.warn(
+        `Could not send payment failure WhatsApp notification for request ${jobData.requestId}`,
+        err instanceof Error ? err.message : String(err),
+      );
+    }
   }
 }

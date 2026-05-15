@@ -1,4 +1,8 @@
-import { runJobStatusCheckFlow, getJobStatusCheckInitialState, jobStatusCheckPromptMessage } from '../job-status-check.flow';
+import {
+  runJobStatusCheckFlow,
+  getJobStatusCheckInitialState,
+  jobStatusCheckPromptMessage,
+} from '../job-status-check.flow';
 import type { BotProfile, BotState } from '../../types/bot-state.types';
 import { FLOW_IDS } from '../../bot.constants';
 import { PaymentFlow } from '@prisma/client';
@@ -47,7 +51,12 @@ function makeCtx() {
 describe('runJobStatusCheckFlow', () => {
   it('returns menu when menu command sent', async () => {
     const ctx = makeCtx();
-    const result = await runJobStatusCheckFlow(makeState(), 'menu', profile, ctx);
+    const result = await runJobStatusCheckFlow(
+      makeState(),
+      'menu',
+      profile,
+      ctx,
+    );
     expect(result.clearState).toBe(true);
   });
 
@@ -59,14 +68,24 @@ describe('runJobStatusCheckFlow', () => {
 
   it('returns error when no jobOfferId', async () => {
     const ctx = makeCtx();
-    const result = await runJobStatusCheckFlow(makeState({ jobOfferId: undefined }), '1', profile, ctx);
+    const result = await runJobStatusCheckFlow(
+      makeState({ jobOfferId: undefined }),
+      '1',
+      profile,
+      ctx,
+    );
     expect(result.clearState).toBe(true);
     expect(result.reply[0]).toContain('ERREUR');
   });
 
   it('returns error when no applicationId', async () => {
     const ctx = makeCtx();
-    const result = await runJobStatusCheckFlow(makeState({ applicationId: undefined }), '1', profile, ctx);
+    const result = await runJobStatusCheckFlow(
+      makeState({ applicationId: undefined }),
+      '1',
+      profile,
+      ctx,
+    );
     expect(result.clearState).toBe(true);
   });
 
@@ -80,7 +99,9 @@ describe('runJobStatusCheckFlow', () => {
 
   it('returns error when markJobCompleted fails', async () => {
     const ctx = makeCtx();
-    ctx.applicationService.markJobCompleted.mockRejectedValue(new Error('Failed'));
+    ctx.applicationService.markJobCompleted.mockRejectedValue(
+      new Error('Failed'),
+    );
     const result = await runJobStatusCheckFlow(makeState(), '1', profile, ctx);
     expect(result.clearState).toBe(true);
     expect(result.reply[0]).toContain('Failed');
@@ -95,19 +116,34 @@ describe('runJobStatusCheckFlow', () => {
 
   it('snoozes with HOURLY payment flow', async () => {
     const ctx = makeCtx();
-    const result = await runJobStatusCheckFlow(makeState({ paymentFlow: PaymentFlow.HOURLY }), '2', profile, ctx);
+    const result = await runJobStatusCheckFlow(
+      makeState({ paymentFlow: PaymentFlow.HOURLY }),
+      '2',
+      profile,
+      ctx,
+    );
     expect(result.nextState).toBeDefined();
   });
 
   it('snoozes with MONTHLY payment flow', async () => {
     const ctx = makeCtx();
-    const result = await runJobStatusCheckFlow(makeState({ paymentFlow: PaymentFlow.MONTHLY }), '2', profile, ctx);
+    const result = await runJobStatusCheckFlow(
+      makeState({ paymentFlow: PaymentFlow.MONTHLY }),
+      '2',
+      profile,
+      ctx,
+    );
     expect(result.nextState).toBeDefined();
   });
 
   it('shows prompt for unrecognized input', async () => {
     const ctx = makeCtx();
-    const result = await runJobStatusCheckFlow(makeState(), 'xyz', profile, ctx);
+    const result = await runJobStatusCheckFlow(
+      makeState(),
+      'xyz',
+      profile,
+      ctx,
+    );
     expect(result.nextState).toBeDefined();
     expect(result.reply[0]).toContain('Plombier');
   });
