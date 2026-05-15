@@ -105,7 +105,7 @@ export class BotNotificationService {
         const pendingCount = await this.botInbox.count(employerProfileId);
         const inboxNotice =
           `*${pendingCount} candidature(s) en attente* dans votre boîte.` +
-          `\nTerminez votre action en cours, puis tapez *candidatures* pour les traiter.`;
+          `\nTerminez votre action en cours, puis tapez *3* (Candidatures reçues) pour les traiter.`;
         await this.whatsApp.sendTextMessage(
           app.job_offer.employer.phone,
           inboxNotice,
@@ -154,7 +154,7 @@ export class BotNotificationService {
           `Pour voir ses coordonnées, vous devez débloquer le contact (*${fees.workerFeeFcfa} FCFA*).`,
           `Votre solde actuel : *${balance} FCFA*`,
           ``,
-          `Tapez *contact* pour accéder à ses coordonnées.`,
+          `Tapez *1* pour débloquer le contact maintenant, ou *Menu* pour revenir plus tard.`,
         ].join('\n');
 
         await this.whatsApp.sendTextMessage(app.worker.phone, text);
@@ -178,7 +178,7 @@ export class BotNotificationService {
             ``,
             `*${employerName}* a accepté votre candidature pour l'offre "${app.job_offer.title}".`,
             ``,
-            `Tapez *contact* pour accéder aux coordonnées de l'employeur.`,
+            `Tapez *Menu* pour accéder à vos candidatures et suivre votre mission.`,
           ].join('\n'),
         );
       }
@@ -413,7 +413,7 @@ export class BotNotificationService {
         `Adresse : ${offer.address}`,
         `Date : ${dateStr}`,
         '',
-        `Tapez *OFFRES* pour voir toutes les offres disponibles.`,
+        `Tapez *1* (Trouver une mission) pour voir toutes les offres disponibles.`,
       ].join('\n');
 
       await this.whatsApp.sendTextMessage(profile.phone, text);

@@ -368,7 +368,7 @@ export class BotOrchestratorService {
         const lastIdx = result.reply.length - 1;
         result.reply[lastIdx] =
           last +
-          `\n\n*${inboxCount} candidature(s) en attente.* Tapez *candidatures* pour les traiter.`;
+          `\n\n*${inboxCount} candidature(s) en attente.* Tapez *3* (Candidatures reçues) pour les traiter.`;
       }
     }
 
