@@ -37,7 +37,7 @@ describe('LogController', () => {
       page: 2,
       limit: 10,
       q: 'test',
-      entity_type: 'Profile',
+      entity_type: ['Profile'],
       created_from: '2026-01-01',
       created_to: '2026-12-31',
     };
@@ -46,7 +46,7 @@ describe('LogController', () => {
       page: 2,
       limit: 10,
       q: 'test',
-      entity_type: 'Profile',
+      entity_type: ['Profile'],
       created_from: '2026-01-01',
       created_to: '2026-12-31',
     });
