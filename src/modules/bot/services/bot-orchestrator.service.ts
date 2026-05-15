@@ -338,11 +338,11 @@ export class BotOrchestratorService {
         const remaining = await this.botInbox.count(profileId);
         const inboxNotice =
           remaining > 0
-            ? `\n\n📬 Il vous reste *${remaining}* candidature(s) en attente.`
+            ? `\n\nIl vous reste *${remaining}* candidature(s) en attente.`
             : '';
         return [
           ...result.reply,
-          `\n📬 *Nouvelle candidature en attente* : ${nextInboxItem.workerName} pour « ${nextInboxItem.offerTitle} ».` +
+          `\n*Nouvelle candidature en attente* : ${nextInboxItem.workerName} pour « ${nextInboxItem.offerTitle} ».` +
             `\nRépondez par *1 – Accepter* ou *2 – Refuser*.` +
             inboxNotice,
         ];
@@ -368,7 +368,7 @@ export class BotOrchestratorService {
         const lastIdx = result.reply.length - 1;
         result.reply[lastIdx] =
           last +
-          `\n\n📬 *${inboxCount} candidature(s) en attente.* Tapez *candidatures* pour les traiter.`;
+          `\n\n*${inboxCount} candidature(s) en attente.* Tapez *candidatures* pour les traiter.`;
       }
     }
 
