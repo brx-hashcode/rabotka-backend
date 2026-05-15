@@ -5,6 +5,7 @@ import { PaymentGatewayService } from '../../../common/services/payment/payment-
 import { PaymentStatusGateway } from '../../ws-notifications/payment-status.gateway';
 import { QueueService } from '../../../common/services/queue/queue.service';
 import { LogService } from '../../log/log.service';
+import { WhatsAppService } from '../../whatsapp/whatsapp.service';
 
 const mockPrisma = {
   paymentRequest: {
@@ -12,6 +13,9 @@ const mockPrisma = {
   },
   payment: {
     create: jest.fn().mockResolvedValue({}),
+  },
+  profile: {
+    findUnique: jest.fn().mockResolvedValue({ phone: '+242001' }),
   },
 };
 
@@ -29,6 +33,10 @@ const mockQueueService = {
 
 const mockLogService = {
   create: jest.fn().mockResolvedValue({}),
+};
+
+const mockWhatsApp = {
+  sendTextMessage: jest.fn().mockResolvedValue(undefined),
 };
 
 const mockPaymentRequestService = {
@@ -63,6 +71,7 @@ describe('PollPaymentStatusProcessor', () => {
         { provide: PaymentStatusGateway, useValue: mockPaymentStatusGateway },
         { provide: QueueService, useValue: mockQueueService },
         { provide: LogService, useValue: mockLogService },
+        { provide: WhatsAppService, useValue: mockWhatsApp },
       ],
     }).compile();
     processor = module.get<PollPaymentStatusProcessor>(

@@ -82,13 +82,6 @@ export class BotNotificationService {
         address: app.job_offer.address,
       });
 
-      if (app.worker.avatar_url) {
-        await this.whatsApp.sendMediaMessage(
-          app.job_offer.employer.phone,
-          app.worker.avatar_url,
-          `*${app.worker.first_name} ${app.worker.last_name} - CANDIDAT*`,
-        );
-      }
       const employerProfileId = app.job_offer.employer_id;
       const acceptRefuseState = getAcceptRefuseInitialState(applicationId);
       // CAS: only set state if no active flow; if blocked, employer is mid-conversation → inbox
@@ -111,7 +104,7 @@ export class BotNotificationService {
         });
         const pendingCount = await this.botInbox.count(employerProfileId);
         const inboxNotice =
-          `📬 *${pendingCount} candidature(s) en attente* dans votre boîte.` +
+          `*${pendingCount} candidature(s) en attente* dans votre boîte.` +
           `\nTerminez votre action en cours, puis tapez *candidatures* pour les traiter.`;
         await this.whatsApp.sendTextMessage(
           app.job_offer.employer.phone,
@@ -166,7 +159,6 @@ export class BotNotificationService {
 
         await this.whatsApp.sendTextMessage(app.worker.phone, text);
 
-        // Pre-load unlock flow state so "contact" routes immediately (CAS: only if no active flow)
         const unlockState = getUnlockContactInitialState({
           attemptId: attempt.id,
           otherName: employerName,
@@ -179,7 +171,6 @@ export class BotNotificationService {
           null,
         );
       } else {
-        // Fallback (attempt not created yet — should not happen in normal flow)
         await this.whatsApp.sendTextMessage(
           app.worker.phone,
           [

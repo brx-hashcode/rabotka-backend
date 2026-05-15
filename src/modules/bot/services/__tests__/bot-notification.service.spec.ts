@@ -116,7 +116,7 @@ describe('BotNotificationService', () => {
       expect(deps.botInbox.push).toHaveBeenCalled();
     });
 
-    it('sends media message when worker has avatar', async () => {
+    it('sends only one text message even when worker has avatar', async () => {
       deps.prisma.application.findUnique.mockResolvedValue(
         makeApp({
           worker: {
@@ -126,7 +126,8 @@ describe('BotNotificationService', () => {
         }),
       );
       await service.sendNewApplicationToEmployer('app-1');
-      expect(deps.whatsApp.sendMediaMessage).toHaveBeenCalled();
+      expect(deps.whatsApp.sendMediaMessage).not.toHaveBeenCalled();
+      expect(deps.whatsApp.sendTextMessage).toHaveBeenCalledTimes(1);
     });
 
     it('does nothing when application not found', async () => {
