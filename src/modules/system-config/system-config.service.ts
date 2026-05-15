@@ -202,6 +202,17 @@ export class SystemConfigService implements OnModuleInit {
     return val === 'true';
   }
 
+  async getMinNotificationScore(): Promise<number> {
+    const val = await this.get('matching.min_notification_score', '0.55');
+    const n = parseFloat(val);
+    return isNaN(n) ? 0.55 : n;
+  }
+
+  async isRecommendationEnabled(): Promise<boolean> {
+    const val = await this.get('matching.recommendations_enabled', 'true');
+    return val === 'true';
+  }
+
   async getContactInfo() {
     const [email, phone, address] = await this.mgetBatch([
       { key: 'contact.email', fallback: 'contact@rabotka.com' },

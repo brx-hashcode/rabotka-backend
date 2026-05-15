@@ -15,9 +15,9 @@ const VECTOR_DIM = 384;
 const DEFAULT_ALPHA = 0.85;
 // Signals before the profile is considered "mature" — alpha adapts below this
 const ALPHA_MATURE_THRESHOLD = 10;
-// Maximum seen/interacted job IDs tracked per user for exclusion
-const MAX_SEEN_JOB_IDS = 100;
-const MAX_TRACKED_CATEGORIES = 50;
+// Keep a tighter window — Qdrant must_not filter degrades with large arrays
+const MAX_SEEN_JOB_IDS = 50;
+const MAX_TRACKED_CATEGORIES = 30;
 
 function toPointId(key: string): string {
   const hex = createHash('sha256').update(key).digest('hex').slice(0, 32);

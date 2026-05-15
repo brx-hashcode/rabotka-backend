@@ -12,6 +12,7 @@ import { PrismaModule } from '../../common/services/prisma/prisma.module';
 import { PaymentRequestModule } from '../payment-request/payment-request.module';
 import { DocumentModule } from '../document/document.module';
 import { MatchingModule } from '../matching/matching.module';
+import { InterestGraphModule } from '../interest-graph/interest-graph.module';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { MatchingModule } from '../matching/matching.module';
     PaymentRequestModule,
     DocumentModule,
     MatchingModule,
+    InterestGraphModule,
   ],
   controllers: [ProfileController, AdminProfileController],
   providers: [ProfileService],

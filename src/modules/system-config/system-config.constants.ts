@@ -141,6 +141,20 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     label: 'Activer algorithme de similarité (embeddings)',
     isSecret: false,
   },
+  {
+    key: 'matching.min_notification_score',
+    value: '0.55',
+    category: ConfigCategory.MATCHING,
+    label: 'Score minimum pour notification de recommandation',
+    isSecret: false,
+  },
+  {
+    key: 'matching.recommendations_enabled',
+    value: 'true',
+    category: ConfigCategory.MATCHING,
+    label: 'Activer les notifications de recommandation de jobs',
+    isSecret: false,
+  },
 
   // ── CONTACT ───────────────────────────────────────────────────────────────
   {
