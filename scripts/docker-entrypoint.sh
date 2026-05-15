@@ -14,19 +14,22 @@ if [ -f "$MARKER_FILE" ] && [ "$(cat "$MARKER_FILE")" = "$FASTEMBED_MODEL_VERSIO
 else
   if [ -f "$MARKER_FILE" ]; then
     echo "FastEmbed model version changed ($(cat "$MARKER_FILE") → ${FASTEMBED_MODEL_VERSION}), clearing old cache..."
-    rm -rf "${FASTEMBED_CACHE_DIR:?}"/*
   else
     echo "FastEmbed cache is empty, downloading models..."
   fi
+  rm -rf "${FASTEMBED_CACHE_DIR:?}"/*
   mkdir -p "$FASTEMBED_CACHE_DIR"
   node -e "
     const { FlagEmbedding, EmbeddingModel, SparseTextEmbedding, SparseEmbeddingModel } = require('fastembed');
     const cacheDir = process.env.FASTEMBED_CACHE_DIR;
-    Promise.all([
-      FlagEmbedding.init({ model: EmbeddingModel.BGESmallENV15, cacheDir }),
-      SparseTextEmbedding.init({ model: SparseEmbeddingModel.SpladePPEnV1, cacheDir }),
-    ]).then(() => { console.log('FastEmbed models downloaded.'); process.exit(0); })
-      .catch(e => { console.error('FastEmbed download failed:', e); process.exit(1); });
+    async function run() {
+      console.log('Downloading BGESmallENV15...');
+      await FlagEmbedding.init({ model: EmbeddingModel.BGESmallENV15, cacheDir });
+      console.log('Downloading SpladePPEnV1...');
+      await SparseTextEmbedding.init({ model: SparseEmbeddingModel.SpladePPEnV1, cacheDir });
+      console.log('FastEmbed models downloaded.');
+    }
+    run().then(() => process.exit(0)).catch(e => { console.error('FastEmbed download failed:', e); process.exit(1); });
   "
   echo "$FASTEMBED_MODEL_VERSION" > "$MARKER_FILE"
   echo "FastEmbed models cached successfully."
