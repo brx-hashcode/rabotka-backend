@@ -421,17 +421,57 @@ export class ContactUnlockService {
       });
 
       if ((jobOffer?.quantity ?? 1) > 1) {
-        return this._handleMultiPersonEmployerPay(attempt, now);
+        try {
+          return await this._handleMultiPersonEmployerPay(attempt, now);
+        } catch (dbErr) {
+          if (useCredit) {
+            await this.walletService
+              .creditProfileWallet(
+                profileId,
+                amount,
+                WalletTransactionType.CONTACT_UNLOCK_CREDIT_CONVERSION,
+                'contact_unlock_attempt',
+                attemptId,
+              )
+              .catch((refundErr) =>
+                this.logger.error(
+                  `[payUnlock] refund failed for profile ${profileId} attempt ${attemptId}`,
+                  refundErr,
+                ),
+              );
+          }
+          throw dbErr;
+        }
       }
     }
 
-    return this.commitStandardPerAttemptPayUnlock({
-      attemptId,
-      attempt,
-      isEmployer,
-      isWorker,
-      now,
-    });
+    try {
+      return await this.commitStandardPerAttemptPayUnlock({
+        attemptId,
+        attempt,
+        isEmployer,
+        isWorker,
+        now,
+      });
+    } catch (dbErr) {
+      if (useCredit) {
+        await this.walletService
+          .creditProfileWallet(
+            profileId,
+            amount,
+            WalletTransactionType.CONTACT_UNLOCK_CREDIT_CONVERSION,
+            'contact_unlock_attempt',
+            attemptId,
+          )
+          .catch((refundErr) =>
+            this.logger.error(
+              `[payUnlock] refund failed for profile ${profileId} attempt ${attemptId}`,
+              refundErr,
+            ),
+          );
+      }
+      throw dbErr;
+    }
   }
 
   private async recordWalletUnlockPayment(
