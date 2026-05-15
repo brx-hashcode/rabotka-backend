@@ -16,6 +16,8 @@ const WARM_EXPLOIT_RATIO = 0.4;
 
 // How many candidate explore jobs to fetch before sampling
 const EXPLORE_POOL_FACTOR = 5;
+// Minimum Qdrant prefetch regardless of requested limit
+const MIN_PREFETCH = 20;
 
 export interface RecommendedJob {
   jobId: string;
@@ -68,6 +70,7 @@ export class InterestRecommendationService {
             profile.categories,
             profile.seenJobIds,
             exploreCount,
+            limit,
           )
         : Promise.resolve([]),
       this.fallback(workerId, limit),
@@ -131,6 +134,7 @@ export class InterestRecommendationService {
     knownCategories: string[],
     seenJobIds: string[],
     limit: number,
+    requestedLimit: number,
   ): Promise<RecommendedJob[]> {
     if (!limit) return [];
 
@@ -143,6 +147,8 @@ export class InterestRecommendationService {
     // but exclude jobs in categories the worker has already seen
     const blendedVector = blendVectors(positiveVectors);
     const filter = this.buildJobFilter(seenJobIds, knownCategories);
+    // Dynamic prefetch: proportional to requested limit, avoids over-fetching
+    const poolSize = Math.max(requestedLimit * EXPLORE_POOL_FACTOR, MIN_PREFETCH);
 
     try {
       const results = await this.qdrant.recommendDense(
@@ -150,7 +156,7 @@ export class InterestRecommendationService {
         [blendedVector],
         [], // no negatives in explore — we want adjacent, not repelled
         filter,
-        limit * EXPLORE_POOL_FACTOR,
+        poolSize,
       );
 
       // Shuffle the pool so explore doesn't always return the same top-N
