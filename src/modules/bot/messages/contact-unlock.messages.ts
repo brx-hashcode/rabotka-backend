@@ -31,7 +31,7 @@ export function formatContactUnlockPrompt(params: {
     : [`⚠️ *Solde insuffisant* (${balance} FCFA disponibles)`];
 
   return [
-    `*DÉVERROUILLAGE DU CONTACT*`,
+    `*Déverrouillage du contact*`,
     '',
     `Pour voir les coordonnées de votre ${role} *${name}*, vous devez débloquer le contact.`,
     '',
@@ -67,7 +67,7 @@ export function formatContactUnlockedMessage(params: {
   ];
 
   return [
-    '*CONTACT DÉVERROUILLÉ !*',
+    '*Contact déverrouillé !*',
     '',
     `*${name}*`,
     '',
@@ -93,7 +93,7 @@ export function formatContactUnlockPending(params: {
   });
 
   return [
-    '*PAIEMENT ENREGISTRÉ*',
+    '*Paiement enregistré*',
     '',
     'Votre paiement a bien été enregistré.',
     '',
@@ -107,7 +107,7 @@ export function formatContactUnlockPending(params: {
 
 export function formatContactUnlockExpiredConversion(amount: number): string {
   return [
-    '*DÉVERROUILLAGE EXPIRÉ*',
+    '*Déverrouillage expiré*',
     '',
     'Le délai de déverrouillage de contact a expiré.',
     '',

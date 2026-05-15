@@ -161,7 +161,7 @@ describe('runListOffersFlow()', () => {
     it('shows full description when input is "2"', async () => {
       const state = makeState(detailPayload);
       const result = await runListOffersFlow(state, '2', workerProfile, ctx);
-      expect(result.reply[0]).toContain('DÉTAILS COMPLETS');
+      expect(result.reply[0]).toContain('détails');
     });
 
     it('returns to list when input is "3"', async () => {

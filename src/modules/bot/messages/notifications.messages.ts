@@ -56,7 +56,7 @@ export function formatAccountActivatedMessage(params: {
     '',
     '*Pour commencer, tapez "Menu" pour voir toutes les options disponibles.*',
     '',
-    '*BIENVENUE SUR RABOTKA !*',
+    '*Bienvenue sur Rabotka !*',
   ].join('\n');
 }
 
@@ -71,7 +71,7 @@ export function formatReminder24h(params: {
   penaltyFcfa: number;
 }): string {
   return [
-    '*RAPPEL DE MISSION*',
+    '*Rappel de mission*',
     '',
     'Votre mission est prévue demain.',
     '',
@@ -103,7 +103,7 @@ export function formatReminderStart(params: {
   employerPhone: string;
 }): string {
   return [
-    "*C'EST L'HEURE - VOTRE MISSION COMMENCE !*",
+    "*C'est l'heure — votre mission commence !*",
     '',
     `*Offre*: ${params.offerTitle}`,
     `*Heure*: ${params.scheduledAt.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', timeZone: APP_TIMEZONE })}`,
@@ -135,11 +135,11 @@ export function formatReminder2h(params: {
     '',
     "*Dernier délai d'annulation sans pénalité dépassé.*",
     '',
-    '*CONSEILS*:',
-    '*✓ Prévoyez votre trajet*',
+    '*Conseils*:',
+    '✓ Prévoyez votre trajet',
     '✓ Vérifiez que vous avez tout votre matériel',
     '✓ Arrivez 5-10 minutes en avance',
     '',
-    '*BONNE MISSION ! 💪*',
+    '*Bonne mission ! 💪*',
   ].join('\n');
 }

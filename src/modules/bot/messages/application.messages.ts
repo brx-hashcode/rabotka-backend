@@ -1,6 +1,5 @@
 import { APP_TIMEZONE } from '../utils/parse-date-time';
 
-export const SEP = '━━━━━━━━━━━━━━━';
 
 export type CandidatureListItem = {
   id: string;
@@ -348,7 +347,7 @@ export function formatNewApplicationToEmployer(params: {
     `*Offre*: ${params.offerTitle}`,
     '',
     '*Candidat*:',
-    SEP,
+    '',
     `*Nom*: ${params.workerName}`,
     `*Score de fiabilité*: ${score}/100`,
     `*Missions complétées*: ${params.completedMissions}`,
@@ -357,7 +356,7 @@ export function formatNewApplicationToEmployer(params: {
           `*Description*: ${params.workerDescription.slice(0, 150)}${params.workerDescription.length > 150 ? '...' : ''}`,
         ]
       : []),
-    SEP,
+    '',
     '',
     `*Rendez-vous prévu*: ${formatDate(params.scheduledAt)}`,
     `*Adresse*: ${params.address.length > 80 ? params.address.slice(0, 80) + '...' : params.address}`,
