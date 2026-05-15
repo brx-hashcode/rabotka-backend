@@ -27,6 +27,7 @@ import {
 import { WalletService } from '../wallet/wallet.service';
 import { DocumentService } from '../document/document.service';
 import { MatchingService } from '../matching/matching.service';
+import { InterestClusterService } from '../interest-graph/interest-cluster.service';
 import { CreateProfileDto } from './dto/create-profile.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { AdminUpdateProfileDto } from './dto/admin-update-profile.dto';
@@ -183,6 +184,7 @@ export class ProfileService {
     private readonly walletService: WalletService,
     private readonly documentService: DocumentService,
     private readonly matchingService: MatchingService,
+    private readonly interestClusters: InterestClusterService,
   ) {}
 
   async findById(id: string): Promise<ProfileMeResponse> {
@@ -270,9 +272,23 @@ export class ProfileService {
 
     // Re-index in Qdrant after update (fire-and-forget)
     if (existingProfile.profile_type === ProfileType.WORKER) {
-      this.matchingService.indexWorkerProfile(id).catch((err: unknown) => this.logger.warn(`indexWorkerProfile failed for id`, err instanceof Error ? err.message : String(err)));
+      this.matchingService
+        .indexWorkerProfile(id)
+        .catch((err: unknown) =>
+          this.logger.warn(
+            `indexWorkerProfile failed for id`,
+            err instanceof Error ? err.message : String(err),
+          ),
+        );
     } else {
-      this.matchingService.indexEmployerProfile(id).catch((err: unknown) => this.logger.warn(`indexEmployerProfile failed for id`, err instanceof Error ? err.message : String(err)));
+      this.matchingService
+        .indexEmployerProfile(id)
+        .catch((err: unknown) =>
+          this.logger.warn(
+            `indexEmployerProfile failed for id`,
+            err instanceof Error ? err.message : String(err),
+          ),
+        );
     }
 
     this.eventEmitter.emit(AdminNotificationEvent.PROFILE_UPDATED, {
@@ -594,7 +610,7 @@ export class ProfileService {
 
     const profile = await this.prisma.profile.findUnique({
       where: { id: profileId },
-      select: { id: true },
+      select: { id: true, profile_type: true },
     });
 
     if (!profile) {
@@ -663,6 +679,26 @@ export class ProfileService {
       entityId: String(profileId),
       timestamp: new Date().toISOString(),
     });
+
+    if (decision === 'VERIFIED') {
+      // Seed interest vector so first recommendation isn't cold-start
+      void this.interestClusters.reseedFromProfile(profileId).catch((err) => {
+        this.logger.warn(
+          `Interest vector reseed failed for profile=${profileId}`,
+          err,
+        );
+      });
+
+      // Grant welcome credit (idempotent — no-op if already granted)
+      void this.walletService
+        .grantWelcomeCredit(profileId, profile.profile_type)
+        .catch((err) => {
+          this.logger.warn(
+            `Welcome credit grant failed for profile=${profileId}`,
+            err,
+          );
+        });
+    }
 
     return this.getProfileDetailForAdmin(profileId);
   }
@@ -779,9 +815,23 @@ export class ProfileService {
 
     // Re-index in Qdrant after update (fire-and-forget)
     if (profile.profile_type === ProfileType.WORKER) {
-      this.matchingService.indexWorkerProfile(profileId).catch((err: unknown) => this.logger.warn(`indexWorkerProfile failed for profileId`, err instanceof Error ? err.message : String(err)));
+      this.matchingService
+        .indexWorkerProfile(profileId)
+        .catch((err: unknown) =>
+          this.logger.warn(
+            `indexWorkerProfile failed for profileId`,
+            err instanceof Error ? err.message : String(err),
+          ),
+        );
     } else {
-      this.matchingService.indexEmployerProfile(profileId).catch((err: unknown) => this.logger.warn(`indexEmployerProfile failed for profileId`, err instanceof Error ? err.message : String(err)));
+      this.matchingService
+        .indexEmployerProfile(profileId)
+        .catch((err: unknown) =>
+          this.logger.warn(
+            `indexEmployerProfile failed for profileId`,
+            err instanceof Error ? err.message : String(err),
+          ),
+        );
     }
 
     this.eventEmitter.emit(AdminNotificationEvent.PROFILE_UPDATED, {
@@ -954,9 +1004,23 @@ export class ProfileService {
 
       // Index profile asynchronously (fire-and-forget, gated by feature flag)
       if (createProfileDto.profileType === 'WORKER') {
-        this.matchingService.indexWorkerProfile(profile.id).catch((err: unknown) => this.logger.warn(`indexWorkerProfile failed for profile.id`, err instanceof Error ? err.message : String(err)));
+        this.matchingService
+          .indexWorkerProfile(profile.id)
+          .catch((err: unknown) =>
+            this.logger.warn(
+              `indexWorkerProfile failed for profile.id`,
+              err instanceof Error ? err.message : String(err),
+            ),
+          );
       } else {
-        this.matchingService.indexEmployerProfile(profile.id).catch((err: unknown) => this.logger.warn(`indexEmployerProfile failed for profile.id`, err instanceof Error ? err.message : String(err)));
+        this.matchingService
+          .indexEmployerProfile(profile.id)
+          .catch((err: unknown) =>
+            this.logger.warn(
+              `indexEmployerProfile failed for profile.id`,
+              err instanceof Error ? err.message : String(err),
+            ),
+          );
       }
 
       this.eventEmitter.emit(AdminNotificationEvent.PROFILE_CREATED, {

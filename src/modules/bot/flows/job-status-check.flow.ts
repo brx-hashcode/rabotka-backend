@@ -20,9 +20,12 @@ function isMenuInput(normalized: string): boolean {
 
 function snoozeHoursFor(paymentFlow: string | undefined): number {
   switch (paymentFlow) {
-    case PaymentFlow.HOURLY: return 1;
-    case PaymentFlow.MONTHLY: return 24;
-    default: return 8; // DAILY
+    case PaymentFlow.HOURLY:
+      return 1;
+    case PaymentFlow.MONTHLY:
+      return 24;
+    default:
+      return 8; // DAILY
   }
 }
 
@@ -31,7 +34,10 @@ function snoozeLabel(paymentFlow: string | undefined): string {
   return h === 1 ? '1 heure' : `${h} heures`;
 }
 
-function statusPrompt(jobTitle: string, paymentFlow: string | undefined): string {
+function statusPrompt(
+  jobTitle: string,
+  paymentFlow: string | undefined,
+): string {
   return [
     `📋 *Mission en cours — ${jobTitle}*`,
     '',
@@ -53,10 +59,14 @@ export async function runJobStatusCheckFlow(
   const normalized = trimmed.toLowerCase();
 
   if (isMenuInput(normalized) || trimmed === '3') {
-    return { reply: ['Tapez *MENU* pour accéder au menu principal.'], clearState: true };
+    return {
+      reply: ['Tapez *MENU* pour accéder au menu principal.'],
+      clearState: true,
+    };
   }
 
-  const { jobOfferId, jobTitle, applicationId, paymentFlow } = (state.payload ?? {}) as {
+  const { jobOfferId, jobTitle, applicationId, paymentFlow } = (state.payload ??
+    {}) as {
     jobOfferId?: string;
     jobTitle?: string;
     applicationId?: string;
@@ -64,7 +74,7 @@ export async function runJobStatusCheckFlow(
   };
 
   if (!jobOfferId || !applicationId) {
-    return { reply: ["*ERREUR. Tapez 'MENU'.*"], clearState: true };
+    return { reply: ["*ERREUR. Tapez *Menu*.*"], clearState: true };
   }
 
   // Re-bind as non-optional after the guard so downstream code is typed as string
@@ -75,7 +85,10 @@ export async function runJobStatusCheckFlow(
   if (trimmed === '1') {
     // Employer confirms mission is done
     try {
-      await ctx.applicationService.markJobCompleted(safeApplicationId, profile.id);
+      await ctx.applicationService.markJobCompleted(
+        safeApplicationId,
+        profile.id,
+      );
       await ctx.notificationService
         .sendJobCompletedToWorker(safeApplicationId)
         .catch(() => {});
@@ -93,22 +106,36 @@ export async function runJobStatusCheckFlow(
       };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Erreur inconnue.';
-      return { reply: [`❌ ${msg}\n\nTapez *MENU* pour revenir.`], clearState: true };
+      return {
+        reply: [`❌ ${msg}\n\nTapez *MENU* pour revenir.`],
+        clearState: true,
+      };
     }
   }
 
   if (trimmed === '2') {
     const hours = snoozeHoursFor(paymentFlow);
     const snoozeCount = ((state.payload?.snoozeCount as number) ?? 0) + 1;
-    const snoozeUntil = new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
+    const snoozeUntil = new Date(
+      Date.now() + hours * 60 * 60 * 1000,
+    ).toISOString();
     const employerId = ctx.employerId ?? profile.id;
 
     // Schedule a proactive re-ask after the snooze duration
     await ctx.queueService
       .addJob<ReminderJobData>(
         WHATSAPP_REMINDERS_QUEUE,
-        { type: 'reminder_job_status', jobOfferId: safeJobOfferId, employerId, applicationId: safeApplicationId, paymentFlow: paymentFlow ?? 'DAILY' },
-        { jobId: `job-status-${safeJobOfferId}-snooze-${snoozeCount}`, delay: hours * 60 * 60 * 1000 },
+        {
+          type: 'reminder_job_status',
+          jobOfferId: safeJobOfferId,
+          employerId,
+          applicationId: safeApplicationId,
+          paymentFlow: paymentFlow ?? 'DAILY',
+        },
+        {
+          jobId: `job-status-${safeJobOfferId}-snooze-${snoozeCount}`,
+          delay: hours * 60 * 60 * 1000,
+        },
       )
       .catch(() => {});
 
@@ -162,6 +189,9 @@ export function getJobStatusCheckInitialState(params: {
   };
 }
 
-export function jobStatusCheckPromptMessage(jobTitle: string, paymentFlow: string): string {
+export function jobStatusCheckPromptMessage(
+  jobTitle: string,
+  paymentFlow: string,
+): string {
   return statusPrompt(jobTitle, paymentFlow);
 }

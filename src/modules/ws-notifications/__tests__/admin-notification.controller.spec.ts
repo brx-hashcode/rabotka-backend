@@ -21,10 +21,14 @@ describe('AdminNotificationController', () => {
       controllers: [AdminNotificationController],
       providers: [{ provide: AdminNotificationService, useValue: mockService }],
     })
-      .overrideGuard(AdminAuthGuard).useValue({ canActivate: () => true })
-      .overrideGuard(RolesGuard).useValue({ canActivate: () => true })
+      .overrideGuard(AdminAuthGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(RolesGuard)
+      .useValue({ canActivate: () => true })
       .compile();
-    controller = module.get<AdminNotificationController>(AdminNotificationController);
+    controller = module.get<AdminNotificationController>(
+      AdminNotificationController,
+    );
   });
 
   it('list returns notifications and unread count', async () => {

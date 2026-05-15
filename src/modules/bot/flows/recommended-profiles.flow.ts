@@ -103,7 +103,7 @@ export async function runRecommendedProfilesFlow(
   if (workerIds.length === 0) {
     return {
       reply: [
-        "*Aucun profil recommandé pour le moment. Tapez 'Menu' pour revenir.*",
+        "*Aucun profil recommandé pour le moment. Tapez *Menu* pour revenir.*",
       ],
       clearState: true,
     };

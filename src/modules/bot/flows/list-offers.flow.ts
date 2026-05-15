@@ -55,7 +55,7 @@ function handleListStep(params: FlowParams): Promise<FlowResult> | FlowResult {
   if (choice === menuIdx) return goToMenu();
   return {
     reply: [
-      `*TAPEZ UN NUMÉRO (1-${offerIds.length}) POUR SÉLECTIONNER UNE OFFRE${nextCursor ? `, ${nextPageIdx} (voir plus)` : ''}, ${menuIdx} (menu).*`,
+      `Tapez un numéro (1-${offerIds.length}) pour sélectionner une offre${nextCursor ? `, ${nextPageIdx} (voir plus)` : ''}, ${menuIdx} (menu).`,
     ],
     nextState: state,
   };
@@ -66,7 +66,7 @@ async function handleLoadMore(params: FlowParams): Promise<FlowResult> {
   if (!nextCursor) {
     return {
       reply: [
-        '*RÉPONDEZ PAR 1-5 POUR SÉLECTIONNER UNE OFFRE, 6 (VOIR PLUS) OU 7 (MENU).*',
+        'Répondez par 1-5 pour sélectionner une offre, 6 (voir plus) ou 7 (menu).',
       ],
       nextState: state,
     };
@@ -110,7 +110,7 @@ async function handleListSelectOffer(
   const offer = await ctx.jobOfferService.findById(offerId);
   if (!offer) {
     return {
-      reply: ["*Cette offre n'existe plus. Tapez 'Menu'.*"],
+      reply: ["*Cette offre n'existe plus. Tapez *Menu*.*"],
       clearState: true,
     };
   }
@@ -140,7 +140,7 @@ function handleDetailStep(
       : null;
   if (!offerId) {
     return {
-      reply: ["*INDEX INVALIDE. TAPEZ 'MENU'.*"],
+      reply: ["❌ Index invalide. Tapez *Menu*."],
       clearState: true,
     };
   }
@@ -150,7 +150,7 @@ function handleDetailStep(
   if (trimmed === '3') return handleDetailBackToList(offerId, params);
   return {
     reply: [
-      '*RÉPONDEZ PAR 1 (POSTULER), 2 (VOIR DESCRIPTION COMPLÈTE), 3 (RETOUR LISTE) OU 4 (MENU).*',
+      'Répondez par 1 (Postuler), 2 (Voir description complète), 3 (Retour liste) ou 4 (Menu).',
     ],
     nextState: state,
   };
@@ -174,7 +174,7 @@ async function handleDetailApply(
   const offer = await ctx.jobOfferService.findById(offerId);
   if (!offer) {
     return {
-      reply: ["*Cette offre n'existe plus. Tapez 'Menu'.*"],
+      reply: ["*Cette offre n'existe plus. Tapez *Menu*.*"],
       clearState: true,
     };
   }
@@ -235,7 +235,7 @@ async function handleDetailViewDescription(
   const offer = await ctx.jobOfferService.findById(offerId);
   if (!offer) {
     return {
-      reply: ["*Offre introuvable. Tapez 'Menu'.*"],
+      reply: ["*Offre introuvable. Tapez *Menu*.*"],
       clearState: true,
     };
   }
@@ -328,7 +328,7 @@ export async function runListOffersFlow(
 
   if (offerIds.length === 0) {
     return {
-      reply: ["*Aucune offre. Tapez 'Menu' pour revenir.*"],
+      reply: ["*Aucune offre. Tapez *Menu* pour revenir.*"],
       clearState: true,
     };
   }
@@ -367,7 +367,7 @@ export async function runListOffersFlow(
   }
 
   return {
-    reply: ["*ERREUR. TAPEZ 'MENU' POUR REVENIR.*"],
+    reply: ["❌ Erreur. Tapez *Menu* pour revenir."],
     clearState: true,
   };
 }

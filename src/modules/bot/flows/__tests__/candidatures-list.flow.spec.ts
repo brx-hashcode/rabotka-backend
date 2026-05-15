@@ -67,7 +67,7 @@ describe('runCandidaturesListFlow()', () => {
       makeCtx(),
     );
     expect(result.clearState).toBe(true);
-    expect(result.reply[0]).toContain('AUCUNE');
+    expect(result.reply[0]).toContain('Aucune candidature');
   });
 
   it('exits to menu on "menu" command', async () => {
@@ -135,7 +135,7 @@ describe('runCandidaturesListFlow()', () => {
       makeCtx(),
     );
     expect(result.nextState).toBe(state);
-    expect(result.reply[0]).toContain('TAPEZ');
+    expect(result.reply[0]).toContain('Tapez');
   });
 
   describe('step: detail', () => {

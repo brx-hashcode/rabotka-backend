@@ -8,7 +8,7 @@ export type ContactInfo = {
 
 export function workerMenuMessage(): string {
   return [
-    '*MENU RABOTKA*',
+    '*Menu Rabotka*',
     '',
     '1- Trouver une mission',
     '2- Mes candidatures',
@@ -24,7 +24,7 @@ export function workerMenuMessage(): string {
 
 export function employerMenuMessage(): string {
   return [
-    '*MENU RABOTKA*',
+    '*Menu Rabotka*',
     '',
     '1- Publier une offre',
     '2- Mes offres publiées',
@@ -46,13 +46,13 @@ export function menuMessage(profileType: BotProfileType): string {
 
 export function helpMessage(contact: ContactInfo): string {
   return [
-    '*CONTACT RABOTKA*',
+    '*Contact Rabotka*',
     '',
     `*Téléphone*: ${contact.phone}`,
     `*Email*: ${contact.email}`,
     `*Adresse*: _${contact.address}_`,
     '',
-    "*Tapez 'Menu' pour revenir.*",
+    "Tapez *Menu* pour revenir.",
   ].join('\n');
 }
 
@@ -75,10 +75,10 @@ export function hasPenaltiesBotMessage(): string {
     '',
     "Vous avez des pénalités impayées. Vous ne pouvez pas accéder aux fonctionnalités tant qu'elles ne sont pas réglées.",
     '',
-    "Tapez *PAYER* pour régler vos pénalités et réactiver l'accès.",
+    "Tapez *3* (Paiements en attente) pour régler vos pénalités et réactiver l'accès.",
   ].join('\n');
 }
 
 export function unknownCommandMessage(): string {
-  return "Commande non reconnue. Tapez 'Menu' pour voir les options.";
+  return "Commande non reconnue. Tapez *Menu* pour voir le menu.";
 }

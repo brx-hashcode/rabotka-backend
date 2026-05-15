@@ -120,7 +120,7 @@ function buildInvalidChoiceMessage(
   pageIndex: number,
 ) {
   const n = getPageSlice(items, pageIndex).length;
-  return `*TAPEZ UN NUMÉRO (1-${n}) POUR SÉLECTIONNER UN CANDIDAT, S/P POUR NAVIGUER, M POUR LE MENU.*`;
+  return `Tapez un numéro (1-${n}) pour sélectionner un candidat, S/P pour naviguer, M pour le menu.`;
 }
 
 type DetailStepParams = {
@@ -169,7 +169,7 @@ async function handleDetailStep(params: DetailStepParams): Promise<FlowResult> {
     const applicationId = selectedItem?.id;
     if (!applicationId) {
       return {
-        reply: ["*ERREUR. TAPEZ 'MENU'.*"],
+        reply: ["❌ Erreur. Tapez *Menu*."],
         clearState: true,
       };
     }
@@ -182,7 +182,9 @@ async function handleDetailStep(params: DetailStepParams): Promise<FlowResult> {
     );
     return {
       reply: result.reply,
-      nextState: result.clearState ? undefined : (result.nextState ?? acceptRefuseState),
+      nextState: result.clearState
+        ? undefined
+        : (result.nextState ?? acceptRefuseState),
       clearState: result.clearState,
     };
   }
@@ -246,9 +248,14 @@ function handleListSelection(
   }
 
   const item = slice[choice - 1];
-  void ctx.applicationService.markAsViewed(item.id).catch((err: unknown) =>
-    console.warn(`[candidatures-list] markAsViewed failed for ${item.id}:`, err),
-  );
+  void ctx.applicationService
+    .markAsViewed(item.id)
+    .catch((err: unknown) =>
+      console.warn(
+        `[candidatures-list] markAsViewed failed for ${item.id}:`,
+        err,
+      ),
+    );
   return {
     reply: [formatSelectedItemDetail(item)],
     nextState: buildDetailState(state, payload, item),
@@ -271,7 +278,7 @@ export async function runCandidaturesListFlow(
 
   if (items.length === 0) {
     return {
-      reply: ["*AUCUNE CANDIDATURE. TAPEZ 'MENU'.*"],
+      reply: ["Aucune candidature reçue. Tapez *Menu*."],
       clearState: true,
     };
   }

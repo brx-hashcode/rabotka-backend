@@ -86,7 +86,9 @@ export class InterestSignalService {
         with_vector: ['dense'],
         with_payload: false,
       });
-      const raw = points[0] as unknown as { vector?: { dense?: unknown } } | undefined;
+      const raw = points[0] as unknown as
+        | { vector?: { dense?: unknown } }
+        | undefined;
       const dense = raw?.vector?.dense;
       if (Array.isArray(dense) && dense.length > 0) {
         vector = dense as number[];
@@ -117,10 +119,12 @@ export class InterestSignalService {
       `Signal recorded: user=${userId} job=${jobId} type=${type} w=${baseWeight}`,
     );
 
-    // EMA update — fires on every signal, no batching
-    await this.clusters.applySignal(userId, jobId, vector, baseWeight, job.category?.name ?? null).catch((err) => {
-      this.logger.warn(`EMA update failed for user=${userId}`, err);
-    });
+    // Fire-and-forget — EMA update must not block the signal recording response
+    void this.clusters
+      .applySignal(userId, jobId, vector, baseWeight, job.category?.name ?? null)
+      .catch((err) => {
+        this.logger.warn(`EMA update failed for user=${userId}`, err);
+      });
   }
 
   async getRecentSignals(userId: string): Promise<

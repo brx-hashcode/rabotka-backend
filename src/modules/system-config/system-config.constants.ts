@@ -72,7 +72,8 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     key: 'fees.employer_late_cancel_score_deduction',
     value: '5',
     category: ConfigCategory.FEES,
-    label: 'Déduction score employeur (annulation tardive ou offre non démarrée avec travailleur accepté)',
+    label:
+      'Déduction score employeur (annulation tardive ou offre non démarrée avec travailleur accepté)',
     isSecret: false,
   },
   {
@@ -138,6 +139,20 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     value: 'false',
     category: ConfigCategory.MATCHING,
     label: 'Activer algorithme de similarité (embeddings)',
+    isSecret: false,
+  },
+  {
+    key: 'matching.min_notification_score',
+    value: '0.55',
+    category: ConfigCategory.MATCHING,
+    label: 'Score minimum pour notification de recommandation',
+    isSecret: false,
+  },
+  {
+    key: 'matching.recommendations_enabled',
+    value: 'true',
+    category: ConfigCategory.MATCHING,
+    label: 'Activer les notifications de recommandation de jobs',
     isSecret: false,
   },
 

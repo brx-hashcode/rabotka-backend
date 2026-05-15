@@ -88,7 +88,9 @@ describe('ReminderProcessor', () => {
       expirePendingAttemptsForJob: jest.fn().mockResolvedValue([]),
     } as any;
     const botNotification = {
-      sendContactUnlockCreditConversionNotification: jest.fn().mockResolvedValue(undefined),
+      sendContactUnlockCreditConversionNotification: jest
+        .fn()
+        .mockResolvedValue(undefined),
     } as any;
     processor = new ReminderProcessor(
       prisma,
@@ -189,7 +191,9 @@ describe('ReminderProcessor', () => {
       prisma.jobOffer.findMany
         .mockResolvedValueOnce([]) // offersToAutoStart (FILLED/PARTIALLY_FILLED with workers)
         .mockResolvedValueOnce([]) // openOverdue (ACTIVE/PARTIALLY_FILLED empty)
-        .mockResolvedValueOnce([{ id: 'offer-1', applications: [{ id: 'app-start' }] }]); // start window
+        .mockResolvedValueOnce([
+          { id: 'offer-1', applications: [{ id: 'app-start' }] },
+        ]); // start window
       redis.get.mockResolvedValue(null);
 
       await processor.process({ data: { type: 'scan' } });
@@ -205,7 +209,9 @@ describe('ReminderProcessor', () => {
       prisma.jobOffer.findMany
         .mockResolvedValueOnce([]) // offersToAutoStart
         .mockResolvedValueOnce([]) // openOverdue
-        .mockResolvedValueOnce([{ id: 'offer-1', applications: [{ id: 'app-start' }] }]);
+        .mockResolvedValueOnce([
+          { id: 'offer-1', applications: [{ id: 'app-start' }] },
+        ]);
       redis.get.mockResolvedValue('1');
 
       await processor.process({ data: { type: 'scan' } });
@@ -256,10 +262,14 @@ describe('ReminderProcessor', () => {
       await processor.process({ data: { type: 'scan' } });
 
       expect(prisma.jobOffer.updateMany).toHaveBeenCalledWith(
-        expect.objectContaining({ data: { status: JobOfferStatus.IN_PROGRESS } }),
+        expect.objectContaining({
+          data: { status: JobOfferStatus.IN_PROGRESS },
+        }),
       );
       expect(prisma.application.updateMany).toHaveBeenCalledWith(
-        expect.objectContaining({ data: { status: ApplicationStatus.STARTED } }),
+        expect.objectContaining({
+          data: { status: ApplicationStatus.STARTED },
+        }),
       );
       expect(whatsApp.sendTextMessage).toHaveBeenCalledWith(
         '+5555',
@@ -286,7 +296,9 @@ describe('ReminderProcessor', () => {
       await processor.process({ data: { type: 'scan' } });
 
       expect(prisma.jobOffer.updateMany).toHaveBeenCalledWith(
-        expect.objectContaining({ data: { status: JobOfferStatus.IN_PROGRESS } }),
+        expect.objectContaining({
+          data: { status: JobOfferStatus.IN_PROGRESS },
+        }),
       );
     });
 
@@ -670,9 +682,13 @@ describe('ReminderProcessor', () => {
         .mockResolvedValueOnce([]); // openOverdue
       prisma.application.findMany.mockResolvedValue([] as never);
       redis.get.mockResolvedValue(null);
-      whatsApp.sendTextMessage.mockRejectedValueOnce(new Error('WhatsApp failure'));
+      whatsApp.sendTextMessage.mockRejectedValueOnce(
+        new Error('WhatsApp failure'),
+      );
       // should not throw
-      await expect(processor.process({ data: { type: 'scan' } })).resolves.not.toThrow();
+      await expect(
+        processor.process({ data: { type: 'scan' } }),
+      ).resolves.not.toThrow();
     });
   });
 
@@ -683,11 +699,15 @@ describe('ReminderProcessor', () => {
       prisma.jobOffer.findMany
         .mockResolvedValueOnce([]) // offersToAutoStart
         .mockResolvedValueOnce([]) // openOverdue
-        .mockResolvedValueOnce([{ id: 'offer-start', applications: [{ id: 'app-start-1' }] }]); // start window
+        .mockResolvedValueOnce([
+          { id: 'offer-start', applications: [{ id: 'app-start-1' }] },
+        ]); // start window
       prisma.application.findMany.mockResolvedValue([] as never);
       redis.get.mockResolvedValue(null);
       const contactUnlockService = (processor as any).contactUnlockService;
-      contactUnlockService.expirePendingAttemptsForJob = jest.fn().mockRejectedValueOnce(new Error('Unlock error'));
+      contactUnlockService.expirePendingAttemptsForJob = jest
+        .fn()
+        .mockRejectedValueOnce(new Error('Unlock error'));
       await processor.process({ data: { type: 'scan' } });
       // Should not throw
       expect(true).toBe(true);
@@ -697,15 +717,23 @@ describe('ReminderProcessor', () => {
       prisma.jobOffer.findMany
         .mockResolvedValueOnce([]) // offersToAutoStart
         .mockResolvedValueOnce([]) // openOverdue
-        .mockResolvedValueOnce([{ id: 'offer-start', applications: [{ id: 'app-start-1' }] }]); // start window
+        .mockResolvedValueOnce([
+          { id: 'offer-start', applications: [{ id: 'app-start-1' }] },
+        ]); // start window
       prisma.application.findMany.mockResolvedValue([] as never);
       redis.get.mockResolvedValue(null);
       const contactUnlockService = (processor as any).contactUnlockService;
-      contactUnlockService.expirePendingAttemptsForJob = jest.fn().mockResolvedValue([{ profileId: 'p-1', amount: 5000 }]);
+      contactUnlockService.expirePendingAttemptsForJob = jest
+        .fn()
+        .mockResolvedValue([{ profileId: 'p-1', amount: 5000 }]);
       const botNotification = (processor as any).botNotification;
-      botNotification.sendContactUnlockCreditConversionNotification = jest.fn().mockResolvedValue(undefined);
+      botNotification.sendContactUnlockCreditConversionNotification = jest
+        .fn()
+        .mockResolvedValue(undefined);
       await processor.process({ data: { type: 'scan' } });
-      expect(botNotification.sendContactUnlockCreditConversionNotification).toHaveBeenCalledWith('p-1', 5000);
+      expect(
+        botNotification.sendContactUnlockCreditConversionNotification,
+      ).toHaveBeenCalledWith('p-1', 5000);
     });
   });
 
@@ -738,11 +766,15 @@ describe('ReminderProcessor', () => {
       prisma.application.findUnique.mockResolvedValue(buildApplication());
       prisma.application.update = jest.fn().mockResolvedValue({});
       prisma.jobOffer.update = jest.fn().mockResolvedValue({});
-      whatsApp.sendTextMessage.mockRejectedValueOnce(new Error('WhatsApp error'));
+      whatsApp.sendTextMessage.mockRejectedValueOnce(
+        new Error('WhatsApp error'),
+      );
       redis.set = jest.fn().mockResolvedValue('OK'); // claim succeeds
       redis.del = jest.fn().mockResolvedValue(1);
       await expect(
-        processor.process({ data: { type: 'reminder_start', applicationId: 'app-1' } })
+        processor.process({
+          data: { type: 'reminder_start', applicationId: 'app-1' },
+        }),
       ).rejects.toThrow('WhatsApp error');
       expect(redis.del).toHaveBeenCalled();
     });

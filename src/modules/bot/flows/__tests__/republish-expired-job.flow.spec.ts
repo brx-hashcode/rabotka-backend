@@ -38,7 +38,11 @@ function makeCtx(jobOverrides: any = {}) {
   return {
     prisma: {
       jobOffer: {
-        findUnique: jest.fn().mockResolvedValue(jobOverrides === null ? null : { ...mockJob, ...jobOverrides }),
+        findUnique: jest
+          .fn()
+          .mockResolvedValue(
+            jobOverrides === null ? null : { ...mockJob, ...jobOverrides },
+          ),
       },
     } as any,
     jobOfferService: {
@@ -51,51 +55,91 @@ describe('runRepublishExpiredJobFlow', () => {
   describe('step 0', () => {
     it('returns menu when menu command sent', async () => {
       const ctx = makeCtx();
-      const result = await runRepublishExpiredJobFlow(makeState(0), 'menu', profile, ctx);
+      const result = await runRepublishExpiredJobFlow(
+        makeState(0),
+        'menu',
+        profile,
+        ctx,
+      );
       expect(result.clearState).toBe(true);
     });
 
     it('returns menu when 2 sent', async () => {
       const ctx = makeCtx();
-      const result = await runRepublishExpiredJobFlow(makeState(0), '2', profile, ctx);
+      const result = await runRepublishExpiredJobFlow(
+        makeState(0),
+        '2',
+        profile,
+        ctx,
+      );
       expect(result.clearState).toBe(true);
     });
 
     it('shows republish prompt for unknown input', async () => {
       const ctx = makeCtx();
-      const result = await runRepublishExpiredJobFlow(makeState(0), 'xyz', profile, ctx);
+      const result = await runRepublishExpiredJobFlow(
+        makeState(0),
+        'xyz',
+        profile,
+        ctx,
+      );
       expect(result.nextState).toBeDefined();
       expect(result.reply[0]).toContain('expirée');
     });
 
     it('fetches job and moves to step 1 when 1 entered', async () => {
       const ctx = makeCtx();
-      const result = await runRepublishExpiredJobFlow(makeState(0), '1', profile, ctx);
+      const result = await runRepublishExpiredJobFlow(
+        makeState(0),
+        '1',
+        profile,
+        ctx,
+      );
       expect(result.nextState?.step).toBe(1);
     });
 
     it('returns menu when no jobOfferId in state', async () => {
       const ctx = makeCtx();
-      const result = await runRepublishExpiredJobFlow(makeState(0, {}), '1', profile, ctx);
+      const result = await runRepublishExpiredJobFlow(
+        makeState(0, {}),
+        '1',
+        profile,
+        ctx,
+      );
       expect(result.clearState).toBe(true);
     });
 
     it('returns error when job not found', async () => {
       const ctx = makeCtx(null);
-      const result = await runRepublishExpiredJobFlow(makeState(0), '1', profile, ctx);
+      const result = await runRepublishExpiredJobFlow(
+        makeState(0),
+        '1',
+        profile,
+        ctx,
+      );
       expect(result.clearState).toBe(true);
       expect(result.reply[0]).toContain('introuvable');
     });
 
     it('returns error when job belongs to different employer', async () => {
       const ctx = makeCtx({ employer_id: 'other-employer' });
-      const result = await runRepublishExpiredJobFlow(makeState(0), '1', profile, ctx);
+      const result = await runRepublishExpiredJobFlow(
+        makeState(0),
+        '1',
+        profile,
+        ctx,
+      );
       expect(result.clearState).toBe(true);
     });
 
     it('handles republier command', async () => {
       const ctx = makeCtx();
-      const result = await runRepublishExpiredJobFlow(makeState(0), 'republier', profile, ctx);
+      const result = await runRepublishExpiredJobFlow(
+        makeState(0),
+        'republier',
+        profile,
+        ctx,
+      );
       expect(result.nextState?.step).toBe(1);
     });
   });
@@ -114,20 +158,35 @@ describe('runRepublishExpiredJobFlow', () => {
 
     it('returns menu when menu command sent', async () => {
       const ctx = makeCtx();
-      const result = await runRepublishExpiredJobFlow(step1State, 'menu', profile, ctx);
+      const result = await runRepublishExpiredJobFlow(
+        step1State,
+        'menu',
+        profile,
+        ctx,
+      );
       expect(result.clearState).toBe(true);
     });
 
     it('returns format error for invalid date', async () => {
       const ctx = makeCtx();
-      const result = await runRepublishExpiredJobFlow(step1State, 'invalid date', profile, ctx);
+      const result = await runRepublishExpiredJobFlow(
+        step1State,
+        'invalid date',
+        profile,
+        ctx,
+      );
       expect(result.nextState).toBeDefined();
       expect(result.reply[0]).toContain('Format invalide');
     });
 
     it('returns error for date in the past', async () => {
       const ctx = makeCtx();
-      const result = await runRepublishExpiredJobFlow(step1State, '01/01/2020 09:00', profile, ctx);
+      const result = await runRepublishExpiredJobFlow(
+        step1State,
+        '01/01/2020 09:00',
+        profile,
+        ctx,
+      );
       expect(result.nextState).toBeDefined();
     });
 
@@ -139,21 +198,33 @@ describe('runRepublishExpiredJobFlow', () => {
       const yyyy = futureDate.getFullYear();
       const dateStr = `${dd}/${mm}/${yyyy} 09:00`;
 
-      const result = await runRepublishExpiredJobFlow(step1State, dateStr, profile, ctx);
+      const result = await runRepublishExpiredJobFlow(
+        step1State,
+        dateStr,
+        profile,
+        ctx,
+      );
       expect(result.clearState).toBe(true);
       expect(result.reply[0]).toContain('republiée');
     });
 
     it('returns error when job creation fails', async () => {
       const ctx = makeCtx();
-      ctx.jobOfferService.create.mockRejectedValue(new Error('Creation failed'));
+      ctx.jobOfferService.create.mockRejectedValue(
+        new Error('Creation failed'),
+      );
       const futureDate = new Date(Date.now() + 86400000 * 7);
       const dd = String(futureDate.getDate()).padStart(2, '0');
       const mm = String(futureDate.getMonth() + 1).padStart(2, '0');
       const yyyy = futureDate.getFullYear();
       const dateStr = `${dd}/${mm}/${yyyy} 09:00`;
 
-      const result = await runRepublishExpiredJobFlow(step1State, dateStr, profile, ctx);
+      const result = await runRepublishExpiredJobFlow(
+        step1State,
+        dateStr,
+        profile,
+        ctx,
+      );
       expect(result.nextState).toBeDefined();
       expect(result.reply[0]).toContain('Creation failed');
     });
@@ -163,7 +234,12 @@ describe('runRepublishExpiredJobFlow', () => {
     it('returns menu for unknown step', async () => {
       const ctx = makeCtx();
       const state = makeState(99);
-      const result = await runRepublishExpiredJobFlow(state, 'test', profile, ctx);
+      const result = await runRepublishExpiredJobFlow(
+        state,
+        'test',
+        profile,
+        ctx,
+      );
       expect(result.clearState).toBe(true);
     });
   });

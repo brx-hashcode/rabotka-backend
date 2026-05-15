@@ -291,7 +291,11 @@ export class AuthController {
   async verifyAdminOtp(
     @Body() verifyAdminOtpDto: VerifyAdminOtpDto,
     @Res({ passthrough: true }) res: Response,
-  ): Promise<{ success: boolean; totpRequired?: boolean; pendingToken?: string }> {
+  ): Promise<{
+    success: boolean;
+    totpRequired?: boolean;
+    pendingToken?: string;
+  }> {
     const result = await this.authService.verifyAdminOtp(
       verifyAdminOtpDto.email,
       verifyAdminOtpDto.otp,
@@ -515,16 +519,30 @@ export class AuthController {
 
   @Post('admin/qr/consume')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Consume confirmed QR session and set cookie (or return TOTP gate)' })
+  @ApiOperation({
+    summary:
+      'Consume confirmed QR session and set cookie (or return TOTP gate)',
+  })
   async consumeQrSession(
     @Body('sessionId') sessionId: string,
     @Body('consumeNonce') consumeNonce: string,
     @Res({ passthrough: true }) res: Response,
-  ): Promise<{ success: boolean; totpRequired?: boolean; pendingToken?: string }> {
-    const result = await this.authService.consumeQrSession(sessionId, consumeNonce);
+  ): Promise<{
+    success: boolean;
+    totpRequired?: boolean;
+    pendingToken?: string;
+  }> {
+    const result = await this.authService.consumeQrSession(
+      sessionId,
+      consumeNonce,
+    );
 
     if (result.totpRequired && result.pendingToken) {
-      return { success: true, totpRequired: true, pendingToken: result.pendingToken };
+      return {
+        success: true,
+        totpRequired: true,
+        pendingToken: result.pendingToken,
+      };
     }
 
     const isProduction =
@@ -549,7 +567,9 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @UseGuards(AdminAuthGuard)
   @ApiCookieAuth()
-  @ApiOperation({ summary: 'Generate a TOTP secret and QR code for enrollment' })
+  @ApiOperation({
+    summary: 'Generate a TOTP secret and QR code for enrollment',
+  })
   async totpSetup(
     @Req() req: AdminAuthenticatedRequest,
   ): Promise<{ secret: string; qrDataUrl: string }> {
@@ -582,7 +602,9 @@ export class AuthController {
 
   @Post('admin/totp/login')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Complete login by verifying TOTP code (sets session cookie)' })
+  @ApiOperation({
+    summary: 'Complete login by verifying TOTP code (sets session cookie)',
+  })
   async totpLogin(
     @Body('pendingToken') pendingToken: string,
     @Body('code') code: string,
@@ -590,7 +612,8 @@ export class AuthController {
   ): Promise<{ success: boolean }> {
     const result = await this.authService.verifyTotpLogin(pendingToken, code);
 
-    const isProduction = this.configService.get<string>('NODE_ENV') === 'production';
+    const isProduction =
+      this.configService.get<string>('NODE_ENV') === 'production';
     const cookieName = this.configService.get<string>('AUTH_COOKIE_NAME');
     if (!cookieName) throw new Error('AUTH_COOKIE_NAME is not set');
 

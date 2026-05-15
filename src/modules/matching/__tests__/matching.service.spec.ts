@@ -51,7 +51,11 @@ describe('MatchingService', () => {
     prisma = makePrisma();
     qdrant = makeQdrant();
     systemConfig = makeSystemConfig(true);
-    service = new MatchingService(prisma as any, qdrant as any, systemConfig as any);
+    service = new MatchingService(
+      prisma as any,
+      qdrant as any,
+      systemConfig as any,
+    );
   });
 
   describe('when similarity is disabled', () => {
@@ -90,7 +94,7 @@ describe('MatchingService', () => {
     });
 
     it('findMatchingWorkersForEmployerProfile returns empty array', async () => {
-      const result = await service.findMatchingWorkersForEmployerProfile({ employerId: 'emp-1', topN: 10 });
+      const result = await service.findMatchingWorkersForEmployerProfile('emp-1', 10);
       expect(result).toEqual([]);
     });
 
@@ -109,9 +113,15 @@ describe('MatchingService', () => {
 
     it('returns early when profile is not WORKER', async () => {
       prisma.profile.findUnique.mockResolvedValue({
-        id: 'emp-1', first_name: 'Jean', last_name: 'Patron', description: null,
-        address: null, profile_type: 'EMPLOYER', reliability_score: 90,
-        categories: [], applications: [],
+        id: 'emp-1',
+        first_name: 'Jean',
+        last_name: 'Patron',
+        description: null,
+        address: null,
+        profile_type: 'EMPLOYER',
+        reliability_score: 90,
+        categories: [],
+        applications: [],
       });
       await service.indexWorkerProfile('emp-1');
       expect(qdrant.upsertHybrid).not.toHaveBeenCalled();
@@ -119,11 +129,22 @@ describe('MatchingService', () => {
 
     it('indexes worker profile when found', async () => {
       prisma.profile.findUnique.mockResolvedValue({
-        id: 'worker-1', first_name: 'Alice', last_name: 'Dupont',
-        description: 'Expert plombier', address: 'Brazzaville',
-        profile_type: 'WORKER', reliability_score: 90,
-        categories: [{ category_id: 'cat-1', category: { name: 'Plomberie', description: 'Desc' } }],
-        applications: [{ job_offer: { title: 'Job', category: { name: 'Plomberie' } } }],
+        id: 'worker-1',
+        first_name: 'Alice',
+        last_name: 'Dupont',
+        description: 'Expert plombier',
+        address: 'Brazzaville',
+        profile_type: 'WORKER',
+        reliability_score: 90,
+        categories: [
+          {
+            category_id: 'cat-1',
+            category: { name: 'Plomberie', description: 'Desc' },
+          },
+        ],
+        applications: [
+          { job_offer: { title: 'Job', category: { name: 'Plomberie' } } },
+        ],
       });
       prisma.application.count.mockResolvedValue(5);
       await service.indexWorkerProfile('worker-1');
@@ -133,9 +154,15 @@ describe('MatchingService', () => {
 
     it('handles qdrant error gracefully', async () => {
       prisma.profile.findUnique.mockResolvedValue({
-        id: 'worker-1', first_name: 'Alice', last_name: 'Dupont',
-        description: null, address: null, profile_type: 'WORKER', reliability_score: 80,
-        categories: [], applications: [],
+        id: 'worker-1',
+        first_name: 'Alice',
+        last_name: 'Dupont',
+        description: null,
+        address: null,
+        profile_type: 'WORKER',
+        reliability_score: 80,
+        categories: [],
+        applications: [],
       });
       prisma.application.count.mockResolvedValue(0);
       qdrant.upsertHybrid.mockRejectedValueOnce(new Error('qdrant error'));
@@ -151,9 +178,17 @@ describe('MatchingService', () => {
     });
 
     const makeJob = (overrides: Record<string, unknown> = {}) => ({
-      id: 'jo-1', title: 'Plombier', description: 'Test', address: 'Brazzaville',
-      employer_id: 'emp-1', category_id: 'cat-1', amount: 15000,
-      payment_flow: 'DIRECT', quantity: 1, note: null, status: 'ACTIVE',
+      id: 'jo-1',
+      title: 'Plombier',
+      description: 'Test',
+      address: 'Brazzaville',
+      employer_id: 'emp-1',
+      category_id: 'cat-1',
+      amount: 15000,
+      payment_flow: 'DIRECT',
+      quantity: 1,
+      note: null,
+      status: 'ACTIVE',
       created_at: new Date(),
       category: { name: 'Plomberie', description: 'Desc' },
       ...overrides,
@@ -166,7 +201,9 @@ describe('MatchingService', () => {
     });
 
     it('handles qdrant error gracefully', async () => {
-      prisma.jobOffer.findUnique.mockResolvedValue(makeJob({ category_id: null, category: null }));
+      prisma.jobOffer.findUnique.mockResolvedValue(
+        makeJob({ category_id: null, category: null }),
+      );
       prisma.profile.findUnique.mockResolvedValue({ categories: [] });
       qdrant.upsertHybrid.mockRejectedValueOnce(new Error('qdrant error'));
       await service.indexJobOffer('jo-1'); // should not throw
@@ -182,8 +219,13 @@ describe('MatchingService', () => {
 
     it('returns early when profile is not EMPLOYER', async () => {
       prisma.profile.findUnique.mockResolvedValue({
-        id: 'worker-1', first_name: 'Alice', last_name: 'Dupont', description: null,
-        address: null, profile_type: 'WORKER', categories: [],
+        id: 'worker-1',
+        first_name: 'Alice',
+        last_name: 'Dupont',
+        description: null,
+        address: null,
+        profile_type: 'WORKER',
+        categories: [],
       });
       await service.indexEmployerProfile('worker-1');
       expect(qdrant.upsertHybrid).not.toHaveBeenCalled();
@@ -191,8 +233,12 @@ describe('MatchingService', () => {
 
     it('indexes employer profile when found', async () => {
       prisma.profile.findUnique.mockResolvedValue({
-        id: 'emp-1', first_name: 'Jean', last_name: 'Patron', description: 'CEO',
-        address: 'Brazzaville', profile_type: 'EMPLOYER',
+        id: 'emp-1',
+        first_name: 'Jean',
+        last_name: 'Patron',
+        description: 'CEO',
+        address: 'Brazzaville',
+        profile_type: 'EMPLOYER',
         categories: [{ category: { name: 'Plomberie', description: 'Desc' } }],
       });
       await service.indexEmployerProfile('emp-1');
@@ -209,11 +255,19 @@ describe('MatchingService', () => {
 
     it('searches by category when job has category', async () => {
       prisma.jobOffer.findUnique.mockResolvedValue({
-        id: 'jo-1', title: 'Plombier', description: null, address: null,
-        category_id: 'cat-1', category: { name: 'Plomberie', description: null },
+        id: 'jo-1',
+        title: 'Plombier',
+        description: null,
+        address: null,
+        category_id: 'cat-1',
+        category: { name: 'Plomberie', description: null },
       });
       qdrant.searchHybridWithFilter.mockResolvedValue([
-        { id: 'w-1', score: 0.9, payload: { profileId: 'w-1', categoryIds: ['cat-1'] } },
+        {
+          id: 'w-1',
+          score: 0.9,
+          payload: { profileId: 'w-1', categoryIds: ['cat-1'] },
+        },
       ]);
       prisma.profile.findMany.mockResolvedValue([
         { id: 'w-1', reliability_score: 90, profile_type: 'WORKER' },
@@ -224,8 +278,12 @@ describe('MatchingService', () => {
 
     it('searches without filter when no category', async () => {
       prisma.jobOffer.findUnique.mockResolvedValue({
-        id: 'jo-1', title: 'Plombier', description: null, address: null,
-        category_id: null, category: null,
+        id: 'jo-1',
+        title: 'Plombier',
+        description: null,
+        address: null,
+        category_id: null,
+        category: null,
       });
       qdrant.searchHybrid.mockResolvedValue([]);
       const result = await service.findMatchingWorkersForJob('jo-1');
@@ -234,10 +292,16 @@ describe('MatchingService', () => {
 
     it('returns empty array on qdrant error', async () => {
       prisma.jobOffer.findUnique.mockResolvedValue({
-        id: 'jo-1', title: 'Plombier', description: null, address: null,
-        category_id: 'cat-1', category: { name: 'Plomberie', description: null },
+        id: 'jo-1',
+        title: 'Plombier',
+        description: null,
+        address: null,
+        category_id: 'cat-1',
+        category: { name: 'Plomberie', description: null },
       });
-      qdrant.searchHybridWithFilter.mockRejectedValueOnce(new Error('qdrant error'));
+      qdrant.searchHybridWithFilter.mockRejectedValueOnce(
+        new Error('qdrant error'),
+      );
       const result = await service.findMatchingWorkersForJob('jo-1');
       expect(result).toEqual([]);
     });
@@ -252,8 +316,13 @@ describe('MatchingService', () => {
 
     it('returns empty when profile is not WORKER', async () => {
       prisma.profile.findUnique.mockResolvedValue({
-        id: 'emp-1', first_name: 'Jean', last_name: 'Patron', description: null,
-        address: null, profile_type: 'EMPLOYER', categories: [],
+        id: 'emp-1',
+        first_name: 'Jean',
+        last_name: 'Patron',
+        description: null,
+        address: null,
+        profile_type: 'EMPLOYER',
+        categories: [],
       });
       const result = await service.findMatchingJobsForWorker('emp-1');
       expect(result).toEqual([]);
@@ -261,9 +330,18 @@ describe('MatchingService', () => {
 
     it('returns results for WORKER profile', async () => {
       prisma.profile.findUnique.mockResolvedValue({
-        id: 'w-1', first_name: 'Alice', last_name: 'Dupont', description: null,
-        address: null, profile_type: 'WORKER',
-        categories: [{ category_id: 'cat-1', category: { name: 'Plomberie', description: null } }],
+        id: 'w-1',
+        first_name: 'Alice',
+        last_name: 'Dupont',
+        description: null,
+        address: null,
+        profile_type: 'WORKER',
+        categories: [
+          {
+            category_id: 'cat-1',
+            category: { name: 'Plomberie', description: null },
+          },
+        ],
       });
       qdrant.searchHybridWithFilter.mockResolvedValue([
         { id: 'jo-1', score: 0.85, payload: { jobOfferId: 'jo-1' } },
@@ -277,11 +355,19 @@ describe('MatchingService', () => {
 
     it('returns empty array on qdrant error', async () => {
       prisma.profile.findUnique.mockResolvedValue({
-        id: 'w-1', first_name: 'Alice', last_name: 'Dupont', description: null,
-        address: null, profile_type: 'WORKER',
-        categories: [{ category_id: 'cat-1', category: { name: 'P', description: null } }],
+        id: 'w-1',
+        first_name: 'Alice',
+        last_name: 'Dupont',
+        description: null,
+        address: null,
+        profile_type: 'WORKER',
+        categories: [
+          { category_id: 'cat-1', category: { name: 'P', description: null } },
+        ],
       });
-      qdrant.searchHybridWithFilter.mockRejectedValueOnce(new Error('qdrant error'));
+      qdrant.searchHybridWithFilter.mockRejectedValueOnce(
+        new Error('qdrant error'),
+      );
       const result = await service.findMatchingJobsForWorker('w-1');
       expect(result).toEqual([]);
     });
@@ -298,13 +384,14 @@ describe('MatchingService', () => {
   describe('findMatchingWorkersForEmployerProfile() - enabled', () => {
     it('returns empty array when employer profile not found', async () => {
       prisma.profile.findUnique.mockResolvedValue(null);
-      const result = await service.findMatchingWorkersForEmployerProfile({ employerId: 'emp-1', topN: 10 });
+      const result = await service.findMatchingWorkersForEmployerProfile('emp-1', 10);
       expect(result).toEqual([]);
     });
 
     it('returns results for employer profile', async () => {
       prisma.profile.findUnique.mockResolvedValue({
-        id: 'emp-1', profile_type: 'EMPLOYER',
+        id: 'emp-1',
+        profile_type: 'EMPLOYER',
       });
       qdrant.recommendDense.mockResolvedValue([
         { id: 'w-1', score: 0.9, payload: { profileId: 'w-1' } },
@@ -312,7 +399,7 @@ describe('MatchingService', () => {
       prisma.profile.findMany.mockResolvedValue([
         { id: 'w-1', reliability_score: 90, profile_type: 'WORKER' },
       ]);
-      const result = await service.findMatchingWorkersForEmployerProfile({ employerId: 'emp-1', topN: 10 });
+      const result = await service.findMatchingWorkersForEmployerProfile('emp-1', 10);
       expect(Array.isArray(result)).toBe(true);
     });
   });
@@ -323,9 +410,18 @@ describe('MatchingService', () => {
       prisma.profile.findMany.mockResolvedValue([]);
       // indexJobOffer will be called - mock job offer lookup
       prisma.jobOffer.findUnique.mockResolvedValue({
-        id: 'jo-1', title: 'Test', description: null, address: null,
-        employer_id: 'emp-1', category_id: null, amount: 5000,
-        payment_flow: 'DIRECT', quantity: 1, note: null, status: 'ACTIVE', created_at: new Date(),
+        id: 'jo-1',
+        title: 'Test',
+        description: null,
+        address: null,
+        employer_id: 'emp-1',
+        category_id: null,
+        amount: 5000,
+        payment_flow: 'DIRECT',
+        quantity: 1,
+        note: null,
+        status: 'ACTIVE',
+        created_at: new Date(),
         category: null,
       });
       prisma.profile.findUnique.mockResolvedValue({ categories: [] });
@@ -344,9 +440,13 @@ describe('MatchingService', () => {
   describe('indexWorkerProfile() - with negative categories', () => {
     it('fetches negative category names when worker has rejected categories', async () => {
       prisma.profile.findUnique.mockResolvedValue({
-        id: 'worker-2', first_name: 'Bob', last_name: 'Smith',
-        description: 'Description text', address: '123 Street',
-        profile_type: 'WORKER', reliability_score: 60,
+        id: 'worker-2',
+        first_name: 'Bob',
+        last_name: 'Smith',
+        description: 'Description text',
+        address: '123 Street',
+        profile_type: 'WORKER',
+        reliability_score: 60,
         categories: [],
         applications: [],
       });
@@ -362,17 +462,28 @@ describe('MatchingService', () => {
           { job_offer: { category_id: 'cat-bad' } },
         ]) // rejected apps (3 times = above threshold)
         .mockResolvedValueOnce([]); // successful apps (none = not in success set)
-      prisma.jobCategory.findMany.mockResolvedValue([{ name: 'Mauvaise catégorie' }]);
+      prisma.jobCategory.findMany.mockResolvedValue([
+        { name: 'Mauvaise catégorie' },
+      ]);
       await service.indexWorkerProfile('worker-2');
       expect(qdrant.upsertHybrid).toHaveBeenCalled();
     });
 
     it('does not fetch category names when no negative categories', async () => {
       prisma.profile.findUnique.mockResolvedValue({
-        id: 'worker-3', first_name: 'Carol', last_name: 'Jones',
-        description: null, address: null,
-        profile_type: 'WORKER', reliability_score: 75,
-        categories: [{ category_id: 'cat-1', category: { name: 'Tech', description: null } }],
+        id: 'worker-3',
+        first_name: 'Carol',
+        last_name: 'Jones',
+        description: null,
+        address: null,
+        profile_type: 'WORKER',
+        reliability_score: 75,
+        categories: [
+          {
+            category_id: 'cat-1',
+            category: { name: 'Tech', description: null },
+          },
+        ],
         applications: [],
       });
       prisma.application.count.mockResolvedValue(0);
@@ -388,14 +499,24 @@ describe('MatchingService', () => {
   describe('indexJobOffer() - with category and payment variants', () => {
     it('indexes job with no category_id (fetches employer categories)', async () => {
       prisma.jobOffer.findUnique.mockResolvedValue({
-        id: 'jo-2', title: 'Job without category', description: 'Desc',
-        address: 'Addr', employer_id: 'emp-2', category_id: null,
+        id: 'jo-2',
+        title: 'Job without category',
+        description: 'Desc',
+        address: 'Addr',
+        employer_id: 'emp-2',
+        category_id: null,
         amount: { toNumber: () => 25000 },
-        payment_flow: 'HOURLY', quantity: 5, note: 'Extra note',
-        status: 'ACTIVE', created_at: new Date(), category: null,
+        payment_flow: 'HOURLY',
+        quantity: 5,
+        note: 'Extra note',
+        status: 'ACTIVE',
+        created_at: new Date(),
+        category: null,
       });
       prisma.profile.findUnique.mockResolvedValue({
-        categories: [{ category: { name: 'Finance', description: 'Finance desc' } }],
+        categories: [
+          { category: { name: 'Finance', description: 'Finance desc' } },
+        ],
       });
       await service.indexJobOffer('jo-2');
       expect(qdrant.upsertHybrid).toHaveBeenCalled();
@@ -403,11 +524,18 @@ describe('MatchingService', () => {
 
     it('indexes job with Decimal-like amount (toNumber)', async () => {
       prisma.jobOffer.findUnique.mockResolvedValue({
-        id: 'jo-3', title: 'Job Decimal', description: 'Desc',
-        address: 'Addr', employer_id: 'emp-3', category_id: 'cat-1',
+        id: 'jo-3',
+        title: 'Job Decimal',
+        description: 'Desc',
+        address: 'Addr',
+        employer_id: 'emp-3',
+        category_id: 'cat-1',
         amount: { toNumber: () => 3000 }, // petit budget
-        payment_flow: 'MONTHLY', quantity: 1, note: null,
-        status: 'ACTIVE', created_at: new Date(),
+        payment_flow: 'MONTHLY',
+        quantity: 1,
+        note: null,
+        status: 'ACTIVE',
+        created_at: new Date(),
         category: { name: 'Tech', description: 'Tech desc' },
       });
       await service.indexJobOffer('jo-3');
@@ -416,11 +544,18 @@ describe('MatchingService', () => {
 
     it('indexes job with amount 0 (inconnu)', async () => {
       prisma.jobOffer.findUnique.mockResolvedValue({
-        id: 'jo-4', title: 'Job zero amount', description: 'Desc',
-        address: 'Addr', employer_id: 'emp-4', category_id: 'cat-1',
+        id: 'jo-4',
+        title: 'Job zero amount',
+        description: 'Desc',
+        address: 'Addr',
+        employer_id: 'emp-4',
+        category_id: 'cat-1',
         amount: 0,
-        payment_flow: 'DAILY', quantity: 2, note: null,
-        status: 'ACTIVE', created_at: new Date(),
+        payment_flow: 'DAILY',
+        quantity: 2,
+        note: null,
+        status: 'ACTIVE',
+        created_at: new Date(),
         category: { name: 'Health', description: null },
       });
       await service.indexJobOffer('jo-4');
@@ -429,11 +564,18 @@ describe('MatchingService', () => {
 
     it('indexes job with null amount', async () => {
       prisma.jobOffer.findUnique.mockResolvedValue({
-        id: 'jo-5', title: 'Job null amount', description: 'Desc',
-        address: 'Addr', employer_id: 'emp-5', category_id: 'cat-1',
+        id: 'jo-5',
+        title: 'Job null amount',
+        description: 'Desc',
+        address: 'Addr',
+        employer_id: 'emp-5',
+        category_id: 'cat-1',
         amount: null,
-        payment_flow: null, quantity: null, note: null,
-        status: 'ACTIVE', created_at: new Date(),
+        payment_flow: null,
+        quantity: null,
+        note: null,
+        status: 'ACTIVE',
+        created_at: new Date(),
         category: { name: 'Health', description: 'Health desc' },
       });
       await service.indexJobOffer('jo-5');
@@ -444,19 +586,51 @@ describe('MatchingService', () => {
   describe('findMatchingWorkersForJob() - with actual worker hits and reranking', () => {
     it('re-ranks workers with category exact match and different reliability scores', async () => {
       prisma.jobOffer.findUnique.mockResolvedValue({
-        id: 'jo-1', title: 'Job', description: 'Desc', address: 'Addr',
-        category_id: 'cat-1', category: { name: 'Tech', description: null },
+        id: 'jo-1',
+        title: 'Job',
+        description: 'Desc',
+        address: 'Addr',
+        category_id: 'cat-1',
+        category: { name: 'Tech', description: null },
       });
       qdrant.searchHybridWithFilter.mockResolvedValue([
-        { id: 'w-excellent', score: 0.7, payload: { profileId: 'w-excellent', categoryIds: ['cat-1'] } },
-        { id: 'w-reliable', score: 0.7, payload: { profileId: 'w-reliable', categoryIds: ['cat-1'] } },
-        { id: 'w-low', score: 0.7, payload: { profileId: 'w-low', categoryIds: ['cat-2'] } },
-        { id: 'w-nocat', score: 0.6, payload: { profileId: 'w-nocat', categoryIds: [] } },
+        {
+          id: 'w-excellent',
+          score: 0.7,
+          payload: { profileId: 'w-excellent', categoryIds: ['cat-1'] },
+        },
+        {
+          id: 'w-reliable',
+          score: 0.7,
+          payload: { profileId: 'w-reliable', categoryIds: ['cat-1'] },
+        },
+        {
+          id: 'w-low',
+          score: 0.7,
+          payload: { profileId: 'w-low', categoryIds: ['cat-2'] },
+        },
+        {
+          id: 'w-nocat',
+          score: 0.6,
+          payload: { profileId: 'w-nocat', categoryIds: [] },
+        },
       ]);
       prisma.profile.findMany.mockResolvedValue([
-        { id: 'w-excellent', reliability_score: 95, categories: [{ category_id: 'cat-1' }] },
-        { id: 'w-reliable', reliability_score: 80, categories: [{ category_id: 'cat-1' }] },
-        { id: 'w-low', reliability_score: 60, categories: [{ category_id: 'cat-2' }] },
+        {
+          id: 'w-excellent',
+          reliability_score: 95,
+          categories: [{ category_id: 'cat-1' }],
+        },
+        {
+          id: 'w-reliable',
+          reliability_score: 80,
+          categories: [{ category_id: 'cat-1' }],
+        },
+        {
+          id: 'w-low',
+          reliability_score: 60,
+          categories: [{ category_id: 'cat-2' }],
+        },
         { id: 'w-nocat', reliability_score: null, categories: [] },
       ]);
       const result = await service.findMatchingWorkersForJob('jo-1');
@@ -465,14 +639,22 @@ describe('MatchingService', () => {
 
     it('re-ranks workers without category match (null jobCategoryId)', async () => {
       prisma.jobOffer.findUnique.mockResolvedValue({
-        id: 'jo-2', title: 'Job', description: 'Desc', address: 'Addr',
-        category_id: null, category: null,
+        id: 'jo-2',
+        title: 'Job',
+        description: 'Desc',
+        address: 'Addr',
+        category_id: null,
+        category: null,
       });
       qdrant.searchHybrid.mockResolvedValue([
         { id: 'w-1', score: 0.8, payload: { profileId: 'w-1' } },
       ]);
       prisma.profile.findMany.mockResolvedValue([
-        { id: 'w-1', reliability_score: 85, categories: [{ category_id: 'cat-x' }] },
+        {
+          id: 'w-1',
+          reliability_score: 85,
+          categories: [{ category_id: 'cat-x' }],
+        },
       ]);
       const result = await service.findMatchingWorkersForJob('jo-2');
       expect(Array.isArray(result)).toBe(true);
@@ -482,8 +664,13 @@ describe('MatchingService', () => {
   describe('findMatchingJobsForWorker() - no categories (uses searchHybrid)', () => {
     it('uses searchHybrid when worker has no categories', async () => {
       prisma.profile.findUnique.mockResolvedValue({
-        id: 'w-1', first_name: 'Alice', last_name: 'Dupont', description: null,
-        address: null, profile_type: 'WORKER', reliability_score: null,
+        id: 'w-1',
+        first_name: 'Alice',
+        last_name: 'Dupont',
+        description: null,
+        address: null,
+        profile_type: 'WORKER',
+        reliability_score: null,
         categories: [],
         applications: [],
       });
@@ -491,7 +678,11 @@ describe('MatchingService', () => {
         { id: 'jo-1', score: 0.7, payload: { jobOfferId: 'jo-1' } },
       ]);
       prisma.jobOffer.findMany.mockResolvedValue([
-        { id: 'jo-1', category_id: 'cat-1', created_at: new Date(Date.now() - 24 * 3600000) },
+        {
+          id: 'jo-1',
+          category_id: 'cat-1',
+          created_at: new Date(Date.now() - 24 * 3600000),
+        },
       ]);
       prisma.application.findMany.mockResolvedValue([]);
       const result = await service.findMatchingJobsForWorker('w-1');
@@ -500,10 +691,22 @@ describe('MatchingService', () => {
 
     it('downranks jobs with negative history', async () => {
       prisma.profile.findUnique.mockResolvedValue({
-        id: 'w-2', first_name: 'Bob', last_name: 'Jones', description: 'Expert',
-        address: 'Brazzaville', profile_type: 'WORKER', reliability_score: 90,
-        categories: [{ category_id: 'cat-1', category: { name: 'Tech', description: null } }],
-        applications: [{ job_offer: { title: 'Old Job', category: { name: 'Tech' } } }],
+        id: 'w-2',
+        first_name: 'Bob',
+        last_name: 'Jones',
+        description: 'Expert',
+        address: 'Brazzaville',
+        profile_type: 'WORKER',
+        reliability_score: 90,
+        categories: [
+          {
+            category_id: 'cat-1',
+            category: { name: 'Tech', description: null },
+          },
+        ],
+        applications: [
+          { job_offer: { title: 'Old Job', category: { name: 'Tech' } } },
+        ],
       });
       qdrant.searchHybridWithFilter.mockResolvedValue([
         { id: 'jo-bad', score: 0.85, payload: { jobOfferId: 'jo-bad' } },
@@ -525,9 +728,13 @@ describe('MatchingService', () => {
   describe('findMatchingWorkersForEmployerProfile() - enabled (correct signature)', () => {
     it('returns empty array when profile is not EMPLOYER', async () => {
       prisma.profile.findUnique.mockResolvedValue({
-        id: 'w-1', profile_type: 'WORKER',
-        first_name: 'Alice', last_name: 'Dupont',
-        description: null, address: null, categories: [],
+        id: 'w-1',
+        profile_type: 'WORKER',
+        first_name: 'Alice',
+        last_name: 'Dupont',
+        description: null,
+        address: null,
+        categories: [],
       });
       const result = await service.findMatchingWorkersForEmployerProfile('w-1');
       expect(result).toEqual([]);
@@ -535,31 +742,46 @@ describe('MatchingService', () => {
 
     it('returns results and handles error gracefully', async () => {
       prisma.profile.findUnique.mockResolvedValue({
-        id: 'emp-1', profile_type: 'EMPLOYER',
-        first_name: 'Jean', last_name: 'Patron',
-        description: 'CEO', address: 'Brazzaville',
+        id: 'emp-1',
+        profile_type: 'EMPLOYER',
+        first_name: 'Jean',
+        last_name: 'Patron',
+        description: 'CEO',
+        address: 'Brazzaville',
         categories: [{ category: { name: 'Tech', description: null } }],
       });
       qdrant.searchHybrid.mockRejectedValueOnce(new Error('qdrant error'));
-      const result = await service.findMatchingWorkersForEmployerProfile('emp-1');
+      const result =
+        await service.findMatchingWorkersForEmployerProfile('emp-1');
       expect(result).toEqual([]);
     });
 
     it('returns diverse workers from employer search', async () => {
       prisma.profile.findUnique.mockResolvedValue({
-        id: 'emp-2', profile_type: 'EMPLOYER',
-        first_name: 'Marie', last_name: 'Dupont',
-        description: null, address: null, categories: [],
+        id: 'emp-2',
+        profile_type: 'EMPLOYER',
+        first_name: 'Marie',
+        last_name: 'Dupont',
+        description: null,
+        address: null,
+        categories: [],
       });
       qdrant.searchHybrid.mockResolvedValue([
         { id: 'w-1', score: 0.9, payload: { profileId: 'w-1' } },
         { id: 'w-2', score: 0.6, payload: { profileId: 'w-2' } },
       ]);
       prisma.profile.findMany.mockResolvedValue([
-        { id: 'w-1', reliability_score: 90, categories: [{ category_id: 'cat-1' }] },
+        {
+          id: 'w-1',
+          reliability_score: 90,
+          categories: [{ category_id: 'cat-1' }],
+        },
         { id: 'w-2', reliability_score: 70, categories: [] },
       ]);
-      const result = await service.findMatchingWorkersForEmployerProfile('emp-2', 5);
+      const result = await service.findMatchingWorkersForEmployerProfile(
+        'emp-2',
+        5,
+      );
       expect(Array.isArray(result)).toBe(true);
     });
   });
@@ -567,15 +789,30 @@ describe('MatchingService', () => {
   describe('indexWorkerProfile() - various buildWorkerText branches', () => {
     it('includes completion stats and success rate when both counts present', async () => {
       prisma.profile.findUnique.mockResolvedValue({
-        id: 'w-full', first_name: 'Dave', last_name: 'Brown',
-        description: 'Skilled worker', address: '456 Avenue',
-        profile_type: 'WORKER', reliability_score: 65, // Fiable bucket (70 > 65, "Faible")
+        id: 'w-full',
+        first_name: 'Dave',
+        last_name: 'Brown',
+        description: 'Skilled worker',
+        address: '456 Avenue',
+        profile_type: 'WORKER',
+        reliability_score: 65, // Fiable bucket (70 > 65, "Faible")
         categories: [
-          { category_id: 'cat-1', category: { name: 'Plomberie', description: 'Water systems' } },
-          { category_id: 'cat-2', category: { name: 'Electric', description: null } },
+          {
+            category_id: 'cat-1',
+            category: { name: 'Plomberie', description: 'Water systems' },
+          },
+          {
+            category_id: 'cat-2',
+            category: { name: 'Electric', description: null },
+          },
         ],
         applications: [
-          { job_offer: { title: 'Plumbing Job', category: { name: 'Plomberie' } } },
+          {
+            job_offer: {
+              title: 'Plumbing Job',
+              category: { name: 'Plomberie' },
+            },
+          },
           { job_offer: { title: 'Another Job', category: null } },
         ],
       });
@@ -593,26 +830,49 @@ describe('MatchingService', () => {
   describe('reindexPending() - with multiple items', () => {
     it('processes multiple jobs and profiles', async () => {
       // Return workers and employers too
-      prisma.jobOffer.findMany.mockResolvedValue([{ id: 'jo-1' }, { id: 'jo-2' }]);
+      prisma.jobOffer.findMany.mockResolvedValue([
+        { id: 'jo-1' },
+        { id: 'jo-2' },
+      ]);
       prisma.profile.findMany
         .mockResolvedValueOnce([{ id: 'w-1' }]) // workers
         .mockResolvedValueOnce([{ id: 'emp-1' }]); // employers
       prisma.jobOffer.findUnique.mockResolvedValue({
-        id: 'jo-1', title: 'Test', description: null, address: null,
-        employer_id: 'emp-1', category_id: null, amount: null,
-        payment_flow: null, quantity: null, note: null, status: 'ACTIVE', created_at: new Date(),
+        id: 'jo-1',
+        title: 'Test',
+        description: null,
+        address: null,
+        employer_id: 'emp-1',
+        category_id: null,
+        amount: null,
+        payment_flow: null,
+        quantity: null,
+        note: null,
+        status: 'ACTIVE',
+        created_at: new Date(),
         category: null,
       });
       prisma.profile.findUnique
         .mockResolvedValueOnce({ categories: [] }) // for indexJobOffer employer lookup
         .mockResolvedValueOnce({
-          id: 'w-1', first_name: 'W', last_name: 'One', description: null, address: null,
-          profile_type: 'WORKER', reliability_score: 100,
-          categories: [], applications: [],
+          id: 'w-1',
+          first_name: 'W',
+          last_name: 'One',
+          description: null,
+          address: null,
+          profile_type: 'WORKER',
+          reliability_score: 100,
+          categories: [],
+          applications: [],
         })
         .mockResolvedValueOnce({
-          id: 'emp-1', first_name: 'E', last_name: 'One', description: null, address: null,
-          profile_type: 'EMPLOYER', categories: [],
+          id: 'emp-1',
+          first_name: 'E',
+          last_name: 'One',
+          description: null,
+          address: null,
+          profile_type: 'EMPLOYER',
+          categories: [],
         });
       prisma.application.count.mockResolvedValue(0);
       prisma.application.findMany.mockResolvedValue([]);
