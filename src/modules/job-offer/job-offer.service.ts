@@ -203,8 +203,8 @@ export class JobOfferService {
       .indexJobOffer(offer.id)
       .then(async () => {
         const [enabled, minScore] = await Promise.all([
-          this.systemConfig.isRecommendationEnabled(),
-          this.systemConfig.getMinNotificationScore(),
+          this.systemConfigService.isRecommendationEnabled(),
+          this.systemConfigService.getMinNotificationScore(),
         ]);
         if (!enabled) return;
 
