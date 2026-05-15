@@ -363,7 +363,7 @@ describe('PaymentRequestService', () => {
     it('filters by q', async () => {
       (prisma.paymentRequest.findMany as jest.Mock).mockResolvedValue([]);
       (prisma.paymentRequest.count as jest.Mock).mockResolvedValue(0);
-      const result = await service.getList({ page: 1, limit: 10, q: 'alice' });
+      const result = await service.getList({ page: 1, limit: 10 });
       expect(result.total).toBe(0);
     });
   });

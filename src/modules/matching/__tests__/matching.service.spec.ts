@@ -94,10 +94,7 @@ describe('MatchingService', () => {
     });
 
     it('findMatchingWorkersForEmployerProfile returns empty array', async () => {
-      const result = await service.findMatchingWorkersForEmployerProfile({
-        employerId: 'emp-1',
-        topN: 10,
-      });
+      const result = await service.findMatchingWorkersForEmployerProfile('emp-1', 10);
       expect(result).toEqual([]);
     });
 
@@ -387,10 +384,7 @@ describe('MatchingService', () => {
   describe('findMatchingWorkersForEmployerProfile() - enabled', () => {
     it('returns empty array when employer profile not found', async () => {
       prisma.profile.findUnique.mockResolvedValue(null);
-      const result = await service.findMatchingWorkersForEmployerProfile({
-        employerId: 'emp-1',
-        topN: 10,
-      });
+      const result = await service.findMatchingWorkersForEmployerProfile('emp-1', 10);
       expect(result).toEqual([]);
     });
 
@@ -405,10 +399,7 @@ describe('MatchingService', () => {
       prisma.profile.findMany.mockResolvedValue([
         { id: 'w-1', reliability_score: 90, profile_type: 'WORKER' },
       ]);
-      const result = await service.findMatchingWorkersForEmployerProfile({
-        employerId: 'emp-1',
-        topN: 10,
-      });
+      const result = await service.findMatchingWorkersForEmployerProfile('emp-1', 10);
       expect(Array.isArray(result)).toBe(true);
     });
   });

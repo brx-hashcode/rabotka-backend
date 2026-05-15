@@ -35,7 +35,7 @@ const mockAd = {
   title: 'Test Ad',
   description: 'Ad description',
   status: AdStatus.DRAFT,
-  payment_status: AdPaymentStatus.PENDING,
+  payment_status: AdPaymentStatus.UNPAID,
   start_date: futureDate,
   end_date: endDate,
   bundle: mockBundle,
