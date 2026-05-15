@@ -70,7 +70,7 @@ export function formatCandidatureDetail(params: {
     '1- Accepter',
     '2- Refuser',
     '3- Retour',
-    "4- Menu (ou tapez 'Menu')",
+    '4- Menu',
     '',
     '*Tapez le numéro correspondant.*',
   ];
@@ -138,7 +138,7 @@ export function formatMyApplicationsList(
   applications: ApplicationForList[],
 ): string {
   if (applications.length === 0) {
-    return "*VOUS N'AVEZ AUCUNE CANDIDATURE. TAPEZ 'MENU' PUIS 1 POUR VOIR LES OFFRES.*";
+    return "*Vous n'avez aucune candidature. Tapez *1* (Trouver une mission) pour voir les offres disponibles.*";
   }
 
   const lines = [`*MES CANDIDATURES (${applications.length})*`, ''];
@@ -193,7 +193,7 @@ export function formatMyApplicationDetailWithCancel(
     '*Actions:*',
     '1- Annuler cette candidature',
     '2- Retour à la liste',
-    "3- Menu (ou tapez 'Menu')",
+    '3- Menu',
     '',
     '*Tapez le numéro correspondant.*',
   ].join('\n');
@@ -214,7 +214,7 @@ export function formatMyApplicationDetailReadOnly(
     '',
     '*Actions:*',
     '1- Retour à la liste',
-    "2- Menu (ou tapez 'Menu')",
+    '2- Menu',
     '',
     '*Tapez le numéro correspondant.*',
   ].join('\n');
@@ -237,7 +237,7 @@ export function formatMyApplicationDetailWaitingPayment(
     '1- Effectuer le paiement',
     '2- Rejeter et annuler',
     '3- Retour à la liste',
-    "4- Menu (ou tapez 'Menu')",
+    '4- Menu',
     '',
     '*Tapez le numéro correspondant.*',
   ].join('\n');
@@ -262,7 +262,7 @@ export function formatMyApplicationDetailWaitingPaymentPaid(
     '*Actions:*',
     '1- Rejeter et annuler',
     '2- Retour à la liste',
-    "3- Menu (ou tapez 'Menu')",
+    '3- Menu',
     '',
     '*Tapez le numéro correspondant.*',
   ].join('\n');

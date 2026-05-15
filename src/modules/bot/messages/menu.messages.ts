@@ -75,10 +75,10 @@ export function hasPenaltiesBotMessage(): string {
     '',
     "Vous avez des pénalités impayées. Vous ne pouvez pas accéder aux fonctionnalités tant qu'elles ne sont pas réglées.",
     '',
-    "Tapez *PAYER* pour régler vos pénalités et réactiver l'accès.",
+    "Tapez *3* (Paiements en attente) pour régler vos pénalités et réactiver l'accès.",
   ].join('\n');
 }
 
 export function unknownCommandMessage(): string {
-  return "Commande non reconnue. Tapez 'Menu' pour voir les options.";
+  return "Commande non reconnue. Tapez *Menu* pour voir le menu.";
 }
