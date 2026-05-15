@@ -362,7 +362,7 @@ export function formatNewApplicationToEmployer(params: {
     `*Rendez-vous prévu*: ${formatDate(params.scheduledAt)}`,
     `*Adresse*: ${params.address.length > 80 ? params.address.slice(0, 80) + '...' : params.address}`,
     '',
-    '📞 *Les coordonnées du candidat seront révélées après le paiement du déverrouillage.*',
+    '*Les coordonnées du candidat seront révélées après le paiement du déverrouillage*',
     '',
     '*Actions*:',
     '1- Accepter le candidat',
