@@ -610,7 +610,7 @@ export class ProfileService {
 
     const profile = await this.prisma.profile.findUnique({
       where: { id: profileId },
-      select: { id: true },
+      select: { id: true, profile_type: true },
     });
 
     if (!profile) {
@@ -680,14 +680,24 @@ export class ProfileService {
       timestamp: new Date().toISOString(),
     });
 
-    // Seed interest vector immediately on approval so first recommendation isn't cold-start
     if (decision === 'VERIFIED') {
+      // Seed interest vector so first recommendation isn't cold-start
       void this.interestClusters.reseedFromProfile(profileId).catch((err) => {
         this.logger.warn(
           `Interest vector reseed failed for profile=${profileId}`,
           err,
         );
       });
+
+      // Grant welcome credit (idempotent — no-op if already granted)
+      void this.walletService
+        .grantWelcomeCredit(profileId, profile.profile_type)
+        .catch((err) => {
+          this.logger.warn(
+            `Welcome credit grant failed for profile=${profileId}`,
+            err,
+          );
+        });
     }
 
     return this.getProfileDetailForAdmin(profileId);
