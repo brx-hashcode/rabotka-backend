@@ -265,6 +265,7 @@ export class JobOfferService {
         status: {
           in: [JobOfferStatus.ACTIVE, JobOfferStatus.PARTIALLY_FILLED],
         },
+        scheduled_at: { gt: new Date() },
         ...(excludeAppliedByWorkerId
           ? {
               applications: {

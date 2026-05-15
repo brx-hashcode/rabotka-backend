@@ -175,7 +175,10 @@ export class ApplicationService {
         'Seuls les workers peuvent postuler aux offres',
       );
     }
-    if (jobOffer.status !== JobOfferStatus.ACTIVE) {
+    if (
+      jobOffer.status !== JobOfferStatus.ACTIVE &&
+      jobOffer.status !== JobOfferStatus.PARTIALLY_FILLED
+    ) {
       throw new BadRequestException("Cette offre n'est plus disponible");
     }
     if (jobOffer.employer_id === workerId) {
