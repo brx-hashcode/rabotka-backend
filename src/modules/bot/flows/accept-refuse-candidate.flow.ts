@@ -128,6 +128,7 @@ async function handleAcceptRefuseStep1(args: StepArgs): Promise<FlowResult> {
               attemptId: attempt.id,
               otherName: workerName,
               amount: fees.employerFeeFcfa,
+              expiresAt: attempt.expires_at.toISOString(),
             },
             updatedAt: new Date().toISOString(),
           },
