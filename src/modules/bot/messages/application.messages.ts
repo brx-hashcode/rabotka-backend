@@ -326,7 +326,7 @@ export function formatApplicationSentSuccess(offerTitle: string): string {
     '',
     '*Astuce*: Consultez le menu principal puis "Mes candidatures" pour suivre vos postulations.',
     '',
-    "Tapez 'Menu' pour revenir.",
+    "Tapez *Menu* pour revenir.",
   ].join('\n');
 }
 
@@ -473,7 +473,7 @@ export function formatFilledJobsListPage(
   const lines = [`*Missions pourvues*${pageLabel}`, ''];
   if (items.length === 0) {
     lines.push(
-      "Aucune mission pourvue pour le moment. Tapez 'Menu' pour revenir.",
+      "Aucune mission pourvue pour le moment. Tapez *Menu* pour revenir.",
     );
     return lines.join('\n');
   }
@@ -524,7 +524,7 @@ export function formatJobCompletedToWorker(params: {
     `L'employeur a marqué la mission "${params.offerTitle}" comme terminée.`,
     `*Gain enregistré*: ${params.amount.toLocaleString('fr-FR')} FCFA`,
     '',
-    "Consultez votre profil pour voir vos gains. Tapez 'Menu'.",
+    "Consultez votre profil pour voir vos gains. Tapez *Menu*.",
   ].join('\n');
 }
 
@@ -536,6 +536,6 @@ export function formatJobCancelledByEmployerToWorker(
     '',
     `L'employeur a annulé la mission "${offerTitle}". L'offre est de nouveau ouverte.`,
     '',
-    "Tapez 'Menu' pour revenir.",
+    "Tapez *Menu* pour revenir.",
   ].join('\n');
 }

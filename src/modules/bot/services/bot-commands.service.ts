@@ -267,7 +267,7 @@ export class BotCommandsService {
     }
     if (allItems.length === 0) {
       return {
-        message: "Aucune candidature en attente pour vos offres. Tapez 'Menu'.",
+        message: "Aucune candidature en attente pour vos offres. Tapez *Menu*.",
       };
     }
     const applicationIds = allItems.map((a) => a.id);
@@ -316,7 +316,7 @@ export class BotCommandsService {
     if (items.length === 0) {
       return {
         message:
-          "Aucune mission pourvue pour le moment. Tapez 'Menu' pour revenir.",
+          "Aucune mission pourvue pour le moment. Tapez *Menu* pour revenir.",
       };
     }
     const firstPage = items.slice(0, 5);
@@ -339,7 +339,7 @@ export class BotCommandsService {
       },
     });
 
-    if (!profileData) return "Profil non trouvé. Tapez 'Menu'.";
+    if (!profileData) return "Profil non trouvé. Tapez *Menu*.";
 
     const walletBalance = await this.walletService
       .getProfileWalletBalance(profile.id)

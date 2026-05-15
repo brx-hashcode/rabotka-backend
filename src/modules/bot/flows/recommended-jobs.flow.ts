@@ -245,7 +245,7 @@ export async function runRecommendedJobsFlow(
   if (offers.length === 0) {
     return {
       reply: [
-        "*Aucune offre recommandée pour le moment. Tapez 'Menu' pour revenir.*",
+        "*Aucune offre recommandée pour le moment. Tapez *Menu* pour revenir.*",
       ],
       clearState: true,
     };

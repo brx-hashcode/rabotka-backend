@@ -84,7 +84,7 @@ async function handleDetailComplete(
           '',
           `Le gain de ${Number(amount).toLocaleString('fr-FR')} FCFA a été enregistré pour le travailleur.`,
           '',
-          "Tapez 'Menu' pour revenir.",
+          "Tapez *Menu* pour revenir.",
         ].join('\n'),
       ],
       clearState: true,
@@ -119,7 +119,7 @@ async function handleDetailCancel(
         [
           "*Mission annulée. L'offre est de nouveau ouverte aux candidatures.*",
           '',
-          "Tapez 'Menu' pour revenir.",
+          "Tapez *Menu* pour revenir.",
         ].join('\n'),
       ],
       clearState: true,
