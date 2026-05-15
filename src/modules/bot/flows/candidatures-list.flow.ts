@@ -120,7 +120,7 @@ function buildInvalidChoiceMessage(
   pageIndex: number,
 ) {
   const n = getPageSlice(items, pageIndex).length;
-  return `*TAPEZ UN NUMÉRO (1-${n}) POUR SÉLECTIONNER UN CANDIDAT, S/P POUR NAVIGUER, M POUR LE MENU.*`;
+  return `Tapez un numéro (1-${n}) pour sélectionner un candidat, S/P pour naviguer, M pour le menu.`;
 }
 
 type DetailStepParams = {
@@ -169,7 +169,7 @@ async function handleDetailStep(params: DetailStepParams): Promise<FlowResult> {
     const applicationId = selectedItem?.id;
     if (!applicationId) {
       return {
-        reply: ["*ERREUR. TAPEZ 'MENU'.*"],
+        reply: ["❌ Erreur. Tapez *Menu*."],
         clearState: true,
       };
     }
@@ -278,7 +278,7 @@ export async function runCandidaturesListFlow(
 
   if (items.length === 0) {
     return {
-      reply: ["*AUCUNE CANDIDATURE. TAPEZ 'MENU'.*"],
+      reply: ["Aucune candidature reçue. Tapez *Menu*."],
       clearState: true,
     };
   }

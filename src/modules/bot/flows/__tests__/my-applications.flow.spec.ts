@@ -99,7 +99,7 @@ describe('runMyApplicationsFlow()', () => {
     const state = makeState([]);
     const result = await runMyApplicationsFlow(state, '', workerProfile, ctx);
     expect(result.clearState).toBe(true);
-    expect(result.reply[0]).toContain('AUCUNE CANDIDATURE');
+    expect(result.reply[0]).toContain('Aucune candidature');
   });
 
   describe('step 0 — select application', () => {

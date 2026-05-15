@@ -174,7 +174,7 @@ export class BotCommandsService {
     if (profile.profile_type !== 'EMPLOYER') {
       return {
         message:
-          "*SEULS LES EMPLOYEURS PEUVENT VOIR LEURS OFFRES. TAPEZ 'MENU' POUR REVENIR.*",
+          "❌ Seuls les employeurs peuvent voir leurs offres. Tapez *Menu* pour revenir.",
         offerIds: [],
       };
     }
@@ -187,7 +187,7 @@ export class BotCommandsService {
     if (total === 0) {
       return {
         message:
-          "*VOUS N'AVEZ PUBLIÉ AUCUNE OFFRE. TAPEZ 'MENU' POUR REVENIR.*",
+          "Vous n'avez publié aucune offre. Tapez *Menu* pour revenir.",
         offerIds: [],
       };
     }
@@ -195,7 +195,7 @@ export class BotCommandsService {
     const start = page * PAGE_SIZE;
     const hasMore = start + PAGE_SIZE < total;
     const pageLabel = totalPages > 1 ? ` — page ${page + 1}/${totalPages}` : '';
-    const lines = [`*MES OFFRES PUBLIÉES (${total})${pageLabel}*`, ''];
+    const lines = [`*Mes offres publiées (${total})${pageLabel}*`, ''];
     pageOffers.forEach((o, i) => {
       const num = start + i + 1;
       const title =
@@ -230,7 +230,7 @@ export class BotCommandsService {
   }> {
     if (profile.profile_type !== 'EMPLOYER') {
       return {
-        message: '*SEULS LES EMPLOYEURS PEUVENT VOIR LES CANDIDATURES REÇUES.*',
+        message: "❌ Seuls les employeurs peuvent voir les candidatures reçues.",
       };
     }
     const offers = await this.jobOfferService.findByEmployerId(profile.id);
@@ -287,7 +287,7 @@ export class BotCommandsService {
   }> {
     if (profile.profile_type !== 'EMPLOYER') {
       return {
-        message: '*SEULS LES EMPLOYEURS PEUVENT VOIR LES MISSIONS POURVUES.*',
+        message: "❌ Seuls les employeurs peuvent voir les missions pourvues.",
       };
     }
     const offers = await this.jobOfferService.findByEmployerId(profile.id);
