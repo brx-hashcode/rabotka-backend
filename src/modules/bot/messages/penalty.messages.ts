@@ -251,9 +251,9 @@ export function formatPenaltyReminderDay(params: {
     ...totalLine,
     '',
     '*Comment payer :*',
-    'Tapez *PAYER* pour regler vos penalites directement depuis le bot.',
+    'Tapez *3* (Paiements en attente) pour régler vos pénalités.',
     '',
-    'Tapez *PROFIL* pour voir le detail de vos penalites.',
+    'Tapez *5* (Mon profil) pour voir le détail de vos pénalités.',
   ].join('\n');
 }
 

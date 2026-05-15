@@ -135,7 +135,7 @@ async function handleApplyStep1(
 
     return {
       reply: [
-        "*Retour sans envoi de candidature.*\n\nVous n'avez pas postulé à cette offre.\n\n- Tapez *offres* pour voir la liste des offres\n- Tapez *MENU* pour le menu principal",
+        "*Retour sans envoi de candidature.*\n\nVous n'avez pas postulé à cette offre.\n\nTapez *1* (Trouver une mission) pour voir les offres, ou *Menu* pour le menu principal.",
       ],
       clearState: true,
     };
