@@ -92,7 +92,7 @@ async function handleAcceptRefuseStep1(args: StepArgs): Promise<FlowResult> {
                 `✅ Votre paiement couvre déjà tous les candidats de ce poste.`,
                 `Le contact avec *${workerName}* sera débloqué dès qu'il confirme de son côté.`,
                 '',
-                "*Tapez 'Menu' pour revenir.*",
+                "Tapez *Menu* pour revenir.",
               ].join('\n'),
             ],
             clearState: true,
@@ -141,7 +141,7 @@ async function handleAcceptRefuseStep1(args: StepArgs): Promise<FlowResult> {
             '',
             'Le travailleur a été notifié.',
             '',
-            "Tapez 'Menu' pour revenir.",
+            "Tapez *Menu* pour revenir.",
           ].join('\n'),
         ],
         clearState: true,
@@ -206,7 +206,7 @@ async function handleAcceptRefuseStep3(args: StepArgs): Promise<FlowResult> {
   if (normalized === '2' || normalized === 'annuler') {
     return {
       reply: [
-        "*Refus annulé.* La candidature reste en attente.\n\nTapez 'Menu' pour revenir.",
+        "*Refus annulé.* La candidature reste en attente.\n\nTapez *Menu* pour revenir.",
       ],
       clearState: true,
     };
@@ -237,7 +237,7 @@ async function handleAcceptRefuseStep3(args: StepArgs): Promise<FlowResult> {
           '',
           "Le candidat a été notifié. Votre offre reste ouverte pour d'autres candidatures.",
           '',
-          "*Tapez 'Menu' pour revenir.*",
+          "Tapez *Menu* pour revenir.",
         ].join('\n'),
       ],
       clearState: true,

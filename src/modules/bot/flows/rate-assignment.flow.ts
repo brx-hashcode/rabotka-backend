@@ -25,7 +25,7 @@ export async function runRateAssignmentFlow(
     CMD_MENU.some((c) => normalized === c || normalized.startsWith(c + ' '))
   ) {
     return {
-      reply: ["*Menu annulé. Tapez 'Menu' pour revenir.*"],
+      reply: ["*Menu annulé. Tapez *Menu* pour revenir.*"],
       clearState: true,
     };
   }
@@ -35,7 +35,7 @@ export async function runRateAssignmentFlow(
 
   if (!assignmentId || !rateeId) {
     return {
-      reply: ["*Erreur d'évaluation. Tapez 'Menu'.*"],
+      reply: ["*Erreur d'évaluation. Tapez *Menu*.*"],
       clearState: true,
     };
   }
@@ -90,7 +90,7 @@ export async function runRateAssignmentFlow(
     };
   } catch {
     return {
-      reply: ["*Impossible d'enregistrer votre note. Tapez 'Menu'.*"],
+      reply: ["*Impossible d'enregistrer votre note. Tapez *Menu*.*"],
       clearState: true,
     };
   }

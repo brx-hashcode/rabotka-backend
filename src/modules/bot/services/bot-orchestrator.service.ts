@@ -516,7 +516,7 @@ export class BotOrchestratorService {
           const offer = await this.jobOfferService.findById(offerId);
           if (!offer) {
             return {
-              reply: ["*Cette offre n'existe plus. Tapez 'Menu'.*"],
+              reply: ["*Cette offre n'existe plus. Tapez *Menu*.*"],
               clearState: true,
             };
           }
@@ -832,7 +832,7 @@ export class BotOrchestratorService {
       '',
       "Aucune offre recommandée pour l'instant. Complétez votre profil pour de meilleures recommandations.",
       '',
-      "*Tapez 'Menu' pour revenir au menu principal.*",
+      "Tapez *Menu* pour revenir au menu principal.",
     ].join('\n');
 
     const offerResults = await this.interestRecommendationService.recommend(
@@ -956,7 +956,7 @@ export class BotOrchestratorService {
           '',
           'Aucun travailleur qualifié disponible pour le moment.',
           '',
-          "*Tapez 'Menu' pour revenir.*",
+          "Tapez *Menu* pour revenir.",
         ].join('\n'),
       ];
     }

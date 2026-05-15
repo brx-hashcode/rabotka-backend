@@ -232,12 +232,12 @@ export function formatOfferPublishedSuccess(offerId: string): string {
     `*Offre ID*: #${offerId.slice(0, 8)}`,
     "Vous recevrez une notification dès qu'un worker postulera.",
     '',
-    "Tapez 'Menu' pour revenir au menu principal.",
+    "Tapez *Menu* pour revenir au menu principal.",
   ].join('\n');
 }
 
 export function formatNoOffersAvailable(): string {
-  return "Aucune offre disponible pour le moment. Tapez 'Menu' pour revenir.";
+  return "Aucune offre disponible pour le moment. Tapez *Menu* pour revenir.";
 }
 
 export function jobOfferToOfferListItem(offer: {

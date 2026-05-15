@@ -74,7 +74,7 @@ export async function runJobStatusCheckFlow(
   };
 
   if (!jobOfferId || !applicationId) {
-    return { reply: ["*ERREUR. Tapez 'MENU'.*"], clearState: true };
+    return { reply: ["*ERREUR. Tapez *Menu*.*"], clearState: true };
   }
 
   // Re-bind as non-optional after the guard so downstream code is typed as string

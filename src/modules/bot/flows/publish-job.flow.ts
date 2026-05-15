@@ -122,7 +122,7 @@ async function handlePublishStep10Confirm(args: StepArgs): Promise<FlowResult> {
     const message =
       err instanceof Error ? err.message : 'Erreur lors de la publication.';
     return {
-      reply: [`❌ ${message} Réessayez ou tapez 'Menu' pour annuler.`],
+      reply: [`❌ ${message} Réessayez ou tapez *Menu* pour annuler.`],
       nextState: state,
     };
   }
@@ -202,7 +202,7 @@ async function handleStep10Confirm(
   }
   if (normalized === '3' || normalized === 'annuler') {
     return {
-      reply: ["Publication annulée. Tapez 'Menu' pour revenir au menu."],
+      reply: ["Publication annulée. Tapez *Menu* pour revenir au menu."],
       clearState: true,
     };
   }
@@ -254,7 +254,7 @@ export async function runPublishJobFlow(
   if (profile.profile_type !== 'EMPLOYER') {
     return {
       reply: [
-        "❌ Seuls les employeurs peuvent publier des offres. Votre compte est de type Worker. Tapez 'Menu' pour voir les options.",
+        "❌ Seuls les employeurs peuvent publier des offres. Votre compte est de type Worker. Tapez *Menu* pour voir les options.",
       ],
       clearState: true,
     };
@@ -268,7 +268,7 @@ export async function runPublishJobFlow(
     normalized === 'cancel'
   ) {
     return {
-      reply: ["Publication annulée. Tapez 'Menu' pour revenir au menu."],
+      reply: ["Publication annulée. Tapez *Menu* pour revenir au menu."],
       clearState: true,
     };
   }
@@ -319,7 +319,7 @@ export async function runPublishJobFlow(
   if (stepHandler) return stepHandler(args);
 
   return {
-    reply: ["Erreur d'étape. Tapez 'Menu' pour annuler."],
+    reply: ["Erreur d'étape. Tapez *Menu* pour annuler."],
     clearState: true,
   };
 }

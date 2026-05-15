@@ -110,7 +110,7 @@ async function handleListSelectOffer(
   const offer = await ctx.jobOfferService.findById(offerId);
   if (!offer) {
     return {
-      reply: ["*Cette offre n'existe plus. Tapez 'Menu'.*"],
+      reply: ["*Cette offre n'existe plus. Tapez *Menu*.*"],
       clearState: true,
     };
   }
@@ -174,7 +174,7 @@ async function handleDetailApply(
   const offer = await ctx.jobOfferService.findById(offerId);
   if (!offer) {
     return {
-      reply: ["*Cette offre n'existe plus. Tapez 'Menu'.*"],
+      reply: ["*Cette offre n'existe plus. Tapez *Menu*.*"],
       clearState: true,
     };
   }
@@ -235,7 +235,7 @@ async function handleDetailViewDescription(
   const offer = await ctx.jobOfferService.findById(offerId);
   if (!offer) {
     return {
-      reply: ["*Offre introuvable. Tapez 'Menu'.*"],
+      reply: ["*Offre introuvable. Tapez *Menu*.*"],
       clearState: true,
     };
   }
@@ -328,7 +328,7 @@ export async function runListOffersFlow(
 
   if (offerIds.length === 0) {
     return {
-      reply: ["*Aucune offre. Tapez 'Menu' pour revenir.*"],
+      reply: ["*Aucune offre. Tapez *Menu* pour revenir.*"],
       clearState: true,
     };
   }
