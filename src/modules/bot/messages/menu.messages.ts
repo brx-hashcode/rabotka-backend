@@ -52,7 +52,7 @@ export function helpMessage(contact: ContactInfo): string {
     `*Email*: ${contact.email}`,
     `*Adresse*: _${contact.address}_`,
     '',
-    "*Tapez 'Menu' pour revenir.*",
+    "Tapez *Menu* pour revenir.",
   ].join('\n');
 }
 

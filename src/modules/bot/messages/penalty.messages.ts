@@ -69,7 +69,7 @@ export function formatPenaltyHistory(
     `- Maintenez un score > 90 pour plus de visibilite`,
     `- Annulez toujours plus de ${thresholdHours}h avant si necessaire`,
     '',
-    "Tapez 'Menu' pour revenir.",
+    "Tapez *Menu* pour revenir.",
   );
   return lines.join('\n');
 }
@@ -176,7 +176,7 @@ export function formatPenaltyBlocked(
     'Indiquez votre numero de telephone en reference lors du paiement.',
     'Votre compte sera debloque sous 24h apres reception.',
     '',
-    "Tapez 'Profil' pour voir le detail ou 'Menu' pour revenir.",
+    "Tapez *Menu* puis *5* (Mon profil) pour voir le detail ou 'Menu' pour revenir.",
   ].join('\n');
 }
 

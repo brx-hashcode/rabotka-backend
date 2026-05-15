@@ -79,7 +79,7 @@ function buildCancelledReply(penaltyAmount: number | null): string {
     '',
     "L'employeur a été notifié.",
     '',
-    "*Tapez 'Menu' pour revenir.*",
+    "Tapez *Menu* pour revenir.",
   ].join('\n');
 }
 
@@ -230,7 +230,7 @@ async function handleCancelStep1(
   if (normalized === '2') {
     return {
       reply: [
-        "*Annulation annulée. Votre candidature est maintenue. Tapez 'Menu'.*",
+        "*Annulation annulée. Votre candidature est maintenue. Tapez *Menu*.*",
       ],
       clearState: true,
     };
@@ -276,7 +276,7 @@ async function handleCancelStep2(args: CancelStepArgs): Promise<FlowResult> {
   if (normalized === '2' || normalized === 'non') {
     return {
       reply: [
-        "*Annulation annulée. Votre candidature est maintenue. Tapez 'Menu'.*",
+        "*Annulation annulée. Votre candidature est maintenue. Tapez *Menu*.*",
       ],
       clearState: true,
     };
