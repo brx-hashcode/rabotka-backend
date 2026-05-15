@@ -163,6 +163,9 @@ describe('ProfileService', () => {
         indexWorkerProfile: jest.fn().mockResolvedValue(undefined),
         indexEmployerProfile: jest.fn().mockResolvedValue(undefined),
       } as any, // matchingService
+      {
+        reseedFromProfile: jest.fn().mockResolvedValue(undefined),
+      } as any, // interestClusters
     );
   });
 
