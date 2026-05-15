@@ -2,18 +2,14 @@ import { APP_TIMEZONE } from '../utils/parse-date-time';
 
 export function formatKycValidatedMessage(
   firstName: string,
-  profileType: 'WORKER' | 'EMPLOYER',
+  _profileType: 'WORKER' | 'EMPLOYER',
 ): string {
   return [
-    `✅ *Félicitations ${firstName} !*`,
+    `Bonjour ${firstName},`,
     '',
-    "Votre vérification d'identité (KYC) a été *approuvée*.",
+    "Bonne nouvelle ! 🎉 Votre vérification d'identité (KYC) a été approuvée avec succès.",
     '',
-    `*Type de compte*: ${profileType === 'WORKER' ? 'Worker' : 'Employer'}`,
-    '',
-    'Vous pouvez maintenant accéder à la plateforme Rabotka.',
-    '',
-    '*Tapez Menu pour commencer.*',
+    'Tapez *Menu* pour commencer',
   ].join('\n');
 }
 
