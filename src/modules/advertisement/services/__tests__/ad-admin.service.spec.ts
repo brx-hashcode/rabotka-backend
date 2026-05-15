@@ -51,7 +51,10 @@ describe('AdAdminService', () => {
   describe('approve', () => {
     it('approves a PENDING_REVIEW ad', async () => {
       mockPrisma.advertisement.findUnique.mockResolvedValue(mockAd);
-      mockPrisma.advertisement.update.mockResolvedValue({ ...mockAd, status: AdStatus.APPROVED });
+      mockPrisma.advertisement.update.mockResolvedValue({
+        ...mockAd,
+        status: AdStatus.APPROVED,
+      });
 
       const result = await service.approve('ad-1');
       expect(result.status).toBe(AdStatus.APPROVED);
@@ -63,15 +66,23 @@ describe('AdAdminService', () => {
     });
 
     it('throws BadRequestException if not PENDING_REVIEW', async () => {
-      mockPrisma.advertisement.findUnique.mockResolvedValue({ ...mockAd, status: AdStatus.DRAFT });
-      await expect(service.approve('ad-1')).rejects.toThrow(BadRequestException);
+      mockPrisma.advertisement.findUnique.mockResolvedValue({
+        ...mockAd,
+        status: AdStatus.DRAFT,
+      });
+      await expect(service.approve('ad-1')).rejects.toThrow(
+        BadRequestException,
+      );
     });
   });
 
   describe('reject', () => {
     it('rejects a PENDING_REVIEW ad', async () => {
       mockPrisma.advertisement.findUnique.mockResolvedValue(mockAd);
-      mockPrisma.advertisement.update.mockResolvedValue({ ...mockAd, status: AdStatus.REJECTED });
+      mockPrisma.advertisement.update.mockResolvedValue({
+        ...mockAd,
+        status: AdStatus.REJECTED,
+      });
 
       const result = await service.reject('ad-1', 'Not acceptable');
       expect(result.status).toBe(AdStatus.REJECTED);
@@ -79,12 +90,19 @@ describe('AdAdminService', () => {
 
     it('throws NotFoundException if not found', async () => {
       mockPrisma.advertisement.findUnique.mockResolvedValue(null);
-      await expect(service.reject('x', 'reason')).rejects.toThrow(NotFoundException);
+      await expect(service.reject('x', 'reason')).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('throws BadRequestException if not PENDING_REVIEW', async () => {
-      mockPrisma.advertisement.findUnique.mockResolvedValue({ ...mockAd, status: AdStatus.ACTIVE });
-      await expect(service.reject('ad-1', 'reason')).rejects.toThrow(BadRequestException);
+      mockPrisma.advertisement.findUnique.mockResolvedValue({
+        ...mockAd,
+        status: AdStatus.ACTIVE,
+      });
+      await expect(service.reject('ad-1', 'reason')).rejects.toThrow(
+        BadRequestException,
+      );
     });
   });
 
@@ -116,15 +134,22 @@ describe('AdAdminService', () => {
   describe('updateBundle', () => {
     it('updates a bundle', async () => {
       mockPrisma.advertisementBundle.findUnique.mockResolvedValue(mockBundle);
-      mockPrisma.advertisementBundle.update.mockResolvedValue({ ...mockBundle, name: 'Updated' });
+      mockPrisma.advertisementBundle.update.mockResolvedValue({
+        ...mockBundle,
+        name: 'Updated',
+      });
 
-      const result = await service.updateBundle('bundle-1', { name: 'Updated' });
+      const result = await service.updateBundle('bundle-1', {
+        name: 'Updated',
+      });
       expect(result.name).toBe('Updated');
     });
 
     it('throws if bundle not found', async () => {
       mockPrisma.advertisementBundle.findUnique.mockResolvedValue(null);
-      await expect(service.updateBundle('x', {})).rejects.toThrow(NotFoundException);
+      await expect(service.updateBundle('x', {})).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 
@@ -148,13 +173,17 @@ describe('AdAdminService', () => {
 
     it('throws if bundle not found', async () => {
       mockPrisma.advertisementBundle.findUnique.mockResolvedValue(null);
-      await expect(service.deleteBundle('x')).rejects.toThrow(NotFoundException);
+      await expect(service.deleteBundle('x')).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('throws if bundle has ads', async () => {
       mockPrisma.advertisementBundle.findUnique.mockResolvedValue(mockBundle);
       mockPrisma.advertisement.count.mockResolvedValue(1);
-      await expect(service.deleteBundle('bundle-1')).rejects.toThrow(BadRequestException);
+      await expect(service.deleteBundle('bundle-1')).rejects.toThrow(
+        BadRequestException,
+      );
     });
   });
 });

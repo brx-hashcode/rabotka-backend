@@ -22,7 +22,11 @@ const mockPrisma = {
     count: jest.fn().mockResolvedValue(0),
   },
   profile: {
-    findUnique: jest.fn().mockResolvedValue({ phone: '+242001', first_name: 'Bob', last_name: 'Doe' }),
+    findUnique: jest.fn().mockResolvedValue({
+      phone: '+242001',
+      first_name: 'Bob',
+      last_name: 'Doe',
+    }),
     update: jest.fn().mockResolvedValue({ phone: '+242001' }),
   },
 };
@@ -88,21 +92,38 @@ describe('PaymentService', () => {
   describe('generatePenaltyPaymentLink', () => {
     it('generates penalty payment link', () => {
       const link = service.generatePenaltyPaymentLink('profile-1', 5000);
-      expect(link).toBe('https://app.example.com/penalties/profile-1?amount=5000');
+      expect(link).toBe(
+        'https://app.example.com/penalties/profile-1?amount=5000',
+      );
     });
   });
 
   describe('createPaymentUrl', () => {
     it('creates payment request and returns URL', async () => {
-      const url = await service.createPaymentUrl('profile-1', 5000, 'Test', 'CONTACT_UNLOCK' as any);
+      const url = await service.createPaymentUrl(
+        'profile-1',
+        5000,
+        'Test',
+        'CONTACT_UNLOCK' as any,
+      );
       expect(mockPrisma.paymentRequest.create).toHaveBeenCalled();
       expect(url).toContain('/pay/');
     });
 
     it('passes optional contactUnlockAttemptId', async () => {
-      const url = await service.createPaymentUrl('profile-1', 5000, 'Test', 'CONTACT_UNLOCK' as any, { contactUnlockAttemptId: 'attempt-1' });
+      const url = await service.createPaymentUrl(
+        'profile-1',
+        5000,
+        'Test',
+        'CONTACT_UNLOCK' as any,
+        { contactUnlockAttemptId: 'attempt-1' },
+      );
       expect(mockPrisma.paymentRequest.create).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.objectContaining({ contact_unlock_attempt_id: 'attempt-1' }) }),
+        expect.objectContaining({
+          data: expect.objectContaining({
+            contact_unlock_attempt_id: 'attempt-1',
+          }),
+        }),
       );
     });
   });
@@ -122,8 +143,16 @@ describe('PaymentService', () => {
 
     it('rolls back payment when queue enqueue fails', async () => {
       mockQueueService.addJob.mockRejectedValueOnce(new Error('Queue error'));
-      await expect(service.makePayment({ type: 'REGISTRATION' as any, profileId: 'p1', amount: 100 })).rejects.toThrow('Queue error');
-      expect(mockPrisma.payment.delete).toHaveBeenCalledWith({ where: { id: 'pay-1' } });
+      await expect(
+        service.makePayment({
+          type: 'REGISTRATION' as any,
+          profileId: 'p1',
+          amount: 100,
+        }),
+      ).rejects.toThrow('Queue error');
+      expect(mockPrisma.payment.delete).toHaveBeenCalledWith({
+        where: { id: 'pay-1' },
+      });
     });
   });
 
@@ -144,7 +173,9 @@ describe('PaymentService', () => {
     });
 
     it('returns error when gateway fails', async () => {
-      mockPaymentGateway.initiatePayment.mockRejectedValueOnce(new Error('Gateway down'));
+      mockPaymentGateway.initiatePayment.mockRejectedValueOnce(
+        new Error('Gateway down'),
+      );
       const result = await service.initiateDirectPayment({
         profileId: 'profile-1',
         amount: 5000,
@@ -179,7 +210,9 @@ describe('PaymentService', () => {
     it('marks penalties as paid and reactivates profile when no remaining', async () => {
       await service.handlePenaltyPaymentSuccess('profile-1');
       expect(mockPrisma.penalty.updateMany).toHaveBeenCalled();
-      expect(mockPrisma.profile.update).toHaveBeenCalledWith(expect.objectContaining({ data: { status: 'ACTIVE' } }));
+      expect(mockPrisma.profile.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { status: 'ACTIVE' } }),
+      );
       expect(mockBotNotification.sendMessage).toHaveBeenCalled();
       expect(mockEventEmitter.emit).toHaveBeenCalledTimes(2);
     });

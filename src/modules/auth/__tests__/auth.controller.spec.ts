@@ -14,6 +14,20 @@ function makeAuthService() {
       name: 'Admin',
     }),
     revokeToken: jest.fn().mockResolvedValue(undefined),
+    updateAdminById: jest.fn().mockResolvedValue({ id: 'u-1', firstName: 'John', lastName: 'Doe', role: 'ADMIN' }),
+    initQrSession: jest.fn().mockResolvedValue({ sessionId: 's-1', consumeNonce: 'n-1', qrUrl: 'http://qr', expiresIn: 300 }),
+    pollQrSession: jest.fn().mockResolvedValue({ status: 'pending' }),
+    unpairPhone: jest.fn().mockResolvedValue(undefined),
+    generatePhonePairingOtp: jest.fn().mockResolvedValue({ otp: '123456', expiresIn: 300, userId: 'u-1' }),
+    verifyPhonePairingOtp: jest.fn().mockResolvedValue({ token: 'phone-tok' }),
+    generateTotp: jest.fn().mockResolvedValue({ secret: 'sec', otpAuthUrl: 'otpauth://...' }),
+    verifyTotp: jest.fn().mockResolvedValue({ success: true }),
+    disableTotp: jest.fn().mockResolvedValue({ success: true }),
+    consumeQrSession: jest.fn().mockResolvedValue({ token: 'qr-tok' }),
+    confirmQrSession: jest.fn().mockResolvedValue({ success: true }),
+    setupTotp: jest.fn().mockResolvedValue({ secret: 'sec', otpAuthUrl: 'otpauth://...' }),
+    enableTotp: jest.fn().mockResolvedValue({ success: true }),
+    verifyTotpLogin: jest.fn().mockResolvedValue({ token: 'totp-tok' }),
   };
 }
 
@@ -185,9 +199,16 @@ describe('AuthController', () => {
 
   describe('verifyAdminOtp() with totpRequired', () => {
     it('returns totpRequired without setting cookie', async () => {
-      authService.verifyAdminOtp = jest.fn().mockResolvedValue({ success: true, token: 'pending-tok', totpRequired: true });
+      authService.verifyAdminOtp = jest.fn().mockResolvedValue({
+        success: true,
+        token: 'pending-tok',
+        totpRequired: true,
+      });
       const res = makeRes();
-      const result = await controller.verifyAdminOtp({ email: 'admin@example.com', otp: '123456' } as any, res);
+      const result = await controller.verifyAdminOtp(
+        { email: 'admin@example.com', otp: '123456' } as any,
+        res,
+      );
       expect(result.totpRequired).toBe(true);
       expect(res.cookie).not.toHaveBeenCalled();
     });
@@ -195,16 +216,30 @@ describe('AuthController', () => {
 
   describe('updateAdminMe()', () => {
     it('updates admin profile', async () => {
-      authService.updateAdminById = jest.fn().mockResolvedValue({ id: 'u-1', email: 'admin@example.com', firstName: 'John', lastName: 'Doe', role: 'ADMIN' });
+      authService.updateAdminById = jest.fn().mockResolvedValue({
+        id: 'u-1',
+        email: 'admin@example.com',
+        firstName: 'John',
+        lastName: 'Doe',
+        role: 'ADMIN',
+      });
       const req = { user: { userId: 'u-1' } } as any;
-      const result = await controller.updateAdminMe(req, { firstName: 'John', lastName: 'Doe' });
+      const result = await controller.updateAdminMe(req, {
+        firstName: 'John',
+        lastName: 'Doe',
+      });
       expect(result.firstName).toBe('John');
     });
   });
 
   describe('initQrSession()', () => {
     it('returns session data', async () => {
-      authService.initQrSession = jest.fn().mockResolvedValue({ sessionId: 's-1', consumeNonce: 'n-1', qrUrl: 'http://qr', expiresIn: 300 });
+      authService.initQrSession = jest.fn().mockResolvedValue({
+        sessionId: 's-1',
+        consumeNonce: 'n-1',
+        qrUrl: 'http://qr',
+        expiresIn: 300,
+      });
       const result = await controller.initQrSession();
       expect(result.sessionId).toBe('s-1');
     });
@@ -212,7 +247,9 @@ describe('AuthController', () => {
 
   describe('pollQrSession()', () => {
     it('returns session status', async () => {
-      authService.pollQrSession = jest.fn().mockResolvedValue({ status: 'pending' });
+      authService.pollQrSession = jest
+        .fn()
+        .mockResolvedValue({ status: 'pending' });
       const result = await controller.pollQrSession('session-1');
       expect(result.status).toBe('pending');
     });
@@ -222,12 +259,19 @@ describe('AuthController', () => {
     it('unpairs phone and returns success', async () => {
       authService.unpairPhone = jest.fn().mockResolvedValue(undefined);
       const wsGateway = makeWsGateway();
-      controller = new AuthController(authService as any, configService as any, makeQrGateway() as any, wsGateway as any);
+      controller = new AuthController(
+        authService as any,
+        configService as any,
+        makeQrGateway() as any,
+        wsGateway as any,
+      );
       const res = makeRes();
       const req = { user: { userId: 'u-1' } } as any;
       const result = await controller.unpairPhone(req, res);
       expect(authService.unpairPhone).toHaveBeenCalledWith('u-1');
-      expect(res.clearCookie).toHaveBeenCalledWith('admin_phone_token', { path: '/' });
+      expect(res.clearCookie).toHaveBeenCalledWith('admin_phone_token', {
+        path: '/',
+      });
       expect(wsGateway.emitToAdmin).toHaveBeenCalled();
       expect(result.success).toBe(true);
     });
@@ -235,7 +279,9 @@ describe('AuthController', () => {
 
   describe('generatePhonePairingOtp()', () => {
     it('delegates to authService and returns otp data', async () => {
-      authService.generatePhonePairingOtp = jest.fn().mockResolvedValue({ otp: '123456', expiresIn: 300, userId: 'u-1' });
+      authService.generatePhonePairingOtp = jest
+        .fn()
+        .mockResolvedValue({ otp: '123456', expiresIn: 300, userId: 'u-1' });
       const req = { user: { userId: 'u-1' } } as any;
       const result = await controller.generatePhonePairingOtp(req, 'iPhone');
       expect(result.otp).toBe('123456');
@@ -244,19 +290,36 @@ describe('AuthController', () => {
 
   describe('verifyPhonePairingOtp()', () => {
     it('sets phone token cookie and returns success', async () => {
-      authService.verifyPhonePairingOtp = jest.fn().mockResolvedValue({ token: 'phone-tok' });
+      authService.verifyPhonePairingOtp = jest
+        .fn()
+        .mockResolvedValue({ token: 'phone-tok' });
       const wsGateway = makeWsGateway();
-      controller = new AuthController(authService as any, configService as any, makeQrGateway() as any, wsGateway as any);
+      controller = new AuthController(
+        authService as any,
+        configService as any,
+        makeQrGateway() as any,
+        wsGateway as any,
+      );
       const res = makeRes();
-      const result = await controller.verifyPhonePairingOtp('u-1', '123456', res);
-      expect(res.cookie).toHaveBeenCalledWith('admin_phone_token', 'phone-tok', expect.objectContaining({ httpOnly: true }));
+      const result = await controller.verifyPhonePairingOtp(
+        'u-1',
+        '123456',
+        res,
+      );
+      expect(res.cookie).toHaveBeenCalledWith(
+        'admin_phone_token',
+        'phone-tok',
+        expect.objectContaining({ httpOnly: true }),
+      );
       expect(result.success).toBe(true);
     });
   });
 
   describe('consumeQrSession()', () => {
     it('returns totpRequired when TOTP needed', async () => {
-      authService.consumeQrSession = jest.fn().mockResolvedValue({ totpRequired: true, pendingToken: 'pending-tok' });
+      authService.consumeQrSession = jest
+        .fn()
+        .mockResolvedValue({ totpRequired: true, pendingToken: 'pending-tok' });
       const res = makeRes();
       const result = await controller.consumeQrSession('s-1', 'n-1', res);
       expect(result.totpRequired).toBe(true);
@@ -265,24 +328,37 @@ describe('AuthController', () => {
     });
 
     it('sets session cookie when no TOTP needed', async () => {
-      authService.consumeQrSession = jest.fn().mockResolvedValue({ token: 'session-tok', totpRequired: false });
+      authService.consumeQrSession = jest
+        .fn()
+        .mockResolvedValue({ token: 'session-tok', totpRequired: false });
       const res = makeRes();
       const result = await controller.consumeQrSession('s-1', 'n-1', res);
-      expect(res.cookie).toHaveBeenCalledWith('auth_token', 'session-tok', expect.objectContaining({ httpOnly: true }));
+      expect(res.cookie).toHaveBeenCalledWith(
+        'auth_token',
+        'session-tok',
+        expect.objectContaining({ httpOnly: true }),
+      );
       expect(result.success).toBe(true);
     });
 
     it('throws when AUTH_COOKIE_NAME not set', async () => {
-      authService.consumeQrSession = jest.fn().mockResolvedValue({ token: 'tok', totpRequired: false });
+      authService.consumeQrSession = jest
+        .fn()
+        .mockResolvedValue({ token: 'tok', totpRequired: false });
       configService.get.mockReturnValue(undefined);
       const res = makeRes();
-      await expect(controller.consumeQrSession('s-1', 'n-1', res)).rejects.toThrow('AUTH_COOKIE_NAME');
+      await expect(
+        controller.consumeQrSession('s-1', 'n-1', res),
+      ).rejects.toThrow('AUTH_COOKIE_NAME');
     });
   });
 
   describe('totpSetup()', () => {
     it('delegates to authService.setupTotp', async () => {
-      authService.setupTotp = jest.fn().mockResolvedValue({ secret: 'SECRET', qrDataUrl: 'data:image/png;base64,...' });
+      authService.setupTotp = jest.fn().mockResolvedValue({
+        secret: 'SECRET',
+        qrDataUrl: 'data:image/png;base64,...',
+      });
       const req = { user: { userId: 'u-1' } } as any;
       const result = await controller.totpSetup(req);
       expect(result.secret).toBe('SECRET');
@@ -309,31 +385,50 @@ describe('AuthController', () => {
 
   describe('totpLogin()', () => {
     it('verifies TOTP and sets session cookie', async () => {
-      authService.verifyTotpLogin = jest.fn().mockResolvedValue({ token: 'session-tok' });
+      authService.verifyTotpLogin = jest
+        .fn()
+        .mockResolvedValue({ token: 'session-tok' });
       const res = makeRes();
       const result = await controller.totpLogin('pending-tok', '123456', res);
-      expect(res.cookie).toHaveBeenCalledWith('auth_token', 'session-tok', expect.objectContaining({ httpOnly: true }));
+      expect(res.cookie).toHaveBeenCalledWith(
+        'auth_token',
+        'session-tok',
+        expect.objectContaining({ httpOnly: true }),
+      );
       expect(result.success).toBe(true);
     });
 
     it('throws when AUTH_COOKIE_NAME not set', async () => {
-      authService.verifyTotpLogin = jest.fn().mockResolvedValue({ token: 'tok' });
+      authService.verifyTotpLogin = jest
+        .fn()
+        .mockResolvedValue({ token: 'tok' });
       configService.get.mockReturnValue(undefined);
       const res = makeRes();
-      await expect(controller.totpLogin('pending', '123456', res)).rejects.toThrow('AUTH_COOKIE_NAME');
+      await expect(
+        controller.totpLogin('pending', '123456', res),
+      ).rejects.toThrow('AUTH_COOKIE_NAME');
     });
   });
 
   describe('confirmQrSession()', () => {
     it('throws when no phone token cookie', async () => {
       const req = { cookies: {} } as any;
-      await expect(controller.confirmQrSession('session-1', req)).rejects.toThrow();
+      await expect(
+        controller.confirmQrSession('session-1', req),
+      ).rejects.toThrow();
     });
 
     it('confirms QR session and emits', async () => {
-      authService.confirmQrSession = jest.fn().mockResolvedValue({ success: true });
+      authService.confirmQrSession = jest
+        .fn()
+        .mockResolvedValue({ success: true });
       const qrGateway = makeQrGateway();
-      controller = new AuthController(authService as any, configService as any, qrGateway as any, makeWsGateway() as any);
+      controller = new AuthController(
+        authService as any,
+        configService as any,
+        qrGateway as any,
+        makeWsGateway() as any,
+      );
       const req = { cookies: { admin_phone_token: 'phone-tok' } } as any;
       const result = await controller.confirmQrSession('session-1', req);
       expect(result.success).toBe(true);

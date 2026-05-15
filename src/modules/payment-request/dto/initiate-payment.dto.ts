@@ -14,7 +14,8 @@ export class InitiatePaymentDto {
   phone!: string;
 
   @ApiPropertyOptional({
-    description: 'Monetbil operator code — required for MONETBIL gateway, omit for MTN_MOMO',
+    description:
+      'Monetbil operator code — required for MONETBIL gateway, omit for MTN_MOMO',
     example: 'CG_MTNMOBILEMONEY',
   })
   @IsOptional()

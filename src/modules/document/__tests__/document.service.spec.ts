@@ -29,7 +29,9 @@ const mockStorage = {
 };
 
 const mockFileService = {
-  getPresignedUrlFromPublicUrl: jest.fn().mockResolvedValue('https://presigned.url/file.docx'),
+  getPresignedUrlFromPublicUrl: jest
+    .fn()
+    .mockResolvedValue('https://presigned.url/file.docx'),
 };
 
 const mockRedis = {
@@ -47,7 +49,8 @@ const baseDoc = {
   title: 'Test Doc',
   category: DocumentCategory.CONTRACT,
   file_url: 'https://storage.example.com/doc.docx',
-  mime_type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  mime_type:
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   created_by: 'user-1',
   created_at: now,
   updated_at: now,
@@ -93,7 +96,8 @@ describe('DocumentService', () => {
         title: 'Test Doc',
         category: DocumentCategory.CONTRACT,
         fileUrl: 'https://storage.example.com/doc.docx',
-        mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        mimeType:
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         createdBy: 'user-1',
       });
 
@@ -129,7 +133,9 @@ describe('DocumentService', () => {
       mockPrisma.document.findMany.mockResolvedValue([]);
       mockPrisma.document.count.mockResolvedValue(0);
 
-      const result = await service.list({ category: DocumentCategory.CONTRACT });
+      const result = await service.list({
+        category: DocumentCategory.CONTRACT,
+      });
       expect(result.total).toBe(0);
     });
   });
@@ -137,7 +143,10 @@ describe('DocumentService', () => {
   describe('update', () => {
     it('updates a document', async () => {
       mockPrisma.document.findUnique.mockResolvedValue(baseDoc);
-      mockPrisma.document.update.mockResolvedValue({ ...baseDoc, title: 'Updated' });
+      mockPrisma.document.update.mockResolvedValue({
+        ...baseDoc,
+        title: 'Updated',
+      });
 
       const result = await service.update('doc-1', { title: 'Updated' });
       expect(result.title).toBe('Updated');
@@ -145,7 +154,9 @@ describe('DocumentService', () => {
 
     it('throws if not found', async () => {
       mockPrisma.document.findUnique.mockResolvedValue(null);
-      await expect(service.update('x', { title: 'X' })).rejects.toThrow(NotFoundException);
+      await expect(service.update('x', { title: 'X' })).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 
@@ -173,7 +184,9 @@ describe('DocumentService', () => {
           category: DocumentCategory.CONTRACT,
           googleDocsUrl: 'https://example.com/not-a-docs-url',
         });
-      } catch (e) { error = e; }
+      } catch (e) {
+        error = e;
+      }
       expect(error?.status).toBe(400);
     });
 
@@ -186,7 +199,9 @@ describe('DocumentService', () => {
           category: DocumentCategory.CONTRACT,
           googleDocsUrl: 'https://docs.google.com/document/d/abc123/edit',
         });
-      } catch (e) { error = e; }
+      } catch (e) {
+        error = e;
+      }
       expect(error?.status).toBe(400);
     });
 
@@ -204,7 +219,9 @@ describe('DocumentService', () => {
           category: DocumentCategory.CONTRACT,
           googleDocsUrl: 'https://docs.google.com/document/d/abc123/edit',
         });
-      } catch (e) { error = e; }
+      } catch (e) {
+        error = e;
+      }
       expect(error?.status).toBe(400);
     });
 
@@ -212,7 +229,13 @@ describe('DocumentService', () => {
       mockFetch.mockResolvedValue({
         ok: false,
         status: 403,
-        headers: { get: jest.fn().mockReturnValue('application/vnd.openxmlformats-officedocument.wordprocessingml.document') },
+        headers: {
+          get: jest
+            .fn()
+            .mockReturnValue(
+              'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            ),
+        },
       });
       let error: any;
       try {
@@ -221,7 +244,9 @@ describe('DocumentService', () => {
           category: DocumentCategory.CONTRACT,
           googleDocsUrl: 'https://docs.google.com/document/d/abc123/edit',
         });
-      } catch (e) { error = e; }
+      } catch (e) {
+        error = e;
+      }
       expect(error?.status).toBe(400);
     });
 
@@ -229,10 +254,18 @@ describe('DocumentService', () => {
       mockFetch.mockResolvedValue({
         ok: true,
         status: 200,
-        headers: { get: jest.fn().mockReturnValue('application/vnd.openxmlformats-officedocument.wordprocessingml.document') },
+        headers: {
+          get: jest
+            .fn()
+            .mockReturnValue(
+              'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            ),
+        },
         arrayBuffer: jest.fn().mockResolvedValue(new ArrayBuffer(8)),
       });
-      mockStorage.upload.mockResolvedValue({ url: 'https://storage.example.com/doc.docx' });
+      mockStorage.upload.mockResolvedValue({
+        url: 'https://storage.example.com/doc.docx',
+      });
       mockPrisma.document.create.mockResolvedValue({
         ...baseDoc,
         source_mode: DocumentSourceMode.GOOGLE_DOCS,
@@ -254,7 +287,11 @@ describe('DocumentService', () => {
     it('throws NotFoundException when document not found', async () => {
       mockPrisma.document.findUnique.mockResolvedValue(null);
       let error: any;
-      try { await service.fillDocumentTemplate('missing', {}); } catch (e) { error = e; }
+      try {
+        await service.fillDocumentTemplate('missing', {});
+      } catch (e) {
+        error = e;
+      }
       expect(error?.status).toBe(404);
     });
 
@@ -265,7 +302,11 @@ describe('DocumentService', () => {
         arrayBuffer: jest.fn().mockResolvedValue(new ArrayBuffer(8)), // invalid docx
       });
       let error: any;
-      try { await service.fillDocumentTemplate('doc-1', {}); } catch (e) { error = e; }
+      try {
+        await service.fillDocumentTemplate('doc-1', {});
+      } catch (e) {
+        error = e;
+      }
       expect(error?.status).toBe(422);
     });
 
@@ -273,7 +314,11 @@ describe('DocumentService', () => {
       mockPrisma.document.findUnique.mockResolvedValue(baseDoc);
       mockFetch.mockResolvedValue({ ok: false, status: 404 });
       let error: any;
-      try { await service.fillDocumentTemplate('doc-1', {}); } catch (e) { error = e; }
+      try {
+        await service.fillDocumentTemplate('doc-1', {});
+      } catch (e) {
+        error = e;
+      }
       expect(error?.status).toBe(400);
     });
   });
@@ -288,50 +333,80 @@ describe('DocumentService', () => {
 
     it('uses googleDocs.exportGoogleDocAsDocx for GOOGLE_DOCS source', async () => {
       mockPrisma.document.findUnique.mockResolvedValue(googleDocsDoc);
-      mockGoogleDocs.exportGoogleDocAsDocx.mockRejectedValue(new Error('export failed'));
+      mockGoogleDocs.exportGoogleDocAsDocx.mockRejectedValue(
+        new Error('export failed'),
+      );
       // Falls back to fetch, also fails → BadRequest
       mockFetch.mockResolvedValue({ ok: false, status: 404 });
       let error: any;
-      try { await service.fillDocumentTemplate('doc-1', {}); } catch (e) { error = e; }
+      try {
+        await service.fillDocumentTemplate('doc-1', {});
+      } catch (e) {
+        error = e;
+      }
       expect(error?.status).toBe(400);
     });
 
     it('falls back to stored snapshot when live export fails', async () => {
       mockPrisma.document.findUnique.mockResolvedValue(googleDocsDoc);
-      mockGoogleDocs.exportGoogleDocAsDocx.mockRejectedValue(new Error('export failed'));
+      mockGoogleDocs.exportGoogleDocAsDocx.mockRejectedValue(
+        new Error('export failed'),
+      );
       mockFetch.mockResolvedValue({
         ok: true,
         arrayBuffer: jest.fn().mockResolvedValue(new ArrayBuffer(8)), // invalid docx
       });
       let error: any;
-      try { await service.fillDocumentTemplate('doc-1', {}); } catch (e) { error = e; }
+      try {
+        await service.fillDocumentTemplate('doc-1', {});
+      } catch (e) {
+        error = e;
+      }
       // Invalid docx → UnprocessableEntity
       expect(error?.status).toBe(422);
     });
 
     it('throws HttpException from googleDocs export directly', async () => {
       mockPrisma.document.findUnique.mockResolvedValue(googleDocsDoc);
-      mockGoogleDocs.exportGoogleDocAsDocx.mockRejectedValue(new HttpException('Forbidden', 403));
+      mockGoogleDocs.exportGoogleDocAsDocx.mockRejectedValue(
+        new HttpException('Forbidden', 403),
+      );
       let error: any;
-      try { await service.fillDocumentTemplate('doc-1', {}); } catch (e) { error = e; }
+      try {
+        await service.fillDocumentTemplate('doc-1', {});
+      } catch (e) {
+        error = e;
+      }
       expect(error?.status).toBe(403);
     });
 
     it('throws error with numeric status from export', async () => {
-      const numericErr = Object.assign(new Error('status error'), { status: 500 });
+      const numericErr = Object.assign(new Error('status error'), {
+        status: 500,
+      });
       mockPrisma.document.findUnique.mockResolvedValue(googleDocsDoc);
       mockGoogleDocs.exportGoogleDocAsDocx.mockRejectedValue(numericErr);
       let error: any;
-      try { await service.fillDocumentTemplate('doc-1', {}); } catch (e) { error = e; }
+      try {
+        await service.fillDocumentTemplate('doc-1', {});
+      } catch (e) {
+        error = e;
+      }
       expect(error?.status).toBe(500);
     });
 
     it('succeeds for GOOGLE_DOCS source when export returns valid docx', async () => {
       mockPrisma.document.findUnique.mockResolvedValue(googleDocsDoc);
       // Return valid-enough buffer (will fail parsing as docx anyway → 422)
-      mockGoogleDocs.exportGoogleDocAsDocx.mockResolvedValue(Buffer.from('valid'));
+      mockGoogleDocs.exportGoogleDocAsDocx.mockResolvedValue(
+        Buffer.from('valid'),
+      );
       let error: any;
-      try { await service.fillDocumentTemplate('doc-1', {}); } catch (e) { error = e; }
+      try {
+        await service.fillDocumentTemplate('doc-1', {});
+      } catch (e) {
+        error = e;
+      }
       expect(error?.status).toBe(422);
     });
   });

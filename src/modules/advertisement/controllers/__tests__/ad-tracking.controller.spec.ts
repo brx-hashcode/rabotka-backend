@@ -13,9 +13,7 @@ describe('AdTrackingController', () => {
     jest.clearAllMocks();
     const module: TestingModule = await Test.createTestingModule({
       controllers: [AdTrackingController],
-      providers: [
-        { provide: AdLinkTrackingService, useValue: mockTracking },
-      ],
+      providers: [{ provide: AdLinkTrackingService, useValue: mockTracking }],
     }).compile();
     controller = module.get<AdTrackingController>(AdTrackingController);
   });

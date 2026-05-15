@@ -8,7 +8,10 @@ import {
   paymentPendingMessage,
   paymentDirectFailedMessage,
 } from '../payment-direct';
-import { verifyWhatsAppMessage, whatsappVerifyCodeMessage } from '../verify-whatsapp';
+import {
+  whatsappVerifyPromptMessage,
+  whatsappAlreadyVerifiedMessage,
+} from '../verify-whatsapp';
 
 describe('WhatsApp Templates', () => {
   describe('jobOfferPublishedMessage', () => {

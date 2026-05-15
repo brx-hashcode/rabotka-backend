@@ -10,7 +10,9 @@ describe('QrGateway', () => {
     }).compile();
     gateway = module.get<QrGateway>(QrGateway);
     // Set up a mock server
-    (gateway as any).server = { to: jest.fn().mockReturnValue({ emit: jest.fn() }) };
+    (gateway as any).server = {
+      to: jest.fn().mockReturnValue({ emit: jest.fn() }),
+    };
   });
 
   it('handleConnection logs client connected', () => {
@@ -43,7 +45,9 @@ describe('QrGateway', () => {
 
   it('emitConfirmed emits to qr room', () => {
     const emitMock = jest.fn();
-    (gateway as any).server = { to: jest.fn().mockReturnValue({ emit: emitMock }) };
+    (gateway as any).server = {
+      to: jest.fn().mockReturnValue({ emit: emitMock }),
+    };
     gateway.emitConfirmed('session-1');
     expect((gateway as any).server.to).toHaveBeenCalledWith('qr:session-1');
     expect(emitMock).toHaveBeenCalledWith('qr:confirmed');

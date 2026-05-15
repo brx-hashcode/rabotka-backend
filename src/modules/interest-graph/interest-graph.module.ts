@@ -9,7 +9,12 @@ import { InterestRecommendationService } from './interest-recommendation.service
 import { AdminInterestGraphController } from './admin-interest-graph.controller';
 
 @Module({
-  imports: [QdrantModule, MatchingModule, PrismaModule, forwardRef(() => AuthModule)],
+  imports: [
+    QdrantModule,
+    MatchingModule,
+    PrismaModule,
+    forwardRef(() => AuthModule),
+  ],
   controllers: [AdminInterestGraphController],
   providers: [
     InterestSignalService,

@@ -1,4 +1,5 @@
-export const SEP = '━━━━━━━━━━━━━━━';
+import { APP_TIMEZONE } from '../utils/parse-date-time';
+
 
 export type CandidatureListItem = {
   id: string;
@@ -19,7 +20,7 @@ export function formatCandidaturesListPage(
   totalPages = 1,
 ): string {
   const pageLabel = totalPages > 1 ? ` (page ${page + 1}/${totalPages})` : '';
-  const lines = [`*CANDIDATURES REÇUES*${pageLabel}`, ''];
+  const lines = [`*Candidatures reçues*${pageLabel}`, ''];
   items.forEach((app, i) => {
     const offerLine = app.offerTitle ? `    Offre: ${app.offerTitle}` : '';
     lines.push(
@@ -68,7 +69,7 @@ export function formatCandidatureDetail(params: {
     '1- Accepter',
     '2- Refuser',
     '3- Retour',
-    "4- Menu (ou tapez 'Menu')",
+    '4- Menu',
     '',
     '*Tapez le numéro correspondant.*',
   ];
@@ -89,6 +90,7 @@ function formatDate(d: Date): string {
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
+    timeZone: APP_TIMEZONE,
   });
 }
 
@@ -135,10 +137,10 @@ export function formatMyApplicationsList(
   applications: ApplicationForList[],
 ): string {
   if (applications.length === 0) {
-    return "*VOUS N'AVEZ AUCUNE CANDIDATURE. TAPEZ 'MENU' PUIS 1 POUR VOIR LES OFFRES.*";
+    return "Vous n'avez aucune candidature. Tapez *1* (Trouver une mission) pour voir les offres disponibles.";
   }
 
-  const lines = [`*MES CANDIDATURES (${applications.length})*`, ''];
+  const lines = [`*Mes candidatures (${applications.length})*`, ''];
 
   const ADDRESS_MAX = 40;
   for (let i = 0; i < applications.length; i++) {
@@ -179,7 +181,7 @@ export function formatMyApplicationDetailWithCancel(
 ): string {
   const statusText = applicationStatusLabel(params.status).replaceAll('*', '');
   return [
-    '*CANDIDATURE SÉLECTIONNÉE*',
+    '*Candidature sélectionnée*',
     '',
     `*Offre*: ${params.jobTitle}`,
     `*Date*: ${formatDate(params.scheduled_at)}`,
@@ -190,7 +192,7 @@ export function formatMyApplicationDetailWithCancel(
     '*Actions:*',
     '1- Annuler cette candidature',
     '2- Retour à la liste',
-    "3- Menu (ou tapez 'Menu')",
+    '3- Menu',
     '',
     '*Tapez le numéro correspondant.*',
   ].join('\n');
@@ -201,7 +203,7 @@ export function formatMyApplicationDetailReadOnly(
 ): string {
   const statusText = applicationStatusLabel(params.status).replaceAll('*', '');
   return [
-    '*CANDIDATURE SÉLECTIONNÉE*',
+    '*Candidature sélectionnée*',
     '',
     `*Offre*: ${params.jobTitle}`,
     `*Date*: ${formatDate(params.scheduled_at)}`,
@@ -211,7 +213,7 @@ export function formatMyApplicationDetailReadOnly(
     '',
     '*Actions:*',
     '1- Retour à la liste',
-    "2- Menu (ou tapez 'Menu')",
+    '2- Menu',
     '',
     '*Tapez le numéro correspondant.*',
   ].join('\n');
@@ -222,7 +224,7 @@ export function formatMyApplicationDetailWaitingPayment(
 ): string {
   const statusText = applicationStatusLabel(params.status).replaceAll('*', '');
   return [
-    '*CANDIDATURE SÉLECTIONNÉE*',
+    '*Candidature sélectionnée*',
     '',
     `*Offre*: ${params.jobTitle}`,
     `*Date*: ${formatDate(params.scheduled_at)}`,
@@ -234,7 +236,7 @@ export function formatMyApplicationDetailWaitingPayment(
     '1- Effectuer le paiement',
     '2- Rejeter et annuler',
     '3- Retour à la liste',
-    "4- Menu (ou tapez 'Menu')",
+    '4- Menu',
     '',
     '*Tapez le numéro correspondant.*',
   ].join('\n');
@@ -245,7 +247,7 @@ export function formatMyApplicationDetailWaitingPaymentPaid(
 ): string {
   const statusText = applicationStatusLabel(params.status).replaceAll('*', '');
   return [
-    '*CANDIDATURE SÉLECTIONNÉE*',
+    '*Candidature sélectionnée*',
     '',
     `*Offre*: ${params.jobTitle}`,
     `*Date*: ${formatDate(params.scheduled_at)}`,
@@ -259,7 +261,7 @@ export function formatMyApplicationDetailWaitingPaymentPaid(
     '*Actions:*',
     '1- Rejeter et annuler',
     '2- Retour à la liste',
-    "3- Menu (ou tapez 'Menu')",
+    '3- Menu',
     '',
     '*Tapez le numéro correspondant.*',
   ].join('\n');
@@ -293,7 +295,7 @@ export function formatApplyConfirmation(params: {
     `*Montant*: ${formatAmount(params.amount, params.payment_flow)}`,
     `*Adresse*: ${params.address}`,
     '',
-    '*ENGAGEMENT IMPORTANT*:',
+    '*Engagement important*:',
     "Vos informations seront partagées avec l'employeur",
     'Vous vous engagez à être présent et ponctuel',
     `Annulation < ${thresholdHours}h avant = pénalité de *${penalty.toLocaleString('fr-FR')} FCFA*`,
@@ -322,9 +324,9 @@ export function formatApplicationSentSuccess(offerTitle: string): string {
     '*Statut*: En attente de réponse',
     "*Vous serez notifié dès que l'employeur prendra une décision.*",
     '',
-    '*Astuce*: Consultez "Menu > Mes candidatures" pour suivre vos postulations.',
+    '*Astuce*: Consultez le menu principal puis "Mes candidatures" pour suivre vos postulations.',
     '',
-    "Tapez 'Menu' pour revenir.",
+    "Tapez *Menu* pour revenir.",
   ].join('\n');
 }
 
@@ -339,25 +341,27 @@ export function formatNewApplicationToEmployer(params: {
 }): string {
   const score = params.reliabilityScore ?? 100;
   return [
-    '*NOUVELLE CANDIDATURE !*',
+    '*Nouvelle candidature !*',
     '',
     '*Un worker a postulé à votre offre* :',
     `*Offre*: ${params.offerTitle}`,
     '',
-    '*CANDIDAT*:',
-    SEP,
+    '*Candidat*:',
+    '',
     `*Nom*: ${params.workerName}`,
     `*Score de fiabilité*: ${score}/100`,
     `*Missions complétées*: ${params.completedMissions}`,
     ...(params.workerDescription
-      ? [`*Description*: ${params.workerDescription.slice(0, 150)}${params.workerDescription.length > 150 ? '...' : ''}`]
+      ? [
+          `*Description*: ${params.workerDescription.slice(0, 150)}${params.workerDescription.length > 150 ? '...' : ''}`,
+        ]
       : []),
-    SEP,
+    '',
     '',
     `*Rendez-vous prévu*: ${formatDate(params.scheduledAt)}`,
     `*Adresse*: ${params.address.length > 80 ? params.address.slice(0, 80) + '...' : params.address}`,
     '',
-    '📞 *Les coordonnées du candidat seront révélées après le paiement du déverrouillage.*',
+    '*Les coordonnées du candidat seront révélées après le paiement du déverrouillage*',
     '',
     '*Actions*:',
     '1- Accepter le candidat',
@@ -389,7 +393,7 @@ export function formatApplicationRejectedToWorker(): string {
     '*Candidature refusée*',
     '',
     "L'employeur a choisi un autre candidat pour cette offre.",
-    "Consultez d'autres offres avec Menu > 1.",
+    "Consultez d'autres offres en tapant *1* (Trouver une mission) depuis le menu.",
   ].join('\n');
 }
 
@@ -408,7 +412,7 @@ export function formatCancellationToEmployer(params: {
       ? params.lateCancellationThresholdHours
       : 4;
   const lines = [
-    '*ANNULATION DE CANDIDATURE*',
+    '*Annulation de candidature*',
     '',
     `*Le worker ${params.workerName} a annulé sa candidature pour* :`,
     `*Offre*: ${params.offerTitle}`,
@@ -446,6 +450,7 @@ function formatDatePublic(d: Date | string | null | undefined): string {
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
+    timeZone: APP_TIMEZONE,
   });
 }
 
@@ -465,10 +470,10 @@ export function formatFilledJobsListPage(
   totalPages = 1,
 ): string {
   const pageLabel = totalPages > 1 ? ` (page ${page + 1}/${totalPages})` : '';
-  const lines = [`*MISSIONS POURVUES*${pageLabel}`, ''];
+  const lines = [`*Missions pourvues*${pageLabel}`, ''];
   if (items.length === 0) {
     lines.push(
-      "Aucune mission pourvue pour le moment. Tapez 'Menu' pour revenir.",
+      "Aucune mission pourvue pour le moment. Tapez *Menu* pour revenir.",
     );
     return lines.join('\n');
   }
@@ -519,7 +524,7 @@ export function formatJobCompletedToWorker(params: {
     `L'employeur a marqué la mission "${params.offerTitle}" comme terminée.`,
     `*Gain enregistré*: ${params.amount.toLocaleString('fr-FR')} FCFA`,
     '',
-    "Consultez votre profil pour voir vos gains. Tapez 'Menu'.",
+    "Consultez votre profil pour voir vos gains. Tapez *Menu*.",
   ].join('\n');
 }
 
@@ -531,6 +536,6 @@ export function formatJobCancelledByEmployerToWorker(
     '',
     `L'employeur a annulé la mission "${offerTitle}". L'offre est de nouveau ouverte.`,
     '',
-    "Tapez 'Menu' pour revenir.",
+    "Tapez *Menu* pour revenir.",
   ].join('\n');
 }

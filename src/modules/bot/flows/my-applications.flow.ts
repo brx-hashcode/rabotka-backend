@@ -268,7 +268,7 @@ async function handleStep0(
     (app.worker_id === profile.id || app.job_offer.employer_id === profile.id);
   if (!canAccess) {
     return {
-      reply: ["*CANDIDATURE INTROUVABLE. TAPEZ 'MENU'.*"],
+      reply: ["❌ Candidature introuvable. Tapez *Menu*."],
       clearState: true,
     };
   }
@@ -304,7 +304,7 @@ async function handleStep1(
     selectedIndex == undefined ? undefined : applicationIds[selectedIndex];
 
   if (!applicationId) {
-    return { reply: ["*INDEX INVALIDE. TAPEZ 'MENU'.*"], clearState: true };
+    return { reply: ["❌ Index invalide. Tapez *Menu*."], clearState: true };
   }
 
   const app = await ctx.applicationService.findById(applicationId);
@@ -313,7 +313,7 @@ async function handleStep1(
     (app.worker_id === profile.id || app.job_offer.employer_id === profile.id);
   if (!canAccess) {
     return {
-      reply: ["*CANDIDATURE INTROUVABLE. TAPEZ 'MENU'.*"],
+      reply: ["❌ Candidature introuvable. Tapez *Menu*."],
       clearState: true,
     };
   }
@@ -408,7 +408,7 @@ export async function runMyApplicationsFlow(
   }
 
   if (applicationIds.length === 0) {
-    return { reply: ["*AUCUNE CANDIDATURE. TAPEZ 'MENU'.*"], clearState: true };
+    return { reply: ["❌ Aucune candidature. Tapez *Menu*."], clearState: true };
   }
 
   const step = state.step ?? 0;
@@ -417,7 +417,7 @@ export async function runMyApplicationsFlow(
   if (step === 1)
     return handleStep1(state, trimmed, applicationIds, profile, ctx);
 
-  return { reply: ["*ERREUR. TAPEZ 'MENU'.*"], clearState: true };
+  return { reply: ["❌ Erreur. Tapez *Menu*."], clearState: true };
 }
 
 export function getMyApplicationsInitialState(

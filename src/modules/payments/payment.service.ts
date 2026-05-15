@@ -1,13 +1,21 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { PaymentStatus, PaymentMethod, PaymentType, PaymentRequestType } from '@prisma/client';
+import {
+  PaymentStatus,
+  PaymentMethod,
+  PaymentType,
+  PaymentRequestType,
+} from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { BotNotificationService } from '../bot/services/bot-notification.service';
 import { QueueService } from '../../common/services/queue/queue.service';
-import { PAYMENT_QUEUE, POLL_PAYMENT_STATUS_QUEUE } from '../../common/services/queue/queue.module';
+import {
+  PAYMENT_QUEUE,
+  POLL_PAYMENT_STATUS_QUEUE,
+} from '../../common/services/queue/queue.module';
 import { SystemConfigService } from '../system-config/system-config.service';
 import type { PollPaymentStatusJobData } from '../payment-request/poll-payment-status.processor';
 import { generatePaymentReference } from '../../common/utils/payment-reference';
@@ -143,7 +151,10 @@ export class PaymentService {
     operator: string;
     description: string;
     requestType: PaymentRequestType;
-    options?: { contactUnlockAttemptId?: string; recommendationWorkerId?: string };
+    options?: {
+      contactUnlockAttemptId?: string;
+      recommendationWorkerId?: string;
+    };
   }): Promise<{ success: boolean; gatewayRef?: string; error?: string }> {
     const token = randomUUID();
     const paymentRequest = await this.prisma.paymentRequest.create({
@@ -183,7 +194,9 @@ export class PaymentService {
         data: { status: 'PENDING' },
       });
       const error = err instanceof Error ? err.message : 'Gateway error';
-      this.logger.error(`initiateDirectPayment failed for ${params.profileId}: ${error}`);
+      this.logger.error(
+        `initiateDirectPayment failed for ${params.profileId}: ${error}`,
+      );
       return { success: false, error };
     }
 

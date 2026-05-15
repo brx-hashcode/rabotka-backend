@@ -21,8 +21,19 @@ jest.mock('@qdrant/js-client-rest', () => {
 
 // Mock fastembed - use jest.fn() stubs that will be configured later
 jest.mock('fastembed', () => {
-  const makeDenseGen = () => (async function* () { yield [new Float32Array(384).fill(0.1)]; })();
-  const makeSparseGen = () => (async function* () { yield [{ indices: new Int32Array([0, 1]), values: new Float32Array([0.5, 0.3]) }]; })();
+  const makeDenseGen = () =>
+    (async function* () {
+      yield [new Float32Array(384).fill(0.1)];
+    })();
+  const makeSparseGen = () =>
+    (async function* () {
+      yield [
+        {
+          indices: new Int32Array([0, 1]),
+          values: new Float32Array([0.5, 0.3]),
+        },
+      ];
+    })();
   const denseEmbedder = { embed: jest.fn().mockReturnValue(makeDenseGen()) };
   const sparseEmbedder = { embed: jest.fn().mockReturnValue(makeSparseGen()) };
   return {
@@ -54,12 +65,21 @@ describe('QdrantService', () => {
   beforeEach(async () => {
     jest.clearAllMocks();
     // Re-setup embedder mocks for each test
-    mockDenseEmbedder.embed.mockReturnValue((async function* () {
-      yield [new Float32Array(384).fill(0.1)];
-    })());
-    mockSparseEmbedder.embed.mockReturnValue((async function* () {
-      yield [{ indices: new Int32Array([0, 1]), values: new Float32Array([0.5, 0.3]) }];
-    })());
+    mockDenseEmbedder.embed.mockReturnValue(
+      (async function* () {
+        yield [new Float32Array(384).fill(0.1)];
+      })(),
+    );
+    mockSparseEmbedder.embed.mockReturnValue(
+      (async function* () {
+        yield [
+          {
+            indices: new Int32Array([0, 1]),
+            values: new Float32Array([0.5, 0.3]),
+          },
+        ];
+      })(),
+    );
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -109,18 +129,25 @@ describe('QdrantService', () => {
   });
 
   it('assertPrefix throws for non-prefixed collection', async () => {
-    await expect(service.ensureCollection('bad-collection')).rejects.toThrow('must start with');
+    await expect(service.ensureCollection('bad-collection')).rejects.toThrow(
+      'must start with',
+    );
   });
 
   describe('ensureCollection', () => {
     it('creates collection if not exists', async () => {
       mockClient.getCollections.mockResolvedValueOnce({ collections: [] });
       await service.ensureCollection(validCollection);
-      expect(mockClient.createCollection).toHaveBeenCalledWith(validCollection, expect.any(Object));
+      expect(mockClient.createCollection).toHaveBeenCalledWith(
+        validCollection,
+        expect.any(Object),
+      );
     });
 
     it('skips creation if collection already exists', async () => {
-      mockClient.getCollections.mockResolvedValueOnce({ collections: [{ name: validCollection }] });
+      mockClient.getCollections.mockResolvedValueOnce({
+        collections: [{ name: validCollection }],
+      });
       await service.ensureCollection(validCollection);
       expect(mockClient.createCollection).not.toHaveBeenCalled();
     });
@@ -128,12 +155,16 @@ describe('QdrantService', () => {
     it('swallows 409 conflict error', async () => {
       mockClient.getCollections.mockResolvedValueOnce({ collections: [] });
       mockClient.createCollection.mockRejectedValueOnce({ status: 409 });
-      await expect(service.ensureCollection(validCollection)).resolves.not.toThrow();
+      await expect(
+        service.ensureCollection(validCollection),
+      ).resolves.not.toThrow();
     });
 
     it('throws non-409 errors', async () => {
       mockClient.getCollections.mockResolvedValueOnce({ collections: [] });
-      mockClient.createCollection.mockRejectedValueOnce(new Error('server error'));
+      mockClient.createCollection.mockRejectedValueOnce(
+        new Error('server error'),
+      );
       await expect(service.ensureCollection(validCollection)).rejects.toThrow();
     });
   });
@@ -146,7 +177,9 @@ describe('QdrantService', () => {
     });
 
     it('skips if already exists', async () => {
-      mockClient.getCollections.mockResolvedValueOnce({ collections: [{ name: validCollection }] });
+      mockClient.getCollections.mockResolvedValueOnce({
+        collections: [{ name: validCollection }],
+      });
       await service.ensureDenseCollection(validCollection);
       expect(mockClient.createCollection).not.toHaveBeenCalled();
     });
@@ -154,16 +187,25 @@ describe('QdrantService', () => {
     it('swallows 409 conflict error', async () => {
       mockClient.getCollections.mockResolvedValueOnce({ collections: [] });
       mockClient.createCollection.mockRejectedValueOnce({ status: 409 });
-      await expect(service.ensureDenseCollection(validCollection)).resolves.not.toThrow();
+      await expect(
+        service.ensureDenseCollection(validCollection),
+      ).resolves.not.toThrow();
     });
   });
 
   describe('upsertDense', () => {
     it('upserts a dense vector', async () => {
-      await service.upsertDense(validCollection, 'id-1', [0.1, 0.2], { key: 'val' });
-      expect(mockClient.upsert).toHaveBeenCalledWith(validCollection, expect.objectContaining({
-        points: expect.arrayContaining([expect.objectContaining({ id: 'id-1' })]),
-      }));
+      await service.upsertDense(validCollection, 'id-1', [0.1, 0.2], {
+        key: 'val',
+      });
+      expect(mockClient.upsert).toHaveBeenCalledWith(
+        validCollection,
+        expect.objectContaining({
+          points: expect.arrayContaining([
+            expect.objectContaining({ id: 'id-1' }),
+          ]),
+        }),
+      );
     });
   });
 
@@ -175,18 +217,25 @@ describe('QdrantService', () => {
     });
 
     it('throws when embedder produces no output', async () => {
-      mockDenseEmbedder.embed.mockReturnValueOnce((async function* () {
-        // yield nothing - empty
-      })());
+      mockDenseEmbedder.embed.mockReturnValueOnce(
+        (async function* () {
+          // yield nothing - empty
+        })(),
+      );
       await expect(service.embed('test')).rejects.toThrow('no output');
     });
   });
 
   describe('embedBatch', () => {
     it('returns batch of embedding vectors', async () => {
-      mockDenseEmbedder.embed.mockReturnValue((async function* () {
-        yield [new Float32Array(384).fill(0.1), new Float32Array(384).fill(0.2)];
-      })());
+      mockDenseEmbedder.embed.mockReturnValue(
+        (async function* () {
+          yield [
+            new Float32Array(384).fill(0.1),
+            new Float32Array(384).fill(0.2),
+          ];
+        })(),
+      );
       const result = await service.embedBatch(['text1', 'text2']);
       expect(result).toHaveLength(2);
     });
@@ -200,16 +249,20 @@ describe('QdrantService', () => {
     });
 
     it('throws when sparse embedder produces no output', async () => {
-      mockSparseEmbedder.embed.mockReturnValueOnce((async function* () {
-        // yield nothing
-      })());
+      mockSparseEmbedder.embed.mockReturnValueOnce(
+        (async function* () {
+          // yield nothing
+        })(),
+      );
       await expect(service.sparseEmbed('test')).rejects.toThrow('no output');
     });
   });
 
   describe('searchHybrid', () => {
     it('returns search results', async () => {
-      mockClient.query.mockResolvedValueOnce({ points: [{ id: 'id-1', score: 0.9, payload: { name: 'test' } }] });
+      mockClient.query.mockResolvedValueOnce({
+        points: [{ id: 'id-1', score: 0.9, payload: { name: 'test' } }],
+      });
       const results = await service.searchHybrid(validCollection, 'query', 5);
       expect(results).toHaveLength(1);
       expect(results[0].id).toBe('id-1');
@@ -218,16 +271,31 @@ describe('QdrantService', () => {
 
   describe('searchHybridWithFilter', () => {
     it('returns filtered search results', async () => {
-      mockClient.query.mockResolvedValueOnce({ points: [{ id: 'id-2', score: 0.8, payload: {} }] });
-      const results = await service.searchHybridWithFilter(validCollection, 'query', { must: [] }, 5);
+      mockClient.query.mockResolvedValueOnce({
+        points: [{ id: 'id-2', score: 0.8, payload: {} }],
+      });
+      const results = await service.searchHybridWithFilter(
+        validCollection,
+        'query',
+        { must: [] },
+        5,
+      );
       expect(results).toHaveLength(1);
     });
   });
 
   describe('recommendDense', () => {
     it('returns recommendation results', async () => {
-      mockClient.query.mockResolvedValueOnce({ points: [{ id: 'id-3', score: 0.7, payload: {} }] });
-      const results = await service.recommendDense(validCollection, [[0.1, 0.2]], [], undefined, 5);
+      mockClient.query.mockResolvedValueOnce({
+        points: [{ id: 'id-3', score: 0.7, payload: {} }],
+      });
+      const results = await service.recommendDense(
+        validCollection,
+        [[0.1, 0.2]],
+        [],
+        undefined,
+        5,
+      );
       expect(results).toHaveLength(1);
     });
   });

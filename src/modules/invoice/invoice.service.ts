@@ -120,8 +120,11 @@ export class InvoiceService {
     };
 
     const paymentMethod = invoice.payment
-      ? (PAYMENT_METHOD_LABELS[invoice.payment.payment_method] ?? invoice.payment.payment_method)
-      : await this.resolvePaymentMethod(invoice.payment_request?.payment_reference);
+      ? (PAYMENT_METHOD_LABELS[invoice.payment.payment_method] ??
+        invoice.payment.payment_method)
+      : await this.resolvePaymentMethod(
+          invoice.payment_request?.payment_reference,
+        );
 
     const data: Record<string, string> = {
       INVOICE_ID: this.invoiceRef(invoice.id, invoice.created_at),
@@ -133,7 +136,10 @@ export class InvoiceService {
       PHONE: invoice.profile.phone,
       AMOUNT: invoice.amount.toString(),
       REASON: reasonLabel[invoice.reason] ?? invoice.reason,
-      PAYMENT_REF: invoice.payment?.transaction_id ?? invoice.payment_request?.payment_reference ?? '',
+      PAYMENT_REF:
+        invoice.payment?.transaction_id ??
+        invoice.payment_request?.payment_reference ??
+        '',
       PAYMENT_METHOD: paymentMethod,
       RELATED_ENTITY: await this.resolveRelatedEntity(
         invoice.related_entity_type,
@@ -180,8 +186,11 @@ export class InvoiceService {
     };
 
     const paymentMethod = invoice.payment
-      ? (PAYMENT_METHOD_LABELS[invoice.payment.payment_method] ?? invoice.payment.payment_method)
-      : await this.resolvePaymentMethod(invoice.payment_request?.payment_reference);
+      ? (PAYMENT_METHOD_LABELS[invoice.payment.payment_method] ??
+        invoice.payment.payment_method)
+      : await this.resolvePaymentMethod(
+          invoice.payment_request?.payment_reference,
+        );
 
     const data: Record<string, string> = {
       INVOICE_ID: this.invoiceRef(invoice.id, invoice.created_at),
@@ -193,7 +202,10 @@ export class InvoiceService {
       PHONE: invoice.profile.phone,
       AMOUNT: invoice.amount.toString(),
       REASON: reasonLabel[invoice.reason] ?? invoice.reason,
-      PAYMENT_REF: invoice.payment?.transaction_id ?? invoice.payment_request?.payment_reference ?? '',
+      PAYMENT_REF:
+        invoice.payment?.transaction_id ??
+        invoice.payment_request?.payment_reference ??
+        '',
       PAYMENT_METHOD: paymentMethod,
       RELATED_ENTITY: await this.resolveRelatedEntity(
         invoice.related_entity_type,

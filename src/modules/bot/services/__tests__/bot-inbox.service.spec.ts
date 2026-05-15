@@ -33,7 +33,10 @@ describe('BotInboxService', () => {
     pipelineMock = {
       rpush: jest.fn().mockReturnThis(),
       expire: jest.fn().mockReturnThis(),
-      exec: jest.fn().mockResolvedValue([[null, 1], [null, 1]]),
+      exec: jest.fn().mockResolvedValue([
+        [null, 1],
+        [null, 1],
+      ]),
     };
 
     redis = {
@@ -89,7 +92,10 @@ describe('BotInboxService', () => {
     });
 
     it('skips malformed JSON entries', async () => {
-      redis.lrange.mockResolvedValue(['{bad}', JSON.stringify(makeItem('app-1'))]);
+      redis.lrange.mockResolvedValue([
+        '{bad}',
+        JSON.stringify(makeItem('app-1')),
+      ]);
       const items = await service.getAll(PROFILE_ID);
       expect(items).toHaveLength(1);
     });

@@ -35,7 +35,7 @@ const mockAd = {
   title: 'Test Ad',
   description: 'Ad description',
   status: AdStatus.DRAFT,
-  payment_status: AdPaymentStatus.PENDING,
+  payment_status: AdPaymentStatus.UNPAID,
   start_date: futureDate,
   end_date: endDate,
   bundle: mockBundle,
@@ -74,38 +74,64 @@ describe('AdvertisementService', () => {
 
     it('throws if bundle not found', async () => {
       mockPrisma.advertisementBundle.findUnique.mockResolvedValue(null);
-      await expect(service.create({ bundleId: 'x', title: 'T', description: 'D', startDate: futureDate.toISOString(), endDate: endDate.toISOString() } as any)).rejects.toThrow(NotFoundException);
+      await expect(
+        service.create({
+          bundleId: 'x',
+          title: 'T',
+          description: 'D',
+          startDate: futureDate.toISOString(),
+          endDate: endDate.toISOString(),
+        } as any),
+      ).rejects.toThrow(NotFoundException);
     });
 
     it('throws if bundle not active', async () => {
-      mockPrisma.advertisementBundle.findUnique.mockResolvedValue({ ...mockBundle, is_active: false });
-      await expect(service.create({ bundleId: 'bundle-1', title: 'T', description: 'D', startDate: futureDate.toISOString(), endDate: endDate.toISOString() } as any)).rejects.toThrow(BadRequestException);
+      mockPrisma.advertisementBundle.findUnique.mockResolvedValue({
+        ...mockBundle,
+        is_active: false,
+      });
+      await expect(
+        service.create({
+          bundleId: 'bundle-1',
+          title: 'T',
+          description: 'D',
+          startDate: futureDate.toISOString(),
+          endDate: endDate.toISOString(),
+        } as any),
+      ).rejects.toThrow(BadRequestException);
     });
 
     it('throws if end date too close to start date', async () => {
       mockPrisma.advertisementBundle.findUnique.mockResolvedValue(mockBundle);
       const start = new Date();
       const end = new Date(start.getTime() + 3600000); // 1 hour later
-      await expect(service.create({
-        bundleId: 'bundle-1',
-        title: 'T',
-        description: 'D',
-        startDate: start.toISOString(),
-        endDate: end.toISOString(),
-      } as any)).rejects.toThrow(BadRequestException);
+      await expect(
+        service.create({
+          bundleId: 'bundle-1',
+          title: 'T',
+          description: 'D',
+          startDate: start.toISOString(),
+          endDate: end.toISOString(),
+        } as any),
+      ).rejects.toThrow(BadRequestException);
     });
 
     it('throws if duration exceeds bundle max', async () => {
-      mockPrisma.advertisementBundle.findUnique.mockResolvedValue({ ...mockBundle, max_duration_days: 5 });
+      mockPrisma.advertisementBundle.findUnique.mockResolvedValue({
+        ...mockBundle,
+        max_duration_days: 5,
+      });
       const start = new Date();
       const end = new Date(start.getTime() + 86400000 * 10);
-      await expect(service.create({
-        bundleId: 'bundle-1',
-        title: 'T',
-        description: 'D',
-        startDate: start.toISOString(),
-        endDate: end.toISOString(),
-      } as any)).rejects.toThrow(BadRequestException);
+      await expect(
+        service.create({
+          bundleId: 'bundle-1',
+          title: 'T',
+          description: 'D',
+          startDate: start.toISOString(),
+          endDate: end.toISOString(),
+        } as any),
+      ).rejects.toThrow(BadRequestException);
     });
   });
 
@@ -149,15 +175,23 @@ describe('AdvertisementService', () => {
   describe('update', () => {
     it('updates a DRAFT ad', async () => {
       mockPrisma.advertisement.findUnique.mockResolvedValue(mockAd);
-      mockPrisma.advertisement.update.mockResolvedValue({ ...mockAd, title: 'Updated' });
+      mockPrisma.advertisement.update.mockResolvedValue({
+        ...mockAd,
+        title: 'Updated',
+      });
 
       const result = await service.update('ad-1', { title: 'Updated' });
       expect(result.title).toBe('Updated');
     });
 
     it('throws if ad is not DRAFT or PAUSED', async () => {
-      mockPrisma.advertisement.findUnique.mockResolvedValue({ ...mockAd, status: AdStatus.ACTIVE });
-      await expect(service.update('ad-1', { title: 'x' })).rejects.toThrow(BadRequestException);
+      mockPrisma.advertisement.findUnique.mockResolvedValue({
+        ...mockAd,
+        status: AdStatus.ACTIVE,
+      });
+      await expect(service.update('ad-1', { title: 'x' })).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('throws if not found', async () => {
@@ -186,29 +220,46 @@ describe('AdvertisementService', () => {
   describe('confirmPayment', () => {
     it('confirms payment', async () => {
       mockPrisma.advertisement.findUnique.mockResolvedValue(mockAd);
-      mockPrisma.advertisement.update.mockResolvedValue({ ...mockAd, payment_status: AdPaymentStatus.PAID });
+      mockPrisma.advertisement.update.mockResolvedValue({
+        ...mockAd,
+        payment_status: AdPaymentStatus.PAID,
+      });
 
       const result = await service.confirmPayment('ad-1');
       expect(result.payment_status).toBe(AdPaymentStatus.PAID);
     });
 
     it('throws if already paid', async () => {
-      mockPrisma.advertisement.findUnique.mockResolvedValue({ ...mockAd, payment_status: AdPaymentStatus.PAID });
-      await expect(service.confirmPayment('ad-1')).rejects.toThrow(BadRequestException);
+      mockPrisma.advertisement.findUnique.mockResolvedValue({
+        ...mockAd,
+        payment_status: AdPaymentStatus.PAID,
+      });
+      await expect(service.confirmPayment('ad-1')).rejects.toThrow(
+        BadRequestException,
+      );
     });
   });
 
   describe('submit', () => {
     it('submits a paid DRAFT ad', async () => {
-      mockPrisma.advertisement.findUnique.mockResolvedValue({ ...mockAd, payment_status: AdPaymentStatus.PAID });
-      mockPrisma.advertisement.update.mockResolvedValue({ ...mockAd, status: AdStatus.PENDING_REVIEW });
+      mockPrisma.advertisement.findUnique.mockResolvedValue({
+        ...mockAd,
+        payment_status: AdPaymentStatus.PAID,
+      });
+      mockPrisma.advertisement.update.mockResolvedValue({
+        ...mockAd,
+        status: AdStatus.PENDING_REVIEW,
+      });
 
       const result = await service.submit('ad-1');
       expect(result.status).toBe(AdStatus.PENDING_REVIEW);
     });
 
     it('throws if not DRAFT', async () => {
-      mockPrisma.advertisement.findUnique.mockResolvedValue({ ...mockAd, status: AdStatus.ACTIVE });
+      mockPrisma.advertisement.findUnique.mockResolvedValue({
+        ...mockAd,
+        status: AdStatus.ACTIVE,
+      });
       await expect(service.submit('ad-1')).rejects.toThrow(BadRequestException);
     });
 
@@ -220,8 +271,14 @@ describe('AdvertisementService', () => {
 
   describe('pause', () => {
     it('pauses an ACTIVE ad', async () => {
-      mockPrisma.advertisement.findUnique.mockResolvedValue({ ...mockAd, status: AdStatus.ACTIVE });
-      mockPrisma.advertisement.update.mockResolvedValue({ ...mockAd, status: AdStatus.PAUSED });
+      mockPrisma.advertisement.findUnique.mockResolvedValue({
+        ...mockAd,
+        status: AdStatus.ACTIVE,
+      });
+      mockPrisma.advertisement.update.mockResolvedValue({
+        ...mockAd,
+        status: AdStatus.PAUSED,
+      });
 
       const result = await service.pause('ad-1');
       expect(result.status).toBe(AdStatus.PAUSED);
@@ -235,8 +292,14 @@ describe('AdvertisementService', () => {
 
   describe('resume', () => {
     it('resumes a PAUSED ad', async () => {
-      mockPrisma.advertisement.findUnique.mockResolvedValue({ ...mockAd, status: AdStatus.PAUSED });
-      mockPrisma.advertisement.update.mockResolvedValue({ ...mockAd, status: AdStatus.APPROVED });
+      mockPrisma.advertisement.findUnique.mockResolvedValue({
+        ...mockAd,
+        status: AdStatus.PAUSED,
+      });
+      mockPrisma.advertisement.update.mockResolvedValue({
+        ...mockAd,
+        status: AdStatus.APPROVED,
+      });
 
       const result = await service.resume('ad-1');
       expect(result.status).toBe(AdStatus.APPROVED);
@@ -251,14 +314,20 @@ describe('AdvertisementService', () => {
   describe('cancel', () => {
     it('cancels an ad', async () => {
       mockPrisma.advertisement.findUnique.mockResolvedValue(mockAd);
-      mockPrisma.advertisement.update.mockResolvedValue({ ...mockAd, status: AdStatus.CANCELLED });
+      mockPrisma.advertisement.update.mockResolvedValue({
+        ...mockAd,
+        status: AdStatus.CANCELLED,
+      });
 
       const result = await service.cancel('ad-1');
       expect(result.status).toBe(AdStatus.CANCELLED);
     });
 
     it('throws if ad is COMPLETED', async () => {
-      mockPrisma.advertisement.findUnique.mockResolvedValue({ ...mockAd, status: AdStatus.COMPLETED });
+      mockPrisma.advertisement.findUnique.mockResolvedValue({
+        ...mockAd,
+        status: AdStatus.COMPLETED,
+      });
       await expect(service.cancel('ad-1')).rejects.toThrow(BadRequestException);
     });
   });
