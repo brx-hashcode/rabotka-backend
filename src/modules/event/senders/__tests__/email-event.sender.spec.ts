@@ -23,8 +23,9 @@ describe('EmailEventSender', () => {
 
   it('sends created notification', async () => {
     await sender.send(
-      { name: 'Alice', email: 'alice@test.com', phone: null },
+      { name: 'Alice', email: 'alice@test.com', phone: undefined },
       {
+        eventId: 'evt-1',
         title: 'Team Meeting',
         startDate: '2026-06-01',
         endDate: '2026-06-01',
@@ -46,8 +47,9 @@ describe('EmailEventSender', () => {
 
   it('sends updated notification', async () => {
     await sender.send(
-      { name: 'Bob', email: 'bob@test.com', phone: null },
+      { name: 'Bob', email: 'bob@test.com', phone: undefined },
       {
+        eventId: 'evt-2',
         title: 'Board Meeting',
         startDate: '2026-07-01',
         endDate: '2026-07-01',

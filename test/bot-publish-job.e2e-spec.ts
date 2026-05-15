@@ -12,7 +12,6 @@ import type {
   BotState,
 } from '../src/modules/bot/types/bot-state.types';
 import type { JobOfferService } from '../src/modules/job-offer/job-offer.service';
-import type { PaymentService } from '../src/modules/payments/payment.service';
 import { PaymentFlow } from '@prisma/client';
 
 const employerProfile: BotProfile = {
@@ -46,14 +45,14 @@ const mockCreateOffer = jest.fn();
 const mockJobOfferService = {
   create: mockCreateOffer,
 } as unknown as jest.Mocked<JobOfferService>;
-const mockPaymentService = {
-  generateJobPostingPaymentLink: jest
-    .fn()
-    .mockResolvedValue('http://pay.test/job'),
-} as unknown as jest.Mocked<PaymentService>;
+const mockPrisma = {
+  jobCategory: {
+    findMany: jest.fn().mockResolvedValue([]),
+  },
+};
 const ctx = {
   jobOfferService: mockJobOfferService,
-  paymentService: mockPaymentService,
+  prisma: mockPrisma,
 };
 
 beforeEach(() => jest.clearAllMocks());

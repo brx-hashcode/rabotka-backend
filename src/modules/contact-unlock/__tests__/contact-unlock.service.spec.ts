@@ -259,7 +259,7 @@ describe('ContactUnlockService', () => {
     it('throws ForbiddenException when not a participant', async () => {
       prisma.contactUnlockAttempt.findUnique.mockResolvedValue(makeAttempt());
       prisma.profile.findUnique.mockResolvedValue({
-        billing_status: BillingStatus.ACTIVE,
+        billing_status: BillingStatus.CLEAR,
       });
       await expect(
         service.payUnlock('attempt-1', 'stranger', false),
@@ -279,7 +279,7 @@ describe('ContactUnlockService', () => {
     it('throws ForbiddenException when hard blocked', async () => {
       prisma.contactUnlockAttempt.findUnique.mockResolvedValue(makeAttempt());
       prisma.profile.findUnique.mockResolvedValue({
-        billing_status: BillingStatus.ACTIVE,
+        billing_status: BillingStatus.CLEAR,
       });
       mockIsWorkerHardBlocked.mockResolvedValueOnce(true);
       await expect(
@@ -292,7 +292,7 @@ describe('ContactUnlockService', () => {
         makeAttempt({ employer_paid: true }),
       );
       prisma.profile.findUnique.mockResolvedValue({
-        billing_status: BillingStatus.ACTIVE,
+        billing_status: BillingStatus.CLEAR,
       });
       await expect(
         service.payUnlock('attempt-1', 'emp-1', false),
@@ -304,7 +304,7 @@ describe('ContactUnlockService', () => {
         makeAttempt({ worker_paid: true }),
       );
       prisma.profile.findUnique.mockResolvedValue({
-        billing_status: BillingStatus.ACTIVE,
+        billing_status: BillingStatus.CLEAR,
       });
       await expect(
         service.payUnlock('attempt-1', 'worker-1', false),
@@ -314,7 +314,7 @@ describe('ContactUnlockService', () => {
     it('employer pays with credit for single-person job', async () => {
       prisma.contactUnlockAttempt.findUnique.mockResolvedValue(makeAttempt());
       prisma.profile.findUnique.mockResolvedValue({
-        billing_status: BillingStatus.ACTIVE,
+        billing_status: BillingStatus.CLEAR,
       });
       prisma.jobOffer.findUnique.mockResolvedValue({
         quantity: 1,
@@ -342,7 +342,7 @@ describe('ContactUnlockService', () => {
         }),
       );
       prisma.profile.findUnique.mockResolvedValue({
-        billing_status: BillingStatus.ACTIVE,
+        billing_status: BillingStatus.CLEAR,
       });
       prisma.jobOffer.findUnique.mockResolvedValue({
         quantity: 1,
@@ -369,7 +369,7 @@ describe('ContactUnlockService', () => {
     it('throws when concurrent payment guard fails (count=0)', async () => {
       prisma.contactUnlockAttempt.findUnique.mockResolvedValue(makeAttempt());
       prisma.profile.findUnique.mockResolvedValue({
-        billing_status: BillingStatus.ACTIVE,
+        billing_status: BillingStatus.CLEAR,
       });
       prisma.jobOffer.findUnique.mockResolvedValue({ quantity: 1 });
       prisma.contactUnlockAttempt.updateMany.mockResolvedValue({ count: 0 });
@@ -381,7 +381,7 @@ describe('ContactUnlockService', () => {
     it('employer pays multi-person job', async () => {
       prisma.contactUnlockAttempt.findUnique.mockResolvedValue(makeAttempt());
       prisma.profile.findUnique.mockResolvedValue({
-        billing_status: BillingStatus.ACTIVE,
+        billing_status: BillingStatus.CLEAR,
       });
       prisma.jobOffer.findUnique.mockResolvedValue({
         quantity: 3,
@@ -402,7 +402,7 @@ describe('ContactUnlockService', () => {
       const attempt = makeAttempt({ worker_paid: true });
       prisma.contactUnlockAttempt.findUnique.mockResolvedValue(attempt);
       prisma.profile.findUnique.mockResolvedValue({
-        billing_status: BillingStatus.ACTIVE,
+        billing_status: BillingStatus.CLEAR,
       });
       prisma.jobOffer.findUnique.mockResolvedValue({
         quantity: 3,

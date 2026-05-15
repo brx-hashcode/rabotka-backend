@@ -51,6 +51,7 @@ function makeApplicationService(overrides = {}) {
   return {
     findByWorker: jest.fn().mockResolvedValue([]),
     findByJobOffer: jest.fn().mockResolvedValue([]),
+    findByEmployer: jest.fn().mockResolvedValue([]),
     markAsViewed: jest.fn().mockResolvedValue(undefined),
     ...overrides,
   };

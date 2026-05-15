@@ -3,7 +3,7 @@ import { ProfileAuthGuard } from '../guards/profile-auth.guard';
 import { ExecutionContext } from '@nestjs/common';
 
 function makeGuard(superCanActivateResult: boolean = true) {
-  const guard = new ProfileAuthGuard(null as any);
+  const guard = new ProfileAuthGuard(null as any, null as any, null as any, null as any);
   jest
     .spyOn(guard as any, 'canActivate')
     .mockImplementation(async (context: ExecutionContext) => {
@@ -31,7 +31,7 @@ describe('ProfileAuthGuard', () => {
   let guard: ProfileAuthGuard;
 
   beforeEach(() => {
-    guard = new ProfileAuthGuard(null as any);
+    guard = new ProfileAuthGuard(null as any, null as any, null as any, null as any);
   });
 
   it('returns false when super.canActivate returns false', async () => {

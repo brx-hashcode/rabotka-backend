@@ -9,8 +9,8 @@ import {
   paymentDirectFailedMessage,
 } from '../payment-direct';
 import {
-  verifyWhatsAppMessage,
-  whatsappVerifyCodeMessage,
+  whatsappVerifyPromptMessage,
+  whatsappAlreadyVerifiedMessage,
 } from '../verify-whatsapp';
 
 describe('WhatsApp Templates', () => {
