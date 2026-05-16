@@ -39,7 +39,7 @@ describe('csrfVisitorMiddleware', () => {
       CSRF_VISITOR_COOKIE,
       expect.any(String),
       expect.objectContaining({
-        sameSite: 'lax',
+        sameSite: 'lax', // SECURE_COOKIES not set → lax
         httpOnly: true,
         path: '/',
       }),
@@ -62,7 +62,7 @@ describe('csrfVisitorMiddleware', () => {
     );
   });
 
-  it('sets secure=true when SECURE_COOKIES=true', () => {
+  it('sets secure=true and sameSite=none when SECURE_COOKIES=true', () => {
     process.env.SECURE_COOKIES = 'true';
     const req = { cookies: {} } as any;
     const res = makeResMock();
@@ -73,7 +73,7 @@ describe('csrfVisitorMiddleware', () => {
     expect(res.cookie).toHaveBeenCalledWith(
       CSRF_VISITOR_COOKIE,
       expect.any(String),
-      expect.objectContaining({ secure: true }),
+      expect.objectContaining({ secure: true, sameSite: 'none' }),
     );
   });
 

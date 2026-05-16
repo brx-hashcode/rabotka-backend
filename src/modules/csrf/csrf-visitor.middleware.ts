@@ -27,7 +27,7 @@ export function csrfVisitorMiddleware(
 
   const secureCookies = process.env.SECURE_COOKIES === 'true';
   res.cookie(CSRF_VISITOR_COOKIE, visitorId, {
-    sameSite: 'lax',
+    sameSite: secureCookies ? 'none' : 'lax',
     path: '/',
     secure: secureCookies,
     httpOnly: true,

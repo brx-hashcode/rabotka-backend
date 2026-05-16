@@ -60,6 +60,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      actions: write
 
     outputs:
       image-digest: ${{ steps.push.outputs.digest }}
@@ -101,8 +102,17 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=buildkit-develop
+          cache-to: type=gha,mode=max,scope=buildkit-develop
+
+      - name: Delete stale GHA caches
+        run: |
+          gh cache list --ref refs/heads/develop --json id --limit 100 \
+            | jq -r '.[].id' \
+            | tail -n +2 \
+            | xargs -r -I{} gh cache delete {}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # ───────────────────────────────────────────────────────────────────────────
   # JOB 3: Deploy pre-built image to VPS
