@@ -38,7 +38,7 @@ import { CsrfController } from './csrf.controller';
               ? CSRF_TOKEN_COOKIE_PROD
               : CSRF_TOKEN_COOKIE_DEV,
           cookieOptions: {
-            sameSite: 'lax',
+            sameSite: secureCookies ? 'none' : 'lax',
             path: '/',
             secure: secureCookies,
             httpOnly: true,
