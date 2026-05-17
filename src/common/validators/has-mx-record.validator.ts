@@ -21,6 +21,7 @@ export class HasMxRecordConstraint implements ValidatorConstraintInterface {
   }
 
   defaultMessage(): string {
+
     return "L'email fourni n'est pas valide. Utilisez un email valide.";
   }
 }
