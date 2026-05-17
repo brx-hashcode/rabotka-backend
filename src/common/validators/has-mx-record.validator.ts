@@ -21,7 +21,7 @@ export class HasMxRecordConstraint implements ValidatorConstraintInterface {
   }
 
   defaultMessage(): string {
-    return "Le domaine de l'adresse email est invalide ou inexistant.";
+    return "L'email fourni n'est pas valide. Utilisez un email valide.";
   }
 }
 
