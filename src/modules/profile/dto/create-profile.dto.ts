@@ -12,6 +12,7 @@ import {
 } from 'class-validator';
 import { ProfileType, DocumentType } from '@prisma/client';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { HasMxRecord } from '../../../common/validators/has-mx-record.validator';
 
 export class CreateProfileDto {
   @ApiProperty({ description: 'First name of the profile' })
@@ -29,6 +30,7 @@ export class CreateProfileDto {
   @ApiProperty({ description: 'Email address (must be unique)' })
   @Transform(({ value }) => value?.trim())
   @IsEmail()
+  @HasMxRecord()
   @IsNotEmpty()
   email: string;
 
