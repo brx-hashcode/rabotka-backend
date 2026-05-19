@@ -56,8 +56,11 @@ export class FileController {
       upstream.headers.get('content-type') ?? 'application/octet-stream';
     const contentLength = upstream.headers.get('content-length');
 
+    const filename = decoded.split('/').pop()?.split('?')[0] ?? 'download';
+
     res.setHeader('Content-Type', contentType);
     res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     if (contentLength) res.setHeader('Content-Length', contentLength);
 
     const buffer = await upstream.arrayBuffer();
