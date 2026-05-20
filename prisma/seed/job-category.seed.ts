@@ -307,6 +307,190 @@ const categories = [
     description: 'Travaux agricoles, culture maraîchère, entretien de champs et récolte',
   },
 
+  // ── Spécifique Congo Brazzaville ─────────────────────────────────────────
+
+  // Charpenterie & Bois
+  {
+    name: 'Charpenterie',
+    slug: 'charpenterie',
+    icon: '🪚',
+    description: 'Fabrication et pose de charpentes en bois pour toitures, hangars et structures',
+  },
+
+  // Travaux spécialisés
+  {
+    name: 'Ferraillage',
+    slug: 'ferraillage',
+    icon: '🧲',
+    description: 'Pose d\'armatures métalliques pour béton armé sur chantiers de construction',
+  },
+  {
+    name: 'Étanchéité & Imperméabilisation',
+    slug: 'etancheite-impermeabilisation',
+    icon: '🪣',
+    description: 'Traitement contre les infiltrations d\'eau, toitures terrasses et sous-sols',
+  },
+
+  // Services domestiques
+  {
+    name: 'Femme de ménage',
+    slug: 'femme-de-menage',
+    icon: '🧺',
+    description: 'Entretien quotidien du foyer, vaisselle, lessive et rangement à domicile',
+  },
+  {
+    name: 'Cuisinière à domicile',
+    slug: 'cuisiniere-domicile',
+    icon: '👩‍🍳',
+    description: 'Préparation de repas africains et locaux à domicile ou pour événements',
+  },
+  {
+    name: 'Nourrice',
+    slug: 'nourrice',
+    icon: '🧒',
+    description: 'Garde et soins de nourrissons et jeunes enfants à domicile',
+  },
+
+  // Transport
+  {
+    name: 'Moto-taxi',
+    slug: 'moto-taxi',
+    icon: '🏍️',
+    description: 'Transport de personnes en moto dans la ville, quartiers et périphéries',
+  },
+  {
+    name: 'Transport en commun informel',
+    slug: 'transport-commun-informel',
+    icon: '🚐',
+    description: 'Conduite de bus, minibus ou fourgons sur des trajets fixes en ville',
+  },
+
+  // Commerce & Vente de rue
+  {
+    name: 'Vente ambulante',
+    slug: 'vente-ambulante',
+    icon: '🛍️',
+    description: 'Commerce itinérant de produits variés dans les rues, marchés et quartiers',
+  },
+  {
+    name: 'Boucherie & Vente de viande',
+    slug: 'boucherie-vente-viande',
+    icon: '🥩',
+    description: 'Découpe et vente de viande bovine, porcine et de gibier sur marchés',
+  },
+  {
+    name: 'Poissonnerie',
+    slug: 'poissonnerie',
+    icon: '🐟',
+    description: 'Vente de poissons frais, fumés ou séchés sur les marchés et en bord de rue',
+  },
+  {
+    name: 'Vente de fruits & légumes',
+    slug: 'vente-fruits-legumes',
+    icon: '🥦',
+    description: 'Commerce de produits frais, fruits tropicaux et légumes au marché ou à domicile',
+  },
+  {
+    name: 'Vente de pain & beignets',
+    slug: 'vente-pain-beignets',
+    icon: '🍞',
+    description: 'Fabrication et vente de pain, beignets, mandazi et pâtisseries locales',
+  },
+
+  // Artisanat local
+  {
+    name: 'Forgeron',
+    slug: 'forgeron',
+    icon: '🔨',
+    description: 'Fabrication et réparation d\'outils, couteaux, équipements agricoles en métal',
+  },
+  {
+    name: 'Poterie & Céramique',
+    slug: 'poterie-ceramique',
+    icon: '🏺',
+    description: 'Fabrication artisanale de poteries, jarres et objets en terre cuite',
+  },
+  {
+    name: 'Vannerie & Tissage',
+    slug: 'vannerie-tissage',
+    icon: '🧺',
+    description: 'Fabrication de paniers, nattes, objets tressés en rotin, raphia et osier',
+  },
+  {
+    name: 'Teinturerie',
+    slug: 'teinturerie',
+    icon: '🪡',
+    description: 'Teinture de tissus, wax et vêtements avec colorants naturels ou chimiques',
+  },
+
+  // Pêche & Agriculture
+  {
+    name: 'Pêche',
+    slug: 'peche',
+    icon: '🎣',
+    description: 'Pêche artisanale en fleuve, lac ou mer pour la vente et la consommation',
+  },
+  {
+    name: 'Maraîchage urbain',
+    slug: 'maraichage-urbain',
+    icon: '🌱',
+    description: 'Culture de légumes et aromates dans des parcelles urbaines ou péri-urbaines',
+  },
+
+  // Élevage
+  {
+    name: 'Élevage de volailles',
+    slug: 'elevage-volailles',
+    icon: '🐔',
+    description: 'Élevage de poulets, canards, pintades et autres volailles pour la vente',
+  },
+
+  // Numérique & Téléphonie
+  {
+    name: 'Crédit téléphonique & Mobile Money',
+    slug: 'credit-telephonique-mobile-money',
+    icon: '📱',
+    description: 'Vente de crédit téléphonique, transfert d\'argent et services Mobile Money',
+  },
+  {
+    name: 'Photo & Impression',
+    slug: 'photo-impression',
+    icon: '📷',
+    description: 'Prise de photos d\'identité, impression de documents et services photo',
+  },
+
+  // ── Secteur formel (métiers qualifiés) ───────────────────────────────────
+  {
+    name: 'Informatique & Développement',
+    slug: 'informatique-developpement',
+    icon: '💻',
+    description: 'Développement de sites web, applications mobiles et logiciels sur mesure',
+  },
+  {
+    name: 'Maintenance informatique',
+    slug: 'maintenance-informatique',
+    icon: '🖥️',
+    description: 'Installation, configuration et maintenance de parcs informatiques et réseaux',
+  },
+  {
+    name: 'Technicien réseaux & Télécoms',
+    slug: 'technicien-reseaux-telecoms',
+    icon: '📡',
+    description: 'Installation et maintenance de réseaux LAN/WAN, fibre optique et équipements télécoms',
+  },
+  {
+    name: 'Comptabilité & Finance',
+    slug: 'comptabilite-finance',
+    icon: '📊',
+    description: 'Tenue de comptabilité, gestion de paie, déclarations fiscales et conseil financier',
+  },
+  {
+    name: 'Conseil juridique',
+    slug: 'conseil-juridique',
+    icon: '⚖️',
+    description: 'Assistance juridique, rédaction de contrats et conseils en droit des affaires',
+  },
+
   // ── Autre ────────────────────────────────────────────────────────────────
   {
     name: 'Autre',
