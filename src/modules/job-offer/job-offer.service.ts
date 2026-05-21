@@ -4,7 +4,10 @@ import {
   BadRequestException,
   NotFoundException,
   ForbiddenException,
+  Inject,
 } from '@nestjs/common';
+import Redis from 'ioredis';
+import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { isWorkerHardBlocked } from '../penalty/penalty.utils';
 import { MailService } from '../mail/mail.service';
@@ -116,7 +119,12 @@ export class JobOfferService {
     private readonly botNotification: BotNotificationService,
     private readonly eventEmitter: EventEmitter2,
     private readonly matchingService: MatchingService,
+    @Inject(REDIS_CONNECTION) private readonly redis: Redis,
   ) {}
+
+  private notificationCooldownKey(workerId: string): string {
+    return `job_notif_cooldown:${workerId}`;
+  }
 
   async create(
     employerId: string,
@@ -202,16 +210,37 @@ export class JobOfferService {
     this.matchingService
       .indexJobOffer(offer.id)
       .then(async () => {
-        const [enabled, minScore] = await Promise.all([
-          this.systemConfigService.isRecommendationEnabled(),
-          this.systemConfigService.getMinNotificationScore(),
-        ]);
+        const [enabled, minScore, maxWorkers, cooldownMinutes] =
+          await Promise.all([
+            this.systemConfigService.isRecommendationEnabled(),
+            this.systemConfigService.getMinNotificationScore(),
+            this.systemConfigService.getMaxNotificationWorkers(),
+            this.systemConfigService.getNotificationCooldownMinutes(),
+          ]);
         if (!enabled) return;
 
         const workerResults: { id: string; score: number }[] =
-          await this.matchingService.findMatchingWorkersForJob(offer.id, 20);
+          await this.matchingService.findMatchingWorkersForJob(
+            offer.id,
+            maxWorkers,
+          );
+
         for (const { id: workerId, score } of workerResults) {
           if (score < minScore) continue;
+
+          // Cooldown check — skip worker if they were recently notified
+          if (cooldownMinutes > 0) {
+            const key = this.notificationCooldownKey(workerId);
+            const locked = await this.redis.set(
+              key,
+              '1',
+              'EX',
+              cooldownMinutes * 60,
+              'NX',
+            );
+            if (locked === null) continue; // Already notified within the window
+          }
+
           this.botNotification
             .sendRecommendedJobNotification(workerId, offer.id)
             .catch((err: unknown) =>

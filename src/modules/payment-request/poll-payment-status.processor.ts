@@ -121,6 +121,7 @@ export class PollPaymentStatusProcessor {
       attempt,
     });
     this.paymentStatusGateway.emitPaymentStatus(token, 'TIMEOUT');
+    await this.notifyPaymentFailed(job.data);
   }
 
   private async recordFailure(

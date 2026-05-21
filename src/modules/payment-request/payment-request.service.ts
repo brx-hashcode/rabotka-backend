@@ -300,7 +300,7 @@ export class PaymentRequestService {
           token: request.token,
           gatewayRef,
           attempt: 1,
-          maxAttempts: 10,
+          maxAttempts: 24,
           intervalMs: 5000,
           profileId: request.profile_id,
           amount: Number(request.amount),
@@ -378,6 +378,12 @@ export class PaymentRequestService {
         gatewayRef,
       });
       this.paymentStatusGateway.emitPaymentStatus(request.token, 'REJECTED');
+      this.notifyPaymentFailedByWebhook(request).catch((err: unknown) =>
+        this.logger.warn(
+          `Could not send webhook failure WhatsApp notification for request ${request.id}`,
+          err instanceof Error ? err.message : String(err),
+        ),
+      );
     } else {
       this.logger.warn(
         `Payment callback for ${gatewayRef} re-verified as PENDING — no action taken`,
@@ -432,16 +438,37 @@ export class PaymentRequestService {
     );
 
     this.emitAdminPaymentNotification(request, context);
-    const unlockResult = await this.handleContactUnlockPostPayment(request);
-    await this.handleRecommendationContactPostPayment(request, context);
     await this.handlePenaltyPostPayment(request);
+
+    // Compute unlock result first (needed for the confirmation message text)
+    // but defer sending the contact details notification until after invoice
+    const unlockResult = await this.handleContactUnlockPostPayment(request);
+
+    // 1. "🎉 Paiement confirmé"
     await this.sendPaymentSuccessNotifications(request, context, unlockResult);
-    this.createAndSendInvoice(request, context).catch((err) =>
+
+    // 2. Invoice PDF
+    await this.createAndSendInvoice(request, context).catch((err) =>
       this.logger.error(
         `Invoice creation/sending failed for payment ${request.id}:`,
         err,
       ),
     );
+
+    // 3. Contact details (regular unlock)
+    for (const id of unlockResult.unlockedAttemptIds) {
+      await this.botNotification
+        .sendContactUnlockedNotification(id)
+        .catch((err) =>
+          this.logger.warn(
+            `Contact unlock notification failed for ${id}:`,
+            err,
+          ),
+        );
+    }
+
+    // 4. Contact details (recommendation unlock)
+    await this.handleRecommendationContactPostPayment(request, context);
   }
 
   private async buildPaymentProcessingContext(
@@ -552,6 +579,25 @@ export class PaymentRequestService {
 
       return true;
     });
+  }
+
+  private async notifyPaymentFailedByWebhook(
+    request: { profile_id: string; amount: unknown },
+  ): Promise<void> {
+    const profile = await this.prisma.profile.findUnique({
+      where: { id: request.profile_id },
+      select: { phone: true },
+    });
+    if (!profile?.phone) return;
+    const amountStr = Number(request.amount).toLocaleString('fr-FR');
+    const message = [
+      `❌ *Paiement échoué*`,
+      ``,
+      `Votre paiement de *${amountStr} FCFA* via Mobile Money n'a pas abouti.`,
+      ``,
+      `Vous pouvez réessayer en tapant la commande correspondante, ou choisir un autre mode de paiement.`,
+    ].join('\n');
+    await this.whatsAppService.sendTextMessage(profile.phone, message);
   }
 
   private async persistFailedPayment(
@@ -787,8 +833,9 @@ export class PaymentRequestService {
 
   private async handleContactUnlockPostPayment(
     request: PaymentRequestWithProfile,
-  ): Promise<{ nowUnlocked: boolean }> {
-    if (!request.contact_unlock_attempt_id) return { nowUnlocked: false };
+  ): Promise<{ nowUnlocked: boolean; unlockedAttemptIds: string[] }> {
+    if (!request.contact_unlock_attempt_id)
+      return { nowUnlocked: false, unlockedAttemptIds: [] };
 
     try {
       const result = await this.contactUnlockService.payUnlock(
@@ -799,29 +846,20 @@ export class PaymentRequestService {
       const nowUnlocked =
         result.status === 'UNLOCKED' || result.newlyUnlocked.length > 0;
 
-      if (!nowUnlocked) return { nowUnlocked: false };
+      if (!nowUnlocked) return { nowUnlocked: false, unlockedAttemptIds: [] };
 
       const attemptIds =
         result.status === 'UNLOCKED'
           ? [result.attemptId, ...result.newlyUnlocked]
           : result.newlyUnlocked;
-      for (const id of new Set(attemptIds)) {
-        await this.botNotification
-          .sendContactUnlockedNotification(id)
-          .catch((err) =>
-            this.logger.warn(
-              `Contact unlock notification failed for ${id}:`,
-              err,
-            ),
-          );
-      }
-      return { nowUnlocked: true };
+
+      return { nowUnlocked: true, unlockedAttemptIds: [...new Set(attemptIds)] };
     } catch (err) {
       this.logger.error(
         `Contact unlock processing failed for attempt ${String(request.contact_unlock_attempt_id)}:`,
         err,
       );
-      return { nowUnlocked: false };
+      return { nowUnlocked: false, unlockedAttemptIds: [] };
     }
   }
 

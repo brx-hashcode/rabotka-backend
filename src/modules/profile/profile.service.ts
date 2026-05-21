@@ -64,6 +64,8 @@ export type ProfileMeResponse = {
   penaltiesCount: number;
   unpaidPenaltiesCount: number;
   walletBalance: number;
+  categoryIds: string[];
+  categoryNames: string[];
 };
 
 export type ProfilePenaltyItem = {
@@ -205,6 +207,9 @@ export class ProfileService {
         whatsapp_connected: true,
         avatar_url: true,
         created_at: true,
+        categories: {
+          select: { category: { select: { id: true, name: true } } },
+        },
         _count: {
           select: {
             job_offers: true,
@@ -244,6 +249,8 @@ export class ProfileService {
       penaltiesCount: profile._count.penalties,
       unpaidPenaltiesCount,
       walletBalance,
+      categoryIds: profile.categories.map((pc) => pc.category.id),
+      categoryNames: profile.categories.map((pc) => pc.category.name),
     };
   }
 
@@ -268,7 +275,21 @@ export class ProfileService {
 
     const dataToUpdate = this.buildProfileUpdateData(updateProfileDto);
 
-    await this.prisma.profile.update({ where: { id }, data: dataToUpdate });
+    await this.prisma.$transaction(async (tx) => {
+      await tx.profile.update({ where: { id }, data: dataToUpdate });
+      if (updateProfileDto.categoryIds !== undefined) {
+        await tx.profileCategory.deleteMany({ where: { profile_id: id } });
+        if (updateProfileDto.categoryIds.length > 0) {
+          await tx.profileCategory.createMany({
+            data: updateProfileDto.categoryIds.map((categoryId) => ({
+              profile_id: id,
+              category_id: categoryId,
+            })),
+            skipDuplicates: true,
+          });
+        }
+      }
+    });
 
     // Re-index in Qdrant after update (fire-and-forget)
     if (existingProfile.profile_type === ProfileType.WORKER) {

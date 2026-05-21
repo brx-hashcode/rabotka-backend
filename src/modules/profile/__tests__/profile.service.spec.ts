@@ -141,6 +141,10 @@ describe('ProfileService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     prisma = makePrisma();
+    // Make $transaction pass the same mock instance so spies on prisma.profile.update etc. are observable
+    (prisma.$transaction as jest.Mock).mockImplementation((calls: any) =>
+      Array.isArray(calls) ? Promise.resolve(calls) : calls(prisma),
+    );
     fileService = makeFileService();
     redis = makeRedis();
     whatsApp = makeWhatsApp();
