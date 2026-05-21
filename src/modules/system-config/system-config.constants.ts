@@ -155,6 +155,20 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     label: 'Activer les notifications de recommandation de jobs',
     isSecret: false,
   },
+  {
+    key: 'matching.max_notification_workers',
+    value: '20',
+    category: ConfigCategory.MATCHING,
+    label: 'Nombre max de travailleurs notifiés par offre',
+    isSecret: false,
+  },
+  {
+    key: 'matching.notification_cooldown_minutes',
+    value: '60',
+    category: ConfigCategory.MATCHING,
+    label: 'Délai minimum entre deux notifications de recommandation (minutes)',
+    isSecret: false,
+  },
 
   // ── CONTACT ───────────────────────────────────────────────────────────────
   {

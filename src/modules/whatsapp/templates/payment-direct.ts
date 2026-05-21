@@ -5,9 +5,9 @@ export function paymentUseRegisteredNumberPrompt(phone: string): string {
     `Voulez-vous payer avec votre numéro enregistré ?`,
     `*${phone}*`,
     ``,
-    `1 — Oui, utiliser ce numéro`,
-    `2 — Non, utiliser un autre numéro`,
-    `3 — Payer via le lien web`,
+    `1 - Oui, utiliser ce numéro`,
+    `2 - Non, utiliser un autre numéro`,
+    `3 - Payer via le lien web`,
   ].join('\n');
 }
 
@@ -24,8 +24,8 @@ export function paymentChooseOperatorPrompt(): string {
   return [
     `*Choisissez votre opérateur*`,
     ``,
-    `1 — MTN Mobile Money`,
-    `2 — Airtel Money`,
+    `1 - MTN Mobile Money`,
+    `2 - Airtel Money`,
   ].join('\n');
 }
 

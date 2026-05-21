@@ -213,6 +213,19 @@ export class SystemConfigService implements OnModuleInit {
     return val === 'true';
   }
 
+  async getMaxNotificationWorkers(): Promise<number> {
+    const val = await this.get('matching.max_notification_workers', '20');
+    const n = parseInt(val, 10);
+    return isNaN(n) || n < 1 ? 20 : n;
+  }
+
+  /** Minimum minutes between two job recommendation notifications for the same worker. */
+  async getNotificationCooldownMinutes(): Promise<number> {
+    const val = await this.get('matching.notification_cooldown_minutes', '60');
+    const n = parseInt(val, 10);
+    return isNaN(n) || n < 0 ? 60 : n;
+  }
+
   async getContactInfo() {
     const [email, phone, address] = await this.mgetBatch([
       { key: 'contact.email', fallback: 'contact@rabotka.com' },

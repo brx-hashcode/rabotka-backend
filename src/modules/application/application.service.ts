@@ -221,7 +221,7 @@ export class ApplicationService {
     const activeCount = await this.prisma.application.count({
       where: {
         worker_id: workerId,
-        status: { in: [ApplicationStatus.PENDING, ApplicationStatus.ACCEPTED] },
+        status: { in: [ApplicationStatus.PENDING, ApplicationStatus.ACCEPTED, ApplicationStatus.WAITING_PAYMENT] },
       },
     });
     if (activeCount >= fees.maxConcurrentApplications) {
