@@ -38,8 +38,13 @@ const mockLogService = {
   create: jest.fn().mockResolvedValue({}),
 };
 
-const adminReq = { user: { userId: 'user-1' } };
-const profileReq = { user: { profileId: 'profile-1' } };
+const adminReq = {
+  user: { userId: 'user-1' },
+  headers: {},
+  ip: '127.0.0.1',
+  get: () => undefined,
+} as any;
+const profileReq = { user: { profileId: 'profile-1' } } as any;
 
 describe('ClaimController', () => {
   let controller: ClaimController;

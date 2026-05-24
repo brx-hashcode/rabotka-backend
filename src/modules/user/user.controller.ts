@@ -10,6 +10,7 @@ import {
   HttpCode,
   HttpStatus,
   UseGuards,
+  Req,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -27,6 +28,9 @@ import { AdminListUsersDto } from './dto/admin-list-users.dto';
 import { AdminAuthGuard } from '../auth/guards/admin-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
+import type { AdminAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
+import { LogService } from '../log/log.service';
+import { extractRequestMeta } from '../../common/utils/request-meta.util';
 
 @ApiTags('User')
 @Controller('user')
@@ -34,7 +38,10 @@ import { Roles } from '../auth/decorators/roles.decorator';
 @ApiBearerAuth()
 @ApiCookieAuth()
 export class UserController {
-  constructor(private readonly userService: UserService) {}
+  constructor(
+    private readonly userService: UserService,
+    private readonly logService: LogService,
+  ) {}
 
   @Get()
   @Roles(UserRole.MODERATOR)
@@ -65,8 +72,22 @@ export class UserController {
     description: 'Unauthorized - admin access required',
   })
   @ApiResponse({ status: 409, description: 'Email already exists' })
-  async createAdmin(@Body() createAdminDto: CreateAdminDto) {
+  async createAdmin(
+    @Req() req: AdminAuthenticatedRequest,
+    @Body() createAdminDto: CreateAdminDto,
+  ) {
     const user = await this.userService.createAdmin(createAdminDto);
+    await this.logService.create({
+      action: 'ADMIN_USER_CREATED',
+      entityType: 'user',
+      entityId: user.id,
+      userId: req.user?.userId,
+      metadata: {
+        email: user.email,
+        role: user.role,
+      },
+      ...extractRequestMeta(req),
+    });
     return {
       id: user.id,
       firstName: user.first_name,
@@ -87,10 +108,19 @@ export class UserController {
   @ApiResponse({ status: 404, description: 'User not found' })
   @ApiResponse({ status: 409, description: 'Email already exists' })
   async updateAdmin(
+    @Req() req: AdminAuthenticatedRequest,
     @Param('id') id: string,
     @Body() updateAdminDto: UpdateAdminDto,
   ) {
     const user = await this.userService.updateAdmin(id, updateAdminDto);
+    await this.logService.create({
+      action: 'ADMIN_USER_UPDATED',
+      entityType: 'user',
+      entityId: id,
+      userId: req.user?.userId,
+      metadata: { changes: { ...updateAdminDto } },
+      ...extractRequestMeta(req),
+    });
     return {
       id: user.id,
       firstName: user.first_name,
@@ -109,8 +139,18 @@ export class UserController {
   @ApiOperation({ summary: 'Activate an admin user' })
   @ApiResponse({ status: 200, description: 'User activated successfully' })
   @ApiResponse({ status: 404, description: 'User not found' })
-  async activate(@Param('id') id: string) {
+  async activate(
+    @Req() req: AdminAuthenticatedRequest,
+    @Param('id') id: string,
+  ) {
     const user = await this.userService.activate(id);
+    await this.logService.create({
+      action: 'ADMIN_USER_ACTIVATED',
+      entityType: 'user',
+      entityId: id,
+      userId: req.user?.userId,
+      ...extractRequestMeta(req),
+    });
     return {
       id: user.id,
       firstName: user.first_name,
@@ -129,8 +169,18 @@ export class UserController {
   @ApiOperation({ summary: 'Deactivate an admin user' })
   @ApiResponse({ status: 200, description: 'User deactivated successfully' })
   @ApiResponse({ status: 404, description: 'User not found' })
-  async deactivate(@Param('id') id: string) {
+  async deactivate(
+    @Req() req: AdminAuthenticatedRequest,
+    @Param('id') id: string,
+  ) {
     const user = await this.userService.deactivate(id);
+    await this.logService.create({
+      action: 'ADMIN_USER_DEACTIVATED',
+      entityType: 'user',
+      entityId: id,
+      userId: req.user?.userId,
+      ...extractRequestMeta(req),
+    });
     return {
       id: user.id,
       firstName: user.first_name,
@@ -149,8 +199,18 @@ export class UserController {
   @ApiOperation({ summary: 'Delete an admin user' })
   @ApiResponse({ status: 200, description: 'User deleted successfully' })
   @ApiResponse({ status: 404, description: 'User not found' })
-  async deleteAdmin(@Param('id') id: string) {
+  async deleteAdmin(
+    @Req() req: AdminAuthenticatedRequest,
+    @Param('id') id: string,
+  ) {
     await this.userService.deleteAdmin(id);
+    await this.logService.create({
+      action: 'ADMIN_USER_DELETED',
+      entityType: 'user',
+      entityId: id,
+      userId: req.user?.userId,
+      ...extractRequestMeta(req),
+    });
     return { success: true };
   }
 }

@@ -23,6 +23,8 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { AdminListPenaltiesDto } from './dto/admin-list-penalties.dto';
 import { LogService } from '../log/log.service';
+import type { AdminAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
+import { extractRequestMeta } from '../../common/utils/request-meta.util';
 
 @ApiTags('Admin - Penalties')
 @Controller('admin/penalties')
@@ -47,12 +49,26 @@ export class AdminPenaltyController {
       amount: number;
       reason: string;
     },
-    @Req() req: any,
+    @Req() req: AdminAuthenticatedRequest,
   ) {
-    return this.penaltyService.createPenaltyByAdmin({
+    const result = await this.penaltyService.createPenaltyByAdmin({
       ...body,
       adminUserId: req.user.userId,
     });
+    await this.logService.create({
+      action: 'PENALTY_CREATED',
+      entityType: 'Penalty',
+      entityId: (result as { id?: string })?.id,
+      userId: req.user.userId,
+      profileId: body.profileId,
+      metadata: {
+        amount: body.amount,
+        reason: body.reason,
+        applicationId: body.applicationId ?? null,
+      },
+      ...extractRequestMeta(req),
+    });
+    return result;
   }
 
   @Get()
@@ -98,16 +114,20 @@ export class AdminPenaltyController {
   @ApiResponse({ status: 201, description: 'Penalty payment confirmed' })
   @ApiResponse({ status: 400, description: 'Penalty already paid' })
   @ApiResponse({ status: 404, description: 'Penalty not found' })
-  async confirmPayment(@Param('id') id: string, @Req() req: any) {
+  async confirmPayment(
+    @Param('id') id: string,
+    @Req() req: AdminAuthenticatedRequest,
+  ) {
     const result = await this.penaltyService.confirmPenaltyPaymentByAdmin(
       id,
       req.user.userId,
     );
     await this.logService.create({
-      action: 'PAYMENT_CONFIRMED',
+      action: 'PENALTY_PAYMENT_CONFIRMED',
       entityType: 'Penalty',
       entityId: id,
       userId: req.user.userId,
+      ...extractRequestMeta(req),
     });
     return result;
   }
@@ -121,13 +141,17 @@ export class AdminPenaltyController {
   })
   @ApiResponse({ status: 200, description: 'Penalty deleted' })
   @ApiResponse({ status: 404, description: 'Penalty not found' })
-  async deletePenalty(@Param('id') id: string, @Req() req: any) {
+  async deletePenalty(
+    @Param('id') id: string,
+    @Req() req: AdminAuthenticatedRequest,
+  ) {
     const result = await this.penaltyService.deletePenalty(id);
     await this.logService.create({
       action: 'PENALTY_DELETED',
       entityType: 'Penalty',
       entityId: id,
       userId: req.user?.userId,
+      ...extractRequestMeta(req),
     });
     return result;
   }

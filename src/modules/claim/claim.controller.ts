@@ -23,6 +23,8 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { ProfileAuthGuard } from '../auth/guards/profile-auth.guard';
 import { LogService } from '../log/log.service';
+import type { AdminAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
+import { extractRequestMeta } from '../../common/utils/request-meta.util';
 
 @Controller('admin/claims')
 @UseGuards(AdminAuthGuard, RolesGuard)
@@ -34,14 +36,18 @@ export class ClaimController {
 
   @Post()
   @Roles(UserRole.MANAGER)
-  async create(@Req() req: any, @Body() dto: CreateClaimDto) {
+  async create(
+    @Req() req: AdminAuthenticatedRequest,
+    @Body() dto: CreateClaimDto,
+  ) {
     const result = await this.claimService.createForAdmin(req.user.userId, dto);
     await this.logService.create({
       action: 'CLAIM_CREATED',
       entityType: 'Claim',
-      entityId: (result as any)?.id,
+      entityId: (result as { id?: string })?.id,
       userId: req.user.userId,
       metadata: { title: dto.title },
+      ...extractRequestMeta(req),
     });
     return result;
   }
@@ -63,7 +69,7 @@ export class ClaimController {
   async update(
     @Param('id') id: string,
     @Body() dto: UpdateClaimDto,
-    @Req() req: any,
+    @Req() req: AdminAuthenticatedRequest,
   ) {
     const result = await this.claimService.updateForAdmin(id, dto);
     await this.logService.create({
@@ -71,20 +77,25 @@ export class ClaimController {
       entityType: 'Claim',
       entityId: id,
       userId: req.user?.userId,
-      metadata: { fields: dto },
+      metadata: { fields: { ...dto } },
+      ...extractRequestMeta(req),
     });
     return result;
   }
 
   @Delete(':id')
   @Roles(UserRole.MANAGER)
-  async delete(@Param('id') id: string, @Req() req: any) {
+  async delete(
+    @Param('id') id: string,
+    @Req() req: AdminAuthenticatedRequest,
+  ) {
     await this.claimService.deleteForAdmin(id);
     await this.logService.create({
       action: 'CLAIM_DELETED',
       entityType: 'Claim',
       entityId: id,
       userId: req.user?.userId,
+      ...extractRequestMeta(req),
     });
     return { success: true };
   }
@@ -108,7 +119,7 @@ export class ClaimCommentController {
   @Roles(UserRole.MANAGER)
   async add(
     @Param('claimId') claimId: string,
-    @Req() req: any,
+    @Req() req: AdminAuthenticatedRequest,
     @Body() dto: CreateCommentDto,
   ) {
     const result = await this.claimService.addComment(
@@ -121,6 +132,7 @@ export class ClaimCommentController {
       entityType: 'Claim',
       entityId: claimId,
       userId: req.user.userId,
+      ...extractRequestMeta(req),
     });
     return result;
   }
@@ -130,7 +142,7 @@ export class ClaimCommentController {
   async remove(
     @Param('claimId') claimId: string,
     @Param('commentId') commentId: string,
-    @Req() req: any,
+    @Req() req: AdminAuthenticatedRequest,
   ) {
     await this.claimService.deleteComment(claimId, commentId);
     await this.logService.create({
@@ -138,6 +150,8 @@ export class ClaimCommentController {
       entityType: 'Claim',
       entityId: claimId,
       userId: req.user?.userId,
+      metadata: { commentId },
+      ...extractRequestMeta(req),
     });
     return { success: true };
   }
