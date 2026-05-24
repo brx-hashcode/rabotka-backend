@@ -28,6 +28,7 @@ import { WalletService } from '../wallet/wallet.service';
 import { DocumentService } from '../document/document.service';
 import { MatchingService } from '../matching/matching.service';
 import { InterestClusterService } from '../interest-graph/interest-cluster.service';
+import { GeocodingService } from '../../common/services/geocoding/geocoding.service';
 import { CreateProfileDto } from './dto/create-profile.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { AdminUpdateProfileDto } from './dto/admin-update-profile.dto';
@@ -187,6 +188,7 @@ export class ProfileService {
     private readonly documentService: DocumentService,
     private readonly matchingService: MatchingService,
     private readonly interestClusters: InterestClusterService,
+    private readonly geocodingService: GeocodingService,
   ) {}
 
   async findById(id: string): Promise<ProfileMeResponse> {
@@ -1022,6 +1024,23 @@ export class ProfileService {
       );
 
       this.logger.log(`Profile created successfully: ${profile.id}`);
+
+      // Geocode address asynchronously (fire-and-forget)
+      this.geocodingService
+        .geocode(createProfileDto.address)
+        .then((coords) => {
+          if (!coords) return;
+          return this.prisma.profile.update({
+            where: { id: profile.id },
+            data: { latitude: coords.lat, longitude: coords.lng },
+          });
+        })
+        .catch((err: unknown) =>
+          this.logger.warn(
+            `geocoding failed for profile ${profile.id}`,
+            err instanceof Error ? err.message : String(err),
+          ),
+        );
 
       // Index profile asynchronously (fire-and-forget, gated by feature flag)
       if (createProfileDto.profileType === 'WORKER') {

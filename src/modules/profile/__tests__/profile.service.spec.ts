@@ -170,6 +170,7 @@ describe('ProfileService', () => {
       {
         reseedFromProfile: jest.fn().mockResolvedValue(undefined),
       } as any, // interestClusters
+      { geocode: jest.fn().mockResolvedValue(null) } as any, // geocodingService
     );
   });
 

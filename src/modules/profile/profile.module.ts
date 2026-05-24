@@ -13,6 +13,7 @@ import { PaymentRequestModule } from '../payment-request/payment-request.module'
 import { DocumentModule } from '../document/document.module';
 import { MatchingModule } from '../matching/matching.module';
 import { InterestGraphModule } from '../interest-graph/interest-graph.module';
+import { GeocodingModule } from '../../common/services/geocoding/geocoding.module';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { InterestGraphModule } from '../interest-graph/interest-graph.module';
     DocumentModule,
     MatchingModule,
     InterestGraphModule,
+    GeocodingModule,
   ],
   controllers: [ProfileController, AdminProfileController],
   providers: [ProfileService],

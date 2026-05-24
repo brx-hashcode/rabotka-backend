@@ -1,7 +1,6 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { PrismaModule } from '../../common/services/prisma/prisma.module';
 import { JobOfferService } from './job-offer.service';
-import { JobOfferExpiryScheduler } from './job-offer-expiry.scheduler';
 import { AdminJobOfferController } from './admin-job-offer.controller';
 import { AuthModule } from '../auth/auth.module';
 import { MailModule } from '../mail/mail.module';
@@ -10,6 +9,7 @@ import { WalletModule } from '../wallet/wallet.module';
 import { BotModule } from '../bot/bot.module';
 import { LogModule } from '../log/log.module';
 import { MatchingModule } from '../matching/matching.module';
+import { GeocodingModule } from '../../common/services/geocoding/geocoding.module';
 
 @Module({
   imports: [
@@ -21,9 +21,10 @@ import { MatchingModule } from '../matching/matching.module';
     WalletModule,
     LogModule,
     MatchingModule,
+    GeocodingModule,
   ],
   controllers: [AdminJobOfferController],
-  providers: [JobOfferService, JobOfferExpiryScheduler],
+  providers: [JobOfferService],
   exports: [JobOfferService],
 })
 export class JobOfferModule {}

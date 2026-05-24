@@ -20,6 +20,7 @@ import {
 import { ContactUnlockService } from '../../contact-unlock/contact-unlock.service';
 import { BotNotificationService } from '../services/bot-notification.service';
 import { jobStatusCheckPromptMessage } from '../flows/job-status-check.flow';
+import { getCancelApplicationInitialState } from '../flows/cancel-application.flow';
 
 const REMINDER_24H_SENT_KEY = 'reminder:sent:24h:';
 const REMINDER_2H_SENT_KEY = 'reminder:sent:2h:';
@@ -102,6 +103,9 @@ export class ReminderProcessor {
     const window2hStart = new Date(now.getTime() + (2 * 60 - 10) * 60 * 1000);
     const window2hEnd = new Date(now.getTime() + (2 * 60 + 10) * 60 * 1000);
 
+    // Defensive cap: a single scan tick shouldn't try to enqueue more than a
+    // few thousand jobs, even if upstream volume spikes.
+    const SCAN_LIMIT = 5_000;
     const [apps24h, apps2h] = await Promise.all([
       this.prisma.application.findMany({
         where: {
@@ -114,6 +118,8 @@ export class ReminderProcessor {
           },
         },
         select: { id: true },
+        take: SCAN_LIMIT,
+        orderBy: { created_at: 'asc' },
       }),
       this.prisma.application.findMany({
         where: {
@@ -126,6 +132,8 @@ export class ReminderProcessor {
           },
         },
         select: { id: true },
+        take: SCAN_LIMIT,
+        orderBy: { created_at: 'asc' },
       }),
     ]);
 
@@ -174,6 +182,8 @@ export class ReminderProcessor {
           select: { id: true },
         },
       },
+      take: SCAN_LIMIT,
+      orderBy: { scheduled_at: 'asc' },
     });
 
     for (const offer of startingOffers) {
@@ -341,17 +351,6 @@ export class ReminderProcessor {
       }
     }
 
-    for (const app of offer.applications) {
-      const key = `${REMINDER_START_SENT_KEY}${app.id}`;
-      const alreadySent = await this.redis.get(key);
-      if (!alreadySent) {
-        await this.queueService.addJob<ReminderJobData>(
-          WHATSAPP_REMINDERS_QUEUE,
-          { type: 'reminder_start', applicationId: app.id },
-          { jobId: `start-${app.id}` },
-        );
-      }
-    }
   }
 
   private async expireEmptyOverdueOffers(now: Date): Promise<void> {
@@ -378,6 +377,10 @@ export class ReminderProcessor {
         title: true,
         employer_id: true,
         employer: { select: { phone: true, first_name: true } },
+        applications: {
+          where: { status: ApplicationStatus.PENDING },
+          select: { worker: { select: { phone: true } } },
+        },
       },
     });
 
@@ -404,6 +407,7 @@ export class ReminderProcessor {
     title: string;
     employer_id: string;
     employer?: { phone?: string | null; first_name?: string | null } | null;
+    applications?: { worker: { phone: string | null } }[];
   }): Promise<void> {
     const phone = offer.employer?.phone;
     if (!phone) return;
@@ -431,18 +435,75 @@ export class ReminderProcessor {
       });
 
     if (sent) {
+      // Queue this offer in the employer's republish state instead of
+      // overwriting. If two offers expire in the same tick, the user
+      // should be able to republish both — one at a time.
       const stateKey = `${BOT_STATE_KEY_PREFIX}${offer.employer_id}`;
-      const stateValue = JSON.stringify({
-        flowId: FLOW_IDS.REPUBLISH_EXPIRED_JOB,
-        step: 0,
-        payload: { jobOfferId: offer.id },
-        updatedAt: new Date().toISOString(),
-      });
-      await this.redis
-        .set(stateKey, stateValue, 'EX', BOT_STATE_TTL_SECONDS)
+      try {
+        const existing = await this.redis.get(stateKey);
+        const queue: string[] = (() => {
+          if (!existing) return [offer.id];
+          try {
+            const parsed = JSON.parse(existing) as {
+              flowId?: string;
+              payload?: { jobOfferIds?: unknown; jobOfferId?: unknown };
+            };
+            // Only append when the existing state is the republish flow;
+            // otherwise the user is mid-flow elsewhere — start fresh.
+            if (parsed.flowId !== FLOW_IDS.REPUBLISH_EXPIRED_JOB) {
+              return [offer.id];
+            }
+            const existingIds = Array.isArray(parsed.payload?.jobOfferIds)
+              ? (parsed.payload!.jobOfferIds as unknown[]).filter(
+                  (v): v is string => typeof v === 'string',
+                )
+              : typeof parsed.payload?.jobOfferId === 'string'
+                ? [parsed.payload.jobOfferId]
+                : [];
+            return existingIds.includes(offer.id)
+              ? existingIds
+              : [...existingIds, offer.id];
+          } catch {
+            return [offer.id];
+          }
+        })();
+
+        const stateValue = JSON.stringify({
+          flowId: FLOW_IDS.REPUBLISH_EXPIRED_JOB,
+          step: 0,
+          payload: { jobOfferIds: queue },
+          updatedAt: new Date().toISOString(),
+        });
+        await this.redis.set(
+          stateKey,
+          stateValue,
+          'EX',
+          BOT_STATE_TTL_SECONDS,
+        );
+      } catch (err) {
+        this.logger.warn(
+          `Failed to enqueue republish flow state for employer ${offer.employer_id}`,
+          err,
+        );
+      }
+    }
+
+    // Notify pending workers that the offer is no longer available
+    for (const app of offer.applications ?? []) {
+      if (!app.worker.phone) continue;
+      await this.whatsApp
+        .sendTextMessage(
+          app.worker.phone,
+          [
+            `ℹ️ *Offre non disponible*`,
+            '',
+            `L'offre *${offer.title}* pour laquelle vous avez postulé est maintenant expirée.`,
+            'De nouvelles offres sont disponibles — tapez *Menu* pour les consulter.',
+          ].join('\n'),
+        )
         .catch((err) =>
           this.logger.warn(
-            `Failed to set republish flow state for employer ${offer.employer_id}`,
+            `Failed to notify pending worker of expired offer ${offer.id}`,
             err,
           ),
         );
@@ -482,8 +543,21 @@ export class ReminderProcessor {
       });
 
     if (sent) {
-      // Refresh the bot state so the employer's reply still routes to the flow
+      // Refresh the bot state so the employer's reply still routes to the flow.
+      // Preserve the existing snoozeCount so the 5-snooze cap is cumulative.
       const stateKey = `${BOT_STATE_KEY_PREFIX}${employerId}`;
+      const existing = await this.redis.get(stateKey).catch(() => null);
+      let snoozeCount = 0;
+      if (existing) {
+        try {
+          const parsed = JSON.parse(existing) as { payload?: { snoozeCount?: unknown } };
+          if (typeof parsed?.payload?.snoozeCount === 'number') {
+            snoozeCount = parsed.payload.snoozeCount;
+          }
+        } catch {
+          // malformed state — start fresh
+        }
+      }
       const stateValue = JSON.stringify({
         flowId: FLOW_IDS.JOB_STATUS_CHECK,
         step: 0,
@@ -492,7 +566,7 @@ export class ReminderProcessor {
           jobTitle: offer.title,
           applicationId,
           paymentFlow,
-          snoozeCount: 0,
+          snoozeCount,
         },
         updatedAt: new Date().toISOString(),
       });
@@ -543,6 +617,24 @@ export class ReminderProcessor {
     });
 
     await this.whatsApp.sendTextMessage(app.worker.phone, text);
+
+    // Set bot state so the worker's reply (1=cancel, 2=keep) routes to the cancel flow.
+    const workerStateKey = `${BOT_STATE_KEY_PREFIX}${app.worker_id}`;
+    const cancelState = getCancelApplicationInitialState(applicationId);
+    await this.redis
+      .set(
+        workerStateKey,
+        JSON.stringify({ ...cancelState, updatedAt: new Date().toISOString() }),
+        'EX',
+        BOT_STATE_TTL_SECONDS,
+      )
+      .catch((err) =>
+        this.logger.warn(
+          `Failed to set cancel flow state for worker after 24h reminder ${applicationId}`,
+          err,
+        ),
+      );
+
     this.logger.log(`Reminder 24h sent for application ${applicationId}`);
   }
 

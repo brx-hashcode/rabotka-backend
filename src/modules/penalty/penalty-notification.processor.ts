@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { QueueService } from '../../common/services/queue/queue.service';
 import { PENALTY_NOTIFICATIONS_QUEUE } from '../../common/services/queue/queue.module';
@@ -13,7 +13,7 @@ const MAX_NOTIFICATIONS = 3;
 const TWENTY_THREE_HOURS_MS = 23 * 60 * 60 * 1000;
 
 @Injectable()
-export class PenaltyNotificationProcessor implements OnModuleInit {
+export class PenaltyNotificationProcessor {
   private readonly logger = new Logger(PenaltyNotificationProcessor.name);
 
   constructor(
@@ -21,14 +21,6 @@ export class PenaltyNotificationProcessor implements OnModuleInit {
     private readonly queueService: QueueService,
     private readonly botNotification: BotNotificationService,
   ) {}
-
-  onModuleInit(): void {
-    this.queueService.createWorker<PenaltyNotificationJobData>(
-      PENALTY_NOTIFICATIONS_QUEUE,
-      (job) => this.process(job),
-      { concurrency: 3 },
-    );
-  }
 
   async process(job: {
     id?: string;
