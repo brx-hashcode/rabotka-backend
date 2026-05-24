@@ -196,6 +196,42 @@ export async function runApplyJobFlow(
     };
   }
 
+  if (state.step === 0) {
+    if (normalized === '1' || normalized === 'postuler') {
+      // Advance to full engagement/confirmation screen
+      const step1State: BotState = {
+        ...state,
+        step: 1,
+        updatedAt: new Date().toISOString(),
+      };
+      return handleApplyStep1(
+        { state: step1State, jobOfferId, trimmed: '', normalized: '', profile, ctx },
+        offer,
+      );
+    }
+    if (normalized === '2' || normalized === 'non') {
+      return { reply: [menuMessage(profile.profile_type)], clearState: true };
+    }
+    const amountLine =
+      offer.amount != null
+        ? `*Montant*: ${offer.amount.toLocaleString('fr-FR')} FCFA`
+        : `*Montant*: Prix à négocier`;
+    return {
+      reply: [
+        [
+          `*${offer.title}*`,
+          `*Date*: ${offer.scheduled_at.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}`,
+          amountLine,
+          `*Adresse*: ${offer.address}`,
+          '',
+          '1- Postuler',
+          '2- Menu',
+        ].join('\n'),
+      ],
+      nextState: state,
+    };
+  }
+
   if (state.step === 1) {
     return handleApplyStep1(
       { state, jobOfferId, trimmed, normalized, profile, ctx },
@@ -218,8 +254,18 @@ export function getApplyJobInitialState(
     step: 1,
     payload: {
       jobOfferId,
-      ...(returnToListOffers ? { returnToListOffers } : {}),
+      ...(returnToListOffers === undefined ? {} : { returnToListOffers }),
     },
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+/** State for push notifications — worker lands on teaser step 0 first. */
+export function getApplyJobNotificationState(jobOfferId: string): BotState {
+  return {
+    flowId: FLOW_IDS.APPLY_JOB,
+    step: 0,
+    payload: { jobOfferId },
     updatedAt: new Date().toISOString(),
   };
 }

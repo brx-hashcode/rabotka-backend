@@ -26,7 +26,14 @@ function makeState(overrides: Partial<BotState> = {}): BotState {
   };
 }
 
-function makeCtx(txOverrides: any = {}) {
+function makeCtx(
+  txOverrides: any = {},
+  assignment: any = {
+    status: 'COMPLETED',
+    worker_id: 'worker-1',
+    job_offer: { employer_id: 'employer-1' },
+  },
+) {
   const tx = {
     rating: {
       upsert: jest.fn().mockResolvedValue({}),
@@ -41,6 +48,9 @@ function makeCtx(txOverrides: any = {}) {
   };
   return {
     prisma: {
+      assignment: {
+        findUnique: jest.fn().mockResolvedValue(assignment),
+      },
       $transaction: jest.fn().mockImplementation((fn: any) => fn(tx)),
       _tx: tx,
     } as any,
@@ -147,6 +157,13 @@ describe('runRateAssignmentFlow', () => {
   it('returns error when transaction fails', async () => {
     const ctx = {
       prisma: {
+        assignment: {
+          findUnique: jest.fn().mockResolvedValue({
+            status: 'COMPLETED',
+            worker_id: 'worker-1',
+            job_offer: { employer_id: 'employer-1' },
+          }),
+        },
         $transaction: jest.fn().mockRejectedValue(new Error('DB error')),
       } as any,
     };

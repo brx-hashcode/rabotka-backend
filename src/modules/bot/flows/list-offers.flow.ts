@@ -170,7 +170,13 @@ async function handleDetailApply(
   offerId: string,
   params: FlowParams,
 ): Promise<FlowResult> {
-  const { ctx } = params;
+  const { ctx, profile } = params;
+  if (profile.profile_type !== 'WORKER') {
+    return {
+      reply: ["❌ Seuls les travailleurs peuvent postuler à une offre."],
+      nextState: params.state,
+    };
+  }
   const offer = await ctx.jobOfferService.findById(offerId);
   if (!offer) {
     return {
