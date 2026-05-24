@@ -148,6 +148,7 @@ enum WalletOwnerType {
   SYSTEM
   USER
   PROFILE
+  MOBILE_MONEY
 }
 
 enum WalletTransactionType {
@@ -161,6 +162,8 @@ enum WalletTransactionType {
   CONTACT_UNLOCK_PAYMENT
   CONTACT_UNLOCK_CREDIT_CONVERSION
   PENALTY_DEBIT
+  MOBILE_MONEY_CREDIT
+  MOBILE_MONEY_WITHDRAWAL
 }
 
 enum ContactUnlockStatus {
@@ -228,6 +231,8 @@ model Profile {
   phone                   String             @unique
   email                   String             @unique
   address                 String
+  latitude                Float?
+  longitude               Float?
   description             String             @db.Text
   profile_type            ProfileType
   category_id             String?            @db.Uuid
@@ -392,6 +397,8 @@ model JobOffer {
   amount       Decimal?       @db.Decimal(10, 2)
   payment_flow PaymentFlow?
   address      String
+  latitude     Float?
+  longitude    Float?
   note         String?
   quantity                Int            @default(1)
   status                  JobOfferStatus @default(ACTIVE)
@@ -604,7 +611,7 @@ model Log {
   updated_at  DateTime @updatedAt
   action      String
   entity_type String?
-  entity_id   String?  @db.Uuid
+  entity_id   String?
   user_id     String?  @db.Uuid
   profile_id  String?  @db.Uuid
   metadata    Json?
