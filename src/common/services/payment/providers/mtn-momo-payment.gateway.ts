@@ -8,6 +8,7 @@ import {
   PaymentStatusResult,
   WebhookHandleResult,
 } from '../types/payment-gateway.types';
+import { fetchWithTimeout } from '../../../utils/fetch-with-timeout.util';
 
 type CachedToken = { value: string; expiresAt: number };
 
@@ -55,7 +56,7 @@ export class MtnMomoPaymentGateway implements IPaymentGateway {
       `${this.collectionApiUser}:${this.collectionApiKey}`,
     ).toString('base64');
 
-    const response = await fetch(`${this.baseUrl}/collection/token/`, {
+    const response = await fetchWithTimeout(`${this.baseUrl}/collection/token/`, {
       method: 'POST',
       headers: {
         Authorization: `Basic ${credentials}`,
@@ -99,7 +100,7 @@ export class MtnMomoPaymentGateway implements IPaymentGateway {
       payeeNote: params.description ?? 'Payment',
     };
 
-    const response = await fetch(
+    const response = await fetchWithTimeout(
       `${this.baseUrl}/collection/v1_0/requesttopay`,
       {
         method: 'POST',
@@ -130,7 +131,7 @@ export class MtnMomoPaymentGateway implements IPaymentGateway {
     try {
       const token = await this.getAccessToken();
 
-      const response = await fetch(
+      const response = await fetchWithTimeout(
         `${this.baseUrl}/collection/v1_0/requesttopay/${gatewayRef}`,
         {
           headers: {

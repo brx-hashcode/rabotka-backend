@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { fetchWithTimeout } from '../../common/utils/fetch-with-timeout.util';
 
 const MONETBIL_PLACE_PAYMENT_URL =
   'https://api.monetbil.com/payment/v1/placePayment';
@@ -47,7 +48,7 @@ export class MonetbilService {
     });
 
     try {
-      const response = await fetch(MONETBIL_PLACE_PAYMENT_URL, {
+      const response = await fetchWithTimeout(MONETBIL_PLACE_PAYMENT_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: body.toString(),
@@ -78,7 +79,7 @@ export class MonetbilService {
     const body = new URLSearchParams({ paymentId });
 
     try {
-      const response = await fetch(MONETBIL_CHECK_PAYMENT_URL, {
+      const response = await fetchWithTimeout(MONETBIL_CHECK_PAYMENT_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: body.toString(),

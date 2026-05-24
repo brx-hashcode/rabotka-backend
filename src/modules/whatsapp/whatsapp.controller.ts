@@ -17,11 +17,10 @@ import Redis from 'ioredis';
 import { Public } from '../auth/decorators/public.decorator.js';
 import { WhatsAppService } from './whatsapp.service';
 import { VerifyWhatsAppDto } from './dto/verify-whatsapp.dto';
-import { ConversationService } from '../conversation/conversation.service';
 import { TwilioService } from '../../common/services/twilio/twilio.service';
 import { QueueService } from '../../common/services/queue/queue.service';
-import { WHATSAPP_OUTBOUND_QUEUE } from '../../common/services/queue/queue.module';
-import type { WhatsAppOutboundJobData } from './whatsapp-outbound.processor';
+import { WHATSAPP_INBOUND_QUEUE } from '../../common/services/queue/queue.module';
+import type { WhatsAppInboundJobData } from './whatsapp-inbound.processor';
 import {
   REDIS_CONNECTION,
   REDIS_KEY_PREFIX,
@@ -39,7 +38,6 @@ export class WhatsAppController {
 
   constructor(
     private readonly whatsAppService: WhatsAppService,
-    private readonly conversationService: ConversationService,
     private readonly twilioService: TwilioService,
     private readonly configService: ConfigService,
     private readonly queueService: QueueService,
@@ -155,51 +153,12 @@ export class WhatsAppController {
       return;
     }
 
-    const result = await this.conversationService.handleIncomingMessage(
-      phone,
-      text,
+    // Enqueue for background processing — the webhook must return fast (<5s)
+    // or Twilio will retry, multiplying load.
+    await this.queueService.addJob<WhatsAppInboundJobData>(
+      WHATSAPP_INBOUND_QUEUE,
+      { phone, text, messageSid: messageSid || undefined },
     );
-
-    for (const message of result.replies) {
-      if (!message) continue;
-      const job = this.parseReplyToJob(phone, result.profileId, message);
-      if (job) {
-        await this.queueService.addJob<WhatsAppOutboundJobData>(
-          WHATSAPP_OUTBOUND_QUEUE,
-          job,
-        );
-      }
-    }
-  }
-
-  private parseReplyToJob(
-    phone: string,
-    profileId: string | null,
-    message: string,
-  ): WhatsAppOutboundJobData | null {
-    const MEDIA_PREFIX = '[IMG:';
-    const MEDIA_SUFFIX = ']';
-
-    if (message.startsWith(MEDIA_PREFIX) && message.includes(MEDIA_SUFFIX)) {
-      const end = message.indexOf(MEDIA_SUFFIX);
-      const mediaUrl = message.slice(MEDIA_PREFIX.length, end).trim();
-      const caption = message.slice(end + MEDIA_SUFFIX.length).trim();
-      if (!mediaUrl) return null;
-      return {
-        type: 'media',
-        phone,
-        profileId: profileId ?? undefined,
-        mediaUrl,
-        caption: caption || undefined,
-      };
-    }
-
-    return {
-      type: 'text',
-      phone,
-      profileId: profileId ?? undefined,
-      text: message,
-    };
   }
 
   private buildWebhookUrl(req: Request): string {

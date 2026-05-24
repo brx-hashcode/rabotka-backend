@@ -7,6 +7,7 @@ import {
   PaymentStatusResult,
   WebhookHandleResult,
 } from '../types/payment-gateway.types';
+import { fetchWithTimeout } from '../../../utils/fetch-with-timeout.util';
 
 const PLACE_PAYMENT_URL = 'https://api.monetbil.com/payment/v1/placePayment';
 const CHECK_PAYMENT_URL = 'https://api.monetbil.com/payment/v1/checkPayment';
@@ -37,7 +38,7 @@ export class MonetbilPaymentGateway implements IPaymentGateway {
     });
 
     try {
-      const response = await fetch(PLACE_PAYMENT_URL, {
+      const response = await fetchWithTimeout(PLACE_PAYMENT_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: body.toString(),
@@ -66,7 +67,7 @@ export class MonetbilPaymentGateway implements IPaymentGateway {
     const body = new URLSearchParams({ paymentId: gatewayRef });
 
     try {
-      const response = await fetch(CHECK_PAYMENT_URL, {
+      const response = await fetchWithTimeout(CHECK_PAYMENT_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: body.toString(),
