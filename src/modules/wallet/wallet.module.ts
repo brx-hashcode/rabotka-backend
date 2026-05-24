@@ -4,9 +4,15 @@ import { WalletService } from './wallet.service';
 import { AuthModule } from '../auth/auth.module';
 import { SystemConfigModule } from '../system-config/system-config.module';
 import { InvoiceModule } from '../invoice/invoice.module';
+import { LogModule } from '../log/log.module';
 
 @Module({
-  imports: [forwardRef(() => AuthModule), SystemConfigModule, InvoiceModule],
+  imports: [
+    forwardRef(() => AuthModule),
+    SystemConfigModule,
+    InvoiceModule,
+    LogModule,
+  ],
   controllers: [WalletController],
   providers: [WalletService],
   exports: [WalletService],
