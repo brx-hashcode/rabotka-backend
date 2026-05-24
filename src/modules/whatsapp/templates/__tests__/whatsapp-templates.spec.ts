@@ -4,9 +4,9 @@ import { verificationSuccessMessage } from '../verification-success';
 import {
   paymentUseRegisteredNumberPrompt,
   paymentEnterPhonePrompt,
-  paymentChooseOperatorPrompt,
   paymentPendingMessage,
   paymentDirectFailedMessage,
+  paymentOperatorUnknownMessage,
 } from '../payment-direct';
 import {
   whatsappVerifyPromptMessage,
@@ -50,17 +50,18 @@ describe('WhatsApp Templates', () => {
       expect(msg).toContain('numéro');
     });
 
-    it('generates choose operator prompt', () => {
-      const msg = paymentChooseOperatorPrompt();
+    it('generates operator unknown message', () => {
+      const msg = paymentOperatorUnknownMessage();
+      expect(msg).toContain('06');
       expect(msg).toContain('MTN');
       expect(msg).toContain('Airtel');
     });
 
     it('generates payment pending message', () => {
-      const msg = paymentPendingMessage(5000, 'MTN', '+242000001');
+      const msg = paymentPendingMessage(5000, 'MTN Mobile Money', '061234567');
       expect(msg).toContain('5');
       expect(msg).toContain('MTN');
-      expect(msg).toContain('+242000001');
+      expect(msg).toContain('061234567');
     });
 
     it('generates payment failed message', () => {
