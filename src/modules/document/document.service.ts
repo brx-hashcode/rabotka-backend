@@ -15,6 +15,7 @@ import { FileService } from '../file/file.service';
 import { RedisService } from '../../common/services/redis/redis.service';
 import { REDIS_KEY_PREFIX } from '../../common/services/redis/redis.constants';
 import { GoogleDocsService } from './google-docs.service';
+import { fetchWithTimeout } from '../../common/utils/fetch-with-timeout.util';
 import { UpdateDocumentDto } from './dto/update-document.dto';
 import { ListDocumentsDto } from './dto/list-documents.dto';
 import {
@@ -132,7 +133,7 @@ export class DocumentService {
     const exportUrl = `https://docs.google.com/feeds/download/documents/export/Export?id=${googleDocsId}&exportFormat=docx`;
     let docxBuffer: Buffer;
     try {
-      const res = await fetch(exportUrl, { redirect: 'follow' });
+      const res = await fetchWithTimeout(exportUrl, { redirect: 'follow' }, 15_000);
       if (!res.ok) {
         throw new BadRequestException(
           `Could not download Google Doc (HTTP ${res.status}). Make sure the document is set to "Anyone with the link can view".`,
@@ -188,7 +189,7 @@ export class DocumentService {
   }): Promise<AdminDocumentItem> {
     let docxBuffer: Buffer;
     try {
-      const res = await fetch(opts.fileUrl);
+      const res = await fetchWithTimeout(opts.fileUrl, {}, 15_000);
       if (!res.ok) throw new Error('Could not fetch uploaded file');
       docxBuffer = Buffer.from(await res.arrayBuffer());
     } catch {
@@ -276,7 +277,7 @@ export class DocumentService {
       doc.source_mode !== DocumentSourceMode.GOOGLE_DOCS ||
       !doc.google_docs_id
     ) {
-      const res = await fetch(doc.file_url);
+      const res = await fetchWithTimeout(doc.file_url, {}, 15_000);
       if (!res.ok) {
         throw new BadRequestException('Template file content is missing');
       }
@@ -293,7 +294,7 @@ export class DocumentService {
         `Live Google Doc export failed for ${doc.google_docs_id}; using stored DOCX snapshot from file_url`,
         err instanceof Error ? err.stack : undefined,
       );
-      const res = await fetch(doc.file_url);
+      const res = await fetchWithTimeout(doc.file_url, {}, 15_000);
       if (!res.ok) {
         throw new BadRequestException(
           'Template file content is missing (live export failed and stored snapshot unavailable)',

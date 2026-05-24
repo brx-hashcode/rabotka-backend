@@ -19,6 +19,7 @@ import {
   ApiQuery,
 } from '@nestjs/swagger';
 import { StorageService } from '../../common/services/storage/storage.service';
+import { fetchWithTimeout } from '../../common/utils/fetch-with-timeout.util';
 
 @ApiTags('File')
 @Controller('file')
@@ -45,7 +46,7 @@ export class FileController {
       });
     }
 
-    const upstream = await fetch(decoded);
+    const upstream = await fetchWithTimeout(decoded, {}, 15_000);
     if (!upstream.ok) {
       return res
         .status(upstream.status)

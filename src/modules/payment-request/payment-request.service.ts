@@ -364,13 +364,25 @@ export class PaymentRequestService {
       await this.processSuccessfulPayment(request, transactionId);
       this.paymentStatusGateway.emitPaymentStatus(request.token, 'APPROVED');
     } else if (status === 'FAILED' || status === 'CANCELLED') {
-      await this.prisma.paymentRequest.update({
-        where: { id: request.id },
+      // Atomic claim — only the first concurrent webhook proceeds with side effects
+      const claimed = await this.prisma.paymentRequest.updateMany({
+        where: {
+          id: request.id,
+          status: {
+            notIn: [
+              PaymentRequestStatus.APPROVED,
+              PaymentRequestStatus.REJECTED,
+            ],
+          },
+        },
         data: {
           status: PaymentRequestStatus.REJECTED,
           ...(transactionId && { gateway_tx_id: transactionId }),
         },
       });
+      if (claimed.count === 0) {
+        return { received: true };
+      }
       await this.persistFailedPayment(request, {
         reason: status === 'FAILED' ? 'GATEWAY_FAILED' : 'GATEWAY_CANCELLED',
         gatewayStatus: status,
@@ -522,7 +534,10 @@ export class PaymentRequestService {
     context: PaymentProcessingContext,
     transactionId?: string,
   ): Promise<boolean> {
-    const systemWallet = await this.walletService.getOrCreateSystemWallet();
+    const [systemWallet, mobileMoneyWallet] = await Promise.all([
+      this.walletService.getOrCreateSystemWallet(),
+      this.walletService.getOrCreateMobileMoneyWallet(),
+    ]);
 
     return this.prisma.$transaction(async (tx) => {
       const claimed = await tx.paymentRequest.updateMany({
@@ -574,6 +589,28 @@ export class PaymentRequestService {
 
       await tx.wallet.update({
         where: { id: systemWallet.id },
+        data: { balance: { increment: context.amount } },
+      });
+
+      // Credit MOBILE_MONEY wallet — encode gateway:operator in reference_type
+      const mmReferenceType = [
+        'payment_request',
+        request.gateway ?? 'UNKNOWN_GATEWAY',
+        request.operator ?? 'UNKNOWN_OPERATOR',
+      ].join(':');
+
+      await tx.walletTransaction.create({
+        data: {
+          wallet_id: mobileMoneyWallet.id,
+          type: WalletTransactionType.MOBILE_MONEY_CREDIT,
+          amount: context.amount,
+          reference_type: mmReferenceType,
+          reference_id: request.id,
+        },
+      });
+
+      await tx.wallet.update({
+        where: { id: mobileMoneyWallet.id },
         data: { balance: { increment: context.amount } },
       });
 

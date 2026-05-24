@@ -22,6 +22,7 @@ import {
 } from '../advertisement/services/ad-analytics.service';
 import { CalendarLinkService } from '../calendar/services/calendar-link.service';
 import { IcsGeneratorService } from '../calendar/services/ics-generator.service';
+import { fetchWithTimeout } from '../../common/utils/fetch-with-timeout.util';
 
 @Injectable()
 export class NotificationService {
@@ -266,7 +267,7 @@ export class NotificationService {
   } | null> {
     if (!imageUrl) return null;
     try {
-      const res = await fetch(imageUrl);
+      const res = await fetchWithTimeout(imageUrl, {}, 10_000);
       if (!res.ok) return null;
 
       const contentType = res.headers.get('content-type') ?? undefined;

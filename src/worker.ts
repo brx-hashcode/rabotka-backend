@@ -15,6 +15,7 @@ import {
   EMAIL_QUEUE,
   WHATSAPP_REMINDERS_QUEUE,
   PAYMENT_QUEUE,
+  PENALTY_NOTIFICATIONS_QUEUE,
 } from './common/services/queue/queue.module';
 import type { EmailJobData } from './common/services/queue/queue.service';
 import { ReminderProcessor } from './modules/bot/reminder/reminder.processor';
@@ -22,6 +23,10 @@ import type { ReminderJobData } from './modules/bot/reminder/reminder.processor'
 import { PaymentProcessor } from './modules/payments/payment.processor';
 import type { PaymentJobData } from './modules/payments/payment.service';
 import { WhatsAppOutboundProcessor } from './modules/whatsapp/whatsapp-outbound.processor';
+// WhatsAppInboundProcessor runs in the API process (needs ConversationService);
+// it self-registers via OnApplicationBootstrap.
+import { PenaltyNotificationProcessor } from './modules/penalty/penalty-notification.processor';
+import type { PenaltyNotificationJobData } from './modules/penalty/penalty-notification.processor';
 
 loadEnv({ path: '.env.local' });
 loadEnv();
@@ -44,6 +49,7 @@ class WorkerLogger implements LoggerService {
     'ReminderProcessor',
     'PaymentProcessor',
     'WhatsAppOutboundProcessor',
+    'PenaltyNotificationProcessor',
   ];
 
   log(message: string, context?: string) {
@@ -276,6 +282,21 @@ async function bootstrap(): Promise<void> {
   );
 
   try {
+    const penaltyProcessor = app.get(PenaltyNotificationProcessor);
+    queueService.createWorker<PenaltyNotificationJobData>(
+      PENALTY_NOTIFICATIONS_QUEUE,
+      (job) => penaltyProcessor.process(job),
+      { concurrency: 3 },
+    );
+    logger.log('Penalty notification worker registered');
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.warn(
+      `PenaltyNotificationProcessor not found (${msg}); penalty notifications will not be processed`,
+    );
+  }
+
+  try {
     const outboundProcessor = app.get(WhatsAppOutboundProcessor);
     outboundProcessor.register(queueService);
     logger.log('WhatsApp outbound worker registered');
@@ -285,6 +306,8 @@ async function bootstrap(): Promise<void> {
       `WhatsAppOutboundProcessor not found (${msg}); outbound WhatsApp jobs will not be processed`,
     );
   }
+
+  // WhatsApp inbound processor lives in the API process, not here.
 
   app.enableShutdownHooks();
 
