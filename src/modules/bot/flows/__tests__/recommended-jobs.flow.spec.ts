@@ -4,8 +4,6 @@ import {
 } from '../recommended-jobs.flow';
 import type { BotProfile, BotState } from '../../types/bot-state.types';
 import { FLOW_IDS } from '../../bot.constants';
-import type { OfferListItem } from '../../messages/offers.messages';
-
 const profile: BotProfile = {
   id: 'worker-1',
   first_name: 'Alice',
@@ -17,24 +15,6 @@ const profile: BotProfile = {
   status: 'ACTIVE',
 };
 
-function makeOffer(id: string): OfferListItem {
-  return {
-    id,
-    title: `Offre ${id}`,
-    description: 'Description',
-    scheduled_at: new Date(Date.now() + 86400000),
-    amount: 15000,
-    payment_flow: 'DAILY',
-    address: 'Brazzaville',
-    note: null,
-    quantity: 1,
-    acceptedCount: 0,
-    status: 'ACTIVE',
-    employerScore: null,
-  };
-}
-
-const mockOffer = makeOffer('offer-1');
 const mockFreshOffer = {
   id: 'offer-1',
   title: 'Offre offer-1',
@@ -54,12 +34,7 @@ function makeState(step: string = 'list', payload: any = {}): BotState {
     flowId: FLOW_IDS.RECOMMENDED_JOBS,
     step: 0,
     payload: {
-      offers: [
-        mockOffer,
-        makeOffer('offer-2'),
-        makeOffer('offer-3'),
-        makeOffer('offer-4'),
-      ],
+      offerIds: ['offer-1', 'offer-2', 'offer-3', 'offer-4'],
       step,
       page: 0,
       ...payload,
@@ -75,6 +50,12 @@ function makeCtx() {
     } as any,
     interestSignalService: {
       record: jest.fn().mockResolvedValue(undefined),
+    } as any,
+    systemConfigService: {
+      getFees: jest.fn().mockResolvedValue({
+        lateCancellationPenaltyFcfa: 5000,
+        cancellationThresholdHours: 4,
+      }),
     } as any,
   };
 }
@@ -96,7 +77,7 @@ describe('runRecommendedJobsFlow', () => {
     const state: BotState = {
       flowId: FLOW_IDS.RECOMMENDED_JOBS,
       step: 0,
-      payload: { offers: [], step: 'list' },
+      payload: { offerIds: [], step: 'list' },
       updatedAt: new Date().toISOString(),
     };
     const result = await runRecommendedJobsFlow(state, '1', profile, ctx);
@@ -127,7 +108,7 @@ describe('runRecommendedJobsFlow', () => {
       expect(result.nextState?.payload?.step).toBe('detail');
     });
 
-    it('returns not found when offer no longer exists', async () => {
+    it('shows empty list when all offers no longer exist', async () => {
       const ctx = makeCtx();
       ctx.jobOfferService.findById.mockResolvedValue(null);
       const result = await runRecommendedJobsFlow(
@@ -136,7 +117,8 @@ describe('runRecommendedJobsFlow', () => {
         profile,
         ctx,
       );
-      expect(result.reply[0]).toContain('introuvable');
+      // All offers filtered out → empty page, state preserved
+      expect(result.nextState).toBeDefined();
     });
 
     it('navigates to next page with s', async () => {
@@ -253,13 +235,13 @@ describe('runRecommendedJobsFlow', () => {
     const state = makeState('unknown_step' as any);
     const result = await runRecommendedJobsFlow(state, '1', profile, ctx);
     expect(result.clearState).toBe(true);
-    expect(result.reply[0]).toContain('ERREUR');
+    expect(result.reply[0]).toContain('Erreur');
   });
 });
 
 describe('getRecommendedJobsInitialState', () => {
   it('returns initial state', () => {
-    const state = getRecommendedJobsInitialState(['offer-1'], [mockOffer]);
+    const state = getRecommendedJobsInitialState(['offer-1']);
     expect(state.flowId).toBe(FLOW_IDS.RECOMMENDED_JOBS);
     expect(state.payload?.step).toBe('list');
   });

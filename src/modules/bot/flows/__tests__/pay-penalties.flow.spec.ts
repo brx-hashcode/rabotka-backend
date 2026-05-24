@@ -260,7 +260,8 @@ describe('runPayPenaltiesFlow() - mobile money sub-flow continuation', () => {
     };
     const ctx = makeCtx();
     const result = await runPayPenaltiesFlow(state, '1', workerProfile, ctx);
-    expect(result.nextState?.payload?._mm_step).toBe('choose_operator');
+    // workerProfile.phone has prefix "00" → unknown operator → asks for a new phone
+    expect(result.nextState?.payload?._mm_step).toBe('enter_phone');
   });
 });
 

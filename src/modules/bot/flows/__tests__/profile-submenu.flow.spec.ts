@@ -109,7 +109,7 @@ describe('runProfileSubmenuFlow()', () => {
   });
 
   describe('employer', () => {
-    it('shows my offers on "1"', async () => {
+    it('shows my offers on "1" and sets MY_OFFERS state for pagination', async () => {
       const ctx = makeCtx();
       const result = await runProfileSubmenuFlow(
         makeEmployerState(),
@@ -118,7 +118,8 @@ describe('runProfileSubmenuFlow()', () => {
         ctx,
       );
       expect(ctx.commands.myOffers).toHaveBeenCalledWith(employerProfile);
-      expect(result.clearState).toBe(true);
+      expect(result.nextState?.flowId).toBe('my_offers');
+      expect(result.clearState).toBeUndefined();
     });
 
     it('shows candidatures received on "2" with no items', async () => {

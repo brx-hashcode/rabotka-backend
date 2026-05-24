@@ -75,7 +75,7 @@ describe('runJobStatusCheckFlow', () => {
       ctx,
     );
     expect(result.clearState).toBe(true);
-    expect(result.reply[0]).toContain('ERREUR');
+    expect(result.reply[0]).toContain('Erreur');
   });
 
   it('returns error when no applicationId', async () => {

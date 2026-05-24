@@ -87,9 +87,8 @@ export function formatReminder24h(params: {
     `• Annulation < ${params.cancellationThresholdHours}h : pénalité de ${params.penaltyFcfa.toLocaleString('fr-FR')} FCFA`,
     '• Soyez ponctuel pour garder un bon score',
     '',
-    '1- Confirmer',
-    '2- Annuler',
-    "3- Contacter l'employeur",
+    '1- Annuler ma candidature',
+    '2- Je serai présent (ne rien faire)',
     '',
     'Répondez avec le numéro correspondant.',
   ].join('\n');

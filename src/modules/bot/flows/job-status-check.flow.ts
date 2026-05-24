@@ -65,6 +65,20 @@ export async function runJobStatusCheckFlow(
     };
   }
 
+  const snoozeUntil = state.payload?.snoozeUntil as string | undefined;
+  if (snoozeUntil && new Date(snoozeUntil) > new Date()) {
+    return {
+      reply: [
+        [
+          `⏳ *Rappel programmé.*`,
+          '',
+          `Vous serez relancé automatiquement. Tapez *1* pour confirmer la fin maintenant ou *3* pour le menu.`,
+        ].join('\n'),
+      ],
+      nextState: state,
+    };
+  }
+
   const { jobOfferId, jobTitle, applicationId, paymentFlow } = (state.payload ??
     {}) as {
     jobOfferId?: string;
@@ -74,7 +88,7 @@ export async function runJobStatusCheckFlow(
   };
 
   if (!jobOfferId || !applicationId) {
-    return { reply: ["*ERREUR. Tapez *Menu*.*"], clearState: true };
+    return { reply: ["❌ Erreur. Tapez *Menu*."], clearState: true };
   }
 
   // Re-bind as non-optional after the guard so downstream code is typed as string
@@ -116,6 +130,24 @@ export async function runJobStatusCheckFlow(
   if (trimmed === '2') {
     const hours = snoozeHoursFor(paymentFlow);
     const snoozeCount = ((state.payload?.snoozeCount as number) ?? 0) + 1;
+    const MAX_SNOOZES = 5;
+
+    if (snoozeCount > MAX_SNOOZES) {
+      return {
+        reply: [
+          [
+            `⚠️ *Vous avez reporté la confirmation trop de fois.*`,
+            '',
+            `Veuillez confirmer le statut de la mission *"${title}"* maintenant.`,
+            '',
+            `1 — ✅ Terminée`,
+            `3 — Menu`,
+          ].join('\n'),
+        ],
+        nextState: state,
+      };
+    }
+
     const snoozeUntil = new Date(
       Date.now() + hours * 60 * 60 * 1000,
     ).toISOString();

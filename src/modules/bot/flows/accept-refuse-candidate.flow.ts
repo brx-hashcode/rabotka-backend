@@ -92,7 +92,7 @@ async function handleAcceptRefuseStep1(args: StepArgs): Promise<FlowResult> {
                 `✅ Votre paiement couvre déjà tous les candidats de ce poste.`,
                 `Le contact avec *${workerName}* sera débloqué dès qu'il confirme de son côté.`,
                 '',
-                "Tapez *Menu* pour revenir.",
+                'Tapez *Menu* pour revenir.',
               ].join('\n'),
             ],
             clearState: true,
@@ -142,7 +142,7 @@ async function handleAcceptRefuseStep1(args: StepArgs): Promise<FlowResult> {
             '',
             'Le travailleur a été notifié.',
             '',
-            "Tapez *Menu* pour revenir.",
+            'Tapez *Menu* pour revenir.',
           ].join('\n'),
         ],
         clearState: true,
@@ -157,7 +157,8 @@ async function handleAcceptRefuseStep1(args: StepArgs): Promise<FlowResult> {
     return {
       reply: [
         [
-          "Raison du refus ? (optionnel). Tapez la raison ou 'Aucune' pour refuser sans raison.",
+          'Raison du refus ? (optionnel).',
+          "Tapez la raison ou 'Aucune' pour refuser sans raison.",
         ].join('\n'),
       ],
       nextState: {
@@ -207,7 +208,7 @@ async function handleAcceptRefuseStep3(args: StepArgs): Promise<FlowResult> {
   if (normalized === '2' || normalized === 'annuler') {
     return {
       reply: [
-        "*Refus annulé.* La candidature reste en attente.\n\nTapez *Menu* pour revenir.",
+        '*Refus annulé.* La candidature reste en attente.\n\nTapez *Menu* pour revenir.',
       ],
       clearState: true,
     };
@@ -238,7 +239,7 @@ async function handleAcceptRefuseStep3(args: StepArgs): Promise<FlowResult> {
           '',
           "Le candidat a été notifié. Votre offre reste ouverte pour d'autres candidatures.",
           '',
-          "Tapez *Menu* pour revenir.",
+          'Tapez *Menu* pour revenir.',
         ].join('\n'),
       ],
       clearState: true,
@@ -266,14 +267,16 @@ export async function runAcceptRefuseCandidateFlow(
 
   if (!applicationId) {
     return {
-      reply: ["❌ Candidature non trouvée. Tapez *Menu*."],
+      reply: ['❌ Candidature non trouvée. Tapez *Menu*.'],
       clearState: true,
     };
   }
 
   if (profile.profile_type !== 'EMPLOYER') {
     return {
-      reply: ["❌ Seuls les employeurs peuvent gérer les candidatures. Tapez *Menu*."],
+      reply: [
+        '❌ Seuls les employeurs peuvent gérer les candidatures. Tapez *Menu*.',
+      ],
       clearState: true,
     };
   }
@@ -292,7 +295,7 @@ export async function runAcceptRefuseCandidateFlow(
   if (state.step === 3) return handleAcceptRefuseStep3(args);
 
   return {
-    reply: ["❌ Erreur. Tapez *Menu* pour revenir."],
+    reply: ['❌ Erreur. Tapez *Menu* pour revenir.'],
     clearState: true,
   };
 }

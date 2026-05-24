@@ -257,7 +257,15 @@ async function handlePaymentStep(
     );
   }
 
-  if (trimmed === '1' && balance >= fee) {
+  if (trimmed === '1') {
+    if (balance < fee) {
+      return {
+        reply: [
+          `⚠️ *Solde insuffisant*\n\nVotre solde est de *${balance.toLocaleString('fr-FR')} FCFA* pour un frais de *${fee.toLocaleString('fr-FR')} FCFA*.\n\nChoisissez *2* pour payer par Mobile Money ou *3* pour annuler.`,
+        ],
+        nextState: state,
+      };
+    }
     return processWalletPayment(selectedWorkerId, profile, fee, ctx);
   }
 

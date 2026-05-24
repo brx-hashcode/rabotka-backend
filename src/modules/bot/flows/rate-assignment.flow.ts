@@ -25,7 +25,7 @@ export async function runRateAssignmentFlow(
     CMD_MENU.some((c) => normalized === c || normalized.startsWith(c + ' '))
   ) {
     return {
-      reply: ["*Menu annulé. Tapez *Menu* pour revenir.*"],
+      reply: ["Tapez *Menu* pour revenir au menu principal."],
       clearState: true,
     };
   }
@@ -35,7 +35,39 @@ export async function runRateAssignmentFlow(
 
   if (!assignmentId || !rateeId) {
     return {
-      reply: ["*Erreur d'évaluation. Tapez *Menu*.*"],
+      reply: ["❌ Erreur d'évaluation. Tapez *Menu*."],
+      clearState: true,
+    };
+  }
+
+  const assignment = await ctx.prisma.assignment.findUnique({
+    where: { id: assignmentId },
+    select: {
+      status: true,
+      worker_id: true,
+      job_offer: { select: { employer_id: true } },
+    },
+  });
+
+  if (!assignment) {
+    return {
+      reply: ["❌ Mission introuvable. Tapez *Menu*."],
+      clearState: true,
+    };
+  }
+
+  const isWorker = assignment.worker_id === profile.id;
+  const isEmployer = assignment.job_offer.employer_id === profile.id;
+  if (!isWorker && !isEmployer) {
+    return {
+      reply: ["❌ Vous n'êtes pas autorisé à évaluer cette mission. Tapez *Menu*."],
+      clearState: true,
+    };
+  }
+
+  if (assignment.status !== 'COMPLETED') {
+    return {
+      reply: ["❌ La mission n'est pas encore terminée. Tapez *Menu*."],
       clearState: true,
     };
   }
@@ -90,7 +122,7 @@ export async function runRateAssignmentFlow(
     };
   } catch {
     return {
-      reply: ["*Impossible d'enregistrer votre note. Tapez *Menu*.*"],
+      reply: ["❌ Impossible d'enregistrer votre note. Tapez *Menu*."],
       clearState: true,
     };
   }
