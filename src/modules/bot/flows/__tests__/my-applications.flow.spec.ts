@@ -33,11 +33,24 @@ function makeApp(status = 'PENDING') {
   };
 }
 
+// findByWorker / findByEmployer are overloaded: legacy {limit} returns
+// an array, new {page, pageSize} returns {items, total}. This adapter
+// returns the right shape for whichever path the caller used.
+function adaptList(rows: unknown[]) {
+  return jest
+    .fn()
+    .mockImplementation((_id: string, opts?: { page?: number }) =>
+      opts && opts.page !== undefined
+        ? Promise.resolve({ items: rows, total: rows.length })
+        : Promise.resolve(rows),
+    );
+}
+
 function makeCtx(overrides: Record<string, unknown> = {}) {
   return {
     applicationService: {
-      findByWorker: jest.fn().mockResolvedValue([makeApp()]),
-      findByEmployer: jest.fn().mockResolvedValue([makeApp()]),
+      findByWorker: adaptList([makeApp()]),
+      findByEmployer: adaptList([makeApp()]),
       findById: jest.fn().mockResolvedValue(makeApp()),
       cancel: jest.fn().mockResolvedValue({ penaltyAmount: null }),
       ...overrides,
@@ -272,8 +285,8 @@ describe('runMyApplicationsFlow()', () => {
     it('initiates payment on "1" for WAITING_PAYMENT application', async () => {
       const ctx = makeCtx({
         applicationService: {
-          findByWorker: jest.fn().mockResolvedValue([makeWaitingPaymentApp()]),
-          findByEmployer: jest.fn().mockResolvedValue([]),
+          findByWorker: adaptList([makeWaitingPaymentApp()]),
+          findByEmployer: adaptList([]),
           findById: jest.fn().mockResolvedValue(makeWaitingPaymentApp()),
           cancel: jest.fn(),
         },
@@ -298,8 +311,8 @@ describe('runMyApplicationsFlow()', () => {
     it('returns early when no unlock attempt for WAITING_PAYMENT on "1"', async () => {
       const ctx = makeCtx({
         applicationService: {
-          findByWorker: jest.fn().mockResolvedValue([makeWaitingPaymentApp()]),
-          findByEmployer: jest.fn().mockResolvedValue([]),
+          findByWorker: adaptList([makeWaitingPaymentApp()]),
+          findByEmployer: adaptList([]),
           findById: jest.fn().mockResolvedValue(makeWaitingPaymentApp()),
           cancel: jest.fn(),
         },
@@ -321,8 +334,8 @@ describe('runMyApplicationsFlow()', () => {
     it('rejects on "2" for WAITING_PAYMENT', async () => {
       const ctx = makeCtx({
         applicationService: {
-          findByWorker: jest.fn().mockResolvedValue([makeWaitingPaymentApp()]),
-          findByEmployer: jest.fn().mockResolvedValue([]),
+          findByWorker: adaptList([makeWaitingPaymentApp()]),
+          findByEmployer: adaptList([]),
           findById: jest.fn().mockResolvedValue(makeWaitingPaymentApp()),
           cancel: jest.fn(),
         },
@@ -348,8 +361,8 @@ describe('runMyApplicationsFlow()', () => {
     it('returns list on "3" for WAITING_PAYMENT', async () => {
       const ctx = makeCtx({
         applicationService: {
-          findByWorker: jest.fn().mockResolvedValue([makeWaitingPaymentApp()]),
-          findByEmployer: jest.fn().mockResolvedValue([]),
+          findByWorker: adaptList([makeWaitingPaymentApp()]),
+          findByEmployer: adaptList([]),
           findById: jest.fn().mockResolvedValue(makeWaitingPaymentApp()),
           cancel: jest.fn(),
         },
@@ -371,8 +384,8 @@ describe('runMyApplicationsFlow()', () => {
     it('returns menu on "4" for WAITING_PAYMENT', async () => {
       const ctx = makeCtx({
         applicationService: {
-          findByWorker: jest.fn().mockResolvedValue([makeWaitingPaymentApp()]),
-          findByEmployer: jest.fn().mockResolvedValue([]),
+          findByWorker: adaptList([makeWaitingPaymentApp()]),
+          findByEmployer: adaptList([]),
           findById: jest.fn().mockResolvedValue(makeWaitingPaymentApp()),
           cancel: jest.fn(),
         },
@@ -462,8 +475,8 @@ describe('runMyApplicationsFlow()', () => {
     it('returns list on "1" for CANCELLED application', async () => {
       const ctx = makeCtx({
         applicationService: {
-          findByWorker: jest.fn().mockResolvedValue([makeCancelledApp()]),
-          findByEmployer: jest.fn().mockResolvedValue([]),
+          findByWorker: adaptList([makeCancelledApp()]),
+          findByEmployer: adaptList([]),
           findById: jest.fn().mockResolvedValue(makeCancelledApp()),
           cancel: jest.fn(),
         },

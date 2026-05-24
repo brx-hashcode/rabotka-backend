@@ -46,6 +46,7 @@ const mockEmployerProfile = {
 function makeDeps() {
   return {
     prisma: {
+      $transaction: jest.fn().mockResolvedValue([]),
       profile: {
         findUnique: jest.fn(),
         findMany: jest.fn().mockResolvedValue([]),
@@ -66,6 +67,7 @@ function makeDeps() {
       verificationToken: {
         findFirst: jest.fn(),
         create: jest.fn().mockResolvedValue({}),
+        update: jest.fn().mockResolvedValue({}),
         delete: jest.fn().mockResolvedValue({}),
         deleteMany: jest.fn().mockResolvedValue({}),
       },
@@ -688,19 +690,43 @@ describe('BotOrchestratorService', () => {
       expect(grantCredit).not.toHaveBeenCalled();
     });
 
-    it('shows support message when whatsapp_connected=false and status is not PENDING_ACTIVATION', async () => {
+    it('issues an inline 4-digit code when ACTIVE profile has whatsapp_connected=false', async () => {
       deps.prisma.profile.findUnique.mockResolvedValue({
         ...mockActiveProfile,
         status: 'ACTIVE',
         whatsapp_connected: false,
       });
-      deps.systemConfig.getContactInfo.mockResolvedValue({
-        email: 'e@e.com',
-        phone: '123',
-        address: 'addr',
-      });
+      // No prior active code → orchestrator should create one.
+      deps.prisma.verificationToken.findFirst.mockResolvedValue(null);
       const result = await service.handle(PROFILE_ID, PHONE, 'menu');
-      expect(result[0]).toContain('suspendu');
+
+      expect(result[0]).toContain('vérifié');
+      expect(result[0]).not.toContain('suspendu');
+      expect(deps.prisma.verificationToken.create).toHaveBeenCalled();
+      // The reply should contain the 4-digit code that was issued.
+      const createdCode = deps.prisma.verificationToken.create.mock.calls[0][0]
+        .data.token as string;
+      expect(result[0]).toContain(createdCode);
+    });
+
+    it('activates the account when ACTIVE profile types the correct code', async () => {
+      deps.prisma.profile.findUnique.mockResolvedValue({
+        ...mockActiveProfile,
+        status: 'ACTIVE',
+        whatsapp_connected: false,
+        whatsapp_activation_bonus_granted: false,
+      });
+      deps.prisma.verificationToken.findFirst.mockResolvedValue({
+        id: 'tok-1',
+        token: '1234',
+        profile_id: PROFILE_ID,
+        used_at: null,
+        expires_at: new Date(Date.now() + 60_000),
+      });
+      const result = await service.handle(PROFILE_ID, PHONE, '1234');
+
+      expect(result[0]).toContain('vérifié avec succès');
+      expect(deps.prisma.$transaction).toHaveBeenCalled();
     });
 
     it('activation succeeds even when grantWelcomeCredit throws', async () => {

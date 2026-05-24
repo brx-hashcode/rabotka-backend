@@ -47,11 +47,40 @@ function makeJobOfferService(overrides = {}) {
   };
 }
 
-function makeApplicationService(overrides = {}) {
+/**
+ * findByWorker / findByEmployer are overloaded: legacy `{limit}` returns
+ * an array, new `{page, pageSize}` returns `{items, total}`. The default
+ * mocks below return the right shape for each path; tests can override
+ * with the array shape (legacy) and an adapter wraps it for paginated
+ * calls.
+ */
+function emptyPaginated() {
+  return Promise.resolve({ items: [], total: 0 });
+}
+
+function adaptToPaginated(rows: any[]) {
+  return jest
+    .fn()
+    .mockImplementation((_id: string, opts?: { page?: number }) =>
+      opts && opts.page !== undefined
+        ? Promise.resolve({ items: rows, total: rows.length })
+        : Promise.resolve(rows),
+    );
+}
+
+function makeApplicationService(overrides: Record<string, unknown> = {}) {
   return {
-    findByWorker: jest.fn().mockResolvedValue([]),
+    findByWorker: jest.fn().mockImplementation((_id, opts) =>
+      opts && (opts as { page?: number }).page !== undefined
+        ? emptyPaginated()
+        : Promise.resolve([]),
+    ),
     findByJobOffer: jest.fn().mockResolvedValue([]),
-    findByEmployer: jest.fn().mockResolvedValue([]),
+    findByEmployer: jest.fn().mockImplementation((_id, opts) =>
+      opts && (opts as { page?: number }).page !== undefined
+        ? emptyPaginated()
+        : Promise.resolve([]),
+    ),
     markAsViewed: jest.fn().mockResolvedValue(undefined),
     ...overrides,
   };
@@ -136,7 +165,7 @@ describe('BotCommandsService', () => {
     });
 
     it('returns application list with ids', async () => {
-      applicationService.findByWorker.mockResolvedValue([
+      applicationService.findByWorker = adaptToPaginated([
         {
           id: 'app-1',
           status: 'PENDING',
@@ -158,7 +187,7 @@ describe('BotCommandsService', () => {
 
   describe('myApplications() - employer', () => {
     it('returns applications for employer profile', async () => {
-      applicationService.findByEmployer = jest.fn().mockResolvedValue([
+      applicationService.findByEmployer = adaptToPaginated([
         {
           id: 'app-e1',
           status: 'PENDING',
@@ -454,7 +483,7 @@ describe('BotCommandsService', () => {
     });
 
     it('returns pending payments list for worker', async () => {
-      applicationService.findByWorker.mockResolvedValue([
+      applicationService.findByWorker = adaptToPaginated([
         {
           id: 'app-2',
           status: 'WAITING_PAYMENT',
@@ -474,13 +503,13 @@ describe('BotCommandsService', () => {
     });
 
     it('returns empty message when no pending payments for employer', async () => {
-      applicationService.findByEmployer = jest.fn().mockResolvedValue([]);
+      applicationService.findByEmployer = adaptToPaginated([]);
       const result = await service.pendingPayments(employerProfile);
       expect(result.message).toContain('Aucun paiement');
     });
 
     it('returns pending payments list for employer', async () => {
-      applicationService.findByEmployer = jest.fn().mockResolvedValue([
+      applicationService.findByEmployer = adaptToPaginated([
         {
           id: 'app-3',
           status: 'WAITING_PAYMENT',

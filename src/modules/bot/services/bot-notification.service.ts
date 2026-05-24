@@ -6,6 +6,8 @@ import { BotInboxService } from './bot-inbox.service';
 import { getAcceptRefuseInitialState } from '../flows/accept-refuse-candidate.flow';
 import { getUnlockContactInitialState } from '../flows/unlock-contact.flow';
 import { getRateAssignmentInitialState } from '../flows/rate-assignment.flow';
+import { FLOW_IDS } from '../bot.constants';
+import { getApplyJobNotificationState } from '../flows/apply-job.flow';
 import {
   formatNewApplicationToEmployer,
   formatApplicationRejectedToWorker,
@@ -69,7 +71,7 @@ export class BotNotificationService {
       if (!app?.job_offer?.employer?.phone || !app.worker) return;
 
       const completedCount = await this.prisma.application.count({
-        where: { worker_id: app.worker_id, status: 'ACCEPTED' },
+        where: { worker_id: app.worker_id, status: 'END' },
       });
 
       const text = formatNewApplicationToEmployer({
@@ -308,8 +310,10 @@ export class BotNotificationService {
         select: {
           job_offer: {
             select: {
+              id: true,
               title: true,
               scheduled_at: true,
+              employer_id: true,
               employer: { select: { phone: true } },
             },
           },
@@ -328,6 +332,25 @@ export class BotNotificationService {
         lateCancellationThresholdHours: fees.cancellationThresholdHours,
       });
       await this.whatsApp.sendTextMessage(app.job_offer.employer.phone, text);
+
+      // Set the POST_CANCELLATION_ACTIONS state so 1/2/3 actually do
+      // something. CAS-write so we don't clobber an in-flight flow.
+      const employerId = app.job_offer.employer_id;
+      await this.botState
+        .setIfFlowAbsentOrMatches(
+          employerId,
+          {
+            flowId: FLOW_IDS.POST_CANCELLATION_ACTIONS,
+            step: 0,
+            payload: {
+              jobOfferId: app.job_offer.id,
+              jobOfferTitle: app.job_offer.title,
+            },
+            updatedAt: new Date().toISOString(),
+          },
+          null,
+        )
+        .catch(() => {});
     } catch (err) {
       this.logger.warn(
         `Failed to send cancellation notification to employer: ${String(applicationId)}`,
@@ -394,6 +417,13 @@ export class BotNotificationService {
       ]);
       if (!profile?.phone || !offer) return;
 
+      const applyState = getApplyJobNotificationState(jobOfferId);
+      await this.botState.setIfFlowAbsentOrMatches(workerId, applyState, null);
+
+      const amountLine =
+        offer.amount != null
+          ? `*Montant* : ${Number(offer.amount).toLocaleString('fr-FR')} FCFA`
+          : `*Montant* : Prix à négocier`;
       const dateStr = offer.scheduled_at.toLocaleDateString('fr-FR', {
         day: '2-digit',
         month: '2-digit',
@@ -401,22 +431,19 @@ export class BotNotificationService {
         hour: '2-digit',
         minute: '2-digit',
       });
-      const amountLine =
-        offer.amount != null
-          ? `Montant : ${Number(offer.amount).toLocaleString()} FCFA`
-          : `Montant : Prix à négocier`;
-      const text = [
-        `*Offre recommandée pour vous, ${profile.first_name}*`,
+      const teaser = [
+        `🔔 *Nouvelle offre pour vous, ${profile.first_name} !*`,
         '',
         `*${offer.title}*`,
         amountLine,
-        `Adresse : ${offer.address}`,
-        `Date : ${dateStr}`,
+        `*Adresse* : ${offer.address}`,
+        `*Date* : ${dateStr}`,
         '',
-        `Tapez *1* (Trouver une mission) pour voir toutes les offres disponibles.`,
+        '1- Postuler',
+        '2- Ignorer',
       ].join('\n');
 
-      await this.whatsApp.sendTextMessage(profile.phone, text);
+      await this.whatsApp.sendTextMessage(profile.phone, teaser);
     } catch (err) {
       this.logger.warn(
         `Failed to send recommended job notification to worker ${workerId}`,
