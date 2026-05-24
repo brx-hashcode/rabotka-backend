@@ -33,6 +33,18 @@ import {
   PENALTY_SUSPENSION_THRESHOLD,
 } from './application.constants';
 
+/**
+ * Statuses that count as a worker's "active" candidature — i.e. the worker
+ * is still tracking it (could still result in money or having to show up at
+ * a job site). Used both for the concurrent-applications quota and for the
+ * worker's "Mes candidatures" bot list.
+ */
+export const WORKER_ACTIVE_APPLICATION_STATUSES = [
+  ApplicationStatus.PENDING,
+  ApplicationStatus.ACCEPTED,
+  ApplicationStatus.WAITING_PAYMENT,
+] as const;
+
 export type AdminApplicationListItem = {
   id: string;
   jobTitle: string;
@@ -218,10 +230,23 @@ export class ApplicationService {
     }
 
     const fees = await this.systemConfigService.getFees();
+    // Count only applications whose parent offer is still live — stale
+    // applications on cancelled/expired/completed offers shouldn't count
+    // against the worker's concurrent-applications quota.
     const activeCount = await this.prisma.application.count({
       where: {
         worker_id: workerId,
-        status: { in: [ApplicationStatus.PENDING, ApplicationStatus.ACCEPTED, ApplicationStatus.WAITING_PAYMENT] },
+        status: { in: [...WORKER_ACTIVE_APPLICATION_STATUSES] },
+        job_offer: {
+          status: {
+            in: [
+              JobOfferStatus.ACTIVE,
+              JobOfferStatus.PARTIALLY_FILLED,
+              JobOfferStatus.FILLED,
+              JobOfferStatus.IN_PROGRESS,
+            ],
+          },
+        },
       },
     });
     if (activeCount >= fees.maxConcurrentApplications) {
@@ -253,33 +278,103 @@ export class ApplicationService {
     return this.toListItem(application);
   }
 
-  async findByWorker(
-    workerId: string,
-    options?: { status?: ApplicationStatus; limit?: number },
-  ): Promise<ApplicationWithOffer[]> {
-    const limit = Math.min(options?.limit ?? 50, 100);
-    const applications = await this.prisma.application.findMany({
-      where: {
-        worker_id: workerId,
-        ...(options?.status ? { status: options.status } : {}),
-      },
-      take: limit,
-      orderBy: { created_at: 'desc' },
-      include: {
-        job_offer: {
-          include: {
-            employer: {
-              select: {
-                id: true,
-                first_name: true,
-                last_name: true,
-                phone: true,
-              },
+  private buildApplicationListWhere(args: {
+    workerId?: string;
+    employerId?: string;
+    status?: ApplicationStatus;
+    statusIn?: readonly ApplicationStatus[];
+  }): Prisma.ApplicationWhereInput {
+    const where: Prisma.ApplicationWhereInput = {};
+    if (args.workerId) where.worker_id = args.workerId;
+    if (args.employerId)
+      where.job_offer = { employer_id: args.employerId };
+    if (args.status) {
+      where.status = args.status;
+    } else if (args.statusIn && args.statusIn.length > 0) {
+      where.status = { in: [...args.statusIn] };
+    }
+    return where;
+  }
+
+  private applicationListInclude(): Prisma.ApplicationInclude {
+    return {
+      job_offer: {
+        include: {
+          employer: {
+            select: {
+              id: true,
+              first_name: true,
+              last_name: true,
+              phone: true,
             },
           },
         },
-        worker: true,
       },
+      worker: true,
+    };
+  }
+
+  // Existing limit-based call shape: returns a flat array.
+  async findByWorker(
+    workerId: string,
+    options?: {
+      status?: ApplicationStatus;
+      statusIn?: readonly ApplicationStatus[];
+      limit?: number;
+    },
+  ): Promise<ApplicationWithOffer[]>;
+  // New paginated call shape: returns { items, total } for bot pagination.
+  async findByWorker(
+    workerId: string,
+    options: {
+      status?: ApplicationStatus;
+      statusIn?: readonly ApplicationStatus[];
+      page: number;
+      pageSize: number;
+    },
+  ): Promise<{ items: ApplicationWithOffer[]; total: number }>;
+  async findByWorker(
+    workerId: string,
+    options?: {
+      status?: ApplicationStatus;
+      statusIn?: readonly ApplicationStatus[];
+      limit?: number;
+      page?: number;
+      pageSize?: number;
+    },
+  ): Promise<
+    ApplicationWithOffer[] | { items: ApplicationWithOffer[]; total: number }
+  > {
+    const where = this.buildApplicationListWhere({
+      workerId,
+      status: options?.status,
+      statusIn: options?.statusIn,
+    });
+
+    if (options?.page !== undefined && options?.pageSize !== undefined) {
+      const pageSize = Math.min(options.pageSize, 100);
+      const [rows, total] = await Promise.all([
+        this.prisma.application.findMany({
+          where,
+          skip: options.page * pageSize,
+          take: pageSize,
+          orderBy: { created_at: 'desc' },
+          include: this.applicationListInclude(),
+        }),
+        this.prisma.application.count({ where }),
+      ]);
+      return {
+        items: rows.map((a) => this.toApplicationWithOffer(a)),
+        total,
+      };
+    }
+
+    const limit = Math.min(options?.limit ?? 50, 100);
+    const applications = await this.prisma.application.findMany({
+      where,
+      take: limit,
+      orderBy: { created_at: 'desc' },
+      include: this.applicationListInclude(),
     });
 
     return applications.map((a) => this.toApplicationWithOffer(a));
@@ -287,31 +382,63 @@ export class ApplicationService {
 
   async findByEmployer(
     employerId: string,
-    options?: { status?: ApplicationStatus; limit?: number },
-  ): Promise<ApplicationWithOffer[]> {
+    options?: {
+      status?: ApplicationStatus;
+      statusIn?: readonly ApplicationStatus[];
+      limit?: number;
+    },
+  ): Promise<ApplicationWithOffer[]>;
+  async findByEmployer(
+    employerId: string,
+    options: {
+      status?: ApplicationStatus;
+      statusIn?: readonly ApplicationStatus[];
+      page: number;
+      pageSize: number;
+    },
+  ): Promise<{ items: ApplicationWithOffer[]; total: number }>;
+  async findByEmployer(
+    employerId: string,
+    options?: {
+      status?: ApplicationStatus;
+      statusIn?: readonly ApplicationStatus[];
+      limit?: number;
+      page?: number;
+      pageSize?: number;
+    },
+  ): Promise<
+    ApplicationWithOffer[] | { items: ApplicationWithOffer[]; total: number }
+  > {
+    const where = this.buildApplicationListWhere({
+      employerId,
+      status: options?.status,
+      statusIn: options?.statusIn,
+    });
+
+    if (options?.page !== undefined && options?.pageSize !== undefined) {
+      const pageSize = Math.min(options.pageSize, 100);
+      const [rows, total] = await Promise.all([
+        this.prisma.application.findMany({
+          where,
+          skip: options.page * pageSize,
+          take: pageSize,
+          orderBy: { created_at: 'desc' },
+          include: this.applicationListInclude(),
+        }),
+        this.prisma.application.count({ where }),
+      ]);
+      return {
+        items: rows.map((a) => this.toApplicationWithOffer(a)),
+        total,
+      };
+    }
+
     const limit = Math.min(options?.limit ?? 50, 100);
     const applications = await this.prisma.application.findMany({
-      where: {
-        job_offer: { employer_id: employerId },
-        ...(options?.status ? { status: options.status } : {}),
-      },
+      where,
       take: limit,
       orderBy: { created_at: 'desc' },
-      include: {
-        job_offer: {
-          include: {
-            employer: {
-              select: {
-                id: true,
-                first_name: true,
-                last_name: true,
-                phone: true,
-              },
-            },
-          },
-        },
-        worker: true,
-      },
+      include: this.applicationListInclude(),
     });
 
     return applications.map((a) => this.toApplicationWithOffer(a));
@@ -573,7 +700,10 @@ export class ApplicationService {
     const fees = await this.systemConfigService.getFees();
     const isLateCancellation = hoursUntil < fees.cancellationThresholdHours;
     const isAccepted = application.status === ApplicationStatus.ACCEPTED;
-    const applyPenalty = isLateCancellation && isAccepted;
+    const isWaitingPayment =
+      application.status === ('WAITING_PAYMENT' as ApplicationStatus);
+    // Penalty applies for late cancellation on ACCEPTED or WAITING_PAYMENT (worker already committed)
+    const applyPenalty = isLateCancellation && (isAccepted || isWaitingPayment);
 
     const penaltyApplied = applyPenalty;
     const penaltyAmount: number | null = applyPenalty
@@ -581,12 +711,17 @@ export class ApplicationService {
       : null;
 
     await this.prisma.$transaction(async (tx) => {
-      if (isAccepted) {
-        // Compute remaining accepted count (excluding this application)
+      if (isAccepted || isWaitingPayment) {
+        // Compute remaining accepted/waiting count (excluding this application)
         const remainingAccepted = await tx.application.count({
           where: {
             job_offer_id: application.job_offer_id,
-            status: ApplicationStatus.ACCEPTED,
+            status: {
+              in: [
+                ApplicationStatus.ACCEPTED,
+                'WAITING_PAYMENT' as ApplicationStatus,
+              ],
+            },
             id: { not: applicationId },
           },
         });
@@ -605,6 +740,7 @@ export class ApplicationService {
             cancelled_at: now,
           },
         });
+
       }
 
       if (applyPenalty) {
@@ -651,6 +787,18 @@ export class ApplicationService {
         },
       });
     });
+
+    // If WAITING_PAYMENT, abort the pending unlock attempt and refund any payment already made
+    if (isWaitingPayment) {
+      await this.contactUnlock
+        .abortPendingUnlockByApplication(applicationId)
+        .catch((err) =>
+          console.warn(
+            `[cancel] Failed to abort unlock for ${applicationId}:`,
+            err,
+          ),
+        );
+    }
 
     // Suspension check after penalty creation
     if (applyPenalty) {

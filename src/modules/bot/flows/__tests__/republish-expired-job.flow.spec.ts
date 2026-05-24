@@ -43,10 +43,8 @@ function makeCtx(jobOverrides: any = {}) {
           .mockResolvedValue(
             jobOverrides === null ? null : { ...mockJob, ...jobOverrides },
           ),
+        update: jest.fn().mockResolvedValue({ id: 'job-1' }),
       },
-    } as any,
-    jobOfferService: {
-      create: jest.fn().mockResolvedValue({ id: 'new-job-1' }),
     } as any,
   };
 }
@@ -208,11 +206,9 @@ describe('runRepublishExpiredJobFlow', () => {
       expect(result.reply[0]).toContain('republiée');
     });
 
-    it('returns error when job creation fails', async () => {
+    it('returns error when job update fails', async () => {
       const ctx = makeCtx();
-      ctx.jobOfferService.create.mockRejectedValue(
-        new Error('Creation failed'),
-      );
+      ctx.prisma.jobOffer.update.mockRejectedValue(new Error('Update failed'));
       const futureDate = new Date(Date.now() + 86400000 * 7);
       const dd = String(futureDate.getDate()).padStart(2, '0');
       const mm = String(futureDate.getMonth() + 1).padStart(2, '0');
@@ -226,7 +222,7 @@ describe('runRepublishExpiredJobFlow', () => {
         ctx,
       );
       expect(result.nextState).toBeDefined();
-      expect(result.reply[0]).toContain('Creation failed');
+      expect(result.reply[0]).toContain('Update failed');
     });
   });
 

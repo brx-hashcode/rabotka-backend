@@ -167,6 +167,58 @@ export function formatMyApplicationsList(
   return lines.join('\n');
 }
 
+/**
+ * Paginated list renderer — mirrors the employer "Mes offres" UX.
+ * `page` is 0-based; items are numbered globally starting at `page * pageSize + 1`.
+ * Pass `title` to label the header (e.g. "Mes candidatures" vs
+ * "Paiements en attente").
+ */
+export function formatMyApplicationsListPage(params: {
+  title: string;
+  applications: ApplicationForList[];
+  total: number;
+  page: number;
+  pageSize: number;
+}): string {
+  const { title, applications, total, page, pageSize } = params;
+  if (total === 0 || applications.length === 0) {
+    return `Vous n'avez aucune candidature active.\n\nTapez *1* (Trouver une mission) pour voir les offres disponibles, ou *Menu* pour revenir.`;
+  }
+
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const pageLabel = totalPages > 1 ? ` — page ${page + 1}/${totalPages}` : '';
+  const start = page * pageSize;
+  const hasMore = start + pageSize < total;
+
+  const lines: string[] = [`*${title} (${total})${pageLabel}*`, ''];
+
+  const ADDRESS_MAX = 40;
+  applications.forEach((app, i) => {
+    const num = start + i + 1;
+    const statusText = applicationStatusLabel(app.status).replaceAll('*', '');
+    const address =
+      app.job_offer.address.length > ADDRESS_MAX
+        ? app.job_offer.address.slice(0, ADDRESS_MAX) + '...'
+        : app.job_offer.address;
+    lines.push(
+      `${num}- *${app.job_offer.title}*`,
+      `    • Date : ${formatDate(app.job_offer.scheduled_at)}`,
+      `    • Montant : ${formatAmount(app.job_offer.amount, app.job_offer.payment_flow)}`,
+      `    • Statut : ${statusText}`,
+      `    • Adresse : ${address}`,
+      '',
+    );
+  });
+
+  const actions: string[] = [];
+  if (page > 0) actions.push('P- Page précédente');
+  if (hasMore) actions.push('S- Page suivante');
+  actions.push('M- Menu principal');
+  lines.push(...actions);
+  lines.push('', 'Tapez le numéro pour voir le détail.');
+  return lines.join('\n');
+}
+
 export type MyApplicationDetailParams = {
   jobTitle: string;
   scheduled_at: Date;
@@ -432,10 +484,9 @@ export function formatCancellationToEmployer(params: {
     '',
     '*Actions*:',
     '1- Voir les autres candidatures',
-    "2- Republier l'offre",
-    "3- Supprimer l'offre",
+    "2- Supprimer l'offre",
     '',
-    'Tapez le numéro correspondant.',
+    'Tapez le numéro correspondant, ou *Menu* pour revenir.',
   );
   return lines.join('\n');
 }

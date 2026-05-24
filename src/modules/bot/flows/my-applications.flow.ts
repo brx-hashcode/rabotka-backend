@@ -6,7 +6,7 @@ import {
 } from './cancel-application.flow';
 import { menuMessage } from '../messages/menu.messages';
 import {
-  formatMyApplicationsList,
+  formatMyApplicationsListPage,
   formatMyApplicationDetailWithCancel,
   formatMyApplicationDetailReadOnly,
   formatMyApplicationDetailWaitingPayment,
@@ -15,7 +15,14 @@ import {
   type MyApplicationDetailParams,
 } from '../messages/application.messages';
 import { ApplicationStatus } from '@prisma/client';
-import type { ApplicationService } from '../../application/application.service';
+import {
+  WORKER_ACTIVE_APPLICATION_STATUSES,
+  type ApplicationService,
+} from '../../application/application.service';
+
+/** Page size for the worker "Mes candidatures" list. Mirrors the
+ *  employer "Mes offres" flow. */
+export const MY_APPLICATIONS_PAGE_SIZE = 5;
 import type { BotNotificationService } from '../services/bot-notification.service';
 import type { ContactUnlockService } from '../../contact-unlock/contact-unlock.service';
 import type { WalletService } from '../../wallet/wallet.service';
@@ -210,6 +217,7 @@ async function tryHandleStep1WaitingPaymentReject(params: {
   applicationId: string;
   profile: BotProfile;
   ctx: MyApplicationsContext;
+  state: BotState;
 }): Promise<FlowResult | null> {
   const {
     trimmed,
@@ -218,6 +226,7 @@ async function tryHandleStep1WaitingPaymentReject(params: {
     applicationId,
     profile,
     ctx,
+    state,
   } = params;
   const isRejectChoice =
     (isWaitingPaymentPaidByCurrentUser && trimmed === '1') ||
@@ -226,6 +235,19 @@ async function tryHandleStep1WaitingPaymentReject(params: {
     return null;
   }
 
+  // Workers go through cancel-application.flow so penalty logic is applied
+  if (profile.profile_type === 'WORKER') {
+    const cancelState = getCancelApplicationInitialState(applicationId);
+    const { cancellationThresholdHours } =
+      await ctx.systemConfigService.getFees();
+    const result = await runCancelApplicationFlow(cancelState, '', profile, {
+      ...ctx,
+      cancellationThresholdHours,
+    });
+    return { reply: result.reply, nextState: result.nextState ?? cancelState };
+  }
+
+  // Employers use the unlock reject path (no penalty, just abort unlock)
   const outcome =
     await ctx.contactUnlockService.rejectPendingAttemptByApplication(
       applicationId,
@@ -254,15 +276,46 @@ async function handleStep0(
   const payload = state.payload || {};
   const listMode: MyApplicationsListMode =
     (payload.listMode as MyApplicationsListMode | undefined) ?? 'all';
-  const index = /^[1-9]\d*$/.test(trimmed)
-    ? Number.parseInt(trimmed, 10) - 1
-    : Number.NaN;
+  const currentPage = (payload.page as number | undefined) ?? 0;
+  const totalPages = (payload.totalPages as number | undefined) ?? 1;
+  const normalized = trimmed.toLowerCase();
 
-  if (Number.isNaN(index) || index < 0 || index >= applicationIds.length) {
-    return buildMyApplicationsListState(profile, ctx, listMode);
+  // Pagination commands — mirror the employer Mes offres flow.
+  if (normalized === 's' && currentPage < totalPages - 1) {
+    return buildMyApplicationsListState(
+      profile,
+      ctx,
+      listMode,
+      currentPage + 1,
+    );
+  }
+  if (normalized === 'p' && currentPage > 0) {
+    return buildMyApplicationsListState(
+      profile,
+      ctx,
+      listMode,
+      currentPage - 1,
+    );
+  }
+  if (normalized === 'm') {
+    return { reply: [menuMessage(profile.profile_type)], clearState: true };
   }
 
-  const app = await ctx.applicationService.findById(applicationIds[index]);
+  // Numeric selection — items are numbered *globally* across pages:
+  // page 0 → 1..pageSize, page 1 → pageSize+1..2*pageSize, etc.
+  const isNumeric = /^[1-9]\d*$/.test(trimmed);
+  if (!isNumeric) {
+    return buildMyApplicationsListState(profile, ctx, listMode, currentPage);
+  }
+  const globalChoice = Number.parseInt(trimmed, 10);
+  const pageStart = currentPage * MY_APPLICATIONS_PAGE_SIZE;
+  const localIndex = globalChoice - pageStart - 1;
+  if (localIndex < 0 || localIndex >= applicationIds.length) {
+    // Out of range for this page — just redraw the current page.
+    return buildMyApplicationsListState(profile, ctx, listMode, currentPage);
+  }
+
+  const app = await ctx.applicationService.findById(applicationIds[localIndex]);
   const canAccess =
     app &&
     (app.worker_id === profile.id || app.job_offer.employer_id === profile.id);
@@ -283,7 +336,11 @@ async function handleStep0(
     nextState: {
       ...state,
       step: 1,
-      payload: { ...payload, applicationIds, selectedIndex: index },
+      payload: {
+        ...payload,
+        applicationIds,
+        selectedIndex: localIndex,
+      },
       updatedAt: new Date().toISOString(),
     },
   };
@@ -345,6 +402,7 @@ async function handleStep1(
     applicationId,
     profile,
     ctx,
+    state,
   });
   if (rejectResult) return rejectResult;
 
@@ -366,7 +424,8 @@ async function handleStep1(
     isCancellable,
   );
   if (nav === 'list') {
-    return buildMyApplicationsListState(profile, ctx, listMode);
+    const storedPage = (payload.page as number | undefined) ?? 0;
+    return buildMyApplicationsListState(profile, ctx, listMode, storedPage);
   }
   if (nav === 'menu') {
     return { reply: [menuMessage(profile.profile_type)], clearState: true };
@@ -423,38 +482,67 @@ export async function runMyApplicationsFlow(
 export function getMyApplicationsInitialState(
   applicationIds: string[],
   listMode: MyApplicationsListMode = 'all',
+  page = 0,
+  totalPages = 1,
 ): BotState {
   return {
     flowId: FLOW_IDS.MY_APPLICATIONS,
     step: 0,
-    payload: { applicationIds, listMode },
+    payload: { applicationIds, listMode, page, totalPages },
     updatedAt: new Date().toISOString(),
   };
 }
 
+/**
+ * Fetch + render one page of applications for the My Candidatures /
+ * Paiements en attente lists. `page` is 0-based.
+ *
+ * - `listMode = 'all'` → worker's *active* candidatures only
+ *   (PENDING / ACCEPTED / WAITING_PAYMENT), sorted by created_at DESC.
+ * - `listMode = 'pending_payments'` → WAITING_PAYMENT only.
+ *
+ * Returns a flow result whose `nextState` carries the page index so the
+ * pagination commands (S / P) can navigate without losing context.
+ */
 async function buildMyApplicationsListState(
   profile: BotProfile,
   ctx: MyApplicationsContext,
   listMode: MyApplicationsListMode = 'all',
+  page = 0,
 ): Promise<FlowResult> {
-  const statusFilter =
+  const filter =
     listMode === 'pending_payments'
-      ? ApplicationStatus.WAITING_PAYMENT
-      : undefined;
-  const applications =
+      ? {
+          status: ApplicationStatus.WAITING_PAYMENT,
+          page,
+          pageSize: MY_APPLICATIONS_PAGE_SIZE,
+        }
+      : {
+          statusIn: WORKER_ACTIVE_APPLICATION_STATUSES,
+          page,
+          pageSize: MY_APPLICATIONS_PAGE_SIZE,
+        };
+
+  const { items, total } =
     profile.profile_type === 'WORKER'
-      ? await ctx.applicationService.findByWorker(profile.id, {
-          limit: 20,
-          ...(statusFilter ? { status: statusFilter } : {}),
-        })
-      : await ctx.applicationService.findByEmployer(profile.id, {
-          limit: 20,
-          ...(statusFilter ? { status: statusFilter } : {}),
-        });
-  if (applications.length === 0) {
-    return { reply: [formatMyApplicationsList([])], clearState: true };
+      ? await ctx.applicationService.findByWorker(profile.id, filter)
+      : await ctx.applicationService.findByEmployer(profile.id, filter);
+
+  if (total === 0) {
+    const emptyMsg =
+      listMode === 'pending_payments'
+        ? '✅ *Aucun paiement en attente* pour le moment.\n\nTapez *Menu* pour revenir.'
+        : `Vous n'avez aucune candidature active.\n\nTapez *1* (Trouver une mission) pour voir les offres disponibles, ou *Menu* pour revenir.`;
+    return { reply: [emptyMsg], clearState: true };
   }
-  const list: ApplicationForList[] = applications.map((a) => ({
+
+  // If the requested page is now empty (e.g. items removed since the
+  // last render), fall back to the previous page.
+  if (items.length === 0 && page > 0) {
+    return buildMyApplicationsListState(profile, ctx, listMode, page - 1);
+  }
+
+  const list: ApplicationForList[] = items.map((a) => ({
     id: a.id,
     status: a.status,
     job_offer: {
@@ -467,14 +555,34 @@ async function buildMyApplicationsListState(
       status: a.job_offer.status,
     },
   }));
+
+  const title =
+    listMode === 'pending_payments'
+      ? 'Paiements en attente'
+      : 'Mes candidatures';
+  const totalPages = Math.max(
+    1,
+    Math.ceil(total / MY_APPLICATIONS_PAGE_SIZE),
+  );
+
   return {
-    reply: [formatMyApplicationsList(list)],
+    reply: [
+      formatMyApplicationsListPage({
+        title,
+        applications: list,
+        total,
+        page,
+        pageSize: MY_APPLICATIONS_PAGE_SIZE,
+      }),
+    ],
     nextState: {
       flowId: FLOW_IDS.MY_APPLICATIONS,
       step: 0,
       payload: {
-        applicationIds: applications.map((a) => a.id),
+        applicationIds: items.map((a) => a.id),
         listMode,
+        page,
+        totalPages,
       },
       updatedAt: new Date().toISOString(),
     },

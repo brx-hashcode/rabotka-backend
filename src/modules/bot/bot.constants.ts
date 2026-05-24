@@ -24,6 +24,9 @@ export const FLOW_IDS = {
   RATE_ASSIGNMENT: 'rate_assignment',
   MY_OFFERS: 'my_offers',
   JOB_STATUS_CHECK: 'job_status_check',
+  /** Tiny state machine that handles the 1/2/3 menu shown to an employer
+   *  after a worker cancels their candidature (see formatCancellationToEmployer). */
+  POST_CANCELLATION_ACTIONS: 'post_cancellation_actions',
 } as const;
 
 export const WORKER_MENU_OPTIONS = {
