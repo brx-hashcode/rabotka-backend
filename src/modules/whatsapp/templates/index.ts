@@ -9,9 +9,9 @@ export { accountActivatedMessage } from './account-activated';
 export {
   paymentUseRegisteredNumberPrompt,
   paymentEnterPhonePrompt,
-  paymentChooseOperatorPrompt,
   paymentPendingMessage,
   paymentDirectFailedMessage,
+  paymentOperatorUnknownMessage,
 } from './payment-direct';
 export { paymentApprovedMessage } from './payment-approved';
 export { welcomeActivationMessage } from './welcome-activation';
