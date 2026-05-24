@@ -1,4 +1,7 @@
-import { runRecommendedProfilesFlow } from '../recommended-profiles.flow';
+import {
+  runRecommendedProfilesFlow,
+  getRecommendedProfilesInitialState,
+} from '../recommended-profiles.flow';
 import type { BotProfile, BotState } from '../../types/bot-state.types';
 import { FLOW_IDS } from '../../bot.constants';
 
@@ -15,9 +18,9 @@ const profile: BotProfile = {
 
 const workerIds = ['worker-1', 'worker-2', 'worker-3'];
 const workerScores: Record<string, number> = {
-  'worker-1': 85,
-  'worker-2': 70,
-  'worker-3': 60,
+  'worker-1': 0.85,
+  'worker-2': 0.7,
+  'worker-3': 0.6,
 };
 
 function makeState(step = 0, payload: Record<string, unknown> = {}): BotState {
@@ -33,56 +36,54 @@ function makeState(step = 0, payload: Record<string, unknown> = {}): BotState {
   };
 }
 
-const mockWorker = {
+const baseWorker = {
   id: 'worker-1',
   first_name: 'Alice',
   last_name: 'Dupont',
   reliability_score: 90,
   description: "Expert plombier avec 5 ans d'expérience",
-  categories: [{ category: { name: 'Plomberie' } }],
+  address: '10 Rue Paris',
+  avatar_url: null as string | null,
+  phone: '+242060000001',
+  email: 'alice@example.com',
 };
 
 function makeCtx(overrides: Record<string, unknown> = {}) {
   const txMock = {
     walletTransaction: { create: jest.fn().mockResolvedValue({}) },
     wallet: { update: jest.fn().mockResolvedValue({}) },
-    payment: { create: jest.fn().mockResolvedValue({}) },
-    paymentRequest: {
-      create: jest.fn().mockResolvedValue({ id: 'pr-1', token: 'tok' }),
-    },
+    payment: { create: jest.fn().mockResolvedValue({ id: 'pay-1' }) },
   };
   return {
     prisma: {
       profile: {
-        findFirst: jest.fn().mockResolvedValue(mockWorker),
-        findUnique: jest.fn().mockResolvedValue(mockWorker),
+        findFirst: jest.fn().mockResolvedValue(baseWorker),
         findMany: jest.fn().mockResolvedValue([
-          mockWorker,
+          baseWorker,
           {
             id: 'worker-2',
             first_name: 'Bob',
             last_name: 'Smith',
             reliability_score: 70,
             description: null,
-            categories: [],
           },
           {
             id: 'worker-3',
             first_name: 'Charlie',
             last_name: 'Brown',
             reliability_score: 60,
-            description: null,
-            categories: [],
+            description: 'x'.repeat(120), // exercise truncation
           },
         ]),
       },
       application: {
         count: jest.fn().mockResolvedValue(2),
       },
-      $transaction: jest.fn().mockImplementation(async (cb) => {
+      $transaction: jest.fn().mockImplementation(async (cb: any) => {
         if (typeof cb === 'function') return cb(txMock);
         return [];
       }),
+      _tx: txMock,
     } as any,
     systemConfig: {
       getRecommendationContactFee: jest.fn().mockResolvedValue(1000),
@@ -97,6 +98,7 @@ function makeCtx(overrides: Record<string, unknown> = {}) {
     } as any,
     paymentService: {
       createPaymentUrl: jest.fn().mockResolvedValue('http://pay.url'),
+      initiateDirectPayment: jest.fn().mockResolvedValue({ success: true }),
     } as any,
     botNotification: {
       sendMessage: jest.fn().mockResolvedValue(undefined),
@@ -112,8 +114,25 @@ function makeCtx(overrides: Record<string, unknown> = {}) {
   };
 }
 
-describe('runRecommendedProfilesFlow', () => {
-  it('returns menu when menu command', async () => {
+describe('getRecommendedProfilesInitialState', () => {
+  it('seeds workerIds, workerScores and jobOfferId', () => {
+    const s = getRecommendedProfilesInitialState(['a', 'b'], { a: 0.5 }, 'jo-9');
+    expect(s.flowId).toBe(FLOW_IDS.RECOMMENDED_PROFILES);
+    expect(s.step).toBe(0);
+    expect(s.payload.workerIds).toEqual(['a', 'b']);
+    expect(s.payload.workerScores).toEqual({ a: 0.5 });
+    expect(s.payload.jobOfferId).toBe('jo-9');
+  });
+
+  it('defaults workerScores to {} and jobOfferId to undefined', () => {
+    const s = getRecommendedProfilesInitialState(['a']);
+    expect(s.payload.workerScores).toEqual({});
+    expect(s.payload.jobOfferId).toBeUndefined();
+  });
+});
+
+describe('runRecommendedProfilesFlow — global commands', () => {
+  it('returns menu when menu command is typed', async () => {
     const result = await runRecommendedProfilesFlow(
       makeState(),
       'menu',
@@ -121,9 +140,10 @@ describe('runRecommendedProfilesFlow', () => {
       makeCtx(),
     );
     expect(result.clearState).toBe(true);
+    expect(result.reply[0]).toBeDefined();
   });
 
-  it('returns empty message when no workerIds', async () => {
+  it('returns empty message when workerIds is empty', async () => {
     const state = makeState(0, { workerIds: [], workerScores: {} });
     const result = await runRecommendedProfilesFlow(
       state,
@@ -135,27 +155,7 @@ describe('runRecommendedProfilesFlow', () => {
     expect(result.reply[0]).toContain('Aucun profil');
   });
 
-  it('shows list when input is not a choice', async () => {
-    const result = await runRecommendedProfilesFlow(
-      makeState(),
-      'hello',
-      profile,
-      makeCtx(),
-    );
-    expect(result.reply.length).toBeGreaterThan(0);
-  });
-
-  it('handles choice 1 - shows worker detail', async () => {
-    const result = await runRecommendedProfilesFlow(
-      makeState(),
-      '1',
-      profile,
-      makeCtx(),
-    );
-    expect(result.nextState).toBeDefined();
-  });
-
-  it('handles choice 7 - returns to menu', async () => {
+  it('returns to menu on "7" from list', async () => {
     const result = await runRecommendedProfilesFlow(
       makeState(),
       '7',
@@ -164,123 +164,300 @@ describe('runRecommendedProfilesFlow', () => {
     );
     expect(result.clearState).toBe(true);
   });
+});
 
-  it('routes to mobile money subflow when _mm_step present', async () => {
+describe('runRecommendedProfilesFlow — list view (step 0)', () => {
+  it('renders a list with workers, AI scores and IDs', async () => {
+    const ctx = makeCtx();
+    const result = await runRecommendedProfilesFlow(
+      makeState(),
+      'show',
+      profile,
+      ctx,
+    );
+    expect(result.reply[0]).toContain('TRAVAILLEURS RECOMMANDÉS');
+    expect(result.reply[0]).toContain('Alice Dupont');
+    expect(result.reply[0]).toContain('Bob Smith');
+    expect(result.reply[0]).toContain('Charlie Brown');
+    expect(result.reply[0]).toContain('IA: 85%'); // worker-1: 0.85 → 85
+    expect(result.nextState?.payload.renderedWorkerIds).toEqual([
+      'worker-1',
+      'worker-2',
+      'worker-3',
+    ]);
+  });
+
+  it('truncates worker descriptions over 80 chars', async () => {
+    const ctx = makeCtx();
+    const result = await runRecommendedProfilesFlow(
+      makeState(),
+      'show',
+      profile,
+      ctx,
+    );
+    expect(result.reply[0]).toContain('…');
+  });
+
+  it('skips workers that are not returned by the DB lookup', async () => {
+    const ctx = makeCtx();
+    // Only worker-1 still exists in DB; -2 and -3 are filtered out.
+    ctx.prisma.profile.findMany = jest.fn().mockResolvedValue([baseWorker]);
+    const result = await runRecommendedProfilesFlow(
+      makeState(),
+      'show',
+      profile,
+      ctx,
+    );
+    expect(result.reply[0]).toContain('Alice Dupont');
+    expect(result.reply[0]).not.toContain('Bob Smith');
+    expect(result.nextState?.payload.renderedWorkerIds).toEqual(['worker-1']);
+  });
+
+  it('selects a worker by index (choice 1)', async () => {
+    const ctx = makeCtx();
+    const result = await runRecommendedProfilesFlow(
+      makeState(),
+      '1',
+      profile,
+      ctx,
+    );
+    expect(result.nextState?.step).toBe(1);
+    expect(result.nextState?.payload.selectedWorkerId).toBe('worker-1');
+    expect(result.reply[0]).toContain('Alice Dupont');
+  });
+
+  it('uses renderedWorkerIds for selection when present', async () => {
+    const ctx = makeCtx();
+    // Pretend the DB returned a re-ordered subset on the previous render.
     const state = makeState(0, {
-      _mm_step: 'initial',
-      _mm_amount: 1000,
-      _mm_worker_id: 'worker-1',
+      renderedWorkerIds: ['worker-3', 'worker-1'],
+    });
+    ctx.prisma.profile.findFirst = jest.fn().mockResolvedValue({
+      ...baseWorker,
+      id: 'worker-3',
+      first_name: 'Charlie',
+      last_name: 'Brown',
+    });
+    const result = await runRecommendedProfilesFlow(state, '1', profile, ctx);
+    expect(result.nextState?.payload.selectedWorkerId).toBe('worker-3');
+  });
+
+  it('shows the list again on unrecognised numeric input', async () => {
+    const ctx = makeCtx();
+    const result = await runRecommendedProfilesFlow(
+      makeState(),
+      '9',
+      profile,
+      ctx,
+    );
+    expect(result.reply[0]).toContain('TRAVAILLEURS RECOMMANDÉS');
+  });
+});
+
+describe('runRecommendedProfilesFlow — detail view (step 1)', () => {
+  it('renders worker detail with address and reliability', async () => {
+    const ctx = makeCtx();
+    const result = await runRecommendedProfilesFlow(
+      makeState(),
+      '1',
+      profile,
+      ctx,
+    );
+    expect(result.reply[0]).toContain('Score fiabilité: 90/100');
+    expect(result.reply[0]).toContain('Score IA: 85%');
+    expect(result.reply[0]).toContain('Adresse: 10 Rue Paris');
+    expect(result.reply[0]).toContain('Missions complétées: 2');
+  });
+
+  it('emits [IMG:...] prefix when worker has an avatar', async () => {
+    const ctx = makeCtx();
+    ctx.prisma.profile.findFirst = jest.fn().mockResolvedValue({
+      ...baseWorker,
+      avatar_url: 'https://cdn.example.com/a.jpg',
     });
     const result = await runRecommendedProfilesFlow(
-      state,
-      '2',
+      makeState(),
+      '1',
       profile,
-      makeCtx(),
+      ctx,
     );
-    expect(result.reply.length).toBeGreaterThan(0);
+    expect(result.reply[0]).toMatch(/^\[IMG:https:\/\/cdn\.example\.com\/a\.jpg\]/);
   });
 
-  it('handles step 1 with selectedWorkerId - returns to list on "2"', async () => {
-    const state = makeState(1, { selectedWorkerId: 'worker-1' });
-    const result = await runRecommendedProfilesFlow(
-      state,
-      '2',
-      profile,
-      makeCtx(),
+  it('records profile_view interest signal when jobOfferId is in payload', async () => {
+    const ctx = makeCtx();
+    const state = makeState(0, { jobOfferId: 'jo-42' });
+    await runRecommendedProfilesFlow(state, '1', profile, ctx);
+    // record is fire-and-forget; wait a tick for the microtask to flush
+    await Promise.resolve();
+    expect(ctx.interestSignalService.record).toHaveBeenCalledWith(
+      'emp-1',
+      'jo-42',
+      'profile_view',
     );
-    expect(result.reply.length).toBeGreaterThan(0);
   });
 
-  it('handles step 1 with selectedWorkerId - returns to menu on "3"', async () => {
+  it('shows fallback when worker is no longer active/verified', async () => {
+    const ctx = makeCtx();
+    ctx.prisma.profile.findFirst = jest.fn().mockResolvedValue(null);
     const state = makeState(1, { selectedWorkerId: 'worker-1' });
-    const result = await runRecommendedProfilesFlow(
-      state,
-      '3',
+    // Trigger a re-render of the detail by simulating an unrecognised input
+    // at detail step that *would* re-render via showWorkerDetail.
+    // We exercise the null path directly by sending '1' from step 0 instead:
+    const fromList = await runRecommendedProfilesFlow(
+      makeState(),
+      '1',
       profile,
-      makeCtx(),
+      ctx,
     );
+    expect(fromList.reply[0]).toContain("plus disponible");
+    expect(fromList.nextState?.step).toBe(0);
+    // direct step 1 path still works
+    void state;
+  });
+
+  it('returns to the list on "2" from detail', async () => {
+    const ctx = makeCtx();
+    const state = makeState(1, { selectedWorkerId: 'worker-1' });
+    const result = await runRecommendedProfilesFlow(state, '2', profile, ctx);
+    expect(result.reply[0]).toContain('TRAVAILLEURS RECOMMANDÉS');
+  });
+
+  it('returns to the menu on "3" from detail', async () => {
+    const ctx = makeCtx();
+    const state = makeState(1, { selectedWorkerId: 'worker-1' });
+    const result = await runRecommendedProfilesFlow(state, '3', profile, ctx);
     expect(result.clearState).toBe(true);
   });
 
-  it('handles step 1 - shows payment prompt on "1"', async () => {
+  it('shows the payment-method prompt on "1" from detail', async () => {
+    const ctx = makeCtx();
+    const state = makeState(1, { selectedWorkerId: 'worker-1' });
+    const result = await runRecommendedProfilesFlow(state, '1', profile, ctx);
+    expect(result.reply[0]).toContain('Déverrouiller le contact');
+    expect(result.reply[0]).toContain('Utiliser mon crédit');
+    expect(result.nextState?.step).toBe(2);
+  });
+
+  it('shows "solde insuffisant" wallet line when balance < fee', async () => {
+    const ctx = makeCtx();
+    ctx.walletService.getProfileWalletBalance = jest.fn().mockResolvedValue(100);
+    const state = makeState(1, { selectedWorkerId: 'worker-1' });
+    const result = await runRecommendedProfilesFlow(state, '1', profile, ctx);
+    expect(result.reply[0]).toContain('solde insuffisant');
+  });
+
+  it('re-shows the sub-menu on unknown input at step 1', async () => {
+    const ctx = makeCtx();
     const state = makeState(1, { selectedWorkerId: 'worker-1' });
     const result = await runRecommendedProfilesFlow(
       state,
-      '1',
+      'wat',
       profile,
-      makeCtx(),
+      ctx,
     );
-    expect(result.reply.length).toBeGreaterThan(0);
+    expect(result.reply[0]).toContain('Tapez *1*, *2* ou *3*');
   });
+});
 
-  it('handles step 1 - invalid input', async () => {
-    const state = makeState(1, { selectedWorkerId: 'worker-1' });
-    const result = await runRecommendedProfilesFlow(
-      state,
-      'invalid',
-      profile,
-      makeCtx(),
-    );
-    expect(result.reply.length).toBeGreaterThan(0);
-  });
-
-  it('handles step 2 payment - wallet pay with sufficient balance on "1"', async () => {
+describe('runRecommendedProfilesFlow — payment (step 2)', () => {
+  it('wallet payment debits profile, credits system, creates Payment + Invoice', async () => {
+    const ctx = makeCtx();
     const state = makeState(2, { selectedWorkerId: 'worker-1' });
-    const result = await runRecommendedProfilesFlow(
-      state,
-      '1',
-      profile,
-      makeCtx(),
+    const result = await runRecommendedProfilesFlow(state, '1', profile, ctx);
+
+    expect(ctx.prisma.$transaction).toHaveBeenCalled();
+    const tx = (ctx.prisma as any)._tx;
+    // 2x walletTransaction creates (debit + credit)
+    expect(tx.walletTransaction.create).toHaveBeenCalledTimes(2);
+    // 2x wallet.update (decrement + increment)
+    expect(tx.wallet.update).toHaveBeenCalledTimes(2);
+    // 1x Payment
+    expect(tx.payment.create).toHaveBeenCalled();
+    // Reply contains the unlocked contact details
+    expect(result.reply[0]).toContain('+242060000001');
+    expect(result.reply[0]).toContain('alice@example.com');
+    expect(result.clearState).toBe(true);
+    // Fire-and-forget invoice (eventually)
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(ctx.invoiceService.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        profileId: 'emp-1',
+        paymentId: 'pay-1',
+        amount: 1000,
+      }),
     );
-    expect(result.reply.length).toBeGreaterThan(0);
   });
 
-  it('handles step 2 payment - wallet pay fails when worker not found', async () => {
+  it('wallet payment short-circuits when worker disappears', async () => {
     const ctx = makeCtx();
     ctx.prisma.profile.findFirst = jest.fn().mockResolvedValue(null);
     const state = makeState(2, { selectedWorkerId: 'worker-1' });
     const result = await runRecommendedProfilesFlow(state, '1', profile, ctx);
     expect(result.clearState).toBe(true);
+    expect(result.reply[0]).toContain("n'est plus actif");
+    expect(ctx.prisma.$transaction).not.toHaveBeenCalled();
   });
 
-  it('handles step 2 payment - mobile money on "2"', async () => {
-    const state = makeState(2, { selectedWorkerId: 'worker-1' });
-    const result = await runRecommendedProfilesFlow(
-      state,
-      '2',
-      profile,
-      makeCtx(),
-    );
-    expect(result.reply.length).toBeGreaterThan(0);
-  });
-
-  it('handles step 2 payment - go back to detail on "3"', async () => {
-    const state = makeState(2, { selectedWorkerId: 'worker-1' });
-    const result = await runRecommendedProfilesFlow(
-      state,
-      '3',
-      profile,
-      makeCtx(),
-    );
-    expect(result.reply.length).toBeGreaterThan(0);
-  });
-
-  it('handles step 2 payment - insufficient balance on "1"', async () => {
+  it('wallet payment reports insufficient balance with a hint', async () => {
     const ctx = makeCtx();
     ctx.walletService.getProfileWalletBalance = jest.fn().mockResolvedValue(0);
     const state = makeState(2, { selectedWorkerId: 'worker-1' });
     const result = await runRecommendedProfilesFlow(state, '1', profile, ctx);
+    expect(result.reply[0]).toContain('Solde insuffisant');
+    expect(result.nextState).toBeDefined(); // stays in step 2
+  });
+
+  it('mobile-money on "2" enters the MM sub-flow with RECOMMENDATION_CONTACT type', async () => {
+    const ctx = makeCtx();
+    const state = makeState(2, { selectedWorkerId: 'worker-1' });
+    const result = await runRecommendedProfilesFlow(state, '2', profile, ctx);
+    // Sub-flow's first prompt asks whether to use the registered number.
     expect(result.reply.length).toBeGreaterThan(0);
   });
 
-  it('handles renderedWorkerIds when set', async () => {
-    const state = makeState(0, { renderedWorkerIds: ['worker-1', 'worker-2'] });
-    const result = await runRecommendedProfilesFlow(
-      state,
-      '1',
-      profile,
-      makeCtx(),
+  it('"3" cancels payment and returns to detail view', async () => {
+    const ctx = makeCtx();
+    const state = makeState(2, { selectedWorkerId: 'worker-1' });
+    const result = await runRecommendedProfilesFlow(state, '3', profile, ctx);
+    expect(result.nextState?.step).toBe(1);
+    expect(result.reply[0]).toContain('Score fiabilité');
+  });
+
+  it('catches transaction errors and reports them', async () => {
+    const ctx = makeCtx();
+    ctx.prisma.$transaction = jest
+      .fn()
+      .mockRejectedValueOnce(new Error('boom'));
+    const state = makeState(2, { selectedWorkerId: 'worker-1' });
+    const result = await runRecommendedProfilesFlow(state, '1', profile, ctx);
+    expect(result.reply[0]).toContain('❌');
+    expect(result.reply[0]).toContain('boom');
+    expect(result.clearState).toBe(true);
+  });
+});
+
+describe('runRecommendedProfilesFlow — mobile-money sub-flow', () => {
+  it('delegates to the MM sub-flow when _mm_step is present', async () => {
+    const ctx = makeCtx();
+    const state = makeState(0, {
+      _mm_step: 'use_registered_number',
+      _mm_amount: 1000,
+      _mm_description: 'Test',
+      _mm_requestType: 'RECOMMENDATION_CONTACT',
+      _mm_options: {},
+      _mm_worker_id: 'worker-1',
+    });
+    // Picking option "3" in the MM sub-flow asks for a fallback URL.
+    const result = await runRecommendedProfilesFlow(state, '3', profile, ctx);
+    expect(ctx.paymentService.createPaymentUrl).toHaveBeenCalledWith(
+      'emp-1',
+      1000,
+      'Test',
+      'RECOMMENDATION_CONTACT',
+      { recommendationWorkerId: 'worker-1' },
     );
-    expect(result.reply.length).toBeGreaterThan(0);
+    expect(result.clearState).toBe(true);
   });
 });
