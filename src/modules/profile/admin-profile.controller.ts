@@ -27,6 +27,8 @@ import {
 } from '@nestjs/swagger';
 import { ProfileService } from './profile.service';
 import { LogService } from '../log/log.service';
+import { extractRequestMeta } from '../../common/utils/request-meta.util';
+import type { AdminAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
 import { UserRole } from '@prisma/client';
 import { AdminAuthGuard } from '../auth/guards/admin-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -260,6 +262,19 @@ export class AdminProfileController {
       );
     }
 
+    await this.logService.create({
+      action: 'PROFILE_MESSAGE_SENT',
+      entityType: 'Profile',
+      entityId: id,
+      userId: adminUserId,
+      profileId: id,
+      metadata: {
+        channel: body.channel,
+        attachmentsCount: files?.length ?? 0,
+      },
+      ...extractRequestMeta(req),
+    });
+
     return { success: true };
   }
 
@@ -392,12 +407,13 @@ export class AdminProfileController {
     const result = await this.profileService.updateAvatar(id, file);
     const adminUserId = req.user?.userId;
     await this.logService.create({
-      action: 'AVATAR_UPDATED',
+      action: 'PROFILE_AVATAR_UPDATED',
       entityType: 'Profile',
       entityId: id,
       userId: adminUserId,
       profileId: id,
       metadata: {},
+      ...extractRequestMeta(req),
     });
     return result;
   }
@@ -498,7 +514,7 @@ export class AdminProfileController {
 
     const adminUserId = req.user?.userId;
     await this.logService.create({
-      action: 'STATUS_CHANGED',
+      action: 'PROFILE_STATUS_UPDATED',
       entityType: 'Profile',
       entityId: id,
       userId: adminUserId,
@@ -507,6 +523,7 @@ export class AdminProfileController {
         newStatus: dto.status,
         ...(dto.reason ? { reason: dto.reason } : {}),
       },
+      ...extractRequestMeta(req),
     });
 
     return result;
@@ -520,8 +537,20 @@ export class AdminProfileController {
       'Generates a new WhatsApp verification token and sends the link to the profile phone number.',
   })
   @ApiResponse({ status: 200, description: 'Verification link sent' })
-  async sendVerificationLink(@Param('id') id: string) {
-    return await this.profileService.requestWhatsAppVerification(id);
+  async sendVerificationLink(
+    @Param('id') id: string,
+    @Req() req: AdminAuthenticatedRequest,
+  ) {
+    const result = await this.profileService.requestWhatsAppVerification(id);
+    await this.logService.create({
+      action: 'PROFILE_VERIFICATION_LINK_SENT',
+      entityType: 'Profile',
+      entityId: id,
+      userId: req.user?.userId,
+      profileId: id,
+      ...extractRequestMeta(req),
+    });
+    return result;
   }
 
   @Get(':id/agreement/download')

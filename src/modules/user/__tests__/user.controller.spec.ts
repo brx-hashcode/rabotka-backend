@@ -50,13 +50,24 @@ function makeService() {
   };
 }
 
+const fakeReq = () =>
+  ({
+    user: { userId: 'admin-1' },
+    headers: {},
+    ip: '127.0.0.1',
+    get: () => undefined,
+  }) as any;
+
+const mockLog = { create: jest.fn() };
+
 describe('UserController', () => {
   let controller: UserController;
   let service: ReturnType<typeof makeService>;
 
   beforeEach(() => {
     service = makeService();
-    controller = new UserController(service as any);
+    controller = new UserController(service as any, mockLog as any);
+    mockLog.create.mockClear();
   });
 
   it('list() delegates to service.getList', async () => {
@@ -66,7 +77,7 @@ describe('UserController', () => {
   });
 
   it('createAdmin() returns formatted user', async () => {
-    const result = await controller.createAdmin({
+    const result = await controller.createAdmin(fakeReq(), {
       email: 'j@d.com',
       password: 'pw',
       role: 'ADMIN',
@@ -80,7 +91,7 @@ describe('UserController', () => {
   });
 
   it('updateAdmin() returns formatted user', async () => {
-    const result = await controller.updateAdmin('1', {
+    const result = await controller.updateAdmin(fakeReq(), '1', {
       email: 'j@d.com',
     } as any);
     expect(result).toMatchObject({ id: '1', firstName: 'John' });
@@ -88,19 +99,19 @@ describe('UserController', () => {
   });
 
   it('activate() calls service.activate and returns user', async () => {
-    const result = await controller.activate('1');
+    const result = await controller.activate(fakeReq(), '1');
     expect(service.activate).toHaveBeenCalledWith('1');
     expect(result).toMatchObject({ id: '1', isActive: true });
   });
 
   it('deactivate() calls service.deactivate and returns user', async () => {
-    const result = await controller.deactivate('1');
+    const result = await controller.deactivate(fakeReq(), '1');
     expect(service.deactivate).toHaveBeenCalledWith('1');
     expect(result).toMatchObject({ id: '1', isActive: false });
   });
 
   it('deleteAdmin() returns success', async () => {
-    const result = await controller.deleteAdmin('1');
+    const result = await controller.deleteAdmin(fakeReq(), '1');
     expect(service.deleteAdmin).toHaveBeenCalledWith('1');
     expect(result).toEqual({ success: true });
   });

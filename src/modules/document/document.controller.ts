@@ -26,6 +26,9 @@ import { AdminAuthGuard } from '../auth/guards/admin-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { LogService } from '../log/log.service';
+import type { AdminAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
+import { extractRequestMeta } from '../../common/utils/request-meta.util';
+import { fetchWithTimeout } from '../../common/utils/fetch-with-timeout.util';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { DocumentCategory } from '@prisma/client';
 
@@ -52,7 +55,10 @@ export class DocumentController {
     status: 400,
     description: 'Invalid URL or document is private',
   })
-  async createFromUrl(@Req() req: any, @Body() dto: CreateDocumentFromUrlDto) {
+  async createFromUrl(
+    @Req() req: AdminAuthenticatedRequest,
+    @Body() dto: CreateDocumentFromUrlDto,
+  ) {
     const result = await this.documentService.createFromGoogleDocs({
       title: dto.title,
       category: dto.category,
@@ -69,6 +75,7 @@ export class DocumentController {
         category: dto.category,
         source: 'google_docs',
       },
+      ...extractRequestMeta(req),
     });
     return result;
   }
@@ -81,7 +88,7 @@ export class DocumentController {
   })
   @ApiResponse({ status: 201, description: 'Document created from upload' })
   async createFromUpload(
-    @Req() req: any,
+    @Req() req: AdminAuthenticatedRequest,
     @Body() dto: CreateDocumentFromUploadDto,
   ) {
     const result = await this.documentService.createFromUpload({
@@ -97,6 +104,7 @@ export class DocumentController {
       entityId: result.id,
       userId: req.user.userId,
       metadata: { title: dto.title, category: dto.category, source: 'upload' },
+      ...extractRequestMeta(req),
     });
     return result;
   }
@@ -114,7 +122,7 @@ export class DocumentController {
   async update(
     @Param('id') id: string,
     @Body() dto: UpdateDocumentDto,
-    @Req() req: any,
+    @Req() req: AdminAuthenticatedRequest,
   ) {
     const result = await this.documentService.update(id, dto);
     await this.logService.create({
@@ -122,7 +130,8 @@ export class DocumentController {
       entityType: 'Document',
       entityId: id,
       userId: req.user?.userId,
-      metadata: { fields: dto },
+      metadata: { fields: { ...dto } },
+      ...extractRequestMeta(req),
     });
     return result;
   }
@@ -131,13 +140,17 @@ export class DocumentController {
   @Roles(UserRole.MANAGER)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Delete a document' })
-  async delete(@Param('id') id: string, @Req() req: any) {
+  async delete(
+    @Param('id') id: string,
+    @Req() req: AdminAuthenticatedRequest,
+  ) {
     await this.documentService.delete(id);
     await this.logService.create({
       action: 'DOCUMENT_DELETED',
       entityType: 'Document',
       entityId: id,
       userId: req.user?.userId,
+      ...extractRequestMeta(req),
     });
     return { success: true };
   }
@@ -149,11 +162,20 @@ export class DocumentController {
     @Param('id') id: string,
     @Body() body: { data: Record<string, string> },
     @Res() res: Response,
+    @Req() req: AdminAuthenticatedRequest,
   ) {
     const buffer = await this.documentService.fillDocumentTemplate(
       id,
       body.data ?? {},
     );
+    await this.logService.create({
+      action: 'DOCUMENT_TEMPLATE_FILLED',
+      entityType: 'Document',
+      entityId: id,
+      userId: req.user?.userId,
+      metadata: { format: 'docx' },
+      ...extractRequestMeta(req),
+    });
     res.setHeader(
       'Content-Type',
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -172,11 +194,20 @@ export class DocumentController {
     @Param('id') id: string,
     @Body() body: { data: Record<string, string> },
     @Res() res: Response,
+    @Req() req: AdminAuthenticatedRequest,
   ) {
     const buffer = await this.documentService.fillDocumentTemplateAsPdf(
       id,
       body.data ?? {},
     );
+    await this.logService.create({
+      action: 'DOCUMENT_TEMPLATE_FILLED',
+      entityType: 'Document',
+      entityId: id,
+      userId: req.user?.userId,
+      metadata: { format: 'pdf' },
+      ...extractRequestMeta(req),
+    });
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader(
       'Content-Disposition',
@@ -211,7 +242,9 @@ export class PublicDocumentController {
       policy.file_url.endsWith('.pdf');
 
     if (isMd) {
-      const content = await fetch(policy.file_url).then((r) => r.text());
+      const content = await fetchWithTimeout(policy.file_url, {}, 10_000).then(
+        (r) => r.text(),
+      );
 
       return res
         .setHeader('Content-Type', 'text/markdown; charset=utf-8')
@@ -219,7 +252,7 @@ export class PublicDocumentController {
     }
 
     if (isPdf) {
-      const fileRes = await fetch(policy.file_url);
+      const fileRes = await fetchWithTimeout(policy.file_url, {}, 10_000);
       const buffer = Buffer.from(await fileRes.arrayBuffer());
       return res
         .setHeader('Content-Type', 'application/pdf')

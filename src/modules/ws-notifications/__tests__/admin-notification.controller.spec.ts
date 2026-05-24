@@ -3,6 +3,7 @@ import { AdminNotificationController } from '../admin-notification.controller';
 import { AdminNotificationService } from '../admin-notification.service';
 import { AdminAuthGuard } from '../../auth/guards/admin-auth.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
+import { LogService } from '../../log/log.service';
 
 const mockService = {
   findRecent: jest.fn().mockResolvedValue([{ id: 'n-1' }]),
@@ -12,6 +13,9 @@ const mockService = {
   deleteOne: jest.fn().mockResolvedValue(undefined),
 };
 
+const mockLogService = { create: jest.fn().mockResolvedValue(undefined) };
+const fakeReq = { headers: {}, ip: '127.0.0.1', get: () => undefined } as any;
+
 describe('AdminNotificationController', () => {
   let controller: AdminNotificationController;
 
@@ -19,7 +23,10 @@ describe('AdminNotificationController', () => {
     jest.clearAllMocks();
     const module: TestingModule = await Test.createTestingModule({
       controllers: [AdminNotificationController],
-      providers: [{ provide: AdminNotificationService, useValue: mockService }],
+      providers: [
+        { provide: AdminNotificationService, useValue: mockService },
+        { provide: LogService, useValue: mockLogService },
+      ],
     })
       .overrideGuard(AdminAuthGuard)
       .useValue({ canActivate: () => true })
@@ -40,19 +47,19 @@ describe('AdminNotificationController', () => {
   });
 
   it('markAllRead marks all as read', async () => {
-    const result = await controller.markAllRead();
+    const result = await controller.markAllRead(fakeReq);
     expect(mockService.markAllRead).toHaveBeenCalled();
     expect(result).toEqual({ ok: true });
   });
 
   it('clear clears all notifications', async () => {
-    const result = await controller.clear();
+    const result = await controller.clear(fakeReq);
     expect(mockService.clearAll).toHaveBeenCalled();
     expect(result).toEqual({ ok: true });
   });
 
   it('deleteOne deletes notification by id', async () => {
-    const result = await controller.deleteOne('n-1');
+    const result = await controller.deleteOne(fakeReq, 'n-1');
     expect(mockService.deleteOne).toHaveBeenCalledWith('n-1');
     expect(result).toEqual({ ok: true });
   });

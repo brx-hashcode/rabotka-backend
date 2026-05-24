@@ -3,6 +3,7 @@ import { EventController } from '../event.controller';
 import { EventService } from '../event.service';
 import { AdminAuthGuard } from '../../auth/guards/admin-auth.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
+import { LogService } from '../../log/log.service';
 
 const mockEventService = {
   list: jest.fn().mockResolvedValue({ data: [], total: 0, page: 1, limit: 10 }),
@@ -12,6 +13,14 @@ const mockEventService = {
   remove: jest.fn().mockResolvedValue(undefined),
 };
 
+const fakeReq = (userId = 'user-1') =>
+  ({
+    user: { userId },
+    headers: {},
+    ip: '127.0.0.1',
+    get: () => undefined,
+  }) as any;
+
 describe('EventController', () => {
   let controller: EventController;
 
@@ -19,7 +28,10 @@ describe('EventController', () => {
     jest.clearAllMocks();
     const module: TestingModule = await Test.createTestingModule({
       controllers: [EventController],
-      providers: [{ provide: EventService, useValue: mockEventService }],
+      providers: [
+        { provide: EventService, useValue: mockEventService },
+        { provide: LogService, useValue: { create: jest.fn() } },
+      ],
     })
       .overrideGuard(AdminAuthGuard)
       .useValue({ canActivate: () => true })
@@ -42,8 +54,7 @@ describe('EventController', () => {
   });
 
   it('creates event', async () => {
-    const req = { user: { userId: 'user-1' } };
-    const result = await controller.create(req, {
+    const result = await controller.create(fakeReq(), {
       title: 'New Event',
       description: 'Desc',
       startDate: '2026-06-01T09:00:00Z',
@@ -54,12 +65,12 @@ describe('EventController', () => {
   });
 
   it('updates event', async () => {
-    const result = await controller.update(1, { title: 'Updated' });
+    const result = await controller.update(fakeReq(), 1, { title: 'Updated' });
     expect(result.title).toBe('Updated');
   });
 
   it('removes event', async () => {
-    const result = await controller.remove(1);
+    const result = await controller.remove(fakeReq(), 1);
     expect(result).toEqual({ success: true });
   });
 });

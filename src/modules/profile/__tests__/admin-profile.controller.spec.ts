@@ -144,7 +144,7 @@ describe('AdminProfileController', () => {
           'p1',
           { channel: 'WHATSAPP', message: 'hi' },
           undefined,
-          { user: { userId: 'u1' } },
+          { user: { userId: 'u1' }, headers: {}, ip: '127.0.0.1', get: () => undefined } as any,
         ),
       ).rejects.toThrow(NotFoundException);
     });
@@ -156,7 +156,7 @@ describe('AdminProfileController', () => {
           'p1',
           { channel: 'WHATSAPP', message: '   ' },
           undefined,
-          { user: { userId: 'u1' } },
+          { user: { userId: 'u1' }, headers: {}, ip: '127.0.0.1', get: () => undefined } as any,
         ),
       ).rejects.toThrow(BadRequestException);
     });
@@ -168,7 +168,7 @@ describe('AdminProfileController', () => {
           'p1',
           { channel: 'WHATSAPP', message: 'hello' },
           undefined,
-          { user: { userId: 'u1' } },
+          { user: { userId: 'u1' }, headers: {}, ip: '127.0.0.1', get: () => undefined } as any,
         ),
       ).rejects.toThrow(BadRequestException);
     });
@@ -189,7 +189,7 @@ describe('AdminProfileController', () => {
         'p1',
         { channel: 'WHATSAPP', message: 'hello' },
         undefined,
-        { user: { userId: 'u1' } },
+        { user: { userId: 'u1' }, headers: {}, ip: '127.0.0.1', get: () => undefined } as any,
       );
       expect(whatsApp.sendTextMessage).toHaveBeenCalledWith(
         '+1234',
@@ -207,7 +207,7 @@ describe('AdminProfileController', () => {
           'p1',
           { channel: 'EMAIL', message: 'hello' },
           undefined,
-          { user: { userId: 'u1' } },
+          { user: { userId: 'u1' }, headers: {}, ip: '127.0.0.1', get: () => undefined } as any,
         ),
       ).rejects.toThrow(BadRequestException);
     });
@@ -228,7 +228,7 @@ describe('AdminProfileController', () => {
         'p1',
         { channel: 'EMAIL', message: 'hello' },
         undefined,
-        { user: { userId: 'u1' } },
+        { user: { userId: 'u1' }, headers: {}, ip: '127.0.0.1', get: () => undefined } as any,
       );
       expect(mail.sendMail).toHaveBeenCalled();
       expect(prisma.message.create).toHaveBeenCalled();
@@ -274,7 +274,7 @@ describe('AdminProfileController', () => {
       'p1',
       { decision: 'VERIFIED' as any, reason: 'approved' },
       [],
-      { user: { userId: 'u1' } },
+      { user: { userId: 'u1' }, headers: {}, ip: '127.0.0.1', get: () => undefined } as any,
     );
     expect(profileService.verifyProfileKyc).toHaveBeenCalled();
     expect(logService.create).toHaveBeenCalled();
@@ -296,7 +296,7 @@ describe('AdminProfileController', () => {
     const result = await ctrl.updateStatus(
       'p1',
       { status: 'ACTIVE' as any },
-      { user: { userId: 'u1' } },
+      { user: { userId: 'u1' }, headers: {}, ip: '127.0.0.1', get: () => undefined } as any,
     );
     expect(profileService.updateProfileStatusByAdmin).toHaveBeenCalledWith(
       'p1',
@@ -308,7 +308,12 @@ describe('AdminProfileController', () => {
 
   it('sendVerificationLink() delegates to profileService', async () => {
     const ctrl = makeController();
-    const result = await ctrl.sendVerificationLink('p1');
+    const result = await ctrl.sendVerificationLink('p1', {
+      user: { userId: 'u1' },
+      headers: {},
+      ip: '127.0.0.1',
+      get: () => undefined,
+    } as any);
     expect(result).toEqual({ token: 'tok' });
   });
 });
