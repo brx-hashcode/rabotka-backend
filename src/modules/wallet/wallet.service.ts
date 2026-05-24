@@ -29,6 +29,20 @@ export type AdminWalletTransactionItem = {
   createdAt: string;
 };
 
+export type AdminMobileMoneyTransactionItem = AdminWalletTransactionItem & {
+  gateway: string | null;
+  operator: string | null;
+  description: string | null;
+  status: string;
+};
+
+export type AdminMobileMoneyBalanceResult = {
+  balance: number;
+  transactionCount: number;
+  byOperator: Record<string, number>;
+  byGateway: Record<string, number>;
+};
+
 export type AdminProfileWallet = {
   balance: number;
   transactions: AdminWalletTransactionItem[];
@@ -712,6 +726,187 @@ export class WalletService {
       page,
       limit,
     };
+  }
+
+  async getOrCreateMobileMoneyWallet(): Promise<{ id: string; balance: number }> {
+    let wallet = await this.prisma.wallet.findFirst({
+      where: {
+        owner_type: WalletOwnerType.MOBILE_MONEY,
+        user_id: null,
+        profile_id: null,
+      },
+      orderBy: { created_at: 'asc' },
+    });
+    if (!wallet) {
+      wallet = await this.prisma.wallet.create({
+        data: { owner_type: WalletOwnerType.MOBILE_MONEY },
+      });
+    }
+    return { id: wallet.id, balance: Number(wallet.balance) };
+  }
+
+  async getMobileMoneyBalance(): Promise<AdminMobileMoneyBalanceResult> {
+    const wallet = await this.getOrCreateMobileMoneyWallet();
+
+    const [creditTxs, transactionCount] = await Promise.all([
+      this.prisma.walletTransaction.findMany({
+        where: {
+          wallet_id: wallet.id,
+          type: WalletTransactionType.MOBILE_MONEY_CREDIT,
+        },
+        select: { amount: true, reference_type: true },
+      }),
+      this.prisma.walletTransaction.count({ where: { wallet_id: wallet.id } }),
+    ]);
+
+    const byOperator: Record<string, number> = {};
+    const byGateway: Record<string, number> = {};
+
+    for (const tx of creditTxs) {
+      // reference_type = "payment_request:GATEWAY:OPERATOR"
+      const parts = (tx.reference_type ?? '').split(':');
+      const gateway = parts[1] ?? 'UNKNOWN';
+      const operator = parts[2] ?? 'UNKNOWN';
+      const amount = Number(tx.amount);
+      byOperator[operator] = (byOperator[operator] ?? 0) + amount;
+      byGateway[gateway] = (byGateway[gateway] ?? 0) + amount;
+    }
+
+    return {
+      balance: Number(wallet.balance),
+      transactionCount,
+      byOperator,
+      byGateway,
+    };
+  }
+
+  async listMobileMoneyTransactionsForAdmin(params: {
+    page: number;
+    limit: number;
+    operator?: string;
+    gateway?: string;
+    type?: string;
+    created_from?: string;
+    created_to?: string;
+  }): Promise<{
+    data: AdminMobileMoneyTransactionItem[];
+    total: number;
+    page: number;
+    limit: number;
+  }> {
+    const { page, limit } = params;
+    const wallet = await this.getOrCreateMobileMoneyWallet();
+    const where: Record<string, unknown> = { wallet_id: wallet.id };
+
+    if (params.type) {
+      where.type = params.type as WalletTransactionType;
+    }
+    if (params.operator) {
+      where.reference_type = { contains: params.operator };
+    } else if (params.gateway) {
+      where.reference_type = { contains: params.gateway };
+    }
+    if (params.created_from || params.created_to) {
+      where.created_at = {
+        ...(params.created_from ? { gte: new Date(params.created_from) } : {}),
+        ...(params.created_to
+          ? { lte: new Date(params.created_to + 'T23:59:59.999Z') }
+          : {}),
+      };
+    }
+
+    const [rows, total] = await Promise.all([
+      this.prisma.walletTransaction.findMany({
+        where,
+        select: {
+          id: true,
+          wallet_id: true,
+          type: true,
+          amount: true,
+          reference_type: true,
+          reference_id: true,
+          created_at: true,
+        },
+        orderBy: { created_at: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.walletTransaction.count({ where }),
+    ]);
+
+    return {
+      data: rows.map((r) => {
+        const ref = r.reference_type ?? '';
+        const parts = ref.split(':');
+        const isPaymentRequest = parts[0] === 'payment_request';
+        return {
+          id: r.id,
+          walletId: r.wallet_id,
+          type: r.type,
+          amount: Number(r.amount),
+          referenceType: r.reference_type ?? null,
+          referenceId: r.reference_id ?? null,
+          createdAt: r.created_at.toISOString(),
+          gateway: isPaymentRequest
+            ? (parts[1] ?? 'UNKNOWN')
+            : parts[0] === 'withdrawal'
+              ? (parts[1] || null)
+              : null,
+          operator: isPaymentRequest ? (parts[2] ?? 'UNKNOWN') : null,
+          description: parts[0] === 'withdrawal'
+            ? (parts.slice(2).join(':') || null)
+            : null,
+          status: 'COMPLETED',
+        };
+      }),
+      total,
+      page,
+      limit,
+    };
+  }
+
+  async recordMobileMoneyWithdrawal(
+    amount: number,
+    description?: string,
+    reference?: string,
+  ): Promise<{ walletId: string; newBalance: number; transactionId: string }> {
+    const wallet = await this.getOrCreateMobileMoneyWallet();
+
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.wallet.updateMany({
+        where: { id: wallet.id, balance: { gte: amount } },
+        data: { balance: { decrement: amount } },
+      });
+      if (updated.count === 0) {
+        throw new BadRequestException(
+          'Solde insuffisant dans le portefeuille Mobile Money',
+        );
+      }
+      // encode gateway (reference) and description into reference_type
+      const refType = [
+        'withdrawal',
+        reference ?? '',
+        description ?? '',
+      ].join(':');
+      const txRecord = await tx.walletTransaction.create({
+        data: {
+          wallet_id: wallet.id,
+          type: WalletTransactionType.MOBILE_MONEY_WITHDRAWAL,
+          amount,
+          reference_type: refType,
+          reference_id: null,
+        },
+      });
+      const refreshed = await tx.wallet.findUnique({
+        where: { id: wallet.id },
+        select: { balance: true },
+      });
+      return {
+        walletId: wallet.id,
+        newBalance: Number(refreshed!.balance),
+        transactionId: txRecord.id,
+      };
+    });
   }
 
   async listPaymentsForAdmin(params: {

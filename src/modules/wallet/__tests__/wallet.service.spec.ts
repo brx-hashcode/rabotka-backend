@@ -58,6 +58,7 @@ describe('WalletService', () => {
       walletTransaction: {
         create: jest.fn(),
         findMany: jest.fn().mockResolvedValue([]),
+        count: jest.fn().mockResolvedValue(0),
         aggregate: jest.fn().mockResolvedValue({ _sum: { amount: null } }),
       },
       profile: { findUnique: jest.fn() },
@@ -773,6 +774,191 @@ describe('WalletService', () => {
           'pen-1',
         ),
       ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  const MM_WALLET_ID = 'wallet-mm-1';
+  const mockMobileMoneyWallet = {
+    id: MM_WALLET_ID,
+    owner_type: WalletOwnerType.MOBILE_MONEY,
+    user_id: null,
+    profile_id: null,
+    balance: 0,
+    created_at: new Date(),
+    updated_at: new Date(),
+  };
+
+  describe('getOrCreateMobileMoneyWallet()', () => {
+    it('returns existing mobile money wallet when found', async () => {
+      (prisma.wallet.findFirst as jest.Mock).mockResolvedValue(
+        mockMobileMoneyWallet,
+      );
+
+      const result = await service.getOrCreateMobileMoneyWallet();
+
+      expect(result.id).toBe(MM_WALLET_ID);
+      expect(prisma.wallet.create).not.toHaveBeenCalled();
+    });
+
+    it('creates mobile money wallet when none exists', async () => {
+      (prisma.wallet.findFirst as jest.Mock).mockResolvedValue(null);
+      (prisma.wallet.create as jest.Mock).mockResolvedValue(
+        mockMobileMoneyWallet,
+      );
+
+      const result = await service.getOrCreateMobileMoneyWallet();
+
+      expect(result.id).toBe(MM_WALLET_ID);
+      expect(prisma.wallet.create).toHaveBeenCalledWith({
+        data: { owner_type: WalletOwnerType.MOBILE_MONEY },
+      });
+    });
+  });
+
+  describe('getMobileMoneyBalance()', () => {
+    it('returns balance, transactionCount, and operator/gateway breakdown', async () => {
+      (prisma.wallet.findFirst as jest.Mock).mockResolvedValue({
+        ...mockMobileMoneyWallet,
+        balance: 75000,
+      });
+      (prisma.walletTransaction as any).findMany = jest.fn().mockResolvedValue([
+        {
+          amount: 50000,
+          reference_type: 'payment_request:MONETBIL:CG_MTNMOBILEMONEY',
+        },
+        {
+          amount: 25000,
+          reference_type: 'payment_request:MTN_MOMO:CG_AIRTELMONEY',
+        },
+      ]);
+      (prisma.walletTransaction as any).count = jest.fn().mockResolvedValue(2);
+
+      const result = await service.getMobileMoneyBalance();
+
+      expect(result.balance).toBe(75000);
+      expect(result.transactionCount).toBe(2);
+      expect(result.byOperator['CG_MTNMOBILEMONEY']).toBe(50000);
+      expect(result.byOperator['CG_AIRTELMONEY']).toBe(25000);
+      expect(result.byGateway['MONETBIL']).toBe(50000);
+      expect(result.byGateway['MTN_MOMO']).toBe(25000);
+    });
+  });
+
+  describe('recordMobileMoneyWithdrawal()', () => {
+    it('returns new balance and transaction id on success', async () => {
+      (prisma.wallet.findFirst as jest.Mock).mockResolvedValue({
+        ...mockMobileMoneyWallet,
+        balance: 100000,
+      });
+      const txMock = {
+        wallet: {
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+          findUnique: jest.fn().mockResolvedValue({ balance: 50000 }),
+        },
+        walletTransaction: {
+          create: jest.fn().mockResolvedValue({ id: 'tx-mm-1' }),
+        },
+      };
+      (prisma.$transaction as jest.Mock).mockImplementationOnce((cb: any) =>
+        cb(txMock),
+      );
+
+      const result = await service.recordMobileMoneyWithdrawal(
+        50000,
+        'Bank transfer',
+        'REF-123',
+      );
+
+      expect(result.walletId).toBe(MM_WALLET_ID);
+      expect(result.newBalance).toBe(50000);
+      expect(result.transactionId).toBe('tx-mm-1');
+      expect(txMock.wallet.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: MM_WALLET_ID, balance: { gte: 50000 } },
+        }),
+      );
+      expect(txMock.walletTransaction.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            type: WalletTransactionType.MOBILE_MONEY_WITHDRAWAL,
+            amount: 50000,
+            reference_type: 'withdrawal:REF-123:Bank transfer',
+          }),
+        }),
+      );
+    });
+
+    it('throws BadRequestException when balance insufficient', async () => {
+      (prisma.wallet.findFirst as jest.Mock).mockResolvedValue({
+        ...mockMobileMoneyWallet,
+        balance: 100,
+      });
+      const txMock = {
+        wallet: {
+          updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+          findUnique: jest.fn(),
+        },
+        walletTransaction: { create: jest.fn() },
+      };
+      (prisma.$transaction as jest.Mock).mockImplementationOnce((cb: any) =>
+        cb(txMock),
+      );
+
+      await expect(
+        service.recordMobileMoneyWithdrawal(50000),
+      ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('listMobileMoneyTransactionsForAdmin()', () => {
+    it('queries mobile money wallet and returns paginated result', async () => {
+      (prisma.wallet.findFirst as jest.Mock).mockResolvedValue(
+        mockMobileMoneyWallet,
+      );
+      const mockTx = {
+        id: 'tx-mm-1',
+        wallet_id: MM_WALLET_ID,
+        type: WalletTransactionType.MOBILE_MONEY_CREDIT,
+        amount: 10000,
+        reference_type: 'payment_request:MONETBIL:CG_MTNMOBILEMONEY',
+        reference_id: 'pr-1',
+        created_at: new Date('2026-01-01'),
+      };
+      (prisma.walletTransaction as any).findMany = jest
+        .fn()
+        .mockResolvedValue([mockTx]);
+      (prisma.walletTransaction as any).count = jest.fn().mockResolvedValue(1);
+
+      const result = await service.listMobileMoneyTransactionsForAdmin({
+        page: 1,
+        limit: 20,
+      });
+
+      expect(result.total).toBe(1);
+      expect(result.data[0].gateway).toBe('MONETBIL');
+      expect(result.data[0].operator).toBe('CG_MTNMOBILEMONEY');
+      expect(result.data[0].amount).toBe(10000);
+      expect(
+        (prisma.walletTransaction.findMany as jest.Mock).mock.calls[0][0].where
+          .wallet_id,
+      ).toBe(MM_WALLET_ID);
+    });
+
+    it('applies pagination skip/take math', async () => {
+      (prisma.wallet.findFirst as jest.Mock).mockResolvedValue(
+        mockMobileMoneyWallet,
+      );
+      (prisma.walletTransaction as any).findMany = jest
+        .fn()
+        .mockResolvedValue([]);
+      (prisma.walletTransaction as any).count = jest.fn().mockResolvedValue(0);
+
+      await service.listMobileMoneyTransactionsForAdmin({ page: 3, limit: 10 });
+
+      const call = (prisma.walletTransaction.findMany as jest.Mock).mock
+        .calls[0][0];
+      expect(call.skip).toBe(20);
+      expect(call.take).toBe(10);
     });
   });
 });
