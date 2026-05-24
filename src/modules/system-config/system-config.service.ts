@@ -205,7 +205,7 @@ export class SystemConfigService implements OnModuleInit {
   async getMinNotificationScore(): Promise<number> {
     const val = await this.get('matching.min_notification_score', '0.55');
     const n = parseFloat(val);
-    return isNaN(n) ? 0.55 : n;
+    return Number.isNaN(n) ? 0.55 : n;
   }
 
   async isRecommendationEnabled(): Promise<boolean> {
@@ -215,15 +215,15 @@ export class SystemConfigService implements OnModuleInit {
 
   async getMaxNotificationWorkers(): Promise<number> {
     const val = await this.get('matching.max_notification_workers', '20');
-    const n = parseInt(val, 10);
-    return isNaN(n) || n < 1 ? 20 : n;
+    const n = Number.parseInt(val, 10);
+    return Number.isNaN(n) || n < 1 ? 20 : n;
   }
 
   /** Minimum minutes between two job recommendation notifications for the same worker. */
   async getNotificationCooldownMinutes(): Promise<number> {
     const val = await this.get('matching.notification_cooldown_minutes', '60');
-    const n = parseInt(val, 10);
-    return isNaN(n) || n < 0 ? 60 : n;
+    const n = Number.parseInt(val, 10);
+    return Number.isNaN(n) || n < 0 ? 60 : n;
   }
 
   async getContactInfo() {

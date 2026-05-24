@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ContactUnlockScheduler } from '../contact-unlock.scheduler';
 import { ContactUnlockService } from '../contact-unlock.service';
 import { BotNotificationService } from '../../bot/services/bot-notification.service';
+import { QueueService } from '../../../common/services/queue/queue.service';
 
 const mockContactUnlockService = {
   processExpiredAttempts: jest.fn().mockResolvedValue([]),
@@ -23,6 +24,16 @@ describe('ContactUnlockScheduler', () => {
         ContactUnlockScheduler,
         { provide: ContactUnlockService, useValue: mockContactUnlockService },
         { provide: BotNotificationService, useValue: mockBotNotification },
+        {
+          provide: QueueService,
+          useValue: {
+            addJob: jest.fn(),
+            createWorker: jest.fn().mockReturnValue({ on: jest.fn() }),
+            getQueue: jest
+              .fn()
+              .mockReturnValue({ add: jest.fn(), getJob: jest.fn() }),
+          },
+        },
       ],
     }).compile();
     scheduler = module.get<ContactUnlockScheduler>(ContactUnlockScheduler);

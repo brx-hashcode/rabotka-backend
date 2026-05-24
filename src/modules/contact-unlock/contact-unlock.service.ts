@@ -782,6 +782,50 @@ export class ContactUnlockService {
   }
 
   /**
+   * Called when the worker cancels a WAITING_PAYMENT application.
+   * Refunds any payments already made and marks the unlock attempt as CONVERTED_TO_CREDIT.
+   * Does NOT update the application status (caller already set it to CANCELLED).
+   */
+  async abortPendingUnlockByApplication(applicationId: string): Promise<void> {
+    const attempt = await this.prisma.contactUnlockAttempt.findUnique({
+      where: { application_id: applicationId },
+    });
+    if (!attempt) return;
+    if (
+      attempt.status !== ContactUnlockStatus.PENDING_BOTH &&
+      attempt.status !== ContactUnlockStatus.PENDING_EMPLOYER &&
+      attempt.status !== ContactUnlockStatus.PENDING_WORKER
+    ) {
+      return;
+    }
+    const now = new Date();
+    await this.prisma.$transaction(async (tx) => {
+      if (attempt.employer_paid) {
+        await this.walletService.creditProfileWallet(
+          attempt.employer_id,
+          Number(attempt.employer_amount),
+          WalletTransactionType.CONTACT_UNLOCK_CREDIT_CONVERSION,
+          'contact_unlock_attempt',
+          attempt.id,
+        );
+      }
+      if (attempt.worker_paid) {
+        await this.walletService.creditProfileWallet(
+          attempt.worker_id,
+          Number(attempt.worker_amount),
+          WalletTransactionType.CONTACT_UNLOCK_CREDIT_CONVERSION,
+          'contact_unlock_attempt',
+          attempt.id,
+        );
+      }
+      await tx.contactUnlockAttempt.update({
+        where: { id: attempt.id },
+        data: { status: ContactUnlockStatus.CONVERTED_TO_CREDIT, converted_at: now },
+      });
+    });
+  }
+
+  /**
    * Returns the contact details of the other party if the attempt is UNLOCKED.
    */
   async getContactsIfUnlocked(

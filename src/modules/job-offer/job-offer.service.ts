@@ -17,6 +17,13 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
 import { BotNotificationService } from '../bot/services/bot-notification.service';
 import { MatchingService } from '../matching/matching.service';
+import { GeocodingService } from '../../common/services/geocoding/geocoding.service';
+import type { Coordinates } from '../../common/services/geocoding/geocoding.service';
+import {
+  haversineKm,
+  proximityScore,
+  urgencyScore,
+} from '../../common/services/geocoding/geo.utils';
 import { CreateJobOfferDto } from './dto/create-job-offer.dto';
 import { AdminUpdateJobOfferDto } from './dto/admin-update-job-offer.dto';
 import {
@@ -119,6 +126,7 @@ export class JobOfferService {
     private readonly botNotification: BotNotificationService,
     private readonly eventEmitter: EventEmitter2,
     private readonly matchingService: MatchingService,
+    private readonly geocodingService: GeocodingService,
     @Inject(REDIS_CONNECTION) private readonly redis: Redis,
   ) {}
 
@@ -205,6 +213,23 @@ export class JobOfferService {
       entityId: String(offer.id),
       timestamp: new Date().toISOString(),
     });
+
+    // Geocode address asynchronously (fire-and-forget)
+    this.geocodingService
+      .geocode(offer.address)
+      .then((coords) => {
+        if (!coords) return;
+        return this.prisma.jobOffer.update({
+          where: { id: offer.id },
+          data: { latitude: coords.lat, longitude: coords.lng },
+        });
+      })
+      .catch((err: unknown) =>
+        this.logger.warn(
+          `geocoding failed for offer ${offer.id}`,
+          err instanceof Error ? err.message : String(err),
+        ),
+      );
 
     // Index + notify matching workers asynchronously (fire-and-forget)
     this.matchingService
@@ -314,44 +339,24 @@ export class JobOfferService {
     });
   }
 
-  private mergeOpenSlotOffersIntoList(
-    offers: Prisma.JobOfferGetPayload<{
-      include: {
-        _count: {
-          select: {
-            applications: {
-              where: { status: typeof ApplicationStatus.ACCEPTED };
-            };
-          };
-        };
-      };
-    }>[],
-    listItems: JobOfferListItem[],
-    targetCount: number,
-  ): void {
-    for (const o of offers) {
-      const accepted = o._count.applications;
-      if (!this.offerHasOpenSlots(o.quantity, accepted)) continue;
-      listItems.push(this.toListItem(o, accepted));
-      if (listItems.length >= targetCount) break;
-    }
-  }
-
   async findActive(
     limit = 20,
     cursor?: string,
     excludeAppliedByWorkerId?: string,
+    workerCoords?: Coordinates | null,
   ): Promise<{
     data: JobOfferListItem[];
     nextCursor: string | null;
   }> {
     const targetCount = limit + 1;
-    const listItems: JobOfferListItem[] = [];
+    // Collect raw rows so we can re-sort before converting to list items
+    type RawOffer = Awaited<ReturnType<typeof this.queryOpenSlotCandidateBatch>>[number];
+    const rawItems: RawOffer[] = [];
     let dbCursor: string | undefined = cursor;
     const batchSize = Math.max(limit * 8, limit + 15);
     const maxIterations = 25;
 
-    for (let i = 0; i < maxIterations && listItems.length < targetCount; i++) {
+    for (let i = 0; i < maxIterations && rawItems.length < targetCount; i++) {
       const offers = await this.queryOpenSlotCandidateBatch(
         batchSize,
         dbCursor,
@@ -359,15 +364,37 @@ export class JobOfferService {
       );
       if (offers.length === 0) break;
 
-      this.mergeOpenSlotOffersIntoList(offers, listItems, targetCount);
+      for (const o of offers) {
+        if (!this.offerHasOpenSlots(o.quantity, o._count.applications)) continue;
+        rawItems.push(o);
+        if (rawItems.length >= targetCount) break;
+      }
 
       dbCursor = offers.at(-1)!.id;
       if (offers.length < batchSize) break;
     }
 
-    const hasMore = listItems.length > limit;
-    const data = hasMore ? listItems.slice(0, limit) : listItems;
-    const nextCursor = hasMore ? (data.at(-1)?.id ?? null) : null;
+    // Re-sort by combined score when worker coords are available
+    if (workerCoords && rawItems.length > 0) {
+      rawItems.sort((a, b) => {
+        const scoreOf = (o: RawOffer): number => {
+          const prox =
+            o.latitude != null && o.longitude != null
+              ? proximityScore(
+                  haversineKm(workerCoords, { lat: o.latitude, lng: o.longitude }),
+                )
+              : 0.5;
+          const urgency = urgencyScore(o.scheduled_at);
+          return 0.6 * prox + 0.4 * urgency;
+        };
+        return scoreOf(b) - scoreOf(a);
+      });
+    }
+
+    const hasMore = rawItems.length > limit;
+    const slice = hasMore ? rawItems.slice(0, limit) : rawItems;
+    const data = slice.map((o) => this.toListItem(o, o._count.applications));
+    const nextCursor = hasMore ? (slice.at(-1)?.id ?? null) : null;
 
     return { data, nextCursor };
   }

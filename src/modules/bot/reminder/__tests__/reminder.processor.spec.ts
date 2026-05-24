@@ -10,6 +10,7 @@ jest.spyOn(Logger.prototype, 'debug').mockImplementation(() => {});
 const buildApplication = (overrides: Record<string, unknown> = {}) => ({
   id: 'app-1',
   job_offer_id: 'offer-1',
+  worker_id: 'worker-1',
   status: 'ACCEPTED',
   worker: { phone: '+1234567890' },
   job_offer: {
@@ -73,6 +74,7 @@ describe('ReminderProcessor', () => {
     redis = {
       get: jest.fn().mockResolvedValue(null),
       set: jest.fn().mockResolvedValue('OK'),
+      del: jest.fn().mockResolvedValue(1),
     };
     systemConfigService = {
       getFees: jest.fn().mockResolvedValue({
@@ -302,6 +304,35 @@ describe('ReminderProcessor', () => {
       );
     });
 
+    it('does not double-enqueue reminder_start for auto-started offers', async () => {
+      // notifyAutoStartedOffer should NOT enqueue reminder_start;
+      // the scan's start window is the only producer of those jobs.
+      prisma.jobOffer.findMany
+        .mockResolvedValueOnce([
+          {
+            id: 'offer-filled',
+            title: 'Filled',
+            employer_id: 'emp-filled',
+            payment_flow: 'DAILY',
+            employer: { phone: '+5555', first_name: 'Marie' },
+            applications: [{ id: 'app-filled-1' }],
+          },
+        ]) // offersToAutoStart
+        .mockResolvedValueOnce([]) // openOverdue
+        .mockResolvedValueOnce([]); // start window — no additional offers
+      prisma.application.findMany.mockResolvedValue([] as never);
+      redis.get.mockResolvedValue(null);
+
+      await processor.process({ data: { type: 'scan' } });
+
+      const startJobs = queueService.addJob.mock.calls.filter(
+        (call: unknown[]) =>
+          (call[1] as { type: string })?.type === 'reminder_start',
+      );
+      // No start-window offers match, so zero reminder_start jobs expected
+      expect(startJobs).toHaveLength(0);
+    });
+
     it('does NOT deduct reliability score when FILLED offer reaches scheduled_at', async () => {
       prisma.jobOffer.findMany
         .mockResolvedValueOnce([
@@ -427,6 +458,24 @@ describe('ReminderProcessor', () => {
         data: { type: 'reminder_24h', applicationId: 'app-1' },
       });
       expect(whatsApp.sendTextMessage).not.toHaveBeenCalled();
+    });
+
+    it('sets CANCEL_APPLICATION bot state for the worker after sending', async () => {
+      prisma.application.findUnique.mockResolvedValue(buildApplication());
+
+      await processor.process({
+        data: { type: 'reminder_24h', applicationId: 'app-1' },
+      });
+
+      // Two redis.set calls: one for the dedup key, one for the bot state
+      const setCalls = redis.set.mock.calls;
+      const botStateCall = setCalls.find((call: unknown[]) =>
+        String(call[0]).includes('bot:state:worker-1'),
+      );
+      expect(botStateCall).toBeDefined();
+      const stateValue = JSON.parse(botStateCall[1] as string) as { flowId: string; payload: { applicationId: string } };
+      expect(stateValue.flowId).toBe('cancel_application');
+      expect(stateValue.payload.applicationId).toBe('app-1');
     });
   });
 
@@ -641,6 +690,39 @@ describe('ReminderProcessor', () => {
         },
       });
       expect(whatsApp.sendTextMessage).not.toHaveBeenCalled();
+    });
+
+    it('preserves snoozeCount from existing bot state instead of resetting to 0', async () => {
+      prisma.jobOffer.findUnique = jest.fn().mockResolvedValue({
+        status: JobOfferStatus.IN_PROGRESS,
+        title: 'Test Job',
+        employer: { phone: '+242000001' },
+      });
+      // Simulate existing Redis state with snoozeCount=3
+      redis.get.mockResolvedValueOnce(
+        JSON.stringify({
+          flowId: 'job_status_check',
+          payload: { snoozeCount: 3 },
+        }),
+      );
+
+      await processor.process({
+        data: {
+          type: 'reminder_job_status',
+          jobOfferId: 'offer-1',
+          employerId: 'emp-1',
+          applicationId: 'app-1',
+          paymentFlow: 'DAILY',
+        },
+      });
+
+      const setCalls = redis.set.mock.calls;
+      const stateCall = setCalls.find((call: unknown[]) =>
+        String(call[0]).includes('emp-1'),
+      );
+      expect(stateCall).toBeDefined();
+      const stateValue = JSON.parse(stateCall[1] as string) as { payload: { snoozeCount: number } };
+      expect(stateValue.payload.snoozeCount).toBe(3);
     });
 
     it('handles whatsApp.sendTextMessage failure gracefully', async () => {
