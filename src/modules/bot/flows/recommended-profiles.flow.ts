@@ -103,7 +103,7 @@ export async function runRecommendedProfilesFlow(
   if (workerIds.length === 0) {
     return {
       reply: [
-        "*Aucun profil recommandé pour le moment. Tapez *Menu* pour revenir.*",
+        '*Aucun profil recommandé pour le moment. Tapez *Menu* pour revenir.*',
       ],
       clearState: true,
     };
@@ -428,7 +428,7 @@ async function showList(
     .filter(Boolean) as typeof workers;
 
   const lines = [
-    '*TRAVAILLEURS RECOMMANDÉS*',
+    '*travailleurs recommandés*',
     '',
     ...orderedWorkers.map((w, i) => {
       const aiScore = Math.round((workerScores[w.id] ?? 0) * 100);

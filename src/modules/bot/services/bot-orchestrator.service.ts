@@ -1210,7 +1210,7 @@ export class BotOrchestratorService {
     if (workerResults.length === 0) {
       return [
         [
-          '*TRAVAILLEURS RECOMMANDÉS*',
+          '*travailleurs recommandés*',
           '',
           "Aucun travailleur recommandé pour l'instant. Publiez une offre pour obtenir des recommandations.",
           '',
@@ -1240,7 +1240,7 @@ export class BotOrchestratorService {
     if (eligibleResults.length === 0) {
       return [
         [
-          '*TRAVAILLEURS RECOMMANDÉS*',
+          '*travailleurs recommandés*',
           '',
           'Aucun travailleur qualifié disponible pour le moment.',
           '',
@@ -1283,7 +1283,7 @@ export class BotOrchestratorService {
       .filter(Boolean) as typeof workers;
 
     const lines = [
-      '*TRAVAILLEURS RECOMMANDÉS*',
+      '*travailleurs recommandés*',
       '',
       ...ordered.flatMap((w, i) => {
         const name = `${w.first_name} ${w.last_name}`.trim();
