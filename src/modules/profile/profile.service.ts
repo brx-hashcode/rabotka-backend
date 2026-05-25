@@ -134,7 +134,7 @@ export type AdminKycDocumentItem = {
   id: string;
   documentType: string | null;
   documentCategory: string;
-  documentUrl: string;
+  documentUrl: string | null;
   verificationStatus: string;
   verifiedAt: Date | null;
   verifiedBy: string | null;
@@ -590,23 +590,39 @@ export class ProfileService {
       penaltiesCount: profile._count.penalties,
       unpaidPenaltiesCount,
       kycDocuments: await Promise.all(
-        profile.kyc_documents.map(async (doc) => ({
-          id: doc.id,
-          documentType: doc.document_type,
-          documentCategory: doc.document_category,
-          documentUrl: doc.storage_key
-            ? await this.fileService.getPublicUrl(doc.storage_key)
-            : await this.fileService.getPresignedUrlFromPublicUrl(
-                doc.document_url ?? '',
-              ),
-          verificationStatus: doc.verification_status,
-          verifiedAt: doc.verified_at,
-          verifiedBy: doc.verified_by
-            ? (verifierNames.get(doc.verified_by) ?? doc.verified_by)
-            : null,
-          rejectionReason: doc.rejection_reason,
-          createdAt: doc.created_at,
-        })),
+        profile.kyc_documents.map(async (doc) => {
+          // Resolving a single doc's URL must never fail the whole profile
+          // load — a missing blob (deleted, expired, wrong provider) would
+          // otherwise 500 the entire detail endpoint. Degrade to null and
+          // log so the admin can still review the rest of the profile.
+          let documentUrl: string | null = null;
+          try {
+            documentUrl = doc.storage_key
+              ? await this.fileService.getPublicUrl(doc.storage_key)
+              : await this.fileService.getPresignedUrlFromPublicUrl(
+                  doc.document_url ?? '',
+                );
+          } catch (err) {
+            this.logger.warn(
+              `Failed to resolve URL for kyc_document ${doc.id}: ${
+                err instanceof Error ? err.message : String(err)
+              }`,
+            );
+          }
+          return {
+            id: doc.id,
+            documentType: doc.document_type,
+            documentCategory: doc.document_category,
+            documentUrl,
+            verificationStatus: doc.verification_status,
+            verifiedAt: doc.verified_at,
+            verifiedBy: doc.verified_by
+              ? (verifierNames.get(doc.verified_by) ?? doc.verified_by)
+              : null,
+            rejectionReason: doc.rejection_reason,
+            createdAt: doc.created_at,
+          };
+        }),
       ),
       verificationImages: profile.kyc_verification_images.map((img) => ({
         id: img.id,

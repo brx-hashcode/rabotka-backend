@@ -79,9 +79,9 @@ function makeCtx(overrides: Record<string, unknown> = {}) {
       application: {
         count: jest.fn().mockResolvedValue(2),
       },
-      $transaction: jest.fn().mockImplementation(async (cb: any) => {
+      $transaction: jest.fn().mockImplementation((cb: any) => {
         if (typeof cb === 'function') return cb(txMock);
-        return [];
+        return Promise.resolve([]);
       }),
       _tx: txMock,
     } as any,
@@ -116,7 +116,11 @@ function makeCtx(overrides: Record<string, unknown> = {}) {
 
 describe('getRecommendedProfilesInitialState', () => {
   it('seeds workerIds, workerScores and jobOfferId', () => {
-    const s = getRecommendedProfilesInitialState(['a', 'b'], { a: 0.5 }, 'jo-9');
+    const s = getRecommendedProfilesInitialState(
+      ['a', 'b'],
+      { a: 0.5 },
+      'jo-9',
+    );
     expect(s.flowId).toBe(FLOW_IDS.RECOMMENDED_PROFILES);
     expect(s.step).toBe(0);
     expect(s.payload.workerIds).toEqual(['a', 'b']);
@@ -175,7 +179,7 @@ describe('runRecommendedProfilesFlow — list view (step 0)', () => {
       profile,
       ctx,
     );
-    expect(result.reply[0]).toContain('TRAVAILLEURS RECOMMANDÉS');
+    expect(result.reply[0]).toContain('*travailleurs recommandés*');
     expect(result.reply[0]).toContain('Alice Dupont');
     expect(result.reply[0]).toContain('Bob Smith');
     expect(result.reply[0]).toContain('Charlie Brown');
@@ -250,7 +254,7 @@ describe('runRecommendedProfilesFlow — list view (step 0)', () => {
       profile,
       ctx,
     );
-    expect(result.reply[0]).toContain('TRAVAILLEURS RECOMMANDÉS');
+    expect(result.reply[0]).toContain('*travailleurs recommandés*');
   });
 });
 
@@ -281,7 +285,9 @@ describe('runRecommendedProfilesFlow — detail view (step 1)', () => {
       profile,
       ctx,
     );
-    expect(result.reply[0]).toMatch(/^\[IMG:https:\/\/cdn\.example\.com\/a\.jpg\]/);
+    expect(result.reply[0]).toMatch(
+      /^\[IMG:https:\/\/cdn\.example\.com\/a\.jpg\]/,
+    );
   });
 
   it('records profile_view interest signal when jobOfferId is in payload', async () => {
@@ -310,7 +316,7 @@ describe('runRecommendedProfilesFlow — detail view (step 1)', () => {
       profile,
       ctx,
     );
-    expect(fromList.reply[0]).toContain("plus disponible");
+    expect(fromList.reply[0]).toContain('plus disponible');
     expect(fromList.nextState?.step).toBe(0);
     // direct step 1 path still works
     void state;
@@ -320,7 +326,7 @@ describe('runRecommendedProfilesFlow — detail view (step 1)', () => {
     const ctx = makeCtx();
     const state = makeState(1, { selectedWorkerId: 'worker-1' });
     const result = await runRecommendedProfilesFlow(state, '2', profile, ctx);
-    expect(result.reply[0]).toContain('TRAVAILLEURS RECOMMANDÉS');
+    expect(result.reply[0]).toContain('*travailleurs recommandés*');
   });
 
   it('returns to the menu on "3" from detail', async () => {
@@ -341,7 +347,9 @@ describe('runRecommendedProfilesFlow — detail view (step 1)', () => {
 
   it('shows "solde insuffisant" wallet line when balance < fee', async () => {
     const ctx = makeCtx();
-    ctx.walletService.getProfileWalletBalance = jest.fn().mockResolvedValue(100);
+    ctx.walletService.getProfileWalletBalance = jest
+      .fn()
+      .mockResolvedValue(100);
     const state = makeState(1, { selectedWorkerId: 'worker-1' });
     const result = await runRecommendedProfilesFlow(state, '1', profile, ctx);
     expect(result.reply[0]).toContain('solde insuffisant');
@@ -350,12 +358,7 @@ describe('runRecommendedProfilesFlow — detail view (step 1)', () => {
   it('re-shows the sub-menu on unknown input at step 1', async () => {
     const ctx = makeCtx();
     const state = makeState(1, { selectedWorkerId: 'worker-1' });
-    const result = await runRecommendedProfilesFlow(
-      state,
-      'wat',
-      profile,
-      ctx,
-    );
+    const result = await runRecommendedProfilesFlow(state, 'wat', profile, ctx);
     expect(result.reply[0]).toContain('Tapez *1*, *2* ou *3*');
   });
 });
@@ -367,7 +370,7 @@ describe('runRecommendedProfilesFlow — payment (step 2)', () => {
     const result = await runRecommendedProfilesFlow(state, '1', profile, ctx);
 
     expect(ctx.prisma.$transaction).toHaveBeenCalled();
-    const tx = (ctx.prisma as any)._tx;
+    const tx = ctx.prisma._tx;
     // 2x walletTransaction creates (debit + credit)
     expect(tx.walletTransaction.create).toHaveBeenCalledTimes(2);
     // 2x wallet.update (decrement + increment)
