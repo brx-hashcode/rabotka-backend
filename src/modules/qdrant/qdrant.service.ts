@@ -17,6 +17,60 @@ export const DENSE_DIM = 384;
 export const SPARSE_MODEL = SparseEmbeddingModel.SpladePPEnV1;
 const SEARCH_LIMIT = 30;
 
+const TRANSIENT_ERROR_CODES = new Set([
+  'ECONNRESET',
+  'ETIMEDOUT',
+  'EPIPE',
+  'ECONNREFUSED',
+  'EAI_AGAIN',
+  'UND_ERR_SOCKET',
+]);
+
+/**
+ * Many managed Qdrant providers drop idle TCP sockets after ~30-60s. Single
+ * upserts then fail with `fetch failed` / `ECONNRESET` even though the cluster
+ * is healthy — a fresh connection succeeds immediately. Retrying transient
+ * network errors with a tiny backoff hides this from callers and keeps the
+ * `vector_indexed_at` bookkeeping honest.
+ */
+async function retryTransient<T>(
+  fn: () => Promise<T>,
+  attempts = 3,
+): Promise<T> {
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      const code = extractErrorCode(err);
+      const isTransient = code != null && TRANSIENT_ERROR_CODES.has(code);
+      const isLast = i === attempts - 1;
+      if (!isTransient || isLast) throw err;
+      await new Promise((r) => setTimeout(r, 150 * (i + 1)));
+    }
+  }
+  // Unreachable: loop either returns or throws.
+  throw lastErr;
+}
+
+function extractErrorCode(err: unknown): string | null {
+  if (err == null || typeof err !== 'object') return null;
+  const direct = (err as { code?: unknown }).code;
+  if (typeof direct === 'string') return direct;
+  const cause = (err as { cause?: unknown }).cause;
+  if (cause && typeof cause === 'object') {
+    const c = (cause as { code?: unknown }).code;
+    if (typeof c === 'string') return c;
+  }
+  // Undici wraps as `TypeError: fetch failed` with the real code on .cause.
+  const msg = (err as { message?: unknown }).message;
+  if (typeof msg === 'string' && msg.includes('fetch failed')) {
+    return 'UND_ERR_SOCKET';
+  }
+  return null;
+}
+
 function removeIncompleteFastembedModelDir(
   logger: Logger,
   modelDir: string,
@@ -178,18 +232,20 @@ export class QdrantService implements OnModuleInit {
   ): Promise<void> {
     this.assertPrefix(collectionName);
     const { dense, sparse } = await this.embedHybrid(text);
-    await this.client.upsert(collectionName, {
-      points: [
-        {
-          id,
-          vector: {
-            dense,
-            sparse: { indices: sparse.indices, values: sparse.values },
+    await retryTransient(() =>
+      this.client.upsert(collectionName, {
+        points: [
+          {
+            id,
+            vector: {
+              dense,
+              sparse: { indices: sparse.indices, values: sparse.values },
+            },
+            payload,
           },
-          payload,
-        },
-      ],
-    });
+        ],
+      }),
+    );
   }
 
   async searchHybrid(
@@ -205,19 +261,21 @@ export class QdrantService implements OnModuleInit {
   > {
     this.assertPrefix(collectionName);
     const { dense, sparse } = await this.embedHybrid(text);
-    const results = await this.client.query(collectionName, {
-      prefetch: [
-        { query: dense, using: 'dense', limit: SEARCH_LIMIT },
-        {
-          query: { indices: sparse.indices, values: sparse.values },
-          using: 'sparse',
-          limit: SEARCH_LIMIT,
-        },
-      ],
-      query: { fusion: 'rrf' },
-      limit,
-      with_payload: true,
-    });
+    const results = await retryTransient(() =>
+      this.client.query(collectionName, {
+        prefetch: [
+          { query: dense, using: 'dense', limit: SEARCH_LIMIT },
+          {
+            query: { indices: sparse.indices, values: sparse.values },
+            using: 'sparse',
+            limit: SEARCH_LIMIT,
+          },
+        ],
+        query: { fusion: 'rrf' },
+        limit,
+        with_payload: true,
+      }),
+    );
     return results.points.map((r) => ({
       id: r.id,
       score: r.score,
@@ -240,20 +298,22 @@ export class QdrantService implements OnModuleInit {
   > {
     this.assertPrefix(collectionName);
     const { dense, sparse } = await this.embedHybrid(text);
-    const results = await this.client.query(collectionName, {
-      prefetch: [
-        { query: dense, using: 'dense', limit: prefetchLimit, filter },
-        {
-          query: { indices: sparse.indices, values: sparse.values },
-          using: 'sparse',
-          limit: prefetchLimit,
-          filter,
-        },
-      ],
-      query: { fusion: 'rrf' },
-      limit,
-      with_payload: true,
-    });
+    const results = await retryTransient(() =>
+      this.client.query(collectionName, {
+        prefetch: [
+          { query: dense, using: 'dense', limit: prefetchLimit, filter },
+          {
+            query: { indices: sparse.indices, values: sparse.values },
+            using: 'sparse',
+            limit: prefetchLimit,
+            filter,
+          },
+        ],
+        query: { fusion: 'rrf' },
+        limit,
+        with_payload: true,
+      }),
+    );
     return results.points.map((r) => ({
       id: r.id,
       score: r.score,
@@ -271,7 +331,9 @@ export class QdrantService implements OnModuleInit {
 
   async ensureCollection(collectionName: string): Promise<void> {
     this.assertPrefix(collectionName);
-    const collections = await this.client.getCollections();
+    const collections = await retryTransient(() =>
+      this.client.getCollections(),
+    );
     const exists = collections.collections.some(
       (c) => c.name === collectionName,
     );
@@ -300,7 +362,9 @@ export class QdrantService implements OnModuleInit {
 
   async ensureDenseCollection(collectionName: string): Promise<void> {
     this.assertPrefix(collectionName);
-    const collections = await this.client.getCollections();
+    const collections = await retryTransient(() =>
+      this.client.getCollections(),
+    );
     const exists = collections.collections.some(
       (c) => c.name === collectionName,
     );
@@ -326,9 +390,11 @@ export class QdrantService implements OnModuleInit {
     payload: Record<string, unknown>,
   ): Promise<void> {
     this.assertPrefix(collectionName);
-    await this.client.upsert(collectionName, {
-      points: [{ id, vector: { dense: vector }, payload }],
-    });
+    await retryTransient(() =>
+      this.client.upsert(collectionName, {
+        points: [{ id, vector: { dense: vector }, payload }],
+      }),
+    );
   }
 
   async recommendDense(
@@ -345,19 +411,21 @@ export class QdrantService implements OnModuleInit {
     }>
   > {
     this.assertPrefix(collectionName);
-    const results = await this.client.query(collectionName, {
-      query: {
-        recommend: {
-          positive: positiveVectors,
-          negative: negativeVectors,
-          strategy: 'average_vector',
+    const results = await retryTransient(() =>
+      this.client.query(collectionName, {
+        query: {
+          recommend: {
+            positive: positiveVectors,
+            negative: negativeVectors,
+            strategy: 'average_vector',
+          },
         },
-      },
-      using: 'dense',
-      filter,
-      limit,
-      with_payload: true,
-    });
+        using: 'dense',
+        filter,
+        limit,
+        with_payload: true,
+      }),
+    );
     return results.points.map((r) => ({
       id: r.id,
       score: r.score,

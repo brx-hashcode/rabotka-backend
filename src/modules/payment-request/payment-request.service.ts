@@ -799,7 +799,19 @@ export class PaymentRequestService {
     request: PaymentRequestWithProfile,
     context: PaymentProcessingContext,
   ): Promise<void> {
-    // 1. Create invoice record
+    // 1. Create invoice record. Recommendation-contact payments don't go
+    // through ContactUnlockAttempt (they're a direct unlock), so we surface
+    // the *worker* as the other party instead — otherwise the receipt would
+    // print "ENTITÉ : -" for the entire recommendation flow.
+    const relatedEntity = request.contact_unlock_attempt_id
+      ? {
+          type: 'contact_unlock_attempt' as const,
+          id: request.contact_unlock_attempt_id,
+        }
+      : request.recommendation_worker_id
+        ? { type: 'worker' as const, id: request.recommendation_worker_id }
+        : null;
+
     const invoice = await this.invoiceService.create({
       profileId: request.profile_id,
       paymentRequestId: request.id,
@@ -808,10 +820,8 @@ export class PaymentRequestService {
         context.isContactUnlock || context.isRecommendationContact
           ? InvoiceReason.CONTACT_UNLOCK
           : InvoiceReason.PENALTY,
-      relatedEntityType: request.contact_unlock_attempt_id
-        ? 'contact_unlock_attempt'
-        : undefined,
-      relatedEntityId: request.contact_unlock_attempt_id ?? undefined,
+      relatedEntityType: relatedEntity?.type,
+      relatedEntityId: relatedEntity?.id,
     });
 
     // 2. Generate PDF
