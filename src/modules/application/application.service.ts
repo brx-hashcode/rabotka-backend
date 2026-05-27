@@ -528,6 +528,8 @@ export class ApplicationService {
       throw new BadRequestException("Cette candidature n'est plus en attente");
     }
 
+    let autoRejectedIds: string[] = [];
+
     await this.prisma.$transaction(async (tx) => {
       // Lock the job offer row to prevent concurrent over-acceptance
       await tx.$executeRaw`SELECT id FROM "job_offers" WHERE id = ${application.job_offer_id}::uuid FOR UPDATE`;
@@ -576,7 +578,34 @@ export class ApplicationService {
         },
       });
       await this.contactUnlock.initiateUnlock(applicationId, employerId, tx);
+
+      if (offerStatus === JobOfferStatus.FILLED) {
+        const toAutoReject = await tx.application.findMany({
+          where: {
+            job_offer_id: application.job_offer_id,
+            id: { not: applicationId },
+            status: { in: [ApplicationStatus.PENDING, ApplicationStatus.VIEWED] },
+          },
+          select: { id: true },
+        });
+        autoRejectedIds = toAutoReject.map((a) => a.id);
+
+        if (autoRejectedIds.length > 0) {
+          await tx.application.updateMany({
+            where: { id: { in: autoRejectedIds } },
+            data: { status: ApplicationStatus.REJECTED },
+          });
+        }
+      }
     });
+
+    for (const appId of autoRejectedIds) {
+      this.botNotification
+        .sendApplicationRejectedToWorker(appId)
+        .catch((err: unknown) =>
+          console.warn(`[accept] auto-reject notify failed for ${appId}:`, err),
+        );
+    }
 
     const updated = await this.findById(applicationId);
     if (!updated)
