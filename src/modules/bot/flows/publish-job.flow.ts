@@ -98,13 +98,16 @@ async function handlePublishStep10Confirm(args: StepArgs): Promise<FlowResult> {
     quantity: Number(payload.quantity),
   };
   try {
-    await ctx.jobOfferService.create(profile.id, dto);
+    const created = await ctx.jobOfferService.create(profile.id, dto);
     return {
       reply: [
         [
           `✅ *Votre offre est publiée !*`,
           ``,
           `Votre offre "*${String(payload.title)}*" est maintenant visible et les travailleurs peuvent y postuler.`,
+          ``,
+          `*Référence*: \`${created.reference}\``,
+          `_Partagez cette référence avec un travailleur pour qu'il trouve directement votre offre._`,
           ``,
           `Vous serez notifié dès qu'une candidature est reçue.`,
           ``,

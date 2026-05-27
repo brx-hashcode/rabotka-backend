@@ -1,3 +1,5 @@
+import { generateJobReference } from '../../src/modules/job-offer/utils/job-reference.util';
+
 /**
  * Recommendation & interest-graph test seed.
  *
@@ -479,6 +481,7 @@ export async function seedRecommendationTest(
   // Job 1 — with category (Nettoyage)
   const job1 = await prisma.jobOffer.create({
     data: {
+      reference: generateJobReference(),
       employer_id: mtn.id,
       category_id: nettoyageId,
       title: 'Agents de nettoyage — 3 agences MTN Brazzaville',
@@ -500,6 +503,7 @@ export async function seedRecommendationTest(
   // Job 2 — with category (Gardiennage)
   const job2 = await prisma.jobOffer.create({
     data: {
+      reference: generateJobReference(),
       employer_id: mtn.id,
       category_id: gardiennageId,
       title: 'Agent de sécurité entrepôt MTN — nuit',
@@ -520,6 +524,7 @@ export async function seedRecommendationTest(
   // Job 3 — with category (Manutention)
   const job3 = await prisma.jobOffer.create({
     data: {
+      reference: generateJobReference(),
       employer_id: mtn.id,
       category_id: manutentionId,
       title: 'Manutentionnaire — déchargement équipements réseau MTN',
@@ -539,6 +544,7 @@ export async function seedRecommendationTest(
   // Job 4 — NO category (description-only signal, employer categories as fallback)
   const job4 = await prisma.jobOffer.create({
     data: {
+      reference: generateJobReference(),
       employer_id: mtn.id,
       // no category_id — forces description-based embedding
       title: 'Équipe de nettoyage post-événement MTN Pulse',
@@ -559,6 +565,7 @@ export async function seedRecommendationTest(
   // Job 5 — NO category (vague description — weak signal test)
   const job5 = await prisma.jobOffer.create({
     data: {
+      reference: generateJobReference(),
       employer_id: mtn.id,
       title: 'Besoin d\'aide samedi matin — MTN',
       description:
@@ -575,6 +582,7 @@ export async function seedRecommendationTest(
   // Job 6 — PARTIALLY_FILLED (Nettoyage, 2 of 3 slots taken)
   const job6 = await prisma.jobOffer.create({
     data: {
+      reference: generateJobReference(),
       employer_id: mtn.id,
       category_id: nettoyageId,
       title: 'Nettoyage hebdomadaire agence MTN Poto-Poto',
@@ -594,6 +602,7 @@ export async function seedRecommendationTest(
   // Job 7 — FILLED (no slots, should not appear in regular list)
   const job7 = await prisma.jobOffer.create({
     data: {
+      reference: generateJobReference(),
       employer_id: mtn.id,
       category_id: manutentionId,
       title: 'Manutention — installation antennes relais (fermé)',
@@ -612,6 +621,7 @@ export async function seedRecommendationTest(
   // Job 8 — ACTIVE, Gardiennage, long description to test embedding richness
   const job8 = await prisma.jobOffer.create({
     data: {
+      reference: generateJobReference(),
       employer_id: mtn.id,
       category_id: gardiennageId,
       title: 'Vigile de jour — showroom MTN Centre-ville',
@@ -635,6 +645,7 @@ export async function seedRecommendationTest(
   // Job 9 — Menuiserie (should not appear in MTN recommendations)
   const job9 = await prisma.jobOffer.create({
     data: {
+      reference: generateJobReference(),
       employer_id: ets.id,
       category_id: menuiserieId,
       title: 'Fabrication d\'étagères murales bois massif',
@@ -652,6 +663,7 @@ export async function seedRecommendationTest(
   // Job 10 — Electricité (borderline for Gardiennage workers)
   const job10 = await prisma.jobOffer.create({
     data: {
+      reference: generateJobReference(),
       employer_id: ets.id,
       category_id: electriciteId,
       title: 'Installation électrique immeuble R+3',
@@ -669,6 +681,7 @@ export async function seedRecommendationTest(
   // Job 11 — Coiffure (completely unrelated to MTN's domain)
   const job11 = await prisma.jobOffer.create({
     data: {
+      reference: generateJobReference(),
       employer_id: ets.id,
       category_id: coiffureId,
       title: 'Coiffeuse pour cérémonie de mariage',
@@ -687,6 +700,7 @@ export async function seedRecommendationTest(
   // Job 12 — NO category, off-domain (mécanique)
   const job12 = await prisma.jobOffer.create({
     data: {
+      reference: generateJobReference(),
       employer_id: ets.id,
       title: 'Réparation groupe électrogène chantier',
       description:

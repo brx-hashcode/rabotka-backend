@@ -6,6 +6,7 @@ import {
   AccountStatus,
   ProfileType,
 } from '@prisma/client';
+import { generateJobReference } from '../../src/modules/job-offer/utils/job-reference.util';
 
 const JOB_TITLES = [
   'Manutention entrepôt',
@@ -166,6 +167,7 @@ export async function seedJobOffersAndApplications(
 
     const job = await prisma.jobOffer.create({
       data: {
+        reference: generateJobReference(),
         employer_id: employer.id,
         title: JOB_TITLES[i % JOB_TITLES.length],
         description: JOB_DESCRIPTIONS[i % JOB_DESCRIPTIONS.length],

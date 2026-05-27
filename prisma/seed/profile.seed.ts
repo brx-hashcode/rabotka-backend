@@ -7,6 +7,7 @@ import {
   ApplicationStatus,
   PaymentFlow,
 } from '@prisma/client';
+import { generateJobReference } from '../../src/modules/job-offer/utils/job-reference.util';
 
 const SEED_WORKER_EMAIL = 'fariol+worker@akieni.tech';
 const SEED_EMPLOYER_EMAIL = 'fariol+employer@akieni.tech';
@@ -68,6 +69,7 @@ export async function seedProfiles(prisma: PrismaClient): Promise<void> {
 
   const jobOffer1 = await prisma.jobOffer.create({
     data: {
+      reference: generateJobReference(),
       employer_id: employer.id,
       title: 'Manutention entrepôt',
       description: 'Chargement et déchargement de palettes.',
@@ -85,6 +87,7 @@ export async function seedProfiles(prisma: PrismaClient): Promise<void> {
 
   const jobOffer2 = await prisma.jobOffer.create({
     data: {
+      reference: generateJobReference(),
       employer_id: employer.id,
       title: 'Inventaire stock',
       description: 'Comptage et vérification des stocks.',

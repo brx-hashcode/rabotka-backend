@@ -17,6 +17,7 @@ import {
   CMD_UNLOCK,
   CMD_RECOMMENDED_JOBS,
   CMD_RECOMMENDED_PROFILES,
+  CMD_SEARCH_BY_REF,
 } from '../bot.constants';
 import { stripChatFormattingChars } from '../utils/chat-input';
 
@@ -49,6 +50,8 @@ function matchCommandAlias(
   if (CMD_UNLOCK.includes(normalized)) return 'unlock_contact';
   if (CMD_RECOMMENDED_JOBS.includes(normalized) && isWorker)
     return 'recommended_jobs';
+  if (CMD_SEARCH_BY_REF.includes(normalized) && isWorker)
+    return 'search_by_ref';
   if (CMD_RECOMMENDED_PROFILES.includes(normalized) && isEmployer)
     return 'recommended_profiles';
   return null;
@@ -56,6 +59,7 @@ function matchCommandAlias(
 
 function matchWorkerNumeric(trimmed: string): string | null {
   if (trimmed === WORKER_MENU_OPTIONS.LIST_OFFERS) return 'list_offers';
+  if (trimmed === WORKER_MENU_OPTIONS.SEARCH_BY_REF) return 'search_by_ref';
   if (trimmed === WORKER_MENU_OPTIONS.MY_APPLICATIONS) return 'my_applications';
   if (trimmed === WORKER_MENU_OPTIONS.WAITING_PAYMENTS)
     return 'pending_payments';

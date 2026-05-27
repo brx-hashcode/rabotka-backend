@@ -84,6 +84,11 @@ import {
   getRecommendedProfilesInitialState,
 } from '../flows/recommended-profiles.flow';
 import { runRateAssignmentFlow } from '../flows/rate-assignment.flow';
+import {
+  runSearchByRefFlow,
+  getSearchByRefInitialState,
+  getSearchByRefPromptMessage,
+} from '../flows/search-by-ref.flow';
 import { MatchingService } from '../../matching/matching.service';
 import { QueueService } from '../../../common/services/queue/queue.service';
 import { runRepublishExpiredJobFlow } from '../flows/republish-expired-job.flow';
@@ -722,6 +727,8 @@ export class BotOrchestratorService {
         }),
       [FLOW_IDS.RATE_ASSIGNMENT]: () =>
         runRateAssignmentFlow(state, input, profile, { prisma: this.prisma }),
+      [FLOW_IDS.SEARCH_BY_REF]: () =>
+        runSearchByRefFlow(state, input, profile, ctx),
       [FLOW_IDS.MY_OFFERS]: async () => {
         const currentPage = (state.payload?.page as number) ?? 0;
         const offerIds = (state.payload?.offerIds as string[]) ?? [];
@@ -794,6 +801,7 @@ export class BotOrchestratorService {
               : `${offer.amount.toLocaleString('fr-FR')} FCFA`;
           const detail = [
             `*${offer.title}*`,
+            `*Référence*: \`${offer.reference}\``,
             '',
             `• Date : ${dateStr}`,
             `• Montant : ${amountStr}`,
@@ -900,6 +908,8 @@ export class BotOrchestratorService {
 
       recommended_profiles: () =>
         this.handleRecommendedProfilesCommand(botProfile, profileId),
+
+      search_by_ref: () => this.handleSearchByRefCommand(botProfile, profileId),
     };
 
     const handler = commandHandlers[route.commandId];
@@ -953,6 +963,19 @@ export class BotOrchestratorService {
       await this.botState.set(profileId, listState);
     }
     return [result.message];
+  }
+
+  private async handleSearchByRefCommand(
+    profile: BotProfile,
+    profileId: string,
+  ): Promise<string[]> {
+    if (profile.profile_type !== 'WORKER') {
+      return [
+        '❌ Seuls les travailleurs peuvent rechercher une offre par référence. Tapez *Menu*.',
+      ];
+    }
+    await this.botState.set(profileId, getSearchByRefInitialState());
+    return [getSearchByRefPromptMessage()];
   }
 
   private async handleMyApplicationsCommand(
@@ -1139,6 +1162,7 @@ export class BotOrchestratorService {
       },
       select: {
         id: true,
+        reference: true,
         title: true,
         description: true,
         amount: true,
