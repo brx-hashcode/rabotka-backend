@@ -70,6 +70,7 @@ export class BotCommandsService {
     }
     const offers: OfferListItem[] = data.map((o) => ({
       id: o.id,
+      reference: o.reference,
       title: o.title,
       description: o.description,
       scheduled_at: o.scheduled_at,
@@ -95,6 +96,7 @@ export class BotCommandsService {
     if (!offer) return null;
     return formatOfferDetail({
       id: offer.id,
+      reference: offer.reference,
       title: offer.title,
       description: offer.description,
       scheduled_at: offer.scheduled_at,
@@ -252,6 +254,7 @@ export class BotCommandsService {
       });
       lines.push(
         `${num}- *${title}*`,
+        `    • Réf : \`${o.reference}\``,
         `    • Date : ${dateStr}`,
         `    • Montant : ${o.amount != null ? `${o.amount.toLocaleString('fr-FR')} FCFA` : 'Prix à négocier'}`,
         `    • Statut : ${translateJobOfferStatus(o.status)}`,
@@ -295,6 +298,18 @@ export class BotCommandsService {
         const email = app.worker?.email ?? '';
         const avatarUrl = app.worker?.avatar_url;
         const verificationStatus = app.worker?.verification_status;
+        const workerId = app.worker?.id;
+        const [profileRow, completedMissions] = workerId
+          ? await Promise.all([
+              this.prisma.profile.findUnique({
+                where: { id: workerId },
+                select: { created_at: true },
+              }),
+              this.prisma.application.count({
+                where: { worker_id: workerId, status: 'END' },
+              }),
+            ])
+          : [null, 0];
         allItems.push({
           id: app.id,
           fullName,
@@ -305,6 +320,9 @@ export class BotCommandsService {
           status: verificationStatus ?? app.status,
           avatarUrl: avatarUrl ?? undefined,
           offerTitle: offer.title,
+          description: app.worker?.description ?? null,
+          completedMissions,
+          memberSince: profileRow?.created_at ?? null,
         });
       }
     }

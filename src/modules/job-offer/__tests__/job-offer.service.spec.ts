@@ -37,6 +37,7 @@ const baseDto = {
 
 const mockOffer = {
   id: OFFER_ID,
+  reference: 'RAB-ABCDE',
   employer_id: EMPLOYER_ID,
   title: 'Plombier pour urgence',
   description: 'Réparation fuite eau cuisine',

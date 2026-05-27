@@ -11,6 +11,9 @@ export type CandidatureListItem = {
   status: string;
   avatarUrl?: string | null;
   offerTitle?: string;
+  description?: string | null;
+  completedMissions?: number;
+  memberSince?: Date | string | null;
 };
 
 export function formatCandidaturesListPage(
@@ -54,25 +57,43 @@ export function formatCandidatureDetail(params: {
   score: string | number;
   avatarUrl?: string | null;
   offerTitle?: string;
+  description?: string | null;
+  completedMissions?: number;
+  memberSince?: Date | string | null;
 }): string {
   const statusLabel = candidatureStatusLabel(params.status);
   const bodyLines = [
-    '*Candidature sélectionnée:*',
+    '*Candidature sélectionnée*',
     '',
-    `Nom: ${params.lastName}`,
-    `Prénom: ${params.firstName}`,
-    ...(params.offerTitle ? [`Offre: ${params.offerTitle}`] : []),
-    `Statut: ${statusLabel}`,
-    `Score: ${params.score}/100`,
+    `*Nom*: ${params.lastName}`,
+    `*Prénom*: ${params.firstName}`,
+    ...(params.offerTitle ? [`*Offre*: ${params.offerTitle}`] : []),
+    `*Statut*: ${statusLabel}`,
+    `*Score de fiabilité*: ${params.score}/100`,
+    ...(params.completedMissions !== undefined
+      ? [`*Missions complétées*: ${params.completedMissions}`]
+      : []),
+    ...(params.memberSince
+      ? [
+          `*Membre depuis*: ${new Date(params.memberSince).toLocaleDateString('fr-FR')}`,
+        ]
+      : []),
+  ];
+  if (params.description && params.description.trim().length > 0) {
+    bodyLines.push('', '*Description*:', params.description);
+  }
+  bodyLines.push(
     '',
-    '*Actions:*',
+    '_Coordonnées (téléphone, email) révélées après acceptation et déverrouillage._',
+    '',
+    '*Actions*:',
     '1- Accepter',
     '2- Refuser',
-    '3- Retour',
+    '3- Retour à la liste',
     '4- Menu',
     '',
     '*Tapez le numéro correspondant.*',
-  ];
+  );
   const body = bodyLines.join('\n');
 
   if (params.avatarUrl) {
@@ -417,8 +438,7 @@ export function formatNewApplicationToEmployer(params: {
     '',
     '*Actions*:',
     '1- Accepter le candidat',
-    '2- Voir son profil complet',
-    '3- Refuser',
+    '2- Refuser',
     '',
     'Tapez le numéro correspondant.',
   ].join('\n');

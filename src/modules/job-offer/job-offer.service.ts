@@ -4,6 +4,7 @@ import {
   BadRequestException,
   NotFoundException,
   ForbiddenException,
+  InternalServerErrorException,
   Inject,
 } from '@nestjs/common';
 import Redis from 'ioredis';
@@ -27,12 +28,19 @@ import {
 import { CreateJobOfferDto } from './dto/create-job-offer.dto';
 import { AdminUpdateJobOfferDto } from './dto/admin-update-job-offer.dto';
 import {
+  generateJobReference,
+  isValidReferenceShape,
+  normalizeJobReference,
+} from './utils/job-reference.util';
+import {
   AccountStatus,
   ApplicationStatus,
   JobOfferStatus,
   PaymentFlow,
   Prisma,
 } from '@prisma/client';
+
+const REFERENCE_MAX_ATTEMPTS = 5;
 
 const MIN_SCHEDULED_HOURS_FROM_NOW = 4;
 const TITLE_MIN = 5;
@@ -48,6 +56,7 @@ const QUANTITY_MAX = 100;
 
 export type AdminJobOfferListItem = {
   id: string;
+  reference: string;
   title: string;
   category: { id: string; name: string } | null;
   description: string;
@@ -90,6 +99,7 @@ export type AdminJobOfferDetailResponse = AdminJobOfferListItem & {
 
 export type JobOfferListItem = {
   id: string;
+  reference: string;
   title: string;
   description: string;
   scheduled_at: Date;
@@ -189,21 +199,45 @@ export class JobOfferService {
       );
     }
 
-    const offer = await this.prisma.jobOffer.create({
-      data: {
-        employer_id: employerId,
-        title: dto.title.trim(),
-        description: dto.description.trim(),
-        scheduled_at: scheduledAt,
-        amount: dto.amount,
-        payment_flow: dto.payment_flow,
-        address: dto.address.trim(),
-        note: dto.note?.trim() ?? null,
-        quantity: dto.quantity ?? 1,
-        status: JobOfferStatus.ACTIVE,
-        ...(dto.category_id ? { category_id: dto.category_id } : {}),
-      },
-    });
+    const baseData = {
+      employer_id: employerId,
+      title: dto.title.trim(),
+      description: dto.description.trim(),
+      scheduled_at: scheduledAt,
+      amount: dto.amount,
+      payment_flow: dto.payment_flow,
+      address: dto.address.trim(),
+      note: dto.note?.trim() ?? null,
+      quantity: dto.quantity ?? 1,
+      status: JobOfferStatus.ACTIVE,
+      ...(dto.category_id ? { category_id: dto.category_id } : {}),
+    };
+
+    let offer: Awaited<ReturnType<typeof this.prisma.jobOffer.create>> | null =
+      null;
+    for (let attempt = 0; attempt < REFERENCE_MAX_ATTEMPTS; attempt++) {
+      try {
+        offer = await this.prisma.jobOffer.create({
+          data: { ...baseData, reference: generateJobReference() },
+        });
+        break;
+      } catch (err) {
+        if (
+          err instanceof Prisma.PrismaClientKnownRequestError &&
+          err.code === 'P2002' &&
+          Array.isArray(err.meta?.target) &&
+          (err.meta?.target as string[]).includes('reference')
+        ) {
+          continue;
+        }
+        throw err;
+      }
+    }
+    if (!offer) {
+      throw new InternalServerErrorException(
+        'Impossible de générer une référence unique pour l\'offre',
+      );
+    }
 
     this.eventEmitter.emit(AdminNotificationEvent.JOB_OFFER_CREATED, {
       event: AdminNotificationEvent.JOB_OFFER_CREATED,
@@ -402,6 +436,44 @@ export class JobOfferService {
   async findById(id: string): Promise<JobOfferDetail | null> {
     const offer = await this.prisma.jobOffer.findUnique({
       where: { id },
+      include: {
+        employer: {
+          select: {
+            id: true,
+            first_name: true,
+            last_name: true,
+            phone: true,
+            reliability_score: true,
+          },
+        },
+        _count: {
+          select: {
+            applications: { where: { status: 'ACCEPTED' } },
+          },
+        },
+      },
+    });
+    if (!offer) return null;
+
+    return {
+      ...this.toListItem(offer, offer._count.applications),
+      employer: offer.employer
+        ? {
+            id: offer.employer.id,
+            first_name: offer.employer.first_name,
+            last_name: offer.employer.last_name,
+            phone: offer.employer.phone,
+            reliability_score: offer.employer.reliability_score,
+          }
+        : undefined,
+    };
+  }
+
+  async findByReference(ref: string): Promise<JobOfferDetail | null> {
+    const normalized = normalizeJobReference(ref);
+    if (!isValidReferenceShape(normalized)) return null;
+    const offer = await this.prisma.jobOffer.findUnique({
+      where: { reference: normalized },
       include: {
         employer: {
           select: {
@@ -643,6 +715,7 @@ export class JobOfferService {
 
     const data: AdminJobOfferListItem[] = offers.map((o) => ({
       id: o.id,
+      reference: o.reference,
       title: o.title,
       category:
         o.category == null
@@ -721,6 +794,7 @@ export class JobOfferService {
 
     return {
       id: offer.id,
+      reference: offer.reference,
       title: offer.title,
       category:
         offer.category == null
@@ -842,6 +916,7 @@ export class JobOfferService {
   private toListItem(
     offer: {
       id: string;
+      reference: string;
       title: string;
       description: string;
       scheduled_at: Date;
@@ -858,6 +933,7 @@ export class JobOfferService {
   ): JobOfferListItem {
     return {
       id: offer.id,
+      reference: offer.reference,
       title: offer.title,
       description: offer.description,
       scheduled_at: offer.scheduled_at,

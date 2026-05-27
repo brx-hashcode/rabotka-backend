@@ -928,6 +928,7 @@ export class PaymentRequestService {
       });
       if (!worker) return;
 
+      const waDigits = worker.phone ? worker.phone.replace(/\D/g, '') : null;
       const contactLines = [
         '🔓 *Contact déverrouillé avec succès !*',
         '',
@@ -935,6 +936,7 @@ export class PaymentRequestService {
         `• *Prénom* : ${worker.first_name ?? '—'}`,
         `• *Nom* : ${worker.last_name ?? '—'}`,
         ...(worker.phone ? [`• *Téléphone* : ${worker.phone}`] : []),
+        ...(waDigits ? [`• *WhatsApp* : https://wa.me/${waDigits}`] : []),
         ...(worker.email ? [`• *Email* : ${worker.email}`] : []),
         '',
         'Tapez *Menu* pour retourner au menu principal.',

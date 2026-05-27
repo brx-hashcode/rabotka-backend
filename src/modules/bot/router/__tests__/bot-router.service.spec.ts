@@ -129,16 +129,24 @@ describe('BotRouterService', () => {
   });
 
   describe('numeric menu options', () => {
-    it('routes worker "3" to pending_payments', () => {
-      const result = service.route('3', workerProfile, null);
+    it('routes worker "2" to search_by_ref', () => {
+      const result = service.route('2', workerProfile, null);
+      expect(result).toEqual({
+        type: 'command',
+        commandId: 'search_by_ref',
+      });
+    });
+
+    it('routes worker "4" to pending_payments', () => {
+      const result = service.route('4', workerProfile, null);
       expect(result).toEqual({
         type: 'command',
         commandId: 'pending_payments',
       });
     });
 
-    it('routes worker "4" to recommended_jobs', () => {
-      const result = service.route('4', workerProfile, null);
+    it('routes worker "5" to recommended_jobs', () => {
+      const result = service.route('5', workerProfile, null);
       expect(result).toEqual({
         type: 'command',
         commandId: 'recommended_jobs',

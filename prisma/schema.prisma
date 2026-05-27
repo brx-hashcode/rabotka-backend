@@ -391,6 +391,7 @@ model JobOffer {
   updated_at   DateTime       @updatedAt
   employer_id  String         @db.Uuid
   category_id  String?        @db.Uuid
+  reference    String         @unique
   title        String
   description  String         @db.Text
   scheduled_at DateTime
