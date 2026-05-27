@@ -17,6 +17,7 @@ import {
 } from '../messages/application.messages';
 import {
   formatContactUnlockedMessage,
+  formatContactUnlockPrompt,
   formatContactUnlockExpiredConversion,
 } from '../messages/contact-unlock.messages';
 import { formatKycValidatedMessage } from '../messages/notifications.messages';
@@ -148,15 +149,18 @@ export class BotNotificationService {
         const balance = await this.walletService.getProfileWalletBalance(
           app.worker_id,
         );
+        const unlockPrompt = formatContactUnlockPrompt({
+          name: employerName,
+          amount: fees.workerFeeFcfa,
+          balance,
+          profileType: 'WORKER',
+        });
         const text = [
           `🎉 *Candidature acceptée !*`,
           ``,
           `*${employerName}* a accepté votre candidature pour l'offre "${app.job_offer.title}".`,
           ``,
-          `Pour voir ses coordonnées, vous devez débloquer le contact (*${fees.workerFeeFcfa} FCFA*).`,
-          `Votre solde actuel : *${balance} FCFA*`,
-          ``,
-          `Tapez *1* pour débloquer le contact maintenant, ou *Menu* pour revenir plus tard.`,
+          unlockPrompt,
         ].join('\n');
 
         await this.whatsApp.sendTextMessage(app.worker.phone, text);
