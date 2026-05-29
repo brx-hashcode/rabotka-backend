@@ -50,10 +50,13 @@ export class BotCommandsService {
     offerIds?: string[];
     nextCursor?: string | null;
   }> {
-    const workerRow = await this.prisma.profile.findUnique({
-      where: { id: profile.id },
-      select: { latitude: true, longitude: true },
-    });
+    const [workerRow, workerCategoryIds] = await Promise.all([
+      this.prisma.profile.findUnique({
+        where: { id: profile.id },
+        select: { latitude: true, longitude: true },
+      }),
+      this.jobOfferService.getWorkerTopCategories(profile.id),
+    ]);
     const workerCoords =
       workerRow?.latitude != null && workerRow.longitude != null
         ? { lat: workerRow.latitude, lng: workerRow.longitude }
@@ -64,6 +67,7 @@ export class BotCommandsService {
       pageCursor,
       profile.id,
       workerCoords,
+      workerCategoryIds,
     );
     if (data.length === 0) {
       return { message: formatNoOffersAvailable() };
