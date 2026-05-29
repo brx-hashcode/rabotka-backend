@@ -329,48 +329,133 @@ export class JobOfferService {
     return accepted < quantity;
   }
 
-  private async queryOpenSlotCandidateBatch(
-    take: number,
-    dbCursor: string | undefined,
-    excludeAppliedByWorkerId?: string,
-  ): Promise<
-    Prisma.JobOfferGetPayload<{
-      include: {
-        _count: {
-          select: {
-            applications: {
-              where: { status: typeof ApplicationStatus.ACCEPTED };
-            };
-          };
-        };
-      };
-    }>[]
-  > {
-    return this.prisma.jobOffer.findMany({
-      take,
-      ...(dbCursor ? { cursor: { id: dbCursor }, skip: 1 } : {}),
-      where: {
-        status: {
-          in: [JobOfferStatus.ACTIVE, JobOfferStatus.PARTIALLY_FILLED],
-        },
-        scheduled_at: { gt: new Date(Date.now() + 2 * 60 * 60 * 1000) },
-        ...(excludeAppliedByWorkerId
-          ? {
-              applications: {
-                none: { worker_id: excludeAppliedByWorkerId },
-              },
-            }
-          : {}),
-      },
-      orderBy: [{ scheduled_at: 'asc' }, { created_at: 'desc' }],
-      include: {
-        _count: {
-          select: {
-            applications: { where: { status: ApplicationStatus.ACCEPTED } },
-          },
-        },
-      },
+  /**
+   * Fetches worker's top applied-to category IDs (up to 3), ordered by
+   * application count descending. Used to boost category-matched offers.
+   */
+  async getWorkerTopCategories(workerId: string): Promise<string[]> {
+    const rows = await this.prisma.application.groupBy({
+      by: ['job_offer_id'],
+      where: { worker_id: workerId },
+      _count: { job_offer_id: true },
+      orderBy: { _count: { job_offer_id: 'desc' } },
+      take: 20,
     });
+    if (rows.length === 0) return [];
+
+    const offerIds = rows.map((r) => r.job_offer_id);
+    const offers = await this.prisma.jobOffer.findMany({
+      where: { id: { in: offerIds }, category_id: { not: null } },
+      select: { category_id: true },
+    });
+
+    const counts = new Map<string, number>();
+    for (const o of offers) {
+      if (!o.category_id) continue;
+      counts.set(o.category_id, (counts.get(o.category_id) ?? 0) + 1);
+    }
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([id]) => id);
+  }
+
+  /**
+   * Single-query replacement for the old batch-loop approach.
+   * Uses a raw SQL HAVING clause to filter out full offers directly in Postgres,
+   * avoiding up to 25 round-trips.
+   */
+  private async queryOpenSlots(params: {
+    take: number;
+    cursorId?: string;
+    excludeWorkerId?: string;
+    minScheduledAt: Date;
+  }): Promise<
+    Array<{
+      id: string;
+      reference: string;
+      title: string;
+      description: string;
+      scheduled_at: Date;
+      amount: unknown;
+      payment_flow: PaymentFlow | null;
+      address: string;
+      latitude: number | null;
+      longitude: number | null;
+      note: string | null;
+      quantity: number;
+      status: string;
+      employer_id: string;
+      category_id: string | null;
+      created_at: Date;
+      accepted_count: bigint;
+    }>
+  > {
+    const { take, cursorId, excludeWorkerId, minScheduledAt } = params;
+
+    // Prisma doesn't support HAVING on aggregates in findMany so we use $queryRaw.
+    // Parameters are passed positionally as $1, $2, … to prevent SQL injection.
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        id: string;
+        reference: string;
+        title: string;
+        description: string;
+        scheduled_at: Date;
+        amount: unknown;
+        payment_flow: PaymentFlow | null;
+        address: string;
+        latitude: number | null;
+        longitude: number | null;
+        note: string | null;
+        quantity: number;
+        status: string;
+        employer_id: string;
+        category_id: string | null;
+        created_at: Date;
+        accepted_count: bigint;
+      }>
+    >`
+      SELECT
+        jo.id,
+        jo.reference,
+        jo.title,
+        jo.description,
+        jo.scheduled_at,
+        jo.amount,
+        jo.payment_flow,
+        jo.address,
+        jo.latitude,
+        jo.longitude,
+        jo.note,
+        jo.quantity,
+        jo.status,
+        jo.employer_id,
+        jo.category_id,
+        jo.created_at,
+        COUNT(a.id) FILTER (WHERE a.status = 'ACCEPTED') AS accepted_count
+      FROM job_offers jo
+      LEFT JOIN applications a ON a.job_offer_id = jo.id
+      WHERE
+        jo.status IN ('ACTIVE', 'PARTIALLY_FILLED')
+        AND jo.scheduled_at > ${minScheduledAt}
+        ${cursorId ? Prisma.sql`AND jo.id > ${cursorId}::uuid` : Prisma.empty}
+        ${
+          excludeWorkerId
+            ? Prisma.sql`AND NOT EXISTS (
+                SELECT 1 FROM applications ex
+                WHERE ex.job_offer_id = jo.id
+                  AND ex.worker_id = ${excludeWorkerId}::uuid
+              )`
+            : Prisma.empty
+        }
+      GROUP BY jo.id
+      HAVING COUNT(a.id) FILTER (WHERE a.status = 'ACCEPTED') < jo.quantity
+      ORDER BY jo.scheduled_at ASC, jo.created_at DESC
+      LIMIT ${take}
+    `;
+
+    return rows;
   }
 
   async findActive(
@@ -378,56 +463,50 @@ export class JobOfferService {
     cursor?: string,
     excludeAppliedByWorkerId?: string,
     workerCoords?: Coordinates | null,
+    workerCategoryIds?: string[],
   ): Promise<{
     data: JobOfferListItem[];
     nextCursor: string | null;
   }> {
     const targetCount = limit + 1;
-    // Collect raw rows so we can re-sort before converting to list items
-    type RawOffer = Awaited<ReturnType<typeof this.queryOpenSlotCandidateBatch>>[number];
-    const rawItems: RawOffer[] = [];
-    let dbCursor: string | undefined = cursor;
-    const batchSize = Math.max(limit * 8, limit + 15);
-    const maxIterations = 25;
+    const minScheduledAt = new Date(Date.now() + 2 * 60 * 60 * 1000);
 
-    for (let i = 0; i < maxIterations && rawItems.length < targetCount; i++) {
-      const offers = await this.queryOpenSlotCandidateBatch(
-        batchSize,
-        dbCursor,
-        excludeAppliedByWorkerId,
-      );
-      if (offers.length === 0) break;
+    const rows = await this.queryOpenSlots({
+      take: targetCount,
+      cursorId: cursor,
+      excludeWorkerId: excludeAppliedByWorkerId,
+      minScheduledAt,
+    });
 
-      for (const o of offers) {
-        if (!this.offerHasOpenSlots(o.quantity, o._count.applications)) continue;
-        rawItems.push(o);
-        if (rawItems.length >= targetCount) break;
-      }
+    const categorySet = new Set(workerCategoryIds ?? []);
 
-      dbCursor = offers.at(-1)!.id;
-      if (offers.length < batchSize) break;
-    }
-
-    // Re-sort by combined score when worker coords are available
-    if (workerCoords && rawItems.length > 0) {
-      rawItems.sort((a, b) => {
-        const scoreOf = (o: RawOffer): number => {
+    // Score and sort: proximity (if coords) + urgency + category affinity
+    if (rows.length > 0 && (workerCoords || categorySet.size > 0)) {
+      rows.sort((a, b) => {
+        const scoreOf = (o: (typeof rows)[number]): number => {
           const prox =
-            o.latitude != null && o.longitude != null
+            workerCoords && o.latitude != null && o.longitude != null
               ? proximityScore(
-                  haversineKm(workerCoords, { lat: o.latitude, lng: o.longitude }),
+                  haversineKm(workerCoords, {
+                    lat: o.latitude,
+                    lng: o.longitude,
+                  }),
                 )
               : 0.5;
           const urgency = urgencyScore(o.scheduled_at);
-          return 0.6 * prox + 0.4 * urgency;
+          const category =
+            o.category_id && categorySet.has(o.category_id) ? 1.0 : 0.0;
+          return 0.45 * prox + 0.3 * urgency + 0.25 * category;
         };
         return scoreOf(b) - scoreOf(a);
       });
     }
 
-    const hasMore = rawItems.length > limit;
-    const slice = hasMore ? rawItems.slice(0, limit) : rawItems;
-    const data = slice.map((o) => this.toListItem(o, o._count.applications));
+    const hasMore = rows.length > limit;
+    const slice = hasMore ? rows.slice(0, limit) : rows;
+    const data = slice.map((o) =>
+      this.toListItem(o, Number(o.accepted_count)),
+    );
     const nextCursor = hasMore ? (slice.at(-1)?.id ?? null) : null;
 
     return { data, nextCursor };
