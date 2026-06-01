@@ -352,7 +352,7 @@ describe('runRecommendedProfilesFlow — detail view (step 1)', () => {
       .mockResolvedValue(100);
     const state = makeState(1, { selectedWorkerId: 'worker-1' });
     const result = await runRecommendedProfilesFlow(state, '1', profile, ctx);
-    expect(result.reply[0]).toContain('solde insuffisant');
+    expect(result.reply[0]).toContain('Solde insuffisant');
   });
 
   it('re-shows the sub-menu on unknown input at step 1', async () => {

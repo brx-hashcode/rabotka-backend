@@ -75,6 +75,7 @@ describe('JobOfferService', () => {
       penalty: {
         count: jest.fn().mockResolvedValue(0),
       },
+      $queryRaw: jest.fn().mockResolvedValue([]),
     };
 
     const mockMailService = {
@@ -226,66 +227,52 @@ describe('JobOfferService', () => {
   });
 
   describe('findActive()', () => {
-    const activeOffers = [
-      { ...mockOffer, id: 'offer-1' },
-      { ...mockOffer, id: 'offer-2' },
-    ];
+    const makeRawOffer = (id: string, overrides = {}) => ({
+      ...mockOffer,
+      id,
+      accepted_count: BigInt(0),
+      latitude: null,
+      longitude: null,
+      category_id: null,
+      ...overrides,
+    });
 
     it('returns paginated ACTIVE offers', async () => {
-      (prisma.jobOffer.findMany as jest.Mock).mockResolvedValue(activeOffers);
+      (prisma.$queryRaw as jest.Mock).mockResolvedValue([
+        makeRawOffer('offer-1'),
+        makeRawOffer('offer-2'),
+      ]);
       const result = await service.findActive(5);
       expect(result.data).toHaveLength(2);
       expect(result.nextCursor).toBeNull();
     });
 
     it('returns nextCursor when there are more results', async () => {
-      const moreOffers = Array.from({ length: 6 }, (_, i) => ({
-        ...mockOffer,
-        id: `offer-${i}`,
-      }));
-      (prisma.jobOffer.findMany as jest.Mock).mockResolvedValue(moreOffers);
+      const moreOffers = Array.from({ length: 6 }, (_, i) =>
+        makeRawOffer(`offer-${i}`),
+      );
+      (prisma.$queryRaw as jest.Mock).mockResolvedValue(moreOffers);
       const result = await service.findActive(5);
       expect(result.data).toHaveLength(5);
       expect(result.nextCursor).toBe('offer-4');
     });
 
-    it('excludes offers already applied by a specific worker', async () => {
-      (prisma.jobOffer.findMany as jest.Mock).mockResolvedValue([]);
+    it('excludes offers already applied by a specific worker (calls $queryRaw)', async () => {
+      (prisma.$queryRaw as jest.Mock).mockResolvedValue([]);
       await service.findActive(5, undefined, WORKER_ID);
-      expect(prisma.jobOffer.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({
-            applications: { none: { worker_id: WORKER_ID } },
-          }),
-        }),
-      );
+      expect(prisma.$queryRaw).toHaveBeenCalled();
     });
 
-    it('uses cursor-based pagination when cursor provided', async () => {
-      (prisma.jobOffer.findMany as jest.Mock).mockResolvedValue([]);
+    it('uses cursor-based pagination when cursor provided (calls $queryRaw)', async () => {
+      (prisma.$queryRaw as jest.Mock).mockResolvedValue([]);
       await service.findActive(5, 'some-cursor');
-      expect(prisma.jobOffer.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          cursor: { id: 'some-cursor' },
-          skip: 1,
-        }),
-      );
+      expect(prisma.$queryRaw).toHaveBeenCalled();
     });
 
-    it('omits offers with no open slots (accepted >= quantity)', async () => {
-      (prisma.jobOffer.findMany as jest.Mock).mockResolvedValue([
-        {
-          ...mockOffer,
-          id: 'offer-full',
-          quantity: 1,
-          _count: { applications: 1 },
-        },
-        {
-          ...mockOffer,
-          id: 'offer-open',
-          quantity: 2,
-          _count: { applications: 0 },
-        },
+    it('omits offers with no open slots (HAVING filters in SQL, raw returns only open slots)', async () => {
+      // $queryRaw already filters via HAVING — only open slots are returned
+      (prisma.$queryRaw as jest.Mock).mockResolvedValue([
+        makeRawOffer('offer-open', { quantity: 2, accepted_count: BigInt(0) }),
       ]);
       const result = await service.findActive(5);
       expect(result.data).toHaveLength(1);

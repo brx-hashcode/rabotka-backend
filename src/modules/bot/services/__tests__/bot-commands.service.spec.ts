@@ -43,6 +43,7 @@ function makeJobOfferService(overrides = {}) {
       .mockImplementation((_, opts) =>
         opts ? Promise.resolve({ items: [], total: 0 }) : Promise.resolve([]),
       ),
+    getWorkerTopCategories: jest.fn().mockResolvedValue([]),
     ...overrides,
   };
 }
