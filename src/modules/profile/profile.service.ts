@@ -59,6 +59,7 @@ export type ProfileMeResponse = {
   reliabilityScore: number | null;
   whatsappConnected: boolean;
   avatarUrl: string | null;
+  firstLogin: boolean;
   createdAt: Date;
   jobOffersCount: number;
   applicationsCount: number;
@@ -208,6 +209,7 @@ export class ProfileService {
         reliability_score: true,
         whatsapp_connected: true,
         avatar_url: true,
+        first_login: true,
         created_at: true,
         categories: {
           select: { category: { select: { id: true, name: true } } },
@@ -245,6 +247,7 @@ export class ProfileService {
       reliabilityScore: profile.reliability_score,
       whatsappConnected: profile.whatsapp_connected,
       avatarUrl: profile.avatar_url,
+      firstLogin: profile.first_login,
       createdAt: profile.created_at,
       jobOffersCount: profile._count.job_offers,
       applicationsCount: profile._count.applications,
@@ -254,6 +257,13 @@ export class ProfileService {
       categoryIds: profile.categories.map((pc) => pc.category.id),
       categoryNames: profile.categories.map((pc) => pc.category.name),
     };
+  }
+
+  async markFirstLoginDone(id: string): Promise<void> {
+    await this.prisma.profile.update({
+      where: { id },
+      data: { first_login: false },
+    });
   }
 
   async updateProfile(
