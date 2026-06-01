@@ -37,6 +37,7 @@ import {
   Prisma,
   ProfileType,
   VerificationStatus,
+  WalletTransactionType,
 } from '@prisma/client';
 import { randomBytes } from 'node:crypto';
 
@@ -605,20 +606,9 @@ export class ProfileService {
           // load — a missing blob (deleted, expired, wrong provider) would
           // otherwise 500 the entire detail endpoint. Degrade to null and
           // log so the admin can still review the rest of the profile.
-          let documentUrl: string | null = null;
-          try {
-            documentUrl = doc.storage_key
-              ? await this.fileService.getPublicUrl(doc.storage_key)
-              : await this.fileService.getPresignedUrlFromPublicUrl(
-                  doc.document_url ?? '',
-                );
-          } catch (err) {
-            this.logger.warn(
-              `Failed to resolve URL for kyc_document ${doc.id}: ${
-                err instanceof Error ? err.message : String(err)
-              }`,
-            );
-          }
+          // Use the URL stored at upload time directly — same approach as avatar_url.
+          // Presigned URL re-generation is unreliable when storage config changes.
+          const documentUrl: string | null = doc.document_url ?? null;
           return {
             id: doc.id,
             documentType: doc.document_type,
@@ -1039,7 +1029,7 @@ export class ProfileService {
     createProfileDto: CreateProfileDto,
     kycDocument: Express.Multer.File,
     kycSelfie: Express.Multer.File,
-  ): Promise<{ message: string }> {
+  ): Promise<{ message: string; profileId: string; profileType: ProfileType }> {
     this.validateFiles(kycDocument, kycSelfie);
 
     try {
@@ -1050,6 +1040,23 @@ export class ProfileService {
       );
 
       this.logger.log(`Profile created successfully: ${profile.id}`);
+
+      // Grant registration welcome credit immediately
+      const welcomeCredits = await this.walletService
+        .getWelcomeCreditsConfig();
+      const creditAmount =
+        createProfileDto.profileType === ProfileType.EMPLOYER
+          ? welcomeCredits.employerCreditFcfa
+          : welcomeCredits.workerCreditFcfa;
+      if (creditAmount > 0) {
+        await this.walletService.creditProfileWallet(
+          profile.id,
+          creditAmount,
+          WalletTransactionType.WELCOME_CREDIT,
+          'profile',
+          profile.id,
+        );
+      }
 
       // Geocode address asynchronously (fire-and-forget)
       this.geocodingService
@@ -1098,7 +1105,7 @@ export class ProfileService {
         timestamp: new Date().toISOString(),
       });
 
-      return { message: 'Profil créé avec succès' };
+      return { message: 'Profil créé avec succès', profileId: profile.id, profileType: createProfileDto.profileType };
     } catch (error: any) {
       this.handleCreateProfileError(error);
     }
