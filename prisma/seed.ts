@@ -8,6 +8,7 @@ import { seedJobOffersAndApplications } from './seed/job-offer.seed';
 import { seedPenalties } from './seed/penalty.seed';
 import { seedInvoices } from './seed/invoice.seed';
 import { seedJobCategories } from './seed/job-category.seed';
+import { seedMobileMoneyWallet } from './seed/mobile-money-wallet.seed';
 
 config({ path: '.env.local' });
 config({ path: '.env' });
@@ -27,6 +28,7 @@ async function run() {
     await seedPenalties(prisma);
     await seedClaims(prisma);
     await seedInvoices(prisma);
+    await seedMobileMoneyWallet(prisma);
   } catch (e) {
     console.error(e);
     process.exit(1);

@@ -41,8 +41,16 @@ export async function runProfileSubmenuFlow(
 
   if (profileType === 'EMPLOYER') {
     if (trimmed === '1') {
-      const { message } = await ctx.commands.myOffers(profile);
-      return { reply: [message], clearState: true };
+      const { message, offerIds } = await ctx.commands.myOffers(profile);
+      return {
+        reply: [message],
+        nextState: {
+          flowId: FLOW_IDS.MY_OFFERS,
+          step: 0,
+          payload: { page: 0, offerIds: offerIds ?? [] },
+          updatedAt: new Date().toISOString(),
+        },
+      };
     }
     if (trimmed === '2') {
       const result = await ctx.commands.candidaturesReceived(profile);

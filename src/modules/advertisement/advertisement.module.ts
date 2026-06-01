@@ -16,6 +16,7 @@ import { AdDevController } from './controllers/ad-dev.controller';
 import { AdLinkTrackingService } from './services/ad-link-tracking.service';
 import { AdNotificationService } from './services/ad-notification.service';
 import { AdReportService } from './services/ad-report.service';
+import { LogModule } from '../log/log.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { AdReportService } from './services/ad-report.service';
     QueueModule,
     NotificationModule,
     WhatsAppModule,
+    LogModule,
   ],
   controllers: [AdAdminController, AdTrackingController, AdDevController],
   providers: [

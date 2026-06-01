@@ -7,6 +7,34 @@ import {
   WHATSAPP_OUTBOUND_DLQ,
 } from '../../common/services/queue/queue.module';
 
+// Twilio's hard limit on a WhatsApp body is 1600 chars. We chunk well below
+// that to leave room for any "(1/N)" prefix and to stay safe across UCS-2
+// counting edge cases.
+const WHATSAPP_BODY_LIMIT = 1500;
+
+/**
+ * Split a long string into ≤ WHATSAPP_BODY_LIMIT chunks, preferring to break
+ * on blank lines, then single newlines, then spaces. Never breaks inside a
+ * word unless a single word exceeds the limit (very rare).
+ */
+function chunkForWhatsApp(text: string): string[] {
+  if (text.length <= WHATSAPP_BODY_LIMIT) return [text];
+  const chunks: string[] = [];
+  let remaining = text;
+  while (remaining.length > WHATSAPP_BODY_LIMIT) {
+    const slice = remaining.slice(0, WHATSAPP_BODY_LIMIT);
+    let cut = slice.lastIndexOf('\n\n');
+    if (cut < WHATSAPP_BODY_LIMIT * 0.5) cut = slice.lastIndexOf('\n');
+    if (cut < WHATSAPP_BODY_LIMIT * 0.5) cut = slice.lastIndexOf(' ');
+    if (cut <= 0) cut = WHATSAPP_BODY_LIMIT;
+    chunks.push(remaining.slice(0, cut).trimEnd());
+    remaining = remaining.slice(cut).trimStart();
+  }
+  if (remaining.length > 0) chunks.push(remaining);
+  // Prefix each with (i/N) so the reader sees ordering.
+  return chunks.map((c, i) => `(${i + 1}/${chunks.length})\n${c}`);
+}
+
 export type WhatsAppOutboundJobData = {
   phone: string;
   profileId?: string;
@@ -70,15 +98,20 @@ export class WhatsAppOutboundProcessor {
     );
 
     if (data.type === 'text') {
-      const sent = await this.whatsApp.sendTextMessage(
-        data.phone,
-        data.text,
-        data.profileId,
-      );
-      if (!sent) {
-        throw new Error(
-          `WhatsApp text message to ${data.phone} returned no SID (unknown Twilio failure)`,
+      // Split any over-long body so we never hit Twilio's 1600-char hard
+      // limit. For normal-sized messages this is a no-op.
+      const parts = chunkForWhatsApp(data.text);
+      for (const part of parts) {
+        const sent = await this.whatsApp.sendTextMessage(
+          data.phone,
+          part,
+          data.profileId,
         );
+        if (!sent) {
+          throw new Error(
+            `WhatsApp text message to ${data.phone} returned no SID (unknown Twilio failure)`,
+          );
+        }
       }
     } else if (data.type === 'media') {
       const sent = await this.whatsApp.sendMediaMessage(

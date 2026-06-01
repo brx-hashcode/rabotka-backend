@@ -77,12 +77,16 @@ async function handleDetailComplete(
         ),
       );
     const amount = updated.job_offer?.amount ?? selectedItem.amount;
+    const amountLine =
+      amount != null
+        ? `Le gain de ${Number(amount).toLocaleString('fr-FR')} FCFA a été enregistré pour le travailleur.`
+        : `La mission est terminée.`;
     return {
       reply: [
         [
           '*Mission marquée comme terminée !*',
           '',
-          `Le gain de ${Number(amount).toLocaleString('fr-FR')} FCFA a été enregistré pour le travailleur.`,
+          amountLine,
           '',
           "Tapez *Menu* pour revenir.",
         ].join('\n'),
@@ -91,7 +95,7 @@ async function handleDetailComplete(
     };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : '*IMPOSSIBLE.*';
-    return { reply: [`❌ ${msg}`] };
+    return { reply: [`❌ ${msg}`], clearState: true };
   }
 }
 
@@ -210,6 +214,7 @@ function handleListStep(
   trimmed: string,
   items: FilledJobListItem[],
   pageIndex: number,
+  profile: BotProfile,
 ): FlowResult {
   const normalized = trimmed.toLowerCase();
   const totalPages = Math.ceil(items.length / PAGE_SIZE);
@@ -245,7 +250,7 @@ function handleListStep(
   const menuIdx = PAGE_SIZE + 2;
   if (choice === nextPageIdx && hasMore)
     return buildListPage(state, items, pageIndex + 1);
-  if (choice === menuIdx) return { reply: ['OK'], clearState: true };
+  if (choice === menuIdx) return { reply: [menuMessage(profile.profile_type)], clearState: true };
 
   return {
     reply: [
@@ -319,7 +324,7 @@ export async function runManageFilledJobFlow(
     );
   }
 
-  return handleListStep(state, trimmed, items, pageIndex);
+  return handleListStep(state, trimmed, items, pageIndex, profile);
 }
 
 export function getManageFilledJobInitialState(

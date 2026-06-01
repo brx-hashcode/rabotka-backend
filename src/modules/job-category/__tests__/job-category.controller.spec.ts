@@ -6,6 +6,15 @@ import {
 import { JobCategoryService } from '../job-category.service';
 import { AdminAuthGuard } from '../../auth/guards/admin-auth.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
+import { LogService } from '../../log/log.service';
+
+const fakeReq = () =>
+  ({
+    user: { userId: 'admin-1' },
+    headers: {},
+    ip: '127.0.0.1',
+    get: () => undefined,
+  }) as any;
 
 const mockService = {
   findAll: jest.fn().mockResolvedValue([{ id: 'cat-1', name: 'Plomberie' }]),
@@ -39,7 +48,10 @@ describe('AdminJobCategoryController', () => {
     jest.clearAllMocks();
     const module: TestingModule = await Test.createTestingModule({
       controllers: [AdminJobCategoryController],
-      providers: [{ provide: JobCategoryService, useValue: mockService }],
+      providers: [
+        { provide: JobCategoryService, useValue: mockService },
+        { provide: LogService, useValue: { create: jest.fn() } },
+      ],
     })
       .overrideGuard(AdminAuthGuard)
       .useValue({ canActivate: () => true })
@@ -57,7 +69,7 @@ describe('AdminJobCategoryController', () => {
   });
 
   it('creates a category', async () => {
-    const result = await controller.create({
+    const result = await controller.create(fakeReq(), {
       name: 'Plomberie',
       slug: 'plomberie',
     });
@@ -65,12 +77,14 @@ describe('AdminJobCategoryController', () => {
   });
 
   it('updates a category', async () => {
-    const result = await controller.update('cat-1', { name: 'Updated' });
+    const result = await controller.update(fakeReq(), 'cat-1', {
+      name: 'Updated',
+    });
     expect(result.name).toBe('Updated');
   });
 
   it('removes a category', async () => {
-    await controller.remove('cat-1');
+    await controller.remove(fakeReq(), 'cat-1');
     expect(mockService.remove).toHaveBeenCalledWith('cat-1');
   });
 });

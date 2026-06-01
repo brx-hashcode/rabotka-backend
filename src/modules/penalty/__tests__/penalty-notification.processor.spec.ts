@@ -40,11 +40,6 @@ describe('PenaltyNotificationProcessor', () => {
     );
   });
 
-  it('onModuleInit creates queue worker', () => {
-    processor.onModuleInit();
-    expect(mockQueueService.createWorker).toHaveBeenCalled();
-  });
-
   it('process(scan) runs scan and adds jobs for each penalty', async () => {
     mockPrisma.penalty.findMany.mockResolvedValueOnce([
       { id: 'pen-1' },

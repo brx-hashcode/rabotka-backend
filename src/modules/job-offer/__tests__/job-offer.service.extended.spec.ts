@@ -13,6 +13,8 @@ import { BotNotificationService } from '../../bot/services/bot-notification.serv
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { JobOfferStatus, PaymentFlow } from '@prisma/client';
 import { MatchingService } from '../../matching/matching.service';
+import { REDIS_CONNECTION } from '../../../common/services/redis/redis.constants';
+import { GeocodingService } from '../../../common/services/geocoding/geocoding.service';
 
 const EMPLOYER_ID = 'employer-uuid-1';
 const OFFER_ID = 'offer-uuid-1';
@@ -94,6 +96,11 @@ describe('JobOfferService (extended)', () => {
             indexJobOffer: jest.fn().mockResolvedValue(undefined),
             findMatchingWorkersForJob: jest.fn().mockResolvedValue([]),
           },
+        },
+        { provide: REDIS_CONNECTION, useValue: { set: jest.fn().mockResolvedValue(null) } },
+        {
+          provide: GeocodingService,
+          useValue: { geocode: jest.fn().mockResolvedValue(null) },
         },
       ],
     }).compile();

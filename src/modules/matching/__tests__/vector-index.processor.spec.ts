@@ -39,24 +39,26 @@ describe('VectorIndexProcessor', () => {
     processor = module.get<VectorIndexProcessor>(VectorIndexProcessor);
   });
 
-  it('onModuleInit creates worker and schedules scan', () => {
-    processor.onModuleInit();
+  it('onModuleInit creates worker and registers a repeatable scan', async () => {
+    await processor.onModuleInit();
     expect(mockQueueService.createWorker).toHaveBeenCalled();
     expect(mockQueue.add).toHaveBeenCalledWith(
       'scan',
       { type: 'scan' },
-      expect.objectContaining({ delay: expect.any(Number) }),
+      expect.objectContaining({
+        repeat: expect.objectContaining({ every: expect.any(Number) }),
+      }),
     );
   });
 
   it('worker handles scan job', async () => {
-    processor.onModuleInit();
+    await processor.onModuleInit();
     await capturedWorkerFn!({ data: { type: 'scan' } });
     expect(mockMatchingService.reindexPending).toHaveBeenCalled();
   });
 
   it('worker handles index_job', async () => {
-    processor.onModuleInit();
+    await processor.onModuleInit();
     await capturedWorkerFn!({
       data: { type: 'index_job', jobOfferId: 'jo-1' },
     });
@@ -64,7 +66,7 @@ describe('VectorIndexProcessor', () => {
   });
 
   it('worker handles index_worker', async () => {
-    processor.onModuleInit();
+    await processor.onModuleInit();
     await capturedWorkerFn!({
       data: { type: 'index_worker', profileId: 'p-1' },
     });
@@ -72,7 +74,7 @@ describe('VectorIndexProcessor', () => {
   });
 
   it('worker handles index_employer', async () => {
-    processor.onModuleInit();
+    await processor.onModuleInit();
     await capturedWorkerFn!({
       data: { type: 'index_employer', profileId: 'p-2' },
     });
@@ -105,10 +107,8 @@ describe('VectorIndexProcessor', () => {
     });
   });
 
-  it('scheduleScan swallows queue errors', async () => {
-    processor.onModuleInit();
+  it('onModuleInit rethrows when registering the repeatable scan fails', async () => {
     mockQueue.add.mockRejectedValueOnce(new Error('queue down'));
-    // Trigger scan again - should not throw
-    await expect((processor as any).scheduleScan()).resolves.not.toThrow();
+    await expect(processor.onModuleInit()).rejects.toThrow('queue down');
   });
 });

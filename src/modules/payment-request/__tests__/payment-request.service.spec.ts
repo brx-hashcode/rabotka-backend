@@ -129,6 +129,9 @@ describe('PaymentRequestService', () => {
             getOrCreateSystemWallet: jest
               .fn()
               .mockResolvedValue({ id: 'sys-wallet' }),
+            getOrCreateMobileMoneyWallet: jest
+              .fn()
+              .mockResolvedValue({ id: 'mm-wallet' }),
             getProfileWalletBalance: jest.fn().mockResolvedValue(0),
           },
         },

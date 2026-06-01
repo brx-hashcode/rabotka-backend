@@ -45,7 +45,7 @@ type AppWithOffer = {
   job_offer: {
     title: string;
     scheduled_at: Date;
-    amount: number;
+    amount: number | null;
   };
 };
 
@@ -166,7 +166,7 @@ function handleLateCancellationInput(args: CancelStepArgs): FlowResult {
   if (!reason) {
     return {
       reply: [
-        "*La raison est obligatoire pour une annulation tardive. Tapez votre raison d'annulation.*",
+        "La raison est obligatoire pour une annulation tardive. Tapez votre raison d'annulation.",
       ],
       nextState: state,
     };
@@ -230,7 +230,7 @@ async function handleCancelStep1(
   if (normalized === '2') {
     return {
       reply: [
-        "*Annulation annulée. Votre candidature est maintenue. Tapez *Menu*.*",
+        "Annulation annulée. Votre candidature est maintenue. Tapez *Menu*.",
       ],
       clearState: true,
     };
@@ -276,7 +276,7 @@ async function handleCancelStep2(args: CancelStepArgs): Promise<FlowResult> {
   if (normalized === '2' || normalized === 'non') {
     return {
       reply: [
-        "*Annulation annulée. Votre candidature est maintenue. Tapez *Menu*.*",
+        "Annulation annulée. Votre candidature est maintenue. Tapez *Menu*.",
       ],
       clearState: true,
     };
@@ -324,7 +324,11 @@ export async function runCancelApplicationFlow(
     };
   }
 
-  if (app.status !== 'PENDING' && app.status !== 'ACCEPTED') {
+  if (
+    app.status !== 'PENDING' &&
+    app.status !== 'ACCEPTED' &&
+    app.status !== 'WAITING_PAYMENT'
+  ) {
     return {
       reply: ["❌ Cette candidature ne peut plus être annulée. Tapez *Menu*."],
       clearState: true,
@@ -359,7 +363,7 @@ export async function runCancelApplicationFlow(
   if (state.step === 1) {
     return handleCancelStep1(
       stepArgs,
-      app as AppWithOffer,
+      app,
       isLate,
       timeRemainingStr,
     );

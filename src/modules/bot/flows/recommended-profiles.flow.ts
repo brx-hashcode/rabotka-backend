@@ -103,7 +103,7 @@ export async function runRecommendedProfilesFlow(
   if (workerIds.length === 0) {
     return {
       reply: [
-        "*Aucun profil recommandé pour le moment. Tapez *Menu* pour revenir.*",
+        '*Aucun profil recommandé pour le moment. Tapez *Menu* pour revenir.*',
       ],
       clearState: true,
     };
@@ -137,6 +137,7 @@ export async function runRecommendedProfilesFlow(
       profile,
       ctx,
       jobOfferId,
+      payload.walletEligible !== false,
     );
   }
 
@@ -242,11 +243,16 @@ async function handlePaymentStep(
   profile: BotProfile,
   ctx: RecommendedProfilesContext,
   jobOfferId?: string,
+  walletEligible = true,
 ): Promise<FlowResult> {
   const fee = await ctx.systemConfig.getRecommendationContactFee();
   const balance = await ctx.walletService.getProfileWalletBalance(profile.id);
 
-  if (trimmed === '3') {
+  // Input mapping depends on whether the wallet option was offered. See
+  // showPaymentMethodPrompt for the matching menu numbering.
+  const action = mapPaymentInput(trimmed, walletEligible);
+
+  if (action === 'cancel') {
     return showWorkerDetail(
       selectedWorkerId,
       workerIds,
@@ -257,11 +263,25 @@ async function handlePaymentStep(
     );
   }
 
-  if (trimmed === '1' && balance >= fee) {
+  if (action === 'wallet') {
+    if (balance < fee) {
+      // Defence-in-depth: rebuild the prompt with the wallet option hidden so
+      // the user has a coherent set of choices, even if the balance shifted
+      // mid-flow.
+      return showPaymentMethodPrompt({
+        workerId: selectedWorkerId,
+        fee,
+        balance,
+        workerIds,
+        workerScores,
+        state,
+        jobOfferId,
+      });
+    }
     return processWalletPayment(selectedWorkerId, profile, fee, ctx);
   }
 
-  if (trimmed === '2') {
+  if (action === 'mobile_money') {
     return enterMobileMoneySubFlow(
       selectedWorkerId,
       profile,
@@ -282,6 +302,24 @@ async function handlePaymentStep(
     state,
     jobOfferId,
   });
+}
+
+type PaymentAction = 'wallet' | 'mobile_money' | 'cancel' | 'invalid';
+
+function mapPaymentInput(
+  trimmed: string,
+  walletEligible: boolean,
+): PaymentAction {
+  if (walletEligible) {
+    if (trimmed === '1') return 'wallet';
+    if (trimmed === '2') return 'mobile_money';
+    if (trimmed === '3') return 'cancel';
+    return 'invalid';
+  }
+  // Wallet hidden: 1 = mobile money, 2 = cancel.
+  if (trimmed === '1') return 'mobile_money';
+  if (trimmed === '2') return 'cancel';
+  return 'invalid';
 }
 
 async function processWalletPayment(
@@ -420,7 +458,7 @@ async function showList(
     .filter(Boolean) as typeof workers;
 
   const lines = [
-    '*TRAVAILLEURS RECOMMANDÉS*',
+    '*travailleurs recommandés*',
     '',
     ...orderedWorkers.map((w, i) => {
       const aiScore = Math.round((workerScores[w.id] ?? 0) * 100);
@@ -551,11 +589,18 @@ function showPaymentMethodPrompt(opts: PaymentPromptOpts): FlowResult {
     opts;
   const hasFunds = balance >= fee;
 
-  const walletLine = hasFunds
-    ? `1- Utiliser mon crédit (${fee.toLocaleString('fr-FR')} FCFA)`
-    : `1- Crédit portefeuille _(solde insuffisant — ${balance.toLocaleString('fr-FR')} FCFA)_`;
-
-  const options = [walletLine, '2- Payer par mobile money', '3- Annuler'];
+  // When the wallet is too low we drop option 1 entirely (rather than show it
+  // as "indisponible") so the user can never even try a payment we know will
+  // fail. The remaining options are renumbered 1/2 — see handlePaymentStep for
+  // the matching input mapping. `hasFunds` is persisted in payload to keep
+  // numbering stable across the round-trip.
+  const options = hasFunds
+    ? [
+        `1- Utiliser mon crédit (${fee.toLocaleString('fr-FR')} FCFA)`,
+        '2- Payer par mobile money',
+        '3- Annuler',
+      ]
+    : ['1- Payer par mobile money', '2- Annuler'];
 
   const balanceLine = hasFunds
     ? `Solde disponible : *${balance.toLocaleString('fr-FR')} FCFA*`
@@ -582,6 +627,7 @@ function showPaymentMethodPrompt(opts: PaymentPromptOpts): FlowResult {
         workerScores,
         selectedWorkerId: workerId,
         jobOfferId,
+        walletEligible: hasFunds,
       },
       updatedAt: new Date().toISOString(),
     },

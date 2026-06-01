@@ -1,5 +1,5 @@
 import { Transform } from 'class-transformer';
-import { IsString, IsOptional, MaxLength } from 'class-validator';
+import { IsString, IsOptional, MaxLength, IsArray, IsUUID, ArrayMaxSize } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class UpdateProfileDto {
@@ -30,4 +30,14 @@ export class UpdateProfileDto {
   @IsString()
   @MaxLength(200)
   address?: string;
+
+  @ApiPropertyOptional({ description: 'Job category IDs (max 5)' })
+  @Transform(({ value }) =>
+    Array.isArray(value) ? value : value != null ? [value] : undefined,
+  )
+  @IsOptional()
+  @IsArray()
+  @IsUUID('4', { each: true })
+  @ArrayMaxSize(5)
+  categoryIds?: string[];
 }

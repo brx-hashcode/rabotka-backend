@@ -20,13 +20,19 @@ import { EventService } from './event.service';
 import { CreateEventDto } from './dto/create-event.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
 import { ListEventsDto } from './dto/list-events.dto';
+import type { AdminAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
+import { LogService } from '../log/log.service';
+import { extractRequestMeta } from '../../common/utils/request-meta.util';
 
 @ApiTags('Admin – Events')
 @Controller('admin/event')
 @UseGuards(AdminAuthGuard, RolesGuard)
 @ApiCookieAuth()
 export class EventController {
-  constructor(private readonly eventService: EventService) {}
+  constructor(
+    private readonly eventService: EventService,
+    private readonly logService: LogService,
+  ) {}
 
   @Get()
   @Roles(UserRole.MODERATOR)
@@ -45,22 +51,57 @@ export class EventController {
   @Post()
   @Roles(UserRole.MANAGER)
   @ApiOperation({ summary: 'Create event' })
-  create(@Req() req: any, @Body() dto: CreateEventDto) {
-    return this.eventService.create(dto, req.user.userId);
+  async create(
+    @Req() req: AdminAuthenticatedRequest,
+    @Body() dto: CreateEventDto,
+  ) {
+    const event = await this.eventService.create(dto, req.user.userId);
+    await this.logService.create({
+      action: 'EVENT_CREATED',
+      entityType: 'event',
+      entityId: String((event as { id?: number | string })?.id ?? ''),
+      userId: req.user?.userId,
+      metadata: { ...dto },
+      ...extractRequestMeta(req),
+    });
+    return event;
   }
 
   @Patch(':id')
   @Roles(UserRole.MANAGER)
   @ApiOperation({ summary: 'Update event' })
-  update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateEventDto) {
-    return this.eventService.update(id, dto);
+  async update(
+    @Req() req: AdminAuthenticatedRequest,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateEventDto,
+  ) {
+    const event = await this.eventService.update(id, dto);
+    await this.logService.create({
+      action: 'EVENT_UPDATED',
+      entityType: 'event',
+      entityId: String(id),
+      userId: req.user?.userId,
+      metadata: { changes: { ...dto } },
+      ...extractRequestMeta(req),
+    });
+    return event;
   }
 
   @Delete(':id')
   @Roles(UserRole.MANAGER)
   @ApiOperation({ summary: 'Delete event' })
-  async remove(@Param('id', ParseIntPipe) id: number) {
+  async remove(
+    @Req() req: AdminAuthenticatedRequest,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
     await this.eventService.remove(id);
+    await this.logService.create({
+      action: 'EVENT_DELETED',
+      entityType: 'event',
+      entityId: String(id),
+      userId: req.user?.userId,
+      ...extractRequestMeta(req),
+    });
     return { success: true };
   }
 }

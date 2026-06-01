@@ -3,6 +3,7 @@ import { APP_TIMEZONE } from '../utils/parse-date-time';
 
 export type OfferListItem = {
   id: string;
+  reference?: string;
   title: string;
   description: string;
   scheduled_at: Date;
@@ -125,6 +126,7 @@ export function formatOfferDetail(offer: OfferListItem): string {
     `*Offre #${offer.id.slice(0, 8)} — détails*`,
     '',
     `*Titre*: ${offer.title}`,
+    ...(offer.reference ? [`*Référence*: \`${offer.reference}\``] : []),
     '',
     '*Description complète*:',
     offer.description,
@@ -207,6 +209,7 @@ export function formatOfferDetailWithActions(offer: OfferListItem): string {
   const scoreLine = formatEmployerScore(offer.employerScore);
   return [
     `*${offer.title}*`,
+    ...(offer.reference ? [`*Référence*: \`${offer.reference}\``] : []),
     '',
     `*Résumé*: ${summary}`,
     `*Date*: ${formatDate(offer.scheduled_at)}`,
@@ -242,6 +245,7 @@ export function formatNoOffersAvailable(): string {
 
 export function jobOfferToOfferListItem(offer: {
   id: string;
+  reference?: string;
   title: string;
   description: string;
   scheduled_at: Date;
@@ -256,6 +260,7 @@ export function jobOfferToOfferListItem(offer: {
 }): OfferListItem {
   return {
     id: offer.id,
+    reference: offer.reference,
     title: offer.title,
     description: offer.description,
     scheduled_at: offer.scheduled_at,

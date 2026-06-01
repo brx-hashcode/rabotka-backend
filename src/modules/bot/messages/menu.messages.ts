@@ -11,12 +11,13 @@ export function workerMenuMessage(): string {
     '*Menu Rabotka*',
     '',
     '1- Trouver une mission',
-    '2- Mes candidatures',
-    '3- Paiements en attente',
-    '4- Offres recommandées',
-    '5- Mon profil',
-    '6- Historique',
-    '7- Aide',
+    '2- Rechercher par référence',
+    '3- Mes candidatures',
+    '4- Paiements en attente',
+    '5- Offres recommandées',
+    '6- Mon profil',
+    '7- Historique',
+    '8- Aide',
     '',
     '*Répondez avec le numéro de votre choix.*',
   ].join('\n');
@@ -52,7 +53,7 @@ export function helpMessage(contact: ContactInfo): string {
     `*Email*: ${contact.email}`,
     `*Adresse*: _${contact.address}_`,
     '',
-    "Tapez *Menu* pour revenir.",
+    'Tapez *Menu* pour revenir.',
   ].join('\n');
 }
 
@@ -71,14 +72,40 @@ export function accountSuspendedBotMessage(contact: ContactInfo): string {
 
 export function hasPenaltiesBotMessage(): string {
   return [
-    '⚠️ *Accès bloqué — Pénalités impayées*',
+    '⚠️ *Accès bloqué - Pénalités impayées*',
     '',
     "Vous avez des pénalités impayées. Vous ne pouvez pas accéder aux fonctionnalités tant qu'elles ne sont pas réglées.",
     '',
-    "Tapez *3* (Paiements en attente) pour régler vos pénalités et réactiver l'accès.",
+    'Tapez *1* pour afficher la liste de vos pénalités et choisir celle(s) à régler.',
   ].join('\n');
 }
 
+export function penaltiesListBotMessage(
+  penalties: Array<{
+    amount: number;
+    reason: string;
+    created_at: Date;
+    jobTitle?: string | null;
+  }>,
+): string {
+  const lines: string[] = ['📋 *Vos pénalités impayées*', ''];
+  penalties.forEach((p, i) => {
+    const date = p.created_at.toLocaleDateString('fr-FR');
+    const job = p.jobTitle ? ` - *_${p.jobTitle}_*` : '';
+    lines.push(
+      `*${i + 1}.* ${p.amount.toLocaleString('fr-FR')} FCFA - ${p.reason}${job} _(${date})_`,
+    );
+  });
+  const total = penalties.reduce((s, p) => s + p.amount, 0);
+  lines.push(
+    '',
+    `*Total*: ${total.toLocaleString('fr-FR')} FCFA`,
+    '',
+    'Tapez le *numéro* de la pénalité à régler, ou *0* pour toutes les régler.',
+  );
+  return lines.join('\n');
+}
+
 export function unknownCommandMessage(): string {
-  return "Commande non reconnue. Tapez *Menu* pour voir le menu.";
+  return 'Commande non reconnue. Tapez *Menu* pour voir le menu.';
 }

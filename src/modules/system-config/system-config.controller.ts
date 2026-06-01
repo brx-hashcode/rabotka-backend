@@ -23,6 +23,9 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { SystemConfigService } from './system-config.service';
 import { UpdateSystemConfigDto } from './dto/update-system-config.dto';
+import type { AdminAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
+import { LogService } from '../log/log.service';
+import { extractRequestMeta } from '../../common/utils/request-meta.util';
 
 @ApiTags('Admin – System Config')
 @Controller('admin/system-configs')
@@ -31,7 +34,10 @@ import { UpdateSystemConfigDto } from './dto/update-system-config.dto';
 @ApiBearerAuth()
 @ApiCookieAuth()
 export class SystemConfigController {
-  constructor(private readonly systemConfigService: SystemConfigService) {}
+  constructor(
+    private readonly systemConfigService: SystemConfigService,
+    private readonly logService: LogService,
+  ) {}
 
   @Get()
   @ApiOperation({
@@ -68,11 +74,20 @@ export class SystemConfigController {
   async update(
     @Param('key') key: string,
     @Body() dto: UpdateSystemConfigDto,
-    @Req() req: any,
+    @Req() req: AdminAuthenticatedRequest,
   ) {
     const entry = await this.systemConfigService.getOne(key);
     if (!entry) throw new NotFoundException(`Config key "${key}" not found`);
+    const oldValue = (entry as { value?: unknown })?.value ?? null;
     await this.systemConfigService.set(key, dto.value, req.user?.userId);
+    await this.logService.create({
+      action: 'SYSTEM_CONFIG_UPDATED',
+      entityType: 'system_config',
+      entityId: key,
+      userId: req.user?.userId,
+      metadata: { key, oldValue, newValue: dto.value },
+      ...extractRequestMeta(req),
+    });
     return { success: true };
   }
 }

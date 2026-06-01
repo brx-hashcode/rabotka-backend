@@ -424,7 +424,13 @@ export class MatchingService {
 
   async indexWorkerProfile(profileId: string): Promise<void> {
     const enabled = await this.systemConfig.isSimilarityEnabled();
-    if (!enabled) return;
+    if (!enabled) {
+      await this.prisma.profile.update({
+        where: { id: profileId },
+        data: { vector_indexed_at: new Date() },
+      }).catch(() => {/* profile may have been deleted */});
+      return;
+    }
 
     const [profile, completedCount, totalTerminalCount] = await Promise.all([
       this.prisma.profile.findUnique({
@@ -531,7 +537,17 @@ export class MatchingService {
 
   async indexJobOffer(jobOfferId: string): Promise<void> {
     const enabled = await this.systemConfig.isSimilarityEnabled();
-    if (!enabled) return;
+    if (!enabled) {
+      // Embeddings are turned off platform-wide. Stamp the row so the admin UI
+      // stops claiming the job is "pending indexing" forever and the reaper
+      // stops re-picking it. When embeddings are re-enabled the operator can
+      // run a bulk reindex from the matching controller.
+      await this.prisma.jobOffer.update({
+        where: { id: jobOfferId },
+        data: { vector_indexed_at: new Date() },
+      }).catch(() => {/* row may have been deleted; safe to ignore */});
+      return;
+    }
 
     const job = await this.prisma.jobOffer.findUnique({
       where: { id: jobOfferId },
@@ -609,7 +625,13 @@ export class MatchingService {
    */
   async indexEmployerProfile(profileId: string): Promise<void> {
     const enabled = await this.systemConfig.isSimilarityEnabled();
-    if (!enabled) return;
+    if (!enabled) {
+      await this.prisma.profile.update({
+        where: { id: profileId },
+        data: { vector_indexed_at: new Date() },
+      }).catch(() => {/* profile may have been deleted */});
+      return;
+    }
 
     const profile = await this.prisma.profile.findUnique({
       where: { id: profileId },

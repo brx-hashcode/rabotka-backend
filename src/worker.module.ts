@@ -18,6 +18,7 @@ import { getMailerTransportConfig } from './modules/mail/mailer-transport.config
 import { WalletService } from './modules/wallet/wallet.service';
 import { SystemConfigService } from './modules/system-config/system-config.service';
 import { InvoiceService } from './modules/invoice/invoice.service';
+import { PenaltyNotificationProcessor } from './modules/penalty/penalty-notification.processor';
 
 /**
  * Worker module for the queue worker process.
@@ -142,12 +143,33 @@ export class WorkerModule {
         ]
       : [];
 
+    const penaltyProvider = {
+      provide: PenaltyNotificationProcessor,
+      useFactory: (
+        prisma: PrismaService,
+        queue: QueueService,
+        whatsApp: WhatsAppService,
+      ) => {
+        const botNotificationStub = {
+          sendMessage: (phone: string, text: string) =>
+            whatsApp.sendTextMessage(phone, text),
+        } as never;
+        return new PenaltyNotificationProcessor(
+          prisma,
+          queue,
+          botNotificationStub,
+        );
+      },
+      inject: [PrismaService, QueueService, WhatsAppService],
+    };
+
     return {
       module: WorkerModule,
       imports: coreImports,
       providers: [
         ...whatsAppProviders,
         ...reminderProviders,
+        penaltyProvider,
         PaymentProcessor,
         {
           provide: WhatsAppOutboundProcessor,

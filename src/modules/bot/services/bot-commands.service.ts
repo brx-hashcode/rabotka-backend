@@ -5,6 +5,7 @@ import { ApplicationService } from '../../application/application.service';
 import { WalletService } from '../../wallet/wallet.service';
 import { SystemConfigService } from '../../system-config/system-config.service';
 import type { BotProfile } from '../types/bot-state.types';
+import { translateJobOfferStatus } from '../utils/status.utils';
 import {
   formatOfferListCompact,
   formatOfferDetail,
@@ -13,12 +14,14 @@ import {
 } from '../messages/offers.messages';
 import {
   formatMyApplicationsList,
+  formatMyApplicationsListPage,
   formatCandidaturesListPage,
   formatFilledJobsListPage,
   type ApplicationForList,
   type CandidatureListItem,
   type FilledJobListItem,
 } from '../messages/application.messages';
+import { WORKER_ACTIVE_APPLICATION_STATUSES } from '../../application/application.service';
 import {
   formatPenaltyHistory,
   formatProfileStats,
@@ -47,16 +50,31 @@ export class BotCommandsService {
     offerIds?: string[];
     nextCursor?: string | null;
   }> {
+    const [workerRow, workerCategoryIds] = await Promise.all([
+      this.prisma.profile.findUnique({
+        where: { id: profile.id },
+        select: { latitude: true, longitude: true },
+      }),
+      this.jobOfferService.getWorkerTopCategories(profile.id),
+    ]);
+    const workerCoords =
+      workerRow?.latitude != null && workerRow.longitude != null
+        ? { lat: workerRow.latitude, lng: workerRow.longitude }
+        : null;
+
     const { data, nextCursor } = await this.jobOfferService.findActive(
       LIST_PAGE_SIZE,
       pageCursor,
       profile.id,
+      workerCoords,
+      workerCategoryIds,
     );
     if (data.length === 0) {
       return { message: formatNoOffersAvailable() };
     }
     const offers: OfferListItem[] = data.map((o) => ({
       id: o.id,
+      reference: o.reference,
       title: o.title,
       description: o.description,
       scheduled_at: o.scheduled_at,
@@ -82,6 +100,7 @@ export class BotCommandsService {
     if (!offer) return null;
     return formatOfferDetail({
       id: offer.id,
+      reference: offer.reference,
       title: offer.title,
       description: offer.description,
       scheduled_at: offer.scheduled_at,
@@ -93,61 +112,83 @@ export class BotCommandsService {
     });
   }
 
+  /**
+   * Active candidatures only (PENDING / ACCEPTED / WAITING_PAYMENT),
+   * sorted most-recent first, paginated 5 per page to fit in a single
+   * WhatsApp message.
+   */
   async myApplications(
     profile: BotProfile,
-  ): Promise<{ message: string; applicationIds?: string[] }> {
-    const applications =
-      profile.profile_type === 'WORKER'
-        ? await this.applicationService.findByWorker(profile.id, { limit: 20 })
-        : await this.applicationService.findByEmployer(profile.id, {
-            limit: 20,
-          });
-    if (applications.length === 0) {
-      return {
-        message: formatMyApplicationsList([]),
-      };
-    }
-    const list: ApplicationForList[] = applications.map((a) => ({
-      id: a.id,
-      status: a.status,
-      job_offer: {
-        id: a.job_offer.id,
-        title: a.job_offer.title,
-        scheduled_at: a.job_offer.scheduled_at,
-        amount: a.job_offer.amount,
-        payment_flow: a.job_offer.payment_flow,
-        address: a.job_offer.address,
-        status: a.job_offer.status,
-      },
-    }));
-    return {
-      message: formatMyApplicationsList(list),
-      applicationIds: applications.map((a) => a.id),
-    };
+    page = 0,
+  ): Promise<{
+    message: string;
+    applicationIds: string[];
+    page: number;
+    totalPages: number;
+  }> {
+    return this.fetchApplicationsPage(profile, {
+      page,
+      title: 'Mes candidatures',
+      statusIn: WORKER_ACTIVE_APPLICATION_STATUSES,
+      emptyMessage: formatMyApplicationsList([]),
+    });
   }
 
   async pendingPayments(
     profile: BotProfile,
-  ): Promise<{ message: string; applicationIds?: string[] }> {
-    const applications =
-      profile.profile_type === 'WORKER'
-        ? await this.applicationService.findByWorker(profile.id, {
-            status: 'WAITING_PAYMENT' as ApplicationStatus,
-            limit: 20,
-          })
-        : await this.applicationService.findByEmployer(profile.id, {
-            status: 'WAITING_PAYMENT' as ApplicationStatus,
-            limit: 20,
-          });
+    page = 0,
+  ): Promise<{
+    message: string;
+    applicationIds: string[];
+    page: number;
+    totalPages: number;
+  }> {
+    return this.fetchApplicationsPage(profile, {
+      page,
+      title: 'Paiements en attente',
+      status: ApplicationStatus.WAITING_PAYMENT,
+      emptyMessage:
+        '✅ *Aucun paiement en attente* pour le moment.\n\nTapez *Menu* pour revenir.',
+    });
+  }
 
-    if (applications.length === 0) {
+  private async fetchApplicationsPage(
+    profile: BotProfile,
+    opts: {
+      page: number;
+      title: string;
+      status?: ApplicationStatus;
+      statusIn?: readonly ApplicationStatus[];
+      emptyMessage: string;
+    },
+  ): Promise<{
+    message: string;
+    applicationIds: string[];
+    page: number;
+    totalPages: number;
+  }> {
+    const filter = {
+      ...(opts.status ? { status: opts.status } : {}),
+      ...(opts.statusIn ? { statusIn: opts.statusIn } : {}),
+      page: opts.page,
+      pageSize: LIST_PAGE_SIZE,
+    };
+
+    const { items, total } =
+      profile.profile_type === 'WORKER'
+        ? await this.applicationService.findByWorker(profile.id, filter)
+        : await this.applicationService.findByEmployer(profile.id, filter);
+
+    if (total === 0) {
       return {
-        message:
-          '✅ *Aucun paiement en attente* pour le moment.\n\nTapez *Menu* pour revenir.',
+        message: opts.emptyMessage,
+        applicationIds: [],
+        page: 0,
+        totalPages: 0,
       };
     }
 
-    const list: ApplicationForList[] = applications.map((a) => ({
+    const list: ApplicationForList[] = items.map((a) => ({
       id: a.id,
       status: a.status,
       job_offer: {
@@ -162,8 +203,16 @@ export class BotCommandsService {
     }));
 
     return {
-      message: formatMyApplicationsList(list),
-      applicationIds: applications.map((a) => a.id),
+      message: formatMyApplicationsListPage({
+        title: opts.title,
+        applications: list,
+        total,
+        page: opts.page,
+        pageSize: LIST_PAGE_SIZE,
+      }),
+      applicationIds: items.map((a) => a.id),
+      page: opts.page,
+      totalPages: Math.ceil(total / LIST_PAGE_SIZE),
     };
   }
 
@@ -209,9 +258,10 @@ export class BotCommandsService {
       });
       lines.push(
         `${num}- *${title}*`,
+        `    • Réf : \`${o.reference}\``,
         `    • Date : ${dateStr}`,
         `    • Montant : ${o.amount != null ? `${o.amount.toLocaleString('fr-FR')} FCFA` : 'Prix à négocier'}`,
-        `    • Statut : ${o.status}`,
+        `    • Statut : ${translateJobOfferStatus(o.status)}`,
         '',
       );
     });
@@ -252,6 +302,18 @@ export class BotCommandsService {
         const email = app.worker?.email ?? '';
         const avatarUrl = app.worker?.avatar_url;
         const verificationStatus = app.worker?.verification_status;
+        const workerId = app.worker?.id;
+        const [profileRow, completedMissions] = workerId
+          ? await Promise.all([
+              this.prisma.profile.findUnique({
+                where: { id: workerId },
+                select: { created_at: true },
+              }),
+              this.prisma.application.count({
+                where: { worker_id: workerId, status: 'END' },
+              }),
+            ])
+          : [null, 0];
         allItems.push({
           id: app.id,
           fullName,
@@ -262,6 +324,9 @@ export class BotCommandsService {
           status: verificationStatus ?? app.status,
           avatarUrl: avatarUrl ?? undefined,
           offerTitle: offer.title,
+          description: app.worker?.description ?? null,
+          completedMissions,
+          memberSince: profileRow?.created_at ?? null,
         });
       }
     }
@@ -292,26 +357,30 @@ export class BotCommandsService {
     }
     const offers = await this.jobOfferService.findByEmployerId(profile.id);
     const filledOffers = offers.filter(
-      (o) => o.status === JobOfferStatus.FILLED,
+      (o) =>
+        o.status === JobOfferStatus.FILLED ||
+        o.status === JobOfferStatus.PARTIALLY_FILLED,
     );
     const items: FilledJobListItem[] = [];
     for (const offer of filledOffers) {
       const applications = await this.applicationService.findByJobOffer(
         offer.id,
       );
-      const accepted = applications.find((a) => a.status === 'ACCEPTED');
-      if (!accepted?.worker) continue;
-      const workerName =
-        `${accepted.worker.first_name} ${accepted.worker.last_name}`.trim() ||
-        'Inconnu';
-      items.push({
-        applicationId: accepted.id,
-        title: offer.title,
-        workerName,
-        scheduled_at: offer.scheduled_at,
-        amount: offer.amount,
-        payment_flow: offer.payment_flow,
-      });
+      const acceptedApps = applications.filter((a) => a.status === 'ACCEPTED');
+      for (const accepted of acceptedApps) {
+        if (!accepted.worker) continue;
+        const workerName =
+          `${accepted.worker.first_name} ${accepted.worker.last_name}`.trim() ||
+          'Inconnu';
+        items.push({
+          applicationId: accepted.id,
+          title: offer.title,
+          workerName,
+          scheduled_at: offer.scheduled_at,
+          amount: offer.amount,
+          payment_flow: offer.payment_flow,
+        });
+      }
     }
     if (items.length === 0) {
       return {
@@ -424,7 +493,9 @@ export class BotCommandsService {
   }
 
   async penaltyHistory(profile: BotProfile): Promise<string> {
-    const [penalties, applications] = await Promise.all([
+    const isEmployer = profile.profile_type === 'EMPLOYER';
+
+    const [penalties, completedMissions] = await Promise.all([
       this.prisma.penalty.findMany({
         where: { profile_id: profile.id },
         orderBy: { applied_at: 'desc' },
@@ -432,15 +503,21 @@ export class BotCommandsService {
           application: { include: { job_offer: true } },
         },
       }),
-      this.applicationService.findByWorker(profile.id, { limit: 500 }),
+      isEmployer
+        ? Promise.resolve(0)
+        : this.applicationService
+            .findByWorker(profile.id, { limit: 500 })
+            .then(
+              (apps) =>
+                apps.filter(
+                  (a) =>
+                    a.status === ApplicationStatus.ACCEPTED &&
+                    a.job_offer?.status === JobOfferStatus.COMPLETED,
+                ).length,
+            ),
     ]);
 
     const totalAmount = penalties.reduce((s, p) => s + Number(p.amount), 0);
-    const completed = applications.filter(
-      (a) =>
-        a.status === ApplicationStatus.ACCEPTED &&
-        a.job_offer?.status === JobOfferStatus.COMPLETED,
-    ).length;
     const score = profile.reliability_score ?? 100;
 
     const items: PenaltyItem[] = penalties.map((p) => ({
@@ -458,7 +535,7 @@ export class BotCommandsService {
       totalAmount,
       penalties.length,
       score,
-      completed,
+      completedMissions,
       cancellationThresholdHours,
     );
   }

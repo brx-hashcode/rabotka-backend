@@ -261,7 +261,7 @@ export async function runUnlockContactFlow(
   if (!attemptId) {
     return {
       reply: [
-        "*Erreur : tentative de déverrouillage introuvable. Tapez *Menu*.*",
+        "❌ Erreur : tentative de déverrouillage introuvable. Tapez *Menu*.",
       ],
       clearState: true,
     };

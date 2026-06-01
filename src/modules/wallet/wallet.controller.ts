@@ -1,7 +1,11 @@
 import {
   BadRequestException,
+  Body,
   Controller,
   Get,
+  HttpCode,
+  HttpStatus,
+  Post,
   Query,
   ForbiddenException,
   UseGuards,
@@ -19,12 +23,18 @@ import {
   WalletService,
   type AdminWalletTransactionItem,
   type AdminPaymentItem,
+  type AdminMobileMoneyTransactionItem,
+  type AdminMobileMoneyBalanceResult,
 } from './wallet.service';
 import { AdminAuthGuard } from '../auth/guards/admin-auth.guard';
 import type { AdminAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { AdminListWalletTransactionsDto } from './dto/admin-list-wallet-transactions.dto';
 import { AdminListPaymentsDto } from './dto/admin-list-payments.dto';
+import { AdminListMobileMoneyTransactionsDto } from './dto/admin-list-mobile-money-transactions.dto';
+import { AdminRecordMobileMoneyWithdrawalDto } from './dto/admin-record-mobile-money-withdrawal.dto';
+import { LogService } from '../log/log.service';
+import { extractRequestMeta } from '../../common/utils/request-meta.util';
 
 const ALLOWED_WALLET_ROLES = new Set<UserRole>([
   UserRole.ADMIN,
@@ -40,6 +50,7 @@ export class WalletController {
   constructor(
     private readonly walletService: WalletService,
     private readonly prisma: PrismaService,
+    private readonly logService: LogService,
   ) {}
 
   @Get('revenue')
@@ -183,5 +194,105 @@ export class WalletController {
       created_from: dto.created_from,
       created_to: dto.created_to,
     });
+  }
+
+  @Get('mobile-money/balance')
+  @ApiOperation({ summary: 'Get Mobile Money wallet balance (admin only)' })
+  @ApiResponse({
+    status: 200,
+    description: 'Mobile Money wallet balance with operator/gateway breakdown',
+  })
+  async getMobileMoneyBalance(
+    @Req() req: AdminAuthenticatedRequest,
+  ): Promise<AdminMobileMoneyBalanceResult> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: req.user.userId },
+      select: { role: true },
+    });
+    if (!user || !ALLOWED_WALLET_ROLES.has(user.role)) {
+      throw new ForbiddenException(
+        'Only ADMIN or SUPER_ADMIN can access wallet data',
+      );
+    }
+    return this.walletService.getMobileMoneyBalance();
+  }
+
+  @Get('mobile-money/transactions')
+  @ApiOperation({
+    summary: 'List Mobile Money wallet transactions (paginated, admin only)',
+  })
+  async listMobileMoneyTransactions(
+    @Req() req: AdminAuthenticatedRequest,
+    @Query() dto: AdminListMobileMoneyTransactionsDto,
+  ): Promise<{
+    data: AdminMobileMoneyTransactionItem[];
+    total: number;
+    page: number;
+    limit: number;
+  }> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: req.user.userId },
+      select: { role: true },
+    });
+    if (!user || !ALLOWED_WALLET_ROLES.has(user.role)) {
+      throw new ForbiddenException(
+        'Only ADMIN or SUPER_ADMIN can access wallet data',
+      );
+    }
+    return this.walletService.listMobileMoneyTransactionsForAdmin({
+      page: dto.page ?? 1,
+      limit: dto.limit ?? 20,
+      operator: dto.operator,
+      gateway: dto.gateway,
+      type: dto.type,
+      created_from: dto.created_from,
+      created_to: dto.created_to,
+    });
+  }
+
+  @Post('mobile-money/withdrawal')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: 'Record a Mobile Money wallet withdrawal (admin only)',
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'Withdrawal recorded; returns new wallet balance',
+  })
+  async recordMobileMoneyWithdrawal(
+    @Req() req: AdminAuthenticatedRequest,
+    @Body() dto: AdminRecordMobileMoneyWithdrawalDto,
+  ): Promise<{ walletId: string; newBalance: number; transactionId: string }> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: req.user.userId },
+      select: { role: true },
+    });
+    if (!user || !ALLOWED_WALLET_ROLES.has(user.role)) {
+      throw new ForbiddenException(
+        'Only ADMIN or SUPER_ADMIN can access wallet data',
+      );
+    }
+    const result = await this.walletService.recordMobileMoneyWithdrawal(
+      dto.amount,
+      dto.description,
+      dto.reference,
+    );
+
+    await this.logService.create({
+      action: 'WALLET_WITHDRAWAL_RECORDED',
+      entityType: 'wallet_transaction',
+      entityId: result.transactionId,
+      userId: req.user.userId,
+      metadata: {
+        amount: dto.amount,
+        description: dto.description ?? null,
+        reference: dto.reference ?? null,
+        walletId: result.walletId,
+        newBalance: result.newBalance,
+      },
+      ...extractRequestMeta(req),
+    });
+
+    return result;
   }
 }
