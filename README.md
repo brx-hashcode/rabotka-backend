@@ -7,24 +7,35 @@
 </p>
 
 <p align="center">
-  A modern, scalable backend service for <strong>Rabotka</strong> — a WhatsApp-based job platform connecting informal workers and employers in African cities.
+  A scalable backend service for <strong>Rabotka</strong> — a WhatsApp-based job platform connecting informal workers and employers in African cities.
 </p>
 
-## About Rabotka
+## About
 
-Rabotka revolutionizes job matching by connecting informal workers and employers through a simple WhatsApp assistant. Our mission: **Find work. Find help. Directly on WhatsApp** — no app download, no complexity, just simple connections.
+Rabotka connects informal workers and employers through a WhatsApp assistant — no app download, no complexity. This service powers the full platform API: job matching, payments, KYC, real-time messaging, document generation, and admin operations.
 
-This backend service provides the API infrastructure for the Rabotka platform, built with NestJS and PostgreSQL to ensure scalability, maintainability, and testability.
+## Tech Stack
 
-### Key Features
-
-- **WhatsApp-Based Platform** — API support for WhatsApp integration via bot conversations
-- **PostgreSQL + Prisma** — Type-safe database access with Prisma 7
-- **Internationalization** — Multi-language support (English, French, Russian)
-- **API Documentation** — Interactive Scalar API documentation
-- **Health Monitoring** — Built-in health checks for system monitoring
-- **Security** — CSRF protection, rate limiting (Throttler), bot detection (Arcjet), email validation
-- **Docker Support** — Full development stack with PostgreSQL, pgAdmin, and LocalStack
+| Category | Technology |
+|---|---|
+| Framework | NestJS 11 |
+| Language | TypeScript 5 |
+| Database | PostgreSQL 17 + Prisma 7 |
+| Cache / Queue broker | Redis 7 + BullMQ |
+| Vector DB | Qdrant |
+| Embeddings | FastEmbed |
+| HTTP Server | Express 5 |
+| WebSockets | Socket.io 4 + @nestjs/websockets |
+| Auth | JWT (@nestjs/jwt) + OTP (otplib) |
+| WhatsApp | Twilio |
+| Email | Nodemailer + MJML templates |
+| Storage | S3 / Cloudinary (factory pattern) |
+| Payments | Monetbil, MTN MoMo |
+| API Docs | Scalar (@scalar/nestjs-api-reference) |
+| i18n | nestjs-i18n (en, fr, ru) |
+| Security | Arcjet (bot/rate-limit), csrf-csrf, @nestjs/throttler |
+| Document generation | docxtemplater, puppeteer, libreoffice-convert, mammoth |
+| Health | @nestjs/terminus |
 
 ## Architecture
 
@@ -32,338 +43,299 @@ This backend service provides the API infrastructure for the Rabotka platform, b
 
 ```
 src/
-├── common/                  # Shared utilities
-│   ├── decorators/          # Custom decorators
-│   ├── dto/                 # Shared DTOs
-│   ├── filters/             # Exception filters
-│   ├── guards/              # Authentication/authorization guards
-│   ├── interceptors/        # Logging, transformation interceptors
-│   ├── pipes/               # Validation pipes
-│   └── utils/               # Utility functions
-├── csrf/                    # CSRF protection
-│   ├── csrf.controller.ts   # Token generation endpoint
-│   ├── csrf-visitor.middleware.ts
-│   └── csrf.module.ts
-├── generated/prisma/        # Prisma-generated client (do not edit)
-├── health/                  # Health check feature
-├── prisma/                  # Prisma service and module
-├── i18n/                    # Translation files
-│   ├── en/                  # English
-│   ├── fr/                  # French
-│   └── ru/                  # Russian
-├── app.controller.ts
+├── common/                    # Shared infrastructure
+│   ├── constants/
+│   ├── decorators/
+│   ├── dto/
+│   ├── events/                # EventEmitter setup
+│   ├── filters/               # Global HTTP + i18n exception filters
+│   ├── guards/                # JWT + Arcjet guards
+│   ├── interceptors/          # Logging interceptor
+│   ├── pipes/
+│   ├── utils/
+│   ├── validators/            # MX record email validator
+│   └── services/
+│       ├── prisma/            # Prisma client service
+│       ├── redis/             # ioredis client
+│       ├── queue/             # BullMQ queue service
+│       ├── storage/           # Multi-provider storage factory (S3, Cloudinary)
+│       ├── twilio/            # WhatsApp / SMS service
+│       ├── payment/           # Payment gateway factory (Monetbil, MTN MoMo)
+│       ├── image-watermark/
+│       └── geocoding/
+│
+├── modules/                   # 34 feature modules (see below)
+│
+├── generated/prisma/          # Prisma-generated client (do not edit)
+├── i18n/                      # Translation files (en, fr, ru)
+├── worker.ts                  # BullMQ worker entry point (separate process)
+├── worker.module.ts
 ├── app.module.ts
-├── app.service.ts
 └── main.ts
 
 prisma/
-├── schema.prisma            # Database schema
-├── seed.ts                  # Database seeding
-└── migrations/              # Migration history
+├── schema.prisma              # Database schema (38 models)
+├── seed.ts                    # Development seed
+├── seed-prod.ts               # Production seed
+└── migrations/
 ```
 
-### Database Schema
+### Modules (34)
 
-The application uses PostgreSQL with Prisma. Key models include:
+| Module | Responsibility |
+|---|---|
+| `advertisement` | Ad delivery, bundles, targeting, analytics, link tracking, scheduling |
+| `application` | Job applications — worker applies to offer, status transitions |
+| `auth` | JWT auth for profiles and admin users; OTP via Twilio |
+| `bot` | WhatsApp conversation orchestration (state machine, commands, routing) |
+| `calendar` | Event scheduling with email/WhatsApp delivery |
+| `claim` | Support ticket system with comments and status tracking |
+| `contact-unlock` | Bilateral payment flow to unlock contact info |
+| `contract` | Contract template generation and download for assignments |
+| `conversation` | WhatsApp conversation thread management |
+| `csrf` | CSRF token endpoint + middleware |
+| `dashboard` | Admin KPIs and activity analytics |
+| `document` | Document management (upload, Google Docs, template variables) |
+| `event` | Internal events with multi-channel delivery |
+| `file` | File upload/storage abstraction (S3, Cloudinary) |
+| `health` | Health check endpoint with disk monitoring |
+| `interest-graph` | Recommendation engine (Qdrant vector search + interest clustering) |
+| `invoice` | Invoice generation for payments, penalties, and contact unlocks |
+| `job-category` | Job category taxonomy (skills, sectors) |
+| `job-offer` | Employer job postings with scheduling, payment, and location |
+| `kyc` | KYC document upload, selfie capture, approval/rejection workflow |
+| `log` | Audit trail for admin and entity changes |
+| `mail` | Email sending via MJML templates + BullMQ job queue |
+| `matching` | Job-to-worker matching via Qdrant vector search |
+| `notification` | Notification service used by other modules |
+| `payment-request` | Payment gateway integration (Monetbil, MTN MoMo) with webhooks |
+| `payments` | Payment processing and transaction tracking |
+| `penalty` | No-show/cancellation penalties with notifications and payment requests |
+| `profile` | Worker/employer profiles with KYC, ratings, categories, vector indexing |
+| `qdrant` | Vector DB client config and service |
+| `system-config` | Dynamic configuration storage (fees, storage, payment settings) |
+| `user` | Admin user management (CRUD, roles: SUPER_ADMIN, ADMIN, MANAGER, MODERATOR) |
+| `wallet` | Wallet and transaction ledger per profile/user |
+| `whatsapp` | Twilio WhatsApp integration (inbound/outbound messaging, OTP) |
+| `ws-notifications` | WebSocket gateways for real-time notifications (payments, QR, claims, admin) |
 
-- **Profile** — Workers and employers with verification status, KYC, WhatsApp connection
-- **User** — Admin users with role-based access
-- **Conversation** — WhatsApp bot conversations per profile
-- **File** — Uploaded files (S3/Local storage)
-- **Log** — Audit trail for actions
-- **AdminOtpSession** — Admin OTP authentication sessions
+### Database (38 models)
 
-## Tech Stack
+Key models:
 
-| Category | Technology |
-|----------|------------|
-| Framework | NestJS 11 |
-| Language | TypeScript 5 |
-| Database | PostgreSQL + Prisma 7 |
-| API Documentation | Scalar API Reference |
-| Swagger | @nestjs/swagger |
-| Internationalization | nestjs-i18n |
-| Health Checks | @nestjs/terminus |
-| Configuration | @nestjs/config |
-| Rate Limiting | @nestjs/throttler |
-| Security (Bot/Email) | Arcjet |
-| CSRF Protection | csrf-csrf |
-| HTTP Server | Express (via @nestjs/platform-express) |
-| Local AWS | LocalStack (S3, SQS, etc.) |
+| Model | Description |
+|---|---|
+| `Profile` | Worker or employer — KYC, rating, categories, WhatsApp connection |
+| `User` | Admin user — roles, TOTP, email |
+| `JobOffer` | Employer job posting with amount, location, schedule |
+| `Application` | Worker application to a job offer |
+| `Assignment` | Confirmed worker ↔ job pairing |
+| `Contract` | Assignment contract |
+| `Invoice` | Invoice for payment, penalty, or contact unlock |
+| `Payment` | Payment transaction |
+| `Wallet` / `WalletTransaction` | Ledger per profile or user |
+| `PaymentRequest` | Gateway request (Monetbil, MTN) |
+| `ContactUnlockAttempt` | Bilateral payment to reveal contact info |
+| `Penalty` | No-show / cancellation penalty |
+| `KycDocument` / `KycVerificationImage` | Identity verification |
+| `Conversation` / `Message` | WhatsApp thread history |
+| `Claim` / `ClaimComment` | Support tickets |
+| `Advertisement` / `AdvertisementBundle` | Ad system with delivery and tracking |
+| `AdDeliveryLog` / `AdTrackedLink` | Ad analytics |
+| `Document` | Platform document templates |
+| `Event` | Calendar event |
+| `Rating` | Worker/employer rating post-assignment |
+| `Log` | Audit trail |
+| `SystemConfig` | Dynamic config entries |
+| `AdminNotification` | Admin notification queue |
 
-## Project Setup
+## Getting Started
 
 ### Prerequisites
 
-- Node.js 18+
-- pnpm (recommended) or npm
-- Docker & Docker Compose (for database and services)
-- PostgreSQL 17 (or use Docker)
+- Node.js 22+
+- pnpm
+- Docker & Docker Compose
 
 ### Installation
 
 ```bash
-# Clone the repository
-git clone https://github.com/bruxx-6243/rabotka-backend.git
-cd rabotka-backend
-
-# Install dependencies
 pnpm install
 ```
 
-### Environment Variables
+`postinstall` automatically runs `prisma generate`.
 
-Create a `.env` or `.env.local` file in the root directory:
+### Environment
+
+Create a `.env` file:
 
 ```env
-# Server Configuration
+# Server
 PORT=3000
 NODE_ENV=development
 ALLOW_ORIGINS=http://localhost:3000,http://localhost:5173
 
-# Database (default matches Docker Compose)
-DATABASE_URL=postgresql://postgres:postgres@localhost:5433/rabotka
+# Database (matches Docker Compose defaults)
+DATABASE_URL=postgresql://postgres:postgres@localhost:5800/rabotka
+DIRECT_DATABASE_URL=postgresql://postgres:postgres@localhost:5800/rabotka
 
-# Rate Limiting
-THROTTLE_TTL=60000
-THROTTLE_LIMIT=100
-
-# Health Check Configuration (optional)
-HEALTH_DISK_CHECK_ENABLED=true
-HEALTH_DISK_THRESHOLD_PERCENT=0.98
-
-# Arcjet (get key from https://app.arcjet.com)
-ARCJET_KEY=
-
-# AWS / LocalStack (for Docker)
-# AWS_ENDPOINT_URL=http://localhost:4566
-
-# Redis (queue)
+# Redis
 REDIS_HOST=localhost
 REDIS_PORT=6379
 
-# Twilio (WhatsApp and optional SMS)
+# Auth
+JWT_SECRET=your-secret
+JWT_EXPIRES_IN=7d
+CSRF_SECRET=your-csrf-secret
+
+# Rate limiting
+THROTTLE_TTL=60000
+THROTTLE_LIMIT=100
+
+# Arcjet
+ARCJET_KEY=
+
+# Storage (S3 or Cloudinary)
+DRIVER=S3
+AWS_REGION=
+AWS_ACCESS_KEY_ID=
+AWS_SECRET_ACCESS_KEY=
+AWS_S3_BUCKET=
+
+# Twilio (WhatsApp)
 TWILIO_ACCOUNT_SID=
 TWILIO_AUTH_TOKEN=
 TWILIO_WHATSAPP_FROM=
-# TWILIO_SMS_FROM=  # Optional
+TWILIO_WEBHOOK_BASE_URL=
+
+# Qdrant
+QDRANT_URL=http://localhost:6333
+QDRANT_API_KEY=
+
+# Email
+SMTP_HOST=
+SMTP_PORT=
+SMTP_USER=
+SMTP_PASSWORD=
+SMTP_FROM_ADDRESS=
+SMTP_FROM_NAME=Rabotka
+
+# Health checks
+HEALTH_DISK_CHECK_ENABLED=true
+HEALTH_DISK_THRESHOLD_PERCENT=0.98
 ```
 
-### Database Setup with Docker
-
-Start PostgreSQL, pgAdmin, and LocalStack:
+### Docker (infrastructure only)
 
 ```bash
-# Start all services
-docker compose up -d postgres pgadmin localstack
-
-# Run migrations
-pnpm prisma:migrate
-
-# Seed the database (optional)
-pnpm db:seed
+docker compose up -d postgres redis qdrant pgadmin
 ```
 
-For local PostgreSQL (without Docker), use `scripts/create-db.ps1` (Windows) or `scripts/create-db.sh` (macOS/Linux) to create the database, then run migrations.
+| Service | Port | Description |
+|---|---|---|
+| postgres | 5800:5432 | PostgreSQL 17 |
+| redis | 6379 | Redis 7 |
+| qdrant | 6333, 6334 | Vector DB |
+| pgadmin | 5050 | DB management UI |
 
-### Running the Application
+### Database setup
 
 ```bash
-# Generate Prisma client (first time or after schema changes)
-pnpm prisma:generate
-
-# Development mode
-pnpm run start:dev
-
-# Production mode
-pnpm run start:prod
-
-# Watch mode (auto-reload on changes)
-pnpm run start:dev
+pnpm prisma:migrate    # Create and apply migrations
+pnpm db:seed           # Seed development data
 ```
 
-### Queue Worker (Email Jobs)
+### Running
 
-The API enqueues email jobs to Redis; a separate worker process consumes them. Run the worker in a **separate terminal** (do not combine with `start:dev` in the same process).
+```bash
+# API (watch mode)
+pnpm start:dev
 
-| Context | Command |
-|---------|---------|
-| **Development** (no build) | `pnpm queue:worker:dev` |
-| **Production** (after build) | `pnpm run build` then `pnpm queue:worker` |
-| **Docker** | `docker compose up -d queue-worker` |
-| **Logs** | `docker compose logs -f queue-worker` |
+# Queue worker — must run as a SEPARATE process
+pnpm worker:dev
+```
 
-For local development, ensure Redis is running (e.g. `docker compose up -d redis`) before starting the worker.
+Once running:
+
+- **API**: `http://localhost:3000/api/v1`
+- **API Docs**: `http://localhost:3000/api-docs`
+- **Health**: `http://localhost:3000/api/v1/health`
+
+## Scripts
+
+| Script | Description |
+|---|---|
+| `pnpm start:dev` | Dev server (watch mode) |
+| `pnpm start:prod` | Production server |
+| `pnpm build` | Compile TypeScript |
+| `pnpm worker:dev` | Queue worker (dev, no build) |
+| `pnpm worker` | Queue worker (production, requires build) |
+| `pnpm test` | Unit tests |
+| `pnpm test:watch` | Unit tests (watch) |
+| `pnpm test:cov` | Tests with coverage report |
+| `pnpm test:e2e` | End-to-end tests |
+| `pnpm lint` | ESLint + Prettier fix |
+| `pnpm prisma:generate` | Regenerate Prisma client |
+| `pnpm prisma:migrate` | Create + apply migration (dev) |
+| `pnpm prisma:migrate:deploy` | Apply migrations (production) |
+| `pnpm prisma:studio` | Visual DB browser |
+| `pnpm db:seed` | Seed development database |
+| `pnpm db:seed:prod` | Seed production database |
+
+## Key Concepts
+
+### Queue worker
+
+The API enqueues email jobs to Redis via BullMQ. The worker (`src/worker.ts`) is a **separate NestJS process** — it must be started independently. Never combine it with the API process.
+
+```bash
+# Terminal 1
+pnpm start:dev
+
+# Terminal 2
+pnpm worker:dev
+```
 
 ### WhatsApp (Twilio)
 
-The backend uses [Twilio](https://www.twilio.com/whatsapp) for WhatsApp. OTP for phone login and verification links are sent via Twilio. Incoming messages are received via webhook.
+- Outbound: OTP and verification links sent via `TWILIO_WHATSAPP_FROM`
+- Inbound: Twilio posts to `POST /api/v1/whatsapp/incoming` — validated via `X-Twilio-Signature`
+- Configure the webhook URL in the Twilio console: `https://your-domain/api/v1/whatsapp/incoming`
 
-**Setup**
+### CSRF protection
 
-1. Create a Twilio account and get your WhatsApp-enabled number (or use the [Twilio Sandbox](https://www.twilio.com/docs/whatsapp/sandbox)).
-2. Set in `.env`: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_FROM` (e.g. `whatsapp:+14155238886`). No fallbacks in code — if these are missing, WhatsApp sending is disabled.
-3. For **incoming messages**, configure your Twilio WhatsApp number (or sandbox) to send webhooks to: `https://your-domain/api/v1/whatsapp/incoming` (POST). The endpoint validates `X-Twilio-Signature` using `TWILIO_AUTH_TOKEN`.
+All state-changing requests require a CSRF token:
 
-**Endpoints**
+1. `GET /api/v1/csrf` — fetch token
+2. Send it in the `x-csrf-token` header
+3. Include cookies (`credentials: true`)
 
-- `GET /api/v1/whatsapp/status` — returns `{ configured: boolean }`.
-- `GET /api/v1/whatsapp/verify?token=...` — verifies a WhatsApp verification token (used when the user clicks the link sent via WhatsApp).
-- `POST /api/v1/whatsapp/incoming` — Twilio webhook for incoming WhatsApp messages (configure this URL in the Twilio console).
+### i18n
 
+Language is resolved from the `Accept-Language` header. Supported: `en`, `fr`, `ru`. Translation files are in `src/i18n/[lang]/`.
 
-Once running, the application will be available at:
+### Prisma
 
-- **API**: `http://localhost:3000/api/v1`
-- **API Documentation**: `http://localhost:3000/api-docs`
-- **Health Check**: `http://localhost:3000/api/v1/health`
-
-## Available Scripts
-
-| Script | Description |
-|--------|-------------|
-| `pnpm run start` | Start the application |
-| `pnpm run start:dev` | Start in development mode with watch |
-| `pnpm run start:prod` | Start in production mode |
-| `pnpm run build` | Build the application |
-| `pnpm run test` | Run unit tests |
-| `pnpm run test:watch` | Run tests in watch mode |
-| `pnpm run test:cov` | Run tests with coverage |
-| `pnpm run test:e2e` | Run end-to-end tests |
-| `pnpm run lint` | Run ESLint |
-| `pnpm prisma:generate` | Generate Prisma client |
-| `pnpm prisma:migrate` | Run migrations (development) |
-| `pnpm prisma:migrate:deploy` | Deploy migrations (production) |
-| `pnpm prisma:studio` | Open Prisma Studio |
-| `pnpm db:seed` | Seed the database |
-| `pnpm db:reset` | Reset database (Docker only) |
-| `pnpm queue:worker` | Run queue worker (production; requires prior build) |
-| `pnpm queue:worker:dev` | Run queue worker in development (no build) |
-
-## API Documentation
-
-### Accessing Documentation
-
-Once the server is running, navigate to:
-
-```
-http://localhost:3000/api-docs
-```
-
-### Available Endpoints
-
-#### App Endpoints
-
-- `GET /api/v1` — Get hello message with i18n support
-
-#### Health Endpoints
-
-- `GET /api/v1/health` — System health check
-
-#### CSRF Endpoints
-
-- `GET /api/v1/csrf` — Get CSRF token for client requests (required for state-changing operations)
-
-### Language Detection
-
-API endpoints support language detection via the `ACCEPT-LANGUAGE` header:
+`src/generated/prisma/` is auto-generated — never edit it directly. After any `schema.prisma` change:
 
 ```bash
-# English (default)
-curl http://localhost:3000/api/v1
-
-# French
-curl -H "ACCEPT-LANGUAGE: fr" http://localhost:3000/api/v1
-
-# Russian
-curl -H "ACCEPT-LANGUAGE: ru" http://localhost:3000/api/v1
+pnpm prisma:generate
+pnpm prisma:migrate
 ```
 
-### CSRF Protection
+### Storage
 
-For mutating requests (POST, PUT, PATCH, DELETE), include the CSRF token:
+Storage uses a factory pattern — `DRIVER=S3` or `DRIVER=CLOUDINARY`. Switch providers by changing the env var; no code changes needed.
 
-1. Fetch token: `GET /api/v1/csrf`
-2. Send token in `x-csrf-token` header with subsequent requests
-3. Ensure cookies are sent (credentials: true)
-
-## Docker
-
-### Full Stack (API + Queue Worker + PostgreSQL + pgAdmin + LocalStack)
+## Docker (full stack)
 
 ```bash
 docker compose up -d
 ```
 
-Services:
+Starts postgres, redis, qdrant, pgadmin, api, and queue-worker.
 
-| Service | Port | Description |
-|---------|------|-------------|
-| API | 3000 | NestJS backend |
-| queue-worker | — | BullMQ worker (processes email jobs) |
-| PostgreSQL | 5433 | Database |
-| pgAdmin | 5050 | Database management UI |
-| LocalStack | 4566 | Local AWS (S3, SQS, etc.) |
-
-### API and Queue Worker
-
-Build and run the API and queue worker:
-
-```bash
-docker compose up -d postgres redis localstack mailhog
-docker compose up -d api queue-worker
-```
-
-View queue worker logs:
-
-```bash
-docker compose logs -f queue-worker
-```
-
-## Development
-
-### Prisma Workflow
-
-```bash
-# After changing prisma/schema.prisma
-pnpm prisma:generate
-pnpm prisma:migrate        # Creates migration and applies
-pnpm prisma:studio         # Visual DB browser
-```
-
-### Adding Translations
-
-Add translation keys to `src/i18n/[lang]/common.json` for each supported language (en, fr, ru).
-
-## Testing
-
-```bash
-# Unit tests
-pnpm run test
-
-# Watch mode
-pnpm run test:watch
-
-# Coverage
-pnpm run test:cov
-
-# E2E tests
-pnpm run test:e2e
-```
-
-## Deployment
-
-When deploying to production:
-
-1. Set `NODE_ENV=production`
-2. Configure `DATABASE_URL` for production PostgreSQL
-3. Set `ARCJET_KEY` for security features
-4. Configure `ALLOW_ORIGINS` for CORS
-5. Configure `REDIS_HOST` and `REDIS_PORT` for BullMQ
-6. Build the application: `pnpm run build`
-7. Run migrations: `pnpm prisma:migrate:deploy`
-8. Start API: `pnpm run start:prod`
-9. Start queue worker (separate process): `pnpm queue:worker`
+The production image is built by CI on every merge to `develop`. The production pipeline pulls the pre-built image — no rebuild on `main`.
 
 ## License
 
