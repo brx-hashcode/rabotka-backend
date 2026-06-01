@@ -961,7 +961,7 @@ describe('BotOrchestratorService', () => {
         cancellationThresholdHours: 12,
       });
       const result = await service.handle('employer-uuid-1', PHONE, 'profils');
-      expect(result[0]).toContain('RECOMMANDÉS');
+      expect(result[0]).toContain('travailleurs recommandés');
     });
   });
 
