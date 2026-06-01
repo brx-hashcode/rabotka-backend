@@ -161,6 +161,8 @@ describe('ProfileService', () => {
       {
         getProfileWalletBalance: jest.fn().mockResolvedValue(0),
         grantWelcomeCredit: jest.fn().mockResolvedValue(undefined),
+        getWelcomeCreditsConfig: jest.fn().mockResolvedValue({ workerCreditFcfa: 100, employerCreditFcfa: 500 }),
+        creditProfileWallet: jest.fn().mockResolvedValue(undefined),
       } as any, // walletService
       documentService as any, // documentService
       {
@@ -713,9 +715,7 @@ describe('ProfileService', () => {
       expect(result.verifiedBy).toBeNull();
     });
 
-    it('uses storage_key for presigned url when available', async () => {
-      const getPublicUrl = jest.fn().mockResolvedValue('http://public-url');
-      (service as any).fileService.getPublicUrl = getPublicUrl;
+    it('returns document_url directly without file service calls', async () => {
       prisma.profile.findUnique.mockResolvedValue({
         ...baseProfile,
         verified_by: null,
@@ -724,7 +724,7 @@ describe('ProfileService', () => {
             id: 'doc-1',
             document_type: 'CNI',
             document_category: 'ID',
-            document_url: null,
+            document_url: 'https://storage/folder/file.jpg',
             storage_key: 'folder/file.jpg',
             verification_status: 'VERIFIED',
             verified_at: null,
@@ -739,7 +739,7 @@ describe('ProfileService', () => {
         categories: [],
       });
       const result = await service.getProfileDetailForAdmin('p-1');
-      expect(getPublicUrl).toHaveBeenCalledWith('folder/file.jpg');
+      expect(result.kycDocuments[0].documentUrl).toBe('https://storage/folder/file.jpg');
     });
   });
 
