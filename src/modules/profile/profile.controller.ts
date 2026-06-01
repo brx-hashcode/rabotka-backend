@@ -42,6 +42,9 @@ import { MailService } from '../mail/mail.service';
 import { ProfileAuthGuard } from '../auth/guards/profile-auth.guard';
 import type { ProfileAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
 import { WalletService } from '../wallet/wallet.service';
+import { JwtService } from '@nestjs/jwt';
+import { ConfigService } from '@nestjs/config';
+import { randomUUID } from 'crypto';
 import { PayPenaltyDto } from '../wallet/dto/pay-penalty.dto';
 
 @ApiTags('Profile')
@@ -51,6 +54,8 @@ export class ProfileController {
     private readonly profileService: ProfileService,
     private readonly mailService: MailService,
     private readonly walletService: WalletService,
+    private readonly jwtService: JwtService,
+    private readonly configService: ConfigService,
   ) {}
 
   @Post()
@@ -170,6 +175,7 @@ export class ProfileController {
       kycDocument?: Express.Multer.File[];
       kycSelfie?: Express.Multer.File[];
     },
+    @Res({ passthrough: true }) res: Response,
   ) {
     const kycDocument = files?.kycDocument?.[0];
     const kycSelfie = files?.kycSelfie?.[0];
@@ -194,9 +200,22 @@ export class ProfileController {
       html: sendWelcomeEmail(createProfileDto.firstName),
     });
 
-    return {
-      message: result.message,
-    };
+    // Sign a JWT and set the auth cookie so the user is logged in immediately
+    const cookieName = this.configService.get<string>('AUTH_COOKIE_NAME');
+    if (cookieName) {
+      const payload = { sub: result.profileId, type: 'profile', jti: randomUUID() };
+      const token = this.jwtService.sign(payload);
+      const isProduction = this.configService.get('NODE_ENV') === 'production';
+      res.cookie(cookieName, token, {
+        httpOnly: true,
+        secure: isProduction,
+        sameSite: isProduction ? 'none' : 'lax',
+        maxAge: 24 * 60 * 60 * 1000,
+        path: '/',
+      });
+    }
+
+    return { message: result.message };
   }
 
   @Get('me')

@@ -1,5 +1,5 @@
-import { Controller, Get } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { Controller, Get, Query } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiQuery, ApiResponse } from '@nestjs/swagger';
 import { SystemConfigService } from './system-config.service';
 
 @ApiTags('Public – System Config')
@@ -15,19 +15,26 @@ export class SystemConfigPublicController {
   }
 
   @Get('welcome-credits')
-  @ApiOperation({ summary: 'Get welcome credit amounts granted on registration' })
+  @ApiOperation({ summary: 'Get welcome credit amount for a given profile type' })
+  @ApiQuery({ name: 'profileType', enum: ['WORKER', 'EMPLOYER'], required: true })
   @ApiResponse({
     status: 200,
-    description: 'Welcome credit amounts in FCFA',
+    description: 'Welcome credit amount in FCFA',
     schema: {
       type: 'object',
       properties: {
-        workerCreditFcfa: { type: 'number' },
-        employerCreditFcfa: { type: 'number' },
+        creditFcfa: { type: 'number' },
       },
     },
   })
-  getWelcomeCredits() {
-    return this.systemConfigService.getWelcomeCredits();
+  async getWelcomeCredits(
+    @Query('profileType') profileType: 'WORKER' | 'EMPLOYER',
+  ) {
+    const credits = await this.systemConfigService.getWelcomeCredits();
+    const creditFcfa =
+      profileType === 'EMPLOYER'
+        ? credits.employerCreditFcfa
+        : credits.workerCreditFcfa;
+    return { creditFcfa };
   }
 }
