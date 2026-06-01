@@ -3,9 +3,10 @@ import {
   getMobileMoneyInitialPayload,
 } from '../mobile-money-subflow';
 
-const makeProfile = () => ({
+// Phone whose local prefix (06) maps to MTN per PREFIX_TO_OPERATOR
+const makeProfile = (phone = '+242061234567') => ({
   id: 'profile-1',
-  phone: '+242001234567',
+  phone,
   first_name: 'Alice',
   last_name: 'Smith',
   profile_type: 'WORKER' as const,
@@ -72,15 +73,42 @@ describe('runMobileMoneySubFlow', () => {
   beforeEach(() => jest.clearAllMocks());
 
   describe('step: use_registered_number', () => {
-    it('option 1 moves to choose_operator with registered phone', async () => {
+    it('option 1 with MTN-prefixed registered phone initiates payment directly', async () => {
       const result = await runMobileMoneySubFlow(
         makeState('use_registered_number') as any,
         '1',
         makeProfile() as any,
         mockCtx,
       );
-      expect(result.nextState?.payload._mm_step).toBe('choose_operator');
-      expect(result.nextState?.payload._mm_phone).toBe('+242001234567');
+      expect(result.clearState).toBe(true);
+      expect(mockCtx.paymentService.initiateDirectPayment).toHaveBeenCalledWith(
+        expect.objectContaining({ operator: 'CG_MTNMOBILEMONEY' }),
+      );
+    });
+
+    it('option 1 with AIRTEL-prefixed registered phone initiates payment directly', async () => {
+      const result = await runMobileMoneySubFlow(
+        makeState('use_registered_number') as any,
+        '1',
+        makeProfile('+242051234567') as any,
+        mockCtx,
+      );
+      expect(result.clearState).toBe(true);
+      expect(mockCtx.paymentService.initiateDirectPayment).toHaveBeenCalledWith(
+        expect.objectContaining({ operator: 'CG_AIRTELMONEY' }),
+      );
+    });
+
+    it('option 1 with unknown-prefix phone falls back to enter_phone step', async () => {
+      const result = await runMobileMoneySubFlow(
+        // 00 prefix is not in PREFIX_TO_OPERATOR
+        makeState('use_registered_number') as any,
+        '1',
+        makeProfile('+242001234567') as any,
+        mockCtx,
+      );
+      expect(result.nextState?.payload._mm_step).toBe('enter_phone');
+      expect(mockCtx.paymentService.initiateDirectPayment).not.toHaveBeenCalled();
     });
 
     it('option 2 moves to enter_phone', async () => {
@@ -116,14 +144,41 @@ describe('runMobileMoneySubFlow', () => {
   });
 
   describe('step: enter_phone', () => {
-    it('valid phone moves to choose_operator', async () => {
+    it('valid MTN phone auto-detects operator and initiates payment', async () => {
       const result = await runMobileMoneySubFlow(
         makeState('enter_phone') as any,
-        '242001234567',
+        '061234567',
         makeProfile() as any,
         mockCtx,
       );
-      expect(result.nextState?.payload._mm_step).toBe('choose_operator');
+      expect(result.clearState).toBe(true);
+      expect(mockCtx.paymentService.initiateDirectPayment).toHaveBeenCalledWith(
+        expect.objectContaining({ operator: 'CG_MTNMOBILEMONEY' }),
+      );
+    });
+
+    it('valid AIRTEL phone auto-detects operator', async () => {
+      const result = await runMobileMoneySubFlow(
+        makeState('enter_phone') as any,
+        '051234567',
+        makeProfile() as any,
+        mockCtx,
+      );
+      expect(result.clearState).toBe(true);
+      expect(mockCtx.paymentService.initiateDirectPayment).toHaveBeenCalledWith(
+        expect.objectContaining({ operator: 'CG_AIRTELMONEY' }),
+      );
+    });
+
+    it('phone with unknown prefix shows operator-unknown message and stays in step', async () => {
+      const result = await runMobileMoneySubFlow(
+        makeState('enter_phone') as any,
+        '001234567',
+        makeProfile() as any,
+        mockCtx,
+      );
+      expect(result.nextState?.payload._mm_step).toBe('enter_phone');
+      expect(mockCtx.paymentService.initiateDirectPayment).not.toHaveBeenCalled();
     });
 
     it('invalid phone shows error', async () => {
@@ -135,59 +190,19 @@ describe('runMobileMoneySubFlow', () => {
       );
       expect(result.reply[0]).toContain('invalide');
     });
-  });
 
-  describe('step: choose_operator', () => {
-    const stateWithPhone = () =>
-      makeState('choose_operator', { _mm_phone: '+242001234567' });
-
-    it('option 1 selects MTN and initiates payment', async () => {
-      const result = await runMobileMoneySubFlow(
-        stateWithPhone() as any,
-        '1',
-        makeProfile() as any,
-        mockCtx,
-      );
-      expect(result.clearState).toBe(true);
-      expect(mockCtx.paymentService.initiateDirectPayment).toHaveBeenCalledWith(
-        expect.objectContaining({ operator: 'CG_MTNMOBILEMONEY' }),
-      );
-    });
-
-    it('option 2 selects AIRTEL and initiates payment', async () => {
-      const result = await runMobileMoneySubFlow(
-        stateWithPhone() as any,
-        '2',
-        makeProfile() as any,
-        mockCtx,
-      );
-      expect(result.clearState).toBe(true);
-      expect(mockCtx.paymentService.initiateDirectPayment).toHaveBeenCalledWith(
-        expect.objectContaining({ operator: 'CG_AIRTELMONEY' }),
-      );
-    });
-
-    it('invalid input shows operator prompt', async () => {
-      const result = await runMobileMoneySubFlow(
-        stateWithPhone() as any,
-        'X',
-        makeProfile() as any,
-        mockCtx,
-      );
-      expect(result.reply[0]).toContain('MTN');
-    });
-
-    it('shows fallback on payment failure', async () => {
+    it('shows fallback on payment-service failure', async () => {
       mockCtx.paymentService.initiateDirectPayment.mockResolvedValueOnce({
         success: false,
       });
       const result = await runMobileMoneySubFlow(
-        stateWithPhone() as any,
-        '1',
+        makeState('enter_phone') as any,
+        '061234567',
         makeProfile() as any,
         mockCtx,
       );
       expect(result.clearState).toBe(true);
+      expect(mockCtx.getFallbackUrl).toHaveBeenCalled();
     });
   });
 

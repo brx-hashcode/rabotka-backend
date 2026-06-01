@@ -5,6 +5,15 @@ import { AdAdminService } from '../../services/ad-admin.service';
 import { AdAnalyticsService } from '../../services/ad-analytics.service';
 import { AdminAuthGuard } from '../../../auth/guards/admin-auth.guard';
 import { RolesGuard } from '../../../auth/guards/roles.guard';
+import { LogService } from '../../../log/log.service';
+
+const fakeReq = () =>
+  ({
+    user: { userId: 'admin-1' },
+    headers: {},
+    ip: '127.0.0.1',
+    get: () => undefined,
+  }) as any;
 
 const mockAdvertisementService = {
   findAll: jest.fn().mockResolvedValue([]),
@@ -47,6 +56,7 @@ describe('AdAdminController', () => {
         { provide: AdvertisementService, useValue: mockAdvertisementService },
         { provide: AdAdminService, useValue: mockAdAdminService },
         { provide: AdAnalyticsService, useValue: mockAdAnalyticsService },
+        { provide: LogService, useValue: { create: jest.fn() } },
       ],
     })
       .overrideGuard(AdminAuthGuard)
@@ -70,7 +80,7 @@ describe('AdAdminController', () => {
       startDate: '2026-07-01',
       endDate: '2026-07-31',
     } as any;
-    const result = await controller.create(dto);
+    const result = await controller.create(fakeReq(), dto);
     expect(result.id).toBe('ad-1');
   });
 
@@ -94,13 +104,13 @@ describe('AdAdminController', () => {
 
   it('createBundle creates a bundle', async () => {
     const dto = { name: 'Bundle', priceXAF: 10000 } as any;
-    const result = await controller.createBundle(dto);
+    const result = await controller.createBundle(fakeReq(), dto);
     expect(result.id).toBe('bundle-1');
   });
 
   it('updateBundle updates a bundle', async () => {
     const dto = { name: 'Updated' } as any;
-    const result = await controller.updateBundle('bundle-1', dto);
+    const result = await controller.updateBundle(fakeReq(), 'bundle-1', dto);
     expect(mockAdAdminService.updateBundle).toHaveBeenCalledWith(
       'bundle-1',
       dto,
@@ -109,7 +119,7 @@ describe('AdAdminController', () => {
   });
 
   it('deleteBundle deletes a bundle', async () => {
-    await controller.deleteBundle('bundle-1');
+    await controller.deleteBundle(fakeReq(), 'bundle-1');
     expect(mockAdAdminService.deleteBundle).toHaveBeenCalledWith('bundle-1');
   });
 
@@ -119,29 +129,31 @@ describe('AdAdminController', () => {
   });
 
   it('update updates an advertisement', async () => {
-    const result = await controller.update('ad-1', { title: 'Updated' } as any);
+    const result = await controller.update(fakeReq(), 'ad-1', {
+      title: 'Updated',
+    } as any);
     expect(result.title).toBe('Updated');
   });
 
   it('confirmPayment confirms payment', async () => {
-    const result = await controller.confirmPayment('ad-1');
+    await controller.confirmPayment(fakeReq(), 'ad-1');
     expect(mockAdvertisementService.confirmPayment).toHaveBeenCalledWith(
       'ad-1',
     );
   });
 
   it('submit submits an ad for review', async () => {
-    const result = await controller.submit('ad-1');
+    await controller.submit(fakeReq(), 'ad-1');
     expect(mockAdvertisementService.submit).toHaveBeenCalledWith('ad-1');
   });
 
   it('approve approves an advertisement', async () => {
-    const result = await controller.approve('ad-1');
+    await controller.approve(fakeReq(), 'ad-1');
     expect(mockAdAdminService.approve).toHaveBeenCalledWith('ad-1');
   });
 
   it('reject rejects an advertisement', async () => {
-    const result = await controller.reject('ad-1', { reason: 'Bad content' });
+    await controller.reject(fakeReq(), 'ad-1', { reason: 'Bad content' });
     expect(mockAdAdminService.reject).toHaveBeenCalledWith(
       'ad-1',
       'Bad content',
@@ -149,22 +161,22 @@ describe('AdAdminController', () => {
   });
 
   it('pause pauses an advertisement', async () => {
-    await controller.pause('ad-1');
+    await controller.pause(fakeReq(), 'ad-1');
     expect(mockAdvertisementService.pause).toHaveBeenCalledWith('ad-1');
   });
 
   it('resume resumes an advertisement', async () => {
-    await controller.resume('ad-1');
+    await controller.resume(fakeReq(), 'ad-1');
     expect(mockAdvertisementService.resume).toHaveBeenCalledWith('ad-1');
   });
 
   it('cancel cancels an advertisement', async () => {
-    await controller.cancel('ad-1');
+    await controller.cancel(fakeReq(), 'ad-1');
     expect(mockAdvertisementService.cancel).toHaveBeenCalledWith('ad-1');
   });
 
   it('remove deletes an advertisement', async () => {
-    await controller.remove('ad-1');
+    await controller.remove(fakeReq(), 'ad-1');
     expect(mockAdvertisementService.delete).toHaveBeenCalledWith('ad-1');
   });
 

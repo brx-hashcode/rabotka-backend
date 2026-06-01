@@ -4,7 +4,11 @@ import {
   BadRequestException,
   NotFoundException,
   ForbiddenException,
+  InternalServerErrorException,
+  Inject,
 } from '@nestjs/common';
+import Redis from 'ioredis';
+import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { isWorkerHardBlocked } from '../penalty/penalty.utils';
 import { MailService } from '../mail/mail.service';
@@ -14,8 +18,20 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
 import { BotNotificationService } from '../bot/services/bot-notification.service';
 import { MatchingService } from '../matching/matching.service';
+import { GeocodingService } from '../../common/services/geocoding/geocoding.service';
+import type { Coordinates } from '../../common/services/geocoding/geocoding.service';
+import {
+  haversineKm,
+  proximityScore,
+  urgencyScore,
+} from '../../common/services/geocoding/geo.utils';
 import { CreateJobOfferDto } from './dto/create-job-offer.dto';
 import { AdminUpdateJobOfferDto } from './dto/admin-update-job-offer.dto';
+import {
+  generateJobReference,
+  isValidReferenceShape,
+  normalizeJobReference,
+} from './utils/job-reference.util';
 import {
   AccountStatus,
   ApplicationStatus,
@@ -23,6 +39,8 @@ import {
   PaymentFlow,
   Prisma,
 } from '@prisma/client';
+
+const REFERENCE_MAX_ATTEMPTS = 5;
 
 const MIN_SCHEDULED_HOURS_FROM_NOW = 4;
 const TITLE_MIN = 5;
@@ -38,6 +56,7 @@ const QUANTITY_MAX = 100;
 
 export type AdminJobOfferListItem = {
   id: string;
+  reference: string;
   title: string;
   category: { id: string; name: string } | null;
   description: string;
@@ -80,6 +99,7 @@ export type AdminJobOfferDetailResponse = AdminJobOfferListItem & {
 
 export type JobOfferListItem = {
   id: string;
+  reference: string;
   title: string;
   description: string;
   scheduled_at: Date;
@@ -116,7 +136,13 @@ export class JobOfferService {
     private readonly botNotification: BotNotificationService,
     private readonly eventEmitter: EventEmitter2,
     private readonly matchingService: MatchingService,
+    private readonly geocodingService: GeocodingService,
+    @Inject(REDIS_CONNECTION) private readonly redis: Redis,
   ) {}
+
+  private notificationCooldownKey(workerId: string): string {
+    return `job_notif_cooldown:${workerId}`;
+  }
 
   async create(
     employerId: string,
@@ -173,21 +199,45 @@ export class JobOfferService {
       );
     }
 
-    const offer = await this.prisma.jobOffer.create({
-      data: {
-        employer_id: employerId,
-        title: dto.title.trim(),
-        description: dto.description.trim(),
-        scheduled_at: scheduledAt,
-        amount: dto.amount,
-        payment_flow: dto.payment_flow,
-        address: dto.address.trim(),
-        note: dto.note?.trim() ?? null,
-        quantity: dto.quantity ?? 1,
-        status: JobOfferStatus.ACTIVE,
-        ...(dto.category_id ? { category_id: dto.category_id } : {}),
-      },
-    });
+    const baseData = {
+      employer_id: employerId,
+      title: dto.title.trim(),
+      description: dto.description.trim(),
+      scheduled_at: scheduledAt,
+      amount: dto.amount,
+      payment_flow: dto.payment_flow,
+      address: dto.address.trim(),
+      note: dto.note?.trim() ?? null,
+      quantity: dto.quantity ?? 1,
+      status: JobOfferStatus.ACTIVE,
+      ...(dto.category_id ? { category_id: dto.category_id } : {}),
+    };
+
+    let offer: Awaited<ReturnType<typeof this.prisma.jobOffer.create>> | null =
+      null;
+    for (let attempt = 0; attempt < REFERENCE_MAX_ATTEMPTS; attempt++) {
+      try {
+        offer = await this.prisma.jobOffer.create({
+          data: { ...baseData, reference: generateJobReference() },
+        });
+        break;
+      } catch (err) {
+        if (
+          err instanceof Prisma.PrismaClientKnownRequestError &&
+          err.code === 'P2002' &&
+          Array.isArray(err.meta?.target) &&
+          (err.meta?.target as string[]).includes('reference')
+        ) {
+          continue;
+        }
+        throw err;
+      }
+    }
+    if (!offer) {
+      throw new InternalServerErrorException(
+        'Impossible de générer une référence unique pour l\'offre',
+      );
+    }
 
     this.eventEmitter.emit(AdminNotificationEvent.JOB_OFFER_CREATED, {
       event: AdminNotificationEvent.JOB_OFFER_CREATED,
@@ -198,20 +248,58 @@ export class JobOfferService {
       timestamp: new Date().toISOString(),
     });
 
+    // Geocode address asynchronously (fire-and-forget)
+    this.geocodingService
+      .geocode(offer.address)
+      .then((coords) => {
+        if (!coords) return;
+        return this.prisma.jobOffer.update({
+          where: { id: offer.id },
+          data: { latitude: coords.lat, longitude: coords.lng },
+        });
+      })
+      .catch((err: unknown) =>
+        this.logger.warn(
+          `geocoding failed for offer ${offer.id}`,
+          err instanceof Error ? err.message : String(err),
+        ),
+      );
+
     // Index + notify matching workers asynchronously (fire-and-forget)
     this.matchingService
       .indexJobOffer(offer.id)
       .then(async () => {
-        const [enabled, minScore] = await Promise.all([
-          this.systemConfigService.isRecommendationEnabled(),
-          this.systemConfigService.getMinNotificationScore(),
-        ]);
+        const [enabled, minScore, maxWorkers, cooldownMinutes] =
+          await Promise.all([
+            this.systemConfigService.isRecommendationEnabled(),
+            this.systemConfigService.getMinNotificationScore(),
+            this.systemConfigService.getMaxNotificationWorkers(),
+            this.systemConfigService.getNotificationCooldownMinutes(),
+          ]);
         if (!enabled) return;
 
         const workerResults: { id: string; score: number }[] =
-          await this.matchingService.findMatchingWorkersForJob(offer.id, 20);
+          await this.matchingService.findMatchingWorkersForJob(
+            offer.id,
+            maxWorkers,
+          );
+
         for (const { id: workerId, score } of workerResults) {
           if (score < minScore) continue;
+
+          // Cooldown check — skip worker if they were recently notified
+          if (cooldownMinutes > 0) {
+            const key = this.notificationCooldownKey(workerId);
+            const locked = await this.redis.set(
+              key,
+              '1',
+              'EX',
+              cooldownMinutes * 60,
+              'NX',
+            );
+            if (locked === null) continue; // Already notified within the window
+          }
+
           this.botNotification
             .sendRecommendedJobNotification(workerId, offer.id)
             .catch((err: unknown) =>
@@ -241,104 +329,185 @@ export class JobOfferService {
     return accepted < quantity;
   }
 
-  private async queryOpenSlotCandidateBatch(
-    take: number,
-    dbCursor: string | undefined,
-    excludeAppliedByWorkerId?: string,
-  ): Promise<
-    Prisma.JobOfferGetPayload<{
-      include: {
-        _count: {
-          select: {
-            applications: {
-              where: { status: typeof ApplicationStatus.ACCEPTED };
-            };
-          };
-        };
-      };
-    }>[]
-  > {
-    return this.prisma.jobOffer.findMany({
-      take,
-      ...(dbCursor ? { cursor: { id: dbCursor }, skip: 1 } : {}),
-      where: {
-        status: {
-          in: [JobOfferStatus.ACTIVE, JobOfferStatus.PARTIALLY_FILLED],
-        },
-        scheduled_at: { gt: new Date(Date.now() + 2 * 60 * 60 * 1000) },
-        ...(excludeAppliedByWorkerId
-          ? {
-              applications: {
-                none: { worker_id: excludeAppliedByWorkerId },
-              },
-            }
-          : {}),
-      },
-      orderBy: [{ scheduled_at: 'asc' }, { created_at: 'desc' }],
-      include: {
-        _count: {
-          select: {
-            applications: { where: { status: ApplicationStatus.ACCEPTED } },
-          },
-        },
-      },
+  /**
+   * Fetches worker's top applied-to category IDs (up to 3), ordered by
+   * application count descending. Used to boost category-matched offers.
+   */
+  async getWorkerTopCategories(workerId: string): Promise<string[]> {
+    const rows = await this.prisma.application.groupBy({
+      by: ['job_offer_id'],
+      where: { worker_id: workerId },
+      _count: { job_offer_id: true },
+      orderBy: { _count: { job_offer_id: 'desc' } },
+      take: 20,
     });
+    if (rows.length === 0) return [];
+
+    const offerIds = rows.map((r) => r.job_offer_id);
+    const offers = await this.prisma.jobOffer.findMany({
+      where: { id: { in: offerIds }, category_id: { not: null } },
+      select: { category_id: true },
+    });
+
+    const counts = new Map<string, number>();
+    for (const o of offers) {
+      if (!o.category_id) continue;
+      counts.set(o.category_id, (counts.get(o.category_id) ?? 0) + 1);
+    }
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([id]) => id);
   }
 
-  private mergeOpenSlotOffersIntoList(
-    offers: Prisma.JobOfferGetPayload<{
-      include: {
-        _count: {
-          select: {
-            applications: {
-              where: { status: typeof ApplicationStatus.ACCEPTED };
-            };
-          };
-        };
-      };
-    }>[],
-    listItems: JobOfferListItem[],
-    targetCount: number,
-  ): void {
-    for (const o of offers) {
-      const accepted = o._count.applications;
-      if (!this.offerHasOpenSlots(o.quantity, accepted)) continue;
-      listItems.push(this.toListItem(o, accepted));
-      if (listItems.length >= targetCount) break;
-    }
+  /**
+   * Single-query replacement for the old batch-loop approach.
+   * Uses a raw SQL HAVING clause to filter out full offers directly in Postgres,
+   * avoiding up to 25 round-trips.
+   */
+  private async queryOpenSlots(params: {
+    take: number;
+    cursorId?: string;
+    excludeWorkerId?: string;
+    minScheduledAt: Date;
+  }): Promise<
+    Array<{
+      id: string;
+      reference: string;
+      title: string;
+      description: string;
+      scheduled_at: Date;
+      amount: unknown;
+      payment_flow: PaymentFlow | null;
+      address: string;
+      latitude: number | null;
+      longitude: number | null;
+      note: string | null;
+      quantity: number;
+      status: string;
+      employer_id: string;
+      category_id: string | null;
+      created_at: Date;
+      accepted_count: bigint;
+    }>
+  > {
+    const { take, cursorId, excludeWorkerId, minScheduledAt } = params;
+
+    // Prisma doesn't support HAVING on aggregates in findMany so we use $queryRaw.
+    // Parameters are passed positionally as $1, $2, … to prevent SQL injection.
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        id: string;
+        reference: string;
+        title: string;
+        description: string;
+        scheduled_at: Date;
+        amount: unknown;
+        payment_flow: PaymentFlow | null;
+        address: string;
+        latitude: number | null;
+        longitude: number | null;
+        note: string | null;
+        quantity: number;
+        status: string;
+        employer_id: string;
+        category_id: string | null;
+        created_at: Date;
+        accepted_count: bigint;
+      }>
+    >`
+      SELECT
+        jo.id,
+        jo.reference,
+        jo.title,
+        jo.description,
+        jo.scheduled_at,
+        jo.amount,
+        jo.payment_flow,
+        jo.address,
+        jo.latitude,
+        jo.longitude,
+        jo.note,
+        jo.quantity,
+        jo.status,
+        jo.employer_id,
+        jo.category_id,
+        jo.created_at,
+        COUNT(a.id) FILTER (WHERE a.status = 'ACCEPTED') AS accepted_count
+      FROM job_offers jo
+      LEFT JOIN applications a ON a.job_offer_id = jo.id
+      WHERE
+        jo.status IN ('ACTIVE', 'PARTIALLY_FILLED')
+        AND jo.scheduled_at > ${minScheduledAt}
+        ${cursorId ? Prisma.sql`AND jo.id > ${cursorId}::uuid` : Prisma.empty}
+        ${
+          excludeWorkerId
+            ? Prisma.sql`AND NOT EXISTS (
+                SELECT 1 FROM applications ex
+                WHERE ex.job_offer_id = jo.id
+                  AND ex.worker_id = ${excludeWorkerId}::uuid
+              )`
+            : Prisma.empty
+        }
+      GROUP BY jo.id
+      HAVING COUNT(a.id) FILTER (WHERE a.status = 'ACCEPTED') < jo.quantity
+      ORDER BY jo.scheduled_at ASC, jo.created_at DESC
+      LIMIT ${take}
+    `;
+
+    return rows;
   }
 
   async findActive(
     limit = 20,
     cursor?: string,
     excludeAppliedByWorkerId?: string,
+    workerCoords?: Coordinates | null,
+    workerCategoryIds?: string[],
   ): Promise<{
     data: JobOfferListItem[];
     nextCursor: string | null;
   }> {
     const targetCount = limit + 1;
-    const listItems: JobOfferListItem[] = [];
-    let dbCursor: string | undefined = cursor;
-    const batchSize = Math.max(limit * 8, limit + 15);
-    const maxIterations = 25;
+    const minScheduledAt = new Date(Date.now() + 2 * 60 * 60 * 1000);
 
-    for (let i = 0; i < maxIterations && listItems.length < targetCount; i++) {
-      const offers = await this.queryOpenSlotCandidateBatch(
-        batchSize,
-        dbCursor,
-        excludeAppliedByWorkerId,
-      );
-      if (offers.length === 0) break;
+    const rows = await this.queryOpenSlots({
+      take: targetCount,
+      cursorId: cursor,
+      excludeWorkerId: excludeAppliedByWorkerId,
+      minScheduledAt,
+    });
 
-      this.mergeOpenSlotOffersIntoList(offers, listItems, targetCount);
+    const categorySet = new Set(workerCategoryIds ?? []);
 
-      dbCursor = offers.at(-1)!.id;
-      if (offers.length < batchSize) break;
+    // Score and sort: proximity (if coords) + urgency + category affinity
+    if (rows.length > 0 && (workerCoords || categorySet.size > 0)) {
+      rows.sort((a, b) => {
+        const scoreOf = (o: (typeof rows)[number]): number => {
+          const prox =
+            workerCoords && o.latitude != null && o.longitude != null
+              ? proximityScore(
+                  haversineKm(workerCoords, {
+                    lat: o.latitude,
+                    lng: o.longitude,
+                  }),
+                )
+              : 0.5;
+          const urgency = urgencyScore(o.scheduled_at);
+          const category =
+            o.category_id && categorySet.has(o.category_id) ? 1.0 : 0.0;
+          return 0.45 * prox + 0.3 * urgency + 0.25 * category;
+        };
+        return scoreOf(b) - scoreOf(a);
+      });
     }
 
-    const hasMore = listItems.length > limit;
-    const data = hasMore ? listItems.slice(0, limit) : listItems;
-    const nextCursor = hasMore ? (data.at(-1)?.id ?? null) : null;
+    const hasMore = rows.length > limit;
+    const slice = hasMore ? rows.slice(0, limit) : rows;
+    const data = slice.map((o) =>
+      this.toListItem(o, Number(o.accepted_count)),
+    );
+    const nextCursor = hasMore ? (slice.at(-1)?.id ?? null) : null;
 
     return { data, nextCursor };
   }
@@ -346,6 +515,44 @@ export class JobOfferService {
   async findById(id: string): Promise<JobOfferDetail | null> {
     const offer = await this.prisma.jobOffer.findUnique({
       where: { id },
+      include: {
+        employer: {
+          select: {
+            id: true,
+            first_name: true,
+            last_name: true,
+            phone: true,
+            reliability_score: true,
+          },
+        },
+        _count: {
+          select: {
+            applications: { where: { status: 'ACCEPTED' } },
+          },
+        },
+      },
+    });
+    if (!offer) return null;
+
+    return {
+      ...this.toListItem(offer, offer._count.applications),
+      employer: offer.employer
+        ? {
+            id: offer.employer.id,
+            first_name: offer.employer.first_name,
+            last_name: offer.employer.last_name,
+            phone: offer.employer.phone,
+            reliability_score: offer.employer.reliability_score,
+          }
+        : undefined,
+    };
+  }
+
+  async findByReference(ref: string): Promise<JobOfferDetail | null> {
+    const normalized = normalizeJobReference(ref);
+    if (!isValidReferenceShape(normalized)) return null;
+    const offer = await this.prisma.jobOffer.findUnique({
+      where: { reference: normalized },
       include: {
         employer: {
           select: {
@@ -587,6 +794,7 @@ export class JobOfferService {
 
     const data: AdminJobOfferListItem[] = offers.map((o) => ({
       id: o.id,
+      reference: o.reference,
       title: o.title,
       category:
         o.category == null
@@ -665,6 +873,7 @@ export class JobOfferService {
 
     return {
       id: offer.id,
+      reference: offer.reference,
       title: offer.title,
       category:
         offer.category == null
@@ -786,6 +995,7 @@ export class JobOfferService {
   private toListItem(
     offer: {
       id: string;
+      reference: string;
       title: string;
       description: string;
       scheduled_at: Date;
@@ -802,6 +1012,7 @@ export class JobOfferService {
   ): JobOfferListItem {
     return {
       id: offer.id,
+      reference: offer.reference,
       title: offer.title,
       description: offer.description,
       scheduled_at: offer.scheduled_at,

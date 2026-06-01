@@ -5,9 +5,9 @@ export function paymentUseRegisteredNumberPrompt(phone: string): string {
     `Voulez-vous payer avec votre numéro enregistré ?`,
     `*${phone}*`,
     ``,
-    `1 — Oui, utiliser ce numéro`,
-    `2 — Non, utiliser un autre numéro`,
-    `3 — Payer via le lien web`,
+    `1 - Oui, utiliser ce numéro`,
+    `2 - Non, utiliser un autre numéro`,
+    `3 - Payer via le lien web`,
   ].join('\n');
 }
 
@@ -15,17 +15,8 @@ export function paymentEnterPhonePrompt(): string {
   return [
     `*Entrez le numéro Mobile Money*`,
     ``,
-    `Saisissez le numéro à débiter (avec l'indicatif pays) :`,
-    `Exemple : *242XXXXXXXX*`,
-  ].join('\n');
-}
-
-export function paymentChooseOperatorPrompt(): string {
-  return [
-    `*Choisissez votre opérateur*`,
-    ``,
-    `1 — MTN Mobile Money`,
-    `2 — Airtel Money`,
+    `Saisissez le numéro à débiter (sans indicatif pays) :`,
+    `Exemple : *06XXXXXXX* (MTN) ou *05XXXXXXX* / *04XXXXXXX* (Airtel)`,
   ].join('\n');
 }
 
@@ -52,5 +43,16 @@ export function paymentDirectFailedMessage(fallbackUrl: string): string {
     `Impossible de déclencher le paiement pour le moment. Veuillez réessayer ou payer via le lien ci-dessous :`,
     ``,
     fallbackUrl,
+  ].join('\n');
+}
+
+export function paymentOperatorUnknownMessage(): string {
+  return [
+    `⚠️ *Opérateur non reconnu*`,
+    ``,
+    `Les numéros commençant par *06* sont MTN Mobile Money.`,
+    `Les numéros commençant par *05* ou *04* sont Airtel Money.`,
+    ``,
+    `Veuillez entrer un numéro valide.`,
   ].join('\n');
 }

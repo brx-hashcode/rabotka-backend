@@ -3,6 +3,7 @@ import { FLOW_IDS, CMD_MENU } from '../bot.constants';
 import { getApplyJobInitialState } from './apply-job.flow';
 import type { JobOfferService } from '../../job-offer/job-offer.service';
 import type { InterestSignalService } from '../../interest-graph/interest-signal.service';
+import type { SystemConfigService } from '../../system-config/system-config.service';
 import {
   formatOfferDetailWithActions,
   formatRecommendedList,
@@ -13,6 +14,7 @@ import { menuMessage } from '../messages/menu.messages';
 export type RecommendedJobsContext = {
   jobOfferService: JobOfferService;
   interestSignalService: InterestSignalService;
+  systemConfigService: SystemConfigService;
 };
 
 export type FlowResult = {
@@ -60,6 +62,62 @@ function isMenuCommand(normalizedInput: string): boolean {
   );
 }
 
+function formatPaymentFlow(flow: string | null): string {
+  switch (flow) {
+    case 'HOURLY': return '/heure';
+    case 'DAILY': return '/jour';
+    case 'MONTHLY': return '/mois';
+    default: return '';
+  }
+}
+
+async function buildApplyTeaser(
+  offerId: string,
+  ctx: RecommendedJobsContext,
+): Promise<{ text: string; applyState: BotState } | null> {
+  const offer = await ctx.jobOfferService.findById(offerId);
+  if (!offer) return null;
+  const fees = await ctx.systemConfigService.getFees();
+  const penalty = fees.lateCancellationPenaltyFcfa;
+  const threshold = fees.cancellationThresholdHours;
+  let amountStr = 'Prix à négocier';
+  if (offer.amount != null) {
+    const flowLabel = formatPaymentFlow(offer.payment_flow);
+    amountStr = flowLabel
+      ? `${offer.amount.toLocaleString('fr-FR')} FCFA ${flowLabel}`
+      : `${offer.amount.toLocaleString('fr-FR')} FCFA`;
+  }
+  const dateStr = offer.scheduled_at.toLocaleDateString('fr-FR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+  const text = [
+    '*Vous êtes sur le point de postuler*',
+    '',
+    `*Offre*: ${offer.title}`,
+    `*Date*: ${dateStr}`,
+    `*Montant*: ${amountStr}`,
+    `*Adresse*: ${offer.address}`,
+    '',
+    '*ENGAGEMENT IMPORTANT*:',
+    "Vos informations seront partagées avec l'employeur",
+    'Vous vous engagez à être présent et ponctuel',
+    `*Annulation < ${threshold}h avant = pénalité de ${penalty.toLocaleString('fr-FR')} FCFA*`,
+    'Impact sur votre score de fiabilité',
+    '',
+    '*Confirmez-vous votre candidature ?*',
+    '1- Oui, je postule',
+    '2- Non, retour',
+    '',
+    '*Tapez le numéro correspondant.*',
+    '',
+  ].join('\n');
+  return { text, applyState: getApplyJobInitialState(offerId) };
+}
+
 function buildListState(
   state: BotState,
   payload: Record<string, unknown>,
@@ -99,11 +157,23 @@ function buildPagedListReply(
   };
 }
 
+async function fetchOfferItems(
+  offerIds: string[],
+  ctx: RecommendedJobsContext,
+): Promise<OfferListItem[]> {
+  const results = await Promise.all(
+    offerIds.map((id) => ctx.jobOfferService.findById(id)),
+  );
+  return results
+    .filter((o): o is NonNullable<typeof o> => o != null)
+    .map((o) => toOfferListItem({ ...o, acceptedCount: o.acceptedCount ?? 0 }));
+}
+
 async function handleRecommendedJobsListStep(
   state: BotState,
   payload: Record<string, unknown>,
   trimmedInput: string,
-  offers: OfferListItem[],
+  offerIds: string[],
   profile: BotProfile,
   ctx: RecommendedJobsContext,
   goToMenu: () => FlowResult,
@@ -111,6 +181,7 @@ async function handleRecommendedJobsListStep(
   const normalized = trimmedInput.toLowerCase();
   if (normalized === 'm' || normalized === 'menu') return goToMenu();
 
+  const offers = await fetchOfferItems(offerIds, ctx);
   const currentPage = typeof payload.page === 'number' ? payload.page : 0;
   const totalPages = Math.ceil(offers.length / PAGE_SIZE);
 
@@ -146,21 +217,12 @@ async function handleRecommendedJobsListStep(
 
   const item = pageOffers[choice - 1];
 
-  // Fetch fresh detail for the full description
-  const fresh = await ctx.jobOfferService.findById(item.id);
-  if (!fresh) return { reply: ['Offre introuvable.'], nextState: state };
-
-  const freshItem = toOfferListItem({
-    ...fresh,
-    acceptedCount: fresh.acceptedCount ?? 0,
-  });
-
   void ctx.interestSignalService
     .record(profile.id, item.id, 'view')
     .catch(() => undefined);
 
   return {
-    reply: [formatOfferDetailWithActions(freshItem)],
+    reply: [formatOfferDetailWithActions(item)],
     nextState: buildDetailState(state, payload, item.id),
   };
 }
@@ -169,6 +231,7 @@ async function handleRecommendedJobsDetailStep(
   state: BotState,
   payload: Record<string, unknown>,
   normalizedInput: string,
+  offerIds: string[],
   profile: BotProfile,
   ctx: RecommendedJobsContext,
   goToMenu: () => FlowResult,
@@ -177,10 +240,20 @@ async function handleRecommendedJobsDetailStep(
 
   // 1 — Postuler
   if (normalizedInput === '1' || normalizedInput === 'postuler') {
+    if (profile.profile_type !== 'WORKER') {
+      return {
+        reply: ["❌ Seuls les travailleurs peuvent postuler à une offre."],
+        nextState: state,
+      };
+    }
     void ctx.interestSignalService
       .record(profile.id, selectedOfferId, 'apply')
       .catch(() => undefined);
-    return { reply: [], nextState: getApplyJobInitialState(selectedOfferId) };
+    const teaser = await buildApplyTeaser(selectedOfferId, ctx);
+    if (!teaser) {
+      return { reply: ["❌ Offre introuvable. Tapez *Menu*."], clearState: true };
+    }
+    return { reply: [teaser.text], nextState: teaser.applyState };
   }
 
   // 2 — Voir description complète
@@ -195,13 +268,13 @@ async function handleRecommendedJobsDetailStep(
           offer.description,
           '',
           '1- Postuler à cette offre',
-          '3- Retour à la liste',
-          '4- Menu principal',
+          '2- Retour à la liste',
+          '3- Menu principal',
           '',
           'Tapez le numéro correspondant.',
         ].join('\n'),
       ],
-      nextState: state,
+      nextState: { ...state, payload: { ...payload, step: 'description' } },
     };
   }
 
@@ -210,7 +283,7 @@ async function handleRecommendedJobsDetailStep(
     void ctx.interestSignalService
       .record(profile.id, selectedOfferId, 'skip')
       .catch(() => undefined);
-    const offers = (payload.offers as OfferListItem[] | undefined) ?? [];
+    const offers = await fetchOfferItems(offerIds, ctx);
     const currentPage = typeof payload.page === 'number' ? payload.page : 0;
     const { reply } = buildPagedListReply(offers, currentPage);
     return {
@@ -223,6 +296,50 @@ async function handleRecommendedJobsDetailStep(
   return goToMenu();
 }
 
+async function handleRecommendedJobsDescriptionStep(
+  state: BotState,
+  payload: Record<string, unknown>,
+  normalizedInput: string,
+  offerIds: string[],
+  profile: BotProfile,
+  ctx: RecommendedJobsContext,
+  goToMenu: () => FlowResult,
+): Promise<FlowResult> {
+  const selectedOfferId = payload.selectedOfferId as string;
+
+  // 1 — Postuler
+  if (normalizedInput === '1' || normalizedInput === 'postuler') {
+    if (profile.profile_type !== 'WORKER') {
+      return {
+        reply: ["❌ Seuls les travailleurs peuvent postuler à une offre."],
+        nextState: state,
+      };
+    }
+    void ctx.interestSignalService
+      .record(profile.id, selectedOfferId, 'apply')
+      .catch(() => undefined);
+    const teaser = await buildApplyTeaser(selectedOfferId, ctx);
+    if (!teaser) {
+      return { reply: ["❌ Offre introuvable. Tapez *Menu*."], clearState: true };
+    }
+    return { reply: [teaser.text], nextState: teaser.applyState };
+  }
+
+  // 2 — Retour fiche offre
+  if (normalizedInput === '2') {
+    const offer = await ctx.jobOfferService.findById(selectedOfferId);
+    if (!offer) return { reply: ['Offre introuvable.'], nextState: state };
+    const item = toOfferListItem({ ...offer, acceptedCount: offer.acceptedCount ?? 0 });
+    return {
+      reply: [formatOfferDetailWithActions(item)],
+      nextState: { ...state, payload: { ...payload, step: 'detail' } },
+    };
+  }
+
+  // 3 — Menu
+  return goToMenu();
+}
+
 export async function runRecommendedJobsFlow(
   state: BotState,
   input: string,
@@ -230,8 +347,8 @@ export async function runRecommendedJobsFlow(
   ctx: RecommendedJobsContext,
 ): Promise<FlowResult> {
   const payload = state.payload || {};
-  const offers = (payload.offers as OfferListItem[] | undefined) ?? [];
-  const step = (payload.step as RecommendedStep) ?? 'list';
+  const offerIds = (payload.offerIds as string[] | undefined) ?? [];
+  const step = (payload.step as RecommendedStep | 'description') ?? 'list';
   const trimmed = input.trim();
   const normalized = trimmed.toLowerCase();
 
@@ -242,7 +359,7 @@ export async function runRecommendedJobsFlow(
 
   if (isMenuCommand(normalized)) return goToMenu();
 
-  if (offers.length === 0) {
+  if (offerIds.length === 0) {
     return {
       reply: [
         "*Aucune offre recommandée pour le moment. Tapez *Menu* pour revenir.*",
@@ -256,7 +373,7 @@ export async function runRecommendedJobsFlow(
       state,
       payload,
       trimmed,
-      offers,
+      offerIds,
       profile,
       ctx,
       goToMenu,
@@ -268,6 +385,19 @@ export async function runRecommendedJobsFlow(
       state,
       payload,
       normalized,
+      offerIds,
+      profile,
+      ctx,
+      goToMenu,
+    );
+  }
+
+  if (step === 'description') {
+    return await handleRecommendedJobsDescriptionStep(
+      state,
+      payload,
+      normalized,
+      offerIds,
       profile,
       ctx,
       goToMenu,
@@ -275,19 +405,18 @@ export async function runRecommendedJobsFlow(
   }
 
   return {
-    reply: ["*ERREUR. TAPEZ 'MENU' POUR REVENIR.*"],
+    reply: ["❌ Erreur. Tapez *Menu* pour revenir."],
     clearState: true,
   };
 }
 
 export function getRecommendedJobsInitialState(
   offerIds: string[],
-  offers: OfferListItem[],
 ): BotState {
   return {
     flowId: FLOW_IDS.RECOMMENDED_JOBS,
     step: 0,
-    payload: { offerIds, offers, step: 'list' },
+    payload: { offerIds, step: 'list' },
     updatedAt: new Date().toISOString(),
   };
 }

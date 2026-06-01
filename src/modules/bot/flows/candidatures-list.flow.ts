@@ -112,6 +112,9 @@ function formatSelectedItemDetail(item: CandidatureListItem): string {
     score: item.score,
     avatarUrl: item.avatarUrl,
     offerTitle: item.offerTitle,
+    description: item.description,
+    completedMissions: item.completedMissions,
+    memberSince: item.memberSince,
   });
 }
 

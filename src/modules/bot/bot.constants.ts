@@ -24,16 +24,21 @@ export const FLOW_IDS = {
   RATE_ASSIGNMENT: 'rate_assignment',
   MY_OFFERS: 'my_offers',
   JOB_STATUS_CHECK: 'job_status_check',
+  SEARCH_BY_REF: 'search_by_ref',
+  /** Tiny state machine that handles the 1/2/3 menu shown to an employer
+   *  after a worker cancels their candidature (see formatCancellationToEmployer). */
+  POST_CANCELLATION_ACTIONS: 'post_cancellation_actions',
 } as const;
 
 export const WORKER_MENU_OPTIONS = {
   LIST_OFFERS: '1',
-  MY_APPLICATIONS: '2',
-  WAITING_PAYMENTS: '3',
-  RECOMMENDED_JOBS: '4',
-  PROFILE: '5',
-  HISTORY: '6',
-  HELP: '7',
+  SEARCH_BY_REF: '2',
+  MY_APPLICATIONS: '3',
+  WAITING_PAYMENTS: '4',
+  RECOMMENDED_JOBS: '5',
+  PROFILE: '6',
+  HISTORY: '7',
+  HELP: '8',
 } as const;
 
 export const EMPLOYER_MENU_OPTIONS = {
@@ -77,3 +82,10 @@ export const CMD_RECOMMENDED_PROFILES = [
   'recommended profiles',
 ];
 export const CMD_VERIFY_WHATSAPP = ['verifier', 'verify', 'vérifier'];
+export const CMD_SEARCH_BY_REF = [
+  'référence',
+  'reference',
+  'ref',
+  'rechercher référence',
+  'rechercher reference',
+];

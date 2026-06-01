@@ -20,14 +20,13 @@ export class VectorIndexProcessor implements OnModuleInit {
     private readonly matchingService: MatchingService,
   ) {}
 
-  onModuleInit(): void {
+  async onModuleInit(): Promise<void> {
     this.queueService.createWorker<VectorIndexJobData>(
       VECTOR_INDEX_QUEUE,
       async (job) => {
         const { data } = job;
         if (data.type === 'scan') {
           await this.matchingService.reindexPending();
-          await this.scheduleScan();
           return;
         }
         if (data.type === 'index_job') {
@@ -45,8 +44,20 @@ export class VectorIndexProcessor implements OnModuleInit {
       { concurrency: 1 },
     );
 
-    void this.scheduleScan();
-    this.logger.log('VectorIndexProcessor ready');
+    try {
+      const queue = this.queueService.getQueue(VECTOR_INDEX_QUEUE);
+      await queue.add(
+        'scan',
+        { type: 'scan' } satisfies VectorIndexJobData,
+        { repeat: { every: SCAN_INTERVAL_MS } },
+      );
+      this.logger.log(
+        `VectorIndexProcessor ready — scan every ${SCAN_INTERVAL_MS / 60000} min`,
+      );
+    } catch (err) {
+      this.logger.error('Failed to register repeatable vector index scan', err);
+      throw err;
+    }
   }
 
   async enqueueJob(jobOfferId: string): Promise<void> {
@@ -62,14 +73,5 @@ export class VectorIndexProcessor implements OnModuleInit {
   async enqueueEmployer(profileId: string): Promise<void> {
     const queue = this.queueService.getQueue(VECTOR_INDEX_QUEUE);
     await queue.add('index_employer', { type: 'index_employer', profileId });
-  }
-
-  private async scheduleScan(): Promise<void> {
-    try {
-      const queue = this.queueService.getQueue(VECTOR_INDEX_QUEUE);
-      await queue.add('scan', { type: 'scan' }, { delay: SCAN_INTERVAL_MS });
-    } catch (err) {
-      this.logger.error('Failed to schedule next vector index scan', err);
-    }
   }
 }

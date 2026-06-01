@@ -444,4 +444,153 @@ describe('DocumentService', () => {
       expect(mockRedisClient.del).toHaveBeenCalledWith('key1', 'key2');
     });
   });
+
+  describe('fillDocumentTemplate — successful render paths', () => {
+    /**
+     * Build a minimal valid .docx in memory containing two placeholders
+     * `[name]` and `[date]` (the service configures docxtemplater with
+     * `[` / `]` delimiters). The resulting buffer is what
+     * `loadDocxTemplateBuffer` would return after fetching from storage.
+     */
+    function buildDocxWithPlaceholders(body: string): Buffer {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const PizZip = require('pizzip');
+      const zip = new PizZip();
+
+      zip.file(
+        '[Content_Types].xml',
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+          '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+          '<Default Extension="xml" ContentType="application/xml"/>' +
+          '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+          '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>' +
+          '</Types>',
+      );
+      zip.folder('_rels').file(
+        '.rels',
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+          '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+          '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>' +
+          '</Relationships>',
+      );
+      zip.folder('word').file(
+        'document.xml',
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+          '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+          '<w:body><w:p><w:r><w:t xml:space="preserve">' +
+          body +
+          '</w:t></w:r></w:p></w:body></w:document>',
+      );
+      return zip.generate({ type: 'nodebuffer' });
+    }
+
+    it('renders a valid .docx with all tags supplied', async () => {
+      mockPrisma.document.findUnique.mockResolvedValue(baseDoc);
+      const buffer = buildDocxWithPlaceholders('Hello [name], today is [date].');
+      // Service fetches the file_url via global.fetch in
+      // loadDocxTemplateBuffer for UPLOAD source.
+      mockFetch.mockResolvedValue({
+        ok: true,
+        arrayBuffer: jest
+          .fn()
+          .mockResolvedValue(
+            buffer.buffer.slice(
+              buffer.byteOffset,
+              buffer.byteOffset + buffer.byteLength,
+            ),
+          ),
+      });
+
+      const result = await service.fillDocumentTemplate('doc-1', {
+        name: 'Alice',
+        date: '2026-05-24',
+      });
+
+      expect(Buffer.isBuffer(result)).toBe(true);
+      expect(result.length).toBeGreaterThan(0);
+
+      // The rendered output is itself a zip — inspect its document.xml
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const PizZip = require('pizzip');
+      const out = new PizZip(result);
+      const xml = out.file('word/document.xml')!.asText();
+      expect(xml).toContain('Alice');
+      expect(xml).toContain('2026-05-24');
+      expect(xml).not.toContain('[name]');
+      expect(xml).not.toContain('[date]');
+    });
+
+    it('renders empty strings for missing tags without throwing', async () => {
+      // docxtemplater's default behaviour: an unresolved tag becomes "".
+      // The implementation's `template.render(data)` catch branch only
+      // fires for harder errors (loop mismatches, unclosed tags, etc.).
+      mockPrisma.document.findUnique.mockResolvedValue(baseDoc);
+      const buffer = buildDocxWithPlaceholders('Hi [name] on [date].');
+      mockFetch.mockResolvedValue({
+        ok: true,
+        arrayBuffer: jest
+          .fn()
+          .mockResolvedValue(
+            buffer.buffer.slice(
+              buffer.byteOffset,
+              buffer.byteOffset + buffer.byteLength,
+            ),
+          ),
+      });
+
+      const result = await service.fillDocumentTemplate('doc-1', {});
+      expect(Buffer.isBuffer(result)).toBe(true);
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const PizZip = require('pizzip');
+      const xml = new PizZip(result).file('word/document.xml')!.asText();
+      expect(xml).not.toContain('[name]');
+      expect(xml).not.toContain('[date]');
+    });
+
+    it('renders a GOOGLE_DOCS template via the live export (happy path)', async () => {
+      const googleDocsDoc = {
+        ...baseDoc,
+        source_mode: DocumentSourceMode.GOOGLE_DOCS,
+        google_docs_id: 'gid-123',
+        google_docs_url: 'https://docs.google.com/document/d/gid-123/edit',
+      };
+      mockPrisma.document.findUnique.mockResolvedValue(googleDocsDoc);
+      const buffer = buildDocxWithPlaceholders('Hello [name].');
+      mockGoogleDocs.exportGoogleDocAsDocx.mockResolvedValue(buffer);
+
+      const result = await service.fillDocumentTemplate('doc-1', {
+        name: 'Bob',
+      });
+
+      expect(mockGoogleDocs.exportGoogleDocAsDocx).toHaveBeenCalledWith('gid-123');
+      // Should not have fallen back to fetch
+      expect(mockFetch).not.toHaveBeenCalled();
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const PizZip = require('pizzip');
+      const xml = new PizZip(result).file('word/document.xml')!.asText();
+      expect(xml).toContain('Bob');
+    });
+
+    it('preserves literal text that does not contain placeholders', async () => {
+      mockPrisma.document.findUnique.mockResolvedValue(baseDoc);
+      const buffer = buildDocxWithPlaceholders('Static text only.');
+      mockFetch.mockResolvedValue({
+        ok: true,
+        arrayBuffer: jest
+          .fn()
+          .mockResolvedValue(
+            buffer.buffer.slice(
+              buffer.byteOffset,
+              buffer.byteOffset + buffer.byteLength,
+            ),
+          ),
+      });
+
+      const result = await service.fillDocumentTemplate('doc-1', {});
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const PizZip = require('pizzip');
+      const xml = new PizZip(result).file('word/document.xml')!.asText();
+      expect(xml).toContain('Static text only.');
+    });
+  });
 });

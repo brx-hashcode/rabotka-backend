@@ -57,7 +57,7 @@ describe('AdminJobOfferController', () => {
     const result = await controller.update(
       'jo1',
       { title: 'New' } as any,
-      { user: { userId: 'u1' } } as any,
+      { user: { userId: 'u1' }, headers: {}, ip: '127.0.0.1', get: () => undefined } as any,
     );
     expect(service.updateJobOfferByAdmin).toHaveBeenCalledWith('jo1', {
       title: 'New',
@@ -66,7 +66,12 @@ describe('AdminJobOfferController', () => {
   });
 
   it('remove() calls deleteJobOfferByAdmin', async () => {
-    await controller.remove('jo1', { user: { userId: 'u1' } } as any);
+    await controller.remove('jo1', {
+      user: { userId: 'u1' },
+      headers: {},
+      ip: '127.0.0.1',
+      get: () => undefined,
+    } as any);
     expect(service.deleteJobOfferByAdmin).toHaveBeenCalledWith('jo1');
   });
 });

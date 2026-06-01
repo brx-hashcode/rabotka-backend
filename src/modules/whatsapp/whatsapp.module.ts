@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { WhatsAppController } from './whatsapp.controller';
 import { WhatsAppService } from './whatsapp.service';
 import { WhatsAppOutboundProcessor } from './whatsapp-outbound.processor';
+import { WhatsAppInboundProcessor } from './whatsapp-inbound.processor';
 import { ConversationModule } from '../conversation/conversation.module';
 import { PrismaModule } from '../../common/services/prisma/prisma.module';
 import { WalletModule } from '../wallet/wallet.module';
@@ -15,7 +16,7 @@ import { WalletModule } from '../wallet/wallet.module';
     forwardRef(() => WalletModule),
   ],
   controllers: [WhatsAppController],
-  providers: [WhatsAppService, WhatsAppOutboundProcessor],
+  providers: [WhatsAppService, WhatsAppOutboundProcessor, WhatsAppInboundProcessor],
   exports: [WhatsAppService],
 })
 export class WhatsAppModule {}

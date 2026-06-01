@@ -4,6 +4,7 @@ import { SystemConfigController } from '../system-config.controller';
 import { SystemConfigService } from '../system-config.service';
 import { AdminAuthGuard } from '../../auth/guards/admin-auth.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
+import { LogService } from '../../log/log.service';
 
 const mockSystemConfigService = {
   getAll: jest
@@ -24,6 +25,7 @@ describe('SystemConfigController', () => {
       controllers: [SystemConfigController],
       providers: [
         { provide: SystemConfigService, useValue: mockSystemConfigService },
+        { provide: LogService, useValue: { create: jest.fn() } },
       ],
     })
       .overrideGuard(AdminAuthGuard)
@@ -58,7 +60,12 @@ describe('SystemConfigController', () => {
   });
 
   it('update updates config entry', async () => {
-    const req = { user: { userId: 'admin-1' } };
+    const req = {
+      user: { userId: 'admin-1' },
+      headers: {},
+      ip: '127.0.0.1',
+      get: () => undefined,
+    } as any;
     const result = await controller.update(
       'ENABLE_SIMILARITY',
       { value: 'false' },
@@ -74,7 +81,12 @@ describe('SystemConfigController', () => {
 
   it('update throws NotFoundException when key not found', async () => {
     mockSystemConfigService.getOne.mockResolvedValueOnce(null);
-    const req = { user: { userId: 'admin-1' } };
+    const req = {
+      user: { userId: 'admin-1' },
+      headers: {},
+      ip: '127.0.0.1',
+      get: () => undefined,
+    } as any;
     await expect(
       controller.update('UNKNOWN_KEY', { value: 'val' }, req),
     ).rejects.toThrow(NotFoundException);

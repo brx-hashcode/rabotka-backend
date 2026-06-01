@@ -3,6 +3,12 @@ import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { QdrantService } from '../qdrant/qdrant.service';
 import { COLLECTIONS } from '../qdrant/qdrant.config';
 import { InterestClusterService } from './interest-cluster.service';
+import {
+  haversineKm,
+  proximityScore,
+  urgencyScore,
+} from '../../common/services/geocoding/geo.utils';
+import type { Coordinates } from '../../common/services/geocoding/geocoding.service';
 
 const DEFAULT_LIMIT = 10;
 
@@ -83,7 +89,67 @@ export class InterestRecommendationService {
     mergeUnique(explored, seen, results);
     mergeUnique(fallbackResults, seen, results, limit);
 
-    return results.slice(0, limit);
+    const merged = results.slice(0, limit);
+    return this.rerank(workerId, merged);
+  }
+
+  // ── Re-ranking: combine qdrant score + proximity + urgency ────────────────
+
+  private async rerank(
+    workerId: string,
+    results: RecommendedJob[],
+  ): Promise<RecommendedJob[]> {
+    if (results.length === 0) return results;
+
+    const [workerRow, offerRows] = await Promise.all([
+      this.prisma.profile.findUnique({
+        where: { id: workerId },
+        select: { latitude: true, longitude: true },
+      }),
+      this.prisma.jobOffer.findMany({
+        where: { id: { in: results.map((r) => r.jobId) } },
+        select: { id: true, latitude: true, longitude: true, scheduled_at: true },
+      }),
+    ]);
+
+    const workerCoords: Coordinates | null =
+      workerRow?.latitude != null && workerRow.longitude != null
+        ? { lat: workerRow.latitude, lng: workerRow.longitude }
+        : null;
+
+    const offerMap = new Map(offerRows.map((o) => [o.id, o]));
+
+    // Normalize qdrant scores to [0, 1] using min-max
+    const scores = results.map((r) => r.score);
+    const minScore = Math.min(...scores);
+    const maxScore = Math.max(...scores);
+    const scoreRange = maxScore - minScore || 1;
+
+    const ranked = results.map((r) => {
+      const offer = offerMap.get(r.jobId);
+      const normalizedQdrant = (r.score - minScore) / scoreRange;
+
+      const prox =
+        workerCoords != null &&
+        offer?.latitude != null &&
+        offer?.longitude != null
+          ? proximityScore(
+              haversineKm(workerCoords, {
+                lat: offer.latitude,
+                lng: offer.longitude,
+              }),
+            )
+          : 0.5; // neutral when coords unavailable
+
+      const urgency = offer?.scheduled_at
+        ? urgencyScore(offer.scheduled_at)
+        : 0.5;
+
+      const combined = 0.5 * normalizedQdrant + 0.3 * prox + 0.2 * urgency;
+      return { ...r, score: combined };
+    });
+
+    return ranked.sort((a, b) => b.score - a.score);
   }
 
   // ── 70% Exploit ───────────────────────────────────────────────────────────

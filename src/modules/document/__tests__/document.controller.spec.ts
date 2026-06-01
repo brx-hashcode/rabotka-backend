@@ -24,7 +24,12 @@ const mockLogService = {
   create: jest.fn().mockResolvedValue({}),
 };
 
-const adminReq = { user: { userId: 'admin-1' } };
+const adminReq = {
+  user: { userId: 'admin-1' },
+  headers: {},
+  ip: '127.0.0.1',
+  get: () => undefined,
+} as any;
 
 describe('DocumentController', () => {
   let controller: DocumentController;
@@ -105,7 +110,12 @@ describe('DocumentController', () => {
 
   it('fillDocx fills template and sends docx', async () => {
     const res = { setHeader: jest.fn(), send: jest.fn() } as any;
-    await controller.fillDocx('doc-1', { data: { name: 'Alice' } }, res);
+    await controller.fillDocx(
+      'doc-1',
+      { data: { name: 'Alice' } },
+      res,
+      adminReq,
+    );
     expect(mockDocumentService.fillDocumentTemplate).toHaveBeenCalledWith(
       'doc-1',
       { name: 'Alice' },
@@ -119,7 +129,7 @@ describe('DocumentController', () => {
 
   it('fillPdf fills template and sends pdf', async () => {
     const res = { setHeader: jest.fn(), send: jest.fn() } as any;
-    await controller.fillPdf('doc-1', { data: {} }, res);
+    await controller.fillPdf('doc-1', { data: {} }, res, adminReq);
     expect(mockDocumentService.fillDocumentTemplateAsPdf).toHaveBeenCalledWith(
       'doc-1',
       {},

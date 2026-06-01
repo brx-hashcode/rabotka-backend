@@ -8,9 +8,15 @@ import { AdminNotificationService } from './admin-notification.service';
 import { AdminNotificationController } from './admin-notification.controller';
 import { PaymentStatusGateway } from './payment-status.gateway';
 import { ClaimCommentsGateway } from './claim-comments.gateway';
+import { LogModule } from '../log/log.module';
 
 @Module({
-  imports: [ConfigModule, forwardRef(() => AuthModule), PrismaModule],
+  imports: [
+    ConfigModule,
+    forwardRef(() => AuthModule),
+    PrismaModule,
+    LogModule,
+  ],
   controllers: [AdminNotificationController],
   providers: [
     WsNotificationsGateway,

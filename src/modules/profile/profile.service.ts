@@ -28,6 +28,7 @@ import { WalletService } from '../wallet/wallet.service';
 import { DocumentService } from '../document/document.service';
 import { MatchingService } from '../matching/matching.service';
 import { InterestClusterService } from '../interest-graph/interest-cluster.service';
+import { GeocodingService } from '../../common/services/geocoding/geocoding.service';
 import { CreateProfileDto } from './dto/create-profile.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { AdminUpdateProfileDto } from './dto/admin-update-profile.dto';
@@ -64,6 +65,8 @@ export type ProfileMeResponse = {
   penaltiesCount: number;
   unpaidPenaltiesCount: number;
   walletBalance: number;
+  categoryIds: string[];
+  categoryNames: string[];
 };
 
 export type ProfilePenaltyItem = {
@@ -131,7 +134,7 @@ export type AdminKycDocumentItem = {
   id: string;
   documentType: string | null;
   documentCategory: string;
-  documentUrl: string;
+  documentUrl: string | null;
   verificationStatus: string;
   verifiedAt: Date | null;
   verifiedBy: string | null;
@@ -185,6 +188,7 @@ export class ProfileService {
     private readonly documentService: DocumentService,
     private readonly matchingService: MatchingService,
     private readonly interestClusters: InterestClusterService,
+    private readonly geocodingService: GeocodingService,
   ) {}
 
   async findById(id: string): Promise<ProfileMeResponse> {
@@ -205,6 +209,9 @@ export class ProfileService {
         whatsapp_connected: true,
         avatar_url: true,
         created_at: true,
+        categories: {
+          select: { category: { select: { id: true, name: true } } },
+        },
         _count: {
           select: {
             job_offers: true,
@@ -244,6 +251,8 @@ export class ProfileService {
       penaltiesCount: profile._count.penalties,
       unpaidPenaltiesCount,
       walletBalance,
+      categoryIds: profile.categories.map((pc) => pc.category.id),
+      categoryNames: profile.categories.map((pc) => pc.category.name),
     };
   }
 
@@ -268,7 +277,21 @@ export class ProfileService {
 
     const dataToUpdate = this.buildProfileUpdateData(updateProfileDto);
 
-    await this.prisma.profile.update({ where: { id }, data: dataToUpdate });
+    await this.prisma.$transaction(async (tx) => {
+      await tx.profile.update({ where: { id }, data: dataToUpdate });
+      if (updateProfileDto.categoryIds !== undefined) {
+        await tx.profileCategory.deleteMany({ where: { profile_id: id } });
+        if (updateProfileDto.categoryIds.length > 0) {
+          await tx.profileCategory.createMany({
+            data: updateProfileDto.categoryIds.map((categoryId) => ({
+              profile_id: id,
+              category_id: categoryId,
+            })),
+            skipDuplicates: true,
+          });
+        }
+      }
+    });
 
     // Re-index in Qdrant after update (fire-and-forget)
     if (existingProfile.profile_type === ProfileType.WORKER) {
@@ -567,23 +590,39 @@ export class ProfileService {
       penaltiesCount: profile._count.penalties,
       unpaidPenaltiesCount,
       kycDocuments: await Promise.all(
-        profile.kyc_documents.map(async (doc) => ({
-          id: doc.id,
-          documentType: doc.document_type,
-          documentCategory: doc.document_category,
-          documentUrl: doc.storage_key
-            ? await this.fileService.getPublicUrl(doc.storage_key)
-            : await this.fileService.getPresignedUrlFromPublicUrl(
-                doc.document_url ?? '',
-              ),
-          verificationStatus: doc.verification_status,
-          verifiedAt: doc.verified_at,
-          verifiedBy: doc.verified_by
-            ? (verifierNames.get(doc.verified_by) ?? doc.verified_by)
-            : null,
-          rejectionReason: doc.rejection_reason,
-          createdAt: doc.created_at,
-        })),
+        profile.kyc_documents.map(async (doc) => {
+          // Resolving a single doc's URL must never fail the whole profile
+          // load — a missing blob (deleted, expired, wrong provider) would
+          // otherwise 500 the entire detail endpoint. Degrade to null and
+          // log so the admin can still review the rest of the profile.
+          let documentUrl: string | null = null;
+          try {
+            documentUrl = doc.storage_key
+              ? await this.fileService.getPublicUrl(doc.storage_key)
+              : await this.fileService.getPresignedUrlFromPublicUrl(
+                  doc.document_url ?? '',
+                );
+          } catch (err) {
+            this.logger.warn(
+              `Failed to resolve URL for kyc_document ${doc.id}: ${
+                err instanceof Error ? err.message : String(err)
+              }`,
+            );
+          }
+          return {
+            id: doc.id,
+            documentType: doc.document_type,
+            documentCategory: doc.document_category,
+            documentUrl,
+            verificationStatus: doc.verification_status,
+            verifiedAt: doc.verified_at,
+            verifiedBy: doc.verified_by
+              ? (verifierNames.get(doc.verified_by) ?? doc.verified_by)
+              : null,
+            rejectionReason: doc.rejection_reason,
+            createdAt: doc.created_at,
+          };
+        }),
       ),
       verificationImages: profile.kyc_verification_images.map((img) => ({
         id: img.id,
@@ -1001,6 +1040,23 @@ export class ProfileService {
       );
 
       this.logger.log(`Profile created successfully: ${profile.id}`);
+
+      // Geocode address asynchronously (fire-and-forget)
+      this.geocodingService
+        .geocode(createProfileDto.address)
+        .then((coords) => {
+          if (!coords) return;
+          return this.prisma.profile.update({
+            where: { id: profile.id },
+            data: { latitude: coords.lat, longitude: coords.lng },
+          });
+        })
+        .catch((err: unknown) =>
+          this.logger.warn(
+            `geocoding failed for profile ${profile.id}`,
+            err instanceof Error ? err.message : String(err),
+          ),
+        );
 
       // Index profile asynchronously (fire-and-forget, gated by feature flag)
       if (createProfileDto.profileType === 'WORKER') {

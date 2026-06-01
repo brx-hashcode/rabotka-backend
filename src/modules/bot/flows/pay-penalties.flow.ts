@@ -316,7 +316,7 @@ export async function runPayPenaltiesFlow(
     );
   }
 
-  // In mobile money sub-flow
+  // In mobile money sub-flow (step stays at 1; _mm_step drives sub-flow navigation)
   if (payload._mm_step) {
     return runMobileMoneySubFlow(state, input, profile, {
       paymentService: ctx.paymentService,

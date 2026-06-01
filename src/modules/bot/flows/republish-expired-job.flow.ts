@@ -1,27 +1,31 @@
-import { PaymentFlow } from '@prisma/client';
 import type { PrismaService } from '../../../common/services/prisma/prisma.service';
 import type { BotProfile, BotState } from '../types/bot-state.types';
 import type { FlowResult } from '../types/flow.types';
-import type { JobOfferService } from '../../job-offer/job-offer.service';
 import { CMD_MENU } from '../bot.constants';
 import {
   parseDateTime,
-  toScheduledAtString,
   formatDateTime,
   MIN_HOURS_FROM_NOW,
 } from '../utils/parse-date-time';
 
 export type RepublishExpiredJobContext = {
   prisma: PrismaService;
-  jobOfferService: JobOfferService;
+};
+
+type ExpiredJobLite = {
+  id: string;
+  title: string;
+  description: string;
+  address: string | null;
+  amount: import('@prisma/client').Prisma.Decimal | number;
+  payment_flow: string | null;
+  quantity: number;
+  note: string | null;
+  employer_id: string;
 };
 
 function isMenuInput(normalized: string): boolean {
-  return (
-    CMD_MENU.includes(normalized) ||
-    normalized === '2' ||
-    normalized === 'annuler'
-  );
+  return CMD_MENU.includes(normalized) || normalized === 'annuler';
 }
 
 const MENU_REPLY: FlowResult = {
@@ -29,36 +33,112 @@ const MENU_REPLY: FlowResult = {
   clearState: true,
 };
 
+/** Pull the queue out of the payload, tolerating the legacy single-id shape. */
+function readQueue(payload: Record<string, unknown>): string[] {
+  const ids = payload.jobOfferIds;
+  if (Array.isArray(ids)) {
+    return ids.filter((v): v is string => typeof v === 'string');
+  }
+  const single = payload.jobOfferId;
+  return typeof single === 'string' ? [single] : [];
+}
+
+function expiredPrompt(title?: string): string {
+  return [
+    `*⏰ Offre expirée*`,
+    '',
+    title
+      ? `Votre offre *"${title}"* a expiré.`
+      : 'Votre offre a expiré.',
+    '',
+    `Que souhaitez-vous faire ?`,
+    '',
+    `1- Republier l'offre`,
+    `2- Passer cette offre`,
+  ].join('\n');
+}
+
+/**
+ * Builds the next state by dropping `count` offers from the front of the
+ * queue. Returns either the next-prompt result, or a terminal MENU_REPLY
+ * if the queue is now empty.
+ */
+async function advanceQueue(
+  state: BotState,
+  drop: number,
+  precedingReply: string | null,
+  ctx: RepublishExpiredJobContext,
+  profileId: string,
+): Promise<FlowResult> {
+  const queue = readQueue(state.payload).slice(drop);
+  if (queue.length === 0) {
+    return {
+      reply: precedingReply
+        ? [precedingReply, 'Tapez *MENU* pour revenir au menu.']
+        : MENU_REPLY.reply,
+      clearState: true,
+    };
+  }
+
+  // Look up the next offer's title so the prompt is specific.
+  const next = await ctx.prisma.jobOffer.findUnique({
+    where: { id: queue[0] },
+    select: { title: true, employer_id: true },
+  });
+  if (!next || next.employer_id !== profileId) {
+    // Skip stale/unauthorised id and recurse on the rest.
+    return advanceQueue(
+      { ...state, payload: { ...state.payload, jobOfferIds: queue } },
+      1,
+      precedingReply,
+      ctx,
+      profileId,
+    );
+  }
+
+  const prompt = expiredPrompt(next.title);
+  return {
+    reply: precedingReply ? [precedingReply, prompt] : [prompt],
+    nextState: {
+      ...state,
+      step: 0,
+      payload: { jobOfferIds: queue },
+      updatedAt: new Date().toISOString(),
+    },
+  };
+}
+
 async function handleStep0(
   state: BotState,
-  trimmed: string,
+  _trimmed: string,
   normalized: string,
   profile: BotProfile,
   ctx: RepublishExpiredJobContext,
 ): Promise<FlowResult> {
-  if (isMenuInput(normalized)) return MENU_REPLY;
+  const queue = readQueue(state.payload);
+  const currentId = queue[0];
+
+  // Global menu: abandon all pending offers.
+  if (isMenuInput(normalized) && normalized !== '2') {
+    return MENU_REPLY;
+  }
+
+  // "2" = skip this offer and move on to the next in the queue (or menu).
+  if (normalized === '2') {
+    return advanceQueue(state, 1, null, ctx, profile.id);
+  }
 
   if (normalized !== '1' && normalized !== 'republier') {
     return {
-      reply: [
-        [
-          `*⏰ Offre expirée*`,
-          '',
-          `Que souhaitez-vous faire ?`,
-          '',
-          `1- Republier l'offre`,
-          `2- Menu`,
-        ].join('\n'),
-      ],
+      reply: [expiredPrompt()],
       nextState: state,
     };
   }
 
-  const jobOfferId = state.payload.jobOfferId as string | undefined;
-  if (!jobOfferId) return MENU_REPLY;
+  if (!currentId) return MENU_REPLY;
 
-  const job = await ctx.prisma.jobOffer.findUnique({
-    where: { id: jobOfferId },
+  const job = (await ctx.prisma.jobOffer.findUnique({
+    where: { id: currentId },
     select: {
       id: true,
       title: true,
@@ -70,13 +150,11 @@ async function handleStep0(
       note: true,
       employer_id: true,
     },
-  });
+  })) as ExpiredJobLite | null;
 
   if (!job || job.employer_id !== profile.id) {
-    return {
-      reply: [`❌ Offre introuvable. Tapez *MENU* pour continuer.`],
-      clearState: true,
-    };
+    // Unauthorised or vanished — drop this id and try the next one.
+    return advanceQueue(state, 1, '❌ Offre introuvable.', ctx, profile.id);
   }
 
   return {
@@ -96,7 +174,7 @@ async function handleStep0(
       ...state,
       step: 1,
       payload: {
-        jobOfferId: job.id,
+        jobOfferIds: queue,
         title: job.title,
         description: job.description,
         address: job.address ?? '',
@@ -140,33 +218,29 @@ async function handleStep1(
   }
 
   const payload = state.payload;
+  const queue = readQueue(payload);
+  const currentId = queue[0];
+  if (!currentId) return MENU_REPLY;
+
   try {
-    await ctx.jobOfferService.create(profile.id, {
-      title: String(payload.title),
-      description: String(payload.description),
-      scheduled_at: toScheduledAtString(dt),
-      ...(payload.amount != null ? { amount: Number(payload.amount) } : {}),
-      ...(payload.payment_flow
-        ? { payment_flow: payload.payment_flow as PaymentFlow }
-        : {}),
-      address: String(payload.address),
-      ...(payload.note ? { note: String(payload.note) } : {}),
-      quantity: Number(payload.quantity ?? 1),
+    await ctx.prisma.jobOffer.update({
+      where: { id: currentId },
+      data: {
+        scheduled_at: dt,
+        status: 'ACTIVE',
+      },
     });
 
-    return {
-      reply: [
-        [
-          `✅ *Offre republiée !*`,
-          '',
-          `Votre offre *"${String(payload.title)}"* a été republiée pour le *${formatDateTime(dt)}*.`,
-          `Les travailleurs peuvent à nouveau y postuler.`,
-          '',
-          `Tapez *MENU* pour revenir au menu.`,
-        ].join('\n'),
-      ],
-      clearState: true,
-    };
+    const successMsg = [
+      `✅ *Offre republiée !*`,
+      '',
+      `Votre offre *"${String(payload.title)}"* a été republiée pour le *${formatDateTime(dt)}*.`,
+      `Les travailleurs peuvent à nouveau y postuler.`,
+    ].join('\n');
+
+    // Drop the current offer and, if more remain, show the next prompt
+    // in the same reply. Otherwise terminate with the success message.
+    return advanceQueue(state, 1, successMsg, ctx, profile.id);
   } catch (err: unknown) {
     const message =
       err instanceof Error ? err.message : 'Erreur lors de la republication.';

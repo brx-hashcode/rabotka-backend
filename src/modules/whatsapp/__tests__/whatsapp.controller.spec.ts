@@ -79,12 +79,13 @@ describe('WhatsAppController', () => {
     queueService = { addJob: jest.fn().mockResolvedValue(undefined) };
     controller = new WhatsAppController(
       whatsAppService as any,
-      conversationService as any,
       twilioService as any,
       configService as any,
       queueService as any,
       redis as any,
     );
+    // Avoid unused-warning; conversationService isn't injected anymore.
+    void conversationService;
   });
 
   describe('getStatus()', () => {
@@ -107,18 +108,14 @@ describe('WhatsAppController', () => {
       MessageSid: 'SM123',
     };
 
-    it('processes webhook and sends reply', async () => {
+    it('enqueues inbound webhook for background processing', async () => {
       await controller.incomingWebhook(makeReq(), body);
-      expect(conversationService.handleIncomingMessage).toHaveBeenCalledWith(
-        '+24200000001',
-        'Hello',
-      );
       expect(queueService.addJob).toHaveBeenCalledWith(
         expect.any(String),
         expect.objectContaining({
-          type: 'text',
           phone: '+24200000001',
-          text: 'Hello back!',
+          text: 'Hello',
+          messageSid: 'SM123',
         }),
       );
     });
@@ -156,24 +153,7 @@ describe('WhatsAppController', () => {
     it('skips duplicate message (NX returns null)', async () => {
       redis.set.mockResolvedValue(null); // already processed
       await controller.incomingWebhook(makeReq(), body);
-      expect(conversationService.handleIncomingMessage).not.toHaveBeenCalled();
-    });
-
-    it('handles media reply messages with [IMG:...] prefix', async () => {
-      conversationService.handleIncomingMessage.mockResolvedValue({
-        profileId: 'p-1',
-        replies: ['[IMG:https://cdn.example.com/photo.jpg]Caption text'],
-      });
-      await controller.incomingWebhook(makeReq(), body);
-      expect(queueService.addJob).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.objectContaining({
-          type: 'media',
-          phone: '+24200000001',
-          mediaUrl: 'https://cdn.example.com/photo.jpg',
-          caption: 'Caption text',
-        }),
-      );
+      expect(queueService.addJob).not.toHaveBeenCalled();
     });
 
     it('strips whatsapp: prefix from From field', async () => {
@@ -181,9 +161,9 @@ describe('WhatsAppController', () => {
         ...body,
         From: 'whatsapp:+24200000001',
       });
-      expect(conversationService.handleIncomingMessage).toHaveBeenCalledWith(
-        '+24200000001',
-        'Hello',
+      expect(queueService.addJob).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ phone: '+24200000001' }),
       );
     });
 
@@ -192,9 +172,9 @@ describe('WhatsAppController', () => {
         ...body,
         From: '+24200000001',
       });
-      expect(conversationService.handleIncomingMessage).toHaveBeenCalledWith(
-        '+24200000001',
-        'Hello',
+      expect(queueService.addJob).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ phone: '+24200000001' }),
       );
     });
 

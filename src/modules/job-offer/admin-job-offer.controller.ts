@@ -27,6 +27,8 @@ import { AdminListJobOffersDto } from './dto/admin-list-job-offers.dto';
 import { AdminUpdateJobOfferDto } from './dto/admin-update-job-offer.dto';
 import { AdminUpdateJobOfferStatusDto } from './dto/admin-update-job-offer-status.dto';
 import { LogService } from '../log/log.service';
+import type { AdminAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
+import { extractRequestMeta } from '../../common/utils/request-meta.util';
 
 @ApiTags('Admin – Job Offers')
 @Controller('admin/job-offers')
@@ -83,7 +85,7 @@ export class AdminJobOfferController {
   async updateStatus(
     @Param('id') id: string,
     @Body() dto: AdminUpdateJobOfferStatusDto,
-    @Req() req: any,
+    @Req() req: AdminAuthenticatedRequest,
   ) {
     const result = await this.jobOfferService.updateStatusByAdmin(
       id,
@@ -95,6 +97,7 @@ export class AdminJobOfferController {
       entityId: id,
       userId: req.user?.userId,
       metadata: { status: dto.status },
+      ...extractRequestMeta(req),
     });
     return result;
   }
@@ -111,7 +114,7 @@ export class AdminJobOfferController {
   async update(
     @Param('id') id: string,
     @Body() dto: AdminUpdateJobOfferDto,
-    @Req() req: any,
+    @Req() req: AdminAuthenticatedRequest,
   ) {
     const result = await this.jobOfferService.updateJobOfferByAdmin(id, dto);
     await this.logService.create({
@@ -119,7 +122,8 @@ export class AdminJobOfferController {
       entityType: 'JobOffer',
       entityId: id,
       userId: req.user?.userId,
-      metadata: { fields: dto },
+      metadata: { fields: { ...dto } },
+      ...extractRequestMeta(req),
     });
     return result;
   }
@@ -133,13 +137,17 @@ export class AdminJobOfferController {
   })
   @ApiResponse({ status: 204, description: 'Job offer deleted' })
   @ApiResponse({ status: 404, description: 'Job offer not found' })
-  async remove(@Param('id') id: string, @Req() req: any) {
+  async remove(
+    @Param('id') id: string,
+    @Req() req: AdminAuthenticatedRequest,
+  ) {
     await this.jobOfferService.deleteJobOfferByAdmin(id);
     await this.logService.create({
       action: 'JOB_OFFER_DELETED',
       entityType: 'JobOffer',
       entityId: id,
       userId: req.user?.userId,
+      ...extractRequestMeta(req),
     });
   }
 }
