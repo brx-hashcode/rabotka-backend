@@ -233,6 +233,7 @@ export class ProfileController {
         reliabilityScore: { type: 'number', nullable: true },
         whatsappConnected: { type: 'boolean' },
         avatarUrl: { type: 'string', nullable: true },
+        firstLogin: { type: 'boolean' },
         createdAt: { type: 'string', format: 'date-time' },
       },
     },
@@ -241,6 +242,19 @@ export class ProfileController {
   @ApiResponse({ status: 404, description: 'Profile not found' })
   getMe(@Req() req: ProfileAuthenticatedRequest): Promise<ProfileMeResponse> {
     return this.profileService.findById(req.user.profileId);
+  }
+
+  @Patch('me/first-login-done')
+  @UseGuards(ProfileAuthGuard)
+  @ApiBearerAuth()
+  @ApiCookieAuth()
+  @ApiOperation({ summary: 'Mark first login as done (called after avatar step)' })
+  @ApiResponse({ status: 200, description: 'first_login set to false' })
+  async markFirstLoginDone(
+    @Req() req: ProfileAuthenticatedRequest,
+  ): Promise<{ success: boolean }> {
+    await this.profileService.markFirstLoginDone(req.user.profileId);
+    return { success: true };
   }
 
   @Get('penalties')
