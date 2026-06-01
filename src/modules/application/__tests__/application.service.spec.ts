@@ -96,7 +96,7 @@ describe('ApplicationService', () => {
       },
       application: {
         findUnique: jest.fn(),
-        findMany: jest.fn(),
+        findMany: jest.fn().mockResolvedValue([]),
         create: jest.fn(),
         update: jest.fn(),
         updateMany: jest.fn(),
