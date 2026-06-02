@@ -243,6 +243,10 @@ export class WalletService {
     });
   }
 
+  getWelcomeCreditsConfig() {
+    return this.systemConfig.getWelcomeCredits();
+  }
+
   async grantWelcomeCredit(
     profileId: string,
     profileType: ProfileType,
