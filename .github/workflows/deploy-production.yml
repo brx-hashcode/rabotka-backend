@@ -165,6 +165,7 @@ jobs:
           QDRANT_URL=$(echo "$VAULT_SECRET" | jq -r '.QDRANT_URL')
           QDRANT_API_KEY=$(echo "$VAULT_SECRET" | jq -r '.QDRANT_API_KEY')
           IS_PROD=$(echo "$VAULT_SECRET" | jq -r '.IS_PROD // "false"')
+          CLOUDFLARE_PUBLIC_BASE_URL=$(echo "$VAULT_SECRET" | jq -r '.CLOUDFLARE_PUBLIC_BASE_URL // ""')
           EOF
           sed -i 's/^[[:space:]]*//' /tmp/deploy.env
 
