@@ -1029,7 +1029,7 @@ export class ProfileService {
     createProfileDto: CreateProfileDto,
     kycDocument: Express.Multer.File,
     kycSelfie: Express.Multer.File,
-  ): Promise<{ message: string; profileId: string; profileType: ProfileType }> {
+  ): Promise<{ message: string; profileId: string; profileType: ProfileType; creditedBalance: number }> {
     this.validateFiles(kycDocument, kycSelfie);
 
     try {
@@ -1105,7 +1105,7 @@ export class ProfileService {
         timestamp: new Date().toISOString(),
       });
 
-      return { message: 'Profil créé avec succès', profileId: profile.id, profileType: createProfileDto.profileType };
+      return { message: 'Profil créé avec succès', profileId: profile.id, profileType: createProfileDto.profileType, creditedBalance: creditAmount };
     } catch (error: any) {
       this.handleCreateProfileError(error);
     }
