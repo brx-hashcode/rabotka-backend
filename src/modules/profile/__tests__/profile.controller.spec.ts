@@ -1,11 +1,19 @@
 import { BadRequestException } from '@nestjs/common';
 import { ProfileController } from '../profile.controller';
 
+function makeJwtService() {
+  return { sign: jest.fn().mockReturnValue('mock-token') };
+}
+
+function makeConfigService() {
+  return { get: jest.fn().mockReturnValue('access_token') };
+}
+
 function makeProfileService() {
   return {
     createProfile: jest
       .fn()
-      .mockResolvedValue({ message: 'Profil créé avec succès' }),
+      .mockResolvedValue({ message: 'Profil créé avec succès', profileId: 'new-p-1' }),
     findById: jest.fn().mockResolvedValue({ id: 'p-1', firstName: 'Alice' }),
     getPenaltiesByProfileId: jest.fn().mockResolvedValue([]),
     updateProfile: jest.fn().mockResolvedValue({ id: 'p-1' }),
@@ -50,6 +58,8 @@ describe('ProfileController', () => {
       profileService as any,
       mailService as any,
       walletService as any,
+      makeJwtService() as any,
+      makeConfigService() as any,
     );
   });
 
@@ -74,11 +84,13 @@ describe('ProfileController', () => {
         size: 4,
       }) as Express.Multer.File;
 
+    const mockRes = () => ({ cookie: jest.fn() } as any);
+
     it('creates a profile and sends welcome email', async () => {
       const result = await controller.createProfile(dto as any, {
         kycDocument: [makeFile('doc')],
         kycSelfie: [makeFile('selfie')],
-      });
+      }, mockRes());
       expect(profileService.createProfile).toHaveBeenCalled();
       expect(mailService.sendMail).toHaveBeenCalledWith(
         expect.objectContaining({ to: dto.email }),
@@ -90,7 +102,7 @@ describe('ProfileController', () => {
       await expect(
         controller.createProfile(dto as any, {
           kycSelfie: [makeFile('selfie')],
-        }),
+        }, mockRes()),
       ).rejects.toThrow(BadRequestException);
     });
 
@@ -98,12 +110,12 @@ describe('ProfileController', () => {
       await expect(
         controller.createProfile(dto as any, {
           kycDocument: [makeFile('doc')],
-        }),
+        }, mockRes()),
       ).rejects.toThrow(BadRequestException);
     });
 
     it('throws BadRequestException when files object is empty', async () => {
-      await expect(controller.createProfile(dto as any, {})).rejects.toThrow(
+      await expect(controller.createProfile(dto as any, {}, mockRes())).rejects.toThrow(
         BadRequestException,
       );
     });
