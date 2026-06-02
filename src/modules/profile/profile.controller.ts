@@ -157,6 +157,11 @@ export class ProfileController {
           type: 'string',
           example: 'Profile created successfully',
         },
+        creditedBalance: {
+          type: 'number',
+          example: 1000,
+          description: 'Welcome credit amount granted to the new profile in FCFA',
+        },
       },
     },
   })
@@ -215,7 +220,7 @@ export class ProfileController {
       });
     }
 
-    return { message: result.message };
+    return { message: result.message, creditedBalance: result.creditedBalance };
   }
 
   @Get('me')
