@@ -154,7 +154,7 @@ jobs:
             -o ServerAliveInterval=60 \
             -o ServerAliveCountMax=10 \
             -p "${{ secrets.VPS_PORT }}" "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
-            "docker pull $IMAGE"
+            "for i in 1 2 3; do docker pull $IMAGE && break || (echo \"Pull attempt \$i failed, retrying in 15s...\"; sleep 15); done"
 
       - name: Fetch secrets from Vault and write .env
         run: |
