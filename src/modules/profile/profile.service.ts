@@ -1130,11 +1130,11 @@ export class ProfileService {
     return Promise.all([
       this.fileService.uploadToStorage(kycDocument, {
         folder: 'kyc-documents',
-        access: 'private',
+        access: 'public',
       }),
       this.fileService.uploadToStorage(kycSelfie, {
         folder: 'kyc-documents',
-        access: 'private',
+        access: 'public',
       }),
     ]);
   }
