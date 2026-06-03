@@ -1,6 +1,10 @@
 import { Injectable, Logger, forwardRef, Inject } from '@nestjs/common';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
-import { AccountStatus, BillingStatus } from '@prisma/client';
+import {
+  AccountStatus,
+  BillingStatus,
+  VerificationStatus,
+} from '@prisma/client';
 import { translateJobOfferStatus } from '../utils/status.utils';
 import { JobOfferService } from '../../job-offer/job-offer.service';
 import { ApplicationService } from '../../application/application.service';
@@ -102,6 +106,10 @@ import { ConfigService } from '@nestjs/config';
 const INACTIVE_MESSAGE = `Votre compte est créé mais pas encore activé. Cliquez sur le lien de confirmation que nous vous avons envoyé par WhatsApp pour l'activer.`;
 
 const KYC_APPROVED_PROMPT_MESSAGE = `✅ Votre vérification KYC a été validée !\n\nTapez *Menu* pour accéder à la plateforme et commencer.`;
+
+const KYC_PENDING_MESSAGE = `⏳ *Votre profil est en cours de vérification.*\n\nNotre équipe examine vos documents KYC. Vous serez notifié dès que votre compte sera activé.`;
+
+const KYC_REJECTED_MESSAGE = `❌ *Votre vérification KYC a été refusée.*\n\nVos documents n'ont pas pu être validés. Veuillez nous contacter pour plus d'informations.`;
 
 const WHATSAPP_VERIFY_CODE_TTL_MINUTES = 15;
 
@@ -229,7 +237,15 @@ export class BotOrchestratorService {
         return this.handleInlineWhatsappVerification(profile, text);
       }
 
-      // KYC approved (PENDING_ACTIVATION) + user types Menu → activate account
+      // Gate: KYC must be verified before activation
+      if (profile.verification_status === VerificationStatus.REJECTED) {
+        return [KYC_REJECTED_MESSAGE];
+      }
+      if (profile.verification_status !== VerificationStatus.VERIFIED) {
+        return [KYC_PENDING_MESSAGE];
+      }
+
+      // KYC verified + user types Menu → activate account
       if (
         CMD_MENU.some(
           (c) => normalizedInput === c || normalizedInput.startsWith(c + ' '),
@@ -1354,6 +1370,7 @@ export class BotOrchestratorService {
         reliability_score: true,
         whatsapp_connected: true,
         whatsapp_activation_bonus_granted: true,
+        verification_status: true,
       },
     });
   }
