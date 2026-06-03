@@ -35,6 +35,7 @@ const mockActiveProfile = {
   reliability_score: 90,
   whatsapp_connected: true,
   whatsapp_activation_bonus_granted: false,
+  verification_status: 'VERIFIED',
 };
 
 const mockEmployerProfile = {
@@ -656,9 +657,30 @@ describe('BotOrchestratorService', () => {
       status: 'PENDING_ACTIVATION',
       whatsapp_connected: false,
       whatsapp_activation_bonus_granted: false,
+      verification_status: 'VERIFIED',
     };
 
-    it('returns KYC prompt when PENDING_ACTIVATION and input is not Menu', async () => {
+    it('returns KYC pending message when PENDING_ACTIVATION and verification_status is PENDING', async () => {
+      deps.prisma.profile.findUnique.mockResolvedValue({
+        ...pendingProfile,
+        verification_status: 'PENDING',
+      });
+      const result = await service.handle(PROFILE_ID, PHONE, 'menu');
+      expect(result[0]).toContain('en cours de vérification');
+      expect(deps.prisma.profile.update).not.toHaveBeenCalled();
+    });
+
+    it('returns KYC rejected message when PENDING_ACTIVATION and verification_status is REJECTED', async () => {
+      deps.prisma.profile.findUnique.mockResolvedValue({
+        ...pendingProfile,
+        verification_status: 'REJECTED',
+      });
+      const result = await service.handle(PROFILE_ID, PHONE, 'menu');
+      expect(result[0]).toContain('refusée');
+      expect(deps.prisma.profile.update).not.toHaveBeenCalled();
+    });
+
+    it('returns KYC prompt when PENDING_ACTIVATION (verified) and input is not Menu', async () => {
       deps.prisma.profile.findUnique.mockResolvedValue(pendingProfile);
       const result = await service.handle(PROFILE_ID, PHONE, 'hello');
       expect(result[0]).toContain('Menu');
