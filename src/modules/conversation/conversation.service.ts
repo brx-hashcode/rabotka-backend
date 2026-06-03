@@ -13,7 +13,7 @@ import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
 import { stripChatFormattingChars } from '../bot/utils/chat-input';
 
 const DEFAULT_BOT_SESSION_ID = 'default';
-const USER_LOCK_TTL = 30; // seconds
+const USER_LOCK_TTL = 30;
 const USER_LOCK_PREFIX = 'bot:lock:';
 
 @Injectable()
@@ -61,7 +61,6 @@ export class ConversationService {
       };
     }
 
-    // Acquire per-user lock to prevent concurrent message handling
     const lockKey = `${USER_LOCK_PREFIX}${profile.id}`;
     const acquired = await this.redis.set(
       lockKey,
@@ -98,7 +97,6 @@ export class ConversationService {
         update: {},
       });
 
-      // Save incoming message
       await this.whatsApp
         .saveMessage(profile.id, MessageDirection.INBOUND, textForBot)
         .catch((err) =>
