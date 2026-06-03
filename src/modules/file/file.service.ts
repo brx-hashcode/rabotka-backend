@@ -40,7 +40,8 @@ export class FileService {
     const fileBuffer: Buffer = Buffer.isBuffer(file.buffer)
       ? file.buffer
       : Buffer.from(file.buffer);
-    const fileName: string = String(file.originalname);
+    const ext = String(file.originalname).split('.').pop() ?? 'bin';
+    const fileName = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
 
     let bufferToUpload = fileBuffer;
     if (file.mimetype.startsWith('image/')) {
