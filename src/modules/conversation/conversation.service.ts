@@ -1,4 +1,5 @@
 import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import {
@@ -25,6 +26,7 @@ export class ConversationService {
     @Inject(forwardRef(() => WhatsAppService))
     private readonly whatsApp: WhatsAppService,
     @Inject(REDIS_CONNECTION) private readonly redis: Redis,
+    private readonly configService: ConfigService,
   ) {}
 
   /**
@@ -47,7 +49,14 @@ export class ConversationService {
       return {
         profileId: null,
         replies: [
-          `Ce numéro n'est pas encore enregistré sur Rabotka. Inscrivez-vous sur notre site pour créer votre compte.`,
+          [
+            '*Bienvenue sur Rabotka !*',
+            '',
+            "Ce numéro n'est pas encore enregistré.",
+            '',
+            'Créez votre compte gratuitement ici :',
+            this.configService.get<string>('FRONTEND_URL', ''),
+          ].join('\n'),
         ],
       };
     }
