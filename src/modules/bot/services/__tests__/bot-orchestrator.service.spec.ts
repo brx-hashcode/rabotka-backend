@@ -18,6 +18,7 @@ import { InterestSignalService } from '../../../interest-graph/interest-signal.s
 import { InterestRecommendationService } from '../../../interest-graph/interest-recommendation.service';
 import { InvoiceService } from '../../../invoice/invoice.service';
 import { QueueService } from '../../../../common/services/queue/queue.service';
+import { ConfigService } from '@nestjs/config';
 
 const PROFILE_ID = 'profile-uuid-1';
 const PHONE = '+242000000';
@@ -226,6 +227,10 @@ describe('BotOrchestratorService', () => {
         {
           provide: QueueService,
           useValue: { addJob: jest.fn().mockResolvedValue('job-1') },
+        },
+        {
+          provide: ConfigService,
+          useValue: { get: jest.fn().mockReturnValue('https://rabotka.work') },
         },
       ],
     }).compile();
