@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { ConfigService } from '@nestjs/config';
 import { ConversationService } from '../conversation.service';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { BotOrchestratorService } from '../../bot/services/bot-orchestrator.service';
@@ -38,6 +39,10 @@ describe('ConversationService', () => {
           provide: REDIS_CONNECTION,
           useValue: { get: jest.fn(), set: jest.fn(), del: jest.fn() },
         },
+        {
+          provide: ConfigService,
+          useValue: { get: jest.fn().mockReturnValue('https://rabotka.work') },
+        },
       ],
     }).compile();
 
@@ -55,6 +60,8 @@ describe('ConversationService', () => {
 
       expect(result.profileId).toBeNull();
       expect(result.replies).toHaveLength(1);
+      expect(result.replies[0]).toContain("n'est pas encore enregistré");
+      expect(result.replies[0]).toContain('https://rabotka.work');
       expect(botOrchestrator.handle).not.toHaveBeenCalled();
     });
 
