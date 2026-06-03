@@ -97,6 +97,7 @@ import { runJobStatusCheckFlow } from '../flows/job-status-check.flow';
 import { InterestSignalService } from '../../interest-graph/interest-signal.service';
 import { InterestRecommendationService } from '../../interest-graph/interest-recommendation.service';
 import { InvoiceService } from '../../invoice/invoice.service';
+import { ConfigService } from '@nestjs/config';
 
 const INACTIVE_MESSAGE = `Votre compte est créé mais pas encore activé. Cliquez sur le lien de confirmation que nous vous avons envoyé par WhatsApp pour l'activer.`;
 
@@ -137,7 +138,16 @@ function buildVerifyInvalidMessage(code: string): string {
   ].join('\n');
 }
 
-const NOT_FOUND_MESSAGE = `Ce numéro n'est pas encore enregistré. Inscrivez-vous sur notre site pour créer votre compte.`;
+function buildNotFoundMessage(frontendUrl: string): string {
+  return [
+    '*Bienvenue sur Rabotka !*',
+    '',
+    "Ce numéro n'est pas encore enregistré.",
+    '',
+    'Créez votre compte gratuitement ici :',
+    frontendUrl,
+  ].join('\n');
+}
 
 const ERROR_MESSAGE = `Une erreur est survenue. Veuillez réessayer ou tapez « Menu ».`;
 
@@ -170,6 +180,7 @@ export class BotOrchestratorService {
     private readonly interestRecommendationService: InterestRecommendationService,
     private readonly invoiceService: InvoiceService,
     private readonly queueService: QueueService,
+    private readonly configService: ConfigService,
   ) {}
 
   async handle(
@@ -179,7 +190,11 @@ export class BotOrchestratorService {
   ): Promise<string[]> {
     const profile = await this.loadProfile(profileId);
     if (!profile) {
-      return [NOT_FOUND_MESSAGE];
+      return [
+        buildNotFoundMessage(
+          this.configService.get<string>('FRONTEND_URL', ''),
+        ),
+      ];
     }
 
     const allowed: string[] = [
