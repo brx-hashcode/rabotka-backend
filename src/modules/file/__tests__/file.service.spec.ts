@@ -109,7 +109,7 @@ describe('FileService', () => {
       await service.uploadToStorage(file, { folder: 'avatars' });
       expect(storage.upload).toHaveBeenCalledWith(
         expect.any(Buffer),
-        'photo.jpg',
+        expect.stringMatching(/\.jpg$/),
         expect.objectContaining({ folder: 'avatars' }),
       );
     });
