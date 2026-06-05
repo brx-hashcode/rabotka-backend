@@ -386,7 +386,10 @@ describe('WalletService', () => {
       const txMock = {
         walletTransaction: { create: jest.fn().mockResolvedValue({}) },
         wallet: { update: jest.fn().mockResolvedValue({}) },
-        profile: { update: jest.fn().mockResolvedValue({}) },
+        profile: {
+          update: jest.fn().mockResolvedValue({}),
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
       };
       (prisma.$transaction as jest.Mock).mockImplementation((cb: any) => {
         if (typeof cb === 'function') return cb(txMock);

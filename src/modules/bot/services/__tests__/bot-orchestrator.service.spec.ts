@@ -698,7 +698,6 @@ describe('BotOrchestratorService', () => {
           data: expect.objectContaining({
             whatsapp_connected: true,
             status: 'ACTIVE',
-            whatsapp_activation_bonus_granted: true,
           }),
         }),
       );
@@ -714,7 +713,9 @@ describe('BotOrchestratorService', () => {
       (deps.walletService2 as any).grantWelcomeCredit = grantCredit;
       deps.router.route.mockReturnValue({ type: 'command', commandId: 'menu' });
       await service.handle(PROFILE_ID, PHONE, 'menu');
-      expect(grantCredit).not.toHaveBeenCalled();
+      // grantWelcomeCredit is always called; idempotency is enforced atomically
+      // inside the method itself (updateMany with where:{bonus_granted:false})
+      expect(grantCredit).toHaveBeenCalledWith(PROFILE_ID, pendingProfile.profile_type);
     });
 
     it('issues an inline 4-digit code when ACTIVE profile has whatsapp_connected=false', async () => {
