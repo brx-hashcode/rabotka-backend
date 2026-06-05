@@ -256,14 +256,11 @@ export class BotOrchestratorService {
           data: {
             whatsapp_connected: true,
             status: AccountStatus.ACTIVE,
-            whatsapp_activation_bonus_granted: true,
           },
         });
-        if (!profile.whatsapp_activation_bonus_granted) {
-          await this.walletService
-            .grantWelcomeCredit(profileId, profile.profile_type)
-            .catch(() => 0);
-        }
+        await this.walletService
+          .grantWelcomeCredit(profileId, profile.profile_type)
+          .catch(() => 0);
         return [menuMessage(profile.profile_type)];
       }
 
@@ -316,18 +313,13 @@ export class BotOrchestratorService {
           }),
           this.prisma.profile.update({
             where: { id: profile.id },
-            data: {
-              whatsapp_connected: true,
-              whatsapp_activation_bonus_granted: true,
-            },
+            data: { whatsapp_connected: true },
           }),
         ]);
 
-        if (!profile.whatsapp_activation_bonus_granted) {
-          await this.walletService
-            .grantWelcomeCredit(profile.id, profile.profile_type)
-            .catch(() => 0);
-        }
+        await this.walletService
+          .grantWelcomeCredit(profile.id, profile.profile_type)
+          .catch(() => 0);
 
         return [buildVerifySuccessMessage()];
       }
