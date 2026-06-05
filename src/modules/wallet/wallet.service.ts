@@ -267,6 +267,15 @@ export class WalletService {
     const wallet = await this.getOrCreateProfileWallet(profileId);
 
     await this.prisma.$transaction(async (tx) => {
+      // Atomic claim: only proceed if flag is still false at commit time.
+      // If two callers race past the early-return above, only one will
+      // match this updateMany (the other gets count=0 and bails out).
+      const claim = await tx.profile.updateMany({
+        where: { id: profileId, whatsapp_activation_bonus_granted: false },
+        data: { whatsapp_activation_bonus_granted: true },
+      });
+      if (claim.count === 0) return;
+
       await tx.walletTransaction.create({
         data: {
           wallet_id: wallet.id,
@@ -279,10 +288,6 @@ export class WalletService {
       await tx.wallet.update({
         where: { id: wallet.id },
         data: { balance: { increment: amount } },
-      });
-      await tx.profile.update({
-        where: { id: profileId },
-        data: { whatsapp_activation_bonus_granted: true },
       });
     });
 
