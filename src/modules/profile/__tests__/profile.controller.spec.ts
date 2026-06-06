@@ -11,9 +11,15 @@ function makeConfigService() {
 
 function makeProfileService() {
   return {
-    createProfile: jest
+    createProfile: jest.fn().mockResolvedValue({
+      message: 'Profil créé avec succès',
+      profileId: 'new-p-1',
+      profileType: 'WORKER',
+      creditedBalance: 1000,
+    }),
+    uploadKycFile: jest
       .fn()
-      .mockResolvedValue({ message: 'Profil créé avec succès', profileId: 'new-p-1' }),
+      .mockResolvedValue({ url: 'https://cdn/id.jpg' }),
     findById: jest.fn().mockResolvedValue({ id: 'p-1', firstName: 'Alice' }),
     getPenaltiesByProfileId: jest.fn().mockResolvedValue([]),
     updateProfile: jest.fn().mockResolvedValue({ id: 'p-1' }),
@@ -73,51 +79,44 @@ describe('ProfileController', () => {
       phone: '+242000001',
       address: '10 Rue Paris',
       profileType: 'WORKER' as any,
+      kycDocumentUrl: 'https://cdn/id.jpg',
+      kycSelfieUrl: 'https://cdn/selfie.jpg',
     };
-
-    const makeFile = (name: string): Express.Multer.File =>
-      ({
-        fieldname: name,
-        originalname: `${name}.jpg`,
-        mimetype: 'image/jpeg',
-        buffer: Buffer.from('data'),
-        size: 4,
-      }) as Express.Multer.File;
 
     const mockRes = () => ({ cookie: jest.fn() } as any);
 
     it('creates a profile and sends welcome email', async () => {
-      const result = await controller.createProfile(dto as any, {
-        kycDocument: [makeFile('doc')],
-        kycSelfie: [makeFile('selfie')],
-      }, mockRes());
-      expect(profileService.createProfile).toHaveBeenCalled();
+      const result = await controller.createProfile(dto as any, mockRes());
+      expect(profileService.createProfile).toHaveBeenCalledWith(dto);
       expect(mailService.sendMail).toHaveBeenCalledWith(
         expect.objectContaining({ to: dto.email }),
       );
       expect(result.message).toBe('Profil créé avec succès');
     });
+  });
 
-    it('throws BadRequestException when kycDocument is missing', async () => {
-      await expect(
-        controller.createProfile(dto as any, {
-          kycSelfie: [makeFile('selfie')],
-        }, mockRes()),
-      ).rejects.toThrow(BadRequestException);
+  describe('uploadKyc()', () => {
+    const makeFile = (): Express.Multer.File =>
+      ({
+        originalname: 'id.jpg',
+        mimetype: 'image/jpeg',
+        buffer: Buffer.from('data'),
+        size: 4,
+      }) as Express.Multer.File;
+
+    it('returns the url from the service', async () => {
+      (profileService.uploadKycFile as jest.Mock).mockResolvedValue({
+        url: 'https://cdn/id.jpg',
+      });
+      const result = await controller.uploadKyc(makeFile());
+      expect(profileService.uploadKycFile).toHaveBeenCalled();
+      expect(result).toEqual({ url: 'https://cdn/id.jpg' });
     });
 
-    it('throws BadRequestException when kycSelfie is missing', async () => {
+    it('throws BadRequestException when no file is provided', async () => {
       await expect(
-        controller.createProfile(dto as any, {
-          kycDocument: [makeFile('doc')],
-        }, mockRes()),
+        controller.uploadKyc(undefined as any),
       ).rejects.toThrow(BadRequestException);
-    });
-
-    it('throws BadRequestException when files object is empty', async () => {
-      await expect(controller.createProfile(dto as any, {}, mockRes())).rejects.toThrow(
-        BadRequestException,
-      );
     });
   });
 

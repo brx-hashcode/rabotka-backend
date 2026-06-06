@@ -37,7 +37,6 @@ import {
   Prisma,
   ProfileType,
   VerificationStatus,
-  WalletTransactionType,
 } from '@prisma/client';
 import { randomBytes } from 'node:crypto';
 
@@ -1027,36 +1026,21 @@ export class ProfileService {
 
   async createProfile(
     createProfileDto: CreateProfileDto,
-    kycDocument: Express.Multer.File,
-    kycSelfie: Express.Multer.File,
   ): Promise<{ message: string; profileId: string; profileType: ProfileType; creditedBalance: number }> {
-    this.validateFiles(kycDocument, kycSelfie);
-
     try {
-      const uploadResults = await this.uploadKycFiles(kycDocument, kycSelfie);
-      const profile = await this.createProfileWithDocuments(
-        createProfileDto,
-        uploadResults,
-      );
+      const profile = await this.createProfileWithDocuments(createProfileDto);
 
       this.logger.log(`Profile created successfully: ${profile.id}`);
 
-      // Grant registration welcome credit immediately
-      const welcomeCredits = await this.walletService
-        .getWelcomeCreditsConfig();
-      const creditAmount =
-        createProfileDto.profileType === ProfileType.EMPLOYER
-          ? welcomeCredits.employerCreditFcfa
-          : welcomeCredits.workerCreditFcfa;
-      if (creditAmount > 0) {
-        await this.walletService.creditProfileWallet(
-          profile.id,
-          creditAmount,
-          WalletTransactionType.WELCOME_CREDIT,
-          'profile',
-          profile.id,
-        );
-      }
+      // Grant registration welcome credit via the idempotent path so the
+      // KYC-verified flow (which also calls grantWelcomeCredit) cannot
+      // double-credit the same profile.
+      const creditedBalance = await this.walletService
+        .grantWelcomeCredit(profile.id, createProfileDto.profileType)
+        .catch((err) => {
+          this.logger.warn(`Welcome credit grant failed for profile=${profile.id}`, err);
+          return 0;
+        });
 
       // Geocode address asynchronously (fire-and-forget)
       this.geocodingService
@@ -1105,46 +1089,28 @@ export class ProfileService {
         timestamp: new Date().toISOString(),
       });
 
-      return { message: 'Profil créé avec succès', profileId: profile.id, profileType: createProfileDto.profileType, creditedBalance: creditAmount };
+      return { message: 'Profil créé avec succès', profileId: profile.id, profileType: createProfileDto.profileType, creditedBalance };
     } catch (error: any) {
       this.handleCreateProfileError(error);
     }
   }
 
-  private validateFiles(
-    kycDocument: Express.Multer.File,
-    kycSelfie: Express.Multer.File,
-  ): void {
-    if (!kycDocument) {
-      throw new BadRequestException('Le document KYC est requis');
-    }
-    if (!kycSelfie) {
-      throw new BadRequestException('La photo KYC est requise');
-    }
+  /**
+   * Uploads a single KYC file to storage and returns its public URL.
+   * Used by POST /profile/kyc-upload so files are uploaded during onboarding
+   * (one round-trip per file) instead of inline with profile creation.
+   */
+  async uploadKycFile(file: Express.Multer.File): Promise<{ url: string }> {
+    const result = await this.fileService.uploadToStorage(file, {
+      folder: 'kyc-documents',
+      access: 'public',
+    });
+    return { url: result.url };
   }
 
-  private async uploadKycFiles(
-    kycDocument: Express.Multer.File,
-    kycSelfie: Express.Multer.File,
-  ) {
-    return Promise.all([
-      this.fileService.uploadToStorage(kycDocument, {
-        folder: 'kyc-documents',
-        access: 'public',
-      }),
-      this.fileService.uploadToStorage(kycSelfie, {
-        folder: 'kyc-documents',
-        access: 'public',
-      }),
-    ]);
-  }
+  private async createProfileWithDocuments(createProfileDto: CreateProfileDto) {
+    const { kycDocumentUrl, kycSelfieUrl } = createProfileDto;
 
-  private async createProfileWithDocuments(
-    createProfileDto: CreateProfileDto,
-    [documentUploadResult, selfieUploadResult]: Awaited<
-      ReturnType<typeof this.uploadKycFiles>
-    >,
-  ) {
     return this.prisma.$transaction(async (tx) => {
       const createdProfile = await this.createProfileRecord(
         tx,
@@ -1164,27 +1130,20 @@ export class ProfileService {
         });
       }
 
-      await this.createFileRecords(tx, createdProfile.id, [
-        documentUploadResult,
-        selfieUploadResult,
-      ]);
-
       await Promise.all([
         this.createKycDocumentRecord(
           tx,
           createdProfile.id,
           createProfileDto.documentType,
           'DOCUMENT',
-          documentUploadResult.url,
-          documentUploadResult.key,
+          kycDocumentUrl,
         ),
         this.createKycDocumentRecord(
           tx,
           createdProfile.id,
           createProfileDto.documentType,
           'SELFIE',
-          selfieUploadResult.url,
-          selfieUploadResult.key,
+          kycSelfieUrl,
         ),
       ]);
 
@@ -1230,29 +1189,6 @@ export class ProfileService {
         id: true,
       },
     });
-  }
-
-  private async createFileRecords(
-    tx: PrismaTransactionClient,
-    profileId: string,
-    uploadResults: Awaited<ReturnType<typeof this.uploadKycFiles>>,
-  ) {
-    return Promise.all(
-      uploadResults.map((result) =>
-        tx.file.create({
-          data: {
-            filename: result.key,
-            original_filename: result.originalFilename,
-            mime_type: result.mimeType,
-            size: result.size,
-            storage_provider: result.provider,
-            storage_key: result.key,
-            bucket: result.bucket,
-            profile_id: profileId,
-          },
-        }),
-      ),
-    );
   }
 
   private createKycDocumentRecord(

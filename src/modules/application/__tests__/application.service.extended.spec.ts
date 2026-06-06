@@ -382,6 +382,18 @@ describe('ApplicationService (extended)', () => {
         service.cancelAcceptedByEmployer(APPLICATION_ID, EMPLOYER_ID),
       ).rejects.toThrow(BadRequestException);
     });
+
+    it('rejects a concurrent duplicate cancel (already CANCELLED inside tx) without deducting score twice', async () => {
+      // Outer read still sees ACCEPTED (passes the pre-tx guard), but the
+      // locked re-read inside the transaction sees CANCELLED.
+      (prisma.application.findUnique as jest.Mock)
+        .mockResolvedValueOnce(acceptedApp) // pre-transaction read
+        .mockResolvedValueOnce({ status: ApplicationStatus.CANCELLED }); // locked re-read
+      await expect(
+        service.cancelAcceptedByEmployer(APPLICATION_ID, EMPLOYER_ID),
+      ).rejects.toThrow(BadRequestException);
+      expect(prisma.profile.update as jest.Mock).not.toHaveBeenCalled();
+    });
   });
 
   describe('markAsViewed()', () => {
