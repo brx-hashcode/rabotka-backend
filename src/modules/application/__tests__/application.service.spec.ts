@@ -318,6 +318,23 @@ describe('ApplicationService', () => {
         }),
       );
     });
+
+    it('rejects a concurrent duplicate cancel (already CANCELLED inside tx) without deducting score twice', async () => {
+      const lateMockOffer = { ...mockJobOffer, scheduled_at: hoursFromNow(2) };
+      // Pre-transaction read sees ACCEPTED (passes outer guard);
+      // the locked in-transaction re-read sees CANCELLED.
+      (prisma.application.findUnique as jest.Mock)
+        .mockResolvedValueOnce({
+          ...acceptedApplication,
+          job_offer: lateMockOffer,
+        })
+        .mockResolvedValueOnce({ status: ApplicationStatus.CANCELLED });
+      await expect(service.cancel(APPLICATION_ID, WORKER_ID)).rejects.toThrow(
+        BadRequestException,
+      );
+      // Reliability score must NOT be deducted on the duplicate cancel
+      expect(prisma.profile.update as jest.Mock).not.toHaveBeenCalled();
+    });
   });
 
   describe('accept()', () => {
