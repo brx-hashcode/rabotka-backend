@@ -90,4 +90,18 @@ export class CreateProfileDto {
     message: 'You must accept the platform policies to register',
   })
   readAndApprovedPolicies: boolean;
+
+  @ApiProperty({
+    description: 'URL of the KYC identity document, pre-uploaded via POST /profile/kyc-upload',
+  })
+  @IsString()
+  @IsNotEmpty()
+  kycDocumentUrl: string;
+
+  @ApiProperty({
+    description: 'URL of the KYC selfie, pre-uploaded via POST /profile/kyc-upload',
+  })
+  @IsString()
+  @IsNotEmpty()
+  kycSelfieUrl: string;
 }

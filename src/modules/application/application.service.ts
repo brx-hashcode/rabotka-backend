@@ -740,6 +740,18 @@ export class ApplicationService {
       : null;
 
     await this.prisma.$transaction(async (tx) => {
+      // Lock and re-check the application status inside the transaction to
+      // prevent a concurrent/duplicate cancel from deducting the reliability
+      // score twice (the penalty upsert is idempotent, the deduction is not).
+      await tx.$executeRaw`SELECT id FROM "applications" WHERE id = ${applicationId}::uuid FOR UPDATE`;
+      const fresh = await tx.application.findUnique({
+        where: { id: applicationId },
+        select: { status: true },
+      });
+      if (fresh?.status === ApplicationStatus.CANCELLED) {
+        throw new BadRequestException('Cette candidature est déjà annulée');
+      }
+
       if (isAccepted || isWaitingPayment) {
         // Compute remaining accepted/waiting count (excluding this application)
         const remainingAccepted = await tx.application.count({
@@ -1124,6 +1136,17 @@ export class ApplicationService {
 
     const now = new Date();
     await this.prisma.$transaction(async (tx) => {
+      // Lock and re-check status inside the transaction so a concurrent/
+      // duplicate cancel cannot deduct the employer reliability score twice.
+      await tx.$executeRaw`SELECT id FROM "applications" WHERE id = ${applicationId}::uuid FOR UPDATE`;
+      const fresh = await tx.application.findUnique({
+        where: { id: applicationId },
+        select: { status: true },
+      });
+      if (fresh?.status === ApplicationStatus.CANCELLED) {
+        throw new BadRequestException('Cette candidature est déjà annulée');
+      }
+
       await tx.application.update({
         where: { id: applicationId },
         data: {

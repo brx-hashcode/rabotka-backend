@@ -539,22 +539,26 @@ describe('ProfileService', () => {
     });
   });
 
+  describe('uploadKycFile()', () => {
+    it('uploads to the kyc-documents folder and returns the url', async () => {
+      const file = {
+        originalname: 'id.jpg',
+        mimetype: 'image/jpeg',
+        buffer: Buffer.from('id'),
+        size: 2,
+      } as Express.Multer.File;
+
+      const result = await service.uploadKycFile(file);
+
+      expect(fileService.uploadToStorage).toHaveBeenCalledWith(file, {
+        folder: 'kyc-documents',
+        access: 'public',
+      });
+      expect(result).toEqual({ url: 'https://cdn.example.com/file.jpg' });
+    });
+  });
+
   describe('createProfile()', () => {
-    const kycDoc = {
-      fieldname: 'kycDocument',
-      originalname: 'id.jpg',
-      encoding: '7bit',
-      mimetype: 'image/jpeg',
-      buffer: Buffer.from('id'),
-      size: 2,
-    } as Express.Multer.File;
-
-    const kycSelfie = {
-      ...kycDoc,
-      fieldname: 'kycSelfie',
-      originalname: 'selfie.jpg',
-    };
-
     const dto = {
       firstName: 'Alice',
       lastName: 'Dupont',
@@ -565,26 +569,24 @@ describe('ProfileService', () => {
       profileType: 'WORKER' as any,
       documentType: 'CNI' as any,
       readAndApprovedPolicies: true,
+      kycDocumentUrl: 'https://cdn.example.com/id.jpg',
+      kycSelfieUrl: 'https://cdn.example.com/selfie.jpg',
     };
 
     it('creates profile and returns success message', async () => {
       const txPrisma = makePrisma();
       txPrisma.profile.create.mockResolvedValue({ id: 'new-p-1' });
       prisma.$transaction.mockImplementation((fn: any) => fn(txPrisma));
-      const result = await service.createProfile(dto, kycDoc, kycSelfie);
+      const result = await service.createProfile(dto);
       expect(result?.message).toContain('succès');
     });
 
-    it('throws BadRequestException when kycDocument missing', async () => {
-      await expect(
-        service.createProfile(dto, null as any, kycSelfie),
-      ).rejects.toThrow('document KYC');
-    });
-
-    it('throws BadRequestException when kycSelfie missing', async () => {
-      await expect(
-        service.createProfile(dto, kycDoc, null as any),
-      ).rejects.toThrow('photo KYC');
+    it('does not re-upload files (urls already uploaded)', async () => {
+      const txPrisma = makePrisma();
+      txPrisma.profile.create.mockResolvedValue({ id: 'new-p-1' });
+      prisma.$transaction.mockImplementation((fn: any) => fn(txPrisma));
+      await service.createProfile(dto);
+      expect(fileService.uploadToStorage).not.toHaveBeenCalled();
     });
   });
 
@@ -744,39 +746,27 @@ describe('ProfileService', () => {
   });
 
   describe('createProfile() - EMPLOYER branch', () => {
-    const kycDoc = {
-      fieldname: 'kycDocument',
-      originalname: 'id.jpg',
-      encoding: '7bit',
-      mimetype: 'image/jpeg',
-      buffer: Buffer.from('id'),
-      size: 2,
-    } as Express.Multer.File;
-    const kycSelfie = {
-      ...kycDoc,
-      fieldname: 'kycSelfie',
-      originalname: 'selfie.jpg',
+    const baseDto = {
+      firstName: 'Jean',
+      lastName: 'Patron',
+      email: 'j@x.com',
+      phone: '+242',
+      address: '1 Rue',
+      description: 'Boss',
+      documentType: 'CNI' as any,
+      readAndApprovedPolicies: true,
+      kycDocumentUrl: 'https://cdn.example.com/id.jpg',
+      kycSelfieUrl: 'https://cdn.example.com/selfie.jpg',
     };
 
     it('calls indexEmployerProfile for EMPLOYER profileType', async () => {
       const txPrisma = makePrisma();
       txPrisma.profile.create.mockResolvedValue({ id: 'new-p-1' });
       prisma.$transaction.mockImplementation((fn: any) => fn(txPrisma));
-      await service.createProfile(
-        {
-          firstName: 'Jean',
-          lastName: 'Patron',
-          email: 'j@x.com',
-          phone: '+242',
-          address: '1 Rue',
-          description: 'Boss',
-          profileType: 'EMPLOYER' as any,
-          documentType: 'CNI' as any,
-          readAndApprovedPolicies: true,
-        },
-        kycDoc,
-        kycSelfie,
-      );
+      await service.createProfile({
+        ...baseDto,
+        profileType: 'EMPLOYER' as any,
+      });
       const matchingService = (service as any).matchingService;
       expect(matchingService.indexEmployerProfile).toHaveBeenCalledWith(
         'new-p-1',
@@ -792,24 +782,13 @@ describe('ProfileService', () => {
         }),
         { meta: { target: ['phone'] } },
       );
-      fileService.uploadToStorage.mockRejectedValueOnce(prismaError);
+      prisma.$transaction.mockRejectedValueOnce(prismaError);
       let error: any;
       try {
-        await service.createProfile(
-          {
-            firstName: 'Jean',
-            lastName: 'Patron',
-            email: 'j@x.com',
-            phone: '+242',
-            address: '1 Rue',
-            description: 'Boss',
-            profileType: 'WORKER' as any,
-            documentType: 'CNI' as any,
-            readAndApprovedPolicies: true,
-          },
-          kycDoc,
-          kycSelfie,
-        );
+        await service.createProfile({
+          ...baseDto,
+          profileType: 'WORKER' as any,
+        });
       } catch (e) {
         error = e;
       }
@@ -825,24 +804,13 @@ describe('ProfileService', () => {
         }),
         { meta: { target: ['email'] } },
       );
-      fileService.uploadToStorage.mockRejectedValueOnce(prismaError);
+      prisma.$transaction.mockRejectedValueOnce(prismaError);
       let error: any;
       try {
-        await service.createProfile(
-          {
-            firstName: 'Jean',
-            lastName: 'Patron',
-            email: 'j@x.com',
-            phone: '+242',
-            address: '1 Rue',
-            description: 'Boss',
-            profileType: 'WORKER' as any,
-            documentType: 'CNI' as any,
-            readAndApprovedPolicies: true,
-          },
-          kycDoc,
-          kycSelfie,
-        );
+        await service.createProfile({
+          ...baseDto,
+          profileType: 'WORKER' as any,
+        });
       } catch (e) {
         error = e;
       }
@@ -850,26 +818,13 @@ describe('ProfileService', () => {
     });
 
     it('handles generic error during createProfile', async () => {
-      fileService.uploadToStorage.mockRejectedValueOnce(
-        new Error('unexpected'),
-      );
+      prisma.$transaction.mockRejectedValueOnce(new Error('unexpected'));
       let error: any;
       try {
-        await service.createProfile(
-          {
-            firstName: 'Jean',
-            lastName: 'Patron',
-            email: 'j@x.com',
-            phone: '+242',
-            address: '1 Rue',
-            description: 'Boss',
-            profileType: 'WORKER' as any,
-            documentType: 'CNI' as any,
-            readAndApprovedPolicies: true,
-          },
-          kycDoc,
-          kycSelfie,
-        );
+        await service.createProfile({
+          ...baseDto,
+          profileType: 'WORKER' as any,
+        });
       } catch (e) {
         error = e;
       }

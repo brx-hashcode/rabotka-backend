@@ -5,7 +5,6 @@ import {
   Patch,
   UseInterceptors,
   UseGuards,
-  UploadedFiles,
   UploadedFile,
   Body,
   Req,
@@ -15,10 +14,7 @@ import {
   Param,
 } from '@nestjs/common';
 import type { Response } from 'express';
-import {
-  FileFieldsInterceptor,
-  FileInterceptor,
-} from '@nestjs/platform-express';
+import { FileInterceptor } from '@nestjs/platform-express';
 import {
   ApiTags,
   ApiOperation,
@@ -59,94 +55,13 @@ export class ProfileController {
   ) {}
 
   @Post()
-  @UseInterceptors(
-    FileFieldsInterceptor(
-      [
-        { name: 'kycDocument', maxCount: 1 },
-        { name: 'kycSelfie', maxCount: 1 },
-      ],
-      {
-        limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
-        fileFilter: (_req, file, cb) => {
-          const allowed = [
-            'image/jpeg',
-            'image/png',
-            'image/webp',
-            'application/pdf',
-          ];
-          cb(null, allowed.includes(file.mimetype));
-        },
-      },
-    ),
-  )
   @ApiOperation({
-    summary: 'Create a new profile with KYC documents',
+    summary: 'Create a new profile with pre-uploaded KYC documents',
     description:
-      'Creates a new profile with personal information and KYC documents (identity document and selfie). Files are uploaded to storage and URLs are stored in the database.',
+      'Creates a new profile with personal information and KYC document descriptors. The KYC files must already be uploaded via POST /profile/kyc-upload; only their descriptors (url + storage metadata) are sent here as JSON.',
   })
-  @ApiConsumes('multipart/form-data')
-  @ApiBody({
-    schema: {
-      type: 'object',
-      required: [
-        'firstName',
-        'lastName',
-        'email',
-        'phone',
-        'address',
-        'profileType',
-        'kycDocument',
-        'kycSelfie',
-      ],
-      properties: {
-        firstName: {
-          type: 'string',
-          description: 'First name of the profile',
-        },
-        lastName: {
-          type: 'string',
-          description: 'Last name of the profile',
-        },
-        email: {
-          type: 'string',
-          format: 'email',
-          description: 'Email address (must be unique)',
-        },
-        phone: {
-          type: 'string',
-          description: 'Phone number (must be unique)',
-        },
-        address: {
-          type: 'string',
-          description: 'Physical address',
-        },
-        description: {
-          type: 'string',
-          description: 'Profile description (optional)',
-        },
-        profileType: {
-          type: 'string',
-          enum: ['WORKER', 'EMPLOYER'],
-          description: 'Profile type',
-        },
-        documentType: {
-          type: 'string',
-          enum: ['IDENTITY_CARD', 'PASSPORT', 'DRIVER_LICENSE', 'OTHER'],
-          description: 'Document type',
-        },
-        kycDocument: {
-          type: 'string',
-          format: 'binary',
-          description: 'KYC identity document (image file)',
-        },
-        kycSelfie: {
-          type: 'string',
-          format: 'binary',
-          description: 'KYC selfie photo (image file)',
-        },
-      },
-    },
-  })
+  @ApiConsumes('application/json')
+  @ApiBody({ type: CreateProfileDto })
   @ApiResponse({
     status: 201,
     description: 'Profile created successfully',
@@ -167,7 +82,7 @@ export class ProfileController {
   })
   @ApiResponse({
     status: 400,
-    description: 'Bad request - validation error or missing files',
+    description: 'Bad request - validation error',
   })
   @ApiResponse({
     status: 409,
@@ -175,29 +90,9 @@ export class ProfileController {
   })
   async createProfile(
     @Body() createProfileDto: CreateProfileDto,
-    @UploadedFiles()
-    files: {
-      kycDocument?: Express.Multer.File[];
-      kycSelfie?: Express.Multer.File[];
-    },
     @Res({ passthrough: true }) res: Response,
   ) {
-    const kycDocument = files?.kycDocument?.[0];
-    const kycSelfie = files?.kycSelfie?.[0];
-
-    if (!kycDocument) {
-      throw new BadRequestException('Le document KYC est requis');
-    }
-
-    if (!kycSelfie) {
-      throw new BadRequestException('La photo KYC est requise');
-    }
-
-    const result = await this.profileService.createProfile(
-      createProfileDto,
-      kycDocument,
-      kycSelfie,
-    );
+    const result = await this.profileService.createProfile(createProfileDto);
 
     await this.mailService.sendMail({
       to: createProfileDto.email,
@@ -524,6 +419,64 @@ export class ProfileController {
     }
 
     return this.profileService.updateAvatar(req.user.profileId, avatar);
+  }
+
+  @Post('kyc-upload')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+      fileFilter: (_req, file, cb) => {
+        const allowed = [
+          'image/jpeg',
+          'image/png',
+          'image/webp',
+          'application/pdf',
+        ];
+        cb(null, allowed.includes(file.mimetype));
+      },
+    }),
+  )
+  @ApiOperation({
+    summary: 'Pre-upload a KYC file during onboarding',
+    description:
+      'Uploads a single KYC file (identity document or selfie) to storage and returns its descriptor. The descriptor is later sent in the JSON body of POST /profile, so no file bytes travel in the profile-creation request. Callable before a profile exists (no auth).',
+  })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['file'],
+      properties: {
+        file: {
+          type: 'string',
+          format: 'binary',
+          description: 'KYC file (JPG, PNG, WEBP, or PDF up to 10MB)',
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'File uploaded successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        url: { type: 'string', description: 'Public URL of the uploaded file' },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Bad request - missing file or invalid format',
+  })
+  async uploadKyc(
+    @UploadedFile() file: Express.Multer.File,
+  ): Promise<{ url: string }> {
+    if (!file) {
+      throw new BadRequestException('Le fichier KYC est requis');
+    }
+
+    return this.profileService.uploadKycFile(file);
   }
 
   @Post('verify-whatsapp')
