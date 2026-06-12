@@ -24,9 +24,11 @@ import {
 import { WORKER_ACTIVE_APPLICATION_STATUSES } from '../../application/application.service';
 import {
   formatPenaltyHistory,
+  formatHistoryMessage,
   formatProfileStats,
   formatEmployerProfileStats,
   type PenaltyItem,
+  type CompletedMissionItem,
 } from '../messages/penalty.messages';
 import { ApplicationStatus, JobOfferStatus } from '@prisma/client';
 
@@ -366,19 +368,22 @@ export class BotCommandsService {
       const applications = await this.applicationService.findByJobOffer(
         offer.id,
       );
-      const acceptedApps = applications.filter((a) => a.status === 'ACCEPTED');
-      for (const accepted of acceptedApps) {
-        if (!accepted.worker) continue;
+      const activeApps = applications.filter(
+        (a) => a.status === 'ACCEPTED' || a.status === 'WAITING_PAYMENT',
+      );
+      for (const app of activeApps) {
+        if (!app.worker) continue;
         const workerName =
-          `${accepted.worker.first_name} ${accepted.worker.last_name}`.trim() ||
+          `${app.worker.first_name} ${app.worker.last_name}`.trim() ||
           'Inconnu';
         items.push({
-          applicationId: accepted.id,
+          applicationId: app.id,
           title: offer.title,
           workerName,
           scheduled_at: offer.scheduled_at,
           amount: offer.amount,
           payment_flow: offer.payment_flow,
+          status: app.status,
         });
       }
     }
@@ -441,7 +446,7 @@ export class BotCommandsService {
         walletBalance,
       });
       if (profileData.avatar_url?.trim()) {
-        return `[IMG:${profileData.avatar_url}]${profileText}`;
+        return `[IMG:${profileData.avatar_url}]\n${profileText}`;
       }
       return profileText;
     }
@@ -487,7 +492,7 @@ export class BotCommandsService {
       walletBalance,
     });
     if (profileData.avatar_url?.trim()) {
-      return `[IMG:${profileData.avatar_url}]${profileText}`;
+      return `[IMG:${profileData.avatar_url}]\n${profileText}`;
     }
     return profileText;
   }
@@ -495,7 +500,7 @@ export class BotCommandsService {
   async penaltyHistory(profile: BotProfile): Promise<string> {
     const isEmployer = profile.profile_type === 'EMPLOYER';
 
-    const [penalties, completedMissions] = await Promise.all([
+    const [penalties, completedMissionItems, completedCount] = await Promise.all([
       this.prisma.penalty.findMany({
         where: { profile_id: profile.id },
         orderBy: { applied_at: 'desc' },
@@ -504,17 +509,52 @@ export class BotCommandsService {
         },
       }),
       isEmployer
-        ? Promise.resolve(0)
-        : this.applicationService
-            .findByWorker(profile.id, { limit: 500 })
-            .then(
-              (apps) =>
-                apps.filter(
-                  (a) =>
-                    a.status === ApplicationStatus.ACCEPTED &&
-                    a.job_offer?.status === JobOfferStatus.COMPLETED,
-                ).length,
+        ? this.prisma.jobOffer
+            .findMany({
+              where: { employer_id: profile.id, status: JobOfferStatus.COMPLETED },
+              select: { title: true, scheduled_at: true, amount: true },
+              orderBy: { scheduled_at: 'desc' },
+              take: 10,
+            })
+            .then((rows) =>
+              rows.map((o) => ({
+                title: o.title,
+                scheduled_at: o.scheduled_at,
+                amount: o.amount != null ? Number(o.amount) : null,
+              })),
+            )
+        : this.prisma.application
+            .findMany({
+              where: {
+                worker_id: profile.id,
+                status: ApplicationStatus.ACCEPTED,
+                job_offer: { status: JobOfferStatus.COMPLETED },
+              },
+              select: {
+                created_at: true,
+                job_offer: { select: { title: true, scheduled_at: true, amount: true } },
+              },
+              orderBy: { created_at: 'desc' },
+              take: 10,
+            })
+            .then((rows) =>
+              rows.map((a) => ({
+                title: a.job_offer!.title,
+                scheduled_at: a.job_offer!.scheduled_at,
+                amount: a.job_offer!.amount != null ? Number(a.job_offer!.amount) : null,
+              })),
             ),
+      isEmployer
+        ? this.prisma.jobOffer.count({
+            where: { employer_id: profile.id, status: JobOfferStatus.COMPLETED },
+          })
+        : this.prisma.application.count({
+            where: {
+              worker_id: profile.id,
+              status: ApplicationStatus.ACCEPTED,
+              job_offer: { status: JobOfferStatus.COMPLETED },
+            },
+          }),
     ]);
 
     const totalAmount = penalties.reduce((s, p) => s + Number(p.amount), 0);
@@ -530,12 +570,13 @@ export class BotCommandsService {
 
     const { cancellationThresholdHours } = await this.systemConfig.getFees();
 
-    return formatPenaltyHistory(
+    return formatHistoryMessage(
+      completedMissionItems,
       items,
       totalAmount,
       penalties.length,
       score,
-      completedMissions,
+      completedCount,
       cancellationThresholdHours,
     );
   }

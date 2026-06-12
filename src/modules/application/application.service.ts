@@ -1036,75 +1036,89 @@ export class ApplicationService {
   private async sendRatingRequests(
     applicationId: string,
     application: {
-      worker: {
-        id: string;
-        phone: string;
-        first_name: string;
-        last_name: string;
-      };
+      job_offer_id: string;
+      worker: { id: string; phone: string; first_name: string; last_name: string };
       job_offer: { title: string; employer_id: string };
     },
   ): Promise<void> {
-    const assignment = await this.prisma.assignment.findUnique({
-      where: { application_id: applicationId },
-      select: { id: true },
-    });
-    if (!assignment) return;
+    const jobTitle = application.job_offer.title;
+    const employerId = application.job_offer.employer_id;
 
     const employer = await this.prisma.profile.findUnique({
-      where: { id: application.job_offer.employer_id },
+      where: { id: employerId },
+      select: { id: true, phone: true, first_name: true, last_name: true, whatsapp_connected: true },
+    });
+    const employerLabel = employer
+      ? `${employer.first_name} ${employer.last_name}`.trim()
+      : "l'employeur";
+
+    // Fetch all completed assignments for this job offer so every worker gets rated,
+    // not just the single applicationId that triggered the completion.
+    const workerSelect = {
+      id: true,
+      phone: true,
+      first_name: true,
+      last_name: true,
+      whatsapp_connected: true,
+    } as const;
+    const assignments = await this.prisma.assignment.findMany({
+      where: {
+        job_offer_id: application.job_offer_id,
+        status: AssignmentStatus.COMPLETED,
+      },
       select: {
         id: true,
-        phone: true,
-        first_name: true,
-        last_name: true,
-        whatsapp_connected: true,
+        application: { select: { worker: { select: workerSelect } } },
       },
     });
 
-    const jobTitle = application.job_offer.title;
-    const assignmentId = assignment.id;
+    // Fall back to the single assignment if the bulk query finds nothing
+    // (e.g. race between this call and the transaction commit).
+    const effectiveAssignments = assignments.length > 0
+      ? assignments
+      : await this.prisma.assignment
+          .findUnique({
+            where: { application_id: applicationId },
+            select: { id: true, application: { select: { worker: { select: workerSelect } } } },
+          })
+          .then((a) => (a ? [a] : []));
 
-    // Ask worker to rate employer
-    if (application.worker.phone) {
-      await this.botNotification
-        .sendRatingRequest({
-          raterProfileId: application.worker.id,
-          raterPhone: application.worker.phone,
-          rateeId: application.job_offer.employer_id,
-          assignmentId,
-          rateeLabel: employer
-            ? `${employer.first_name} ${employer.last_name}`.trim()
-            : "l'employeur",
-          jobTitle,
-        })
-        .catch((err: unknown) =>
-          console.warn(
-            `[ApplicationService] sendRatingRequest (worker) failed:`,
-            err,
-          ),
-        );
-    }
+    for (const asgn of effectiveAssignments) {
+      const worker = asgn.application?.worker ?? null;
+      if (!worker?.phone) continue;
 
-    // Ask employer to rate worker
-    if (employer?.phone && employer.whatsapp_connected) {
-      const workerLabel =
-        `${application.worker.first_name} ${application.worker.last_name}`.trim();
-      await this.botNotification
-        .sendRatingRequest({
-          raterProfileId: employer.id,
-          raterPhone: employer.phone,
-          rateeId: application.worker.id,
-          assignmentId,
-          rateeLabel: workerLabel,
-          jobTitle,
-        })
-        .catch((err: unknown) =>
-          console.warn(
-            `[ApplicationService] sendRatingRequest (employer) failed:`,
-            err,
-          ),
-        );
+      // Ask worker to rate employer
+      if (worker.whatsapp_connected) {
+        await this.botNotification
+          .sendRatingRequest({
+            raterProfileId: worker.id,
+            raterPhone: worker.phone,
+            rateeId: employerId,
+            assignmentId: asgn.id,
+            rateeLabel: employerLabel,
+            jobTitle,
+          })
+          .catch((err: unknown) =>
+            console.warn(`[ApplicationService] sendRatingRequest (worker ${worker.id}) failed:`, err),
+          );
+      }
+
+      // Ask employer to rate worker
+      if (employer?.phone && employer.whatsapp_connected) {
+        const workerLabel = `${worker.first_name} ${worker.last_name}`.trim();
+        await this.botNotification
+          .sendRatingRequest({
+            raterProfileId: employer.id,
+            raterPhone: employer.phone,
+            rateeId: worker.id,
+            assignmentId: asgn.id,
+            rateeLabel: workerLabel,
+            jobTitle,
+          })
+          .catch((err: unknown) =>
+            console.warn(`[ApplicationService] sendRatingRequest (employer for worker ${worker.id}) failed:`, err),
+          );
+      }
     }
   }
 

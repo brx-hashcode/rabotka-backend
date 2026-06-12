@@ -5,6 +5,7 @@ import type { JobOfferService } from '../../job-offer/job-offer.service';
 import type { InterestSignalService } from '../../interest-graph/interest-signal.service';
 import type { SystemConfigService } from '../../system-config/system-config.service';
 import {
+  formatAmount,
   formatOfferDetailWithActions,
   formatRecommendedList,
   type OfferListItem,
@@ -62,15 +63,6 @@ function isMenuCommand(normalizedInput: string): boolean {
   );
 }
 
-function formatPaymentFlow(flow: string | null): string {
-  switch (flow) {
-    case 'HOURLY': return '/heure';
-    case 'DAILY': return '/jour';
-    case 'MONTHLY': return '/mois';
-    default: return '';
-  }
-}
-
 async function buildApplyTeaser(
   offerId: string,
   ctx: RecommendedJobsContext,
@@ -80,13 +72,6 @@ async function buildApplyTeaser(
   const fees = await ctx.systemConfigService.getFees();
   const penalty = fees.lateCancellationPenaltyFcfa;
   const threshold = fees.cancellationThresholdHours;
-  let amountStr = 'Prix à négocier';
-  if (offer.amount != null) {
-    const flowLabel = formatPaymentFlow(offer.payment_flow);
-    amountStr = flowLabel
-      ? `${offer.amount.toLocaleString('fr-FR')} FCFA ${flowLabel}`
-      : `${offer.amount.toLocaleString('fr-FR')} FCFA`;
-  }
   const dateStr = offer.scheduled_at.toLocaleDateString('fr-FR', {
     day: '2-digit',
     month: '2-digit',
@@ -99,7 +84,7 @@ async function buildApplyTeaser(
     '',
     `*Offre*: ${offer.title}`,
     `*Date*: ${dateStr}`,
-    `*Montant*: ${amountStr}`,
+    `*Montant*: ${formatAmount(offer.amount, offer.payment_flow)}`,
     `*Adresse*: ${offer.address}`,
     '',
     '*ENGAGEMENT IMPORTANT*:',
@@ -292,8 +277,13 @@ async function handleRecommendedJobsDetailStep(
     };
   }
 
-  // 4 / Menu
-  return goToMenu();
+  // 4 / explicit menu commands → exit; anything else → re-show detail
+  if (normalizedInput === '4' || isMenuCommand(normalizedInput)) return goToMenu();
+
+  const offer = await ctx.jobOfferService.findById(selectedOfferId);
+  if (!offer) return goToMenu();
+  const item = toOfferListItem({ ...offer, acceptedCount: offer.acceptedCount ?? 0 });
+  return { reply: [formatOfferDetailWithActions(item)], nextState: state };
 }
 
 async function handleRecommendedJobsDescriptionStep(
@@ -336,8 +326,27 @@ async function handleRecommendedJobsDescriptionStep(
     };
   }
 
-  // 3 — Menu
-  return goToMenu();
+  // 3 / explicit menu commands → exit; anything else → re-show description
+  if (normalizedInput === '3' || isMenuCommand(normalizedInput)) return goToMenu();
+
+  const offer = await ctx.jobOfferService.findById(selectedOfferId);
+  if (!offer) return goToMenu();
+  return {
+    reply: [
+      [
+        `*${offer.title}*`,
+        '',
+        offer.description,
+        '',
+        '1- Postuler à cette offre',
+        '2- Retour à la liste',
+        '3- Menu principal',
+        '',
+        'Tapez le numéro correspondant.',
+      ].join('\n'),
+    ],
+    nextState: state,
+  };
 }
 
 export async function runRecommendedJobsFlow(

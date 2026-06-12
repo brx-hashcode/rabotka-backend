@@ -1343,29 +1343,43 @@ export class ProfileService {
   async downloadAgreement(
     profileId: string,
   ): Promise<{ buffer: Buffer; filename: string }> {
-    const [template, profile] = await Promise.all([
-      this.prisma.document.findFirst({
-        where: { category: 'AGREEMENT' },
-        orderBy: { created_at: 'desc' },
-      }),
-      this.prisma.profile.findUnique({
-        where: { id: profileId },
-        select: {
-          first_name: true,
-          last_name: true,
-          created_at: true,
-          email: true,
-          profile_type: true,
-        },
-      }),
-    ]);
+    const template = await this.prisma.document.findFirst({
+      where: { category: 'AGREEMENT' },
+      orderBy: { created_at: 'desc' },
+    });
 
     if (!template) {
       throw new NotFoundException("Aucun modèle d'accord trouvé");
     }
+
+    // Check cache before fetching profile — saves a DB round-trip on hits.
+    const cacheKey = `${REDIS_KEY_PREFIX}pdf:agreement:${profileId}:${template.id}`;
+    const cached = await this.redis.get(cacheKey);
+    if (cached) {
+      // Still need a filename — derive it from profileId as a safe fallback.
+      return { buffer: Buffer.from(cached, 'base64'), filename: `accord_${profileId}.pdf` };
+    }
+
+    const profile = await this.prisma.profile.findUnique({
+      where: { id: profileId },
+      select: {
+        first_name: true,
+        last_name: true,
+        created_at: true,
+        email: true,
+        profile_type: true,
+      },
+    });
+
     if (!profile) {
       throw new NotFoundException('Profil introuvable');
     }
+
+    const safeName = `${profile.last_name}_accord`.replaceAll(
+      /[^a-zA-Z0-9_-]/g,
+      '_',
+    );
+    const filename = `${safeName}.pdf`;
 
     const data: Record<string, string> = {
       EMAIL: profile.email,
@@ -1380,11 +1394,9 @@ export class ProfileService {
       template.id,
       data,
     );
-    const safeName = `${profile.last_name}_accord`.replaceAll(
-      /[^a-zA-Z0-9_-]/g,
-      '_',
-    );
-    return { buffer, filename: `${safeName}.pdf` };
+
+    await this.redis.setex(cacheKey, 30 * 24 * 60 * 60, buffer.toString('base64'));
+    return { buffer, filename };
   }
 
   private getProfileTypeLabel(profileType: ProfileType): string {

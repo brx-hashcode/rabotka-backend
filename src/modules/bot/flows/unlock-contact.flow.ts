@@ -106,7 +106,7 @@ async function handleStep1(args: StepArgs): Promise<FlowResult> {
     });
     return {
       reply: [
-        `D'accord. Tapez *Menu* puis choisissez *3* (Paiements en attente) quand vous êtes prêt(e) à débloquer ce contact.\n\nLa demande expire le *${deadline}*. Passé ce délai, si l'autre partie n'a pas payé, votre paiement sera recrédité sous forme de *crédit portefeuille*.`,
+        `D'accord. Tapez *débloquer* quand vous êtes prêt(e) à finaliser le déverrouillage de ce contact.\n\nLa demande expire le *${deadline}*. Passé ce délai, si l'autre partie n'a pas payé, votre paiement sera recrédité sous forme de *crédit portefeuille*.`,
       ],
       clearState: true,
     };

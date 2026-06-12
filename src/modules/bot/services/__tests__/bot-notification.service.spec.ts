@@ -370,11 +370,14 @@ describe('BotNotificationService', () => {
       deps.prisma.profile.findUnique.mockResolvedValue({
         phone: '+242001',
         first_name: 'Alice',
+        status: 'ACTIVE',
+        profile_type: 'WORKER',
       });
       (deps.prisma as any).jobOffer = {
         findUnique: jest.fn().mockResolvedValue({
           title: 'Plombier',
           amount: 5000,
+          payment_flow: null,
           address: '10 Rue Paris',
           scheduled_at: new Date('2026-06-01T10:00:00Z'),
         }),
