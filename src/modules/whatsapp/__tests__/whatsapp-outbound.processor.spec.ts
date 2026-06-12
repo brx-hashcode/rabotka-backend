@@ -34,7 +34,11 @@ describe('WhatsAppOutboundProcessor', () => {
 
   it('register creates worker with queue service', () => {
     processor.register(mockQueueService as any);
-    expect(mockQueueService.createWorker).toHaveBeenCalled();
+    expect(mockQueueService.createWorker).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(Function),
+      expect.objectContaining({ concurrency: 3 }),
+    );
     const worker = mockQueueService.createWorker.mock.results[0].value;
     expect(worker.on).toHaveBeenCalledWith('failed', expect.any(Function));
   });
@@ -160,5 +164,34 @@ describe('WhatsAppOutboundProcessor', () => {
     const failedHandler = workerMock.on.mock.calls[0][1];
     await failedHandler(null, new Error('Error'));
     expect(mockQueueService.addJob).not.toHaveBeenCalled();
+  });
+
+  it('register - failed handler logs when DLQ addJob itself fails', async () => {
+    mockQueueService.addJob.mockRejectedValueOnce(new Error('DLQ unavailable'));
+    processor.register(mockQueueService as any);
+    const workerMock = mockQueueService.createWorker.mock.results[0].value;
+    const failedHandler = workerMock.on.mock.calls[0][1];
+
+    const job = {
+      id: 'job-x',
+      data: { type: 'text', phone: '+242001', text: 'Test' },
+      opts: { attempts: 3 },
+      attemptsMade: 3,
+    };
+    // Should not throw even when DLQ write fails — handler is fire-and-forget
+    await failedHandler(job, new Error('Send failed'));
+    expect(mockQueueService.addJob).toHaveBeenCalled();
+  });
+
+  it('process splits long text into chunked messages', async () => {
+    const longText = 'A'.repeat(1600);
+    await processor.process({
+      data: { type: 'text', phone: '+242001', text: longText },
+    });
+    // Must have been called more than once — message was split
+    expect(mockWhatsApp.sendTextMessage.mock.calls.length).toBeGreaterThan(1);
+    // Each call's text must be prefixed with (i/N)
+    const firstCall = mockWhatsApp.sendTextMessage.mock.calls[0][1] as string;
+    expect(firstCall).toMatch(/^\(1\/\d+\)/);
   });
 });

@@ -57,16 +57,25 @@ function makeDocumentService() {
   };
 }
 
+function makeRedis() {
+  return {
+    get: jest.fn().mockResolvedValue(null),
+    set: jest.fn().mockResolvedValue('OK'),
+  };
+}
+
 describe('InvoiceService', () => {
   let service: InvoiceService;
   let prisma: ReturnType<typeof makePrisma>;
   let documentService: ReturnType<typeof makeDocumentService>;
+  let redis: ReturnType<typeof makeRedis>;
 
   beforeEach(() => {
     jest.clearAllMocks();
     prisma = makePrisma();
     documentService = makeDocumentService();
-    service = new InvoiceService(prisma as any, documentService as any);
+    redis = makeRedis();
+    service = new InvoiceService(prisma as any, documentService as any, redis as any);
   });
 
   describe('create()', () => {
@@ -171,6 +180,32 @@ describe('InvoiceService', () => {
         where: { id: 'inv-1' },
         data: { status: 'DOWNLOADED' },
       });
+    });
+
+    it('returns cached buffer without calling fillDocumentTemplateAsPdf on cache hit', async () => {
+      const cachedBuf = Buffer.from('cached-invoice');
+      redis.get.mockResolvedValue(cachedBuf.toString('base64'));
+      const result = await service.download('inv-1', 'profile-1');
+      expect(documentService.fillDocumentTemplateAsPdf).not.toHaveBeenCalled();
+      expect(result.buffer).toEqual(cachedBuf);
+    });
+
+    it('stores generated PDF in Redis on cache miss', async () => {
+      await service.download('inv-1', 'profile-1');
+      expect(redis.set).toHaveBeenCalledWith(
+        expect.stringContaining('pdf:invoice:inv-1:tpl-invoice-1'),
+        expect.any(String),
+      );
+    });
+
+    it('uses invoice.created_at for GENERATED_DATE, not today', async () => {
+      await service.download('inv-1', 'profile-1');
+      expect(documentService.fillDocumentTemplateAsPdf).toHaveBeenCalledWith(
+        'tpl-invoice-1',
+        expect.objectContaining({
+          GENERATED_DATE: new Date(baseInvoice.created_at).toLocaleDateString('fr-FR'),
+        }),
+      );
     });
 
     it('resolves related entity for worker type', async () => {

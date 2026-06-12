@@ -215,7 +215,7 @@ async function handleCancelStep1(
     return handleLateCancellationInput(args);
   }
 
-  if (normalized === '1' || normalized === '0' || normalized === 'confirmer') {
+  if (normalized === '1' || normalized === 'confirmer') {
     return executeCancellation(
       applicationId,
       profile,
@@ -346,7 +346,7 @@ export async function runCancelApplicationFlow(
     };
   }
 
-  const isLate = hoursUntil < 4;
+  const isLate = hoursUntil < ctx.cancellationThresholdHours;
   const timeRemainingStr = formatTimeRemaining(msUntil);
 
   const stepArgs: CancelStepArgs = {

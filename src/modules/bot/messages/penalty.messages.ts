@@ -74,6 +74,70 @@ export function formatPenaltyHistory(
   return lines.join('\n');
 }
 
+export type CompletedMissionItem = {
+  title: string;
+  scheduled_at: Date;
+  amount: number | null;
+};
+
+export function formatHistoryMessage(
+  completedMissions: CompletedMissionItem[],
+  penalties: PenaltyItem[],
+  totalPenaltyAmount: number,
+  lateCancellationsCount: number,
+  currentScore: number,
+  completedCount: number,
+  thresholdHours: number,
+): string {
+  const lines: string[] = ['*Historique*', ''];
+
+  lines.push(`*Missions terminées (${completedMissions.length})*`, '');
+  if (completedMissions.length === 0) {
+    lines.push('Aucune mission terminée pour le moment.', '');
+  } else {
+    completedMissions.forEach((m, i) => {
+      const date = formatDateShort(m.scheduled_at);
+      const amount = m.amount != null ? fcfa(m.amount) : 'Montant non défini';
+      lines.push(`${i + 1}. ${m.title} — ${date} — ${amount}`);
+    });
+    lines.push('');
+  }
+
+  lines.push(`*Pénalités (${penalties.length})*`, '');
+  lines.push(
+    `*Total penalites*: ${fcfa(totalPenaltyAmount)}`,
+    `*Annulations tardives*: ${lateCancellationsCount}`,
+    `*Score actuel*: ${currentScore}/100`,
+    `*Missions completees*: ${completedCount}`,
+    '',
+  );
+
+  if (penalties.length === 0) {
+    lines.push('Aucune pénalité enregistrée.', '');
+  } else {
+    lines.push('Détail des pénalités :', '');
+    for (const p of penalties) {
+      lines.push(
+        `Date : ${formatDate(p.appliedAt)}`,
+        p.jobOfferTitle ? `*Offre*: ${p.jobOfferTitle}` : '',
+        `*Penalite*: ${fcfa(p.amount)}`,
+        p.reason ? `*Raison*: ${p.reason}` : '',
+        '',
+      );
+    }
+  }
+
+  lines.push(
+    '*Conseils pour améliorer votre score*',
+    `- Completez vos missions sans annulation`,
+    `- Maintenez un score > 90 pour plus de visibilite`,
+    `- Annulez toujours plus de ${thresholdHours}h avant si necessaire`,
+    '',
+    "Tapez *Menu* pour revenir.",
+  );
+  return lines.join('\n');
+}
+
 export function formatEmployerProfileStats(params: {
   firstName: string;
   lastName: string;
@@ -104,9 +168,8 @@ export function formatEmployerProfileStats(params: {
     '',
     '',
     '*Actions*',
-    '1- Voir mes offres',
-    '2- Candidatures recues',
-    '3- Retour au menu',
+    '1- Mon historique',
+    '2- Menu',
     '',
     'Tapez le numero correspondant.',
   ].join('\n');
@@ -150,9 +213,8 @@ export function formatProfileStats(params: {
     `*Annulations tardives*: ${params.lateCancellations}`,
     '',
     '*Actions*',
-    "1- Voir l'historique complet",
-    '2- Historique des penalites',
-    '3- Retour au menu',
+    '1- Mon historique',
+    '2- Menu',
     '',
     '*Tapez le numero correspondant.*',
   ].join('\n');
@@ -250,7 +312,7 @@ export function formatPenaltyReminderDay(params: {
     ...totalLine,
     '',
     '*Comment payer :*',
-    'Tapez *3* (Paiements en attente) pour régler vos pénalités.',
+    'Tapez *payer* pour régler vos pénalités.',
     '',
     'Tapez *5* (Mon profil) pour voir le détail de vos pénalités.',
   ].join('\n');

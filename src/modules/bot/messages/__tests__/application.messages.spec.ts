@@ -388,7 +388,7 @@ describe('formatCancellationToEmployer', () => {
 describe('formatFilledJobsListPage', () => {
   it('shows empty message when no items', () => {
     const msg = formatFilledJobsListPage([], false);
-    expect(msg).toContain('Aucune mission pourvue');
+    expect(msg).toContain('Aucune mission en cours');
   });
 
   it('renders job items', () => {
