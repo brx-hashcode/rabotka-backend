@@ -129,34 +129,55 @@ describe('BotRouterService', () => {
   });
 
   describe('numeric menu options', () => {
-    it('routes worker "2" to search_by_ref', () => {
+    it('routes worker "2" to my_applications', () => {
       const result = service.route('2', workerProfile, null);
-      expect(result).toEqual({
-        type: 'command',
-        commandId: 'search_by_ref',
-      });
+      expect(result).toEqual({ type: 'command', commandId: 'my_applications' });
     });
 
-    it('routes worker "4" to pending_payments', () => {
+    it('routes worker "3" to recommended_jobs', () => {
+      const result = service.route('3', workerProfile, null);
+      expect(result).toEqual({ type: 'command', commandId: 'recommended_jobs' });
+    });
+
+    it('routes worker "4" to search_by_ref', () => {
       const result = service.route('4', workerProfile, null);
-      expect(result).toEqual({
-        type: 'command',
-        commandId: 'pending_payments',
-      });
+      expect(result).toEqual({ type: 'command', commandId: 'search_by_ref' });
     });
 
-    it('routes worker "5" to recommended_jobs', () => {
+    it('routes worker "5" to profile', () => {
       const result = service.route('5', workerProfile, null);
-      expect(result).toEqual({
-        type: 'command',
-        commandId: 'recommended_jobs',
-      });
+      expect(result).toEqual({ type: 'command', commandId: 'profile' });
     });
 
-    it('routes employer numeric option for my_offers', () => {
-      // EMPLOYER_MENU_OPTIONS.MY_OFFERS
+    it('routes worker "6" to help', () => {
+      const result = service.route('6', workerProfile, null);
+      expect(result).toEqual({ type: 'command', commandId: 'help' });
+    });
+
+    it('routes employer "2" to candidatures_received', () => {
       const result = service.route('2', employerProfile, null);
+      expect(result).toEqual({ type: 'command', commandId: 'candidatures_received' });
+    });
+
+    it('routes employer "3" to my_offers', () => {
+      const result = service.route('3', employerProfile, null);
       expect(result).toEqual({ type: 'command', commandId: 'my_offers' });
+    });
+
+    it('routes employer "7" to help', () => {
+      const result = service.route('7', employerProfile, null);
+      expect(result).toEqual({ type: 'command', commandId: 'help' });
+    });
+
+    it('text alias "historique" still routes to penalty_history', () => {
+      expect(service.route('historique', workerProfile, null)).toEqual({
+        type: 'command',
+        commandId: 'penalty_history',
+      });
+      expect(service.route('historique', employerProfile, null)).toEqual({
+        type: 'command',
+        commandId: 'penalty_history',
+      });
     });
   });
 

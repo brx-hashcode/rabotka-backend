@@ -458,7 +458,7 @@ async function showList(
     .filter(Boolean) as typeof workers;
 
   const lines = [
-    '*travailleurs recommandés*',
+    '*Travailleurs recommandés*',
     '',
     ...orderedWorkers.map((w, i) => {
       const aiScore = Math.round((workerScores[w.id] ?? 0) * 100);
@@ -555,7 +555,7 @@ async function showWorkerDetail(
 
   const detailText = detailLines.join('\n');
   const reply = worker.avatar_url?.trim()
-    ? [`[IMG:${worker.avatar_url}]${detailText}`]
+    ? [`[IMG:${worker.avatar_url}]\n${detailText}`]
     : [detailText];
 
   return {

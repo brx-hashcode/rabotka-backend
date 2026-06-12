@@ -4,11 +4,11 @@ import { getApplyJobInitialState } from './apply-job.flow';
 import type { JobOfferService } from '../../job-offer/job-offer.service';
 import type { SystemConfigService } from '../../system-config/system-config.service';
 import {
+  formatAmount,
   formatOfferDetail,
   formatOfferDetailWithActions,
   formatOfferListCompact,
   formatNoOffersAvailable,
-  formatPaymentFlow,
   jobOfferToOfferListItem,
   type OfferListItem,
 } from '../messages/offers.messages';
@@ -187,21 +187,12 @@ async function handleDetailApply(
   const fees = await ctx.systemConfigService.getFees();
   const penalty = fees.lateCancellationPenaltyFcfa;
   const cancellationThresholdHours = fees.cancellationThresholdHours;
-  let amountStr = 'Prix à négocier';
-  if (offer.amount != null) {
-    const flowLabel = offer.payment_flow
-      ? formatPaymentFlow(offer.payment_flow)
-      : '';
-    amountStr = flowLabel
-      ? `${offer.amount.toLocaleString('fr-FR')} FCFA ${flowLabel}`
-      : `${offer.amount.toLocaleString('fr-FR')} FCFA`;
-  }
   const text = [
     '*Vous êtes sur le point de postuler*',
     '',
     `*Offre*: ${offer.title}`,
     `*Date*: ${formatOfferDate(offer.scheduled_at)}`,
-    `*Montant*: ${amountStr}`,
+    `*Montant*: ${formatAmount(offer.amount, offer.payment_flow)}`,
     `*Adresse*: ${offer.address}`,
     '',
     '*ENGAGEMENT IMPORTANT*:',

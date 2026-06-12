@@ -2,7 +2,9 @@ import {
   Injectable,
   NotFoundException,
   ForbiddenException,
+  Inject,
 } from '@nestjs/common';
+import Redis from 'ioredis';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { DocumentService } from '../document/document.service';
 import {
@@ -11,6 +13,10 @@ import {
   PaymentMethod,
   ProfileType,
 } from '@prisma/client';
+import {
+  REDIS_CONNECTION,
+  REDIS_KEY_PREFIX,
+} from '../../common/services/redis/redis.constants';
 
 const PROFILE_TYPE_LABELS: Record<ProfileType, string> = {
   [ProfileType.WORKER]: 'Travailleur',
@@ -41,6 +47,7 @@ export class InvoiceService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly documentService: DocumentService,
+    @Inject(REDIS_CONNECTION) private readonly redis: Redis,
   ) {}
 
   private invoiceRef(id: string, createdAt: Date): string {
@@ -58,7 +65,6 @@ export class InvoiceService {
     relatedEntityType?: string;
     relatedEntityId?: string;
   }): Promise<InvoiceItem> {
-    // Check idempotency by whichever key is provided
     if (params.paymentRequestId) {
       const existing = await this.prisma.invoice.findUnique({
         where: { payment_request_id: params.paymentRequestId },
@@ -113,6 +119,12 @@ export class InvoiceService {
     });
     if (!template) throw new NotFoundException('No INVOICE template found');
 
+    const filename = `facture_${invoice.profile.last_name}_${invoice.id.slice(0, 8)}.pdf`;
+
+    const cacheKey = `${REDIS_KEY_PREFIX}pdf:invoice:${invoiceId}:${template.id}`;
+    const cached = await this.redis.get(cacheKey);
+    if (cached) return { buffer: Buffer.from(cached, 'base64'), filename };
+
     const reasonLabel: Record<InvoiceReason, string> = {
       CONTACT_UNLOCK: 'Déverrouillage de contact',
       PENALTY: 'Pénalité',
@@ -146,7 +158,7 @@ export class InvoiceService {
         invoice.related_entity_id,
         invoice.profile_id,
       ),
-      GENERATED_DATE: new Date().toLocaleDateString('fr-FR'),
+      GENERATED_DATE: new Date(invoice.created_at).toLocaleDateString('fr-FR'),
     };
 
     const buffer = await this.documentService.fillDocumentTemplateAsPdf(
@@ -154,12 +166,14 @@ export class InvoiceService {
       data,
     );
 
-    await this.prisma.invoice.update({
-      where: { id: invoiceId },
-      data: { status: 'DOWNLOADED' },
-    });
+    await Promise.all([
+      this.redis.set(cacheKey, buffer.toString('base64')),
+      this.prisma.invoice.update({
+        where: { id: invoiceId },
+        data: { status: 'DOWNLOADED' },
+      }),
+    ]);
 
-    const filename = `facture_${invoice.profile.last_name}_${invoice.id.slice(0, 8)}.pdf`;
     return { buffer, filename };
   }
 
@@ -178,6 +192,12 @@ export class InvoiceService {
       orderBy: { created_at: 'desc' },
     });
     if (!template) throw new NotFoundException('No INVOICE template found');
+
+    const filename = `facture_${invoice.profile.last_name}_${invoice.id.slice(0, 8)}.pdf`;
+
+    const cacheKey = `${REDIS_KEY_PREFIX}pdf:invoice:${invoiceId}:${template.id}`;
+    const cached = await this.redis.get(cacheKey);
+    if (cached) return { buffer: Buffer.from(cached, 'base64'), filename };
 
     const reasonLabel: Record<InvoiceReason, string> = {
       CONTACT_UNLOCK: 'Déverrouillage de contact',
@@ -212,14 +232,15 @@ export class InvoiceService {
         invoice.related_entity_id,
         invoice.profile_id,
       ),
-      GENERATED_DATE: new Date().toLocaleDateString('fr-FR'),
+      GENERATED_DATE: new Date(invoice.created_at).toLocaleDateString('fr-FR'),
     };
 
     const buffer = await this.documentService.fillDocumentTemplateAsPdf(
       template.id,
       data,
     );
-    const filename = `facture_${invoice.profile.last_name}_${invoice.id.slice(0, 8)}.pdf`;
+
+    await this.redis.set(cacheKey, buffer.toString('base64'));
     return { buffer, filename };
   }
 

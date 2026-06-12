@@ -2,7 +2,9 @@ import {
   Injectable,
   NotFoundException,
   ForbiddenException,
+  Inject,
 } from '@nestjs/common';
+import Redis from 'ioredis';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { DocumentService } from '../document/document.service';
 import { DocumentCategory, PaymentFlow } from '@prisma/client';
@@ -12,6 +14,10 @@ import {
   paymentFlowPayModeFr,
   paymentFlowFrequencyFr,
 } from './contract-template.helpers';
+import {
+  REDIS_CONNECTION,
+  REDIS_KEY_PREFIX,
+} from '../../common/services/redis/redis.constants';
 
 export type ContractItem = {
   id: string;
@@ -26,6 +32,7 @@ export class ContractService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly documentService: DocumentService,
+    @Inject(REDIS_CONNECTION) private readonly redis: Redis,
   ) {}
 
   async create(applicationId: string): Promise<ContractItem> {
@@ -62,21 +69,28 @@ export class ContractService {
     });
     if (!template) throw new NotFoundException('No CONTRACT template found');
 
-    const data = this.buildContractTemplateData(contract);
+    const job = application.job_offer;
+    const worker = application.worker;
+    const filename = `contrat_${worker.last_name}_${job.title.replaceAll(/[^a-zA-Z0-9]/g, '_')}.pdf`;
 
+    const cacheKey = `${REDIS_KEY_PREFIX}pdf:contract:${contractId}:${template.id}`;
+    const cached = await this.redis.get(cacheKey);
+    if (cached) return { buffer: Buffer.from(cached, 'base64'), filename };
+
+    const data = this.buildContractTemplateData(contract);
     const buffer = await this.documentService.fillDocumentTemplateAsPdf(
       template.id,
       data,
     );
 
-    await this.prisma.contract.update({
-      where: { id: contractId },
-      data: { status: 'DOWNLOADED' },
-    });
+    await Promise.all([
+      this.redis.set(cacheKey, buffer.toString('base64')),
+      this.prisma.contract.update({
+        where: { id: contractId },
+        data: { status: 'DOWNLOADED' },
+      }),
+    ]);
 
-    const job = application.job_offer;
-    const worker = application.worker;
-    const filename = `contrat_${worker.last_name}_${job.title.replaceAll(/[^a-zA-Z0-9]/g, '_')}.pdf`;
     return { buffer, filename };
   }
 
@@ -91,15 +105,21 @@ export class ContractService {
     });
     if (!template) throw new NotFoundException('No CONTRACT template found');
 
-    const data = this.buildContractTemplateData(contract);
+    const job = contract.application.job_offer;
+    const worker = contract.application.worker;
+    const filename = `contrat_${worker.last_name}_${job.title.replaceAll(/[^a-zA-Z0-9]/g, '_')}.pdf`;
 
+    const cacheKey = `${REDIS_KEY_PREFIX}pdf:contract:${contractId}:${template.id}`;
+    const cached = await this.redis.get(cacheKey);
+    if (cached) return { buffer: Buffer.from(cached, 'base64'), filename };
+
+    const data = this.buildContractTemplateData(contract);
     const buffer = await this.documentService.fillDocumentTemplateAsPdf(
       template.id,
       data,
     );
-    const job = contract.application.job_offer;
-    const worker = contract.application.worker;
-    const filename = `contrat_${worker.last_name}_${job.title.replaceAll(/[^a-zA-Z0-9]/g, '_')}.pdf`;
+
+    await this.redis.set(cacheKey, buffer.toString('base64'));
     return { buffer, filename };
   }
 
@@ -213,7 +233,7 @@ export class ContractService {
       JOB_AMOUNT: job.amount == null ? '-' : job.amount.toString(),
       JOB_PAYMENT_FLOW: s(job.payment_flow),
       JOB_DATE: startStr,
-      GENERATED_DATE: new Date().toLocaleDateString('fr-FR'),
+      GENERATED_DATE: contract.created_at.toLocaleDateString('fr-FR'),
     };
   }
 

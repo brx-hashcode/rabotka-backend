@@ -11,6 +11,7 @@ import { DocumentCategory, DocumentSourceMode } from '@prisma/client';
 const mockRedisClient = {
   keys: jest.fn().mockResolvedValue([]),
   del: jest.fn().mockResolvedValue(1),
+  scan: jest.fn().mockResolvedValue(['0', []]),
 };
 
 const mockPrisma = {

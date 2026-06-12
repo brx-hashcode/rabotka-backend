@@ -4,6 +4,22 @@ export const BOT_STATE_KEY_PREFIX = `${REDIS_KEY_PREFIX}bot:state:`;
 
 export const BOT_STATE_TTL_SECONDS = 86400;
 
+// Shorter TTLs for flows that should expire if abandoned mid-conversation.
+// Flows not listed here fall back to BOT_STATE_TTL_SECONDS (24h).
+export const FLOW_TTL_SECONDS: Partial<Record<string, number>> = {
+  apply_job: 4 * 3600, // 4 h
+  publish_job: 4 * 3600, // 4 h
+  cancel_application: 2 * 3600,
+  accept_refuse_candidate: 2 * 3600,
+  list_offers: 2 * 3600,
+  search_by_ref: 2 * 3600,
+  my_applications: 2 * 3600,
+  candidatures_list: 2 * 3600,
+  profile_submenu: 1800, // 30 min
+  recommended_jobs: 2 * 3600,
+  recommended_profiles: 2 * 3600,
+};
+
 export const FLOW_IDS = {
   PUBLISH_JOB: 'publish_job',
   APPLY_JOB: 'apply_job',
@@ -32,25 +48,21 @@ export const FLOW_IDS = {
 
 export const WORKER_MENU_OPTIONS = {
   LIST_OFFERS: '1',
-  SEARCH_BY_REF: '2',
-  MY_APPLICATIONS: '3',
-  WAITING_PAYMENTS: '4',
-  RECOMMENDED_JOBS: '5',
-  PROFILE: '6',
-  HISTORY: '7',
-  HELP: '8',
+  MY_APPLICATIONS: '2',
+  RECOMMENDED_JOBS: '3',
+  SEARCH_BY_REF: '4',
+  PROFILE: '5',
+  HELP: '6',
 } as const;
 
 export const EMPLOYER_MENU_OPTIONS = {
   PUBLISH_OFFER: '1',
-  MY_OFFERS: '2',
-  CANDIDATURES_RECEIVED: '3',
-  WAITING_PAYMENTS: '4',
-  FILLED_JOBS: '5',
-  RECOMMENDED_PROFILES: '6',
-  PROFILE: '7',
-  HISTORY: '8',
-  HELP: '9',
+  CANDIDATURES_RECEIVED: '2',
+  MY_OFFERS: '3',
+  FILLED_JOBS: '4',
+  RECOMMENDED_PROFILES: '5',
+  PROFILE: '6',
+  HELP: '7',
 } as const;
 
 export const CMD_MENU = ['menu', 'aide', 'help', 'bonjour', '*'];
@@ -73,13 +85,14 @@ export const CMD_PAY = [
 export const CMD_UNLOCK = ['débloquer', 'debloquer', 'unlock', 'contact'];
 export const CMD_RECOMMENDED_JOBS = [
   'offres recommandées',
+  'Offres recommandées',
   'recommandées',
   'recommended',
 ];
 export const CMD_RECOMMENDED_PROFILES = [
-  'profils recommandés',
-  'travailleurs recommandés',
-  'recommended profiles',
+  'Profils recommandés',
+  'Travailleurs recommandés',
+  'Recommandés',
 ];
 export const CMD_VERIFY_WHATSAPP = ['verifier', 'verify', 'vérifier'];
 export const CMD_SEARCH_BY_REF = [

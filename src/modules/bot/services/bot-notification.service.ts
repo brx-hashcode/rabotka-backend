@@ -21,6 +21,7 @@ import {
   formatContactUnlockExpiredConversion,
 } from '../messages/contact-unlock.messages';
 import { formatKycValidatedMessage } from '../messages/notifications.messages';
+import { formatAmount } from '../messages/offers.messages';
 import { ContactUnlockService } from '../../contact-unlock/contact-unlock.service';
 import { SystemConfigService } from '../../system-config/system-config.service';
 import { WalletService } from '../../wallet/wallet.service';
@@ -407,27 +408,26 @@ export class BotNotificationService {
       const [profile, offer] = await Promise.all([
         this.prisma.profile.findUnique({
           where: { id: workerId },
-          select: { phone: true, first_name: true },
+          select: { phone: true, first_name: true, status: true, profile_type: true },
         }),
         this.prisma.jobOffer.findUnique({
           where: { id: jobOfferId },
           select: {
             title: true,
             amount: true,
+            payment_flow: true,
             address: true,
             scheduled_at: true,
           },
         }),
       ]);
       if (!profile?.phone || !offer) return;
+      if (profile.profile_type !== 'WORKER' || profile.status !== 'ACTIVE') return;
 
       const applyState = getApplyJobNotificationState(jobOfferId);
-      await this.botState.setIfFlowAbsentOrMatches(workerId, applyState, null);
+      const stateSet = await this.botState.setIfFlowAbsentOrMatches(workerId, applyState, null);
+      if (!stateSet) return;
 
-      const amountLine =
-        offer.amount != null
-          ? `*Montant* : ${Number(offer.amount).toLocaleString('fr-FR')} FCFA`
-          : `*Montant* : Prix à négocier`;
       const dateStr = offer.scheduled_at.toLocaleDateString('fr-FR', {
         day: '2-digit',
         month: '2-digit',
@@ -439,7 +439,7 @@ export class BotNotificationService {
         `🔔 *Nouvelle offre pour vous, ${profile.first_name} !*`,
         '',
         `*${offer.title}*`,
-        amountLine,
+        `*Montant* : ${formatAmount(offer.amount != null ? Number(offer.amount) : null, offer.payment_flow)}`,
         `*Adresse* : ${offer.address}`,
         `*Date* : ${dateStr}`,
         '',
@@ -478,7 +478,18 @@ export class BotNotificationService {
       state,
       null,
     );
-    if (!written) return;
+    if (!written) {
+      // User is mid-flow — defer the rating request so it fires when their flow ends.
+      await this.botInbox.push(raterProfileId, {
+        type: 'pending_rating',
+        assignmentId,
+        rateeId,
+        rateeLabel,
+        jobTitle,
+        createdAt: new Date().toISOString(),
+      });
+      return;
+    }
     const text = [
       `*Évaluez votre mission*`,
       '',

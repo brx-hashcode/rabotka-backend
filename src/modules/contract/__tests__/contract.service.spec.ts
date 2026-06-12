@@ -79,16 +79,25 @@ function makeDocumentService() {
   };
 }
 
+function makeRedis() {
+  return {
+    get: jest.fn().mockResolvedValue(null),
+    set: jest.fn().mockResolvedValue('OK'),
+  };
+}
+
 describe('ContractService', () => {
   let service: ContractService;
   let prisma: ReturnType<typeof makePrisma>;
   let documentService: ReturnType<typeof makeDocumentService>;
+  let redis: ReturnType<typeof makeRedis>;
 
   beforeEach(() => {
     jest.clearAllMocks();
     prisma = makePrisma();
     documentService = makeDocumentService();
-    service = new ContractService(prisma as any, documentService as any);
+    redis = makeRedis();
+    service = new ContractService(prisma as any, documentService as any, redis as any);
   });
 
   describe('create()', () => {
@@ -172,6 +181,32 @@ describe('ContractService', () => {
         where: { id: 'contract-1' },
         data: { status: 'DOWNLOADED' },
       });
+    });
+
+    it('returns cached buffer without calling fillDocumentTemplateAsPdf on cache hit', async () => {
+      const cachedBuf = Buffer.from('cached-pdf');
+      redis.get.mockResolvedValue(cachedBuf.toString('base64'));
+      const result = await service.download('contract-1', 'worker-1');
+      expect(documentService.fillDocumentTemplateAsPdf).not.toHaveBeenCalled();
+      expect(result.buffer).toEqual(cachedBuf);
+    });
+
+    it('stores generated PDF in Redis on cache miss', async () => {
+      await service.download('contract-1', 'worker-1');
+      expect(redis.set).toHaveBeenCalledWith(
+        expect.stringContaining('pdf:contract:contract-1:tpl-1'),
+        expect.any(String),
+      );
+    });
+
+    it('uses contract.created_at for GENERATED_DATE, not today', async () => {
+      await service.download('contract-1', 'worker-1');
+      expect(documentService.fillDocumentTemplateAsPdf).toHaveBeenCalledWith(
+        'tpl-1',
+        expect.objectContaining({
+          GENERATED_DATE: baseContract.created_at.toLocaleDateString('fr-FR'),
+        }),
+      );
     });
   });
 

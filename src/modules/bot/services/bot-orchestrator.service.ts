@@ -64,10 +64,6 @@ import {
   getPayPenaltiesInitialState,
 } from '../flows/pay-penalties.flow';
 import { runResolvePenaltiesFlow } from '../flows/resolve-penalties.flow';
-import {
-  runVerifyWhatsappFlow,
-  getVerifyWhatsappInitialState,
-} from '../flows/verify-whatsapp.flow';
 import { PaymentService } from '../../payments/payment.service';
 import { ContactUnlockService } from '../../contact-unlock/contact-unlock.service';
 import { WalletService } from '../../wallet/wallet.service';
@@ -87,7 +83,10 @@ import {
   runRecommendedProfilesFlow,
   getRecommendedProfilesInitialState,
 } from '../flows/recommended-profiles.flow';
-import { runRateAssignmentFlow } from '../flows/rate-assignment.flow';
+import {
+  runRateAssignmentFlow,
+  getRateAssignmentInitialState,
+} from '../flows/rate-assignment.flow';
 import {
   runSearchByRefFlow,
   getSearchByRefInitialState,
@@ -113,9 +112,6 @@ const KYC_REJECTED_MESSAGE = `❌ *Votre vérification KYC a été refusée.*\n\
 
 const WHATSAPP_VERIFY_CODE_TTL_MINUTES = 15;
 
-// Pseudo-flow id used while we're waiting for the user to pick which
-// penalty (or all) to pay. Once they pick, we transition to the real
-// FLOW_IDS.PAY_PENALTIES flow with the selected total.
 const PENALTY_GATE_FLOW_ID = 'penalty_gate';
 
 function buildVerifyPromptMessage(code: string): string {
@@ -516,31 +512,6 @@ export class BotOrchestratorService {
     }));
   }
 
-  private async handlePendingActivation(
-    profileId: string,
-    text: string,
-    botProfile: BotProfile,
-  ): Promise<string[]> {
-    const state = await this.botState.get(profileId);
-    const isReturningToFlow = state?.flowId === FLOW_IDS.VERIFY_WHATSAPP;
-    const flowState = isReturningToFlow
-      ? state
-      : getVerifyWhatsappInitialState();
-    const flowInput = isReturningToFlow ? text : '';
-    const result = await runVerifyWhatsappFlow(
-      flowState,
-      flowInput,
-      botProfile,
-      this.buildFlowContext(),
-    );
-    if (result.clearState) {
-      await this.botState.clear(profileId);
-    } else if (result.nextState) {
-      await this.botState.set(profileId, result.nextState);
-    }
-    return result.reply;
-  }
-
   private async routeMessage(
     profileId: string,
     text: string,
@@ -637,6 +608,22 @@ export class BotOrchestratorService {
             inboxNotice,
         ];
       }
+      if (nextInboxItem?.type === 'pending_rating') {
+        const ratingState = getRateAssignmentInitialState(
+          nextInboxItem.assignmentId,
+          nextInboxItem.rateeId,
+        );
+        await this.botState.set(profileId, ratingState);
+        const ratingPrompt = [
+          `*Évaluez votre mission*`,
+          '',
+          `La mission *${nextInboxItem.jobTitle}* est terminée.`,
+          `Comment évaluez-vous *${nextInboxItem.rateeLabel}* ?`,
+          '',
+          'Répondez avec une note de *1* à *5*.',
+        ].join('\n');
+        return [...result.reply, ratingPrompt];
+      }
     } else if (result.nextState) {
       if (result.clearDraft) {
         await this.botDraft
@@ -716,8 +703,6 @@ export class BotOrchestratorService {
         runPayPenaltiesFlow(state, input, profile, ctx),
       [FLOW_IDS.RESOLVE_PENALTIES]: () =>
         runResolvePenaltiesFlow(state, input, profile, ctx),
-      [FLOW_IDS.VERIFY_WHATSAPP]: () =>
-        runVerifyWhatsappFlow(state, input, profile, ctx),
       [FLOW_IDS.UNLOCK_CONTACT]: () =>
         runUnlockContactFlow(state, input, profile, {
           ...ctx,
@@ -757,7 +742,7 @@ export class BotOrchestratorService {
         const offerIds = (state.payload?.offerIds as string[]) ?? [];
         const trimmed = input.trim();
         const normalized = trimmed.toLowerCase();
-        if (CMD_MENU.some((c) => normalized === c || normalized === 'm')) {
+        if (normalized === 'm' || CMD_MENU.some((c) => normalized === c)) {
           return { reply: [handleMenuCommand(profile)], clearState: true };
         }
         const PAGE_SIZE = 5;
@@ -1257,7 +1242,7 @@ export class BotOrchestratorService {
     if (workerResults.length === 0) {
       return [
         [
-          '*travailleurs recommandés*',
+          '*Travailleurs recommandés*',
           '',
           "Aucun travailleur recommandé pour l'instant. Publiez une offre pour obtenir des recommandations.",
           '',
@@ -1287,7 +1272,7 @@ export class BotOrchestratorService {
     if (eligibleResults.length === 0) {
       return [
         [
-          '*travailleurs recommandés*',
+          '*Travailleurs recommandés*',
           '',
           'Aucun travailleur qualifié disponible pour le moment.',
           '',
@@ -1330,7 +1315,7 @@ export class BotOrchestratorService {
       .filter(Boolean) as typeof workers;
 
     const lines = [
-      '*travailleurs recommandés*',
+      '*Travailleurs recommandés*',
       '',
       ...ordered.flatMap((w, i) => {
         const name = `${w.first_name} ${w.last_name}`.trim();
