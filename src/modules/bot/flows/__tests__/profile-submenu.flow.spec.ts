@@ -33,33 +33,39 @@ function makeEmployerState() {
 function makeCtx() {
   return {
     commands: {
-      myApplications: jest
-        .fn()
-        .mockResolvedValue({ message: 'Mes candidatures' }),
-      penaltyHistory: jest.fn().mockResolvedValue('Historique pénalités'),
-      myOffers: jest.fn().mockResolvedValue('Mes offres'),
-      candidaturesReceived: jest
-        .fn()
-        .mockResolvedValue({ message: 'Candidatures reçues', items: [] }),
+      penaltyHistory: jest.fn().mockResolvedValue('Historique'),
     } as any,
   };
 }
 
 describe('runProfileSubmenuFlow()', () => {
   describe('worker', () => {
-    it('exits to menu on "3"', async () => {
+    it('"1" calls penaltyHistory and clears state', async () => {
       const ctx = makeCtx();
       const result = await runProfileSubmenuFlow(
         makeWorkerState(),
-        '3',
+        '1',
+        workerProfile,
+        ctx,
+      );
+      expect(ctx.commands.penaltyHistory).toHaveBeenCalledWith(workerProfile);
+      expect(result.reply[0]).toBe('Historique');
+      expect(result.clearState).toBe(true);
+    });
+
+    it('"2" goes to menu', async () => {
+      const ctx = makeCtx();
+      const result = await runProfileSubmenuFlow(
+        makeWorkerState(),
+        '2',
         workerProfile,
         ctx,
       );
       expect(result.clearState).toBe(true);
-      expect(result.reply[0]).toMatch(/MENU/i);
+      expect(result.reply[0]).toMatch(/Menu Rabotka/i);
     });
 
-    it('exits to menu on "menu"', async () => {
+    it('"menu" goes to menu', async () => {
       const ctx = makeCtx();
       const result = await runProfileSubmenuFlow(
         makeWorkerState(),
@@ -70,32 +76,7 @@ describe('runProfileSubmenuFlow()', () => {
       expect(result.clearState).toBe(true);
     });
 
-    it('shows my applications on "1"', async () => {
-      const ctx = makeCtx();
-      const result = await runProfileSubmenuFlow(
-        makeWorkerState(),
-        '1',
-        workerProfile,
-        ctx,
-      );
-      expect(ctx.commands.myApplications).toHaveBeenCalledWith(workerProfile);
-      expect(result.reply[0]).toBe('Mes candidatures');
-      expect(result.clearState).toBe(true);
-    });
-
-    it('shows penalty history on "2"', async () => {
-      const ctx = makeCtx();
-      const result = await runProfileSubmenuFlow(
-        makeWorkerState(),
-        '2',
-        workerProfile,
-        ctx,
-      );
-      expect(ctx.commands.penaltyHistory).toHaveBeenCalled();
-      expect(result.clearState).toBe(true);
-    });
-
-    it('shows prompt for unknown input', async () => {
+    it('unknown input re-prompts without clearing state', async () => {
       const ctx = makeCtx();
       const result = await runProfileSubmenuFlow(
         makeWorkerState(),
@@ -109,7 +90,7 @@ describe('runProfileSubmenuFlow()', () => {
   });
 
   describe('employer', () => {
-    it('shows my offers on "1" and sets MY_OFFERS state for pagination', async () => {
+    it('"1" calls penaltyHistory and clears state', async () => {
       const ctx = makeCtx();
       const result = await runProfileSubmenuFlow(
         makeEmployerState(),
@@ -117,52 +98,23 @@ describe('runProfileSubmenuFlow()', () => {
         employerProfile,
         ctx,
       );
-      expect(ctx.commands.myOffers).toHaveBeenCalledWith(employerProfile);
-      expect(result.nextState?.flowId).toBe('my_offers');
-      expect(result.clearState).toBeUndefined();
-    });
-
-    it('shows candidatures received on "2" with no items', async () => {
-      const ctx = makeCtx();
-      const result = await runProfileSubmenuFlow(
-        makeEmployerState(),
-        '2',
-        employerProfile,
-        ctx,
-      );
-      expect(ctx.commands.candidaturesReceived).toHaveBeenCalledWith(
-        employerProfile,
-      );
+      expect(ctx.commands.penaltyHistory).toHaveBeenCalledWith(employerProfile);
       expect(result.clearState).toBe(true);
     });
 
-    it('transitions to candidatures list flow when items exist', async () => {
+    it('"2" goes to menu', async () => {
       const ctx = makeCtx();
-      ctx.commands.candidaturesReceived.mockResolvedValue({
-        message: 'Liste',
-        items: [
-          {
-            id: 'app-1',
-            fullName: 'Alice Dupont',
-            firstName: 'Alice',
-            lastName: 'Dupont',
-            email: 'alice@example.com',
-            score: 90,
-            status: 'VERIFIED',
-            offerTitle: 'Plombier',
-          },
-        ],
-      });
       const result = await runProfileSubmenuFlow(
         makeEmployerState(),
         '2',
         employerProfile,
         ctx,
       );
-      expect(result.nextState?.flowId).toBe(FLOW_IDS.CANDIDATURES_LIST);
+      expect(result.clearState).toBe(true);
+      expect(result.reply[0]).toMatch(/Menu Rabotka/i);
     });
 
-    it('exits on "retour"', async () => {
+    it('"retour" exits to menu', async () => {
       const ctx = makeCtx();
       const result = await runProfileSubmenuFlow(
         makeEmployerState(),

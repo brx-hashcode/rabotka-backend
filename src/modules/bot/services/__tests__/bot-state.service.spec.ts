@@ -4,6 +4,7 @@ import { REDIS_CONNECTION } from '../../../../common/services/redis/redis.consta
 import {
   BOT_STATE_KEY_PREFIX,
   BOT_STATE_TTL_SECONDS,
+  FLOW_TTL_SECONDS,
 } from '../../bot.constants';
 import { FLOW_IDS } from '../../bot.constants';
 
@@ -72,13 +73,15 @@ describe('BotStateService', () => {
   });
 
   describe('set()', () => {
-    it('serializes state and saves with TTL', async () => {
+    it('serializes state and saves with flow-specific TTL', async () => {
       await service.set(PROFILE_ID, mockState);
+      const expectedTtl =
+        FLOW_TTL_SECONDS[mockState.flowId] ?? BOT_STATE_TTL_SECONDS;
       expect(redis.set).toHaveBeenCalledWith(
         `${BOT_STATE_KEY_PREFIX}${PROFILE_ID}`,
         expect.any(String),
         'EX',
-        BOT_STATE_TTL_SECONDS,
+        expectedTtl,
       );
     });
 

@@ -179,7 +179,7 @@ describe('runRecommendedProfilesFlow — list view (step 0)', () => {
       profile,
       ctx,
     );
-    expect(result.reply[0]).toContain('*travailleurs recommandés*');
+    expect(result.reply[0]).toContain('*Travailleurs recommandés*');
     expect(result.reply[0]).toContain('Alice Dupont');
     expect(result.reply[0]).toContain('Bob Smith');
     expect(result.reply[0]).toContain('Charlie Brown');
@@ -254,7 +254,7 @@ describe('runRecommendedProfilesFlow — list view (step 0)', () => {
       profile,
       ctx,
     );
-    expect(result.reply[0]).toContain('*travailleurs recommandés*');
+    expect(result.reply[0]).toContain('*Travailleurs recommandés*');
   });
 });
 
@@ -326,7 +326,7 @@ describe('runRecommendedProfilesFlow — detail view (step 1)', () => {
     const ctx = makeCtx();
     const state = makeState(1, { selectedWorkerId: 'worker-1' });
     const result = await runRecommendedProfilesFlow(state, '2', profile, ctx);
-    expect(result.reply[0]).toContain('*travailleurs recommandés*');
+    expect(result.reply[0]).toContain('*Travailleurs recommandés*');
   });
 
   it('returns to the menu on "3" from detail', async () => {

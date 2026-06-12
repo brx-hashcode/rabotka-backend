@@ -17,13 +17,22 @@ redis.call('LPOP', KEYS[1])
 return val
 `;
 
-export type InboxItem = {
-  type: 'new_application';
-  applicationId: string;
-  workerName: string;
-  offerTitle: string;
-  createdAt: string;
-};
+export type InboxItem =
+  | {
+      type: 'new_application';
+      applicationId: string;
+      workerName: string;
+      offerTitle: string;
+      createdAt: string;
+    }
+  | {
+      type: 'pending_rating';
+      assignmentId: string;
+      rateeId: string;
+      rateeLabel: string;
+      jobTitle: string;
+      createdAt: string;
+    };
 
 @Injectable()
 export class BotInboxService {

@@ -27,7 +27,7 @@ export function formatPaymentFlow(flow: string | null): string {
   return map[flow] ?? flow;
 }
 
-function formatAmount(amount: number | null, flow: string | null): string {
+export function formatAmount(amount: number | null, flow: string | null): string {
   if (amount == null || amount === 0) return 'A négocier';
   const flowLabel = formatPaymentFlow(flow);
   const flowSuffix = flowLabel ? ` ${flowLabel}` : '';

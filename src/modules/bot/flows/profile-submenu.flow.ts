@@ -2,7 +2,6 @@ import type { BotProfile, BotState } from '../types/bot-state.types';
 import { FLOW_IDS, CMD_MENU } from '../bot.constants';
 import { menuMessage } from '../messages/menu.messages';
 import type { BotCommandsService } from '../services/bot-commands.service';
-import { getCandidaturesListInitialState } from './candidatures-list.flow';
 
 export type ProfileSubmenuContext = {
   commands: BotCommandsService;
@@ -32,47 +31,16 @@ export async function runProfileSubmenuFlow(
   });
 
   if (
-    trimmed === '3' ||
+    trimmed === '2' ||
     normalized === 'retour' ||
     CMD_MENU.some((c) => normalized === c || normalized.startsWith(c + ' '))
   ) {
     return goToMenu();
   }
 
-  if (profileType === 'EMPLOYER') {
-    if (trimmed === '1') {
-      const { message, offerIds } = await ctx.commands.myOffers(profile);
-      return {
-        reply: [message],
-        nextState: {
-          flowId: FLOW_IDS.MY_OFFERS,
-          step: 0,
-          payload: { page: 0, offerIds: offerIds ?? [] },
-          updatedAt: new Date().toISOString(),
-        },
-      };
-    }
-    if (trimmed === '2') {
-      const result = await ctx.commands.candidaturesReceived(profile);
-      if (result.items?.length) {
-        return {
-          reply: [result.message],
-          nextState: getCandidaturesListInitialState(result.items),
-        };
-      }
-      return { reply: [result.message], clearState: true };
-    }
-  }
-
-  if (profileType === 'WORKER') {
-    if (trimmed === '1') {
-      const result = await ctx.commands.myApplications(profile);
-      return { reply: [result.message], clearState: true };
-    }
-    if (trimmed === '2') {
-      const message = await ctx.commands.penaltyHistory(profile);
-      return { reply: [message], clearState: true };
-    }
+  if (trimmed === '1') {
+    const message = await ctx.commands.penaltyHistory(profile);
+    return { reply: [message], clearState: true };
   }
 
   return {

@@ -5,6 +5,7 @@ import {
   formatApplicationSentSuccess,
 } from '../messages/application.messages';
 import {
+  formatAmount,
   formatOfferDetailWithActions,
   jobOfferToOfferListItem,
 } from '../messages/offers.messages';
@@ -212,16 +213,12 @@ export async function runApplyJobFlow(
     if (normalized === '2' || normalized === 'non') {
       return { reply: [menuMessage(profile.profile_type)], clearState: true };
     }
-    const amountLine =
-      offer.amount != null
-        ? `*Montant*: ${offer.amount.toLocaleString('fr-FR')} FCFA`
-        : `*Montant*: Prix à négocier`;
     return {
       reply: [
         [
           `*${offer.title}*`,
           `*Date*: ${offer.scheduled_at.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}`,
-          amountLine,
+          `*Montant*: ${formatAmount(offer.amount, offer.payment_flow)}`,
           `*Adresse*: ${offer.address}`,
           '',
           '1- Postuler',

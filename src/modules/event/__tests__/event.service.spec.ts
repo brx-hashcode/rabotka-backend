@@ -186,6 +186,45 @@ describe('EventService', () => {
       expect(mockDispatcher.dispatchEventUpdated).toHaveBeenCalled();
     });
 
+    it('dispatches update notification with profiles and assigned_users when dates change', async () => {
+      const newStart = new Date(now.getTime() + 7200000);
+      const eventWithRecipients = {
+        ...baseEvent,
+        start_date: newStart,
+        profiles: [
+          { id: 'p1', first_name: 'Alice', last_name: 'D', avatar_url: null, email: 'alice@test.com', phone: '+242001' },
+        ],
+        assigned_users: [
+          { id: 'u1', first_name: 'Bob', last_name: 'M', email: 'bob@test.com' },
+        ],
+      };
+      mockPrisma.event.findUnique.mockResolvedValue(baseEvent);
+      mockPrisma.event.update.mockResolvedValue(eventWithRecipients);
+
+      await service.update(1, {
+        startDate: newStart.toISOString(),
+        channel: DeliveryChannel.WHATSAPP,
+      });
+
+      expect(mockDispatcher.dispatchEventUpdated).toHaveBeenCalledWith(
+        expect.arrayContaining([
+          expect.objectContaining({ email: 'alice@test.com', phone: '+242001' }),
+          expect.objectContaining({ email: 'bob@test.com' }),
+        ]),
+        expect.any(Object),
+        DeliveryChannel.WHATSAPP,
+      );
+    });
+
+    it('does not dispatch update notification when dates do not change', async () => {
+      mockPrisma.event.findUnique.mockResolvedValue(baseEvent);
+      mockPrisma.event.update.mockResolvedValue({ ...baseEvent, title: 'New title' });
+
+      await service.update(1, { title: 'New title' });
+
+      expect(mockDispatcher.dispatchEventUpdated).not.toHaveBeenCalled();
+    });
+
     it('throws NotFoundException if event not found', async () => {
       mockPrisma.event.findUnique.mockResolvedValue(null);
       await expect(service.update(999, { title: 'x' })).rejects.toThrow(
