@@ -248,26 +248,18 @@ export class JobOfferService {
       timestamp: new Date().toISOString(),
     });
 
-    // Geocode address asynchronously (fire-and-forget)
+    // Geocode first, then index — matching uses lat/lng so coordinates must be written before indexing.
     this.geocodingService
       .geocode(offer.address)
-      .then((coords) => {
-        if (!coords) return;
-        return this.prisma.jobOffer.update({
-          where: { id: offer.id },
-          data: { latitude: coords.lat, longitude: coords.lng },
-        });
+      .then(async (coords) => {
+        if (coords) {
+          await this.prisma.jobOffer.update({
+            where: { id: offer.id },
+            data: { latitude: coords.lat, longitude: coords.lng },
+          });
+        }
+        await this.matchingService.indexJobOffer(offer.id);
       })
-      .catch((err: unknown) =>
-        this.logger.warn(
-          `geocoding failed for offer ${offer.id}`,
-          err instanceof Error ? err.message : String(err),
-        ),
-      );
-
-    // Index + notify matching workers asynchronously (fire-and-forget)
-    this.matchingService
-      .indexJobOffer(offer.id)
       .then(async () => {
         const [enabled, minScore, maxWorkers, cooldownMinutes] =
           await Promise.all([
@@ -284,23 +276,19 @@ export class JobOfferService {
             maxWorkers,
           );
 
-        for (const { id: workerId, score } of workerResults) {
-          if (score < minScore) continue;
+        // Notify eligible workers with a concurrency cap of 5 to avoid
+        // thundering-herd on the WhatsApp queue when a job matches many workers.
+        const NOTIFY_CONCURRENCY = 5;
+        let active = 0;
+        const queue: Promise<void>[] = [];
 
-          // Cooldown check — skip worker if they were recently notified
+        const notify = async (workerId: string) => {
           if (cooldownMinutes > 0) {
             const key = this.notificationCooldownKey(workerId);
-            const locked = await this.redis.set(
-              key,
-              '1',
-              'EX',
-              cooldownMinutes * 60,
-              'NX',
-            );
-            if (locked === null) continue; // Already notified within the window
+            const locked = await this.redis.set(key, '1', 'EX', cooldownMinutes * 60, 'NX');
+            if (locked === null) return;
           }
-
-          this.botNotification
+          await this.botNotification
             .sendRecommendedJobNotification(workerId, offer.id)
             .catch((err: unknown) =>
               this.logger.warn(
@@ -308,11 +296,28 @@ export class JobOfferService {
                 err instanceof Error ? err.message : String(err),
               ),
             );
+        };
+
+        for (const { id: workerId, score } of workerResults) {
+          if (score < minScore) continue;
+          const p = Promise.resolve().then(async () => {
+            while (active >= NOTIFY_CONCURRENCY) {
+              await Promise.race(queue);
+            }
+            active++;
+            try {
+              await notify(workerId);
+            } finally {
+              active--;
+            }
+          });
+          queue.push(p);
         }
+        await Promise.all(queue);
       })
       .catch((err: unknown) =>
         this.logger.warn(
-          `indexJobOffer/matchingNotify failed for offer ${offer.id}`,
+          `geocode/index/notify failed for offer ${offer.id}`,
           err instanceof Error ? err.message : String(err),
         ),
       );

@@ -61,7 +61,11 @@ export class WhatsAppOutboundProcessor {
     const worker = queueService.createWorker<WhatsAppOutboundJobData>(
       WHATSAPP_OUTBOUND_QUEUE,
       (job) => this.process(job),
-      { concurrency: 3 },
+      {
+        concurrency: 3,
+        // Hard rate limit: max 10 Twilio sends per second across all concurrency slots.
+        limiter: { max: 10, duration: 1000 },
+      },
     );
 
     worker.on('failed', (job, err) => {

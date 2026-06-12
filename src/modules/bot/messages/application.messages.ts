@@ -96,9 +96,8 @@ export function formatCandidatureDetail(params: {
   );
   const body = bodyLines.join('\n');
 
-  if (params.avatarUrl) {
-    const caption = body ? `\n${body}` : '';
-    return `[IMG:${params.avatarUrl}]${caption}`;
+  if (params.avatarUrl?.trim()) {
+    return `[IMG:${params.avatarUrl}]\n${body}`;
   }
 
   return body;
@@ -192,7 +191,7 @@ export function formatMyApplicationsList(
  * Paginated list renderer — mirrors the employer "Mes offres" UX.
  * `page` is 0-based; items are numbered globally starting at `page * pageSize + 1`.
  * Pass `title` to label the header (e.g. "Mes candidatures" vs
- * "Paiements en attente").
+ * "Mes candidatures").
  */
 export function formatMyApplicationsListPage(params: {
   title: string;
@@ -532,6 +531,7 @@ export type FilledJobListItem = {
   scheduled_at: Date | string;
   amount: number | null;
   payment_flow: string | null;
+  status?: string;
 };
 
 export function formatFilledJobsListPage(
@@ -541,17 +541,18 @@ export function formatFilledJobsListPage(
   totalPages = 1,
 ): string {
   const pageLabel = totalPages > 1 ? ` (page ${page + 1}/${totalPages})` : '';
-  const lines = [`*Missions pourvues*${pageLabel}`, ''];
+  const lines = [`*Missions en cours*${pageLabel}`, ''];
   if (items.length === 0) {
     lines.push(
-      "Aucune mission pourvue pour le moment. Tapez *Menu* pour revenir.",
+      "Aucune mission en cours pour le moment. Tapez *Menu* pour revenir.",
     );
     return lines.join('\n');
   }
   items.forEach((item, i) => {
+    const pendingBadge = item.status === 'WAITING_PAYMENT' ? ' ⏳' : '';
     lines.push(
       `${i + 1}. ${item.title}`,
-      `    Worker: ${item.workerName}`,
+      `    Worker: ${item.workerName}${pendingBadge}`,
       `    Date: ${formatDatePublic(item.scheduled_at)}`,
       `    Montant: ${formatAmount(item.amount, item.payment_flow)}`,
       '',

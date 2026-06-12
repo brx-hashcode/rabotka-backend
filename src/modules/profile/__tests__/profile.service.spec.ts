@@ -103,7 +103,9 @@ function makeFileService() {
 
 function makeRedis() {
   return {
+    get: jest.fn().mockResolvedValue(null),
     set: jest.fn().mockResolvedValue('OK'),
+    setex: jest.fn().mockResolvedValue('OK'),
     del: jest.fn().mockResolvedValue(1),
   };
 }
@@ -916,6 +918,27 @@ describe('ProfileService', () => {
       prisma.document.findFirst.mockResolvedValue(template);
       prisma.profile.findUnique.mockResolvedValue(null);
       await expect(service.downloadAgreement('p-1')).rejects.toThrow('Profil');
+    });
+
+    it('returns cached buffer without calling fillDocumentTemplateAsPdf on cache hit', async () => {
+      prisma.document.findFirst.mockResolvedValue(template);
+      prisma.profile.findUnique.mockResolvedValue(profile);
+      const cachedBuf = Buffer.from('cached-agreement');
+      redis.get.mockResolvedValue(cachedBuf.toString('base64'));
+      const result = await service.downloadAgreement('p-1');
+      expect(documentService.fillDocumentTemplateAsPdf).not.toHaveBeenCalled();
+      expect(result.buffer).toEqual(cachedBuf);
+    });
+
+    it('stores generated agreement PDF with 30-day TTL on cache miss', async () => {
+      prisma.document.findFirst.mockResolvedValue(template);
+      prisma.profile.findUnique.mockResolvedValue(profile);
+      await service.downloadAgreement('p-1');
+      expect(redis.setex).toHaveBeenCalledWith(
+        expect.stringContaining('pdf:agreement:p-1:doc-1'),
+        30 * 24 * 60 * 60,
+        expect.any(String),
+      );
     });
   });
 });

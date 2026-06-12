@@ -90,8 +90,11 @@ function makeApplicationService(overrides: Record<string, unknown> = {}) {
 function makePrisma(overrides = {}) {
   return {
     profile: { findUnique: jest.fn().mockResolvedValue(null) },
-    jobOffer: { count: jest.fn().mockResolvedValue(0) },
-    application: { count: jest.fn().mockResolvedValue(0) },
+    jobOffer: { count: jest.fn().mockResolvedValue(0), findMany: jest.fn().mockResolvedValue([]) },
+    application: {
+      count: jest.fn().mockResolvedValue(0),
+      findMany: jest.fn().mockResolvedValue([]),
+    },
     penalty: { findMany: jest.fn().mockResolvedValue([]) },
     ...overrides,
   };
@@ -632,28 +635,16 @@ describe('BotCommandsService', () => {
     });
 
     it('calculates completed stats from applications', async () => {
-      applicationService.findByWorker.mockResolvedValue([
+      prisma.application.findMany.mockResolvedValue([
         {
-          id: 'app-1',
-          status: 'ACCEPTED',
           job_offer: {
-            id: 'jo-1',
             title: 'Job',
-            status: 'COMPLETED',
             amount: 15000,
-          },
-        },
-        {
-          id: 'app-2',
-          status: 'PENDING',
-          job_offer: {
-            id: 'jo-2',
-            title: 'Job2',
-            status: 'ACTIVE',
-            amount: 10000,
+            scheduled_at: new Date('2026-05-01'),
           },
         },
       ]);
+      prisma.application.count.mockResolvedValue(1);
       const result = await service.penaltyHistory(workerProfile);
       expect(result).toBeDefined();
     });

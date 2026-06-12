@@ -117,6 +117,17 @@ export class DocumentService {
     if (keys.length > 0) await client.del(...keys);
   }
 
+  private async invalidatePdfCache(templateId: string): Promise<void> {
+    const client = this.redis.getClient();
+    const pattern = `${REDIS_KEY_PREFIX}pdf:*:${templateId}`;
+    let cursor = '0';
+    do {
+      const [next, keys] = await client.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+      if (keys.length) await client.del(...keys);
+      cursor = next;
+    } while (cursor !== '0');
+  }
+
   async createFromGoogleDocs(opts: {
     title: string;
     category: DocumentCategory;
@@ -257,7 +268,7 @@ export class DocumentService {
         ...(dto.category !== undefined && { category: dto.category }),
       },
     });
-    await this.invalidateListCache();
+    await Promise.all([this.invalidateListCache(), this.invalidatePdfCache(id)]);
     return this.mapDocument(doc);
   }
 
@@ -265,7 +276,7 @@ export class DocumentService {
     const existing = await this.prisma.document.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException('Document not found');
     await this.prisma.document.delete({ where: { id } });
-    await this.invalidateListCache();
+    await Promise.all([this.invalidateListCache(), this.invalidatePdfCache(id)]);
   }
 
   /**

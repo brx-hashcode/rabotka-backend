@@ -1,9 +1,8 @@
 import type { BotProfile, BotState } from '../types/bot-state.types';
 import { FLOW_IDS, CMD_MENU } from '../bot.constants';
 import {
-  formatOfferDetail,
+  formatAmount,
   formatOfferDetailWithActions,
-  formatPaymentFlow,
   jobOfferToOfferListItem,
 } from '../messages/offers.messages';
 import { menuMessage } from '../messages/menu.messages';
@@ -23,7 +22,7 @@ export type FlowResult = {
   clearState?: boolean;
 };
 
-type SearchStep = 'ref' | 'detail';
+type SearchStep = 'ref' | 'detail' | 'description';
 
 export function getSearchByRefInitialState(): BotState {
   return {
@@ -38,7 +37,7 @@ export function getSearchByRefPromptMessage(): string {
   return [
     '*Rechercher une offre par référence*',
     '',
-    "Entrez la référence de l'offre (exemple : *RAB-7K3X9*).",
+    "Entrez la référence de l'offre (exemple : *RBT-7K3X9*).",
     '',
     'Tapez *Menu* pour annuler.',
   ].join('\n');
@@ -131,21 +130,12 @@ async function handleDetailApply(
   const fees = await ctx.systemConfigService.getFees();
   const penalty = fees.lateCancellationPenaltyFcfa;
   const cancellationThresholdHours = fees.cancellationThresholdHours;
-  let amountStr = 'Prix à négocier';
-  if (offer.amount != null) {
-    const flowLabel = offer.payment_flow
-      ? formatPaymentFlow(offer.payment_flow)
-      : '';
-    amountStr = flowLabel
-      ? `${offer.amount.toLocaleString('fr-FR')} FCFA ${flowLabel}`
-      : `${offer.amount.toLocaleString('fr-FR')} FCFA`;
-  }
   const text = [
     '*Vous êtes sur le point de postuler*',
     '',
     `*Offre*: ${offer.title}`,
     `*Date*: ${formatOfferDate(offer.scheduled_at)}`,
-    `*Montant*: ${amountStr}`,
+    `*Montant*: ${formatAmount(offer.amount, offer.payment_flow)}`,
     `*Adresse*: ${offer.address}`,
     '',
     '*ENGAGEMENT IMPORTANT*:',
@@ -185,9 +175,24 @@ async function handleDetailStep(
         clearState: true,
       };
     }
+    const descText = [
+      `*${offer.title}*`,
+      '',
+      offer.description,
+      '',
+      '1- Postuler à cette offre',
+      '2- Retour à la fiche',
+      '3- Menu',
+      '',
+      'Tapez le numéro correspondant.',
+    ].join('\n');
     return {
-      reply: [formatOfferDetail(jobOfferToOfferListItem(offer))],
-      nextState: state,
+      reply: [descText],
+      nextState: {
+        ...state,
+        payload: { step: 'description' as SearchStep, offerId },
+        updatedAt: new Date().toISOString(),
+      },
     };
   }
   if (trimmed === '3') {
@@ -203,6 +208,40 @@ async function handleDetailStep(
     reply: [
       'Répondez par 1 (Postuler), 2 (Voir description complète), 3 (Nouvelle référence) ou 4 (Menu).',
     ],
+    nextState: state,
+  };
+}
+
+async function handleDescriptionStep(
+  state: BotState,
+  trimmed: string,
+  profile: BotProfile,
+  ctx: SearchByRefContext,
+): Promise<FlowResult> {
+  const offerId = state.payload?.offerId as string | undefined;
+  if (!offerId) return backToRefPrompt(state);
+
+  // '1' = apply, '2' = back to detail card
+  if (trimmed === '1') {
+    return handleDetailApply(state, offerId, profile, ctx);
+  }
+  if (trimmed === '2') {
+    const offer = await ctx.jobOfferService.findById(offerId);
+    if (!offer) return { reply: ["*Offre introuvable. Tapez *Menu*.*"], clearState: true };
+    return {
+      reply: [formatOfferDetailWithActions(jobOfferToOfferListItem(offer))],
+      nextState: {
+        ...state,
+        payload: { step: 'detail' as SearchStep, offerId },
+        updatedAt: new Date().toISOString(),
+      },
+    };
+  }
+  if (trimmed === '3' || CMD_MENU.some((c) => trimmed.toLowerCase() === c)) {
+    return { reply: [menuMessage(profile.profile_type)], clearState: true };
+  }
+  return {
+    reply: ['Répondez par 1 (Postuler), 2 (Retour à la fiche) ou 3 (Menu).'],
     nextState: state,
   };
 }
@@ -237,6 +276,9 @@ export async function runSearchByRefFlow(
   const step = (state.payload?.step as SearchStep | undefined) ?? 'ref';
   if (step === 'detail') {
     return handleDetailStep(state, trimmed, profile, ctx);
+  }
+  if (step === 'description') {
+    return handleDescriptionStep(state, trimmed, profile, ctx);
   }
   return handleRefStep(state, trimmed, ctx);
 }
