@@ -183,12 +183,53 @@ async function handleDetailStep(params: DetailStepParams): Promise<FlowResult> {
       profile,
       ctx,
     );
+    if (result.clearState) {
+      // Remove the handled item from the list and go back to it,
+      // so the employer can continue processing remaining candidates.
+      const remaining = items.filter((it) => it.id !== applicationId);
+      if (remaining.length === 0) {
+        return {
+          reply: [
+            ...result.reply,
+            '\nAucune autre candidature en attente. Tapez *Menu* pour revenir.',
+          ],
+          clearState: true,
+        };
+      }
+      const newPageIndex = Math.min(
+        pageIndex,
+        Math.max(0, Math.ceil(remaining.length / PAGE_SIZE) - 1),
+      );
+      const slice = remaining.slice(
+        newPageIndex * PAGE_SIZE,
+        newPageIndex * PAGE_SIZE + PAGE_SIZE,
+      );
+      const totalPages = Math.ceil(remaining.length / PAGE_SIZE);
+      const listMsg = formatCandidaturesListPage(
+        slice,
+        remaining.length > (newPageIndex + 1) * PAGE_SIZE,
+        newPageIndex,
+        totalPages,
+      );
+      return {
+        reply: [...result.reply, listMsg],
+        nextState: {
+          ...state,
+          payload: {
+            ...payload,
+            items: remaining,
+            pageIndex: newPageIndex,
+            step: 'list',
+            selectedApplicationId: undefined,
+            selectedItem: undefined,
+          },
+          updatedAt: new Date().toISOString(),
+        },
+      };
+    }
     return {
       reply: result.reply,
-      nextState: result.clearState
-        ? undefined
-        : (result.nextState ?? acceptRefuseState),
-      clearState: result.clearState,
+      nextState: result.nextState ?? acceptRefuseState,
     };
   }
 

@@ -30,6 +30,9 @@ export type PollPaymentStatusJobData = {
   gateway?: string;
 };
 
+const MAX_POLL_ATTEMPTS = 48;
+const MIN_POLL_INTERVAL_MS = 5_000;
+
 // Minimal interface to break the circular dep: processor → service (without service → processor)
 export interface IProcessApprovedPayment {
   processApprovedPaymentById(
@@ -60,8 +63,9 @@ export class PollPaymentStatusProcessor {
     id?: string;
     data: PollPaymentStatusJobData;
   }): Promise<void> {
-    const { requestId, token, gatewayRef, attempt, maxAttempts, intervalMs } =
-      job.data;
+    const { requestId, token, gatewayRef, attempt } = job.data;
+    const maxAttempts = Math.min(job.data.maxAttempts, MAX_POLL_ATTEMPTS);
+    const intervalMs = Math.max(job.data.intervalMs, MIN_POLL_INTERVAL_MS);
 
     this.logger.log(
       `Poll attempt ${attempt}/${maxAttempts} for request ${requestId} (gatewayRef: ${gatewayRef})`,
