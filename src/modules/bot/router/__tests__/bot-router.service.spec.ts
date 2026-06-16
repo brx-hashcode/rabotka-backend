@@ -136,7 +136,10 @@ describe('BotRouterService', () => {
 
     it('routes worker "3" to recommended_jobs', () => {
       const result = service.route('3', workerProfile, null);
-      expect(result).toEqual({ type: 'command', commandId: 'recommended_jobs' });
+      expect(result).toEqual({
+        type: 'command',
+        commandId: 'recommended_jobs',
+      });
     });
 
     it('routes worker "4" to search_by_ref', () => {
@@ -156,7 +159,10 @@ describe('BotRouterService', () => {
 
     it('routes employer "2" to candidatures_received', () => {
       const result = service.route('2', employerProfile, null);
-      expect(result).toEqual({ type: 'command', commandId: 'candidatures_received' });
+      expect(result).toEqual({
+        type: 'command',
+        commandId: 'candidatures_received',
+      });
     });
 
     it('routes employer "3" to my_offers', () => {

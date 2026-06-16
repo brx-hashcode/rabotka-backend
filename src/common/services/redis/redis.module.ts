@@ -107,21 +107,17 @@ export class RedisModule {
             });
 
             redis.on('reconnecting', (delay: number) => {
-              RedisModule.logger.debug(
-                `Redis reconnecting in ${delay}ms`,
-              );
+              RedisModule.logger.debug(`Redis reconnecting in ${delay}ms`);
             });
 
             // App-level PING heartbeat — keeps the connection warm
             // even when the app is idle (cron pauses, low traffic).
             const heartbeat = setInterval(() => {
-              redis
-                .ping()
-                .catch(() => {
-                  // ioredis will surface the failure via 'error'; no need
-                  // to log twice. We swallow here to keep the interval
-                  // alive.
-                });
+              redis.ping().catch(() => {
+                // ioredis will surface the failure via 'error'; no need
+                // to log twice. We swallow here to keep the interval
+                // alive.
+              });
             }, RedisModule.HEARTBEAT_MS);
             // Don't keep the process alive just for the heartbeat.
             heartbeat.unref();

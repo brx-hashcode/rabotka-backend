@@ -5,7 +5,11 @@ import { fetchWithTimeout } from '../../common/utils/fetch-with-timeout.util';
 export class GoogleDocsService {
   async exportGoogleDocAsDocx(googleDocsId: string): Promise<Buffer> {
     const exportUrl = `https://docs.google.com/feeds/download/documents/export/Export?id=${googleDocsId}&exportFormat=docx`;
-    const res = await fetchWithTimeout(exportUrl, { redirect: 'follow' }, 15_000);
+    const res = await fetchWithTimeout(
+      exportUrl,
+      { redirect: 'follow' },
+      15_000,
+    );
     if (!res.ok) {
       throw new BadRequestException(
         `Could not export Google Doc (HTTP ${res.status}). Make sure the document is set to "Anyone with the link can view".`,

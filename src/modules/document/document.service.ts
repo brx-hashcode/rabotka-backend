@@ -122,7 +122,13 @@ export class DocumentService {
     const pattern = `${REDIS_KEY_PREFIX}pdf:*:${templateId}`;
     let cursor = '0';
     do {
-      const [next, keys] = await client.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+      const [next, keys] = await client.scan(
+        cursor,
+        'MATCH',
+        pattern,
+        'COUNT',
+        100,
+      );
       if (keys.length) await client.del(...keys);
       cursor = next;
     } while (cursor !== '0');
@@ -144,7 +150,11 @@ export class DocumentService {
     const exportUrl = `https://docs.google.com/feeds/download/documents/export/Export?id=${googleDocsId}&exportFormat=docx`;
     let docxBuffer: Buffer;
     try {
-      const res = await fetchWithTimeout(exportUrl, { redirect: 'follow' }, 15_000);
+      const res = await fetchWithTimeout(
+        exportUrl,
+        { redirect: 'follow' },
+        15_000,
+      );
       if (!res.ok) {
         throw new BadRequestException(
           `Could not download Google Doc (HTTP ${res.status}). Make sure the document is set to "Anyone with the link can view".`,
@@ -268,7 +278,10 @@ export class DocumentService {
         ...(dto.category !== undefined && { category: dto.category }),
       },
     });
-    await Promise.all([this.invalidateListCache(), this.invalidatePdfCache(id)]);
+    await Promise.all([
+      this.invalidateListCache(),
+      this.invalidatePdfCache(id),
+    ]);
     return this.mapDocument(doc);
   }
 
@@ -276,7 +289,10 @@ export class DocumentService {
     const existing = await this.prisma.document.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException('Document not found');
     await this.prisma.document.delete({ where: { id } });
-    await Promise.all([this.invalidateListCache(), this.invalidatePdfCache(id)]);
+    await Promise.all([
+      this.invalidateListCache(),
+      this.invalidatePdfCache(id),
+    ]);
   }
 
   /**

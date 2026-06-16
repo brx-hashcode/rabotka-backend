@@ -25,7 +25,7 @@ export async function runRateAssignmentFlow(
     CMD_MENU.some((c) => normalized === c || normalized.startsWith(c + ' '))
   ) {
     return {
-      reply: ["Tapez *Menu* pour revenir au menu principal."],
+      reply: ['Tapez *Menu* pour revenir au menu principal.'],
       clearState: true,
     };
   }
@@ -51,16 +51,18 @@ export async function runRateAssignmentFlow(
 
   if (!assignment) {
     return {
-      reply: ["❌ Mission introuvable. Tapez *Menu*."],
+      reply: ['❌ Mission introuvable. Tapez *Menu*.'],
       clearState: true,
     };
   }
 
   const isWorker = assignment.worker_id === profile.id;
-  const isEmployer = assignment.job_offer.employer_id === profile.id;
+  const isEmployer = assignment.job_offer?.employer_id === profile.id;
   if (!isWorker && !isEmployer) {
     return {
-      reply: ["❌ Vous n'êtes pas autorisé à évaluer cette mission. Tapez *Menu*."],
+      reply: [
+        "❌ Vous n'êtes pas autorisé à évaluer cette mission. Tapez *Menu*.",
+      ],
       clearState: true,
     };
   }

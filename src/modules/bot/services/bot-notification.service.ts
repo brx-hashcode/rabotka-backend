@@ -408,7 +408,12 @@ export class BotNotificationService {
       const [profile, offer] = await Promise.all([
         this.prisma.profile.findUnique({
           where: { id: workerId },
-          select: { phone: true, first_name: true, status: true, profile_type: true },
+          select: {
+            phone: true,
+            first_name: true,
+            status: true,
+            profile_type: true,
+          },
         }),
         this.prisma.jobOffer.findUnique({
           where: { id: jobOfferId },
@@ -422,10 +427,15 @@ export class BotNotificationService {
         }),
       ]);
       if (!profile?.phone || !offer) return;
-      if (profile.profile_type !== 'WORKER' || profile.status !== 'ACTIVE') return;
+      if (profile.profile_type !== 'WORKER' || profile.status !== 'ACTIVE')
+        return;
 
       const applyState = getApplyJobNotificationState(jobOfferId);
-      const stateSet = await this.botState.setIfFlowAbsentOrMatches(workerId, applyState, null);
+      const stateSet = await this.botState.setIfFlowAbsentOrMatches(
+        workerId,
+        applyState,
+        null,
+      );
       if (!stateSet) return;
 
       const dateStr = offer.scheduled_at.toLocaleDateString('fr-FR', {

@@ -108,7 +108,12 @@ export class InterestRecommendationService {
       }),
       this.prisma.jobOffer.findMany({
         where: { id: { in: results.map((r) => r.jobId) } },
-        select: { id: true, latitude: true, longitude: true, scheduled_at: true },
+        select: {
+          id: true,
+          latitude: true,
+          longitude: true,
+          scheduled_at: true,
+        },
       }),
     ]);
 
@@ -214,7 +219,10 @@ export class InterestRecommendationService {
     const blendedVector = blendVectors(positiveVectors);
     const filter = this.buildJobFilter(seenJobIds, knownCategories);
     // Dynamic prefetch: proportional to requested limit, avoids over-fetching
-    const poolSize = Math.max(requestedLimit * EXPLORE_POOL_FACTOR, MIN_PREFETCH);
+    const poolSize = Math.max(
+      requestedLimit * EXPLORE_POOL_FACTOR,
+      MIN_PREFETCH,
+    );
 
     try {
       const results = await this.qdrant.recommendDense(

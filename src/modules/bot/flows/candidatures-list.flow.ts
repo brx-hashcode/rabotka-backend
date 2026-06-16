@@ -172,7 +172,7 @@ async function handleDetailStep(params: DetailStepParams): Promise<FlowResult> {
     const applicationId = selectedItem?.id;
     if (!applicationId) {
       return {
-        reply: ["❌ Erreur. Tapez *Menu*."],
+        reply: ['❌ Erreur. Tapez *Menu*.'],
         clearState: true,
       };
     }
@@ -322,7 +322,7 @@ export async function runCandidaturesListFlow(
 
   if (items.length === 0) {
     return {
-      reply: ["Aucune candidature reçue. Tapez *Menu*."],
+      reply: ['Aucune candidature reçue. Tapez *Menu*.'],
       clearState: true,
     };
   }

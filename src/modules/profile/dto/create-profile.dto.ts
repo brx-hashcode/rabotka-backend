@@ -92,14 +92,16 @@ export class CreateProfileDto {
   readAndApprovedPolicies: boolean;
 
   @ApiProperty({
-    description: 'URL of the KYC identity document, pre-uploaded via POST /profile/kyc-upload',
+    description:
+      'URL of the KYC identity document, pre-uploaded via POST /profile/kyc-upload',
   })
   @IsString()
   @IsNotEmpty()
   kycDocumentUrl: string;
 
   @ApiProperty({
-    description: 'URL of the KYC selfie, pre-uploaded via POST /profile/kyc-upload',
+    description:
+      'URL of the KYC selfie, pre-uploaded via POST /profile/kyc-upload',
   })
   @IsString()
   @IsNotEmpty()

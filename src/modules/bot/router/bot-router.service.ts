@@ -61,7 +61,8 @@ function matchWorkerNumeric(trimmed: string): string | null {
   if (trimmed === WORKER_MENU_OPTIONS.LIST_OFFERS) return 'list_offers';
   if (trimmed === WORKER_MENU_OPTIONS.SEARCH_BY_REF) return 'search_by_ref';
   if (trimmed === WORKER_MENU_OPTIONS.MY_APPLICATIONS) return 'my_applications';
-  if (trimmed === WORKER_MENU_OPTIONS.RECOMMENDED_JOBS) return 'recommended_jobs';
+  if (trimmed === WORKER_MENU_OPTIONS.RECOMMENDED_JOBS)
+    return 'recommended_jobs';
   if (trimmed === WORKER_MENU_OPTIONS.PROFILE) return 'profile';
   if (trimmed === WORKER_MENU_OPTIONS.HELP) return 'help';
   return null;

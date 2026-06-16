@@ -16,7 +16,11 @@ import { WalletModule } from '../wallet/wallet.module';
     forwardRef(() => WalletModule),
   ],
   controllers: [WhatsAppController],
-  providers: [WhatsAppService, WhatsAppOutboundProcessor, WhatsAppInboundProcessor],
+  providers: [
+    WhatsAppService,
+    WhatsAppOutboundProcessor,
+    WhatsAppInboundProcessor,
+  ],
   exports: [WhatsAppService],
 })
 export class WhatsAppModule {}

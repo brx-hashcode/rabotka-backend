@@ -454,7 +454,6 @@ describe('DocumentService', () => {
      * `loadDocxTemplateBuffer` would return after fetching from storage.
      */
     function buildDocxWithPlaceholders(body: string): Buffer {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
       const PizZip = require('pizzip');
       const zip = new PizZip();
 
@@ -467,27 +466,33 @@ describe('DocumentService', () => {
           '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>' +
           '</Types>',
       );
-      zip.folder('_rels').file(
-        '.rels',
-        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
-          '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
-          '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>' +
-          '</Relationships>',
-      );
-      zip.folder('word').file(
-        'document.xml',
-        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
-          '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
-          '<w:body><w:p><w:r><w:t xml:space="preserve">' +
-          body +
-          '</w:t></w:r></w:p></w:body></w:document>',
-      );
+      zip
+        .folder('_rels')
+        .file(
+          '.rels',
+          '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>' +
+            '</Relationships>',
+        );
+      zip
+        .folder('word')
+        .file(
+          'document.xml',
+          '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+            '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+            '<w:body><w:p><w:r><w:t xml:space="preserve">' +
+            body +
+            '</w:t></w:r></w:p></w:body></w:document>',
+        );
       return zip.generate({ type: 'nodebuffer' });
     }
 
     it('renders a valid .docx with all tags supplied', async () => {
       mockPrisma.document.findUnique.mockResolvedValue(baseDoc);
-      const buffer = buildDocxWithPlaceholders('Hello [name], today is [date].');
+      const buffer = buildDocxWithPlaceholders(
+        'Hello [name], today is [date].',
+      );
       // Service fetches the file_url via global.fetch in
       // loadDocxTemplateBuffer for UPLOAD source.
       mockFetch.mockResolvedValue({
@@ -511,7 +516,7 @@ describe('DocumentService', () => {
       expect(result.length).toBeGreaterThan(0);
 
       // The rendered output is itself a zip — inspect its document.xml
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
+
       const PizZip = require('pizzip');
       const out = new PizZip(result);
       const xml = out.file('word/document.xml')!.asText();
@@ -541,7 +546,7 @@ describe('DocumentService', () => {
 
       const result = await service.fillDocumentTemplate('doc-1', {});
       expect(Buffer.isBuffer(result)).toBe(true);
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
+
       const PizZip = require('pizzip');
       const xml = new PizZip(result).file('word/document.xml')!.asText();
       expect(xml).not.toContain('[name]');
@@ -563,10 +568,12 @@ describe('DocumentService', () => {
         name: 'Bob',
       });
 
-      expect(mockGoogleDocs.exportGoogleDocAsDocx).toHaveBeenCalledWith('gid-123');
+      expect(mockGoogleDocs.exportGoogleDocAsDocx).toHaveBeenCalledWith(
+        'gid-123',
+      );
       // Should not have fallen back to fetch
       expect(mockFetch).not.toHaveBeenCalled();
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
+
       const PizZip = require('pizzip');
       const xml = new PizZip(result).file('word/document.xml')!.asText();
       expect(xml).toContain('Bob');
@@ -588,7 +595,7 @@ describe('DocumentService', () => {
       });
 
       const result = await service.fillDocumentTemplate('doc-1', {});
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
+
       const PizZip = require('pizzip');
       const xml = new PizZip(result).file('word/document.xml')!.asText();
       expect(xml).toContain('Static text only.');

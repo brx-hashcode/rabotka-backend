@@ -1,5 +1,12 @@
 import { Transform } from 'class-transformer';
-import { IsString, IsOptional, MaxLength, IsArray, IsUUID, ArrayMaxSize } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  MaxLength,
+  IsArray,
+  IsUUID,
+  ArrayMaxSize,
+} from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class UpdateProfileDto {

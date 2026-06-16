@@ -117,39 +117,23 @@ async function handleWalletConfirmationStep(
   // Fetch penalty IDs before marking paid so we can link them to the invoice
   const unpaid = await ctx.applicationService.getUnpaidPenalties(profile.id);
 
-  await ctx.walletService.debitProfileWallet(
+  // Mark penalties paid before touching the wallet — if the debit fails the
+  // user retries and we re-check balance, but at least no money is lost.
+  const result = await ctx.applicationService.markPenaltiesPaid(profile.id);
+
+  // Atomic debit of profile wallet + credit of system wallet in one transaction
+  await ctx.walletService.debitProfileAndCreditSystem(
     profile.id,
     totalAmount,
     WalletTransactionType.PENALTY_DEBIT,
+    WalletTransactionType.CREDIT_PENALTY,
     'penalty_batch',
     profile.id,
   );
-  const result = await ctx.applicationService.markPenaltiesPaid(profile.id);
 
-  // Create Payment record, credit system wallet, and issue invoice
+  // Create Payment record and issue invoice
   const reference = generatePaymentReference();
   const token = randomUUID();
-
-  const systemWallet = await ctx.walletService.getOrCreateSystemWallet();
-  const profileWallet = await ctx.walletService.getOrCreateProfileWallet(
-    profile.id,
-  );
-
-  await ctx.prisma.$transaction([
-    ctx.prisma.walletTransaction.create({
-      data: {
-        wallet_id: systemWallet.id,
-        type: WalletTransactionType.CREDIT_PENALTY,
-        amount: totalAmount,
-        reference_type: 'penalty_batch',
-        reference_id: profile.id,
-      },
-    }),
-    ctx.prisma.wallet.update({
-      where: { id: systemWallet.id },
-      data: { balance: { increment: totalAmount } },
-    }),
-  ]);
 
   const paymentRequest = await ctx.prisma.paymentRequest.create({
     data: {

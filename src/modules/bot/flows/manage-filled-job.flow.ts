@@ -88,7 +88,7 @@ async function handleDetailComplete(
           '',
           amountLine,
           '',
-          "Tapez *Menu* pour revenir.",
+          'Tapez *Menu* pour revenir.',
         ].join('\n'),
       ],
       clearState: true,
@@ -123,7 +123,7 @@ async function handleDetailCancel(
         [
           "*Mission annulée. L'offre est de nouveau ouverte aux candidatures.*",
           '',
-          "Tapez *Menu* pour revenir.",
+          'Tapez *Menu* pour revenir.',
         ].join('\n'),
       ],
       clearState: true,
@@ -250,7 +250,8 @@ function handleListStep(
   const menuIdx = PAGE_SIZE + 2;
   if (choice === nextPageIdx && hasMore)
     return buildListPage(state, items, pageIndex + 1);
-  if (choice === menuIdx) return { reply: [menuMessage(profile.profile_type)], clearState: true };
+  if (choice === menuIdx)
+    return { reply: [menuMessage(profile.profile_type)], clearState: true };
 
   return {
     reply: [

@@ -225,7 +225,7 @@ export class BotCommandsService {
     if (profile.profile_type !== 'EMPLOYER') {
       return {
         message:
-          "❌ Seuls les employeurs peuvent voir leurs offres. Tapez *Menu* pour revenir.",
+          '❌ Seuls les employeurs peuvent voir leurs offres. Tapez *Menu* pour revenir.',
         offerIds: [],
       };
     }
@@ -237,8 +237,7 @@ export class BotCommandsService {
       });
     if (total === 0) {
       return {
-        message:
-          "Vous n'avez publié aucune offre. Tapez *Menu* pour revenir.",
+        message: "Vous n'avez publié aucune offre. Tapez *Menu* pour revenir.",
         offerIds: [],
       };
     }
@@ -282,7 +281,8 @@ export class BotCommandsService {
   }> {
     if (profile.profile_type !== 'EMPLOYER') {
       return {
-        message: "❌ Seuls les employeurs peuvent voir les candidatures reçues.",
+        message:
+          '❌ Seuls les employeurs peuvent voir les candidatures reçues.',
       };
     }
     const offers = await this.jobOfferService.findByEmployerId(profile.id);
@@ -334,7 +334,7 @@ export class BotCommandsService {
     }
     if (allItems.length === 0) {
       return {
-        message: "Aucune candidature en attente pour vos offres. Tapez *Menu*.",
+        message: 'Aucune candidature en attente pour vos offres. Tapez *Menu*.',
       };
     }
     const applicationIds = allItems.map((a) => a.id);
@@ -354,7 +354,7 @@ export class BotCommandsService {
   }> {
     if (profile.profile_type !== 'EMPLOYER') {
       return {
-        message: "❌ Seuls les employeurs peuvent voir les missions pourvues.",
+        message: '❌ Seuls les employeurs peuvent voir les missions pourvues.',
       };
     }
     const offers = await this.jobOfferService.findByEmployerId(profile.id);
@@ -390,7 +390,7 @@ export class BotCommandsService {
     if (items.length === 0) {
       return {
         message:
-          "Aucune mission pourvue pour le moment. Tapez *Menu* pour revenir.",
+          'Aucune mission pourvue pour le moment. Tapez *Menu* pour revenir.',
       };
     }
     const firstPage = items.slice(0, 5);
@@ -413,7 +413,7 @@ export class BotCommandsService {
       },
     });
 
-    if (!profileData) return "Profil non trouvé. Tapez *Menu*.";
+    if (!profileData) return 'Profil non trouvé. Tapez *Menu*.';
 
     const walletBalance = await this.walletService
       .getProfileWalletBalance(profile.id)
@@ -467,10 +467,6 @@ export class BotCommandsService {
         a.status === ApplicationStatus.ACCEPTED &&
         a.job_offer?.status === JobOfferStatus.COMPLETED,
     );
-    const totalEarnings = completed.reduce(
-      (sum, a) => sum + (a.job_offer?.amount ?? 0),
-      0,
-    );
     const completionRate =
       applications.length > 0
         ? Math.round((completed.length / applications.length) * 100)
@@ -485,7 +481,6 @@ export class BotCommandsService {
       reliabilityScore: profileData.reliability_score,
       memberSince: profileData.created_at,
       completedMissions: completed.length,
-      totalEarnings,
       completionRate,
       totalPenalties,
       lateCancellations: lateCount,
@@ -500,62 +495,74 @@ export class BotCommandsService {
   async penaltyHistory(profile: BotProfile): Promise<string> {
     const isEmployer = profile.profile_type === 'EMPLOYER';
 
-    const [penalties, completedMissionItems, completedCount] = await Promise.all([
-      this.prisma.penalty.findMany({
-        where: { profile_id: profile.id },
-        orderBy: { applied_at: 'desc' },
-        include: {
-          application: { include: { job_offer: true } },
-        },
-      }),
-      isEmployer
-        ? this.prisma.jobOffer
-            .findMany({
-              where: { employer_id: profile.id, status: JobOfferStatus.COMPLETED },
-              select: { title: true, scheduled_at: true, amount: true },
-              orderBy: { scheduled_at: 'desc' },
-              take: 10,
+    const [penalties, completedMissionItems, completedCount] =
+      await Promise.all([
+        this.prisma.penalty.findMany({
+          where: { profile_id: profile.id },
+          orderBy: { applied_at: 'desc' },
+          include: {
+            application: { include: { job_offer: true } },
+          },
+        }),
+        isEmployer
+          ? this.prisma.jobOffer
+              .findMany({
+                where: {
+                  employer_id: profile.id,
+                  status: JobOfferStatus.COMPLETED,
+                },
+                select: { title: true, scheduled_at: true, amount: true },
+                orderBy: { scheduled_at: 'desc' },
+                take: 10,
+              })
+              .then((rows) =>
+                rows.map((o) => ({
+                  title: o.title,
+                  scheduled_at: o.scheduled_at,
+                  amount: o.amount != null ? Number(o.amount) : null,
+                })),
+              )
+          : this.prisma.application
+              .findMany({
+                where: {
+                  worker_id: profile.id,
+                  status: ApplicationStatus.ACCEPTED,
+                  job_offer: { status: JobOfferStatus.COMPLETED },
+                },
+                select: {
+                  created_at: true,
+                  job_offer: {
+                    select: { title: true, scheduled_at: true, amount: true },
+                  },
+                },
+                orderBy: { created_at: 'desc' },
+                take: 10,
+              })
+              .then((rows) =>
+                rows.map((a) => ({
+                  title: a.job_offer.title,
+                  scheduled_at: a.job_offer.scheduled_at,
+                  amount:
+                    a.job_offer.amount != null
+                      ? Number(a.job_offer.amount)
+                      : null,
+                })),
+              ),
+        isEmployer
+          ? this.prisma.jobOffer.count({
+              where: {
+                employer_id: profile.id,
+                status: JobOfferStatus.COMPLETED,
+              },
             })
-            .then((rows) =>
-              rows.map((o) => ({
-                title: o.title,
-                scheduled_at: o.scheduled_at,
-                amount: o.amount != null ? Number(o.amount) : null,
-              })),
-            )
-        : this.prisma.application
-            .findMany({
+          : this.prisma.application.count({
               where: {
                 worker_id: profile.id,
                 status: ApplicationStatus.ACCEPTED,
                 job_offer: { status: JobOfferStatus.COMPLETED },
               },
-              select: {
-                created_at: true,
-                job_offer: { select: { title: true, scheduled_at: true, amount: true } },
-              },
-              orderBy: { created_at: 'desc' },
-              take: 10,
-            })
-            .then((rows) =>
-              rows.map((a) => ({
-                title: a.job_offer!.title,
-                scheduled_at: a.job_offer!.scheduled_at,
-                amount: a.job_offer!.amount != null ? Number(a.job_offer!.amount) : null,
-              })),
-            ),
-      isEmployer
-        ? this.prisma.jobOffer.count({
-            where: { employer_id: profile.id, status: JobOfferStatus.COMPLETED },
-          })
-        : this.prisma.application.count({
-            where: {
-              worker_id: profile.id,
-              status: ApplicationStatus.ACCEPTED,
-              job_offer: { status: JobOfferStatus.COMPLETED },
-            },
-          }),
-    ]);
+            }),
+      ]);
 
     const totalAmount = penalties.reduce((s, p) => s + Number(p.amount), 0);
     const score = profile.reliability_score ?? 100;

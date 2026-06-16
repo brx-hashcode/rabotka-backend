@@ -34,11 +34,9 @@ export class ContactUnlockScheduler implements OnModuleInit {
 
     try {
       const queue = this.queueService.getQueue(CONTACT_UNLOCK_QUEUE);
-      await queue.add(
-        'scan',
-        { type: 'scan' } satisfies ContactUnlockJobData,
-        { repeat: { every: SCAN_INTERVAL_MS } },
-      );
+      await queue.add('scan', { type: 'scan' } satisfies ContactUnlockJobData, {
+        repeat: { every: SCAN_INTERVAL_MS },
+      });
       this.logger.log(
         `ContactUnlockScheduler ready — scan every ${SCAN_INTERVAL_MS / 60000} min`,
       );

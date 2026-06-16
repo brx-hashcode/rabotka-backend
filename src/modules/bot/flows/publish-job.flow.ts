@@ -199,7 +199,7 @@ async function handleStep10Confirm(
   }
   if (normalized === '3' || normalized === 'annuler') {
     return {
-      reply: ["Publication annulée. Tapez *Menu* pour revenir au menu."],
+      reply: ['Publication annulée. Tapez *Menu* pour revenir au menu.'],
       clearState: true,
     };
   }
@@ -250,7 +250,7 @@ export async function runPublishJobFlow(
   if (profile.profile_type !== 'EMPLOYER') {
     return {
       reply: [
-        "❌ Seuls les employeurs peuvent publier des offres. Votre compte est de type Worker. Tapez *Menu* pour voir les options.",
+        '❌ Seuls les employeurs peuvent publier des offres. Votre compte est de type Worker. Tapez *Menu* pour voir les options.',
       ],
       clearState: true,
     };
@@ -264,7 +264,7 @@ export async function runPublishJobFlow(
     normalized === 'cancel'
   ) {
     return {
-      reply: ["Publication annulée. Tapez *Menu* pour revenir au menu."],
+      reply: ['Publication annulée. Tapez *Menu* pour revenir au menu.'],
       clearState: true,
     };
   }

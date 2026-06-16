@@ -47,9 +47,7 @@ function expiredPrompt(title?: string): string {
   return [
     `*⏰ Offre expirée*`,
     '',
-    title
-      ? `Votre offre *"${title}"* a expiré.`
-      : 'Votre offre a expiré.',
+    title ? `Votre offre *"${title}"* a expiré.` : 'Votre offre a expiré.',
     '',
     `Que souhaitez-vous faire ?`,
     '',

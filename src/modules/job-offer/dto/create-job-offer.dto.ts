@@ -5,6 +5,7 @@ import {
   IsInt,
   IsEnum,
   IsOptional,
+  IsDateString,
   Min,
   Max,
   MinLength,
@@ -31,7 +32,7 @@ export class CreateJobOfferDto {
   description!: string;
 
   @ApiProperty({ example: '2026-02-15T09:00:00.000Z' })
-  @IsString()
+  @IsDateString()
   scheduled_at!: string;
 
   @ApiPropertyOptional({

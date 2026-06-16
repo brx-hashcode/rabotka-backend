@@ -93,7 +93,6 @@ describe('formatProfileStats', () => {
     reliabilityScore: 85,
     memberSince: date,
     completedMissions: 12,
-    totalEarnings: 120000,
     completionRate: 90,
     totalPenalties: 5000,
     lateCancellations: 1,

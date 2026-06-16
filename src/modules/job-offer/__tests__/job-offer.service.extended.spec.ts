@@ -97,7 +97,10 @@ describe('JobOfferService (extended)', () => {
             findMatchingWorkersForJob: jest.fn().mockResolvedValue([]),
           },
         },
-        { provide: REDIS_CONNECTION, useValue: { set: jest.fn().mockResolvedValue(null) } },
+        {
+          provide: REDIS_CONNECTION,
+          useValue: { set: jest.fn().mockResolvedValue(null) },
+        },
         {
           provide: GeocodingService,
           useValue: { geocode: jest.fn().mockResolvedValue(null) },

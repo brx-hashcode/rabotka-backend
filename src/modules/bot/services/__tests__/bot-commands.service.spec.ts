@@ -71,17 +71,21 @@ function adaptToPaginated(rows: any[]) {
 
 function makeApplicationService(overrides: Record<string, unknown> = {}) {
   return {
-    findByWorker: jest.fn().mockImplementation((_id, opts) =>
-      opts && (opts as { page?: number }).page !== undefined
-        ? emptyPaginated()
-        : Promise.resolve([]),
-    ),
+    findByWorker: jest
+      .fn()
+      .mockImplementation((_id, opts) =>
+        opts && (opts as { page?: number }).page !== undefined
+          ? emptyPaginated()
+          : Promise.resolve([]),
+      ),
     findByJobOffer: jest.fn().mockResolvedValue([]),
-    findByEmployer: jest.fn().mockImplementation((_id, opts) =>
-      opts && (opts as { page?: number }).page !== undefined
-        ? emptyPaginated()
-        : Promise.resolve([]),
-    ),
+    findByEmployer: jest
+      .fn()
+      .mockImplementation((_id, opts) =>
+        opts && (opts as { page?: number }).page !== undefined
+          ? emptyPaginated()
+          : Promise.resolve([]),
+      ),
     markAsViewed: jest.fn().mockResolvedValue(undefined),
     ...overrides,
   };
@@ -90,7 +94,10 @@ function makeApplicationService(overrides: Record<string, unknown> = {}) {
 function makePrisma(overrides = {}) {
   return {
     profile: { findUnique: jest.fn().mockResolvedValue(null) },
-    jobOffer: { count: jest.fn().mockResolvedValue(0), findMany: jest.fn().mockResolvedValue([]) },
+    jobOffer: {
+      count: jest.fn().mockResolvedValue(0),
+      findMany: jest.fn().mockResolvedValue([]),
+    },
     application: {
       count: jest.fn().mockResolvedValue(0),
       findMany: jest.fn().mockResolvedValue([]),

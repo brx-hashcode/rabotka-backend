@@ -286,8 +286,7 @@ export class ApplicationService {
   }): Prisma.ApplicationWhereInput {
     const where: Prisma.ApplicationWhereInput = {};
     if (args.workerId) where.worker_id = args.workerId;
-    if (args.employerId)
-      where.job_offer = { employer_id: args.employerId };
+    if (args.employerId) where.job_offer = { employer_id: args.employerId };
     if (args.status) {
       where.status = args.status;
     } else if (args.statusIn && args.statusIn.length > 0) {
@@ -584,7 +583,9 @@ export class ApplicationService {
           where: {
             job_offer_id: application.job_offer_id,
             id: { not: applicationId },
-            status: { in: [ApplicationStatus.PENDING, ApplicationStatus.VIEWED] },
+            status: {
+              in: [ApplicationStatus.PENDING, ApplicationStatus.VIEWED],
+            },
           },
           select: { id: true },
         });
@@ -781,7 +782,6 @@ export class ApplicationService {
             cancelled_at: now,
           },
         });
-
       }
 
       if (applyPenalty) {
@@ -1037,7 +1037,12 @@ export class ApplicationService {
     applicationId: string,
     application: {
       job_offer_id: string;
-      worker: { id: string; phone: string; first_name: string; last_name: string };
+      worker: {
+        id: string;
+        phone: string;
+        first_name: string;
+        last_name: string;
+      };
       job_offer: { title: string; employer_id: string };
     },
   ): Promise<void> {
@@ -1046,7 +1051,13 @@ export class ApplicationService {
 
     const employer = await this.prisma.profile.findUnique({
       where: { id: employerId },
-      select: { id: true, phone: true, first_name: true, last_name: true, whatsapp_connected: true },
+      select: {
+        id: true,
+        phone: true,
+        first_name: true,
+        last_name: true,
+        whatsapp_connected: true,
+      },
     });
     const employerLabel = employer
       ? `${employer.first_name} ${employer.last_name}`.trim()
@@ -1074,14 +1085,18 @@ export class ApplicationService {
 
     // Fall back to the single assignment if the bulk query finds nothing
     // (e.g. race between this call and the transaction commit).
-    const effectiveAssignments = assignments.length > 0
-      ? assignments
-      : await this.prisma.assignment
-          .findUnique({
-            where: { application_id: applicationId },
-            select: { id: true, application: { select: { worker: { select: workerSelect } } } },
-          })
-          .then((a) => (a ? [a] : []));
+    const effectiveAssignments =
+      assignments.length > 0
+        ? assignments
+        : await this.prisma.assignment
+            .findUnique({
+              where: { application_id: applicationId },
+              select: {
+                id: true,
+                application: { select: { worker: { select: workerSelect } } },
+              },
+            })
+            .then((a) => (a ? [a] : []));
 
     for (const asgn of effectiveAssignments) {
       const worker = asgn.application?.worker ?? null;
@@ -1099,7 +1114,10 @@ export class ApplicationService {
             jobTitle,
           })
           .catch((err: unknown) =>
-            console.warn(`[ApplicationService] sendRatingRequest (worker ${worker.id}) failed:`, err),
+            console.warn(
+              `[ApplicationService] sendRatingRequest (worker ${worker.id}) failed:`,
+              err,
+            ),
           );
       }
 
@@ -1116,7 +1134,10 @@ export class ApplicationService {
             jobTitle,
           })
           .catch((err: unknown) =>
-            console.warn(`[ApplicationService] sendRatingRequest (employer for worker ${worker.id}) failed:`, err),
+            console.warn(
+              `[ApplicationService] sendRatingRequest (employer for worker ${worker.id}) failed:`,
+              err,
+            ),
           );
       }
     }
