@@ -59,9 +59,7 @@ export class AdTargetingService {
         : Prisma.empty;
 
     const profileTypesLiteral = Prisma.join(
-      profileTypes.map(
-        (t) => Prisma.sql`${Prisma.raw(`'${t}'::"ProfileType"`)}`,
-      ),
+      profileTypes.map((t) => Prisma.sql`${t}::"ProfileType"`),
     );
 
     const profiles = await this.prisma.$queryRaw<

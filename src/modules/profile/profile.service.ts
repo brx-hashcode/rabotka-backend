@@ -1024,9 +1024,12 @@ export class ProfileService {
     return { data, total, page, limit };
   }
 
-  async createProfile(
-    createProfileDto: CreateProfileDto,
-  ): Promise<{ message: string; profileId: string; profileType: ProfileType; creditedBalance: number }> {
+  async createProfile(createProfileDto: CreateProfileDto): Promise<{
+    message: string;
+    profileId: string;
+    profileType: ProfileType;
+    creditedBalance: number;
+  }> {
     try {
       const profile = await this.createProfileWithDocuments(createProfileDto);
 
@@ -1038,7 +1041,10 @@ export class ProfileService {
       const creditedBalance = await this.walletService
         .grantWelcomeCredit(profile.id, createProfileDto.profileType)
         .catch((err) => {
-          this.logger.warn(`Welcome credit grant failed for profile=${profile.id}`, err);
+          this.logger.warn(
+            `Welcome credit grant failed for profile=${profile.id}`,
+            err,
+          );
           return 0;
         });
 
@@ -1089,7 +1095,12 @@ export class ProfileService {
         timestamp: new Date().toISOString(),
       });
 
-      return { message: 'Profil créé avec succès', profileId: profile.id, profileType: createProfileDto.profileType, creditedBalance };
+      return {
+        message: 'Profil créé avec succès',
+        profileId: profile.id,
+        profileType: createProfileDto.profileType,
+        creditedBalance,
+      };
     } catch (error: any) {
       this.handleCreateProfileError(error);
     }
@@ -1357,7 +1368,10 @@ export class ProfileService {
     const cached = await this.redis.get(cacheKey);
     if (cached) {
       // Still need a filename — derive it from profileId as a safe fallback.
-      return { buffer: Buffer.from(cached, 'base64'), filename: `accord_${profileId}.pdf` };
+      return {
+        buffer: Buffer.from(cached, 'base64'),
+        filename: `accord_${profileId}.pdf`,
+      };
     }
 
     const profile = await this.prisma.profile.findUnique({
@@ -1395,7 +1409,11 @@ export class ProfileService {
       data,
     );
 
-    await this.redis.setex(cacheKey, 30 * 24 * 60 * 60, buffer.toString('base64'));
+    await this.redis.setex(
+      cacheKey,
+      30 * 24 * 60 * 60,
+      buffer.toString('base64'),
+    );
     return { buffer, filename };
   }
 

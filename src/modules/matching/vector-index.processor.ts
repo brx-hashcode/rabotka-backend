@@ -46,11 +46,9 @@ export class VectorIndexProcessor implements OnModuleInit {
 
     try {
       const queue = this.queueService.getQueue(VECTOR_INDEX_QUEUE);
-      await queue.add(
-        'scan',
-        { type: 'scan' } satisfies VectorIndexJobData,
-        { repeat: { every: SCAN_INTERVAL_MS } },
-      );
+      await queue.add('scan', { type: 'scan' } satisfies VectorIndexJobData, {
+        repeat: { every: SCAN_INTERVAL_MS },
+      });
       this.logger.log(
         `VectorIndexProcessor ready — scan every ${SCAN_INTERVAL_MS / 60000} min`,
       );

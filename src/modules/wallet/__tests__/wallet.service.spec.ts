@@ -907,9 +907,9 @@ describe('WalletService', () => {
         cb(txMock),
       );
 
-      await expect(
-        service.recordMobileMoneyWithdrawal(50000),
-      ).rejects.toThrow(BadRequestException);
+      await expect(service.recordMobileMoneyWithdrawal(50000)).rejects.toThrow(
+        BadRequestException,
+      );
     });
   });
 

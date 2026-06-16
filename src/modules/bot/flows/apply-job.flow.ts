@@ -81,16 +81,9 @@ async function handleApplyStep1(
     normalized === 'oui' ||
     normalized === 'oui, je postule'
   ) {
+    let created: { id: string };
     try {
-      const created = await ctx.applicationService.create(
-        jobOfferId,
-        profile.id,
-      );
-      await ctx.notificationService.sendNewApplicationToEmployer(created.id);
-      return {
-        reply: [formatApplicationSentSuccess(offer.title)],
-        clearState: true,
-      };
+      created = await ctx.applicationService.create(jobOfferId, profile.id);
     } catch (err: unknown) {
       const message =
         err instanceof Error ? err.message : 'Impossible de postuler.';
@@ -99,6 +92,12 @@ async function handleApplyStep1(
         clearState: true,
       };
     }
+    // Notification is best-effort — never let it mask a successful application
+    await ctx.notificationService.sendNewApplicationToEmployer(created.id);
+    return {
+      reply: [formatApplicationSentSuccess(offer.title)],
+      clearState: true,
+    };
   }
   if (normalized === '2' || normalized === 'non') {
     const ret = state.payload?.returnToListOffers as
@@ -169,14 +168,16 @@ export async function runApplyJobFlow(
 
   if (!jobOfferId) {
     return {
-      reply: ["❌ Offre non trouvée. Tapez *Menu* pour revenir."],
+      reply: ['❌ Offre non trouvée. Tapez *Menu* pour revenir.'],
       clearState: true,
     };
   }
 
   if (profile.profile_type !== 'WORKER') {
     return {
-      reply: ["❌ Seuls les travailleurs peuvent postuler aux offres. Tapez *Menu*."],
+      reply: [
+        '❌ Seuls les travailleurs peuvent postuler aux offres. Tapez *Menu*.',
+      ],
       clearState: true,
     };
   }
@@ -206,7 +207,14 @@ export async function runApplyJobFlow(
         updatedAt: new Date().toISOString(),
       };
       return handleApplyStep1(
-        { state: step1State, jobOfferId, trimmed: '', normalized: '', profile, ctx },
+        {
+          state: step1State,
+          jobOfferId,
+          trimmed: '',
+          normalized: '',
+          profile,
+          ctx,
+        },
         offer,
       );
     }
@@ -237,7 +245,7 @@ export async function runApplyJobFlow(
   }
 
   return {
-    reply: ["❌ Erreur. Tapez *Menu* pour revenir."],
+    reply: ['❌ Erreur. Tapez *Menu* pour revenir.'],
     clearState: true,
   };
 }

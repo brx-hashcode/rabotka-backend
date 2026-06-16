@@ -5,6 +5,8 @@ import {
   UseInterceptors,
   UploadedFiles,
   BadRequestException,
+  ForbiddenException,
+  UseGuards,
   Query,
   Res,
 } from '@nestjs/common';
@@ -18,15 +20,24 @@ import {
   ApiResponse,
   ApiQuery,
 } from '@nestjs/swagger';
+import { ConfigService } from '@nestjs/config';
 import { StorageService } from '../../common/services/storage/storage.service';
 import { fetchWithTimeout } from '../../common/utils/fetch-with-timeout.util';
+import { JwtAuthGuard } from '../auth/guards';
+
+const PRIVATE_IP_RE =
+  /^(localhost$|127\.|10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|169\.254\.)/;
 
 @ApiTags('File')
 @Controller('file')
 export class FileController {
-  constructor(private readonly storageService: StorageService) {}
+  constructor(
+    private readonly storageService: StorageService,
+    private readonly configService: ConfigService,
+  ) {}
 
   @Get('proxy')
+  @UseGuards(JwtAuthGuard)
   async proxyFile(@Query('url') fileUrl: string, @Res() res: Response) {
     if (!fileUrl) {
       return res.status(400).json({ message: 'url query param is required' });
@@ -44,6 +55,33 @@ export class FileController {
         message:
           'Blob URLs cannot be proxied. The file was not properly uploaded to storage.',
       });
+    }
+
+    let parsed: URL;
+    try {
+      parsed = new URL(decoded);
+    } catch {
+      return res.status(400).json({ message: 'Invalid url' });
+    }
+
+    if (PRIVATE_IP_RE.test(parsed.hostname)) {
+      throw new ForbiddenException('URL not allowed');
+    }
+
+    const allowedHosts = (
+      this.configService.get<string>('PROXY_ALLOWED_HOSTS') ?? ''
+    )
+      .split(',')
+      .map((h) => h.trim())
+      .filter(Boolean);
+
+    if (
+      allowedHosts.length > 0 &&
+      !allowedHosts.some(
+        (h) => parsed.hostname === h || parsed.hostname.endsWith(`.${h}`),
+      )
+    ) {
+      throw new ForbiddenException('URL not allowed');
     }
 
     const upstream = await fetchWithTimeout(decoded, {}, 15_000);
@@ -69,7 +107,10 @@ export class FileController {
   }
 
   @Post('upload')
-  @UseInterceptors(FilesInterceptor('files', 10))
+  @UseGuards(JwtAuthGuard)
+  @UseInterceptors(
+    FilesInterceptor('files', 10, { limits: { fileSize: 10 * 1024 * 1024 } }),
+  )
   @ApiOperation({ summary: 'Upload file(s)' })
   @ApiConsumes('multipart/form-data')
   @ApiQuery({

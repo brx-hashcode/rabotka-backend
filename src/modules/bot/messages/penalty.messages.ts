@@ -1,4 +1,3 @@
-
 function formatDate(d: Date): string {
   return d.toLocaleDateString('fr-FR', {
     day: '2-digit',
@@ -69,7 +68,7 @@ export function formatPenaltyHistory(
     `- Maintenez un score > 90 pour plus de visibilite`,
     `- Annulez toujours plus de ${thresholdHours}h avant si necessaire`,
     '',
-    "Tapez *Menu* pour revenir.",
+    'Tapez *Menu* pour revenir.',
   );
   return lines.join('\n');
 }
@@ -133,7 +132,7 @@ export function formatHistoryMessage(
     `- Maintenez un score > 90 pour plus de visibilite`,
     `- Annulez toujours plus de ${thresholdHours}h avant si necessaire`,
     '',
-    "Tapez *Menu* pour revenir.",
+    'Tapez *Menu* pour revenir.',
   );
   return lines.join('\n');
 }
@@ -182,7 +181,6 @@ export function formatProfileStats(params: {
   reliabilityScore: number | null;
   memberSince: Date;
   completedMissions: number;
-  totalEarnings: number;
   completionRate: number;
   totalPenalties: number;
   lateCancellations: number;
@@ -203,7 +201,6 @@ export function formatProfileStats(params: {
     `*Score de fiabilite*: ${score}/100`,
     `*Membre depuis*: ${since}`,
     `*Missions completees*: ${params.completedMissions}`,
-    `*Revenus totaux*: ${fcfa(params.totalEarnings)}`,
     `*Taux de completion*: ${params.completionRate}%`,
     `*Solde portefeuille*: ${fcfa(balance)}`,
     '',

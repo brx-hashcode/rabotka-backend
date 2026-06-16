@@ -140,10 +140,7 @@ export class DocumentController {
   @Roles(UserRole.MANAGER)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Delete a document' })
-  async delete(
-    @Param('id') id: string,
-    @Req() req: AdminAuthenticatedRequest,
-  ) {
+  async delete(@Param('id') id: string, @Req() req: AdminAuthenticatedRequest) {
     await this.documentService.delete(id);
     await this.logService.create({
       action: 'DOCUMENT_DELETED',

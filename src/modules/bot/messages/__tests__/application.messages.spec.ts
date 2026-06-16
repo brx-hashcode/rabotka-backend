@@ -159,7 +159,7 @@ describe('formatCandidatureDetail', () => {
 describe('formatMyApplicationsList', () => {
   it('shows empty message when no applications', () => {
     const msg = formatMyApplicationsList([]);
-    expect(msg).toContain("aucune candidature");
+    expect(msg).toContain('aucune candidature');
   });
 
   it('renders applications list', () => {

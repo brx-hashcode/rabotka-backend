@@ -85,10 +85,7 @@ export class ClaimController {
 
   @Delete(':id')
   @Roles(UserRole.MANAGER)
-  async delete(
-    @Param('id') id: string,
-    @Req() req: AdminAuthenticatedRequest,
-  ) {
+  async delete(@Param('id') id: string, @Req() req: AdminAuthenticatedRequest) {
     await this.claimService.deleteForAdmin(id);
     await this.logService.create({
       action: 'CLAIM_DELETED',

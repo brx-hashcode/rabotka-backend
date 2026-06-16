@@ -1,7 +1,11 @@
 import { Injectable, Inject } from '@nestjs/common';
 import Redis from 'ioredis';
 import { REDIS_CONNECTION } from '../../../common/services/redis/redis.constants';
-import { BOT_STATE_KEY_PREFIX, BOT_STATE_TTL_SECONDS, FLOW_TTL_SECONDS } from '../bot.constants';
+import {
+  BOT_STATE_KEY_PREFIX,
+  BOT_STATE_TTL_SECONDS,
+  FLOW_TTL_SECONDS,
+} from '../bot.constants';
 import type { BotState } from '../types/bot-state.types';
 
 // CAS write: only sets the value if the key is absent OR the current flowId matches expectedFlowId.

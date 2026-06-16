@@ -235,7 +235,7 @@ export class JobOfferService {
     }
     if (!offer) {
       throw new InternalServerErrorException(
-        'Impossible de générer une référence unique pour l\'offre',
+        "Impossible de générer une référence unique pour l'offre",
       );
     }
 
@@ -285,7 +285,13 @@ export class JobOfferService {
         const notify = async (workerId: string) => {
           if (cooldownMinutes > 0) {
             const key = this.notificationCooldownKey(workerId);
-            const locked = await this.redis.set(key, '1', 'EX', cooldownMinutes * 60, 'NX');
+            const locked = await this.redis.set(
+              key,
+              '1',
+              'EX',
+              cooldownMinutes * 60,
+              'NX',
+            );
             if (locked === null) return;
           }
           await this.botNotification
@@ -509,9 +515,7 @@ export class JobOfferService {
 
     const hasMore = rows.length > limit;
     const slice = hasMore ? rows.slice(0, limit) : rows;
-    const data = slice.map((o) =>
-      this.toListItem(o, Number(o.accepted_count)),
-    );
+    const data = slice.map((o) => this.toListItem(o, Number(o.accepted_count)));
     const nextCursor = hasMore ? (slice.at(-1)?.id ?? null) : null;
 
     return { data, nextCursor };

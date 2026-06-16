@@ -15,8 +15,14 @@ export class SystemConfigPublicController {
   }
 
   @Get('welcome-credits')
-  @ApiOperation({ summary: 'Get welcome credit amount for a given profile type' })
-  @ApiQuery({ name: 'profileType', enum: ['WORKER', 'EMPLOYER'], required: true })
+  @ApiOperation({
+    summary: 'Get welcome credit amount for a given profile type',
+  })
+  @ApiQuery({
+    name: 'profileType',
+    enum: ['WORKER', 'EMPLOYER'],
+    required: true,
+  })
   @ApiResponse({
     status: 200,
     description: 'Welcome credit amount in FCFA',

@@ -97,7 +97,11 @@ describe('ContractService', () => {
     prisma = makePrisma();
     documentService = makeDocumentService();
     redis = makeRedis();
-    service = new ContractService(prisma as any, documentService as any, redis as any);
+    service = new ContractService(
+      prisma as any,
+      documentService as any,
+      redis as any,
+    );
   });
 
   describe('create()', () => {

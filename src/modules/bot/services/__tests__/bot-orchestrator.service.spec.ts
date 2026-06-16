@@ -715,7 +715,10 @@ describe('BotOrchestratorService', () => {
       await service.handle(PROFILE_ID, PHONE, 'menu');
       // grantWelcomeCredit is always called; idempotency is enforced atomically
       // inside the method itself (updateMany with where:{bonus_granted:false})
-      expect(grantCredit).toHaveBeenCalledWith(PROFILE_ID, pendingProfile.profile_type);
+      expect(grantCredit).toHaveBeenCalledWith(
+        PROFILE_ID,
+        pendingProfile.profile_type,
+      );
     });
 
     it('issues an inline 4-digit code when ACTIVE profile has whatsapp_connected=false', async () => {

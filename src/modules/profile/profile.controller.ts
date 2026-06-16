@@ -32,7 +32,6 @@ import {
 } from './profile.service';
 import { CreateProfileDto } from './dto/create-profile.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
-import { VerifyWhatsAppDto } from './dto/verify-whatsapp.dto';
 import { sendWelcomeEmail } from '../mail/templates';
 import { MailService } from '../mail/mail.service';
 import { ProfileAuthGuard } from '../auth/guards/profile-auth.guard';
@@ -75,7 +74,8 @@ export class ProfileController {
         creditedBalance: {
           type: 'number',
           example: 1000,
-          description: 'Welcome credit amount granted to the new profile in FCFA',
+          description:
+            'Welcome credit amount granted to the new profile in FCFA',
         },
       },
     },
@@ -103,7 +103,11 @@ export class ProfileController {
     // Sign a JWT and set the auth cookie so the user is logged in immediately
     const cookieName = this.configService.get<string>('AUTH_COOKIE_NAME');
     if (cookieName) {
-      const payload = { sub: result.profileId, type: 'profile', jti: randomUUID() };
+      const payload = {
+        sub: result.profileId,
+        type: 'profile',
+        jti: randomUUID(),
+      };
       const token = this.jwtService.sign(payload);
       const isProduction = this.configService.get('NODE_ENV') === 'production';
       res.cookie(cookieName, token, {
@@ -167,7 +171,9 @@ export class ProfileController {
   @UseGuards(ProfileAuthGuard)
   @ApiBearerAuth()
   @ApiCookieAuth()
-  @ApiOperation({ summary: 'Mark first login as done (called after avatar step)' })
+  @ApiOperation({
+    summary: 'Mark first login as done (called after avatar step)',
+  })
   @ApiResponse({ status: 200, description: 'first_login set to false' })
   async markFirstLoginDone(
     @Req() req: ProfileAuthenticatedRequest,
@@ -484,11 +490,10 @@ export class ProfileController {
   @ApiBearerAuth()
   @ApiCookieAuth()
   @ApiOperation({
-    summary: 'Request WhatsApp verification for a profile',
+    summary: 'Request WhatsApp verification for the authenticated profile',
     description:
-      'Admin endpoint: Generates a secure verification token and sends it via WhatsApp to the specified profile phone number. The token expires in 30 minutes.',
+      'Generates a secure verification token and sends it via WhatsApp to the authenticated profile phone number. The token expires in 30 minutes.',
   })
-  @ApiBody({ type: VerifyWhatsAppDto })
   @ApiResponse({
     status: 200,
     description: 'Verification token sent successfully',
@@ -506,11 +511,9 @@ export class ProfileController {
     description: 'WhatsApp service unavailable or message send failed',
   })
   async requestWhatsAppVerification(
-    @Body() verifyWhatsAppDto: VerifyWhatsAppDto,
+    @Req() req: ProfileAuthenticatedRequest,
   ): Promise<{ success: boolean }> {
-    return this.profileService.requestWhatsAppVerification(
-      verifyWhatsAppDto.profileId,
-    );
+    return this.profileService.requestWhatsAppVerification(req.user.profileId);
   }
 
   @Get('agreement/download')

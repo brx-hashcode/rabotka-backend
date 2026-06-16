@@ -140,7 +140,7 @@ function handleDetailStep(
       : null;
   if (!offerId) {
     return {
-      reply: ["❌ Index invalide. Tapez *Menu*."],
+      reply: ['❌ Index invalide. Tapez *Menu*.'],
       clearState: true,
     };
   }
@@ -173,7 +173,7 @@ async function handleDetailApply(
   const { ctx, profile } = params;
   if (profile.profile_type !== 'WORKER') {
     return {
-      reply: ["❌ Seuls les travailleurs peuvent postuler à une offre."],
+      reply: ['❌ Seuls les travailleurs peuvent postuler à une offre.'],
       nextState: params.state,
     };
   }
@@ -232,7 +232,7 @@ async function handleDetailViewDescription(
   const offer = await ctx.jobOfferService.findById(offerId);
   if (!offer) {
     return {
-      reply: ["*Offre introuvable. Tapez *Menu*.*"],
+      reply: ['*Offre introuvable. Tapez *Menu*.*'],
       clearState: true,
     };
   }
@@ -325,7 +325,7 @@ export async function runListOffersFlow(
 
   if (offerIds.length === 0) {
     return {
-      reply: ["*Aucune offre. Tapez *Menu* pour revenir.*"],
+      reply: ['*Aucune offre. Tapez *Menu* pour revenir.*'],
       clearState: true,
     };
   }
@@ -364,7 +364,7 @@ export async function runListOffersFlow(
   }
 
   return {
-    reply: ["❌ Erreur. Tapez *Menu* pour revenir."],
+    reply: ['❌ Erreur. Tapez *Menu* pour revenir.'],
     clearState: true,
   };
 }

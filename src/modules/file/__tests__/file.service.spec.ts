@@ -68,7 +68,12 @@ describe('FileService', () => {
     prisma = makePrisma();
     storage = makeStorageService();
     watermark = makeWatermarkService();
-    service = new FileService(prisma as any, storage as any, watermark as any, {} as any);
+    service = new FileService(
+      prisma as any,
+      storage as any,
+      watermark as any,
+      {} as any,
+    );
   });
 
   describe('uploadToStorage()', () => {

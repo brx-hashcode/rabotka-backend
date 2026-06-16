@@ -820,7 +820,10 @@ export class ContactUnlockService {
       }
       await tx.contactUnlockAttempt.update({
         where: { id: attempt.id },
-        data: { status: ContactUnlockStatus.CONVERTED_TO_CREDIT, converted_at: now },
+        data: {
+          status: ContactUnlockStatus.CONVERTED_TO_CREDIT,
+          converted_at: now,
+        },
       });
     });
   }
@@ -940,8 +943,14 @@ export class ContactUnlockService {
             attempt.id,
           );
           newStatus = ContactUnlockStatus.CONVERTED_TO_CREDIT;
-          conversions.push({ profileId: attempt.employer_id, amount: employerAmount });
-          conversions.push({ profileId: attempt.worker_id, amount: workerAmount });
+          conversions.push({
+            profileId: attempt.employer_id,
+            amount: employerAmount,
+          });
+          conversions.push({
+            profileId: attempt.worker_id,
+            amount: workerAmount,
+          });
         } else if (
           attempt.worker_paid &&
           (employerPaidAtJobLevel || !attempt.employer_paid)

@@ -45,7 +45,11 @@ describe('WhatsAppInboundProcessor', () => {
 
       expect(mockQueueService.addJob).toHaveBeenCalledWith(
         expect.stringContaining('whatsapp'),
-        expect.objectContaining({ type: 'text', phone: '+242001', text: 'Bonjour !' }),
+        expect.objectContaining({
+          type: 'text',
+          phone: '+242001',
+          text: 'Bonjour !',
+        }),
       );
     });
 

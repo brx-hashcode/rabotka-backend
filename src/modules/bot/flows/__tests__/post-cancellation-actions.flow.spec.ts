@@ -14,10 +14,7 @@ const employer: BotProfile = {
   status: 'ACTIVE',
 };
 
-function makeState(
-  payload: Record<string, unknown> = {},
-  step = 0,
-): BotState {
+function makeState(payload: Record<string, unknown> = {}, step = 0): BotState {
   return {
     flowId: FLOW_IDS.POST_CANCELLATION_ACTIONS,
     step,

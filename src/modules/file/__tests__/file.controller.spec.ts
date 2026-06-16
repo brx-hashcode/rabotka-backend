@@ -27,13 +27,16 @@ function makeFile(
   };
 }
 
+const mockConfigService = { get: jest.fn().mockReturnValue(undefined) };
+
 describe('FileController', () => {
   let controller: FileController;
   let storage: ReturnType<typeof makeStorage>;
 
   beforeEach(() => {
     storage = makeStorage();
-    controller = new FileController(storage as any);
+    mockConfigService.get.mockReturnValue(undefined);
+    controller = new FileController(storage as any, mockConfigService as any);
   });
 
   it('throws when no files provided', async () => {
