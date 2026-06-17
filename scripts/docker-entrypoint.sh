@@ -49,7 +49,7 @@ echo "Redis is ready!"
 
 # Deploy pending migrations using direct connection (bypasses PgBouncer)
 echo "Running Prisma migrations..."
-node node_modules/.bin/prisma migrate deploy --schema=prisma/schema.prisma
+node node_modules/prisma/build/index.js migrate deploy
 echo "Migrations deployed!"
 
 # Execute the command
