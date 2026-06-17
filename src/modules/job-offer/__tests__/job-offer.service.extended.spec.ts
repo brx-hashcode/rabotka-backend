@@ -95,6 +95,7 @@ describe('JobOfferService (extended)', () => {
           useValue: {
             indexJobOffer: jest.fn().mockResolvedValue(undefined),
             findMatchingWorkersForJob: jest.fn().mockResolvedValue([]),
+            deleteJobFromIndex: jest.fn().mockResolvedValue(undefined),
           },
         },
         {

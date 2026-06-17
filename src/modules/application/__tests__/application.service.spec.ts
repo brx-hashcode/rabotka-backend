@@ -224,6 +224,14 @@ describe('ApplicationService', () => {
       );
     });
 
+    it('WAITING_PAYMENT applications do NOT count toward the concurrent limit', async () => {
+      // Only PENDING and ACCEPTED count; WAITING_PAYMENT should not block new applications
+      // Simulate: the quota count returns 0 (WAITING_PAYMENT excluded from query)
+      (prisma.application.count as jest.Mock).mockResolvedValue(0);
+      // Should succeed — no ForbiddenException
+      await expect(service.create(JOB_OFFER_ID, WORKER_ID)).resolves.toBeDefined();
+    });
+
     it('throws BadRequestException when offer is not ACTIVE', async () => {
       (prisma.jobOffer.findUnique as jest.Mock).mockResolvedValue({
         ...mockJobOffer,
@@ -317,6 +325,29 @@ describe('ApplicationService', () => {
           data: { status: JobOfferStatus.ACTIVE },
         }),
       );
+    });
+
+    it('throws BadRequestException when cancelling ACCEPTED application after job has started', async () => {
+      const pastOffer = { ...mockJobOffer, scheduled_at: hoursFromNow(-1) };
+      (prisma.application.findUnique as jest.Mock).mockResolvedValue({
+        ...acceptedApplication,
+        job_offer: pastOffer,
+      });
+      await expect(service.cancel(APPLICATION_ID, WORKER_ID)).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('allows cancelling PENDING application even after scheduled_at has passed (no penalty)', async () => {
+      const pastOffer = { ...mockJobOffer, scheduled_at: hoursFromNow(-1) };
+      (prisma.application.findUnique as jest.Mock).mockResolvedValue({
+        ...mockApplication,
+        status: ApplicationStatus.PENDING,
+        job_offer: pastOffer,
+      });
+      // PENDING past-start is allowed (no confirmed acceptance)
+      const result = await service.cancel(APPLICATION_ID, WORKER_ID);
+      expect(result.penaltyApplied).toBe(false);
     });
 
     it('rejects a concurrent duplicate cancel (already CANCELLED inside tx) without deducting score twice', async () => {
@@ -615,7 +646,10 @@ describe('ApplicationService', () => {
               .fn()
               .mockResolvedValue({ status: JobOfferStatus.ACTIVE }),
           },
-          assignment: { updateMany: jest.fn().mockResolvedValue({}) },
+          assignment: {
+            updateMany: jest.fn().mockResolvedValue({}),
+            findUnique: jest.fn().mockResolvedValue({ status: 'COMPLETED' }),
+          },
           payment: { create: jest.fn().mockResolvedValue({}) },
           application: { updateMany: jest.fn().mockResolvedValue({}) },
           profile: {

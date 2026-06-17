@@ -28,14 +28,14 @@ export class CreateProfileDto {
   lastName: string;
 
   @ApiProperty({ description: 'Email address (must be unique)' })
-  @Transform(({ value }) => value?.trim())
+  @Transform(({ value }) => value?.trim()?.toLowerCase())
   @IsEmail()
   @HasMxRecord()
   @IsNotEmpty()
   email: string;
 
   @ApiProperty({ description: 'Phone number (must be unique)' })
-  @Transform(({ value }) => value?.trim())
+  @Transform(({ value }) => value?.trim()?.toLowerCase())
   @IsString()
   @IsNotEmpty()
   phone: string;

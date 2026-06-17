@@ -625,6 +625,18 @@ export class MatchingService {
     }
   }
 
+  async deleteJobFromIndex(jobOfferId: string): Promise<void> {
+    try {
+      await this.qdrant.deletePoints(COLLECTION_JOBS, [jobOfferId]);
+      this.logger.log(`Removed job offer ${jobOfferId} from vector index`);
+    } catch (err) {
+      this.logger.error(
+        `Failed to remove job offer ${jobOfferId} from vector index`,
+        err,
+      );
+    }
+  }
+
   // ── Employer profile indexing ───────────────────────────────────────────────
 
   /**

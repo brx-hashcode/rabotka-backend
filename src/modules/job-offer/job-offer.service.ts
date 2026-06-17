@@ -938,6 +938,16 @@ export class JobOfferService {
 
     await this.prisma.jobOffer.delete({ where: { id } });
 
+    // Remove from vector index — fire-and-forget, non-fatal
+    void this.matchingService
+      .deleteJobFromIndex(id)
+      .catch((err) =>
+        this.logger.error(
+          `Failed to remove job offer ${id} from vector index after deletion`,
+          err,
+        ),
+      );
+
     this.eventEmitter.emit(AdminNotificationEvent.JOB_OFFER_DELETED, {
       event: AdminNotificationEvent.JOB_OFFER_DELETED,
       title: 'Offre supprimée',

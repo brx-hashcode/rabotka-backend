@@ -119,6 +119,30 @@ describe('runVerifyWhatsappFlow', () => {
     expect(ctx.walletService.grantWelcomeCredit).toHaveBeenCalled();
   });
 
+  it('tracks failed attempt count in state', async () => {
+    const ctx = makeCtx(null);
+    ctx.prisma.verificationToken.findFirst.mockResolvedValue(null);
+    const result = await runVerifyWhatsappFlow(makeState(), 'WRONG', profile, ctx);
+    expect(result.nextState?.payload?.attempts).toBe(1);
+    expect(result.clearState).toBeFalsy();
+  });
+
+  it('blocks after 5 failed attempts', async () => {
+    const ctx = makeCtx(null);
+    ctx.prisma.verificationToken.findFirst.mockResolvedValue(null);
+    const stateWith5Failures: BotState = {
+      flowId: FLOW_IDS.VERIFY_WHATSAPP,
+      step: 1,
+      payload: { attempts: 5 },
+      updatedAt: new Date().toISOString(),
+    };
+    const result = await runVerifyWhatsappFlow(stateWith5Failures, 'WRONG', profile, ctx);
+    expect(result.clearState).toBe(true);
+    expect(result.reply[0]).toContain('support');
+    // Must not even reach DB lookup on 6th attempt
+    expect(ctx.prisma.verificationToken.findFirst).not.toHaveBeenCalled();
+  });
+
   it('handles wallet error gracefully', async () => {
     const ctx = makeCtx({});
     ctx.walletService.grantWelcomeCredit.mockRejectedValue(

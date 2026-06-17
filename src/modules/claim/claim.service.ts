@@ -582,6 +582,9 @@ export class ClaimService {
       where: { id: commentId, claim_id: claimId },
     });
     if (!comment) throw new NotFoundException('Comment not found');
+    if (comment.profile_id !== profileId) {
+      throw new NotFoundException('Comment not found');
+    }
     await this.prisma.claimComment.delete({ where: { id: commentId } });
     this.claimCommentsGateway.emitDeletedComment(claimId, commentId);
   }

@@ -285,50 +285,49 @@ export class BotCommandsService {
           '❌ Seuls les employeurs peuvent voir les candidatures reçues.',
       };
     }
-    const offers = await this.jobOfferService.findByEmployerId(profile.id);
+    // Single query: all pending/viewed applications across all employer's offers
+    const pendingApps = await this.prisma.application.findMany({
+      where: {
+        job_offer: { employer_id: profile.id },
+        status: { in: ['PENDING', 'VIEWED'] },
+      },
+      include: {
+        worker: true,
+        job_offer: { select: { title: true } },
+      },
+      orderBy: { created_at: 'desc' },
+    });
+
     const allItems: CandidatureListItem[] = [];
-    for (const offer of offers) {
-      const applications = await this.applicationService.findByJobOffer(
-        offer.id,
+    if (pendingApps.length > 0) {
+      // Batch-count completed missions per worker in one query
+      const workerIds = [
+        ...new Set(pendingApps.map((a) => a.worker_id).filter(Boolean)),
+      ] as string[];
+      const missionCounts = await this.prisma.application.groupBy({
+        by: ['worker_id'],
+        where: { worker_id: { in: workerIds }, status: 'END' },
+        _count: { id: true },
+      });
+      const countByWorker = new Map(
+        missionCounts.map((r) => [r.worker_id, r._count.id]),
       );
-      const pending = applications.filter(
-        (a) => a.status === 'PENDING' || a.status === 'VIEWED',
-      );
-      for (const app of pending) {
-        const firstName = app.worker?.first_name ?? '';
-        const lastName = app.worker?.last_name ?? '';
-        const fullName = app.worker
-          ? `${app.worker.first_name} ${app.worker.last_name}`
-          : 'Inconnu';
-        const score = app.worker?.reliability_score ?? '?';
-        const email = app.worker?.email ?? '';
-        const avatarUrl = app.worker?.avatar_url;
-        const verificationStatus = app.worker?.verification_status;
-        const workerId = app.worker?.id;
-        const [profileRow, completedMissions] = workerId
-          ? await Promise.all([
-              this.prisma.profile.findUnique({
-                where: { id: workerId },
-                select: { created_at: true },
-              }),
-              this.prisma.application.count({
-                where: { worker_id: workerId, status: 'END' },
-              }),
-            ])
-          : [null, 0];
+
+      for (const app of pendingApps) {
+        const w = app.worker;
         allItems.push({
           id: app.id,
-          fullName,
-          score,
-          firstName,
-          lastName,
-          email,
-          status: verificationStatus ?? app.status,
-          avatarUrl: avatarUrl ?? undefined,
-          offerTitle: offer.title,
-          description: app.worker?.description ?? null,
-          completedMissions,
-          memberSince: profileRow?.created_at ?? null,
+          fullName: w ? `${w.first_name} ${w.last_name}` : 'Inconnu',
+          score: w?.reliability_score ?? '?',
+          firstName: w?.first_name ?? '',
+          lastName: w?.last_name ?? '',
+          email: w?.email ?? '',
+          status: w?.verification_status ?? app.status,
+          avatarUrl: w?.avatar_url ?? undefined,
+          offerTitle: app.job_offer?.title ?? '',
+          description: w?.description ?? null,
+          completedMissions: countByWorker.get(app.worker_id ?? '') ?? 0,
+          memberSince: w?.created_at ?? null,
         });
       }
     }
@@ -357,36 +356,42 @@ export class BotCommandsService {
         message: '❌ Seuls les employeurs peuvent voir les missions pourvues.',
       };
     }
-    const offers = await this.jobOfferService.findByEmployerId(profile.id);
-    const filledOffers = offers.filter(
-      (o) =>
-        o.status === JobOfferStatus.FILLED ||
-        o.status === JobOfferStatus.PARTIALLY_FILLED,
-    );
-    const items: FilledJobListItem[] = [];
-    for (const offer of filledOffers) {
-      const applications = await this.applicationService.findByJobOffer(
-        offer.id,
-      );
-      const activeApps = applications.filter(
-        (a) => a.status === 'ACCEPTED' || a.status === 'WAITING_PAYMENT',
-      );
-      for (const app of activeApps) {
-        if (!app.worker) continue;
-        const workerName =
-          `${app.worker.first_name} ${app.worker.last_name}`.trim() ||
-          'Inconnu';
-        items.push({
-          applicationId: app.id,
-          title: offer.title,
-          workerName,
-          scheduled_at: offer.scheduled_at,
-          amount: offer.amount,
-          payment_flow: offer.payment_flow,
-          status: app.status,
-        });
-      }
-    }
+    // Single query: all accepted/waiting applications for employer's filled offers
+    const activeApps = await this.prisma.application.findMany({
+      where: {
+        job_offer: {
+          employer_id: profile.id,
+          status: { in: [JobOfferStatus.FILLED, JobOfferStatus.PARTIALLY_FILLED] },
+        },
+        status: { in: ['ACCEPTED', 'WAITING_PAYMENT'] },
+      },
+      include: {
+        worker: { select: { first_name: true, last_name: true } },
+        job_offer: {
+          select: {
+            title: true,
+            scheduled_at: true,
+            amount: true,
+            payment_flow: true,
+          },
+        },
+      },
+      orderBy: { created_at: 'desc' },
+    });
+
+    const items: FilledJobListItem[] = activeApps
+      .filter((app) => app.worker && app.job_offer)
+      .map((app) => ({
+        applicationId: app.id,
+        title: app.job_offer!.title,
+        workerName:
+          `${app.worker!.first_name} ${app.worker!.last_name}`.trim() ||
+          'Inconnu',
+        scheduled_at: app.job_offer!.scheduled_at,
+        amount: app.job_offer!.amount !== null ? Number(app.job_offer!.amount) : null,
+        payment_flow: app.job_offer!.payment_flow,
+        status: app.status,
+      }));
     if (items.length === 0) {
       return {
         message:

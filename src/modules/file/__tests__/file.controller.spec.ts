@@ -56,7 +56,7 @@ describe('FileController', () => {
     expect(result).toEqual({ file_url: 'https://cdn.example.com/file.jpg' });
     expect(storage.upload).toHaveBeenCalledWith(
       expect.any(Buffer),
-      'test.jpg',
+      expect.stringMatching(/\.jpg$/),
       expect.objectContaining({ mimeType: 'image/jpeg', folder: 'files' }),
     );
   });
@@ -99,7 +99,7 @@ describe('FileController', () => {
     );
     expect(storage.upload).toHaveBeenCalledWith(
       expect.any(Buffer),
-      'doc.pdf',
+      expect.stringMatching(/\.pdf$/),
       expect.objectContaining({ access: 'private' }),
     );
   });

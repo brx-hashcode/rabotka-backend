@@ -947,12 +947,31 @@ export class ProfileService {
 
     const searchTrimmed = q?.trim() ?? '';
     if (searchTrimmed.length > 0) {
-      where.OR = [
+      const parts = searchTrimmed.split(/\s+/).filter(Boolean);
+      const orClauses: Prisma.ProfileWhereInput[] = [
         { first_name: { contains: searchTrimmed, mode: 'insensitive' } },
         { last_name: { contains: searchTrimmed, mode: 'insensitive' } },
         { email: { contains: searchTrimmed, mode: 'insensitive' } },
         { phone: { contains: searchTrimmed, mode: 'insensitive' } },
       ];
+      // "Alice Dupont" → match first_name=Alice AND last_name=Dupont, or vice-versa
+      if (parts.length >= 2) {
+        orClauses.push(
+          {
+            AND: [
+              { first_name: { contains: parts[0], mode: 'insensitive' } },
+              { last_name: { contains: parts.slice(1).join(' '), mode: 'insensitive' } },
+            ],
+          },
+          {
+            AND: [
+              { first_name: { contains: parts.slice(1).join(' '), mode: 'insensitive' } },
+              { last_name: { contains: parts[0], mode: 'insensitive' } },
+            ],
+          },
+        );
+      }
+      where.OR = orClauses;
     }
 
     if (status != null && status.length > 0) {
@@ -1381,6 +1400,7 @@ export class ProfileService {
         last_name: true,
         created_at: true,
         email: true,
+        phone: true,
         profile_type: true,
       },
     });
@@ -1402,6 +1422,8 @@ export class ProfileService {
       FULL_NAME: `${profile.first_name} ${profile.last_name}`,
       PROFILE_TYPE: this.getProfileTypeLabel(profile.profile_type),
       DATE: profile.created_at.toLocaleDateString('fr-FR'),
+      PHONE: profile.phone ?? '',
+      USER_ID: profileId,
     };
 
     const buffer = await this.documentService.fillDocumentTemplateAsPdf(
