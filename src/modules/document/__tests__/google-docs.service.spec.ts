@@ -18,7 +18,10 @@ describe('GoogleDocsService', () => {
     const fakeData = Buffer.from('docx-content');
     mockFetch.mockResolvedValue({
       ok: true,
-      headers: { get: () => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+      headers: {
+        get: () =>
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      },
       arrayBuffer: () => Promise.resolve(fakeData.buffer),
     });
 

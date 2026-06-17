@@ -618,9 +618,10 @@ export class PaymentRequestService {
     });
   }
 
-  private async notifyPaymentFailedByWebhook(
-    request: { profile_id: string; amount: unknown },
-  ): Promise<void> {
+  private async notifyPaymentFailedByWebhook(request: {
+    profile_id: string;
+    amount: unknown;
+  }): Promise<void> {
     const profile = await this.prisma.profile.findUnique({
       where: { id: request.profile_id },
       select: { phone: true },
@@ -900,7 +901,10 @@ export class PaymentRequestService {
           ? [result.attemptId, ...result.newlyUnlocked]
           : result.newlyUnlocked;
 
-      return { nowUnlocked: true, unlockedAttemptIds: [...new Set(attemptIds)] };
+      return {
+        nowUnlocked: true,
+        unlockedAttemptIds: [...new Set(attemptIds)],
+      };
     } catch (err) {
       this.logger.error(
         `Contact unlock processing failed for attempt ${String(request.contact_unlock_attempt_id)}:`,

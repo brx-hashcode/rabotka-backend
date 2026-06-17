@@ -28,14 +28,14 @@ export class CreateProfileDto {
   lastName: string;
 
   @ApiProperty({ description: 'Email address (must be unique)' })
-  @Transform(({ value }) => value?.trim())
+  @Transform(({ value }) => value?.trim()?.toLowerCase())
   @IsEmail()
   @HasMxRecord()
   @IsNotEmpty()
   email: string;
 
   @ApiProperty({ description: 'Phone number (must be unique)' })
-  @Transform(({ value }) => value?.trim())
+  @Transform(({ value }) => value?.trim()?.toLowerCase())
   @IsString()
   @IsNotEmpty()
   phone: string;
@@ -92,14 +92,16 @@ export class CreateProfileDto {
   readAndApprovedPolicies: boolean;
 
   @ApiProperty({
-    description: 'URL of the KYC identity document, pre-uploaded via POST /profile/kyc-upload',
+    description:
+      'URL of the KYC identity document, pre-uploaded via POST /profile/kyc-upload',
   })
   @IsString()
   @IsNotEmpty()
   kycDocumentUrl: string;
 
   @ApiProperty({
-    description: 'URL of the KYC selfie, pre-uploaded via POST /profile/kyc-upload',
+    description:
+      'URL of the KYC selfie, pre-uploaded via POST /profile/kyc-upload',
   })
   @IsString()
   @IsNotEmpty()

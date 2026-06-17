@@ -1,0 +1,12 @@
+allowBuilds:
+  '@nestjs/core': true
+  '@prisma/engines': true
+  '@scarf/scarf': true
+  better-sqlite3: true
+  esbuild: true
+  msgpackr-extract: true
+  onnxruntime-node: true
+  prisma: true
+  puppeteer: true
+  sharp: true
+  unrs-resolver: true

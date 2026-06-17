@@ -28,6 +28,21 @@ const REMINDER_START_SENT_KEY = 'reminder:sent:start:';
 const SENT_KEY_TTL = 48 * 60 * 60;
 const SCAN_INTERVAL_MS = 15 * 60 * 1000;
 
+// CAS: only writes if the key is absent OR current flowId matches expectedFlowId.
+const LUA_CAS_SET = `
+local current = redis.call('GET', KEYS[1])
+if current == false then
+  redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2])
+  return 1
+end
+local ok, parsed = pcall(cjson.decode, current)
+if not ok or parsed.flowId == ARGV[3] then
+  redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2])
+  return 1
+end
+return 0
+`;
+
 export type ReminderJobData =
   | { type: 'scan' }
   | { type: 'reminder_24h'; applicationId: string }
@@ -341,16 +356,46 @@ export class ReminderProcessor {
           updatedAt: new Date().toISOString(),
         });
         await this.redis
-          .set(stateKey, stateValue, 'EX', BOT_STATE_TTL_SECONDS)
+          .eval(
+            LUA_CAS_SET,
+            1,
+            stateKey,
+            stateValue,
+            String(BOT_STATE_TTL_SECONDS),
+            FLOW_IDS.JOB_STATUS_CHECK,
+          )
           .catch((err) =>
             this.logger.warn(
               `Failed to set job status check state for employer ${offer.employer_id}`,
               err,
             ),
           );
+
+        // Fallback re-ping if the employer never responds — enqueued with a
+        // unique jobId so BullMQ deduplicates across ticks.
+        await this.queueService
+          .addJob<ReminderJobData>(
+            WHATSAPP_REMINDERS_QUEUE,
+            {
+              type: 'reminder_job_status',
+              jobOfferId: offer.id,
+              employerId: offer.employer_id,
+              applicationId: firstApp.id,
+              paymentFlow: offer.payment_flow ?? 'DAILY',
+            },
+            {
+              jobId: `job-status-${offer.id}-autostart`,
+              delay: 4 * 60 * 60 * 1000,
+            },
+          )
+          .catch((err) =>
+            this.logger.warn(
+              `Failed to enqueue fallback job status reminder for offer ${offer.id}`,
+              err,
+            ),
+          );
       }
     }
-
   }
 
   private async expireEmptyOverdueOffers(now: Date): Promise<void> {
@@ -454,7 +499,7 @@ export class ReminderProcessor {
               return [offer.id];
             }
             const existingIds = Array.isArray(parsed.payload?.jobOfferIds)
-              ? (parsed.payload!.jobOfferIds as unknown[]).filter(
+              ? (parsed.payload.jobOfferIds as unknown[]).filter(
                   (v): v is string => typeof v === 'string',
                 )
               : typeof parsed.payload?.jobOfferId === 'string'
@@ -474,12 +519,7 @@ export class ReminderProcessor {
           payload: { jobOfferIds: queue },
           updatedAt: new Date().toISOString(),
         });
-        await this.redis.set(
-          stateKey,
-          stateValue,
-          'EX',
-          BOT_STATE_TTL_SECONDS,
-        );
+        await this.redis.set(stateKey, stateValue, 'EX', BOT_STATE_TTL_SECONDS);
       } catch (err) {
         this.logger.warn(
           `Failed to enqueue republish flow state for employer ${offer.employer_id}`,
@@ -550,7 +590,9 @@ export class ReminderProcessor {
       let snoozeCount = 0;
       if (existing) {
         try {
-          const parsed = JSON.parse(existing) as { payload?: { snoozeCount?: unknown } };
+          const parsed = JSON.parse(existing) as {
+            payload?: { snoozeCount?: unknown };
+          };
           if (typeof parsed?.payload?.snoozeCount === 'number') {
             snoozeCount = parsed.payload.snoozeCount;
           }
@@ -571,7 +613,14 @@ export class ReminderProcessor {
         updatedAt: new Date().toISOString(),
       });
       await this.redis
-        .set(stateKey, stateValue, 'EX', BOT_STATE_TTL_SECONDS)
+        .eval(
+          LUA_CAS_SET,
+          1,
+          stateKey,
+          stateValue,
+          String(BOT_STATE_TTL_SECONDS),
+          FLOW_IDS.JOB_STATUS_CHECK,
+        )
         .catch((err) =>
           this.logger.warn(
             `Failed to refresh job status check state for employer ${employerId}`,

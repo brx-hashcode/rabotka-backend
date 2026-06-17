@@ -188,10 +188,7 @@ export class AdAdminController {
   @Post(':id/submit')
   @HttpCode(HttpStatus.OK)
   @Roles(UserRole.MANAGER)
-  async submit(
-    @Req() req: AdminAuthenticatedRequest,
-    @Param('id') id: string,
-  ) {
+  async submit(@Req() req: AdminAuthenticatedRequest, @Param('id') id: string) {
     const ad = await this.advertisementService.submit(id);
     await this.logService.create({
       action: 'AD_SUBMITTED',
@@ -244,10 +241,7 @@ export class AdAdminController {
   @Post(':id/pause')
   @HttpCode(HttpStatus.OK)
   @Roles(UserRole.MANAGER)
-  async pause(
-    @Req() req: AdminAuthenticatedRequest,
-    @Param('id') id: string,
-  ) {
+  async pause(@Req() req: AdminAuthenticatedRequest, @Param('id') id: string) {
     const ad = await this.advertisementService.pause(id);
     await this.logService.create({
       action: 'AD_PAUSED',
@@ -262,10 +256,7 @@ export class AdAdminController {
   @Post(':id/resume')
   @HttpCode(HttpStatus.OK)
   @Roles(UserRole.MANAGER)
-  async resume(
-    @Req() req: AdminAuthenticatedRequest,
-    @Param('id') id: string,
-  ) {
+  async resume(@Req() req: AdminAuthenticatedRequest, @Param('id') id: string) {
     const ad = await this.advertisementService.resume(id);
     await this.logService.create({
       action: 'AD_RESUMED',
@@ -280,10 +271,7 @@ export class AdAdminController {
   @Post(':id/cancel')
   @HttpCode(HttpStatus.OK)
   @Roles(UserRole.MANAGER)
-  async cancel(
-    @Req() req: AdminAuthenticatedRequest,
-    @Param('id') id: string,
-  ) {
+  async cancel(@Req() req: AdminAuthenticatedRequest, @Param('id') id: string) {
     const ad = await this.advertisementService.cancel(id);
     await this.logService.create({
       action: 'AD_CANCELLED',
@@ -298,10 +286,7 @@ export class AdAdminController {
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   @Roles(UserRole.MANAGER)
-  async remove(
-    @Req() req: AdminAuthenticatedRequest,
-    @Param('id') id: string,
-  ) {
+  async remove(@Req() req: AdminAuthenticatedRequest, @Param('id') id: string) {
     const result = await this.advertisementService.delete(id);
     await this.logService.create({
       action: 'AD_DELETED',

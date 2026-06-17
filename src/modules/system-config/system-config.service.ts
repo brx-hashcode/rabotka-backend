@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit, Inject } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, OnModuleInit, Inject } from '@nestjs/common';
 import Redis from 'ioredis';
 import { ConfigCategory } from '@prisma/client';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
@@ -151,7 +151,34 @@ export class SystemConfigService implements OnModuleInit {
     return cached.map((v, i) => v ?? entries[i].fallback ?? null);
   }
 
+  // Fee keys that must be positive integers — setting them to 0 or negative
+  // would break penalty/unlock/scoring logic throughout the app.
+  private static readonly POSITIVE_INT_KEYS = new Set([
+    'fees.late_cancellation_penalty_fcfa',
+    'fees.late_cancellation_score_deduction',
+    'fees.cancellation_threshold_hours',
+    'fees.reliability_score_min',
+    'fees.employer_late_cancel_score_deduction',
+    'fees.billing_block_threshold',
+    'fees.max_concurrent_applications',
+    'fees.contact_unlock_fee_employer',
+    'fees.contact_unlock_fee_worker',
+    'fees.contact_unlock_expiry_hours',
+    'fees.contact_recommendation_fee_employer',
+    'fees.welcome_credit_worker',
+    'fees.welcome_credit_employer',
+    'matching.max_notification_workers',
+  ]);
+
   async set(key: string, value: string, adminId?: string): Promise<void> {
+    if (SystemConfigService.POSITIVE_INT_KEYS.has(key)) {
+      const n = Number(value);
+      if (!Number.isFinite(n) || n <= 0) {
+        throw new BadRequestException(
+          `La valeur de "${key}" doit être un entier strictement positif`,
+        );
+      }
+    }
     await this.prisma.systemConfig.update({
       where: { key },
       data: { value, updated_by: adminId ?? null },

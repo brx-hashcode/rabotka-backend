@@ -75,7 +75,11 @@ describe('InvoiceService', () => {
     prisma = makePrisma();
     documentService = makeDocumentService();
     redis = makeRedis();
-    service = new InvoiceService(prisma as any, documentService as any, redis as any);
+    service = new InvoiceService(
+      prisma as any,
+      documentService as any,
+      redis as any,
+    );
   });
 
   describe('create()', () => {
@@ -203,7 +207,9 @@ describe('InvoiceService', () => {
       expect(documentService.fillDocumentTemplateAsPdf).toHaveBeenCalledWith(
         'tpl-invoice-1',
         expect.objectContaining({
-          GENERATED_DATE: new Date(baseInvoice.created_at).toLocaleDateString('fr-FR'),
+          GENERATED_DATE: new Date(baseInvoice.created_at).toLocaleDateString(
+            'fr-FR',
+          ),
         }),
       );
     });

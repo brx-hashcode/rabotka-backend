@@ -227,7 +227,7 @@ async function handleRecommendedJobsDetailStep(
   if (normalizedInput === '1' || normalizedInput === 'postuler') {
     if (profile.profile_type !== 'WORKER') {
       return {
-        reply: ["❌ Seuls les travailleurs peuvent postuler à une offre."],
+        reply: ['❌ Seuls les travailleurs peuvent postuler à une offre.'],
         nextState: state,
       };
     }
@@ -236,7 +236,10 @@ async function handleRecommendedJobsDetailStep(
       .catch(() => undefined);
     const teaser = await buildApplyTeaser(selectedOfferId, ctx);
     if (!teaser) {
-      return { reply: ["❌ Offre introuvable. Tapez *Menu*."], clearState: true };
+      return {
+        reply: ['❌ Offre introuvable. Tapez *Menu*.'],
+        clearState: true,
+      };
     }
     return { reply: [teaser.text], nextState: teaser.applyState };
   }
@@ -278,11 +281,15 @@ async function handleRecommendedJobsDetailStep(
   }
 
   // 4 / explicit menu commands → exit; anything else → re-show detail
-  if (normalizedInput === '4' || isMenuCommand(normalizedInput)) return goToMenu();
+  if (normalizedInput === '4' || isMenuCommand(normalizedInput))
+    return goToMenu();
 
   const offer = await ctx.jobOfferService.findById(selectedOfferId);
   if (!offer) return goToMenu();
-  const item = toOfferListItem({ ...offer, acceptedCount: offer.acceptedCount ?? 0 });
+  const item = toOfferListItem({
+    ...offer,
+    acceptedCount: offer.acceptedCount ?? 0,
+  });
   return { reply: [formatOfferDetailWithActions(item)], nextState: state };
 }
 
@@ -301,7 +308,7 @@ async function handleRecommendedJobsDescriptionStep(
   if (normalizedInput === '1' || normalizedInput === 'postuler') {
     if (profile.profile_type !== 'WORKER') {
       return {
-        reply: ["❌ Seuls les travailleurs peuvent postuler à une offre."],
+        reply: ['❌ Seuls les travailleurs peuvent postuler à une offre.'],
         nextState: state,
       };
     }
@@ -310,7 +317,10 @@ async function handleRecommendedJobsDescriptionStep(
       .catch(() => undefined);
     const teaser = await buildApplyTeaser(selectedOfferId, ctx);
     if (!teaser) {
-      return { reply: ["❌ Offre introuvable. Tapez *Menu*."], clearState: true };
+      return {
+        reply: ['❌ Offre introuvable. Tapez *Menu*.'],
+        clearState: true,
+      };
     }
     return { reply: [teaser.text], nextState: teaser.applyState };
   }
@@ -319,7 +329,10 @@ async function handleRecommendedJobsDescriptionStep(
   if (normalizedInput === '2') {
     const offer = await ctx.jobOfferService.findById(selectedOfferId);
     if (!offer) return { reply: ['Offre introuvable.'], nextState: state };
-    const item = toOfferListItem({ ...offer, acceptedCount: offer.acceptedCount ?? 0 });
+    const item = toOfferListItem({
+      ...offer,
+      acceptedCount: offer.acceptedCount ?? 0,
+    });
     return {
       reply: [formatOfferDetailWithActions(item)],
       nextState: { ...state, payload: { ...payload, step: 'detail' } },
@@ -327,7 +340,8 @@ async function handleRecommendedJobsDescriptionStep(
   }
 
   // 3 / explicit menu commands → exit; anything else → re-show description
-  if (normalizedInput === '3' || isMenuCommand(normalizedInput)) return goToMenu();
+  if (normalizedInput === '3' || isMenuCommand(normalizedInput))
+    return goToMenu();
 
   const offer = await ctx.jobOfferService.findById(selectedOfferId);
   if (!offer) return goToMenu();
@@ -371,7 +385,7 @@ export async function runRecommendedJobsFlow(
   if (offerIds.length === 0) {
     return {
       reply: [
-        "*Aucune offre recommandée pour le moment. Tapez *Menu* pour revenir.*",
+        '*Aucune offre recommandée pour le moment. Tapez *Menu* pour revenir.*',
       ],
       clearState: true,
     };
@@ -414,14 +428,12 @@ export async function runRecommendedJobsFlow(
   }
 
   return {
-    reply: ["❌ Erreur. Tapez *Menu* pour revenir."],
+    reply: ['❌ Erreur. Tapez *Menu* pour revenir.'],
     clearState: true,
   };
 }
 
-export function getRecommendedJobsInitialState(
-  offerIds: string[],
-): BotState {
+export function getRecommendedJobsInitialState(offerIds: string[]): BotState {
   return {
     flowId: FLOW_IDS.RECOMMENDED_JOBS,
     step: 0,

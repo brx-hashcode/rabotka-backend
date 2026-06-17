@@ -4,6 +4,7 @@ import {
   Inject,
   Injectable,
   Logger,
+  NotFoundException,
   OnModuleInit,
 } from '@nestjs/common';
 import { QdrantService } from '../qdrant/qdrant.service';
@@ -141,6 +142,10 @@ export class InterestClusterService implements OnModuleInit {
   // ── Public re-seed (admin / backfill) ────────────────────────────────────
 
   async reseedFromProfile(userId: string): Promise<void> {
+    const exists = await this.prisma.profile.count({ where: { id: userId, status: 'ACTIVE' } });
+    if (!exists) {
+      throw new NotFoundException(`Profile ${userId} not found or not active`);
+    }
     const pointId = toPointId(`interest__${userId}`);
     await this.seedFromProfile(userId, pointId);
     this.logger.log(`Re-seeded interest vector for user=${userId}`);
@@ -155,11 +160,17 @@ export class InterestClusterService implements OnModuleInit {
     const worker = await this.prisma.profile.findUnique({
       where: { id: userId },
       select: {
+        status: true,
         description: true,
         category: { select: { name: true } },
         categories: { select: { category: { select: { name: true } } } },
       },
     });
+    if (!worker || worker.status !== 'ACTIVE') {
+      throw new Error(
+        `Cannot seed interest profile for inactive or missing profile ${userId}`,
+      );
+    }
 
     const parts: string[] = [];
     if (worker?.category?.name) parts.push(worker.category.name);

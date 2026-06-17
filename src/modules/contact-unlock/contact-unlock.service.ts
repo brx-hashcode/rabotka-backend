@@ -426,7 +426,7 @@ export class ContactUnlockService {
         } catch (dbErr) {
           if (useCredit) {
             await this.walletService
-              .creditProfileWallet(
+              .refundProfileWallet(
                 profileId,
                 amount,
                 WalletTransactionType.CONTACT_UNLOCK_CREDIT_CONVERSION,
@@ -456,7 +456,7 @@ export class ContactUnlockService {
     } catch (dbErr) {
       if (useCredit) {
         await this.walletService
-          .creditProfileWallet(
+          .refundProfileWallet(
             profileId,
             amount,
             WalletTransactionType.CONTACT_UNLOCK_CREDIT_CONVERSION,
@@ -677,7 +677,7 @@ export class ContactUnlockService {
 
     await this.prisma.$transaction(async (tx) => {
       if (attempt.employer_paid) {
-        await this.walletService.creditProfileWallet(
+        await this.walletService.refundProfileWallet(
           attempt.employer_id,
           Number(attempt.employer_amount),
           WalletTransactionType.CONTACT_UNLOCK_CREDIT_CONVERSION,
@@ -686,7 +686,7 @@ export class ContactUnlockService {
         );
       }
       if (attempt.worker_paid) {
-        await this.walletService.creditProfileWallet(
+        await this.walletService.refundProfileWallet(
           attempt.worker_id,
           Number(attempt.worker_amount),
           WalletTransactionType.CONTACT_UNLOCK_CREDIT_CONVERSION,
@@ -801,7 +801,7 @@ export class ContactUnlockService {
     const now = new Date();
     await this.prisma.$transaction(async (tx) => {
       if (attempt.employer_paid) {
-        await this.walletService.creditProfileWallet(
+        await this.walletService.refundProfileWallet(
           attempt.employer_id,
           Number(attempt.employer_amount),
           WalletTransactionType.CONTACT_UNLOCK_CREDIT_CONVERSION,
@@ -810,7 +810,7 @@ export class ContactUnlockService {
         );
       }
       if (attempt.worker_paid) {
-        await this.walletService.creditProfileWallet(
+        await this.walletService.refundProfileWallet(
           attempt.worker_id,
           Number(attempt.worker_amount),
           WalletTransactionType.CONTACT_UNLOCK_CREDIT_CONVERSION,
@@ -820,7 +820,10 @@ export class ContactUnlockService {
       }
       await tx.contactUnlockAttempt.update({
         where: { id: attempt.id },
-        data: { status: ContactUnlockStatus.CONVERTED_TO_CREDIT, converted_at: now },
+        data: {
+          status: ContactUnlockStatus.CONVERTED_TO_CREDIT,
+          converted_at: now,
+        },
       });
     });
   }
@@ -925,14 +928,14 @@ export class ContactUnlockService {
           // Standard job — both paid but unlock expired: refund both.
           const employerAmount = Number(attempt.employer_amount);
           const workerAmount = Number(attempt.worker_amount);
-          await this.walletService.creditProfileWallet(
+          await this.walletService.refundProfileWallet(
             attempt.employer_id,
             employerAmount,
             WalletTransactionType.CONTACT_UNLOCK_CREDIT_CONVERSION,
             'contact_unlock_attempt',
             attempt.id,
           );
-          await this.walletService.creditProfileWallet(
+          await this.walletService.refundProfileWallet(
             attempt.worker_id,
             workerAmount,
             WalletTransactionType.CONTACT_UNLOCK_CREDIT_CONVERSION,
@@ -940,8 +943,14 @@ export class ContactUnlockService {
             attempt.id,
           );
           newStatus = ContactUnlockStatus.CONVERTED_TO_CREDIT;
-          conversions.push({ profileId: attempt.employer_id, amount: employerAmount });
-          conversions.push({ profileId: attempt.worker_id, amount: workerAmount });
+          conversions.push({
+            profileId: attempt.employer_id,
+            amount: employerAmount,
+          });
+          conversions.push({
+            profileId: attempt.worker_id,
+            amount: workerAmount,
+          });
         } else if (
           attempt.worker_paid &&
           (employerPaidAtJobLevel || !attempt.employer_paid)
@@ -949,7 +958,7 @@ export class ContactUnlockService {
           // Multi-person: employer paid at job level — refund worker only.
           // Standard: worker paid, employer did not — refund worker.
           const amount = Number(attempt.worker_amount);
-          await this.walletService.creditProfileWallet(
+          await this.walletService.refundProfileWallet(
             attempt.worker_id,
             amount,
             WalletTransactionType.CONTACT_UNLOCK_CREDIT_CONVERSION,
@@ -965,7 +974,7 @@ export class ContactUnlockService {
         ) {
           // Standard: employer paid, worker did not — refund employer.
           const amount = Number(attempt.employer_amount);
-          await this.walletService.creditProfileWallet(
+          await this.walletService.refundProfileWallet(
             attempt.employer_id,
             amount,
             WalletTransactionType.CONTACT_UNLOCK_CREDIT_CONVERSION,

@@ -5,6 +5,7 @@ import {
   IsInt,
   IsEnum,
   IsOptional,
+  IsDateString,
   Min,
   Max,
   MinLength,
@@ -31,7 +32,7 @@ export class CreateJobOfferDto {
   description!: string;
 
   @ApiProperty({ example: '2026-02-15T09:00:00.000Z' })
-  @IsString()
+  @IsDateString()
   scheduled_at!: string;
 
   @ApiPropertyOptional({
@@ -40,7 +41,7 @@ export class CreateJobOfferDto {
   })
   @IsOptional()
   @IsNumber()
-  @Min(0, { message: 'Le montant minimum est 0 FCFA' })
+  @Min(1_000, { message: 'Le montant minimum est 1 000 FCFA' })
   @Max(1_000_000, { message: 'Le montant maximum est 1 000 000 FCFA' })
   amount?: number;
 

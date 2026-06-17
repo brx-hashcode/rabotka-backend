@@ -121,7 +121,13 @@ export class InterestSignalService {
 
     // Fire-and-forget — EMA update must not block the signal recording response
     void this.clusters
-      .applySignal(userId, jobId, vector, baseWeight, job.category?.name ?? null)
+      .applySignal(
+        userId,
+        jobId,
+        vector,
+        baseWeight,
+        job.category?.name ?? null,
+      )
       .catch((err) => {
         this.logger.warn(`EMA update failed for user=${userId}`, err);
       });

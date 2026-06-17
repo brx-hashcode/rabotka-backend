@@ -71,17 +71,21 @@ function adaptToPaginated(rows: any[]) {
 
 function makeApplicationService(overrides: Record<string, unknown> = {}) {
   return {
-    findByWorker: jest.fn().mockImplementation((_id, opts) =>
-      opts && (opts as { page?: number }).page !== undefined
-        ? emptyPaginated()
-        : Promise.resolve([]),
-    ),
+    findByWorker: jest
+      .fn()
+      .mockImplementation((_id, opts) =>
+        opts && (opts as { page?: number }).page !== undefined
+          ? emptyPaginated()
+          : Promise.resolve([]),
+      ),
     findByJobOffer: jest.fn().mockResolvedValue([]),
-    findByEmployer: jest.fn().mockImplementation((_id, opts) =>
-      opts && (opts as { page?: number }).page !== undefined
-        ? emptyPaginated()
-        : Promise.resolve([]),
-    ),
+    findByEmployer: jest
+      .fn()
+      .mockImplementation((_id, opts) =>
+        opts && (opts as { page?: number }).page !== undefined
+          ? emptyPaginated()
+          : Promise.resolve([]),
+      ),
     markAsViewed: jest.fn().mockResolvedValue(undefined),
     ...overrides,
   };
@@ -90,10 +94,14 @@ function makeApplicationService(overrides: Record<string, unknown> = {}) {
 function makePrisma(overrides = {}) {
   return {
     profile: { findUnique: jest.fn().mockResolvedValue(null) },
-    jobOffer: { count: jest.fn().mockResolvedValue(0), findMany: jest.fn().mockResolvedValue([]) },
+    jobOffer: {
+      count: jest.fn().mockResolvedValue(0),
+      findMany: jest.fn().mockResolvedValue([]),
+    },
     application: {
       count: jest.fn().mockResolvedValue(0),
       findMany: jest.fn().mockResolvedValue([]),
+      groupBy: jest.fn().mockResolvedValue([]),
     },
     penalty: { findMany: jest.fn().mockResolvedValue([]) },
     ...overrides,
@@ -316,11 +324,11 @@ describe('BotCommandsService', () => {
     });
 
     it('returns list with items when pending applications exist', async () => {
-      jobOfferService.findByEmployerId.mockResolvedValue([mockOffer]);
-      applicationService.findByJobOffer.mockResolvedValue([
+      prisma.application.findMany.mockResolvedValueOnce([
         {
           id: 'app-1',
           status: 'PENDING',
+          worker_id: 'w-1',
           worker: {
             first_name: 'Alice',
             last_name: 'Dupont',
@@ -330,6 +338,7 @@ describe('BotCommandsService', () => {
             avatar_url: null,
             verification_status: 'VERIFIED',
           },
+          job_offer: { title: 'Plombier' },
         },
       ]);
       const result = await service.candidaturesReceived(employerProfile);
@@ -337,24 +346,19 @@ describe('BotCommandsService', () => {
     });
 
     it('handles application with no worker (fullName = Inconnu)', async () => {
-      jobOfferService.findByEmployerId.mockResolvedValue([mockOffer]);
-      applicationService.findByJobOffer.mockResolvedValue([
-        {
-          id: 'app-2',
-          status: 'PENDING',
-          worker: null,
-        },
+      prisma.application.findMany.mockResolvedValueOnce([
+        { id: 'app-2', status: 'PENDING', worker_id: null, worker: null, job_offer: { title: 'Plombier' } },
       ]);
       const result = await service.candidaturesReceived(employerProfile);
       expect(result.applicationIds).toContain('app-2');
     });
 
     it('handles VIEWED status application', async () => {
-      jobOfferService.findByEmployerId.mockResolvedValue([mockOffer]);
-      applicationService.findByJobOffer.mockResolvedValue([
+      prisma.application.findMany.mockResolvedValueOnce([
         {
           id: 'app-3',
           status: 'VIEWED',
+          worker_id: 'w-3',
           worker: {
             first_name: 'Bob',
             last_name: 'Smith',
@@ -363,6 +367,7 @@ describe('BotCommandsService', () => {
             avatar_url: 'http://example.com/avatar.jpg',
             verification_status: null,
           },
+          job_offer: { title: 'Plombier' },
         },
       ]);
       const result = await service.candidaturesReceived(employerProfile);
@@ -370,11 +375,11 @@ describe('BotCommandsService', () => {
     });
 
     it('returns hasMore for more than 5 items', async () => {
-      jobOfferService.findByEmployerId.mockResolvedValue([mockOffer]);
-      applicationService.findByJobOffer.mockResolvedValue(
+      prisma.application.findMany.mockResolvedValueOnce(
         Array.from({ length: 7 }, (_, i) => ({
           id: `app-${i}`,
           status: 'PENDING',
+          worker_id: `w-${i}`,
           worker: {
             first_name: `W${i}`,
             last_name: 'X',
@@ -383,6 +388,7 @@ describe('BotCommandsService', () => {
             avatar_url: null,
             verification_status: 'VERIFIED',
           },
+          job_offer: { title: 'Plombier' },
         })),
       );
       const result = await service.candidaturesReceived(employerProfile);
@@ -402,14 +408,12 @@ describe('BotCommandsService', () => {
     });
 
     it('returns filled jobs list', async () => {
-      jobOfferService.findByEmployerId.mockResolvedValue([
-        { ...mockOffer, status: 'FILLED' },
-      ]);
-      applicationService.findByJobOffer.mockResolvedValue([
+      prisma.application.findMany.mockResolvedValueOnce([
         {
           id: 'app-1',
           status: 'ACCEPTED',
           worker: { first_name: 'Alice', last_name: 'Dupont' },
+          job_offer: { title: 'Plombier', scheduled_at: new Date(), amount: 15000, payment_flow: 'DAILY' },
         },
       ]);
       const result = await service.filledJobs(employerProfile);
@@ -417,25 +421,20 @@ describe('BotCommandsService', () => {
     });
 
     it('skips accepted application with no worker', async () => {
-      jobOfferService.findByEmployerId.mockResolvedValue([
-        { ...mockOffer, status: 'FILLED' },
-      ]);
-      applicationService.findByJobOffer.mockResolvedValue([
-        { id: 'app-1', status: 'ACCEPTED', worker: null },
+      prisma.application.findMany.mockResolvedValueOnce([
+        { id: 'app-1', status: 'ACCEPTED', worker: null, job_offer: { title: 'Plombier', scheduled_at: new Date(), amount: 15000, payment_flow: 'DAILY' } },
       ]);
       const result = await service.filledJobs(employerProfile);
       expect(result.message).toContain('Aucune mission');
     });
 
     it('uses worker name with empty last_name as Inconnu', async () => {
-      jobOfferService.findByEmployerId.mockResolvedValue([
-        { ...mockOffer, status: 'FILLED' },
-      ]);
-      applicationService.findByJobOffer.mockResolvedValue([
+      prisma.application.findMany.mockResolvedValueOnce([
         {
           id: 'app-1',
           status: 'ACCEPTED',
           worker: { first_name: '', last_name: '' },
+          job_offer: { title: 'Plombier', scheduled_at: new Date(), amount: 15000, payment_flow: 'DAILY' },
         },
       ]);
       const result = await service.filledJobs(employerProfile);

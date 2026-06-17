@@ -31,13 +31,7 @@ function makeCtx(
     } as unknown as PayPenaltiesContext['applicationService'],
     walletService: {
       getProfileWalletBalance: jest.fn().mockResolvedValue(0),
-      debitProfileWallet: jest.fn().mockResolvedValue(undefined),
-      getOrCreateSystemWallet: jest
-        .fn()
-        .mockResolvedValue({ id: 'sys-wallet' }),
-      getOrCreateProfileWallet: jest
-        .fn()
-        .mockResolvedValue({ id: 'profile-wallet' }),
+      debitProfileAndCreditSystem: jest.fn().mockResolvedValue(undefined),
     } as unknown as PayPenaltiesContext['walletService'],
     paymentService: {
       createPaymentUrl: jest
@@ -51,9 +45,6 @@ function makeCtx(
       create: jest.fn().mockResolvedValue({}),
     } as unknown as PayPenaltiesContext['invoiceService'],
     prisma: {
-      $transaction: jest.fn().mockResolvedValue([]),
-      walletTransaction: { create: jest.fn().mockResolvedValue({}) },
-      wallet: { update: jest.fn().mockResolvedValue({}) },
       paymentRequest: { create: jest.fn().mockResolvedValue({ id: 'pr-1' }) },
       payment: { create: jest.fn().mockResolvedValue({}) },
     } as unknown as PayPenaltiesContext['prisma'],
@@ -194,10 +185,48 @@ describe('runPayPenaltiesFlow() - step 2 wallet confirmation', () => {
     );
     const state = makeStep2State();
     const result = await runPayPenaltiesFlow(state, '1', workerProfile, ctx);
-    expect(ctx.walletService.debitProfileWallet).toHaveBeenCalled();
+    expect(ctx.walletService.debitProfileAndCreditSystem).toHaveBeenCalled();
     expect(ctx.applicationService.markPenaltiesPaid).toHaveBeenCalled();
     expect(result.clearState).toBe(true);
     expect(result.reply[0]).toContain('Paiement par crédit');
+  });
+
+  it('uses live penalty total at confirmation, not stale state amount', async () => {
+    const ctx = makeCtx();
+    // Live fetch returns a higher total than what was stored in state
+    (
+      ctx.applicationService.getUnpaidPenalties as jest.Mock
+    ).mockResolvedValue({ count: 3, total: 15000, ids: ['p1', 'p2', 'p3'] });
+    (ctx.walletService.getProfileWalletBalance as jest.Mock).mockResolvedValue(
+      20000,
+    );
+    // state still has old totalAmount of 10000
+    const state = makeStep2State();
+    const result = await runPayPenaltiesFlow(state, '1', workerProfile, ctx);
+    expect(ctx.walletService.debitProfileAndCreditSystem).toHaveBeenCalledWith(
+      workerProfile.id,
+      15000, // live total, not stale 10000
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+    );
+    expect(result.clearState).toBe(true);
+  });
+
+  it('clears state if no unpaid penalties remain at confirmation', async () => {
+    const ctx = makeCtx();
+    (
+      ctx.applicationService.getUnpaidPenalties as jest.Mock
+    ).mockResolvedValue({ count: 0, total: 0, ids: [] });
+    (ctx.walletService.getProfileWalletBalance as jest.Mock).mockResolvedValue(
+      20000,
+    );
+    const state = makeStep2State();
+    const result = await runPayPenaltiesFlow(state, '1', workerProfile, ctx);
+    expect(ctx.walletService.debitProfileAndCreditSystem).not.toHaveBeenCalled();
+    expect(result.clearState).toBe(true);
+    expect(result.reply[0]).toContain('Aucune pénalité');
   });
 
   it('confirms payment on "oui"', async () => {

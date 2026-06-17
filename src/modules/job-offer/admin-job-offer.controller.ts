@@ -137,10 +137,7 @@ export class AdminJobOfferController {
   })
   @ApiResponse({ status: 204, description: 'Job offer deleted' })
   @ApiResponse({ status: 404, description: 'Job offer not found' })
-  async remove(
-    @Param('id') id: string,
-    @Req() req: AdminAuthenticatedRequest,
-  ) {
+  async remove(@Param('id') id: string, @Req() req: AdminAuthenticatedRequest) {
     await this.jobOfferService.deleteJobOfferByAdmin(id);
     await this.logService.create({
       action: 'JOB_OFFER_DELETED',

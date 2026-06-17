@@ -30,6 +30,7 @@ import {
   VerifyOtpDto,
   SendAdminOtpDto,
   VerifyAdminOtpDto,
+  UpdateAdminMeDto,
 } from './dto';
 import { QrGateway } from '../ws-notifications/qr.gateway';
 import { WsNotificationsGateway } from '../ws-notifications/ws-notifications.gateway';
@@ -363,21 +364,12 @@ export class AuthController {
   @UseGuards(AdminAuthGuard)
   @ApiOperation({ summary: 'Update current admin profile' })
   @ApiCookieAuth()
-  @ApiBody({
-    schema: {
-      type: 'object',
-      properties: {
-        firstName: { type: 'string' },
-        lastName: { type: 'string' },
-      },
-      required: ['firstName', 'lastName'],
-    },
-  })
+  @ApiBody({ type: UpdateAdminMeDto })
   @ApiResponse({ status: 200, description: 'Updated admin user' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   async updateAdminMe(
     @Req() req: AdminAuthenticatedRequest,
-    @Body() body: { firstName: string; lastName: string },
+    @Body() body: UpdateAdminMeDto,
   ): Promise<{
     id: string;
     email: string;

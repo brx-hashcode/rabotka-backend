@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     rm -rf /var/lib/apt/lists/* && \
     npm install -g pnpm
 
-COPY package.json pnpm-lock.yaml ./
+COPY package.json pnpm-lock.yaml .npmrc ./
 
 # --ignore-scripts skips postinstall (prisma generate) which crashes due to
 # a transitive ESM/CJS conflict in @prisma/dev bundled with prisma@7.x
@@ -40,6 +40,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libreoffice-writer \
         fonts-liberation \
         fonts-dejavu-core \
+        fonts-noto \
+        fonts-noto-cjk \
         fontconfig && \
     fc-cache -f && \
     rm -rf /var/lib/apt/lists/* && \
@@ -60,6 +62,7 @@ RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh && \
     chmod +x /usr/local/bin/docker-entrypoint.sh
 
 ENV NODE_ENV=production \
+    CI=true \
     PORT=3000 \
     NODE_OPTIONS="--max-old-space-size=2048" \
     PNPM_HOME="/home/nestjs/.local/share/pnpm" \
@@ -91,6 +94,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libreoffice-writer \
         fonts-liberation \
         fonts-dejavu-core \
+        fonts-noto \
+        fonts-noto-cjk \
         fontconfig && \
     fc-cache -f && \
     rm -rf /var/lib/apt/lists/* && \
@@ -118,6 +123,7 @@ RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh && \
 
 # 512 MB heap — leaves headroom for LibreOffice within the 700 MB compose cap
 ENV NODE_ENV=production \
+    CI=true \
     PORT=3000 \
     NODE_OPTIONS="--max-old-space-size=512" \
     PNPM_HOME="/home/nestjs/.local/share/pnpm" \

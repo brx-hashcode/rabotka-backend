@@ -1,4 +1,5 @@
 import { Module, forwardRef } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
 import { PrismaModule } from '../../common/services/prisma/prisma.module';
 import { BotModule } from '../bot/bot.module';
 import { SystemConfigModule } from '../system-config/system-config.module';
@@ -8,6 +9,7 @@ import { PaymentWebhookController } from './payment.webhook.controller';
 
 @Module({
   imports: [
+    ConfigModule,
     PrismaModule,
     forwardRef(() => BotModule),
     forwardRef(() => SystemConfigModule),

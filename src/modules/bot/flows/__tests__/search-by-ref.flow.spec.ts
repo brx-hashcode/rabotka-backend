@@ -39,7 +39,9 @@ const baseOffer = {
   employerScore: null,
 };
 
-function makeCtx(overrides: Partial<{ jobOfferService: any; systemConfigService: any }> = {}) {
+function makeCtx(
+  overrides: Partial<{ jobOfferService: any; systemConfigService: any }> = {},
+) {
   return {
     jobOfferService: {
       findByReference: jest.fn().mockResolvedValue(baseOffer),
@@ -96,20 +98,35 @@ describe('runSearchByRefFlow()', () => {
   describe('menu command', () => {
     it('exits on "menu" regardless of step', async () => {
       const ctx = makeCtx();
-      const result = await runSearchByRefFlow(refState(), 'menu', workerProfile, ctx);
+      const result = await runSearchByRefFlow(
+        refState(),
+        'menu',
+        workerProfile,
+        ctx,
+      );
       expect(result.clearState).toBe(true);
       expect(result.reply[0]).toContain('Menu');
     });
 
     it('exits on "Menu" (capitalized)', async () => {
-      const result = await runSearchByRefFlow(refState(), 'Menu', workerProfile, makeCtx());
+      const result = await runSearchByRefFlow(
+        refState(),
+        'Menu',
+        workerProfile,
+        makeCtx(),
+      );
       expect(result.clearState).toBe(true);
     });
   });
 
   describe('employer guard', () => {
     it('rejects employer profile immediately', async () => {
-      const result = await runSearchByRefFlow(refState(), 'RBT-ABC12', employerProfile, makeCtx());
+      const result = await runSearchByRefFlow(
+        refState(),
+        'RBT-ABC12',
+        employerProfile,
+        makeCtx(),
+      );
       expect(result.clearState).toBe(true);
       expect(result.reply[0]).toContain('travailleurs');
     });
@@ -117,14 +134,24 @@ describe('runSearchByRefFlow()', () => {
 
   describe('ref step', () => {
     it('shows prompt again on empty input', async () => {
-      const result = await runSearchByRefFlow(refState(), '  ', workerProfile, makeCtx());
+      const result = await runSearchByRefFlow(
+        refState(),
+        '  ',
+        workerProfile,
+        makeCtx(),
+      );
       expect(result.reply[0]).toContain('référence');
       expect(result.clearState).toBeUndefined();
     });
 
     it('returns offer detail card when offer is found', async () => {
       const ctx = makeCtx();
-      const result = await runSearchByRefFlow(refState(), 'RBT-ABC12', workerProfile, ctx);
+      const result = await runSearchByRefFlow(
+        refState(),
+        'RBT-ABC12',
+        workerProfile,
+        ctx,
+      );
       expect(ctx.jobOfferService.findByReference).toHaveBeenCalled();
       expect(result.reply[0]).toBeTruthy();
       expect(result.nextState?.payload?.step).toBe('detail');
@@ -132,8 +159,15 @@ describe('runSearchByRefFlow()', () => {
     });
 
     it('reports not found when offer is null', async () => {
-      const ctx = makeCtx({ jobOfferService: { findByReference: jest.fn().mockResolvedValue(null) } });
-      const result = await runSearchByRefFlow(refState(), 'RBT-XXXXX', workerProfile, ctx);
+      const ctx = makeCtx({
+        jobOfferService: { findByReference: jest.fn().mockResolvedValue(null) },
+      });
+      const result = await runSearchByRefFlow(
+        refState(),
+        'RBT-XXXXX',
+        workerProfile,
+        ctx,
+      );
       expect(result.reply[0]).toContain('Aucune offre trouvée');
       expect(result.nextState?.payload?.step).toBe('ref');
     });
@@ -141,12 +175,19 @@ describe('runSearchByRefFlow()', () => {
     it('rejects offer with non-active status', async () => {
       const ctx = makeCtx({
         jobOfferService: {
-          findByReference: jest.fn().mockResolvedValue({ ...baseOffer, status: 'COMPLETED' }),
+          findByReference: jest
+            .fn()
+            .mockResolvedValue({ ...baseOffer, status: 'COMPLETED' }),
         },
       });
-      const result = await runSearchByRefFlow(refState(), 'RBT-ABC12', workerProfile, ctx);
+      const result = await runSearchByRefFlow(
+        refState(),
+        'RBT-ABC12',
+        workerProfile,
+        ctx,
+      );
       expect(result.clearState).toBe(true);
-      expect(result.reply[0]).toContain("plus disponible");
+      expect(result.reply[0]).toContain('plus disponible');
     });
 
     it('rejects offer with PARTIALLY_FILLED status that is full', async () => {
@@ -160,7 +201,12 @@ describe('runSearchByRefFlow()', () => {
           }),
         },
       });
-      const result = await runSearchByRefFlow(refState(), 'RBT-ABC12', workerProfile, ctx);
+      const result = await runSearchByRefFlow(
+        refState(),
+        'RBT-ABC12',
+        workerProfile,
+        ctx,
+      );
       expect(result.clearState).toBe(true);
       expect(result.reply[0]).toContain('complète');
     });
@@ -176,7 +222,12 @@ describe('runSearchByRefFlow()', () => {
           }),
         },
       });
-      const result = await runSearchByRefFlow(refState(), 'RBT-ABC12', workerProfile, ctx);
+      const result = await runSearchByRefFlow(
+        refState(),
+        'RBT-ABC12',
+        workerProfile,
+        ctx,
+      );
       expect(result.nextState?.payload?.step).toBe('detail');
     });
   });
@@ -189,12 +240,22 @@ describe('runSearchByRefFlow()', () => {
         payload: { step: 'detail' },
         updatedAt: new Date().toISOString(),
       };
-      const result = await runSearchByRefFlow(state, '1', workerProfile, makeCtx());
+      const result = await runSearchByRefFlow(
+        state,
+        '1',
+        workerProfile,
+        makeCtx(),
+      );
       expect(result.reply[0]).toContain('référence');
     });
 
     it('1 — starts apply confirmation for worker', async () => {
-      const result = await runSearchByRefFlow(detailState(), '1', workerProfile, makeCtx());
+      const result = await runSearchByRefFlow(
+        detailState(),
+        '1',
+        workerProfile,
+        makeCtx(),
+      );
       expect(result.reply[0]).toContain('postuler');
       expect(result.nextState?.flowId).toBe(FLOW_IDS.APPLY_JOB);
     });
@@ -206,42 +267,87 @@ describe('runSearchByRefFlow()', () => {
         payload: { step: 'detail', offerId: 'offer-1' },
         updatedAt: new Date().toISOString(),
       };
-      const result = await runSearchByRefFlow(state, '1', employerProfile, makeCtx());
+      const result = await runSearchByRefFlow(
+        state,
+        '1',
+        employerProfile,
+        makeCtx(),
+      );
       expect(result.reply[0]).toContain('travailleurs');
       expect(result.clearState).toBe(true);
     });
 
     it('1 — handles offer not found during apply', async () => {
-      const ctx = makeCtx({ jobOfferService: { findByReference: jest.fn(), findById: jest.fn().mockResolvedValue(null) } });
-      const result = await runSearchByRefFlow(detailState(), '1', workerProfile, ctx);
+      const ctx = makeCtx({
+        jobOfferService: {
+          findByReference: jest.fn(),
+          findById: jest.fn().mockResolvedValue(null),
+        },
+      });
+      const result = await runSearchByRefFlow(
+        detailState(),
+        '1',
+        workerProfile,
+        ctx,
+      );
       expect(result.clearState).toBe(true);
     });
 
     it('2 — shows description', async () => {
-      const result = await runSearchByRefFlow(detailState(), '2', workerProfile, makeCtx());
+      const result = await runSearchByRefFlow(
+        detailState(),
+        '2',
+        workerProfile,
+        makeCtx(),
+      );
       expect(result.reply[0]).toContain('Plombier');
       expect(result.nextState?.payload?.step).toBe('description');
     });
 
     it('2 — handles offer not found for description', async () => {
-      const ctx = makeCtx({ jobOfferService: { findByReference: jest.fn(), findById: jest.fn().mockResolvedValue(null) } });
-      const result = await runSearchByRefFlow(detailState(), '2', workerProfile, ctx);
+      const ctx = makeCtx({
+        jobOfferService: {
+          findByReference: jest.fn(),
+          findById: jest.fn().mockResolvedValue(null),
+        },
+      });
+      const result = await runSearchByRefFlow(
+        detailState(),
+        '2',
+        workerProfile,
+        ctx,
+      );
       expect(result.clearState).toBe(true);
     });
 
     it('3 — goes back to ref prompt', async () => {
-      const result = await runSearchByRefFlow(detailState(), '3', workerProfile, makeCtx());
+      const result = await runSearchByRefFlow(
+        detailState(),
+        '3',
+        workerProfile,
+        makeCtx(),
+      );
       expect(result.reply[0]).toContain('référence');
       expect(result.nextState?.payload?.step).toBe('ref');
     });
 
     it('4 — exits to menu', async () => {
-      const result = await runSearchByRefFlow(detailState(), '4', workerProfile, makeCtx());
+      const result = await runSearchByRefFlow(
+        detailState(),
+        '4',
+        workerProfile,
+        makeCtx(),
+      );
       expect(result.clearState).toBe(true);
     });
 
     it('unknown input — re-prompts', async () => {
-      const result = await runSearchByRefFlow(detailState(), 'xyz', workerProfile, makeCtx());
+      const result = await runSearchByRefFlow(
+        detailState(),
+        'xyz',
+        workerProfile,
+        makeCtx(),
+      );
       expect(result.reply[0]).toContain('Répondez par');
       expect(result.nextState?.payload?.step).toBe('detail');
     });
@@ -255,39 +361,79 @@ describe('runSearchByRefFlow()', () => {
         payload: { step: 'description' },
         updatedAt: new Date().toISOString(),
       };
-      const result = await runSearchByRefFlow(state, '1', workerProfile, makeCtx());
+      const result = await runSearchByRefFlow(
+        state,
+        '1',
+        workerProfile,
+        makeCtx(),
+      );
       expect(result.reply[0]).toContain('référence');
     });
 
     it('1 — starts apply confirmation', async () => {
-      const result = await runSearchByRefFlow(descriptionState(), '1', workerProfile, makeCtx());
+      const result = await runSearchByRefFlow(
+        descriptionState(),
+        '1',
+        workerProfile,
+        makeCtx(),
+      );
       expect(result.reply[0]).toContain('postuler');
       expect(result.nextState?.flowId).toBe(FLOW_IDS.APPLY_JOB);
     });
 
     it('2 — returns to detail card', async () => {
-      const result = await runSearchByRefFlow(descriptionState(), '2', workerProfile, makeCtx());
+      const result = await runSearchByRefFlow(
+        descriptionState(),
+        '2',
+        workerProfile,
+        makeCtx(),
+      );
       expect(result.nextState?.payload?.step).toBe('detail');
     });
 
     it('2 — handles offer not found', async () => {
-      const ctx = makeCtx({ jobOfferService: { findByReference: jest.fn(), findById: jest.fn().mockResolvedValue(null) } });
-      const result = await runSearchByRefFlow(descriptionState(), '2', workerProfile, ctx);
+      const ctx = makeCtx({
+        jobOfferService: {
+          findByReference: jest.fn(),
+          findById: jest.fn().mockResolvedValue(null),
+        },
+      });
+      const result = await runSearchByRefFlow(
+        descriptionState(),
+        '2',
+        workerProfile,
+        ctx,
+      );
       expect(result.clearState).toBe(true);
     });
 
     it('3 — exits to menu', async () => {
-      const result = await runSearchByRefFlow(descriptionState(), '3', workerProfile, makeCtx());
+      const result = await runSearchByRefFlow(
+        descriptionState(),
+        '3',
+        workerProfile,
+        makeCtx(),
+      );
       expect(result.clearState).toBe(true);
     });
 
     it('"menu" command — exits to menu', async () => {
-      const result = await runSearchByRefFlow(descriptionState(), 'menu', workerProfile, makeCtx());
+      const result = await runSearchByRefFlow(
+        descriptionState(),
+        'menu',
+        workerProfile,
+        makeCtx(),
+      );
       expect(result.clearState).toBe(true);
     });
 
     it('unknown input — re-prompts', async () => {
-      const result = await runSearchByRefFlow(descriptionState(), 'xyz', workerProfile, makeCtx());
+      const result = await runSearchByRefFlow(
+        descriptionState(),
+        'xyz',
+        workerProfile,
+        makeCtx(),
+      );
       expect(result.reply[0]).toContain('Répondez par');
       expect(result.nextState?.payload?.step).toBe('description');
     });

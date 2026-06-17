@@ -14,18 +14,34 @@ function makeAuthService() {
       name: 'Admin',
     }),
     revokeToken: jest.fn().mockResolvedValue(undefined),
-    updateAdminById: jest.fn().mockResolvedValue({ id: 'u-1', firstName: 'John', lastName: 'Doe', role: 'ADMIN' }),
-    initQrSession: jest.fn().mockResolvedValue({ sessionId: 's-1', consumeNonce: 'n-1', qrUrl: 'http://qr', expiresIn: 300 }),
+    updateAdminById: jest.fn().mockResolvedValue({
+      id: 'u-1',
+      firstName: 'John',
+      lastName: 'Doe',
+      role: 'ADMIN',
+    }),
+    initQrSession: jest.fn().mockResolvedValue({
+      sessionId: 's-1',
+      consumeNonce: 'n-1',
+      qrUrl: 'http://qr',
+      expiresIn: 300,
+    }),
     pollQrSession: jest.fn().mockResolvedValue({ status: 'pending' }),
     unpairPhone: jest.fn().mockResolvedValue(undefined),
-    generatePhonePairingOtp: jest.fn().mockResolvedValue({ otp: '123456', expiresIn: 300, userId: 'u-1' }),
+    generatePhonePairingOtp: jest
+      .fn()
+      .mockResolvedValue({ otp: '123456', expiresIn: 300, userId: 'u-1' }),
     verifyPhonePairingOtp: jest.fn().mockResolvedValue({ token: 'phone-tok' }),
-    generateTotp: jest.fn().mockResolvedValue({ secret: 'sec', otpAuthUrl: 'otpauth://...' }),
+    generateTotp: jest
+      .fn()
+      .mockResolvedValue({ secret: 'sec', otpAuthUrl: 'otpauth://...' }),
     verifyTotp: jest.fn().mockResolvedValue({ success: true }),
     disableTotp: jest.fn().mockResolvedValue({ success: true }),
     consumeQrSession: jest.fn().mockResolvedValue({ token: 'qr-tok' }),
     confirmQrSession: jest.fn().mockResolvedValue({ success: true }),
-    setupTotp: jest.fn().mockResolvedValue({ secret: 'sec', otpAuthUrl: 'otpauth://...' }),
+    setupTotp: jest
+      .fn()
+      .mockResolvedValue({ secret: 'sec', otpAuthUrl: 'otpauth://...' }),
     enableTotp: jest.fn().mockResolvedValue({ success: true }),
     verifyTotpLogin: jest.fn().mockResolvedValue({ token: 'totp-tok' }),
   };

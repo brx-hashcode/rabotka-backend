@@ -192,10 +192,22 @@ describe('EventService', () => {
         ...baseEvent,
         start_date: newStart,
         profiles: [
-          { id: 'p1', first_name: 'Alice', last_name: 'D', avatar_url: null, email: 'alice@test.com', phone: '+242001' },
+          {
+            id: 'p1',
+            first_name: 'Alice',
+            last_name: 'D',
+            avatar_url: null,
+            email: 'alice@test.com',
+            phone: '+242001',
+          },
         ],
         assigned_users: [
-          { id: 'u1', first_name: 'Bob', last_name: 'M', email: 'bob@test.com' },
+          {
+            id: 'u1',
+            first_name: 'Bob',
+            last_name: 'M',
+            email: 'bob@test.com',
+          },
         ],
       };
       mockPrisma.event.findUnique.mockResolvedValue(baseEvent);
@@ -208,7 +220,10 @@ describe('EventService', () => {
 
       expect(mockDispatcher.dispatchEventUpdated).toHaveBeenCalledWith(
         expect.arrayContaining([
-          expect.objectContaining({ email: 'alice@test.com', phone: '+242001' }),
+          expect.objectContaining({
+            email: 'alice@test.com',
+            phone: '+242001',
+          }),
           expect.objectContaining({ email: 'bob@test.com' }),
         ]),
         expect.any(Object),
@@ -218,7 +233,10 @@ describe('EventService', () => {
 
     it('does not dispatch update notification when dates do not change', async () => {
       mockPrisma.event.findUnique.mockResolvedValue(baseEvent);
-      mockPrisma.event.update.mockResolvedValue({ ...baseEvent, title: 'New title' });
+      mockPrisma.event.update.mockResolvedValue({
+        ...baseEvent,
+        title: 'New title',
+      });
 
       await service.update(1, { title: 'New title' });
 

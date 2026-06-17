@@ -74,6 +74,7 @@ describe('ReminderProcessor', () => {
     redis = {
       get: jest.fn().mockResolvedValue(null),
       set: jest.fn().mockResolvedValue('OK'),
+      eval: jest.fn().mockResolvedValue(1),
       del: jest.fn().mockResolvedValue(1),
     };
     systemConfigService = {
@@ -473,7 +474,10 @@ describe('ReminderProcessor', () => {
         String(call[0]).includes('bot:state:worker-1'),
       );
       expect(botStateCall).toBeDefined();
-      const stateValue = JSON.parse(botStateCall[1] as string) as { flowId: string; payload: { applicationId: string } };
+      const stateValue = JSON.parse(botStateCall[1] as string) as {
+        flowId: string;
+        payload: { applicationId: string };
+      };
       expect(stateValue.flowId).toBe('cancel_application');
       expect(stateValue.payload.applicationId).toBe('app-1');
     });
@@ -716,12 +720,15 @@ describe('ReminderProcessor', () => {
         },
       });
 
-      const setCalls = redis.set.mock.calls;
-      const stateCall = setCalls.find((call: unknown[]) =>
-        String(call[0]).includes('emp-1'),
+      // State is now written via CAS (redis.eval) to avoid overwriting active flows
+      const evalCalls = redis.eval.mock.calls;
+      const stateCall = evalCalls.find((call: unknown[]) =>
+        String(call[2]).includes('emp-1'),
       );
       expect(stateCall).toBeDefined();
-      const stateValue = JSON.parse(stateCall[1] as string) as { payload: { snoozeCount: number } };
+      const stateValue = JSON.parse(stateCall[3] as string) as {
+        payload: { snoozeCount: number };
+      };
       expect(stateValue.payload.snoozeCount).toBe(3);
     });
 

@@ -18,10 +18,7 @@ export function haversineKm(a: Coordinates, b: Coordinates): number {
  * Proximity score 0–1. Distance 0 km → 1.0, falls off with a half-life of
  * `halfLifeKm` (default 5 km — tuned for a city like Brazzaville).
  */
-export function proximityScore(
-  distanceKm: number,
-  halfLifeKm = 5,
-): number {
+export function proximityScore(distanceKm: number, halfLifeKm = 5): number {
   return Math.exp((-Math.LN2 * distanceKm) / halfLifeKm);
 }
 

@@ -483,7 +483,7 @@ describe('ClaimService', () => {
   describe('deleteCommentAsProfile', () => {
     it('deletes comment as profile', async () => {
       mockPrisma.claim.findUnique.mockResolvedValue(baseClaim);
-      mockPrisma.claimComment.findFirst.mockResolvedValue(baseComment);
+      mockPrisma.claimComment.findFirst.mockResolvedValue({ ...baseComment, profile_id: 'profile-1' });
       mockPrisma.claimComment.delete.mockResolvedValue(baseComment);
 
       await service.deleteCommentAsProfile('claim-1', 'comment-1', 'profile-1');

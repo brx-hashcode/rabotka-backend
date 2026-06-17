@@ -79,7 +79,7 @@ function buildCancelledReply(penaltyAmount: number | null): string {
     '',
     "L'employeur a été notifié.",
     '',
-    "Tapez *Menu* pour revenir.",
+    'Tapez *Menu* pour revenir.',
   ].join('\n');
 }
 
@@ -230,7 +230,7 @@ async function handleCancelStep1(
   if (normalized === '2') {
     return {
       reply: [
-        "Annulation annulée. Votre candidature est maintenue. Tapez *Menu*.",
+        'Annulation annulée. Votre candidature est maintenue. Tapez *Menu*.',
       ],
       clearState: true,
     };
@@ -276,7 +276,7 @@ async function handleCancelStep2(args: CancelStepArgs): Promise<FlowResult> {
   if (normalized === '2' || normalized === 'non') {
     return {
       reply: [
-        "Annulation annulée. Votre candidature est maintenue. Tapez *Menu*.",
+        'Annulation annulée. Votre candidature est maintenue. Tapez *Menu*.',
       ],
       clearState: true,
     };
@@ -304,14 +304,16 @@ export async function runCancelApplicationFlow(
 
   if (!applicationId) {
     return {
-      reply: ["❌ Candidature non trouvée. Tapez *Menu*."],
+      reply: ['❌ Candidature non trouvée. Tapez *Menu*.'],
       clearState: true,
     };
   }
 
   if (profile.profile_type !== 'WORKER') {
     return {
-      reply: ["❌ Seuls les travailleurs peuvent annuler leurs candidatures. Tapez *Menu*."],
+      reply: [
+        '❌ Seuls les travailleurs peuvent annuler leurs candidatures. Tapez *Menu*.',
+      ],
       clearState: true,
     };
   }
@@ -319,7 +321,7 @@ export async function runCancelApplicationFlow(
   const app = await ctx.applicationService.findById(applicationId);
   if (app?.worker_id !== profile.id) {
     return {
-      reply: ["❌ Candidature introuvable. Tapez *Menu*."],
+      reply: ['❌ Candidature introuvable. Tapez *Menu*.'],
       clearState: true,
     };
   }
@@ -330,7 +332,7 @@ export async function runCancelApplicationFlow(
     app.status !== 'WAITING_PAYMENT'
   ) {
     return {
-      reply: ["❌ Cette candidature ne peut plus être annulée. Tapez *Menu*."],
+      reply: ['❌ Cette candidature ne peut plus être annulée. Tapez *Menu*.'],
       clearState: true,
     };
   }
@@ -361,16 +363,11 @@ export async function runCancelApplicationFlow(
   };
 
   if (state.step === 1) {
-    return handleCancelStep1(
-      stepArgs,
-      app,
-      isLate,
-      timeRemainingStr,
-    );
+    return handleCancelStep1(stepArgs, app, isLate, timeRemainingStr);
   }
   if (state.step === 2) return handleCancelStep2(stepArgs);
 
-  return { reply: ["❌ Erreur. Tapez *Menu*."], clearState: true };
+  return { reply: ['❌ Erreur. Tapez *Menu*.'], clearState: true };
 }
 
 export function getCancelApplicationInitialState(
