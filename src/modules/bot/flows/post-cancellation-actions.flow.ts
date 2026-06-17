@@ -99,9 +99,7 @@ export async function runPostCancellationActionsFlow(
         };
       } catch (err) {
         const message =
-          err instanceof Error
-            ? err.message
-            : 'Erreur lors de la suppression.';
+          err instanceof Error ? err.message : 'Erreur lors de la suppression.';
         return {
           reply: [`❌ ${message} Tapez *Menu* pour revenir.`],
           clearState: true,

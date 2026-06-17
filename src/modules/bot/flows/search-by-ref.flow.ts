@@ -87,7 +87,9 @@ async function handleRefStep(
   const remaining = Math.max(0, offer.quantity - (offer.acceptedCount ?? 0));
   if (offer.status !== 'ACTIVE' && offer.status !== 'PARTIALLY_FILLED') {
     return {
-      reply: ["❌ Cette offre n'est plus disponible. Tapez *Menu* pour revenir."],
+      reply: [
+        "❌ Cette offre n'est plus disponible. Tapez *Menu* pour revenir.",
+      ],
       clearState: true,
     };
   }
@@ -171,7 +173,7 @@ async function handleDetailStep(
     const offer = await ctx.jobOfferService.findById(offerId);
     if (!offer) {
       return {
-        reply: ["*Offre introuvable. Tapez *Menu*.*"],
+        reply: ['*Offre introuvable. Tapez *Menu*.*'],
         clearState: true,
       };
     }
@@ -227,7 +229,11 @@ async function handleDescriptionStep(
   }
   if (trimmed === '2') {
     const offer = await ctx.jobOfferService.findById(offerId);
-    if (!offer) return { reply: ["*Offre introuvable. Tapez *Menu*.*"], clearState: true };
+    if (!offer)
+      return {
+        reply: ['*Offre introuvable. Tapez *Menu*.*'],
+        clearState: true,
+      };
     return {
       reply: [formatOfferDetailWithActions(jobOfferToOfferListItem(offer))],
       nextState: {

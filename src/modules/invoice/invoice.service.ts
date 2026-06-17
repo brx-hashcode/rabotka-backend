@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   ForbiddenException,
+  BadRequestException,
   Inject,
 } from '@nestjs/common';
 import Redis from 'ioredis';
@@ -65,6 +66,9 @@ export class InvoiceService {
     relatedEntityType?: string;
     relatedEntityId?: string;
   }): Promise<InvoiceItem> {
+    if (params.amount <= 0) {
+      throw new BadRequestException('Invoice amount must be positive');
+    }
     if (params.paymentRequestId) {
       const existing = await this.prisma.invoice.findUnique({
         where: { payment_request_id: params.paymentRequestId },

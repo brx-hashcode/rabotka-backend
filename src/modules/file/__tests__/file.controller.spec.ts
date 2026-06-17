@@ -27,13 +27,16 @@ function makeFile(
   };
 }
 
+const mockConfigService = { get: jest.fn().mockReturnValue(undefined) };
+
 describe('FileController', () => {
   let controller: FileController;
   let storage: ReturnType<typeof makeStorage>;
 
   beforeEach(() => {
     storage = makeStorage();
-    controller = new FileController(storage as any);
+    mockConfigService.get.mockReturnValue(undefined);
+    controller = new FileController(storage as any, mockConfigService as any);
   });
 
   it('throws when no files provided', async () => {
@@ -53,7 +56,7 @@ describe('FileController', () => {
     expect(result).toEqual({ file_url: 'https://cdn.example.com/file.jpg' });
     expect(storage.upload).toHaveBeenCalledWith(
       expect.any(Buffer),
-      'test.jpg',
+      expect.stringMatching(/\.jpg$/),
       expect.objectContaining({ mimeType: 'image/jpeg', folder: 'files' }),
     );
   });
@@ -96,7 +99,7 @@ describe('FileController', () => {
     );
     expect(storage.upload).toHaveBeenCalledWith(
       expect.any(Buffer),
-      'doc.pdf',
+      expect.stringMatching(/\.pdf$/),
       expect.objectContaining({ access: 'private' }),
     );
   });

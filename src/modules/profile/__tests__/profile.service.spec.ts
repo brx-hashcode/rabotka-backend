@@ -144,7 +144,7 @@ describe('ProfileService', () => {
     jest.clearAllMocks();
     prisma = makePrisma();
     // Make $transaction pass the same mock instance so spies on prisma.profile.update etc. are observable
-    (prisma.$transaction as jest.Mock).mockImplementation((calls: any) =>
+    prisma.$transaction.mockImplementation((calls: any) =>
       Array.isArray(calls) ? Promise.resolve(calls) : calls(prisma),
     );
     fileService = makeFileService();
@@ -163,7 +163,10 @@ describe('ProfileService', () => {
       {
         getProfileWalletBalance: jest.fn().mockResolvedValue(0),
         grantWelcomeCredit: jest.fn().mockResolvedValue(undefined),
-        getWelcomeCreditsConfig: jest.fn().mockResolvedValue({ workerCreditFcfa: 100, employerCreditFcfa: 500 }),
+        getWelcomeCreditsConfig: jest.fn().mockResolvedValue({
+          workerCreditFcfa: 100,
+          employerCreditFcfa: 500,
+        }),
         creditProfileWallet: jest.fn().mockResolvedValue(undefined),
       } as any, // walletService
       documentService as any, // documentService
@@ -743,7 +746,9 @@ describe('ProfileService', () => {
         categories: [],
       });
       const result = await service.getProfileDetailForAdmin('p-1');
-      expect(result.kycDocuments[0].documentUrl).toBe('https://storage/folder/file.jpg');
+      expect(result.kycDocuments[0].documentUrl).toBe(
+        'https://storage/folder/file.jpg',
+      );
     });
   });
 

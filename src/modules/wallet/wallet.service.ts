@@ -149,6 +149,9 @@ export class WalletService {
     referenceType?: string,
     referenceId?: string,
   ): Promise<void> {
+    if (amount <= 0) {
+      throw new BadRequestException('Credit amount must be positive');
+    }
     const wallet = await this.getOrCreateProfileWallet(profileId);
     await this.prisma.$transaction(async (tx) => {
       await tx.walletTransaction.create({
@@ -165,6 +168,24 @@ export class WalletService {
         data: { balance: { increment: amount } },
       });
     });
+  }
+
+  // Alias for automated refunds (payment failed, unlock aborted, etc.)
+  // Use creditProfileWallet only for admin-initiated manual credits.
+  async refundProfileWallet(
+    profileId: string,
+    amount: number,
+    type: WalletTransactionType,
+    referenceType?: string,
+    referenceId?: string,
+  ): Promise<void> {
+    return this.creditProfileWallet(
+      profileId,
+      amount,
+      type,
+      referenceType,
+      referenceId,
+    );
   }
 
   async debitProfileWallet(
@@ -737,7 +758,10 @@ export class WalletService {
     };
   }
 
-  async getOrCreateMobileMoneyWallet(): Promise<{ id: string; balance: number }> {
+  async getOrCreateMobileMoneyWallet(): Promise<{
+    id: string;
+    balance: number;
+  }> {
     let wallet = await this.prisma.wallet.findFirst({
       where: {
         owner_type: WalletOwnerType.MOBILE_MONEY,
@@ -859,12 +883,11 @@ export class WalletService {
           gateway: isPaymentRequest
             ? (parts[1] ?? 'UNKNOWN')
             : parts[0] === 'withdrawal'
-              ? (parts[1] || null)
+              ? parts[1] || null
               : null,
           operator: isPaymentRequest ? (parts[2] ?? 'UNKNOWN') : null,
-          description: parts[0] === 'withdrawal'
-            ? (parts.slice(2).join(':') || null)
-            : null,
+          description:
+            parts[0] === 'withdrawal' ? parts.slice(2).join(':') || null : null,
           status: 'COMPLETED',
         };
       }),
@@ -892,11 +915,9 @@ export class WalletService {
         );
       }
       // encode gateway (reference) and description into reference_type
-      const refType = [
-        'withdrawal',
-        reference ?? '',
-        description ?? '',
-      ].join(':');
+      const refType = ['withdrawal', reference ?? '', description ?? ''].join(
+        ':',
+      );
       const txRecord = await tx.walletTransaction.create({
         data: {
           wallet_id: wallet.id,

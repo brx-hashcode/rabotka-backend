@@ -56,13 +56,16 @@ export class MtnMomoPaymentGateway implements IPaymentGateway {
       `${this.collectionApiUser}:${this.collectionApiKey}`,
     ).toString('base64');
 
-    const response = await fetchWithTimeout(`${this.baseUrl}/collection/token/`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Basic ${credentials}`,
-        'Ocp-Apim-Subscription-Key': this.primaryKey,
+    const response = await fetchWithTimeout(
+      `${this.baseUrl}/collection/token/`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Basic ${credentials}`,
+          'Ocp-Apim-Subscription-Key': this.primaryKey,
+        },
       },
-    });
+    );
 
     if (!response.ok) {
       const text = await response.text();

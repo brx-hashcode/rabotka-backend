@@ -20,7 +20,7 @@ function makeState(overrides: Partial<BotState> = {}): BotState {
   return {
     flowId: FLOW_IDS.RATE_ASSIGNMENT,
     step: 1,
-    payload: { assignmentId: 'assign-1', rateeId: 'ratee-1' },
+    payload: { assignmentId: 'assign-1', rateeId: 'employer-1' },
     updatedAt: new Date().toISOString(),
     ...overrides,
   };
@@ -96,28 +96,6 @@ describe('runRateAssignmentFlow', () => {
     expect(result.reply[0]).toContain('1');
   });
 
-  it('returns error for score out of range (0)', async () => {
-    const ctx = makeCtx();
-    const result = await runRateAssignmentFlow(
-      makeState(),
-      '0',
-      workerProfile,
-      ctx,
-    );
-    expect(result.nextState).toBeDefined();
-  });
-
-  it('returns error for score out of range (6)', async () => {
-    const ctx = makeCtx();
-    const result = await runRateAssignmentFlow(
-      makeState(),
-      '6',
-      workerProfile,
-      ctx,
-    );
-    expect(result.nextState).toBeDefined();
-  });
-
   it('saves rating successfully with score 4', async () => {
     const ctx = makeCtx();
     const result = await runRateAssignmentFlow(
@@ -154,6 +132,58 @@ describe('runRateAssignmentFlow', () => {
     expect(result.reply[0]).toContain('5/5');
   });
 
+  it('rejects tampered rateeId that does not match the DB counter-party', async () => {
+    // Worker rates, so expected rateeId = employer_id = 'employer-1'
+    // State has been tampered to point at a third party
+    const state = makeState({ payload: { assignmentId: 'assign-1', rateeId: 'third-party-99' } });
+    const ctx = makeCtx();
+    const result = await runRateAssignmentFlow(state, '4', workerProfile, ctx);
+    expect(result.clearState).toBe(true);
+    expect(result.reply[0]).toContain('Erreur');
+  });
+
+  it('rejects when assignment is not found', async () => {
+    const ctx = makeCtx({}, null);
+    const result = await runRateAssignmentFlow(makeState(), '4', workerProfile, ctx);
+    expect(result.clearState).toBe(true);
+    expect(result.reply[0]).toContain('introuvable');
+  });
+
+  it('rejects when profile is not a participant of the assignment', async () => {
+    const outsiderProfile: BotProfile = { ...workerProfile, id: 'outsider-99' };
+    const ctx = makeCtx();
+    const result = await runRateAssignmentFlow(makeState(), '4', outsiderProfile, ctx);
+    expect(result.clearState).toBe(true);
+    expect(result.reply[0]).toContain('autorisé');
+  });
+
+  it('rejects when assignment is not yet completed', async () => {
+    const ctx = makeCtx({}, {
+      status: 'CONFIRMED',
+      worker_id: 'worker-1',
+      job_offer: { employer_id: 'employer-1' },
+    });
+    const result = await runRateAssignmentFlow(makeState(), '4', workerProfile, ctx);
+    expect(result.clearState).toBe(true);
+    expect(result.reply[0]).toContain('terminée');
+  });
+
+  it('returns error for score out of range (0) with retry prompt', async () => {
+    const ctx = makeCtx();
+    const result = await runRateAssignmentFlow(makeState(), '0', workerProfile, ctx);
+    expect(result.nextState).toBeDefined();
+    expect(result.clearState).toBeFalsy();
+    expect(result.reply[0]).toContain('1');
+  });
+
+  it('returns error for score out of range (6) with retry prompt', async () => {
+    const ctx = makeCtx();
+    const result = await runRateAssignmentFlow(makeState(), '6', workerProfile, ctx);
+    expect(result.nextState).toBeDefined();
+    expect(result.clearState).toBeFalsy();
+    expect(result.reply[0]).toContain('5');
+  });
+
   it('returns error when transaction fails', async () => {
     const ctx = {
       prisma: {
@@ -180,9 +210,9 @@ describe('runRateAssignmentFlow', () => {
 
 describe('getRateAssignmentInitialState', () => {
   it('returns correct initial state', () => {
-    const state = getRateAssignmentInitialState('assign-1', 'ratee-1');
+    const state = getRateAssignmentInitialState('assign-1', 'employer-1');
     expect(state.flowId).toBe(FLOW_IDS.RATE_ASSIGNMENT);
     expect(state.payload?.assignmentId).toBe('assign-1');
-    expect(state.payload?.rateeId).toBe('ratee-1');
+    expect(state.payload?.rateeId).toBe('employer-1');
   });
 });

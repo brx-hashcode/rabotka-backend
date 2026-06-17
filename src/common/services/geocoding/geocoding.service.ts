@@ -33,9 +33,7 @@ function sleep(ms: number): Promise<void> {
 export class GeocodingService {
   private readonly logger = new Logger(GeocodingService.name);
 
-  constructor(
-    @Inject(REDIS_CONNECTION) private readonly redis: Redis,
-  ) {}
+  constructor(@Inject(REDIS_CONNECTION) private readonly redis: Redis) {}
 
   async geocode(address: string): Promise<Coordinates | null> {
     const key = cacheKey(address);
@@ -65,7 +63,9 @@ export class GeocodingService {
         );
 
         if (!response.ok) {
-          this.logger.warn(`Nominatim returned ${response.status} for "${address}" (attempt ${attempt})`);
+          this.logger.warn(
+            `Nominatim returned ${response.status} for "${address}" (attempt ${attempt})`,
+          );
           break; // HTTP error — retrying won't help
         }
 
@@ -89,7 +89,10 @@ export class GeocodingService {
       } catch (err) {
         const isLastAttempt = attempt === MAX_RETRIES;
         if (isLastAttempt) {
-          this.logger.warn(`Geocoding failed for "${address}" after ${MAX_RETRIES} attempts`, err);
+          this.logger.warn(
+            `Geocoding failed for "${address}" after ${MAX_RETRIES} attempts`,
+            err,
+          );
         } else {
           // Exponential backoff: 1s, 2s before retrying
           await sleep(1_000 * attempt);

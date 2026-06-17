@@ -1,6 +1,5 @@
 import { APP_TIMEZONE } from '../utils/parse-date-time';
 
-
 export type OfferListItem = {
   id: string;
   reference?: string;
@@ -27,7 +26,10 @@ export function formatPaymentFlow(flow: string | null): string {
   return map[flow] ?? flow;
 }
 
-export function formatAmount(amount: number | null, flow: string | null): string {
+export function formatAmount(
+  amount: number | null,
+  flow: string | null,
+): string {
   if (amount == null || amount === 0) return 'A négocier';
   const flowLabel = formatPaymentFlow(flow);
   const flowSuffix = flowLabel ? ` ${flowLabel}` : '';
@@ -235,12 +237,12 @@ export function formatOfferPublishedSuccess(offerId: string): string {
     `*Offre ID*: #${offerId.slice(0, 8)}`,
     "Vous recevrez une notification dès qu'un worker postulera.",
     '',
-    "Tapez *Menu* pour revenir au menu principal.",
+    'Tapez *Menu* pour revenir au menu principal.',
   ].join('\n');
 }
 
 export function formatNoOffersAvailable(): string {
-  return "Aucune offre disponible pour le moment. Tapez *Menu* pour revenir.";
+  return 'Aucune offre disponible pour le moment. Tapez *Menu* pour revenir.';
 }
 
 export function jobOfferToOfferListItem(offer: {

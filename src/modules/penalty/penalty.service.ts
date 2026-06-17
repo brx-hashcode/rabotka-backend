@@ -162,6 +162,11 @@ export class PenaltyService {
       select: { id: true, profile_id: true, paid_at: true },
     });
     if (!penalty) throw new NotFoundException('Pénalité introuvable');
+    if (penalty.paid_at) {
+      throw new BadRequestException(
+        'Impossible de supprimer une pénalité déjà réglée',
+      );
+    }
 
     await this.prisma.penalty.delete({ where: { id } });
 
@@ -259,22 +264,30 @@ export class PenaltyService {
 
     const searchTrimmed = q?.trim() ?? '';
     if (searchTrimmed.length > 0) {
-      where.OR = [
-        {
-          profile: {
-            first_name: { contains: searchTrimmed, mode: 'insensitive' },
-          },
-        },
-        {
-          profile: {
-            last_name: { contains: searchTrimmed, mode: 'insensitive' },
-          },
-        },
-        {
-          profile: { phone: { contains: searchTrimmed, mode: 'insensitive' } },
-        },
+      const parts = searchTrimmed.split(/\s+/).filter(Boolean);
+      const orClauses: Prisma.PenaltyWhereInput[] = [
+        { profile: { first_name: { contains: searchTrimmed, mode: 'insensitive' } } },
+        { profile: { last_name: { contains: searchTrimmed, mode: 'insensitive' } } },
+        { profile: { phone: { contains: searchTrimmed, mode: 'insensitive' } } },
         { reason: { contains: searchTrimmed, mode: 'insensitive' } },
       ];
+      if (parts.length >= 2) {
+        orClauses.push(
+          {
+            AND: [
+              { profile: { first_name: { contains: parts[0], mode: 'insensitive' } } },
+              { profile: { last_name: { contains: parts.slice(1).join(' '), mode: 'insensitive' } } },
+            ],
+          },
+          {
+            AND: [
+              { profile: { first_name: { contains: parts.slice(1).join(' '), mode: 'insensitive' } } },
+              { profile: { last_name: { contains: parts[0], mode: 'insensitive' } } },
+            ],
+          },
+        );
+      }
+      where.OR = orClauses;
     }
 
     if (paymentStatus && paymentStatus.length > 0) {

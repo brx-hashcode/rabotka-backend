@@ -59,7 +59,9 @@ describe('GeocodingService.geocode', () => {
     redis.get.mockResolvedValue('{not json');
     global.fetch = jest
       .fn()
-      .mockResolvedValue(makeResponse({ body: [{ lat: '5.5', lon: '6.6' }] })) as any;
+      .mockResolvedValue(
+        makeResponse({ body: [{ lat: '5.5', lon: '6.6' }] }),
+      ) as any;
 
     const service = new GeocodingService(redis as any);
     const result = await service.geocode('Pointe-Noire');
@@ -74,7 +76,9 @@ describe('GeocodingService.geocode', () => {
     redis.get.mockResolvedValue(null);
     global.fetch = jest
       .fn()
-      .mockResolvedValue(makeResponse({ body: [{ lat: '4.05', lon: '9.7' }] })) as any;
+      .mockResolvedValue(
+        makeResponse({ body: [{ lat: '4.05', lon: '9.7' }] }),
+      ) as any;
 
     const service = new GeocodingService(redis as any);
     const result = await service.geocode('Brazzaville, Congo');

@@ -17,9 +17,7 @@ function makeProfileService() {
       profileType: 'WORKER',
       creditedBalance: 1000,
     }),
-    uploadKycFile: jest
-      .fn()
-      .mockResolvedValue({ url: 'https://cdn/id.jpg' }),
+    uploadKycFile: jest.fn().mockResolvedValue({ url: 'https://cdn/id.jpg' }),
     findById: jest.fn().mockResolvedValue({ id: 'p-1', firstName: 'Alice' }),
     getPenaltiesByProfileId: jest.fn().mockResolvedValue([]),
     updateProfile: jest.fn().mockResolvedValue({ id: 'p-1' }),
@@ -83,7 +81,7 @@ describe('ProfileController', () => {
       kycSelfieUrl: 'https://cdn/selfie.jpg',
     };
 
-    const mockRes = () => ({ cookie: jest.fn() } as any);
+    const mockRes = () => ({ cookie: jest.fn() }) as any;
 
     it('creates a profile and sends welcome email', async () => {
       const result = await controller.createProfile(dto as any, mockRes());
@@ -105,7 +103,7 @@ describe('ProfileController', () => {
       }) as Express.Multer.File;
 
     it('returns the url from the service', async () => {
-      (profileService.uploadKycFile as jest.Mock).mockResolvedValue({
+      profileService.uploadKycFile.mockResolvedValue({
         url: 'https://cdn/id.jpg',
       });
       const result = await controller.uploadKyc(makeFile());
@@ -114,9 +112,9 @@ describe('ProfileController', () => {
     });
 
     it('throws BadRequestException when no file is provided', async () => {
-      await expect(
-        controller.uploadKyc(undefined as any),
-      ).rejects.toThrow(BadRequestException);
+      await expect(controller.uploadKyc(undefined as any)).rejects.toThrow(
+        BadRequestException,
+      );
     });
   });
 
@@ -252,10 +250,9 @@ describe('ProfileController', () => {
   // ─── POST /verify-whatsapp ────────────────────────────────────────────────
 
   describe('requestWhatsAppVerification()', () => {
-    it('delegates to profileService and returns success', async () => {
-      const result = await controller.requestWhatsAppVerification({
-        profileId: 'p-1',
-      });
+    it('delegates to profileService using authenticated user profileId', async () => {
+      const req = { user: { profileId: 'p-1' } } as any;
+      const result = await controller.requestWhatsAppVerification(req);
       expect(profileService.requestWhatsAppVerification).toHaveBeenCalledWith(
         'p-1',
       );

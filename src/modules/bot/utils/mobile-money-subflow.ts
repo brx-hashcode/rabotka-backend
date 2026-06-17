@@ -113,11 +113,20 @@ async function initiatePayment(
 
   if (!result.success) {
     const fallbackUrl = await ctx.getFallbackUrl();
-    return { reply: [paymentDirectFailedMessage(fallbackUrl)], clearState: true };
+    return {
+      reply: [paymentDirectFailedMessage(fallbackUrl)],
+      clearState: true,
+    };
   }
 
   return {
-    reply: [paymentPendingMessage(amount, OPERATOR_LABELS[operator] ?? operator, gatewayPhone)],
+    reply: [
+      paymentPendingMessage(
+        amount,
+        OPERATOR_LABELS[operator] ?? operator,
+        gatewayPhone,
+      ),
+    ],
     clearState: true,
   };
 }
@@ -144,14 +153,20 @@ export async function runMobileMoneySubFlow(
         // Registered number has unrecognized prefix — ask for a different number
         const nextState = withMmPayload(state, { _mm_step: 'enter_phone' });
         return {
-          reply: [
-            paymentOperatorUnknownMessage(),
-            paymentEnterPhonePrompt(),
-          ],
+          reply: [paymentOperatorUnknownMessage(), paymentEnterPhonePrompt()],
           nextState,
         };
       }
-      return initiatePayment(phone, operator, amount, description, requestType, options, profile, ctx);
+      return initiatePayment(
+        phone,
+        operator,
+        amount,
+        description,
+        requestType,
+        options,
+        profile,
+        ctx,
+      );
     }
 
     if (trimmed === '2') {
@@ -189,7 +204,16 @@ export async function runMobileMoneySubFlow(
         nextState: state,
       };
     }
-    return initiatePayment(phone, operator, amount, description, requestType, options, profile, ctx);
+    return initiatePayment(
+      phone,
+      operator,
+      amount,
+      description,
+      requestType,
+      options,
+      profile,
+      ctx,
+    );
   }
 
   // Unexpected state — reset

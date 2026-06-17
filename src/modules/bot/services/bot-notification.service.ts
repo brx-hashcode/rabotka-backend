@@ -369,14 +369,13 @@ export class BotNotificationService {
       const app = await this.prisma.application.findUnique({
         where: { id: applicationId },
         select: {
-          job_offer: { select: { title: true, amount: true } },
+          job_offer: { select: { title: true } },
           worker: { select: { phone: true } },
         },
       });
       if (!app?.worker?.phone || !app.job_offer) return;
       const text = formatJobCompletedToWorker({
         offerTitle: app.job_offer.title,
-        amount: Number(app.job_offer.amount ?? 0),
       });
       await this.whatsApp.sendTextMessage(app.worker.phone, text);
     } catch (err) {
@@ -408,7 +407,12 @@ export class BotNotificationService {
       const [profile, offer] = await Promise.all([
         this.prisma.profile.findUnique({
           where: { id: workerId },
-          select: { phone: true, first_name: true, status: true, profile_type: true },
+          select: {
+            phone: true,
+            first_name: true,
+            status: true,
+            profile_type: true,
+          },
         }),
         this.prisma.jobOffer.findUnique({
           where: { id: jobOfferId },
@@ -422,10 +426,15 @@ export class BotNotificationService {
         }),
       ]);
       if (!profile?.phone || !offer) return;
-      if (profile.profile_type !== 'WORKER' || profile.status !== 'ACTIVE') return;
+      if (profile.profile_type !== 'WORKER' || profile.status !== 'ACTIVE')
+        return;
 
       const applyState = getApplyJobNotificationState(jobOfferId);
-      const stateSet = await this.botState.setIfFlowAbsentOrMatches(workerId, applyState, null);
+      const stateSet = await this.botState.setIfFlowAbsentOrMatches(
+        workerId,
+        applyState,
+        null,
+      );
       if (!stateSet) return;
 
       const dateStr = offer.scheduled_at.toLocaleDateString('fr-FR', {

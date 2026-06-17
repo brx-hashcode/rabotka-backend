@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { BadRequestException } from '@nestjs/common';
 import { SystemConfigService } from '../system-config.service';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { REDIS_CONNECTION } from '../../../common/services/redis/redis.constants';
@@ -96,6 +97,32 @@ describe('SystemConfigService', () => {
       await service.set('some.key', 'new-value', 'admin-1');
       expect(mockPrisma.systemConfig.update).toHaveBeenCalled();
       expect(mockRedis.del).toHaveBeenCalled();
+    });
+
+    it('throws BadRequestException when setting a fee key to zero', async () => {
+      await expect(
+        service.set('fees.late_cancellation_penalty_fcfa', '0', 'admin-1'),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockPrisma.systemConfig.update).not.toHaveBeenCalled();
+    });
+
+    it('throws BadRequestException when setting a fee key to a negative value', async () => {
+      await expect(
+        service.set('fees.contact_unlock_fee_employer', '-500', 'admin-1'),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('throws BadRequestException when setting a fee key to a non-numeric string', async () => {
+      await expect(
+        service.set('fees.max_concurrent_applications', 'abc', 'admin-1'),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('allows setting non-fee keys to any string value', async () => {
+      mockPrisma.systemConfig.update.mockResolvedValue({});
+      await expect(
+        service.set('contact.email', 'admin@example.com', 'admin-1'),
+      ).resolves.toBeUndefined();
     });
   });
 

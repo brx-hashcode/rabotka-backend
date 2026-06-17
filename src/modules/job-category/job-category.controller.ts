@@ -99,10 +99,7 @@ export class AdminJobCategoryController {
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Delete a category' })
-  async remove(
-    @Req() req: AdminAuthenticatedRequest,
-    @Param('id') id: string,
-  ) {
+  async remove(@Req() req: AdminAuthenticatedRequest, @Param('id') id: string) {
     const result = await this.jobCategoryService.remove(id);
     await this.logService.create({
       action: 'JOB_CATEGORY_DELETED',

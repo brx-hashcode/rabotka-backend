@@ -159,7 +159,7 @@ describe('formatCandidatureDetail', () => {
 describe('formatMyApplicationsList', () => {
   it('shows empty message when no applications', () => {
     const msg = formatMyApplicationsList([]);
-    expect(msg).toContain("aucune candidature");
+    expect(msg).toContain('aucune candidature');
   });
 
   it('renders applications list', () => {
@@ -429,13 +429,9 @@ describe('formatFilledJobDetail', () => {
 });
 
 describe('formatJobCompletedToWorker', () => {
-  it('includes offer title and amount', () => {
-    const msg = formatJobCompletedToWorker({
-      offerTitle: 'Livreur',
-      amount: 12000,
-    });
+  it('includes offer title', () => {
+    const msg = formatJobCompletedToWorker({ offerTitle: 'Livreur' });
     expect(msg).toContain('Livreur');
-    expect(msg).toContain('12');
   });
 });
 

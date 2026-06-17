@@ -38,6 +38,16 @@ export async function runVerifyWhatsappFlow(
     };
   }
 
+  const MAX_OTP_ATTEMPTS = 5;
+  const attempts = ((state.payload?.attempts as number) ?? 0) + 1;
+
+  if (attempts > MAX_OTP_ATTEMPTS) {
+    return {
+      reply: ['❌ Trop de tentatives. Contactez le support pour obtenir un nouveau code.'],
+      clearState: true,
+    };
+  }
+
   const now = new Date();
 
   const token = await ctx.prisma.verificationToken.findFirst({
@@ -49,8 +59,8 @@ export async function runVerifyWhatsappFlow(
 
   if (!token) {
     return {
-      reply: ['❌ Code incorrect. Veuillez réessayer :'],
-      nextState: state,
+      reply: [`❌ Code incorrect. Veuillez réessayer (${attempts}/${MAX_OTP_ATTEMPTS}) :`],
+      nextState: { ...state, payload: { ...state.payload, attempts } },
     };
   }
 

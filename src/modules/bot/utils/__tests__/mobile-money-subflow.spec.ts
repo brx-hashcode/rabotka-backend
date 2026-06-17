@@ -108,7 +108,9 @@ describe('runMobileMoneySubFlow', () => {
         mockCtx,
       );
       expect(result.nextState?.payload._mm_step).toBe('enter_phone');
-      expect(mockCtx.paymentService.initiateDirectPayment).not.toHaveBeenCalled();
+      expect(
+        mockCtx.paymentService.initiateDirectPayment,
+      ).not.toHaveBeenCalled();
     });
 
     it('option 2 moves to enter_phone', async () => {
@@ -178,7 +180,9 @@ describe('runMobileMoneySubFlow', () => {
         mockCtx,
       );
       expect(result.nextState?.payload._mm_step).toBe('enter_phone');
-      expect(mockCtx.paymentService.initiateDirectPayment).not.toHaveBeenCalled();
+      expect(
+        mockCtx.paymentService.initiateDirectPayment,
+      ).not.toHaveBeenCalled();
     });
 
     it('invalid phone shows error', async () => {

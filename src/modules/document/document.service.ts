@@ -122,7 +122,13 @@ export class DocumentService {
     const pattern = `${REDIS_KEY_PREFIX}pdf:*:${templateId}`;
     let cursor = '0';
     do {
-      const [next, keys] = await client.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+      const [next, keys] = await client.scan(
+        cursor,
+        'MATCH',
+        pattern,
+        'COUNT',
+        100,
+      );
       if (keys.length) await client.del(...keys);
       cursor = next;
     } while (cursor !== '0');
@@ -144,7 +150,11 @@ export class DocumentService {
     const exportUrl = `https://docs.google.com/feeds/download/documents/export/Export?id=${googleDocsId}&exportFormat=docx`;
     let docxBuffer: Buffer;
     try {
-      const res = await fetchWithTimeout(exportUrl, { redirect: 'follow' }, 15_000);
+      const res = await fetchWithTimeout(
+        exportUrl,
+        { redirect: 'follow' },
+        15_000,
+      );
       if (!res.ok) {
         throw new BadRequestException(
           `Could not download Google Doc (HTTP ${res.status}). Make sure the document is set to "Anyone with the link can view".`,
@@ -268,7 +278,10 @@ export class DocumentService {
         ...(dto.category !== undefined && { category: dto.category }),
       },
     });
-    await Promise.all([this.invalidateListCache(), this.invalidatePdfCache(id)]);
+    await Promise.all([
+      this.invalidateListCache(),
+      this.invalidatePdfCache(id),
+    ]);
     return this.mapDocument(doc);
   }
 
@@ -276,7 +289,10 @@ export class DocumentService {
     const existing = await this.prisma.document.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException('Document not found');
     await this.prisma.document.delete({ where: { id } });
-    await Promise.all([this.invalidateListCache(), this.invalidatePdfCache(id)]);
+    await Promise.all([
+      this.invalidateListCache(),
+      this.invalidatePdfCache(id),
+    ]);
   }
 
   /**
@@ -445,12 +461,32 @@ export class DocumentService {
     if (!soffice) return null;
 
     const tmp = os.tmpdir();
-    const inputPath = path.join(tmp, `rabotka_${Date.now()}.docx`);
+    const ts = Date.now();
+    const inputPath = path.join(tmp, `rabotka_${ts}.docx`);
     const outputPath = inputPath.replace('.docx', '.pdf');
+    const loUserDir = path.join(
+      tmp,
+      `lo_user_${ts}_${Math.random().toString(36).slice(2, 7)}`,
+    );
+    const loUserDirPosix = loUserDir.replaceAll('\\', '/');
+
+    const loUserDirUri = `file://${loUserDirPosix.startsWith('/') ? '' : '/'}${loUserDirPosix}`;
+
+    const fontSubXcu = `<?xml version="1.0" encoding="UTF-8"?>
+<oor:items xmlns:oor="http://openoffice.org/2001/registry" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <item oor:path="/org.openoffice.VCL/SubstFonts"><prop oor:name="FontPairs" oor:type="oor:string-list"><value/></prop></item>
+</oor:items>`;
 
     try {
+      await fs.mkdir(loUserDir, { recursive: true });
+      await fs.writeFile(
+        path.join(loUserDir, 'registrymodifications.xcu'),
+        fontSubXcu,
+        'utf8',
+      );
       await fs.writeFile(inputPath, docxBuffer);
       await execFileAsync(soffice, [
+        `-env:UserInstallation=${loUserDirUri}`,
         '--headless',
         '--convert-to',
         'pdf',
@@ -463,6 +499,7 @@ export class DocumentService {
     } finally {
       await fs.unlink(inputPath).catch(() => {});
       await fs.unlink(outputPath).catch(() => {});
+      await fs.rm(loUserDir, { recursive: true, force: true }).catch(() => {});
     }
   }
 

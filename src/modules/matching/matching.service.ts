@@ -425,10 +425,14 @@ export class MatchingService {
   async indexWorkerProfile(profileId: string): Promise<void> {
     const enabled = await this.systemConfig.isSimilarityEnabled();
     if (!enabled) {
-      await this.prisma.profile.update({
-        where: { id: profileId },
-        data: { vector_indexed_at: new Date() },
-      }).catch(() => {/* profile may have been deleted */});
+      await this.prisma.profile
+        .update({
+          where: { id: profileId },
+          data: { vector_indexed_at: new Date() },
+        })
+        .catch(() => {
+          /* profile may have been deleted */
+        });
       return;
     }
 
@@ -542,10 +546,14 @@ export class MatchingService {
       // stops claiming the job is "pending indexing" forever and the reaper
       // stops re-picking it. When embeddings are re-enabled the operator can
       // run a bulk reindex from the matching controller.
-      await this.prisma.jobOffer.update({
-        where: { id: jobOfferId },
-        data: { vector_indexed_at: new Date() },
-      }).catch(() => {/* row may have been deleted; safe to ignore */});
+      await this.prisma.jobOffer
+        .update({
+          where: { id: jobOfferId },
+          data: { vector_indexed_at: new Date() },
+        })
+        .catch(() => {
+          /* row may have been deleted; safe to ignore */
+        });
       return;
     }
 
@@ -617,6 +625,18 @@ export class MatchingService {
     }
   }
 
+  async deleteJobFromIndex(jobOfferId: string): Promise<void> {
+    try {
+      await this.qdrant.deletePoints(COLLECTION_JOBS, [jobOfferId]);
+      this.logger.log(`Removed job offer ${jobOfferId} from vector index`);
+    } catch (err) {
+      this.logger.error(
+        `Failed to remove job offer ${jobOfferId} from vector index`,
+        err,
+      );
+    }
+  }
+
   // ── Employer profile indexing ───────────────────────────────────────────────
 
   /**
@@ -626,10 +646,14 @@ export class MatchingService {
   async indexEmployerProfile(profileId: string): Promise<void> {
     const enabled = await this.systemConfig.isSimilarityEnabled();
     if (!enabled) {
-      await this.prisma.profile.update({
-        where: { id: profileId },
-        data: { vector_indexed_at: new Date() },
-      }).catch(() => {/* profile may have been deleted */});
+      await this.prisma.profile
+        .update({
+          where: { id: profileId },
+          data: { vector_indexed_at: new Date() },
+        })
+        .catch(() => {
+          /* profile may have been deleted */
+        });
       return;
     }
 
@@ -659,7 +683,7 @@ export class MatchingService {
         lastName: profile.last_name,
         description: profile.description ?? '',
         address: profile.address ?? '',
-        categoryIds: profile.categories.map((pc) => pc.category),
+        categoryIds: profile.categories.map((pc) => pc.category.name),
       });
       await this.prisma.profile.update({
         where: { id: profileId },

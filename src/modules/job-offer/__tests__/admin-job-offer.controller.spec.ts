@@ -57,7 +57,12 @@ describe('AdminJobOfferController', () => {
     const result = await controller.update(
       'jo1',
       { title: 'New' } as any,
-      { user: { userId: 'u1' }, headers: {}, ip: '127.0.0.1', get: () => undefined } as any,
+      {
+        user: { userId: 'u1' },
+        headers: {},
+        ip: '127.0.0.1',
+        get: () => undefined,
+      } as any,
     );
     expect(service.updateJobOfferByAdmin).toHaveBeenCalledWith('jo1', {
       title: 'New',
