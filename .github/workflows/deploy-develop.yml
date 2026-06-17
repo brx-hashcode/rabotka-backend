@@ -110,7 +110,7 @@ jobs:
           gh cache list --ref refs/heads/develop --json id --limit 100 \
             | jq -r '.[].id' \
             | tail -n +2 \
-            | xargs -r -I{} gh cache delete {}
+            | xargs -r -I{} sh -c 'gh cache delete "$1" || true' _ {}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
