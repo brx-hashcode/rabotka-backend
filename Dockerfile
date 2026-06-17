@@ -62,6 +62,7 @@ RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh && \
     chmod +x /usr/local/bin/docker-entrypoint.sh
 
 ENV NODE_ENV=production \
+    CI=true \
     PORT=3000 \
     NODE_OPTIONS="--max-old-space-size=2048" \
     PNPM_HOME="/home/nestjs/.local/share/pnpm" \
@@ -122,6 +123,7 @@ RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh && \
 
 # 512 MB heap — leaves headroom for LibreOffice within the 700 MB compose cap
 ENV NODE_ENV=production \
+    CI=true \
     PORT=3000 \
     NODE_OPTIONS="--max-old-space-size=512" \
     PNPM_HOME="/home/nestjs/.local/share/pnpm" \
