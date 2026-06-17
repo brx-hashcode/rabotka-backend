@@ -429,13 +429,9 @@ describe('formatFilledJobDetail', () => {
 });
 
 describe('formatJobCompletedToWorker', () => {
-  it('includes offer title and amount', () => {
-    const msg = formatJobCompletedToWorker({
-      offerTitle: 'Livreur',
-      amount: 12000,
-    });
+  it('includes offer title', () => {
+    const msg = formatJobCompletedToWorker({ offerTitle: 'Livreur' });
     expect(msg).toContain('Livreur');
-    expect(msg).toContain('12');
   });
 });
 

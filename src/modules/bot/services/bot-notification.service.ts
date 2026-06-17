@@ -369,14 +369,13 @@ export class BotNotificationService {
       const app = await this.prisma.application.findUnique({
         where: { id: applicationId },
         select: {
-          job_offer: { select: { title: true, amount: true } },
+          job_offer: { select: { title: true } },
           worker: { select: { phone: true } },
         },
       });
       if (!app?.worker?.phone || !app.job_offer) return;
       const text = formatJobCompletedToWorker({
         offerTitle: app.job_offer.title,
-        amount: Number(app.job_offer.amount ?? 0),
       });
       await this.whatsApp.sendTextMessage(app.worker.phone, text);
     } catch (err) {

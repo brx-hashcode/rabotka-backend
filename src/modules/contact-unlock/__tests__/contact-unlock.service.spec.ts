@@ -61,6 +61,7 @@ function makeWalletService() {
   return {
     debitProfileAndCreditSystem: jest.fn().mockResolvedValue(undefined),
     creditProfileWallet: jest.fn().mockResolvedValue(undefined),
+    refundProfileWallet: jest.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -493,7 +494,7 @@ describe('ContactUnlockService', () => {
         'app-1',
         'emp-1',
       );
-      expect(walletService.creditProfileWallet).toHaveBeenCalled(); // worker refunded
+      expect(walletService.refundProfileWallet).toHaveBeenCalled(); // worker refunded
       expect(result.otherPhone).toBe('+242001'); // worker phone
     });
 
@@ -518,7 +519,7 @@ describe('ContactUnlockService', () => {
         'app-1',
         'worker-1',
       );
-      expect(walletService.creditProfileWallet).toHaveBeenCalled(); // employer refunded
+      expect(walletService.refundProfileWallet).toHaveBeenCalled(); // employer refunded
       expect(result.otherPhone).toBe('+242002'); // employer phone
     });
 
@@ -540,7 +541,7 @@ describe('ContactUnlockService', () => {
       txMock.assignment.updateMany.mockResolvedValue({ count: 1 });
       txMock.jobOffer.update.mockResolvedValue({});
       await service.rejectPendingAttemptByApplication('app-1', 'emp-1');
-      expect(walletService.creditProfileWallet).not.toHaveBeenCalled();
+      expect(walletService.refundProfileWallet).not.toHaveBeenCalled();
     });
   });
 
@@ -656,7 +657,7 @@ describe('ContactUnlockService', () => {
       prisma._txMock.application.count.mockResolvedValue(0);
       prisma._txMock.jobOffer.update.mockResolvedValue({});
       const result = await service.processExpiredAttempts();
-      expect(walletService.creditProfileWallet).toHaveBeenCalledWith(
+      expect(walletService.refundProfileWallet).toHaveBeenCalledWith(
         'worker-1',
         100,
         WalletTransactionType.CONTACT_UNLOCK_CREDIT_CONVERSION,
@@ -677,7 +678,7 @@ describe('ContactUnlockService', () => {
       prisma.$transaction.mockImplementation(async (cb) => cb(prisma._txMock));
       prisma._txMock.application.findUnique.mockResolvedValue(null);
       const result = await service.processExpiredAttempts();
-      expect(walletService.creditProfileWallet).toHaveBeenCalledWith(
+      expect(walletService.refundProfileWallet).toHaveBeenCalledWith(
         'emp-1',
         500,
         WalletTransactionType.CONTACT_UNLOCK_CREDIT_CONVERSION,
@@ -697,7 +698,7 @@ describe('ContactUnlockService', () => {
       prisma.$transaction.mockImplementation(async (cb) => cb(prisma._txMock));
       prisma._txMock.application.findUnique.mockResolvedValue(null);
       const result = await service.processExpiredAttempts();
-      expect(walletService.creditProfileWallet).not.toHaveBeenCalled();
+      expect(walletService.refundProfileWallet).not.toHaveBeenCalled();
       expect(result).toHaveLength(0);
       expect(prisma.contactUnlockAttempt.update).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -718,7 +719,7 @@ describe('ContactUnlockService', () => {
       prisma.$transaction.mockImplementation(async (cb) => cb(prisma._txMock));
       prisma._txMock.application.findUnique.mockResolvedValue(null);
       const result = await service.processExpiredAttempts();
-      expect(walletService.creditProfileWallet).toHaveBeenCalledWith(
+      expect(walletService.refundProfileWallet).toHaveBeenCalledWith(
         'worker-1',
         expect.any(Number),
         expect.any(String),

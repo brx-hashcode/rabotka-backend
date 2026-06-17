@@ -373,7 +373,7 @@ export function getCandidaturesListInitialState(
 ): BotState {
   return {
     flowId: FLOW_IDS.CANDIDATURES_LIST,
-    step: 1,
+    step: 0,
     payload: { items, pageIndex: 0, step: 'list' },
     updatedAt: new Date().toISOString(),
   };

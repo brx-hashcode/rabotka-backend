@@ -42,7 +42,6 @@ import {
 export const WORKER_ACTIVE_APPLICATION_STATUSES = [
   ApplicationStatus.PENDING,
   ApplicationStatus.ACCEPTED,
-  ApplicationStatus.WAITING_PAYMENT,
 ] as const;
 
 export type AdminApplicationListItem = {
@@ -255,15 +254,28 @@ export class ApplicationService {
       );
     }
 
-    const application = await this.prisma.application.create({
-      data: {
-        job_offer_id: jobOfferId,
-        worker_id: workerId,
-        status: ApplicationStatus.PENDING,
-      },
-      include: {
-        job_offer: true,
-      },
+    const application = await this.prisma.$transaction(async (tx) => {
+      // Lock the job offer row so a concurrent accept() cannot fill remaining
+      // slots between our status check above and this create.
+      await tx.$executeRaw`SELECT id FROM "job_offers" WHERE id = ${jobOfferId}::uuid FOR UPDATE`;
+      const freshOffer = await tx.jobOffer.findUnique({
+        where: { id: jobOfferId },
+        select: { status: true },
+      });
+      if (
+        freshOffer?.status !== JobOfferStatus.ACTIVE &&
+        freshOffer?.status !== JobOfferStatus.PARTIALLY_FILLED
+      ) {
+        throw new BadRequestException("Cette offre n'est plus disponible");
+      }
+      return tx.application.create({
+        data: {
+          job_offer_id: jobOfferId,
+          worker_id: workerId,
+          status: ApplicationStatus.PENDING,
+        },
+        include: { job_offer: true },
+      });
     });
 
     this.eventEmitter.emit(AdminNotificationEvent.APPLICATION_CREATED, {
@@ -530,6 +542,19 @@ export class ApplicationService {
     let autoRejectedIds: string[] = [];
 
     await this.prisma.$transaction(async (tx) => {
+      // Lock the application row first to prevent concurrent duplicate-accept
+      await tx.$executeRaw`SELECT id FROM "applications" WHERE id = ${applicationId}::uuid FOR UPDATE`;
+      const freshApp = await tx.application.findUnique({
+        where: { id: applicationId },
+        select: { status: true },
+      });
+      if (
+        freshApp?.status !== ApplicationStatus.PENDING &&
+        freshApp?.status !== ApplicationStatus.VIEWED
+      ) {
+        throw new BadRequestException("Cette candidature n'est plus en attente");
+      }
+
       // Lock the job offer row to prevent concurrent over-acceptance
       await tx.$executeRaw`SELECT id FROM "job_offers" WHERE id = ${application.job_offer_id}::uuid FOR UPDATE`;
 
@@ -725,6 +750,14 @@ export class ApplicationService {
 
     const now = new Date();
     const scheduledAt = application.job_offer.scheduled_at;
+
+    // Block cancellation after the job has already started
+    if (scheduledAt <= now && application.status === ApplicationStatus.ACCEPTED) {
+      throw new BadRequestException(
+        'Cette mission a déjà débuté, vous ne pouvez plus annuler votre candidature',
+      );
+    }
+
     const hoursUntil =
       (scheduledAt.getTime() - now.getTime()) / (60 * 60 * 1000);
     const fees = await this.systemConfigService.getFees();
@@ -978,28 +1011,35 @@ export class ApplicationService {
           description: `Job completion payment for job ${application.job_offer_id}`,
         },
       });
-      // Mark all accepted/started applications for this job as END
+      // Mark accepted/started applications as END — skip NO_SHOW workers
       await tx.application.updateMany({
         where: {
           job_offer_id: application.job_offer_id,
           status: {
             in: [ApplicationStatus.ACCEPTED, ApplicationStatus.STARTED],
           },
+          NOT: { assignment: { status: AssignmentStatus.NO_SHOW } },
         },
         data: { status: ApplicationStatus.END },
       });
-      // Boost worker reliability score on successful completion
-      const worker = await tx.profile.findUnique({
-        where: { id: application.worker_id },
-        select: { reliability_score: true },
+      // Boost reliability score only if the completing worker was not a no-show
+      const completingAssignment = await tx.assignment.findUnique({
+        where: { application_id: applicationId },
+        select: { status: true },
       });
-      const currentScore = worker?.reliability_score ?? 100;
-      const boostedScore = Math.min(RELIABILITY_SCORE_MAX, currentScore + 2);
-      if (boostedScore > currentScore) {
-        await tx.profile.update({
+      if (completingAssignment?.status !== AssignmentStatus.NO_SHOW) {
+        const worker = await tx.profile.findUnique({
           where: { id: application.worker_id },
-          data: { reliability_score: boostedScore },
+          select: { reliability_score: true },
         });
+        const currentScore = worker?.reliability_score ?? 100;
+        const boostedScore = Math.min(RELIABILITY_SCORE_MAX, currentScore + 2);
+        if (boostedScore > currentScore) {
+          await tx.profile.update({
+            where: { id: application.worker_id },
+            data: { reliability_score: boostedScore },
+          });
+        }
       }
     });
 
@@ -1485,23 +1525,29 @@ export class ApplicationService {
 
     const searchTrimmed = q?.trim() ?? '';
     if (searchTrimmed.length > 0) {
-      where.OR = [
-        {
-          worker: {
-            first_name: { contains: searchTrimmed, mode: 'insensitive' },
-          },
-        },
-        {
-          worker: {
-            last_name: { contains: searchTrimmed, mode: 'insensitive' },
-          },
-        },
-        {
-          job_offer: {
-            title: { contains: searchTrimmed, mode: 'insensitive' },
-          },
-        },
+      const parts = searchTrimmed.split(/\s+/).filter(Boolean);
+      const orClauses: Prisma.ApplicationWhereInput[] = [
+        { worker: { first_name: { contains: searchTrimmed, mode: 'insensitive' } } },
+        { worker: { last_name: { contains: searchTrimmed, mode: 'insensitive' } } },
+        { job_offer: { title: { contains: searchTrimmed, mode: 'insensitive' } } },
       ];
+      if (parts.length >= 2) {
+        orClauses.push(
+          {
+            AND: [
+              { worker: { first_name: { contains: parts[0], mode: 'insensitive' } } },
+              { worker: { last_name: { contains: parts.slice(1).join(' '), mode: 'insensitive' } } },
+            ],
+          },
+          {
+            AND: [
+              { worker: { first_name: { contains: parts.slice(1).join(' '), mode: 'insensitive' } } },
+              { worker: { last_name: { contains: parts[0], mode: 'insensitive' } } },
+            ],
+          },
+        );
+      }
+      where.OR = orClauses;
     }
 
     if (status != null && status.length > 0) {

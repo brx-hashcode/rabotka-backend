@@ -178,7 +178,8 @@ export class FileController {
           const fileBuffer: Buffer = Buffer.isBuffer(file.buffer)
             ? file.buffer
             : Buffer.from(file.buffer);
-          const fileName: string = String(file.originalname);
+          const ext = String(file.originalname).split('.').pop()?.replace(/[^a-zA-Z0-9]/g, '') ?? 'bin';
+          const fileName = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
 
           const uploadResult = await this.storageService.upload(
             fileBuffer,
@@ -212,7 +213,8 @@ export class FileController {
     const fileBuffer: Buffer = Buffer.isBuffer(file.buffer)
       ? file.buffer
       : Buffer.from(file.buffer);
-    const fileName: string = String(file.originalname);
+    const ext = String(file.originalname).split('.').pop()?.replace(/[^a-zA-Z0-9]/g, '') ?? 'bin';
+    const fileName = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
 
     const uploadResult = await this.storageService.upload(
       fileBuffer,

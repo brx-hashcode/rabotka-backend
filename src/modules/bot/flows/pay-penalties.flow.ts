@@ -94,7 +94,7 @@ async function handleWalletConfirmationStep(
   normalizedInput: string,
   profile: BotProfile,
   ctx: PayPenaltiesContext,
-  totalAmount: number,
+  _staleTotalAmount: number,
   goToMenu: () => FlowResult,
 ): Promise<FlowResult> {
   if (trimmedInput === '2' || normalizedInput === 'annuler') return goToMenu();
@@ -106,6 +106,18 @@ async function handleWalletConfirmationStep(
     };
   }
 
+  // Re-fetch live penalty total at confirmation time — the amount stored in
+  // state.payload may be stale if new penalties were added since the flow started.
+  const unpaid = await ctx.applicationService.getUnpaidPenalties(profile.id);
+  const totalAmount = unpaid.total;
+
+  if (unpaid.count === 0) {
+    return {
+      reply: ['Aucune pénalité impayée. Tapez *Menu*.'],
+      clearState: true,
+    };
+  }
+
   const balance = await ctx.walletService.getProfileWalletBalance(profile.id);
   if (balance < totalAmount) {
     return {
@@ -113,9 +125,6 @@ async function handleWalletConfirmationStep(
       clearState: true,
     };
   }
-
-  // Fetch penalty IDs before marking paid so we can link them to the invoice
-  const unpaid = await ctx.applicationService.getUnpaidPenalties(profile.id);
 
   // Mark penalties paid before touching the wallet — if the debit fails the
   // user retries and we re-check balance, but at least no money is lost.

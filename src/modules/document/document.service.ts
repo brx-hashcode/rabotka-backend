@@ -461,12 +461,32 @@ export class DocumentService {
     if (!soffice) return null;
 
     const tmp = os.tmpdir();
-    const inputPath = path.join(tmp, `rabotka_${Date.now()}.docx`);
+    const ts = Date.now();
+    const inputPath = path.join(tmp, `rabotka_${ts}.docx`);
     const outputPath = inputPath.replace('.docx', '.pdf');
+    const loUserDir = path.join(
+      tmp,
+      `lo_user_${ts}_${Math.random().toString(36).slice(2, 7)}`,
+    );
+    const loUserDirPosix = loUserDir.replaceAll('\\', '/');
+
+    const loUserDirUri = `file://${loUserDirPosix.startsWith('/') ? '' : '/'}${loUserDirPosix}`;
+
+    const fontSubXcu = `<?xml version="1.0" encoding="UTF-8"?>
+<oor:items xmlns:oor="http://openoffice.org/2001/registry" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <item oor:path="/org.openoffice.VCL/SubstFonts"><prop oor:name="FontPairs" oor:type="oor:string-list"><value/></prop></item>
+</oor:items>`;
 
     try {
+      await fs.mkdir(loUserDir, { recursive: true });
+      await fs.writeFile(
+        path.join(loUserDir, 'registrymodifications.xcu'),
+        fontSubXcu,
+        'utf8',
+      );
       await fs.writeFile(inputPath, docxBuffer);
       await execFileAsync(soffice, [
+        `-env:UserInstallation=${loUserDirUri}`,
         '--headless',
         '--convert-to',
         'pdf',
@@ -479,6 +499,7 @@ export class DocumentService {
     } finally {
       await fs.unlink(inputPath).catch(() => {});
       await fs.unlink(outputPath).catch(() => {});
+      await fs.rm(loUserDir, { recursive: true, force: true }).catch(() => {});
     }
   }
 

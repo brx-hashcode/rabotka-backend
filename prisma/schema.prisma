@@ -77,7 +77,6 @@ enum KycDocumentCategory {
 }
 
 enum JobOfferStatus {
-  DRAFT
   ACTIVE
   PARTIALLY_FILLED
   FILLED
@@ -502,6 +501,8 @@ model ContactUnlockAttempt {
   @@index([application_id], name: "idx_unlock_application")
   @@index([status], name: "idx_unlock_status")
   @@index([expires_at], name: "idx_unlock_expires_at")
+  @@index([worker_id], name: "idx_unlock_worker")
+  @@index([employer_id], name: "idx_unlock_employer")
   @@map("contact_unlock_attempts")
 }
 
@@ -673,7 +674,7 @@ model VerificationToken {
   expires_at DateTime
   used_at    DateTime?
   created_at DateTime  @default(now())
-  profile    Profile   @relation(fields: [profile_id], references: [id])
+  profile    Profile   @relation(fields: [profile_id], references: [id], onDelete: Cascade)
 
   @@map("verification_tokens")
 }

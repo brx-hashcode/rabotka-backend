@@ -18,6 +18,16 @@ export const FLOW_TTL_SECONDS: Partial<Record<string, number>> = {
   profile_submenu: 1800, // 30 min
   recommended_jobs: 2 * 3600,
   recommended_profiles: 2 * 3600,
+  my_offers: 2 * 3600,
+  verify_whatsapp: 10 * 60, // 10 min — OTP-like, short window
+  job_status_check: 30 * 60, // 30 min — re-triggered by reminder anyway
+  manage_filled_job: 30 * 60, // 30 min
+  post_cancellation_actions: 30 * 60, // 30 min
+  republish_expired_job: 30 * 60, // 30 min
+  rate_assignment: 2 * 3600,
+  pay_penalties: 3600, // 1 h — holds payment intent
+  resolve_penalties: 3600, // 1 h — holds payment intent
+  unlock_contact: 3600, // 1 h — holds payment intent
 };
 
 export const FLOW_IDS = {

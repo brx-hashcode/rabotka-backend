@@ -41,7 +41,7 @@ export class CreateJobOfferDto {
   })
   @IsOptional()
   @IsNumber()
-  @Min(0, { message: 'Le montant minimum est 0 FCFA' })
+  @Min(1_000, { message: 'Le montant minimum est 1 000 FCFA' })
   @Max(1_000_000, { message: 'Le montant maximum est 1 000 000 FCFA' })
   amount?: number;
 
