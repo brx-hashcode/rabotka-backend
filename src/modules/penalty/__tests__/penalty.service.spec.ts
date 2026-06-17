@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { PenaltyService } from '../penalty.service';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { WalletService } from '../../wallet/wallet.service';
@@ -352,6 +352,18 @@ describe('PenaltyService', () => {
 
       const result = await service.deletePenalty(PENALTY_ID);
       expect(result.success).toBe(true);
+    });
+
+    it('throws BadRequestException when trying to delete a paid penalty', async () => {
+      (prisma.penalty.findUnique as jest.Mock).mockResolvedValue({
+        id: PENALTY_ID,
+        profile_id: WORKER_ID,
+        paid_at: new Date(),
+      });
+      await expect(service.deletePenalty(PENALTY_ID)).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(prisma.penalty.delete as jest.Mock).not.toHaveBeenCalled();
     });
 
     it('throws NotFoundException when penalty not found', async () => {

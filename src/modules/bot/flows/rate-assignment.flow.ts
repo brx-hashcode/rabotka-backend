@@ -67,6 +67,17 @@ export async function runRateAssignmentFlow(
     };
   }
 
+  // Cross-check rateeId from state matches the actual counter-party in the DB
+  const expectedRateeId = isWorker
+    ? assignment.job_offer?.employer_id
+    : assignment.worker_id;
+  if (!expectedRateeId || rateeId !== expectedRateeId) {
+    return {
+      reply: ["❌ Erreur d'évaluation. Tapez *Menu*."],
+      clearState: true,
+    };
+  }
+
   if (assignment.status !== 'COMPLETED') {
     return {
       reply: ["❌ La mission n'est pas encore terminée. Tapez *Menu*."],

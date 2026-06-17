@@ -84,6 +84,22 @@ function toScheduledAtString(scheduledAt: unknown): string {
 async function handlePublishStep10Confirm(args: StepArgs): Promise<FlowResult> {
   const { state, payload, profile, ctx } = args;
   const scheduledStr = toScheduledAtString(payload.scheduled_at);
+
+  // Re-validate scheduled_at at confirmation — the user may have taken a long
+  // time between entering the date and confirming, pushing it under the minimum.
+  const scheduledDate = new Date(scheduledStr);
+  const minDate = new Date(
+    Date.now() + MIN_HOURS_FROM_NOW * 60 * 60 * 1000,
+  );
+  if (!scheduledStr || scheduledDate < minDate) {
+    return {
+      reply: [
+        `⚠️ *La date de début n'est plus valide.*\n\nElle doit être au moins *${MIN_HOURS_FROM_NOW} heures* dans le futur. Tapez *MENU* et recommencez la publication.`,
+      ],
+      clearState: true,
+    };
+  }
+
   const noteValue = typeof payload.note === 'string' ? payload.note : undefined;
   const dto: CreateJobOfferDto = {
     title: String(payload.title),
@@ -452,20 +468,21 @@ function handlePublishStep4(args: StepArgs): FlowResult {
   const { state, payload, trimmed } = args;
   if (!trimmed) {
     return {
-      reply: ['*Entrez le montant en FCFA (entre 1 000 et 1 000 000).*'],
+      reply: [
+        `*Entrez le montant en FCFA (entre ${AMOUNT_MIN.toLocaleString('fr-FR')} et ${AMOUNT_MAX.toLocaleString('fr-FR')}).*`,
+      ],
       nextState: state,
     };
   }
   const amount = Number.parseInt(trimmed.replaceAll(/\s/g, ''), 10);
   if (
     Number.isNaN(amount) ||
-    amount < 0 ||
-    (amount !== 0 && amount < AMOUNT_MIN) ||
+    amount < AMOUNT_MIN ||
     amount > AMOUNT_MAX
   ) {
     return {
       reply: [
-        `*Montant invalide. Entrez un montant entre ${AMOUNT_MIN.toLocaleString('fr-FR')} et ${AMOUNT_MAX.toLocaleString('fr-FR')} FCFA, ou *0* pour passer cette étape.*`,
+        `*Montant invalide. Entrez un montant entre ${AMOUNT_MIN.toLocaleString('fr-FR')} et ${AMOUNT_MAX.toLocaleString('fr-FR')} FCFA.*`,
       ],
       nextState: state,
     };
@@ -722,7 +739,7 @@ function buildSummary(payload: Record<string, unknown>): string {
     '',
     `*Date et heure*: ${scheduled}`,
     '',
-    `*Montant*: ${Number(payload.amount ?? 0).toLocaleString('fr-FR')} FCFA ${flow}`,
+    `*Montant*: ${Number(payload.amount).toLocaleString('fr-FR')} FCFA ${flow}`.trim(),
     '',
     `*Adresse*: ${address}`,
     '',

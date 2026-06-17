@@ -19,9 +19,11 @@ const mockPrisma = {
   profile: {
     findUnique: jest.fn().mockResolvedValue({
       description: 'Experienced plumber',
+      status: 'ACTIVE',
       category: { name: 'Plomberie' },
       categories: [],
     }),
+    count: jest.fn().mockResolvedValue(1),
   },
 };
 

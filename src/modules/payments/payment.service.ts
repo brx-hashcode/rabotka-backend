@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   PaymentStatus,
@@ -107,6 +107,9 @@ export class PaymentService {
     entityId?: string;
     description?: string;
   }): Promise<{ paymentId: string }> {
+    if (data.amount <= 0) {
+      throw new BadRequestException('Payment amount must be positive');
+    }
     const transactionId = generatePaymentReference();
     const payment = await this.prisma.payment.create({
       data: {
@@ -291,6 +294,5 @@ export class PaymentService {
       timestamp: new Date().toISOString(),
     });
 
-    await this.makePayment({ type: PaymentType.PENALTY, profileId, amount: 0 });
   }
 }
