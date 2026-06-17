@@ -248,6 +248,13 @@ export class QdrantService implements OnModuleInit {
     );
   }
 
+  async deletePoints(collectionName: string, ids: string[]): Promise<void> {
+    this.assertPrefix(collectionName);
+    await retryTransient(() =>
+      this.client.delete(collectionName, { points: ids }),
+    );
+  }
+
   async searchHybrid(
     collectionName: string,
     text: string,

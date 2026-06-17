@@ -256,7 +256,12 @@ export class BotOrchestratorService {
         });
         await this.walletService
           .grantWelcomeCredit(profileId, profile.profile_type)
-          .catch(() => 0);
+          .catch((err: unknown) =>
+            this.logger.error(
+              `Failed to grant welcome credit to profile ${profileId}`,
+              err,
+            ),
+          );
         return [menuMessage(profile.profile_type)];
       }
 
@@ -315,7 +320,12 @@ export class BotOrchestratorService {
 
         await this.walletService
           .grantWelcomeCredit(profile.id, profile.profile_type)
-          .catch(() => 0);
+          .catch((err: unknown) =>
+            this.logger.error(
+              `Failed to grant welcome credit to profile ${profile.id}`,
+              err,
+            ),
+          );
 
         return [buildVerifySuccessMessage()];
       }

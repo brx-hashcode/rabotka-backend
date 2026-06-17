@@ -1,5 +1,4 @@
 const JOB_OFFER_STATUS_FR: Record<string, string> = {
-  DRAFT: 'Brouillon',
   ACTIVE: 'Active',
   PARTIALLY_FILLED: 'Partiellement pourvue',
   FILLED: 'Pourvue',

@@ -587,15 +587,13 @@ export function formatFilledJobDetail(params: FilledJobListItem): string {
 
 export function formatJobCompletedToWorker(params: {
   offerTitle: string;
-  amount: number;
 }): string {
   return [
     '*Mission terminée !*',
     '',
     `L'employeur a marqué la mission "${params.offerTitle}" comme terminée.`,
-    `*Gain enregistré*: ${params.amount.toLocaleString('fr-FR')} FCFA`,
     '',
-    'Consultez votre profil pour voir vos gains. Tapez *Menu*.',
+    'Merci pour votre travail !',
   ].join('\n');
 }
 

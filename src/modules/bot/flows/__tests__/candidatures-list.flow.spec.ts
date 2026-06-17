@@ -199,5 +199,6 @@ describe('getCandidaturesListInitialState()', () => {
     expect(state.flowId).toBe(FLOW_IDS.CANDIDATURES_LIST);
     expect(state.payload?.items).toBe(items);
     expect(state.payload?.pageIndex).toBe(0);
+    expect(state.step).toBe(0);
   });
 });

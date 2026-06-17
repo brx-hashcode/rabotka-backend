@@ -313,6 +313,18 @@ describe('WalletService', () => {
   });
 
   describe('creditProfileWallet()', () => {
+    it('throws BadRequestException when amount is zero', async () => {
+      await expect(
+        service.creditProfileWallet('profile-1', 0, WalletTransactionType.WELCOME_CREDIT),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('throws BadRequestException when amount is negative', async () => {
+      await expect(
+        service.creditProfileWallet('profile-1', -100, WalletTransactionType.WELCOME_CREDIT),
+      ).rejects.toThrow(BadRequestException);
+    });
+
     it('credits wallet via transaction', async () => {
       (prisma.wallet as any).upsert = jest
         .fn()
