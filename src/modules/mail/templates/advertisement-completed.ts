@@ -391,5 +391,6 @@ export function advertisementCompletedEmail(params: {
 
   return wrapEmailHtml(body, {
     previewText: `Votre campagne « ${adTitle} » est terminée — consultez votre rapport de performance`,
+    rawLayout: true,
   });
 }
