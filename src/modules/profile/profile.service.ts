@@ -163,6 +163,7 @@ export type AdminProfileDetailResponse = AdminProfileListItem & {
   unpaidPenaltiesCount: number;
   kycDocuments: AdminKycDocumentItem[];
   verificationImages: AdminVerificationImageItem[];
+  vectorIndexedAt: Date | null;
 };
 
 type PrismaTransactionClient = Parameters<
@@ -501,6 +502,7 @@ export class ProfileService {
         avatar_url: true,
         created_at: true,
         updated_at: true,
+        vector_indexed_at: true,
         category: {
           select: { id: true, name: true },
         },
@@ -591,6 +593,7 @@ export class ProfileService {
       avatarUrl: profile.avatar_url,
       createdAt: profile.created_at,
       updatedAt: profile.updated_at,
+      vectorIndexedAt: profile.vector_indexed_at,
       categoryId: profile.category?.id ?? null,
       categoryName: profile.category?.name ?? null,
       categoryIds: profile.categories.map((pc) => pc.category.id),
