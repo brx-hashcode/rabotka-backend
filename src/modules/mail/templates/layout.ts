@@ -62,7 +62,7 @@ export function wrapEmailHtml(
 
             <!-- Content -->
             <tr>
-              <td style="padding:32px;font-size:15px;color:#2a322e;line-height:1.65;font-family:'Ubuntu',sans-serif;">
+              <td style="padding:32px;font-size:16px;color:#2a322e;line-height:1.7;font-family:'Ubuntu',sans-serif;">
                 ${content}
               </td>
             </tr>
