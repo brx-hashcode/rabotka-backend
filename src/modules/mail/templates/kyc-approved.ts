@@ -1,7 +1,7 @@
-import { escapeHtml, wrapEmailHtml } from './layout';
+import { escapeHtml } from './layout';
 
 export function kycApprovedEmail(name: string): string {
-  const body = `
+  return `
     <p>Bonjour ${escapeHtml(name)},</p>
 
     <p>Bonne nouvelle ! 🎉 Votre vérification d'identité (KYC) a été <strong>approuvée avec succès</strong>.</p>
@@ -16,6 +16,4 @@ export function kycApprovedEmail(name: string): string {
       <strong>L'équipe Rabotka</strong>
     </p>
   `;
-
-  return wrapEmailHtml(body);
 }

@@ -1,14 +1,4 @@
-import { escapeHtml, wrapEmailHtml } from './layout';
-
-function formatDate(iso: string): string {
-  const d = new Date(iso);
-  return d.toLocaleDateString('fr-FR', {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-  });
-}
+import { escapeHtml } from './layout';
 
 function toHtmlParagraphs(text: string): string {
   return escapeHtml(text)
@@ -34,7 +24,7 @@ export function advertisementCreatedEmail(params: {
     ? `<p style="margin: 8px 0;">${params.tags.map((t) => `<span style="display:inline-block;margin:2px 4px 2px 0;padding:2px 10px;border-radius:9999px;border:1px solid #6ee7b7;color:#059669;font-size:12px;">#${escapeHtml(t)}</span>`).join('')}</p>`
     : '';
 
-  const body = `
+  return `
     ${params.imageUrl ? `<p style="margin: 0 0 16px;"><img src="${escapeHtml(params.imageUrl)}" alt="${escapeHtml(params.title)}" style="max-width: 100%; border-radius: 8px; object-fit: cover; display: block;" /></p>` : ''}
     <p>Bonjour <strong>${escapeHtml(params.name)}</strong>,</p>
     <p>Vous avez une nouvelle annonce sur Rabotka :</p>
@@ -45,8 +35,4 @@ export function advertisementCreatedEmail(params: {
     <p>Si vous avez des questions, n'hésitez pas à nous contacter.</p>
     <p>Cordialement,<br /><strong>L'équipe Rabotka</strong></p>
   `;
-
-  return wrapEmailHtml(body, {
-    previewText: `Nouvelle annonce : ${params.title}`,
-  });
 }

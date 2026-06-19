@@ -38,6 +38,7 @@ import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { WalletService } from '../wallet/wallet.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { MailService } from '../mail/mail.service';
+import { LayoutService } from '../mail/layout.service';
 import { kycApprovedEmail, kycRejectedEmail } from '../mail/templates';
 import { formatKycValidatedMessage } from '../bot/messages/notifications.messages';
 import { MessageDirection, BotPlatform } from '@prisma/client';
@@ -62,6 +63,7 @@ export class AdminProfileController {
     private readonly prisma: PrismaService,
     private readonly whatsApp: WhatsAppService,
     private readonly mail: MailService,
+    private readonly layout: LayoutService,
     private readonly walletService: WalletService,
   ) {}
 
@@ -465,7 +467,7 @@ export class AdminProfileController {
       await this.mail.sendMail({
         to: result.email,
         subject: 'Votre vérification KYC a été approuvée',
-        html: kycApprovedEmail(fullName),
+        html: await this.layout.wrap(kycApprovedEmail(fullName)),
       });
 
       this.whatsApp
@@ -486,7 +488,7 @@ export class AdminProfileController {
       await this.mail.sendMail({
         to: result.email,
         subject: 'Votre vérification KYC a été rejetée',
-        html: kycRejectedEmail(fullName, dto.reason),
+        html: await this.layout.wrap(kycRejectedEmail(fullName, dto.reason)),
       });
     }
 

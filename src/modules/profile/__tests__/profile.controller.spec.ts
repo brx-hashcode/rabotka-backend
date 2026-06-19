@@ -35,6 +35,10 @@ function makeMailService() {
   return { sendMail: jest.fn().mockResolvedValue(undefined) };
 }
 
+function makeLayoutService() {
+  return { wrap: jest.fn().mockImplementation((html: string) => Promise.resolve(html)) };
+}
+
 function makeWalletService() {
   return {
     recordPenaltyPayment: jest
@@ -61,6 +65,7 @@ describe('ProfileController', () => {
     controller = new ProfileController(
       profileService as any,
       mailService as any,
+      makeLayoutService() as any,
       walletService as any,
       makeJwtService() as any,
       makeConfigService() as any,

@@ -1,4 +1,4 @@
-import { escapeHtml, wrapEmailHtml } from './layout';
+import { escapeHtml } from './layout';
 
 function formatDate(iso: string): string {
   const d = new Date(iso);
@@ -28,7 +28,7 @@ export function eventUpdatedEmail(
   const start = formatTime(startDate);
   const end = formatTime(endDate);
 
-  const body = `
+  return `
     <p>Bonjour <strong>${escapeHtml(name)}</strong>,</p>
     <p>Les horaires de l'événement suivant ont été modifiés :</p>
 
@@ -43,8 +43,4 @@ export function eventUpdatedEmail(
     <p>Merci de bien vouloir mettre à jour votre agenda.</p>
     <p>Cordialement,<br /><strong>L'équipe Rabotka</strong></p>
   `;
-
-  return wrapEmailHtml(body, {
-    previewText: `Mise à jour : ${title} — ${date}`,
-  });
 }

@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { MailService } from '../mail/mail.service';
+import { LayoutService } from '../mail/layout.service';
 import {
   adminCreatedEmail,
   adminUpdatedEmail,
@@ -28,6 +29,7 @@ import { fetchWithTimeout } from '../../common/utils/fetch-with-timeout.util';
 export class NotificationService {
   constructor(
     private readonly mail: MailService,
+    private readonly layout: LayoutService,
     private readonly calendarLink: CalendarLinkService,
     private readonly icsGenerator: IcsGeneratorService,
   ) {}
@@ -36,7 +38,9 @@ export class NotificationService {
     await this.mail.sendMail({
       to,
       subject: 'Bienvenue sur Rabotka – Votre compte administrateur',
-      html: adminCreatedEmail(name),
+      html: await this.layout.wrap(adminCreatedEmail(name), {
+        previewText: 'Votre compte administrateur Rabotka a été créé.',
+      }),
     });
   }
 
@@ -44,7 +48,9 @@ export class NotificationService {
     await this.mail.sendMail({
       to,
       subject: 'Rabotka – Vos informations ont été mises à jour',
-      html: adminUpdatedEmail(name),
+      html: await this.layout.wrap(adminUpdatedEmail(name), {
+        previewText: 'Les informations de votre compte ont été mises à jour.',
+      }),
     });
   }
 
@@ -52,7 +58,7 @@ export class NotificationService {
     await this.mail.sendMail({
       to,
       subject: 'Bienvenue sur Rabotka',
-      html: sendWelcomeEmail(name),
+      html: await this.layout.wrap(sendWelcomeEmail(name)),
     });
   }
 
@@ -60,7 +66,9 @@ export class NotificationService {
     await this.mail.sendMail({
       to,
       subject: 'Votre code de vérification Rabotka',
-      html: sendOtpEmail(code),
+      html: await this.layout.wrap(sendOtpEmail(code), {
+        previewText: `Votre code de vérification Rabotka : ${code}`,
+      }),
     });
   }
 
@@ -72,7 +80,7 @@ export class NotificationService {
     await this.mail.sendMail({
       to,
       subject: 'Rabotka – Votre réclamation a été créée',
-      html: claimCreatedEmail(name, title),
+      html: await this.layout.wrap(claimCreatedEmail(name, title)),
     });
   }
 
@@ -84,7 +92,7 @@ export class NotificationService {
     await this.mail.sendMail({
       to,
       subject: 'Rabotka – Votre réclamation est en cours de traitement',
-      html: claimInProgressEmail(name, title),
+      html: await this.layout.wrap(claimInProgressEmail(name, title)),
     });
   }
 
@@ -96,7 +104,7 @@ export class NotificationService {
     await this.mail.sendMail({
       to,
       subject: 'Rabotka – Votre réclamation a été résolue',
-      html: claimCompletedEmail(name, title),
+      html: await this.layout.wrap(claimCompletedEmail(name, title)),
     });
   }
 
@@ -108,7 +116,7 @@ export class NotificationService {
     await this.mail.sendMail({
       to,
       subject: 'Rabotka – Votre réclamation a été rejetée',
-      html: claimRejectedEmail(name, title),
+      html: await this.layout.wrap(claimRejectedEmail(name, title)),
     });
   }
 
@@ -120,7 +128,7 @@ export class NotificationService {
     await this.mail.sendMail({
       to,
       subject: 'Rabotka – Une réclamation vous a été assignée',
-      html: claimAssignedEmail(adminName, title),
+      html: await this.layout.wrap(claimAssignedEmail(adminName, title)),
     });
   }
 
@@ -132,7 +140,7 @@ export class NotificationService {
     await this.mail.sendMail({
       to,
       subject: "Rabotka – Vous avez été retiré d'une réclamation",
-      html: claimUnassignedEmail(adminName, title),
+      html: await this.layout.wrap(claimUnassignedEmail(adminName, title)),
     });
   }
 
@@ -152,14 +160,17 @@ export class NotificationService {
     await this.mail.sendMail({
       to,
       subject: `Rabotka – Nouvel événement : ${title}`,
-      html: eventCreatedEmail(
-        name,
-        title,
-        startDate,
-        endDate,
-        description,
-        location,
-        googleCalendarUrl,
+      html: await this.layout.wrap(
+        eventCreatedEmail(
+          name,
+          title,
+          startDate,
+          endDate,
+          description,
+          location,
+          googleCalendarUrl,
+        ),
+        { previewText: `Nouvel événement : ${title}` },
       ),
       attachments: [
         {
@@ -187,14 +198,17 @@ export class NotificationService {
     await this.mail.sendMail({
       to,
       subject: `Rabotka – Mise à jour de l'événement : ${title}`,
-      html: eventUpdatedEmail(
-        name,
-        title,
-        startDate,
-        endDate,
-        description,
-        location,
-        googleCalendarUrl,
+      html: await this.layout.wrap(
+        eventUpdatedEmail(
+          name,
+          title,
+          startDate,
+          endDate,
+          description,
+          location,
+          googleCalendarUrl,
+        ),
+        { previewText: `Mise à jour : ${title}` },
       ),
       attachments: [
         {
@@ -223,7 +237,9 @@ export class NotificationService {
     await this.mail.sendMail({
       to: params.to,
       subject: `Rabotka - Nouvelle annonce : ${params.title}`,
-      html: advertisementCreatedEmail(params),
+      html: await this.layout.wrap(advertisementCreatedEmail(params), {
+        previewText: `Nouvelle annonce : ${params.title}`,
+      }),
       ...(attachment ? { attachments: [attachment] } : {}),
     });
   }
