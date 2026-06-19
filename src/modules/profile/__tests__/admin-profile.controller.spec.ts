@@ -49,6 +49,10 @@ function makeMail() {
   return { sendMail: jest.fn().mockResolvedValue(undefined) };
 }
 
+function makeLayout() {
+  return { wrap: jest.fn().mockImplementation((html: string) => Promise.resolve(html)) };
+}
+
 function makeWalletService() {
   return {
     getProfileWalletForAdmin: jest
@@ -65,6 +69,7 @@ function makeController(prismaProfile: any = null) {
     makePrisma(prismaProfile) as any,
     makeWhatsApp() as any,
     makeMail() as any,
+    makeLayout() as any,
     makeWalletService() as any,
   );
 }
@@ -298,6 +303,7 @@ describe('AdminProfileController', () => {
       makePrisma() as any,
       makeWhatsApp() as any,
       makeMail() as any,
+      makeLayout() as any,
       makeWalletService() as any,
     );
     const result = await ctrl.verify(
@@ -326,6 +332,7 @@ describe('AdminProfileController', () => {
       makePrisma() as any,
       makeWhatsApp() as any,
       makeMail() as any,
+      makeLayout() as any,
       makeWalletService() as any,
     );
     const result = await ctrl.updateStatus('p1', { status: 'ACTIVE' as any }, {

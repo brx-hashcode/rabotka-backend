@@ -19,6 +19,7 @@ import {
   accountActivatedMessage,
 } from '../whatsapp/templates';
 import { MailService } from '../mail/mail.service';
+import { LayoutService } from '../mail/layout.service';
 import { accountSuspendedEmail } from '../mail/templates';
 import {
   REDIS_CONNECTION,
@@ -185,6 +186,7 @@ export class ProfileService {
     private readonly whatsAppService: WhatsAppService,
     private readonly configService: ConfigService,
     private readonly mailService: MailService,
+    private readonly layoutService: LayoutService,
     private readonly eventEmitter: EventEmitter2,
     private readonly walletService: WalletService,
     private readonly documentService: DocumentService,
@@ -814,7 +816,9 @@ export class ProfileService {
           await this.mailService.sendMail({
             to: profile.email,
             subject: 'Votre compte a été suspendu',
-            html: accountSuspendedEmail(profile.first_name),
+            html: await this.layoutService.wrap(
+              accountSuspendedEmail(profile.first_name),
+            ),
           });
         }
       } catch {

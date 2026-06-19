@@ -1,11 +1,11 @@
-import { escapeHtml, wrapEmailHtml } from './layout';
+import { escapeHtml } from './layout';
 
 export function kycRejectedEmail(name: string, reason?: string): string {
   const reasonBlock = reason
     ? `<p><strong>Motif :</strong> ${escapeHtml(reason)}</p>`
     : '';
 
-  const body = `
+  return `
     <p>Bonjour ${escapeHtml(name)},</p>
 
     <p>
@@ -25,6 +25,4 @@ export function kycRejectedEmail(name: string, reason?: string): string {
       <strong>L'équipe Rabotka</strong>
     </p>
   `;
-
-  return wrapEmailHtml(body);
 }

@@ -23,6 +23,7 @@ import { SystemConfigService } from '../system-config/system-config.service';
 import { WalletService } from '../wallet/wallet.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { MailService } from '../mail/mail.service';
+import { LayoutService } from '../mail/layout.service';
 import { paymentSuccessEmail } from '../mail/templates';
 import { PaymentGatewayService } from '../../common/services/payment/payment-gateway.service';
 import { PaymentStatusGateway } from '../ws-notifications/payment-status.gateway';
@@ -98,6 +99,7 @@ export class PaymentRequestService {
     private readonly walletService: WalletService,
     private readonly whatsAppService: WhatsAppService,
     private readonly mailService: MailService,
+    private readonly layoutService: LayoutService,
     private readonly paymentGateway: PaymentGatewayService,
     private readonly paymentStatusGateway: PaymentStatusGateway,
     private readonly eventEmitter: EventEmitter2,
@@ -781,10 +783,12 @@ export class PaymentRequestService {
         .sendMail({
           to: request.profile.email,
           subject: `Paiement confirmé — ${context.paymentDescription}`,
-          html: paymentSuccessEmail(
-            profileName,
-            context.paymentDescription,
-            context.amount,
+          html: await this.layoutService.wrap(
+            paymentSuccessEmail(
+              profileName,
+              context.paymentDescription,
+              context.amount,
+            ),
           ),
         })
         .catch((err) =>

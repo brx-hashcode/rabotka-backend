@@ -1,9 +1,15 @@
 const RABOTKA_GREEN = '#1FBA52';
 
+export type FooterInfo = {
+  description?: string | null;
+  email?: string | null;
+  address?: string | null;
+};
 
 export type EmailLayoutOptions = {
   previewText?: string;
   rawLayout?: boolean;
+  footer?: FooterInfo;
 };
 
 export function wrapEmailHtml(
@@ -14,6 +20,7 @@ export function wrapEmailHtml(
   const previewSpan = previewText
     ? `<span style="display:none;max-height:0;overflow:hidden;">${escapeHtml(previewText)}</span>`
     : '';
+  const footer = options?.footer;
 
   if (options?.rawLayout) {
     return `<!DOCTYPE html>
@@ -69,8 +76,11 @@ export function wrapEmailHtml(
 
             <!-- Footer -->
             <tr>
-              <td align="center" style="padding:20px 32px 28px;border-top:1px solid #e6e4dd;font-size:12px;color:#9aa39d;font-family:'Ubuntu',sans-serif;">
-                &copy; ${new Date().getFullYear()} Rabotka &nbsp;&middot;&nbsp; noreply@rabotka.work
+              <td align="center" style="padding:20px 32px 28px;border-top:1px solid #e6e4dd;font-family:'Ubuntu',sans-serif;">
+                ${footer?.description ? `<p style="margin:0 0 10px;font-size:13px;color:#2a322e;font-weight:500;">${escapeHtml(footer.description)}</p>` : ''}
+                <p style="margin:0;font-size:12px;color:#9aa39d;">
+                  &copy; ${new Date().getFullYear()} Rabotka${footer?.email ? ` &nbsp;&middot;&nbsp; ${escapeHtml(footer.email)}` : ' &nbsp;&middot;&nbsp; noreply@rabotka.work'}${footer?.address ? ` &nbsp;&middot;&nbsp; ${escapeHtml(footer.address)}` : ''}
+                </p>
               </td>
             </tr>
 

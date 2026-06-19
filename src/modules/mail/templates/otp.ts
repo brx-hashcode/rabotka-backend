@@ -1,9 +1,8 @@
-import { escapeHtml, wrapEmailHtml } from './layout';
+import { escapeHtml } from './layout';
 
 export function sendOtpEmail(code: string, first_name?: string): string {
   const greeting = first_name ? `Bonjour ${first_name},` : 'Bonjour,';
-  const body = `
-
+  return `
     <p>${greeting}</p>
 
     <p>
@@ -25,8 +24,4 @@ export function sendOtpEmail(code: string, first_name?: string): string {
       <strong>L'équipe Rabotka</strong>
     </p>
   `;
-
-  return wrapEmailHtml(body, {
-    previewText: `Votre code de vérification Rabotka : ${code}`,
-  });
 }

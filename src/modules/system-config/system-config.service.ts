@@ -262,6 +262,19 @@ export class SystemConfigService implements OnModuleInit {
     return { email, phone, address };
   }
 
+  async getEmailFooterInfo() {
+    const [description, email, address] = await this.mgetBatch([
+      {
+        key: 'general.description',
+        fallback:
+          'Plateforme de mise en relation entre employeurs et travailleurs informels en Afrique.',
+      },
+      { key: 'contact.email', fallback: 'contact@rabotka.com' },
+      { key: 'contact.address', fallback: '' },
+    ]);
+    return { description, email, address };
+  }
+
   async getFees() {
     const [
       penalty,

@@ -9,6 +9,7 @@ import { JwtService } from '@nestjs/jwt';
 import { AuthService } from '../auth.service';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { MailService } from '../../mail/mail.service';
+import { LayoutService } from '../../mail/layout.service';
 import { WhatsAppService } from '../../whatsapp/whatsapp.service';
 import { REDIS_CONNECTION } from '../../../common/services/redis/redis.constants';
 import { ConfigService } from '@nestjs/config';
@@ -86,6 +87,10 @@ describe('AuthService', () => {
         { provide: PrismaService, useValue: mockPrismaService },
         { provide: JwtService, useValue: mockJwtService },
         { provide: MailService, useValue: mockMailService },
+        {
+          provide: LayoutService,
+          useValue: { wrap: jest.fn().mockImplementation((html: string) => Promise.resolve(html)) },
+        },
         { provide: WhatsAppService, useValue: mockWhatsAppService },
         { provide: REDIS_CONNECTION, useValue: redis },
         {

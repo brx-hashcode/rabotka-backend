@@ -1,7 +1,7 @@
-import { escapeHtml, wrapEmailHtml } from './layout';
+import { escapeHtml } from './layout';
 
 export function adminCreatedEmail(name: string): string {
-  const body = `
+  return `
     <p>Bonjour ${escapeHtml(name)},</p>
 
     <p>Votre compte administrateur a été créé avec succès sur la plateforme Rabotka.</p>
@@ -21,8 +21,4 @@ export function adminCreatedEmail(name: string): string {
       <strong>L'équipe Rabotka</strong>
     </p>
   `;
-
-  return wrapEmailHtml(body, {
-    previewText: 'Votre compte administrateur Rabotka a été créé.',
-  });
 }
