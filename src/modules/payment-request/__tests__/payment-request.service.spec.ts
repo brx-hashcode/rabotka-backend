@@ -6,6 +6,7 @@ import { WhatsAppService } from '../../whatsapp/whatsapp.service';
 import { LogService } from '../../log/log.service';
 import { ConfigService } from '@nestjs/config';
 import { MailService } from '../../mail/mail.service';
+import { LayoutService } from '../../mail/layout.service';
 import { PaymentService } from '../../payments/payment.service';
 import { SystemConfigService } from '../../system-config/system-config.service';
 import { PaymentRequestStatus, PaymentRequestType } from '@prisma/client';
@@ -157,6 +158,10 @@ describe('PaymentRequestService', () => {
         {
           provide: PaymentStatusGateway,
           useValue: { emitPaymentStatus: jest.fn() },
+        },
+        {
+          provide: LayoutService,
+          useValue: { wrap: jest.fn().mockImplementation((html: string) => Promise.resolve(html)) },
         },
         { provide: EventEmitter2, useValue: { emit: jest.fn() } },
         {

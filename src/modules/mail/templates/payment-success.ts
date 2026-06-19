@@ -1,15 +1,15 @@
-import { escapeHtml, wrapEmailHtml } from './layout';
+import { escapeHtml } from './layout';
 
 export function paymentSuccessEmail(
   name: string,
   description: string,
   amount: number,
 ): string {
-  const body = `
+  return `
     <p>Bonjour <strong>${escapeHtml(name)}</strong>,</p>
 
     <p>
-      Nous vous confirmons que votre paiement a été 
+      Nous vous confirmons que votre paiement a été
       <strong>effectué avec succès</strong>.
     </p>
 
@@ -42,14 +42,12 @@ export function paymentSuccessEmail(
     </p>
 
     <p>
-      Si vous avez des questions ou besoin d’assistance, notre équipe reste à votre disposition.
+      Si vous avez des questions ou besoin d'assistance, notre équipe reste à votre disposition.
     </p>
 
     <p>
       Cordialement,<br />
-      <strong>L’équipe Rabotka</strong>
+      <strong>L'équipe Rabotka</strong>
     </p>
   `;
-
-  return wrapEmailHtml(body);
 }

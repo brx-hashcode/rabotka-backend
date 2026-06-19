@@ -1,7 +1,7 @@
-import { escapeHtml, wrapEmailHtml } from './layout';
+import { escapeHtml } from './layout';
 
 export function sendWelcomeEmail(name: string): string {
-  const body = `
+  return `
     <p>Bonjour ${escapeHtml(name)},</p>
 
     <p>Votre profil a été créé avec succès 🎉</p>
@@ -24,6 +24,4 @@ export function sendWelcomeEmail(name: string): string {
       <strong>L'équipe Rabotka</strong>
     </p>
   `;
-
-  return wrapEmailHtml(body);
 }

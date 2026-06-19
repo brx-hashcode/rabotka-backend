@@ -34,6 +34,7 @@ import { CreateProfileDto } from './dto/create-profile.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { sendWelcomeEmail } from '../mail/templates';
 import { MailService } from '../mail/mail.service';
+import { LayoutService } from '../mail/layout.service';
 import { ProfileAuthGuard } from '../auth/guards/profile-auth.guard';
 import type { ProfileAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
 import { WalletService } from '../wallet/wallet.service';
@@ -48,6 +49,7 @@ export class ProfileController {
   constructor(
     private readonly profileService: ProfileService,
     private readonly mailService: MailService,
+    private readonly layoutService: LayoutService,
     private readonly walletService: WalletService,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
@@ -97,7 +99,9 @@ export class ProfileController {
     await this.mailService.sendMail({
       to: createProfileDto.email,
       subject: 'Bienvenue sur Rabotka',
-      html: sendWelcomeEmail(createProfileDto.firstName),
+      html: await this.layoutService.wrap(
+        sendWelcomeEmail(createProfileDto.firstName),
+      ),
     });
 
     // Sign a JWT and set the auth cookie so the user is logged in immediately
