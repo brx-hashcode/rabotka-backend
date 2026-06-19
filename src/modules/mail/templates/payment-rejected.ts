@@ -1,11 +1,11 @@
-import { escapeHtml, wrapEmailHtml } from './layout';
+import { escapeHtml } from './layout';
 
 export function paymentRejectedEmail(reason?: string): string {
   const reasonBlock = reason
     ? `<p><strong>Motif :</strong> ${escapeHtml(reason)}</p>`
     : '';
 
-  const body = `
+  return `
     <p>
       Nous avons examiné votre demande de paiement et nous avons le regret de vous informer
       qu'elle a été <strong>rejetée</strong>.
@@ -23,6 +23,4 @@ export function paymentRejectedEmail(reason?: string): string {
       <strong>L'équipe Rabotka</strong>
     </p>
   `;
-
-  return wrapEmailHtml(body);
 }

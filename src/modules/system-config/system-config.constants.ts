@@ -170,6 +170,16 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     isSecret: false,
   },
 
+  // ── GENERAL ───────────────────────────────────────────────────────────────
+  {
+    key: 'general.description',
+    value:
+      'Plateforme de mise en relation entre employeurs et travailleurs informels en Afrique.',
+    category: ConfigCategory.GENERAL,
+    label: 'Description courte de Rabotka (utilisée dans les emails)',
+    isSecret: false,
+  },
+
   // ── CONTACT ───────────────────────────────────────────────────────────────
   {
     key: 'contact.email',

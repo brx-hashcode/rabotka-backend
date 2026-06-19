@@ -159,6 +159,7 @@ describe('ProfileService', () => {
       whatsApp as any,
       configService as any,
       {} as any, // mailService
+      { wrap: jest.fn().mockImplementation((html: string) => Promise.resolve(html)) } as any, // layoutService
       { emit: jest.fn() } as any, // eventEmitter
       {
         getProfileWalletBalance: jest.fn().mockResolvedValue(0),
