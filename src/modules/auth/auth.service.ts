@@ -17,6 +17,7 @@ import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
 import { REDIS_KEY_PREFIX } from '../../common/services/redis/redis.constants';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
+import { LayoutService } from '../mail/layout.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { sendOtpEmail } from '../mail/templates';
 import { otpMessage } from '../whatsapp/templates';
@@ -57,6 +58,7 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
     private readonly mailService: MailService,
+    private readonly layoutService: LayoutService,
     private readonly whatsAppService: WhatsAppService,
     private readonly configService: ConfigService,
   ) {}
@@ -465,7 +467,9 @@ export class AuthService {
     await this.mailService.sendMail({
       to: email,
       subject: 'Votre code de vérification Rabotka',
-      html: sendOtpEmail(otp, first_name),
+      html: await this.layoutService.wrap(sendOtpEmail(otp, first_name), {
+        previewText: `Votre code de vérification Rabotka : ${otp}`,
+      }),
     });
     this.logger.log(`OTP email sent to ${email}`);
   }
