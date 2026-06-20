@@ -335,10 +335,13 @@ export class AdminProfileController {
         contentType: f.mimetype,
       })) ?? [];
     const messageHtml = message.trim().replaceAll('\n', '<br/>');
+    const html = await this.layout.wrap(
+      `<p>${messageHtml}</p><br/><p>${adminFullName}<br/>L'équipe Rabotka</p>`,
+    );
     await this.mail.sendMail({
       to: profile.email,
       subject: 'Message de Rabotka',
-      html: `<p>${messageHtml}</p><br/><p>${adminFullName}<br/>L'équipe Rabotka</p>`,
+      html,
       ...(attachments.length > 0 && { attachments }),
     });
     await this.prisma.message.create({
