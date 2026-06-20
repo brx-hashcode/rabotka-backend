@@ -132,6 +132,7 @@ describe('AdminProfileController', () => {
         prisma as any,
         makeWhatsApp() as any,
         makeMail() as any,
+        makeLayout() as any,
         makeWalletService() as any,
       );
       const result = await ctrl.getMessages('p1');
@@ -203,6 +204,7 @@ describe('AdminProfileController', () => {
         prisma as any,
         whatsApp as any,
         makeMail() as any,
+        makeLayout() as any,
         makeWalletService() as any,
       );
       const result = await ctrl.sendMessage(
@@ -252,6 +254,7 @@ describe('AdminProfileController', () => {
         prisma as any,
         makeWhatsApp() as any,
         mail as any,
+        makeLayout() as any,
         makeWalletService() as any,
       );
       const result = await ctrl.sendMessage(
@@ -281,6 +284,7 @@ describe('AdminProfileController', () => {
       makePrisma() as any,
       makeWhatsApp() as any,
       makeMail() as any,
+      makeLayout() as any,
       makeWalletService() as any,
     );
     const result = await ctrl.update('p1', { first_name: 'Jo' } as any, {

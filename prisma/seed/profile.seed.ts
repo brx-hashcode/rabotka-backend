@@ -7,7 +7,14 @@ import {
   ApplicationStatus,
   PaymentFlow,
 } from '@prisma/client';
-import { generateJobReference } from '../../src/modules/job-offer/utils/job-reference.util';
+import { randomInt } from 'node:crypto';
+
+function generateJobReference(): string {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  for (let i = 0; i < 5; i++) code += alphabet[randomInt(0, alphabet.length)];
+  return `RBT-${code}`;
+}
 
 const SEED_WORKER_EMAIL = 'fariol+worker@akieni.tech';
 const SEED_EMPLOYER_EMAIL = 'fariol+employer@akieni.tech';

@@ -17,6 +17,7 @@ import { WhatsAppOutboundProcessor } from './modules/whatsapp/whatsapp-outbound.
 import { getMailerTransportConfig } from './modules/mail/mailer-transport.config';
 import { WalletService } from './modules/wallet/wallet.service';
 import { SystemConfigService } from './modules/system-config/system-config.service';
+import { LayoutService } from './modules/mail/layout.service';
 import { InvoiceService } from './modules/invoice/invoice.service';
 import { PenaltyNotificationProcessor } from './modules/penalty/penalty-notification.processor';
 
@@ -67,6 +68,12 @@ export class WorkerModule {
     // TwilioService needs SystemConfigService so twilio.whatsapp_from (and optional DB credentials) load like the API.
     const whatsAppProviders = [
       systemConfigProvider,
+      {
+        provide: LayoutService,
+        useFactory: (systemConfig: SystemConfigService) =>
+          new LayoutService(systemConfig),
+        inject: [SystemConfigService],
+      },
       {
         provide: TwilioService,
         useFactory: (
