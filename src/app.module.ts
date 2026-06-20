@@ -52,6 +52,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { HttpOnlyArcjetGuard } from './common/guards/http-only-arcjet.guard';
+import { LayoutService } from './modules/mail/layout.service';
 
 @Module({
   imports: [
@@ -160,6 +161,7 @@ import { HttpOnlyArcjetGuard } from './common/guards/http-only-arcjet.guard';
   controllers: [AppController],
   providers: [
     AppService,
+    LayoutService,
     { provide: APP_GUARD, useClass: HttpOnlyArcjetGuard },
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_FILTER, useClass: HttpExceptionFilter },
