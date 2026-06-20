@@ -3,7 +3,6 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { BullModule } from '@nestjs/bullmq';
 import { MailProcessor } from './mail.processor';
 import { MailService } from './mail.service';
-import { LayoutService } from './layout.service';
 
 @Module({
   imports: [
@@ -21,7 +20,8 @@ import { LayoutService } from './layout.service';
     BullModule.registerQueue({ name: 'mail' }),
   ],
   controllers: [],
-  providers: [MailService, MailProcessor, LayoutService],
-  exports: [MailService, LayoutService],
+  providers: [MailService, MailProcessor],
+  exports: [MailService],
 })
 export class MailModule {}
+

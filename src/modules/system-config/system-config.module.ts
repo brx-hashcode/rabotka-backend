@@ -4,12 +4,13 @@ import { SystemConfigService } from './system-config.service';
 import { SystemConfigController } from './system-config.controller';
 import { SystemConfigPublicController } from './system-config-public.controller';
 import { LogModule } from '../log/log.module';
+import { LayoutService } from '../mail/layout.service';
 
 @Global()
 @Module({
   imports: [forwardRef(() => AuthModule), LogModule],
-  providers: [SystemConfigService],
+  providers: [SystemConfigService, LayoutService],
   controllers: [SystemConfigController, SystemConfigPublicController],
-  exports: [SystemConfigService],
+  exports: [SystemConfigService, LayoutService],
 })
 export class SystemConfigModule {}
