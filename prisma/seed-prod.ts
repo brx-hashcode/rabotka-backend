@@ -3,6 +3,7 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '@prisma/client';
 import { seedSuperAdmin } from './seed/user.seed';
 import { seedJobCategories } from './seed/job-category.seed';
+import { seedSystemConfig } from './seed/system-config.seed';
 
 config({ path: '.env.local' });
 config({ path: '.env' });
@@ -17,6 +18,7 @@ async function run() {
   try {
     await seedJobCategories(prisma);
     await seedSuperAdmin(prisma);
+    await seedSystemConfig(prisma);
   } catch (e) {
     console.error(e);
     process.exit(1);
