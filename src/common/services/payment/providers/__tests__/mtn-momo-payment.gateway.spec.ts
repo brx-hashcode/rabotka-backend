@@ -89,6 +89,70 @@ describe('MtnMomoPaymentGateway', () => {
       // Only 1 fetch call (no token refresh)
       expect(fetchSpy).toHaveBeenCalledTimes(1);
     });
+
+    it('sends trailing slash on requesttopay URL', async () => {
+      (gateway as any).cachedToken = { value: 'tok', expiresAt: Date.now() + 99999 };
+      fetchSpy.mockResolvedValueOnce(makeResponse({}, true, 202));
+      await gateway.initiatePayment(params);
+      const url = fetchSpy.mock.calls[0][0] as string;
+      expect(url).toMatch(/\/requesttopay\/$/);
+    });
+
+    it('sends Host header on requesttopay', async () => {
+      (gateway as any).cachedToken = { value: 'tok', expiresAt: Date.now() + 99999 };
+      fetchSpy.mockResolvedValueOnce(makeResponse({}, true, 202));
+      await gateway.initiatePayment(params);
+      const init = fetchSpy.mock.calls[0][1] as RequestInit;
+      const headers = init.headers as Record<string, string>;
+      expect(headers['Host']).toBe('sandbox.momodeveloper.mtn.com');
+    });
+
+    it('prepends 242 to local phone number', async () => {
+      (gateway as any).cachedToken = { value: 'tok', expiresAt: Date.now() + 99999 };
+      fetchSpy.mockResolvedValueOnce(makeResponse({}, true, 202));
+      await gateway.initiatePayment({ ...params, phone: '061234567' });
+      const init = fetchSpy.mock.calls[0][1] as RequestInit;
+      const body = JSON.parse(init.body as string);
+      expect(body.payer.partyId).toBe('242061234567');
+    });
+
+    it('does not double-prefix 242 when already present', async () => {
+      (gateway as any).cachedToken = { value: 'tok', expiresAt: Date.now() + 99999 };
+      fetchSpy.mockResolvedValueOnce(makeResponse({}, true, 202));
+      await gateway.initiatePayment({ ...params, phone: '242061234567' });
+      const init = fetchSpy.mock.calls[0][1] as RequestInit;
+      const body = JSON.parse(init.body as string);
+      expect(body.payer.partyId).toBe('242061234567');
+    });
+
+    it('normalizes +242 prefix', async () => {
+      (gateway as any).cachedToken = { value: 'tok', expiresAt: Date.now() + 99999 };
+      fetchSpy.mockResolvedValueOnce(makeResponse({}, true, 202));
+      await gateway.initiatePayment({ ...params, phone: '+242061234567' });
+      const init = fetchSpy.mock.calls[0][1] as RequestInit;
+      const body = JSON.parse(init.body as string);
+      expect(body.payer.partyId).toBe('242061234567');
+    });
+
+    it('uses description as payerMessage and payeeNote', async () => {
+      (gateway as any).cachedToken = { value: 'tok', expiresAt: Date.now() + 99999 };
+      fetchSpy.mockResolvedValueOnce(makeResponse({}, true, 202));
+      await gateway.initiatePayment({ ...params, description: 'Recharge du wallet — 5 000 FCFA' });
+      const init = fetchSpy.mock.calls[0][1] as RequestInit;
+      const body = JSON.parse(init.body as string);
+      expect(body.payerMessage).toBe('Recharge du wallet — 5 000 FCFA');
+      expect(body.payeeNote).toBe('Recharge du wallet — 5 000 FCFA');
+    });
+
+    it('falls back to Paiement Rabotka when no description', async () => {
+      (gateway as any).cachedToken = { value: 'tok', expiresAt: Date.now() + 99999 };
+      fetchSpy.mockResolvedValueOnce(makeResponse({}, true, 202));
+      const { description: _, ...noDesc } = params;
+      await gateway.initiatePayment(noDesc);
+      const init = fetchSpy.mock.calls[0][1] as RequestInit;
+      const body = JSON.parse(init.body as string);
+      expect(body.payerMessage).toBe('Paiement Rabotka');
+    });
   });
 
   describe('checkPaymentStatus', () => {
@@ -143,13 +207,25 @@ describe('MtnMomoPaymentGateway', () => {
       };
     });
 
-    it('re-verifies and returns status', async () => {
+    it('re-verifies and returns status using externalId as fallback', async () => {
       fetchSpy.mockResolvedValueOnce(
         makeResponse({ status: 'SUCCESSFUL', financialTransactionId: 'tx-1' }),
       );
       const result = await gateway.handleWebhookPayload({ externalId: 'gw-1' });
       expect(result.status).toBe('COMPLETED');
       expect(result.gatewayRef).toBe('gw-1');
+    });
+
+    it('prefers referenceId over externalId for status check', async () => {
+      fetchSpy.mockResolvedValueOnce(
+        makeResponse({ status: 'SUCCESSFUL', financialTransactionId: 'tx-2' }),
+      );
+      const result = await gateway.handleWebhookPayload({
+        referenceId: 'uuid-ref',
+        externalId: 'db-id',
+      });
+      expect(result.gatewayRef).toBe('uuid-ref');
+      expect(result.status).toBe('COMPLETED');
     });
 
     it('uses referenceId when no externalId', async () => {
