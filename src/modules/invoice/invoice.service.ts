@@ -131,7 +131,8 @@ export class InvoiceService {
 
     const reasonLabel: Record<InvoiceReason, string> = {
       CONTACT_UNLOCK: 'Déverrouillage de contact',
-      PENALTY: 'Pénalité',
+      PENALTY: 'Régularisation',
+      WALLET_TOP_UP: 'Recharge de wallet',
       OTHER: 'Autre',
     };
 
@@ -205,7 +206,8 @@ export class InvoiceService {
 
     const reasonLabel: Record<InvoiceReason, string> = {
       CONTACT_UNLOCK: 'Déverrouillage de contact',
-      PENALTY: 'Pénalité',
+      PENALTY: 'Régularisation',
+      WALLET_TOP_UP: 'Recharge de wallet',
       OTHER: 'Autre',
     };
 

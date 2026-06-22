@@ -152,8 +152,13 @@ describe('BotRouterService', () => {
       expect(result).toEqual({ type: 'command', commandId: 'profile' });
     });
 
-    it('routes worker "6" to help', () => {
+    it('routes worker "6" to credit_wallet', () => {
       const result = service.route('6', workerProfile, null);
+      expect(result).toEqual({ type: 'command', commandId: 'credit_wallet' });
+    });
+
+    it('routes worker "7" to help', () => {
+      const result = service.route('7', workerProfile, null);
       expect(result).toEqual({ type: 'command', commandId: 'help' });
     });
 
@@ -170,8 +175,13 @@ describe('BotRouterService', () => {
       expect(result).toEqual({ type: 'command', commandId: 'my_offers' });
     });
 
-    it('routes employer "7" to help', () => {
+    it('routes employer "7" to credit_wallet', () => {
       const result = service.route('7', employerProfile, null);
+      expect(result).toEqual({ type: 'command', commandId: 'credit_wallet' });
+    });
+
+    it('routes employer "8" to help', () => {
+      const result = service.route('8', employerProfile, null);
       expect(result).toEqual({ type: 'command', commandId: 'help' });
     });
 

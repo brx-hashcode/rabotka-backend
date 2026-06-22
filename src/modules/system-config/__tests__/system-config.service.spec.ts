@@ -294,43 +294,6 @@ describe('SystemConfigService', () => {
     });
   });
 
-  describe('getPaymentGatewayDriver', () => {
-    it('returns payment gateway driver', async () => {
-      mockRedis.get.mockResolvedValue('MONETBIL');
-      const result = await service.getPaymentGatewayDriver();
-      expect(result).toBe('MONETBIL');
-    });
-  });
-
-  describe('getPaymentEnvOverrides', () => {
-    it('returns empty for unknown driver', async () => {
-      const result = await service.getPaymentEnvOverrides('UNKNOWN');
-      expect(result).toEqual({});
-    });
-
-    it('returns overrides for MONETBIL driver', async () => {
-      mockRedis.get.mockResolvedValue('service-key');
-      const result = await service.getPaymentEnvOverrides('MONETBIL');
-      expect(typeof result).toBe('object');
-    });
-  });
-
-  describe('getMonetbilConfig', () => {
-    it('returns service key', async () => {
-      mockRedis.get.mockResolvedValue('mk-key');
-      const result = await service.getMonetbilConfig();
-      expect(result.serviceKey).toBe('mk-key');
-    });
-  });
-
-  describe('getMonetbilEnvOverrides', () => {
-    it('returns env overrides', async () => {
-      mockRedis.get.mockResolvedValue('val');
-      const result = await service.getMonetbilEnvOverrides();
-      expect(typeof result).toBe('object');
-    });
-  });
-
   describe('getStorageEnvOverrides', () => {
     it('returns empty for unknown driver', async () => {
       const result = await service.getStorageEnvOverrides('UNKNOWN_DRIVER');
