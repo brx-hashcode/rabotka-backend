@@ -18,8 +18,8 @@ export class PaymentGatewayService implements OnModuleInit {
     private readonly factory: PaymentGatewayFactory,
   ) {}
 
-  async onModuleInit(): Promise<void> {
-    this.gateway = await this.factory.create();
+  onModuleInit(): void {
+    this.gateway = this.factory.create();
     this.logger.log('Payment gateway service initialized');
   }
 

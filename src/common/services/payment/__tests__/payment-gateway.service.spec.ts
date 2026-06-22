@@ -11,7 +11,7 @@ const mockGateway = {
 };
 
 const mockFactory = {
-  create: jest.fn().mockResolvedValue(mockGateway),
+  create: jest.fn().mockReturnValue(mockGateway),
 };
 
 describe('PaymentGatewayService', () => {
@@ -28,13 +28,13 @@ describe('PaymentGatewayService', () => {
     service = module.get<PaymentGatewayService>(PaymentGatewayService);
   });
 
-  it('onModuleInit creates gateway', async () => {
-    await service.onModuleInit();
+  it('onModuleInit creates gateway', () => {
+    service.onModuleInit();
     expect(mockFactory.create).toHaveBeenCalled();
   });
 
   it('initiatePayment delegates to gateway', async () => {
-    await service.onModuleInit();
+    service.onModuleInit();
     const result = await service.initiatePayment({
       amount: 5000,
       currency: 'XAF',
@@ -47,14 +47,14 @@ describe('PaymentGatewayService', () => {
   });
 
   it('checkPaymentStatus delegates to gateway', async () => {
-    await service.onModuleInit();
+    service.onModuleInit();
     const result = await service.checkPaymentStatus('gw-1');
     expect(mockGateway.checkPaymentStatus).toHaveBeenCalledWith('gw-1');
     expect(result.status).toBe('PENDING');
   });
 
   it('handleWebhookPayload delegates to gateway', async () => {
-    await service.onModuleInit();
+    service.onModuleInit();
     const result = await service.handleWebhookPayload({
       event: 'PAYMENT_SUCCESS',
     });

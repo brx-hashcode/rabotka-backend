@@ -203,9 +203,8 @@ export class PaymentService {
       return { success: false, error };
     }
 
-    const activeGateway = await this.systemConfig
-      .getPaymentGatewayDriver()
-      .catch(() => 'MONETBIL');
+    const activeGateway = this.config.get<string>('PAYMENT_GATEWAY_DRIVER');
+    if (!activeGateway) throw new Error('PAYMENT_GATEWAY_DRIVER env var is required but not set.');
 
     await this.prisma.paymentRequest.update({
       where: { id: paymentRequest.id },

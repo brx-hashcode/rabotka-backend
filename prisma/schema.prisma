@@ -135,6 +135,7 @@ enum PaymentType {
   JOB_POSTING
   PENALTY
   CONTACT_UNLOCK
+  WALLET_TOP_UP
 }
 
 enum PaymentFlow {
@@ -163,6 +164,7 @@ enum WalletTransactionType {
   PENALTY_DEBIT
   MOBILE_MONEY_CREDIT
   MOBILE_MONEY_WITHDRAWAL
+  TOP_UP_CREDIT
 }
 
 enum ContactUnlockStatus {
@@ -187,6 +189,7 @@ enum PaymentRequestType {
   PENALTY_RESOLUTION
   CONTACT_UNLOCK
   RECOMMENDATION_CONTACT
+  WALLET_TOP_UP
 }
 
 enum ClaimStatus {
@@ -203,8 +206,6 @@ enum ConfigCategory {
   CONTACT
   STORAGE
   GENERAL
-  MONETBIL
-  PAYMENT
 }
 
 model SystemConfig {
@@ -870,6 +871,7 @@ enum InvoiceStatus {
 enum InvoiceReason {
   CONTACT_UNLOCK
   PENALTY
+  WALLET_TOP_UP
   OTHER
 }
 
