@@ -28,6 +28,7 @@ export const FLOW_TTL_SECONDS: Partial<Record<string, number>> = {
   pay_penalties: 3600, // 1 h — holds payment intent
   resolve_penalties: 3600, // 1 h — holds payment intent
   unlock_contact: 3600, // 1 h — holds payment intent
+  credit_wallet: 3600, // 1 h — holds top-up payment intent
 };
 
 export const FLOW_IDS = {
@@ -54,6 +55,7 @@ export const FLOW_IDS = {
   /** Tiny state machine that handles the 1/2/3 menu shown to an employer
    *  after a worker cancels their candidature (see formatCancellationToEmployer). */
   POST_CANCELLATION_ACTIONS: 'post_cancellation_actions',
+  CREDIT_WALLET: 'credit_wallet',
 } as const;
 
 export const WORKER_MENU_OPTIONS = {
@@ -62,7 +64,8 @@ export const WORKER_MENU_OPTIONS = {
   RECOMMENDED_JOBS: '3',
   SEARCH_BY_REF: '4',
   PROFILE: '5',
-  HELP: '6',
+  CREDIT_WALLET: '6',
+  HELP: '7',
 } as const;
 
 export const EMPLOYER_MENU_OPTIONS = {
@@ -72,7 +75,8 @@ export const EMPLOYER_MENU_OPTIONS = {
   FILLED_JOBS: '4',
   RECOMMENDED_PROFILES: '5',
   PROFILE: '6',
-  HELP: '7',
+  CREDIT_WALLET: '7',
+  HELP: '8',
 } as const;
 
 export const CMD_MENU = ['menu', 'aide', 'help', 'bonjour', '*'];
@@ -111,4 +115,10 @@ export const CMD_SEARCH_BY_REF = [
   'ref',
   'rechercher référence',
   'rechercher reference',
+];
+export const CMD_CREDIT_WALLET = [
+  'recharger',
+  'recharger mon wallet',
+  'recharge',
+  'recharger portefeuille',
 ];

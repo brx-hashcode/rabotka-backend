@@ -18,6 +18,7 @@ import {
   CMD_RECOMMENDED_JOBS,
   CMD_RECOMMENDED_PROFILES,
   CMD_SEARCH_BY_REF,
+  CMD_CREDIT_WALLET,
 } from '../bot.constants';
 import { stripChatFormattingChars } from '../utils/chat-input';
 
@@ -54,6 +55,7 @@ function matchCommandAlias(
     return 'search_by_ref';
   if (CMD_RECOMMENDED_PROFILES.includes(normalized) && isEmployer)
     return 'recommended_profiles';
+  if (CMD_CREDIT_WALLET.includes(normalized)) return 'credit_wallet';
   return null;
 }
 
@@ -64,6 +66,7 @@ function matchWorkerNumeric(trimmed: string): string | null {
   if (trimmed === WORKER_MENU_OPTIONS.RECOMMENDED_JOBS)
     return 'recommended_jobs';
   if (trimmed === WORKER_MENU_OPTIONS.PROFILE) return 'profile';
+  if (trimmed === WORKER_MENU_OPTIONS.CREDIT_WALLET) return 'credit_wallet';
   if (trimmed === WORKER_MENU_OPTIONS.HELP) return 'help';
   return null;
 }
@@ -78,6 +81,7 @@ function matchEmployerNumeric(trimmed: string): string | null {
   if (trimmed === EMPLOYER_MENU_OPTIONS.RECOMMENDED_PROFILES)
     return 'recommended_profiles';
   if (trimmed === EMPLOYER_MENU_OPTIONS.PROFILE) return 'profile';
+  if (trimmed === EMPLOYER_MENU_OPTIONS.CREDIT_WALLET) return 'credit_wallet';
   if (trimmed === EMPLOYER_MENU_OPTIONS.HELP) return 'help';
   return null;
 }
