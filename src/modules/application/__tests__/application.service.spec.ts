@@ -107,6 +107,7 @@ describe('ApplicationService', () => {
         create: jest.fn(),
         updateMany: jest.fn(),
         findUnique: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
       },
       $executeRaw: jest.fn().mockResolvedValue(0),
       $transaction: jest.fn().mockImplementation((arg: unknown) => {
