@@ -88,6 +88,12 @@ type PaymentProcessingContext = {
   paymentDescription: string;
 };
 
+function resolvePaymentType(requestType: PaymentRequestType | null | undefined, isContactUnlock: boolean, isRecommendationContact: boolean): PaymentType {
+  if (isContactUnlock || isRecommendationContact) return PaymentType.CONTACT_UNLOCK;
+  if (requestType === PaymentRequestType.WALLET_TOP_UP) return PaymentType.WALLET_TOP_UP;
+  return PaymentType.PENALTY;
+}
+
 @Injectable()
 export class PaymentRequestService {
   private readonly logger = new Logger(PaymentRequestService.name);
@@ -172,9 +178,8 @@ export class PaymentRequestService {
       throw new BadRequestException('Cette demande a déjà été traitée');
     }
 
-    const activeGateway = await this.systemConfig
-      .getPaymentGatewayDriver()
-      .catch(() => 'MONETBIL');
+    const activeGateway = this.config.get<string>('PAYMENT_GATEWAY_DRIVER');
+    if (!activeGateway) throw new Error('PAYMENT_GATEWAY_DRIVER env var is required but not set.');
 
     return {
       id: request.id,
@@ -281,9 +286,8 @@ export class PaymentRequestService {
       throw new BadRequestException(errorMessage);
     }
 
-    const activeGateway = await this.systemConfig
-      .getPaymentGatewayDriver()
-      .catch(() => 'MONETBIL');
+    const activeGateway = this.config.get<string>('PAYMENT_GATEWAY_DRIVER');
+    if (!activeGateway) throw new Error('PAYMENT_GATEWAY_DRIVER env var is required but not set.');
 
     await this.prisma.paymentRequest.update({
       where: { id: request.id },
@@ -453,6 +457,7 @@ export class PaymentRequestService {
 
     this.emitAdminPaymentNotification(request, context);
     await this.handlePenaltyPostPayment(request);
+    await this.handleWalletTopUpPostPayment(request, context);
 
     // Compute unlock result first (needed for the confirmation message text)
     // but defer sending the contact details notification until after invoice
@@ -517,10 +522,7 @@ export class PaymentRequestService {
       isContactUnlock,
       isRecommendationContact,
       recommendationWorkerId,
-      paymentType:
-        isContactUnlock || isRecommendationContact
-          ? PaymentType.CONTACT_UNLOCK
-          : PaymentType.PENALTY,
+      paymentType: resolvePaymentType(requestType, isContactUnlock, isRecommendationContact),
       paymentDescription,
     };
   }
@@ -665,9 +667,7 @@ export class PaymentRequestService {
         request.contact_unlock_attempt_id != null;
       await this.prisma.payment.create({
         data: {
-          type: isContactType
-            ? PaymentType.CONTACT_UNLOCK
-            : PaymentType.PENALTY,
+          type: resolvePaymentType(request.request_type, isContactType, false),
           profile_id: request.profile_id,
           amount: Number(request.amount ?? 0),
           payment_method: PaymentMethod.MOBILE_MONEY,
@@ -824,7 +824,9 @@ export class PaymentRequestService {
       reason:
         context.isContactUnlock || context.isRecommendationContact
           ? InvoiceReason.CONTACT_UNLOCK
-          : InvoiceReason.PENALTY,
+          : request.request_type === PaymentRequestType.WALLET_TOP_UP
+            ? InvoiceReason.WALLET_TOP_UP
+            : InvoiceReason.PENALTY,
       relatedEntityType: relatedEntity?.type,
       relatedEntityId: relatedEntity?.id,
     });
@@ -1047,6 +1049,55 @@ export class PaymentRequestService {
       createdAt: r.created_at,
       updatedAt: r.updated_at,
     };
+  }
+
+  private async handleWalletTopUpPostPayment(
+    request: PaymentRequestWithProfile,
+    context: PaymentProcessingContext,
+  ): Promise<void> {
+    if (request.request_type !== PaymentRequestType.WALLET_TOP_UP) return;
+
+    try {
+      await this.walletService.creditProfileWallet(
+        request.profile_id,
+        context.amount,
+        WalletTransactionType.TOP_UP_CREDIT,
+        'payment_request',
+        request.id,
+      );
+
+      const newBalance = await this.walletService.getProfileWalletBalance(
+        request.profile_id,
+      );
+
+      if (request.profile.phone) {
+        const message = [
+          `✅ *Wallet rechargé avec succès !*`,
+          ``,
+          `Montant crédité : *${context.amount.toLocaleString('fr-FR')} FCFA*`,
+          `Nouveau solde : *${newBalance.toLocaleString('fr-FR')} FCFA*`,
+          ``,
+          `Tapez *Menu* pour continuer.`,
+        ].join('\n');
+        await this.botNotification
+          .sendMessage(request.profile.phone, message)
+          .catch((err) =>
+            this.logger.warn(
+              `Wallet top-up WhatsApp notification failed for profile ${request.profile_id}:`,
+              err,
+            ),
+          );
+      }
+
+      this.logger.log(
+        `Wallet top-up: ${context.amount} FCFA credited to profile ${request.profile_id} via payment request ${request.id}`,
+      );
+    } catch (err) {
+      this.logger.warn(
+        `Wallet top-up post-payment processing failed for profile ${request.profile_id}:`,
+        err,
+      );
+    }
   }
 
   private async handlePenaltyPostPayment(

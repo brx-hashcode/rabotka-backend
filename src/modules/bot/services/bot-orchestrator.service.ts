@@ -92,6 +92,10 @@ import {
   getSearchByRefInitialState,
   getSearchByRefPromptMessage,
 } from '../flows/search-by-ref.flow';
+import {
+  runCreditWalletFlow,
+  getCreditWalletInitialState,
+} from '../flows/credit-wallet.flow';
 import { MatchingService } from '../../matching/matching.service';
 import { QueueService } from '../../../common/services/queue/queue.service';
 import { runRepublishExpiredJobFlow } from '../flows/republish-expired-job.flow';
@@ -747,6 +751,11 @@ export class BotOrchestratorService {
         runRateAssignmentFlow(state, input, profile, { prisma: this.prisma }),
       [FLOW_IDS.SEARCH_BY_REF]: () =>
         runSearchByRefFlow(state, input, profile, ctx),
+      [FLOW_IDS.CREDIT_WALLET]: () =>
+        runCreditWalletFlow(state, input, profile, {
+          paymentService: this.paymentService,
+          walletService: this.walletService,
+        }),
       [FLOW_IDS.MY_OFFERS]: async () => {
         const currentPage = (state.payload?.page as number) ?? 0;
         const offerIds = (state.payload?.offerIds as string[]) ?? [];
@@ -928,6 +937,8 @@ export class BotOrchestratorService {
         this.handleRecommendedProfilesCommand(botProfile, profileId),
 
       search_by_ref: () => this.handleSearchByRefCommand(botProfile, profileId),
+
+      credit_wallet: () => this.handleCreditWalletCommand(botProfile, profileId),
     };
 
     const handler = commandHandlers[route.commandId];
@@ -994,6 +1005,18 @@ export class BotOrchestratorService {
     }
     await this.botState.set(profileId, getSearchByRefInitialState());
     return [getSearchByRefPromptMessage()];
+  }
+
+  private async handleCreditWalletCommand(
+    profile: BotProfile,
+    profileId: string,
+  ): Promise<string[]> {
+    const { state, message } = await getCreditWalletInitialState(profile, {
+      paymentService: this.paymentService,
+      walletService: this.walletService,
+    });
+    await this.botState.set(profileId, state);
+    return [message];
   }
 
   private async handleMyApplicationsCommand(

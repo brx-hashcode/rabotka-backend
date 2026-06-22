@@ -39,7 +39,7 @@ export class MtnMomoPaymentGateway implements IPaymentGateway {
   }
 
   private get environment(): string {
-    return this.configService.get<string>('MTN_MOMO_ENVIRONMENT', 'sandbox');
+    return this.configService.get<string>('MTN_MOMO_ENVIRONMENT', '');
   }
 
   private get callbackUrl(): string {
@@ -94,17 +94,20 @@ export class MtnMomoPaymentGateway implements IPaymentGateway {
     const token = await this.getAccessToken();
     const referenceId = randomUUID();
 
+    const msisdn = params.phone.replace(/^(\+?242)?/, '242').replace(/^\+/, '');
+    const message = params.description ?? 'Paiement Rabotka';
+
     const body = {
       amount: String(params.amount),
       currency: params.currency,
       externalId: params.externalId,
-      payer: { partyIdType: 'MSISDN', partyId: params.phone },
-      payerMessage: params.description ?? 'Payment',
-      payeeNote: params.description ?? 'Payment',
+      payer: { partyIdType: 'MSISDN', partyId: msisdn },
+      payerMessage: message,
+      payeeNote: message,
     };
 
     const response = await fetchWithTimeout(
-      `${this.baseUrl}/collection/v1_0/requesttopay`,
+      `${this.baseUrl}/collection/v1_0/requesttopay/`,
       {
         method: 'POST',
         headers: {
@@ -114,6 +117,7 @@ export class MtnMomoPaymentGateway implements IPaymentGateway {
           'Ocp-Apim-Subscription-Key': this.primaryKey,
           'X-Callback-Url': this.callbackUrl,
           'Content-Type': 'application/json',
+          Host: new URL(this.baseUrl).hostname,
         },
         body: JSON.stringify(body),
       },
@@ -184,7 +188,7 @@ export class MtnMomoPaymentGateway implements IPaymentGateway {
   async handleWebhookPayload(payload: unknown): Promise<WebhookHandleResult> {
     const body = payload as Record<string, unknown>;
     const gatewayRef =
-      (body['externalId'] as string) ?? (body['referenceId'] as string) ?? '';
+      (body['referenceId'] as string) ?? (body['externalId'] as string) ?? '';
 
     // Re-verify via API — don't trust webhook body alone
     const verified = await this.checkPaymentStatus(gatewayRef);

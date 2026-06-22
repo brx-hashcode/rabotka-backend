@@ -166,6 +166,14 @@ jobs:
           QDRANT_API_KEY=$(echo "$VAULT_SECRET" | jq -r '.QDRANT_API_KEY')
           IS_PROD=$(echo "$VAULT_SECRET" | jq -r '.IS_PROD // "false"')
           CLOUDFLARE_PUBLIC_BASE_URL=$(echo "$VAULT_SECRET" | jq -r '.CLOUDFLARE_PUBLIC_BASE_URL // ""')
+          PAYMENT_GATEWAY_DRIVER=$(echo "$VAULT_SECRET" | jq -r '.PAYMENT_GATEWAY_DRIVER')
+          MONETBIL_SERVICE_KEY=$(echo "$VAULT_SECRET" | jq -r '.MONETBIL_SERVICE_KEY')
+          MTN_MOMO_BASE_URL=$(echo "$VAULT_SECRET" | jq -r '.MTN_MOMO_BASE_URL')
+          MTN_MOMO_COLLECTION_API_USER=$(echo "$VAULT_SECRET" | jq -r '.MTN_MOMO_COLLECTION_API_USER')
+          MTN_MOMO_COLLECTION_API_KEY=$(echo "$VAULT_SECRET" | jq -r '.MTN_MOMO_COLLECTION_API_KEY')
+          MTN_MOMO_COLLECTION_PRIMARY_KEY=$(echo "$VAULT_SECRET" | jq -r '.MTN_MOMO_COLLECTION_PRIMARY_KEY')
+          MTN_MOMO_ENVIRONMENT=$(echo "$VAULT_SECRET" | jq -r '.MTN_MOMO_ENVIRONMENT')
+          MTN_MOMO_CALLBACK_URL=$(echo "$VAULT_SECRET" | jq -r '.MTN_MOMO_CALLBACK_URL')
           EOF
           sed -i 's/^[[:space:]]*//' /tmp/deploy.env
 
