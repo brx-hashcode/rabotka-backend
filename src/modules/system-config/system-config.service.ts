@@ -8,8 +8,6 @@ import {
 } from '../../common/services/redis/redis.constants';
 import {
   DEFAULT_SYSTEM_CONFIGS,
-  MONETBIL_ENV_OVERRIDES,
-  PAYMENT_ENV_OVERRIDES,
   STORAGE_ENV_OVERRIDES,
 } from './system-config.constants';
 
@@ -348,44 +346,6 @@ export class SystemConfigService implements OnModuleInit {
 
   async getStorageDriver(): Promise<string> {
     return this.get('storage.driver', 'S3');
-  }
-
-  async getPaymentGatewayDriver(): Promise<string> {
-    return this.get('payment.gateway_driver', 'MONETBIL');
-  }
-
-  async getPaymentEnvOverrides(
-    driver: string,
-  ): Promise<Record<string, string>> {
-    const mapping = PAYMENT_ENV_OVERRIDES[driver.toUpperCase()] ?? {};
-    const overrides: Record<string, string> = {};
-    await Promise.all(
-      Object.entries(mapping).map(async ([envKey, cfgKey]) => {
-        const val = await this.get(cfgKey, '');
-        if (val !== '') overrides[envKey] = val;
-      }),
-    );
-    return overrides;
-  }
-
-  async getMonetbilConfig(): Promise<{ serviceKey: string }> {
-    const serviceKey = await this.get('monetbil.service_key', '');
-    return { serviceKey };
-  }
-
-  /**
-   * Returns a map of env-var-name → db-value for Monetbil.
-   * Empty string values are omitted so the original env var takes precedence.
-   */
-  async getMonetbilEnvOverrides(): Promise<Record<string, string>> {
-    const overrides: Record<string, string> = {};
-    await Promise.all(
-      Object.entries(MONETBIL_ENV_OVERRIDES).map(async ([envKey, cfgKey]) => {
-        const val = await this.getRaw(cfgKey, '');
-        if (val !== '') overrides[envKey] = val;
-      }),
-    );
-    return overrides;
   }
 
   /**
