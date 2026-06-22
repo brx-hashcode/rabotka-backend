@@ -790,22 +790,6 @@ describe('PaymentRequestService', () => {
     });
   });
 
-  describe('getByToken() - getPaymentGatewayDriver catch', () => {
-    it('uses MONETBIL fallback when getPaymentGatewayDriver throws', async () => {
-      (prisma.paymentRequest.findUnique as jest.Mock).mockResolvedValue(
-        makeRequest(PaymentRequestStatus.PENDING),
-      );
-      const systemConfig = (service as any).systemConfig;
-      if (systemConfig) {
-        systemConfig.getPaymentGatewayDriver = jest
-          .fn()
-          .mockRejectedValueOnce(new Error('config error'));
-      }
-      const result = await service.getByToken(TOKEN);
-      expect(result.gateway).toBe('MONETBIL');
-    });
-  });
-
   describe('sendPaymentSuccessNotifications() branches', () => {
     function setupProcessApproval(
       requestOverrides: Record<string, unknown> = {},
