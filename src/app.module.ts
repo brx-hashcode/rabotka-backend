@@ -39,6 +39,7 @@ import { QdrantModule } from './modules/qdrant/qdrant.module';
 import { ClaimModule } from './modules/claim/claim.module';
 import { DocumentModule } from './modules/document/document.module';
 import { ContractModule } from './modules/contract/contract.module';
+import { ResumeModule } from './modules/resume/resume.module';
 import { InvoiceModule } from './modules/invoice/invoice.module';
 import { EventModule } from './modules/event/event.module';
 import { EventEmitterModule } from '@nestjs/event-emitter';
@@ -146,6 +147,7 @@ import { HttpOnlyArcjetGuard } from './common/guards/http-only-arcjet.guard';
     ClaimModule,
     DocumentModule,
     ContractModule,
+    ResumeModule,
     InvoiceModule,
     EventModule,
     DashboardModule,
