@@ -5,6 +5,7 @@ import { seedSuperAdmin } from './seed/user.seed';
 import { seedClaims } from './seed/claims.seed';
 import { seedProfiles } from './seed/profile.seed';
 import { seedJobOffersAndApplications } from './seed/job-offer.seed';
+import { seedResumeTest } from './seed/resume-test.seed';
 import { seedPenalties } from './seed/penalty.seed';
 import { seedInvoices } from './seed/invoice.seed';
 import { seedJobCategories } from './seed/job-category.seed';
@@ -27,6 +28,7 @@ async function run() {
     await seedSystemConfig(prisma);
     await seedProfiles(prisma);
     await seedJobOffersAndApplications(prisma);
+    await seedResumeTest(prisma);
     await seedPenalties(prisma);
     await seedClaims(prisma);
     await seedInvoices(prisma);
