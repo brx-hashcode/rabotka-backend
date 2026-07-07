@@ -34,6 +34,10 @@ function makeCtx(overrides: Record<string, unknown> = {}) {
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
     } as any,
+    applicationService: {
+      rejectPendingApplicants: jest.fn().mockResolvedValue([]),
+      notifyRejectedApplicants: jest.fn(),
+    } as any,
     ...overrides,
   };
 }

@@ -748,7 +748,10 @@ export class BotOrchestratorService {
           invoiceService: this.invoiceService,
         }),
       [FLOW_IDS.RATE_ASSIGNMENT]: () =>
-        runRateAssignmentFlow(state, input, profile, { prisma: this.prisma }),
+        runRateAssignmentFlow(state, input, profile, {
+          prisma: this.prisma,
+          applicationService: this.applicationService,
+        }),
       [FLOW_IDS.SEARCH_BY_REF]: () =>
         runSearchByRefFlow(state, input, profile, ctx),
       [FLOW_IDS.CREDIT_WALLET]: () =>
@@ -877,7 +880,10 @@ export class BotOrchestratorService {
           state,
           input,
           profile,
-          { prisma: this.prisma },
+          {
+            prisma: this.prisma,
+            applicationService: this.applicationService,
+          },
         );
         // Resolve the "Voir les autres candidatures" hand-off inline — we
         // have access to the candidatures-received command + state setter.

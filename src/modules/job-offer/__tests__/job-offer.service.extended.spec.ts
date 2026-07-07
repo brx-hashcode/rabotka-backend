@@ -60,6 +60,10 @@ describe('JobOfferService (extended)', () => {
         delete: jest.fn(),
         count: jest.fn(),
       },
+      application: {
+        findMany: jest.fn().mockResolvedValue([]),
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+      },
     };
 
     const mockMailService = {
@@ -76,6 +80,7 @@ describe('JobOfferService (extended)', () => {
 
     const mockBotNotificationService = {
       sendMessage: jest.fn().mockResolvedValue(undefined),
+      sendApplicationRejectedToWorker: jest.fn().mockResolvedValue(undefined),
     };
 
     const module: TestingModule = await Test.createTestingModule({

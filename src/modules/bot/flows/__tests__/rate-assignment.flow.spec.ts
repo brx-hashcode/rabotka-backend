@@ -36,6 +36,7 @@ function makeCtx(
 ) {
   const tx = {
     rating: {
+      findUnique: jest.fn().mockResolvedValue(null),
       upsert: jest.fn().mockResolvedValue({}),
       aggregate: jest
         .fn()
@@ -46,6 +47,9 @@ function makeCtx(
     },
     ...txOverrides,
   };
+  const applicationService = {
+    applyRatingToReliability: jest.fn().mockResolvedValue(undefined),
+  };
   return {
     prisma: {
       assignment: {
@@ -54,6 +58,8 @@ function makeCtx(
       $transaction: jest.fn().mockImplementation((fn: any) => fn(tx)),
       _tx: tx,
     } as any,
+    applicationService: applicationService as any,
+    _applicationService: applicationService,
   };
 }
 
@@ -205,6 +211,56 @@ describe('runRateAssignmentFlow', () => {
     );
     expect(result.clearState).toBe(true);
     expect(result.reply[0]).toContain('Menu');
+  });
+
+  describe('reliability score feed (employer rates worker)', () => {
+    const employerProfile: BotProfile = {
+      id: 'employer-1',
+      first_name: 'Marc',
+      last_name: 'Patron',
+      phone: '+242000009',
+      email: 'marc@example.com',
+      profile_type: 'EMPLOYER',
+      reliability_score: 100,
+      status: 'ACTIVE',
+    };
+    // Employer rates → ratee is the worker
+    const employerRatesState = makeState({
+      payload: { assignmentId: 'assign-1', rateeId: 'worker-1' },
+    });
+
+    it('applies the rating delta to the worker on first rating', async () => {
+      const ctx = makeCtx();
+      await runRateAssignmentFlow(employerRatesState, '5', employerProfile, ctx);
+      expect(
+        (ctx as any)._applicationService.applyRatingToReliability,
+      ).toHaveBeenCalledWith(expect.anything(), 'worker-1', 5);
+    });
+
+    it('does NOT apply the delta on a re-rating (already rated)', async () => {
+      const ctx = makeCtx({
+        rating: {
+          findUnique: jest.fn().mockResolvedValue({ id: 'existing-rating' }),
+          upsert: jest.fn().mockResolvedValue({}),
+          aggregate: jest
+            .fn()
+            .mockResolvedValue({ _avg: { score: 4 }, _count: { score: 2 } }),
+        },
+      });
+      await runRateAssignmentFlow(employerRatesState, '2', employerProfile, ctx);
+      expect(
+        (ctx as any)._applicationService.applyRatingToReliability,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('does NOT feed reliability when the worker rates the employer', async () => {
+      const ctx = makeCtx();
+      // worker rates → ratee is employer-1; reliability feed should be skipped
+      await runRateAssignmentFlow(makeState(), '5', workerProfile, ctx);
+      expect(
+        (ctx as any)._applicationService.applyRatingToReliability,
+      ).not.toHaveBeenCalled();
+    });
   });
 });
 
