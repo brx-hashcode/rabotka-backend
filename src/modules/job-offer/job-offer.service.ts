@@ -42,6 +42,17 @@ import {
 
 const REFERENCE_MAX_ATTEMPTS = 5;
 
+/**
+ * Offer statuses that close a posting for good. When an offer moves into one of
+ * these, any applicants still waiting on it (PENDING / VIEWED / WAITING_PAYMENT)
+ * can no longer be accepted and must be rejected + notified.
+ */
+const TERMINAL_JOB_OFFER_STATUSES: JobOfferStatus[] = [
+  JobOfferStatus.CANCELLED,
+  JobOfferStatus.COMPLETED,
+  JobOfferStatus.EXPIRED,
+];
+
 const MIN_SCHEDULED_HOURS_FROM_NOW = 4;
 const TITLE_MIN = 5;
 const TITLE_MAX = 100;
@@ -628,6 +639,50 @@ export class JobOfferService {
     return { items: offers.map((o) => this.toListItem(o)), total };
   }
 
+  /**
+   * When an offer is moved to a terminal status, reject the applicants still
+   * waiting on it (PENDING / VIEWED / WAITING_PAYMENT → REJECTED) and WhatsApp
+   * each worker. No-op for non-terminal statuses. Idempotent — REJECTED is
+   * terminal, so re-running rejects nothing.
+   */
+  private async closeApplicantsIfTerminal(
+    jobOfferId: string,
+    status: JobOfferStatus,
+  ): Promise<void> {
+    if (!TERMINAL_JOB_OFFER_STATUSES.includes(status)) return;
+
+    const leftovers = await this.prisma.application.findMany({
+      where: {
+        job_offer_id: jobOfferId,
+        status: {
+          in: [
+            ApplicationStatus.PENDING,
+            ApplicationStatus.VIEWED,
+            ApplicationStatus.WAITING_PAYMENT,
+          ],
+        },
+      },
+      select: { id: true },
+    });
+    if (leftovers.length === 0) return;
+
+    const ids = leftovers.map((a) => a.id);
+    await this.prisma.application.updateMany({
+      where: { id: { in: ids } },
+      data: { status: ApplicationStatus.REJECTED },
+    });
+    for (const appId of ids) {
+      this.botNotification
+        .sendApplicationRejectedToWorker(appId)
+        .catch((err: unknown) =>
+          this.logger.warn(
+            `[closeApplicantsIfTerminal] notify failed for ${appId}:`,
+            err,
+          ),
+        );
+    }
+  }
+
   async updateStatus(
     id: string,
     status: JobOfferStatus,
@@ -647,6 +702,8 @@ export class JobOfferService {
       where: { id },
       data: { status },
     });
+
+    await this.closeApplicantsIfTerminal(id, status);
 
     this.eventEmitter.emit(AdminNotificationEvent.JOB_OFFER_STATUS_CHANGED, {
       event: AdminNotificationEvent.JOB_OFFER_STATUS_CHANGED,
@@ -675,6 +732,8 @@ export class JobOfferService {
       where: { id },
       data: { status },
     });
+
+    await this.closeApplicantsIfTerminal(id, status);
 
     this.eventEmitter.emit(AdminNotificationEvent.JOB_OFFER_STATUS_CHANGED, {
       event: AdminNotificationEvent.JOB_OFFER_STATUS_CHANGED,

@@ -1,9 +1,11 @@
 import type { BotProfile, BotState } from '../types/bot-state.types';
 import { FLOW_IDS, CMD_MENU } from '../bot.constants';
 import type { PrismaService } from 'src/common/services/prisma/prisma.service';
+import type { ApplicationService } from '../../application/application.service';
 
 export type RateAssignmentContext = {
   prisma: PrismaService;
+  applicationService: ApplicationService;
 };
 
 type FlowResult = {
@@ -95,6 +97,20 @@ export async function runRateAssignmentFlow(
 
   try {
     await ctx.prisma.$transaction(async (tx) => {
+      // Was this assignment already rated by this rater? Determines whether the
+      // reliability delta should be applied (only on the first rating, never on
+      // a re-rate — otherwise the delta would be counted twice).
+      const existing = await tx.rating.findUnique({
+        where: {
+          rater_id_assignment_id: {
+            rater_id: profile.id,
+            assignment_id: assignmentId,
+          },
+        },
+        select: { id: true },
+      });
+      const isFirstRating = existing === null;
+
       // Upsert rating (idempotent — unique on rater_id + assignment_id)
       await tx.rating.upsert({
         where: {
@@ -125,6 +141,16 @@ export async function runRateAssignmentFlow(
           rating_count: agg._count.score,
         },
       });
+
+      // When the employer rates the worker, feed that rating into the worker's
+      // reliability_score (worker-as-ratee only; first rating only).
+      if (isEmployer && isFirstRating) {
+        await ctx.applicationService.applyRatingToReliability(
+          tx,
+          rateeId,
+          score,
+        );
+      }
     });
 
     return {

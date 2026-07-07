@@ -423,18 +423,53 @@ export class ReminderProcessor {
         employer_id: true,
         employer: { select: { phone: true, first_name: true } },
         applications: {
-          where: { status: ApplicationStatus.PENDING },
-          select: { worker: { select: { phone: true } } },
+          where: {
+            status: {
+              in: [
+                ApplicationStatus.PENDING,
+                ApplicationStatus.VIEWED,
+                ApplicationStatus.WAITING_PAYMENT,
+              ],
+            },
+          },
+          select: {
+            id: true,
+            worker: {
+              select: { id: true, phone: true, first_name: true },
+            },
+          },
         },
       },
     });
 
     if (overdue.length === 0) return;
 
+    const overdueIds = overdue.map((o) => o.id);
+
     await this.prisma.$transaction([
       this.prisma.jobOffer.updateMany({
-        where: { id: { in: overdue.map((o) => o.id) } },
+        where: { id: { in: overdueIds } },
         data: { status: JobOfferStatus.EXPIRED },
+      }),
+      // Cancel the uncommitted applicants left behind by the expired offers so
+      // they don't linger as PENDING forever. Workers are notified below.
+      this.prisma.application.updateMany({
+        where: {
+          job_offer_id: { in: overdueIds },
+          status: {
+            in: [
+              ApplicationStatus.PENDING,
+              ApplicationStatus.VIEWED,
+              ApplicationStatus.WAITING_PAYMENT,
+            ],
+          },
+        },
+        data: {
+          status: ApplicationStatus.CANCELLED,
+          cancelled_at: now,
+          cancellation_reason:
+            'Offre expirée (date de début dépassée sans démarrage)',
+        },
       }),
     ]);
 
@@ -444,7 +479,39 @@ export class ReminderProcessor {
 
     for (const offer of overdue) {
       await this.notifyExpiredOffer(offer);
+      for (const app of offer.applications ?? []) {
+        await this.notifyExpiredApplicant(offer.title, app.worker);
+      }
     }
+  }
+
+  private async notifyExpiredApplicant(
+    offerTitle: string,
+    worker: {
+      id: string;
+      phone: string | null;
+      first_name?: string | null;
+    },
+  ): Promise<void> {
+    const phone = worker.phone;
+    if (!phone) return;
+    const firstName = worker.first_name ?? '';
+    const text = [
+      `*⏰ Offre expirée*`,
+      '',
+      `Bonjour ${firstName}, l'offre *"${offerTitle}"* à laquelle vous aviez postulé a expiré, votre candidature a donc été clôturée.`,
+      '',
+      `D'autres offres sont disponibles — tapez *MENU* pour les consulter.`,
+    ].join('\n');
+
+    await this.whatsApp
+      .sendTextMessage(phone, text, worker.id)
+      .catch((err) => {
+        this.logger.warn(
+          `Failed to notify worker ${worker.id} of expired offer`,
+          err,
+        );
+      });
   }
 
   private async notifyExpiredOffer(offer: {
