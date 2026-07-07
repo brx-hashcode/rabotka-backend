@@ -946,6 +946,109 @@ export class ApplicationService {
     return hoursUntil >= 0 && hoursUntil < fees.cancellationThresholdHours;
   }
 
+  /**
+   * Reject the applicants left "hanging" when an offer reaches a terminal/closed
+   * state (COMPLETED, CANCELLED, FILLED, …): flip every still-uncommitted
+   * application (PENDING / VIEWED / WAITING_PAYMENT) to REJECTED. Mirrors the
+   * auto-reject in `accept()`. Returns the rejected application ids so the caller
+   * can notify the workers *after* its transaction commits (see
+   * `notifyRejectedApplicants`).
+   *
+   * Idempotent by construction: REJECTED is terminal, so a leftover only matches
+   * the filter once — re-running any transition rejects nothing (no double sends).
+   *
+   * @param tx  when supplied, the status write joins the caller's transaction so
+   *            it commits atomically with the offer's own status change.
+   */
+  async rejectPendingApplicants(
+    jobOfferId: string,
+    opts?: {
+      tx?: Prisma.TransactionClient;
+      excludeApplicationId?: string;
+    },
+  ): Promise<string[]> {
+    const client = opts?.tx ?? this.prisma;
+
+    const leftovers = await client.application.findMany({
+      where: {
+        job_offer_id: jobOfferId,
+        status: {
+          in: [
+            ApplicationStatus.PENDING,
+            ApplicationStatus.VIEWED,
+            ApplicationStatus.WAITING_PAYMENT,
+          ],
+        },
+        ...(opts?.excludeApplicationId
+          ? { id: { not: opts.excludeApplicationId } }
+          : {}),
+      },
+      select: { id: true },
+    });
+    if (leftovers.length === 0) return [];
+
+    const ids = leftovers.map((a) => a.id);
+    await client.application.updateMany({
+      where: { id: { in: ids } },
+      data: { status: ApplicationStatus.REJECTED },
+    });
+    return ids;
+  }
+
+  /**
+   * Best-effort WhatsApp "your application was closed" fan-out for the ids
+   * returned by `rejectPendingApplicants`. Each send is guarded so one failure
+   * never aborts the loop. Call this *after* the caller's transaction commits.
+   */
+  notifyRejectedApplicants(applicationIds: string[]): void {
+    for (const appId of applicationIds) {
+      this.botNotification
+        .sendApplicationRejectedToWorker(appId)
+        .catch((err: unknown) =>
+          console.warn(
+            `[notifyRejectedApplicants] notify failed for ${appId}:`,
+            err,
+          ),
+        );
+    }
+  }
+
+  /**
+   * Apply a 1–5 rating to a worker's reliability_score using the configured
+   * per-star delta (`fees.ratingScoreDeltas`), clamped to
+   * [reliabilityScoreMin, RELIABILITY_SCORE_MAX]. Runs inside the caller's
+   * transaction. Only meaningful for a WORKER ratee — the caller must gate on
+   * that (an employer's reliability is not driven by worker ratings today).
+   *
+   * Call this only for a *newly created* rating, never on re-rating, to avoid
+   * applying the delta more than once for the same assignment.
+   */
+  async applyRatingToReliability(
+    tx: Prisma.TransactionClient,
+    workerProfileId: string,
+    score: number,
+  ): Promise<void> {
+    const fees = await this.systemConfigService.getFees();
+    const delta = fees.ratingScoreDeltas[score];
+    if (delta === undefined || delta === 0) return;
+
+    const worker = await tx.profile.findUnique({
+      where: { id: workerProfileId },
+      select: { reliability_score: true },
+    });
+    const currentScore = worker?.reliability_score ?? 100;
+    const nextScore = Math.max(
+      fees.reliabilityScoreMin,
+      Math.min(RELIABILITY_SCORE_MAX, currentScore + delta),
+    );
+    if (nextScore !== currentScore) {
+      await tx.profile.update({
+        where: { id: workerProfileId },
+        data: { reliability_score: nextScore },
+      });
+    }
+  }
+
   /** Employer marks job as completed: set JobOffer to COMPLETED and create Payment for worker */
   async markJobCompleted(
     applicationId: string,
@@ -975,6 +1078,8 @@ export class ApplicationService {
     const amount = Number(application.job_offer.amount);
     const transactionId = generatePaymentReference();
     const now = new Date();
+    const fees = await this.systemConfigService.getFees();
+    let rejectedOrphanIds: string[] = [];
     await this.prisma.$transaction(async (tx) => {
       // Lock and re-check job status inside the transaction to prevent duplicate completions
       await tx.$executeRaw`SELECT id FROM "job_offers" WHERE id = ${application.job_offer_id}::uuid FOR UPDATE`;
@@ -1022,26 +1127,46 @@ export class ApplicationService {
         },
         data: { status: ApplicationStatus.END },
       });
-      // Boost reliability score only if the completing worker was not a no-show
+      // Close out any applicants still waiting on this now-completed offer
+      // (PENDING / VIEWED / WAITING_PAYMENT → REJECTED). Notified after commit.
+      rejectedOrphanIds = await this.rejectPendingApplicants(
+        application.job_offer_id,
+        { tx },
+      );
+      // Small "reliably showed up and completed" reward, config-driven. The
+      // quality signal (good/bad work) is applied separately when the worker is
+      // rated (see applyRatingToReliability), since many completions never get
+      // rated over WhatsApp. Skipped for a no-show.
       const completingAssignment = await tx.assignment.findUnique({
         where: { application_id: applicationId },
         select: { status: true },
       });
-      if (completingAssignment?.status !== AssignmentStatus.NO_SHOW) {
+      if (
+        completingAssignment?.status !== AssignmentStatus.NO_SHOW &&
+        fees.completionScoreReward !== 0
+      ) {
         const worker = await tx.profile.findUnique({
           where: { id: application.worker_id },
           select: { reliability_score: true },
         });
         const currentScore = worker?.reliability_score ?? 100;
-        const boostedScore = Math.min(RELIABILITY_SCORE_MAX, currentScore + 2);
-        if (boostedScore > currentScore) {
+        const rewardedScore = Math.max(
+          fees.reliabilityScoreMin,
+          Math.min(
+            RELIABILITY_SCORE_MAX,
+            currentScore + fees.completionScoreReward,
+          ),
+        );
+        if (rewardedScore !== currentScore) {
           await tx.profile.update({
             where: { id: application.worker_id },
-            data: { reliability_score: boostedScore },
+            data: { reliability_score: rewardedScore },
           });
         }
       }
     });
+
+    this.notifyRejectedApplicants(rejectedOrphanIds);
 
     const updated = await this.findById(applicationId);
     if (!updated)
