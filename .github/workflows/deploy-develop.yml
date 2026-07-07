@@ -110,7 +110,10 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=buildkit-develop
-          cache-to: type=gha,mode=max,scope=buildkit-develop
+          # ignore-error=true keeps cache export best-effort: a GitHub Actions
+          # Cache service outage logs a warning instead of failing the build
+          # (the image is already built and pushed before this step).
+          cache-to: type=gha,mode=max,scope=buildkit-develop,ignore-error=true
 
       - name: Delete stale GHA caches
         run: |
