@@ -84,6 +84,7 @@ const mockApplication = {
 describe('ApplicationService', () => {
   let service: ApplicationService;
   let prisma: jest.Mocked<PrismaService>;
+  let botNotification: jest.Mocked<BotNotificationService>;
 
   beforeEach(async () => {
     const mockPrismaService = {
@@ -129,7 +130,9 @@ describe('ApplicationService', () => {
           useValue: {
             sendNewApplicationToEmployer: jest.fn(),
             sendApplicationAcceptedToWorker: jest.fn(),
-            sendApplicationRejectedToWorker: jest.fn(),
+            sendApplicationRejectedToWorker: jest
+              .fn()
+              .mockResolvedValue(undefined),
             sendCancellationToEmployer: jest.fn(),
             sendJobCompletedToWorker: jest.fn(),
             sendJobCancelledByEmployerToWorker: jest.fn(),
@@ -156,6 +159,8 @@ describe('ApplicationService', () => {
               employerLateCancelScoreDeduction: 5,
               billingBlockThreshold: 2,
               maxConcurrentApplications: 3,
+              completionScoreReward: 1,
+              ratingScoreDeltas: { 1: -4, 2: -2, 3: 0, 4: 1, 5: 3 },
             }),
           },
         },
@@ -171,6 +176,99 @@ describe('ApplicationService', () => {
 
     service = module.get<ApplicationService>(ApplicationService);
     prisma = module.get(PrismaService);
+    botNotification = module.get(BotNotificationService);
+  });
+
+  describe('rejectPendingApplicants()', () => {
+    it('rejects PENDING/VIEWED/WAITING_PAYMENT applicants and returns their ids', async () => {
+      (prisma.application.findMany as jest.Mock).mockResolvedValueOnce([
+        { id: 'a1' },
+        { id: 'a2' },
+      ]);
+
+      const ids = await service.rejectPendingApplicants(JOB_OFFER_ID);
+
+      expect(ids).toEqual(['a1', 'a2']);
+      expect(prisma.application.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: { in: ['a1', 'a2'] } },
+          data: { status: ApplicationStatus.REJECTED },
+        }),
+      );
+    });
+
+    it('is a no-op (no update) when there are no leftover applicants', async () => {
+      (prisma.application.findMany as jest.Mock).mockResolvedValueOnce([]);
+
+      const ids = await service.rejectPendingApplicants(JOB_OFFER_ID);
+
+      expect(ids).toEqual([]);
+      expect(prisma.application.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('excludes the given application id from rejection', async () => {
+      (prisma.application.findMany as jest.Mock).mockResolvedValueOnce([]);
+
+      await service.rejectPendingApplicants(JOB_OFFER_ID, {
+        excludeApplicationId: APPLICATION_ID,
+      });
+
+      expect(prisma.application.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            id: { not: APPLICATION_ID },
+          }),
+        }),
+      );
+    });
+
+    it('notifyRejectedApplicants sends a rejection to each worker', () => {
+      service.notifyRejectedApplicants(['a1', 'a2']);
+      expect(
+        botNotification.sendApplicationRejectedToWorker,
+      ).toHaveBeenCalledWith('a1');
+      expect(
+        botNotification.sendApplicationRejectedToWorker,
+      ).toHaveBeenCalledWith('a2');
+    });
+  });
+
+  describe('applyRatingToReliability()', () => {
+    const makeTx = (currentScore: number | null) => ({
+      profile: {
+        findUnique: jest
+          .fn()
+          .mockResolvedValue({ reliability_score: currentScore }),
+        update: jest.fn().mockResolvedValue({}),
+      },
+    });
+
+    it('raises the score by the 5★ delta (clamped at 100)', async () => {
+      const tx = makeTx(98);
+      await service.applyRatingToReliability(tx as any, WORKER_ID, 5); // +3 → 100
+      expect(tx.profile.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: WORKER_ID },
+          data: { reliability_score: 100 },
+        }),
+      );
+    });
+
+    it('lowers the score by the 1★ delta (clamped at floor 50)', async () => {
+      const tx = makeTx(52);
+      await service.applyRatingToReliability(tx as any, WORKER_ID, 1); // -4 → 50 (floor)
+      expect(tx.profile.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: { reliability_score: 50 },
+        }),
+      );
+    });
+
+    it('does nothing for a neutral 3★ (delta 0)', async () => {
+      const tx = makeTx(80);
+      await service.applyRatingToReliability(tx as any, WORKER_ID, 3);
+      expect(tx.profile.update).not.toHaveBeenCalled();
+    });
   });
 
   describe('create()', () => {
@@ -652,7 +750,10 @@ describe('ApplicationService', () => {
             findUnique: jest.fn().mockResolvedValue({ status: 'COMPLETED' }),
           },
           payment: { create: jest.fn().mockResolvedValue({}) },
-          application: { updateMany: jest.fn().mockResolvedValue({}) },
+          application: {
+            updateMany: jest.fn().mockResolvedValue({}),
+            findMany: jest.fn().mockResolvedValue([]),
+          },
           profile: {
             findUnique: jest.fn().mockResolvedValue({ reliability_score: 100 }),
             update: jest.fn().mockResolvedValue({}),

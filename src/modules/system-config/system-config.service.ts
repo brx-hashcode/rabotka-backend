@@ -282,6 +282,12 @@ export class SystemConfigService implements OnModuleInit {
       empLateCancelDed,
       billingBlock,
       maxConcurrentApps,
+      completionReward,
+      ratingDelta1,
+      ratingDelta2,
+      ratingDelta3,
+      ratingDelta4,
+      ratingDelta5,
     ] = await this.mgetBatch([
       { key: 'fees.late_cancellation_penalty_fcfa', fallback: '5000' },
       { key: 'fees.late_cancellation_score_deduction', fallback: '5' },
@@ -290,6 +296,12 @@ export class SystemConfigService implements OnModuleInit {
       { key: 'fees.employer_late_cancel_score_deduction', fallback: '5' },
       { key: 'fees.billing_block_threshold', fallback: '2' },
       { key: 'fees.max_concurrent_applications', fallback: '3' },
+      { key: 'fees.completion_score_reward', fallback: '1' },
+      { key: 'fees.rating_score_delta_1', fallback: '-4' },
+      { key: 'fees.rating_score_delta_2', fallback: '-2' },
+      { key: 'fees.rating_score_delta_3', fallback: '0' },
+      { key: 'fees.rating_score_delta_4', fallback: '1' },
+      { key: 'fees.rating_score_delta_5', fallback: '3' },
     ]);
     return {
       lateCancellationPenaltyFcfa: Number(penalty),
@@ -299,6 +311,14 @@ export class SystemConfigService implements OnModuleInit {
       employerLateCancelScoreDeduction: Number(empLateCancelDed),
       billingBlockThreshold: Number(billingBlock),
       maxConcurrentApplications: Number(maxConcurrentApps),
+      completionScoreReward: Number(completionReward),
+      ratingScoreDeltas: {
+        1: Number(ratingDelta1),
+        2: Number(ratingDelta2),
+        3: Number(ratingDelta3),
+        4: Number(ratingDelta4),
+        5: Number(ratingDelta5),
+      } as Record<number, number>,
     };
   }
 
