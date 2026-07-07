@@ -247,6 +247,83 @@ describe('ReminderProcessor', () => {
       );
     });
 
+    it('cancels uncommitted applicants and notifies them when an offer expires', async () => {
+      prisma.jobOffer.findMany
+        .mockResolvedValueOnce([]) // offersToAutoStart
+        .mockResolvedValueOnce([
+          {
+            id: 'offer-1',
+            title: 'Ménage',
+            employer_id: 'emp-1',
+            employer: { phone: '+1111', first_name: 'Bob' },
+            applications: [
+              {
+                id: 'app-a',
+                worker: {
+                  id: 'worker-a',
+                  phone: '+2222',
+                  first_name: 'Awa',
+                },
+              },
+              {
+                id: 'app-b',
+                worker: {
+                  id: 'worker-b',
+                  phone: '+3333',
+                  first_name: 'Beni',
+                },
+              },
+            ],
+          },
+        ]); // openOverdue
+      prisma.application.findMany.mockResolvedValue([] as never);
+
+      await processor.process({ data: { type: 'scan' } });
+
+      // Offer → EXPIRED
+      expect(prisma.jobOffer.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { status: JobOfferStatus.EXPIRED } }),
+      );
+      // Uncommitted applications → CANCELLED with cancelled_at + reason
+      expect(prisma.application.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: ApplicationStatus.CANCELLED,
+            cancelled_at: expect.any(Date),
+            cancellation_reason: expect.any(String),
+          }),
+        }),
+      );
+      // Each worker notified (+ the employer)
+      expect(whatsApp.sendTextMessage).toHaveBeenCalledWith(
+        '+2222',
+        expect.any(String),
+        'worker-a',
+      );
+      expect(whatsApp.sendTextMessage).toHaveBeenCalledWith(
+        '+3333',
+        expect.any(String),
+        'worker-b',
+      );
+    });
+
+    it('does not cancel applications when there are no overdue empty offers', async () => {
+      prisma.jobOffer.findMany
+        .mockResolvedValueOnce([]) // offersToAutoStart
+        .mockResolvedValueOnce([]); // openOverdue
+      prisma.application.findMany.mockResolvedValue([] as never);
+
+      await processor.process({ data: { type: 'scan' } });
+
+      expect(prisma.application.updateMany).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: ApplicationStatus.CANCELLED,
+          }),
+        }),
+      );
+    });
+
     it('auto-starts FILLED offers that have accepted workers', async () => {
       prisma.jobOffer.findMany
         .mockResolvedValueOnce([
