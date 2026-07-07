@@ -1,4 +1,5 @@
 import type { PrismaService } from '../../../common/services/prisma/prisma.service';
+import type { ApplicationService } from '../../application/application.service';
 import type { BotProfile, BotState } from '../types/bot-state.types';
 import type { FlowResult } from '../types/flow.types';
 import { CMD_MENU } from '../bot.constants';
@@ -22,6 +23,7 @@ import { JobOfferStatus } from '@prisma/client';
 
 export type PostCancellationActionsContext = {
   prisma: PrismaService;
+  applicationService: ApplicationService;
 };
 
 export type PostCancellationHandoff = 'candidatures';
@@ -91,6 +93,10 @@ export async function runPostCancellationActionsFlow(
           where: { id: jobOfferId, employer_id: profile.id },
           data: { status: JobOfferStatus.CANCELLED },
         });
+        // Close out anyone still waiting on this offer and tell them.
+        const rejectedIds =
+          await ctx.applicationService.rejectPendingApplicants(jobOfferId);
+        ctx.applicationService.notifyRejectedApplicants(rejectedIds);
         return {
           reply: [
             `✅ L'offre *"${payload.jobOfferTitle ?? ''}"* a été supprimée.\n\nTapez *Menu* pour revenir.`,

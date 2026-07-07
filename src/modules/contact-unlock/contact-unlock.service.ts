@@ -28,6 +28,7 @@ import { SystemConfigService } from '../system-config/system-config.service';
 import { WalletService } from '../wallet/wallet.service';
 import { InvoiceService } from '../invoice/invoice.service';
 import { MatchingService } from '../matching/matching.service';
+import { BotNotificationService } from '../bot/services/bot-notification.service';
 import { generatePaymentReference } from '../../common/utils/payment-reference';
 import { randomUUID } from 'node:crypto';
 
@@ -61,7 +62,22 @@ export class ContactUnlockService {
     private readonly walletService: WalletService,
     private readonly invoiceService: InvoiceService,
     private readonly matchingService: MatchingService,
+    @Inject(forwardRef(() => BotNotificationService))
+    private readonly botNotification: BotNotificationService,
   ) {}
+
+  private notifyRejectedApplicants(applicationIds: string[]): void {
+    for (const appId of applicationIds) {
+      this.botNotification
+        .sendApplicationRejectedToWorker(appId)
+        .catch((err: unknown) =>
+          this.logger.warn(
+            `[contact-unlock] reject notify failed for ${appId}:`,
+            err,
+          ),
+        );
+    }
+  }
 
   private shouldReopenOffer(params: {
     scheduledAt: Date;
@@ -523,7 +539,7 @@ export class ContactUnlockService {
     if (applicationIds.length === 0) return;
     const apps = await this.prisma.application.findMany({
       where: { id: { in: applicationIds } },
-      select: { worker_id: true },
+      select: { worker_id: true, job_offer_id: true },
     });
     await this.prisma.application.updateMany({
       where: {
@@ -539,6 +555,65 @@ export class ContactUnlockService {
           console.warn(`Failed to re-index worker after unlock:`, err),
         );
     }
+
+    // If accepting these workers just filled an offer, close out the applicants
+    // still waiting on it (they can no longer be accepted) and notify them.
+    const jobOfferIds = [...new Set(apps.map((a) => a.job_offer_id))];
+    for (const jobOfferId of jobOfferIds) {
+      const rejectedIds = await this.rejectLeftoversIfOfferFilled(jobOfferId);
+      this.notifyRejectedApplicants(rejectedIds);
+    }
+  }
+
+  /**
+   * If `jobOfferId` now has enough ACCEPTED workers to meet its quantity, mark it
+   * FILLED and REJECT the still-uncommitted applicants (PENDING / VIEWED /
+   * WAITING_PAYMENT). Returns the rejected application ids (empty if not full).
+   * Runs in its own transaction so the fill + reject are atomic.
+   */
+  private async rejectLeftoversIfOfferFilled(
+    jobOfferId: string,
+  ): Promise<string[]> {
+    return this.prisma.$transaction(async (tx) => {
+      const offer = await tx.jobOffer.findUnique({
+        where: { id: jobOfferId },
+        select: { quantity: true, status: true },
+      });
+      if (!offer) return [];
+
+      const acceptedCount = await tx.application.count({
+        where: { job_offer_id: jobOfferId, status: ApplicationStatus.ACCEPTED },
+      });
+      if (acceptedCount < (offer.quantity ?? 1)) return [];
+
+      if (offer.status !== JobOfferStatus.FILLED) {
+        await tx.jobOffer.update({
+          where: { id: jobOfferId },
+          data: { status: JobOfferStatus.FILLED },
+        });
+      }
+
+      const leftovers = await tx.application.findMany({
+        where: {
+          job_offer_id: jobOfferId,
+          status: {
+            in: [
+              ApplicationStatus.PENDING,
+              ApplicationStatus.VIEWED,
+              ApplicationStatus.WAITING_PAYMENT,
+            ],
+          },
+        },
+        select: { id: true },
+      });
+      if (leftovers.length === 0) return [];
+      const ids = leftovers.map((a) => a.id);
+      await tx.application.updateMany({
+        where: { id: { in: ids } },
+        data: { status: ApplicationStatus.REJECTED },
+      });
+      return ids;
+    });
   }
 
   /**
