@@ -474,14 +474,13 @@ describe('BotOrchestratorService', () => {
       expect(result[0]).toBe('Filled jobs');
     });
 
-    it('handles "profile" command route (sets state)', async () => {
+    it('handles "profile" command route', async () => {
       deps.router.route.mockReturnValue({
         type: 'command',
         commandId: 'profile',
       });
       const result = await service.handle(PROFILE_ID, PHONE, 'profil');
       expect(result[0]).toBe('Profile message');
-      expect(deps.botState.set).toHaveBeenCalled();
     });
 
     it('handles "pay_penalties" command with no unpaid penalties', async () => {
@@ -1103,27 +1102,6 @@ describe('BotOrchestratorService', () => {
       });
       deps.botState.get.mockResolvedValue(flowState);
       const result = await service.handle('employer-uuid-1', PHONE, '1');
-      expect(Array.isArray(result)).toBe(true);
-    });
-
-    it('executes profile_submenu flow', async () => {
-      const flowState = {
-        flowId: 'profile_submenu',
-        step: 1,
-        payload: {},
-        updatedAt: new Date().toISOString(),
-      };
-      deps.router.route.mockReturnValue({
-        type: 'flow',
-        flowId: 'profile_submenu',
-        state: flowState,
-      });
-      deps.botState.get.mockResolvedValue(flowState);
-      (deps.commands as any).profile = jest
-        .fn()
-        .mockResolvedValue('Profile info');
-      deps.prisma.profile.findMany = jest.fn().mockResolvedValue([]);
-      const result = await service.handle(PROFILE_ID, PHONE, '1');
       expect(Array.isArray(result)).toBe(true);
     });
 

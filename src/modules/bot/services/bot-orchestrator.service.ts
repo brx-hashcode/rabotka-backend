@@ -56,10 +56,6 @@ import {
   getManageFilledJobInitialState,
 } from '../flows/manage-filled-job.flow';
 import {
-  runProfileSubmenuFlow,
-  getProfileSubmenuInitialState,
-} from '../flows/profile-submenu.flow';
-import {
   runPayPenaltiesFlow,
   getPayPenaltiesInitialState,
 } from '../flows/pay-penalties.flow';
@@ -711,8 +707,6 @@ export class BotOrchestratorService {
         runCandidaturesListFlow(state, input, profile, ctx),
       [FLOW_IDS.MANAGE_FILLED_JOB]: () =>
         runManageFilledJobFlow(state, input, profile, ctx),
-      [FLOW_IDS.PROFILE_SUBMENU]: () =>
-        runProfileSubmenuFlow(state, input, profile, ctx),
       [FLOW_IDS.PAY_PENALTIES]: () =>
         runPayPenaltiesFlow(state, input, profile, ctx),
       [FLOW_IDS.RESOLVE_PENALTIES]: () =>
@@ -928,7 +922,7 @@ export class BotOrchestratorService {
 
       my_offers: () => this.handleMyOffersCommand(botProfile, profileId, 0),
 
-      profile: () => this.handleProfileCommand(profileId, botProfile),
+      profile: () => this.handleProfileCommand(botProfile),
 
       pay_penalties: () =>
         this.handlePayPenaltiesCommand(botProfile, profileId),
@@ -957,12 +951,9 @@ export class BotOrchestratorService {
   }
 
   private async handleProfileCommand(
-    profileId: string,
     botProfile: BotProfile,
   ): Promise<string[]> {
     const message = await this.commands.profile(botProfile);
-    const submenuState = getProfileSubmenuInitialState(botProfile.profile_type);
-    await this.botState.set(profileId, submenuState);
     return [message];
   }
 
