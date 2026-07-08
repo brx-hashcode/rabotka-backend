@@ -165,12 +165,7 @@ export function formatEmployerProfileStats(params: {
     `*Candidatures en attente*: ${params.pendingCandidaturesCount}`,
     `*Solde portefeuille*: ${fcfa(balance)}`,
     '',
-    '',
-    '*Actions*',
-    '1- Mon historique',
-    '2- Menu',
-    '',
-    'Tapez le numero correspondant.',
+    'Tapez *Menu* pour revenir au menu principal.',
   ].join('\n');
 }
 
@@ -209,11 +204,7 @@ export function formatProfileStats(params: {
     `*Total penalites*: ${fcfa(params.totalPenalties)}`,
     `*Annulations tardives*: ${params.lateCancellations}`,
     '',
-    '*Actions*',
-    '1- Mon historique',
-    '2- Menu',
-    '',
-    '*Tapez le numero correspondant.*',
+    'Tapez *Menu* pour revenir au menu principal.',
   ].join('\n');
 }
 

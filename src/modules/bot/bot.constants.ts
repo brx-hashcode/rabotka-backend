@@ -39,7 +39,6 @@ export const FLOW_IDS = {
   CANDIDATURES_LIST: 'candidatures_list',
   LIST_OFFERS: 'list_offers',
   MY_APPLICATIONS: 'my_applications',
-  PROFILE_SUBMENU: 'profile_submenu',
   MANAGE_FILLED_JOB: 'manage_filled_job',
   PAY_PENALTIES: 'pay_penalties',
   VERIFY_WHATSAPP: 'verify_whatsapp',
