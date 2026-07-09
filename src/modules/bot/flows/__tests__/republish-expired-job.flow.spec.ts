@@ -62,7 +62,7 @@ describe('runRepublishExpiredJobFlow', () => {
       expect(result.clearState).toBe(true);
     });
 
-    it('returns menu when 2 sent', async () => {
+    it('returns rendered menu when 2 sent', async () => {
       const ctx = makeCtx();
       const result = await runRepublishExpiredJobFlow(
         makeState(0),
@@ -71,6 +71,8 @@ describe('runRepublishExpiredJobFlow', () => {
         ctx,
       );
       expect(result.clearState).toBe(true);
+      expect(result.reply[0]).toContain('Menu Rabotka');
+      expect(result.reply[0]).not.toContain('Tapez');
     });
 
     it('shows republish prompt for unknown input', async () => {
