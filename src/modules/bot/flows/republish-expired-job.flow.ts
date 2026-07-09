@@ -2,6 +2,7 @@ import type { PrismaService } from '../../../common/services/prisma/prisma.servi
 import type { BotProfile, BotState } from '../types/bot-state.types';
 import type { FlowResult } from '../types/flow.types';
 import { CMD_MENU } from '../bot.constants';
+import { menuMessage } from '../messages/menu.messages';
 import {
   parseDateTime,
   formatDateTime,
@@ -52,7 +53,7 @@ function expiredPrompt(title?: string): string {
     `Que souhaitez-vous faire ?`,
     '',
     `1- Republier l'offre`,
-    `2- Passer cette offre`,
+    `2- Menu`,
   ].join('\n');
 }
 
@@ -121,9 +122,12 @@ async function handleStep0(
     return MENU_REPLY;
   }
 
-  // "2" = skip this offer and move on to the next in the queue (or menu).
+  // "2" = go straight to the main menu, abandoning any other queued offers.
   if (normalized === '2') {
-    return advanceQueue(state, 1, null, ctx, profile.id);
+    return {
+      reply: [menuMessage(profile.profile_type)],
+      clearState: true,
+    };
   }
 
   if (normalized !== '1' && normalized !== 'republier') {
