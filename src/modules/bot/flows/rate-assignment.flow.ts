@@ -1,6 +1,6 @@
 import type { BotProfile, BotState } from '../types/bot-state.types';
 import { FLOW_IDS, CMD_MENU } from '../bot.constants';
-import type { PrismaService } from 'src/common/services/prisma/prisma.service';
+import type { PrismaService } from '../../../common/services/prisma/prisma.service';
 import type { ApplicationService } from '../../application/application.service';
 
 export type RateAssignmentContext = {
