@@ -1,6 +1,6 @@
 import type { BotProfile, BotState } from '../types/bot-state.types';
 import { FLOW_IDS } from '../bot.constants';
-import type { PrismaService } from 'src/common/services/prisma/prisma.service';
+import type { PrismaService } from '../../../common/services/prisma/prisma.service';
 import type { WalletService } from '../../wallet/wallet.service';
 import type { SystemConfigService } from '../../system-config/system-config.service';
 import { AccountStatus, ProfileType } from '@prisma/client';

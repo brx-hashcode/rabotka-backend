@@ -24,6 +24,7 @@ import { JobOfferModule } from './modules/job-offer/job-offer.module';
 import { JobCategoryModule } from './modules/job-category/job-category.module';
 import { MatchingModule } from './modules/matching/matching.module';
 import { ApplicationModule } from './modules/application/application.module';
+import { MobileFeedModule } from './modules/mobile-feed/mobile-feed.module';
 import { PenaltyModule } from './modules/penalty/penalty.module';
 import { PaymentRequestModule } from './modules/payment-request/payment-request.module';
 import { FileModule } from './modules/file/file.module';
@@ -135,6 +136,7 @@ import { HttpOnlyArcjetGuard } from './common/guards/http-only-arcjet.guard';
     JobCategoryModule,
     MatchingModule,
     ApplicationModule,
+    MobileFeedModule,
     PenaltyModule,
     PaymentRequestModule,
     SystemConfigModule,

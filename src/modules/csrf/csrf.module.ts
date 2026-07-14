@@ -46,7 +46,19 @@ import { CsrfController } from './csrf.controller';
           ignoredMethods: ['GET', 'HEAD', 'OPTIONS'],
           skipCsrfProtection: (req) => {
             const url: string = req.originalUrl ?? req.url ?? req.path ?? '';
-            return url.includes('/whatsapp/incoming');
+            // CSRF is a cookie-session attack vector. Requests authenticated with
+            // a Bearer token (the mobile app) carry no ambient cookie the browser
+            // would auto-send, so CSRF does not apply — skip it for them. The web
+            // app keeps using cookies and stays protected.
+            const authHeader = req.headers?.authorization;
+            const isBearer =
+              typeof authHeader === 'string' &&
+              authHeader.startsWith('Bearer ');
+            return (
+              isBearer ||
+              url.includes('/whatsapp/incoming') ||
+              url.includes('/auth/mobile/')
+            );
           },
         });
       },
