@@ -19,15 +19,19 @@ import {
   ApiResponse,
   ApiBody,
   ApiCookieAuth,
+  ApiBearerAuth,
 } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
 import { ConfigService } from '@nestjs/config';
 import { AuthService } from './auth.service';
 import { AdminAuthGuard } from './guards/admin-auth.guard';
+import { ProfileAuthGuard } from './guards/profile-auth.guard';
 import type { AdminAuthenticatedRequest } from './guards/jwt-auth.guard';
 import {
   SendOtpDto,
   VerifyOtpDto,
+  RefreshTokenDto,
+  MobileLogoutDto,
   SendAdminOtpDto,
   VerifyAdminOtpDto,
   UpdateAdminMeDto,
@@ -163,6 +167,114 @@ export class AuthController {
       path: '/',
     });
 
+    return { success: true };
+  }
+
+  // --- Mobile bearer-token endpoints -------------------------------------
+  // Cookie-less: tokens are returned in the response body. These paths are
+  // CSRF-exempt (see CsrfModule.skipCsrfProtection).
+
+  @Post('mobile/send-otp')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: '[Mobile] Send OTP to email or phone',
+    description:
+      'Same delivery rules as the web flow (account must exist; phone requires a verified WhatsApp).',
+  })
+  @ApiBody({ type: SendOtpDto })
+  @ApiResponse({ status: 200, description: 'OTP sent successfully' })
+  @ApiResponse({ status: 400, description: 'Invalid email or phone' })
+  @ApiResponse({ status: 404, description: 'Profile not found' })
+  async mobileSendOtp(
+    @Body() sendOtpDto: SendOtpDto,
+  ): Promise<{ success: boolean; message: string }> {
+    // Delivery is identical to the web flow; only the route (CSRF-exempt) differs.
+    return this.sendOtp(sendOtpDto);
+  }
+
+  @Post('mobile/resend-otp')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: '[Mobile] Resend OTP',
+    description: 'Resends the OTP with the same 60s cooldown as the web flow.',
+  })
+  @ApiBody({ type: SendOtpDto })
+  @ApiResponse({ status: 200, description: 'OTP resent successfully' })
+  @ApiResponse({ status: 429, description: 'Resend cooldown active' })
+  async mobileResendOtp(
+    @Body() sendOtpDto: SendOtpDto,
+  ): Promise<{ success: boolean; message: string }> {
+    return this.resendOtp(sendOtpDto);
+  }
+
+  @Post('mobile/verify-otp')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: '[Mobile] Verify OTP and issue tokens',
+    description:
+      'Verifies the OTP and returns an access token (15m) + refresh token (24h) and the user profile in the body.',
+  })
+  @ApiBody({ type: VerifyOtpDto })
+  @ApiResponse({
+    status: 200,
+    description: 'OTP verified, tokens issued',
+    schema: {
+      type: 'object',
+      properties: {
+        token: { type: 'string' },
+        refreshToken: { type: 'string' },
+        user: { type: 'object' },
+      },
+    },
+  })
+  @ApiResponse({ status: 401, description: 'Invalid or expired OTP' })
+  @ApiResponse({ status: 404, description: 'Profile not found' })
+  async mobileVerifyOtp(@Body() verifyOtpDto: VerifyOtpDto) {
+    return this.authService.verifyOtpMobile(
+      verifyOtpDto.emailOrPhone,
+      verifyOtpDto.otp,
+    );
+  }
+
+  @Post('mobile/refresh')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: '[Mobile] Refresh tokens',
+    description:
+      'Exchanges a valid refresh token for a new access + refresh pair (rotating). The old refresh token is invalidated.',
+  })
+  @ApiBody({ type: RefreshTokenDto })
+  @ApiResponse({ status: 200, description: 'New token pair issued' })
+  @ApiResponse({
+    status: 401,
+    description: 'Invalid, expired, revoked or already-used refresh token',
+  })
+  async mobileRefresh(@Body() refreshTokenDto: RefreshTokenDto) {
+    return this.authService.refreshMobileTokens(refreshTokenDto.refreshToken);
+  }
+
+  @Post('mobile/logout')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(ProfileAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: '[Mobile] Logout',
+    description:
+      'Revokes the current access token and deletes the refresh token so the session cannot be resumed.',
+  })
+  @ApiBody({ type: MobileLogoutDto, required: false })
+  @ApiResponse({ status: 200, description: 'Session revoked' })
+  @ApiResponse({ status: 401, description: 'Missing or invalid access token' })
+  async mobileLogout(
+    @Req() req: Request,
+    @Body() logoutDto: MobileLogoutDto,
+  ): Promise<{ success: boolean }> {
+    const authHeader = req.headers.authorization;
+    const accessToken = authHeader?.startsWith('Bearer ')
+      ? authHeader.slice(7)
+      : undefined;
+
+    await this.authService.logoutMobile(accessToken, logoutDto.refreshToken);
     return { success: true };
   }
 
