@@ -81,6 +81,7 @@ describe('AuthService', () => {
 
     const mockWhatsAppService = {
       sendTextMessage: jest.fn().mockResolvedValue(true),
+      sendTemplateMessage: jest.fn().mockResolvedValue(true),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -131,7 +132,7 @@ describe('AuthService', () => {
       const result = await service.sendOtp('+24200000001');
 
       expect(result.success).toBe(true);
-      expect(whatsAppService.sendTextMessage).toHaveBeenCalled();
+      expect(whatsAppService.sendTemplateMessage).toHaveBeenCalled();
     });
 
     it('throws BadRequestException for invalid email/phone', async () => {
@@ -199,7 +200,7 @@ describe('AuthService', () => {
       redis.get.mockResolvedValue(null);
       const result = await service.resendOtp('+24200000001');
       expect(result.success).toBe(true);
-      expect(whatsAppService.sendTextMessage).toHaveBeenCalled();
+      expect(whatsAppService.sendTemplateMessage).toHaveBeenCalled();
     });
 
     it('throws when phone is not WhatsApp-connected on resend', async () => {

@@ -20,7 +20,7 @@ import { MailService } from '../mail/mail.service';
 import { LayoutService } from '../mail/layout.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { sendOtpEmail } from '../mail/templates';
-import { otpMessage } from '../whatsapp/templates';
+import { WHATSAPP_TEMPLATES } from '../../common/constants/whatsapp-templates';
 import * as otplib from 'otplib';
 import * as QRCode from 'qrcode';
 
@@ -656,8 +656,12 @@ export class AuthService {
   }
 
   private async sendOtpByWhatsApp(phone: string, otp: string): Promise<void> {
-    const message = otpMessage(otp);
-    const sent = await this.whatsAppService.sendTextMessage(phone, message);
+    const template = WHATSAPP_TEMPLATES.otp;
+    const sent = await this.whatsAppService.sendTemplateMessage(
+      phone,
+      template.contentSid,
+      template.variables(otp),
+    );
     if (sent) {
       this.logger.log(`WhatsApp OTP sent to ${phone}`);
     } else {

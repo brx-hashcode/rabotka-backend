@@ -113,6 +113,7 @@ function makeRedis() {
 function makeWhatsApp() {
   return {
     sendTextMessage: jest.fn().mockResolvedValue(true),
+    sendTemplateMessage: jest.fn().mockResolvedValue(true),
     isConfigured: jest.fn().mockReturnValue(true),
   };
 }
@@ -654,7 +655,7 @@ describe('ProfileService', () => {
         phone: '+242000001',
       });
       await service.updateProfileStatusByAdmin('p-1', 'ACTIVE' as any);
-      expect(whatsApp.sendTextMessage).toHaveBeenCalled();
+      expect(whatsApp.sendTemplateMessage).toHaveBeenCalled();
     });
 
     it('handles activation notification without phone', async () => {

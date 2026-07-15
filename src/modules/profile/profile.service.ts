@@ -14,10 +14,8 @@ import Redis from 'ioredis';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { FileService } from '../file/file.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
-import {
-  verificationLinkMessage,
-  accountActivatedMessage,
-} from '../whatsapp/templates';
+import { verificationLinkMessage } from '../whatsapp/templates';
+import { WHATSAPP_TEMPLATES } from '../../common/constants/whatsapp-templates';
 import { MailService } from '../mail/mail.service';
 import { LayoutService } from '../mail/layout.service';
 import { accountSuspendedEmail } from '../mail/templates';
@@ -351,6 +349,12 @@ export class ProfileService {
     return data;
   }
 
+  private accountActivatedTemplate(profileType: ProfileType) {
+    return profileType === ProfileType.WORKER
+      ? WHATSAPP_TEMPLATES.accountActivatedWorker
+      : WHATSAPP_TEMPLATES.accountActivatedEmployer;
+  }
+
   private async sendActivationNotification(profileId: string): Promise<void> {
     try {
       const profile = await this.prisma.profile.findUnique({
@@ -358,12 +362,13 @@ export class ProfileService {
         select: { phone: true, first_name: true, profile_type: true },
       });
       if (!profile?.phone) return;
-      const text = accountActivatedMessage(
-        profile.first_name,
-        profile.profile_type,
-      );
+      const tpl = this.accountActivatedTemplate(profile.profile_type);
       await this.whatsAppService
-        .sendTextMessage(profile.phone, text)
+        .sendTemplateMessage(
+          profile.phone,
+          tpl.contentSid,
+          tpl.variables(profile.first_name),
+        )
         .catch((err) =>
           this.logger.warn(
             `Failed to send account-activated WhatsApp to ${profile.phone}:`,
@@ -785,12 +790,13 @@ export class ProfileService {
     ) {
       try {
         if (profile.phone) {
-          const message = accountActivatedMessage(
-            profile.first_name,
-            profile.profile_type,
-          );
+          const tpl = this.accountActivatedTemplate(profile.profile_type);
 
-          await this.whatsAppService.sendTextMessage(profile.phone, message);
+          await this.whatsAppService.sendTemplateMessage(
+            profile.phone,
+            tpl.contentSid,
+            tpl.variables(profile.first_name),
+          );
         }
       } catch {
         this.logger.warn(
