@@ -11,6 +11,13 @@ import type { BotProfile, BotState } from '../types/bot-state.types';
 import { FLOW_IDS, CMD_MENU } from '../bot.constants';
 import { menuMessage } from '../messages/menu.messages';
 import { formatContactUnlockedMessage } from '../messages/contact-unlock.messages';
+import {
+  type CarouselCard,
+  carouselReply,
+  composeCardBody,
+  PROFILE_PLACEHOLDER_KEY,
+  profileImageUrl,
+} from '../../../common/constants/whatsapp-carousel';
 import type { PrismaService } from '../../../common/services/prisma/prisma.service';
 import type { SystemConfigService } from '../../system-config/system-config.service';
 import type { ContactUnlockService } from '../../contact-unlock/contact-unlock.service';
@@ -23,6 +30,7 @@ import {
 import type { BotNotificationService } from '../services/bot-notification.service';
 import type { InterestSignalService } from '../../interest-graph/interest-signal.service';
 import type { InvoiceService } from '../../invoice/invoice.service';
+import type { WhatsAppMediaMirrorService } from '../../../common/services/whatsapp-media/whatsapp-media-mirror.service';
 
 export type RecommendedProfilesContext = {
   prisma: PrismaService;
@@ -34,6 +42,7 @@ export type RecommendedProfilesContext = {
   employerProfileId: string;
   interestSignalService: InterestSignalService;
   invoiceService: InvoiceService;
+  mediaMirror: WhatsAppMediaMirrorService;
 };
 
 export type FlowResult = {
@@ -449,6 +458,7 @@ async function showList(
       last_name: true,
       reliability_score: true,
       description: true,
+      avatar_url: true,
     },
   });
 
@@ -471,8 +481,47 @@ async function showList(
   // Store the rendered order explicitly so selection always maps to the displayed item
   const renderedWorkerIds = orderedWorkers.map((w) => w.id);
 
+  // Native WhatsApp carousel (one "Sélectionner" button per card, positional
+  // id matches the numeric selection the detail step already parses). Falls
+  // back to the text list when the count is outside 2..5 (Meta requires at
+  // least 2 cards per carousel).
+  // Card body must be a single line — WhatsApp carousel cards reject line
+  // breaks — so fields get inline labels joined by " • " instead of real
+  // bullets. Mirrors the same two metrics formatWorkerCard() shows in the
+  // text fallback above: reliability_score ("Fiabilité") and the computed
+  // match score ("Score IA") — these are two distinct fields, not the same
+  // number under two labels. Description is unbounded free text (the
+  // worker's name goes in the card's own `title` field, not here), so it's
+  // ordered last: composeCardBody truncates whichever field overflows the
+  // budget — putting the bounded fields (scores) first guarantees they're
+  // never the ones cut off.
+  const cards: CarouselCard[] = await Promise.all(
+    orderedWorkers.map(async (w) => {
+      const name = `${w.first_name} ${w.last_name}`.trim();
+      const reliability = w.reliability_score ?? 100;
+      const aiScore = Math.round((workerScores[w.id] ?? 0) * 100);
+      const desc = w.description ?? '';
+      const body = composeCardBody(
+        [
+          { label: 'Fiabilité', value: `${reliability}/100` },
+          aiScore > 0 ? { label: 'Score IA', value: `${aiScore}%` } : null,
+          desc ? { label: 'À propos', value: desc } : null,
+        ].filter((f): f is { label: string; value: string } => f !== null),
+      );
+      return {
+        title: name,
+        image: await ctx.mediaMirror.resolveMediaKey(
+          w.avatar_url,
+          PROFILE_PLACEHOLDER_KEY,
+        ),
+        body,
+      };
+    }),
+  );
+  const carousel = carouselReply('profiles', cards);
+
   return {
-    reply: [lines.join('\n')],
+    reply: [carousel ?? lines.join('\n')],
     nextState: {
       ...state,
       step: 0,
@@ -554,9 +603,9 @@ async function showWorkerDetail(
   ];
 
   const detailText = detailLines.join('\n');
-  const reply = worker.avatar_url?.trim()
-    ? [`[IMG:${worker.avatar_url}]\n${detailText}`]
-    : [detailText];
+  // Always show a header image: the worker's avatar, or the profile
+  // placeholder when they haven't set one (rather than no image at all).
+  const reply = [`[IMG:${profileImageUrl(worker.avatar_url)}]\n${detailText}`];
 
   return {
     reply,

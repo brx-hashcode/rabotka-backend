@@ -67,6 +67,30 @@ function parseReplyToJob(
 ): WhatsAppOutboundJobData | null {
   const MEDIA_PREFIX = '[IMG:';
   const MEDIA_SUFFIX = ']';
+  const TEMPLATE_PREFIX = '[TPL:';
+
+  // Carousel / content-template send, encoded as `[TPL:<contentSid>]<jsonVars>`.
+  if (message.startsWith(TEMPLATE_PREFIX) && message.includes(MEDIA_SUFFIX)) {
+    const end = message.indexOf(MEDIA_SUFFIX);
+    const contentSid = message.slice(TEMPLATE_PREFIX.length, end).trim();
+    const rest = message.slice(end + MEDIA_SUFFIX.length).trim();
+    if (!contentSid) return null;
+    let contentVariables: Record<string, string> = {};
+    if (rest) {
+      try {
+        contentVariables = JSON.parse(rest) as Record<string, string>;
+      } catch {
+        return null;
+      }
+    }
+    return {
+      type: 'template',
+      phone,
+      profileId: profileId ?? undefined,
+      contentSid,
+      contentVariables,
+    };
+  }
 
   if (message.startsWith(MEDIA_PREFIX) && message.includes(MEDIA_SUFFIX)) {
     const end = message.indexOf(MEDIA_SUFFIX);

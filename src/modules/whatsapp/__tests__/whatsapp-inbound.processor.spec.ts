@@ -88,6 +88,38 @@ describe('WhatsAppInboundProcessor', () => {
       );
     });
 
+    it('enqueues a template outbound job for a [TPL:sid]{vars} reply', async () => {
+      mockConversationService.handleIncomingMessage.mockResolvedValue({
+        replies: ['[TPL:HXcarousel]{"1":"https://img/1.png","2":"*Card*"}'],
+        profileId: 'p-1',
+      });
+
+      const processor = makeProcessor();
+      await processor.process({ data: { phone: '+242001', text: 'menu' } });
+
+      expect(mockQueueService.addJob).toHaveBeenCalledWith(
+        expect.stringContaining('whatsapp'),
+        expect.objectContaining({
+          type: 'template',
+          phone: '+242001',
+          contentSid: 'HXcarousel',
+          contentVariables: { '1': 'https://img/1.png', '2': '*Card*' },
+        }),
+      );
+    });
+
+    it('skips a [TPL:] reply with invalid JSON variables', async () => {
+      mockConversationService.handleIncomingMessage.mockResolvedValue({
+        replies: ['[TPL:HXcarousel]{not-json}'],
+        profileId: null,
+      });
+
+      const processor = makeProcessor();
+      await processor.process({ data: { phone: '+242001', text: 'menu' } });
+
+      expect(mockQueueService.addJob).not.toHaveBeenCalled();
+    });
+
     it('skips null/empty replies', async () => {
       mockConversationService.handleIncomingMessage.mockResolvedValue({
         replies: [null, '', 'Valid reply'],

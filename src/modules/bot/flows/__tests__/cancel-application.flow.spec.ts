@@ -237,6 +237,38 @@ describe('runCancelApplicationFlow()', () => {
       expect(result.reply[0]).toContain('maintenue');
     });
 
+    it('cancels on quick-reply button title "Annuler"', async () => {
+      const ctx = makeCtx();
+      const state = makeState(APP_ID);
+      const result = await runCancelApplicationFlow(
+        state,
+        'Annuler',
+        workerProfile,
+        ctx,
+      );
+      expect(result.clearState).toBe(true);
+      expect(ctx.applicationService.cancel).toHaveBeenCalledWith(
+        APP_ID,
+        WORKER_ID,
+        undefined,
+      );
+    });
+
+    it('keeps candidature on quick-reply button title "Je serai présent"', async () => {
+      const ctx = makeCtx();
+      const state = makeState(APP_ID);
+      const result = await runCancelApplicationFlow(
+        state,
+        'Je serai présent',
+        workerProfile,
+        ctx,
+      );
+      expect(result.clearState).toBe(true);
+      expect(result.reply[0]).toContain('maintenue');
+      // Must NOT cancel — the "keep" button should never trigger cancellation.
+      expect(ctx.applicationService.cancel).not.toHaveBeenCalled();
+    });
+
     it('cancels with custom reason on free text', async () => {
       const ctx = makeCtx();
       const state = makeState(APP_ID);
