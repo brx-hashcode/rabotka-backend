@@ -69,7 +69,10 @@ describe('ReminderProcessor', () => {
         return Promise.all(arg as Promise<unknown>[]);
       }),
     };
-    whatsApp = { sendTextMessage: jest.fn().mockResolvedValue(undefined) };
+    whatsApp = {
+      sendTextMessage: jest.fn().mockResolvedValue(undefined),
+      sendTemplateMessage: jest.fn().mockResolvedValue(true),
+    };
     queueService = { addJob: jest.fn().mockResolvedValue('job-1') };
     redis = {
       get: jest.fn().mockResolvedValue(null),
@@ -119,7 +122,7 @@ describe('ReminderProcessor', () => {
       await processor.process({
         data: { type: 'reminder_24h', applicationId: 'app-1' },
       });
-      expect(whatsApp.sendTextMessage).toHaveBeenCalled();
+      expect(whatsApp.sendTemplateMessage).toHaveBeenCalled();
     });
 
     it('delegates to sendReminder2h for type=reminder_2h', async () => {
@@ -127,7 +130,7 @@ describe('ReminderProcessor', () => {
       await processor.process({
         data: { type: 'reminder_2h', applicationId: 'app-1' },
       });
-      expect(whatsApp.sendTextMessage).toHaveBeenCalled();
+      expect(whatsApp.sendTemplateMessage).toHaveBeenCalled();
     });
 
     it('delegates to sendReminderStart for type=reminder_start', async () => {
@@ -135,7 +138,7 @@ describe('ReminderProcessor', () => {
       await processor.process({
         data: { type: 'reminder_start', applicationId: 'app-1' },
       });
-      expect(whatsApp.sendTextMessage).toHaveBeenCalled();
+      expect(whatsApp.sendTemplateMessage).toHaveBeenCalled();
     });
 
     it('logs a warning for unknown job type', async () => {
@@ -295,14 +298,16 @@ describe('ReminderProcessor', () => {
         }),
       );
       // Each worker notified (+ the employer)
-      expect(whatsApp.sendTextMessage).toHaveBeenCalledWith(
+      expect(whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+2222',
-        expect.any(String),
+        'HXe051fd6c43d82d253e9cab592d64457d',
+        expect.any(Object),
         'worker-a',
       );
-      expect(whatsApp.sendTextMessage).toHaveBeenCalledWith(
+      expect(whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+3333',
-        expect.any(String),
+        'HXe051fd6c43d82d253e9cab592d64457d',
+        expect.any(Object),
         'worker-b',
       );
     });
@@ -351,9 +356,10 @@ describe('ReminderProcessor', () => {
           data: { status: ApplicationStatus.STARTED },
         }),
       );
-      expect(whatsApp.sendTextMessage).toHaveBeenCalledWith(
+      expect(whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+5555',
-        expect.stringContaining('Mission démarrée'),
+        'HX9532674e5bc5016e76f3005cb44ea711',
+        expect.any(Object),
         'emp-filled',
       );
     });
@@ -485,9 +491,10 @@ describe('ReminderProcessor', () => {
         data: { type: 'reminder_24h', applicationId: 'app-1' },
       });
 
-      expect(whatsApp.sendTextMessage).toHaveBeenCalledWith(
+      expect(whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+1234567890',
         expect.any(String),
+        expect.any(Object),
       );
       expect(redis.set).toHaveBeenCalledWith(
         expect.stringContaining('app-1'),
@@ -504,7 +511,7 @@ describe('ReminderProcessor', () => {
       await processor.process({
         data: { type: 'reminder_24h', applicationId: 'app-1' },
       });
-      expect(whatsApp.sendTextMessage).not.toHaveBeenCalled();
+      expect(whatsApp.sendTemplateMessage).not.toHaveBeenCalled();
     });
 
     it('skips if application not found', async () => {
@@ -513,7 +520,7 @@ describe('ReminderProcessor', () => {
       await processor.process({
         data: { type: 'reminder_24h', applicationId: 'missing' },
       });
-      expect(whatsApp.sendTextMessage).not.toHaveBeenCalled();
+      expect(whatsApp.sendTemplateMessage).not.toHaveBeenCalled();
     });
 
     it('skips if worker has no phone', async () => {
@@ -524,7 +531,7 @@ describe('ReminderProcessor', () => {
       await processor.process({
         data: { type: 'reminder_24h', applicationId: 'app-1' },
       });
-      expect(whatsApp.sendTextMessage).not.toHaveBeenCalled();
+      expect(whatsApp.sendTemplateMessage).not.toHaveBeenCalled();
     });
 
     it('skips if application status is not ACCEPTED', async () => {
@@ -535,7 +542,7 @@ describe('ReminderProcessor', () => {
       await processor.process({
         data: { type: 'reminder_24h', applicationId: 'app-1' },
       });
-      expect(whatsApp.sendTextMessage).not.toHaveBeenCalled();
+      expect(whatsApp.sendTemplateMessage).not.toHaveBeenCalled();
     });
 
     it('sets CANCEL_APPLICATION bot state for the worker after sending', async () => {
@@ -570,9 +577,10 @@ describe('ReminderProcessor', () => {
         data: { type: 'reminder_2h', applicationId: 'app-1' },
       });
 
-      expect(whatsApp.sendTextMessage).toHaveBeenCalledWith(
+      expect(whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+1234567890',
         expect.any(String),
+        expect.any(Object),
       );
       expect(redis.set).toHaveBeenCalledWith(
         expect.stringContaining('app-1'),
@@ -589,7 +597,7 @@ describe('ReminderProcessor', () => {
       await processor.process({
         data: { type: 'reminder_2h', applicationId: 'app-1' },
       });
-      expect(whatsApp.sendTextMessage).not.toHaveBeenCalled();
+      expect(whatsApp.sendTemplateMessage).not.toHaveBeenCalled();
     });
 
     it('skips if application not found', async () => {
@@ -598,7 +606,7 @@ describe('ReminderProcessor', () => {
       await processor.process({
         data: { type: 'reminder_2h', applicationId: 'missing' },
       });
-      expect(whatsApp.sendTextMessage).not.toHaveBeenCalled();
+      expect(whatsApp.sendTemplateMessage).not.toHaveBeenCalled();
     });
 
     it('skips if worker has no phone', async () => {
@@ -609,7 +617,7 @@ describe('ReminderProcessor', () => {
       await processor.process({
         data: { type: 'reminder_2h', applicationId: 'app-1' },
       });
-      expect(whatsApp.sendTextMessage).not.toHaveBeenCalled();
+      expect(whatsApp.sendTemplateMessage).not.toHaveBeenCalled();
     });
 
     it('skips if application status is not ACCEPTED', async () => {
@@ -620,7 +628,7 @@ describe('ReminderProcessor', () => {
       await processor.process({
         data: { type: 'reminder_2h', applicationId: 'app-1' },
       });
-      expect(whatsApp.sendTextMessage).not.toHaveBeenCalled();
+      expect(whatsApp.sendTemplateMessage).not.toHaveBeenCalled();
     });
   });
 
@@ -648,9 +656,10 @@ describe('ReminderProcessor', () => {
           data: { status: JobOfferStatus.IN_PROGRESS },
         }),
       );
-      expect(whatsApp.sendTextMessage).toHaveBeenCalledWith(
+      expect(whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+1234567890',
-        expect.any(String),
+        'HX5a6777bdc1d800826a66d2faba155084',
+        expect.any(Object),
       );
       expect(redis.set).toHaveBeenCalledWith(
         expect.stringContaining('app-1'),
@@ -720,7 +729,12 @@ describe('ReminderProcessor', () => {
           paymentFlow: 'DAILY',
         },
       });
-      expect(whatsApp.sendTextMessage).toHaveBeenCalled();
+      expect(whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
+        '+242000001',
+        'HX92ef7c0f7a6f2c53899c0fa28e1551b8',
+        expect.any(Object),
+        'emp-1',
+      );
     });
 
     it('skips when offer is not IN_PROGRESS', async () => {
@@ -815,7 +829,7 @@ describe('ReminderProcessor', () => {
         title: 'Test Job',
         employer: { phone: '+242000001' },
       });
-      whatsApp.sendTextMessage.mockRejectedValueOnce(new Error('send failed'));
+      whatsApp.sendTemplateMessage.mockRejectedValueOnce(new Error('send failed'));
       await processor.process({
         data: {
           type: 'reminder_job_status',
@@ -848,7 +862,7 @@ describe('ReminderProcessor', () => {
         .mockResolvedValueOnce([]); // openOverdue
       prisma.application.findMany.mockResolvedValue([] as never);
       redis.get.mockResolvedValue(null);
-      whatsApp.sendTextMessage.mockRejectedValueOnce(
+      whatsApp.sendTemplateMessage.mockRejectedValueOnce(
         new Error('WhatsApp failure'),
       );
       // should not throw
@@ -918,7 +932,7 @@ describe('ReminderProcessor', () => {
           },
         ]); // openOverdue
       prisma.application.findMany.mockResolvedValue([] as never);
-      whatsApp.sendTextMessage.mockRejectedValueOnce(new Error('send failed'));
+      whatsApp.sendTemplateMessage.mockRejectedValueOnce(new Error('send failed'));
       await processor.process({ data: { type: 'scan' } });
       // Should not throw; redis.set not called since sent=false
       expect(true).toBe(true);
@@ -928,11 +942,11 @@ describe('ReminderProcessor', () => {
   // ─── sendReminderStart() error path ─────────────────────────────────────────
 
   describe('sendReminderStart() error path', () => {
-    it('rolls back application status when whatsApp.sendTextMessage throws', async () => {
+    it('rolls back application status when whatsApp.sendTemplateMessage throws', async () => {
       prisma.application.findUnique.mockResolvedValue(buildApplication());
       prisma.application.update = jest.fn().mockResolvedValue({});
       prisma.jobOffer.update = jest.fn().mockResolvedValue({});
-      whatsApp.sendTextMessage.mockRejectedValueOnce(
+      whatsApp.sendTemplateMessage.mockRejectedValueOnce(
         new Error('WhatsApp error'),
       );
       redis.set = jest.fn().mockResolvedValue('OK'); // claim succeeds

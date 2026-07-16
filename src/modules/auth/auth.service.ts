@@ -20,7 +20,7 @@ import { MailService } from '../mail/mail.service';
 import { LayoutService } from '../mail/layout.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { sendOtpEmail } from '../mail/templates';
-import { otpMessage } from '../whatsapp/templates';
+import { WHATSAPP_TEMPLATES } from '../../common/constants/whatsapp-templates';
 import * as otplib from 'otplib';
 import * as QRCode from 'qrcode';
 
@@ -31,6 +31,10 @@ const TOTP_PENDING_TTL = 300; // 5 min to enter TOTP code
 
 const OTP_TTL_SECONDS = 300;
 const OTP_KEY_PREFIX = `${REDIS_KEY_PREFIX}otp:`;
+// Mobile refresh-token whitelist: jti → profileId, TTL matches the refresh token.
+// Presence enables rotation (delete on use) and revocation (delete on logout).
+const MOBILE_REFRESH_PREFIX = `${REDIS_KEY_PREFIX}mobile:refresh:`;
+const DEFAULT_REFRESH_TTL_SECONDS = 24 * 60 * 60;
 const ADMIN_OTP_KEY_PREFIX = `${REDIS_KEY_PREFIX}admin:otp:`;
 const RESEND_COOLDOWN_SECONDS = 60;
 const RESEND_COOLDOWN_KEY_PREFIX = `${REDIS_KEY_PREFIX}otp:resend:`;
@@ -47,6 +51,27 @@ if v == ARGV[1] then
 end
 return 0
 `;
+
+// Matches the cast used in AuthModule's JwtModule config for expiresIn.
+type JwtExpiresIn = `${number}${'s' | 'm' | 'h' | 'd'}` | `${number}`;
+
+export interface MobileSessionUser {
+  id: string;
+  first_name: string;
+  last_name: string;
+  email: string;
+  phone: string;
+  avatar_url: string | null;
+  profile_type: string;
+  description: string;
+  domains: { id: string; name: string }[];
+}
+
+export interface MobileTokens {
+  token: string;
+  refreshToken: string;
+  user: MobileSessionUser;
+}
 
 @Injectable()
 export class AuthService {
@@ -176,10 +201,9 @@ export class AuthService {
     return { success: true };
   }
 
-  async verifyOtp(
-    emailOrPhone: string,
-    otp: string,
-  ): Promise<{ success: boolean; token: string }> {
+  // Atomically verify+consume the OTP, then load the owning profile.
+  // Shared by the web (cookie) and mobile (bearer) verify flows.
+  private async verifyOtpAndGetProfile(emailOrPhone: string, otp: string) {
     const normalized = this.normalize(emailOrPhone);
     const isEmail = this.isEmail(normalized);
 
@@ -207,10 +231,167 @@ export class AuthService {
       );
     }
 
+    return profile;
+  }
+
+  async verifyOtp(
+    emailOrPhone: string,
+    otp: string,
+  ): Promise<{ success: boolean; token: string }> {
+    const profile = await this.verifyOtpAndGetProfile(emailOrPhone, otp);
+
     const payload = { sub: profile.id, type: 'profile', jti: randomUUID() };
     const token = this.jwtService.sign(payload);
 
     return { success: true, token };
+  }
+
+  // --- Mobile bearer-token flow ------------------------------------------
+
+  // Verify the OTP and issue an access + refresh token pair for a mobile client.
+  async verifyOtpMobile(
+    emailOrPhone: string,
+    otp: string,
+  ): Promise<MobileTokens> {
+    const profile = await this.verifyOtpAndGetProfile(emailOrPhone, otp);
+    return this.issueMobileTokens(profile.id);
+  }
+
+  // Rotate a refresh token: validate it, invalidate the old one, and issue a
+  // fresh pair. A missing/mismatched whitelist entry means the token was
+  // revoked or already used (reuse detection) → 401.
+  async refreshMobileTokens(refreshToken: string): Promise<MobileTokens> {
+    let payload: { sub?: string; type?: string; jti?: string };
+    try {
+      payload = this.jwtService.verify<{
+        sub?: string;
+        type?: string;
+        jti?: string;
+      }>(refreshToken);
+    } catch {
+      throw new UnauthorizedException('Refresh token invalide ou expiré');
+    }
+
+    if (payload.type !== 'refresh' || !payload.jti || !payload.sub) {
+      throw new UnauthorizedException('Refresh token invalide');
+    }
+
+    const redisKey = `${MOBILE_REFRESH_PREFIX}${payload.jti}`;
+    const storedProfileId = await this.redis.get(redisKey);
+    if (!storedProfileId || storedProfileId !== payload.sub) {
+      throw new UnauthorizedException(
+        'Refresh token révoqué ou déjà utilisé',
+      );
+    }
+
+    // Rotation: the old refresh token can never be used again.
+    await this.redis.del(redisKey);
+
+    const profile = await this.prisma.profile.findUnique({
+      where: { id: payload.sub },
+      select: { id: true },
+    });
+    if (!profile) {
+      throw new UnauthorizedException('Compte introuvable');
+    }
+
+    return this.issueMobileTokens(profile.id);
+  }
+
+  // Revoke the current access token (blocklist) and delete the refresh token.
+  async logoutMobile(
+    accessToken: string | undefined,
+    refreshToken?: string,
+  ): Promise<void> {
+    // Blocklisting the bearer access token is enough to revoke a session; the
+    // long-lived mobile token has no refresh token to invalidate.
+    if (accessToken) {
+      await this.revokeToken(accessToken);
+    }
+
+    if (!refreshToken) return;
+
+    try {
+      const payload = this.jwtService.decode(refreshToken) as {
+        jti?: string;
+      } | null;
+      if (payload?.jti) {
+        await this.redis.del(`${MOBILE_REFRESH_PREFIX}${payload.jti}`);
+      }
+    } catch {
+      // Refresh token already invalid — nothing to revoke.
+    }
+  }
+
+  private async issueMobileTokens(profileId: string): Promise<MobileTokens> {
+    const accessToken = this.jwtService.sign(
+      { sub: profileId, type: 'profile', jti: randomUUID() },
+      {
+        expiresIn: this.configService.get<string>(
+          'JWT_ACCESS_EXPIRES_IN',
+          '15m',
+        ) as JwtExpiresIn,
+      },
+    );
+
+    const refreshJti = randomUUID();
+    const refreshToken = this.jwtService.sign(
+      { sub: profileId, type: 'refresh', jti: refreshJti },
+      {
+        expiresIn: this.configService.get<string>(
+          'JWT_REFRESH_EXPIRES_IN',
+          '24h',
+        ) as JwtExpiresIn,
+      },
+    );
+
+    // Keep the Redis whitelist TTL in sync with the token's own expiry.
+    const decoded = this.jwtService.decode(refreshToken) as {
+      exp?: number;
+    } | null;
+    const ttl = decoded?.exp
+      ? decoded.exp - Math.floor(Date.now() / 1000)
+      : DEFAULT_REFRESH_TTL_SECONDS;
+    await this.redis.set(
+      `${MOBILE_REFRESH_PREFIX}${refreshJti}`,
+      profileId,
+      'EX',
+      Math.max(ttl, 1),
+    );
+
+    const user = await this.getMobileSessionUser(profileId);
+    return { token: accessToken, refreshToken, user };
+  }
+
+  private async getMobileSessionUser(
+    profileId: string,
+  ): Promise<MobileSessionUser> {
+    const profile = await this.prisma.profile.findUnique({
+      where: { id: profileId },
+      select: {
+        id: true,
+        first_name: true,
+        last_name: true,
+        email: true,
+        phone: true,
+        avatar_url: true,
+        profile_type: true,
+        description: true,
+        categories: {
+          select: { category: { select: { id: true, name: true } } },
+        },
+      },
+    });
+
+    if (!profile) {
+      throw new NotFoundException('Compte introuvable');
+    }
+
+    const { categories, ...rest } = profile;
+    return {
+      ...rest,
+      domains: categories.map((pc) => pc.category),
+    };
   }
 
   async sendAdminOtp(email: string): Promise<{ success: boolean }> {
@@ -475,8 +656,12 @@ export class AuthService {
   }
 
   private async sendOtpByWhatsApp(phone: string, otp: string): Promise<void> {
-    const message = otpMessage(otp);
-    const sent = await this.whatsAppService.sendTextMessage(phone, message);
+    const template = WHATSAPP_TEMPLATES.otp;
+    const sent = await this.whatsAppService.sendTemplateMessage(
+      phone,
+      template.contentSid,
+      template.variables(otp),
+    );
     if (sent) {
       this.logger.log(`WhatsApp OTP sent to ${phone}`);
     } else {

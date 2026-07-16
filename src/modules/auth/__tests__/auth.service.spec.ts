@@ -71,6 +71,8 @@ describe('AuthService', () => {
 
     const mockJwtService = {
       sign: jest.fn().mockReturnValue('jwt-token-abc'),
+      verify: jest.fn(),
+      decode: jest.fn(),
     };
 
     const mockMailService = {
@@ -79,6 +81,7 @@ describe('AuthService', () => {
 
     const mockWhatsAppService = {
       sendTextMessage: jest.fn().mockResolvedValue(true),
+      sendTemplateMessage: jest.fn().mockResolvedValue(true),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -129,7 +132,7 @@ describe('AuthService', () => {
       const result = await service.sendOtp('+24200000001');
 
       expect(result.success).toBe(true);
-      expect(whatsAppService.sendTextMessage).toHaveBeenCalled();
+      expect(whatsAppService.sendTemplateMessage).toHaveBeenCalled();
     });
 
     it('throws BadRequestException for invalid email/phone', async () => {
@@ -197,7 +200,7 @@ describe('AuthService', () => {
       redis.get.mockResolvedValue(null);
       const result = await service.resendOtp('+24200000001');
       expect(result.success).toBe(true);
-      expect(whatsAppService.sendTextMessage).toHaveBeenCalled();
+      expect(whatsAppService.sendTemplateMessage).toHaveBeenCalled();
     });
 
     it('throws when phone is not WhatsApp-connected on resend', async () => {
@@ -241,6 +244,181 @@ describe('AuthService', () => {
       await expect(
         service.verifyOtp('user@example.com', '123456'),
       ).rejects.toThrow(UnauthorizedException);
+    });
+  });
+
+  describe('mobile token flow', () => {
+    // Raw Prisma row shape returned by getMobileSessionUser's findUnique.
+    const mobileProfile = {
+      id: PROFILE_ID,
+      first_name: 'Jane',
+      last_name: 'Doe',
+      email: 'user@example.com',
+      phone: '+24200000001',
+      avatar_url: null,
+      profile_type: 'WORKER',
+      description: 'Plombière expérimentée',
+      categories: [
+        { category: { id: 'cat-1', name: 'Plomberie' } },
+        { category: { id: 'cat-2', name: 'Électricité' } },
+      ],
+    };
+    // Expected client-facing user object (categories flattened → domains).
+    const mobileUser = {
+      id: PROFILE_ID,
+      first_name: 'Jane',
+      last_name: 'Doe',
+      email: 'user@example.com',
+      phone: '+24200000001',
+      avatar_url: null,
+      profile_type: 'WORKER',
+      description: 'Plombière expérimentée',
+      domains: [
+        { id: 'cat-1', name: 'Plomberie' },
+        { id: 'cat-2', name: 'Électricité' },
+      ],
+    };
+
+    describe('verifyOtpMobile()', () => {
+      it('issues access + refresh tokens and returns the user on valid OTP', async () => {
+        redis.eval.mockResolvedValue(1);
+        // 1st findUnique: verifyOtpAndGetProfile; 2nd: getMobileSessionUser
+        (prisma.profile.findUnique as jest.Mock)
+          .mockResolvedValueOnce(mockProfile)
+          .mockResolvedValueOnce(mobileProfile);
+        jwtService.sign
+          .mockReturnValueOnce('access-token')
+          .mockReturnValueOnce('refresh-token');
+        (jwtService.decode as jest.Mock).mockReturnValue({
+          exp: Math.floor(Date.now() / 1000) + 86400,
+        });
+
+        const result = await service.verifyOtpMobile('user@example.com', '123456');
+
+        expect(result.token).toBe('access-token');
+        expect(result.refreshToken).toBe('refresh-token');
+        expect(result.user).toEqual(mobileUser);
+        expect(result.user.domains).toEqual([
+          { id: 'cat-1', name: 'Plomberie' },
+          { id: 'cat-2', name: 'Électricité' },
+        ]);
+        // access token is a profile token; refresh token carries type 'refresh'
+        // Second arg is the sign options { expiresIn } — value resolves via
+        // ConfigService at runtime (mocked to undefined here), so match shape only.
+        expect(jwtService.sign).toHaveBeenCalledWith(
+          expect.objectContaining({ sub: PROFILE_ID, type: 'profile' }),
+          expect.any(Object),
+        );
+        expect(jwtService.sign).toHaveBeenCalledWith(
+          expect.objectContaining({ sub: PROFILE_ID, type: 'refresh' }),
+          expect.any(Object),
+        );
+        // refresh jti is whitelisted in redis
+        expect(redis.set).toHaveBeenCalledWith(
+          expect.stringContaining('mobile:refresh:'),
+          PROFILE_ID,
+          'EX',
+          expect.any(Number),
+        );
+      });
+
+      it('throws UnauthorizedException when OTP is invalid', async () => {
+        redis.eval.mockResolvedValue(0);
+
+        await expect(
+          service.verifyOtpMobile('user@example.com', '000000'),
+        ).rejects.toThrow(UnauthorizedException);
+      });
+    });
+
+    describe('refreshMobileTokens()', () => {
+      it('rotates tokens on a valid, whitelisted refresh token', async () => {
+        jwtService.verify.mockReturnValue({
+          sub: PROFILE_ID,
+          type: 'refresh',
+          jti: 'refresh-jti-1',
+        });
+        redis.get.mockResolvedValue(PROFILE_ID); // whitelist hit
+        (prisma.profile.findUnique as jest.Mock)
+          .mockResolvedValueOnce({ id: PROFILE_ID }) // existence check
+          .mockResolvedValueOnce(mobileProfile); // getMobileSessionUser
+        jwtService.sign
+          .mockReturnValueOnce('new-access')
+          .mockReturnValueOnce('new-refresh');
+        (jwtService.decode as jest.Mock).mockReturnValue({
+          exp: Math.floor(Date.now() / 1000) + 86400,
+        });
+
+        const result = await service.refreshMobileTokens('old-refresh');
+
+        expect(result.token).toBe('new-access');
+        expect(result.refreshToken).toBe('new-refresh');
+        // old refresh jti must be deleted (rotation)
+        expect(redis.del).toHaveBeenCalledWith(
+          expect.stringContaining('mobile:refresh:refresh-jti-1'),
+        );
+      });
+
+      it('rejects a refresh token whose jti is not whitelisted (reuse/revoked)', async () => {
+        jwtService.verify.mockReturnValue({
+          sub: PROFILE_ID,
+          type: 'refresh',
+          jti: 'refresh-jti-1',
+        });
+        redis.get.mockResolvedValue(null); // no whitelist entry
+
+        await expect(
+          service.refreshMobileTokens('reused-refresh'),
+        ).rejects.toThrow(UnauthorizedException);
+        expect(jwtService.sign).not.toHaveBeenCalled();
+      });
+
+      it('rejects a token that is not of type refresh', async () => {
+        jwtService.verify.mockReturnValue({
+          sub: PROFILE_ID,
+          type: 'profile',
+          jti: 'access-jti',
+        });
+
+        await expect(
+          service.refreshMobileTokens('an-access-token'),
+        ).rejects.toThrow(UnauthorizedException);
+      });
+
+      it('rejects an invalid/expired refresh token (verify throws)', async () => {
+        jwtService.verify.mockImplementation(() => {
+          throw new Error('jwt expired');
+        });
+
+        await expect(
+          service.refreshMobileTokens('expired'),
+        ).rejects.toThrow(UnauthorizedException);
+      });
+    });
+
+    describe('logoutMobile()', () => {
+      it('blocklists the access token and deletes the refresh jti', async () => {
+        (jwtService.decode as jest.Mock)
+          .mockReturnValueOnce({
+            jti: 'access-jti',
+            exp: Math.floor(Date.now() / 1000) + 900,
+          }) // revokeToken decodes the access token
+          .mockReturnValueOnce({ jti: 'refresh-jti-1' }); // refresh token decode
+
+        await service.logoutMobile('access-token', 'refresh-token');
+
+        // access token jti blocklisted
+        expect(redis.set).toHaveBeenCalledWith(
+          expect.stringContaining('jwtblocklist:access-jti'),
+          '1',
+          'EX',
+          expect.any(Number),
+        );
+        // refresh jti deleted
+        expect(redis.del).toHaveBeenCalledWith(
+          expect.stringContaining('mobile:refresh:refresh-jti-1'),
+        );
+      });
     });
   });
 

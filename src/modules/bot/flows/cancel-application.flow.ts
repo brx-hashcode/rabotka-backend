@@ -215,7 +215,11 @@ async function handleCancelStep1(
     return handleLateCancellationInput(args);
   }
 
-  if (normalized === '1' || normalized === 'confirmer') {
+  if (
+    normalized === '1' ||
+    normalized === 'confirmer' ||
+    normalized === 'annuler'
+  ) {
     return executeCancellation(
       applicationId,
       profile,
@@ -227,7 +231,7 @@ async function handleCancelStep1(
     );
   }
 
-  if (normalized === '2') {
+  if (normalized === '2' || normalized === 'je serai présent') {
     return {
       reply: [
         'Annulation annulée. Votre candidature est maintenue. Tapez *Menu*.',

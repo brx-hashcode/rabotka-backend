@@ -42,7 +42,10 @@ function makePrisma(profile: any = null) {
 }
 
 function makeWhatsApp() {
-  return { sendTextMessage: jest.fn().mockResolvedValue(undefined) };
+  return {
+    sendTextMessage: jest.fn().mockResolvedValue(undefined),
+    sendTemplateMessage: jest.fn().mockResolvedValue(true),
+  };
 }
 
 function makeMail() {

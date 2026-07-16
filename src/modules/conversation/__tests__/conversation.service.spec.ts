@@ -60,8 +60,9 @@ describe('ConversationService', () => {
 
       expect(result.profileId).toBeNull();
       expect(result.replies).toHaveLength(1);
-      expect(result.replies[0]).toContain("n'est pas encore enregistré");
-      expect(result.replies[0]).toContain('https://rabotka.work');
+      expect(result.replies[0]).toContain(
+        '[TPL:HX1610d675f58d8fa92d277383584cc5fb]',
+      );
       expect(botOrchestrator.handle).not.toHaveBeenCalled();
     });
 

@@ -41,6 +41,14 @@ type FlowParams = {
   goToMenu: () => FlowResult;
 };
 
+function buildOfferListReply(
+  offers: OfferListItem[],
+  hasMore: boolean,
+  page: number,
+): string[] {
+  return [formatOfferListCompact(offers, hasMore, page)];
+}
+
 function handleListStep(params: FlowParams): Promise<FlowResult> | FlowResult {
   const { state, offerIds, nextCursor, trimmed, normalized, goToMenu } = params;
   if (normalized === 'm') return goToMenu();
@@ -85,9 +93,8 @@ async function handleLoadMore(params: FlowParams): Promise<FlowResult> {
   const newOfferIds = data.map((o) => o.id);
   const offers = data.map((o) => jobOfferToOfferListItem(o));
   const nextPage = ((params.payload.page as number | undefined) ?? 0) + 1;
-  const message = formatOfferListCompact(offers, !!newCursor, nextPage);
   return {
-    reply: [message],
+    reply: buildOfferListReply(offers, !!newCursor, nextPage),
     nextState: {
       ...state,
       payload: {
@@ -263,9 +270,8 @@ async function handleDetailBackToList(
   }
   const listItems = withOpenSlots.map((o) => jobOfferToOfferListItem(o));
   const currentPage = (params.payload.page as number | undefined) ?? 0;
-  const message = formatOfferListCompact(listItems, !!nextCursor, currentPage);
   return {
-    reply: [message],
+    reply: buildOfferListReply(listItems, !!nextCursor, currentPage),
     nextState: {
       ...state,
       payload: {

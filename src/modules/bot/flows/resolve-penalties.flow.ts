@@ -1,7 +1,7 @@
 import type { BotProfile, BotState } from '../types/bot-state.types';
 import { FLOW_IDS, CMD_MENU } from '../bot.constants';
 import { menuMessage } from '../messages/menu.messages';
-import { PrismaService } from 'src/common/services/prisma/prisma.service';
+import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import type { IPaymentUrlService } from '../types/payment-url.types';
 import { PaymentRequestType } from '@prisma/client';
 
