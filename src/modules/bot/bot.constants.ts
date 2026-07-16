@@ -64,7 +64,8 @@ export const WORKER_MENU_OPTIONS = {
   SEARCH_BY_REF: '4',
   PROFILE: '5',
   CREDIT_WALLET: '6',
-  HELP: '7',
+  CREATE_CLAIM: '7',
+  HELP: '8',
 } as const;
 
 export const EMPLOYER_MENU_OPTIONS = {
@@ -75,7 +76,8 @@ export const EMPLOYER_MENU_OPTIONS = {
   RECOMMENDED_PROFILES: '5',
   PROFILE: '6',
   CREDIT_WALLET: '7',
-  HELP: '8',
+  CREATE_CLAIM: '8',
+  HELP: '9',
 } as const;
 
 export const CMD_MENU = ['menu', 'aide', 'help', 'bonjour', '*'];
@@ -120,4 +122,12 @@ export const CMD_CREDIT_WALLET = [
   'recharger mon wallet',
   'recharge',
   'recharger portefeuille',
+];
+
+export const CMD_CREATE_CLAIM = [
+  'reclamation',
+  'réclamation',
+  'creer une reclamation',
+  'créer une réclamation',
+  'claim',
 ];

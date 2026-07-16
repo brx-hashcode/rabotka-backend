@@ -29,7 +29,7 @@ import {
 } from '../messages/menu.messages';
 import type { BotProfile, BotState } from '../types/bot-state.types';
 import type { FlowContext, FlowResult } from '../types/flow.types';
-import { FLOW_IDS, CMD_MENU } from '../bot.constants';
+import { FLOW_IDS, CMD_MENU, EMPLOYER_MENU_OPTIONS } from '../bot.constants';
 import {
   runPublishJobFlow,
   getPublishJobInitialState,
@@ -645,7 +645,7 @@ export class BotOrchestratorService {
         const lastIdx = result.reply.length - 1;
         result.reply[lastIdx] =
           last +
-          `\n\n*${inboxCount} candidature(s) en attente.* Tapez *3* (Candidatures reçues) pour les traiter.`;
+          `\n\n*${inboxCount} candidature(s) en attente.* Tapez *${EMPLOYER_MENU_OPTIONS.CANDIDATURES_RECEIVED}* (Candidatures reçues) pour les traiter.`;
       }
     }
 
@@ -1393,6 +1393,10 @@ export class BotOrchestratorService {
         return this.commands.profile(profile);
       case 'penalty_history':
         return this.commands.penaltyHistory(profile);
+      // One-shot template reply (URL button opens the claim form in WhatsApp's
+      // webview) — no state, so it lives here rather than in commandHandlers.
+      case 'create_claim':
+        return templateReply(WHATSAPP_TEMPLATES.createClaim.contentSid);
       default:
         return unknownCommandMessage();
     }

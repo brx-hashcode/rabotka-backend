@@ -91,13 +91,13 @@ describe('BotRouterService — "recharger" command routing', () => {
     });
   });
 
-  it('worker "7" now routes to help (shifted from 6)', () => {
-    const result = service.route('7', workerProfile, null);
+  it('worker "8" now routes to help (shifted from 7 by create_claim)', () => {
+    const result = service.route('8', workerProfile, null);
     expect(result).toEqual({ type: 'command', commandId: 'help' });
   });
 
-  it('employer "8" now routes to help (shifted from 7)', () => {
-    const result = service.route('8', employerProfile, null);
+  it('employer "9" now routes to help (shifted from 8 by create_claim)', () => {
+    const result = service.route('9', employerProfile, null);
     expect(result).toEqual({ type: 'command', commandId: 'help' });
   });
 });

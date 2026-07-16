@@ -357,6 +357,15 @@ describe('BotOrchestratorService', () => {
       expect(result[0]).toContain('Contact');
     });
 
+    it('handles "create_claim" command with the claim template', async () => {
+      deps.router.route.mockReturnValue({
+        type: 'command',
+        commandId: 'create_claim',
+      });
+      const result = await service.handle(PROFILE_ID, PHONE, '7');
+      expect(result[0]).toContain('[TPL:HX9d9725488bc9dc2c6e4340dc5a000ca1]');
+    });
+
     it('handles "my_offers" command', async () => {
       deps.router.route.mockReturnValue({
         type: 'command',
