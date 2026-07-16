@@ -30,7 +30,9 @@
     "db:reset": "docker exec rabotka_postgres psql -U postgres -c \"DROP DATABASE IF EXISTS rabotka;\" && docker exec rabotka_postgres psql -U postgres -c \"CREATE DATABASE rabotka;\" && pnpm prisma:migrate:deploy",
     "db:seed": "prisma db seed",
     "db:seed:prod": "tsx prisma/seed-prod.ts",
-    "db:seed:reco-test": "tsx prisma/seed-reco-test.ts"
+    "db:seed:reco-test": "tsx prisma/seed-reco-test.ts",
+    "wa:test-reminders": "tsx scripts/send-test-reminders.ts",
+    "wa:build-placeholders": "tsx scripts/build-placeholder-images.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

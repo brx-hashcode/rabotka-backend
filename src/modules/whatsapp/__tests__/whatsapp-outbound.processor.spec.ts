@@ -6,6 +6,7 @@ import { QueueService } from '../../../common/services/queue/queue.service';
 const mockWhatsApp = {
   sendTextMessage: jest.fn().mockResolvedValue('SM-sid-123'),
   sendMediaMessage: jest.fn().mockResolvedValue('SM-sid-456'),
+  sendTemplateMessage: jest.fn().mockResolvedValue('SM-sid-789'),
   saveMessage: jest.fn().mockResolvedValue(undefined),
 };
 
@@ -79,6 +80,42 @@ describe('WhatsAppOutboundProcessor', () => {
       'Caption',
     );
     expect(mockWhatsApp.saveMessage).toHaveBeenCalled();
+  });
+
+  it('process sends a template (carousel) message', async () => {
+    await processor.process({
+      data: {
+        type: 'template',
+        phone: '+242001',
+        contentSid: 'HXcarousel',
+        contentVariables: { '1': 'https://img/1.png', '2': '*Card*' },
+        profileId: 'p1',
+      },
+    });
+    expect(mockWhatsApp.sendTemplateMessage).toHaveBeenCalledWith(
+      '+242001',
+      'HXcarousel',
+      { '1': 'https://img/1.png', '2': '*Card*' },
+    );
+    expect(mockWhatsApp.saveMessage).toHaveBeenCalledWith(
+      'p1',
+      expect.any(String),
+      '[TPL:HXcarousel]',
+    );
+  });
+
+  it('process throws when template returns no SID', async () => {
+    mockWhatsApp.sendTemplateMessage.mockResolvedValueOnce(null);
+    await expect(
+      processor.process({
+        data: {
+          type: 'template',
+          phone: '+242001',
+          contentSid: 'HXcarousel',
+          contentVariables: {},
+        },
+      }),
+    ).rejects.toThrow('returned no SID');
   });
 
   it('process sends media without caption saves proper body', async () => {

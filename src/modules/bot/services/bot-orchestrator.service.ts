@@ -17,6 +17,9 @@ import { BotDraftService } from './bot-draft.service';
 import { handleMenuCommand } from '../commands/menu.command';
 import { handleHelpCommand } from '../commands/help.command';
 import { SystemConfigService } from '../../system-config/system-config.service';
+import { WhatsAppMediaMirrorService } from '../../../common/services/whatsapp-media/whatsapp-media-mirror.service';
+import { WHATSAPP_TEMPLATES } from '../../../common/constants/whatsapp-templates';
+import { templateReply } from '../../../common/constants/whatsapp-carousel';
 import {
   unknownCommandMessage,
   accountSuspendedBotMessage,
@@ -142,16 +145,6 @@ function buildVerifyInvalidMessage(code: string): string {
   ].join('\n');
 }
 
-function buildNotFoundMessage(frontendUrl: string): string {
-  return [
-    '*Bienvenue sur Rabotka !*',
-    '',
-    "Ce numéro n'est pas encore enregistré.",
-    '',
-    'Créez votre compte gratuitement ici :',
-    frontendUrl,
-  ].join('\n');
-}
 
 const ERROR_MESSAGE = `Une erreur est survenue. Veuillez réessayer ou tapez « Menu ».`;
 
@@ -185,6 +178,7 @@ export class BotOrchestratorService {
     private readonly invoiceService: InvoiceService,
     private readonly queueService: QueueService,
     private readonly configService: ConfigService,
+    private readonly mediaMirror: WhatsAppMediaMirrorService,
   ) {}
 
   async handle(
@@ -194,11 +188,7 @@ export class BotOrchestratorService {
   ): Promise<string[]> {
     const profile = await this.loadProfile(profileId);
     if (!profile) {
-      return [
-        buildNotFoundMessage(
-          this.configService.get<string>('FRONTEND_URL', ''),
-        ),
-      ];
+      return [templateReply(WHATSAPP_TEMPLATES.welcomeUnregistered.contentSid)];
     }
 
     const allowed: string[] = [
@@ -675,6 +665,7 @@ export class BotOrchestratorService {
       walletService: this.walletService,
       interestSignalService: this.interestSignalService,
       invoiceService: this.invoiceService,
+      mediaMirror: this.mediaMirror,
     };
   }
 
@@ -740,6 +731,7 @@ export class BotOrchestratorService {
           employerProfileId: profile.id,
           interestSignalService: this.interestSignalService,
           invoiceService: this.invoiceService,
+          mediaMirror: this.mediaMirror,
         }),
       [FLOW_IDS.RATE_ASSIGNMENT]: () =>
         runRateAssignmentFlow(state, input, profile, {

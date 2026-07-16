@@ -10,6 +10,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { PrismaModule } from './common/services/prisma/prisma.module';
 import { TwilioModule } from './common/services/twilio/twilio.module';
+import { WhatsAppMediaMirrorModule } from './common/services/whatsapp-media/whatsapp-media-mirror.module';
 import { RedisModule } from './common/services/redis/redis.module';
 import { QueueModule } from './common/services/queue/queue.module';
 import { HealthModule } from './modules/health/health.module';
@@ -116,6 +117,7 @@ import { HttpOnlyArcjetGuard } from './common/guards/http-only-arcjet.guard';
     }),
     PrismaModule,
     TwilioModule,
+    WhatsAppMediaMirrorModule,
     RedisModule.forRoot(),
     QueueModule.forRoot(),
     MailerModule.forRootAsync({

@@ -111,7 +111,10 @@ export class WhatsAppController {
     }
 
     const from = body.From ?? '';
-    const text = body.Body ?? '';
+    // Quick-reply button taps arrive as ButtonPayload (the button id we set,
+    // e.g. "1"/"2") and ButtonText (its title). Prefer the payload so replies
+    // route into the existing numeric-token bot flows; fall back to free text.
+    const text = body.ButtonPayload || body.ButtonText || body.Body || '';
     const messageSid = body.MessageSid ?? '';
 
     if (!from) {

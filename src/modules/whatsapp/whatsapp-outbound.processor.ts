@@ -41,6 +41,11 @@ export type WhatsAppOutboundJobData = {
 } & (
   | { type: 'text'; text: string }
   | { type: 'media'; mediaUrl: string; caption?: string }
+  | {
+      type: 'template';
+      contentSid: string;
+      contentVariables: Record<string, string>;
+    }
 );
 
 @Injectable()
@@ -102,42 +107,78 @@ export class WhatsAppOutboundProcessor {
     );
 
     if (data.type === 'text') {
-      // Split any over-long body so we never hit Twilio's 1600-char hard
-      // limit. For normal-sized messages this is a no-op.
-      const parts = chunkForWhatsApp(data.text);
-      for (const part of parts) {
-        const sent = await this.whatsApp.sendTextMessage(
-          data.phone,
-          part,
-          data.profileId,
-        );
-        if (!sent) {
-          throw new Error(
-            `WhatsApp text message to ${data.phone} returned no SID (unknown Twilio failure)`,
-          );
-        }
-      }
+      await this.processText(data);
     } else if (data.type === 'media') {
-      const sent = await this.whatsApp.sendMediaMessage(
+      await this.processMedia(data);
+    } else if (data.type === 'template') {
+      await this.processTemplate(data);
+    }
+  }
+
+  private async processText(
+    data: Extract<WhatsAppOutboundJobData, { type: 'text' }>,
+  ): Promise<void> {
+    // Split any over-long body so we never hit Twilio's 1600-char hard
+    // limit. For normal-sized messages this is a no-op.
+    const parts = chunkForWhatsApp(data.text);
+    for (const part of parts) {
+      const sent = await this.whatsApp.sendTextMessage(
         data.phone,
-        data.mediaUrl,
-        data.caption,
+        part,
+        data.profileId,
       );
       if (!sent) {
         throw new Error(
-          `WhatsApp media message to ${data.phone} returned no SID (unknown Twilio failure)`,
+          `WhatsApp text message to ${data.phone} returned no SID (unknown Twilio failure)`,
         );
       }
-      if (data.profileId) {
-        const body = data.caption
-          ? `[IMG:${data.mediaUrl}] ${data.caption}`
-          : `[IMG:${data.mediaUrl}]`;
-        await this.whatsApp.saveMessage(
-          data.profileId,
-          MessageDirection.OUTBOUND,
-          body,
-        );
-      }
+    }
+  }
+
+  private async processMedia(
+    data: Extract<WhatsAppOutboundJobData, { type: 'media' }>,
+  ): Promise<void> {
+    const sent = await this.whatsApp.sendMediaMessage(
+      data.phone,
+      data.mediaUrl,
+      data.caption,
+    );
+    if (!sent) {
+      throw new Error(
+        `WhatsApp media message to ${data.phone} returned no SID (unknown Twilio failure)`,
+      );
+    }
+    if (data.profileId) {
+      const body = data.caption
+        ? `[IMG:${data.mediaUrl}] ${data.caption}`
+        : `[IMG:${data.mediaUrl}]`;
+      await this.whatsApp.saveMessage(
+        data.profileId,
+        MessageDirection.OUTBOUND,
+        body,
+      );
+    }
+  }
+
+  private async processTemplate(
+    data: Extract<WhatsAppOutboundJobData, { type: 'template' }>,
+  ): Promise<void> {
+    const sent = await this.whatsApp.sendTemplateMessage(
+      data.phone,
+      data.contentSid,
+      data.contentVariables,
+    );
+    if (!sent) {
+      throw new Error(
+        `WhatsApp template ${data.contentSid} to ${data.phone} returned no SID (unknown Twilio failure)`,
+      );
+    }
+    if (data.profileId) {
+      await this.whatsApp.saveMessage(
+        data.profileId,
+        MessageDirection.OUTBOUND,
+        `[TPL:${data.contentSid}]`,
+      );
     }
   }
 }

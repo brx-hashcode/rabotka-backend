@@ -19,6 +19,7 @@ import { InterestRecommendationService } from '../../../interest-graph/interest-
 import { InvoiceService } from '../../../invoice/invoice.service';
 import { QueueService } from '../../../../common/services/queue/queue.service';
 import { ConfigService } from '@nestjs/config';
+import { WhatsAppMediaMirrorService } from '../../../../common/services/whatsapp-media/whatsapp-media-mirror.service';
 
 const PROFILE_ID = 'profile-uuid-1';
 const PHONE = '+242000000';
@@ -233,6 +234,16 @@ describe('BotOrchestratorService', () => {
           provide: ConfigService,
           useValue: { get: jest.fn().mockReturnValue('https://rabotka.work') },
         },
+        {
+          provide: WhatsAppMediaMirrorService,
+          useValue: {
+            resolveMediaKey: jest
+              .fn()
+              .mockImplementation((url: string | null, placeholder: string) =>
+                Promise.resolve(url ?? placeholder),
+              ),
+          },
+        },
       ],
     }).compile();
 
@@ -244,7 +255,9 @@ describe('BotOrchestratorService', () => {
       deps.prisma.profile.findUnique.mockResolvedValue(null);
       const result = await service.handle(PROFILE_ID, PHONE, 'Menu');
       expect(result).toHaveLength(1);
-      expect(result[0]).toContain("n'est pas encore enregistré");
+      expect(result[0]).toContain(
+        '[TPL:HX1610d675f58d8fa92d277383584cc5fb]',
+      );
     });
 
     it('returns INACTIVE_MESSAGE when account is not ACTIVE', async () => {
