@@ -375,13 +375,13 @@ describe('BotOrchestratorService', () => {
       expect(result[0]).toBe('My offers message');
     });
 
-    it('handles "profile" command via runCommand', async () => {
+    it('handles "profile" command with the view-profile template', async () => {
       deps.router.route.mockReturnValue({
         type: 'command',
         commandId: 'profile',
       });
       const result = await service.handle(PROFILE_ID, PHONE, 'profil');
-      expect(result[0]).toBe('Profile message');
+      expect(result[0]).toContain('[TPL:HX8ab587d99e769edaded28d5dd8247af5]');
     });
 
     it('handles "penalty_history" command', async () => {
@@ -502,7 +502,7 @@ describe('BotOrchestratorService', () => {
         commandId: 'profile',
       });
       const result = await service.handle(PROFILE_ID, PHONE, 'profil');
-      expect(result[0]).toBe('Profile message');
+      expect(result[0]).toContain('[TPL:HX8ab587d99e769edaded28d5dd8247af5]');
     });
 
     it('handles "pay_penalties" command with no unpaid penalties', async () => {
@@ -688,6 +688,46 @@ describe('BotOrchestratorService', () => {
       });
       const result = await service.handle(PROFILE_ID, PHONE, 'menu');
       expect(result[0]).toContain('en cours de vérification');
+      expect(deps.prisma.profile.update).not.toHaveBeenCalled();
+    });
+
+    it('offers the restricted profile/claim menu while KYC is under review', async () => {
+      deps.prisma.profile.findUnique.mockResolvedValue({
+        ...pendingProfile,
+        verification_status: 'PENDING',
+      });
+      const result = await service.handle(PROFILE_ID, PHONE, 'menu');
+      expect(result[0]).toContain('1- Mon profil');
+      expect(result[0]).toContain('2- Créer une réclamation');
+    });
+
+    it('serves the profile template on "1" while KYC is under review', async () => {
+      deps.prisma.profile.findUnique.mockResolvedValue({
+        ...pendingProfile,
+        verification_status: 'PENDING',
+      });
+      const result = await service.handle(PROFILE_ID, PHONE, '1');
+      expect(result[0]).toContain('[TPL:HX8ab587d99e769edaded28d5dd8247af5]');
+      expect(deps.prisma.profile.update).not.toHaveBeenCalled();
+    });
+
+    it('serves the claim template on "2" while KYC is under review', async () => {
+      deps.prisma.profile.findUnique.mockResolvedValue({
+        ...pendingProfile,
+        verification_status: 'PENDING',
+      });
+      const result = await service.handle(PROFILE_ID, PHONE, '2');
+      expect(result[0]).toContain('[TPL:HX9d9725488bc9dc2c6e4340dc5a000ca1]');
+      expect(deps.prisma.profile.update).not.toHaveBeenCalled();
+    });
+
+    it('does not activate the account from the restricted menu (still PENDING KYC)', async () => {
+      deps.prisma.profile.findUnique.mockResolvedValue({
+        ...pendingProfile,
+        verification_status: 'PENDING',
+      });
+      await service.handle(PROFILE_ID, PHONE, '1');
+      await service.handle(PROFILE_ID, PHONE, 'menu');
       expect(deps.prisma.profile.update).not.toHaveBeenCalled();
     });
 
