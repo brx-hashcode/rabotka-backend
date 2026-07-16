@@ -25,11 +25,18 @@ import {
   accountSuspendedBotMessage,
   hasPenaltiesBotMessage,
   menuMessage,
+  restrictedMenuMessage,
   penaltiesListBotMessage,
 } from '../messages/menu.messages';
 import type { BotProfile, BotState } from '../types/bot-state.types';
 import type { FlowContext, FlowResult } from '../types/flow.types';
-import { FLOW_IDS, CMD_MENU, EMPLOYER_MENU_OPTIONS } from '../bot.constants';
+import {
+  FLOW_IDS,
+  CMD_MENU,
+  CMD_PROFILE,
+  CMD_CREATE_CLAIM,
+  EMPLOYER_MENU_OPTIONS,
+} from '../bot.constants';
 import {
   runPublishJobFlow,
   getPublishJobInitialState,
@@ -108,8 +115,6 @@ import { ConfigService } from '@nestjs/config';
 const INACTIVE_MESSAGE = `Votre compte est créé mais pas encore activé. Cliquez sur le lien de confirmation que nous vous avons envoyé par WhatsApp pour l'activer.`;
 
 const KYC_APPROVED_PROMPT_MESSAGE = `✅ Votre vérification KYC a été validée !\n\nTapez *Menu* pour accéder à la plateforme et commencer.`;
-
-const KYC_PENDING_MESSAGE = `⏳ *Votre profil est en cours de vérification.*\n\nNotre équipe examine vos documents KYC. Vous serez notifié dès que votre compte sera activé.`;
 
 const KYC_REJECTED_MESSAGE = `❌ *Votre vérification KYC a été refusée.*\n\nVos documents n'ont pas pu être validés. Veuillez nous contacter pour plus d'informations.`;
 
@@ -228,7 +233,12 @@ export class BotOrchestratorService {
         return [KYC_REJECTED_MESSAGE];
       }
       if (profile.verification_status !== VerificationStatus.VERIFIED) {
-        return [KYC_PENDING_MESSAGE];
+        // Still under review: the account can't be activated yet, but an admin
+        // may ask the user to correct their profile or file a claim during the
+        // review — so those two stay reachable via a restricted 1/2 menu.
+        // Handled here, before routeMessage, so this numbering can't collide
+        // with the full menu's (worker '1' = Trouver une mission).
+        return [this.handlePendingKycInput(normalizedInput)];
       }
 
       // KYC verified + user types Menu → activate account
@@ -269,6 +279,22 @@ export class BotOrchestratorService {
     }
 
     return this.routeMessage(profileId, text, profile, botProfile);
+  }
+
+  /**
+   * Input handling for a profile whose KYC is still under review. Only the two
+   * actions an admin may request during review are available — view/fix the
+   * profile, or file a claim — each answered with its webview template.
+   * Anything else re-shows the restricted menu.
+   */
+  private handlePendingKycInput(normalizedInput: string): string {
+    if (normalizedInput === '1' || CMD_PROFILE.includes(normalizedInput)) {
+      return templateReply(WHATSAPP_TEMPLATES.viewProfile.contentSid);
+    }
+    if (normalizedInput === '2' || CMD_CREATE_CLAIM.includes(normalizedInput)) {
+      return templateReply(WHATSAPP_TEMPLATES.createClaim.contentSid);
+    }
+    return restrictedMenuMessage();
   }
 
   /**
@@ -914,7 +940,6 @@ export class BotOrchestratorService {
 
       my_offers: () => this.handleMyOffersCommand(botProfile, profileId, 0),
 
-      profile: () => this.handleProfileCommand(botProfile),
 
       pay_penalties: () =>
         this.handlePayPenaltiesCommand(botProfile, profileId),
@@ -940,13 +965,6 @@ export class BotOrchestratorService {
     }
     const reply = await this.runCommand(route.commandId, botProfile);
     return [reply];
-  }
-
-  private async handleProfileCommand(
-    botProfile: BotProfile,
-  ): Promise<string[]> {
-    const message = await this.commands.profile(botProfile);
-    return [message];
   }
 
   private async handleStartPublishJobCommand(
@@ -1389,12 +1407,12 @@ export class BotOrchestratorService {
           address: contact.address ?? '',
         });
       }
-      case 'profile':
-        return this.commands.profile(profile);
       case 'penalty_history':
         return this.commands.penaltyHistory(profile);
-      // One-shot template reply (URL button opens the claim form in WhatsApp's
-      // webview) — no state, so it lives here rather than in commandHandlers.
+      // One-shot template replies — the URL button opens the page inside
+      // WhatsApp's webview. No state, so they live here (not commandHandlers).
+      case 'profile':
+        return templateReply(WHATSAPP_TEMPLATES.viewProfile.contentSid);
       case 'create_claim':
         return templateReply(WHATSAPP_TEMPLATES.createClaim.contentSid);
       default:

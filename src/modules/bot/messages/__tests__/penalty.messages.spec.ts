@@ -1,7 +1,5 @@
 import {
   formatPenaltyHistory,
-  formatEmployerProfileStats,
-  formatProfileStats,
   formatPenaltyBlocked,
   formatCancelApplicationNoPenalty,
   formatCancelApplicationWithPenalty,
@@ -51,65 +49,6 @@ describe('formatPenaltyHistory', () => {
     expect(msg).toContain('75/100');
     expect(msg).toContain('10');
     expect(msg).toContain('2');
-  });
-});
-
-describe('formatEmployerProfileStats', () => {
-  const base = {
-    firstName: 'Paul',
-    lastName: 'Kanda',
-    email: 'paul@test.com',
-    memberSince: date,
-    offersCount: 5,
-    pendingCandidaturesCount: 3,
-  };
-
-  it('renders name and stats', () => {
-    const msg = formatEmployerProfileStats(base);
-    expect(msg).toContain('Paul');
-    expect(msg).toContain('Kanda');
-    expect(msg).toContain('paul@test.com');
-    expect(msg).toContain('5');
-    expect(msg).toContain('3');
-  });
-
-  it('uses activeOffersCount when provided', () => {
-    const msg = formatEmployerProfileStats({ ...base, activeOffersCount: 2 });
-    expect(msg).toContain('2');
-  });
-
-  it('falls back to offersCount when activeOffersCount is undefined', () => {
-    const msg = formatEmployerProfileStats(base);
-    // offersCount=5 shown as both total and active
-    expect(msg).toContain('Offres actives*: 5');
-  });
-});
-
-describe('formatProfileStats', () => {
-  const base = {
-    firstName: 'Ana',
-    lastName: 'Mbo',
-    email: 'ana@test.com',
-    reliabilityScore: 85,
-    memberSince: date,
-    completedMissions: 12,
-    completionRate: 90,
-    totalPenalties: 5000,
-    lateCancellations: 1,
-  };
-
-  it('renders profile stats', () => {
-    const msg = formatProfileStats(base);
-    expect(msg).toContain('Ana');
-    expect(msg).toContain('Mbo');
-    expect(msg).toContain('85/100');
-    expect(msg).toContain('12');
-    expect(msg).toContain('90%');
-  });
-
-  it('defaults reliabilityScore to 100 when null', () => {
-    const msg = formatProfileStats({ ...base, reliabilityScore: null });
-    expect(msg).toContain('100/100');
   });
 });
 

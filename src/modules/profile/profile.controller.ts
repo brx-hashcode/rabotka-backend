@@ -12,6 +12,7 @@ import {
   Query,
   BadRequestException,
   Param,
+  Logger,
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -41,11 +42,15 @@ import { WalletService } from '../wallet/wallet.service';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
+import { WhatsAppService } from '../whatsapp/whatsapp.service';
+import { WHATSAPP_TEMPLATES } from '../../common/constants/whatsapp-templates';
 import { PayPenaltyDto } from '../wallet/dto/pay-penalty.dto';
 
 @ApiTags('Profile')
 @Controller('profile')
 export class ProfileController {
+  private readonly logger = new Logger(ProfileController.name);
+
   constructor(
     private readonly profileService: ProfileService,
     private readonly mailService: MailService,
@@ -53,6 +58,7 @@ export class ProfileController {
     private readonly walletService: WalletService,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
+    private readonly whatsApp: WhatsAppService,
   ) {}
 
   @Post()
@@ -103,6 +109,24 @@ export class ProfileController {
         sendWelcomeEmail(createProfileDto.firstName),
       ),
     });
+
+    // Tell the user on WhatsApp that their profile is created and under
+    // review. Onboarding is a web form, so there is no open 24h session —
+    // this must be a template, not a free-form text. Fire-and-forget: a
+    // WhatsApp failure must never fail signup.
+    const profileCreatedTpl = WHATSAPP_TEMPLATES.profileCreated;
+    void this.whatsApp
+      .sendTemplateMessage(
+        createProfileDto.phone,
+        profileCreatedTpl.contentSid,
+        profileCreatedTpl.variables(createProfileDto.firstName),
+      )
+      .catch((err: unknown) =>
+        this.logger.warn(
+          `Failed to send profile_created WhatsApp template to ${createProfileDto.phone}`,
+          err,
+        ),
+      );
 
     // Sign a JWT and set the auth cookie so the user is logged in immediately
     const cookieName = this.configService.get<string>('AUTH_COOKIE_NAME');
