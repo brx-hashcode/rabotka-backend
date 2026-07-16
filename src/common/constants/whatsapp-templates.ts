@@ -18,6 +18,15 @@ export const WHATSAPP_TEMPLATES = {
     contentSid: 'HX1610d675f58d8fa92d277383584cc5fb',
     variables: () => ({}),
   } satisfies WhatsAppTemplate<[]>,
+
+  // "Créer une réclamation" — menu option for workers and employers.
+  // twilio/call-to-action URL button opens /login?redirect=/claims/new inside
+  // WhatsApp's in-app browser, landing the user on the create-claim form.
+  // No variables (URL is static in the template).
+  createClaim: {
+    contentSid: 'HX9d9725488bc9dc2c6e4340dc5a000ca1',
+    variables: () => ({}),
+  } satisfies WhatsAppTemplate<[]>,
   
   // KYC-approved message with a "Commencer" quick-reply button (payload
   // "menu"). Used by kyc.service.ts and sendKycValidatedMessage.
