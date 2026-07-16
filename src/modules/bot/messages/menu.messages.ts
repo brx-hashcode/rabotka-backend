@@ -16,7 +16,8 @@ export function workerMenuMessage(): string {
     '4- Rechercher par référence',
     '5- Mon profil',
     '6- Recharger mon wallet',
-    '7- Aide',
+    '7- Créer une réclamation',
+    '8- Aide',
     '',
     '*Répondez avec le numéro de votre choix.*',
   ].join('\n');
@@ -33,7 +34,8 @@ export function employerMenuMessage(): string {
     '5- Travailleurs recommandés',
     '6- Mon profil',
     '7- Recharger mon wallet',
-    '8- Aide',
+    '8- Créer une réclamation',
+    '9- Aide',
     '',
     '*Répondez avec le numéro de votre choix.*',
   ].join('\n');

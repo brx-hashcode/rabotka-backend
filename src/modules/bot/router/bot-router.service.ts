@@ -19,6 +19,7 @@ import {
   CMD_RECOMMENDED_PROFILES,
   CMD_SEARCH_BY_REF,
   CMD_CREDIT_WALLET,
+  CMD_CREATE_CLAIM,
 } from '../bot.constants';
 import { stripChatFormattingChars } from '../utils/chat-input';
 
@@ -56,6 +57,8 @@ function matchCommandAlias(
   if (CMD_RECOMMENDED_PROFILES.includes(normalized) && isEmployer)
     return 'recommended_profiles';
   if (CMD_CREDIT_WALLET.includes(normalized)) return 'credit_wallet';
+  // Not gated on profile type: workers and employers can both file a claim.
+  if (CMD_CREATE_CLAIM.includes(normalized)) return 'create_claim';
   return null;
 }
 
@@ -67,6 +70,7 @@ function matchWorkerNumeric(trimmed: string): string | null {
     return 'recommended_jobs';
   if (trimmed === WORKER_MENU_OPTIONS.PROFILE) return 'profile';
   if (trimmed === WORKER_MENU_OPTIONS.CREDIT_WALLET) return 'credit_wallet';
+  if (trimmed === WORKER_MENU_OPTIONS.CREATE_CLAIM) return 'create_claim';
   if (trimmed === WORKER_MENU_OPTIONS.HELP) return 'help';
   return null;
 }
@@ -82,6 +86,7 @@ function matchEmployerNumeric(trimmed: string): string | null {
     return 'recommended_profiles';
   if (trimmed === EMPLOYER_MENU_OPTIONS.PROFILE) return 'profile';
   if (trimmed === EMPLOYER_MENU_OPTIONS.CREDIT_WALLET) return 'credit_wallet';
+  if (trimmed === EMPLOYER_MENU_OPTIONS.CREATE_CLAIM) return 'create_claim';
   if (trimmed === EMPLOYER_MENU_OPTIONS.HELP) return 'help';
   return null;
 }
