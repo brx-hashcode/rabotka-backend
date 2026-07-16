@@ -178,6 +178,20 @@ describe('WhatsAppController', () => {
       );
     });
 
+    it('routes quick-reply ButtonPayload as the message text', async () => {
+      await controller.incomingWebhook(makeReq(), {
+        From: 'whatsapp:+24200000001',
+        ButtonPayload: '1',
+        ButtonText: 'Postuler',
+        Body: 'Postuler',
+        MessageSid: 'SM999',
+      });
+      expect(queueService.addJob).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ phone: '+24200000001', text: '1' }),
+      );
+    });
+
     it('uses TWILIO_WEBHOOK_BASE_URL from config when set', async () => {
       configService.get.mockReturnValue('https://my-ngrok.io');
       await controller.incomingWebhook(makeReq(), body);

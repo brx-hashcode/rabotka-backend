@@ -29,7 +29,7 @@ function snoozeHoursFor(paymentFlow: string | undefined): number {
   }
 }
 
-function snoozeLabel(paymentFlow: string | undefined): string {
+export function snoozeLabel(paymentFlow: string | undefined): string {
   const h = snoozeHoursFor(paymentFlow);
   return h === 1 ? '1 heure' : `${h} heures`;
 }

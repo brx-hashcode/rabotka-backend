@@ -40,7 +40,7 @@ import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { MailService } from '../mail/mail.service';
 import { LayoutService } from '../mail/layout.service';
 import { kycApprovedEmail, kycRejectedEmail } from '../mail/templates';
-import { formatKycValidatedMessage } from '../bot/messages/notifications.messages';
+import { WHATSAPP_TEMPLATES } from '../../common/constants/whatsapp-templates';
 import { MessageDirection, BotPlatform } from '@prisma/client';
 import { AdminListProfilesDto } from './dto/admin-list-profiles.dto';
 import {
@@ -473,13 +473,12 @@ export class AdminProfileController {
         html: await this.layout.wrap(kycApprovedEmail(fullName)),
       });
 
+      const kycTpl = WHATSAPP_TEMPLATES.kyc;
       this.whatsApp
-        .sendTextMessage(
+        .sendTemplateMessage(
           result.phone,
-          formatKycValidatedMessage(
-            result.firstName,
-            result.profileType as 'WORKER' | 'EMPLOYER',
-          ),
+          kycTpl.contentSid,
+          kycTpl.variables(result.firstName),
         )
         .catch((err) =>
           console.warn(

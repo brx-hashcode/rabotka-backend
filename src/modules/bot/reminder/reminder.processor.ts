@@ -5,11 +5,9 @@ import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { WhatsAppService } from '../../whatsapp/whatsapp.service';
 import { QueueService } from '../../../common/services/queue/queue.service';
 import { WHATSAPP_REMINDERS_QUEUE } from '../../../common/services/queue/queue.module';
-import {
-  formatReminder24h,
-  formatReminder2h,
-  formatReminderStart,
-} from '../messages/notifications.messages';
+import { formatDate } from '../messages/notifications.messages';
+import { APP_TIMEZONE } from '../utils/parse-date-time';
+import { WHATSAPP_TEMPLATES } from '../../../common/constants/whatsapp-templates';
 import { ApplicationStatus, JobOfferStatus } from '@prisma/client';
 import { SystemConfigService } from '../../system-config/system-config.service';
 import {
@@ -19,7 +17,7 @@ import {
 } from '../bot.constants';
 import { ContactUnlockService } from '../../contact-unlock/contact-unlock.service';
 import { BotNotificationService } from '../services/bot-notification.service';
-import { jobStatusCheckPromptMessage } from '../flows/job-status-check.flow';
+import { snoozeLabel } from '../flows/job-status-check.flow';
 import { getCancelApplicationInitialState } from '../flows/cancel-application.flow';
 
 const REMINDER_24H_SENT_KEY = 'reminder:sent:24h:';
@@ -304,25 +302,17 @@ export class ReminderProcessor {
     applications: { id: string }[];
   }): Promise<void> {
     const phone = offer.employer?.phone;
-    const firstName = offer.employer?.first_name ?? '';
     const firstApp = offer.applications[0];
 
     if (phone) {
-      const autoStartText = [
-        `🚀 *Mission démarrée automatiquement*`,
-        ``,
-        `Bonjour ${firstName}, votre offre *"${offer.title}"* a atteint l'heure prévue avec des travailleurs acceptés.`,
-        ``,
-        `La mission est maintenant marquée comme démarrée.`,
-      ].join('\n');
-
-      const statusCheckText = jobStatusCheckPromptMessage(
-        offer.title,
-        offer.payment_flow ?? 'DAILY',
-      );
-
+      const autoStartTpl = WHATSAPP_TEMPLATES.autoStarted;
       const sent = await this.whatsApp
-        .sendTextMessage(phone, autoStartText, offer.employer_id)
+        .sendTemplateMessage(
+          phone,
+          autoStartTpl.contentSid,
+          autoStartTpl.variables({ offerTitle: offer.title }),
+          offer.employer_id,
+        )
         .then(() => true)
         .catch((err) => {
           this.logger.warn(
@@ -333,8 +323,17 @@ export class ReminderProcessor {
         });
 
       if (sent && firstApp) {
+        const statusTpl = WHATSAPP_TEMPLATES.statusCheck;
         await this.whatsApp
-          .sendTextMessage(phone, statusCheckText, offer.employer_id)
+          .sendTemplateMessage(
+            phone,
+            statusTpl.contentSid,
+            statusTpl.variables({
+              jobTitle: offer.title,
+              snoozeLabel: snoozeLabel(offer.payment_flow ?? 'DAILY'),
+            }),
+            offer.employer_id,
+          )
           .catch((err) =>
             this.logger.warn(
               `Failed to send status check prompt to employer ${offer.employer_id}`,
@@ -495,17 +494,14 @@ export class ReminderProcessor {
   ): Promise<void> {
     const phone = worker.phone;
     if (!phone) return;
-    const firstName = worker.first_name ?? '';
-    const text = [
-      `*⏰ Offre expirée*`,
-      '',
-      `Bonjour ${firstName}, l'offre *"${offerTitle}"* à laquelle vous aviez postulé a expiré, votre candidature a donc été clôturée.`,
-      '',
-      `D'autres offres sont disponibles — tapez *MENU* pour les consulter.`,
-    ].join('\n');
-
+    const tpl = WHATSAPP_TEMPLATES.offerExpiredApplicant;
     await this.whatsApp
-      .sendTextMessage(phone, text, worker.id)
+      .sendTemplateMessage(
+        phone,
+        tpl.contentSid,
+        tpl.variables({ offerTitle }),
+        worker.id,
+      )
       .catch((err) => {
         this.logger.warn(
           `Failed to notify worker ${worker.id} of expired offer`,
@@ -523,20 +519,14 @@ export class ReminderProcessor {
   }): Promise<void> {
     const phone = offer.employer?.phone;
     if (!phone) return;
-    const firstName = offer.employer?.first_name ?? '';
-    const text = [
-      `*⏰ Offre expirée*`,
-      '',
-      `Bonjour ${firstName}, votre offre *"${offer.title}"* a expiré car la date est passée sans démarrage effectif de la mission.`,
-      '',
-      `Que souhaitez-vous faire ?`,
-      '',
-      `1- Republier l'offre`,
-      `2- Menu`,
-    ].join('\n');
-
+    const tpl = WHATSAPP_TEMPLATES.offerExpiredEmployer;
     const sent = await this.whatsApp
-      .sendTextMessage(phone, text, offer.employer_id)
+      .sendTemplateMessage(
+        phone,
+        tpl.contentSid,
+        tpl.variables({ offerTitle: offer.title }),
+        offer.employer_id,
+      )
       .then(() => true)
       .catch((err) => {
         this.logger.warn(
@@ -596,17 +586,14 @@ export class ReminderProcessor {
     }
 
     // Notify pending workers that the offer is no longer available
+    const unavailableTpl = WHATSAPP_TEMPLATES.offerUnavailableWorker;
     for (const app of offer.applications ?? []) {
       if (!app.worker.phone) continue;
       await this.whatsApp
-        .sendTextMessage(
+        .sendTemplateMessage(
           app.worker.phone,
-          [
-            `ℹ️ *Offre non disponible*`,
-            '',
-            `L'offre *${offer.title}* pour laquelle vous avez postulé est maintenant expirée.`,
-            'De nouvelles offres sont disponibles — tapez *Menu* pour les consulter.',
-          ].join('\n'),
+          unavailableTpl.contentSid,
+          unavailableTpl.variables({ offerTitle: offer.title }),
         )
         .catch((err) =>
           this.logger.warn(
@@ -637,9 +624,17 @@ export class ReminderProcessor {
     const phone = offer.employer?.phone;
     if (!phone) return;
 
-    const text = jobStatusCheckPromptMessage(offer.title, paymentFlow);
+    const tpl = WHATSAPP_TEMPLATES.statusCheck;
     const sent = await this.whatsApp
-      .sendTextMessage(phone, text, employerId)
+      .sendTemplateMessage(
+        phone,
+        tpl.contentSid,
+        tpl.variables({
+          jobTitle: offer.title,
+          snoozeLabel: snoozeLabel(paymentFlow),
+        }),
+        employerId,
+      )
       .then(() => true)
       .catch((err) => {
         this.logger.warn(
@@ -721,18 +716,21 @@ export class ReminderProcessor {
     if (!app?.worker?.phone || app.status !== 'ACCEPTED') return;
 
     const fees = await this.systemConfigService.getFees();
-    const text = formatReminder24h({
-      offerTitle: app.job_offer.title,
-      scheduledAt: app.job_offer.scheduled_at,
-      address: app.job_offer.address,
-      amount: Number(app.job_offer.amount),
-      employerName: `${app.job_offer.employer.first_name} ${app.job_offer.employer.last_name}`,
-      employerPhone: app.job_offer.employer.phone,
-      cancellationThresholdHours: fees.cancellationThresholdHours,
-      penaltyFcfa: fees.lateCancellationPenaltyFcfa,
-    });
-
-    await this.whatsApp.sendTextMessage(app.worker.phone, text);
+    const tpl = WHATSAPP_TEMPLATES.reminder24h;
+    await this.whatsApp.sendTemplateMessage(
+      app.worker.phone,
+      tpl.contentSid,
+      tpl.variables({
+        offerTitle: app.job_offer.title,
+        date: formatDate(app.job_offer.scheduled_at),
+        address: app.job_offer.address,
+        amount: Number(app.job_offer.amount).toLocaleString('fr-FR'),
+        employerName: `${app.job_offer.employer.first_name} ${app.job_offer.employer.last_name}`,
+        employerPhone: app.job_offer.employer.phone,
+        cancellationThresholdHours: String(fees.cancellationThresholdHours),
+        penaltyFcfa: fees.lateCancellationPenaltyFcfa.toLocaleString('fr-FR'),
+      }),
+    );
 
     // Set bot state so the worker's reply (1=cancel, 2=keep) routes to the cancel flow.
     const workerStateKey = `${BOT_STATE_KEY_PREFIX}${app.worker_id}`;
@@ -772,15 +770,22 @@ export class ReminderProcessor {
 
     if (!app?.worker?.phone || app.status !== 'ACCEPTED') return;
 
-    const text = formatReminder2h({
-      offerTitle: app.job_offer.title,
-      scheduledAt: app.job_offer.scheduled_at,
-      address: app.job_offer.address,
-      employerName: `${app.job_offer.employer.first_name} ${app.job_offer.employer.last_name}`,
-      employerPhone: app.job_offer.employer.phone,
-    });
-
-    await this.whatsApp.sendTextMessage(app.worker.phone, text);
+    const tpl = WHATSAPP_TEMPLATES.reminder2h;
+    await this.whatsApp.sendTemplateMessage(
+      app.worker.phone,
+      tpl.contentSid,
+      tpl.variables({
+        offerTitle: app.job_offer.title,
+        time: app.job_offer.scheduled_at.toLocaleTimeString('fr-FR', {
+          hour: '2-digit',
+          minute: '2-digit',
+          timeZone: APP_TIMEZONE,
+        }),
+        address: app.job_offer.address,
+        employerName: `${app.job_offer.employer.first_name} ${app.job_offer.employer.last_name}`,
+        employerPhone: app.job_offer.employer.phone,
+      }),
+    );
     this.logger.log(`Reminder 2h sent for application ${applicationId}`);
   }
 
@@ -834,15 +839,23 @@ export class ReminderProcessor {
     }
 
     try {
-      const text = formatReminderStart({
-        offerTitle: app.job_offer.title,
-        scheduledAt: app.job_offer.scheduled_at,
-        address: app.job_offer.address,
-        employerName: `${app.job_offer.employer.first_name} ${app.job_offer.employer.last_name}`,
-        employerPhone: app.job_offer.employer.phone,
+      const time = app.job_offer.scheduled_at.toLocaleTimeString('fr-FR', {
+        hour: '2-digit',
+        minute: '2-digit',
+        timeZone: APP_TIMEZONE,
       });
-
-      await this.whatsApp.sendTextMessage(app.worker.phone, text);
+      const tpl = WHATSAPP_TEMPLATES.reminderStart;
+      await this.whatsApp.sendTemplateMessage(
+        app.worker.phone,
+        tpl.contentSid,
+        tpl.variables({
+          offerTitle: app.job_offer.title,
+          time,
+          address: app.job_offer.address,
+          employerName: `${app.job_offer.employer.first_name} ${app.job_offer.employer.last_name}`,
+          employerPhone: app.job_offer.employer.phone,
+        }),
+      );
       this.logger.log(
         `Reminder start sent for application ${applicationId} (alreadyStarted=${alreadyStarted})`,
       );

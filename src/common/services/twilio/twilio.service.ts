@@ -178,6 +178,54 @@ export class TwilioService implements OnModuleInit {
     }
   }
 
+  async sendWhatsAppTemplate(
+    to: string,
+    contentSid: string,
+    contentVariables?: Record<string, string>,
+  ): Promise<string | null> {
+    const client = this.getClient();
+
+    if (!client || !this.whatsappFrom) {
+      this.logger.error(
+        'Twilio client or WhatsApp sender not configured (set twilio.whatsapp_from in system config and TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN). Cannot send WhatsApp template.',
+      );
+      return null;
+    }
+
+    const toFormatted = this.formatWhatsAppNumber(to);
+    const fromFormatted = this.formatWhatsAppNumber(this.whatsappFrom);
+
+    try {
+      const message = await client.messages.create({
+        from: fromFormatted,
+        to: toFormatted,
+        contentSid,
+        ...(contentVariables
+          ? { contentVariables: JSON.stringify(contentVariables) }
+          : {}),
+      });
+      if (message.sid) {
+        this.logger.debug(
+          `WhatsApp template ${contentSid} sent to ${to}. Message SID: ${message.sid}`,
+        );
+        return message.sid;
+      }
+      return null;
+    } catch (err) {
+      const twilioErr = err as {
+        code?: number;
+        status?: number;
+        message?: string;
+      };
+      this.logger.error(
+        `Twilio error sending WhatsApp template ${contentSid} to ${to}: [${twilioErr.code ?? twilioErr.status}] ${twilioErr.message}`,
+      );
+      throw new Error(
+        `[Twilio ${twilioErr.code ?? twilioErr.status}] ${twilioErr.message ?? 'Unknown error'} — template to ${to} failed`,
+      );
+    }
+  }
+
   async sendWhatsAppMedia(
     to: string,
     mediaUrl: string,

@@ -110,6 +110,13 @@ function makeCtx(overrides: Record<string, unknown> = {}) {
     invoiceService: {
       create: jest.fn().mockResolvedValue({ id: 'inv-1' }),
     } as any,
+    mediaMirror: {
+      resolveMediaKey: jest
+        .fn()
+        .mockImplementation((url: string | null, placeholder: string) =>
+          Promise.resolve(url ?? placeholder),
+        ),
+    } as any,
     ...overrides,
   };
 }
@@ -179,11 +186,12 @@ describe('runRecommendedProfilesFlow — list view (step 0)', () => {
       profile,
       ctx,
     );
-    expect(result.reply[0]).toContain('*Travailleurs recommandés*');
+    // 3 workers → a 3-card carousel ([TPL:] reply); card bodies carry names + AI score.
+    expect(result.reply[0]).toContain('[TPL:');
     expect(result.reply[0]).toContain('Alice Dupont');
     expect(result.reply[0]).toContain('Bob Smith');
     expect(result.reply[0]).toContain('Charlie Brown');
-    expect(result.reply[0]).toContain('IA: 85%'); // worker-1: 0.85 → 85
+    expect(result.reply[0]).toContain('Score IA : 85%'); // worker-1: 0.85 → 85
     expect(result.nextState?.payload.renderedWorkerIds).toEqual([
       'worker-1',
       'worker-2',
@@ -254,7 +262,7 @@ describe('runRecommendedProfilesFlow — list view (step 0)', () => {
       profile,
       ctx,
     );
-    expect(result.reply[0]).toContain('*Travailleurs recommandés*');
+    expect(result.reply[0]).toContain('[TPL:');
   });
 });
 
@@ -326,7 +334,7 @@ describe('runRecommendedProfilesFlow — detail view (step 1)', () => {
     const ctx = makeCtx();
     const state = makeState(1, { selectedWorkerId: 'worker-1' });
     const result = await runRecommendedProfilesFlow(state, '2', profile, ctx);
-    expect(result.reply[0]).toContain('*Travailleurs recommandés*');
+    expect(result.reply[0]).toContain('[TPL:');
   });
 
   it('returns to the menu on "3" from detail', async () => {

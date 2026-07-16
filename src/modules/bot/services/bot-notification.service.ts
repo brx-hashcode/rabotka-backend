@@ -8,20 +8,8 @@ import { getUnlockContactInitialState } from '../flows/unlock-contact.flow';
 import { getRateAssignmentInitialState } from '../flows/rate-assignment.flow';
 import { FLOW_IDS } from '../bot.constants';
 import { getApplyJobNotificationState } from '../flows/apply-job.flow';
-import {
-  formatNewApplicationToEmployer,
-  formatApplicationRejectedToWorker,
-  formatCancellationToEmployer,
-  formatJobCompletedToWorker,
-  formatJobCancelledByEmployerToWorker,
-} from '../messages/application.messages';
-import {
-  formatContactUnlockedMessage,
-  formatContactUnlockPrompt,
-  formatContactUnlockExpiredConversion,
-} from '../messages/contact-unlock.messages';
-import { formatKycValidatedMessage } from '../messages/notifications.messages';
 import { formatAmount } from '../messages/offers.messages';
+import { WHATSAPP_TEMPLATES } from '../../../common/constants/whatsapp-templates';
 import { ContactUnlockService } from '../../contact-unlock/contact-unlock.service';
 import { SystemConfigService } from '../../system-config/system-config.service';
 import { WalletService } from '../../wallet/wallet.service';
@@ -76,16 +64,6 @@ export class BotNotificationService {
         where: { worker_id: app.worker_id, status: 'END' },
       });
 
-      const text = formatNewApplicationToEmployer({
-        offerTitle: app.job_offer.title,
-        workerName: `${app.worker.first_name} ${app.worker.last_name}`,
-        workerDescription: app.worker.description ?? '',
-        reliabilityScore: app.worker.reliability_score,
-        completedMissions: completedCount,
-        scheduledAt: app.job_offer.scheduled_at,
-        address: app.job_offer.address,
-      });
-
       const employerProfileId = app.job_offer.employer_id;
       const acceptRefuseState = getAcceptRefuseInitialState(applicationId);
       // CAS: only set state if no active flow; if blocked, employer is mid-conversation → inbox
@@ -95,7 +73,35 @@ export class BotNotificationService {
         null,
       );
 
-      await this.whatsApp.sendTextMessage(app.job_offer.employer.phone, text);
+      const scheduledAt = app.job_offer.scheduled_at.toLocaleDateString(
+        'fr-FR',
+        {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        },
+      );
+      const description = app.worker.description ?? '';
+      const address = app.job_offer.address;
+      const tpl = WHATSAPP_TEMPLATES.newApplication;
+      await this.whatsApp.sendTemplateMessage(
+        app.job_offer.employer.phone,
+        tpl.contentSid,
+        tpl.variables({
+          offerTitle: app.job_offer.title,
+          workerName: `${app.worker.first_name} ${app.worker.last_name}`,
+          reliabilityScore: app.worker.reliability_score ?? 100,
+          completedMissions: completedCount,
+          workerDescription:
+            description.length > 150
+              ? `${description.slice(0, 150)}...`
+              : description,
+          scheduledAt,
+          address: address.length > 80 ? `${address.slice(0, 80)}...` : address,
+        }),
+      );
 
       if (!wrote) {
         // Employer is mid-flow — queue into inbox
@@ -147,25 +153,11 @@ export class BotNotificationService {
         await this.contactUnlock.getByApplicationId(applicationId);
       if (attempt) {
         const fees = await this.systemConfig.getContactUnlockFees();
-        const balance = await this.walletService.getProfileWalletBalance(
-          app.worker_id,
-        );
-        const unlockPrompt = formatContactUnlockPrompt({
-          name: employerName,
-          amount: fees.workerFeeFcfa,
-          balance,
-          profileType: 'WORKER',
-        });
-        const text = [
-          `🎉 *Candidature acceptée !*`,
-          ``,
-          `*${employerName}* a accepté votre candidature pour l'offre "${app.job_offer.title}".`,
-          ``,
-          unlockPrompt,
-        ].join('\n');
 
-        await this.whatsApp.sendTextMessage(app.worker.phone, text);
-
+        // Set unlockState BEFORE sending so that when the worker taps
+        // "Continuer" (payload "continuer") the flow is already active and
+        // re-shows the live payment prompt (unlock-contact.flow.ts). The
+        // dynamic, balance-dependent option list cannot live in a template.
         const unlockState = getUnlockContactInitialState({
           attemptId: attempt.id,
           otherName: employerName,
@@ -177,16 +169,25 @@ export class BotNotificationService {
           unlockState,
           null,
         );
-      } else {
-        await this.whatsApp.sendTextMessage(
+
+        const tpl = WHATSAPP_TEMPLATES.applicationAcceptedUnlock;
+        await this.whatsApp.sendTemplateMessage(
           app.worker.phone,
-          [
-            `🎉 *Candidature acceptée !*`,
-            ``,
-            `*${employerName}* a accepté votre candidature pour l'offre "${app.job_offer.title}".`,
-            ``,
-            `Tapez *Menu* pour accéder à vos candidatures et suivre votre mission.`,
-          ].join('\n'),
+          tpl.contentSid,
+          tpl.variables({
+            employerName,
+            offerTitle: app.job_offer.title,
+          }),
+        );
+      } else {
+        const tpl = WHATSAPP_TEMPLATES.applicationAccepted;
+        await this.whatsApp.sendTemplateMessage(
+          app.worker.phone,
+          tpl.contentSid,
+          tpl.variables({
+            employerName,
+            offerTitle: app.job_offer.title,
+          }),
         );
       }
     } catch (err) {
@@ -234,10 +235,13 @@ export class BotNotificationService {
         }),
       ]);
 
+      const tpl = WHATSAPP_TEMPLATES.contactUnlocked;
+
       if (employer?.phone && worker && attempt.employer_id !== skipId) {
-        await this.whatsApp.sendTextMessage(
+        await this.whatsApp.sendTemplateMessage(
           employer.phone,
-          formatContactUnlockedMessage({
+          tpl.contentSid,
+          tpl.variables({
             name: `${worker.first_name} ${worker.last_name}`.trim(),
             phone: worker.phone,
             email: worker.email,
@@ -246,9 +250,10 @@ export class BotNotificationService {
       }
 
       if (worker?.phone && employer && attempt.worker_id !== skipId) {
-        await this.whatsApp.sendTextMessage(
+        await this.whatsApp.sendTemplateMessage(
           worker.phone,
-          formatContactUnlockedMessage({
+          tpl.contentSid,
+          tpl.variables({
             name: `${employer.first_name} ${employer.last_name}`.trim(),
             phone: employer.phone,
             email: employer.email,
@@ -274,9 +279,11 @@ export class BotNotificationService {
       });
       if (!profile?.phone) return;
 
-      await this.whatsApp.sendTextMessage(
+      const tpl = WHATSAPP_TEMPLATES.unlockExpiredConversion;
+      await this.whatsApp.sendTemplateMessage(
         profile.phone,
-        formatContactUnlockExpiredConversion(amount),
+        tpl.contentSid,
+        tpl.variables({ amount }),
       );
     } catch (err) {
       this.logger.warn(
@@ -294,8 +301,12 @@ export class BotNotificationService {
       });
       if (!app?.worker?.phone) return;
 
-      const text = formatApplicationRejectedToWorker();
-      await this.whatsApp.sendTextMessage(app.worker.phone, text);
+      const tpl = WHATSAPP_TEMPLATES.applicationRejected;
+      await this.whatsApp.sendTemplateMessage(
+        app.worker.phone,
+        tpl.contentSid,
+        tpl.variables(),
+      );
     } catch (err) {
       this.logger.warn(
         `Failed to send rejected notification to worker: ${String(applicationId)}`,
@@ -328,15 +339,28 @@ export class BotNotificationService {
       if (!app?.job_offer?.employer?.phone || !app.worker) return;
 
       const fees = await this.systemConfig.getFees();
-      const text = formatCancellationToEmployer({
-        workerName: `${app.worker.first_name} ${app.worker.last_name}`,
-        offerTitle: app.job_offer.title,
-        scheduledAt: app.job_offer.scheduled_at,
-        reason,
-        wasLatePenalty,
-        lateCancellationThresholdHours: fees.cancellationThresholdHours,
+      const date = app.job_offer.scheduled_at.toLocaleDateString('fr-FR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
       });
-      await this.whatsApp.sendTextMessage(app.job_offer.employer.phone, text);
+      const penaltyStatus = wasLatePenalty
+        ? `Cette annulation tardive (moins de ${fees.cancellationThresholdHours}h avant) a entraîné une pénalité pour le worker.`
+        : 'Aucune pénalité n’a été appliquée (annulation dans les délais).';
+      const tpl = WHATSAPP_TEMPLATES.cancellation;
+      await this.whatsApp.sendTemplateMessage(
+        app.job_offer.employer.phone,
+        tpl.contentSid,
+        tpl.variables({
+          workerName: `${app.worker.first_name} ${app.worker.last_name}`,
+          offerTitle: app.job_offer.title,
+          date,
+          reason: reason ?? '',
+          penaltyStatus,
+        }),
+      );
 
       // Set the POST_CANCELLATION_ACTIONS state so 1/2/3 actually do
       // something. CAS-write so we don't clobber an in-flight flow.
@@ -374,10 +398,12 @@ export class BotNotificationService {
         },
       });
       if (!app?.worker?.phone || !app.job_offer) return;
-      const text = formatJobCompletedToWorker({
-        offerTitle: app.job_offer.title,
-      });
-      await this.whatsApp.sendTextMessage(app.worker.phone, text);
+      const tpl = WHATSAPP_TEMPLATES.jobCompleted;
+      await this.whatsApp.sendTemplateMessage(
+        app.worker.phone,
+        tpl.contentSid,
+        tpl.variables({ offerTitle: app.job_offer.title }),
+      );
     } catch (err) {
       this.logger.warn(
         `Failed to send job completed notification to worker: ${applicationId}`,
@@ -393,10 +419,16 @@ export class BotNotificationService {
   async sendKycValidatedMessage(
     phone: string,
     firstName: string,
-    profileType: 'WORKER' | 'EMPLOYER',
+    _profileType: 'WORKER' | 'EMPLOYER',
   ): Promise<void> {
-    const message = formatKycValidatedMessage(firstName, profileType);
-    await this.whatsApp.sendTextMessage(phone, message);
+    // Same KYC-approved message as kyc.service.ts — reuse the approved `kyc`
+    // template rather than a free-form send (recipient is out of window).
+    const tpl = WHATSAPP_TEMPLATES.kyc;
+    await this.whatsApp.sendTemplateMessage(
+      phone,
+      tpl.contentSid,
+      tpl.variables(firstName),
+    );
   }
 
   async sendRecommendedJobNotification(
@@ -444,19 +476,21 @@ export class BotNotificationService {
         hour: '2-digit',
         minute: '2-digit',
       });
-      const teaser = [
-        `🔔 *Nouvelle offre pour vous, ${profile.first_name} !*`,
-        '',
-        `*${offer.title}*`,
-        `*Montant* : ${formatAmount(offer.amount != null ? Number(offer.amount) : null, offer.payment_flow)}`,
-        `*Adresse* : ${offer.address}`,
-        `*Date* : ${dateStr}`,
-        '',
-        '1- Postuler',
-        '2- Ignorer',
-      ].join('\n');
-
-      await this.whatsApp.sendTextMessage(profile.phone, teaser);
+      const tpl = WHATSAPP_TEMPLATES.jobRecommendation;
+      await this.whatsApp.sendTemplateMessage(
+        profile.phone,
+        tpl.contentSid,
+        tpl.variables({
+          firstName: profile.first_name,
+          title: offer.title,
+          amount: formatAmount(
+            offer.amount != null ? Number(offer.amount) : null,
+            offer.payment_flow,
+          ),
+          address: offer.address,
+          date: dateStr,
+        }),
+      );
     } catch (err) {
       this.logger.warn(
         `Failed to send recommended job notification to worker ${workerId}`,
@@ -499,16 +533,13 @@ export class BotNotificationService {
       });
       return;
     }
-    const text = [
-      `*Évaluez votre mission*`,
-      '',
-      `La mission *${jobTitle}* est terminée.`,
-      `Comment évaluez-vous *${rateeLabel}* ?`,
-      '',
-      'Répondez avec une note de *1* à *5*.',
-    ].join('\n');
+    const tpl = WHATSAPP_TEMPLATES.ratingRequest;
     await this.whatsApp
-      .sendTextMessage(raterPhone, text)
+      .sendTemplateMessage(
+        raterPhone,
+        tpl.contentSid,
+        tpl.variables({ jobTitle, rateeLabel }),
+      )
       .catch((err) =>
         this.logger.warn(`Failed to send rating request to ${raterPhone}`, err),
       );
@@ -526,8 +557,12 @@ export class BotNotificationService {
         },
       });
       if (!app?.worker?.phone || !app.job_offer) return;
-      const text = formatJobCancelledByEmployerToWorker(app.job_offer.title);
-      await this.whatsApp.sendTextMessage(app.worker.phone, text);
+      const tpl = WHATSAPP_TEMPLATES.jobCancelledByEmployer;
+      await this.whatsApp.sendTemplateMessage(
+        app.worker.phone,
+        tpl.contentSid,
+        tpl.variables({ offerTitle: app.job_offer.title }),
+      );
     } catch (err) {
       this.logger.warn(
         `Failed to send job cancelled by employer to worker: ${applicationId}`,

@@ -22,6 +22,7 @@ import {
   type FilledJobListItem,
 } from '../messages/application.messages';
 import { WORKER_ACTIVE_APPLICATION_STATUSES } from '../../application/application.service';
+import { profileImageUrl } from '../../../common/constants/whatsapp-carousel';
 import {
   formatPenaltyHistory,
   formatHistoryMessage,
@@ -450,10 +451,7 @@ export class BotCommandsService {
         activeOffersCount,
         walletBalance,
       });
-      if (profileData.avatar_url?.trim()) {
-        return `[IMG:${profileData.avatar_url}]\n${profileText}`;
-      }
-      return profileText;
+      return `[IMG:${profileImageUrl(profileData.avatar_url)}]\n${profileText}`;
     }
 
     const [applications, penalties] = await Promise.all([
@@ -491,10 +489,7 @@ export class BotCommandsService {
       lateCancellations: lateCount,
       walletBalance,
     });
-    if (profileData.avatar_url?.trim()) {
-      return `[IMG:${profileData.avatar_url}]\n${profileText}`;
-    }
-    return profileText;
+    return `[IMG:${profileImageUrl(profileData.avatar_url)}]\n${profileText}`;
   }
 
   async penaltyHistory(profile: BotProfile): Promise<string> {
