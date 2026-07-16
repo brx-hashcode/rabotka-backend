@@ -2,7 +2,6 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { JobOfferService } from '../../job-offer/job-offer.service';
 import { ApplicationService } from '../../application/application.service';
-import { WalletService } from '../../wallet/wallet.service';
 import { SystemConfigService } from '../../system-config/system-config.service';
 import type { BotProfile } from '../types/bot-state.types';
 import { translateJobOfferStatus } from '../utils/status.utils';
@@ -22,14 +21,9 @@ import {
   type FilledJobListItem,
 } from '../messages/application.messages';
 import { WORKER_ACTIVE_APPLICATION_STATUSES } from '../../application/application.service';
-import { profileImageUrl } from '../../../common/constants/whatsapp-carousel';
 import {
-  formatPenaltyHistory,
   formatHistoryMessage,
-  formatProfileStats,
-  formatEmployerProfileStats,
   type PenaltyItem,
-  type CompletedMissionItem,
 } from '../messages/penalty.messages';
 import { ApplicationStatus, JobOfferStatus } from '@prisma/client';
 
@@ -41,7 +35,6 @@ export class BotCommandsService {
     private readonly prisma: PrismaService,
     private readonly jobOfferService: JobOfferService,
     private readonly applicationService: ApplicationService,
-    private readonly walletService: WalletService,
     private readonly systemConfig: SystemConfigService,
   ) {}
 
@@ -403,93 +396,6 @@ export class BotCommandsService {
     const hasMore = items.length > 5;
     const message = formatFilledJobsListPage(firstPage, hasMore);
     return { message, items };
-  }
-
-  async profile(profile: BotProfile): Promise<string> {
-    const profileData = await this.prisma.profile.findUnique({
-      where: { id: profile.id },
-      select: {
-        first_name: true,
-        last_name: true,
-        email: true,
-        reliability_score: true,
-        created_at: true,
-        avatar_url: true,
-        profile_type: true,
-      },
-    });
-
-    if (!profileData) return 'Profil non trouvé. Tapez *Menu*.';
-
-    const walletBalance = await this.walletService
-      .getProfileWalletBalance(profile.id)
-      .catch(() => 0);
-
-    if (profileData.profile_type === 'EMPLOYER') {
-      const [offersCount, pendingCandidaturesCount] = await Promise.all([
-        this.prisma.jobOffer.count({ where: { employer_id: profile.id } }),
-        this.prisma.application.count({
-          where: {
-            job_offer: { employer_id: profile.id },
-            status: 'PENDING',
-          },
-        }),
-      ]);
-      const activeOffersCount = await this.prisma.jobOffer.count({
-        where: {
-          employer_id: profile.id,
-          status: JobOfferStatus.ACTIVE,
-        },
-      });
-      const profileText = formatEmployerProfileStats({
-        firstName: profileData.first_name,
-        lastName: profileData.last_name,
-        email: profileData.email,
-        memberSince: profileData.created_at,
-        offersCount,
-        pendingCandidaturesCount,
-        activeOffersCount,
-        walletBalance,
-      });
-      return `[IMG:${profileImageUrl(profileData.avatar_url)}]\n${profileText}`;
-    }
-
-    const [applications, penalties] = await Promise.all([
-      this.applicationService.findByWorker(profile.id, { limit: 500 }),
-      this.prisma.penalty.findMany({
-        where: { profile_id: profile.id },
-        orderBy: { applied_at: 'desc' },
-        include: {
-          application: { include: { job_offer: true } },
-        },
-      }),
-    ]);
-
-    const completed = applications.filter(
-      (a) =>
-        a.status === ApplicationStatus.ACCEPTED &&
-        a.job_offer?.status === JobOfferStatus.COMPLETED,
-    );
-    const completionRate =
-      applications.length > 0
-        ? Math.round((completed.length / applications.length) * 100)
-        : 100;
-    const totalPenalties = penalties.reduce((s, p) => s + Number(p.amount), 0);
-    const lateCount = penalties.length;
-
-    const profileText = formatProfileStats({
-      firstName: profileData.first_name,
-      lastName: profileData.last_name,
-      email: profileData.email,
-      reliabilityScore: profileData.reliability_score,
-      memberSince: profileData.created_at,
-      completedMissions: completed.length,
-      completionRate,
-      totalPenalties,
-      lateCancellations: lateCount,
-      walletBalance,
-    });
-    return `[IMG:${profileImageUrl(profileData.avatar_url)}]\n${profileText}`;
   }
 
   async penaltyHistory(profile: BotProfile): Promise<string> {

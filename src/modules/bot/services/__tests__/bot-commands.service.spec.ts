@@ -122,7 +122,6 @@ describe('BotCommandsService', () => {
       prisma as any,
       jobOfferService as any,
       applicationService as any,
-      { getProfileWalletBalance: jest.fn().mockResolvedValue(0) } as any,
       {
         getFees: jest.fn().mockResolvedValue({ cancellationThresholdHours: 4 }),
       } as any,
@@ -442,43 +441,6 @@ describe('BotCommandsService', () => {
     });
   });
 
-  describe('profile()', () => {
-    it('returns not found message when profile missing', async () => {
-      const result = await service.profile(workerProfile);
-      expect(result).toContain('non trouvé');
-    });
-
-    it('returns worker profile stats', async () => {
-      prisma.profile.findUnique.mockResolvedValue({
-        first_name: 'Alice',
-        last_name: 'Dupont',
-        email: 'alice@example.com',
-        reliability_score: 90,
-        status: 'ACTIVE',
-        created_at: new Date(),
-        avatar_url: null,
-        profile_type: 'WORKER',
-      });
-      const result = await service.profile(workerProfile);
-      expect(result).toBeDefined();
-    });
-
-    it('returns employer profile stats', async () => {
-      prisma.profile.findUnique.mockResolvedValue({
-        first_name: 'Jean',
-        last_name: 'Patron',
-        email: 'jean@example.com',
-        reliability_score: null,
-        status: 'ACTIVE',
-        created_at: new Date(),
-        avatar_url: null,
-        profile_type: 'EMPLOYER',
-      });
-      const result = await service.profile(employerProfile);
-      expect(result).toBeDefined();
-    });
-  });
-
   describe('pendingPayments()', () => {
     it('returns empty message when no pending payments for worker', async () => {
       const result = await service.pendingPayments(workerProfile);
@@ -532,87 +494,6 @@ describe('BotCommandsService', () => {
     });
   });
 
-  describe('profile() - avatar_url and EMPLOYER stats', () => {
-    it('returns employer profile with avatar_url', async () => {
-      prisma.profile.findUnique.mockResolvedValue({
-        first_name: 'Jean',
-        last_name: 'Patron',
-        email: 'jean@example.com',
-        reliability_score: null,
-        status: 'ACTIVE',
-        created_at: new Date(),
-        avatar_url: 'http://example.com/avatar.jpg',
-        profile_type: 'EMPLOYER',
-      });
-      const result = await service.profile(employerProfile);
-      expect(result).toContain('[IMG:');
-    });
-
-    it('returns worker profile with avatar_url', async () => {
-      prisma.profile.findUnique.mockResolvedValue({
-        first_name: 'Alice',
-        last_name: 'Dupont',
-        email: 'alice@example.com',
-        reliability_score: 85,
-        status: 'ACTIVE',
-        created_at: new Date(),
-        avatar_url: 'http://example.com/avatar2.jpg',
-        profile_type: 'WORKER',
-      });
-      applicationService.findByWorker.mockResolvedValue([
-        {
-          id: 'app-1',
-          status: 'ACCEPTED',
-          job_offer: {
-            id: 'jo-1',
-            title: 'Job',
-            status: 'COMPLETED',
-            amount: 15000,
-          },
-        },
-      ]);
-      const result = await service.profile(workerProfile);
-      expect(result).toContain('[IMG:');
-    });
-
-    it('returns worker stats with completed applications', async () => {
-      prisma.profile.findUnique.mockResolvedValue({
-        first_name: 'Alice',
-        last_name: 'Dupont',
-        email: 'alice@example.com',
-        reliability_score: 90,
-        status: 'ACTIVE',
-        created_at: new Date(),
-        avatar_url: null,
-        profile_type: 'WORKER',
-      });
-      applicationService.findByWorker.mockResolvedValue([
-        {
-          id: 'app-1',
-          status: 'ACCEPTED',
-          job_offer: {
-            id: 'jo-1',
-            title: 'Job',
-            status: 'COMPLETED',
-            amount: 15000,
-          },
-        },
-        {
-          id: 'app-2',
-          status: 'PENDING',
-          job_offer: {
-            id: 'jo-2',
-            title: 'Job2',
-            status: 'ACTIVE',
-            amount: 10000,
-          },
-        },
-      ]);
-      const result = await service.profile(workerProfile);
-      expect(result).toBeDefined();
-    });
-  });
-
   describe('penaltyHistory()', () => {
     it('returns formatted penalty history', async () => {
       const result = await service.penaltyHistory(workerProfile);
@@ -649,37 +530,4 @@ describe('BotCommandsService', () => {
     });
   });
 
-  describe('profile() - wallet error handling', () => {
-    it('catches wallet error gracefully', async () => {
-      prisma.profile.findUnique.mockResolvedValue({
-        first_name: 'Alice',
-        last_name: 'Dupont',
-        email: 'alice@example.com',
-        reliability_score: 90,
-        status: 'ACTIVE',
-        created_at: new Date(),
-        avatar_url: null,
-        profile_type: 'WORKER',
-      });
-      // Create a new service with a wallet that throws
-      const errorWallet = {
-        getProfileWalletBalance: jest
-          .fn()
-          .mockRejectedValue(new Error('wallet error')),
-      };
-      const svc = new BotCommandsService(
-        prisma as any,
-        jobOfferService as any,
-        applicationService as any,
-        errorWallet as any,
-        {
-          getFees: jest
-            .fn()
-            .mockResolvedValue({ cancellationThresholdHours: 4 }),
-        } as any,
-      );
-      const result = await svc.profile(workerProfile);
-      expect(result).toBeDefined();
-    });
-  });
 });

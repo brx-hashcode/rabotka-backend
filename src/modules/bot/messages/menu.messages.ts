@@ -45,6 +45,28 @@ export function menuMessage(profileType: BotProfileType): string {
   return profileType === 'WORKER' ? workerMenuMessage() : employerMenuMessage();
 }
 
+/**
+ * Menu shown while the account is still awaiting KYC validation. Only the two
+ * actions an admin may ask for during review are available (view/fix the
+ * profile, or file a claim), so it uses its own 1/2 numbering — the pre-KYC
+ * gate in bot-orchestrator intercepts this input before the router, so these
+ * numbers never collide with the full menu's.
+ */
+export function restrictedMenuMessage(): string {
+  return [
+    '⏳ *Votre profil est en cours de vérification.*',
+    '',
+    'Une fois votre KYC validé, vous aurez accès à toutes les fonctionnalités de Rabotka.',
+    '',
+    'En attendant, vous pouvez :',
+    '',
+    '1- Mon profil',
+    '2- Créer une réclamation',
+    '',
+    '*Répondez avec le numéro de votre choix.*',
+  ].join('\n');
+}
+
 export function helpMessage(contact: ContactInfo): string {
   return [
     '*Contact Rabotka*',
