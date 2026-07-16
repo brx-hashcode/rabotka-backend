@@ -56,12 +56,14 @@ describe('ProfileController', () => {
   let profileService: ReturnType<typeof makeProfileService>;
   let mailService: ReturnType<typeof makeMailService>;
   let walletService: ReturnType<typeof makeWalletService>;
+  let whatsApp: { sendTemplateMessage: jest.Mock };
 
   beforeEach(() => {
     jest.clearAllMocks();
     profileService = makeProfileService();
     mailService = makeMailService();
     walletService = makeWalletService();
+    whatsApp = { sendTemplateMessage: jest.fn().mockResolvedValue(true) };
     controller = new ProfileController(
       profileService as any,
       mailService as any,
@@ -69,6 +71,7 @@ describe('ProfileController', () => {
       walletService as any,
       makeJwtService() as any,
       makeConfigService() as any,
+      whatsApp as any,
     );
   });
 
@@ -95,6 +98,24 @@ describe('ProfileController', () => {
         expect.objectContaining({ to: dto.email }),
       );
       expect(result.message).toBe('Profil créé avec succès');
+    });
+
+    it('sends the profile_created WhatsApp template with the first name', async () => {
+      await controller.createProfile(dto as any, mockRes());
+      expect(whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
+        dto.phone,
+        'HXa0d2cd880e5b4a035912c315fdd1b586',
+        { '1': dto.firstName },
+      );
+    });
+
+    it('still creates the profile when the WhatsApp template send fails', async () => {
+      whatsApp.sendTemplateMessage.mockRejectedValueOnce(new Error('twilio'));
+      await expect(
+        controller.createProfile(dto as any, mockRes()),
+      ).resolves.toEqual(
+        expect.objectContaining({ message: 'Profil créé avec succès' }),
+      );
     });
   });
 
