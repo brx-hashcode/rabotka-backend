@@ -51,6 +51,7 @@ function makeDeps() {
 
   const whatsApp = {
     sendTextMessage: jest.fn().mockResolvedValue(true),
+    sendTemplateMessage: jest.fn().mockResolvedValue(true),
     sendMediaMessage: jest.fn().mockResolvedValue(true),
   };
 
@@ -70,16 +71,22 @@ function makeDeps() {
 
 describe('BotNotificationService', () => {
   let service: BotNotificationService;
-  let deps: ReturnType<typeof makeDeps>;
+  let deps: ReturnType<typeof makeDeps> & {
+    contactUnlock: { getByApplicationId: jest.Mock };
+  };
 
   beforeEach(() => {
-    deps = makeDeps();
+    const base = makeDeps();
+    const contactUnlock = {
+      getByApplicationId: jest.fn().mockResolvedValue(null),
+    };
+    deps = { ...base, contactUnlock };
     service = new BotNotificationService(
       deps.prisma as any,
       deps.whatsApp as any,
       deps.botState as any,
       deps.botInbox as any,
-      { getByApplicationId: jest.fn().mockResolvedValue(null) } as any,
+      contactUnlock as any,
       {
         getContactUnlockFees: jest.fn().mockResolvedValue({
           employerFeeFcfa: 500,
@@ -100,12 +107,13 @@ describe('BotNotificationService', () => {
   });
 
   describe('sendNewApplicationToEmployer()', () => {
-    it('sends text message to employer when no active state', async () => {
+    it('sends the new-application template to employer when no active state', async () => {
       deps.botState.get.mockResolvedValue(null);
       await service.sendNewApplicationToEmployer('app-1');
-      expect(deps.whatsApp.sendTextMessage).toHaveBeenCalledWith(
+      expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+24200000002',
-        expect.any(String),
+        'HXce200c3e6c6e80b96b1c31e2daefac9e',
+        expect.objectContaining({ '2': expect.any(String) }),
       );
       expect(deps.botState.setIfFlowAbsentOrMatches).toHaveBeenCalled();
     });
@@ -116,7 +124,7 @@ describe('BotNotificationService', () => {
       expect(deps.botInbox.push).toHaveBeenCalled();
     });
 
-    it('sends only one text message even when worker has avatar', async () => {
+    it('sends the notification as a template (not media) even when worker has avatar', async () => {
       deps.prisma.application.findUnique.mockResolvedValue(
         makeApp({
           worker: {
@@ -127,7 +135,7 @@ describe('BotNotificationService', () => {
       );
       await service.sendNewApplicationToEmployer('app-1');
       expect(deps.whatsApp.sendMediaMessage).not.toHaveBeenCalled();
-      expect(deps.whatsApp.sendTextMessage).toHaveBeenCalledTimes(1);
+      expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalledTimes(1);
     });
 
     it('does nothing when application not found', async () => {
@@ -160,12 +168,27 @@ describe('BotNotificationService', () => {
   });
 
   describe('sendApplicationAcceptedToWorker()', () => {
-    it('sends message to worker', async () => {
+    it('sends the simple accepted template when there is no pending unlock', async () => {
       await service.sendApplicationAcceptedToWorker('app-1');
-      expect(deps.whatsApp.sendTextMessage).toHaveBeenCalledWith(
+      expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+24200000001',
-        expect.any(String),
+        'HX8806c575b1a3a0ee6d4a76b57372e42a',
+        expect.objectContaining({ '2': expect.any(String) }),
       );
+    });
+
+    it('sends the unlock template and pre-sets unlock state when a pending unlock exists', async () => {
+      deps.contactUnlock.getByApplicationId.mockResolvedValue({
+        id: 'attempt-1',
+        expires_at: new Date(Date.now() + 3600_000),
+      });
+      await service.sendApplicationAcceptedToWorker('app-1');
+      expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
+        '+24200000001',
+        'HXee503e4fe516ce55d67b22ca6e4ef178',
+        expect.objectContaining({ '2': expect.any(String) }),
+      );
+      expect(deps.botState.setIfFlowAbsentOrMatches).toHaveBeenCalled();
     });
 
     it('does nothing when worker has no phone', async () => {
@@ -187,11 +210,12 @@ describe('BotNotificationService', () => {
   });
 
   describe('sendApplicationRejectedToWorker()', () => {
-    it('sends rejection message to worker', async () => {
+    it('sends the rejection template to worker', async () => {
       await service.sendApplicationRejectedToWorker('app-1');
-      expect(deps.whatsApp.sendTextMessage).toHaveBeenCalledWith(
+      expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+24200000001',
-        expect.any(String),
+        'HXba7e8c10a2a8f9485dd4cd20288807b8',
+        {},
       );
     });
 
@@ -206,17 +230,26 @@ describe('BotNotificationService', () => {
   });
 
   describe('sendCancellationToEmployer()', () => {
-    it('sends cancellation message to employer', async () => {
+    it('sends the cancellation template to employer', async () => {
       await service.sendCancellationToEmployer('app-1', 'Malade', false);
-      expect(deps.whatsApp.sendTextMessage).toHaveBeenCalledWith(
+      expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+24200000002',
-        expect.any(String),
+        'HXc6a4943330c840a93b1d85849a169fcd',
+        expect.objectContaining({ '4': 'Malade' }),
       );
     });
 
-    it('works with null reason', async () => {
+    it('falls back to a default reason and a no-penalty status when applicable', async () => {
+      await service.sendCancellationToEmployer('app-1', null, false);
+      const vars = deps.whatsApp.sendTemplateMessage.mock.calls[0][2];
+      expect(vars['4']).toBe('Aucune raison donnée');
+      expect(vars['5']).toContain('Aucune pénalité');
+    });
+
+    it('sets a penalty status when the cancellation was late', async () => {
       await service.sendCancellationToEmployer('app-1', null, true);
-      expect(deps.whatsApp.sendTextMessage).toHaveBeenCalled();
+      const vars = deps.whatsApp.sendTemplateMessage.mock.calls[0][2];
+      expect(vars['5']).toContain('pénalité');
     });
 
     it('swallows errors gracefully', async () => {
@@ -230,11 +263,12 @@ describe('BotNotificationService', () => {
   });
 
   describe('sendJobCompletedToWorker()', () => {
-    it('sends job completed message to worker', async () => {
+    it('sends the job-completed template to worker', async () => {
       await service.sendJobCompletedToWorker('app-1');
-      expect(deps.whatsApp.sendTextMessage).toHaveBeenCalledWith(
+      expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+24200000001',
-        expect.any(String),
+        'HX2956d3638cf58ed03aaf638a2f67d03a',
+        expect.objectContaining({ '1': expect.any(String) }),
       );
     });
 
@@ -249,11 +283,12 @@ describe('BotNotificationService', () => {
   });
 
   describe('sendJobCancelledByEmployerToWorker()', () => {
-    it('sends job cancelled message to worker', async () => {
+    it('sends the job-cancelled template to worker', async () => {
       await service.sendJobCancelledByEmployerToWorker('app-1');
-      expect(deps.whatsApp.sendTextMessage).toHaveBeenCalledWith(
+      expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+24200000001',
-        expect.any(String),
+        'HX58f4367495ec70f8a20be8b5045d99b9',
+        expect.objectContaining({ '1': expect.any(String) }),
       );
     });
 
@@ -271,7 +306,7 @@ describe('BotNotificationService', () => {
     it('does nothing when attempt not found', async () => {
       deps.prisma.contactUnlockAttempt.findUnique.mockResolvedValue(null);
       await service.sendContactUnlockedNotification('attempt-1');
-      expect(deps.whatsApp.sendTextMessage).not.toHaveBeenCalled();
+      expect(deps.whatsApp.sendTemplateMessage).not.toHaveBeenCalled();
     });
 
     it('sends notifications to both parties when found', async () => {
@@ -294,7 +329,7 @@ describe('BotNotificationService', () => {
           email: 'bob@test.com',
         }); // worker
       await service.sendContactUnlockedNotification('attempt-1');
-      expect(deps.whatsApp.sendTextMessage).toHaveBeenCalledTimes(2);
+      expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalledTimes(2);
     });
 
     it('skips notifying skipNotifyProfileId', async () => {
@@ -319,7 +354,7 @@ describe('BotNotificationService', () => {
       await service.sendContactUnlockedNotification('attempt-1', {
         skipNotifyProfileId: 'emp-1',
       });
-      expect(deps.whatsApp.sendTextMessage).toHaveBeenCalledTimes(1); // only worker notified
+      expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalledTimes(1); // only worker notified
     });
   });
 
@@ -330,7 +365,7 @@ describe('BotNotificationService', () => {
         'profile-1',
         500,
       );
-      expect(deps.whatsApp.sendTextMessage).not.toHaveBeenCalled();
+      expect(deps.whatsApp.sendTemplateMessage).not.toHaveBeenCalled();
     });
 
     it('sends message when profile has phone', async () => {
@@ -339,9 +374,10 @@ describe('BotNotificationService', () => {
         'profile-1',
         500,
       );
-      expect(deps.whatsApp.sendTextMessage).toHaveBeenCalledWith(
+      expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+242001',
-        expect.any(String),
+        'HX6b46effc11d4b98b5c7ca6665fff7f53',
+        { '1': '500' },
       );
     });
   });
@@ -363,7 +399,7 @@ describe('BotNotificationService', () => {
         findUnique: jest.fn().mockResolvedValue(null),
       };
       await service.sendRecommendedJobNotification('worker-1', 'jo-1');
-      expect(deps.whatsApp.sendTextMessage).not.toHaveBeenCalled();
+      expect(deps.whatsApp.sendTemplateMessage).not.toHaveBeenCalled();
     });
 
     it('sends message when profile and offer found', async () => {
@@ -383,9 +419,10 @@ describe('BotNotificationService', () => {
         }),
       };
       await service.sendRecommendedJobNotification('worker-1', 'jo-1');
-      expect(deps.whatsApp.sendTextMessage).toHaveBeenCalledWith(
+      expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+242001',
-        expect.stringContaining('Plombier'),
+        expect.any(String),
+        expect.objectContaining({ '2': 'Plombier' }),
       );
     });
   });
@@ -401,9 +438,10 @@ describe('BotNotificationService', () => {
         rateeLabel: 'Alice',
         jobTitle: 'Plombier',
       });
-      expect(deps.whatsApp.sendTextMessage).toHaveBeenCalledWith(
+      expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+242001',
-        expect.stringContaining('Plombier'),
+        'HX9e7f9a2ff6a38ad0952faf72640f4db6',
+        { '1': 'Plombier', '2': 'Alice' },
       );
     });
 
@@ -417,7 +455,7 @@ describe('BotNotificationService', () => {
         rateeLabel: 'Alice',
         jobTitle: 'Plombier',
       });
-      expect(deps.whatsApp.sendTextMessage).not.toHaveBeenCalled();
+      expect(deps.whatsApp.sendTemplateMessage).not.toHaveBeenCalled();
     });
   });
 });

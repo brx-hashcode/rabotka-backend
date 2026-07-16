@@ -218,7 +218,11 @@ export async function runApplyJobFlow(
         offer,
       );
     }
-    if (normalized === '2' || normalized === 'non') {
+    if (
+      normalized === '2' ||
+      normalized === 'non' ||
+      normalized === 'ignorer'
+    ) {
       return { reply: [menuMessage(profile.profile_type)], clearState: true };
     }
     return {

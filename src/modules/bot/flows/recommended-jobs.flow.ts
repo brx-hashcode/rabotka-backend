@@ -1,6 +1,12 @@
 import type { BotProfile, BotState } from '../types/bot-state.types';
 import { FLOW_IDS, CMD_MENU } from '../bot.constants';
 import { getApplyJobInitialState } from './apply-job.flow';
+import {
+  type CarouselCard,
+  carouselReply,
+  composeCardBody,
+  JOB_PLACEHOLDER_KEY,
+} from '../../../common/constants/whatsapp-carousel';
 import type { JobOfferService } from '../../job-offer/job-offer.service';
 import type { InterestSignalService } from '../../interest-graph/interest-signal.service';
 import type { SystemConfigService } from '../../system-config/system-config.service';
@@ -126,6 +132,28 @@ function buildDetailState(
   };
 }
 
+// Card body must be a single line — WhatsApp carousel cards reject line
+// breaks — so fields get inline labels joined by " • " instead of real
+// bullets. Address is unbounded free text (job title goes in the card's own
+// `title` field, not here), so it's ordered last: composeCardBody truncates
+// whichever field overflows the budget, and anything after it is dropped —
+// putting the bounded fields (amount, date) first guarantees they're never
+// the ones silently cut off.
+function jobCardBody(offer: OfferListItem): string {
+  const date = offer.scheduled_at.toLocaleDateString('fr-FR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+  return composeCardBody([
+    { label: 'Montant', value: formatAmount(offer.amount, offer.payment_flow) },
+    { label: 'Date', value: date },
+    { label: 'Adresse', value: offer.address },
+  ]);
+}
+
 function buildPagedListReply(
   offers: OfferListItem[],
   page: number,
@@ -136,6 +164,25 @@ function buildPagedListReply(
     safePage * PAGE_SIZE,
     (safePage + 1) * PAGE_SIZE,
   );
+
+  // Native WhatsApp carousel (one "Sélectionner" button per card, positional
+  // id matches the numeric selection this list step already parses). Falls
+  // back to the text list when the count is outside 2..5 (Meta requires at
+  // least 2 cards per carousel).
+  const cards: CarouselCard[] = pageOffers.map((o) => ({
+    title: o.title,
+    image: JOB_PLACEHOLDER_KEY,
+    body: jobCardBody(o),
+  }));
+  const carousel = carouselReply('jobs', cards);
+  if (carousel) {
+    const nav =
+      totalPages > 1
+        ? `📄 Page ${safePage + 1}/${totalPages} — *S* suivante · *P* précédente · *Menu* pour revenir.`
+        : 'Touchez *Sélectionner* sur une offre, ou *Menu* pour revenir.';
+    return { reply: [carousel, nav], page: safePage };
+  }
+
   return {
     reply: [formatRecommendedList(pageOffers, safePage, totalPages)],
     page: safePage,
