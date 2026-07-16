@@ -183,6 +183,14 @@ describe('runApplyJobFlow()', () => {
       expect(result.reply[0]).toContain('pas postulé');
     });
 
+    it('ignores on notification quick-reply button title "Ignorer" (step 0)', async () => {
+      const ctx = makeCtx();
+      const state = makeState('offer-1', 0);
+      const result = await runApplyJobFlow(state, 'Ignorer', workerProfile, ctx);
+      expect(result.clearState).toBe(true);
+      expect(ctx.applicationService.create).not.toHaveBeenCalled();
+    });
+
     it('on "2" restores list-offers detail when returnToListOffers is set', async () => {
       const ctx = makeCtx();
       const state: BotState = {

@@ -13,7 +13,7 @@ export function formatKycValidatedMessage(
   ].join('\n');
 }
 
-function formatDate(d: Date): string {
+export function formatDate(d: Date): string {
   return d.toLocaleDateString('fr-FR', {
     day: '2-digit',
     month: '2-digit',

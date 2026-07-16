@@ -61,6 +61,36 @@ export class WhatsAppService {
     return sent;
   }
 
+  async sendTemplateMessage(
+    phone: string,
+    contentSid: string,
+    variables?: Record<string, string>,
+    profileId?: string,
+    body?: string,
+  ): Promise<boolean> {
+    const sid = await this.twilioService.sendWhatsAppTemplate(
+      phone,
+      contentSid,
+      variables,
+    );
+    const sent = sid != null;
+
+    if (sent && profileId && body) {
+      await this.saveMessage(
+        profileId,
+        MessageDirection.OUTBOUND,
+        body,
+      ).catch((err) =>
+        this.logger.warn(
+          `Failed to save outbound message for ${profileId}:`,
+          err,
+        ),
+      );
+    }
+
+    return sent;
+  }
+
   async sendMediaMessage(
     phone: string,
     mediaUrl: string,
