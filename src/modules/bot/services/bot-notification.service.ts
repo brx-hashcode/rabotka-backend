@@ -6,7 +6,7 @@ import { BotInboxService } from './bot-inbox.service';
 import { getAcceptRefuseInitialState } from '../flows/accept-refuse-candidate.flow';
 import { getUnlockContactInitialState } from '../flows/unlock-contact.flow';
 import { getRateAssignmentInitialState } from '../flows/rate-assignment.flow';
-import { FLOW_IDS } from '../bot.constants';
+import { FLOW_IDS, EMPLOYER_MENU_OPTIONS } from '../bot.constants';
 import { getApplyJobNotificationState } from '../flows/apply-job.flow';
 import { formatAmount } from '../messages/offers.messages';
 import { WHATSAPP_TEMPLATES } from '../../../common/constants/whatsapp-templates';
@@ -115,7 +115,7 @@ export class BotNotificationService {
         const pendingCount = await this.botInbox.count(employerProfileId);
         const inboxNotice =
           `*${pendingCount} candidature(s) en attente* dans votre boîte.` +
-          `\nTerminez votre action en cours, puis tapez *3* (Candidatures reçues) pour les traiter.`;
+          `\nTerminez votre action en cours, puis tapez *${EMPLOYER_MENU_OPTIONS.CANDIDATURES_RECEIVED}* (Candidatures reçues) pour les traiter.`;
         await this.whatsApp.sendTextMessage(
           app.job_offer.employer.phone,
           inboxNotice,

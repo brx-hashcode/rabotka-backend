@@ -157,8 +157,13 @@ describe('BotRouterService', () => {
       expect(result).toEqual({ type: 'command', commandId: 'credit_wallet' });
     });
 
-    it('routes worker "7" to help', () => {
+    it('routes worker "7" to create_claim', () => {
       const result = service.route('7', workerProfile, null);
+      expect(result).toEqual({ type: 'command', commandId: 'create_claim' });
+    });
+
+    it('routes worker "8" to help', () => {
+      const result = service.route('8', workerProfile, null);
       expect(result).toEqual({ type: 'command', commandId: 'help' });
     });
 
@@ -180,9 +185,25 @@ describe('BotRouterService', () => {
       expect(result).toEqual({ type: 'command', commandId: 'credit_wallet' });
     });
 
-    it('routes employer "8" to help', () => {
+    it('routes employer "8" to create_claim', () => {
       const result = service.route('8', employerProfile, null);
+      expect(result).toEqual({ type: 'command', commandId: 'create_claim' });
+    });
+
+    it('routes employer "9" to help', () => {
+      const result = service.route('9', employerProfile, null);
       expect(result).toEqual({ type: 'command', commandId: 'help' });
+    });
+
+    it('routes the "réclamation" alias to create_claim for both profiles', () => {
+      expect(service.route('réclamation', workerProfile, null)).toEqual({
+        type: 'command',
+        commandId: 'create_claim',
+      });
+      expect(service.route('reclamation', employerProfile, null)).toEqual({
+        type: 'command',
+        commandId: 'create_claim',
+      });
     });
 
     it('text alias "historique" still routes to penalty_history', () => {
