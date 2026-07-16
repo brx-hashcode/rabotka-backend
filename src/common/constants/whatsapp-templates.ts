@@ -27,6 +27,21 @@ export const WHATSAPP_TEMPLATES = {
     contentSid: 'HX9d9725488bc9dc2c6e4340dc5a000ca1',
     variables: () => ({}),
   } satisfies WhatsAppTemplate<[]>,
+
+  // "Mon profil" — replaces rendering profile stats in chat. URL button opens
+  // /login?redirect=/profile inside WhatsApp's in-app browser. No variables.
+  viewProfile: {
+    contentSid: 'HX8ab587d99e769edaded28d5dd8247af5',
+    variables: () => ({}),
+  } satisfies WhatsAppTemplate<[]>,
+
+  // Sent after onboarding completes (POST /profile). Business-initiated (the
+  // user filled a web form, so there's no open 24h session) — must be a
+  // template. {{1}} = firstName.
+  profileCreated: {
+    contentSid: 'HXa0d2cd880e5b4a035912c315fdd1b586',
+    variables: (firstName: string) => ({ '1': firstName }),
+  } satisfies WhatsAppTemplate<[firstName: string]>,
   
   // KYC-approved message with a "Commencer" quick-reply button (payload
   // "menu"). Used by kyc.service.ts and sendKycValidatedMessage.
