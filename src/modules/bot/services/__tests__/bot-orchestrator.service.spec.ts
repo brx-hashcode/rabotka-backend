@@ -19,7 +19,6 @@ import { InterestRecommendationService } from '../../../interest-graph/interest-
 import { InvoiceService } from '../../../invoice/invoice.service';
 import { QueueService } from '../../../../common/services/queue/queue.service';
 import { ConfigService } from '@nestjs/config';
-import { WhatsAppMediaMirrorService } from '../../../../common/services/whatsapp-media/whatsapp-media-mirror.service';
 
 const PROFILE_ID = 'profile-uuid-1';
 const PHONE = '+242000000';
@@ -233,16 +232,6 @@ describe('BotOrchestratorService', () => {
         {
           provide: ConfigService,
           useValue: { get: jest.fn().mockReturnValue('https://rabotka.work') },
-        },
-        {
-          provide: WhatsAppMediaMirrorService,
-          useValue: {
-            resolveMediaKey: jest
-              .fn()
-              .mockImplementation((url: string | null, placeholder: string) =>
-                Promise.resolve(url ?? placeholder),
-              ),
-          },
         },
       ],
     }).compile();
@@ -938,7 +927,7 @@ describe('BotOrchestratorService', () => {
       const result = await service.handle(PROFILE_ID, PHONE, 'recommandations');
       // Must be the carousel template, not the plain-text list the entry
       // point used to build itself.
-      expect(result[0]).toMatch(/^\[TPL:HX8d2bb43f677a9ff8a938c2891cfd304b\]/);
+      expect(result[0]).toMatch(/^\[TPL:HX97bbc0e84a73f3121c67e9e282b32739\]/);
     });
 
     it('handles "recommended_jobs" command with offers but all filtered out', async () => {
@@ -1091,7 +1080,7 @@ describe('BotOrchestratorService', () => {
       const result = await service.handle('employer-uuid-1', PHONE, 'profils');
       // Must be the carousel template, not the plain-text list the entry
       // point used to build itself.
-      expect(result[0]).toMatch(/^\[TPL:HX4b4efe03a3d7946ba1ea73a727bcac8c\]/);
+      expect(result[0]).toMatch(/^\[TPL:HXd5081b4e58a999a71a79d04ec12886d7\]/);
       expect(result[0]).not.toContain('*Travailleurs recommandés*');
     });
 

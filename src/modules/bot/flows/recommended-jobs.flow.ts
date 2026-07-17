@@ -3,9 +3,10 @@ import { FLOW_IDS, CMD_MENU } from '../bot.constants';
 import { getApplyJobInitialState } from './apply-job.flow';
 import {
   type CarouselCard,
+  cardBodyBudget,
   carouselReply,
   composeCardBody,
-  JOB_PLACEHOLDER_KEY,
+  jobImageUrl,
 } from '../../../common/constants/whatsapp-carousel';
 import type { JobOfferService } from '../../job-offer/job-offer.service';
 import type { InterestSignalService } from '../../interest-graph/interest-signal.service';
@@ -150,11 +151,17 @@ function jobCardBody(offer: OfferListItem): string {
     hour: '2-digit',
     minute: '2-digit',
   });
-  return composeCardBody([
-    { label: 'Montant', value: formatAmount(offer.amount, offer.payment_flow) },
-    { label: 'Date', value: date },
-    { label: 'Adresse', value: offer.address },
-  ]);
+  return composeCardBody(
+    [
+      {
+        label: 'Montant',
+        value: formatAmount(offer.amount, offer.payment_flow),
+      },
+      { label: 'Date', value: date },
+      { label: 'Adresse', value: offer.address },
+    ],
+    cardBodyBudget('jobs', offer.title),
+  );
 }
 
 /**
@@ -183,7 +190,7 @@ export function buildPagedListReply(
   // least 2 cards per carousel).
   const cards: CarouselCard[] = pageOffers.map((o) => ({
     title: o.title,
-    image: JOB_PLACEHOLDER_KEY,
+    image: jobImageUrl(),
     body: jobCardBody(o),
   }));
   const carousel = carouselReply('jobs', cards);
