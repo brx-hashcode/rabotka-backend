@@ -151,13 +151,13 @@ export const WHATSAPP_TEMPLATES = {
   >,
 
   jobsTop5Carousel: {
-    contentSid: 'HX9363237405e438383ddaad39f38ab937',
-    variables: (cards: CarouselCard[]) => carouselVariables(cards),
+    contentSid: 'HX0edfe2c17dc69fc2a253694c2eefd9c7',
+    variables: (cards: CarouselCard[]) => carouselVariables('jobs', cards),
   } satisfies WhatsAppTemplate<[cards: CarouselCard[]]>,
 
   profilesTop5Carousel: {
-    contentSid: 'HXc14d753679bb10bcd3bcc87c21ede123',
-    variables: (cards: CarouselCard[]) => carouselVariables(cards),
+    contentSid: 'HXa7692e79775cb42143625f5b390e8041',
+    variables: (cards: CarouselCard[]) => carouselVariables('profiles', cards),
   } satisfies WhatsAppTemplate<[cards: CarouselCard[]]>,
 
   newApplication: {
