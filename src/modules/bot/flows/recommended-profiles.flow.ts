@@ -13,9 +13,9 @@ import { menuMessage } from '../messages/menu.messages';
 import { formatContactUnlockedMessage } from '../messages/contact-unlock.messages';
 import {
   type CarouselCard,
+  cardBodyBudget,
   carouselReply,
   composeCardBody,
-  PROFILE_PLACEHOLDER_KEY,
   profileImageUrl,
 } from '../../../common/constants/whatsapp-carousel';
 import type { PrismaService } from '../../../common/services/prisma/prisma.service';
@@ -30,7 +30,6 @@ import {
 import type { BotNotificationService } from '../services/bot-notification.service';
 import type { InterestSignalService } from '../../interest-graph/interest-signal.service';
 import type { InvoiceService } from '../../invoice/invoice.service';
-import type { WhatsAppMediaMirrorService } from '../../../common/services/whatsapp-media/whatsapp-media-mirror.service';
 
 export type RecommendedProfilesContext = {
   prisma: PrismaService;
@@ -42,7 +41,6 @@ export type RecommendedProfilesContext = {
   employerProfileId: string;
   interestSignalService: InterestSignalService;
   invoiceService: InvoiceService;
-  mediaMirror: WhatsAppMediaMirrorService;
 };
 
 export type FlowResult = {
@@ -478,11 +476,10 @@ export const WORKER_LIST_SELECT = {
  * ordered last: composeCardBody truncates whichever field overflows, and
  * putting the bounded scores first guarantees they're never the ones cut off.
  */
-export async function buildWorkerListReply(
+export function buildWorkerListReply(
   orderedWorkers: WorkerListItem[],
   workerScores: Record<string, number>,
-  mediaMirror: WhatsAppMediaMirrorService,
-): Promise<string> {
+): string {
   const lines = [
     '*Travailleurs recommandés*',
     '',
@@ -494,29 +491,21 @@ export async function buildWorkerListReply(
     '*Tapez le numéro pour voir le profil complet ou 7 pour le menu.*',
   ];
 
-  const cards: CarouselCard[] = await Promise.all(
-    orderedWorkers.map(async (w) => {
-      const name = `${w.first_name} ${w.last_name}`.trim();
-      const reliability = w.reliability_score ?? 100;
-      const aiScore = Math.round((workerScores[w.id] ?? 0) * 100);
-      const desc = w.description ?? '';
-      const body = composeCardBody(
-        [
-          { label: 'Fiabilité', value: `${reliability}/100` },
-          aiScore > 0 ? { label: 'Score IA', value: `${aiScore}%` } : null,
-          desc ? { label: 'À propos', value: desc } : null,
-        ].filter((f): f is { label: string; value: string } => f !== null),
-      );
-      return {
-        title: name,
-        image: await mediaMirror.resolveMediaKey(
-          w.avatar_url,
-          PROFILE_PLACEHOLDER_KEY,
-        ),
-        body,
-      };
-    }),
-  );
+  const cards: CarouselCard[] = orderedWorkers.map((w) => {
+    const name = `${w.first_name} ${w.last_name}`.trim();
+    const reliability = w.reliability_score ?? 100;
+    const aiScore = Math.round((workerScores[w.id] ?? 0) * 100);
+    const desc = w.description ?? '';
+    const body = composeCardBody(
+      [
+        { label: 'Fiabilité', value: `${reliability}/100` },
+        aiScore > 0 ? { label: 'Score IA', value: `${aiScore}%` } : null,
+        desc ? { label: 'À propos', value: desc } : null,
+      ].filter((f): f is { label: string; value: string } => f !== null),
+      cardBodyBudget('profiles', name),
+    );
+    return { title: name, image: profileImageUrl(w.avatar_url), body };
+  });
 
   return carouselReply('profiles', cards) ?? lines.join('\n');
 }
@@ -548,7 +537,6 @@ async function showList(
   const reply = await buildWorkerListReply(
     orderedWorkers,
     workerScores,
-    ctx.mediaMirror,
   );
 
   return {
