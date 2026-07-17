@@ -17,7 +17,6 @@ export function profileImageUrl(avatarUrl: string | null | undefined): string {
   );
 }
 
-
 /**
  * Full public URL of a job card's header image. Jobs have no per-offer photo,
  * so every card uses the same placeholder.
@@ -59,7 +58,6 @@ export type CarouselCard = {
   body: string;
 };
 
-
 /**
  * Meta's hard limit per carousel card: title and body TOGETHER may not exceed
  * 160 characters. Exceeding it fails template approval with subCode 2388337
@@ -91,8 +89,29 @@ export const CARD_BODY_PREFIX: Record<CarouselEntity, string> = {
   jobs: 'Mission recommandée pour vous : ',
 };
 
+/**
+ * Make a free-text value safe to inject into a WhatsApp template variable.
+ *
+ * Values come from user input (a worker's description, a job's title/address),
+ * and WhatsApp rejects the whole send with Twilio 63013 ("Channel policy
+ * violation") when a variable contains a newline, a run of 4+ whitespace
+ * characters, or control characters — carousel card bodies are single-line and
+ * cannot carry any of these. Collapsing every whitespace run to one space and
+ * stripping C0 control chars makes those triggers impossible. Emojis are left
+ * intact: WhatsApp body text supports them.
+ */
+export function sanitizeTemplateValue(text: string): string {
+  return (
+    text
+      // eslint-disable-next-line no-control-regex
+      .replace(/[\x00-\x1F\x7F]+/g, ' ') // newlines/tabs/control chars -> space
+      .replace(/\s+/g, ' ') // collapse any remaining whitespace run
+      .trim()
+  );
+}
+
 export function truncateCardTitle(text: string): string {
-  const t = text.trim();
+  const t = sanitizeTemplateValue(text);
   return t.length > CARD_TITLE_MAX ? `${t.slice(0, CARD_TITLE_MAX - 1)}…` : t;
 }
 
@@ -108,7 +127,7 @@ export function cardBodyBudget(entity: CarouselEntity, title: string): number {
 }
 
 export function truncateCardBody(text: string, max: number): string {
-  const t = text.trim();
+  const t = sanitizeTemplateValue(text);
   return t.length > max ? `${t.slice(0, max - 1)}…` : t;
 }
 
@@ -122,8 +141,12 @@ export function composeCardBody(
 ): string {
   const SEP = ' • ';
   let result = '';
-  for (const { label, value } of fields) {
-    const piece = `${label} : ${value.trim()}`;
+  for (const { label, value: rawValue } of fields) {
+    // Sanitize per field so the length accounting below counts the actual
+    // characters that will be sent, and so newlines/whitespace runs from
+    // free-text values can never reach the template variable (Twilio 63013).
+    const value = sanitizeTemplateValue(rawValue);
+    const piece = `${label} : ${value}`;
     const candidate = result ? `${result}${SEP}${piece}` : piece;
     if (candidate.length <= max) {
       result = candidate;
@@ -132,13 +155,12 @@ export function composeCardBody(
     const prefix = result ? `${result}${SEP}${label} : ` : `${label} : `;
     const remaining = max - prefix.length;
     if (remaining >= 4) {
-      result = `${prefix}${value.trim().slice(0, remaining - 1)}…`;
+      result = `${prefix}${value.slice(0, remaining - 1)}…`;
     }
     break;
   }
   return result;
 }
-
 
 /**
  * Positional variables for a carousel send: per card, title / image / body.
@@ -160,7 +182,6 @@ export function carouselVariables(
   });
   return vars;
 }
-
 
 export function carouselReply(
   entity: CarouselEntity,
