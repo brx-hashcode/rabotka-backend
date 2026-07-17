@@ -17,7 +17,6 @@ import { BotDraftService } from './bot-draft.service';
 import { handleMenuCommand } from '../commands/menu.command';
 import { handleHelpCommand } from '../commands/help.command';
 import { SystemConfigService } from '../../system-config/system-config.service';
-import { WhatsAppMediaMirrorService } from '../../../common/services/whatsapp-media/whatsapp-media-mirror.service';
 import { WHATSAPP_TEMPLATES } from '../../../common/constants/whatsapp-templates';
 import { templateReply } from '../../../common/constants/whatsapp-carousel';
 import {
@@ -183,7 +182,6 @@ export class BotOrchestratorService {
     private readonly invoiceService: InvoiceService,
     private readonly queueService: QueueService,
     private readonly configService: ConfigService,
-    private readonly mediaMirror: WhatsAppMediaMirrorService,
   ) {}
 
   async handle(
@@ -691,7 +689,6 @@ export class BotOrchestratorService {
       walletService: this.walletService,
       interestSignalService: this.interestSignalService,
       invoiceService: this.invoiceService,
-      mediaMirror: this.mediaMirror,
     };
   }
 
@@ -757,8 +754,7 @@ export class BotOrchestratorService {
           employerProfileId: profile.id,
           interestSignalService: this.interestSignalService,
           invoiceService: this.invoiceService,
-          mediaMirror: this.mediaMirror,
-        }),
+            }),
       [FLOW_IDS.RATE_ASSIGNMENT]: () =>
         runRateAssignmentFlow(state, input, profile, {
           prisma: this.prisma,
@@ -1352,7 +1348,7 @@ export class BotOrchestratorService {
     // Same renderer as the flow's list step (carousel, text fallback for
     // counts outside 2..5) — this entry point must not render its own list.
     return [
-      await buildWorkerListReply(ordered, workerScores, this.mediaMirror),
+      buildWorkerListReply(ordered, workerScores),
     ];
   }
 
