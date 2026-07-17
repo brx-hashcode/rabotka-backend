@@ -906,6 +906,41 @@ describe('BotOrchestratorService', () => {
       expect(result.length).toBeGreaterThan(0);
     });
 
+    // Regression: the entry-point command used to render its OWN text list,
+    // so the carousel only ever appeared on later flow interactions.
+    it('renders the 2-card carousel (not a text list) for two recommended offers', async () => {
+      deps.router.route.mockReturnValue({
+        type: 'command',
+        commandId: 'recommended_jobs',
+      });
+      deps.interestRecommendationService.recommend.mockResolvedValue([
+        { jobId: 'jo-1', score: 0.9 },
+        { jobId: 'jo-2', score: 0.8 },
+      ]);
+      const offer = (id: string, title: string) => ({
+        id,
+        title,
+        description: 'Desc',
+        amount: 10000,
+        payment_flow: 'DAILY',
+        address: 'Brazzaville',
+        note: null,
+        scheduled_at: new Date(),
+        quantity: 1,
+        status: 'ACTIVE',
+        employer: { reliability_score: 90 },
+        _count: { applications: 0 },
+      });
+      deps.prisma.jobOffer.findMany.mockResolvedValue([
+        offer('jo-1', 'Job One'),
+        offer('jo-2', 'Job Two'),
+      ]);
+      const result = await service.handle(PROFILE_ID, PHONE, 'recommandations');
+      // Must be the carousel template, not the plain-text list the entry
+      // point used to build itself.
+      expect(result[0]).toMatch(/^\[TPL:HX8d2bb43f677a9ff8a938c2891cfd304b\]/);
+    });
+
     it('handles "recommended_jobs" command with offers but all filtered out', async () => {
       deps.router.route.mockReturnValue({
         type: 'command',
@@ -1021,6 +1056,43 @@ describe('BotOrchestratorService', () => {
       });
       const result = await service.handle('employer-uuid-1', PHONE, 'profils');
       expect(result[0]).toContain('qualifié');
+    });
+
+    // Regression: the entry-point command used to render its OWN text list,
+    // so the carousel only ever appeared on later flow interactions.
+    it('renders the 2-card carousel (not a text list) for two eligible workers', async () => {
+      deps.prisma.profile.findUnique.mockResolvedValue(mockEmployerProfile);
+      deps.router.route.mockReturnValue({
+        type: 'command',
+        commandId: 'recommended_profiles',
+      });
+      deps.prisma.jobOffer.findFirst.mockResolvedValue({ id: 'jo-1' });
+      const matchingService = (service as any).matchingService;
+      matchingService.findMatchingWorkersForJob.mockResolvedValue([
+        { id: 'w-1', score: 0.9 },
+        { id: 'w-2', score: 0.8 },
+      ]);
+      const worker = (id: string, name: string) => ({
+        id,
+        first_name: name,
+        last_name: 'Smith',
+        reliability_score: 90,
+        description: 'Expert worker',
+        avatar_url: null,
+      });
+      deps.prisma.profile.findMany = jest
+        .fn()
+        .mockResolvedValueOnce([{ id: 'w-1' }, { id: 'w-2' }]) // eligibleProfiles
+        .mockResolvedValueOnce([worker('w-1', 'Alice'), worker('w-2', 'Bob')]);
+      deps.systemConfig.getFees = jest.fn().mockResolvedValue({
+        reliabilityScoreMin: 50,
+        cancellationThresholdHours: 12,
+      });
+      const result = await service.handle('employer-uuid-1', PHONE, 'profils');
+      // Must be the carousel template, not the plain-text list the entry
+      // point used to build itself.
+      expect(result[0]).toMatch(/^\[TPL:HX4b4efe03a3d7946ba1ea73a727bcac8c\]/);
+      expect(result[0]).not.toContain('*Travailleurs recommandés*');
     });
 
     it('returns workers list when eligible workers found', async () => {

@@ -30,7 +30,10 @@ export type FlowResult = {
   clearState?: boolean;
 };
 
-const PAGE_SIZE = 3;
+// 5 = the max cards a WhatsApp carousel can hold (MAX_CARDS). Was 3, which
+// capped every page at a 3-card carousel and made the approved jobs_4 /
+// jobs_5 templates unreachable. Matches the recommended-profiles page size.
+const PAGE_SIZE = 5;
 type RecommendedStep = 'list' | 'detail';
 
 function toOfferListItem(o: {
@@ -154,7 +157,16 @@ function jobCardBody(offer: OfferListItem): string {
   ]);
 }
 
-function buildPagedListReply(
+/**
+ * Single source of truth for rendering a page of recommended offers: a native
+ * WhatsApp carousel, falling back to the text list when the count is outside
+ * 2..5 (Meta requires at least 2 cards).
+ *
+ * Exported because the orchestrator's entry-point command must render the
+ * first page with the SAME renderer — it previously built its own text list,
+ * so the carousel never showed on the initial menu selection.
+ */
+export function buildPagedListReply(
   offers: OfferListItem[],
   page: number,
 ): { reply: string[]; page: number } {
