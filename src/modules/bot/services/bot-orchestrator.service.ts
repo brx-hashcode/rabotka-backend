@@ -80,14 +80,14 @@ import {
 import {
   runRecommendedJobsFlow,
   getRecommendedJobsInitialState,
+  buildPagedListReply,
 } from '../flows/recommended-jobs.flow';
-import {
-  formatRecommendedList,
-  jobOfferToOfferListItem,
-} from '../messages/offers.messages';
+import { jobOfferToOfferListItem } from '../messages/offers.messages';
 import {
   runRecommendedProfilesFlow,
   getRecommendedProfilesInitialState,
+  buildWorkerListReply,
+  WORKER_LIST_SELECT,
 } from '../flows/recommended-profiles.flow';
 import {
   runRateAssignmentFlow,
@@ -1243,8 +1243,9 @@ export class BotOrchestratorService {
     const flowState = getRecommendedJobsInitialState(offerIds);
     await this.botState.set(profileId, flowState);
 
-    const totalPages = Math.ceil(offerItems.length / 3);
-    return [formatRecommendedList(offerItems.slice(0, 3), 0, totalPages)];
+    // Same renderer as the flow's list step (carousel, text fallback for
+    // counts outside 2..5) — this entry point must not render its own list.
+    return buildPagedListReply(offerItems, 0).reply;
   }
 
   private async handleRecommendedProfilesCommand(
@@ -1341,35 +1342,18 @@ export class BotOrchestratorService {
         verification_status: 'VERIFIED',
         reliability_score: { gte: reliabilityScoreMin },
       },
-      select: {
-        id: true,
-        first_name: true,
-        last_name: true,
-        reliability_score: true,
-        description: true,
-      },
+      select: WORKER_LIST_SELECT,
     });
     const workerMap = new Map(workers.map((w) => [w.id, w]));
     const ordered = pageIds
       .map((id) => workerMap.get(id))
       .filter(Boolean) as typeof workers;
 
-    const lines = [
-      '*Travailleurs recommandés*',
-      '',
-      ...ordered.flatMap((w, i) => {
-        const name = `${w.first_name} ${w.last_name}`.trim();
-        const aiScore = Math.round((workerScores[w.id] ?? 0) * 100);
-        return [
-          `${i + 1}- *${name}*`,
-          `    • Fiabilité : ${w.reliability_score ?? 100}/100`,
-          `    • Score IA : ${aiScore}%`,
-          '',
-        ];
-      }),
-      `Tapez le numéro pour voir le profil complet ou *Menu* pour revenir au menu.`,
+    // Same renderer as the flow's list step (carousel, text fallback for
+    // counts outside 2..5) — this entry point must not render its own list.
+    return [
+      await buildWorkerListReply(ordered, workerScores, this.mediaMirror),
     ];
-    return [lines.join('\n')];
   }
 
   private async loadProfile(profileId: string) {

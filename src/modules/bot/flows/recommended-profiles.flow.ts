@@ -439,34 +439,50 @@ async function processWalletPayment(
   }
 }
 
-async function showList(
-  workerIds: string[],
+/** Fields a worker row must carry to be rendered in the recommended list. */
+export type WorkerListItem = {
+  id: string;
+  first_name: string;
+  last_name: string;
+  reliability_score: number | null;
+  description: string | null;
+  avatar_url: string | null;
+};
+
+/** Prisma `select` for WorkerListItem — keep both call sites in sync. */
+export const WORKER_LIST_SELECT = {
+  id: true,
+  first_name: true,
+  last_name: true,
+  reliability_score: true,
+  description: true,
+  avatar_url: true,
+} as const;
+
+/**
+ * Single source of truth for rendering a page of recommended workers: a native
+ * WhatsApp carousel (one "Sélectionner" button per card, positional id matches
+ * the numeric selection the detail step parses), falling back to the text list
+ * when the count is outside 2..5 (Meta requires at least 2 cards).
+ *
+ * Used by BOTH the flow's list step and the orchestrator's entry-point command
+ * — they previously rendered the list separately, so the entry point silently
+ * kept showing text after the carousel shipped.
+ *
+ * Card body must be a single line — carousel cards reject line breaks — so
+ * fields get inline labels joined by " • " instead of real bullets. Mirrors the
+ * same two metrics formatWorkerCard() shows in the text fallback:
+ * reliability_score ("Fiabilité") and the computed match score ("Score IA") —
+ * two distinct fields, not one number under two labels. Description is
+ * unbounded free text (the name lives in the card's own `title`), so it's
+ * ordered last: composeCardBody truncates whichever field overflows, and
+ * putting the bounded scores first guarantees they're never the ones cut off.
+ */
+export async function buildWorkerListReply(
+  orderedWorkers: WorkerListItem[],
   workerScores: Record<string, number>,
-  state: BotState,
-  ctx: RecommendedProfilesContext,
-): Promise<FlowResult> {
-  const pageWorkerIds = workerIds.slice(0, 5);
-  const workers = await ctx.prisma.profile.findMany({
-    where: {
-      id: { in: pageWorkerIds },
-      status: 'ACTIVE',
-      verification_status: 'VERIFIED',
-    },
-    select: {
-      id: true,
-      first_name: true,
-      last_name: true,
-      reliability_score: true,
-      description: true,
-      avatar_url: true,
-    },
-  });
-
-  const workerMap = new Map(workers.map((w) => [w.id, w]));
-  const orderedWorkers = pageWorkerIds
-    .map((id) => workerMap.get(id))
-    .filter(Boolean) as typeof workers;
-
+  mediaMirror: WhatsAppMediaMirrorService,
+): Promise<string> {
   const lines = [
     '*Travailleurs recommandés*',
     '',
@@ -478,23 +494,6 @@ async function showList(
     '*Tapez le numéro pour voir le profil complet ou 7 pour le menu.*',
   ];
 
-  // Store the rendered order explicitly so selection always maps to the displayed item
-  const renderedWorkerIds = orderedWorkers.map((w) => w.id);
-
-  // Native WhatsApp carousel (one "Sélectionner" button per card, positional
-  // id matches the numeric selection the detail step already parses). Falls
-  // back to the text list when the count is outside 2..5 (Meta requires at
-  // least 2 cards per carousel).
-  // Card body must be a single line — WhatsApp carousel cards reject line
-  // breaks — so fields get inline labels joined by " • " instead of real
-  // bullets. Mirrors the same two metrics formatWorkerCard() shows in the
-  // text fallback above: reliability_score ("Fiabilité") and the computed
-  // match score ("Score IA") — these are two distinct fields, not the same
-  // number under two labels. Description is unbounded free text (the
-  // worker's name goes in the card's own `title` field, not here), so it's
-  // ordered last: composeCardBody truncates whichever field overflows the
-  // budget — putting the bounded fields (scores) first guarantees they're
-  // never the ones cut off.
   const cards: CarouselCard[] = await Promise.all(
     orderedWorkers.map(async (w) => {
       const name = `${w.first_name} ${w.last_name}`.trim();
@@ -510,7 +509,7 @@ async function showList(
       );
       return {
         title: name,
-        image: await ctx.mediaMirror.resolveMediaKey(
+        image: await mediaMirror.resolveMediaKey(
           w.avatar_url,
           PROFILE_PLACEHOLDER_KEY,
         ),
@@ -518,10 +517,42 @@ async function showList(
       };
     }),
   );
-  const carousel = carouselReply('profiles', cards);
+
+  return carouselReply('profiles', cards) ?? lines.join('\n');
+}
+
+async function showList(
+  workerIds: string[],
+  workerScores: Record<string, number>,
+  state: BotState,
+  ctx: RecommendedProfilesContext,
+): Promise<FlowResult> {
+  const pageWorkerIds = workerIds.slice(0, 5);
+  const workers = await ctx.prisma.profile.findMany({
+    where: {
+      id: { in: pageWorkerIds },
+      status: 'ACTIVE',
+      verification_status: 'VERIFIED',
+    },
+    select: WORKER_LIST_SELECT,
+  });
+
+  const workerMap = new Map(workers.map((w) => [w.id, w]));
+  const orderedWorkers = pageWorkerIds
+    .map((id) => workerMap.get(id))
+    .filter(Boolean) as typeof workers;
+
+  // Store the rendered order explicitly so selection always maps to the displayed item
+  const renderedWorkerIds = orderedWorkers.map((w) => w.id);
+
+  const reply = await buildWorkerListReply(
+    orderedWorkers,
+    workerScores,
+    ctx.mediaMirror,
+  );
 
   return {
-    reply: [carousel ?? lines.join('\n')],
+    reply: [reply],
     nextState: {
       ...state,
       step: 0,
