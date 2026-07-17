@@ -123,8 +123,19 @@ describe('runRecommendedJobsFlow', () => {
 
     it('navigates to next page with s', async () => {
       const ctx = makeCtx();
+      // Needs more than PAGE_SIZE (5) offers for a second page to exist.
       const result = await runRecommendedJobsFlow(
-        makeState('list', { page: 0 }),
+        makeState('list', {
+          page: 0,
+          offerIds: [
+            'offer-1',
+            'offer-2',
+            'offer-3',
+            'offer-4',
+            'offer-5',
+            'offer-6',
+          ],
+        }),
         's',
         profile,
         ctx,
