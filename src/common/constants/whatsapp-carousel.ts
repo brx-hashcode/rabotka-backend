@@ -59,13 +59,19 @@ export type CarouselCard = {
 };
 
 /**
- * Meta's hard limit per carousel card: title and body TOGETHER may not exceed
- * 160 characters. Exceeding it fails template approval with subCode 2388337
- * ("Carousel card at index N exceeds the limit of 160 characters") — note the
- * Twilio Content Builder shows 1024 for these fields, which is the Content API's
- * cross-channel limit and NOT what WhatsApp enforces.
+ * Max characters per carousel card (title + body combined).
+ *
+ * Meta's *approval*-time limit is 160 (subCode 2388337, "Carousel card at index
+ * N exceeds the limit of 160 characters"). But the *send*-time limit is
+ * stricter: a card whose title+body renders to 158–160 chars is rejected at
+ * send with Twilio 63013 ("Channel policy violation"), while 156 delivers
+ * (measured empirically — 158 failed, 156 delivered). So the runtime budget
+ * caps below 160 to stay inside the send limit; the extra margin also absorbs
+ * grapheme-vs-code-unit counting differences (e.g. emoji counted as 2 UTF-16
+ * units here but differently by WhatsApp). The Content Builder's 1024 is the
+ * Content API's cross-channel field limit and irrelevant to WhatsApp.
  */
-export const CARD_MAX = 160;
+export const CARD_MAX = 154;
 
 export const CARD_TITLE_MAX = 40;
 

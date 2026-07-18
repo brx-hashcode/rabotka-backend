@@ -163,7 +163,7 @@ describe('WhatsAppInboundProcessor', () => {
       );
     });
 
-    it('enqueues multiple replies as separate jobs', async () => {
+    it('bundles multiple replies into one ordered sequence job', async () => {
       mockConversationService.handleIncomingMessage.mockResolvedValue({
         replies: ['First', 'Second'],
         profileId: 'p-1',
@@ -172,7 +172,21 @@ describe('WhatsAppInboundProcessor', () => {
       const processor = makeProcessor();
       await processor.process({ data: { phone: '+242001', text: 'hi' } });
 
-      expect(mockQueueService.addJob).toHaveBeenCalledTimes(2);
+      // One job, not two — so the outbound worker (concurrency 3) can't race
+      // them out of order.
+      expect(mockQueueService.addJob).toHaveBeenCalledTimes(1);
+      expect(mockQueueService.addJob).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          type: 'sequence',
+          phone: '+242001',
+          profileId: 'p-1',
+          messages: [
+            { type: 'text', text: 'First' },
+            { type: 'text', text: 'Second' },
+          ],
+        }),
+      );
     });
   });
 });

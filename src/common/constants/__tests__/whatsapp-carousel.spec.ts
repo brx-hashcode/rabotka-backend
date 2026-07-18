@@ -144,8 +144,9 @@ describe('carouselVariables', () => {
 });
 
 describe('cardBodyBudget', () => {
-  // Meta rejects a card whose title + body exceed 160 chars (subCode 2388337),
-  // and the template's static prefix counts toward that.
+  // WhatsApp rejects an over-long card: 160 at approval (subCode 2388337) but
+  // stricter (~156) at send (63013). CARD_MAX caps below that, and the
+  // template's static prefix counts toward the total.
   it.each(['profiles', 'jobs'] as const)(
     'keeps rendered title + prefix + value within the %s card cap',
     (entity) => {
