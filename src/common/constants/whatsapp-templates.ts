@@ -35,6 +35,14 @@ export const WHATSAPP_TEMPLATES = {
     variables: () => ({}),
   } satisfies WhatsAppTemplate<[]>,
 
+  // "Mes candidatures" — replaces listing applications inline in chat. URL
+  // button opens /login?redirect=/profile (the worker's applications sheet
+  // lives on the profile page) inside WhatsApp's in-app browser. No variables.
+  viewApplications: {
+    contentSid: 'HX75d46b310dd534710f7254f23205a7eb',
+    variables: () => ({}),
+  } satisfies WhatsAppTemplate<[]>,
+
   // Sent after onboarding completes (POST /profile). Business-initiated (the
   // user filled a web form, so there's no open 24h session) — must be a
   // template. {{1}} = firstName.
