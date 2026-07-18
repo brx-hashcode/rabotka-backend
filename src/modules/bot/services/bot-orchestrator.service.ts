@@ -924,7 +924,7 @@ export class BotOrchestratorService {
       list_offers: () => this.handleListOffersCommand(profile, profileId),
 
       my_applications: () =>
-        this.handleMyApplicationsCommand(profile, profileId),
+        Promise.resolve(this.handleMyApplicationsCommand()),
 
       pending_payments: () =>
         this.handlePendingPaymentsCommand(botProfile, profileId),
@@ -1022,21 +1022,11 @@ export class BotOrchestratorService {
     return [message];
   }
 
-  private async handleMyApplicationsCommand(
-    profile: NonNullable<Awaited<ReturnType<typeof this.loadProfile>>>,
-    profileId: string,
-  ): Promise<string[]> {
-    const result = await this.commands.myApplications(profile);
-    if (result.applicationIds.length > 0) {
-      const myAppState = getMyApplicationsInitialState(
-        result.applicationIds,
-        'all',
-        result.page,
-        result.totalPages,
-      );
-      await this.botState.set(profileId, myAppState);
-    }
-    return [result.message];
+  private handleMyApplicationsCommand(): string[] {
+    // "Mes candidatures" now opens the profile webview (where the worker's
+    // applications sheet lives) via a URL-button template, instead of listing
+    // applications inline in chat — same pattern as viewProfile / createClaim.
+    return [templateReply(WHATSAPP_TEMPLATES.viewApplications.contentSid)];
   }
 
   private async handlePendingPaymentsCommand(
