@@ -444,17 +444,15 @@ describe('BotOrchestratorService', () => {
       expect(result[0]).toBe('No offers');
     });
 
-    it('handles "my_applications" command', async () => {
+    it('handles "my_applications" command with the applications webview template', async () => {
       deps.router.route.mockReturnValue({
         type: 'command',
         commandId: 'my_applications',
       });
-      deps.commands.myApplications.mockResolvedValue({
-        message: 'My apps',
-        applicationIds: ['a1'],
-      });
       const result = await service.handle(PROFILE_ID, PHONE, '2');
-      expect(result[0]).toBe('My apps');
+      // Opens the profile webview (applications sheet) instead of listing inline.
+      expect(result[0]).toMatch(/^\[TPL:HX75d46b310dd534710f7254f23205a7eb\]/);
+      expect(deps.botState.set).not.toHaveBeenCalled();
     });
 
     it('handles "candidatures_received" command', async () => {
