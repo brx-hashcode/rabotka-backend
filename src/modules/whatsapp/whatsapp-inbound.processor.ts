@@ -5,7 +5,10 @@ import {
   WHATSAPP_INBOUND_QUEUE,
   WHATSAPP_OUTBOUND_QUEUE,
 } from '../../common/services/queue/queue.module';
-import type { WhatsAppOutboundJobData } from './whatsapp-outbound.processor';
+import type {
+  WhatsAppOutboundJobData,
+  WhatsAppSend,
+} from './whatsapp-outbound.processor';
 
 export type WhatsAppInboundJobData = {
   phone: string;
@@ -47,17 +50,53 @@ export class WhatsAppInboundProcessor implements OnApplicationBootstrap {
       text,
     );
 
+    const jobs: WhatsAppOutboundJobData[] = [];
     for (const message of result.replies) {
       if (!message) continue;
       const outboundJob = parseReplyToJob(phone, result.profileId, message);
-      if (outboundJob) {
-        await this.queueService.addJob<WhatsAppOutboundJobData>(
-          WHATSAPP_OUTBOUND_QUEUE,
-          outboundJob,
-        );
-      }
+      if (outboundJob) jobs.push(outboundJob);
+    }
+
+    if (jobs.length === 1) {
+      await this.queueService.addJob<WhatsAppOutboundJobData>(
+        WHATSAPP_OUTBOUND_QUEUE,
+        jobs[0],
+      );
+    } else if (jobs.length > 1) {
+      // Deliver a multi-message reply as one ordered job. The outbound worker
+      // runs concurrency: 3, so separate jobs race and arrive inconsistently
+      // (e.g. a carousel's pagination line landing before or after the carousel
+      // from one page to the next). A sequence job is sent in array order.
+      await this.queueService.addJob<WhatsAppOutboundJobData>(
+        WHATSAPP_OUTBOUND_QUEUE,
+        {
+          phone,
+          profileId: result.profileId ?? undefined,
+          type: 'sequence',
+          messages: jobs.map(toSend),
+        },
+      );
     }
   }
+}
+
+/** Drop the per-message recipient fields — the sequence job carries them once. */
+function toSend(job: WhatsAppOutboundJobData): WhatsAppSend {
+  if (job.type === 'media') {
+    return { type: 'media', mediaUrl: job.mediaUrl, caption: job.caption };
+  }
+  if (job.type === 'template') {
+    return {
+      type: 'template',
+      contentSid: job.contentSid,
+      contentVariables: job.contentVariables,
+    };
+  }
+  if (job.type === 'text') {
+    return { type: 'text', text: job.text };
+  }
+  // A parsed reply is never itself a sequence; keep the type exhaustive.
+  throw new Error(`Unexpected reply job type: ${job.type}`);
 }
 
 function parseReplyToJob(
