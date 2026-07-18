@@ -55,6 +55,42 @@ describe('WhatsAppOutboundProcessor', () => {
     );
   });
 
+  it('process sends a sequence in array order', async () => {
+    const order: string[] = [];
+    mockWhatsApp.sendTemplateMessage.mockImplementationOnce(() => {
+      order.push('template');
+      return Promise.resolve('SM-tpl');
+    });
+    mockWhatsApp.sendTextMessage.mockImplementationOnce(() => {
+      order.push('text');
+      return Promise.resolve('SM-txt');
+    });
+
+    await processor.process({
+      data: {
+        type: 'sequence',
+        phone: '+242001',
+        profileId: 'p1',
+        messages: [
+          {
+            type: 'template',
+            contentSid: 'HXcarousel',
+            contentVariables: { '1': 'x' },
+          },
+          { type: 'text', text: 'Page 1/3' },
+        ],
+      },
+    });
+
+    // Carousel before its pagination line — the ordering the race used to break.
+    expect(order).toEqual(['template', 'text']);
+    expect(mockWhatsApp.sendTextMessage).toHaveBeenCalledWith(
+      '+242001',
+      'Page 1/3',
+      'p1',
+    );
+  });
+
   it('process throws when text message returns no SID', async () => {
     mockWhatsApp.sendTextMessage.mockResolvedValueOnce(null);
     await expect(

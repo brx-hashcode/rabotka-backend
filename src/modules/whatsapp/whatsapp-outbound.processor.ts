@@ -35,17 +35,26 @@ function chunkForWhatsApp(text: string): string[] {
   return chunks.map((c, i) => `(${i + 1}/${chunks.length})\n${c}`);
 }
 
-export type WhatsAppOutboundJobData = {
-  phone: string;
-  profileId?: string;
-} & (
+/** A single WhatsApp send, without recipient (carried by the enclosing job). */
+export type WhatsAppSend =
   | { type: 'text'; text: string }
   | { type: 'media'; mediaUrl: string; caption?: string }
   | {
       type: 'template';
       contentSid: string;
       contentVariables: Record<string, string>;
-    }
+    };
+
+export type WhatsAppOutboundJobData = {
+  phone: string;
+  profileId?: string;
+} & (
+  | WhatsAppSend
+  // An ordered batch delivered as ONE job: the worker runs concurrency: 3, so
+  // the messages of a single bot reply (e.g. a carousel + its pagination line)
+  // would otherwise race and arrive in inconsistent order. Sending them in a
+  // sequence job, awaited one by one, guarantees the order the flow produced.
+  | { type: 'sequence'; messages: WhatsAppSend[] }
 );
 
 @Injectable()
@@ -106,12 +115,29 @@ export class WhatsAppOutboundProcessor {
       `whatsApp instance: ${this.whatsApp?.constructor?.name ?? typeof this.whatsApp}`,
     );
 
-    if (data.type === 'text') {
-      await this.processText(data);
-    } else if (data.type === 'media') {
-      await this.processMedia(data);
-    } else if (data.type === 'template') {
-      await this.processTemplate(data);
+    if (data.type === 'sequence') {
+      // Await each in turn so the batch arrives in order. If a later send fails
+      // the whole job retries (earlier sends may repeat) — acceptable and rare,
+      // versus the alternative of guaranteed out-of-order delivery.
+      for (const message of data.messages) {
+        await this.processOne(data.phone, data.profileId, message);
+      }
+      return;
+    }
+    await this.processOne(data.phone, data.profileId, data);
+  }
+
+  private async processOne(
+    phone: string,
+    profileId: string | undefined,
+    message: WhatsAppSend,
+  ): Promise<void> {
+    if (message.type === 'text') {
+      await this.processText({ phone, profileId, ...message });
+    } else if (message.type === 'media') {
+      await this.processMedia({ phone, profileId, ...message });
+    } else if (message.type === 'template') {
+      await this.processTemplate({ phone, profileId, ...message });
     }
   }
 
