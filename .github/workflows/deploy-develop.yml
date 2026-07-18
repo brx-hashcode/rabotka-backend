@@ -340,6 +340,13 @@ jobs:
     steps:
       - name: Slack notify success
         if: ${{ !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
+        env:
+          MESSAGE: |
+            Deployment Succeeded (develop)
+            ${{ github.event.pull_request.title }}
+            Branch: ${{ github.ref_name }}
+            Author: ${{ github.actor }}
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         uses: slackapi/slack-github-action@v2.0.0
         with:
           webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
@@ -349,13 +356,20 @@ jobs:
               "attachments": [
                 {
                   "color": "#00B32C",
-                  "text": "Deployment Succeeded (develop)\n${{ github.event.pull_request.title }}\nBranch: ${{ github.ref_name }}\nAuthor: ${{ github.actor }}\nRun: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                  "text": ${{ toJSON(env.MESSAGE) }}
                 }
               ]
             }
 
       - name: Slack notify failure
         if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
+        env:
+          MESSAGE: |
+            Deployment Failed (develop)
+            ${{ github.event.pull_request.title }}
+            Branch: ${{ github.ref_name }}
+            Author: ${{ github.actor }}
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         uses: slackapi/slack-github-action@v2.0.0
         with:
           webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
@@ -365,7 +379,7 @@ jobs:
               "attachments": [
                 {
                   "color": "#B3000C",
-                  "text": "Deployment Failed (develop)\n${{ github.event.pull_request.title }}\nBranch: ${{ github.ref_name }}\nAuthor: ${{ github.actor }}\nRun: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                  "text": ${{ toJSON(env.MESSAGE) }}
                 }
               ]
             }
