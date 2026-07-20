@@ -440,7 +440,7 @@ describe('BotNotificationService', () => {
       });
       expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+242001',
-        'HX9e7f9a2ff6a38ad0952faf72640f4db6',
+        'HXb5173adfc2ec51a7158943f9b11cdbcb',
         { '1': 'Plombier', '2': 'Alice' },
       );
     });
