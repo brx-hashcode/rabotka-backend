@@ -11,7 +11,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY package.json pnpm-lock.yaml .npmrc ./
 
 # --ignore-scripts skips postinstall (prisma generate) which crashes due to
-# a transitive ESM/CJS conflict in @prisma/dev bundled with prisma@7.x
+# a transitive ESM/CJS conflict in @prisma/dev bundled with prisma@7.x.
+# Note it also skips puppeteer's own postinstall, so no Chromium is downloaded
+# here — the final stage installs Debian's chromium instead (see below).
+# PUPPETEER_SKIP_DOWNLOAD makes that explicit, so dropping --ignore-scripts
+# later can't silently start bundling a second ~400MB browser.
+ENV PUPPETEER_SKIP_DOWNLOAD=true
 RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
     pnpm install --frozen-lockfile --ignore-scripts
 
@@ -33,10 +38,15 @@ FROM node:22-slim AS api
 
 WORKDIR /app
 
+# chromium is what puppeteer drives to render the CV PDF (resume.service) and
+# as the docx->pdf fallback (document.service). Installing Debian's package
+# pulls in every shared library Chromium needs, which is why it is preferred
+# over downloading a browser and hand-listing libnss3/libgbm1/etc.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
         tini \
         postgresql-client \
+        chromium \
         libreoffice-writer \
         fonts-liberation \
         fonts-dejavu-core \
@@ -69,6 +79,8 @@ ENV NODE_ENV=production \
     HOME=/tmp \
     SAL_USE_VCLPLUGIN=svp \
     DISPLAY="" \
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium \
+    PUPPETEER_SKIP_DOWNLOAD=true \
     FASTEMBED_CACHE_DIR=/var/cache/fastembed \
     FASTEMBED_MODEL_VERSION=v1
 
