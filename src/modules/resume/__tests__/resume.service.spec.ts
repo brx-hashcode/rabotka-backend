@@ -1,6 +1,11 @@
+jest.mock('../../../common/utils/puppeteer', () => ({
+  launchBrowser: jest.fn(),
+}));
+
 import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException } from '@nestjs/common';
 import { ResumeService } from '../resume.service';
+import { launchBrowser } from '../../../common/utils/puppeteer';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { REDIS_CONNECTION } from '../../../common/services/redis/redis.constants';
 import {
@@ -9,6 +14,10 @@ import {
   AssignmentStatus,
   PaymentFlow,
 } from '@prisma/client';
+
+const mockedLaunchBrowser = launchBrowser as jest.MockedFunction<
+  typeof launchBrowser
+>;
 
 const PROFILE_ID = 'profile-uuid-1';
 
@@ -160,5 +169,50 @@ describe('ResumeService', () => {
     const html = renderSpy.mock.calls[0][0] as string;
     expect(html).toContain('Aucune expérience pour le moment.');
     expect(html).toContain('Travailleur Non vérifié');
+  });
+
+  // The real renderHtmlToPdf is mocked out above, so the failure path shipped
+  // untested — and it is exactly what broke in production (no Chromium in the
+  // image => 500 "PDF generation unavailable" with the cause swallowed).
+  describe('renderHtmlToPdf failures', () => {
+    beforeEach(() => {
+      renderSpy.mockRestore();
+      redis.get.mockResolvedValue(null);
+      prisma.profile.findUnique.mockResolvedValue(mockProfile);
+      prisma.assignment.findMany.mockResolvedValue([mockAssignment]);
+    });
+
+    it('logs the underlying cause and returns the generic message when the browser cannot launch', async () => {
+      const cause = new Error('Could not find Chromium at /usr/bin/chromium');
+      mockedLaunchBrowser.mockRejectedValue(cause);
+      const logSpy = jest
+        .spyOn((service as any).logger, 'error')
+        .mockImplementation(() => undefined);
+
+      await expect(service.download(PROFILE_ID)).rejects.toMatchObject({
+        status: 500,
+        response: expect.objectContaining({
+          message: 'PDF generation unavailable',
+        }),
+      });
+
+      // Without this the 500 is undiagnosable — the client never sees the cause.
+      expect(logSpy).toHaveBeenCalledWith(
+        'Resume PDF generation failed',
+        expect.stringContaining('Could not find Chromium'),
+      );
+      // A failed render must not be cached as if it succeeded.
+      expect(redis.setex).not.toHaveBeenCalled();
+    });
+
+    it('rethrows an HTTP exception unchanged rather than masking it', async () => {
+      mockedLaunchBrowser.mockRejectedValue(
+        new NotFoundException('Profil introuvable'),
+      );
+
+      await expect(service.download(PROFILE_ID)).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+    });
   });
 });
