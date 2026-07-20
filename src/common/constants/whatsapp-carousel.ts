@@ -199,6 +199,32 @@ export function carouselReply(
   return `[TPL:${contentSid}]${JSON.stringify(carouselVariables(entity, cards))}`;
 }
 
+// A carousel needs ≥2 cards, so a single recommendation used to fall back to a
+// plain-text list. Instead send one twilio/card (media + title + "Sélectionner"
+// quick-reply button, id "1"). A single-button card needs no template approval
+// and sends in-session; the "1" payload is parsed by the recommendation flows
+// as selecting the first (only) item. Same template for profiles and jobs.
+//
+// WhatsApp renders a card's media + title + button but NOT its body, so the
+// name and the details are packed together into the TITLE (bold name, then the
+// composed details line). {{1}} = media, {{2}} = title.
+export const RECOMMENDATION_CARD_SID = 'HX5d85225342a2ad319ee1159ed5459a82';
+
+export function singleCardReply(
+  entity: CarouselEntity,
+  card: CarouselCard,
+): string {
+  const name = truncateCardTitle(card.title);
+  const details = truncateCardBody(card.body, cardBodyBudget(entity, card.title));
+  const vars: Record<string, string> = {
+    '1': card.image,
+    // The single newline between name and details survives on a card title
+    // (unlike carousel bodies, which reject newlines).
+    '2': `*${name}*\n${details}`,
+  };
+  return `[TPL:${RECOMMENDATION_CARD_SID}]${JSON.stringify(vars)}`;
+}
+
 /**
  * Encode a Content-template send as a bot reply string. The inbound pipeline
  * (parseReplyToJob in whatsapp-inbound.processor.ts) turns any reply starting
