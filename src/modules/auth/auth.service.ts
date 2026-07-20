@@ -107,20 +107,10 @@ export class AuthService {
       );
     }
 
-    if (isPhone) {
-      const phoneProfile = profile as unknown as {
-        id: string;
-        email: string;
-        phone: string;
-        whatsapp_connected: boolean;
-      };
-      if (!phoneProfile.whatsapp_connected) {
-        throw new BadRequestException(
-          "Ce numéro WhatsApp n'est pas encore vérifié. Veuillez utiliser votre adresse e-mail pour continuer.",
-        );
-      }
-    }
-
+    // Send the OTP over the channel the user chose — WhatsApp for a phone,
+    // email for an email. The OTP is an approved business-initiated template,
+    // so it reaches any WhatsApp number; no prior whatsapp_connected link is
+    // required.
     const otp = this.generateOtp();
 
     const redisKey = `${OTP_KEY_PREFIX}${normalized}`;
@@ -156,20 +146,6 @@ export class AuthService {
       throw new NotFoundException(
         'Aucun compte trouvé pour cet email ou téléphone',
       );
-    }
-
-    if (isPhone) {
-      const phoneProfile = profile as unknown as {
-        id: string;
-        email: string;
-        phone: string;
-        whatsapp_connected: boolean;
-      };
-      if (!phoneProfile.whatsapp_connected) {
-        throw new BadRequestException(
-          "Ce numéro WhatsApp n'est pas encore vérifié. Veuillez utiliser votre adresse e-mail pour continuer.",
-        );
-      }
     }
 
     const resendCooldownKey = `${RESEND_COOLDOWN_KEY_PREFIX}${normalized}`;
