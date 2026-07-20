@@ -5,6 +5,7 @@ import {
   type CarouselCard,
   cardBodyBudget,
   carouselReply,
+  singleCardReply,
   composeCardBody,
   jobImageUrl,
 } from '../../../common/constants/whatsapp-carousel';
@@ -193,13 +194,19 @@ export function buildPagedListReply(
     image: jobImageUrl(),
     body: jobCardBody(o),
   }));
+  const nav =
+    totalPages > 1
+      ? `📄 Page ${safePage + 1}/${totalPages} — *S* suivante · *P* précédente · *Menu* pour revenir.`
+      : 'Touchez *Sélectionner* pour voir le détail, ou *Menu* pour revenir.';
+
   const carousel = carouselReply('jobs', cards);
   if (carousel) {
-    const nav =
-      totalPages > 1
-        ? `📄 Page ${safePage + 1}/${totalPages} — *S* suivante · *P* précédente · *Menu* pour revenir.`
-        : 'Touchez *Sélectionner* sur une offre, ou *Menu* pour revenir.';
     return { reply: [carousel, nav], page: safePage };
+  }
+
+  // Exactly one offer: a single card instead of the plain-text fallback.
+  if (cards.length === 1) {
+    return { reply: [singleCardReply('jobs', cards[0]), nav], page: safePage };
   }
 
   return {
