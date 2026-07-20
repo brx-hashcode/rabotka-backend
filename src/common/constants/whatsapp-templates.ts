@@ -11,48 +11,36 @@ export const WHATSAPP_TEMPLATES = {
     variables: (code: string) => ({ '1': code }),
   } satisfies WhatsAppTemplate<[code: string]>,
 
-  // "Number not registered" welcome, sent when an unknown phone messages the
-  // bot. twilio/call-to-action URL button opens the onboarding page inside
-  // WhatsApp's in-app browser. No variables (URL is static in the template).
+
   welcomeUnregistered: {
     contentSid: 'HX1610d675f58d8fa92d277383584cc5fb',
     variables: () => ({}),
   } satisfies WhatsAppTemplate<[]>,
 
-  // "Créer une réclamation" — menu option for workers and employers.
-  // twilio/call-to-action URL button opens /login?redirect=/claims/new inside
-  // WhatsApp's in-app browser, landing the user on the create-claim form.
-  // No variables (URL is static in the template).
   createClaim: {
     contentSid: 'HX9d9725488bc9dc2c6e4340dc5a000ca1',
     variables: () => ({}),
   } satisfies WhatsAppTemplate<[]>,
 
-  // "Mon profil" — replaces rendering profile stats in chat. URL button opens
-  // /login?redirect=/profile inside WhatsApp's in-app browser. No variables.
+
   viewProfile: {
     contentSid: 'HX8ab587d99e769edaded28d5dd8247af5',
     variables: () => ({}),
   } satisfies WhatsAppTemplate<[]>,
 
-  // "Mes candidatures" — replaces listing applications inline in chat. URL
-  // button opens /login?redirect=/profile (the worker's applications sheet
-  // lives on the profile page) inside WhatsApp's in-app browser. No variables.
+
   viewApplications: {
     contentSid: 'HX75d46b310dd534710f7254f23205a7eb',
     variables: () => ({}),
   } satisfies WhatsAppTemplate<[]>,
 
-  // Sent after onboarding completes (POST /profile). Business-initiated (the
-  // user filled a web form, so there's no open 24h session) — must be a
-  // template. {{1}} = firstName.
+
   profileCreated: {
     contentSid: 'HXa0d2cd880e5b4a035912c315fdd1b586',
     variables: (firstName: string) => ({ '1': firstName }),
   } satisfies WhatsAppTemplate<[firstName: string]>,
   
-  // KYC-approved message with a "Commencer" quick-reply button (payload
-  // "menu"). Used by kyc.service.ts and sendKycValidatedMessage.
+
   kyc: {
     contentSid: 'HX4a20caf26410d2efbcfa0c69b82aa052',
     variables: (name: string) => ({ '1': name }),
@@ -264,7 +252,7 @@ export const WHATSAPP_TEMPLATES = {
 
 
   ratingRequest: {
-    contentSid: 'HX9e7f9a2ff6a38ad0952faf72640f4db6',
+    contentSid: 'HXb5173adfc2ec51a7158943f9b11cdbcb',
     variables: (p: { jobTitle: string; rateeLabel: string }) => ({
       '1': p.jobTitle,
       '2': p.rateeLabel,
@@ -274,7 +262,10 @@ export const WHATSAPP_TEMPLATES = {
   >,
 
   contactUnlocked: {
-    contentSid: 'HXadb2993d2badfd7fc5da51fa8349234c',
+    // twilio/quick-reply ("Voir le menu" button) — warmer copy + a closing
+    // line. Same 3 variables as before (name/phone/email), so only the SID
+    // changed.
+    contentSid: 'HX0cff136f3bc10f77066b949b110ecada',
     variables: (p: {
       name: string;
       phone: string | null;
