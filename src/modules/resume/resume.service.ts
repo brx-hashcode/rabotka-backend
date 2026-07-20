@@ -13,6 +13,7 @@ import {
   REDIS_CONNECTION,
   REDIS_KEY_PREFIX,
 } from '../../common/services/redis/redis.constants';
+import { launchBrowser } from '../../common/utils/puppeteer';
 import { Prisma, ProfileType, VerificationStatus } from '@prisma/client';
 
 /** A single accomplished mission as rendered in the CV. */
@@ -327,11 +328,7 @@ export class ResumeService {
 
   private async renderHtmlToPdf(html: string): Promise<Buffer> {
     try {
-      const puppeteer = await import('puppeteer');
-      const browser = await puppeteer.launch({
-        headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox'],
-      });
+      const browser = await launchBrowser();
       try {
         const page = await browser.newPage();
         await page.setContent(html, { waitUntil: 'networkidle0' });
@@ -346,6 +343,13 @@ export class ResumeService {
       }
     } catch (err: any) {
       if (err?.status) throw err;
+      // The client only ever sees the generic message, so without this the
+      // real cause (missing Chromium, launch failure, render timeout) is lost
+      // and the 500 is undiagnosable.
+      this.logger.error(
+        'Resume PDF generation failed',
+        err instanceof Error ? err.stack : String(err),
+      );
       throw new InternalServerErrorException('PDF generation unavailable');
     }
   }
