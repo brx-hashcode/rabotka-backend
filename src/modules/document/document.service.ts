@@ -16,6 +16,7 @@ import { RedisService } from '../../common/services/redis/redis.service';
 import { REDIS_KEY_PREFIX } from '../../common/services/redis/redis.constants';
 import { GoogleDocsService } from './google-docs.service';
 import { fetchWithTimeout } from '../../common/utils/fetch-with-timeout.util';
+import { launchBrowser } from '../../common/utils/puppeteer';
 import { UpdateDocumentDto } from './dto/update-document.dto';
 import { ListDocumentsDto } from './dto/list-documents.dto';
 import {
@@ -506,7 +507,6 @@ export class DocumentService {
   private async convertWithPuppeteer(docxBuffer: Buffer): Promise<Buffer> {
     try {
       const mammoth = await import('mammoth');
-      const puppeteer = await import('puppeteer');
 
       const { value: html } = await mammoth.convertToHtml(
         { buffer: docxBuffer },
@@ -519,10 +519,7 @@ export class DocumentService {
         },
       );
 
-      const browser = await puppeteer.launch({
-        headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox'],
-      });
+      const browser = await launchBrowser();
       try {
         const page = await browser.newPage();
         await page.setContent(
@@ -569,6 +566,12 @@ export class DocumentService {
       }
     } catch (err: any) {
       if (err?.status) throw err;
+      // Same reasoning as ResumeService: the generic message is all the client
+      // gets, so the underlying cause has to reach the logs.
+      this.logger.error(
+        'Puppeteer docx->pdf conversion failed',
+        err instanceof Error ? err.stack : String(err),
+      );
       throw new InternalServerErrorException('PDF conversion unavailable');
     }
   }
