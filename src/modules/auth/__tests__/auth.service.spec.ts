@@ -149,15 +149,16 @@ describe('AuthService', () => {
       );
     });
 
-    it('throws BadRequestException when phone is not WhatsApp-connected', async () => {
+    it('sends the OTP via WhatsApp even when the phone is not WhatsApp-connected', async () => {
       (prisma.profile.findUnique as jest.Mock).mockResolvedValue({
         ...mockProfile,
         whatsapp_connected: false,
       });
 
-      await expect(service.sendOtp('+24200000001')).rejects.toThrow(
-        BadRequestException,
-      );
+      const result = await service.sendOtp('+24200000001');
+
+      expect(result.success).toBe(true);
+      expect(whatsAppService.sendTemplateMessage).toHaveBeenCalled();
     });
   });
 
@@ -203,15 +204,15 @@ describe('AuthService', () => {
       expect(whatsAppService.sendTemplateMessage).toHaveBeenCalled();
     });
 
-    it('throws when phone is not WhatsApp-connected on resend', async () => {
+    it('resends the OTP via WhatsApp even when the phone is not WhatsApp-connected', async () => {
       (prisma.profile.findUnique as jest.Mock).mockResolvedValue({
         ...mockProfile,
         whatsapp_connected: false,
       });
       redis.get.mockResolvedValue(null);
-      await expect(service.resendOtp('+24200000001')).rejects.toThrow(
-        BadRequestException,
-      );
+      const result = await service.resendOtp('+24200000001');
+      expect(result.success).toBe(true);
+      expect(whatsAppService.sendTemplateMessage).toHaveBeenCalled();
     });
   });
 
