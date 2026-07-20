@@ -1,6 +1,7 @@
 import type { BotProfile, BotState } from '../types/bot-state.types';
 import { FLOW_IDS, CMD_MENU } from '../bot.constants';
 import { menuMessage } from '../messages/menu.messages';
+import { walletRechargeReply } from '../../../common/constants/whatsapp-listpickers';
 import type { WalletService } from '../../wallet/wallet.service';
 import type { IPaymentUrlService } from '../types/payment-url.types';
 import { PaymentRequestType } from '@prisma/client';
@@ -34,20 +35,17 @@ function isMenuCommand(normalized: string): boolean {
   );
 }
 
+/**
+ * The amount step is a WhatsApp list-picker: a "Choisir un montant" button that
+ * opens a tap-list of the presets, "Montant personnalisé" (id 5) and "Annuler"
+ * (id 0). A tapped row returns its id, which handleAmountSelection parses just
+ * like the typed digit — so typing still works.
+ *
+ * The rows are baked into the Content template, so PRESET_AMOUNTS below must
+ * stay in sync with it (see scripts/create_listpickers.py).
+ */
 function buildAmountMenuMessage(balance: number): string {
-  return [
-    `*Recharger mon wallet*`,
-    ``,
-    `Solde actuel : *${balance.toLocaleString('fr-FR')} FCFA*`,
-    ``,
-    `Choisissez un montant :`,
-    ``,
-    ...PRESET_AMOUNTS.map(
-      (a, i) => `${i + 1}- ${a.toLocaleString('fr-FR')} FCFA`,
-    ),
-    `5- Montant personnalisé`,
-    `0- Annuler`,
-  ].join('\n');
+  return walletRechargeReply(balance.toLocaleString('fr-FR'));
 }
 
 async function handleAmountSelection(

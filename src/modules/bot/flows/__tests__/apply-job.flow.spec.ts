@@ -2,6 +2,7 @@ import { runApplyJobFlow, getApplyJobInitialState } from '../apply-job.flow';
 import type { BotProfile, BotState } from '../../types/bot-state.types';
 import type { ApplyJobContext } from '../apply-job.flow';
 import { FLOW_IDS } from '../../bot.constants';
+import { workerMenuMessage } from '../../messages/menu.messages';
 
 const mockOffer = {
   id: 'offer-1',
@@ -84,7 +85,7 @@ describe('runApplyJobFlow()', () => {
       const state = makeState('offer-1');
       const result = await runApplyJobFlow(state, 'menu', workerProfile, ctx);
       expect(result.clearState).toBe(true);
-      expect(result.reply[0]).toMatch(/MENU/i);
+      expect(result.reply[0]).toBe(workerMenuMessage());
     });
 
     it('returns error when jobOfferId is missing', async () => {

@@ -1,6 +1,7 @@
 import { runRepublishExpiredJobFlow } from '../republish-expired-job.flow';
 import type { BotProfile, BotState } from '../../types/bot-state.types';
 import { FLOW_IDS } from '../../bot.constants';
+import { employerMenuMessage } from '../../messages/menu.messages';
 
 const profile: BotProfile = {
   id: 'employer-1',
@@ -71,7 +72,7 @@ describe('runRepublishExpiredJobFlow', () => {
         ctx,
       );
       expect(result.clearState).toBe(true);
-      expect(result.reply[0]).toContain('Menu Rabotka');
+      expect(result.reply[0]).toBe(employerMenuMessage());
       expect(result.reply[0]).not.toContain('Tapez');
     });
 
