@@ -1112,7 +1112,9 @@ describe('BotOrchestratorService', () => {
         cancellationThresholdHours: 12,
       });
       const result = await service.handle('employer-uuid-1', PHONE, 'profils');
-      expect(result[0]).toMatch(/travailleurs recommandés/i);
+      // A single eligible worker renders as one twilio/card (recommendation_card),
+      // not the text list — a carousel needs at least 2 cards.
+      expect(result[0]).toMatch(/^\[TPL:HX5d85225342a2ad319ee1159ed5459a82\]/);
     });
   });
 
