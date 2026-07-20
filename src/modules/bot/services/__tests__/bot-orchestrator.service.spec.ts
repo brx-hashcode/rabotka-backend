@@ -3,6 +3,11 @@ import { BotOrchestratorService } from '../bot-orchestrator.service';
 import { PrismaService } from '../../../../common/services/prisma/prisma.service';
 import { BotStateService } from '../bot-state.service';
 import { BotRouterService } from '../../router/bot-router.service';
+import {
+  workerMenuMessage,
+  employerMenuMessage,
+} from '../../messages/menu.messages';
+import { contactReply } from '../../../../common/constants/whatsapp-listpickers';
 import { BotCommandsService } from '../bot-commands.service';
 import { BotNotificationService } from '../bot-notification.service';
 import { BotInboxService } from '../bot-inbox.service';
@@ -282,7 +287,7 @@ describe('BotOrchestratorService', () => {
       deps.router.route.mockReturnValue({ type: 'unknown' });
       const result = await service.handle(PROFILE_ID, PHONE, '3');
       expect(result[0]).toContain('Session expirée');
-      expect(result[1]).toContain('Menu');
+      expect(result[1]).toBe(workerMenuMessage());
     });
 
     it('returns ERROR_MESSAGE on exception', async () => {
@@ -334,7 +339,7 @@ describe('BotOrchestratorService', () => {
         commandId: 'menu',
       });
       const result = await service.handle(PROFILE_ID, PHONE, 'Menu');
-      expect(result[0]).toContain('Menu');
+      expect(result[0]).toBe(workerMenuMessage());
     });
 
     it('handles "help" command', async () => {
@@ -343,7 +348,15 @@ describe('BotOrchestratorService', () => {
         commandId: 'help',
       });
       const result = await service.handle(PROFILE_ID, PHONE, 'aide');
-      expect(result[0]).toContain('Contact');
+      // Contact is a read-only quick-reply template: the details ride in the
+      // variables, so assert the rendered reply rather than a body substring.
+      expect(result[0]).toBe(
+        contactReply(
+          '+242 06 000 0000',
+          'contact@rabotka.com',
+          'Brazzaville, Congo',
+        ),
+      );
     });
 
     it('handles "create_claim" command with the claim template', async () => {
@@ -1546,7 +1559,7 @@ describe('BotOrchestratorService', () => {
       });
       deps.botState.get.mockResolvedValue(flowState);
       const result = await service.handle('employer-uuid-1', PHONE, 'menu');
-      expect(result[0]).toContain('Menu');
+      expect(result[0]).toBe(employerMenuMessage());
     });
 
     it('shows offer detail when selecting valid offer number', async () => {
