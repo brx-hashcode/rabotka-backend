@@ -1,6 +1,8 @@
 import {
   carouselVariables,
   carouselReply,
+  singleCardReply,
+  RECOMMENDATION_CARD_SID,
   composeCardBody,
   cardBodyBudget,
   sanitizeTemplateValue,
@@ -227,6 +229,39 @@ describe('composeCardBody', () => {
       80,
     );
     expect(result).not.toContain('Date');
+  });
+});
+
+describe('singleCardReply', () => {
+  it('renders one card (media/title/body) with the recommendation_card SID', () => {
+    const body = 'Fiabilité : 90/100 • Score IA : 82% • À propos : Plombier';
+    const reply = singleCardReply('profiles', {
+      title: 'Jean Moukala',
+      image: 'https://img/1.png',
+      body,
+    });
+    expect(reply.startsWith(`[TPL:${RECOMMENDATION_CARD_SID}]`)).toBe(true);
+    const vars = JSON.parse(reply.slice(reply.indexOf(']') + 1));
+    // WhatsApp only renders a card's title, so name + details are packed there:
+    // bold name, newline, then the composeCardBody line (AI score included).
+    expect(vars['1']).toBe('https://img/1.png');
+    expect(vars['2']).toBe(`*Jean Moukala*\n${body}`);
+    expect(vars['3']).toBeUndefined();
+  });
+
+  it('sanitizes the details (only the name/details separator newline remains)', () => {
+    const reply = singleCardReply('jobs', {
+      title: 'Ménage',
+      image: 'https://img/1.png',
+      body: 'Montant : 5000\n\nAdresse : Bacongo',
+    });
+    const vars = JSON.parse(reply.slice(reply.indexOf(']') + 1));
+    // Exactly one newline (after the bold name); the details themselves are
+    // sanitized — no leftover newlines or whitespace runs from the raw body.
+    expect(vars['2'].match(/\n/g) ?? []).toHaveLength(1);
+    const details = vars['2'].split('\n')[1];
+    expect(details).not.toContain('\n');
+    expect(details).not.toMatch(/\s\s/);
   });
 });
 

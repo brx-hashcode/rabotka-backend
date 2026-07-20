@@ -15,6 +15,7 @@ import {
   type CarouselCard,
   cardBodyBudget,
   carouselReply,
+  singleCardReply,
   composeCardBody,
   profileImageUrl,
 } from '../../../common/constants/whatsapp-carousel';
@@ -507,6 +508,7 @@ export function buildWorkerListReply(
     return { title: name, image: profileImageUrl(w.avatar_url), body };
   });
 
+  if (cards.length === 1) return singleCardReply('profiles', cards[0]);
   return carouselReply('profiles', cards) ?? lines.join('\n');
 }
 
