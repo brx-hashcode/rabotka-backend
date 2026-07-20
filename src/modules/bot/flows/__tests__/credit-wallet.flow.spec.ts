@@ -5,6 +5,7 @@ import {
 import type { CreditWalletContext } from '../credit-wallet.flow';
 import type { BotProfile, BotState } from '../../types/bot-state.types';
 import { FLOW_IDS } from '../../bot.constants';
+import { walletRechargeReply } from '../../../../common/constants/whatsapp-listpickers';
 
 const workerProfile: BotProfile = {
   id: 'worker-1',
@@ -63,7 +64,7 @@ describe('runCreditWalletFlow() - step 1 (amount selection)', () => {
     const state = makeStep1State();
     const result = await runCreditWalletFlow(state, 'blabla', workerProfile, ctx);
     expect(result.nextState).toBeDefined();
-    expect(result.reply[0]).toContain('Recharger mon wallet');
+    expect(result.reply[0]).toBe(walletRechargeReply((3000).toLocaleString('fr-FR')));
     expect(result.clearState).toBeUndefined();
   });
 
@@ -72,7 +73,7 @@ describe('runCreditWalletFlow() - step 1 (amount selection)', () => {
     const state = makeStep1State();
     const result = await runCreditWalletFlow(state, '', workerProfile, ctx);
     expect(result.nextState).toBeDefined();
-    expect(result.reply[0]).toContain('Recharger');
+    expect(result.reply[0]).toBe(walletRechargeReply((5000).toLocaleString('fr-FR')));
   });
 
   it('selects preset amount "1" (1000 FCFA) and enters mobile money sub-flow', async () => {
@@ -243,7 +244,7 @@ describe('runCreditWalletFlow() - employer profile', () => {
     const ctx = makeCtx(8000);
     const state = makeStep1State();
     const result = await runCreditWalletFlow(state, '', employerProfile, ctx);
-    expect(result.reply[0]).toContain('Recharger');
+    expect(result.reply[0]).toBe(walletRechargeReply((8000).toLocaleString('fr-FR')));
   });
 
   it('employer can select preset amount and proceed', async () => {
@@ -261,7 +262,7 @@ describe('getCreditWalletInitialState()', () => {
     expect(state.flowId).toBe(FLOW_IDS.CREDIT_WALLET);
     expect(state.step).toBe(1);
     expect(state.payload).toEqual({});
-    expect(message).toContain('Recharger');
+    expect(message).toBe(walletRechargeReply((7500).toLocaleString('fr-FR')));
     expect(message).toContain('7');
   });
 

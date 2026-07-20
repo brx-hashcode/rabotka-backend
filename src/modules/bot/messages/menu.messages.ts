@@ -1,4 +1,8 @@
 import type { BotProfileType } from '../types/bot-state.types';
+import {
+  menuReply,
+  contactReply,
+} from '../../../common/constants/whatsapp-listpickers';
 
 export type ContactInfo = {
   email: string;
@@ -7,51 +11,18 @@ export type ContactInfo = {
 };
 
 export function workerMenuMessage(): string {
-  return [
-    '*Menu Rabotka*',
-    '',
-    '1- Trouver une mission',
-    '2- Mes candidatures actives',
-    '3- Offres recommandées',
-    '4- Rechercher par référence',
-    '5- Mon profil',
-    '6- Recharger mon wallet',
-    '7- Créer une réclamation',
-    '8- Aide',
-    '',
-    '*Répondez avec le numéro de votre choix.*',
-  ].join('\n');
+  return menuReply('WORKER');
 }
 
 export function employerMenuMessage(): string {
-  return [
-    '*Menu Rabotka*',
-    '',
-    '1- Publier une offre',
-    '2- Candidatures reçues',
-    '3- Mes offres publiées',
-    '4- Missions en cours',
-    '5- Travailleurs recommandés',
-    '6- Mon profil',
-    '7- Recharger mon wallet',
-    '8- Créer une réclamation',
-    '9- Aide',
-    '',
-    '*Répondez avec le numéro de votre choix.*',
-  ].join('\n');
+  return menuReply('EMPLOYER');
 }
 
 export function menuMessage(profileType: BotProfileType): string {
   return profileType === 'WORKER' ? workerMenuMessage() : employerMenuMessage();
 }
 
-/**
- * Menu shown while the account is still awaiting KYC validation. Only the two
- * actions an admin may ask for during review are available (view/fix the
- * profile, or file a claim), so it uses its own 1/2 numbering — the pre-KYC
- * gate in bot-orchestrator intercepts this input before the router, so these
- * numbers never collide with the full menu's.
- */
+
 export function restrictedMenuMessage(): string {
   return [
     '⏳ *Votre profil est en cours de vérification.*',
@@ -67,16 +38,10 @@ export function restrictedMenuMessage(): string {
   ].join('\n');
 }
 
+// The details render read-only in the template body; the single "Retour au
+// menu" button is the only tappable element.
 export function helpMessage(contact: ContactInfo): string {
-  return [
-    '*Contact Rabotka*',
-    '',
-    `*Téléphone*: ${contact.phone}`,
-    `*Email*: ${contact.email}`,
-    `*Adresse*: _${contact.address}_`,
-    '',
-    'Tapez *Menu* pour revenir.',
-  ].join('\n');
+  return contactReply(contact.phone, contact.email, contact.address);
 }
 
 export function accountSuspendedBotMessage(contact: ContactInfo): string {
