@@ -6,7 +6,7 @@ import {
   AccountStatus,
   ProfileType,
 } from '@prisma/client';
-import { generateJobReference } from '../../src/modules/job-offer/utils/job-reference.util';
+import { generateJobReference } from './job-reference.util';
 
 const JOB_TITLES = [
   'Manutention entrepôt',
