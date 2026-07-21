@@ -1,4 +1,4 @@
-import { generateJobReference } from '../../src/modules/job-offer/utils/job-reference.util';
+import { generateJobReference } from './job-reference.util';
 
 /**
  * Recommendation & interest-graph test seed.

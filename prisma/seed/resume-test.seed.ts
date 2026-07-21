@@ -8,7 +8,7 @@ import {
   AssignmentStatus,
   PaymentFlow,
 } from '@prisma/client';
-import { generateJobReference } from '../../src/modules/job-offer/utils/job-reference.util';
+import { generateJobReference } from './job-reference.util';
 
 const RESUME_WORKER_EMAIL = 'fariol+resume@akieni.tech';
 const RESUME_EMPLOYER_EMAIL = 'fariol+resume-employer@akieni.tech';
