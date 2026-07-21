@@ -1,5 +1,5 @@
 import type { PrismaClient } from '@prisma/client';
-import { DEFAULT_SYSTEM_CONFIGS } from '../../src/modules/system-config/system-config.constants';
+import { DEFAULT_SYSTEM_CONFIGS } from './system-config.constants';
 
 export async function seedSystemConfig(prisma: PrismaClient): Promise<void> {
   const existing = await prisma.systemConfig.findMany({ select: { key: true } });
