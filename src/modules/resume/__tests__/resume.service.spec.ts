@@ -31,6 +31,7 @@ const mockProfile = {
   profile_type: ProfileType.WORKER,
   verification_status: VerificationStatus.VERIFIED,
   created_at: new Date('2024-03-01T00:00:00Z'),
+  rating_avg: 4.5,
   categories: [
     {
       profile_id: PROFILE_ID,
@@ -47,12 +48,14 @@ const mockAssignment = {
   worker_id: PROFILE_ID,
   status: AssignmentStatus.COMPLETED,
   completed_at: new Date('2026-06-22T00:00:00Z'),
+  ratings: [{ score: 5 }],
   job_offer: {
     title: 'Déménagement appartement',
     address: 'Moungali, Brazzaville',
     amount: 45000,
     scheduled_at: new Date('2026-06-22T00:00:00Z'),
     payment_flow: PaymentFlow.DAILY,
+    category_id: 'cat-1',
     employer: { first_name: 'Mme', last_name: 'Soudan' },
   },
 };
@@ -128,14 +131,19 @@ describe('ResumeService', () => {
     expect(result.buffer.length).toBeGreaterThan(0);
     expect(result.filename).toBe('Alex_Makaya_resume.pdf');
 
-    // Lists only a capped number of missions (page fit).
+    // Fetches both completed and current missions (ranked & capped afterwards).
     expect(prisma.assignment.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { worker_id: PROFILE_ID, status: 'COMPLETED' },
-        orderBy: { completed_at: 'desc' },
-        take: 5,
+        where: {
+          worker_id: PROFILE_ID,
+          status: { in: ['COMPLETED', 'CONFIRMED'] },
+        },
       }),
     );
+    // The stat-strip count is scoped to completed missions only.
+    expect(prisma.assignment.count).toHaveBeenCalledWith({
+      where: { worker_id: PROFILE_ID, status: 'COMPLETED' },
+    });
 
     const html = renderSpy.mock.calls[0][0] as string;
     expect(html).toContain('Alex Makaya');
@@ -152,6 +160,31 @@ describe('ResumeService', () => {
       3600,
       expect.any(String),
     );
+  });
+
+  it('labels a current (confirmed) mission "En cours" rather than "Terminé"', async () => {
+    redis.get.mockResolvedValue(null);
+    prisma.profile.findUnique.mockResolvedValue(mockProfile);
+    prisma.assignment.count.mockResolvedValue(0);
+    prisma.assignment.findMany.mockResolvedValue([
+      {
+        ...mockAssignment,
+        id: 'assign-current',
+        status: AssignmentStatus.CONFIRMED,
+        completed_at: null,
+        ratings: [],
+        job_offer: {
+          ...mockAssignment.job_offer,
+          title: 'Installation cuisine',
+        },
+      },
+    ]);
+
+    await service.download(PROFILE_ID);
+
+    const html = renderSpy.mock.calls[0][0] as string;
+    expect(html).toContain('Installation cuisine');
+    expect(html).toContain('En cours');
   });
 
   it('renders the empty-state when the worker has no completed jobs', async () => {
