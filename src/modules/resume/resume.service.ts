@@ -14,13 +14,23 @@ import {
   REDIS_KEY_PREFIX,
 } from '../../common/services/redis/redis.constants';
 import { launchBrowser } from '../../common/utils/puppeteer';
-import { Prisma, ProfileType, VerificationStatus } from '@prisma/client';
+import {
+  Prisma,
+  ProfileType,
+  VerificationStatus,
+  AssignmentStatus,
+} from '@prisma/client';
+import {
+  rankResumeExperiences,
+  RESUME_EXPERIENCE_LIMIT,
+} from './resume-ranking';
 
 /** A single accomplished mission as rendered in the CV. */
 type ResumeJob = {
   period: string;
   employer: string;
   status: string;
+  ongoing: boolean;
   title: string;
   amount: string;
   location: string;
@@ -37,12 +47,14 @@ type ResumeProfile = Prisma.ProfileGetPayload<{
     profile_type: true;
     verification_status: true;
     created_at: true;
+    rating_avg: true;
     categories: { include: { category: true } };
   };
 }>;
 
 type ResumeAssignment = Prisma.AssignmentGetPayload<{
   include: {
+    ratings: { select: { score: true } };
     job_offer: {
       select: {
         title: true;
@@ -50,14 +62,12 @@ type ResumeAssignment = Prisma.AssignmentGetPayload<{
         amount: true;
         scheduled_at: true;
         payment_flow: true;
+        category_id: true;
         employer: { select: { first_name: true; last_name: true } };
       };
     };
   };
 }>;
-
-/** How many recent missions to list on the CV (kept low to fit one page). */
-const RESUME_EXPERIENCE_LIMIT = 5;
 
 @Injectable()
 export class ResumeService {
@@ -100,6 +110,7 @@ export class ResumeService {
         profile_type: true,
         verification_status: true,
         created_at: true,
+        rating_avg: true,
         categories: { include: { category: true } },
       },
     });
@@ -108,17 +119,22 @@ export class ResumeService {
       throw new NotFoundException('Profil introuvable');
     }
 
-    const completedWhere = {
-      worker_id: profileId,
-      status: 'COMPLETED' as const,
-    };
-
-    // Total completed missions (stat strip) vs. the few we list (page fit).
-    const [totalCompleted, assignments] = await Promise.all([
-      this.prisma.assignment.count({ where: completedWhere }),
+    // Stat strip counts completed missions; the list below ranks both completed
+    // and current (in-progress) missions by relevance and shows the best few.
+    const [totalCompleted, eligible] = await Promise.all([
+      this.prisma.assignment.count({
+        where: { worker_id: profileId, status: AssignmentStatus.COMPLETED },
+      }),
       this.prisma.assignment.findMany({
-        where: completedWhere,
+        where: {
+          worker_id: profileId,
+          status: {
+            in: [AssignmentStatus.COMPLETED, AssignmentStatus.CONFIRMED],
+          },
+        },
         include: {
+          // The rating THIS worker earned on the mission (ratee = worker).
+          ratings: { where: { ratee_id: profileId }, select: { score: true } },
           job_offer: {
             select: {
               title: true,
@@ -126,14 +142,25 @@ export class ResumeService {
               amount: true,
               scheduled_at: true,
               payment_flow: true,
+              category_id: true,
               employer: { select: { first_name: true, last_name: true } },
             },
           },
         },
-        orderBy: { completed_at: 'desc' },
-        take: RESUME_EXPERIENCE_LIMIT,
+        // Prefetch a bounded set ordered by recency; relevance ranking below
+        // picks the final top few.
+        orderBy: { job_offer: { scheduled_at: 'desc' } },
+        take: 100,
       }),
     ]);
+
+    const assignments = rankResumeExperiences(eligible, {
+      targetCategoryIds: new Set(
+        profile.categories.map((c) => c.category_id).filter(Boolean),
+      ),
+      ratingAvg: profile.rating_avg,
+      limit: RESUME_EXPERIENCE_LIMIT,
+    });
 
     const filename = buildResumeFilename(profile.first_name, profile.last_name);
 
@@ -165,10 +192,12 @@ export class ResumeService {
     const experiences: ResumeJob[] = assignments.map((a) => {
       const job = a.job_offer;
       const date = a.completed_at ?? job.scheduled_at;
+      const inProgress = a.status === AssignmentStatus.CONFIRMED;
       return {
         period: date.toLocaleDateString('fr-FR').toUpperCase(),
         employer: `${job.employer.first_name} ${job.employer.last_name}`,
-        status: 'Terminé',
+        status: inProgress ? 'En cours' : 'Terminé',
+        ongoing: inProgress,
         title: job.title,
         amount: this.formatAmount(job.amount),
         location: job.address,
@@ -197,20 +226,24 @@ export class ResumeService {
     const experiencesHtml =
       experiences.length > 0
         ? experiences
-            .map(
-              (job) => `
+            .map((job) => {
+              // Green pill for completed, amber for an in-progress mission.
+              const pill = job.ongoing
+                ? 'background:#FEF3E2; border:1px solid #F7D9A8; color:#B4690E;'
+                : 'background:#E7F8EE; border:1px solid #BCEACE; color:#0A8C42;';
+              return `
       <div style="border-top:1px solid #E6EAE7; padding:17px 0;">
         <div style="display:flex; justify-content:space-between; align-items:baseline; gap:16px;">
           <div style="font-family:'Space Grotesk',sans-serif; font-size:10px; font-weight:600; letter-spacing:0.16em; text-transform:uppercase; color:#7A857F;">${esc(job.period)}&nbsp;&nbsp;·&nbsp;&nbsp;${esc(job.employer)}</div>
-          <div style="flex-shrink:0; display:inline-flex; align-items:center; gap:6px; background:#E7F8EE; border:1px solid #BCEACE; color:#0A8C42; font-family:'Space Grotesk',sans-serif; font-size:9px; font-weight:600; letter-spacing:0.14em; text-transform:uppercase; padding:3px 9px; border-radius:999px;">${esc(job.status)}</div>
+          <div style="flex-shrink:0; display:inline-flex; align-items:center; gap:6px; ${pill} font-family:'Space Grotesk',sans-serif; font-size:9px; font-weight:600; letter-spacing:0.14em; text-transform:uppercase; padding:3px 9px; border-radius:999px;">${esc(job.status)}</div>
         </div>
         <div style="display:flex; justify-content:space-between; align-items:baseline; gap:16px; margin-top:7px;">
           <h3 style="font-family:'Space Grotesk',sans-serif; font-size:17px; font-weight:600; letter-spacing:-0.01em; margin:0; color:#0F1713;">${esc(job.title)}</h3>
           <div style="flex-shrink:0; font-family:'Space Grotesk',sans-serif; font-size:14px; font-weight:600; color:#0F1713;">${esc(job.amount)}</div>
         </div>
         <div style="margin-top:4px; font-size:12.5px; color:#5A655F;">${esc(job.location)}</div>
-      </div>`,
-            )
+      </div>`;
+            })
             .join('')
         : `<div style="border-top:1px solid #E6EAE7; margin-top:8px; padding:30px 0; text-align:center; color:#7A857F; font-size:13.5px; font-style:italic;">Aucune expérience pour le moment.</div>`;
 
