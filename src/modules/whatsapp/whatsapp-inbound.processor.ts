@@ -9,6 +9,7 @@ import type {
   WhatsAppOutboundJobData,
   WhatsAppSend,
 } from './whatsapp-outbound.processor';
+import { SendTimingService } from './telemetry/send-timing.service';
 
 export type WhatsAppInboundJobData = {
   phone: string;
@@ -29,6 +30,7 @@ export class WhatsAppInboundProcessor implements OnApplicationBootstrap {
   constructor(
     private readonly conversationService: ConversationService,
     private readonly queueService: QueueService,
+    private readonly sendTiming: SendTimingService,
   ) {}
 
   onApplicationBootstrap(): void {
@@ -58,23 +60,27 @@ export class WhatsAppInboundProcessor implements OnApplicationBootstrap {
     }
 
     if (jobs.length === 1) {
-      await this.queueService.addJob<WhatsAppOutboundJobData>(
-        WHATSAPP_OUTBOUND_QUEUE,
-        jobs[0],
+      await this.sendTiming.time('enqueue', 'outbound', { to: phone }, () =>
+        this.queueService.addJob<WhatsAppOutboundJobData>(
+          WHATSAPP_OUTBOUND_QUEUE,
+          jobs[0],
+        ),
       );
     } else if (jobs.length > 1) {
       // Deliver a multi-message reply as one ordered job. The outbound worker
       // runs concurrency: 3, so separate jobs race and arrive inconsistently
       // (e.g. a carousel's pagination line landing before or after the carousel
       // from one page to the next). A sequence job is sent in array order.
-      await this.queueService.addJob<WhatsAppOutboundJobData>(
-        WHATSAPP_OUTBOUND_QUEUE,
-        {
-          phone,
-          profileId: result.profileId ?? undefined,
-          type: 'sequence',
-          messages: jobs.map(toSend),
-        },
+      await this.sendTiming.time('enqueue', 'outbound', { to: phone }, () =>
+        this.queueService.addJob<WhatsAppOutboundJobData>(
+          WHATSAPP_OUTBOUND_QUEUE,
+          {
+            phone,
+            profileId: result.profileId ?? undefined,
+            type: 'sequence',
+            messages: jobs.map(toSend),
+          },
+        ),
       );
     }
   }
