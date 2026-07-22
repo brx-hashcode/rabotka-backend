@@ -1,112 +1,195 @@
 import type { PrismaClient } from '@prisma/client';
-import { ProfileType } from '@prisma/client';
+import { AccountStatus, ProfileType } from '@prisma/client';
 
-// Seeds a worker portfolio (realizations with image galleries) so the public
-// portfolio page (/api/v1/public/workers/:slug) has something to show in dev.
-// Idempotent: skips if the target worker already has portfolio items.
+// Seeds worker portfolios (realizations with image galleries) using real,
+// contextual Unsplash photos of informal/manual trades, so the admin portfolio
+// tab and the public page have realistic data in dev.
+// Idempotent: creates each demo worker if missing (by email) and skips a worker
+// that already has portfolio items.
 
-const SEED_WORKER_EMAIL = 'fariol+worker@akieni.tech';
-const SEED_PORTFOLIO_SLUG = 'jean-travailleur-demo';
-
-// Public placeholder images (deterministic via a per-item seed).
-function demoImage(seed: string): string {
-  return `https://picsum.photos/seed/rabotka-${seed}/900/675`;
+function unsplash(id: string): string {
+  return `https://images.unsplash.com/photo-${id}?auto=format&fit=crop&w=900&q=70`;
 }
 
-const PORTFOLIO_ITEMS: Array<{
-  title: string;
+type DemoWorker = {
+  email: string;
+  firstName: string;
+  lastName: string;
+  phone: string;
+  address: string;
+  slug: string;
   description: string;
-  images: string[];
-}> = [
+  items: Array<{ title: string; description: string; images: string[] }>;
+};
+
+const DEMO_WORKERS: DemoWorker[] = [
   {
-    title: 'Rénovation peinture appartement',
+    email: 'fariol+peintre@akieni.tech',
+    firstName: 'Alex',
+    lastName: 'Peintre',
+    phone: '+242060000101',
+    address: 'Quartier Bacongo, Brazzaville',
+    slug: 'alex-peintre-demo',
     description:
-      "Peinture complète d'un appartement de 3 pièces : préparation des murs, enduit, deux couches et finitions soignées. Livré en 4 jours.",
-    images: ['peinture-1', 'peinture-2', 'peinture-3'],
+      'Peintre en bâtiment, finitions soignées intérieur et extérieur.',
+    items: [
+      {
+        title: 'Rénovation peinture appartement',
+        description:
+          "Peinture complète d'un appartement 3 pièces : préparation des murs, enduit, deux couches et finitions. Livré en 4 jours.",
+        images: [
+          unsplash('1589939705384-5185137a7f0f'),
+          unsplash('1562259949-e8e7689d7828'),
+        ],
+      },
+    ],
   },
   {
-    title: 'Pose de carrelage cuisine',
-    description:
-      'Pose de carrelage grand format dans une cuisine, avec découpes autour des meubles et joints époxy. Surface de 18 m².',
-    images: ['carrelage-1', 'carrelage-2'],
+    email: 'fariol+plombier@akieni.tech',
+    firstName: 'Marc',
+    lastName: 'Plombier',
+    phone: '+242060000102',
+    address: 'Quartier Moungali, Brazzaville',
+    slug: 'marc-plombier-demo',
+    description: 'Plomberie sanitaire, installation et dépannage.',
+    items: [
+      {
+        title: 'Installation sanitaire salle de bain',
+        description:
+          "Pose complète d'une salle de bain : alimentation, évacuation, robinetterie et test d'étanchéité.",
+        images: [unsplash('1607472586893-edb57bdc0e39')],
+      },
+    ],
   },
   {
-    title: 'Montage de mobilier et étagères',
-    description:
-      'Assemblage et fixation murale de meubles et bibliothèques pour un bureau, mise à niveau et sécurisation.',
-    images: ['montage-1'],
+    email: 'fariol+electricien@akieni.tech',
+    firstName: 'Sara',
+    lastName: 'Electricienne',
+    phone: '+242060000103',
+    address: 'Centre-ville, Pointe-Noire',
+    slug: 'sara-electricienne-demo',
+    description: 'Électricité bâtiment, mise aux normes et installation.',
+    items: [
+      {
+        title: 'Mise aux normes tableau électrique',
+        description:
+          "Remplacement d'un tableau électrique vétuste, repérage des circuits et sécurisation de l'installation.",
+        images: [unsplash('1621905251189-08b45d6a269e')],
+      },
+    ],
+  },
+  {
+    email: 'fariol+carreleur@akieni.tech',
+    firstName: 'Yann',
+    lastName: 'Carreleur',
+    phone: '+242060000104',
+    address: 'Quartier Poto-Poto, Brazzaville',
+    slug: 'yann-carreleur-demo',
+    description: 'Pose de carrelage et faïence, sols et murs.',
+    items: [
+      {
+        title: 'Pose de carrelage cuisine',
+        description:
+          'Pose de carrelage grand format avec découpes autour des meubles et joints époxy. Surface de 18 m².',
+        images: [unsplash('1620626011761-996317b8d101')],
+      },
+    ],
+  },
+  {
+    email: 'fariol+menage@akieni.tech',
+    firstName: 'Awa',
+    lastName: 'Menagere',
+    phone: '+242060000105',
+    address: 'Quartier Ouenzé, Brazzaville',
+    slug: 'awa-menage-demo',
+    description: 'Nettoyage de fin de chantier et entretien de bureaux.',
+    items: [
+      {
+        title: 'Nettoyage fin de chantier',
+        description:
+          'Nettoyage complet après travaux : dépoussiérage, vitres, sols et évacuation des gravats légers.',
+        images: [unsplash('1581578731548-c64695cc6952')],
+      },
+    ],
+  },
+  {
+    email: 'fariol+menuisier@akieni.tech',
+    firstName: 'Ibrahim',
+    lastName: 'Menuisier',
+    phone: '+242060000106',
+    address: 'Quartier Tié-Tié, Pointe-Noire',
+    slug: 'ibrahim-menuisier-demo',
+    description: 'Menuiserie bois, meubles et agencements sur mesure.',
+    items: [
+      {
+        title: 'Fabrication meuble sur mesure',
+        description:
+          "Conception et fabrication d'une bibliothèque sur mesure en bois massif, ponçage et vernis.",
+        images: [unsplash('1504148455328-c376907d081c')],
+      },
+    ],
   },
 ];
 
 export async function seedPortfolio(prisma: PrismaClient): Promise<void> {
-  const worker =
-    (await prisma.profile.findUnique({
-      where: { email: SEED_WORKER_EMAIL },
-      select: { id: true, portfolio_slug: true, profile_type: true },
-    })) ??
-    (await prisma.profile.findFirst({
-      where: { profile_type: ProfileType.WORKER },
-      select: { id: true, portfolio_slug: true, profile_type: true },
-    }));
+  let created = 0;
 
-  if (!worker || worker.profile_type !== ProfileType.WORKER) {
-    console.log('[Portfolio seed] Skipped (no worker profile found).');
-    return;
-  }
-
-  const existing = await prisma.portfolioItem.count({
-    where: { profile_id: worker.id },
-  });
-  if (existing > 0) {
-    console.log(
-      '[Portfolio seed] Skipped (worker already has portfolio items).',
-    );
-    return;
-  }
-
-  // Give the worker a public portfolio slug if they don't have one yet.
-  if (!worker.portfolio_slug) {
-    const slugTaken = await prisma.profile.findUnique({
-      where: { portfolio_slug: SEED_PORTFOLIO_SLUG },
-      select: { id: true },
-    });
-    await prisma.profile.update({
-      where: { id: worker.id },
-      data: {
-        portfolio_slug: slugTaken
-          ? `${SEED_PORTFOLIO_SLUG}-${worker.id.slice(0, 6)}`
-          : SEED_PORTFOLIO_SLUG,
+  for (const worker of DEMO_WORKERS) {
+    const profile = await prisma.profile.upsert({
+      where: { email: worker.email },
+      update: {},
+      create: {
+        first_name: worker.firstName,
+        last_name: worker.lastName,
+        phone: worker.phone,
+        email: worker.email,
+        address: worker.address,
+        description: worker.description,
+        profile_type: ProfileType.WORKER,
+        status: AccountStatus.ACTIVE,
+        reliability_score: 100,
+        portfolio_slug: worker.slug,
       },
+      select: { id: true, portfolio_slug: true },
     });
-  }
 
-  for (const [index, item] of PORTFOLIO_ITEMS.entries()) {
-    await prisma.portfolioItem.create({
-      data: {
-        profile_id: worker.id,
-        title: item.title,
-        description: item.description,
-        position: index,
-        images: {
-          create: item.images.map((seed, i) => ({
-            image_url: demoImage(seed),
-            storage_key: null,
-            position: i,
-          })),
+    if (!profile.portfolio_slug) {
+      await prisma.profile.update({
+        where: { id: profile.id },
+        data: { portfolio_slug: worker.slug },
+      });
+    }
+
+    const existing = await prisma.portfolioItem.count({
+      where: { profile_id: profile.id },
+    });
+    if (existing > 0) continue;
+
+    for (const [index, item] of worker.items.entries()) {
+      await prisma.portfolioItem.create({
+        data: {
+          profile_id: profile.id,
+          title: item.title,
+          description: item.description,
+          position: index,
+          images: {
+            create: item.images.map((url, i) => ({
+              image_url: url,
+              storage_key: null,
+              position: i,
+            })),
+          },
         },
-      },
-    });
+      });
+    }
+    created += 1;
   }
 
-  const slug =
-    (
-      await prisma.profile.findUnique({
-        where: { id: worker.id },
-        select: { portfolio_slug: true },
-      })
-    )?.portfolio_slug ?? SEED_PORTFOLIO_SLUG;
-
+  if (created === 0) {
+    console.log('[Portfolio seed] Skipped (demo portfolios already present).');
+    return;
+  }
   console.log(
-    `[Portfolio seed] Created ${PORTFOLIO_ITEMS.length} portfolio items for worker ${worker.id} (public: /api/v1/public/workers/${slug}).`,
+    `[Portfolio seed] Seeded portfolios for ${created} demo worker(s) with Unsplash images.`,
   );
 }
