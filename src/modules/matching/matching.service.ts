@@ -129,6 +129,7 @@ export class MatchingService {
     completed_count?: number;
     total_terminal_count?: number;
     rejected_categories?: string[];
+    portfolio_items?: Array<{ title: string; description: string | null }>;
   }): string {
     const parts: string[] = [
       `${profile.first_name} ${profile.last_name}`.trim(),
@@ -183,6 +184,14 @@ export class MatchingService {
       ].join(', ');
       parts.push(`Travaux effectués: ${jobTitles}`);
       if (jobCategories) parts.push(`Domaines travaillés: ${jobCategories}`);
+    }
+
+    // Portfolio realizations (worker showcase)
+    if (profile.portfolio_items && profile.portfolio_items.length > 0) {
+      const realizations = profile.portfolio_items
+        .map((p) => (p.description ? `${p.title} — ${p.description}` : p.title))
+        .join('; ');
+      if (realizations) parts.push(`Réalisations: ${realizations}`);
     }
 
     // Negative signal: categories the worker avoids
@@ -465,6 +474,10 @@ export class MatchingService {
             },
             orderBy: { created_at: 'desc' },
             take: 10,
+          },
+          portfolio_items: {
+            select: { title: true, description: true },
+            orderBy: { position: 'asc' },
           },
         },
       }),
