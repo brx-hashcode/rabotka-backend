@@ -139,10 +139,18 @@ jobs:
     timeout-minutes: 25
     permissions:
       contents: read
+      packages: read
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4.2.2
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up SSH key
         run: |
@@ -160,14 +168,21 @@ jobs:
         run: |
           ssh-keyscan -p "${{ secrets.VPS_PORT }}" -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts
 
-      - name: Pull image on VPS
+      # The VPS's IPv6 route to ghcr.io drops large layer transfers ("connection
+      # reset by peer"), so pulling on the VPS is unreliable. Instead, pull on the
+      # runner (healthy GHCR connectivity) and stream the image to the VPS over the
+      # SSH channel — the VPS never talks to ghcr.io.
+      - name: Load image onto VPS (bypass VPS→GHCR pull)
         run: |
           IMAGE="ghcr.io/${{ github.repository_owner }}/rabotka-backend:${{ needs.build-and-push.outputs.image-sha-tag }}"
-          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+          echo "Pulling $IMAGE on the runner..."
+          docker pull "$IMAGE"
+          echo "Streaming image to the VPS (docker save | ssh docker load)..."
+          docker save "$IMAGE" | gzip -1 | ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
             -o ServerAliveInterval=60 \
             -o ServerAliveCountMax=10 \
             -p "${{ secrets.VPS_PORT }}" "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
-            "ok=0; for i in 1 2 3 4 5 6; do timeout 300 docker pull $IMAGE && { ok=1; break; }; echo \"Pull attempt \$i failed/stalled, retrying in \$((i*10))s...\"; sleep \$((i*10)); done; [ \$ok = 1 ] || { echo 'All pull attempts failed'; exit 1; }"
+            "gunzip | docker load"
 
       - name: Fetch secrets from Vault and write .env
         run: |
