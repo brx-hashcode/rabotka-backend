@@ -82,11 +82,12 @@ export class PortfolioController {
   @ApiBearerAuth()
   @ApiCookieAuth()
   @ApiOperation({ summary: 'Delete a portfolio item and its images' })
-  remove(
+  async remove(
     @Req() req: ProfileAuthenticatedRequest,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
-    return this.portfolioService.deleteItem(req.user.profileId, id);
+    await this.portfolioService.deleteItem(req.user.profileId, id);
+    return { success: true };
   }
 
   @Post(':id/images')
@@ -107,11 +108,12 @@ export class PortfolioController {
   @ApiBearerAuth()
   @ApiCookieAuth()
   @ApiOperation({ summary: 'Remove a single image from a portfolio item' })
-  removeImage(
+  async removeImage(
     @Req() req: ProfileAuthenticatedRequest,
     @Param('id', ParseUUIDPipe) id: string,
     @Param('imageId', ParseUUIDPipe) imageId: string,
   ) {
-    return this.portfolioService.removeImage(req.user.profileId, id, imageId);
+    await this.portfolioService.removeImage(req.user.profileId, id, imageId);
+    return { success: true };
   }
 }

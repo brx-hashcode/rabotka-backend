@@ -130,7 +130,7 @@ export class PortfolioService {
   async listOwn(profileId: string): Promise<PortfolioItemView[]> {
     const items = await this.prisma.portfolioItem.findMany({
       where: { profile_id: profileId },
-      orderBy: { position: 'asc' },
+      orderBy: { created_at: 'desc' },
       include: { images: { orderBy: { position: 'asc' } } },
     });
     return items.map((item) => this.toItemView(item));
@@ -244,7 +244,7 @@ export class PortfolioService {
         address: true,
         profile_type: true,
         portfolio_items: {
-          orderBy: { position: 'asc' },
+          orderBy: { created_at: 'desc' },
           include: { images: { orderBy: { position: 'asc' } } },
         },
       },
