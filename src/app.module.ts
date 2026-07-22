@@ -32,6 +32,7 @@ import { LogModule } from './modules/log/log.module';
 import { WalletModule } from './modules/wallet/wallet.module';
 import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
 import { WhatsAppTelemetryModule } from './modules/whatsapp/telemetry/whatsapp-telemetry.module';
+import { PortfolioModule } from './modules/portfolio/portfolio.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { ReminderModule } from './modules/bot/reminder/reminder.module';
 import { PaymentsModule } from './modules/payments/payment.module';
@@ -129,6 +130,7 @@ import { HttpOnlyArcjetGuard } from './common/guards/http-only-arcjet.guard';
     MailModule,
     WhatsAppTelemetryModule,
     WhatsAppModule,
+    PortfolioModule,
     ReminderModule,
     AuthModule,
     ProfileModule,
