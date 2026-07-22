@@ -9,8 +9,10 @@ import {
 import { ConfigService } from '@nestjs/config';
 import TwilioSDK from 'twilio';
 import { SystemConfigService } from '../../../modules/system-config/system-config.service';
+import { SendTimingService } from '../../../modules/whatsapp/telemetry/send-timing.service';
 
 type TwilioClient = ReturnType<typeof TwilioSDK>;
+type CreateMessagePayload = Parameters<TwilioClient['messages']['create']>[0];
 
 @Injectable()
 export class TwilioService implements OnModuleInit {
@@ -27,6 +29,9 @@ export class TwilioService implements OnModuleInit {
     @Optional()
     @Inject(forwardRef(() => SystemConfigService))
     private readonly systemConfig?: SystemConfigService,
+    @Optional()
+    @Inject(SendTimingService)
+    private readonly sendTiming?: SendTimingService,
   ) {
     this.accountSid = this.config.get<string>('TWILIO_ACCOUNT_SID') ?? null;
     this.authToken = this.config.get<string>('TWILIO_AUTH_TOKEN') ?? null;
@@ -121,6 +126,21 @@ export class TwilioService implements OnModuleInit {
     return this.client;
   }
 
+  private async timedCreate(
+    client: TwilioClient,
+    payload: CreateMessagePayload,
+    meta: { to: string; templateSid?: string },
+  ): Promise<{ sid: string | null }> {
+    const run = () => client.messages.create(payload);
+    const message = this.sendTiming
+      ? await this.sendTiming.time('twilioAck', 'outbound', meta, run)
+      : await run();
+    if (message.sid) {
+      void this.sendTiming?.markSent(message.sid, meta);
+    }
+    return message;
+  }
+
   async sendWhatsApp(to: string, body: string): Promise<string | null> {
     const client = this.getClient();
 
@@ -135,11 +155,11 @@ export class TwilioService implements OnModuleInit {
     const fromFormatted = this.formatWhatsAppNumber(this.whatsappFrom);
 
     try {
-      const message = await client.messages.create({
-        from: fromFormatted,
-        to: toFormatted,
-        body,
-      });
+      const message = await this.timedCreate(
+        client,
+        { from: fromFormatted, to: toFormatted, body },
+        { to },
+      );
       if (message.sid) {
         this.logger.debug(
           `WhatsApp message sent to ${to}. Message SID: ${message.sid}`,
@@ -196,14 +216,18 @@ export class TwilioService implements OnModuleInit {
     const fromFormatted = this.formatWhatsAppNumber(this.whatsappFrom);
 
     try {
-      const message = await client.messages.create({
-        from: fromFormatted,
-        to: toFormatted,
-        contentSid,
-        ...(contentVariables
-          ? { contentVariables: JSON.stringify(contentVariables) }
-          : {}),
-      });
+      const message = await this.timedCreate(
+        client,
+        {
+          from: fromFormatted,
+          to: toFormatted,
+          contentSid,
+          ...(contentVariables
+            ? { contentVariables: JSON.stringify(contentVariables) }
+            : {}),
+        },
+        { to, templateSid: contentSid },
+      );
       if (message.sid) {
         this.logger.debug(
           `WhatsApp template ${contentSid} sent to ${to}. Message SID: ${message.sid}`,
@@ -256,7 +280,7 @@ export class TwilioService implements OnModuleInit {
       };
       if (body) payload.body = body;
 
-      const message = await client.messages.create(payload);
+      const message = await this.timedCreate(client, payload, { to });
       if (message.sid) {
         this.logger.debug(
           `WhatsApp media sent to ${to}. Message SID: ${message.sid}`,

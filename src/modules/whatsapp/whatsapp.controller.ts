@@ -9,6 +9,7 @@ import {
   ForbiddenException,
   Logger,
   Inject,
+  UseInterceptors,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
@@ -18,6 +19,7 @@ import { Public } from '../auth/decorators/public.decorator.js';
 import { WhatsAppService } from './whatsapp.service';
 import { VerifyWhatsAppDto } from './dto/verify-whatsapp.dto';
 import { TwilioService } from '../../common/services/twilio/twilio.service';
+import { SendTimingInterceptor } from './telemetry/send-timing.interceptor';
 import { QueueService } from '../../common/services/queue/queue.service';
 import { WHATSAPP_INBOUND_QUEUE } from '../../common/services/queue/queue.module';
 import type { WhatsAppInboundJobData } from './whatsapp-inbound.processor';
@@ -33,6 +35,7 @@ const RATE_LIMIT_WINDOW = 60; // seconds
 @ApiTags('WhatsApp')
 @Controller('whatsapp')
 @Public()
+@UseInterceptors(SendTimingInterceptor)
 export class WhatsAppController {
   private readonly logger = new Logger(WhatsAppController.name);
 
