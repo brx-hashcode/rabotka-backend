@@ -53,7 +53,9 @@ function makeMail() {
 }
 
 function makeLayout() {
-  return { wrap: jest.fn().mockImplementation((html: string) => Promise.resolve(html)) };
+  return {
+    wrap: jest.fn().mockImplementation((html: string) => Promise.resolve(html)),
+  };
 }
 
 function makeWalletService() {
@@ -61,6 +63,15 @@ function makeWalletService() {
     getProfileWalletForAdmin: jest
       .fn()
       .mockResolvedValue({ balance: 0, transactions: [] }),
+  };
+}
+
+function makePortfolioService() {
+  return {
+    listOwn: jest.fn().mockResolvedValue([{ id: 'item1', images: [] }]),
+    updateItem: jest.fn().mockResolvedValue({ id: 'item1', title: 'new' }),
+    deleteItem: jest.fn().mockResolvedValue(undefined),
+    removeImage: jest.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -74,6 +85,7 @@ function makeController(prismaProfile: any = null) {
     makeMail() as any,
     makeLayout() as any,
     makeWalletService() as any,
+    makePortfolioService() as any,
   );
 }
 
@@ -137,6 +149,7 @@ describe('AdminProfileController', () => {
         makeMail() as any,
         makeLayout() as any,
         makeWalletService() as any,
+        makePortfolioService() as any,
       );
       const result = await ctrl.getMessages('p1');
       expect(result).toHaveLength(2);
@@ -209,6 +222,7 @@ describe('AdminProfileController', () => {
         makeMail() as any,
         makeLayout() as any,
         makeWalletService() as any,
+        makePortfolioService() as any,
       );
       const result = await ctrl.sendMessage(
         'p1',
@@ -259,6 +273,7 @@ describe('AdminProfileController', () => {
         mail as any,
         makeLayout() as any,
         makeWalletService() as any,
+        makePortfolioService() as any,
       );
       const result = await ctrl.sendMessage(
         'p1',
@@ -289,6 +304,7 @@ describe('AdminProfileController', () => {
       makeMail() as any,
       makeLayout() as any,
       makeWalletService() as any,
+      makePortfolioService() as any,
     );
     const result = await ctrl.update('p1', { first_name: 'Jo' } as any, {
       user: { userId: 'u1' },
@@ -312,6 +328,7 @@ describe('AdminProfileController', () => {
       makeMail() as any,
       makeLayout() as any,
       makeWalletService() as any,
+      makePortfolioService() as any,
     );
     const result = await ctrl.verify(
       'p1',
@@ -341,6 +358,7 @@ describe('AdminProfileController', () => {
       makeMail() as any,
       makeLayout() as any,
       makeWalletService() as any,
+      makePortfolioService() as any,
     );
     const result = await ctrl.updateStatus('p1', { status: 'ACTIVE' as any }, {
       user: { userId: 'u1' },
@@ -365,5 +383,107 @@ describe('AdminProfileController', () => {
       get: () => undefined,
     } as any);
     expect(result).toEqual({ token: 'tok' });
+  });
+
+  describe('portfolio (admin)', () => {
+    const adminReq = { user: { userId: 'u1' } } as any;
+
+    it('getPortfolio() delegates to portfolioService.listOwn with the profile id', async () => {
+      const portfolio = makePortfolioService();
+      const logService = makeLogService();
+      const ctrl = new AdminProfileController(
+        makeProfileService() as any,
+        logService as any,
+        makePaymentRequestService() as any,
+        makePrisma() as any,
+        makeWhatsApp() as any,
+        makeMail() as any,
+        makeLayout() as any,
+        makeWalletService() as any,
+        portfolio as any,
+      );
+      const result = await ctrl.getPortfolio('worker-1');
+      expect(portfolio.listOwn).toHaveBeenCalledWith('worker-1');
+      expect(result).toEqual([{ id: 'item1', images: [] }]);
+    });
+
+    it('updatePortfolioItem() delegates with (profileId, itemId, dto) and audit-logs', async () => {
+      const portfolio = makePortfolioService();
+      const logService = makeLogService();
+      const ctrl = new AdminProfileController(
+        makeProfileService() as any,
+        logService as any,
+        makePaymentRequestService() as any,
+        makePrisma() as any,
+        makeWhatsApp() as any,
+        makeMail() as any,
+        makeLayout() as any,
+        makeWalletService() as any,
+        portfolio as any,
+      );
+      const dto = { title: 'new' };
+      await ctrl.updatePortfolioItem('worker-1', 'item1', dto as any, adminReq);
+      expect(portfolio.updateItem).toHaveBeenCalledWith(
+        'worker-1',
+        'item1',
+        dto,
+      );
+      expect(logService.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'PORTFOLIO_ITEM_UPDATED',
+          entityId: 'item1',
+          profileId: 'worker-1',
+        }),
+      );
+    });
+
+    it('deletePortfolioItem() delegates and returns success', async () => {
+      const portfolio = makePortfolioService();
+      const ctrl = new AdminProfileController(
+        makeProfileService() as any,
+        makeLogService() as any,
+        makePaymentRequestService() as any,
+        makePrisma() as any,
+        makeWhatsApp() as any,
+        makeMail() as any,
+        makeLayout() as any,
+        makeWalletService() as any,
+        portfolio as any,
+      );
+      const result = await ctrl.deletePortfolioItem(
+        'worker-1',
+        'item1',
+        adminReq,
+      );
+      expect(portfolio.deleteItem).toHaveBeenCalledWith('worker-1', 'item1');
+      expect(result).toEqual({ success: true });
+    });
+
+    it('deletePortfolioImage() delegates to removeImage(profileId, itemId, imageId)', async () => {
+      const portfolio = makePortfolioService();
+      const ctrl = new AdminProfileController(
+        makeProfileService() as any,
+        makeLogService() as any,
+        makePaymentRequestService() as any,
+        makePrisma() as any,
+        makeWhatsApp() as any,
+        makeMail() as any,
+        makeLayout() as any,
+        makeWalletService() as any,
+        portfolio as any,
+      );
+      const result = await ctrl.deletePortfolioImage(
+        'worker-1',
+        'item1',
+        'img1',
+        adminReq,
+      );
+      expect(portfolio.removeImage).toHaveBeenCalledWith(
+        'worker-1',
+        'item1',
+        'img1',
+      );
+      expect(result).toEqual({ success: true });
+    });
   });
 });
