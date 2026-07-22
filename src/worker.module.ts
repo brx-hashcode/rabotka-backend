@@ -6,6 +6,7 @@ import { RedisModule } from './common/services/redis/redis.module';
 import { QueueModule } from './common/services/queue/queue.module';
 import { MailModule } from './modules/mail/mail.module';
 import { TwilioService } from './common/services/twilio/twilio.service';
+import { SendTimingService } from './modules/whatsapp/telemetry/send-timing.service';
 import { WhatsAppService } from './modules/whatsapp/whatsapp.service';
 import { ReminderProcessor } from './modules/bot/reminder/reminder.processor';
 import { PrismaService } from './common/services/prisma/prisma.service';
@@ -75,12 +76,18 @@ export class WorkerModule {
         inject: [SystemConfigService],
       },
       {
+        provide: SendTimingService,
+        useFactory: (redis: Redis) => new SendTimingService(redis),
+        inject: [REDIS_CONNECTION],
+      },
+      {
         provide: TwilioService,
         useFactory: (
           config: ConfigService,
           systemConfig: SystemConfigService,
-        ) => new TwilioService(config, systemConfig),
-        inject: [ConfigService, SystemConfigService],
+          sendTiming: SendTimingService,
+        ) => new TwilioService(config, systemConfig, sendTiming),
+        inject: [ConfigService, SystemConfigService, SendTimingService],
       },
       {
         provide: WalletService,

@@ -9,10 +9,22 @@ const mockQueueService = {
   addJob: jest.fn().mockResolvedValue(undefined),
 };
 
+const mockSendTiming = {
+  time: jest.fn(
+    (
+      _stage: string,
+      _dir: string,
+      _meta: unknown,
+      fn: () => Promise<unknown>,
+    ) => fn(),
+  ),
+};
+
 function makeProcessor() {
   return new WhatsAppInboundProcessor(
     mockConversationService as any,
     mockQueueService as any,
+    mockSendTiming as any,
   );
 }
 
