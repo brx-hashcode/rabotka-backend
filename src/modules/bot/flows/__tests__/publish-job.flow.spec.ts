@@ -263,11 +263,11 @@ describe('runPublishJobFlow()', () => {
       expect(result.nextState?.payload.amount).toBe(15000);
     });
 
-    it('rejects 0 as below minimum and stays at step 4', async () => {
+    it('treats 0 as skip — advances to step 5 with no amount', async () => {
       const state = makeState(4);
       const result = await runPublishJobFlow(state, '0', employerProfile, ctx);
-      expect(result.nextState?.step).toBe(4);
-      expect(result.reply[0]).toContain('Montant invalide');
+      expect(result.nextState?.step).toBe(5);
+      expect(result.nextState?.payload.amount).toBeUndefined();
     });
   });
 
