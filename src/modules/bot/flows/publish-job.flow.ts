@@ -469,23 +469,26 @@ function handlePublishStep4(args: StepArgs): FlowResult {
   if (!trimmed) {
     return {
       reply: [
-        `*Entrez le montant en FCFA (entre ${AMOUNT_MIN.toLocaleString('fr-FR')} et ${AMOUNT_MAX.toLocaleString('fr-FR')}).*`,
+        `*Entrez le montant en FCFA (entre ${AMOUNT_MIN.toLocaleString('fr-FR')} et ${AMOUNT_MAX.toLocaleString('fr-FR')}), ou 0 pour passer.*`,
       ],
       nextState: state,
     };
   }
-  const amount = Number.parseInt(trimmed.replaceAll(/\s/g, ''), 10);
-  if (
-    Number.isNaN(amount) ||
-    amount < AMOUNT_MIN ||
-    amount > AMOUNT_MAX
-  ) {
-    return {
-      reply: [
-        `*Montant invalide. Entrez un montant entre ${AMOUNT_MIN.toLocaleString('fr-FR')} et ${AMOUNT_MAX.toLocaleString('fr-FR')} FCFA.*`,
-      ],
-      nextState: state,
-    };
+  // "0" skips this optional field — the step 3 prompt advertises it and the
+  // job-offer DTO marks `amount` optional. Leaving it undefined drops it from
+  // the payload (and thus the created offer).
+  const skipped = trimmed === '0';
+  let amount: number | undefined;
+  if (!skipped) {
+    amount = Number.parseInt(trimmed.replaceAll(/\s/g, ''), 10);
+    if (Number.isNaN(amount) || amount < AMOUNT_MIN || amount > AMOUNT_MAX) {
+      return {
+        reply: [
+          `*Montant invalide. Entrez un montant entre ${AMOUNT_MIN.toLocaleString('fr-FR')} et ${AMOUNT_MAX.toLocaleString('fr-FR')} FCFA, ou 0 pour passer.*`,
+        ],
+        nextState: state,
+      };
+    }
   }
   return {
     reply: [
@@ -732,6 +735,13 @@ function buildSummary(payload: Record<string, unknown>): string {
     payload.note == null || typeof payload.note !== 'string'
       ? 'Aucune'
       : payload.note;
+  // Amount and payment flow are both optional/skippable — avoid "NaN FCFA" and
+  // a dangling flow separator when either is absent.
+  const amountStr =
+    typeof payload.amount === 'number' && !Number.isNaN(payload.amount)
+      ? `${payload.amount.toLocaleString('fr-FR')} FCFA`
+      : 'Non spécifié';
+  const flowSuffix = flow && flow !== '-' ? ` ${flow}` : '';
   return [
     `*Titre*: ${title}`,
     '',
@@ -739,7 +749,7 @@ function buildSummary(payload: Record<string, unknown>): string {
     '',
     `*Date et heure*: ${scheduled}`,
     '',
-    `*Montant*: ${Number(payload.amount).toLocaleString('fr-FR')} FCFA ${flow}`.trim(),
+    `*Montant*: ${amountStr}${flowSuffix}`,
     '',
     `*Adresse*: ${address}`,
     '',

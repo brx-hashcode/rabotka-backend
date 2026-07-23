@@ -32,7 +32,6 @@ import { BotNotificationService } from '../bot/services/bot-notification.service
 import { formatPenaltyPaidSuccess } from '../bot/messages/penalty.messages';
 import { ContactUnlockService } from '../contact-unlock/contact-unlock.service';
 import { InvoiceService } from '../invoice/invoice.service';
-import { StorageService } from '../../common/services/storage/storage.service';
 import { generatePaymentReference } from '../../common/utils/payment-reference';
 import { LogService } from '../log/log.service';
 import { QueueService } from '../../common/services/queue/queue.service';
@@ -112,7 +111,6 @@ export class PaymentRequestService {
     private readonly botNotification: BotNotificationService,
     private readonly contactUnlockService: ContactUnlockService,
     private readonly invoiceService: InvoiceService,
-    private readonly storageService: StorageService,
     private readonly queueService: QueueService,
     private readonly logService: LogService,
   ) {}
@@ -459,22 +457,14 @@ export class PaymentRequestService {
     await this.handlePenaltyPostPayment(request);
     await this.handleWalletTopUpPostPayment(request, context);
 
-    // Compute unlock result first (needed for the confirmation message text)
-    // but defer sending the contact details notification until after invoice
+    // Compute unlock result first (needed for the confirmation message text).
     const unlockResult = await this.handleContactUnlockPostPayment(request);
 
     // 1. "🎉 Paiement confirmé"
     await this.sendPaymentSuccessNotifications(request, context, unlockResult);
 
-    // 2. Invoice PDF
-    await this.createAndSendInvoice(request, context).catch((err) =>
-      this.logger.error(
-        `Invoice creation/sending failed for payment ${request.id}:`,
-        err,
-      ),
-    );
-
-    // 3. Contact details (regular unlock)
+    // 2. Contact details (regular unlock) — this is what the user is waiting
+    // for after paying, so send it before the invoice, not after.
     for (const id of unlockResult.unlockedAttemptIds) {
       await this.botNotification
         .sendContactUnlockedNotification(id)
@@ -486,8 +476,19 @@ export class PaymentRequestService {
         );
     }
 
-    // 4. Contact details (recommendation unlock)
+    // 3. Contact details (recommendation unlock)
     await this.handleRecommendationContactPostPayment(request, context);
+
+    // 4. Invoice PDF (email only) — fire-and-forget. PDF generation + email are
+    // relatively slow and the invoice isn't needed to complete the unlock, so
+    // we don't await it: the user gets their contact immediately while the
+    // invoice is produced in the background of this worker process.
+    void this.createAndSendInvoice(request, context).catch((err) =>
+      this.logger.error(
+        `Invoice creation/sending failed for payment ${request.id}:`,
+        err,
+      ),
+    );
   }
 
   private async buildPaymentProcessingContext(
@@ -740,7 +741,7 @@ export class PaymentRequestService {
 
     if (request.profile.phone) {
       const lines = [
-        `🎉 *Paiement confirmé*`,
+        `🎉 *Paiement confirmé* !`,
         '',
         `Montant : *${context.amount.toLocaleString('fr-FR')} FCFA*`,
         `Objet : ${context.paymentDescription}`,
@@ -757,7 +758,7 @@ export class PaymentRequestService {
         if (unlockResult?.nowUnlocked) {
           lines.push(
             '',
-            '✅ *Les deux parties ont payé — les coordonnées vous ont été envoyées.*',
+            '*Les deux parties ont payé — les coordonnées vous seront envoyées dans le message suivant.*',
           );
         } else {
           lines.push(
@@ -836,7 +837,12 @@ export class PaymentRequestService {
       invoice.id,
     );
 
-    // 3. Send email with PDF attachment
+    // 3. Send the invoice by email only. We intentionally do NOT send it over
+    // WhatsApp: that path uploads the PDF to storage and then calls
+    // sendMediaMessage (two slow network round-trips), and this whole method is
+    // awaited before the contact-details notification — so sending the invoice
+    // on WhatsApp made the user wait longer for the contact they just paid for.
+    // The PDF stays available in the app (invoice list) and by email.
     if (request.profile.email) {
       await this.mailService
         .sendMail({
@@ -857,31 +863,6 @@ export class PaymentRequestService {
             err,
           ),
         );
-    }
-
-    // 4. Send WhatsApp media (upload to storage to get a public URL)
-    if (request.profile.phone) {
-      const uploaded = await this.storageService
-        .upload(buffer, filename, { folder: 'invoices' })
-        .catch((err) => {
-          this.logger.warn(`Invoice storage upload failed:`, err);
-          return null;
-        });
-
-      if (uploaded?.url) {
-        await this.whatsAppService
-          .sendMediaMessage(
-            request.profile.phone,
-            uploaded.url,
-            `📄 Votre facture de ${context.amount.toLocaleString('fr-FR')} FCFA`,
-          )
-          .catch((err) =>
-            this.logger.warn(
-              `Invoice WhatsApp send failed for ${request.profile.phone}:`,
-              err,
-            ),
-          );
-      }
     }
   }
 
