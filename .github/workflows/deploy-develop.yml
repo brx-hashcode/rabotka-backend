@@ -28,15 +28,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4.2.2
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
       - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:
           version: latest
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          # Cache the pnpm store keyed on the lockfile so unchanged deps are
+          # restored instead of re-downloaded on every deploy. pnpm must be
+          # installed first for setup-node to locate its store path.
+          cache: pnpm
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --ignore-scripts
@@ -304,21 +308,22 @@ jobs:
       contents: read
 
     steps:
-      - name: Wait for container to stabilize
-        run: sleep 60
-
       - name: Check health endpoint
         run: |
-          for i in $(seq 1 20); do
+          # Short initial wait, then poll tightly so a healthy backend is
+          # detected in ~15-25s while still tolerating a slow boot (migrations +
+          # DB/Redis/Qdrant): 15s + 30×8s ≈ 4 min ceiling. Exits on first 200.
+          sleep 15
+          for i in $(seq 1 30); do
             STATUS=$(curl -o /tmp/health_response.txt -s -w "%{http_code}" \
               --max-time 30 \
               "https://api-rabotka.${{ secrets.INFRA_DOMAIN }}/api/v1/health")
             echo "Attempt $i — HTTP status: $STATUS"
             cat /tmp/health_response.txt
             [ "$STATUS" = "200" ] && exit 0
-            sleep 15
+            sleep 8
           done
-          echo "Health check failed after 20 attempts"
+          echo "Health check failed after 30 attempts"
           exit 1
 
   # ───────────────────────────────────────────────────────────────────────────
