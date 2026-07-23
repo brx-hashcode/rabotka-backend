@@ -174,9 +174,14 @@ jobs:
           IMAGE="ghcr.io/${{ github.repository_owner }}/rabotka-backend:${{ needs.build-and-push.outputs.image-sha-tag }}"
           DEST="${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}"
           SSHOPTS="-i $HOME/.ssh/deploy_key -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -p ${{ secrets.VPS_PORT }}"
-          # Fast path: native pull on the VPS. Short 90s timeout × 3 so a
-          # VPS→GHCR blackhole fails fast (~5 min) instead of hanging ~30 min.
-          if ssh $SSHOPTS "$DEST" "ok=0; for i in 1 2 3; do timeout 90 docker pull '$IMAGE' && { ok=1; break; }; echo \"native pull attempt \$i stalled...\"; sleep 5; done; [ \$ok = 1 ]"; then
+          # Fast path: native pull on the VPS. A brand-new tag pulls every layer
+          # cold, which a short 90s window can't finish — so it used to fail over
+          # to the slow SSH stream on the FIRST deploy (and only pass on a rerun
+          # once layers were cached). Each killed attempt resumes from the layers
+          # already on disk, so we give it a 300s window × 3 (~15 min budget) to
+          # complete natively; a true VPS→GHCR blackhole makes zero progress and
+          # still falls through to the SSH-stream fallback below.
+          if ssh $SSHOPTS "$DEST" "ok=0; for i in 1 2 3; do timeout 300 docker pull '$IMAGE' && { ok=1; break; }; echo \"native pull attempt \$i stalled...\"; sleep 5; done; [ \$ok = 1 ]"; then
             echo "✅ Native pull succeeded"
           else
             # Fallback: the VPS can't pull from GHCR, but the runner can. Pull
