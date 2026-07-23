@@ -340,6 +340,35 @@ export const WHATSAPP_TEMPLATES = {
       },
     ]
   >,
+
+  // Job-offer created confirmation → employer (after publishing from the web
+  // form). Template rabotka_job_created (twilio/call-to-action, UTILITY).
+  jobOfferCreated: {
+    contentSid: 'HX312f029fcedf2ab8d2d35d6269490912',
+    variables: (p: {
+      title: string;
+      reference: string;
+      dateLabel: string;
+      address: string;
+      amountLabel: string;
+    }) => ({
+      '1': p.title,
+      '2': p.reference,
+      '3': p.dateLabel,
+      '4': p.address,
+      '5': p.amountLabel,
+    }),
+  } satisfies WhatsAppTemplate<
+    [
+      params: {
+        title: string;
+        reference: string;
+        dateLabel: string;
+        address: string;
+        amountLabel: string;
+      },
+    ]
+  >,
 } as const;
 
 export type WhatsAppTemplateName = keyof typeof WHATSAPP_TEMPLATES;
