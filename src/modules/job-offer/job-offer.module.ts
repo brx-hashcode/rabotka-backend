@@ -2,6 +2,7 @@ import { Module, forwardRef } from '@nestjs/common';
 import { PrismaModule } from '../../common/services/prisma/prisma.module';
 import { JobOfferService } from './job-offer.service';
 import { AdminJobOfferController } from './admin-job-offer.controller';
+import { JobOfferController } from './job-offer.controller';
 import { AuthModule } from '../auth/auth.module';
 import { MailModule } from '../mail/mail.module';
 import { SystemConfigModule } from '../system-config/system-config.module';
@@ -23,7 +24,7 @@ import { GeocodingModule } from '../../common/services/geocoding/geocoding.modul
     MatchingModule,
     GeocodingModule,
   ],
-  controllers: [AdminJobOfferController],
+  controllers: [AdminJobOfferController, JobOfferController],
   providers: [JobOfferService],
   exports: [JobOfferService],
 })
