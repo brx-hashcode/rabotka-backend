@@ -11,6 +11,7 @@ import { seedInvoices } from './seed/invoice.seed';
 import { seedJobCategories } from './seed/job-category.seed';
 import { seedMobileMoneyWallet } from './seed/mobile-money-wallet.seed';
 import { seedSystemConfig } from './seed/system-config.seed';
+import { seedPortfolio } from './seed/portfolio.seed';
 
 config({ path: '.env.local' });
 config({ path: '.env' });
@@ -27,6 +28,7 @@ async function run() {
     await seedSuperAdmin(prisma);
     await seedSystemConfig(prisma);
     await seedProfiles(prisma);
+    await seedPortfolio(prisma);
     await seedJobOffersAndApplications(prisma);
     await seedResumeTest(prisma);
     await seedPenalties(prisma);
