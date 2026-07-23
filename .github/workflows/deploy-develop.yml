@@ -115,15 +115,6 @@ jobs:
           # (the image is already built and pushed before this step).
           cache-to: type=gha,mode=max,scope=buildkit-develop,ignore-error=true
 
-      - name: Delete stale GHA caches
-        run: |
-          gh cache list --ref refs/heads/develop --json id --limit 100 \
-            | jq -r '.[].id' \
-            | tail -n +2 \
-            | xargs -r -I{} sh -c 'gh cache delete "$1" || true' _ {}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
   # ───────────────────────────────────────────────────────────────────────────
   # JOB 3: Deploy pre-built image to VPS
   # Vault secrets are fetched on the runner, written to .env, then scp'd to
