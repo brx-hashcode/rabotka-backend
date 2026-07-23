@@ -134,9 +134,10 @@ jobs:
     name: Deploy to VPS (develop)
     runs-on: ubuntu-latest
     needs: build-and-push
-    # Hard cap: a stalled VPS pull/compose must fail fast, not hang for hours
-    # (GitHub's default job timeout is 6h).
-    timeout-minutes: 25
+    # Hard cap so a stall can't hang for hours (GitHub default is 6h). The
+    # image is streamed to the VPS over SSH (docker save | ssh load), which for
+    # the large backend image needs headroom — but still fails within the hour.
+    timeout-minutes: 50
     permissions:
       contents: read
       packages: read
