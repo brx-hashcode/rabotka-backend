@@ -404,29 +404,16 @@ describe('BotOrchestratorService', () => {
       expect(result[0]).toContain('Commande non reconnue');
     });
 
-    it('handles "start_publish_job" command (no draft)', async () => {
+    it('handles "start_publish_job" by sending the create-offer webview template', async () => {
       deps.router.route.mockReturnValue({
         type: 'command',
         commandId: 'start_publish_job',
       });
       const result = await service.handle(PROFILE_ID, PHONE, '1');
-      expect(result.length).toBeGreaterThan(0);
-      expect(deps.botState.set).toHaveBeenCalled();
-    });
-
-    it('handles "start_publish_job" command with existing draft', async () => {
-      deps.router.route.mockReturnValue({
-        type: 'command',
-        commandId: 'start_publish_job',
-      });
-      deps.botDraft.getDraft.mockResolvedValue({
-        step: 3,
-        payload: { title: 'Draft title' },
-        savedAt: new Date().toISOString(),
-      });
-      const result = await service.handle(PROFILE_ID, PHONE, '1');
-      expect(result.length).toBeGreaterThan(0);
-      expect(deps.botState.set).toHaveBeenCalled();
+      // Now returns a URL-button template (webview) instead of starting the
+      // old in-chat flow — so no bot state is set.
+      expect(result[0]).toContain('[TPL:');
+      expect(deps.botState.set).not.toHaveBeenCalled();
     });
 
     it('handles "list_offers" command', async () => {
