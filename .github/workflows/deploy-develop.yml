@@ -113,11 +113,13 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=buildkit-develop
-          # ignore-error=true keeps cache export best-effort: a GitHub Actions
-          # Cache service outage logs a warning instead of failing the build
-          # (the image is already built and pushed before this step).
-          cache-to: type=gha,mode=max,scope=buildkit-develop,ignore-error=true
+          # Registry-backed layer cache stored in GHCR (a :buildcache tag), not
+          # GitHub's Actions Cache — which returned 400 outages and gave 0% hit,
+          # forcing full rebuilds. mode=max caches every intermediate layer, so a
+          # code-only change reuses deps/apt/prisma/fastembed layers (~1 min build
+          # vs ~5-6 min cold). ignore-error keeps export best-effort.
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max,ignore-error=true
 
   # ───────────────────────────────────────────────────────────────────────────
   # JOB 3: Deploy pre-built image to VPS
