@@ -59,6 +59,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      packages: read
 
     steps:
       - name: Checkout
@@ -88,14 +89,33 @@ jobs:
             -p "${{ secrets.VPS_PORT }}" "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
             "docker image prune -af --filter 'until=24h' || true"
 
-      - name: Pull image on VPS
+      # Runner→GHCR is reliable; this login is only used by the SSH-stream
+      # fallback below (runner pulls the image, then streams it to the VPS).
+      - name: Log in to GHCR (for fallback)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull image on VPS (native, SSH-stream fallback)
         run: |
           IMAGE="ghcr.io/${{ github.repository_owner }}/rabotka-backend:latest"
-          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
-            -o ServerAliveInterval=60 \
-            -o ServerAliveCountMax=10 \
-            -p "${{ secrets.VPS_PORT }}" "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
-            "for i in 1 2 3; do docker pull $IMAGE && break || (echo \"Pull attempt \$i failed, retrying in 15s...\"; sleep 15); done"
+          DEST="${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}"
+          SSHOPTS="-i $HOME/.ssh/deploy_key -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -p ${{ secrets.VPS_PORT }}"
+          # Fast path: native pull on the VPS. Short 90s timeout × 3 so a
+          # VPS→GHCR blackhole fails fast (~5 min) instead of hanging ~30 min.
+          if ssh $SSHOPTS "$DEST" "ok=0; for i in 1 2 3; do timeout 90 docker pull '$IMAGE' && { ok=1; break; }; echo \"native pull attempt \$i stalled...\"; sleep 5; done; [ \$ok = 1 ]"; then
+            echo "✅ Native pull succeeded"
+          else
+            # Fallback: the VPS can't pull from GHCR, but the runner can. Pull
+            # here, then stream the image to the VPS over the (IPv4) SSH channel,
+            # which is unaffected by the registry blackhole.
+            echo "⚠️ Native pull stalled — streaming image to VPS over SSH"
+            docker pull "$IMAGE"
+            docker save "$IMAGE" | gzip -1 | ssh $SSHOPTS "$DEST" "gunzip | docker load"
+            echo "✅ Image loaded on VPS via SSH stream"
+          fi
 
       - name: Fetch secrets from Vault and write .env
         run: |
@@ -221,6 +241,9 @@ jobs:
             git reset --hard origin/main
 
             docker compose -f docker-compose.prod.yml up -d --remove-orphans || rollback
+            # Reclaim disk: drop old images so /var/lib/docker doesn't fill the
+            # root FS over many deploys (running image kept; volumes untouched).
+            docker image prune -af || true
           "
 
   # ───────────────────────────────────────────────────────────────────────────
