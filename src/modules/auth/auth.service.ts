@@ -7,6 +7,7 @@ import {
   NotFoundException,
   HttpException,
   HttpStatus,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
@@ -162,7 +163,6 @@ export class AuthService {
 
     const redisKey = `${OTP_KEY_PREFIX}${normalized}`;
     await this.redis.set(redisKey, otp, 'EX', OTP_TTL_SECONDS);
-    await this.redis.set(resendCooldownKey, '1', 'EX', RESEND_COOLDOWN_SECONDS);
 
     if (isEmail) {
       await this.sendOtpByEmail(
@@ -173,6 +173,10 @@ export class AuthService {
     } else {
       await this.sendOtpByWhatsApp(normalized, otp);
     }
+
+    // Only start the cooldown once the code was actually sent — a failed send
+    // throws above, so the user isn't locked out of retrying for nothing.
+    await this.redis.set(resendCooldownKey, '1', 'EX', RESEND_COOLDOWN_SECONDS);
 
     return { success: true };
   }
@@ -638,13 +642,18 @@ export class AuthService {
       template.contentSid,
       template.variables(otp),
     );
-    if (sent) {
-      this.logger.log(`WhatsApp OTP sent to ${phone}`);
-    } else {
-      this.logger.warn(
-        `WhatsApp not connected or failed to send OTP to ${phone}; user may not receive the code`,
+    if (!sent) {
+      // Phone is the only login channel (the client no longer collects email),
+      // so a failed WhatsApp send must surface as an error — otherwise the user
+      // is told the code was sent while never receiving it, with no fallback.
+      this.logger.error(
+        `WhatsApp failed to send OTP to ${phone}; user would not receive the code`,
+      );
+      throw new ServiceUnavailableException(
+        "Impossible d'envoyer le code de vérification par WhatsApp. Veuillez réessayer dans quelques instants.",
       );
     }
+    this.logger.log(`WhatsApp OTP sent to ${phone}`);
   }
 
   private readonly QR_TTL = 300;
