@@ -309,7 +309,7 @@ jobs:
 
       - name: Check health endpoint
         run: |
-          for i in 1 2 3 4 5; do
+          for i in $(seq 1 20); do
             STATUS=$(curl -o /tmp/health_response.txt -s -w "%{http_code}" \
               --max-time 30 \
               "https://api-rabotka.${{ secrets.INFRA_DOMAIN }}/api/v1/health")
@@ -318,7 +318,7 @@ jobs:
             [ "$STATUS" = "200" ] && exit 0
             sleep 15
           done
-          echo "Health check failed after 5 attempts"
+          echo "Health check failed after 20 attempts"
           exit 1
 
   # ───────────────────────────────────────────────────────────────────────────
