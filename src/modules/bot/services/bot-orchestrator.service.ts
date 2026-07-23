@@ -183,8 +183,9 @@ export class BotOrchestratorService {
     profileId: string,
     _phone: string,
     text: string,
+    preloadedProfile?: Awaited<ReturnType<typeof this.loadProfile>>,
   ): Promise<string[]> {
-    const profile = await this.loadProfile(profileId);
+    const profile = preloadedProfile ?? (await this.loadProfile(profileId));
     if (!profile) {
       return [templateReply(WHATSAPP_TEMPLATES.welcomeUnregistered.contentSid)];
     }
@@ -1326,9 +1327,9 @@ export class BotOrchestratorService {
     ];
   }
 
-  private async loadProfile(profileId: string) {
+  private loadProfileWhere(where: { id: string } | { phone: string }) {
     return this.prisma.profile.findUnique({
-      where: { id: profileId },
+      where,
       select: {
         id: true,
         first_name: true,
@@ -1344,6 +1345,17 @@ export class BotOrchestratorService {
         verification_status: true,
       },
     });
+  }
+
+  private loadProfile(profileId: string) {
+    return this.loadProfileWhere({ id: profileId });
+  }
+
+  // Public so the inbound path can fetch the profile by phone once (for its
+  // unregistered-number check) and hand it straight to handle(), instead of
+  // this service re-fetching the same row by id on every message.
+  loadProfileByPhone(phone: string) {
+    return this.loadProfileWhere({ phone });
   }
 
   private async runCommand(
