@@ -28,15 +28,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4.2.2
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
       - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:
           version: latest
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          # Cache the pnpm store keyed on the lockfile so unchanged deps are
+          # restored instead of re-downloaded on every deploy. pnpm must be
+          # installed first for setup-node to locate its store path.
+          cache: pnpm
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --ignore-scripts
@@ -109,20 +113,13 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=buildkit-develop
-          # ignore-error=true keeps cache export best-effort: a GitHub Actions
-          # Cache service outage logs a warning instead of failing the build
-          # (the image is already built and pushed before this step).
-          cache-to: type=gha,mode=max,scope=buildkit-develop,ignore-error=true
-
-      - name: Delete stale GHA caches
-        run: |
-          gh cache list --ref refs/heads/develop --json id --limit 100 \
-            | jq -r '.[].id' \
-            | tail -n +2 \
-            | xargs -r -I{} sh -c 'gh cache delete "$1" || true' _ {}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Registry-backed layer cache stored in GHCR (a :buildcache tag), not
+          # GitHub's Actions Cache — which returned 400 outages and gave 0% hit,
+          # forcing full rebuilds. mode=max caches every intermediate layer, so a
+          # code-only change reuses deps/apt/prisma/fastembed layers (~1 min build
+          # vs ~5-6 min cold). ignore-error keeps export best-effort.
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max,ignore-error=true
 
   # ───────────────────────────────────────────────────────────────────────────
   # JOB 3: Deploy pre-built image to VPS
@@ -134,8 +131,14 @@ jobs:
     name: Deploy to VPS (develop)
     runs-on: ubuntu-latest
     needs: build-and-push
+    # Hard cap so a stall can't hang for hours (GitHub default is 6h). The
+    # Hard cap so a stall can't hang for hours. Native pull is fast; the SSH
+    # stream fallback (docker save | ssh load) for the large image needs
+    # headroom — but still fails within the cap.
+    timeout-minutes: 40
     permissions:
       contents: read
+      packages: read
 
     steps:
       - name: Checkout
@@ -157,14 +160,33 @@ jobs:
         run: |
           ssh-keyscan -p "${{ secrets.VPS_PORT }}" -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts
 
-      - name: Pull image on VPS
+      # Runner→GHCR is reliable; this login is only used by the SSH-stream
+      # fallback below (runner pulls the image, then streams it to the VPS).
+      - name: Log in to GHCR (for fallback)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull image on VPS (native, SSH-stream fallback)
         run: |
           IMAGE="ghcr.io/${{ github.repository_owner }}/rabotka-backend:${{ needs.build-and-push.outputs.image-sha-tag }}"
-          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
-            -o ServerAliveInterval=60 \
-            -o ServerAliveCountMax=10 \
-            -p "${{ secrets.VPS_PORT }}" "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
-            "for i in 1 2 3; do docker pull $IMAGE && break || (echo \"Pull attempt \$i failed, retrying in 15s...\"; sleep 15); done"
+          DEST="${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}"
+          SSHOPTS="-i $HOME/.ssh/deploy_key -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -p ${{ secrets.VPS_PORT }}"
+          # Fast path: native pull on the VPS. Short 90s timeout × 3 so a
+          # VPS→GHCR blackhole fails fast (~5 min) instead of hanging ~30 min.
+          if ssh $SSHOPTS "$DEST" "ok=0; for i in 1 2 3; do timeout 90 docker pull '$IMAGE' && { ok=1; break; }; echo \"native pull attempt \$i stalled...\"; sleep 5; done; [ \$ok = 1 ]"; then
+            echo "✅ Native pull succeeded"
+          else
+            # Fallback: the VPS can't pull from GHCR, but the runner can. Pull
+            # here, then stream the image to the VPS over the (IPv4) SSH channel,
+            # which is unaffected by the registry blackhole.
+            echo "⚠️ Native pull stalled — streaming image to VPS over SSH"
+            docker pull "$IMAGE"
+            docker save "$IMAGE" | gzip -1 | ssh $SSHOPTS "$DEST" "gunzip | docker load"
+            echo "✅ Image loaded on VPS via SSH stream"
+          fi
 
       - name: Fetch secrets from Vault and write .env
         run: |
@@ -295,7 +317,10 @@ jobs:
             # Swap BACKEND_IMAGE to the immutable SHA tag for this deploy
             sed -i \"s|BACKEND_IMAGE=.*|BACKEND_IMAGE=$NEW_IMAGE|\" .env
 
-            docker compose -f docker-compose.prod.yml up -d --remove-orphans || rollback
+            timeout 600 docker compose -f docker-compose.prod.yml up -d --remove-orphans || rollback
+            # Reclaim disk: drop old sha-tagged images so /var/lib/docker
+            # doesn't fill the root FS over many deploys (running image kept).
+            docker image prune -af || true
           "
 
   # ───────────────────────────────────────────────────────────────────────────
@@ -309,21 +334,22 @@ jobs:
       contents: read
 
     steps:
-      - name: Wait for container to stabilize
-        run: sleep 60
-
       - name: Check health endpoint
         run: |
-          for i in 1 2 3 4 5; do
+          # Short initial wait, then poll tightly so a healthy backend is
+          # detected in ~15-25s while still tolerating a slow boot (migrations +
+          # DB/Redis/Qdrant): 15s + 30×8s ≈ 4 min ceiling. Exits on first 200.
+          sleep 15
+          for i in $(seq 1 30); do
             STATUS=$(curl -o /tmp/health_response.txt -s -w "%{http_code}" \
               --max-time 30 \
               "https://api-rabotka.${{ secrets.INFRA_DOMAIN }}/api/v1/health")
             echo "Attempt $i — HTTP status: $STATUS"
             cat /tmp/health_response.txt
             [ "$STATUS" = "200" ] && exit 0
-            sleep 15
+            sleep 8
           done
-          echo "Health check failed after 5 attempts"
+          echo "Health check failed after 30 attempts"
           exit 1
 
   # ───────────────────────────────────────────────────────────────────────────

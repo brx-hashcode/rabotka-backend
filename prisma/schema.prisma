@@ -256,6 +256,7 @@ model Profile {
 
   avatar_url              String?
   vector_indexed_at       DateTime?
+  portfolio_slug          String?            @unique
 
   category               JobCategory?       @relation(fields: [category_id], references: [id], onDelete: SetNull)
   categories             ProfileCategory[]
@@ -285,6 +286,7 @@ model Profile {
   ad_delivery_logs                AdDeliveryLog[]
   ratings_given                   Rating[]                       @relation("RatingRater")
   ratings_received                Rating[]                       @relation("RatingRatee")
+  portfolio_items                 PortfolioItem[]
 
   @@index([email], name: "idx_profile_email")
   @@index([phone], name: "idx_profile_phone")
@@ -358,6 +360,36 @@ model KycVerificationImage {
 
   @@index([profile_id], name: "idx_kyc_verification_image_profile")
   @@map("kyc_verification_images")
+}
+
+model PortfolioItem {
+  id          String   @id @default(uuid()) @db.Uuid
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+  profile_id  String   @db.Uuid
+  title       String
+  description String   @db.Text
+  position    Int      @default(0)
+
+  profile Profile          @relation(fields: [profile_id], references: [id], onDelete: Cascade)
+  images  PortfolioImage[]
+
+  @@index([profile_id], name: "idx_portfolio_item_profile")
+  @@map("portfolio_items")
+}
+
+model PortfolioImage {
+  id                String   @id @default(uuid()) @db.Uuid
+  created_at        DateTime @default(now())
+  portfolio_item_id String   @db.Uuid
+  image_url         String
+  storage_key       String?
+  position          Int      @default(0)
+
+  item PortfolioItem @relation(fields: [portfolio_item_id], references: [id], onDelete: Cascade)
+
+  @@index([portfolio_item_id], name: "idx_portfolio_image_item")
+  @@map("portfolio_images")
 }
 
 model JobCategory {

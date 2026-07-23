@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Delete,
   Param,
   Body,
   Query,
@@ -49,6 +50,8 @@ import {
 } from './dto/admin-verify-profile.dto';
 import { AdminUpdateStatusDto } from './dto/admin-update-status.dto';
 import { AdminUpdateProfileDto } from './dto/admin-update-profile.dto';
+import { PortfolioService } from '../portfolio/portfolio.service';
+import { UpdatePortfolioItemDto } from '../portfolio/dto/update-portfolio-item.dto';
 
 @ApiTags('Admin – Profiles')
 @Controller('admin/profiles')
@@ -65,6 +68,7 @@ export class AdminProfileController {
     private readonly mail: MailService,
     private readonly layout: LayoutService,
     private readonly walletService: WalletService,
+    private readonly portfolioService: PortfolioService,
   ) {}
 
   @Get()
@@ -379,6 +383,101 @@ export class AdminProfileController {
       metadata: { fields: dto },
     });
     return result;
+  }
+
+  // ── Portfolio (worker realizations) ─────────────────────────────────────────
+  // Admins can view / edit / delete a worker's portfolio, but NOT create it —
+  // workers create their own. All routes reuse PortfolioService, which scopes by
+  // the profile id, so the admin acts only on that worker's items.
+
+  @Get(':id/portfolio')
+  @Roles(UserRole.MODERATOR)
+  @ApiOperation({
+    summary: 'Get a worker portfolio (admin only)',
+    description:
+      'Returns the worker portfolio items with their image galleries.',
+  })
+  @ApiResponse({ status: 200, description: 'Portfolio items' })
+  async getPortfolio(@Param('id') id: string) {
+    return await this.portfolioService.listOwn(id);
+  }
+
+  @Patch(':id/portfolio/:itemId')
+  @Roles(UserRole.MANAGER)
+  @ApiOperation({
+    summary: 'Update a portfolio item (admin only)',
+    description: 'Updates a portfolio item title/description for a worker.',
+  })
+  @ApiResponse({ status: 200, description: 'Updated portfolio item' })
+  @ApiResponse({ status: 404, description: 'Portfolio item not found' })
+  async updatePortfolioItem(
+    @Param('id') id: string,
+    @Param('itemId') itemId: string,
+    @Body() dto: UpdatePortfolioItemDto,
+    @Req() req: AdminAuthenticatedRequest,
+  ) {
+    const result = await this.portfolioService.updateItem(id, itemId, dto);
+    await this.logService.create({
+      action: 'PORTFOLIO_ITEM_UPDATED',
+      entityType: 'PortfolioItem',
+      entityId: itemId,
+      userId: req.user?.userId,
+      profileId: id,
+      metadata: { fields: dto },
+    });
+    return result;
+  }
+
+  @Delete(':id/portfolio/:itemId')
+  @Roles(UserRole.MANAGER)
+  @ApiOperation({
+    summary: 'Delete a portfolio item (admin only)',
+    description: 'Deletes a portfolio item and all its images for a worker.',
+  })
+  @ApiResponse({ status: 200, description: 'Portfolio item deleted' })
+  @ApiResponse({ status: 404, description: 'Portfolio item not found' })
+  async deletePortfolioItem(
+    @Param('id') id: string,
+    @Param('itemId') itemId: string,
+    @Req() req: AdminAuthenticatedRequest,
+  ) {
+    await this.portfolioService.deleteItem(id, itemId);
+    await this.logService.create({
+      action: 'PORTFOLIO_ITEM_DELETED',
+      entityType: 'PortfolioItem',
+      entityId: itemId,
+      userId: req.user?.userId,
+      profileId: id,
+    });
+    return { success: true };
+  }
+
+  @Delete(':id/portfolio/:itemId/images/:imageId')
+  @Roles(UserRole.MANAGER)
+  @ApiOperation({
+    summary: 'Delete a portfolio image (admin only)',
+    description: 'Removes a single image from a worker portfolio item.',
+  })
+  @ApiResponse({ status: 200, description: 'Portfolio image deleted' })
+  @ApiResponse({
+    status: 404,
+    description: 'Portfolio item or image not found',
+  })
+  async deletePortfolioImage(
+    @Param('id') id: string,
+    @Param('itemId') itemId: string,
+    @Param('imageId') imageId: string,
+    @Req() req: AdminAuthenticatedRequest,
+  ) {
+    await this.portfolioService.removeImage(id, itemId, imageId);
+    await this.logService.create({
+      action: 'PORTFOLIO_IMAGE_DELETED',
+      entityType: 'PortfolioImage',
+      entityId: imageId,
+      userId: req.user?.userId,
+      profileId: id,
+    });
+    return { success: true };
   }
 
   @Patch(':id/avatar')
