@@ -50,8 +50,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libreoffice-writer \
         fonts-liberation \
         fonts-dejavu-core \
-        fonts-noto \
-        fonts-noto-cjk \
+        fonts-noto-core \
         fontconfig && \
     fc-cache -f && \
     rm -rf /var/lib/apt/lists/* && \
@@ -106,8 +105,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libreoffice-writer \
         fonts-liberation \
         fonts-dejavu-core \
-        fonts-noto \
-        fonts-noto-cjk \
+        fonts-noto-core \
         fontconfig && \
     fc-cache -f && \
     rm -rf /var/lib/apt/lists/* && \
