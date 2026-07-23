@@ -129,6 +129,74 @@ export class BotNotificationService {
     }
   }
 
+  /**
+   * Confirmation sent to an employer right after they publish an offer from the
+   * web form. Business-initiated (usually outside the 24h window) so it uses the
+   * approved rabotka_job_created template. Best-effort — only logs on failure.
+   */
+  async sendJobCreatedConfirmation(offerId: string): Promise<void> {
+    try {
+      const offer = await this.prisma.jobOffer.findUnique({
+        where: { id: offerId },
+        select: {
+          title: true,
+          reference: true,
+          scheduled_at: true,
+          address: true,
+          amount: true,
+          employer_id: true,
+          employer: { select: { phone: true } },
+        },
+      });
+      if (!offer?.employer?.phone) return;
+
+      const dateLabel = offer.scheduled_at.toLocaleDateString('fr-FR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+      const amountLabel =
+        offer.amount != null
+          ? `${Number(offer.amount).toLocaleString('fr-FR')} FCFA`
+          : 'Non spécifié';
+      const address =
+        offer.address.length > 80
+          ? `${offer.address.slice(0, 80)}...`
+          : offer.address;
+
+      const body =
+        `✅ *Votre offre est publiée !*\n\n` +
+        `*Offre* : ${offer.title}\n` +
+        `*Référence* : ${offer.reference}\n` +
+        `*Date* : ${dateLabel}\n` +
+        `*Adresse* : ${address}\n` +
+        `*Montant* : ${amountLabel}\n\n` +
+        `Partagez la référence avec un travailleur pour qu'il trouve directement votre offre. Vous serez notifié dès qu'une candidature est reçue.`;
+
+      const tpl = WHATSAPP_TEMPLATES.jobOfferCreated;
+      await this.whatsApp.sendTemplateMessage(
+        offer.employer.phone,
+        tpl.contentSid,
+        tpl.variables({
+          title: offer.title,
+          reference: offer.reference,
+          dateLabel,
+          address,
+          amountLabel,
+        }),
+        offer.employer_id,
+        body,
+      );
+    } catch (err) {
+      this.logger.warn(
+        `Failed to send job-created confirmation for offer ${offerId}`,
+        err,
+      );
+    }
+  }
+
   async sendApplicationAcceptedToWorker(applicationId: string): Promise<void> {
     try {
       const app = await this.prisma.application.findUnique({
