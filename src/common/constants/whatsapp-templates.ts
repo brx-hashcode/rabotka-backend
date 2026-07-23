@@ -22,6 +22,14 @@ export const WHATSAPP_TEMPLATES = {
     variables: () => ({}),
   } satisfies WhatsAppTemplate<[]>,
 
+  // "Publier une offre" — CTA button opening the create-offer webview
+  // (/job-offers/new). Replaces the old in-chat publish flow. Template
+  // rabotka_create_job (twilio/call-to-action, UTILITY).
+  createJob: {
+    contentSid: 'HX6c8e6f659afb7363288fa25696a96ab2',
+    variables: () => ({}),
+  } satisfies WhatsAppTemplate<[]>,
+
 
   viewProfile: {
     contentSid: 'HX8ab587d99e769edaded28d5dd8247af5',
@@ -262,9 +270,6 @@ export const WHATSAPP_TEMPLATES = {
   >,
 
   contactUnlocked: {
-    // twilio/quick-reply ("Voir le menu" button) — warmer copy + a closing
-    // line. Same 3 variables as before (name/phone/email), so only the SID
-    // changed.
     contentSid: 'HX0cff136f3bc10f77066b949b110ecada',
     variables: (p: {
       name: string;
@@ -341,8 +346,6 @@ export const WHATSAPP_TEMPLATES = {
     ]
   >,
 
-  // Job-offer created confirmation → employer (after publishing from the web
-  // form). Template rabotka_job_created (twilio/call-to-action, UTILITY).
   jobOfferCreated: {
     contentSid: 'HX312f029fcedf2ab8d2d35d6269490912',
     variables: (p: {

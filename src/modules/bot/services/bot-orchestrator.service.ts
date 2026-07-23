@@ -36,12 +36,7 @@ import {
   CMD_CREATE_CLAIM,
   EMPLOYER_MENU_OPTIONS,
 } from '../bot.constants';
-import {
-  runPublishJobFlow,
-  getPublishJobInitialState,
-  getPublishJobFirstMessage,
-  getPublishJobDraftResumeMessage,
-} from '../flows/publish-job.flow';
+import { runPublishJobFlow } from '../flows/publish-job.flow';
 import {
   runListOffersFlow,
   getListOffersInitialState,
@@ -919,7 +914,8 @@ export class BotOrchestratorService {
     botProfile: BotProfile,
   ): Promise<string[]> {
     const commandHandlers: Record<string, () => Promise<string[]>> = {
-      start_publish_job: () => this.handleStartPublishJobCommand(profileId),
+      start_publish_job: () =>
+        Promise.resolve(this.handleStartPublishJobCommand()),
 
       list_offers: () => this.handleListOffersCommand(profile, profileId),
 
@@ -963,23 +959,11 @@ export class BotOrchestratorService {
     return [reply];
   }
 
-  private async handleStartPublishJobCommand(
-    profileId: string,
-  ): Promise<string[]> {
-    const draft = await this.botDraft.getDraft(profileId);
-    if (draft && draft.step > 1) {
-      const resumeState: BotState = {
-        flowId: FLOW_IDS.PUBLISH_JOB,
-        step: 0,
-        payload: { ...draft.payload, _draftStep: draft.step },
-        updatedAt: new Date().toISOString(),
-      };
-      await this.botState.set(profileId, resumeState);
-      return [getPublishJobDraftResumeMessage(draft.step, draft.payload)];
-    }
-    const initialState = getPublishJobInitialState();
-    await this.botState.set(profileId, initialState);
-    return [getPublishJobFirstMessage()];
+  private handleStartPublishJobCommand(): string[] {
+    // Publishing an offer now opens the create-offer webview via a URL-button
+    // template (same pattern as viewProfile / createClaim), replacing the old
+    // in-chat 8-step publish flow. Stateless — sets no bot state.
+    return [templateReply(WHATSAPP_TEMPLATES.createJob.contentSid)];
   }
 
   private async handleListOffersCommand(

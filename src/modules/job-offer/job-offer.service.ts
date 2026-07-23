@@ -617,12 +617,23 @@ export class JobOfferService {
   ): Promise<
     JobOfferListItem[] | { items: JobOfferListItem[]; total: number }
   > {
+    // Newest first, and count ACCEPTED applications so the "N/M postes" filled
+    // count is accurate (matches findById/findByReference).
+    const acceptedCount = {
+      _count: {
+        select: {
+          applications: { where: { status: ApplicationStatus.ACCEPTED } },
+        },
+      },
+    } as const;
+
     if (!pagination) {
       const offers = await this.prisma.jobOffer.findMany({
         where: { employer_id: employerId },
-        orderBy: [{ scheduled_at: 'asc' }, { created_at: 'desc' }],
+        orderBy: { created_at: 'desc' },
+        include: acceptedCount,
       });
-      return offers.map((o) => this.toListItem(o));
+      return offers.map((o) => this.toListItem(o, o._count.applications));
     }
 
     const { page, pageSize } = pagination;
@@ -630,13 +641,17 @@ export class JobOfferService {
     const [offers, total] = await Promise.all([
       this.prisma.jobOffer.findMany({
         where: { employer_id: employerId },
-        orderBy: [{ scheduled_at: 'asc' }, { created_at: 'desc' }],
+        orderBy: { created_at: 'desc' },
+        include: acceptedCount,
         skip,
         take: pageSize,
       }),
       this.prisma.jobOffer.count({ where: { employer_id: employerId } }),
     ]);
-    return { items: offers.map((o) => this.toListItem(o)), total };
+    return {
+      items: offers.map((o) => this.toListItem(o, o._count.applications)),
+      total,
+    };
   }
 
   /**
