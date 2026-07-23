@@ -130,11 +130,13 @@ jobs:
     runs-on: ubuntu-latest
     needs: build-and-push
     # Hard cap so a stall can't hang for hours (GitHub default is 6h). The
-    # image is streamed to the VPS over SSH (docker save | ssh load), which for
-    # the large backend image needs headroom — but still fails within the hour.
-    timeout-minutes: 50
+    # Hard cap so a stall can't hang for hours. Native pull is fast; the SSH
+    # stream fallback (docker save | ssh load) for the large image needs
+    # headroom — but still fails within the cap.
+    timeout-minutes: 40
     permissions:
       contents: read
+      packages: read
 
     steps:
       - name: Checkout
@@ -156,14 +158,33 @@ jobs:
         run: |
           ssh-keyscan -p "${{ secrets.VPS_PORT }}" -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts
 
-      - name: Pull image on VPS
+      # Runner→GHCR is reliable; this login is only used by the SSH-stream
+      # fallback below (runner pulls the image, then streams it to the VPS).
+      - name: Log in to GHCR (for fallback)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull image on VPS (native, SSH-stream fallback)
         run: |
           IMAGE="ghcr.io/${{ github.repository_owner }}/rabotka-backend:${{ needs.build-and-push.outputs.image-sha-tag }}"
-          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
-            -o ServerAliveInterval=60 \
-            -o ServerAliveCountMax=10 \
-            -p "${{ secrets.VPS_PORT }}" "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
-            "ok=0; for i in 1 2 3 4 5 6; do timeout 300 docker pull $IMAGE && { ok=1; break; }; echo \"Pull attempt \$i failed/stalled, retrying in \$((i*10))s...\"; sleep \$((i*10)); done; [ \$ok = 1 ] || { echo 'All pull attempts failed'; exit 1; }"
+          DEST="${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}"
+          SSHOPTS="-i $HOME/.ssh/deploy_key -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -p ${{ secrets.VPS_PORT }}"
+          # Fast path: native pull on the VPS. Short 90s timeout × 3 so a
+          # VPS→GHCR blackhole fails fast (~5 min) instead of hanging ~30 min.
+          if ssh $SSHOPTS "$DEST" "ok=0; for i in 1 2 3; do timeout 90 docker pull '$IMAGE' && { ok=1; break; }; echo \"native pull attempt \$i stalled...\"; sleep 5; done; [ \$ok = 1 ]"; then
+            echo "✅ Native pull succeeded"
+          else
+            # Fallback: the VPS can't pull from GHCR, but the runner can. Pull
+            # here, then stream the image to the VPS over the (IPv4) SSH channel,
+            # which is unaffected by the registry blackhole.
+            echo "⚠️ Native pull stalled — streaming image to VPS over SSH"
+            docker pull "$IMAGE"
+            docker save "$IMAGE" | gzip -1 | ssh $SSHOPTS "$DEST" "gunzip | docker load"
+            echo "✅ Image loaded on VPS via SSH stream"
+          fi
 
       - name: Fetch secrets from Vault and write .env
         run: |
@@ -295,6 +316,9 @@ jobs:
             sed -i \"s|BACKEND_IMAGE=.*|BACKEND_IMAGE=$NEW_IMAGE|\" .env
 
             timeout 600 docker compose -f docker-compose.prod.yml up -d --remove-orphans || rollback
+            # Reclaim disk: drop old sha-tagged images so /var/lib/docker
+            # doesn't fill the root FS over many deploys (running image kept).
+            docker image prune -af || true
           "
 
   # ───────────────────────────────────────────────────────────────────────────
