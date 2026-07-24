@@ -320,7 +320,15 @@ export class PortfolioService {
     });
   }
 
-  private async ensurePortfolioSlug(profileId: string): Promise<string> {
+  /**
+   * The profile's public portfolio slug, creating one if it has none.
+   *
+   * Public because the WhatsApp bot builds `/p/<slug>` links for workers an
+   * employer is browsing — and a worker who has never uploaded a realization
+   * has no slug yet (it is otherwise only minted on the first upload), so the
+   * link has to be able to mint one on demand.
+   */
+  async ensurePortfolioSlug(profileId: string): Promise<string> {
     const profile = await this.prisma.profile.findUnique({
       where: { id: profileId },
       select: { portfolio_slug: true, first_name: true, last_name: true },

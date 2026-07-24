@@ -42,6 +42,20 @@ export const WHATSAPP_TEMPLATES = {
     variables: () => ({}),
   } satisfies WhatsAppTemplate<[]>,
 
+  // "Voir le portfolio" — CTA button opening a worker's PUBLIC portfolio
+  // (/p/<slug>) inside WhatsApp's in-app browser. Unlike the other webview
+  // templates that page needs no login, so the employer lands straight on the
+  // realizations. Template rabotka_view_worker_portfolio
+  // (twilio/call-to-action, UTILITY): {{1}} = worker name (body),
+  // {{2}} = portfolio slug (URL suffix — WhatsApp only allows a variable there).
+  viewWorkerPortfolio: {
+    contentSid: 'HXd46839e8028869e15469add1b73000fd',
+    variables: (p: { workerName: string; slug: string }) => ({
+      '1': p.workerName,
+      '2': p.slug,
+    }),
+  } satisfies WhatsAppTemplate<[params: { workerName: string; slug: string }]>,
+
 
   profileCreated: {
     contentSid: 'HXa0d2cd880e5b4a035912c315fdd1b586',
