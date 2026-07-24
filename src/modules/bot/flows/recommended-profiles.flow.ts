@@ -31,6 +31,8 @@ import {
 import type { BotNotificationService } from '../services/bot-notification.service';
 import type { InterestSignalService } from '../../interest-graph/interest-signal.service';
 import type { InvoiceService } from '../../invoice/invoice.service';
+import type { PortfolioService } from '../../portfolio/portfolio.service';
+import { buildPortfolioReply } from '../utils/portfolio-link';
 
 export type RecommendedProfilesContext = {
   prisma: PrismaService;
@@ -42,6 +44,7 @@ export type RecommendedProfilesContext = {
   employerProfileId: string;
   interestSignalService: InterestSignalService;
   invoiceService: InvoiceService;
+  portfolioService: PortfolioService;
 };
 
 export type FlowResult = {
@@ -78,8 +81,9 @@ function subMenu(): string {
   return [
     '',
     '1- Contacter le candidat',
-    '2- Liste des candidats',
-    '3- Menu',
+    '2- Voir le portfolio',
+    '3- Liste des candidats',
+    '4- Menu',
   ].join('\n');
 }
 
@@ -185,6 +189,25 @@ export async function runRecommendedProfilesFlow(
   return showList(workerIds, workerScores, state, ctx);
 }
 
+/**
+ * The portfolio CTA for a worker the employer has selected. The detail step
+ * only carries the worker id, so the name (used in the template body) is read
+ * back here — one lookup on an already-selected id.
+ */
+async function portfolioReplyFor(
+  workerId: string,
+  ctx: RecommendedProfilesContext,
+): Promise<string> {
+  const worker = await ctx.prisma.profile.findUnique({
+    where: { id: workerId },
+    select: { first_name: true, last_name: true },
+  });
+  const name = worker
+    ? `${worker.first_name} ${worker.last_name}`.trim()
+    : 'ce candidat';
+  return buildPortfolioReply(workerId, name, ctx.portfolioService);
+}
+
 async function handleDetailStep(
   trimmed: string,
   selectedWorkerId: string,
@@ -209,8 +232,17 @@ async function handleDetailStep(
     goToMenu,
     jobOfferId,
   } = opts;
-  if (trimmed === '3') return goToMenu();
-  if (trimmed === '2') return showList(workerIds, workerScores, state, ctx);
+  if (trimmed === '4') return goToMenu();
+  if (trimmed === '3') return showList(workerIds, workerScores, state, ctx);
+
+  // Portfolio CTA. State stays on the detail step so the employer can carry on
+  // with "1- Contacter" right after looking at the work.
+  if (trimmed === '2') {
+    return {
+      reply: [await portfolioReplyFor(selectedWorkerId, ctx)],
+      nextState: state,
+    };
+  }
 
   if (trimmed === '1') {
     const fee = await ctx.systemConfig.getRecommendationContactFee();
@@ -227,7 +259,7 @@ async function handleDetailStep(
   }
 
   return {
-    reply: [`Tapez *1*, *2* ou *3*.\n${subMenu()}`],
+    reply: [`Tapez *1*, *2*, *3* ou *4*.\n${subMenu()}`],
     nextState: {
       ...state,
       payload: {

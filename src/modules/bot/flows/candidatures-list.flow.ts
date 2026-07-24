@@ -16,6 +16,11 @@ import type { ContactUnlockService } from '../../contact-unlock/contact-unlock.s
 import type { WalletService } from '../../wallet/wallet.service';
 import type { SystemConfigService } from '../../system-config/system-config.service';
 import type { PrismaService } from '../../../common/services/prisma/prisma.service';
+import type { PortfolioService } from '../../portfolio/portfolio.service';
+import {
+  buildPortfolioReply,
+  PORTFOLIO_UNAVAILABLE,
+} from '../utils/portfolio-link';
 
 export type CandidaturesListContext = {
   prisma: PrismaService;
@@ -24,6 +29,7 @@ export type CandidaturesListContext = {
   contactUnlockService: ContactUnlockService;
   walletService: WalletService;
   systemConfigService: SystemConfigService;
+  portfolioService: PortfolioService;
 };
 
 export type FlowResult = {
@@ -118,6 +124,33 @@ function formatSelectedItemDetail(item: CandidatureListItem): string {
   });
 }
 
+/**
+ * Portfolio CTA for the selected applicant.
+ *
+ * `workerId` is read from the stored item when present; items persisted in bot
+ * state before that field existed fall back to reading it off the application.
+ */
+async function portfolioReplyFor(
+  item: CandidatureListItem,
+  ctx: CandidaturesListContext,
+): Promise<string> {
+  let workerId = item.workerId ?? null;
+  if (!workerId) {
+    const app = await ctx.prisma.application.findUnique({
+      where: { id: item.id },
+      select: { worker_id: true },
+    });
+    workerId = app?.worker_id ?? null;
+  }
+  if (!workerId) return PORTFOLIO_UNAVAILABLE;
+
+  const name =
+    item.fullName?.trim() ||
+    `${item.firstName} ${item.lastName}`.trim() ||
+    'ce candidat';
+  return buildPortfolioReply(workerId, name, ctx.portfolioService);
+}
+
 function buildInvalidChoiceMessage(
   items: CandidatureListItem[],
   pageIndex: number,
@@ -152,6 +185,15 @@ async function handleDetailStep(params: DetailStepParams): Promise<FlowResult> {
   } = params;
 
   if (trimmedInput === '4') return goToMenu();
+
+  // Portfolio CTA — state stays on the detail step so the employer can still
+  // accept or refuse right after looking at the applicant's work.
+  if (trimmedInput === '5' && selectedItem) {
+    return {
+      reply: [await portfolioReplyFor(selectedItem, ctx)],
+      nextState: state,
+    };
+  }
 
   if (trimmedInput === '3') {
     const totalPages = Math.ceil(items.length / PAGE_SIZE);

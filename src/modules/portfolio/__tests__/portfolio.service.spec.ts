@@ -271,4 +271,46 @@ describe('PortfolioService', () => {
       );
     });
   });
+
+  // Public because the WhatsApp bot builds /p/<slug> links for workers who may
+  // never have uploaded a realization (and so have no slug yet).
+  describe('ensurePortfolioSlug', () => {
+    it('returns the existing slug without writing', async () => {
+      prisma.profile.findUnique.mockResolvedValue({
+        portfolio_slug: 'jean-dupont-abc123',
+        first_name: 'Jean',
+        last_name: 'Dupont',
+      });
+
+      await expect(service.ensurePortfolioSlug('w1')).resolves.toBe(
+        'jean-dupont-abc123',
+      );
+      expect(prisma.profile.update).not.toHaveBeenCalled();
+    });
+
+    it('mints and persists a slug when the profile has none', async () => {
+      prisma.profile.findUnique.mockResolvedValue({
+        portfolio_slug: null,
+        first_name: 'Jean',
+        last_name: 'Dupont',
+      });
+      prisma.profile.update.mockImplementation((args: any) =>
+        Promise.resolve({ portfolio_slug: args.data.portfolio_slug }),
+      );
+
+      const slug = await service.ensurePortfolioSlug('w1');
+
+      expect(slug).toMatch(/^jean-dupont-[0-9a-f]{6}$/);
+      expect(prisma.profile.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'w1' } }),
+      );
+    });
+
+    it('throws 404 for an unknown profile', async () => {
+      prisma.profile.findUnique.mockResolvedValue(null);
+      await expect(service.ensurePortfolioSlug('nope')).rejects.toThrow(
+        'non trouvé',
+      );
+    });
+  });
 });

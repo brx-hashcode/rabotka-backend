@@ -22,6 +22,7 @@ import { MatchingService } from '../../../matching/matching.service';
 import { InterestSignalService } from '../../../interest-graph/interest-signal.service';
 import { InterestRecommendationService } from '../../../interest-graph/interest-recommendation.service';
 import { InvoiceService } from '../../../invoice/invoice.service';
+import { PortfolioService } from '../../../portfolio/portfolio.service';
 import { QueueService } from '../../../../common/services/queue/queue.service';
 import { ConfigService } from '@nestjs/config';
 
@@ -229,6 +230,14 @@ describe('BotOrchestratorService', () => {
         {
           provide: InvoiceService,
           useValue: { create: jest.fn().mockResolvedValue({ id: 'inv-1' }) },
+        },
+        {
+          provide: PortfolioService,
+          useValue: {
+            ensurePortfolioSlug: jest
+              .fn()
+              .mockResolvedValue('alice-dupont-abc123'),
+          },
         },
         {
           provide: QueueService,
@@ -893,9 +902,11 @@ describe('BotOrchestratorService', () => {
       expect(result.length).toBeGreaterThan(0);
     });
 
-    // Regression: the entry-point command used to render its OWN text list,
-    // so the carousel only ever appeared on later flow interactions.
-    it('renders the 2-card carousel (not a text list) for two recommended offers', async () => {
+    // Regression: the entry-point command must render through the flow's
+    // shared buildPagedListReply, not its own list — and that renderer is
+    // plain text. Job recommendations are never sent as carousel/card
+    // templates (unlike recommended profiles below).
+    it('renders the plain-text list (no template) for two recommended offers', async () => {
       deps.router.route.mockReturnValue({
         type: 'command',
         commandId: 'recommended_jobs',
@@ -923,9 +934,12 @@ describe('BotOrchestratorService', () => {
         offer('jo-2', 'Job Two'),
       ]);
       const result = await service.handle(PROFILE_ID, PHONE, 'recommandations');
-      // Must be the carousel template, not the plain-text list the entry
-      // point used to build itself.
-      expect(result[0]).toMatch(/^\[TPL:HX97bbc0e84a73f3121c67e9e282b32739\]/);
+      // One plain-text message, never a template send.
+      expect(result).toHaveLength(1);
+      expect(result[0]).not.toMatch(/^\[TPL:/);
+      expect(result[0]).toContain('Offres recommandées');
+      expect(result[0]).toContain('Job One');
+      expect(result[0]).toContain('Job Two');
     });
 
     it('handles "recommended_jobs" command with offers but all filtered out', async () => {
