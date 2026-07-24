@@ -97,6 +97,21 @@ describe('runRecommendedJobsFlow', () => {
       expect(result.nextState).toBeDefined();
     });
 
+    // Job recommendations are rendered as plain text only — never as a
+    // carousel / card Content template (those remain for profiles).
+    it('renders the list as a single plain-text message, not a template', async () => {
+      const ctx = makeCtx();
+      const result = await runRecommendedJobsFlow(
+        makeState(),
+        'xyz',
+        profile,
+        ctx,
+      );
+      expect(result.reply).toHaveLength(1);
+      expect(result.reply[0]).not.toMatch(/^\[TPL:/);
+      expect(result.reply[0]).toContain('Offres recommandées');
+    });
+
     it('selects offer with valid number', async () => {
       const ctx = makeCtx();
       const result = await runRecommendedJobsFlow(

@@ -4,6 +4,7 @@ import {
 } from '../recommended-profiles.flow';
 import type { BotProfile, BotState } from '../../types/bot-state.types';
 import { FLOW_IDS } from '../../bot.constants';
+import { WHATSAPP_TEMPLATES } from '../../../../common/constants/whatsapp-templates';
 
 const profile: BotProfile = {
   id: 'emp-1',
@@ -58,6 +59,7 @@ function makeCtx(overrides: Record<string, unknown> = {}) {
     prisma: {
       profile: {
         findFirst: jest.fn().mockResolvedValue(baseWorker),
+        findUnique: jest.fn().mockResolvedValue(baseWorker),
         findMany: jest.fn().mockResolvedValue([
           baseWorker,
           {
@@ -109,6 +111,9 @@ function makeCtx(overrides: Record<string, unknown> = {}) {
     } as any,
     invoiceService: {
       create: jest.fn().mockResolvedValue({ id: 'inv-1' }),
+    } as any,
+    portfolioService: {
+      ensurePortfolioSlug: jest.fn().mockResolvedValue('alice-dupont-abc123'),
     } as any,
     mediaMirror: {
       resolveMediaKey: jest
@@ -330,17 +335,93 @@ describe('runRecommendedProfilesFlow — detail view (step 1)', () => {
     void state;
   });
 
-  it('returns to the list on "2" from detail', async () => {
+  it('sends the portfolio CTA template on "2" from detail', async () => {
     const ctx = makeCtx();
     const state = makeState(1, { selectedWorkerId: 'worker-1' });
     const result = await runRecommendedProfilesFlow(state, '2', profile, ctx);
-    expect(result.reply[0]).toContain('[TPL:');
+
+    expect(ctx.portfolioService.ensurePortfolioSlug).toHaveBeenCalledWith(
+      'worker-1',
+    );
+    expect(result.reply[0]).toMatch(
+      new RegExp(
+        `^\\[TPL:${WHATSAPP_TEMPLATES.viewWorkerPortfolio.contentSid}\\]`,
+      ),
+    );
+    expect(result.reply[0]).toContain('alice-dupont-abc123');
+    expect(result.reply[0]).toContain('Alice Dupont');
+    // Stays on the detail step so "1- Contacter" still works afterwards.
+    expect(result.nextState?.step).toBe(1);
   });
 
-  it('returns to the menu on "3" from detail', async () => {
+  // Viewing the portfolio must not consume the selection: the employer can
+  // look at the work and then carry straight on with "1- Contacter".
+  it('still accepts "1" (contacter) right after viewing the portfolio', async () => {
+    const ctx = makeCtx();
+    const state = makeState(1, { selectedWorkerId: 'worker-1' });
+
+    const afterPortfolio = await runRecommendedProfilesFlow(
+      state,
+      '2',
+      profile,
+      ctx,
+    );
+    const contact = await runRecommendedProfilesFlow(
+      afterPortfolio.nextState!,
+      '1',
+      profile,
+      ctx,
+    );
+
+    expect(contact.reply[0]).toContain('Déverrouiller le contact');
+    expect(contact.nextState?.step).toBe(2);
+    expect(contact.nextState?.payload?.selectedWorkerId).toBe('worker-1');
+  });
+
+  it('still accepts "3" (liste) right after viewing the portfolio', async () => {
+    const ctx = makeCtx();
+    const state = makeState(1, { selectedWorkerId: 'worker-1' });
+
+    const afterPortfolio = await runRecommendedProfilesFlow(
+      state,
+      '2',
+      profile,
+      ctx,
+    );
+    const back = await runRecommendedProfilesFlow(
+      afterPortfolio.nextState!,
+      '3',
+      profile,
+      ctx,
+    );
+
+    expect(back.nextState?.step).toBe(0);
+  });
+
+  it('degrades to plain text when the portfolio slug cannot be resolved', async () => {
+    const ctx = makeCtx();
+    ctx.portfolioService.ensurePortfolioSlug = jest
+      .fn()
+      .mockRejectedValue(new Error('db down'));
+    const state = makeState(1, { selectedWorkerId: 'worker-1' });
+    const result = await runRecommendedProfilesFlow(state, '2', profile, ctx);
+
+    expect(result.reply[0]).not.toContain('[TPL:');
+    expect(result.reply[0]).toContain('Portfolio indisponible');
+    expect(result.nextState?.step).toBe(1);
+  });
+
+  it('returns to the list on "3" from detail', async () => {
     const ctx = makeCtx();
     const state = makeState(1, { selectedWorkerId: 'worker-1' });
     const result = await runRecommendedProfilesFlow(state, '3', profile, ctx);
+    expect(result.reply[0]).toContain('[TPL:');
+  });
+
+  it('returns to the menu on "4" from detail', async () => {
+    const ctx = makeCtx();
+    const state = makeState(1, { selectedWorkerId: 'worker-1' });
+    const result = await runRecommendedProfilesFlow(state, '4', profile, ctx);
     expect(result.clearState).toBe(true);
   });
 
@@ -367,7 +448,8 @@ describe('runRecommendedProfilesFlow — detail view (step 1)', () => {
     const ctx = makeCtx();
     const state = makeState(1, { selectedWorkerId: 'worker-1' });
     const result = await runRecommendedProfilesFlow(state, 'wat', profile, ctx);
-    expect(result.reply[0]).toContain('Tapez *1*, *2* ou *3*');
+    expect(result.reply[0]).toContain('Tapez *1*, *2*, *3* ou *4*');
+    expect(result.reply[0]).toContain('2- Voir le portfolio');
   });
 });
 
