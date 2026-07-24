@@ -71,6 +71,26 @@ const JOBS = [
     amount: 10000,
     payment_flow: 'HOURLY' as const,
   },
+  // 5 and 6 exist so the recommended list spills onto a second page
+  // (PAGE_SIZE = 5 in recommended-jobs.flow.ts) and S / P can be tested.
+  {
+    categoryName: 'Plomberie',
+    title: 'Débouchage canalisation cuisine',
+    description:
+      "Canalisation de cuisine bouchée dans un restaurant, débouchage et nettoyage du siphon, contrôle de l'évacuation.",
+    address: 'Ouenzé, Brazzaville',
+    amount: 12000,
+    payment_flow: 'HOURLY' as const,
+  },
+  {
+    categoryName: 'Électricité',
+    title: 'Installation éclairage extérieur',
+    description:
+      "Pose de projecteurs LED et d'un détecteur de mouvement sur la façade et dans la cour d'une maison.",
+    address: 'Makélékélé, Brazzaville',
+    amount: 18000,
+    payment_flow: 'DAILY' as const,
+  },
 ];
 
 async function main() {

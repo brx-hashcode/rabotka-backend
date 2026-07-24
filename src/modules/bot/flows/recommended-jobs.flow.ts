@@ -1,14 +1,6 @@
 import type { BotProfile, BotState } from '../types/bot-state.types';
 import { FLOW_IDS, CMD_MENU } from '../bot.constants';
 import { getApplyJobInitialState } from './apply-job.flow';
-import {
-  type CarouselCard,
-  cardBodyBudget,
-  carouselReply,
-  singleCardReply,
-  composeCardBody,
-  jobImageUrl,
-} from '../../../common/constants/whatsapp-carousel';
 import type { JobOfferService } from '../../job-offer/job-offer.service';
 import type { InterestSignalService } from '../../interest-graph/interest-signal.service';
 import type { SystemConfigService } from '../../system-config/system-config.service';
@@ -32,9 +24,8 @@ export type FlowResult = {
   clearState?: boolean;
 };
 
-// 5 = the max cards a WhatsApp carousel can hold (MAX_CARDS). Was 3, which
-// capped every page at a 3-card carousel and made the approved jobs_4 /
-// jobs_5 templates unreachable. Matches the recommended-profiles page size.
+// Offers shown per page of the plain-text list. Matches the
+// recommended-profiles page size.
 const PAGE_SIZE = 5;
 type RecommendedStep = 'list' | 'detail';
 
@@ -137,42 +128,19 @@ function buildDetailState(
   };
 }
 
-// Card body must be a single line — WhatsApp carousel cards reject line
-// breaks — so fields get inline labels joined by " • " instead of real
-// bullets. Address is unbounded free text (job title goes in the card's own
-// `title` field, not here), so it's ordered last: composeCardBody truncates
-// whichever field overflows the budget, and anything after it is dropped —
-// putting the bounded fields (amount, date) first guarantees they're never
-// the ones silently cut off.
-function jobCardBody(offer: OfferListItem): string {
-  const date = offer.scheduled_at.toLocaleDateString('fr-FR', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-  return composeCardBody(
-    [
-      {
-        label: 'Montant',
-        value: formatAmount(offer.amount, offer.payment_flow),
-      },
-      { label: 'Date', value: date },
-      { label: 'Adresse', value: offer.address },
-    ],
-    cardBodyBudget('jobs', offer.title),
-  );
-}
-
 /**
- * Single source of truth for rendering a page of recommended offers: a native
- * WhatsApp carousel, falling back to the text list when the count is outside
- * 2..5 (Meta requires at least 2 cards).
+ * Single source of truth for rendering a page of recommended offers: the plain
+ * numbered text list, for every page size. Recommended offers are deliberately
+ * NOT sent as WhatsApp carousel / card templates — that path was reverted;
+ * templates remain only on the employer-side recommended-profiles flow.
+ *
+ * formatRecommendedList already carries the pagination actions (P / S / M) and
+ * the "tapez un numéro" hint, so this is a single message — no separate nav
+ * line.
  *
  * Exported because the orchestrator's entry-point command must render the
- * first page with the SAME renderer — it previously built its own text list,
- * so the carousel never showed on the initial menu selection.
+ * first page with the SAME renderer — it previously built its own text list
+ * and drifted from the flow.
  */
 export function buildPagedListReply(
   offers: OfferListItem[],
@@ -184,30 +152,6 @@ export function buildPagedListReply(
     safePage * PAGE_SIZE,
     (safePage + 1) * PAGE_SIZE,
   );
-
-  // Native WhatsApp carousel (one "Sélectionner" button per card, positional
-  // id matches the numeric selection this list step already parses). Falls
-  // back to the text list when the count is outside 2..5 (Meta requires at
-  // least 2 cards per carousel).
-  const cards: CarouselCard[] = pageOffers.map((o) => ({
-    title: o.title,
-    image: jobImageUrl(),
-    body: jobCardBody(o),
-  }));
-  const nav =
-    totalPages > 1
-      ? `📄 Page ${safePage + 1}/${totalPages} — *S* suivante · *P* précédente · *Menu* pour revenir.`
-      : 'Touchez *Sélectionner* pour voir le détail, ou *Menu* pour revenir.';
-
-  const carousel = carouselReply('jobs', cards);
-  if (carousel) {
-    return { reply: [carousel, nav], page: safePage };
-  }
-
-  // Exactly one offer: a single card instead of the plain-text fallback.
-  if (cards.length === 1) {
-    return { reply: [singleCardReply('jobs', cards[0]), nav], page: safePage };
-  }
 
   return {
     reply: [formatRecommendedList(pageOffers, safePage, totalPages)],

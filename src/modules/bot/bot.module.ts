@@ -11,6 +11,7 @@ import { SystemConfigModule } from '../system-config/system-config.module';
 import { MatchingModule } from '../matching/matching.module';
 import { InterestGraphModule } from '../interest-graph/interest-graph.module';
 import { InvoiceModule } from '../invoice/invoice.module';
+import { PortfolioModule } from '../portfolio/portfolio.module';
 import { BotStateService } from './services/bot-state.service';
 import { BotInboxService } from './services/bot-inbox.service';
 import { BotDraftService } from './services/bot-draft.service';
@@ -33,6 +34,7 @@ import { BotNotificationService } from './services/bot-notification.service';
     MatchingModule,
     InterestGraphModule,
     InvoiceModule,
+    forwardRef(() => PortfolioModule),
   ],
   providers: [
     BotStateService,

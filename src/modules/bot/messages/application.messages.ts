@@ -2,6 +2,12 @@ import { APP_TIMEZONE } from '../utils/parse-date-time';
 
 export type CandidatureListItem = {
   id: string;
+  /**
+   * Profile id of the applicant — needed to build the portfolio link. Optional
+   * because items are persisted in bot state: entries stored before this field
+   * existed have none, and the flow falls back to reading the application.
+   */
+  workerId?: string | null;
   fullName: string;
   score: string | number;
   firstName: string;
@@ -90,6 +96,9 @@ export function formatCandidatureDetail(params: {
     '2- Refuser',
     '3- Retour à la liste',
     '4- Menu',
+    // Appended rather than inserted: 1/2 are Accepter/Refuser and are forwarded
+    // as-is to the accept/refuse flow, so their numbers must not shift.
+    '5- Voir le portfolio',
     '',
     '*Tapez le numéro correspondant.*',
   );
