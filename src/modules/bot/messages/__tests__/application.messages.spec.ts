@@ -108,6 +108,19 @@ describe('formatCandidatureDetail', () => {
     expect(msg).toContain('90/100');
   });
 
+  it('offers the portfolio as action 5, leaving accept/refuse on 1/2', () => {
+    const msg = formatCandidatureDetail({
+      firstName: 'Marie',
+      lastName: 'Kanda',
+      email: 'marie@test.com',
+      status: 'VERIFIED',
+      score: 90,
+    });
+    expect(msg).toContain('1- Accepter');
+    expect(msg).toContain('2- Refuser');
+    expect(msg).toContain('5- Voir le portfolio');
+  });
+
   it('renders with avatar URL as [IMG:...] prefix', () => {
     const msg = formatCandidatureDetail({
       firstName: 'Paul',

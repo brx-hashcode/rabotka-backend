@@ -5,6 +5,7 @@ import {
 import type { BotProfile } from '../../types/bot-state.types';
 import type { CandidatureListItem } from '../../messages/application.messages';
 import { FLOW_IDS } from '../../bot.constants';
+import { WHATSAPP_TEMPLATES } from '../../../../common/constants/whatsapp-templates';
 
 const employerProfile: BotProfile = {
   id: 'e-1',
@@ -21,6 +22,7 @@ function makeItem(id: string, name = 'Alice Dupont'): CandidatureListItem {
   const [firstName, lastName] = name.split(' ');
   return {
     id,
+    workerId: `worker-of-${id}`,
     fullName: name,
     firstName,
     lastName,
@@ -39,7 +41,13 @@ function makeItems(count: number): CandidatureListItem[] {
 
 function makeCtx() {
   return {
-    prisma: {} as any,
+    prisma: {
+      application: {
+        findUnique: jest
+          .fn()
+          .mockResolvedValue({ worker_id: 'worker-from-db' }),
+      },
+    } as any,
     applicationService: {
       markAsViewed: jest.fn().mockResolvedValue(undefined),
       accept: jest.fn().mockResolvedValue(undefined),
@@ -54,6 +62,9 @@ function makeCtx() {
     } as any,
     walletService: {} as any,
     systemConfigService: {} as any,
+    portfolioService: {
+      ensurePortfolioSlug: jest.fn().mockResolvedValue('alice-dupont-abc123'),
+    } as any,
   };
 }
 
@@ -188,6 +199,89 @@ describe('runCandidaturesListFlow()', () => {
         makeCtx(),
       );
       expect(result.reply.length).toBeGreaterThan(0);
+    });
+
+    it('sends the portfolio CTA template on "5"', async () => {
+      const item = makeItem('app-1');
+      const state = makeDetailState(item);
+      const ctx = makeCtx();
+      const result = await runCandidaturesListFlow(
+        state,
+        '5',
+        employerProfile,
+        ctx,
+      );
+
+      expect(ctx.portfolioService.ensurePortfolioSlug).toHaveBeenCalledWith(
+        'worker-of-app-1',
+      );
+      expect(result.reply[0]).toMatch(
+        new RegExp(
+          `^\\[TPL:${WHATSAPP_TEMPLATES.viewWorkerPortfolio.contentSid}\\]`,
+        ),
+      );
+      expect(result.reply[0]).toContain('alice-dupont-abc123');
+      // Detail step preserved so accept/refuse still works afterwards.
+      expect(result.nextState).toBe(state);
+    });
+
+    // Same guarantee as the recommended-profiles flow: looking at the
+    // portfolio does not consume the selection.
+    it('still accepts "1" (accepter) right after viewing the portfolio', async () => {
+      const item = makeItem('app-1');
+      const state = makeDetailState(item);
+      const ctx = makeCtx();
+
+      const afterPortfolio = await runCandidaturesListFlow(
+        state,
+        '5',
+        employerProfile,
+        ctx,
+      );
+      const accepted = await runCandidaturesListFlow(
+        afterPortfolio.nextState!,
+        '1',
+        employerProfile,
+        ctx,
+      );
+
+      expect(accepted.reply.length).toBeGreaterThan(0);
+      expect(ctx.applicationService.markAsViewed).toBeDefined();
+    });
+
+    it('falls back to the application when a stored item has no workerId', async () => {
+      // Items persisted in bot state before workerId existed.
+      const { workerId: _omitted, ...legacyItem } = makeItem('app-1');
+      const state = makeDetailState(legacyItem as CandidatureListItem);
+      const ctx = makeCtx();
+      const result = await runCandidaturesListFlow(
+        state,
+        '5',
+        employerProfile,
+        ctx,
+      );
+
+      expect(ctx.prisma.application.findUnique).toHaveBeenCalled();
+      expect(ctx.portfolioService.ensurePortfolioSlug).toHaveBeenCalledWith(
+        'worker-from-db',
+      );
+      expect(result.reply[0]).toContain('[TPL:');
+    });
+
+    it('degrades to plain text when the applicant cannot be resolved', async () => {
+      const { workerId: _omitted, ...legacyItem } = makeItem('app-1');
+      const state = makeDetailState(legacyItem as CandidatureListItem);
+      const ctx = makeCtx();
+      ctx.prisma.application.findUnique = jest.fn().mockResolvedValue(null);
+      const result = await runCandidaturesListFlow(
+        state,
+        '5',
+        employerProfile,
+        ctx,
+      );
+
+      expect(result.reply[0]).not.toContain('[TPL:');
+      expect(result.reply[0]).toContain('Portfolio indisponible');
     });
   });
 });
