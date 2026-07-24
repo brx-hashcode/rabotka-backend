@@ -104,6 +104,7 @@ import { runJobStatusCheckFlow } from '../flows/job-status-check.flow';
 import { InterestSignalService } from '../../interest-graph/interest-signal.service';
 import { InterestRecommendationService } from '../../interest-graph/interest-recommendation.service';
 import { InvoiceService } from '../../invoice/invoice.service';
+import { PortfolioService } from '../../portfolio/portfolio.service';
 import { ConfigService } from '@nestjs/config';
 
 const INACTIVE_MESSAGE = `Votre compte est créé mais pas encore activé. Cliquez sur le lien de confirmation que nous vous avons envoyé par WhatsApp pour l'activer.`;
@@ -175,6 +176,7 @@ export class BotOrchestratorService {
     private readonly interestSignalService: InterestSignalService,
     private readonly interestRecommendationService: InterestRecommendationService,
     private readonly invoiceService: InvoiceService,
+    private readonly portfolioService: PortfolioService,
     private readonly queueService: QueueService,
     private readonly configService: ConfigService,
   ) {}
@@ -685,6 +687,7 @@ export class BotOrchestratorService {
       walletService: this.walletService,
       interestSignalService: this.interestSignalService,
       invoiceService: this.invoiceService,
+      portfolioService: this.portfolioService,
     };
   }
 
@@ -750,7 +753,8 @@ export class BotOrchestratorService {
           employerProfileId: profile.id,
           interestSignalService: this.interestSignalService,
           invoiceService: this.invoiceService,
-            }),
+          portfolioService: this.portfolioService,
+        }),
       [FLOW_IDS.RATE_ASSIGNMENT]: () =>
         runRateAssignmentFlow(state, input, profile, {
           prisma: this.prisma,
@@ -1214,8 +1218,9 @@ export class BotOrchestratorService {
     const flowState = getRecommendedJobsInitialState(offerIds);
     await this.botState.set(profileId, flowState);
 
-    // Same renderer as the flow's list step (carousel, text fallback for
-    // counts outside 2..5) — this entry point must not render its own list.
+    // Same renderer as the flow's list step (plain numbered text list — job
+    // recommendations are not sent as templates) — this entry point must not
+    // render its own list.
     return buildPagedListReply(offerItems, 0).reply;
   }
 

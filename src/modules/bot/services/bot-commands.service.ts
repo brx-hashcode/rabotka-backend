@@ -311,6 +311,7 @@ export class BotCommandsService {
         const w = app.worker;
         allItems.push({
           id: app.id,
+          workerId: app.worker_id,
           fullName: w ? `${w.first_name} ${w.last_name}` : 'Inconnu',
           score: w?.reliability_score ?? '?',
           firstName: w?.first_name ?? '',
