@@ -154,6 +154,26 @@ describe('WhatsAppOutboundProcessor', () => {
     ).rejects.toThrow('returned no SID');
   });
 
+  // Regression: a bookkeeping (saveMessage) failure after a delivered template
+  // must NOT fail the job — a failed job is retried and would resend the
+  // template (the recommended-profiles duplicate-card bug).
+  it('does not throw or resend when saveMessage fails after a delivered template', async () => {
+    mockWhatsApp.saveMessage.mockRejectedValueOnce(new Error('db down'));
+    await expect(
+      processor.process({
+        data: {
+          type: 'template',
+          phone: '+242001',
+          contentSid: 'HXcarousel',
+          contentVariables: { '1': 'x' },
+          profileId: 'p1',
+        },
+      }),
+    ).resolves.toBeUndefined();
+    // Sent exactly once — the job completed, so BullMQ will not retry/resend.
+    expect(mockWhatsApp.sendTemplateMessage).toHaveBeenCalledTimes(1);
+  });
+
   it('process sends media without caption saves proper body', async () => {
     await processor.process({
       data: {
@@ -192,6 +212,23 @@ describe('WhatsAppOutboundProcessor', () => {
         },
       }),
     ).rejects.toThrow('returned no SID');
+  });
+
+  // Regression: a bookkeeping failure after a delivered media message must not
+  // fail the job (which would resend the media on retry).
+  it('does not throw or resend when saveMessage fails after a delivered media message', async () => {
+    mockWhatsApp.saveMessage.mockRejectedValueOnce(new Error('db down'));
+    await expect(
+      processor.process({
+        data: {
+          type: 'media',
+          phone: '+242001',
+          mediaUrl: 'https://img.com/1.jpg',
+          profileId: 'p1',
+        },
+      }),
+    ).resolves.toBeUndefined();
+    expect(mockWhatsApp.sendMediaMessage).toHaveBeenCalledTimes(1);
   });
 
   it('register - failed handler triggers DLQ when max attempts reached', async () => {
