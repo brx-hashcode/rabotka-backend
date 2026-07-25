@@ -6,6 +6,7 @@ import {
   Min,
   Max,
   IsArray,
+  IsBoolean,
 } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -52,4 +53,12 @@ export class AdminListPenaltiesDto {
   @Transform(({ value }) => toArray(value))
   @IsArray()
   payment_status?: string[];
+
+  @ApiPropertyOptional({
+    description: 'When true, list archived (soft-deleted) rows instead of active',
+  })
+  @IsOptional()
+  @Transform(({ value }) => value === 'true' || value === true)
+  @IsBoolean()
+  deleted?: boolean;
 }

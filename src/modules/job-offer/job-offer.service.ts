@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import Redis from 'ioredis';
 import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
+import { deletedAtFilter } from '../../common/utils/soft-delete.util';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { isWorkerHardBlocked } from '../penalty/penalty.utils';
 import { MailService } from '../mail/mail.service';
@@ -820,16 +821,20 @@ export class JobOfferService {
     limit: number;
     q?: string;
     status?: JobOfferStatus[];
+    deleted?: boolean;
   }): Promise<{
     data: AdminJobOfferListItem[];
     total: number;
     page: number;
     limit: number;
   }> {
-    const { page, limit, q, status } = params;
+    const { page, limit, q, status, deleted } = params;
     const skip = (page - 1) * limit;
 
-    const where: Prisma.JobOfferWhereInput = {};
+    // Active rows by default; the admin "Deleted" filter flips to archived rows.
+    const where: Prisma.JobOfferWhereInput = {
+      deleted_at: deletedAtFilter(deleted),
+    };
 
     const searchTrimmed = q?.trim() ?? '';
     if (searchTrimmed.length > 0) {
@@ -1002,15 +1007,19 @@ export class JobOfferService {
   }
 
   async deleteJobOfferByAdmin(id: string): Promise<void> {
-    const offer = await this.prisma.jobOffer.findUnique({
-      where: { id },
+    const offer = await this.prisma.jobOffer.findFirst({
+      where: { id, deleted_at: null },
       select: { id: true, title: true },
     });
     if (!offer) {
       throw new NotFoundException("Offre d'emploi introuvable");
     }
 
-    await this.prisma.jobOffer.delete({ where: { id } });
+    // Soft delete (archive) — reversible, preserves history.
+    await this.prisma.jobOffer.update({
+      where: { id },
+      data: { deleted_at: new Date() },
+    });
 
     // Remove from vector index — fire-and-forget, non-fatal
     void this.matchingService
@@ -1030,6 +1039,22 @@ export class JobOfferService {
       entityId: String(id),
       timestamp: new Date().toISOString(),
     });
+  }
+
+  /** Archive many offers at once (admin bulk delete). Returns the count archived. */
+  async bulkSoftDeleteByAdmin(ids: string[]): Promise<{ count: number }> {
+    if (ids.length === 0) return { count: 0 };
+    const { count } = await this.prisma.jobOffer.updateMany({
+      where: { id: { in: ids }, deleted_at: null },
+      data: { deleted_at: new Date() },
+    });
+    // Remove each from the vector index so archived offers stop being matched.
+    for (const id of ids) {
+      void this.matchingService
+        .deleteJobFromIndex(id)
+        .catch(() => undefined);
+    }
+    return { count };
   }
 
   async updateJobOfferByAdmin(

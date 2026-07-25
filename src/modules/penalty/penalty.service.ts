@@ -5,6 +5,7 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
+import { deletedAtFilter } from '../../common/utils/soft-delete.util';
 import { BillingStatus, Prisma, PaymentMethod } from '@prisma/client';
 import { WalletService } from '../wallet/wallet.service';
 
@@ -157,8 +158,8 @@ export class PenaltyService {
   }
 
   async deletePenalty(id: string): Promise<{ success: boolean }> {
-    const penalty = await this.prisma.penalty.findUnique({
-      where: { id },
+    const penalty = await this.prisma.penalty.findFirst({
+      where: { id, deleted_at: null },
       select: { id: true, profile_id: true, paid_at: true },
     });
     if (!penalty) throw new NotFoundException('Pénalité introuvable');
@@ -168,7 +169,11 @@ export class PenaltyService {
       );
     }
 
-    await this.prisma.penalty.delete({ where: { id } });
+    // Soft delete (archive) — reversible, preserves financial history.
+    await this.prisma.penalty.update({
+      where: { id },
+      data: { deleted_at: new Date() },
+    });
 
     const unpaidCount = await this.prisma.penalty.count({
       where: { profile_id: penalty.profile_id, paid_at: null },
@@ -181,6 +186,45 @@ export class PenaltyService {
     });
 
     return { success: true };
+  }
+
+  /**
+   * Archive many penalties at once (admin bulk delete). Already-paid penalties
+   * are skipped (their financial record must stay). Returns the count archived.
+   */
+  async bulkSoftDeletePenalties(ids: string[]): Promise<{ count: number }> {
+    if (ids.length === 0) return { count: 0 };
+    const affected = await this.prisma.penalty.findMany({
+      where: { id: { in: ids }, deleted_at: null, paid_at: null },
+      select: { id: true, profile_id: true },
+    });
+    if (affected.length === 0) return { count: 0 };
+
+    await this.prisma.penalty.updateMany({
+      where: { id: { in: affected.map((p) => p.id) } },
+      data: { deleted_at: new Date() },
+    });
+
+    // Recompute billing status for each affected profile.
+    const profileIds = [...new Set(affected.map((p) => p.profile_id))];
+    await Promise.all(
+      profileIds.map(async (profileId) => {
+        const unpaidCount = await this.prisma.penalty.count({
+          where: { profile_id: profileId, paid_at: null, deleted_at: null },
+        });
+        await this.prisma.profile.update({
+          where: { id: profileId },
+          data: {
+            billing_status:
+              unpaidCount === 0
+                ? BillingStatus.CLEAR
+                : BillingStatus.PENDING_PAYMENT,
+          },
+        });
+      }),
+    );
+
+    return { count: affected.length };
   }
 
   async getPenaltyDetailForAdmin(
@@ -256,11 +300,15 @@ export class PenaltyService {
     limit: number;
     q?: string;
     paymentStatus?: string[];
+    deleted?: boolean;
   }): Promise<AdminPenaltiesListResponse> {
-    const { page, limit, q, paymentStatus } = params;
+    const { page, limit, q, paymentStatus, deleted } = params;
     const skip = (page - 1) * limit;
 
-    const where: Prisma.PenaltyWhereInput = {};
+    // Active rows by default; the admin "Deleted" filter flips to archived rows.
+    const where: Prisma.PenaltyWhereInput = {
+      deleted_at: deletedAtFilter(deleted),
+    };
 
     const searchTrimmed = q?.trim() ?? '';
     if (searchTrimmed.length > 0) {

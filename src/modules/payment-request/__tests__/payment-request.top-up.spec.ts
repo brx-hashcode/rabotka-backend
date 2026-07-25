@@ -12,6 +12,7 @@ import {
   PaymentRequestStatus,
   PaymentRequestType,
   WalletTransactionType,
+  InvoiceReason,
 } from '@prisma/client';
 import { WalletService } from '../../wallet/wallet.service';
 import { MonetbilService } from '../monetbil.service';
@@ -80,8 +81,15 @@ describe('PaymentRequestService — WALLET_TOP_UP post-payment', () => {
   let mockBotNotification: { sendMessage: jest.Mock; sendContactUnlockedNotification: jest.Mock };
   let mockPrisma: Record<string, unknown>;
   let mockPaymentGateway: { handleWebhookPayload: jest.Mock; initiatePayment: jest.Mock };
+  let mockInvoiceService: { create: jest.Mock; downloadAsAdmin: jest.Mock };
 
   beforeEach(async () => {
+    mockInvoiceService = {
+      create: jest.fn().mockResolvedValue({ id: 'inv-1' }),
+      downloadAsAdmin: jest
+        .fn()
+        .mockResolvedValue({ buffer: Buffer.from('pdf'), filename: 'invoice.pdf' }),
+    };
     mockWalletService = {
       getOrCreateSystemWallet: jest.fn().mockResolvedValue({ id: 'sys-wallet' }),
       getOrCreateMobileMoneyWallet: jest.fn().mockResolvedValue({ id: 'mm-wallet' }),
@@ -159,10 +167,7 @@ describe('PaymentRequestService — WALLET_TOP_UP post-payment', () => {
         { provide: ContactUnlockService, useValue: { payUnlock: jest.fn(), getContactsIfUnlocked: jest.fn() } },
         {
           provide: InvoiceService,
-          useValue: {
-            create: jest.fn().mockResolvedValue({ id: 'inv-1' }),
-            downloadAsAdmin: jest.fn().mockResolvedValue({ buffer: Buffer.from('pdf'), filename: 'invoice.pdf' }),
-          },
+          useValue: mockInvoiceService,
         },
         { provide: StorageService, useValue: { upload: jest.fn().mockResolvedValue({ url: 'https://cdn.example.com/invoice.pdf' }) } },
         { provide: QueueService, useValue: { addJob: jest.fn().mockResolvedValue('job-1') } },
@@ -181,6 +186,19 @@ describe('PaymentRequestService — WALLET_TOP_UP post-payment', () => {
       WalletTransactionType.TOP_UP_CREDIT,
       'payment_request',
       REQUEST_ID,
+    );
+  });
+
+  it('creates a downloadable WALLET_TOP_UP invoice on successful top-up', async () => {
+    await service.handlePaymentCallback({ paymentId: GATEWAY_REF, status: 'SUCCESS' });
+
+    expect(mockInvoiceService.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        profileId: PROFILE_ID,
+        paymentRequestId: REQUEST_ID,
+        amount: 5000,
+        reason: InvoiceReason.WALLET_TOP_UP,
+      }),
     );
   });
 

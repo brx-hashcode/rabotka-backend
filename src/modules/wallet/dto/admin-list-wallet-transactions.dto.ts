@@ -7,6 +7,7 @@ import {
   Max,
   IsArray,
   IsDateString,
+  IsBoolean,
 } from 'class-validator';
 
 import { ApiPropertyOptional } from '@nestjs/swagger';
@@ -69,4 +70,12 @@ export class AdminListWalletTransactionsDto {
   @IsOptional()
   @IsDateString()
   created_to?: string;
+
+  @ApiPropertyOptional({
+    description: 'When true, list archived (soft-deleted) rows instead of active',
+  })
+  @IsOptional()
+  @Transform(({ value }) => value === 'true' || value === true)
+  @IsBoolean()
+  deleted?: boolean;
 }

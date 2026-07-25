@@ -10,6 +10,7 @@ import {
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
+import { deletedAtFilter } from '../../common/utils/soft-delete.util';
 import { isWorkerHardBlocked } from '../penalty/penalty.utils';
 import { BotNotificationService } from '../bot/services/bot-notification.service';
 import { ContactUnlockService } from '../contact-unlock/contact-unlock.service';
@@ -1636,17 +1637,29 @@ export class ApplicationService {
     penaltyApplied?: string[];
     workerId?: string;
     employerId?: string;
+    deleted?: boolean;
   }): Promise<{
     data: AdminApplicationListItem[];
     total: number;
     page: number;
     limit: number;
   }> {
-    const { page, limit, q, status, penaltyApplied, workerId, employerId } =
-      params;
+    const {
+      page,
+      limit,
+      q,
+      status,
+      penaltyApplied,
+      workerId,
+      employerId,
+      deleted,
+    } = params;
     const skip = (page - 1) * limit;
 
-    const where: Prisma.ApplicationWhereInput = {};
+    // Active rows by default; the admin "Deleted" filter flips to archived rows.
+    const where: Prisma.ApplicationWhereInput = {
+      deleted_at: deletedAtFilter(deleted),
+    };
 
     const searchTrimmed = q?.trim() ?? '';
     if (searchTrimmed.length > 0) {
@@ -1756,6 +1769,16 @@ export class ApplicationService {
     }));
 
     return { data, total, page, limit };
+  }
+
+  /** Archive many applications at once (admin bulk delete). Returns the count archived. */
+  async bulkSoftDeleteApplications(ids: string[]): Promise<{ count: number }> {
+    if (ids.length === 0) return { count: 0 };
+    const { count } = await this.prisma.application.updateMany({
+      where: { id: { in: ids }, deleted_at: null },
+      data: { deleted_at: new Date() },
+    });
+    return { count };
   }
 
   private toListItem(app: {

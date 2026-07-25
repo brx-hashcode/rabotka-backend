@@ -19,6 +19,7 @@ import { REDIS_KEY_PREFIX } from '../../common/services/redis/redis.constants';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
 import { LayoutService } from '../mail/layout.service';
+import { LogService } from '../log/log.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { sendOtpEmail } from '../mail/templates';
 import { WHATSAPP_TEMPLATES } from '../../common/constants/whatsapp-templates';
@@ -87,7 +88,32 @@ export class AuthService {
     private readonly layoutService: LayoutService,
     private readonly whatsAppService: WhatsAppService,
     private readonly configService: ConfigService,
+    private readonly logService: LogService,
   ) {}
+
+  /**
+   * Record a successful admin login in the audit log (surfaced on the admin
+   * Logs page). Best-effort — a logging failure must never block the login.
+   */
+  private async recordAdminLogin(
+    userId: string,
+    method: 'otp' | 'totp' | 'qr',
+    meta?: { ipAddress?: string; userAgent?: string },
+  ): Promise<void> {
+    await this.logService
+      .create({
+        action: 'admin.login',
+        entityType: 'User',
+        entityId: userId,
+        userId,
+        metadata: { method },
+        ipAddress: meta?.ipAddress,
+        userAgent: meta?.userAgent,
+      })
+      .catch((err) =>
+        this.logger.warn(`Failed to record admin login for ${userId}:`, err),
+      );
+  }
 
   async sendOtp(emailOrPhone: string): Promise<{ success: boolean }> {
     const normalized = this.normalize(emailOrPhone);
@@ -442,6 +468,7 @@ export class AuthService {
   async verifyAdminOtp(
     email: string,
     otp: string,
+    meta?: { ipAddress?: string; userAgent?: string },
   ): Promise<{ success: boolean; token: string; totpRequired?: boolean }> {
     const normalized = this.normalize(email);
 
@@ -496,6 +523,7 @@ export class AuthService {
       where: { id: user.id },
       data: { last_login_at: new Date() },
     });
+    await this.recordAdminLogin(user.id, 'otp', meta);
 
     return { success: true, token };
   }
@@ -786,6 +814,7 @@ export class AuthService {
       where: { id: user.id },
       data: { last_login_at: new Date() },
     });
+    await this.recordAdminLogin(user.id, 'qr');
 
     return { success: true };
   }
@@ -1054,6 +1083,7 @@ export class AuthService {
   async verifyTotpLogin(
     pendingToken: string,
     code: string,
+    meta?: { ipAddress?: string; userAgent?: string },
   ): Promise<{ success: boolean; token: string }> {
     const userId = await this.redis.get(
       `${TOTP_PENDING_PREFIX}${pendingToken}`,
@@ -1091,6 +1121,7 @@ export class AuthService {
       where: { id: userId },
       data: { last_login_at: new Date() },
     });
+    await this.recordAdminLogin(userId, 'totp', meta);
 
     return { success: true, token };
   }
