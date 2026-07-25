@@ -1,9 +1,15 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { createHash } from 'node:crypto';
 
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { QdrantClient } from '@qdrant/js-client-rest';
+import Redis from 'ioredis';
+import {
+  REDIS_CONNECTION,
+  REDIS_KEY_PREFIX,
+} from '../../common/services/redis/redis.constants';
 import { QDRANT_COLLECTION_PREFIX } from './qdrant.config';
 import {
   EmbeddingModel,
@@ -16,6 +22,18 @@ export const DENSE_MODEL = EmbeddingModel.BGESmallENV15;
 export const DENSE_DIM = 384;
 export const SPARSE_MODEL = SparseEmbeddingModel.SpladePPEnV1;
 const SEARCH_LIMIT = 30;
+
+// Hot-path query embeddings are cached in Redis by content hash. The query
+// text is deterministic per entity (a worker's profile text, a job's text),
+// so encoding it on every recommendation is pure waste. `v1` namespaces the
+// serialization format; bump it if the stored shape or embedding model changes.
+const EMB_CACHE_PREFIX = `${REDIS_KEY_PREFIX}emb:hybrid:v1:`;
+const EMB_CACHE_TTL_SECONDS = 86_400; // 24h
+
+type HybridEmbedding = {
+  dense: number[];
+  sparse: { indices: number[]; values: number[] };
+};
 
 const TRANSIENT_ERROR_CODES = new Set([
   'ECONNRESET',
@@ -103,7 +121,10 @@ export class QdrantService implements OnModuleInit {
   private sparseEmbedder: SparseTextEmbedding | undefined;
   private embeddersPromise: Promise<void> | null = null;
 
-  constructor(private readonly config: ConfigService) {}
+  constructor(
+    private readonly config: ConfigService,
+    @Inject(REDIS_CONNECTION) private readonly redis: Redis,
+  ) {}
 
   onModuleInit(): void {
     const url = this.config.get<string>('QDRANT_URL');
@@ -213,15 +234,56 @@ export class QdrantService implements OnModuleInit {
     };
   }
 
-  async embedHybrid(text: string): Promise<{
-    dense: number[];
-    sparse: { indices: number[]; values: number[] };
-  }> {
+  async embedHybrid(text: string): Promise<HybridEmbedding> {
     const [dense, sparse] = await Promise.all([
       this.embed(text),
       this.sparseEmbed(text),
     ]);
     return { dense, sparse };
+  }
+
+  /**
+   * Query-side hybrid embedding with a Redis read-through cache keyed by the
+   * text's content hash. Search queries re-encode the same deterministic text
+   * (a worker/job/employer's built text) on every recommendation; caching it
+   * removes that per-request fastembed cost. Same text → same vectors, so this
+   * is behaviour-preserving, and it self-invalidates: edited text hashes to a
+   * new key and the old one simply expires.
+   *
+   * Cache is strictly best-effort — any Redis/parse error falls through to a
+   * direct encode so a cache problem can never fail a search. Only used on the
+   * query path; indexing (`upsertHybrid`) always encodes fresh.
+   */
+  async embedHybridCached(text: string): Promise<HybridEmbedding> {
+    const key = `${EMB_CACHE_PREFIX}${createHash('sha256').update(text).digest('hex')}`;
+
+    try {
+      const cached = await this.redis.get(key);
+      if (cached) {
+        return JSON.parse(cached) as HybridEmbedding;
+      }
+    } catch (err) {
+      this.logger.debug(
+        `Embedding cache read failed, encoding directly: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
+    const embedding = await this.embedHybrid(text);
+
+    try {
+      await this.redis.set(
+        key,
+        JSON.stringify(embedding),
+        'EX',
+        EMB_CACHE_TTL_SECONDS,
+      );
+    } catch (err) {
+      this.logger.debug(
+        `Embedding cache write failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
+    return embedding;
   }
 
   async upsertHybrid(
@@ -267,7 +329,7 @@ export class QdrantService implements OnModuleInit {
     }>
   > {
     this.assertPrefix(collectionName);
-    const { dense, sparse } = await this.embedHybrid(text);
+    const { dense, sparse } = await this.embedHybridCached(text);
     const results = await retryTransient(() =>
       this.client.query(collectionName, {
         prefetch: [
@@ -304,7 +366,7 @@ export class QdrantService implements OnModuleInit {
     }>
   > {
     this.assertPrefix(collectionName);
-    const { dense, sparse } = await this.embedHybrid(text);
+    const { dense, sparse } = await this.embedHybridCached(text);
     const results = await retryTransient(() =>
       this.client.query(collectionName, {
         prefetch: [

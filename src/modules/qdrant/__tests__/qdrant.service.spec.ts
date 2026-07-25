@@ -2,8 +2,15 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { QdrantService } from '../qdrant.service';
 import { QDRANT_COLLECTION_PREFIX } from '../qdrant.config';
+import { REDIS_CONNECTION } from '../../../common/services/redis/redis.constants';
 
 const validCollection = `${QDRANT_COLLECTION_PREFIX}test-collection`;
+
+// Cache defaults to a miss; individual tests override get/set as needed.
+const mockRedis = {
+  get: jest.fn().mockResolvedValue(null),
+  set: jest.fn().mockResolvedValue('OK'),
+};
 
 const mockClient = {
   getCollections: jest.fn(),
@@ -85,6 +92,7 @@ describe('QdrantService', () => {
       providers: [
         QdrantService,
         { provide: ConfigService, useValue: mockConfig },
+        { provide: REDIS_CONNECTION, useValue: mockRedis },
       ],
     }).compile();
     service = module.get<QdrantService>(QdrantService);
@@ -103,6 +111,7 @@ describe('QdrantService', () => {
       providers: [
         QdrantService,
         { provide: ConfigService, useValue: mockConfig },
+        { provide: REDIS_CONNECTION, useValue: mockRedis },
       ],
     }).compile();
     const service2 = module2.get<QdrantService>(QdrantService);
@@ -117,6 +126,7 @@ describe('QdrantService', () => {
       providers: [
         QdrantService,
         { provide: ConfigService, useValue: mockConfig },
+        { provide: REDIS_CONNECTION, useValue: mockRedis },
       ],
     }).compile();
     const service3 = module3.get<QdrantService>(QdrantService);
@@ -266,6 +276,57 @@ describe('QdrantService', () => {
       const results = await service.searchHybrid(validCollection, 'query', 5);
       expect(results).toHaveLength(1);
       expect(results[0].id).toBe('id-1');
+    });
+
+    it('encodes and caches the query embedding on a cache miss', async () => {
+      mockRedis.get.mockResolvedValueOnce(null);
+      mockClient.query.mockResolvedValueOnce({ points: [] });
+
+      await service.searchHybrid(validCollection, 'plombier brazzaville', 5);
+
+      // Encoded once (dense + sparse) and written to the cache with a TTL.
+      expect(mockDenseEmbedder.embed).toHaveBeenCalledTimes(1);
+      expect(mockSparseEmbedder.embed).toHaveBeenCalledTimes(1);
+      expect(mockRedis.set).toHaveBeenCalledWith(
+        expect.stringContaining('emb:hybrid:v1:'),
+        expect.any(String),
+        'EX',
+        expect.any(Number),
+      );
+    });
+
+    it('reuses the cached embedding on a hit (no re-encode)', async () => {
+      const cached = JSON.stringify({
+        dense: new Array<number>(384).fill(0.2),
+        sparse: { indices: [3, 7], values: [0.9, 0.4] },
+      });
+      mockRedis.get.mockResolvedValueOnce(cached);
+      mockClient.query.mockResolvedValueOnce({ points: [] });
+
+      await service.searchHybrid(validCollection, 'plombier brazzaville', 5);
+
+      // No fastembed call, and the cached vectors are what Qdrant queried with.
+      expect(mockDenseEmbedder.embed).not.toHaveBeenCalled();
+      expect(mockSparseEmbedder.embed).not.toHaveBeenCalled();
+      expect(mockRedis.set).not.toHaveBeenCalled();
+      const queryArg = mockClient.query.mock.calls[0][1];
+      expect(queryArg.prefetch[0].query).toEqual(
+        new Array<number>(384).fill(0.2),
+      );
+      expect(queryArg.prefetch[1].query).toEqual({
+        indices: [3, 7],
+        values: [0.9, 0.4],
+      });
+    });
+
+    it('falls back to a direct encode when the cache read throws', async () => {
+      mockRedis.get.mockRejectedValueOnce(new Error('redis down'));
+      mockClient.query.mockResolvedValueOnce({ points: [] });
+
+      await expect(
+        service.searchHybrid(validCollection, 'query', 5),
+      ).resolves.toBeDefined();
+      expect(mockDenseEmbedder.embed).toHaveBeenCalledTimes(1);
     });
   });
 
