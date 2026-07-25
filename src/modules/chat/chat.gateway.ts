@@ -260,6 +260,25 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   /**
+   * Directly notify each newly-added member that they've been added to a group,
+   * so their client can toast/sound and surface the conversation immediately
+   * (the `conversation:updated` event already put it in their list).
+   */
+  notifyMembersAdded(
+    conversation: ChatConversationItem,
+    addedIds: string[],
+    addedByName: string,
+  ): void {
+    for (const userId of addedIds) {
+      this.server.to(`user:${userId}`).emit('chat:added-to-group', {
+        conversationId: conversation.id,
+        conversationName: conversation.name,
+        addedByName,
+      });
+    }
+  }
+
+  /**
    * Tell a removed member the conversation is gone and drop their sockets from
    * its room so they stop receiving its messages.
    */
