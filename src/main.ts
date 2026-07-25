@@ -9,6 +9,7 @@ import express from 'express';
 import * as path from 'node:path';
 import { AppModule } from './app.module';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
+import { RedisIoAdapter } from './common/adapters/redis-io.adapter';
 import { CSRF_UTILITIES } from './modules/csrf/csrf.constants';
 import { csrfVisitorMiddleware } from './modules/csrf/csrf-visitor.middleware';
 
@@ -170,6 +171,11 @@ async function bootstrap() {
       },
     } as Parameters<typeof apiReference>[0]),
   );
+
+  // Back Socket.IO with Redis so rooms/emits work across API instances.
+  const redisIoAdapter = new RedisIoAdapter(app);
+  await redisIoAdapter.connectToRedis(configService);
+  app.useWebSocketAdapter(redisIoAdapter);
 
   await app.listen(port);
 
