@@ -178,11 +178,17 @@ export class WhatsAppOutboundProcessor {
       const body = data.caption
         ? `[IMG:${data.mediaUrl}] ${data.caption}`
         : `[IMG:${data.mediaUrl}]`;
-      await this.whatsApp.saveMessage(
-        data.profileId,
-        MessageDirection.OUTBOUND,
-        body,
-      );
+      // Best-effort: the media is already delivered, so a bookkeeping failure
+      // must never fail the job — a failed job is retried and would RESEND the
+      // message (the recommended-profiles duplicate-card bug). Mirrors the
+      // guarded save in WhatsAppService.sendTextMessage.
+      await this.whatsApp
+        .saveMessage(data.profileId, MessageDirection.OUTBOUND, body)
+        .catch((err: unknown) =>
+          this.logger.warn(
+            `Failed to save outbound media message for ${data.profileId}: ${err instanceof Error ? err.message : String(err)}`,
+          ),
+        );
     }
   }
 
@@ -200,11 +206,21 @@ export class WhatsAppOutboundProcessor {
       );
     }
     if (data.profileId) {
-      await this.whatsApp.saveMessage(
-        data.profileId,
-        MessageDirection.OUTBOUND,
-        `[TPL:${data.contentSid}]`,
-      );
+      // Best-effort: the template is already delivered, so a bookkeeping
+      // failure must never fail the job — a failed job is retried and would
+      // RESEND the message (the recommended-profiles duplicate-card bug).
+      // Mirrors the guarded save in WhatsAppService.sendTextMessage.
+      await this.whatsApp
+        .saveMessage(
+          data.profileId,
+          MessageDirection.OUTBOUND,
+          `[TPL:${data.contentSid}]`,
+        )
+        .catch((err: unknown) =>
+          this.logger.warn(
+            `Failed to save outbound template message for ${data.profileId}: ${err instanceof Error ? err.message : String(err)}`,
+          ),
+        );
     }
   }
 }
