@@ -96,4 +96,12 @@ export class AdminListProfilesDto {
   @IsArray()
   @IsEnum(VerificationStatus, { each: true })
   verification_status?: VerificationStatus[];
+
+  @ApiPropertyOptional({
+    description: 'When true, list archived (soft-deleted) rows instead of active',
+  })
+  @IsOptional()
+  @Transform(({ value }) => value === 'true' || value === true)
+  @IsBoolean()
+  deleted?: boolean;
 }
