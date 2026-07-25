@@ -60,26 +60,37 @@ export class DashboardService {
       this.prisma.assignment.count({
         where: { created_at: { gte: sixtyDaysAgo, lt: thirtyDaysAgo } },
       }),
-      this.prisma.profile.count(),
+      // deleted_at: null everywhere below so archived (soft-deleted) rows stop
+      // inflating the dashboard totals once they're bulk-deleted.
+      this.prisma.profile.count({ where: { deleted_at: null } }),
       this.prisma.profile.count({
-        where: { created_at: { gte: thirtyDaysAgo } },
+        where: { deleted_at: null, created_at: { gte: thirtyDaysAgo } },
       }),
       this.prisma.profile.count({
-        where: { created_at: { gte: sixtyDaysAgo, lt: thirtyDaysAgo } },
+        where: {
+          deleted_at: null,
+          created_at: { gte: sixtyDaysAgo, lt: thirtyDaysAgo },
+        },
       }),
-      this.prisma.jobOffer.count(),
+      this.prisma.jobOffer.count({ where: { deleted_at: null } }),
       this.prisma.jobOffer.count({
-        where: { created_at: { gte: thirtyDaysAgo } },
+        where: { deleted_at: null, created_at: { gte: thirtyDaysAgo } },
       }),
       this.prisma.jobOffer.count({
-        where: { created_at: { gte: sixtyDaysAgo, lt: thirtyDaysAgo } },
+        where: {
+          deleted_at: null,
+          created_at: { gte: sixtyDaysAgo, lt: thirtyDaysAgo },
+        },
       }),
-      this.prisma.application.count(),
+      this.prisma.application.count({ where: { deleted_at: null } }),
       this.prisma.application.count({
-        where: { created_at: { gte: thirtyDaysAgo } },
+        where: { deleted_at: null, created_at: { gte: thirtyDaysAgo } },
       }),
       this.prisma.application.count({
-        where: { created_at: { gte: sixtyDaysAgo, lt: thirtyDaysAgo } },
+        where: {
+          deleted_at: null,
+          created_at: { gte: sixtyDaysAgo, lt: thirtyDaysAgo },
+        },
       }),
     ]);
 
@@ -108,7 +119,7 @@ export class DashboardService {
 
     const groups = await this.prisma.jobOffer.groupBy({
       by: ['status'],
-      where: { created_at: { gte: startDate } },
+      where: { deleted_at: null, created_at: { gte: startDate } },
       _count: { status: true },
     });
 
@@ -143,6 +154,7 @@ export class DashboardService {
         SELECT created_at::date AS day, COUNT(*) AS cnt
         FROM "job_offers"
         WHERE created_at >= ${startDate}
+          AND deleted_at IS NULL
         GROUP BY created_at::date
       ) AS created ON created.day = d.date
       LEFT JOIN (
@@ -150,6 +162,7 @@ export class DashboardService {
         FROM "job_offers"
         WHERE status = 'FILLED'
           AND updated_at >= ${startDate}
+          AND deleted_at IS NULL
         GROUP BY updated_at::date
       ) AS filled ON filled.day = d.date
       ORDER BY d.date

@@ -55,6 +55,8 @@ describe('PenaltyService', () => {
         count: jest.fn(),
         create: jest.fn(),
         delete: jest.fn(),
+        update: jest.fn(),
+        updateMany: jest.fn(),
       },
       application: {
         findUnique: jest.fn(),
@@ -340,22 +342,28 @@ describe('PenaltyService', () => {
   });
 
   describe('deletePenalty()', () => {
-    it('deletes penalty successfully', async () => {
-      (prisma.penalty.findUnique as jest.Mock).mockResolvedValue({
+    it('archives penalty successfully (soft delete)', async () => {
+      (prisma.penalty.findFirst as jest.Mock).mockResolvedValue({
         id: PENALTY_ID,
         profile_id: WORKER_ID,
         paid_at: null,
       });
-      (prisma.penalty.delete as jest.Mock).mockResolvedValue({});
+      (prisma.penalty.update as jest.Mock).mockResolvedValue({});
       (prisma.penalty.count as jest.Mock).mockResolvedValue(0);
       (prisma.profile.update as jest.Mock).mockResolvedValue({});
 
       const result = await service.deletePenalty(PENALTY_ID);
       expect(result.success).toBe(true);
+      expect(prisma.penalty.update as jest.Mock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: PENALTY_ID },
+          data: { deleted_at: expect.any(Date) },
+        }),
+      );
     });
 
     it('throws BadRequestException when trying to delete a paid penalty', async () => {
-      (prisma.penalty.findUnique as jest.Mock).mockResolvedValue({
+      (prisma.penalty.findFirst as jest.Mock).mockResolvedValue({
         id: PENALTY_ID,
         profile_id: WORKER_ID,
         paid_at: new Date(),
@@ -363,11 +371,11 @@ describe('PenaltyService', () => {
       await expect(service.deletePenalty(PENALTY_ID)).rejects.toThrow(
         BadRequestException,
       );
-      expect(prisma.penalty.delete as jest.Mock).not.toHaveBeenCalled();
+      expect(prisma.penalty.update as jest.Mock).not.toHaveBeenCalled();
     });
 
     it('throws NotFoundException when penalty not found', async () => {
-      (prisma.penalty.findUnique as jest.Mock).mockResolvedValue(null);
+      (prisma.penalty.findFirst as jest.Mock).mockResolvedValue(null);
       await expect(service.deletePenalty('x')).rejects.toThrow(
         NotFoundException,
       );

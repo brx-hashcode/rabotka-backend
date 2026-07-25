@@ -1,6 +1,7 @@
 import {
   Controller,
   Get,
+  Post,
   Patch,
   Delete,
   Param,
@@ -11,6 +12,7 @@ import {
   HttpStatus,
   Req,
 } from '@nestjs/common';
+import { BulkDeleteDto } from '../../common/dto/bulk-delete.dto';
 import {
   ApiTags,
   ApiOperation,
@@ -58,6 +60,7 @@ export class AdminJobOfferController {
       limit,
       q: dto.q,
       status: dto.status,
+      deleted: dto.deleted,
     });
   }
 
@@ -128,12 +131,34 @@ export class AdminJobOfferController {
     return result;
   }
 
+  @Post('bulk-delete')
+  @Roles(UserRole.MANAGER)
+  @ApiOperation({
+    summary: 'Bulk archive job offers (admin only)',
+    description: 'Soft-deletes (archives) the given job offers.',
+  })
+  @ApiResponse({ status: 201, description: 'Offers archived' })
+  async bulkDelete(
+    @Body() dto: BulkDeleteDto,
+    @Req() req: AdminAuthenticatedRequest,
+  ): Promise<{ count: number }> {
+    const result = await this.jobOfferService.bulkSoftDeleteByAdmin(dto.ids);
+    await this.logService.create({
+      action: 'JOB_OFFER_BULK_DELETED',
+      entityType: 'JobOffer',
+      userId: req.user?.userId,
+      metadata: { ids: dto.ids, count: result.count },
+      ...extractRequestMeta(req),
+    });
+    return result;
+  }
+
   @Delete(':id')
   @Roles(UserRole.MANAGER)
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({
     summary: 'Delete job offer (admin only)',
-    description: 'Permanently deletes a job offer and its related data.',
+    description: 'Archives a job offer (soft delete).',
   })
   @ApiResponse({ status: 204, description: 'Job offer deleted' })
   @ApiResponse({ status: 404, description: 'Job offer not found' })

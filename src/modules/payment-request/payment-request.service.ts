@@ -19,6 +19,7 @@ import {
 } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
+import { deletedAtFilter } from '../../common/utils/soft-delete.util';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { WalletService } from '../wallet/wallet.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
@@ -979,7 +980,11 @@ export class PaymentRequestService {
     const page = dto.page ?? 1;
     const limit = dto.limit ?? 10;
     const skip = (page - 1) * limit;
-    const where = dto.status ? { status: dto.status } : {};
+    // Active rows by default; the admin "Deleted" filter flips to archived rows.
+    const where: Prisma.PaymentRequestWhereInput = {
+      deleted_at: deletedAtFilter(dto.deleted),
+      ...(dto.status ? { status: dto.status } : {}),
+    };
 
     const [requests, total] = await Promise.all([
       this.prisma.paymentRequest.findMany({
@@ -998,6 +1003,16 @@ export class PaymentRequestService {
       page,
       limit,
     };
+  }
+
+  /** Archive many payment requests at once (admin bulk delete). Returns the count archived. */
+  async bulkSoftDelete(ids: string[]): Promise<{ count: number }> {
+    if (ids.length === 0) return { count: 0 };
+    const { count } = await this.prisma.paymentRequest.updateMany({
+      where: { id: { in: ids }, deleted_at: null },
+      data: { deleted_at: new Date() },
+    });
+    return { count };
   }
 
   private fullName(
@@ -1046,6 +1061,24 @@ export class PaymentRequestService {
         'payment_request',
         request.id,
       );
+
+      // Generate a downloadable invoice for the top-up (idempotent per
+      // payment_request, so a retried post-payment won't duplicate it).
+      await this.invoiceService
+        .create({
+          profileId: request.profile_id,
+          paymentRequestId: request.id,
+          amount: context.amount,
+          reason: InvoiceReason.WALLET_TOP_UP,
+          relatedEntityType: 'payment_request',
+          relatedEntityId: request.id,
+        })
+        .catch((err) =>
+          this.logger.warn(
+            `Wallet top-up invoice creation failed for payment request ${request.id}:`,
+            err,
+          ),
+        );
 
       const newBalance = await this.walletService.getProfileWalletBalance(
         request.profile_id,
