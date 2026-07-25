@@ -100,13 +100,23 @@ export class ChatController {
     @Param('id') id: string,
     @Body() dto: AddMembersDto,
   ) {
-    const { conversation } = await this.chatService.addMembers(
+    const { conversation, addedIds } = await this.chatService.addMembers(
       this.userId(req),
       id,
       dto.memberIds,
     );
     this.gateway.joinParticipants(conversation);
     this.gateway.emitConversationUpdated(conversation);
+    if (addedIds.length > 0) {
+      const actor = conversation.participants.find(
+        (p) => p.userId === this.userId(req),
+      );
+      this.gateway.notifyMembersAdded(
+        conversation,
+        addedIds,
+        actor?.name ?? 'A teammate',
+      );
+    }
     return conversation;
   }
 
