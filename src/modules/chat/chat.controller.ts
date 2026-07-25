@@ -170,6 +170,7 @@ export class ChatController {
     @Param('id') id: string,
   ) {
     await this.chatService.markRead(this.userId(req), id);
+    this.gateway.emitRead(id, this.userId(req));
     return { success: true };
   }
 
