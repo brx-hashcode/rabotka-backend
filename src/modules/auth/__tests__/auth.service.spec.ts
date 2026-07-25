@@ -11,6 +11,7 @@ import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { MailService } from '../../mail/mail.service';
 import { LayoutService } from '../../mail/layout.service';
 import { WhatsAppService } from '../../whatsapp/whatsapp.service';
+import { LogService } from '../../log/log.service';
 import { REDIS_CONNECTION } from '../../../common/services/redis/redis.constants';
 import { ConfigService } from '@nestjs/config';
 
@@ -40,6 +41,7 @@ const mockUser = {
 describe('AuthService', () => {
   let service: AuthService;
   let prisma: jest.Mocked<PrismaService>;
+  let logService: { create: jest.Mock };
   let jwtService: jest.Mocked<JwtService>;
   let mailService: jest.Mocked<MailService>;
   let whatsAppService: jest.Mocked<WhatsAppService>;
@@ -100,11 +102,16 @@ describe('AuthService', () => {
           provide: ConfigService,
           useValue: { get: jest.fn().mockReturnValue(undefined) },
         },
+        {
+          provide: LogService,
+          useValue: { create: jest.fn().mockResolvedValue(undefined) },
+        },
       ],
     }).compile();
 
     service = module.get<AuthService>(AuthService);
     prisma = module.get(PrismaService);
+    logService = module.get(LogService);
     jwtService = module.get(JwtService);
     mailService = module.get(MailService);
     whatsAppService = module.get(WhatsAppService);
@@ -478,6 +485,27 @@ describe('AuthService', () => {
       expect(prisma.user.update).toHaveBeenCalledWith(
         expect.objectContaining({
           data: { last_login_at: expect.any(Date) },
+        }),
+      );
+    });
+
+    it('records an admin.login audit log on successful OTP login', async () => {
+      redis.eval.mockResolvedValue(1);
+      (prisma.user.findUnique as jest.Mock).mockResolvedValue(mockUser);
+      (prisma.user.update as jest.Mock).mockResolvedValue(mockUser);
+
+      await service.verifyAdminOtp('admin@example.com', '654321', {
+        ipAddress: '1.2.3.4',
+        userAgent: 'jest',
+      });
+
+      expect(logService.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'admin.login',
+          userId: USER_ID,
+          ipAddress: '1.2.3.4',
+          userAgent: 'jest',
+          metadata: { method: 'otp' },
         }),
       );
     });

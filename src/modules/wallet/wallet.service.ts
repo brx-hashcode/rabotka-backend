@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import {
+  Prisma,
   WalletOwnerType,
   WalletTransactionType,
   PaymentStatus,
@@ -16,6 +17,7 @@ import { generatePaymentReference } from '../../common/utils/payment-reference';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { InvoiceService } from '../invoice/invoice.service';
 import { InvoiceReason, PaymentRequestStatus } from '@prisma/client';
+import { deletedAtFilter } from '../../common/utils/soft-delete.util';
 import { randomUUID } from 'crypto';
 import type { PayPenaltyDto } from './dto/pay-penalty.dto';
 
@@ -681,6 +683,7 @@ export class WalletService {
     type?: string[];
     created_from?: string;
     created_to?: string;
+    deleted?: boolean;
   }): Promise<{
     data: AdminWalletTransactionItem[];
     total: number;
@@ -689,39 +692,60 @@ export class WalletService {
   }> {
     const { page, limit } = params;
     const systemWallet = await this.getOrCreateSystemWallet();
-    // Only show system wallet transactions — profile debits are internal and irrelevant here
-    const where: Record<string, unknown> = { wallet_id: systemWallet.id };
+
+    // Scope: system-wallet transactions (platform revenue/movements) PLUS user
+    // wallet top-ups — the top-up money is booked on the user's own wallet, but
+    // admins expect to see it in this table. Profile debits stay internal.
+    // Archived (soft-deleted) rows are excluded. Built with AND so the optional
+    // search/type/date filters compose without clobbering the scope OR.
+    const and: Prisma.WalletTransactionWhereInput[] = [
+      {
+        OR: [
+          { wallet_id: systemWallet.id },
+          { type: WalletTransactionType.TOP_UP_CREDIT },
+        ],
+      },
+    ];
 
     if (params.q) {
-      where.OR = [
-        { type: { contains: params.q, mode: 'insensitive' } },
-        { reference_type: { contains: params.q, mode: 'insensitive' } },
-        { reference_id: { contains: params.q, mode: 'insensitive' } },
-        {
-          wallet: {
-            profile: {
-              OR: [
-                { first_name: { contains: params.q, mode: 'insensitive' } },
-                { last_name: { contains: params.q, mode: 'insensitive' } },
-                { email: { contains: params.q, mode: 'insensitive' } },
-                { phone: { contains: params.q, mode: 'insensitive' } },
-              ],
+      and.push({
+        OR: [
+          { reference_type: { contains: params.q, mode: 'insensitive' } },
+          {
+            wallet: {
+              profile: {
+                OR: [
+                  { first_name: { contains: params.q, mode: 'insensitive' } },
+                  { last_name: { contains: params.q, mode: 'insensitive' } },
+                  { email: { contains: params.q, mode: 'insensitive' } },
+                  { phone: { contains: params.q, mode: 'insensitive' } },
+                ],
+              },
             },
           },
-        },
-      ];
+        ],
+      });
     }
     if (params.type?.length) {
-      where.type = { in: params.type as WalletTransactionType[] };
+      and.push({ type: { in: params.type as WalletTransactionType[] } });
     }
     if (params.created_from || params.created_to) {
-      where.created_at = {
-        ...(params.created_from ? { gte: new Date(params.created_from) } : {}),
-        ...(params.created_to
-          ? { lte: new Date(params.created_to + 'T23:59:59.999Z') }
-          : {}),
-      };
+      and.push({
+        created_at: {
+          ...(params.created_from
+            ? { gte: new Date(params.created_from) }
+            : {}),
+          ...(params.created_to
+            ? { lte: new Date(params.created_to + 'T23:59:59.999Z') }
+            : {}),
+        },
+      });
     }
+
+    const where: Prisma.WalletTransactionWhereInput = {
+      deleted_at: deletedAtFilter(params.deleted),
+      AND: and,
+    };
 
     const [rows, total] = await Promise.all([
       this.prisma.walletTransaction.findMany({
@@ -756,6 +780,16 @@ export class WalletService {
       page,
       limit,
     };
+  }
+
+  /** Archive many wallet transactions at once (admin bulk delete). Returns the count archived. */
+  async bulkSoftDeleteTransactions(ids: string[]): Promise<{ count: number }> {
+    if (ids.length === 0) return { count: 0 };
+    const { count } = await this.prisma.walletTransaction.updateMany({
+      where: { id: { in: ids }, deleted_at: null },
+      data: { deleted_at: new Date() },
+    });
+    return { count };
   }
 
   async getOrCreateMobileMoneyWallet(): Promise<{

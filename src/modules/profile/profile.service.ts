@@ -31,6 +31,7 @@ import { GeocodingService } from '../../common/services/geocoding/geocoding.serv
 import { CreateProfileDto } from './dto/create-profile.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { AdminUpdateProfileDto } from './dto/admin-update-profile.dto';
+import { deletedAtFilter } from '../../common/utils/soft-delete.util';
 import {
   AccountStatus,
   Prisma,
@@ -944,6 +945,7 @@ export class ProfileService {
     profileType?: ProfileType[];
     whatsappConnected?: boolean;
     verificationStatus?: VerificationStatus[];
+    deleted?: boolean;
   }): Promise<AdminProfilesListResponse> {
     const {
       page,
@@ -953,10 +955,14 @@ export class ProfileService {
       profileType,
       whatsappConnected,
       verificationStatus,
+      deleted,
     } = params;
     const skip = (page - 1) * limit;
 
-    const where: Prisma.ProfileWhereInput = {};
+    // Active rows by default; the admin "Deleted" filter flips to archived rows.
+    const where: Prisma.ProfileWhereInput = {
+      deleted_at: deletedAtFilter(deleted),
+    };
 
     const searchTrimmed = q?.trim() ?? '';
     if (searchTrimmed.length > 0) {
@@ -1054,6 +1060,16 @@ export class ProfileService {
     }));
 
     return { data, total, page, limit };
+  }
+
+  /** Archive many profiles at once (admin bulk delete). Returns the count archived. */
+  async bulkSoftDeleteProfiles(ids: string[]): Promise<{ count: number }> {
+    if (ids.length === 0) return { count: 0 };
+    const { count } = await this.prisma.profile.updateMany({
+      where: { id: { in: ids }, deleted_at: null },
+      data: { deleted_at: new Date() },
+    });
+    return { count };
   }
 
   async createProfile(createProfileDto: CreateProfileDto): Promise<{

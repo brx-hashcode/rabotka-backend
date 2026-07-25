@@ -56,8 +56,10 @@ describe('JobOfferService (extended)', () => {
         create: jest.fn(),
         findMany: jest.fn(),
         findUnique: jest.fn(),
+        findFirst: jest.fn(),
         update: jest.fn(),
         delete: jest.fn(),
+        updateMany: jest.fn(),
         count: jest.fn(),
       },
       application: {
@@ -381,24 +383,45 @@ describe('JobOfferService (extended)', () => {
   });
 
   describe('deleteJobOfferByAdmin()', () => {
-    it('deletes offer successfully', async () => {
-      (prisma.jobOffer.findUnique as jest.Mock).mockResolvedValue({
+    it('archives offer successfully (soft delete)', async () => {
+      (prisma.jobOffer.findFirst as jest.Mock).mockResolvedValue({
         id: OFFER_ID,
       });
-      (prisma.jobOffer.delete as jest.Mock).mockResolvedValue(mockOffer);
+      (prisma.jobOffer.update as jest.Mock).mockResolvedValue(mockOffer);
       await expect(
         service.deleteJobOfferByAdmin(OFFER_ID),
       ).resolves.toBeUndefined();
-      expect(prisma.jobOffer.delete).toHaveBeenCalledWith({
+      expect(prisma.jobOffer.update).toHaveBeenCalledWith({
         where: { id: OFFER_ID },
+        data: { deleted_at: expect.any(Date) },
       });
     });
 
     it('throws NotFoundException when not found', async () => {
-      (prisma.jobOffer.findUnique as jest.Mock).mockResolvedValue(null);
+      (prisma.jobOffer.findFirst as jest.Mock).mockResolvedValue(null);
       await expect(service.deleteJobOfferByAdmin('no')).rejects.toThrow(
         NotFoundException,
       );
+    });
+  });
+
+  describe('bulkSoftDeleteByAdmin()', () => {
+    it('archives the given offers and returns the count', async () => {
+      (prisma.jobOffer.updateMany as jest.Mock).mockResolvedValue({ count: 2 });
+
+      const result = await service.bulkSoftDeleteByAdmin(['a', 'b']);
+
+      expect(result).toEqual({ count: 2 });
+      expect(prisma.jobOffer.updateMany).toHaveBeenCalledWith({
+        where: { id: { in: ['a', 'b'] }, deleted_at: null },
+        data: { deleted_at: expect.any(Date) },
+      });
+    });
+
+    it('is a no-op for an empty id list', async () => {
+      const result = await service.bulkSoftDeleteByAdmin([]);
+      expect(result).toEqual({ count: 0 });
+      expect(prisma.jobOffer.updateMany).not.toHaveBeenCalled();
     });
   });
 
