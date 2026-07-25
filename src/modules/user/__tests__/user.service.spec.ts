@@ -32,9 +32,11 @@ describe('UserService', () => {
     const mockPrismaService = {
       user: {
         findUnique: jest.fn(),
+        findFirst: jest.fn(),
         create: jest.fn(),
         update: jest.fn(),
         delete: jest.fn(),
+        updateMany: jest.fn(),
         findMany: jest.fn(),
         count: jest.fn(),
       },
@@ -202,18 +204,19 @@ describe('UserService', () => {
   });
 
   describe('deleteAdmin()', () => {
-    it('deletes the user', async () => {
-      (prisma.user.findUnique as jest.Mock).mockResolvedValue(mockUser);
-      (prisma.user.delete as jest.Mock).mockResolvedValue(mockUser);
+    it('archives the user (soft delete)', async () => {
+      (prisma.user.findFirst as jest.Mock).mockResolvedValue(mockUser);
+      (prisma.user.update as jest.Mock).mockResolvedValue(mockUser);
 
       await expect(service.deleteAdmin(USER_ID)).resolves.toBeUndefined();
-      expect(prisma.user.delete).toHaveBeenCalledWith({
+      expect(prisma.user.update).toHaveBeenCalledWith({
         where: { id: USER_ID },
+        data: { deleted_at: expect.any(Date) },
       });
     });
 
     it('throws NotFoundException when user not found', async () => {
-      (prisma.user.findUnique as jest.Mock).mockResolvedValue(null);
+      (prisma.user.findFirst as jest.Mock).mockResolvedValue(null);
 
       await expect(service.deleteAdmin(USER_ID)).rejects.toThrow(
         NotFoundException,

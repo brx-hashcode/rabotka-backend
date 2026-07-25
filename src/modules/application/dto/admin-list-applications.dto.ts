@@ -7,6 +7,7 @@ import {
   Max,
   IsArray,
   IsEnum,
+  IsBoolean,
 } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { ApplicationStatus } from '@prisma/client';
@@ -75,4 +76,12 @@ export class AdminListApplicationsDto {
   @IsOptional()
   @IsString()
   employer_id?: string;
+
+  @ApiPropertyOptional({
+    description: 'When true, list archived (soft-deleted) rows instead of active',
+  })
+  @IsOptional()
+  @Transform(({ value }) => value === 'true' || value === true)
+  @IsBoolean()
+  deleted?: boolean;
 }

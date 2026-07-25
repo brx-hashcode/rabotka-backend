@@ -1,5 +1,12 @@
-import { IsEnum, IsInt, IsOptional, Max, Min } from 'class-validator';
-import { Type } from 'class-transformer';
+import {
+  IsBoolean,
+  IsEnum,
+  IsInt,
+  IsOptional,
+  Max,
+  Min,
+} from 'class-validator';
+import { Transform, Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { PaymentRequestStatus } from '@prisma/client';
 
@@ -23,4 +30,12 @@ export class ListPaymentRequestsDto {
   @IsOptional()
   @IsEnum(PaymentRequestStatus)
   status?: PaymentRequestStatus;
+
+  @ApiPropertyOptional({
+    description: 'When true, list archived (soft-deleted) rows instead of active',
+  })
+  @IsOptional()
+  @Transform(({ value }) => value === 'true' || value === true)
+  @IsBoolean()
+  deleted?: boolean;
 }

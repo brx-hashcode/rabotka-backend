@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
+import { deletedAtFilter } from '../../common/utils/soft-delete.util';
 import { Prisma } from '@prisma/client';
 import { CreateAdminDto } from './dto/create-admin.dto';
 import { UpdateAdminDto } from './dto/update-admin.dto';
@@ -180,7 +181,10 @@ export class UserService {
     const limit = dto.limit ?? 10;
     const skip = (page - 1) * limit;
 
-    const where: Prisma.UserWhereInput = {};
+    // Active rows by default; the admin "Deleted" filter flips to archived rows.
+    const where: Prisma.UserWhereInput = {
+      deleted_at: deletedAtFilter(dto.deleted),
+    };
 
     if (dto.q) {
       where.OR = [
@@ -236,13 +240,29 @@ export class UserService {
   }
 
   async deleteAdmin(id: string) {
-    const user = await this.prisma.user.findUnique({ where: { id } });
+    const user = await this.prisma.user.findFirst({
+      where: { id, deleted_at: null },
+    });
 
     if (!user) {
       throw new NotFoundException('Utilisateur non trouvé');
     }
 
-    await this.prisma.user.delete({ where: { id } });
+    // Soft delete (archive) — reversible.
+    await this.prisma.user.update({
+      where: { id },
+      data: { deleted_at: new Date() },
+    });
+  }
+
+  /** Archive many team members at once (admin bulk delete). Returns the count archived. */
+  async bulkSoftDeleteAdmins(ids: string[]): Promise<{ count: number }> {
+    if (ids.length === 0) return { count: 0 };
+    const { count } = await this.prisma.user.updateMany({
+      where: { id: { in: ids }, deleted_at: null },
+      data: { deleted_at: new Date() },
+    });
+    return { count };
   }
 
   async findByEmail(email: string) {

@@ -24,6 +24,7 @@ import {
 import type { Request, Response } from 'express';
 import { ConfigService } from '@nestjs/config';
 import { AuthService } from './auth.service';
+import { extractRequestMeta } from '../../common/utils/request-meta.util';
 import { AdminAuthGuard } from './guards/admin-auth.guard';
 import { ProfileAuthGuard } from './guards/profile-auth.guard';
 import type { AdminAuthenticatedRequest } from './guards/jwt-auth.guard';
@@ -404,6 +405,7 @@ export class AuthController {
   async verifyAdminOtp(
     @Body() verifyAdminOtpDto: VerifyAdminOtpDto,
     @Res({ passthrough: true }) res: Response,
+    @Req() req: Request,
   ): Promise<{
     success: boolean;
     totpRequired?: boolean;
@@ -412,6 +414,7 @@ export class AuthController {
     const result = await this.authService.verifyAdminOtp(
       verifyAdminOtpDto.email,
       verifyAdminOtpDto.otp,
+      extractRequestMeta(req),
     );
 
     if (result.totpRequired) {
@@ -713,8 +716,13 @@ export class AuthController {
     @Body('pendingToken') pendingToken: string,
     @Body('code') code: string,
     @Res({ passthrough: true }) res: Response,
+    @Req() req: Request,
   ): Promise<{ success: boolean }> {
-    const result = await this.authService.verifyTotpLogin(pendingToken, code);
+    const result = await this.authService.verifyTotpLogin(
+      pendingToken,
+      code,
+      extractRequestMeta(req),
+    );
 
     const isProduction =
       this.configService.get<string>('NODE_ENV') === 'production';

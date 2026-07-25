@@ -1,4 +1,13 @@
-import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
@@ -12,6 +21,10 @@ import { AdminAuthGuard } from '../auth/guards/admin-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { AdminListApplicationsDto } from './dto/admin-list-applications.dto';
+import { BulkDeleteDto } from '../../common/dto/bulk-delete.dto';
+import { LogService } from '../log/log.service';
+import { extractRequestMeta } from '../../common/utils/request-meta.util';
+import type { AdminAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
 
 @ApiTags('Admin – Applications')
 @Controller('admin/applications')
@@ -20,7 +33,34 @@ import { AdminListApplicationsDto } from './dto/admin-list-applications.dto';
 @ApiBearerAuth()
 @ApiCookieAuth()
 export class AdminApplicationController {
-  constructor(private readonly applicationService: ApplicationService) {}
+  constructor(
+    private readonly applicationService: ApplicationService,
+    private readonly logService: LogService,
+  ) {}
+
+  @Post('bulk-delete')
+  @Roles(UserRole.MANAGER)
+  @ApiOperation({
+    summary: 'Bulk archive applications (admin only)',
+    description: 'Soft-deletes (archives) the given applications.',
+  })
+  @ApiResponse({ status: 201, description: 'Applications archived' })
+  async bulkDelete(
+    @Body() dto: BulkDeleteDto,
+    @Req() req: AdminAuthenticatedRequest,
+  ): Promise<{ count: number }> {
+    const result = await this.applicationService.bulkSoftDeleteApplications(
+      dto.ids,
+    );
+    await this.logService.create({
+      action: 'APPLICATION_BULK_DELETED',
+      entityType: 'Application',
+      userId: req.user?.userId,
+      metadata: { ids: dto.ids, count: result.count },
+      ...extractRequestMeta(req),
+    });
+    return result;
+  }
 
   @Get()
   @ApiOperation({
@@ -41,6 +81,7 @@ export class AdminApplicationController {
       penaltyApplied: dto.penalty_applied,
       workerId: dto.worker_id,
       employerId: dto.employer_id,
+      deleted: dto.deleted,
     });
   }
 

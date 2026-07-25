@@ -223,70 +223,71 @@ model SystemConfig {
 }
 
 model Profile {
-  id                      String             @id @default(uuid()) @db.Uuid
-  created_at              DateTime           @default(now())
-  updated_at              DateTime           @updatedAt
-  first_name              String
-  last_name               String
-  phone                   String             @unique
-  email                   String             @unique
-  address                 String
-  latitude                Float?
-  longitude               Float?
-  description             String             @db.Text
-  profile_type            ProfileType
-  category_id             String?            @db.Uuid
-  status                  AccountStatus      @default(PENDING_ACTIVATION)
-  billing_status          BillingStatus      @default(CLEAR)
-  reliability_score       Int?               @default(100)
-  rating_avg              Float?
-  rating_count            Int                @default(0)
+  id                                String             @id @default(uuid()) @db.Uuid
+  created_at                        DateTime           @default(now())
+  updated_at                        DateTime           @updatedAt
+  first_name                        String
+  last_name                         String
+  phone                             String             @unique
+  email                             String             @unique
+  address                           String
+  latitude                          Float?
+  longitude                         Float?
+  description                       String             @db.Text
+  profile_type                      ProfileType
+  category_id                       String?            @db.Uuid
+  status                            AccountStatus      @default(PENDING_ACTIVATION)
+  billing_status                    BillingStatus      @default(CLEAR)
+  reliability_score                 Int?               @default(100)
+  rating_avg                        Float?
+  rating_count                      Int                @default(0)
   whatsapp_connected                Boolean            @default(false)
   whatsapp_activation_bonus_granted Boolean            @default(false)
   payment_link                      String?
   payment_link_expires_at           DateTime?
-  verification_status     VerificationStatus @default(PENDING)
-  verified_by             String?            @db.Uuid
-  verified_at             DateTime?
-  rejection_reason        String?
+  verification_status               VerificationStatus @default(PENDING)
+  verified_by                       String?            @db.Uuid
+  verified_at                       DateTime?
+  rejection_reason                  String?
   /// Admin note from the latest KYC verify action (approve or reject).
-  kyc_verification_note   String?            @db.Text
-  read_and_approved_policies Boolean @default(false)
-  first_login             Boolean            @default(true)
+  kyc_verification_note             String?            @db.Text
+  read_and_approved_policies        Boolean            @default(false)
+  first_login                       Boolean            @default(true)
 
-  avatar_url              String?
-  vector_indexed_at       DateTime?
-  portfolio_slug          String?            @unique
+  avatar_url        String?
+  vector_indexed_at DateTime?
+  portfolio_slug    String?   @unique
 
-  category               JobCategory?       @relation(fields: [category_id], references: [id], onDelete: SetNull)
-  categories             ProfileCategory[]
+  category   JobCategory?      @relation(fields: [category_id], references: [id], onDelete: SetNull)
+  categories ProfileCategory[]
 
-  payment_requests       PaymentRequest[]
-  kyc_documents          KycDocument[]
-  kyc_verification_images KycVerificationImage[]
-  applications           Application[]
-  job_offers    JobOffer[]
-  penalties     Penalty[]
-  payments      Payment[]
-  conversations Conversation[]
-  messages      Message[]
-  logs    Log[]
-  files   File[]
-  wallets     Wallet[]
-  assignments Assignment[]
-  verification_tokens VerificationToken[]
-  claims               Claim[]  @relation("ClaimProfile")
-  unlock_attempts_as_worker   ContactUnlockAttempt[] @relation("UnlockWorker")
-  unlock_attempts_as_employer ContactUnlockAttempt[] @relation("UnlockEmployer")
-  claims_created       Claim[]  @relation("ClaimCreatedByProfile")
-  claim_comments       ClaimComment[] @relation("ClaimCommentProfile")
-  events               Event[]  @relation("EventProfiles")
+  payment_requests                PaymentRequest[]
+  kyc_documents                   KycDocument[]
+  kyc_verification_images         KycVerificationImage[]
+  applications                    Application[]
+  job_offers                      JobOffer[]
+  penalties                       Penalty[]
+  payments                        Payment[]
+  conversations                   Conversation[]
+  messages                        Message[]
+  logs                            Log[]
+  files                           File[]
+  wallets                         Wallet[]
+  assignments                     Assignment[]
+  verification_tokens             VerificationToken[]
+  claims                          Claim[]                       @relation("ClaimProfile")
+  unlock_attempts_as_worker       ContactUnlockAttempt[]        @relation("UnlockWorker")
+  unlock_attempts_as_employer     ContactUnlockAttempt[]        @relation("UnlockEmployer")
+  claims_created                  Claim[]                       @relation("ClaimCreatedByProfile")
+  claim_comments                  ClaimComment[]                @relation("ClaimCommentProfile")
+  events                          Event[]                       @relation("EventProfiles")
   profile_platform_document_links ProfilePlatformDocumentLink[]
   invoices                        Invoice[]
   ad_delivery_logs                AdDeliveryLog[]
-  ratings_given                   Rating[]                       @relation("RatingRater")
-  ratings_received                Rating[]                       @relation("RatingRatee")
+  ratings_given                   Rating[]                      @relation("RatingRater")
+  ratings_received                Rating[]                      @relation("RatingRatee")
   portfolio_items                 PortfolioItem[]
+  deleted_at                      DateTime?                     @db.Timestamptz
 
   @@index([email], name: "idx_profile_email")
   @@index([phone], name: "idx_profile_phone")
@@ -294,17 +295,18 @@ model Profile {
   @@index([profile_type], name: "idx_profile_type")
   @@index([reliability_score], name: "idx_profile_reliability")
   @@index([category_id], name: "idx_profile_category")
+  @@index([deleted_at], name: "idx_profile_deleted_at")
   @@map("profiles")
 }
 
 model User {
-  id            String    @id @default(uuid()) @db.Uuid
-  created_at    DateTime  @default(now())
-  updated_at    DateTime  @updatedAt
-  first_name    String
-  last_name     String
-  email         String    @unique
-  role          UserRole  @default(ADMIN)
+  id              String    @id @default(uuid()) @db.Uuid
+  created_at      DateTime  @default(now())
+  updated_at      DateTime  @updatedAt
+  first_name      String
+  last_name       String
+  email           String    @unique
+  role            UserRole  @default(ADMIN)
   is_active       Boolean   @default(true)
   last_login_at   DateTime?
   phone_paired_at DateTime?
@@ -312,33 +314,35 @@ model User {
   totp_secret     String?
   totp_enabled    Boolean   @default(false)
 
-  files            File[]
-  logs             Log[]
-  wallets          Wallet[]
-  sent_messages    Message[]
-  claims_assigned  Claim[]  @relation("ClaimAssignedUser")
-  claims_created   Claim[]  @relation("ClaimCreatedByUser")
-  claim_comments   ClaimComment[] @relation("ClaimCommentUser")
-  events_created   Event[]  @relation("EventCreatedBy")
-  events           Event[]  @relation("EventAssignedUsers")
+  files           File[]
+  logs            Log[]
+  wallets         Wallet[]
+  sent_messages   Message[]
+  claims_assigned Claim[]        @relation("ClaimAssignedUser")
+  claims_created  Claim[]        @relation("ClaimCreatedByUser")
+  claim_comments  ClaimComment[] @relation("ClaimCommentUser")
+  events_created  Event[]        @relation("EventCreatedBy")
+  events          Event[]        @relation("EventAssignedUsers")
+  deleted_at      DateTime?      @db.Timestamptz
 
   @@index([email], name: "idx_user_email")
   @@index([role], name: "idx_user_role")
+  @@index([deleted_at], name: "idx_user_deleted_at")
   @@map("users")
 }
 
 model KycDocument {
-  id                  String             @id @default(uuid()) @db.Uuid
-  created_at          DateTime           @default(now())
-  updated_at          DateTime           @updatedAt
-  profile_id          String             @db.Uuid
+  id                  String              @id @default(uuid()) @db.Uuid
+  created_at          DateTime            @default(now())
+  updated_at          DateTime            @updatedAt
+  profile_id          String              @db.Uuid
   document_type       DocumentType?
   document_category   KycDocumentCategory
   document_url        String
   storage_key         String?
-  verification_status VerificationStatus @default(PENDING)
+  verification_status VerificationStatus  @default(PENDING)
   verified_at         DateTime?
-  verified_by         String?            @db.Uuid
+  verified_by         String?             @db.Uuid
   rejection_reason    String?
 
   profile Profile @relation(fields: [profile_id], references: [id], onDelete: Cascade)
@@ -350,11 +354,11 @@ model KycDocument {
 }
 
 model KycVerificationImage {
-  id             String   @id @default(uuid()) @db.Uuid
-  created_at     DateTime @default(now())
-  profile_id     String   @db.Uuid
-  image_url      String
-  uploaded_by    String?  @db.Uuid
+  id          String   @id @default(uuid()) @db.Uuid
+  created_at  DateTime @default(now())
+  profile_id  String   @db.Uuid
+  image_url   String
+  uploaded_by String?  @db.Uuid
 
   profile Profile @relation(fields: [profile_id], references: [id], onDelete: Cascade)
 
@@ -393,15 +397,15 @@ model PortfolioImage {
 }
 
 model JobCategory {
-  id          String     @id @default(uuid()) @db.Uuid
-  created_at  DateTime   @default(now())
-  name        String     @unique
-  slug        String     @unique
+  id          String   @id @default(uuid()) @db.Uuid
+  created_at  DateTime @default(now())
+  name        String   @unique
+  slug        String   @unique
   description String?
   icon        String?
 
-  job_offers        JobOffer[]
-  profiles          Profile[]
+  job_offers         JobOffer[]
+  profiles           Profile[]
   profile_categories ProfileCategory[]
 
   @@index([slug], name: "idx_job_category_slug")
@@ -419,21 +423,21 @@ model ProfileCategory {
 }
 
 model JobOffer {
-  id           String         @id @default(uuid()) @db.Uuid
-  created_at   DateTime       @default(now())
-  updated_at   DateTime       @updatedAt
-  employer_id  String         @db.Uuid
-  category_id  String?        @db.Uuid
-  reference    String         @unique
-  title        String
-  description  String         @db.Text
-  scheduled_at DateTime
-  amount       Decimal?       @db.Decimal(10, 2)
-  payment_flow PaymentFlow?
-  address      String
-  latitude     Float?
-  longitude    Float?
-  note         String?
+  id                      String         @id @default(uuid()) @db.Uuid
+  created_at              DateTime       @default(now())
+  updated_at              DateTime       @updatedAt
+  employer_id             String         @db.Uuid
+  category_id             String?        @db.Uuid
+  reference               String         @unique
+  title                   String
+  description             String         @db.Text
+  scheduled_at            DateTime
+  amount                  Decimal?       @db.Decimal(10, 2)
+  payment_flow            PaymentFlow?
+  address                 String
+  latitude                Float?
+  longitude               Float?
+  note                    String?
   quantity                Int            @default(1)
   status                  JobOfferStatus @default(ACTIVE)
   employer_unlock_paid    Boolean        @default(false)
@@ -445,11 +449,13 @@ model JobOffer {
   applications            Application[]
   assignments             Assignment[]
   contact_unlock_attempts ContactUnlockAttempt[]
+  deleted_at              DateTime?              @db.Timestamptz
 
   @@index([employer_id], name: "idx_job_offer_employer")
   @@index([status], name: "idx_job_offer_status")
   @@index([scheduled_at], name: "idx_job_offer_scheduled")
   @@index([category_id], name: "idx_job_offer_category")
+  @@index([deleted_at], name: "idx_job_offer_deleted_at")
   @@map("job_offers")
 }
 
@@ -467,18 +473,20 @@ model Application {
 
   viewed_at DateTime?
 
-  job_offer              JobOffer             @relation(fields: [job_offer_id], references: [id], onDelete: Cascade)
-  worker                 Profile              @relation(fields: [worker_id], references: [id], onDelete: Cascade)
+  job_offer              JobOffer              @relation(fields: [job_offer_id], references: [id], onDelete: Cascade)
+  worker                 Profile               @relation(fields: [worker_id], references: [id], onDelete: Cascade)
   penalties              Penalty[]
   assignment             Assignment?
   contact_unlock_attempt ContactUnlockAttempt?
   contract               Contract?
+  deleted_at             DateTime?             @db.Timestamptz
 
   @@unique([job_offer_id, worker_id], name: "idx_application_unique")
   @@index([worker_id], name: "idx_application_worker")
   @@index([job_offer_id], name: "idx_application_job_offer")
   @@index([status], name: "idx_application_status")
   @@index([job_offer_id, status], name: "idx_application_job_offer_status")
+  @@index([deleted_at], name: "idx_application_deleted_at")
   @@map("applications")
 }
 
@@ -508,20 +516,20 @@ model Assignment {
 }
 
 model ContactUnlockAttempt {
-  id              String              @id @default(uuid()) @db.Uuid
-  created_at      DateTime            @default(now())
-  updated_at      DateTime            @updatedAt
-  application_id  String              @unique @db.Uuid
-  job_offer_id    String              @db.Uuid
-  worker_id       String              @db.Uuid
-  employer_id     String              @db.Uuid
-  status          ContactUnlockStatus @default(PENDING_BOTH)
-  employer_paid   Boolean             @default(false)
-  worker_paid     Boolean             @default(false)
+  id               String              @id @default(uuid()) @db.Uuid
+  created_at       DateTime            @default(now())
+  updated_at       DateTime            @updatedAt
+  application_id   String              @unique @db.Uuid
+  job_offer_id     String              @db.Uuid
+  worker_id        String              @db.Uuid
+  employer_id      String              @db.Uuid
+  status           ContactUnlockStatus @default(PENDING_BOTH)
+  employer_paid    Boolean             @default(false)
+  worker_paid      Boolean             @default(false)
   employer_paid_at DateTime?
   worker_paid_at   DateTime?
-  employer_amount  Decimal            @db.Decimal(10, 2)
-  worker_amount    Decimal            @db.Decimal(10, 2)
+  employer_amount  Decimal             @db.Decimal(10, 2)
+  worker_amount    Decimal             @db.Decimal(10, 2)
   expires_at       DateTime
   unlocked_at      DateTime?
   converted_at     DateTime?
@@ -540,23 +548,25 @@ model ContactUnlockAttempt {
 }
 
 model Penalty {
-  id             String    @id @default(uuid()) @db.Uuid
-  created_at     DateTime  @default(now())
-  profile_id     String    @db.Uuid
-  application_id String?   @db.Uuid
-  amount         Decimal   @db.Decimal(10, 2)
-  reason         String?
-  applied_at          DateTime  @default(now())
-  paid_at             DateTime?
-  notification_count  Int       @default(0)
-  last_notified_at    DateTime?
+  id                 String    @id @default(uuid()) @db.Uuid
+  created_at         DateTime  @default(now())
+  profile_id         String    @db.Uuid
+  application_id     String?   @db.Uuid
+  amount             Decimal   @db.Decimal(10, 2)
+  reason             String?
+  applied_at         DateTime  @default(now())
+  paid_at            DateTime?
+  notification_count Int       @default(0)
+  last_notified_at   DateTime?
 
   profile     Profile      @relation(fields: [profile_id], references: [id], onDelete: Cascade)
   application Application? @relation(fields: [application_id], references: [id], onDelete: Cascade)
+  deleted_at  DateTime?    @db.Timestamptz
 
   @@unique([application_id], name: "idx_penalty_application_unique")
   @@index([profile_id], name: "idx_penalty_profile")
   @@index([applied_at], name: "idx_penalty_applied_at")
+  @@index([deleted_at], name: "idx_penalty_deleted_at")
   @@map("penalties")
 }
 
@@ -573,7 +583,7 @@ model Payment {
   paid_at        DateTime?
   description    String?
 
-  profile Profile   @relation(fields: [profile_id], references: [id], onDelete: Cascade)
+  profile Profile  @relation(fields: [profile_id], references: [id], onDelete: Cascade)
   invoice Invoice?
 
   @@index([transaction_id], name: "idx_payment_transaction")
@@ -592,8 +602,8 @@ model Wallet {
   profile_id String?         @db.Uuid
   balance    Decimal         @default(0) @db.Decimal(12, 2)
 
-  user    User?               @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  profile Profile?            @relation(fields: [profile_id], references: [id], onDelete: Cascade)
+  user         User?               @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  profile      Profile?            @relation(fields: [profile_id], references: [id], onDelete: Cascade)
   transactions WalletTransaction[]
 
   @@unique([owner_type, user_id], name: "idx_wallet_owner_user")
@@ -605,17 +615,20 @@ model Wallet {
 model WalletTransaction {
   id             String                @id @default(uuid()) @db.Uuid
   wallet_id      String                @db.Uuid
-  type          WalletTransactionType
+  type           WalletTransactionType
   amount         Decimal               @db.Decimal(10, 2)
   reference_type String?
   reference_id   String?               @db.Uuid
   created_at     DateTime              @default(now())
+
+  deleted_at DateTime? @db.Timestamptz
 
   wallet Wallet @relation(fields: [wallet_id], references: [id], onDelete: Cascade)
 
   @@index([wallet_id], name: "idx_wallet_transaction_wallet")
   @@index([created_at], name: "idx_wallet_transaction_created_at")
   @@index([type], name: "idx_wallet_transaction_type")
+  @@index([deleted_at], name: "idx_wallet_transaction_deleted_at")
   @@map("wallet_transactions")
 }
 
@@ -677,23 +690,22 @@ model Conversation {
   profile Profile @relation(fields: [profile_id], references: [id], onDelete: Cascade)
 
   @@unique([profile_id, bot_session_id], name: "idx_conversation_unique")
-
   @@index([profile_id], name: "idx_conversation_profile")
   @@index([status], name: "idx_conversation_status")
   @@map("conversations")
 }
 
 model Message {
-  id           String           @id @default(uuid()) @db.Uuid
-  created_at   DateTime         @default(now())
-  profile_id   String           @db.Uuid
-  direction    MessageDirection
-  platform     BotPlatform      @default(WHATSAPP)
-  body         String
-  sent_by_id   String?          @db.Uuid
+  id         String           @id @default(uuid()) @db.Uuid
+  created_at DateTime         @default(now())
+  profile_id String           @db.Uuid
+  direction  MessageDirection
+  platform   BotPlatform      @default(WHATSAPP)
+  body       String
+  sent_by_id String?          @db.Uuid
 
-  profile  Profile @relation(fields: [profile_id], references: [id], onDelete: Cascade)
-  sent_by  User?   @relation(fields: [sent_by_id], references: [id], onDelete: SetNull)
+  profile Profile @relation(fields: [profile_id], references: [id], onDelete: Cascade)
+  sent_by User?   @relation(fields: [sent_by_id], references: [id], onDelete: SetNull)
 
   @@index([profile_id], name: "idx_message_profile")
   @@index([created_at], name: "idx_message_created_at")
@@ -713,36 +725,38 @@ model VerificationToken {
 }
 
 model PaymentRequest {
-  id                   String               @id @default(uuid()) @db.Uuid
-  created_at           DateTime             @default(now())
-  updated_at           DateTime             @updatedAt
-  profile_id           String               @db.Uuid
-  token                String               @unique
-  status               PaymentRequestStatus @default(PENDING)
-  payment_reference    String?
-  proof_images         String[]
-  rejection_note       String?
-  amount               Decimal?             @db.Decimal(10, 2)
-  description          String?
-  phone                String?
-  operator             String?
-  gateway              String?
-  gateway_payment_ref  String?              @unique
-  gateway_tx_id        String?
-  monetbil_payment_ref        String?              @unique
-  monetbil_tx_id              String?
-  request_type                PaymentRequestType?
-  recommendation_worker_id    String?              @db.Uuid
-  contact_unlock_attempt_id   String?              @db.Uuid
+  id                        String               @id @default(uuid()) @db.Uuid
+  created_at                DateTime             @default(now())
+  updated_at                DateTime             @updatedAt
+  profile_id                String               @db.Uuid
+  token                     String               @unique
+  status                    PaymentRequestStatus @default(PENDING)
+  payment_reference         String?
+  proof_images              String[]
+  rejection_note            String?
+  amount                    Decimal?             @db.Decimal(10, 2)
+  description               String?
+  phone                     String?
+  operator                  String?
+  gateway                   String?
+  gateway_payment_ref       String?              @unique
+  gateway_tx_id             String?
+  monetbil_payment_ref      String?              @unique
+  monetbil_tx_id            String?
+  request_type              PaymentRequestType?
+  recommendation_worker_id  String?              @db.Uuid
+  contact_unlock_attempt_id String?              @db.Uuid
 
-  profile  Profile  @relation(fields: [profile_id], references: [id], onDelete: Cascade)
-  invoice  Invoice?
+  profile    Profile   @relation(fields: [profile_id], references: [id], onDelete: Cascade)
+  invoice    Invoice?
+  deleted_at DateTime? @db.Timestamptz
 
   @@index([profile_id], name: "idx_payment_request_profile")
   @@index([token], name: "idx_payment_request_token")
   @@index([status], name: "idx_payment_request_status")
   @@index([monetbil_payment_ref], name: "idx_payment_request_monetbil_ref")
   @@index([request_type], name: "idx_payment_request_type")
+  @@index([deleted_at], name: "idx_payment_request_deleted_at")
   @@map("payment_requests")
 }
 
@@ -759,10 +773,10 @@ model Claim {
   created_by_user_id    String?     @db.Uuid
   created_by_profile_id String?     @db.Uuid
 
-  profile            Profile  @relation("ClaimProfile", fields: [profile_id], references: [id], onDelete: Cascade)
-  assigned_user      User?    @relation("ClaimAssignedUser", fields: [assigned_user_id], references: [id], onDelete: SetNull)
-  created_by_user    User?    @relation("ClaimCreatedByUser", fields: [created_by_user_id], references: [id], onDelete: SetNull)
-  created_by_profile Profile? @relation("ClaimCreatedByProfile", fields: [created_by_profile_id], references: [id], onDelete: SetNull)
+  profile            Profile        @relation("ClaimProfile", fields: [profile_id], references: [id], onDelete: Cascade)
+  assigned_user      User?          @relation("ClaimAssignedUser", fields: [assigned_user_id], references: [id], onDelete: SetNull)
+  created_by_user    User?          @relation("ClaimCreatedByUser", fields: [created_by_user_id], references: [id], onDelete: SetNull)
+  created_by_profile Profile?       @relation("ClaimCreatedByProfile", fields: [created_by_profile_id], references: [id], onDelete: SetNull)
   comments           ClaimComment[]
 
   @@index([profile_id])
@@ -779,7 +793,7 @@ model ClaimComment {
   content         String   @db.Text
   user_id         String?  @db.Uuid
   profile_id      String?  @db.Uuid
-  created_by_type String   @default("user") 
+  created_by_type String   @default("user")
 
   claim   Claim    @relation(fields: [claim_id], references: [id], onDelete: Cascade)
   user    User?    @relation("ClaimCommentUser", fields: [user_id], references: [id], onDelete: SetNull)
@@ -790,21 +804,21 @@ model ClaimComment {
 }
 
 model Event {
-  id             Int              @id @default(autoincrement())
-  created_at     DateTime         @default(now())
-  updated_at     DateTime         @updatedAt
-  title          String
-  description    String           @db.Text
-  start_date     DateTime
-  end_date       DateTime
-  color          String
-  channel        DeliveryChannel  @default(EMAIL)
-  location       String?
-  created_by_id  String           @db.Uuid
+  id            Int             @id @default(autoincrement())
+  created_at    DateTime        @default(now())
+  updated_at    DateTime        @updatedAt
+  title         String
+  description   String          @db.Text
+  start_date    DateTime
+  end_date      DateTime
+  color         String
+  channel       DeliveryChannel @default(EMAIL)
+  location      String?
+  created_by_id String          @db.Uuid
 
-  created_by     User             @relation("EventCreatedBy", fields: [created_by_id], references: [id], onDelete: Cascade)
-  profiles       Profile[]        @relation("EventProfiles")
-  assigned_users User[]           @relation("EventAssignedUsers")
+  created_by     User      @relation("EventCreatedBy", fields: [created_by_id], references: [id], onDelete: Cascade)
+  profiles       Profile[] @relation("EventProfiles")
+  assigned_users User[]    @relation("EventAssignedUsers")
 
   @@index([created_by_id], name: "idx_event_created_by")
   @@index([start_date], name: "idx_event_start_date")
@@ -826,19 +840,19 @@ enum DocumentSourceMode {
 }
 
 model Document {
-  id               String             @id @default(uuid()) @db.Uuid
-  created_at       DateTime           @default(now())
-  updated_at       DateTime           @updatedAt
-  title            String
-  category         DocumentCategory
-  file_url         String
-  mime_type        String
-  created_by       String?            @db.Uuid
-  source_mode      DocumentSourceMode @default(UPLOAD)
-  google_docs_id   String?
-  google_docs_url  String?
-  preview_url      String?
-  variables        String[]           @default([])
+  id              String             @id @default(uuid()) @db.Uuid
+  created_at      DateTime           @default(now())
+  updated_at      DateTime           @updatedAt
+  title           String
+  category        DocumentCategory
+  file_url        String
+  mime_type       String
+  created_by      String?            @db.Uuid
+  source_mode     DocumentSourceMode @default(UPLOAD)
+  google_docs_id  String?
+  google_docs_url String?
+  preview_url     String?
+  variables       String[]           @default([])
 
   profile_platform_document_links ProfilePlatformDocumentLink[]
 
@@ -959,7 +973,6 @@ enum BundleTargetAudience {
   BOTH
 }
 
-
 enum AdDeliveryStatus {
   SENT
   DELIVERED
@@ -969,28 +982,28 @@ enum AdDeliveryStatus {
 }
 
 model AdvertisementBundle {
-  id                     String          @id @default(uuid()) @db.Uuid
+  id                     String               @id @default(uuid()) @db.Uuid
   name                   String
-  description            String          @db.Text
-  price                  Decimal         @db.Decimal(10, 2)
-  currency               String          @default("XAF")
+  description            String               @db.Text
+  price                  Decimal              @db.Decimal(10, 2)
+  currency               String               @default("XAF")
   max_reach              Int
   max_frequency_per_week Int
   max_duration_days      Int
   allowed_channels       DeliveryChannel[]
   target_audience        BundleTargetAudience @default(BOTH)
-  is_active              Boolean         @default(true)
-  created_at             DateTime        @default(now())
+  is_active              Boolean              @default(true)
+  created_at             DateTime             @default(now())
   advertisements         Advertisement[]
 
   @@map("advertisement_bundles")
 }
 
 model Advertisement {
-  id               String            @id @default(uuid()) @db.Uuid
-  bundle_id        String            @db.Uuid
+  id               String          @id @default(uuid()) @db.Uuid
+  bundle_id        String          @db.Uuid
   title            String
-  description      String            @db.Text
+  description      String          @db.Text
   call_to_action   String?
   cta_url          String?
   image_urls       String[]
@@ -1001,22 +1014,22 @@ model Advertisement {
   contact_email    String?
   sector           String?
   advertiser_type  AdvertiserType
-  language         String            @default("fr")
+  language         String          @default("fr")
   tags             String[]
-  start_date       DateTime          @db.Date
-  end_date         DateTime          @db.Date
-  dispatch_time    String            @default("08:00")
+  start_date       DateTime        @db.Date
+  end_date         DateTime        @db.Date
+  dispatch_time    String          @default("08:00")
   target_filters   Json?
-  status           AdStatus          @default(DRAFT)
+  status           AdStatus        @default(DRAFT)
   rejection_reason String?
-  payment_status   AdPaymentStatus   @default(UNPAID)
+  payment_status   AdPaymentStatus @default(UNPAID)
   invoice_id       String?
-  budget           Decimal?          @db.Decimal(10, 2)
-  total_sent       Int               @default(0)
-  total_opened     Int               @default(0)
-  total_clicks     Int               @default(0)
-  created_at       DateTime          @default(now())
-  updated_at       DateTime          @updatedAt
+  budget           Decimal?        @db.Decimal(10, 2)
+  total_sent       Int             @default(0)
+  total_opened     Int             @default(0)
+  total_clicks     Int             @default(0)
+  created_at       DateTime        @default(now())
+  updated_at       DateTime        @updatedAt
 
   bundle        AdvertisementBundle @relation(fields: [bundle_id], references: [id])
   delivery_logs AdDeliveryLog[]
@@ -1038,8 +1051,8 @@ model AdDeliveryLog {
   clicked_at       DateTime?
   failure_reason   String?
 
-  advertisement Advertisement @relation(fields: [advertisement_id], references: [id], onDelete: Cascade)
-  profile       Profile        @relation(fields: [profile_id], references: [id], onDelete: Cascade)
+  advertisement Advertisement   @relation(fields: [advertisement_id], references: [id], onDelete: Cascade)
+  profile       Profile         @relation(fields: [profile_id], references: [id], onDelete: Cascade)
   tracked_links AdTrackedLink[]
 
   @@index([advertisement_id], name: "idx_ad_delivery_advertisement")
@@ -1064,7 +1077,7 @@ model AdTrackedLink {
   updated_at         DateTime        @updatedAt
 
   advertisement Advertisement @relation(fields: [advertisement_id], references: [id], onDelete: Cascade)
-  delivery_log   AdDeliveryLog @relation(fields: [ad_delivery_log_id], references: [id], onDelete: Cascade)
+  delivery_log  AdDeliveryLog @relation(fields: [ad_delivery_log_id], references: [id], onDelete: Cascade)
 
   @@index([advertisement_id], name: "idx_ad_tracked_link_advertisement")
   @@index([ad_delivery_log_id], name: "idx_ad_tracked_link_delivery_log")
