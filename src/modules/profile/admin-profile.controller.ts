@@ -27,6 +27,7 @@ import {
   ApiConsumes,
 } from '@nestjs/swagger';
 import { ProfileService } from './profile.service';
+import { BulkDeleteDto } from '../../common/dto/bulk-delete.dto';
 import { LogService } from '../log/log.service';
 import { extractRequestMeta } from '../../common/utils/request-meta.util';
 import type { AdminAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
@@ -90,7 +91,30 @@ export class AdminProfileController {
       profileType: dto.profile_type,
       whatsappConnected: dto.whatsapp_connected,
       verificationStatus: dto.verification_status,
+      deleted: dto.deleted,
     });
+  }
+
+  @Post('bulk-delete')
+  @Roles(UserRole.MANAGER)
+  @ApiOperation({
+    summary: 'Bulk archive profiles (admin only)',
+    description: 'Soft-deletes (archives) the given profiles.',
+  })
+  @ApiResponse({ status: 201, description: 'Profiles archived' })
+  async bulkDelete(
+    @Body() dto: BulkDeleteDto,
+    @Req() req: AdminAuthenticatedRequest,
+  ): Promise<{ count: number }> {
+    const result = await this.profileService.bulkSoftDeleteProfiles(dto.ids);
+    await this.logService.create({
+      action: 'PROFILE_BULK_DELETED',
+      entityType: 'Profile',
+      userId: req.user?.userId,
+      metadata: { ids: dto.ids, count: result.count },
+      ...extractRequestMeta(req),
+    });
+    return result;
   }
 
   @Get(':id')

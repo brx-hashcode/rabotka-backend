@@ -22,6 +22,7 @@ import { AdminAuthGuard } from '../auth/guards/admin-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { AdminListPenaltiesDto } from './dto/admin-list-penalties.dto';
+import { BulkDeleteDto } from '../../common/dto/bulk-delete.dto';
 import { LogService } from '../log/log.service';
 import type { AdminAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
 import { extractRequestMeta } from '../../common/utils/request-meta.util';
@@ -88,6 +89,7 @@ export class AdminPenaltyController {
       limit,
       q: dto.q,
       paymentStatus: dto.payment_status,
+      deleted: dto.deleted,
     });
   }
 
@@ -132,12 +134,35 @@ export class AdminPenaltyController {
     return result;
   }
 
+  @Post('bulk-delete')
+  @Roles(UserRole.MANAGER)
+  @ApiOperation({
+    summary: 'Bulk archive penalties (admin only)',
+    description:
+      'Soft-deletes (archives) the given penalties (skips already-paid ones) and re-syncs billing status.',
+  })
+  @ApiResponse({ status: 201, description: 'Penalties archived' })
+  async bulkDelete(
+    @Body() dto: BulkDeleteDto,
+    @Req() req: AdminAuthenticatedRequest,
+  ): Promise<{ count: number }> {
+    const result = await this.penaltyService.bulkSoftDeletePenalties(dto.ids);
+    await this.logService.create({
+      action: 'PENALTY_BULK_DELETED',
+      entityType: 'Penalty',
+      userId: req.user?.userId,
+      metadata: { ids: dto.ids, count: result.count },
+      ...extractRequestMeta(req),
+    });
+    return result;
+  }
+
   @Delete(':id')
   @Roles(UserRole.MANAGER)
   @ApiOperation({
     summary: 'Delete a penalty (admin only)',
     description:
-      'Permanently deletes a penalty and re-syncs the worker billing status.',
+      'Archives a penalty (soft delete) and re-syncs the worker billing status.',
   })
   @ApiResponse({ status: 200, description: 'Penalty deleted' })
   @ApiResponse({ status: 404, description: 'Penalty not found' })

@@ -33,6 +33,7 @@ import { AdminListWalletTransactionsDto } from './dto/admin-list-wallet-transact
 import { AdminListPaymentsDto } from './dto/admin-list-payments.dto';
 import { AdminListMobileMoneyTransactionsDto } from './dto/admin-list-mobile-money-transactions.dto';
 import { AdminRecordMobileMoneyWithdrawalDto } from './dto/admin-record-mobile-money-withdrawal.dto';
+import { BulkDeleteDto } from '../../common/dto/bulk-delete.dto';
 import { LogService } from '../log/log.service';
 import { extractRequestMeta } from '../../common/utils/request-meta.util';
 
@@ -162,7 +163,34 @@ export class WalletController {
       type: dto.type,
       created_from: dto.created_from,
       created_to: dto.created_to,
+      deleted: dto.deleted,
     });
+  }
+
+  @Post('transactions/bulk-delete')
+  @ApiOperation({ summary: 'Bulk archive wallet transactions (admin only)' })
+  async bulkDeleteTransactions(
+    @Req() req: AdminAuthenticatedRequest,
+    @Body() dto: BulkDeleteDto,
+  ): Promise<{ count: number }> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: req.user.userId },
+      select: { role: true },
+    });
+    if (!user || !ALLOWED_WALLET_ROLES.has(user.role)) {
+      throw new ForbiddenException(
+        'Only ADMIN or SUPER_ADMIN can access wallet data',
+      );
+    }
+    const result = await this.walletService.bulkSoftDeleteTransactions(dto.ids);
+    await this.logService.create({
+      action: 'WALLET_TRANSACTION_BULK_DELETED',
+      entityType: 'WalletTransaction',
+      userId: req.user.userId,
+      metadata: { ids: dto.ids, count: result.count },
+      ...extractRequestMeta(req),
+    });
+    return result;
   }
 
   @Get('payments')

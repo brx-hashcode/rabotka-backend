@@ -25,6 +25,7 @@ import { UserService } from './user.service';
 import { CreateAdminDto } from './dto/create-admin.dto';
 import { UpdateAdminDto } from './dto/update-admin.dto';
 import { AdminListUsersDto } from './dto/admin-list-users.dto';
+import { BulkDeleteDto } from '../../common/dto/bulk-delete.dto';
 import { AdminAuthGuard } from '../auth/guards/admin-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -192,6 +193,25 @@ export class UserController {
       createdAt: user.created_at,
       updatedAt: user.updated_at,
     };
+  }
+
+  @Post('bulk-delete')
+  @Roles(UserRole.SUPER_ADMIN)
+  @ApiOperation({ summary: 'Bulk archive admin users' })
+  @ApiResponse({ status: 201, description: 'Users archived' })
+  async bulkDelete(
+    @Body() dto: BulkDeleteDto,
+    @Req() req: AdminAuthenticatedRequest,
+  ): Promise<{ count: number }> {
+    const result = await this.userService.bulkSoftDeleteAdmins(dto.ids);
+    await this.logService.create({
+      action: 'ADMIN_USER_BULK_DELETED',
+      entityType: 'user',
+      userId: req.user?.userId,
+      metadata: { ids: dto.ids, count: result.count },
+      ...extractRequestMeta(req),
+    });
+    return result;
   }
 
   @Delete(':id')
