@@ -31,6 +31,7 @@ import {
   CreateGroupDto,
   SendMessageDto,
   EditMessageDto,
+  AddMembersDto,
 } from './dto/chat.dto';
 
 @ApiTags('Admin – Chat')
@@ -90,6 +91,40 @@ export class ChatController {
     );
     this.gateway.joinParticipants(convo);
     return convo;
+  }
+
+  @Post('conversations/:id/members')
+  @ApiOperation({ summary: 'Add members to a group' })
+  async addMembers(
+    @Req() req: AdminAuthenticatedRequest,
+    @Param('id') id: string,
+    @Body() dto: AddMembersDto,
+  ) {
+    const { conversation } = await this.chatService.addMembers(
+      this.userId(req),
+      id,
+      dto.memberIds,
+    );
+    this.gateway.joinParticipants(conversation);
+    this.gateway.emitConversationUpdated(conversation);
+    return conversation;
+  }
+
+  @Delete('conversations/:id/members/:userId')
+  @ApiOperation({ summary: 'Remove a member from a group (or leave it)' })
+  async removeMember(
+    @Req() req: AdminAuthenticatedRequest,
+    @Param('id') id: string,
+    @Param('userId') targetUserId: string,
+  ) {
+    const conversation = await this.chatService.removeMember(
+      this.userId(req),
+      id,
+      targetUserId,
+    );
+    this.gateway.removeParticipant(id, targetUserId);
+    this.gateway.emitConversationUpdated(conversation);
+    return conversation;
   }
 
   @Get('conversations/:id/messages')

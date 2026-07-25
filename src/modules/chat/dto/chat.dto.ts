@@ -31,6 +31,14 @@ export class CreateGroupDto {
   memberIds!: string[];
 }
 
+export class AddMembersDto {
+  @ApiProperty({ type: [String] })
+  @IsArray()
+  @ArrayMaxSize(100)
+  @IsUUID('all', { each: true })
+  memberIds!: string[];
+}
+
 export class AttachmentDto {
   @IsString() url!: string;
   @IsString() key!: string;

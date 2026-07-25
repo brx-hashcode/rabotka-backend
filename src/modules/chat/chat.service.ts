@@ -294,6 +294,89 @@ export class ChatService {
     return this.mapConversation(userId, convo);
   }
 
+  /** Load a group conversation for membership edits, guarding the invariants. */
+  private async assertEditableGroup(
+    userId: string,
+    conversationId: string,
+  ): Promise<void> {
+    await this.assertMembership(userId, conversationId);
+    const convo = await this.prisma.chatConversation.findUnique({
+      where: { id: conversationId },
+      select: { type: true, is_team: true },
+    });
+    if (!convo) throw new NotFoundException('Conversation not found');
+    if (convo.type !== ChatConversationType.GROUP) {
+      throw new ForbiddenException('Only group members can be changed');
+    }
+    if (convo.is_team) {
+      throw new ForbiddenException(
+        'The Team channel syncs automatically and cannot be edited',
+      );
+    }
+  }
+
+  /**
+   * Add active team members to a group. Returns the refreshed conversation and
+   * the ids that were actually added (for room join + notifications).
+   */
+  async addMembers(
+    userId: string,
+    conversationId: string,
+    memberIds: string[],
+  ): Promise<{ conversation: ChatConversationItem; addedIds: string[] }> {
+    await this.assertEditableGroup(userId, conversationId);
+
+    const existing = new Set(await this.participantUserIds(conversationId));
+    const users = await this.prisma.user.findMany({
+      where: {
+        id: { in: [...new Set(memberIds)] },
+        is_active: true,
+        deleted_at: null,
+      },
+      select: { id: true },
+    });
+    const addedIds = users.map((u) => u.id).filter((id) => !existing.has(id));
+
+    if (addedIds.length > 0) {
+      await this.prisma.chatParticipant.createMany({
+        data: addedIds.map((user_id) => ({
+          conversation_id: conversationId,
+          user_id,
+        })),
+        skipDuplicates: true,
+      });
+    }
+    return {
+      conversation: await this.getConversation(userId, conversationId),
+      addedIds,
+    };
+  }
+
+  /**
+   * Remove a member from a group (or leave, when targetUserId === userId).
+   * Returns the refreshed conversation for the remaining members.
+   */
+  async removeMember(
+    userId: string,
+    conversationId: string,
+    targetUserId: string,
+  ): Promise<ChatConversationItem> {
+    await this.assertEditableGroup(userId, conversationId);
+    await this.prisma.chatParticipant.deleteMany({
+      where: { conversation_id: conversationId, user_id: targetUserId },
+    });
+    // Re-read for the remaining members; the caller (a member) may have left,
+    // so map from the target's own perspective only if still present.
+    const convo = await this.prisma.chatConversation.findUnique({
+      where: { id: conversationId },
+      include: this.conversationInclude,
+    });
+    if (!convo) throw new NotFoundException('Conversation not found');
+    const viewer =
+      userId === targetUserId ? convo.participants[0]?.user_id : userId;
+    return this.mapConversation(viewer ?? userId, convo);
+  }
+
   // ── Messages ───────────────────────────────────────────────────────────────
 
   async getMessages(
