@@ -129,6 +129,69 @@ describe('ChatService', () => {
     });
   });
 
+  describe('member management', () => {
+    it('refuses to edit members of the Team channel', async () => {
+      prisma.chatParticipant.findUnique.mockResolvedValue({ id: 'p1' }); // membership
+      prisma.chatConversation.findUnique.mockResolvedValue({
+        type: ChatConversationType.GROUP,
+        is_team: true,
+      });
+      await expect(service.addMembers(ME, 'team', ['b'])).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(prisma.chatParticipant.createMany).not.toHaveBeenCalled();
+    });
+
+    it('refuses to add members to a direct conversation', async () => {
+      prisma.chatParticipant.findUnique.mockResolvedValue({ id: 'p1' });
+      prisma.chatConversation.findUnique.mockResolvedValue({
+        type: ChatConversationType.DIRECT,
+        is_team: false,
+      });
+      await expect(service.addMembers(ME, 'dm', ['b'])).rejects.toThrow(
+        ForbiddenException,
+      );
+    });
+
+    it('adds only new, active users and returns the added ids', async () => {
+      // assertEditableGroup: membership + group lookup
+      prisma.chatParticipant.findUnique.mockResolvedValue({ id: 'p1' });
+      prisma.chatConversation.findUnique
+        .mockResolvedValueOnce({
+          type: ChatConversationType.GROUP,
+          is_team: false,
+        })
+        // getConversation → the mapped conversation payload
+        .mockResolvedValueOnce({
+          id: 'g1',
+          type: ChatConversationType.GROUP,
+          name: 'Group',
+          is_team: false,
+          updated_at: new Date(),
+          participants: [
+            {
+              user_id: ME,
+              last_read_at: null,
+              user: { id: ME, first_name: 'Me', last_name: 'X', role: 'ADMIN' },
+            },
+          ],
+          messages: [],
+        });
+      // existing participants (for the add diff) — ME already in, b is new
+      prisma.chatParticipant.findMany.mockResolvedValue([{ user_id: ME }]);
+      prisma.user.findMany.mockResolvedValue([{ id: ME }, { id: 'b' }]);
+
+      const { addedIds } = await service.addMembers(ME, 'g1', [ME, 'b']);
+
+      expect(addedIds).toEqual(['b']);
+      expect(prisma.chatParticipant.createMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: [{ conversation_id: 'g1', user_id: 'b' }],
+        }),
+      );
+    });
+  });
+
   describe('sendMessage', () => {
     it('notifies recipients = participants − sender', async () => {
       prisma.chatParticipant.findUnique.mockResolvedValue({ id: 'p1' }); // membership

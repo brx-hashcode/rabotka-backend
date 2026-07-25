@@ -230,6 +230,34 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
+  /**
+   * Broadcast an updated conversation (e.g. members changed) to everyone in its
+   * room plus each current participant's personal room — the latter covers
+   * newly added members whose sockets are joining the room this same tick.
+   */
+  emitConversationUpdated(conversation: ChatConversationItem): void {
+    this.server
+      .to(`conv:${conversation.id}`)
+      .emit('conversation:updated', conversation);
+    for (const p of conversation.participants) {
+      this.server
+        .to(`user:${p.userId}`)
+        .emit('conversation:updated', conversation);
+    }
+  }
+
+  /**
+   * Tell a removed member the conversation is gone and drop their sockets from
+   * its room so they stop receiving its messages.
+   */
+  removeParticipant(conversationId: string, userId: string): void {
+    const room = `conv:${conversationId}`;
+    this.server.to(`user:${userId}`).emit('conversation:removed', {
+      conversationId,
+    });
+    this.server.in(`user:${userId}`).socketsLeave(room);
+  }
+
   private broadcastPresence(userId: string, online: boolean): void {
     this.server.emit('presence', { userId, online });
   }
