@@ -206,6 +206,19 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
+  /**
+   * Broadcast a read receipt to the conversation room. Used by the REST
+   * mark-read endpoint so a reader who opens a conversation via HTTP (not the
+   * socket handler) still lets the sender's "seen" ticks update live.
+   */
+  emitRead(conversationId: string, userId: string): void {
+    this.server.to(`conv:${conversationId}`).emit('read', {
+      conversationId,
+      userId,
+      readAt: new Date().toISOString(),
+    });
+  }
+
   emitEditedMessage(message: ChatMessageItem): void {
     this.server
       .to(`conv:${message.conversationId}`)
