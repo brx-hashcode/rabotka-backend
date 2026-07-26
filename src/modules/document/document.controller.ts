@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Put,
   Delete,
   Body,
   Param,
@@ -13,15 +14,17 @@ import {
   HttpCode,
   HttpStatus,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
-import { UserRole } from '@prisma/client';
-import { DocumentService } from './document.service';
+import { UserRole, DocumentCategory } from '@prisma/client';
+import { DocumentService, assertStorageUrl } from './document.service';
 import { UpdateDocumentDto } from './dto/update-document.dto';
 import { ListDocumentsDto } from './dto/list-documents.dto';
 import { CreateDocumentFromUrlDto } from './dto/create-from-url.dto';
 import { CreateDocumentFromUploadDto } from './dto/create-from-upload.dto';
+import { ReplaceDocumentFileDto } from './dto/replace-document-file.dto';
 import { AdminAuthGuard } from '../auth/guards/admin-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -30,7 +33,6 @@ import type { AdminAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
 import { extractRequestMeta } from '../../common/utils/request-meta.util';
 import { fetchWithTimeout } from '../../common/utils/fetch-with-timeout.util';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
-import { DocumentCategory } from '@prisma/client';
 
 @ApiTags('Admin – Documents')
 @Controller('admin/documents')
@@ -136,6 +138,32 @@ export class DocumentController {
     return result;
   }
 
+  @Put(':id/file')
+  @Roles(UserRole.MANAGER)
+  @ApiOperation({
+    summary: "Replace a document's file (repair a broken/blob file_url)",
+  })
+  @ApiResponse({ status: 200, description: 'Document file replaced' })
+  async replaceFile(
+    @Param('id') id: string,
+    @Body() dto: ReplaceDocumentFileDto,
+    @Req() req: AdminAuthenticatedRequest,
+  ) {
+    const result = await this.documentService.replaceFile(id, {
+      fileUrl: dto.file_url,
+      mimeType: dto.mime_type,
+    });
+    await this.logService.create({
+      action: 'DOCUMENT_FILE_REPLACED',
+      entityType: 'Document',
+      entityId: id,
+      userId: req.user?.userId,
+      metadata: { mimeType: dto.mime_type },
+      ...extractRequestMeta(req),
+    });
+    return result;
+  }
+
   @Delete(':id')
   @Roles(UserRole.MANAGER)
   @HttpCode(HttpStatus.OK)
@@ -233,37 +261,44 @@ export class PublicDocumentController {
 
     if (!policy) throw new NotFoundException('No active POLICY document found');
 
-    const isMd = policy.file_url.endsWith('.md');
-    const isPdf =
-      policy.mime_type === 'application/pdf' ||
-      policy.file_url.endsWith('.pdf');
+    // The stored file must be a real, fetchable storage URL — a blob:/bad URL
+    // means the policy file was never uploaded properly.
+    assertStorageUrl(policy.file_url);
 
-    if (isMd) {
-      const content = await fetchWithTimeout(policy.file_url, {}, 10_000).then(
-        (r) => r.text(),
+    const upstream = await fetchWithTimeout(policy.file_url, {}, 10_000).catch(
+      () => {
+        throw new ServiceUnavailableException(
+          'Policy file is unreachable. Re-upload the policy document.',
+        );
+      },
+    );
+    if (!upstream.ok) {
+      throw new ServiceUnavailableException(
+        'Policy file could not be fetched from storage.',
       );
+    }
 
+    const isMd =
+      policy.mime_type === 'text/markdown' || policy.file_url.endsWith('.md');
+    if (isMd) {
+      const content = await upstream.text();
       return res
         .setHeader('Content-Type', 'text/markdown; charset=utf-8')
         .send(content);
     }
 
-    if (isPdf) {
-      const fileRes = await fetchWithTimeout(policy.file_url, {}, 10_000);
-      const buffer = Buffer.from(await fileRes.arrayBuffer());
-      return res
-        .setHeader('Content-Type', 'application/pdf')
-        .setHeader('Content-Disposition', `inline; filename="policy.pdf"`)
-        .send(buffer);
-    }
-
-    return res.json({
-      id: policy.id,
-      title: policy.title,
-      category: policy.category,
-      mimeType: policy.mime_type,
-      fileUrl: policy.file_url,
-      createdAt: policy.created_at,
-    });
+    // Stream the actual file content for every other type (pdf, docx, …) using
+    // its stored mime type — never return JSON metadata as "the content".
+    const contentType =
+      policy.mime_type ||
+      upstream.headers.get('content-type') ||
+      'application/octet-stream';
+    const buffer = Buffer.from(await upstream.arrayBuffer());
+    const filename =
+      policy.file_url.split('/').pop()?.split('?')[0] || 'policy';
+    return res
+      .setHeader('Content-Type', contentType)
+      .setHeader('Content-Disposition', `inline; filename="${filename}"`)
+      .send(buffer);
   }
 }

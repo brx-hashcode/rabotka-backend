@@ -172,7 +172,7 @@ describe('PublicDocumentController', () => {
     );
   });
 
-  it('getActivePolicy returns JSON for non-pdf/md files', async () => {
+  it('getActivePolicy streams non-pdf/md files with their mime type', async () => {
     prisma.document.findFirst.mockResolvedValue({
       id: 'doc-1',
       title: 'Policy',
@@ -181,15 +181,20 @@ describe('PublicDocumentController', () => {
       file_url: 'https://storage/policy.html',
       created_at: new Date(),
     });
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      headers: { get: () => 'text/html' },
+      arrayBuffer: () => Promise.resolve(new ArrayBuffer(10)),
+    }) as any;
     const res = {
-      setHeader: jest.fn(),
+      setHeader: jest.fn().mockReturnThis(),
       send: jest.fn(),
       json: jest.fn(),
     } as any;
     await controller.getActivePolicy(res);
-    expect(res.json).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'doc-1' }),
-    );
+    expect(res.json).not.toHaveBeenCalled();
+    expect(res.setHeader).toHaveBeenCalledWith('Content-Type', 'text/html');
+    expect(res.send).toHaveBeenCalledWith(expect.any(Buffer));
   });
 
   it('getActivePolicy fetches and returns markdown content', async () => {
@@ -202,6 +207,7 @@ describe('PublicDocumentController', () => {
       created_at: new Date(),
     });
     global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
       text: () => Promise.resolve('# Policy'),
     }) as any;
     const res = {
@@ -226,6 +232,8 @@ describe('PublicDocumentController', () => {
       created_at: new Date(),
     });
     global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      headers: { get: () => 'application/pdf' },
       arrayBuffer: () => Promise.resolve(new ArrayBuffer(100)),
     }) as any;
     const res = {
