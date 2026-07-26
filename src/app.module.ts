@@ -47,6 +47,7 @@ import { InvoiceModule } from './modules/invoice/invoice.module';
 import { EventModule } from './modules/event/event.module';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { WsNotificationsModule } from './modules/ws-notifications/ws-notifications.module';
+import { ChatModule } from './modules/chat/chat.module';
 import { ContactUnlockModule } from './modules/contact-unlock/contact-unlock.module';
 import { StorageModule } from './common/services/storage/storage.module';
 import { PaymentGatewayModule } from './common/services/payment/payment-gateway.module';
@@ -164,6 +165,7 @@ import { HttpOnlyArcjetGuard } from './common/guards/http-only-arcjet.guard';
     ContactUnlockModule,
     WsNotificationsModule,
     AdvertisementModule,
+    ChatModule,
   ],
   controllers: [AppController],
   providers: [
