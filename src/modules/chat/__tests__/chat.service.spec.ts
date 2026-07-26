@@ -22,6 +22,7 @@ function makePrismaMock() {
       findUnique: jest.fn(),
       create: jest.fn(),
       update: jest.fn().mockResolvedValue({}),
+      delete: jest.fn().mockResolvedValue({}),
       findUniqueOrThrow: jest.fn(),
     },
     chatMessage: {
@@ -189,6 +190,88 @@ describe('ChatService', () => {
           data: [{ conversation_id: 'g1', user_id: 'b' }],
         }),
       );
+    });
+  });
+
+  describe('creator-only group controls', () => {
+    it('lets a member leave (self-removal) even if not the creator', async () => {
+      prisma.chatParticipant.findUnique.mockResolvedValue({ id: 'p1' });
+      prisma.chatConversation.findUnique
+        .mockResolvedValueOnce({
+          type: ChatConversationType.GROUP,
+          is_team: false,
+          created_by: 'someone-else',
+        })
+        .mockResolvedValueOnce({
+          id: 'g1',
+          type: ChatConversationType.GROUP,
+          name: 'G',
+          is_team: false,
+          created_by: 'someone-else',
+          updated_at: new Date(),
+          participants: [
+            {
+              user_id: 'other',
+              last_read_at: null,
+              user: {
+                id: 'other',
+                first_name: 'O',
+                last_name: 'Y',
+                role: 'ADMIN',
+              },
+            },
+          ],
+          messages: [],
+        });
+
+      await expect(service.removeMember(ME, 'g1', ME)).resolves.toBeDefined();
+      expect(prisma.chatParticipant.deleteMany).toHaveBeenCalled();
+    });
+
+    it('refuses to remove another member when not the creator', async () => {
+      prisma.chatParticipant.findUnique.mockResolvedValue({ id: 'p1' });
+      prisma.chatConversation.findUnique.mockResolvedValueOnce({
+        type: ChatConversationType.GROUP,
+        is_team: false,
+        created_by: 'someone-else',
+      });
+      await expect(service.removeMember(ME, 'g1', 'victim')).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(prisma.chatParticipant.deleteMany).not.toHaveBeenCalled();
+    });
+
+    it('deletes a group only for its creator', async () => {
+      prisma.chatParticipant.findUnique.mockResolvedValue({ id: 'p1' });
+      prisma.chatConversation.findUnique.mockResolvedValueOnce({
+        type: ChatConversationType.GROUP,
+        is_team: false,
+        created_by: ME,
+      });
+      prisma.chatParticipant.findMany.mockResolvedValue([
+        { user_id: ME },
+        { user_id: 'b' },
+      ]);
+
+      const res = await service.deleteGroup(ME, 'g1');
+
+      expect(res.participantIds.sort()).toEqual([ME, 'b'].sort());
+      expect(prisma.chatConversation.delete).toHaveBeenCalledWith({
+        where: { id: 'g1' },
+      });
+    });
+
+    it('refuses group deletion by a non-creator', async () => {
+      prisma.chatParticipant.findUnique.mockResolvedValue({ id: 'p1' });
+      prisma.chatConversation.findUnique.mockResolvedValueOnce({
+        type: ChatConversationType.GROUP,
+        is_team: false,
+        created_by: 'someone-else',
+      });
+      await expect(service.deleteGroup(ME, 'g1')).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(prisma.chatConversation.delete).not.toHaveBeenCalled();
     });
   });
 

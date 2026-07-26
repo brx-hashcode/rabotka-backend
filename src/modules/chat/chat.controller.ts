@@ -137,6 +137,22 @@ export class ChatController {
     return conversation;
   }
 
+  @Delete('conversations/:id')
+  @ApiOperation({ summary: 'Delete a group (creator only)' })
+  async deleteConversation(
+    @Req() req: AdminAuthenticatedRequest,
+    @Param('id') id: string,
+  ) {
+    const { participantIds } = await this.chatService.deleteGroup(
+      this.userId(req),
+      id,
+    );
+    for (const userId of participantIds) {
+      this.gateway.removeParticipant(id, userId);
+    }
+    return { success: true };
+  }
+
   @Get('conversations/:id/messages')
   @ApiOperation({ summary: 'Paginated message history (cursor-based)' })
   getMessages(
