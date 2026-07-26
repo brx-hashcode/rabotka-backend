@@ -1,5 +1,12 @@
-import { IsString, IsOptional, MaxLength, IsEmail } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  MaxLength,
+  IsEmail,
+  IsEnum,
+} from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { ProfileType } from '@prisma/client';
 import { UpdateProfileDto } from './update-profile.dto';
 
 export class AdminUpdateProfileDto extends UpdateProfileDto {
@@ -13,4 +20,12 @@ export class AdminUpdateProfileDto extends UpdateProfileDto {
   @IsOptional()
   @IsEmail()
   email?: string;
+
+  @ApiPropertyOptional({
+    enum: ProfileType,
+    description: 'Profile type (WORKER/EMPLOYER) — triggers a vector re-index',
+  })
+  @IsOptional()
+  @IsEnum(ProfileType)
+  profileType?: ProfileType;
 }
