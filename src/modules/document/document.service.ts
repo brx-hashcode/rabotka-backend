@@ -44,6 +44,28 @@ export type AdminDocumentItem = {
 const DOCX_MIME =
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
+/**
+ * A document's file_url must be a real, server-fetchable storage URL. Reject
+ * browser-only `blob:`/`data:` references (and any non-http url): those can't be
+ * proxied, streamed for the policy endpoint, or fetched to fill a contract
+ * template — they mean the file was never uploaded to storage.
+ */
+export function assertStorageUrl(url: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new BadRequestException(
+      'Invalid file URL. The file was not properly uploaded to storage — re-upload it.',
+    );
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new BadRequestException(
+      `Unsupported file URL (${parsed.protocol}). Expected an http(s) storage URL — the file was not properly uploaded. Re-upload it.`,
+    );
+  }
+}
+
 function extractVariables(docxBuffer: Buffer): string[] {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -209,6 +231,8 @@ export class DocumentService {
     mimeType: string;
     createdBy?: string;
   }): Promise<AdminDocumentItem> {
+    assertStorageUrl(opts.fileUrl);
+
     let docxBuffer: Buffer;
     try {
       const res = await fetchWithTimeout(opts.fileUrl, {}, 15_000);
@@ -236,6 +260,53 @@ export class DocumentService {
     });
 
     await this.invalidateListCache();
+    return this.mapDocument(doc);
+  }
+
+  /**
+   * Replace a document's underlying file with a freshly-uploaded one (repair a
+   * document whose stored file_url is broken/blob). Re-extracts template
+   * variables, switches the doc to UPLOAD mode, and busts the list + contract
+   * PDF caches so downstream (policy stream / contract fill) picks up the new file.
+   */
+  async replaceFile(
+    id: string,
+    opts: { fileUrl: string; mimeType: string },
+  ): Promise<AdminDocumentItem> {
+    const existing = await this.prisma.document.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException('Document not found');
+
+    assertStorageUrl(opts.fileUrl);
+
+    let variables: string[] = existing.variables ?? [];
+    try {
+      const res = await fetchWithTimeout(opts.fileUrl, {}, 15_000);
+      if (res.ok) {
+        const buffer = Buffer.from(await res.arrayBuffer());
+        if (buffer.length > 0) variables = extractVariables(buffer);
+      }
+    } catch {
+      // Keep the previous variables if the new file can't be inspected yet.
+    }
+
+    const previewUrl = `https://docs.google.com/gview?url=${encodeURIComponent(opts.fileUrl)}&embedded=true`;
+
+    const doc = await this.prisma.document.update({
+      where: { id },
+      data: {
+        file_url: opts.fileUrl,
+        mime_type: opts.mimeType,
+        source_mode: DocumentSourceMode.UPLOAD,
+        preview_url: previewUrl,
+        variables,
+        // This is now a plain uploaded file — drop any Google Docs linkage so
+        // the stored file is what gets used.
+        google_docs_id: null,
+        google_docs_url: null,
+      },
+    });
+
+    await Promise.all([this.invalidateListCache(), this.invalidatePdfCache(id)]);
     return this.mapDocument(doc);
   }
 
@@ -300,16 +371,32 @@ export class DocumentService {
    * For GOOGLE_DOCS sources, exports the live Google Doc as DOCX so structure matches the current
    * document in Drive. Falls back to the import-time snapshot at `file_url` if export fails.
    */
+  /**
+   * Fetch the stored DOCX snapshot at `doc.file_url`, guarding against
+   * blob:/unreachable URLs and turning a raw `fetch failed` into a clear,
+   * actionable error (the template file needs re-uploading).
+   */
+  private async fetchTemplateSnapshot(doc: Document): Promise<Buffer> {
+    assertStorageUrl(doc.file_url);
+    const res = await fetchWithTimeout(doc.file_url, {}, 15_000).catch(() => {
+      throw new BadRequestException(
+        'Template file is unreachable. Re-upload the template file.',
+      );
+    });
+    if (!res.ok) {
+      throw new BadRequestException(
+        'Template file content is missing. Re-upload the template file.',
+      );
+    }
+    return Buffer.from(await res.arrayBuffer());
+  }
+
   private async loadDocxTemplateBuffer(doc: Document): Promise<Buffer> {
     if (
       doc.source_mode !== DocumentSourceMode.GOOGLE_DOCS ||
       !doc.google_docs_id
     ) {
-      const res = await fetchWithTimeout(doc.file_url, {}, 15_000);
-      if (!res.ok) {
-        throw new BadRequestException('Template file content is missing');
-      }
-      return Buffer.from(await res.arrayBuffer());
+      return this.fetchTemplateSnapshot(doc);
     }
 
     try {
@@ -322,13 +409,9 @@ export class DocumentService {
         `Live Google Doc export failed for ${doc.google_docs_id}; using stored DOCX snapshot from file_url`,
         err instanceof Error ? err.stack : undefined,
       );
-      const res = await fetchWithTimeout(doc.file_url, {}, 15_000);
-      if (!res.ok) {
-        throw new BadRequestException(
-          'Template file content is missing (live export failed and stored snapshot unavailable)',
-        );
-      }
-      return Buffer.from(await res.arrayBuffer());
+      // Fall back to the stored snapshot — guarded so an unreachable/blob
+      // snapshot yields a clear "re-upload the template" error, not a 500.
+      return this.fetchTemplateSnapshot(doc);
     }
   }
 

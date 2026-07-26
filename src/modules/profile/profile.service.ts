@@ -865,8 +865,25 @@ export class ProfileService {
       throw err;
     }
 
-    // Re-index in Qdrant after update (fire-and-forget)
-    if (profile.profile_type === ProfileType.WORKER) {
+    // Re-index in Qdrant after update (fire-and-forget). If the profile type
+    // changed, the point must move collections: drop it from the OLD collection
+    // first, then index into the NEW one — otherwise a stale worker/employer
+    // point lingers and keeps matching.
+    const oldType = profile.profile_type;
+    const newType = dto.profileType ?? oldType;
+    if (newType !== oldType) {
+      const removeFromOld =
+        oldType === ProfileType.WORKER
+          ? this.matchingService.deleteWorkerFromIndex(profileId)
+          : this.matchingService.deleteEmployerFromIndex(profileId);
+      removeFromOld.catch((err: unknown) =>
+        this.logger.warn(
+          `Removing profile from old ${oldType} index failed`,
+          err instanceof Error ? err.message : String(err),
+        ),
+      );
+    }
+    if (newType === ProfileType.WORKER) {
       this.matchingService
         .indexWorkerProfile(profileId)
         .catch((err: unknown) =>
@@ -908,6 +925,7 @@ export class ProfileService {
     if (dto.address !== undefined) data.address = dto.address;
     if (dto.phone !== undefined) data.phone = dto.phone;
     if (dto.email !== undefined) data.email = dto.email;
+    if (dto.profileType !== undefined) data.profile_type = dto.profileType;
     return data;
   }
 

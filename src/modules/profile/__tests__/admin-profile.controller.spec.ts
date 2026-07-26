@@ -241,6 +241,9 @@ describe('AdminProfileController', () => {
         'p1',
         'u1',
       );
+      // sendTextMessage persists the OUTBOUND message itself; the controller
+      // must NOT create a second one (that caused duplicate WhatsApp bubbles).
+      expect(prisma.message.create).not.toHaveBeenCalled();
       expect(result).toEqual({ success: true });
     });
 
