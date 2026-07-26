@@ -325,6 +325,10 @@ model User {
   events          Event[]        @relation("EventAssignedUsers")
   deleted_at      DateTime?      @db.Timestamptz
 
+  chat_participants  ChatParticipant[]
+  chat_messages      ChatMessage[]
+  chat_conversations ChatConversation[] @relation("ChatConversationCreatedBy")
+
   @@index([email], name: "idx_user_email")
   @@index([role], name: "idx_user_role")
   @@index([deleted_at], name: "idx_user_deleted_at")
@@ -1099,4 +1103,62 @@ model Rating {
   @@unique([rater_id, assignment_id])
   @@index([ratee_id], name: "idx_rating_ratee")
   @@map("ratings")
+}
+
+enum ChatConversationType {
+  DIRECT
+  GROUP
+}
+
+model ChatConversation {
+  id         String               @id @default(uuid()) @db.Uuid
+  created_at DateTime             @default(now())
+  updated_at DateTime             @updatedAt
+  type       ChatConversationType
+  name       String?
+  is_team    Boolean              @default(false)
+  created_by String?              @db.Uuid
+
+  creator      User?             @relation("ChatConversationCreatedBy", fields: [created_by], references: [id], onDelete: SetNull)
+  participants ChatParticipant[]
+  messages     ChatMessage[]
+
+  @@index([updated_at], name: "idx_chat_conversation_updated")
+  @@index([type], name: "idx_chat_conversation_type")
+  @@index([is_team], name: "idx_chat_conversation_is_team")
+  @@map("chat_conversations")
+}
+
+model ChatParticipant {
+  id              String    @id @default(uuid()) @db.Uuid
+  conversation_id String    @db.Uuid
+  user_id         String    @db.Uuid
+  joined_at       DateTime  @default(now())
+  last_read_at    DateTime?
+
+  conversation ChatConversation @relation(fields: [conversation_id], references: [id], onDelete: Cascade)
+  user         User             @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([conversation_id, user_id], name: "idx_chat_participant_unique")
+  @@index([user_id], name: "idx_chat_participant_user")
+  @@index([conversation_id], name: "idx_chat_participant_conversation")
+  @@map("chat_participants")
+}
+
+model ChatMessage {
+  id              String    @id @default(uuid()) @db.Uuid
+  conversation_id String    @db.Uuid
+  sender_id       String    @db.Uuid
+  body            String?   @db.Text
+  attachments     Json?
+  created_at      DateTime  @default(now())
+  edited_at       DateTime?
+  deleted_at      DateTime?
+
+  conversation ChatConversation @relation(fields: [conversation_id], references: [id], onDelete: Cascade)
+  sender       User             @relation(fields: [sender_id], references: [id], onDelete: Cascade)
+
+  @@index([conversation_id, created_at], name: "idx_chat_message_conversation_created")
+  @@index([sender_id], name: "idx_chat_message_sender")
+  @@map("chat_messages")
 }
