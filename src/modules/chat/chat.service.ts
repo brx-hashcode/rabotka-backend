@@ -38,6 +38,7 @@ export type ChatConversationItem = {
   type: ChatConversationType;
   name: string | null;
   isTeam: boolean;
+  createdBy: string | null;
   updatedAt: string;
   participants: ChatParticipantItem[];
   lastMessage: ChatMessageItem | null;
@@ -197,6 +198,7 @@ export class ChatService {
       type: c.type,
       name: c.name,
       isTeam: c.is_team,
+      createdBy: c.created_by,
       updatedAt: c.updated_at.toISOString(),
       participants: c.participants.map((p) => ({
         userId: p.user_id,
@@ -298,11 +300,11 @@ export class ChatService {
   private async assertEditableGroup(
     userId: string,
     conversationId: string,
-  ): Promise<void> {
+  ): Promise<{ created_by: string | null }> {
     await this.assertMembership(userId, conversationId);
     const convo = await this.prisma.chatConversation.findUnique({
       where: { id: conversationId },
-      select: { type: true, is_team: true },
+      select: { type: true, is_team: true, created_by: true },
     });
     if (!convo) throw new NotFoundException('Conversation not found');
     if (convo.type !== ChatConversationType.GROUP) {
@@ -313,6 +315,7 @@ export class ChatService {
         'The Team channel syncs automatically and cannot be edited',
       );
     }
+    return { created_by: convo.created_by };
   }
 
   /**
@@ -361,7 +364,17 @@ export class ChatService {
     conversationId: string,
     targetUserId: string,
   ): Promise<ChatConversationItem> {
-    await this.assertEditableGroup(userId, conversationId);
+    const { created_by } = await this.assertEditableGroup(
+      userId,
+      conversationId,
+    );
+    // Members may remove themselves (leave); removing anyone else is reserved
+    // to the group's creator.
+    if (targetUserId !== userId && created_by !== userId) {
+      throw new ForbiddenException(
+        'Only the group creator can remove members',
+      );
+    }
     await this.prisma.chatParticipant.deleteMany({
       where: { conversation_id: conversationId, user_id: targetUserId },
     });
@@ -375,6 +388,31 @@ export class ChatService {
     const viewer =
       userId === targetUserId ? convo.participants[0]?.user_id : userId;
     return this.mapConversation(viewer ?? userId, convo);
+  }
+
+  /**
+   * Delete a group entirely — only the creator may do this. Returns the
+   * participant ids (before deletion) so the gateway can notify them.
+   */
+  async deleteGroup(
+    userId: string,
+    conversationId: string,
+  ): Promise<{ participantIds: string[] }> {
+    const { created_by } = await this.assertEditableGroup(
+      userId,
+      conversationId,
+    );
+    if (created_by !== userId) {
+      throw new ForbiddenException(
+        'Only the group creator can delete the group',
+      );
+    }
+    const participantIds = await this.participantUserIds(conversationId);
+    // Cascades to participants + messages (onDelete: Cascade in the schema).
+    await this.prisma.chatConversation.delete({
+      where: { id: conversationId },
+    });
+    return { participantIds };
   }
 
   // ── Messages ───────────────────────────────────────────────────────────────
