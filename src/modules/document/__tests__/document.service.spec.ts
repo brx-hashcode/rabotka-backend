@@ -1,5 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { NotFoundException, HttpException } from '@nestjs/common';
+import {
+  NotFoundException,
+  HttpException,
+  BadRequestException,
+} from '@nestjs/common';
 import { DocumentService } from '../document.service';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { StorageService } from '../../../common/services/storage/storage.service';
@@ -117,6 +121,71 @@ describe('DocumentService', () => {
       });
 
       expect(result.id).toBe('doc-1');
+    });
+
+    it('rejects a blob: file url (never uploaded to storage)', async () => {
+      await expect(
+        service.createFromUpload({
+          title: 'Test Doc',
+          category: DocumentCategory.CONTRACT,
+          fileUrl: 'blob:https://admin.rabotka.work/abc-123',
+          mimeType: 'application/pdf',
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockPrisma.document.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('replaceFile', () => {
+    it('rejects a blob: replacement url', async () => {
+      mockPrisma.document.findUnique.mockResolvedValue(baseDoc);
+      await expect(
+        service.replaceFile('doc-1', {
+          fileUrl: 'blob:https://x/y',
+          mimeType: 'application/pdf',
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockPrisma.document.update).not.toHaveBeenCalled();
+    });
+
+    it('updates file_url + mime and re-extracts variables', async () => {
+      mockPrisma.document.findUnique.mockResolvedValue(baseDoc);
+      mockFetch.mockResolvedValue({
+        ok: true,
+        arrayBuffer: jest.fn().mockResolvedValue(new ArrayBuffer(8)),
+      });
+      mockPrisma.document.update.mockResolvedValue({
+        ...baseDoc,
+        file_url: 'https://storage.example.com/new.pdf',
+        mime_type: 'application/pdf',
+      });
+
+      const result = await service.replaceFile('doc-1', {
+        fileUrl: 'https://storage.example.com/new.pdf',
+        mimeType: 'application/pdf',
+      });
+
+      expect(mockPrisma.document.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'doc-1' },
+          data: expect.objectContaining({
+            file_url: 'https://storage.example.com/new.pdf',
+            mime_type: 'application/pdf',
+            source_mode: DocumentSourceMode.UPLOAD,
+          }),
+        }),
+      );
+      expect(result.id).toBe('doc-1');
+    });
+
+    it('throws when the document does not exist', async () => {
+      mockPrisma.document.findUnique.mockResolvedValue(null);
+      await expect(
+        service.replaceFile('missing', {
+          fileUrl: 'https://storage.example.com/new.pdf',
+          mimeType: 'application/pdf',
+        }),
+      ).rejects.toThrow(NotFoundException);
     });
   });
 

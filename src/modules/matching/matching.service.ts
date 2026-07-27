@@ -650,6 +650,20 @@ export class MatchingService {
     }
   }
 
+  /** Remove a worker profile point from the workers collection. */
+  async deleteWorkerFromIndex(profileId: string): Promise<void> {
+    await this.qdrant.deletePoints(COLLECTION_WORKERS, [profileId]);
+    this.logger.log(`Removed worker profile ${profileId} from workers index`);
+  }
+
+  /** Remove an employer profile point from the employers collection. */
+  async deleteEmployerFromIndex(profileId: string): Promise<void> {
+    await this.qdrant.deletePoints(COLLECTION_EMPLOYERS, [profileId]);
+    this.logger.log(
+      `Removed employer profile ${profileId} from employers index`,
+    );
+  }
+
   // ── Employer profile indexing ───────────────────────────────────────────────
 
   /**

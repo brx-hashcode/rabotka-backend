@@ -175,6 +175,8 @@ describe('ProfileService', () => {
       {
         indexWorkerProfile: jest.fn().mockResolvedValue(undefined),
         indexEmployerProfile: jest.fn().mockResolvedValue(undefined),
+        deleteWorkerFromIndex: jest.fn().mockResolvedValue(undefined),
+        deleteEmployerFromIndex: jest.fn().mockResolvedValue(undefined),
       } as any, // matchingService
       {
         reseedFromProfile: jest.fn().mockResolvedValue(undefined),
@@ -618,6 +620,34 @@ describe('ProfileService', () => {
       await service.updateProfileByAdmin('p-1', { firstName: 'Jean' });
       const matchingService = (service as any).matchingService;
       expect(matchingService.indexEmployerProfile).toHaveBeenCalledWith('p-1');
+    });
+  });
+
+  describe('updateProfileByAdmin() - profile type change', () => {
+    it('removes from the old collection and indexes into the new one', async () => {
+      // Existing profile is a WORKER; admin switches it to EMPLOYER.
+      prisma.profile.findUnique.mockResolvedValue({
+        ...baseProfile,
+        profile_type: 'WORKER',
+      });
+      await service.updateProfileByAdmin('p-1', { profileType: 'EMPLOYER' });
+      const matchingService = (service as any).matchingService;
+      expect(matchingService.deleteWorkerFromIndex).toHaveBeenCalledWith('p-1');
+      expect(matchingService.indexEmployerProfile).toHaveBeenCalledWith('p-1');
+      expect(matchingService.indexWorkerProfile).not.toHaveBeenCalled();
+      expect(matchingService.deleteEmployerFromIndex).not.toHaveBeenCalled();
+    });
+
+    it('does not delete from any collection when the type is unchanged', async () => {
+      prisma.profile.findUnique.mockResolvedValue({
+        ...baseProfile,
+        profile_type: 'WORKER',
+      });
+      await service.updateProfileByAdmin('p-1', { firstName: 'Jean' });
+      const matchingService = (service as any).matchingService;
+      expect(matchingService.deleteWorkerFromIndex).not.toHaveBeenCalled();
+      expect(matchingService.deleteEmployerFromIndex).not.toHaveBeenCalled();
+      expect(matchingService.indexWorkerProfile).toHaveBeenCalledWith('p-1');
     });
   });
 

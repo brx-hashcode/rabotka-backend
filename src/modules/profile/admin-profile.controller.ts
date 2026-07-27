@@ -323,20 +323,15 @@ export class AdminProfileController {
       `_${adminFullName}_`,
       `_L'équipe Rabotka_`,
     ].join('\n');
+    // sendTextMessage persists the OUTBOUND Message itself (it's given the
+    // profileId + sender), so we must NOT create a second one here — doing so
+    // made every admin WhatsApp message show up twice in the conversation.
     await this.whatsApp.sendTextMessage(
       profile.phone,
       whatsappBody,
       profile.id,
       adminUserId,
     );
-    await this.prisma.message.create({
-      data: {
-        profile_id: profile.id,
-        direction: MessageDirection.OUTBOUND,
-        platform: BotPlatform.WHATSAPP,
-        body: whatsappBody,
-      },
-    });
   }
 
   private async sendEmailMessage(
