@@ -1,3 +1,4 @@
+import { AdminArchiveModule } from '../admin-archive/admin-archive.module';
 import { Module, forwardRef } from '@nestjs/common';
 import { WalletController } from './wallet.controller';
 import { WalletService } from './wallet.service';
@@ -8,6 +9,7 @@ import { LogModule } from '../log/log.module';
 
 @Module({
   imports: [
+    AdminArchiveModule,
     forwardRef(() => AuthModule),
     SystemConfigModule,
     InvoiceModule,

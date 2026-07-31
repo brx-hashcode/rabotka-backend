@@ -1,4 +1,8 @@
 import {
+  AdminCacheService,
+  ADMIN_LIST_TTL_SECONDS,
+} from '../../common/services/cache/admin-cache.service';
+import {
   Injectable,
   BadRequestException,
   NotFoundException,
@@ -10,6 +14,7 @@ import {
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
+import { assertKycVerified } from '../../common/exceptions/kyc-not-verified.exception';
 import { deletedAtFilter } from '../../common/utils/soft-delete.util';
 import {
   startOfBusinessDay,
@@ -224,6 +229,7 @@ export class ApplicationService {
     private readonly systemConfigService: SystemConfigService,
     private readonly matchingService: MatchingService,
     private readonly interactionEvents: InteractionEventService,
+    private readonly cache: AdminCacheService,
   ) {}
 
   async create(
@@ -237,7 +243,12 @@ export class ApplicationService {
       }),
       this.prisma.profile.findUnique({
         where: { id: workerId },
-        select: { id: true, status: true, profile_type: true },
+        select: {
+          id: true,
+          status: true,
+          profile_type: true,
+          verification_status: true,
+        },
       }),
     ]);
 
@@ -257,6 +268,10 @@ export class ApplicationService {
         'Seuls les workers peuvent postuler aux offres',
       );
     }
+    // Also checked by KycVerifiedGuard on the HTTP route. Repeated here because
+    // the WhatsApp bot calls this service directly (apply-job.flow.ts), where no
+    // guard runs.
+    assertKycVerified(worker.verification_status);
     if (
       jobOffer.status !== JobOfferStatus.ACTIVE &&
       jobOffer.status !== JobOfferStatus.PARTIALLY_FILLED
@@ -1389,14 +1404,6 @@ export class ApplicationService {
       source: InteractionSource.SERVER,
       surface: 'job_complete',
     });
-    // Fire-and-forget: send rating requests to both parties via WhatsApp
-    this.sendRatingRequests(applicationId, application).catch((err: unknown) =>
-      console.warn(
-        `[ApplicationService] sendRatingRequests failed for ${applicationId}:`,
-        err,
-      ),
-    );
-
     return updated;
   }
 
@@ -1770,117 +1777,6 @@ export class ApplicationService {
     }));
   }
 
-  private async sendRatingRequests(
-    applicationId: string,
-    application: {
-      job_offer_id: string;
-      worker: {
-        id: string;
-        phone: string;
-        first_name: string;
-        last_name: string;
-      };
-      job_offer: { title: string; employer_id: string };
-    },
-  ): Promise<void> {
-    const jobTitle = application.job_offer.title;
-    const employerId = application.job_offer.employer_id;
-
-    const employer = await this.prisma.profile.findUnique({
-      where: { id: employerId },
-      select: {
-        id: true,
-        phone: true,
-        first_name: true,
-        last_name: true,
-        whatsapp_connected: true,
-      },
-    });
-    const employerLabel = employer
-      ? `${employer.first_name} ${employer.last_name}`.trim()
-      : "l'employeur";
-
-    // Fetch all completed assignments for this job offer so every worker gets rated,
-    // not just the single applicationId that triggered the completion.
-    const workerSelect = {
-      id: true,
-      phone: true,
-      first_name: true,
-      last_name: true,
-      whatsapp_connected: true,
-    } as const;
-    const assignments = await this.prisma.assignment.findMany({
-      where: {
-        job_offer_id: application.job_offer_id,
-        status: AssignmentStatus.COMPLETED,
-      },
-      select: {
-        id: true,
-        application: { select: { worker: { select: workerSelect } } },
-      },
-    });
-
-    // Fall back to the single assignment if the bulk query finds nothing
-    // (e.g. race between this call and the transaction commit).
-    const effectiveAssignments =
-      assignments.length > 0
-        ? assignments
-        : await this.prisma.assignment
-            .findUnique({
-              where: { application_id: applicationId },
-              select: {
-                id: true,
-                application: { select: { worker: { select: workerSelect } } },
-              },
-            })
-            .then((a) => (a ? [a] : []));
-
-    for (const asgn of effectiveAssignments) {
-      const worker = asgn.application?.worker ?? null;
-      if (!worker?.phone) continue;
-
-      // Ask worker to rate employer
-      if (worker.whatsapp_connected) {
-        await this.botNotification
-          .sendRatingRequest({
-            raterProfileId: worker.id,
-            raterPhone: worker.phone,
-            rateeId: employerId,
-            assignmentId: asgn.id,
-            rateeLabel: employerLabel,
-            jobTitle,
-          })
-          .catch((err: unknown) =>
-            console.warn(
-              `[ApplicationService] sendRatingRequest (worker ${worker.id}) failed:`,
-              err,
-            ),
-          );
-      }
-
-      // Ask employer to rate worker
-      if (employer?.phone && employer.whatsapp_connected) {
-        const workerLabel = `${worker.first_name} ${worker.last_name}`.trim();
-        await this.botNotification
-          .sendRatingRequest({
-            raterProfileId: employer.id,
-            raterPhone: employer.phone,
-            rateeId: worker.id,
-            assignmentId: asgn.id,
-            rateeLabel: workerLabel,
-            jobTitle,
-          })
-          .catch((err: unknown) =>
-            console.warn(
-              `[ApplicationService] sendRatingRequest (employer for worker ${worker.id}) failed:`,
-              err,
-            ),
-          );
-      }
-    }
-  }
-
-  /** Employer cancels accepted application: reopen job offer, cancel application */
   async cancelAcceptedByEmployer(
     applicationId: string,
     employerId: string,
@@ -2337,6 +2233,28 @@ export class ApplicationService {
     page: number;
     limit: number;
   }> {
+    return this.cache.wrap(
+      this.cache.listKey('applications', params),
+      ADMIN_LIST_TTL_SECONDS,
+      () => this.loadGetApplicationsForAdmin(params),
+    );
+  }
+
+  private async loadGetApplicationsForAdmin(params: {
+    page: number;
+    limit: number;
+    q?: string;
+    status?: ApplicationStatus[];
+    penaltyApplied?: string[];
+    workerId?: string;
+    employerId?: string;
+    deleted?: boolean;
+  }): Promise<{
+    data: AdminApplicationListItem[];
+    total: number;
+    page: number;
+    limit: number;
+  }> {
     const {
       page,
       limit,
@@ -2471,6 +2389,7 @@ export class ApplicationService {
       where: { id: { in: ids }, deleted_at: null },
       data: { deleted_at: new Date() },
     });
+    await this.cache.invalidate('applications');
     return { count };
   }
 

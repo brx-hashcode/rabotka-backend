@@ -21,6 +21,7 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { ProfileAuthGuard } from '../auth/guards/profile-auth.guard';
+import { KycVerifiedGuard } from '../auth/guards/kyc-verified.guard';
 import type { ProfileAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
 import { JobOfferService } from '../job-offer/job-offer.service';
 import { ApplicationService } from '../application/application.service';
@@ -430,6 +431,7 @@ export class MobileFeedController {
   }
 
   @Post('jobs/:jobOfferId/apply')
+  @UseGuards(KycVerifiedGuard)
   @ApiOperation({
     summary: '[Mobile/WORKER] Apply to a job offer',
     description:

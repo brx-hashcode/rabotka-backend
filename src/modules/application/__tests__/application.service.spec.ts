@@ -1,3 +1,4 @@
+import { AdminCacheService } from '../../../common/services/cache/admin-cache.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import {
   BadRequestException,
@@ -55,6 +56,7 @@ const mockWorker = {
   id: WORKER_ID,
   status: 'ACTIVE',
   profile_type: 'WORKER',
+  verification_status: 'VERIFIED',
 };
 
 const mockApplication = {
@@ -132,6 +134,17 @@ describe('ApplicationService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        {
+          // Pass-through cache: the loader always runs, so these specs keep
+          // exercising the real queries rather than a cached value.
+          provide: AdminCacheService,
+          useValue: {
+            wrap: (_k: string, _t: number, loader: () => unknown) => loader(),
+            listKey: (e: string) => e,
+            dashboardKey: (e: string) => e,
+            invalidate: jest.fn(),
+          },
+        },
         ApplicationService,
         { provide: PrismaService, useValue: mockPrismaService },
         {
@@ -147,8 +160,6 @@ describe('ApplicationService', () => {
               .fn()
               .mockResolvedValue(undefined),
             sendCancellationToEmployer: jest.fn(),
-            sendJobCompletedToWorker: jest.fn(),
-            sendJobCancelledByEmployerToWorker: jest.fn(),
           },
         },
         { provide: EventEmitter2, useValue: { emit: jest.fn() } },
@@ -443,6 +454,18 @@ describe('ApplicationService', () => {
       );
       await expect(service.create(JOB_OFFER_ID, WORKER_ID)).rejects.toThrow(
         BadRequestException,
+      );
+    });
+
+    it('refuses a worker whose KYC is not verified', async () => {
+      // Mirrors KycVerifiedGuard: enforced here too because the WhatsApp bot
+      // reaches this service without passing through any HTTP guard.
+      (prisma.profile.findUnique as jest.Mock).mockResolvedValue({
+        ...mockWorker,
+        verification_status: 'PENDING',
+      });
+      await expect(service.create(JOB_OFFER_ID, WORKER_ID)).rejects.toThrow(
+        ForbiddenException,
       );
     });
 

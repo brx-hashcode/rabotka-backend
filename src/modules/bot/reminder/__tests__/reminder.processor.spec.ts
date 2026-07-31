@@ -2,6 +2,7 @@ import { Logger } from '@nestjs/common';
 import { ReminderProcessor } from '../reminder.processor';
 import { ApplicationStatus, JobOfferStatus } from '@prisma/client';
 import type { SystemConfigService } from '../../../system-config/system-config.service';
+import { WHATSAPP_TEMPLATES } from '../../../../common/constants/whatsapp-templates';
 
 jest.spyOn(Logger.prototype, 'log').mockImplementation(() => {});
 jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => {});
@@ -125,14 +126,6 @@ describe('ReminderProcessor', () => {
       expect(whatsApp.sendTemplateMessage).toHaveBeenCalled();
     });
 
-    it('delegates to sendReminder2h for type=reminder_2h', async () => {
-      prisma.application.findUnique.mockResolvedValue(buildApplication());
-      await processor.process({
-        data: { type: 'reminder_2h', applicationId: 'app-1' },
-      });
-      expect(whatsApp.sendTemplateMessage).toHaveBeenCalled();
-    });
-
     it('delegates to sendReminderStart for type=reminder_start', async () => {
       prisma.application.findUnique.mockResolvedValue(buildApplication());
       await processor.process({
@@ -152,9 +145,8 @@ describe('ReminderProcessor', () => {
 
   describe('runScan()', () => {
     it('enqueues reminder_24h jobs for apps not yet notified', async () => {
-      prisma.application.findMany
-        .mockResolvedValueOnce([{ id: 'app-24h' }]) // 24h window
-        .mockResolvedValueOnce([]); // 2h window
+      // Single query now: the 2h reminder was removed, leaving only the 24h window.
+      prisma.application.findMany.mockResolvedValueOnce([{ id: 'app-24h' }]);
       // start window uses jobOffer.findMany (already mocked to return [])
       redis.get.mockResolvedValue(null);
 
@@ -175,21 +167,6 @@ describe('ReminderProcessor', () => {
 
       await processor.process({ data: { type: 'scan' } });
       expect(queueService.addJob).not.toHaveBeenCalled();
-    });
-
-    it('enqueues reminder_2h jobs for apps not yet notified', async () => {
-      prisma.application.findMany
-        .mockResolvedValueOnce([]) // 24h window
-        .mockResolvedValueOnce([{ id: 'app-2h' }]); // 2h window
-      redis.get.mockResolvedValue(null);
-
-      await processor.process({ data: { type: 'scan' } });
-
-      expect(queueService.addJob).toHaveBeenCalledWith(
-        expect.any(String),
-        { type: 'reminder_2h', applicationId: 'app-2h' },
-        { jobId: '2h-app-2h' },
-      );
     });
 
     it('enqueues reminder_start jobs for apps whose scheduled_at just passed', async () => {
@@ -300,13 +277,13 @@ describe('ReminderProcessor', () => {
       // Each worker notified (+ the employer)
       expect(whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+2222',
-        'HXe051fd6c43d82d253e9cab592d64457d',
+        WHATSAPP_TEMPLATES.offerExpiredApplicant.contentSid,
         expect.any(Object),
         'worker-a',
       );
       expect(whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+3333',
-        'HXe051fd6c43d82d253e9cab592d64457d',
+        WHATSAPP_TEMPLATES.offerExpiredApplicant.contentSid,
         expect.any(Object),
         'worker-b',
       );
@@ -358,7 +335,7 @@ describe('ReminderProcessor', () => {
       );
       expect(whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+5555',
-        'HX9532674e5bc5016e76f3005cb44ea711',
+        WHATSAPP_TEMPLATES.autoStarted.contentSid,
         expect.any(Object),
         'emp-filled',
       );
@@ -567,71 +544,6 @@ describe('ReminderProcessor', () => {
     });
   });
 
-  // ─── sendReminder2h() ────────────────────────────────────────────────────
-
-  describe('sendReminder2h()', () => {
-    it('sends WhatsApp message and sets redis key', async () => {
-      prisma.application.findUnique.mockResolvedValue(buildApplication());
-
-      await processor.process({
-        data: { type: 'reminder_2h', applicationId: 'app-1' },
-      });
-
-      expect(whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
-        '+1234567890',
-        expect.any(String),
-        expect.any(Object),
-      );
-      expect(redis.set).toHaveBeenCalledWith(
-        expect.stringContaining('app-1'),
-        '1',
-        'EX',
-        expect.any(Number),
-        'NX',
-      );
-    });
-
-    it('skips if redis key already set', async () => {
-      redis.set.mockResolvedValueOnce(null); // NX returns null when key exists
-
-      await processor.process({
-        data: { type: 'reminder_2h', applicationId: 'app-1' },
-      });
-      expect(whatsApp.sendTemplateMessage).not.toHaveBeenCalled();
-    });
-
-    it('skips if application not found', async () => {
-      prisma.application.findUnique.mockResolvedValue(null);
-
-      await processor.process({
-        data: { type: 'reminder_2h', applicationId: 'missing' },
-      });
-      expect(whatsApp.sendTemplateMessage).not.toHaveBeenCalled();
-    });
-
-    it('skips if worker has no phone', async () => {
-      prisma.application.findUnique.mockResolvedValue(
-        buildApplication({ worker: { phone: null } }),
-      );
-
-      await processor.process({
-        data: { type: 'reminder_2h', applicationId: 'app-1' },
-      });
-      expect(whatsApp.sendTemplateMessage).not.toHaveBeenCalled();
-    });
-
-    it('skips if application status is not ACCEPTED', async () => {
-      prisma.application.findUnique.mockResolvedValue(
-        buildApplication({ status: ApplicationStatus.PENDING }),
-      );
-
-      await processor.process({
-        data: { type: 'reminder_2h', applicationId: 'app-1' },
-      });
-      expect(whatsApp.sendTemplateMessage).not.toHaveBeenCalled();
-    });
-  });
-
   // ─── sendReminderStart() ──────────────────────────────────────────────────
 
   describe('sendReminderStart()', () => {
@@ -658,7 +570,7 @@ describe('ReminderProcessor', () => {
       );
       expect(whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+1234567890',
-        'HX5a6777bdc1d800826a66d2faba155084',
+        WHATSAPP_TEMPLATES.reminderStart.contentSid,
         expect.any(Object),
       );
       expect(redis.set).toHaveBeenCalledWith(
@@ -731,7 +643,7 @@ describe('ReminderProcessor', () => {
       });
       expect(whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+242000001',
-        'HX92ef7c0f7a6f2c53899c0fa28e1551b8',
+        WHATSAPP_TEMPLATES.statusCheck.contentSid,
         expect.any(Object),
         'emp-1',
       );

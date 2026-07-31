@@ -25,6 +25,7 @@ import { UserService } from './user.service';
 import { CreateAdminDto } from './dto/create-admin.dto';
 import { UpdateAdminDto } from './dto/update-admin.dto';
 import { AdminListUsersDto } from './dto/admin-list-users.dto';
+import { ArchiveService } from '../admin-archive/archive.service';
 import { BulkDeleteDto } from '../../common/dto/bulk-delete.dto';
 import { AdminAuthGuard } from '../auth/guards/admin-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -42,6 +43,7 @@ export class UserController {
   constructor(
     private readonly userService: UserService,
     private readonly logService: LogService,
+    private readonly archiveService: ArchiveService,
   ) {}
 
   @Get()
@@ -193,6 +195,52 @@ export class UserController {
       createdAt: user.created_at,
       updatedAt: user.updated_at,
     };
+  }
+
+  @Post('bulk-restore')
+  @Roles(UserRole.MANAGER)
+  @ApiOperation({
+    summary: 'Bulk restore archived rows (admin only)',
+    description: 'Clears deleted_at. Only rows that are currently archived are affected.',
+  })
+  @ApiResponse({ status: 201, description: 'Rows restored' })
+  async bulkRestore(
+    @Body() dto: BulkDeleteDto,
+    @Req() req: AdminAuthenticatedRequest,
+  ): Promise<{ count: number }> {
+    const result = await this.archiveService.restore('users', dto.ids);
+    await this.logService.create({
+      action: 'ADMIN_USER_BULK_RESTORED',
+      entityType: 'user',
+      userId: req.user?.userId,
+      metadata: { ids: dto.ids, count: result.count },
+      ...extractRequestMeta(req),
+    });
+    return result;
+  }
+
+  @Post('bulk-purge')
+  @Roles(UserRole.SUPER_ADMIN)
+  @ApiOperation({
+    summary: 'Permanently delete archived rows (SUPER_ADMIN only)',
+    description:
+      'Irreversible. Refuses rows carrying records that must outlive them (financial or compliance), returning 409 with the blocking counts.',
+  })
+  @ApiResponse({ status: 201, description: 'Rows permanently deleted' })
+  @ApiResponse({ status: 409, description: 'Blocked by linked records' })
+  async bulkPurge(
+    @Body() dto: BulkDeleteDto,
+    @Req() req: AdminAuthenticatedRequest,
+  ): Promise<{ count: number }> {
+    const result = await this.archiveService.purge('users', dto.ids);
+    await this.logService.create({
+      action: 'ADMIN_USER_BULK_PURGED',
+      entityType: 'user',
+      userId: req.user?.userId,
+      metadata: { ids: dto.ids, count: result.count },
+      ...extractRequestMeta(req),
+    });
+    return result;
   }
 
   @Post('bulk-delete')

@@ -10,6 +10,9 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { PrismaModule } from './common/services/prisma/prisma.module';
 import { TwilioModule } from './common/services/twilio/twilio.module';
+import { AdminCacheModule } from './common/services/cache/admin-cache.module';
+import { AdminArchiveModule } from './modules/admin-archive/admin-archive.module';
+import { CollaborationGraphModule } from './modules/collaboration-graph/collaboration-graph.module';
 import { RedisModule } from './common/services/redis/redis.module';
 import { QueueModule } from './common/services/queue/queue.module';
 import { HealthModule } from './modules/health/health.module';
@@ -121,6 +124,9 @@ import { HttpOnlyArcjetGuard } from './common/guards/http-only-arcjet.guard';
     PrismaModule,
     TwilioModule,
     RedisModule.forRoot(),
+    AdminCacheModule,
+    AdminArchiveModule,
+    CollaborationGraphModule,
     QueueModule.forRoot(),
     MailerModule.forRootAsync({
       imports: [ConfigModule],

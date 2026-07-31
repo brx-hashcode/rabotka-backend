@@ -1,4 +1,8 @@
 import {
+  AdminCacheService,
+  ADMIN_LIST_TTL_SECONDS,
+} from '../../common/services/cache/admin-cache.service';
+import {
   Injectable,
   Logger,
   BadRequestException,
@@ -192,6 +196,7 @@ export class ProfileService {
     private readonly matchingService: MatchingService,
     private readonly interestClusters: InterestClusterService,
     private readonly geocodingService: GeocodingService,
+    private readonly cache: AdminCacheService,
   ) {}
 
   async findById(id: string): Promise<ProfileMeResponse> {
@@ -992,6 +997,23 @@ export class ProfileService {
     verificationStatus?: VerificationStatus[];
     deleted?: boolean;
   }): Promise<AdminProfilesListResponse> {
+    return this.cache.wrap(
+      this.cache.listKey('profiles', params),
+      ADMIN_LIST_TTL_SECONDS,
+      () => this.loadGetProfilesForAdmin(params),
+    );
+  }
+
+  private async loadGetProfilesForAdmin(params: {
+    page: number;
+    limit: number;
+    q?: string;
+    status?: AccountStatus[];
+    profileType?: ProfileType[];
+    whatsappConnected?: boolean;
+    verificationStatus?: VerificationStatus[];
+    deleted?: boolean;
+  }): Promise<AdminProfilesListResponse> {
     const {
       page,
       limit,
@@ -1114,6 +1136,7 @@ export class ProfileService {
       where: { id: { in: ids }, deleted_at: null },
       data: { deleted_at: new Date() },
     });
+    await this.cache.invalidate('profiles');
     return { count };
   }
 

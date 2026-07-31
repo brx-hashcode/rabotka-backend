@@ -18,6 +18,7 @@ describe('AdminPenaltyController', () => {
     controller = new AdminPenaltyController(
       service as any,
       mockLogService as any,
+      { restore: jest.fn(), purge: jest.fn(), purgeBlockers: jest.fn() } as any,
     );
   });
 

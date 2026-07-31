@@ -1,3 +1,4 @@
+import { AdminArchiveModule } from '../admin-archive/admin-archive.module';
 import { Module, forwardRef } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { PrismaModule } from '../../common/services/prisma/prisma.module';
@@ -21,6 +22,7 @@ import { PollPaymentStatusWorkerService } from './poll-payment-status.worker.ser
 
 @Module({
   imports: [
+    AdminArchiveModule,
     PrismaModule,
     AuthModule,
     ConfigModule,

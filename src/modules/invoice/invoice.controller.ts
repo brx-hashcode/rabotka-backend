@@ -10,6 +10,7 @@ import {
 import { InvoiceService } from './invoice.service';
 import { ProfileAuthGuard } from '../auth/guards/profile-auth.guard';
 import { AdminAuthGuard } from '../auth/guards/admin-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
 import type { ProfileAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
 
 @ApiTags('Invoices')
@@ -49,7 +50,7 @@ export class InvoiceController {
 
 @ApiTags('Admin – Invoices')
 @Controller('admin/invoices')
-@UseGuards(AdminAuthGuard)
+@UseGuards(AdminAuthGuard, RolesGuard)
 @ApiCookieAuth()
 @ApiBearerAuth()
 export class AdminInvoiceController {
