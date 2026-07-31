@@ -280,6 +280,8 @@ export class ProfileService {
         first_name: true,
         last_name: true,
         profile_type: true,
+        // Needed to detect an address change and trigger a re-geocode.
+        address: true,
       },
     });
 
@@ -304,6 +306,31 @@ export class ProfileService {
         }
       }
     });
+
+    // Re-geocode when the address actually changed. Coordinates were previously
+    // only ever written at profile creation, so anyone who moved kept stale
+    // coordinates forever — and every distance-weighted ranking term silently
+    // degraded to a neutral value for them.
+    if (
+      updateProfileDto.address !== undefined &&
+      updateProfileDto.address !== existingProfile.address
+    ) {
+      void this.geocodingService
+        .geocode(updateProfileDto.address)
+        .then((coords) => {
+          if (!coords) return;
+          return this.prisma.profile.update({
+            where: { id },
+            data: { latitude: coords.lat, longitude: coords.lng },
+          });
+        })
+        .catch((err: unknown) =>
+          this.logger.warn(
+            `re-geocoding failed for profile ${id}`,
+            err instanceof Error ? err.message : String(err),
+          ),
+        );
+    }
 
     // Re-index in Qdrant after update (fire-and-forget)
     if (existingProfile.profile_type === ProfileType.WORKER) {
@@ -731,7 +758,7 @@ export class ProfileService {
 
     if (decision === 'VERIFIED') {
       // Seed interest vector so first recommendation isn't cold-start
-      void this.interestClusters.reseedFromProfile(profileId).catch((err) => {
+      void this.interestClusters.ensureSeeded(profileId).catch((err) => {
         this.logger.warn(
           `Interest vector reseed failed for profile=${profileId}`,
           err,

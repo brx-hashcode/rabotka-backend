@@ -96,62 +96,10 @@ export async function runRateAssignmentFlow(
   }
 
   try {
-    await ctx.prisma.$transaction(async (tx) => {
-      // Was this assignment already rated by this rater? Determines whether the
-      // reliability delta should be applied (only on the first rating, never on
-      // a re-rate — otherwise the delta would be counted twice).
-      const existing = await tx.rating.findUnique({
-        where: {
-          rater_id_assignment_id: {
-            rater_id: profile.id,
-            assignment_id: assignmentId,
-          },
-        },
-        select: { id: true },
-      });
-      const isFirstRating = existing === null;
-
-      // Upsert rating (idempotent — unique on rater_id + assignment_id)
-      await tx.rating.upsert({
-        where: {
-          rater_id_assignment_id: {
-            rater_id: profile.id,
-            assignment_id: assignmentId,
-          },
-        },
-        create: {
-          rater_id: profile.id,
-          ratee_id: rateeId,
-          assignment_id: assignmentId,
-          score,
-        },
-        update: { score },
-      });
-
-      // Recompute ratee's avg inside the same transaction to avoid read-then-write race
-      const agg = await tx.rating.aggregate({
-        where: { ratee_id: rateeId },
-        _avg: { score: true },
-        _count: { score: true },
-      });
-      await tx.profile.update({
-        where: { id: rateeId },
-        data: {
-          rating_avg: agg._avg.score ?? null,
-          rating_count: agg._count.score,
-        },
-      });
-
-      // When the employer rates the worker, feed that rating into the worker's
-      // reliability_score (worker-as-ratee only; first rating only).
-      if (isEmployer && isFirstRating) {
-        await ctx.applicationService.applyRatingToReliability(
-          tx,
-          rateeId,
-          score,
-        );
-      }
-    });
+    // Shared with the mobile controllers — upserts the rating, recomputes the
+    // ratee's aggregate and applies the worker reliability delta (employer→worker,
+    // first rating only).
+    await ctx.applicationService.rateAssignment(assignmentId, profile.id, score);
 
     return {
       reply: [

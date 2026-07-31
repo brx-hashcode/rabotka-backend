@@ -5,6 +5,21 @@ export interface WhatsAppTemplate<Args extends unknown[]> {
   variables: (...args: Args) => Record<string, string>;
 }
 
+/**
+ * Reads a template SID from the environment, falling back to the currently
+ * approved one.
+ *
+ * New wording means a NEW Twilio template and a new SID — bodies live in Twilio,
+ * not here. The default is always a CURRENTLY APPROVED sid, so the code sends the
+ * intended template with no env configuration at all; the variable exists only to
+ * roll back to a previous template without a deploy. Defaulting to something
+ * unapproved would make every send fail silently.
+ */
+function sid(envVar: string, approvedDefault: string): string {
+  const override = process.env[envVar]?.trim();
+  return override && override.length > 0 ? override : approvedDefault;
+}
+
 export const WHATSAPP_TEMPLATES = {
   otp: {
     contentSid: 'HXf66c3d91d9f56e59b72d8fad31d4a795',
@@ -14,6 +29,19 @@ export const WHATSAPP_TEMPLATES = {
 
   welcomeUnregistered: {
     contentSid: 'HX1610d675f58d8fa92d277383584cc5fb',
+    variables: () => ({}),
+  } satisfies WhatsAppTemplate<[]>,
+
+  /**
+   * Shown while KYC is under review. Replaces the old free-form 1/2 numbered
+   * menu: both of its options only returned webview templates anyway, so the
+   * typing step added nothing.
+   */
+  kycPendingMenu: {
+    contentSid: sid(
+      'TPL_KYC_PENDING_MENU',
+      'HX33c0083c30a0c07100f400233b077059',
+    ),
     variables: () => ({}),
   } satisfies WhatsAppTemplate<[]>,
 
@@ -57,8 +85,24 @@ export const WHATSAPP_TEMPLATES = {
   } satisfies WhatsAppTemplate<[params: { workerName: string; slug: string }]>,
 
 
-  profileCreated: {
-    contentSid: 'HXa0d2cd880e5b4a035912c315fdd1b586',
+  /**
+   * Sent right after web onboarding. Split by role: `/home` is already
+   * role-aware, so both point there and only the closing sentence differs
+   * (offers that match you vs profiles that match you).
+   */
+  profileCreatedWorker: {
+    contentSid: sid(
+      'TPL_PROFILE_CREATED_KYC_WORKER',
+      'HXaf40f9505f60583cc99dac6e4134cf31',
+    ),
+    variables: (firstName: string) => ({ '1': firstName }),
+  } satisfies WhatsAppTemplate<[firstName: string]>,
+
+  profileCreatedEmployer: {
+    contentSid: sid(
+      'TPL_PROFILE_CREATED_KYC_EMPLOYER',
+      'HX978164d0fdb7e388b594502e83700d85',
+    ),
     variables: (firstName: string) => ({ '1': firstName }),
   } satisfies WhatsAppTemplate<[firstName: string]>,
   
@@ -141,20 +185,26 @@ export const WHATSAPP_TEMPLATES = {
     ]
   >,
 
+  /** `{{6}}` is the jobOfferId, the CTA button's URL suffix (`/offres/{{6}}`). */
   jobRecommendation: {
-    contentSid: 'HX8e46aad25e2e3429c34f1ee8d1daa59e',
+    contentSid: sid(
+      'TPL_JOB_RECOMMENDATION_CTA',
+      'HXabc07b58525ee5d9c68c0049e31d9001',
+    ),
     variables: (p: {
       firstName: string;
       title: string;
       amount: string;
       address: string;
       date: string;
+      jobOfferId: string;
     }) => ({
       '1': p.firstName,
       '2': p.title,
       '3': p.amount,
       '4': p.address,
       '5': p.date,
+      '6': p.jobOfferId,
     }),
   } satisfies WhatsAppTemplate<
     [
@@ -164,6 +214,7 @@ export const WHATSAPP_TEMPLATES = {
         amount: string;
         address: string;
         date: string;
+        jobOfferId: string;
       },
     ]
   >,
@@ -178,8 +229,16 @@ export const WHATSAPP_TEMPLATES = {
     variables: (cards: CarouselCard[]) => carouselVariables('profiles', cards),
   } satisfies WhatsAppTemplate<[cards: CarouselCard[]]>,
 
+  /**
+   * `{{8}}` is the applicationId, used as the CTA button's URL suffix
+   * (`/candidatures/{{8}}`). Harmless on the old template, which ignores it —
+   * so this works either side of approval.
+   */
   newApplication: {
-    contentSid: 'HXce200c3e6c6e80b96b1c31e2daefac9e',
+    contentSid: sid(
+      'TPL_NEW_APPLICATION_CTA',
+      'HXe51191f9e1cbd68ad0ecacc419893634',
+    ),
     variables: (p: {
       offerTitle: string;
       workerName: string;
@@ -188,6 +247,7 @@ export const WHATSAPP_TEMPLATES = {
       workerDescription: string;
       scheduledAt: string;
       address: string;
+      applicationId: string;
     }) => ({
       '1': p.offerTitle,
       '2': p.workerName,
@@ -196,6 +256,7 @@ export const WHATSAPP_TEMPLATES = {
       '5': p.workerDescription.trim() || 'Non renseignée',
       '6': p.scheduledAt,
       '7': p.address,
+      '8': p.applicationId,
     }),
   } satisfies WhatsAppTemplate<
     [
@@ -207,12 +268,16 @@ export const WHATSAPP_TEMPLATES = {
         workerDescription: string;
         scheduledAt: string;
         address: string;
+        applicationId: string;
       },
     ]
   >,
 
   applicationAccepted: {
-    contentSid: 'HX8806c575b1a3a0ee6d4a76b57372e42a',
+    contentSid: sid(
+      'TPL_APPLICATION_ACCEPTED_CTA',
+      'HX4d707dff3ff60ce21fe36927b1647924',
+    ),
     variables: (p: { employerName: string; offerTitle: string }) => ({
       '1': p.employerName,
       '2': p.offerTitle,
@@ -283,8 +348,41 @@ export const WHATSAPP_TEMPLATES = {
     [params: { jobTitle: string; rateeLabel: string }]
   >,
 
+  /**
+   * Mutual reveal — both parties settled their share. Plain `twilio/text`, no
+   * buttons, so it reads like an ordinary message while still being deliverable
+   * outside WhatsApp's 24h window (payment now usually happens on the web, where
+   * the recipient has never messaged the bot and free-form would be rejected).
+   */
   contactUnlocked: {
-    contentSid: 'HX0cff136f3bc10f77066b949b110ecada',
+    contentSid: sid(
+      'TPL_CONTACT_UNLOCKED_MUTUAL',
+      'HX9eb43a66b1acb109d5ff9dda2d2a2486',
+    ),
+    variables: (p: {
+      name: string;
+      phone: string | null;
+      email: string | null;
+    }) => ({
+      '1': p.name,
+      '2': p.phone?.trim() || 'Non renseigné',
+      '3': p.email?.trim() || 'Non renseigné',
+    }),
+  } satisfies WhatsAppTemplate<
+    [params: { name: string; phone: string | null; email: string | null }]
+  >,
+
+  /**
+   * One-sided reveal: an employer paid to reach a worker from the recommendation
+   * feed. This path used to send FREE-FORM text with `.catch(() => undefined)`,
+   * so an employer who paid on the web outside the 24h window silently received
+   * nothing at all despite having paid.
+   */
+  contactUnlockedRecommendation: {
+    contentSid: sid(
+      'TPL_CONTACT_UNLOCKED_RECO',
+      'HX7a8a2600c16b662c320c5592835de621',
+    ),
     variables: (p: {
       name: string;
       phone: string | null;

@@ -16,7 +16,11 @@ import {
 import { generatePaymentReference } from '../../common/utils/payment-reference';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { InvoiceService } from '../invoice/invoice.service';
-import { InvoiceReason, PaymentRequestStatus } from '@prisma/client';
+import {
+  BillingStatus,
+  InvoiceReason,
+  PaymentRequestStatus,
+} from '@prisma/client';
 import { deletedAtFilter } from '../../common/utils/soft-delete.util';
 import { randomUUID } from 'crypto';
 import type { PayPenaltyDto } from './dto/pay-penalty.dto';
@@ -483,6 +487,95 @@ export class WalletService {
     });
 
     return { reference };
+  }
+
+  /**
+   * Settles ALL of the profile's unpaid penalties by debiting their own wallet
+   * and crediting the system wallet, then marks the penalties paid, records the
+   * payment + invoice, and recomputes billing status. Mirrors the WhatsApp
+   * pay-penalties wallet sub-flow. Throws if there is nothing to pay or the
+   * balance is short (checked atomically inside the debit).
+   */
+  async payAllPenaltiesWithWallet(
+    profileId: string,
+  ): Promise<{ paidCount: number; totalAmount: number; reference: string }> {
+    const unpaid = await this.prisma.penalty.findMany({
+      where: { profile_id: profileId, paid_at: null },
+      select: { id: true, amount: true },
+    });
+    if (unpaid.length === 0) {
+      throw new BadRequestException('Aucune pénalité impayée');
+    }
+    const totalAmount = unpaid.reduce((sum, p) => sum + Number(p.amount), 0);
+    const reference = generatePaymentReference();
+    const now = new Date();
+
+    // Atomic debit + system credit; throws BadRequestException on a short balance
+    // before any penalty is marked paid.
+    await this.debitProfileAndCreditSystem(
+      profileId,
+      totalAmount,
+      WalletTransactionType.PENALTY_DEBIT,
+      WalletTransactionType.CREDIT_PENALTY,
+      'penalty_batch',
+      profileId,
+    );
+
+    const fees = await this.systemConfig.getFees();
+    await this.prisma.$transaction(async (tx) => {
+      await tx.penalty.updateMany({
+        where: { id: { in: unpaid.map((p) => p.id) } },
+        data: { paid_at: now },
+      });
+      await tx.payment.create({
+        data: {
+          type: PaymentType.PENALTY,
+          profile_id: profileId,
+          amount: totalAmount,
+          payment_method: PaymentMethod.WALLET,
+          transaction_id: reference,
+          status: PaymentStatus.COMPLETED,
+          paid_at: now,
+          description: `Paiement de ${unpaid.length} pénalité(s) via portefeuille`,
+        },
+      });
+      const stillUnpaid = await tx.penalty.count({
+        where: { profile_id: profileId, paid_at: null },
+      });
+      let billingStatus: BillingStatus;
+      if (stillUnpaid === 0) {
+        billingStatus = BillingStatus.CLEAR;
+      } else if (stillUnpaid >= fees.billingBlockThreshold) {
+        billingStatus = BillingStatus.BLOCKED;
+      } else {
+        billingStatus = BillingStatus.PENDING_PAYMENT;
+      }
+      await tx.profile.update({
+        where: { id: profileId },
+        data: { billing_status: billingStatus },
+      });
+    });
+
+    const paymentRequest = await this.prisma.paymentRequest.create({
+      data: {
+        profile_id: profileId,
+        token: randomUUID(),
+        status: PaymentRequestStatus.APPROVED,
+        amount: totalAmount,
+        description: 'Pénalités réglées (portefeuille)',
+        payment_reference: reference,
+      },
+    });
+    await this.invoiceService.create({
+      profileId,
+      paymentRequestId: paymentRequest.id,
+      amount: totalAmount,
+      reason: InvoiceReason.PENALTY,
+      relatedEntityType: 'penalty_batch',
+      relatedEntityId: unpaid[0].id,
+    });
+
+    return { paidCount: unpaid.length, totalAmount, reference };
   }
 
   async recordRegistrationPayment(

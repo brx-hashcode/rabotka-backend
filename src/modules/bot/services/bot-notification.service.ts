@@ -3,11 +3,9 @@ import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { WhatsAppService } from '../../whatsapp/whatsapp.service';
 import { BotStateService } from './bot-state.service';
 import { BotInboxService } from './bot-inbox.service';
-import { getAcceptRefuseInitialState } from '../flows/accept-refuse-candidate.flow';
 import { getUnlockContactInitialState } from '../flows/unlock-contact.flow';
 import { getRateAssignmentInitialState } from '../flows/rate-assignment.flow';
-import { FLOW_IDS, EMPLOYER_MENU_OPTIONS } from '../bot.constants';
-import { getApplyJobNotificationState } from '../flows/apply-job.flow';
+import { FLOW_IDS } from '../bot.constants';
 import { formatAmount } from '../messages/offers.messages';
 import { WHATSAPP_TEMPLATES } from '../../../common/constants/whatsapp-templates';
 import { ContactUnlockService } from '../../contact-unlock/contact-unlock.service';
@@ -30,6 +28,14 @@ export class BotNotificationService {
     private readonly walletService: WalletService,
   ) {}
 
+  /**
+   * Tells the employer a worker applied. Notification only — the decision is
+   * made on the web at `/candidatures/:id`, which the template's button opens.
+   *
+   * No longer arms the accept/refuse flow or queues an inbox entry: the approved
+   * template carries a URL button instead of « Accepter » / « Refuser », so
+   * there is nothing for a typed reply to drive.
+   */
   async sendNewApplicationToEmployer(applicationId: string): Promise<void> {
     try {
       const app = await this.prisma.application.findUnique({
@@ -64,15 +70,6 @@ export class BotNotificationService {
         where: { worker_id: app.worker_id, status: 'END' },
       });
 
-      const employerProfileId = app.job_offer.employer_id;
-      const acceptRefuseState = getAcceptRefuseInitialState(applicationId);
-      // CAS: only set state if no active flow; if blocked, employer is mid-conversation → inbox
-      const wrote = await this.botState.setIfFlowAbsentOrMatches(
-        employerProfileId,
-        acceptRefuseState,
-        null,
-      );
-
       const scheduledAt = app.job_offer.scheduled_at.toLocaleDateString(
         'fr-FR',
         {
@@ -100,27 +97,11 @@ export class BotNotificationService {
               : description,
           scheduledAt,
           address: address.length > 80 ? `${address.slice(0, 80)}...` : address,
+          // URL suffix for the CTA button (/candidatures/{{8}}). Ignored by the
+          // pre-approval template, so this is safe either side of the cutover.
+          applicationId,
         }),
       );
-
-      if (!wrote) {
-        // Employer is mid-flow — queue into inbox
-        await this.botInbox.push(employerProfileId, {
-          type: 'new_application',
-          applicationId,
-          workerName: `${app.worker.first_name} ${app.worker.last_name}`,
-          offerTitle: app.job_offer.title,
-          createdAt: new Date().toISOString(),
-        });
-        const pendingCount = await this.botInbox.count(employerProfileId);
-        const inboxNotice =
-          `*${pendingCount} candidature(s) en attente* dans votre boîte.` +
-          `\nTerminez votre action en cours, puis tapez *${EMPLOYER_MENU_OPTIONS.CANDIDATURES_RECEIVED}* (Candidatures reçues) pour les traiter.`;
-        await this.whatsApp.sendTextMessage(
-          app.job_offer.employer.phone,
-          inboxNotice,
-        );
-      }
     } catch (err) {
       this.logger.warn(
         `Failed to send new application notification to employer: ${applicationId}`,
@@ -484,21 +465,6 @@ export class BotNotificationService {
     await this.whatsApp.sendTextMessage(phone, text);
   }
 
-  async sendKycValidatedMessage(
-    phone: string,
-    firstName: string,
-    _profileType: 'WORKER' | 'EMPLOYER',
-  ): Promise<void> {
-    // Same KYC-approved message as kyc.service.ts — reuse the approved `kyc`
-    // template rather than a free-form send (recipient is out of window).
-    const tpl = WHATSAPP_TEMPLATES.kyc;
-    await this.whatsApp.sendTemplateMessage(
-      phone,
-      tpl.contentSid,
-      tpl.variables(firstName),
-    );
-  }
-
   async sendRecommendedJobNotification(
     workerId: string,
     jobOfferId: string,
@@ -529,13 +495,10 @@ export class BotNotificationService {
       if (profile.profile_type !== 'WORKER' || profile.status !== 'ACTIVE')
         return;
 
-      const applyState = getApplyJobNotificationState(jobOfferId);
-      const stateSet = await this.botState.setIfFlowAbsentOrMatches(
-        workerId,
-        applyState,
-        null,
-      );
-      if (!stateSet) return;
+      // No flow arming: the approved template's button opens `/offres/:id`, so
+      // the worker applies on the web. This previously both armed the apply flow
+      // and — worse — returned without sending when the worker happened to be
+      // mid-conversation, silently dropping the recommendation entirely.
 
       const dateStr = offer.scheduled_at.toLocaleDateString('fr-FR', {
         day: '2-digit',
@@ -557,6 +520,8 @@ export class BotNotificationService {
           ),
           address: offer.address,
           date: dateStr,
+          // URL suffix for the CTA button (/offres/{{6}}).
+          jobOfferId,
         }),
       );
     } catch (err) {
@@ -590,7 +555,10 @@ export class BotNotificationService {
       null,
     );
     if (!written) {
-      // User is mid-flow — defer the rating request so it fires when their flow ends.
+      // Mid-flow: queue it so the bot re-offers the rating when their flow ends.
+      // This used to `return` here, so a user who was mid-conversation never got
+      // the request at all — the inbox is an addition to the send, not a
+      // substitute for it.
       await this.botInbox.push(raterProfileId, {
         type: 'pending_rating',
         assignmentId,
@@ -599,7 +567,6 @@ export class BotNotificationService {
         jobTitle,
         createdAt: new Date().toISOString(),
       });
-      return;
     }
     const tpl = WHATSAPP_TEMPLATES.ratingRequest;
     await this.whatsApp

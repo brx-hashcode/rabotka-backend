@@ -51,7 +51,7 @@ export class InterestRecommendationService {
     // Cold start — no signals yet, pure profile-text search
     if (signals < WARM_THRESHOLD || !profile) {
       if (!profile) {
-        void this.clusters.reseedFromProfile(workerId).catch(() => undefined);
+        void this.clusters.ensureSeeded(workerId).catch(() => undefined);
       }
       return this.fallback(workerId, limit);
     }

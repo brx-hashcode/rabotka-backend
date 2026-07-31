@@ -51,10 +51,9 @@ async function handleAcceptRefuseStep1(args: StepArgs): Promise<FlowResult> {
   }
   if (normalized === '1' || normalized === 'accepter') {
     try {
+      // accept() notifies the worker itself now, so both channels behave the
+      // same; calling it here as well would send twice.
       await ctx.applicationService.accept(applicationId, profile.id);
-      await ctx.notificationService.sendApplicationAcceptedToWorker(
-        applicationId,
-      );
 
       const attempt =
         await ctx.contactUnlockService.getByApplicationId(applicationId);

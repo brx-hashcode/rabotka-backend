@@ -8,7 +8,7 @@ import { RolesGuard } from '../../auth/guards/roles.guard';
 
 const mockClusters = {
   getProfile: jest.fn(),
-  reseedFromProfile: jest.fn().mockResolvedValue(undefined),
+  forceReseedFromProfile: jest.fn().mockResolvedValue(undefined),
 };
 
 const mockSignals = {
@@ -67,6 +67,6 @@ describe('AdminInterestGraphController', () => {
 
   it('reseed triggers cluster reseed', async () => {
     await controller.reseed('user-1');
-    expect(mockClusters.reseedFromProfile).toHaveBeenCalledWith('user-1');
+    expect(mockClusters.forceReseedFromProfile).toHaveBeenCalledWith('user-1');
   });
 });

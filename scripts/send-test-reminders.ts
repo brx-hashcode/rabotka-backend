@@ -67,6 +67,7 @@ const CASES = {
       amount: '5 000 FCFA',
       address: '123 Rue Exemple, Brazzaville',
       date: '16/07/2026 08:00',
+      jobOfferId: '3f2b1c8e-0000-4000-8000-000000000000',
     }),
   },
 } as const;

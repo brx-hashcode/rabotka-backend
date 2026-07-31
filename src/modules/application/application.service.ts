@@ -11,6 +11,11 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { deletedAtFilter } from '../../common/utils/soft-delete.util';
+import {
+  startOfBusinessDay,
+  startOfNextBusinessDay,
+} from '../../common/utils/business-day.util';
+import { InteractionEventService } from '../recommendation-engine/interaction-event.service';
 import { isWorkerHardBlocked } from '../penalty/penalty.utils';
 import { BotNotificationService } from '../bot/services/bot-notification.service';
 import { ContactUnlockService } from '../contact-unlock/contact-unlock.service';
@@ -19,11 +24,17 @@ import {
   ApplicationStatus,
   AssignmentStatus,
   BillingStatus,
+  InteractionActor,
+  InteractionKind,
+  InteractionObject,
+  InteractionSource,
   JobOfferStatus,
   PaymentStatus,
   PaymentMethod,
   PaymentType,
   Prisma,
+  RatingDirection,
+  RejectionSource,
 } from '@prisma/client';
 import { generatePaymentReference } from '../../common/utils/payment-reference';
 import { ContractService } from '../contract/contract.service';
@@ -140,6 +151,64 @@ export type ApplicationWithOffer = ApplicationListItem & {
       phone: string;
     };
   };
+  contractId?: string | null;
+};
+
+const WORKER_MISSION_SELECT = {
+  id: true,
+  status: true,
+  assignment: { select: { id: true, status: true } },
+  contract: { select: { id: true } },
+  job_offer: {
+    select: {
+      id: true,
+      title: true,
+      description: true,
+      scheduled_at: true,
+      amount: true,
+      address: true,
+      status: true,
+      employer: {
+        select: {
+          id: true,
+          first_name: true,
+          last_name: true,
+          reliability_score: true,
+          rating_avg: true,
+          rating_count: true,
+        },
+      },
+    },
+  },
+} satisfies Prisma.ApplicationSelect;
+
+type WorkerMissionRow = Prisma.ApplicationGetPayload<{
+  select: typeof WORKER_MISSION_SELECT;
+}>;
+
+export type WorkerMissionCard = {
+  applicationId: string;
+  applicationStatus: ApplicationStatus;
+  assignmentStatus: AssignmentStatus | null;
+  ratedEmployer: boolean;
+  contractId: string | null;
+  jobOffer: {
+    id: string;
+    title: string;
+    description: string;
+    scheduledAt: string;
+    amount: number | null;
+    address: string;
+    status: JobOfferStatus;
+  };
+  employer: {
+    id: string;
+    firstName: string;
+    lastName: string;
+    reliabilityScore: number | null;
+    ratingAvg: number | null;
+    ratingCount: number;
+  };
 };
 
 @Injectable()
@@ -154,6 +223,7 @@ export class ApplicationService {
     private readonly contractService: ContractService,
     private readonly systemConfigService: SystemConfigService,
     private readonly matchingService: MatchingService,
+    private readonly interactionEvents: InteractionEventService,
   ) {}
 
   async create(
@@ -209,11 +279,11 @@ export class ApplicationService {
       const hardBlocked = await isWorkerHardBlocked(this.prisma, workerId);
       if (hardBlocked) {
         throw new ForbiddenException(
-          '🚨 Votre compte est bloqué en raison de pénalités impayées depuis plus de 3 jours. Tapez PAYER pour régulariser votre situation.',
+          '🚨 Votre compte est bloqué en raison de pénalités impayées depuis plus de 3 jours. Veuillez les payer afin de pouvoir postuler à nouveau.',
         );
       }
       throw new ForbiddenException(
-        'Vous avez des pénalités impayées. Tapez PAYER pour les régler et débloquer votre compte.',
+        'Vous avez des pénalités impayées. Veuillez les payer afin de pouvoir postuler à nouveau.',
       );
     }
 
@@ -233,25 +303,20 @@ export class ApplicationService {
     // Count only applications whose parent offer is still live — stale
     // applications on cancelled/expired/completed offers shouldn't count
     // against the worker's concurrent-applications quota.
-    const activeCount = await this.prisma.application.count({
-      where: {
-        worker_id: workerId,
-        status: { in: [...WORKER_ACTIVE_APPLICATION_STATUSES] },
-        job_offer: {
-          status: {
-            in: [
-              JobOfferStatus.ACTIVE,
-              JobOfferStatus.PARTIALLY_FILLED,
-              JobOfferStatus.FILLED,
-              JobOfferStatus.IN_PROGRESS,
-            ],
-          },
-        },
-      },
-    });
+    const activeCount = await this.countActiveApplications(workerId);
     if (activeCount >= fees.maxConcurrentApplications) {
       throw new ForbiddenException(
         `Vous avez déjà ${activeCount} candidature(s) active(s). Maximum autorisé : ${fees.maxConcurrentApplications}.`,
+      );
+    }
+
+    // Daily application cap — a sliding window, not a stored counter: nothing
+    // resets it, the midnight boundary simply moves. Enforced for both the
+    // WhatsApp bot and the mobile apply endpoint.
+    const todayCount = await this.countApplicationsToday(workerId);
+    if (todayCount >= fees.maxDailyApplications) {
+      throw new ForbiddenException(
+        `Vous avez atteint votre limite de ${fees.maxDailyApplications} candidatures aujourd'hui. Réessayez demain.`,
       );
     }
 
@@ -287,6 +352,33 @@ export class ApplicationService {
       entityId: String(application.id),
       timestamp: new Date().toISOString(),
     });
+
+    // Captured server-side rather than from the client so it can't be inflated,
+    // and so the WhatsApp bot and the web app produce the same signal.
+    void this.interactionEvents.record({
+      actorId: workerId,
+      actorType: InteractionActor.WORKER,
+      kind: InteractionKind.APPLY,
+      objectType: InteractionObject.JOB_OFFER,
+      objectId: jobOfferId,
+      categoryId: application.job_offer.category_id,
+      counterpartyId: application.job_offer.employer_id,
+      source: InteractionSource.SERVER,
+      surface: 'apply',
+    });
+
+    // Notify the employer here, not at the call site: this used to fire only
+    // from the WhatsApp apply flow, so a worker applying on the web produced no
+    // notification at all. Fire-and-forget — a WhatsApp failure must never fail
+    // the application itself.
+    void this.botNotification
+      .sendNewApplicationToEmployer(application.id)
+      .catch((err: unknown) =>
+        console.warn(
+          `[create] new-application notify failed for ${application.id}:`,
+          err,
+        ),
+      );
 
     return this.toListItem(application);
   }
@@ -474,6 +566,7 @@ export class ApplicationService {
           },
         },
         worker: true,
+        contract: { select: { id: true } },
       },
     });
 
@@ -588,7 +681,12 @@ export class ApplicationService {
 
       await tx.application.update({
         where: { id: applicationId },
-        data: { status: ApplicationStatus.WAITING_PAYMENT },
+        data: {
+          status: ApplicationStatus.WAITING_PAYMENT,
+          // `updated_at` is overwritten by every later transition, so the
+          // decision moment needs its own column.
+          accepted_at: new Date(),
+        },
       });
       await tx.jobOffer.update({
         where: { id: application.job_offer_id },
@@ -620,7 +718,14 @@ export class ApplicationService {
         if (autoRejectedIds.length > 0) {
           await tx.application.updateMany({
             where: { id: { in: autoRejectedIds } },
-            data: { status: ApplicationStatus.REJECTED },
+            data: {
+              status: ApplicationStatus.REJECTED,
+              rejected_at: new Date(),
+              // The offer filled up — nobody judged these workers. Marking them
+              // AUTO_FILL keeps them out of negative preference signals; without
+              // it, losing two races looks identical to being turned down twice.
+              rejection_source: RejectionSource.AUTO_FILL,
+            },
           });
         }
       }
@@ -633,6 +738,18 @@ export class ApplicationService {
           console.warn(`[accept] auto-reject notify failed for ${appId}:`, err),
         );
     }
+
+    // The accepted worker was only ever notified from the WhatsApp accept flow,
+    // so accepting on the web left them uninformed while their rivals got their
+    // rejection. Fires here so both channels behave the same.
+    void this.botNotification
+      .sendApplicationAcceptedToWorker(applicationId)
+      .catch((err: unknown) =>
+        console.warn(
+          `[accept] accepted notify failed for ${applicationId}:`,
+          err,
+        ),
+      );
 
     const updated = await this.findById(applicationId);
     if (!updated)
@@ -656,6 +773,19 @@ export class ApplicationService {
           err,
         ),
       );
+
+    // Accepting is the employer's strongest non-paid endorsement of a worker.
+    void this.interactionEvents.record({
+      actorId: employerId,
+      actorType: InteractionActor.EMPLOYER,
+      kind: InteractionKind.ACCEPT,
+      objectType: InteractionObject.WORKER_PROFILE,
+      objectId: application.worker_id,
+      categoryId: application.job_offer.category_id,
+      counterpartyId: application.job_offer_id,
+      source: InteractionSource.SERVER,
+      surface: 'application_accept',
+    });
 
     return updated;
   }
@@ -687,7 +817,14 @@ export class ApplicationService {
 
     const updated = await this.prisma.application.update({
       where: { id: applicationId },
-      data: { status: ApplicationStatus.REJECTED },
+      data: {
+        status: ApplicationStatus.REJECTED,
+        rejected_at: new Date(),
+        // An actual employer decision — distinct from AUTO_FILL, which is what
+        // rejectPendingApplicants writes when an offer simply fills up. Only this
+        // variant may ever be read as a negative preference signal.
+        rejection_source: RejectionSource.EMPLOYER,
+      },
       include: {
         job_offer: {
           include: {
@@ -703,6 +840,19 @@ export class ApplicationService {
         },
         worker: true,
       },
+    });
+
+    void this.interactionEvents.record({
+      actorId: employerId,
+      actorType: InteractionActor.EMPLOYER,
+      kind: InteractionKind.REJECT,
+      objectType: InteractionObject.WORKER_PROFILE,
+      objectId: application.worker_id,
+      categoryId: application.job_offer.category_id,
+      counterpartyId: application.job_offer_id,
+      source: InteractionSource.SERVER,
+      surface: 'application_reject',
+      metadata: reason ? { reason } : undefined,
     });
 
     this.eventEmitter.emit(AdminNotificationEvent.APPLICATION_REJECTED, {
@@ -917,6 +1067,20 @@ export class ApplicationService {
       });
     }
 
+    // The worker walked away from this offer — attributed to them, since the
+    // employer did nothing here.
+    void this.interactionEvents.record({
+      actorId: workerId,
+      actorType: InteractionActor.WORKER,
+      kind: InteractionKind.APPLY_CANCEL,
+      objectType: InteractionObject.JOB_OFFER,
+      objectId: application.job_offer_id,
+      categoryId: application.job_offer.category_id,
+      counterpartyId: application.job_offer.employer_id,
+      source: InteractionSource.SERVER,
+      surface: 'application_cancel',
+    });
+
     return {
       application: updated,
       penaltyApplied,
@@ -991,7 +1155,13 @@ export class ApplicationService {
     const ids = leftovers.map((a) => a.id);
     await client.application.updateMany({
       where: { id: { in: ids } },
-      data: { status: ApplicationStatus.REJECTED },
+      data: {
+        status: ApplicationStatus.REJECTED,
+        rejected_at: new Date(),
+        // Closed out because the offer is no longer open, not because the
+        // employer rejected anyone. Must never count as a negative signal.
+        rejection_source: RejectionSource.AUTO_FILL,
+      },
     });
     return ids;
   }
@@ -1068,9 +1238,14 @@ export class ApplicationService {
         "Vous n'êtes pas l'employeur de cette offre",
       );
     }
+    // END is accepted too: the worker may have already confirmed and rated their
+    // own side first (markCompletedByWorker), which ends their application. The
+    // employer still has to settle the offer. Double settlement is prevented by
+    // the job-offer row lock + COMPLETED check inside the transaction below.
     if (
       application.status !== ApplicationStatus.ACCEPTED &&
-      application.status !== ApplicationStatus.STARTED
+      application.status !== ApplicationStatus.STARTED &&
+      application.status !== ApplicationStatus.END
     ) {
       throw new BadRequestException(
         'Seule une candidature acceptée ou démarrée peut être marquée comme terminée',
@@ -1188,6 +1363,32 @@ export class ApplicationService {
       .catch((err) =>
         console.warn(`Failed to re-index worker after job completion:`, err),
       );
+
+    // A completed job is the highest-confidence evidence the pairing worked, so
+    // it is recorded from BOTH sides: the employer learns about this worker, and
+    // the worker learns about this kind of offer/employer.
+    void this.interactionEvents.record({
+      actorId: employerId,
+      actorType: InteractionActor.EMPLOYER,
+      kind: InteractionKind.COMPLETE,
+      objectType: InteractionObject.WORKER_PROFILE,
+      objectId: application.worker_id,
+      categoryId: application.job_offer.category_id,
+      counterpartyId: application.job_offer_id,
+      source: InteractionSource.SERVER,
+      surface: 'job_complete',
+    });
+    void this.interactionEvents.record({
+      actorId: application.worker_id,
+      actorType: InteractionActor.WORKER,
+      kind: InteractionKind.COMPLETE,
+      objectType: InteractionObject.JOB_OFFER,
+      objectId: application.job_offer_id,
+      categoryId: application.job_offer.category_id,
+      counterpartyId: application.job_offer.employer_id,
+      source: InteractionSource.SERVER,
+      surface: 'job_complete',
+    });
     // Fire-and-forget: send rating requests to both parties via WhatsApp
     this.sendRatingRequests(applicationId, application).catch((err: unknown) =>
       console.warn(
@@ -1197,6 +1398,376 @@ export class ApplicationService {
     );
 
     return updated;
+  }
+
+  /**
+   * Record a rating for one side of a completed assignment. Directional and
+   * symmetric — the employer rates the worker OR the worker rates the employer;
+   * the ratee is always the counter-party. Idempotent (unique on
+   * rater+assignment → upsert). The reliability_score delta is a worker-only
+   * quality signal, so it is applied only when an employer rates a worker, and
+   * only on the first rating. Lifted from rate-assignment.flow so both the bot
+   * and mobile share one implementation.
+   */
+  async rateAssignment(
+    assignmentId: string,
+    raterProfileId: string,
+    score: number,
+  ): Promise<void> {
+    if (!Number.isInteger(score) || score < 1 || score > 5) {
+      throw new BadRequestException('La note doit être comprise entre 1 et 5.');
+    }
+
+    const assignment = await this.prisma.assignment.findUnique({
+      where: { id: assignmentId },
+      select: {
+        status: true,
+        worker_id: true,
+        job_offer_id: true,
+        // category_id is denormalised onto the interaction event below.
+        job_offer: { select: { employer_id: true, category_id: true } },
+      },
+    });
+    if (!assignment) {
+      throw new NotFoundException('Mission introuvable');
+    }
+
+    const isWorker = assignment.worker_id === raterProfileId;
+    const isEmployer = assignment.job_offer?.employer_id === raterProfileId;
+    if (!isWorker && !isEmployer) {
+      throw new ForbiddenException(
+        "Vous n'êtes pas autorisé à évaluer cette mission",
+      );
+    }
+    if (assignment.status !== AssignmentStatus.COMPLETED) {
+      throw new BadRequestException("La mission n'est pas encore terminée");
+    }
+
+    const rateeId = isWorker
+      ? assignment.job_offer?.employer_id
+      : assignment.worker_id;
+    if (!rateeId) {
+      throw new BadRequestException("Impossible de déterminer l'évalué");
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      // First rating? Determines whether the reliability delta applies (only the
+      // first time, never on a re-rate — otherwise it would be counted twice).
+      const existing = await tx.rating.findUnique({
+        where: {
+          rater_id_assignment_id: {
+            rater_id: raterProfileId,
+            assignment_id: assignmentId,
+          },
+        },
+        select: { id: true },
+      });
+      const isFirstRating = existing === null;
+
+      await tx.rating.upsert({
+        where: {
+          rater_id_assignment_id: {
+            rater_id: raterProfileId,
+            assignment_id: assignmentId,
+          },
+        },
+        create: {
+          rater_id: raterProfileId,
+          ratee_id: rateeId,
+          assignment_id: assignmentId,
+          score,
+          // Stored so readers don't have to re-derive it by joining through
+          // assignment → job_offer on every single read.
+          direction: isEmployer
+            ? RatingDirection.EMPLOYER_TO_WORKER
+            : RatingDirection.WORKER_TO_EMPLOYER,
+        },
+        update: { score },
+      });
+
+      // Recompute the ratee's aggregate inside the same transaction.
+      const agg = await tx.rating.aggregate({
+        where: { ratee_id: rateeId },
+        _avg: { score: true },
+        _count: { score: true },
+      });
+      await tx.profile.update({
+        where: { id: rateeId },
+        data: {
+          rating_avg: agg._avg.score ?? null,
+          rating_count: agg._count.score,
+        },
+      });
+
+      if (isEmployer && isFirstRating) {
+        await this.applyRatingToReliability(tx, rateeId, score);
+      }
+    });
+
+    // A rating is the only signal that reflects how the work actually went, so
+    // it's the highest-confidence evidence either side gives us. 3/5 is neutral
+    // and deliberately records nothing.
+    if (score !== 3) {
+      void this.interactionEvents.record({
+        actorId: raterProfileId,
+        actorType: isEmployer
+          ? InteractionActor.EMPLOYER
+          : InteractionActor.WORKER,
+        kind:
+          score > 3
+            ? InteractionKind.RATE_POSITIVE
+            : InteractionKind.RATE_NEGATIVE,
+        objectType: isEmployer
+          ? InteractionObject.WORKER_PROFILE
+          : InteractionObject.EMPLOYER_PROFILE,
+        objectId: rateeId,
+        categoryId: assignment.job_offer?.category_id ?? null,
+        counterpartyId: assignment.job_offer_id,
+        source: InteractionSource.SERVER,
+        surface: 'rating',
+        metadata: { score },
+      });
+    }
+  }
+
+  /**
+   * Employer marks the mission completed and rates the worker in one action.
+   * markJobCompleted handles ownership/status guards, closes the offer, pays the
+   * worker and stores the note; the assignment is then COMPLETED so the rating
+   * passes its guard.
+   */
+  async completeAndRate(
+    applicationId: string,
+    employerId: string,
+    score: number,
+    note?: string,
+  ): Promise<void> {
+    if (!Number.isInteger(score) || score < 1 || score > 5) {
+      throw new BadRequestException('La note doit être comprise entre 1 et 5.');
+    }
+    await this.markJobCompleted(applicationId, employerId, note);
+    const assignment = await this.prisma.assignment.findFirst({
+      where: { application_id: applicationId },
+      select: { id: true },
+    });
+    if (assignment) {
+      await this.rateAssignment(assignment.id, employerId, score);
+    }
+  }
+
+  /**
+   * Worker-side completion: confirms THIS worker's own assignment is done and
+   * marks their application as ended (END). Unlike the employer flow it does
+   * NOT close the offer, pay anyone, or end other applications — those remain
+   * employer settlement concerns.
+   */
+  async markCompletedByWorker(
+    applicationId: string,
+    workerId: string,
+  ): Promise<void> {
+    const application = await this.prisma.application.findUnique({
+      where: { id: applicationId },
+      select: { worker_id: true, status: true, job_offer_id: true },
+    });
+    if (!application) {
+      throw new NotFoundException('Candidature introuvable');
+    }
+    if (application.worker_id !== workerId) {
+      throw new ForbiddenException("Cette mission n'est pas la vôtre");
+    }
+    if (
+      application.status !== ApplicationStatus.ACCEPTED &&
+      application.status !== ApplicationStatus.STARTED &&
+      application.status !== ApplicationStatus.END
+    ) {
+      throw new BadRequestException(
+        'Cette mission ne peut pas être marquée comme terminée',
+      );
+    }
+    // Ensure an assignment exists so the worker→employer rating can attach to it.
+    // Some accepted applications may not have one yet (e.g. seeded data); create
+    // it on the fly. If it already exists, just mark it completed.
+    const existing = await this.prisma.assignment.findFirst({
+      where: { application_id: applicationId },
+      select: { id: true, status: true },
+    });
+    if (!existing) {
+      await this.prisma.assignment.create({
+        data: {
+          application_id: applicationId,
+          job_offer_id: application.job_offer_id,
+          worker_id: workerId,
+          status: AssignmentStatus.COMPLETED,
+          completed_at: new Date(),
+        },
+      });
+    } else if (existing.status !== AssignmentStatus.COMPLETED) {
+      await this.prisma.assignment.update({
+        where: { id: existing.id },
+        data: {
+          status: AssignmentStatus.COMPLETED,
+          completed_at: new Date(),
+        },
+      });
+    }
+    if (application.status !== ApplicationStatus.END) {
+      await this.prisma.application.update({
+        where: { id: applicationId },
+        data: { status: ApplicationStatus.END },
+      });
+    }
+  }
+
+  /**
+   * Worker marks their side done and rates the employer in one action. Mirrors
+   * completeAndRate but for the worker direction (no offer close / payment; the
+   * reliability delta is skipped inside rateAssignment for worker→employer).
+   */
+  async completeAndRateByWorker(
+    applicationId: string,
+    workerId: string,
+    score: number,
+  ): Promise<void> {
+    if (!Number.isInteger(score) || score < 1 || score > 5) {
+      throw new BadRequestException('La note doit être comprise entre 1 et 5.');
+    }
+    await this.markCompletedByWorker(applicationId, workerId);
+    const assignment = await this.prisma.assignment.findFirst({
+      where: { application_id: applicationId },
+      select: { id: true },
+    });
+    if (!assignment) {
+      throw new BadRequestException(
+        'Aucune mission associée à cette candidature',
+      );
+    }
+    await this.rateAssignment(assignment.id, workerId, score);
+  }
+
+  /**
+   * The worker's own "missions" — applications they were hired on (ACCEPTED /
+   * STARTED / END), with the offer + employer and whether the worker has already
+   * rated the employer for that assignment. Powers the worker mission surface.
+   */
+  async findWorkerMissions(
+    workerId: string,
+    pagination: { page: number; pageSize: number },
+  ): Promise<{ items: WorkerMissionCard[]; total: number }> {
+    const where: Prisma.ApplicationWhereInput = {
+      worker_id: workerId,
+      deleted_at: null,
+      status: {
+        in: [
+          ApplicationStatus.ACCEPTED,
+          ApplicationStatus.STARTED,
+          ApplicationStatus.END,
+        ],
+      },
+    };
+    const { page, pageSize } = pagination;
+    const [applications, total] = await Promise.all([
+      this.prisma.application.findMany({
+        where,
+        orderBy: { created_at: 'desc' },
+        skip: page * pageSize,
+        take: pageSize,
+        select: WORKER_MISSION_SELECT,
+      }),
+      this.prisma.application.count({ where }),
+    ]);
+    const items = await this.toWorkerMissionCards(workerId, applications);
+    return { items, total };
+  }
+
+  async findWorkerMissionById(
+    workerId: string,
+    applicationId: string,
+  ): Promise<WorkerMissionCard> {
+    const application = await this.prisma.application.findFirst({
+      where: { id: applicationId, worker_id: workerId, deleted_at: null },
+      select: WORKER_MISSION_SELECT,
+    });
+    if (!application) {
+      throw new NotFoundException('Mission introuvable');
+    }
+
+    // Backfill a missing contract for an engaged application. accept() creates
+    // contract metadata fire-and-forget (so a failure there is never retried),
+    // and applications that never went through accept() — seeded data — have no
+    // contract row at all. Same self-heal-on-read approach used for a missing
+    // assignment in markCompletedByWorker. create() is idempotent.
+    let contract = application.contract;
+    if (
+      !contract &&
+      (application.status === ApplicationStatus.ACCEPTED ||
+        application.status === ApplicationStatus.STARTED ||
+        application.status === ApplicationStatus.END)
+    ) {
+      try {
+        const created = await this.contractService.create(applicationId);
+        contract = { id: created.id };
+      } catch (err) {
+        console.warn(
+          `Failed to backfill contract for application ${applicationId}:`,
+          err,
+        );
+      }
+    }
+
+    const [card] = await this.toWorkerMissionCards(workerId, [
+      { ...application, contract },
+    ]);
+    return card;
+  }
+
+  private async toWorkerMissionCards(
+    workerId: string,
+    applications: WorkerMissionRow[],
+  ): Promise<WorkerMissionCard[]> {
+    // Batch the "did I already rate the employer?" lookup to avoid N+1.
+    const assignmentIds = applications
+      .map((a) => a.assignment?.id)
+      .filter((id): id is string => Boolean(id));
+    const ratedAssignmentIds = new Set(
+      assignmentIds.length === 0
+        ? []
+        : (
+            await this.prisma.rating.findMany({
+              where: {
+                rater_id: workerId,
+                assignment_id: { in: assignmentIds },
+              },
+              select: { assignment_id: true },
+            })
+          ).map((r) => r.assignment_id),
+    );
+
+    return applications.map((a) => ({
+      applicationId: a.id,
+      applicationStatus: a.status,
+      assignmentStatus: a.assignment?.status ?? null,
+      ratedEmployer: a.assignment
+        ? ratedAssignmentIds.has(a.assignment.id)
+        : false,
+      contractId: a.contract?.id ?? null,
+      jobOffer: {
+        id: a.job_offer.id,
+        title: a.job_offer.title,
+        description: a.job_offer.description,
+        scheduledAt: a.job_offer.scheduled_at.toISOString(),
+        amount: a.job_offer.amount == null ? null : Number(a.job_offer.amount),
+        address: a.job_offer.address,
+        status: a.job_offer.status,
+      },
+      employer: {
+        id: a.job_offer.employer.id,
+        firstName: a.job_offer.employer.first_name,
+        lastName: a.job_offer.employer.last_name,
+        reliabilityScore: a.job_offer.employer.reliability_score,
+        ratingAvg: a.job_offer.employer.rating_avg,
+        ratingCount: a.job_offer.employer.rating_count,
+      },
+    }));
   }
 
   private async sendRatingRequests(
@@ -1420,11 +1991,26 @@ export class ApplicationService {
       timestamp: new Date().toISOString(),
     });
 
+    // The EMPLOYER dropped an already-accepted worker — attributed to the
+    // employer, unlike `cancel()` where the worker walks away. Getting the actor
+    // wrong here would teach the wrong person's model.
+    void this.interactionEvents.record({
+      actorId: employerId,
+      actorType: InteractionActor.EMPLOYER,
+      kind: InteractionKind.APPLY_CANCEL,
+      objectType: InteractionObject.WORKER_PROFILE,
+      objectId: application.worker_id,
+      categoryId: application.job_offer.category_id,
+      counterpartyId: application.job_offer_id,
+      source: InteractionSource.SERVER,
+      surface: 'employer_cancel',
+    });
+
     return updated;
   }
 
   async markAsViewed(applicationId: string): Promise<void> {
-    await this.prisma.application.updateMany({
+    const updated = await this.prisma.application.updateMany({
       where: {
         id: applicationId,
         status: ApplicationStatus.PENDING,
@@ -1433,6 +2019,32 @@ export class ApplicationService {
         status: ApplicationStatus.VIEWED,
         viewed_at: new Date(),
       },
+    });
+    if (updated.count === 0) return;
+
+    // An employer opening a candidature is a genuine (if weak) interest signal in
+    // that worker. Only recorded on the PENDING → VIEWED transition, so
+    // re-opening the same application doesn't inflate it.
+    const application = await this.prisma.application.findUnique({
+      where: { id: applicationId },
+      select: {
+        worker_id: true,
+        job_offer_id: true,
+        job_offer: { select: { employer_id: true, category_id: true } },
+      },
+    });
+    if (!application?.job_offer) return;
+
+    void this.interactionEvents.record({
+      actorId: application.job_offer.employer_id,
+      actorType: InteractionActor.EMPLOYER,
+      kind: InteractionKind.PROFILE_VIEW,
+      objectType: InteractionObject.WORKER_PROFILE,
+      objectId: application.worker_id,
+      categoryId: application.job_offer.category_id,
+      counterpartyId: application.job_offer_id,
+      source: InteractionSource.SERVER,
+      surface: 'application_detail',
     });
   }
 
@@ -1458,6 +2070,87 @@ export class ApplicationService {
       where: { id: workerId },
       data: { billing_status: newStatus },
     });
+  }
+
+  /**
+   * The worker's daily application quota (resets each day at local midnight).
+   * Powers the "X/10 candidatures aujourd'hui" counter on the worker home.
+   */
+  /**
+   * Applications that currently occupy one of the worker's concurrent slots:
+   * still-open applications (PENDING / ACCEPTED) on offers that haven't closed.
+   * Shared by create()'s concurrency check and the quota surface so the number
+   * shown to the worker can never drift from the one that blocks them.
+   */
+  /**
+   * Applications created since the current business day began (UTC+1 midnight).
+   *
+   * Cancelled applications intentionally still count: the cap exists to stop
+   * spam-applying, and refunding quota on cancel would let a worker loop
+   * apply → cancel → apply indefinitely. Soft-deleted rows do NOT count — those
+   * are administrative removals, not something the worker did.
+   */
+  private countApplicationsToday(workerId: string): Promise<number> {
+    return this.prisma.application.count({
+      where: {
+        worker_id: workerId,
+        deleted_at: null,
+        created_at: { gte: startOfBusinessDay() },
+      },
+    });
+  }
+
+  private countActiveApplications(workerId: string): Promise<number> {
+    return this.prisma.application.count({
+      where: {
+        worker_id: workerId,
+        deleted_at: null,
+        status: { in: [...WORKER_ACTIVE_APPLICATION_STATUSES] },
+        job_offer: {
+          status: {
+            in: [
+              JobOfferStatus.ACTIVE,
+              JobOfferStatus.PARTIALLY_FILLED,
+              JobOfferStatus.FILLED,
+              JobOfferStatus.IN_PROGRESS,
+            ],
+          },
+        },
+      },
+    });
+  }
+
+  /**
+   * Both limits that gate applying: the per-day cap and the concurrent-slot cap.
+   * `concurrent` is usually the binding one (3 slots vs 10/day), so clients
+   * should surface it as the effective remaining count.
+   */
+  async getDailyApplicationQuota(workerId: string): Promise<{
+    used: number;
+    limit: number;
+    remaining: number;
+    resetsAt: string;
+    concurrent: { used: number; limit: number; remaining: number };
+  }> {
+    const fees = await this.systemConfigService.getFees();
+    const limit = fees.maxDailyApplications;
+    const [used, activeCount] = await Promise.all([
+      this.countApplicationsToday(workerId),
+      this.countActiveApplications(workerId),
+    ]);
+    const resetsAt = startOfNextBusinessDay();
+    const concurrentLimit = fees.maxConcurrentApplications;
+    return {
+      used,
+      limit,
+      remaining: Math.max(0, limit - used),
+      resetsAt: resetsAt.toISOString(),
+      concurrent: {
+        used: activeCount,
+        limit: concurrentLimit,
+        remaining: Math.max(0, concurrentLimit - activeCount),
+      },
+    };
   }
 
   async getUnpaidPenalties(
@@ -1866,6 +2559,7 @@ export class ApplicationService {
       verification_status: string;
       avatar_url?: string | null;
     };
+    contract?: { id: string } | null;
   }): ApplicationWithOffer {
     return {
       ...this.toListItem({ ...app, job_offer: app.job_offer }),
@@ -1883,6 +2577,7 @@ export class ApplicationService {
         employer: app.job_offer.employer,
       },
       worker: app.worker,
+      contractId: app.contract?.id ?? null,
     } as ApplicationWithOffer;
   }
 }

@@ -179,7 +179,7 @@ describe('ProfileService', () => {
         deleteEmployerFromIndex: jest.fn().mockResolvedValue(undefined),
       } as any, // matchingService
       {
-        reseedFromProfile: jest.fn().mockResolvedValue(undefined),
+        ensureSeeded: jest.fn().mockResolvedValue(undefined),
       } as any, // interestClusters
       { geocode: jest.fn().mockResolvedValue(null) } as any, // geocodingService
     );

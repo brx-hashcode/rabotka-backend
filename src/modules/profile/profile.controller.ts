@@ -43,6 +43,7 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
+import { ProfileType } from '@prisma/client';
 import { WHATSAPP_TEMPLATES } from '../../common/constants/whatsapp-templates';
 import { PayPenaltyDto } from '../wallet/dto/pay-penalty.dto';
 
@@ -114,7 +115,13 @@ export class ProfileController {
     // review. Onboarding is a web form, so there is no open 24h session —
     // this must be a template, not a free-form text. Fire-and-forget: a
     // WhatsApp failure must never fail signup.
-    const profileCreatedTpl = WHATSAPP_TEMPLATES.profileCreated;
+    // Role decides the closing line: workers are pointed at offers that match
+    // them, employers at profiles that match them. Both land on /home, which is
+    // already role-aware.
+    const profileCreatedTpl =
+      createProfileDto.profileType === ProfileType.EMPLOYER
+        ? WHATSAPP_TEMPLATES.profileCreatedEmployer
+        : WHATSAPP_TEMPLATES.profileCreatedWorker;
     void this.whatsApp
       .sendTemplateMessage(
         createProfileDto.phone,
