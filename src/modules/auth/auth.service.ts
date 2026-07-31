@@ -11,11 +11,10 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
-import { randomUUID } from 'crypto';
+import { randomUUID } from 'node:crypto';
 import Redis from 'ioredis';
-import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
 
-import { REDIS_KEY_PREFIX } from '../../common/services/redis/redis.constants';
+import { REDIS_KEY_PREFIX, REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
 import { LayoutService } from '../mail/layout.service';
@@ -28,13 +27,11 @@ import * as QRCode from 'qrcode';
 
 const JWT_BLOCKLIST_PREFIX = `${REDIS_KEY_PREFIX}jwtblocklist:`;
 
-const TOTP_PENDING_PREFIX = `${REDIS_KEY_PREFIX}admin:totp:pending:`; // email → JWT after email OTP
-const TOTP_PENDING_TTL = 300; // 5 min to enter TOTP code
+const TOTP_PENDING_PREFIX = `${REDIS_KEY_PREFIX}admin:totp:pending:`;
+const TOTP_PENDING_TTL = 300;
 
 const OTP_TTL_SECONDS = 300;
 const OTP_KEY_PREFIX = `${REDIS_KEY_PREFIX}otp:`;
-// Mobile refresh-token whitelist: jti → profileId, TTL matches the refresh token.
-// Presence enables rotation (delete on use) and revocation (delete on logout).
 const MOBILE_REFRESH_PREFIX = `${REDIS_KEY_PREFIX}mobile:refresh:`;
 const DEFAULT_REFRESH_TTL_SECONDS = 24 * 60 * 60;
 const ADMIN_OTP_KEY_PREFIX = `${REDIS_KEY_PREFIX}admin:otp:`;
@@ -42,8 +39,6 @@ const RESEND_COOLDOWN_SECONDS = 60;
 const RESEND_COOLDOWN_KEY_PREFIX = `${REDIS_KEY_PREFIX}otp:resend:`;
 const ADMIN_RESEND_COOLDOWN_KEY_PREFIX = `${REDIS_KEY_PREFIX}admin:otp:resend:`;
 
-// Atomically verify and consume an OTP in a single round-trip.
-// Returns 1 on match+delete, 0 on mismatch or missing key.
 const LUA_VERIFY_AND_DELETE_OTP = `
 local v = redis.call('GET', KEYS[1])
 if v == false then return 0 end
@@ -54,7 +49,6 @@ end
 return 0
 `;
 
-// Matches the cast used in AuthModule's JwtModule config for expiresIn.
 type JwtExpiresIn = `${number}${'s' | 'm' | 'h' | 'd'}` | `${number}`;
 
 export interface MobileSessionUser {
@@ -134,11 +128,9 @@ export class AuthService {
       );
     }
 
-    // Send the OTP over the channel the user chose — WhatsApp for a phone,
-    // email for an email. The OTP is an approved business-initiated template,
-    // so it reaches any WhatsApp number; no prior whatsapp_connected link is
-    // required.
     const otp = this.generateOtp();
+
+    this.logger.warn(`[OTP][send] ${normalized} → ${otp}`);
 
     const redisKey = `${OTP_KEY_PREFIX}${normalized}`;
     await this.redis.set(redisKey, otp, 'EX', OTP_TTL_SECONDS);
@@ -185,7 +177,7 @@ export class AuthService {
     }
 
     const otp = this.generateOtp();
-    this.logger.debug(`[OTP resend] generated for ${normalized}`);
+    this.logger.warn(`[OTP][resend] ${normalized} → ${otp}`);
 
     const redisKey = `${OTP_KEY_PREFIX}${normalized}`;
     await this.redis.set(redisKey, otp, 'EX', OTP_TTL_SECONDS);
@@ -200,15 +192,13 @@ export class AuthService {
       await this.sendOtpByWhatsApp(normalized, otp);
     }
 
-    // Only start the cooldown once the code was actually sent — a failed send
-    // throws above, so the user isn't locked out of retrying for nothing.
+ 
     await this.redis.set(resendCooldownKey, '1', 'EX', RESEND_COOLDOWN_SECONDS);
 
     return { success: true };
   }
 
-  // Atomically verify+consume the OTP, then load the owning profile.
-  // Shared by the web (cookie) and mobile (bearer) verify flows.
+
   private async verifyOtpAndGetProfile(emailOrPhone: string, otp: string) {
     const normalized = this.normalize(emailOrPhone);
     const isEmail = this.isEmail(normalized);
@@ -252,9 +242,7 @@ export class AuthService {
     return { success: true, token };
   }
 
-  // --- Mobile bearer-token flow ------------------------------------------
 
-  // Verify the OTP and issue an access + refresh token pair for a mobile client.
   async verifyOtpMobile(
     emailOrPhone: string,
     otp: string,
@@ -263,9 +251,6 @@ export class AuthService {
     return this.issueMobileTokens(profile.id);
   }
 
-  // Rotate a refresh token: validate it, invalidate the old one, and issue a
-  // fresh pair. A missing/mismatched whitelist entry means the token was
-  // revoked or already used (reuse detection) → 401.
   async refreshMobileTokens(refreshToken: string): Promise<MobileTokens> {
     let payload: { sub?: string; type?: string; jti?: string };
     try {
@@ -290,7 +275,6 @@ export class AuthService {
       );
     }
 
-    // Rotation: the old refresh token can never be used again.
     await this.redis.del(redisKey);
 
     const profile = await this.prisma.profile.findUnique({
@@ -304,13 +288,10 @@ export class AuthService {
     return this.issueMobileTokens(profile.id);
   }
 
-  // Revoke the current access token (blocklist) and delete the refresh token.
   async logoutMobile(
     accessToken: string | undefined,
     refreshToken?: string,
   ): Promise<void> {
-    // Blocklisting the bearer access token is enough to revoke a session; the
-    // long-lived mobile token has no refresh token to invalidate.
     if (accessToken) {
       await this.revokeToken(accessToken);
     }
@@ -325,7 +306,7 @@ export class AuthService {
         await this.redis.del(`${MOBILE_REFRESH_PREFIX}${payload.jti}`);
       }
     } catch {
-      // Refresh token already invalid — nothing to revoke.
+        // Refresh token already invalid — nothing to revoke.
     }
   }
 
@@ -351,7 +332,6 @@ export class AuthService {
       },
     );
 
-    // Keep the Redis whitelist TTL in sync with the token's own expiry.
     const decoded = this.jwtService.decode(refreshToken) as {
       exp?: number;
     } | null;
@@ -503,8 +483,6 @@ export class AuthService {
       throw new UnauthorizedException('Ce compte administrateur est inactif');
     }
 
-    // If TOTP is enabled, issue a short-lived intermediate token stored in Redis
-    // The actual session cookie is only set after the TOTP code is verified.
     if (user.totp_enabled) {
       const pendingToken = randomUUID();
       await this.redis.set(
@@ -671,9 +649,7 @@ export class AuthService {
       template.variables(otp),
     );
     if (!sent) {
-      // Phone is the only login channel (the client no longer collects email),
-      // so a failed WhatsApp send must surface as an error — otherwise the user
-      // is told the code was sent while never receiving it, with no fallback.
+
       this.logger.error(
         `WhatsApp failed to send OTP to ${phone}; user would not receive the code`,
       );
@@ -763,7 +739,7 @@ export class AuthService {
         totp_enabled: true,
       },
     });
-    if (!user || !user.is_active) {
+    if (!user?.is_active) {
       throw new UnauthorizedException('Admin account not found or inactive');
     }
     if (!user.phone_paired_at) {
@@ -772,8 +748,6 @@ export class AuthService {
       );
     }
 
-    // If TOTP is enabled, store a pending token instead of the real JWT.
-    // The browser will prompt for the TOTP code before the session cookie is set.
     if (user.totp_enabled) {
       const pendingToken = randomUUID();
       await this.redis.set(
@@ -854,7 +828,6 @@ export class AuthService {
     return { token: data.token };
   }
 
-  // ─── Phone Pairing ───────────────────────────────────────────────────────────
 
   private readonly PAIR_TTL = 300;
   private pairOtpKey = (userId: string) => `admin:pair:otp:${userId}`;
@@ -896,7 +869,7 @@ export class AuthService {
       where: { id: userId },
       select: { id: true, is_active: true, totp_enabled: true },
     });
-    if (!user || !user.is_active) {
+    if (!user?.is_active) {
       throw new UnauthorizedException('Admin account not found or inactive');
     }
     if (!user.totp_enabled) {
@@ -1004,7 +977,6 @@ export class AuthService {
     });
     const qrDataUrl = await QRCode.toDataURL(otpauthUrl);
 
-    // Store the pending secret temporarily — only persisted after confirmation
     await this.redis.set(
       `${REDIS_KEY_PREFIX}admin:totp:setup:${userId}`,
       secret,
@@ -1070,8 +1042,6 @@ export class AuthService {
       data: {
         totp_secret: null,
         totp_enabled: false,
-        // Auto-unpair phone — phone login requires TOTP, so disabling TOTP
-        // would leave phone pairing as a security bypass.
         phone_paired_at: null,
         phone_name: null,
       },

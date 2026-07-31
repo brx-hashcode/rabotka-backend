@@ -35,6 +35,46 @@ type HybridEmbedding = {
   sparse: { indices: number[]; values: number[] };
 };
 
+/**
+ * Payload keys we filter on. Qdrant filters work without an index but degrade to
+ * a full scan, so every key any `must`/`must_not` touches must be listed here.
+ * Adding a key requires running `ensurePayloadIndexes` — collection creation is
+ * not retroactive for collections that already exist.
+ */
+const INDEXED_PAYLOAD_KEYS = [
+  'status',
+  'categoryId',
+  'categoryIds',
+  'categoryName',
+  'jobOfferId',
+  'profileId',
+  'employerId',
+  'profileType',
+  'amountBucket',
+] as const;
+
+/**
+ * A retrieval hit.
+ *
+ * `score` is only comparable **within one call** — for hybrid search it is an
+ * RRF fusion score (`Σ 1/(60+rank)`, max ≈0.033), NOT a similarity. Never put it
+ * in an arithmetic expression or compare it to an absolute threshold; use `rank`
+ * for fusion across sources, or `searchDenseWithFilter` when you need a
+ * calibrated 0–1 similarity.
+ */
+export type QdrantHit = {
+  id: string | number;
+  score: number;
+  /** 0-based position in this result set. Stable basis for rank fusion. */
+  rank: number;
+  payload: Record<string, unknown> | null;
+};
+
+/** Maps a Cosine distance score onto [0,1]. Vectors are normalized. */
+function calibrateCosine(score: number): number {
+  return Math.min(1, Math.max(0, (1 + score) / 2));
+}
+
 const TRANSIENT_ERROR_CODES = new Set([
   'ECONNRESET',
   'ETIMEDOUT',
@@ -317,17 +357,12 @@ export class QdrantService implements OnModuleInit {
     );
   }
 
+  /** Hybrid (dense+sparse RRF) search. `score` is ordinal — see {@link QdrantHit}. */
   async searchHybrid(
     collectionName: string,
     text: string,
     limit = 10,
-  ): Promise<
-    Array<{
-      id: string | number;
-      score: number;
-      payload: Record<string, unknown> | null;
-    }>
-  > {
+  ): Promise<QdrantHit[]> {
     this.assertPrefix(collectionName);
     const { dense, sparse } = await this.embedHybridCached(text);
     const results = await retryTransient(() =>
@@ -345,26 +380,22 @@ export class QdrantService implements OnModuleInit {
         with_payload: true,
       }),
     );
-    return results.points.map((r) => ({
+    return results.points.map((r, i) => ({
       id: r.id,
       score: r.score,
+      rank: i,
       payload: r.payload as Record<string, unknown> | null,
     }));
   }
 
+  /** Filtered hybrid search. `score` is ordinal — see {@link QdrantHit}. */
   async searchHybridWithFilter(
     collectionName: string,
     text: string,
     filter: Record<string, unknown>,
     limit = 10,
     prefetchLimit = SEARCH_LIMIT,
-  ): Promise<
-    Array<{
-      id: string | number;
-      score: number;
-      payload: Record<string, unknown> | null;
-    }>
-  > {
+  ): Promise<QdrantHit[]> {
     this.assertPrefix(collectionName);
     const { dense, sparse } = await this.embedHybridCached(text);
     const results = await retryTransient(() =>
@@ -383,9 +414,39 @@ export class QdrantService implements OnModuleInit {
         with_payload: true,
       }),
     );
-    return results.points.map((r) => ({
+    return results.points.map((r, i) => ({
       id: r.id,
       score: r.score,
+      rank: i,
+      payload: r.payload as Record<string, unknown> | null,
+    }));
+  }
+
+  /**
+   * Dense-only search whose `score` IS a calibrated similarity on [0,1], so it
+   * can be used in arithmetic and compared to an absolute threshold. Use this
+   * for the ranking stage; use the hybrid methods for candidate generation.
+   */
+  async searchDenseWithFilter(
+    collectionName: string,
+    vector: number[],
+    filter: Record<string, unknown> | undefined,
+    limit = 10,
+  ): Promise<QdrantHit[]> {
+    this.assertPrefix(collectionName);
+    const results = await retryTransient(() =>
+      this.client.query(collectionName, {
+        query: vector,
+        using: 'dense',
+        ...(filter ? { filter } : {}),
+        limit,
+        with_payload: true,
+      }),
+    );
+    return results.points.map((r, i) => ({
+      id: r.id,
+      score: calibrateCosine(r.score),
+      rank: i,
       payload: r.payload as Record<string, unknown> | null,
     }));
   }
@@ -406,7 +467,12 @@ export class QdrantService implements OnModuleInit {
     const exists = collections.collections.some(
       (c) => c.name === collectionName,
     );
-    if (exists) return;
+    if (exists) {
+      // Indexes are not created retroactively, and an unindexed filter is a full
+      // scan — so an already-existing collection still needs this pass.
+      await this.ensurePayloadIndexes(collectionName);
+      return;
+    }
 
     try {
       await this.client.createCollection(collectionName, {
@@ -424,8 +490,38 @@ export class QdrantService implements OnModuleInit {
       });
       this.logger.log(`Collection created: ${collectionName}`);
     } catch (err: any) {
-      if (err?.status === 409) return; // already exists — concurrent creation race
+      if (err?.status === 409) {
+        // already exists — concurrent creation race
+        await this.ensurePayloadIndexes(collectionName);
+        return;
+      }
       throw err;
+    }
+    await this.ensurePayloadIndexes(collectionName);
+  }
+
+  /**
+   * Creates a keyword payload index per filterable key. Idempotent — Qdrant
+   * returns 409 for an index that already exists, which we swallow. Best-effort:
+   * a failure here degrades performance, never correctness, so it must not break
+   * indexing or search.
+   */
+  async ensurePayloadIndexes(collectionName: string): Promise<void> {
+    this.assertPrefix(collectionName);
+    for (const field of INDEXED_PAYLOAD_KEYS) {
+      try {
+        await this.client.createPayloadIndex(collectionName, {
+          field_name: field,
+          field_schema: 'keyword',
+        });
+      } catch (err: unknown) {
+        const status = (err as { status?: number } | null)?.status;
+        if (status === 409 || status === 400) continue; // exists / not present in payload
+        this.logger.warn(
+          `Payload index for "${field}" on ${collectionName} failed`,
+          err,
+        );
+      }
     }
   }
 

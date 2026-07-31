@@ -154,9 +154,12 @@ describe('runApplyJobFlow()', () => {
         'offer-1',
         'worker-1',
       );
+      // applicationService.create() owns the employer notification now, so both
+      // the web and the bot produce exactly one. The flow firing it too would
+      // send the employer a duplicate.
       expect(
         ctx.notificationService.sendNewApplicationToEmployer,
-      ).toHaveBeenCalledWith('app-1');
+      ).not.toHaveBeenCalled();
     });
 
     it('creates application on "oui" input', async () => {

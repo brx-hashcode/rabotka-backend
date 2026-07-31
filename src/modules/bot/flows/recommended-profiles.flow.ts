@@ -626,13 +626,13 @@ async function showWorkerDetail(
     };
   }
 
-  // Record profile_view signal on the employer — they are the one browsing worker profiles.
-  // This populates the employer's interest graph so future recommendations improve.
-  if (jobOfferId) {
-    void ctx.interestSignalService
-      .record(ctx.employerProfileId, jobOfferId, 'profile_view')
-      .catch(() => undefined);
-  }
+  // Record profile_view on the employer — they are the one browsing worker
+  // profiles. The object is the WORKER being viewed; passing the employer's own
+  // jobOfferId (as this did before) taught their vector about their own postings
+  // and threw away which worker was actually looked at.
+  void ctx.interestSignalService
+    .recordWorkerProfileView(ctx.employerProfileId, workerId)
+    .catch(() => undefined);
 
   const completedCount = await ctx.prisma.application.count({
     where: {

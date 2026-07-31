@@ -9,6 +9,7 @@ import { LogModule } from '../log/log.module';
 import { ContractModule } from '../contract/contract.module';
 import { SystemConfigModule } from '../system-config/system-config.module';
 import { MatchingModule } from '../matching/matching.module';
+import { RecommendationEngineModule } from '../recommendation-engine/recommendation-engine.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { MatchingModule } from '../matching/matching.module';
     ContractModule,
     SystemConfigModule,
     MatchingModule,
+    RecommendationEngineModule,
   ],
   controllers: [AdminApplicationController],
   providers: [ApplicationService],

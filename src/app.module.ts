@@ -23,6 +23,7 @@ import { ConversationModule } from './modules/conversation/conversation.module';
 import { JobOfferModule } from './modules/job-offer/job-offer.module';
 import { JobCategoryModule } from './modules/job-category/job-category.module';
 import { MatchingModule } from './modules/matching/matching.module';
+import { RecommendationEngineModule } from './modules/recommendation-engine/recommendation-engine.module';
 import { ApplicationModule } from './modules/application/application.module';
 import { MobileFeedModule } from './modules/mobile-feed/mobile-feed.module';
 import { PenaltyModule } from './modules/penalty/penalty.module';
@@ -140,6 +141,7 @@ import { HttpOnlyArcjetGuard } from './common/guards/http-only-arcjet.guard';
     JobOfferModule,
     JobCategoryModule,
     MatchingModule,
+    RecommendationEngineModule,
     ApplicationModule,
     MobileFeedModule,
     PenaltyModule,

@@ -12,6 +12,7 @@ import { ContactUnlockService } from '../../contact-unlock/contact-unlock.servic
 import { ContractService } from '../../contract/contract.service';
 import { SystemConfigService } from '../../system-config/system-config.service';
 import { MatchingService } from '../../matching/matching.service';
+import { InteractionEventService } from '../../recommendation-engine/interaction-event.service';
 import { ApplicationStatus, JobOfferStatus, PaymentFlow } from '@prisma/client';
 
 const JOB_OFFER_ID = 'offer-uuid-1';
@@ -144,6 +145,13 @@ describe('ApplicationService (extended)', () => {
           provide: MatchingService,
           useValue: {
             indexWorkerProfile: jest.fn().mockResolvedValue(undefined),
+          },
+        },
+        {
+          provide: InteractionEventService,
+          useValue: {
+            record: jest.fn().mockResolvedValue(undefined),
+            recordMany: jest.fn().mockResolvedValue(0),
           },
         },
       ],

@@ -250,6 +250,10 @@ describe('JobOfferService', () => {
       expect(result.nextCursor).toBeNull();
     });
 
+    /** The cursor is opaque base64url of `scheduledAt|createdAt|id`. */
+    const decodeCursor = (c: string) =>
+      Buffer.from(c, 'base64url').toString('utf8').split('|');
+
     it('returns nextCursor when there are more results', async () => {
       const moreOffers = Array.from({ length: 6 }, (_, i) =>
         makeRawOffer(`offer-${i}`),
@@ -257,7 +261,50 @@ describe('JobOfferService', () => {
       (prisma.$queryRaw as jest.Mock).mockResolvedValue(moreOffers);
       const result = await service.findActive(5);
       expect(result.data).toHaveLength(5);
-      expect(result.nextCursor).toBe('offer-4');
+
+      // Keyset cursor carries every ordered column, not just the id — ordering is
+      // by scheduled_at/created_at, so an id-only cursor skipped and repeated rows.
+      expect(result.nextCursor).not.toBeNull();
+      const [scheduledAt, createdAt, id] = decodeCursor(result.nextCursor!);
+      expect(id).toBe('offer-4');
+      expect(Number.isNaN(new Date(scheduledAt).getTime())).toBe(false);
+      expect(Number.isNaN(new Date(createdAt).getTime())).toBe(false);
+    });
+
+    it('derives the cursor from query order, not from the re-ranked page', async () => {
+      // Ranking reorders the page for display; the cursor must still point at the
+      // last row in SQL order or the next page skips/repeats offers.
+      const offers = Array.from({ length: 6 }, (_, i) =>
+        makeRawOffer(`offer-${i}`, {
+          latitude: 0,
+          longitude: i, // increasing distance → ranking reverses the page
+          category_id: 'cat-1',
+        }),
+      );
+      (prisma.$queryRaw as jest.Mock).mockResolvedValue(offers);
+
+      const result = await service.findActive(
+        5,
+        undefined,
+        undefined,
+        { lat: 0, lng: 0 },
+        ['cat-1'],
+      );
+
+      const [, , id] = decodeCursor(result.nextCursor!);
+      expect(id).toBe('offer-4');
+      // ...and the displayed page really was reordered by proximity.
+      expect(result.data[0].id).toBe('offer-0');
+    });
+
+    it('ignores an unparseable cursor instead of throwing', async () => {
+      (prisma.$queryRaw as jest.Mock).mockResolvedValue([
+        makeRawOffer('offer-1'),
+      ]);
+      // Old id-only cursors have no meaning under keyset paging.
+      await expect(
+        service.findActive(5, 'offer-legacy-id'),
+      ).resolves.toMatchObject({ nextCursor: null });
     });
 
     it('excludes offers already applied by a specific worker (calls $queryRaw)', async () => {
@@ -340,6 +387,95 @@ describe('JobOfferService', () => {
       expect(() =>
         service.validateCreateDto({ ...baseDto, quantity: 200 }),
       ).toThrow(BadRequestException);
+    });
+  });
+  describe('republish()', () => {
+    const OFFER_ID = 'offer-1';
+    const OWNER_ID = 'employer-1';
+    const hoursFromNow = (h: number) =>
+      new Date(Date.now() + h * 60 * 60 * 1000);
+
+    const expiredOffer = {
+      id: OFFER_ID,
+      title: 'Plombier',
+      employer_id: OWNER_ID,
+      status: JobOfferStatus.EXPIRED,
+      deleted_at: null,
+    };
+
+    beforeEach(() => {
+      (prisma.jobOffer.findUnique as jest.Mock).mockResolvedValue(expiredOffer);
+      (prisma.jobOffer.update as jest.Mock).mockImplementation(
+        ({ data }: { data: Record<string, unknown> }) =>
+          Promise.resolve({ ...expiredOffer, ...data }),
+      );
+    });
+
+    it('reopens the offer at the new date', async () => {
+      const when = hoursFromNow(48);
+      await service.republish(OFFER_ID, OWNER_ID, when);
+
+      expect(prisma.jobOffer.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: OFFER_ID },
+          data: { scheduled_at: when, status: JobOfferStatus.ACTIVE },
+        }),
+      );
+    });
+
+    it('rejects someone who does not own the offer', async () => {
+      // The bot flow only ever walked the employer's own queue, so it never
+      // needed this. A REST caller supplies an arbitrary id.
+      await expect(
+        service.republish(OFFER_ID, 'someone-else', hoursFromNow(48)),
+      ).rejects.toThrow(ForbiddenException);
+      expect(prisma.jobOffer.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects an offer that is not EXPIRED', async () => {
+      (prisma.jobOffer.findUnique as jest.Mock).mockResolvedValue({
+        ...expiredOffer,
+        status: JobOfferStatus.ACTIVE,
+      });
+      await expect(
+        service.republish(OFFER_ID, OWNER_ID, hoursFromNow(48)),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('rejects a date under the minimum lead time', async () => {
+      await expect(
+        service.republish(OFFER_ID, OWNER_ID, hoursFromNow(1)),
+      ).rejects.toThrow(BadRequestException);
+      expect(prisma.jobOffer.update).not.toHaveBeenCalled();
+    });
+
+    it('accepts a date exactly at the boundary', async () => {
+      // 4h + a second of slack, since Date.now() advances between the two calls.
+      await expect(
+        service.republish(OFFER_ID, OWNER_ID, hoursFromNow(4 + 1 / 3600)),
+      ).resolves.toBeDefined();
+    });
+
+    it('rejects an invalid date rather than writing NaN', async () => {
+      await expect(
+        service.republish(OFFER_ID, OWNER_ID, new Date('not-a-date')),
+      ).rejects.toThrow(BadRequestException);
+      expect(prisma.jobOffer.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects a missing or soft-deleted offer', async () => {
+      (prisma.jobOffer.findUnique as jest.Mock).mockResolvedValue(null);
+      await expect(
+        service.republish(OFFER_ID, OWNER_ID, hoursFromNow(48)),
+      ).rejects.toThrow(NotFoundException);
+
+      (prisma.jobOffer.findUnique as jest.Mock).mockResolvedValue({
+        ...expiredOffer,
+        deleted_at: new Date(),
+      });
+      await expect(
+        service.republish(OFFER_ID, OWNER_ID, hoursFromNow(48)),
+      ).rejects.toThrow(NotFoundException);
     });
   });
 });

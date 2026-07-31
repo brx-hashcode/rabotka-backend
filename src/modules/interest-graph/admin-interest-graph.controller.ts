@@ -47,9 +47,13 @@ export class AdminInterestGraphController {
 
   @Post(':userId/reseed')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Re-seed interest vector from profile for a user' })
+  @ApiOperation({
+    summary: 'Force re-seed interest vector from profile for a user',
+    description:
+      'Destructive: discards the learned interest vector and rebuilds it from declared profile attributes. Admin repair only.',
+  })
   async reseed(@Param('userId') userId: string): Promise<void> {
-    this.logger.log(`Manual re-seed triggered for user ${userId}`);
-    await this.clusters.reseedFromProfile(userId);
+    this.logger.log(`Manual force re-seed triggered for user ${userId}`);
+    await this.clusters.forceReseedFromProfile(userId);
   }
 }

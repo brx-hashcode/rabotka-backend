@@ -14,7 +14,7 @@ const ADDRESS_MIN = 10;
 const NOTE_MAX = 500;
 const QUANTITY_MIN = 1;
 const QUANTITY_MAX = 100;
-const MIN_HOURS_FROM_NOW = 4;
+import { MIN_HOURS_FROM_NOW } from '../../job-offer/job-offer.constants';
 const TOTAL_STEPS = 8;
 
 const PAYMENT_FLOW_LABELS: Record<string, string> = {

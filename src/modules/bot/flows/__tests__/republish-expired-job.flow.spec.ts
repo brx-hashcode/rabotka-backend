@@ -47,6 +47,11 @@ function makeCtx(jobOverrides: any = {}) {
         update: jest.fn().mockResolvedValue({ id: 'job-1' }),
       },
     } as any,
+    // Republishing lives in JobOfferService now, so the bot and the REST
+    // endpoint enforce the same ownership/status/date rules.
+    jobOfferService: {
+      republish: jest.fn().mockResolvedValue({ id: 'job-1' }),
+    } as any,
   };
 }
 
@@ -209,9 +214,11 @@ describe('runRepublishExpiredJobFlow', () => {
       expect(result.reply[0]).toContain('republiée');
     });
 
-    it('returns error when job update fails', async () => {
+    it('returns error when republishing fails', async () => {
       const ctx = makeCtx();
-      ctx.prisma.jobOffer.update.mockRejectedValue(new Error('Update failed'));
+      // Surfaces whatever JobOfferService.republish throws — including its
+      // ownership and non-EXPIRED guards, which the bot no longer duplicates.
+      ctx.jobOfferService.republish.mockRejectedValue(new Error('Update failed'));
       const futureDate = new Date(Date.now() + 86400000 * 7);
       const dd = String(futureDate.getDate()).padStart(2, '0');
       const mm = String(futureDate.getMonth() + 1).padStart(2, '0');

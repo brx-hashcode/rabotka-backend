@@ -24,7 +24,6 @@ import {
   accountSuspendedBotMessage,
   hasPenaltiesBotMessage,
   menuMessage,
-  restrictedMenuMessage,
   penaltiesListBotMessage,
 } from '../messages/menu.messages';
 import type { BotProfile, BotState } from '../types/bot-state.types';
@@ -103,6 +102,8 @@ import { runPostCancellationActionsFlow } from '../flows/post-cancellation-actio
 import { runJobStatusCheckFlow } from '../flows/job-status-check.flow';
 import { InterestSignalService } from '../../interest-graph/interest-signal.service';
 import { InterestRecommendationService } from '../../interest-graph/interest-recommendation.service';
+import { EngineRolloutService } from '../../recommendation-engine/engine-rollout.service';
+import { RecommendationEngineService } from '../../recommendation-engine/recommendation-engine.service';
 import { InvoiceService } from '../../invoice/invoice.service';
 import { PortfolioService } from '../../portfolio/portfolio.service';
 import { ConfigService } from '@nestjs/config';
@@ -175,6 +176,8 @@ export class BotOrchestratorService {
     private readonly matchingService: MatchingService,
     private readonly interestSignalService: InterestSignalService,
     private readonly interestRecommendationService: InterestRecommendationService,
+    private readonly engineRollout: EngineRolloutService,
+    private readonly recommendationEngine: RecommendationEngineService,
     private readonly invoiceService: InvoiceService,
     private readonly portfolioService: PortfolioService,
     private readonly queueService: QueueService,
@@ -278,19 +281,24 @@ export class BotOrchestratorService {
   }
 
   /**
-   * Input handling for a profile whose KYC is still under review. Only the two
-   * actions an admin may request during review are available — view/fix the
-   * profile, or file a claim — each answered with its webview template.
-   * Anything else re-shows the restricted menu.
+   * Input handling for a profile whose KYC is still under review.
+   *
+   * Answers everything with one template carrying a "Gérer mon profil" button.
+   * The old reply was a typed 1/2 menu whose options each just returned a
+   * webview template — so the typing step bought nothing, and it contradicted
+   * the onboarding message that already told the user to use the web app.
+   *
+   * The named commands stay honoured: someone who explicitly types "profil" or
+   * "reclamation" gets that specific page rather than the generic one.
    */
   private handlePendingKycInput(normalizedInput: string): string {
-    if (normalizedInput === '1' || CMD_PROFILE.includes(normalizedInput)) {
+    if (CMD_PROFILE.includes(normalizedInput)) {
       return templateReply(WHATSAPP_TEMPLATES.viewProfile.contentSid);
     }
-    if (normalizedInput === '2' || CMD_CREATE_CLAIM.includes(normalizedInput)) {
+    if (CMD_CREATE_CLAIM.includes(normalizedInput)) {
       return templateReply(WHATSAPP_TEMPLATES.createClaim.contentSid);
     }
-    return restrictedMenuMessage();
+    return templateReply(WHATSAPP_TEMPLATES.kycPendingMenu.contentSid);
   }
 
   /**
@@ -734,6 +742,7 @@ export class BotOrchestratorService {
       [FLOW_IDS.REPUBLISH_EXPIRED_JOB]: () =>
         runRepublishExpiredJobFlow(state, input, profile, {
           prisma: this.prisma,
+          jobOfferService: this.jobOfferService,
         }),
       [FLOW_IDS.JOB_STATUS_CHECK]: () =>
         runJobStatusCheckFlow(state, input, profile, {
@@ -1157,6 +1166,33 @@ export class BotOrchestratorService {
     return result.reply;
   }
 
+  /**
+   * Recommended offer ids for a worker, from whichever engine they are bucketed
+   * onto. v2 failing falls back to the legacy interest recommender rather than
+   * leaving the bot with nothing to show.
+   */
+  private async recommendedOfferIds(
+    workerId: string,
+    limit: number,
+  ): Promise<string[]> {
+    if ((await this.engineRollout.versionFor(workerId)) === 'v2') {
+      try {
+        const ranked = await this.recommendationEngine.recommendJobsForWorker(
+          workerId,
+          limit,
+        );
+        if (ranked.length > 0) return ranked.map((r) => r.id);
+      } catch (err) {
+        this.logger.warn(`v2 ranker failed for ${workerId}`, err);
+      }
+    }
+    const legacy = await this.interestRecommendationService.recommend(
+      workerId,
+      limit,
+    );
+    return legacy.map((r) => r.jobId);
+  }
+
   private async handleRecommendedJobsCommand(
     profile: BotProfile,
     profileId: string,
@@ -1169,11 +1205,7 @@ export class BotOrchestratorService {
       'Tapez *Menu* pour revenir au menu principal.',
     ].join('\n');
 
-    const offerResults = await this.interestRecommendationService.recommend(
-      profile.id,
-      20,
-    );
-    const offerIds = offerResults.map((r) => r.jobId);
+    const offerIds = await this.recommendedOfferIds(profile.id, 20);
 
     if (offerIds.length === 0) return [noOffersMsg];
 
@@ -1282,8 +1314,11 @@ export class BotOrchestratorService {
       select: { id: true },
     });
     const eligibleSet = new Set(eligibleProfiles.map((p) => p.id));
+    // The score gate is config-driven; the previous hardcoded `> 0.5` was above
+    // the range the ranker could actually produce, so this list was always empty.
+    const minScore = await this.systemConfig.getRecommendationMinScore();
     const eligibleResults = workerResults.filter(
-      (r) => eligibleSet.has(r.id) && r.score > 0.5,
+      (r) => eligibleSet.has(r.id) && r.score >= minScore,
     );
 
     if (eligibleResults.length === 0) {

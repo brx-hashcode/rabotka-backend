@@ -208,6 +208,79 @@ enum ConfigCategory {
   GENERAL
 }
 
+enum InteractionActor {
+  WORKER
+  EMPLOYER
+}
+
+enum InteractionObject {
+  JOB_OFFER
+  WORKER_PROFILE
+  EMPLOYER_PROFILE
+  PORTFOLIO
+  SEARCH
+  CATEGORY
+}
+
+enum InteractionSource {
+  WEB
+  BOT
+  MOBILE
+  SERVER
+  BACKFILL
+}
+
+enum InteractionKind {
+  // Passive / browsing
+  IMPRESSION_BATCH
+  VIEW
+  PROFILE_VIEW
+  PORTFOLIO_VIEW
+  // Explicit intent
+  SEARCH
+  SEARCH_CLICK
+  SAVE
+  UNSAVE
+  // Commitment
+  APPLY
+  APPLY_CANCEL
+  ACCEPT
+  REJECT
+  COMPLETE
+  NO_SHOW
+  // Outcome quality
+  RATE_POSITIVE
+  RATE_NEGATIVE
+  // Paid intent — the strongest employer signal there is
+  CONTACT_UNLOCK
+  CONTACT_PAID
+  // Explicit negatives
+  SKIP
+  DISLIKE
+  // Bookkeeping for evaluation (what we served, so CTR is computable)
+  RECOMMENDATION_SERVED
+}
+
+/**
+ * How an employer's REJECTED decision came about.
+ *
+ * Without this, a bulk auto-reject (offer filled up, so everyone still pending is
+ * closed out) is indistinguishable from an employer actively turning someone
+ * down. The recommender reads repeated rejections in a category as "this worker
+ * doesn't want this kind of work" — so losing two races would ban a worker from
+ * their own trade. Only EMPLOYER rejections may count as a negative signal.
+ */
+enum RejectionSource {
+  EMPLOYER
+  AUTO_FILL
+}
+
+/** Which way a rating points. Previously only derivable by joining assignments. */
+enum RatingDirection {
+  EMPLOYER_TO_WORKER
+  WORKER_TO_EMPLOYER
+}
+
 model SystemConfig {
   id         String         @id @default(uuid()) @db.Uuid
   key        String         @unique
@@ -287,6 +360,9 @@ model Profile {
   ratings_given                   Rating[]                      @relation("RatingRater")
   ratings_received                Rating[]                      @relation("RatingRatee")
   portfolio_items                 PortfolioItem[]
+  saved_jobs                      SavedJob[]
+  interaction_events              InteractionEvent[]            @relation("InteractionActor")
+  interaction_profile             InteractionProfile?
   deleted_at                      DateTime?                     @db.Timestamptz
 
   @@index([email], name: "idx_profile_email")
@@ -426,6 +502,110 @@ model ProfileCategory {
   @@map("profile_categories")
 }
 
+// A worker's bookmarked job offers ("save for later").
+model SavedJob {
+  profile_id   String   @db.Uuid
+  job_offer_id String   @db.Uuid
+  created_at   DateTime @default(now())
+  profile      Profile  @relation(fields: [profile_id], references: [id], onDelete: Cascade)
+  job_offer    JobOffer @relation(fields: [job_offer_id], references: [id], onDelete: Cascade)
+
+  @@id([profile_id, job_offer_id])
+  @@index([profile_id], name: "idx_saved_job_profile")
+  @@map("saved_jobs")
+}
+
+/**
+ * Append-only behavioural log — the durable source of truth for recommendations.
+ *
+ * Signals previously lived only in Qdrant, keyed `sha256(user__job__type)`, so a
+ * second view OVERWROTE the first: interaction frequency and recency-of-Nth-view
+ * were physically unrecoverable, and a Qdrant wipe erased all learned state with
+ * no replay path. Postgres owns the history now; Qdrant and Redis hold only
+ * derived, rebuildable projections.
+ *
+ * Polymorphic on both ends because the subject can be a worker or an employer and
+ * the object can be an offer, a profile, a portfolio or a search.
+ */
+model InteractionEvent {
+  id          String            @id @default(uuid()) @db.Uuid
+  occurred_at DateTime          @default(now()) @db.Timestamptz
+  actor_id    String            @db.Uuid
+  actor_type  InteractionActor
+  kind        InteractionKind
+  object_type InteractionObject
+  /// Null for SEARCH (the query lives in metadata) and IMPRESSION_BATCH (ids do).
+  object_id   String?           @db.Uuid
+
+  /// Denormalised at write time so the aggregator never has to join back.
+  category_id     String? @db.Uuid
+  /// The offer's employer, or the viewed profile's owner — powers counterparty affinity.
+  counterparty_id String? @db.Uuid
+
+  /// Weight resolved at write time, kept for honest replay after retuning.
+  weight  Float             @default(0)
+  source  InteractionSource
+  /// Which surface produced this — job_feed | job_search | worker_feed | detail | bot…
+  surface String?           @db.VarChar(40)
+
+  session_id String? @db.VarChar(64)
+  /// Ties IMPRESSION_BATCH ⇄ VIEW ⇄ APPLY back to one ranked response, so CTR and
+  /// position bias are computable.
+  request_id String? @db.VarChar(64)
+  position   Int?
+  dwell_ms   Int?
+  metadata   Json?
+
+  actor Profile @relation("InteractionActor", fields: [actor_id], references: [id], onDelete: Cascade)
+
+  @@index([actor_id, occurred_at(sort: Desc)], name: "idx_ievent_actor_time")
+  @@index([object_type, object_id, occurred_at(sort: Desc)], name: "idx_ievent_object_time")
+  @@index([kind, occurred_at(sort: Desc)], name: "idx_ievent_kind_time")
+  @@index([request_id], name: "idx_ievent_request")
+  /// BRIN: the table is append-only and physically time-ordered, so this is a
+  /// fraction of a btree's size and makes the retention prune cheap.
+  @@index([occurred_at], name: "idx_ievent_occurred_brin", type: Brin)
+  @@map("interaction_events")
+}
+
+/**
+ * Derived per-profile preference features, rebuildable from InteractionEvent at
+ * any time.
+ *
+ * Lives in Postgres rather than Redis on purpose: the SQL-only fallback tier has
+ * to read these when embeddings are disabled (`matching.use_embeddings` defaults
+ * to false) or Qdrant is unavailable. That tier is what keeps two identical
+ * profiles from getting identical feeds when the vector stack is off.
+ */
+model InteractionProfile {
+  profile_id  String   @id @db.Uuid
+  updated_at  DateTime @updatedAt
+  event_count Int      @default(0)
+  /// Drives the cold→warm→hot weight interpolation.
+  positive_count Int   @default(0)
+  last_event_at  DateTime?
+
+  /// { categoryId: 0..1 }
+  category_affinity     Json @default("{}")
+  /// { employerId | workerId: 0..1 }
+  counterparty_affinity Json @default("{}")
+  /// { 'petit budget' | 'budget moyen' | 'budget élevé': 0..1 }
+  amount_band_affinity  Json @default("{}")
+  /// { HOURLY | DAILY | MONTHLY: 0..1 }
+  payment_flow_affinity Json @default("{}")
+
+  negative_category_ids String[] @db.Uuid
+  /// Learned commute tolerance, replacing a global 5 km half-life for everyone.
+  distance_half_life_km Float?
+
+  vector_synced_at DateTime?
+
+  profile Profile @relation(fields: [profile_id], references: [id], onDelete: Cascade)
+
+  @@index([updated_at], name: "idx_iprofile_updated")
+  @@map("interaction_profiles")
+}
+
 model JobOffer {
   id                      String         @id @default(uuid()) @db.Uuid
   created_at              DateTime       @default(now())
@@ -453,6 +633,7 @@ model JobOffer {
   applications            Application[]
   assignments             Assignment[]
   contact_unlock_attempts ContactUnlockAttempt[]
+  saved_by                SavedJob[]
   deleted_at              DateTime?              @db.Timestamptz
 
   @@index([employer_id], name: "idx_job_offer_employer")
@@ -474,6 +655,14 @@ model Application {
   cancellation_reason String?
   penalty_applied     Boolean           @default(false)
   penalty_amount      Decimal?          @db.Decimal(10, 2)
+
+  /// Set when an employer accepts. `updated_at` is overwritten by every later
+  /// transition, so it can't stand in for the decision moment.
+  accepted_at DateTime?
+  rejected_at DateTime?
+  /// EMPLOYER (an actual decision) vs AUTO_FILL (offer filled, pending closed out).
+  /// Only EMPLOYER may be treated as a negative preference signal.
+  rejection_source RejectionSource?
 
   viewed_at DateTime?
 
@@ -1095,6 +1284,9 @@ model Rating {
   ratee_id      String   @db.Uuid
   assignment_id String   @db.Uuid
   score         Int
+  /// Stored rather than re-derived: telling worker→employer from employer→worker
+  /// otherwise needs a join through assignment → job_offer on every read.
+  direction     RatingDirection?
 
   rater      Profile    @relation("RatingRater", fields: [rater_id], references: [id], onDelete: Cascade)
   ratee      Profile    @relation("RatingRatee", fields: [ratee_id], references: [id], onDelete: Cascade)
