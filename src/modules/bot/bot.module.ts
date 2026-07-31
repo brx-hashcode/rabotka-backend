@@ -10,6 +10,7 @@ import { WalletModule } from '../wallet/wallet.module';
 import { SystemConfigModule } from '../system-config/system-config.module';
 import { MatchingModule } from '../matching/matching.module';
 import { InterestGraphModule } from '../interest-graph/interest-graph.module';
+import { RecommendationEngineModule } from '../recommendation-engine/recommendation-engine.module';
 import { InvoiceModule } from '../invoice/invoice.module';
 import { PortfolioModule } from '../portfolio/portfolio.module';
 import { BotStateService } from './services/bot-state.service';
@@ -33,6 +34,7 @@ import { BotNotificationService } from './services/bot-notification.service';
     forwardRef(() => WalletModule),
     MatchingModule,
     InterestGraphModule,
+    RecommendationEngineModule,
     InvoiceModule,
     forwardRef(() => PortfolioModule),
   ],

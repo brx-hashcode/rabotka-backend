@@ -1,4 +1,6 @@
-export const MIN_HOURS_FROM_NOW = 4;
+// Re-exported so the bot flows' existing imports keep working; the rule itself
+// belongs to the job-offer domain, which the REST republish endpoint also uses.
+export { MIN_HOURS_FROM_NOW } from '../../job-offer/job-offer.constants';
 
 const DATE_TIME_REGEX = /^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})$/;
 

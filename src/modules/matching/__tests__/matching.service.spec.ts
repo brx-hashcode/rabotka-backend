@@ -37,6 +37,9 @@ function makeSystemConfig(enabled = true) {
     isSimilarityEnabled: jest.fn().mockResolvedValue(enabled),
     getMatchingReliabilityThreshold: jest.fn().mockResolvedValue(50),
     getRecommendationContactFee: jest.fn().mockResolvedValue(100),
+    // Must be stubbed: without it every search method throws inside its try and
+    // returns [] via the catch, so assertions silently exercise the error path.
+    getRecommendationMinScore: jest.fn().mockResolvedValue(0.3),
   };
 }
 

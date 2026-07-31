@@ -1,4 +1,5 @@
 import type { PrismaService } from '../../../common/services/prisma/prisma.service';
+import type { JobOfferService } from '../../job-offer/job-offer.service';
 import type { BotProfile, BotState } from '../types/bot-state.types';
 import type { FlowResult } from '../types/flow.types';
 import { CMD_MENU } from '../bot.constants';
@@ -11,6 +12,7 @@ import {
 
 export type RepublishExpiredJobContext = {
   prisma: PrismaService;
+  jobOfferService: Pick<JobOfferService, 'republish'>;
 };
 
 type ExpiredJobLite = {
@@ -225,13 +227,10 @@ async function handleStep1(
   if (!currentId) return MENU_REPLY;
 
   try {
-    await ctx.prisma.jobOffer.update({
-      where: { id: currentId },
-      data: {
-        scheduled_at: dt,
-        status: 'ACTIVE',
-      },
-    });
+    // Delegates to the shared service so the bot and the REST endpoint enforce
+    // the same ownership, status and minimum-date rules. The date checks above
+    // stay because they produce the chat-shaped retry prompt rather than a 400.
+    await ctx.jobOfferService.republish(currentId, profile.id, dt);
 
     const successMsg = [
       `✅ *Offre republiée !*`,

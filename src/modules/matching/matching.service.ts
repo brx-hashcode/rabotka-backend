@@ -8,15 +8,18 @@ const COLLECTION_WORKERS = COLLECTIONS.WORKERS;
 const COLLECTION_JOBS = COLLECTIONS.JOBS;
 const COLLECTION_EMPLOYERS = COLLECTIONS.EMPLOYERS;
 
-// Score thresholds
-const MIN_MATCH_SCORE = 0.5;
 const MIN_NOTIFICATION_SCORE = 0.55;
 
-// Re-ranking weights
+// Re-ranking weights. These are RELATIVE — every score is divided by the sum of
+// the weights actually applied, so `score` is always on [0,1] and a threshold
+// means the same thing however these are tuned.
 const W_VECTOR = 0.6;
 const W_RELIABILITY = 0.2;
 const W_RECENCY = 0.1;
 const W_CATEGORY_EXACT = 0.1;
+
+/** Multiplier applied to a candidate the user already rejected or cancelled. */
+const NEGATIVE_HISTORY_MULTIPLIER = 0.3;
 
 // Negative signal: only exclude category if worker cancelled/rejected > this many times
 const NEGATIVE_CATEGORY_THRESHOLD = 2;
@@ -25,7 +28,7 @@ const NEGATIVE_CATEGORY_THRESHOLD = 2;
 const MAX_PER_CATEGORY_JOBS = 3;
 const MAX_PER_CATEGORY_WORKERS = 5;
 
-export { MIN_NOTIFICATION_SCORE };
+export { MIN_NOTIFICATION_SCORE, NEGATIVE_HISTORY_MULTIPLIER };
 
 interface ScoredHit {
   id: string;
@@ -81,6 +84,53 @@ function computeAmountBucket(
 function computeRecencyFactor(createdAt: Date): number {
   const ageHours = (Date.now() - createdAt.getTime()) / (1000 * 60 * 60);
   return Math.max(0.1, 1.0 - ageHours / 168); // 168 = 7 days in hours
+}
+
+/**
+ * Converts a retrieval position into a calibrated [0,1] relevance term.
+ *
+ * Retrieval gives us an ordering, not a similarity: hybrid search returns an RRF
+ * fusion score (`Σ 1/(60+rank)`, max ≈0.033 for a doc ranked first in both
+ * prefetches). Multiplying that by a weight makes the semantic term ~2% of the
+ * total and puts any absolute threshold out of reach. Position in the result set
+ * is the only honest signal the fusion gives us, so use it directly.
+ */
+export function rankRelevance(rank: number, total: number): number {
+  if (total <= 1) return 1;
+  return 1 - rank / (total - 1);
+}
+
+/**
+ * Weighted mean over the terms that are actually available, divided by ΣW.
+ *
+ * Terms that don't apply to an entity must be OMITTED, not passed as a neutral
+ * constant — feeding `0.5` for "reliability of a job offer" adds a fixed floor to
+ * every score, which is what made the old thresholds unreachable and made
+ * downranking impossible.
+ */
+export function weightedMean(terms: { value: number; weight: number }[]): number {
+  const totalWeight = terms.reduce((s, t) => s + t.weight, 0);
+  if (totalWeight <= 0) return 0;
+  const sum = terms.reduce((s, t) => s + t.value * t.weight, 0);
+  return Math.min(1, Math.max(0, sum / totalWeight));
+}
+
+/**
+ * Drops candidates below `minScore`, but never below `keepAtLeast` results.
+ *
+ * A relevance threshold must not be able to empty a feed. A misconfigured or
+ * miscalibrated threshold previously did exactly that, silently, on three code
+ * paths — so the floor is enforced structurally rather than by convention.
+ */
+export function applyThreshold<T extends { score: number }>(
+  ranked: T[],
+  minScore: number,
+  keepAtLeast: number,
+): T[] {
+  const passing = ranked.filter((r) => r.score >= minScore);
+  return passing.length >= Math.min(keepAtLeast, ranked.length)
+    ? passing
+    : ranked.slice(0, Math.min(keepAtLeast, ranked.length));
 }
 
 function diversifyByCategory(
@@ -299,26 +349,29 @@ export class MatchingService {
     });
     const profileMap = new Map(profiles.map((p) => [p.id, p]));
 
-    const ranked: ScoredHitWithCategory[] = hits.map((hit) => {
+    // `hits` arrives in descending retrieval order, so the index IS the rank.
+    // No recency term: a worker profile has no meaningful freshness, and passing a
+    // constant for it would just add a fixed floor to every score.
+    const ranked: ScoredHitWithCategory[] = hits.map((hit, rank) => {
       const profile = profileMap.get(hit.id);
-      const reliabilityFactor = (profile?.reliability_score ?? 100) / 100;
-      const categoryExactMatch =
+      const matchesJobCategory =
         jobCategoryId != null &&
-        profile?.categories.some((c) => c.category_id === jobCategoryId)
-          ? 1.0
-          : 0.0;
-      const recencyFactor = 0.5; // neutral for worker ranking
-      const finalScore =
-        hit.score * W_VECTOR +
-        reliabilityFactor * W_RELIABILITY +
-        recencyFactor * W_RECENCY +
-        categoryExactMatch * W_CATEGORY_EXACT;
-      const workerCategoryId =
-        jobCategoryId != null &&
-        profile?.categories.some((c) => c.category_id === jobCategoryId)
-          ? jobCategoryId
-          : (profile?.categories[0]?.category_id ?? null);
-      return { id: hit.id, score: finalScore, categoryId: workerCategoryId };
+        (profile?.categories.some((c) => c.category_id === jobCategoryId) ??
+          false);
+
+      const score = weightedMean([
+        { value: rankRelevance(rank, hits.length), weight: W_VECTOR },
+        {
+          value: (profile?.reliability_score ?? 100) / 100,
+          weight: W_RELIABILITY,
+        },
+        { value: matchesJobCategory ? 1 : 0, weight: W_CATEGORY_EXACT },
+      ]);
+
+      const workerCategoryId = matchesJobCategory
+        ? jobCategoryId
+        : (profile?.categories[0]?.category_id ?? null);
+      return { id: hit.id, score, categoryId: workerCategoryId };
     });
 
     return ranked.sort((a, b) => b.score - a.score);
@@ -352,29 +405,30 @@ export class MatchingService {
       negativeApplications.map((a) => a.job_offer_id),
     );
 
-    const ranked: ScoredHitWithCategory[] = hits.map((hit) => {
+    // `hits` arrives in descending retrieval order, so the index IS the rank.
+    // No reliability term: that's a worker attribute, not a property of an offer.
+    const ranked: ScoredHitWithCategory[] = hits.map((hit, rank) => {
       const job = jobMap.get(hit.id);
-      const recencyFactor = job ? computeRecencyFactor(job.created_at) : 0.5;
-      const categoryExactMatch =
-        job?.category_id != null && workerCategoryIds.includes(job.category_id)
-          ? 1.0
-          : 0.0;
-      let finalScore =
-        hit.score * W_VECTOR +
-        0.5 * W_RELIABILITY + // neutral — reliability is a worker attribute
-        recencyFactor * W_RECENCY +
-        categoryExactMatch * W_CATEGORY_EXACT;
+      const matchesWorkerCategory =
+        job?.category_id != null && workerCategoryIds.includes(job.category_id);
 
-      // Downrank jobs with negative history
-      if (negativeJobIds.has(hit.id)) {
-        finalScore *= 0.3;
-      }
+      const relevance = weightedMean([
+        { value: rankRelevance(rank, hits.length), weight: W_VECTOR },
+        {
+          // A missing job is a stale index entry; treat it as maximally old
+          // rather than neutral so it sinks instead of floating.
+          value: job ? computeRecencyFactor(job.created_at) : 0,
+          weight: W_RECENCY,
+        },
+        { value: matchesWorkerCategory ? 1 : 0, weight: W_CATEGORY_EXACT },
+      ]);
 
-      return {
-        id: hit.id,
-        score: finalScore,
-        categoryId: job?.category_id ?? null,
-      };
+      // Multiplicative, so it actually suppresses rather than being swamped.
+      const score = negativeJobIds.has(hit.id)
+        ? relevance * NEGATIVE_HISTORY_MULTIPLIER
+        : relevance;
+
+      return { id: hit.id, score, categoryId: job?.category_id ?? null };
     });
 
     return ranked.sort((a, b) => b.score - a.score);
@@ -786,8 +840,9 @@ export class MatchingService {
       // Phase 3: re-rank
       const reRanked = await this.reRankWorkers(hits, job.category_id ?? null);
 
-      // Phase 4: score threshold
-      const filtered = reRanked.filter((r) => r.score >= MIN_MATCH_SCORE);
+      // Phase 4: score threshold — floored so it can never empty the result
+      const minScore = await this.systemConfig.getRecommendationMinScore();
+      const filtered = applyThreshold(reRanked, minScore, topN);
 
       // Phase 6: diversity then slice to topN
       const diverse = diversifyByCategory(
@@ -884,8 +939,9 @@ export class MatchingService {
         workerCategoryIds,
       );
 
-      // Phase 4: score threshold
-      const filtered = reRanked.filter((r) => r.score >= MIN_MATCH_SCORE);
+      // Phase 4: score threshold — floored so it can never empty the feed
+      const minScore = await this.systemConfig.getRecommendationMinScore();
+      const filtered = applyThreshold(reRanked, minScore, topN);
 
       // Phase 6: diversity then slice
       const diverse = diversifyByCategory(
@@ -944,7 +1000,10 @@ export class MatchingService {
       );
       const hits = mapSearchHitsToScoredIds(results, 'profileId');
       const reRanked = await this.reRankWorkers(hits, null);
-      const filtered = reRanked.filter((r) => r.score >= MIN_MATCH_SCORE);
+      // Threshold is config-driven (matching.recommendation_min_score) and
+      // floored so it can never empty the feed.
+      const minScore = await this.systemConfig.getRecommendationMinScore();
+      const filtered = applyThreshold(reRanked, minScore, topN);
       return diversifyByCategory(filtered, MAX_PER_CATEGORY_WORKERS, topN);
     } catch (err) {
       this.logger.error(
