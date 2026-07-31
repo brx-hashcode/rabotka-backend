@@ -155,7 +155,8 @@ describe('JobOfferService (extended)', () => {
     });
 
     it('returns offer with employer info', async () => {
-      (prisma.jobOffer.findUnique as jest.Mock).mockResolvedValue({
+      // findById uses findFirst (it filters on deleted_at), not findUnique.
+      (prisma.jobOffer.findFirst as jest.Mock).mockResolvedValue({
         ...mockOffer,
         employer: {
           id: EMPLOYER_ID,

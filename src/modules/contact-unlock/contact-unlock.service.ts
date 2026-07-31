@@ -20,6 +20,7 @@ import {
   PaymentStatus,
   PaymentType,
   Prisma,
+  RejectionSource,
   WalletTransactionType,
 } from '@prisma/client';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
@@ -610,7 +611,13 @@ export class ContactUnlockService {
       const ids = leftovers.map((a) => a.id);
       await tx.application.updateMany({
         where: { id: { in: ids } },
-        data: { status: ApplicationStatus.REJECTED },
+        data: {
+          status: ApplicationStatus.REJECTED,
+          rejected_at: new Date(),
+          // Closed out because the offer is no longer open — nobody judged these
+          // workers, so this must never read as a negative preference signal.
+          rejection_source: RejectionSource.AUTO_FILL,
+        },
       });
       return ids;
     });
@@ -783,6 +790,10 @@ export class ContactUnlockService {
           status: ApplicationStatus.REJECTED,
           cancelled_at: now,
           cancellation_reason: `Déverrouillage rejeté par ${rejectedByLabel}`,
+          rejected_at: now,
+          // The contact unlock lapsed; this is not a judgement of the worker's
+          // suitability, so it stays out of negative preference signals.
+          rejection_source: RejectionSource.AUTO_FILL,
         },
       });
       await tx.assignment.updateMany({

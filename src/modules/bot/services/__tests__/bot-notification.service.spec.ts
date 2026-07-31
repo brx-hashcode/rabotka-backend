@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { BotNotificationService } from '../bot-notification.service';
+import { WHATSAPP_TEMPLATES } from '../../../../common/constants/whatsapp-templates';
 
 jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => {});
 
@@ -107,21 +108,36 @@ describe('BotNotificationService', () => {
   });
 
   describe('sendNewApplicationToEmployer()', () => {
-    it('sends the new-application template to employer when no active state', async () => {
+    it('sends the new-application template to the employer', async () => {
       deps.botState.get.mockResolvedValue(null);
       await service.sendNewApplicationToEmployer('app-1');
+      // Asserted against the constant, not a literal, so swapping in a newly
+      // approved template does not require touching this test.
       expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+24200000002',
-        'HXce200c3e6c6e80b96b1c31e2daefac9e',
+        WHATSAPP_TEMPLATES.newApplication.contentSid,
         expect.objectContaining({ '2': expect.any(String) }),
       );
-      expect(deps.botState.setIfFlowAbsentOrMatches).toHaveBeenCalled();
     });
 
-    it('pushes to inbox when employer has active flow', async () => {
+    it('passes the applicationId as the CTA button URL suffix', async () => {
+      await service.sendNewApplicationToEmployer('app-1');
+      expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.any(String),
+        expect.objectContaining({ '8': 'app-1' }),
+      );
+    });
+
+    it('no longer arms the accept/refuse flow or queues an inbox entry', async () => {
+      // The approved template carries a URL button to /candidatures/:id instead
+      // of « Accepter » / « Refuser », so there is nothing a typed reply drives.
       deps.botState.setIfFlowAbsentOrMatches.mockResolvedValue(false);
       await service.sendNewApplicationToEmployer('app-1');
-      expect(deps.botInbox.push).toHaveBeenCalled();
+      expect(deps.botState.setIfFlowAbsentOrMatches).not.toHaveBeenCalled();
+      expect(deps.botInbox.push).not.toHaveBeenCalled();
+      // ...and the send still happens regardless of chat state.
+      expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalled();
     });
 
     it('sends the notification as a template (not media) even when worker has avatar', async () => {
@@ -172,7 +188,7 @@ describe('BotNotificationService', () => {
       await service.sendApplicationAcceptedToWorker('app-1');
       expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+24200000001',
-        'HX8806c575b1a3a0ee6d4a76b57372e42a',
+        WHATSAPP_TEMPLATES.applicationAccepted.contentSid,
         expect.objectContaining({ '2': expect.any(String) }),
       );
     });
@@ -425,6 +441,58 @@ describe('BotNotificationService', () => {
         expect.objectContaining({ '2': 'Plombier' }),
       );
     });
+
+    it('still sends when the worker is mid-flow', async () => {
+      // Regression: this used to `return` when the flow state could not be
+      // written, so a worker who happened to be mid-conversation silently
+      // received no job recommendations at all. Delivery must never depend on
+      // chat state.
+      deps.botState.setIfFlowAbsentOrMatches.mockResolvedValue(false);
+      deps.prisma.profile.findUnique.mockResolvedValue({
+        phone: '+242001',
+        first_name: 'Alice',
+        status: 'ACTIVE',
+        profile_type: 'WORKER',
+      });
+      (deps.prisma as any).jobOffer = {
+        findUnique: jest.fn().mockResolvedValue({
+          title: 'Plombier',
+          amount: 5000,
+          payment_flow: null,
+          address: '10 Rue Paris',
+          scheduled_at: new Date('2026-06-01T10:00:00Z'),
+        }),
+      };
+
+      await service.sendRecommendedJobNotification('worker-1', 'jo-1');
+
+      expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalled();
+    });
+
+    it('still sends when arming the flow throws', async () => {
+      deps.botState.setIfFlowAbsentOrMatches.mockRejectedValue(
+        new Error('redis down'),
+      );
+      deps.prisma.profile.findUnique.mockResolvedValue({
+        phone: '+242001',
+        first_name: 'Alice',
+        status: 'ACTIVE',
+        profile_type: 'WORKER',
+      });
+      (deps.prisma as any).jobOffer = {
+        findUnique: jest.fn().mockResolvedValue({
+          title: 'Plombier',
+          amount: 5000,
+          payment_flow: null,
+          address: '10 Rue Paris',
+          scheduled_at: new Date('2026-06-01T10:00:00Z'),
+        }),
+      };
+
+      await service.sendRecommendedJobNotification('worker-1', 'jo-1');
+
+      expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalled();
+    });
   });
 
   describe('sendRatingRequest()', () => {
@@ -445,7 +513,10 @@ describe('BotNotificationService', () => {
       );
     });
 
-    it('skips when state not written', async () => {
+    it('still sends when the user is mid-flow, and also queues it', async () => {
+      // Previously this returned early and sent nothing, so anyone who happened
+      // to be mid-conversation never received the rating request at all. The
+      // inbox push is an addition to the send, not a substitute.
       deps.botState.setIfFlowAbsentOrMatches.mockResolvedValue(false);
       await service.sendRatingRequest({
         raterProfileId: 'p-1',
@@ -455,7 +526,11 @@ describe('BotNotificationService', () => {
         rateeLabel: 'Alice',
         jobTitle: 'Plombier',
       });
-      expect(deps.whatsApp.sendTemplateMessage).not.toHaveBeenCalled();
+      expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalled();
+      expect(deps.botInbox.push).toHaveBeenCalledWith(
+        'p-1',
+        expect.objectContaining({ type: 'pending_rating' }),
+      );
     });
   });
 });

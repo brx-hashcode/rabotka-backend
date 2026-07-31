@@ -69,7 +69,7 @@ export class InterestClusterService implements OnModuleInit {
 
     const existing: { vector: number[]; payload: Record<string, unknown> } =
       (await this.retrievePoint(pointId)) ??
-      (await this.seedFromProfile(userId, pointId));
+      (await this.seedFromProfile(userId, pointId, null));
 
     const signalCount = ((existing.payload.total_signals as number) ?? 0) + 1;
 
@@ -141,14 +141,51 @@ export class InterestClusterService implements OnModuleInit {
 
   // ── Public re-seed (admin / backfill) ────────────────────────────────────
 
-  async reseedFromProfile(userId: string): Promise<void> {
-    const exists = await this.prisma.profile.count({ where: { id: userId, status: 'ACTIVE' } });
+  /**
+   * Seeds a cold-start interest vector from declared profile attributes, but
+   * NEVER discards learned state.
+   *
+   * The previous `reseedFromProfile` overwrote the point with `total_signals: 0`
+   * and no `seen_job_ids`/`categories`. Since it runs from the KYC-verified hook,
+   * getting verified erased everything the user had taught the system. Now: no-op
+   * once real signals exist, and blend rather than replace otherwise.
+   */
+  async ensureSeeded(userId: string): Promise<void> {
+    const exists = await this.prisma.profile.count({
+      where: { id: userId, status: 'ACTIVE' },
+    });
+    if (!exists) {
+      throw new NotFoundException(`Profile ${userId} not found or not active`);
+    }
+
+    const pointId = toPointId(`interest__${userId}`);
+    const existing = await this.retrievePoint(pointId);
+    const learnedSignals = (existing?.payload.total_signals as number) ?? 0;
+    if (existing && learnedSignals > 0) {
+      this.logger.debug(
+        `Interest vector kept for user=${userId} (${learnedSignals} signals)`,
+      );
+      return;
+    }
+
+    await this.seedFromProfile(userId, pointId, existing);
+    this.logger.log(`Seeded interest vector for user=${userId}`);
+  }
+
+  /**
+   * Force a re-seed, discarding the current vector. Admin repair only — this is
+   * destructive, so it is never called from a lifecycle hook.
+   */
+  async forceReseedFromProfile(userId: string): Promise<void> {
+    const exists = await this.prisma.profile.count({
+      where: { id: userId, status: 'ACTIVE' },
+    });
     if (!exists) {
       throw new NotFoundException(`Profile ${userId} not found or not active`);
     }
     const pointId = toPointId(`interest__${userId}`);
-    await this.seedFromProfile(userId, pointId);
-    this.logger.log(`Re-seeded interest vector for user=${userId}`);
+    await this.seedFromProfile(userId, pointId, null);
+    this.logger.log(`Force re-seeded interest vector for user=${userId}`);
   }
 
   // ── Seed from declared profile (cold start) ───────────────────────────────
@@ -156,6 +193,7 @@ export class InterestClusterService implements OnModuleInit {
   private async seedFromProfile(
     userId: string,
     pointId: string,
+    existing: { vector: number[]; payload: Record<string, unknown> } | null,
   ): Promise<{ vector: number[]; payload: Record<string, unknown> }> {
     const worker = await this.prisma.profile.findUnique({
       where: { id: userId },
@@ -178,16 +216,24 @@ export class InterestClusterService implements OnModuleInit {
     if (worker?.description) parts.push(worker.description);
 
     const profileText = parts.filter(Boolean).join(' ').slice(0, 500);
-    const vector = profileText
+    const seedVector = profileText
       ? await this.qdrant.embed(profileText)
       : Array.from<number>({ length: VECTOR_DIM }).fill(0);
 
-    const norm = Math.sqrt(vector.reduce((s, x) => s + x * x, 0)) || 1;
-    const normalized = vector.map((x) => x / norm);
+    // Blend rather than replace when a vector already exists, so re-seeding
+    // nudges the profile toward declared attributes instead of wiping it.
+    const blended = existing
+      ? seedVector.map((x, i) => 0.5 * (existing.vector[i] ?? 0) + 0.5 * x)
+      : seedVector;
 
+    const norm = Math.sqrt(blended.reduce((s, x) => s + x * x, 0)) || 1;
+    const normalized = blended.map((x) => x / norm);
+
+    // Carry forward everything learned; only stamp the seeding metadata.
     const payload: Record<string, unknown> = {
+      ...(existing?.payload ?? {}),
       user_id: userId,
-      total_signals: 0,
+      total_signals: (existing?.payload.total_signals as number) ?? 0,
       seeded_at: new Date().toISOString(),
     };
 
