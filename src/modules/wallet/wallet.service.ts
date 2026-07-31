@@ -1,4 +1,8 @@
 import {
+  AdminCacheService,
+  ADMIN_LIST_TTL_SECONDS,
+} from '../../common/services/cache/admin-cache.service';
+import {
   Injectable,
   BadRequestException,
   NotFoundException,
@@ -75,6 +79,7 @@ export class WalletService {
     private readonly prisma: PrismaService,
     private readonly systemConfig: SystemConfigService,
     private readonly invoiceService: InvoiceService,
+    private readonly cache: AdminCacheService,
   ) {}
 
   async getOrCreateSystemWallet(): Promise<{
@@ -783,6 +788,27 @@ export class WalletService {
     page: number;
     limit: number;
   }> {
+    return this.cache.wrap(
+      this.cache.listKey('wallet-transactions', params),
+      ADMIN_LIST_TTL_SECONDS,
+      () => this.loadListTransactionsForAdmin(params),
+    );
+  }
+
+  private async loadListTransactionsForAdmin(params: {
+    page: number;
+    limit: number;
+    q?: string;
+    type?: string[];
+    created_from?: string;
+    created_to?: string;
+    deleted?: boolean;
+  }): Promise<{
+    data: AdminWalletTransactionItem[];
+    total: number;
+    page: number;
+    limit: number;
+  }> {
     const { page, limit } = params;
     const systemWallet = await this.getOrCreateSystemWallet();
 
@@ -882,6 +908,7 @@ export class WalletService {
       where: { id: { in: ids }, deleted_at: null },
       data: { deleted_at: new Date() },
     });
+    await this.cache.invalidate('wallet-transactions');
     return { count };
   }
 

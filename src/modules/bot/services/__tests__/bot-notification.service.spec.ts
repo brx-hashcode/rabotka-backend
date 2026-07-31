@@ -201,7 +201,7 @@ describe('BotNotificationService', () => {
       await service.sendApplicationAcceptedToWorker('app-1');
       expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+24200000001',
-        'HXee503e4fe516ce55d67b22ca6e4ef178',
+        WHATSAPP_TEMPLATES.applicationAcceptedUnlock.contentSid,
         expect.objectContaining({ '2': expect.any(String) }),
       );
       expect(deps.botState.setIfFlowAbsentOrMatches).toHaveBeenCalled();
@@ -230,7 +230,7 @@ describe('BotNotificationService', () => {
       await service.sendApplicationRejectedToWorker('app-1');
       expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+24200000001',
-        'HXba7e8c10a2a8f9485dd4cd20288807b8',
+        WHATSAPP_TEMPLATES.applicationRejected.contentSid,
         {},
       );
     });
@@ -250,7 +250,7 @@ describe('BotNotificationService', () => {
       await service.sendCancellationToEmployer('app-1', 'Malade', false);
       expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+24200000002',
-        'HXc6a4943330c840a93b1d85849a169fcd',
+        WHATSAPP_TEMPLATES.cancellation.contentSid,
         expect.objectContaining({ '4': 'Malade' }),
       );
     });
@@ -274,46 +274,6 @@ describe('BotNotificationService', () => {
       );
       await expect(
         service.sendCancellationToEmployer('app-1', null, false),
-      ).resolves.toBeUndefined();
-    });
-  });
-
-  describe('sendJobCompletedToWorker()', () => {
-    it('sends the job-completed template to worker', async () => {
-      await service.sendJobCompletedToWorker('app-1');
-      expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
-        '+24200000001',
-        'HX2956d3638cf58ed03aaf638a2f67d03a',
-        expect.objectContaining({ '1': expect.any(String) }),
-      );
-    });
-
-    it('swallows errors gracefully', async () => {
-      deps.prisma.application.findUnique.mockRejectedValueOnce(
-        new Error('fail'),
-      );
-      await expect(
-        service.sendJobCompletedToWorker('app-1'),
-      ).resolves.toBeUndefined();
-    });
-  });
-
-  describe('sendJobCancelledByEmployerToWorker()', () => {
-    it('sends the job-cancelled template to worker', async () => {
-      await service.sendJobCancelledByEmployerToWorker('app-1');
-      expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
-        '+24200000001',
-        'HX58f4367495ec70f8a20be8b5045d99b9',
-        expect.objectContaining({ '1': expect.any(String) }),
-      );
-    });
-
-    it('swallows errors gracefully', async () => {
-      deps.prisma.application.findUnique.mockRejectedValueOnce(
-        new Error('fail'),
-      );
-      await expect(
-        service.sendJobCancelledByEmployerToWorker('app-1'),
       ).resolves.toBeUndefined();
     });
   });
@@ -392,7 +352,7 @@ describe('BotNotificationService', () => {
       );
       expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+242001',
-        'HX6b46effc11d4b98b5c7ca6665fff7f53',
+        WHATSAPP_TEMPLATES.unlockExpiredConversion.contentSid,
         { '1': '500' },
       );
     });
@@ -495,42 +455,4 @@ describe('BotNotificationService', () => {
     });
   });
 
-  describe('sendRatingRequest()', () => {
-    it('sends rating request when state written', async () => {
-      deps.botState.setIfFlowAbsentOrMatches.mockResolvedValue(true);
-      await service.sendRatingRequest({
-        raterProfileId: 'p-1',
-        raterPhone: '+242001',
-        rateeId: 'p-2',
-        assignmentId: 'asgn-1',
-        rateeLabel: 'Alice',
-        jobTitle: 'Plombier',
-      });
-      expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
-        '+242001',
-        'HXb5173adfc2ec51a7158943f9b11cdbcb',
-        { '1': 'Plombier', '2': 'Alice' },
-      );
-    });
-
-    it('still sends when the user is mid-flow, and also queues it', async () => {
-      // Previously this returned early and sent nothing, so anyone who happened
-      // to be mid-conversation never received the rating request at all. The
-      // inbox push is an addition to the send, not a substitute.
-      deps.botState.setIfFlowAbsentOrMatches.mockResolvedValue(false);
-      await service.sendRatingRequest({
-        raterProfileId: 'p-1',
-        raterPhone: '+242001',
-        rateeId: 'p-2',
-        assignmentId: 'asgn-1',
-        rateeLabel: 'Alice',
-        jobTitle: 'Plombier',
-      });
-      expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalled();
-      expect(deps.botInbox.push).toHaveBeenCalledWith(
-        'p-1',
-        expect.objectContaining({ type: 'pending_rating' }),
-      );
-    });
-  });
 });

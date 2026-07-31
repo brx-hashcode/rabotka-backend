@@ -1,4 +1,8 @@
 import {
+  AdminCacheService,
+  ADMIN_LIST_TTL_SECONDS,
+} from '../../common/services/cache/admin-cache.service';
+import {
   Injectable,
   Logger,
   BadRequestException,
@@ -11,6 +15,7 @@ import Redis from 'ioredis';
 import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
 import { deletedAtFilter } from '../../common/utils/soft-delete.util';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
+import { assertKycVerified } from '../../common/exceptions/kyc-not-verified.exception';
 import { isWorkerHardBlocked } from '../penalty/penalty.utils';
 import { MailService } from '../mail/mail.service';
 import { SystemConfigService } from '../system-config/system-config.service';
@@ -205,6 +210,7 @@ export class JobOfferService {
     private readonly matchingService: MatchingService,
     private readonly geocodingService: GeocodingService,
     @Inject(REDIS_CONNECTION) private readonly redis: Redis,
+    private readonly cache: AdminCacheService,
   ) {}
 
   private notificationCooldownKey(workerId: string): string {
@@ -222,6 +228,7 @@ export class JobOfferService {
         status: true,
         profile_type: true,
         reliability_score: true,
+        verification_status: true,
       },
     });
     if (!employer) {
@@ -237,6 +244,9 @@ export class JobOfferService {
         "Seuls les employeurs peuvent publier des offres d'emploi",
       );
     }
+    // Mirrors KycVerifiedGuard for the WhatsApp path (publish-job.flow.ts),
+    // which reaches this service without passing through any HTTP guard.
+    assertKycVerified(employer.verification_status);
 
     const fees = await this.systemConfigService.getFees();
     const employerScore = employer.reliability_score ?? 100;
@@ -869,13 +879,25 @@ export class JobOfferService {
     actorProfileId: string,
     scheduledAt: Date,
   ): Promise<JobOfferListItem> {
-    const offer = await this.prisma.jobOffer.findUnique({ where: { id } });
+    const [offer, actor] = await Promise.all([
+      this.prisma.jobOffer.findUnique({ where: { id } }),
+      this.prisma.profile.findUnique({
+        where: { id: actorProfileId },
+        select: { verification_status: true },
+      }),
+    ]);
     if (!offer || offer.deleted_at) {
       throw new NotFoundException("Offre d'emploi introuvable");
     }
     if (offer.employer_id !== actorProfileId) {
       throw new ForbiddenException('Non autorisé à modifier cette offre');
     }
+    // Republishing puts a live offer back on the market, so it needs the same
+    // gate as creating one. Also reached from the bot (republish-expired-job.flow).
+    if (!actor) {
+      throw new NotFoundException('Employeur introuvable');
+    }
+    assertKycVerified(actor.verification_status);
     if (offer.status !== JobOfferStatus.EXPIRED) {
       throw new BadRequestException(
         'Seule une offre expirée peut être republiée',
@@ -993,6 +1015,25 @@ export class JobOfferService {
   }
 
   async getJobOffersForAdmin(params: {
+    page: number;
+    limit: number;
+    q?: string;
+    status?: JobOfferStatus[];
+    deleted?: boolean;
+  }): Promise<{
+    data: AdminJobOfferListItem[];
+    total: number;
+    page: number;
+    limit: number;
+  }> {
+    return this.cache.wrap(
+      this.cache.listKey('jobs', params),
+      ADMIN_LIST_TTL_SECONDS,
+      () => this.loadGetJobOffersForAdmin(params),
+    );
+  }
+
+  private async loadGetJobOffersForAdmin(params: {
     page: number;
     limit: number;
     q?: string;
@@ -1196,6 +1237,7 @@ export class JobOfferService {
       where: { id },
       data: { deleted_at: new Date() },
     });
+    await this.cache.invalidate('jobs');
 
     // Remove from vector index — fire-and-forget, non-fatal
     void this.matchingService
@@ -1263,6 +1305,7 @@ export class JobOfferService {
       where: { id },
       data: { deleted_at: new Date() },
     });
+    await this.cache.invalidate('jobs');
 
     // Remove from vector index — fire-and-forget, non-fatal
     void this.matchingService
@@ -1282,6 +1325,7 @@ export class JobOfferService {
       where: { id: { in: ids }, deleted_at: null },
       data: { deleted_at: new Date() },
     });
+    await this.cache.invalidate('jobs');
     // Remove each from the vector index so archived offers stop being matched.
     for (const id of ids) {
       void this.matchingService

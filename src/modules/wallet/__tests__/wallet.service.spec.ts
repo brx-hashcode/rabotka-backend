@@ -1,3 +1,4 @@
+import { AdminCacheService } from '../../../common/services/cache/admin-cache.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException, BadRequestException } from '@nestjs/common';
 import { WalletService } from '../wallet.service';
@@ -77,6 +78,17 @@ describe('WalletService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        {
+          // Pass-through cache: the loader always runs, so these specs keep
+          // exercising the real queries rather than a cached value.
+          provide: AdminCacheService,
+          useValue: {
+            wrap: (_k: string, _t: number, loader: () => unknown) => loader(),
+            listKey: (e: string) => e,
+            dashboardKey: (e: string) => e,
+            invalidate: jest.fn(),
+          },
+        },
         WalletService,
         { provide: PrismaService, useValue: mockPrismaService },
         {

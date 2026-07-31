@@ -1,3 +1,4 @@
+import { AdminCacheService } from '../../../common/services/cache/admin-cache.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import {
   BadRequestException,
@@ -102,6 +103,17 @@ describe('JobOfferService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        {
+          // Pass-through cache: the loader always runs, so these specs keep
+          // exercising the real queries rather than a cached value.
+          provide: AdminCacheService,
+          useValue: {
+            wrap: (_k: string, _t: number, loader: () => unknown) => loader(),
+            listKey: (e: string) => e,
+            dashboardKey: (e: string) => e,
+            invalidate: jest.fn(),
+          },
+        },
         JobOfferService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: MailService, useValue: mockMailService },
@@ -144,6 +156,7 @@ describe('JobOfferService', () => {
         id: EMPLOYER_ID,
         status: 'ACTIVE',
         profile_type: 'EMPLOYER',
+        verification_status: 'VERIFIED',
       });
       (prisma.jobOffer.create as jest.Mock).mockResolvedValue(mockOffer);
     });
@@ -196,6 +209,21 @@ describe('JobOfferService', () => {
       await expect(service.create(EMPLOYER_ID, { ...baseDto })).rejects.toThrow(
         ForbiddenException,
       );
+    });
+
+    it('refuses an employer whose KYC is not verified', async () => {
+      // Mirrors KycVerifiedGuard: enforced here too because the WhatsApp bot
+      // reaches this service without passing through any HTTP guard.
+      (prisma.profile.findUnique as jest.Mock).mockResolvedValue({
+        id: EMPLOYER_ID,
+        status: 'ACTIVE',
+        profile_type: 'EMPLOYER',
+        verification_status: 'PENDING',
+      });
+      await expect(service.create(EMPLOYER_ID, { ...baseDto })).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(prisma.jobOffer.create).not.toHaveBeenCalled();
     });
 
     it('throws ForbiddenException when profile is not EMPLOYER', async () => {
@@ -405,10 +433,25 @@ describe('JobOfferService', () => {
 
     beforeEach(() => {
       (prisma.jobOffer.findUnique as jest.Mock).mockResolvedValue(expiredOffer);
+      // Republishing puts a live offer back on the market, so it now also loads
+      // the actor to check KYC.
+      (prisma.profile.findUnique as jest.Mock).mockResolvedValue({
+        verification_status: 'VERIFIED',
+      });
       (prisma.jobOffer.update as jest.Mock).mockImplementation(
         ({ data }: { data: Record<string, unknown> }) =>
           Promise.resolve({ ...expiredOffer, ...data }),
       );
+    });
+
+    it('refuses an employer whose KYC is not verified', async () => {
+      (prisma.profile.findUnique as jest.Mock).mockResolvedValue({
+        verification_status: 'PENDING',
+      });
+      await expect(
+        service.republish(OFFER_ID, OWNER_ID, hoursFromNow(48)),
+      ).rejects.toThrow(ForbiddenException);
+      expect(prisma.jobOffer.update).not.toHaveBeenCalled();
     });
 
     it('reopens the offer at the new date', async () => {

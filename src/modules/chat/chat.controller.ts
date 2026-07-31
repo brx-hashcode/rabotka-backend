@@ -22,6 +22,7 @@ import {
   ApiConsumes,
 } from '@nestjs/swagger';
 import { AdminAuthGuard } from '../auth/guards/admin-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
 import type { AdminAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
 import { FileService } from '../file/file.service';
 import { ChatService, type ChatAttachment } from './chat.service';
@@ -36,7 +37,7 @@ import {
 
 @ApiTags('Admin – Chat')
 @Controller('admin/chat')
-@UseGuards(AdminAuthGuard)
+@UseGuards(AdminAuthGuard, RolesGuard)
 @ApiBearerAuth()
 @ApiCookieAuth()
 export class ChatController {

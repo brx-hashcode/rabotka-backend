@@ -11,6 +11,7 @@ import {
   type Candidate,
   type WorkerCandidate,
 } from './candidate-sources';
+import { InteractionKind } from '@prisma/client';
 import { UserFeatureService, type UserFeatures } from './user-feature.service';
 import {
   DEFAULT_PENALTIES,
@@ -287,13 +288,20 @@ export class RecommendationEngineService {
     }
 
     const candidateIds = fused.map((f) => f.id);
-    const [employer, quality, lastActive] = await Promise.all([
+    const [employer, quality, lastActive, lastSeen] = await Promise.all([
       this.prisma.profile.findUnique({
         where: { id: employerId },
         select: { latitude: true, longitude: true },
       }),
       this.sources.workerQuality(candidateIds),
       this.sources.lastActiveAt(candidateIds),
+      // Which of these workers this employer has already been shown. Without it
+      // the employer feed is frozen: the same top profiles resurface on every
+      // refresh, and someone who scrolled past them yesterday sees them again.
+      this.sources.lastSeenAt(employerId, candidateIds, [
+        InteractionKind.PROFILE_VIEW,
+        InteractionKind.IMPRESSION_BATCH,
+      ]),
     ]);
 
     const weights = interpolateWeights(features.positiveCount);
@@ -328,6 +336,7 @@ export class RecommendationEngineService {
           negativeCategory: c.categoryIds.some((id) =>
             negativeCategories.has(id),
           ),
+          seenDecay: seenDecay(lastSeen.get(c.id) ?? null),
         },
         DEFAULT_PENALTIES,
       );

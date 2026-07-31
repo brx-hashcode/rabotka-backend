@@ -10,6 +10,7 @@ import {
 import { ContractService } from './contract.service';
 import { ProfileAuthGuard } from '../auth/guards/profile-auth.guard';
 import { AdminAuthGuard } from '../auth/guards/admin-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
 import type { ProfileAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
 
 @ApiTags('Contracts')
@@ -44,7 +45,7 @@ export class ContractController {
 
 @ApiTags('Admin – Contracts')
 @Controller('admin/contracts')
-@UseGuards(AdminAuthGuard)
+@UseGuards(AdminAuthGuard, RolesGuard)
 @ApiCookieAuth()
 @ApiBearerAuth()
 export class AdminContractController {

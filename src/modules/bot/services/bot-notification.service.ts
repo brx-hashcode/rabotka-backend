@@ -4,7 +4,6 @@ import { WhatsAppService } from '../../whatsapp/whatsapp.service';
 import { BotStateService } from './bot-state.service';
 import { BotInboxService } from './bot-inbox.service';
 import { getUnlockContactInitialState } from '../flows/unlock-contact.flow';
-import { getRateAssignmentInitialState } from '../flows/rate-assignment.flow';
 import { FLOW_IDS } from '../bot.constants';
 import { formatAmount } from '../messages/offers.messages';
 import { WHATSAPP_TEMPLATES } from '../../../common/constants/whatsapp-templates';
@@ -226,6 +225,8 @@ export class BotNotificationService {
           tpl.variables({
             employerName,
             offerTitle: app.job_offer.title,
+            // URL suffix: the worker settles their share on the web now.
+            applicationId,
           }),
         );
       } else {
@@ -408,6 +409,7 @@ export class BotNotificationService {
           date,
           reason: reason ?? '',
           penaltyStatus,
+          jobOfferId: app.job_offer.id,
         }),
       );
 
@@ -432,30 +434,6 @@ export class BotNotificationService {
     } catch (err) {
       this.logger.warn(
         `Failed to send cancellation notification to employer: ${String(applicationId)}`,
-        err,
-      );
-    }
-  }
-
-  async sendJobCompletedToWorker(applicationId: string): Promise<void> {
-    try {
-      const app = await this.prisma.application.findUnique({
-        where: { id: applicationId },
-        select: {
-          job_offer: { select: { title: true } },
-          worker: { select: { phone: true } },
-        },
-      });
-      if (!app?.worker?.phone || !app.job_offer) return;
-      const tpl = WHATSAPP_TEMPLATES.jobCompleted;
-      await this.whatsApp.sendTemplateMessage(
-        app.worker.phone,
-        tpl.contentSid,
-        tpl.variables({ offerTitle: app.job_offer.title }),
-      );
-    } catch (err) {
-      this.logger.warn(
-        `Failed to send job completed notification to worker: ${applicationId}`,
         err,
       );
     }
@@ -532,77 +510,4 @@ export class BotNotificationService {
     }
   }
 
-  async sendRatingRequest(params: {
-    raterProfileId: string;
-    raterPhone: string;
-    rateeId: string;
-    assignmentId: string;
-    rateeLabel: string;
-    jobTitle: string;
-  }): Promise<void> {
-    const {
-      raterProfileId,
-      raterPhone,
-      rateeId,
-      assignmentId,
-      rateeLabel,
-      jobTitle,
-    } = params;
-    const state = getRateAssignmentInitialState(assignmentId, rateeId);
-    const written = await this.botState.setIfFlowAbsentOrMatches(
-      raterProfileId,
-      state,
-      null,
-    );
-    if (!written) {
-      // Mid-flow: queue it so the bot re-offers the rating when their flow ends.
-      // This used to `return` here, so a user who was mid-conversation never got
-      // the request at all — the inbox is an addition to the send, not a
-      // substitute for it.
-      await this.botInbox.push(raterProfileId, {
-        type: 'pending_rating',
-        assignmentId,
-        rateeId,
-        rateeLabel,
-        jobTitle,
-        createdAt: new Date().toISOString(),
-      });
-    }
-    const tpl = WHATSAPP_TEMPLATES.ratingRequest;
-    await this.whatsApp
-      .sendTemplateMessage(
-        raterPhone,
-        tpl.contentSid,
-        tpl.variables({ jobTitle, rateeLabel }),
-      )
-      .catch((err) =>
-        this.logger.warn(`Failed to send rating request to ${raterPhone}`, err),
-      );
-  }
-
-  async sendJobCancelledByEmployerToWorker(
-    applicationId: string,
-  ): Promise<void> {
-    try {
-      const app = await this.prisma.application.findUnique({
-        where: { id: applicationId },
-        select: {
-          job_offer: { select: { title: true } },
-          worker: { select: { phone: true } },
-        },
-      });
-      if (!app?.worker?.phone || !app.job_offer) return;
-      const tpl = WHATSAPP_TEMPLATES.jobCancelledByEmployer;
-      await this.whatsApp.sendTemplateMessage(
-        app.worker.phone,
-        tpl.contentSid,
-        tpl.variables({ offerTitle: app.job_offer.title }),
-      );
-    } catch (err) {
-      this.logger.warn(
-        `Failed to send job cancelled by employer to worker: ${applicationId}`,
-        err,
-      );
-    }
-  }
 }
