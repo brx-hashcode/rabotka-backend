@@ -182,6 +182,14 @@ describe('ProfileService', () => {
         ensureSeeded: jest.fn().mockResolvedValue(undefined),
       } as any, // interestClusters
       { geocode: jest.fn().mockResolvedValue(null) } as any, // geocodingService
+      {
+        // Pass-through: the loader always runs, so these tests keep asserting
+        // real query behaviour rather than a cached value.
+        wrap: (_k: string, _t: number, loader: () => unknown) => loader(),
+        listKey: (e: string) => e,
+        dashboardKey: (e: string) => e,
+        invalidate: jest.fn(),
+      } as any, // adminCache
     );
   });
 

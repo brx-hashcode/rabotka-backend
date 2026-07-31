@@ -17,11 +17,17 @@ enum VerificationStatus {
   REJECTED
 }
 
+/// ADMIN / MANAGER / MODERATOR / SUPER_ADMIN form a hierarchy (see
+/// ROLE_HIERARCHY in roles.guard.ts). FINANCE and SUPPORT are *lateral*: they
+/// sit outside that ladder and are granted an explicit allowlist of areas
+/// instead (see LATERAL_ACCESS in lateral-access.ts).
 enum UserRole {
   ADMIN
   MANAGER
   MODERATOR
   SUPER_ADMIN
+  FINANCE
+  SUPPORT
 }
 
 enum StorageProvider {

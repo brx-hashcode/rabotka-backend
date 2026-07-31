@@ -60,6 +60,22 @@ describe('UserFeatureService', () => {
       expect(live.positiveCount).toBe(1);
     });
 
+    it('lets repeated negatives cancel out a counterparty', () => {
+      // Previously only positives accumulated here, so a worker rejected over
+      // and over by one employer built no negative signal and that employer's
+      // offers kept resurfacing at neutral weight.
+      const f = service.deriveFeatures([
+        ev({ counterparty_id: 'good', weight: 1 }),
+        ev({ counterparty_id: 'bad', weight: 1 }),
+        ev({ counterparty_id: 'bad', weight: -0.5, kind: 'REJECT' }),
+        ev({ counterparty_id: 'bad', weight: -0.9, kind: 'REJECT' }),
+      ]);
+
+      expect(f.counterpartyAffinity.good).toBeGreaterThan(0);
+      // Net negative → drops out entirely rather than ranking neutral.
+      expect(f.counterpartyAffinity.bad).toBeUndefined();
+    });
+
     it('returns neutral features for a user with no history', () => {
       const f = service.deriveFeatures([]);
       expect(f.positiveCount).toBe(0);

@@ -86,7 +86,8 @@ function makeController(prismaProfile: any = null) {
     makeLayout() as any,
     makeWalletService() as any,
     makePortfolioService() as any,
-  );
+      { restore: jest.fn(), purge: jest.fn(), purgeBlockers: jest.fn() } as any,
+    );
 }
 
 describe('AdminProfileController', () => {
@@ -150,7 +151,8 @@ describe('AdminProfileController', () => {
         makeLayout() as any,
         makeWalletService() as any,
         makePortfolioService() as any,
-      );
+      { restore: jest.fn(), purge: jest.fn(), purgeBlockers: jest.fn() } as any,
+    );
       const result = await ctrl.getMessages('p1');
       expect(result).toHaveLength(2);
       expect(result[0].sentByName).toBeNull();
@@ -223,7 +225,8 @@ describe('AdminProfileController', () => {
         makeLayout() as any,
         makeWalletService() as any,
         makePortfolioService() as any,
-      );
+      { restore: jest.fn(), purge: jest.fn(), purgeBlockers: jest.fn() } as any,
+    );
       const result = await ctrl.sendMessage(
         'p1',
         { channel: 'WHATSAPP', message: 'hello' },
@@ -277,7 +280,8 @@ describe('AdminProfileController', () => {
         makeLayout() as any,
         makeWalletService() as any,
         makePortfolioService() as any,
-      );
+      { restore: jest.fn(), purge: jest.fn(), purgeBlockers: jest.fn() } as any,
+    );
       const result = await ctrl.sendMessage(
         'p1',
         { channel: 'EMAIL', message: 'hello' },
@@ -308,6 +312,7 @@ describe('AdminProfileController', () => {
       makeLayout() as any,
       makeWalletService() as any,
       makePortfolioService() as any,
+      { restore: jest.fn(), purge: jest.fn(), purgeBlockers: jest.fn() } as any,
     );
     const result = await ctrl.update('p1', { first_name: 'Jo' } as any, {
       user: { userId: 'u1' },
@@ -332,6 +337,7 @@ describe('AdminProfileController', () => {
       makeLayout() as any,
       makeWalletService() as any,
       makePortfolioService() as any,
+      { restore: jest.fn(), purge: jest.fn(), purgeBlockers: jest.fn() } as any,
     );
     const result = await ctrl.verify(
       'p1',
@@ -362,6 +368,7 @@ describe('AdminProfileController', () => {
       makeLayout() as any,
       makeWalletService() as any,
       makePortfolioService() as any,
+      { restore: jest.fn(), purge: jest.fn(), purgeBlockers: jest.fn() } as any,
     );
     const result = await ctrl.updateStatus('p1', { status: 'ACTIVE' as any }, {
       user: { userId: 'u1' },
@@ -404,7 +411,8 @@ describe('AdminProfileController', () => {
         makeLayout() as any,
         makeWalletService() as any,
         portfolio as any,
-      );
+      { restore: jest.fn(), purge: jest.fn(), purgeBlockers: jest.fn() } as any,
+    );
       const result = await ctrl.getPortfolio('worker-1');
       expect(portfolio.listOwn).toHaveBeenCalledWith('worker-1');
       expect(result).toEqual([{ id: 'item1', images: [] }]);
@@ -423,7 +431,8 @@ describe('AdminProfileController', () => {
         makeLayout() as any,
         makeWalletService() as any,
         portfolio as any,
-      );
+      { restore: jest.fn(), purge: jest.fn(), purgeBlockers: jest.fn() } as any,
+    );
       const dto = { title: 'new' };
       await ctrl.updatePortfolioItem('worker-1', 'item1', dto as any, adminReq);
       expect(portfolio.updateItem).toHaveBeenCalledWith(
@@ -452,7 +461,8 @@ describe('AdminProfileController', () => {
         makeLayout() as any,
         makeWalletService() as any,
         portfolio as any,
-      );
+      { restore: jest.fn(), purge: jest.fn(), purgeBlockers: jest.fn() } as any,
+    );
       const result = await ctrl.deletePortfolioItem(
         'worker-1',
         'item1',
@@ -474,7 +484,8 @@ describe('AdminProfileController', () => {
         makeLayout() as any,
         makeWalletService() as any,
         portfolio as any,
-      );
+      { restore: jest.fn(), purge: jest.fn(), purgeBlockers: jest.fn() } as any,
+    );
       const result = await ctrl.deletePortfolioImage(
         'worker-1',
         'item1',

@@ -40,7 +40,6 @@ function makeCtx() {
       markJobCompleted: jest.fn().mockResolvedValue({}),
     } as any,
     notificationService: {
-      sendJobCompletedToWorker: jest.fn().mockResolvedValue(undefined),
     } as any,
     queueService: {
       addJob: jest.fn().mockResolvedValue(undefined),

@@ -165,7 +165,12 @@ export class UserFeatureService {
         }
       }
 
-      if (e.counterparty_id && contribution > 0) {
+      // Signed, unlike before. Only positives used to accumulate here, so a
+      // worker rejected five times by one employer built no negative signal at
+      // all and that employer's offers kept resurfacing at neutral weight.
+      // normalizeAffinity floors at 0, so a net-negative counterparty simply
+      // drops out rather than going negative.
+      if (e.counterparty_id) {
         counterparty.set(
           e.counterparty_id,
           (counterparty.get(e.counterparty_id) ?? 0) + contribution,

@@ -1,3 +1,4 @@
+import { AdminArchiveModule } from '../admin-archive/admin-archive.module';
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../../common/services/prisma/prisma.module';
 import { PenaltyService } from './penalty.service';
@@ -10,7 +11,8 @@ import { PenaltyNotificationScheduler } from './penalty-notification.scheduler';
 import { PenaltyNotificationProcessor } from './penalty-notification.processor';
 
 @Module({
-  imports: [PrismaModule, AuthModule, WalletModule, LogModule, BotModule],
+  imports: [
+    AdminArchiveModule,PrismaModule, AuthModule, WalletModule, LogModule, BotModule],
   controllers: [AdminPenaltyController],
   providers: [
     PenaltyService,

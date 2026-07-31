@@ -1,3 +1,4 @@
+import { AdminArchiveModule } from '../admin-archive/admin-archive.module';
 import { Module, forwardRef } from '@nestjs/common';
 import { PrismaModule } from '../../common/services/prisma/prisma.module';
 import { JobOfferService } from './job-offer.service';
@@ -14,6 +15,7 @@ import { GeocodingModule } from '../../common/services/geocoding/geocoding.modul
 
 @Module({
   imports: [
+    AdminArchiveModule,
     PrismaModule,
     forwardRef(() => AuthModule),
     forwardRef(() => BotModule),

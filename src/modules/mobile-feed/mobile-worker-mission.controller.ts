@@ -21,6 +21,7 @@ import { IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validato
 import { PaymentRequestType, ProfileType } from '@prisma/client';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { ProfileAuthGuard } from '../auth/guards/profile-auth.guard';
+import { KycVerifiedGuard } from '../auth/guards/kyc-verified.guard';
 import type { ProfileAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
 import { ApplicationService } from '../application/application.service';
 import { SystemConfigService } from '../system-config/system-config.service';
@@ -152,6 +153,7 @@ export class MobileWorkerMissionController {
   }
 
   @Post(':id/unlock/pay-wallet')
+  @UseGuards(KycVerifiedGuard)
   @ApiOperation({
     summary: "[Mobile/WORKER] Pay my share of the contact unlock from wallet",
   })
@@ -171,6 +173,7 @@ export class MobileWorkerMissionController {
   }
 
   @Post(':id/unlock/pay-mobile')
+  @UseGuards(KycVerifiedGuard)
   @ApiOperation({
     summary:
       '[Mobile/WORKER] Create a mobile-money payment for my share of the unlock',

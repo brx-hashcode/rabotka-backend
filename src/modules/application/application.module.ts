@@ -1,3 +1,4 @@
+import { AdminArchiveModule } from '../admin-archive/admin-archive.module';
 import { Module, forwardRef } from '@nestjs/common';
 import { PrismaModule } from '../../common/services/prisma/prisma.module';
 import { ApplicationService } from './application.service';
@@ -13,6 +14,7 @@ import { RecommendationEngineModule } from '../recommendation-engine/recommendat
 
 @Module({
   imports: [
+    AdminArchiveModule,
     PrismaModule,
     forwardRef(() => AuthModule),
     forwardRef(() => BotModule),

@@ -6,6 +6,7 @@ import {
 import { ContractService } from '../contract.service';
 import { ProfileAuthGuard } from '../../auth/guards/profile-auth.guard';
 import { AdminAuthGuard } from '../../auth/guards/admin-auth.guard';
+import { RolesGuard } from '../../auth/guards/roles.guard';
 
 const mockContractService = {
   download: jest.fn().mockResolvedValue({
@@ -68,6 +69,8 @@ describe('AdminContractController', () => {
       providers: [{ provide: ContractService, useValue: mockContractService }],
     })
       .overrideGuard(AdminAuthGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(RolesGuard)
       .useValue({ canActivate: () => true })
       .compile();
     controller = module.get<AdminContractController>(AdminContractController);

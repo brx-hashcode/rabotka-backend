@@ -16,18 +16,28 @@ function makeReflector(roles: UserRole[] | null) {
   } as any;
 }
 
-function makeContext(user: any) {
+function makeContext(user: any, controllerPath?: string, method = 'GET') {
+  class FakeController {}
+  if (controllerPath) {
+    Reflect.defineMetadata('path', controllerPath, FakeController);
+  }
   return {
     switchToHttp: () => ({
-      getRequest: () => ({ user }),
+      getRequest: () => ({ user, method }),
     }),
     getHandler: jest.fn(),
-    getClass: jest.fn(),
+    getClass: () => FakeController,
   } as unknown as ExecutionContext;
+}
+
+/** An active user of the given role, for the guard's own lookup. */
+function activeUser(role: UserRole) {
+  mockPrisma.user.findUnique.mockResolvedValue({ role, is_active: true });
 }
 
 describe('RolesGuard', () => {
   it('returns true when no required roles', async () => {
+    activeUser(UserRole.MODERATOR);
     const guard = new RolesGuard(makeReflector(null), mockPrisma as any);
     const ctx = makeContext({ userId: 'u1' });
     const result = await guard.canActivate(ctx);
@@ -35,10 +45,24 @@ describe('RolesGuard', () => {
   });
 
   it('returns true when required roles is empty', async () => {
+    activeUser(UserRole.MODERATOR);
     const guard = new RolesGuard(makeReflector([]), mockPrisma as any);
     const ctx = makeContext({ userId: 'u1' });
     const result = await guard.canActivate(ctx);
     expect(result).toBe(true);
+  });
+
+  it('rejects an inactive user even when no roles are declared', async () => {
+    // The identity check no longer sits behind the "no @Roles" shortcut, so a
+    // deactivated admin cannot keep using an ungated endpoint.
+    mockPrisma.user.findUnique.mockResolvedValue({
+      role: UserRole.ADMIN,
+      is_active: false,
+    });
+    const guard = new RolesGuard(makeReflector(null), mockPrisma as any);
+    await expect(
+      guard.canActivate(makeContext({ userId: 'u1' })),
+    ).rejects.toThrow(ForbiddenException);
   });
 
   it('throws ForbiddenException when no userId', async () => {
@@ -112,5 +136,93 @@ describe('RolesGuard', () => {
     const ctx = makeContext({ userId: 'u1' });
     const result = await guard.canActivate(ctx);
     expect(result).toBe(true);
+  });
+
+  describe('lateral roles', () => {
+    const guardFor = (roles: UserRole[] | null) =>
+      new RolesGuard(makeReflector(roles), mockPrisma as any);
+
+    it('lets FINANCE into an area it owns', async () => {
+      activeUser(UserRole.FINANCE);
+      await expect(
+        guardFor([UserRole.MANAGER]).canActivate(
+          makeContext({ userId: 'u1' }, 'admin/wallet', 'POST'),
+        ),
+      ).resolves.toBe(true);
+    });
+
+    it('keeps FINANCE out of an area it does not own', async () => {
+      // The whole point of a lateral role: seniority elsewhere is not implied.
+      activeUser(UserRole.FINANCE);
+      await expect(
+        guardFor([UserRole.MODERATOR]).canActivate(
+          makeContext({ userId: 'u1' }, 'admin/claims', 'GET'),
+        ),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('keeps SUPPORT out of the wallet', async () => {
+      activeUser(UserRole.SUPPORT);
+      await expect(
+        guardFor(null).canActivate(
+          makeContext({ userId: 'u1' }, 'admin/wallet', 'GET'),
+        ),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('lets SUPPORT read profiles but not write them', async () => {
+      activeUser(UserRole.SUPPORT);
+      await expect(
+        guardFor([UserRole.MODERATOR]).canActivate(
+          makeContext({ userId: 'u1' }, 'admin/profiles', 'GET'),
+        ),
+      ).resolves.toBe(true);
+
+      activeUser(UserRole.SUPPORT);
+      await expect(
+        guardFor([UserRole.MODERATOR]).canActivate(
+          makeContext({ userId: 'u1' }, 'admin/profiles', 'PATCH'),
+        ),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('never lets a lateral role pass a SUPER_ADMIN gate in its own area', async () => {
+      // Penalties belong to FINANCE, but permanent deletion never does.
+      activeUser(UserRole.FINANCE);
+      await expect(
+        guardFor([UserRole.SUPER_ADMIN]).canActivate(
+          makeContext({ userId: 'u1' }, 'admin/penalties', 'POST'),
+        ),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('never lets a lateral role pass an ADMIN gate in its own area', async () => {
+      activeUser(UserRole.FINANCE);
+      await expect(
+        guardFor([UserRole.ADMIN]).canActivate(
+          makeContext({ userId: 'u1' }, 'admin/wallet', 'POST'),
+        ),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('denies an endpoint that declares no roles at all', async () => {
+      // Fails closed: forgetting @Roles on a new admin controller must not hand
+      // lateral roles an area they were never granted.
+      activeUser(UserRole.SUPPORT);
+      await expect(
+        guardFor(null).canActivate(
+          makeContext({ userId: 'u1' }, 'admin/logs', 'GET'),
+        ),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('denies a controller with no path metadata', async () => {
+      activeUser(UserRole.FINANCE);
+      await expect(
+        guardFor([UserRole.MANAGER]).canActivate(
+          makeContext({ userId: 'u1' }, undefined, 'GET'),
+        ),
+      ).rejects.toThrow(ForbiddenException);
+    });
   });
 });

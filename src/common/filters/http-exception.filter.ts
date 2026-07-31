@@ -18,6 +18,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const request = ctx.getRequest<Request>();
 
     const { status, message } = this.extractStatusAndMessage(exception);
+    const code = this.extractCode(exception);
 
     if (request.url === '/favicon.ico' && status === 404) {
       response.status(HttpStatus.NO_CONTENT).end();
@@ -32,9 +33,28 @@ export class HttpExceptionFilter implements ExceptionFilter {
     response.status(status).json({
       statusCode: status,
       message,
+      ...(code ? { code } : {}),
       timestamp: new Date().toISOString(),
       path: request.url,
     });
+  }
+
+  /**
+   * Carries a `code` from the thrown exception through to the response body.
+   *
+   * This filter rebuilds the body from scratch, so without this any extra field
+   * an exception sets is silently dropped — which is how a client ends up
+   * unable to tell one 403 from another. Kept generic rather than tied to any
+   * single exception type.
+   */
+  private extractCode(exception: unknown): string | undefined {
+    if (!(exception instanceof HttpException)) return undefined;
+
+    const body = exception.getResponse();
+    if (typeof body !== 'object' || body === null) return undefined;
+
+    const code = (body as Record<string, unknown>)['code'];
+    return typeof code === 'string' ? code : undefined;
   }
 
   private extractStatusAndMessage(exception: unknown): {

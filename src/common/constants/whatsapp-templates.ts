@@ -108,7 +108,7 @@ export const WHATSAPP_TEMPLATES = {
   
 
   kyc: {
-    contentSid: 'HX4a20caf26410d2efbcfa0c69b82aa052',
+    contentSid: sid('TPL_KYC_APPROVED_CTA', 'HX4634aa6494daabe3ac5dc9ad3fd6a9fd'),
     variables: (name: string) => ({ '1': name }),
   } satisfies WhatsAppTemplate<[name: string]>,
 
@@ -123,7 +123,7 @@ export const WHATSAPP_TEMPLATES = {
   } satisfies WhatsAppTemplate<[firstName: string]>,
 
   reminder24h: {
-    contentSid: 'HX9a6f131e86d26e501a28645b8a892fc2',
+    contentSid: sid('TPL_REMINDER_24H_CTA', 'HX518e3f6bac5a1f337456cda963692474'),
     variables: (p: {
       offerTitle: string;
       date: string;
@@ -133,6 +133,7 @@ export const WHATSAPP_TEMPLATES = {
       employerPhone: string;
       cancellationThresholdHours: string;
       penaltyFcfa: string;
+      applicationId: string;
     }) => ({
       '1': p.offerTitle,
       '2': p.date,
@@ -142,6 +143,8 @@ export const WHATSAPP_TEMPLATES = {
       '6': p.employerPhone,
       '7': p.cancellationThresholdHours,
       '8': p.penaltyFcfa,
+      // URL suffix for the CTA button (/applications/{{9}}).
+      '9': p.applicationId,
     }),
   } satisfies WhatsAppTemplate<
     [
@@ -154,38 +157,11 @@ export const WHATSAPP_TEMPLATES = {
         employerPhone: string;
         cancellationThresholdHours: string;
         penaltyFcfa: string;
+        applicationId: string;
       },
     ]
   >,
 
-  reminder2h: {
-    contentSid: 'HX409fbe7f96ce794c01fd9cbc4e9a5c52',
-    variables: (p: {
-      offerTitle: string;
-      time: string;
-      address: string;
-      employerName: string;
-      employerPhone: string;
-    }) => ({
-      '1': p.offerTitle,
-      '2': p.time,
-      '3': p.address,
-      '4': p.employerName,
-      '5': p.employerPhone,
-    }),
-  } satisfies WhatsAppTemplate<
-    [
-      params: {
-        offerTitle: string;
-        time: string;
-        address: string;
-        employerName: string;
-        employerPhone: string;
-      },
-    ]
-  >,
-
-  /** `{{6}}` is the jobOfferId, the CTA button's URL suffix (`/offres/{{6}}`). */
   jobRecommendation: {
     contentSid: sid(
       'TPL_JOB_RECOMMENDATION_CTA',
@@ -287,34 +263,53 @@ export const WHATSAPP_TEMPLATES = {
   >,
 
   applicationAcceptedUnlock: {
-    contentSid: 'HXee503e4fe516ce55d67b22ca6e4ef178',
-    variables: (p: { employerName: string; offerTitle: string }) => ({
+    contentSid: sid(
+      'TPL_APPLICATION_ACCEPTED_UNLOCK_CTA',
+      'HX3cedb9f4daad01310c52630094caaa2c',
+    ),
+    variables: (p: {
+      employerName: string;
+      offerTitle: string;
+      applicationId: string;
+    }) => ({
       '1': p.employerName,
       '2': p.offerTitle,
+      // URL suffix: /applications/{{3}}/paiement, where the worker settles their
+      // share. The old template's "Continuer" reply reopened an in-chat prompt.
+      '3': p.applicationId,
     }),
   } satisfies WhatsAppTemplate<
-    [params: { employerName: string; offerTitle: string }]
+    [
+      params: {
+        employerName: string;
+        offerTitle: string;
+        applicationId: string;
+      },
+    ]
   >,
 
   applicationRejected: {
-    contentSid: 'HXba7e8c10a2a8f9485dd4cd20288807b8',
+    contentSid: sid('TPL_APPLICATION_REJECTED_CTA', 'HXe44c7a8f9e1d6cf75c7e1cf37e8a7666'),
     variables: () => ({}),
   } satisfies WhatsAppTemplate<[]>,
 
   cancellation: {
-    contentSid: 'HXc6a4943330c840a93b1d85849a169fcd',
+    contentSid: sid('TPL_CANCELLATION_CTA', 'HX6c6f426c62bbe0c173f7f02376b47586'),
     variables: (p: {
       workerName: string;
       offerTitle: string;
       date: string;
       reason: string;
       penaltyStatus: string;
+      jobOfferId: string;
     }) => ({
       '1': p.workerName,
       '2': p.offerTitle,
       '3': p.date,
       '4': p.reason.trim() || 'Aucune raison donnée',
       '5': p.penaltyStatus,
+      // URL suffix for the CTA button (/job-offers/{{6}}).
+      '6': p.jobOfferId,
     }),
   } satisfies WhatsAppTemplate<
     [
@@ -324,36 +319,11 @@ export const WHATSAPP_TEMPLATES = {
         date: string;
         reason: string;
         penaltyStatus: string;
+        jobOfferId: string;
       },
     ]
   >,
 
-  jobCompleted: {
-    contentSid: 'HX2956d3638cf58ed03aaf638a2f67d03a',
-    variables: (p: { offerTitle: string }) => ({ '1': p.offerTitle }),
-  } satisfies WhatsAppTemplate<[params: { offerTitle: string }]>,
-  jobCancelledByEmployer: {
-    contentSid: 'HX58f4367495ec70f8a20be8b5045d99b9',
-    variables: (p: { offerTitle: string }) => ({ '1': p.offerTitle }),
-  } satisfies WhatsAppTemplate<[params: { offerTitle: string }]>,
-
-
-  ratingRequest: {
-    contentSid: 'HXb5173adfc2ec51a7158943f9b11cdbcb',
-    variables: (p: { jobTitle: string; rateeLabel: string }) => ({
-      '1': p.jobTitle,
-      '2': p.rateeLabel,
-    }),
-  } satisfies WhatsAppTemplate<
-    [params: { jobTitle: string; rateeLabel: string }]
-  >,
-
-  /**
-   * Mutual reveal — both parties settled their share. Plain `twilio/text`, no
-   * buttons, so it reads like an ordinary message while still being deliverable
-   * outside WhatsApp's 24h window (payment now usually happens on the web, where
-   * the recipient has never messaged the bot and free-form would be rejected).
-   */
   contactUnlocked: {
     contentSid: sid(
       'TPL_CONTACT_UNLOCKED_MUTUAL',
@@ -397,54 +367,71 @@ export const WHATSAPP_TEMPLATES = {
   >,
 
   unlockExpiredConversion: {
-    contentSid: 'HX6b46effc11d4b98b5c7ca6665fff7f53',
+    contentSid: sid('TPL_UNLOCK_EXPIRED_CONVERSION_CTA', 'HX8c338b28d1cb8e224942413adf4489da'),
     variables: (p: { amount: number }) => ({ '1': String(p.amount) }),
   } satisfies WhatsAppTemplate<[params: { amount: number }]>,
 
   autoStarted: {
-    contentSid: 'HX9532674e5bc5016e76f3005cb44ea711',
-    variables: (p: { offerTitle: string }) => ({ '1': p.offerTitle }),
-  } satisfies WhatsAppTemplate<[params: { offerTitle: string }]>,
-
-  statusCheck: {
-    contentSid: 'HX92ef7c0f7a6f2c53899c0fa28e1551b8',
-    variables: (p: { jobTitle: string; snoozeLabel: string }) => ({
-      '1': p.jobTitle,
-      '2': p.snoozeLabel,
+    contentSid: sid('TPL_AUTO_STARTED_CTA', 'HXf41bcce791ad5ac3351c0c6c9dc3e611'),
+    variables: (p: { offerTitle: string; jobOfferId: string }) => ({
+      '1': p.offerTitle,
+      // URL suffix for the CTA button.
+      '2': p.jobOfferId,
     }),
   } satisfies WhatsAppTemplate<
-    [params: { jobTitle: string; snoozeLabel: string }]
+    [params: { offerTitle: string; jobOfferId: string }]
+  >,
+
+  statusCheck: {
+    contentSid: sid('TPL_STATUS_CHECK_CTA', 'HX53ac4969d31ecc682d3b3e1fd030563f'),
+    variables: (p: { jobTitle: string; jobOfferId: string }) => ({
+      '1': p.jobTitle,
+      // URL suffix (/missions/{{2}}). Replaces the snooze label: the employer
+      // updates status on the web, so there is no in-chat "remind me later".
+      '2': p.jobOfferId,
+    }),
+  } satisfies WhatsAppTemplate<
+    [params: { jobTitle: string; jobOfferId: string }]
   >,
 
   offerExpiredApplicant: {
-    contentSid: 'HXe051fd6c43d82d253e9cab592d64457d',
+    contentSid: sid('TPL_OFFER_EXPIRED_APPLICANT_CTA', 'HX3df8380c1ebe801e512c772f9f868019'),
     variables: (p: { offerTitle: string }) => ({ '1': p.offerTitle }),
   } satisfies WhatsAppTemplate<[params: { offerTitle: string }]>,
 
   offerExpiredEmployer: {
-    contentSid: 'HXfc5435e40f25647ea79cbce0b0099cbe',
-    variables: (p: { offerTitle: string }) => ({ '1': p.offerTitle }),
-  } satisfies WhatsAppTemplate<[params: { offerTitle: string }]>,
+    contentSid: sid('TPL_OFFER_EXPIRED_EMPLOYER_CTA', 'HXa721971676e29a4fc129e785384f83d1'),
+    variables: (p: { offerTitle: string; jobOfferId: string }) => ({
+      '1': p.offerTitle,
+      // URL suffix for the CTA button.
+      '2': p.jobOfferId,
+    }),
+  } satisfies WhatsAppTemplate<
+    [params: { offerTitle: string; jobOfferId: string }]
+  >,
 
   offerUnavailableWorker: {
-    contentSid: 'HX3773e2525ff67007d2942e0aa149b0e9',
+    contentSid: sid('TPL_OFFER_UNAVAILABLE_WORKER_CTA', 'HX864ab0cc3426204258cf12552ef40d8a'),
     variables: (p: { offerTitle: string }) => ({ '1': p.offerTitle }),
   } satisfies WhatsAppTemplate<[params: { offerTitle: string }]>,
 
   reminderStart: {
-    contentSid: 'HX5a6777bdc1d800826a66d2faba155084',
+    contentSid: sid('TPL_REMINDER_START_CTA', 'HX2a2e2633f45b1fceb8164d08b0963ec8'),
     variables: (p: {
       offerTitle: string;
       time: string;
       address: string;
       employerName: string;
       employerPhone: string;
+      applicationId: string;
     }) => ({
       '1': p.offerTitle,
       '2': p.time,
       '3': p.address,
       '4': p.employerName,
       '5': p.employerPhone,
+      // URL suffix for the CTA button (/applications/{{6}}).
+      '6': p.applicationId,
     }),
   } satisfies WhatsAppTemplate<
     [
@@ -454,6 +441,7 @@ export const WHATSAPP_TEMPLATES = {
         address: string;
         employerName: string;
         employerPhone: string;
+        applicationId: string;
       },
     ]
   >,
