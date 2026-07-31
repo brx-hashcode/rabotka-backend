@@ -1,3 +1,4 @@
+import { AdminCacheService } from '../../../common/services/cache/admin-cache.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import {
   BadRequestException,
@@ -110,6 +111,17 @@ describe('ApplicationService (extended)', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        {
+          // Pass-through cache: the loader always runs, so these specs keep
+          // exercising the real queries rather than a cached value.
+          provide: AdminCacheService,
+          useValue: {
+            wrap: (_k: string, _t: number, loader: () => unknown) => loader(),
+            listKey: (e: string) => e,
+            dashboardKey: (e: string) => e,
+            invalidate: jest.fn(),
+          },
+        },
         ApplicationService,
         { provide: PrismaService, useValue: mockPrismaService },
         {
@@ -119,8 +131,6 @@ describe('ApplicationService (extended)', () => {
             sendApplicationAcceptedToWorker: jest.fn(),
             sendApplicationRejectedToWorker: jest.fn(),
             sendCancellationToEmployer: jest.fn(),
-            sendJobCompletedToWorker: jest.fn(),
-            sendJobCancelledByEmployerToWorker: jest.fn(),
           },
         },
         { provide: EventEmitter2, useValue: { emit: jest.fn() } },

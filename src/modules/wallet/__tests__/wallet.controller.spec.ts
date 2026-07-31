@@ -26,6 +26,7 @@ describe('WalletController', () => {
     const controller = new WalletController(
       makeService() as any,
       makePrisma('ADMIN') as any,
+      { restore: jest.fn(), purge: jest.fn(), purgeBlockers: jest.fn() } as any,
     );
     const result = await controller.getRevenue(makeReq() as any);
     expect(result).toEqual({ totalRevenue: 1000, balance: 1000 });
@@ -35,6 +36,7 @@ describe('WalletController', () => {
     const controller = new WalletController(
       makeService() as any,
       makePrisma('SUPER_ADMIN') as any,
+      { restore: jest.fn(), purge: jest.fn(), purgeBlockers: jest.fn() } as any,
     );
     const result = await controller.getRevenue(makeReq() as any);
     expect(result).toEqual({ totalRevenue: 1000, balance: 1000 });
@@ -44,6 +46,7 @@ describe('WalletController', () => {
     const controller = new WalletController(
       makeService() as any,
       makePrisma('VIEWER') as any,
+      { restore: jest.fn(), purge: jest.fn(), purgeBlockers: jest.fn() } as any,
     );
     await expect(controller.getRevenue(makeReq() as any)).rejects.toThrow(
       ForbiddenException,
@@ -54,6 +57,7 @@ describe('WalletController', () => {
     const controller = new WalletController(
       makeService() as any,
       makePrisma(null) as any,
+      { restore: jest.fn(), purge: jest.fn(), purgeBlockers: jest.fn() } as any,
     );
     await expect(controller.getRevenue(makeReq() as any)).rejects.toThrow(
       ForbiddenException,
@@ -69,6 +73,7 @@ describe('WalletController', () => {
     const controller = new WalletController(
       service as any,
       makePrisma('ADMIN') as any,
+      { restore: jest.fn(), purge: jest.fn(), purgeBlockers: jest.fn() } as any,
     );
     await controller.getMonthlyRevenue(makeReq() as any, undefined, '6');
     expect(service.getMonthlyRevenueRollingMonths).toHaveBeenCalledWith(6);
@@ -83,6 +88,7 @@ describe('WalletController', () => {
     const controller = new WalletController(
       service as any,
       makePrisma('ADMIN') as any,
+      { restore: jest.fn(), purge: jest.fn(), purgeBlockers: jest.fn() } as any,
     );
     await controller.getMonthlyRevenue(makeReq() as any, '2026');
     expect(service.getMonthlyRevenueForCalendarYear).toHaveBeenCalledWith(2026);
@@ -93,6 +99,7 @@ describe('WalletController', () => {
     const controller = new WalletController(
       service as any,
       makePrisma('ADMIN') as any,
+      { restore: jest.fn(), purge: jest.fn(), purgeBlockers: jest.fn() } as any,
     );
     // BadRequestException is already imported
     await expect(
@@ -105,6 +112,7 @@ describe('WalletController', () => {
     const controller = new WalletController(
       service as any,
       makePrisma('ADMIN') as any,
+      { restore: jest.fn(), purge: jest.fn(), purgeBlockers: jest.fn() } as any,
     );
     // BadRequestException is already imported
     await expect(
@@ -122,6 +130,7 @@ describe('WalletController', () => {
     const controller = new WalletController(
       service as any,
       makePrisma('ADMIN') as any,
+      { restore: jest.fn(), purge: jest.fn(), purgeBlockers: jest.fn() } as any,
     );
     const result = await controller.listTransactions(makeReq() as any, {});
     expect(service.listTransactionsForAdmin).toHaveBeenCalledWith(
@@ -140,6 +149,7 @@ describe('WalletController', () => {
     const controller = new WalletController(
       service as any,
       makePrisma('ADMIN') as any,
+      { restore: jest.fn(), purge: jest.fn(), purgeBlockers: jest.fn() } as any,
     );
     const result = await controller.listPayments(makeReq() as any, {});
     expect(service.listPaymentsForAdmin).toHaveBeenCalled();
@@ -151,6 +161,7 @@ describe('WalletController', () => {
     const controller = new WalletController(
       service as any,
       makePrisma('VIEWER') as any,
+      { restore: jest.fn(), purge: jest.fn(), purgeBlockers: jest.fn() } as any,
     );
     // ForbiddenException is already imported
     await expect(

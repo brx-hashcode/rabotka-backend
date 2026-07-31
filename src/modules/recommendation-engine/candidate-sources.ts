@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import {
   AccountStatus,
+  InteractionKind,
   JobOfferStatus,
   Prisma,
   ProfileType,
@@ -327,17 +328,21 @@ export class CandidateSourceService {
 
   /** Offers the worker has recently been shown, for seen-suppression. */
   async lastSeenAt(
-    workerId: string,
-    offerIds: string[],
+    actorId: string,
+    objectIds: string[],
+    kinds: InteractionKind[] = [
+      InteractionKind.VIEW,
+      InteractionKind.IMPRESSION_BATCH,
+    ],
   ): Promise<Map<string, Date>> {
     const out = new Map<string, Date>();
-    if (offerIds.length === 0) return out;
+    if (objectIds.length === 0) return out;
     try {
       const rows = await this.prisma.interactionEvent.findMany({
         where: {
-          actor_id: workerId,
-          object_id: { in: offerIds },
-          kind: { in: ['VIEW', 'IMPRESSION_BATCH'] },
+          actor_id: actorId,
+          object_id: { in: objectIds },
+          kind: { in: kinds },
         },
         orderBy: { occurred_at: 'desc' },
         select: { object_id: true, occurred_at: true },

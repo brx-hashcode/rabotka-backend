@@ -105,4 +105,41 @@ describe('HttpExceptionFilter', () => {
     filter.catch(new HttpException('Server Error', 500), host);
     expect(logSpy).toHaveBeenCalled();
   });
+
+  describe('machine-readable code', () => {
+    it('carries a code from the exception body through to the response', () => {
+      // This filter rebuilds the body from scratch, so without the passthrough
+      // the code is silently dropped and clients cannot tell one 403 apart from
+      // another. Guarding it here because the loss is invisible at runtime.
+      const { host, json } = makeHost('/job-offers');
+
+      filter.catch(
+        new HttpException(
+          { message: 'Vérification en cours', code: 'KYC_NOT_VERIFIED' },
+          403,
+        ),
+        host,
+      );
+
+      expect(json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          statusCode: 403,
+          code: 'KYC_NOT_VERIFIED',
+          message: 'Vérification en cours',
+        }),
+      );
+    });
+
+    it('omits the key entirely when the exception has no code', () => {
+      const { host, json } = makeHost('/api');
+      filter.catch(new HttpException('plain', 400), host);
+      expect(json.mock.calls[0][0]).not.toHaveProperty('code');
+    });
+
+    it('ignores a non-string code', () => {
+      const { host, json } = makeHost('/api');
+      filter.catch(new HttpException({ message: 'x', code: 42 }, 400), host);
+      expect(json.mock.calls[0][0]).not.toHaveProperty('code');
+    });
+  });
 });

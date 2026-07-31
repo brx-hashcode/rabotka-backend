@@ -12,6 +12,7 @@ import {
   HttpStatus,
   Req,
 } from '@nestjs/common';
+import { ArchiveService } from '../admin-archive/archive.service';
 import { BulkDeleteDto } from '../../common/dto/bulk-delete.dto';
 import {
   ApiTags,
@@ -41,6 +42,7 @@ export class AdminJobOfferController {
   constructor(
     private readonly jobOfferService: JobOfferService,
     private readonly logService: LogService,
+    private readonly archiveService: ArchiveService,
   ) {}
 
   @Get()
@@ -126,6 +128,52 @@ export class AdminJobOfferController {
       entityId: id,
       userId: req.user?.userId,
       metadata: { fields: { ...dto } },
+      ...extractRequestMeta(req),
+    });
+    return result;
+  }
+
+  @Post('bulk-restore')
+  @Roles(UserRole.MANAGER)
+  @ApiOperation({
+    summary: 'Bulk restore archived rows (admin only)',
+    description: 'Clears deleted_at. Only rows that are currently archived are affected.',
+  })
+  @ApiResponse({ status: 201, description: 'Rows restored' })
+  async bulkRestore(
+    @Body() dto: BulkDeleteDto,
+    @Req() req: AdminAuthenticatedRequest,
+  ): Promise<{ count: number }> {
+    const result = await this.archiveService.restore('jobs', dto.ids);
+    await this.logService.create({
+      action: 'JOB_OFFER_BULK_RESTORED',
+      entityType: 'JobOffer',
+      userId: req.user?.userId,
+      metadata: { ids: dto.ids, count: result.count },
+      ...extractRequestMeta(req),
+    });
+    return result;
+  }
+
+  @Post('bulk-purge')
+  @Roles(UserRole.SUPER_ADMIN)
+  @ApiOperation({
+    summary: 'Permanently delete archived rows (SUPER_ADMIN only)',
+    description:
+      'Irreversible. Refuses rows carrying records that must outlive them (financial or compliance), returning 409 with the blocking counts.',
+  })
+  @ApiResponse({ status: 201, description: 'Rows permanently deleted' })
+  @ApiResponse({ status: 409, description: 'Blocked by linked records' })
+  async bulkPurge(
+    @Body() dto: BulkDeleteDto,
+    @Req() req: AdminAuthenticatedRequest,
+  ): Promise<{ count: number }> {
+    const result = await this.archiveService.purge('jobs', dto.ids);
+    await this.logService.create({
+      action: 'JOB_OFFER_BULK_PURGED',
+      entityType: 'JobOffer',
+      userId: req.user?.userId,
+      metadata: { ids: dto.ids, count: result.count },
       ...extractRequestMeta(req),
     });
     return result;

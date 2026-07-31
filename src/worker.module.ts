@@ -1,3 +1,4 @@
+import { AdminCacheService } from './common/services/cache/admin-cache.service';
 import { DynamicModule, Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MailerModule } from '@nestjs-modules/mailer';
@@ -96,6 +97,8 @@ export class WorkerModule {
             prisma,
             null as unknown as SystemConfigService,
             null as unknown as InvoiceService,
+            // Admin list caching is never exercised in the worker process.
+            null as unknown as AdminCacheService,
           ),
         inject: [PrismaService],
       },

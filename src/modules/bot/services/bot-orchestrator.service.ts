@@ -592,6 +592,7 @@ export class BotOrchestratorService {
       profile_type: profile.profile_type as BotProfile['profile_type'],
       status: profile.status,
       reliability_score: profile.reliability_score,
+      verification_status: profile.verification_status,
     };
   }
 

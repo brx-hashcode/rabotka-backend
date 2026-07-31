@@ -27,12 +27,14 @@ import {
   type AdminMobileMoneyBalanceResult,
 } from './wallet.service';
 import { AdminAuthGuard } from '../auth/guards/admin-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
 import type { AdminAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { AdminListWalletTransactionsDto } from './dto/admin-list-wallet-transactions.dto';
 import { AdminListPaymentsDto } from './dto/admin-list-payments.dto';
 import { AdminListMobileMoneyTransactionsDto } from './dto/admin-list-mobile-money-transactions.dto';
 import { AdminRecordMobileMoneyWithdrawalDto } from './dto/admin-record-mobile-money-withdrawal.dto';
+import { ArchiveService } from '../admin-archive/archive.service';
 import { BulkDeleteDto } from '../../common/dto/bulk-delete.dto';
 import { LogService } from '../log/log.service';
 import { extractRequestMeta } from '../../common/utils/request-meta.util';
@@ -40,11 +42,14 @@ import { extractRequestMeta } from '../../common/utils/request-meta.util';
 const ALLOWED_WALLET_ROLES = new Set<UserRole>([
   UserRole.ADMIN,
   UserRole.SUPER_ADMIN,
+  // Wallet data is this role's whole job. RolesGuard has already confirmed the
+  // area is theirs; this set is the per-handler check that predates it.
+  UserRole.FINANCE,
 ]);
 
 @ApiTags('Wallet')
 @Controller('admin/wallet')
-@UseGuards(AdminAuthGuard)
+@UseGuards(AdminAuthGuard, RolesGuard)
 @ApiBearerAuth()
 @ApiCookieAuth()
 export class WalletController {
@@ -52,6 +57,7 @@ export class WalletController {
     private readonly walletService: WalletService,
     private readonly prisma: PrismaService,
     private readonly logService: LogService,
+    private readonly archiveService: ArchiveService,
   ) {}
 
   @Get('revenue')
@@ -165,6 +171,68 @@ export class WalletController {
       created_to: dto.created_to,
       deleted: dto.deleted,
     });
+  }
+
+  @Post('transactions/bulk-restore')
+  @ApiOperation({
+    summary: 'Bulk restore archived rows (admin only)',
+    description: 'Clears deleted_at. Only rows that are currently archived are affected.',
+  })
+  @ApiResponse({ status: 201, description: 'Rows restored' })
+  async bulkRestore(
+    @Body() dto: BulkDeleteDto,
+    @Req() req: AdminAuthenticatedRequest,
+  ): Promise<{ count: number }> {
+    await this.assertWalletRole(req);
+    const result = await this.archiveService.restore(
+      'wallet-transactions',
+      dto.ids,
+    );
+    await this.logService.create({
+      action: 'WALLET_TX_BULK_RESTORED',
+      entityType: 'WalletTransaction',
+      userId: req.user?.userId,
+      metadata: { ids: dto.ids, count: result.count },
+      ...extractRequestMeta(req),
+    });
+    return result;
+  }
+
+  @Post('transactions/bulk-purge')
+  @ApiOperation({
+    summary: 'Permanently delete archived rows (SUPER_ADMIN only)',
+    description:
+      'Irreversible. Refuses rows carrying records that must outlive them (financial or compliance), returning 409 with the blocking counts.',
+  })
+  @ApiResponse({ status: 201, description: 'Rows permanently deleted' })
+  @ApiResponse({ status: 409, description: 'Blocked by linked records' })
+  async bulkPurge(
+    @Body() dto: BulkDeleteDto,
+    @Req() req: AdminAuthenticatedRequest,
+  ): Promise<{ count: number }> {
+    // Purge is SUPER_ADMIN-only everywhere; wallet gates inline rather than
+    // via RolesGuard, so the check is explicit here.
+    const user = await this.prisma.user.findUnique({
+      where: { id: req.user.userId },
+      select: { role: true },
+    });
+    if (user?.role !== UserRole.SUPER_ADMIN) {
+      throw new ForbiddenException(
+        'Only SUPER_ADMIN can permanently delete wallet transactions',
+      );
+    }
+    const result = await this.archiveService.purge(
+      'wallet-transactions',
+      dto.ids,
+    );
+    await this.logService.create({
+      action: 'WALLET_TX_BULK_PURGED',
+      entityType: 'WalletTransaction',
+      userId: req.user?.userId,
+      metadata: { ids: dto.ids, count: result.count },
+      ...extractRequestMeta(req),
+    });
+    return result;
   }
 
   @Post('transactions/bulk-delete')
@@ -322,5 +390,20 @@ export class WalletController {
     });
 
     return result;
+  }
+
+  /** Mirrors the inline gate the other wallet handlers use. */
+  private async assertWalletRole(
+    req: AdminAuthenticatedRequest,
+  ): Promise<void> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: req.user.userId },
+      select: { role: true },
+    });
+    if (!user || !ALLOWED_WALLET_ROLES.has(user.role)) {
+      throw new ForbiddenException(
+        'Only ADMIN or SUPER_ADMIN can access wallet data',
+      );
+    }
   }
 }

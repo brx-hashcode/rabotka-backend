@@ -28,6 +28,7 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { ProfileAuthGuard } from '../auth/guards/profile-auth.guard';
+import { KycVerifiedGuard } from '../auth/guards/kyc-verified.guard';
 import type { ProfileAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
 import { MatchingService } from '../matching/matching.service';
 import { SystemConfigService } from '../system-config/system-config.service';
@@ -260,6 +261,7 @@ export class MobileRecommendationController {
   }
 
   @Post('recommended-workers/:workerId/contact/pay-wallet')
+  @UseGuards(KycVerifiedGuard)
   @ApiOperation({
     summary: '[Mobile/EMPLOYER] Pay a recommended worker contact via wallet',
   })
@@ -273,6 +275,7 @@ export class MobileRecommendationController {
   }
 
   @Post('recommended-workers/:workerId/contact/pay-mobile')
+  @UseGuards(KycVerifiedGuard)
   @ApiOperation({
     summary:
       '[Mobile/EMPLOYER] Create a mobile-money payment for a recommended worker contact',
