@@ -3,6 +3,7 @@ import { AdDevController } from '../ad-dev.controller';
 import { AdvertisementService } from '../../services/advertisement.service';
 import { AdReportService } from '../../services/ad-report.service';
 import { NotificationService } from '../../../notification/notification.service';
+import { AdProcessor } from '../../services/ad.processor';
 
 const mockAd = {
   id: 'ad-1',
@@ -24,6 +25,10 @@ const mockNotificationService = {
   notifyAdvertisementCompleted: jest.fn().mockResolvedValue(undefined),
 };
 
+const mockAdProcessor = {
+  process: jest.fn().mockResolvedValue(undefined),
+};
+
 describe('AdDevController', () => {
   let controller: AdDevController;
 
@@ -35,9 +40,18 @@ describe('AdDevController', () => {
         { provide: AdvertisementService, useValue: mockAdvertisementService },
         { provide: AdReportService, useValue: mockAdReportService },
         { provide: NotificationService, useValue: mockNotificationService },
+        { provide: AdProcessor, useValue: mockAdProcessor },
       ],
     }).compile();
     controller = module.get<AdDevController>(AdDevController);
+  });
+
+  it('runDispatch triggers an immediate dispatch pass', async () => {
+    const result = await controller.runDispatch();
+    expect(mockAdProcessor.process).toHaveBeenCalledWith({
+      data: { type: 'dispatch' },
+    });
+    expect(result).toEqual({ dispatched: true });
   });
 
   it('sendTestReport sends a test report and returns info', async () => {

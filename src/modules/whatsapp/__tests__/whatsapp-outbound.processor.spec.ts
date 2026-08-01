@@ -2,12 +2,19 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { WhatsAppOutboundProcessor } from '../whatsapp-outbound.processor';
 import { WhatsAppService } from '../whatsapp.service';
 import { QueueService } from '../../../common/services/queue/queue.service';
+import { WhatsAppLoginLinkService } from '../../auth/whatsapp-login-link.service';
+import { WHATSAPP_TEMPLATES } from '../../../common/constants/whatsapp-templates';
 
 const mockWhatsApp = {
   sendTextMessage: jest.fn().mockResolvedValue('SM-sid-123'),
   sendMediaMessage: jest.fn().mockResolvedValue('SM-sid-456'),
   sendTemplateMessage: jest.fn().mockResolvedValue('SM-sid-789'),
   saveMessage: jest.fn().mockResolvedValue(undefined),
+};
+
+const mockLoginLink = {
+  // Default: no login code attached, so existing expectations stay exact.
+  appendTo: jest.fn().mockImplementation((_id: string, target: string) => target),
 };
 
 const mockQueueService = {
@@ -26,6 +33,7 @@ describe('WhatsAppOutboundProcessor', () => {
       providers: [
         WhatsAppOutboundProcessor,
         { provide: WhatsAppService, useValue: mockWhatsApp },
+        { provide: WhatsAppLoginLinkService, useValue: mockLoginLink },
       ],
     }).compile();
     processor = module.get<WhatsAppOutboundProcessor>(
@@ -303,5 +311,85 @@ describe('WhatsAppOutboundProcessor', () => {
     // Each call's text must be prefixed with (i/N)
     const firstCall = mockWhatsApp.sendTextMessage.mock.calls[0][1] as string;
     expect(firstCall).toMatch(/^\(1\/\d+\)/);
+  });
+
+  describe('WhatsApp auto-login code', () => {
+    // `statusCheck` declares urlSuffixVar '2' — the job-offer id that ends the
+    // CTA button's URL.
+    const statusCheck = WHATSAPP_TEMPLATES.statusCheck.contentSid;
+
+    it('appends a login code to the CTA URL suffix variable', async () => {
+      mockLoginLink.appendTo.mockResolvedValue('offer-9?s=code-1');
+
+      await processor.process({
+        data: {
+          type: 'template',
+          phone: '+242001',
+          contentSid: statusCheck,
+          contentVariables: { '1': 'Plomberie', '2': 'offer-9' },
+          profileId: 'p1',
+        },
+      });
+
+      expect(mockLoginLink.appendTo).toHaveBeenCalledWith('p1', 'offer-9');
+      expect(mockWhatsApp.sendTemplateMessage).toHaveBeenCalledWith(
+        '+242001',
+        statusCheck,
+        { '1': 'Plomberie', '2': 'offer-9?s=code-1' },
+      );
+    });
+
+    it('leaves templates without a URL suffix untouched', async () => {
+      await processor.process({
+        data: {
+          type: 'template',
+          phone: '+242001',
+          contentSid: 'HXcarousel',
+          contentVariables: { '1': 'x' },
+          profileId: 'p1',
+        },
+      });
+
+      expect(mockLoginLink.appendTo).not.toHaveBeenCalled();
+    });
+
+    it('skips minting when the recipient profile is unknown', async () => {
+      await processor.process({
+        data: {
+          type: 'template',
+          phone: '+242001',
+          contentSid: statusCheck,
+          contentVariables: { '1': 'Plomberie', '2': 'offer-9' },
+        },
+      });
+
+      expect(mockLoginLink.appendTo).not.toHaveBeenCalled();
+      expect(mockWhatsApp.sendTemplateMessage).toHaveBeenCalledWith(
+        '+242001',
+        statusCheck,
+        { '1': 'Plomberie', '2': 'offer-9' },
+      );
+    });
+
+    it('still sends the template when no code could be attached', async () => {
+      // appendTo degrades to the plain target on a Redis failure.
+      mockLoginLink.appendTo.mockResolvedValue('offer-9');
+
+      await processor.process({
+        data: {
+          type: 'template',
+          phone: '+242001',
+          contentSid: statusCheck,
+          contentVariables: { '1': 'Plomberie', '2': 'offer-9' },
+          profileId: 'p1',
+        },
+      });
+
+      expect(mockWhatsApp.sendTemplateMessage).toHaveBeenCalledWith(
+        '+242001',
+        statusCheck,
+        { '1': 'Plomberie', '2': 'offer-9' },
+      );
+    });
   });
 });

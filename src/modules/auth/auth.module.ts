@@ -11,6 +11,7 @@ import { RedisModule } from '../../common/services/redis/redis.module';
 import { LogModule } from '../log/log.module';
 import { JwtAuthGuard, AdminAuthGuard, RolesGuard } from './guards';
 import { QrGateway } from '../ws-notifications/qr.gateway';
+import { WhatsAppLoginLinkModule } from './whatsapp-login-link.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { QrGateway } from '../ws-notifications/qr.gateway';
     RedisModule.forRoot(),
     LogModule,
     MailModule,
+    WhatsAppLoginLinkModule,
     forwardRef(() => WhatsAppModule),
     forwardRef(() => WsNotificationsModule),
     JwtModule.registerAsync({

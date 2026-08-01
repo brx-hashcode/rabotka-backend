@@ -14,6 +14,7 @@ import { BundleTargetAudience, DeliveryChannel } from '@prisma/client';
 export enum BundleChannel {
   EMAIL = 'EMAIL',
   WHATSAPP = 'WHATSAPP',
+  IN_APP = 'IN_APP',
   BOTH = 'BOTH',
 }
 
