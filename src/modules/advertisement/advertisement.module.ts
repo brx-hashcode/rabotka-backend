@@ -13,6 +13,9 @@ import { AdAnalyticsService } from './services/ad-analytics.service';
 import { AdAdminController } from './controllers/ad-admin.controller';
 import { AdTrackingController } from './controllers/ad-tracking.controller';
 import { AdDevController } from './controllers/ad-dev.controller';
+import { AdInboxController } from './controllers/ad-inbox.controller';
+import { AdInboxService } from './services/ad-inbox.service';
+import { AdInboxGateway } from './gateways/ad-inbox.gateway';
 import { AdLinkTrackingService } from './services/ad-link-tracking.service';
 import { AdNotificationService } from './services/ad-notification.service';
 import { AdReportService } from './services/ad-report.service';
@@ -27,7 +30,12 @@ import { LogModule } from '../log/log.module';
     WhatsAppModule,
     LogModule,
   ],
-  controllers: [AdAdminController, AdTrackingController, AdDevController],
+  controllers: [
+    AdAdminController,
+    AdTrackingController,
+    AdDevController,
+    AdInboxController,
+  ],
   providers: [
     AdvertisementService,
     AdAdminService,
@@ -38,6 +46,8 @@ import { LogModule } from '../log/log.module';
     AdLinkTrackingService,
     AdNotificationService,
     AdReportService,
+    AdInboxService,
+    AdInboxGateway,
   ],
   exports: [AdvertisementService, AdAnalyticsService],
 })

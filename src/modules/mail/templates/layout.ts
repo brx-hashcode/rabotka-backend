@@ -1,4 +1,5 @@
-const RABOTKA_GREEN = '#1FBA52';
+import { RABOTKA_LOGO_CID } from './logo-asset';
+
 
 export type FooterInfo = {
   description?: string | null;
@@ -62,9 +63,17 @@ export function wrapEmailHtml(
           <table class="rk-card" width="600" cellpadding="0" cellspacing="0" bgcolor="#ffffff"
             style="border-collapse:collapse;background:#ffffff;border:1px solid #e6e4dd;border-radius:8px;overflow:hidden;">
 
-            <!-- Green top accent bar -->
+            <!-- Logo. width/height are set as attributes as well as inline
+                 styles because Outlook ignores the CSS; alt carries the brand
+                 when a client blocks images, which most do by default. The
+                 32px left padding matches the content cell below, so the logo
+                 lines up with the body text. align + text-align because some
+                 clients honour only one of the two. -->
             <tr>
-              <td height="6" bgcolor="${RABOTKA_GREEN}" style="background-color:${RABOTKA_GREEN};font-size:0;line-height:0;">&nbsp;</td>
+              <td align="left" style="padding:28px 32px 0;text-align:left;">
+                <img src="cid:${RABOTKA_LOGO_CID}" width="56" height="56" alt="Rabotka"
+                  style="display:block;width:56px;height:56px;border:0;outline:none;text-decoration:none;-ms-interpolation-mode:bicubic;">
+              </td>
             </tr>
 
             <!-- Content -->

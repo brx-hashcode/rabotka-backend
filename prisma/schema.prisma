@@ -46,6 +46,7 @@ enum BotPlatform {
 enum DeliveryChannel {
   EMAIL
   WHATSAPP
+  IN_APP
   ALL
 }
 

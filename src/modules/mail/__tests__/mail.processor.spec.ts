@@ -71,6 +71,67 @@ describe('MailProcessor', () => {
         delete process.env.SMTP_PASSWORD;
       });
 
+      describe('embedded logo', () => {
+        const sentAttachments = () =>
+          (mailerService.sendMail.mock.calls[0][0] as {
+            attachments?: {
+              cid?: string;
+              contentType?: string;
+              contentDisposition?: string;
+              content?: Buffer;
+            }[];
+          }).attachments ?? [];
+
+        it('attaches the logo when the HTML references its cid', async () => {
+          // Without the attachment the cid: src has nowhere to point and the
+          // logo is broken in every email.
+          await processor.processEmailJob(
+            makeJob({
+              ...validData(),
+              html: '<img src="cid:rabotka-logo">',
+            }) as any,
+          );
+
+          const logo = sentAttachments().find(
+            (a) => a.cid === 'rabotka-logo',
+          );
+          expect(logo).toBeDefined();
+          expect(logo?.contentType).toBe('image/png');
+          // inline, or clients show a paperclip and a downloadable file on
+          // every transactional email.
+          expect(logo?.contentDisposition).toBe('inline');
+          expect(Buffer.isBuffer(logo?.content)).toBe(true);
+        });
+
+        it('does not attach it when the HTML does not reference it', async () => {
+          await processor.processEmailJob(
+            makeJob({ ...validData(), html: '<p>plain</p>' }) as any,
+          );
+
+          expect(
+            sentAttachments().some((a) => a.cid === 'rabotka-logo'),
+          ).toBe(false);
+        });
+
+        it('keeps caller-supplied attachments alongside it', async () => {
+          await processor.processEmailJob(
+            makeJob({
+              ...validData(),
+              html: '<img src="cid:rabotka-logo">',
+              attachments: [
+                { filename: 'invoice.pdf', content: Buffer.from('pdf') },
+              ],
+            }) as any,
+          );
+
+          const names = sentAttachments().map(
+            (a) => (a as { filename?: string }).filename,
+          );
+          expect(names).toContain('invoice.pdf');
+          expect(names).toContain('rabotka-logo.png');
+        });
+      });
+
       it('sends email via mailerService', async () => {
         await processor.processEmailJob(makeJob(validData()) as any);
         expect(mailerService.sendMail).toHaveBeenCalledWith(
