@@ -144,7 +144,7 @@ export class BotCommandsService {
       title: 'Paiements en attente',
       status: ApplicationStatus.WAITING_PAYMENT,
       emptyMessage:
-        '✅ *Aucun paiement en attente* pour le moment.\n\nTapez *Menu* pour revenir.',
+        '✅ *Aucun paiement en attente* pour le moment.',
     });
   }
 
@@ -219,7 +219,7 @@ export class BotCommandsService {
     if (profile.profile_type !== 'EMPLOYER') {
       return {
         message:
-          '❌ Seuls les employeurs peuvent voir leurs offres. Tapez *Menu* pour revenir.',
+          '❌ Seuls les employeurs peuvent voir leurs offres.',
         offerIds: [],
       };
     }
@@ -231,7 +231,7 @@ export class BotCommandsService {
       });
     if (total === 0) {
       return {
-        message: "Vous n'avez publié aucune offre. Tapez *Menu* pour revenir.",
+        message: "Vous n'avez publié aucune offre.",
         offerIds: [],
       };
     }
@@ -328,7 +328,7 @@ export class BotCommandsService {
     }
     if (allItems.length === 0) {
       return {
-        message: 'Aucune candidature en attente pour vos offres. Tapez *Menu*.',
+        message: 'Aucune candidature en attente pour vos offres.',
       };
     }
     const applicationIds = allItems.map((a) => a.id);
@@ -390,7 +390,7 @@ export class BotCommandsService {
     if (items.length === 0) {
       return {
         message:
-          'Aucune mission pourvue pour le moment. Tapez *Menu* pour revenir.',
+          'Aucune mission pourvue pour le moment.',
       };
     }
     const firstPage = items.slice(0, 5);

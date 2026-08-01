@@ -3,7 +3,7 @@ import type { JobOfferService } from '../../job-offer/job-offer.service';
 import type { BotProfile, BotState } from '../types/bot-state.types';
 import type { FlowResult } from '../types/flow.types';
 import { CMD_MENU } from '../bot.constants';
-import { menuMessage } from '../messages/menu.messages';
+import { welcomePlatformMessage } from '../messages/welcome.messages';
 import {
   parseDateTime,
   formatDateTime,
@@ -32,7 +32,7 @@ function isMenuInput(normalized: string): boolean {
 }
 
 const MENU_REPLY: FlowResult = {
-  reply: ['Tapez *MENU* pour accéder au menu principal.'],
+  reply: [welcomePlatformMessage()],
   clearState: true,
 };
 
@@ -75,7 +75,7 @@ async function advanceQueue(
   if (queue.length === 0) {
     return {
       reply: precedingReply
-        ? [precedingReply, 'Tapez *MENU* pour revenir au menu.']
+        ? [precedingReply, '']
         : MENU_REPLY.reply,
       clearState: true,
     };
@@ -127,7 +127,7 @@ async function handleStep0(
   // "2" = go straight to the main menu, abandoning any other queued offers.
   if (normalized === '2') {
     return {
-      reply: [menuMessage(profile.profile_type)],
+      reply: [welcomePlatformMessage()],
       clearState: true,
     };
   }
@@ -171,7 +171,7 @@ async function handleStep0(
         `Entrez la nouvelle date et heure au format *JJ/MM/AAAA HH:MM* :`,
         `(ex: 25/05/2026 09:00)`,
         '',
-        `Tapez *MENU* pour annuler.`,
+        ``,
       ].join('\n'),
     ],
     nextState: {
@@ -205,7 +205,7 @@ async function handleStep1(
   if (!dt) {
     return {
       reply: [
-        `*Format invalide.* Utilisez *JJ/MM/AAAA HH:MM* (ex: 25/05/2026 09:00)\n\nTapez *MENU* pour annuler.`,
+        `*Format invalide.* Utilisez *JJ/MM/AAAA HH:MM* (ex: 25/05/2026 09:00)`,
       ],
       nextState: state,
     };
@@ -215,7 +215,7 @@ async function handleStep1(
   if (dt < minDate) {
     return {
       reply: [
-        `*La date doit être au moins ${MIN_HOURS_FROM_NOW} heures dans le futur.*\n\nTapez *MENU* pour annuler.`,
+        `*La date doit être au moins ${MIN_HOURS_FROM_NOW} heures dans le futur.*`,
       ],
       nextState: state,
     };
@@ -246,7 +246,7 @@ async function handleStep1(
     const message =
       err instanceof Error ? err.message : 'Erreur lors de la republication.';
     return {
-      reply: [`❌ ${message} Réessayez ou tapez *MENU* pour annuler.`],
+      reply: [`❌ ${message}`],
       nextState: state,
     };
   }

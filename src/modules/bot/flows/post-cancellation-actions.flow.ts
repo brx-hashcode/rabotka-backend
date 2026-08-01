@@ -3,7 +3,7 @@ import type { ApplicationService } from '../../application/application.service';
 import type { BotProfile, BotState } from '../types/bot-state.types';
 import type { FlowResult } from '../types/flow.types';
 import { CMD_MENU } from '../bot.constants';
-import { menuMessage } from '../messages/menu.messages';
+import { welcomePlatformMessage } from '../messages/welcome.messages';
 import { JobOfferStatus } from '@prisma/client';
 
 /**
@@ -47,7 +47,7 @@ const ACTIONS_PROMPT = [
   '1- Voir les autres candidatures',
   "2- Supprimer l'offre",
   '',
-  'Tapez le numéro correspondant, ou *Menu* pour revenir.',
+  'Tapez le numéro correspondant.',
 ].join('\n');
 
 const DELETE_CONFIRM_PROMPT = (title: string) =>
@@ -76,11 +76,11 @@ export async function runPostCancellationActionsFlow(
   const jobOfferId = payload.jobOfferId;
 
   if (isMenuCommand(normalized)) {
-    return { reply: [menuMessage(profile.profile_type)], clearState: true };
+    return { reply: [welcomePlatformMessage()], clearState: true };
   }
 
   if (!jobOfferId) {
-    return { reply: [menuMessage(profile.profile_type)], clearState: true };
+    return { reply: [welcomePlatformMessage()], clearState: true };
   }
 
   // Step: awaiting delete confirmation
@@ -99,7 +99,7 @@ export async function runPostCancellationActionsFlow(
         ctx.applicationService.notifyRejectedApplicants(rejectedIds);
         return {
           reply: [
-            `✅ L'offre *"${payload.jobOfferTitle ?? ''}"* a été supprimée.\n\nTapez *Menu* pour revenir.`,
+            `✅ L'offre *"${payload.jobOfferTitle ?? ''}"* a été supprimée.`,
           ],
           clearState: true,
         };
@@ -107,7 +107,7 @@ export async function runPostCancellationActionsFlow(
         const message =
           err instanceof Error ? err.message : 'Erreur lors de la suppression.';
         return {
-          reply: [`❌ ${message} Tapez *Menu* pour revenir.`],
+          reply: [`❌ ${message}`],
           clearState: true,
         };
       }

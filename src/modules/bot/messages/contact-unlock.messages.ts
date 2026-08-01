@@ -72,8 +72,6 @@ export function formatContactUnlockedMessage(params: {
     `*${name}*`,
     '',
     ...contactLines,
-    '',
-    'Tapez *Menu* pour revenir au menu principal.',
   ].join('\n');
 }
 

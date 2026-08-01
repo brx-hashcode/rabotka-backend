@@ -14,7 +14,7 @@ import { BotCommandsService } from './bot-commands.service';
 import { BotNotificationService } from './bot-notification.service';
 import { BotInboxService } from './bot-inbox.service';
 import { BotDraftService } from './bot-draft.service';
-import { handleMenuCommand } from '../commands/menu.command';
+import { welcomePlatformMessage } from '../messages/welcome.messages';
 import { handleHelpCommand } from '../commands/help.command';
 import { SystemConfigService } from '../../system-config/system-config.service';
 import { WHATSAPP_TEMPLATES } from '../../../common/constants/whatsapp-templates';
@@ -23,7 +23,6 @@ import {
   unknownCommandMessage,
   accountSuspendedBotMessage,
   hasPenaltiesBotMessage,
-  menuMessage,
   penaltiesListBotMessage,
 } from '../messages/menu.messages';
 import type { BotProfile, BotState } from '../types/bot-state.types';
@@ -110,7 +109,7 @@ import { ConfigService } from '@nestjs/config';
 
 const INACTIVE_MESSAGE = `Votre compte est créé mais pas encore activé. Cliquez sur le lien de confirmation que nous vous avons envoyé par WhatsApp pour l'activer.`;
 
-const KYC_APPROVED_PROMPT_MESSAGE = `✅ Votre vérification KYC a été validée !\n\nTapez *Menu* pour accéder à la plateforme et commencer.`;
+const KYC_APPROVED_PROMPT_MESSAGE = `✅ Votre vérification KYC a été validée !`;
 
 const KYC_REJECTED_MESSAGE = `❌ *Votre vérification KYC a été refusée.*\n\nVos documents n'ont pas pu être validés. Veuillez nous contacter pour plus d'informations.`;
 
@@ -133,8 +132,6 @@ function buildVerifySuccessMessage(): string {
     '✅ *WhatsApp vérifié avec succès !*',
     '',
     'Votre numéro est maintenant lié à votre compte.',
-    '',
-    'Tapez *Menu* pour commencer.',
   ].join('\n');
 }
 
@@ -147,7 +144,7 @@ function buildVerifyInvalidMessage(code: string): string {
 }
 
 
-const ERROR_MESSAGE = `Une erreur est survenue. Veuillez réessayer ou tapez « Menu ».`;
+const ERROR_MESSAGE = `Une erreur est survenue. Veuillez réessayer.`;
 
 function looksLikeFlowInput(input: string): boolean {
   const t = input.trim();
@@ -261,10 +258,10 @@ export class BotOrchestratorService {
               err,
             ),
           );
-        return [menuMessage(profile.profile_type)];
+        return [welcomePlatformMessage()];
       }
 
-      // PENDING_ACTIVATION + any other input → remind to type Menu
+      // PENDING_ACTIVATION + any other input → point at the app
       return [KYC_APPROVED_PROMPT_MESSAGE];
     }
 
@@ -436,8 +433,8 @@ export class BotOrchestratorService {
     if (normalized === '1') {
       const penalties = await this.loadUnpaidPenalties(profileId);
       if (penalties.length === 0) {
-        // Race: billing_status not yet refreshed; just go to menu.
-        return [menuMessage(profile.profile_type)];
+        // Race: billing_status not yet refreshed; just send them back to the app.
+        return [welcomePlatformMessage()];
       }
       await this.botState.set(profileId, {
         flowId: PENALTY_GATE_FLOW_ID,
@@ -566,14 +563,10 @@ export class BotOrchestratorService {
         return this.handleCommandRoute(route, profile, profileId, botProfile);
       }
 
-      if (!state) {
-        return [
-          '⏱ *Session expirée.* Votre conversation précédente a expiré.',
-          handleMenuCommand(botProfile),
-        ];
-      }
-
-      return [unknownCommandMessage()];
+      // Nothing recognised and no live flow: there is no menu to fall back
+      // to any more, so the welcome card is the answer — including for an
+      // expired session, where re-explaining the expiry helps nobody.
+      return [welcomePlatformMessage()];
     } catch (err) {
       this.logger.warn('Bot handling error', err);
       return [ERROR_MESSAGE];
@@ -782,8 +775,8 @@ export class BotOrchestratorService {
         const offerIds = (state.payload?.offerIds as string[]) ?? [];
         const trimmed = input.trim();
         const normalized = trimmed.toLowerCase();
-        if (normalized === 'm' || CMD_MENU.some((c) => normalized === c)) {
-          return { reply: [handleMenuCommand(profile)], clearState: true };
+        if (normalized === 'm') {
+          return { reply: [welcomePlatformMessage()], clearState: true };
         }
         const PAGE_SIZE = 5;
         const { total } = await this.jobOfferService.findByEmployerId(
@@ -832,7 +825,7 @@ export class BotOrchestratorService {
           const offer = await this.jobOfferService.findById(offerId);
           if (!offer) {
             return {
-              reply: ["*Cette offre n'existe plus. Tapez *Menu*.*"],
+              reply: ["*Cette offre n'existe plus.*"],
               clearState: true,
             };
           }
@@ -1002,7 +995,7 @@ export class BotOrchestratorService {
   ): Promise<string[]> {
     if (profile.profile_type !== 'WORKER') {
       return [
-        '❌ Seuls les travailleurs peuvent rechercher une offre par référence. Tapez *Menu*.',
+        '❌ Seuls les travailleurs peuvent rechercher une offre par référence.',
       ];
     }
     await this.botState.set(profileId, getSearchByRefInitialState());
@@ -1109,7 +1102,7 @@ export class BotOrchestratorService {
 
     if (!attempt) {
       return [
-        `Aucune tentative de déverrouillage en cours.\n\nTapez *MENU* pour revenir.`,
+        `Aucune tentative de déverrouillage en cours.`,
       ];
     }
 
@@ -1152,7 +1145,7 @@ export class BotOrchestratorService {
     const unpaid = await this.applicationService.getUnpaidPenalties(profile.id);
     if (unpaid.count === 0) {
       return [
-        `✅ *Aucune pénalité impayée.* Votre compte est en règle.\n\nTapez *MENU* pour continuer.`,
+        `✅ *Aucune pénalité impayée.* Votre compte est en règle.`,
       ];
     }
     const flowState = getPayPenaltiesInitialState(unpaid.count, unpaid.total);
@@ -1202,8 +1195,6 @@ export class BotOrchestratorService {
       '*Offres recommandées*',
       '',
       "Aucune offre recommandée pour l'instant. Complétez votre profil pour de meilleures recommandations.",
-      '',
-      'Tapez *Menu* pour revenir au menu principal.',
     ].join('\n');
 
     const offerIds = await this.recommendedOfferIds(profile.id, 20);
@@ -1296,7 +1287,7 @@ export class BotOrchestratorService {
           '',
           "Aucun travailleur recommandé pour l'instant. Publiez une offre pour obtenir des recommandations.",
           '',
-          '*Tapez 1 pour publier une offre ou Menu pour revenir.*',
+          '*Tapez 1 pour publier une offre.*',
         ].join('\n'),
       ];
     }
@@ -1328,8 +1319,6 @@ export class BotOrchestratorService {
           '*Travailleurs recommandés*',
           '',
           'Aucun travailleur qualifié disponible pour le moment.',
-          '',
-          'Tapez *Menu* pour revenir.',
         ].join('\n'),
       ];
     }
@@ -1405,7 +1394,7 @@ export class BotOrchestratorService {
   ): Promise<string> {
     switch (commandId) {
       case 'menu':
-        return handleMenuCommand(profile);
+        return welcomePlatformMessage();
       case 'help': {
         const contact = await this.systemConfig.getContactInfo();
         return handleHelpCommand(commandId, {

@@ -1,6 +1,6 @@
 import type { BotProfile, BotState } from '../types/bot-state.types';
 import { FLOW_IDS, CMD_MENU } from '../bot.constants';
-import { menuMessage } from '../messages/menu.messages';
+import { welcomePlatformMessage } from '../messages/welcome.messages';
 import type { ApplicationService } from '../../application/application.service';
 import type { WalletService } from '../../wallet/wallet.service';
 import type { InvoiceService } from '../../invoice/invoice.service';
@@ -69,7 +69,7 @@ function buildInsufficientFundsReply(
     ``,
     `Votre solde est de *${balance.toLocaleString('fr-FR')} FCFA*, mais le montant dû est de *${totalAmount.toLocaleString('fr-FR')} FCFA*.`,
     ``,
-    `Tapez *MENU* pour revenir ou effectuez un rechargement d'abord.`,
+    `'abord.`,
   ].join('\n');
 }
 
@@ -84,7 +84,7 @@ function buildWalletPaymentSuccessReply(
     ``,
     `Votre compte est maintenant *débloqué*.`,
     ``,
-    `Tapez *MENU* pour continuer.`,
+    ``,
   ].join('\n');
 }
 
@@ -113,7 +113,7 @@ async function handleWalletConfirmationStep(
 
   if (unpaid.count === 0) {
     return {
-      reply: ['Aucune pénalité impayée. Tapez *Menu*.'],
+      reply: ['Aucune pénalité impayée.'],
       clearState: true,
     };
   }
@@ -285,7 +285,7 @@ export async function runPayPenaltiesFlow(
   const normalized = trimmed.toLowerCase();
 
   const goToMenu = (): FlowResult => ({
-    reply: [menuMessage(profile.profile_type)],
+    reply: [welcomePlatformMessage()],
     clearState: true,
   });
 

@@ -84,13 +84,21 @@ export class WhatsAppLoginLinkService {
    * Appends a fresh code to a link (or to a CTA button's URL suffix). Never
    * throws: a Redis hiccup must degrade to the plain link, never block the
    * message it is attached to.
+   *
+   * `separator` is the caller's, not ours to guess: a template suffix like
+   * `applications/42` carries no `?` of its own yet lands inside
+   * `…/login?redirect=/applications/42`, where `?s=` would be swallowed by the
+   * `redirect` value instead of becoming a parameter of its own.
    */
-  async appendTo(profileId: string, target: string): Promise<string> {
+  async appendTo(
+    profileId: string,
+    target: string,
+    separator: '?' | '&' = '?',
+  ): Promise<string> {
     try {
       const code = await this.mint(profileId);
       if (!code) return target;
 
-      const separator = target.includes('?') ? '&' : '?';
       return `${target}${separator}${WA_LOGIN_QUERY_PARAM}=${code}`;
     } catch (err) {
       this.logger.warn(

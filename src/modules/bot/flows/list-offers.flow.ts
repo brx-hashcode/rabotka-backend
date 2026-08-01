@@ -12,7 +12,7 @@ import {
   jobOfferToOfferListItem,
   type OfferListItem,
 } from '../messages/offers.messages';
-import { menuMessage } from '../messages/menu.messages';
+import { welcomePlatformMessage } from '../messages/welcome.messages';
 
 export type ListOffersContext = {
   jobOfferService: JobOfferService;
@@ -86,7 +86,7 @@ async function handleLoadMore(params: FlowParams): Promise<FlowResult> {
   );
   if (data.length === 0) {
     return {
-      reply: ["*Plus d'offres. Tapez 7 ou 'Menu' pour revenir.*"],
+      reply: ["*Plus d'offres. Tapez 7.*"],
       nextState: state,
     };
   }
@@ -117,7 +117,7 @@ async function handleListSelectOffer(
   const offer = await ctx.jobOfferService.findById(offerId);
   if (!offer) {
     return {
-      reply: ["*Cette offre n'existe plus. Tapez *Menu*.*"],
+      reply: ["*Cette offre n'existe plus.*"],
       clearState: true,
     };
   }
@@ -147,7 +147,7 @@ function handleDetailStep(
       : null;
   if (!offerId) {
     return {
-      reply: ['❌ Index invalide. Tapez *Menu*.'],
+      reply: ['❌ Index invalide.'],
       clearState: true,
     };
   }
@@ -157,7 +157,7 @@ function handleDetailStep(
   if (trimmed === '3') return handleDetailBackToList(offerId, params);
   return {
     reply: [
-      'Répondez par 1 (Postuler), 2 (Voir description complète), 3 (Retour liste) ou 4 (Menu).',
+      'Répondez par 1 (Postuler), 2 (Voir description complète), 3 (Retour liste) ou 4 (Quitter).',
     ],
     nextState: state,
   };
@@ -187,7 +187,7 @@ async function handleDetailApply(
   const offer = await ctx.jobOfferService.findById(offerId);
   if (!offer) {
     return {
-      reply: ["*Cette offre n'existe plus. Tapez *Menu*.*"],
+      reply: ["*Cette offre n'existe plus.*"],
       clearState: true,
     };
   }
@@ -239,7 +239,7 @@ async function handleDetailViewDescription(
   const offer = await ctx.jobOfferService.findById(offerId);
   if (!offer) {
     return {
-      reply: ['*Offre introuvable. Tapez *Menu*.*'],
+      reply: ['*Offre introuvable.*'],
       clearState: true,
     };
   }
@@ -331,13 +331,13 @@ export async function runListOffersFlow(
 
   if (offerIds.length === 0) {
     return {
-      reply: ['*Aucune offre. Tapez *Menu* pour revenir.*'],
+      reply: ['*Aucune offre.*'],
       clearState: true,
     };
   }
 
   const goToMenu = (): FlowResult => ({
-    reply: [menuMessage(profile.profile_type)],
+    reply: [welcomePlatformMessage()],
     clearState: true,
   });
 
@@ -370,7 +370,7 @@ export async function runListOffersFlow(
   }
 
   return {
-    reply: ['❌ Erreur. Tapez *Menu* pour revenir.'],
+    reply: ['❌ Erreur.'],
     clearState: true,
   };
 }

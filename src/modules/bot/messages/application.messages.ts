@@ -41,7 +41,7 @@ export function formatCandidaturesListPage(
   const actions: string[] = [];
   if (page > 0) actions.push('P- Page précédente');
   if (hasMore) actions.push('Voir plus');
-  actions.push('M- Menu principal');
+  actions.push('M- Quitter');
   lines.push(...actions, '', 'Tapez un numéro pour voir le détail.');
   return lines.join('\n');
 }
@@ -95,7 +95,7 @@ export function formatCandidatureDetail(params: {
     '1- Accepter',
     '2- Refuser',
     '3- Retour à la liste',
-    '4- Menu',
+    '4- Quitter',
     // Appended rather than inserted: 1/2 are Accepter/Refuser and are forwarded
     // as-is to the accept/refuse flow, so their numbers must not shift.
     '5- Voir le portfolio',
@@ -190,7 +190,7 @@ export function formatMyApplicationsList(
   }
 
   lines.push(
-    "Veuillez taper un numéro pour sélectionner une candidature ou 'Menu' pour revenir au menu",
+    "Veuillez taper un numéro pour sélectionner une candidature",
   );
   return lines.join('\n');
 }
@@ -210,7 +210,7 @@ export function formatMyApplicationsListPage(params: {
 }): string {
   const { title, applications, total, page, pageSize } = params;
   if (total === 0 || applications.length === 0) {
-    return `Vous n'avez aucune candidature active.\n\nTapez *1* (Trouver une mission) pour voir les offres disponibles, ou *Menu* pour revenir.`;
+    return `Vous n'avez aucune candidature active.\n\nTapez *1* (Trouver une mission) pour voir les offres disponibles.`;
   }
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
@@ -241,7 +241,7 @@ export function formatMyApplicationsListPage(params: {
   const actions: string[] = [];
   if (page > 0) actions.push('P- Page précédente');
   if (hasMore) actions.push('S- Page suivante');
-  actions.push('M- Menu principal');
+  actions.push('M- Quitter');
   lines.push(...actions);
   lines.push('', 'Tapez le numéro pour voir le détail.');
   return lines.join('\n');
@@ -272,7 +272,7 @@ export function formatMyApplicationDetailWithCancel(
     '*Actions:*',
     '1- Annuler cette candidature',
     '2- Retour à la liste',
-    '3- Menu',
+    '3- Quitter',
     '',
     '*Tapez le numéro correspondant.*',
   ].join('\n');
@@ -293,7 +293,7 @@ export function formatMyApplicationDetailReadOnly(
     '',
     '*Actions:*',
     '1- Retour à la liste',
-    '2- Menu',
+    '2- Quitter',
     '',
     '*Tapez le numéro correspondant.*',
   ].join('\n');
@@ -316,7 +316,7 @@ export function formatMyApplicationDetailWaitingPayment(
     '1- Effectuer le paiement',
     '2- Rejeter et annuler',
     '3- Retour à la liste',
-    '4- Menu',
+    '4- Quitter',
     '',
     '*Tapez le numéro correspondant.*',
   ].join('\n');
@@ -341,7 +341,7 @@ export function formatMyApplicationDetailWaitingPaymentPaid(
     '*Actions:*',
     '1- Rejeter et annuler',
     '2- Retour à la liste',
-    '3- Menu',
+    '3- Quitter',
     '',
     '*Tapez le numéro correspondant.*',
   ].join('\n');
@@ -404,9 +404,7 @@ export function formatApplicationSentSuccess(offerTitle: string): string {
     '*Statut*: En attente de réponse',
     "*Vous serez notifié dès que l'employeur prendra une décision.*",
     '',
-    '*Astuce*: Consultez le menu principal puis "Mes candidatures" pour suivre vos postulations.',
-    '',
-    'Tapez *Menu* pour revenir.',
+    '*Astuce*: retrouvez toutes vos candidatures dans l’application.',
   ].join('\n');
 }
 
@@ -472,7 +470,7 @@ export function formatApplicationRejectedToWorker(): string {
     '*Candidature refusée*',
     '',
     "L'employeur a choisi un autre candidat pour cette offre.",
-    "Consultez d'autres offres en tapant *1* (Trouver une mission) depuis le menu.",
+    "Retrouvez d'autres offres dans l'application.",
   ].join('\n');
 }
 
@@ -513,7 +511,7 @@ export function formatCancellationToEmployer(params: {
     '1- Voir les autres candidatures',
     "2- Supprimer l'offre",
     '',
-    'Tapez le numéro correspondant, ou *Menu* pour revenir.',
+    'Tapez le numéro correspondant.',
   );
   return lines.join('\n');
 }
@@ -552,7 +550,7 @@ export function formatFilledJobsListPage(
   const lines = [`*Missions en cours*${pageLabel}`, ''];
   if (items.length === 0) {
     lines.push(
-      'Aucune mission en cours pour le moment. Tapez *Menu* pour revenir.',
+      'Aucune mission en cours pour le moment.',
     );
     return lines.join('\n');
   }
@@ -569,7 +567,7 @@ export function formatFilledJobsListPage(
   const actions: string[] = [];
   if (page > 0) actions.push('P- Page précédente');
   if (hasMore) actions.push('Voir plus');
-  actions.push('M- Menu principal');
+  actions.push('M- Quitter');
   lines.push(...actions, '', 'Tapez un numéro pour sélectionner une mission.');
   return lines.join('\n');
 }
@@ -588,7 +586,7 @@ export function formatFilledJobDetail(params: FilledJobListItem): string {
     '1- Marquer comme terminée (verser le gain au worker)',
     "2- Annuler (réouvrir l'offre)",
     '3- Retour',
-    '4- Menu',
+    '4- Quitter',
     '',
     'Tapez le numéro correspondant.',
   ].join('\n');
@@ -613,7 +611,5 @@ export function formatJobCancelledByEmployerToWorker(
     "*Mission annulée par l'employeur*",
     '',
     `L'employeur a annulé la mission "${offerTitle}". L'offre est de nouveau ouverte.`,
-    '',
-    'Tapez *Menu* pour revenir.',
   ].join('\n');
 }

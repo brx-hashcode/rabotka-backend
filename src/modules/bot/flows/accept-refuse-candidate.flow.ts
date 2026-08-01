@@ -90,8 +90,6 @@ async function handleAcceptRefuseStep1(args: StepArgs): Promise<FlowResult> {
                 '',
                 `✅ Votre paiement couvre déjà tous les candidats de ce poste.`,
                 `Le contact avec *${workerName}* sera débloqué dès qu'il confirme de son côté.`,
-                '',
-                'Tapez *Menu* pour revenir.',
               ].join('\n'),
             ],
             clearState: true,
@@ -140,8 +138,6 @@ async function handleAcceptRefuseStep1(args: StepArgs): Promise<FlowResult> {
             '*Candidature acceptée !*',
             '',
             'Le travailleur a été notifié.',
-            '',
-            'Tapez *Menu* pour revenir.',
           ].join('\n'),
         ],
         clearState: true,
@@ -207,7 +203,7 @@ async function handleAcceptRefuseStep3(args: StepArgs): Promise<FlowResult> {
   if (normalized === '2' || normalized === 'annuler') {
     return {
       reply: [
-        '*Refus annulé.* La candidature reste en attente.\n\nTapez *Menu* pour revenir.',
+        '*Refus annulé.* La candidature reste en attente.',
       ],
       clearState: true,
     };
@@ -237,8 +233,6 @@ async function handleAcceptRefuseStep3(args: StepArgs): Promise<FlowResult> {
           '*Candidature refusée.*',
           '',
           "Le candidat a été notifié. Votre offre reste ouverte pour d'autres candidatures.",
-          '',
-          'Tapez *Menu* pour revenir.',
         ].join('\n'),
       ],
       clearState: true,
@@ -266,7 +260,7 @@ export async function runAcceptRefuseCandidateFlow(
 
   if (!applicationId) {
     return {
-      reply: ['❌ Candidature non trouvée. Tapez *Menu*.'],
+      reply: ['❌ Candidature non trouvée.'],
       clearState: true,
     };
   }
@@ -274,7 +268,7 @@ export async function runAcceptRefuseCandidateFlow(
   if (profile.profile_type !== 'EMPLOYER') {
     return {
       reply: [
-        '❌ Seuls les employeurs peuvent gérer les candidatures. Tapez *Menu*.',
+        '❌ Seuls les employeurs peuvent gérer les candidatures.',
       ],
       clearState: true,
     };
@@ -294,7 +288,7 @@ export async function runAcceptRefuseCandidateFlow(
   if (state.step === 3) return handleAcceptRefuseStep3(args);
 
   return {
-    reply: ['❌ Erreur. Tapez *Menu* pour revenir.'],
+    reply: ['❌ Erreur.'],
     clearState: true,
   };
 }
