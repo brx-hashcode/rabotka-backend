@@ -1,6 +1,6 @@
 import type { BotProfile, BotState } from '../types/bot-state.types';
 import { FLOW_IDS, CMD_MENU } from '../bot.constants';
-import { menuMessage } from '../messages/menu.messages';
+import { welcomePlatformMessage } from '../messages/welcome.messages';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import type { IPaymentUrlService } from '../types/payment-url.types';
 import { PaymentRequestType } from '@prisma/client';
@@ -31,7 +31,7 @@ export async function runResolvePenaltiesFlow(
       normalized === 'retour')
   ) {
     return {
-      reply: [menuMessage(profile.profile_type)],
+      reply: [welcomePlatformMessage()],
       clearState: true,
     };
   }
@@ -51,7 +51,7 @@ export async function runResolvePenaltiesFlow(
     if (count === 0) {
       return {
         reply: [
-          `✅ *Aucune pénalité impayée.*\n\nVotre situation est régularisée. Tapez *MENU* pour continuer.`,
+          `✅ *Aucune pénalité impayée.*\n\nVotre situation est régularisée.`,
         ],
         clearState: true,
       };
@@ -113,7 +113,7 @@ export async function runResolvePenaltiesFlow(
           ``,
           `Après le paiement, votre compte sera réactivé automatiquement.`,
           ``,
-          `Tapez *MENU* pour revenir au menu principal.`,
+          ``,
         ].join('\n'),
       ],
       clearState: true,

@@ -8,8 +8,6 @@ export function formatKycValidatedMessage(
     `Bonjour ${firstName},`,
     '',
     "Bonne nouvelle ! 🎉 Votre vérification d'identité (KYC) a été approuvée avec succès.",
-    '',
-    'Tapez *Menu* pour commencer',
   ].join('\n');
 }
 
@@ -54,7 +52,7 @@ export function formatAccountActivatedMessage(params: {
     '',
     ...actions.map((a) => `• ${a}`),
     '',
-    '*Pour commencer, tapez "Menu" pour voir toutes les options disponibles.*',
+    '*Pour commencer,*',
     '',
     '*Bienvenue sur Rabotka !*',
   ].join('\n');

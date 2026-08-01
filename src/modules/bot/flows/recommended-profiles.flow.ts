@@ -9,7 +9,7 @@ import {
 import { generatePaymentReference } from '../../../common/utils/payment-reference';
 import type { BotProfile, BotState } from '../types/bot-state.types';
 import { FLOW_IDS, CMD_MENU } from '../bot.constants';
-import { menuMessage } from '../messages/menu.messages';
+import { welcomePlatformMessage } from '../messages/welcome.messages';
 import { formatContactUnlockedMessage } from '../messages/contact-unlock.messages';
 import {
   type CarouselCard,
@@ -83,7 +83,7 @@ function subMenu(): string {
     '1- Contacter le candidat',
     '2- Voir le portfolio',
     '3- Liste des candidats',
-    '4- Menu',
+    '4- Quitter',
   ].join('\n');
 }
 
@@ -102,7 +102,7 @@ export async function runRecommendedProfilesFlow(
   const normalized = trimmed.toLowerCase();
 
   const goToMenu = (): FlowResult => ({
-    reply: [menuMessage(profile.profile_type)],
+    reply: [welcomePlatformMessage()],
     clearState: true,
   });
 
@@ -115,7 +115,7 @@ export async function runRecommendedProfilesFlow(
   if (workerIds.length === 0) {
     return {
       reply: [
-        '*Aucun profil recommandé pour le moment. Tapez *Menu* pour revenir.*',
+        '*Aucun profil recommandé pour le moment.*',
       ],
       clearState: true,
     };

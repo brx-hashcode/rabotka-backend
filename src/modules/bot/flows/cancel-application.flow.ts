@@ -11,7 +11,7 @@ import {
 import type { ApplicationService } from '../../application/application.service';
 import type { BotNotificationService } from '../services/bot-notification.service';
 import type { InterestSignalService } from '../../interest-graph/interest-signal.service';
-import { menuMessage } from '../messages/menu.messages';
+import { welcomePlatformMessage } from '../messages/welcome.messages';
 
 export type CancelApplicationContext = {
   applicationService: ApplicationService;
@@ -78,8 +78,6 @@ function buildCancelledReply(penaltyAmount: number | null): string {
     'Votre candidature a été annulée.' + penaltyMsg,
     '',
     "L'employeur a été notifié.",
-    '',
-    'Tapez *Menu* pour revenir.',
   ].join('\n');
 }
 
@@ -119,7 +117,7 @@ async function executeCancellation(
     const message =
       err instanceof Error ? err.message : "Impossible d'annuler.";
     return {
-      reply: [`❌ ${message}\n\nTapez *Menu* pour annuler.`],
+      reply: [`❌ ${message}`],
       nextState: state,
     };
   }
@@ -234,14 +232,14 @@ async function handleCancelStep1(
   if (normalized === '2' || normalized === 'je serai présent') {
     return {
       reply: [
-        'Annulation annulée. Votre candidature est maintenue. Tapez *Menu*.',
+        'Annulation annulée. Votre candidature est maintenue.',
       ],
       clearState: true,
     };
   }
 
   if (normalized === '3' || isMenuCommand(normalized)) {
-    return { reply: [menuMessage(profile.profile_type)], clearState: true };
+    return { reply: [welcomePlatformMessage()], clearState: true };
   }
 
   return executeCancellation(
@@ -280,7 +278,7 @@ async function handleCancelStep2(args: CancelStepArgs): Promise<FlowResult> {
   if (normalized === '2' || normalized === 'non') {
     return {
       reply: [
-        'Annulation annulée. Votre candidature est maintenue. Tapez *Menu*.',
+        'Annulation annulée. Votre candidature est maintenue.',
       ],
       clearState: true,
     };
@@ -303,12 +301,12 @@ export async function runCancelApplicationFlow(
   const normalized = trimmed.toLowerCase();
 
   if (isMenuCommand(normalized)) {
-    return { reply: [menuMessage(profile.profile_type)], clearState: true };
+    return { reply: [welcomePlatformMessage()], clearState: true };
   }
 
   if (!applicationId) {
     return {
-      reply: ['❌ Candidature non trouvée. Tapez *Menu*.'],
+      reply: ['❌ Candidature non trouvée.'],
       clearState: true,
     };
   }
@@ -316,7 +314,7 @@ export async function runCancelApplicationFlow(
   if (profile.profile_type !== 'WORKER') {
     return {
       reply: [
-        '❌ Seuls les travailleurs peuvent annuler leurs candidatures. Tapez *Menu*.',
+        '❌ Seuls les travailleurs peuvent annuler leurs candidatures.',
       ],
       clearState: true,
     };
@@ -325,7 +323,7 @@ export async function runCancelApplicationFlow(
   const app = await ctx.applicationService.findById(applicationId);
   if (app?.worker_id !== profile.id) {
     return {
-      reply: ['❌ Candidature introuvable. Tapez *Menu*.'],
+      reply: ['❌ Candidature introuvable.'],
       clearState: true,
     };
   }
@@ -336,7 +334,7 @@ export async function runCancelApplicationFlow(
     app.status !== 'WAITING_PAYMENT'
   ) {
     return {
-      reply: ['❌ Cette candidature ne peut plus être annulée. Tapez *Menu*.'],
+      reply: ['❌ Cette candidature ne peut plus être annulée.'],
       clearState: true,
     };
   }
@@ -371,7 +369,7 @@ export async function runCancelApplicationFlow(
   }
   if (state.step === 2) return handleCancelStep2(stepArgs);
 
-  return { reply: ['❌ Erreur. Tapez *Menu*.'], clearState: true };
+  return { reply: ['❌ Erreur.'], clearState: true };
 }
 
 export function getCancelApplicationInitialState(
