@@ -853,7 +853,7 @@ export class ContactUnlockService {
         `La mise en relation pour "${attempt.job_offer.title}" a été annulée.`,
         ...refundLines,
         '',
-        "Tapez 'Menu' pour revenir.",
+        "",
       ].join('\n'),
       otherPartyMessage: [
         '*Demande de paiement annulée*',
@@ -861,7 +861,7 @@ export class ContactUnlockService {
         `${currentName} a rejeté la mise en relation pour "${attempt.job_offer.title}".`,
         ...refundLines,
         '',
-        "Tapez 'Menu' pour revenir.",
+        "",
       ].join('\n'),
       otherPhone,
     };

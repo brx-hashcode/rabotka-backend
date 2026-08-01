@@ -1,6 +1,6 @@
 import type { BotProfile, BotState } from '../types/bot-state.types';
 import { FLOW_IDS, CMD_MENU } from '../bot.constants';
-import { menuMessage } from '../messages/menu.messages';
+import { welcomePlatformMessage } from '../messages/welcome.messages';
 import {
   formatCandidaturesListPage,
   formatCandidatureDetail,
@@ -156,7 +156,7 @@ function buildInvalidChoiceMessage(
   pageIndex: number,
 ) {
   const n = getPageSlice(items, pageIndex).length;
-  return `Tapez un numéro (1-${n}) pour sélectionner un candidat, S/P pour naviguer, M pour le menu.`;
+  return `Tapez un numéro (1-${n}) pour sélectionner un candidat, S/P pour naviguer, M pour quitter.`;
 }
 
 type DetailStepParams = {
@@ -214,7 +214,7 @@ async function handleDetailStep(params: DetailStepParams): Promise<FlowResult> {
     const applicationId = selectedItem?.id;
     if (!applicationId) {
       return {
-        reply: ['❌ Erreur. Tapez *Menu*.'],
+        reply: ['❌ Erreur.'],
         clearState: true,
       };
     }
@@ -233,7 +233,7 @@ async function handleDetailStep(params: DetailStepParams): Promise<FlowResult> {
         return {
           reply: [
             ...result.reply,
-            '\nAucune autre candidature en attente. Tapez *Menu* pour revenir.',
+            '\nAucune autre candidature en attente.',
           ],
           clearState: true,
         };
@@ -277,7 +277,7 @@ async function handleDetailStep(params: DetailStepParams): Promise<FlowResult> {
 
   if (!selectedItem) {
     return {
-      reply: ["*ERREUR. TAPEZ 'MENU'.*"],
+      reply: ['*Une erreur est survenue.*'],
       clearState: true,
     };
   }
@@ -364,13 +364,13 @@ export async function runCandidaturesListFlow(
 
   if (items.length === 0) {
     return {
-      reply: ['Aucune candidature reçue. Tapez *Menu*.'],
+      reply: ['Aucune candidature reçue.'],
       clearState: true,
     };
   }
 
   const goToMenu = (): FlowResult => ({
-    reply: [menuMessage(profile.profile_type)],
+    reply: [welcomePlatformMessage()],
     clearState: true,
   });
 
@@ -404,7 +404,7 @@ export async function runCandidaturesListFlow(
     return handlePageNav(state, payload, items, pageIndex, 's');
   }
   if (numericInput === menuIdx) {
-    return { reply: [menuMessage(profile.profile_type)], clearState: true };
+    return { reply: [welcomePlatformMessage()], clearState: true };
   }
 
   return handleListSelection(state, payload, items, pageIndex, trimmed, ctx);

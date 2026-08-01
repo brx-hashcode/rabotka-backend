@@ -1,3 +1,4 @@
+import { welcomePlatformMessage } from '../../messages/welcome.messages';
 import {
   runUnlockContactFlow,
   getUnlockContactInitialState,
@@ -70,7 +71,7 @@ function makeCtx(
 
 describe('runUnlockContactFlow()', () => {
   describe('guard checks', () => {
-    it('returns menu on "menu" input', async () => {
+    it('returns the welcome card on "menu" input', async () => {
       const result = await runUnlockContactFlow(
         makeState(),
         'menu',
@@ -78,7 +79,7 @@ describe('runUnlockContactFlow()', () => {
         makeCtx(),
       );
       expect(result.clearState).toBe(true);
-      expect(result.reply[0]).toMatch(/MENU/i);
+      expect(result.reply[0]).toBe(welcomePlatformMessage());
     });
 
     it('returns error when attemptId is missing', async () => {

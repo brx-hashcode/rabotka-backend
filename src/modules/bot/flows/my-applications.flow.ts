@@ -4,7 +4,7 @@ import {
   getCancelApplicationInitialState,
   runCancelApplicationFlow,
 } from './cancel-application.flow';
-import { menuMessage } from '../messages/menu.messages';
+import { welcomePlatformMessage } from '../messages/welcome.messages';
 import {
   formatMyApplicationsListPage,
   formatMyApplicationDetailWithCancel,
@@ -182,7 +182,7 @@ async function tryHandleStep1WaitingPaymentPay(params: {
   if (!attempt) {
     return {
       reply: [
-        '❌ Aucune tentative de paiement en attente pour cette candidature.\n\nTapez *Menu* pour revenir.',
+        '❌ Aucune tentative de paiement en attente pour cette candidature.',
       ],
       clearState: true,
     };
@@ -298,7 +298,7 @@ async function handleStep0(
     );
   }
   if (normalized === 'm') {
-    return { reply: [menuMessage(profile.profile_type)], clearState: true };
+    return { reply: [welcomePlatformMessage()], clearState: true };
   }
 
   // Numeric selection — items are numbered *globally* across pages:
@@ -321,7 +321,7 @@ async function handleStep0(
     (app.worker_id === profile.id || app.job_offer.employer_id === profile.id);
   if (!canAccess) {
     return {
-      reply: ['❌ Candidature introuvable. Tapez *Menu*.'],
+      reply: ['❌ Candidature introuvable.'],
       clearState: true,
     };
   }
@@ -361,7 +361,7 @@ async function handleStep1(
     selectedIndex == undefined ? undefined : applicationIds[selectedIndex];
 
   if (!applicationId) {
-    return { reply: ['❌ Index invalide. Tapez *Menu*.'], clearState: true };
+    return { reply: ['❌ Index invalide.'], clearState: true };
   }
 
   const app = await ctx.applicationService.findById(applicationId);
@@ -370,7 +370,7 @@ async function handleStep1(
     (app.worker_id === profile.id || app.job_offer.employer_id === profile.id);
   if (!canAccess) {
     return {
-      reply: ['❌ Candidature introuvable. Tapez *Menu*.'],
+      reply: ['❌ Candidature introuvable.'],
       clearState: true,
     };
   }
@@ -428,7 +428,7 @@ async function handleStep1(
     return buildMyApplicationsListState(profile, ctx, listMode, storedPage);
   }
   if (nav === 'menu') {
-    return { reply: [menuMessage(profile.profile_type)], clearState: true };
+    return { reply: [welcomePlatformMessage()], clearState: true };
   }
 
   return { reply: [detailText], nextState: state };
@@ -463,12 +463,12 @@ export async function runMyApplicationsFlow(
   if (
     CMD_MENU.some((c) => normalized === c || normalized.startsWith(c + ' '))
   ) {
-    return { reply: [menuMessage(profile.profile_type)], clearState: true };
+    return { reply: [welcomePlatformMessage()], clearState: true };
   }
 
   if (applicationIds.length === 0) {
     return {
-      reply: ['❌ Aucune candidature. Tapez *Menu*.'],
+      reply: ['❌ Aucune candidature.'],
       clearState: true,
     };
   }
@@ -479,7 +479,7 @@ export async function runMyApplicationsFlow(
   if (step === 1)
     return handleStep1(state, trimmed, applicationIds, profile, ctx);
 
-  return { reply: ['❌ Erreur. Tapez *Menu*.'], clearState: true };
+  return { reply: ['❌ Erreur.'], clearState: true };
 }
 
 export function getMyApplicationsInitialState(
@@ -534,8 +534,8 @@ async function buildMyApplicationsListState(
   if (total === 0) {
     const emptyMsg =
       listMode === 'pending_payments'
-        ? '✅ *Aucun paiement en attente* pour le moment.\n\nTapez *Menu* pour revenir.'
-        : `Vous n'avez aucune candidature active.\n\nTapez *1* (Trouver une mission) pour voir les offres disponibles, ou *Menu* pour revenir.`;
+        ? '✅ *Aucun paiement en attente* pour le moment.'
+        : `Vous n'avez aucune candidature active.\n\nTapez *1* (Trouver une mission) pour voir les offres disponibles.`;
     return { reply: [emptyMsg], clearState: true };
   }
 

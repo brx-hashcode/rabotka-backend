@@ -14,6 +14,14 @@ export interface WhatsAppTemplate<Args extends unknown[]> {
    * variable in a button URL and it must sit at the end.
    */
   urlSuffixVar?: string;
+  /**
+   * Character joining the login code to the suffix. Every CTA URL here is of
+   * the form `…/login?redirect=/applications/{{9}}`, so the variable ends the
+   * URL but sits inside a query *value*: appending `?s=CODE` would make the
+   * code part of `redirect` and invisible to `URLSearchParams`. Those templates
+   * need `'&'`. Only a URL with no query string at all takes `'?'`.
+   */
+  urlSuffixSeparator?: '?' | '&';
 }
 
 /**
@@ -42,6 +50,35 @@ export const WHATSAPP_TEMPLATES = {
     contentSid: 'HX1610d675f58d8fa92d277383584cc5fb',
     variables: () => ({}),
   } satisfies WhatsAppTemplate<[]>,
+
+  /**
+   * Welcome cards carrying the brand cover. The image is baked into the
+   * approved template, not passed as a variable — WhatsApp rejects
+   * "Media url cannot contain a full variable" — so swapping the picture means
+   * re-uploading to the same R2 key.
+   */
+  welcomeUnregisteredCard: {
+    contentSid: sid(
+      'TPL_WELCOME_UNREGISTERED_V2',
+      'HXcf1954a8146623c7482682a605aacd93',
+    ),
+    variables: () => ({}),
+  } satisfies WhatsAppTemplate<[]>,
+
+  /**
+   * The single answer the bot gives a registered user for anything they type —
+   * the in-chat menu is gone. {{1}} is the destination path and ends the CTA
+   * URL (`…/login?redirect=/{{1}}`), so the one-tap login code can ride along.
+   */
+  welcomePlatform: {
+    contentSid: sid(
+      'TPL_WELCOME_PLATFORM',
+      'HX230bb5b440d631488889a134b6bd8388',
+    ),
+    urlSuffixVar: '1',
+    urlSuffixSeparator: '&',
+    variables: (path: string) => ({ '1': path }),
+  } satisfies WhatsAppTemplate<[path: string]>,
 
   /**
    * Shown while KYC is under review. Replaces the old free-form 1/2 numbered
@@ -136,6 +173,7 @@ export const WHATSAPP_TEMPLATES = {
   reminder24h: {
     contentSid: sid('TPL_REMINDER_24H_CTA', 'HX518e3f6bac5a1f337456cda963692474'),
     urlSuffixVar: '9',
+    urlSuffixSeparator: '&',
     variables: (p: {
       offerTitle: string;
       date: string;
@@ -180,6 +218,7 @@ export const WHATSAPP_TEMPLATES = {
       'HXabc07b58525ee5d9c68c0049e31d9001',
     ),
     urlSuffixVar: '6',
+    urlSuffixSeparator: '&',
     variables: (p: {
       firstName: string;
       title: string;
@@ -229,6 +268,7 @@ export const WHATSAPP_TEMPLATES = {
       'HXe51191f9e1cbd68ad0ecacc419893634',
     ),
     urlSuffixVar: '8',
+    urlSuffixSeparator: '&',
     variables: (p: {
       offerTitle: string;
       workerName: string;
@@ -390,6 +430,7 @@ export const WHATSAPP_TEMPLATES = {
   autoStarted: {
     contentSid: sid('TPL_AUTO_STARTED_CTA', 'HXf41bcce791ad5ac3351c0c6c9dc3e611'),
     urlSuffixVar: '2',
+    urlSuffixSeparator: '&',
     variables: (p: { offerTitle: string; jobOfferId: string }) => ({
       '1': p.offerTitle,
       // URL suffix for the CTA button.
@@ -402,6 +443,7 @@ export const WHATSAPP_TEMPLATES = {
   statusCheck: {
     contentSid: sid('TPL_STATUS_CHECK_CTA', 'HX53ac4969d31ecc682d3b3e1fd030563f'),
     urlSuffixVar: '2',
+    urlSuffixSeparator: '&',
     variables: (p: { jobTitle: string; jobOfferId: string }) => ({
       '1': p.jobTitle,
       // URL suffix (/missions/{{2}}). Replaces the snooze label: the employer
@@ -420,6 +462,7 @@ export const WHATSAPP_TEMPLATES = {
   offerExpiredEmployer: {
     contentSid: sid('TPL_OFFER_EXPIRED_EMPLOYER_CTA', 'HXa721971676e29a4fc129e785384f83d1'),
     urlSuffixVar: '2',
+    urlSuffixSeparator: '&',
     variables: (p: { offerTitle: string; jobOfferId: string }) => ({
       '1': p.offerTitle,
       // URL suffix for the CTA button.
@@ -437,6 +480,7 @@ export const WHATSAPP_TEMPLATES = {
   reminderStart: {
     contentSid: sid('TPL_REMINDER_START_CTA', 'HX2a2e2633f45b1fceb8164d08b0963ec8'),
     urlSuffixVar: '6',
+    urlSuffixSeparator: '&',
     variables: (p: {
       offerTitle: string;
       time: string;
@@ -501,15 +545,29 @@ export type WhatsAppTemplateName = keyof typeof WHATSAPP_TEMPLATES;
  * the SID actually being sent — content SIDs are env-overridable through
  * `sid()`, so the map has to be built from the resolved values.
  */
-const URL_SUFFIX_VAR_BY_SID: ReadonlyMap<string, string> = new Map(
+export type UrlSuffixTarget = { variable: string; separator: '?' | '&' };
+
+const URL_SUFFIX_BY_SID: ReadonlyMap<string, UrlSuffixTarget> = new Map(
   Object.values(WHATSAPP_TEMPLATES)
     .filter(
       (template): template is typeof template & { urlSuffixVar: string } =>
         'urlSuffixVar' in template && typeof template.urlSuffixVar === 'string',
     )
-    .map((template) => [template.contentSid, template.urlSuffixVar]),
+    .map((template) => [
+      template.contentSid,
+      {
+        variable: template.urlSuffixVar,
+        separator:
+          'urlSuffixSeparator' in template &&
+          typeof template.urlSuffixSeparator === 'string'
+            ? template.urlSuffixSeparator
+            : '?',
+      },
+    ]),
 );
 
-export function getUrlSuffixVar(contentSid: string): string | undefined {
-  return URL_SUFFIX_VAR_BY_SID.get(contentSid);
+export function getUrlSuffixTarget(
+  contentSid: string,
+): UrlSuffixTarget | undefined {
+  return URL_SUFFIX_BY_SID.get(contentSid);
 }

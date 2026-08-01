@@ -67,8 +67,6 @@ export function formatPenaltyHistory(
     `- Completez vos missions sans annulation`,
     `- Maintenez un score > 90 pour plus de visibilite`,
     `- Annulez toujours plus de ${thresholdHours}h avant si necessaire`,
-    '',
-    'Tapez *Menu* pour revenir.',
   );
   return lines.join('\n');
 }
@@ -131,8 +129,6 @@ export function formatHistoryMessage(
     `- Completez vos missions sans annulation`,
     `- Maintenez un score > 90 pour plus de visibilite`,
     `- Annulez toujours plus de ${thresholdHours}h avant si necessaire`,
-    '',
-    'Tapez *Menu* pour revenir.',
   );
   return lines.join('\n');
 }
@@ -154,8 +150,6 @@ export function formatPenaltyBlocked(
     '',
     'Indiquez votre numero de telephone en reference lors du paiement.',
     'Votre compte sera debloque sous 24h apres reception.',
-    '',
-    "Tapez *Menu* puis *5* (Mon profil) pour voir le detail ou 'Menu' pour revenir.",
   ].join('\n');
 }
 
@@ -184,7 +178,7 @@ export function formatCancelApplicationNoPenalty(params: {
     "1- Confirmer l'annulation sans raison",
     '   ou tapez votre raison et envoyez directement',
     '2- Retour a la candidature',
-    '3- Menu',
+    '3- Quitter',
     '',
     '*Tapez le numero correspondant.*',
   ].join('\n');
@@ -243,7 +237,7 @@ export function formatPenaltyPaidSuccess(firstName: string): string {
     '',
     'Vous pouvez a nouveau postuler aux offres et publier.',
     '',
-    'Tapez "MENU" pour continuer.',
+    '',
   ].join('\n');
 }
 

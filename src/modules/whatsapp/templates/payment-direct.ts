@@ -32,7 +32,7 @@ export function paymentPendingMessage(
     ``,
     `Vous allez recevoir une invitation de paiement sur votre téléphone. *Confirmez-la pour finaliser.*`,
     ``,
-    `Tapez *MENU* pour revenir au menu principal.`,
+    ``,
   ].join('\n');
 }
 

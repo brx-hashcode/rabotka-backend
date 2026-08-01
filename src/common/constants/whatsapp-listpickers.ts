@@ -1,19 +1,9 @@
 import { templateReply } from './whatsapp-carousel';
 
 
-export const LISTPICKER_MENU_SIDS = {
-  WORKER: 'HXf5ffce95c990175bd51a50897190f740',
-  EMPLOYER: 'HXd86a36beb62d214a9a761ebfefa5133e',
-} as const;
-
 export const LISTPICKER_WALLET_SID = 'HXc39e837cb45672990f826134f04b18ac';
 
 export const CONTACT_INFO_SID = 'HXece187e3b80f4413d723d2214adc7a08';
-
-export function menuReply(profileType: 'WORKER' | 'EMPLOYER'): string {
-  return templateReply(LISTPICKER_MENU_SIDS[profileType]);
-}
-
 
 export function walletRechargeReply(balanceLabel: string): string {
   return templateReply(LISTPICKER_WALLET_SID, { '1': balanceLabel });
