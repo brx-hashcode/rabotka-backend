@@ -1,3 +1,5 @@
+import type { VerificationStatus } from '@prisma/client';
+
 export type BotState = {
   flowId: string;
   step: number;
@@ -29,4 +31,10 @@ export type BotProfile = {
   reliability_score: number | null;
   address?: string;
   description?: string;
+  /**
+   * KYC state. Optional because the orchestrator's own KYC gate only runs while
+   * `whatsapp_connected` is false — once a user has verified their number they
+   * reach every flow, so flows that spend money must check this themselves.
+   */
+  verification_status?: VerificationStatus;
 };

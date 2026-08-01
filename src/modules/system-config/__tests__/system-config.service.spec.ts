@@ -227,8 +227,8 @@ describe('SystemConfigService', () => {
 
   describe('getFees', () => {
     it('returns fees with defaults', async () => {
-      // getFees requests 13 keys — return all null so every value falls back.
-      mockRedis.mget.mockResolvedValue(Array<null>(13).fill(null));
+      // getFees requests 14 keys — return all null so every value falls back.
+      mockRedis.mget.mockResolvedValue(Array<null>(14).fill(null));
       mockPrisma.systemConfig.findMany.mockResolvedValue([]);
       const result = await service.getFees();
       expect(result.lateCancellationPenaltyFcfa).toBe(5000);
@@ -236,7 +236,7 @@ describe('SystemConfigService', () => {
     });
 
     it('returns the completion reward and per-star rating deltas (defaults)', async () => {
-      mockRedis.mget.mockResolvedValue(Array<null>(13).fill(null));
+      mockRedis.mget.mockResolvedValue(Array<null>(14).fill(null));
       mockPrisma.systemConfig.findMany.mockResolvedValue([]);
       const result = await service.getFees();
       expect(result.completionScoreReward).toBe(1);

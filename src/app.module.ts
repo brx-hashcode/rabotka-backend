@@ -10,6 +10,9 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { PrismaModule } from './common/services/prisma/prisma.module';
 import { TwilioModule } from './common/services/twilio/twilio.module';
+import { AdminCacheModule } from './common/services/cache/admin-cache.module';
+import { AdminArchiveModule } from './modules/admin-archive/admin-archive.module';
+import { CollaborationGraphModule } from './modules/collaboration-graph/collaboration-graph.module';
 import { RedisModule } from './common/services/redis/redis.module';
 import { QueueModule } from './common/services/queue/queue.module';
 import { HealthModule } from './modules/health/health.module';
@@ -23,6 +26,7 @@ import { ConversationModule } from './modules/conversation/conversation.module';
 import { JobOfferModule } from './modules/job-offer/job-offer.module';
 import { JobCategoryModule } from './modules/job-category/job-category.module';
 import { MatchingModule } from './modules/matching/matching.module';
+import { RecommendationEngineModule } from './modules/recommendation-engine/recommendation-engine.module';
 import { ApplicationModule } from './modules/application/application.module';
 import { MobileFeedModule } from './modules/mobile-feed/mobile-feed.module';
 import { PenaltyModule } from './modules/penalty/penalty.module';
@@ -120,6 +124,9 @@ import { HttpOnlyArcjetGuard } from './common/guards/http-only-arcjet.guard';
     PrismaModule,
     TwilioModule,
     RedisModule.forRoot(),
+    AdminCacheModule,
+    AdminArchiveModule,
+    CollaborationGraphModule,
     QueueModule.forRoot(),
     MailerModule.forRootAsync({
       imports: [ConfigModule],
@@ -140,6 +147,7 @@ import { HttpOnlyArcjetGuard } from './common/guards/http-only-arcjet.guard';
     JobOfferModule,
     JobCategoryModule,
     MatchingModule,
+    RecommendationEngineModule,
     ApplicationModule,
     MobileFeedModule,
     PenaltyModule,

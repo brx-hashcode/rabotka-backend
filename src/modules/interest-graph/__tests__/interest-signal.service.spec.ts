@@ -32,25 +32,45 @@ const mockClusters = {
   applySignal: jest.fn().mockResolvedValue(undefined),
 };
 
+const daysAgo = (n: number) =>
+  new Date(Date.now() - n * 24 * 60 * 60 * 1000);
+
 describe('temporalWeight', () => {
-  it('returns 1.0 for recent signal (< 30 days)', () => {
-    const now = new Date();
-    expect(temporalWeight(now)).toBe(1.0);
+  it('returns 1.0 for a signal recorded now', () => {
+    expect(temporalWeight(new Date())).toBe(1.0);
   });
 
-  it('returns 0.7 for signal 31-60 days old', () => {
-    const d = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000);
-    expect(temporalWeight(d)).toBe(0.7);
+  it('halves at each half-life', () => {
+    expect(temporalWeight(daysAgo(21))).toBeCloseTo(0.5, 3);
+    expect(temporalWeight(daysAgo(42))).toBeCloseTo(0.25, 3);
+    expect(temporalWeight(daysAgo(63))).toBeCloseTo(0.125, 3);
   });
 
-  it('returns 0.4 for signal 61-90 days old', () => {
-    const d = new Date(Date.now() - 70 * 24 * 60 * 60 * 1000);
-    expect(temporalWeight(d)).toBe(0.4);
+  it('respects a caller-supplied half-life', () => {
+    expect(temporalWeight(daysAgo(7), 7)).toBeCloseTo(0.5, 3);
   });
 
-  it('returns 0 for signal > 90 days old', () => {
-    const d = new Date(Date.now() - 100 * 24 * 60 * 60 * 1000);
-    expect(temporalWeight(d)).toBe(0);
+  it('decays smoothly — no cliff between adjacent days', () => {
+    // The old step function dropped 30% overnight on day 31, so a user's feed
+    // could shift with no new interaction. Adjacent days must now be close.
+    for (const d of [29, 30, 31, 59, 60, 61]) {
+      const delta = Math.abs(temporalWeight(daysAgo(d)) - temporalWeight(daysAgo(d + 1)));
+      expect(delta).toBeLessThan(0.03);
+    }
+  });
+
+  it('is monotonically decreasing in age', () => {
+    const series = [0, 5, 10, 30, 60, 90, 120].map((d) =>
+      temporalWeight(daysAgo(d)),
+    );
+    for (let i = 1; i < series.length; i++) {
+      expect(series[i]).toBeLessThan(series[i - 1]);
+    }
+  });
+
+  it('floors to 0 past the hard max age', () => {
+    expect(temporalWeight(daysAgo(180))).toBe(0);
+    expect(temporalWeight(daysAgo(400))).toBe(0);
   });
 });
 
@@ -145,8 +165,11 @@ describe('InterestSignalService', () => {
             type: 'skip',
             weight: -0.3,
             category: null,
+            // Past SIGNAL_MAX_AGE_DAYS (180). Under the old step function 100
+            // days was already 0; with exponential decay it would still carry
+            // ~0.04, so the fixture has to be genuinely expired.
             recorded_at: new Date(
-              Date.now() - 100 * 24 * 60 * 60 * 1000,
+              Date.now() - 200 * 24 * 60 * 60 * 1000,
             ).toISOString(),
           },
         },
@@ -154,7 +177,7 @@ describe('InterestSignalService', () => {
     });
 
     const result = await service.getRecentSignals('user-1');
-    // The expired skip signal has temporal weight 0, effective = -0.3 * 0 = 0, so it's filtered out
+    // Expired signal has temporal weight 0 → effective 0 → filtered out.
     expect(result.some((s) => s.jobId === 'job-1')).toBe(true);
     expect(result.some((s) => s.jobId === 'job-2')).toBe(false);
   });

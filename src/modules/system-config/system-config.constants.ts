@@ -127,9 +127,16 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
   },
   {
     key: 'fees.max_concurrent_applications',
-    value: '3',
+    value: '10',
     category: ConfigCategory.FEES,
     label: 'Nombre max de candidatures simultanées (par travailleur)',
+    isSecret: false,
+  },
+  {
+    key: 'fees.max_daily_applications',
+    value: '10',
+    category: ConfigCategory.FEES,
+    label: 'Nombre max de candidatures par jour (par travailleur)',
     isSecret: false,
   },
   {
@@ -195,6 +202,34 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     value: 'true',
     category: ConfigCategory.MATCHING,
     label: 'Activer les notifications de recommandation de jobs',
+    isSecret: false,
+  },
+  {
+    key: 'matching.recommendation_min_score',
+    value: '0.3',
+    category: ConfigCategory.MATCHING,
+    label: 'Score minimum pour le fil de profils recommandés (employeur)',
+    isSecret: false,
+  },
+  {
+    key: 'matching.cf_enabled',
+    value: 'false',
+    category: ConfigCategory.MATCHING,
+    label: 'Activer le filtrage collaboratif (recommandations croisées)',
+    isSecret: false,
+  },
+  {
+    key: 'matching.engine_version',
+    value: 'legacy',
+    category: ConfigCategory.MATCHING,
+    label: 'Moteur de recommandation actif (legacy | v2)',
+    isSecret: false,
+  },
+  {
+    key: 'matching.v2_rollout_percent',
+    value: '0',
+    category: ConfigCategory.MATCHING,
+    label: 'Pourcentage d’utilisateurs sur le moteur v2 (0-100)',
     isSecret: false,
   },
   {

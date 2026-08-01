@@ -92,8 +92,9 @@ async function handleApplyStep1(
         clearState: true,
       };
     }
-    // Notification is best-effort — never let it mask a successful application
-    await ctx.notificationService.sendNewApplicationToEmployer(created.id);
+    // The employer notification now fires inside applicationService.create(), so
+    // it reaches them whichever channel the worker applied from. Calling it here
+    // as well would send twice.
     return {
       reply: [formatApplicationSentSuccess(offer.title)],
       clearState: true,

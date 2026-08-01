@@ -1,3 +1,4 @@
+import { AdminCacheService } from '../../../common/services/cache/admin-cache.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import {
   BadRequestException,
@@ -87,6 +88,17 @@ describe('JobOfferService (extended)', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        {
+          // Pass-through cache: the loader always runs, so these specs keep
+          // exercising the real queries rather than a cached value.
+          provide: AdminCacheService,
+          useValue: {
+            wrap: (_k: string, _t: number, loader: () => unknown) => loader(),
+            listKey: (e: string) => e,
+            dashboardKey: (e: string) => e,
+            invalidate: jest.fn(),
+          },
+        },
         JobOfferService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: MailService, useValue: mockMailService },
@@ -155,7 +167,8 @@ describe('JobOfferService (extended)', () => {
     });
 
     it('returns offer with employer info', async () => {
-      (prisma.jobOffer.findUnique as jest.Mock).mockResolvedValue({
+      // findById uses findFirst (it filters on deleted_at), not findUnique.
+      (prisma.jobOffer.findFirst as jest.Mock).mockResolvedValue({
         ...mockOffer,
         employer: {
           id: EMPLOYER_ID,

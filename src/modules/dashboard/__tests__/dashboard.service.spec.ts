@@ -28,7 +28,12 @@ describe('DashboardService', () => {
 
   beforeEach(() => {
     prisma = makePrisma();
-    service = new DashboardService(prisma as any);
+    service = new DashboardService(prisma as any, {
+      wrap: <T,>(_k: string, _t: number, loader: () => Promise<T>) => loader(),
+      dashboardKey: (scope: string) => scope,
+      listKey: (e: string) => e,
+      invalidate: jest.fn(),
+    } as never);
   });
 
   describe('getMetrics()', () => {
@@ -43,7 +48,12 @@ describe('DashboardService', () => {
     it('calculates trend as 100 when previous is 0 and current > 0', async () => {
       // Reset and setup for this test
       prisma = makePrisma();
-      service = new DashboardService(prisma as any);
+      service = new DashboardService(prisma as any, {
+      wrap: <T,>(_k: string, _t: number, loader: () => Promise<T>) => loader(),
+      dashboardKey: (scope: string) => scope,
+      listKey: (e: string) => e,
+      invalidate: jest.fn(),
+    } as never);
 
       // profile.count called 3 times: total, current 30d, previous 30d
       prisma.profile.count
@@ -60,7 +70,12 @@ describe('DashboardService', () => {
     it('calculates trend as null when both current and previous are 0', async () => {
       // Reset mocks for clean state
       prisma = makePrisma();
-      service = new DashboardService(prisma as any);
+      service = new DashboardService(prisma as any, {
+      wrap: <T,>(_k: string, _t: number, loader: () => Promise<T>) => loader(),
+      dashboardKey: (scope: string) => scope,
+      listKey: (e: string) => e,
+      invalidate: jest.fn(),
+    } as never);
 
       const metrics = await service.getMetrics();
       expect(metrics.profilesTrend).toBeNull(); // previous is 0, so trend is null

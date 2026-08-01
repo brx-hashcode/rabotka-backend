@@ -27,6 +27,7 @@ import {
   ApiConsumes,
 } from '@nestjs/swagger';
 import { ProfileService } from './profile.service';
+import { ArchiveService } from '../admin-archive/archive.service';
 import { BulkDeleteDto } from '../../common/dto/bulk-delete.dto';
 import { LogService } from '../log/log.service';
 import { extractRequestMeta } from '../../common/utils/request-meta.util';
@@ -70,6 +71,7 @@ export class AdminProfileController {
     private readonly layout: LayoutService,
     private readonly walletService: WalletService,
     private readonly portfolioService: PortfolioService,
+    private readonly archiveService: ArchiveService,
   ) {}
 
   @Get()
@@ -93,6 +95,52 @@ export class AdminProfileController {
       verificationStatus: dto.verification_status,
       deleted: dto.deleted,
     });
+  }
+
+  @Post('bulk-restore')
+  @Roles(UserRole.MANAGER)
+  @ApiOperation({
+    summary: 'Bulk restore archived rows (admin only)',
+    description: 'Clears deleted_at. Only rows that are currently archived are affected.',
+  })
+  @ApiResponse({ status: 201, description: 'Rows restored' })
+  async bulkRestore(
+    @Body() dto: BulkDeleteDto,
+    @Req() req: AdminAuthenticatedRequest,
+  ): Promise<{ count: number }> {
+    const result = await this.archiveService.restore('profiles', dto.ids);
+    await this.logService.create({
+      action: 'PROFILE_BULK_RESTORED',
+      entityType: 'Profile',
+      userId: req.user?.userId,
+      metadata: { ids: dto.ids, count: result.count },
+      ...extractRequestMeta(req),
+    });
+    return result;
+  }
+
+  @Post('bulk-purge')
+  @Roles(UserRole.SUPER_ADMIN)
+  @ApiOperation({
+    summary: 'Permanently delete archived rows (SUPER_ADMIN only)',
+    description:
+      'Irreversible. Refuses rows carrying records that must outlive them (financial or compliance), returning 409 with the blocking counts.',
+  })
+  @ApiResponse({ status: 201, description: 'Rows permanently deleted' })
+  @ApiResponse({ status: 409, description: 'Blocked by linked records' })
+  async bulkPurge(
+    @Body() dto: BulkDeleteDto,
+    @Req() req: AdminAuthenticatedRequest,
+  ): Promise<{ count: number }> {
+    const result = await this.archiveService.purge('profiles', dto.ids);
+    await this.logService.create({
+      action: 'PROFILE_BULK_PURGED',
+      entityType: 'Profile',
+      userId: req.user?.userId,
+      metadata: { ids: dto.ids, count: result.count },
+      ...extractRequestMeta(req),
+    });
+    return result;
   }
 
   @Post('bulk-delete')

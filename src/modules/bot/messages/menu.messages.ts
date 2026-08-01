@@ -23,21 +23,6 @@ export function menuMessage(profileType: BotProfileType): string {
 }
 
 
-export function restrictedMenuMessage(): string {
-  return [
-    '⏳ *Votre profil est en cours de vérification.*',
-    '',
-    'Une fois votre KYC validé, vous aurez accès à toutes les fonctionnalités de Rabotka.',
-    '',
-    'En attendant, vous pouvez :',
-    '',
-    '1- Mon profil',
-    '2- Créer une réclamation',
-    '',
-    '*Répondez avec le numéro de votre choix.*',
-  ].join('\n');
-}
-
 // The details render read-only in the template body; the single "Retour au
 // menu" button is the only tappable element.
 export function helpMessage(contact: ContactInfo): string {

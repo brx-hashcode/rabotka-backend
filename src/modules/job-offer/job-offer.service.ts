@@ -1,4 +1,8 @@
 import {
+  AdminCacheService,
+  ADMIN_LIST_TTL_SECONDS,
+} from '../../common/services/cache/admin-cache.service';
+import {
   Injectable,
   Logger,
   BadRequestException,
@@ -11,11 +15,13 @@ import Redis from 'ioredis';
 import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
 import { deletedAtFilter } from '../../common/utils/soft-delete.util';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
+import { assertKycVerified } from '../../common/exceptions/kyc-not-verified.exception';
 import { isWorkerHardBlocked } from '../penalty/penalty.utils';
 import { MailService } from '../mail/mail.service';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { WalletService } from '../wallet/wallet.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { MIN_HOURS_FROM_NOW } from './job-offer.constants';
 import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
 import { BotNotificationService } from '../bot/services/bot-notification.service';
 import { MatchingService } from '../matching/matching.service';
@@ -39,6 +45,7 @@ import {
   JobOfferStatus,
   PaymentFlow,
   Prisma,
+  RejectionSource,
 } from '@prisma/client';
 
 const REFERENCE_MAX_ATTEMPTS = 5;
@@ -54,7 +61,57 @@ const TERMINAL_JOB_OFFER_STATUSES: JobOfferStatus[] = [
   JobOfferStatus.EXPIRED,
 ];
 
-const MIN_SCHEDULED_HOURS_FROM_NOW = 4;
+/**
+ * Statuses from which an employer may delete their own offer: it is either still
+ * open (ACTIVE) or dead (EXPIRED) — never engaged (filled / in progress /
+ * completed). The no-candidate / no-assignment guard is enforced on top.
+ */
+const EMPLOYER_DELETABLE_JOB_OFFER_STATUSES: JobOfferStatus[] = [
+  JobOfferStatus.ACTIVE,
+  JobOfferStatus.EXPIRED,
+];
+
+/**
+ * Keyset cursor for the open-slots feed. Carries every column the query orders
+ * by, so paging can resume at an exact position instead of guessing from an id.
+ */
+type OpenSlotsCursor = {
+  scheduledAt: Date;
+  createdAt: Date;
+  id: string;
+};
+
+function encodeOpenSlotsCursor(row: {
+  scheduled_at: Date;
+  created_at: Date;
+  id: string;
+}): string {
+  const raw = `${row.scheduled_at.toISOString()}|${row.created_at.toISOString()}|${row.id}`;
+  return Buffer.from(raw, 'utf8').toString('base64url');
+}
+
+/**
+ * Returns null for anything unparseable — including the old id-only cursors,
+ * which have no meaning under keyset paging. A bad cursor restarts from the
+ * first page rather than throwing at a user mid-scroll.
+ */
+function decodeOpenSlotsCursor(cursor?: string): OpenSlotsCursor | null {
+  if (!cursor) return null;
+  try {
+    const [scheduledAt, createdAt, id] = Buffer.from(cursor, 'base64url')
+      .toString('utf8')
+      .split('|');
+    if (!scheduledAt || !createdAt || !id) return null;
+    const scheduled = new Date(scheduledAt);
+    const created = new Date(createdAt);
+    if (Number.isNaN(scheduled.getTime()) || Number.isNaN(created.getTime())) {
+      return null;
+    }
+    return { scheduledAt: scheduled, createdAt: created, id };
+  } catch {
+    return null;
+  }
+}
 const TITLE_MIN = 5;
 const TITLE_MAX = 100;
 const DESCRIPTION_MIN = 20;
@@ -133,6 +190,9 @@ export type JobOfferDetail = JobOfferListItem & {
     last_name: string;
     phone: string;
     reliability_score: number | null;
+    avatar_url: string | null;
+    rating_avg: number | null;
+    rating_count: number;
   };
 };
 
@@ -150,6 +210,7 @@ export class JobOfferService {
     private readonly matchingService: MatchingService,
     private readonly geocodingService: GeocodingService,
     @Inject(REDIS_CONNECTION) private readonly redis: Redis,
+    private readonly cache: AdminCacheService,
   ) {}
 
   private notificationCooldownKey(workerId: string): string {
@@ -167,6 +228,7 @@ export class JobOfferService {
         status: true,
         profile_type: true,
         reliability_score: true,
+        verification_status: true,
       },
     });
     if (!employer) {
@@ -182,6 +244,9 @@ export class JobOfferService {
         "Seuls les employeurs peuvent publier des offres d'emploi",
       );
     }
+    // Mirrors KycVerifiedGuard for the WhatsApp path (publish-job.flow.ts),
+    // which reaches this service without passing through any HTTP guard.
+    assertKycVerified(employer.verification_status);
 
     const fees = await this.systemConfigService.getFees();
     const employerScore = employer.reliability_score ?? 100;
@@ -203,11 +268,11 @@ export class JobOfferService {
     const scheduledAt = new Date(dto.scheduled_at);
     const now = new Date();
     const minDate = new Date(
-      now.getTime() + MIN_SCHEDULED_HOURS_FROM_NOW * 60 * 60 * 1000,
+      now.getTime() + MIN_HOURS_FROM_NOW * 60 * 60 * 1000,
     );
     if (scheduledAt < minDate) {
       throw new BadRequestException(
-        'La date doit être au moins 4 heures dans le futur',
+        `La date doit être au moins ${MIN_HOURS_FROM_NOW} heures dans le futur`,
       );
     }
 
@@ -390,7 +455,7 @@ export class JobOfferService {
    */
   private async queryOpenSlots(params: {
     take: number;
-    cursorId?: string;
+    cursor?: OpenSlotsCursor | null;
     excludeWorkerId?: string;
     minScheduledAt: Date;
   }): Promise<
@@ -414,7 +479,21 @@ export class JobOfferService {
       accepted_count: bigint;
     }>
   > {
-    const { take, cursorId, excludeWorkerId, minScheduledAt } = params;
+    const { take, cursor, excludeWorkerId, minScheduledAt } = params;
+
+    // Keyset predicate must mirror `ORDER BY scheduled_at ASC, created_at DESC`
+    // exactly. It is written out longhand rather than as a row comparison
+    // because the directions are mixed — `(a,b,c) > (x,y,z)` only holds when
+    // every column sorts the same way. The previous `jo.id > cursor` compared a
+    // column the query never ordered by, so paging both skipped and repeated
+    // offers regardless of the in-memory re-sort below.
+    const keyset = cursor
+      ? Prisma.sql`AND (
+          jo.scheduled_at > ${cursor.scheduledAt}
+          OR (jo.scheduled_at = ${cursor.scheduledAt} AND jo.created_at < ${cursor.createdAt})
+          OR (jo.scheduled_at = ${cursor.scheduledAt} AND jo.created_at = ${cursor.createdAt} AND jo.id > ${cursor.id}::uuid)
+        )`
+      : Prisma.empty;
 
     // Prisma doesn't support HAVING on aggregates in findMany so we use $queryRaw.
     // Parameters are passed positionally as $1, $2, … to prevent SQL injection.
@@ -462,7 +541,7 @@ export class JobOfferService {
       WHERE
         jo.status IN ('ACTIVE', 'PARTIALLY_FILLED')
         AND jo.scheduled_at > ${minScheduledAt}
-        ${cursorId ? Prisma.sql`AND jo.id > ${cursorId}::uuid` : Prisma.empty}
+        ${keyset}
         ${
           excludeWorkerId
             ? Prisma.sql`AND NOT EXISTS (
@@ -496,16 +575,32 @@ export class JobOfferService {
 
     const rows = await this.queryOpenSlots({
       take: targetCount,
-      cursorId: cursor,
+      cursor: decodeOpenSlotsCursor(cursor),
       excludeWorkerId: excludeAppliedByWorkerId,
       minScheduledAt,
     });
 
-    const categorySet = new Set(workerCategoryIds ?? []);
+    const hasMore = rows.length > limit;
+    const slice = hasMore ? rows.slice(0, limit) : rows;
 
-    // Score and sort: proximity (if coords) + urgency + category affinity
-    if (rows.length > 0 && (workerCoords || categorySet.size > 0)) {
-      rows.sort((a, b) => {
+    // Derive the cursor from SQL order, BEFORE the display re-sort below.
+    // Reading it off the re-sorted array (as this did) yields an arbitrary row's
+    // position and breaks the next page.
+    const lastInQueryOrder = slice.at(-1);
+    const nextCursor =
+      hasMore && lastInQueryOrder
+        ? encodeOpenSlotsCursor(lastInQueryOrder)
+        : null;
+
+    // Rank the page for display: proximity (when coords are known) + urgency +
+    // category affinity. This is per-page, not global — the page is chosen by
+    // `scheduled_at` and only then reordered. Global ranking needs the
+    // recommendation engine, which doesn't cursor-paginate.
+    const categorySet = new Set(workerCategoryIds ?? []);
+    const ordered =
+      workerCoords || categorySet.size > 0 ? [...slice] : slice;
+    if (ordered !== slice) {
+      ordered.sort((a, b) => {
         const scoreOf = (o: (typeof rows)[number]): number => {
           const prox =
             workerCoords && o.latitude != null && o.longitude != null
@@ -525,17 +620,16 @@ export class JobOfferService {
       });
     }
 
-    const hasMore = rows.length > limit;
-    const slice = hasMore ? rows.slice(0, limit) : rows;
-    const data = slice.map((o) => this.toListItem(o, Number(o.accepted_count)));
-    const nextCursor = hasMore ? (slice.at(-1)?.id ?? null) : null;
+    const data = ordered.map((o) =>
+      this.toListItem(o, Number(o.accepted_count)),
+    );
 
     return { data, nextCursor };
   }
 
   async findById(id: string): Promise<JobOfferDetail | null> {
-    const offer = await this.prisma.jobOffer.findUnique({
-      where: { id },
+    const offer = await this.prisma.jobOffer.findFirst({
+      where: { id, deleted_at: null },
       include: {
         employer: {
           select: {
@@ -544,6 +638,9 @@ export class JobOfferService {
             last_name: true,
             phone: true,
             reliability_score: true,
+            avatar_url: true,
+            rating_avg: true,
+            rating_count: true,
           },
         },
         _count: {
@@ -564,6 +661,9 @@ export class JobOfferService {
             last_name: offer.employer.last_name,
             phone: offer.employer.phone,
             reliability_score: offer.employer.reliability_score,
+            avatar_url: offer.employer.avatar_url,
+            rating_avg: offer.employer.rating_avg,
+            rating_count: offer.employer.rating_count,
           }
         : undefined,
     };
@@ -582,6 +682,9 @@ export class JobOfferService {
             last_name: true,
             phone: true,
             reliability_score: true,
+            avatar_url: true,
+            rating_avg: true,
+            rating_count: true,
           },
         },
         _count: {
@@ -602,6 +705,9 @@ export class JobOfferService {
             last_name: offer.employer.last_name,
             phone: offer.employer.phone,
             reliability_score: offer.employer.reliability_score,
+            avatar_url: offer.employer.avatar_url,
+            rating_avg: offer.employer.rating_avg,
+            rating_count: offer.employer.rating_count,
           }
         : undefined,
     };
@@ -610,11 +716,21 @@ export class JobOfferService {
   async findByEmployerId(employerId: string): Promise<JobOfferListItem[]>;
   async findByEmployerId(
     employerId: string,
-    pagination: { page: number; pageSize: number },
+    pagination: {
+      page: number;
+      pageSize: number;
+      /** Narrow to these statuses. Must be applied here, not client-side: a
+       *  post-pagination filter yields short pages and a wrong `total`. */
+      statuses?: JobOfferStatus[];
+    },
   ): Promise<{ items: JobOfferListItem[]; total: number }>;
   async findByEmployerId(
     employerId: string,
-    pagination?: { page: number; pageSize: number },
+    pagination?: {
+      page: number;
+      pageSize: number;
+      statuses?: JobOfferStatus[];
+    },
   ): Promise<
     JobOfferListItem[] | { items: JobOfferListItem[]; total: number }
   > {
@@ -628,9 +744,18 @@ export class JobOfferService {
       },
     } as const;
 
+    // Hide soft-deleted offers from the employer's own list.
+    const where: Prisma.JobOfferWhereInput = {
+      employer_id: employerId,
+      deleted_at: null,
+      ...(pagination?.statuses?.length
+        ? { status: { in: pagination.statuses } }
+        : {}),
+    };
+
     if (!pagination) {
       const offers = await this.prisma.jobOffer.findMany({
-        where: { employer_id: employerId },
+        where,
         orderBy: { created_at: 'desc' },
         include: acceptedCount,
       });
@@ -641,13 +766,13 @@ export class JobOfferService {
     const skip = page * pageSize;
     const [offers, total] = await Promise.all([
       this.prisma.jobOffer.findMany({
-        where: { employer_id: employerId },
+        where,
         orderBy: { created_at: 'desc' },
         include: acceptedCount,
         skip,
         take: pageSize,
       }),
-      this.prisma.jobOffer.count({ where: { employer_id: employerId } }),
+      this.prisma.jobOffer.count({ where }),
     ]);
     return {
       items: offers.map((o) => this.toListItem(o, o._count.applications)),
@@ -685,7 +810,12 @@ export class JobOfferService {
     const ids = leftovers.map((a) => a.id);
     await this.prisma.application.updateMany({
       where: { id: { in: ids } },
-      data: { status: ApplicationStatus.REJECTED },
+      data: {
+        status: ApplicationStatus.REJECTED,
+        rejected_at: new Date(),
+        // Offer closed, not an employer decision — see RejectionSource.
+        rejection_source: RejectionSource.AUTO_FILL,
+      },
     });
     for (const appId of ids) {
       this.botNotification
@@ -725,6 +855,74 @@ export class JobOfferService {
       event: AdminNotificationEvent.JOB_OFFER_STATUS_CHANGED,
       title: 'Statut offre modifié',
       message: `Le statut de l'offre "${updated.title}" a été changé en ${status}`,
+      entityType: 'job-offer',
+      entityId: String(updated.id),
+      timestamp: new Date().toISOString(),
+    });
+
+    return this.toListItem(updated);
+  }
+
+  /**
+   * Reopens an expired offer at a new date.
+   *
+   * Previously this existed only inside the WhatsApp republish flow, so an
+   * employer who ignored the expiry message had no way to reopen the offer at
+   * all. The flow now delegates here so both channels share one implementation.
+   *
+   * The bot flow got ownership and status correctness implicitly — it only ever
+   * walks a queue it built from that employer's own expired offers. A REST
+   * caller supplies an arbitrary id, so both are checked explicitly.
+   */
+  async republish(
+    id: string,
+    actorProfileId: string,
+    scheduledAt: Date,
+  ): Promise<JobOfferListItem> {
+    const [offer, actor] = await Promise.all([
+      this.prisma.jobOffer.findUnique({ where: { id } }),
+      this.prisma.profile.findUnique({
+        where: { id: actorProfileId },
+        select: { verification_status: true },
+      }),
+    ]);
+    if (!offer || offer.deleted_at) {
+      throw new NotFoundException("Offre d'emploi introuvable");
+    }
+    if (offer.employer_id !== actorProfileId) {
+      throw new ForbiddenException('Non autorisé à modifier cette offre');
+    }
+    // Republishing puts a live offer back on the market, so it needs the same
+    // gate as creating one. Also reached from the bot (republish-expired-job.flow).
+    if (!actor) {
+      throw new NotFoundException('Employeur introuvable');
+    }
+    assertKycVerified(actor.verification_status);
+    if (offer.status !== JobOfferStatus.EXPIRED) {
+      throw new BadRequestException(
+        'Seule une offre expirée peut être republiée',
+      );
+    }
+    if (Number.isNaN(scheduledAt.getTime())) {
+      throw new BadRequestException('Date invalide');
+    }
+
+    const minDate = new Date(Date.now() + MIN_HOURS_FROM_NOW * 60 * 60 * 1000);
+    if (scheduledAt < minDate) {
+      throw new BadRequestException(
+        `La date doit être au moins ${MIN_HOURS_FROM_NOW} heures dans le futur`,
+      );
+    }
+
+    const updated = await this.prisma.jobOffer.update({
+      where: { id },
+      data: { scheduled_at: scheduledAt, status: JobOfferStatus.ACTIVE },
+    });
+
+    this.eventEmitter.emit(AdminNotificationEvent.JOB_OFFER_STATUS_CHANGED, {
+      event: AdminNotificationEvent.JOB_OFFER_STATUS_CHANGED,
+      title: 'Offre republiée',
+      message: `L'offre "${updated.title}" a été republiée`,
       entityType: 'job-offer',
       entityId: String(updated.id),
       timestamp: new Date().toISOString(),
@@ -817,6 +1015,25 @@ export class JobOfferService {
   }
 
   async getJobOffersForAdmin(params: {
+    page: number;
+    limit: number;
+    q?: string;
+    status?: JobOfferStatus[];
+    deleted?: boolean;
+  }): Promise<{
+    data: AdminJobOfferListItem[];
+    total: number;
+    page: number;
+    limit: number;
+  }> {
+    return this.cache.wrap(
+      this.cache.listKey('jobs', params),
+      ADMIN_LIST_TTL_SECONDS,
+      () => this.loadGetJobOffersForAdmin(params),
+    );
+  }
+
+  private async loadGetJobOffersForAdmin(params: {
     page: number;
     limit: number;
     q?: string;
@@ -1020,6 +1237,7 @@ export class JobOfferService {
       where: { id },
       data: { deleted_at: new Date() },
     });
+    await this.cache.invalidate('jobs');
 
     // Remove from vector index — fire-and-forget, non-fatal
     void this.matchingService
@@ -1041,6 +1259,65 @@ export class JobOfferService {
     });
   }
 
+  /**
+   * Employer-facing delete. An employer may remove one of their own offers only
+   * while it carries no engagement: ACTIVE or EXPIRED status, no live applications
+   * (candidates) and no assignments. This keeps started / filled / completed
+   * offers intact. Soft delete (reversible, preserves history) mirroring
+   * {@link deleteJobOfferByAdmin}.
+   */
+  async deleteByEmployer(id: string, actorProfileId: string): Promise<void> {
+    const offer = await this.prisma.jobOffer.findFirst({
+      where: { id, deleted_at: null },
+      select: { id: true, employer_id: true, status: true },
+    });
+    if (!offer) {
+      throw new NotFoundException('Offre introuvable');
+    }
+    if (offer.employer_id !== actorProfileId) {
+      throw new ForbiddenException("Vous n'êtes pas l'employeur de cette offre");
+    }
+    if (!EMPLOYER_DELETABLE_JOB_OFFER_STATUSES.includes(offer.status)) {
+      throw new BadRequestException(
+        'Cette offre ne peut plus être supprimée car elle est en cours ou terminée.',
+      );
+    }
+
+    const [liveApplications, assignments] = await Promise.all([
+      this.prisma.application.count({
+        where: {
+          job_offer_id: id,
+          deleted_at: null,
+          status: {
+            notIn: [ApplicationStatus.REJECTED, ApplicationStatus.CANCELLED],
+          },
+        },
+      }),
+      this.prisma.assignment.count({ where: { job_offer_id: id } }),
+    ]);
+    if (liveApplications > 0 || assignments > 0) {
+      throw new BadRequestException(
+        'Impossible de supprimer : cette offre a déjà des candidats.',
+      );
+    }
+
+    await this.prisma.jobOffer.update({
+      where: { id },
+      data: { deleted_at: new Date() },
+    });
+    await this.cache.invalidate('jobs');
+
+    // Remove from vector index — fire-and-forget, non-fatal
+    void this.matchingService
+      .deleteJobFromIndex(id)
+      .catch((err) =>
+        this.logger.error(
+          `Failed to remove job offer ${id} from vector index after deletion`,
+          err,
+        ),
+      );
+  }
+
   /** Archive many offers at once (admin bulk delete). Returns the count archived. */
   async bulkSoftDeleteByAdmin(ids: string[]): Promise<{ count: number }> {
     if (ids.length === 0) return { count: 0 };
@@ -1048,6 +1325,7 @@ export class JobOfferService {
       where: { id: { in: ids }, deleted_at: null },
       data: { deleted_at: new Date() },
     });
+    await this.cache.invalidate('jobs');
     // Remove each from the vector index so archived offers stop being matched.
     for (const id of ids) {
       void this.matchingService

@@ -37,10 +37,6 @@ function makeCtx() {
       cancelAcceptedByEmployer: jest.fn().mockResolvedValue(undefined),
     } as any,
     notificationService: {
-      sendJobCompletedToWorker: jest.fn().mockResolvedValue(undefined),
-      sendJobCancelledByEmployerToWorker: jest
-        .fn()
-        .mockResolvedValue(undefined),
     } as any,
   };
 }

@@ -1,3 +1,4 @@
+import { AdminCacheService } from '../../../common/services/cache/admin-cache.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import {
   BadRequestException,
@@ -13,6 +14,7 @@ import { ContactUnlockService } from '../../contact-unlock/contact-unlock.servic
 import { ContractService } from '../../contract/contract.service';
 import { SystemConfigService } from '../../system-config/system-config.service';
 import { MatchingService } from '../../matching/matching.service';
+import { InteractionEventService } from '../../recommendation-engine/interaction-event.service';
 import { ApplicationStatus, JobOfferStatus, PaymentFlow } from '@prisma/client';
 import { LATE_CANCELLATION_PENALTY_FCFA } from '../application.constants';
 
@@ -54,6 +56,7 @@ const mockWorker = {
   id: WORKER_ID,
   status: 'ACTIVE',
   profile_type: 'WORKER',
+  verification_status: 'VERIFIED',
 };
 
 const mockApplication = {
@@ -108,7 +111,15 @@ describe('ApplicationService', () => {
         create: jest.fn(),
         updateMany: jest.fn(),
         findUnique: jest.fn().mockResolvedValue(null),
+        findFirst: jest.fn().mockResolvedValue(null),
         findMany: jest.fn().mockResolvedValue([]),
+      },
+      rating: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        upsert: jest.fn().mockResolvedValue({}),
+        aggregate: jest
+          .fn()
+          .mockResolvedValue({ _avg: { score: 4.5 }, _count: { score: 4 } }),
       },
       $executeRaw: jest.fn().mockResolvedValue(0),
       $transaction: jest.fn().mockImplementation((arg: unknown) => {
@@ -123,19 +134,32 @@ describe('ApplicationService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        {
+          // Pass-through cache: the loader always runs, so these specs keep
+          // exercising the real queries rather than a cached value.
+          provide: AdminCacheService,
+          useValue: {
+            wrap: (_k: string, _t: number, loader: () => unknown) => loader(),
+            listKey: (e: string) => e,
+            dashboardKey: (e: string) => e,
+            invalidate: jest.fn(),
+          },
+        },
         ApplicationService,
         { provide: PrismaService, useValue: mockPrismaService },
         {
           provide: BotNotificationService,
           useValue: {
-            sendNewApplicationToEmployer: jest.fn(),
-            sendApplicationAcceptedToWorker: jest.fn(),
+            sendNewApplicationToEmployer: jest
+              .fn()
+              .mockResolvedValue(undefined),
+            sendApplicationAcceptedToWorker: jest
+              .fn()
+              .mockResolvedValue(undefined),
             sendApplicationRejectedToWorker: jest
               .fn()
               .mockResolvedValue(undefined),
             sendCancellationToEmployer: jest.fn(),
-            sendJobCompletedToWorker: jest.fn(),
-            sendJobCancelledByEmployerToWorker: jest.fn(),
           },
         },
         { provide: EventEmitter2, useValue: { emit: jest.fn() } },
@@ -171,6 +195,13 @@ describe('ApplicationService', () => {
             indexWorkerProfile: jest.fn().mockResolvedValue(undefined),
           },
         },
+        {
+          provide: InteractionEventService,
+          useValue: {
+            record: jest.fn().mockResolvedValue(undefined),
+            recordMany: jest.fn().mockResolvedValue(0),
+          },
+        },
       ],
     }).compile();
 
@@ -192,7 +223,15 @@ describe('ApplicationService', () => {
       expect(prisma.application.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { id: { in: ['a1', 'a2'] } },
-          data: { status: ApplicationStatus.REJECTED },
+          data: expect.objectContaining({
+            status: ApplicationStatus.REJECTED,
+            // Must be AUTO_FILL: these applicants were closed out because the
+            // offer is no longer open, not turned down. Marking them EMPLOYER
+            // would feed the recommender false negatives and eventually ban a
+            // worker from their own trade.
+            rejection_source: 'AUTO_FILL',
+            rejected_at: expect.any(Date),
+          }),
         }),
       );
     });
@@ -271,6 +310,95 @@ describe('ApplicationService', () => {
     });
   });
 
+  describe('rateAssignment()', () => {
+    const ASSIGNMENT_ID = 'assign-uuid-1';
+    const completedAssignment = {
+      status: 'COMPLETED',
+      worker_id: WORKER_ID,
+      job_offer: { employer_id: EMPLOYER_ID },
+    };
+
+    it('feeds the worker reliability when the employer rates on first rating', async () => {
+      (prisma.assignment.findUnique as jest.Mock).mockResolvedValueOnce(
+        completedAssignment,
+      );
+      (prisma.rating.findUnique as jest.Mock).mockResolvedValueOnce(null);
+      (prisma.profile.findUnique as jest.Mock).mockResolvedValueOnce({
+        reliability_score: 90,
+      });
+
+      await service.rateAssignment(ASSIGNMENT_ID, EMPLOYER_ID, 5); // +3
+
+      expect(prisma.rating.upsert).toHaveBeenCalled();
+      expect(prisma.profile.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: WORKER_ID },
+          data: { reliability_score: 93 },
+        }),
+      );
+    });
+
+    it('does NOT feed reliability on a re-rating (already rated)', async () => {
+      (prisma.assignment.findUnique as jest.Mock).mockResolvedValueOnce(
+        completedAssignment,
+      );
+      (prisma.rating.findUnique as jest.Mock).mockResolvedValueOnce({
+        id: 'existing',
+      });
+
+      await service.rateAssignment(ASSIGNMENT_ID, EMPLOYER_ID, 2);
+
+      // Only the ratee-aggregate profile.update runs, never a reliability bump.
+      const reliabilityUpdate = (
+        prisma.profile.update as jest.Mock
+      ).mock.calls.find(
+        (c) => c[0]?.data?.reliability_score !== undefined,
+      );
+      expect(reliabilityUpdate).toBeUndefined();
+    });
+
+    it('does NOT feed reliability when the worker rates the employer', async () => {
+      (prisma.assignment.findUnique as jest.Mock).mockResolvedValueOnce(
+        completedAssignment,
+      );
+      (prisma.rating.findUnique as jest.Mock).mockResolvedValueOnce(null);
+
+      await service.rateAssignment(ASSIGNMENT_ID, WORKER_ID, 5);
+
+      const reliabilityUpdate = (
+        prisma.profile.update as jest.Mock
+      ).mock.calls.find(
+        (c) => c[0]?.data?.reliability_score !== undefined,
+      );
+      expect(reliabilityUpdate).toBeUndefined();
+    });
+
+    it('rejects a rater who is neither the worker nor the employer', async () => {
+      (prisma.assignment.findUnique as jest.Mock).mockResolvedValueOnce(
+        completedAssignment,
+      );
+      await expect(
+        service.rateAssignment(ASSIGNMENT_ID, 'stranger', 4),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('rejects when the assignment is not yet completed', async () => {
+      (prisma.assignment.findUnique as jest.Mock).mockResolvedValueOnce({
+        ...completedAssignment,
+        status: 'CONFIRMED',
+      });
+      await expect(
+        service.rateAssignment(ASSIGNMENT_ID, EMPLOYER_ID, 4),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('rejects a score outside 1–5', async () => {
+      await expect(
+        service.rateAssignment(ASSIGNMENT_ID, EMPLOYER_ID, 6),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+  });
+
   describe('create()', () => {
     beforeEach(() => {
       (prisma.jobOffer.findUnique as jest.Mock).mockResolvedValue(mockJobOffer);
@@ -282,6 +410,28 @@ describe('ApplicationService', () => {
         ...mockApplication,
         job_offer: mockJobOffer,
       });
+    });
+
+    it('notifies the employer exactly once, whatever the channel', async () => {
+      // This used to fire only from the WhatsApp apply flow, so a worker
+      // applying on the web produced no notification at all. It lives here now,
+      // and the bot flow no longer calls it — so exactly one is sent either way.
+      await service.create(JOB_OFFER_ID, WORKER_ID);
+      expect(
+        botNotification.sendNewApplicationToEmployer,
+      ).toHaveBeenCalledTimes(1);
+      expect(botNotification.sendNewApplicationToEmployer).toHaveBeenCalledWith(
+        APPLICATION_ID,
+      );
+    });
+
+    it('still returns the application when the notification fails', async () => {
+      botNotification.sendNewApplicationToEmployer.mockRejectedValue(
+        new Error('twilio down'),
+      );
+      await expect(service.create(JOB_OFFER_ID, WORKER_ID)).resolves.toEqual(
+        expect.objectContaining({ id: APPLICATION_ID }),
+      );
     });
 
     it('creates a valid application', async () => {
@@ -304,6 +454,18 @@ describe('ApplicationService', () => {
       );
       await expect(service.create(JOB_OFFER_ID, WORKER_ID)).rejects.toThrow(
         BadRequestException,
+      );
+    });
+
+    it('refuses a worker whose KYC is not verified', async () => {
+      // Mirrors KycVerifiedGuard: enforced here too because the WhatsApp bot
+      // reaches this service without passing through any HTTP guard.
+      (prisma.profile.findUnique as jest.Mock).mockResolvedValue({
+        ...mockWorker,
+        verification_status: 'PENDING',
+      });
+      await expect(service.create(JOB_OFFER_ID, WORKER_ID)).rejects.toThrow(
+        ForbiddenException,
       );
     });
 
@@ -525,6 +687,29 @@ describe('ApplicationService', () => {
     it('accepts application and returns ACCEPTED status', async () => {
       const result = await service.accept(APPLICATION_ID, EMPLOYER_ID);
       expect(result.status).toBe(ApplicationStatus.ACCEPTED);
+    });
+
+    it('notifies the accepted worker exactly once', async () => {
+      // Only the WhatsApp accept flow used to do this, so accepting on the web
+      // left the winner uninformed while the rivals got their rejection.
+      await service.accept(APPLICATION_ID, EMPLOYER_ID);
+      expect(
+        botNotification.sendApplicationAcceptedToWorker,
+      ).toHaveBeenCalledTimes(1);
+      expect(
+        botNotification.sendApplicationAcceptedToWorker,
+      ).toHaveBeenCalledWith(APPLICATION_ID);
+    });
+
+    it('still accepts when the notification fails', async () => {
+      botNotification.sendApplicationAcceptedToWorker.mockRejectedValue(
+        new Error('twilio down'),
+      );
+      await expect(
+        service.accept(APPLICATION_ID, EMPLOYER_ID),
+      ).resolves.toEqual(
+        expect.objectContaining({ status: ApplicationStatus.ACCEPTED }),
+      );
     });
 
     it('throws ForbiddenException when non-employer tries to accept', async () => {

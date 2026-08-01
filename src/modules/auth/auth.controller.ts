@@ -28,6 +28,8 @@ import { extractRequestMeta } from '../../common/utils/request-meta.util';
 import { AdminAuthGuard } from './guards/admin-auth.guard';
 import { ProfileAuthGuard } from './guards/profile-auth.guard';
 import type { AdminAuthenticatedRequest } from './guards/jwt-auth.guard';
+import { Throttle } from '@nestjs/throttler';
+import { LogService } from '../log/log.service';
 import {
   SendOtpDto,
   VerifyOtpDto,
@@ -36,6 +38,7 @@ import {
   SendAdminOtpDto,
   VerifyAdminOtpDto,
   UpdateAdminMeDto,
+  WhatsAppSessionDto,
 } from './dto';
 import { QrGateway } from '../ws-notifications/qr.gateway';
 import { WsNotificationsGateway } from '../ws-notifications/ws-notifications.gateway';
@@ -48,7 +51,32 @@ export class AuthController {
     private readonly configService: ConfigService,
     private readonly qrGateway: QrGateway,
     private readonly wsGateway: WsNotificationsGateway,
+    private readonly logService: LogService,
   ) {}
+
+  /**
+   * Single definition of the session cookie. Every login path — OTP, admin
+   * OTP, admin QR, admin TOTP, WhatsApp link — must set exactly the same
+   * attributes, or a session created by one path behaves differently from
+   * another's.
+   */
+  private setAuthCookie(res: Response, token: string): void {
+    const isProduction =
+      this.configService.get<string>('NODE_ENV') === 'production';
+    const cookieName = this.configService.get<string>('AUTH_COOKIE_NAME');
+
+    if (!cookieName) {
+      throw new Error('AUTH_COOKIE_NAME is not set');
+    }
+
+    res.cookie(cookieName, token, {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: isProduction ? 'none' : 'lax',
+      maxAge: 24 * 60 * 60 * 1000,
+      path: '/',
+    });
+  }
 
   @Post('send-otp')
   @HttpCode(HttpStatus.OK)
@@ -151,24 +179,59 @@ export class AuthController {
       verifyOtpDto.otp,
     );
 
-    const isProduction =
-      this.configService.get<string>('NODE_ENV') === 'production';
-    const cookieName = this.configService.get<string>('AUTH_COOKIE_NAME');
-    const maxAge = 24 * 60 * 60 * 1000;
-
-    if (!cookieName) {
-      throw new Error('AUTH_COOKIE_NAME is not set');
-    }
-
-    res.cookie(cookieName, result.token, {
-      httpOnly: true,
-      secure: isProduction,
-      sameSite: isProduction ? 'none' : 'lax',
-      maxAge,
-      path: '/',
-    });
+    this.setAuthCookie(res, result.token);
 
     return { success: true };
+  }
+
+  @Post('whatsapp/session')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  // Tighter than the global 100/min: this endpoint turns a guessable-in-theory
+  // string into a session, so brute-force room matters more than convenience.
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @ApiOperation({
+    summary: 'Exchange a WhatsApp link code for a session',
+    description:
+      'Consumes the one-time code carried by a bot link (`?s=`) and sets the ' +
+      'ordinary session cookie, so the WhatsApp WebView lands signed in. The ' +
+      'code is single-use and expires after 24h.',
+  })
+  @ApiBody({ type: WhatsAppSessionDto })
+  @ApiResponse({ status: 204, description: 'Session cookie set' })
+  @ApiResponse({ status: 401, description: 'Code invalid, expired or used' })
+  async whatsappSession(
+    @Body() dto: WhatsAppSessionDto,
+    @Res({ passthrough: true }) res: Response,
+    @Req() req: Request,
+  ): Promise<void> {
+    const meta = extractRequestMeta(req);
+
+    let result: { token: string; profileId: string };
+    try {
+      result = await this.authService.loginWithWhatsAppCode(dto.code);
+    } catch (err) {
+      // Authentication path: a rejected code is worth a log line, since a burst
+      // of them is the signal that someone is fishing with stolen links.
+      await this.logService
+        .create({
+          action: 'auth.whatsapp_link.rejected',
+          entityType: 'Profile',
+          ...meta,
+        })
+        .catch(() => undefined);
+      throw err;
+    }
+
+    this.setAuthCookie(res, result.token);
+
+    await this.logService
+      .create({
+        action: 'auth.whatsapp_link.consumed',
+        entityType: 'Profile',
+        entityId: result.profileId,
+        ...meta,
+      })
+      .catch(() => undefined);
   }
 
   // --- Mobile bearer-token endpoints -------------------------------------
@@ -421,22 +484,7 @@ export class AuthController {
       return { success: true, totpRequired: true, pendingToken: result.token };
     }
 
-    const isProduction =
-      this.configService.get<string>('NODE_ENV') === 'production';
-    const cookieName = this.configService.get<string>('AUTH_COOKIE_NAME');
-    const maxAge = 24 * 60 * 60 * 1000;
-
-    if (!cookieName) {
-      throw new Error('AUTH_COOKIE_NAME is not set');
-    }
-
-    res.cookie(cookieName, result.token, {
-      httpOnly: true,
-      secure: isProduction,
-      sameSite: isProduction ? 'none' : 'lax',
-      maxAge,
-      path: '/',
-    });
+    this.setAuthCookie(res, result.token);
 
     return { success: true };
   }
@@ -652,18 +700,7 @@ export class AuthController {
       };
     }
 
-    const isProduction =
-      this.configService.get<string>('NODE_ENV') === 'production';
-    const cookieName = this.configService.get<string>('AUTH_COOKIE_NAME');
-    if (!cookieName) throw new Error('AUTH_COOKIE_NAME is not set');
-
-    res.cookie(cookieName, result.token!, {
-      httpOnly: true,
-      secure: isProduction,
-      sameSite: isProduction ? 'none' : 'lax',
-      maxAge: 24 * 60 * 60 * 1000,
-      path: '/',
-    });
+    this.setAuthCookie(res, result.token!);
 
     return { success: true };
   }
@@ -724,18 +761,7 @@ export class AuthController {
       extractRequestMeta(req),
     );
 
-    const isProduction =
-      this.configService.get<string>('NODE_ENV') === 'production';
-    const cookieName = this.configService.get<string>('AUTH_COOKIE_NAME');
-    if (!cookieName) throw new Error('AUTH_COOKIE_NAME is not set');
-
-    res.cookie(cookieName, result.token, {
-      httpOnly: true,
-      secure: isProduction,
-      sameSite: isProduction ? 'none' : 'lax',
-      maxAge: 24 * 60 * 60 * 1000,
-      path: '/',
-    });
+    this.setAuthCookie(res, result.token);
 
     return { success: true };
   }

@@ -1,0 +1,469 @@
+import {
+  Controller,
+  ForbiddenException,
+  Get,
+  Logger,
+  NotFoundException,
+  Param,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
+import {
+  InteractionActor,
+  InteractionKind,
+  InteractionObject,
+  InteractionSource,
+  Prisma,
+  ProfileType,
+  PaymentRequestType,
+  PaymentRequestStatus,
+} from '@prisma/client';
+import { PrismaService } from '../../common/services/prisma/prisma.service';
+import { ProfileAuthGuard } from '../auth/guards/profile-auth.guard';
+import { KycVerifiedGuard } from '../auth/guards/kyc-verified.guard';
+import type { ProfileAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
+import { MatchingService } from '../matching/matching.service';
+import { SystemConfigService } from '../system-config/system-config.service';
+import { WalletService } from '../wallet/wallet.service';
+import { RecommendationContactService } from '../recommendation/recommendation-contact.service';
+import { InteractionEventService } from '../recommendation-engine/interaction-event.service';
+import { EngineRolloutService } from '../recommendation-engine/engine-rollout.service';
+import { RecommendationEngineService } from '../recommendation-engine/recommendation-engine.service';
+
+const WORKER_SELECT = {
+  id: true,
+  first_name: true,
+  last_name: true,
+  avatar_url: true,
+  reliability_score: true,
+  rating_avg: true,
+  rating_count: true,
+  description: true,
+  portfolio_slug: true,
+  categories: {
+    select: { category: { select: { name: true } } },
+    take: 1,
+  },
+} as const;
+
+type RecommendedWorker = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  avatarUrl: string | null;
+  reliabilityScore: number | null;
+  ratingAvg: number | null;
+  ratingCount: number;
+  categoryName: string | null;
+  description: string | null;
+  completedMissions: number;
+  portfolioSlug: string | null;
+  score: number;
+};
+
+
+@ApiTags('Mobile — Recommendations')
+@ApiBearerAuth()
+@Controller('profile')
+@UseGuards(ProfileAuthGuard)
+export class MobileRecommendationController {
+  private readonly logger = new Logger(MobileRecommendationController.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly matching: MatchingService,
+    private readonly systemConfig: SystemConfigService,
+    private readonly wallet: WalletService,
+    private readonly recommendationContact: RecommendationContactService,
+    private readonly interactionEvents: InteractionEventService,
+    private readonly rollout: EngineRolloutService,
+    private readonly engine: RecommendationEngineService,
+  ) {}
+
+  @Get('worker-feed')
+  @ApiOperation({
+    summary: '[Mobile/EMPLOYER] Recommended worker profiles',
+    description:
+      'Semantic recommendations when similarity is enabled; otherwise workers in the domains this employer posts offers in, best reliability/rating first, then any eligible worker. Already-contacted workers are excluded at every tier.',
+  })
+  @ApiResponse({ status: 200, description: 'Ranked recommended workers' })
+  @ApiResponse({ status: 403, description: 'Not an EMPLOYER profile' })
+  async workerFeed(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Query('limit') limit?: string,
+  ): Promise<RecommendedWorker[]> {
+    const profileId = req.user.profileId;
+    await this.assertEmployer(profileId);
+
+    const topN = this.parseLimit(limit, 20, 50);
+    const contactedIds = await this.getContactedWorkerIds(profileId);
+
+    const hits = await this.rankWorkers(profileId, topN, contactedIds);
+    const recommended = await this.hydrate(
+      hits.filter((h) => !contactedIds.has(h.id)).slice(0, topN),
+    );
+    if (recommended.length > 0) return recommended;
+
+    const categoryIds = await this.employerCategoryIds(profileId);
+    if (categoryIds.length > 0) {
+      const inDomain = await this.hydrate(
+        await this.eligibleWorkerHits(categoryIds, contactedIds, topN),
+      );
+      if (inDomain.length > 0) return inDomain;
+    }
+
+    return this.hydrate(
+      await this.eligibleWorkerHits([], contactedIds, topN),
+    );
+  }
+
+
+  private async rankWorkers(
+    profileId: string,
+    topN: number,
+    contactedIds: Set<string>,
+  ): Promise<{ id: string; score: number }[]> {
+    if ((await this.rollout.versionFor(profileId)) === 'v2') {
+      try {
+        const ranked = await this.engine.recommendWorkersForEmployer(
+          profileId,
+          topN,
+          { exclude: contactedIds },
+        );
+        if (ranked.length > 0) {
+          return ranked.map((r) => ({ id: r.id, score: r.score }));
+        }
+      } catch (err) {
+        this.logger.warn(`v2 worker ranker failed for ${profileId}`, err);
+      }
+    }
+    return (
+      (await this.matching.findMatchingWorkersForEmployerProfile(
+        profileId,
+        topN + contactedIds.size,
+      )) ?? []
+    );
+  }
+
+  private async employerCategoryIds(employerId: string): Promise<string[]> {
+    const rows = await this.prisma.jobOffer.findMany({
+      where: {
+        employer_id: employerId,
+        deleted_at: null,
+        category_id: { not: null },
+      },
+      select: { category_id: true },
+      distinct: ['category_id'],
+    });
+    return rows
+      .map((r) => r.category_id)
+      .filter((id): id is string => id !== null);
+  }
+
+  private async eligibleWorkerHits(
+    categoryIds: string[],
+    contactedIds: Set<string>,
+    take: number,
+  ): Promise<{ id: string; score: number }[]> {
+    const fees = await this.systemConfig.getFees();
+    const rows = await this.prisma.profile.findMany({
+      where: {
+        profile_type: ProfileType.WORKER,
+        status: 'ACTIVE',
+        verification_status: 'VERIFIED',
+        deleted_at: null,
+        reliability_score: { gte: fees.reliabilityScoreMin },
+        ...(contactedIds.size > 0
+          ? { id: { notIn: [...contactedIds] } }
+          : {}),
+        ...(categoryIds.length > 0
+          ? { categories: { some: { category_id: { in: categoryIds } } } }
+          : {}),
+      },
+      orderBy: [{ reliability_score: 'desc' }, { rating_avg: 'desc' }],
+      take,
+      select: { id: true },
+    });
+    return rows.map((r) => ({ id: r.id, score: 0 }));
+  }
+
+  private async getContactedWorkerIds(
+    employerId: string,
+  ): Promise<Set<string>> {
+    const [walletTxns, requests] = await Promise.all([
+      this.prisma.walletTransaction.findMany({
+        where: {
+          reference_type: 'recommendation_contact',
+          reference_id: { not: null },
+          wallet: { profile_id: employerId },
+        },
+        select: { reference_id: true },
+      }),
+      this.prisma.paymentRequest.findMany({
+        where: {
+          profile_id: employerId,
+          request_type: PaymentRequestType.RECOMMENDATION_CONTACT,
+          status: PaymentRequestStatus.APPROVED,
+          recommendation_worker_id: { not: null },
+        },
+        select: { recommendation_worker_id: true },
+      }),
+    ]);
+    const ids = new Set<string>();
+    for (const t of walletTxns) if (t.reference_id) ids.add(t.reference_id);
+    for (const r of requests)
+      if (r.recommendation_worker_id) ids.add(r.recommendation_worker_id);
+    return ids;
+  }
+
+  @Get('worker-feed/:workerId')
+  @ApiOperation({
+    summary: '[Mobile/EMPLOYER] Recommended worker detail (+ contact fee)',
+  })
+  @ApiResponse({ status: 200, description: 'Worker detail' })
+  @ApiResponse({ status: 404, description: 'Worker not found' })
+  async workerDetail(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('workerId') workerId: string,
+  ) {
+    const profileId = req.user.profileId;
+    await this.assertEmployer(profileId);
+
+    const [hydrated, recommendationFee, walletBalance] = await Promise.all([
+      this.hydrate([{ id: workerId, score: 0 }], { skipEligibility: true }),
+      this.systemConfig.getRecommendationContactFee(),
+      this.wallet.getProfileWalletBalance(profileId),
+    ]);
+    const worker = hydrated[0];
+    if (!worker) {
+      throw new NotFoundException('Travailleur introuvable');
+    }
+
+    void this.interactionEvents.record({
+      actorId: profileId,
+      actorType: InteractionActor.EMPLOYER,
+      kind: InteractionKind.PROFILE_VIEW,
+      objectType: InteractionObject.WORKER_PROFILE,
+      objectId: workerId,
+      source: InteractionSource.SERVER,
+      surface: 'worker_detail',
+    });
+
+    return { worker, recommendationFee, walletBalance };
+  }
+
+  @Post('recommended-workers/:workerId/contact/pay-wallet')
+  @UseGuards(KycVerifiedGuard)
+  @ApiOperation({
+    summary: '[Mobile/EMPLOYER] Pay a recommended worker contact via wallet',
+  })
+  async payWallet(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('workerId') workerId: string,
+  ) {
+    const profileId = req.user.profileId;
+    await this.assertEmployer(profileId);
+    return this.recommendationContact.payWithWallet(profileId, workerId);
+  }
+
+  @Post('recommended-workers/:workerId/contact/pay-mobile')
+  @UseGuards(KycVerifiedGuard)
+  @ApiOperation({
+    summary:
+      '[Mobile/EMPLOYER] Create a mobile-money payment for a recommended worker contact',
+  })
+  async payMobile(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('workerId') workerId: string,
+  ) {
+    const profileId = req.user.profileId;
+    await this.assertEmployer(profileId);
+    return this.recommendationContact.createMobilePaymentUrl(
+      profileId,
+      workerId,
+    );
+  }
+
+  @Get('worker-search')
+  @ApiOperation({
+    summary: '[Mobile/EMPLOYER] Search all workers (name/description + filters)',
+  })
+  @ApiResponse({ status: 200, description: 'Paginated worker search results' })
+  @ApiResponse({ status: 403, description: 'Not an EMPLOYER profile' })
+  async workerSearch(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Query('q') q?: string,
+    @Query('categoryId') categoryId?: string,
+    @Query('minReliability') minReliability?: string,
+    @Query('minRating') minRating?: string,
+    @Query('city') city?: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+  ): Promise<{ items: RecommendedWorker[]; total: number }> {
+    await this.assertEmployer(req.user.profileId);
+
+    const take = this.parseLimit(pageSize, 20, 100);
+    const pageNum = Math.max(0, Number.parseInt(page ?? '0', 10) || 0);
+    const skip = pageNum * take;
+
+    const where: Prisma.ProfileWhereInput = {
+      profile_type: ProfileType.WORKER,
+      status: 'ACTIVE',
+      verification_status: 'VERIFIED',
+      deleted_at: null,
+    };
+    if (categoryId) {
+      where.categories = { some: { category_id: categoryId } };
+    }
+    const rel = Number(minReliability);
+    if (minReliability && Number.isFinite(rel)) {
+      where.reliability_score = { gte: rel };
+    }
+    const rating = Number(minRating);
+    if (minRating && Number.isFinite(rating)) {
+      where.rating_avg = { gte: rating };
+    }
+    if (city?.trim()) {
+      where.address = { contains: city.trim(), mode: 'insensitive' };
+    }
+
+    const term = q?.trim();
+    if (term) {
+      const tokens = term.split(/\s+/).filter(Boolean);
+      where.AND = tokens.map((tok) => ({
+        OR: [
+          { first_name: { contains: tok, mode: 'insensitive' } },
+          { last_name: { contains: tok, mode: 'insensitive' } },
+          { description: { contains: tok, mode: 'insensitive' } },
+        ],
+      }));
+    }
+
+    const [profiles, total] = await Promise.all([
+      this.prisma.profile.findMany({
+        where,
+        select: WORKER_SELECT,
+        skip,
+        take,
+        orderBy: [{ reliability_score: 'desc' }, { rating_avg: 'desc' }],
+      }),
+      this.prisma.profile.count({ where }),
+    ]);
+
+    const ids = profiles.map((p) => p.id);
+    const endCounts =
+      ids.length === 0
+        ? []
+        : await this.prisma.application.groupBy({
+            by: ['worker_id'],
+            where: { worker_id: { in: ids }, status: 'END' },
+            _count: { _all: true },
+          });
+    const endById = new Map(endCounts.map((c) => [c.worker_id, c._count._all]));
+
+    const items = profiles.map((p) =>
+      this.toCard(p, endById.get(p.id) ?? 0, 0),
+    );
+    return { items, total };
+  }
+
+  // --- helpers ---
+
+  private async hydrate(
+    hits: { id: string; score: number }[],
+    opts: { skipEligibility?: boolean } = {},
+  ): Promise<RecommendedWorker[]> {
+    if (hits.length === 0) return [];
+    const ids = hits.map((h) => h.id);
+
+    const where = opts.skipEligibility
+      ? { id: { in: ids } }
+      : {
+          id: { in: ids },
+          status: 'ACTIVE' as const,
+          verification_status: 'VERIFIED' as const,
+          reliability_score: {
+            gte: (await this.systemConfig.getFees()).reliabilityScoreMin,
+          },
+        };
+
+    const [profiles, endCounts] = await Promise.all([
+      this.prisma.profile.findMany({ where, select: WORKER_SELECT }),
+      this.prisma.application.groupBy({
+        by: ['worker_id'],
+        where: { worker_id: { in: ids }, status: 'END' },
+        _count: { _all: true },
+      }),
+    ]);
+
+    const endById = new Map(
+      endCounts.map((c) => [c.worker_id, c._count._all]),
+    );
+    const byId = new Map(profiles.map((p) => [p.id, p]));
+    const scoreById = new Map(hits.map((h) => [h.id, h.score]));
+
+    return ids
+      .map((id) => byId.get(id))
+      .filter((p): p is NonNullable<typeof p> => Boolean(p))
+      .map((p) => this.toCard(p, endById.get(p.id) ?? 0, scoreById.get(p.id) ?? 0));
+  }
+
+  private toCard(
+    p: {
+      id: string;
+      first_name: string;
+      last_name: string;
+      avatar_url: string | null;
+      reliability_score: number | null;
+      rating_avg: number | null;
+      rating_count: number;
+      description: string | null;
+      portfolio_slug: string | null;
+      categories: { category: { name: string } | null }[];
+    },
+    completedMissions: number,
+    score: number,
+  ): RecommendedWorker {
+    return {
+      id: p.id,
+      firstName: p.first_name,
+      lastName: p.last_name,
+      avatarUrl: p.avatar_url,
+      reliabilityScore: p.reliability_score,
+      ratingAvg: p.rating_avg,
+      ratingCount: p.rating_count,
+      categoryName: p.categories[0]?.category?.name ?? null,
+      description: p.description,
+      completedMissions,
+      portfolioSlug: p.portfolio_slug,
+      score,
+    };
+  }
+
+  private parseLimit(value: string | undefined, fallback: number, max: number) {
+    const n = Number.parseInt(value ?? '', 10);
+    if (Number.isNaN(n) || n <= 0) return fallback;
+    return Math.min(n, max);
+  }
+
+  private async assertEmployer(profileId: string): Promise<void> {
+    const profile = await this.prisma.profile.findUnique({
+      where: { id: profileId },
+      select: { profile_type: true },
+    });
+    if (!profile) {
+      throw new ForbiddenException('Profil introuvable');
+    }
+    if (profile.profile_type !== ProfileType.EMPLOYER) {
+      throw new ForbiddenException('Réservé aux employeurs');
+    }
+  }
+}

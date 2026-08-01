@@ -20,6 +20,7 @@ describe('AdminJobOfferController', () => {
     controller = new AdminJobOfferController(
       service as any,
       mockLogService as any,
+      { restore: jest.fn(), purge: jest.fn(), purgeBlockers: jest.fn() } as any,
     );
   });
 

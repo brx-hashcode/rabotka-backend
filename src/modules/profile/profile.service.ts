@@ -1,4 +1,8 @@
 import {
+  AdminCacheService,
+  ADMIN_LIST_TTL_SECONDS,
+} from '../../common/services/cache/admin-cache.service';
+import {
   Injectable,
   Logger,
   BadRequestException,
@@ -192,6 +196,7 @@ export class ProfileService {
     private readonly matchingService: MatchingService,
     private readonly interestClusters: InterestClusterService,
     private readonly geocodingService: GeocodingService,
+    private readonly cache: AdminCacheService,
   ) {}
 
   async findById(id: string): Promise<ProfileMeResponse> {
@@ -280,6 +285,8 @@ export class ProfileService {
         first_name: true,
         last_name: true,
         profile_type: true,
+        // Needed to detect an address change and trigger a re-geocode.
+        address: true,
       },
     });
 
@@ -304,6 +311,31 @@ export class ProfileService {
         }
       }
     });
+
+    // Re-geocode when the address actually changed. Coordinates were previously
+    // only ever written at profile creation, so anyone who moved kept stale
+    // coordinates forever — and every distance-weighted ranking term silently
+    // degraded to a neutral value for them.
+    if (
+      updateProfileDto.address !== undefined &&
+      updateProfileDto.address !== existingProfile.address
+    ) {
+      void this.geocodingService
+        .geocode(updateProfileDto.address)
+        .then((coords) => {
+          if (!coords) return;
+          return this.prisma.profile.update({
+            where: { id },
+            data: { latitude: coords.lat, longitude: coords.lng },
+          });
+        })
+        .catch((err: unknown) =>
+          this.logger.warn(
+            `re-geocoding failed for profile ${id}`,
+            err instanceof Error ? err.message : String(err),
+          ),
+        );
+    }
 
     // Re-index in Qdrant after update (fire-and-forget)
     if (existingProfile.profile_type === ProfileType.WORKER) {
@@ -731,7 +763,7 @@ export class ProfileService {
 
     if (decision === 'VERIFIED') {
       // Seed interest vector so first recommendation isn't cold-start
-      void this.interestClusters.reseedFromProfile(profileId).catch((err) => {
+      void this.interestClusters.ensureSeeded(profileId).catch((err) => {
         this.logger.warn(
           `Interest vector reseed failed for profile=${profileId}`,
           err,
@@ -965,6 +997,23 @@ export class ProfileService {
     verificationStatus?: VerificationStatus[];
     deleted?: boolean;
   }): Promise<AdminProfilesListResponse> {
+    return this.cache.wrap(
+      this.cache.listKey('profiles', params),
+      ADMIN_LIST_TTL_SECONDS,
+      () => this.loadGetProfilesForAdmin(params),
+    );
+  }
+
+  private async loadGetProfilesForAdmin(params: {
+    page: number;
+    limit: number;
+    q?: string;
+    status?: AccountStatus[];
+    profileType?: ProfileType[];
+    whatsappConnected?: boolean;
+    verificationStatus?: VerificationStatus[];
+    deleted?: boolean;
+  }): Promise<AdminProfilesListResponse> {
     const {
       page,
       limit,
@@ -1087,6 +1136,7 @@ export class ProfileService {
       where: { id: { in: ids }, deleted_at: null },
       data: { deleted_at: new Date() },
     });
+    await this.cache.invalidate('profiles');
     return { count };
   }
 

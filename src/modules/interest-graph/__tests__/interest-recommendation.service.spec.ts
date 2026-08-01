@@ -20,7 +20,7 @@ const mockPrisma = {
 
 const mockClusters = {
   getProfile: jest.fn(),
-  reseedFromProfile: jest.fn().mockResolvedValue(undefined),
+  ensureSeeded: jest.fn().mockResolvedValue(undefined),
 };
 
 const makeProfile = (totalSignals: number) => ({
@@ -61,7 +61,7 @@ describe('InterestRecommendationService', () => {
     ]);
 
     const results = await service.recommend('worker-1');
-    expect(mockClusters.reseedFromProfile).toHaveBeenCalledWith('worker-1');
+    expect(mockClusters.ensureSeeded).toHaveBeenCalledWith('worker-1');
     expect(results).toHaveLength(1);
     expect(results[0].source).toBe('fallback');
   });

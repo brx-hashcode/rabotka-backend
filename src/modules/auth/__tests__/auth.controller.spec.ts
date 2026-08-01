@@ -5,6 +5,9 @@ function makeAuthService() {
     sendOtp: jest.fn().mockResolvedValue({ success: true }),
     resendOtp: jest.fn().mockResolvedValue({ success: true }),
     verifyOtp: jest.fn().mockResolvedValue({ token: 'jwt-token' }),
+    loginWithWhatsAppCode: jest
+      .fn()
+      .mockResolvedValue({ token: 'wa-jwt', profileId: 'p-1' }),
     sendAdminOtp: jest.fn().mockResolvedValue({ success: true }),
     resendAdminOtp: jest.fn().mockResolvedValue({ success: true }),
     verifyAdminOtp: jest.fn().mockResolvedValue({ token: 'admin-jwt' }),
@@ -63,6 +66,10 @@ function makeWsGateway() {
   return { emitToAdmin: jest.fn() };
 }
 
+function makeLogService() {
+  return { create: jest.fn().mockResolvedValue(undefined) };
+}
+
 function makeRes() {
   return {
     cookie: jest.fn(),
@@ -83,6 +90,7 @@ describe('AuthController', () => {
       configService as any,
       makeQrGateway() as any,
       makeWsGateway() as any,
+      makeLogService() as any,
     );
   });
 
@@ -280,6 +288,7 @@ describe('AuthController', () => {
         configService as any,
         makeQrGateway() as any,
         wsGateway as any,
+        makeLogService() as any,
       );
       const res = makeRes();
       const req = { user: { userId: 'u-1' } } as any;
@@ -315,6 +324,7 @@ describe('AuthController', () => {
         configService as any,
         makeQrGateway() as any,
         wsGateway as any,
+        makeLogService() as any,
       );
       const res = makeRes();
       const result = await controller.verifyPhonePairingOtp(
@@ -444,11 +454,45 @@ describe('AuthController', () => {
         configService as any,
         qrGateway as any,
         makeWsGateway() as any,
+        makeLogService() as any,
       );
       const req = { cookies: { admin_phone_token: 'phone-tok' } } as any;
       const result = await controller.confirmQrSession('session-1', req);
       expect(result.success).toBe(true);
       expect(qrGateway.emitConfirmed).toHaveBeenCalledWith('session-1');
+    });
+  });
+
+  describe('whatsappSession()', () => {
+    it('exchanges the code for the standard session cookie', async () => {
+      const res = makeRes();
+      const req = { headers: {}, ip: '10.0.0.1' } as any;
+
+      await controller.whatsappSession({ code: 'code-1' } as any, res, req);
+
+      expect(authService.loginWithWhatsAppCode).toHaveBeenCalledWith('code-1');
+      expect(res.cookie).toHaveBeenCalledWith(
+        'auth_token',
+        'wa-jwt',
+        expect.objectContaining({
+          httpOnly: true,
+          path: '/',
+          maxAge: 24 * 60 * 60 * 1000,
+        }),
+      );
+    });
+
+    it('sets no cookie when the code is rejected', async () => {
+      authService.loginWithWhatsAppCode = jest
+        .fn()
+        .mockRejectedValue(new Error('Lien de connexion invalide ou expiré'));
+      const res = makeRes();
+      const req = { headers: {}, ip: '10.0.0.1' } as any;
+
+      await expect(
+        controller.whatsappSession({ code: 'stale' } as any, res, req),
+      ).rejects.toThrow();
+      expect(res.cookie).not.toHaveBeenCalled();
     });
   });
 });

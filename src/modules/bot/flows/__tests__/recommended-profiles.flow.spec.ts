@@ -108,6 +108,7 @@ function makeCtx(overrides: Record<string, unknown> = {}) {
     employerProfileId: 'emp-1',
     interestSignalService: {
       record: jest.fn().mockResolvedValue(undefined),
+      recordWorkerProfileView: jest.fn().mockResolvedValue(undefined),
     } as any,
     invoiceService: {
       create: jest.fn().mockResolvedValue({ id: 'inv-1' }),
@@ -303,17 +304,32 @@ describe('runRecommendedProfilesFlow — detail view (step 1)', () => {
     );
   });
 
-  it('records profile_view interest signal when jobOfferId is in payload', async () => {
+  it('records profile_view against the WORKER being viewed', async () => {
     const ctx = makeCtx();
     const state = makeState(0, { jobOfferId: 'jo-42' });
     await runRecommendedProfilesFlow(state, '1', profile, ctx);
-    // record is fire-and-forget; wait a tick for the microtask to flush
+    // fire-and-forget; wait a tick for the microtask to flush
     await Promise.resolve();
-    expect(ctx.interestSignalService.record).toHaveBeenCalledWith(
-      'emp-1',
-      'jo-42',
-      'profile_view',
-    );
+
+    // Regression: this used to record the employer's OWN jobOfferId, which
+    // taught their vector about their own postings and discarded which worker
+    // was actually viewed.
+    expect(
+      ctx.interestSignalService.recordWorkerProfileView,
+    ).toHaveBeenCalledWith('emp-1', 'worker-1');
+    expect(ctx.interestSignalService.record).not.toHaveBeenCalled();
+  });
+
+  it('records profile_view even without a jobOfferId in payload', async () => {
+    // The old guard `if (jobOfferId)` meant browsing outside an offer context
+    // recorded nothing at all.
+    const ctx = makeCtx();
+    const state = makeState(0, {});
+    await runRecommendedProfilesFlow(state, '1', profile, ctx);
+    await Promise.resolve();
+    expect(
+      ctx.interestSignalService.recordWorkerProfileView,
+    ).toHaveBeenCalledWith('emp-1', 'worker-1');
   });
 
   it('shows fallback when worker is no longer active/verified', async () => {
