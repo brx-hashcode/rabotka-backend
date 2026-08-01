@@ -2,6 +2,11 @@ import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import { MailerService } from '@nestjs-modules/mailer';
 import { EMAIL_QUEUE } from '../../common/services/queue/queue.module';
 import { type EmailJobData } from '../../common/services/queue/queue.service';
+import {
+  RABOTKA_LOGO_CID,
+  RABOTKA_LOGO_FILENAME,
+  rabotkaLogoBuffer,
+} from './templates/logo-asset';
 
 function formatFromField(from?: string, fromName?: string): string | undefined {
   if (from === undefined && fromName === undefined) return undefined;
@@ -9,6 +14,26 @@ function formatFromField(from?: string, fromName?: string): string | undefined {
   if (!fromName?.trim()) return email;
   const name = fromName.trim().replaceAll('"', String.raw`\"`);
   return `"${name}" <${email}>`;
+}
+
+/** Whether this email's HTML points at the embedded logo. */
+function referencesLogo(html?: string): boolean {
+  return html?.includes(`cid:${RABOTKA_LOGO_CID}`) ?? false;
+}
+
+/**
+ * The logo as an inline attachment. `contentDisposition: 'inline'` keeps it out
+ * of the recipient's attachment list — without it, clients show a paperclip and
+ * a downloadable file on every transactional email.
+ */
+function logoAttachment() {
+  return {
+    filename: RABOTKA_LOGO_FILENAME,
+    content: rabotkaLogoBuffer(),
+    contentType: 'image/png',
+    cid: RABOTKA_LOGO_CID,
+    contentDisposition: 'inline' as const,
+  };
 }
 
 @Injectable()
@@ -94,24 +119,29 @@ export class MailProcessor implements OnModuleInit {
     const fromAddr: string | undefined = data.from;
     const fromNameVal: string | undefined = data.fromName;
     const fromFormatted = formatFromField(fromAddr, fromNameVal);
+    const attachments = [
+      ...(data.attachments ?? []).map((a) => ({
+        ...a,
+        // BullMQ serializes Buffer → { type: 'Buffer', data: [...] } via JSON.
+        // Restore it so nodemailer receives an actual Buffer instance.
+        content:
+          !Buffer.isBuffer(a.content) &&
+          typeof a.content === 'object' &&
+          (a.content as any).type === 'Buffer'
+            ? Buffer.from((a.content as any).data)
+            : a.content,
+      })),
+      // Attached here rather than queued with the job: the bytes would
+      // otherwise be JSON-serialised into Redis once per email for no reason.
+      ...(referencesLogo(html) ? [logoAttachment()] : []),
+    ];
+
     const sendMailOptions: Parameters<MailerService['sendMail']>[0] = {
       to,
       subject,
       ...(text !== undefined && { text }),
       ...(html !== undefined && { html }),
-      ...(data.attachments?.length && {
-        attachments: data.attachments.map((a) => ({
-          ...a,
-          // BullMQ serializes Buffer → { type: 'Buffer', data: [...] } via JSON.
-          // Restore it so nodemailer receives an actual Buffer instance.
-          content:
-            !Buffer.isBuffer(a.content) &&
-            typeof a.content === 'object' &&
-            (a.content as any).type === 'Buffer'
-              ? Buffer.from((a.content as any).data)
-              : a.content,
-        })),
-      }),
+      ...(attachments.length > 0 && { attachments }),
     };
 
     if (fromFormatted !== undefined) {
