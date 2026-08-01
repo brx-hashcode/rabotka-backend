@@ -9,6 +9,6 @@ export function jobOfferPublishedMessage(
     '',
     'Elle est maintenant visible par les travailleurs sur la plateforme.',
     '',
-    'Tapez *Menu* pour gérer vos offres.',
+    '',
   ].join('\n');
 }

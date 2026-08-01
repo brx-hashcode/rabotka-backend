@@ -10,7 +10,7 @@ import {
   formatRecommendedList,
   type OfferListItem,
 } from '../messages/offers.messages';
-import { menuMessage } from '../messages/menu.messages';
+import { welcomePlatformMessage } from '../messages/welcome.messages';
 
 export type RecommendedJobsContext = {
   jobOfferService: JobOfferService;
@@ -254,7 +254,7 @@ async function handleRecommendedJobsDetailStep(
     const teaser = await buildApplyTeaser(selectedOfferId, ctx);
     if (!teaser) {
       return {
-        reply: ['❌ Offre introuvable. Tapez *Menu*.'],
+        reply: ['❌ Offre introuvable.'],
         clearState: true,
       };
     }
@@ -335,7 +335,7 @@ async function handleRecommendedJobsDescriptionStep(
     const teaser = await buildApplyTeaser(selectedOfferId, ctx);
     if (!teaser) {
       return {
-        reply: ['❌ Offre introuvable. Tapez *Menu*.'],
+        reply: ['❌ Offre introuvable.'],
         clearState: true,
       };
     }
@@ -393,7 +393,7 @@ export async function runRecommendedJobsFlow(
   const normalized = trimmed.toLowerCase();
 
   const goToMenu = (): FlowResult => ({
-    reply: [menuMessage(profile.profile_type)],
+    reply: [welcomePlatformMessage()],
     clearState: true,
   });
 
@@ -402,7 +402,7 @@ export async function runRecommendedJobsFlow(
   if (offerIds.length === 0) {
     return {
       reply: [
-        '*Aucune offre recommandée pour le moment. Tapez *Menu* pour revenir.*',
+        '*Aucune offre recommandée pour le moment.*',
       ],
       clearState: true,
     };
@@ -445,7 +445,7 @@ export async function runRecommendedJobsFlow(
   }
 
   return {
-    reply: ['❌ Erreur. Tapez *Menu* pour revenir.'],
+    reply: ['❌ Erreur.'],
     clearState: true,
   };
 }

@@ -1,27 +1,10 @@
-import type { BotProfileType } from '../types/bot-state.types';
-import {
-  menuReply,
-  contactReply,
-} from '../../../common/constants/whatsapp-listpickers';
+import { contactReply } from '../../../common/constants/whatsapp-listpickers';
 
 export type ContactInfo = {
   email: string;
   phone: string;
   address: string;
 };
-
-export function workerMenuMessage(): string {
-  return menuReply('WORKER');
-}
-
-export function employerMenuMessage(): string {
-  return menuReply('EMPLOYER');
-}
-
-export function menuMessage(profileType: BotProfileType): string {
-  return profileType === 'WORKER' ? workerMenuMessage() : employerMenuMessage();
-}
-
 
 // The details render read-only in the template body; the single "Retour au
 // menu" button is the only tappable element.
@@ -78,6 +61,10 @@ export function penaltiesListBotMessage(
   return lines.join('\n');
 }
 
+/**
+ * Re-prompt inside a flow. Deliberately does not point anywhere: the menu is
+ * gone, and a dead end outside a flow gets the welcome card instead.
+ */
 export function unknownCommandMessage(): string {
-  return 'Commande non reconnue. Tapez *Menu* pour voir le menu.';
+  return "Je n'ai pas compris votre réponse. Merci de réessayer.";
 }

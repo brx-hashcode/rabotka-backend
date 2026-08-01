@@ -10,7 +10,7 @@ import {
   jobOfferToOfferListItem,
 } from '../messages/offers.messages';
 import { formatPenaltyBlocked } from '../messages/penalty.messages';
-import { menuMessage } from '../messages/menu.messages';
+import { welcomePlatformMessage } from '../messages/welcome.messages';
 import type { ApplicationService } from '../../application/application.service';
 import type { JobOfferService } from '../../job-offer/job-offer.service';
 import type { BotNotificationService } from '../services/bot-notification.service';
@@ -88,7 +88,7 @@ async function handleApplyStep1(
       const message =
         err instanceof Error ? err.message : 'Impossible de postuler.';
       return {
-        reply: [`❌ ${message} Tapez *Menu* pour revenir.`],
+        reply: [`❌ ${message}`],
         clearState: true,
       };
     }
@@ -110,7 +110,7 @@ async function handleApplyStep1(
       if (!fullOffer) {
         return {
           reply: [
-            "*Cette offre n'est plus disponible.* Tapez *Menu* pour revenir.",
+            "*Cette offre n'est plus disponible.*",
           ],
           clearState: true,
         };
@@ -136,7 +136,7 @@ async function handleApplyStep1(
 
     return {
       reply: [
-        "*Retour sans envoi de candidature.*\n\nVous n'avez pas postulé à cette offre.\n\nTapez *1* (Trouver une mission) pour voir les offres, ou *Menu* pour le menu principal.",
+        "*Retour sans envoi de candidature.*\n\nVous n'avez pas postulé à cette offre.\n\nTapez *1* (Trouver une mission) pour voir les offres.",
       ],
       clearState: true,
     };
@@ -162,14 +162,14 @@ export async function runApplyJobFlow(
     CMD_MENU.some((c) => normalized === c || normalized.startsWith(c + ' '))
   ) {
     return {
-      reply: [menuMessage(profile.profile_type)],
+      reply: [welcomePlatformMessage()],
       clearState: true,
     };
   }
 
   if (!jobOfferId) {
     return {
-      reply: ['❌ Offre non trouvée. Tapez *Menu* pour revenir.'],
+      reply: ['❌ Offre non trouvée.'],
       clearState: true,
     };
   }
@@ -177,7 +177,7 @@ export async function runApplyJobFlow(
   if (profile.profile_type !== 'WORKER') {
     return {
       reply: [
-        '❌ Seuls les travailleurs peuvent postuler aux offres. Tapez *Menu*.',
+        '❌ Seuls les travailleurs peuvent postuler aux offres.',
       ],
       clearState: true,
     };
@@ -194,7 +194,7 @@ export async function runApplyJobFlow(
   const offer = await ctx.jobOfferService.findById(jobOfferId);
   if (!offer) {
     return {
-      reply: ["❌ Cette offre n'existe plus. Tapez *Menu*."],
+      reply: ["❌ Cette offre n'existe plus."],
       clearState: true,
     };
   }
@@ -224,7 +224,7 @@ export async function runApplyJobFlow(
       normalized === 'non' ||
       normalized === 'ignorer'
     ) {
-      return { reply: [menuMessage(profile.profile_type)], clearState: true };
+      return { reply: [welcomePlatformMessage()], clearState: true };
     }
     return {
       reply: [
@@ -235,7 +235,7 @@ export async function runApplyJobFlow(
           `*Adresse*: ${offer.address}`,
           '',
           '1- Postuler',
-          '2- Menu',
+          '2- Quitter',
         ].join('\n'),
       ],
       nextState: state,
@@ -250,7 +250,7 @@ export async function runApplyJobFlow(
   }
 
   return {
-    reply: ['❌ Erreur. Tapez *Menu* pour revenir.'],
+    reply: ['❌ Erreur.'],
     clearState: true,
   };
 }

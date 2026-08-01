@@ -4,6 +4,7 @@ import {
 } from '../rate-assignment.flow';
 import type { BotProfile, BotState } from '../../types/bot-state.types';
 import { FLOW_IDS } from '../../bot.constants';
+import { welcomePlatformMessage } from '../../messages/welcome.messages';
 
 const workerProfile: BotProfile = {
   id: 'worker-1',
@@ -66,7 +67,7 @@ function makeCtx(
 }
 
 describe('runRateAssignmentFlow', () => {
-  it('cancels when menu command received', async () => {
+  it('sends the welcome card when the user asks to leave', async () => {
     const ctx = makeCtx();
     const result = await runRateAssignmentFlow(
       makeState(),
@@ -75,7 +76,7 @@ describe('runRateAssignmentFlow', () => {
       ctx,
     );
     expect(result.clearState).toBe(true);
-    expect(result.reply[0]).toContain('Menu');
+    expect(result.reply[0]).toBe(welcomePlatformMessage());
   });
 
   it('returns error when no assignmentId in state', async () => {
@@ -204,7 +205,7 @@ describe('runRateAssignmentFlow', () => {
       ctx,
     );
     expect(result.clearState).toBe(true);
-    expect(result.reply[0]).toContain('Menu');
+    expect(result.reply[0]).toContain("Impossible d'enregistrer");
   });
 
   describe('delegates the write to ApplicationService.rateAssignment', () => {

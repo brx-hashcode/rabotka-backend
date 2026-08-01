@@ -14,6 +14,6 @@ export function whatsappAlreadyVerifiedMessage(): string {
   return [
     `✅ *Votre numéro WhatsApp est déjà vérifié.*`,
     ``,
-    `Tapez *MENU* pour accéder à la plateforme.`,
+    ``,
   ].join('\n');
 }

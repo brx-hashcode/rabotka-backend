@@ -1,3 +1,4 @@
+import { welcomePlatformMessage } from '../messages/welcome.messages';
 import type { BotProfile, BotState } from '../types/bot-state.types';
 import { FLOW_IDS, CMD_MENU } from '../bot.constants';
 import {
@@ -45,7 +46,7 @@ type StepArgs = {
 };
 
 const goToMenu = (): FlowResult => ({
-  reply: ['Tapez *MENU* pour revenir au menu principal.'],
+  reply: [welcomePlatformMessage()],
   clearState: true,
 });
 
@@ -278,7 +279,7 @@ export async function runUnlockContactFlow(
   if (!attemptId) {
     return {
       reply: [
-        '❌ Erreur : tentative de déverrouillage introuvable. Tapez *Menu*.',
+        '❌ Erreur : tentative de déverrouillage introuvable.',
       ],
       clearState: true,
     };

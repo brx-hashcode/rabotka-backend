@@ -5,7 +5,7 @@ import {
 } from '../search-by-ref.flow';
 import type { BotProfile, BotState } from '../../types/bot-state.types';
 import { FLOW_IDS } from '../../bot.constants';
-import { workerMenuMessage } from '../../messages/menu.messages';
+import { welcomePlatformMessage } from '../../messages/welcome.messages';
 
 const workerProfile: BotProfile = {
   id: 'worker-1',
@@ -106,7 +106,7 @@ describe('runSearchByRefFlow()', () => {
         ctx,
       );
       expect(result.clearState).toBe(true);
-      expect(result.reply[0]).toBe(workerMenuMessage());
+      expect(result.reply[0]).toBe(welcomePlatformMessage());
     });
 
     it('exits on "Menu" (capitalized)', async () => {

@@ -21,11 +21,11 @@ export function welcomeActivationMessage(
 
   const creditLine =
     creditAmount > 0
-      ? `Vous avez reçu un crédit de bienvenue de *${creditAmount} FCFA* dans votre portefeuille 🎁\n\n`
+      ? `Vous avez reçu un crédit de bienvenue de *${creditAmount} FCFA* dans votre portefeuille 🎁`
       : '';
 
   const balanceLine =
-    creditAmount > 0 ? `Solde actuel : *${walletBalance} FCFA*\n\n` : '';
+    creditAmount > 0 ? `Solde actuel : *${walletBalance} FCFA*` : '';
 
   return (
     `Bienvenue sur la plateforme, ${firstName} ! 🎉\n` +
@@ -35,8 +35,8 @@ export function welcomeActivationMessage(
     creditLine +
     `Vous pouvez maintenant :\n` +
     actions.join('\n') +
-    `\n\n` +
+    `` +
     balanceLine +
-    `Tapez *MENU* pour commencer.`
+    ``
   );
 }

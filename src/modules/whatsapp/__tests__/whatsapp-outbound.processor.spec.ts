@@ -331,7 +331,9 @@ describe('WhatsAppOutboundProcessor', () => {
         },
       });
 
-      expect(mockLoginLink.appendTo).toHaveBeenCalledWith('p1', 'offer-9');
+      // '&' because the CTA is `…/login?redirect=/missions/{{2}}`: a '?' would
+      // bury the code inside the redirect value.
+      expect(mockLoginLink.appendTo).toHaveBeenCalledWith('p1', 'offer-9', '&');
       expect(mockWhatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+242001',
         statusCheck,

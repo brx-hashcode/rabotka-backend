@@ -25,7 +25,7 @@ export function accountActivatedMessage(
     '',
     ...actions.map((a) => `• ${a}`),
     '',
-    'Tapez *Menu* pour voir toutes les options disponibles.',
+    '',
     '',
     'Bienvenue dans la communauté Rabotka 🚀',
   ].join('\n');

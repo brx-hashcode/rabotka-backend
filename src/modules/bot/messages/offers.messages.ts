@@ -78,7 +78,7 @@ export function formatOfferList(
   if (pageInfo?.hasNext) {
     lines.push('3- *Offre suivante*');
   }
-  lines.push('4- *Retour au menu*', '', '*Tapez le numéro correspondant.*');
+  lines.push('4- *Quitter*', '', '*Tapez le numéro correspondant.*');
 
   return lines.join('\n');
 }
@@ -118,7 +118,7 @@ export function formatOfferListCompact(
   const actions: string[] = [];
   if (page > 0) actions.push('P- Page précédente');
   if (hasMore) actions.push(`${nextIdx} - Voir plus`);
-  actions.push('M- Menu principal');
+  actions.push('M- Quitter');
   lines.push(...actions, '', 'Tapez un numéro pour sélectionner une offre.');
   return lines.join('\n');
 }
@@ -197,7 +197,7 @@ export function formatRecommendedList(
   const actions: string[] = [];
   if (page > 0) actions.push('P- Page précédente');
   if (page < totalPages - 1) actions.push('S- Page suivante');
-  actions.push('M- Menu principal');
+  actions.push('M- Quitter');
   lines.push(...actions, '', 'Tapez un numéro pour voir le détail.');
   return lines.join('\n');
 }
@@ -223,7 +223,7 @@ export function formatOfferDetailWithActions(offer: OfferListItem): string {
     '1- Postuler',
     '2- Voir description complète',
     '3- Retour à la liste des offres',
-    '4- Menu',
+    '4- Quitter',
     '',
     'Tapez le numéro correspondant.',
   ].join('\n');
@@ -236,13 +236,11 @@ export function formatOfferPublishedSuccess(offerId: string): string {
     '',
     `*Offre ID*: #${offerId.slice(0, 8)}`,
     "Vous recevrez une notification dès qu'un worker postulera.",
-    '',
-    'Tapez *Menu* pour revenir au menu principal.',
   ].join('\n');
 }
 
 export function formatNoOffersAvailable(): string {
-  return 'Aucune offre disponible pour le moment. Tapez *Menu* pour revenir.';
+  return 'Aucune offre disponible pour le moment.';
 }
 
 export function jobOfferToOfferListItem(offer: {
