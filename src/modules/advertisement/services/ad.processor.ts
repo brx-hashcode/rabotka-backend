@@ -9,10 +9,11 @@ import {
 } from './ad-notification.service';
 import { AdReportService } from './ad-report.service';
 import { NotificationService } from '../../notification/notification.service';
+import { AdInboxGateway } from '../gateways/ad-inbox.gateway';
 
 export type AdJobData = { type: 'lifecycle' } | { type: 'dispatch' };
 
-type ConcreteChannel = 'EMAIL' | 'WHATSAPP';
+type ConcreteChannel = 'EMAIL' | 'WHATSAPP' | 'IN_APP';
 
 type AdWithBundle = Awaited<
   ReturnType<PrismaService['advertisement']['findFirst']>
@@ -36,6 +37,7 @@ export class AdProcessor {
     private readonly adLinkTracking: AdLinkTrackingService,
     private readonly adReport: AdReportService,
     private readonly notificationService: NotificationService,
+    private readonly adInboxGateway: AdInboxGateway,
   ) {}
 
   async process(job: { id?: string; data: AdJobData }): Promise<void> {
@@ -231,7 +233,10 @@ export class AdProcessor {
     for (const c of channels) {
       if (c === DeliveryChannel.EMAIL) set.add('EMAIL');
       else if (c === DeliveryChannel.WHATSAPP) set.add('WHATSAPP');
+      else if (c === DeliveryChannel.IN_APP) set.add('IN_APP');
       else if (c === DeliveryChannel.ALL) {
+        // ALL predates the in-app channel and stays email + WhatsApp, so
+        // existing bundles don't silently start pushing popups. IN_APP is opt-in.
         set.add('EMAIL');
         set.add('WHATSAPP');
       }
@@ -249,6 +254,9 @@ export class AdProcessor {
   ): ConcreteChannel[] {
     return allowed.filter((c) => {
       if (c === 'EMAIL') return Boolean(profile.email);
+      // In-app needs no contact details — the ad waits in the profile's inbox
+      // until they next open the client.
+      if (c === 'IN_APP') return true;
       // WhatsApp requires both a phone and a connected WhatsApp session
       return Boolean(profile.phone) && profile.whatsapp_connected;
     });
@@ -279,6 +287,27 @@ export class AdProcessor {
         channel,
         payload: basePayload,
       });
+
+      // In-app has no carrier: the delivery row itself is the inbox entry, so
+      // it counts as sent whether or not the profile is currently connected.
+      // Online clients get it pushed; the rest read it from GET /ads/inbox.
+      if (channel === 'IN_APP') {
+        await this.prisma.adDeliveryLog.update({
+          where: { id: deliveryLog.id },
+          data: { status: AdDeliveryStatus.SENT, sent_at: new Date() },
+        });
+        this.adInboxGateway.emitNewAd(profileId, {
+          deliveryId: deliveryLog.id,
+          advertisementId,
+          title: payload.title,
+          description: payload.description ?? '',
+          imageUrl: payload.imageUrl ?? null,
+          callToAction: payload.callToAction ?? null,
+          ctaUrl: payload.ctaUrl ?? null,
+          tags: payload.tags ?? [],
+        });
+        return 'sent';
+      }
 
       const ok = await this.adNotificationService.sendOnChannel(
         recipient,
