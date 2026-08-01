@@ -7,6 +7,7 @@ import { AdLinkTrackingService } from '../ad-link-tracking.service';
 import { AdNotificationService } from '../ad-notification.service';
 import { AdReportService } from '../ad-report.service';
 import { NotificationService } from '../../../notification/notification.service';
+import { AdInboxGateway } from '../../gateways/ad-inbox.gateway';
 
 const makeAd = (overrides: Record<string, unknown> = {}) => ({
   id: 'ad-1',
@@ -46,6 +47,7 @@ describe('AdProcessor', () => {
   let adNotificationService: jest.Mocked<AdNotificationService>;
   let adReport: any;
   let notificationService: any;
+  let adInboxGateway: jest.Mocked<AdInboxGateway>;
 
   beforeEach(async () => {
     const mockPrismaService = {
@@ -100,6 +102,10 @@ describe('AdProcessor', () => {
               .mockResolvedValue(undefined),
           },
         },
+        {
+          provide: AdInboxGateway,
+          useValue: { emitNewAd: jest.fn() },
+        },
       ],
     }).compile();
 
@@ -110,6 +116,7 @@ describe('AdProcessor', () => {
     adNotificationService = module.get(AdNotificationService);
     adReport = module.get(AdReportService);
     notificationService = module.get(NotificationService);
+    adInboxGateway = module.get(AdInboxGateway);
   });
 
   describe('process()', () => {
@@ -359,6 +366,84 @@ describe('AdProcessor', () => {
         expect.anything(),
         'WHATSAPP',
       );
+    });
+
+    it('dispatches via IN_APP without contacting a carrier', async () => {
+      prisma.advertisement.findMany.mockResolvedValue([
+        makeAd({
+          bundle: {
+            allowed_channels: [DeliveryChannel.IN_APP],
+            max_reach: 10,
+            max_frequency_per_week: 3,
+            target_audience: 'ALL',
+          },
+        }),
+      ]);
+      prisma.adDeliveryLog.count.mockResolvedValue(0);
+      prisma.$queryRaw.mockResolvedValue([]);
+      adTargeting.resolveRecipients.mockResolvedValue([makeProfile()]);
+
+      await service.process({ data: { type: 'dispatch' } });
+
+      expect(adNotificationService.sendOnChannel).not.toHaveBeenCalled();
+      expect(prisma.adDeliveryLog.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ status: AdDeliveryStatus.SENT }),
+        }),
+      );
+      expect(adInboxGateway.emitNewAd).toHaveBeenCalledWith(
+        'profile-1',
+        expect.objectContaining({
+          deliveryId: 'dl-1',
+          advertisementId: 'ad-1',
+          title: 'Test Ad',
+        }),
+      );
+    });
+
+    it('dispatches IN_APP to a profile with no email and no whatsapp', async () => {
+      prisma.advertisement.findMany.mockResolvedValue([
+        makeAd({
+          bundle: {
+            allowed_channels: [DeliveryChannel.IN_APP],
+            max_reach: 10,
+            max_frequency_per_week: 3,
+            target_audience: 'ALL',
+          },
+        }),
+      ]);
+      prisma.adDeliveryLog.count.mockResolvedValue(0);
+      prisma.$queryRaw.mockResolvedValue([]);
+      adTargeting.resolveRecipients.mockResolvedValue([
+        makeProfile({ email: '', phone: null, whatsapp_connected: false }),
+      ]);
+
+      await service.process({ data: { type: 'dispatch' } });
+
+      expect(prisma.adDeliveryLog.create).toHaveBeenCalled();
+      expect(adInboxGateway.emitNewAd).toHaveBeenCalled();
+    });
+
+    it('ALL does not include IN_APP — popups stay opt-in', async () => {
+      prisma.advertisement.findMany.mockResolvedValue([
+        makeAd({
+          bundle: {
+            allowed_channels: [DeliveryChannel.ALL],
+            max_reach: 10,
+            max_frequency_per_week: 3,
+            target_audience: 'ALL',
+          },
+        }),
+      ]);
+      prisma.adDeliveryLog.count.mockResolvedValue(0);
+      prisma.$queryRaw.mockResolvedValue([]);
+      adTargeting.resolveRecipients.mockResolvedValue([
+        makeProfile({ whatsapp_connected: true }),
+      ]);
+
+      await service.process({ data: { type: 'dispatch' } });
+
+      expect(adInboxGateway.emitNewAd).not.toHaveBeenCalled();
     });
 
     it('dispatches via ALL channels (EMAIL + WHATSAPP)', async () => {

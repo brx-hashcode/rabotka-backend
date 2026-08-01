@@ -3,6 +3,17 @@ import { carouselVariables, type CarouselCard } from './whatsapp-carousel';
 export interface WhatsAppTemplate<Args extends unknown[]> {
   contentSid: string;
   variables: (...args: Args) => Record<string, string>;
+  /**
+   * Index of the variable that fills the CTA button's URL suffix, when that
+   * link opens an authenticated page. The outbound processor appends a one-time
+   * login code to it so the WebView lands signed in
+   * (see `WhatsAppLoginLinkService`).
+   *
+   * Left unset for templates whose CTA needs no session (the public portfolio)
+   * and for those with no dynamic suffix at all — WhatsApp allows exactly one
+   * variable in a button URL and it must sit at the end.
+   */
+  urlSuffixVar?: string;
 }
 
 /**
@@ -124,6 +135,7 @@ export const WHATSAPP_TEMPLATES = {
 
   reminder24h: {
     contentSid: sid('TPL_REMINDER_24H_CTA', 'HX518e3f6bac5a1f337456cda963692474'),
+    urlSuffixVar: '9',
     variables: (p: {
       offerTitle: string;
       date: string;
@@ -167,6 +179,7 @@ export const WHATSAPP_TEMPLATES = {
       'TPL_JOB_RECOMMENDATION_CTA',
       'HXabc07b58525ee5d9c68c0049e31d9001',
     ),
+    urlSuffixVar: '6',
     variables: (p: {
       firstName: string;
       title: string;
@@ -215,6 +228,7 @@ export const WHATSAPP_TEMPLATES = {
       'TPL_NEW_APPLICATION_CTA',
       'HXe51191f9e1cbd68ad0ecacc419893634',
     ),
+    urlSuffixVar: '8',
     variables: (p: {
       offerTitle: string;
       workerName: string;
@@ -274,8 +288,10 @@ export const WHATSAPP_TEMPLATES = {
     }) => ({
       '1': p.employerName,
       '2': p.offerTitle,
-      // URL suffix: /applications/{{3}}/paiement, where the worker settles their
-      // share. The old template's "Continuer" reply reopened an in-chat prompt.
+      // /applications/{{3}}/paiement — the variable sits MID-URL, so it must
+      // not carry a `?s=` login code (it would land before "/paiement" and
+      // break the link). Hence no `urlSuffixVar` on this template.
+      // The old template's "Continuer" reply reopened an in-chat prompt.
       '3': p.applicationId,
     }),
   } satisfies WhatsAppTemplate<
@@ -373,6 +389,7 @@ export const WHATSAPP_TEMPLATES = {
 
   autoStarted: {
     contentSid: sid('TPL_AUTO_STARTED_CTA', 'HXf41bcce791ad5ac3351c0c6c9dc3e611'),
+    urlSuffixVar: '2',
     variables: (p: { offerTitle: string; jobOfferId: string }) => ({
       '1': p.offerTitle,
       // URL suffix for the CTA button.
@@ -384,6 +401,7 @@ export const WHATSAPP_TEMPLATES = {
 
   statusCheck: {
     contentSid: sid('TPL_STATUS_CHECK_CTA', 'HX53ac4969d31ecc682d3b3e1fd030563f'),
+    urlSuffixVar: '2',
     variables: (p: { jobTitle: string; jobOfferId: string }) => ({
       '1': p.jobTitle,
       // URL suffix (/missions/{{2}}). Replaces the snooze label: the employer
@@ -401,6 +419,7 @@ export const WHATSAPP_TEMPLATES = {
 
   offerExpiredEmployer: {
     contentSid: sid('TPL_OFFER_EXPIRED_EMPLOYER_CTA', 'HXa721971676e29a4fc129e785384f83d1'),
+    urlSuffixVar: '2',
     variables: (p: { offerTitle: string; jobOfferId: string }) => ({
       '1': p.offerTitle,
       // URL suffix for the CTA button.
@@ -417,6 +436,7 @@ export const WHATSAPP_TEMPLATES = {
 
   reminderStart: {
     contentSid: sid('TPL_REMINDER_START_CTA', 'HX2a2e2633f45b1fceb8164d08b0963ec8'),
+    urlSuffixVar: '6',
     variables: (p: {
       offerTitle: string;
       time: string;
@@ -475,3 +495,21 @@ export const WHATSAPP_TEMPLATES = {
 } as const;
 
 export type WhatsAppTemplateName = keyof typeof WHATSAPP_TEMPLATES;
+
+/**
+ * Which variable of a template fills its CTA button URL suffix, looked up by
+ * the SID actually being sent — content SIDs are env-overridable through
+ * `sid()`, so the map has to be built from the resolved values.
+ */
+const URL_SUFFIX_VAR_BY_SID: ReadonlyMap<string, string> = new Map(
+  Object.values(WHATSAPP_TEMPLATES)
+    .filter(
+      (template): template is typeof template & { urlSuffixVar: string } =>
+        'urlSuffixVar' in template && typeof template.urlSuffixVar === 'string',
+    )
+    .map((template) => [template.contentSid, template.urlSuffixVar]),
+);
+
+export function getUrlSuffixVar(contentSid: string): string | undefined {
+  return URL_SUFFIX_VAR_BY_SID.get(contentSid);
+}

@@ -7,6 +7,7 @@ import { WhatsAppInboundProcessor } from './whatsapp-inbound.processor';
 import { ConversationModule } from '../conversation/conversation.module';
 import { PrismaModule } from '../../common/services/prisma/prisma.module';
 import { WalletModule } from '../wallet/wallet.module';
+import { WhatsAppLoginLinkModule } from '../auth/whatsapp-login-link.module';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { WalletModule } from '../wallet/wallet.module';
     PrismaModule,
     ConfigModule,
     forwardRef(() => WalletModule),
+    WhatsAppLoginLinkModule,
   ],
   controllers: [WhatsAppController],
   providers: [

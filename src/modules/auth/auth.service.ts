@@ -13,6 +13,7 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'node:crypto';
 import Redis from 'ioredis';
+import { AccountStatus } from '@prisma/client';
 
 import { REDIS_KEY_PREFIX, REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
@@ -22,6 +23,7 @@ import { LogService } from '../log/log.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { sendOtpEmail } from '../mail/templates';
 import { WHATSAPP_TEMPLATES } from '../../common/constants/whatsapp-templates';
+import { WhatsAppLoginLinkService } from './whatsapp-login-link.service';
 import * as otplib from 'otplib';
 import * as QRCode from 'qrcode';
 
@@ -83,6 +85,7 @@ export class AuthService {
     private readonly whatsAppService: WhatsAppService,
     private readonly configService: ConfigService,
     private readonly logService: LogService,
+    private readonly whatsAppLoginLink: WhatsAppLoginLinkService,
   ) {}
 
   /**
@@ -228,6 +231,34 @@ export class AuthService {
     }
 
     return profile;
+  }
+
+  /**
+   * Exchanges a one-time code from a WhatsApp link for the ordinary profile
+   * session — same payload, same expiry, same `jti` revocation as OTP login.
+   * The code is consumed here, so a forwarded link only ever works once.
+   */
+  async loginWithWhatsAppCode(code: string): Promise<{ token: string; profileId: string }> {
+    const profileId = await this.whatsAppLoginLink.consume(code);
+
+    if (!profileId) {
+      throw new UnauthorizedException('Lien de connexion invalide ou expiré');
+    }
+
+    const profile = await this.prisma.profile.findUnique({
+      where: { id: profileId },
+      select: { id: true, status: true },
+    });
+
+    // Status is re-checked at consume time: the account may have been
+    // suspended in the hours between the message and the tap.
+    if (!profile || profile.status !== AccountStatus.ACTIVE) {
+      throw new UnauthorizedException('Compte indisponible');
+    }
+
+    const payload = { sub: profile.id, type: 'profile', jti: randomUUID() };
+
+    return { token: this.jwtService.sign(payload), profileId: profile.id };
   }
 
   async verifyOtp(
