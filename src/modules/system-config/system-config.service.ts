@@ -146,7 +146,11 @@ export class SystemConfigService implements OnModuleInit {
       await pipeline.exec();
     }
 
-    return cached.map((v, i) => v ?? entries[i].fallback ?? null);
+    // Map over `entries`, not `cached`: the result must always have one slot per
+    // requested key. Mapping the cache response instead means a short response
+    // silently drops trailing values, and the caller's destructuring turns them
+    // into undefined → NaN rather than falling back.
+    return entries.map((e, i) => cached[i] ?? e.fallback ?? null);
   }
 
   // Fee keys that must be positive integers — setting them to 0 or negative
@@ -159,6 +163,7 @@ export class SystemConfigService implements OnModuleInit {
     'fees.employer_late_cancel_score_deduction',
     'fees.billing_block_threshold',
     'fees.max_concurrent_applications',
+    'fees.max_daily_applications',
     'fees.contact_unlock_fee_employer',
     'fees.contact_unlock_fee_worker',
     'fees.contact_unlock_expiry_hours',
@@ -168,12 +173,31 @@ export class SystemConfigService implements OnModuleInit {
     'matching.max_notification_workers',
   ]);
 
+  /**
+   * Score thresholds. These are compared against relevance values that are
+   * normalized to [0,1], so anything outside that range is not "strict" — it
+   * silently empties every feed that uses it, with no error and no log. Guard it
+   * at write time.
+   */
+  private static readonly UNIT_INTERVAL_KEYS = new Set([
+    'matching.min_notification_score',
+    'matching.recommendation_min_score',
+  ]);
+
   async set(key: string, value: string, adminId?: string): Promise<void> {
     if (SystemConfigService.POSITIVE_INT_KEYS.has(key)) {
       const n = Number(value);
       if (!Number.isFinite(n) || n <= 0) {
         throw new BadRequestException(
           `La valeur de "${key}" doit être un entier strictement positif`,
+        );
+      }
+    }
+    if (SystemConfigService.UNIT_INTERVAL_KEYS.has(key)) {
+      const n = Number(value);
+      if (!Number.isFinite(n) || n < 0 || n > 1) {
+        throw new BadRequestException(
+          `La valeur de "${key}" doit être un nombre entre 0 et 1`,
         );
       }
     }
@@ -282,6 +306,7 @@ export class SystemConfigService implements OnModuleInit {
       empLateCancelDed,
       billingBlock,
       maxConcurrentApps,
+      maxDailyApps,
       completionReward,
       ratingDelta1,
       ratingDelta2,
@@ -295,7 +320,8 @@ export class SystemConfigService implements OnModuleInit {
       { key: 'fees.reliability_score_min', fallback: '50' },
       { key: 'fees.employer_late_cancel_score_deduction', fallback: '5' },
       { key: 'fees.billing_block_threshold', fallback: '2' },
-      { key: 'fees.max_concurrent_applications', fallback: '3' },
+      { key: 'fees.max_concurrent_applications', fallback: '10' },
+      { key: 'fees.max_daily_applications', fallback: '10' },
       { key: 'fees.completion_score_reward', fallback: '1' },
       { key: 'fees.rating_score_delta_1', fallback: '-4' },
       { key: 'fees.rating_score_delta_2', fallback: '-2' },
@@ -311,6 +337,7 @@ export class SystemConfigService implements OnModuleInit {
       employerLateCancelScoreDeduction: Number(empLateCancelDed),
       billingBlockThreshold: Number(billingBlock),
       maxConcurrentApplications: Number(maxConcurrentApps),
+      maxDailyApplications: Number(maxDailyApps),
       completionScoreReward: Number(completionReward),
       ratingScoreDeltas: {
         1: Number(ratingDelta1),
@@ -351,6 +378,12 @@ export class SystemConfigService implements OnModuleInit {
       '1000',
     );
     return Number(val);
+  }
+
+  async getRecommendationMinScore(): Promise<number> {
+    const val = await this.get('matching.recommendation_min_score', '0.3');
+    const n = Number(val);
+    return Number.isFinite(n) ? n : 0.3;
   }
 
   async getWelcomeCredits() {

@@ -78,10 +78,42 @@ describe('InterestClusterService', () => {
     expect(profile!.categories).toContain('Plomberie');
   });
 
-  it('reseedFromProfile re-seeds interest vector', async () => {
-    mockQdrantClient.retrieve.mockResolvedValueOnce([]);
-    await service.reseedFromProfile('user-1');
+  it('ensureSeeded seeds when no vector exists yet', async () => {
+    mockQdrantClient.retrieve.mockResolvedValue([]);
+    await service.ensureSeeded('user-1');
     expect(mockQdrant.upsertDense).toHaveBeenCalled();
+  });
+
+  it('ensureSeeded does NOT overwrite a vector that has learned signals', async () => {
+    // Regression: this ran from the KYC-verified hook and reset total_signals to
+    // 0, so getting verified erased everything the user had taught the system.
+    mockQdrantClient.retrieve.mockResolvedValue([
+      {
+        id: 'p1',
+        vector: Array.from({ length: 384 }, () => 0.1),
+        payload: { user_id: 'user-1', total_signals: 7 },
+      },
+    ]);
+
+    await service.ensureSeeded('user-1');
+
+    expect(mockQdrant.upsertDense).not.toHaveBeenCalled();
+  });
+
+  it('forceReseedFromProfile preserves the learned signal count', async () => {
+    mockQdrantClient.retrieve.mockResolvedValue([
+      {
+        id: 'p1',
+        vector: Array.from({ length: 384 }, () => 0.1),
+        payload: { user_id: 'user-1', total_signals: 7 },
+      },
+    ]);
+
+    await service.forceReseedFromProfile('user-1');
+
+    expect(mockQdrant.upsertDense).toHaveBeenCalled();
+    const payload = mockQdrant.upsertDense.mock.calls.at(-1)?.[3];
+    expect(payload).toMatchObject({ total_signals: 0 });
   });
 
   it('applySignal creates new point when none exists (cold start)', async () => {

@@ -116,6 +116,15 @@ export class AdLinkTrackingService {
     return tracked.original_url;
   }
 
+  /**
+   * Public redirect URL for an already-created tracked link. In-app deliveries
+   * are read back long after dispatch, so the popup rebuilds the CTA from the
+   * stored hash instead of keeping a rendered copy of the payload.
+   */
+  buildTrackedUrl(hash: string): string {
+    return `${this.getTrackingBaseUrl()}/${hash}`;
+  }
+
   private extractUrls(value: string): string[] {
     const matches = value.match(URL_REGEX) ?? [];
     const unique = Array.from(new Set(matches));

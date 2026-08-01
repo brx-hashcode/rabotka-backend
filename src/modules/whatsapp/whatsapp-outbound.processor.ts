@@ -6,6 +6,8 @@ import {
   WHATSAPP_OUTBOUND_QUEUE,
   WHATSAPP_OUTBOUND_DLQ,
 } from '../../common/services/queue/queue.module';
+import { getUrlSuffixVar } from '../../common/constants/whatsapp-templates';
+import { WhatsAppLoginLinkService } from '../auth/whatsapp-login-link.service';
 
 // Twilio's hard limit on a WhatsApp body is 1600 chars. We chunk well below
 // that to leave room for any "(1/N)" prefix and to stay safe across UCS-2
@@ -61,7 +63,10 @@ export type WhatsAppOutboundJobData = {
 export class WhatsAppOutboundProcessor {
   private readonly logger = new Logger(WhatsAppOutboundProcessor.name);
 
-  constructor(private readonly whatsApp: WhatsAppService) {
+  constructor(
+    private readonly whatsApp: WhatsAppService,
+    private readonly loginLink: WhatsAppLoginLinkService,
+  ) {
     this.logger.debug(
       `WhatsAppOutboundProcessor constructed, whatsApp=${whatsApp?.constructor?.name ?? typeof whatsApp}`,
     );
@@ -192,13 +197,40 @@ export class WhatsAppOutboundProcessor {
     }
   }
 
+  /**
+   * Appends a one-time login code to the CTA button's URL suffix, so tapping it
+   * opens the WebView already signed in instead of on the OTP screen. Every
+   * content-template send funnels through here, which is why the templates
+   * declare `urlSuffixVar` rather than each of the ~15 call sites doing this.
+   *
+   * Returns the variables untouched whenever anything is missing or fails — a
+   * missing login code costs the user an OTP, a thrown error costs them the
+   * notification entirely.
+   */
+  private async withLoginCode(
+    contentSid: string,
+    variables: Record<string, string>,
+    profileId?: string,
+  ): Promise<Record<string, string>> {
+    const suffixVar = getUrlSuffixVar(contentSid);
+    if (!profileId || !suffixVar) return variables;
+
+    const suffix = variables[suffixVar];
+    if (!suffix) return variables;
+
+    const withCode = await this.loginLink.appendTo(profileId, suffix);
+    if (withCode === suffix) return variables;
+
+    return { ...variables, [suffixVar]: withCode };
+  }
+
   private async processTemplate(
     data: Extract<WhatsAppOutboundJobData, { type: 'template' }>,
   ): Promise<void> {
     const sent = await this.whatsApp.sendTemplateMessage(
       data.phone,
       data.contentSid,
-      data.contentVariables,
+      await this.withLoginCode(data.contentSid, data.contentVariables, data.profileId),
     );
     if (!sent) {
       throw new Error(

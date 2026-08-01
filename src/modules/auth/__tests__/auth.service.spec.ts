@@ -12,6 +12,7 @@ import { MailService } from '../../mail/mail.service';
 import { LayoutService } from '../../mail/layout.service';
 import { WhatsAppService } from '../../whatsapp/whatsapp.service';
 import { LogService } from '../../log/log.service';
+import { WhatsAppLoginLinkService } from '../whatsapp-login-link.service';
 import { REDIS_CONNECTION } from '../../../common/services/redis/redis.constants';
 import { ConfigService } from '@nestjs/config';
 
@@ -45,6 +46,7 @@ describe('AuthService', () => {
   let jwtService: jest.Mocked<JwtService>;
   let mailService: jest.Mocked<MailService>;
   let whatsAppService: jest.Mocked<WhatsAppService>;
+  let whatsAppLoginLink: { consume: jest.Mock; mint: jest.Mock; appendTo: jest.Mock };
   let redis: {
     get: jest.Mock;
     set: jest.Mock;
@@ -106,6 +108,16 @@ describe('AuthService', () => {
           provide: LogService,
           useValue: { create: jest.fn().mockResolvedValue(undefined) },
         },
+        {
+          provide: WhatsAppLoginLinkService,
+          useValue: {
+            mint: jest.fn().mockResolvedValue('code-1'),
+            consume: jest.fn().mockResolvedValue(null),
+            appendTo: jest
+              .fn()
+              .mockImplementation((_id: string, target: string) => target),
+          },
+        },
       ],
     }).compile();
 
@@ -115,6 +127,7 @@ describe('AuthService', () => {
     jwtService = module.get(JwtService);
     mailService = module.get(MailService);
     whatsAppService = module.get(WhatsAppService);
+    whatsAppLoginLink = module.get(WhatsAppLoginLinkService);
   });
 
   describe('sendOtp()', () => {
@@ -1195,6 +1208,46 @@ describe('AuthService', () => {
       const result = await service.consumeQrSession('s-1', 'nonce-1');
       expect(result.totpRequired).toBe(true);
       expect(result.pendingToken).toBe('pt-1');
+    });
+  });
+
+  describe('loginWithWhatsAppCode()', () => {
+    it('consumes the code and issues the same session as OTP login', async () => {
+      whatsAppLoginLink.consume.mockResolvedValue(PROFILE_ID);
+      (prisma.profile.findUnique as jest.Mock).mockResolvedValue({
+        id: PROFILE_ID,
+        status: 'ACTIVE',
+      });
+
+      const result = await service.loginWithWhatsAppCode('code-1');
+
+      expect(whatsAppLoginLink.consume).toHaveBeenCalledWith('code-1');
+      expect(result).toEqual({ token: 'jwt-token-abc', profileId: PROFILE_ID });
+      expect(jwtService.sign).toHaveBeenCalledWith(
+        expect.objectContaining({ sub: PROFILE_ID, type: 'profile' }),
+      );
+    });
+
+    it('rejects a code that was already used or expired', async () => {
+      whatsAppLoginLink.consume.mockResolvedValue(null);
+
+      await expect(service.loginWithWhatsAppCode('stale')).rejects.toThrow(
+        UnauthorizedException,
+      );
+      expect(jwtService.sign).not.toHaveBeenCalled();
+    });
+
+    it('rejects when the account was suspended after the link was sent', async () => {
+      whatsAppLoginLink.consume.mockResolvedValue(PROFILE_ID);
+      (prisma.profile.findUnique as jest.Mock).mockResolvedValue({
+        id: PROFILE_ID,
+        status: 'SUSPENDED',
+      });
+
+      await expect(service.loginWithWhatsAppCode('code-1')).rejects.toThrow(
+        UnauthorizedException,
+      );
+      expect(jwtService.sign).not.toHaveBeenCalled();
     });
   });
 });

@@ -122,9 +122,12 @@ describe('runAcceptRefuseCandidateFlow()', () => {
         APP_ID,
         EMPLOYER_ID,
       );
+      // applicationService.accept() owns the worker notification now, so both
+      // the web and the bot produce exactly one. The flow firing it too would
+      // send the worker a duplicate.
       expect(
         ctx.notificationService.sendApplicationAcceptedToWorker,
-      ).toHaveBeenCalledWith(APP_ID);
+      ).not.toHaveBeenCalled();
     });
 
     it('accepts on "accepter" input', async () => {

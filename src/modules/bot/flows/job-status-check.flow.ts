@@ -103,9 +103,6 @@ export async function runJobStatusCheckFlow(
         safeApplicationId,
         profile.id,
       );
-      await ctx.notificationService
-        .sendJobCompletedToWorker(safeApplicationId)
-        .catch(() => {});
       return {
         reply: [
           [

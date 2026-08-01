@@ -1,4 +1,8 @@
 import {
+  AdminCacheService,
+  ADMIN_LIST_TTL_SECONDS,
+} from '../../common/services/cache/admin-cache.service';
+import {
   Injectable,
   NotFoundException,
   BadRequestException,
@@ -47,6 +51,7 @@ export class PenaltyService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly walletService: WalletService,
+    private readonly cache: AdminCacheService,
   ) {}
 
   async createPenaltyByAdmin(params: {
@@ -174,6 +179,7 @@ export class PenaltyService {
       where: { id },
       data: { deleted_at: new Date() },
     });
+    await this.cache.invalidate('penalties');
 
     const unpaidCount = await this.prisma.penalty.count({
       where: { profile_id: penalty.profile_id, paid_at: null },
@@ -204,6 +210,7 @@ export class PenaltyService {
       where: { id: { in: affected.map((p) => p.id) } },
       data: { deleted_at: new Date() },
     });
+    await this.cache.invalidate('penalties');
 
     // Recompute billing status for each affected profile.
     const profileIds = [...new Set(affected.map((p) => p.profile_id))];
@@ -296,6 +303,20 @@ export class PenaltyService {
   }
 
   async getPenaltiesForAdmin(params: {
+    page: number;
+    limit: number;
+    q?: string;
+    paymentStatus?: string[];
+    deleted?: boolean;
+  }): Promise<AdminPenaltiesListResponse> {
+    return this.cache.wrap(
+      this.cache.listKey('penalties', params),
+      ADMIN_LIST_TTL_SECONDS,
+      () => this.loadGetPenaltiesForAdmin(params),
+    );
+  }
+
+  private async loadGetPenaltiesForAdmin(params: {
     page: number;
     limit: number;
     q?: string;

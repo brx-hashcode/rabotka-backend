@@ -6,6 +6,7 @@ import {
 import { InvoiceService } from '../invoice.service';
 import { ProfileAuthGuard } from '../../auth/guards/profile-auth.guard';
 import { AdminAuthGuard } from '../../auth/guards/admin-auth.guard';
+import { RolesGuard } from '../../auth/guards/roles.guard';
 
 const mockInvoiceService = {
   listForProfile: jest.fn().mockResolvedValue([{ id: 'inv-1' }]),
@@ -68,6 +69,8 @@ describe('AdminInvoiceController', () => {
       providers: [{ provide: InvoiceService, useValue: mockInvoiceService }],
     })
       .overrideGuard(AdminAuthGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(RolesGuard)
       .useValue({ canActivate: () => true })
       .compile();
     controller = module.get<AdminInvoiceController>(AdminInvoiceController);

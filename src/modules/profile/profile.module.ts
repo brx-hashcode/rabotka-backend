@@ -1,3 +1,4 @@
+import { AdminArchiveModule } from '../admin-archive/admin-archive.module';
 import { Module } from '@nestjs/common';
 import { ProfileController } from './profile.controller';
 import { AdminProfileController } from './admin-profile.controller';
@@ -18,6 +19,7 @@ import { PortfolioModule } from '../portfolio/portfolio.module';
 
 @Module({
   imports: [
+    AdminArchiveModule,
     FileModule,
     MailModule,
     AuthModule,

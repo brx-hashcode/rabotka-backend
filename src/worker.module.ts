@@ -1,3 +1,4 @@
+import { AdminCacheService } from './common/services/cache/admin-cache.service';
 import { DynamicModule, Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MailerModule } from '@nestjs-modules/mailer';
@@ -12,6 +13,7 @@ import { ReminderProcessor } from './modules/bot/reminder/reminder.processor';
 import { PrismaService } from './common/services/prisma/prisma.service';
 import { QueueService } from './common/services/queue/queue.service';
 import { REDIS_CONNECTION } from './common/services/redis/redis.constants';
+import { WhatsAppLoginLinkService } from './modules/auth/whatsapp-login-link.service';
 import type Redis from 'ioredis';
 import { PaymentProcessor } from './modules/payments/payment.processor';
 import { WhatsAppOutboundProcessor } from './modules/whatsapp/whatsapp-outbound.processor';
@@ -96,6 +98,8 @@ export class WorkerModule {
             prisma,
             null as unknown as SystemConfigService,
             null as unknown as InvoiceService,
+            // Admin list caching is never exercised in the worker process.
+            null as unknown as AdminCacheService,
           ),
         inject: [PrismaService],
       },
@@ -185,11 +189,14 @@ export class WorkerModule {
         ...reminderProviders,
         penaltyProvider,
         PaymentProcessor,
+        WhatsAppLoginLinkService,
         {
           provide: WhatsAppOutboundProcessor,
-          useFactory: (whatsApp: WhatsAppService) =>
-            new WhatsAppOutboundProcessor(whatsApp),
-          inject: [WhatsAppService],
+          useFactory: (
+            whatsApp: WhatsAppService,
+            loginLink: WhatsAppLoginLinkService,
+          ) => new WhatsAppOutboundProcessor(whatsApp, loginLink),
+          inject: [WhatsAppService, WhatsAppLoginLinkService],
         },
       ],
     };

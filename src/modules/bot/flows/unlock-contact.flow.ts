@@ -12,8 +12,11 @@ import {
   getMobileMoneyInitialPayload,
   runMobileMoneySubFlow,
 } from '../utils/mobile-money-subflow';
-import { PaymentRequestType } from '@prisma/client';
+import { PaymentRequestType, VerificationStatus } from '@prisma/client';
 import type { IPaymentUrlService } from '../types/payment-url.types';
+
+const KYC_UNLOCK_BLOCKED_MESSAGE =
+  "Votre profil est en cours de vérification. Vous pourrez débloquer des contacts dès qu'elle sera terminée — vous recevrez une notification.";
 
 export type UnlockContactContext = {
   contactUnlockService: ContactUnlockService;
@@ -133,6 +136,20 @@ async function handleWalletCredit(args: {
   ctx: UnlockContactContext;
 }): Promise<FlowResult> {
   const { profile, attemptId, otherName, expiresAt, ctx } = args;
+
+  // Checked here rather than inside payUnlock(): that method is also the
+  // mobile-money confirmation callback, where the user has already been
+  // charged and refusing would take their money without unlocking anything.
+  if (
+    profile.verification_status &&
+    profile.verification_status !== VerificationStatus.VERIFIED
+  ) {
+    return {
+      reply: [KYC_UNLOCK_BLOCKED_MESSAGE],
+      clearState: true,
+    };
+  }
+
   try {
     const result = await ctx.contactUnlockService.payUnlock(
       attemptId,

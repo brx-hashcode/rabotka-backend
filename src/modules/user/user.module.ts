@@ -1,3 +1,4 @@
+import { AdminArchiveModule } from '../admin-archive/admin-archive.module';
 import { Module } from '@nestjs/common';
 import { UserController } from './user.controller';
 import { UserService } from './user.service';
@@ -7,7 +8,8 @@ import { NotificationModule } from '../notification/notification.module';
 import { LogModule } from '../log/log.module';
 
 @Module({
-  imports: [AuthModule, PrismaModule, NotificationModule, LogModule],
+  imports: [
+    AdminArchiveModule,AuthModule, PrismaModule, NotificationModule, LogModule],
   controllers: [UserController],
   providers: [UserService],
   exports: [UserService],

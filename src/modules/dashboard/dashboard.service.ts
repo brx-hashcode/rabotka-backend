@@ -1,3 +1,7 @@
+import {
+  AdminCacheService,
+  ADMIN_DASHBOARD_TTL_SECONDS,
+} from '../../common/services/cache/admin-cache.service';
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { TimeRange } from './dto/job-activity-query.dto';
@@ -27,9 +31,20 @@ const TIME_RANGE_DAYS: Record<TimeRange, number> = {
 
 @Injectable()
 export class DashboardService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly cache: AdminCacheService,
+  ) {}
 
   async getMetrics(): Promise<DashboardMetrics> {
+    return this.cache.wrap(
+      this.cache.dashboardKey('metrics'),
+      ADMIN_DASHBOARD_TTL_SECONDS,
+      () => this.loadMetrics(),
+    );
+  }
+
+  private async loadMetrics(): Promise<DashboardMetrics> {
     const now = new Date();
     const thirtyDaysAgo = new Date(now);
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
@@ -112,6 +127,16 @@ export class DashboardService {
   async getJobStatusDistribution(
     range: TimeRange,
   ): Promise<{ status: string; count: number }[]> {
+    return this.cache.wrap(
+      this.cache.dashboardKey('job-status', { range }),
+      ADMIN_DASHBOARD_TTL_SECONDS,
+      () => this.loadJobStatusDistribution(range),
+    );
+  }
+
+  private async loadJobStatusDistribution(
+    range: TimeRange,
+  ): Promise<{ status: string; count: number }[]> {
     const days = TIME_RANGE_DAYS[range];
     const startDate = new Date();
     startDate.setHours(0, 0, 0, 0);
@@ -133,6 +158,16 @@ export class DashboardService {
   }
 
   async getJobActivity(range: TimeRange): Promise<JobActivityDataPoint[]> {
+    return this.cache.wrap(
+      this.cache.dashboardKey('job-activity', { range }),
+      ADMIN_DASHBOARD_TTL_SECONDS,
+      () => this.loadJobActivity(range),
+    );
+  }
+
+  private async loadJobActivity(
+    range: TimeRange,
+  ): Promise<JobActivityDataPoint[]> {
     const days = TIME_RANGE_DAYS[range];
     const startDate = new Date();
     startDate.setHours(0, 0, 0, 0);

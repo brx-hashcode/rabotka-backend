@@ -21,10 +21,13 @@ import { WalletService } from '../../../wallet/wallet.service';
 import { MatchingService } from '../../../matching/matching.service';
 import { InterestSignalService } from '../../../interest-graph/interest-signal.service';
 import { InterestRecommendationService } from '../../../interest-graph/interest-recommendation.service';
+import { EngineRolloutService } from '../../../recommendation-engine/engine-rollout.service';
+import { RecommendationEngineService } from '../../../recommendation-engine/recommendation-engine.service';
 import { InvoiceService } from '../../../invoice/invoice.service';
 import { PortfolioService } from '../../../portfolio/portfolio.service';
 import { QueueService } from '../../../../common/services/queue/queue.service';
 import { ConfigService } from '@nestjs/config';
+import { WHATSAPP_TEMPLATES } from '../../../../common/constants/whatsapp-templates';
 
 const PROFILE_ID = 'profile-uuid-1';
 const PHONE = '+242000000';
@@ -147,6 +150,7 @@ function makeDeps() {
         .fn()
         .mockResolvedValue({ employerFeeFcfa: 500, workerFeeFcfa: 250 }),
       getFees: jest.fn().mockResolvedValue({ cancellationThresholdHours: 12 }),
+      getRecommendationMinScore: jest.fn().mockResolvedValue(0.3),
     },
     walletService2: {
       grantWelcomeCredit: jest.fn().mockResolvedValue(500),
@@ -226,6 +230,17 @@ describe('BotOrchestratorService', () => {
         {
           provide: InterestRecommendationService,
           useValue: deps.interestRecommendationService,
+        },
+        {
+          // Legacy by default — the v2 ranker is behind a rollout flag.
+          provide: EngineRolloutService,
+          useValue: { versionFor: jest.fn().mockResolvedValue('legacy') },
+        },
+        {
+          provide: RecommendationEngineService,
+          useValue: {
+            recommendJobsForWorker: jest.fn().mockResolvedValue([]),
+          },
         },
         {
           provide: InvoiceService,
@@ -677,43 +692,50 @@ describe('BotOrchestratorService', () => {
       verification_status: 'VERIFIED',
     };
 
-    it('returns KYC pending message when PENDING_ACTIVATION and verification_status is PENDING', async () => {
+    it('answers any input with the KYC-pending template while under review', async () => {
+      // One template with a "Gérer mon profil" button replaces the old typed
+      // 1/2 menu — whose options each only returned a webview template anyway.
+      for (const input of ['menu', 'start', 'bonjour', '1', '2', '7']) {
+        deps.prisma.profile.findUnique.mockResolvedValue({
+          ...pendingProfile,
+          verification_status: 'PENDING',
+        });
+        const result = await service.handle(PROFILE_ID, PHONE, input);
+        expect(result[0]).toContain(
+          `[TPL:${WHATSAPP_TEMPLATES.kycPendingMenu.contentSid}]`,
+        );
+      }
+      expect(deps.prisma.profile.update).not.toHaveBeenCalled();
+    });
+
+    it('no longer asks the user to reply with a number', async () => {
       deps.prisma.profile.findUnique.mockResolvedValue({
         ...pendingProfile,
         verification_status: 'PENDING',
       });
       const result = await service.handle(PROFILE_ID, PHONE, 'menu');
-      expect(result[0]).toContain('en cours de vérification');
-      expect(deps.prisma.profile.update).not.toHaveBeenCalled();
+      expect(result[0]).not.toContain('1- Mon profil');
+      expect(result[0]).not.toContain('Répondez avec le numéro');
     });
 
-    it('offers the restricted profile/claim menu while KYC is under review', async () => {
+    it('still honours an explicitly typed "profil" / "reclamation"', async () => {
       deps.prisma.profile.findUnique.mockResolvedValue({
         ...pendingProfile,
         verification_status: 'PENDING',
       });
-      const result = await service.handle(PROFILE_ID, PHONE, 'menu');
-      expect(result[0]).toContain('1- Mon profil');
-      expect(result[0]).toContain('2- Créer une réclamation');
-    });
+      const profile = await service.handle(PROFILE_ID, PHONE, 'profil');
+      expect(profile[0]).toContain(
+        `[TPL:${WHATSAPP_TEMPLATES.viewProfile.contentSid}]`,
+      );
 
-    it('serves the profile template on "1" while KYC is under review', async () => {
       deps.prisma.profile.findUnique.mockResolvedValue({
         ...pendingProfile,
         verification_status: 'PENDING',
       });
-      const result = await service.handle(PROFILE_ID, PHONE, '1');
-      expect(result[0]).toContain('[TPL:HX8ab587d99e769edaded28d5dd8247af5]');
-      expect(deps.prisma.profile.update).not.toHaveBeenCalled();
-    });
-
-    it('serves the claim template on "2" while KYC is under review', async () => {
-      deps.prisma.profile.findUnique.mockResolvedValue({
-        ...pendingProfile,
-        verification_status: 'PENDING',
-      });
-      const result = await service.handle(PROFILE_ID, PHONE, '2');
-      expect(result[0]).toContain('[TPL:HX9d9725488bc9dc2c6e4340dc5a000ca1]');
+      const claim = await service.handle(PROFILE_ID, PHONE, 'reclamation');
+      expect(claim[0]).toContain(
+        `[TPL:${WHATSAPP_TEMPLATES.createClaim.contentSid}]`,
+      );
       expect(deps.prisma.profile.update).not.toHaveBeenCalled();
     });
 

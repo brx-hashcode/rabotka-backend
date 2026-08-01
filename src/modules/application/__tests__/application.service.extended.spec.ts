@@ -1,3 +1,4 @@
+import { AdminCacheService } from '../../../common/services/cache/admin-cache.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import {
   BadRequestException,
@@ -12,6 +13,7 @@ import { ContactUnlockService } from '../../contact-unlock/contact-unlock.servic
 import { ContractService } from '../../contract/contract.service';
 import { SystemConfigService } from '../../system-config/system-config.service';
 import { MatchingService } from '../../matching/matching.service';
+import { InteractionEventService } from '../../recommendation-engine/interaction-event.service';
 import { ApplicationStatus, JobOfferStatus, PaymentFlow } from '@prisma/client';
 
 const JOB_OFFER_ID = 'offer-uuid-1';
@@ -109,6 +111,17 @@ describe('ApplicationService (extended)', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        {
+          // Pass-through cache: the loader always runs, so these specs keep
+          // exercising the real queries rather than a cached value.
+          provide: AdminCacheService,
+          useValue: {
+            wrap: (_k: string, _t: number, loader: () => unknown) => loader(),
+            listKey: (e: string) => e,
+            dashboardKey: (e: string) => e,
+            invalidate: jest.fn(),
+          },
+        },
         ApplicationService,
         { provide: PrismaService, useValue: mockPrismaService },
         {
@@ -118,8 +131,6 @@ describe('ApplicationService (extended)', () => {
             sendApplicationAcceptedToWorker: jest.fn(),
             sendApplicationRejectedToWorker: jest.fn(),
             sendCancellationToEmployer: jest.fn(),
-            sendJobCompletedToWorker: jest.fn(),
-            sendJobCancelledByEmployerToWorker: jest.fn(),
           },
         },
         { provide: EventEmitter2, useValue: { emit: jest.fn() } },
@@ -144,6 +155,13 @@ describe('ApplicationService (extended)', () => {
           provide: MatchingService,
           useValue: {
             indexWorkerProfile: jest.fn().mockResolvedValue(undefined),
+          },
+        },
+        {
+          provide: InteractionEventService,
+          useValue: {
+            record: jest.fn().mockResolvedValue(undefined),
+            recordMany: jest.fn().mockResolvedValue(0),
           },
         },
       ],

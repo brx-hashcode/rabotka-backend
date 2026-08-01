@@ -48,6 +48,8 @@ function makeCtx(
     ...txOverrides,
   };
   const applicationService = {
+    // The flow now delegates the rating write to the service (shared with mobile).
+    rateAssignment: jest.fn().mockResolvedValue(undefined),
     applyRatingToReliability: jest.fn().mockResolvedValue(undefined),
   };
   return {
@@ -190,19 +192,11 @@ describe('runRateAssignmentFlow', () => {
     expect(result.reply[0]).toContain('5');
   });
 
-  it('returns error when transaction fails', async () => {
-    const ctx = {
-      prisma: {
-        assignment: {
-          findUnique: jest.fn().mockResolvedValue({
-            status: 'COMPLETED',
-            worker_id: 'worker-1',
-            job_offer: { employer_id: 'employer-1' },
-          }),
-        },
-        $transaction: jest.fn().mockRejectedValue(new Error('DB error')),
-      } as any,
-    };
+  it('returns error when the rating write fails', async () => {
+    const ctx = makeCtx();
+    (ctx as any)._applicationService.rateAssignment.mockRejectedValueOnce(
+      new Error('DB error'),
+    );
     const result = await runRateAssignmentFlow(
       makeState(),
       '3',
@@ -213,50 +207,19 @@ describe('runRateAssignmentFlow', () => {
     expect(result.reply[0]).toContain('Menu');
   });
 
-  describe('reliability score feed (employer rates worker)', () => {
-    const employerProfile: BotProfile = {
-      id: 'employer-1',
-      first_name: 'Marc',
-      last_name: 'Patron',
-      phone: '+242000009',
-      email: 'marc@example.com',
-      profile_type: 'EMPLOYER',
-      reliability_score: 100,
-      status: 'ACTIVE',
-    };
-    // Employer rates → ratee is the worker
-    const employerRatesState = makeState({
-      payload: { assignmentId: 'assign-1', rateeId: 'worker-1' },
-    });
-
-    it('applies the rating delta to the worker on first rating', async () => {
+  describe('delegates the write to ApplicationService.rateAssignment', () => {
+    it('calls rateAssignment with (assignmentId, raterProfileId, score)', async () => {
       const ctx = makeCtx();
-      await runRateAssignmentFlow(employerRatesState, '5', employerProfile, ctx);
-      expect(
-        (ctx as any)._applicationService.applyRatingToReliability,
-      ).toHaveBeenCalledWith(expect.anything(), 'worker-1', 5);
-    });
-
-    it('does NOT apply the delta on a re-rating (already rated)', async () => {
-      const ctx = makeCtx({
-        rating: {
-          findUnique: jest.fn().mockResolvedValue({ id: 'existing-rating' }),
-          upsert: jest.fn().mockResolvedValue({}),
-          aggregate: jest
-            .fn()
-            .mockResolvedValue({ _avg: { score: 4 }, _count: { score: 2 } }),
-        },
-      });
-      await runRateAssignmentFlow(employerRatesState, '2', employerProfile, ctx);
-      expect(
-        (ctx as any)._applicationService.applyRatingToReliability,
-      ).not.toHaveBeenCalled();
-    });
-
-    it('does NOT feed reliability when the worker rates the employer', async () => {
-      const ctx = makeCtx();
-      // worker rates → ratee is employer-1; reliability feed should be skipped
       await runRateAssignmentFlow(makeState(), '5', workerProfile, ctx);
+      expect(
+        (ctx as any)._applicationService.rateAssignment,
+      ).toHaveBeenCalledWith('assign-1', 'worker-1', 5);
+    });
+
+    it('does not perform the rating write inline (no direct reliability call)', async () => {
+      const ctx = makeCtx();
+      await runRateAssignmentFlow(makeState(), '4', workerProfile, ctx);
+      // Reliability handling now lives inside rateAssignment, not the flow.
       expect(
         (ctx as any)._applicationService.applyRatingToReliability,
       ).not.toHaveBeenCalled();
