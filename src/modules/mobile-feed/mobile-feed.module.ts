@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ContactedProfilesModule } from '../recommendation/contacted-profiles.module';
 import { PrismaModule } from '../../common/services/prisma/prisma.module';
 import { AuthModule } from '../auth/auth.module';
 import { JobOfferModule } from '../job-offer/job-offer.module';
@@ -21,6 +22,7 @@ import { MobilePenaltyController } from './mobile-penalty.controller';
 @Module({
   imports: [
     PrismaModule,
+    ContactedProfilesModule,
     AuthModule,
     JobOfferModule,
     ApplicationModule,

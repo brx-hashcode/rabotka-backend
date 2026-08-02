@@ -639,7 +639,7 @@ export class PaymentRequestService {
       ``,
       `Votre paiement de *${amountStr} FCFA* via Mobile Money n'a pas abouti.`,
       ``,
-      `Vous pouvez réessayer en tapant la commande correspondante, ou choisir un autre mode de paiement.`,
+      `Vous pouvez réessayer ou choisir un autre mode de paiement.`,
     ].join('\n');
     await this.whatsAppService.sendTextMessage(profile.phone, message);
   }

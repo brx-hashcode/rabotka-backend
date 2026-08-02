@@ -26,6 +26,7 @@ import {
   PaymentRequestType,
   PaymentRequestStatus,
 } from '@prisma/client';
+import { ContactedProfilesService } from '../recommendation/contacted-profiles.service';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { ProfileAuthGuard } from '../auth/guards/profile-auth.guard';
 import { KycVerifiedGuard } from '../auth/guards/kyc-verified.guard';
@@ -86,6 +87,7 @@ export class MobileRecommendationController {
     private readonly interactionEvents: InteractionEventService,
     private readonly rollout: EngineRolloutService,
     private readonly engine: RecommendationEngineService,
+    private readonly contactedProfiles: ContactedProfilesService,
   ) {}
 
   @Get('worker-feed')
@@ -104,7 +106,7 @@ export class MobileRecommendationController {
     await this.assertEmployer(profileId);
 
     const topN = this.parseLimit(limit, 20, 50);
-    const contactedIds = await this.getContactedWorkerIds(profileId);
+    const contactedIds = await this.contactedProfiles.listContactedWorkerIds(profileId);
 
     const hits = await this.rankWorkers(profileId, topN, contactedIds);
     const recommended = await this.hydrate(
@@ -193,35 +195,6 @@ export class MobileRecommendationController {
       select: { id: true },
     });
     return rows.map((r) => ({ id: r.id, score: 0 }));
-  }
-
-  private async getContactedWorkerIds(
-    employerId: string,
-  ): Promise<Set<string>> {
-    const [walletTxns, requests] = await Promise.all([
-      this.prisma.walletTransaction.findMany({
-        where: {
-          reference_type: 'recommendation_contact',
-          reference_id: { not: null },
-          wallet: { profile_id: employerId },
-        },
-        select: { reference_id: true },
-      }),
-      this.prisma.paymentRequest.findMany({
-        where: {
-          profile_id: employerId,
-          request_type: PaymentRequestType.RECOMMENDATION_CONTACT,
-          status: PaymentRequestStatus.APPROVED,
-          recommendation_worker_id: { not: null },
-        },
-        select: { recommendation_worker_id: true },
-      }),
-    ]);
-    const ids = new Set<string>();
-    for (const t of walletTxns) if (t.reference_id) ids.add(t.reference_id);
-    for (const r of requests)
-      if (r.recommendation_worker_id) ids.add(r.recommendation_worker_id);
-    return ids;
   }
 
   @Get('worker-feed/:workerId')

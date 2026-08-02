@@ -46,6 +46,7 @@ describe('WhatsAppService', () => {
     const mockTwilioService = {
       sendWhatsApp: jest.fn().mockResolvedValue('SM-sid'),
       sendWhatsAppMedia: jest.fn().mockResolvedValue('SM-media-sid'),
+      sendWhatsAppTemplate: jest.fn().mockResolvedValue('SM-template-sid'),
       isConfigured: jest.fn().mockReturnValue(true),
     };
 
@@ -138,6 +139,36 @@ describe('WhatsAppService', () => {
         'https://x.com/img.jpg',
       );
       expect(result).toBe(false);
+    });
+  });
+
+  // TwilioService rethrows the SDK error; every send here must absorb it into a
+  // false so the ~40 bare-awaiting call sites can't turn a Twilio outage into an
+  // unhandled 500.
+  describe('twilio failures never escape', () => {
+    it.each([
+      [
+        'sendTextMessage',
+        'sendWhatsApp' as const,
+        () => service.sendTextMessage(PHONE, 'Hello'),
+      ],
+      [
+        'sendTemplateMessage',
+        'sendWhatsAppTemplate' as const,
+        () => service.sendTemplateMessage(PHONE, 'HX123', { 1: '000000' }),
+      ],
+      [
+        'sendMediaMessage',
+        'sendWhatsAppMedia' as const,
+        () => service.sendMediaMessage(PHONE, 'https://x.com/img.jpg'),
+      ],
+    ])('%s returns false when twilio throws', async (_name, method, call) => {
+      (twilioService[method] as jest.Mock).mockRejectedValue(
+        new Error('[Twilio 20003] Authentication Error - invalid username'),
+      );
+
+      await expect(call()).resolves.toBe(false);
+      expect(prisma.message.create).not.toHaveBeenCalled();
     });
   });
 
