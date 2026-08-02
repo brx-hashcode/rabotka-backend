@@ -37,6 +37,7 @@ import { sendWelcomeEmail } from '../mail/templates';
 import { MailService } from '../mail/mail.service';
 import { LayoutService } from '../mail/layout.service';
 import { ProfileAuthGuard } from '../auth/guards/profile-auth.guard';
+import { ContactedProfilesService } from '../recommendation/contacted-profiles.service';
 import type { ProfileAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
 import { WalletService } from '../wallet/wallet.service';
 import { JwtService } from '@nestjs/jwt';
@@ -60,7 +61,23 @@ export class ProfileController {
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly whatsApp: WhatsAppService,
+    private readonly contactedProfiles: ContactedProfilesService,
   ) {}
+
+  @Get('contacts')
+  @UseGuards(ProfileAuthGuard)
+  @ApiCookieAuth()
+  @ApiOperation({
+    summary: 'Profiles this employer has paid to contact',
+    description:
+      'Every worker the employer unlocked, through a recommendation or a ' +
+      'mission, with the phone and email they paid for. Employers only.',
+  })
+  @ApiResponse({ status: 200, description: 'Contacted profiles returned' })
+  @ApiResponse({ status: 403, description: 'Not an employer' })
+  listContacts(@Req() req: ProfileAuthenticatedRequest) {
+    return this.contactedProfiles.listContacts(req.user.profileId);
+  }
 
   @Post()
   @ApiOperation({

@@ -14,6 +14,8 @@ export type GraphNode = {
   collaborations: number;
   /** Applications that never became a mission. */
   applications: number;
+  /** Contacts the employer paid to unlock — a relationship with no mission yet. */
+  contacts: number;
   /** Number of distinct counterparties — what the node is sized by. */
   degree: number;
 };
@@ -23,6 +25,7 @@ export type GraphEdge = {
   target: string;
   collaborations: number;
   applications: number;
+  contacts: number;
 };
 
 export type CollaborationGraph = {
@@ -33,6 +36,7 @@ export type CollaborationGraph = {
     edges: number;
     collaborations: number;
     applications: number;
+    contacts: number;
     truncated: boolean;
   };
 };
@@ -42,6 +46,8 @@ export type GraphQuery = {
   minCollaborations?: number;
   /** Include the faint applied-but-never-worked edges. */
   includeApplications?: boolean;
+  /** Include paid contact unlocks (recommendation or mission). */
+  includeContacts?: boolean;
   /** Safety cap on edges returned; the densest are kept. */
   limit?: number;
 };
@@ -69,6 +75,7 @@ export class CollaborationGraphService {
   async getGraph(query: GraphQuery = {}): Promise<CollaborationGraph> {
     const minCollaborations = Math.max(0, query.minCollaborations ?? 0);
     const includeApplications = query.includeApplications ?? true;
+    const includeContacts = query.includeContacts ?? true;
     const limit = Math.min(
       Math.max(1, query.limit ?? DEFAULT_EDGE_LIMIT),
       MAX_EDGE_LIMIT,
@@ -77,20 +84,27 @@ export class CollaborationGraphService {
     const key = this.cache.listKey('collaboration-graph', {
       minCollaborations,
       includeApplications,
+      includeContacts,
       limit,
     });
 
     return this.cache.wrap(key, ADMIN_LIST_TTL_SECONDS, () =>
-      this.loadGraph({ minCollaborations, includeApplications, limit }),
+      this.loadGraph({
+        minCollaborations,
+        includeApplications,
+        includeContacts,
+        limit,
+      }),
     );
   }
 
   private async loadGraph(opts: {
     minCollaborations: number;
     includeApplications: boolean;
+    includeContacts: boolean;
     limit: number;
   }): Promise<CollaborationGraph> {
-    const [collabRows, applicationRows] = await Promise.all([
+    const [collabRows, applicationRows, contactRows] = await Promise.all([
       // A confirmed Assignment is the only record that means "these two actually
       // worked together" — an application on its own does not.
       this.prisma.$queryRaw<EdgeRow[]>`
@@ -119,9 +133,45 @@ export class CollaborationGraphService {
             GROUP BY jo.employer_id, ap.worker_id
           `
         : Promise.resolve<EdgeRow[]>([]),
+      // Paid contact unlocks. The recommendation path stores no attempt row —
+      // the money is the only record — so the two payment sources are unioned
+      // with the mission-path attempts. DISTINCT because an employer who paid
+      // twice for the same worker still has one relationship with them.
+      opts.includeContacts
+        ? this.prisma.$queryRaw<EdgeRow[]>`
+            SELECT employer_id, worker_id, COUNT(*) AS count
+            FROM (
+              SELECT DISTINCT w.profile_id AS employer_id,
+                              wt.reference_id::uuid AS worker_id
+              FROM "wallet_transactions" wt
+              JOIN "wallets" w ON w.id = wt.wallet_id
+              WHERE wt.reference_type = 'recommendation_contact'
+                AND wt.reference_id IS NOT NULL
+                -- Not every wallet belongs to a profile (admin/system wallets
+                -- exist), and a null id here poisons the node lookup.
+                AND w.profile_id IS NOT NULL
+
+              UNION
+
+              SELECT DISTINCT pr.profile_id AS employer_id,
+                              pr.recommendation_worker_id AS worker_id
+              FROM "payment_requests" pr
+              WHERE pr.request_type = 'RECOMMENDATION_CONTACT'
+                AND pr.status = 'APPROVED'
+                AND pr.recommendation_worker_id IS NOT NULL
+
+              UNION
+
+              SELECT DISTINCT cua.employer_id, cua.worker_id
+              FROM "contact_unlock_attempts" cua
+              WHERE cua.unlocked_at IS NOT NULL
+            ) AS paid_contacts
+            GROUP BY employer_id, worker_id
+          `
+        : Promise.resolve<EdgeRow[]>([]),
     ]);
 
-    const edges = this.mergeEdges(collabRows, applicationRows);
+    const edges = this.mergeEdges(collabRows, applicationRows, contactRows);
     const kept = this.selectEdges(edges, opts.minCollaborations, opts.limit);
     const nodes = await this.buildNodes(kept);
 
@@ -133,6 +183,7 @@ export class CollaborationGraphService {
         edges: kept.length,
         collaborations: kept.reduce((sum, e) => sum + e.collaborations, 0),
         applications: kept.reduce((sum, e) => sum + e.applications, 0),
+        contacts: kept.reduce((sum, e) => sum + e.contacts, 0),
         truncated: kept.length < edges.length,
       },
     };
@@ -142,16 +193,21 @@ export class CollaborationGraphService {
   private mergeEdges(
     collaborations: EdgeRow[],
     applications: EdgeRow[],
+    contacts: EdgeRow[],
   ): GraphEdge[] {
     const byPair = new Map<string, GraphEdge>();
 
-    const upsert = (row: EdgeRow, field: 'collaborations' | 'applications') => {
+    const upsert = (
+      row: EdgeRow,
+      field: 'collaborations' | 'applications' | 'contacts',
+    ) => {
       const key = `${row.employer_id}|${row.worker_id}`;
       const existing = byPair.get(key) ?? {
         source: row.employer_id,
         target: row.worker_id,
         collaborations: 0,
         applications: 0,
+        contacts: 0,
       };
       existing[field] += Number(row.count);
       byPair.set(key, existing);
@@ -159,6 +215,7 @@ export class CollaborationGraphService {
 
     for (const row of collaborations) upsert(row, 'collaborations');
     for (const row of applications) upsert(row, 'applications');
+    for (const row of contacts) upsert(row, 'contacts');
 
     return [...byPair.values()];
   }
@@ -209,17 +266,24 @@ export class CollaborationGraphService {
 
     const totals = new Map<
       string,
-      { collaborations: number; applications: number; degree: number }
+      {
+        collaborations: number;
+        applications: number;
+        contacts: number;
+        degree: number;
+      }
     >();
     for (const e of edges) {
       for (const id of [e.source, e.target]) {
         const t = totals.get(id) ?? {
           collaborations: 0,
           applications: 0,
+          contacts: 0,
           degree: 0,
         };
         t.collaborations += e.collaborations;
         t.applications += e.applications;
+        t.contacts += e.contacts;
         t.degree += 1;
         totals.set(id, t);
       }
@@ -234,6 +298,7 @@ export class CollaborationGraphService {
         avatarUrl: p.avatar_url,
         collaborations: t?.collaborations ?? 0,
         applications: t?.applications ?? 0,
+        contacts: t?.contacts ?? 0,
         degree: t?.degree ?? 0,
       };
     });
