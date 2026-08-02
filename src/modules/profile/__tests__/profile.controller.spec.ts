@@ -1,3 +1,4 @@
+import { ForbiddenException } from '@nestjs/common';
 import { BadRequestException } from '@nestjs/common';
 import { ProfileController } from '../profile.controller';
 import { WHATSAPP_TEMPLATES } from '../../../common/constants/whatsapp-templates';
@@ -58,6 +59,7 @@ describe('ProfileController', () => {
   let mailService: ReturnType<typeof makeMailService>;
   let walletService: ReturnType<typeof makeWalletService>;
   let whatsApp: { sendTemplateMessage: jest.Mock };
+  let contactedProfiles: { listContacts: jest.Mock };
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -65,6 +67,7 @@ describe('ProfileController', () => {
     mailService = makeMailService();
     walletService = makeWalletService();
     whatsApp = { sendTemplateMessage: jest.fn().mockResolvedValue(true) };
+    contactedProfiles = { listContacts: jest.fn().mockResolvedValue([]) };
     controller = new ProfileController(
       profileService as any,
       mailService as any,
@@ -73,6 +76,7 @@ describe('ProfileController', () => {
       makeJwtService() as any,
       makeConfigService() as any,
       whatsApp as any,
+      contactedProfiles as any,
     );
   });
 
@@ -284,6 +288,29 @@ describe('ProfileController', () => {
         'p-1',
       );
       expect(result).toEqual({ success: true });
+    });
+  });
+
+  // ─── GET /contacts ─────────────────────────────────────────────────────────
+
+  describe('listContacts()', () => {
+    it('asks only for the caller’s own contacts', async () => {
+      const req = { user: { profileId: 'e-1', type: 'profile' } } as any;
+
+      await controller.listContacts(req);
+
+      expect(contactedProfiles.listContacts).toHaveBeenCalledWith('e-1');
+    });
+
+    it('passes the service refusal through — a worker gets no contacts', async () => {
+      contactedProfiles.listContacts.mockRejectedValue(
+        new ForbiddenException('Réservé aux recruteurs'),
+      );
+      const req = { user: { profileId: 'w-1', type: 'profile' } } as any;
+
+      await expect(controller.listContacts(req)).rejects.toThrow(
+        ForbiddenException,
+      );
     });
   });
 });

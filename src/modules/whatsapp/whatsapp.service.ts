@@ -35,13 +35,40 @@ export class WhatsAppService {
     return this.twilioService.isConfigured();
   }
 
+  /**
+   * Every send here is `Promise<boolean>`: a Twilio failure is a `false`, never
+   * a throw. TwilioService rethrows the SDK error (it needs the code to tell
+   * 63038/63031 apart), but the ~40 call sites above this one are HTTP handlers
+   * and processors that mostly `await` bare — an escaping error there turns a
+   * dead sender number or a stale credential into an unhandled 500 on an
+   * otherwise fine request. Callers that genuinely need the failure to surface
+   * — the outbound queue processor, which relies on it for retries and the DLQ
+   * — turn `false` back into a throw themselves.
+   */
+  private async attempt(
+    what: string,
+    phone: string,
+    send: () => Promise<string | null>,
+  ): Promise<string | null> {
+    try {
+      return await send();
+    } catch (err) {
+      this.logger.error(
+        `WhatsApp ${what} to ${phone} failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return null;
+    }
+  }
+
   async sendTextMessage(
     phone: string,
     text: string,
     profileId?: string,
     sentById?: string,
   ): Promise<boolean> {
-    const sid = await this.twilioService.sendWhatsApp(phone, text);
+    const sid = await this.attempt('text', phone, () =>
+      this.twilioService.sendWhatsApp(phone, text),
+    );
     const sent = sid != null;
 
     if (sent && profileId) {
@@ -68,10 +95,8 @@ export class WhatsAppService {
     profileId?: string,
     body?: string,
   ): Promise<boolean> {
-    const sid = await this.twilioService.sendWhatsAppTemplate(
-      phone,
-      contentSid,
-      variables,
+    const sid = await this.attempt(`template ${contentSid}`, phone, () =>
+      this.twilioService.sendWhatsAppTemplate(phone, contentSid, variables),
     );
     const sent = sid != null;
 
@@ -96,10 +121,8 @@ export class WhatsAppService {
     mediaUrl: string,
     caption?: string,
   ): Promise<boolean> {
-    const sid = await this.twilioService.sendWhatsAppMedia(
-      phone,
-      mediaUrl,
-      caption,
+    const sid = await this.attempt('media', phone, () =>
+      this.twilioService.sendWhatsAppMedia(phone, mediaUrl, caption),
     );
     return sid != null;
   }

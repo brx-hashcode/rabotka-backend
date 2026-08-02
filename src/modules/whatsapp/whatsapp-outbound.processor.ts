@@ -6,7 +6,7 @@ import {
   WHATSAPP_OUTBOUND_QUEUE,
   WHATSAPP_OUTBOUND_DLQ,
 } from '../../common/services/queue/queue.module';
-import { getUrlSuffixVar } from '../../common/constants/whatsapp-templates';
+import { getUrlSuffixTarget } from '../../common/constants/whatsapp-templates';
 import { WhatsAppLoginLinkService } from '../auth/whatsapp-login-link.service';
 
 // Twilio's hard limit on a WhatsApp body is 1600 chars. We chunk well below
@@ -212,16 +212,20 @@ export class WhatsAppOutboundProcessor {
     variables: Record<string, string>,
     profileId?: string,
   ): Promise<Record<string, string>> {
-    const suffixVar = getUrlSuffixVar(contentSid);
-    if (!profileId || !suffixVar) return variables;
+    const target = getUrlSuffixTarget(contentSid);
+    if (!profileId || !target) return variables;
 
-    const suffix = variables[suffixVar];
+    const suffix = variables[target.variable];
     if (!suffix) return variables;
 
-    const withCode = await this.loginLink.appendTo(profileId, suffix);
+    const withCode = await this.loginLink.appendTo(
+      profileId,
+      suffix,
+      target.separator,
+    );
     if (withCode === suffix) return variables;
 
-    return { ...variables, [suffixVar]: withCode };
+    return { ...variables, [target.variable]: withCode };
   }
 
   private async processTemplate(

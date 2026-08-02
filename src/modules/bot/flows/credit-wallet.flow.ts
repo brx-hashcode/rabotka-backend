@@ -1,6 +1,6 @@
 import type { BotProfile, BotState } from '../types/bot-state.types';
 import { FLOW_IDS, CMD_MENU } from '../bot.constants';
-import { menuMessage } from '../messages/menu.messages';
+import { welcomePlatformMessage } from '../messages/welcome.messages';
 import { walletRechargeReply } from '../../../common/constants/whatsapp-listpickers';
 import type { WalletService } from '../../wallet/wallet.service';
 import type { IPaymentUrlService } from '../types/payment-url.types';
@@ -56,7 +56,7 @@ async function handleAmountSelection(
   ctx: CreditWalletContext,
 ): Promise<FlowResult> {
   if (trimmed === '0' || normalized === 'annuler') {
-    return { reply: [menuMessage(profile.profile_type)], clearState: true };
+    return { reply: [welcomePlatformMessage()], clearState: true };
   }
 
   // Preset amounts
@@ -101,7 +101,7 @@ function handleCustomAmountInput(
 ): Promise<FlowResult> {
   if (trimmed === '0' || normalized === 'annuler') {
     return Promise.resolve({
-      reply: [menuMessage(profile.profile_type)],
+      reply: [welcomePlatformMessage()],
       clearState: true,
     });
   }
@@ -180,7 +180,7 @@ export async function runCreditWalletFlow(
   const normalized = trimmed.toLowerCase();
 
   if (isMenuCommand(normalized)) {
-    return { reply: [menuMessage(profile.profile_type)], clearState: true };
+    return { reply: [welcomePlatformMessage()], clearState: true };
   }
 
   const payload = state.payload ?? {};

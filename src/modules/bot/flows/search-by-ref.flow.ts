@@ -5,7 +5,7 @@ import {
   formatOfferDetailWithActions,
   jobOfferToOfferListItem,
 } from '../messages/offers.messages';
-import { menuMessage } from '../messages/menu.messages';
+import { welcomePlatformMessage } from '../messages/welcome.messages';
 import { getApplyJobInitialState } from './apply-job.flow';
 import { normalizeJobReference } from '../../job-offer/utils/job-reference.util';
 import type { JobOfferService } from '../../job-offer/job-offer.service';
@@ -38,8 +38,6 @@ export function getSearchByRefPromptMessage(): string {
     '*Rechercher une offre par référence*',
     '',
     "Entrez la référence de l'offre (exemple : *RBT-7K3X9*).",
-    '',
-    'Tapez *Menu* pour annuler.',
   ].join('\n');
 }
 
@@ -78,7 +76,7 @@ async function handleRefStep(
   if (!offer) {
     return {
       reply: [
-        `❌ Aucune offre trouvée pour la référence *${ref}*.\n\nRéessayez ou tapez *Menu* pour annuler.`,
+        `❌ Aucune offre trouvée pour la référence *${ref}*.\n\nRéessayez ou`,
       ],
       nextState: state,
     };
@@ -88,14 +86,14 @@ async function handleRefStep(
   if (offer.status !== 'ACTIVE' && offer.status !== 'PARTIALLY_FILLED') {
     return {
       reply: [
-        "❌ Cette offre n'est plus disponible. Tapez *Menu* pour revenir.",
+        "❌ Cette offre n'est plus disponible.",
       ],
       clearState: true,
     };
   }
   if (remaining === 0) {
     return {
-      reply: ['❌ Cette offre est complète. Tapez *Menu* pour revenir.'],
+      reply: ['❌ Cette offre est complète.'],
       clearState: true,
     };
   }
@@ -125,7 +123,7 @@ async function handleDetailApply(
   const offer = await ctx.jobOfferService.findById(offerId);
   if (!offer) {
     return {
-      reply: ["*Cette offre n'existe plus. Tapez *Menu*.*"],
+      reply: ["*Cette offre n'existe plus.*"],
       clearState: true,
     };
   }
@@ -173,7 +171,7 @@ async function handleDetailStep(
     const offer = await ctx.jobOfferService.findById(offerId);
     if (!offer) {
       return {
-        reply: ['*Offre introuvable. Tapez *Menu*.*'],
+        reply: ['*Offre introuvable.*'],
         clearState: true,
       };
     }
@@ -184,7 +182,7 @@ async function handleDetailStep(
       '',
       '1- Postuler à cette offre',
       '2- Retour à la fiche',
-      '3- Menu',
+      '3- Quitter',
       '',
       'Tapez le numéro correspondant.',
     ].join('\n');
@@ -202,13 +200,13 @@ async function handleDetailStep(
   }
   if (trimmed === '4') {
     return {
-      reply: [menuMessage(profile.profile_type)],
+      reply: [welcomePlatformMessage()],
       clearState: true,
     };
   }
   return {
     reply: [
-      'Répondez par 1 (Postuler), 2 (Voir description complète), 3 (Nouvelle référence) ou 4 (Menu).',
+      'Répondez par 1 (Postuler), 2 (Voir description complète), 3 (Nouvelle référence) ou 4 (Quitter).',
     ],
     nextState: state,
   };
@@ -231,7 +229,7 @@ async function handleDescriptionStep(
     const offer = await ctx.jobOfferService.findById(offerId);
     if (!offer)
       return {
-        reply: ['*Offre introuvable. Tapez *Menu*.*'],
+        reply: ['*Offre introuvable.*'],
         clearState: true,
       };
     return {
@@ -244,10 +242,10 @@ async function handleDescriptionStep(
     };
   }
   if (trimmed === '3' || CMD_MENU.some((c) => trimmed.toLowerCase() === c)) {
-    return { reply: [menuMessage(profile.profile_type)], clearState: true };
+    return { reply: [welcomePlatformMessage()], clearState: true };
   }
   return {
-    reply: ['Répondez par 1 (Postuler), 2 (Retour à la fiche) ou 3 (Menu).'],
+    reply: ['Répondez par 1 (Postuler), 2 (Retour à la fiche) ou 3 (Quitter).'],
     nextState: state,
   };
 }
@@ -265,7 +263,7 @@ export async function runSearchByRefFlow(
     CMD_MENU.some((c) => normalized === c || normalized.startsWith(c + ' '))
   ) {
     return {
-      reply: [menuMessage(profile.profile_type)],
+      reply: [welcomePlatformMessage()],
       clearState: true,
     };
   }
@@ -273,7 +271,7 @@ export async function runSearchByRefFlow(
   if (profile.profile_type !== 'WORKER') {
     return {
       reply: [
-        '❌ Seuls les travailleurs peuvent rechercher une offre par référence. Tapez *Menu*.',
+        '❌ Seuls les travailleurs peuvent rechercher une offre par référence.',
       ],
       clearState: true,
     };

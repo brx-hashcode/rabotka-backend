@@ -5,6 +5,7 @@ export const WHATSAPP_MEDIA_BASE = (
 
 export const JOB_PLACEHOLDER_KEY = 'whatsapp/job-placeholder.png';
 export const PROFILE_PLACEHOLDER_KEY = 'whatsapp/profile-placeholder.png';
+export const COVER_KEY = 'whatsapp/cover-rabotka.jpg';
 
 /**
  * Full public URL of a profile's header image for a WhatsApp media message:
@@ -23,6 +24,14 @@ export function profileImageUrl(avatarUrl: string | null | undefined): string {
  */
 export function jobImageUrl(): string {
   return `${WHATSAPP_MEDIA_BASE}/${JOB_PLACEHOLDER_KEY}`;
+}
+
+/**
+ * Full public URL of the brand cover, used as the header image of the welcome
+ * cards — the first thing a number sees from Rabotka, registered or not.
+ */
+export function coverImageUrl(): string {
+  return `${WHATSAPP_MEDIA_BASE}/${COVER_KEY}`;
 }
 
 export type CarouselEntity = 'profiles' | 'jobs';

@@ -4,7 +4,7 @@ import {
 } from '../my-applications.flow';
 import type { BotProfile } from '../../types/bot-state.types';
 import { FLOW_IDS } from '../../bot.constants';
-import { workerMenuMessage } from '../../messages/menu.messages';
+import { welcomePlatformMessage } from '../../messages/welcome.messages';
 
 const workerProfile: BotProfile = {
   id: 'w-1',
@@ -105,7 +105,7 @@ describe('runMyApplicationsFlow()', () => {
       ctx,
     );
     expect(result.clearState).toBe(true);
-    expect(result.reply[0]).toBe(workerMenuMessage());
+    expect(result.reply[0]).toBe(welcomePlatformMessage());
   });
 
   it('returns error when no applicationIds', async () => {

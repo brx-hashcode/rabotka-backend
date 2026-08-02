@@ -1,3 +1,4 @@
+import { welcomePlatformMessage } from '../messages/welcome.messages';
 import { PaymentFlow } from '@prisma/client';
 import type { BotProfile, BotState } from '../types/bot-state.types';
 import type { FlowResult } from '../types/flow.types';
@@ -60,7 +61,7 @@ export async function runJobStatusCheckFlow(
 
   if (isMenuInput(normalized) || trimmed === '3') {
     return {
-      reply: ['Tapez *MENU* pour accéder au menu principal.'],
+      reply: [welcomePlatformMessage()],
       clearState: true,
     };
   }
@@ -72,7 +73,7 @@ export async function runJobStatusCheckFlow(
         [
           `⏳ *Rappel programmé.*`,
           '',
-          `Vous serez relancé automatiquement. Tapez *1* pour confirmer la fin maintenant ou *3* pour le menu.`,
+          `Vous serez relancé automatiquement. Tapez *1* pour confirmer la fin maintenant ou *3* pour quitter.`,
         ].join('\n'),
       ],
       nextState: state,
@@ -88,7 +89,7 @@ export async function runJobStatusCheckFlow(
   };
 
   if (!jobOfferId || !applicationId) {
-    return { reply: ['❌ Erreur. Tapez *Menu*.'], clearState: true };
+    return { reply: ['❌ Erreur.'], clearState: true };
   }
 
   // Re-bind as non-optional after the guard so downstream code is typed as string
@@ -110,7 +111,7 @@ export async function runJobStatusCheckFlow(
             '',
             `Les gains ont été enregistrés pour les travailleurs.`,
             '',
-            `Tapez *MENU* pour revenir au menu principal.`,
+            ``,
           ].join('\n'),
         ],
         clearState: true,
@@ -118,7 +119,7 @@ export async function runJobStatusCheckFlow(
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Erreur inconnue.';
       return {
-        reply: [`❌ ${msg}\n\nTapez *MENU* pour revenir.`],
+        reply: [`❌ ${msg}`],
         clearState: true,
       };
     }
@@ -175,7 +176,7 @@ export async function runJobStatusCheckFlow(
           '',
           `N'oubliez pas de confirmer la fin de la mission *"${title}"* une fois qu'elle est terminée.`,
           '',
-          `Tapez *MENU* pour accéder au menu ou *1* pour confirmer la fin maintenant.`,
+          ``,
         ].join('\n'),
       ],
       nextState: {
