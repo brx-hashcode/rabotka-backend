@@ -3,10 +3,7 @@ import { BotOrchestratorService } from '../bot-orchestrator.service';
 import { PrismaService } from '../../../../common/services/prisma/prisma.service';
 import { BotStateService } from '../bot-state.service';
 import { BotRouterService } from '../../router/bot-router.service';
-import {
-  workerMenuMessage,
-  employerMenuMessage,
-} from '../../messages/menu.messages';
+import { welcomePlatformMessage } from '../../messages/welcome.messages';
 import { contactReply } from '../../../../common/constants/whatsapp-listpickers';
 import { BotCommandsService } from '../bot-commands.service';
 import { BotNotificationService } from '../bot-notification.service';
@@ -297,21 +294,20 @@ describe('BotOrchestratorService', () => {
       deps.prisma.profile.findUnique.mockResolvedValue(mockActiveProfile);
     });
 
-    it('returns session-expired message for unrecognized input without state', async () => {
+    it('answers the welcome card for unrecognized input', async () => {
       deps.router.route.mockReturnValue({ type: 'unknown' });
       const result = await service.handle(
         PROFILE_ID,
         PHONE,
         'bonjour le monde',
       );
-      expect(result[0]).toContain('Session expirée');
+      expect(result).toEqual([welcomePlatformMessage()]);
     });
 
-    it('returns session-expired message when no state and input looks like flow input', async () => {
+    it('answers the welcome card when the input looks like flow input but no flow is live', async () => {
       deps.router.route.mockReturnValue({ type: 'unknown' });
       const result = await service.handle(PROFILE_ID, PHONE, '3');
-      expect(result[0]).toContain('Session expirée');
-      expect(result[1]).toBe(workerMenuMessage());
+      expect(result).toEqual([welcomePlatformMessage()]);
     });
 
     it('returns ERROR_MESSAGE on exception', async () => {
@@ -363,7 +359,7 @@ describe('BotOrchestratorService', () => {
         commandId: 'menu',
       });
       const result = await service.handle(PROFILE_ID, PHONE, 'Menu');
-      expect(result[0]).toBe(workerMenuMessage());
+      expect(result[0]).toBe(welcomePlatformMessage());
     });
 
     it('handles "help" command', async () => {
@@ -425,7 +421,7 @@ describe('BotOrchestratorService', () => {
         commandId: 'totally_unknown',
       });
       const result = await service.handle(PROFILE_ID, PHONE, 'xyz');
-      expect(result[0]).toContain('Commande non reconnue');
+      expect(result[0]).toContain("Je n'ai pas compris");
     });
 
     it('handles "start_publish_job" by sending the create-offer webview template', async () => {
@@ -653,7 +649,7 @@ describe('BotOrchestratorService', () => {
       expect(result[0]).toContain('candidature(s) en attente');
     });
 
-    it('returns unknownCommandMessage when flow not implemented', async () => {
+    it('returns the welcome card when a flow is not implemented', async () => {
       const flowState = {
         flowId: 'unknown_flow',
         step: 1,
@@ -668,7 +664,7 @@ describe('BotOrchestratorService', () => {
       jest.spyOn(service as any, 'executeFlow').mockResolvedValue(null);
 
       const result = await service.handle(PROFILE_ID, PHONE, '1');
-      expect(result[0]).toContain('Commande non reconnue');
+      expect(result[0]).toContain("Je n'ai pas compris");
     });
   });
 
@@ -759,10 +755,10 @@ describe('BotOrchestratorService', () => {
       expect(deps.prisma.profile.update).not.toHaveBeenCalled();
     });
 
-    it('returns KYC prompt when PENDING_ACTIVATION (verified) and input is not Menu', async () => {
+    it('returns KYC prompt when PENDING_ACTIVATION (verified)', async () => {
       deps.prisma.profile.findUnique.mockResolvedValue(pendingProfile);
       const result = await service.handle(PROFILE_ID, PHONE, 'hello');
-      expect(result[0]).toContain('Menu');
+      expect(result[0]).toContain('KYC');
     });
 
     it('activates account and shows menu when PENDING_ACTIVATION types Menu', async () => {
@@ -1548,7 +1544,7 @@ describe('BotOrchestratorService', () => {
       expect(Array.isArray(result)).toBe(true);
     });
 
-    it('returns session-expired when state exists but no matching route', async () => {
+    it('returns the welcome card when state exists but no route matches', async () => {
       const flowState = {
         flowId: 'some_old_flow',
         step: 1,
@@ -1558,8 +1554,8 @@ describe('BotOrchestratorService', () => {
       deps.botState.get.mockResolvedValue(flowState);
       deps.router.route.mockReturnValue({ type: 'unknown' });
       const result = await service.handle(PROFILE_ID, PHONE, 'unknown input');
-      // Has state but unknown type - should return unknownCommandMessage
-      expect(result[0]).toContain('Commande non reconnue');
+      // No route matched: the welcome card is the only answer left.
+      expect(result).toEqual([welcomePlatformMessage()]);
     });
   });
 
@@ -1568,7 +1564,7 @@ describe('BotOrchestratorService', () => {
       deps.prisma.profile.findUnique.mockResolvedValue(mockEmployerProfile);
     });
 
-    it('exits MY_OFFERS flow with menu command', async () => {
+    it('exits MY_OFFERS flow with "m"', async () => {
       const flowState = {
         flowId: 'my_offers',
         step: 0,
@@ -1581,8 +1577,8 @@ describe('BotOrchestratorService', () => {
         state: flowState,
       });
       deps.botState.get.mockResolvedValue(flowState);
-      const result = await service.handle('employer-uuid-1', PHONE, 'menu');
-      expect(result[0]).toBe(employerMenuMessage());
+      const result = await service.handle('employer-uuid-1', PHONE, 'm');
+      expect(result[0]).toBe(welcomePlatformMessage());
     });
 
     it('shows offer detail when selecting valid offer number', async () => {
@@ -1692,7 +1688,7 @@ describe('BotOrchestratorService', () => {
       deps.botState.get.mockResolvedValue(flowState);
       deps.jobOfferService.findByEmployerId.mockResolvedValue({ total: 1 });
       const result = await service.handle('employer-uuid-1', PHONE, 'zzz');
-      expect(result[0]).toContain('Commande non reconnue');
+      expect(result[0]).toContain("Je n'ai pas compris");
     });
 
     it('navigates to previous page with "p"', async () => {

@@ -9,6 +9,7 @@ import { AuthModule } from '../auth/auth.module';
 import { WhatsAppModule } from '../whatsapp/whatsapp.module';
 import { WalletModule } from '../wallet/wallet.module';
 import { LogModule } from '../log/log.module';
+import { ContactedProfilesModule } from '../recommendation/contacted-profiles.module';
 import { PrismaModule } from '../../common/services/prisma/prisma.module';
 import { PaymentRequestModule } from '../payment-request/payment-request.module';
 import { DocumentModule } from '../document/document.module';
@@ -27,6 +28,7 @@ import { PortfolioModule } from '../portfolio/portfolio.module';
     WalletModule,
     LogModule,
     PrismaModule,
+    ContactedProfilesModule,
     PaymentRequestModule,
     DocumentModule,
     MatchingModule,

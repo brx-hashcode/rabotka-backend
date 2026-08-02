@@ -1,3 +1,4 @@
+import { welcomePlatformMessage } from '../messages/welcome.messages';
 import type { BotProfile, BotState } from '../types/bot-state.types';
 import { FLOW_IDS, CMD_MENU } from '../bot.constants';
 import type { PrismaService } from '../../../common/services/prisma/prisma.service';
@@ -27,7 +28,7 @@ export async function runRateAssignmentFlow(
     CMD_MENU.some((c) => normalized === c || normalized.startsWith(c + ' '))
   ) {
     return {
-      reply: ['Tapez *Menu* pour revenir au menu principal.'],
+      reply: [welcomePlatformMessage()],
       clearState: true,
     };
   }
@@ -37,7 +38,7 @@ export async function runRateAssignmentFlow(
 
   if (!assignmentId || !rateeId) {
     return {
-      reply: ["❌ Erreur d'évaluation. Tapez *Menu*."],
+      reply: ["❌ Erreur d'évaluation."],
       clearState: true,
     };
   }
@@ -53,7 +54,7 @@ export async function runRateAssignmentFlow(
 
   if (!assignment) {
     return {
-      reply: ['❌ Mission introuvable. Tapez *Menu*.'],
+      reply: ['❌ Mission introuvable.'],
       clearState: true,
     };
   }
@@ -63,7 +64,7 @@ export async function runRateAssignmentFlow(
   if (!isWorker && !isEmployer) {
     return {
       reply: [
-        "❌ Vous n'êtes pas autorisé à évaluer cette mission. Tapez *Menu*.",
+        "❌ Vous n'êtes pas autorisé à évaluer cette mission.",
       ],
       clearState: true,
     };
@@ -75,14 +76,14 @@ export async function runRateAssignmentFlow(
     : assignment.worker_id;
   if (!expectedRateeId || rateeId !== expectedRateeId) {
     return {
-      reply: ["❌ Erreur d'évaluation. Tapez *Menu*."],
+      reply: ["❌ Erreur d'évaluation."],
       clearState: true,
     };
   }
 
   if (assignment.status !== 'COMPLETED') {
     return {
-      reply: ["❌ La mission n'est pas encore terminée. Tapez *Menu*."],
+      reply: ["❌ La mission n'est pas encore terminée."],
       clearState: true,
     };
   }
@@ -109,7 +110,7 @@ export async function runRateAssignmentFlow(
     };
   } catch {
     return {
-      reply: ["❌ Impossible d'enregistrer votre note. Tapez *Menu*."],
+      reply: ["❌ Impossible d'enregistrer votre note."],
       clearState: true,
     };
   }

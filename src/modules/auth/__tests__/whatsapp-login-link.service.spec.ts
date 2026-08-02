@@ -105,10 +105,12 @@ describe('WhatsAppLoginLinkService', () => {
       expect(link).toMatch(/^application-42\?s=[\w-]+$/);
     });
 
-    it('uses & when the target already carries a query string', async () => {
-      const link = await service.appendTo('profile-1', 'pay/tok?return=/home');
+    it('joins with the separator the caller asks for', async () => {
+      // Template suffixes land inside `…/login?redirect=/home`, where a '?'
+      // would make the code part of the redirect value instead of a parameter.
+      const link = await service.appendTo('profile-1', 'home', '&');
 
-      expect(link).toMatch(/^pay\/tok\?return=\/home&s=[\w-]+$/);
+      expect(link).toMatch(/^home&s=[\w-]+$/);
     });
 
     it('returns the plain target when the profile may not auto-login', async () => {

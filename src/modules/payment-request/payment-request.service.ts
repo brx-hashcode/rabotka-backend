@@ -639,7 +639,7 @@ export class PaymentRequestService {
       ``,
       `Votre paiement de *${amountStr} FCFA* via Mobile Money n'a pas abouti.`,
       ``,
-      `Vous pouvez réessayer en tapant la commande correspondante, ou choisir un autre mode de paiement.`,
+      `Vous pouvez réessayer ou choisir un autre mode de paiement.`,
     ].join('\n');
     await this.whatsAppService.sendTextMessage(profile.phone, message);
   }
@@ -930,8 +930,6 @@ export class PaymentRequestService {
         ...(worker.phone ? [`• *Téléphone* : ${worker.phone}`] : []),
         ...(waDigits ? [`• *WhatsApp* : https://wa.me/${waDigits}`] : []),
         ...(worker.email ? [`• *Email* : ${worker.email}`] : []),
-        '',
-        'Tapez *Menu* pour retourner au menu principal.',
       ].join('\n');
       await this.botNotification
         .sendMessage(request.profile.phone, contactLines)
@@ -1090,8 +1088,6 @@ export class PaymentRequestService {
           ``,
           `Montant crédité : *${context.amount.toLocaleString('fr-FR')} FCFA*`,
           `Nouveau solde : *${newBalance.toLocaleString('fr-FR')} FCFA*`,
-          ``,
-          `Tapez *Menu* pour continuer.`,
         ].join('\n');
         await this.botNotification
           .sendMessage(request.profile.phone, message)

@@ -1,6 +1,6 @@
 import type { BotProfile, BotState } from '../types/bot-state.types';
 import { FLOW_IDS, CMD_MENU } from '../bot.constants';
-import { menuMessage } from '../messages/menu.messages';
+import { welcomePlatformMessage } from '../messages/welcome.messages';
 import {
   formatFilledJobsListPage,
   formatFilledJobDetail,
@@ -79,8 +79,6 @@ async function handleDetailComplete(
           '*Mission marquée comme terminée !*',
           '',
           amountLine,
-          '',
-          'Tapez *Menu* pour revenir.',
         ].join('\n'),
       ],
       clearState: true,
@@ -106,8 +104,6 @@ async function handleDetailCancel(
       reply: [
         [
           "*Mission annulée. L'offre est de nouveau ouverte aux candidatures.*",
-          '',
-          'Tapez *Menu* pour revenir.',
         ].join('\n'),
       ],
       clearState: true,
@@ -235,7 +231,7 @@ function handleListStep(
   if (choice === nextPageIdx && hasMore)
     return buildListPage(state, items, pageIndex + 1);
   if (choice === menuIdx)
-    return { reply: [menuMessage(profile.profile_type)], clearState: true };
+    return { reply: [welcomePlatformMessage()], clearState: true };
 
   return {
     reply: [
@@ -268,11 +264,11 @@ export async function runManageFilledJobFlow(
   }
 
   if (isMenuInput(trimmed, normalized)) {
-    return { reply: [menuMessage(profile.profile_type)], clearState: true };
+    return { reply: [welcomePlatformMessage()], clearState: true };
   }
 
   if (trimmed === '4' && step === 'detail') {
-    return { reply: [menuMessage(profile.profile_type)], clearState: true };
+    return { reply: [welcomePlatformMessage()], clearState: true };
   }
 
   if (step === 'cancel_confirm') {

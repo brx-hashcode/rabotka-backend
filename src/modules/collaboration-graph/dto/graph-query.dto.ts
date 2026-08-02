@@ -24,6 +24,15 @@ export class GraphQueryDto {
   includeApplications?: boolean;
 
   @ApiPropertyOptional({
+    description: 'Include links where the employer only paid to unlock a contact.',
+    default: true,
+  })
+  @IsOptional()
+  @Transform(({ value }) => value !== 'false' && value !== false)
+  @IsBoolean()
+  includeContacts?: boolean;
+
+  @ApiPropertyOptional({
     description: 'Max links returned; the strongest are kept.',
     default: 2000,
   })
