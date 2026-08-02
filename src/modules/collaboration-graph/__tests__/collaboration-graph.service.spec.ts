@@ -22,11 +22,16 @@ describe('CollaborationGraphService', () => {
     profile: { findMany: jest.Mock };
   };
 
-  /** Queue the two raw results in call order: assignments, then applications. */
-  function withRows(collabs: unknown[], applications: unknown[]) {
+  /** Queue the raw results in call order: assignments, applications, contacts. */
+  function withRows(
+    collabs: unknown[],
+    applications: unknown[],
+    contacts: unknown[] = [],
+  ) {
     prisma.$queryRaw
       .mockResolvedValueOnce(collabs)
-      .mockResolvedValueOnce(applications);
+      .mockResolvedValueOnce(applications)
+      .mockResolvedValueOnce(contacts);
   }
 
   beforeEach(() => {
@@ -53,7 +58,7 @@ describe('CollaborationGraphService', () => {
     const graph = await service.getGraph();
 
     expect(graph.edges).toEqual([
-      { source: 'e1', target: 'w1', collaborations: 3, applications: 5 },
+      { source: 'e1', target: 'w1', collaborations: 3, applications: 5, contacts: 0 },
     ]);
   });
 
@@ -114,7 +119,10 @@ describe('CollaborationGraphService', () => {
       profile('w1', 'WORKER'),
     ]);
 
-    await service.getGraph({ includeApplications: false });
+    await service.getGraph({
+      includeApplications: false,
+      includeContacts: false,
+    });
 
     expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
   });
@@ -168,5 +176,35 @@ describe('CollaborationGraphService', () => {
     await expect(
       service.getGraph({ limit: 999_999 }),
     ).resolves.toBeDefined();
+  });
+
+  it('counts a paid contact as its own kind of link', async () => {
+    // An employer who paid to reach a worker they never hired still has a
+    // relationship with them — the graph exists to show exactly that.
+    withRows([], [], [row('e1', 'w1', 1)]);
+    prisma.profile.findMany.mockResolvedValue([
+      profile('e1', 'EMPLOYER'),
+      profile('w1', 'WORKER'),
+    ]);
+
+    const graph = await service.getGraph();
+
+    expect(graph.edges).toEqual([
+      { source: 'e1', target: 'w1', collaborations: 0, applications: 0, contacts: 1 },
+    ]);
+    expect(graph.stats.contacts).toBe(1);
+    expect(graph.nodes.map((n) => n.contacts)).toEqual([1, 1]);
+  });
+
+  it('skips the contact query when excluded', async () => {
+    withRows([row('e1', 'w1', 1)], []);
+    prisma.profile.findMany.mockResolvedValue([
+      profile('e1', 'EMPLOYER'),
+      profile('w1', 'WORKER'),
+    ]);
+
+    await service.getGraph({ includeContacts: false });
+
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(2);
   });
 });
