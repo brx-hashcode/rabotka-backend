@@ -1,5 +1,6 @@
 import { ForbiddenException } from '@nestjs/common';
 import { ProfileType } from '@prisma/client';
+import { ContactedProfilesService } from '../../recommendation/contacted-profiles.service';
 import { MobileRecommendationController } from '../mobile-recommendation.controller';
 
 type Req = { user: { profileId: string } };
@@ -106,6 +107,9 @@ describe('MobileRecommendationController — worker-feed tiers', () => {
       interactionEvents as never,
       rollout as never,
       engine as never,
+      // The real service on the same prisma mock: the exclusion assertions below
+      // are only meaningful if the derivation itself runs.
+      new ContactedProfilesService(prisma as never),
     );
   });
 
