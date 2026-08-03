@@ -200,7 +200,23 @@ export class MobileApplicationController {
 
     const attempt = await this.contactUnlock.getByApplicationId(id);
     if (!attempt) {
-      return { application, unlock: null, workerSlug };
+      // No unlock attempt yet, so there is no fee to report — but the employer
+      // still needs to know what accepting will cost *before* committing to it.
+      // Quote the configured fee alongside the balance it would be drawn from,
+      // mirroring the recommended-worker detail endpoint.
+      const [fees, balance] = await Promise.all([
+        this.systemConfig.getContactUnlockFees(),
+        this.wallet.getProfileWalletBalance(profileId),
+      ]);
+      return {
+        application,
+        unlock: null,
+        quote: {
+          employerFee: fees.employerFeeFcfa,
+          walletBalance: balance,
+        },
+        workerSlug,
+      };
     }
 
     const balance = await this.wallet.getProfileWalletBalance(profileId);
@@ -216,7 +232,9 @@ export class MobileApplicationController {
 
     // Contact details are delivered to both parties over WhatsApp once both
     // have paid — never exposed through this API.
-    return { application, unlock, workerSlug };
+    // `quote` is null once an attempt exists: `unlock` carries the real, already
+    // committed amount, so a prospective quote would only invite ambiguity.
+    return { application, unlock, quote: null, workerSlug };
   }
 
   private async getOwnedAttempt(id: string, profileId: string) {
