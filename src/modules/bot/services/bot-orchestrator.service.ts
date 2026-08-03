@@ -14,7 +14,6 @@ import { BotNotificationService } from './bot-notification.service';
 import { BotInboxService } from './bot-inbox.service';
 import { BotDraftService } from './bot-draft.service';
 import { welcomePlatformMessage } from '../messages/welcome.messages';
-import { handleHelpCommand } from '../commands/help.command';
 import { SystemConfigService } from '../../system-config/system-config.service';
 import { WHATSAPP_TEMPLATES } from '../../../common/constants/whatsapp-templates';
 import { templateReply } from '../../../common/constants/whatsapp-carousel';
