@@ -22,6 +22,20 @@ export interface WhatsAppTemplate<Args extends unknown[]> {
    * need `'&'`. Only a URL with no query string at all takes `'?'`.
    */
   urlSuffixSeparator?: '?' | '&';
+  /**
+   * How the login code reaches the CTA URL.
+   *
+   * `append` — the approved URL already ends in the variable (e.g.
+   * `…/login?redirect=/applications/{{9}}`), so the code is appended to the
+   * value the caller supplies.
+   *
+   * `shortlink` — the URL is the fixed `…/s/{{n}}` and the variable's value at
+   * send time is the DESTINATION PATH, which the processor swaps for a code
+   * minted against it. The only shape that works for a template whose landing
+   * page is otherwise hardcoded, and it never needs re-approval when the
+   * destination changes.
+   */
+  urlSuffixMode?: 'append' | 'shortlink';
 }
 
 /**
@@ -88,34 +102,44 @@ export const WHATSAPP_TEMPLATES = {
   kycPendingMenu: {
     contentSid: sid(
       'TPL_KYC_PENDING_MENU',
-      'HX33c0083c30a0c07100f400233b077059',
+      'HXc5cf46e7f22fd73d52895bc42c2779c5',
     ),
-    variables: () => ({}),
+    urlSuffixVar: '1',
+    urlSuffixMode: 'shortlink',
+    variables: () => ({ '1': 'profile' }),
   } satisfies WhatsAppTemplate<[]>,
 
   createClaim: {
-    contentSid: 'HX9d9725488bc9dc2c6e4340dc5a000ca1',
-    variables: () => ({}),
+    contentSid: 'HX70966729dd624c3c12174b90023e857b',
+    urlSuffixVar: '1',
+    urlSuffixMode: 'shortlink',
+    variables: () => ({ '1': 'claims/new' }),
   } satisfies WhatsAppTemplate<[]>,
 
   // "Publier une offre" — CTA button opening the create-offer webview
   // (/job-offers/new). Replaces the old in-chat publish flow. Template
   // rabotka_create_job (twilio/call-to-action, UTILITY).
   createJob: {
-    contentSid: 'HX6c8e6f659afb7363288fa25696a96ab2',
-    variables: () => ({}),
+    contentSid: 'HXc186e2699e16f829b7bc3157dbb85336',
+    urlSuffixVar: '1',
+    urlSuffixMode: 'shortlink',
+    variables: () => ({ '1': 'job-offers/new' }),
   } satisfies WhatsAppTemplate<[]>,
 
 
   viewProfile: {
-    contentSid: 'HX8ab587d99e769edaded28d5dd8247af5',
-    variables: () => ({}),
+    contentSid: 'HXa6e44c25afaae6a0d96481a12b68f54e',
+    urlSuffixVar: '1',
+    urlSuffixMode: 'shortlink',
+    variables: () => ({ '1': 'profile' }),
   } satisfies WhatsAppTemplate<[]>,
 
 
   viewApplications: {
-    contentSid: 'HX75d46b310dd534710f7254f23205a7eb',
-    variables: () => ({}),
+    contentSid: 'HX6a79507e837b75cc3abac65f047d3c33',
+    urlSuffixVar: '1',
+    urlSuffixMode: 'shortlink',
+    variables: () => ({ '1': 'profile' }),
   } satisfies WhatsAppTemplate<[]>,
 
   // "Voir le portfolio" — CTA button opening a worker's PUBLIC portfolio
@@ -141,34 +165,66 @@ export const WHATSAPP_TEMPLATES = {
   profileCreatedWorker: {
     contentSid: sid(
       'TPL_PROFILE_CREATED_KYC_WORKER',
-      'HXaf40f9505f60583cc99dac6e4134cf31',
+      'HX3b4cca9d6cfbf5bf0683545198e0db1f',
     ),
+    urlSuffixVar: '2',
+    urlSuffixMode: 'shortlink',
     variables: (firstName: string) => ({ '1': firstName }),
   } satisfies WhatsAppTemplate<[firstName: string]>,
 
   profileCreatedEmployer: {
     contentSid: sid(
       'TPL_PROFILE_CREATED_KYC_EMPLOYER',
-      'HX978164d0fdb7e388b594502e83700d85',
+      'HX5540f14049e1796d4eefd179521e87b4',
     ),
+    urlSuffixVar: '2',
+    urlSuffixMode: 'shortlink',
     variables: (firstName: string) => ({ '1': firstName }),
   } satisfies WhatsAppTemplate<[firstName: string]>,
   
 
   kyc: {
-    contentSid: sid('TPL_KYC_APPROVED_CTA', 'HX4634aa6494daabe3ac5dc9ad3fd6a9fd'),
+    contentSid: sid('TPL_KYC_APPROVED_CTA', 'HXab1c58ea985695fc3eb473aef762b137'),
+    urlSuffixVar: '2',
+    urlSuffixMode: 'shortlink',
     variables: (name: string) => ({ '1': name }),
   } satisfies WhatsAppTemplate<[name: string]>,
 
+  /**
+   * Sent when an admin activates a profile. The v1 templates ended with
+   * "Tapez *Menu* pour voir toutes les options disponibles" — there is no menu
+   * any more, so these replace them with a button into the app. {{2}} is the
+   * destination path and ends the CTA URL, so the login code can ride along.
+   *
+   * The full bulleted body renders without a "Read more": WhatsApp only
+   * attached a link preview (which does force one) when two messages carrying
+   * the same URL arrived back to back, and a profile is activated once.
+   */
   accountActivatedWorker: {
-    contentSid: 'HXef7bf2ce65d308deaa964faf1e3aaf04',
-    variables: (firstName: string) => ({ '1': firstName }),
-  } satisfies WhatsAppTemplate<[firstName: string]>,
+    contentSid: sid(
+      'TPL_ACCOUNT_ACTIVATED_WORKER',
+      'HX25c7ed5a471136b533d824a41387d758',
+    ),
+    urlSuffixVar: '2',
+    urlSuffixSeparator: '&',
+    variables: (p: { firstName: string; path: string }) => ({
+      '1': p.firstName,
+      '2': p.path,
+    }),
+  } satisfies WhatsAppTemplate<[params: { firstName: string; path: string }]>,
 
   accountActivatedEmployer: {
-    contentSid: 'HXf55fa9db88558fd5c27d1d2dd67c3f64',
-    variables: (firstName: string) => ({ '1': firstName }),
-  } satisfies WhatsAppTemplate<[firstName: string]>,
+    contentSid: sid(
+      'TPL_ACCOUNT_ACTIVATED_EMPLOYER',
+      'HX395ee26cefd5ac3ea94986ee36671563',
+    ),
+    urlSuffixVar: '2',
+    urlSuffixSeparator: '&',
+    variables: (p: { firstName: string; path: string }) => ({
+      '1': p.firstName,
+      '2': p.path,
+    }),
+  } satisfies WhatsAppTemplate<[params: { firstName: string; path: string }]>,
 
   reminder24h: {
     contentSid: sid('TPL_REMINDER_24H_CTA', 'HX518e3f6bac5a1f337456cda963692474'),
@@ -306,9 +362,12 @@ export const WHATSAPP_TEMPLATES = {
   applicationAccepted: {
     contentSid: sid(
       'TPL_APPLICATION_ACCEPTED_CTA',
-      'HX4d707dff3ff60ce21fe36927b1647924',
+      'HX6ad9840c74ea5d052ef0257f99f33644',
     ),
+    urlSuffixVar: '3',
+    urlSuffixMode: 'shortlink',
     variables: (p: { employerName: string; offerTitle: string }) => ({
+      '3': 'mes-candidatures',
       '1': p.employerName,
       '2': p.offerTitle,
     }),
@@ -317,10 +376,15 @@ export const WHATSAPP_TEMPLATES = {
   >,
 
   applicationAcceptedUnlock: {
+    // This SID is rabotka_application_accepted_unlock_cta_v2, whose URL ends in
+    // the variable (`…/login?redirect=/applications/{{3}}`) — so it can carry a
+    // login code. (The v1 template, HXfbc9a0…, put it mid-URL and could not.)
     contentSid: sid(
       'TPL_APPLICATION_ACCEPTED_UNLOCK_CTA',
       'HX3cedb9f4daad01310c52630094caaa2c',
     ),
+    urlSuffixVar: '3',
+    urlSuffixSeparator: '&',
     variables: (p: {
       employerName: string;
       offerTitle: string;
@@ -328,10 +392,6 @@ export const WHATSAPP_TEMPLATES = {
     }) => ({
       '1': p.employerName,
       '2': p.offerTitle,
-      // /applications/{{3}}/paiement — the variable sits MID-URL, so it must
-      // not carry a `?s=` login code (it would land before "/paiement" and
-      // break the link). Hence no `urlSuffixVar` on this template.
-      // The old template's "Continuer" reply reopened an in-chat prompt.
       '3': p.applicationId,
     }),
   } satisfies WhatsAppTemplate<
@@ -345,12 +405,16 @@ export const WHATSAPP_TEMPLATES = {
   >,
 
   applicationRejected: {
-    contentSid: sid('TPL_APPLICATION_REJECTED_CTA', 'HXe44c7a8f9e1d6cf75c7e1cf37e8a7666'),
-    variables: () => ({}),
+    contentSid: sid('TPL_APPLICATION_REJECTED_CTA', 'HX06b679564eca26a2bd88e48c5361357a'),
+    urlSuffixVar: '1',
+    urlSuffixMode: 'shortlink',
+    variables: () => ({ '1': 'recherche-offres' }),
   } satisfies WhatsAppTemplate<[]>,
 
   cancellation: {
     contentSid: sid('TPL_CANCELLATION_CTA', 'HX6c6f426c62bbe0c173f7f02376b47586'),
+    urlSuffixVar: '6',
+    urlSuffixSeparator: '&',
     variables: (p: {
       workerName: string;
       offerTitle: string;
@@ -383,13 +447,16 @@ export const WHATSAPP_TEMPLATES = {
   contactUnlocked: {
     contentSid: sid(
       'TPL_CONTACT_UNLOCKED_MUTUAL',
-      'HX9eb43a66b1acb109d5ff9dda2d2a2486',
+      'HX4537d7f09c1bd7a2f1e900418b97ee9d',
     ),
+    urlSuffixVar: '4',
+    urlSuffixMode: 'shortlink',
     variables: (p: {
       name: string;
       phone: string | null;
       email: string | null;
     }) => ({
+      '4': 'leave-note',
       '1': p.name,
       '2': p.phone?.trim() || 'Non renseigné',
       '3': p.email?.trim() || 'Non renseigné',
@@ -407,13 +474,16 @@ export const WHATSAPP_TEMPLATES = {
   contactUnlockedRecommendation: {
     contentSid: sid(
       'TPL_CONTACT_UNLOCKED_RECO',
-      'HX7a8a2600c16b662c320c5592835de621',
+      'HX6e2644db5dd013c2e0abbf0226b464cc',
     ),
+    urlSuffixVar: '4',
+    urlSuffixMode: 'shortlink',
     variables: (p: {
       name: string;
       phone: string | null;
       email: string | null;
     }) => ({
+      '4': 'leave-note',
       '1': p.name,
       '2': p.phone?.trim() || 'Non renseigné',
       '3': p.email?.trim() || 'Non renseigné',
@@ -423,7 +493,9 @@ export const WHATSAPP_TEMPLATES = {
   >,
 
   unlockExpiredConversion: {
-    contentSid: sid('TPL_UNLOCK_EXPIRED_CONVERSION_CTA', 'HX8c338b28d1cb8e224942413adf4489da'),
+    contentSid: sid('TPL_UNLOCK_EXPIRED_CONVERSION_CTA', 'HX6bf4ad0386162858db883156b5ea07a3'),
+    urlSuffixVar: '2',
+    urlSuffixMode: 'shortlink',
     variables: (p: { amount: number }) => ({ '1': String(p.amount) }),
   } satisfies WhatsAppTemplate<[params: { amount: number }]>,
 
@@ -455,7 +527,9 @@ export const WHATSAPP_TEMPLATES = {
   >,
 
   offerExpiredApplicant: {
-    contentSid: sid('TPL_OFFER_EXPIRED_APPLICANT_CTA', 'HX3df8380c1ebe801e512c772f9f868019'),
+    contentSid: sid('TPL_OFFER_EXPIRED_APPLICANT_CTA', 'HX0647a60e08307a0ffda4d446fb2cb711'),
+    urlSuffixVar: '2',
+    urlSuffixMode: 'shortlink',
     variables: (p: { offerTitle: string }) => ({ '1': p.offerTitle }),
   } satisfies WhatsAppTemplate<[params: { offerTitle: string }]>,
 
@@ -473,7 +547,9 @@ export const WHATSAPP_TEMPLATES = {
   >,
 
   offerUnavailableWorker: {
-    contentSid: sid('TPL_OFFER_UNAVAILABLE_WORKER_CTA', 'HX864ab0cc3426204258cf12552ef40d8a'),
+    contentSid: sid('TPL_OFFER_UNAVAILABLE_WORKER_CTA', 'HX8603fcae7dfdbcdd3570216395ede043'),
+    urlSuffixVar: '2',
+    urlSuffixMode: 'shortlink',
     variables: (p: { offerTitle: string }) => ({ '1': p.offerTitle }),
   } satisfies WhatsAppTemplate<[params: { offerTitle: string }]>,
 
@@ -510,32 +586,6 @@ export const WHATSAPP_TEMPLATES = {
     ]
   >,
 
-  jobOfferCreated: {
-    contentSid: 'HX312f029fcedf2ab8d2d35d6269490912',
-    variables: (p: {
-      title: string;
-      reference: string;
-      dateLabel: string;
-      address: string;
-      amountLabel: string;
-    }) => ({
-      '1': p.title,
-      '2': p.reference,
-      '3': p.dateLabel,
-      '4': p.address,
-      '5': p.amountLabel,
-    }),
-  } satisfies WhatsAppTemplate<
-    [
-      params: {
-        title: string;
-        reference: string;
-        dateLabel: string;
-        address: string;
-        amountLabel: string;
-      },
-    ]
-  >,
 } as const;
 
 export type WhatsAppTemplateName = keyof typeof WHATSAPP_TEMPLATES;
@@ -545,7 +595,11 @@ export type WhatsAppTemplateName = keyof typeof WHATSAPP_TEMPLATES;
  * the SID actually being sent — content SIDs are env-overridable through
  * `sid()`, so the map has to be built from the resolved values.
  */
-export type UrlSuffixTarget = { variable: string; separator: '?' | '&' };
+export type UrlSuffixTarget = {
+  variable: string;
+  separator: '?' | '&';
+  mode: 'append' | 'shortlink';
+};
 
 const URL_SUFFIX_BY_SID: ReadonlyMap<string, UrlSuffixTarget> = new Map(
   Object.values(WHATSAPP_TEMPLATES)
@@ -562,6 +616,11 @@ const URL_SUFFIX_BY_SID: ReadonlyMap<string, UrlSuffixTarget> = new Map(
           typeof template.urlSuffixSeparator === 'string'
             ? template.urlSuffixSeparator
             : '?',
+        mode:
+          'urlSuffixMode' in template &&
+          template.urlSuffixMode === 'shortlink'
+            ? 'shortlink'
+            : 'append',
       },
     ]),
 );

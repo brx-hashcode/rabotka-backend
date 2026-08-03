@@ -238,15 +238,17 @@ export class AuthService {
    * session — same payload, same expiry, same `jti` revocation as OTP login.
    * The code is consumed here, so a forwarded link only ever works once.
    */
-  async loginWithWhatsAppCode(code: string): Promise<{ token: string; profileId: string }> {
-    const profileId = await this.whatsAppLoginLink.consume(code);
+  async loginWithWhatsAppCode(
+    code: string,
+  ): Promise<{ token: string; profileId: string; path: string }> {
+    const grant = await this.whatsAppLoginLink.consume(code);
 
-    if (!profileId) {
+    if (!grant) {
       throw new UnauthorizedException('Lien de connexion invalide ou expiré');
     }
 
     const profile = await this.prisma.profile.findUnique({
-      where: { id: profileId },
+      where: { id: grant.profileId },
       select: { id: true, status: true },
     });
 
@@ -258,7 +260,11 @@ export class AuthService {
 
     const payload = { sub: profile.id, type: 'profile', jti: randomUUID() };
 
-    return { token: this.jwtService.sign(payload), profileId: profile.id };
+    return {
+      token: this.jwtService.sign(payload),
+      profileId: profile.id,
+      path: grant.path,
+    };
   }
 
   async verifyOtp(
