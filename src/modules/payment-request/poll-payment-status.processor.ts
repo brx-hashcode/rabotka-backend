@@ -21,7 +21,6 @@ export type PollPaymentStatusJobData = {
   attempt: number;
   maxAttempts: number;
   intervalMs: number;
-  // context for audit trail on failure
   profileId: string;
   amount: number;
   phone?: string;
