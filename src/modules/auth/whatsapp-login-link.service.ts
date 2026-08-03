@@ -6,7 +6,13 @@ import {
   REDIS_CONNECTION,
   REDIS_KEY_PREFIX,
 } from '../../common/services/redis/redis.constants';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
+
+/** Stored and redirected to without a leading slash, so `/s/x` → `/<path>`. */
+function normalizePath(path: string): string {
+  return path.replace(/^\/+/, '').trim() || DEFAULT_LOGIN_LANDING;
+}
 
 const WA_LOGIN_KEY_PREFIX = `${REDIS_KEY_PREFIX}wa:login:`;
 
@@ -14,8 +20,18 @@ const WA_LOGIN_KEY_PREFIX = `${REDIS_KEY_PREFIX}wa:login:`;
  *  send most users back to the login screen and defeat the purpose. */
 const WA_LOGIN_TTL_SECONDS = 24 * 60 * 60;
 
-/** Query parameter carrying the code on bot links. */
+/** Query parameter carrying the code on bot links (append mode). */
 export const WA_LOGIN_QUERY_PARAM = 's';
+
+/** What a consumed code resolves to. */
+export type WhatsAppLoginGrant = {
+  profileId: string;
+  /** Where the tap should land, without a leading slash. */
+  path: string;
+};
+
+/** Where a link with no destination of its own sends people. */
+export const DEFAULT_LOGIN_LANDING = 'home';
 
 /**
  * Reads the code and deletes it in the same round-trip, so two taps on a
@@ -44,10 +60,21 @@ export class WhatsAppLoginLinkService {
   constructor(
     @Inject(REDIS_CONNECTION) private readonly redis: Redis,
     private readonly prisma: PrismaService,
+    private readonly config: ConfigService,
   ) {}
 
-  /** Returns null when the profile may not be auto-logged in. */
-  async mint(profileId: string): Promise<string | null> {
+  /**
+   * Returns null when the profile may not be auto-logged in.
+   *
+   * The destination travels with the code rather than in the URL, which is what
+   * lets a template's button be the fixed string `…/s/{{1}}`: one variable, at
+   * the end, where WhatsApp requires it — and the landing page can change later
+   * without another Meta approval.
+   */
+  async mint(
+    profileId: string,
+    path: string = DEFAULT_LOGIN_LANDING,
+  ): Promise<string | null> {
     const profile = await this.prisma.profile.findUnique({
       where: { id: profileId },
       select: { status: true },
@@ -59,7 +86,7 @@ export class WhatsAppLoginLinkService {
     const code = randomBytes(32).toString('base64url');
     await this.redis.set(
       `${WA_LOGIN_KEY_PREFIX}${code}`,
-      profileId,
+      JSON.stringify({ p: profileId, d: normalizePath(path) }),
       'EX',
       WA_LOGIN_TTL_SECONDS,
     );
@@ -67,17 +94,56 @@ export class WhatsAppLoginLinkService {
     return code;
   }
 
-  /** Consumes the code, returning the profile it was minted for. */
-  async consume(code: string): Promise<string | null> {
+  /** Consumes the code, returning who it was minted for and where they were going. */
+  async consume(code: string): Promise<WhatsAppLoginGrant | null> {
     if (!code || code.trim().length === 0) return null;
 
-    const profileId = (await this.redis.eval(
+    const stored = (await this.redis.eval(
       LUA_GET_AND_DELETE,
       1,
       `${WA_LOGIN_KEY_PREFIX}${code}`,
     )) as string | null;
 
-    return profileId ?? null;
+    if (!stored) return null;
+
+    try {
+      const parsed = JSON.parse(stored) as { p?: string; d?: string };
+      if (!parsed.p) return null;
+      return {
+        profileId: parsed.p,
+        path: normalizePath(parsed.d ?? DEFAULT_LOGIN_LANDING),
+      };
+    } catch {
+      // Codes minted before destinations existed stored a bare profile id.
+      return { profileId: stored, path: DEFAULT_LOGIN_LANDING };
+    }
+  }
+
+  /**
+   * A one-tap link to `path`. This is the only shape that works everywhere —
+   * template buttons, plain-text messages — because the whole destination lives
+   * behind the code instead of in the URL.
+   */
+  async shortLink(profileId: string, path: string): Promise<string | null> {
+    try {
+      const code = await this.mint(profileId, path);
+      if (!code) return null;
+
+      return `${this.frontendUrl()}/s/${code}`;
+    } catch (err) {
+      this.logger.warn(
+        `Could not build a login link for profile ${profileId}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      return null;
+    }
+  }
+
+  private frontendUrl(): string {
+    return (
+      this.config.get<string>('FRONTEND_URL') ?? 'http://localhost:3000'
+    ).replace(/\/+$/, '');
   }
 
   /**

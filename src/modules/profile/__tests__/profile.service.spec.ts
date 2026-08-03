@@ -538,6 +538,32 @@ describe('ProfileService', () => {
       expect(result.id).toBe('p-1');
     });
 
+    it('activates the account when KYC passes', async () => {
+      // Verified is the moment the account becomes usable — leaving it
+      // PENDING_ACTIVATION means the worker still cannot do anything.
+      await service.verifyProfileKyc('p-1', 'admin-1', 'VERIFIED', 'Conforme.');
+
+      expect(prisma.profile.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'p-1' },
+          data: expect.objectContaining({
+            verification_status: 'VERIFIED',
+            whatsapp_connected: true,
+            status: 'ACTIVE',
+          }),
+        }),
+      );
+    });
+
+    it('leaves the account untouched when KYC is rejected', async () => {
+      await service.verifyProfileKyc('p-1', 'admin-1', 'REJECTED', 'Flou.');
+
+      const data = prisma.profile.update.mock.calls.at(-1)?.[0].data;
+      expect(data.verification_status).toBe('REJECTED');
+      expect(data.whatsapp_connected).toBeUndefined();
+      expect(data.status).toBeUndefined();
+    });
+
     it('rejects KYC with a reason', async () => {
       const result = await service.verifyProfileKyc(
         'p-1',

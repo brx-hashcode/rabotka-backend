@@ -231,7 +231,9 @@ describe('BotNotificationService', () => {
       expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+24200000001',
         WHATSAPP_TEMPLATES.applicationRejected.contentSid,
-        {},
+        // The destination the short link resolves to; the processor swaps it
+        // for a login code on the way out.
+        { '1': 'recherche-offres' },
       );
     });
 
