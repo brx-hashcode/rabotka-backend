@@ -55,6 +55,9 @@ describe('MobileFeedController', () => {
 
   /** The `where` handed to jobOffer.findMany on the last call. */
   const lastWhere = () => prisma.jobOffer.findMany.mock.calls.at(-1)?.[0].where;
+  /** "Pour vous" now issues several offer queries; assert against any of them. */
+  const allWheres = () =>
+    prisma.jobOffer.findMany.mock.calls.map((c: unknown[]) => (c[0] as any).where);
   const lastArgs = () => prisma.jobOffer.findMany.mock.calls.at(-1)?.[0];
 
   beforeEach(() => {
@@ -151,7 +154,7 @@ describe('MobileFeedController', () => {
       expect(result[0].id).toBe('open');
     });
 
-    it('falls back to the worker\'s own domains when nothing is matched', async () => {
+    it("tops up with the worker's own domains", async () => {
       mockType(ProfileType.WORKER);
       prisma.profileCategory.findMany.mockResolvedValue([
         { category_id: 'c1' },
@@ -160,17 +163,65 @@ describe('MobileFeedController', () => {
 
       await controller.jobFeed(reqFor('w1') as never);
 
-      expect(lastWhere()).toMatchObject({ category_id: { in: ['c1', 'c2'] } });
+      expect(allWheres()).toContainEqual(
+        expect.objectContaining({ category_id: { in: ['c1', 'c2'] } }),
+      );
     });
 
-    it('falls back to all open offers when the worker has no domains', async () => {
+    it('also asks for every open offer, so nothing visible under a chip is missing', async () => {
       mockType(ProfileType.WORKER);
-      prisma.profileCategory.findMany.mockResolvedValue([]);
+      prisma.profileCategory.findMany.mockResolvedValue([
+        { category_id: 'c1' },
+      ]);
 
       await controller.jobFeed(reqFor('w1') as never);
 
+      // The last query is the unrestricted one.
       expect(lastWhere().category_id).toBeUndefined();
       expect(lastWhere()).toMatchObject({ deleted_at: null });
+    });
+
+    it('keeps ranked hits on top and fills the rest of the page', async () => {
+      // The bug this replaces: one semantic hit produced a one-item feed while a
+      // domain chip listed several, because the ranked set replaced the feed
+      // instead of ordering it.
+      mockType(ProfileType.WORKER);
+      matchingService.findMatchingJobsForWorker.mockResolvedValue([
+        { id: 'ranked', score: 0.91 },
+      ]);
+      prisma.jobOffer.findMany
+        .mockResolvedValueOnce([{ id: 'ranked' }]) // keepOpenOffers
+        .mockResolvedValueOnce([{ id: 'own-domain' }]) // worker's categories
+        .mockResolvedValueOnce([{ id: 'ranked' }, { id: 'anything' }]); // everything
+      jobOfferService.findById.mockImplementation((id: string) =>
+        Promise.resolve({ id, title: id }),
+      );
+
+      const result = await controller.jobFeed(reqFor('w1') as never);
+
+      expect(result.map((r: { id: string }) => r.id)).toEqual([
+        'ranked',
+        'own-domain',
+        'anything',
+      ]);
+      expect(result[0].matchScore).toBe(0.91);
+    });
+
+    it('never exceeds the requested page size', async () => {
+      mockType(ProfileType.WORKER);
+      matchingService.findMatchingJobsForWorker.mockResolvedValue([]);
+      prisma.jobOffer.findMany.mockResolvedValue([
+        { id: 'a' },
+        { id: 'b' },
+        { id: 'c' },
+      ]);
+      jobOfferService.findById.mockImplementation((id: string) =>
+        Promise.resolve({ id, title: id }),
+      );
+
+      const result = await controller.jobFeed(reqFor('w1') as never, '2');
+
+      expect(result.map((r: { id: string }) => r.id)).toEqual(['a', 'b']);
     });
 
     it('drops ids that no longer resolve to an offer', async () => {

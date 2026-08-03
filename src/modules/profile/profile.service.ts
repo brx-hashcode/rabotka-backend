@@ -177,6 +177,9 @@ type PrismaTransactionClient = Parameters<
 const VERIFICATION_TOKEN_TTL_SECONDS = 1800;
 const VERIFICATION_TOKEN_KEY_PREFIX = `${REDIS_KEY_PREFIX}wa:verify:`;
 
+/** Where the activation message's button lands. `/home` is role-aware. */
+const ACTIVATION_LANDING_PATH = 'home';
+
 @Injectable()
 export class ProfileService {
   private readonly logger = new Logger(ProfileService.name);
@@ -400,7 +403,10 @@ export class ProfileService {
         .sendTemplateMessage(
           profile.phone,
           tpl.contentSid,
-          tpl.variables(profile.first_name),
+          tpl.variables({
+            firstName: profile.first_name,
+            path: ACTIVATION_LANDING_PATH,
+          }),
         )
         .catch((err) =>
           this.logger.warn(
@@ -719,6 +725,12 @@ export class ProfileService {
           verified_at: now,
           kyc_verification_note: note,
           rejection_reason: decision === 'REJECTED' ? note : null,
+          // Passing KYC is the moment the account becomes usable: a verified
+          // profile left PENDING_ACTIVATION can do nothing, and every other
+          // writer of whatsapp_connected flips status with it.
+          ...(decision === 'VERIFIED'
+            ? { whatsapp_connected: true, status: AccountStatus.ACTIVE }
+            : {}),
         },
       }),
 
@@ -828,7 +840,11 @@ export class ProfileService {
           await this.whatsAppService.sendTemplateMessage(
             profile.phone,
             tpl.contentSid,
-            tpl.variables(profile.first_name),
+            tpl.variables({
+              firstName: profile.first_name,
+              path: ACTIVATION_LANDING_PATH,
+            }),
+            profileId,
           );
         }
       } catch {
