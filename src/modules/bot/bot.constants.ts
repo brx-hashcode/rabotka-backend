@@ -7,89 +7,36 @@ export const BOT_STATE_TTL_SECONDS = 86400;
 // Shorter TTLs for flows that should expire if abandoned mid-conversation.
 // Flows not listed here fall back to BOT_STATE_TTL_SECONDS (24h).
 export const FLOW_TTL_SECONDS: Partial<Record<string, number>> = {
-  apply_job: 4 * 3600, // 4 h
-  publish_job: 4 * 3600, // 4 h
   cancel_application: 2 * 3600,
   accept_refuse_candidate: 2 * 3600,
-  list_offers: 2 * 3600,
-  search_by_ref: 2 * 3600,
-  my_applications: 2 * 3600,
-  candidatures_list: 2 * 3600,
-  profile_submenu: 1800, // 30 min
-  recommended_jobs: 2 * 3600,
-  recommended_profiles: 2 * 3600,
-  my_offers: 2 * 3600,
   verify_whatsapp: 10 * 60, // 10 min — OTP-like, short window
   job_status_check: 30 * 60, // 30 min — re-triggered by reminder anyway
-  manage_filled_job: 30 * 60, // 30 min
   post_cancellation_actions: 30 * 60, // 30 min
   republish_expired_job: 30 * 60, // 30 min
   rate_assignment: 2 * 3600,
   pay_penalties: 3600, // 1 h — holds payment intent
-  resolve_penalties: 3600, // 1 h — holds payment intent
   unlock_contact: 3600, // 1 h — holds payment intent
-  credit_wallet: 3600, // 1 h — holds top-up payment intent
 };
 
 export const FLOW_IDS = {
-  PUBLISH_JOB: 'publish_job',
-  APPLY_JOB: 'apply_job',
-  CANCEL_APPLICATION: 'cancel_application',
   ACCEPT_REFUSE_CANDIDATE: 'accept_refuse_candidate',
-  CANDIDATURES_LIST: 'candidatures_list',
-  LIST_OFFERS: 'list_offers',
-  MY_APPLICATIONS: 'my_applications',
-  MANAGE_FILLED_JOB: 'manage_filled_job',
-  PAY_PENALTIES: 'pay_penalties',
-  VERIFY_WHATSAPP: 'verify_whatsapp',
-  RESOLVE_PENALTIES: 'resolve_penalties',
-  UNLOCK_CONTACT: 'unlock_contact',
-  RECOMMENDED_JOBS: 'recommended_jobs',
-  RECOMMENDED_PROFILES: 'recommended_profiles',
-  REPUBLISH_EXPIRED_JOB: 'republish_expired_job',
-  RATE_ASSIGNMENT: 'rate_assignment',
-  MY_OFFERS: 'my_offers',
+  CANCEL_APPLICATION: 'cancel_application',
   JOB_STATUS_CHECK: 'job_status_check',
-  SEARCH_BY_REF: 'search_by_ref',
+  PAY_PENALTIES: 'pay_penalties',
   /** Tiny state machine that handles the 1/2/3 menu shown to an employer
    *  after a worker cancels their candidature (see formatCancellationToEmployer). */
   POST_CANCELLATION_ACTIONS: 'post_cancellation_actions',
-  CREDIT_WALLET: 'credit_wallet',
+  RATE_ASSIGNMENT: 'rate_assignment',
+  REPUBLISH_EXPIRED_JOB: 'republish_expired_job',
+  UNLOCK_CONTACT: 'unlock_contact',
+  VERIFY_WHATSAPP: 'verify_whatsapp',
 } as const;
 
-export const WORKER_MENU_OPTIONS = {
-  LIST_OFFERS: '1',
-  MY_APPLICATIONS: '2',
-  RECOMMENDED_JOBS: '3',
-  SEARCH_BY_REF: '4',
-  PROFILE: '5',
-  CREDIT_WALLET: '6',
-  CREATE_CLAIM: '7',
-  HELP: '8',
-} as const;
-
-export const EMPLOYER_MENU_OPTIONS = {
-  PUBLISH_OFFER: '1',
-  CANDIDATURES_RECEIVED: '2',
-  MY_OFFERS: '3',
-  FILLED_JOBS: '4',
-  RECOMMENDED_PROFILES: '5',
-  PROFILE: '6',
-  CREDIT_WALLET: '7',
-  CREATE_CLAIM: '8',
-  HELP: '9',
-} as const;
-
+/**
+ * Words that mean "get me out of here". There is no menu any more — inside a
+ * live flow these exit it, and the orchestrator answers with the welcome card.
+ */
 export const CMD_MENU = ['menu', 'aide', 'help', 'bonjour', '*'];
-export const CMD_PUBLISH = ['publier', 'publish'];
-export const CMD_MY_OFFERS = ['mes offres', 'mes offres publiées', 'my offers'];
-export const CMD_CANDIDATURES = ['candidatures', 'candidatures reçues'];
-export const CMD_FILLED_JOBS = ['missions pourvues', 'gérer missions pourvues'];
-export const CMD_PROFILE = ['profil', 'mon profil', 'profile'];
-export const CMD_HISTORY = ['historique', 'history'];
-export const CMD_LIST_OFFERS = ['voir les offres', 'offres', 'list offres'];
-export const CMD_MY_APPLICATIONS = ['mes candidatures', 'mes applications'];
-export const CMD_PENDING_PAYMENTS = ['paiements en attente', 'waiting payment'];
 export const CMD_PAY = [
   'payer',
   'régler',
@@ -97,37 +44,5 @@ export const CMD_PAY = [
   'payer pénalités',
   'payer penalites',
 ];
-export const CMD_UNLOCK = ['débloquer', 'debloquer', 'unlock', 'contact'];
-export const CMD_RECOMMENDED_JOBS = [
-  'offres recommandées',
-  'Offres recommandées',
-  'recommandées',
-  'recommended',
-];
-export const CMD_RECOMMENDED_PROFILES = [
-  'Profils recommandés',
-  'Travailleurs recommandés',
-  'Recommandés',
-];
 export const CMD_VERIFY_WHATSAPP = ['verifier', 'verify', 'vérifier'];
-export const CMD_SEARCH_BY_REF = [
-  'référence',
-  'reference',
-  'ref',
-  'rechercher référence',
-  'rechercher reference',
-];
-export const CMD_CREDIT_WALLET = [
-  'recharger',
-  'recharger mon wallet',
-  'recharge',
-  'recharger portefeuille',
-];
 
-export const CMD_CREATE_CLAIM = [
-  'reclamation',
-  'réclamation',
-  'creer une reclamation',
-  'créer une réclamation',
-  'claim',
-];

@@ -21,7 +21,6 @@ import type { ProfileAuthenticatedRequest } from '../auth/guards/jwt-auth.guard'
 import { JobOfferService } from './job-offer.service';
 import { CreateJobOfferDto } from './dto/create-job-offer.dto';
 import { RepublishJobOfferDto } from './dto/republish-job-offer.dto';
-import { BotNotificationService } from '../bot/services/bot-notification.service';
 
 @ApiTags('Job Offers')
 @Controller('job-offers')
@@ -29,7 +28,6 @@ import { BotNotificationService } from '../bot/services/bot-notification.service
 export class JobOfferController {
   constructor(
     private readonly jobOfferService: JobOfferService,
-    private readonly botNotification: BotNotificationService,
   ) {}
 
   @Post()
@@ -45,14 +43,10 @@ export class JobOfferController {
   ) {
     // EMPLOYER enforcement (profile type, account status, reliability, hard-block)
     // lives inside JobOfferService.create() and throws Forbidden otherwise.
-    const offer = await this.jobOfferService.create(req.user.profileId, dto);
-
-    // Best-effort WhatsApp confirmation (recap + copyable reference). Triggered
-    // here — not in the shared service — so the bot flow keeps its own inline
-    // confirmation and we don't double-send.
-    void this.botNotification.sendJobCreatedConfirmation(offer.id);
-
-    return offer;
+    // Publishing sends no WhatsApp message: the employer is already on the web
+    // form and gets the reference on the success screen, so a push adds nothing
+    // but noise. The bot's own publish flow still answers inline, in-conversation.
+    return this.jobOfferService.create(req.user.profileId, dto);
   }
 
   @Post(':id/republish')
