@@ -10,12 +10,10 @@ import { JobOfferService } from '../../job-offer/job-offer.service';
 import { ApplicationService } from '../../application/application.service';
 import { BotStateService } from './bot-state.service';
 import { BotRouterService } from '../router/bot-router.service';
-import { BotCommandsService } from './bot-commands.service';
 import { BotNotificationService } from './bot-notification.service';
 import { BotInboxService } from './bot-inbox.service';
 import { BotDraftService } from './bot-draft.service';
 import { welcomePlatformMessage } from '../messages/welcome.messages';
-import { handleHelpCommand } from '../commands/help.command';
 import { SystemConfigService } from '../../system-config/system-config.service';
 import { WHATSAPP_TEMPLATES } from '../../../common/constants/whatsapp-templates';
 import { templateReply } from '../../../common/constants/whatsapp-carousel';
@@ -27,41 +25,16 @@ import {
 } from '../messages/menu.messages';
 import type { BotProfile, BotState } from '../types/bot-state.types';
 import type { FlowContext, FlowResult } from '../types/flow.types';
-import {
-  FLOW_IDS,
-  CMD_MENU,
-  CMD_PROFILE,
-  CMD_CREATE_CLAIM,
-  EMPLOYER_MENU_OPTIONS,
-} from '../bot.constants';
-import { runPublishJobFlow } from '../flows/publish-job.flow';
-import {
-  runListOffersFlow,
-  getListOffersInitialState,
-} from '../flows/list-offers.flow';
-import { runApplyJobFlow } from '../flows/apply-job.flow';
+import { FLOW_IDS, CMD_MENU } from '../bot.constants';
 import {
   runAcceptRefuseCandidateFlow,
   getAcceptRefuseInitialState,
 } from '../flows/accept-refuse-candidate.flow';
 import { runCancelApplicationFlow } from '../flows/cancel-application.flow';
 import {
-  runMyApplicationsFlow,
-  getMyApplicationsInitialState,
-} from '../flows/my-applications.flow';
-import {
-  runCandidaturesListFlow,
-  getCandidaturesListInitialState,
-} from '../flows/candidatures-list.flow';
-import {
-  runManageFilledJobFlow,
-  getManageFilledJobInitialState,
-} from '../flows/manage-filled-job.flow';
-import {
   runPayPenaltiesFlow,
   getPayPenaltiesInitialState,
 } from '../flows/pay-penalties.flow';
-import { runResolvePenaltiesFlow } from '../flows/resolve-penalties.flow';
 import { PaymentService } from '../../payments/payment.service';
 import { ContactUnlockService } from '../../contact-unlock/contact-unlock.service';
 import { WalletService } from '../../wallet/wallet.service';
@@ -69,31 +42,11 @@ import {
   runUnlockContactFlow,
   getUnlockContactInitialState,
 } from '../flows/unlock-contact.flow';
-import {
-  runRecommendedJobsFlow,
-  getRecommendedJobsInitialState,
-  buildPagedListReply,
-} from '../flows/recommended-jobs.flow';
 import { jobOfferToOfferListItem } from '../messages/offers.messages';
-import {
-  runRecommendedProfilesFlow,
-  getRecommendedProfilesInitialState,
-  buildWorkerListReply,
-  WORKER_LIST_SELECT,
-} from '../flows/recommended-profiles.flow';
 import {
   runRateAssignmentFlow,
   getRateAssignmentInitialState,
 } from '../flows/rate-assignment.flow';
-import {
-  runSearchByRefFlow,
-  getSearchByRefInitialState,
-  getSearchByRefPromptMessage,
-} from '../flows/search-by-ref.flow';
-import {
-  runCreditWalletFlow,
-  getCreditWalletInitialState,
-} from '../flows/credit-wallet.flow';
 import { MatchingService } from '../../matching/matching.service';
 import { QueueService } from '../../../common/services/queue/queue.service';
 import { runRepublishExpiredJobFlow } from '../flows/republish-expired-job.flow';
@@ -161,7 +114,6 @@ export class BotOrchestratorService {
     private readonly botInbox: BotInboxService,
     private readonly botDraft: BotDraftService,
     private readonly router: BotRouterService,
-    private readonly commands: BotCommandsService,
     private readonly jobOfferService: JobOfferService,
     private readonly applicationService: ApplicationService,
     private readonly notificationService: BotNotificationService,
@@ -234,7 +186,7 @@ export class BotOrchestratorService {
         // review — so those two stay reachable via a restricted 1/2 menu.
         // Handled here, before routeMessage, so this numbering can't collide
         // with the full menu's (worker '1' = Trouver une mission).
-        return [this.handlePendingKycInput(normalizedInput)];
+        return [this.handlePendingKycInput()];
       }
 
       // KYC verified + user types Menu → activate account
@@ -278,33 +230,15 @@ export class BotOrchestratorService {
   }
 
   /**
-   * Input handling for a profile whose KYC is still under review.
-   *
-   * Answers everything with one template carrying a "Gérer mon profil" button.
-   * The old reply was a typed 1/2 menu whose options each just returned a
-   * webview template — so the typing step bought nothing, and it contradicted
-   * the onboarding message that already told the user to use the web app.
-   *
-   * The named commands stay honoured: someone who explicitly types "profil" or
-   * "reclamation" gets that specific page rather than the generic one.
+   * Input handling for a profile whose KYC is still under review: one template
+   * carrying a "Gérer mon profil" button, whatever they typed. The old reply
+   * was a 1/2 menu whose options each returned a webview template anyway.
    */
-  private handlePendingKycInput(normalizedInput: string): string {
-    if (CMD_PROFILE.includes(normalizedInput)) {
-      return templateReply(
-        WHATSAPP_TEMPLATES.viewProfile.contentSid,
-        WHATSAPP_TEMPLATES.viewProfile.variables(),
-      );
-    }
-    if (CMD_CREATE_CLAIM.includes(normalizedInput)) {
-      return templateReply(
-        WHATSAPP_TEMPLATES.createClaim.contentSid,
-        WHATSAPP_TEMPLATES.createClaim.variables(),
-      );
-    }
+  private handlePendingKycInput(): string {
     return templateReply(
-        WHATSAPP_TEMPLATES.kycPendingMenu.contentSid,
-        WHATSAPP_TEMPLATES.kycPendingMenu.variables(),
-      );
+      WHATSAPP_TEMPLATES.kycPendingMenu.contentSid,
+      WHATSAPP_TEMPLATES.kycPendingMenu.variables(),
+    );
   }
 
   /**
@@ -421,8 +355,7 @@ export class BotOrchestratorService {
     // Already inside a payment-related flow — let it run.
     const canContinueFlow =
       state?.flowId === FLOW_IDS.PAY_PENALTIES ||
-      state?.flowId === FLOW_IDS.UNLOCK_CONTACT ||
-      state?.flowId === FLOW_IDS.MY_APPLICATIONS;
+      state?.flowId === FLOW_IDS.UNLOCK_CONTACT;
     if (canContinueFlow) {
       return this.routeMessage(profileId, text, profile, botProfile);
     }
@@ -612,16 +545,6 @@ export class BotOrchestratorService {
     }
 
     if (result.clearState) {
-      if (state.flowId === FLOW_IDS.PUBLISH_JOB) {
-        await this.botDraft
-          .clearDraft(profileId)
-          .catch((err: unknown) =>
-            this.logger.warn(
-              `clearDraft failed for profile ${profileId}`,
-              err instanceof Error ? err.message : String(err),
-            ),
-          );
-      }
       await this.botState.clear(profileId);
       const nextInboxItem = await this.botInbox.peekAndShift(profileId);
       if (nextInboxItem?.type === 'new_application') {
@@ -678,7 +601,7 @@ export class BotOrchestratorService {
         const lastIdx = result.reply.length - 1;
         result.reply[lastIdx] =
           last +
-          `\n\n*${inboxCount} candidature(s) en attente.* Tapez *${EMPLOYER_MENU_OPTIONS.CANDIDATURES_RECEIVED}* (Candidatures reçues) pour les traiter.`;
+          `\n\n*${inboxCount} candidature(s) en attente* dans l’application.`;
       }
     }
 
@@ -693,7 +616,6 @@ export class BotOrchestratorService {
       notificationService: this.notificationService,
       systemConfigService: this.systemConfig,
       paymentService: this.paymentService,
-      commands: this.commands,
       contactUnlockService: this.contactUnlockService,
       walletService: this.walletService,
       interestSignalService: this.interestSignalService,
@@ -710,11 +632,9 @@ export class BotOrchestratorService {
   ): Promise<FlowResult | null> {
     const ctx = this.buildFlowContext();
     const runners: Record<string, () => Promise<FlowResult>> = {
-      [FLOW_IDS.PUBLISH_JOB]: () =>
-        runPublishJobFlow(state, input, profile, ctx),
-      [FLOW_IDS.LIST_OFFERS]: () =>
-        runListOffersFlow(state, input, profile, ctx),
-      [FLOW_IDS.APPLY_JOB]: () => runApplyJobFlow(state, input, profile, ctx),
+
+
+
       [FLOW_IDS.ACCEPT_REFUSE_CANDIDATE]: () =>
         runAcceptRefuseCandidateFlow(state, input, profile, ctx),
       [FLOW_IDS.CANCEL_APPLICATION]: async () => {
@@ -725,23 +645,18 @@ export class BotOrchestratorService {
           cancellationThresholdHours,
         });
       },
-      [FLOW_IDS.MY_APPLICATIONS]: () =>
-        runMyApplicationsFlow(state, input, profile, ctx),
-      [FLOW_IDS.CANDIDATURES_LIST]: () =>
-        runCandidaturesListFlow(state, input, profile, ctx),
-      [FLOW_IDS.MANAGE_FILLED_JOB]: () =>
-        runManageFilledJobFlow(state, input, profile, ctx),
+
+
+
       [FLOW_IDS.PAY_PENALTIES]: () =>
         runPayPenaltiesFlow(state, input, profile, ctx),
-      [FLOW_IDS.RESOLVE_PENALTIES]: () =>
-        runResolvePenaltiesFlow(state, input, profile, ctx),
+
       [FLOW_IDS.UNLOCK_CONTACT]: () =>
         runUnlockContactFlow(state, input, profile, {
           ...ctx,
           botNotification: this.notificationService,
         }),
-      [FLOW_IDS.RECOMMENDED_JOBS]: () =>
-        runRecommendedJobsFlow(state, input, profile, ctx),
+
       [FLOW_IDS.REPUBLISH_EXPIRED_JOB]: () =>
         runRepublishExpiredJobFlow(state, input, profile, {
           prisma: this.prisma,
@@ -754,147 +669,14 @@ export class BotOrchestratorService {
           queueService: this.queueService,
           employerId: profile.id,
         }),
-      [FLOW_IDS.RECOMMENDED_PROFILES]: () =>
-        runRecommendedProfilesFlow(state, input, profile, {
-          prisma: this.prisma,
-          systemConfig: this.systemConfig,
-          contactUnlockService: this.contactUnlockService,
-          walletService: this.walletService,
-          paymentService: this.paymentService,
-          botNotification: this.notificationService,
-          employerProfileId: profile.id,
-          interestSignalService: this.interestSignalService,
-          invoiceService: this.invoiceService,
-          portfolioService: this.portfolioService,
-        }),
+
       [FLOW_IDS.RATE_ASSIGNMENT]: () =>
         runRateAssignmentFlow(state, input, profile, {
           prisma: this.prisma,
           applicationService: this.applicationService,
         }),
-      [FLOW_IDS.SEARCH_BY_REF]: () =>
-        runSearchByRefFlow(state, input, profile, ctx),
-      [FLOW_IDS.CREDIT_WALLET]: () =>
-        runCreditWalletFlow(state, input, profile, {
-          paymentService: this.paymentService,
-          walletService: this.walletService,
-        }),
-      [FLOW_IDS.MY_OFFERS]: async () => {
-        const currentPage = (state.payload?.page as number) ?? 0;
-        const offerIds = (state.payload?.offerIds as string[]) ?? [];
-        const trimmed = input.trim();
-        const normalized = trimmed.toLowerCase();
-        if (normalized === 'm') {
-          return { reply: [welcomePlatformMessage()], clearState: true };
-        }
-        const PAGE_SIZE = 5;
-        const { total } = await this.jobOfferService.findByEmployerId(
-          profile.id,
-          { page: 0, pageSize: 1 },
-        );
-        const totalPages = Math.ceil(total / PAGE_SIZE);
-        if (normalized === 's' && currentPage < totalPages - 1) {
-          const nextPage = currentPage + 1;
-          const { message, offerIds: newOfferIds } =
-            await this.commands.myOffers(profile, nextPage);
-          return {
-            reply: [message],
-            nextState: {
-              flowId: FLOW_IDS.MY_OFFERS,
-              step: 0,
-              payload: { page: nextPage, offerIds: newOfferIds },
-              updatedAt: new Date().toISOString(),
-            },
-          };
-        }
-        if (normalized === 'p' && currentPage > 0) {
-          const prevPage = currentPage - 1;
-          const { message, offerIds: newOfferIds } =
-            await this.commands.myOffers(profile, prevPage);
-          return {
-            reply: [message],
-            nextState: {
-              flowId: FLOW_IDS.MY_OFFERS,
-              step: 0,
-              payload: { page: prevPage, offerIds: newOfferIds },
-              updatedAt: new Date().toISOString(),
-            },
-          };
-        }
-        const choice = /^\d+$/.test(trimmed) ? Number.parseInt(trimmed, 10) : 0;
-        const pageStart = currentPage * PAGE_SIZE;
-        const localIndex = choice - pageStart - 1;
-        if (
-          choice >= pageStart + 1 &&
-          choice <= pageStart + offerIds.length &&
-          localIndex >= 0 &&
-          localIndex < offerIds.length
-        ) {
-          const offerId = offerIds[localIndex];
-          const offer = await this.jobOfferService.findById(offerId);
-          if (!offer) {
-            return {
-              reply: ["*Cette offre n'existe plus.*"],
-              clearState: true,
-            };
-          }
-          const dateStr = offer.scheduled_at.toLocaleDateString('fr-FR', {
-            day: '2-digit',
-            month: '2-digit',
-            year: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-          });
-          const amountStr =
-            offer.amount == null
-              ? 'Prix à négocier'
-              : `${offer.amount.toLocaleString('fr-FR')} FCFA`;
-          const detail = [
-            `*${offer.title}*`,
-            `*Référence*: \`${offer.reference}\``,
-            '',
-            `• Date : ${dateStr}`,
-            `• Montant : ${amountStr}`,
-            `• Adresse : ${offer.address}`,
-            `• Statut : ${translateJobOfferStatus(offer.status)}`,
-            `• Candidatures : ${offer.acceptedCount ?? 0}/${offer.quantity}`,
-            offer.description ? `• Description : ${offer.description}` : '',
-            '',
-            'R- Retour à la liste',
-            'M- Menu principal',
-          ]
-            .filter((l) => l !== '')
-            .join('\n');
-          return {
-            reply: [detail],
-            nextState: {
-              ...state,
-              payload: {
-                ...state.payload,
-                step: 'detail',
-                selectedOfferId: offerId,
-              },
-              updatedAt: new Date().toISOString(),
-            },
-          };
-        }
-        if ((state.payload?.step as string) === 'detail') {
-          if (normalized === 'r') {
-            const { message, offerIds: refreshedIds } =
-              await this.commands.myOffers(profile, currentPage);
-            return {
-              reply: [message],
-              nextState: {
-                flowId: FLOW_IDS.MY_OFFERS,
-                step: 0,
-                payload: { page: currentPage, offerIds: refreshedIds },
-                updatedAt: new Date().toISOString(),
-              },
-            };
-          }
-        }
-        return { reply: [unknownCommandMessage()], nextState: state };
-      },
+
+
       [FLOW_IDS.POST_CANCELLATION_ACTIONS]: async () => {
         const result = await runPostCancellationActionsFlow(
           state,
@@ -905,17 +687,10 @@ export class BotOrchestratorService {
             applicationService: this.applicationService,
           },
         );
-        // Resolve the "Voir les autres candidatures" hand-off inline — we
-        // have access to the candidatures-received command + state setter.
+        // "Voir les autres candidatures" now sends them to the app: the
+        // in-chat list flow is gone, and browsing candidates belongs there.
         if (result.handoff?.type === 'candidatures') {
-          const cmdResult = await this.commands.candidaturesReceived(profile);
-          if (cmdResult.items?.length) {
-            const listState = getCandidaturesListInitialState(cmdResult.items);
-            await this.botState.set(profile.id, listState);
-          } else {
-            await this.botState.clear(profile.id);
-          }
-          return { reply: [cmdResult.message] };
+          return { reply: [welcomePlatformMessage()], clearState: true };
         }
         return result;
       },
@@ -924,233 +699,22 @@ export class BotOrchestratorService {
     return runner ? runner() : Promise.resolve(null);
   }
 
+  /**
+   * The router can only produce `pay_penalties` now — the PAYER escape from
+   * inside a live flow. Every other command was reachable only by typing into
+   * the retired menu, and those journeys live in the app.
+   */
   private async handleCommandRoute(
     route: { type: 'command'; commandId: string },
-    profile: NonNullable<Awaited<ReturnType<typeof this.loadProfile>>>,
+    _profile: NonNullable<Awaited<ReturnType<typeof this.loadProfile>>>,
     profileId: string,
     botProfile: BotProfile,
   ): Promise<string[]> {
-    const commandHandlers: Record<string, () => Promise<string[]>> = {
-      start_publish_job: () =>
-        Promise.resolve(this.handleStartPublishJobCommand()),
-
-      list_offers: () => this.handleListOffersCommand(profile, profileId),
-
-      my_applications: () =>
-        Promise.resolve(this.handleMyApplicationsCommand()),
-
-      pending_payments: () =>
-        this.handlePendingPaymentsCommand(botProfile, profileId),
-
-      candidatures_received: () =>
-        this.handleCandidaturesReceivedCommand(botProfile, profileId),
-
-      filled_jobs: () => this.handleFilledJobsCommand(botProfile, profileId),
-
-      my_offers: () => this.handleMyOffersCommand(botProfile, profileId, 0),
-
-
-      pay_penalties: () =>
-        this.handlePayPenaltiesCommand(botProfile, profileId),
-
-      unlock_contact: () =>
-        this.handleUnlockContactCommand(botProfile, profileId),
-
-      recommended_jobs: () =>
-        this.handleRecommendedJobsCommand(botProfile, profileId),
-
-      recommended_profiles: () =>
-        this.handleRecommendedProfilesCommand(botProfile, profileId),
-
-      search_by_ref: () => this.handleSearchByRefCommand(botProfile, profileId),
-
-      credit_wallet: () => this.handleCreditWalletCommand(botProfile, profileId),
-    };
-
-    const handler = commandHandlers[route.commandId];
-    if (handler) return handler();
-    if (route.commandId === 'menu') {
-      await this.botState.clear(profileId);
-    }
-    const reply = await this.runCommand(route.commandId, botProfile);
-    return [reply];
-  }
-
-  private handleStartPublishJobCommand(): string[] {
-    // Publishing an offer now opens the create-offer webview via a URL-button
-    // template (same pattern as viewProfile / createClaim), replacing the old
-    // in-chat 8-step publish flow. Stateless — sets no bot state.
-    return [templateReply(
-        WHATSAPP_TEMPLATES.createJob.contentSid,
-        WHATSAPP_TEMPLATES.createJob.variables(),
-      )];
-  }
-
-  private async handleListOffersCommand(
-    profile: NonNullable<Awaited<ReturnType<typeof this.loadProfile>>>,
-    profileId: string,
-  ): Promise<string[]> {
-    const result = await this.commands.listOffers(profile);
-    if (result.offerIds?.length) {
-      const listState = getListOffersInitialState(
-        result.offerIds,
-        result.nextCursor,
-      );
-      await this.botState.set(profileId, listState);
-    }
-    return [result.message];
-  }
-
-  private async handleSearchByRefCommand(
-    profile: BotProfile,
-    profileId: string,
-  ): Promise<string[]> {
-    if (profile.profile_type !== 'WORKER') {
-      return [
-        '❌ Seuls les travailleurs peuvent rechercher une offre par référence.',
-      ];
-    }
-    await this.botState.set(profileId, getSearchByRefInitialState());
-    return [getSearchByRefPromptMessage()];
-  }
-
-  private async handleCreditWalletCommand(
-    profile: BotProfile,
-    profileId: string,
-  ): Promise<string[]> {
-    const { state, message } = await getCreditWalletInitialState(profile, {
-      paymentService: this.paymentService,
-      walletService: this.walletService,
-    });
-    await this.botState.set(profileId, state);
-    return [message];
-  }
-
-  private handleMyApplicationsCommand(): string[] {
-    // "Mes candidatures" now opens the profile webview (where the worker's
-    // applications sheet lives) via a URL-button template, instead of listing
-    // applications inline in chat — same pattern as viewProfile / createClaim.
-    return [templateReply(
-        WHATSAPP_TEMPLATES.viewApplications.contentSid,
-        WHATSAPP_TEMPLATES.viewApplications.variables(),
-      )];
-  }
-
-  private async handlePendingPaymentsCommand(
-    botProfile: BotProfile,
-    profileId: string,
-  ): Promise<string[]> {
-    const result = await this.commands.pendingPayments(botProfile);
-    if (result.applicationIds.length > 0) {
-      const state = getMyApplicationsInitialState(
-        result.applicationIds,
-        'pending_payments',
-        result.page,
-        result.totalPages,
-      );
-      await this.botState.set(profileId, state);
-    }
-    return [result.message];
-  }
-
-  private async handleCandidaturesReceivedCommand(
-    profile: BotProfile,
-    profileId: string,
-  ): Promise<string[]> {
-    const result = await this.commands.candidaturesReceived(profile);
-    if (result.items?.length) {
-      const listState = getCandidaturesListInitialState(result.items);
-      await this.botState.set(profileId, listState);
-    }
-    return [result.message];
-  }
-
-  private async handleFilledJobsCommand(
-    profile: BotProfile,
-    profileId: string,
-  ): Promise<string[]> {
-    const result = await this.commands.filledJobs(profile);
-    if (result.items?.length) {
-      const listState = getManageFilledJobInitialState(result.items);
-      await this.botState.set(profileId, listState);
-    }
-    return [result.message];
-  }
-
-  private async handleMyOffersCommand(
-    profile: BotProfile,
-    profileId: string,
-    page: number,
-  ): Promise<string[]> {
-    const { message, offerIds } = await this.commands.myOffers(profile, page);
-    await this.botState.set(profileId, {
-      flowId: FLOW_IDS.MY_OFFERS,
-      step: 0,
-      payload: { page, offerIds },
-      updatedAt: new Date().toISOString(),
-    });
-    return [message];
-  }
-
-  private async handleUnlockContactCommand(
-    profile: BotProfile,
-    profileId: string,
-  ): Promise<string[]> {
-    // Check if there's already an unlock state pre-loaded (e.g. by notification)
-    const existingState = await this.botState.get(profileId);
-    if (existingState?.flowId === FLOW_IDS.UNLOCK_CONTACT) {
-      const result = await runUnlockContactFlow(existingState, '', profile, {
-        contactUnlockService: this.contactUnlockService,
-        walletService: this.walletService,
-        paymentService: this.paymentService,
-        botNotification: this.notificationService,
-      });
-      if (result.nextState) {
-        await this.botState.set(profileId, result.nextState);
-      }
-      return result.reply;
+    if (route.commandId === 'pay_penalties') {
+      return this.handlePayPenaltiesCommand(botProfile, profileId);
     }
 
-    // Look up the most recent pending attempt via service
-    const attempt =
-      await this.contactUnlockService.findPendingAttemptForProfile(profileId);
-
-    if (!attempt) {
-      return [
-        `Aucune tentative de déverrouillage en cours.`,
-      ];
-    }
-
-    const fees = await this.systemConfig.getContactUnlockFees();
-    const isEmployer = attempt.employer_id === profileId;
-    const otherPartyId = isEmployer ? attempt.worker_id : attempt.employer_id;
-    const otherParty = await this.prisma.profile.findUnique({
-      where: { id: otherPartyId },
-      select: { first_name: true, last_name: true },
-    });
-    const otherName = otherParty
-      ? `${otherParty.first_name} ${otherParty.last_name}`.trim()
-      : 'votre contact';
-    const amount = isEmployer ? fees.employerFeeFcfa : fees.workerFeeFcfa;
-
-    const unlockState = getUnlockContactInitialState({
-      attemptId: attempt.id,
-      otherName,
-      amount,
-      expiresAt: attempt.expires_at,
-    });
-    await this.botState.set(profileId, unlockState);
-
-    const result = await runUnlockContactFlow(unlockState, '', profile, {
-      contactUnlockService: this.contactUnlockService,
-      walletService: this.walletService,
-      paymentService: this.paymentService,
-      botNotification: this.notificationService,
-    });
-    if (result.nextState) {
-      await this.botState.set(profileId, result.nextState);
-    }
-    return result.reply;
+    return [welcomePlatformMessage()];
   }
 
   private async handlePayPenaltiesCommand(
@@ -1202,176 +766,6 @@ export class BotOrchestratorService {
     return legacy.map((r) => r.jobId);
   }
 
-  private async handleRecommendedJobsCommand(
-    profile: BotProfile,
-    profileId: string,
-  ): Promise<string[]> {
-    const noOffersMsg = [
-      '*Offres recommandées*',
-      '',
-      "Aucune offre recommandée pour l'instant. Complétez votre profil pour de meilleures recommandations.",
-    ].join('\n');
-
-    const offerIds = await this.recommendedOfferIds(profile.id, 20);
-
-    if (offerIds.length === 0) return [noOffersMsg];
-
-    const rows = await this.prisma.jobOffer.findMany({
-      where: {
-        id: { in: offerIds },
-        status: { in: ['ACTIVE', 'PARTIALLY_FILLED'] },
-        applications: { none: { worker_id: profile.id } },
-      },
-      select: {
-        id: true,
-        reference: true,
-        title: true,
-        description: true,
-        amount: true,
-        payment_flow: true,
-        address: true,
-        note: true,
-        scheduled_at: true,
-        quantity: true,
-        status: true,
-        employer: { select: { reliability_score: true } },
-        _count: { select: { applications: { where: { status: 'ACCEPTED' } } } },
-      },
-    });
-
-    const offerMap = new Map(rows.map((o) => [o.id, o]));
-    const orderedRows = offerIds
-      .map((id) => offerMap.get(id))
-      .filter(Boolean) as typeof rows;
-
-    if (orderedRows.length === 0) return [noOffersMsg];
-
-    const offerItems = orderedRows.map((o) =>
-      jobOfferToOfferListItem({
-        ...o,
-        amount: o.amount != null ? Number(o.amount) : null,
-        acceptedCount: o._count.applications,
-      }),
-    );
-
-    const flowState = getRecommendedJobsInitialState(offerIds);
-    await this.botState.set(profileId, flowState);
-
-    // Same renderer as the flow's list step (plain numbered text list — job
-    // recommendations are not sent as templates) — this entry point must not
-    // render its own list.
-    return buildPagedListReply(offerItems, 0).reply;
-  }
-
-  private async handleRecommendedProfilesCommand(
-    profile: BotProfile,
-    profileId: string,
-  ): Promise<string[]> {
-    // Prefer active offer; fall back to any recent offer so signals can always be recorded
-    const latestOffer =
-      (await this.prisma.jobOffer.findFirst({
-        where: { employer_id: profile.id, status: 'ACTIVE' },
-        orderBy: { created_at: 'desc' },
-        select: { id: true },
-      })) ??
-      (await this.prisma.jobOffer.findFirst({
-        where: { employer_id: profile.id },
-        orderBy: { created_at: 'desc' },
-        select: { id: true },
-      }));
-
-    let workerResults: { id: string; score: number }[] = [];
-    if (latestOffer) {
-      workerResults = await this.matchingService.findMatchingWorkersForJob(
-        latestOffer.id,
-        10,
-      );
-    }
-    if (workerResults.length === 0) {
-      workerResults =
-        await this.matchingService.findMatchingWorkersForEmployerProfile(
-          profile.id,
-          10,
-        );
-    }
-
-    if (workerResults.length === 0) {
-      return [
-        [
-          '*Travailleurs recommandés*',
-          '',
-          "Aucun travailleur recommandé pour l'instant. Publiez une offre pour obtenir des recommandations.",
-          '',
-          '*Tapez 1 pour publier une offre.*',
-        ].join('\n'),
-      ];
-    }
-
-    const { reliabilityScoreMin } = await this.systemConfig.getFees();
-
-    // Pre-filter: only keep active, verified workers meeting the score threshold
-    const candidateIds = workerResults.map((r) => r.id);
-    const eligibleProfiles = await this.prisma.profile.findMany({
-      where: {
-        id: { in: candidateIds },
-        status: 'ACTIVE',
-        verification_status: 'VERIFIED',
-        reliability_score: { gte: reliabilityScoreMin },
-      },
-      select: { id: true },
-    });
-    const eligibleSet = new Set(eligibleProfiles.map((p) => p.id));
-    // The score gate is config-driven; the previous hardcoded `> 0.5` was above
-    // the range the ranker could actually produce, so this list was always empty.
-    const minScore = await this.systemConfig.getRecommendationMinScore();
-    const eligibleResults = workerResults.filter(
-      (r) => eligibleSet.has(r.id) && r.score >= minScore,
-    );
-
-    if (eligibleResults.length === 0) {
-      return [
-        [
-          '*Travailleurs recommandés*',
-          '',
-          'Aucun travailleur qualifié disponible pour le moment.',
-        ].join('\n'),
-      ];
-    }
-
-    const workerIds = eligibleResults.map((r) => r.id);
-    const workerScores: Record<string, number> = Object.fromEntries(
-      eligibleResults.map((r) => [r.id, r.score]),
-    );
-
-    const flowState = getRecommendedProfilesInitialState(
-      workerIds,
-      workerScores,
-      latestOffer?.id,
-    );
-    await this.botState.set(profileId, flowState);
-
-    const pageIds = workerIds.slice(0, 5);
-    const workers = await this.prisma.profile.findMany({
-      where: {
-        id: { in: pageIds },
-        status: 'ACTIVE',
-        verification_status: 'VERIFIED',
-        reliability_score: { gte: reliabilityScoreMin },
-      },
-      select: WORKER_LIST_SELECT,
-    });
-    const workerMap = new Map(workers.map((w) => [w.id, w]));
-    const ordered = pageIds
-      .map((id) => workerMap.get(id))
-      .filter(Boolean) as typeof workers;
-
-    // Same renderer as the flow's list step (carousel, text fallback for
-    // counts outside 2..5) — this entry point must not render its own list.
-    return [
-      buildWorkerListReply(ordered, workerScores),
-    ];
-  }
-
   private loadProfileWhere(where: { id: string } | { phone: string }) {
     return this.prisma.profile.findUnique({
       where,
@@ -1403,37 +797,4 @@ export class BotOrchestratorService {
     return this.loadProfileWhere({ phone });
   }
 
-  private async runCommand(
-    commandId: string,
-    profile: BotProfile,
-  ): Promise<string> {
-    switch (commandId) {
-      case 'menu':
-        return welcomePlatformMessage();
-      case 'help': {
-        const contact = await this.systemConfig.getContactInfo();
-        return handleHelpCommand(commandId, {
-          email: contact.email ?? '',
-          phone: contact.phone ?? '',
-          address: contact.address ?? '',
-        });
-      }
-      case 'penalty_history':
-        return this.commands.penaltyHistory(profile);
-      // One-shot template replies — the URL button opens the page inside
-      // WhatsApp's webview. No state, so they live here (not commandHandlers).
-      case 'profile':
-        return templateReply(
-        WHATSAPP_TEMPLATES.viewProfile.contentSid,
-        WHATSAPP_TEMPLATES.viewProfile.variables(),
-      );
-      case 'create_claim':
-        return templateReply(
-        WHATSAPP_TEMPLATES.createClaim.contentSid,
-        WHATSAPP_TEMPLATES.createClaim.variables(),
-      );
-      default:
-        return unknownCommandMessage();
-    }
-  }
 }

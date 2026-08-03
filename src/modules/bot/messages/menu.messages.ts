@@ -1,16 +1,9 @@
-import { contactReply } from '../../../common/constants/whatsapp-listpickers';
 
 export type ContactInfo = {
   email: string;
   phone: string;
   address: string;
 };
-
-// The details render read-only in the template body; the single "Retour au
-// menu" button is the only tappable element.
-export function helpMessage(contact: ContactInfo): string {
-  return contactReply(contact.phone, contact.email, contact.address);
-}
 
 export function accountSuspendedBotMessage(contact: ContactInfo): string {
   return [

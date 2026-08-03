@@ -43,7 +43,6 @@ if not SID or not TOKEN:
 
 AUTH = 'Basic ' + base64.b64encode(f'{SID}:{TOKEN}'.encode()).decode()
 
-
 def create(friendly, types):
     payload = {'friendly_name': friendly, 'language': 'fr', 'types': types}
     req = urllib.request.Request(
@@ -58,36 +57,8 @@ def create(friendly, types):
     print(f'{friendly:28s} {sid}')
     return sid
 
-
 def list_picker(body, button, items):
     return {'twilio/list-picker': {'body': body, 'button': button, 'items': items}}
-
-
-MENU_BODY = '*Menu Rabotka*\nQue souhaitez-vous faire ?'
-MENU_BUTTON = 'Ouvrir le menu'
-
-worker = create('rabotka_worker_menu', list_picker(MENU_BODY, MENU_BUTTON, [
-    {'id': '1', 'item': 'Trouver une mission', 'description': 'Parcourez les missions disponibles près de chez vous'},
-    {'id': '2', 'item': 'Mes candidatures actives', 'description': "Suivez l'état de vos candidatures en cours"},
-    {'id': '3', 'item': 'Offres recommandées', 'description': 'Des missions choisies selon votre profil et vos compétences'},
-    {'id': '4', 'item': 'Rechercher par référence', 'description': 'Retrouvez une mission grâce à son numéro de référence'},
-    {'id': '5', 'item': 'Mon profil', 'description': 'Consultez et mettez à jour vos informations personnelles'},
-    {'id': '6', 'item': 'Recharger mon wallet', 'description': 'Ajoutez des fonds pour débloquer des contacts'},
-    {'id': '7', 'item': 'Créer une réclamation', 'description': 'Signalez un problème ou contactez le support'},
-    {'id': '8', 'item': 'Aide', 'description': 'Nos coordonnées et comment nous joindre'},
-]))
-
-employer = create('rabotka_employer_menu', list_picker(MENU_BODY, MENU_BUTTON, [
-    {'id': '1', 'item': 'Publier une offre', 'description': 'Créez une nouvelle mission et recevez des candidatures'},
-    {'id': '2', 'item': 'Candidatures reçues', 'description': 'Consultez les travailleurs qui ont postulé'},
-    {'id': '3', 'item': 'Mes offres publiées', 'description': 'Gérez vos missions en ligne et leur statut'},
-    {'id': '4', 'item': 'Missions en cours', 'description': "Suivez les missions pourvues et en cours d'exécution"},
-    {'id': '5', 'item': 'Travailleurs recommandés', 'description': 'Des profils sélectionnés selon vos besoins'},
-    {'id': '6', 'item': 'Mon profil', 'description': 'Consultez et mettez à jour vos informations'},
-    {'id': '7', 'item': 'Recharger mon wallet', 'description': 'Ajoutez des fonds pour débloquer des contacts'},
-    {'id': '8', 'item': 'Créer une réclamation', 'description': 'Signalez un problème ou contactez le support'},
-    {'id': '9', 'item': 'Aide', 'description': 'Nos coordonnées et comment nous joindre'},
-]))
 
 # {{1}} = current balance, pre-formatted fr-FR by the flow.
 wallet = create('rabotka_wallet_recharge', list_picker(
@@ -110,7 +81,6 @@ contact = create('rabotka_contact_info_v2', {'twilio/quick-reply': {
 }})
 
 print('\nPaste into src/common/constants/whatsapp-listpickers.ts:')
-print(f'  WORKER   = {worker}')
-print(f'  EMPLOYER = {employer}')
+
 print(f'  WALLET   = {wallet}')
 print(f'  CONTACT  = {contact}')
