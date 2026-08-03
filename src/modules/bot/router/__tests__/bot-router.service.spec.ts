@@ -37,11 +37,11 @@ describe('BotRouterService', () => {
 
   describe('when a flow is live', () => {
     it('hands the input to the active flow', () => {
-      const state = makeState(FLOW_IDS.PUBLISH_JOB);
+      const state = makeState(FLOW_IDS.PAY_PENALTIES);
 
       expect(service.route('hello', workerProfile, state)).toEqual({
         type: 'flow',
-        flowId: FLOW_IDS.PUBLISH_JOB,
+        flowId: FLOW_IDS.PAY_PENALTIES,
         state,
       });
     });
@@ -50,7 +50,7 @@ describe('BotRouterService', () => {
       'lets %p escape into pay_penalties',
       (input) => {
         expect(
-          service.route(input, workerProfile, makeState(FLOW_IDS.PUBLISH_JOB)),
+          service.route(input, workerProfile, makeState(FLOW_IDS.PAY_PENALTIES)),
         ).toEqual({ type: 'command', commandId: 'pay_penalties' });
       },
     );
@@ -60,7 +60,7 @@ describe('BotRouterService', () => {
         service.route(
           '‎payer',
           workerProfile,
-          makeState(FLOW_IDS.PUBLISH_JOB),
+          makeState(FLOW_IDS.PAY_PENALTIES),
         ),
       ).toEqual({ type: 'command', commandId: 'pay_penalties' });
     });

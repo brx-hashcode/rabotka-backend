@@ -1,4 +1,3 @@
-import { carouselVariables, type CarouselCard } from './whatsapp-carousel';
 
 export interface WhatsAppTemplate<Args extends unknown[]> {
   contentSid: string;
@@ -303,15 +302,7 @@ export const WHATSAPP_TEMPLATES = {
     ]
   >,
 
-  jobsTop5Carousel: {
-    contentSid: 'HX0edfe2c17dc69fc2a253694c2eefd9c7',
-    variables: (cards: CarouselCard[]) => carouselVariables('jobs', cards),
-  } satisfies WhatsAppTemplate<[cards: CarouselCard[]]>,
 
-  profilesTop5Carousel: {
-    contentSid: 'HXa7692e79775cb42143625f5b390e8041',
-    variables: (cards: CarouselCard[]) => carouselVariables('profiles', cards),
-  } satisfies WhatsAppTemplate<[cards: CarouselCard[]]>,
 
   /**
    * `{{8}}` is the applicationId, used as the CTA button's URL suffix
