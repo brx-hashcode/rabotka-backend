@@ -4,7 +4,6 @@ import type { ApplicationService } from '../../application/application.service';
 import type { IPaymentUrlService } from './payment-url.types';
 import type { SystemConfigService } from '../../system-config/system-config.service';
 import type { BotNotificationService } from '../services/bot-notification.service';
-import type { BotCommandsService } from '../services/bot-commands.service';
 import type { ContactUnlockService } from '../../contact-unlock/contact-unlock.service';
 import type { WalletService } from '../../wallet/wallet.service';
 import type { InterestSignalService } from '../../interest-graph/interest-signal.service';
@@ -23,7 +22,6 @@ export type FlowContext = {
   notificationService: BotNotificationService;
   systemConfigService: SystemConfigService;
   paymentService: IPaymentUrlService;
-  commands: BotCommandsService;
   contactUnlockService: ContactUnlockService;
   walletService: WalletService;
   interestSignalService: InterestSignalService;
