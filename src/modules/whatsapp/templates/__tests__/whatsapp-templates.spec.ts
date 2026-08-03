@@ -1,4 +1,3 @@
-import { jobOfferPublishedMessage } from '../job-offer-published';
 import { paymentApprovedMessage } from '../payment-approved';
 import { verificationSuccessMessage } from '../verification-success';
 import {
@@ -14,14 +13,6 @@ import {
 } from '../verify-whatsapp';
 
 describe('WhatsApp Templates', () => {
-  describe('jobOfferPublishedMessage', () => {
-    it('generates message with name and job title', () => {
-      const msg = jobOfferPublishedMessage('Alice', 'Plombier');
-      expect(msg).toContain('Alice');
-      expect(msg).toContain('Plombier');
-    });
-  });
-
   describe('paymentApprovedMessage', () => {
     it('generates payment approved message', () => {
       const msg = paymentApprovedMessage('Bob');
