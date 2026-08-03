@@ -4,7 +4,6 @@ import { PrismaService } from '../../../../common/services/prisma/prisma.service
 import { BotStateService } from '../bot-state.service';
 import { BotRouterService } from '../../router/bot-router.service';
 import { welcomePlatformMessage } from '../../messages/welcome.messages';
-import { contactReply } from '../../../../common/constants/whatsapp-listpickers';
 import { BotNotificationService } from '../bot-notification.service';
 import { BotInboxService } from '../bot-inbox.service';
 import { BotDraftService } from '../bot-draft.service';
