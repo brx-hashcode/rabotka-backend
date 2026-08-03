@@ -385,7 +385,7 @@ describe('BotOrchestratorService', () => {
         commandId: 'create_claim',
       });
       const result = await service.handle(PROFILE_ID, PHONE, '7');
-      expect(result[0]).toContain('[TPL:HX9d9725488bc9dc2c6e4340dc5a000ca1]');
+      expect(result[0]).toContain('[TPL:HX70966729dd624c3c12174b90023e857b]');
     });
 
     it('handles "my_offers" command', async () => {
@@ -403,7 +403,7 @@ describe('BotOrchestratorService', () => {
         commandId: 'profile',
       });
       const result = await service.handle(PROFILE_ID, PHONE, 'profil');
-      expect(result[0]).toContain('[TPL:HX8ab587d99e769edaded28d5dd8247af5]');
+      expect(result[0]).toContain('[TPL:HXa6e44c25afaae6a0d96481a12b68f54e]');
     });
 
     it('handles "penalty_history" command', async () => {
@@ -471,7 +471,7 @@ describe('BotOrchestratorService', () => {
       });
       const result = await service.handle(PROFILE_ID, PHONE, '2');
       // Opens the profile webview (applications sheet) instead of listing inline.
-      expect(result[0]).toMatch(/^\[TPL:HX75d46b310dd534710f7254f23205a7eb\]/);
+      expect(result[0]).toMatch(/^\[TPL:HX6a79507e837b75cc3abac65f047d3c33\]/);
       expect(deps.botState.set).not.toHaveBeenCalled();
     });
 
@@ -509,7 +509,7 @@ describe('BotOrchestratorService', () => {
         commandId: 'profile',
       });
       const result = await service.handle(PROFILE_ID, PHONE, 'profil');
-      expect(result[0]).toContain('[TPL:HX8ab587d99e769edaded28d5dd8247af5]');
+      expect(result[0]).toContain('[TPL:HXa6e44c25afaae6a0d96481a12b68f54e]');
     });
 
     it('handles "pay_penalties" command with no unpaid penalties', async () => {

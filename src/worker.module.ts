@@ -195,8 +195,9 @@ export class WorkerModule {
           useFactory: (
             whatsApp: WhatsAppService,
             loginLink: WhatsAppLoginLinkService,
-          ) => new WhatsAppOutboundProcessor(whatsApp, loginLink),
-          inject: [WhatsAppService, WhatsAppLoginLinkService],
+            config: ConfigService,
+          ) => new WhatsAppOutboundProcessor(whatsApp, loginLink, config),
+          inject: [WhatsAppService, WhatsAppLoginLinkService, ConfigService],
         },
       ],
     };

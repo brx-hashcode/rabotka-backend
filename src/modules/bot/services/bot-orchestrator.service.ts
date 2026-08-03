@@ -290,12 +290,21 @@ export class BotOrchestratorService {
    */
   private handlePendingKycInput(normalizedInput: string): string {
     if (CMD_PROFILE.includes(normalizedInput)) {
-      return templateReply(WHATSAPP_TEMPLATES.viewProfile.contentSid);
+      return templateReply(
+        WHATSAPP_TEMPLATES.viewProfile.contentSid,
+        WHATSAPP_TEMPLATES.viewProfile.variables(),
+      );
     }
     if (CMD_CREATE_CLAIM.includes(normalizedInput)) {
-      return templateReply(WHATSAPP_TEMPLATES.createClaim.contentSid);
+      return templateReply(
+        WHATSAPP_TEMPLATES.createClaim.contentSid,
+        WHATSAPP_TEMPLATES.createClaim.variables(),
+      );
     }
-    return templateReply(WHATSAPP_TEMPLATES.kycPendingMenu.contentSid);
+    return templateReply(
+        WHATSAPP_TEMPLATES.kycPendingMenu.contentSid,
+        WHATSAPP_TEMPLATES.kycPendingMenu.variables(),
+      );
   }
 
   /**
@@ -971,7 +980,10 @@ export class BotOrchestratorService {
     // Publishing an offer now opens the create-offer webview via a URL-button
     // template (same pattern as viewProfile / createClaim), replacing the old
     // in-chat 8-step publish flow. Stateless — sets no bot state.
-    return [templateReply(WHATSAPP_TEMPLATES.createJob.contentSid)];
+    return [templateReply(
+        WHATSAPP_TEMPLATES.createJob.contentSid,
+        WHATSAPP_TEMPLATES.createJob.variables(),
+      )];
   }
 
   private async handleListOffersCommand(
@@ -1018,7 +1030,10 @@ export class BotOrchestratorService {
     // "Mes candidatures" now opens the profile webview (where the worker's
     // applications sheet lives) via a URL-button template, instead of listing
     // applications inline in chat — same pattern as viewProfile / createClaim.
-    return [templateReply(WHATSAPP_TEMPLATES.viewApplications.contentSid)];
+    return [templateReply(
+        WHATSAPP_TEMPLATES.viewApplications.contentSid,
+        WHATSAPP_TEMPLATES.viewApplications.variables(),
+      )];
   }
 
   private async handlePendingPaymentsCommand(
@@ -1408,9 +1423,15 @@ export class BotOrchestratorService {
       // One-shot template replies — the URL button opens the page inside
       // WhatsApp's webview. No state, so they live here (not commandHandlers).
       case 'profile':
-        return templateReply(WHATSAPP_TEMPLATES.viewProfile.contentSid);
+        return templateReply(
+        WHATSAPP_TEMPLATES.viewProfile.contentSid,
+        WHATSAPP_TEMPLATES.viewProfile.variables(),
+      );
       case 'create_claim':
-        return templateReply(WHATSAPP_TEMPLATES.createClaim.contentSid);
+        return templateReply(
+        WHATSAPP_TEMPLATES.createClaim.contentSid,
+        WHATSAPP_TEMPLATES.createClaim.variables(),
+      );
       default:
         return unknownCommandMessage();
     }
