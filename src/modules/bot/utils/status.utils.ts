@@ -57,27 +57,3 @@ const VERIFICATION_STATUS_FR: Record<string, string> = {
 export function translateJobOfferStatus(status: string): string {
   return JOB_OFFER_STATUS_FR[status] ?? status;
 }
-
-export function translateApplicationStatus(status: string): string {
-  return APPLICATION_STATUS_FR[status] ?? status;
-}
-
-export function translateAssignmentStatus(status: string): string {
-  return ASSIGNMENT_STATUS_FR[status] ?? status;
-}
-
-export function translatePaymentStatus(status: string): string {
-  return PAYMENT_STATUS_FR[status] ?? status;
-}
-
-export function translateClaimStatus(status: string): string {
-  return CLAIM_STATUS_FR[status] ?? status;
-}
-
-export function translateAccountStatus(status: string): string {
-  return ACCOUNT_STATUS_FR[status] ?? status;
-}
-
-export function translateVerificationStatus(status: string): string {
-  return VERIFICATION_STATUS_FR[status] ?? status;
-}
