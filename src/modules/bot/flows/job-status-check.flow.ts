@@ -198,30 +198,3 @@ export async function runJobStatusCheckFlow(
     nextState: state,
   };
 }
-
-export function getJobStatusCheckInitialState(params: {
-  jobOfferId: string;
-  jobTitle: string;
-  applicationId: string;
-  paymentFlow: string;
-}): BotState {
-  return {
-    flowId: FLOW_IDS.JOB_STATUS_CHECK,
-    step: 0,
-    payload: {
-      jobOfferId: params.jobOfferId,
-      jobTitle: params.jobTitle,
-      applicationId: params.applicationId,
-      paymentFlow: params.paymentFlow,
-      snoozeCount: 0,
-    },
-    updatedAt: new Date().toISOString(),
-  };
-}
-
-export function jobStatusCheckPromptMessage(
-  jobTitle: string,
-  paymentFlow: string,
-): string {
-  return statusPrompt(jobTitle, paymentFlow);
-}

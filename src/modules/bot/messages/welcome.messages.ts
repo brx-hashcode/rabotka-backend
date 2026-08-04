@@ -41,14 +41,19 @@ export function welcomePlatformMessage(): string {
 /**
  * Sent to a number with no profile. Same card, different button — there is no
  * account to open yet, so it points at onboarding.
+ *
+ * Every path that answers an unregistered number must come through here. Two of
+ * them used to pass the old text-only SID straight to `templateReply`, so the
+ * card was built, approved and registered while nothing ever sent it — the
+ * registry was right and the call sites were wrong.
+ *
+ * No fallback branch: `sid()` returns its approved default whenever the env
+ * override is blank, so `contentSid` is never empty and a guard here would be
+ * dead code that reads like a live choice. Rolling back means pointing
+ * `TPL_WELCOME_UNREGISTERED_V2` at the previous text template,
+ * `HX1610d675f58d8fa92d277383584cc5fb`.
  */
 export function welcomeUnregisteredMessage(): string {
   const card = WHATSAPP_TEMPLATES.welcomeUnregisteredCard;
-
-  if (card.contentSid) {
-    return templateReply(card.contentSid, card.variables());
-  }
-
-  // The previously approved text-only template, until the card is live.
-  return templateReply(WHATSAPP_TEMPLATES.welcomeUnregistered.contentSid);
+  return templateReply(card.contentSid, card.variables());
 }

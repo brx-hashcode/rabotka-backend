@@ -11,8 +11,7 @@ import { BotOrchestratorService } from '../bot/services/bot-orchestrator.service
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
 import { stripChatFormattingChars } from '../bot/utils/chat-input';
-import { WHATSAPP_TEMPLATES } from '../../common/constants/whatsapp-templates';
-import { templateReply } from '../../common/constants/whatsapp-carousel';
+import { welcomeUnregisteredMessage } from '../bot/messages/welcome.messages';
 
 const DEFAULT_BOT_SESSION_ID = 'default';
 const USER_LOCK_TTL = 30;
@@ -50,7 +49,7 @@ export class ConversationService {
       );
       return {
         profileId: null,
-        replies: [templateReply(WHATSAPP_TEMPLATES.welcomeUnregistered.contentSid)],
+        replies: [welcomeUnregisteredMessage()],
       };
     }
 
