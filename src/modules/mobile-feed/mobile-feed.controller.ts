@@ -151,24 +151,46 @@ export class MobileFeedController {
       );
     }
 
-    // "Pour vous". Both rankers return [] on "no opinion" (v2 when every tier is
-    // empty, legacy when similarity is disabled or it swallowed an error), so an
-    // empty result must fall through to the category feed rather than render an
-    // empty screen.
+    // "Pour vous" = ranked first, then topped up to the page size.
+    //
+    // The ranked set is never authoritative about what EXISTS: an offer
+    // published a minute ago may not be in Qdrant yet, and the score threshold
+    // and per-category diversity cap both drop offers on purpose. Returning
+    // only those hits made "Pour vous" show one item while a domain chip listed
+    // several — the chips read Postgres directly, so the personalised tab
+    // looked broken. Ranking now decides ORDER, not membership.
     const matched = await this.keepOpenOffers(
       (await this.rankForYou(profileId, topN)) ?? [],
     );
-    if (matched.length > 0) {
-      return this.hydrateWorkerJobs(profileId, matched);
-    }
 
-    // Fallback: the worker's own domains, newest first. No domains set → all
-    // open offers, so the feed is never empty for a fresh profile.
     const workerCategoryIds = await this.workerCategoryIds(profileId);
+    const [ownDomains, everythingElse] = await Promise.all([
+      this.recentOpenOfferHits(workerCategoryIds, topN),
+      this.recentOpenOfferHits([], topN),
+    ]);
+
     return this.hydrateWorkerJobs(
       profileId,
-      await this.recentOpenOfferHits(workerCategoryIds, topN),
+      this.dedupeHits([...matched, ...ownDomains, ...everythingElse], topN),
     );
+  }
+
+  /** First occurrence wins, so relevance order survives the top-up. */
+  private dedupeHits(
+    hits: { id: string; score: number }[],
+    take: number,
+  ): { id: string; score: number }[] {
+    const seen = new Set<string>();
+    const out: { id: string; score: number }[] = [];
+
+    for (const hit of hits) {
+      if (seen.has(hit.id)) continue;
+      seen.add(hit.id);
+      out.push(hit);
+      if (out.length === take) break;
+    }
+
+    return out;
   }
 
   /**

@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { MessageDirection } from '@prisma/client';
 import { WhatsAppService } from './whatsapp.service';
 import { QueueService } from '../../common/services/queue/queue.service';
@@ -13,6 +14,11 @@ import { WhatsAppLoginLinkService } from '../auth/whatsapp-login-link.service';
 // that to leave room for any "(1/N)" prefix and to stay safe across UCS-2
 // counting edge cases.
 const WHATSAPP_BODY_LIMIT = 1500;
+
+/** The base URL is config, so it must be escaped before going into a RegExp. */
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 /**
  * Split a long string into ≤ WHATSAPP_BODY_LIMIT chunks, preferring to break
@@ -66,6 +72,7 @@ export class WhatsAppOutboundProcessor {
   constructor(
     private readonly whatsApp: WhatsAppService,
     private readonly loginLink: WhatsAppLoginLinkService,
+    private readonly config: ConfigService,
   ) {
     this.logger.debug(
       `WhatsAppOutboundProcessor constructed, whatsApp=${whatsApp?.constructor?.name ?? typeof whatsApp}`,
@@ -151,7 +158,9 @@ export class WhatsAppOutboundProcessor {
   ): Promise<void> {
     // Split any over-long body so we never hit Twilio's 1600-char hard
     // limit. For normal-sized messages this is a no-op.
-    const parts = chunkForWhatsApp(data.text);
+    const parts = chunkForWhatsApp(
+      await this.withLoginLinks(data.text, data.profileId),
+    );
     for (const part of parts) {
       const sent = await this.whatsApp.sendTextMessage(
         data.phone,
@@ -218,6 +227,18 @@ export class WhatsAppOutboundProcessor {
     const suffix = variables[target.variable];
     if (!suffix) return variables;
 
+    // shortlink: the variable holds the DESTINATION, and the approved URL is
+    // the fixed `…/s/{{n}}` — so the code replaces it outright.
+    if (target.mode === 'shortlink') {
+      const code = await this.loginLink.mint(profileId, suffix).catch(() => null);
+      // No code means the profile may not auto-login (suspended) or Redis is
+      // down. Leaving the destination in place would produce `/s/<path>`, a
+      // dead link — so send the template as-is and let the button 404 into the
+      // login fallback rather than fabricate one.
+      if (!code) return variables;
+      return { ...variables, [target.variable]: code };
+    }
+
     const withCode = await this.loginLink.appendTo(
       profileId,
       suffix,
@@ -226,6 +247,45 @@ export class WhatsAppOutboundProcessor {
     if (withCode === suffix) return variables;
 
     return { ...variables, [target.variable]: withCode };
+  }
+
+  /**
+   * Rewrites first-party links in a plain-text message into one-tap `/s/<code>`
+   * links. Templates funnel through `withLoginCode`; free-form messages — every
+   * Mobile Money `/pay/<token>` fallback — had no equivalent, so they always
+   * cost the reader an OTP.
+   *
+   * Left alone: wa.me (not ours), `/r/<hash>` ad links (already tracked and
+   * resolved server-side) and `/verify/whatsapp` (carries its own token, and the
+   * account is not ACTIVE yet so no code would be minted anyway).
+   */
+  private async withLoginLinks(
+    text: string,
+    profileId?: string,
+  ): Promise<string> {
+    if (!profileId) return text;
+
+    const base = (
+      this.config.get<string>('FRONTEND_URL') ?? 'http://localhost:3000'
+    ).replace(/\/+$/, '');
+    if (!text.includes(base)) return text;
+
+    const urls = [
+      ...new Set(text.match(new RegExp(`${escapeRegExp(base)}[^\\s<>"')\\]}]*`, 'g')) ?? []),
+    ].filter((url) => {
+      const path = url.slice(base.length);
+      return !/^\/(r|verify|s)\//.test(path) && path !== '' && path !== '/';
+    });
+
+    let rewritten = text;
+    for (const url of urls) {
+      const link = await this.loginLink
+        .shortLink(profileId, url.slice(base.length))
+        .catch(() => null);
+      if (link) rewritten = rewritten.split(url).join(link);
+    }
+
+    return rewritten;
   }
 
   private async processTemplate(

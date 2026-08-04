@@ -2,6 +2,7 @@ import { Module, forwardRef } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { AuthController } from './auth.controller';
+import { LoginLinkController } from './login-link.controller';
 import { AuthService } from './auth.service';
 import { MailModule } from '../mail/mail.module';
 import { WhatsAppModule } from '../whatsapp/whatsapp.module';
@@ -42,7 +43,7 @@ import { WhatsAppLoginLinkModule } from './whatsapp-login-link.module';
       },
     }),
   ],
-  controllers: [AuthController],
+  controllers: [AuthController, LoginLinkController],
   providers: [AuthService, JwtAuthGuard, AdminAuthGuard, RolesGuard, QrGateway],
   exports: [
     AuthService,
