@@ -267,8 +267,11 @@ describe('BotOrchestratorService', () => {
       deps.prisma.profile.findUnique.mockResolvedValue(null);
       const result = await service.handle(PROFILE_ID, PHONE, 'Menu');
       expect(result).toHaveLength(1);
+      // Asserted against the registry, not a literal: a hardcoded SID passes
+      // happily while the wrong template goes out, which is exactly how the
+      // old text-only welcome survived the switch to the card.
       expect(result[0]).toContain(
-        '[TPL:HX1610d675f58d8fa92d277383584cc5fb]',
+        `[TPL:${WHATSAPP_TEMPLATES.welcomeUnregisteredCard.contentSid}]`,
       );
     });
 

@@ -59,11 +59,6 @@ export const WHATSAPP_TEMPLATES = {
   } satisfies WhatsAppTemplate<[code: string]>,
 
 
-  welcomeUnregistered: {
-    contentSid: 'HX1610d675f58d8fa92d277383584cc5fb',
-    variables: () => ({}),
-  } satisfies WhatsAppTemplate<[]>,
-
   /**
    * Welcome cards carrying the brand cover. The image is baked into the
    * approved template, not passed as a variable — WhatsApp rejects
@@ -71,6 +66,10 @@ export const WHATSAPP_TEMPLATES = {
    * re-uploading to the same R2 key.
    */
   welcomeUnregisteredCard: {
+    // Rollback: point TPL_WELCOME_UNREGISTERED_V2 at the previous text-only
+    // template, HX1610d675f58d8fa92d277383584cc5fb. It is deliberately not a
+    // registry entry of its own — an unused entry is exactly what let two call
+    // sites keep sending it long after this card was approved.
     contentSid: sid(
       'TPL_WELCOME_UNREGISTERED_V2',
       'HXcf1954a8146623c7482682a605aacd93',
@@ -108,38 +107,11 @@ export const WHATSAPP_TEMPLATES = {
     variables: () => ({ '1': 'profile' }),
   } satisfies WhatsAppTemplate<[]>,
 
-  createClaim: {
-    contentSid: 'HX70966729dd624c3c12174b90023e857b',
-    urlSuffixVar: '1',
-    urlSuffixMode: 'shortlink',
-    variables: () => ({ '1': 'claims/new' }),
-  } satisfies WhatsAppTemplate<[]>,
-
-  // "Publier une offre" — CTA button opening the create-offer webview
-  // (/job-offers/new). Replaces the old in-chat publish flow. Template
-  // rabotka_create_job (twilio/call-to-action, UTILITY).
-  createJob: {
-    contentSid: 'HXc186e2699e16f829b7bc3157dbb85336',
-    urlSuffixVar: '1',
-    urlSuffixMode: 'shortlink',
-    variables: () => ({ '1': 'job-offers/new' }),
-  } satisfies WhatsAppTemplate<[]>,
 
 
-  viewProfile: {
-    contentSid: 'HXa6e44c25afaae6a0d96481a12b68f54e',
-    urlSuffixVar: '1',
-    urlSuffixMode: 'shortlink',
-    variables: () => ({ '1': 'profile' }),
-  } satisfies WhatsAppTemplate<[]>,
 
 
-  viewApplications: {
-    contentSid: 'HX6a79507e837b75cc3abac65f047d3c33',
-    urlSuffixVar: '1',
-    urlSuffixMode: 'shortlink',
-    variables: () => ({ '1': 'profile' }),
-  } satisfies WhatsAppTemplate<[]>,
+
 
   // "Voir le portfolio" — CTA button opening a worker's PUBLIC portfolio
   // (/p/<slug>) inside WhatsApp's in-app browser. Unlike the other webview

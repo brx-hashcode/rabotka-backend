@@ -403,33 +403,34 @@ describe('WhatsAppOutboundProcessor', () => {
   });
 
   describe('short-link templates', () => {
-    // `createClaim` is `urlSuffixMode: 'shortlink'`: its approved URL is the
+    // `kycPendingMenu` is `urlSuffixMode: 'shortlink'`: its approved URL is the
     // fixed `…/s/{{1}}`, so the variable must be REPLACED by a code, never
-    // appended to.
-    const createClaim = WHATSAPP_TEMPLATES.createClaim.contentSid;
+    // appended to. Any shortlink template would do — this one stands in for the
+    // mode, not for itself.
+    const shortlinkTpl = WHATSAPP_TEMPLATES.kycPendingMenu.contentSid;
 
     it('swaps the destination for a freshly minted code', async () => {
       await processor.process({
         data: {
           type: 'template',
           phone: '+242001',
-          contentSid: createClaim,
-          contentVariables: { '1': 'claims/new' },
+          contentSid: shortlinkTpl,
+          contentVariables: { '1': 'profile' },
           profileId: 'p1',
         },
       });
 
-      expect(mockLoginLink.mint).toHaveBeenCalledWith('p1', 'claims/new');
+      expect(mockLoginLink.mint).toHaveBeenCalledWith('p1', 'profile');
       expect(mockWhatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+242001',
-        createClaim,
+        shortlinkTpl,
         { '1': 'CODE123' },
       );
       expect(mockLoginLink.appendTo).not.toHaveBeenCalled();
     });
 
     it('leaves the destination alone when no code could be minted', async () => {
-      // Sending `/s/claims/new` would be a dead link; the untouched template
+      // Sending `/s/profile` would be a dead link; the untouched template
       // at least reaches the login fallback.
       mockLoginLink.mint.mockResolvedValueOnce(null);
 
@@ -437,16 +438,16 @@ describe('WhatsAppOutboundProcessor', () => {
         data: {
           type: 'template',
           phone: '+242001',
-          contentSid: createClaim,
-          contentVariables: { '1': 'claims/new' },
+          contentSid: shortlinkTpl,
+          contentVariables: { '1': 'profile' },
           profileId: 'p1',
         },
       });
 
       expect(mockWhatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+242001',
-        createClaim,
-        { '1': 'claims/new' },
+        shortlinkTpl,
+        { '1': 'profile' },
       );
     });
   });
