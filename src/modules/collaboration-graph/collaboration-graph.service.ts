@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { paidContactPairs } from '../../common/queries/paid-contacts.sql';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import {
   AdminCacheService,
@@ -140,32 +141,7 @@ export class CollaborationGraphService {
       opts.includeContacts
         ? this.prisma.$queryRaw<EdgeRow[]>`
             SELECT employer_id, worker_id, COUNT(*) AS count
-            FROM (
-              SELECT DISTINCT w.profile_id AS employer_id,
-                              wt.reference_id::uuid AS worker_id
-              FROM "wallet_transactions" wt
-              JOIN "wallets" w ON w.id = wt.wallet_id
-              WHERE wt.reference_type = 'recommendation_contact'
-                AND wt.reference_id IS NOT NULL
-                -- Not every wallet belongs to a profile (admin/system wallets
-                -- exist), and a null id here poisons the node lookup.
-                AND w.profile_id IS NOT NULL
-
-              UNION
-
-              SELECT DISTINCT pr.profile_id AS employer_id,
-                              pr.recommendation_worker_id AS worker_id
-              FROM "payment_requests" pr
-              WHERE pr.request_type = 'RECOMMENDATION_CONTACT'
-                AND pr.status = 'APPROVED'
-                AND pr.recommendation_worker_id IS NOT NULL
-
-              UNION
-
-              SELECT DISTINCT cua.employer_id, cua.worker_id
-              FROM "contact_unlock_attempts" cua
-              WHERE cua.unlocked_at IS NOT NULL
-            ) AS paid_contacts
+            FROM (${paidContactPairs()}) AS paid_contacts
             GROUP BY employer_id, worker_id
           `
         : Promise.resolve<EdgeRow[]>([]),
