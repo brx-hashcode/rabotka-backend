@@ -18,7 +18,6 @@ import { BotInboxService } from './services/bot-inbox.service';
 import { BotDraftService } from './services/bot-draft.service';
 import { BotRouterService } from './router/bot-router.service';
 import { BotOrchestratorService } from './services/bot-orchestrator.service';
-import { BotCommandsService } from './services/bot-commands.service';
 import { BotNotificationService } from './services/bot-notification.service';
 
 @Module({
@@ -43,7 +42,6 @@ import { BotNotificationService } from './services/bot-notification.service';
     BotInboxService,
     BotDraftService,
     BotRouterService,
-    BotCommandsService,
     BotNotificationService,
     BotOrchestratorService,
   ],

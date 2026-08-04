@@ -29,6 +29,7 @@ import { AdminAuthGuard } from './guards/admin-auth.guard';
 import { ProfileAuthGuard } from './guards/profile-auth.guard';
 import type { AdminAuthenticatedRequest } from './guards/jwt-auth.guard';
 import { Throttle } from '@nestjs/throttler';
+import { setAuthCookie } from './auth-cookie.util';
 import { LogService } from '../log/log.service';
 import {
   SendOtpDto,
@@ -54,28 +55,9 @@ export class AuthController {
     private readonly logService: LogService,
   ) {}
 
-  /**
-   * Single definition of the session cookie. Every login path — OTP, admin
-   * OTP, admin QR, admin TOTP, WhatsApp link — must set exactly the same
-   * attributes, or a session created by one path behaves differently from
-   * another's.
-   */
+  /** Delegates to the shared definition so every login path matches. */
   private setAuthCookie(res: Response, token: string): void {
-    const isProduction =
-      this.configService.get<string>('NODE_ENV') === 'production';
-    const cookieName = this.configService.get<string>('AUTH_COOKIE_NAME');
-
-    if (!cookieName) {
-      throw new Error('AUTH_COOKIE_NAME is not set');
-    }
-
-    res.cookie(cookieName, token, {
-      httpOnly: true,
-      secure: isProduction,
-      sameSite: isProduction ? 'none' : 'lax',
-      maxAge: 24 * 60 * 60 * 1000,
-      path: '/',
-    });
+    setAuthCookie(res, this.configService, token);
   }
 
   @Post('send-otp')

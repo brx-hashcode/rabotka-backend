@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { ConfigService } from '@nestjs/config';
 import { WhatsAppOutboundProcessor } from '../whatsapp-outbound.processor';
 import { WhatsAppService } from '../whatsapp.service';
 import { QueueService } from '../../../common/services/queue/queue.service';
@@ -15,6 +16,8 @@ const mockWhatsApp = {
 const mockLoginLink = {
   // Default: no login code attached, so existing expectations stay exact.
   appendTo: jest.fn().mockImplementation((_id: string, target: string) => target),
+  mint: jest.fn().mockResolvedValue('CODE123'),
+  shortLink: jest.fn().mockResolvedValue(null),
 };
 
 const mockQueueService = {
@@ -34,6 +37,10 @@ describe('WhatsAppOutboundProcessor', () => {
         WhatsAppOutboundProcessor,
         { provide: WhatsAppService, useValue: mockWhatsApp },
         { provide: WhatsAppLoginLinkService, useValue: mockLoginLink },
+        {
+          provide: ConfigService,
+          useValue: { get: jest.fn(() => 'https://rabotka.work') },
+        },
       ],
     }).compile();
     processor = module.get<WhatsAppOutboundProcessor>(
@@ -392,6 +399,105 @@ describe('WhatsAppOutboundProcessor', () => {
         statusCheck,
         { '1': 'Plomberie', '2': 'offer-9' },
       );
+    });
+  });
+
+  describe('short-link templates', () => {
+    // `createClaim` is `urlSuffixMode: 'shortlink'`: its approved URL is the
+    // fixed `…/s/{{1}}`, so the variable must be REPLACED by a code, never
+    // appended to.
+    const createClaim = WHATSAPP_TEMPLATES.createClaim.contentSid;
+
+    it('swaps the destination for a freshly minted code', async () => {
+      await processor.process({
+        data: {
+          type: 'template',
+          phone: '+242001',
+          contentSid: createClaim,
+          contentVariables: { '1': 'claims/new' },
+          profileId: 'p1',
+        },
+      });
+
+      expect(mockLoginLink.mint).toHaveBeenCalledWith('p1', 'claims/new');
+      expect(mockWhatsApp.sendTemplateMessage).toHaveBeenCalledWith(
+        '+242001',
+        createClaim,
+        { '1': 'CODE123' },
+      );
+      expect(mockLoginLink.appendTo).not.toHaveBeenCalled();
+    });
+
+    it('leaves the destination alone when no code could be minted', async () => {
+      // Sending `/s/claims/new` would be a dead link; the untouched template
+      // at least reaches the login fallback.
+      mockLoginLink.mint.mockResolvedValueOnce(null);
+
+      await processor.process({
+        data: {
+          type: 'template',
+          phone: '+242001',
+          contentSid: createClaim,
+          contentVariables: { '1': 'claims/new' },
+          profileId: 'p1',
+        },
+      });
+
+      expect(mockWhatsApp.sendTemplateMessage).toHaveBeenCalledWith(
+        '+242001',
+        createClaim,
+        { '1': 'claims/new' },
+      );
+    });
+  });
+
+  describe('plain-text links', () => {
+    it('rewrites a first-party link into a one-tap short link', async () => {
+      mockLoginLink.shortLink.mockResolvedValue('https://rabotka.work/s/CODE');
+
+      await processor.process({
+        data: {
+          type: 'text',
+          phone: '+242001',
+          profileId: 'p1',
+          text: 'Payez ici : https://rabotka.work/pay/tok-1',
+        },
+      });
+
+      expect(mockLoginLink.shortLink).toHaveBeenCalledWith('p1', '/pay/tok-1');
+      expect(mockWhatsApp.sendTextMessage).toHaveBeenCalledWith(
+        '+242001',
+        'Payez ici : https://rabotka.work/s/CODE',
+        'p1',
+      );
+    });
+
+    it.each([
+      ['https://wa.me/242069917686', 'wa.me is not ours'],
+      ['https://rabotka.work/r/abc123', 'ad links resolve themselves'],
+      ['https://rabotka.work/verify/whatsapp?token=x', 'carries its own token'],
+    ])('leaves %s alone (%s)', async (url) => {
+      await processor.process({
+        data: { type: 'text', phone: '+242001', profileId: 'p1', text: url },
+      });
+
+      expect(mockWhatsApp.sendTextMessage).toHaveBeenCalledWith(
+        '+242001',
+        url,
+        'p1',
+      );
+    });
+
+    it('does not rewrite when the recipient profile is unknown', async () => {
+      await processor.process({
+        data: {
+          type: 'text',
+          phone: '+242001',
+          text: 'https://rabotka.work/pay/tok-1',
+        },
+      });
+
+      expect(mockLoginLink.shortLink).not.toHaveBeenCalled();
     });
   });
 });

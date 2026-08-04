@@ -11,7 +11,7 @@ import { FLOW_IDS } from '../../bot.constants';
 const PROFILE_ID = 'profile-1';
 
 const mockState = {
-  flowId: FLOW_IDS.LIST_OFFERS,
+  flowId: FLOW_IDS.PAY_PENALTIES,
   step: 1,
   payload: { offerIds: ['a', 'b'] },
   updatedAt: new Date().toISOString(),
@@ -48,7 +48,7 @@ describe('BotStateService', () => {
     it('returns parsed BotState when found', async () => {
       redis.get.mockResolvedValue(JSON.stringify(mockState));
       const result = await service.get(PROFILE_ID);
-      expect(result?.flowId).toBe(FLOW_IDS.LIST_OFFERS);
+      expect(result?.flowId).toBe(FLOW_IDS.PAY_PENALTIES);
       expect(result?.step).toBe(1);
     });
 
@@ -88,7 +88,7 @@ describe('BotStateService', () => {
     it('stored JSON contains flowId and step', async () => {
       await service.set(PROFILE_ID, mockState);
       const stored = JSON.parse(redis.set.mock.calls[0][1]);
-      expect(stored.flowId).toBe(FLOW_IDS.LIST_OFFERS);
+      expect(stored.flowId).toBe(FLOW_IDS.PAY_PENALTIES);
       expect(stored.step).toBe(1);
     });
 
