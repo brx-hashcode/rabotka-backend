@@ -45,6 +45,40 @@ describe('DashboardService', () => {
       expect(metrics.assignmentsCount).toBe(0);
     });
 
+    it('reports connections from the shared paid-contact query', async () => {
+      // Three windowed counts in order: total, last 30d, previous 30d.
+      prisma.$queryRaw = jest
+        .fn()
+        .mockResolvedValueOnce([{ count: 4 }])
+        .mockResolvedValueOnce([{ count: 3 }])
+        .mockResolvedValueOnce([{ count: 1 }])
+        .mockResolvedValue([]);
+
+      const metrics = await service.getMetrics();
+
+      expect(metrics.connectionsCount).toBe(4);
+      // calcTrend clamps to ±100, so 3-vs-1 (+200%) reports as 100 like every
+      // other metric on this dashboard.
+      expect(metrics.connectionsTrend).toBe(100);
+    });
+
+    it('counts a pair once when the same employer paid twice', async () => {
+      // The DISTINCT lives in SQL, so what is pinned here is that the service
+      // reports the row count the query returns rather than summing payments —
+      // this is the number that must match the Network graph's edge count.
+      prisma.$queryRaw = jest.fn().mockResolvedValue([{ count: 1 }]);
+
+      const metrics = await service.getMetrics();
+
+      expect(metrics.connectionsCount).toBe(1);
+    });
+
+    it('treats a missing connections row as zero, not NaN', async () => {
+      prisma.$queryRaw = jest.fn().mockResolvedValue([]);
+      const metrics = await service.getMetrics();
+      expect(metrics.connectionsCount).toBe(0);
+    });
+
     it('calculates trend as 100 when previous is 0 and current > 0', async () => {
       // Reset and setup for this test
       prisma = makePrisma();
