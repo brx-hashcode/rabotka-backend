@@ -44,5 +44,3 @@ export const CMD_PAY = [
   'payer pénalités',
   'payer penalites',
 ];
-export const CMD_VERIFY_WHATSAPP = ['verifier', 'verify', 'vérifier'];
-

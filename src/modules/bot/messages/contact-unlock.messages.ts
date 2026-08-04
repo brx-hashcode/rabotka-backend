@@ -102,13 +102,3 @@ export function formatContactUnlockPending(params: {
     `Si l'autre partie ne paie pas avant le *${deadline}*, votre paiement sera reversé vers votre wallet interne.`,
   ].join('\n');
 }
-
-export function formatContactUnlockExpiredConversion(amount: number): string {
-  return [
-    '*Déverrouillage expiré*',
-    '',
-    'Le délai de déverrouillage de contact a expiré.',
-    '',
-    `*${amount} FCFA* ont été recrédités sur votre portefeuille.`,
-  ].join('\n');
-}
