@@ -5,6 +5,7 @@ import {
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { TimeRange } from './dto/job-activity-query.dto';
+import { countPaidContactPairs } from '../../common/queries/paid-contacts.sql';
 
 export type JobActivityDataPoint = {
   date: string;
@@ -13,6 +14,13 @@ export type JobActivityDataPoint = {
 };
 
 export type DashboardMetrics = {
+  /**
+   * Distinct employer↔worker pairs where the employer paid to make contact.
+   * The same number the Network graph draws as a "Contact payé" edge — both
+   * read `paidContactPairs()` so the card and the graph cannot disagree.
+   */
+  connectionsCount: number;
+  connectionsTrend: number | null;
   assignmentsCount: number;
   assignmentsTrend: number | null;
   profilesCount: number;
@@ -44,6 +52,18 @@ export class DashboardService {
     );
   }
 
+  /** Distinct paid employer↔worker pairs, optionally within a window. */
+  private async countConnections(where?: {
+    since?: Date;
+    until?: Date;
+  }): Promise<number> {
+    const rows =
+      await this.prisma.$queryRaw<{ count: number }[]>(
+        countPaidContactPairs(where),
+      );
+    return rows[0]?.count ?? 0;
+  }
+
   private async loadMetrics(): Promise<DashboardMetrics> {
     const now = new Date();
     const thirtyDaysAgo = new Date(now);
@@ -52,6 +72,9 @@ export class DashboardService {
     sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
 
     const [
+      connectionsTotal,
+      connectionsCurrent,
+      connectionsPrevious,
       assignmentsTotal,
       assignmentsCurrent,
       assignmentsPrevious,
@@ -65,6 +88,12 @@ export class DashboardService {
       applicationsCurrent,
       applicationsPrevious,
     ] = await Promise.all([
+      // Connections: employers who paid to reach a worker. Counted as distinct
+      // pairs, not payments — paying twice for the same worker is still one
+      // relationship, which is what the graph shows.
+      this.countConnections(),
+      this.countConnections({ since: thirtyDaysAgo }),
+      this.countConnections({ since: sixtyDaysAgo, until: thirtyDaysAgo }),
       // Total assignments (placements made)
       this.prisma.assignment.count(),
       // Assignments last 30 days
@@ -110,6 +139,8 @@ export class DashboardService {
     ]);
 
     return {
+      connectionsCount: connectionsTotal,
+      connectionsTrend: this.calcTrend(connectionsCurrent, connectionsPrevious),
       assignmentsCount: assignmentsTotal,
       assignmentsTrend: this.calcTrend(assignmentsCurrent, assignmentsPrevious),
       profilesCount: profilesTotal,
