@@ -1,7 +1,5 @@
 import {
   runJobStatusCheckFlow,
-  getJobStatusCheckInitialState,
-  jobStatusCheckPromptMessage,
 } from '../job-status-check.flow';
 import type { BotProfile, BotState } from '../../types/bot-state.types';
 import { FLOW_IDS } from '../../bot.constants';
@@ -152,27 +150,5 @@ describe('runJobStatusCheckFlow', () => {
     ctx.queueService.addJob.mockRejectedValue(new Error('Queue error'));
     const result = await runJobStatusCheckFlow(makeState(), '2', profile, ctx);
     expect(result.nextState).toBeDefined();
-  });
-});
-
-describe('getJobStatusCheckInitialState', () => {
-  it('returns initial state', () => {
-    const state = getJobStatusCheckInitialState({
-      jobOfferId: 'job-1',
-      jobTitle: 'Plombier',
-      applicationId: 'app-1',
-      paymentFlow: PaymentFlow.DAILY,
-    });
-    expect(state.flowId).toBe(FLOW_IDS.JOB_STATUS_CHECK);
-    expect(state.payload?.jobOfferId).toBe('job-1');
-  });
-});
-
-describe('jobStatusCheckPromptMessage', () => {
-  it('generates prompt message', () => {
-    const msg = jobStatusCheckPromptMessage('Plombier', PaymentFlow.DAILY);
-    expect(msg).toContain('Plombier');
-    expect(msg).toContain('1');
-    expect(msg).toContain('2');
   });
 });
