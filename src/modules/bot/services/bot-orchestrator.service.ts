@@ -13,7 +13,10 @@ import { BotRouterService } from '../router/bot-router.service';
 import { BotNotificationService } from './bot-notification.service';
 import { BotInboxService } from './bot-inbox.service';
 import { BotDraftService } from './bot-draft.service';
-import { welcomePlatformMessage } from '../messages/welcome.messages';
+import {
+  welcomePlatformMessage,
+  welcomeUnregisteredMessage,
+} from '../messages/welcome.messages';
 import { SystemConfigService } from '../../system-config/system-config.service';
 import { WHATSAPP_TEMPLATES } from '../../../common/constants/whatsapp-templates';
 import { templateReply } from '../../../common/constants/whatsapp-carousel';
@@ -141,7 +144,7 @@ export class BotOrchestratorService {
   ): Promise<string[]> {
     const profile = preloadedProfile ?? (await this.loadProfile(profileId));
     if (!profile) {
-      return [templateReply(WHATSAPP_TEMPLATES.welcomeUnregistered.contentSid)];
+      return [welcomeUnregisteredMessage()];
     }
 
     const allowed: string[] = [

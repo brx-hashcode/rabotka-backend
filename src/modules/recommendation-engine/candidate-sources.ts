@@ -482,14 +482,6 @@ export class CandidateSourceService {
 }
 
 /** The highest-scoring keys of an affinity map, capped. */
-export function topAffinityKeys(
-  affinity: Record<string, number>,
-  max: number,
-): string[] {
-  return topKeys(affinity, max);
-}
-
-/** The highest-scoring keys of an affinity map, capped. */
 function topKeys(affinity: Record<string, number>, max: number): string[] {
   return Object.entries(affinity)
     .filter(([, v]) => v > 0)
