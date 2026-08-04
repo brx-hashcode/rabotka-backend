@@ -24,12 +24,6 @@ export function parseDateTime(input: string): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
-export function toScheduledAtString(scheduledAt: unknown): string {
-  if (scheduledAt instanceof Date) return scheduledAt.toISOString();
-  if (typeof scheduledAt === 'string') return scheduledAt;
-  return '';
-}
-
 export const APP_TIMEZONE = 'Africa/Brazzaville';
 
 export function formatDateTime(d: Date): string {

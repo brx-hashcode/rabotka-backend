@@ -3,28 +3,7 @@ export const WHATSAPP_MEDIA_BASE = (
   'https://pub-fd4c940e661d483b955abd6d7de0e17f.r2.dev'
 ).replace(/\/$/, '');
 
-export const JOB_PLACEHOLDER_KEY = 'whatsapp/job-placeholder.png';
-export const PROFILE_PLACEHOLDER_KEY = 'whatsapp/profile-placeholder.png';
 export const COVER_KEY = 'whatsapp/cover-rabotka.jpg';
-
-/**
- * Full public URL of a profile's header image for a WhatsApp media message:
- * the worker's avatar when set, else the profile placeholder — so a profile
- * view always shows a picture instead of rendering with none.
- */
-export function profileImageUrl(avatarUrl: string | null | undefined): string {
-  return (
-    avatarUrl?.trim() || `${WHATSAPP_MEDIA_BASE}/${PROFILE_PLACEHOLDER_KEY}`
-  );
-}
-
-/**
- * Full public URL of a job card's header image. Jobs have no per-offer photo,
- * so every card uses the same placeholder.
- */
-export function jobImageUrl(): string {
-  return `${WHATSAPP_MEDIA_BASE}/${JOB_PLACEHOLDER_KEY}`;
-}
 
 /**
  * Full public URL of the brand cover, used as the header image of the welcome
@@ -37,27 +16,6 @@ export function coverImageUrl(): string {
 // Meta requires at least 2 cards per WhatsApp carousel template (and each
 // approved template is locked to its exact card count), so a single result
 // is never sent as a carousel — callers fall back to plain text for count 1.
-
-/**
- * Make a free-text value safe to inject into a WhatsApp template variable.
- *
- * Values come from user input (a worker's description, a job's title/address),
- * and WhatsApp rejects the whole send with Twilio 63013 ("Channel policy
- * violation") when a variable contains a newline, a run of 4+ whitespace
- * characters, or control characters — carousel card bodies are single-line and
- * cannot carry any of these. Collapsing every whitespace run to one space and
- * stripping C0 control chars makes those triggers impossible. Emojis are left
- * intact: WhatsApp body text supports them.
- */
-export function sanitizeTemplateValue(text: string): string {
-  return (
-    text
-      // eslint-disable-next-line no-control-regex
-      .replace(/[\x00-\x1F\x7F]+/g, ' ') // newlines/tabs/control chars -> space
-      .replace(/\s+/g, ' ') // collapse any remaining whitespace run
-      .trim()
-  );
-}
 
 // A carousel needs ≥2 cards, so a single recommendation used to fall back to a
 // plain-text list. Instead send one twilio/card (media + title + "Sélectionner"
