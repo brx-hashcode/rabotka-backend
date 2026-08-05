@@ -31,8 +31,15 @@ export type ScoreTerms = {
   partyAff: number;
   /** Agreement across independent candidate sources. */
   cf: number | null;
-  /** Distance, decayed by the user's own learned tolerance. */
-  prox: number;
+  /**
+   * Distance, decayed by the user's own learned tolerance.
+   *
+   * Null for a REMOTE job, where distance carries no information at all — not
+   * "neutral", genuinely absent. A constant 0.5 would drag every remote offer
+   * toward the middle against local work while ordering nothing; null drops the
+   * term and redistributes its weight onto the signals that do say something.
+   */
+  prox: number | null;
   /** How soon the job starts. Null for a worker, who has no start time. */
   urgency: number | null;
   /** How recently the item was posted, or the counterparty last active. */
@@ -183,7 +190,8 @@ export function applyPenalties(
 ): number {
   let score = clamp01(relevance);
   if (flags.negativeCategory) score *= 1 - clamp01(penalties.negCategory);
-  if (flags.seenDecay) score *= 1 - clamp01(penalties.seen) * clamp01(flags.seenDecay);
+  if (flags.seenDecay)
+    score *= 1 - clamp01(penalties.seen) * clamp01(flags.seenDecay);
   if (flags.unsaved) score *= 1 - clamp01(penalties.unsaved);
   return clamp01(score);
 }

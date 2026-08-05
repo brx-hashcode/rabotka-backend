@@ -13,8 +13,9 @@ import {
 import { ProfileType, DocumentType } from '@prisma/client';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { HasMxRecord } from '../../../common/validators/has-mx-record.validator';
+import { LocationDto } from '../../../common/dto/location.dto';
 
-export class CreateProfileDto {
+export class CreateProfileDto extends LocationDto {
   @ApiProperty({ description: 'First name of the profile' })
   @Transform(({ value }) => value?.trim())
   @IsString()
