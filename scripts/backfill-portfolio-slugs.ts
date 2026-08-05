@@ -14,9 +14,13 @@
  * Safe to re-run: profiles that already have a slug are skipped, and the slug
  * itself is only ever written when the column is null.
  *
+ * Invoke tsx directly, NOT through pnpm: pnpm's verifyDepsBeforeRun check runs
+ * first and reinstalls node_modules whenever the lockfile looks out of step,
+ * which on a server turns a read-only report into a several-minute install.
+ *
  * Usage:
- *   pnpm tsx scripts/backfill-portfolio-slugs.ts --dry-run   # report only
- *   pnpm tsx scripts/backfill-portfolio-slugs.ts             # write
+ *   node_modules/.bin/tsx scripts/backfill-portfolio-slugs.ts --dry-run   # report only
+ *   node_modules/.bin/tsx scripts/backfill-portfolio-slugs.ts             # write
  */
 import { config } from 'dotenv';
 import { PrismaPg } from '@prisma/adapter-pg';

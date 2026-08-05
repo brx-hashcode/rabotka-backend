@@ -15,6 +15,7 @@ const row = (id: string, over: Record<string, unknown> = {}) => ({
   payment_flow: null,
   latitude: null,
   longitude: null,
+  is_remote: false,
   ...over,
 });
 
@@ -97,16 +98,20 @@ describe('CandidateSourceService', () => {
         10,
       );
 
-      expect(prisma.jobOffer.findMany.mock.calls[0][0].where.category_id).toEqual(
-        { notIn: ['cat-x'] },
-      );
+      expect(
+        prisma.jobOffer.findMany.mock.calls[0][0].where.category_id,
+      ).toEqual({ notIn: ['cat-x'] });
     });
 
     it('caps how many affinity keys reach the query', async () => {
       const many = Object.fromEntries(
         Array.from({ length: 30 }, (_, i) => [`cat-${i}`, 1 - i / 100]),
       );
-      await service.fromAffinities('w1', features({ categoryAffinity: many }), 10);
+      await service.fromAffinities(
+        'w1',
+        features({ categoryAffinity: many }),
+        10,
+      );
 
       const or = prisma.jobOffer.findMany.mock.calls[0][0].where.OR;
       expect(or[0].category_id.in).toHaveLength(12);
@@ -136,29 +141,81 @@ describe('CandidateSourceService', () => {
     });
   });
 
+  /**
+   * Where a job offer's location comes from.
+   *
+   * Offers only gained country/city after profiles did, so both sources exist
+   * and the precedence between them decides whether an employer who recruits
+   * away from their own base is ranked against the right city.
+   */
+  describe('offer location', () => {
+    const locate = async (over: Record<string, unknown>) => {
+      prisma.jobOffer.findMany.mockResolvedValue([row('o1', over)]);
+      const [candidate] = await service.fromAllOpen('w1', 10);
+      return candidate;
+    };
+
+    it("prefers the offer's own location over the employer's", async () => {
+      const c = await locate({
+        country_code: 'CG',
+        city: 'Pointe-Noire',
+        employer: { country_code: 'CG', city: 'Brazzaville' },
+      });
+
+      expect(c.city).toBe('Pointe-Noire');
+      expect(c.countryCode).toBe('CG');
+    });
+
+    it('falls back to the employer for offers created before the columns existed', async () => {
+      const c = await locate({
+        country_code: null,
+        city: null,
+        employer: { country_code: 'CG', city: 'Brazzaville' },
+      });
+
+      expect(c.city).toBe('Brazzaville');
+      expect(c.countryCode).toBe('CG');
+    });
+
+    it('reports no location when neither side has one', async () => {
+      const c = await locate({
+        country_code: null,
+        city: null,
+        employer: null,
+      });
+
+      expect(c.city).toBeNull();
+      expect(c.countryCode).toBeNull();
+    });
+  });
+
   describe('fromCollaborativeFiltering', () => {
     const warm = features({ categoryAffinity: { 'cat-a': 1 } });
 
     it('is a no-op without seed categories', async () => {
-      const out = await service.fromCollaborativeFiltering('w1', features(), 10);
+      const out = await service.fromCollaborativeFiltering(
+        'w1',
+        features(),
+        10,
+      );
       expect(out).toEqual([]);
       expect(prisma.application.findMany).not.toHaveBeenCalled();
     });
 
     it('returns nothing when no peer worked the same categories', async () => {
       prisma.application.findMany.mockResolvedValue([]);
-      expect(
-        await service.fromCollaborativeFiltering('w1', warm, 10),
-      ).toEqual([]);
+      expect(await service.fromCollaborativeFiltering('w1', warm, 10)).toEqual(
+        [],
+      );
       expect(prisma.application.groupBy).not.toHaveBeenCalled();
     });
 
     it('excludes the user themselves from the peer set', async () => {
       prisma.application.findMany.mockResolvedValue([{ worker_id: 'w2' }]);
       await service.fromCollaborativeFiltering('w1', warm, 10);
-      expect(prisma.application.findMany.mock.calls[0][0].where.worker_id).toEqual(
-        { not: 'w1' },
-      );
+      expect(
+        prisma.application.findMany.mock.calls[0][0].where.worker_id,
+      ).toEqual({ not: 'w1' });
     });
 
     it('discards co-occurrences below the support floor', async () => {
@@ -223,9 +280,9 @@ describe('CandidateSourceService', () => {
 
     it('degrades to an empty pool instead of throwing', async () => {
       prisma.application.findMany.mockRejectedValue(new Error('db down'));
-      expect(
-        await service.fromCollaborativeFiltering('w1', warm, 10),
-      ).toEqual([]);
+      expect(await service.fromCollaborativeFiltering('w1', warm, 10)).toEqual(
+        [],
+      );
     });
   });
 
@@ -237,9 +294,9 @@ describe('CandidateSourceService', () => {
 
     it('always excludes already-applied offers in the last-resort tier', async () => {
       await service.fromAllOpen('w1', 10);
-      expect(prisma.jobOffer.findMany.mock.calls[0][0].where.applications).toEqual(
-        { none: { worker_id: 'w1' } },
-      );
+      expect(
+        prisma.jobOffer.findMany.mock.calls[0][0].where.applications,
+      ).toEqual({ none: { worker_id: 'w1' } });
     });
   });
 
@@ -264,7 +321,10 @@ describe('CandidateSourceService', () => {
         { id: 'e1', reliability_score: 100, rating_avg: null },
       ]);
       // 0.6 * 1 + 0.4 * 0.5
-      expect((await service.employerQuality(['e1'])).get('e1')).toBeCloseTo(0.8, 6);
+      expect((await service.employerQuality(['e1'])).get('e1')).toBeCloseTo(
+        0.8,
+        6,
+      );
     });
 
     it('assumes a full reliability score when none is recorded', async () => {
@@ -272,7 +332,10 @@ describe('CandidateSourceService', () => {
         { id: 'e1', reliability_score: null, rating_avg: 3 },
       ]);
       // 0.6 * 1 + 0.4 * 0.5
-      expect((await service.employerQuality(['e1'])).get('e1')).toBeCloseTo(0.8, 6);
+      expect((await service.employerQuality(['e1'])).get('e1')).toBeCloseTo(
+        0.8,
+        6,
+      );
     });
 
     it('keeps every score inside [0,1] for out-of-range stored values', async () => {
@@ -374,18 +437,18 @@ describe('CandidateSourceService', () => {
       expect(prisma.profile.findMany).not.toHaveBeenCalled();
     });
 
-    it('narrows to the employer\'s high-affinity trades', async () => {
+    it("narrows to the employer's high-affinity trades", async () => {
       await service.workersFromAffinities(
         features({ categoryAffinity: { 'cat-a': 1, 'cat-b': 0.5 } }),
         opts,
         10,
       );
-      expect(
-        prisma.profile.findMany.mock.calls[0][0].where.categories,
-      ).toEqual({ some: { category_id: { in: ['cat-a', 'cat-b'] } } });
+      expect(prisma.profile.findMany.mock.calls[0][0].where.categories).toEqual(
+        { some: { category_id: { in: ['cat-a', 'cat-b'] } } },
+      );
     });
 
-    it('flattens a worker\'s categories onto the candidate', async () => {
+    it("flattens a worker's categories onto the candidate", async () => {
       prisma.profile.findMany.mockResolvedValue([
         workerRow('w1', ['cat-a', 'cat-b']),
       ]);

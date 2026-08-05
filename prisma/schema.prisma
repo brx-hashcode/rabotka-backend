@@ -311,6 +311,13 @@ model Profile {
   phone                             String             @unique
   email                             String             @unique
   address                           String
+  /// ISO 3166-1 alpha-2. What the ranker and the coming filters compare —
+  /// stable and case-safe, unlike the display name beside it.
+  country_code                      String?            @db.VarChar(2)
+  /// Denormalised so admin and the profile page can render a country without
+  /// carrying the reference list.
+  country_name                      String?
+  city                              String?
   latitude                          Float?
   longitude                         Float?
   description                       String             @db.Text
@@ -379,6 +386,7 @@ model Profile {
   @@index([reliability_score], name: "idx_profile_reliability")
   @@index([category_id], name: "idx_profile_category")
   @@index([deleted_at], name: "idx_profile_deleted_at")
+  @@index([country_code, city], name: "idx_profile_country_city")
   @@map("profiles")
 }
 
@@ -625,7 +633,18 @@ model JobOffer {
   scheduled_at            DateTime
   amount                  Decimal?       @db.Decimal(10, 2)
   payment_flow            PaymentFlow?
-  address                 String
+  /// Null for a remote job, which has no site to travel to. Everything that
+  /// renders it must handle that rather than printing an empty line.
+  address                 String?
+  /// A job done from anywhere. Suppresses the whole location block in the UI
+  /// and removes distance from its ranking entirely.
+  is_remote               Boolean        @default(false)
+  /// ISO 3166-1 alpha-2. Set from the employer's own location at creation
+  /// unless the offer declares its own — a job is usually, but not always,
+  /// where the person posting it is.
+  country_code            String?        @db.VarChar(2)
+  country_name            String?
+  city                    String?
   latitude                Float?
   longitude               Float?
   note                    String?
@@ -648,6 +667,7 @@ model JobOffer {
   @@index([scheduled_at], name: "idx_job_offer_scheduled")
   @@index([category_id], name: "idx_job_offer_category")
   @@index([deleted_at], name: "idx_job_offer_deleted_at")
+  @@index([country_code, city], name: "idx_job_offer_country_city")
   @@map("job_offers")
 }
 

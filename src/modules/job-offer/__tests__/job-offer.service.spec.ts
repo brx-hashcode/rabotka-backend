@@ -1,4 +1,5 @@
 import { AdminCacheService } from '../../../common/services/cache/admin-cache.service';
+import { GeoService } from '../../geo/geo.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import {
   BadRequestException,
@@ -103,6 +104,12 @@ describe('JobOfferService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        {
+          // The real GeoService: it has no dependencies beyond a checked-in
+          // JSON file, so a mock would only weaken the location assertions.
+          provide: GeoService,
+          useValue: new GeoService(),
+        },
         {
           // Pass-through cache: the loader always runs, so these specs keep
           // exercising the real queries rather than a cached value.

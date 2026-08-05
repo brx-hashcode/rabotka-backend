@@ -47,6 +47,7 @@ import {
   Prisma,
   RejectionSource,
 } from '@prisma/client';
+import { GeoService } from '../geo/geo.service';
 
 const REFERENCE_MAX_ATTEMPTS = 5;
 
@@ -132,7 +133,9 @@ export type AdminJobOfferListItem = {
   scheduledAt: string;
   amount: number;
   paymentFlow: PaymentFlow | null;
-  address: string;
+  /** Null for a remote job — render `isRemote` instead of an empty line. */
+  address: string | null;
+  isRemote: boolean;
   note: string | null;
   quantity: number;
   status: string;
@@ -174,7 +177,9 @@ export type JobOfferListItem = {
   scheduled_at: Date;
   amount: number | null;
   payment_flow: PaymentFlow | null;
-  address: string;
+  /** Null for a remote job — render `is_remote` instead of an empty line. */
+  address: string | null;
+  is_remote: boolean;
   note: string | null;
   quantity: number;
   acceptedCount: number;
@@ -211,7 +216,34 @@ export class JobOfferService {
     private readonly geocodingService: GeocodingService,
     @Inject(REDIS_CONNECTION) private readonly redis: Redis,
     private readonly cache: AdminCacheService,
+    private readonly geo: GeoService,
   ) {}
+
+  /**
+   * The location columns for a new offer: whatever it declares, else the
+   * employer's.
+   *
+   * Inheriting is all-or-nothing on purpose. Mixing a declared country with an
+   * inherited city would silently produce a city that does not belong to the
+   * country stored beside it.
+   */
+  private offerLocation(
+    dto: { countryCode?: string; city?: string },
+    employer: {
+      country_code: string | null;
+      country_name: string | null;
+      city: string | null;
+    },
+  ): { country_code?: string; country_name?: string; city?: string } {
+    if (dto.countryCode !== undefined || dto.city !== undefined) {
+      return this.geo.resolveLocation(dto);
+    }
+    return {
+      country_code: employer.country_code ?? undefined,
+      country_name: employer.country_name ?? undefined,
+      city: employer.city ?? undefined,
+    };
+  }
 
   private notificationCooldownKey(workerId: string): string {
     return `job_notif_cooldown:${workerId}`;
@@ -229,6 +261,10 @@ export class JobOfferService {
         profile_type: true,
         reliability_score: true,
         verification_status: true,
+        // The fallback when the offer does not declare its own location.
+        country_code: true,
+        country_name: true,
+        city: true,
       },
     });
     if (!employer) {
@@ -283,7 +319,23 @@ export class JobOfferService {
       scheduled_at: scheduledAt,
       amount: dto.amount,
       payment_flow: dto.payment_flow,
-      address: dto.address.trim(),
+      is_remote: dto.isRemote ?? false,
+      // A remote job stores NO location at all — not the employer's, not a
+      // blank string. Inheriting one would put it in a city it has nothing to
+      // do with and let a city filter surface it as local work.
+      ...(dto.isRemote
+        ? { address: null, country_code: null, country_name: null, city: null }
+        : {
+            address: dto.address!.trim(),
+            // An offer that says nothing about where it is inherits the
+            // employer's own location. Most people recruit where they are, and
+            // a null here would drop the offer out of the proximity term
+            // entirely — the blind spot this column exists to close. An offer
+            // that DOES declare a location always wins, because recruiting for
+            // a site away from your base is exactly the case the employer's
+            // address gets wrong.
+            ...this.offerLocation(dto, employer),
+          }),
       note: dto.note?.trim() ?? null,
       quantity: dto.quantity ?? 1,
       status: JobOfferStatus.ACTIVE,
@@ -326,8 +378,13 @@ export class JobOfferService {
     });
 
     // Geocode first, then index — matching uses lat/lng so coordinates must be written before indexing.
-    this.geocodingService
-      .geocode(offer.address)
+    // A remote job has no address, so there is nothing to geocode; resolve
+    // straight through rather than sending an empty string to Nominatim, which
+    // would spend a request to be told nothing.
+    (offer.address
+      ? this.geocodingService.geocode(offer.address)
+      : Promise.resolve(null)
+    )
       .then(async (coords) => {
         if (coords) {
           await this.prisma.jobOffer.update({
@@ -467,7 +524,8 @@ export class JobOfferService {
       scheduled_at: Date;
       amount: unknown;
       payment_flow: PaymentFlow | null;
-      address: string;
+      address: string | null;
+      is_remote: boolean;
       latitude: number | null;
       longitude: number | null;
       note: string | null;
@@ -506,7 +564,8 @@ export class JobOfferService {
         scheduled_at: Date;
         amount: unknown;
         payment_flow: PaymentFlow | null;
-        address: string;
+        address: string | null;
+        is_remote: boolean;
         latitude: number | null;
         longitude: number | null;
         note: string | null;
@@ -597,8 +656,7 @@ export class JobOfferService {
     // `scheduled_at` and only then reordered. Global ranking needs the
     // recommendation engine, which doesn't cursor-paginate.
     const categorySet = new Set(workerCategoryIds ?? []);
-    const ordered =
-      workerCoords || categorySet.size > 0 ? [...slice] : slice;
+    const ordered = workerCoords || categorySet.size > 0 ? [...slice] : slice;
     if (ordered !== slice) {
       ordered.sort((a, b) => {
         const scoreOf = (o: (typeof rows)[number]): number => {
@@ -992,7 +1050,23 @@ export class JobOfferService {
         `Le montant doit être entre ${AMOUNT_MIN_FCFA} et ${AMOUNT_MAX_FCFA} FCFA`,
       );
     }
-    if (!dto.address || dto.address.trim().length < ADDRESS_MIN) {
+    // A remote job has no site to travel to, so no address is required —
+    // but if one is supplied anyway it still has to be a real address rather
+    // than a stray character.
+    if (
+      !dto.isRemote &&
+      (!dto.address || dto.address.trim().length < ADDRESS_MIN)
+    ) {
+      throw new BadRequestException(
+        `L'adresse doit contenir au moins ${ADDRESS_MIN} caractères`,
+      );
+    }
+    if (
+      dto.isRemote &&
+      dto.address != null &&
+      dto.address.trim().length > 0 &&
+      dto.address.trim().length < ADDRESS_MIN
+    ) {
       throw new BadRequestException(
         `L'adresse doit contenir au moins ${ADDRESS_MIN} caractères`,
       );
@@ -1110,6 +1184,7 @@ export class JobOfferService {
       amount: Number(o.amount),
       paymentFlow: o.payment_flow,
       address: o.address,
+      isRemote: o.is_remote,
       note: o.note,
       quantity: o.quantity,
       status: o.status,
@@ -1189,6 +1264,7 @@ export class JobOfferService {
       amount: Number(offer.amount),
       paymentFlow: offer.payment_flow,
       address: offer.address,
+      isRemote: offer.is_remote,
       note: offer.note,
       quantity: offer.quantity,
       status: offer.status,
@@ -1275,7 +1351,9 @@ export class JobOfferService {
       throw new NotFoundException('Offre introuvable');
     }
     if (offer.employer_id !== actorProfileId) {
-      throw new ForbiddenException("Vous n'êtes pas l'employeur de cette offre");
+      throw new ForbiddenException(
+        "Vous n'êtes pas l'employeur de cette offre",
+      );
     }
     if (!EMPLOYER_DELETABLE_JOB_OFFER_STATUSES.includes(offer.status)) {
       throw new BadRequestException(
@@ -1328,9 +1406,7 @@ export class JobOfferService {
     await this.cache.invalidate('jobs');
     // Remove each from the vector index so archived offers stop being matched.
     for (const id of ids) {
-      void this.matchingService
-        .deleteJobFromIndex(id)
-        .catch(() => undefined);
+      void this.matchingService.deleteJobFromIndex(id).catch(() => undefined);
     }
     return { count };
   }
@@ -1366,7 +1442,18 @@ export class JobOfferService {
         data.category = { connect: { id: dto.categoryId } };
       }
     }
-    if (dto.address !== undefined) data.address = dto.address.trim();
+    if (dto.isRemote !== undefined) data.is_remote = dto.isRemote;
+    if (dto.isRemote) {
+      // Same rule as creation: flipping an offer to remote drops its location
+      // rather than leaving a stale one behind for filters to trip over.
+      data.address = null;
+      data.country_code = null;
+      data.country_name = null;
+      data.city = null;
+    } else {
+      if (dto.address !== undefined) data.address = dto.address.trim();
+      Object.assign(data, this.geo.resolveLocation(dto));
+    }
     if (dto.note !== undefined) data.note = dto.note.trim() || null;
     if (dto.quantity !== undefined) data.quantity = dto.quantity;
 
@@ -1397,7 +1484,8 @@ export class JobOfferService {
       scheduled_at: Date;
       amount: unknown;
       payment_flow: PaymentFlow | null;
-      address: string;
+      address: string | null;
+      is_remote?: boolean;
       note: string | null;
       quantity: number;
       status: string;
@@ -1415,6 +1503,7 @@ export class JobOfferService {
       amount: offer.amount == null ? null : Number(offer.amount),
       payment_flow: offer.payment_flow,
       address: offer.address,
+      is_remote: offer.is_remote ?? false,
       note: offer.note,
       quantity: offer.quantity,
       acceptedCount,
