@@ -83,9 +83,20 @@ export const WHATSAPP_TEMPLATES = {
    * URL (`…/login?redirect=/{{1}}`), so the one-tap login code can ride along.
    */
   welcomePlatform: {
+    // v4 (2026-08): the copy now says what Rabotka is, and the button reads
+    // "Ouvrir l'application". Rollback: point TPL_WELCOME_PLATFORM at
+    // HX230bb5b440d631488889a134b6bd8388, the v2 card. Same variables and the
+    // same append-mode URL, so nothing else here changes.
+    //
+    // v4 rather than v3 because the two are byte-identical except for the
+    // category asked for at submission: v3 requested UTILITY and sat pending
+    // for hours while Meta wanted to reclassify it (its approval record read
+    // `category: MARKETING, allow_category_change: true`); v4 asked for
+    // MARKETING — what v2 and the unregistered card already are — and was
+    // approved in minutes. Worth remembering for the next brand card.
     contentSid: sid(
       'TPL_WELCOME_PLATFORM',
-      'HX230bb5b440d631488889a134b6bd8388',
+      'HX8c4fcf4d486e3643ce2ac55cef77b01a',
     ),
     urlSuffixVar: '1',
     urlSuffixSeparator: '&',
