@@ -6,14 +6,16 @@ import {
   IsEnum,
   IsOptional,
   IsDateString,
+  IsBoolean,
   Min,
   Max,
   MinLength,
   MaxLength,
 } from 'class-validator';
 import { PaymentFlow } from '@prisma/client';
+import { LocationDto } from '../../../common/dto/location.dto';
 
-export class CreateJobOfferDto {
+export class CreateJobOfferDto extends LocationDto {
   @ApiProperty({ example: 'Plombier pour réparation urgente' })
   @IsString()
   @MinLength(5, { message: 'Le titre doit contenir entre 5 et 100 caractères' })
@@ -50,12 +52,24 @@ export class CreateJobOfferDto {
   @IsEnum(PaymentFlow)
   payment_flow?: PaymentFlow | null;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     example: '123 Avenue de la Paix, Poto-Poto, Brazzaville',
+    description:
+      'Required unless isRemote is true — a remote job has no site. ' +
+      'Enforced in the service, which is the only place that knows both fields.',
   })
+  @IsOptional()
   @IsString()
   @MinLength(10)
-  address!: string;
+  address?: string;
+
+  @ApiPropertyOptional({
+    example: false,
+    description: 'A job done from anywhere. Clears address, country and city.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  isRemote?: boolean;
 
   @ApiPropertyOptional({ example: 'Apporter vos propres outils' })
   @IsOptional()

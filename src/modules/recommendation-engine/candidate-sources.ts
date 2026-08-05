@@ -27,6 +27,16 @@ export type Candidate = {
   paymentFlow: string | null;
   latitude: number | null;
   longitude: number | null;
+  /**
+   * The offer's own declared country/city, falling back to the employer's for
+   * rows created before offers had the columns. Used only when the offer has no
+   * coordinates, where a coarse "same city" beats the flat constant it
+   * replaces.
+   */
+  countryCode: string | null;
+  city: string | null;
+  /** Done from anywhere: distance is meaningless, not merely unknown. */
+  isRemote: boolean;
 };
 
 export type WorkerCandidate = {
@@ -34,6 +44,8 @@ export type WorkerCandidate = {
   categoryIds: string[];
   latitude: number | null;
   longitude: number | null;
+  countryCode: string | null;
+  city: string | null;
   createdAt: Date;
 };
 
@@ -54,6 +66,8 @@ const WORKER_SELECT = {
   id: true,
   latitude: true,
   longitude: true,
+  country_code: true,
+  city: true,
   created_at: true,
   categories: { select: { category_id: true } },
 } satisfies Prisma.ProfileSelect;
@@ -65,6 +79,8 @@ const toWorkerCandidate = (r: WorkerRow): WorkerCandidate => ({
   categoryIds: r.categories.map((c) => c.category_id),
   latitude: r.latitude,
   longitude: r.longitude,
+  countryCode: r.country_code,
+  city: r.city,
   createdAt: r.created_at,
 });
 
@@ -97,6 +113,10 @@ const CANDIDATE_SELECT = {
   payment_flow: true,
   latitude: true,
   longitude: true,
+  country_code: true,
+  city: true,
+  is_remote: true,
+  employer: { select: { country_code: true, city: true } },
 } satisfies Prisma.JobOfferSelect;
 
 type CandidateRow = Prisma.JobOfferGetPayload<{
@@ -113,6 +133,11 @@ const toCandidate = (r: CandidateRow): Candidate => ({
   paymentFlow: r.payment_flow,
   latitude: r.latitude,
   longitude: r.longitude,
+  // Offer first, employer second — an offer that names its own site must not
+  // be overridden by where the person posting it happens to live.
+  countryCode: r.country_code ?? r.employer?.country_code ?? null,
+  city: r.city ?? r.employer?.city ?? null,
+  isRemote: r.is_remote,
 });
 
 /**
@@ -209,7 +234,9 @@ export class CandidateSourceService {
           worker_id: { in: peerIds },
           job_offer: {
             ...OPEN_OFFER_WHERE,
-            category_id: { notIn: [...seedCategories, ...features.negativeCategoryIds] },
+            category_id: {
+              notIn: [...seedCategories, ...features.negativeCategoryIds],
+            },
           },
         },
         _count: { _all: true },
@@ -318,7 +345,10 @@ export class CandidateSourceService {
         const reliability = (p.reliability_score ?? 100) / 100;
         // rating_avg is 1–5; absent means "no evidence", i.e. neutral.
         const rating = p.rating_avg != null ? (p.rating_avg - 1) / 4 : 0.5;
-        out.set(p.id, Math.min(1, Math.max(0, 0.6 * reliability + 0.4 * rating)));
+        out.set(
+          p.id,
+          Math.min(1, Math.max(0, 0.6 * reliability + 0.4 * rating)),
+        );
       }
     } catch (err) {
       this.logger.warn('employerQuality failed', err);

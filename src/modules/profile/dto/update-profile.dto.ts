@@ -8,8 +8,9 @@ import {
   ArrayMaxSize,
 } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { LocationDto } from '../../../common/dto/location.dto';
 
-export class UpdateProfileDto {
+export class UpdateProfileDto extends LocationDto {
   @ApiPropertyOptional({ description: 'First name of the profile' })
   @Transform(({ value }) => value?.trim())
   @IsOptional()

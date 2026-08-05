@@ -13,6 +13,11 @@
         "include": "modules/mail/templates/**/*.mjml",
         "outDir": "dist/src",
         "watchAssets": true
+      },
+      {
+        "include": "modules/geo/data/*.json",
+        "outDir": "dist/src",
+        "watchAssets": false
       }
     ]
   }
