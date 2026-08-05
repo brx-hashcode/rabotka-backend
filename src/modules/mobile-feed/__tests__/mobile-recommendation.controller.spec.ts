@@ -110,6 +110,9 @@ describe('MobileRecommendationController — worker-feed tiers', () => {
       // The real service on the same prisma mock: the exclusion assertions below
       // are only meaningful if the derivation itself runs.
       new ContactedProfilesService(prisma as never),
+      // Returns a slug so workerDetail() does not try to mint one; the
+      // mint-on-demand path has its own test below.
+      { ensurePortfolioSlug: jest.fn().mockResolvedValue('awa-a1b2c3') } as never,
     );
   });
 
