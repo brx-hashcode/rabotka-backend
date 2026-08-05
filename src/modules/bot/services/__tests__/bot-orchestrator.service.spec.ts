@@ -542,6 +542,37 @@ describe('BotOrchestratorService', () => {
       expect(Array.isArray(result)).toBe(true);
     });
 
+    /**
+     * `start` is the documented entry point, so it must do everything `menu`
+     * does. It reaches this branch through CMD_MENU rather than a case of its
+     * own — before that it only worked by falling through to the welcome card,
+     * which does not activate anything.
+     */
+    it.each(['start', 'démarrer', 'demarrer', 'commencer'])(
+      'activates a KYC-verified account when the user types %s',
+      async (input) => {
+        deps.prisma.profile.findUnique.mockResolvedValue(pendingProfile);
+        (deps.walletService2 as any).grantWelcomeCredit = jest
+          .fn()
+          .mockResolvedValue(500);
+        deps.router.route.mockReturnValue({
+          type: 'command',
+          commandId: 'menu',
+        });
+
+        await service.handle(PROFILE_ID, PHONE, input);
+
+        expect(deps.prisma.profile.update).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              whatsapp_connected: true,
+              status: 'ACTIVE',
+            }),
+          }),
+        );
+      },
+    );
+
     it('does not double-grant credit when bonus already granted', async () => {
       deps.prisma.profile.findUnique.mockResolvedValue({
         ...pendingProfile,
@@ -1048,5 +1079,4 @@ describe('BotOrchestratorService', () => {
       expect(result).toEqual([welcomePlatformMessage()]);
     });
   });
-
 });
