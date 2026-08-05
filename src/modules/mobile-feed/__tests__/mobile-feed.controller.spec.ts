@@ -57,13 +57,18 @@ describe('MobileFeedController', () => {
   const lastWhere = () => prisma.jobOffer.findMany.mock.calls.at(-1)?.[0].where;
   /** "Pour vous" now issues several offer queries; assert against any of them. */
   const allWheres = () =>
-    prisma.jobOffer.findMany.mock.calls.map((c: unknown[]) => (c[0] as any).where);
+    prisma.jobOffer.findMany.mock.calls.map(
+      (c: unknown[]) => (c[0] as any).where,
+    );
   const lastArgs = () => prisma.jobOffer.findMany.mock.calls.at(-1)?.[0];
 
   beforeEach(() => {
     prisma = {
       profile: { findUnique: jest.fn() },
-      jobOffer: { findMany: jest.fn().mockResolvedValue([]), count: jest.fn().mockResolvedValue(0) },
+      jobOffer: {
+        findMany: jest.fn().mockResolvedValue([]),
+        count: jest.fn().mockResolvedValue(0),
+      },
       jobCategory: { findMany: jest.fn().mockResolvedValue([]) },
       profileCategory: { findMany: jest.fn().mockResolvedValue([]) },
       savedJob: { findMany: jest.fn().mockResolvedValue([]) },
@@ -107,7 +112,13 @@ describe('MobileFeedController', () => {
         expect.objectContaining({ take: 10 }),
       );
       expect(result).toEqual([
-        { id: 'job-1', title: 'A', matchScore: 0, saved: false, applied: false },
+        {
+          id: 'job-1',
+          title: 'A',
+          matchScore: 0,
+          saved: false,
+          applied: false,
+        },
         { id: 'job-2', title: 'B', matchScore: 0, saved: true, applied: false },
       ]);
     });
@@ -117,9 +128,7 @@ describe('MobileFeedController', () => {
       await controller.jobFeed(reqFor('w1') as never, undefined, 'cat-9');
       expect(lastWhere()).toMatchObject({ category_id: { in: ['cat-9'] } });
       // A chip is an explicit choice — don't let the recommender override it.
-      expect(
-        matchingService.findMatchingJobsForWorker,
-      ).not.toHaveBeenCalled();
+      expect(matchingService.findMatchingJobsForWorker).not.toHaveBeenCalled();
     });
 
     it('"Pour vous" uses semantic matches when the recommender returns some', async () => {
@@ -134,7 +143,13 @@ describe('MobileFeedController', () => {
       const result = await controller.jobFeed(reqFor('w1') as never);
 
       expect(result).toEqual([
-        { id: 'job-9', title: 'Z', matchScore: 0.91, saved: false, applied: false },
+        {
+          id: 'job-9',
+          title: 'Z',
+          matchScore: 0.91,
+          saved: false,
+          applied: false,
+        },
       ]);
     });
 
@@ -270,7 +285,9 @@ describe('MobileFeedController', () => {
 
     it('ANDs each token and ORs it across title/description/address/reference', async () => {
       mockType(ProfileType.WORKER);
-      await controller.jobSearch(reqFor('w1') as never, { q: 'menage bacongo' });
+      await controller.jobSearch(reqFor('w1') as never, {
+        q: 'menage bacongo',
+      });
 
       const and = lastWhere().AND;
       expect(and).toHaveLength(2);
@@ -343,7 +360,9 @@ describe('MobileFeedController', () => {
       await controller.jobSearch(reqFor('w1') as never, { sort: 'soon' });
       expect(lastArgs().orderBy[0]).toEqual({ scheduled_at: 'asc' });
 
-      await controller.jobSearch(reqFor('w1') as never, { sort: 'amount_desc' });
+      await controller.jobSearch(reqFor('w1') as never, {
+        sort: 'amount_desc',
+      });
       expect(lastArgs().orderBy[0]).toEqual({
         amount: { sort: 'desc', nulls: 'last' },
       });
@@ -364,10 +383,19 @@ describe('MobileFeedController', () => {
 
       expect(lastWhere()).toMatchObject({
         category_id: 'c1',
-        address: { contains: 'Bacongo', mode: 'insensitive' },
         payment_flow: 'DAILY',
         amount: { gte: 5000 },
         applications: { none: { worker_id: 'w1' } },
+      });
+
+      // City now matches the structured column as well as the free-text
+      // address. Matching only the column would hide every offer created
+      // before the backfill; matching only the address is what this replaced.
+      expect(lastWhere().AND).toContainEqual({
+        OR: [
+          { city: { equals: 'Bacongo', mode: 'insensitive' } },
+          { address: { contains: 'Bacongo', mode: 'insensitive' } },
+        ],
       });
     });
 
@@ -428,7 +456,10 @@ describe('MobileFeedController', () => {
   describe('job-offers (EMPLOYER)', () => {
     it('returns the employer’s offers', async () => {
       mockType(ProfileType.EMPLOYER);
-      jobOfferService.findByEmployerId.mockResolvedValue({ items: [{ id: 'o1' }], total: 1 });
+      jobOfferService.findByEmployerId.mockResolvedValue({
+        items: [{ id: 'o1' }],
+        total: 1,
+      });
 
       const result = await controller.myJobOffers(reqFor('e1') as never);
 
@@ -441,9 +472,9 @@ describe('MobileFeedController', () => {
 
     it('403s for a WORKER', async () => {
       mockType(ProfileType.WORKER);
-      await expect(controller.myJobOffers(reqFor('w1') as never)).rejects.toThrow(
-        ForbiddenException,
-      );
+      await expect(
+        controller.myJobOffers(reqFor('w1') as never),
+      ).rejects.toThrow(ForbiddenException);
       expect(jobOfferService.findByEmployerId).not.toHaveBeenCalled();
     });
   });
@@ -451,9 +482,14 @@ describe('MobileFeedController', () => {
   describe('received-applications (EMPLOYER)', () => {
     it('returns applications received', async () => {
       mockType(ProfileType.EMPLOYER);
-      applicationService.findByEmployer.mockResolvedValue({ items: [{ id: 'a1' }], total: 1 });
+      applicationService.findByEmployer.mockResolvedValue({
+        items: [{ id: 'a1' }],
+        total: 1,
+      });
 
-      const result = await controller.receivedApplications(reqFor('e1') as never);
+      const result = await controller.receivedApplications(
+        reqFor('e1') as never,
+      );
 
       expect(applicationService.findByEmployer).toHaveBeenCalledWith('e1', {
         page: 0,
