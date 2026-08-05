@@ -3,6 +3,7 @@ import {
   InterestSignalService,
   temporalWeight,
   SIGNAL_WEIGHTS,
+  SIGNAL_HALF_LIFE_DAYS,
 } from '../interest-signal.service';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { QdrantService } from '../../qdrant/qdrant.service';
@@ -32,12 +33,32 @@ const mockClusters = {
   applySignal: jest.fn().mockResolvedValue(undefined),
 };
 
-const daysAgo = (n: number) =>
-  new Date(Date.now() - n * 24 * 60 * 60 * 1000);
+const daysAgo = (n: number) => new Date(Date.now() - n * 24 * 60 * 60 * 1000);
 
 describe('temporalWeight', () => {
   it('returns 1.0 for a signal recorded now', () => {
-    expect(temporalWeight(new Date())).toBe(1.0);
+    // The SAME instant on both sides, via the function's own `now` seam.
+    // `temporalWeight(new Date())` looks equivalent but is not: the function
+    // captures its own `new Date()` a moment later, so ageDays is a tiny
+    // POSITIVE number and 0.5 ** (tiny / 21) is 0.9999999996. It passed only
+    // when both calls landed in the same millisecond — which is why this failed
+    // roughly one run in a dozen, for a long time, with no obvious cause.
+    const now = new Date();
+    expect(temporalWeight(now, SIGNAL_HALF_LIFE_DAYS, now)).toBe(1.0);
+  });
+
+  it('does not round a barely-aged signal up to 1.0', () => {
+    // Guards the boundary the flake was hiding: just-past-now is below 1, and
+    // exactly-now is 1. Both matter, because `ageDays <= 0` is what separates
+    // them.
+    const now = new Date();
+    const aMomentAgo = new Date(now.getTime() - 1);
+    expect(temporalWeight(aMomentAgo, SIGNAL_HALF_LIFE_DAYS, now)).toBeLessThan(
+      1,
+    );
+    expect(
+      temporalWeight(aMomentAgo, SIGNAL_HALF_LIFE_DAYS, now),
+    ).toBeGreaterThan(0.999);
   });
 
   it('halves at each half-life', () => {
@@ -54,7 +75,9 @@ describe('temporalWeight', () => {
     // The old step function dropped 30% overnight on day 31, so a user's feed
     // could shift with no new interaction. Adjacent days must now be close.
     for (const d of [29, 30, 31, 59, 60, 61]) {
-      const delta = Math.abs(temporalWeight(daysAgo(d)) - temporalWeight(daysAgo(d + 1)));
+      const delta = Math.abs(
+        temporalWeight(daysAgo(d)) - temporalWeight(daysAgo(d + 1)),
+      );
       expect(delta).toBeLessThan(0.03);
     }
   });

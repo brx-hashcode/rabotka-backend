@@ -12,6 +12,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { withCityFilter } from '../../common/queries/city-filter';
 import {
   ApplicationStatus,
   JobOfferStatus,
@@ -312,7 +313,7 @@ export class MobileFeedController {
     // Base eligibility. ACTIVE/PARTIALLY_FILLED already implies "has open slots":
     // accept() flips an offer to FILLED once accepted >= quantity, so there is no
     // need to re-derive slot availability here.
-    const where: Prisma.JobOfferWhereInput = {
+    let where: Prisma.JobOfferWhereInput = {
       status: {
         in: [JobOfferStatus.ACTIVE, JobOfferStatus.PARTIALLY_FILLED],
       },
@@ -322,10 +323,9 @@ export class MobileFeedController {
     if (categoryId) {
       where.category_id = categoryId;
     }
-    // No city column exists — location is free-text `address` (+ optional lat/lng).
-    if (city?.trim()) {
-      where.address = { contains: city.trim(), mode: 'insensitive' };
-    }
+    // Structured `city` first, free-text `address` as the fallback — see
+    // withCityFilter for why both.
+    where = withCityFilter(where, city);
     if (paymentFlow && paymentFlow in PaymentFlow) {
       where.payment_flow = paymentFlow as PaymentFlow;
     }
