@@ -21,6 +21,7 @@ import { PortfolioModule } from '../portfolio/portfolio.module';
 @Module({
   imports: [
     AdminArchiveModule,
+    PortfolioModule,
     FileModule,
     MailModule,
     AuthModule,

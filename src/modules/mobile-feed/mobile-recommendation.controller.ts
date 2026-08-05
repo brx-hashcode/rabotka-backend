@@ -25,8 +25,10 @@ import {
   ProfileType,
   PaymentRequestType,
   PaymentRequestStatus,
+  VerificationStatus,
 } from '@prisma/client';
 import { ContactedProfilesService } from '../recommendation/contacted-profiles.service';
+import { PortfolioService } from '../portfolio/portfolio.service';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { ProfileAuthGuard } from '../auth/guards/profile-auth.guard';
 import { KycVerifiedGuard } from '../auth/guards/kyc-verified.guard';
@@ -49,9 +51,14 @@ const WORKER_SELECT = {
   rating_count: true,
   description: true,
   portfolio_slug: true,
+  // Address only — never phone or email. The public portfolio already shows it
+  // (PortfolioHeader), whereas contact details are what the unlock fee buys.
+  address: true,
+  verification_status: true,
+  // No `take: 1`: an employer choosing between workers needs every domain, and
+  // truncating to one made a multi-skilled worker look like a specialist.
   categories: {
     select: { category: { select: { name: true } } },
-    take: 1,
   },
 } as const;
 
@@ -63,8 +70,18 @@ type RecommendedWorker = {
   reliabilityScore: number | null;
   ratingAvg: number | null;
   ratingCount: number;
+  /** First domain, kept for the compact card. */
   categoryName: string | null;
+  /** Every domain, for the detail page. */
+  categoryNames: string[];
   description: string | null;
+  address: string | null;
+  /**
+   * Only ever true. PENDING and REJECTED are moderation outcomes, and telling
+   * every employer that a worker is "not verified" punishes them for a review
+   * queue they do not control — so the absence of a badge says nothing.
+   */
+  isVerified: boolean;
   completedMissions: number;
   portfolioSlug: string | null;
   score: number;
@@ -88,6 +105,7 @@ export class MobileRecommendationController {
     private readonly rollout: EngineRolloutService,
     private readonly engine: RecommendationEngineService,
     private readonly contactedProfiles: ContactedProfilesService,
+    private readonly portfolio: PortfolioService,
   ) {}
 
   @Get('worker-feed')
@@ -218,6 +236,23 @@ export class MobileRecommendationController {
     const worker = hydrated[0];
     if (!worker) {
       throw new NotFoundException('Travailleur introuvable');
+    }
+
+    // Workers who predate slug-on-signup have none, because it used to be
+    // minted only on the first realization upload — so the employer saw no
+    // "Voir le portfolio" at all. `ensurePortfolioSlug` exists for exactly this
+    // and is idempotent. A failure leaves the button hidden, which is a far
+    // smaller problem than a detail page that will not load.
+    if (!worker.portfolioSlug) {
+      worker.portfolioSlug = await this.portfolio
+        .ensurePortfolioSlug(workerId)
+        .catch((err) => {
+          this.logger.warn(
+            `Could not mint a portfolio slug for worker=${workerId}`,
+            err,
+          );
+          return null;
+        });
     }
 
     void this.interactionEvents.record({
@@ -400,6 +435,8 @@ export class MobileRecommendationController {
       rating_count: number;
       description: string | null;
       portfolio_slug: string | null;
+      address?: string | null;
+      verification_status?: string | null;
       categories: { category: { name: string } | null }[];
     },
     completedMissions: number,
@@ -414,7 +451,12 @@ export class MobileRecommendationController {
       ratingAvg: p.rating_avg,
       ratingCount: p.rating_count,
       categoryName: p.categories[0]?.category?.name ?? null,
+      categoryNames: p.categories
+        .map((c) => c.category?.name)
+        .filter((n): n is string => Boolean(n)),
       description: p.description,
+      address: p.address ?? null,
+      isVerified: p.verification_status === VerificationStatus.VERIFIED,
       completedMissions,
       portfolioSlug: p.portfolio_slug,
       score,

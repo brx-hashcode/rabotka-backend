@@ -31,6 +31,7 @@ import { WalletService } from '../wallet/wallet.service';
 import { DocumentService } from '../document/document.service';
 import { MatchingService } from '../matching/matching.service';
 import { InterestClusterService } from '../interest-graph/interest-cluster.service';
+import { PortfolioService } from '../portfolio/portfolio.service';
 import { GeocodingService } from '../../common/services/geocoding/geocoding.service';
 import { CreateProfileDto } from './dto/create-profile.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
@@ -200,6 +201,7 @@ export class ProfileService {
     private readonly interestClusters: InterestClusterService,
     private readonly geocodingService: GeocodingService,
     private readonly cache: AdminCacheService,
+    private readonly portfolioService: PortfolioService,
   ) {}
 
   async findById(id: string): Promise<ProfileMeResponse> {
@@ -1166,6 +1168,26 @@ export class ProfileService {
       const profile = await this.createProfileWithDocuments(createProfileDto);
 
       this.logger.log(`Profile created successfully: ${profile.id}`);
+
+      // Give every worker a public portfolio URL from day one. The slug used to
+      // be minted only on the first realization upload, so a worker who had not
+      // uploaded anything had no `/p/<slug>` — and an employer browsing them saw
+      // no "Voir le portfolio" at all. The workers most in need of a shopfront
+      // were the ones without one.
+      //
+      // After the transaction, not inside it: ensurePortfolioSlug retries on
+      // unique collisions, and a slug that could not be minted must never roll
+      // back a completed signup.
+      if (createProfileDto.profileType === ProfileType.WORKER) {
+        await this.portfolioService
+          .ensurePortfolioSlug(profile.id)
+          .catch((err) =>
+            this.logger.warn(
+              `Portfolio slug not minted for profile=${profile.id}; it will be minted on first view`,
+              err,
+            ),
+          );
+      }
 
       // Grant registration welcome credit via the idempotent path so the
       // KYC-verified flow (which also calls grantWelcomeCredit) cannot
