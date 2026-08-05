@@ -35,8 +35,28 @@ export const FLOW_IDS = {
 /**
  * Words that mean "get me out of here". There is no menu any more — inside a
  * live flow these exit it, and the orchestrator answers with the welcome card.
+ *
+ * `start` is the documented entry point. It belongs HERE rather than being
+ * handled on its own, because until now it only worked by accident: unrecognised
+ * input falls through to the welcome card, so `start` did nothing while a user
+ * was mid-flow — which is precisely when someone types it. Someone stuck in the
+ * penalty-payment flow had it parsed as a payment option and stayed stuck.
+ * Listing it here gives it the escape behaviour every flow already honours.
+ *
+ * `démarrer`/`commencer` are here because a French-speaking user is at least as
+ * likely to type those, and the cost is two array entries.
  */
-export const CMD_MENU = ['menu', 'aide', 'help', 'bonjour', '*'];
+export const CMD_MENU = [
+  'menu',
+  'aide',
+  'help',
+  'bonjour',
+  '*',
+  'start',
+  'démarrer',
+  'demarrer',
+  'commencer',
+];
 export const CMD_PAY = [
   'payer',
   'régler',
