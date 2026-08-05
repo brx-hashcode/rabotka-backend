@@ -1,4 +1,5 @@
 import { AdminCacheService } from '../../../common/services/cache/admin-cache.service';
+import { GeoService } from '../../geo/geo.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import {
   BadRequestException,
@@ -124,6 +125,12 @@ describe('JobOfferService (extended)', () => {
         {
           provide: GeocodingService,
           useValue: { geocode: jest.fn().mockResolvedValue(null) },
+        },
+        {
+          // The real GeoService: it has no dependencies beyond a checked-in
+          // JSON file, so a mock would only weaken the location assertions.
+          provide: GeoService,
+          useValue: new GeoService(),
         },
       ],
     }).compile();

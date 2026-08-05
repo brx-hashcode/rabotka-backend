@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { jobLocationLabel } from '../../common/utils/job-location.util';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { QdrantService } from '../qdrant/qdrant.service';
 import { SystemConfigService } from '../system-config/system-config.service';
@@ -108,7 +109,9 @@ export function rankRelevance(rank: number, total: number): number {
  * every score, which is what made the old thresholds unreachable and made
  * downranking impossible.
  */
-export function weightedMean(terms: { value: number; weight: number }[]): number {
+export function weightedMean(
+  terms: { value: number; weight: number }[],
+): number {
   const totalWeight = terms.reduce((s, t) => s + t.weight, 0);
   if (totalWeight <= 0) return 0;
   const sum = terms.reduce((s, t) => s + t.value * t.weight, 0);
@@ -255,7 +258,7 @@ export class MatchingService {
   private buildJobText(job: {
     title: string;
     description: string;
-    address: string;
+    address: string | null;
     amount?: { toNumber?: () => number } | number | null;
     payment_flow?: string | null;
     quantity?: number | null;
@@ -263,7 +266,9 @@ export class MatchingService {
     category?: { name: string; description: string | null } | null;
     employerCategories?: Array<{ name: string; description: string | null }>;
   }): string {
-    const parts: string[] = [job.title, job.description, job.address];
+    // The embedding text: a remote job contributes its label rather than a
+    // hole, so "en ligne" is itself searchable.
+    const parts: string[] = [job.title, job.description, jobLocationLabel(job)];
 
     if (job.category?.name) {
       parts.push(job.category.name);
