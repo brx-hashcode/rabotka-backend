@@ -65,6 +65,12 @@ COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/assets ./assets
+# Maintenance scripts (pnpm portfolio:backfill-slugs, wa:test-reminders, …).
+# Without this the package.json aliases resolve and then fail on a missing file,
+# because only scripts/docker-entrypoint.sh reached the image — and it lands in
+# /usr/local/bin, not /app/scripts. tsx and the Prisma client are already here,
+# so the .ts sources run as-is.
+COPY --from=builder /app/scripts ./scripts
 
 COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh && \
@@ -126,6 +132,12 @@ COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/assets ./assets
+# Maintenance scripts (pnpm portfolio:backfill-slugs, wa:test-reminders, …).
+# Without this the package.json aliases resolve and then fail on a missing file,
+# because only scripts/docker-entrypoint.sh reached the image — and it lands in
+# /usr/local/bin, not /app/scripts. tsx and the Prisma client are already here,
+# so the .ts sources run as-is.
+COPY --from=builder /app/scripts ./scripts
 
 COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh && \
