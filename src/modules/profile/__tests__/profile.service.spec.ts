@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { ProfileService } from '../profile.service';
+import { GeoService } from '../../geo/geo.service';
 
 jest.spyOn(Logger.prototype, 'log').mockImplementation(() => {});
 jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => {});
@@ -164,7 +165,11 @@ describe('ProfileService', () => {
       whatsApp as any,
       configService as any,
       {} as any, // mailService
-      { wrap: jest.fn().mockImplementation((html: string) => Promise.resolve(html)) } as any, // layoutService
+      {
+        wrap: jest
+          .fn()
+          .mockImplementation((html: string) => Promise.resolve(html)),
+      } as any, // layoutService
       { emit: jest.fn() } as any, // eventEmitter
       {
         getProfileWalletBalance: jest.fn().mockResolvedValue(0),
@@ -195,6 +200,9 @@ describe('ProfileService', () => {
         invalidate: jest.fn(),
       } as any, // adminCache
       portfolioService as any, // portfolioService
+      // The real one: it has no dependencies beyond a checked-in JSON file, so
+      // mocking it would only weaken the country/city assertions below.
+      new GeoService(), // geo
     );
   });
 
@@ -640,7 +648,9 @@ describe('ProfileService', () => {
 
       await service.createProfile(dto);
 
-      expect(portfolioService.ensurePortfolioSlug).toHaveBeenCalledWith('new-p-1');
+      expect(portfolioService.ensurePortfolioSlug).toHaveBeenCalledWith(
+        'new-p-1',
+      );
     });
 
     it('does not mint a slug for an employer', async () => {

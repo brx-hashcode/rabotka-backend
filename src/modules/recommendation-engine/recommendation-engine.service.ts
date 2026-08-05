@@ -3,6 +3,7 @@ import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { SystemConfigService } from '../system-config/system-config.service';
 import {
   haversineKm,
+  placeProximityScore,
   proximityScore,
   urgencyScore,
 } from '../../common/services/geocoding/geo.utils';
@@ -29,11 +30,7 @@ import {
 } from './scoring';
 
 /** Which generator produced a candidate — logged so tier mix is observable. */
-export type CandidateTier =
-  | 'affinity'
-  | 'cf'
-  | 'declared'
-  | 'all_open';
+export type CandidateTier = 'affinity' | 'cf' | 'declared' | 'all_open';
 
 export type RankedJob = {
   id: string;
@@ -59,6 +56,37 @@ const MAX_PER_EMPLOYER = 2;
  * the way an offer is, and a worker idle for four days is still a live lead.
  */
 const ACTIVITY_HALF_LIFE_HOURS = 168;
+
+/**
+ * Everything the ranker knows about where the user asking for recommendations
+ * is: exact coordinates when geocoding worked, and the country/city they
+ * declared either way. The two are carried together so the proximity term can
+ * fall back without a second query.
+ */
+type WorkerPlace = {
+  coords: { lat: number; lng: number } | null;
+  countryCode: string | null;
+  city: string | null;
+};
+
+/** The profile row the two recommend paths select, as a `WorkerPlace`. */
+function toPlace(
+  row: {
+    latitude: number | null;
+    longitude: number | null;
+    country_code: string | null;
+    city: string | null;
+  } | null,
+): WorkerPlace {
+  return {
+    coords:
+      row?.latitude != null && row.longitude != null
+        ? { lat: row.latitude, lng: row.longitude }
+        : null,
+    countryCode: row?.country_code ?? null,
+    city: row?.city ?? null,
+  };
+}
 
 /**
  * The unified ranker.
@@ -128,7 +156,12 @@ export class RecommendationEngineService {
     const [worker, quality, lastSeen, unsaved] = await Promise.all([
       this.prisma.profile.findUnique({
         where: { id: workerId },
-        select: { latitude: true, longitude: true },
+        select: {
+          latitude: true,
+          longitude: true,
+          country_code: true,
+          city: true,
+        },
       }),
       this.sources.employerQuality([
         ...new Set(candidateIds.map((id) => byId.get(id)?.employerId ?? '')),
@@ -139,10 +172,7 @@ export class RecommendationEngineService {
 
     const weights = interpolateWeights(features.positiveCount);
     const negativeCategories = new Set(features.negativeCategoryIds);
-    const workerCoords =
-      worker?.latitude != null && worker.longitude != null
-        ? { lat: worker.latitude, lng: worker.longitude }
-        : null;
+    const workerPlace = toPlace(worker);
 
     // `sim` stays null until the vector tier lands. Deriving it from fused rank
     // would be dishonest: within a tier the order is `created_at desc`, so the
@@ -158,11 +188,8 @@ export class RecommendationEngineService {
         partyAff: features.counterpartyAffinity[c.employerId] ?? 0,
         // Agreement across independent sources is itself evidence — but only
         // when there is more than one source to agree.
-        cf:
-          pools.size > 1
-            ? clamp01((f.sources - 1) / (pools.size - 1))
-            : null,
-        prox: this.proximityTerm(workerCoords, c, features),
+        cf: pools.size > 1 ? clamp01((f.sources - 1) / (pools.size - 1)) : null,
+        prox: this.proximityTerm(workerPlace, c, features),
         urgency: urgencyScore(c.scheduledAt),
         fresh: freshnessScore(c.createdAt),
         quality: quality.get(c.employerId) ?? 0.5,
@@ -257,11 +284,7 @@ export class RecommendationEngineService {
     if (gathered() < limit) {
       add(
         'declared',
-        await this.sources.workersFromCategories(
-          categoryIds,
-          queryOpts,
-          limit,
-        ),
+        await this.sources.workersFromCategories(categoryIds, queryOpts, limit),
       );
     }
     if (gathered() < limit) {
@@ -291,7 +314,12 @@ export class RecommendationEngineService {
     const [employer, quality, lastActive, lastSeen] = await Promise.all([
       this.prisma.profile.findUnique({
         where: { id: employerId },
-        select: { latitude: true, longitude: true },
+        select: {
+          latitude: true,
+          longitude: true,
+          country_code: true,
+          city: true,
+        },
       }),
       this.sources.workerQuality(candidateIds),
       this.sources.lastActiveAt(candidateIds),
@@ -306,10 +334,7 @@ export class RecommendationEngineService {
 
     const weights = interpolateWeights(features.positiveCount);
     const negativeCategories = new Set(features.negativeCategoryIds);
-    const employerCoords =
-      employer?.latitude != null && employer.longitude != null
-        ? { lat: employer.latitude, lng: employer.longitude }
-        : null;
+    const employerPlace = toPlace(employer);
 
     const scored = fused.map((f) => {
       const c = byId.get(f.id)!;
@@ -318,9 +343,8 @@ export class RecommendationEngineService {
         sim: null,
         catAff: bestCategoryAffinity(c.categoryIds, features.categoryAffinity),
         partyAff: features.counterpartyAffinity[c.id] ?? 0,
-        cf:
-          pools.size > 1 ? clamp01((f.sources - 1) / (pools.size - 1)) : null,
-        prox: this.workerProximity(employerCoords, c, features),
+        cf: pools.size > 1 ? clamp01((f.sources - 1) / (pools.size - 1)) : null,
+        prox: this.workerProximity(employerPlace, c, features),
         // A worker has no scheduled start and no pay amount.
         urgency: null,
         // Recency of the worker's OWN activity, not of their profile row.
@@ -389,19 +413,20 @@ export class RecommendationEngineService {
       .filter((id): id is string => id !== null);
   }
 
+  /** The employer-side mirror of `proximityTerm`; same fallback, same reasons. */
   private workerProximity(
-    employerCoords: { lat: number; lng: number } | null,
+    employerPlace: WorkerPlace,
     candidate: WorkerCandidate,
     features: UserFeatures,
   ): number {
     if (
-      !employerCoords ||
+      !employerPlace.coords ||
       candidate.latitude == null ||
       candidate.longitude == null
     ) {
-      return 0.5;
+      return placeProximityScore(employerPlace, candidate);
     }
-    const km = haversineKm(employerCoords, {
+    const km = haversineKm(employerPlace.coords, {
       lat: candidate.latitude,
       lng: candidate.longitude,
     });
@@ -458,22 +483,33 @@ export class RecommendationEngineService {
 
   /**
    * Distance term using the worker's OWN learned tolerance rather than a single
-   * global half-life. Neutral (not zero) when coordinates are missing, so a
-   * profile without geocoding isn't penalised for it.
+   * global half-life, falling back to declared country/city when either side
+   * has no coordinates.
+   *
+   * That fallback is the point. This used to return a flat 0.5 in the missing-
+   * coordinate case, and `prox` carries 0.35 of the cold-start weight — the
+   * heaviest term there is. Since geocoding is fire-and-forget, a failure is
+   * silent and permanent, so for those users a third of the ranking was a
+   * constant that ordered nothing. Country and city are coarse, but coarse
+   * beats constant.
    */
   private proximityTerm(
-    workerCoords: { lat: number; lng: number } | null,
+    workerPlace: WorkerPlace,
     candidate: Candidate,
     features: UserFeatures,
-  ): number {
+  ): number | null {
+    // A remote job is not "distance unknown", it is "distance irrelevant".
+    // Returning null drops the term from the weighted mean entirely rather
+    // than scoring every remote offer the same flat value against local work.
+    if (candidate.isRemote) return null;
     if (
-      !workerCoords ||
+      !workerPlace.coords ||
       candidate.latitude == null ||
       candidate.longitude == null
     ) {
-      return 0.5;
+      return placeProximityScore(workerPlace, candidate);
     }
-    const km = haversineKm(workerCoords, {
+    const km = haversineKm(workerPlace.coords, {
       lat: candidate.latitude,
       lng: candidate.longitude,
     });
@@ -497,9 +533,10 @@ export class RecommendationEngineService {
     const flowFit = candidate.paymentFlow
       ? features.paymentFlowAffinity[candidate.paymentFlow]
       : undefined;
-    const bandFit = candidate.amount != null
-      ? features.amountBandAffinity[amountBand(candidate.amount)]
-      : undefined;
+    const bandFit =
+      candidate.amount != null
+        ? features.amountBandAffinity[amountBand(candidate.amount)]
+        : undefined;
     if (flowFit === undefined && bandFit === undefined) return null;
     return clamp01(((flowFit ?? 0.5) + (bandFit ?? 0.5)) / 2);
   }
@@ -514,7 +551,9 @@ export class RecommendationEngineService {
 
   private async cfEnabled(): Promise<boolean> {
     try {
-      return (await this.systemConfig.get('matching.cf_enabled', 'false')) === 'true';
+      return (
+        (await this.systemConfig.get('matching.cf_enabled', 'false')) === 'true'
+      );
     } catch {
       return false;
     }

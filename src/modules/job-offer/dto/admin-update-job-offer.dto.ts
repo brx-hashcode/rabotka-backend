@@ -1,4 +1,5 @@
 import {
+  IsBoolean,
   IsOptional,
   IsString,
   IsNumber,
@@ -13,8 +14,9 @@ import {
 } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { PaymentFlow } from '@prisma/client';
+import { LocationDto } from '../../../common/dto/location.dto';
 
-export class AdminUpdateJobOfferDto {
+export class AdminUpdateJobOfferDto extends LocationDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
@@ -56,6 +58,11 @@ export class AdminUpdateJobOfferDto {
   @IsString()
   @MinLength(10)
   address?: string;
+
+  @ApiPropertyOptional({ description: 'A job done from anywhere.' })
+  @IsOptional()
+  @IsBoolean()
+  isRemote?: boolean;
 
   @ApiPropertyOptional()
   @IsOptional()
