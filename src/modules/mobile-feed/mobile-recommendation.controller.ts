@@ -28,6 +28,7 @@ import {
   VerificationStatus,
 } from '@prisma/client';
 import { ContactedProfilesService } from '../recommendation/contacted-profiles.service';
+import { withCityFilter } from '../../common/queries/city-filter';
 import { PortfolioService } from '../portfolio/portfolio.service';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { ProfileAuthGuard } from '../auth/guards/profile-auth.guard';
@@ -322,7 +323,7 @@ export class MobileRecommendationController {
     const pageNum = Math.max(0, Number.parseInt(page ?? '0', 10) || 0);
     const skip = pageNum * take;
 
-    const where: Prisma.ProfileWhereInput = {
+    let where: Prisma.ProfileWhereInput = {
       profile_type: ProfileType.WORKER,
       status: 'ACTIVE',
       verification_status: 'VERIFIED',
@@ -339,9 +340,8 @@ export class MobileRecommendationController {
     if (minRating && Number.isFinite(rating)) {
       where.rating_avg = { gte: rating };
     }
-    if (city?.trim()) {
-      where.address = { contains: city.trim(), mode: 'insensitive' };
-    }
+    // Structured `city` first, free-text `address` as the fallback.
+    where = withCityFilter(where, city);
 
     const term = q?.trim();
     if (term) {
