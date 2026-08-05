@@ -32,6 +32,7 @@ import { MobileFeedModule } from './modules/mobile-feed/mobile-feed.module';
 import { PenaltyModule } from './modules/penalty/penalty.module';
 import { PaymentRequestModule } from './modules/payment-request/payment-request.module';
 import { FileModule } from './modules/file/file.module';
+import { GeoModule } from './modules/geo/geo.module';
 import { LogModule } from './modules/log/log.module';
 import { WalletModule } from './modules/wallet/wallet.module';
 import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
@@ -157,6 +158,7 @@ import { HttpOnlyArcjetGuard } from './common/guards/http-only-arcjet.guard';
     PaymentGatewayModule,
     ImageWatermarkModule,
     FileModule,
+    GeoModule,
     LogModule,
     WalletModule,
     ClaimModule,

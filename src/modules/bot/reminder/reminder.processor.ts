@@ -1,4 +1,5 @@
 import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
+import { jobLocationLabel } from '../../../common/utils/job-location.util';
 import Redis from 'ioredis';
 import { REDIS_CONNECTION } from '../../../common/services/redis/redis.constants';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
@@ -686,7 +687,7 @@ export class ReminderProcessor {
       tpl.variables({
         offerTitle: app.job_offer.title,
         date: formatDate(app.job_offer.scheduled_at),
-        address: app.job_offer.address,
+        address: jobLocationLabel(app.job_offer),
         amount: Number(app.job_offer.amount).toLocaleString('fr-FR'),
         employerName: `${app.job_offer.employer.first_name} ${app.job_offer.employer.last_name}`,
         employerPhone: app.job_offer.employer.phone,
@@ -780,7 +781,7 @@ export class ReminderProcessor {
         tpl.variables({
           offerTitle: app.job_offer.title,
           time,
-          address: app.job_offer.address,
+          address: jobLocationLabel(app.job_offer),
           employerName: `${app.job_offer.employer.first_name} ${app.job_offer.employer.last_name}`,
           employerPhone: app.job_offer.employer.phone,
           applicationId,

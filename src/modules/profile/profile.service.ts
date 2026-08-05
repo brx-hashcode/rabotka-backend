@@ -33,6 +33,7 @@ import { MatchingService } from '../matching/matching.service';
 import { InterestClusterService } from '../interest-graph/interest-cluster.service';
 import { PortfolioService } from '../portfolio/portfolio.service';
 import { GeocodingService } from '../../common/services/geocoding/geocoding.service';
+import { GeoService } from '../geo/geo.service';
 import { CreateProfileDto } from './dto/create-profile.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { AdminUpdateProfileDto } from './dto/admin-update-profile.dto';
@@ -57,6 +58,9 @@ export type ProfileMeResponse = {
   email: string;
   phone: string;
   address: string;
+  countryCode: string | null;
+  countryName: string | null;
+  city: string | null;
   description: string;
   profileType: string;
   status: string;
@@ -95,7 +99,7 @@ export type ProfileApplicationItem = {
     title: string;
     scheduledAt: Date;
     amount: number;
-    address: string;
+    address: string | null;
     status: string;
   };
 };
@@ -114,6 +118,9 @@ export type AdminProfileListItem = {
   email: string;
   phone: string;
   address: string;
+  countryCode: string | null;
+  countryName: string | null;
+  city: string | null;
   description: string;
   status: string;
   profileType: string;
@@ -202,6 +209,7 @@ export class ProfileService {
     private readonly geocodingService: GeocodingService,
     private readonly cache: AdminCacheService,
     private readonly portfolioService: PortfolioService,
+    private readonly geo: GeoService,
   ) {}
 
   async findById(id: string): Promise<ProfileMeResponse> {
@@ -214,6 +222,9 @@ export class ProfileService {
         email: true,
         phone: true,
         address: true,
+        country_code: true,
+        country_name: true,
+        city: true,
         description: true,
         profile_type: true,
         status: true,
@@ -252,6 +263,9 @@ export class ProfileService {
       email: profile.email,
       phone: profile.phone,
       address: profile.address,
+      countryCode: profile.country_code,
+      countryName: profile.country_name,
+      city: profile.city,
       description: profile.description,
       profileType: profile.profile_type,
       status: profile.status,
@@ -384,6 +398,7 @@ export class ProfileService {
     if (dto.lastName !== undefined) data.last_name = dto.lastName;
     if (dto.description !== undefined) data.description = dto.description;
     if (dto.address !== undefined) data.address = dto.address;
+    Object.assign(data, this.geo.resolveLocation(dto));
     return data;
   }
 
@@ -537,6 +552,9 @@ export class ProfileService {
         email: true,
         phone: true,
         address: true,
+        country_code: true,
+        country_name: true,
+        city: true,
         description: true,
         status: true,
         profile_type: true,
@@ -626,6 +644,9 @@ export class ProfileService {
       email: profile.email,
       phone: profile.phone,
       address: profile.address,
+      countryCode: profile.country_code,
+      countryName: profile.country_name,
+      city: profile.city,
       description: profile.description,
       status: profile.status,
       profileType: profile.profile_type,
@@ -976,6 +997,7 @@ export class ProfileService {
     if (dto.phone !== undefined) data.phone = dto.phone;
     if (dto.email !== undefined) data.email = dto.email;
     if (dto.profileType !== undefined) data.profile_type = dto.profileType;
+    Object.assign(data, this.geo.resolveLocation(dto));
     return data;
   }
 
@@ -1064,12 +1086,22 @@ export class ProfileService {
           {
             AND: [
               { first_name: { contains: parts[0], mode: 'insensitive' } },
-              { last_name: { contains: parts.slice(1).join(' '), mode: 'insensitive' } },
+              {
+                last_name: {
+                  contains: parts.slice(1).join(' '),
+                  mode: 'insensitive',
+                },
+              },
             ],
           },
           {
             AND: [
-              { first_name: { contains: parts.slice(1).join(' '), mode: 'insensitive' } },
+              {
+                first_name: {
+                  contains: parts.slice(1).join(' '),
+                  mode: 'insensitive',
+                },
+              },
               { last_name: { contains: parts[0], mode: 'insensitive' } },
             ],
           },
@@ -1104,6 +1136,9 @@ export class ProfileService {
           email: true,
           phone: true,
           address: true,
+          country_code: true,
+          country_name: true,
+          city: true,
           description: true,
           status: true,
           profile_type: true,
@@ -1129,6 +1164,9 @@ export class ProfileService {
       email: p.email,
       phone: p.phone,
       address: p.address,
+      countryCode: p.country_code,
+      countryName: p.country_name,
+      city: p.city,
       description: p.description,
       status: p.status,
       profileType: p.profile_type,
@@ -1342,6 +1380,7 @@ export class ProfileService {
         email: createProfileDto.email,
         phone: createProfileDto.phone,
         address: createProfileDto.address,
+        ...this.geo.resolveLocation(createProfileDto),
         description: createProfileDto.description || '',
         profile_type: createProfileDto.profileType,
         category_id: null,

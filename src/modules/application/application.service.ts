@@ -12,6 +12,7 @@ import {
   forwardRef,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { jobLocationLabel } from '../../common/utils/job-location.util';
 import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { assertKycVerified } from '../../common/exceptions/kyc-not-verified.exception';
@@ -120,7 +121,7 @@ export type ApplicationListItem = {
     title: string;
     scheduled_at: Date;
     amount: number;
-    address: string;
+    address: string | null;
     status: string;
     employer_id: string;
   };
@@ -145,7 +146,7 @@ export type ApplicationWithOffer = ApplicationListItem & {
     scheduled_at: Date;
     amount: number | null;
     payment_flow: string | null;
-    address: string;
+    address: string | null;
     note: string | null;
     status: string;
     employer_id: string;
@@ -203,7 +204,7 @@ export type WorkerMissionCard = {
     description: string;
     scheduledAt: string;
     amount: number | null;
-    address: string;
+    address: string | null;
     status: JobOfferStatus;
   };
   employer: {
@@ -661,7 +662,9 @@ export class ApplicationService {
         freshApp?.status !== ApplicationStatus.PENDING &&
         freshApp?.status !== ApplicationStatus.VIEWED
       ) {
-        throw new BadRequestException("Cette candidature n'est plus en attente");
+        throw new BadRequestException(
+          "Cette candidature n'est plus en attente",
+        );
       }
 
       // Lock the job offer row to prevent concurrent over-acceptance
@@ -918,7 +921,10 @@ export class ApplicationService {
     const scheduledAt = application.job_offer.scheduled_at;
 
     // Block cancellation after the job has already started
-    if (scheduledAt <= now && application.status === ApplicationStatus.ACCEPTED) {
+    if (
+      scheduledAt <= now &&
+      application.status === ApplicationStatus.ACCEPTED
+    ) {
       throw new BadRequestException(
         'Cette mission a déjà débuté, vous ne pouvez plus annuler votre candidature',
       );
@@ -2177,7 +2183,7 @@ export class ApplicationService {
       jobOfferId: app.job_offer_id,
       jobScheduledAt: app.job_offer.scheduled_at.toISOString(),
       jobAmount: Number(app.job_offer.amount),
-      jobAddress: app.job_offer.address,
+      jobAddress: jobLocationLabel(app.job_offer),
       jobPaymentFlow: app.job_offer.payment_flow,
       jobStatus: app.job_offer.status,
       jobQuantity: app.job_offer.quantity,
@@ -2276,22 +2282,56 @@ export class ApplicationService {
     if (searchTrimmed.length > 0) {
       const parts = searchTrimmed.split(/\s+/).filter(Boolean);
       const orClauses: Prisma.ApplicationWhereInput[] = [
-        { worker: { first_name: { contains: searchTrimmed, mode: 'insensitive' } } },
-        { worker: { last_name: { contains: searchTrimmed, mode: 'insensitive' } } },
-        { job_offer: { title: { contains: searchTrimmed, mode: 'insensitive' } } },
+        {
+          worker: {
+            first_name: { contains: searchTrimmed, mode: 'insensitive' },
+          },
+        },
+        {
+          worker: {
+            last_name: { contains: searchTrimmed, mode: 'insensitive' },
+          },
+        },
+        {
+          job_offer: {
+            title: { contains: searchTrimmed, mode: 'insensitive' },
+          },
+        },
       ];
       if (parts.length >= 2) {
         orClauses.push(
           {
             AND: [
-              { worker: { first_name: { contains: parts[0], mode: 'insensitive' } } },
-              { worker: { last_name: { contains: parts.slice(1).join(' '), mode: 'insensitive' } } },
+              {
+                worker: {
+                  first_name: { contains: parts[0], mode: 'insensitive' },
+                },
+              },
+              {
+                worker: {
+                  last_name: {
+                    contains: parts.slice(1).join(' '),
+                    mode: 'insensitive',
+                  },
+                },
+              },
             ],
           },
           {
             AND: [
-              { worker: { first_name: { contains: parts.slice(1).join(' '), mode: 'insensitive' } } },
-              { worker: { last_name: { contains: parts[0], mode: 'insensitive' } } },
+              {
+                worker: {
+                  first_name: {
+                    contains: parts.slice(1).join(' '),
+                    mode: 'insensitive',
+                  },
+                },
+              },
+              {
+                worker: {
+                  last_name: { contains: parts[0], mode: 'insensitive' },
+                },
+              },
             ],
           },
         );
@@ -2408,7 +2448,7 @@ export class ApplicationService {
       title: string;
       scheduled_at: Date;
       amount: unknown;
-      address: string;
+      address: string | null;
       status: string;
       employer_id: string;
     };
@@ -2456,7 +2496,7 @@ export class ApplicationService {
       scheduled_at: Date;
       amount: unknown;
       payment_flow: string | null;
-      address: string;
+      address: string | null;
       note: string | null;
       status: string;
       employer_id: string;

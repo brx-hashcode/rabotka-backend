@@ -6,6 +6,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import * as fs from 'node:fs';
+import { jobLocationLabel } from '../../common/utils/job-location.util';
 import * as path from 'node:path';
 import Redis from 'ioredis';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
@@ -200,7 +201,7 @@ export class ResumeService {
         ongoing: inProgress,
         title: job.title,
         amount: this.formatAmount(job.amount),
-        location: job.address,
+        location: jobLocationLabel(job),
       };
     });
 

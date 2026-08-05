@@ -15,6 +15,9 @@ const candidate = (id: string, over: Partial<Candidate> = {}): Candidate => ({
   paymentFlow: null,
   latitude: null,
   longitude: null,
+  countryCode: null,
+  city: null,
+  isRemote: false,
   ...over,
 });
 
@@ -28,6 +31,8 @@ const worker = (id: string, over: Record<string, unknown> = {}) => ({
   categoryIds: ['cat-a'],
   latitude: null,
   longitude: null,
+  countryCode: null,
+  city: null,
   createdAt: new Date(Date.now() - 86_400_000),
   ...over,
 });
@@ -352,7 +357,10 @@ describe('RecommendationEngineService', () => {
       deps.systemConfig.getRecommendationMinScore.mockResolvedValue(0.5);
       deps.sources.fromAllOpen.mockResolvedValue([
         ...Array.from({ length: 4 }, (_, i) =>
-          candidate(`good${i}`, { categoryId: `cat-${i}`, employerId: `e${i}` }),
+          candidate(`good${i}`, {
+            categoryId: `cat-${i}`,
+            employerId: `e${i}`,
+          }),
         ),
         candidate('bad-offer', { categoryId: 'bad', employerId: 'e9' }),
       ]);
@@ -498,6 +506,98 @@ describe('RecommendationEngineService', () => {
       expect(exploring.map((r) => r.id)).not.toEqual(greedy.map((r) => r.id));
     });
   });
+  /**
+   * Proximity used to collapse to a flat 0.5 whenever either side lacked
+   * coordinates. `prox` carries 0.35 of the cold-start weight — the heaviest
+   * term there is — so for anyone whose fire-and-forget geocoding had failed,
+   * a third of the ranking was a constant that ordered nothing.
+   */
+  describe('proximity falls back to declared country/city', () => {
+    const brazzaville = {
+      latitude: null,
+      longitude: null,
+      country_code: 'CG',
+      city: 'Brazzaville',
+    };
+
+    it('ranks a same-city offer above one merely in the same country', async () => {
+      deps.prisma.profile.findUnique.mockResolvedValue(brazzaville);
+      deps.sources.fromAffinities.mockResolvedValue([
+        candidate('far', { countryCode: 'CG', city: 'Pointe-Noire' }),
+        candidate('near', { countryCode: 'CG', city: 'Brazzaville' }),
+      ]);
+
+      const out = await recommend(2);
+
+      // Both arrive from one source with `far` ranked first by the fuser, so
+      // only proximity can put `near` on top.
+      expect(out[0].id).toBe('near');
+    });
+
+    it('ranks a domestic offer above a foreign one', async () => {
+      deps.prisma.profile.findUnique.mockResolvedValue(brazzaville);
+      deps.sources.fromAffinities.mockResolvedValue([
+        candidate('abroad', { countryCode: 'FR', city: 'Paris' }),
+        candidate('home', { countryCode: 'CG', city: 'Owando' }),
+      ]);
+
+      expect((await recommend(2))[0].id).toBe('home');
+    });
+
+    it('leaves geocoded candidates on the haversine path', async () => {
+      // The regression that would matter most: quietly degrading users who
+      // already rank correctly. `close` is ~1 km away and in a DIFFERENT
+      // country; if the coarse fallback were consulted it would lose.
+      deps.prisma.profile.findUnique.mockResolvedValue({
+        latitude: -4.2634,
+        longitude: 15.2429,
+        country_code: 'CG',
+        city: 'Brazzaville',
+      });
+      deps.sources.fromAffinities.mockResolvedValue([
+        candidate('sameCityFarAway', {
+          latitude: -4.7889,
+          longitude: 11.8636,
+          countryCode: 'CG',
+          city: 'Brazzaville',
+        }),
+        candidate('close', {
+          latitude: -4.2723,
+          longitude: 15.2429,
+          countryCode: 'CD',
+          city: 'Kinshasa',
+        }),
+      ]);
+
+      expect((await recommend(2))[0].id).toBe('close');
+    });
+
+    it('drops distance entirely for a remote job', async () => {
+      // Not 0.5. A remote job is not "distance unknown", it is "distance
+      // irrelevant" — a constant would drag every remote offer toward the
+      // middle against local work while ordering nothing between them.
+      deps.prisma.profile.findUnique.mockResolvedValue(brazzaville);
+      deps.sources.fromAffinities.mockResolvedValue([
+        candidate('remote', { isRemote: true, countryCode: null, city: null }),
+        candidate('abroad', { countryCode: 'FR', city: 'Paris' }),
+      ]);
+
+      // With prox dropped, `remote` is scored on the terms that do carry
+      // information and beats a job on the other side of the world.
+      expect((await recommend(2))[0].id).toBe('remote');
+    });
+
+    it('is unchanged when neither side declared a country', async () => {
+      // Nobody who has told us nothing may be moved by this change.
+      deps.prisma.profile.findUnique.mockResolvedValue(null);
+      deps.sources.fromAffinities.mockResolvedValue([
+        candidate('a'),
+        candidate('b'),
+      ]);
+
+      expect((await recommend(2)).map((r) => r.id)).toEqual(['a', 'b']);
+    });
+  });
 });
 
 describe('RecommendationEngineService.recommendWorkersForEmployer', () => {
@@ -534,7 +634,7 @@ describe('RecommendationEngineService.recommendWorkersForEmployer', () => {
       expect(deps.sources.workersFromAll).not.toHaveBeenCalled();
     });
 
-    it('falls back to the employer\'s own offer categories', async () => {
+    it("falls back to the employer's own offer categories", async () => {
       deps.prisma.jobOffer.findMany.mockResolvedValue([
         { category_id: 'cat-x' },
         { category_id: null },
@@ -762,6 +862,27 @@ describe('RecommendationEngineService.recommendWorkersForEmployer', () => {
       );
 
       expect(await recommend(7)).toHaveLength(7);
+    });
+  });
+  /**
+   * The employer-side mirror. Worth its own test rather than trusting symmetry:
+   * this path reads country/city off the WORKER row, a different select from
+   * the one the job path uses, so a missing field here would not show up above.
+   */
+  describe('proximity falls back to declared country/city', () => {
+    it('ranks a worker in the employer\u2019s own city first', async () => {
+      deps.prisma.profile.findUnique.mockResolvedValue({
+        latitude: null,
+        longitude: null,
+        country_code: 'CG',
+        city: 'Brazzaville',
+      });
+      deps.sources.workersFromAffinities.mockResolvedValue([
+        worker('elsewhere', { countryCode: 'CG', city: 'Dolisie' }),
+        worker('local', { countryCode: 'CG', city: 'Brazzaville' }),
+      ]);
+
+      expect((await recommend(2))[0].id).toBe('local');
     });
   });
 });

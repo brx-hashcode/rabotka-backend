@@ -1,4 +1,5 @@
 import { Injectable, Logger, forwardRef, Inject } from '@nestjs/common';
+import { jobLocationLabel } from '../../../common/utils/job-location.util';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { WhatsAppService } from '../../whatsapp/whatsapp.service';
 import { BotStateService } from './bot-state.service';
@@ -80,7 +81,7 @@ export class BotNotificationService {
         },
       );
       const description = app.worker.description ?? '';
-      const address = app.job_offer.address;
+      const address = jobLocationLabel(app.job_offer);
       const tpl = WHATSAPP_TEMPLATES.newApplication;
       await this.whatsApp.sendTemplateMessage(
         app.job_offer.employer.phone,
@@ -428,7 +429,7 @@ export class BotNotificationService {
             offer.amount != null ? Number(offer.amount) : null,
             offer.payment_flow,
           ),
-          address: offer.address,
+          address: jobLocationLabel(offer),
           date: dateStr,
           // URL suffix for the CTA button (/offres/{{6}}).
           jobOfferId,
@@ -441,5 +442,4 @@ export class BotNotificationService {
       );
     }
   }
-
 }
