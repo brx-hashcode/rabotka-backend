@@ -28,9 +28,11 @@ export function welcomePlatformMessage(): string {
     return templateReply(contentSid, variables(WELCOME_PATH));
   }
 
+  // Kept word-for-word in step with the v3 card's title, so a rollback to the
+  // free-form branch doesn't quietly change what the bot says.
   return [
-    `[IMG:${coverImageUrl()}]*Bienvenue sur Rabotka*`,
-    'L’endroit où compétences et opportunités se rencontrent.',
+    `[IMG:${coverImageUrl()}]*Rabotka*`,
+    'La première marketplace d’emploi sur WhatsApp en Afrique.',
     '',
     'Offres, candidatures et missions : tout se passe dans l’application.',
     '',

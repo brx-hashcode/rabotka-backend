@@ -77,6 +77,28 @@ describe('runPayPenaltiesFlow() - step 1 main prompt', () => {
     expect(result.clearState).toBe(true);
   });
 
+  /**
+   * The reason `start` was added to CMD_MENU rather than handled on its own.
+   * It used to reach the welcome card only by falling through as unrecognised
+   * input — which never happens inside a live flow, so someone part-way through
+   * paying a penalty typed "start", had it parsed as a payment option, and
+   * stayed stuck. `clearState` is what proves they are actually out.
+   */
+  it.each(['start', 'démarrer', 'demarrer', 'commencer'])(
+    'escapes the flow on "%s"',
+    async (input) => {
+      const ctx = makeCtx();
+      const state = makeState();
+      const result = await runPayPenaltiesFlow(
+        state,
+        input,
+        workerProfile,
+        ctx,
+      );
+      expect(result.clearState).toBe(true);
+    },
+  );
+
   it('goes to menu on "retour" input', async () => {
     const ctx = makeCtx();
     const state = makeState();
@@ -194,9 +216,11 @@ describe('runPayPenaltiesFlow() - step 2 wallet confirmation', () => {
   it('uses live penalty total at confirmation, not stale state amount', async () => {
     const ctx = makeCtx();
     // Live fetch returns a higher total than what was stored in state
-    (
-      ctx.applicationService.getUnpaidPenalties as jest.Mock
-    ).mockResolvedValue({ count: 3, total: 15000, ids: ['p1', 'p2', 'p3'] });
+    (ctx.applicationService.getUnpaidPenalties as jest.Mock).mockResolvedValue({
+      count: 3,
+      total: 15000,
+      ids: ['p1', 'p2', 'p3'],
+    });
     (ctx.walletService.getProfileWalletBalance as jest.Mock).mockResolvedValue(
       20000,
     );
@@ -216,15 +240,19 @@ describe('runPayPenaltiesFlow() - step 2 wallet confirmation', () => {
 
   it('clears state if no unpaid penalties remain at confirmation', async () => {
     const ctx = makeCtx();
-    (
-      ctx.applicationService.getUnpaidPenalties as jest.Mock
-    ).mockResolvedValue({ count: 0, total: 0, ids: [] });
+    (ctx.applicationService.getUnpaidPenalties as jest.Mock).mockResolvedValue({
+      count: 0,
+      total: 0,
+      ids: [],
+    });
     (ctx.walletService.getProfileWalletBalance as jest.Mock).mockResolvedValue(
       20000,
     );
     const state = makeStep2State();
     const result = await runPayPenaltiesFlow(state, '1', workerProfile, ctx);
-    expect(ctx.walletService.debitProfileAndCreditSystem).not.toHaveBeenCalled();
+    expect(
+      ctx.walletService.debitProfileAndCreditSystem,
+    ).not.toHaveBeenCalled();
     expect(result.clearState).toBe(true);
     expect(result.reply[0]).toContain('Aucune pénalité');
   });
