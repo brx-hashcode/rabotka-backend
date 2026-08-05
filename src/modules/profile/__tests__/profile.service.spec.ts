@@ -140,6 +140,7 @@ describe('ProfileService', () => {
   let whatsApp: ReturnType<typeof makeWhatsApp>;
   let configService: ReturnType<typeof makeConfigService>;
   let documentService: ReturnType<typeof makeDocumentService>;
+  let portfolioService: { ensurePortfolioSlug: jest.Mock };
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -153,6 +154,9 @@ describe('ProfileService', () => {
     whatsApp = makeWhatsApp();
     configService = makeConfigService();
     documentService = makeDocumentService();
+    portfolioService = {
+      ensurePortfolioSlug: jest.fn().mockResolvedValue('alice-dupont-a1b2c3'),
+    };
     service = new ProfileService(
       prisma as any,
       fileService as any,
@@ -190,6 +194,7 @@ describe('ProfileService', () => {
         dashboardKey: (e: string) => e,
         invalidate: jest.fn(),
       } as any, // adminCache
+      portfolioService as any, // portfolioService
     );
   });
 
@@ -621,6 +626,45 @@ describe('ProfileService', () => {
       txPrisma.profile.create.mockResolvedValue({ id: 'new-p-1' });
       prisma.$transaction.mockImplementation((fn: any) => fn(txPrisma));
       const result = await service.createProfile(dto);
+      expect(result?.message).toContain('succès');
+    });
+
+    it('gives a new worker a portfolio slug straight away', async () => {
+      // The slug used to be minted only on the first realization upload, so a
+      // worker who had uploaded nothing had no public page and employers saw no
+      // "Voir le portfolio" — the workers most in need of a shopfront were the
+      // ones without one.
+      const txPrisma = makePrisma();
+      txPrisma.profile.create.mockResolvedValue({ id: 'new-p-1' });
+      prisma.$transaction.mockImplementation((fn: any) => fn(txPrisma));
+
+      await service.createProfile(dto);
+
+      expect(portfolioService.ensurePortfolioSlug).toHaveBeenCalledWith('new-p-1');
+    });
+
+    it('does not mint a slug for an employer', async () => {
+      // Employers have no portfolio; minting would be a pointless write and a
+      // public page nobody should land on.
+      const txPrisma = makePrisma();
+      txPrisma.profile.create.mockResolvedValue({ id: 'new-e-1' });
+      prisma.$transaction.mockImplementation((fn: any) => fn(txPrisma));
+
+      await service.createProfile({ ...dto, profileType: 'EMPLOYER' as any });
+
+      expect(portfolioService.ensurePortfolioSlug).not.toHaveBeenCalled();
+    });
+
+    it('still completes the signup when the slug cannot be minted', async () => {
+      // A slug is a nicety; a failed signup is not. The detail endpoint mints
+      // on demand later anyway.
+      const txPrisma = makePrisma();
+      txPrisma.profile.create.mockResolvedValue({ id: 'new-p-2' });
+      prisma.$transaction.mockImplementation((fn: any) => fn(txPrisma));
+      portfolioService.ensurePortfolioSlug.mockRejectedValue(new Error('boom'));
+
+      const result = await service.createProfile(dto);
+
       expect(result?.message).toContain('succès');
     });
 
