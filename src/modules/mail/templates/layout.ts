@@ -101,6 +101,26 @@ export function wrapEmailHtml(
 </html>`;
 }
 
+/**
+ * The one call-to-action button for transactional emails.
+ *
+ * A table rather than a styled `<a>`: Outlook ignores padding on inline
+ * elements, so a bare anchor collapses to underlined text there. Colours are
+ * inline and literal because email clients strip `<style>` blocks and have no
+ * access to the design tokens — `#2a322e` is the body text colour used by
+ * `wrapEmailHtml` above.
+ */
+export function emailButton(href: string, label: string): string {
+  return `
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:24px 0;">
+      <tr>
+        <td align="center" bgcolor="#2a322e" style="border-radius:6px;">
+          <a href="${escapeHtml(href)}" style="display:inline-block;padding:12px 28px;font-family:'Ubuntu',Arial,sans-serif;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:6px;">${escapeHtml(label)}</a>
+        </td>
+      </tr>
+    </table>`;
+}
+
 export function escapeHtml(raw: string): string {
   return raw
     .replaceAll('&', '&amp;')
