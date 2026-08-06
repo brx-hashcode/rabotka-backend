@@ -1,5 +1,5 @@
 import { ConfigService } from '@nestjs/config';
-import type { Response } from 'express';
+import type { CookieOptions, Request, Response } from 'express';
 
 /**
  * How long a session lives. Most Rabotka traffic arrives from a WhatsApp link
@@ -21,24 +21,60 @@ export function setAuthCookie(
   config: ConfigService,
   token: string,
 ): void {
-  const isProduction = config.get<string>('NODE_ENV') === 'production';
+  const days = Number(
+    config.get<string>('AUTH_COOKIE_MAX_AGE_DAYS') ?? DEFAULT_MAX_AGE_DAYS,
+  );
+  const maxAgeDays =
+    Number.isFinite(days) && days > 0 ? days : DEFAULT_MAX_AGE_DAYS;
+
+  res.cookie(authCookieName(config), token, {
+    ...cookieAttributes(config),
+    maxAge: maxAgeDays * 24 * 60 * 60 * 1000,
+  });
+}
+
+/**
+ * The token the browser sent, if any.
+ *
+ * `cookie-parser` populates `req.cookies` (registered in `main.ts`), so this is
+ * only here to keep the cookie's *name* in one place alongside its attributes.
+ */
+export function readAuthCookie(
+  req: Request,
+  config: ConfigService,
+): string | undefined {
+  return req.cookies?.[authCookieName(config)] as string | undefined;
+}
+
+/**
+ * Drops a session the server has already rejected.
+ *
+ * The attributes must match `setAuthCookie` byte for byte — a `Set-Cookie` that
+ * differs in `path`, `secure` or `sameSite` creates a *second* cookie instead of
+ * removing the first, and the browser keeps resending the dead one forever.
+ */
+export function clearAuthCookie(res: Response, config: ConfigService): void {
+  res.clearCookie(authCookieName(config), cookieAttributes(config));
+}
+
+function authCookieName(config: ConfigService): string {
   const cookieName = config.get<string>('AUTH_COOKIE_NAME');
 
   if (!cookieName) {
     throw new Error('AUTH_COOKIE_NAME is not set');
   }
 
-  const days = Number(
-    config.get<string>('AUTH_COOKIE_MAX_AGE_DAYS') ?? DEFAULT_MAX_AGE_DAYS,
-  );
-  const maxAgeDays = Number.isFinite(days) && days > 0 ? days : DEFAULT_MAX_AGE_DAYS;
+  return cookieName;
+}
 
-  res.cookie(cookieName, token, {
+function cookieAttributes(config: ConfigService): CookieOptions {
+  const isProduction = config.get<string>('NODE_ENV') === 'production';
+
+  return {
     httpOnly: true,
     secure: isProduction,
     // The WhatsApp WebView arrives cross-site, so production needs None.
     sameSite: isProduction ? 'none' : 'lax',
-    maxAge: maxAgeDays * 24 * 60 * 60 * 1000,
     path: '/',
-  });
+  };
 }
