@@ -14,14 +14,22 @@ function makeContext(
     headers: authHeader ? { authorization: authHeader } : {},
     ...overrides,
   };
+  const response = { clearCookie: jest.fn() };
 
   return {
     getHandler: () => ({}),
     getClass: () => ({}),
     switchToHttp: () => ({
       getRequest: () => request,
+      getResponse: () => response,
     }),
   } as unknown as ExecutionContext;
+}
+
+/** The `clearCookie` spy on the response `makeContext` built. */
+function clearCookieSpy(ctx: ExecutionContext): jest.Mock {
+  return ctx.switchToHttp().getResponse<{ clearCookie: jest.Mock }>()
+    .clearCookie;
 }
 
 describe('JwtAuthGuard', () => {
@@ -104,6 +112,35 @@ describe('JwtAuthGuard', () => {
 
     const ctx = makeContext('bad-token');
     await expect(guard.canActivate(ctx)).rejects.toThrow(UnauthorizedException);
+  });
+
+  it('drops the cookie it just refused', async () => {
+    // Nothing on the client can do this — the cookie is httpOnly — so without
+    // it the browser resends a dead session on every request, forever.
+    (jwtService.verify as jest.Mock).mockImplementation(() => {
+      throw new Error('jwt expired');
+    });
+
+    const ctx = makeContext('expired-token');
+    await expect(guard.canActivate(ctx)).rejects.toThrow(UnauthorizedException);
+
+    expect(clearCookieSpy(ctx)).toHaveBeenCalledWith(
+      'auth-token',
+      expect.objectContaining({ httpOnly: true, path: '/' }),
+    );
+  });
+
+  it('leaves the response alone for a rejected bearer token', async () => {
+    // Mobile sends no cookie; there is nothing to clear and no reason to put a
+    // Set-Cookie header on its 401.
+    (jwtService.verify as jest.Mock).mockImplementation(() => {
+      throw new Error('invalid token');
+    });
+
+    const ctx = makeContext(undefined, 'Bearer bad-token');
+    await expect(guard.canActivate(ctx)).rejects.toThrow(UnauthorizedException);
+
+    expect(clearCookieSpy(ctx)).not.toHaveBeenCalled();
   });
 
   it('defaults type to "profile" when payload.type is missing', async () => {
