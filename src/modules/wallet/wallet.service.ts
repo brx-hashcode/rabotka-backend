@@ -29,6 +29,27 @@ import { deletedAtFilter } from '../../common/utils/soft-delete.util';
 import { randomUUID } from 'crypto';
 import type { PayPenaltyDto } from './dto/pay-penalty.dto';
 
+/**
+ * The payment types that are actually Rabotka's revenue.
+ *
+ * Revenue used to be "every COMPLETED payment", which is only correct while no
+ * Payment row exists for money the platform never earned — and one did: job
+ * completion recorded the worker's whole wage, so a 45 000 FCFA job read as
+ * 45 000 FCFA of platform revenue. Naming the types is what stops a future row
+ * doing the same thing silently.
+ *
+ * WALLET_TOP_UP is deliberately absent. A top-up is a customer deposit, not
+ * something earned; it becomes revenue only when it is spent on a fee, which is
+ * already counted here as CONTACT_UNLOCK or PENALTY. Counting both would book
+ * the same franc twice.
+ */
+export const REVENUE_PAYMENT_TYPES = [
+  PaymentType.CONTACT_UNLOCK,
+  PaymentType.PENALTY,
+  PaymentType.JOB_POSTING,
+  PaymentType.REGISTRATION,
+] as const;
+
 export type AdminWalletTransactionItem = {
   id: string;
   walletId: string;
@@ -672,7 +693,10 @@ export class WalletService {
       contactUnlockAgg,
     ] = await Promise.all([
       this.prisma.payment.aggregate({
-        where: { status: PaymentStatus.COMPLETED },
+        where: {
+          status: PaymentStatus.COMPLETED,
+          type: { in: [...REVENUE_PAYMENT_TYPES] },
+        },
         _sum: { amount: true },
         _count: true,
       }),
@@ -715,6 +739,7 @@ export class WalletService {
     year: number,
   ): Promise<{ month: string; revenue: number }[]> {
     const y = Math.min(2100, Math.max(2000, Math.floor(year)));
+    const revenueTypes = [...REVENUE_PAYMENT_TYPES] as string[];
 
     const rows = await this.prisma.$queryRaw<
       { month: Date; revenue: bigint }[]
@@ -730,6 +755,9 @@ export class WalletService {
       LEFT JOIN "payments" p
         ON DATE_TRUNC('month', p.paid_at) = d.month
         AND p.status = 'COMPLETED'
+        -- Same definition as REVENUE_PAYMENT_TYPES above: money the platform
+        -- earned, not money that merely passed through or never existed.
+        AND p.type::text = ANY(${revenueTypes})
       GROUP BY d.month
       ORDER BY d.month ASC
     `;
@@ -749,6 +777,7 @@ export class WalletService {
   ): Promise<{ month: string; revenue: number }[]> {
     const clampedMonths = Math.min(Math.max(1, months), 24);
     const span = clampedMonths - 1;
+    const revenueTypes = [...REVENUE_PAYMENT_TYPES] as string[];
 
     const rows = await this.prisma.$queryRaw<
       { month: Date; revenue: bigint }[]
@@ -764,6 +793,9 @@ export class WalletService {
       LEFT JOIN "payments" p
         ON DATE_TRUNC('month', p.paid_at) = d.month
         AND p.status = 'COMPLETED'
+        -- Same definition as REVENUE_PAYMENT_TYPES above: money the platform
+        -- earned, not money that merely passed through or never existed.
+        AND p.type::text = ANY(${revenueTypes})
       GROUP BY d.month
       ORDER BY d.month ASC
     `;

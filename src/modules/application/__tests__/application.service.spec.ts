@@ -962,5 +962,45 @@ describe('ApplicationService', () => {
         }),
       );
     });
+
+    it('records no payment — Rabotka never touches the wage', async () => {
+      // The employer pays the worker directly. Recording the wage as a Payment
+      // invented a transaction that never happened and, because the revenue
+      // queries summed every COMPLETED payment, booked the worker's whole wage
+      // as platform revenue: a 45 000 FCFA job read as 45 000 FCFA earned.
+      // Rabotka's revenue from a job is the posting fee, recorded separately.
+      setupMock(ApplicationStatus.ACCEPTED);
+
+      let capturedTx: any;
+      (prisma.$transaction as jest.Mock).mockImplementationOnce((fn: any) => {
+        capturedTx = {
+          jobOffer: {
+            update: jest.fn().mockResolvedValue({}),
+            findUnique: jest
+              .fn()
+              .mockResolvedValue({ status: JobOfferStatus.ACTIVE }),
+          },
+          assignment: {
+            updateMany: jest.fn().mockResolvedValue({}),
+            findUnique: jest.fn().mockResolvedValue({ status: 'COMPLETED' }),
+          },
+          payment: { create: jest.fn().mockResolvedValue({}) },
+          application: {
+            updateMany: jest.fn().mockResolvedValue({}),
+            findMany: jest.fn().mockResolvedValue([]),
+          },
+          profile: {
+            findUnique: jest.fn().mockResolvedValue({ reliability_score: 100 }),
+            update: jest.fn().mockResolvedValue({}),
+          },
+          $executeRaw: jest.fn().mockResolvedValue(0),
+        };
+        return fn(capturedTx);
+      });
+
+      await service.markJobCompleted(APPLICATION_ID, EMPLOYER_ID);
+
+      expect(capturedTx.payment.create).not.toHaveBeenCalled();
+    });
   });
 });
