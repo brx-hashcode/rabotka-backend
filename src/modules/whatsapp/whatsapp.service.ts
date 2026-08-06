@@ -14,9 +14,36 @@ import {
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { TwilioService } from '../../common/services/twilio/twilio.service';
 import { WalletService } from '../wallet/wallet.service';
-import { welcomeActivationMessage } from './templates';
+import { WHATSAPP_TEMPLATES } from '../../common/constants/whatsapp-templates';
+import {
+  welcomeActivationMessage,
+  formatAdminMessage,
+  flattenForTemplateVariable,
+  ADMIN_MESSAGE_VAR_MAX,
+  ADMIN_MESSAGE_FALLBACK_SIGNATURE,
+} from './templates';
 
 const VERIFICATION_TOKEN_KEY_PREFIX = `${REDIS_KEY_PREFIX}wa:verify:`;
+
+/** WhatsApp's customer-service window: free-form is only allowed inside it. */
+const SERVICE_WINDOW_MS = 24 * 60 * 60 * 1000;
+/**
+ * Safety margin on the window.
+ *
+ * Not cosmetic. Our clock and Meta's differ, and there is real latency between
+ * the admin's composer rendering, the POST landing and Twilio dispatching. Being
+ * wrong towards "sent a template unnecessarily" still delivers the message;
+ * being wrong the other way is the bug this whole feature exists to fix.
+ */
+const SERVICE_WINDOW_MARGIN_MS = 5 * 60 * 1000;
+
+export type AdminMessageMode = 'FREE_FORM' | 'TEMPLATE';
+
+export type AdminMessageDelivery = {
+  mode: AdminMessageMode;
+  sent: boolean;
+  error?: string;
+};
 
 @Injectable()
 export class WhatsAppService {
@@ -101,15 +128,12 @@ export class WhatsAppService {
     const sent = sid != null;
 
     if (sent && profileId && body) {
-      await this.saveMessage(
-        profileId,
-        MessageDirection.OUTBOUND,
-        body,
-      ).catch((err) =>
-        this.logger.warn(
-          `Failed to save outbound message for ${profileId}:`,
-          err,
-        ),
+      await this.saveMessage(profileId, MessageDirection.OUTBOUND, body).catch(
+        (err) =>
+          this.logger.warn(
+            `Failed to save outbound message for ${profileId}:`,
+            err,
+          ),
       );
     }
 
@@ -125,6 +149,131 @@ export class WhatsAppService {
       this.twilioService.sendWhatsAppMedia(phone, mediaUrl, caption),
     );
     return sid != null;
+  }
+
+  /**
+   * Is the profile inside WhatsApp's 24h customer-service window?
+   *
+   * Free-form text is only accepted while the profile has messaged us in the
+   * last 24 hours; outside it Twilio rejects with 63016. The window is derived
+   * from the newest INBOUND message, which `ConversationService` writes on every
+   * incoming WhatsApp message.
+   *
+   * NO INBOUND MESSAGE AT ALL MEANS CLOSED, and that is the common case, not an
+   * edge case — most profiles sign up on the web and never message the bot.
+   */
+  async isServiceWindowOpen(
+    profileId: string,
+  ): Promise<{ open: boolean; lastInboundAt: Date | null }> {
+    const last = await this.prisma.message.findFirst({
+      where: {
+        profile_id: profileId,
+        direction: MessageDirection.INBOUND,
+        // Explicit even though the column defaults to WHATSAPP: admin emails are
+        // written into this same table with platform EMAIL, and an email would
+        // otherwise be read as evidence of an open WhatsApp session.
+        platform: BotPlatform.WHATSAPP,
+      },
+      orderBy: { created_at: 'desc' },
+      select: { created_at: true },
+    });
+
+    if (!last) {
+      return { open: false, lastInboundAt: null };
+    }
+
+    const age = Date.now() - last.created_at.getTime();
+    return {
+      open: age < SERVICE_WINDOW_MS - SERVICE_WINDOW_MARGIN_MS,
+      lastInboundAt: last.created_at,
+    };
+  }
+
+  /**
+   * Send an admin-authored message, picking the delivery mode from the window.
+   *
+   * Unlike every other sender on this service, this one REPORTS ITS FAILURE
+   * instead of swallowing it — see the note on `attempt` above. It has exactly
+   * one caller, an admin-facing HTTP handler, and the whole point of the feature
+   * is that the admin learns whether their message actually went out. So it
+   * calls TwilioService directly and catches for itself.
+   */
+  async sendAdminMessage(params: {
+    phone: string;
+    profileId: string;
+    message: string;
+    adminName: string;
+    adminUserId?: string;
+  }): Promise<AdminMessageDelivery> {
+    const { phone, profileId, message, adminUserId } = params;
+    const adminName =
+      flattenForTemplateVariable(params.adminName) ||
+      ADMIN_MESSAGE_FALLBACK_SIGNATURE;
+
+    const { open } = await this.isServiceWindowOpen(profileId);
+    const mode: AdminMessageMode = open ? 'FREE_FORM' : 'TEMPLATE';
+
+    // Free-form keeps the admin's line breaks; the template cannot (Meta rejects
+    // newlines inside a variable), so its text is flattened first. Both go
+    // through the same formatter, so the two modes render identically.
+    const text = open ? message.trim() : flattenForTemplateVariable(message);
+
+    if (!text) {
+      throw new BadRequestException('Le message ne peut pas être vide');
+    }
+    if (!open && text.length > ADMIN_MESSAGE_VAR_MAX) {
+      throw new BadRequestException(
+        `Hors de la fenêtre de 24h, le message est envoyé via un modèle approuvé ` +
+          `et ne peut pas dépasser ${ADMIN_MESSAGE_VAR_MAX} caractères ` +
+          `(actuellement ${text.length}). Découpez-le en plusieurs envois.`,
+      );
+    }
+
+    const body = formatAdminMessage({ message: text, adminName });
+
+    let sid: string | null;
+    try {
+      sid = open
+        ? await this.twilioService.sendWhatsApp(phone, body)
+        : await this.twilioService.sendWhatsAppTemplate(
+            phone,
+            WHATSAPP_TEMPLATES.adminMessage.contentSid,
+            WHATSAPP_TEMPLATES.adminMessage.variables({
+              message: text,
+              adminName,
+            }),
+          );
+    } catch (err) {
+      // TwilioService formats these as "[Twilio 63016] … — message to … failed",
+      // which is what the admin sees in the toast.
+      const error = err instanceof Error ? err.message : String(err);
+      this.logger.error(
+        `Admin ${mode} message to ${phone} (profile ${profileId}) failed: ${error}`,
+      );
+      return { mode, sent: false, error };
+    }
+
+    if (sid == null) {
+      // A null without a throw means Twilio is not configured at all.
+      this.logger.error(
+        `Admin ${mode} message to ${phone} not sent: WhatsApp is not configured`,
+      );
+      return { mode, sent: false, error: 'WhatsApp n’est pas configuré' };
+    }
+
+    // Persist what was really delivered, exactly once, and only on success — a
+    // bubble in the thread for a message that never arrived is the same lie as
+    // returning success from the endpoint.
+    await this.saveMessage(
+      profileId,
+      MessageDirection.OUTBOUND,
+      body,
+      adminUserId,
+    ).catch((err) =>
+      this.logger.warn(`Failed to save admin message for ${profileId}:`, err),
+    );
+
+    return { mode, sent: true };
   }
 
   async saveMessage(
