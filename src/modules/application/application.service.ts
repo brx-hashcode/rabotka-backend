@@ -35,14 +35,10 @@ import {
   InteractionObject,
   InteractionSource,
   JobOfferStatus,
-  PaymentStatus,
-  PaymentMethod,
-  PaymentType,
   Prisma,
   RatingDirection,
   RejectionSource,
 } from '@prisma/client';
-import { generatePaymentReference } from '../../common/utils/payment-reference';
 import { ContractService } from '../contract/contract.service';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { MatchingService } from '../matching/matching.service';
@@ -1273,7 +1269,6 @@ export class ApplicationService {
       );
     }
     const amount = Number(application.job_offer.amount);
-    const transactionId = generatePaymentReference();
     const now = new Date();
     const fees = await this.systemConfigService.getFees();
     let rejectedOrphanIds: string[] = [];
@@ -1301,18 +1296,17 @@ export class ApplicationService {
           note: note ?? null,
         },
       });
-      await tx.payment.create({
-        data: {
-          type: PaymentType.JOB_POSTING,
-          profile_id: application.worker_id,
-          amount,
-          payment_method: PaymentMethod.OTHER,
-          transaction_id: transactionId,
-          status: PaymentStatus.COMPLETED,
-          paid_at: now,
-          description: `Job completion payment for job ${application.job_offer_id}`,
-        },
-      });
+      // No Payment row for the wage. The employer pays the worker directly —
+      // Rabotka never touches that money, so recording it as a payment invented
+      // a transaction that never happened, attributed the worker's full wage to
+      // their profile, and (because the revenue queries sum every COMPLETED
+      // payment) counted it as Rabotka revenue. A 45 000 FCFA job showed up as
+      // 45 000 FCFA earned by the platform.
+      //
+      // Rabotka's revenue from a job is the posting fee, recorded separately by
+      // `WalletService.recordJobPostingPayment` against the employer, with a
+      // matching system-wallet credit.
+
       // Mark accepted/started applications as END — skip NO_SHOW workers
       await tx.application.updateMany({
         where: {
