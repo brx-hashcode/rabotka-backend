@@ -116,6 +116,36 @@ export const DEFAULT_PENALTIES: Penalties = {
   unsaved: 0.4,
 };
 
+/**
+ * Floor of the realistic calibrated-similarity band, in `calibrateCosine` units.
+ *
+ * `calibrateCosine` maps the THEORETICAL cosine range [-1,1] onto [0,1]. Real
+ * normalized text embeddings never come close to -1: measured against this
+ * corpus, an employer scored against 15 workers produced 0.8026–0.8679. A
+ * 0.065 spread carrying a 0.30–0.36 weight adds ~0.25 to every candidate and
+ * separates them by ~0.02 — a term that moves every score by the same amount
+ * and therefore ranks nothing, which is precisely the miscalibration this
+ * ranker was rewritten to remove.
+ *
+ * Re-measure before changing: `spreadSimilarity` is only honest while the floor
+ * sits just below what the corpus actually produces.
+ */
+export const SIMILARITY_FLOOR = 0.75;
+
+/**
+ * Stretches a calibrated similarity across [0,1] so it can actually order.
+ *
+ * A FIXED transform, not a per-request min–max. Normalising within the
+ * candidate set would look better distributed but make scores incomparable
+ * between requests, breaking the absolute relevance threshold the whole engine
+ * depends on. Everything below the floor clamps to 0 — those are candidates
+ * with nothing in common, and the distinction between "unrelated" and "very
+ * unrelated" is not worth ranking on.
+ */
+export function spreadSimilarity(calibrated: number): number {
+  return clamp01((calibrated - SIMILARITY_FLOOR) / (1 - SIMILARITY_FLOOR));
+}
+
 export const clamp01 = (n: number): number =>
   Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 0;
 

@@ -13,6 +13,7 @@ import {
   type WorkerCandidate,
 } from './candidate-sources';
 import { InteractionKind } from '@prisma/client';
+import { COLLECTIONS } from '../qdrant/qdrant.config';
 import { UserFeatureService, type UserFeatures } from './user-feature.service';
 import {
   DEFAULT_PENALTIES,
@@ -153,7 +154,7 @@ export class RecommendationEngineService {
     }
 
     const candidateIds = fused.map((f) => f.id);
-    const [worker, quality, lastSeen, unsaved] = await Promise.all([
+    const [worker, quality, lastSeen, unsaved, simScores] = await Promise.all([
       this.prisma.profile.findUnique({
         where: { id: workerId },
         select: {
@@ -168,6 +169,15 @@ export class RecommendationEngineService {
       ]),
       this.sources.lastSeenAt(workerId, candidateIds),
       this.sources.unsavedOfferIds(workerId, candidateIds),
+      // The worker's own vector carries their portfolio; the jobs' carry their
+      // text. Empty when embeddings are off or Qdrant is unreachable, which
+      // leaves `sim` null rather than zero.
+      this.similarityFor(
+        COLLECTIONS.WORKERS,
+        workerId,
+        COLLECTIONS.JOBS,
+        candidateIds,
+      ),
     ]);
 
     const weights = interpolateWeights(features.positiveCount);
@@ -181,7 +191,7 @@ export class RecommendationEngineService {
     const scored = fused.map((f) => {
       const c = byId.get(f.id)!;
       const terms: ScoreTerms = {
-        sim: null,
+        sim: simScores.get(c.id) ?? null,
         catAff: c.categoryId
           ? (features.categoryAffinity[c.categoryId] ?? 0)
           : 0,
@@ -311,26 +321,35 @@ export class RecommendationEngineService {
     }
 
     const candidateIds = fused.map((f) => f.id);
-    const [employer, quality, lastActive, lastSeen] = await Promise.all([
-      this.prisma.profile.findUnique({
-        where: { id: employerId },
-        select: {
-          latitude: true,
-          longitude: true,
-          country_code: true,
-          city: true,
-        },
-      }),
-      this.sources.workerQuality(candidateIds),
-      this.sources.lastActiveAt(candidateIds),
-      // Which of these workers this employer has already been shown. Without it
-      // the employer feed is frozen: the same top profiles resurface on every
-      // refresh, and someone who scrolled past them yesterday sees them again.
-      this.sources.lastSeenAt(employerId, candidateIds, [
-        InteractionKind.PROFILE_VIEW,
-        InteractionKind.IMPRESSION_BATCH,
-      ]),
-    ]);
+    const [employer, quality, lastActive, lastSeen, simScores] =
+      await Promise.all([
+        this.prisma.profile.findUnique({
+          where: { id: employerId },
+          select: {
+            latitude: true,
+            longitude: true,
+            country_code: true,
+            city: true,
+          },
+        }),
+        this.sources.workerQuality(candidateIds),
+        this.sources.lastActiveAt(candidateIds),
+        // Which of these workers this employer has already been shown. Without it
+        // the employer feed is frozen: the same top profiles resurface on every
+        // refresh, and someone who scrolled past them yesterday sees them again.
+        this.sources.lastSeenAt(employerId, candidateIds, [
+          InteractionKind.PROFILE_VIEW,
+          InteractionKind.IMPRESSION_BATCH,
+        ]),
+        // The direction that answers "does my portfolio help me get found": the
+        // candidates ARE workers, so their realizations lift them here.
+        this.similarityFor(
+          COLLECTIONS.EMPLOYERS,
+          employerId,
+          COLLECTIONS.WORKERS,
+          candidateIds,
+        ),
+      ]);
 
     const weights = interpolateWeights(features.positiveCount);
     const negativeCategories = new Set(features.negativeCategoryIds);
@@ -340,7 +359,7 @@ export class RecommendationEngineService {
       const c = byId.get(f.id)!;
       const active = lastActive.get(c.id);
       const terms: ScoreTerms = {
-        sim: null,
+        sim: simScores.get(c.id) ?? null,
         catAff: bestCategoryAffinity(c.categoryIds, features.categoryAffinity),
         partyAff: features.counterpartyAffinity[c.id] ?? 0,
         cf: pools.size > 1 ? clamp01((f.sources - 1) / (pools.size - 1)) : null,
@@ -479,6 +498,39 @@ export class RecommendationEngineService {
       add('all_open', await this.sources.fromAllOpen(workerId, limit));
     }
     return pools;
+  }
+
+  /**
+   * Similarity scores, or an empty map when embeddings are switched off.
+   *
+   * Gated on the same `matching.use_embeddings` flag the legacy path honours,
+   * so one switch still disables embeddings everywhere. Checking it here rather
+   * than inside `similarity()` keeps the Qdrant calls from being made at all.
+   */
+  private async similarityFor(
+    queryCollection: string,
+    queryId: string,
+    candidateCollection: string,
+    candidateIds: string[],
+  ): Promise<Map<string, number>> {
+    try {
+      if (!(await this.systemConfig.isSimilarityEnabled())) {
+        return new Map();
+      }
+      return await this.sources.similarity(
+        queryCollection,
+        queryId,
+        candidateCollection,
+        candidateIds,
+      );
+    } catch (err) {
+      // `similarity()` already swallows Qdrant faults, but the config lookup in
+      // front of it does not — and this runs inside a Promise.all, where one
+      // rejection would take the whole feed down. A ranking without `sim` is a
+      // worse feed; a thrown error is no feed at all.
+      this.logger.warn('similarity lookup failed', err);
+      return new Map();
+    }
   }
 
   /**

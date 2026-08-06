@@ -56,9 +56,12 @@ function makeDeps() {
     workersFromAll: jest.fn().mockResolvedValue([]),
     workerQuality: jest.fn().mockResolvedValue(new Map()),
     lastActiveAt: jest.fn().mockResolvedValue(new Map()),
+    similarity: jest.fn().mockResolvedValue(new Map()),
   };
   const featureService = { get: jest.fn().mockResolvedValue(features()) };
   const systemConfig = {
+    // On by default, matching production (`matching.use_embeddings = true`).
+    isSimilarityEnabled: jest.fn().mockResolvedValue(true),
     getRecommendationMinScore: jest.fn().mockResolvedValue(0),
     get: jest.fn().mockResolvedValue('false'),
     getFees: jest.fn().mockResolvedValue({ reliabilityScoreMin: 50 }),
@@ -585,6 +588,77 @@ describe('RecommendationEngineService', () => {
       // With prox dropped, `remote` is scored on the terms that do carry
       // information and beats a job on the other side of the world.
       expect((await recommend(2))[0].id).toBe('remote');
+    });
+
+    /**
+     * Semantic similarity — the term that carries a worker's portfolio.
+     *
+     * Realizations are part of the text MatchingService embeds, so wiring `sim`
+     * is what makes them count. It was hardcoded null, and since
+     * computeRelevance silently drops nulls and redistributes their weight,
+     * nothing errored — the signal just never arrived.
+     */
+    describe('similarity', () => {
+      it('orders by similarity when nothing else separates candidates', async () => {
+        // A WARM user: `sim` carries 0 weight for a cold one by design, so a
+        // cold fixture would pass whatever the wiring did.
+        deps.featureService.get.mockResolvedValue(
+          features({ positiveCount: 50 }),
+        );
+        // Identical in every other respect and delivered in the losing order,
+        // so only `sim` can put `close` on top. Proves the score is actually
+        // consumed rather than merely computed.
+        deps.sources.fromAffinities.mockResolvedValue([
+          candidate('far'),
+          candidate('close'),
+        ]);
+        deps.sources.similarity.mockResolvedValue(
+          new Map([
+            ['far', 0.55],
+            ['close', 0.95],
+          ]),
+        );
+
+        expect((await recommend(2))[0].id).toBe('close');
+      });
+
+      it('treats a missing score as no evidence, not as zero', async () => {
+        // `0` would actively bury a worker who simply has not been indexed
+        // yet. Null drops the term and redistributes its weight instead, so an
+        // unindexed candidate can still win on everything else.
+        deps.featureService.get.mockResolvedValue(
+          features({ positiveCount: 50, categoryAffinity: { 'cat-hot': 1 } }),
+        );
+        deps.sources.fromAffinities.mockResolvedValue([
+          candidate('unindexed', { categoryId: 'cat-hot' }),
+          candidate('indexed'),
+        ]);
+        deps.sources.similarity.mockResolvedValue(new Map([['indexed', 0.6]]));
+
+        expect((await recommend(2))[0].id).toBe('unindexed');
+      });
+
+      it('keeps the feed when the similarity lookup fails', async () => {
+        // Degrade the ranking, never empty the feed.
+        deps.sources.similarity.mockRejectedValue(new Error('qdrant down'));
+        deps.sources.fromAffinities.mockResolvedValue([
+          candidate('a'),
+          candidate('b'),
+        ]);
+
+        expect(await recommend(2)).toHaveLength(2);
+      });
+
+      it('makes no Qdrant call when embeddings are switched off', async () => {
+        // One flag still disables embeddings everywhere, and it must short
+        // circuit before the query rather than discard the result after it.
+        deps.systemConfig.isSimilarityEnabled.mockResolvedValue(false);
+        deps.sources.fromAffinities.mockResolvedValue([candidate('a')]);
+
+        await recommend(1);
+
+        expect(deps.sources.similarity).not.toHaveBeenCalled();
+      });
     });
 
     it('is unchanged when neither side declared a country', async () => {

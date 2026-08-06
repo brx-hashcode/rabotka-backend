@@ -15,3 +15,9 @@ export {
 } from './payment-direct';
 export { paymentApprovedMessage } from './payment-approved';
 export { welcomeActivationMessage } from './welcome-activation';
+export {
+  formatAdminMessage,
+  flattenForTemplateVariable,
+  ADMIN_MESSAGE_VAR_MAX,
+  ADMIN_MESSAGE_FALLBACK_SIGNATURE,
+} from './admin-message';

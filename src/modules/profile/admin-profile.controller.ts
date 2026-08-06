@@ -15,6 +15,7 @@ import {
   UploadedFile,
   BadRequestException,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { FilesInterceptor, FileInterceptor } from '@nestjs/platform-express';
@@ -40,6 +41,7 @@ import { PaymentRequestService } from '../payment-request/payment-request.servic
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { WalletService } from '../wallet/wallet.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
+import type { AdminMessageDelivery } from '../whatsapp/whatsapp.service';
 import { MailService } from '../mail/mail.service';
 import { LayoutService } from '../mail/layout.service';
 import { kycApprovedEmail, kycRejectedEmail } from '../mail/templates';
@@ -288,6 +290,34 @@ export class AdminProfileController {
     }));
   }
 
+  @Get(':id/whatsapp-window')
+  @Roles(UserRole.MODERATOR)
+  @ApiOperation({
+    summary: "Whether the profile's 24h WhatsApp window is open (admin only)",
+    description:
+      'Tells the composer which delivery mode a WhatsApp message would use. ' +
+      'Advisory only — the window can open or lapse between this call and the ' +
+      'send, so the send path recomputes it and is authoritative.',
+  })
+  async getWhatsAppWindow(@Param('id') id: string) {
+    const profile = await this.prisma.profile.findUnique({
+      where: { id },
+      select: { id: true, phone: true },
+    });
+    if (!profile) {
+      throw new NotFoundException('Profil non trouvé');
+    }
+
+    const { open, lastInboundAt } = await this.whatsApp.isServiceWindowOpen(id);
+
+    return {
+      windowOpen: open,
+      lastInboundAt,
+      mode: open ? 'FREE_FORM' : 'TEMPLATE',
+      hasPhone: !!profile.phone,
+    };
+  }
+
   @Post(':id/messages')
   @Roles(UserRole.MANAGER)
   @ApiOperation({ summary: 'Send a message to a profile (admin only)' })
@@ -312,19 +342,11 @@ export class AdminProfileController {
       throw new BadRequestException('Le message ne peut pas être vide');
     }
 
-    let adminFullName = "L'équipe Rabotka";
-    if (adminUserId) {
-      const admin = await this.prisma.user.findUnique({
-        where: { id: adminUserId },
-        select: { first_name: true, last_name: true },
-      });
-      if (admin) {
-        adminFullName = `${admin.first_name} ${admin.last_name}`.trim();
-      }
-    }
+    const adminFullName = await this.resolveAdminSignature(adminUserId);
 
+    let delivery: AdminMessageDelivery | undefined;
     if (body.channel === 'WHATSAPP') {
-      await this.sendWhatsAppMessage(
+      delivery = await this.sendWhatsAppMessage(
         profile,
         body.message,
         adminFullName,
@@ -340,6 +362,8 @@ export class AdminProfileController {
       );
     }
 
+    // Logged before the throw below: a message that failed to reach the profile
+    // is exactly the event you want on the timeline.
     await this.logService.create({
       action: 'PROFILE_MESSAGE_SENT',
       entityType: 'Profile',
@@ -349,11 +373,42 @@ export class AdminProfileController {
       metadata: {
         channel: body.channel,
         attachmentsCount: files?.length ?? 0,
+        deliveryMode: delivery?.mode ?? null,
+        success: delivery?.sent ?? true,
+        ...(delivery?.sent === false ? { failureReason: delivery.error } : {}),
       },
       ...extractRequestMeta(req),
     });
 
-    return { success: true };
+    if (delivery && !delivery.sent) {
+      // 503, not 400: the failure is upstream (Twilio credentials, a Meta
+      // rejection, the sandbox cap), not something the admin typed wrong. This
+      // endpoint used to return success here and the message simply vanished.
+      throw new ServiceUnavailableException(
+        `Le message n'a pas pu être remis sur WhatsApp. ${delivery.error ?? ''}`.trim(),
+      );
+    }
+
+    return { success: true, deliveryMode: delivery?.mode ?? null };
+  }
+
+  /**
+   * The name a message is signed with. Falls back to the team when the admin has
+   * no usable name — an empty signature would be an empty template variable,
+   * which Meta rejects outright.
+   */
+  private async resolveAdminSignature(
+    adminUserId: string | undefined,
+  ): Promise<string> {
+    if (!adminUserId) {
+      return "L'équipe Rabotka";
+    }
+    const admin = await this.prisma.user.findUnique({
+      where: { id: adminUserId },
+      select: { first_name: true, last_name: true },
+    });
+    const full = `${admin?.first_name ?? ''} ${admin?.last_name ?? ''}`.trim();
+    return full || "L'équipe Rabotka";
   }
 
   private async sendWhatsAppMessage(
@@ -361,25 +416,24 @@ export class AdminProfileController {
     message: string,
     adminFullName: string,
     adminUserId: string | undefined,
-  ): Promise<void> {
+  ): Promise<AdminMessageDelivery> {
     if (!profile.phone) {
       throw new BadRequestException("Ce profil n'a pas de numéro de téléphone");
     }
-    const whatsappBody = [
-      message.trim(),
-      '',
-      `_${adminFullName}_`,
-      `_L'équipe Rabotka_`,
-    ].join('\n');
-    // sendTextMessage persists the OUTBOUND Message itself (it's given the
-    // profileId + sender), so we must NOT create a second one here — doing so
-    // made every admin WhatsApp message show up twice in the conversation.
-    await this.whatsApp.sendTextMessage(
-      profile.phone,
-      whatsappBody,
-      profile.id,
+    // sendAdminMessage owns the whole WhatsApp side: it picks free-form vs the
+    // approved template from the 24h service window, formats the body (the same
+    // shape either way) and persists the OUTBOUND Message itself. We must NOT
+    // create a second one here — doing so made every admin WhatsApp message show
+    // up twice in the conversation. Unlike the rest of WhatsAppService it hands
+    // failures back rather than swallowing them, which is what the caller turns
+    // into a 503.
+    return this.whatsApp.sendAdminMessage({
+      phone: profile.phone,
+      profileId: profile.id,
+      message,
+      adminName: adminFullName,
       adminUserId,
-    );
+    });
   }
 
   private async sendEmailMessage(

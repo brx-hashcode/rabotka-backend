@@ -8,9 +8,10 @@ import {
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
-import { Request } from 'express';
+import { Request, Response } from 'express';
 import Redis from 'ioredis';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator.js';
+import { clearAuthCookie, readAuthCookie } from '../auth-cookie.util';
 import {
   REDIS_CONNECTION,
   REDIS_KEY_PREFIX,
@@ -95,19 +96,25 @@ export class JwtAuthGuard implements CanActivate {
 
       return true;
     } catch (err) {
+      // The cookie holds a token this server will never accept again (expired,
+      // revoked, or signed by a retired secret). Leaving it in place means the
+      // browser resends it on every request forever, and nothing on the client
+      // can delete it — it is httpOnly. Mobile sends a bearer token and has no
+      // cookie to clear, so only touch the response when one was actually sent.
+      if (readAuthCookie(request, this.configService)) {
+        clearAuthCookie(
+          context.switchToHttp().getResponse<Response>(),
+          this.configService,
+        );
+      }
+
       if (err instanceof UnauthorizedException) throw err;
       throw new UnauthorizedException('Session invalide ou expirée');
     }
   }
 
   private extractToken(request: Request): string | undefined {
-    const cookieName = this.configService.get<string>('AUTH_COOKIE_NAME');
-
-    if (!cookieName) {
-      throw new Error('AUTH_COOKIE_NAME is not set');
-    }
-
-    const cookieToken = request.cookies?.[cookieName];
+    const cookieToken = readAuthCookie(request, this.configService);
     if (cookieToken) {
       return cookieToken;
     }
