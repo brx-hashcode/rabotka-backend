@@ -35,7 +35,11 @@ import { WhatsAppLoginLinkModule } from './whatsapp-login-link.module';
         return {
           secret: jwtSecret,
           signOptions: {
-            expiresIn: configService.get<string>('JWT_EXPIRES_IN', '24h') as
+            // Must track AUTH_COOKIE_MAX_AGE_DAYS (see auth-cookie.util.ts).
+            // A token shorter-lived than the cookie carrying it means the
+            // browser keeps sending a session the server already refuses, and
+            // there is no cookie-side refresh flow to recover from it.
+            expiresIn: configService.get<string>('JWT_EXPIRES_IN', '30d') as
               | `${number}${'s' | 'm' | 'h' | 'd'}`
               | `${number}`,
           },

@@ -28,14 +28,34 @@ async function main() {
   // Deterministic: always exploit, so divergence can't be explained by chance.
   const rng = () => 0.99;
   const systemConfig = {
+    // This script measures the SQL-only tier, per the usage note above, so the
+    // similarity term stays off — and `similarityFor` checks this before it
+    // would reach Qdrant, which is why the stub below can refuse every call.
+    isSimilarityEnabled: async () => false,
     getRecommendationMinScore: async () => 0.3,
     get: async (_k: string, fallback: string) => fallback,
     getFees: async () => ({ reliabilityScoreMin: 50 }),
   };
 
+  // Loud rather than absent: if embeddings are ever switched on here, the run
+  // should say so instead of quietly scoring without the term it was measuring.
+  const qdrant = new Proxy(
+    {},
+    {
+      get(_t, prop) {
+        throw new Error(
+          `check-feed-divergence runs with embeddings off; QdrantService.${String(prop)} was called`,
+        );
+      },
+    },
+  );
+
   try {
     const features = new UserFeatureService(prisma as never);
-    const sources = new CandidateSourceService(prisma as never);
+    const sources = new CandidateSourceService(
+      prisma as never,
+      qdrant as never,
+    );
     const engine = new RecommendationEngineService(
       prisma as never,
       sources,

@@ -267,6 +267,43 @@ export class AuthService {
     };
   }
 
+  /**
+   * The profile a session token belongs to, or null if it does not grant one.
+   *
+   * Same checks as `JwtAuthGuard`, but answering rather than throwing: callers
+   * here are asking "is this visitor already signed in?" on a public route,
+   * where a missing or dead token is an ordinary answer and not an error.
+   */
+  async resolveSessionProfile(token?: string): Promise<string | null> {
+    if (!token) return null;
+
+    try {
+      const payload = this.jwtService.verify<{
+        sub: string;
+        type?: string;
+        jti?: string;
+      }>(token, {
+        secret: this.configService.get<string>('JWT_SECRET'),
+      });
+
+      // Admin and mobile-refresh tokens are signed with the same secret; only a
+      // profile session token may stand in for a WhatsApp login link.
+      if ((payload.type ?? 'profile') !== 'profile') return null;
+
+      if (payload.jti) {
+        const blocked = await this.redis.get(
+          `${JWT_BLOCKLIST_PREFIX}${payload.jti}`,
+        );
+        if (blocked) return null;
+      }
+
+      return payload.sub ?? null;
+    } catch {
+      // Expired, tampered with, or signed by a secret we no longer use.
+      return null;
+    }
+  }
+
   async verifyOtp(
     emailOrPhone: string,
     otp: string,

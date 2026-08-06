@@ -36,7 +36,10 @@ describe('WhatsAppService', () => {
     };
 
     const mockPrismaService = {
-      message: { create: jest.fn().mockResolvedValue({}) },
+      message: {
+        create: jest.fn().mockResolvedValue({}),
+        findFirst: jest.fn().mockResolvedValue(null),
+      },
       profile: {
         findUnique: jest.fn(),
         update: jest.fn().mockResolvedValue({}),
@@ -270,6 +273,222 @@ describe('WhatsAppService', () => {
       await service.verifyWhatsAppToken('valid-token');
 
       expect(twilioService.sendWhatsApp).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('isServiceWindowOpen', () => {
+    const inboundAt = (msAgo: number) => ({
+      created_at: new Date(Date.now() - msAgo),
+    });
+    const HOUR = 60 * 60 * 1000;
+
+    it('is closed when the profile has never messaged us', async () => {
+      (prisma.message.findFirst as jest.Mock).mockResolvedValue(null);
+
+      // The dominant real case: profiles sign up on the web and never message
+      // the bot, so free-form would be rejected on the very first admin message.
+      await expect(service.isServiceWindowOpen(PROFILE_ID)).resolves.toEqual({
+        open: false,
+        lastInboundAt: null,
+      });
+    });
+
+    it('is open just inside the window', async () => {
+      (prisma.message.findFirst as jest.Mock).mockResolvedValue(
+        inboundAt(23 * HOUR),
+      );
+
+      const result = await service.isServiceWindowOpen(PROFILE_ID);
+
+      expect(result.open).toBe(true);
+      expect(result.lastInboundAt).toBeInstanceOf(Date);
+    });
+
+    it('is closed inside the safety margin, before the 24h mark', async () => {
+      // 23h58m — technically still inside WhatsApp's window, but close enough
+      // that clock skew and dispatch latency could push the send past it.
+      (prisma.message.findFirst as jest.Mock).mockResolvedValue(
+        inboundAt(23 * HOUR + 58 * 60 * 1000),
+      );
+
+      const result = await service.isServiceWindowOpen(PROFILE_ID);
+
+      expect(result.open).toBe(false);
+    });
+
+    it('is closed well past the window', async () => {
+      (prisma.message.findFirst as jest.Mock).mockResolvedValue(
+        inboundAt(25 * HOUR),
+      );
+
+      const result = await service.isServiceWindowOpen(PROFILE_ID);
+
+      expect(result.open).toBe(false);
+    });
+
+    it('only counts INBOUND WhatsApp messages', async () => {
+      await service.isServiceWindowOpen(PROFILE_ID);
+
+      // An admin email is written into this same table; reading one as evidence
+      // of an open WhatsApp session would be exactly wrong.
+      expect(prisma.message.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            profile_id: PROFILE_ID,
+            direction: MessageDirection.INBOUND,
+            platform: BotPlatform.WHATSAPP,
+          },
+          orderBy: { created_at: 'desc' },
+          select: { created_at: true },
+        }),
+      );
+    });
+  });
+
+  describe('sendAdminMessage', () => {
+    const HOUR = 60 * 60 * 1000;
+    const openWindow = () =>
+      (prisma.message.findFirst as jest.Mock).mockResolvedValue({
+        created_at: new Date(Date.now() - HOUR),
+      });
+    const closedWindow = () =>
+      (prisma.message.findFirst as jest.Mock).mockResolvedValue(null);
+
+    const base = {
+      phone: PHONE,
+      profileId: PROFILE_ID,
+      adminName: 'Fariol Blondeau',
+      adminUserId: 'admin-uuid-1',
+    };
+
+    it('sends free-form and keeps line breaks while the window is open', async () => {
+      openWindow();
+
+      const result = await service.sendAdminMessage({
+        ...base,
+        message: 'Bonjour,\n\nVotre compte est actif.',
+      });
+
+      expect(result).toEqual({ mode: 'FREE_FORM', sent: true });
+      expect(twilioService.sendWhatsAppTemplate).not.toHaveBeenCalled();
+
+      const [, body] = (twilioService.sendWhatsApp as jest.Mock).mock.calls[0];
+      expect(body).toContain('Bonjour,\n\nVotre compte est actif.');
+      expect(body).toContain('_Fariol Blondeau — L’équipe Rabotka_');
+    });
+
+    it('sends the approved template, flattened, once the window has closed', async () => {
+      closedWindow();
+
+      const result = await service.sendAdminMessage({
+        ...base,
+        message: 'Bonjour,\n\nVotre compte est actif.',
+      });
+
+      expect(result).toEqual({ mode: 'TEMPLATE', sent: true });
+      expect(twilioService.sendWhatsApp).not.toHaveBeenCalled();
+
+      const [, contentSid, variables] = (
+        twilioService.sendWhatsAppTemplate as jest.Mock
+      ).mock.calls[0];
+      expect(contentSid).toBeTruthy();
+      // Meta rejects newlines inside a variable.
+      expect(variables['1']).toBe('Bonjour, · Votre compte est actif.');
+      expect(variables['2']).toBe('Fariol Blondeau');
+    });
+
+    it('persists the delivered body with the sending admin, exactly once', async () => {
+      closedWindow();
+
+      await service.sendAdminMessage({ ...base, message: 'Compte actif.' });
+
+      expect(prisma.message.create).toHaveBeenCalledTimes(1);
+      expect(prisma.message.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          profile_id: PROFILE_ID,
+          direction: MessageDirection.OUTBOUND,
+          platform: BotPlatform.WHATSAPP,
+          sent_by_id: 'admin-uuid-1',
+          // What the profile actually received, not a "[TPL:…]" marker.
+          body: expect.stringContaining('Compte actif.'),
+        }),
+      });
+    });
+
+    it('reports a Twilio failure instead of swallowing it, and persists nothing', async () => {
+      closedWindow();
+      (twilioService.sendWhatsAppTemplate as jest.Mock).mockRejectedValue(
+        new Error('[Twilio 63016] outside the 24h window — message failed'),
+      );
+
+      const result = await service.sendAdminMessage({
+        ...base,
+        message: 'Compte actif.',
+      });
+
+      expect(result.sent).toBe(false);
+      expect(result.mode).toBe('TEMPLATE');
+      expect(result.error).toContain('63016');
+      // A bubble in the thread for a message that never arrived would be the
+      // same lie as the endpoint returning success.
+      expect(prisma.message.create).not.toHaveBeenCalled();
+    });
+
+    it('reports failure when Twilio is unconfigured and returns no sid', async () => {
+      openWindow();
+      (twilioService.sendWhatsApp as jest.Mock).mockResolvedValue(null);
+
+      const result = await service.sendAdminMessage({
+        ...base,
+        message: 'Compte actif.',
+      });
+
+      expect(result.sent).toBe(false);
+      expect(prisma.message.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects an over-length template message before calling Twilio', async () => {
+      closedWindow();
+
+      await expect(
+        service.sendAdminMessage({ ...base, message: 'x'.repeat(701) }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      expect(twilioService.sendWhatsAppTemplate).not.toHaveBeenCalled();
+    });
+
+    it('does not apply the template limit while the window is open', async () => {
+      openWindow();
+
+      const result = await service.sendAdminMessage({
+        ...base,
+        message: 'x'.repeat(701),
+      });
+
+      expect(result).toEqual({ mode: 'FREE_FORM', sent: true });
+    });
+
+    it('rejects a message that is only whitespace', async () => {
+      closedWindow();
+
+      await expect(
+        service.sendAdminMessage({ ...base, message: '  \n\n \t ' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('falls back to a signature rather than sending an empty variable', async () => {
+      closedWindow();
+
+      await service.sendAdminMessage({
+        ...base,
+        adminName: '   ',
+        message: 'Compte actif.',
+      });
+
+      const [, , variables] = (twilioService.sendWhatsAppTemplate as jest.Mock)
+        .mock.calls[0];
+      // Meta rejects an empty ContentVariables value outright.
+      expect(variables['2']).toBe('Le support');
     });
   });
 });
