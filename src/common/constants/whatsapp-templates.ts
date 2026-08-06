@@ -560,6 +560,34 @@ export const WHATSAPP_TEMPLATES = {
     ]
   >,
 
+  /**
+   * Generic passthrough for admin-authored messages from the back office.
+   *
+   * The only template here that carries arbitrary text rather than a fixed
+   * notification. Used when the profile's 24h customer-service window has closed
+   * (see `WhatsAppService.isServiceWindowOpen`); inside the window the same body
+   * goes out as free-form.
+   *
+   * `'1'` must arrive ALREADY FLATTENED — Meta rejects newlines, tabs and runs of
+   * 4+ spaces inside a variable. `flattenForTemplateVariable` in
+   * modules/whatsapp/templates/admin-message.ts does that, and
+   * `formatAdminMessage` there renders the body this template must match.
+   *
+   * No `urlSuffixVar`: the template has no CTA button.
+   */
+  adminMessage: {
+    // v2. The v1 body (HXad7c4b31e5a934ffbe4da891c9c6b161) was rejected by Meta
+    // with subCode 2388293 — it wrapped its two variables in only ~27 characters
+    // of static text. Do not point the env override at it; it was never
+    // approved and every send through it would fail.
+    contentSid: sid('TPL_ADMIN_MESSAGE', 'HX19ecc295fd0ad9070740b2db85154c95'),
+    variables: (p: { message: string; adminName: string }) => ({
+      '1': p.message,
+      '2': p.adminName,
+    }),
+  } satisfies WhatsAppTemplate<
+    [params: { message: string; adminName: string }]
+  >,
 } as const;
 
 export type WhatsAppTemplateName = keyof typeof WHATSAPP_TEMPLATES;

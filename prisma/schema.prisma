@@ -929,6 +929,9 @@ model Message {
 
   @@index([profile_id], name: "idx_message_profile")
   @@index([created_at], name: "idx_message_created_at")
+  // Serves the 24h WhatsApp service-window lookup (newest INBOUND per profile),
+  // which runs on every admin send and every composer render.
+  @@index([profile_id, direction, created_at(sort: Desc)], name: "idx_message_profile_direction_created")
   @@map("messages")
 }
 
