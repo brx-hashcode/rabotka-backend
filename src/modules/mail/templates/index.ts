@@ -1,5 +1,5 @@
 export { escapeHtml, wrapEmailHtml, type EmailLayoutOptions, type FooterInfo } from './layout';
-export { sendWelcomeEmail } from './welcome';
+export { sendWelcomeEmail, WELCOME_EMAIL_PREVIEW } from './welcome';
 export { sendOtpEmail } from './otp';
 export { adminCreatedEmail } from './admin-created';
 export { adminUpdatedEmail } from './admin-updated';

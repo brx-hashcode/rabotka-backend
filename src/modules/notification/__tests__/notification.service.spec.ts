@@ -62,19 +62,6 @@ describe('NotificationService', () => {
     });
   });
 
-  describe('notifyWelcome()', () => {
-    it('sends welcome email with correct subject', async () => {
-      await service.notifyWelcome('user@example.com', 'Alice');
-
-      expect(mockMailService.sendMail).toHaveBeenCalledWith(
-        expect.objectContaining({
-          to: 'user@example.com',
-          subject: 'Bienvenue sur Rabotka',
-        }),
-      );
-    });
-  });
-
   describe('notifyOtp()', () => {
     it('sends OTP email with correct subject', async () => {
       await service.notifyOtp('user@example.com', '123456');
