@@ -33,7 +33,8 @@ import {
 } from './profile.service';
 import { CreateProfileDto } from './dto/create-profile.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
-import { sendWelcomeEmail } from '../mail/templates';
+import { sendWelcomeEmail, WELCOME_EMAIL_PREVIEW } from '../mail/templates';
+import { setAuthCookie } from '../auth/auth-cookie.util';
 import { MailService } from '../mail/mail.service';
 import { LayoutService } from '../mail/layout.service';
 import { ProfileAuthGuard } from '../auth/guards/profile-auth.guard';
@@ -124,7 +125,11 @@ export class ProfileController {
       to: createProfileDto.email,
       subject: 'Bienvenue sur Rabotka',
       html: await this.layoutService.wrap(
-        sendWelcomeEmail(createProfileDto.firstName),
+        sendWelcomeEmail(createProfileDto.firstName, {
+          appUrl: this.frontendUrl(),
+          creditedBalance: result.creditedBalance,
+        }),
+        { previewText: WELCOME_EMAIL_PREVIEW },
       ),
     });
 
@@ -152,26 +157,25 @@ export class ProfileController {
         ),
       );
 
-    // Sign a JWT and set the auth cookie so the user is logged in immediately
-    const cookieName = this.configService.get<string>('AUTH_COOKIE_NAME');
-    if (cookieName) {
-      const payload = {
-        sub: result.profileId,
-        type: 'profile',
-        jti: randomUUID(),
-      };
-      const token = this.jwtService.sign(payload);
-      const isProduction = this.configService.get('NODE_ENV') === 'production';
-      res.cookie(cookieName, token, {
-        httpOnly: true,
-        secure: isProduction,
-        sameSite: isProduction ? 'none' : 'lax',
-        maxAge: 24 * 60 * 60 * 1000,
-        path: '/',
-      });
-    }
+    // Sign a JWT and set the auth cookie so the user is logged in immediately.
+    // Through `setAuthCookie` rather than an inline `res.cookie`: it is the one
+    // definition of the session cookie, and hand-rolling it here had quietly
+    // given everyone who signed up a 24h session while every other login path
+    // issued 30 days.
+    const payload = {
+      sub: result.profileId,
+      type: 'profile',
+      jti: randomUUID(),
+    };
+    setAuthCookie(res, this.configService, this.jwtService.sign(payload));
 
     return { message: result.message, creditedBalance: result.creditedBalance };
+  }
+
+  private frontendUrl(): string {
+    return (
+      this.configService.get<string>('FRONTEND_URL') ?? 'http://localhost:3000'
+    ).replace(/\/+$/, '');
   }
 
   @Get('me')
