@@ -105,6 +105,35 @@ describe('ProfileController', () => {
       expect(result.message).toBe('Profil créé avec succès');
     });
 
+    it('gives the new session the same lifetime as every other login', async () => {
+      // Signup used to hand-roll `res.cookie` with a 24h maxAge while every
+      // other path went through `setAuthCookie` and issued 30 days — so people
+      // who had just signed up were logged out 29 days early.
+      const res = mockRes();
+      await controller.createProfile(dto as any, res);
+
+      expect(res.cookie).toHaveBeenCalledWith(
+        'access_token',
+        expect.any(String),
+        expect.objectContaining({
+          httpOnly: true,
+          path: '/',
+          maxAge: 30 * 24 * 60 * 60 * 1000,
+        }),
+      );
+    });
+
+    it('tells the welcome email about the credit that was just granted', async () => {
+      // The email is the message titled "Bienvenue" and never mentioned it.
+      await controller.createProfile(dto as any, mockRes());
+
+      expect(mailService.sendMail).toHaveBeenCalledWith(
+        expect.objectContaining({
+          html: expect.stringContaining((1000).toLocaleString('fr-FR')),
+        }),
+      );
+    });
+
     it('sends the profile_created WhatsApp template with the first name', async () => {
       await controller.createProfile(dto as any, mockRes());
       expect(whatsApp.sendTemplateMessage).toHaveBeenCalledWith(

@@ -5,7 +5,6 @@ import {
   adminCreatedEmail,
   adminUpdatedEmail,
   sendOtpEmail,
-  sendWelcomeEmail,
   claimCreatedEmail,
   claimInProgressEmail,
   claimCompletedEmail,
@@ -51,14 +50,6 @@ export class NotificationService {
       html: await this.layout.wrap(adminUpdatedEmail(name), {
         previewText: 'Les informations de votre compte ont été mises à jour.',
       }),
-    });
-  }
-
-  async notifyWelcome(to: string, name: string): Promise<void> {
-    await this.mail.sendMail({
-      to,
-      subject: 'Bienvenue sur Rabotka',
-      html: await this.layout.wrap(sendWelcomeEmail(name)),
     });
   }
 
