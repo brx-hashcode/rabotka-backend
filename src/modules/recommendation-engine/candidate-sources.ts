@@ -8,7 +8,9 @@ import {
   VerificationStatus,
 } from '@prisma/client';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
+import { QdrantService } from '../qdrant/qdrant.service';
 import type { UserFeatures } from './user-feature.service';
+import { spreadSimilarity } from './scoring';
 
 /** Candidate pool multiplier — over-fetch so filtering still yields topN. */
 const POOL_FACTOR = 4;
@@ -152,7 +154,92 @@ const toCandidate = (r: CandidateRow): Candidate => ({
 export class CandidateSourceService {
   private readonly logger = new Logger(CandidateSourceService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly qdrant: QdrantService,
+  ) {}
+
+  /**
+   * Calibrated 0–1 semantic similarity between the asking user and each
+   * candidate, keyed by candidate id.
+   *
+   * This is what makes a worker's portfolio count: their realizations are part
+   * of the text `MatchingService.buildWorkerText` embeds, so a plumber whose
+   * realizations describe pipework sits closer to a plumbing job in vector
+   * space. The v2 ranker had this term hardcoded to null, so none of that
+   * reached the score.
+   *
+   * Uses `searchDenseWithFilter`, NOT `searchHybrid`. The latter returns an RRF
+   * fusion score (max ≈0.033) that means nothing on an absolute scale — see the
+   * `QdrantHit` docblock. `sim` feeds a weighted mean of terms that all mean the
+   * same thing on [0,1], so it must be the calibrated cosine. Putting an RRF
+   * score here would recreate exactly the miscalibration the v2 rewrite removed.
+   *
+   * The asking user's vector is READ from the index rather than re-embedded at
+   * query time: it is the same vector indexing produced, portfolio included, and
+   * it costs a retrieve instead of an embedding.
+   *
+   * Returns an EMPTY MAP on any failure, like `employerQuality` and
+   * `lastActiveAt`. A missing entry becomes `sim: null`, which
+   * `computeRelevance` drops while redistributing its weight — so Qdrant being
+   * down degrades the ranking instead of emptying the feed.
+   */
+  async similarity(
+    queryCollection: string,
+    queryId: string,
+    candidateCollection: string,
+    candidateIds: string[],
+  ): Promise<Map<string, number>> {
+    const out = new Map<string, number>();
+    if (candidateIds.length === 0) return out;
+
+    try {
+      const vector = await this.queryVector(queryCollection, queryId);
+      // No vector means the asker was never indexed. No evidence, not zero
+      // evidence — leaving the map empty is what expresses that.
+      if (!vector) return out;
+
+      const hits = await this.qdrant.searchDenseWithFilter(
+        candidateCollection,
+        vector,
+        // `has_id` must be nested under `must` — Qdrant rejects it as a
+        // top-level field ("unknown field `has_id`, expected one of `should`,
+        // `min_should`, `must`, `must_not`"). It fails as a 400, which
+        // `similarity()` catches, so getting this wrong yields an empty map and
+        // a permanently dead `sim` term rather than a visible error.
+        { must: [{ has_id: candidateIds }] },
+        candidateIds.length,
+      );
+      for (const hit of hits) {
+        // Stretched across [0,1]: the raw calibrated band for real text
+        // embeddings is roughly [0.80, 0.87], which would make `sim` a near
+        // constant carrying a third of the weight. See SIMILARITY_FLOOR.
+        out.set(String(hit.id), spreadSimilarity(hit.score));
+      }
+    } catch (err) {
+      this.logger.warn('similarity failed', err);
+    }
+    return out;
+  }
+
+  /** The stored dense vector for a point, or null. Mirrors interest-signal. */
+  private async queryVector(
+    collection: string,
+    id: string,
+  ): Promise<number[] | null> {
+    const points = await this.qdrant.getClient().retrieve(collection, {
+      ids: [id],
+      with_vector: ['dense'],
+      with_payload: false,
+    });
+    const raw = points[0] as unknown as
+      | { vector?: { dense?: unknown } }
+      | undefined;
+    const dense = raw?.vector?.dense;
+    return Array.isArray(dense) && dense.length > 0
+      ? (dense as number[])
+      : null;
+  }
 
   /**
    * Pure-SQL personalized candidates — the tier that matters most.
