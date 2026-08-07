@@ -15,7 +15,9 @@ const mockWhatsApp = {
 
 const mockLoginLink = {
   // Default: no login code attached, so existing expectations stay exact.
-  appendTo: jest.fn().mockImplementation((_id: string, target: string) => target),
+  appendTo: jest
+    .fn()
+    .mockImplementation((_id: string, target: string) => target),
   mint: jest.fn().mockResolvedValue('CODE123'),
   shortLink: jest.fn().mockResolvedValue(null),
 };
@@ -429,9 +431,37 @@ describe('WhatsAppOutboundProcessor', () => {
       expect(mockLoginLink.appendTo).not.toHaveBeenCalled();
     });
 
+    it('substitutes a code for a profile still awaiting KYC review', async () => {
+      // The case that mattered and was never covered. The KYC-pending card goes
+      // ONLY to PENDING_ACTIVATION profiles, and `mint()` used to refuse those
+      // outright — so this template took the bail-out branch below 100% of the
+      // time and its button shipped the literal `/s/profile`.
+      mockLoginLink.mint.mockResolvedValueOnce('MINTEDCODE1234567890');
+
+      await processor.process({
+        data: {
+          type: 'template',
+          phone: '+242001',
+          contentSid: shortlinkTpl,
+          contentVariables: { '1': 'profile' },
+          profileId: 'p1',
+        },
+      });
+
+      expect(mockLoginLink.mint).toHaveBeenCalledWith('p1', 'profile');
+      expect(mockWhatsApp.sendTemplateMessage).toHaveBeenCalledWith(
+        '+242001',
+        shortlinkTpl,
+        { '1': 'MINTEDCODE1234567890' },
+      );
+    });
+
     it('leaves the destination alone when no code could be minted', async () => {
-      // Sending `/s/profile` would be a dead link; the untouched template
-      // at least reaches the login fallback.
+      // Only reachable now for a profile genuinely refused a session — a
+      // suspended account, or Redis being down. The button then renders
+      // `/s/profile`, which fails CODE_PATTERN and falls through to the login
+      // screen. Not good, but the honest outcome when we cannot sign a link:
+      // fabricating one would hand a suspended account a session.
       mockLoginLink.mint.mockResolvedValueOnce(null);
 
       await processor.process({
