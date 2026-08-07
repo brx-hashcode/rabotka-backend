@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import Redis from 'ioredis';
+import { interactionEventCounter } from '../../common/telemetry/metrics';
 import {
   InteractionActor,
   InteractionKind,
@@ -109,7 +110,12 @@ export class InteractionEventService {
 
   async record(input: RecordEventInput): Promise<void> {
     try {
-      if (await this.isDuplicate(input)) return;
+      if (await this.isDuplicate(input)) {
+        // A healthy outcome for the passive kinds, counted separately so a
+        // suppressed duplicate is never mistaken for a lost signal.
+        interactionEventCounter.inc({ kind: input.kind, outcome: 'deduped' });
+        return;
+      }
 
       await this.prisma.interactionEvent.create({
         data: {
@@ -131,12 +137,65 @@ export class InteractionEventService {
           ...(input.occurredAt ? { occurred_at: input.occurredAt } : {}),
         },
       });
+      interactionEventCounter.inc({ kind: input.kind, outcome: 'recorded' });
     } catch (err) {
+      interactionEventCounter.inc({ kind: input.kind, outcome: 'failed' });
       this.logger.warn(
         `Failed to record ${input.kind} for actor=${input.actorId}`,
         err,
       );
     }
+  }
+
+  /**
+   * Records what one ranked response actually showed, in order.
+   *
+   * Nothing wrote IMPRESSION_BATCH before this existed, with two consequences.
+   * Seen-suppression was a permanent no-op — `CandidateSourceService.lastSeenAt`
+   * queries [VIEW, IMPRESSION_BATCH] and both had zero rows — so a feed kept
+   * resurfacing the same top items on every refresh, exactly what its own
+   * comment warned about. And with `request_id`/`position` never populated,
+   * click-through and position bias were not computable at all.
+   *
+   * Goes through `recordMany`, never `record`: the dedupe window keys on
+   * actor:kind:object and ignores `requestId`, so a scroll-back inside 60s
+   * would silently drop rows and corrupt the position data.
+   *
+   * `offset` exists for paginated surfaces — without it every page restarts at
+   * position 0 and position-bias analysis is meaningless.
+   */
+  async recordImpressions(params: {
+    actorId: string;
+    actorType: InteractionActor;
+    objectType: InteractionObject;
+    items: {
+      objectId: string;
+      categoryId?: string | null;
+      counterpartyId?: string | null;
+    }[];
+    surface: string;
+    requestId?: string;
+    offset?: number;
+  }): Promise<number> {
+    const { actorId, actorType, objectType, items, surface, requestId } =
+      params;
+    if (items.length === 0) return 0;
+
+    return this.recordMany(
+      items.map((it, i) => ({
+        actorId,
+        actorType,
+        kind: InteractionKind.IMPRESSION_BATCH,
+        objectType,
+        objectId: it.objectId,
+        categoryId: it.categoryId,
+        counterpartyId: it.counterpartyId,
+        source: InteractionSource.SERVER,
+        surface,
+        requestId,
+        position: (params.offset ?? 0) + i,
+      })),
+    );
   }
 
   /**
@@ -166,8 +225,14 @@ export class InteractionEventService {
           ...(input.occurredAt ? { occurred_at: input.occurredAt } : {}),
         })),
       });
+      for (const input of inputs) {
+        interactionEventCounter.inc({ kind: input.kind, outcome: 'recorded' });
+      }
       return result.count;
     } catch (err) {
+      for (const input of inputs) {
+        interactionEventCounter.inc({ kind: input.kind, outcome: 'failed' });
+      }
       this.logger.warn(`Failed to record ${inputs.length} events`, err);
       return 0;
     }

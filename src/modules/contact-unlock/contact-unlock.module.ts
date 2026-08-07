@@ -7,6 +7,7 @@ import { InvoiceModule } from '../invoice/invoice.module';
 import { ContactUnlockService } from './contact-unlock.service';
 import { ContactUnlockScheduler } from './contact-unlock.scheduler';
 import { MatchingModule } from '../matching/matching.module';
+import { RecommendationEngineModule } from '../recommendation-engine/recommendation-engine.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { MatchingModule } from '../matching/matching.module';
     forwardRef(() => BotModule),
     InvoiceModule,
     MatchingModule,
+    RecommendationEngineModule,
   ],
   providers: [ContactUnlockService, ContactUnlockScheduler],
   exports: [ContactUnlockService],
