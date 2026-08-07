@@ -35,6 +35,9 @@ const baseDto = {
   payment_flow: PaymentFlow.DAILY,
   address: '123 Avenue de la Paix, Poto-Poto',
   quantity: 2,
+  // Optional on the DTO, but declared here so the type-narrowing tests below
+  // can override it without casting through `unknown`.
+  employment_type: undefined as EmploymentType | undefined,
 };
 
 const mockOffer = {
