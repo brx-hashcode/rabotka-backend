@@ -106,6 +106,8 @@ describe('ContactUnlockService', () => {
   let walletService: ReturnType<typeof makeWalletService>;
   let invoiceService: ReturnType<typeof makeInvoiceService>;
   let matchingService: ReturnType<typeof makeMatchingService>;
+  let botNotification: { sendContactUnlockedNotification: jest.Mock };
+  let interactionEvents: { record: jest.Mock; recordMany: jest.Mock };
   let systemConfig: ReturnType<typeof makeSystemConfig>;
 
   beforeEach(() => {
@@ -115,12 +117,16 @@ describe('ContactUnlockService', () => {
     invoiceService = makeInvoiceService();
     matchingService = makeMatchingService();
     systemConfig = makeSystemConfig();
+    botNotification = { sendContactUnlockedNotification: jest.fn() };
+    interactionEvents = { record: jest.fn(), recordMany: jest.fn() };
     service = new ContactUnlockService(
       prisma as any,
       systemConfig as any,
       walletService as any,
       invoiceService as any,
       matchingService as any,
+      botNotification as any,
+      interactionEvents as any,
     );
   });
 
@@ -365,6 +371,55 @@ describe('ContactUnlockService', () => {
       const result = await service.payUnlock('attempt-1', 'emp-1', false);
       expect(result.status).toBe(ContactUnlockStatus.UNLOCKED);
       expect(result.newlyUnlocked).toContain('attempt-1');
+    });
+
+    it('records the unlock for BOTH parties — the strongest intent signal', async () => {
+      prisma.contactUnlockAttempt.findUnique.mockResolvedValue(
+        makeAttempt({
+          worker_paid: true,
+          status: ContactUnlockStatus.PENDING_EMPLOYER,
+        }),
+      );
+      prisma.profile.findUnique.mockResolvedValue({
+        billing_status: BillingStatus.CLEAR,
+      });
+      prisma.jobOffer.findUnique.mockResolvedValue({
+        quantity: 1,
+        employer_unlock_paid: false,
+      });
+      prisma.contactUnlockAttempt.updateMany.mockResolvedValue({ count: 1 });
+      prisma.contactUnlockAttempt.findUniqueOrThrow.mockResolvedValue(
+        makeAttempt({
+          employer_paid: true,
+          worker_paid: true,
+          status: ContactUnlockStatus.UNLOCKED,
+        }),
+      );
+      prisma.application.findMany.mockResolvedValue([
+        { worker_id: 'worker-1' },
+      ]);
+      prisma.application.updateMany.mockResolvedValue({ count: 1 });
+
+      await service.payUnlock('attempt-1', 'emp-1', false);
+
+      // Until this existed, only the recommendation flow emitted CONTACT_PAID.
+      // The application-based unlock — used by the web app AND the WhatsApp bot
+      // — recorded nothing, so the interest graph saw one of two purchase paths.
+      // Both directions, as job completion already does: the employer learns
+      // about this worker, the worker learns about this kind of job.
+      const kinds = interactionEvents.record.mock.calls.map(
+        (c: [{ kind: string; actorType: string }]) => [
+          c[0].actorType,
+          c[0].kind,
+        ],
+      );
+
+      expect(kinds).toEqual(
+        expect.arrayContaining([
+          ['EMPLOYER', 'CONTACT_PAID'],
+          ['WORKER', 'CONTACT_PAID'],
+        ]),
+      );
     });
 
     it('throws when concurrent payment guard fails (count=0)', async () => {

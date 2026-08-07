@@ -13,6 +13,10 @@ import {
   BillingStatus,
   ContactUnlockAttempt,
   ContactUnlockStatus,
+  InteractionActor,
+  InteractionKind,
+  InteractionObject,
+  InteractionSource,
   InvoiceReason,
   JobOfferStatus,
   PaymentMethod,
@@ -30,6 +34,7 @@ import { WalletService } from '../wallet/wallet.service';
 import { InvoiceService } from '../invoice/invoice.service';
 import { MatchingService } from '../matching/matching.service';
 import { BotNotificationService } from '../bot/services/bot-notification.service';
+import { InteractionEventService } from '../recommendation-engine/interaction-event.service';
 import { generatePaymentReference } from '../../common/utils/payment-reference';
 import { randomUUID } from 'node:crypto';
 
@@ -52,6 +57,13 @@ export type PayUnlockResult = {
   newlyUnlocked: string[];
 };
 
+/** The three ids an unlock signal needs — far less than a full attempt row. */
+type UnlockParties = {
+  employer_id: string;
+  worker_id: string;
+  job_offer_id: string;
+};
+
 @Injectable()
 export class ContactUnlockService {
   private readonly logger = new Logger(ContactUnlockService.name);
@@ -65,6 +77,7 @@ export class ContactUnlockService {
     private readonly matchingService: MatchingService,
     @Inject(forwardRef(() => BotNotificationService))
     private readonly botNotification: BotNotificationService,
+    private readonly interactionEvents: InteractionEventService,
   ) {}
 
   private notifyRejectedApplicants(applicationIds: string[]): void {
@@ -230,6 +243,7 @@ export class ContactUnlockService {
     });
     if (newStatus === ContactUnlockStatus.UNLOCKED) {
       await this.markApplicationAcceptedAfterUnlock([updated.application_id]);
+      this.recordUnlockSignal(updated);
     }
 
     return {
@@ -238,6 +252,71 @@ export class ContactUnlockService {
       newlyUnlocked:
         newStatus === ContactUnlockStatus.UNLOCKED ? [attemptId] : [],
     };
+  }
+
+  /**
+   * Paying to reach someone is the strongest intent signal in the product, and
+   * until now this flow — the application-based unlock used by both the web app
+   * and the WhatsApp bot — recorded none of it. Only the recommendation flow
+   * (`recommendation-contact.service.ts`) ever emitted CONTACT_PAID, so the
+   * interest graph saw one of two purchase paths.
+   *
+   * Recorded here rather than at the wallet debit in `payUnlock`: that debit can
+   * still be rolled back and refunded further down, and a paid event for a
+   * refunded transaction is worse than a missing one.
+   *
+   * Both directions, as `application.service.ts` already does for COMPLETE — the
+   * employer learns about this worker, the worker learns about this kind of job.
+   */
+  /** Batched variant, for the multi-person path where one payment unlocks N. */
+  private recordUnlockSignals(attempts: UnlockParties[]): void {
+    if (attempts.length === 0) return;
+    const rows = attempts.flatMap((a) => [
+      {
+        actorId: a.employer_id,
+        actorType: InteractionActor.EMPLOYER,
+        kind: InteractionKind.CONTACT_PAID,
+        objectType: InteractionObject.WORKER_PROFILE,
+        objectId: a.worker_id,
+        counterpartyId: a.job_offer_id,
+        source: InteractionSource.SERVER,
+        surface: 'contact_unlock',
+      },
+      {
+        actorId: a.worker_id,
+        actorType: InteractionActor.WORKER,
+        kind: InteractionKind.CONTACT_PAID,
+        objectType: InteractionObject.JOB_OFFER,
+        objectId: a.job_offer_id,
+        counterpartyId: a.employer_id,
+        source: InteractionSource.SERVER,
+        surface: 'contact_unlock',
+      },
+    ]);
+    void this.interactionEvents.recordMany(rows);
+  }
+
+  private recordUnlockSignal(attempt: UnlockParties): void {
+    void this.interactionEvents.record({
+      actorId: attempt.employer_id,
+      actorType: InteractionActor.EMPLOYER,
+      kind: InteractionKind.CONTACT_PAID,
+      objectType: InteractionObject.WORKER_PROFILE,
+      objectId: attempt.worker_id,
+      counterpartyId: attempt.job_offer_id,
+      source: InteractionSource.SERVER,
+      surface: 'contact_unlock',
+    });
+    void this.interactionEvents.record({
+      actorId: attempt.worker_id,
+      actorType: InteractionActor.WORKER,
+      kind: InteractionKind.CONTACT_PAID,
+      objectType: InteractionObject.JOB_OFFER,
+      objectId: attempt.job_offer_id,
+      counterpartyId: attempt.employer_id,
+      source: InteractionSource.SERVER,
+      surface: 'contact_unlock',
+    });
   }
 
   /**
@@ -655,6 +734,11 @@ export class ContactUnlockService {
     const newlyUnlocked: string[] = [];
     const unlockedApplicationIds: string[] = [];
 
+    // One employer payment can unlock N attempts here, so the signal has to be
+    // batched: recording once would lose N-1 unlocks. `recordMany` also skips
+    // the per-kind Redis dedupe, which is what a batch wants.
+    const unlockedAttempts: UnlockParties[] = [];
+
     for (const a of pendingAttempts) {
       const willUnlock = a.worker_paid;
       await this.prisma.contactUnlockAttempt.update({
@@ -668,8 +752,11 @@ export class ContactUnlockService {
           ...(willUnlock ? { unlocked_at: now } : {}),
         },
       });
-      if (willUnlock) newlyUnlocked.push(a.id);
-      if (willUnlock) unlockedApplicationIds.push(a.application_id);
+      if (willUnlock) {
+        newlyUnlocked.push(a.id);
+        unlockedApplicationIds.push(a.application_id);
+        unlockedAttempts.push(a);
+      }
     }
 
     // Also update PENDING_WORKER attempts for this job that didn't need employer pay
@@ -688,15 +775,24 @@ export class ContactUnlockService {
     if (triggerAttempt.worker_paid) {
       const trigger = await this.prisma.contactUnlockAttempt.findUnique({
         where: { id: triggerAttempt.id },
-        select: { application_id: true },
+        select: {
+          application_id: true,
+          employer_id: true,
+          worker_id: true,
+          job_offer_id: true,
+        },
       });
       if (trigger?.application_id)
         unlockedApplicationIds.push(trigger.application_id);
+      // The trigger attempt is a narrow select, so its party ids come from the
+      // lookup that is already happening rather than a second round-trip.
+      if (trigger) unlockedAttempts.push(trigger);
     }
 
     await this.markApplicationAcceptedAfterUnlock([
       ...new Set(unlockedApplicationIds),
     ]);
+    this.recordUnlockSignals(unlockedAttempts);
 
     return {
       attemptId: triggerAttempt.id,
@@ -853,7 +949,7 @@ export class ContactUnlockService {
         `La mise en relation pour "${attempt.job_offer.title}" a été annulée.`,
         ...refundLines,
         '',
-        "",
+        '',
       ].join('\n'),
       otherPartyMessage: [
         '*Demande de paiement annulée*',
@@ -861,7 +957,7 @@ export class ContactUnlockService {
         `${currentName} a rejeté la mise en relation pour "${attempt.job_offer.title}".`,
         ...refundLines,
         '',
-        "",
+        '',
       ].join('\n'),
       otherPhone,
     };

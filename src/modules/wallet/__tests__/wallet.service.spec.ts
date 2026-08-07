@@ -1,7 +1,7 @@
 import { AdminCacheService } from '../../../common/services/cache/admin-cache.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException, BadRequestException } from '@nestjs/common';
-import { WalletService } from '../wallet.service';
+import { REVENUE_PAYMENT_TYPES, WalletService } from '../wallet.service';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { SystemConfigService } from '../../system-config/system-config.service';
 import { InvoiceService } from '../../invoice/invoice.service';
@@ -257,6 +257,43 @@ describe('WalletService', () => {
 
       expect(result.totalRevenue).toBeDefined();
       expect(result.balance).toBeDefined();
+    });
+  });
+
+  describe('what counts as revenue', () => {
+    it('sums only the types Rabotka actually earns', async () => {
+      // Revenue used to be "every COMPLETED payment". Job completion recorded
+      // the worker's whole wage as a Payment, so a 45 000 FCFA job read as
+      // 45 000 FCFA of platform revenue. That row is gone, but naming the types
+      // is what stops the next non-revenue row doing it again silently.
+      (prisma.wallet.findFirst as jest.Mock).mockResolvedValue(
+        mockSystemWallet,
+      );
+      (prisma.payment.aggregate as jest.Mock).mockResolvedValue({
+        _sum: { amount: 0 },
+        _count: 0,
+      });
+      (prisma.payment.count as jest.Mock).mockResolvedValue(0);
+
+      await service.getSystemRevenue();
+
+      const totalCall = (prisma.payment.aggregate as jest.Mock).mock
+        .calls[0][0];
+      expect(totalCall.where.type.in).toEqual(
+        expect.arrayContaining([
+          PaymentType.CONTACT_UNLOCK,
+          PaymentType.PENALTY,
+          PaymentType.JOB_POSTING,
+          PaymentType.REGISTRATION,
+        ]),
+      );
+    });
+
+    it('excludes wallet top-ups, which are deposits and not earnings', () => {
+      // A top-up becomes revenue when it is spent on a fee, and that spend is
+      // already counted as CONTACT_UNLOCK or PENALTY. Counting both books the
+      // same franc twice.
+      expect(REVENUE_PAYMENT_TYPES).not.toContain(PaymentType.WALLET_TOP_UP);
     });
   });
 

@@ -12,6 +12,7 @@ import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { RedisIoAdapter } from './common/adapters/redis-io.adapter';
 import { CSRF_UTILITIES } from './modules/csrf/csrf.constants';
 import { csrfVisitorMiddleware } from './modules/csrf/csrf-visitor.middleware';
+import { requestIdMiddleware } from './common/middleware/request-id.middleware';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
@@ -68,6 +69,9 @@ async function bootstrap() {
     }),
   );
 
+  // Before everything that might record an interaction, so a ranked feed and
+  // the taps that follow it share one correlation id.
+  app.use(requestIdMiddleware);
   app.use(I18nMiddleware);
   app.use(cookieParser());
   app.use(csrfVisitorMiddleware);

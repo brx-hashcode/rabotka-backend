@@ -10,6 +10,7 @@ import { LogModule } from '../log/log.module';
 import { ContractModule } from '../contract/contract.module';
 import { SystemConfigModule } from '../system-config/system-config.module';
 import { MatchingModule } from '../matching/matching.module';
+import { WsNotificationsModule } from '../ws-notifications/ws-notifications.module';
 import { RecommendationEngineModule } from '../recommendation-engine/recommendation-engine.module';
 
 @Module({
@@ -24,6 +25,7 @@ import { RecommendationEngineModule } from '../recommendation-engine/recommendat
     SystemConfigModule,
     MatchingModule,
     RecommendationEngineModule,
+    forwardRef(() => WsNotificationsModule),
   ],
   controllers: [AdminApplicationController],
   providers: [ApplicationService],

@@ -180,6 +180,9 @@ export type JobOfferListItem = {
   /** Null for a remote job — render `is_remote` instead of an empty line. */
   address: string | null;
   is_remote: boolean;
+  /** Where the job actually is. An address alone hides the city and country. */
+  city: string | null;
+  country_name: string | null;
   note: string | null;
   quantity: number;
   acceptedCount: number;
@@ -1486,6 +1489,8 @@ export class JobOfferService {
       payment_flow: PaymentFlow | null;
       address: string | null;
       is_remote?: boolean;
+      city?: string | null;
+      country_name?: string | null;
       note: string | null;
       quantity: number;
       status: string;
@@ -1504,6 +1509,8 @@ export class JobOfferService {
       payment_flow: offer.payment_flow,
       address: offer.address,
       is_remote: offer.is_remote ?? false,
+      city: offer.city ?? null,
+      country_name: offer.country_name ?? null,
       note: offer.note,
       quantity: offer.quantity,
       acceptedCount,

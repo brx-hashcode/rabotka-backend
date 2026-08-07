@@ -14,6 +14,7 @@ import { ContractService } from '../../contract/contract.service';
 import { SystemConfigService } from '../../system-config/system-config.service';
 import { MatchingService } from '../../matching/matching.service';
 import { InteractionEventService } from '../../recommendation-engine/interaction-event.service';
+import { JobEventsGateway } from '../../ws-notifications/job-events.gateway';
 import { ApplicationStatus, JobOfferStatus, PaymentFlow } from '@prisma/client';
 
 const JOB_OFFER_ID = 'offer-uuid-1';
@@ -99,7 +100,14 @@ describe('ApplicationService (extended)', () => {
         count: jest.fn(),
       },
       payment: { create: jest.fn() },
-      assignment: { create: jest.fn(), updateMany: jest.fn(), findUnique: jest.fn().mockResolvedValue(null), findMany: jest.fn().mockResolvedValue([]) },
+      assignment: {
+        create: jest.fn(),
+        update: jest.fn(),
+        updateMany: jest.fn(),
+        findFirst: jest.fn().mockResolvedValue(null),
+        findUnique: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
       $executeRaw: jest.fn().mockResolvedValue(0),
       $transaction: jest.fn().mockImplementation((arg: unknown) => {
         if (typeof arg === 'function') {
@@ -156,6 +164,12 @@ describe('ApplicationService (extended)', () => {
           useValue: {
             indexWorkerProfile: jest.fn().mockResolvedValue(undefined),
           },
+        },
+        {
+          // Push that keeps the counterparty's screen in sync; irrelevant to
+          // these assertions, but the service depends on it.
+          provide: JobEventsGateway,
+          useValue: { emitJobChanged: jest.fn() },
         },
         {
           provide: InteractionEventService,
@@ -711,21 +725,21 @@ describe('ApplicationService (extended)', () => {
     });
   });
 
-  describe('markJobCompleted() error paths', () => {
+  describe('markCompletedByWorker() error paths', () => {
     it('throws NotFoundException when not found', async () => {
       (prisma.application.findUnique as jest.Mock).mockResolvedValue(null);
       await expect(
-        service.markJobCompleted(APPLICATION_ID, EMPLOYER_ID),
+        service.markCompletedByWorker(APPLICATION_ID, WORKER_ID),
       ).rejects.toThrow(NotFoundException);
     });
 
-    it('throws ForbiddenException when not employer', async () => {
+    it('throws ForbiddenException when not the worker on this mission', async () => {
       (prisma.application.findUnique as jest.Mock).mockResolvedValue({
         ...mockApplication,
         status: ApplicationStatus.ACCEPTED,
       });
       await expect(
-        service.markJobCompleted(APPLICATION_ID, 'other-employer'),
+        service.markCompletedByWorker(APPLICATION_ID, 'other-worker'),
       ).rejects.toThrow(ForbiddenException);
     });
 
@@ -734,25 +748,27 @@ describe('ApplicationService (extended)', () => {
         mockApplication, // status: PENDING
       );
       await expect(
-        service.markJobCompleted(APPLICATION_ID, EMPLOYER_ID),
+        service.markCompletedByWorker(APPLICATION_ID, WORKER_ID),
       ).rejects.toThrow(BadRequestException);
     });
 
-    it('throws BadRequestException when job already COMPLETED', async () => {
+    it('accepts a confirmation on an already-closed offer', async () => {
+      // Under the old model the employer settled the offer, so a second
+      // settlement was a BadRequest. Now each worker confirms only their own
+      // side and the offer closes on its own once the last of them is done —
+      // so a late confirmation is a no-op, not an error.
       (prisma.application.findUnique as jest.Mock).mockResolvedValue({
         ...mockApplication,
         status: ApplicationStatus.ACCEPTED,
-        job_offer: {
-          ...mockJobOffer,
-          status: JobOfferStatus.COMPLETED,
-        },
+        job_offer: { ...mockJobOffer, status: JobOfferStatus.COMPLETED },
       });
       (prisma.jobOffer.findUnique as jest.Mock).mockResolvedValue({
         status: JobOfferStatus.COMPLETED,
       });
+
       await expect(
-        service.markJobCompleted(APPLICATION_ID, EMPLOYER_ID),
-      ).rejects.toThrow(BadRequestException);
+        service.markCompletedByWorker(APPLICATION_ID, WORKER_ID),
+      ).resolves.toBeUndefined();
     });
   });
 });
