@@ -141,6 +141,7 @@ export type AdminJobOfferListItem = {
   description: string;
   /** Null for an offer with no closing date — CDI/CDD/STAGE. */
   scheduledAt: string | null;
+  employmentType: EmploymentType;
   amount: number;
   paymentFlow: PaymentFlow | null;
   /** Null for a remote job — render `isRemote` instead of an empty line. */
@@ -541,6 +542,9 @@ export class JobOfferService {
       payment_flow: PaymentFlow | null;
       address: string | null;
       is_remote: boolean;
+      employment_type: EmploymentType;
+      city: string | null;
+      country_name: string | null;
       latitude: number | null;
       longitude: number | null;
       note: string | null;
@@ -594,6 +598,9 @@ export class JobOfferService {
         payment_flow: PaymentFlow | null;
         address: string | null;
         is_remote: boolean;
+        employment_type: EmploymentType;
+        city: string | null;
+        country_name: string | null;
         latitude: number | null;
         longitude: number | null;
         note: string | null;
@@ -614,6 +621,10 @@ export class JobOfferService {
         jo.amount,
         jo.payment_flow,
         jo.address,
+        jo.is_remote,
+        jo.employment_type,
+        jo.city,
+        jo.country_name,
         jo.latitude,
         jo.longitude,
         jo.note,
@@ -1239,6 +1250,7 @@ export class JobOfferService {
           : { id: o.category.id, name: o.category.name },
       description: o.description,
       scheduledAt: o.scheduled_at?.toISOString() ?? null,
+      employmentType: o.employment_type,
       amount: Number(o.amount),
       paymentFlow: o.payment_flow,
       address: o.address,
@@ -1319,6 +1331,7 @@ export class JobOfferService {
           : { id: offer.category.id, name: offer.category.name },
       description: offer.description,
       scheduledAt: offer.scheduled_at?.toISOString() ?? null,
+      employmentType: offer.employment_type,
       amount: Number(offer.amount),
       paymentFlow: offer.payment_flow,
       address: offer.address,
@@ -1488,8 +1501,14 @@ export class JobOfferService {
     if (dto.title !== undefined) data.title = dto.title.trim();
     if (dto.description !== undefined)
       data.description = dto.description.trim();
-    if (dto.scheduledAt !== undefined)
-      data.scheduled_at = new Date(dto.scheduledAt);
+    // Explicit null clears the closing date — the only way to turn a dated
+    // offer into an open-ended one. `undefined` still means "leave alone".
+    if (dto.scheduledAt !== undefined) {
+      data.scheduled_at = dto.scheduledAt === null ? null : new Date(dto.scheduledAt);
+    }
+    if (dto.employmentType !== undefined) {
+      data.employment_type = dto.employmentType;
+    }
     if (dto.amount !== undefined) data.amount = dto.amount ?? null;
     if (dto.paymentFlow !== undefined)
       data.payment_flow = dto.paymentFlow ?? null;
@@ -1544,7 +1563,10 @@ export class JobOfferService {
       payment_flow: PaymentFlow | null;
       address: string | null;
       is_remote?: boolean;
-      employment_type?: EmploymentType;
+      // Required, not optional-with-a-default: an `?? MISSION` fallback here
+      // silently relabelled every CDI/CDD/STAGE as a mission whenever a caller's
+      // `select` forgot the column. Let the compiler catch that instead.
+      employment_type: EmploymentType;
       city?: string | null;
       country_name?: string | null;
       note: string | null;
@@ -1565,7 +1587,7 @@ export class JobOfferService {
       payment_flow: offer.payment_flow,
       address: offer.address,
       is_remote: offer.is_remote ?? false,
-      employment_type: offer.employment_type ?? EmploymentType.MISSION,
+      employment_type: offer.employment_type,
       city: offer.city ?? null,
       country_name: offer.country_name ?? null,
       note: offer.note,
