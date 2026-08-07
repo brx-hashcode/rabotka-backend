@@ -224,7 +224,13 @@ export class ReminderProcessor {
         employer: { select: { phone: true, first_name: true } },
         applications: {
           where: { status: ApplicationStatus.ACCEPTED },
-          select: { id: true },
+          // The worker confirms completion now, so the status-check prompt goes
+          // to them rather than the employer — which needs their phone.
+          select: {
+            id: true,
+            worker_id: true,
+            worker: { select: { phone: true } },
+          },
         },
       },
     });
@@ -260,10 +266,13 @@ export class ReminderProcessor {
     payment_flow: string | null;
     employer_id: string;
     employer?: { phone?: string | null; first_name?: string | null } | null;
-    applications: { id: string }[];
+    applications: {
+      id: string;
+      worker_id: string;
+      worker?: { phone?: string | null } | null;
+    }[];
   }): Promise<void> {
     const phone = offer.employer?.phone;
-    const firstApp = offer.applications[0];
 
     if (phone) {
       const autoStartTpl = WHATSAPP_TEMPLATES.autoStarted;
@@ -286,79 +295,105 @@ export class ReminderProcessor {
           return false;
         });
 
-      if (sent && firstApp) {
-        const statusTpl = WHATSAPP_TEMPLATES.statusCheck;
-        await this.whatsApp
-          .sendTemplateMessage(
-            phone,
-            statusTpl.contentSid,
-            statusTpl.variables({
-              jobTitle: offer.title,
-              jobOfferId: offer.id,
-            }),
-            offer.employer_id,
-          )
-          .catch((err) =>
-            this.logger.warn(
-              `Failed to send status check prompt to employer ${offer.employer_id}`,
-              err,
-            ),
-          );
+      if (!sent) return;
 
-        const stateKey = `${BOT_STATE_KEY_PREFIX}${offer.employer_id}`;
-        const stateValue = JSON.stringify({
-          flowId: FLOW_IDS.JOB_STATUS_CHECK,
-          step: 0,
-          payload: {
-            jobOfferId: offer.id,
-            jobTitle: offer.title,
-            applicationId: firstApp.id,
-            paymentFlow: offer.payment_flow ?? 'DAILY',
-            snoozeCount: 0,
-          },
-          updatedAt: new Date().toISOString(),
-        });
-        await this.redis
-          .eval(
-            LUA_CAS_SET,
-            1,
-            stateKey,
-            stateValue,
-            String(BOT_STATE_TTL_SECONDS),
-            FLOW_IDS.JOB_STATUS_CHECK,
-          )
-          .catch((err) =>
-            this.logger.warn(
-              `Failed to set job status check state for employer ${offer.employer_id}`,
-              err,
-            ),
-          );
-
-        // Fallback re-ping if the employer never responds — enqueued with a
-        // unique jobId so BullMQ deduplicates across ticks.
-        await this.queueService
-          .addJob<ReminderJobData>(
-            WHATSAPP_REMINDERS_QUEUE,
-            {
-              type: 'reminder_job_status',
-              jobOfferId: offer.id,
-              employerId: offer.employer_id,
-              applicationId: firstApp.id,
-              paymentFlow: offer.payment_flow ?? 'DAILY',
-            },
-            {
-              jobId: `job-status-${offer.id}-autostart`,
-              delay: 4 * 60 * 60 * 1000,
-            },
-          )
-          .catch((err) =>
-            this.logger.warn(
-              `Failed to enqueue fallback job status reminder for offer ${offer.id}`,
-              err,
-            ),
-          );
+      // Completion is the worker's call, so the "is it finished?" prompt goes
+      // to each hired worker rather than the employer. On a multi-worker offer
+      // every one of them is asked: the offer closes only once all have
+      // confirmed, so a single answer is not enough.
+      for (const app of offer.applications) {
+        await this.promptWorkerForStatus(offer, app);
       }
     }
+  }
+
+  /** Asks one hired worker to confirm their own mission is finished. */
+  private async promptWorkerForStatus(
+    offer: {
+      id: string;
+      title: string;
+      payment_flow: string | null;
+      employer_id: string;
+    },
+    app: {
+      id: string;
+      worker_id: string;
+      worker?: { phone?: string | null } | null;
+    },
+  ): Promise<void> {
+    const workerPhone = app.worker?.phone;
+    if (!workerPhone) return;
+
+    const statusTpl = WHATSAPP_TEMPLATES.statusCheck;
+    await this.whatsApp
+      .sendTemplateMessage(
+        workerPhone,
+        statusTpl.contentSid,
+        statusTpl.variables({
+          jobTitle: offer.title,
+          jobOfferId: offer.id,
+        }),
+        app.worker_id,
+      )
+      .catch((err) =>
+        this.logger.warn(
+          `Failed to send status check prompt to worker ${app.worker_id}`,
+          err,
+        ),
+      );
+
+    const stateKey = `${BOT_STATE_KEY_PREFIX}${app.worker_id}`;
+    const stateValue = JSON.stringify({
+      flowId: FLOW_IDS.JOB_STATUS_CHECK,
+      step: 0,
+      payload: {
+        jobOfferId: offer.id,
+        jobTitle: offer.title,
+        applicationId: app.id,
+        paymentFlow: offer.payment_flow ?? 'DAILY',
+        snoozeCount: 0,
+      },
+      updatedAt: new Date().toISOString(),
+    });
+    await this.redis
+      .eval(
+        LUA_CAS_SET,
+        1,
+        stateKey,
+        stateValue,
+        String(BOT_STATE_TTL_SECONDS),
+        FLOW_IDS.JOB_STATUS_CHECK,
+      )
+      .catch((err) =>
+        this.logger.warn(
+          `Failed to set job status check state for worker ${app.worker_id}`,
+          err,
+        ),
+      );
+
+    // Fallback re-ping if the worker never responds — enqueued with a unique
+    // jobId so BullMQ deduplicates across ticks.
+    await this.queueService
+      .addJob<ReminderJobData>(
+        WHATSAPP_REMINDERS_QUEUE,
+        {
+          type: 'reminder_job_status',
+          jobOfferId: offer.id,
+          employerId: offer.employer_id,
+          applicationId: app.id,
+          paymentFlow: offer.payment_flow ?? 'DAILY',
+        },
+        {
+          jobId: `job-status-${offer.id}-${app.worker_id}-autostart`,
+          delay: 4 * 60 * 60 * 1000,
+        },
+      )
+      .catch((err) =>
+        this.logger.warn(
+          `Failed to enqueue fallback job status reminder for offer ${offer.id}`,
+          err,
+        ),
+      );
   }
 
   private async expireEmptyOverdueOffers(now: Date): Promise<void> {
@@ -577,17 +612,33 @@ export class ReminderProcessor {
     // Check the offer is still IN_PROGRESS — skip if already completed/expired
     const offer = await this.prisma.jobOffer.findUnique({
       where: { id: jobOfferId },
-      select: {
-        status: true,
-        title: true,
-        employer: { select: { phone: true } },
-      },
+      select: { status: true, title: true },
     });
     if (!offer || offer.status !== JobOfferStatus.IN_PROGRESS) return;
 
-    const phone = offer.employer?.phone;
+    // The worker confirms completion, so the re-ping goes to them. Skip once
+    // this worker has already answered — their application leaves ACCEPTED /
+    // STARTED the moment they confirm, and chasing them again would be noise.
+    const application = await this.prisma.application.findUnique({
+      where: { id: applicationId },
+      select: {
+        status: true,
+        worker_id: true,
+        worker: { select: { phone: true } },
+      },
+    });
+    if (
+      !application ||
+      (application.status !== ApplicationStatus.ACCEPTED &&
+        application.status !== ApplicationStatus.STARTED)
+    ) {
+      return;
+    }
+
+    const phone = application.worker?.phone;
     if (!phone) return;
 
+    const workerId = application.worker_id;
     const tpl = WHATSAPP_TEMPLATES.statusCheck;
     const sent = await this.whatsApp
       .sendTemplateMessage(
@@ -597,21 +648,21 @@ export class ReminderProcessor {
           jobTitle: offer.title,
           jobOfferId,
         }),
-        employerId,
+        workerId,
       )
       .then(() => true)
       .catch((err) => {
         this.logger.warn(
-          `Failed to send job status check reminder to employer ${employerId}`,
+          `Failed to send job status check reminder to worker ${workerId}`,
           err,
         );
         return false;
       });
 
     if (sent) {
-      // Refresh the bot state so the employer's reply still routes to the flow.
+      // Refresh the bot state so the worker's reply still routes to the flow.
       // Preserve the existing snoozeCount so the 5-snooze cap is cumulative.
-      const stateKey = `${BOT_STATE_KEY_PREFIX}${employerId}`;
+      const stateKey = `${BOT_STATE_KEY_PREFIX}${workerId}`;
       const existing = await this.redis.get(stateKey).catch(() => null);
       let snoozeCount = 0;
       if (existing) {

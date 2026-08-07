@@ -88,7 +88,6 @@ type RecommendedWorker = {
   score: number;
 };
 
-
 @ApiTags('Mobile — Recommendations')
 @ApiBearerAuth()
 @Controller('profile')
@@ -125,8 +124,34 @@ export class MobileRecommendationController {
     await this.assertEmployer(profileId);
 
     const topN = this.parseLimit(limit, 20, 50);
-    const contactedIds = await this.contactedProfiles.listContactedWorkerIds(profileId);
+    const contactedIds =
+      await this.contactedProfiles.listContactedWorkerIds(profileId);
 
+    const served = await this.resolveWorkerFeed(profileId, topN, contactedIds);
+
+    // Recorded once on whatever tier actually answered, rather than at each of
+    // the three exits. Without this the employer feed is frozen: the ranker
+    // seen-suppresses on [PROFILE_VIEW, IMPRESSION_BATCH], and only workers
+    // whose detail page was opened were ever suppressed — anyone merely
+    // scrolled past resurfaced on every refresh.
+    void this.interactionEvents.recordImpressions({
+      actorId: profileId,
+      actorType: InteractionActor.EMPLOYER,
+      objectType: InteractionObject.WORKER_PROFILE,
+      items: served.map((w) => ({ objectId: w.id })),
+      surface: 'worker_feed',
+      requestId: req.requestId,
+    });
+
+    return served;
+  }
+
+  /** The three tiers, best first: ranked → in-domain → any eligible worker. */
+  private async resolveWorkerFeed(
+    profileId: string,
+    topN: number,
+    contactedIds: Set<string>,
+  ): Promise<RecommendedWorker[]> {
     const hits = await this.rankWorkers(profileId, topN, contactedIds);
     const recommended = await this.hydrate(
       hits.filter((h) => !contactedIds.has(h.id)).slice(0, topN),
@@ -141,11 +166,8 @@ export class MobileRecommendationController {
       if (inDomain.length > 0) return inDomain;
     }
 
-    return this.hydrate(
-      await this.eligibleWorkerHits([], contactedIds, topN),
-    );
+    return this.hydrate(await this.eligibleWorkerHits([], contactedIds, topN));
   }
-
 
   private async rankWorkers(
     profileId: string,
@@ -202,9 +224,7 @@ export class MobileRecommendationController {
         verification_status: 'VERIFIED',
         deleted_at: null,
         reliability_score: { gte: fees.reliabilityScoreMin },
-        ...(contactedIds.size > 0
-          ? { id: { notIn: [...contactedIds] } }
-          : {}),
+        ...(contactedIds.size > 0 ? { id: { notIn: [...contactedIds] } } : {}),
         ...(categoryIds.length > 0
           ? { categories: { some: { category_id: { in: categoryIds } } } }
           : {}),
@@ -264,6 +284,7 @@ export class MobileRecommendationController {
       objectId: workerId,
       source: InteractionSource.SERVER,
       surface: 'worker_detail',
+      requestId: req.requestId,
     });
 
     return { worker, recommendationFee, walletBalance };
@@ -303,7 +324,8 @@ export class MobileRecommendationController {
 
   @Get('worker-search')
   @ApiOperation({
-    summary: '[Mobile/EMPLOYER] Search all workers (name/description + filters)',
+    summary:
+      '[Mobile/EMPLOYER] Search all workers (name/description + filters)',
   })
   @ApiResponse({ status: 200, description: 'Paginated worker search results' })
   @ApiResponse({ status: 403, description: 'Not an EMPLOYER profile' })
@@ -412,16 +434,16 @@ export class MobileRecommendationController {
       }),
     ]);
 
-    const endById = new Map(
-      endCounts.map((c) => [c.worker_id, c._count._all]),
-    );
+    const endById = new Map(endCounts.map((c) => [c.worker_id, c._count._all]));
     const byId = new Map(profiles.map((p) => [p.id, p]));
     const scoreById = new Map(hits.map((h) => [h.id, h.score]));
 
     return ids
       .map((id) => byId.get(id))
       .filter((p): p is NonNullable<typeof p> => Boolean(p))
-      .map((p) => this.toCard(p, endById.get(p.id) ?? 0, scoreById.get(p.id) ?? 0));
+      .map((p) =>
+        this.toCard(p, endById.get(p.id) ?? 0, scoreById.get(p.id) ?? 0),
+      );
   }
 
   private toCard(
