@@ -142,11 +142,22 @@ export type AdminJobOfferListItem = {
   /** Null for an offer with no closing date — CDI/CDD/STAGE. */
   scheduledAt: string | null;
   employmentType: EmploymentType;
-  amount: number;
+  /**
+   * Null when the employer named no price — «Laisser vide si pas de prix fixe».
+   * This was `number`, and the mappers coerced with `Number(offer.amount)`,
+   * which turns null into 0. The back office then showed «0 FCFA» for an
+   * open price, and saving the form wrote that 0 back over the null.
+   */
+  amount: number | null;
   paymentFlow: PaymentFlow | null;
   /** Null for a remote job — render `isRemote` instead of an empty line. */
   address: string | null;
   isRemote: boolean;
+  /** The structured location. Absent here, the admin form's country and city
+      selects rendered empty for an offer that has both. */
+  city: string | null;
+  countryCode: string | null;
+  countryName: string | null;
   note: string | null;
   quantity: number;
   status: string;
@@ -1251,10 +1262,13 @@ export class JobOfferService {
       description: o.description,
       scheduledAt: o.scheduled_at?.toISOString() ?? null,
       employmentType: o.employment_type,
-      amount: Number(o.amount),
+      amount: o.amount == null ? null : Number(o.amount),
       paymentFlow: o.payment_flow,
       address: o.address,
       isRemote: o.is_remote,
+      city: o.city,
+      countryCode: o.country_code,
+      countryName: o.country_name,
       note: o.note,
       quantity: o.quantity,
       status: o.status,
@@ -1332,10 +1346,13 @@ export class JobOfferService {
       description: offer.description,
       scheduledAt: offer.scheduled_at?.toISOString() ?? null,
       employmentType: offer.employment_type,
-      amount: Number(offer.amount),
+      amount: offer.amount == null ? null : Number(offer.amount),
       paymentFlow: offer.payment_flow,
       address: offer.address,
       isRemote: offer.is_remote,
+      city: offer.city,
+      countryCode: offer.country_code,
+      countryName: offer.country_name,
       note: offer.note,
       quantity: offer.quantity,
       status: offer.status,
@@ -1567,8 +1584,8 @@ export class JobOfferService {
       // silently relabelled every CDI/CDD/STAGE as a mission whenever a caller's
       // `select` forgot the column. Let the compiler catch that instead.
       employment_type: EmploymentType;
-      city?: string | null;
-      country_name?: string | null;
+      city: string | null;
+      country_name: string | null;
       note: string | null;
       quantity: number;
       status: string;
@@ -1588,8 +1605,8 @@ export class JobOfferService {
       address: offer.address,
       is_remote: offer.is_remote ?? false,
       employment_type: offer.employment_type,
-      city: offer.city ?? null,
-      country_name: offer.country_name ?? null,
+      city: offer.city,
+      country_name: offer.country_name,
       note: offer.note,
       quantity: offer.quantity,
       acceptedCount,
