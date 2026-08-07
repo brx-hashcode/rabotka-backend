@@ -15,6 +15,7 @@ import { ContractService } from '../../contract/contract.service';
 import { SystemConfigService } from '../../system-config/system-config.service';
 import { MatchingService } from '../../matching/matching.service';
 import { InteractionEventService } from '../../recommendation-engine/interaction-event.service';
+import { JobEventsGateway } from '../../ws-notifications/job-events.gateway';
 import { ApplicationStatus, JobOfferStatus, PaymentFlow } from '@prisma/client';
 import { LATE_CANCELLATION_PENALTY_FCFA } from '../application.constants';
 
@@ -88,6 +89,7 @@ describe('ApplicationService', () => {
   let service: ApplicationService;
   let prisma: jest.Mocked<PrismaService>;
   let botNotification: jest.Mocked<BotNotificationService>;
+  let testingModule: TestingModule;
 
   beforeEach(async () => {
     const mockPrismaService = {
@@ -196,6 +198,12 @@ describe('ApplicationService', () => {
           },
         },
         {
+          // Push that keeps the counterparty's screen in sync; irrelevant to
+          // these assertions, but the service depends on it.
+          provide: JobEventsGateway,
+          useValue: { emitJobChanged: jest.fn() },
+        },
+        {
           provide: InteractionEventService,
           useValue: {
             record: jest.fn().mockResolvedValue(undefined),
@@ -208,6 +216,7 @@ describe('ApplicationService', () => {
     service = module.get<ApplicationService>(ApplicationService);
     prisma = module.get(PrismaService);
     botNotification = module.get(BotNotificationService);
+    testingModule = module;
   });
 
   describe('rejectPendingApplicants()', () => {
@@ -351,9 +360,7 @@ describe('ApplicationService', () => {
       // Only the ratee-aggregate profile.update runs, never a reliability bump.
       const reliabilityUpdate = (
         prisma.profile.update as jest.Mock
-      ).mock.calls.find(
-        (c) => c[0]?.data?.reliability_score !== undefined,
-      );
+      ).mock.calls.find((c) => c[0]?.data?.reliability_score !== undefined);
       expect(reliabilityUpdate).toBeUndefined();
     });
 
@@ -367,9 +374,7 @@ describe('ApplicationService', () => {
 
       const reliabilityUpdate = (
         prisma.profile.update as jest.Mock
-      ).mock.calls.find(
-        (c) => c[0]?.data?.reliability_score !== undefined,
-      );
+      ).mock.calls.find((c) => c[0]?.data?.reliability_score !== undefined);
       expect(reliabilityUpdate).toBeUndefined();
     });
 
@@ -490,7 +495,9 @@ describe('ApplicationService', () => {
       // Simulate: the quota count returns 0 (WAITING_PAYMENT excluded from query)
       (prisma.application.count as jest.Mock).mockResolvedValue(0);
       // Should succeed — no ForbiddenException
-      await expect(service.create(JOB_OFFER_ID, WORKER_ID)).resolves.toBeDefined();
+      await expect(
+        service.create(JOB_OFFER_ID, WORKER_ID),
+      ).resolves.toBeDefined();
     });
 
     it('throws BadRequestException when offer is not ACTIVE', async () => {
@@ -877,89 +884,129 @@ describe('ApplicationService', () => {
     });
   });
 
-  describe('markJobCompleted()', () => {
-    const setupMock = (status: ApplicationStatus) => {
+  describe('markCompletedByWorker()', () => {
+    /**
+     * Completion belongs to the worker now — the employer only rates. Builds a
+     * tx double so each test can assert what was written inside the
+     * transaction, and control how many co-workers are still outstanding.
+     */
+    const setupTx = (
+      opts: { stillWorking?: number; offerStatus?: string } = {},
+    ) => {
+      const tx: any = {
+        jobOffer: {
+          update: jest.fn().mockResolvedValue({}),
+          findUnique: jest.fn().mockResolvedValue({
+            status: opts.offerStatus ?? JobOfferStatus.IN_PROGRESS,
+          }),
+        },
+        assignment: {
+          create: jest.fn().mockResolvedValue({}),
+          update: jest.fn().mockResolvedValue({}),
+          updateMany: jest.fn().mockResolvedValue({}),
+          findFirst: jest
+            .fn()
+            .mockResolvedValue({ id: 'asg-1', status: 'STARTED' }),
+          findUnique: jest.fn().mockResolvedValue({ status: 'COMPLETED' }),
+        },
+        application: {
+          update: jest.fn().mockResolvedValue({}),
+          updateMany: jest.fn().mockResolvedValue({}),
+          findMany: jest.fn().mockResolvedValue([]),
+          // How many hired workers have NOT finished yet.
+          count: jest.fn().mockResolvedValue(opts.stillWorking ?? 0),
+        },
+        payment: { create: jest.fn().mockResolvedValue({}) },
+        profile: {
+          findUnique: jest.fn().mockResolvedValue({ reliability_score: 100 }),
+          update: jest.fn().mockResolvedValue({}),
+        },
+        $executeRaw: jest.fn().mockResolvedValue(0),
+      };
+      (prisma.$transaction as jest.Mock).mockImplementation((fn: any) =>
+        typeof fn === 'function' ? fn(tx) : Promise.resolve([]),
+      );
+      return tx;
+    };
+
+    const setupApplication = (status: ApplicationStatus) => {
       (prisma.application.findUnique as jest.Mock).mockResolvedValue({
         ...mockApplication,
         status,
       });
-      (prisma.$transaction as jest.Mock).mockResolvedValue([]);
-      jest.spyOn(service, 'findById').mockResolvedValue({
-        ...mockApplication,
-        status: ApplicationStatus.END,
-        job_offer: {
-          ...mockJobOffer,
-          status: JobOfferStatus.COMPLETED,
-          description: 'desc',
-          payment_flow: 'DAILY',
-          note: null,
-        } as any,
-        worker: mockApplication.worker as any,
-      } as any);
     };
 
-    it('marks offer as COMPLETED when application is ACCEPTED', async () => {
-      setupMock(ApplicationStatus.ACCEPTED);
-      const result = await service.markJobCompleted(
-        APPLICATION_ID,
-        EMPLOYER_ID,
-      );
-      expect(prisma.$transaction as jest.Mock).toHaveBeenCalled();
-      expect(result.job_offer.status).toBe(JobOfferStatus.COMPLETED);
+    it('refuses a worker who is not the one on this mission', async () => {
+      setupApplication(ApplicationStatus.ACCEPTED);
+      setupTx();
+
+      await expect(
+        service.markCompletedByWorker(APPLICATION_ID, 'someone-else'),
+      ).rejects.toThrow(ForbiddenException);
     });
 
-    it('marks offer as COMPLETED when application is STARTED', async () => {
-      setupMock(ApplicationStatus.STARTED);
-      const result = await service.markJobCompleted(
-        APPLICATION_ID,
-        EMPLOYER_ID,
-      );
-      expect(prisma.$transaction as jest.Mock).toHaveBeenCalled();
-      expect(result.job_offer.status).toBe(JobOfferStatus.COMPLETED);
-    });
+    it('ends the worker own application', async () => {
+      setupApplication(ApplicationStatus.ACCEPTED);
+      const tx = setupTx();
 
-    it('sets applications to END status inside transaction', async () => {
-      setupMock(ApplicationStatus.ACCEPTED);
+      await service.markCompletedByWorker(APPLICATION_ID, WORKER_ID);
 
-      let capturedTx: any;
-      (prisma.$transaction as jest.Mock).mockImplementationOnce((fn: any) => {
-        capturedTx = {
-          jobOffer: {
-            update: jest.fn().mockResolvedValue({}),
-            findUnique: jest
-              .fn()
-              .mockResolvedValue({ status: JobOfferStatus.ACTIVE }),
-          },
-          assignment: {
-            updateMany: jest.fn().mockResolvedValue({}),
-            findUnique: jest.fn().mockResolvedValue({ status: 'COMPLETED' }),
-          },
-          payment: { create: jest.fn().mockResolvedValue({}) },
-          application: {
-            updateMany: jest.fn().mockResolvedValue({}),
-            findMany: jest.fn().mockResolvedValue([]),
-          },
-          profile: {
-            findUnique: jest.fn().mockResolvedValue({ reliability_score: 100 }),
-            update: jest.fn().mockResolvedValue({}),
-          },
-          $executeRaw: jest.fn().mockResolvedValue(0),
-        };
-        return fn(capturedTx);
-      });
-
-      await service.markJobCompleted(APPLICATION_ID, EMPLOYER_ID);
-
-      expect(capturedTx.application.updateMany).toHaveBeenCalledWith(
+      expect(tx.application.update).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: expect.objectContaining({
-            job_offer_id: JOB_OFFER_ID,
-            status: {
-              in: [ApplicationStatus.ACCEPTED, ApplicationStatus.STARTED],
-            },
-          }),
+          where: { id: APPLICATION_ID },
           data: { status: ApplicationStatus.END },
         }),
+      );
+    });
+
+    it('works from STARTED too', async () => {
+      setupApplication(ApplicationStatus.STARTED);
+      const tx = setupTx();
+
+      await service.markCompletedByWorker(APPLICATION_ID, WORKER_ID);
+
+      expect(tx.assignment.update).toHaveBeenCalled();
+    });
+
+    it('closes the offer once no hired worker is left outstanding', async () => {
+      setupApplication(ApplicationStatus.ACCEPTED);
+      const tx = setupTx({ stillWorking: 0 });
+
+      await service.markCompletedByWorker(APPLICATION_ID, WORKER_ID);
+
+      expect(tx.jobOffer.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: { status: JobOfferStatus.COMPLETED },
+        }),
+      );
+    });
+
+    it('leaves the offer open while a co-worker is still going', async () => {
+      // The whole reason completion is per-worker: an offer can hire several
+      // people, and the first to finish must not end everyone else's mission.
+      setupApplication(ApplicationStatus.ACCEPTED);
+      const tx = setupTx({ stillWorking: 1 });
+
+      await service.markCompletedByWorker(APPLICATION_ID, WORKER_ID);
+
+      expect(tx.jobOffer.update).not.toHaveBeenCalled();
+    });
+
+    it('pushes to BOTH parties, not just the one who acted', async () => {
+      // The employer's rating action only becomes available once the worker
+      // confirms, and their screen has no other way to learn that:
+      // invalidateQueries runs in the worker's browser, not theirs. Inside
+      // WhatsApp's webview it never self-corrects either — no focus or
+      // reconnect events fire there.
+      setupApplication(ApplicationStatus.ACCEPTED);
+      setupTx();
+      const gateway = testingModule.get(JobEventsGateway);
+
+      await service.markCompletedByWorker(APPLICATION_ID, WORKER_ID);
+
+      expect(gateway.emitJobChanged).toHaveBeenCalledWith(
+        expect.arrayContaining([WORKER_ID, EMPLOYER_ID]),
+        expect.objectContaining({ kind: 'completed' }),
       );
     });
 
@@ -967,40 +1014,13 @@ describe('ApplicationService', () => {
       // The employer pays the worker directly. Recording the wage as a Payment
       // invented a transaction that never happened and, because the revenue
       // queries summed every COMPLETED payment, booked the worker's whole wage
-      // as platform revenue: a 45 000 FCFA job read as 45 000 FCFA earned.
-      // Rabotka's revenue from a job is the posting fee, recorded separately.
-      setupMock(ApplicationStatus.ACCEPTED);
+      // as platform revenue.
+      setupApplication(ApplicationStatus.ACCEPTED);
+      const tx = setupTx();
 
-      let capturedTx: any;
-      (prisma.$transaction as jest.Mock).mockImplementationOnce((fn: any) => {
-        capturedTx = {
-          jobOffer: {
-            update: jest.fn().mockResolvedValue({}),
-            findUnique: jest
-              .fn()
-              .mockResolvedValue({ status: JobOfferStatus.ACTIVE }),
-          },
-          assignment: {
-            updateMany: jest.fn().mockResolvedValue({}),
-            findUnique: jest.fn().mockResolvedValue({ status: 'COMPLETED' }),
-          },
-          payment: { create: jest.fn().mockResolvedValue({}) },
-          application: {
-            updateMany: jest.fn().mockResolvedValue({}),
-            findMany: jest.fn().mockResolvedValue([]),
-          },
-          profile: {
-            findUnique: jest.fn().mockResolvedValue({ reliability_score: 100 }),
-            update: jest.fn().mockResolvedValue({}),
-          },
-          $executeRaw: jest.fn().mockResolvedValue(0),
-        };
-        return fn(capturedTx);
-      });
+      await service.markCompletedByWorker(APPLICATION_ID, WORKER_ID);
 
-      await service.markJobCompleted(APPLICATION_ID, EMPLOYER_ID);
-
-      expect(capturedTx.payment.create).not.toHaveBeenCalled();
+      expect(tx.payment.create).not.toHaveBeenCalled();
     });
   });
 });

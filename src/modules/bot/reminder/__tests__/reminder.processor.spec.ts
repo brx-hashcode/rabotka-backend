@@ -626,11 +626,15 @@ describe('ReminderProcessor', () => {
   // ─── sendJobStatusCheckReminder() ────────────────────────────────────────────
 
   describe('sendJobStatusCheckReminder()', () => {
-    it('sends job status check reminder when offer is IN_PROGRESS', async () => {
+    it('asks the WORKER, not the employer — completion is theirs to confirm', async () => {
       prisma.jobOffer.findUnique = jest.fn().mockResolvedValue({
         status: JobOfferStatus.IN_PROGRESS,
         title: 'Test Job',
-        employer: { phone: '+242000001' },
+      });
+      prisma.application.findUnique.mockResolvedValue({
+        status: ApplicationStatus.STARTED,
+        worker_id: 'worker-1',
+        worker: { phone: '+242000002' },
       });
       await processor.process({
         data: {
@@ -642,11 +646,35 @@ describe('ReminderProcessor', () => {
         },
       });
       expect(whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
-        '+242000001',
+        '+242000002',
         WHATSAPP_TEMPLATES.statusCheck.contentSid,
         expect.any(Object),
-        'emp-1',
+        'worker-1',
       );
+    });
+
+    it('stops chasing a worker who has already confirmed', async () => {
+      // Their application leaves ACCEPTED/STARTED the moment they confirm;
+      // re-pinging them after that is noise.
+      prisma.jobOffer.findUnique = jest.fn().mockResolvedValue({
+        status: JobOfferStatus.IN_PROGRESS,
+        title: 'Test Job',
+      });
+      prisma.application.findUnique.mockResolvedValue({
+        status: ApplicationStatus.END,
+        worker_id: 'worker-1',
+        worker: { phone: '+242000002' },
+      });
+      await processor.process({
+        data: {
+          type: 'reminder_job_status',
+          jobOfferId: 'offer-1',
+          employerId: 'emp-1',
+          applicationId: 'app-1',
+          paymentFlow: 'DAILY',
+        },
+      });
+      expect(whatsApp.sendTemplateMessage).not.toHaveBeenCalled();
     });
 
     it('skips when offer is not IN_PROGRESS', async () => {
@@ -703,7 +731,11 @@ describe('ReminderProcessor', () => {
       prisma.jobOffer.findUnique = jest.fn().mockResolvedValue({
         status: JobOfferStatus.IN_PROGRESS,
         title: 'Test Job',
-        employer: { phone: '+242000001' },
+      });
+      prisma.application.findUnique.mockResolvedValue({
+        status: ApplicationStatus.STARTED,
+        worker_id: 'worker-1',
+        worker: { phone: '+242000002' },
       });
       // Simulate existing Redis state with snoozeCount=3
       redis.get.mockResolvedValueOnce(
@@ -726,7 +758,7 @@ describe('ReminderProcessor', () => {
       // State is now written via CAS (redis.eval) to avoid overwriting active flows
       const evalCalls = redis.eval.mock.calls;
       const stateCall = evalCalls.find((call: unknown[]) =>
-        String(call[2]).includes('emp-1'),
+        String(call[2]).includes('worker-1'),
       );
       expect(stateCall).toBeDefined();
       const stateValue = JSON.parse(stateCall[3] as string) as {
@@ -741,7 +773,9 @@ describe('ReminderProcessor', () => {
         title: 'Test Job',
         employer: { phone: '+242000001' },
       });
-      whatsApp.sendTemplateMessage.mockRejectedValueOnce(new Error('send failed'));
+      whatsApp.sendTemplateMessage.mockRejectedValueOnce(
+        new Error('send failed'),
+      );
       await processor.process({
         data: {
           type: 'reminder_job_status',
@@ -844,7 +878,9 @@ describe('ReminderProcessor', () => {
           },
         ]); // openOverdue
       prisma.application.findMany.mockResolvedValue([] as never);
-      whatsApp.sendTemplateMessage.mockRejectedValueOnce(new Error('send failed'));
+      whatsApp.sendTemplateMessage.mockRejectedValueOnce(
+        new Error('send failed'),
+      );
       await processor.process({ data: { type: 'scan' } });
       // Should not throw; redis.set not called since sent=false
       expect(true).toBe(true);
