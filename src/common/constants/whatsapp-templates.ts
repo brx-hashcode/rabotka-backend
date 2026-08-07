@@ -107,11 +107,29 @@ export const WHATSAPP_TEMPLATES = {
    * Shown while KYC is under review. Replaces the old free-form 1/2 numbered
    * menu: both of its options only returned webview templates anyway, so the
    * typing step added nothing.
+   *
+   * v3 (2026-08): a card carrying the brand cover, and both of v2's mistakes
+   * fixed. v2's body said "consulter et *compléter* votre profil" — but the
+   * profile is already complete and submitted, only the KYC review is
+   * outstanding, so it described work the user had already done; and its button
+   * read "Gérer mon profil", which suggests editing for the same reason. Now:
+   * "consulter votre profil" and "Voir mon profil".
+   *
+   * Its button also never worked. The `shortlink` mode below swaps {{1}} for a
+   * one-tap login code, but `mint()` refused every profile that was not ACTIVE
+   * — and this card is sent ONLY to PENDING_ACTIVATION profiles, so it minted
+   * nothing 100% of the time and shipped the literal `/s/profile`: too short
+   * for CODE_PATTERN, so it fell through to the login screen. Fixed in
+   * `whatsapp-login-link.service.ts`, not here.
+   *
+   * Rollback: point TPL_KYC_PENDING_MENU at HXc5cf46e7f22fd73d52895bc42c2779c5,
+   * the v2 call-to-action. Same variable and the same shortlink mode, so
+   * nothing else here changes — but the button goes back to being dead.
    */
   kycPendingMenu: {
     contentSid: sid(
       'TPL_KYC_PENDING_MENU',
-      'HXc5cf46e7f22fd73d52895bc42c2779c5',
+      'HX22cce223f0163abc339d502e686989a1',
     ),
     urlSuffixVar: '1',
     urlSuffixMode: 'shortlink',

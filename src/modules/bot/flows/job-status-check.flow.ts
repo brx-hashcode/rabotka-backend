@@ -98,9 +98,11 @@ export async function runJobStatusCheckFlow(
   const title = jobTitle ?? 'mission';
 
   if (trimmed === '1') {
-    // Employer confirms mission is done
+    // The WORKER confirms their own mission is done — they are the one who
+    // knows. The employer only rates afterwards, and cannot rate until this
+    // has happened.
     try {
-      await ctx.applicationService.markJobCompleted(
+      await ctx.applicationService.markCompletedByWorker(
         safeApplicationId,
         profile.id,
       );
@@ -109,9 +111,7 @@ export async function runJobStatusCheckFlow(
           [
             `✅ *Mission confirmée comme terminée !*`,
             '',
-            `Les gains ont été enregistrés pour les travailleurs.`,
-            '',
-            ``,
+            `Merci. L'employeur va pouvoir vous noter.`,
           ].join('\n'),
         ],
         clearState: true,

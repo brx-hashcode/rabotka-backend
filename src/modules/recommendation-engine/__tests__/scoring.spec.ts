@@ -119,6 +119,48 @@ describe('scoring', () => {
     });
   });
 
+  describe('computeRelevance — null is not zero', () => {
+    /**
+     * The distinction the whole scoring design rests on, and the one three
+     * terms used to get wrong by populating with `?? 0` / `?? 0.5`.
+     *
+     * A cold worker looking at a job 10 km out (prox 0.25), starting in 48 h
+     * (urgency 0.5), posted 24 h ago (fresh 0.794), unrated employer.
+     */
+    const coldCase = (catAff: number | null): ScoreTerms => ({
+      ...ZERO_TERMS,
+      sim: null,
+      catAff,
+      partyAff: null,
+      cf: null,
+      prox: 0.25,
+      urgency: 0.5,
+      fresh: 0.794,
+      quality: 0.8,
+      payFit: null,
+    });
+
+    it('drops a null term and redistributes its weight', () => {
+      const withZero = computeRelevance(coldCase(0), COLD_WEIGHTS);
+      const withNull = computeRelevance(coldCase(null), COLD_WEIGHTS);
+
+      // Same evidence, different divisor: 0.95 vs 0.80.
+      expect(withZero).toBeCloseTo(0.413, 3);
+      expect(withNull).toBeCloseTo(0.491, 3);
+      expect(withNull).toBeGreaterThan(withZero);
+    });
+
+    it('a zero term orders nothing but still costs score', () => {
+      // Two candidates identical except for a term nobody has evidence on.
+      // Scoring it 0 lowers both equally — pure loss against the threshold.
+      const a = computeRelevance(coldCase(0), COLD_WEIGHTS);
+      const b = computeRelevance(coldCase(0), COLD_WEIGHTS);
+
+      expect(a).toBe(b);
+      expect(a).toBeLessThan(computeRelevance(coldCase(null), COLD_WEIGHTS));
+    });
+  });
+
   describe('computeRelevance', () => {
     it('maps all-zero terms to 0 and all-one terms to 1', () => {
       for (const n of [0, 10, 40]) {

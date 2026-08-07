@@ -192,17 +192,21 @@ export class RecommendationEngineService {
       const c = byId.get(f.id)!;
       const terms: ScoreTerms = {
         sim: simScores.get(c.id) ?? null,
+        // `?? null`, never `?? 0`: an unlearned category is no evidence, and
+        // zero would spend the full 0.15 weight asserting "measured, and bad"
+        // — identical for every candidate, so it orders nothing while dragging
+        // the whole feed toward the relevance threshold.
         catAff: c.categoryId
-          ? (features.categoryAffinity[c.categoryId] ?? 0)
-          : 0,
-        partyAff: features.counterpartyAffinity[c.employerId] ?? 0,
+          ? (features.categoryAffinity[c.categoryId] ?? null)
+          : null,
+        partyAff: features.counterpartyAffinity[c.employerId] ?? null,
         // Agreement across independent sources is itself evidence — but only
         // when there is more than one source to agree.
         cf: pools.size > 1 ? clamp01((f.sources - 1) / (pools.size - 1)) : null,
         prox: this.proximityTerm(workerPlace, c, features),
         urgency: urgencyScore(c.scheduledAt),
         fresh: freshnessScore(c.createdAt),
-        quality: quality.get(c.employerId) ?? 0.5,
+        quality: quality.get(c.employerId) ?? null,
         payFit: this.payFitTerm(c, features),
       };
 
@@ -361,14 +365,14 @@ export class RecommendationEngineService {
       const terms: ScoreTerms = {
         sim: simScores.get(c.id) ?? null,
         catAff: bestCategoryAffinity(c.categoryIds, features.categoryAffinity),
-        partyAff: features.counterpartyAffinity[c.id] ?? 0,
+        partyAff: features.counterpartyAffinity[c.id] ?? null,
         cf: pools.size > 1 ? clamp01((f.sources - 1) / (pools.size - 1)) : null,
         prox: this.workerProximity(employerPlace, c, features),
         // A worker has no scheduled start and no pay amount.
         urgency: null,
         // Recency of the worker's OWN activity, not of their profile row.
         fresh: active ? freshnessScore(active, ACTIVITY_HALF_LIFE_HOURS) : null,
-        quality: quality.get(c.id) ?? 0.5,
+        quality: quality.get(c.id) ?? null,
         payFit: null,
       };
 
@@ -635,14 +639,19 @@ function amountBand(amount: number): string {
  * plumbing when that's what the employer hires for, not be averaged down by the
  * unrelated trade.
  */
+/**
+ * The strongest learned affinity among a worker's categories, or null if none
+ * of them has been learned — "no evidence", which `computeRelevance` drops and
+ * redistributes, rather than a zero that would rank nothing at full weight.
+ */
 function bestCategoryAffinity(
   categoryIds: string[],
   affinity: Record<string, number>,
-): number {
-  let best = 0;
+): number | null {
+  let best: number | null = null;
   for (const id of categoryIds) {
-    const v = affinity[id] ?? 0;
-    if (v > best) best = v;
+    const v = affinity[id];
+    if (v != null && (best == null || v > best)) best = v;
   }
   return best;
 }

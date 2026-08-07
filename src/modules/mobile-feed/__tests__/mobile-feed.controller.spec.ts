@@ -47,6 +47,11 @@ describe('MobileFeedController', () => {
   let matchingService: { findMatchingJobsForWorker: jest.Mock };
   let rollout: { versionFor: jest.Mock };
   let engine: { recommendJobsForWorker: jest.Mock };
+  let interactionEvents: {
+    record: jest.Mock;
+    recordMany: jest.Mock;
+    recordImpressions: jest.Mock;
+  };
 
   const mockType = (type: ProfileType | null) =>
     prisma.profile.findUnique.mockResolvedValue(
@@ -84,6 +89,11 @@ describe('MobileFeedController', () => {
     rollout = { versionFor: jest.fn().mockResolvedValue('legacy') };
     engine = { recommendJobsForWorker: jest.fn().mockResolvedValue([]) };
 
+    interactionEvents = {
+      record: jest.fn(),
+      recordMany: jest.fn(),
+      recordImpressions: jest.fn(),
+    };
     controller = new MobileFeedController(
       prisma as never,
       jobOfferService as never,
@@ -91,6 +101,7 @@ describe('MobileFeedController', () => {
       matchingService as never,
       rollout as never,
       engine as never,
+      interactionEvents as never,
     );
   });
 

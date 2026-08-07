@@ -25,10 +25,15 @@
 export type ScoreTerms = {
   /** Calibrated cosine against the user's interest vector. */
   sim: number | null;
-  /** How much this user engages with this category. */
-  catAff: number;
-  /** How much this user engages with this employer/worker specifically. */
-  partyAff: number;
+  /** How much this user engages with this category. Null when unlearned. */
+  catAff: number | null;
+  /**
+   * How much this user engages with this employer/worker specifically.
+   *
+   * Null when there is no history with them — a first encounter is unknown, not
+   * bad. Zero here used to consume the full weight while ordering nothing.
+   */
+  partyAff: number | null;
   /** Agreement across independent candidate sources. */
   cf: number | null;
   /**
@@ -44,8 +49,14 @@ export type ScoreTerms = {
   urgency: number | null;
   /** How recently the item was posted, or the counterparty last active. */
   fresh: number | null;
-  /** Counterparty quality prior (fill rate, responsiveness, reliability). */
-  quality: number;
+  /**
+   * Counterparty quality prior (fill rate, responsiveness, reliability).
+   *
+   * Null for an unrated counterparty. A 0.5 "neutral" constant is the same
+   * mistake wearing a plausible number: it is identical for everyone it is
+   * applied to, so it orders nothing while still spending its weight.
+   */
+  quality: number | null;
   /** Fit against learned amount-band and payment-flow preferences. */
   payFit: number | null;
 };
