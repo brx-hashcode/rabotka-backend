@@ -70,7 +70,7 @@ export class BotNotificationService {
         where: { worker_id: app.worker_id, status: 'END' },
       });
 
-      const scheduledAt = app.job_offer.scheduled_at.toLocaleDateString(
+      const scheduledAt = app.job_offer.scheduled_at?.toLocaleDateString(
         'fr-FR',
         {
           day: '2-digit',
@@ -95,7 +95,7 @@ export class BotNotificationService {
             description.length > 150
               ? `${description.slice(0, 150)}...`
               : description,
-          scheduledAt,
+          scheduledAt: scheduledAt ?? 'Non précisée',
           address: address.length > 80 ? `${address.slice(0, 80)}...` : address,
           // URL suffix for the CTA button (/candidatures/{{8}}). Ignored by the
           // pre-approval template, so this is safe either side of the cutover.
@@ -322,7 +322,7 @@ export class BotNotificationService {
       if (!app?.job_offer?.employer?.phone || !app.worker) return;
 
       const fees = await this.systemConfig.getFees();
-      const date = app.job_offer.scheduled_at.toLocaleDateString('fr-FR', {
+      const date = app.job_offer.scheduled_at?.toLocaleDateString('fr-FR', {
         day: '2-digit',
         month: '2-digit',
         year: 'numeric',
@@ -339,7 +339,7 @@ export class BotNotificationService {
         tpl.variables({
           workerName: `${app.worker.first_name} ${app.worker.last_name}`,
           offerTitle: app.job_offer.title,
-          date,
+          date: date ?? 'Non précisée',
           reason: reason ?? '',
           penaltyStatus,
           jobOfferId: app.job_offer.id,
@@ -411,7 +411,7 @@ export class BotNotificationService {
       // and — worse — returned without sending when the worker happened to be
       // mid-conversation, silently dropping the recommendation entirely.
 
-      const dateStr = offer.scheduled_at.toLocaleDateString('fr-FR', {
+      const dateStr = offer.scheduled_at?.toLocaleDateString('fr-FR', {
         day: '2-digit',
         month: '2-digit',
         year: 'numeric',
@@ -430,7 +430,7 @@ export class BotNotificationService {
             offer.payment_flow,
           ),
           address: jobLocationLabel(offer),
-          date: dateStr,
+          date: dateStr ?? 'Non précisée',
           // URL suffix for the CTA button (/offres/{{6}}).
           jobOfferId,
         }),

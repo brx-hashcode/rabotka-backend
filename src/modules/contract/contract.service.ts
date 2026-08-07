@@ -161,7 +161,7 @@ export class ContractService {
         address: string | null;
         amount: { toString(): string } | null;
         payment_flow: PaymentFlow | null;
-        scheduled_at: Date;
+        scheduled_at: Date | null;
         note: string | null;
         employer: {
           first_name: string;
