@@ -97,7 +97,7 @@ export type ProfileApplicationItem = {
   jobOffer: {
     id: string;
     title: string;
-    scheduledAt: Date;
+    scheduledAt: Date | null;
     amount: number;
     address: string | null;
     status: string;

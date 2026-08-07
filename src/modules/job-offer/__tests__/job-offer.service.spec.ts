@@ -13,7 +13,7 @@ import { SystemConfigService } from '../../system-config/system-config.service';
 import { WalletService } from '../../wallet/wallet.service';
 import { BotNotificationService } from '../../bot/services/bot-notification.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { JobOfferStatus, PaymentFlow } from '@prisma/client';
+import { EmploymentType, JobOfferStatus, PaymentFlow } from '@prisma/client';
 import { MatchingService } from '../../matching/matching.service';
 import { REDIS_CONNECTION } from '../../../common/services/redis/redis.constants';
 import { GeocodingService } from '../../../common/services/geocoding/geocoding.service';
@@ -363,6 +363,59 @@ describe('JobOfferService', () => {
       expect(result.data).toHaveLength(1);
       expect(result.data[0]?.id).toBe('offer-open');
       expect(result.nextCursor).toBeNull();
+    });
+  });
+
+  describe('the closing date is required only for a MISSION', () => {
+    /**
+     * A one-off gig has nothing to schedule against without a date — the
+     * reminders, auto-start and expiry that drive it all key off that column.
+     * A CDI, CDD or stage has no single date, so demanding one would force the
+     * employer to invent it.
+     */
+    it('rejects a MISSION with no closing date', () => {
+      const { scheduled_at: _omitted, ...noDate } = baseDto;
+
+      expect(() => service.validateCreateDto(noDate as typeof baseDto)).toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('defaults to MISSION, so an unspecified type still needs a date', () => {
+      // employment_type is optional on the DTO; absent must mean MISSION, or
+      // an old client could post an undated gig by simply not sending it.
+      const { scheduled_at: _omitted, ...noDate } = baseDto;
+
+      expect(() =>
+        service.validateCreateDto({
+          ...noDate,
+          employment_type: undefined,
+        } as typeof baseDto),
+      ).toThrow(BadRequestException);
+    });
+
+    it.each([EmploymentType.CDI, EmploymentType.CDD, EmploymentType.STAGE])(
+      'accepts a %s with no closing date',
+      (employment_type) => {
+        const { scheduled_at: _omitted, ...noDate } = baseDto;
+
+        expect(() =>
+          service.validateCreateDto({
+            ...noDate,
+            employment_type,
+          } as typeof baseDto),
+        ).not.toThrow();
+      },
+    );
+
+    it('still rejects a malformed date whatever the type', () => {
+      expect(() =>
+        service.validateCreateDto({
+          ...baseDto,
+          employment_type: EmploymentType.CDI,
+          scheduled_at: 'not-a-date',
+        } as typeof baseDto),
+      ).toThrow(BadRequestException);
     });
   });
 

@@ -40,11 +40,13 @@ const MS_PER_DAY = 1000 * 60 * 60 * 24;
 export interface RankableAssignment {
   status: AssignmentStatus;
   completed_at: Date | null;
+  /** Final fallback for referenceDate when the offer has no closing date. */
+  created_at: Date;
   ratings: { score: number }[];
   job_offer: {
     category_id: string | null;
     amount: unknown; // Prisma.Decimal | number | null
-    scheduled_at: Date;
+    scheduled_at: Date | null;
   };
 }
 
@@ -59,10 +61,17 @@ export interface RankingContext {
   limit?: number;
 }
 
-/** The date a mission is anchored to: completion if done, else when it is/was
- * scheduled (current jobs have no completed_at yet). */
+/**
+ * The date a mission is anchored to: completion if done, else its closing date
+ * (current jobs have no completed_at yet), else when the assignment was
+ * created.
+ *
+ * The third fallback exists because CDI/CDD/STAGE offers carry no closing date
+ * — without it a permanent engagement would have no date at all to sort or
+ * decay by, and the résumé would order it arbitrarily.
+ */
 export function referenceDate(a: RankableAssignment): Date {
-  return a.completed_at ?? a.job_offer.scheduled_at;
+  return a.completed_at ?? a.job_offer.scheduled_at ?? a.created_at;
 }
 
 function toNumberOrNull(amount: unknown): number | null {

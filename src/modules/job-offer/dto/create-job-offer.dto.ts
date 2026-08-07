@@ -12,7 +12,7 @@ import {
   MinLength,
   MaxLength,
 } from 'class-validator';
-import { PaymentFlow } from '@prisma/client';
+import { EmploymentType, PaymentFlow } from '@prisma/client';
 import { LocationDto } from '../../../common/dto/location.dto';
 
 export class CreateJobOfferDto extends LocationDto {
@@ -33,9 +33,27 @@ export class CreateJobOfferDto extends LocationDto {
   @MaxLength(1000)
   description!: string;
 
-  @ApiProperty({ example: '2026-02-15T09:00:00.000Z' })
+  @ApiPropertyOptional({
+    enum: EmploymentType,
+    default: EmploymentType.MISSION,
+    description:
+      'What kind of engagement this is. MISSION (the default) is a one-off gig ' +
+      'and is the only type that requires a closing date.',
+  })
+  @IsOptional()
+  @IsEnum(EmploymentType)
+  employment_type?: EmploymentType;
+
+  @ApiPropertyOptional({
+    example: '2026-02-15T09:00:00.000Z',
+    description:
+      'When the offer CLOSES to applications. Required for a MISSION; may be ' +
+      'omitted for CDI/CDD/STAGE, which have no single date. Enforced in the ' +
+      'service, which is the only place that knows both fields.',
+  })
+  @IsOptional()
   @IsDateString()
-  scheduled_at!: string;
+  scheduled_at?: string;
 
   @ApiPropertyOptional({
     example: 15000,

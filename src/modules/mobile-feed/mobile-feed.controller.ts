@@ -99,6 +99,7 @@ const JOB_SEARCH_SELECT = {
   // which city it is in. Selecting only `address` is what left the client's
   // jobLocationDetail() with nothing to add.
   is_remote: true,
+  employment_type: true,
   city: true,
   country_name: true,
   quantity: true,
@@ -578,16 +579,19 @@ export class MobileFeedController {
     const appliedSet = new Set(applied.map((a) => a.job_offer_id));
     const scoreById = new Map(hits.map((h) => [h.id, h.score]));
 
-    const hydrated = offers.map(({ is_remote, country_name, ...o }) => ({
-      ...o,
-      // camelCase because the client reads these by name rather than through
-      // the snake_case passthrough the spread gives the rest.
-      isRemote: is_remote,
-      countryName: country_name,
-      matchScore: scoreById.get(o.id) ?? 0,
-      saved: savedSet.has(o.id),
-      applied: appliedSet.has(o.id),
-    }));
+    const hydrated = offers.map(
+      ({ is_remote, country_name, employment_type, ...o }) => ({
+        ...o,
+        // camelCase because the client reads these by name rather than through
+        // the snake_case passthrough the spread gives the rest.
+        isRemote: is_remote,
+        countryName: country_name,
+        employmentType: employment_type,
+        matchScore: scoreById.get(o.id) ?? 0,
+        saved: savedSet.has(o.id),
+        applied: appliedSet.has(o.id),
+      }),
+    );
 
     if (impression) {
       void this.interactionEvents.recordImpressions({

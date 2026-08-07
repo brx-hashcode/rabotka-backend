@@ -15,7 +15,12 @@ import { SystemConfigService } from '../../system-config/system-config.service';
 import { MatchingService } from '../../matching/matching.service';
 import { InteractionEventService } from '../../recommendation-engine/interaction-event.service';
 import { JobEventsGateway } from '../../ws-notifications/job-events.gateway';
-import { ApplicationStatus, JobOfferStatus, PaymentFlow } from '@prisma/client';
+import {
+  ApplicationStatus,
+  EmploymentType,
+  JobOfferStatus,
+  PaymentFlow,
+} from '@prisma/client';
 
 const JOB_OFFER_ID = 'offer-uuid-1';
 const WORKER_ID = 'worker-uuid-1';
@@ -33,6 +38,7 @@ const mockJobOffer = {
   scheduled_at: hoursFromNow(5),
   amount: 15000,
   payment_flow: PaymentFlow.DAILY,
+  employment_type: EmploymentType.MISSION,
   address: '123 Avenue de la Paix',
   note: null,
   quantity: 1,
