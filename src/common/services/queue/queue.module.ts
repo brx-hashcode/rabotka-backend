@@ -12,6 +12,7 @@ export const VECTOR_INDEX_QUEUE = 'vector-index-queue';
 export const CONTACT_UNLOCK_QUEUE = 'contact-unlock-queue';
 export const POLL_PAYMENT_STATUS_QUEUE = 'poll-payment-status-queue';
 export const WHATSAPP_INBOUND_QUEUE = 'whatsapp-inbound-queue';
+export const USER_FEATURE_QUEUE = 'user-feature-queue';
 
 @Module({})
 export class QueueModule {

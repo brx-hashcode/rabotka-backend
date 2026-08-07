@@ -32,7 +32,7 @@ describe('MobileRecommendationController — worker-feed tiers', () => {
   };
   let matching: { findMatchingWorkersForEmployerProfile: jest.Mock };
   let systemConfig: { getFees: jest.Mock };
-  let interactionEvents: { record: jest.Mock };
+  let interactionEvents: { record: jest.Mock; recordImpressions: jest.Mock };
   let rollout: { versionFor: jest.Mock };
   let engine: { recommendWorkersForEmployer: jest.Mock };
 
@@ -93,7 +93,10 @@ describe('MobileRecommendationController — worker-feed tiers', () => {
       getFees: jest.fn().mockResolvedValue({ reliabilityScoreMin: 50 }),
     };
 
-    interactionEvents = { record: jest.fn().mockResolvedValue(undefined) };
+    interactionEvents = {
+      record: jest.fn().mockResolvedValue(undefined),
+      recordImpressions: jest.fn().mockResolvedValue(0),
+    };
     // Legacy by default — the v2 ranker is behind a rollout flag.
     rollout = { versionFor: jest.fn().mockResolvedValue('legacy') };
     engine = { recommendWorkersForEmployer: jest.fn().mockResolvedValue([]) };
@@ -112,15 +115,17 @@ describe('MobileRecommendationController — worker-feed tiers', () => {
       new ContactedProfilesService(prisma as never),
       // Returns a slug so workerDetail() does not try to mint one; the
       // mint-on-demand path has its own test below.
-      { ensurePortfolioSlug: jest.fn().mockResolvedValue('awa-a1b2c3') } as never,
+      {
+        ensurePortfolioSlug: jest.fn().mockResolvedValue('awa-a1b2c3'),
+      } as never,
     );
   });
 
   it('403s for a WORKER', async () => {
     mockType(ProfileType.WORKER);
-    await expect(
-      controller.workerFeed(reqFor('w1') as never),
-    ).rejects.toThrow(ForbiddenException);
+    await expect(controller.workerFeed(reqFor('w1') as never)).rejects.toThrow(
+      ForbiddenException,
+    );
     expect(
       matching.findMatchingWorkersForEmployerProfile,
     ).not.toHaveBeenCalled();

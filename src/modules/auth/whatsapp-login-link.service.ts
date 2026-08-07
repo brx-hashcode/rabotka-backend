@@ -34,6 +34,18 @@ export type WhatsAppLoginGrant = {
 export const DEFAULT_LOGIN_LANDING = 'home';
 
 /**
+ * Account states allowed to receive a one-tap login code.
+ *
+ * Named rather than inlined so the exclusion is explicit: everything else —
+ * SUSPENDED above all — is refused, and a new AccountStatus has to be added
+ * here deliberately rather than slipping in behind a `!==` comparison.
+ */
+const MINTABLE_STATUSES: ReadonlySet<AccountStatus> = new Set([
+  AccountStatus.ACTIVE,
+  AccountStatus.PENDING_ACTIVATION,
+]);
+
+/**
  * Reads the code and deletes it in the same round-trip, so two taps on a
  * forwarded message cannot both win. Mirrors the OTP verify-and-delete script
  * in `auth.service.ts`; GETDEL would need Redis >= 6.2.
@@ -81,7 +93,15 @@ export class WhatsAppLoginLinkService {
     });
 
     // A suspended or banned account must not get a free session handed to it.
-    if (profile?.status !== AccountStatus.ACTIVE) return null;
+    //
+    // PENDING_ACTIVATION is not that. It is a brand-new user waiting on KYC
+    // review, and signup already hands them a real 30-day session cookie
+    // (profile.controller), so refusing them a one-tap code grants no security
+    // — it only broke the links they are sent while they wait. The KYC-pending
+    // card is sent ONLY to pending profiles, so this guard rejected 100% of its
+    // mints and its button shipped the literal `/s/profile`: not a code, not a
+    // path, just a dead link into the login screen.
+    if (!profile || !MINTABLE_STATUSES.has(profile.status)) return null;
 
     const code = randomBytes(32).toString('base64url');
     await this.redis.set(
