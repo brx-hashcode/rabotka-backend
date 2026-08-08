@@ -16,7 +16,12 @@ import { SystemConfigService } from '../../system-config/system-config.service';
 import { MatchingService } from '../../matching/matching.service';
 import { InteractionEventService } from '../../recommendation-engine/interaction-event.service';
 import { JobEventsGateway } from '../../ws-notifications/job-events.gateway';
-import { ApplicationStatus, JobOfferStatus, PaymentFlow } from '@prisma/client';
+import {
+  ApplicationStatus,
+  EmploymentType,
+  JobOfferStatus,
+  PaymentFlow,
+} from '@prisma/client';
 import { LATE_CANCELLATION_PENALTY_FCFA } from '../application.constants';
 
 const JOB_OFFER_ID = 'offer-uuid-1';
@@ -35,6 +40,7 @@ const mockJobOffer = {
   scheduled_at: hoursFromNow(5),
   amount: 15000,
   payment_flow: PaymentFlow.DAILY,
+  employment_type: EmploymentType.MISSION,
   address: '123 Avenue de la Paix',
   note: null,
   quantity: 1,
@@ -1009,6 +1015,25 @@ describe('ApplicationService', () => {
         expect.objectContaining({ kind: 'completed' }),
       );
     });
+
+    it.each([EmploymentType.CDI, EmploymentType.CDD, EmploymentType.STAGE])(
+      'refuses to complete a %s — it is not a one-off gig',
+      async (type) => {
+        // A permanent or fixed-term engagement has no moment to confirm. Offering
+        // "terminer" there would be misleading, and the error names the type so
+        // the caller can tell this from an ordinary state error.
+        (prisma.application.findUnique as jest.Mock).mockResolvedValue({
+          ...mockApplication,
+          status: ApplicationStatus.ACCEPTED,
+          job_offer: { ...mockJobOffer, employment_type: type },
+        });
+        setupTx();
+
+        await expect(
+          service.markCompletedByWorker(APPLICATION_ID, WORKER_ID),
+        ).rejects.toThrow(BadRequestException);
+      },
+    );
 
     it('records no payment — Rabotka never touches the wage', async () => {
       // The employer pays the worker directly. Recording the wage as a Payment

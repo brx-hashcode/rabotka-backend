@@ -44,7 +44,7 @@ type AppWithOffer = {
   job_offer_id: string;
   job_offer: {
     title: string;
-    scheduled_at: Date;
+    scheduled_at: Date | null;
     amount: number | null;
   };
 };
@@ -231,9 +231,7 @@ async function handleCancelStep1(
 
   if (normalized === '2' || normalized === 'je serai présent') {
     return {
-      reply: [
-        'Annulation annulée. Votre candidature est maintenue.',
-      ],
+      reply: ['Annulation annulée. Votre candidature est maintenue.'],
       clearState: true,
     };
   }
@@ -277,9 +275,7 @@ async function handleCancelStep2(args: CancelStepArgs): Promise<FlowResult> {
   }
   if (normalized === '2' || normalized === 'non') {
     return {
-      reply: [
-        'Annulation annulée. Votre candidature est maintenue.',
-      ],
+      reply: ['Annulation annulée. Votre candidature est maintenue.'],
       clearState: true,
     };
   }
@@ -313,9 +309,7 @@ export async function runCancelApplicationFlow(
 
   if (profile.profile_type !== 'WORKER') {
     return {
-      reply: [
-        '❌ Seuls les travailleurs peuvent annuler leurs candidatures.',
-      ],
+      reply: ['❌ Seuls les travailleurs peuvent annuler leurs candidatures.'],
       clearState: true,
     };
   }
@@ -340,7 +334,14 @@ export async function runCancelApplicationFlow(
   }
 
   const now = new Date();
-  const msUntil = app.job_offer.scheduled_at.getTime() - now.getTime();
+  const scheduledAt = app.job_offer.scheduled_at;
+  // An offer with no closing date has no deadline: it can never be "already
+  // passed", and leaving it is never late. Infinity keeps the arithmetic below
+  // honest without a second branch through the whole flow.
+  const msUntil =
+    scheduledAt === null
+      ? Number.POSITIVE_INFINITY
+      : scheduledAt.getTime() - now.getTime();
   const hoursUntil = msUntil / (60 * 60 * 1000);
 
   if (hoursUntil < 0) {
@@ -351,7 +352,8 @@ export async function runCancelApplicationFlow(
   }
 
   const isLate = hoursUntil < ctx.cancellationThresholdHours;
-  const timeRemainingStr = formatTimeRemaining(msUntil);
+  const timeRemainingStr =
+    scheduledAt === null ? '—' : formatTimeRemaining(msUntil);
 
   const stepArgs: CancelStepArgs = {
     state,

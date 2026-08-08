@@ -23,7 +23,8 @@ export type Candidate = {
   id: string;
   categoryId: string | null;
   employerId: string;
-  scheduledAt: Date;
+  /** Null for an offer with no closing date; `urgency` becomes null too. */
+  scheduledAt: Date | null;
   createdAt: Date;
   amount: number | null;
   paymentFlow: string | null;
