@@ -40,6 +40,7 @@ import { AdminUpdateProfileDto } from './dto/admin-update-profile.dto';
 import { deletedAtFilter } from '../../common/utils/soft-delete.util';
 import {
   AccountStatus,
+  EmploymentType,
   Prisma,
   ProfileType,
   VerificationStatus,
@@ -98,8 +99,13 @@ export type ProfileApplicationItem = {
     id: string;
     title: string;
     scheduledAt: Date | null;
-    amount: number;
+    employmentType: EmploymentType;
+    /** Null when the employer named no price — «À négocier», not «0 FCFA». */
+    amount: number | null;
     address: string | null;
+    isRemote: boolean;
+    city: string | null;
+    countryName: string | null;
     status: string;
   };
 };
@@ -532,8 +538,16 @@ export class ProfileService {
         id: a.job_offer.id,
         title: a.job_offer.title,
         scheduledAt: a.job_offer.scheduled_at,
-        amount: Number(a.job_offer.amount),
+        employmentType: a.job_offer.employment_type,
+        // Number(null) is 0, which reads as "this job pays nothing" rather
+        // than "the price is open".
+        amount: a.job_offer.amount == null ? null : Number(a.job_offer.amount),
         address: a.job_offer.address,
+        // An address alone cannot express a remote job, so the applications
+        // list had a blank where the location goes.
+        isRemote: a.job_offer.is_remote,
+        city: a.job_offer.city,
+        countryName: a.job_offer.country_name,
         status: a.job_offer.status,
       },
     }));
