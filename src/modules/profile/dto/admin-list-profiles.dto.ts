@@ -11,6 +11,7 @@ import {
 } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { AccountStatus, ProfileType, VerificationStatus } from '@prisma/client';
+import { ToBoolean } from '../../../common/utils/query-boolean.util';
 
 function toArray(value: unknown): string[] {
   if (Array.isArray(value)) return value.filter((v) => typeof v === 'string');
@@ -21,17 +22,6 @@ function toArray(value: unknown): string[] {
       .filter(Boolean);
   }
   return [];
-}
-
-function toBoolean(value: unknown): boolean | undefined {
-  if (value === undefined || value === null) return undefined;
-  if (typeof value === 'boolean') return value;
-  if (typeof value === 'string') {
-    const lower = value.toLowerCase();
-    if (lower === 'true' || lower === '1') return true;
-    if (lower === 'false' || lower === '0') return false;
-  }
-  return undefined;
 }
 
 export class AdminListProfilesDto {
@@ -82,7 +72,7 @@ export class AdminListProfilesDto {
 
   @ApiPropertyOptional({ description: 'Filter by WhatsApp connected' })
   @IsOptional()
-  @Transform(({ value }) => toBoolean(value))
+  @ToBoolean()
   @IsBoolean()
   whatsapp_connected?: boolean;
 
@@ -98,10 +88,11 @@ export class AdminListProfilesDto {
   verification_status?: VerificationStatus[];
 
   @ApiPropertyOptional({
-    description: 'When true, list archived (soft-deleted) rows instead of active',
+    description:
+      'When true, list archived (soft-deleted) rows instead of active',
   })
   @IsOptional()
-  @Transform(({ value }) => value === 'true' || value === true)
+  @ToBoolean(false)
   @IsBoolean()
   deleted?: boolean;
 }

@@ -1,6 +1,7 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import { IsBoolean, IsInt, IsOptional, Max, Min } from 'class-validator';
+import { ToBoolean } from '../../../common/utils/query-boolean.util';
 
 export class GraphQueryDto {
   @ApiPropertyOptional({
@@ -19,16 +20,17 @@ export class GraphQueryDto {
     default: true,
   })
   @IsOptional()
-  @Transform(({ value }) => value !== 'false' && value !== false)
+  @ToBoolean(true)
   @IsBoolean()
   includeApplications?: boolean;
 
   @ApiPropertyOptional({
-    description: 'Include links where the employer only paid to unlock a contact.',
+    description:
+      'Include links where the employer only paid to unlock a contact.',
     default: true,
   })
   @IsOptional()
-  @Transform(({ value }) => value !== 'false' && value !== false)
+  @ToBoolean(true)
   @IsBoolean()
   includeContacts?: boolean;
 
