@@ -94,11 +94,15 @@ export class ContactUnlockService {
   }
 
   private shouldReopenOffer(params: {
-    scheduledAt: Date;
+    scheduledAt: Date | null;
     currentStatus: JobOfferStatus;
     now: Date;
   }): boolean {
-    if (params.scheduledAt <= params.now) return false;
+    // Null means no closing date, so the offer cannot be in the past — it stays
+    // reopenable until something else closes it.
+    if (params.scheduledAt !== null && params.scheduledAt <= params.now) {
+      return false;
+    }
     if (
       params.currentStatus === JobOfferStatus.IN_PROGRESS ||
       params.currentStatus === JobOfferStatus.COMPLETED
@@ -357,15 +361,20 @@ export class ContactUnlockService {
     // Hard deadline: 2h before job starts (so both parties can exchange contacts in time).
     // Soft window: expiryHours from SystemConfig (default 48h) from now.
     // Whichever is sooner is used; minimum 2h from now if job is imminent.
-    const twoHBeforeJob = new Date(
-      jobOffer.scheduled_at.getTime() - 2 * 60 * 60 * 1000,
-    );
     const configWindow = new Date(
       Date.now() + fees.expiryHours * 60 * 60 * 1000,
     );
     const minExpiry = new Date(Date.now() + 2 * 60 * 60 * 1000);
+    // With no closing date there is no job start to be two hours ahead of, so
+    // only the soft config window applies.
+    const twoHBeforeJob =
+      jobOffer.scheduled_at === null
+        ? null
+        : new Date(jobOffer.scheduled_at.getTime() - 2 * 60 * 60 * 1000);
     const preferredExpiry =
-      twoHBeforeJob < configWindow ? twoHBeforeJob : configWindow;
+      twoHBeforeJob !== null && twoHBeforeJob < configWindow
+        ? twoHBeforeJob
+        : configWindow;
     const expiresAt = preferredExpiry > minExpiry ? preferredExpiry : minExpiry;
 
     const isMultiPerson = (jobOffer.quantity ?? 1) > 1;

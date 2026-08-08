@@ -192,7 +192,9 @@ export class ResumeService {
 
     const experiences: ResumeJob[] = assignments.map((a) => {
       const job = a.job_offer;
-      const date = a.completed_at ?? job.scheduled_at;
+      // Same anchor as referenceDate: completion, then closing date, then
+      // when the assignment was created.
+      const date = a.completed_at ?? job.scheduled_at ?? a.created_at;
       const inProgress = a.status === AssignmentStatus.CONFIRMED;
       return {
         period: date.toLocaleDateString('fr-FR').toUpperCase(),

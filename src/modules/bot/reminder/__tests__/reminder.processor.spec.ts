@@ -227,6 +227,31 @@ describe('ReminderProcessor', () => {
       );
     });
 
+    it('retires an undated offer on age, since it has no date to be past', async () => {
+      // This scan is the ONLY thing that ever retires an offer, and it filtered
+      // purely on scheduled_at — so a CDI/CDD/STAGE, which carries no closing
+      // date, would sit ACTIVE in the feed forever.
+      prisma.jobOffer.findMany
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([]);
+      prisma.application.findMany.mockResolvedValue([] as never);
+
+      await processor.process({ data: { type: 'scan' } });
+
+      const overdueQuery = prisma.jobOffer.findMany.mock.calls[1][0] as {
+        where: { OR: unknown[] };
+      };
+      expect(overdueQuery.where.OR).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ scheduled_at: { lt: expect.any(Date) } }),
+          expect.objectContaining({
+            scheduled_at: null,
+            created_at: { lt: expect.any(Date) },
+          }),
+        ]),
+      );
+    });
+
     it('cancels uncommitted applicants and notifies them when an offer expires', async () => {
       prisma.jobOffer.findMany
         .mockResolvedValueOnce([]) // offersToAutoStart

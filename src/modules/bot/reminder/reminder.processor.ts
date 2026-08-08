@@ -26,6 +26,16 @@ const REMINDER_START_SENT_KEY = 'reminder:sent:start:';
 const SENT_KEY_TTL = 48 * 60 * 60;
 const SCAN_INTERVAL_MS = 15 * 60 * 1000;
 
+/**
+ * How long an offer with no closing date stays open.
+ *
+ * CDI/CDD/STAGE offers carry no date, so the expiry scan has nothing to compare
+ * against and they would never retire. Thirty days is long enough that a
+ * genuine permanent search is not cut short, and short enough that a forgotten
+ * offer does not haunt the feed indefinitely.
+ */
+const UNDATED_OFFER_TTL_DAYS = 30;
+
 // CAS: only writes if the key is absent OR current flowId matches expectedFlowId.
 const LUA_CAS_SET = `
 local current = redis.call('GET', KEYS[1])
@@ -397,12 +407,22 @@ export class ReminderProcessor {
   }
 
   private async expireEmptyOverdueOffers(now: Date): Promise<void> {
+    // An offer with no closing date — CDI, CDD, stage — would otherwise never
+    // expire, because this scan is the ONLY thing that ever retires an offer
+    // and it filters on a date those rows do not have. They would sit ACTIVE in
+    // the feed forever. Age since posting is the honest substitute.
+    const undatedCutoff = new Date(
+      now.getTime() - UNDATED_OFFER_TTL_DAYS * 24 * 60 * 60 * 1000,
+    );
     const overdue = await this.prisma.jobOffer.findMany({
       where: {
         status: {
           in: [JobOfferStatus.ACTIVE, JobOfferStatus.PARTIALLY_FILLED],
         },
-        scheduled_at: { lt: now },
+        OR: [
+          { scheduled_at: { lt: now } },
+          { scheduled_at: null, created_at: { lt: undatedCutoff } },
+        ],
         applications: {
           none: {
             status: {
@@ -820,7 +840,7 @@ export class ReminderProcessor {
     }
 
     try {
-      const time = app.job_offer.scheduled_at.toLocaleTimeString('fr-FR', {
+      const time = app.job_offer.scheduled_at!.toLocaleTimeString('fr-FR', {
         hour: '2-digit',
         minute: '2-digit',
         timeZone: APP_TIMEZONE,
