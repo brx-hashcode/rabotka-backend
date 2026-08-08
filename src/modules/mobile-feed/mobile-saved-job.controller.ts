@@ -28,6 +28,7 @@ import { ProfileAuthGuard } from '../auth/guards/profile-auth.guard';
 import type { ProfileAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
 import { JobOfferService } from '../job-offer/job-offer.service';
 import { InteractionEventService } from '../recommendation-engine/interaction-event.service';
+import { toWorkerJobShape } from './worker-job-shape';
 
 /**
  * Worker bookmarks ("save a job for later"). Save/unsave a job offer and list the
@@ -168,8 +169,11 @@ export class MobileSavedJobController {
       : [];
     const appliedSet = new Set(applied.map((a) => a.job_offer_id));
 
+    // findById returns the service's snake_case shape; the worker app expects
+    // isRemote/employmentType/countryName in camelCase, which a bare spread
+    // does not give it.
     const items = offers.map((o) => ({
-      ...o,
+      ...toWorkerJobShape(o),
       matchScore: 0,
       saved: true,
       applied: appliedSet.has(o.id),

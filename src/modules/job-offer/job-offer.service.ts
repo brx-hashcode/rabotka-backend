@@ -42,6 +42,7 @@ import {
 import {
   AccountStatus,
   ApplicationStatus,
+  EmploymentType,
   JobOfferStatus,
   PaymentFlow,
   Prisma,
@@ -77,17 +78,21 @@ const EMPLOYER_DELETABLE_JOB_OFFER_STATUSES: JobOfferStatus[] = [
  * by, so paging can resume at an exact position instead of guessing from an id.
  */
 type OpenSlotsCursor = {
-  scheduledAt: Date;
+  /** Null for an offer with no closing date — those sort last. */
+  scheduledAt: Date | null;
   createdAt: Date;
   id: string;
 };
 
 function encodeOpenSlotsCursor(row: {
-  scheduled_at: Date;
+  scheduled_at: Date | null;
   created_at: Date;
   id: string;
 }): string {
-  const raw = `${row.scheduled_at.toISOString()}|${row.created_at.toISOString()}|${row.id}`;
+  // An empty first segment encodes "no closing date". It has to be
+  // representable: undated offers sort last, so a cursor landing on one must be
+  // able to say so, or the next page restarts from the dated rows.
+  const raw = `${row.scheduled_at?.toISOString() ?? ''}|${row.created_at.toISOString()}|${row.id}`;
   return Buffer.from(raw, 'utf8').toString('base64url');
 }
 
@@ -102,10 +107,14 @@ function decodeOpenSlotsCursor(cursor?: string): OpenSlotsCursor | null {
     const [scheduledAt, createdAt, id] = Buffer.from(cursor, 'base64url')
       .toString('utf8')
       .split('|');
-    if (!scheduledAt || !createdAt || !id) return null;
-    const scheduled = new Date(scheduledAt);
+    // `scheduledAt` may legitimately be empty — that is the undated marker.
+    if (scheduledAt === undefined || !createdAt || !id) return null;
+    const scheduled = scheduledAt === '' ? null : new Date(scheduledAt);
     const created = new Date(createdAt);
-    if (Number.isNaN(scheduled.getTime()) || Number.isNaN(created.getTime())) {
+    if (
+      (scheduled !== null && Number.isNaN(scheduled.getTime())) ||
+      Number.isNaN(created.getTime())
+    ) {
       return null;
     }
     return { scheduledAt: scheduled, createdAt: created, id };
@@ -130,12 +139,25 @@ export type AdminJobOfferListItem = {
   title: string;
   category: { id: string; name: string } | null;
   description: string;
-  scheduledAt: string;
-  amount: number;
+  /** Null for an offer with no closing date — CDI/CDD/STAGE. */
+  scheduledAt: string | null;
+  employmentType: EmploymentType;
+  /**
+   * Null when the employer named no price — «Laisser vide si pas de prix fixe».
+   * This was `number`, and the mappers coerced with `Number(offer.amount)`,
+   * which turns null into 0. The back office then showed «0 FCFA» for an
+   * open price, and saving the form wrote that 0 back over the null.
+   */
+  amount: number | null;
   paymentFlow: PaymentFlow | null;
   /** Null for a remote job — render `isRemote` instead of an empty line. */
   address: string | null;
   isRemote: boolean;
+  /** The structured location. Absent here, the admin form's country and city
+      selects rendered empty for an offer that has both. */
+  city: string | null;
+  countryCode: string | null;
+  countryName: string | null;
   note: string | null;
   quantity: number;
   status: string;
@@ -174,12 +196,13 @@ export type JobOfferListItem = {
   reference: string;
   title: string;
   description: string;
-  scheduled_at: Date;
+  scheduled_at: Date | null;
   amount: number | null;
   payment_flow: PaymentFlow | null;
   /** Null for a remote job — render `is_remote` instead of an empty line. */
   address: string | null;
   is_remote: boolean;
+  employment_type: EmploymentType;
   /** Where the job actually is. An address alone hides the city and country. */
   city: string | null;
   country_name: string | null;
@@ -304,12 +327,12 @@ export class JobOfferService {
 
     this.validateCreateDto(dto);
 
-    const scheduledAt = new Date(dto.scheduled_at);
+    const scheduledAt = dto.scheduled_at ? new Date(dto.scheduled_at) : null;
     const now = new Date();
     const minDate = new Date(
       now.getTime() + MIN_HOURS_FROM_NOW * 60 * 60 * 1000,
     );
-    if (scheduledAt < minDate) {
+    if (scheduledAt !== null && scheduledAt < minDate) {
       throw new BadRequestException(
         `La date doit être au moins ${MIN_HOURS_FROM_NOW} heures dans le futur`,
       );
@@ -320,6 +343,7 @@ export class JobOfferService {
       title: dto.title.trim(),
       description: dto.description.trim(),
       scheduled_at: scheduledAt,
+      employment_type: dto.employment_type ?? EmploymentType.MISSION,
       amount: dto.amount,
       payment_flow: dto.payment_flow,
       is_remote: dto.isRemote ?? false,
@@ -524,11 +548,14 @@ export class JobOfferService {
       reference: string;
       title: string;
       description: string;
-      scheduled_at: Date;
+      scheduled_at: Date | null;
       amount: unknown;
       payment_flow: PaymentFlow | null;
       address: string | null;
       is_remote: boolean;
+      employment_type: EmploymentType;
+      city: string | null;
+      country_name: string | null;
       latitude: number | null;
       longitude: number | null;
       note: string | null;
@@ -548,13 +575,26 @@ export class JobOfferService {
     // every column sorts the same way. The previous `jo.id > cursor` compared a
     // column the query never ordered by, so paging both skipped and repeated
     // offers regardless of the in-memory re-sort below.
-    const keyset = cursor
-      ? Prisma.sql`AND (
-          jo.scheduled_at > ${cursor.scheduledAt}
-          OR (jo.scheduled_at = ${cursor.scheduledAt} AND jo.created_at < ${cursor.createdAt})
-          OR (jo.scheduled_at = ${cursor.scheduledAt} AND jo.created_at = ${cursor.createdAt} AND jo.id > ${cursor.id}::uuid)
-        )`
-      : Prisma.empty;
+    //
+    // Two branches, because the sort is `scheduled_at ASC NULLS LAST`: an
+    // undated offer sorts after every dated one, and SQL's three-valued logic
+    // will not express that on its own — `NULL > x` is unknown, not false, so a
+    // single predicate silently drops rows.
+    const keyset = !cursor
+      ? Prisma.empty
+      : cursor.scheduledAt === null
+        ? // Already inside the undated block: only later undated rows remain.
+          Prisma.sql`AND jo.scheduled_at IS NULL AND (
+            jo.created_at < ${cursor.createdAt}
+            OR (jo.created_at = ${cursor.createdAt} AND jo.id > ${cursor.id}::uuid)
+          )`
+        : // Still in the dated block: later dated rows, then all undated ones.
+          Prisma.sql`AND (
+            jo.scheduled_at IS NULL
+            OR jo.scheduled_at > ${cursor.scheduledAt}
+            OR (jo.scheduled_at = ${cursor.scheduledAt} AND jo.created_at < ${cursor.createdAt})
+            OR (jo.scheduled_at = ${cursor.scheduledAt} AND jo.created_at = ${cursor.createdAt} AND jo.id > ${cursor.id}::uuid)
+          )`;
 
     // Prisma doesn't support HAVING on aggregates in findMany so we use $queryRaw.
     // Parameters are passed positionally as $1, $2, … to prevent SQL injection.
@@ -564,11 +604,14 @@ export class JobOfferService {
         reference: string;
         title: string;
         description: string;
-        scheduled_at: Date;
+        scheduled_at: Date | null;
         amount: unknown;
         payment_flow: PaymentFlow | null;
         address: string | null;
         is_remote: boolean;
+        employment_type: EmploymentType;
+        city: string | null;
+        country_name: string | null;
         latitude: number | null;
         longitude: number | null;
         note: string | null;
@@ -589,6 +632,10 @@ export class JobOfferService {
         jo.amount,
         jo.payment_flow,
         jo.address,
+        jo.is_remote,
+        jo.employment_type,
+        jo.city,
+        jo.country_name,
         jo.latitude,
         jo.longitude,
         jo.note,
@@ -602,7 +649,10 @@ export class JobOfferService {
       LEFT JOIN applications a ON a.job_offer_id = jo.id
       WHERE
         jo.status IN ('ACTIVE', 'PARTIALLY_FILLED')
-        AND jo.scheduled_at > ${minScheduledAt}
+        -- An undated offer has no closing date to be past, so the floor
+        -- cannot apply to it. Without the IS NULL branch it would be excluded
+        -- from the entire open feed.
+        AND (jo.scheduled_at IS NULL OR jo.scheduled_at > ${minScheduledAt})
         ${keyset}
         ${
           excludeWorkerId
@@ -615,7 +665,7 @@ export class JobOfferService {
         }
       GROUP BY jo.id
       HAVING COUNT(a.id) FILTER (WHERE a.status = 'ACCEPTED') < jo.quantity
-      ORDER BY jo.scheduled_at ASC, jo.created_at DESC
+      ORDER BY jo.scheduled_at ASC NULLS LAST, jo.created_at DESC
       LIMIT ${take}
     `;
 
@@ -672,7 +722,12 @@ export class JobOfferService {
                   }),
                 )
               : 0.5;
-          const urgency = urgencyScore(o.scheduled_at);
+          // This is a simple weighted display re-sort, not the v2 ranker's
+          // null-redistributing mean — there is nowhere to redistribute to, so
+          // an undated offer takes the neutral midpoint rather than 0, which
+          // would sink it beneath every dated offer for no reason.
+          const urgency =
+            o.scheduled_at === null ? 0.5 : urgencyScore(o.scheduled_at);
           const category =
             o.category_id && categorySet.has(o.category_id) ? 1.0 : 0.0;
           return 0.45 * prox + 0.3 * urgency + 0.25 * category;
@@ -1022,6 +1077,23 @@ export class JobOfferService {
     return this.toListItem(updated);
   }
 
+  /**
+   * Whether this kind of engagement needs a closing date.
+   *
+   * A MISSION is a one-off gig: without a date there is nothing to schedule
+   * against, and the reminders, auto-start and expiry that drive it all key off
+   * that column. A CDI, CDD or stage has no single date, so demanding one would
+   * force the employer to invent it.
+   *
+   * One predicate rather than the condition repeated at each of the three
+   * places that enforce the date — those drifted apart once already.
+   */
+  requiresClosingDate(employmentType?: EmploymentType | null): boolean {
+    return (
+      (employmentType ?? EmploymentType.MISSION) === EmploymentType.MISSION
+    );
+  }
+
   validateCreateDto(dto: CreateJobOfferDto): void {
     if (
       !dto.title ||
@@ -1041,8 +1113,13 @@ export class JobOfferService {
         `La description doit contenir entre ${DESCRIPTION_MIN} et ${DESCRIPTION_MAX} caractères`,
       );
     }
-    const scheduledAt = new Date(dto.scheduled_at);
-    if (Number.isNaN(scheduledAt.getTime())) {
+    if (!dto.scheduled_at && this.requiresClosingDate(dto.employment_type)) {
+      throw new BadRequestException(
+        'La date de clôture est requise pour une mission',
+      );
+    }
+    const scheduledAt = dto.scheduled_at ? new Date(dto.scheduled_at) : null;
+    if (scheduledAt !== null && Number.isNaN(scheduledAt.getTime())) {
       throw new BadRequestException('Format de date invalide');
     }
     if (
@@ -1183,11 +1260,15 @@ export class JobOfferService {
           ? null
           : { id: o.category.id, name: o.category.name },
       description: o.description,
-      scheduledAt: o.scheduled_at.toISOString(),
-      amount: Number(o.amount),
+      scheduledAt: o.scheduled_at?.toISOString() ?? null,
+      employmentType: o.employment_type,
+      amount: o.amount == null ? null : Number(o.amount),
       paymentFlow: o.payment_flow,
       address: o.address,
       isRemote: o.is_remote,
+      city: o.city,
+      countryCode: o.country_code,
+      countryName: o.country_name,
       note: o.note,
       quantity: o.quantity,
       status: o.status,
@@ -1263,11 +1344,15 @@ export class JobOfferService {
           ? null
           : { id: offer.category.id, name: offer.category.name },
       description: offer.description,
-      scheduledAt: offer.scheduled_at.toISOString(),
-      amount: Number(offer.amount),
+      scheduledAt: offer.scheduled_at?.toISOString() ?? null,
+      employmentType: offer.employment_type,
+      amount: offer.amount == null ? null : Number(offer.amount),
       paymentFlow: offer.payment_flow,
       address: offer.address,
       isRemote: offer.is_remote,
+      city: offer.city,
+      countryCode: offer.country_code,
+      countryName: offer.country_name,
       note: offer.note,
       quantity: offer.quantity,
       status: offer.status,
@@ -1433,8 +1518,14 @@ export class JobOfferService {
     if (dto.title !== undefined) data.title = dto.title.trim();
     if (dto.description !== undefined)
       data.description = dto.description.trim();
-    if (dto.scheduledAt !== undefined)
-      data.scheduled_at = new Date(dto.scheduledAt);
+    // Explicit null clears the closing date — the only way to turn a dated
+    // offer into an open-ended one. `undefined` still means "leave alone".
+    if (dto.scheduledAt !== undefined) {
+      data.scheduled_at = dto.scheduledAt === null ? null : new Date(dto.scheduledAt);
+    }
+    if (dto.employmentType !== undefined) {
+      data.employment_type = dto.employmentType;
+    }
     if (dto.amount !== undefined) data.amount = dto.amount ?? null;
     if (dto.paymentFlow !== undefined)
       data.payment_flow = dto.paymentFlow ?? null;
@@ -1484,13 +1575,17 @@ export class JobOfferService {
       reference: string;
       title: string;
       description: string;
-      scheduled_at: Date;
+      scheduled_at: Date | null;
       amount: unknown;
       payment_flow: PaymentFlow | null;
       address: string | null;
       is_remote?: boolean;
-      city?: string | null;
-      country_name?: string | null;
+      // Required, not optional-with-a-default: an `?? MISSION` fallback here
+      // silently relabelled every CDI/CDD/STAGE as a mission whenever a caller's
+      // `select` forgot the column. Let the compiler catch that instead.
+      employment_type: EmploymentType;
+      city: string | null;
+      country_name: string | null;
       note: string | null;
       quantity: number;
       status: string;
@@ -1509,8 +1604,9 @@ export class JobOfferService {
       payment_flow: offer.payment_flow,
       address: offer.address,
       is_remote: offer.is_remote ?? false,
-      city: offer.city ?? null,
-      country_name: offer.country_name ?? null,
+      employment_type: offer.employment_type,
+      city: offer.city,
+      country_name: offer.country_name,
       note: offer.note,
       quantity: offer.quantity,
       acceptedCount,

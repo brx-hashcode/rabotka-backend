@@ -11,6 +11,7 @@ import {
 } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
+import { ToBoolean } from '../../../common/utils/query-boolean.util';
 
 function toArray(value: unknown): string[] {
   if (Array.isArray(value)) return value.filter((v) => typeof v === 'string');
@@ -59,10 +60,11 @@ export class AdminListUsersDto {
   role?: UserRole[];
 
   @ApiPropertyOptional({
-    description: 'When true, list archived (soft-deleted) rows instead of active',
+    description:
+      'When true, list archived (soft-deleted) rows instead of active',
   })
   @IsOptional()
-  @Transform(({ value }) => value === 'true' || value === true)
+  @ToBoolean(false)
   @IsBoolean()
   deleted?: boolean;
 }
