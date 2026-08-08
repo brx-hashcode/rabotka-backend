@@ -9,6 +9,7 @@ import {
 import { Transform, Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { PaymentRequestStatus } from '@prisma/client';
+import { ToBoolean } from '../../../common/utils/query-boolean.util';
 
 export class ListPaymentRequestsDto {
   @ApiPropertyOptional({ default: 1 })
@@ -32,10 +33,11 @@ export class ListPaymentRequestsDto {
   status?: PaymentRequestStatus;
 
   @ApiPropertyOptional({
-    description: 'When true, list archived (soft-deleted) rows instead of active',
+    description:
+      'When true, list archived (soft-deleted) rows instead of active',
   })
   @IsOptional()
-  @Transform(({ value }) => value === 'true' || value === true)
+  @ToBoolean(false)
   @IsBoolean()
   deleted?: boolean;
 }

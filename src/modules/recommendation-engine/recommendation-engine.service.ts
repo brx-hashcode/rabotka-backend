@@ -204,7 +204,11 @@ export class RecommendationEngineService {
         // when there is more than one source to agree.
         cf: pools.size > 1 ? clamp01((f.sources - 1) / (pools.size - 1)) : null,
         prox: this.proximityTerm(workerPlace, c, features),
-        urgency: urgencyScore(c.scheduledAt),
+        // Null, not 0.5. An offer with no closing date carries no urgency
+        // evidence at all, and computeRelevance drops a null term and
+        // redistributes its weight — whereas a constant would move every score
+        // by the same amount, ranking nothing while still spending 0.18.
+        urgency: c.scheduledAt === null ? null : urgencyScore(c.scheduledAt),
         fresh: freshnessScore(c.createdAt),
         quality: quality.get(c.employerId) ?? null,
         payFit: this.payFitTerm(c, features),

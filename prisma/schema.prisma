@@ -151,6 +151,23 @@ enum PaymentFlow {
   MONTHLY
 }
 
+/// What kind of engagement an offer is.
+///
+/// Named EmploymentType rather than ContractType because `Contract` already
+/// means the generated PDF agreement attached to an application — two meanings
+/// for one word is how PaymentFlow/payment_flow drifted.
+///
+/// MISSION is the one-off gig Rabotka started with and remains the default, so
+/// every offer that predates this enum keeps exactly its current semantics. It
+/// is also the only type that requires a date, and the only one that can be
+/// completed: a CDI is never "terminated" the way a gig is.
+enum EmploymentType {
+  MISSION
+  CDD
+  CDI
+  STAGE
+}
+
 enum WalletOwnerType {
   SYSTEM
   USER
@@ -630,7 +647,19 @@ model JobOffer {
   reference               String         @unique
   title                   String
   description             String         @db.Text
-  scheduled_at            DateTime
+  employment_type         EmploymentType @default(MISSION)
+  /// When the offer CLOSES — the point after which it stops accepting
+  /// applications. Shown as «Date de clôture».
+  ///
+  /// Null only for CDI/CDD/STAGE: a permanent role has no single hour, while a
+  /// MISSION still requires one. Null means the offer never expires on a date,
+  /// so `expireEmptyOverdueOffers` falls back to created_at + 30 days — without
+  /// that it would sit ACTIVE forever, since expiry is the only thing that ever
+  /// retires an offer.
+  ///
+  /// The column keeps its old name while the meaning has moved; renaming it to
+  /// `closes_at` touches ~50 call sites and is deliberately a separate change.
+  scheduled_at            DateTime?
   amount                  Decimal?       @db.Decimal(10, 2)
   payment_flow            PaymentFlow?
   /// Null for a remote job, which has no site to travel to. Everything that

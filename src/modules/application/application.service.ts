@@ -31,6 +31,7 @@ import {
   ApplicationStatus,
   AssignmentStatus,
   BillingStatus,
+  EmploymentType,
   InteractionActor,
   InteractionKind,
   InteractionObject,
@@ -90,7 +91,8 @@ export type AdminApplicationPenaltyItem = {
 };
 
 export type AdminApplicationDetailResponse = AdminApplicationListItem & {
-  jobScheduledAt: string;
+  /** Null for an offer with no closing date — CDI/CDD/STAGE. */
+  jobScheduledAt: string | null;
   jobAmount: number;
   jobAddress: string;
   jobPaymentFlow: string | null;
@@ -116,7 +118,7 @@ export type ApplicationListItem = {
   job_offer?: {
     id: string;
     title: string;
-    scheduled_at: Date;
+    scheduled_at: Date | null;
     amount: number;
     address: string | null;
     status: string;
@@ -140,10 +142,15 @@ export type ApplicationWithOffer = ApplicationListItem & {
     id: string;
     title: string;
     description: string;
-    scheduled_at: Date;
+    scheduled_at: Date | null;
     amount: number | null;
     payment_flow: string | null;
     address: string | null;
+    /** Address alone cannot say "remote", and a blank line is what the
+        applications list rendered for every remote offer. */
+    is_remote: boolean;
+    city: string | null;
+    country_name: string | null;
     note: string | null;
     status: string;
     employer_id: string;
@@ -177,6 +184,11 @@ const WORKER_MISSION_SELECT = {
       title: true,
       description: true,
       scheduled_at: true,
+      // The worker's mission screen gates "Terminer & noter" on this: only a
+      // MISSION can be completed. Unselected, it arrived undefined and the
+      // client's `?? MISSION` default showed the button on every CDI, where the
+      // API then rejected it.
+      employment_type: true,
       amount: true,
       address: true,
       status: true,
@@ -208,7 +220,9 @@ export type WorkerMissionCard = {
     id: string;
     title: string;
     description: string;
-    scheduledAt: string;
+    /** Null for an offer with no closing date — CDI/CDD/STAGE. */
+    scheduledAt: string | null;
+    employmentType: EmploymentType;
     amount: number | null;
     address: string | null;
     status: JobOfferStatus;
@@ -954,8 +968,10 @@ export class ApplicationService {
     const now = new Date();
     const scheduledAt = application.job_offer.scheduled_at;
 
-    // Block cancellation after the job has already started
+    // Block cancellation after the job has already started. An offer with no
+    // closing date has not "already started" — there is no instant to be past.
     if (
+      scheduledAt !== null &&
       scheduledAt <= now &&
       application.status === ApplicationStatus.ACCEPTED
     ) {
@@ -964,10 +980,14 @@ export class ApplicationService {
       );
     }
 
-    const hoursUntil =
-      (scheduledAt.getTime() - now.getTime()) / (60 * 60 * 1000);
     const fees = await this.systemConfigService.getFees();
-    const isLateCancellation = hoursUntil < fees.cancellationThresholdHours;
+    // No deadline means nothing to be late for. Penalising a worker against a
+    // date that does not exist would be arbitrary, so an undated engagement is
+    // always free to leave.
+    const isLateCancellation =
+      scheduledAt !== null &&
+      (scheduledAt.getTime() - now.getTime()) / (60 * 60 * 1000) <
+        fees.cancellationThresholdHours;
     const isAccepted = application.status === ApplicationStatus.ACCEPTED;
     const isWaitingPayment =
       application.status === ('WAITING_PAYMENT' as ApplicationStatus);
@@ -1159,6 +1179,8 @@ export class ApplicationService {
       app.status !== ('WAITING_PAYMENT' as ApplicationStatus)
     )
       return false;
+    // Undated engagements carry no penalty — there is no deadline to miss.
+    if (app.job_offer.scheduled_at === null) return false;
     const now = new Date();
     const hoursUntil =
       (app.job_offer.scheduled_at.getTime() - now.getTime()) / (60 * 60 * 1000);
@@ -1588,6 +1610,16 @@ export class ApplicationService {
     if (application.worker_id !== workerId) {
       throw new ForbiddenException("Cette mission n'est pas la vôtre");
     }
+    // Only a one-off gig is ever "finished". A CDI, a CDD or a stage is an
+    // ongoing engagement — there is no moment to confirm, so offering the
+    // action at all would be misleading. Says which type rather than a generic
+    // 400, because the caller cannot otherwise tell this from a state error.
+    if (application.job_offer.employment_type !== EmploymentType.MISSION) {
+      throw new BadRequestException(
+        'Un contrat de type ' +
+          `${application.job_offer.employment_type} ne se termine pas comme une mission ponctuelle.`,
+      );
+    }
     if (
       application.status !== ApplicationStatus.ACCEPTED &&
       application.status !== ApplicationStatus.STARTED &&
@@ -1838,7 +1870,8 @@ export class ApplicationService {
         id: a.job_offer.id,
         title: a.job_offer.title,
         description: a.job_offer.description,
-        scheduledAt: a.job_offer.scheduled_at.toISOString(),
+        scheduledAt: a.job_offer.scheduled_at?.toISOString() ?? null,
+        employmentType: a.job_offer.employment_type,
         amount: a.job_offer.amount == null ? null : Number(a.job_offer.amount),
         address: a.job_offer.address,
         status: a.job_offer.status,
@@ -1930,10 +1963,12 @@ export class ApplicationService {
       });
       // Deduct employer reliability score only for late cancellations (within threshold window)
       const fees = await this.systemConfigService.getFees();
-      const hoursUntilJob =
-        (application.job_offer.scheduled_at.getTime() - now.getTime()) /
-        (60 * 60 * 1000);
-      const isLateCancel = hoursUntilJob < fees.cancellationThresholdHours;
+      // Same rule as the worker side: no closing date, no deadline, no penalty.
+      const scheduledAt = application.job_offer.scheduled_at;
+      const isLateCancel =
+        scheduledAt !== null &&
+        (scheduledAt.getTime() - now.getTime()) / (60 * 60 * 1000) <
+          fees.cancellationThresholdHours;
       if (isLateCancel) {
         const employer = await tx.profile.findUnique({
           where: { id: employerId },
@@ -2216,6 +2251,9 @@ export class ApplicationService {
             scheduled_at: true,
             amount: true,
             address: true,
+            is_remote: true,
+            city: true,
+            country_name: true,
             payment_flow: true,
             status: true,
             quantity: true,
@@ -2252,7 +2290,7 @@ export class ApplicationService {
       id: app.id,
       jobTitle: app.job_offer.title,
       jobOfferId: app.job_offer_id,
-      jobScheduledAt: app.job_offer.scheduled_at.toISOString(),
+      jobScheduledAt: app.job_offer.scheduled_at?.toISOString() ?? null,
       jobAmount: Number(app.job_offer.amount),
       jobAddress: jobLocationLabel(app.job_offer),
       jobPaymentFlow: app.job_offer.payment_flow,
@@ -2517,7 +2555,7 @@ export class ApplicationService {
     job_offer?: {
       id: string;
       title: string;
-      scheduled_at: Date;
+      scheduled_at: Date | null;
       amount: unknown;
       address: string | null;
       status: string;
@@ -2564,10 +2602,13 @@ export class ApplicationService {
       id: string;
       title: string;
       description: string;
-      scheduled_at: Date;
+      scheduled_at: Date | null;
       amount: unknown;
       payment_flow: string | null;
       address: string | null;
+      is_remote: boolean;
+      city: string | null;
+      country_name: string | null;
       note: string | null;
       status: string;
       employer_id: string;
@@ -2598,9 +2639,13 @@ export class ApplicationService {
         title: app.job_offer.title,
         description: app.job_offer.description,
         scheduled_at: app.job_offer.scheduled_at,
-        amount: Number(app.job_offer.amount),
+        amount:
+          app.job_offer.amount == null ? null : Number(app.job_offer.amount),
         payment_flow: app.job_offer.payment_flow,
         address: app.job_offer.address,
+        is_remote: app.job_offer.is_remote,
+        city: app.job_offer.city,
+        country_name: app.job_offer.country_name,
         note: app.job_offer.note,
         status: app.job_offer.status,
         employer_id: app.job_offer.employer_id,

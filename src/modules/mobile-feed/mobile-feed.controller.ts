@@ -17,6 +17,7 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import { toWorkerJobShape } from './worker-job-shape';
 import { withCityFilter } from '../../common/queries/city-filter';
 import {
   ApplicationStatus,
@@ -99,6 +100,7 @@ const JOB_SEARCH_SELECT = {
   // which city it is in. Selecting only `address` is what left the client's
   // jobLocationDetail() with nothing to add.
   is_remote: true,
+  employment_type: true,
   city: true,
   country_name: true,
   quantity: true,
@@ -426,25 +428,19 @@ export class MobileFeedController {
     const savedSet = new Set(saved.map((s) => s.job_offer_id));
     const appliedSet = new Set(applied.map((a) => a.job_offer_id));
 
-    const items = rows.map((r) => ({
-      id: r.id,
-      reference: r.reference,
-      title: r.title,
-      description: r.description,
-      status: r.status,
-      scheduled_at: r.scheduled_at,
+    // Built through toWorkerJobShape rather than field by field: the explicit
+    // list here used to omit is_remote, employment_type, city and country_name
+    // entirely, even though the shared select fetches all four.
+    const items = rows.map(({ category, _count, ...r }) => ({
+      ...toWorkerJobShape(r),
+      // Prisma Decimal → number, which is what the client's type declares.
       amount: r.amount == null ? null : Number(r.amount),
-      payment_flow: r.payment_flow,
-      address: r.address,
-      quantity: r.quantity,
-      acceptedCount: r._count.applications,
-      created_at: r.created_at,
-      categoryId: r.category?.id ?? null,
-      categoryName: r.category?.name ?? null,
+      acceptedCount: _count.applications,
+      categoryId: category?.id ?? null,
+      categoryName: category?.name ?? null,
       matchScore: 0,
       saved: savedSet.has(r.id),
       applied: appliedSet.has(r.id),
-      employer: r.employer,
     }));
 
     // `offset: skip` — otherwise every page restarts at position 0 and
@@ -578,12 +574,8 @@ export class MobileFeedController {
     const appliedSet = new Set(applied.map((a) => a.job_offer_id));
     const scoreById = new Map(hits.map((h) => [h.id, h.score]));
 
-    const hydrated = offers.map(({ is_remote, country_name, ...o }) => ({
-      ...o,
-      // camelCase because the client reads these by name rather than through
-      // the snake_case passthrough the spread gives the rest.
-      isRemote: is_remote,
-      countryName: country_name,
+    const hydrated = offers.map((o) => ({
+      ...toWorkerJobShape(o),
       matchScore: scoreById.get(o.id) ?? 0,
       saved: savedSet.has(o.id),
       applied: appliedSet.has(o.id),
