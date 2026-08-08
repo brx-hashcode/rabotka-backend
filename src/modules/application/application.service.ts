@@ -146,6 +146,11 @@ export type ApplicationWithOffer = ApplicationListItem & {
     amount: number | null;
     payment_flow: string | null;
     address: string | null;
+    /** Address alone cannot say "remote", and a blank line is what the
+        applications list rendered for every remote offer. */
+    is_remote: boolean;
+    city: string | null;
+    country_name: string | null;
     note: string | null;
     status: string;
     employer_id: string;
@@ -179,6 +184,11 @@ const WORKER_MISSION_SELECT = {
       title: true,
       description: true,
       scheduled_at: true,
+      // The worker's mission screen gates "Terminer & noter" on this: only a
+      // MISSION can be completed. Unselected, it arrived undefined and the
+      // client's `?? MISSION` default showed the button on every CDI, where the
+      // API then rejected it.
+      employment_type: true,
       amount: true,
       address: true,
       status: true,
@@ -212,6 +222,7 @@ export type WorkerMissionCard = {
     description: string;
     /** Null for an offer with no closing date — CDI/CDD/STAGE. */
     scheduledAt: string | null;
+    employmentType: EmploymentType;
     amount: number | null;
     address: string | null;
     status: JobOfferStatus;
@@ -1860,6 +1871,7 @@ export class ApplicationService {
         title: a.job_offer.title,
         description: a.job_offer.description,
         scheduledAt: a.job_offer.scheduled_at?.toISOString() ?? null,
+        employmentType: a.job_offer.employment_type,
         amount: a.job_offer.amount == null ? null : Number(a.job_offer.amount),
         address: a.job_offer.address,
         status: a.job_offer.status,
@@ -2239,6 +2251,9 @@ export class ApplicationService {
             scheduled_at: true,
             amount: true,
             address: true,
+            is_remote: true,
+            city: true,
+            country_name: true,
             payment_flow: true,
             status: true,
             quantity: true,
@@ -2591,6 +2606,9 @@ export class ApplicationService {
       amount: unknown;
       payment_flow: string | null;
       address: string | null;
+      is_remote: boolean;
+      city: string | null;
+      country_name: string | null;
       note: string | null;
       status: string;
       employer_id: string;
@@ -2621,9 +2639,13 @@ export class ApplicationService {
         title: app.job_offer.title,
         description: app.job_offer.description,
         scheduled_at: app.job_offer.scheduled_at,
-        amount: Number(app.job_offer.amount),
+        amount:
+          app.job_offer.amount == null ? null : Number(app.job_offer.amount),
         payment_flow: app.job_offer.payment_flow,
         address: app.job_offer.address,
+        is_remote: app.job_offer.is_remote,
+        city: app.job_offer.city,
+        country_name: app.job_offer.country_name,
         note: app.job_offer.note,
         status: app.job_offer.status,
         employer_id: app.job_offer.employer_id,
