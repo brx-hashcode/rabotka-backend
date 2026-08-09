@@ -2,6 +2,7 @@ import { ArcjetModule, detectBot, fixedWindow, shield } from '@arcjet/nest';
 import { Module } from '@nestjs/common';
 import { createArcjetLoggerAdapter } from './common/utils/arcjet-logger.adapter.js';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { validateWhatsappEnv } from './modules/whatsapp/whatsapp.config';
 import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { MailerModule } from '@nestjs-modules/mailer';
@@ -70,6 +71,9 @@ import { HttpOnlyArcjetGuard } from './common/guards/http-only-arcjet.guard';
       envFilePath: ['.env.local', '.env'],
       cache: true,
       expandVariables: true,
+      // Fails the boot naming every blank WhatsApp credential, rather than
+      // letting the process start and drop messages silently.
+      validate: validateWhatsappEnv,
     }),
     ThrottlerModule.forRootAsync({
       imports: [ConfigModule],
