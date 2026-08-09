@@ -22,9 +22,9 @@ describe('TemplateParams', () => {
       date: '12/08',
       jobOfferId: 'offer-1',
     };
-    expect(WHATSAPP_TEMPLATES.jobRecommendation.variables(params)).toMatchObject(
-      { '1': 'Fariol', '6': 'offer-1' },
-    );
+    expect(
+      WHATSAPP_TEMPLATES.jobRecommendation.variables(params),
+    ).toMatchObject({ '1': 'Fariol', '6': 'offer-1' });
   });
 
   it('resolves a no-param template to undefined', () => {

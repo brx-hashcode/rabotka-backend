@@ -8,37 +8,13 @@ export interface ConfigDefault {
   isSecret: boolean;
 }
 
+// Keep in sync with src/modules/system-config/system-config.constants.ts —
+// a test asserts the two lists define the same keys.
+//
+// The `twilio.*` keys were removed when WhatsApp gained a second provider:
+// messaging credentials are environment-only now, for both Twilio and Meta
+// Cloud. See src/modules/whatsapp/whatsapp.config.ts.
 export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
-  // ── TWILIO ────────────────────────────────────────────────────────────────
-  {
-    key: 'twilio.account_sid',
-    value: '',
-    category: ConfigCategory.TWILIO,
-    label: 'Twilio Account SID',
-    isSecret: false,
-  },
-  {
-    key: 'twilio.auth_token',
-    value: '',
-    category: ConfigCategory.TWILIO,
-    label: 'Twilio Auth Token',
-    isSecret: true,
-  },
-  {
-    key: 'twilio.whatsapp_from',
-    value: '',
-    category: ConfigCategory.TWILIO,
-    label: 'Numéro WhatsApp expéditeur (ex: whatsapp:+14155...)',
-    isSecret: false,
-  },
-  {
-    key: 'twilio.sms_from',
-    value: '',
-    category: ConfigCategory.TWILIO,
-    label: 'Numéro SMS expéditeur',
-    isSecret: false,
-  },
-
   // ── FEES ──────────────────────────────────────────────────────────────────
   {
     key: 'fees.late_cancellation_penalty_fcfa',
@@ -404,5 +380,4 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     label: 'Vercel Blob – Read/Write Token',
     isSecret: true,
   },
-
 ];
