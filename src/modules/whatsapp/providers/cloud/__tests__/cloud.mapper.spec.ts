@@ -106,22 +106,66 @@ describe('buildComponents', () => {
     });
   });
 
-  it('emits only a button for a template whose single variable is the suffix', () => {
-    // kycPendingMenu's one variable IS the shortlink destination.
+  it('emits no body for a template whose single variable is the suffix', () => {
+    // kycPendingMenu's one variable IS the shortlink destination, so nothing is
+    // left for the body. It is also a card, hence the header.
     const components = buildComponents(
       'kycPendingMenu',
       WHATSAPP_TEMPLATES.kycPendingMenu.variables(),
     );
-    expect(components.map((c) => c.type)).toEqual(['button']);
+    expect(components.map((c) => c.type)).toEqual(['header', 'button']);
   });
 
-  it('emits nothing for a template with no variables', () => {
-    expect(
-      buildComponents(
-        'welcomeUnregisteredCard',
-        WHATSAPP_TEMPLATES.welcomeUnregisteredCard.variables(),
-      ),
-    ).toEqual([]);
+  it('sends the image on every card, not just at template creation', () => {
+    // Providers differ and it is invisible until a send fails: Twilio bakes the
+    // media into the approved template and takes nothing at send time, Meta
+    // keeps only an example and rejects a send without a header component —
+    // 132012 "Format mismatch, expected IMAGE, received UNKNOWN".
+    const components = buildComponents(
+      'welcomePlatform',
+      WHATSAPP_TEMPLATES.welcomePlatform.variables('home'),
+    );
+    expect(components[0]).toMatchObject({
+      type: 'header',
+      parameters: [
+        {
+          type: 'image',
+          image: { link: expect.stringContaining('cover-rabotka.jpg') },
+        },
+      ],
+    });
+  });
+
+  it.each([
+    'welcomeUnregisteredCard',
+    'welcomePlatform',
+    'kycPendingMenu',
+  ] as const)('%s carries an image header', (key) => {
+    const vars = (
+      WHATSAPP_TEMPLATES[key].variables as (
+        p?: unknown,
+      ) => Record<string, string>
+    )(key === 'welcomePlatform' ? 'home' : undefined);
+    expect(buildComponents(key, vars)[0]?.type).toBe('header');
+  });
+
+  it('emits no header for a template that is not a card', () => {
+    const components = buildComponents(
+      'statusCheck',
+      WHATSAPP_TEMPLATES.statusCheck.variables({
+        jobTitle: 'x',
+        jobOfferId: 'o',
+      }),
+    );
+    expect(components.some((c) => c.type === 'header')).toBe(false);
+  });
+
+  it('emits only the header for a card with no variables', () => {
+    const components = buildComponents(
+      'welcomeUnregisteredCard',
+      WHATSAPP_TEMPLATES.welcomeUnregisteredCard.variables(),
+    );
+    expect(components.map((c) => c.type)).toEqual(['header']);
   });
 
   it('routes a public-page button variable, which carries no login code', () => {
@@ -216,10 +260,11 @@ describe('toTemplatePayload', () => {
 
   it('omits components entirely when there are none', () => {
     // Meta rejects `components: []` on some template shapes, so the key is
-    // absent rather than empty.
+    // absent rather than empty. viewWorkerPortfolio with no variables at all
+    // produces nothing — it is not a card, so there is no header either.
     const payload = toTemplatePayload(
       '+242069917686',
-      'welcomeUnregisteredCard',
+      'viewWorkerPortfolio',
       {},
     );
     expect(payload.template).not.toHaveProperty('components');
