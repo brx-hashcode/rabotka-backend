@@ -152,27 +152,48 @@ myNewTemplate: {
    Params are typed per template — the wrong shape is a compile error.
 
 You do **not** write a `buildComponents`. The Cloud components are derived from
-the same numbered map: body parameters in numeric order, with `urlSuffixVar`
-routed to a `button` / `url` / `index: "0"` component instead. Writing 27 by hand
-would be 27 chances to disagree with the Twilio side about what `{{4}}` means.
+the same numbered map: body parameters in numeric order, with the button
+variable routed to a `button` / `url` / `index: "0"` component instead. Writing
+27 by hand would be 27 chances to disagree with the Twilio side about what
+`{{4}}` means.
+
+Which variable fills the button matters more than it looks. Twilio shares ONE
+`{{n}}` namespace across body and button, so it needs no marking; Meta splits
+them, and a value that belongs in the button but is sent in the body is a
+parameter-count mismatch (132000). `urlSuffixVar` marks it AND injects a login
+code; use **`buttonUrlVar`** when the button takes a variable but the page needs
+no login, as the public portfolio does.
 
 Both the SID and the Cloud name are overridable per environment
 (`TPL_MY_NEW_TEMPLATE`, `TPL_CLOUD_MY_NEW_TEMPLATE`) so a template can be rolled
 back without a deploy. A blank override falls back to the default rather than
 sending nothing.
 
-### ⚠️ The Cloud template names are unverified
+### Recreating templates in the WABA
 
-The `cloud.name` defaults were derived from the template key and cross-checked
-against the names the repo-root `create-*.js` / `test-send-all.js` scripts use.
-**None of them has been checked against the live WABA.** Every one must be
-confirmed against an approved Meta template before `cloud` carries production
-traffic — that is what the parity checklist below is for. Correct any mismatch
-with the `TPL_CLOUD_*` override rather than a code change.
+Rabotka's Twilio templates are approved under **Twilio's** WABA — Twilio is a
+BSP and submits on its own account. Approvals do not transfer between WABAs, so
+going direct meant recreating all 27 in Rabotka's own account.
+`scripts/whatsapp-templates/` does that, reading the approved copy back out of
+the Twilio Content API rather than rewriting it:
+
+```bash
+node_modules/.bin/tsx scripts/whatsapp-templates/generate.ts      # read-only, writes out/
+node_modules/.bin/tsx scripts/whatsapp-templates/create.ts        # plan only
+node_modules/.bin/tsx scripts/whatsapp-templates/create.ts --commit
+node_modules/.bin/tsx scripts/whatsapp-templates/status.ts --watch
+```
+
+`cloud.name` must be the name the template is APPROVED under, which is the
+Twilio `friendly_name`. The defaults started as guesses derived from the key and
+16 of 27 were wrong — the real names are versioned (`rabotka_otp_auth`,
+`rabotka_kyc_pending_menu_v3`). That surfaced in production as
+`132001 Template name does not exist in the translation`, so a test now asserts
+every registry name matches the captured Twilio name.
 
 Categories are our *intent*. Meta stores its own on the approved template and
 reclassifies on submission; `welcomePlatform` in the registry documents that
-costing hours.
+costing hours. `status.ts` flags any template Meta reclassified.
 
 ---
 
@@ -239,7 +260,7 @@ normalized code:
 | `INVALID_RECIPIENT` | 63024, 21211, 63003 | 131026, 131009 | No — mark contact unreachable |
 | `RATE_LIMITED` | 63018, 63021 | 130429, 80007, 131048 | Yes, with backoff |
 | `TEMPLATE_NOT_FOUND` | 63005, 63007 | 132000–132069 | No — alert |
-| `AUTH_FAILED` | 20003 | 190, 102, 10, 200 | No — alert loudly |
+| `AUTH_FAILED` | 20003 | 190, 102, 10, 200, 131005 | No — alert loudly |
 | `SANDBOX_LIMIT_REACHED` | 63038 | — | No — resets next UTC day |
 | `SENDER_IS_RECIPIENT` | 63031 | 131021 | No — check webhook config |
 | `MEDIA_ERROR` | 63019, 63020 | 131052, 131053 | No |
@@ -251,6 +272,26 @@ Note that **only the queued path is retried at all.** Direct
 `sendTemplateMessage` calls from `kyc.service`, `auth.service`,
 `bot-notification.service` and `reminder.processor` return `false` on failure and
 are not retried — that was true under Twilio and is unchanged.
+
+### `131005 Access denied` on sends, while reads still work
+
+A temporary token can go stale WITHOUT reaching its hard expiry. When it does,
+listing templates and reading the phone number keep working, and only sends
+fail — with `131005 Access denied`, whose text points at "the access token or
+permissions", which reads like a misconfiguration.
+
+It is not. **Regenerate the token.**
+
+What this looks like, and what to skip: the account is healthy
+(`GET /{waba-id}?fields=health_status` returns `can_send_message: AVAILABLE` for
+the WABA, business and app), the phone number is `CONNECTED`/`VERIFIED`, and
+`debug_token` reports the token valid with both scopes. A `whatsapp_business_messaging`
+granular scope showing no `target_ids` is NORMAL and is not the cause — a
+working token has exactly the same shape. Meta's own `hello_world` failing the
+same way is the quickest confirmation that it is the token and not our
+templates.
+
+Mapped to `AUTH_FAILED`, so it is not retried: the same token will keep failing.
 
 ### The 24h window
 

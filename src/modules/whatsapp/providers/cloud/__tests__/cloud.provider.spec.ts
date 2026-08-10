@@ -274,6 +274,7 @@ describe('CloudProvider', () => {
       [80007, 'RATE_LIMITED'],
       [132001, 'TEMPLATE_NOT_FOUND'],
       [190, 'AUTH_FAILED'],
+      [131005, 'AUTH_FAILED'],
     ])('maps Meta %i to %s', (code, expected) => {
       expect(cloudErrorCode(code)).toBe(expected);
     });
