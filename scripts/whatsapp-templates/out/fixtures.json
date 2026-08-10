@@ -3,7 +3,6 @@
     "key": "otp",
     "kind": "whatsapp/authentication",
     "content": {
-      "account_sid": "AC7a671e9e64faae647462625fbf1cd104",
       "date_created": "2026-07-14T22:33:32Z",
       "date_updated": "2026-07-14T22:33:48Z",
       "friendly_name": "rabotka_otp_auth",
@@ -34,7 +33,6 @@
     "key": "welcomeUnregisteredCard",
     "kind": "twilio/card",
     "content": {
-      "account_sid": "AC7a671e9e64faae647462625fbf1cd104",
       "date_created": "2026-08-01T22:22:53Z",
       "date_updated": "2026-08-01T22:32:50Z",
       "friendly_name": "rabotka_welcome_unregistered_v3",
@@ -75,7 +73,6 @@
     "key": "welcomePlatform",
     "kind": "twilio/card",
     "content": {
-      "account_sid": "AC7a671e9e64faae647462625fbf1cd104",
       "date_created": "2026-08-05T20:14:30Z",
       "date_updated": "2026-08-05T20:16:50Z",
       "friendly_name": "rabotka_welcome_platform_v4",
@@ -118,7 +115,6 @@
     "key": "kycPendingMenu",
     "kind": "twilio/card",
     "content": {
-      "account_sid": "AC7a671e9e64faae647462625fbf1cd104",
       "date_created": "2026-08-06T23:49:22Z",
       "date_updated": "2026-08-06T23:52:30Z",
       "friendly_name": "rabotka_kyc_pending_menu_v3",
@@ -161,7 +157,6 @@
     "key": "viewWorkerPortfolio",
     "kind": "twilio/call-to-action",
     "content": {
-      "account_sid": "AC7a671e9e64faae647462625fbf1cd104",
       "date_created": "2026-07-24T11:34:33Z",
       "date_updated": "2026-07-25T10:47:40Z",
       "friendly_name": "rabotka_view_worker_portfolio",
@@ -195,7 +190,6 @@
     "key": "profileCreatedWorker",
     "kind": "twilio/call-to-action",
     "content": {
-      "account_sid": "AC7a671e9e64faae647462625fbf1cd104",
       "date_created": "2026-08-03T09:03:04Z",
       "date_updated": "2026-08-03T09:18:57Z",
       "friendly_name": "rabotka_profile_created_kyc_worker_v2",
@@ -229,7 +223,6 @@
     "key": "profileCreatedEmployer",
     "kind": "twilio/call-to-action",
     "content": {
-      "account_sid": "AC7a671e9e64faae647462625fbf1cd104",
       "date_created": "2026-08-03T09:03:05Z",
       "date_updated": "2026-08-03T09:09:01Z",
       "friendly_name": "rabotka_profile_created_kyc_employer_v2",
@@ -263,7 +256,6 @@
     "key": "kyc",
     "kind": "twilio/call-to-action",
     "content": {
-      "account_sid": "AC7a671e9e64faae647462625fbf1cd104",
       "date_created": "2026-08-03T09:04:21Z",
       "date_updated": "2026-08-03T09:17:33Z",
       "friendly_name": "rabotka_kyc_approved_cta_v2",
@@ -297,7 +289,6 @@
     "key": "accountActivatedWorker",
     "kind": "twilio/call-to-action",
     "content": {
-      "account_sid": "AC7a671e9e64faae647462625fbf1cd104",
       "date_created": "2026-08-03T08:00:55Z",
       "date_updated": "2026-08-03T08:04:54Z",
       "friendly_name": "rabotka_account_activated_worker_v4",
@@ -331,7 +322,6 @@
     "key": "accountActivatedEmployer",
     "kind": "twilio/call-to-action",
     "content": {
-      "account_sid": "AC7a671e9e64faae647462625fbf1cd104",
       "date_created": "2026-08-03T08:00:56Z",
       "date_updated": "2026-08-03T08:20:01Z",
       "friendly_name": "rabotka_account_activated_employer_v4",
@@ -365,7 +355,6 @@
     "key": "reminder24h",
     "kind": "twilio/call-to-action",
     "content": {
-      "account_sid": "AC7a671e9e64faae647462625fbf1cd104",
       "date_created": "2026-07-31T05:35:12Z",
       "date_updated": "2026-08-01T04:45:16Z",
       "friendly_name": "rabotka_reminder_24h_cta",
@@ -406,7 +395,6 @@
     "key": "jobRecommendation",
     "kind": "twilio/call-to-action",
     "content": {
-      "account_sid": "AC7a671e9e64faae647462625fbf1cd104",
       "date_created": "2026-07-30T21:40:56Z",
       "date_updated": "2026-07-30T21:43:15Z",
       "friendly_name": "rabotka_job_recommendation_cta",
@@ -444,7 +432,6 @@
     "key": "newApplication",
     "kind": "twilio/call-to-action",
     "content": {
-      "account_sid": "AC7a671e9e64faae647462625fbf1cd104",
       "date_created": "2026-07-30T21:40:54Z",
       "date_updated": "2026-07-30T21:49:09Z",
       "friendly_name": "rabotka_new_application_cta",
@@ -484,7 +471,6 @@
     "key": "applicationAccepted",
     "kind": "twilio/call-to-action",
     "content": {
-      "account_sid": "AC7a671e9e64faae647462625fbf1cd104",
       "date_created": "2026-08-03T09:03:06Z",
       "date_updated": "2026-08-03T09:16:45Z",
       "friendly_name": "rabotka_application_accepted_cta_v2",
@@ -519,7 +505,6 @@
     "key": "applicationAcceptedUnlock",
     "kind": "twilio/call-to-action",
     "content": {
-      "account_sid": "AC7a671e9e64faae647462625fbf1cd104",
       "date_created": "2026-07-31T06:40:51Z",
       "date_updated": "2026-07-31T06:49:19Z",
       "friendly_name": "rabotka_application_accepted_unlock_cta_v2",
@@ -554,7 +539,6 @@
     "key": "applicationRejected",
     "kind": "twilio/call-to-action",
     "content": {
-      "account_sid": "AC7a671e9e64faae647462625fbf1cd104",
       "date_created": "2026-08-03T09:04:23Z",
       "date_updated": "2026-08-03T09:22:16Z",
       "friendly_name": "rabotka_application_rejected_cta_v2",
@@ -587,7 +571,6 @@
     "key": "cancellation",
     "kind": "twilio/call-to-action",
     "content": {
-      "account_sid": "AC7a671e9e64faae647462625fbf1cd104",
       "date_created": "2026-07-31T06:34:02Z",
       "date_updated": "2026-07-31T06:41:11Z",
       "friendly_name": "rabotka_cancellation_cta",
@@ -625,7 +608,6 @@
     "key": "contactUnlocked",
     "kind": "twilio/call-to-action",
     "content": {
-      "account_sid": "AC7a671e9e64faae647462625fbf1cd104",
       "date_created": "2026-08-03T09:04:13Z",
       "date_updated": "2026-08-03T09:11:46Z",
       "friendly_name": "rabotka_contact_unlocked_mutual_v5",
@@ -661,7 +643,6 @@
     "key": "contactUnlockedRecommendation",
     "kind": "twilio/call-to-action",
     "content": {
-      "account_sid": "AC7a671e9e64faae647462625fbf1cd104",
       "date_created": "2026-08-03T09:04:15Z",
       "date_updated": "2026-08-03T09:10:09Z",
       "friendly_name": "rabotka_contact_unlocked_reco_v4",
@@ -697,7 +678,6 @@
     "key": "unlockExpiredConversion",
     "kind": "twilio/call-to-action",
     "content": {
-      "account_sid": "AC7a671e9e64faae647462625fbf1cd104",
       "date_created": "2026-08-03T09:04:20Z",
       "date_updated": "2026-08-03T09:09:43Z",
       "friendly_name": "rabotka_unlock_expired_conversion_cta_v2",
@@ -731,7 +711,6 @@
     "key": "autoStarted",
     "kind": "twilio/call-to-action",
     "content": {
-      "account_sid": "AC7a671e9e64faae647462625fbf1cd104",
       "date_created": "2026-07-31T05:35:16Z",
       "date_updated": "2026-07-31T05:50:06Z",
       "friendly_name": "rabotka_auto_started_cta",
@@ -765,7 +744,6 @@
     "key": "statusCheck",
     "kind": "twilio/call-to-action",
     "content": {
-      "account_sid": "AC7a671e9e64faae647462625fbf1cd104",
       "date_created": "2026-07-31T06:34:03Z",
       "date_updated": "2026-07-31T06:48:08Z",
       "friendly_name": "rabotka_status_check_cta",
@@ -799,7 +777,6 @@
     "key": "offerExpiredApplicant",
     "kind": "twilio/call-to-action",
     "content": {
-      "account_sid": "AC7a671e9e64faae647462625fbf1cd104",
       "date_created": "2026-08-03T09:04:17Z",
       "date_updated": "2026-08-03T09:20:58Z",
       "friendly_name": "rabotka_offer_expired_applicant_cta_v2",
@@ -833,7 +810,6 @@
     "key": "offerExpiredEmployer",
     "kind": "twilio/call-to-action",
     "content": {
-      "account_sid": "AC7a671e9e64faae647462625fbf1cd104",
       "date_created": "2026-07-31T05:35:18Z",
       "date_updated": "2026-07-31T05:45:15Z",
       "friendly_name": "rabotka_offer_expired_employer_cta",
@@ -867,7 +843,6 @@
     "key": "offerUnavailableWorker",
     "kind": "twilio/call-to-action",
     "content": {
-      "account_sid": "AC7a671e9e64faae647462625fbf1cd104",
       "date_created": "2026-08-03T09:04:19Z",
       "date_updated": "2026-08-03T09:15:49Z",
       "friendly_name": "rabotka_offer_unavailable_worker_cta_v2",
@@ -901,7 +876,6 @@
     "key": "reminderStart",
     "kind": "twilio/call-to-action",
     "content": {
-      "account_sid": "AC7a671e9e64faae647462625fbf1cd104",
       "date_created": "2026-07-31T05:35:15Z",
       "date_updated": "2026-07-31T05:40:47Z",
       "friendly_name": "rabotka_reminder_start_cta",
@@ -939,7 +913,6 @@
     "key": "adminMessage",
     "kind": "twilio/text",
     "content": {
-      "account_sid": "AC7a671e9e64faae647462625fbf1cd104",
       "date_created": "2026-08-06T05:12:43Z",
       "date_updated": "2026-08-06T05:23:54Z",
       "friendly_name": "rabotka_admin_message_v2",
