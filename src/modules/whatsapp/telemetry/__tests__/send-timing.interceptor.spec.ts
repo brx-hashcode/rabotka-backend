@@ -32,14 +32,18 @@ describe('SendTimingInterceptor', () => {
     );
   });
 
-  it('records delivery latency for a Twilio delivered callback (no handler timing)', async () => {
+  it('no longer records delivery latency itself', async () => {
+    // Moved to InboundIngestService, which sees a NORMALIZED status event from
+    // either provider. Keyed off Twilio's MessageStatus form field, this branch
+    // would have gone silent at the Cloud flip, because Cloud posts a nested
+    // JSON envelope instead. Timing the handler is still this interceptor's job.
     const ctx = httpContext({
       method: 'POST',
       body: { MessageStatus: 'delivered', MessageSid: 'SM1' },
     });
     await lastValueFrom(interceptor.intercept(ctx, next));
-    expect(sendTiming.recordDelivered).toHaveBeenCalledWith('SM1');
-    expect(sendTiming.observe).not.toHaveBeenCalled();
+    expect(sendTiming.recordDelivered).not.toHaveBeenCalled();
+    expect(sendTiming.observe).toHaveBeenCalledTimes(1);
   });
 
   it('measures handlerMs for a genuine inbound message', async () => {

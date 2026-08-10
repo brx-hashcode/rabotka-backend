@@ -10,6 +10,8 @@ import { WalletModule } from '../wallet/wallet.module';
 import { WhatsAppLoginLinkModule } from '../auth/whatsapp-login-link.module';
 import { TwilioProvider } from './providers/twilio/twilio.provider';
 import { whatsappProviderFactory } from './whatsapp-provider.factory';
+import { CloudWebhookController } from './webhooks/cloud-webhook.controller';
+import { InboundIngestService } from './webhooks/inbound-ingest.service';
 
 @Module({
   imports: [
@@ -19,12 +21,17 @@ import { whatsappProviderFactory } from './whatsapp-provider.factory';
     forwardRef(() => WalletModule),
     WhatsAppLoginLinkModule,
   ],
-  controllers: [WhatsAppController],
+  // Both webhook controllers stay mounted whichever provider is active; each
+  // drops a payload meant for the other with a warning and a 200. A provider
+  // that is answered with an error retries, and Meta eventually disables the
+  // subscription.
+  controllers: [WhatsAppController, CloudWebhookController],
   providers: [
     // Every provider is registered; the factory picks which one answers the
     // WHATSAPP_PROVIDER token, from validated config, once at boot.
     TwilioProvider,
     whatsappProviderFactory,
+    InboundIngestService,
     WhatsAppService,
     WhatsAppOutboundProcessor,
     WhatsAppInboundProcessor,
