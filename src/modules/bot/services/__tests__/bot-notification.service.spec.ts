@@ -74,15 +74,20 @@ describe('BotNotificationService', () => {
   let deps: ReturnType<typeof makeDeps> & {
     contactUnlock: { getByApplicationId: jest.Mock };
   };
-  let feedback: { requestFeedback: jest.Mock };
+  let feedback: { requestFeedback: jest.Mock; mintFlowToken: jest.Mock };
 
   beforeEach(() => {
     const base = makeDeps();
     const contactUnlock = {
       getByApplicationId: jest.fn().mockResolvedValue(null),
     };
-    // Fire-and-forget after the contact details; asserted separately.
-    feedback = { requestFeedback: jest.fn().mockResolvedValue(true) };
+    // The ask now rides on the unlock template's own FLOW button, so only the
+    // token comes from here; `requestFeedback` is the free-form path the
+    // unlock no longer uses.
+    feedback = {
+      requestFeedback: jest.fn().mockResolvedValue(true),
+      mintFlowToken: jest.fn((id: string) => `fb_${id}_uuid`),
+    };
     deps = { ...base, contactUnlock };
     service = new BotNotificationService(
       deps.prisma as any,
@@ -187,9 +192,12 @@ describe('BotNotificationService', () => {
   });
 
   describe('asking for feedback after an unlock', () => {
-    it('asks both parties once the contact details are out', async () => {
+    it('asks both parties on the unlock template itself', async () => {
       // The unlock is the moment the product either delivered or did not, so
-      // it is the honest place to ask.
+      // it is the honest place to ask — and the ask is a FLOW button on the
+      // template, not a second message. A second message would be a free-form
+      // interactive send, which WhatsApp rejects outside the 24h window (the
+      // window anyone who paid on the web is outside of).
       deps.prisma.contactUnlockAttempt.findUnique.mockResolvedValue({
         id: 'attempt-1',
         employer_id: 'emp-1',
@@ -209,7 +217,20 @@ describe('BotNotificationService', () => {
           email: 'bob@test.com',
         });
       await service.sendContactUnlockedNotification('attempt-1');
-      expect(feedback.requestFeedback).toHaveBeenCalledTimes(2);
+
+      expect(feedback.requestFeedback).not.toHaveBeenCalled();
+      // A token per recipient, and each one naming the profile that was asked
+      // — that string is the only thing tying a submission back to a person.
+      expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
+        '+242001',
+        'contactUnlocked',
+        expect.objectContaining({ flowToken: 'fb_emp-1_uuid' }),
+      );
+      expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
+        '+242002',
+        'contactUnlocked',
+        expect.objectContaining({ flowToken: 'fb_worker-1_uuid' }),
+      );
     });
 
     it('does not let a failed survey break the unlock notification', async () => {

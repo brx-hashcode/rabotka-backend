@@ -207,8 +207,13 @@ export class BotNotificationService {
         }),
       ]);
 
-      const tpl = WHATSAPP_TEMPLATES.contactUnlocked;
-
+      // The unlock is the moment the product either delivered or did not, so it
+      // is the honest place to ask for feedback — and the template now carries
+      // the Flow on its own button, so the ask rides along with the contact
+      // details instead of arriving as a second message. That second message
+      // used to be `feedback.requestFeedback`, a free-form interactive send:
+      // WhatsApp rejects those outside the 24h service window (131047), which
+      // is precisely where anyone who paid on the web sits.
       if (employer?.phone && worker && attempt.employer_id !== skipId) {
         await this.whatsApp.sendTemplateMessage(
           employer.phone,
@@ -217,6 +222,7 @@ export class BotNotificationService {
             name: `${worker.first_name} ${worker.last_name}`.trim(),
             phone: worker.phone,
             email: worker.email,
+            flowToken: this.feedback.mintFlowToken(attempt.employer_id),
           },
         );
       }
@@ -229,24 +235,9 @@ export class BotNotificationService {
             name: `${employer.first_name} ${employer.last_name}`.trim(),
             phone: employer.phone,
             email: employer.email,
+            flowToken: this.feedback.mintFlowToken(attempt.worker_id),
           },
         );
-      }
-
-      // The unlock is the moment the product either delivered or did not, so it
-      // is the honest place to ask. Fire-and-forget and after the contact
-      // details: a survey must never delay or displace the thing the user paid
-      // for. Degrades to a link to the web form outside the 24h window or on a
-      // provider without Flows.
-      if (employer?.phone && attempt.employer_id !== skipId) {
-        void this.feedback
-          .requestFeedback(employer.phone, attempt.employer_id)
-          .catch(() => undefined);
-      }
-      if (worker?.phone && attempt.worker_id !== skipId) {
-        void this.feedback
-          .requestFeedback(worker.phone, attempt.worker_id)
-          .catch(() => undefined);
       }
     } catch (err) {
       this.logger.warn(

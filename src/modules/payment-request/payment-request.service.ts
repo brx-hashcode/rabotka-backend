@@ -23,6 +23,7 @@ import { deletedAtFilter } from '../../common/utils/soft-delete.util';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { WalletService } from '../wallet/wallet.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
+import { WhatsAppFeedbackService } from '../whatsapp/feedback/whatsapp-feedback.service';
 import { MailService } from '../mail/mail.service';
 import { LayoutService } from '../mail/layout.service';
 import { paymentSuccessEmail } from '../mail/templates';
@@ -31,6 +32,7 @@ import { PaymentStatusGateway } from '../ws-notifications/payment-status.gateway
 import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
 import { BotNotificationService } from '../bot/services/bot-notification.service';
 import { formatPenaltyPaidSuccess } from '../bot/messages/penalty.messages';
+import { formatContactUnlockedMessage } from '../bot/messages/contact-unlock.messages';
 import { ContactUnlockService } from '../contact-unlock/contact-unlock.service';
 import { InvoiceService } from '../invoice/invoice.service';
 import { generatePaymentReference } from '../../common/utils/payment-reference';
@@ -114,6 +116,10 @@ export class PaymentRequestService {
     private readonly invoiceService: InvoiceService,
     private readonly queueService: QueueService,
     private readonly logService: LogService,
+    // Appended, not slotted in beside `whatsAppService` where it reads better:
+    // the specs construct this service positionally, and inserting a parameter
+    // mid-list silently shifts fourteen mocks by one.
+    private readonly feedback: WhatsAppFeedbackService,
   ) {}
 
   /**
@@ -461,7 +467,7 @@ export class PaymentRequestService {
     // Compute unlock result first (needed for the confirmation message text).
     const unlockResult = await this.handleContactUnlockPostPayment(request);
 
-    // 1. "🎉 Paiement confirmé"
+    // 1. "Paiement confirmé"
     await this.sendPaymentSuccessNotifications(request, context, unlockResult);
 
     // 2. Contact details (regular unlock) — this is what the user is waiting
@@ -635,7 +641,7 @@ export class PaymentRequestService {
     if (!profile?.phone) return;
     const amountStr = Number(request.amount).toLocaleString('fr-FR');
     const message = [
-      `❌ *Paiement échoué*`,
+      `*Paiement échoué*`,
       ``,
       `Votre paiement de *${amountStr} FCFA* via Mobile Money n'a pas abouti.`,
       ``,
@@ -742,7 +748,7 @@ export class PaymentRequestService {
 
     if (request.profile.phone) {
       const lines = [
-        `🎉 *Paiement confirmé* !`,
+        `*Paiement confirmé*`,
         '',
         `Montant : *${context.amount.toLocaleString('fr-FR')} FCFA*`,
         `Objet : ${context.paymentDescription}`,
@@ -753,7 +759,7 @@ export class PaymentRequestService {
       if (context.isRecommendationContact) {
         lines.push(
           '',
-          '📞 *Les coordonnées du travailleur vous seront envoyées dans le message suivant.*',
+          '*Les coordonnées du travailleur vous seront envoyées dans le message suivant.*',
         );
       } else if (context.isContactUnlock) {
         if (unlockResult?.nowUnlocked) {
@@ -764,7 +770,7 @@ export class PaymentRequestService {
         } else {
           lines.push(
             '',
-            "⏳ *En attente du paiement de l'autre partie. Les coordonnées seront révélées dès que les deux parties auront payé.*",
+            "*En attente du paiement de l'autre partie. Les coordonnées seront révélées dès que les deux parties auront payé.*",
           );
         }
       }
@@ -920,19 +926,34 @@ export class PaymentRequestService {
       });
       if (!worker) return;
 
-      const waDigits = worker.phone ? worker.phone.replace(/\D/g, '') : null;
-      const contactLines = [
-        '🔓 *Contact déverrouillé avec succès !*',
-        '',
-        '👤 *Informations du travailleur*',
-        `• *Prénom* : ${worker.first_name ?? '—'}`,
-        `• *Nom* : ${worker.last_name ?? '—'}`,
-        ...(worker.phone ? [`• *Téléphone* : ${worker.phone}`] : []),
-        ...(waDigits ? [`• *WhatsApp* : https://wa.me/${waDigits}`] : []),
-        ...(worker.email ? [`• *Email* : ${worker.email}`] : []),
-      ].join('\n');
-      await this.botNotification
-        .sendMessage(request.profile.phone, contactLines)
+      const workerName =
+        `${worker.first_name ?? ''} ${worker.last_name ?? ''}`.trim() ||
+        'le travailleur';
+
+      // The approved template, not free-form text. Two reasons: it carries the
+      // feedback Flow on its « Laisser un avis » button, and an employer who
+      // paid on the web without ever messaging the bot is outside WhatsApp's
+      // 24h service window — where free-form is rejected (63016) and the
+      // contact they just paid for silently never arrives. Mirrors
+      // `RecommendationContactService`, which sends the same template on the
+      // wallet-paid path.
+      await this.whatsAppService
+        .sendTemplateMessage(
+          request.profile.phone,
+          'contactUnlockedRecommendation',
+          {
+            name: workerName,
+            phone: worker.phone ?? null,
+            email: worker.email ?? null,
+            flowToken: this.feedback.mintFlowToken(request.profile_id),
+          },
+          request.profile_id,
+          formatContactUnlockedMessage({
+            name: workerName,
+            phone: worker.phone ?? null,
+            email: worker.email ?? null,
+          }),
+        )
         .catch((err) =>
           this.logger.warn(
             `Recommendation contact send failed for worker ${context.recommendationWorkerId}:`,
@@ -1084,7 +1105,7 @@ export class PaymentRequestService {
 
       if (request.profile.phone) {
         const message = [
-          `✅ *Wallet rechargé avec succès !*`,
+          `*Wallet rechargé avec succès*`,
           ``,
           `Montant crédité : *${context.amount.toLocaleString('fr-FR')} FCFA*`,
           `Nouveau solde : *${newBalance.toLocaleString('fr-FR')} FCFA*`,

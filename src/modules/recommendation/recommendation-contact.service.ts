@@ -26,6 +26,7 @@ import { PaymentRequestService } from '../payment-request/payment-request.servic
 import { formatContactUnlockedMessage } from '../bot/messages/contact-unlock.messages';
 import { WHATSAPP_TEMPLATES } from '../../common/constants/whatsapp-templates';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
+import { WhatsAppFeedbackService } from '../whatsapp/feedback/whatsapp-feedback.service';
 import { generatePaymentReference } from '../../common/utils/payment-reference';
 import { InteractionEventService } from '../recommendation-engine/interaction-event.service';
 
@@ -47,6 +48,8 @@ export class RecommendationContactService {
     private readonly interactionEvents: InteractionEventService,
     @Inject(forwardRef(() => WhatsAppService))
     private readonly whatsApp: WhatsAppService,
+    @Inject(forwardRef(() => WhatsAppFeedbackService))
+    private readonly feedback: WhatsAppFeedbackService,
   ) {}
 
   async payWithWallet(
@@ -141,6 +144,7 @@ export class RecommendationContactService {
             name: workerName,
             phone: worker.phone ?? null,
             email: worker.email ?? null,
+            flowToken: this.feedback.mintFlowToken(employerId),
           },
           employerId,
           formatContactUnlockedMessage({

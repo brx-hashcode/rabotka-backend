@@ -2,6 +2,7 @@ import { toDigits } from '../../contracts/address';
 import { coverImageUrl } from '../../../../common/constants/whatsapp-carousel';
 import {
   getButtonUrlVar,
+  getFlowTokenVar,
   hasImageHeader,
   templateCloudName,
   templateLanguage,
@@ -30,12 +31,19 @@ export function toProviderAddress(raw: string): string {
  * Defensive, not load-bearing: JavaScript already enumerates integer-like keys
  * in ascending numeric order regardless of insertion order, so `{'3','1','2'}`
  * already yields `['1','2','3']`. The explicit sort states the requirement
- * rather than depending on that, and keeps the behaviour if a non-integer key
- * ever appears — which would otherwise sort by insertion and silently
- * transpose the body parameters Meta matches positionally.
+ * rather than depending on that.
+ *
+ * Non-numeric keys are dropped rather than sorted. `Number('flow_token')` is
+ * NaN and a comparator returning NaN is read as 0, so a single reserved key
+ * would not merely place itself wrongly — it would stop the surrounding
+ * integer keys from ordering against each other, and Meta matches body
+ * parameters POSITIONALLY. Reserved keys (`flow_token`) address components of
+ * their own and are read by name below.
  */
 function orderedKeys(variables: Record<string, string>): string[] {
-  return Object.keys(variables).sort((a, b) => Number(a) - Number(b));
+  return Object.keys(variables)
+    .filter((k) => /^\d+$/.test(k))
+    .sort((a, b) => Number(a) - Number(b));
 }
 
 /**
@@ -110,6 +118,23 @@ export function buildComponents(
       sub_type: 'url',
       index: '0',
       parameters: [{ type: 'text', text: variables[buttonVar] }],
+    });
+  }
+
+  // A FLOW button — the native in-chat feedback form, opened from an approved
+  // template rather than sent as a free-form interactive message. That is the
+  // whole point of putting it here: `sendFeedbackFlow` only reaches people
+  // inside WhatsApp's 24h service window, and someone who paid on the web
+  // never opened one.
+  const flowTokenVar = getFlowTokenVar(key);
+  if (flowTokenVar && variables[flowTokenVar]) {
+    components.push({
+      type: 'button',
+      sub_type: 'flow',
+      index: '0',
+      parameters: [
+        { type: 'action', action: { flow_token: variables[flowTokenVar] } },
+      ],
     });
   }
 

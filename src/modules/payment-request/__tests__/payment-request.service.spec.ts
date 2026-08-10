@@ -3,6 +3,7 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { PaymentRequestService } from '../payment-request.service';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { WhatsAppService } from '../../whatsapp/whatsapp.service';
+import { WhatsAppFeedbackService } from '../../whatsapp/feedback/whatsapp-feedback.service';
 import { LogService } from '../../log/log.service';
 import { ConfigService } from '@nestjs/config';
 import { MailService } from '../../mail/mail.service';
@@ -99,6 +100,12 @@ describe('PaymentRequestService', () => {
         PaymentRequestService,
         { provide: PrismaService, useValue: mockPrismaService },
         { provide: WhatsAppService, useValue: mockWhatsApp },
+        {
+          // The recommendation reveal mints one of these per send; the token is
+          // what ties a submitted feedback Flow back to the payer.
+          provide: WhatsAppFeedbackService,
+          useValue: { mintFlowToken: jest.fn(() => 'fb_profile-1_uuid') },
+        },
         { provide: LogService, useValue: mockLog },
         { provide: ConfigService, useValue: mockConfig },
         {
