@@ -161,7 +161,10 @@ describe('WhatsAppOutboundProcessor', () => {
     expect(mockWhatsApp.saveMessage).toHaveBeenCalledWith(
       'p1',
       expect.any(String),
-      `[TPL:${CAROUSEL_SID}]`,
+      // The persisted marker is the logical key now, not the Twilio SID.
+      // Rows written before this deploy keep `[TPL:HX…]`, so anything rendering
+      // a conversation thread has to tolerate both.
+      '[TPL:viewWorkerPortfolio]',
     );
   });
 

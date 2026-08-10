@@ -9,7 +9,8 @@ import {
 } from '../../common/services/queue/queue.module';
 import {
   getTemplateKeyBySid,
-  getUrlSuffixTarget,
+  getUrlSuffixTargetByKey,
+  type WhatsAppTemplateName,
 } from '../../common/constants/whatsapp-templates';
 import { WhatsAppLoginLinkService } from '../auth/whatsapp-login-link.service';
 
@@ -51,6 +52,28 @@ export type WhatsAppSend =
   | { type: 'text'; text: string }
   | { type: 'media'; mediaUrl: string; caption?: string }
   | {
+      type: 'template';
+      /** Logical template key. Provider-agnostic; what new jobs carry. */
+      templateKey: WhatsAppTemplateName;
+      /**
+       * The resolved `{'1': …}` map, still the payload's variable form.
+       *
+       * Kept rather than replaced with typed params because the login-code
+       * rewriting below operates on the numbered map (it has to — `urlSuffixVar`
+       * names a number), and because it survives JSON round-tripping through
+       * Redis without needing per-template deserialization.
+       */
+      contentVariables: Record<string, string>;
+    }
+  | {
+      /**
+       * LEGACY, drain-only. Jobs enqueued before template sends carried a key
+       * are already sitting in Redis and cannot be rewritten, so the processor
+       * accepts this shape and resolves the SID back to a key.
+       *
+       * Nothing produces it any more. Removable one release after this deploys,
+       * once the queue has certainly drained.
+       */
       type: 'template';
       contentSid: string;
       contentVariables: Record<string, string>;
@@ -220,11 +243,11 @@ export class WhatsAppOutboundProcessor {
    * notification entirely.
    */
   private async withLoginCode(
-    contentSid: string,
+    templateKey: WhatsAppTemplateName,
     variables: Record<string, string>,
     profileId?: string,
   ): Promise<Record<string, string>> {
-    const target = getUrlSuffixTarget(contentSid);
+    const target = getUrlSuffixTargetByKey(templateKey);
     if (!profileId || !target) return variables;
 
     const suffix = variables[target.variable];
@@ -299,29 +322,29 @@ export class WhatsAppOutboundProcessor {
   private async processTemplate(
     data: Extract<WhatsAppOutboundJobData, { type: 'template' }>,
   ): Promise<void> {
-    // Jobs carry a Twilio content SID, so a payload enqueued before this deploy
-    // still drains. Resolving it to the logical key here is what lets the send
-    // itself be provider-agnostic.
-    const key = getTemplateKeyBySid(data.contentSid);
+    // New jobs carry the logical key. A job enqueued before this deploy carries
+    // a Twilio SID instead and is resolved back — that payload is already in
+    // Redis and cannot be rewritten.
+    const key =
+      'templateKey' in data
+        ? data.templateKey
+        : getTemplateKeyBySid(data.contentSid);
     if (!key) {
       throw new Error(
-        `WhatsApp template ${data.contentSid} to ${data.phone} has no registry entry — ` +
-          `the SID was removed or an env override points at an unknown template`,
+        `WhatsApp template ${'contentSid' in data ? data.contentSid : '?'} to ${data.phone} ` +
+          `has no registry entry — the SID was removed or an env override points ` +
+          `at an unknown template`,
       );
     }
 
     const sent = await this.whatsApp.sendTemplateMessageWithVariables(
       data.phone,
       key,
-      await this.withLoginCode(
-        data.contentSid,
-        data.contentVariables,
-        data.profileId,
-      ),
+      await this.withLoginCode(key, data.contentVariables, data.profileId),
     );
     if (!sent) {
       throw new Error(
-        `WhatsApp template ${data.contentSid} to ${data.phone} returned no SID (unknown Twilio failure)`,
+        `WhatsApp template ${key} to ${data.phone} returned no SID (unknown provider failure)`,
       );
     }
     if (data.profileId) {
@@ -330,11 +353,7 @@ export class WhatsAppOutboundProcessor {
       // RESEND the message (the recommended-profiles duplicate-card bug).
       // Mirrors the guarded save in WhatsAppService.sendTextMessage.
       await this.whatsApp
-        .saveMessage(
-          data.profileId,
-          MessageDirection.OUTBOUND,
-          `[TPL:${data.contentSid}]`,
-        )
+        .saveMessage(data.profileId, MessageDirection.OUTBOUND, `[TPL:${key}]`)
         .catch((err: unknown) =>
           this.logger.warn(
             `Failed to save outbound template message for ${data.profileId}: ${err instanceof Error ? err.message : String(err)}`,

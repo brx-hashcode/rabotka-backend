@@ -99,7 +99,6 @@ function buildVerifyInvalidMessage(code: string): string {
   ].join('\n');
 }
 
-
 const ERROR_MESSAGE = `Une erreur est survenue. Veuillez réessayer.`;
 
 function looksLikeFlowInput(input: string): boolean {
@@ -239,7 +238,7 @@ export class BotOrchestratorService {
    */
   private handlePendingKycInput(): string {
     return templateReply(
-      WHATSAPP_TEMPLATES.kycPendingMenu.contentSid,
+      'kycPendingMenu',
       WHATSAPP_TEMPLATES.kycPendingMenu.variables(),
     );
   }
@@ -635,9 +634,6 @@ export class BotOrchestratorService {
   ): Promise<FlowResult | null> {
     const ctx = this.buildFlowContext();
     const runners: Record<string, () => Promise<FlowResult>> = {
-
-
-
       [FLOW_IDS.ACCEPT_REFUSE_CANDIDATE]: () =>
         runAcceptRefuseCandidateFlow(state, input, profile, ctx),
       [FLOW_IDS.CANCEL_APPLICATION]: async () => {
@@ -648,8 +644,6 @@ export class BotOrchestratorService {
           cancellationThresholdHours,
         });
       },
-
-
 
       [FLOW_IDS.PAY_PENALTIES]: () =>
         runPayPenaltiesFlow(state, input, profile, ctx),
@@ -678,7 +672,6 @@ export class BotOrchestratorService {
           prisma: this.prisma,
           applicationService: this.applicationService,
         }),
-
 
       [FLOW_IDS.POST_CANCELLATION_ACTIONS]: async () => {
         const result = await runPostCancellationActionsFlow(
@@ -726,9 +719,7 @@ export class BotOrchestratorService {
   ): Promise<string[]> {
     const unpaid = await this.applicationService.getUnpaidPenalties(profile.id);
     if (unpaid.count === 0) {
-      return [
-        `✅ *Aucune pénalité impayée.* Votre compte est en règle.`,
-      ];
+      return [`✅ *Aucune pénalité impayée.* Votre compte est en règle.`];
     }
     const flowState = getPayPenaltiesInitialState(unpaid.count, unpaid.total);
     await this.botState.set(profileId, flowState);
@@ -799,5 +790,4 @@ export class BotOrchestratorService {
   loadProfileByPhone(phone: string) {
     return this.loadProfileWhere({ phone });
   }
-
 }
