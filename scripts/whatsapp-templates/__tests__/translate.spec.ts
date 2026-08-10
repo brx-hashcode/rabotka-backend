@@ -5,6 +5,7 @@ import { urlAction, variablesIn, type SourceTemplate } from '../twilio-source';
 import {
   WHATSAPP_TEMPLATES,
   getButtonUrlVar,
+  templateCloudName,
   type WhatsAppTemplateName,
 } from '../../../src/common/constants/whatsapp-templates';
 
@@ -147,6 +148,17 @@ describeIfCaptured('translated payloads', () => {
   it('names every template after its Twilio friendly_name', () => {
     for (const s of sources) {
       expect(payloadFor(s.key).name).toBe(s.content.friendly_name);
+    }
+  });
+
+  it("matches the registry's cloud.name for every template", () => {
+    // The one that would have caught the 132001 in production. The registry's
+    // defaults started as guesses derived from the key; 16 of 27 were wrong,
+    // and the first real OTP send failed with "template name (rabotka_otp)
+    // does not exist in fr". Nothing in the type system connects the name the
+    // app sends to the name the template was approved under — only this does.
+    for (const s of sources) {
+      expect(templateCloudName(s.key)).toBe(s.content.friendly_name);
     }
   });
 
