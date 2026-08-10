@@ -1,8 +1,14 @@
 import type { WhatsAppTemplateName } from './whatsapp-templates';
 
+// The bucket that actually serves the cover. The previous default,
+// pub-fd4c940e661d483b955abd6d7de0e17f, returns 404 for whatsapp/cover-rabotka.jpg
+// — the approved Twilio cards point here instead. Only the free-form fallback in
+// welcome.messages.ts reads this (the cards bake the image in), and that branch
+// is unreachable while contentSid is set, which is why a dead image URL went
+// unnoticed.
 export const WHATSAPP_MEDIA_BASE = (
   process.env.CLOUDFLARE_PUBLIC_BASE_URL ??
-  'https://pub-fd4c940e661d483b955abd6d7de0e17f.r2.dev'
+  'https://pub-1c3331ee6be84a71b4be0db2b3734ac7.r2.dev'
 ).replace(/\/$/, '');
 
 export const COVER_KEY = 'whatsapp/cover-rabotka.jpg';
