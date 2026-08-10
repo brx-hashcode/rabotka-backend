@@ -101,13 +101,6 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     isSecret: false,
   },
   {
-    key: 'fees.max_concurrent_applications',
-    value: '10',
-    category: ConfigCategory.FEES,
-    label: 'Nombre max de candidatures simultanées (par travailleur)',
-    isSecret: false,
-  },
-  {
     key: 'fees.max_daily_applications',
     value: '10',
     category: ConfigCategory.FEES,

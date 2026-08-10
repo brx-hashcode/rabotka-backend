@@ -114,7 +114,7 @@ describe('SystemConfigService', () => {
 
     it('throws BadRequestException when setting a fee key to a non-numeric string', async () => {
       await expect(
-        service.set('fees.max_concurrent_applications', 'abc', 'admin-1'),
+        service.set('fees.max_daily_applications', 'abc', 'admin-1'),
       ).rejects.toThrow(BadRequestException);
     });
 
@@ -228,7 +228,7 @@ describe('SystemConfigService', () => {
   describe('getFees', () => {
     it('returns fees with defaults', async () => {
       // getFees requests 14 keys — return all null so every value falls back.
-      mockRedis.mget.mockResolvedValue(Array<null>(14).fill(null));
+      mockRedis.mget.mockResolvedValue(Array<null>(32).fill(null));
       mockPrisma.systemConfig.findMany.mockResolvedValue([]);
       const result = await service.getFees();
       expect(result.lateCancellationPenaltyFcfa).toBe(5000);
@@ -236,7 +236,7 @@ describe('SystemConfigService', () => {
     });
 
     it('returns the completion reward and per-star rating deltas (defaults)', async () => {
-      mockRedis.mget.mockResolvedValue(Array<null>(14).fill(null));
+      mockRedis.mget.mockResolvedValue(Array<null>(32).fill(null));
       mockPrisma.systemConfig.findMany.mockResolvedValue([]);
       const result = await service.getFees();
       expect(result.completionScoreReward).toBe(1);
