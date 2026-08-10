@@ -74,7 +74,7 @@ describe('createWhatsappProvider', () => {
     );
   });
 
-  it('refuses to silently fall back to Twilio when cloud is requested', () => {
+  it('resolves Cloud when asked for, and never silently falls back to Twilio', () => {
     // The worst outcome of a half-finished rollout would be a deploy that asked
     // for cloud, quietly kept sending through Twilio, and looked healthy.
     withEnv({
@@ -85,8 +85,16 @@ describe('createWhatsappProvider', () => {
       WHATSAPP_CLOUD_VERIFY_TOKEN: 'v',
       WHATSAPP_CLOUD_WABA_ID: 'w',
     });
+    expect(createWhatsappProvider(config, twilioProvider()).name).toBe('cloud');
+  });
+
+  it('refuses to boot on cloud with a missing Cloud credential', () => {
+    withEnv({
+      WHATSAPP_PROVIDER: 'cloud',
+      WHATSAPP_CLOUD_PHONE_NUMBER_ID: '1',
+    });
     expect(() => createWhatsappProvider(config, twilioProvider())).toThrow(
-      /not available in this build yet/,
+      /WHATSAPP_CLOUD_ACCESS_TOKEN/,
     );
   });
 });
