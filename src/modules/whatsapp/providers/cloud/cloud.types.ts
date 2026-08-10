@@ -26,14 +26,21 @@ export type CloudTemplateParameter =
   | { type: 'date_time'; date_time: { fallback_value: string } }
   | { type: 'image'; image: { link: string } }
   | { type: 'document'; document: { link: string; filename?: string } }
-  | { type: 'video'; video: { link: string } };
+  | { type: 'video'; video: { link: string } }
+  /**
+   * A FLOW button's send-time parameter. The flow id and the screen live on the
+   * APPROVED template, so the only thing a send carries is the token — which is
+   * echoed back verbatim on submission and is the sole link between a completed
+   * Flow and the profile that was asked.
+   */
+  | { type: 'action'; action: { flow_token: string } };
 
 export type CloudTemplateComponent =
   | { type: 'header'; parameters: CloudTemplateParameter[] }
   | { type: 'body'; parameters: CloudTemplateParameter[] }
   | {
       type: 'button';
-      sub_type: 'url' | 'quick_reply';
+      sub_type: 'url' | 'quick_reply' | 'flow';
       index: string;
       parameters: CloudTemplateParameter[];
     };

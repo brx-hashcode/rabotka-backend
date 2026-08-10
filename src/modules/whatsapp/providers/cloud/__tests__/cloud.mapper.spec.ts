@@ -225,6 +225,59 @@ describe('buildComponents', () => {
       },
     ]);
   });
+
+  it('sends a FLOW button as an action parameter, and keeps its token out of the body', () => {
+    // The token is not a `{{n}}` — the flow button has its own component. Sent
+    // in the body it would be a parameter-count mismatch (132000), which is why
+    // the registry keys it by name and `orderedKeys` drops non-numeric keys.
+    const components = buildComponents(
+      'contactUnlocked',
+      WHATSAPP_TEMPLATES.contactUnlocked.variables({
+        name: 'Marie Lore',
+        phone: '+242060000000',
+        email: 'marie@example.com',
+        flowToken: 'fb_profile-1_uuid',
+      }),
+    );
+    expect(components).toEqual([
+      {
+        type: 'body',
+        parameters: [
+          { type: 'text', text: 'Marie Lore' },
+          { type: 'text', text: '+242060000000' },
+          { type: 'text', text: 'marie@example.com' },
+        ],
+      },
+      {
+        type: 'button',
+        sub_type: 'flow',
+        index: '0',
+        parameters: [
+          { type: 'action', action: { flow_token: 'fb_profile-1_uuid' } },
+        ],
+      },
+    ]);
+  });
+
+  it('falls back to "Non renseigné" rather than sending an empty contact line', () => {
+    const components = buildComponents(
+      'contactUnlockedRecommendation',
+      WHATSAPP_TEMPLATES.contactUnlockedRecommendation.variables({
+        name: 'Sara',
+        phone: null,
+        email: '   ',
+        flowToken: 'fb_profile-2_uuid',
+      }),
+    );
+    expect(components[0]).toEqual({
+      type: 'body',
+      parameters: [
+        { type: 'text', text: 'Sara' },
+        { type: 'text', text: 'Non renseigné' },
+        { type: 'text', text: 'Non renseigné' },
+      ],
+    });
+  });
 });
 
 describe('toTemplatePayload', () => {

@@ -27,6 +27,22 @@ export class WhatsAppFeedbackService {
   }
 
   /**
+   * Mint the token that ties a submitted Flow back to who was asked.
+   *
+   * `fb_<profileId>_<uuid>`. The reply carries no profile and the sender's
+   * number is not on it either, so this string is the ONLY link; the uuid makes
+   * it unique per ask, so a webhook retry cannot double-count.
+   *
+   * Public because the unlock templates carry the Flow on a BUTTON rather than
+   * sending it themselves — they need a token at template-send time, and it has
+   * to be minted in the same place `profileIdFrom` parses it. The two are one
+   * format and drift the moment they live apart.
+   */
+  mintFlowToken(profileId: string): string {
+    return `fb_${profileId}_${randomUUID()}`;
+  }
+
+  /**
    * Ask a profile for feedback.
    *
    * Falls back to the web form where Flows are unavailable — Twilio has no
@@ -53,10 +69,7 @@ export class WhatsAppFeedbackService {
       );
     }
 
-    // The token is the ONLY thing tying a submission back to who was asked —
-    // the reply carries no profile, and the sender's number is not on it
-    // either. Stored on the row so a webhook retry cannot double-count.
-    const flowToken = `fb_${profileId}_${randomUUID()}`;
+    const flowToken = this.mintFlowToken(profileId);
 
     return this.whatsApp.sendFeedbackFlow(phone, {
       flowId: this.flowId,

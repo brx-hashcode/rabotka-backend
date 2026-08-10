@@ -44,12 +44,20 @@ export interface MetaComponent {
 }
 
 export interface MetaButton {
-  type: 'URL' | 'QUICK_REPLY' | 'OTP';
+  type: 'URL' | 'QUICK_REPLY' | 'OTP' | 'FLOW';
   text?: string;
   url?: string;
   example?: string[];
   otp_type?: 'COPY_CODE';
   autofill_text?: string;
+  /**
+   * FLOW only. The flow binds at creation — a send carries just the token —
+   * which is why this can never come out of `translate()`: Twilio Content has
+   * no Flow action to translate from. See `definitions.ts`.
+   */
+  flow_id?: string;
+  navigate_screen?: string;
+  flow_action?: 'navigate' | 'data_exchange';
 }
 
 export interface MetaTemplatePayload {

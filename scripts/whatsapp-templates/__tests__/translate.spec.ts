@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { translate } from '../translate';
 import { urlAction, variablesIn, type SourceTemplate } from '../twilio-source';
+import { AUTHORED_KEYS, authoredTemplates } from '../definitions';
 import {
   WHATSAPP_TEMPLATES,
   getButtonUrlVar,
@@ -25,20 +26,33 @@ const FIXTURES = path.join(
 );
 
 const available = fs.existsSync(FIXTURES);
+/**
+ * Only the templates Twilio still owns.
+ *
+ * The two unlock templates were re-authored against Meta directly (see
+ * `definitions.ts`) — emoji-free, and with a FLOW button that Twilio Content
+ * cannot express at all. Their Twilio fixtures are the OLD versions, so every
+ * assertion below would be checking the registry against copy the app no
+ * longer sends.
+ */
 const sources: SourceTemplate[] = available
   ? (
       JSON.parse(fs.readFileSync(FIXTURES, 'utf8')) as Omit<
         SourceTemplate,
         'spec'
       >[]
-    ).map((s) => ({ ...s, spec: s.content.types[s.kind] }))
+    )
+      .filter((s) => !AUTHORED_KEYS.has(s.key))
+      .map((s) => ({ ...s, spec: s.content.types[s.kind] }))
   : [];
 
 const describeIfCaptured = available ? describe : describe.skip;
 
 describeIfCaptured('registry vs the live Twilio templates', () => {
-  it('captured all 27', () => {
-    expect(sources).toHaveLength(Object.keys(WHATSAPP_TEMPLATES).length);
+  it('captured every template Twilio still owns', () => {
+    expect(sources).toHaveLength(
+      Object.keys(WHATSAPP_TEMPLATES).length - AUTHORED_KEYS.size,
+    );
   });
 
   /**
@@ -166,5 +180,81 @@ describeIfCaptured('translated payloads', () => {
     for (const s of sources) {
       expect(payloadFor(s.key).name).toMatch(/^[a-z0-9_]+$/);
     }
+  });
+});
+
+/**
+ * The repo-authored templates. No fixtures involved — these have no Twilio
+ * counterpart to capture, which is the whole reason they live in
+ * `definitions.ts`.
+ */
+describe('authored templates', () => {
+  const FLOW_ID = 'FLOW_ID_FOR_TEST';
+  const authored = () => {
+    process.env.WHATSAPP_FEEDBACK_FLOW_ID = FLOW_ID;
+    return authoredTemplates();
+  };
+
+  it('covers exactly the keys it claims', () => {
+    expect(new Set(Object.keys(authored()))).toEqual(new Set(AUTHORED_KEYS));
+  });
+
+  it.each([...AUTHORED_KEYS])(
+    '%s carries the feedback Flow on its button, not a link',
+    (key) => {
+      const buttons = authored()[key]?.components.find(
+        (c) => c.type === 'BUTTONS',
+      );
+      expect(buttons?.buttons).toHaveLength(1);
+      expect(buttons?.buttons?.[0]).toEqual({
+        type: 'FLOW',
+        text: 'Laisser un avis',
+        flow_id: FLOW_ID,
+        navigate_screen: 'FEEDBACK',
+        flow_action: 'navigate',
+      });
+      // A link button here would be the old `/leave-note` web form, which is
+      // what the Flow replaced.
+      expect(buttons?.buttons?.[0].url).toBeUndefined();
+    },
+  );
+
+  it.each([...AUTHORED_KEYS])('%s has an emoji-free body', (key) => {
+    const text = authored()[key]?.components.find(
+      (c) => c.type === 'BODY',
+    )?.text;
+    expect(text).toBeTruthy();
+    // `Extended_Pictographic` rather than a hand-rolled range: it is the
+    // property Unicode defines for exactly this, and the previous bodies used
+    // characters from four different blocks (🎉 📞 ✉️ 🤝).
+    expect(text).not.toMatch(/\p{Extended_Pictographic}/u);
+  });
+
+  it.each([...AUTHORED_KEYS])(
+    '%s names itself what the registry sends to',
+    (key) => {
+      // Same 132001 trap the Twilio-sourced templates have a check for: the
+      // registry name is what a send resolves to, and nothing in the type
+      // system ties it to the name the template is approved under.
+      expect(authored()[key]?.name).toBe(templateCloudName(key));
+    },
+  );
+
+  it.each([...AUTHORED_KEYS])(
+    '%s numbers its body variables contiguously from 1',
+    (key) => {
+      const body = authored()[key]?.components.find((c) => c.type === 'BODY');
+      const vars = variablesIn(body?.text);
+      expect(vars).toEqual(vars.map((_, i) => String(i + 1)));
+      // Meta matches examples to variables positionally.
+      expect(body?.example?.body_text?.[0]).toHaveLength(vars.length);
+    },
+  );
+
+  it('throws rather than submitting a template bound to no Flow', () => {
+    delete process.env.WHATSAPP_FEEDBACK_FLOW_ID;
+    // A FLOW button binds its flow at creation. Submitted with an empty id it
+    // would be rejected, and rejections count against the WABA quality rating.
+    expect(() => authoredTemplates()).toThrow(/WHATSAPP_FEEDBACK_FLOW_ID/);
   });
 });

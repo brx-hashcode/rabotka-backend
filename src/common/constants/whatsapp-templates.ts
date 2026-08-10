@@ -87,7 +87,30 @@ export interface WhatsAppTemplate<Args extends unknown[]> {
    * destination changes.
    */
   urlSuffixMode?: 'append' | 'shortlink';
+  /**
+   * The template's button is a FLOW button, and THIS key of the `variables()`
+   * map carries its flow token.
+   *
+   * Deliberately not a `{{n}}` index. Meta gives the flow button its own
+   * component and the token is not a body parameter, so numbering it would put
+   * it in the body and produce a parameter-count mismatch (132000). The key is
+   * a reserved name instead — `cloud.mapper.ts` drops non-numeric keys from the
+   * body and reads this one by name.
+   *
+   * Mutually exclusive with `urlSuffixVar`/`buttonUrlVar`: a template here has
+   * one button, and it is either a link or a Flow.
+   */
+  flowTokenVar?: string;
 }
+
+/**
+ * The reserved `variables()` key holding a FLOW button's token.
+ *
+ * One constant rather than a free string per entry: the mapper matches on it,
+ * the registry writes it, and a typo would silently send a template with no
+ * button parameter at all.
+ */
+export const FLOW_TOKEN_VAR = 'flow_token';
 
 /**
  * Reads a template SID from the environment, falling back to the currently
@@ -621,32 +644,57 @@ export const WHATSAPP_TEMPLATES = {
     ]
   >,
 
+  /**
+   * Both parties paid; here is who to call.
+   *
+   * v6 replaces v5's « Laisser un avis » URL button — which opened the
+   * `/leave-note` web form in the in-app browser — with a FLOW button carrying
+   * the feedback Flow itself, and drops the emoji from the body.
+   *
+   * The button is not a nicety here. `WhatsAppFeedbackService.requestFeedback`
+   * sends the Flow as a free-form interactive message, which WhatsApp rejects
+   * outside the 24h service window (131047) — and the people this template
+   * reaches are exactly the ones who paid on the web without ever messaging the
+   * bot. On an approved template the same Flow has no such limit, so this is
+   * the only shape that reaches everyone who was just served.
+   */
   contactUnlocked: {
+    // Points at the v5 Content template, which still has the URL button. Kept
+    // only to satisfy the Twilio binding until that provider is removed; the
+    // v6 body exists on Meta alone and was authored in
+    // `scripts/whatsapp-templates/definitions.ts`, not derived from Twilio.
     contentSid: sid(
       'TPL_CONTACT_UNLOCKED_MUTUAL',
       'HX4537d7f09c1bd7a2f1e900418b97ee9d',
     ),
-    urlSuffixVar: '4',
-    urlSuffixMode: 'shortlink',
+    flowTokenVar: FLOW_TOKEN_VAR,
     category: 'UTILITY',
     cloud: {
       name: cloudName(
         'TPL_CLOUD_CONTACT_UNLOCKED',
-        'rabotka_contact_unlocked_mutual_v5',
+        'rabotka_contact_unlocked_mutual_v6',
       ),
     },
     variables: (p: {
       name: string;
       phone: string | null;
       email: string | null;
+      flowToken: string;
     }) => ({
-      '4': 'leave-note',
       '1': p.name,
       '2': p.phone?.trim() || 'Non renseigné',
       '3': p.email?.trim() || 'Non renseigné',
+      [FLOW_TOKEN_VAR]: p.flowToken,
     }),
   } satisfies WhatsAppTemplate<
-    [params: { name: string; phone: string | null; email: string | null }]
+    [
+      params: {
+        name: string;
+        phone: string | null;
+        email: string | null;
+        flowToken: string;
+      },
+    ]
   >,
 
   /**
@@ -654,33 +702,44 @@ export const WHATSAPP_TEMPLATES = {
    * feed. This path used to send FREE-FORM text with `.catch(() => undefined)`,
    * so an employer who paid on the web outside the 24h window silently received
    * nothing at all despite having paid.
+   *
+   * v5 carries the feedback Flow on its button and no emoji, for the same
+   * reasons as `contactUnlocked` above.
    */
   contactUnlockedRecommendation: {
+    // As above: the v4 Content template, kept only for the Twilio binding.
     contentSid: sid(
       'TPL_CONTACT_UNLOCKED_RECO',
       'HX6e2644db5dd013c2e0abbf0226b464cc',
     ),
-    urlSuffixVar: '4',
-    urlSuffixMode: 'shortlink',
+    flowTokenVar: FLOW_TOKEN_VAR,
     category: 'UTILITY',
     cloud: {
       name: cloudName(
         'TPL_CLOUD_CONTACT_UNLOCKED_RECOMMENDATION',
-        'rabotka_contact_unlocked_reco_v4',
+        'rabotka_contact_unlocked_reco_v5',
       ),
     },
     variables: (p: {
       name: string;
       phone: string | null;
       email: string | null;
+      flowToken: string;
     }) => ({
-      '4': 'leave-note',
       '1': p.name,
       '2': p.phone?.trim() || 'Non renseigné',
       '3': p.email?.trim() || 'Non renseigné',
+      [FLOW_TOKEN_VAR]: p.flowToken,
     }),
   } satisfies WhatsAppTemplate<
-    [params: { name: string; phone: string | null; email: string | null }]
+    [
+      params: {
+        name: string;
+        phone: string | null;
+        email: string | null;
+        flowToken: string;
+      },
+    ]
   >,
 
   unlockExpiredConversion: {
@@ -890,6 +949,7 @@ export type TemplateBinding = Pick<
   | 'buttonUrlVar'
   | 'urlSuffixVar'
   | 'hasImageHeader'
+  | 'flowTokenVar'
 >;
 
 /**
@@ -986,6 +1046,14 @@ export function hasImageHeader(key: WhatsAppTemplateName): boolean {
 export function getButtonUrlVar(key: WhatsAppTemplateName): string | undefined {
   const t = TEMPLATE_BINDINGS[key];
   return t.urlSuffixVar ?? t.buttonUrlVar;
+}
+
+/**
+ * Which `variables()` key holds the FLOW button's token, if the template has
+ * one. Undefined for every template whose button is a link.
+ */
+export function getFlowTokenVar(key: WhatsAppTemplateName): string | undefined {
+  return TEMPLATE_BINDINGS[key].flowTokenVar;
 }
 
 /** Narrow an arbitrary string to a registry key. */
