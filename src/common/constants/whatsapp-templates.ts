@@ -95,18 +95,18 @@ function sid(envVar: string, approvedDefault: string): string {
 export const CLOUD_DEFAULT_LANGUAGE = 'fr';
 
 /**
- * Reads a Meta template name from the environment, falling back to the derived
- * default.
+ * Reads a Meta template name from the environment, falling back to the name the
+ * template is actually approved under.
  *
- * UNVERIFIED DEFAULTS. Unlike `sid()`, whose defaults are SIDs known to be
- * approved, these names were derived from the template key and cross-checked
- * against the names the repo-root create-*.js / test-send-all.js scripts use.
- * Nothing here has been checked against the live WABA — creating and approving
- * Meta templates is out of scope for this change — so every one of them must be
- * confirmed before `WHATSAPP_PROVIDER=cloud` carries production traffic. The
- * env override exists so a name can be corrected without a deploy, and the
- * staging parity checklist in docs/whatsapp-providers.md is where they get
- * verified.
+ * These defaults are the Twilio `friendly_name` of each template, which is the
+ * name it was recreated under in Rabotka's own WABA — one string finds a
+ * template in either console. They were derived from the key at first, and all
+ * of those guesses were wrong: the real names are versioned
+ * (`rabotka_otp_auth`, `rabotka_kyc_pending_menu_v3`), 16 of 27 differed, and
+ * the mismatch surfaced as `132001 Template name does not exist` on the first
+ * real send. `scripts/whatsapp-templates/` regenerates them from the live API.
+ *
+ * The env override exists so a name can be corrected without a deploy.
  */
 function cloudName(envVar: string, derivedDefault: string): string {
   const override = process.env[envVar]?.trim();
@@ -117,7 +117,7 @@ export const WHATSAPP_TEMPLATES = {
   otp: {
     contentSid: 'HXf66c3d91d9f56e59b72d8fad31d4a795',
     category: 'AUTHENTICATION',
-    cloud: { name: cloudName('TPL_CLOUD_OTP', 'rabotka_otp') },
+    cloud: { name: cloudName('TPL_CLOUD_OTP', 'rabotka_otp_auth') },
     variables: (code: string) => ({ '1': code }),
   } satisfies WhatsAppTemplate<[code: string]>,
 
@@ -140,7 +140,7 @@ export const WHATSAPP_TEMPLATES = {
     cloud: {
       name: cloudName(
         'TPL_CLOUD_WELCOME_UNREGISTERED_CARD',
-        'rabotka_welcome_unregistered_card',
+        'rabotka_welcome_unregistered_v3',
       ),
     },
     variables: () => ({}),
@@ -171,7 +171,10 @@ export const WHATSAPP_TEMPLATES = {
     urlSuffixSeparator: '&',
     category: 'MARKETING',
     cloud: {
-      name: cloudName('TPL_CLOUD_WELCOME_PLATFORM', 'rabotka_welcome_platform'),
+      name: cloudName(
+        'TPL_CLOUD_WELCOME_PLATFORM',
+        'rabotka_welcome_platform_v4',
+      ),
     },
     variables: (path: string) => ({ '1': path }),
   } satisfies WhatsAppTemplate<[path: string]>,
@@ -208,7 +211,10 @@ export const WHATSAPP_TEMPLATES = {
     urlSuffixMode: 'shortlink',
     category: 'UTILITY',
     cloud: {
-      name: cloudName('TPL_CLOUD_KYC_PENDING_MENU', 'rabotka_kyc_pending_menu'),
+      name: cloudName(
+        'TPL_CLOUD_KYC_PENDING_MENU',
+        'rabotka_kyc_pending_menu_v3',
+      ),
     },
     variables: () => ({ '1': 'profile' }),
   } satisfies WhatsAppTemplate<[]>,
@@ -254,7 +260,7 @@ export const WHATSAPP_TEMPLATES = {
     cloud: {
       name: cloudName(
         'TPL_CLOUD_PROFILE_CREATED_WORKER',
-        'rabotka_profile_created_kyc_worker',
+        'rabotka_profile_created_kyc_worker_v2',
       ),
     },
     variables: (firstName: string) => ({ '1': firstName }),
@@ -271,7 +277,7 @@ export const WHATSAPP_TEMPLATES = {
     cloud: {
       name: cloudName(
         'TPL_CLOUD_PROFILE_CREATED_EMPLOYER',
-        'rabotka_profile_created_kyc_employer',
+        'rabotka_profile_created_kyc_employer_v2',
       ),
     },
     variables: (firstName: string) => ({ '1': firstName }),
@@ -285,7 +291,7 @@ export const WHATSAPP_TEMPLATES = {
     urlSuffixVar: '2',
     urlSuffixMode: 'shortlink',
     category: 'UTILITY',
-    cloud: { name: cloudName('TPL_CLOUD_KYC', 'rabotka_kyc_approved') },
+    cloud: { name: cloudName('TPL_CLOUD_KYC', 'rabotka_kyc_approved_cta_v2') },
     variables: (name: string) => ({ '1': name }),
   } satisfies WhatsAppTemplate<[name: string]>,
 
@@ -310,7 +316,7 @@ export const WHATSAPP_TEMPLATES = {
     cloud: {
       name: cloudName(
         'TPL_CLOUD_ACCOUNT_ACTIVATED_WORKER',
-        'rabotka_account_activated_worker',
+        'rabotka_account_activated_worker_v4',
       ),
     },
     variables: (p: { firstName: string; path: string }) => ({
@@ -330,7 +336,7 @@ export const WHATSAPP_TEMPLATES = {
     cloud: {
       name: cloudName(
         'TPL_CLOUD_ACCOUNT_ACTIVATED_EMPLOYER',
-        'rabotka_account_activated_employer',
+        'rabotka_account_activated_employer_v4',
       ),
     },
     variables: (p: { firstName: string; path: string }) => ({
@@ -348,7 +354,7 @@ export const WHATSAPP_TEMPLATES = {
     urlSuffixSeparator: '&',
     category: 'UTILITY',
     cloud: {
-      name: cloudName('TPL_CLOUD_REMINDER_2_4H', 'rabotka_reminder_24h'),
+      name: cloudName('TPL_CLOUD_REMINDER_2_4H', 'rabotka_reminder_24h_cta'),
     },
     variables: (p: {
       offerTitle: string;
@@ -399,7 +405,7 @@ export const WHATSAPP_TEMPLATES = {
     cloud: {
       name: cloudName(
         'TPL_CLOUD_JOB_RECOMMENDATION',
-        'rabotka_job_recommendation',
+        'rabotka_job_recommendation_cta',
       ),
     },
     variables: (p: {
@@ -444,7 +450,10 @@ export const WHATSAPP_TEMPLATES = {
     urlSuffixSeparator: '&',
     category: 'UTILITY',
     cloud: {
-      name: cloudName('TPL_CLOUD_NEW_APPLICATION', 'rabotka_new_application'),
+      name: cloudName(
+        'TPL_CLOUD_NEW_APPLICATION',
+        'rabotka_new_application_cta',
+      ),
     },
     variables: (p: {
       offerTitle: string;
@@ -491,7 +500,7 @@ export const WHATSAPP_TEMPLATES = {
     cloud: {
       name: cloudName(
         'TPL_CLOUD_APPLICATION_ACCEPTED',
-        'rabotka_application_accepted_cta',
+        'rabotka_application_accepted_cta_v2',
       ),
     },
     variables: (p: { employerName: string; offerTitle: string }) => ({
@@ -669,7 +678,7 @@ export const WHATSAPP_TEMPLATES = {
     cloud: {
       name: cloudName(
         'TPL_CLOUD_UNLOCK_EXPIRED_CONVERSION',
-        'rabotka_unlock_expired_conversion_cta',
+        'rabotka_unlock_expired_conversion_cta_v2',
       ),
     },
     variables: (p: { amount: number }) => ({ '1': String(p.amount) }),
@@ -727,7 +736,7 @@ export const WHATSAPP_TEMPLATES = {
     cloud: {
       name: cloudName(
         'TPL_CLOUD_OFFER_EXPIRED_APPLICANT',
-        'rabotka_offer_expired_applicant_cta',
+        'rabotka_offer_expired_applicant_cta_v2',
       ),
     },
     variables: (p: { offerTitle: string }) => ({ '1': p.offerTitle }),
@@ -767,7 +776,7 @@ export const WHATSAPP_TEMPLATES = {
     cloud: {
       name: cloudName(
         'TPL_CLOUD_OFFER_UNAVAILABLE_WORKER',
-        'rabotka_offer_unavailable_worker_cta',
+        'rabotka_offer_unavailable_worker_cta_v2',
       ),
     },
     variables: (p: { offerTitle: string }) => ({ '1': p.offerTitle }),

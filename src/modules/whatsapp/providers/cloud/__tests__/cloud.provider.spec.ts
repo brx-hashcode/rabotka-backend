@@ -153,7 +153,7 @@ describe('CloudProvider', () => {
         to: '242069917686',
         type: 'template',
         template: {
-          name: 'rabotka_otp',
+          name: 'rabotka_otp_auth',
           language: { code: 'fr' },
           // AUTHENTICATION: the code goes in the body and again in the
           // copy-code button.
