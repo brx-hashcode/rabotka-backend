@@ -1,4 +1,10 @@
-import { BadRequestException, Injectable, Logger, OnModuleInit, Inject } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  OnModuleInit,
+  Inject,
+} from '@nestjs/common';
 import Redis from 'ioredis';
 import { ConfigCategory } from '@prisma/client';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
@@ -123,10 +129,14 @@ export class SystemConfigService implements OnModuleInit {
     const cacheKeys = entries.map((e) => `${CACHE_PREFIX}${e.key}`);
     const cached = await this.redis.mget(...cacheKeys);
 
+    // Bounded by `entries`, not by what Redis returned. ioredis mirrors the key
+    // count, but indexing `entries[i]` off a longer response throws — and the
+    // symptom is an unrelated "Cannot read properties of undefined" deep in a
+    // fee lookup, which is a poor trade for one comparison.
     const missIndices: number[] = [];
-    cached.forEach((v, i) => {
-      if (v === null) missIndices.push(i);
-    });
+    for (let i = 0; i < entries.length; i++) {
+      if ((cached[i] ?? null) === null) missIndices.push(i);
+    }
 
     if (missIndices.length > 0) {
       const missKeys = missIndices.map((i) => entries[i].key);
@@ -162,7 +172,6 @@ export class SystemConfigService implements OnModuleInit {
     'fees.reliability_score_min',
     'fees.employer_late_cancel_score_deduction',
     'fees.billing_block_threshold',
-    'fees.max_concurrent_applications',
     'fees.max_daily_applications',
     'fees.contact_unlock_fee_employer',
     'fees.contact_unlock_fee_worker',
@@ -305,7 +314,6 @@ export class SystemConfigService implements OnModuleInit {
       scoreMin,
       empLateCancelDed,
       billingBlock,
-      maxConcurrentApps,
       maxDailyApps,
       completionReward,
       ratingDelta1,
@@ -320,7 +328,6 @@ export class SystemConfigService implements OnModuleInit {
       { key: 'fees.reliability_score_min', fallback: '50' },
       { key: 'fees.employer_late_cancel_score_deduction', fallback: '5' },
       { key: 'fees.billing_block_threshold', fallback: '2' },
-      { key: 'fees.max_concurrent_applications', fallback: '10' },
       { key: 'fees.max_daily_applications', fallback: '10' },
       { key: 'fees.completion_score_reward', fallback: '1' },
       { key: 'fees.rating_score_delta_1', fallback: '-4' },
@@ -336,7 +343,6 @@ export class SystemConfigService implements OnModuleInit {
       reliabilityScoreMin: Number(scoreMin),
       employerLateCancelScoreDeduction: Number(empLateCancelDed),
       billingBlockThreshold: Number(billingBlock),
-      maxConcurrentApplications: Number(maxConcurrentApps),
       maxDailyApplications: Number(maxDailyApps),
       completionScoreReward: Number(completionReward),
       ratingScoreDeltas: {
