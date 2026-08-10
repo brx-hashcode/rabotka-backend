@@ -155,8 +155,16 @@ describe('CloudProvider', () => {
         template: {
           name: 'rabotka_otp',
           language: { code: 'fr' },
+          // AUTHENTICATION: the code goes in the body and again in the
+          // copy-code button.
           components: [
             { type: 'body', parameters: [{ type: 'text', text: '123456' }] },
+            {
+              type: 'button',
+              sub_type: 'url',
+              index: '0',
+              parameters: [{ type: 'text', text: '123456' }],
+            },
           ],
         },
       });
