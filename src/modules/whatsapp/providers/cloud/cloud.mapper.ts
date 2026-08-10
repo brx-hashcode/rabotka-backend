@@ -1,6 +1,6 @@
 import { toDigits } from '../../contracts/address';
 import {
-  getUrlSuffixTargetByKey,
+  getButtonUrlVar,
   templateCloudName,
   templateLanguage,
   WHATSAPP_TEMPLATES,
@@ -41,8 +41,13 @@ function orderedKeys(variables: Record<string, string>): string[] {
  *
  * Derived rather than declared per template. The registry already encodes the
  * two facts needed: the numbered map (whose ORDER matters — Meta matches body
- * parameters positionally, not by name) and `urlSuffixVar`, naming the one
- * variable that fills a CTA button's URL rather than the body.
+ * parameters positionally, not by name) and the button variable, naming the one
+ * value that fills a CTA button's URL rather than the body.
+ *
+ * Routing keys off `getButtonUrlVar`, NOT `urlSuffixVar`. The latter also means
+ * "inject a login code here", so a public-page button like
+ * `viewWorkerPortfolio` leaves it unset — and keying off it put that template's
+ * slug in the body with no button parameter at all.
  *
  * Order matters: Meta matches body parameters positionally, so a transposition
  * here delivers successfully with the values in the wrong slots. See
@@ -52,10 +57,27 @@ export function buildComponents(
   key: WhatsAppTemplateName,
   variables: Record<string, string>,
 ): CloudTemplateComponent[] {
-  const target = getUrlSuffixTargetByKey(key);
+  const buttonVar = getButtonUrlVar(key);
   const components: CloudTemplateComponent[] = [];
 
-  const bodyKeys = orderedKeys(variables).filter((k) => k !== target?.variable);
+  // An AUTHENTICATION template is a fixed shape Meta owns: one body parameter
+  // holding the code, and the SAME code again as the copy-code button's
+  // parameter. Sending only the body is a parameter-count mismatch, so this
+  // cannot go through the generic path below.
+  if (WHATSAPP_TEMPLATES[key].category === 'AUTHENTICATION') {
+    const code = variables[orderedKeys(variables)[0]] ?? '';
+    return [
+      { type: 'body', parameters: [{ type: 'text', text: code }] },
+      {
+        type: 'button',
+        sub_type: 'url',
+        index: '0',
+        parameters: [{ type: 'text', text: code }],
+      },
+    ];
+  }
+
+  const bodyKeys = orderedKeys(variables).filter((k) => k !== buttonVar);
   if (bodyKeys.length > 0) {
     components.push({
       type: 'body',
@@ -70,12 +92,12 @@ export function buildComponents(
   // this registry is a single-button card, so index 0 is the only one there is;
   // a template with several buttons would need the index declared alongside
   // `urlSuffixVar`.
-  if (target && variables[target.variable] !== undefined) {
+  if (buttonVar && variables[buttonVar] !== undefined) {
     components.push({
       type: 'button',
       sub_type: 'url',
       index: '0',
-      parameters: [{ type: 'text', text: variables[target.variable] }],
+      parameters: [{ type: 'text', text: variables[buttonVar] }],
     });
   }
 

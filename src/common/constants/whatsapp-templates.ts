@@ -27,14 +27,29 @@ export interface WhatsAppTemplate<Args extends unknown[]> {
   cloud: { name: string; defaultLanguage?: string };
   variables: (...args: Args) => Record<string, string>;
   /**
+   * Which variable fills the CTA button's URL, for a template whose link needs
+   * NO login — currently only the public portfolio.
+   *
+   * `urlSuffixVar` implies this, so only set `buttonUrlVar` on its own when the
+   * button takes a variable but must not carry a login code.
+   *
+   * The distinction is not cosmetic. Twilio shares one `{{n}}` namespace across
+   * body and button, so it needs no such marking; Meta splits them, and a
+   * variable that belongs in the button but is sent in the body produces a
+   * parameter-count mismatch (132000) rather than a visible error. Before this
+   * field existed, `viewWorkerPortfolio` did exactly that.
+   */
+  buttonUrlVar?: string;
+  /**
    * Index of the variable that fills the CTA button's URL suffix, when that
    * link opens an authenticated page. The outbound processor appends a one-time
    * login code to it so the WebView lands signed in
    * (see `WhatsAppLoginLinkService`).
    *
-   * Left unset for templates whose CTA needs no session (the public portfolio)
-   * and for those with no dynamic suffix at all — WhatsApp allows exactly one
-   * variable in a button URL and it must sit at the end.
+   * Left unset for templates whose CTA needs no session (the public portfolio —
+   * those use `buttonUrlVar`) and for those with no dynamic suffix at all —
+   * WhatsApp allows exactly one variable in a button URL and it must sit at the
+   * end.
    */
   urlSuffixVar?: string;
   /**
@@ -206,6 +221,10 @@ export const WHATSAPP_TEMPLATES = {
   // {{2}} = portfolio slug (URL suffix — WhatsApp only allows a variable there).
   viewWorkerPortfolio: {
     contentSid: 'HXd46839e8028869e15469add1b73000fd',
+    // {{2}} fills the button URL but takes NO login code — the portfolio is
+    // public. Without this the Cloud mapper puts the slug in the body and sends
+    // no button parameter at all.
+    buttonUrlVar: '2',
     category: 'UTILITY',
     cloud: {
       name: cloudName(
@@ -840,7 +859,7 @@ export type WhatsAppTemplateName = keyof typeof WHATSAPP_TEMPLATES;
  */
 export type TemplateBinding = Pick<
   WhatsAppTemplate<never[]>,
-  'contentSid' | 'category' | 'cloud'
+  'contentSid' | 'category' | 'cloud' | 'buttonUrlVar' | 'urlSuffixVar'
 >;
 
 /**
@@ -920,6 +939,18 @@ export function findTemplateBindingProblems(
 /** The language a template is sent in, unless a call overrides it. */
 export function templateLanguage(key: WhatsAppTemplateName): string {
   return TEMPLATE_BINDINGS[key].cloud.defaultLanguage ?? CLOUD_DEFAULT_LANGUAGE;
+}
+
+/**
+ * Which variable fills the CTA button's URL, for the Cloud component mapper.
+ *
+ * `urlSuffixVar` implies it: every template that receives a login code puts the
+ * code in the button. `buttonUrlVar` covers the case of a button variable with
+ * no login code.
+ */
+export function getButtonUrlVar(key: WhatsAppTemplateName): string | undefined {
+  const t = TEMPLATE_BINDINGS[key];
+  return t.urlSuffixVar ?? t.buttonUrlVar;
 }
 
 /** Narrow an arbitrary string to a registry key. */

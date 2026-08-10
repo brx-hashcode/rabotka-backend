@@ -59,9 +59,9 @@ describe('buildComponents', () => {
 
   it('sorts numerically rather than lexicographically', () => {
     // '10' must follow '9', not precede it. No current template reaches 10
-    // variables, so this drives buildComponents directly — and on a template
-    // with no urlSuffixVar, so every key lands in the body.
-    const components = buildComponents('viewWorkerPortfolio', {
+    // variables, so this drives buildComponents directly — on adminMessage,
+    // which has no button variable, so every key lands in the body.
+    const components = buildComponents('adminMessage', {
       '1': 'a',
       '2': 'b',
       '10': 'j',
@@ -124,13 +124,61 @@ describe('buildComponents', () => {
     ).toEqual([]);
   });
 
-  it('emits only a body for a template with no CTA button', () => {
+  it('routes a public-page button variable, which carries no login code', () => {
+    // viewWorkerPortfolio's Twilio URL is …/p/{{2}}, but it deliberately has no
+    // urlSuffixVar because the portfolio needs no login. Routing off
+    // urlSuffixVar put the slug in the body and sent NO button parameter, which
+    // Meta rejects as a parameter-count mismatch rather than a visible error.
     const components = buildComponents(
-      'otp',
-      WHATSAPP_TEMPLATES.otp.variables('123456'),
+      'viewWorkerPortfolio',
+      WHATSAPP_TEMPLATES.viewWorkerPortfolio.variables({
+        workerName: 'Alice',
+        slug: 'alice-plombier',
+      }),
     );
     expect(components).toEqual([
+      { type: 'body', parameters: [{ type: 'text', text: 'Alice' }] },
+      {
+        type: 'button',
+        sub_type: 'url',
+        index: '0',
+        parameters: [{ type: 'text', text: 'alice-plombier' }],
+      },
+    ]);
+  });
+
+  it('repeats the code into the button for an AUTHENTICATION template', () => {
+    // Meta owns this shape: the code appears in the body AND again as the
+    // copy-code button's parameter. Body only is a parameter-count mismatch.
+    expect(
+      buildComponents('otp', WHATSAPP_TEMPLATES.otp.variables('123456')),
+    ).toEqual([
       { type: 'body', parameters: [{ type: 'text', text: '123456' }] },
+      {
+        type: 'button',
+        sub_type: 'url',
+        index: '0',
+        parameters: [{ type: 'text', text: '123456' }],
+      },
+    ]);
+  });
+
+  it('emits only a body for a template with no CTA button', () => {
+    const components = buildComponents(
+      'adminMessage',
+      WHATSAPP_TEMPLATES.adminMessage.variables({
+        message: 'Bonjour',
+        adminName: 'Fariol',
+      }),
+    );
+    expect(components).toEqual([
+      {
+        type: 'body',
+        parameters: [
+          { type: 'text', text: 'Bonjour' },
+          { type: 'text', text: 'Fariol' },
+        ],
+      },
     ]);
   });
 });
@@ -138,17 +186,29 @@ describe('buildComponents', () => {
 describe('toTemplatePayload', () => {
   it('produces the exact Graph body for a template send', () => {
     expect(
-      toTemplatePayloadFromParams('+242 06 99 17 686', 'otp', '123456'),
+      toTemplatePayloadFromParams('+242 06 99 17 686', 'statusCheck', {
+        jobTitle: 'Ménage bureau',
+        jobOfferId: 'offer-1',
+      }),
     ).toEqual({
       messaging_product: 'whatsapp',
       recipient_type: 'individual',
       to: '242069917686',
       type: 'template',
       template: {
-        name: 'rabotka_otp',
+        name: 'rabotka_status_check_cta',
         language: { code: 'fr' },
         components: [
-          { type: 'body', parameters: [{ type: 'text', text: '123456' }] },
+          {
+            type: 'body',
+            parameters: [{ type: 'text', text: 'Ménage bureau' }],
+          },
+          {
+            type: 'button',
+            sub_type: 'url',
+            index: '0',
+            parameters: [{ type: 'text', text: 'offer-1' }],
+          },
         ],
       },
     });
