@@ -41,10 +41,6 @@ import {
 import { PaymentService } from '../../payments/payment.service';
 import { ContactUnlockService } from '../../contact-unlock/contact-unlock.service';
 import { WalletService } from '../../wallet/wallet.service';
-import {
-  runUnlockContactFlow,
-  getUnlockContactInitialState,
-} from '../flows/unlock-contact.flow';
 import { jobOfferToOfferListItem } from '../messages/offers.messages';
 import {
   runRateAssignmentFlow,
@@ -354,10 +350,9 @@ export class BotOrchestratorService {
     const normalized = text.trim().toLowerCase();
     const state = await this.botState.get(profileId);
 
-    // Already inside a payment-related flow — let it run.
-    const canContinueFlow =
-      state?.flowId === FLOW_IDS.PAY_PENALTIES ||
-      state?.flowId === FLOW_IDS.UNLOCK_CONTACT;
+    // Already inside a payment-related flow — let it run. Contact unlock used
+    // to be the other one; it is settled in the app now and has no chat flow.
+    const canContinueFlow = state?.flowId === FLOW_IDS.PAY_PENALTIES;
     if (canContinueFlow) {
       return this.routeMessage(profileId, text, profile, botProfile);
     }
@@ -647,12 +642,6 @@ export class BotOrchestratorService {
 
       [FLOW_IDS.PAY_PENALTIES]: () =>
         runPayPenaltiesFlow(state, input, profile, ctx),
-
-      [FLOW_IDS.UNLOCK_CONTACT]: () =>
-        runUnlockContactFlow(state, input, profile, {
-          ...ctx,
-          botNotification: this.notificationService,
-        }),
 
       [FLOW_IDS.REPUBLISH_EXPIRED_JOB]: () =>
         runRepublishExpiredJobFlow(state, input, profile, {

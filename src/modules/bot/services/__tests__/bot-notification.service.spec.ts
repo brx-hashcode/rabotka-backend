@@ -192,7 +192,7 @@ describe('BotNotificationService', () => {
       );
     });
 
-    it('sends the unlock template and pre-sets unlock state when a pending unlock exists', async () => {
+    it('sends the unlock template and arms no chat state', async () => {
       deps.contactUnlock.getByApplicationId.mockResolvedValue({
         id: 'attempt-1',
         expires_at: new Date(Date.now() + 3600_000),
@@ -203,7 +203,11 @@ describe('BotNotificationService', () => {
         'applicationAcceptedUnlock',
         expect.objectContaining({ offerTitle: expect.any(String) }),
       );
-      expect(deps.botState.setIfFlowAbsentOrMatches).toHaveBeenCalled();
+      // It used to pre-arm the unlock flow so a "Continuer" quick-reply could
+      // re-show a payment menu in the chat. The template carries a URL button
+      // now and the worker settles up in the app, so arming a flow only left a
+      // stale state for the next thing they typed to fall into.
+      expect(deps.botState.setIfFlowAbsentOrMatches).not.toHaveBeenCalled();
     });
 
     it('does nothing when worker has no phone', async () => {
@@ -459,5 +463,4 @@ describe('BotNotificationService', () => {
       expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalled();
     });
   });
-
 });

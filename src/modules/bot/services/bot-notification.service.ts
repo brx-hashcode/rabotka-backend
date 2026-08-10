@@ -4,7 +4,6 @@ import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { WhatsAppService } from '../../whatsapp/whatsapp.service';
 import { BotStateService } from './bot-state.service';
 import { BotInboxService } from './bot-inbox.service';
-import { getUnlockContactInitialState } from '../flows/unlock-contact.flow';
 import { FLOW_IDS } from '../bot.constants';
 import { formatAmount } from '../messages/offers.messages';
 import { WHATSAPP_TEMPLATES } from '../../../common/constants/whatsapp-templates';
@@ -135,23 +134,11 @@ export class BotNotificationService {
       if (attempt) {
         const fees = await this.systemConfig.getContactUnlockFees();
 
-        // Set unlockState BEFORE sending so that when the worker taps
-        // "Continuer" (payload "continuer") the flow is already active and
-        // re-shows the live payment prompt (unlock-contact.flow.ts). The
-        // dynamic, balance-dependent option list cannot live in a template.
-        const unlockState = getUnlockContactInitialState({
-          attemptId: attempt.id,
-          otherName: employerName,
-          amount: fees.workerFeeFcfa,
-          expiresAt: attempt.expires_at,
-        });
-        await this.botState.setIfFlowAbsentOrMatches(
-          app.worker_id,
-          unlockState,
-          null,
-        );
-
-        const tpl = WHATSAPP_TEMPLATES.applicationAcceptedUnlock;
+        // No chat state is armed. This used to pre-arm the unlock flow so a
+        // "Continuer" quick-reply could re-show a balance-dependent option list
+        // in the chat; the template carries a URL button now and the worker
+        // settles up in the app, so arming a flow only left a stale state for
+        // the next thing they typed to fall into.
         await this.whatsApp.sendTemplateMessage(
           app.worker.phone,
           'applicationAcceptedUnlock',
@@ -163,7 +150,6 @@ export class BotNotificationService {
           },
         );
       } else {
-        const tpl = WHATSAPP_TEMPLATES.applicationAccepted;
         await this.whatsApp.sendTemplateMessage(
           app.worker.phone,
           'applicationAccepted',
