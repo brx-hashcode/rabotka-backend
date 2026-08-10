@@ -389,6 +389,7 @@ model Profile {
   invoices                        Invoice[]
   ad_delivery_logs                AdDeliveryLog[]
   ratings_given                   Rating[]                      @relation("RatingRater")
+  feedback          Feedback[]
   ratings_received                Rating[]                      @relation("RatingRatee")
   portfolio_items                 PortfolioItem[]
   saved_jobs                      SavedJob[]
@@ -1334,6 +1335,32 @@ model AdTrackedLink {
   @@index([advertisement_id], name: "idx_ad_tracked_link_advertisement")
   @@index([ad_delivery_log_id], name: "idx_ad_tracked_link_delivery_log")
   @@map("ad_tracked_links")
+}
+
+/// Feedback about RABOTKA, not about a person.
+///
+/// Distinct from `Rating`, which is rater -> ratee on an assignment. This has
+/// no counterparty: it is a product survey, today collected through a WhatsApp
+/// Flow after a contact unlock.
+model Feedback {
+  id         String   @id @default(uuid()) @db.Uuid
+  created_at DateTime @default(now())
+  profile_id String   @db.Uuid
+  /// 1-5. Constrained here rather than only in code: a survey answer arriving
+  /// from a webhook is external input.
+  score      Int
+  comment    String?
+  /// Where it came from, so a future in-app form does not need a new table.
+  source     String   @default("whatsapp_flow")
+  /// Echoed back by the Flow submission. Kept for correlation and de-duplication
+  /// — Meta retries a webhook, and a resubmitted form must not double-count.
+  flow_token String?  @unique
+
+  profile Profile @relation(fields: [profile_id], references: [id], onDelete: Cascade)
+
+  @@index([profile_id], name: "idx_feedback_profile")
+  @@index([created_at], name: "idx_feedback_created_at")
+  @@map("feedback")
 }
 
 model Rating {

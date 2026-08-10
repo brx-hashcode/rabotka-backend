@@ -42,6 +42,10 @@ function makeProvider(
   };
 }
 
+function makeFeedback() {
+  return { handleSubmission: jest.fn().mockResolvedValue(undefined) };
+}
+
 function makeDeps(redisOverrides = {}, provider = makeProvider()) {
   const redis = makeRedis(redisOverrides);
   const queueService = { addJob: jest.fn().mockResolvedValue(undefined) };
@@ -52,13 +56,15 @@ function makeDeps(redisOverrides = {}, provider = makeProvider()) {
     observe: jest.fn(),
     recordDelivered: jest.fn().mockResolvedValue(undefined),
   };
+  const feedback = makeFeedback();
   const service = new InboundIngestService(
     redis as never,
     queueService as never,
     sendTiming as never,
     provider as never,
+    feedback as never,
   );
-  return { service, redis, queueService, sendTiming, provider };
+  return { service, redis, queueService, sendTiming, provider, feedback };
 }
 
 const message = (
@@ -222,6 +228,38 @@ describe('InboundIngestService', () => {
         },
       ]);
       expect(provider.markAsRead).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('a submitted Flow', () => {
+    const flowEvent = () =>
+      ({
+        kind: 'message',
+        from: '+242069917686',
+        providerMessageId: 'wamid.flow',
+        timestamp: new Date(),
+        provider: 'cloud',
+        content: {
+          type: 'flow_reply',
+          flowToken: 'fb_profile-1_abc',
+          answers: { score: '5', comment: 'Super' },
+        },
+      }) as InboundEvent;
+
+    it('goes to the feedback service, not the bot queue', async () => {
+      // A form submission has no text for the bot to answer, and replying to
+      // it would be noise.
+      const { service, queueService, feedback } = makeDeps();
+      await service.ingest([flowEvent()]);
+      expect(feedback.handleSubmission).toHaveBeenCalledTimes(1);
+      expect(queueService.addJob).not.toHaveBeenCalled();
+    });
+
+    it('is de-duplicated like any other inbound message', async () => {
+      // Meta retries the webhook; a resubmitted form must not double-count.
+      const { service, feedback } = makeDeps({ setResult: null });
+      await service.ingest([flowEvent()]);
+      expect(feedback.handleSubmission).not.toHaveBeenCalled();
     });
   });
 

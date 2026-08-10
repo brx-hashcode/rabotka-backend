@@ -304,6 +304,7 @@ export class CloudProvider implements WhatsappProvider {
           name: 'flow',
           parameters: {
             flow_message_version: '3',
+            ...(payload.flowToken ? { flow_token: payload.flowToken } : {}),
             flow_id: payload.flowId,
             flow_cta: payload.flowCta,
             flow_action: 'navigate',

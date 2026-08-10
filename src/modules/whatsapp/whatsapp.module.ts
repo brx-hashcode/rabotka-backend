@@ -12,6 +12,7 @@ import { TwilioProvider } from './providers/twilio/twilio.provider';
 import { whatsappProviderFactory } from './whatsapp-provider.factory';
 import { CloudWebhookController } from './webhooks/cloud-webhook.controller';
 import { InboundIngestService } from './webhooks/inbound-ingest.service';
+import { WhatsAppFeedbackService } from './feedback/whatsapp-feedback.service';
 
 @Module({
   imports: [
@@ -32,10 +33,11 @@ import { InboundIngestService } from './webhooks/inbound-ingest.service';
     TwilioProvider,
     whatsappProviderFactory,
     InboundIngestService,
+    WhatsAppFeedbackService,
     WhatsAppService,
     WhatsAppOutboundProcessor,
     WhatsAppInboundProcessor,
   ],
-  exports: [WhatsAppService],
+  exports: [WhatsAppService, WhatsAppFeedbackService],
 })
 export class WhatsAppModule {}
