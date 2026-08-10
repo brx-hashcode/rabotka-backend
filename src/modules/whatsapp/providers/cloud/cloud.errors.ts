@@ -31,6 +31,10 @@ const BY_CODE: ReadonlyMap<number, WhatsappErrorCode> = new Map([
   [132069, 'TEMPLATE_NOT_FOUND'],
   // Expired or revoked token, or the app lacks the permission.
   [190, 'AUTH_FAILED'],
+  // "Access denied" on a SEND while reads still succeed. Observed from a
+  // temporary token that had gone stale without reaching its hard expiry — the
+  // fix is to regenerate, so retrying the same token is pure waste.
+  [131005, 'AUTH_FAILED'],
   [102, 'AUTH_FAILED'],
   [10, 'AUTH_FAILED'],
   [200, 'AUTH_FAILED'],
