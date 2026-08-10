@@ -41,6 +41,19 @@ export interface WhatsAppTemplate<Args extends unknown[]> {
    */
   buttonUrlVar?: string;
   /**
+   * The template has an IMAGE header (a "card").
+   *
+   * Providers differ here, and the difference is invisible until a send fails.
+   * Twilio bakes the media into the approved Content template and takes nothing
+   * at send time. Meta stores only an EXAMPLE at creation and requires the real
+   * image in a `header` component on EVERY send — omit it and the send is
+   * rejected with `132012 Format mismatch, expected IMAGE, received UNKNOWN`.
+   *
+   * All three cards use the brand cover, so the mapper resolves the URL from
+   * `coverImageUrl()` rather than storing it per entry.
+   */
+  hasImageHeader?: true;
+  /**
    * Index of the variable that fills the CTA button's URL suffix, when that
    * link opens an authenticated page. The outbound processor appends a one-time
    * login code to it so the WebView lands signed in
@@ -128,6 +141,7 @@ export const WHATSAPP_TEMPLATES = {
    * re-uploading to the same R2 key.
    */
   welcomeUnregisteredCard: {
+    hasImageHeader: true,
     // Rollback: point TPL_WELCOME_UNREGISTERED_V2 at the previous text-only
     // template, HX1610d675f58d8fa92d277383584cc5fb. It is deliberately not a
     // registry entry of its own — an unused entry is exactly what let two call
@@ -152,6 +166,7 @@ export const WHATSAPP_TEMPLATES = {
    * URL (`…/login?redirect=/{{1}}`), so the one-tap login code can ride along.
    */
   welcomePlatform: {
+    hasImageHeader: true,
     // v4 (2026-08): the copy now says what Rabotka is, and the button reads
     // "Ouvrir l'application". Rollback: point TPL_WELCOME_PLATFORM at
     // HX230bb5b440d631488889a134b6bd8388, the v2 card. Same variables and the
@@ -203,6 +218,7 @@ export const WHATSAPP_TEMPLATES = {
    * nothing else here changes — but the button goes back to being dead.
    */
   kycPendingMenu: {
+    hasImageHeader: true,
     contentSid: sid(
       'TPL_KYC_PENDING_MENU',
       'HX22cce223f0163abc339d502e686989a1',
@@ -868,7 +884,12 @@ export type WhatsAppTemplateName = keyof typeof WHATSAPP_TEMPLATES;
  */
 export type TemplateBinding = Pick<
   WhatsAppTemplate<never[]>,
-  'contentSid' | 'category' | 'cloud' | 'buttonUrlVar' | 'urlSuffixVar'
+  | 'contentSid'
+  | 'category'
+  | 'cloud'
+  | 'buttonUrlVar'
+  | 'urlSuffixVar'
+  | 'hasImageHeader'
 >;
 
 /**
@@ -957,6 +978,11 @@ export function templateLanguage(key: WhatsAppTemplateName): string {
  * code in the button. `buttonUrlVar` covers the case of a button variable with
  * no login code.
  */
+/** Whether a template carries an IMAGE header that must be sent every time. */
+export function hasImageHeader(key: WhatsAppTemplateName): boolean {
+  return TEMPLATE_BINDINGS[key].hasImageHeader === true;
+}
+
 export function getButtonUrlVar(key: WhatsAppTemplateName): string | undefined {
   const t = TEMPLATE_BINDINGS[key];
   return t.urlSuffixVar ?? t.buttonUrlVar;

@@ -1,6 +1,8 @@
 import { toDigits } from '../../contracts/address';
+import { coverImageUrl } from '../../../../common/constants/whatsapp-carousel';
 import {
   getButtonUrlVar,
+  hasImageHeader,
   templateCloudName,
   templateLanguage,
   WHATSAPP_TEMPLATES,
@@ -75,6 +77,16 @@ export function buildComponents(
         parameters: [{ type: 'text', text: code }],
       },
     ];
+  }
+
+  // Meta keeps only an EXAMPLE image on the approved template and wants the
+  // real one on every send. Twilio bakes it in and takes nothing, which is why
+  // no caller passes an image and why this has to come from the registry.
+  if (hasImageHeader(key)) {
+    components.push({
+      type: 'header',
+      parameters: [{ type: 'image', image: { link: coverImageUrl() } }],
+    });
   }
 
   const bodyKeys = orderedKeys(variables).filter((k) => k !== buttonVar);
