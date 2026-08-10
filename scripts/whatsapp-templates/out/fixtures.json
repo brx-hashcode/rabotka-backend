@@ -1,0 +1,964 @@
+[
+  {
+    "key": "otp",
+    "kind": "whatsapp/authentication",
+    "content": {
+      "account_sid": "AC7a671e9e64faae647462625fbf1cd104",
+      "date_created": "2026-07-14T22:33:32Z",
+      "date_updated": "2026-07-14T22:33:48Z",
+      "friendly_name": "rabotka_otp_auth",
+      "language": "fr",
+      "links": {
+        "approval_create": "https://content.twilio.com/v1/Content/HXf66c3d91d9f56e59b72d8fad31d4a795/ApprovalRequests/whatsapp",
+        "approval_fetch": "https://content.twilio.com/v1/Content/HXf66c3d91d9f56e59b72d8fad31d4a795/ApprovalRequests"
+      },
+      "sid": "HXf66c3d91d9f56e59b72d8fad31d4a795",
+      "types": {
+        "whatsapp/authentication": {
+          "actions": [
+            {
+              "copy_code_text": "Copier le code",
+              "type": "COPY_CODE"
+            }
+          ],
+          "add_security_recommendation": true,
+          "body": "{{1}}",
+          "code_expiration_minutes": 5
+        }
+      },
+      "url": "https://content.twilio.com/v1/Content/HXf66c3d91d9f56e59b72d8fad31d4a795",
+      "variables": {}
+    }
+  },
+  {
+    "key": "welcomeUnregisteredCard",
+    "kind": "twilio/card",
+    "content": {
+      "account_sid": "AC7a671e9e64faae647462625fbf1cd104",
+      "date_created": "2026-08-01T22:22:53Z",
+      "date_updated": "2026-08-01T22:32:50Z",
+      "friendly_name": "rabotka_welcome_unregistered_v3",
+      "language": "fr",
+      "links": {
+        "approval_create": "https://content.twilio.com/v1/Content/HXcf1954a8146623c7482682a605aacd93/ApprovalRequests/whatsapp",
+        "approval_fetch": "https://content.twilio.com/v1/Content/HXcf1954a8146623c7482682a605aacd93/ApprovalRequests"
+      },
+      "sid": "HXcf1954a8146623c7482682a605aacd93",
+      "types": {
+        "twilio/card": {
+          "actions": [
+            {
+              "chip_list": null,
+              "id": null,
+              "title": "Créer mon compte",
+              "type": "URL",
+              "url": "https://rabotka.work/onboarding",
+              "webview_size": "NONE"
+            }
+          ],
+          "body": null,
+          "height": "TALL",
+          "media": [
+            "https://pub-1c3331ee6be84a71b4be0db2b3734ac7.r2.dev/whatsapp/cover-rabotka.jpg"
+          ],
+          "orientation": "VERTICAL",
+          "subtitle": null,
+          "thumbnailImageAlignment": "LEFT",
+          "title": "*Bienvenue sur Rabotka*\nL’endroit où compétences et opportunités se rencontrent.\nCe numéro n’est pas encore enregistré."
+        }
+      },
+      "url": "https://content.twilio.com/v1/Content/HXcf1954a8146623c7482682a605aacd93",
+      "variables": {}
+    }
+  },
+  {
+    "key": "welcomePlatform",
+    "kind": "twilio/card",
+    "content": {
+      "account_sid": "AC7a671e9e64faae647462625fbf1cd104",
+      "date_created": "2026-08-05T20:14:30Z",
+      "date_updated": "2026-08-05T20:16:50Z",
+      "friendly_name": "rabotka_welcome_platform_v4",
+      "language": "fr",
+      "links": {
+        "approval_create": "https://content.twilio.com/v1/Content/HX8c4fcf4d486e3643ce2ac55cef77b01a/ApprovalRequests/whatsapp",
+        "approval_fetch": "https://content.twilio.com/v1/Content/HX8c4fcf4d486e3643ce2ac55cef77b01a/ApprovalRequests"
+      },
+      "sid": "HX8c4fcf4d486e3643ce2ac55cef77b01a",
+      "types": {
+        "twilio/card": {
+          "actions": [
+            {
+              "chip_list": null,
+              "id": null,
+              "title": "Ouvrir l’application",
+              "type": "URL",
+              "url": "https://rabotka.work/login?redirect=/{{1}}",
+              "webview_size": "NONE"
+            }
+          ],
+          "body": null,
+          "height": "TALL",
+          "media": [
+            "https://pub-1c3331ee6be84a71b4be0db2b3734ac7.r2.dev/whatsapp/cover-rabotka.jpg"
+          ],
+          "orientation": "VERTICAL",
+          "subtitle": null,
+          "thumbnailImageAlignment": "LEFT",
+          "title": "*Rabotka*\nLa première marketplace d’emploi sur WhatsApp en Afrique.\nOffres, candidatures et missions : tout se passe dans l’application."
+        }
+      },
+      "url": "https://content.twilio.com/v1/Content/HX8c4fcf4d486e3643ce2ac55cef77b01a",
+      "variables": {
+        "1": "home"
+      }
+    }
+  },
+  {
+    "key": "kycPendingMenu",
+    "kind": "twilio/card",
+    "content": {
+      "account_sid": "AC7a671e9e64faae647462625fbf1cd104",
+      "date_created": "2026-08-06T23:49:22Z",
+      "date_updated": "2026-08-06T23:52:30Z",
+      "friendly_name": "rabotka_kyc_pending_menu_v3",
+      "language": "fr",
+      "links": {
+        "approval_create": "https://content.twilio.com/v1/Content/HX22cce223f0163abc339d502e686989a1/ApprovalRequests/whatsapp",
+        "approval_fetch": "https://content.twilio.com/v1/Content/HX22cce223f0163abc339d502e686989a1/ApprovalRequests"
+      },
+      "sid": "HX22cce223f0163abc339d502e686989a1",
+      "types": {
+        "twilio/card": {
+          "actions": [
+            {
+              "chip_list": null,
+              "id": null,
+              "title": "Voir mon profil",
+              "type": "URL",
+              "url": "https://rabotka.work/s/{{1}}",
+              "webview_size": "NONE"
+            }
+          ],
+          "body": null,
+          "height": "TALL",
+          "media": [
+            "https://pub-1c3331ee6be84a71b4be0db2b3734ac7.r2.dev/whatsapp/cover-rabotka.jpg"
+          ],
+          "orientation": "VERTICAL",
+          "subtitle": null,
+          "thumbnailImageAlignment": "LEFT",
+          "title": "⏳ *Votre profil est en cours de vérification*\nNotre équipe examine vos documents. Vous recevrez une notification dès que votre KYC est validé.\nEn attendant, vous pouvez consulter votre profil."
+        }
+      },
+      "url": "https://content.twilio.com/v1/Content/HX22cce223f0163abc339d502e686989a1",
+      "variables": {
+        "1": "profile"
+      }
+    }
+  },
+  {
+    "key": "viewWorkerPortfolio",
+    "kind": "twilio/call-to-action",
+    "content": {
+      "account_sid": "AC7a671e9e64faae647462625fbf1cd104",
+      "date_created": "2026-07-24T11:34:33Z",
+      "date_updated": "2026-07-25T10:47:40Z",
+      "friendly_name": "rabotka_view_worker_portfolio",
+      "language": "fr",
+      "links": {
+        "approval_create": "https://content.twilio.com/v1/Content/HXd46839e8028869e15469add1b73000fd/ApprovalRequests/whatsapp",
+        "approval_fetch": "https://content.twilio.com/v1/Content/HXd46839e8028869e15469add1b73000fd/ApprovalRequests"
+      },
+      "sid": "HXd46839e8028869e15469add1b73000fd",
+      "types": {
+        "twilio/call-to-action": {
+          "actions": [
+            {
+              "id": null,
+              "title": "Voir le portfolio",
+              "type": "URL",
+              "url": "https://rabotka.work/p/{{2}}"
+            }
+          ],
+          "body": "*Portfolio de {{1}}*\n\nConsultez ses réalisations, sa note et ses missions terminées avant de le contacter.\n\nAppuyez sur le bouton ci-dessous pour ouvrir son portfolio."
+        }
+      },
+      "url": "https://content.twilio.com/v1/Content/HXd46839e8028869e15469add1b73000fd",
+      "variables": {
+        "1": "Jean Dupont",
+        "2": "jean-dupont-abc123"
+      }
+    }
+  },
+  {
+    "key": "profileCreatedWorker",
+    "kind": "twilio/call-to-action",
+    "content": {
+      "account_sid": "AC7a671e9e64faae647462625fbf1cd104",
+      "date_created": "2026-08-03T09:03:04Z",
+      "date_updated": "2026-08-03T09:18:57Z",
+      "friendly_name": "rabotka_profile_created_kyc_worker_v2",
+      "language": "fr",
+      "links": {
+        "approval_create": "https://content.twilio.com/v1/Content/HX3b4cca9d6cfbf5bf0683545198e0db1f/ApprovalRequests/whatsapp",
+        "approval_fetch": "https://content.twilio.com/v1/Content/HX3b4cca9d6cfbf5bf0683545198e0db1f/ApprovalRequests"
+      },
+      "sid": "HX3b4cca9d6cfbf5bf0683545198e0db1f",
+      "types": {
+        "twilio/call-to-action": {
+          "actions": [
+            {
+              "id": null,
+              "title": "Se connecter",
+              "type": "URL",
+              "url": "https://rabotka.work/s/{{2}}"
+            }
+          ],
+          "body": "Bonjour {{1}}, votre profil Rabotka a bien été créé.\n\nVotre vérification d'identité (KYC) est en cours d'examen par notre équipe. Dès qu'elle sera validée, vous recevrez une notification.\n\nEn attendant, vous pouvez vous connecter à tout moment pour accéder à votre profil et consulter les offres qui vous correspondent."
+        }
+      },
+      "url": "https://content.twilio.com/v1/Content/HX3b4cca9d6cfbf5bf0683545198e0db1f",
+      "variables": {
+        "1": "Jean",
+        "2": "home"
+      }
+    }
+  },
+  {
+    "key": "profileCreatedEmployer",
+    "kind": "twilio/call-to-action",
+    "content": {
+      "account_sid": "AC7a671e9e64faae647462625fbf1cd104",
+      "date_created": "2026-08-03T09:03:05Z",
+      "date_updated": "2026-08-03T09:09:01Z",
+      "friendly_name": "rabotka_profile_created_kyc_employer_v2",
+      "language": "fr",
+      "links": {
+        "approval_create": "https://content.twilio.com/v1/Content/HX5540f14049e1796d4eefd179521e87b4/ApprovalRequests/whatsapp",
+        "approval_fetch": "https://content.twilio.com/v1/Content/HX5540f14049e1796d4eefd179521e87b4/ApprovalRequests"
+      },
+      "sid": "HX5540f14049e1796d4eefd179521e87b4",
+      "types": {
+        "twilio/call-to-action": {
+          "actions": [
+            {
+              "id": null,
+              "title": "Se connecter",
+              "type": "URL",
+              "url": "https://rabotka.work/s/{{2}}"
+            }
+          ],
+          "body": "Bonjour {{1}}, votre profil Rabotka a bien été créé.\n\nVotre vérification d'identité (KYC) est en cours d'examen par notre équipe. Dès qu'elle sera validée, vous recevrez une notification.\n\nEn attendant, vous pouvez vous connecter à tout moment pour accéder à votre profil et consulter les profils qui vous correspondent."
+        }
+      },
+      "url": "https://content.twilio.com/v1/Content/HX5540f14049e1796d4eefd179521e87b4",
+      "variables": {
+        "1": "Jean",
+        "2": "home"
+      }
+    }
+  },
+  {
+    "key": "kyc",
+    "kind": "twilio/call-to-action",
+    "content": {
+      "account_sid": "AC7a671e9e64faae647462625fbf1cd104",
+      "date_created": "2026-08-03T09:04:21Z",
+      "date_updated": "2026-08-03T09:17:33Z",
+      "friendly_name": "rabotka_kyc_approved_cta_v2",
+      "language": "fr",
+      "links": {
+        "approval_create": "https://content.twilio.com/v1/Content/HXab1c58ea985695fc3eb473aef762b137/ApprovalRequests/whatsapp",
+        "approval_fetch": "https://content.twilio.com/v1/Content/HXab1c58ea985695fc3eb473aef762b137/ApprovalRequests"
+      },
+      "sid": "HXab1c58ea985695fc3eb473aef762b137",
+      "types": {
+        "twilio/call-to-action": {
+          "actions": [
+            {
+              "id": null,
+              "title": "Accéder à Rabotka",
+              "type": "URL",
+              "url": "https://rabotka.work/s/{{2}}"
+            }
+          ],
+          "body": "Bonjour {{1}},\n\nBonne nouvelle ! 🎉 Votre vérification d’identité (KYC) a été approuvée.\n\nVous avez maintenant accès à toutes les fonctionnalités de Rabotka. Appuyez ci-dessous pour commencer."
+        }
+      },
+      "url": "https://content.twilio.com/v1/Content/HXab1c58ea985695fc3eb473aef762b137",
+      "variables": {
+        "1": "Jean",
+        "2": "home"
+      }
+    }
+  },
+  {
+    "key": "accountActivatedWorker",
+    "kind": "twilio/call-to-action",
+    "content": {
+      "account_sid": "AC7a671e9e64faae647462625fbf1cd104",
+      "date_created": "2026-08-03T08:00:55Z",
+      "date_updated": "2026-08-03T08:04:54Z",
+      "friendly_name": "rabotka_account_activated_worker_v4",
+      "language": "fr",
+      "links": {
+        "approval_create": "https://content.twilio.com/v1/Content/HX25c7ed5a471136b533d824a41387d758/ApprovalRequests/whatsapp",
+        "approval_fetch": "https://content.twilio.com/v1/Content/HX25c7ed5a471136b533d824a41387d758/ApprovalRequests"
+      },
+      "sid": "HX25c7ed5a471136b533d824a41387d758",
+      "types": {
+        "twilio/call-to-action": {
+          "actions": [
+            {
+              "id": null,
+              "title": "Ouvrir Rabotka",
+              "type": "URL",
+              "url": "https://rabotka.work/login?redirect=/{{2}}"
+            }
+          ],
+          "body": "Félicitations {{1}} !\n\nVotre compte *Rabotka* est maintenant activé.\n\nVous pouvez maintenant :\n\n• Consulter les offres d'emploi disponibles\n• Postuler aux offres qui vous intéressent\n• Suivre et gérer vos candidatures\n\nBienvenue dans la communauté Rabotka 🚀"
+        }
+      },
+      "url": "https://content.twilio.com/v1/Content/HX25c7ed5a471136b533d824a41387d758",
+      "variables": {
+        "1": "Alice",
+        "2": "home"
+      }
+    }
+  },
+  {
+    "key": "accountActivatedEmployer",
+    "kind": "twilio/call-to-action",
+    "content": {
+      "account_sid": "AC7a671e9e64faae647462625fbf1cd104",
+      "date_created": "2026-08-03T08:00:56Z",
+      "date_updated": "2026-08-03T08:20:01Z",
+      "friendly_name": "rabotka_account_activated_employer_v4",
+      "language": "fr",
+      "links": {
+        "approval_create": "https://content.twilio.com/v1/Content/HX395ee26cefd5ac3ea94986ee36671563/ApprovalRequests/whatsapp",
+        "approval_fetch": "https://content.twilio.com/v1/Content/HX395ee26cefd5ac3ea94986ee36671563/ApprovalRequests"
+      },
+      "sid": "HX395ee26cefd5ac3ea94986ee36671563",
+      "types": {
+        "twilio/call-to-action": {
+          "actions": [
+            {
+              "id": null,
+              "title": "Ouvrir Rabotka",
+              "type": "URL",
+              "url": "https://rabotka.work/login?redirect=/{{2}}"
+            }
+          ],
+          "body": "Félicitations {{1}} !\n\nVotre compte *Rabotka* est maintenant activé.\n\nVous pouvez maintenant :\n\n• Publier des offres d'emploi\n• Recevoir des candidatures\n• Gérer vos offres et recruter\n\nBienvenue dans la communauté Rabotka 🚀"
+        }
+      },
+      "url": "https://content.twilio.com/v1/Content/HX395ee26cefd5ac3ea94986ee36671563",
+      "variables": {
+        "1": "Alice",
+        "2": "home"
+      }
+    }
+  },
+  {
+    "key": "reminder24h",
+    "kind": "twilio/call-to-action",
+    "content": {
+      "account_sid": "AC7a671e9e64faae647462625fbf1cd104",
+      "date_created": "2026-07-31T05:35:12Z",
+      "date_updated": "2026-08-01T04:45:16Z",
+      "friendly_name": "rabotka_reminder_24h_cta",
+      "language": "fr",
+      "links": {
+        "approval_create": "https://content.twilio.com/v1/Content/HX518e3f6bac5a1f337456cda963692474/ApprovalRequests/whatsapp",
+        "approval_fetch": "https://content.twilio.com/v1/Content/HX518e3f6bac5a1f337456cda963692474/ApprovalRequests"
+      },
+      "sid": "HX518e3f6bac5a1f337456cda963692474",
+      "types": {
+        "twilio/call-to-action": {
+          "actions": [
+            {
+              "id": null,
+              "title": "Voir ma mission",
+              "type": "URL",
+              "url": "https://rabotka.work/login?redirect=/applications/{{9}}"
+            }
+          ],
+          "body": "⏰ *Votre mission est demain*\n\n*Offre* : {{1}}\n*Date* : {{2}}\n*Adresse* : {{3}}\n*Rémunération* : {{4}}\n\n*Employeur* : {{5}}\n*Contact* : {{6}}\n\nSi vous ne pouvez plus assurer la mission, annulez au moins {{7}} heures à l’avance : passé ce délai une pénalité de {{8}} FCFA s’applique.\n\nAppuyez ci-dessous pour voir la mission ou l’annuler."
+        }
+      },
+      "url": "https://content.twilio.com/v1/Content/HX518e3f6bac5a1f337456cda963692474",
+      "variables": {
+        "1": "Ménage bureau",
+        "2": "16/07/2026 08:00",
+        "3": "Bacongo, Brazzaville",
+        "4": "15 000 FCFA",
+        "5": "Marie Lore",
+        "6": "+242 06 000 0000",
+        "7": "4",
+        "8": "5 000",
+        "9": "3f2b1c8e-0000-4000-8000-000000000000"
+      }
+    }
+  },
+  {
+    "key": "jobRecommendation",
+    "kind": "twilio/call-to-action",
+    "content": {
+      "account_sid": "AC7a671e9e64faae647462625fbf1cd104",
+      "date_created": "2026-07-30T21:40:56Z",
+      "date_updated": "2026-07-30T21:43:15Z",
+      "friendly_name": "rabotka_job_recommendation_cta",
+      "language": "fr",
+      "links": {
+        "approval_create": "https://content.twilio.com/v1/Content/HXabc07b58525ee5d9c68c0049e31d9001/ApprovalRequests/whatsapp",
+        "approval_fetch": "https://content.twilio.com/v1/Content/HXabc07b58525ee5d9c68c0049e31d9001/ApprovalRequests"
+      },
+      "sid": "HXabc07b58525ee5d9c68c0049e31d9001",
+      "types": {
+        "twilio/call-to-action": {
+          "actions": [
+            {
+              "id": null,
+              "title": "Voir l'offre",
+              "type": "URL",
+              "url": "https://rabotka.work/login?redirect=/offres/{{6}}"
+            }
+          ],
+          "body": "Bonjour {{1}}, une offre correspond à votre profil.\n\n*Offre* : {{2}}\n*Montant* : {{3}}\n*Adresse* : {{4}}\n*Date* : {{5}}\n\nAppuyez ci-dessous pour voir le détail et postuler."
+        }
+      },
+      "url": "https://content.twilio.com/v1/Content/HXabc07b58525ee5d9c68c0049e31d9001",
+      "variables": {
+        "1": "Alice",
+        "2": "Ménage bureau",
+        "3": "15 000 FCFA",
+        "4": "Bacongo, Brazzaville",
+        "5": "16/07/2026 08:00",
+        "6": "3f2b1c8e-0000-4000-8000-000000000000"
+      }
+    }
+  },
+  {
+    "key": "newApplication",
+    "kind": "twilio/call-to-action",
+    "content": {
+      "account_sid": "AC7a671e9e64faae647462625fbf1cd104",
+      "date_created": "2026-07-30T21:40:54Z",
+      "date_updated": "2026-07-30T21:49:09Z",
+      "friendly_name": "rabotka_new_application_cta",
+      "language": "fr",
+      "links": {
+        "approval_create": "https://content.twilio.com/v1/Content/HXe51191f9e1cbd68ad0ecacc419893634/ApprovalRequests/whatsapp",
+        "approval_fetch": "https://content.twilio.com/v1/Content/HXe51191f9e1cbd68ad0ecacc419893634/ApprovalRequests"
+      },
+      "sid": "HXe51191f9e1cbd68ad0ecacc419893634",
+      "types": {
+        "twilio/call-to-action": {
+          "actions": [
+            {
+              "id": null,
+              "title": "Voir la candidature",
+              "type": "URL",
+              "url": "https://rabotka.work/login?redirect=/candidatures/{{8}}"
+            }
+          ],
+          "body": "*Nouvelle candidature !*\n\n*Offre* : {{1}}\n\n*Candidat* : {{2}}\n*Score de fiabilité* : {{3}}/100\n*Missions complétées* : {{4}}\n*Description* : {{5}}\n\n*Rendez-vous prévu* : {{6}}\n*Adresse* : {{7}}\n\nAppuyez ci-dessous pour consulter la candidature et accepter ou refuser."
+        }
+      },
+      "url": "https://content.twilio.com/v1/Content/HXe51191f9e1cbd68ad0ecacc419893634",
+      "variables": {
+        "1": "Ménage bureau",
+        "2": "Alice Koumba",
+        "3": "95",
+        "4": "12",
+        "5": "Plombier expérimenté, disponible rapidement.",
+        "6": "16/07/2026 08:00",
+        "7": "Bacongo, Brazzaville",
+        "8": "3f2b1c8e-0000-4000-8000-000000000000"
+      }
+    }
+  },
+  {
+    "key": "applicationAccepted",
+    "kind": "twilio/call-to-action",
+    "content": {
+      "account_sid": "AC7a671e9e64faae647462625fbf1cd104",
+      "date_created": "2026-08-03T09:03:06Z",
+      "date_updated": "2026-08-03T09:16:45Z",
+      "friendly_name": "rabotka_application_accepted_cta_v2",
+      "language": "fr",
+      "links": {
+        "approval_create": "https://content.twilio.com/v1/Content/HX6ad9840c74ea5d052ef0257f99f33644/ApprovalRequests/whatsapp",
+        "approval_fetch": "https://content.twilio.com/v1/Content/HX6ad9840c74ea5d052ef0257f99f33644/ApprovalRequests"
+      },
+      "sid": "HX6ad9840c74ea5d052ef0257f99f33644",
+      "types": {
+        "twilio/call-to-action": {
+          "actions": [
+            {
+              "id": null,
+              "title": "Voir ma candidature",
+              "type": "URL",
+              "url": "https://rabotka.work/s/{{3}}"
+            }
+          ],
+          "body": "🎉 *Candidature acceptée !*\n\n*{{1}}* a accepté votre candidature pour l’offre « {{2}} ».\n\nAppuyez ci-dessous pour suivre votre mission."
+        }
+      },
+      "url": "https://content.twilio.com/v1/Content/HX6ad9840c74ea5d052ef0257f99f33644",
+      "variables": {
+        "1": "Marie Lore",
+        "2": "Ménage bureau",
+        "3": "mes-candidatures"
+      }
+    }
+  },
+  {
+    "key": "applicationAcceptedUnlock",
+    "kind": "twilio/call-to-action",
+    "content": {
+      "account_sid": "AC7a671e9e64faae647462625fbf1cd104",
+      "date_created": "2026-07-31T06:40:51Z",
+      "date_updated": "2026-07-31T06:49:19Z",
+      "friendly_name": "rabotka_application_accepted_unlock_cta_v2",
+      "language": "fr",
+      "links": {
+        "approval_create": "https://content.twilio.com/v1/Content/HX3cedb9f4daad01310c52630094caaa2c/ApprovalRequests/whatsapp",
+        "approval_fetch": "https://content.twilio.com/v1/Content/HX3cedb9f4daad01310c52630094caaa2c/ApprovalRequests"
+      },
+      "sid": "HX3cedb9f4daad01310c52630094caaa2c",
+      "types": {
+        "twilio/call-to-action": {
+          "actions": [
+            {
+              "id": null,
+              "title": "Payer ma part",
+              "type": "URL",
+              "url": "https://rabotka.work/login?redirect=/applications/{{3}}"
+            }
+          ],
+          "body": "🎉 *Candidature acceptée !*\n\n*{{1}}* a accepté votre candidature pour l’offre « {{2}} ».\n\nIl reste une étape : réglez votre part du déverrouillage pour recevoir ses coordonnées."
+        }
+      },
+      "url": "https://content.twilio.com/v1/Content/HX3cedb9f4daad01310c52630094caaa2c",
+      "variables": {
+        "1": "Marie Lore",
+        "2": "Ménage bureau",
+        "3": "3f2b1c8e-0000-4000-8000-000000000000"
+      }
+    }
+  },
+  {
+    "key": "applicationRejected",
+    "kind": "twilio/call-to-action",
+    "content": {
+      "account_sid": "AC7a671e9e64faae647462625fbf1cd104",
+      "date_created": "2026-08-03T09:04:23Z",
+      "date_updated": "2026-08-03T09:22:16Z",
+      "friendly_name": "rabotka_application_rejected_cta_v2",
+      "language": "fr",
+      "links": {
+        "approval_create": "https://content.twilio.com/v1/Content/HX06b679564eca26a2bd88e48c5361357a/ApprovalRequests/whatsapp",
+        "approval_fetch": "https://content.twilio.com/v1/Content/HX06b679564eca26a2bd88e48c5361357a/ApprovalRequests"
+      },
+      "sid": "HX06b679564eca26a2bd88e48c5361357a",
+      "types": {
+        "twilio/call-to-action": {
+          "actions": [
+            {
+              "id": null,
+              "title": "Voir les offres",
+              "type": "URL",
+              "url": "https://rabotka.work/s/{{1}}"
+            }
+          ],
+          "body": "*Candidature non retenue*\n\nL’employeur a choisi un autre candidat pour cette offre.\n\nNe vous découragez pas — de nouvelles missions sont publiées chaque jour. Appuyez ci-dessous pour les découvrir."
+        }
+      },
+      "url": "https://content.twilio.com/v1/Content/HX06b679564eca26a2bd88e48c5361357a",
+      "variables": {
+        "1": "recherche-offres"
+      }
+    }
+  },
+  {
+    "key": "cancellation",
+    "kind": "twilio/call-to-action",
+    "content": {
+      "account_sid": "AC7a671e9e64faae647462625fbf1cd104",
+      "date_created": "2026-07-31T06:34:02Z",
+      "date_updated": "2026-07-31T06:41:11Z",
+      "friendly_name": "rabotka_cancellation_cta",
+      "language": "fr",
+      "links": {
+        "approval_create": "https://content.twilio.com/v1/Content/HX6c6f426c62bbe0c173f7f02376b47586/ApprovalRequests/whatsapp",
+        "approval_fetch": "https://content.twilio.com/v1/Content/HX6c6f426c62bbe0c173f7f02376b47586/ApprovalRequests"
+      },
+      "sid": "HX6c6f426c62bbe0c173f7f02376b47586",
+      "types": {
+        "twilio/call-to-action": {
+          "actions": [
+            {
+              "id": null,
+              "title": "Voir mon offre",
+              "type": "URL",
+              "url": "https://rabotka.work/login?redirect=/job-offers/{{6}}"
+            }
+          ],
+          "body": "*Annulation de candidature*\n\nLe travailleur *{{1}}* a annulé sa candidature pour l’offre « {{2}} » (prévue le {{3}}).\n\n*Raison* : {{4}}\n\n{{5}}\n\nVotre offre est de nouveau ouverte aux candidatures. Appuyez ci-dessous pour la gérer."
+        }
+      },
+      "url": "https://content.twilio.com/v1/Content/HX6c6f426c62bbe0c173f7f02376b47586",
+      "variables": {
+        "1": "Alice Koumba",
+        "2": "Ménage bureau",
+        "3": "16/07/2026 08:00",
+        "4": "Empêchement de dernière minute",
+        "5": "Cette annulation tardive a entraîné une pénalité pour le travailleur.",
+        "6": "3f2b1c8e-0000-4000-8000-000000000000"
+      }
+    }
+  },
+  {
+    "key": "contactUnlocked",
+    "kind": "twilio/call-to-action",
+    "content": {
+      "account_sid": "AC7a671e9e64faae647462625fbf1cd104",
+      "date_created": "2026-08-03T09:04:13Z",
+      "date_updated": "2026-08-03T09:11:46Z",
+      "friendly_name": "rabotka_contact_unlocked_mutual_v5",
+      "language": "fr",
+      "links": {
+        "approval_create": "https://content.twilio.com/v1/Content/HX4537d7f09c1bd7a2f1e900418b97ee9d/ApprovalRequests/whatsapp",
+        "approval_fetch": "https://content.twilio.com/v1/Content/HX4537d7f09c1bd7a2f1e900418b97ee9d/ApprovalRequests"
+      },
+      "sid": "HX4537d7f09c1bd7a2f1e900418b97ee9d",
+      "types": {
+        "twilio/call-to-action": {
+          "actions": [
+            {
+              "id": null,
+              "title": "Laisser un avis",
+              "type": "URL",
+              "url": "https://rabotka.work/s/{{4}}"
+            }
+          ],
+          "body": "🎉 *C’est parti !*\n\nLes deux parties ont réglé leur part — voici les coordonnées de *{{1}}* :\n\n📞 {{2}}\n✉️ {{3}}\n\nUn premier message pour vous présenter et confirmer votre présence, et tout est prêt.\n\nToute l’équipe vous souhaite une excellente collaboration 🤝"
+        }
+      },
+      "url": "https://content.twilio.com/v1/Content/HX4537d7f09c1bd7a2f1e900418b97ee9d",
+      "variables": {
+        "1": "Marie Lore",
+        "2": "+242 06 000 0000",
+        "3": "marie.lore@example.com",
+        "4": "leave-note"
+      }
+    }
+  },
+  {
+    "key": "contactUnlockedRecommendation",
+    "kind": "twilio/call-to-action",
+    "content": {
+      "account_sid": "AC7a671e9e64faae647462625fbf1cd104",
+      "date_created": "2026-08-03T09:04:15Z",
+      "date_updated": "2026-08-03T09:10:09Z",
+      "friendly_name": "rabotka_contact_unlocked_reco_v4",
+      "language": "fr",
+      "links": {
+        "approval_create": "https://content.twilio.com/v1/Content/HX6e2644db5dd013c2e0abbf0226b464cc/ApprovalRequests/whatsapp",
+        "approval_fetch": "https://content.twilio.com/v1/Content/HX6e2644db5dd013c2e0abbf0226b464cc/ApprovalRequests"
+      },
+      "sid": "HX6e2644db5dd013c2e0abbf0226b464cc",
+      "types": {
+        "twilio/call-to-action": {
+          "actions": [
+            {
+              "id": null,
+              "title": "Laisser un avis",
+              "type": "URL",
+              "url": "https://rabotka.work/s/{{4}}"
+            }
+          ],
+          "body": "🎉 *Contact débloqué !*\n\nVotre paiement est confirmé. Voici comment joindre *{{1}}* :\n\n📞 {{2}}\n✉️ {{3}}\n\nPrésentez-lui votre mission dès maintenant — les profils les plus demandés répondent vite.\n\nToute l’équipe Rabotka vous souhaite une excellente collaboration 🤝"
+        }
+      },
+      "url": "https://content.twilio.com/v1/Content/HX6e2644db5dd013c2e0abbf0226b464cc",
+      "variables": {
+        "1": "Sara Electricienne",
+        "2": "+242 06 000 0103",
+        "3": "sara@example.com",
+        "4": "leave-note"
+      }
+    }
+  },
+  {
+    "key": "unlockExpiredConversion",
+    "kind": "twilio/call-to-action",
+    "content": {
+      "account_sid": "AC7a671e9e64faae647462625fbf1cd104",
+      "date_created": "2026-08-03T09:04:20Z",
+      "date_updated": "2026-08-03T09:09:43Z",
+      "friendly_name": "rabotka_unlock_expired_conversion_cta_v2",
+      "language": "fr",
+      "links": {
+        "approval_create": "https://content.twilio.com/v1/Content/HX6bf4ad0386162858db883156b5ea07a3/ApprovalRequests/whatsapp",
+        "approval_fetch": "https://content.twilio.com/v1/Content/HX6bf4ad0386162858db883156b5ea07a3/ApprovalRequests"
+      },
+      "sid": "HX6bf4ad0386162858db883156b5ea07a3",
+      "types": {
+        "twilio/call-to-action": {
+          "actions": [
+            {
+              "id": null,
+              "title": "Voir mon portefeuille",
+              "type": "URL",
+              "url": "https://rabotka.work/s/{{2}}"
+            }
+          ],
+          "body": "⏳ *Déverrouillage expiré*\n\nLe délai de déverrouillage de contact a expiré. *{{1}} FCFA* ont été recrédités sur votre portefeuille.\n\nAppuyez ci-dessous pour consulter votre solde."
+        }
+      },
+      "url": "https://content.twilio.com/v1/Content/HX6bf4ad0386162858db883156b5ea07a3",
+      "variables": {
+        "1": "100",
+        "2": "portefeuille"
+      }
+    }
+  },
+  {
+    "key": "autoStarted",
+    "kind": "twilio/call-to-action",
+    "content": {
+      "account_sid": "AC7a671e9e64faae647462625fbf1cd104",
+      "date_created": "2026-07-31T05:35:16Z",
+      "date_updated": "2026-07-31T05:50:06Z",
+      "friendly_name": "rabotka_auto_started_cta",
+      "language": "fr",
+      "links": {
+        "approval_create": "https://content.twilio.com/v1/Content/HXf41bcce791ad5ac3351c0c6c9dc3e611/ApprovalRequests/whatsapp",
+        "approval_fetch": "https://content.twilio.com/v1/Content/HXf41bcce791ad5ac3351c0c6c9dc3e611/ApprovalRequests"
+      },
+      "sid": "HXf41bcce791ad5ac3351c0c6c9dc3e611",
+      "types": {
+        "twilio/call-to-action": {
+          "actions": [
+            {
+              "id": null,
+              "title": "Voir la mission",
+              "type": "URL",
+              "url": "https://rabotka.work/login?redirect=/missions/{{2}}"
+            }
+          ],
+          "body": "🚀 *Mission démarrée automatiquement*\n\nVotre offre « {{1}} » a atteint l’heure prévue avec des travailleurs acceptés. La mission est maintenant marquée comme démarrée.\n\nAppuyez ci-dessous pour la suivre et la clôturer une fois terminée."
+        }
+      },
+      "url": "https://content.twilio.com/v1/Content/HXf41bcce791ad5ac3351c0c6c9dc3e611",
+      "variables": {
+        "1": "Ménage bureau",
+        "2": "3f2b1c8e-0000-4000-8000-000000000000"
+      }
+    }
+  },
+  {
+    "key": "statusCheck",
+    "kind": "twilio/call-to-action",
+    "content": {
+      "account_sid": "AC7a671e9e64faae647462625fbf1cd104",
+      "date_created": "2026-07-31T06:34:03Z",
+      "date_updated": "2026-07-31T06:48:08Z",
+      "friendly_name": "rabotka_status_check_cta",
+      "language": "fr",
+      "links": {
+        "approval_create": "https://content.twilio.com/v1/Content/HX53ac4969d31ecc682d3b3e1fd030563f/ApprovalRequests/whatsapp",
+        "approval_fetch": "https://content.twilio.com/v1/Content/HX53ac4969d31ecc682d3b3e1fd030563f/ApprovalRequests"
+      },
+      "sid": "HX53ac4969d31ecc682d3b3e1fd030563f",
+      "types": {
+        "twilio/call-to-action": {
+          "actions": [
+            {
+              "id": null,
+              "title": "Mettre à jour",
+              "type": "URL",
+              "url": "https://rabotka.work/login?redirect=/missions/{{2}}"
+            }
+          ],
+          "body": "📋 *Mission en cours — {{1}}*\n\nLa mission a atteint son heure prévue. Si le travail est terminé, clôturez-la pour permettre l’évaluation et finaliser le paiement.\n\nAppuyez ci-dessous pour mettre à jour son statut."
+        }
+      },
+      "url": "https://content.twilio.com/v1/Content/HX53ac4969d31ecc682d3b3e1fd030563f",
+      "variables": {
+        "1": "Ménage bureau",
+        "2": "3f2b1c8e-0000-4000-8000-000000000000"
+      }
+    }
+  },
+  {
+    "key": "offerExpiredApplicant",
+    "kind": "twilio/call-to-action",
+    "content": {
+      "account_sid": "AC7a671e9e64faae647462625fbf1cd104",
+      "date_created": "2026-08-03T09:04:17Z",
+      "date_updated": "2026-08-03T09:20:58Z",
+      "friendly_name": "rabotka_offer_expired_applicant_cta_v2",
+      "language": "fr",
+      "links": {
+        "approval_create": "https://content.twilio.com/v1/Content/HX0647a60e08307a0ffda4d446fb2cb711/ApprovalRequests/whatsapp",
+        "approval_fetch": "https://content.twilio.com/v1/Content/HX0647a60e08307a0ffda4d446fb2cb711/ApprovalRequests"
+      },
+      "sid": "HX0647a60e08307a0ffda4d446fb2cb711",
+      "types": {
+        "twilio/call-to-action": {
+          "actions": [
+            {
+              "id": null,
+              "title": "Voir les offres",
+              "type": "URL",
+              "url": "https://rabotka.work/s/{{2}}"
+            }
+          ],
+          "body": "⏰ *Offre expirée*\n\nL’offre « {{1}} » à laquelle vous aviez postulé a expiré, votre candidature est donc clôturée.\n\nD’autres missions vous attendent — appuyez ci-dessous pour les découvrir."
+        }
+      },
+      "url": "https://content.twilio.com/v1/Content/HX0647a60e08307a0ffda4d446fb2cb711",
+      "variables": {
+        "1": "Ménage bureau",
+        "2": "recherche-offres"
+      }
+    }
+  },
+  {
+    "key": "offerExpiredEmployer",
+    "kind": "twilio/call-to-action",
+    "content": {
+      "account_sid": "AC7a671e9e64faae647462625fbf1cd104",
+      "date_created": "2026-07-31T05:35:18Z",
+      "date_updated": "2026-07-31T05:45:15Z",
+      "friendly_name": "rabotka_offer_expired_employer_cta",
+      "language": "fr",
+      "links": {
+        "approval_create": "https://content.twilio.com/v1/Content/HXa721971676e29a4fc129e785384f83d1/ApprovalRequests/whatsapp",
+        "approval_fetch": "https://content.twilio.com/v1/Content/HXa721971676e29a4fc129e785384f83d1/ApprovalRequests"
+      },
+      "sid": "HXa721971676e29a4fc129e785384f83d1",
+      "types": {
+        "twilio/call-to-action": {
+          "actions": [
+            {
+              "id": null,
+              "title": "Republier l’offre",
+              "type": "URL",
+              "url": "https://rabotka.work/login?redirect=/job-offers/{{2}}"
+            }
+          ],
+          "body": "⏰ *Offre expirée*\n\nVotre offre « {{1}} » a expiré : la date est passée sans démarrage effectif de la mission.\n\nVous pouvez la republier à une nouvelle date en appuyant ci-dessous."
+        }
+      },
+      "url": "https://content.twilio.com/v1/Content/HXa721971676e29a4fc129e785384f83d1",
+      "variables": {
+        "1": "Ménage bureau",
+        "2": "3f2b1c8e-0000-4000-8000-000000000000"
+      }
+    }
+  },
+  {
+    "key": "offerUnavailableWorker",
+    "kind": "twilio/call-to-action",
+    "content": {
+      "account_sid": "AC7a671e9e64faae647462625fbf1cd104",
+      "date_created": "2026-08-03T09:04:19Z",
+      "date_updated": "2026-08-03T09:15:49Z",
+      "friendly_name": "rabotka_offer_unavailable_worker_cta_v2",
+      "language": "fr",
+      "links": {
+        "approval_create": "https://content.twilio.com/v1/Content/HX8603fcae7dfdbcdd3570216395ede043/ApprovalRequests/whatsapp",
+        "approval_fetch": "https://content.twilio.com/v1/Content/HX8603fcae7dfdbcdd3570216395ede043/ApprovalRequests"
+      },
+      "sid": "HX8603fcae7dfdbcdd3570216395ede043",
+      "types": {
+        "twilio/call-to-action": {
+          "actions": [
+            {
+              "id": null,
+              "title": "Voir les offres",
+              "type": "URL",
+              "url": "https://rabotka.work/s/{{2}}"
+            }
+          ],
+          "body": "ℹ️ *Offre non disponible*\n\nL’offre « {{1}} » pour laquelle vous aviez postulé n’est plus disponible.\n\nDe nouvelles missions sont publiées chaque jour — appuyez ci-dessous pour les parcourir."
+        }
+      },
+      "url": "https://content.twilio.com/v1/Content/HX8603fcae7dfdbcdd3570216395ede043",
+      "variables": {
+        "1": "Ménage bureau",
+        "2": "recherche-offres"
+      }
+    }
+  },
+  {
+    "key": "reminderStart",
+    "kind": "twilio/call-to-action",
+    "content": {
+      "account_sid": "AC7a671e9e64faae647462625fbf1cd104",
+      "date_created": "2026-07-31T05:35:15Z",
+      "date_updated": "2026-07-31T05:40:47Z",
+      "friendly_name": "rabotka_reminder_start_cta",
+      "language": "fr",
+      "links": {
+        "approval_create": "https://content.twilio.com/v1/Content/HX2a2e2633f45b1fceb8164d08b0963ec8/ApprovalRequests/whatsapp",
+        "approval_fetch": "https://content.twilio.com/v1/Content/HX2a2e2633f45b1fceb8164d08b0963ec8/ApprovalRequests"
+      },
+      "sid": "HX2a2e2633f45b1fceb8164d08b0963ec8",
+      "types": {
+        "twilio/call-to-action": {
+          "actions": [
+            {
+              "id": null,
+              "title": "Voir ma mission",
+              "type": "URL",
+              "url": "https://rabotka.work/login?redirect=/applications/{{6}}"
+            }
+          ],
+          "body": "🚀 *C’est l’heure — votre mission commence !*\n\n*Offre* : {{1}}\n*Heure* : {{2}}\n*Adresse* : {{3}}\n\n*Employeur* : {{4}}\n*Contact* : {{5}}\n\nBonne mission ! Appuyez ci-dessous pour la suivre et la marquer terminée une fois le travail fait."
+        }
+      },
+      "url": "https://content.twilio.com/v1/Content/HX2a2e2633f45b1fceb8164d08b0963ec8",
+      "variables": {
+        "1": "Ménage bureau",
+        "2": "08:00",
+        "3": "Bacongo, Brazzaville",
+        "4": "Marie Lore",
+        "5": "+242 06 000 0000",
+        "6": "3f2b1c8e-0000-4000-8000-000000000000"
+      }
+    }
+  },
+  {
+    "key": "adminMessage",
+    "kind": "twilio/text",
+    "content": {
+      "account_sid": "AC7a671e9e64faae647462625fbf1cd104",
+      "date_created": "2026-08-06T05:12:43Z",
+      "date_updated": "2026-08-06T05:23:54Z",
+      "friendly_name": "rabotka_admin_message_v2",
+      "language": "fr",
+      "links": {
+        "approval_create": "https://content.twilio.com/v1/Content/HX19ecc295fd0ad9070740b2db85154c95/ApprovalRequests/whatsapp",
+        "approval_fetch": "https://content.twilio.com/v1/Content/HX19ecc295fd0ad9070740b2db85154c95/ApprovalRequests"
+      },
+      "sid": "HX19ecc295fd0ad9070740b2db85154c95",
+      "types": {
+        "twilio/text": {
+          "body": "*Rabotka*\n\n{{1}}\n\nMerci et à bientôt,\n_{{2}} — L’équipe Rabotka_"
+        }
+      },
+      "url": "https://content.twilio.com/v1/Content/HX19ecc295fd0ad9070740b2db85154c95",
+      "variables": {
+        "1": "Votre document d’identité a bien été validé, votre compte est maintenant actif.",
+        "2": "Fariol Blondeau"
+      }
+    }
+  }
+]
