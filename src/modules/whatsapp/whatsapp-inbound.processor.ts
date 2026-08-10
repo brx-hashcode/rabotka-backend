@@ -10,6 +10,7 @@ import type {
   WhatsAppSend,
 } from './whatsapp-outbound.processor';
 import { SendTimingService } from './telemetry/send-timing.service';
+import { isTemplateKey } from '../../common/constants/whatsapp-templates';
 
 export type WhatsAppInboundJobData = {
   phone: string;
@@ -92,9 +93,17 @@ function toSend(job: WhatsAppOutboundJobData): WhatsAppSend {
     return { type: 'media', mediaUrl: job.mediaUrl, caption: job.caption };
   }
   if (job.type === 'template') {
+    // parseReplyToJob only ever produces the key-shaped variant; the legacy
+    // SID shape exists solely to drain jobs already in Redis and never reaches
+    // a sequence.
+    if (!('templateKey' in job)) {
+      throw new Error(
+        'Bot replies must carry a template key, not a content SID',
+      );
+    }
     return {
       type: 'template',
-      contentSid: job.contentSid,
+      templateKey: job.templateKey,
       contentVariables: job.contentVariables,
     };
   }
@@ -114,12 +123,15 @@ function parseReplyToJob(
   const MEDIA_SUFFIX = ']';
   const TEMPLATE_PREFIX = '[TPL:';
 
-  // Carousel / content-template send, encoded as `[TPL:<contentSid>]<jsonVars>`.
+  // Template send, encoded as `[TPL:<templateKey>]<jsonVars>`.
   if (message.startsWith(TEMPLATE_PREFIX) && message.includes(MEDIA_SUFFIX)) {
     const end = message.indexOf(MEDIA_SUFFIX);
-    const contentSid = message.slice(TEMPLATE_PREFIX.length, end).trim();
+    const templateKey = message.slice(TEMPLATE_PREFIX.length, end).trim();
     const rest = message.slice(end + MEDIA_SUFFIX.length).trim();
-    if (!contentSid) return null;
+    // An unknown key means a flow built a reply for a template that is not in
+    // the registry. Dropping it is right: enqueuing it would fail the job and
+    // retry twice before the DLQ, for a reply that can never succeed.
+    if (!templateKey || !isTemplateKey(templateKey)) return null;
     let contentVariables: Record<string, string> = {};
     if (rest) {
       try {
@@ -132,7 +144,7 @@ function parseReplyToJob(
       type: 'template',
       phone,
       profileId: profileId ?? undefined,
-      contentSid,
+      templateKey,
       contentVariables,
     };
   }
