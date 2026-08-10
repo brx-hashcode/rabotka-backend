@@ -82,6 +82,15 @@ export type WhatsAppSend =
 export type WhatsAppOutboundJobData = {
   phone: string;
   profileId?: string;
+  /**
+   * The inbound message this reply answers.
+   *
+   * Only used to re-show the typing bubble between the messages of a sequence:
+   * the indicator clears the moment anything is sent, so a three-message reply
+   * would show it once and then go quiet for the rest. Optional — a
+   * notification that nobody asked for has no message to attach it to.
+   */
+  replyToMessageId?: string;
 } & (
   | WhatsAppSend
   // An ordered batch delivered as ONE job: the worker runs concurrency: 3, so
@@ -157,7 +166,13 @@ export class WhatsAppOutboundProcessor {
       // Await each in turn so the batch arrives in order. If a later send fails
       // the whole job retries (earlier sends may repeat) — acceptable and rare,
       // versus the alternative of guaranteed out-of-order delivery.
-      for (const message of data.messages) {
+      for (const [i, message] of data.messages.entries()) {
+        // Sending clears the composer bubble, so put it back before each
+        // subsequent message. Not before the first: the webhook already did
+        // that the moment the inbound message arrived.
+        if (i > 0 && data.replyToMessageId) {
+          void this.whatsApp.showTyping(data.replyToMessageId);
+        }
         await this.processOne(data.phone, data.profileId, message);
       }
       return;

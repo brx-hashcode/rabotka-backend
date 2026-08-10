@@ -8,7 +8,11 @@ import { QueueService } from '../../../common/services/queue/queue.service';
 import { WHATSAPP_INBOUND_QUEUE } from '../../../common/services/queue/queue.module';
 import type { WhatsAppInboundJobData } from '../whatsapp-inbound.processor';
 import { SendTimingService } from '../telemetry/send-timing.service';
-import type { InboundEvent } from '../contracts';
+import {
+  WHATSAPP_PROVIDER,
+  type InboundEvent,
+  type WhatsappProvider,
+} from '../contracts';
 import { toBotInput } from './inbound-normalizer';
 
 const MSG_IDEMPOTENCY_TTL = 5 * 60; // 5 minutes
@@ -34,6 +38,7 @@ export class InboundIngestService {
     @Inject(REDIS_CONNECTION) private readonly redis: Redis,
     private readonly queueService: QueueService,
     private readonly sendTiming: SendTimingService,
+    @Inject(WHATSAPP_PROVIDER) private readonly provider: WhatsappProvider,
   ) {}
 
   /**
@@ -98,6 +103,16 @@ export class InboundIngestService {
 
     if (!(await this.withinRateLimit(phone))) return;
 
+    // Acknowledge before the work starts. The bot round-trip is a database
+    // read, a flow evaluation and a send, which is long enough for a reader to
+    // wonder whether the message arrived — the blue ticks say it did, and the
+    // composer bubble says something is happening.
+    //
+    // Deliberately NOT awaited: this is a courtesy, and a slow or failing
+    // acknowledgement must never delay the reply it is announcing. No-ops on
+    // Twilio, which has neither.
+    void this.acknowledge(event.providerMessageId);
+
     // Enqueue rather than handle inline: the webhook has to return in well
     // under the provider's timeout or it retries, multiplying load.
     await this.sendTiming.time('enqueue', 'inbound', { to: phone }, () =>
@@ -107,6 +122,33 @@ export class InboundIngestService {
         messageSid: event.providerMessageId || undefined,
       }),
     );
+  }
+
+  /**
+   * Blue ticks, then the typing bubble.
+   *
+   * On Meta these are one endpoint: the typing indicator rides on the read
+   * receipt, so `sendTypingIndicator` also marks the message read. Both are
+   * called anyway — `markAsRead` alone is what a provider without typing
+   * support can still honour, and the pair reads as the intent rather than as
+   * a trick of Meta's API shape.
+   *
+   * The bubble clears itself after ~25s, or the moment a message is sent.
+   */
+  private async acknowledge(providerMessageId: string): Promise<void> {
+    if (!providerMessageId) return;
+    try {
+      if (this.provider.capabilities.readReceipts) {
+        await this.provider.markAsRead(providerMessageId);
+      }
+      if (this.provider.capabilities.typingIndicator) {
+        await this.provider.sendTypingIndicator(providerMessageId);
+      }
+    } catch (err) {
+      this.logger.debug(
+        `Could not acknowledge ${providerMessageId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
   /** `SET NX` — true if this is the first time we have seen the id. */

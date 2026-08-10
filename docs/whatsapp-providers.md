@@ -322,6 +322,30 @@ Read receipts and typing indicators **no-op rather than throw** on Twilio: a
 missing "seen" tick costs the reader nothing, and throwing would force every
 caller to branch on the provider.
 
+### Blue ticks and the typing bubble
+
+On Cloud, every inbound message is acknowledged the moment the webhook accepts
+it: `markAsRead` for the ticks, then `sendTypingIndicator` for the composer
+bubble. The bot round-trip is a database read, a flow evaluation and a send —
+long enough for a reader to wonder whether their message arrived.
+
+Details worth knowing:
+
+- On Meta these are **one endpoint**. The typing indicator rides on the read
+  receipt, so there is no way to show typing without also marking the message
+  read.
+- The bubble clears after ~25 seconds, or **the instant anything is sent**. A
+  multi-message reply would therefore show it once and then go quiet, so the
+  outbound processor re-shows it between the messages of a sequence, using the
+  `replyToMessageId` carried on the job. Not before the first — the webhook
+  already did that.
+- Both are fire-and-forget. A slow or failing acknowledgement must never delay
+  the reply it is announcing, and a stale message id is a normal failure.
+- Duplicates and rate-limited messages are not acknowledged: the reader already
+  saw the ticks, and a provider retry should not cost another two calls.
+- On Twilio nothing happens at all. The capability flags are false and the calls
+  are skipped.
+
 Today nothing in the codebase calls the interactive methods — every interactive
 message Rabotka sends is a pre-approved template whose buttons live in the Twilio
 Console. They exist on the port so the Cloud side is ready when a caller needs
