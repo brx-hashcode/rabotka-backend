@@ -74,12 +74,15 @@ describe('BotNotificationService', () => {
   let deps: ReturnType<typeof makeDeps> & {
     contactUnlock: { getByApplicationId: jest.Mock };
   };
+  let feedback: { requestFeedback: jest.Mock };
 
   beforeEach(() => {
     const base = makeDeps();
     const contactUnlock = {
       getByApplicationId: jest.fn().mockResolvedValue(null),
     };
+    // Fire-and-forget after the contact details; asserted separately.
+    feedback = { requestFeedback: jest.fn().mockResolvedValue(true) };
     deps = { ...base, contactUnlock };
     service = new BotNotificationService(
       deps.prisma as any,
@@ -103,6 +106,7 @@ describe('BotNotificationService', () => {
         }),
       } as any,
       { getProfileWalletBalance: jest.fn().mockResolvedValue(0) } as any,
+      feedback as any,
     );
   });
 
@@ -179,6 +183,59 @@ describe('BotNotificationService', () => {
       await expect(
         service.sendNewApplicationToEmployer('app-1'),
       ).resolves.toBeUndefined();
+    });
+  });
+
+  describe('asking for feedback after an unlock', () => {
+    it('asks both parties once the contact details are out', async () => {
+      // The unlock is the moment the product either delivered or did not, so
+      // it is the honest place to ask.
+      deps.prisma.contactUnlockAttempt.findUnique.mockResolvedValue({
+        id: 'attempt-1',
+        employer_id: 'emp-1',
+        worker_id: 'worker-1',
+      });
+      deps.prisma.profile.findUnique
+        .mockResolvedValueOnce({
+          phone: '+242001',
+          first_name: 'Alice',
+          last_name: 'Smith',
+          email: 'alice@test.com',
+        })
+        .mockResolvedValueOnce({
+          phone: '+242002',
+          first_name: 'Bob',
+          last_name: 'Jones',
+          email: 'bob@test.com',
+        });
+      await service.sendContactUnlockedNotification('attempt-1');
+      expect(feedback.requestFeedback).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not let a failed survey break the unlock notification', async () => {
+      // A survey must never cost the reader the contact details they paid for.
+      feedback.requestFeedback.mockRejectedValue(new Error('flow unavailable'));
+      deps.prisma.contactUnlockAttempt.findUnique.mockResolvedValue({
+        id: 'attempt-1',
+        employer_id: 'emp-1',
+        worker_id: 'worker-1',
+      });
+      deps.prisma.profile.findUnique
+        .mockResolvedValueOnce({
+          phone: '+242001',
+          first_name: 'Alice',
+          last_name: 'Smith',
+          email: 'alice@test.com',
+        })
+        .mockResolvedValueOnce({
+          phone: '+242002',
+          first_name: 'Bob',
+          last_name: 'Jones',
+          email: 'bob@test.com',
+        });
+      await expect(
+        service.sendContactUnlockedNotification('attempt-1'),
+      ).resolves.not.toThrow();
     });
   });
 

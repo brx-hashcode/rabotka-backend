@@ -34,7 +34,13 @@ export class WhatsAppFeedbackService {
    * being collected the moment someone rolls the provider back.
    */
   async requestFeedback(phone: string, profileId: string): Promise<boolean> {
-    if (!this.whatsApp.supports('flows') || !this.flowId) {
+    // A Flow sent outside the 24h window is rejected (131047): it is a
+    // free-form interactive message, not a template. Asking first costs one
+    // indexed query and turns a failed send into the web-form fallback, which
+    // is what the reader would have got anyway.
+    const { open } = await this.whatsApp.isServiceWindowOpen(profileId);
+
+    if (!open || !this.whatsApp.supports('flows') || !this.flowId) {
       return this.whatsApp.sendTextMessage(
         phone,
         [
@@ -111,7 +117,14 @@ export class WhatsAppFeedbackService {
     }
   }
 
-  /** `fb_<profileId>_<uuid>` — the profile is the middle segment. */
+  /**
+   * `fb_<profileId>_<uuid>` — the profile is the middle segment.
+   *
+   * Validated as a uuid before it reaches Prisma. The token is external input
+   * by the time it comes back, and an id that is merely non-empty produces
+   * `invalid input syntax for type uuid` from the driver — a stack trace where
+   * a one-line warning belongs.
+   */
   private profileIdFrom(flowToken: string | undefined): string | null {
     if (!flowToken?.startsWith('fb_')) return null;
     const withoutPrefix = flowToken.slice('fb_'.length);
@@ -119,9 +132,12 @@ export class WhatsAppFeedbackService {
     // first — both halves are uuids and only the separator is unambiguous.
     const cut = withoutPrefix.lastIndexOf('_');
     if (cut <= 0) return null;
-    return withoutPrefix.slice(0, cut);
+    const profileId = withoutPrefix.slice(0, cut);
+    return UUID.test(profileId) ? profileId : null;
   }
 }
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function isUniqueViolation(err: unknown): boolean {
   return (
