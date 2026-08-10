@@ -408,10 +408,16 @@ export class ProfileService {
     return data;
   }
 
-  private accountActivatedTemplate(profileType: ProfileType) {
+  /**
+   * Both variants take the same params, so the union is a single key type and
+   * callers pass it straight through to `sendTemplateMessage`.
+   */
+  private accountActivatedTemplateKey(
+    profileType: ProfileType,
+  ): 'accountActivatedWorker' | 'accountActivatedEmployer' {
     return profileType === ProfileType.WORKER
-      ? WHATSAPP_TEMPLATES.accountActivatedWorker
-      : WHATSAPP_TEMPLATES.accountActivatedEmployer;
+      ? 'accountActivatedWorker'
+      : 'accountActivatedEmployer';
   }
 
   private async sendActivationNotification(profileId: string): Promise<void> {
@@ -421,15 +427,14 @@ export class ProfileService {
         select: { phone: true, first_name: true, profile_type: true },
       });
       if (!profile?.phone) return;
-      const tpl = this.accountActivatedTemplate(profile.profile_type);
       await this.whatsAppService
         .sendTemplateMessage(
           profile.phone,
-          tpl.contentSid,
-          tpl.variables({
+          this.accountActivatedTemplateKey(profile.profile_type),
+          {
             firstName: profile.first_name,
             path: ACTIVATION_LANDING_PATH,
-          }),
+          },
         )
         .catch((err) =>
           this.logger.warn(
@@ -872,15 +877,13 @@ export class ProfileService {
     ) {
       try {
         if (profile.phone) {
-          const tpl = this.accountActivatedTemplate(profile.profile_type);
-
           await this.whatsAppService.sendTemplateMessage(
             profile.phone,
-            tpl.contentSid,
-            tpl.variables({
+            this.accountActivatedTemplateKey(profile.profile_type),
+            {
               firstName: profile.first_name,
               path: ACTIVATION_LANDING_PATH,
-            }),
+            },
             profileId,
           );
         }

@@ -136,12 +136,12 @@ export class RecommendationContactService {
       void this.whatsApp
         .sendTemplateMessage(
           employer.phone,
-          tpl.contentSid,
-          tpl.variables({
+          'contactUnlockedRecommendation',
+          {
             name: workerName,
             phone: worker.phone ?? null,
             email: worker.email ?? null,
-          }),
+          },
           employerId,
           formatContactUnlockedMessage({
             name: workerName,

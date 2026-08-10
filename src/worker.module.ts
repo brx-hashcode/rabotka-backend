@@ -2,6 +2,12 @@ import { AdminCacheService } from './common/services/cache/admin-cache.service';
 import { DynamicModule, Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { validateWhatsappEnv } from './modules/whatsapp/whatsapp.config';
+import { TwilioProvider } from './modules/whatsapp/providers/twilio/twilio.provider';
+import { whatsappProviderFactory } from './modules/whatsapp/whatsapp-provider.factory';
+import {
+  WHATSAPP_PROVIDER,
+  type WhatsappProvider,
+} from './modules/whatsapp/contracts';
 import { MailerModule } from '@nestjs-modules/mailer';
 import { PrismaModule } from './common/services/prisma/prisma.module';
 import { RedisModule } from './common/services/redis/redis.module';
@@ -105,18 +111,26 @@ export class WorkerModule {
         inject: [PrismaService],
       },
       {
+        // The worker builds its graph by hand, so the provider token has to be
+        // registered here too — WhatsAppService injects it, not TwilioService.
+        provide: TwilioProvider,
+        useFactory: (twilio: TwilioService) => new TwilioProvider(twilio),
+        inject: [TwilioService],
+      },
+      whatsappProviderFactory,
+      {
         provide: WhatsAppService,
         useFactory: (
           redis: Redis,
           prisma: PrismaService,
-          twilio: TwilioService,
+          provider: WhatsappProvider,
           config: ConfigService,
           wallet: WalletService,
-        ) => new WhatsAppService(redis, prisma, twilio, config, wallet),
+        ) => new WhatsAppService(redis, prisma, provider, config, wallet),
         inject: [
           REDIS_CONNECTION,
           PrismaService,
-          TwilioService,
+          WHATSAPP_PROVIDER,
           ConfigService,
           WalletService,
         ],

@@ -1,15 +1,23 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
+import { WHATSAPP_TEMPLATES } from '../../../common/constants/whatsapp-templates';
 import { WhatsAppOutboundProcessor } from '../whatsapp-outbound.processor';
 import { WhatsAppService } from '../whatsapp.service';
 import { QueueService } from '../../../common/services/queue/queue.service';
 import { WhatsAppLoginLinkService } from '../../auth/whatsapp-login-link.service';
-import { WHATSAPP_TEMPLATES } from '../../../common/constants/whatsapp-templates';
+
+/**
+ * A real registry SID: the processor resolves it back to a logical key so the
+ * send itself is provider-agnostic. viewWorkerPortfolio is hardcoded in the
+ * registry (no env override), so it is stable across environments.
+ */
+const CAROUSEL_SID = WHATSAPP_TEMPLATES.viewWorkerPortfolio.contentSid;
 
 const mockWhatsApp = {
   sendTextMessage: jest.fn().mockResolvedValue('SM-sid-123'),
   sendMediaMessage: jest.fn().mockResolvedValue('SM-sid-456'),
   sendTemplateMessage: jest.fn().mockResolvedValue('SM-sid-789'),
+  sendTemplateMessageWithVariables: jest.fn().mockResolvedValue('SM-sid-789'),
   saveMessage: jest.fn().mockResolvedValue(undefined),
 };
 
@@ -74,7 +82,7 @@ describe('WhatsAppOutboundProcessor', () => {
 
   it('process sends a sequence in array order', async () => {
     const order: string[] = [];
-    mockWhatsApp.sendTemplateMessage.mockImplementationOnce(() => {
+    mockWhatsApp.sendTemplateMessageWithVariables.mockImplementationOnce(() => {
       order.push('template');
       return Promise.resolve('SM-tpl');
     });
@@ -91,7 +99,7 @@ describe('WhatsAppOutboundProcessor', () => {
         messages: [
           {
             type: 'template',
-            contentSid: 'HXcarousel',
+            contentSid: CAROUSEL_SID,
             contentVariables: { '1': 'x' },
           },
           { type: 'text', text: 'Page 1/3' },
@@ -140,31 +148,52 @@ describe('WhatsAppOutboundProcessor', () => {
       data: {
         type: 'template',
         phone: '+242001',
-        contentSid: 'HXcarousel',
+        contentSid: CAROUSEL_SID,
         contentVariables: { '1': 'https://img/1.png', '2': '*Card*' },
         profileId: 'p1',
       },
     });
-    expect(mockWhatsApp.sendTemplateMessage).toHaveBeenCalledWith(
+    expect(mockWhatsApp.sendTemplateMessageWithVariables).toHaveBeenCalledWith(
       '+242001',
-      'HXcarousel',
+      'viewWorkerPortfolio',
       { '1': 'https://img/1.png', '2': '*Card*' },
     );
     expect(mockWhatsApp.saveMessage).toHaveBeenCalledWith(
       'p1',
       expect.any(String),
-      '[TPL:HXcarousel]',
+      `[TPL:${CAROUSEL_SID}]`,
     );
   });
 
-  it('process throws when template returns no SID', async () => {
-    mockWhatsApp.sendTemplateMessage.mockResolvedValueOnce(null);
+  // Behaviour change, deliberate: a SID with no registry entry now fails the job
+  // instead of being forwarded blind. It can only happen to a job enqueued
+  // before a template env override changed under it, and the DLQ keeps the
+  // payload — whereas forwarding an untracked SID would send a template we can
+  // no longer reason about, and cannot be expressed on a non-Twilio provider.
+  it('fails a legacy job whose content SID is no longer in the registry', async () => {
     await expect(
       processor.process({
         data: {
           type: 'template',
           phone: '+242001',
-          contentSid: 'HXcarousel',
+          contentSid: 'HXdeadbeefdeadbeefdeadbeefdeadbeef',
+          contentVariables: {},
+        },
+      }),
+    ).rejects.toThrow('has no registry entry');
+    expect(
+      mockWhatsApp.sendTemplateMessageWithVariables,
+    ).not.toHaveBeenCalled();
+  });
+
+  it('process throws when template returns no SID', async () => {
+    mockWhatsApp.sendTemplateMessageWithVariables.mockResolvedValueOnce(null);
+    await expect(
+      processor.process({
+        data: {
+          type: 'template',
+          phone: '+242001',
+          contentSid: CAROUSEL_SID,
           contentVariables: {},
         },
       }),
@@ -181,14 +210,16 @@ describe('WhatsAppOutboundProcessor', () => {
         data: {
           type: 'template',
           phone: '+242001',
-          contentSid: 'HXcarousel',
+          contentSid: CAROUSEL_SID,
           contentVariables: { '1': 'x' },
           profileId: 'p1',
         },
       }),
     ).resolves.toBeUndefined();
     // Sent exactly once — the job completed, so BullMQ will not retry/resend.
-    expect(mockWhatsApp.sendTemplateMessage).toHaveBeenCalledTimes(1);
+    expect(mockWhatsApp.sendTemplateMessageWithVariables).toHaveBeenCalledTimes(
+      1,
+    );
   });
 
   it('process sends media without caption saves proper body', async () => {
@@ -326,6 +357,7 @@ describe('WhatsAppOutboundProcessor', () => {
     // `statusCheck` declares urlSuffixVar '2' — the job-offer id that ends the
     // CTA button's URL.
     const statusCheck = WHATSAPP_TEMPLATES.statusCheck.contentSid;
+    const statusCheckKey = 'statusCheck' as const;
 
     it('appends a login code to the CTA URL suffix variable', async () => {
       mockLoginLink.appendTo.mockResolvedValue('offer-9?s=code-1');
@@ -343,11 +375,12 @@ describe('WhatsAppOutboundProcessor', () => {
       // '&' because the CTA is `…/login?redirect=/missions/{{2}}`: a '?' would
       // bury the code inside the redirect value.
       expect(mockLoginLink.appendTo).toHaveBeenCalledWith('p1', 'offer-9', '&');
-      expect(mockWhatsApp.sendTemplateMessage).toHaveBeenCalledWith(
-        '+242001',
-        statusCheck,
-        { '1': 'Plomberie', '2': 'offer-9?s=code-1' },
-      );
+      expect(
+        mockWhatsApp.sendTemplateMessageWithVariables,
+      ).toHaveBeenCalledWith('+242001', statusCheckKey, {
+        '1': 'Plomberie',
+        '2': 'offer-9?s=code-1',
+      });
     });
 
     it('leaves templates without a URL suffix untouched', async () => {
@@ -355,7 +388,7 @@ describe('WhatsAppOutboundProcessor', () => {
         data: {
           type: 'template',
           phone: '+242001',
-          contentSid: 'HXcarousel',
+          contentSid: CAROUSEL_SID,
           contentVariables: { '1': 'x' },
           profileId: 'p1',
         },
@@ -375,11 +408,12 @@ describe('WhatsAppOutboundProcessor', () => {
       });
 
       expect(mockLoginLink.appendTo).not.toHaveBeenCalled();
-      expect(mockWhatsApp.sendTemplateMessage).toHaveBeenCalledWith(
-        '+242001',
-        statusCheck,
-        { '1': 'Plomberie', '2': 'offer-9' },
-      );
+      expect(
+        mockWhatsApp.sendTemplateMessageWithVariables,
+      ).toHaveBeenCalledWith('+242001', statusCheckKey, {
+        '1': 'Plomberie',
+        '2': 'offer-9',
+      });
     });
 
     it('still sends the template when no code could be attached', async () => {
@@ -396,11 +430,12 @@ describe('WhatsAppOutboundProcessor', () => {
         },
       });
 
-      expect(mockWhatsApp.sendTemplateMessage).toHaveBeenCalledWith(
-        '+242001',
-        statusCheck,
-        { '1': 'Plomberie', '2': 'offer-9' },
-      );
+      expect(
+        mockWhatsApp.sendTemplateMessageWithVariables,
+      ).toHaveBeenCalledWith('+242001', statusCheckKey, {
+        '1': 'Plomberie',
+        '2': 'offer-9',
+      });
     });
   });
 
@@ -410,6 +445,7 @@ describe('WhatsAppOutboundProcessor', () => {
     // appended to. Any shortlink template would do — this one stands in for the
     // mode, not for itself.
     const shortlinkTpl = WHATSAPP_TEMPLATES.kycPendingMenu.contentSid;
+    const shortlinkKey = 'kycPendingMenu' as const;
 
     it('swaps the destination for a freshly minted code', async () => {
       await processor.process({
@@ -423,11 +459,9 @@ describe('WhatsAppOutboundProcessor', () => {
       });
 
       expect(mockLoginLink.mint).toHaveBeenCalledWith('p1', 'profile');
-      expect(mockWhatsApp.sendTemplateMessage).toHaveBeenCalledWith(
-        '+242001',
-        shortlinkTpl,
-        { '1': 'CODE123' },
-      );
+      expect(
+        mockWhatsApp.sendTemplateMessageWithVariables,
+      ).toHaveBeenCalledWith('+242001', shortlinkKey, { '1': 'CODE123' });
       expect(mockLoginLink.appendTo).not.toHaveBeenCalled();
     });
 
@@ -449,11 +483,11 @@ describe('WhatsAppOutboundProcessor', () => {
       });
 
       expect(mockLoginLink.mint).toHaveBeenCalledWith('p1', 'profile');
-      expect(mockWhatsApp.sendTemplateMessage).toHaveBeenCalledWith(
-        '+242001',
-        shortlinkTpl,
-        { '1': 'MINTEDCODE1234567890' },
-      );
+      expect(
+        mockWhatsApp.sendTemplateMessageWithVariables,
+      ).toHaveBeenCalledWith('+242001', shortlinkKey, {
+        '1': 'MINTEDCODE1234567890',
+      });
     });
 
     it('leaves the destination alone when no code could be minted', async () => {
@@ -474,11 +508,9 @@ describe('WhatsAppOutboundProcessor', () => {
         },
       });
 
-      expect(mockWhatsApp.sendTemplateMessage).toHaveBeenCalledWith(
-        '+242001',
-        shortlinkTpl,
-        { '1': 'profile' },
-      );
+      expect(
+        mockWhatsApp.sendTemplateMessageWithVariables,
+      ).toHaveBeenCalledWith('+242001', shortlinkKey, { '1': 'profile' });
     });
   });
 

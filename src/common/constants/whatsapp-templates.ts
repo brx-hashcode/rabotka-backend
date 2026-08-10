@@ -650,3 +650,32 @@ export function getUrlSuffixTarget(
 ): UrlSuffixTarget | undefined {
   return URL_SUFFIX_BY_SID.get(contentSid);
 }
+
+/**
+ * Content SID -> logical key, built from the RESOLVED sids so the `sid()` env
+ * overrides are covered.
+ *
+ * Only needed to drain jobs enqueued before template sends started carrying a
+ * key: those payloads are already in Redis and cannot be rewritten. Removable
+ * one release after the deploy that introduced the key-shaped job.
+ */
+const KEY_BY_SID: ReadonlyMap<string, WhatsAppTemplateName> = new Map(
+  (
+    Object.entries(WHATSAPP_TEMPLATES) as [
+      WhatsAppTemplateName,
+      { contentSid: string },
+    ][]
+  ).map(([key, template]) => [template.contentSid, key]),
+);
+
+export function getTemplateKeyBySid(
+  contentSid: string,
+): WhatsAppTemplateName | undefined {
+  return KEY_BY_SID.get(contentSid);
+}
+
+export function getUrlSuffixTargetByKey(
+  key: WhatsAppTemplateName,
+): UrlSuffixTarget | undefined {
+  return URL_SUFFIX_BY_SID.get(WHATSAPP_TEMPLATES[key].contentSid);
+}

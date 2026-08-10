@@ -140,15 +140,15 @@ export class ProfileController {
     // Role decides the closing line: workers are pointed at offers that match
     // them, employers at profiles that match them. Both land on /home, which is
     // already role-aware.
-    const profileCreatedTpl =
+    const profileCreatedKey =
       createProfileDto.profileType === ProfileType.EMPLOYER
-        ? WHATSAPP_TEMPLATES.profileCreatedEmployer
-        : WHATSAPP_TEMPLATES.profileCreatedWorker;
+        ? ('profileCreatedEmployer' as const)
+        : ('profileCreatedWorker' as const);
     void this.whatsApp
       .sendTemplateMessage(
         createProfileDto.phone,
-        profileCreatedTpl.contentSid,
-        profileCreatedTpl.variables(createProfileDto.firstName),
+        profileCreatedKey,
+        createProfileDto.firstName,
       )
       .catch((err: unknown) =>
         this.logger.warn(

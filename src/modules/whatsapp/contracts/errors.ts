@@ -20,6 +20,14 @@ export type WhatsappErrorCode =
   /** Credentials rejected. Do not retry; alert loudly — every send is failing. */
   | 'AUTH_FAILED'
   /**
+   * No client at all — credentials absent, so nothing was even attempted.
+   * Distinct from `AUTH_FAILED` because the admin back office reports it
+   * differently ("WhatsApp is not configured" rather than a provider error),
+   * and because it is the expected state in a dev environment with no
+   * credentials rather than an incident.
+   */
+  | 'NOT_CONFIGURED'
+  /**
    * Twilio sandbox only: 50 messages/day, then everything is dropped. Kept as
    * its own code because it looks like a rate limit but waiting does not help
    * until the next UTC day, and it never occurs on a paid number.

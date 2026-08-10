@@ -12,9 +12,16 @@ import {
   REDIS_KEY_PREFIX,
 } from '../../common/services/redis/redis.constants';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
-import { TwilioService } from '../../common/services/twilio/twilio.service';
 import { WalletService } from '../wallet/wallet.service';
-import { WHATSAPP_TEMPLATES } from '../../common/constants/whatsapp-templates';
+import {
+  WHATSAPP_PROVIDER,
+  WhatsappError,
+  type Capability,
+  type SendResult,
+  type TemplateKey,
+  type TemplateParams,
+  type WhatsappProvider,
+} from './contracts';
 import {
   welcomeActivationMessage,
   formatAdminMessage,
@@ -53,13 +60,30 @@ export class WhatsAppService {
     @Inject(REDIS_CONNECTION)
     private readonly redis: Redis,
     private readonly prisma: PrismaService,
-    private readonly twilioService: TwilioService,
+    @Inject(WHATSAPP_PROVIDER)
+    private readonly provider: WhatsappProvider,
     private readonly config: ConfigService,
     private readonly walletService: WalletService,
   ) {}
 
   isConfigured(): boolean {
-    return this.twilioService.isConfigured();
+    return this.provider.isConfigured();
+  }
+
+  /** Which provider is actually sending. For logs and the admin status endpoint. */
+  get providerName(): WhatsappProvider['name'] {
+    return this.provider.name;
+  }
+
+  /**
+   * Whether the active provider can express something.
+   *
+   * Callers that can degrade gracefully should ask before calling rather than
+   * catching `WhatsappCapabilityError` — the two providers differ most on the
+   * interactive message types.
+   */
+  supports(capability: Capability): boolean {
+    return this.provider.capabilities[capability];
   }
 
   /**
@@ -75,11 +99,20 @@ export class WhatsAppService {
   private async attempt(
     what: string,
     phone: string,
-    send: () => Promise<string | null>,
+    send: () => Promise<SendResult>,
   ): Promise<string | null> {
     try {
-      return await send();
+      return (await send()).providerMessageId;
     } catch (err) {
+      // An unconfigured provider is the expected state in dev and is already
+      // reported by `isConfigured()`; logging it at error level on every send
+      // would bury the failures that matter.
+      if (err instanceof WhatsappError && err.code === 'NOT_CONFIGURED') {
+        this.logger.warn(
+          `WhatsApp ${what} to ${phone} skipped: ${err.message}`,
+        );
+        return null;
+      }
       this.logger.error(
         `WhatsApp ${what} to ${phone} failed: ${err instanceof Error ? err.message : String(err)}`,
       );
@@ -94,7 +127,7 @@ export class WhatsAppService {
     sentById?: string,
   ): Promise<boolean> {
     const sid = await this.attempt('text', phone, () =>
-      this.twilioService.sendWhatsApp(phone, text),
+      this.provider.sendText(phone, text),
     );
     const sent = sid != null;
 
@@ -115,15 +148,46 @@ export class WhatsAppService {
     return sent;
   }
 
-  async sendTemplateMessage(
+  async sendTemplateMessage<K extends TemplateKey>(
     phone: string,
-    contentSid: string,
-    variables?: Record<string, string>,
+    template: K,
+    params: TemplateParams<K>,
     profileId?: string,
     body?: string,
   ): Promise<boolean> {
-    const sid = await this.attempt(`template ${contentSid}`, phone, () =>
-      this.twilioService.sendWhatsAppTemplate(phone, contentSid, variables),
+    const sid = await this.attempt(`template ${template}`, phone, () =>
+      this.provider.sendTemplate(phone, template, params),
+    );
+    const sent = sid != null;
+
+    if (sent && profileId && body) {
+      await this.saveMessage(profileId, MessageDirection.OUTBOUND, body).catch(
+        (err) =>
+          this.logger.warn(
+            `Failed to save outbound message for ${profileId}:`,
+            err,
+          ),
+      );
+    }
+
+    return sent;
+  }
+
+  /**
+   * MIGRATION ONLY — see `WhatsappProvider.sendTemplateWithVariables`.
+   *
+   * Used by the outbound processor to drain jobs enqueued before template sends
+   * carried a key. New code passes typed params to `sendTemplateMessage`.
+   */
+  async sendTemplateMessageWithVariables(
+    phone: string,
+    template: TemplateKey,
+    variables: Record<string, string>,
+    profileId?: string,
+    body?: string,
+  ): Promise<boolean> {
+    const sid = await this.attempt(`template ${template}`, phone, () =>
+      this.provider.sendTemplateWithVariables(phone, template, variables),
     );
     const sent = sid != null;
 
@@ -146,7 +210,11 @@ export class WhatsAppService {
     caption?: string,
   ): Promise<boolean> {
     const sid = await this.attempt('media', phone, () =>
-      this.twilioService.sendWhatsAppMedia(phone, mediaUrl, caption),
+      this.provider.sendMedia(phone, {
+        kind: 'image',
+        url: mediaUrl,
+        caption,
+      }),
     );
     return sid != null;
   }
@@ -231,34 +299,31 @@ export class WhatsAppService {
 
     const body = formatAdminMessage({ message: text, adminName });
 
-    let sid: string | null;
     try {
-      sid = open
-        ? await this.twilioService.sendWhatsApp(phone, body)
-        : await this.twilioService.sendWhatsAppTemplate(
-            phone,
-            WHATSAPP_TEMPLATES.adminMessage.contentSid,
-            WHATSAPP_TEMPLATES.adminMessage.variables({
-              message: text,
-              adminName,
-            }),
-          );
+      if (open) {
+        await this.provider.sendText(phone, body);
+      } else {
+        await this.provider.sendTemplate(phone, 'adminMessage', {
+          message: text,
+          adminName,
+        });
+      }
     } catch (err) {
-      // TwilioService formats these as "[Twilio 63016] … — message to … failed",
+      // An absent client is reported as "not configured" rather than as a
+      // provider error — it is the one failure the admin can act on themselves.
+      if (err instanceof WhatsappError && err.code === 'NOT_CONFIGURED') {
+        this.logger.error(
+          `Admin ${mode} message to ${phone} not sent: WhatsApp is not configured`,
+        );
+        return { mode, sent: false, error: 'WhatsApp n’est pas configuré' };
+      }
+      // The provider formats these as "[Twilio 63016] … — message to … failed",
       // which is what the admin sees in the toast.
       const error = err instanceof Error ? err.message : String(err);
       this.logger.error(
         `Admin ${mode} message to ${phone} (profile ${profileId}) failed: ${error}`,
       );
       return { mode, sent: false, error };
-    }
-
-    if (sid == null) {
-      // A null without a throw means Twilio is not configured at all.
-      this.logger.error(
-        `Admin ${mode} message to ${phone} not sent: WhatsApp is not configured`,
-      );
-      return { mode, sent: false, error: 'WhatsApp n’est pas configuré' };
     }
 
     // Persist what was really delivered, exactly once, and only on success — a

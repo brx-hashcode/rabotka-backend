@@ -697,8 +697,8 @@ export class AdminProfileController {
       this.whatsApp
         .sendTemplateMessage(
           result.phone,
-          kycTpl.contentSid,
-          kycTpl.variables(result.firstName),
+          'kyc',
+          result.firstName,
         )
         .catch((err) =>
           console.warn(
