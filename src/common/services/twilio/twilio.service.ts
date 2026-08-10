@@ -2,6 +2,7 @@ import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import TwilioSDK from 'twilio';
 import { SendTimingService } from '../../../modules/whatsapp/telemetry/send-timing.service';
+import { TwilioSendError } from '../../../modules/whatsapp/providers/twilio/twilio.errors';
 
 type TwilioClient = ReturnType<typeof TwilioSDK>;
 type CreateMessagePayload = Parameters<TwilioClient['messages']['create']>[0];
@@ -145,22 +146,28 @@ export class TwilioService {
         this.logger.warn(
           `[Twilio] Daily sandbox limit reached (50 msg/day). Message to ${to} dropped.`,
         );
-        throw new Error(
+        throw new TwilioSendError(
           `[Twilio 63038] Daily sandbox limit reached — message to ${to} dropped`,
+          twilioErr.code,
+          twilioErr.status,
         );
       } else if (twilioErr.code === 63031) {
         this.logger.warn(
           `[Twilio] To and From are the same number (${to}). Check webhook/status callback config.`,
         );
-        throw new Error(
+        throw new TwilioSendError(
           `[Twilio 63031] To and From are the same number (${to})`,
+          twilioErr.code,
+          twilioErr.status,
         );
       } else {
         this.logger.error(
           `Twilio error sending WhatsApp message to ${to}: [${twilioErr.code ?? twilioErr.status}] ${twilioErr.message}`,
         );
-        throw new Error(
+        throw new TwilioSendError(
           `[Twilio ${twilioErr.code ?? twilioErr.status}] ${twilioErr.message ?? 'Unknown error'} — message to ${to} failed`,
+          twilioErr.code,
+          twilioErr.status,
         );
       }
     }
@@ -212,8 +219,10 @@ export class TwilioService {
       this.logger.error(
         `Twilio error sending WhatsApp template ${contentSid} to ${to}: [${twilioErr.code ?? twilioErr.status}] ${twilioErr.message}`,
       );
-      throw new Error(
+      throw new TwilioSendError(
         `[Twilio ${twilioErr.code ?? twilioErr.status}] ${twilioErr.message ?? 'Unknown error'} — template to ${to} failed`,
+        twilioErr.code,
+        twilioErr.status,
       );
     }
   }
@@ -266,15 +275,19 @@ export class TwilioService {
         this.logger.warn(
           `[Twilio] Daily sandbox limit reached (50 msg/day). Media to ${to} dropped.`,
         );
-        throw new Error(
+        throw new TwilioSendError(
           `[Twilio 63038] Daily sandbox limit reached — media to ${to} dropped`,
+          twilioErr.code,
+          twilioErr.status,
         );
       } else {
         this.logger.error(
           `Twilio error sending WhatsApp media to ${to}: [${twilioErr.code ?? twilioErr.status}] ${twilioErr.message}`,
         );
-        throw new Error(
+        throw new TwilioSendError(
           `[Twilio ${twilioErr.code ?? twilioErr.status}] ${twilioErr.message ?? 'Unknown error'} — media to ${to} failed`,
+          twilioErr.code,
+          twilioErr.status,
         );
       }
     }

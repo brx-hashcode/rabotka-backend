@@ -41,6 +41,15 @@ export interface WhatsappProvider {
   readonly name: ProviderName;
   readonly capabilities: ProviderCapabilities;
 
+  /**
+   * Whether credentials are present and a client could be built.
+   *
+   * `false` is a normal state in a dev environment with no credentials, not an
+   * incident — sends short-circuit rather than throwing, and the admin status
+   * endpoint reports it.
+   */
+  isConfigured(): boolean;
+
   sendText(
     to: E164,
     body: string,
@@ -51,6 +60,25 @@ export interface WhatsappProvider {
     to: E164,
     template: K,
     params: TemplateParams<K>,
+    opts?: { languageOverride?: string } & SendOptions,
+  ): Promise<SendResult>;
+
+  /**
+   * Send a template from its already-resolved `{'1': …, '9': …}` variables.
+   *
+   * MIGRATION ONLY — prefer `sendTemplate`, which types params per template.
+   * This exists for jobs that were already sitting in BullMQ when a deploy
+   * landed: their payload carries the numbered map and no longer has the typed
+   * params it was built from, and those payloads cannot be rewritten in place.
+   *
+   * Not a provider leak: the numbered map is the registry's own canonical
+   * variable form, and both mappers build their wire format from it. Removable
+   * one release after the deploy that introduced key-shaped jobs.
+   */
+  sendTemplateWithVariables(
+    to: E164,
+    template: TemplateKey,
+    variables: Record<string, string>,
     opts?: { languageOverride?: string } & SendOptions,
   ): Promise<SendResult>;
 

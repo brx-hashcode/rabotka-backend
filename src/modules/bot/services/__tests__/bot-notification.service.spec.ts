@@ -1,6 +1,5 @@
 import { Logger } from '@nestjs/common';
 import { BotNotificationService } from '../bot-notification.service';
-import { WHATSAPP_TEMPLATES } from '../../../../common/constants/whatsapp-templates';
 
 jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => {});
 
@@ -115,8 +114,8 @@ describe('BotNotificationService', () => {
       // approved template does not require touching this test.
       expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+24200000002',
-        WHATSAPP_TEMPLATES.newApplication.contentSid,
-        expect.objectContaining({ '2': expect.any(String) }),
+        'newApplication',
+        expect.objectContaining({ workerName: expect.any(String) }),
       );
     });
 
@@ -125,7 +124,7 @@ describe('BotNotificationService', () => {
       expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         expect.any(String),
         expect.any(String),
-        expect.objectContaining({ '8': 'app-1' }),
+        expect.objectContaining({ applicationId: 'app-1' }),
       );
     });
 
@@ -188,8 +187,8 @@ describe('BotNotificationService', () => {
       await service.sendApplicationAcceptedToWorker('app-1');
       expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+24200000001',
-        WHATSAPP_TEMPLATES.applicationAccepted.contentSid,
-        expect.objectContaining({ '2': expect.any(String) }),
+        'applicationAccepted',
+        expect.objectContaining({ offerTitle: expect.any(String) }),
       );
     });
 
@@ -201,8 +200,8 @@ describe('BotNotificationService', () => {
       await service.sendApplicationAcceptedToWorker('app-1');
       expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+24200000001',
-        WHATSAPP_TEMPLATES.applicationAcceptedUnlock.contentSid,
-        expect.objectContaining({ '2': expect.any(String) }),
+        'applicationAcceptedUnlock',
+        expect.objectContaining({ offerTitle: expect.any(String) }),
       );
       expect(deps.botState.setIfFlowAbsentOrMatches).toHaveBeenCalled();
     });
@@ -230,10 +229,11 @@ describe('BotNotificationService', () => {
       await service.sendApplicationRejectedToWorker('app-1');
       expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+24200000001',
-        WHATSAPP_TEMPLATES.applicationRejected.contentSid,
-        // The destination the short link resolves to; the processor swaps it
-        // for a login code on the way out.
-        { '1': 'recherche-offres' },
+        'applicationRejected',
+        // Takes no params — the short-link destination is baked into the
+        // registry entry, and the processor swaps it for a login code on the
+        // way out. Covered in the twilio mapper spec.
+        undefined,
       );
     });
 
@@ -252,22 +252,25 @@ describe('BotNotificationService', () => {
       await service.sendCancellationToEmployer('app-1', 'Malade', false);
       expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+24200000002',
-        WHATSAPP_TEMPLATES.cancellation.contentSid,
-        expect.objectContaining({ '4': 'Malade' }),
+        'cancellation',
+        expect.objectContaining({ reason: 'Malade' }),
       );
     });
 
     it('falls back to a default reason and a no-penalty status when applicable', async () => {
       await service.sendCancellationToEmployer('app-1', null, false);
-      const vars = deps.whatsApp.sendTemplateMessage.mock.calls[0][2];
-      expect(vars['4']).toBe('Aucune raison donnée');
-      expect(vars['5']).toContain('Aucune pénalité');
+      // The "Aucune raison donnée" fallback now lives in the registry's
+      // variables() and is exercised in the twilio mapper spec; here the
+      // service is only responsible for passing the raw reason through.
+      const params = deps.whatsApp.sendTemplateMessage.mock.calls[0][2];
+      expect(params.reason ?? '').toBe('');
+      expect(params.penaltyStatus).toContain('Aucune pénalité');
     });
 
     it('sets a penalty status when the cancellation was late', async () => {
       await service.sendCancellationToEmployer('app-1', null, true);
-      const vars = deps.whatsApp.sendTemplateMessage.mock.calls[0][2];
-      expect(vars['5']).toContain('pénalité');
+      const params = deps.whatsApp.sendTemplateMessage.mock.calls[0][2];
+      expect(params.penaltyStatus).toContain('pénalité');
     });
 
     it('swallows errors gracefully', async () => {
@@ -354,8 +357,8 @@ describe('BotNotificationService', () => {
       );
       expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+242001',
-        WHATSAPP_TEMPLATES.unlockExpiredConversion.contentSid,
-        { '1': '500' },
+        'unlockExpiredConversion',
+        { amount: 500 },
       );
     });
   });
@@ -400,7 +403,7 @@ describe('BotNotificationService', () => {
       expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+242001',
         expect.any(String),
-        expect.objectContaining({ '2': 'Plombier' }),
+        expect.objectContaining({ title: 'Plombier' }),
       );
     });
 

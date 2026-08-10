@@ -8,6 +8,8 @@ import { ConversationModule } from '../conversation/conversation.module';
 import { PrismaModule } from '../../common/services/prisma/prisma.module';
 import { WalletModule } from '../wallet/wallet.module';
 import { WhatsAppLoginLinkModule } from '../auth/whatsapp-login-link.module';
+import { TwilioProvider } from './providers/twilio/twilio.provider';
+import { whatsappProviderFactory } from './whatsapp-provider.factory';
 
 @Module({
   imports: [
@@ -19,6 +21,10 @@ import { WhatsAppLoginLinkModule } from '../auth/whatsapp-login-link.module';
   ],
   controllers: [WhatsAppController],
   providers: [
+    // Every provider is registered; the factory picks which one answers the
+    // WHATSAPP_PROVIDER token, from validated config, once at boot.
+    TwilioProvider,
+    whatsappProviderFactory,
     WhatsAppService,
     WhatsAppOutboundProcessor,
     WhatsAppInboundProcessor,

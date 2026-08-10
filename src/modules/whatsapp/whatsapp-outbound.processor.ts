@@ -7,7 +7,10 @@ import {
   WHATSAPP_OUTBOUND_QUEUE,
   WHATSAPP_OUTBOUND_DLQ,
 } from '../../common/services/queue/queue.module';
-import { getUrlSuffixTarget } from '../../common/constants/whatsapp-templates';
+import {
+  getTemplateKeyBySid,
+  getUrlSuffixTarget,
+} from '../../common/constants/whatsapp-templates';
 import { WhatsAppLoginLinkService } from '../auth/whatsapp-login-link.service';
 
 // Twilio's hard limit on a WhatsApp body is 1600 chars. We chunk well below
@@ -230,7 +233,9 @@ export class WhatsAppOutboundProcessor {
     // shortlink: the variable holds the DESTINATION, and the approved URL is
     // the fixed `…/s/{{n}}` — so the code replaces it outright.
     if (target.mode === 'shortlink') {
-      const code = await this.loginLink.mint(profileId, suffix).catch(() => null);
+      const code = await this.loginLink
+        .mint(profileId, suffix)
+        .catch(() => null);
       // No code means the profile may not auto-login (suspended) or Redis is
       // down. Leaving the destination in place would produce `/s/<path>`, a
       // dead link — so send the template as-is and let the button 404 into the
@@ -271,7 +276,10 @@ export class WhatsAppOutboundProcessor {
     if (!text.includes(base)) return text;
 
     const urls = [
-      ...new Set(text.match(new RegExp(`${escapeRegExp(base)}[^\\s<>"')\\]}]*`, 'g')) ?? []),
+      ...new Set(
+        text.match(new RegExp(`${escapeRegExp(base)}[^\\s<>"')\\]}]*`, 'g')) ??
+          [],
+      ),
     ].filter((url) => {
       const path = url.slice(base.length);
       return !/^\/(r|verify|s)\//.test(path) && path !== '' && path !== '/';
@@ -291,10 +299,25 @@ export class WhatsAppOutboundProcessor {
   private async processTemplate(
     data: Extract<WhatsAppOutboundJobData, { type: 'template' }>,
   ): Promise<void> {
-    const sent = await this.whatsApp.sendTemplateMessage(
+    // Jobs carry a Twilio content SID, so a payload enqueued before this deploy
+    // still drains. Resolving it to the logical key here is what lets the send
+    // itself be provider-agnostic.
+    const key = getTemplateKeyBySid(data.contentSid);
+    if (!key) {
+      throw new Error(
+        `WhatsApp template ${data.contentSid} to ${data.phone} has no registry entry — ` +
+          `the SID was removed or an env override points at an unknown template`,
+      );
+    }
+
+    const sent = await this.whatsApp.sendTemplateMessageWithVariables(
       data.phone,
-      data.contentSid,
-      await this.withLoginCode(data.contentSid, data.contentVariables, data.profileId),
+      key,
+      await this.withLoginCode(
+        data.contentSid,
+        data.contentVariables,
+        data.profileId,
+      ),
     );
     if (!sent) {
       throw new Error(

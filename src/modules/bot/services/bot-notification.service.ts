@@ -85,8 +85,8 @@ export class BotNotificationService {
       const tpl = WHATSAPP_TEMPLATES.newApplication;
       await this.whatsApp.sendTemplateMessage(
         app.job_offer.employer.phone,
-        tpl.contentSid,
-        tpl.variables({
+        'newApplication',
+        {
           offerTitle: app.job_offer.title,
           workerName: `${app.worker.first_name} ${app.worker.last_name}`,
           reliabilityScore: app.worker.reliability_score ?? 100,
@@ -100,7 +100,7 @@ export class BotNotificationService {
           // URL suffix for the CTA button (/candidatures/{{8}}). Ignored by the
           // pre-approval template, so this is safe either side of the cutover.
           applicationId,
-        }),
+        },
       );
     } catch (err) {
       this.logger.warn(
@@ -154,23 +154,23 @@ export class BotNotificationService {
         const tpl = WHATSAPP_TEMPLATES.applicationAcceptedUnlock;
         await this.whatsApp.sendTemplateMessage(
           app.worker.phone,
-          tpl.contentSid,
-          tpl.variables({
+          'applicationAcceptedUnlock',
+          {
             employerName,
             offerTitle: app.job_offer.title,
             // URL suffix: the worker settles their share on the web now.
             applicationId,
-          }),
+          },
         );
       } else {
         const tpl = WHATSAPP_TEMPLATES.applicationAccepted;
         await this.whatsApp.sendTemplateMessage(
           app.worker.phone,
-          tpl.contentSid,
-          tpl.variables({
+          'applicationAccepted',
+          {
             employerName,
             offerTitle: app.job_offer.title,
-          }),
+          },
         );
       }
     } catch (err) {
@@ -223,24 +223,24 @@ export class BotNotificationService {
       if (employer?.phone && worker && attempt.employer_id !== skipId) {
         await this.whatsApp.sendTemplateMessage(
           employer.phone,
-          tpl.contentSid,
-          tpl.variables({
+          'contactUnlocked',
+          {
             name: `${worker.first_name} ${worker.last_name}`.trim(),
             phone: worker.phone,
             email: worker.email,
-          }),
+          },
         );
       }
 
       if (worker?.phone && employer && attempt.worker_id !== skipId) {
         await this.whatsApp.sendTemplateMessage(
           worker.phone,
-          tpl.contentSid,
-          tpl.variables({
+          'contactUnlocked',
+          {
             name: `${employer.first_name} ${employer.last_name}`.trim(),
             phone: employer.phone,
             email: employer.email,
-          }),
+          },
         );
       }
     } catch (err) {
@@ -265,8 +265,8 @@ export class BotNotificationService {
       const tpl = WHATSAPP_TEMPLATES.unlockExpiredConversion;
       await this.whatsApp.sendTemplateMessage(
         profile.phone,
-        tpl.contentSid,
-        tpl.variables({ amount }),
+        'unlockExpiredConversion',
+        { amount },
       );
     } catch (err) {
       this.logger.warn(
@@ -287,8 +287,8 @@ export class BotNotificationService {
       const tpl = WHATSAPP_TEMPLATES.applicationRejected;
       await this.whatsApp.sendTemplateMessage(
         app.worker.phone,
-        tpl.contentSid,
-        tpl.variables(),
+        'applicationRejected',
+        undefined,
       );
     } catch (err) {
       this.logger.warn(
@@ -335,15 +335,15 @@ export class BotNotificationService {
       const tpl = WHATSAPP_TEMPLATES.cancellation;
       await this.whatsApp.sendTemplateMessage(
         app.job_offer.employer.phone,
-        tpl.contentSid,
-        tpl.variables({
+        'cancellation',
+        {
           workerName: `${app.worker.first_name} ${app.worker.last_name}`,
           offerTitle: app.job_offer.title,
           date: date ?? 'Non précisée',
           reason: reason ?? '',
           penaltyStatus,
           jobOfferId: app.job_offer.id,
-        }),
+        },
       );
 
       // Set the POST_CANCELLATION_ACTIONS state so 1/2/3 actually do
@@ -421,8 +421,8 @@ export class BotNotificationService {
       const tpl = WHATSAPP_TEMPLATES.jobRecommendation;
       await this.whatsApp.sendTemplateMessage(
         profile.phone,
-        tpl.contentSid,
-        tpl.variables({
+        'jobRecommendation',
+        {
           firstName: profile.first_name,
           title: offer.title,
           amount: formatAmount(
@@ -433,7 +433,7 @@ export class BotNotificationService {
           date: dateStr ?? 'Non précisée',
           // URL suffix for the CTA button (/offres/{{6}}).
           jobOfferId,
-        }),
+        },
       );
     } catch (err) {
       this.logger.warn(
