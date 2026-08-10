@@ -5,7 +5,6 @@ import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { BotOrchestratorService } from '../../bot/services/bot-orchestrator.service';
 import { WhatsAppService } from '../../whatsapp/whatsapp.service';
 import { REDIS_CONNECTION } from '../../../common/services/redis/redis.constants';
-import { WHATSAPP_TEMPLATES } from '../../../common/constants/whatsapp-templates';
 
 const PROFILE_ID = 'profile-uuid-1';
 const PHONE = '+24200000001';
@@ -63,9 +62,7 @@ describe('ConversationService', () => {
       expect(result.profileId).toBeNull();
       expect(result.replies).toHaveLength(1);
       // Registry, not a literal — see bot-orchestrator.service.spec.ts.
-      expect(result.replies[0]).toContain(
-        `[TPL:${WHATSAPP_TEMPLATES.welcomeUnregisteredCard.contentSid}]`,
-      );
+      expect(result.replies[0]).toContain('[TPL:welcomeUnregisteredCard]');
       expect(botOrchestrator.handle).not.toHaveBeenCalled();
     });
 

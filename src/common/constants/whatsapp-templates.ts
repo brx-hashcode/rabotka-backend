@@ -1,16 +1,68 @@
+/**
+ * Meta's template category. Affects pricing and what Meta will approve, so it
+ * is declared rather than inferred.
+ *
+ * These values are our INTENT. Meta stores its own category on the approved
+ * template and will reclassify on submission — `welcomePlatform` below is a
+ * worked example of that costing hours. Treat a mismatch as a template problem
+ * to fix in Business Manager, not a value to quietly change here.
+ */
+export type WhatsAppTemplateCategory =
+  | 'UTILITY'
+  | 'AUTHENTICATION'
+  | 'MARKETING';
 
 export interface WhatsAppTemplate<Args extends unknown[]> {
   contentSid: string;
+  category: WhatsAppTemplateCategory;
+  /**
+   * Meta Cloud binding: the template's NAME in the WABA, since Cloud addresses
+   * templates by name + language rather than by an opaque id.
+   *
+   * There is no `buildComponents` here. The components are derived generically
+   * in `providers/cloud/cloud.mapper.ts` from the same numbered map `variables()`
+   * already returns, plus `urlSuffixVar` — writing 27 of them by hand would be
+   * 27 chances to disagree with the Twilio side about what `{{4}}` means.
+   */
+  cloud: { name: string; defaultLanguage?: string };
   variables: (...args: Args) => Record<string, string>;
+  /**
+   * Which variable fills the CTA button's URL, for a template whose link needs
+   * NO login — currently only the public portfolio.
+   *
+   * `urlSuffixVar` implies this, so only set `buttonUrlVar` on its own when the
+   * button takes a variable but must not carry a login code.
+   *
+   * The distinction is not cosmetic. Twilio shares one `{{n}}` namespace across
+   * body and button, so it needs no such marking; Meta splits them, and a
+   * variable that belongs in the button but is sent in the body produces a
+   * parameter-count mismatch (132000) rather than a visible error. Before this
+   * field existed, `viewWorkerPortfolio` did exactly that.
+   */
+  buttonUrlVar?: string;
+  /**
+   * The template has an IMAGE header (a "card").
+   *
+   * Providers differ here, and the difference is invisible until a send fails.
+   * Twilio bakes the media into the approved Content template and takes nothing
+   * at send time. Meta stores only an EXAMPLE at creation and requires the real
+   * image in a `header` component on EVERY send — omit it and the send is
+   * rejected with `132012 Format mismatch, expected IMAGE, received UNKNOWN`.
+   *
+   * All three cards use the brand cover, so the mapper resolves the URL from
+   * `coverImageUrl()` rather than storing it per entry.
+   */
+  hasImageHeader?: true;
   /**
    * Index of the variable that fills the CTA button's URL suffix, when that
    * link opens an authenticated page. The outbound processor appends a one-time
    * login code to it so the WebView lands signed in
    * (see `WhatsAppLoginLinkService`).
    *
-   * Left unset for templates whose CTA needs no session (the public portfolio)
-   * and for those with no dynamic suffix at all — WhatsApp allows exactly one
-   * variable in a button URL and it must sit at the end.
+   * Left unset for templates whose CTA needs no session (the public portfolio —
+   * those use `buttonUrlVar`) and for those with no dynamic suffix at all —
+   * WhatsApp allows exactly one variable in a button URL and it must sit at the
+   * end.
    */
   urlSuffixVar?: string;
   /**
@@ -35,7 +87,30 @@ export interface WhatsAppTemplate<Args extends unknown[]> {
    * destination changes.
    */
   urlSuffixMode?: 'append' | 'shortlink';
+  /**
+   * The template's button is a FLOW button, and THIS key of the `variables()`
+   * map carries its flow token.
+   *
+   * Deliberately not a `{{n}}` index. Meta gives the flow button its own
+   * component and the token is not a body parameter, so numbering it would put
+   * it in the body and produce a parameter-count mismatch (132000). The key is
+   * a reserved name instead — `cloud.mapper.ts` drops non-numeric keys from the
+   * body and reads this one by name.
+   *
+   * Mutually exclusive with `urlSuffixVar`/`buttonUrlVar`: a template here has
+   * one button, and it is either a link or a Flow.
+   */
+  flowTokenVar?: string;
 }
+
+/**
+ * The reserved `variables()` key holding a FLOW button's token.
+ *
+ * One constant rather than a free string per entry: the mapper matches on it,
+ * the registry writes it, and a typo would silently send a template with no
+ * button parameter at all.
+ */
+export const FLOW_TOKEN_VAR = 'flow_token';
 
 /**
  * Reads a template SID from the environment, falling back to the currently
@@ -52,12 +127,35 @@ function sid(envVar: string, approvedDefault: string): string {
   return override && override.length > 0 ? override : approvedDefault;
 }
 
+/** French. Every Rabotka template is authored in it; there is no other locale yet. */
+export const CLOUD_DEFAULT_LANGUAGE = 'fr';
+
+/**
+ * Reads a Meta template name from the environment, falling back to the name the
+ * template is actually approved under.
+ *
+ * These defaults are the Twilio `friendly_name` of each template, which is the
+ * name it was recreated under in Rabotka's own WABA — one string finds a
+ * template in either console. They were derived from the key at first, and all
+ * of those guesses were wrong: the real names are versioned
+ * (`rabotka_otp_auth`, `rabotka_kyc_pending_menu_v3`), 16 of 27 differed, and
+ * the mismatch surfaced as `132001 Template name does not exist` on the first
+ * real send. `scripts/whatsapp-templates/` regenerates them from the live API.
+ *
+ * The env override exists so a name can be corrected without a deploy.
+ */
+function cloudName(envVar: string, derivedDefault: string): string {
+  const override = process.env[envVar]?.trim();
+  return override && override.length > 0 ? override : derivedDefault;
+}
+
 export const WHATSAPP_TEMPLATES = {
   otp: {
     contentSid: 'HXf66c3d91d9f56e59b72d8fad31d4a795',
+    category: 'AUTHENTICATION',
+    cloud: { name: cloudName('TPL_CLOUD_OTP', 'rabotka_otp_auth') },
     variables: (code: string) => ({ '1': code }),
   } satisfies WhatsAppTemplate<[code: string]>,
-
 
   /**
    * Welcome cards carrying the brand cover. The image is baked into the
@@ -66,6 +164,7 @@ export const WHATSAPP_TEMPLATES = {
    * re-uploading to the same R2 key.
    */
   welcomeUnregisteredCard: {
+    hasImageHeader: true,
     // Rollback: point TPL_WELCOME_UNREGISTERED_V2 at the previous text-only
     // template, HX1610d675f58d8fa92d277383584cc5fb. It is deliberately not a
     // registry entry of its own — an unused entry is exactly what let two call
@@ -74,6 +173,13 @@ export const WHATSAPP_TEMPLATES = {
       'TPL_WELCOME_UNREGISTERED_V2',
       'HXcf1954a8146623c7482682a605aacd93',
     ),
+    category: 'MARKETING',
+    cloud: {
+      name: cloudName(
+        'TPL_CLOUD_WELCOME_UNREGISTERED_CARD',
+        'rabotka_welcome_unregistered_v3',
+      ),
+    },
     variables: () => ({}),
   } satisfies WhatsAppTemplate<[]>,
 
@@ -83,6 +189,7 @@ export const WHATSAPP_TEMPLATES = {
    * URL (`…/login?redirect=/{{1}}`), so the one-tap login code can ride along.
    */
   welcomePlatform: {
+    hasImageHeader: true,
     // v4 (2026-08): the copy now says what Rabotka is, and the button reads
     // "Ouvrir l'application". Rollback: point TPL_WELCOME_PLATFORM at
     // HX230bb5b440d631488889a134b6bd8388, the v2 card. Same variables and the
@@ -100,6 +207,13 @@ export const WHATSAPP_TEMPLATES = {
     ),
     urlSuffixVar: '1',
     urlSuffixSeparator: '&',
+    category: 'MARKETING',
+    cloud: {
+      name: cloudName(
+        'TPL_CLOUD_WELCOME_PLATFORM',
+        'rabotka_welcome_platform_v4',
+      ),
+    },
     variables: (path: string) => ({ '1': path }),
   } satisfies WhatsAppTemplate<[path: string]>,
 
@@ -127,20 +241,22 @@ export const WHATSAPP_TEMPLATES = {
    * nothing else here changes — but the button goes back to being dead.
    */
   kycPendingMenu: {
+    hasImageHeader: true,
     contentSid: sid(
       'TPL_KYC_PENDING_MENU',
       'HX22cce223f0163abc339d502e686989a1',
     ),
     urlSuffixVar: '1',
     urlSuffixMode: 'shortlink',
+    category: 'UTILITY',
+    cloud: {
+      name: cloudName(
+        'TPL_CLOUD_KYC_PENDING_MENU',
+        'rabotka_kyc_pending_menu_v3',
+      ),
+    },
     variables: () => ({ '1': 'profile' }),
   } satisfies WhatsAppTemplate<[]>,
-
-
-
-
-
-
 
   // "Voir le portfolio" — CTA button opening a worker's PUBLIC portfolio
   // (/p/<slug>) inside WhatsApp's in-app browser. Unlike the other webview
@@ -150,12 +266,22 @@ export const WHATSAPP_TEMPLATES = {
   // {{2}} = portfolio slug (URL suffix — WhatsApp only allows a variable there).
   viewWorkerPortfolio: {
     contentSid: 'HXd46839e8028869e15469add1b73000fd',
+    // {{2}} fills the button URL but takes NO login code — the portfolio is
+    // public. Without this the Cloud mapper puts the slug in the body and sends
+    // no button parameter at all.
+    buttonUrlVar: '2',
+    category: 'UTILITY',
+    cloud: {
+      name: cloudName(
+        'TPL_CLOUD_VIEW_WORKER_PORTFOLIO',
+        'rabotka_view_worker_portfolio',
+      ),
+    },
     variables: (p: { workerName: string; slug: string }) => ({
       '1': p.workerName,
       '2': p.slug,
     }),
   } satisfies WhatsAppTemplate<[params: { workerName: string; slug: string }]>,
-
 
   /**
    * Sent right after web onboarding. Split by role: `/home` is already
@@ -169,6 +295,13 @@ export const WHATSAPP_TEMPLATES = {
     ),
     urlSuffixVar: '2',
     urlSuffixMode: 'shortlink',
+    category: 'UTILITY',
+    cloud: {
+      name: cloudName(
+        'TPL_CLOUD_PROFILE_CREATED_WORKER',
+        'rabotka_profile_created_kyc_worker_v2',
+      ),
+    },
     variables: (firstName: string) => ({ '1': firstName }),
   } satisfies WhatsAppTemplate<[firstName: string]>,
 
@@ -179,14 +312,25 @@ export const WHATSAPP_TEMPLATES = {
     ),
     urlSuffixVar: '2',
     urlSuffixMode: 'shortlink',
+    category: 'UTILITY',
+    cloud: {
+      name: cloudName(
+        'TPL_CLOUD_PROFILE_CREATED_EMPLOYER',
+        'rabotka_profile_created_kyc_employer_v2',
+      ),
+    },
     variables: (firstName: string) => ({ '1': firstName }),
   } satisfies WhatsAppTemplate<[firstName: string]>,
-  
 
   kyc: {
-    contentSid: sid('TPL_KYC_APPROVED_CTA', 'HXab1c58ea985695fc3eb473aef762b137'),
+    contentSid: sid(
+      'TPL_KYC_APPROVED_CTA',
+      'HXab1c58ea985695fc3eb473aef762b137',
+    ),
     urlSuffixVar: '2',
     urlSuffixMode: 'shortlink',
+    category: 'UTILITY',
+    cloud: { name: cloudName('TPL_CLOUD_KYC', 'rabotka_kyc_approved_cta_v2') },
     variables: (name: string) => ({ '1': name }),
   } satisfies WhatsAppTemplate<[name: string]>,
 
@@ -207,6 +351,13 @@ export const WHATSAPP_TEMPLATES = {
     ),
     urlSuffixVar: '2',
     urlSuffixSeparator: '&',
+    category: 'UTILITY',
+    cloud: {
+      name: cloudName(
+        'TPL_CLOUD_ACCOUNT_ACTIVATED_WORKER',
+        'rabotka_account_activated_worker_v4',
+      ),
+    },
     variables: (p: { firstName: string; path: string }) => ({
       '1': p.firstName,
       '2': p.path,
@@ -220,6 +371,13 @@ export const WHATSAPP_TEMPLATES = {
     ),
     urlSuffixVar: '2',
     urlSuffixSeparator: '&',
+    category: 'UTILITY',
+    cloud: {
+      name: cloudName(
+        'TPL_CLOUD_ACCOUNT_ACTIVATED_EMPLOYER',
+        'rabotka_account_activated_employer_v4',
+      ),
+    },
     variables: (p: { firstName: string; path: string }) => ({
       '1': p.firstName,
       '2': p.path,
@@ -227,9 +385,16 @@ export const WHATSAPP_TEMPLATES = {
   } satisfies WhatsAppTemplate<[params: { firstName: string; path: string }]>,
 
   reminder24h: {
-    contentSid: sid('TPL_REMINDER_24H_CTA', 'HX518e3f6bac5a1f337456cda963692474'),
+    contentSid: sid(
+      'TPL_REMINDER_24H_CTA',
+      'HX518e3f6bac5a1f337456cda963692474',
+    ),
     urlSuffixVar: '9',
     urlSuffixSeparator: '&',
+    category: 'UTILITY',
+    cloud: {
+      name: cloudName('TPL_CLOUD_REMINDER_2_4H', 'rabotka_reminder_24h_cta'),
+    },
     variables: (p: {
       offerTitle: string;
       date: string;
@@ -275,6 +440,13 @@ export const WHATSAPP_TEMPLATES = {
     ),
     urlSuffixVar: '6',
     urlSuffixSeparator: '&',
+    category: 'MARKETING',
+    cloud: {
+      name: cloudName(
+        'TPL_CLOUD_JOB_RECOMMENDATION',
+        'rabotka_job_recommendation_cta',
+      ),
+    },
     variables: (p: {
       firstName: string;
       title: string;
@@ -303,8 +475,6 @@ export const WHATSAPP_TEMPLATES = {
     ]
   >,
 
-
-
   /**
    * `{{8}}` is the applicationId, used as the CTA button's URL suffix
    * (`/candidatures/{{8}}`). Harmless on the old template, which ignores it —
@@ -317,6 +487,13 @@ export const WHATSAPP_TEMPLATES = {
     ),
     urlSuffixVar: '8',
     urlSuffixSeparator: '&',
+    category: 'UTILITY',
+    cloud: {
+      name: cloudName(
+        'TPL_CLOUD_NEW_APPLICATION',
+        'rabotka_new_application_cta',
+      ),
+    },
     variables: (p: {
       offerTitle: string;
       workerName: string;
@@ -358,6 +535,13 @@ export const WHATSAPP_TEMPLATES = {
     ),
     urlSuffixVar: '3',
     urlSuffixMode: 'shortlink',
+    category: 'UTILITY',
+    cloud: {
+      name: cloudName(
+        'TPL_CLOUD_APPLICATION_ACCEPTED',
+        'rabotka_application_accepted_cta_v2',
+      ),
+    },
     variables: (p: { employerName: string; offerTitle: string }) => ({
       '3': 'mes-candidatures',
       '1': p.employerName,
@@ -377,6 +561,13 @@ export const WHATSAPP_TEMPLATES = {
     ),
     urlSuffixVar: '3',
     urlSuffixSeparator: '&',
+    category: 'UTILITY',
+    cloud: {
+      name: cloudName(
+        'TPL_CLOUD_APPLICATION_ACCEPTED_UNLOCK',
+        'rabotka_application_accepted_unlock_cta_v2',
+      ),
+    },
     variables: (p: {
       employerName: string;
       offerTitle: string;
@@ -397,16 +588,33 @@ export const WHATSAPP_TEMPLATES = {
   >,
 
   applicationRejected: {
-    contentSid: sid('TPL_APPLICATION_REJECTED_CTA', 'HX06b679564eca26a2bd88e48c5361357a'),
+    contentSid: sid(
+      'TPL_APPLICATION_REJECTED_CTA',
+      'HX06b679564eca26a2bd88e48c5361357a',
+    ),
     urlSuffixVar: '1',
     urlSuffixMode: 'shortlink',
+    category: 'UTILITY',
+    cloud: {
+      name: cloudName(
+        'TPL_CLOUD_APPLICATION_REJECTED',
+        'rabotka_application_rejected_cta_v2',
+      ),
+    },
     variables: () => ({ '1': 'recherche-offres' }),
   } satisfies WhatsAppTemplate<[]>,
 
   cancellation: {
-    contentSid: sid('TPL_CANCELLATION_CTA', 'HX6c6f426c62bbe0c173f7f02376b47586'),
+    contentSid: sid(
+      'TPL_CANCELLATION_CTA',
+      'HX6c6f426c62bbe0c173f7f02376b47586',
+    ),
     urlSuffixVar: '6',
     urlSuffixSeparator: '&',
+    category: 'UTILITY',
+    cloud: {
+      name: cloudName('TPL_CLOUD_CANCELLATION', 'rabotka_cancellation_cta'),
+    },
     variables: (p: {
       workerName: string;
       offerTitle: string;
@@ -436,25 +644,57 @@ export const WHATSAPP_TEMPLATES = {
     ]
   >,
 
+  /**
+   * Both parties paid; here is who to call.
+   *
+   * v6 replaces v5's « Laisser un avis » URL button — which opened the
+   * `/leave-note` web form in the in-app browser — with a FLOW button carrying
+   * the feedback Flow itself, and drops the emoji from the body.
+   *
+   * The button is not a nicety here. `WhatsAppFeedbackService.requestFeedback`
+   * sends the Flow as a free-form interactive message, which WhatsApp rejects
+   * outside the 24h service window (131047) — and the people this template
+   * reaches are exactly the ones who paid on the web without ever messaging the
+   * bot. On an approved template the same Flow has no such limit, so this is
+   * the only shape that reaches everyone who was just served.
+   */
   contactUnlocked: {
+    // Points at the v5 Content template, which still has the URL button. Kept
+    // only to satisfy the Twilio binding until that provider is removed; the
+    // v6 body exists on Meta alone and was authored in
+    // `scripts/whatsapp-templates/definitions.ts`, not derived from Twilio.
     contentSid: sid(
       'TPL_CONTACT_UNLOCKED_MUTUAL',
       'HX4537d7f09c1bd7a2f1e900418b97ee9d',
     ),
-    urlSuffixVar: '4',
-    urlSuffixMode: 'shortlink',
+    flowTokenVar: FLOW_TOKEN_VAR,
+    category: 'UTILITY',
+    cloud: {
+      name: cloudName(
+        'TPL_CLOUD_CONTACT_UNLOCKED',
+        'rabotka_contact_unlocked_mutual_v6',
+      ),
+    },
     variables: (p: {
       name: string;
       phone: string | null;
       email: string | null;
+      flowToken: string;
     }) => ({
-      '4': 'leave-note',
       '1': p.name,
       '2': p.phone?.trim() || 'Non renseigné',
       '3': p.email?.trim() || 'Non renseigné',
+      [FLOW_TOKEN_VAR]: p.flowToken,
     }),
   } satisfies WhatsAppTemplate<
-    [params: { name: string; phone: string | null; email: string | null }]
+    [
+      params: {
+        name: string;
+        phone: string | null;
+        email: string | null;
+        flowToken: string;
+      },
+    ]
   >,
 
   /**
@@ -462,39 +702,74 @@ export const WHATSAPP_TEMPLATES = {
    * feed. This path used to send FREE-FORM text with `.catch(() => undefined)`,
    * so an employer who paid on the web outside the 24h window silently received
    * nothing at all despite having paid.
+   *
+   * v5 carries the feedback Flow on its button and no emoji, for the same
+   * reasons as `contactUnlocked` above.
    */
   contactUnlockedRecommendation: {
+    // As above: the v4 Content template, kept only for the Twilio binding.
     contentSid: sid(
       'TPL_CONTACT_UNLOCKED_RECO',
       'HX6e2644db5dd013c2e0abbf0226b464cc',
     ),
-    urlSuffixVar: '4',
-    urlSuffixMode: 'shortlink',
+    flowTokenVar: FLOW_TOKEN_VAR,
+    category: 'UTILITY',
+    cloud: {
+      name: cloudName(
+        'TPL_CLOUD_CONTACT_UNLOCKED_RECOMMENDATION',
+        'rabotka_contact_unlocked_reco_v5',
+      ),
+    },
     variables: (p: {
       name: string;
       phone: string | null;
       email: string | null;
+      flowToken: string;
     }) => ({
-      '4': 'leave-note',
       '1': p.name,
       '2': p.phone?.trim() || 'Non renseigné',
       '3': p.email?.trim() || 'Non renseigné',
+      [FLOW_TOKEN_VAR]: p.flowToken,
     }),
   } satisfies WhatsAppTemplate<
-    [params: { name: string; phone: string | null; email: string | null }]
+    [
+      params: {
+        name: string;
+        phone: string | null;
+        email: string | null;
+        flowToken: string;
+      },
+    ]
   >,
 
   unlockExpiredConversion: {
-    contentSid: sid('TPL_UNLOCK_EXPIRED_CONVERSION_CTA', 'HX6bf4ad0386162858db883156b5ea07a3'),
+    contentSid: sid(
+      'TPL_UNLOCK_EXPIRED_CONVERSION_CTA',
+      'HX6bf4ad0386162858db883156b5ea07a3',
+    ),
     urlSuffixVar: '2',
     urlSuffixMode: 'shortlink',
+    category: 'UTILITY',
+    cloud: {
+      name: cloudName(
+        'TPL_CLOUD_UNLOCK_EXPIRED_CONVERSION',
+        'rabotka_unlock_expired_conversion_cta_v2',
+      ),
+    },
     variables: (p: { amount: number }) => ({ '1': String(p.amount) }),
   } satisfies WhatsAppTemplate<[params: { amount: number }]>,
 
   autoStarted: {
-    contentSid: sid('TPL_AUTO_STARTED_CTA', 'HXf41bcce791ad5ac3351c0c6c9dc3e611'),
+    contentSid: sid(
+      'TPL_AUTO_STARTED_CTA',
+      'HXf41bcce791ad5ac3351c0c6c9dc3e611',
+    ),
     urlSuffixVar: '2',
     urlSuffixSeparator: '&',
+    category: 'UTILITY',
+    cloud: {
+      name: cloudName('TPL_CLOUD_AUTO_STARTED', 'rabotka_auto_started_cta'),
+    },
     variables: (p: { offerTitle: string; jobOfferId: string }) => ({
       '1': p.offerTitle,
       // URL suffix for the CTA button.
@@ -505,9 +780,16 @@ export const WHATSAPP_TEMPLATES = {
   >,
 
   statusCheck: {
-    contentSid: sid('TPL_STATUS_CHECK_CTA', 'HX53ac4969d31ecc682d3b3e1fd030563f'),
+    contentSid: sid(
+      'TPL_STATUS_CHECK_CTA',
+      'HX53ac4969d31ecc682d3b3e1fd030563f',
+    ),
     urlSuffixVar: '2',
     urlSuffixSeparator: '&',
+    category: 'UTILITY',
+    cloud: {
+      name: cloudName('TPL_CLOUD_STATUS_CHECK', 'rabotka_status_check_cta'),
+    },
     variables: (p: { jobTitle: string; jobOfferId: string }) => ({
       '1': p.jobTitle,
       // URL suffix (/missions/{{2}}). Replaces the snooze label: the employer
@@ -519,16 +801,36 @@ export const WHATSAPP_TEMPLATES = {
   >,
 
   offerExpiredApplicant: {
-    contentSid: sid('TPL_OFFER_EXPIRED_APPLICANT_CTA', 'HX0647a60e08307a0ffda4d446fb2cb711'),
+    contentSid: sid(
+      'TPL_OFFER_EXPIRED_APPLICANT_CTA',
+      'HX0647a60e08307a0ffda4d446fb2cb711',
+    ),
     urlSuffixVar: '2',
     urlSuffixMode: 'shortlink',
+    category: 'UTILITY',
+    cloud: {
+      name: cloudName(
+        'TPL_CLOUD_OFFER_EXPIRED_APPLICANT',
+        'rabotka_offer_expired_applicant_cta_v2',
+      ),
+    },
     variables: (p: { offerTitle: string }) => ({ '1': p.offerTitle }),
   } satisfies WhatsAppTemplate<[params: { offerTitle: string }]>,
 
   offerExpiredEmployer: {
-    contentSid: sid('TPL_OFFER_EXPIRED_EMPLOYER_CTA', 'HXa721971676e29a4fc129e785384f83d1'),
+    contentSid: sid(
+      'TPL_OFFER_EXPIRED_EMPLOYER_CTA',
+      'HXa721971676e29a4fc129e785384f83d1',
+    ),
     urlSuffixVar: '2',
     urlSuffixSeparator: '&',
+    category: 'UTILITY',
+    cloud: {
+      name: cloudName(
+        'TPL_CLOUD_OFFER_EXPIRED_EMPLOYER',
+        'rabotka_offer_expired_employer_cta',
+      ),
+    },
     variables: (p: { offerTitle: string; jobOfferId: string }) => ({
       '1': p.offerTitle,
       // URL suffix for the CTA button.
@@ -539,16 +841,33 @@ export const WHATSAPP_TEMPLATES = {
   >,
 
   offerUnavailableWorker: {
-    contentSid: sid('TPL_OFFER_UNAVAILABLE_WORKER_CTA', 'HX8603fcae7dfdbcdd3570216395ede043'),
+    contentSid: sid(
+      'TPL_OFFER_UNAVAILABLE_WORKER_CTA',
+      'HX8603fcae7dfdbcdd3570216395ede043',
+    ),
     urlSuffixVar: '2',
     urlSuffixMode: 'shortlink',
+    category: 'UTILITY',
+    cloud: {
+      name: cloudName(
+        'TPL_CLOUD_OFFER_UNAVAILABLE_WORKER',
+        'rabotka_offer_unavailable_worker_cta_v2',
+      ),
+    },
     variables: (p: { offerTitle: string }) => ({ '1': p.offerTitle }),
   } satisfies WhatsAppTemplate<[params: { offerTitle: string }]>,
 
   reminderStart: {
-    contentSid: sid('TPL_REMINDER_START_CTA', 'HX2a2e2633f45b1fceb8164d08b0963ec8'),
+    contentSid: sid(
+      'TPL_REMINDER_START_CTA',
+      'HX2a2e2633f45b1fceb8164d08b0963ec8',
+    ),
     urlSuffixVar: '6',
     urlSuffixSeparator: '&',
+    category: 'UTILITY',
+    cloud: {
+      name: cloudName('TPL_CLOUD_REMINDER_START', 'rabotka_reminder_start_cta'),
+    },
     variables: (p: {
       offerTitle: string;
       time: string;
@@ -599,6 +918,10 @@ export const WHATSAPP_TEMPLATES = {
     // of static text. Do not point the env override at it; it was never
     // approved and every send through it would fail.
     contentSid: sid('TPL_ADMIN_MESSAGE', 'HX19ecc295fd0ad9070740b2db85154c95'),
+    category: 'UTILITY',
+    cloud: {
+      name: cloudName('TPL_CLOUD_ADMIN_MESSAGE', 'rabotka_admin_message_v2'),
+    },
     variables: (p: { message: string; adminName: string }) => ({
       '1': p.message,
       '2': p.adminName,
@@ -609,6 +932,139 @@ export const WHATSAPP_TEMPLATES = {
 } as const;
 
 export type WhatsAppTemplateName = keyof typeof WHATSAPP_TEMPLATES;
+
+/**
+ * Every entry carries a binding for BOTH providers.
+ *
+ * The per-entry `satisfies WhatsAppTemplate<[…]>` above already types each
+ * one's params; this asserts the registry is exhaustive over its own keys, so
+ * an entry added without a `cloud` binding or a `category` fails the build
+ * rather than the first send after a provider flip.
+ */
+export type TemplateBinding = Pick<
+  WhatsAppTemplate<never[]>,
+  | 'contentSid'
+  | 'category'
+  | 'cloud'
+  | 'buttonUrlVar'
+  | 'urlSuffixVar'
+  | 'hasImageHeader'
+  | 'flowTokenVar'
+>;
+
+/**
+ * The registry widened to the declared interface.
+ *
+ * Doubles as the exhaustiveness check and as the way the helpers below read
+ * optional fields: the object literal's inferred type omits `defaultLanguage`
+ * entirely (no entry sets it), so reading it off `WHATSAPP_TEMPLATES` directly
+ * would not compile.
+ */
+const TEMPLATE_BINDINGS: Record<WhatsAppTemplateName, TemplateBinding> =
+  WHATSAPP_TEMPLATES;
+
+export interface TemplateBindingProblem {
+  key: WhatsAppTemplateName;
+  problem: string;
+}
+
+/**
+ * Validate a set of bindings against one provider.
+ *
+ * Note what this can and cannot catch. A BLANK env override cannot produce an
+ * empty binding — `sid()` and `cloudName()` both fall back to their default —
+ * so the empty case only arises from a registry entry added by hand without a
+ * value. What an env override CAN do is set a syntactically wrong value, and
+ * with two providers in play the easy mistake is pasting a Meta template name
+ * into a Twilio SID override, or the reverse.
+ *
+ * Pure, and takes the bindings as an argument, so the failure modes can be
+ * tested directly instead of by reloading the module under a mutated
+ * environment.
+ */
+export function findBindingProblemsIn(
+  bindings: Record<string, TemplateBinding>,
+  provider: 'twilio' | 'cloud',
+): TemplateBindingProblem[] {
+  const problems: TemplateBindingProblem[] = [];
+  for (const [name, template] of Object.entries(bindings)) {
+    const key = name as WhatsAppTemplateName;
+    if (provider === 'twilio') {
+      if (!template.contentSid.trim()) {
+        problems.push({ key, problem: 'contentSid is empty' });
+      } else if (!template.contentSid.startsWith('HX')) {
+        problems.push({
+          key,
+          problem: `contentSid "${template.contentSid}" is not a Twilio Content SID`,
+        });
+      }
+      continue;
+    }
+    if (!template.cloud.name.trim()) {
+      problems.push({ key, problem: 'cloud.name is empty' });
+    } else if (!/^[a-z0-9_]+$/.test(template.cloud.name)) {
+      // Meta rejects uppercase, hyphens and dots in a template name outright.
+      problems.push({
+        key,
+        problem: `cloud.name "${template.cloud.name}" is not a valid Meta template name`,
+      });
+    }
+  }
+  return problems;
+}
+
+/**
+ * Check every template resolves to something sendable on the ACTIVE provider.
+ *
+ * Only the active provider is checked: a blank Cloud name must not refuse a
+ * boot that is still running on Twilio, and demanding both would make the Cloud
+ * rollout gate every deploy long before anyone flips the switch.
+ */
+export function findTemplateBindingProblems(
+  provider: 'twilio' | 'cloud',
+): TemplateBindingProblem[] {
+  return findBindingProblemsIn(TEMPLATE_BINDINGS, provider);
+}
+
+/** The language a template is sent in, unless a call overrides it. */
+export function templateLanguage(key: WhatsAppTemplateName): string {
+  return TEMPLATE_BINDINGS[key].cloud.defaultLanguage ?? CLOUD_DEFAULT_LANGUAGE;
+}
+
+/**
+ * Which variable fills the CTA button's URL, for the Cloud component mapper.
+ *
+ * `urlSuffixVar` implies it: every template that receives a login code puts the
+ * code in the button. `buttonUrlVar` covers the case of a button variable with
+ * no login code.
+ */
+/** Whether a template carries an IMAGE header that must be sent every time. */
+export function hasImageHeader(key: WhatsAppTemplateName): boolean {
+  return TEMPLATE_BINDINGS[key].hasImageHeader === true;
+}
+
+export function getButtonUrlVar(key: WhatsAppTemplateName): string | undefined {
+  const t = TEMPLATE_BINDINGS[key];
+  return t.urlSuffixVar ?? t.buttonUrlVar;
+}
+
+/**
+ * Which `variables()` key holds the FLOW button's token, if the template has
+ * one. Undefined for every template whose button is a link.
+ */
+export function getFlowTokenVar(key: WhatsAppTemplateName): string | undefined {
+  return TEMPLATE_BINDINGS[key].flowTokenVar;
+}
+
+/** Narrow an arbitrary string to a registry key. */
+export function isTemplateKey(value: string): value is WhatsAppTemplateName {
+  return Object.prototype.hasOwnProperty.call(WHATSAPP_TEMPLATES, value);
+}
+
+/** The Meta template name a key resolves to, after any env override. */
+export function templateCloudName(key: WhatsAppTemplateName): string {
+  return TEMPLATE_BINDINGS[key].cloud.name;
+}
 
 /**
  * Which variable of a template fills its CTA button URL suffix, looked up by
@@ -637,8 +1093,7 @@ const URL_SUFFIX_BY_SID: ReadonlyMap<string, UrlSuffixTarget> = new Map(
             ? template.urlSuffixSeparator
             : '?',
         mode:
-          'urlSuffixMode' in template &&
-          template.urlSuffixMode === 'shortlink'
+          'urlSuffixMode' in template && template.urlSuffixMode === 'shortlink'
             ? 'shortlink'
             : 'append',
       },
@@ -649,4 +1104,33 @@ export function getUrlSuffixTarget(
   contentSid: string,
 ): UrlSuffixTarget | undefined {
   return URL_SUFFIX_BY_SID.get(contentSid);
+}
+
+/**
+ * Content SID -> logical key, built from the RESOLVED sids so the `sid()` env
+ * overrides are covered.
+ *
+ * Only needed to drain jobs enqueued before template sends started carrying a
+ * key: those payloads are already in Redis and cannot be rewritten. Removable
+ * one release after the deploy that introduced the key-shaped job.
+ */
+const KEY_BY_SID: ReadonlyMap<string, WhatsAppTemplateName> = new Map(
+  (
+    Object.entries(WHATSAPP_TEMPLATES) as [
+      WhatsAppTemplateName,
+      { contentSid: string },
+    ][]
+  ).map(([key, template]) => [template.contentSid, key]),
+);
+
+export function getTemplateKeyBySid(
+  contentSid: string,
+): WhatsAppTemplateName | undefined {
+  return KEY_BY_SID.get(contentSid);
+}
+
+export function getUrlSuffixTargetByKey(
+  key: WhatsAppTemplateName,
+): UrlSuffixTarget | undefined {
+  return URL_SUFFIX_BY_SID.get(WHATSAPP_TEMPLATES[key].contentSid);
 }

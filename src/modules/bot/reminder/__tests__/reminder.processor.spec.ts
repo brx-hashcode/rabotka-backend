@@ -2,7 +2,6 @@ import { Logger } from '@nestjs/common';
 import { ReminderProcessor } from '../reminder.processor';
 import { ApplicationStatus, JobOfferStatus } from '@prisma/client';
 import type { SystemConfigService } from '../../../system-config/system-config.service';
-import { WHATSAPP_TEMPLATES } from '../../../../common/constants/whatsapp-templates';
 
 jest.spyOn(Logger.prototype, 'log').mockImplementation(() => {});
 jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => {});
@@ -302,13 +301,13 @@ describe('ReminderProcessor', () => {
       // Each worker notified (+ the employer)
       expect(whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+2222',
-        WHATSAPP_TEMPLATES.offerExpiredApplicant.contentSid,
+        'offerExpiredApplicant',
         expect.any(Object),
         'worker-a',
       );
       expect(whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+3333',
-        WHATSAPP_TEMPLATES.offerExpiredApplicant.contentSid,
+        'offerExpiredApplicant',
         expect.any(Object),
         'worker-b',
       );
@@ -360,7 +359,7 @@ describe('ReminderProcessor', () => {
       );
       expect(whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+5555',
-        WHATSAPP_TEMPLATES.autoStarted.contentSid,
+        'autoStarted',
         expect.any(Object),
         'emp-filled',
       );
@@ -595,7 +594,7 @@ describe('ReminderProcessor', () => {
       );
       expect(whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+1234567890',
-        WHATSAPP_TEMPLATES.reminderStart.contentSid,
+        'reminderStart',
         expect.any(Object),
       );
       expect(redis.set).toHaveBeenCalledWith(
@@ -672,7 +671,7 @@ describe('ReminderProcessor', () => {
       });
       expect(whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+242000002',
-        WHATSAPP_TEMPLATES.statusCheck.contentSid,
+        'statusCheck',
         expect.any(Object),
         'worker-1',
       );

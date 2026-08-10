@@ -95,7 +95,8 @@
     "rxjs": "^7.8.1",
     "sharp": "^0.33.5",
     "socket.io": "^4.8.3",
-    "twilio": "^5.3.0"
+    "twilio": "^5.3.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",
@@ -135,6 +136,10 @@
       "ts"
     ],
     "rootDir": "src",
+    "roots": [
+      "<rootDir>",
+      "<rootDir>/../scripts"
+    ],
     "testRegex": ".*\\.spec\\.ts$",
     "transform": {
       "^.+\\.(t|j)s$": "ts-jest"

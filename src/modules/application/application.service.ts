@@ -338,19 +338,18 @@ export class ApplicationService {
     }
 
     const fees = await this.systemConfigService.getFees();
-    // Count only applications whose parent offer is still live — stale
-    // applications on cancelled/expired/completed offers shouldn't count
-    // against the worker's concurrent-applications quota.
-    const activeCount = await this.countActiveApplications(workerId);
-    if (activeCount >= fees.maxConcurrentApplications) {
-      throw new ForbiddenException(
-        `Vous avez déjà ${activeCount} candidature(s) active(s). Maximum autorisé : ${fees.maxConcurrentApplications}.`,
-      );
-    }
 
-    // Daily application cap — a sliding window, not a stored counter: nothing
-    // resets it, the midnight boundary simply moves. Enforced for both the
-    // WhatsApp bot and the mobile apply endpoint.
+    // The daily cap is now the ONLY gate on applying. There used to be a
+    // concurrent-slot cap alongside it, and it was the binding one — 5 slots
+    // against 10/day — which meant a worker with five pending applications was
+    // blocked indefinitely: the daily window rolls at midnight, open slots do
+    // not. They only free when an employer responds, so the worker was left
+    // waiting on someone else with a UI that said "0 remaining, resets at
+    // midnight".
+    //
+    // A sliding window, not a stored counter: nothing resets it, the midnight
+    // boundary simply moves. Enforced for both the WhatsApp bot and the mobile
+    // apply endpoint.
     const todayCount = await this.countApplicationsToday(workerId);
     if (todayCount >= fees.maxDailyApplications) {
       throw new ForbiddenException(
@@ -2108,56 +2107,28 @@ export class ApplicationService {
     });
   }
 
-  private countActiveApplications(workerId: string): Promise<number> {
-    return this.prisma.application.count({
-      where: {
-        worker_id: workerId,
-        deleted_at: null,
-        status: { in: [...WORKER_ACTIVE_APPLICATION_STATUSES] },
-        job_offer: {
-          status: {
-            in: [
-              JobOfferStatus.ACTIVE,
-              JobOfferStatus.PARTIALLY_FILLED,
-              JobOfferStatus.FILLED,
-              JobOfferStatus.IN_PROGRESS,
-            ],
-          },
-        },
-      },
-    });
-  }
-
   /**
-   * Both limits that gate applying: the per-day cap and the concurrent-slot cap.
-   * `concurrent` is usually the binding one (3 slots vs 10/day), so clients
-   * should surface it as the effective remaining count.
+   * The only limit that gates applying: the per-day cap.
+   *
+   * `concurrent` used to be reported here too and was the binding one. It is
+   * gone — `resetsAt` is now the whole truth about when the worker can apply
+   * again, which it was not while a concurrent cap that midnight never cleared
+   * sat behind the same widget.
    */
   async getDailyApplicationQuota(workerId: string): Promise<{
     used: number;
     limit: number;
     remaining: number;
     resetsAt: string;
-    concurrent: { used: number; limit: number; remaining: number };
   }> {
     const fees = await this.systemConfigService.getFees();
     const limit = fees.maxDailyApplications;
-    const [used, activeCount] = await Promise.all([
-      this.countApplicationsToday(workerId),
-      this.countActiveApplications(workerId),
-    ]);
-    const resetsAt = startOfNextBusinessDay();
-    const concurrentLimit = fees.maxConcurrentApplications;
+    const used = await this.countApplicationsToday(workerId);
     return {
       used,
       limit,
       remaining: Math.max(0, limit - used),
-      resetsAt: resetsAt.toISOString(),
-      concurrent: {
-        used: activeCount,
-        limit: concurrentLimit,
-        remaining: Math.max(0, concurrentLimit - activeCount),
-      },
+      resetsAt: startOfNextBusinessDay().toISOString(),
     };
   }
 

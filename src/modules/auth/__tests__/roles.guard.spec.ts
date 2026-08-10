@@ -186,6 +186,35 @@ describe('RolesGuard', () => {
       ).rejects.toThrow(ForbiddenException);
     });
 
+    it('lets SUPPORT read feedback but not write it', async () => {
+      activeUser(UserRole.SUPPORT);
+      await expect(
+        guardFor([UserRole.MODERATOR]).canActivate(
+          makeContext({ userId: 'u1' }, 'admin/feedback', 'GET'),
+        ),
+      ).resolves.toBe(true);
+
+      // Both endpoints are GET today. The `read` grant is what keeps that true
+      // if someone later adds a destructive one to the same controller.
+      activeUser(UserRole.SUPPORT);
+      await expect(
+        guardFor([UserRole.MODERATOR]).canActivate(
+          makeContext({ userId: 'u1' }, 'admin/feedback', 'DELETE'),
+        ),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('keeps FINANCE out of feedback', async () => {
+      // Granted to SUPPORT alone: finance has no reason to read what a worker
+      // said about a match.
+      activeUser(UserRole.FINANCE);
+      await expect(
+        guardFor([UserRole.MODERATOR]).canActivate(
+          makeContext({ userId: 'u1' }, 'admin/feedback', 'GET'),
+        ),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
     it('never lets a lateral role pass a SUPER_ADMIN gate in its own area', async () => {
       // Penalties belong to FINANCE, but permanent deletion never does.
       activeUser(UserRole.FINANCE);

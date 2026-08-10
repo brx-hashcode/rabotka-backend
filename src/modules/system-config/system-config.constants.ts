@@ -8,37 +8,12 @@ export interface ConfigDefault {
   isSecret: boolean;
 }
 
+// The `twilio.*` keys lived here until WhatsApp gained a second provider.
+// Messaging credentials are environment-only now, for both Twilio and Meta
+// Cloud — see whatsapp.config.ts. `ConfigCategory.TWILIO` stays in the Prisma
+// enum: it is unused, and removing a Postgres enum value is a destructive
+// migration for no gain.
 export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
-  // ── TWILIO ────────────────────────────────────────────────────────────────
-  {
-    key: 'twilio.account_sid',
-    value: '',
-    category: ConfigCategory.TWILIO,
-    label: 'Twilio Account SID',
-    isSecret: false,
-  },
-  {
-    key: 'twilio.auth_token',
-    value: '',
-    category: ConfigCategory.TWILIO,
-    label: 'Twilio Auth Token',
-    isSecret: true,
-  },
-  {
-    key: 'twilio.whatsapp_from',
-    value: '',
-    category: ConfigCategory.TWILIO,
-    label: 'Numéro WhatsApp expéditeur (ex: whatsapp:+14155...)',
-    isSecret: false,
-  },
-  {
-    key: 'twilio.sms_from',
-    value: '',
-    category: ConfigCategory.TWILIO,
-    label: 'Numéro SMS expéditeur',
-    isSecret: false,
-  },
-
   // ── FEES ──────────────────────────────────────────────────────────────────
   {
     key: 'fees.late_cancellation_penalty_fcfa',
@@ -123,13 +98,6 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     value: '2',
     category: ConfigCategory.FEES,
     label: 'Nombre de pénalités impayées avant blocage',
-    isSecret: false,
-  },
-  {
-    key: 'fees.max_concurrent_applications',
-    value: '10',
-    category: ConfigCategory.FEES,
-    label: 'Nombre max de candidatures simultanées (par travailleur)',
     isSecret: false,
   },
   {
@@ -404,7 +372,6 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     label: 'Vercel Blob – Read/Write Token',
     isSecret: true,
   },
-
 ];
 
 export const STORAGE_ENV_OVERRIDES: Record<string, Record<string, string>> = {
@@ -431,4 +398,3 @@ export const STORAGE_ENV_OVERRIDES: Record<string, Record<string, string>> = {
     BLOB_READ_WRITE_TOKEN: 'storage.vercel_blob.token',
   },
 };
-
