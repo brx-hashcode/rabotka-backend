@@ -45,6 +45,10 @@ export const LATERAL_ACCESS: Record<LateralRole, Record<string, AreaAccess>> = {
     'admin/profiles': 'read',
     'admin/applications': 'read',
     'admin/job-offers': 'read',
+    // Post-unlock sentiment is context for the claim sitting next to it. Read
+    // only: the feedback rows carry the author's name and phone, and support's
+    // reach into personal data stays at the same level as `admin/profiles`.
+    'admin/feedback': 'read',
   },
 };
 
