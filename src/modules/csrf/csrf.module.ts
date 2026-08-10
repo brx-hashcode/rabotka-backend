@@ -57,6 +57,11 @@ import { CsrfController } from './csrf.controller';
             return (
               isBearer ||
               url.includes('/whatsapp/incoming') ||
+              // Meta's webhook. A provider cannot carry a CSRF token, and
+              // without this the POST is answered with a JSON 403 by this very
+              // middleware — signature verification never runs, and Meta
+              // retries against the 403 for days.
+              url.includes('/webhooks/whatsapp/') ||
               url.includes('/auth/mobile/')
             );
           },

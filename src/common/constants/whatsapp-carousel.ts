@@ -1,6 +1,14 @@
+import type { WhatsAppTemplateName } from './whatsapp-templates';
+
+// The bucket that actually serves the cover. The previous default,
+// pub-fd4c940e661d483b955abd6d7de0e17f, returns 404 for whatsapp/cover-rabotka.jpg
+// — the approved Twilio cards point here instead. Only the free-form fallback in
+// welcome.messages.ts reads this (the cards bake the image in), and that branch
+// is unreachable while contentSid is set, which is why a dead image URL went
+// unnoticed.
 export const WHATSAPP_MEDIA_BASE = (
   process.env.CLOUDFLARE_PUBLIC_BASE_URL ??
-  'https://pub-fd4c940e661d483b955abd6d7de0e17f.r2.dev'
+  'https://pub-1c3331ee6be84a71b4be0db2b3734ac7.r2.dev'
 ).replace(/\/$/, '');
 
 export const COVER_KEY = 'whatsapp/cover-rabotka.jpg';
@@ -28,14 +36,19 @@ export function coverImageUrl(): string {
 // composed details line). {{1}} = media, {{2}} = title.
 
 /**
- * Encode a Content-template send as a bot reply string. The inbound pipeline
+ * Encode a template send as a bot reply string. The inbound pipeline
  * (parseReplyToJob in whatsapp-inbound.processor.ts) turns any reply starting
- * with `[TPL:<contentSid>]<jsonVars>` into a template outbound job — so a flow
+ * with `[TPL:<templateKey>]<jsonVars>` into a template outbound job — so a flow
  * can return a template (e.g. one with a URL button) in place of plain text.
+ *
+ * Carries the logical key rather than a Twilio content SID. Both ends live in
+ * the same request — a flow returns the string and the inbound processor parses
+ * it immediately — so unlike the queue payload there is no old encoding still
+ * in flight to stay compatible with.
  */
 export function templateReply(
-  contentSid: string,
+  templateKey: WhatsAppTemplateName,
   variables: Record<string, string> = {},
 ): string {
-  return `[TPL:${contentSid}]${JSON.stringify(variables)}`;
+  return `[TPL:${templateKey}]${JSON.stringify(variables)}`;
 }

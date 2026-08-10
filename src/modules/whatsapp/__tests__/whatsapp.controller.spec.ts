@@ -1,5 +1,6 @@
 import { Logger, BadRequestException } from '@nestjs/common';
 import { WhatsAppController } from '../whatsapp.controller';
+import { InboundIngestService } from '../webhooks/inbound-ingest.service';
 
 jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => {});
 jest.spyOn(Logger.prototype, 'debug').mockImplementation(() => {});
@@ -51,6 +52,28 @@ function makeRedis() {
   };
 }
 
+/**
+ * A real SendTimingService is not needed, but a real InboundIngestService is:
+ * de-duplication, rate limiting and the enqueue moved there, and wiring the
+ * genuine collaborator keeps these assertions testing the path production
+ * takes rather than a mock's shape.
+ */
+function makeSendTiming() {
+  return {
+    time: jest.fn(
+      (
+        _stage: string,
+        _dir: string,
+        _meta: unknown,
+        fn: () => Promise<unknown>,
+      ) => fn(),
+    ),
+    observe: jest.fn(),
+    recordDelivered: jest.fn().mockResolvedValue(undefined),
+    markSent: jest.fn().mockResolvedValue(undefined),
+  };
+}
+
 function makeReq(overrides: Record<string, unknown> = {}) {
   return {
     headers: { 'x-twilio-signature': 'valid-sig' },
@@ -69,6 +92,7 @@ describe('WhatsAppController', () => {
   let configService: ReturnType<typeof makeConfigService>;
   let redis: ReturnType<typeof makeRedis>;
   let queueService: { addJob: jest.Mock };
+  let sendTiming: ReturnType<typeof makeSendTiming>;
 
   beforeEach(() => {
     whatsAppService = makeWhatsAppService();
@@ -77,12 +101,26 @@ describe('WhatsAppController', () => {
     configService = makeConfigService();
     redis = makeRedis();
     queueService = { addJob: jest.fn().mockResolvedValue(undefined) };
+    sendTiming = makeSendTiming();
+    const ingest = new InboundIngestService(
+      redis as any,
+      queueService as any,
+      sendTiming as any,
+      // Twilio: no read receipts, no typing, no Flows.
+      {
+        name: 'twilio',
+        capabilities: { readReceipts: false, typingIndicator: false },
+        markAsRead: jest.fn(),
+        sendTypingIndicator: jest.fn(),
+      } as any,
+      { handleSubmission: jest.fn().mockResolvedValue(undefined) } as any,
+    );
     controller = new WhatsAppController(
       whatsAppService as any,
       twilioService as any,
       configService as any,
-      queueService as any,
-      redis as any,
+      ingest,
+      { name: 'twilio' } as any,
     );
     // Avoid unused-warning; conversationService isn't injected anymore.
     void conversationService;

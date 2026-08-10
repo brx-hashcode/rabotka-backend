@@ -190,7 +190,7 @@ describe('ApplicationService', () => {
               reliabilityScoreMin: 50,
               employerLateCancelScoreDeduction: 5,
               billingBlockThreshold: 2,
-              maxConcurrentApplications: 3,
+              maxDailyApplications: 10,
               completionScoreReward: 1,
               ratingScoreDeltas: { 1: -4, 2: -2, 3: 0, 4: 1, 5: 3 },
             }),
@@ -489,18 +489,20 @@ describe('ApplicationService', () => {
       );
     });
 
-    it('throws ForbiddenException when worker has reached max concurrent applications', async () => {
-      (prisma.application.count as jest.Mock).mockResolvedValue(3);
+    it('throws ForbiddenException at the daily cap', async () => {
+      // The daily cap is the only gate now. The concurrent-slot cap is gone —
+      // it was the binding one and nothing cleared it on a clock, so a worker
+      // with open applications was blocked until an employer responded.
+      (prisma.application.count as jest.Mock).mockResolvedValue(10);
       await expect(service.create(JOB_OFFER_ID, WORKER_ID)).rejects.toThrow(
         ForbiddenException,
       );
     });
 
-    it('WAITING_PAYMENT applications do NOT count toward the concurrent limit', async () => {
-      // Only PENDING and ACCEPTED count; WAITING_PAYMENT should not block new applications
-      // Simulate: the quota count returns 0 (WAITING_PAYMENT excluded from query)
-      (prisma.application.count as jest.Mock).mockResolvedValue(0);
-      // Should succeed — no ForbiddenException
+    it('does not block a worker who already has open applications', async () => {
+      // Five open applications used to be a hard stop. Now only today's count
+      // matters, and this worker has applied 3 times today against a cap of 10.
+      (prisma.application.count as jest.Mock).mockResolvedValue(3);
       await expect(
         service.create(JOB_OFFER_ID, WORKER_ID),
       ).resolves.toBeDefined();

@@ -12,6 +12,7 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
+import { SkipThrottle } from '@nestjs/throttler';
 import { ConfigService } from '@nestjs/config';
 import type { Request } from 'express';
 import Redis from 'ioredis';
@@ -20,21 +21,18 @@ import { WhatsAppService } from './whatsapp.service';
 import { VerifyWhatsAppDto } from './dto/verify-whatsapp.dto';
 import { TwilioService } from '../../common/services/twilio/twilio.service';
 import { SendTimingInterceptor } from './telemetry/send-timing.interceptor';
-import { QueueService } from '../../common/services/queue/queue.service';
-import { WHATSAPP_INBOUND_QUEUE } from '../../common/services/queue/queue.module';
-import type { WhatsAppInboundJobData } from './whatsapp-inbound.processor';
-import {
-  REDIS_CONNECTION,
-  REDIS_KEY_PREFIX,
-} from '../../common/services/redis/redis.constants';
-
-const MSG_IDEMPOTENCY_TTL = 5 * 60; // 5 minutes
-const RATE_LIMIT_MAX = 30; // max messages per window
-const RATE_LIMIT_WINDOW = 60; // seconds
+import { WHATSAPP_PROVIDER, type WhatsappProvider } from './contracts';
+import { InboundIngestService } from './webhooks/inbound-ingest.service';
+import { normalizeTwilioWebhook } from './webhooks/inbound-normalizer';
 
 @ApiTags('WhatsApp')
 @Controller('whatsapp')
 @Public()
+// The global ThrottlerGuard and the Arcjet fixed window both allow 100 req/min
+// per IP, and a provider's status callbacks share that budget with real inbound
+// traffic — a bulk notification run could exhaust it and turn provider retries
+// into a storm. The meaningful limit is per-phone, inside InboundIngestService.
+@SkipThrottle()
 @UseInterceptors(SendTimingInterceptor)
 export class WhatsAppController {
   private readonly logger = new Logger(WhatsAppController.name);
@@ -43,8 +41,8 @@ export class WhatsAppController {
     private readonly whatsAppService: WhatsAppService,
     private readonly twilioService: TwilioService,
     private readonly configService: ConfigService,
-    private readonly queueService: QueueService,
-    @Inject(REDIS_CONNECTION) private readonly redis: Redis,
+    private readonly ingest: InboundIngestService,
+    @Inject(WHATSAPP_PROVIDER) private readonly provider: WhatsappProvider,
   ) {}
 
   @Get('status')
@@ -77,6 +75,18 @@ export class WhatsAppController {
     @Req() req: Request,
     @Body() body: Record<string, string>,
   ): Promise<void> {
+    // Gated on the ACTIVE provider, not on whether credentials happen to exist.
+    // Twilio credentials stay in the environment after a flip to Cloud — that
+    // is what makes rollback a single variable — so `getAuthToken()` would keep
+    // returning a token and this handler would keep processing real traffic
+    // from a provider we believe is switched off.
+    if (this.provider.name !== 'twilio') {
+      this.logger.warn(
+        `Twilio webhook received while provider is "${this.provider.name}" — dropped`,
+      );
+      return;
+    }
+
     if (!this.twilioService.getAuthToken()) {
       this.logger.warn('TWILIO_AUTH_TOKEN not set; rejecting webhook');
       throw new ForbiddenException('Webhook non configuré');
@@ -87,11 +97,11 @@ export class WhatsAppController {
       throw new ForbiddenException('En-tête X-Twilio-Signature manquant');
     }
 
-    const url = this.buildWebhookUrl(req);
-
+    // Twilio signs the parsed form body plus the exact URL it called, so unlike
+    // Meta's HMAC this cannot be computed from the raw buffer alone.
     const isValid = this.twilioService.validateWebhookSignature(
       signature,
-      url,
+      this.buildWebhookUrl(req),
       body,
     );
     if (!isValid) {
@@ -99,72 +109,13 @@ export class WhatsAppController {
       throw new ForbiddenException('Signature invalide');
     }
 
-    // Ignore Twilio delivery status callbacks — real inbound messages have MessageStatus='received'
-    const deliveryStatuses = [
-      'sent',
-      'delivered',
-      'read',
-      'undelivered',
-      'failed',
-      'queued',
-      'sending',
-    ];
-    if (body.MessageStatus && deliveryStatuses.includes(body.MessageStatus)) {
-      return;
-    }
-
-    const from = body.From ?? '';
-    // Quick-reply button taps arrive as ButtonPayload (the button id we set,
-    // e.g. "1"/"2") and ButtonText (its title). Prefer the payload so replies
-    // route into the existing numeric-token bot flows; fall back to free text.
-    const text = body.ButtonPayload || body.ButtonText || body.Body || '';
-    const messageSid = body.MessageSid ?? '';
-
-    if (!from) {
+    if (!body.MessageStatus && !body.From) {
       throw new BadRequestException("Champ 'From' manquant");
     }
 
-    if (messageSid) {
-      const idempotencyKey = `${REDIS_KEY_PREFIX}wa:msg:${messageSid}`;
-      const already = await this.redis.set(
-        idempotencyKey,
-        '1',
-        'EX',
-        MSG_IDEMPOTENCY_TTL,
-        'NX',
-      );
-      if (already === null) {
-        this.logger.debug(`Duplicate webhook ignored: ${messageSid}`);
-        return;
-      }
-    }
-
-    const phone = from.startsWith('whatsapp:')
-      ? from.slice('whatsapp:'.length)
-      : from;
-
-    this.logger.log(
-      `Incoming WhatsApp from ${phone}: "${text.slice(0, 80)}${text.length > 80 ? '...' : ''}"`,
-    );
-
-    // Per-phone rate limiting — atomic INCR + EXPIRE NX avoids permanent lock on crash
-    const rateLimitKey = `${REDIS_KEY_PREFIX}wa:rate:${phone}`;
-    const [[, count]] = (await this.redis
-      .pipeline()
-      .incr(rateLimitKey)
-      .expire(rateLimitKey, RATE_LIMIT_WINDOW, 'NX')
-      .exec()) as [[null, number], [null, number]];
-    if (count > RATE_LIMIT_MAX) {
-      this.logger.warn(`Rate limit exceeded for ${phone}: ${count} msgs/min`);
-      return;
-    }
-
-    // Enqueue for background processing — the webhook must return fast (<5s)
-    // or Twilio will retry, multiplying load.
-    await this.queueService.addJob<WhatsAppInboundJobData>(
-      WHATSAPP_INBOUND_QUEUE,
-      { phone, text, messageSid: messageSid || undefined },
-    );
+    // Normalization, de-duplication, rate limiting and the enqueue are shared
+    // with the Cloud webhook so the two cannot drift.
+    await this.ingest.ingest(normalizeTwilioWebhook(body));
   }
 
   private buildWebhookUrl(req: Request): string {

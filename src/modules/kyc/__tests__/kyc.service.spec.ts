@@ -3,7 +3,6 @@ import { NotFoundException } from '@nestjs/common';
 import { KycService } from '../kyc.service';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { WhatsAppService } from '../../whatsapp/whatsapp.service';
-import { WHATSAPP_TEMPLATES } from '../../../common/constants/whatsapp-templates';
 
 const mockPrisma = {
   profile: {
@@ -46,8 +45,8 @@ describe('KycService', () => {
 
       expect(mockWhatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         mockProfile.phone,
-        WHATSAPP_TEMPLATES.kyc.contentSid,
-        { '1': 'Alice Smith' },
+        'kyc',
+        'Alice Smith',
         mockProfile.id,
       );
     });
