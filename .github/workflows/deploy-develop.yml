@@ -13,6 +13,17 @@ on:
       - closed
   workflow_dispatch:
 
+# One deploy at a time. Three PRs merged seconds apart raced each other on the
+# VPS: concurrent `git fetch` in the same checkout failed with "cannot lock ref
+# 'refs/remotes/origin/develop'" and two of the three deploys died.
+#
+# Queue rather than cancel — killing a run mid `docker compose up` can leave the
+# VPS on a half-swapped container. GitHub keeps only the newest pending run, so
+# a burst of merges converges on the latest commit instead of replaying each.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
 jobs:
   # ───────────────────────────────────────────────────────────────────────────
   # JOB 1: Run test suite
