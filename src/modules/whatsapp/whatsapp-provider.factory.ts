@@ -11,6 +11,7 @@ import {
 } from '../../common/constants/whatsapp-templates';
 import { parseWhatsappConfig } from './whatsapp.config';
 import { TwilioProvider } from './providers/twilio/twilio.provider';
+import { CloudProvider } from './providers/cloud/cloud.provider';
 
 /**
  * Resolves the active provider once, at boot, from validated config.
@@ -30,13 +31,13 @@ export function createWhatsappProvider(
   assertTemplateBindings(resolved.provider, logger);
 
   if (resolved.provider === 'cloud') {
-    // Replaced by CloudProvider in the commit that adds it. Failing here rather
-    // than silently falling back to Twilio: a deploy that asked for `cloud` and
-    // quietly kept sending through Twilio is the worst of both outcomes.
-    throw new Error(
-      'WHATSAPP_PROVIDER=cloud is not available in this build yet. ' +
-        'Set WHATSAPP_PROVIDER=twilio.',
+    const cloud = new CloudProvider(resolved);
+    // Phone number id and API version only — never the token, not even
+    // truncated. The WABA id is equally not needed to diagnose a send.
+    logger.log(
+      `WhatsApp provider: cloud (api=${resolved.apiVersion}, phoneNumberId=${resolved.phoneNumberId})`,
     );
+    return cloud;
   }
 
   logger.log(

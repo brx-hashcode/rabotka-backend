@@ -37,12 +37,20 @@ export type WhatsappErrorCode =
   | 'SENDER_IS_RECIPIENT'
   /** Media rejected: unsupported type, too large, or the URL was unreachable. */
   | 'MEDIA_ERROR'
+  /**
+   * The request never reached a verdict — timeout, DNS or socket failure. Kept
+   * distinct from RATE_LIMITED so a network problem is not read as throttling
+   * in logs and dashboards, and from UNKNOWN so it backs off properly instead
+   * of retrying once.
+   */
+  | 'TRANSPORT_ERROR'
   /** Nothing matched. Retried once, then surfaced with the raw payload attached. */
   | 'UNKNOWN';
 
 /** Codes where retrying the identical request can plausibly succeed. */
 const RETRYABLE: ReadonlySet<WhatsappErrorCode> = new Set<WhatsappErrorCode>([
   'RATE_LIMITED',
+  'TRANSPORT_ERROR',
   'UNKNOWN',
 ]);
 
