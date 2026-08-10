@@ -2,6 +2,7 @@ import { Injectable, Logger, forwardRef, Inject } from '@nestjs/common';
 import { jobLocationLabel } from '../../../common/utils/job-location.util';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { WhatsAppService } from '../../whatsapp/whatsapp.service';
+import { WhatsAppFeedbackService } from '../../whatsapp/feedback/whatsapp-feedback.service';
 import { BotStateService } from './bot-state.service';
 import { BotInboxService } from './bot-inbox.service';
 import { FLOW_IDS } from '../bot.constants';
@@ -25,6 +26,8 @@ export class BotNotificationService {
     private readonly contactUnlock: ContactUnlockService,
     private readonly systemConfig: SystemConfigService,
     private readonly walletService: WalletService,
+    @Inject(forwardRef(() => WhatsAppFeedbackService))
+    private readonly feedback: WhatsAppFeedbackService,
   ) {}
 
   /**
@@ -228,6 +231,22 @@ export class BotNotificationService {
             email: employer.email,
           },
         );
+      }
+
+      // The unlock is the moment the product either delivered or did not, so it
+      // is the honest place to ask. Fire-and-forget and after the contact
+      // details: a survey must never delay or displace the thing the user paid
+      // for. Degrades to a link to the web form outside the 24h window or on a
+      // provider without Flows.
+      if (employer?.phone && attempt.employer_id !== skipId) {
+        void this.feedback
+          .requestFeedback(employer.phone, attempt.employer_id)
+          .catch(() => undefined);
+      }
+      if (worker?.phone && attempt.worker_id !== skipId) {
+        void this.feedback
+          .requestFeedback(worker.phone, attempt.worker_id)
+          .catch(() => undefined);
       }
     } catch (err) {
       this.logger.warn(

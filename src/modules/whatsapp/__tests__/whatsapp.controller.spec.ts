@@ -106,6 +106,14 @@ describe('WhatsAppController', () => {
       redis as any,
       queueService as any,
       sendTiming as any,
+      // Twilio: no read receipts, no typing, no Flows.
+      {
+        name: 'twilio',
+        capabilities: { readReceipts: false, typingIndicator: false },
+        markAsRead: jest.fn(),
+        sendTypingIndicator: jest.fn(),
+      } as any,
+      { handleSubmission: jest.fn().mockResolvedValue(undefined) } as any,
     );
     controller = new WhatsAppController(
       whatsAppService as any,
