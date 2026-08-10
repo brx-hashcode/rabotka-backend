@@ -220,6 +220,26 @@ export class WhatsAppService {
   }
 
   /**
+   * Show the composer bubble against an inbound message.
+   *
+   * Best-effort and never throws: it is a courtesy, and a failure here must not
+   * cost the reader the message it was announcing. No-ops on a provider without
+   * typing support, so callers need not branch.
+   */
+  async showTyping(providerMessageId: string): Promise<void> {
+    if (!providerMessageId || !this.provider.capabilities.typingIndicator) {
+      return;
+    }
+    try {
+      await this.provider.sendTypingIndicator(providerMessageId);
+    } catch (err) {
+      this.logger.debug(
+        `Typing indicator for ${providerMessageId} failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  /**
    * Is the profile inside WhatsApp's 24h customer-service window?
    *
    * Free-form text is only accepted while the profile has messaged us in the

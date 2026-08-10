@@ -28,7 +28,21 @@ function makeRedis(
   };
 }
 
-function makeDeps(redisOverrides = {}) {
+function makeProvider(
+  caps: { readReceipts?: boolean; typingIndicator?: boolean } = {},
+) {
+  return {
+    name: 'cloud',
+    capabilities: {
+      readReceipts: caps.readReceipts ?? true,
+      typingIndicator: caps.typingIndicator ?? true,
+    },
+    markAsRead: jest.fn().mockResolvedValue(undefined),
+    sendTypingIndicator: jest.fn().mockResolvedValue(undefined),
+  };
+}
+
+function makeDeps(redisOverrides = {}, provider = makeProvider()) {
   const redis = makeRedis(redisOverrides);
   const queueService = { addJob: jest.fn().mockResolvedValue(undefined) };
   const sendTiming = {
@@ -42,8 +56,9 @@ function makeDeps(redisOverrides = {}) {
     redis as never,
     queueService as never,
     sendTiming as never,
+    provider as never,
   );
-  return { service, redis, queueService, sendTiming };
+  return { service, redis, queueService, sendTiming, provider };
 }
 
 const message = (
@@ -150,6 +165,64 @@ describe('InboundIngestService', () => {
       ]),
     ).resolves.toBeUndefined();
     expect(queueService.addJob).toHaveBeenCalledTimes(2);
+  });
+
+  describe('acknowledging the reader', () => {
+    it('marks read and shows typing on an inbound message', async () => {
+      const { service, provider } = makeDeps();
+      await service.ingest([message()]);
+      expect(provider.markAsRead).toHaveBeenCalledWith('wamid.1');
+      expect(provider.sendTypingIndicator).toHaveBeenCalledWith('wamid.1');
+    });
+
+    it('does not acknowledge a duplicate', async () => {
+      // The reader already saw the ticks the first time; re-acknowledging is a
+      // wasted call on every provider retry.
+      const { service, provider } = makeDeps({ setResult: null });
+      await service.ingest([message()]);
+      expect(provider.markAsRead).not.toHaveBeenCalled();
+    });
+
+    it('does not acknowledge past the rate limit', async () => {
+      const { service, provider } = makeDeps({ count: 31 });
+      await service.ingest([message()]);
+      expect(provider.markAsRead).not.toHaveBeenCalled();
+    });
+
+    it('skips what the provider cannot do', async () => {
+      // Twilio has neither. The calls no-op there anyway, but asking first
+      // keeps the intent visible rather than relying on that.
+      const { service, provider } = makeDeps(
+        {},
+        makeProvider({ readReceipts: false, typingIndicator: false }),
+      );
+      await service.ingest([message()]);
+      expect(provider.markAsRead).not.toHaveBeenCalled();
+      expect(provider.sendTypingIndicator).not.toHaveBeenCalled();
+    });
+
+    it('still delivers the message when acknowledging fails', async () => {
+      // A courtesy must never cost the reader the reply it was announcing.
+      const provider = makeProvider();
+      provider.markAsRead.mockRejectedValue(new Error('stale wamid'));
+      const { service, queueService } = makeDeps({}, provider);
+      await expect(service.ingest([message()])).resolves.toBeUndefined();
+      expect(queueService.addJob).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not acknowledge a status event', async () => {
+      const { service, provider } = makeDeps();
+      await service.ingest([
+        {
+          kind: 'status',
+          providerMessageId: 'wamid.9',
+          status: 'delivered',
+          timestamp: new Date(),
+          provider: 'cloud',
+        },
+      ]);
+      expect(provider.markAsRead).not.toHaveBeenCalled();
+    });
   });
 
   it('routes an interactive reply to the bot as its id', async () => {

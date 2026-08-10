@@ -18,6 +18,7 @@ const mockWhatsApp = {
   sendMediaMessage: jest.fn().mockResolvedValue('SM-sid-456'),
   sendTemplateMessage: jest.fn().mockResolvedValue('SM-sid-789'),
   sendTemplateMessageWithVariables: jest.fn().mockResolvedValue('SM-sid-789'),
+  showTyping: jest.fn().mockResolvedValue(undefined),
   saveMessage: jest.fn().mockResolvedValue(undefined),
 };
 
@@ -78,6 +79,41 @@ describe('WhatsAppOutboundProcessor', () => {
       'Hello',
       'p1',
     );
+  });
+
+  it('re-shows typing between the messages of a sequence, but not before the first', async () => {
+    // Sending clears the composer bubble, so a three-message reply would show
+    // it once and then go quiet. The webhook already showed it before the
+    // first, which is why index 0 is skipped.
+    await processor.process({
+      data: {
+        type: 'sequence',
+        phone: '+242001',
+        replyToMessageId: 'wamid.inbound',
+        messages: [
+          { type: 'text', text: 'un' },
+          { type: 'text', text: 'deux' },
+          { type: 'text', text: 'trois' },
+        ],
+      },
+    });
+    expect(mockWhatsApp.showTyping).toHaveBeenCalledTimes(2);
+    expect(mockWhatsApp.showTyping).toHaveBeenCalledWith('wamid.inbound');
+  });
+
+  it('shows no typing for a sequence with nothing to reply to', async () => {
+    // A notification nobody asked for has no inbound message to attach to.
+    await processor.process({
+      data: {
+        type: 'sequence',
+        phone: '+242001',
+        messages: [
+          { type: 'text', text: 'un' },
+          { type: 'text', text: 'deux' },
+        ],
+      },
+    });
+    expect(mockWhatsApp.showTyping).not.toHaveBeenCalled();
   });
 
   it('process sends a sequence in array order', async () => {

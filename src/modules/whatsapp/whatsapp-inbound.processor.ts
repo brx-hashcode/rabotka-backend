@@ -47,7 +47,7 @@ export class WhatsAppInboundProcessor implements OnApplicationBootstrap {
     id?: string;
     data: WhatsAppInboundJobData;
   }): Promise<void> {
-    const { phone, text } = job.data;
+    const { phone, text, messageSid } = job.data;
     const result = await this.conversationService.handleIncomingMessage(
       phone,
       text,
@@ -64,7 +64,7 @@ export class WhatsAppInboundProcessor implements OnApplicationBootstrap {
       await this.sendTiming.time('enqueue', 'outbound', { to: phone }, () =>
         this.queueService.addJob<WhatsAppOutboundJobData>(
           WHATSAPP_OUTBOUND_QUEUE,
-          jobs[0],
+          { ...jobs[0], replyToMessageId: messageSid },
         ),
       );
     } else if (jobs.length > 1) {
@@ -78,6 +78,7 @@ export class WhatsAppInboundProcessor implements OnApplicationBootstrap {
           {
             phone,
             profileId: result.profileId ?? undefined,
+            replyToMessageId: messageSid,
             type: 'sequence',
             messages: jobs.map(toSend),
           },
