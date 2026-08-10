@@ -14,6 +14,7 @@ import {
   type WhatsappProvider,
 } from '../contracts';
 import { toBotInput } from './inbound-normalizer';
+import { WhatsAppFeedbackService } from '../feedback/whatsapp-feedback.service';
 
 const MSG_IDEMPOTENCY_TTL = 5 * 60; // 5 minutes
 const RATE_LIMIT_MAX = 30; // max messages per window
@@ -39,6 +40,7 @@ export class InboundIngestService {
     private readonly queueService: QueueService,
     private readonly sendTiming: SendTimingService,
     @Inject(WHATSAPP_PROVIDER) private readonly provider: WhatsappProvider,
+    private readonly feedback: WhatsAppFeedbackService,
   ) {}
 
   /**
@@ -82,6 +84,20 @@ export class InboundIngestService {
   private async handleMessage(
     event: Extract<InboundEvent, { kind: 'message' }>,
   ): Promise<void> {
+    // A submitted Flow is a form, not something the bot should answer. Handled
+    // here rather than through the queue: it writes one row and produces no
+    // reply, so the round trip would buy nothing.
+    if (event.content.type === 'flow_reply') {
+      if (
+        event.providerMessageId &&
+        !(await this.claim(event.providerMessageId))
+      ) {
+        return;
+      }
+      await this.feedback.handleSubmission(event);
+      return;
+    }
+
     const text = toBotInput(event);
     if (text === null) return;
 

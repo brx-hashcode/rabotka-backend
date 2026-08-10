@@ -204,6 +204,50 @@ export class WhatsAppService {
     return sent;
   }
 
+  /**
+   * Send a WhatsApp Flow — a native in-chat form.
+   *
+   * `flowToken` is echoed back verbatim on submission and is the only thing
+   * correlating an answer to the person who was asked, so callers must make it
+   * meaningful rather than random.
+   */
+  async sendFeedbackFlow(
+    phone: string,
+    params: {
+      flowId: string;
+      flowToken: string;
+      body: string;
+      cta: string;
+      profileId?: string;
+    },
+  ): Promise<boolean> {
+    const sid = await this.attempt('flow', phone, () =>
+      this.provider.sendFlow(phone, {
+        body: params.body,
+        flowId: params.flowId,
+        flowCta: params.cta,
+        flowToken: params.flowToken,
+        screen: 'FEEDBACK',
+      }),
+    );
+    const sent = sid != null;
+
+    if (sent && params.profileId) {
+      await this.saveMessage(
+        params.profileId,
+        MessageDirection.OUTBOUND,
+        params.body,
+      ).catch((err) =>
+        this.logger.warn(
+          `Failed to save outbound flow message for ${params.profileId}:`,
+          err,
+        ),
+      );
+    }
+
+    return sent;
+  }
+
   async sendMediaMessage(
     phone: string,
     mediaUrl: string,

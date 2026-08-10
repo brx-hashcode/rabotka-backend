@@ -49,6 +49,18 @@ export type InboundContent =
   | { type: 'reaction'; emoji: string; targetMessageId: string }
   | {
       /**
+       * A submitted WhatsApp Flow — a native in-chat form.
+       *
+       * `answers` is the parsed `response_json`; `flowToken` is what we set
+       * when sending, and the only correlation back to who was asked, since
+       * the submission carries no application or profile of its own.
+       */
+      type: 'flow_reply';
+      flowToken?: string;
+      answers: Record<string, unknown>;
+    }
+  | {
+      /**
        * Received but not modelled — stickers, contacts, orders, system
        * notifications. Carried through rather than dropped so the bot can
        * answer something rather than appearing to ignore the user.

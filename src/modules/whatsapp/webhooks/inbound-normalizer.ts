@@ -32,6 +32,23 @@ function toCloudContent(message: CloudInboundMessage): InboundContent {
       return { type: 'text', text: message.text?.body ?? '' };
 
     case 'interactive': {
+      // A submitted Flow. Handled before the reply-button case because it is
+      // the same `interactive` envelope with a completely different payload.
+      const flow = message.interactive?.nfm_reply;
+      if (flow) {
+        const answers = parseFlowAnswers(flow.response_json);
+        return {
+          type: 'flow_reply',
+          // Set by us at send time and echoed back untouched. Nothing else in
+          // the submission says who was asked.
+          flowToken:
+            typeof answers.flow_token === 'string'
+              ? answers.flow_token
+              : undefined,
+          answers,
+        };
+      }
+
       // A tap on a reply button or a list row. Both carry an id we chose when
       // sending, and the bot flows route on that id — the title is for logs.
       const reply =
@@ -107,6 +124,24 @@ function toCloudContent(message: CloudInboundMessage): InboundContent {
       // rather than dropped so the bot can answer something instead of
       // appearing to ignore the user.
       return { type: 'unsupported', rawType: message.type };
+  }
+}
+
+/**
+ * The Flow's answers, which arrive as a JSON STRING inside the reply.
+ *
+ * Double-encoded, and quietly: treating `response_json` as an object yields
+ * "[object Object]" rather than an error. Returns `{}` on anything unparseable
+ * — a malformed submission should lose its answers, not the webhook.
+ */
+function parseFlowAnswers(responseJson: string): Record<string, unknown> {
+  try {
+    const parsed: unknown = JSON.parse(responseJson);
+    return typeof parsed === 'object' && parsed !== null
+      ? (parsed as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
   }
 }
 
@@ -279,6 +314,10 @@ export function toBotInput(event: InboundEvent): string | null {
       return content.text;
     case 'interactive_reply':
       return content.replyId;
+    case 'flow_reply':
+      // Handled by the feedback path, not the bot graph — there is no text for
+      // a flow submission and answering it with a bot reply would be noise.
+      return null;
     case 'image':
     case 'video':
     case 'document':

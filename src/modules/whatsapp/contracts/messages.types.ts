@@ -112,6 +112,12 @@ export interface FlowPayload {
   footer?: string;
   flowId: string;
   flowCta: string;
+  /**
+   * Echoed back on submission, and the only correlation between an answer and
+   * the person who was asked — the reply carries neither a profile nor the
+   * sender's number.
+   */
+  flowToken?: string;
   /** Screen the flow opens on, plus whatever data it needs to render. */
   screen: string;
   data?: Record<string, string | number | boolean>;

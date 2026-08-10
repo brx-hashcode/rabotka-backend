@@ -108,6 +108,12 @@ export interface CloudInteractivePayload {
           name: 'flow';
           parameters: {
             flow_message_version: '3';
+            /**
+             * Echoed back verbatim on submission. A sibling of `flow_id`, NOT
+             * part of `flow_action_payload.data` — Meta accepts the message
+             * either way and only returns the token when it is here.
+             */
+            flow_token?: string;
             flow_id: string;
             flow_cta: string;
             flow_action: 'navigate';
@@ -212,9 +218,18 @@ export interface CloudInboundMedia {
 }
 
 export interface CloudInboundInteractive {
-  type: 'button_reply' | 'list_reply';
+  type: 'button_reply' | 'list_reply' | 'nfm_reply';
   button_reply?: { id: string; title: string };
   list_reply?: { id: string; title: string; description?: string };
+  /**
+   * A submitted Flow ("Native Flow Message" reply).
+   *
+   * `response_json` is a JSON STRING, not an object — the answers arrive
+   * double-encoded, which is easy to miss and yields `[object Object]` if you
+   * treat it as parsed. It also carries `flow_token`, echoed back from the
+   * send, which is the only thing tying a submission to who was asked.
+   */
+  nfm_reply?: { name: string; body?: string; response_json: string };
 }
 
 export interface CloudInboundMessage {
