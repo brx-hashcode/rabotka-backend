@@ -328,4 +328,32 @@ describe('duplicate webhook delivery', () => {
       .expect(403);
     expect(inboundJobs).toHaveLength(0);
   });
+
+  it('delivers on retry when handling threw the first time', async () => {
+    // The acceptance criterion the original work never actually tested. A
+    // failure after the claim used to be indistinguishable from a duplicate,
+    // so BullMQ's retry dropped the message and the reader got nothing.
+    seenJobIds.clear();
+
+    const bot = app.get(ConversationService) as unknown as {
+      handleIncomingMessage: jest.Mock;
+    };
+    bot.handleIncomingMessage
+      .mockRejectedValueOnce(new Error('db down'))
+      .mockResolvedValueOnce({ replies: ['Bienvenue !'], profileId: 'p-1' });
+
+    await post('wamid.retry').expect(200);
+    const [job] = inboundJobs;
+
+    // Attempt 1 throws, so BullMQ would retry.
+    await expect(processor.process({ data: job, attemptsMade: 0 })).rejects.toThrow(
+      'db down',
+    );
+    expect(outboundJobs).toHaveLength(0);
+
+    // Attempt 2 must deliver, not treat the failure as a duplicate.
+    await processor.process({ data: job, attemptsMade: 1 });
+
+    expect(outboundJobs).toHaveLength(1);
+  });
 });
