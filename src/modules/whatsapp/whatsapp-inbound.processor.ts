@@ -7,7 +7,9 @@ import {
 import {
   IdempotencyService,
   INBOUND_TTL_SECONDS,
+  IN_FLIGHT_TTL_SECONDS,
   inboundKey,
+  inFlightKey,
 } from '../../common/services/idempotency/idempotency.service';
 import { webhookDuplicateDroppedCounter } from './telemetry/metrics';
 import {
@@ -65,26 +67,64 @@ export class WhatsAppInboundProcessor implements OnApplicationBootstrap {
         `attempt=${job.attemptsMade} correlationId=${correlationId ?? 'none'}`,
     );
 
-    // The claim lives HERE, not in the controller, because this is the only
-    // point that sees every path to handling: a Meta replay, a BullMQ retry
-    // after a throw, and a stalled-job re-run all arrive through this worker.
-    // Claiming at the webhook would miss the latter two entirely.
+    // Dedup lives HERE, not in the controller, because this is the only point
+    // that sees every path to handling: a Meta replay, a BullMQ retry after a
+    // throw, and a stalled-job re-run all arrive through this worker.
     //
-    // Returning rather than throwing is the whole point: a throw would be
-    // retried by BullMQ, which is the behaviour being suppressed.
+    // TWO keys, not one. The first version used a single key claimed before
+    // handling, which meant anything that threw afterwards left it set — the
+    // retry read it as a duplicate and dropped the message for seven days.
+    //
+    //   done  written only after the work succeeds; survives 7 days
+    //   lock  held for the duration of one attempt; released in `finally`
+    //
+    // Returning rather than throwing on a duplicate is deliberate: a throw
+    // would be retried by BullMQ, which is the behaviour being suppressed.
     if (messageSid) {
-      const claimed = await this.idempotency.claim(
-        inboundKey(messageSid),
-        INBOUND_TTL_SECONDS,
-      );
-      if (!claimed) {
+      if (await this.idempotency.has(inboundKey(messageSid))) {
         webhookDuplicateDroppedCounter.inc({ provider: provider ?? 'unknown' });
         this.logger.debug(
-          `Duplicate inbound dropped: wamid=${messageSid} attempt=${job.attemptsMade}`,
+          `Already handled, dropping: wamid=${messageSid} attempt=${job.attemptsMade}`,
+        );
+        return;
+      }
+
+      const gotLock = await this.idempotency.claim(
+        inFlightKey(messageSid),
+        IN_FLIGHT_TTL_SECONDS,
+      );
+      if (!gotLock) {
+        // Another attempt is mid-flight. Returning rather than throwing lets it
+        // finish; if it fails, it releases the lock and BullMQ's next attempt
+        // picks the message up.
+        this.logger.debug(
+          `Already in flight, deferring: wamid=${messageSid} attempt=${job.attemptsMade}`,
         );
         return;
       }
     }
+
+    try {
+      await this.handle(job.data, messageSid);
+    } finally {
+      // The `finally` is the mechanism; the lock's TTL is only a backstop for a
+      // worker that died before reaching this line.
+      if (messageSid) await this.idempotency.release(inFlightKey(messageSid));
+    }
+  }
+
+  /**
+   * The actual work. Split out so the caller can wrap it in the in-flight lock
+   * without the happy path being buried in bookkeeping.
+   *
+   * Marks the message done only once a reply is enqueued — anything that throws
+   * before that point leaves no marker, so the retry does the work again.
+   */
+  private async handle(
+    data: WhatsAppInboundJobData,
+    messageSid: string | undefined,
+  ): Promise<void> {
+    const { phone, text } = data;
 
     const result = await this.conversationService.handleIncomingMessage(
       phone,
@@ -122,6 +162,17 @@ export class WhatsAppInboundProcessor implements OnApplicationBootstrap {
           },
         ),
       );
+    }
+
+    // Last line on purpose. Everything above can throw — the bot graph, the
+    // enqueue — and until this runs there is no marker, so a BullMQ retry does
+    // the work again instead of mistaking the failure for a duplicate.
+    //
+    // A message that legitimately produces no reply still counts as handled:
+    // re-running it would produce no reply again, and leaving it unmarked lets
+    // a provider replay re-enter the bot graph days later.
+    if (messageSid) {
+      await this.idempotency.claim(inboundKey(messageSid), INBOUND_TTL_SECONDS);
     }
   }
 }

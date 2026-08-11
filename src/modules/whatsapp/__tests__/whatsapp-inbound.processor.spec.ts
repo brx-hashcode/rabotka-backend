@@ -25,10 +25,21 @@ const mockSendTiming = {
   ),
 };
 
+const redisStore = new Set<string>();
 const mockIdempotency = {
-  claim: jest.fn().mockResolvedValue(true),
-  release: jest.fn().mockResolvedValue(undefined),
+  claim: jest.fn((key: string) => {
+    if (redisStore.has(key)) return Promise.resolve(false);
+    redisStore.add(key);
+    return Promise.resolve(true);
+  }),
+  has: jest.fn((key: string) => Promise.resolve(redisStore.has(key))),
+  release: jest.fn((key: string) => {
+    redisStore.delete(key);
+    return Promise.resolve();
+  }),
 };
+
+const DONE = (id: string) => expect.stringContaining(`wa:in:done:${id}`);
 
 function makeProcessor() {
   return new WhatsAppInboundProcessor(
@@ -42,7 +53,7 @@ function makeProcessor() {
 describe('WhatsAppInboundProcessor', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    mockIdempotency.claim.mockResolvedValue(true);
+    redisStore.clear();
   });
 
   describe('onApplicationBootstrap()', () => {
@@ -229,15 +240,14 @@ describe('WhatsAppInboundProcessor', () => {
         attemptsMade: 0,
       });
 
-      expect(mockIdempotency.claim).toHaveBeenCalledWith(
-        expect.stringContaining('wa:in:wamid.1'),
-        604800, // 7 days — Meta's full retry window
-      );
+      // The marker is written AFTER handling, with Meta's full retry window.
       expect(mockConversationService.handleIncomingMessage).toHaveBeenCalled();
+      expect(mockIdempotency.claim).toHaveBeenCalledWith(DONE('wamid.1'), 604800);
     });
 
     it('drops a message whose id is already claimed, without sending', async () => {
-      mockIdempotency.claim.mockResolvedValue(false);
+      // Already handled: the done marker is present.
+      redisStore.add(`rabotka:dev:wa:in:done:wamid.1`);
 
       const processor = makeProcessor();
       await processor.process({
@@ -255,7 +265,7 @@ describe('WhatsAppInboundProcessor', () => {
       // A throw would be retried by BullMQ, which is the behaviour being
       // suppressed — the retry would find the claim taken and throw again,
       // burning all three attempts before landing in the DLQ.
-      mockIdempotency.claim.mockResolvedValue(false);
+      redisStore.add(`rabotka:dev:wa:in:done:wamid.1`);
 
       const processor = makeProcessor();
       await expect(
@@ -266,10 +276,10 @@ describe('WhatsAppInboundProcessor', () => {
       ).resolves.toBeUndefined();
     });
 
-    it('catches a BullMQ retry of a job that already sent', async () => {
-      // The reason the claim lives in the worker and not the webhook. A first
-      // attempt handled the message and then something later in the job threw;
-      // BullMQ re-runs it, and only a claim at this level sees that.
+    it('catches a BullMQ retry of a job that already succeeded', async () => {
+      // A first attempt handled the message; BullMQ re-runs the job anyway
+      // (a stalled-job re-run, or a throw somewhere after the reply). Only a
+      // marker at this level sees that the work is already done.
       mockConversationService.handleIncomingMessage.mockResolvedValue({
         replies: ['Bonjour !'],
         profileId: 'p-1',
@@ -283,7 +293,6 @@ describe('WhatsAppInboundProcessor', () => {
       await processor.process(job);
       expect(mockQueueService.addJob).toHaveBeenCalledTimes(1);
 
-      mockIdempotency.claim.mockResolvedValue(false); // claim now held
       await processor.process({ ...job, attemptsMade: 1 });
 
       expect(mockQueueService.addJob).toHaveBeenCalledTimes(1);
@@ -305,6 +314,90 @@ describe('WhatsAppInboundProcessor', () => {
 
       expect(mockIdempotency.claim).not.toHaveBeenCalled();
       expect(mockConversationService.handleIncomingMessage).toHaveBeenCalled();
+    });
+  });
+
+  describe('a failure must not look like a duplicate', () => {
+    // The bug this covers: the marker was written BEFORE handling, so anything
+    // that threw afterwards left it set and the BullMQ retry read it as a
+    // duplicate and dropped the message for seven days. The reader got nothing.
+
+    const job = (attemptsMade = 0) => ({
+      data: { phone: '+242001', text: 'Hello', messageSid: 'wamid.boom' },
+      attemptsMade,
+    });
+
+    it('retries the message when the bot graph throws', async () => {
+      mockConversationService.handleIncomingMessage
+        .mockRejectedValueOnce(new Error('db down'))
+        .mockResolvedValueOnce({ replies: ['Bonjour !'], profileId: 'p-1' });
+
+      const processor = makeProcessor();
+
+      // Attempt 1 fails and the error escapes, so BullMQ will retry.
+      await expect(processor.process(job(0))).rejects.toThrow('db down');
+      expect(mockQueueService.addJob).not.toHaveBeenCalled();
+
+      // Attempt 2 must actually do the work, not treat it as already handled.
+      await processor.process(job(1));
+      expect(mockConversationService.handleIncomingMessage).toHaveBeenCalledTimes(2);
+      expect(mockQueueService.addJob).toHaveBeenCalledTimes(1);
+    });
+
+    it('leaves no done marker behind when handling throws', async () => {
+      mockConversationService.handleIncomingMessage.mockRejectedValue(
+        new Error('db down'),
+      );
+      const processor = makeProcessor();
+
+      await expect(processor.process(job(0))).rejects.toThrow('db down');
+
+      expect(await mockIdempotency.has(`rabotka:dev:wa:in:done:wamid.boom`)).toBe(
+        false,
+      );
+    });
+
+    it('releases the in-flight lock even when handling throws', async () => {
+      // Released in a `finally`, so the TTL is only a backstop for a worker
+      // that died. Without this the retry would defer to a flight that ended.
+      mockConversationService.handleIncomingMessage.mockRejectedValue(
+        new Error('db down'),
+      );
+      const processor = makeProcessor();
+
+      await expect(processor.process(job(0))).rejects.toThrow('db down');
+
+      expect(await mockIdempotency.has(`rabotka:dev:wa:in:lock:wamid.boom`)).toBe(
+        false,
+      );
+    });
+
+    it('retries when the outbound enqueue throws', async () => {
+      // Not just the bot graph — everything before the marker is written.
+      mockConversationService.handleIncomingMessage.mockResolvedValue({
+        replies: ['Bonjour !'],
+        profileId: 'p-1',
+      });
+      mockQueueService.addJob
+        .mockRejectedValueOnce(new Error('redis down'))
+        .mockResolvedValueOnce(undefined);
+
+      const processor = makeProcessor();
+      await expect(processor.process(job(0))).rejects.toThrow('redis down');
+
+      await processor.process(job(1));
+      expect(mockQueueService.addJob).toHaveBeenCalledTimes(2);
+    });
+
+    it('defers while another attempt holds the lock', async () => {
+      redisStore.add(`rabotka:dev:wa:in:lock:wamid.boom`);
+      const processor = makeProcessor();
+
+      await expect(processor.process(job(1))).resolves.toBeUndefined();
+
+      expect(
+        mockConversationService.handleIncomingMessage,
+      ).not.toHaveBeenCalled();
     });
   });
 });
