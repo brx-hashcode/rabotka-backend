@@ -322,7 +322,41 @@ export function toBotInput(event: InboundEvent): string | null {
     case 'video':
     case 'document':
       return content.caption ?? '';
+    case 'reaction':
+      // An emoji on an earlier message is not something to answer. This branch
+      // used to fall through to `''`, and `''` is not `null`, so the bot
+      // answered it — an unregistered number got the whole welcome card for
+      // tapping a thumbs-up, with no message sent.
+      return null;
+    case 'unsupported':
+      // Split by what the raw type actually is. A sticker or a contact card IS
+      // a person trying to say something, and answering "I did not understand"
+      // beats silence. A system notification is WhatsApp talking to us about
+      // the account — nobody typed it, and replying to one produces an
+      // unprompted message the reader never asked for.
+      return SILENT_RAW_TYPES.has(content.rawType) ? null : '';
     default:
+      // Audio and location: deliberate messages with no text to extract, so
+      // the bot answers rather than ignoring them.
       return '';
   }
 }
+
+/**
+ * Inbound `messages` entries that no human composed.
+ *
+ * WhatsApp delivers these on the same webhook as real messages, so without
+ * this they reach the bot graph as empty input and get answered.
+ */
+const SILENT_RAW_TYPES = new Set([
+  // Number changed, security-code changed, group notices.
+  'system',
+  // Commerce events, not conversation.
+  'order',
+  // Sent when a chat is opened, before the person has said anything.
+  'request_welcome',
+  // Disappearing-message notices.
+  'ephemeral',
+  // Meta's own catch-all for a type it declined to describe.
+  'unknown',
+]);
