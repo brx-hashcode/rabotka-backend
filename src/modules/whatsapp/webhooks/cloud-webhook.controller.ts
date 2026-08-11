@@ -134,10 +134,31 @@ export class CloudWebhookController {
       throw new ForbiddenException('Invalid signature');
     }
 
-    const events = normalizeCloudWebhook(readBody(req));
-    if (events.length === 0) return;
+    // Past this point NOTHING may throw. The signature is verified, so the
+    // payload is genuinely Meta's; a 5xx from here would only make Meta replay
+    // a message we have already accepted — and Meta retries with backoff for up
+    // to seven days, then disables the subscription. Replays are the problem
+    // this pipeline exists to stop, so the handler must not manufacture them.
+    //
+    // Deliberately AFTER signature verification, not around it: an invalid
+    // signature must still be a 403.
+    //
+    // `ingest()` already swallows per-event failures; this covers `readBody`
+    // and `normalizeCloudWebhook`, which can throw on a payload shape Meta has
+    // not sent us before.
+    try {
+      const events = normalizeCloudWebhook(readBody(req));
+      if (events.length === 0) return;
 
-    await this.ingest.ingest(events);
+      await this.ingest.ingest(events, req.requestId);
+    } catch (err) {
+      this.logger.error(
+        `Cloud webhook processing failed after a valid signature — ` +
+          `acknowledged anyway to prevent a replay: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+      );
+    }
   }
 }
 

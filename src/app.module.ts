@@ -15,6 +15,7 @@ import { AdminCacheModule } from './common/services/cache/admin-cache.module';
 import { AdminArchiveModule } from './modules/admin-archive/admin-archive.module';
 import { CollaborationGraphModule } from './modules/collaboration-graph/collaboration-graph.module';
 import { RedisModule } from './common/services/redis/redis.module';
+import { IdempotencyModule } from './common/services/idempotency/idempotency.module';
 import { QueueModule } from './common/services/queue/queue.module';
 import { HealthModule } from './modules/health/health.module';
 import { CsrfModule } from './modules/csrf/csrf.module';
@@ -130,6 +131,7 @@ import { HttpOnlyArcjetGuard } from './common/guards/http-only-arcjet.guard';
     PrismaModule,
     TwilioModule,
     RedisModule.forRoot(),
+    IdempotencyModule,
     AdminCacheModule,
     AdminArchiveModule,
     CollaborationGraphModule,

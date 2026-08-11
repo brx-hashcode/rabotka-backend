@@ -57,14 +57,29 @@ function makeDeps(redisOverrides = {}, provider = makeProvider()) {
     recordDelivered: jest.fn().mockResolvedValue(undefined),
   };
   const feedback = makeFeedback();
+  // Claims are granted by default. The queued path no longer claims at all —
+  // that moved to the worker — so this only affects the flow_reply branch.
+  const idempotency = {
+    claim: jest.fn().mockResolvedValue(true),
+    release: jest.fn().mockResolvedValue(undefined),
+  };
   const service = new InboundIngestService(
     redis as never,
     queueService as never,
     sendTiming as never,
     provider as never,
     feedback as never,
+    idempotency as never,
   );
-  return { service, redis, queueService, sendTiming, provider, feedback };
+  return {
+    service,
+    redis,
+    queueService,
+    sendTiming,
+    provider,
+    feedback,
+    idempotency,
+  };
 }
 
 const message = (
@@ -91,26 +106,31 @@ describe('InboundIngestService', () => {
         text: 'Bonjour',
         messageSid: 'wamid.1',
       }),
+      expect.objectContaining({ jobId: 'wa-in-wamid.1' }),
     );
   });
 
-  it('de-duplicates a repeated provider message id', async () => {
-    const { service, queueService } = makeDeps({ setResult: null });
-    await service.ingest([message()]);
-    expect(queueService.addJob).not.toHaveBeenCalled();
+  it('sets jobId to the message id so BullMQ refuses a replay outright', async () => {
+    // First line of defence only: the record is dropped by removeOnComplete
+    // after an hour, and the duplicate that prompted this work arrived at 38
+    // minutes. The worker's claim is what covers the full retry window.
+    const { service, queueService } = makeDeps();
+    await service.ingest([message({ providerMessageId: 'wamid.abc' })]);
+    expect(queueService.addJob).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.anything(),
+      { jobId: 'wa-in-wamid.abc' },
+    );
   });
 
-  it('shares the dedup namespace across providers', async () => {
-    // Twilio SIDs and Cloud wamids cannot collide, and a shared namespace means
-    // a message stays de-duplicated across a provider flip.
-    const { service, redis } = makeDeps();
-    await service.ingest([
-      message({ providerMessageId: 'SM1', provider: 'twilio' }),
-    ]);
-    await service.ingest([message({ providerMessageId: 'wamid.1' })]);
-    const keys = redis.set.mock.calls.map((c) => String(c[0]));
-    expect(keys[0]).toContain('wa:msg:SM1');
-    expect(keys[1]).toContain('wa:msg:wamid.1');
+  it('does NOT claim for queued messages — that belongs to the worker', async () => {
+    // Deliberate: claiming here would win the race every time and the worker's
+    // claim, the only one that also covers BullMQ retries and stalled-job
+    // re-runs, would never fire. See whatsapp-inbound.processor.spec.ts.
+    const { service, idempotency, queueService } = makeDeps();
+    await service.ingest([message()]);
+    expect(idempotency.claim).not.toHaveBeenCalled();
+    expect(queueService.addJob).toHaveBeenCalled();
   });
 
   it('drops a message once the per-phone rate limit is exceeded', async () => {
@@ -181,12 +201,18 @@ describe('InboundIngestService', () => {
       expect(provider.sendTypingIndicator).toHaveBeenCalledWith('wamid.1');
     });
 
-    it('does not acknowledge a duplicate', async () => {
-      // The reader already saw the ticks the first time; re-acknowledging is a
-      // wasted call on every provider retry.
-      const { service, provider } = makeDeps({ setResult: null });
+    it('acknowledges a replay too, now that dedup lives in the worker', async () => {
+      // Behaviour change, recorded rather than hidden. The claim moved to the
+      // worker, so this layer can no longer tell a replay from a first
+      // delivery and will re-send ticks on both.
+      //
+      // Accepted: marking an already-read message read is a no-op at Meta, and
+      // the cost is two API calls per replay. The alternative — claiming here
+      // to detect it — is what would break the worker's claim.
+      const { service, provider } = makeDeps();
       await service.ingest([message()]);
-      expect(provider.markAsRead).not.toHaveBeenCalled();
+      await service.ingest([message()]);
+      expect(provider.markAsRead).toHaveBeenCalledTimes(2);
     });
 
     it('does not acknowledge past the rate limit', async () => {
@@ -255,11 +281,25 @@ describe('InboundIngestService', () => {
       expect(queueService.addJob).not.toHaveBeenCalled();
     });
 
-    it('is de-duplicated like any other inbound message', async () => {
-      // Meta retries the webhook; a resubmitted form must not double-count.
-      const { service, feedback } = makeDeps({ setResult: null });
+    it('is de-duplicated here, because it never reaches the worker', async () => {
+      // A submitted Flow is handled inline, so the worker's claim cannot cover
+      // it — this branch keeps its own. Meta retries the webhook and a
+      // resubmitted form must not double-count.
+      const { service, feedback, idempotency } = makeDeps();
+      idempotency.claim.mockResolvedValue(false);
       await service.ingest([flowEvent()]);
       expect(feedback.handleSubmission).not.toHaveBeenCalled();
+    });
+
+    it('claims the flow reply under the shared inbound namespace', async () => {
+      // One namespace for Twilio SIDs and Cloud wamids: they cannot collide,
+      // and a message stays de-duplicated across a provider flip.
+      const { service, idempotency } = makeDeps();
+      await service.ingest([flowEvent()]);
+      expect(idempotency.claim).toHaveBeenCalledWith(
+        expect.stringContaining('wa:in:'),
+        604800,
+      );
     });
   });
 
@@ -271,6 +311,7 @@ describe('InboundIngestService', () => {
     expect(queueService.addJob).toHaveBeenCalledWith(
       expect.any(String),
       expect.objectContaining({ text: '2' }),
+      expect.anything(),
     );
   });
 });
