@@ -1,6 +1,15 @@
 import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { ConversationService } from '../conversation/conversation.service';
-import { QueueService } from '../../common/services/queue/queue.service';
+import {
+  QueueService,
+  type ProcessedJob,
+} from '../../common/services/queue/queue.service';
+import {
+  IdempotencyService,
+  INBOUND_TTL_SECONDS,
+  inboundKey,
+} from '../../common/services/idempotency/idempotency.service';
+import { webhookDuplicateDroppedCounter } from './telemetry/metrics';
 import {
   WHATSAPP_INBOUND_QUEUE,
   WHATSAPP_OUTBOUND_QUEUE,
@@ -16,6 +25,10 @@ export type WhatsAppInboundJobData = {
   phone: string;
   text: string;
   messageSid?: string;
+  /** Which webhook produced this, for the duplicate metric's label. */
+  provider?: string;
+  /** `req.requestId` from the webhook, so worker logs join the request's. */
+  correlationId?: string;
 };
 
 /**
@@ -32,6 +45,7 @@ export class WhatsAppInboundProcessor implements OnApplicationBootstrap {
     private readonly conversationService: ConversationService,
     private readonly queueService: QueueService,
     private readonly sendTiming: SendTimingService,
+    private readonly idempotency: IdempotencyService,
   ) {}
 
   onApplicationBootstrap(): void {
@@ -43,11 +57,35 @@ export class WhatsAppInboundProcessor implements OnApplicationBootstrap {
     this.logger.log('WhatsApp inbound worker registered (API process)');
   }
 
-  async process(job: {
-    id?: string;
-    data: WhatsAppInboundJobData;
-  }): Promise<void> {
-    const { phone, text, messageSid } = job.data;
+  async process(job: ProcessedJob<WhatsAppInboundJobData>): Promise<void> {
+    const { phone, text, messageSid, provider, correlationId } = job.data;
+
+    this.logger.log(
+      `Inbound job wamid=${messageSid ?? 'none'} provider=${provider ?? 'unknown'} ` +
+        `attempt=${job.attemptsMade} correlationId=${correlationId ?? 'none'}`,
+    );
+
+    // The claim lives HERE, not in the controller, because this is the only
+    // point that sees every path to handling: a Meta replay, a BullMQ retry
+    // after a throw, and a stalled-job re-run all arrive through this worker.
+    // Claiming at the webhook would miss the latter two entirely.
+    //
+    // Returning rather than throwing is the whole point: a throw would be
+    // retried by BullMQ, which is the behaviour being suppressed.
+    if (messageSid) {
+      const claimed = await this.idempotency.claim(
+        inboundKey(messageSid),
+        INBOUND_TTL_SECONDS,
+      );
+      if (!claimed) {
+        webhookDuplicateDroppedCounter.inc({ provider: provider ?? 'unknown' });
+        this.logger.debug(
+          `Duplicate inbound dropped: wamid=${messageSid} attempt=${job.attemptsMade}`,
+        );
+        return;
+      }
+    }
+
     const result = await this.conversationService.handleIncomingMessage(
       phone,
       text,

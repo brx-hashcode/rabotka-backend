@@ -15,8 +15,13 @@ import {
 } from '../contracts';
 import { toBotInput } from './inbound-normalizer';
 import { WhatsAppFeedbackService } from '../feedback/whatsapp-feedback.service';
+import {
+  IdempotencyService,
+  INBOUND_TTL_SECONDS,
+  inboundKey,
+} from '../../../common/services/idempotency/idempotency.service';
+import { webhookDuplicateDroppedCounter } from '../telemetry/metrics';
 
-const MSG_IDEMPOTENCY_TTL = 5 * 60; // 5 minutes
 const RATE_LIMIT_MAX = 30; // max messages per window
 const RATE_LIMIT_WINDOW = 60; // seconds
 
@@ -41,6 +46,7 @@ export class InboundIngestService {
     private readonly sendTiming: SendTimingService,
     @Inject(WHATSAPP_PROVIDER) private readonly provider: WhatsappProvider,
     private readonly feedback: WhatsAppFeedbackService,
+    private readonly idempotency: IdempotencyService,
   ) {}
 
   /**
@@ -50,13 +56,13 @@ export class InboundIngestService {
    * enough that a persistent 500 costs a subscription. One bad event must not
    * take the rest of the batch down with it.
    */
-  async ingest(events: InboundEvent[]): Promise<void> {
+  async ingest(events: InboundEvent[], correlationId?: string): Promise<void> {
     for (const event of events) {
       try {
         if (event.kind === 'status') {
           await this.handleStatus(event);
         } else {
-          await this.handleMessage(event);
+          await this.handleMessage(event, correlationId);
         }
       } catch (err) {
         this.logger.error(
@@ -83,15 +89,26 @@ export class InboundIngestService {
 
   private async handleMessage(
     event: Extract<InboundEvent, { kind: 'message' }>,
+    correlationId?: string,
   ): Promise<void> {
     // A submitted Flow is a form, not something the bot should answer. Handled
     // here rather than through the queue: it writes one row and produces no
     // reply, so the round trip would buy nothing.
+    //
+    // This branch keeps its own claim precisely because it never reaches the
+    // worker, so the worker's claim cannot cover it.
     if (event.content.type === 'flow_reply') {
       if (
         event.providerMessageId &&
-        !(await this.claim(event.providerMessageId))
+        !(await this.idempotency.claim(
+          inboundKey(event.providerMessageId),
+          INBOUND_TTL_SECONDS,
+        ))
       ) {
+        webhookDuplicateDroppedCounter.inc({ provider: event.provider });
+        this.logger.debug(
+          `Duplicate flow reply dropped: ${event.providerMessageId}`,
+        );
         return;
       }
       await this.feedback.handleSubmission(event);
@@ -103,15 +120,11 @@ export class InboundIngestService {
 
     const phone = event.from;
 
-    if (
-      event.providerMessageId &&
-      !(await this.claim(event.providerMessageId))
-    ) {
-      this.logger.debug(
-        `Duplicate webhook ignored: ${event.providerMessageId}`,
-      );
-      return;
-    }
+    // No claim here. It moved into the inbound WORKER, which is the only place
+    // that sees BullMQ retries and stalled-job re-runs as well as provider
+    // replays. Claiming in both would be worse than claiming in one: the
+    // controller would win the race every time and the worker's claim — the one
+    // that actually covers retries — would never fire.
 
     this.logger.log(
       `Incoming WhatsApp (${event.provider}) from ${phone}: "${text.slice(0, 80)}${text.length > 80 ? '...' : ''}"`,
@@ -131,12 +144,26 @@ export class InboundIngestService {
 
     // Enqueue rather than handle inline: the webhook has to return in well
     // under the provider's timeout or it retries, multiplying load.
+    //
+    // `jobId` is the cheap first line of defence — BullMQ refuses a second add
+    // under an id it already holds, so a replay inside the retention window
+    // never becomes a job at all. It is NOT sufficient alone: removeOnComplete
+    // drops the record after an hour, and the duplicate we chased arrived at 38
+    // minutes. The worker's claim is what covers the full 7 days.
     await this.sendTiming.time('enqueue', 'inbound', { to: phone }, () =>
-      this.queueService.addJob<WhatsAppInboundJobData>(WHATSAPP_INBOUND_QUEUE, {
-        phone,
-        text,
-        messageSid: event.providerMessageId || undefined,
-      }),
+      this.queueService.addJob<WhatsAppInboundJobData>(
+        WHATSAPP_INBOUND_QUEUE,
+        {
+          phone,
+          text,
+          messageSid: event.providerMessageId || undefined,
+          provider: event.provider,
+          correlationId,
+        },
+        event.providerMessageId
+          ? { jobId: `wa-in-${event.providerMessageId}` }
+          : undefined,
+      ),
     );
   }
 
@@ -165,19 +192,6 @@ export class InboundIngestService {
         `Could not acknowledge ${providerMessageId}: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
-  }
-
-  /** `SET NX` — true if this is the first time we have seen the id. */
-  private async claim(providerMessageId: string): Promise<boolean> {
-    const key = `${REDIS_KEY_PREFIX}wa:msg:${providerMessageId}`;
-    const claimed = await this.redis.set(
-      key,
-      '1',
-      'EX',
-      MSG_IDEMPOTENCY_TTL,
-      'NX',
-    );
-    return claimed !== null;
   }
 
   /**

@@ -114,6 +114,11 @@ describe('WhatsAppController', () => {
         sendTypingIndicator: jest.fn(),
       } as any,
       { handleSubmission: jest.fn().mockResolvedValue(undefined) } as any,
+      // Claims are granted; the queued path does not claim here anyway.
+      {
+        claim: jest.fn().mockResolvedValue(true),
+        release: jest.fn().mockResolvedValue(undefined),
+      } as any,
     );
     controller = new WhatsAppController(
       whatsAppService as any,
@@ -154,7 +159,9 @@ describe('WhatsAppController', () => {
           phone: '+24200000001',
           text: 'Hello',
           messageSid: 'SM123',
+          provider: 'twilio',
         }),
+        expect.objectContaining({ jobId: 'wa-in-SM123' }),
       );
     });
 
@@ -188,10 +195,16 @@ describe('WhatsAppController', () => {
       ).rejects.toThrow("'From' manquant");
     });
 
-    it('skips duplicate message (NX returns null)', async () => {
-      redis.set.mockResolvedValue(null); // already processed
+    it('still enqueues a replay — dedup is the worker\'s job now', async () => {
+      // Both providers share one contract: the webhook verifies, enqueues and
+      // acknowledges; the worker decides whether the message has been handled.
+      // Covered end to end in whatsapp-inbound.processor.spec.ts.
       await controller.incomingWebhook(makeReq(), body);
-      expect(queueService.addJob).not.toHaveBeenCalled();
+      await controller.incomingWebhook(makeReq(), body);
+      expect(queueService.addJob).toHaveBeenCalledTimes(2);
+      // Same jobId both times, so BullMQ collapses them before the worker runs.
+      const ids = queueService.addJob.mock.calls.map((c) => c[2]?.jobId);
+      expect(ids[0]).toBe(ids[1]);
     });
 
     it('strips whatsapp: prefix from From field', async () => {
@@ -202,6 +215,7 @@ describe('WhatsAppController', () => {
       expect(queueService.addJob).toHaveBeenCalledWith(
         expect.any(String),
         expect.objectContaining({ phone: '+24200000001' }),
+        expect.anything(),
       );
     });
 
@@ -213,6 +227,7 @@ describe('WhatsAppController', () => {
       expect(queueService.addJob).toHaveBeenCalledWith(
         expect.any(String),
         expect.objectContaining({ phone: '+24200000001' }),
+        expect.anything(),
       );
     });
 
@@ -227,6 +242,7 @@ describe('WhatsAppController', () => {
       expect(queueService.addJob).toHaveBeenCalledWith(
         expect.any(String),
         expect.objectContaining({ phone: '+24200000001', text: '1' }),
+        expect.anything(),
       );
     });
 

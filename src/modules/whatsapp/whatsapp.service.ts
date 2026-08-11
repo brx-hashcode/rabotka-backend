@@ -29,8 +29,30 @@ import {
   ADMIN_MESSAGE_VAR_MAX,
   ADMIN_MESSAGE_FALLBACK_SIGNATURE,
 } from './templates';
+import {
+  IdempotencyService,
+  OUTBOUND_TTL_SECONDS,
+  outboundKey,
+} from '../../common/services/idempotency/idempotency.service';
+import { outboundDuplicateBlockedCounter } from './telemetry/metrics';
 
 const VERIFICATION_TOKEN_KEY_PREFIX = `${REDIS_KEY_PREFIX}wa:verify:`;
+
+/**
+ * How long the same template+params to the same number is treated as a repeat.
+ *
+ * The provider-agnostic safety net: whatever the upstream cause — a Meta
+ * replay the worker missed, a BullMQ re-run, a bot flow that fires twice — this
+ * is the last thing between it and the reader.
+ *
+ * Short on purpose. It is not a business rule about how often a person may be
+ * messaged; it only has to span the window a duplicate realistically arrives
+ * in. Anything longer starts suppressing legitimate sends.
+ */
+const OUTBOUND_GUARD_WINDOW_SECONDS: Partial<Record<TemplateKey, number>> = {
+  // Nothing here yet. Add a template only with a reason: a longer window turns
+  // a second legitimate send into silence, and the caller is told it failed.
+};
 
 /** WhatsApp's customer-service window: free-form is only allowed inside it. */
 const SERVICE_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -64,6 +86,7 @@ export class WhatsAppService {
     private readonly provider: WhatsappProvider,
     private readonly config: ConfigService,
     private readonly walletService: WalletService,
+    private readonly idempotency: IdempotencyService,
   ) {}
 
   isConfigured(): boolean {
@@ -120,6 +143,54 @@ export class WhatsAppService {
     }
   }
 
+  /**
+   * Last line of defence against a duplicate reaching the reader.
+   *
+   * Sits here rather than in either provider because it must hold whichever one
+   * is active, and because every send in the codebase already routes through
+   * this class — so it costs no call-site changes.
+   *
+   * Keyed on recipient AND a hash of the parameters. Keying on the template
+   * alone would block a second, genuinely different message that happens to
+   * reuse it inside the window: two job recommendations a minute apart, or an
+   * OTP resend the reader just asked for. Silently swallowing an authentication
+   * code is a worse bug than the duplicate this prevents.
+   *
+   * Returns false to mean "not sent", matching what the callers already do with
+   * a failed send. It does not throw: a duplicate is not an error condition,
+   * and throwing here would fail a BullMQ job that has nothing left to do.
+   *
+   * Fails OPEN. If Redis is unreachable the message goes out — a duplicate is
+   * an annoyance, silence is a broken product.
+   */
+  private async claimOutbound(
+    phone: string,
+    template: TemplateKey,
+    params: unknown,
+  ): Promise<boolean> {
+    const ttl = OUTBOUND_GUARD_WINDOW_SECONDS[template] ?? OUTBOUND_TTL_SECONDS;
+    try {
+      const claimed = await this.idempotency.claim(
+        outboundKey(phone, template, params),
+        ttl,
+      );
+      if (claimed) return true;
+    } catch (err) {
+      this.logger.warn(
+        `Outbound duplicate guard unavailable for ${template}, sending anyway: ` +
+          `${err instanceof Error ? err.message : String(err)}`,
+      );
+      return true;
+    }
+
+    outboundDuplicateBlockedCounter.inc({ provider: this.provider.name });
+    this.logger.warn(
+      `Blocked duplicate ${template} to ${maskPhone(phone)}: an identical ` +
+        `send was made within the last ${ttl}s`,
+    );
+    return false;
+  }
+
   async sendTextMessage(
     phone: string,
     text: string,
@@ -155,6 +226,8 @@ export class WhatsAppService {
     profileId?: string,
     body?: string,
   ): Promise<boolean> {
+    if (!(await this.claimOutbound(phone, template, params))) return false;
+
     const sid = await this.attempt(`template ${template}`, phone, () =>
       this.provider.sendTemplate(phone, template, params),
     );
@@ -186,6 +259,8 @@ export class WhatsAppService {
     profileId?: string,
     body?: string,
   ): Promise<boolean> {
+    if (!(await this.claimOutbound(phone, template, variables))) return false;
+
     const sid = await this.attempt(`template ${template}`, phone, () =>
       this.provider.sendTemplateWithVariables(phone, template, variables),
     );
@@ -479,4 +554,17 @@ export class WhatsAppService {
       `WhatsApp verified and account activated for profile ${profileId}`,
     );
   }
+}
+
+/**
+ * `+242069917686` -> `+2420***686`.
+ *
+ * Enough to correlate a blocked send with a support report, not enough to make
+ * the log a directory of user phone numbers. Keeps the country code and the
+ * last three digits, which is what someone reading the line actually needs.
+ */
+function maskPhone(phone: string): string {
+  const trimmed = phone.trim();
+  if (trimmed.length <= 8) return '***';
+  return `${trimmed.slice(0, 5)}***${trimmed.slice(-3)}`;
 }
