@@ -1,6 +1,8 @@
 import {
   IdempotencyService,
   INBOUND_TTL_SECONDS,
+  IN_FLIGHT_TTL_SECONDS,
+  inFlightKey,
   OUTBOUND_TTL_SECONDS,
   hashParams,
   inboundKey,
@@ -34,6 +36,9 @@ function makeRedis() {
       const had = store.delete(key);
       return Promise.resolve(had ? 1 : 0);
     }),
+    exists: jest.fn((key: string): Promise<number> =>
+      Promise.resolve(store.has(key) ? 1 : 0),
+    ),
   };
 }
 
@@ -56,7 +61,7 @@ describe('IdempotencyService', () => {
       await service.claim(inboundKey('wamid.1'), INBOUND_TTL_SECONDS);
 
       expect(redis.set).toHaveBeenCalledWith(
-        expect.stringContaining('wa:in:wamid.1'),
+        expect.stringContaining('wa:in:done:wamid.1'),
         '1',
         'EX',
         604800,
@@ -98,8 +103,8 @@ describe('IdempotencyService', () => {
     it('shares one namespace across providers', () => {
       // Twilio SIDs and Cloud wamids cannot collide, so one namespace keeps a
       // message de-duplicated across a provider flip.
-      expect(inboundKey('SM1')).toContain('wa:in:SM1');
-      expect(inboundKey('wamid.1')).toContain('wa:in:wamid.1');
+      expect(inboundKey('SM1')).toContain('wa:in:done:SM1');
+      expect(inboundKey('wamid.1')).toContain('wa:in:done:wamid.1');
     });
 
     it('separates outbound sends by recipient, template and params', () => {
@@ -141,6 +146,52 @@ describe('IdempotencyService', () => {
     it('handles primitives and null without throwing', () => {
       expect(hashParams(null)).toEqual(expect.any(String));
       expect(hashParams('x')).not.toBe(hashParams('y'));
+    });
+  });
+
+  describe('has()', () => {
+    it('answers without writing the key', async () => {
+      // The reason this exists: asking with `claim` would SET the key as a side
+      // effect of the question, and releasing it to undo that is racy — two
+      // workers can both probe, both release, and both proceed.
+      const redis = makeRedis();
+      const service = new IdempotencyService(redis as never);
+
+      await expect(service.has('k')).resolves.toBe(false);
+      expect(redis.set).not.toHaveBeenCalled();
+      expect(redis.store.has('k')).toBe(false);
+    });
+
+    it('sees a key that was claimed', async () => {
+      const redis = makeRedis();
+      const service = new IdempotencyService(redis as never);
+      await service.claim('k', 60);
+      await expect(service.has('k')).resolves.toBe(true);
+    });
+  });
+
+  describe('the done marker and the in-flight lock are different keys', () => {
+    it('does not collide for the same message', () => {
+      // Collapsing these into one key is the bug being fixed: the lock has to
+      // be released on failure, the marker has to survive for 7 days, and one
+      // key cannot do both.
+      expect(inboundKey('wamid.1')).not.toBe(inFlightKey('wamid.1'));
+    });
+
+    it('holding the lock does not mark the message handled', async () => {
+      const redis = makeRedis();
+      const service = new IdempotencyService(redis as never);
+
+      await service.claim(inFlightKey('wamid.1'), IN_FLIGHT_TTL_SECONDS);
+
+      await expect(service.has(inboundKey('wamid.1'))).resolves.toBe(false);
+    });
+
+    it('gives the lock a much shorter life than the marker', () => {
+      // The lock is a backstop for a dead worker; the marker spans Meta's
+      // retry window. Seven days of lock would strand a message.
+      expect(IN_FLIGHT_TTL_SECONDS).toBeLessThan(INBOUND_TTL_SECONDS);
+      expect(IN_FLIGHT_TTL_SECONDS).toBe(120);
     });
   });
 });
