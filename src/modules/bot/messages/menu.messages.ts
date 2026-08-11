@@ -55,9 +55,17 @@ export function penaltiesListBotMessage(
 }
 
 /**
- * Re-prompt inside a flow. Deliberately does not point anywhere: the menu is
- * gone, and a dead end outside a flow gets the welcome card instead.
+ * Re-prompt inside a flow.
+ *
+ * Now names the escape. This is what someone stuck mid-flow sees, and it
+ * previously pointed nowhere — the reader had to already know that "menu" got
+ * them out. `/` is the discoverable version of that, and it works from inside
+ * any flow (see `expandSlashCommand`).
  */
 export function unknownCommandMessage(): string {
-  return "Je n'ai pas compris votre réponse. Merci de réessayer.";
+  return [
+    "Je n'ai pas compris votre réponse. Merci de réessayer.",
+    '',
+    'Envoyez */* à tout moment pour revenir aux options.',
+  ].join('\n');
 }

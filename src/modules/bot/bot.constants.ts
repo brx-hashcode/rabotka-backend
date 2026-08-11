@@ -54,6 +54,11 @@ export const CMD_MENU = [
   'démarrer',
   'demarrer',
   'commencer',
+  // `expandSlashCommand` already rewrites a bare "/" to "menu" at the
+  // conversation entry point, so this is belt and braces — it keeps the slash
+  // working for any caller that matches CMD_MENU against raw input rather than
+  // the expanded text.
+  '/',
 ];
 export const CMD_PAY = [
   'payer',
