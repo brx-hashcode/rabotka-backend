@@ -7,11 +7,23 @@ import {
 } from '../redis/redis.constants';
 
 /**
- * Meta's webhook retry window. A claim has to outlive it, or a replay on day
- * two looks like a brand-new message — which is exactly how the same /start
+ * Meta's webhook retry window. The DONE marker has to outlive it, or a replay on
+ * day two looks like a brand-new message — which is exactly how the same /start
  * welcome went out twice, 38 minutes apart, against a 5-minute claim.
  */
 export const INBOUND_TTL_SECONDS = 604800; // 7 days
+
+/**
+ * How long a single delivery may be in flight before another attempt is allowed
+ * to pick it up.
+ *
+ * A backstop for a worker that died mid-handling, NOT the mechanism — the lock
+ * is released in a `finally`, so this only matters when the process never got
+ * to run one. Long enough to cover the slowest bot round trip (a DB read, a
+ * flow evaluation and an enqueue), short enough that a crashed worker does not
+ * strand the message for long.
+ */
+export const IN_FLIGHT_TTL_SECONDS = 120;
 
 /** Default window for the outbound duplicate guard. */
 export const OUTBOUND_TTL_SECONDS = 60;
@@ -45,6 +57,17 @@ export class IdempotencyService {
   }
 
   /**
+   * Read-only "is this key set?".
+   *
+   * Distinct from `claim`: asking with `claim` would WRITE the key as a side
+   * effect of the question, and releasing it afterwards to undo that is racy —
+   * two workers can both probe, both release, and both proceed.
+   */
+  async has(key: string): Promise<boolean> {
+    return (await this.redis.exists(key)) === 1;
+  }
+
+  /**
    * Drop a claim so the work can be retried.
    *
    * For hard failures only — where we know nothing user-visible happened. After
@@ -57,12 +80,33 @@ export class IdempotencyService {
 }
 
 /**
- * Inbound message id. Twilio SIDs (`SM…`/`MM…`) and Cloud wamids (`wamid.…`)
- * cannot collide, so one namespace covers both and a message stays
- * de-duplicated across a provider switch.
+ * "This message has been handled to completion."
+ *
+ * Written only AFTER a reply is on its way. The first version of this set the
+ * key BEFORE handling, so anything that threw afterwards — the bot graph, the
+ * outbound enqueue, a worker restart — left the key set, and the BullMQ retry
+ * read it as a duplicate and dropped the message for seven days. The reader
+ * never got an answer. A duplicate is an annoyance; silence is a broken
+ * product, and that trade was the wrong way round.
+ *
+ * Twilio SIDs (`SM…`/`MM…`) and Cloud wamids (`wamid.…`) cannot collide, so one
+ * namespace covers both and a message stays de-duplicated across a provider
+ * switch.
  */
 export function inboundKey(providerMessageId: string): string {
-  return `${REDIS_KEY_PREFIX}wa:in:${providerMessageId}`;
+  return `${REDIS_KEY_PREFIX}wa:in:done:${providerMessageId}`;
+}
+
+/**
+ * "Someone is handling this right now."
+ *
+ * Separate from the done marker because they answer different questions. This
+ * one stops two concurrent deliveries of the same message doing the work twice;
+ * the done marker stops a delivery that arrives after the work finished. Only
+ * the second may outlive a failure.
+ */
+export function inFlightKey(providerMessageId: string): string {
+  return `${REDIS_KEY_PREFIX}wa:in:lock:${providerMessageId}`;
 }
 
 /**

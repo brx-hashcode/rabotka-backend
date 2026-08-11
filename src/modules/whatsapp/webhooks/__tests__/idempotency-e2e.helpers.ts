@@ -27,6 +27,8 @@ export const REDIS_CONNECTION_FOR_TESTS = {
       },
       del: (key: string): Promise<number> =>
         Promise.resolve(store.delete(key) ? 1 : 0),
+      exists: (key: string): Promise<number> =>
+        Promise.resolve(store.has(key) ? 1 : 0),
       // The ingest service rate-limits with an INCR/EXPIRE pipeline.
       pipeline: () => ({
         incr: function () {
