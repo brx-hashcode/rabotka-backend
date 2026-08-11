@@ -6,15 +6,21 @@ import type { WhatsAppTemplateName } from './whatsapp-templates';
 // welcome.messages.ts reads this (the cards bake the image in), and that branch
 // is unreachable while contentSid is set, which is why a dead image URL went
 // unnoticed.
-//
-// `||` rather than `??`, deliberately. The deploy writes this key as
-// `$(jq -r '.CLOUDFLARE_PUBLIC_BASE_URL // ""')`, so a value absent from Vault
-// arrives as an EMPTY STRING, not undefined — and `??` only falls back on
-// null/undefined. That left the base as '' and coverImageUrl() returning the
-// bare path `/whatsapp/cover-rabotka.jpg`, which Meta cannot fetch:
+// Deliberately NOT CLOUDFLARE_PUBLIC_BASE_URL. That is the public base for user
+// file storage — avatars, documents, portfolios — and it points at the bucket
+// those files live in. The WhatsApp cover lives in a DIFFERENT bucket, the one
+// the approved Twilio cards reference, so reading the storage base here made the
+// cover 404 on any environment where storage was configured:
 // `131053 Downloading media from weblink failed with http code 404`.
+//
+// Repointing the storage variable would have fixed the cover and broken every
+// existing file URL in the app, so the two are separated instead.
+//
+// `||` rather than `??`: the deploy writes env values through
+// `jq -r '… // ""'`, so an absent key arrives as an EMPTY STRING and `??` would
+// not fall back. Trimmed because docker compose `env_file` does not.
 export const WHATSAPP_MEDIA_BASE = (
-  process.env.CLOUDFLARE_PUBLIC_BASE_URL?.trim() ||
+  process.env.WHATSAPP_MEDIA_BASE_URL?.trim() ||
   'https://pub-1c3331ee6be84a71b4be0db2b3734ac7.r2.dev'
 ).replace(/\/$/, '');
 
