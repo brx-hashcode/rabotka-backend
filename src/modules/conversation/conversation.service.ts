@@ -10,7 +10,10 @@ import {
 import { BotOrchestratorService } from '../bot/services/bot-orchestrator.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
-import { stripChatFormattingChars } from '../bot/utils/chat-input';
+import {
+  expandSlashCommand,
+  stripChatFormattingChars,
+} from '../bot/utils/chat-input';
 import { welcomeUnregisteredMessage } from '../bot/messages/welcome.messages';
 
 const DEFAULT_BOT_SESSION_ID = 'default';
@@ -68,7 +71,7 @@ export class ConversationService {
       return { profileId: profile.id, replies: [] };
     }
 
-    const textForBot = stripChatFormattingChars(text);
+    const textForBot = expandSlashCommand(stripChatFormattingChars(text));
 
     try {
       const now = new Date();
