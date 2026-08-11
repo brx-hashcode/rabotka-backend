@@ -19,6 +19,7 @@ const notConfigured = () =>
 import { REDIS_CONNECTION } from '../../../common/services/redis/redis.constants';
 import { ConfigService } from '@nestjs/config';
 import { WalletService } from '../../wallet/wallet.service';
+import { IdempotencyService } from '../../../common/services/idempotency/idempotency.service';
 
 // Prevent the real Twilio SDK from being loaded in this test suite
 jest.mock('twilio', () => {
@@ -39,6 +40,7 @@ describe('WhatsAppService', () => {
   let prisma: jest.Mocked<PrismaService>;
   let provider: jest.Mocked<WhatsappProvider>;
   let redis: { get: jest.Mock; set: jest.Mock; del: jest.Mock };
+  let module: TestingModule;
 
   beforeEach(async () => {
     redis = {
@@ -71,7 +73,7 @@ describe('WhatsAppService', () => {
       isConfigured: jest.fn().mockReturnValue(true),
     };
 
-    const module: TestingModule = await Test.createTestingModule({
+    module = await Test.createTestingModule({
       providers: [
         WhatsAppService,
         { provide: PrismaService, useValue: mockPrismaService },
@@ -89,6 +91,15 @@ describe('WhatsAppService', () => {
             getOrCreateProfileWallet: jest
               .fn()
               .mockResolvedValue({ balance: 0 }),
+          },
+        },
+        {
+          // Claims granted by default, so these tests keep exercising the send
+          // path rather than the duplicate guard. The guard has its own tests.
+          provide: IdempotencyService,
+          useValue: {
+            claim: jest.fn().mockResolvedValue(true),
+            release: jest.fn().mockResolvedValue(undefined),
           },
         },
       ],
@@ -506,6 +517,90 @@ describe('WhatsAppService', () => {
       const [, , params] = (provider.sendTemplate as jest.Mock).mock.calls[0];
       // Meta rejects an empty variable value outright.
       expect(params.adminName).toBe('Le support');
+    });
+  });
+
+  describe('outbound duplicate guard', () => {
+    // The provider-agnostic safety net: whatever the upstream cause, this is
+    // the last thing between a duplicate and the reader.
+    function guard() {
+      return module.get(IdempotencyService) as unknown as {
+        claim: jest.Mock;
+      };
+    }
+
+    it('sends when the claim is granted', async () => {
+      guard().claim.mockResolvedValue(true);
+      await expect(
+        service.sendTemplateMessage(PHONE, 'otp', '000000'),
+      ).resolves.toBe(true);
+      expect(provider.sendTemplate).toHaveBeenCalled();
+    });
+
+    it('blocks the send when the claim is refused', async () => {
+      guard().claim.mockResolvedValue(false);
+      await expect(
+        service.sendTemplateMessage(PHONE, 'otp', '000000'),
+      ).resolves.toBe(false);
+      expect(provider.sendTemplate).not.toHaveBeenCalled();
+    });
+
+    it('does not throw on a blocked send', async () => {
+      // A duplicate is not an error. Throwing would fail a BullMQ job that has
+      // nothing left to do, and burn its retries.
+      guard().claim.mockResolvedValue(false);
+      await expect(
+        service.sendTemplateMessage(PHONE, 'otp', '000000'),
+      ).resolves.toBe(false);
+    });
+
+    it('keys on recipient, template and params together', async () => {
+      guard().claim.mockResolvedValue(true);
+      await service.sendTemplateMessage(PHONE, 'otp', '000000');
+
+      const [key, ttl] = guard().claim.mock.calls[0] as [string, number];
+      expect(key).toContain('wa:out:');
+      expect(key).toContain(PHONE);
+      expect(key).toContain('otp');
+      expect(ttl).toBe(60);
+    });
+
+    it('gives a different key to different params, so a resend is not eaten', async () => {
+      // An OTP resend the reader asked for is not a duplicate. Keying on the
+      // template alone would silently swallow the second code.
+      guard().claim.mockResolvedValue(true);
+      await service.sendTemplateMessage(PHONE, 'otp', '111111');
+      await service.sendTemplateMessage(PHONE, 'otp', '222222');
+
+      const keys = guard().claim.mock.calls.map((c) => c[0] as string);
+      expect(keys[0]).not.toBe(keys[1]);
+      expect(provider.sendTemplate).toHaveBeenCalledTimes(2);
+    });
+
+    it('gives the same key to an identical repeat', async () => {
+      guard().claim.mockResolvedValue(true);
+      await service.sendTemplateMessage(PHONE, 'otp', '000000');
+      await service.sendTemplateMessage(PHONE, 'otp', '000000');
+
+      const keys = guard().claim.mock.calls.map((c) => c[0] as string);
+      expect(keys[0]).toBe(keys[1]);
+    });
+
+    it('sends anyway when Redis is unreachable', async () => {
+      // Fails OPEN. A duplicate is an annoyance; silence is a broken product.
+      guard().claim.mockRejectedValue(new Error('redis down'));
+      await expect(
+        service.sendTemplateMessage(PHONE, 'otp', '000000'),
+      ).resolves.toBe(true);
+      expect(provider.sendTemplate).toHaveBeenCalled();
+    });
+
+    it('guards the legacy variables path too', async () => {
+      guard().claim.mockResolvedValue(false);
+      await expect(
+        service.sendTemplateMessageWithVariables(PHONE, 'otp', { '1': 'x' }),
+      ).resolves.toBe(false);
+      expect(provider.sendTemplateWithVariables).not.toHaveBeenCalled();
     });
   });
 });

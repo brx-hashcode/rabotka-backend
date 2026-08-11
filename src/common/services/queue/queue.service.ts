@@ -14,6 +14,20 @@ import { EMAIL_QUEUE } from './queue.module';
 const env = process.env.IS_PROD === 'true' ? 'prod' : 'dev';
 const BULLMQ_PREFIX = `bull:rabotka:${env}`;
 
+/**
+ * The slice of BullMQ's `Job` a processor is given.
+ *
+ * Narrow on purpose — processors should not reach into queue internals — but
+ * `attemptsMade` has to be here: it is the only way a processor can tell a
+ * first delivery from a retry, and a retry is exactly when idempotency has to
+ * hold. It is 0 on the first attempt.
+ */
+export type ProcessedJob<T> = {
+  id?: string;
+  data: T;
+  attemptsMade: number;
+};
+
 export type MailAttachment = {
   filename: string;
   content: Buffer | string;
@@ -95,7 +109,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
 
   createWorker<T = unknown>(
     queueName: string,
-    processor: (job: { id?: string; data: T }) => Promise<void>,
+    processor: (job: ProcessedJob<T>) => Promise<void>,
     options?: Omit<WorkerOptions, 'connection'>,
   ): Worker {
     if (this.workers.has(queueName)) {
