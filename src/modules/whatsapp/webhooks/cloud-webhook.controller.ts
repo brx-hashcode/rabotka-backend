@@ -109,7 +109,27 @@ export class CloudWebhookController {
     }
 
     if (!cloud.verifyWebhookSignature(rawBody, normalizeHeaders(req.headers))) {
-      this.logger.warn('Cloud webhook signature validation failed');
+      // "validation failed" on its own is useless: it cannot distinguish a
+      // wrong app secret from a body altered in transit, and those need
+      // opposite fixes. The three facts below separate them.
+      //
+      // A body that survived intact has rawBody.length === content-length; a
+      // proxy that rewrote or re-encoded it will not. A duplicated
+      // X-Hub-Signature-256 (Express joins repeats with ", ") means something
+      // ahead of us is signing too. Both are HMAC output or byte counts, so
+      // none of this leaks the secret.
+      const declared = req.headers['content-length'] ?? 'absent';
+      const rawHeader = req.headers['x-hub-signature-256'];
+      const count = Array.isArray(rawHeader) ? rawHeader.length : 1;
+      const received = normalizeHeaders(req.headers)['x-hub-signature-256'];
+
+      this.logger.warn(
+        `Cloud webhook signature validation failed — ` +
+          `rawBody=${rawBody.length}B, content-length=${String(declared)}, ` +
+          `sigHeaders=${rawHeader ? count : 0}, ` +
+          `received=${received ? received.slice(0, 20) : 'none'}…, ` +
+          `computed=${cloud.expectedSignaturePreview(rawBody)}…`,
+      );
       throw new ForbiddenException('Invalid signature');
     }
 
