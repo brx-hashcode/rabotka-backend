@@ -414,4 +414,70 @@ describe('toBotInput', () => {
       }),
     ).toBeNull();
   });
+
+  const msg = (content: unknown) =>
+    ({
+      kind: 'message',
+      from: '+242001',
+      providerMessageId: 'm',
+      timestamp: new Date(),
+      provider: 'cloud',
+      content,
+    }) as Parameters<typeof toBotInput>[0];
+
+  describe('things nobody typed', () => {
+    // The bug this covers: `toBotInput` returned '' for these, and the caller
+    // only skips on null — so an unregistered number received the entire
+    // welcome card for reacting to a message, twice, hours apart, without
+    // sending anything.
+
+    it('does not answer a reaction', () => {
+      expect(
+        toBotInput(msg({ type: 'reaction', emoji: '👍', targetMessageId: 'x' })),
+      ).toBeNull();
+    });
+
+    it.each(['system', 'order', 'request_welcome', 'ephemeral', 'unknown'])(
+      'does not answer a %s notification',
+      (rawType) => {
+        expect(toBotInput(msg({ type: 'unsupported', rawType }))).toBeNull();
+      },
+    );
+
+    it('returns null, not an empty string', () => {
+      // The distinction is the whole bug: handleMessage checks `=== null`, so
+      // '' is treated as a real message with no text.
+      const out = toBotInput(
+        msg({ type: 'reaction', emoji: '👍', targetMessageId: 'x' }),
+      );
+      expect(out).not.toBe('');
+      expect(out).toBeNull();
+    });
+  });
+
+  describe('things a person did send', () => {
+    it('still answers a sticker, so the reader is not ignored', () => {
+      expect(toBotInput(msg({ type: 'unsupported', rawType: 'sticker' }))).toBe(
+        '',
+      );
+    });
+
+    it('still answers a contact card', () => {
+      expect(
+        toBotInput(msg({ type: 'unsupported', rawType: 'contacts' })),
+      ).toBe('');
+    });
+
+    it('still answers a voice note', () => {
+      expect(toBotInput(msg({ type: 'audio', mediaId: 'a' }))).toBe('');
+    });
+
+    it('still answers a shared location', () => {
+      expect(
+        toBotInput(
+          msg({ type: 'location', latitude: 1, longitude: 2 }),
+        ),
+      ).toBe('');
+    });
+  });
 });
