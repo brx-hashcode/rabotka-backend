@@ -1,0 +1,69 @@
+name: Sync main back into develop
+
+# Every release is merged develop -> main with a merge commit, and that commit
+# lands only on main. Nothing is lost — the trees stay identical — but main
+# drifts ahead of develop by one commit per release, and `git log develop..main`
+# stops answering "what is unreleased?", which is the only question it is for.
+# It had reached 41 commits in this repo before anyone noticed.
+#
+# Doing it by hand means remembering after every release. This does it on the
+# push, so the two branches are never out of step for longer than a build.
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+# One at a time: two releases merged close together would otherwise race to
+# push develop, and the loser fails on a non-fast-forward.
+concurrency:
+  group: sync-main-to-develop
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Fast-forward develop to main
+    runs-on: ubuntu-latest
+    permissions:
+      # Pushing to develop is the whole job.
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.2.2
+        with:
+          # Full history: a shallow clone cannot fast-forward, and cannot tell
+          # whether a real merge is needed either.
+          fetch-depth: 0
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Bring develop up to main
+        run: |
+          set -euo pipefail
+          git checkout develop
+          git merge --ff-only origin/main && echo "fast-forwarded" && exit 0 || true
+
+          # Not a fast-forward: someone pushed to develop between the release
+          # merge and this run. A real merge is correct — main is released code
+          # and develop must contain it — and it cannot lose the newer work.
+          echo "develop has moved on; merging instead of fast-forwarding"
+          git merge --no-edit origin/main
+
+      - name: Push
+        run: |
+          set -euo pipefail
+          # Compare COMMITS, not trees. `git diff HEAD origin/develop` is empty
+          # here even when there is something to push: a release merge changes
+          # no files, so the trees match while the histories do not. Guarding on
+          # the diff would report "nothing to push" every single time and the
+          # sync would silently never happen.
+          if [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/develop)" ]; then
+            echo "develop already at main — nothing to push"
+            exit 0
+          fi
+          git push origin develop
