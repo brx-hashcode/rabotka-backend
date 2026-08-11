@@ -2,9 +2,9 @@ import { Injectable, Logger, forwardRef, Inject } from '@nestjs/common';
 import { jobLocationLabel } from '../../../common/utils/job-location.util';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { WhatsAppService } from '../../whatsapp/whatsapp.service';
+import { WhatsAppFeedbackService } from '../../whatsapp/feedback/whatsapp-feedback.service';
 import { BotStateService } from './bot-state.service';
 import { BotInboxService } from './bot-inbox.service';
-import { getUnlockContactInitialState } from '../flows/unlock-contact.flow';
 import { FLOW_IDS } from '../bot.constants';
 import { formatAmount } from '../messages/offers.messages';
 import { WHATSAPP_TEMPLATES } from '../../../common/constants/whatsapp-templates';
@@ -26,6 +26,8 @@ export class BotNotificationService {
     private readonly contactUnlock: ContactUnlockService,
     private readonly systemConfig: SystemConfigService,
     private readonly walletService: WalletService,
+    @Inject(forwardRef(() => WhatsAppFeedbackService))
+    private readonly feedback: WhatsAppFeedbackService,
   ) {}
 
   /**
@@ -85,8 +87,8 @@ export class BotNotificationService {
       const tpl = WHATSAPP_TEMPLATES.newApplication;
       await this.whatsApp.sendTemplateMessage(
         app.job_offer.employer.phone,
-        tpl.contentSid,
-        tpl.variables({
+        'newApplication',
+        {
           offerTitle: app.job_offer.title,
           workerName: `${app.worker.first_name} ${app.worker.last_name}`,
           reliabilityScore: app.worker.reliability_score ?? 100,
@@ -100,7 +102,7 @@ export class BotNotificationService {
           // URL suffix for the CTA button (/candidatures/{{8}}). Ignored by the
           // pre-approval template, so this is safe either side of the cutover.
           applicationId,
-        }),
+        },
       );
     } catch (err) {
       this.logger.warn(
@@ -135,42 +137,29 @@ export class BotNotificationService {
       if (attempt) {
         const fees = await this.systemConfig.getContactUnlockFees();
 
-        // Set unlockState BEFORE sending so that when the worker taps
-        // "Continuer" (payload "continuer") the flow is already active and
-        // re-shows the live payment prompt (unlock-contact.flow.ts). The
-        // dynamic, balance-dependent option list cannot live in a template.
-        const unlockState = getUnlockContactInitialState({
-          attemptId: attempt.id,
-          otherName: employerName,
-          amount: fees.workerFeeFcfa,
-          expiresAt: attempt.expires_at,
-        });
-        await this.botState.setIfFlowAbsentOrMatches(
-          app.worker_id,
-          unlockState,
-          null,
-        );
-
-        const tpl = WHATSAPP_TEMPLATES.applicationAcceptedUnlock;
+        // No chat state is armed. This used to pre-arm the unlock flow so a
+        // "Continuer" quick-reply could re-show a balance-dependent option list
+        // in the chat; the template carries a URL button now and the worker
+        // settles up in the app, so arming a flow only left a stale state for
+        // the next thing they typed to fall into.
         await this.whatsApp.sendTemplateMessage(
           app.worker.phone,
-          tpl.contentSid,
-          tpl.variables({
+          'applicationAcceptedUnlock',
+          {
             employerName,
             offerTitle: app.job_offer.title,
             // URL suffix: the worker settles their share on the web now.
             applicationId,
-          }),
+          },
         );
       } else {
-        const tpl = WHATSAPP_TEMPLATES.applicationAccepted;
         await this.whatsApp.sendTemplateMessage(
           app.worker.phone,
-          tpl.contentSid,
-          tpl.variables({
+          'applicationAccepted',
+          {
             employerName,
             offerTitle: app.job_offer.title,
-          }),
+          },
         );
       }
     } catch (err) {
@@ -218,29 +207,36 @@ export class BotNotificationService {
         }),
       ]);
 
-      const tpl = WHATSAPP_TEMPLATES.contactUnlocked;
-
+      // The unlock is the moment the product either delivered or did not, so it
+      // is the honest place to ask for feedback — and the template now carries
+      // the Flow on its own button, so the ask rides along with the contact
+      // details instead of arriving as a second message. That second message
+      // used to be `feedback.requestFeedback`, a free-form interactive send:
+      // WhatsApp rejects those outside the 24h service window (131047), which
+      // is precisely where anyone who paid on the web sits.
       if (employer?.phone && worker && attempt.employer_id !== skipId) {
         await this.whatsApp.sendTemplateMessage(
           employer.phone,
-          tpl.contentSid,
-          tpl.variables({
+          'contactUnlocked',
+          {
             name: `${worker.first_name} ${worker.last_name}`.trim(),
             phone: worker.phone,
             email: worker.email,
-          }),
+            flowToken: this.feedback.mintFlowToken(attempt.employer_id),
+          },
         );
       }
 
       if (worker?.phone && employer && attempt.worker_id !== skipId) {
         await this.whatsApp.sendTemplateMessage(
           worker.phone,
-          tpl.contentSid,
-          tpl.variables({
+          'contactUnlocked',
+          {
             name: `${employer.first_name} ${employer.last_name}`.trim(),
             phone: employer.phone,
             email: employer.email,
-          }),
+            flowToken: this.feedback.mintFlowToken(attempt.worker_id),
+          },
         );
       }
     } catch (err) {
@@ -265,8 +261,8 @@ export class BotNotificationService {
       const tpl = WHATSAPP_TEMPLATES.unlockExpiredConversion;
       await this.whatsApp.sendTemplateMessage(
         profile.phone,
-        tpl.contentSid,
-        tpl.variables({ amount }),
+        'unlockExpiredConversion',
+        { amount },
       );
     } catch (err) {
       this.logger.warn(
@@ -287,8 +283,8 @@ export class BotNotificationService {
       const tpl = WHATSAPP_TEMPLATES.applicationRejected;
       await this.whatsApp.sendTemplateMessage(
         app.worker.phone,
-        tpl.contentSid,
-        tpl.variables(),
+        'applicationRejected',
+        undefined,
       );
     } catch (err) {
       this.logger.warn(
@@ -335,15 +331,15 @@ export class BotNotificationService {
       const tpl = WHATSAPP_TEMPLATES.cancellation;
       await this.whatsApp.sendTemplateMessage(
         app.job_offer.employer.phone,
-        tpl.contentSid,
-        tpl.variables({
+        'cancellation',
+        {
           workerName: `${app.worker.first_name} ${app.worker.last_name}`,
           offerTitle: app.job_offer.title,
           date: date ?? 'Non précisée',
           reason: reason ?? '',
           penaltyStatus,
           jobOfferId: app.job_offer.id,
-        }),
+        },
       );
 
       // Set the POST_CANCELLATION_ACTIONS state so 1/2/3 actually do
@@ -421,8 +417,8 @@ export class BotNotificationService {
       const tpl = WHATSAPP_TEMPLATES.jobRecommendation;
       await this.whatsApp.sendTemplateMessage(
         profile.phone,
-        tpl.contentSid,
-        tpl.variables({
+        'jobRecommendation',
+        {
           firstName: profile.first_name,
           title: offer.title,
           amount: formatAmount(
@@ -433,7 +429,7 @@ export class BotNotificationService {
           date: dateStr ?? 'Non précisée',
           // URL suffix for the CTA button (/offres/{{6}}).
           jobOfferId,
-        }),
+        },
       );
     } catch (err) {
       this.logger.warn(

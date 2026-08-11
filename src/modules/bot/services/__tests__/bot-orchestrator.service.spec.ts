@@ -270,9 +270,7 @@ describe('BotOrchestratorService', () => {
       // Asserted against the registry, not a literal: a hardcoded SID passes
       // happily while the wrong template goes out, which is exactly how the
       // old text-only welcome survived the switch to the card.
-      expect(result[0]).toContain(
-        `[TPL:${WHATSAPP_TEMPLATES.welcomeUnregisteredCard.contentSid}]`,
-      );
+      expect(result[0]).toContain('[TPL:welcomeUnregisteredCard]');
     });
 
     it('returns INACTIVE_MESSAGE when account is not ACTIVE', async () => {
@@ -481,9 +479,7 @@ describe('BotOrchestratorService', () => {
           verification_status: 'PENDING',
         });
         const result = await service.handle(PROFILE_ID, PHONE, input);
-        expect(result[0]).toContain(
-          `[TPL:${WHATSAPP_TEMPLATES.kycPendingMenu.contentSid}]`,
-        );
+        expect(result[0]).toContain('[TPL:kycPendingMenu]');
       }
       expect(deps.prisma.profile.update).not.toHaveBeenCalled();
     });

@@ -1,0 +1,57 @@
+{
+  "version": "7.0",
+  "screens": [
+    {
+      "id": "FEEDBACK",
+      "title": "Votre avis",
+      "terminal": true,
+      "success": true,
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "TextBody",
+            "text": "Merci d'avoir utilisé Rabotka ! Votre avis nous aide à améliorer le service."
+          },
+          {
+            "type": "Form",
+            "name": "feedback_form",
+            "children": [
+              {
+                "type": "RadioButtonsGroup",
+                "name": "score",
+                "label": "Votre note",
+                "required": true,
+                "data-source": [
+                  { "id": "5", "title": "⭐⭐⭐⭐⭐ Excellent" },
+                  { "id": "4", "title": "⭐⭐⭐⭐ Très bien" },
+                  { "id": "3", "title": "⭐⭐⭐ Correct" },
+                  { "id": "2", "title": "⭐⭐ Peut mieux faire" },
+                  { "id": "1", "title": "⭐ Décevant" }
+                ]
+              },
+              {
+                "type": "TextArea",
+                "name": "comment",
+                "label": "Un commentaire ?",
+                "helper-text": "Facultatif",
+                "required": false
+              },
+              {
+                "type": "Footer",
+                "label": "Envoyer",
+                "on-click-action": {
+                  "name": "complete",
+                  "payload": {
+                    "score": "${form.score}",
+                    "comment": "${form.comment}"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

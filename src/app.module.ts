@@ -2,6 +2,7 @@ import { ArcjetModule, detectBot, fixedWindow, shield } from '@arcjet/nest';
 import { Module } from '@nestjs/common';
 import { createArcjetLoggerAdapter } from './common/utils/arcjet-logger.adapter.js';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { validateWhatsappEnv } from './modules/whatsapp/whatsapp.config';
 import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { MailerModule } from '@nestjs-modules/mailer';
@@ -14,6 +15,7 @@ import { AdminCacheModule } from './common/services/cache/admin-cache.module';
 import { AdminArchiveModule } from './modules/admin-archive/admin-archive.module';
 import { CollaborationGraphModule } from './modules/collaboration-graph/collaboration-graph.module';
 import { RedisModule } from './common/services/redis/redis.module';
+import { IdempotencyModule } from './common/services/idempotency/idempotency.module';
 import { QueueModule } from './common/services/queue/queue.module';
 import { HealthModule } from './modules/health/health.module';
 import { CsrfModule } from './modules/csrf/csrf.module';
@@ -42,6 +44,7 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { ReminderModule } from './modules/bot/reminder/reminder.module';
 import { PaymentsModule } from './modules/payments/payment.module';
 import { KycModule } from './modules/kyc/kyc.module';
+import { FeedbackModule } from './modules/feedback/feedback.module';
 import { SystemConfigModule } from './modules/system-config/system-config.module';
 import { QdrantModule } from './modules/qdrant/qdrant.module';
 import { ClaimModule } from './modules/claim/claim.module';
@@ -70,6 +73,9 @@ import { HttpOnlyArcjetGuard } from './common/guards/http-only-arcjet.guard';
       envFilePath: ['.env.local', '.env'],
       cache: true,
       expandVariables: true,
+      // Fails the boot naming every blank WhatsApp credential, rather than
+      // letting the process start and drop messages silently.
+      validate: validateWhatsappEnv,
     }),
     ThrottlerModule.forRootAsync({
       imports: [ConfigModule],
@@ -125,6 +131,7 @@ import { HttpOnlyArcjetGuard } from './common/guards/http-only-arcjet.guard';
     PrismaModule,
     TwilioModule,
     RedisModule.forRoot(),
+    IdempotencyModule,
     AdminCacheModule,
     AdminArchiveModule,
     CollaborationGraphModule,
@@ -170,6 +177,7 @@ import { HttpOnlyArcjetGuard } from './common/guards/http-only-arcjet.guard';
     DashboardModule,
     PaymentsModule,
     KycModule,
+    FeedbackModule,
     QdrantModule,
     EventEmitterModule.forRoot({ wildcard: true }),
     ContactUnlockModule,

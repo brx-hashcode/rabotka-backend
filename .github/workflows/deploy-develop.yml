@@ -13,6 +13,17 @@ on:
       - closed
   workflow_dispatch:
 
+# One deploy at a time. Three PRs merged seconds apart raced each other on the
+# VPS: concurrent `git fetch` in the same checkout failed with "cannot lock ref
+# 'refs/remotes/origin/develop'" and two of the three deploys died.
+#
+# Queue rather than cancel — killing a run mid `docker compose up` can leave the
+# VPS on a half-swapped container. GitHub keeps only the newest pending run, so
+# a burst of merges converges on the latest commit instead of replaying each.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
 jobs:
   # ───────────────────────────────────────────────────────────────────────────
   # JOB 1: Run test suite
@@ -226,6 +237,40 @@ jobs:
           ADMIN_BASE_URL=$(echo "$VAULT_SECRET" | jq -r '.ADMIN_BASE_URL')
           ALLOW_ORIGINS=$(echo "$VAULT_SECRET" | jq -r '.ALLOW_ORIGINS')
           SUPER_ADMIN_EMAIL=$(echo "$VAULT_SECRET" | jq -r '.SUPER_ADMIN_EMAIL')
+          # --- WhatsApp: provider switch and both credential sets ---
+          # Every value here comes from Vault, the provider included, so moving
+          # an environment between Twilio and the Meta Cloud API is a Vault edit
+          # plus a re-run of this workflow — no code change, no image rebuild.
+          #
+          # The "// empty-string" fallback on every line is load-bearing: a jq
+          # lookup of a key Vault does not have prints the literal string null,
+          # and TWILIO_AUTH_TOKEN=null passes the schema's non-empty check, so
+          # the app would boot clean and fail every send on auth. Empty is the
+          # honest value for absent, and the guard step below makes it fatal.
+          #
+          # NOTE: this heredoc is unquoted, so backticks and dollar-parens in
+          # these comments would be EXECUTED and their output written into the
+          # .env. Keep the prose free of both.
+          #
+          # PROVIDER falls back to empty rather than to twilio: the preprocess
+          # in whatsapp.config.ts already treats blank as twilio, and repeating
+          # the default here is a second source of truth that can drift.
+          #
+          # WHATSAPP_CLOUD_API_VERSION is deliberately NOT in this heredoc. Its
+          # zod default only fires on undefined, not on an empty string, so an
+          # empty line here fails the v25.0 regex and the app will not boot. It
+          # is appended below only when Vault actually has a value.
+          WHATSAPP_PROVIDER=$(echo "$VAULT_SECRET" | jq -r '.WHATSAPP_PROVIDER // ""')
+          TWILIO_ACCOUNT_SID=$(echo "$VAULT_SECRET" | jq -r '.TWILIO_ACCOUNT_SID // ""')
+          TWILIO_AUTH_TOKEN=$(echo "$VAULT_SECRET" | jq -r '.TWILIO_AUTH_TOKEN // ""')
+          TWILIO_WHATSAPP_FROM=$(echo "$VAULT_SECRET" | jq -r '.TWILIO_WHATSAPP_FROM // ""')
+          TWILIO_SMS_FROM=$(echo "$VAULT_SECRET" | jq -r '.TWILIO_SMS_FROM // ""')
+          WHATSAPP_CLOUD_PHONE_NUMBER_ID=$(echo "$VAULT_SECRET" | jq -r '.WHATSAPP_CLOUD_PHONE_NUMBER_ID // ""')
+          WHATSAPP_CLOUD_ACCESS_TOKEN=$(echo "$VAULT_SECRET" | jq -r '.WHATSAPP_CLOUD_ACCESS_TOKEN // ""')
+          WHATSAPP_CLOUD_APP_SECRET=$(echo "$VAULT_SECRET" | jq -r '.WHATSAPP_CLOUD_APP_SECRET // ""')
+          WHATSAPP_CLOUD_VERIFY_TOKEN=$(echo "$VAULT_SECRET" | jq -r '.WHATSAPP_CLOUD_VERIFY_TOKEN // ""')
+          WHATSAPP_CLOUD_WABA_ID=$(echo "$VAULT_SECRET" | jq -r '.WHATSAPP_CLOUD_WABA_ID // ""')
+          WHATSAPP_FEEDBACK_FLOW_ID=$(echo "$VAULT_SECRET" | jq -r '.WHATSAPP_FEEDBACK_FLOW_ID // ""')
           # --- static values ---
           BACKEND_IMAGE=ghcr.io/${{ github.repository_owner }}/rabotka-backend:${{ needs.build-and-push.outputs.image-sha-tag }}
           NODE_ENV=production
@@ -256,10 +301,6 @@ jobs:
           CLOUDINARY_CLOUD_NAME=placeholder
           CLOUDINARY_API_KEY=placeholder
           CLOUDINARY_API_SECRET=placeholder
-          TWILIO_ACCOUNT_SID=placeholder
-          TWILIO_AUTH_TOKEN=placeholder
-          TWILIO_WHATSAPP_FROM=placeholder
-          TWILIO_SMS_FROM=placeholder
           TWILIO_WEBHOOK_BASE_URL=$(echo "$VAULT_SECRET" | jq -r '.TWILIO_WEBHOOK_BASE_URL')
           QDRANT_URL=$(echo "$VAULT_SECRET" | jq -r '.QDRANT_URL')
           QDRANT_API_KEY=$(echo "$VAULT_SECRET" | jq -r '.QDRANT_API_KEY')
@@ -276,9 +317,65 @@ jobs:
           EOF
           sed -i 's/^[[:space:]]*//' /tmp/deploy.env
 
+          # Appended rather than written in the heredoc so the key is ABSENT
+          # when Vault has no value. zod's .default('v25.0') fires on undefined
+          # only — an empty WHATSAPP_CLOUD_API_VERSION= line fails its regex and
+          # takes the container down on boot.
+          WA_API_VERSION=$(echo "$VAULT_SECRET" | jq -r '.WHATSAPP_CLOUD_API_VERSION // ""')
+          if [ -n "$WA_API_VERSION" ]; then
+            echo "WHATSAPP_CLOUD_API_VERSION=$WA_API_VERSION" >> /tmp/deploy.env
+          fi
+
           curl -sf --request POST \
             --header "X-Vault-Token: $TOKEN" \
             "${{ secrets.VAULT_ADDR }}/v1/auth/token/revoke-self" > /dev/null || true
+
+      # Mirrors the discriminated union in whatsapp.config.ts so CI rejects
+      # exactly what the container would — but on the runner, before the VPS is
+      # touched at all.
+      #
+      # Worth its own step because a bad .env currently leaves the environment
+      # broken with NO rollback: rollback() only fires when `docker compose up
+      # -d` itself fails, and that returns success as soon as containers start.
+      # A crash-loop or a silently-misconfigured client sails past it and only
+      # surfaces in smoke-test, a separate job with no rollback path.
+      - name: Verify required WhatsApp secrets are present
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC1091
+          get() { grep -E "^$1=" /tmp/deploy.env | head -1 | cut -d= -f2-; }
+
+          PROVIDER=$(get WHATSAPP_PROVIDER)
+          # Blank inherits the schema's own default rather than assuming here.
+          [ -n "$PROVIDER" ] || PROVIDER=twilio
+
+          case "$PROVIDER" in
+            twilio) REQUIRED="TWILIO_ACCOUNT_SID TWILIO_AUTH_TOKEN TWILIO_WHATSAPP_FROM" ;;
+            cloud)  REQUIRED="WHATSAPP_CLOUD_PHONE_NUMBER_ID WHATSAPP_CLOUD_ACCESS_TOKEN WHATSAPP_CLOUD_APP_SECRET WHATSAPP_CLOUD_VERIFY_TOKEN WHATSAPP_CLOUD_WABA_ID" ;;
+            *)
+              echo "::error::WHATSAPP_PROVIDER must be 'twilio' or 'cloud', got '$PROVIDER'"
+              exit 1
+              ;;
+          esac
+
+          echo "Provider: $PROVIDER"
+          MISSING=""
+          for key in $REQUIRED; do
+            value=$(get "$key")
+            # "null" is what jq writes for a key absent from Vault, and it is
+            # non-empty, so the app would accept it and fail at send time.
+            if [ -z "$value" ] || [ "$value" = "null" ]; then
+              MISSING="$MISSING $key"
+            fi
+          done
+
+          # Report every missing key at once: fixing them one deploy at a time
+          # is three failed runs instead of one.
+          if [ -n "$MISSING" ]; then
+            echo "::error::Missing from Vault (secret/data/apps/rabotka-backend-develop) for provider '$PROVIDER':$MISSING"
+            exit 1
+          fi
+          echo "All required WhatsApp secrets present."
 
       - name: Copy .env to VPS
         run: |

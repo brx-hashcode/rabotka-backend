@@ -1,12 +1,11 @@
 import type { BotProfile, BotState } from '../types/bot-state.types';
-import { FLOW_IDS } from '../bot.constants';
+import { APP_BASE_URL, FLOW_IDS } from '../bot.constants';
 import type { ApplicationService } from '../../application/application.service';
 import type { BotNotificationService } from '../services/bot-notification.service';
 import type { ContactUnlockService } from '../../contact-unlock/contact-unlock.service';
 import type { WalletService } from '../../wallet/wallet.service';
 import type { SystemConfigService } from '../../system-config/system-config.service';
 import type { PrismaService } from '../../../common/services/prisma/prisma.service';
-import { formatContactUnlockPrompt } from '../messages/contact-unlock.messages';
 
 export type AcceptRefuseContext = {
   prisma: PrismaService;
@@ -96,17 +95,19 @@ async function handleAcceptRefuseStep1(args: StepArgs): Promise<FlowResult> {
           };
         }
 
-        const balance = await ctx.walletService.getProfileWalletBalance(
-          profile.id,
-        );
-
-        const unlockPrompt = formatContactUnlockPrompt({
-          name: workerName,
-          amount: fees.employerFeeFcfa,
-          balance,
-          profileType: 'EMPLOYER',
-          isJobLevel: isMultiPerson,
-        });
+        // Payment happens in the app, not in the chat. The in-chat submenu
+        // that used to live here ("1- credit, 2- mobile money, 3- later") is
+        // gone: the app is webview-scoped, so the wallet balance, the operator
+        // choice and the receipt all belong on one page rather than split
+        // across a typed conversation.
+        //
+        // Free-form rather than a template: the employer just typed to accept,
+        // so the 24h window is open and this needs no approval. The outbound
+        // processor rewrites the link into a one-tap `/s/<code>` so the page
+        // opens signed in.
+        const scopeNote = isMultiPerson
+          ? `\nCe paiement couvre *tous les candidats acceptés* pour ce poste.`
+          : '';
 
         return {
           reply: [
@@ -115,20 +116,12 @@ async function handleAcceptRefuseStep1(args: StepArgs): Promise<FlowResult> {
               '',
               'Le travailleur a été notifié.',
               '',
-              unlockPrompt,
+              `Il reste une étape : réglez les frais de déverrouillage (*${fees.employerFeeFcfa} FCFA*) pour recevoir les coordonnées de *${workerName}*.${scopeNote}`,
+              '',
+              `${APP_BASE_URL}/candidatures/${attempt.application_id}/paiement`,
             ].join('\n'),
           ],
-          nextState: {
-            flowId: FLOW_IDS.UNLOCK_CONTACT,
-            step: 1,
-            payload: {
-              attemptId: attempt.id,
-              otherName: workerName,
-              amount: fees.employerFeeFcfa,
-              expiresAt: attempt.expires_at.toISOString(),
-            },
-            updatedAt: new Date().toISOString(),
-          },
+          clearState: true,
         };
       }
 
@@ -202,9 +195,7 @@ async function handleAcceptRefuseStep3(args: StepArgs): Promise<FlowResult> {
 
   if (normalized === '2' || normalized === 'annuler') {
     return {
-      reply: [
-        '*Refus annulé.* La candidature reste en attente.',
-      ],
+      reply: ['*Refus annulé.* La candidature reste en attente.'],
       clearState: true,
     };
   }
@@ -267,9 +258,7 @@ export async function runAcceptRefuseCandidateFlow(
 
   if (profile.profile_type !== 'EMPLOYER') {
     return {
-      reply: [
-        '❌ Seuls les employeurs peuvent gérer les candidatures.',
-      ],
+      reply: ['❌ Seuls les employeurs peuvent gérer les candidatures.'],
       clearState: true,
     };
   }

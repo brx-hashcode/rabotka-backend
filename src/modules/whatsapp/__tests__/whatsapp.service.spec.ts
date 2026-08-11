@@ -3,10 +3,23 @@ import { BadRequestException } from '@nestjs/common';
 import { MessageDirection, BotPlatform } from '@prisma/client';
 import { WhatsAppService } from '../whatsapp.service';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
-import { TwilioService } from '../../../common/services/twilio/twilio.service';
+import {
+  WHATSAPP_PROVIDER,
+  WhatsappError,
+  type WhatsappProvider,
+} from '../contracts';
+
+/** What the provider throws when it has no client at all. */
+const notConfigured = () =>
+  new WhatsappError({
+    code: 'NOT_CONFIGURED',
+    provider: 'twilio',
+    message: 'Twilio is not configured',
+  });
 import { REDIS_CONNECTION } from '../../../common/services/redis/redis.constants';
 import { ConfigService } from '@nestjs/config';
 import { WalletService } from '../../wallet/wallet.service';
+import { IdempotencyService } from '../../../common/services/idempotency/idempotency.service';
 
 // Prevent the real Twilio SDK from being loaded in this test suite
 jest.mock('twilio', () => {
@@ -25,8 +38,9 @@ const PHONE = '+24200000001';
 describe('WhatsAppService', () => {
   let service: WhatsAppService;
   let prisma: jest.Mocked<PrismaService>;
-  let twilioService: jest.Mocked<TwilioService>;
+  let provider: jest.Mocked<WhatsappProvider>;
   let redis: { get: jest.Mock; set: jest.Mock; del: jest.Mock };
+  let module: TestingModule;
 
   beforeEach(async () => {
     redis = {
@@ -46,18 +60,24 @@ describe('WhatsAppService', () => {
       },
     };
 
-    const mockTwilioService = {
-      sendWhatsApp: jest.fn().mockResolvedValue('SM-sid'),
-      sendWhatsAppMedia: jest.fn().mockResolvedValue('SM-media-sid'),
-      sendWhatsAppTemplate: jest.fn().mockResolvedValue('SM-template-sid'),
+    const ok = (id: string) => ({ providerMessageId: id, provider: 'twilio' });
+    const mockProvider = {
+      name: 'twilio',
+      capabilities: { typingIndicator: false, readReceipts: false },
+      sendText: jest.fn().mockResolvedValue(ok('SM-sid')),
+      sendMedia: jest.fn().mockResolvedValue(ok('SM-media-sid')),
+      sendTemplate: jest.fn().mockResolvedValue(ok('SM-template-sid')),
+      sendTemplateWithVariables: jest
+        .fn()
+        .mockResolvedValue(ok('SM-template-sid')),
       isConfigured: jest.fn().mockReturnValue(true),
     };
 
-    const module: TestingModule = await Test.createTestingModule({
+    module = await Test.createTestingModule({
       providers: [
         WhatsAppService,
         { provide: PrismaService, useValue: mockPrismaService },
-        { provide: TwilioService, useValue: mockTwilioService },
+        { provide: WHATSAPP_PROVIDER, useValue: mockProvider },
         { provide: REDIS_CONNECTION, useValue: redis },
         {
           provide: ConfigService,
@@ -73,16 +93,25 @@ describe('WhatsAppService', () => {
               .mockResolvedValue({ balance: 0 }),
           },
         },
+        {
+          // Claims granted by default, so these tests keep exercising the send
+          // path rather than the duplicate guard. The guard has its own tests.
+          provide: IdempotencyService,
+          useValue: {
+            claim: jest.fn().mockResolvedValue(true),
+            release: jest.fn().mockResolvedValue(undefined),
+          },
+        },
       ],
     }).compile();
 
     service = module.get<WhatsAppService>(WhatsAppService);
     prisma = module.get(PrismaService);
-    twilioService = module.get(TwilioService);
+    provider = module.get(WHATSAPP_PROVIDER);
   });
 
   describe('isConfigured()', () => {
-    it('delegates to twilioService.isConfigured', () => {
+    it('delegates to the provider', () => {
       expect(service.isConfigured()).toBe(true);
     });
   });
@@ -91,7 +120,7 @@ describe('WhatsAppService', () => {
     it('sends text and returns true when SID is returned', async () => {
       const result = await service.sendTextMessage(PHONE, 'Hello');
       expect(result).toBe(true);
-      expect(twilioService.sendWhatsApp).toHaveBeenCalledWith(PHONE, 'Hello');
+      expect(provider.sendText).toHaveBeenCalledWith(PHONE, 'Hello');
     });
 
     it('saves outbound message when profileId is provided', async () => {
@@ -111,8 +140,8 @@ describe('WhatsAppService', () => {
       expect(prisma.message.create).not.toHaveBeenCalled();
     });
 
-    it('returns false when twilio returns null', async () => {
-      (twilioService.sendWhatsApp as jest.Mock).mockResolvedValue(null);
+    it('returns false when the provider is not configured', async () => {
+      (provider.sendText as jest.Mock).mockRejectedValue(notConfigured());
 
       const result = await service.sendTextMessage(PHONE, 'Hello');
       expect(result).toBe(false);
@@ -127,15 +156,15 @@ describe('WhatsAppService', () => {
         'caption',
       );
       expect(result).toBe(true);
-      expect(twilioService.sendWhatsAppMedia).toHaveBeenCalledWith(
-        PHONE,
-        'https://x.com/img.jpg',
-        'caption',
-      );
+      expect(provider.sendMedia).toHaveBeenCalledWith(PHONE, {
+        kind: 'image',
+        url: 'https://x.com/img.jpg',
+        caption: 'caption',
+      });
     });
 
-    it('returns false when twilio returns null', async () => {
-      (twilioService.sendWhatsAppMedia as jest.Mock).mockResolvedValue(null);
+    it('returns false when the provider is not configured', async () => {
+      (provider.sendMedia as jest.Mock).mockRejectedValue(notConfigured());
 
       const result = await service.sendMediaMessage(
         PHONE,
@@ -152,21 +181,21 @@ describe('WhatsAppService', () => {
     it.each([
       [
         'sendTextMessage',
-        'sendWhatsApp' as const,
+        'sendText' as const,
         () => service.sendTextMessage(PHONE, 'Hello'),
       ],
       [
         'sendTemplateMessage',
-        'sendWhatsAppTemplate' as const,
-        () => service.sendTemplateMessage(PHONE, 'HX123', { 1: '000000' }),
+        'sendTemplate' as const,
+        () => service.sendTemplateMessage(PHONE, 'otp', '000000'),
       ],
       [
         'sendMediaMessage',
-        'sendWhatsAppMedia' as const,
+        'sendMedia' as const,
         () => service.sendMediaMessage(PHONE, 'https://x.com/img.jpg'),
       ],
     ])('%s returns false when twilio throws', async (_name, method, call) => {
-      (twilioService[method] as jest.Mock).mockRejectedValue(
+      (provider[method] as jest.Mock).mockRejectedValue(
         new Error('[Twilio 20003] Authentication Error - invalid username'),
       );
 
@@ -255,11 +284,11 @@ describe('WhatsAppService', () => {
         phone: PHONE,
         first_name: 'Alice',
       });
-      (twilioService.isConfigured as jest.Mock).mockReturnValue(true);
+      (provider.isConfigured as jest.Mock).mockReturnValue(true);
 
       await service.verifyWhatsAppToken('valid-token');
 
-      expect(twilioService.sendWhatsApp).toHaveBeenCalled();
+      expect(provider.sendText).toHaveBeenCalled();
     });
 
     it('does not send message when Twilio is not configured', async () => {
@@ -268,11 +297,11 @@ describe('WhatsAppService', () => {
         phone: PHONE,
         first_name: 'Alice',
       });
-      (twilioService.isConfigured as jest.Mock).mockReturnValue(false);
+      (provider.isConfigured as jest.Mock).mockReturnValue(false);
 
       await service.verifyWhatsAppToken('valid-token');
 
-      expect(twilioService.sendWhatsApp).not.toHaveBeenCalled();
+      expect(provider.sendText).not.toHaveBeenCalled();
     });
   });
 
@@ -370,9 +399,9 @@ describe('WhatsAppService', () => {
       });
 
       expect(result).toEqual({ mode: 'FREE_FORM', sent: true });
-      expect(twilioService.sendWhatsAppTemplate).not.toHaveBeenCalled();
+      expect(provider.sendTemplate).not.toHaveBeenCalled();
 
-      const [, body] = (twilioService.sendWhatsApp as jest.Mock).mock.calls[0];
+      const [, body] = (provider.sendText as jest.Mock).mock.calls[0];
       expect(body).toContain('Bonjour,\n\nVotre compte est actif.');
       expect(body).toContain('_Fariol Blondeau — L’équipe Rabotka_');
     });
@@ -386,15 +415,15 @@ describe('WhatsAppService', () => {
       });
 
       expect(result).toEqual({ mode: 'TEMPLATE', sent: true });
-      expect(twilioService.sendWhatsApp).not.toHaveBeenCalled();
+      expect(provider.sendText).not.toHaveBeenCalled();
 
-      const [, contentSid, variables] = (
-        twilioService.sendWhatsAppTemplate as jest.Mock
-      ).mock.calls[0];
-      expect(contentSid).toBeTruthy();
-      // Meta rejects newlines inside a variable.
-      expect(variables['1']).toBe('Bonjour, · Votre compte est actif.');
-      expect(variables['2']).toBe('Fariol Blondeau');
+      const [, key, params] = (provider.sendTemplate as jest.Mock).mock
+        .calls[0];
+      expect(key).toBe('adminMessage');
+      // Meta rejects newlines inside a variable, so the flattening has to
+      // happen before the params leave this service.
+      expect(params.message).toBe('Bonjour, · Votre compte est actif.');
+      expect(params.adminName).toBe('Fariol Blondeau');
     });
 
     it('persists the delivered body with the sending admin, exactly once', async () => {
@@ -417,7 +446,7 @@ describe('WhatsAppService', () => {
 
     it('reports a Twilio failure instead of swallowing it, and persists nothing', async () => {
       closedWindow();
-      (twilioService.sendWhatsAppTemplate as jest.Mock).mockRejectedValue(
+      (provider.sendTemplate as jest.Mock).mockRejectedValue(
         new Error('[Twilio 63016] outside the 24h window — message failed'),
       );
 
@@ -436,7 +465,7 @@ describe('WhatsAppService', () => {
 
     it('reports failure when Twilio is unconfigured and returns no sid', async () => {
       openWindow();
-      (twilioService.sendWhatsApp as jest.Mock).mockResolvedValue(null);
+      (provider.sendText as jest.Mock).mockRejectedValue(notConfigured());
 
       const result = await service.sendAdminMessage({
         ...base,
@@ -454,7 +483,7 @@ describe('WhatsAppService', () => {
         service.sendAdminMessage({ ...base, message: 'x'.repeat(701) }),
       ).rejects.toBeInstanceOf(BadRequestException);
 
-      expect(twilioService.sendWhatsAppTemplate).not.toHaveBeenCalled();
+      expect(provider.sendTemplate).not.toHaveBeenCalled();
     });
 
     it('does not apply the template limit while the window is open', async () => {
@@ -485,10 +514,93 @@ describe('WhatsAppService', () => {
         message: 'Compte actif.',
       });
 
-      const [, , variables] = (twilioService.sendWhatsAppTemplate as jest.Mock)
-        .mock.calls[0];
-      // Meta rejects an empty ContentVariables value outright.
-      expect(variables['2']).toBe('Le support');
+      const [, , params] = (provider.sendTemplate as jest.Mock).mock.calls[0];
+      // Meta rejects an empty variable value outright.
+      expect(params.adminName).toBe('Le support');
+    });
+  });
+
+  describe('outbound duplicate guard', () => {
+    // The provider-agnostic safety net: whatever the upstream cause, this is
+    // the last thing between a duplicate and the reader.
+    function guard() {
+      return module.get(IdempotencyService) as unknown as {
+        claim: jest.Mock;
+      };
+    }
+
+    it('sends when the claim is granted', async () => {
+      guard().claim.mockResolvedValue(true);
+      await expect(
+        service.sendTemplateMessage(PHONE, 'otp', '000000'),
+      ).resolves.toBe(true);
+      expect(provider.sendTemplate).toHaveBeenCalled();
+    });
+
+    it('blocks the send when the claim is refused', async () => {
+      guard().claim.mockResolvedValue(false);
+      await expect(
+        service.sendTemplateMessage(PHONE, 'otp', '000000'),
+      ).resolves.toBe(false);
+      expect(provider.sendTemplate).not.toHaveBeenCalled();
+    });
+
+    it('does not throw on a blocked send', async () => {
+      // A duplicate is not an error. Throwing would fail a BullMQ job that has
+      // nothing left to do, and burn its retries.
+      guard().claim.mockResolvedValue(false);
+      await expect(
+        service.sendTemplateMessage(PHONE, 'otp', '000000'),
+      ).resolves.toBe(false);
+    });
+
+    it('keys on recipient, template and params together', async () => {
+      guard().claim.mockResolvedValue(true);
+      await service.sendTemplateMessage(PHONE, 'otp', '000000');
+
+      const [key, ttl] = guard().claim.mock.calls[0] as [string, number];
+      expect(key).toContain('wa:out:');
+      expect(key).toContain(PHONE);
+      expect(key).toContain('otp');
+      expect(ttl).toBe(60);
+    });
+
+    it('gives a different key to different params, so a resend is not eaten', async () => {
+      // An OTP resend the reader asked for is not a duplicate. Keying on the
+      // template alone would silently swallow the second code.
+      guard().claim.mockResolvedValue(true);
+      await service.sendTemplateMessage(PHONE, 'otp', '111111');
+      await service.sendTemplateMessage(PHONE, 'otp', '222222');
+
+      const keys = guard().claim.mock.calls.map((c) => c[0] as string);
+      expect(keys[0]).not.toBe(keys[1]);
+      expect(provider.sendTemplate).toHaveBeenCalledTimes(2);
+    });
+
+    it('gives the same key to an identical repeat', async () => {
+      guard().claim.mockResolvedValue(true);
+      await service.sendTemplateMessage(PHONE, 'otp', '000000');
+      await service.sendTemplateMessage(PHONE, 'otp', '000000');
+
+      const keys = guard().claim.mock.calls.map((c) => c[0] as string);
+      expect(keys[0]).toBe(keys[1]);
+    });
+
+    it('sends anyway when Redis is unreachable', async () => {
+      // Fails OPEN. A duplicate is an annoyance; silence is a broken product.
+      guard().claim.mockRejectedValue(new Error('redis down'));
+      await expect(
+        service.sendTemplateMessage(PHONE, 'otp', '000000'),
+      ).resolves.toBe(true);
+      expect(provider.sendTemplate).toHaveBeenCalled();
+    });
+
+    it('guards the legacy variables path too', async () => {
+      guard().claim.mockResolvedValue(false);
+      await expect(
+        service.sendTemplateMessageWithVariables(PHONE, 'otp', { '1': 'x' }),
+      ).resolves.toBe(false);
+      expect(provider.sendTemplateWithVariables).not.toHaveBeenCalled();
     });
   });
 });

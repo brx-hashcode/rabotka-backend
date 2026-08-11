@@ -25,7 +25,7 @@ export function welcomePlatformMessage(): string {
   const { contentSid, variables } = WHATSAPP_TEMPLATES.welcomePlatform;
 
   if (contentSid) {
-    return templateReply(contentSid, variables(WELCOME_PATH));
+    return templateReply('welcomePlatform', variables(WELCOME_PATH));
   }
 
   // Kept word-for-word in step with the v3 card's title, so a rollback to the
@@ -57,5 +57,5 @@ export function welcomePlatformMessage(): string {
  */
 export function welcomeUnregisteredMessage(): string {
   const card = WHATSAPP_TEMPLATES.welcomeUnregisteredCard;
-  return templateReply(card.contentSid, card.variables());
+  return templateReply('welcomeUnregisteredCard', card.variables());
 }

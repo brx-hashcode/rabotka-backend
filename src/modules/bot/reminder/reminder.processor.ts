@@ -289,11 +289,11 @@ export class ReminderProcessor {
       const sent = await this.whatsApp
         .sendTemplateMessage(
           phone,
-          autoStartTpl.contentSid,
-          autoStartTpl.variables({
+          'autoStarted',
+          {
             offerTitle: offer.title,
             jobOfferId: offer.id,
-          }),
+          },
           offer.employer_id,
         )
         .then(() => true)
@@ -338,11 +338,11 @@ export class ReminderProcessor {
     await this.whatsApp
       .sendTemplateMessage(
         workerPhone,
-        statusTpl.contentSid,
-        statusTpl.variables({
+        'statusCheck',
+        {
           jobTitle: offer.title,
           jobOfferId: offer.id,
-        }),
+        },
         app.worker_id,
       )
       .catch((err) =>
@@ -517,8 +517,8 @@ export class ReminderProcessor {
     await this.whatsApp
       .sendTemplateMessage(
         phone,
-        tpl.contentSid,
-        tpl.variables({ offerTitle }),
+        'offerExpiredApplicant',
+        { offerTitle },
         worker.id,
       )
       .catch((err) => {
@@ -542,8 +542,8 @@ export class ReminderProcessor {
     const sent = await this.whatsApp
       .sendTemplateMessage(
         phone,
-        tpl.contentSid,
-        tpl.variables({ offerTitle: offer.title, jobOfferId: offer.id }),
+        'offerExpiredEmployer',
+        { offerTitle: offer.title, jobOfferId: offer.id },
         offer.employer_id,
       )
       .then(() => true)
@@ -611,8 +611,8 @@ export class ReminderProcessor {
       await this.whatsApp
         .sendTemplateMessage(
           app.worker.phone,
-          unavailableTpl.contentSid,
-          unavailableTpl.variables({ offerTitle: offer.title }),
+          'offerUnavailableWorker',
+          { offerTitle: offer.title },
         )
         .catch((err) =>
           this.logger.warn(
@@ -663,11 +663,11 @@ export class ReminderProcessor {
     const sent = await this.whatsApp
       .sendTemplateMessage(
         phone,
-        tpl.contentSid,
-        tpl.variables({
+        'statusCheck',
+        {
           jobTitle: offer.title,
           jobOfferId,
-        }),
+        },
         workerId,
       )
       .then(() => true)
@@ -754,8 +754,8 @@ export class ReminderProcessor {
     const tpl = WHATSAPP_TEMPLATES.reminder24h;
     await this.whatsApp.sendTemplateMessage(
       app.worker.phone,
-      tpl.contentSid,
-      tpl.variables({
+      'reminder24h',
+      {
         offerTitle: app.job_offer.title,
         date: formatDate(app.job_offer.scheduled_at),
         address: jobLocationLabel(app.job_offer),
@@ -767,7 +767,7 @@ export class ReminderProcessor {
         // URL suffix: the reminder deep-links to this exact mission rather than
         // dropping the worker on a list to find it.
         applicationId,
-      }),
+      },
     );
 
     // Set bot state so the worker's reply (1=cancel, 2=keep) routes to the cancel flow.
@@ -848,15 +848,15 @@ export class ReminderProcessor {
       const tpl = WHATSAPP_TEMPLATES.reminderStart;
       await this.whatsApp.sendTemplateMessage(
         app.worker.phone,
-        tpl.contentSid,
-        tpl.variables({
+        'reminderStart',
+        {
           offerTitle: app.job_offer.title,
           time,
           address: jobLocationLabel(app.job_offer),
           employerName: `${app.job_offer.employer.first_name} ${app.job_offer.employer.last_name}`,
           employerPhone: app.job_offer.employer.phone,
           applicationId,
-        }),
+        },
       );
       this.logger.log(
         `Reminder start sent for application ${applicationId} (alreadyStarted=${alreadyStarted})`,
