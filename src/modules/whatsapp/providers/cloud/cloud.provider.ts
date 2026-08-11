@@ -1,5 +1,5 @@
 import { Logger } from '@nestjs/common';
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import type { CloudProviderConfig } from '../../whatsapp.config';
 import {
   WhatsappError,
@@ -393,6 +393,23 @@ export class CloudProvider implements WhatsappProvider {
       .update(rawBody)
       .digest('hex')
       .slice(0, 20);
+  }
+
+  /**
+   * A stable fingerprint of the app secret actually in use.
+   *
+   * SHA-256 of the secret, truncated to 8 hex characters. One-way and far too
+   * short to attack, so it is safe in a log — but it pins down WHICH secret the
+   * running process holds, which `printenv` on the host cannot: that shows the
+   * container's environment, not the value this object was constructed with.
+   *
+   * Also reports the length, since a stray space or CR survives `env_file`
+   * (docker compose does not trim) and is invisible in every paste.
+   */
+  appSecretFingerprint(): string {
+    const s = this.config.appSecret;
+    const fp = createHash('sha256').update(s).digest('hex').slice(0, 8);
+    return `${fp}/${s.length}ch`;
   }
 
   /** Constant-time compare of the GET handshake token. */
