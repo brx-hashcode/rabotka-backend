@@ -526,6 +526,7 @@ describe('WhatsAppService', () => {
     function guard() {
       return module.get(IdempotencyService) as unknown as {
         claim: jest.Mock;
+        release: jest.Mock;
       };
     }
 
@@ -537,21 +538,44 @@ describe('WhatsAppService', () => {
       expect(provider.sendTemplate).toHaveBeenCalled();
     });
 
-    it('blocks the send when the claim is refused', async () => {
+    it('does not send again when the claim is refused', async () => {
       guard().claim.mockResolvedValue(false);
-      await expect(
-        service.sendTemplateMessage(PHONE, 'otp', '000000'),
-      ).resolves.toBe(false);
+      await service.sendTemplateMessage(PHONE, 'otp', '000000');
       expect(provider.sendTemplate).not.toHaveBeenCalled();
     });
 
-    it('does not throw on a blocked send', async () => {
-      // A duplicate is not an error. Throwing would fail a BullMQ job that has
-      // nothing left to do, and burn its retries.
+    it('reports a blocked duplicate as SENT, not failed', async () => {
+      // The message was delivered — seconds ago. Returning false made the
+      // outbound processor throw, and the job dead-lettered for the crime of
+      // correctly preventing a duplicate.
       guard().claim.mockResolvedValue(false);
       await expect(
         service.sendTemplateMessage(PHONE, 'otp', '000000'),
+      ).resolves.toBe(true);
+    });
+
+    it('hands the claim back when the send fails, so the retry can send', async () => {
+      // Without this the three BullMQ attempts (immediate, +2s, +4s) all land
+      // inside the 60s window, attempts two and three never reach the provider,
+      // and one transient failure becomes permanent.
+      guard().claim.mockResolvedValue(true);
+      (provider.sendTemplate as jest.Mock).mockRejectedValue(
+        new Error('gateway timeout'),
+      );
+
+      await expect(
+        service.sendTemplateMessage(PHONE, 'otp', '000000'),
       ).resolves.toBe(false);
+
+      expect(guard().release).toHaveBeenCalledWith(
+        expect.stringContaining('wa:out:'),
+      );
+    });
+
+    it('keeps the claim when the send succeeds', async () => {
+      guard().claim.mockResolvedValue(true);
+      await service.sendTemplateMessage(PHONE, 'otp', '000000');
+      expect(guard().release).not.toHaveBeenCalled();
     });
 
     it('keys on recipient, template and params together', async () => {
@@ -599,8 +623,21 @@ describe('WhatsAppService', () => {
       guard().claim.mockResolvedValue(false);
       await expect(
         service.sendTemplateMessageWithVariables(PHONE, 'otp', { '1': 'x' }),
-      ).resolves.toBe(false);
+      ).resolves.toBe(true);
       expect(provider.sendTemplateWithVariables).not.toHaveBeenCalled();
+    });
+
+    it('releases on the legacy path too when the send fails', async () => {
+      guard().claim.mockResolvedValue(true);
+      (provider.sendTemplateWithVariables as jest.Mock).mockRejectedValue(
+        new Error('gateway timeout'),
+      );
+
+      await expect(
+        service.sendTemplateMessageWithVariables(PHONE, 'otp', { '1': 'x' }),
+      ).resolves.toBe(false);
+
+      expect(guard().release).toHaveBeenCalled();
     });
   });
 });

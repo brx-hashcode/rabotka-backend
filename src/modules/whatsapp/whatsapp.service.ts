@@ -191,6 +191,32 @@ export class WhatsAppService {
     return false;
   }
 
+  /**
+   * Undo the guard when the send did not happen.
+   *
+   * The claim is taken before the send so two concurrent callers cannot both
+   * dispatch, which means a failure has to hand it back — otherwise the guard
+   * blocks the very retry that would have delivered the message.
+   *
+   * Swallows its own errors: this runs on a path that has already failed, and a
+   * Redis blip here must not replace the real send error with a confusing one.
+   * The key expires on its own within the window anyway.
+   */
+  private async releaseOutbound(
+    phone: string,
+    template: TemplateKey,
+    params: unknown,
+  ): Promise<void> {
+    try {
+      await this.idempotency.release(outboundKey(phone, template, params));
+    } catch (err) {
+      this.logger.debug(
+        `Could not release the outbound guard for ${template}: ` +
+          `${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
   async sendTextMessage(
     phone: string,
     text: string,
@@ -226,12 +252,22 @@ export class WhatsAppService {
     profileId?: string,
     body?: string,
   ): Promise<boolean> {
-    if (!(await this.claimOutbound(phone, template, params))) return false;
+    // `true`, not `false`, when the guard blocks: from the caller's point of
+    // view the message WAS delivered, seconds ago. The outbound processor turns
+    // a false into a throw so BullMQ retries, so returning false here
+    // dead-lettered jobs for the crime of correctly preventing a duplicate.
+    if (!(await this.claimOutbound(phone, template, params))) return true;
 
     const sid = await this.attempt(`template ${template}`, phone, () =>
       this.provider.sendTemplate(phone, template, params),
     );
     const sent = sid != null;
+
+    // Nothing went out, so the guard must not keep blocking. Without this the
+    // three BullMQ attempts (immediate, +2s, +4s) all land inside the 60s
+    // window, attempts two and three never reach the provider at all, and one
+    // transient failure becomes a permanent one.
+    if (!sent) await this.releaseOutbound(phone, template, params);
 
     if (sent && profileId && body) {
       await this.saveMessage(profileId, MessageDirection.OUTBOUND, body).catch(
@@ -259,12 +295,15 @@ export class WhatsAppService {
     profileId?: string,
     body?: string,
   ): Promise<boolean> {
-    if (!(await this.claimOutbound(phone, template, variables))) return false;
+    // See sendTemplateMessage: blocked means already delivered, not failed.
+    if (!(await this.claimOutbound(phone, template, variables))) return true;
 
     const sid = await this.attempt(`template ${template}`, phone, () =>
       this.provider.sendTemplateWithVariables(phone, template, variables),
     );
     const sent = sid != null;
+
+    if (!sent) await this.releaseOutbound(phone, template, variables);
 
     if (sent && profileId && body) {
       await this.saveMessage(profileId, MessageDirection.OUTBOUND, body).catch(
