@@ -6,8 +6,15 @@ import type { WhatsAppTemplateName } from './whatsapp-templates';
 // welcome.messages.ts reads this (the cards bake the image in), and that branch
 // is unreachable while contentSid is set, which is why a dead image URL went
 // unnoticed.
+//
+// `||` rather than `??`, deliberately. The deploy writes this key as
+// `$(jq -r '.CLOUDFLARE_PUBLIC_BASE_URL // ""')`, so a value absent from Vault
+// arrives as an EMPTY STRING, not undefined — and `??` only falls back on
+// null/undefined. That left the base as '' and coverImageUrl() returning the
+// bare path `/whatsapp/cover-rabotka.jpg`, which Meta cannot fetch:
+// `131053 Downloading media from weblink failed with http code 404`.
 export const WHATSAPP_MEDIA_BASE = (
-  process.env.CLOUDFLARE_PUBLIC_BASE_URL ??
+  process.env.CLOUDFLARE_PUBLIC_BASE_URL?.trim() ||
   'https://pub-1c3331ee6be84a71b4be0db2b3734ac7.r2.dev'
 ).replace(/\/$/, '');
 
