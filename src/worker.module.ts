@@ -11,6 +11,8 @@ import {
 import { MailerModule } from '@nestjs-modules/mailer';
 import { PrismaModule } from './common/services/prisma/prisma.module';
 import { RedisModule } from './common/services/redis/redis.module';
+import { IdempotencyModule } from './common/services/idempotency/idempotency.module';
+import { IdempotencyService } from './common/services/idempotency/idempotency.service';
 import { QueueModule } from './common/services/queue/queue.module';
 import { MailModule } from './modules/mail/mail.module';
 import { TwilioService } from './common/services/twilio/twilio.service';
@@ -60,6 +62,7 @@ export class WorkerModule {
         validate: validateWhatsappEnv,
       }),
       RedisModule.forRoot(),
+      IdempotencyModule,
       QueueModule.forRoot(),
       MailerModule.forRootAsync({
         imports: [ConfigModule],
@@ -126,13 +129,23 @@ export class WorkerModule {
           provider: WhatsappProvider,
           config: ConfigService,
           wallet: WalletService,
-        ) => new WhatsAppService(redis, prisma, provider, config, wallet),
+          idempotency: IdempotencyService,
+        ) =>
+          new WhatsAppService(
+            redis,
+            prisma,
+            provider,
+            config,
+            wallet,
+            idempotency,
+          ),
         inject: [
           REDIS_CONNECTION,
           PrismaService,
           WHATSAPP_PROVIDER,
           ConfigService,
           WalletService,
+          IdempotencyService,
         ],
       },
     ];

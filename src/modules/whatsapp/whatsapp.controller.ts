@@ -113,9 +113,28 @@ export class WhatsAppController {
       throw new BadRequestException("Champ 'From' manquant");
     }
 
-    // Normalization, de-duplication, rate limiting and the enqueue are shared
-    // with the Cloud webhook so the two cannot drift.
-    await this.ingest.ingest(normalizeTwilioWebhook(body));
+    // Past this point NOTHING may throw. The signature is verified, so the
+    // request is genuine; a 5xx from here would only make the provider replay a
+    // message we have already accepted responsibility for, and replays are the
+    // problem this pipeline exists to stop.
+    //
+    // Deliberately after signature verification, not around it: a bad signature
+    // must still be a 403.
+    //
+    // `ingest()` already swallows per-event failures; this covers the
+    // normalizer, which can throw on a payload shape we have not seen.
+    try {
+      // Normalization, rate limiting and the enqueue are shared with the Cloud
+      // webhook so the two cannot drift. De-duplication is in the worker.
+      await this.ingest.ingest(normalizeTwilioWebhook(body), req.requestId);
+    } catch (err) {
+      this.logger.error(
+        `Twilio webhook processing failed after a valid signature — ` +
+          `acknowledged anyway to prevent a replay: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+      );
+    }
   }
 
   private buildWebhookUrl(req: Request): string {
