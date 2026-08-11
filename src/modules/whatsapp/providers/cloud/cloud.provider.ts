@@ -381,6 +381,20 @@ export class CloudProvider implements WhatsappProvider {
     return timingSafeEqual(expected, received);
   }
 
+  /**
+   * The first 20 hex characters of the signature we expected, for diagnostics.
+   *
+   * Safe to log: it is HMAC output, not the key. Truncated anyway, so it can
+   * never be replayed as a valid header. Exists so a failed verification can
+   * be compared against what arrived without dumping the request body.
+   */
+  expectedSignaturePreview(rawBody: Buffer): string {
+    return createHmac('sha256', this.config.appSecret)
+      .update(rawBody)
+      .digest('hex')
+      .slice(0, 20);
+  }
+
   /** Constant-time compare of the GET handshake token. */
   verifyChallengeToken(token: string): boolean {
     const expected = Buffer.from(this.config.verifyToken, 'utf8');
