@@ -128,7 +128,8 @@ export class CloudWebhookController {
           `rawBody=${rawBody.length}B, content-length=${String(declared)}, ` +
           `sigHeaders=${rawHeader ? count : 0}, ` +
           `received=${received ? received.slice(0, 20) : 'none'}…, ` +
-          `computed=${cloud.expectedSignaturePreview(rawBody)}…`,
+          `computed=${cloud.expectedSignaturePreview(rawBody)}…, ` +
+          `secret=${cloud.appSecretFingerprint()}`,
       );
       throw new ForbiddenException('Invalid signature');
     }
