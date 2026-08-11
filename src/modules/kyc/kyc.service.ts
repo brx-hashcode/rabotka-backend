@@ -28,8 +28,8 @@ export class KycService {
 
     const sent = await this.whatsApp.sendTemplateMessage(
       profile.phone,
-      WHATSAPP_TEMPLATES.kyc.contentSid,
-      WHATSAPP_TEMPLATES.kyc.variables(name),
+      'kyc',
+      name,
       profile.id,
     );
 

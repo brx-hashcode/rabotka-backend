@@ -1,34 +1,35 @@
-import {
-  Injectable,
-  Logger,
-  OnModuleInit,
-  Optional,
-  Inject,
-  forwardRef,
-} from '@nestjs/common';
+import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import TwilioSDK from 'twilio';
-import { SystemConfigService } from '../../../modules/system-config/system-config.service';
 import { SendTimingService } from '../../../modules/whatsapp/telemetry/send-timing.service';
+import { TwilioSendError } from '../../../modules/whatsapp/providers/twilio/twilio.errors';
 
 type TwilioClient = ReturnType<typeof TwilioSDK>;
 type CreateMessagePayload = Parameters<TwilioClient['messages']['create']>[0];
 
+/**
+ * Credentials come from the environment ONLY.
+ *
+ * They used to be overridable at runtime from `system_config` (with an admin
+ * settings card writing them), which meant the process could be sending on
+ * credentials that appeared nowhere in its configuration — and made a
+ * fail-fast boot check impossible, because the real values arrived after
+ * `onModuleInit`. Both providers now validate identically in
+ * `whatsapp.config.ts`, and `WHATSAPP_PROVIDER` fail-fast actually means
+ * something.
+ */
 @Injectable()
-export class TwilioService implements OnModuleInit {
+export class TwilioService {
   private readonly logger = new Logger(TwilioService.name);
 
   private client: TwilioClient | null = null;
-  private accountSid: string | null;
-  private authToken: string | null;
-  private whatsappFrom: string | null;
-  private smsFrom: string | null;
+  private readonly accountSid: string | null;
+  private readonly authToken: string | null;
+  private readonly whatsappFrom: string | null;
+  private readonly smsFrom: string | null;
 
   constructor(
     private readonly config: ConfigService,
-    @Optional()
-    @Inject(forwardRef(() => SystemConfigService))
-    private readonly systemConfig?: SystemConfigService,
     @Optional()
     @Inject(SendTimingService)
     private readonly sendTiming?: SendTimingService,
@@ -38,38 +39,6 @@ export class TwilioService implements OnModuleInit {
     this.whatsappFrom = this.config.get<string>('TWILIO_WHATSAPP_FROM') ?? null;
     this.smsFrom = this.config.get<string>('TWILIO_SMS_FROM') ?? null;
     this.initClient();
-  }
-
-  async onModuleInit(): Promise<void> {
-    if (!this.systemConfig) return;
-
-    try {
-      const [sid, token, waFrom, smsFrom] = await Promise.all([
-        this.systemConfig.getRaw('twilio.account_sid', ''),
-        this.systemConfig.getRaw('twilio.auth_token', ''),
-        this.systemConfig.getRaw('twilio.whatsapp_from', ''),
-        this.systemConfig.getRaw('twilio.sms_from', ''),
-      ]);
-
-      if (sid) this.accountSid = sid;
-      if (token) this.authToken = token;
-      if (waFrom) this.whatsappFrom = waFrom;
-      if (smsFrom) this.smsFrom = smsFrom;
-
-      const credentialsChanged =
-        (sid && sid !== this.config.get('TWILIO_ACCOUNT_SID')) ||
-        (token && token !== this.config.get('TWILIO_AUTH_TOKEN'));
-
-      if (credentialsChanged) {
-        this.initClient();
-        this.logger.log('Twilio client re-initialised from system config (DB)');
-      }
-    } catch (e) {
-      this.logger.warn(
-        'Could not load Twilio config from DB, using env vars',
-        e,
-      );
-    }
   }
 
   private initClient(): void {
@@ -177,22 +146,28 @@ export class TwilioService implements OnModuleInit {
         this.logger.warn(
           `[Twilio] Daily sandbox limit reached (50 msg/day). Message to ${to} dropped.`,
         );
-        throw new Error(
+        throw new TwilioSendError(
           `[Twilio 63038] Daily sandbox limit reached — message to ${to} dropped`,
+          twilioErr.code,
+          twilioErr.status,
         );
       } else if (twilioErr.code === 63031) {
         this.logger.warn(
           `[Twilio] To and From are the same number (${to}). Check webhook/status callback config.`,
         );
-        throw new Error(
+        throw new TwilioSendError(
           `[Twilio 63031] To and From are the same number (${to})`,
+          twilioErr.code,
+          twilioErr.status,
         );
       } else {
         this.logger.error(
           `Twilio error sending WhatsApp message to ${to}: [${twilioErr.code ?? twilioErr.status}] ${twilioErr.message}`,
         );
-        throw new Error(
+        throw new TwilioSendError(
           `[Twilio ${twilioErr.code ?? twilioErr.status}] ${twilioErr.message ?? 'Unknown error'} — message to ${to} failed`,
+          twilioErr.code,
+          twilioErr.status,
         );
       }
     }
@@ -244,8 +219,10 @@ export class TwilioService implements OnModuleInit {
       this.logger.error(
         `Twilio error sending WhatsApp template ${contentSid} to ${to}: [${twilioErr.code ?? twilioErr.status}] ${twilioErr.message}`,
       );
-      throw new Error(
+      throw new TwilioSendError(
         `[Twilio ${twilioErr.code ?? twilioErr.status}] ${twilioErr.message ?? 'Unknown error'} — template to ${to} failed`,
+        twilioErr.code,
+        twilioErr.status,
       );
     }
   }
@@ -298,15 +275,19 @@ export class TwilioService implements OnModuleInit {
         this.logger.warn(
           `[Twilio] Daily sandbox limit reached (50 msg/day). Media to ${to} dropped.`,
         );
-        throw new Error(
+        throw new TwilioSendError(
           `[Twilio 63038] Daily sandbox limit reached — media to ${to} dropped`,
+          twilioErr.code,
+          twilioErr.status,
         );
       } else {
         this.logger.error(
           `Twilio error sending WhatsApp media to ${to}: [${twilioErr.code ?? twilioErr.status}] ${twilioErr.message}`,
         );
-        throw new Error(
+        throw new TwilioSendError(
           `[Twilio ${twilioErr.code ?? twilioErr.status}] ${twilioErr.message ?? 'Unknown error'} — media to ${to} failed`,
+          twilioErr.code,
+          twilioErr.status,
         );
       }
     }

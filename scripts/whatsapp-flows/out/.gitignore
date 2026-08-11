@@ -1,0 +1,3 @@
+# Written by create-feedback-flow.ts. The flow id belongs in the environment
+# (WHATSAPP_FEEDBACK_FLOW_ID), not in the repo — it differs per WABA.
+feedback-flow.json

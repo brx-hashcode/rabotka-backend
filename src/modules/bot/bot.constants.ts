@@ -15,7 +15,6 @@ export const FLOW_TTL_SECONDS: Partial<Record<string, number>> = {
   republish_expired_job: 30 * 60, // 30 min
   rate_assignment: 2 * 3600,
   pay_penalties: 3600, // 1 h — holds payment intent
-  unlock_contact: 3600, // 1 h — holds payment intent
 };
 
 export const FLOW_IDS = {
@@ -28,7 +27,6 @@ export const FLOW_IDS = {
   POST_CANCELLATION_ACTIONS: 'post_cancellation_actions',
   RATE_ASSIGNMENT: 'rate_assignment',
   REPUBLISH_EXPIRED_JOB: 'republish_expired_job',
-  UNLOCK_CONTACT: 'unlock_contact',
   VERIFY_WHATSAPP: 'verify_whatsapp',
 } as const;
 
@@ -56,6 +54,11 @@ export const CMD_MENU = [
   'démarrer',
   'demarrer',
   'commencer',
+  // `expandSlashCommand` already rewrites a bare "/" to "menu" at the
+  // conversation entry point, so this is belt and braces — it keeps the slash
+  // working for any caller that matches CMD_MENU against raw input rather than
+  // the expanded text.
+  '/',
 ];
 export const CMD_PAY = [
   'payer',
@@ -64,3 +67,15 @@ export const CMD_PAY = [
   'payer pénalités',
   'payer penalites',
 ];
+
+/**
+ * Base URL for links the bot puts in a message.
+ *
+ * Must match `FRONTEND_URL`, because that is what
+ * `WhatsAppOutboundProcessor.withLoginLinks` matches on when it rewrites a
+ * first-party link into a one-tap `/s/<code>`. A hardcoded production URL looks
+ * right and silently loses that rewrite in every other environment.
+ */
+export const APP_BASE_URL = (
+  process.env.FRONTEND_URL ?? 'https://rabotka.work'
+).replace(/\/+$/, '');

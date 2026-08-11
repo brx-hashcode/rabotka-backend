@@ -719,8 +719,8 @@ export class AuthService {
     const template = WHATSAPP_TEMPLATES.otp;
     const sent = await this.whatsAppService.sendTemplateMessage(
       phone,
-      template.contentSid,
-      template.variables(otp),
+      'otp',
+      otp,
     );
     if (!sent) {
 

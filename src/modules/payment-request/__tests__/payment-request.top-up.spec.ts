@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { PaymentRequestService } from '../payment-request.service';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { WhatsAppService } from '../../whatsapp/whatsapp.service';
+import { WhatsAppFeedbackService } from '../../whatsapp/feedback/whatsapp-feedback.service';
 import { LogService } from '../../log/log.service';
 import { ConfigService } from '@nestjs/config';
 import { MailService } from '../../mail/mail.service';
@@ -143,6 +144,10 @@ describe('PaymentRequestService — WALLET_TOP_UP post-payment', () => {
         {
           provide: WhatsAppService,
           useValue: { sendTextMessage: jest.fn().mockResolvedValue(true), sendMediaMessage: jest.fn().mockResolvedValue(true) },
+        },
+        {
+          provide: WhatsAppFeedbackService,
+          useValue: { mintFlowToken: jest.fn(() => 'fb_profile-1_uuid') },
         },
         { provide: LogService, useValue: { create: jest.fn().mockResolvedValue({}) } },
         { provide: ConfigService, useValue: { get: jest.fn().mockReturnValue('http://localhost:3000') } },

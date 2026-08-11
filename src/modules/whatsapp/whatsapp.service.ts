@@ -12,9 +12,16 @@ import {
   REDIS_KEY_PREFIX,
 } from '../../common/services/redis/redis.constants';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
-import { TwilioService } from '../../common/services/twilio/twilio.service';
 import { WalletService } from '../wallet/wallet.service';
-import { WHATSAPP_TEMPLATES } from '../../common/constants/whatsapp-templates';
+import {
+  WHATSAPP_PROVIDER,
+  WhatsappError,
+  type Capability,
+  type SendResult,
+  type TemplateKey,
+  type TemplateParams,
+  type WhatsappProvider,
+} from './contracts';
 import {
   welcomeActivationMessage,
   formatAdminMessage,
@@ -22,8 +29,30 @@ import {
   ADMIN_MESSAGE_VAR_MAX,
   ADMIN_MESSAGE_FALLBACK_SIGNATURE,
 } from './templates';
+import {
+  IdempotencyService,
+  OUTBOUND_TTL_SECONDS,
+  outboundKey,
+} from '../../common/services/idempotency/idempotency.service';
+import { outboundDuplicateBlockedCounter } from './telemetry/metrics';
 
 const VERIFICATION_TOKEN_KEY_PREFIX = `${REDIS_KEY_PREFIX}wa:verify:`;
+
+/**
+ * How long the same template+params to the same number is treated as a repeat.
+ *
+ * The provider-agnostic safety net: whatever the upstream cause — a Meta
+ * replay the worker missed, a BullMQ re-run, a bot flow that fires twice — this
+ * is the last thing between it and the reader.
+ *
+ * Short on purpose. It is not a business rule about how often a person may be
+ * messaged; it only has to span the window a duplicate realistically arrives
+ * in. Anything longer starts suppressing legitimate sends.
+ */
+const OUTBOUND_GUARD_WINDOW_SECONDS: Partial<Record<TemplateKey, number>> = {
+  // Nothing here yet. Add a template only with a reason: a longer window turns
+  // a second legitimate send into silence, and the caller is told it failed.
+};
 
 /** WhatsApp's customer-service window: free-form is only allowed inside it. */
 const SERVICE_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -53,13 +82,31 @@ export class WhatsAppService {
     @Inject(REDIS_CONNECTION)
     private readonly redis: Redis,
     private readonly prisma: PrismaService,
-    private readonly twilioService: TwilioService,
+    @Inject(WHATSAPP_PROVIDER)
+    private readonly provider: WhatsappProvider,
     private readonly config: ConfigService,
     private readonly walletService: WalletService,
+    private readonly idempotency: IdempotencyService,
   ) {}
 
   isConfigured(): boolean {
-    return this.twilioService.isConfigured();
+    return this.provider.isConfigured();
+  }
+
+  /** Which provider is actually sending. For logs and the admin status endpoint. */
+  get providerName(): WhatsappProvider['name'] {
+    return this.provider.name;
+  }
+
+  /**
+   * Whether the active provider can express something.
+   *
+   * Callers that can degrade gracefully should ask before calling rather than
+   * catching `WhatsappCapabilityError` — the two providers differ most on the
+   * interactive message types.
+   */
+  supports(capability: Capability): boolean {
+    return this.provider.capabilities[capability];
   }
 
   /**
@@ -75,16 +122,73 @@ export class WhatsAppService {
   private async attempt(
     what: string,
     phone: string,
-    send: () => Promise<string | null>,
+    send: () => Promise<SendResult>,
   ): Promise<string | null> {
     try {
-      return await send();
+      return (await send()).providerMessageId;
     } catch (err) {
+      // An unconfigured provider is the expected state in dev and is already
+      // reported by `isConfigured()`; logging it at error level on every send
+      // would bury the failures that matter.
+      if (err instanceof WhatsappError && err.code === 'NOT_CONFIGURED') {
+        this.logger.warn(
+          `WhatsApp ${what} to ${phone} skipped: ${err.message}`,
+        );
+        return null;
+      }
       this.logger.error(
         `WhatsApp ${what} to ${phone} failed: ${err instanceof Error ? err.message : String(err)}`,
       );
       return null;
     }
+  }
+
+  /**
+   * Last line of defence against a duplicate reaching the reader.
+   *
+   * Sits here rather than in either provider because it must hold whichever one
+   * is active, and because every send in the codebase already routes through
+   * this class — so it costs no call-site changes.
+   *
+   * Keyed on recipient AND a hash of the parameters. Keying on the template
+   * alone would block a second, genuinely different message that happens to
+   * reuse it inside the window: two job recommendations a minute apart, or an
+   * OTP resend the reader just asked for. Silently swallowing an authentication
+   * code is a worse bug than the duplicate this prevents.
+   *
+   * Returns false to mean "not sent", matching what the callers already do with
+   * a failed send. It does not throw: a duplicate is not an error condition,
+   * and throwing here would fail a BullMQ job that has nothing left to do.
+   *
+   * Fails OPEN. If Redis is unreachable the message goes out — a duplicate is
+   * an annoyance, silence is a broken product.
+   */
+  private async claimOutbound(
+    phone: string,
+    template: TemplateKey,
+    params: unknown,
+  ): Promise<boolean> {
+    const ttl = OUTBOUND_GUARD_WINDOW_SECONDS[template] ?? OUTBOUND_TTL_SECONDS;
+    try {
+      const claimed = await this.idempotency.claim(
+        outboundKey(phone, template, params),
+        ttl,
+      );
+      if (claimed) return true;
+    } catch (err) {
+      this.logger.warn(
+        `Outbound duplicate guard unavailable for ${template}, sending anyway: ` +
+          `${err instanceof Error ? err.message : String(err)}`,
+      );
+      return true;
+    }
+
+    outboundDuplicateBlockedCounter.inc({ provider: this.provider.name });
+    this.logger.warn(
+      `Blocked duplicate ${template} to ${maskPhone(phone)}: an identical ` +
+        `send was made within the last ${ttl}s`,
+    );
+    return false;
   }
 
   async sendTextMessage(
@@ -94,7 +198,7 @@ export class WhatsAppService {
     sentById?: string,
   ): Promise<boolean> {
     const sid = await this.attempt('text', phone, () =>
-      this.twilioService.sendWhatsApp(phone, text),
+      this.provider.sendText(phone, text),
     );
     const sent = sid != null;
 
@@ -115,15 +219,17 @@ export class WhatsAppService {
     return sent;
   }
 
-  async sendTemplateMessage(
+  async sendTemplateMessage<K extends TemplateKey>(
     phone: string,
-    contentSid: string,
-    variables?: Record<string, string>,
+    template: K,
+    params: TemplateParams<K>,
     profileId?: string,
     body?: string,
   ): Promise<boolean> {
-    const sid = await this.attempt(`template ${contentSid}`, phone, () =>
-      this.twilioService.sendWhatsAppTemplate(phone, contentSid, variables),
+    if (!(await this.claimOutbound(phone, template, params))) return false;
+
+    const sid = await this.attempt(`template ${template}`, phone, () =>
+      this.provider.sendTemplate(phone, template, params),
     );
     const sent = sid != null;
 
@@ -140,15 +246,116 @@ export class WhatsAppService {
     return sent;
   }
 
+  /**
+   * MIGRATION ONLY — see `WhatsappProvider.sendTemplateWithVariables`.
+   *
+   * Used by the outbound processor to drain jobs enqueued before template sends
+   * carried a key. New code passes typed params to `sendTemplateMessage`.
+   */
+  async sendTemplateMessageWithVariables(
+    phone: string,
+    template: TemplateKey,
+    variables: Record<string, string>,
+    profileId?: string,
+    body?: string,
+  ): Promise<boolean> {
+    if (!(await this.claimOutbound(phone, template, variables))) return false;
+
+    const sid = await this.attempt(`template ${template}`, phone, () =>
+      this.provider.sendTemplateWithVariables(phone, template, variables),
+    );
+    const sent = sid != null;
+
+    if (sent && profileId && body) {
+      await this.saveMessage(profileId, MessageDirection.OUTBOUND, body).catch(
+        (err) =>
+          this.logger.warn(
+            `Failed to save outbound message for ${profileId}:`,
+            err,
+          ),
+      );
+    }
+
+    return sent;
+  }
+
+  /**
+   * Send a WhatsApp Flow — a native in-chat form.
+   *
+   * `flowToken` is echoed back verbatim on submission and is the only thing
+   * correlating an answer to the person who was asked, so callers must make it
+   * meaningful rather than random.
+   */
+  async sendFeedbackFlow(
+    phone: string,
+    params: {
+      flowId: string;
+      flowToken: string;
+      body: string;
+      cta: string;
+      profileId?: string;
+    },
+  ): Promise<boolean> {
+    const sid = await this.attempt('flow', phone, () =>
+      this.provider.sendFlow(phone, {
+        body: params.body,
+        flowId: params.flowId,
+        flowCta: params.cta,
+        flowToken: params.flowToken,
+        screen: 'FEEDBACK',
+      }),
+    );
+    const sent = sid != null;
+
+    if (sent && params.profileId) {
+      await this.saveMessage(
+        params.profileId,
+        MessageDirection.OUTBOUND,
+        params.body,
+      ).catch((err) =>
+        this.logger.warn(
+          `Failed to save outbound flow message for ${params.profileId}:`,
+          err,
+        ),
+      );
+    }
+
+    return sent;
+  }
+
   async sendMediaMessage(
     phone: string,
     mediaUrl: string,
     caption?: string,
   ): Promise<boolean> {
     const sid = await this.attempt('media', phone, () =>
-      this.twilioService.sendWhatsAppMedia(phone, mediaUrl, caption),
+      this.provider.sendMedia(phone, {
+        kind: 'image',
+        url: mediaUrl,
+        caption,
+      }),
     );
     return sid != null;
+  }
+
+  /**
+   * Show the composer bubble against an inbound message.
+   *
+   * Best-effort and never throws: it is a courtesy, and a failure here must not
+   * cost the reader the message it was announcing. No-ops on a provider without
+   * typing support, so callers need not branch.
+   */
+  async showTyping(providerMessageId: string): Promise<void> {
+    if (!providerMessageId || !this.provider.capabilities.typingIndicator) {
+      return;
+    }
+    try {
+      await this.provider.sendTypingIndicator(providerMessageId);
+    } catch (err) {
+      this.logger.debug(
+        `Typing indicator for ${providerMessageId} failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
   /**
@@ -231,34 +438,31 @@ export class WhatsAppService {
 
     const body = formatAdminMessage({ message: text, adminName });
 
-    let sid: string | null;
     try {
-      sid = open
-        ? await this.twilioService.sendWhatsApp(phone, body)
-        : await this.twilioService.sendWhatsAppTemplate(
-            phone,
-            WHATSAPP_TEMPLATES.adminMessage.contentSid,
-            WHATSAPP_TEMPLATES.adminMessage.variables({
-              message: text,
-              adminName,
-            }),
-          );
+      if (open) {
+        await this.provider.sendText(phone, body);
+      } else {
+        await this.provider.sendTemplate(phone, 'adminMessage', {
+          message: text,
+          adminName,
+        });
+      }
     } catch (err) {
-      // TwilioService formats these as "[Twilio 63016] … — message to … failed",
+      // An absent client is reported as "not configured" rather than as a
+      // provider error — it is the one failure the admin can act on themselves.
+      if (err instanceof WhatsappError && err.code === 'NOT_CONFIGURED') {
+        this.logger.error(
+          `Admin ${mode} message to ${phone} not sent: WhatsApp is not configured`,
+        );
+        return { mode, sent: false, error: 'WhatsApp n’est pas configuré' };
+      }
+      // The provider formats these as "[Twilio 63016] … — message to … failed",
       // which is what the admin sees in the toast.
       const error = err instanceof Error ? err.message : String(err);
       this.logger.error(
         `Admin ${mode} message to ${phone} (profile ${profileId}) failed: ${error}`,
       );
       return { mode, sent: false, error };
-    }
-
-    if (sid == null) {
-      // A null without a throw means Twilio is not configured at all.
-      this.logger.error(
-        `Admin ${mode} message to ${phone} not sent: WhatsApp is not configured`,
-      );
-      return { mode, sent: false, error: 'WhatsApp n’est pas configuré' };
     }
 
     // Persist what was really delivered, exactly once, and only on success — a
@@ -350,4 +554,17 @@ export class WhatsAppService {
       `WhatsApp verified and account activated for profile ${profileId}`,
     );
   }
+}
+
+/**
+ * `+242069917686` -> `+2420***686`.
+ *
+ * Enough to correlate a blocked send with a support report, not enough to make
+ * the log a directory of user phone numbers. Keeps the country code and the
+ * last three digits, which is what someone reading the line actually needs.
+ */
+function maskPhone(phone: string): string {
+  const trimmed = phone.trim();
+  if (trimmed.length <= 8) return '***';
+  return `${trimmed.slice(0, 5)}***${trimmed.slice(-3)}`;
 }

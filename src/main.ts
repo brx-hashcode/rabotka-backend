@@ -19,6 +19,12 @@ async function bootstrap() {
 
   const app = await NestFactory.create(AppModule, {
     logger: ['error', 'warn', 'log', 'debug', 'verbose'],
+    // Meta signs the EXACT bytes of a webhook body, so the Cloud webhook has to
+    // HMAC the raw buffer — a re-serialized body differs in key order and
+    // whitespace and never matches. This only adds a `verify` hook that stashes
+    // the buffer on `req.rawBody`; parsing is unchanged, so the form-encoded
+    // Twilio webhook and every JSON route behave exactly as before.
+    rawBody: true,
   });
 
   const configService = app.get(ConfigService);

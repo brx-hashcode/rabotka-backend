@@ -1,7 +1,6 @@
 import { ForbiddenException } from '@nestjs/common';
 import { BadRequestException } from '@nestjs/common';
 import { ProfileController } from '../profile.controller';
-import { WHATSAPP_TEMPLATES } from '../../../common/constants/whatsapp-templates';
 
 function makeJwtService() {
   return { sign: jest.fn().mockReturnValue('mock-token') };
@@ -138,8 +137,8 @@ describe('ProfileController', () => {
       await controller.createProfile(dto as any, mockRes());
       expect(whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         dto.phone,
-        WHATSAPP_TEMPLATES.profileCreatedWorker.contentSid,
-        { '1': dto.firstName },
+        'profileCreatedWorker',
+        dto.firstName,
       );
     });
 
