@@ -613,7 +613,7 @@ export const WHATSAPP_TEMPLATES = {
     urlSuffixSeparator: '&',
     category: 'UTILITY',
     cloud: {
-      name: cloudName('TPL_CLOUD_CANCELLATION', 'rabotka_cancellation_cta'),
+      name: cloudName('TPL_CLOUD_CANCELLATION', 'rabotka_cancellation_cta_v2'),
     },
     variables: (p: {
       workerName: string;
