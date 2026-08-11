@@ -116,7 +116,20 @@ export class InboundIngestService {
     }
 
     const text = toBotInput(event);
-    if (text === null) return;
+    if (text === null) {
+      // Logged rather than dropped silently. Working out that a welcome card
+      // was answering a REACTION took reading the normalizer, because nothing
+      // recorded what type had arrived — the content type is the one fact that
+      // makes an unprompted reply diagnosable.
+      this.logger.debug(
+        `Inbound ${event.content.type}` +
+          (event.content.type === 'unsupported'
+            ? ` (${event.content.rawType})`
+            : '') +
+          ` from ${event.from} — nothing for the bot to answer`,
+      );
+      return;
+    }
 
     const phone = event.from;
 
