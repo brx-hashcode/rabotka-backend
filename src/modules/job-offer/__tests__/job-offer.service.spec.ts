@@ -369,24 +369,57 @@ describe('JobOfferService', () => {
     });
   });
 
-  describe('the closing date is required only for a MISSION', () => {
+  describe('every type needs a date', () => {
     /**
-     * A one-off gig has nothing to schedule against without a date — the
-     * reminders, auto-start and expiry that drive it all key off that column.
-     * A CDI, CDD or stage has no single date, so demanding one would force the
-     * employer to invent it.
+     * `scheduled_at` means "the day this offer stops being open", which is true
+     * of any offer — for a MISSION it is also the day the work happens, for the
+     * rest it is only the application deadline.
+     *
+     * This used to be MISSION-only, on the reasoning that the others "have no
+     * single date". That confused when the job happens with when recruiting
+     * stops, and the cost was that every scan keying off this column skipped
+     * three of the four types — which is how a hired CDI became an offer that
+     * could never close and never be rated.
      */
-    it('rejects a MISSION with no closing date', () => {
+    it.each([
+      EmploymentType.MISSION,
+      EmploymentType.CDI,
+      EmploymentType.CDD,
+      EmploymentType.STAGE,
+    ])('rejects a %s with no date', (employment_type) => {
+      const { scheduled_at: _omitted, ...noDate } = baseDto;
+
+      expect(() =>
+        service.validateCreateDto({
+          ...noDate,
+          employment_type,
+        } as typeof baseDto),
+      ).toThrow(BadRequestException);
+    });
+
+    it('names the mission date on a MISSION', () => {
       const { scheduled_at: _omitted, ...noDate } = baseDto;
 
       expect(() => service.validateCreateDto(noDate as typeof baseDto)).toThrow(
-        BadRequestException,
+        /date de la mission/i,
       );
     });
 
-    it('defaults to MISSION, so an unspecified type still needs a date', () => {
-      // employment_type is optional on the DTO; absent must mean MISSION, or
-      // an old client could post an undated gig by simply not sending it.
+    it('names the application deadline on an ongoing engagement', () => {
+      // The employer is being asked for two different things depending on the
+      // type. Demanding "la date de la mission" on a CDI is how you get one
+      // invented.
+      const { scheduled_at: _omitted, ...noDate } = baseDto;
+
+      expect(() =>
+        service.validateCreateDto({
+          ...noDate,
+          employment_type: EmploymentType.CDI,
+        } as typeof baseDto),
+      ).toThrow(/clôture des candidatures/i);
+    });
+
+    it('defaults to MISSION when the type is unspecified', () => {
       const { scheduled_at: _omitted, ...noDate } = baseDto;
 
       expect(() =>
@@ -394,22 +427,8 @@ describe('JobOfferService', () => {
           ...noDate,
           employment_type: undefined,
         } as typeof baseDto),
-      ).toThrow(BadRequestException);
+      ).toThrow(/date de la mission/i);
     });
-
-    it.each([EmploymentType.CDI, EmploymentType.CDD, EmploymentType.STAGE])(
-      'accepts a %s with no closing date',
-      (employment_type) => {
-        const { scheduled_at: _omitted, ...noDate } = baseDto;
-
-        expect(() =>
-          service.validateCreateDto({
-            ...noDate,
-            employment_type,
-          } as typeof baseDto),
-        ).not.toThrow();
-      },
-    );
 
     it('still rejects a malformed date whatever the type', () => {
       expect(() =>

@@ -18,6 +18,7 @@ import { InteractionEventService } from '../../recommendation-engine/interaction
 import { JobEventsGateway } from '../../ws-notifications/job-events.gateway';
 import {
   ApplicationStatus,
+  AssignmentStatus,
   EmploymentType,
   JobOfferStatus,
   PaymentFlow,
@@ -536,6 +537,13 @@ describe('ApplicationService', () => {
       (prisma.application.findUnique as jest.Mock).mockResolvedValue(
         acceptedApplication,
       );
+      // Reopening a slot now reads the offer first and refuses to write over a
+      // closed one — so the offer has to exist and be live for the reopen to
+      // happen at all.
+      (prisma.jobOffer.findUnique as jest.Mock).mockResolvedValue({
+        ...mockJobOffer,
+        status: JobOfferStatus.PARTIALLY_FILLED,
+      });
       (prisma.jobOffer.update as jest.Mock).mockResolvedValue(mockJobOffer);
       (prisma.application.update as jest.Mock).mockResolvedValue({
         ...acceptedApplication,
@@ -1048,6 +1056,142 @@ describe('ApplicationService', () => {
       await service.markCompletedByWorker(APPLICATION_ID, WORKER_ID);
 
       expect(tx.payment.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('confirmHireByEmployer()', () => {
+    /**
+     * An ongoing engagement is closed by the employer confirming the hire, not
+     * by anyone confirming the work is finished — the work carries on
+     * off-platform and we would never learn when it ended. Waiting for that is
+     * exactly how a hired CDI used to strand in FILLED with neither side able
+     * to rate the other.
+     */
+    const OFFER_ID = 'offer-1';
+
+    const setupOffer = (
+      overrides: {
+        status?: JobOfferStatus;
+        employment_type?: EmploymentType;
+        employer_id?: string;
+      } = {},
+    ) => {
+      (prisma.jobOffer.findUnique as jest.Mock).mockResolvedValue({
+        id: OFFER_ID,
+        title: 'Agent de sécurité',
+        employer_id: overrides.employer_id ?? EMPLOYER_ID,
+        status: overrides.status ?? JobOfferStatus.FILLED,
+        employment_type: overrides.employment_type ?? EmploymentType.CDI,
+      });
+    };
+
+    const setupTx = () => {
+      const tx: any = {
+        jobOffer: {
+          findUnique: jest
+            .fn()
+            .mockResolvedValue({ status: JobOfferStatus.FILLED }),
+          update: jest.fn().mockResolvedValue({}),
+        },
+        application: {
+          findMany: jest.fn().mockResolvedValue([{ id: APPLICATION_ID }]),
+          updateMany: jest.fn().mockResolvedValue({}),
+        },
+        assignment: { updateMany: jest.fn().mockResolvedValue({}) },
+        profile: {
+          findUnique: jest.fn().mockResolvedValue({ reliability_score: 100 }),
+          update: jest.fn().mockResolvedValue({}),
+        },
+        $executeRaw: jest.fn().mockResolvedValue(0),
+      };
+      (prisma.$transaction as jest.Mock).mockImplementation((fn: any) =>
+        typeof fn === 'function' ? fn(tx) : Promise.resolve([]),
+      );
+      (prisma.application.findMany as jest.Mock).mockResolvedValue([]);
+      return tx;
+    };
+
+    it('closes the offer and ends every hired application', async () => {
+      setupOffer();
+      const tx = setupTx();
+
+      await service.confirmHireByEmployer(OFFER_ID, EMPLOYER_ID);
+
+      expect(tx.application.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { status: ApplicationStatus.END } }),
+      );
+      expect(tx.jobOffer.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: { status: JobOfferStatus.COMPLETED },
+        }),
+      );
+    });
+
+    it('completes the assignments, which is what opens the rating', async () => {
+      // Both rating methods gate on the assignment being COMPLETED. Without
+      // this write the offer would close and still nobody could rate anyone.
+      setupOffer();
+      const tx = setupTx();
+
+      await service.confirmHireByEmployer(OFFER_ID, EMPLOYER_ID);
+
+      expect(tx.assignment.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: AssignmentStatus.COMPLETED,
+          }),
+        }),
+      );
+    });
+
+    it('awards no reliability score — being hired is not work delivered', async () => {
+      // completionScoreReward is paid for finishing a job. Paying it out at
+      // hiring would make the score inflatable by posting a role and filling
+      // it, which is the whole reason this path does not reuse
+      // markCompletedByWorker.
+      setupOffer();
+      const tx = setupTx();
+
+      await service.confirmHireByEmployer(OFFER_ID, EMPLOYER_ID);
+
+      expect(tx.profile.update).not.toHaveBeenCalled();
+    });
+
+    it('refuses a MISSION — its worker is the one who closes it', async () => {
+      setupOffer({ employment_type: EmploymentType.MISSION });
+      setupTx();
+
+      await expect(
+        service.confirmHireByEmployer(OFFER_ID, EMPLOYER_ID),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('refuses while the offer is still recruiting', async () => {
+      setupOffer({ status: JobOfferStatus.PARTIALLY_FILLED });
+      setupTx();
+
+      await expect(
+        service.confirmHireByEmployer(OFFER_ID, EMPLOYER_ID),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('refuses an employer who does not own the offer', async () => {
+      setupOffer({ employer_id: 'someone-else' });
+      setupTx();
+
+      await expect(
+        service.confirmHireByEmployer(OFFER_ID, EMPLOYER_ID),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('is idempotent once closed, so the grace sweep can race the employer', async () => {
+      setupOffer({ status: JobOfferStatus.COMPLETED });
+      const tx = setupTx();
+
+      await expect(
+        service.confirmHireByEmployer(OFFER_ID, EMPLOYER_ID),
+      ).resolves.toBeUndefined();
+      expect(tx.jobOffer.update).not.toHaveBeenCalled();
     });
   });
 });
