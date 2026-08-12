@@ -13,7 +13,7 @@ import { SystemConfigService } from '../../system-config/system-config.service';
 import { WalletService } from '../../wallet/wallet.service';
 import { BotNotificationService } from '../../bot/services/bot-notification.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { JobOfferStatus, PaymentFlow } from '@prisma/client';
+import { EmploymentType, JobOfferStatus, PaymentFlow } from '@prisma/client';
 import { MatchingService } from '../../matching/matching.service';
 import { REDIS_CONNECTION } from '../../../common/services/redis/redis.constants';
 import { GeocodingService } from '../../../common/services/geocoding/geocoding.service';
@@ -295,6 +295,96 @@ describe('JobOfferService (extended)', () => {
           }),
         }),
       );
+    });
+
+    it('applies employment type filter', async () => {
+      (prisma.jobOffer.findMany as jest.Mock).mockResolvedValue([]);
+      (prisma.jobOffer.count as jest.Mock).mockResolvedValue(0);
+      await service.getJobOffersForAdmin({
+        page: 1,
+        limit: 10,
+        employment_type: [EmploymentType.CDI, EmploymentType.STAGE],
+      });
+      expect(prisma.jobOffer.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            employment_type: { in: [EmploymentType.CDI, EmploymentType.STAGE] },
+          }),
+        }),
+      );
+    });
+
+    it('applies payment flow filter', async () => {
+      (prisma.jobOffer.findMany as jest.Mock).mockResolvedValue([]);
+      (prisma.jobOffer.count as jest.Mock).mockResolvedValue(0);
+      await service.getJobOffersForAdmin({
+        page: 1,
+        limit: 10,
+        payment_flow: [PaymentFlow.DAILY, PaymentFlow.MONTHLY],
+      });
+      expect(prisma.jobOffer.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            payment_flow: { in: [PaymentFlow.DAILY, PaymentFlow.MONTHLY] },
+          }),
+        }),
+      );
+    });
+
+    it('applies both amount bounds together', async () => {
+      (prisma.jobOffer.findMany as jest.Mock).mockResolvedValue([]);
+      (prisma.jobOffer.count as jest.Mock).mockResolvedValue(0);
+      await service.getJobOffersForAdmin({
+        page: 1,
+        limit: 10,
+        amount_min: 10000,
+        amount_max: 50000,
+      });
+      expect(prisma.jobOffer.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            amount: { gte: 10000, lte: 50000 },
+          }),
+        }),
+      );
+    });
+
+    it('applies a lone amount bound without inventing the other', async () => {
+      (prisma.jobOffer.findMany as jest.Mock).mockResolvedValue([]);
+      (prisma.jobOffer.count as jest.Mock).mockResolvedValue(0);
+      await service.getJobOffersForAdmin({
+        page: 1,
+        limit: 10,
+        amount_max: 50000,
+      });
+      expect(prisma.jobOffer.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ amount: { lte: 50000 } }),
+        }),
+      );
+    });
+
+    it('treats an amount bound of 0 as a real bound, not as absent', async () => {
+      (prisma.jobOffer.findMany as jest.Mock).mockResolvedValue([]);
+      (prisma.jobOffer.count as jest.Mock).mockResolvedValue(0);
+      await service.getJobOffersForAdmin({
+        page: 1,
+        limit: 10,
+        amount_min: 0,
+      });
+      expect(prisma.jobOffer.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ amount: { gte: 0 } }),
+        }),
+      );
+    });
+
+    it('leaves amount unconstrained when neither bound is given', async () => {
+      (prisma.jobOffer.findMany as jest.Mock).mockResolvedValue([]);
+      (prisma.jobOffer.count as jest.Mock).mockResolvedValue(0);
+      await service.getJobOffersForAdmin({ page: 1, limit: 10 });
+      const [[call]] = (prisma.jobOffer.findMany as jest.Mock).mock.calls;
+      expect(call.where).not.toHaveProperty('amount');
     });
 
     it('returns results without error when called with basic params', async () => {
