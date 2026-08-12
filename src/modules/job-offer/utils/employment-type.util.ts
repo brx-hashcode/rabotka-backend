@@ -34,11 +34,22 @@ import { EmploymentType } from '@prisma/client';
  * Defaults to MISSION, and every caller must keep it that way: never a bare
  * `!== MISSION`. If `employment_type` is missing from a `select` or a test
  * mock, the fail-safe direction is "behave as it always has".
+ *
+ * Written as "not one of the ongoing three" rather than
+ * `(employmentType ?? MISSION)` on purpose. `??` falls back only on null and
+ * undefined, so an empty string — which a loosely typed caller or a hand-built
+ * payload can supply — would have sailed past it and been read as an ongoing
+ * engagement. That is the unsafe direction: the offer stops getting its
+ * reminders and its worker loses the ability to confirm the work is done.
  */
 export function isDatedMission(
-  employmentType?: EmploymentType | null,
+  employmentType?: EmploymentType | string | null,
 ): boolean {
-  return (employmentType ?? EmploymentType.MISSION) === EmploymentType.MISSION;
+  return (
+    employmentType !== EmploymentType.CDD &&
+    employmentType !== EmploymentType.CDI &&
+    employmentType !== EmploymentType.STAGE
+  );
 }
 
 /**
