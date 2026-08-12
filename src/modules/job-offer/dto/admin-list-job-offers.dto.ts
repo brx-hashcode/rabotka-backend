@@ -3,6 +3,7 @@ import {
   IsOptional,
   IsString,
   IsInt,
+  IsNumber,
   Min,
   Max,
   IsArray,
@@ -10,7 +11,7 @@ import {
   IsBoolean,
 } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { JobOfferStatus } from '@prisma/client';
+import { EmploymentType, JobOfferStatus, PaymentFlow } from '@prisma/client';
 import { ToBoolean } from '../../../common/utils/query-boolean.util';
 
 function toArray(value: unknown): string[] {
@@ -58,6 +59,51 @@ export class AdminListJobOffersDto {
   @IsArray()
   @IsEnum(JobOfferStatus, { each: true })
   status?: JobOfferStatus[];
+
+  @ApiPropertyOptional({
+    description: 'Filter by kind of engagement',
+    enum: EmploymentType,
+    isArray: true,
+  })
+  @IsOptional()
+  @Transform(({ value }) => toArray(value))
+  @IsArray()
+  @IsEnum(EmploymentType, { each: true })
+  employment_type?: EmploymentType[];
+
+  @ApiPropertyOptional({
+    description: 'Filter by how the offer pays',
+    enum: PaymentFlow,
+    isArray: true,
+  })
+  @IsOptional()
+  @Transform(({ value }) => toArray(value))
+  @IsArray()
+  @IsEnum(PaymentFlow, { each: true })
+  payment_flow?: PaymentFlow[];
+
+  @ApiPropertyOptional({
+    description:
+      'Lowest amount to include, inclusive. Offers with no amount set are ' +
+      'excluded as soon as either bound is given — a null amount is not zero, ' +
+      'and it cannot honestly be said to fall inside a range.',
+    minimum: 0,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  amount_min?: number;
+
+  @ApiPropertyOptional({
+    description: 'Highest amount to include, inclusive.',
+    minimum: 0,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  amount_max?: number;
 
   @ApiPropertyOptional({
     description:
