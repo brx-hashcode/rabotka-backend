@@ -12,6 +12,7 @@ import type { ApplicationService } from '../../application/application.service';
 import type { BotNotificationService } from '../services/bot-notification.service';
 import type { InterestSignalService } from '../../interest-graph/interest-signal.service';
 import { welcomePlatformMessage } from '../messages/welcome.messages';
+import { closesOnFill } from '../../job-offer/utils/employment-type.util';
 
 export type CancelApplicationContext = {
   applicationService: ApplicationService;
@@ -322,10 +323,18 @@ export async function runCancelApplicationFlow(
     };
   }
 
+  // END counts on an ongoing engagement: there it means "the offer closed once
+  // we were hired", not "the work is finished", and a hire that falls through
+  // has to be reversible from WhatsApp too — this flow is how most workers
+  // reach it. The service re-checks the same rule.
+  const isReversibleHire =
+    app.status === 'END' && closesOnFill(app.job_offer.employment_type);
+
   if (
     app.status !== 'PENDING' &&
     app.status !== 'ACCEPTED' &&
-    app.status !== 'WAITING_PAYMENT'
+    app.status !== 'WAITING_PAYMENT' &&
+    !isReversibleHire
   ) {
     return {
       reply: ['❌ Cette candidature ne peut plus être annulée.'],

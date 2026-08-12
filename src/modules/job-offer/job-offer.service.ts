@@ -39,6 +39,8 @@ import {
   isValidReferenceShape,
   normalizeJobReference,
 } from './utils/job-reference.util';
+import { closesOnFill, isDatedMission } from './utils/employment-type.util';
+import { TERMINAL_JOB_OFFER_STATUSES } from './utils/job-offer-status.util';
 import {
   AccountStatus,
   ApplicationStatus,
@@ -51,17 +53,6 @@ import {
 import { GeoService } from '../geo/geo.service';
 
 const REFERENCE_MAX_ATTEMPTS = 5;
-
-/**
- * Offer statuses that close a posting for good. When an offer moves into one of
- * these, any applicants still waiting on it (PENDING / VIEWED / WAITING_PAYMENT)
- * can no longer be accepted and must be rejected + notified.
- */
-const TERMINAL_JOB_OFFER_STATUSES: JobOfferStatus[] = [
-  JobOfferStatus.CANCELLED,
-  JobOfferStatus.COMPLETED,
-  JobOfferStatus.EXPIRED,
-];
 
 /**
  * Statuses from which an employer may delete their own offer: it is either still
@@ -1076,6 +1067,21 @@ export class JobOfferService {
       throw new NotFoundException("Offre d'emploi introuvable");
     }
 
+    // Admin status changes are otherwise unconstrained on purpose — this is the
+    // escape hatch when something has gone wrong. But reopening a COMPLETED
+    // offer is not an escape hatch, it is a corruption: closing it moved every
+    // hired application to END and its assignments to COMPLETED, and putting
+    // the offer back to recruiting leaves those workers attached to a live post
+    // in a state no other code expects. Nothing here can undo that half.
+    if (
+      offer.status === JobOfferStatus.COMPLETED &&
+      !TERMINAL_JOB_OFFER_STATUSES.includes(status)
+    ) {
+      throw new BadRequestException(
+        "Cette offre est clôturée : ses candidats ont déjà été soldés. Republiez-la ou créez-en une nouvelle plutôt que de la rouvrir.",
+      );
+    }
+
     const updated = await this.prisma.jobOffer.update({
       where: { id },
       data: { status },
@@ -1093,23 +1099,6 @@ export class JobOfferService {
     });
 
     return this.toListItem(updated);
-  }
-
-  /**
-   * Whether this kind of engagement needs a closing date.
-   *
-   * A MISSION is a one-off gig: without a date there is nothing to schedule
-   * against, and the reminders, auto-start and expiry that drive it all key off
-   * that column. A CDI, CDD or stage has no single date, so demanding one would
-   * force the employer to invent it.
-   *
-   * One predicate rather than the condition repeated at each of the three
-   * places that enforce the date — those drifted apart once already.
-   */
-  requiresClosingDate(employmentType?: EmploymentType | null): boolean {
-    return (
-      (employmentType ?? EmploymentType.MISSION) === EmploymentType.MISSION
-    );
   }
 
   validateCreateDto(dto: CreateJobOfferDto): void {
@@ -1131,9 +1120,14 @@ export class JobOfferService {
         `La description doit contenir entre ${DESCRIPTION_MIN} et ${DESCRIPTION_MAX} caractères`,
       );
     }
-    if (!dto.scheduled_at && this.requiresClosingDate(dto.employment_type)) {
+    // Every offer needs this date, but it means two different things, so the
+    // message names the one the employer is actually being asked for. Demanding
+    // "la date de clôture" on a CDI is how you get an employer inventing one.
+    if (!dto.scheduled_at) {
       throw new BadRequestException(
-        'La date de clôture est requise pour une mission',
+        isDatedMission(dto.employment_type)
+          ? 'La date de la mission est requise'
+          : 'La date de clôture des candidatures est requise',
       );
     }
     const scheduledAt = dto.scheduled_at ? new Date(dto.scheduled_at) : null;

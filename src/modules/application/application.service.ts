@@ -24,6 +24,9 @@ import {
 import { InteractionEventService } from '../recommendation-engine/interaction-event.service';
 import { JobEventsGateway } from '../ws-notifications/job-events.gateway';
 import { isWorkerHardBlocked } from '../penalty/penalty.utils';
+import { closesOnFill } from '../job-offer/utils/employment-type.util';
+import { isTerminalJobOfferStatus } from '../job-offer/utils/job-offer-status.util';
+import { closeRecruitedOfferTx } from '../job-offer/utils/close-recruited-offer';
 import { BotNotificationService } from '../bot/services/bot-notification.service';
 import { ContactUnlockService } from '../contact-unlock/contact-unlock.service';
 import {
@@ -143,6 +146,9 @@ export type ApplicationWithOffer = ApplicationListItem & {
     title: string;
     description: string;
     scheduled_at: Date | null;
+    /** Decides whether `scheduled_at` is a start time or a closing deadline,
+        and whether END means "work finished" or "we were hired". */
+    employment_type: EmploymentType | null;
     amount: number | null;
     payment_flow: string | null;
     address: string | null;
@@ -954,10 +960,21 @@ export class ApplicationService {
         'Vous ne pouvez annuler que vos propres candidatures',
       );
     }
+    // END is cancellable only on an ongoing engagement, where it does not mean
+    // "the work is finished" but "the offer closed once we were hired". A hire
+    // that falls through — the worker never starts, the employer changes their
+    // mind — has to be reversible, or closing the offer would turn a permanent
+    // job into a permanent bond. On a MISSION, END really does mean finished
+    // and there is nothing to walk away from.
+    const isReversibleHire =
+      application.status === ApplicationStatus.END &&
+      closesOnFill(application.job_offer.employment_type);
+
     if (
       application.status !== ApplicationStatus.ACCEPTED &&
       application.status !== ApplicationStatus.PENDING &&
-      application.status !== ('WAITING_PAYMENT' as ApplicationStatus)
+      application.status !== ('WAITING_PAYMENT' as ApplicationStatus) &&
+      !isReversibleHire
     ) {
       throw new BadRequestException(
         'Cette candidature ne peut plus être annulée',
@@ -1011,16 +1028,25 @@ export class ApplicationService {
         throw new BadRequestException('Cette candidature est déjà annulée');
       }
 
-      if (isAccepted || isWaitingPayment) {
-        // Compute remaining accepted/waiting count (excluding this application)
+      if (isAccepted || isWaitingPayment || isReversibleHire) {
+        // Which slots are still taken, this application aside. On an undone
+        // hire the other hires sit at END rather than ACCEPTED — the offer
+        // closed around them — so counting only ACCEPTED/WAITING_PAYMENT would
+        // read a fully staffed team as empty and throw the offer wide open.
         const remainingAccepted = await tx.application.count({
           where: {
             job_offer_id: application.job_offer_id,
             status: {
-              in: [
-                ApplicationStatus.ACCEPTED,
-                'WAITING_PAYMENT' as ApplicationStatus,
-              ],
+              in: isReversibleHire
+                ? [
+                    ApplicationStatus.ACCEPTED,
+                    'WAITING_PAYMENT' as ApplicationStatus,
+                    ApplicationStatus.END,
+                  ]
+                : [
+                    ApplicationStatus.ACCEPTED,
+                    'WAITING_PAYMENT' as ApplicationStatus,
+                  ],
             },
             id: { not: applicationId },
           },
@@ -1029,10 +1055,21 @@ export class ApplicationService {
           remainingAccepted > 0
             ? JobOfferStatus.PARTIALLY_FILLED
             : JobOfferStatus.ACTIVE;
-        await tx.jobOffer.update({
-          where: { id: application.job_offer_id },
-          data: { status: reopenStatus },
-        });
+        if (isReversibleHire) {
+          // Deliberately bypasses the terminal guard. Undoing the hire is the
+          // one legitimate route back out of COMPLETED — the offer was closed
+          // *because* this person took the job, and they no longer have.
+          await tx.jobOffer.update({
+            where: { id: application.job_offer_id },
+            data: { status: reopenStatus },
+          });
+        } else {
+          await this.reopenOfferUnlessClosed(
+            tx,
+            application.job_offer_id,
+            reopenStatus,
+          );
+        }
         await tx.assignment.updateMany({
           where: { application_id: applicationId },
           data: {
@@ -1346,6 +1383,34 @@ export class ApplicationService {
   }
 
   /**
+   * Puts an offer back to recruiting after someone drops out — unless it has
+   * already been closed for good.
+   *
+   * The guard is the point. Every caller here computes a reopen status from a
+   * count and writes it unconditionally, which was safe while COMPLETED could
+   * only arrive days later via every worker confirming. An ongoing engagement
+   * now closes the instant its last position is paid for, so an unguarded write
+   * can land on a closed offer and put a fully-staffed post back on the feed
+   * with its workers already at END.
+   */
+  private async reopenOfferUnlessClosed(
+    tx: Prisma.TransactionClient,
+    jobOfferId: string,
+    status: JobOfferStatus,
+  ): Promise<void> {
+    const offer = await tx.jobOffer.findUnique({
+      where: { id: jobOfferId },
+      select: { status: true },
+    });
+    if (!offer || isTerminalJobOfferStatus(offer.status)) return;
+
+    await tx.jobOffer.update({
+      where: { id: jobOfferId },
+      data: { status },
+    });
+  }
+
+  /**
    * The reliability reward for reliably showing up and finishing.
    *
    * The quality signal (good or bad work) is applied separately when the worker
@@ -1539,7 +1604,7 @@ export class ApplicationService {
       select: {
         worker_id: true,
         job_offer_id: true,
-        job_offer: { select: { employer_id: true } },
+        job_offer: { select: { employer_id: true, employment_type: true } },
       },
     });
     if (!application) {
@@ -1561,8 +1626,14 @@ export class ApplicationService {
       );
     }
     if (assignment.status !== AssignmentStatus.COMPLETED) {
+      // Who is being waited on depends on the type. On an ongoing engagement
+      // the worker never confirms anything — the employer does, by confirming
+      // the hire — so naming the worker here would send them chasing someone
+      // who has nothing to do.
       throw new BadRequestException(
-        "Le travailleur n'a pas encore confirmé la fin de la mission.",
+        closesOnFill(application.job_offer.employment_type)
+          ? "Vous n'avez pas encore confirmé l'embauche pour cette offre."
+          : "Le travailleur n'a pas encore confirmé la fin de la mission.",
       );
     }
 
@@ -1595,6 +1666,142 @@ export class ApplicationService {
    * other hired worker is still outstanding: an offer can hire several people
    * (`quantity`), and the first to finish must not end the rest.
    */
+  /**
+   * The worker rates the employer without confirming anything.
+   *
+   * The mirror image of `rateWorkerForMission`. It exists because the worker's
+   * only rating route until now was `completeAndRateByWorker`, which rates *and*
+   * marks the mission finished — and marking an ongoing engagement finished is
+   * refused outright. So on a CDD/CDI/STAGE the worker could not rate at all,
+   * even once the employer had closed the offer and the employer could rate
+   * them.
+   *
+   * `rateAssignment` already enforces the 1–5 range, the COMPLETED-assignment
+   * gate and the direction, so this only resolves the assignment and checks
+   * ownership.
+   */
+  async rateEmployerForMission(
+    applicationId: string,
+    workerId: string,
+    score: number,
+  ): Promise<void> {
+    const application = await this.prisma.application.findUnique({
+      where: { id: applicationId },
+      select: {
+        worker_id: true,
+        job_offer_id: true,
+        job_offer: { select: { employer_id: true } },
+      },
+    });
+    if (!application) {
+      throw new NotFoundException('Candidature non trouvée');
+    }
+    if (application.worker_id !== workerId) {
+      throw new ForbiddenException("Cette mission n'est pas la vôtre");
+    }
+
+    const assignment = await this.prisma.assignment.findFirst({
+      where: { application_id: applicationId },
+      select: { id: true },
+    });
+    if (!assignment) {
+      throw new BadRequestException(
+        'Aucune mission associée à cette candidature',
+      );
+    }
+
+    await this.rateAssignment(assignment.id, workerId, score);
+
+    this.jobEvents.emitJobChanged(
+      [workerId, application.job_offer.employer_id],
+      {
+        jobOfferId: application.job_offer_id,
+        applicationId,
+        kind: 'rated',
+      },
+    );
+  }
+
+  /**
+   * The employer confirms the people they hired actually took the job, which
+   * closes a CDD/CDI/STAGE offer for good and opens the mutual rating.
+   *
+   * The counterpart of `markCompletedByWorker`, and the reason it cannot simply
+   * be reused: on an ongoing engagement there is no moment the worker could
+   * confirm. The work continues off-platform indefinitely, so waiting for
+   * "it finished" means waiting forever — which is precisely how these offers
+   * used to strand in FILLED with nobody able to rate anyone.
+   *
+   * Only reachable once recruiting has stopped (FILLED), so an employer cannot
+   * close an offer that is still taking candidates.
+   */
+  async confirmHireByEmployer(
+    jobOfferId: string,
+    employerId: string,
+  ): Promise<void> {
+    const offer = await this.prisma.jobOffer.findUnique({
+      where: { id: jobOfferId },
+      select: {
+        id: true,
+        title: true,
+        employer_id: true,
+        status: true,
+        employment_type: true,
+      },
+    });
+    if (!offer) {
+      throw new NotFoundException('Offre introuvable');
+    }
+    if (offer.employer_id !== employerId) {
+      throw new ForbiddenException("Cette offre n'est pas la vôtre");
+    }
+    if (!closesOnFill(offer.employment_type)) {
+      throw new BadRequestException(
+        "Une mission ponctuelle se termine quand le travailleur confirme l'avoir faite, pas à l'embauche.",
+      );
+    }
+    if (offer.status === JobOfferStatus.COMPLETED) {
+      return; // Idempotent: the sweep may have got there first.
+    }
+    if (offer.status !== JobOfferStatus.FILLED) {
+      throw new BadRequestException(
+        'Cette offre recrute encore. Elle pourra être clôturée une fois tous les postes pourvus.',
+      );
+    }
+
+    const rejectedOrphanIds = await this.prisma.$transaction((tx) =>
+      closeRecruitedOfferTx(tx, jobOfferId),
+    );
+
+    this.notifyRejectedApplicants(rejectedOrphanIds);
+
+    const hired = await this.prisma.application.findMany({
+      where: { job_offer_id: jobOfferId, status: ApplicationStatus.END },
+      select: { id: true, worker_id: true },
+    });
+
+    // Both sides' rating actions only appear once this lands, and neither
+    // screen has another way to learn about it. One event per hired
+    // application rather than one for the offer: a JobEvent names the
+    // application it concerns, and each of these really did move to END.
+    for (const application of hired) {
+      this.jobEvents.emitJobChanged([employerId, application.worker_id], {
+        jobOfferId,
+        applicationId: application.id,
+        kind: 'completed',
+      });
+    }
+
+    this.eventEmitter.emit(AdminNotificationEvent.APPLICATION_COMPLETED, {
+      event: AdminNotificationEvent.APPLICATION_COMPLETED,
+      title: 'Recrutement clôturé',
+      message: `L'employeur a confirmé l'embauche pour l'offre "${offer.title}"`,
+      entityType: 'job_offer',
+      entityId: String(jobOfferId),
+      timestamp: new Date().toISOString(),
+    });
+  }
+
   async markCompletedByWorker(
     applicationId: string,
     workerId: string,
@@ -1902,9 +2109,18 @@ export class ApplicationService {
         "Vous n'êtes pas l'employeur de cette offre",
       );
     }
+    // Same reversible-hire rule as the worker's own cancel: on an ongoing
+    // engagement END means "we closed the offer once this person was hired",
+    // and an employer whose hire never showed up must be able to take the
+    // position back rather than lose the whole posting.
+    const isReversibleHire =
+      application.status === ApplicationStatus.END &&
+      closesOnFill(application.job_offer.employment_type);
+
     if (
       application.status !== ApplicationStatus.ACCEPTED &&
-      application.status !== ('WAITING_PAYMENT' as ApplicationStatus)
+      application.status !== ('WAITING_PAYMENT' as ApplicationStatus) &&
+      !isReversibleHire
     ) {
       throw new BadRequestException(
         'Seule une candidature acceptée ou en attente de paiement peut être annulée ici',
@@ -1932,27 +2148,44 @@ export class ApplicationService {
           cancellation_reason: "Annulée par l'employeur",
         },
       });
+      // See the worker-side cancel: on an undone hire the other hires sit at
+      // END, so they have to be counted or a staffed offer reads as empty.
       const remainingAccepted = await tx.application.count({
         where: {
           job_offer_id: application.job_offer_id,
           status: {
-            in: [
-              ApplicationStatus.ACCEPTED,
-              'WAITING_PAYMENT' as ApplicationStatus,
-            ],
+            in: isReversibleHire
+              ? [
+                  ApplicationStatus.ACCEPTED,
+                  'WAITING_PAYMENT' as ApplicationStatus,
+                  ApplicationStatus.END,
+                ]
+              : [
+                  ApplicationStatus.ACCEPTED,
+                  'WAITING_PAYMENT' as ApplicationStatus,
+                ],
           },
           id: { not: applicationId },
         },
       });
-      await tx.jobOffer.update({
-        where: { id: application.job_offer_id },
-        data: {
-          status:
-            remainingAccepted > 0
-              ? JobOfferStatus.PARTIALLY_FILLED
-              : JobOfferStatus.ACTIVE,
-        },
-      });
+      const reopenStatus =
+        remainingAccepted > 0
+          ? JobOfferStatus.PARTIALLY_FILLED
+          : JobOfferStatus.ACTIVE;
+      if (isReversibleHire) {
+        // Bypasses the terminal guard on purpose — undoing the hire is the one
+        // legitimate route back out of COMPLETED.
+        await tx.jobOffer.update({
+          where: { id: application.job_offer_id },
+          data: { status: reopenStatus },
+        });
+      } else {
+        await this.reopenOfferUnlessClosed(
+          tx,
+          application.job_offer_id,
+          reopenStatus,
+        );
+      }
       await tx.assignment.updateMany({
         where: { application_id: applicationId },
         data: {
