@@ -62,6 +62,10 @@ export class AdminJobOfferController {
       limit,
       q: dto.q,
       status: dto.status,
+      employment_type: dto.employment_type,
+      payment_flow: dto.payment_flow,
+      amount_min: dto.amount_min,
+      amount_max: dto.amount_max,
       deleted: dto.deleted,
     });
   }

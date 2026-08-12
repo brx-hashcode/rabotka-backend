@@ -191,6 +191,24 @@ export type AdminJobOfferDetailResponse = AdminJobOfferListItem & {
   applications: AdminJobOfferApplicationItem[];
 };
 
+/**
+ * Filters behind the admin job list. Named rather than inlined because the
+ * cached wrapper and the loader underneath it have to agree on the shape — the
+ * cache key is derived from this object, so a field that reaches only one of
+ * the two would be a filter that silently serves the wrong cached page.
+ */
+export type AdminJobOfferListParams = {
+  page: number;
+  limit: number;
+  q?: string;
+  status?: JobOfferStatus[];
+  employment_type?: EmploymentType[];
+  payment_flow?: PaymentFlow[];
+  amount_min?: number;
+  amount_max?: number;
+  deleted?: boolean;
+};
+
 export type JobOfferListItem = {
   id: string;
   reference: string;
@@ -1168,13 +1186,7 @@ export class JobOfferService {
     }
   }
 
-  async getJobOffersForAdmin(params: {
-    page: number;
-    limit: number;
-    q?: string;
-    status?: JobOfferStatus[];
-    deleted?: boolean;
-  }): Promise<{
+  async getJobOffersForAdmin(params: AdminJobOfferListParams): Promise<{
     data: AdminJobOfferListItem[];
     total: number;
     page: number;
@@ -1187,19 +1199,25 @@ export class JobOfferService {
     );
   }
 
-  private async loadGetJobOffersForAdmin(params: {
-    page: number;
-    limit: number;
-    q?: string;
-    status?: JobOfferStatus[];
-    deleted?: boolean;
-  }): Promise<{
+  private async loadGetJobOffersForAdmin(
+    params: AdminJobOfferListParams,
+  ): Promise<{
     data: AdminJobOfferListItem[];
     total: number;
     page: number;
     limit: number;
   }> {
-    const { page, limit, q, status, deleted } = params;
+    const {
+      page,
+      limit,
+      q,
+      status,
+      employment_type,
+      payment_flow,
+      amount_min,
+      amount_max,
+      deleted,
+    } = params;
     const skip = (page - 1) * limit;
 
     // Active rows by default; the admin "Deleted" filter flips to archived rows.
@@ -1218,6 +1236,25 @@ export class JobOfferService {
 
     if (status != null && status.length > 0) {
       where.status = { in: status };
+    }
+
+    if (employment_type != null && employment_type.length > 0) {
+      where.employment_type = { in: employment_type };
+    }
+
+    if (payment_flow != null && payment_flow.length > 0) {
+      where.payment_flow = { in: payment_flow };
+    }
+
+    // Only one bound may be given, so the two are applied independently rather
+    // than as a pair. Note this also drops offers with no amount set: Prisma
+    // translates gte/lte to SQL comparisons, and NULL fails both. That is the
+    // intended reading — an offer with no price is not "between 0 and 50,000".
+    if (amount_min != null || amount_max != null) {
+      where.amount = {
+        ...(amount_min != null ? { gte: amount_min } : {}),
+        ...(amount_max != null ? { lte: amount_max } : {}),
+      };
     }
 
     const [offers, total] = await Promise.all([
