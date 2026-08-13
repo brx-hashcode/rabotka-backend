@@ -117,7 +117,9 @@ describe('ContactUnlockService', () => {
     invoiceService = makeInvoiceService();
     matchingService = makeMatchingService();
     systemConfig = makeSystemConfig();
-    botNotification = { sendContactUnlockedNotification: jest.fn() };
+    botNotification = {
+      sendContactUnlockedNotification: jest.fn().mockResolvedValue(undefined),
+    };
     interactionEvents = { record: jest.fn(), recordMany: jest.fn() };
     service = new ContactUnlockService(
       prisma as any,
@@ -420,6 +422,54 @@ describe('ContactUnlockService', () => {
           ['WORKER', 'CONTACT_PAID'],
         ]),
       );
+    });
+
+    it('delivers the contacts for the attempt that was just paid for', async () => {
+      // The bug this covers: an unlock is only worth anything once the contacts
+      // arrive, and this service never sent them — the delivery lived solely in
+      // the payment-request flow, which handles mobile money. Paying the final
+      // share from wallet credit calls payUnlock directly from the controllers
+      // and skipped it, so the attempt went UNLOCKED in the database while the
+      // WhatsApp message both parties were waiting for was never sent.
+      await service.dispatchUnlockedContacts({
+        attemptId: 'attempt-1',
+        status: ContactUnlockStatus.UNLOCKED,
+        newlyUnlocked: [],
+      });
+
+      expect(
+        botNotification.sendContactUnlockedNotification,
+      ).toHaveBeenCalledWith('attempt-1');
+    });
+
+    it('delivers to the cascade of a multi-person job without duplicating', async () => {
+      // `newlyUnlocked` carries the side-effect unlocks; the attempt that was
+      // paid for directly only shows up in `status`. Counting it twice sends
+      // somebody the same contact message twice.
+      await service.dispatchUnlockedContacts({
+        attemptId: 'attempt-1',
+        status: ContactUnlockStatus.UNLOCKED,
+        newlyUnlocked: ['attempt-1', 'attempt-2'],
+      });
+
+      expect(
+        botNotification.sendContactUnlockedNotification,
+      ).toHaveBeenCalledTimes(2);
+      expect(
+        botNotification.sendContactUnlockedNotification,
+      ).toHaveBeenCalledWith('attempt-2');
+    });
+
+    it('sends nothing while the unlock is still one-sided', async () => {
+      await service.dispatchUnlockedContacts({
+        attemptId: 'attempt-1',
+        status: ContactUnlockStatus.PENDING_WORKER,
+        newlyUnlocked: [],
+      });
+
+      expect(
+        botNotification.sendContactUnlockedNotification,
+      ).not.toHaveBeenCalled();
     });
 
     it('throws when concurrent payment guard fails (count=0)', async () => {
