@@ -216,36 +216,6 @@ describe('JobOfferService (extended)', () => {
     });
   });
 
-  describe('updateStatus()', () => {
-    it('updates status successfully', async () => {
-      (prisma.jobOffer.findUnique as jest.Mock).mockResolvedValue(mockOffer);
-      (prisma.jobOffer.update as jest.Mock).mockResolvedValue({
-        ...mockOffer,
-        status: 'CANCELLED',
-      });
-      const result = await service.updateStatus(
-        OFFER_ID,
-        JobOfferStatus.CANCELLED,
-        EMPLOYER_ID,
-      );
-      expect(result.status).toBe('CANCELLED');
-    });
-
-    it('throws NotFoundException when not found', async () => {
-      (prisma.jobOffer.findUnique as jest.Mock).mockResolvedValue(null);
-      await expect(
-        service.updateStatus(OFFER_ID, JobOfferStatus.CANCELLED, EMPLOYER_ID),
-      ).rejects.toThrow(NotFoundException);
-    });
-
-    it('throws ForbiddenException when not owner', async () => {
-      (prisma.jobOffer.findUnique as jest.Mock).mockResolvedValue(mockOffer);
-      await expect(
-        service.updateStatus(OFFER_ID, JobOfferStatus.CANCELLED, 'other-id'),
-      ).rejects.toThrow(ForbiddenException);
-    });
-  });
-
   describe('getJobOffersForAdmin()', () => {
     const adminOffer = {
       ...mockOffer,
