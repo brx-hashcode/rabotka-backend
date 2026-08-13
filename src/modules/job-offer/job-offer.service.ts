@@ -963,40 +963,6 @@ export class JobOfferService {
     }
   }
 
-  async updateStatus(
-    id: string,
-    status: JobOfferStatus,
-    actorProfileId: string,
-  ): Promise<JobOfferListItem> {
-    const offer = await this.prisma.jobOffer.findUnique({
-      where: { id },
-    });
-    if (!offer) {
-      throw new NotFoundException("Offre d'emploi introuvable");
-    }
-    if (offer.employer_id !== actorProfileId) {
-      throw new ForbiddenException('Non autorisé à modifier cette offre');
-    }
-
-    const updated = await this.prisma.jobOffer.update({
-      where: { id },
-      data: { status },
-    });
-
-    await this.closeApplicantsIfTerminal(id, status);
-
-    this.eventEmitter.emit(AdminNotificationEvent.JOB_OFFER_STATUS_CHANGED, {
-      event: AdminNotificationEvent.JOB_OFFER_STATUS_CHANGED,
-      title: 'Statut offre modifié',
-      message: `Le statut de l'offre "${updated.title}" a été changé en ${status}`,
-      entityType: 'job-offer',
-      entityId: String(updated.id),
-      timestamp: new Date().toISOString(),
-    });
-
-    return this.toListItem(updated);
-  }
-
   /**
    * Reopens an expired offer at a new date.
    *
@@ -1558,7 +1524,8 @@ export class JobOfferService {
     // Explicit null clears the closing date — the only way to turn a dated
     // offer into an open-ended one. `undefined` still means "leave alone".
     if (dto.scheduledAt !== undefined) {
-      data.scheduled_at = dto.scheduledAt === null ? null : new Date(dto.scheduledAt);
+      data.scheduled_at =
+        dto.scheduledAt === null ? null : new Date(dto.scheduledAt);
     }
     if (dto.employmentType !== undefined) {
       data.employment_type = dto.employmentType;
