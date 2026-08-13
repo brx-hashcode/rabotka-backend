@@ -80,6 +80,51 @@ export class ContactUnlockService {
     private readonly interactionEvents: InteractionEventService,
   ) {}
 
+  /**
+   * Which attempts a `payUnlock` actually completed.
+   *
+   * `newlyUnlocked` covers the side-effect unlocks of a multi-person job, but
+   * not the attempt that was paid for directly — that one only shows up in
+   * `status`. Getting this wrong means either a missed contact or a duplicate
+   * WhatsApp message, so it is derived in one place rather than at each caller.
+   */
+  unlockedAttemptIds(result: PayUnlockResult): string[] {
+    const ids =
+      result.status === ContactUnlockStatus.UNLOCKED
+        ? [result.attemptId, ...result.newlyUnlocked]
+        : result.newlyUnlocked;
+    return [...new Set(ids)];
+  }
+
+  /**
+   * Sends both parties their contact details for every attempt this payment
+   * completed.
+   *
+   * An unlock is only worth anything once the contacts actually arrive, but
+   * this service never sent them: the delivery lived solely in the payment
+   * request flow, which handles mobile money. Paying the *final* share from
+   * wallet credit goes straight to `payUnlock` from the two controllers and
+   * skipped it entirely — so the attempt went UNLOCKED in the database, the web
+   * app would happily show the contact, and the WhatsApp message both parties
+   * were waiting for was never sent.
+   *
+   * Kept as an explicit call rather than folded into `payUnlock` so the payment
+   * flow keeps its deliberate ordering (confirmation, then contacts, then
+   * invoice) instead of having contacts jump the queue.
+   */
+  async dispatchUnlockedContacts(result: PayUnlockResult): Promise<void> {
+    for (const id of this.unlockedAttemptIds(result)) {
+      await this.botNotification
+        .sendContactUnlockedNotification(id)
+        .catch((err: unknown) =>
+          this.logger.warn(
+            `[contact-unlock] contact notification failed for ${id}:`,
+            err,
+          ),
+        );
+    }
+  }
+
   private notifyRejectedApplicants(applicationIds: string[]): void {
     for (const appId of applicationIds) {
       this.botNotification
