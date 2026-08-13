@@ -8,7 +8,7 @@ import Redis from 'ioredis';
 import { jobLocationLabel } from '../../common/utils/job-location.util';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { DocumentService } from '../document/document.service';
-import { DocumentCategory, PaymentFlow } from '@prisma/client';
+import { DocumentCategory, EmploymentType, PaymentFlow } from '@prisma/client';
 import {
   computeContractPublicReference,
   resolveMissionPeriodForContractPdf,
@@ -148,8 +148,11 @@ export class ContractService {
   }
 
   /**
-   * MONTHLY: END_DATE = contract.created_at (acceptance proxy) + 30 UTC calendar days.
-   * Other payment flows: END from scheduled_at + note-based duration (or 1 day).
+   * MISSION, MONTHLY: END_DATE = contract.created_at (acceptance proxy) + 30 UTC calendar days.
+   * MISSION, other payment flows: END from scheduled_at + note-based duration (or 1 day).
+   * CDD / CDI / STAGE: no dates and a "à convenir" term — nothing here knows when
+   * the engagement begins or ends, and inventing it would put a falsehood on a
+   * legal document.
    */
   private buildContractTemplateData(contract: {
     id: string;
@@ -161,6 +164,7 @@ export class ContractService {
         address: string | null;
         amount: { toString(): string } | null;
         payment_flow: PaymentFlow | null;
+        employment_type: EmploymentType | null;
         scheduled_at: Date | null;
         note: string | null;
         employer: {
@@ -192,6 +196,7 @@ export class ContractService {
       contractCreatedAt: contract.created_at,
       paymentFlow: job.payment_flow,
       jobNote: job.note,
+      employmentType: job.employment_type,
     });
     const startStr = period.startDate
       ? period.startDate.toLocaleDateString('fr-FR')

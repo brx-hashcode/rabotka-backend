@@ -1,6 +1,10 @@
 import { Logger } from '@nestjs/common';
 import { ReminderProcessor } from '../reminder.processor';
-import { ApplicationStatus, JobOfferStatus } from '@prisma/client';
+import {
+  ApplicationStatus,
+  EmploymentType,
+  JobOfferStatus,
+} from '@prisma/client';
 import type { SystemConfigService } from '../../../system-config/system-config.service';
 
 jest.spyOn(Logger.prototype, 'log').mockImplementation(() => {});
@@ -248,6 +252,47 @@ describe('ReminderProcessor', () => {
             created_at: { lt: expect.any(Date) },
           }),
         ]),
+      );
+    });
+
+    it('never auto-starts an ongoing engagement', async () => {
+      // Every type carries a date now. On a CDD/CDI/STAGE it is the day
+      // applications close, not a start time — without this filter a staffed
+      // CDI whose window shut would be flipped to IN_PROGRESS and its worker
+      // asked whether a job with years left to run is finished.
+      prisma.jobOffer.findMany.mockResolvedValue([] as never);
+      prisma.application.findMany.mockResolvedValue([] as never);
+
+      await processor.process({ data: { type: 'scan' } });
+
+      const autoStartQuery = prisma.jobOffer.findMany.mock.calls[0][0] as {
+        where: { employment_type: unknown };
+      };
+      expect(autoStartQuery.where.employment_type).toBe(
+        EmploymentType.MISSION,
+      );
+    });
+
+    it('stops recruiting on a staffed engagement past its deadline', async () => {
+      // The expiry scan will not touch these — it requires zero accepted
+      // applications, since expiring an offer somebody was hired on would be
+      // wrong. That left a quantity-3 offer with one hire stuck forever:
+      // never full, so never closed; never empty, so never expired.
+      prisma.jobOffer.findMany.mockResolvedValue([] as never);
+      prisma.application.findMany.mockResolvedValue([] as never);
+      prisma.jobOffer.findMany.mockResolvedValueOnce([] as never); // autoStart
+      prisma.jobOffer.findMany.mockResolvedValueOnce([] as never); // expiry
+      prisma.jobOffer.findMany.mockResolvedValueOnce([] as never); // start window
+      prisma.jobOffer.findMany.mockResolvedValueOnce([
+        { id: 'offer-cdd' },
+      ] as never);
+
+      await processor.process({ data: { type: 'scan' } });
+
+      expect(prisma.jobOffer.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: { status: JobOfferStatus.FILLED },
+        }),
       );
     });
 
