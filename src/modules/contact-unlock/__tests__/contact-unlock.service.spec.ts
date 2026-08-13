@@ -21,10 +21,19 @@ const mockIsWorkerHardBlocked = isWorkerHardBlocked as jest.Mock;
 
 function makePrisma() {
   const txMock = {
-    application: { findUnique: jest.fn(), update: jest.fn(), count: jest.fn() },
+    application: {
+      findUnique: jest.fn(),
+      findMany: jest.fn().mockResolvedValue([]),
+      update: jest.fn(),
+      updateMany: jest.fn(),
+      count: jest.fn(),
+    },
     assignment: { updateMany: jest.fn() },
     jobOffer: { findUnique: jest.fn(), update: jest.fn() },
     contactUnlockAttempt: { update: jest.fn() },
+    // The fill path locks the offer row before counting, so two concurrent
+    // final payments cannot both decide the offer is full.
+    $executeRaw: jest.fn().mockResolvedValue(0),
   };
 
   return {

@@ -9,7 +9,12 @@ import { WHATSAPP_REMINDERS_QUEUE } from '../../../common/services/queue/queue.m
 import { formatDate } from '../messages/notifications.messages';
 import { APP_TIMEZONE } from '../utils/parse-date-time';
 import { WHATSAPP_TEMPLATES } from '../../../common/constants/whatsapp-templates';
-import { ApplicationStatus, JobOfferStatus } from '@prisma/client';
+import {
+  ApplicationStatus,
+  EmploymentType,
+  JobOfferStatus,
+} from '@prisma/client';
+import { closeRecruitedOfferTx } from '../../job-offer/utils/close-recruited-offer';
 import { SystemConfigService } from '../../system-config/system-config.service';
 import {
   BOT_STATE_KEY_PREFIX,
@@ -35,6 +40,20 @@ const SCAN_INTERVAL_MS = 15 * 60 * 1000;
  * offer does not haunt the feed indefinitely.
  */
 const UNDATED_OFFER_TTL_DAYS = 30;
+
+/**
+ * How long a staffed CDD/CDI/STAGE waits for its employer to confirm the hire
+ * before the system closes it on their behalf.
+ *
+ * Without a backstop the dead end this whole flow exists to fix simply moves one
+ * state later: the offer parks in FILLED, and since rating hangs off the
+ * assignment being COMPLETED, neither side can ever rate the other.
+ *
+ * A week is long enough that a busy employer is not overruled for being slow,
+ * and closing is the low-stakes direction — it opens the rating and stops the
+ * offer lingering, and nothing about it is destructive.
+ */
+const FILLED_CONFIRMATION_GRACE_DAYS = 7;
 
 // CAS: only writes if the key is absent OR current flowId matches expectedFlowId.
 const LUA_CAS_SET = `
@@ -126,6 +145,10 @@ export class ReminderProcessor {
         status: ApplicationStatus.ACCEPTED,
         job_offer: {
           scheduled_at: { gte: window24hStart, lte: window24hEnd },
+          // "Your job starts in 24 hours" is only true of a MISSION. On the
+          // other types this date is the day applications close, and the work
+          // may have begun weeks earlier or not be arranged yet.
+          employment_type: EmploymentType.MISSION,
         },
       },
       select: { id: true },
@@ -150,6 +173,10 @@ export class ReminderProcessor {
     const startingOffers = await this.prisma.jobOffer.findMany({
       where: {
         scheduled_at: { gte: startWindowStart, lte: now },
+        // Same reason as the 24h window: a closing deadline is not a start
+        // time, and `sendReminderStart` reads `scheduled_at` as an hour of day
+        // to announce.
+        employment_type: EmploymentType.MISSION,
         status: {
           in: [
             JobOfferStatus.ACTIVE,
@@ -204,12 +231,126 @@ export class ReminderProcessor {
         }
       }
     }
+
+    // Ongoing engagements last. They are independent of everything above — the
+    // scans for MISSION reminders and expiry share no rows with these — and
+    // running them at the end keeps the earlier queries at the call positions
+    // `reminder.processor.spec.ts` asserts on.
+    await this.stopRecruitingOnDeadline(now);
+    await this.closeRecruitedOffersAfterGrace(now);
   }
 
   private async expireOverdueOffers(): Promise<void> {
     const now = new Date();
     await this.autoStartOffersWithWorkers(now);
     await this.expireEmptyOverdueOffers(now);
+  }
+
+  /**
+   * An ongoing engagement whose application deadline has passed, with at least
+   * one person hired, stops recruiting.
+   *
+   * `expireEmptyOverdueOffers` deliberately will not touch these — it requires
+   * zero accepted applications, because expiring an offer somebody was hired on
+   * would be wrong. But that left a `quantity: 3` offer with one hire in
+   * PARTIALLY_FILLED forever: never full, so never closed by the fill path, and
+   * never empty, so never expired. This is the missing exit.
+   *
+   * FILLED rather than COMPLETED: the employer still gets to say whether the
+   * hire actually stuck, exactly as they would had the offer filled normally.
+   */
+  private async stopRecruitingOnDeadline(now: Date): Promise<void> {
+    const overdue = await this.prisma.jobOffer.findMany({
+      where: {
+        status: {
+          in: [JobOfferStatus.ACTIVE, JobOfferStatus.PARTIALLY_FILLED],
+        },
+        employment_type: { not: EmploymentType.MISSION },
+        scheduled_at: { lt: now },
+        applications: {
+          some: {
+            status: {
+              in: [ApplicationStatus.ACCEPTED, ApplicationStatus.STARTED],
+            },
+          },
+        },
+      },
+      select: { id: true },
+    });
+
+    if (overdue.length === 0) return;
+
+    const ids = overdue.map((o) => o.id);
+    await this.prisma.$transaction([
+      this.prisma.jobOffer.updateMany({
+        where: { id: { in: ids } },
+        data: { status: JobOfferStatus.FILLED },
+      }),
+      // Whoever had not committed yet is out — recruiting is over. Mirrors what
+      // `rejectLeftoversIfOfferFilled` does when an offer fills normally.
+      this.prisma.application.updateMany({
+        where: {
+          job_offer_id: { in: ids },
+          status: {
+            in: [
+              ApplicationStatus.PENDING,
+              ApplicationStatus.VIEWED,
+              ApplicationStatus.WAITING_PAYMENT,
+            ],
+          },
+        },
+        data: { status: ApplicationStatus.REJECTED, rejected_at: now },
+      }),
+    ]);
+
+    this.logger.log(
+      `Stopped recruiting on ${overdue.length} ongoing engagement(s) past their application deadline`,
+    );
+  }
+
+  /**
+   * Closes a staffed ongoing engagement the employer never got round to
+   * confirming.
+   *
+   * Without this the dead end simply moves one state later: the offer sits in
+   * FILLED, and because rating hangs off the assignment being COMPLETED,
+   * neither side can ever rate the other — which is the whole problem this was
+   * meant to solve.
+   *
+   * Anchored on `updated_at` for want of a `filled_at` column. It is imprecise
+   * — any write to the row restarts the clock — but it is imprecise in the safe
+   * direction: an unrelated update delays the sweep, giving the employer longer
+   * to answer, and never closes an offer early.
+   */
+  private async closeRecruitedOffersAfterGrace(now: Date): Promise<void> {
+    const graceCutoff = new Date(
+      now.getTime() - FILLED_CONFIRMATION_GRACE_DAYS * 24 * 60 * 60 * 1000,
+    );
+    const stale = await this.prisma.jobOffer.findMany({
+      where: {
+        status: JobOfferStatus.FILLED,
+        employment_type: { not: EmploymentType.MISSION },
+        updated_at: { lt: graceCutoff },
+      },
+      select: { id: true },
+    });
+
+    if (stale.length === 0) return;
+
+    for (const offer of stale) {
+      await this.prisma
+        .$transaction((tx) => closeRecruitedOfferTx(tx, offer.id))
+        .catch((err) =>
+          this.logger.warn(
+            `Grace-period close failed for offer ${offer.id}:`,
+            err,
+          ),
+        );
+    }
+
+    this.logger.log(
+      `Closed ${stale.length} staffed engagement(s) unconfirmed after ${FILLED_CONFIRMATION_GRACE_DAYS} days`,
+    );
   }
 
   private async autoStartOffersWithWorkers(now: Date): Promise<void> {
@@ -219,6 +360,11 @@ export class ReminderProcessor {
           in: [JobOfferStatus.FILLED, JobOfferStatus.PARTIALLY_FILLED],
         },
         scheduled_at: { lt: now },
+        // Only a MISSION begins on its date. Every type carries a date now, so
+        // without this a staffed CDI whose application window closed would be
+        // flipped to IN_PROGRESS and its worker asked whether the job is
+        // finished — for an engagement that may have years left to run.
+        employment_type: EmploymentType.MISSION,
         applications: {
           some: { status: ApplicationStatus.ACCEPTED },
           none: {
