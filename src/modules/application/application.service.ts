@@ -197,6 +197,16 @@ const WORKER_MISSION_SELECT = {
       employment_type: true,
       amount: true,
       address: true,
+      // The rest of the location. Without these the worker's mission screen had
+      // nothing to fall back on when `address` was null, so every remote job —
+      // and every offer posted before the address field existed — rendered
+      // "Lieu non précisé", including ones whose city we knew perfectly well.
+      is_remote: true,
+      city: true,
+      country_name: true,
+      // Where the employer writes the practical detail: meeting point, what to
+      // bring, who to ask for. It reached this screen and was dropped.
+      note: true,
       status: true,
       employer: {
         select: {
@@ -204,6 +214,9 @@ const WORKER_MISSION_SELECT = {
           first_name: true,
           last_name: true,
           reliability_score: true,
+          // The mission screen renders an employer avatar and had no URL to put
+          // in it, so it always fell through to the initials.
+          avatar_url: true,
           rating_avg: true,
           rating_count: true,
         },
@@ -230,7 +243,13 @@ export type WorkerMissionCard = {
     scheduledAt: string | null;
     employmentType: EmploymentType;
     amount: number | null;
+    /** Null for a remote job, and for offers predating the address field. */
     address: string | null;
+    isRemote: boolean;
+    city: string | null;
+    countryName: string | null;
+    /** The employer's free-text practical instructions. */
+    note: string | null;
     status: JobOfferStatus;
   };
   employer: {
@@ -238,6 +257,7 @@ export type WorkerMissionCard = {
     firstName: string;
     lastName: string;
     reliabilityScore: number | null;
+    avatarUrl: string | null;
     ratingAvg: number | null;
     ratingCount: number;
   };
@@ -2080,6 +2100,10 @@ export class ApplicationService {
         employmentType: a.job_offer.employment_type,
         amount: a.job_offer.amount == null ? null : Number(a.job_offer.amount),
         address: a.job_offer.address,
+        isRemote: a.job_offer.is_remote,
+        city: a.job_offer.city,
+        countryName: a.job_offer.country_name,
+        note: a.job_offer.note,
         status: a.job_offer.status,
       },
       employer: {
@@ -2087,6 +2111,7 @@ export class ApplicationService {
         firstName: a.job_offer.employer.first_name,
         lastName: a.job_offer.employer.last_name,
         reliabilityScore: a.job_offer.employer.reliability_score,
+        avatarUrl: a.job_offer.employer.avatar_url,
         ratingAvg: a.job_offer.employer.rating_avg,
         ratingCount: a.job_offer.employer.rating_count,
       },
