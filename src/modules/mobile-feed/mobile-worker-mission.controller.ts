@@ -120,6 +120,33 @@ export class MobileWorkerMissionController {
     return { success: true };
   }
 
+  @Post(':id/rate')
+  @ApiOperation({
+    summary: '[Mobile/WORKER] Rate the employer, without completing anything',
+    description:
+      'Records the worker→employer rating (1–5) on an assignment that is already completed. For CDD/CDI/STAGE, where the employer closes the offer by confirming the hire and the worker never confirms anything — `/complete` refuses those types by design. On a MISSION, use `/complete` instead: the worker confirming is what completes it.',
+  })
+  @ApiResponse({ status: 200, description: 'Rated' })
+  @ApiResponse({
+    status: 400,
+    description: 'Not yet completed, or invalid score',
+  })
+  @ApiResponse({ status: 403, description: 'Not a WORKER / not the owner' })
+  async rate(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('id') id: string,
+    @Body() body: WorkerCompleteMissionDto,
+  ) {
+    const profileId = req.user.profileId;
+    await this.assertWorker(profileId);
+    await this.applicationService.rateEmployerForMission(
+      id,
+      profileId,
+      body.score,
+    );
+    return { success: true };
+  }
+
   @Get(':id/unlock')
   @ApiOperation({
     summary: "[Mobile/WORKER] My side of the contact unlock",
@@ -168,7 +195,16 @@ export class MobileWorkerMissionController {
     const attempt = await this.requireOwnedAttempt(id, profileId);
     // payUnlock is party-aware: it resolves employer vs worker from profileId
     // and charges the matching amount, so no worker-specific branch is needed.
-    await this.contactUnlock.payUnlock(attempt.id, profileId, true);
+    const result = await this.contactUnlock.payUnlock(
+      attempt.id,
+      profileId,
+      true,
+    );
+    // Deliver the contacts if this payment completed the unlock. Paying from
+    // wallet credit does not go through the payment-request flow, which is
+    // where the delivery used to live exclusively — so this call was missing
+    // and both parties were left waiting for a message that never came.
+    await this.contactUnlock.dispatchUnlockedContacts(result);
     return this.unlockState(req, id);
   }
 

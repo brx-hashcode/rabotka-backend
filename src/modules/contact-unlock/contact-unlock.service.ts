@@ -80,6 +80,51 @@ export class ContactUnlockService {
     private readonly interactionEvents: InteractionEventService,
   ) {}
 
+  /**
+   * Which attempts a `payUnlock` actually completed.
+   *
+   * `newlyUnlocked` covers the side-effect unlocks of a multi-person job, but
+   * not the attempt that was paid for directly — that one only shows up in
+   * `status`. Getting this wrong means either a missed contact or a duplicate
+   * WhatsApp message, so it is derived in one place rather than at each caller.
+   */
+  unlockedAttemptIds(result: PayUnlockResult): string[] {
+    const ids =
+      result.status === ContactUnlockStatus.UNLOCKED
+        ? [result.attemptId, ...result.newlyUnlocked]
+        : result.newlyUnlocked;
+    return [...new Set(ids)];
+  }
+
+  /**
+   * Sends both parties their contact details for every attempt this payment
+   * completed.
+   *
+   * An unlock is only worth anything once the contacts actually arrive, but
+   * this service never sent them: the delivery lived solely in the payment
+   * request flow, which handles mobile money. Paying the *final* share from
+   * wallet credit goes straight to `payUnlock` from the two controllers and
+   * skipped it entirely — so the attempt went UNLOCKED in the database, the web
+   * app would happily show the contact, and the WhatsApp message both parties
+   * were waiting for was never sent.
+   *
+   * Kept as an explicit call rather than folded into `payUnlock` so the payment
+   * flow keeps its deliberate ordering (confirmation, then contacts, then
+   * invoice) instead of having contacts jump the queue.
+   */
+  async dispatchUnlockedContacts(result: PayUnlockResult): Promise<void> {
+    for (const id of this.unlockedAttemptIds(result)) {
+      await this.botNotification
+        .sendContactUnlockedNotification(id)
+        .catch((err: unknown) =>
+          this.logger.warn(
+            `[contact-unlock] contact notification failed for ${id}:`,
+            err,
+          ),
+        );
+    }
+  }
+
   private notifyRejectedApplicants(applicationIds: string[]): void {
     for (const appId of applicationIds) {
       this.botNotification
@@ -664,6 +709,12 @@ export class ContactUnlockService {
     jobOfferId: string,
   ): Promise<string[]> {
     return this.prisma.$transaction(async (tx) => {
+      // Lock the offer before counting. An employer paying for several unlocks
+      // at once cascades N calls through here, and without this two of them can
+      // both read "full" and both run the fill. `accept()` and
+      // `closeOfferIfAllWorkersDone` both take this lock for the same reason.
+      await tx.$executeRaw`SELECT id FROM "job_offers" WHERE id = ${jobOfferId}::uuid FOR UPDATE`;
+
       const offer = await tx.jobOffer.findUnique({
         where: { id: jobOfferId },
         select: { quantity: true, status: true },
@@ -923,10 +974,21 @@ export class ContactUnlockService {
         remainingAccepted,
         quantity,
       );
+      // Re-read the status inside the transaction. `attempt` was loaded before
+      // it opened, and the offer can close in between — an ongoing engagement
+      // now closes at the very moment its last slot is paid for, which is the
+      // same event that leaves this rejection holding a stale PARTIALLY_FILLED.
+      // Acting on that stale value would write ACTIVE over a closed offer and
+      // put a fully-staffed post back on the feed with every worker at END.
+      const freshOffer = await tx.jobOffer.findUnique({
+        where: { id: attempt.job_offer_id },
+        select: { status: true, scheduled_at: true },
+      });
       if (
+        freshOffer &&
         this.shouldReopenOffer({
-          scheduledAt: attempt.job_offer.scheduled_at,
-          currentStatus: attempt.job_offer.status,
+          scheduledAt: freshOffer.scheduled_at,
+          currentStatus: freshOffer.status,
           now,
         })
       ) {

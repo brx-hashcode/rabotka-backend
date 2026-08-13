@@ -164,7 +164,16 @@ export class MobileApplicationController {
     const profileId = req.user.profileId;
     await this.assertEmployer(profileId);
     const attempt = await this.getOwnedAttempt(id, profileId);
-    await this.contactUnlock.payUnlock(attempt.id, profileId, true);
+    const result = await this.contactUnlock.payUnlock(
+      attempt.id,
+      profileId,
+      true,
+    );
+    // Deliver the contacts if this payment completed the unlock. Paying from
+    // wallet credit does not go through the payment-request flow, which is
+    // where the delivery used to live exclusively — so this call was missing
+    // and both parties were left waiting for a message that never came.
+    await this.contactUnlock.dispatchUnlockedContacts(result);
     return this.buildDetail(id, profileId);
   }
 

@@ -684,6 +684,30 @@ export class MobileFeedController {
     });
   }
 
+  @Post('job-offers/:id/confirm-hire')
+  @ApiOperation({
+    summary: '[Mobile/EMPLOYER] Confirm the hire on a CDD/CDI/STAGE offer',
+    description:
+      'Closes an offer whose positions are all taken, and opens the mutual rating. Only for ongoing engagements — a MISSION is closed by its worker confirming the work is done. Requires the offer to be FILLED, so an offer still taking candidates cannot be closed early. Idempotent once closed.',
+  })
+  @ApiResponse({ status: 200, description: 'Offer closed, rating open' })
+  @ApiResponse({
+    status: 400,
+    description: 'Still recruiting, or a MISSION',
+  })
+  @ApiResponse({ status: 403, description: 'Not an EMPLOYER / not the owner' })
+  @ApiResponse({ status: 404, description: 'Job offer not found' })
+  async confirmHire(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('id') id: string,
+  ) {
+    const profileId = req.user.profileId;
+    await this.assertProfileType(profileId, ProfileType.EMPLOYER);
+
+    await this.applicationService.confirmHireByEmployer(id, profileId);
+    return { success: true };
+  }
+
   @Delete('job-offers/:id')
   @ApiOperation({
     summary: '[Mobile/EMPLOYER] Delete one of my job offers',
