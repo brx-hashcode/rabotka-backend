@@ -885,20 +885,18 @@ export class PaymentRequestService {
         request.profile_id,
         false,
       );
-      const nowUnlocked =
-        result.status === 'UNLOCKED' || result.newlyUnlocked.length > 0;
+      // Same derivation the wallet-payment path uses. It was duplicated here,
+      // and "which attempts did this actually unlock" is exactly the question
+      // that, answered differently in two places, sends someone two contact
+      // messages or none.
+      const unlockedAttemptIds =
+        this.contactUnlockService.unlockedAttemptIds(result);
 
-      if (!nowUnlocked) return { nowUnlocked: false, unlockedAttemptIds: [] };
+      if (unlockedAttemptIds.length === 0) {
+        return { nowUnlocked: false, unlockedAttemptIds: [] };
+      }
 
-      const attemptIds =
-        result.status === 'UNLOCKED'
-          ? [result.attemptId, ...result.newlyUnlocked]
-          : result.newlyUnlocked;
-
-      return {
-        nowUnlocked: true,
-        unlockedAttemptIds: [...new Set(attemptIds)],
-      };
+      return { nowUnlocked: true, unlockedAttemptIds };
     } catch (err) {
       this.logger.error(
         `Contact unlock processing failed for attempt ${String(request.contact_unlock_attempt_id)}:`,
