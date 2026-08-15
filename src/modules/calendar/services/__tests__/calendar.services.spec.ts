@@ -100,4 +100,82 @@ describe('IcsGeneratorService', () => {
     });
     expect(ics).toContain('\\;');
   });
+
+  describe('recurrence', () => {
+    const base = {
+      title: 'Standup',
+      startDate: '2026-06-01T09:00:00Z',
+      endDate: '2026-06-01T09:15:00Z',
+    };
+
+    it('emits no RRULE for a one-off event', () => {
+      expect(service.generate(base)).not.toContain('RRULE');
+    });
+
+    it('encodes an end date as UNTIL, in the UTC form RFC 5545 requires', () => {
+      const ics = service.generate({
+        ...base,
+        recurrence: { frequency: 'WEEKLY', until: '2026-12-31T23:59:59Z' },
+      });
+      expect(ics).toContain('RRULE:FREQ=WEEKLY;UNTIL=20261231T235959Z');
+    });
+
+    it('encodes an occurrence limit as COUNT', () => {
+      const ics = service.generate({
+        ...base,
+        recurrence: { frequency: 'DAILY', count: 10 },
+      });
+      expect(ics).toContain('RRULE:FREQ=DAILY;COUNT=10');
+    });
+
+    it('emits a bare FREQ for an open-ended series', () => {
+      // No UNTIL and no COUNT is RFC 5545 for "forever", which is exactly what
+      // an open-ended series means.
+      const ics = service.generate({
+        ...base,
+        recurrence: { frequency: 'MONTHLY' },
+      });
+      expect(ics).toContain('RRULE:FREQ=MONTHLY');
+      expect(ics).not.toContain('UNTIL');
+      expect(ics).not.toContain('COUNT');
+    });
+
+    it('places the RRULE inside the VEVENT, after DTEND', () => {
+      const lines = service
+        .generate({ ...base, recurrence: { frequency: 'WEEKLY' } })
+        .split('\r\n');
+      const dtEnd = lines.findIndex((l) => l.startsWith('DTEND:'));
+      const rrule = lines.findIndex((l) => l.startsWith('RRULE:'));
+      const endVevent = lines.indexOf('END:VEVENT');
+
+      expect(rrule).toBeGreaterThan(dtEnd);
+      expect(rrule).toBeLessThan(endVevent);
+    });
+  });
+
+  describe('identity', () => {
+    const base = {
+      title: 'Standup',
+      startDate: '2026-06-01T09:00:00Z',
+      endDate: '2026-06-01T09:15:00Z',
+    };
+
+    it('uses the supplied uid verbatim, and the same one twice', () => {
+      // The UID used to be `${Date.now()}@rabotka`, so the update mail carried
+      // a different identity than the invitation and calendar clients filed it
+      // as a second event instead of revising the first.
+      const first = service.generate({ ...base, uid: 'event-42@rabotka' });
+      const second = service.generate({ ...base, uid: 'event-42@rabotka' });
+
+      expect(first).toContain('UID:event-42@rabotka');
+      expect(second).toContain('UID:event-42@rabotka');
+    });
+
+    it('defaults SEQUENCE to 0 and emits what it is given', () => {
+      expect(service.generate(base)).toContain('SEQUENCE:0');
+      expect(service.generate({ ...base, sequence: 3 })).toContain(
+        'SEQUENCE:3',
+      );
+    });
+  });
 });

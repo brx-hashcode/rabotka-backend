@@ -13,7 +13,27 @@ export type WhatsAppTemplateCategory =
   | 'MARKETING';
 
 export interface WhatsAppTemplate<Args extends unknown[]> {
-  contentSid: string;
+  /**
+   * The approved Twilio Content SID. Absent exactly when `cloudOnly` is set.
+   */
+  contentSid?: string;
+  /**
+   * The template exists on Meta ONLY — it was authored in
+   * `scripts/whatsapp-templates/definitions.ts` and never had a Twilio Content
+   * counterpart to translate from.
+   *
+   * The original 27 were recreated in Rabotka's WABA from the approved Twilio
+   * copy, and each kept its SID so either provider could send it. That shape
+   * does not extend to anything new: the account is moving to Cloud, and
+   * getting a template approved twice — once per BSP — to satisfy a binding
+   * nobody sends on is pure cost. So `findBindingProblemsIn` skips these on
+   * Twilio, and `toContentSid` throws rather than silently sending nothing.
+   *
+   * Set it together with omitting `contentSid`; the binding check enforces that
+   * the two agree, because a `cloudOnly` entry that kept a stale SID would be
+   * sendable on Twilio under copy that no longer exists there.
+   */
+  cloudOnly?: true;
   category: WhatsAppTemplateCategory;
   /**
    * Meta Cloud binding: the template's NAME in the WABA, since Cloud addresses
@@ -129,6 +149,22 @@ function sid(envVar: string, approvedDefault: string): string {
 
 /** French. Every Rabotka template is authored in it; there is no other locale yet. */
 export const CLOUD_DEFAULT_LANGUAGE = 'fr';
+
+/**
+ * Where the two "bad news" templates send people.
+ *
+ * Exported because the CALLER mints the login code — these notifications are
+ * sent straight through `WhatsAppService.sendTemplateMessage`, which talks to
+ * the provider directly and never touches the outbound queue, so the
+ * processor's `withLoginCode` (the only other place that fills a url-suffix
+ * var) never runs for them. The caller mints against these exact paths.
+ *
+ * A rejected KYC is contested with a claim; a suspension is lifted by an admin
+ * and by nothing the user can do, so that one just opens the app so they can
+ * read their own status.
+ */
+export const KYC_REJECTED_CTA_PATH = 'claims/new';
+export const SUSPENDED_CTA_PATH = 'home';
 
 /**
  * Reads a Meta template name from the environment, falling back to the name the
@@ -333,6 +369,95 @@ export const WHATSAPP_TEMPLATES = {
     cloud: { name: cloudName('TPL_CLOUD_KYC', 'rabotka_kyc_approved_cta_v2') },
     variables: (name: string) => ({ '1': name }),
   } satisfies WhatsAppTemplate<[name: string]>,
+
+  /**
+   * The other half of `kyc` above: the rejection. It reached the user by email
+   * alone, on a platform where WhatsApp is the channel people actually read —
+   * so a rejected dossier could sit unnoticed while the account stayed stuck.
+   *
+   * No CTA button, deliberately. A rejected profile is not ACTIVE, and a login
+   * code is only minted for a profile that is — the same dead-button failure
+   * `kycPendingMenu` above documents at length. Nothing to link to anyway: the
+   * user must send new documents, which happens in the chat.
+   */
+  kycRejected: {
+    cloudOnly: true,
+    // {{3}} fills the CTA URL. v1 had no button, on the reasoning that a
+    // rejected profile can never hold a session — no longer true, see
+    // `MINTABLE_STATUSES`.
+    urlSuffixVar: '3',
+    urlSuffixMode: 'shortlink',
+    category: 'UTILITY',
+    cloud: {
+      // The default is v2 — the version this code is written against. While v2
+      // is still in review, deployments pin the approved v1 through
+      // TPL_CLOUD_KYC_REJECTED; drop that override once `status.ts` reports v2
+      // approved and the switch needs no deploy. That override is exactly what
+      // `cloudName` exists for.
+      name: cloudName('TPL_CLOUD_KYC_REJECTED', 'rabotka_kyc_rejected_v2'),
+    },
+    variables: (p: {
+      firstName: string;
+      reason: string | null;
+      loginCode?: string | null;
+    }) => ({
+      '1': p.firstName,
+      // Never empty. WhatsApp rejects a send whose positional parameter is
+      // missing or blank (132000), and the reason is optional upstream.
+      '2': p.reason?.trim() || 'Non précisé',
+      // A minted login code when the caller has one, else the bare
+      // destination — which lands on the login screen rather than the claim
+      // form, but is still a live link rather than a dead `/s/<path>`.
+      '3': p.loginCode?.trim() || KYC_REJECTED_CTA_PATH,
+    }),
+  } satisfies WhatsAppTemplate<
+    [
+      params: {
+        firstName: string;
+        reason: string | null;
+        loginCode?: string | null;
+      },
+    ]
+  >,
+
+  /**
+   * Account suspended, with the admin's reason.
+   *
+   * Same shape and the same reasoning as `kycRejected`: no button, because a
+   * suspended profile is refused a session outright (`auth.service.ts`), so
+   * every link would land on the login screen.
+   */
+  accountSuspended: {
+    cloudOnly: true,
+    urlSuffixVar: '3',
+    urlSuffixMode: 'shortlink',
+    category: 'UTILITY',
+    cloud: {
+      name: cloudName(
+        'TPL_CLOUD_ACCOUNT_SUSPENDED',
+        // v2 by default, pinned to v1 via the override while in review — see
+        // the note on kycRejected above.
+        'rabotka_account_suspended_v2',
+      ),
+    },
+    variables: (p: {
+      firstName: string;
+      reason: string | null;
+      loginCode?: string | null;
+    }) => ({
+      '1': p.firstName,
+      '2': p.reason?.trim() || 'Non précisé',
+      '3': p.loginCode?.trim() || SUSPENDED_CTA_PATH,
+    }),
+  } satisfies WhatsAppTemplate<
+    [
+      params: {
+        firstName: string;
+        reason: string | null;
+        loginCode?: string | null;
+      },
+    ]
+  >,
 
   /**
    * Sent when an admin activates a profile. The v1 templates ended with
@@ -944,6 +1069,7 @@ export type WhatsAppTemplateName = keyof typeof WHATSAPP_TEMPLATES;
 export type TemplateBinding = Pick<
   WhatsAppTemplate<never[]>,
   | 'contentSid'
+  | 'cloudOnly'
   | 'category'
   | 'cloud'
   | 'buttonUrlVar'
@@ -989,26 +1115,56 @@ export function findBindingProblemsIn(
   const problems: TemplateBindingProblem[] = [];
   for (const [name, template] of Object.entries(bindings)) {
     const key = name as WhatsAppTemplateName;
-    if (provider === 'twilio') {
-      if (!template.contentSid.trim()) {
-        problems.push({ key, problem: 'contentSid is empty' });
-      } else if (!template.contentSid.startsWith('HX')) {
-        problems.push({
-          key,
-          problem: `contentSid "${template.contentSid}" is not a Twilio Content SID`,
-        });
-      }
-      continue;
-    }
-    if (!template.cloud.name.trim()) {
-      problems.push({ key, problem: 'cloud.name is empty' });
-    } else if (!/^[a-z0-9_]+$/.test(template.cloud.name)) {
-      // Meta rejects uppercase, hyphens and dots in a template name outright.
-      problems.push({
-        key,
-        problem: `cloud.name "${template.cloud.name}" is not a valid Meta template name`,
-      });
-    }
+    const found =
+      provider === 'twilio'
+        ? twilioBindingProblem(template)
+        : cloudBindingProblem(template);
+    for (const problem of found) problems.push({ key, problem });
+  }
+  return problems;
+}
+
+/**
+ * The `cloudOnly` marker and the SID must agree, and this is the one check that
+ * runs on BOTH providers: an entry marked Cloud-only that kept its SID stays
+ * sendable on Twilio under copy that no longer exists there, which no
+ * provider-specific check would catch.
+ *
+ * The reverse — a missing SID with no marker — is a Twilio binding problem and
+ * belongs to `twilioBindingProblem` alone. Reporting it on the Cloud path would
+ * make a broken Twilio binding refuse a Cloud boot, which is exactly what this
+ * split-by-provider design exists to avoid.
+ */
+function sidMarkerProblems(template: TemplateBinding): string[] {
+  return template.cloudOnly && template.contentSid !== undefined
+    ? ['cloudOnly is set but a contentSid is still declared']
+    : [];
+}
+
+function twilioBindingProblem(template: TemplateBinding): string[] {
+  // Cloud-only templates are not expected to be sendable here. Reporting them
+  // would refuse a boot on Twilio over a template that deployment never sends.
+  if (template.cloudOnly) return sidMarkerProblems(template);
+
+  const sid = template.contentSid?.trim();
+  if (!sid) return ['contentSid is empty'];
+  if (!sid.startsWith('HX')) {
+    return [`contentSid "${sid}" is not a Twilio Content SID`];
+  }
+  return [];
+}
+
+function cloudBindingProblem(template: TemplateBinding): string[] {
+  const problems = sidMarkerProblems(template);
+
+  const name = template.cloud.name.trim();
+  if (!name) {
+    problems.push('cloud.name is empty');
+  } else if (!/^[a-z0-9_]+$/.test(name)) {
+    // Meta rejects uppercase, hyphens and dots in a template name outright.
+    problems.push(
+      `cloud.name "${template.cloud.name}" is not a valid Meta template name`,
+    );
   }
   return problems;
 }
@@ -1067,6 +1223,26 @@ export function templateCloudName(key: WhatsAppTemplateName): string {
 }
 
 /**
+ * The Twilio Content SID a key resolves to, or undefined for a Cloud-only
+ * template.
+ *
+ * Read through here rather than off `WHATSAPP_TEMPLATES[key]` directly: the
+ * literal's inferred union now contains entries with no `contentSid` at all, so
+ * a direct property access does not compile. `TEMPLATE_BINDINGS` widens them to
+ * the declared interface, where the field is optional.
+ */
+export function templateContentSid(
+  key: WhatsAppTemplateName,
+): string | undefined {
+  return TEMPLATE_BINDINGS[key].contentSid;
+}
+
+/** Whether a template exists on Meta only, with no Twilio counterpart. */
+export function isCloudOnlyTemplate(key: WhatsAppTemplateName): boolean {
+  return TEMPLATE_BINDINGS[key].cloudOnly === true;
+}
+
+/**
  * Which variable of a template fills its CTA button URL suffix, looked up by
  * the SID actually being sent — content SIDs are env-overridable through
  * `sid()`, so the map has to be built from the resolved values.
@@ -1080,8 +1256,18 @@ export type UrlSuffixTarget = {
 const URL_SUFFIX_BY_SID: ReadonlyMap<string, UrlSuffixTarget> = new Map(
   Object.values(WHATSAPP_TEMPLATES)
     .filter(
-      (template): template is typeof template & { urlSuffixVar: string } =>
-        'urlSuffixVar' in template && typeof template.urlSuffixVar === 'string',
+      (
+        template,
+      ): template is typeof template & {
+        urlSuffixVar: string;
+        contentSid: string;
+      } =>
+        'urlSuffixVar' in template &&
+        typeof template.urlSuffixVar === 'string' &&
+        // Keyed by SID, so a Cloud-only template has nothing to key on. None
+        // has a CTA button either, so nothing is lost by dropping it here.
+        'contentSid' in template &&
+        typeof template.contentSid === 'string',
     )
     .map((template) => [
       template.contentSid,
@@ -1118,9 +1304,15 @@ const KEY_BY_SID: ReadonlyMap<string, WhatsAppTemplateName> = new Map(
   (
     Object.entries(WHATSAPP_TEMPLATES) as [
       WhatsAppTemplateName,
-      { contentSid: string },
+      { contentSid?: string },
     ][]
-  ).map(([key, template]) => [template.contentSid, key]),
+  )
+    // A Cloud-only template has no SID to look up by, and no legacy job in
+    // Redis can name it — those predate it existing.
+    .filter((entry): entry is [WhatsAppTemplateName, { contentSid: string }] =>
+      Boolean(entry[1].contentSid),
+    )
+    .map(([key, template]) => [template.contentSid, key]),
 );
 
 export function getTemplateKeyBySid(
@@ -1132,5 +1324,6 @@ export function getTemplateKeyBySid(
 export function getUrlSuffixTargetByKey(
   key: WhatsAppTemplateName,
 ): UrlSuffixTarget | undefined {
-  return URL_SUFFIX_BY_SID.get(WHATSAPP_TEMPLATES[key].contentSid);
+  const contentSid = TEMPLATE_BINDINGS[key].contentSid;
+  return contentSid ? URL_SUFFIX_BY_SID.get(contentSid) : undefined;
 }

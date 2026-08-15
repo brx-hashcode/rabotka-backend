@@ -4,6 +4,7 @@ import { EventService } from '../event.service';
 import { AdminAuthGuard } from '../../auth/guards/admin-auth.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
 import { LogService } from '../../log/log.service';
+import { EventEditScope } from '../enums/event-edit-scope.enum';
 
 const mockEventService = {
   list: jest.fn().mockResolvedValue({ data: [], total: 0, page: 1, limit: 10 }),
@@ -70,7 +71,22 @@ describe('EventController', () => {
   });
 
   it('removes event', async () => {
-    const result = await controller.remove(fakeReq(), 1);
+    const result = await controller.remove(fakeReq(), 1, {});
     expect(result).toEqual({ success: true });
+  });
+
+  it('defaults an unqualified delete to a single occurrence', async () => {
+    // Every caller that predates recurrence sends no scope, and must keep
+    // deleting exactly the row it named.
+    await controller.remove(fakeReq(), 1, {});
+    expect(mockEventService.remove).toHaveBeenCalledWith(1, undefined);
+  });
+
+  it('forwards the requested scope to the service', async () => {
+    await controller.remove(fakeReq(), 1, { scope: EventEditScope.ALL });
+    expect(mockEventService.remove).toHaveBeenCalledWith(
+      1,
+      EventEditScope.ALL,
+    );
   });
 });
