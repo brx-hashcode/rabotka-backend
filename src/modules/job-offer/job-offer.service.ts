@@ -974,7 +974,7 @@ export class JobOfferService {
       this.prisma.jobOffer.findUnique({ where: { id } }),
       this.prisma.profile.findUnique({
         where: { id: actorProfileId },
-        select: { verification_status: true },
+        select: { verification_status: true, status: true },
       }),
     ]);
     if (!offer || offer.deleted_at) {
@@ -987,6 +987,14 @@ export class JobOfferService {
     // gate as creating one. Also reached from the bot (republish-expired-job.flow).
     if (!actor) {
       throw new NotFoundException('Employeur introuvable');
+    }
+    // The account check `create()` has always had, which this path was missing:
+    // a suspended employer could reopen an expired offer and be back on the
+    // market, which is exactly what suspending them was meant to stop.
+    if (actor.status !== AccountStatus.ACTIVE) {
+      throw new ForbiddenException(
+        'Le profil doit être actif pour publier des offres',
+      );
     }
     assertKycVerified(actor.verification_status);
     if (offer.status !== JobOfferStatus.EXPIRED) {

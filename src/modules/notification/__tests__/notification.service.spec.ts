@@ -8,11 +8,13 @@ import { IcsGeneratorService } from '../../calendar/services/ics-generator.servi
 describe('NotificationService', () => {
   let service: NotificationService;
   let mockMailService: { sendMail: jest.Mock };
+  let mockIcsGenerator: { generate: jest.Mock };
 
   beforeEach(async () => {
     mockMailService = {
       sendMail: jest.fn().mockResolvedValue({ jobId: 'job-1' }),
     };
+    mockIcsGenerator = { generate: jest.fn().mockReturnValue('') };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -26,10 +28,7 @@ describe('NotificationService', () => {
           provide: CalendarLinkService,
           useValue: { googleCalendarLink: jest.fn().mockReturnValue('') },
         },
-        {
-          provide: IcsGeneratorService,
-          useValue: { generate: jest.fn().mockReturnValue('') },
-        },
+        { provide: IcsGeneratorService, useValue: mockIcsGenerator },
       ],
     }).compile();
 
@@ -122,16 +121,28 @@ describe('NotificationService', () => {
   });
 
   describe('event notifications', () => {
+    const baseParams = {
+      to: 'user@example.com',
+      name: 'Bob',
+      title: 'Team Meeting',
+      startDate: '2026-06-01T09:00:00Z',
+      endDate: '2026-06-01T10:00:00Z',
+    };
+
+    /**
+     * What the service asked the ICS generator to build. The generator is
+     * mocked here — its own spec covers the RRULE and UID it renders from
+     * this, so what matters at this level is that the rule and a stable
+     * identity are handed over at all.
+     */
+    const icsInput = () => mockIcsGenerator.generate.mock.calls.at(-1)?.[0];
+
     it('notifyEventCreated sends email with ICS attachment', async () => {
-      await service.notifyEventCreated(
-        'user@example.com',
-        'Bob',
-        'Team Meeting',
-        '2026-06-01T09:00:00Z',
-        '2026-06-01T10:00:00Z',
-        'Description',
-        'Office',
-      );
+      await service.notifyEventCreated({
+        ...baseParams,
+        description: 'Description',
+        location: 'Office',
+      });
       expect(mockMailService.sendMail).toHaveBeenCalledWith(
         expect.objectContaining({
           attachments: expect.arrayContaining([
@@ -142,14 +153,55 @@ describe('NotificationService', () => {
     });
 
     it('notifyEventUpdated sends email with ICS attachment', async () => {
-      await service.notifyEventUpdated(
-        'user@example.com',
-        'Bob',
-        'Team Meeting',
-        '2026-06-01T09:00:00Z',
-        '2026-06-01T10:00:00Z',
-      );
+      await service.notifyEventUpdated(baseParams);
       expect(mockMailService.sendMail).toHaveBeenCalled();
+    });
+
+    it('asks for no recurrence on a one-off event', async () => {
+      await service.notifyEventCreated({ ...baseParams, eventId: '7' });
+      expect(icsInput()?.recurrence).toBeUndefined();
+    });
+
+    it('hands the repeat rule to the calendar attachment', async () => {
+      // What makes one message enough for a whole series: the recipient's own
+      // calendar expands the rule into every occurrence.
+      await service.notifyEventCreated({
+        ...baseParams,
+        eventId: '7',
+        seriesId: 'series-1',
+        recurrence: { frequency: 'WEEKLY', until: '2026-12-31T23:59:59Z' },
+      });
+      expect(icsInput()?.recurrence).toEqual({
+        frequency: 'WEEKLY',
+        until: '2026-12-31T23:59:59Z',
+      });
+    });
+
+    it('keys the calendar entry on the series, and the update revises it', async () => {
+      // A changing UID is why an update used to land as a *second* entry in
+      // the recipient's calendar rather than replacing the first.
+      const seriesParams = {
+        ...baseParams,
+        eventId: '7',
+        seriesId: 'series-1',
+      };
+
+      await service.notifyEventCreated(seriesParams);
+      expect(icsInput()).toMatchObject({
+        uid: 'event-series-1@rabotka',
+        sequence: 0,
+      });
+
+      await service.notifyEventUpdated(seriesParams);
+      expect(icsInput()).toMatchObject({
+        uid: 'event-series-1@rabotka',
+        sequence: 1,
+      });
+    });
+
+    it('falls back to the event id when there is no series', async () => {
+      await service.notifyEventCreated({ ...baseParams, eventId: '7' });
+      expect(icsInput()?.uid).toBe('event-7@rabotka');
     });
   });
 

@@ -4,14 +4,24 @@ import {
   findTemplateBindingProblems,
   getTemplateKeyBySid,
   getUrlSuffixTargetByKey,
+  isCloudOnlyTemplate,
   isTemplateKey,
   templateCloudName,
+  templateContentSid,
   templateLanguage,
   type TemplateBinding,
   type WhatsAppTemplateName,
 } from '../whatsapp-templates';
 
 const KEYS = Object.keys(WHATSAPP_TEMPLATES) as WhatsAppTemplateName[];
+
+/**
+ * Keys with a Twilio Content SID.
+ *
+ * Cloud-only templates were authored for Meta and never existed in Twilio, so
+ * every SID-shaped assertion below has nothing to check on them.
+ */
+const SID_KEYS = KEYS.filter((key) => !isCloudOnlyTemplate(key));
 
 describe('template registry bindings', () => {
   it('binds every template for both providers', () => {
@@ -52,9 +62,19 @@ describe('template registry bindings', () => {
     }
   });
 
-  it('gives every template a distinct content SID', () => {
-    const sids = KEYS.map((k) => WHATSAPP_TEMPLATES[k].contentSid);
+  it('gives every Twilio-bound template a distinct content SID', () => {
+    const sids = SID_KEYS.map(templateContentSid);
     expect(new Set(sids).size).toBe(sids.length);
+  });
+
+  it('leaves Cloud-only templates without a content SID', () => {
+    // The two must agree. A cloudOnly entry that kept a SID is sendable on
+    // Twilio under copy that does not exist there.
+    for (const key of KEYS) {
+      expect(templateContentSid(key) === undefined).toBe(
+        isCloudOnlyTemplate(key),
+      );
+    }
   });
 });
 
@@ -141,12 +161,49 @@ describe('findBindingProblemsIn', () => {
       findBindingProblemsIn({ kyc: binding({ contentSid: '' }) }, 'cloud'),
     ).toEqual([]);
   });
+
+  it('skips a cloud-only binding on twilio and accepts it on cloud', () => {
+    const cloudOnly = {
+      cloudOnly: true,
+      category: 'UTILITY',
+      cloud: { name: 'rabotka_account_suspended' },
+    } satisfies TemplateBinding;
+
+    // Nothing to send here, so nothing to complain about — a Cloud-only
+    // template must not refuse a boot that is still running on Twilio.
+    expect(
+      findBindingProblemsIn({ accountSuspended: cloudOnly }, 'twilio'),
+    ).toEqual([]);
+    expect(
+      findBindingProblemsIn({ accountSuspended: cloudOnly }, 'cloud'),
+    ).toEqual([]);
+  });
+
+  it('reports a cloud-only binding that kept a content SID', () => {
+    // The dangerous half of the disagreement: still sendable on Twilio, under
+    // copy that only ever existed on Meta.
+    const stale = {
+      ...binding(),
+      cloudOnly: true,
+    } satisfies TemplateBinding;
+
+    for (const provider of ['twilio', 'cloud'] as const) {
+      expect(
+        findBindingProblemsIn({ accountSuspended: stale }, provider),
+      ).toEqual([
+        {
+          key: 'accountSuspended',
+          problem: 'cloudOnly is set but a contentSid is still declared',
+        },
+      ]);
+    }
+  });
 });
 
 describe('key lookups', () => {
-  it('round-trips every key through its SID', () => {
-    for (const key of KEYS) {
-      expect(getTemplateKeyBySid(WHATSAPP_TEMPLATES[key].contentSid)).toBe(key);
+  it('round-trips every Twilio-bound key through its SID', () => {
+    for (const key of SID_KEYS) {
+      expect(getTemplateKeyBySid(templateContentSid(key)!)).toBe(key);
     }
   });
 

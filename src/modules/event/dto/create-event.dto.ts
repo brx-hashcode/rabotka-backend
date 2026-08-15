@@ -6,9 +6,11 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
+  ValidateNested,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { DeliveryChannel } from '@prisma/client';
+import { RecurrenceDto } from './recurrence.dto';
 
 export class CreateEventDto {
   @ApiProperty()
@@ -62,4 +64,14 @@ export class CreateEventDto {
   @IsOptional()
   @IsEnum(DeliveryChannel)
   channel?: DeliveryChannel;
+
+  /**
+   * Omit for a one-off event. When present, `startDate`/`endDate` describe the
+   * first occurrence and the rest are generated from it.
+   */
+  @ApiPropertyOptional({ type: RecurrenceDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => RecurrenceDto)
+  recurrence?: RecurrenceDto;
 }

@@ -45,8 +45,9 @@ import type { AdminMessageDelivery } from '../whatsapp/whatsapp.service';
 import { MailService } from '../mail/mail.service';
 import { LayoutService } from '../mail/layout.service';
 import { kycApprovedEmail, kycRejectedEmail } from '../mail/templates';
-import { WHATSAPP_TEMPLATES } from '../../common/constants/whatsapp-templates';
 import { MessageDirection, BotPlatform } from '@prisma/client';
+import { KYC_REJECTED_CTA_PATH } from '../../common/constants/whatsapp-templates';
+import { WhatsAppLoginLinkService } from '../auth/whatsapp-login-link.service';
 import { AdminListProfilesDto } from './dto/admin-list-profiles.dto';
 import {
   AdminVerifyProfileDto,
@@ -69,6 +70,7 @@ export class AdminProfileController {
     private readonly paymentRequestService: PaymentRequestService,
     private readonly prisma: PrismaService,
     private readonly whatsApp: WhatsAppService,
+    private readonly loginLink: WhatsAppLoginLinkService,
     private readonly mail: MailService,
     private readonly layout: LayoutService,
     private readonly walletService: WalletService,
@@ -693,13 +695,8 @@ export class AdminProfileController {
         html: await this.layout.wrap(kycApprovedEmail(fullName)),
       });
 
-      const kycTpl = WHATSAPP_TEMPLATES.kyc;
       this.whatsApp
-        .sendTemplateMessage(
-          result.phone,
-          'kyc',
-          result.firstName,
-        )
+        .sendTemplateMessage(result.phone, 'kyc', result.firstName)
         .catch((err) =>
           console.warn(
             `Failed to send KYC validated WhatsApp message for ${id}:`,
@@ -712,6 +709,30 @@ export class AdminProfileController {
         subject: 'Votre vérification KYC a été rejetée',
         html: await this.layout.wrap(kycRejectedEmail(fullName, dto.reason)),
       });
+
+      // The rejection used to go out by email only, and `email` is nullable on
+      // a profile while `phone` is not — so the people whose documents failed
+      // were the ones least likely to hear why.
+      // Minted here for the same reason as the suspension send: this goes
+      // straight to the provider, never through the outbound queue, so
+      // nothing else fills the CTA's variable. Null degrades to the bare
+      // path, which lands on the login screen rather than dead.
+      const loginCode = await this.loginLink
+        .mint(id, KYC_REJECTED_CTA_PATH)
+        .catch(() => null);
+
+      this.whatsApp
+        .sendTemplateMessage(result.phone, 'kycRejected', {
+          firstName: result.firstName,
+          reason: dto.reason,
+          loginCode,
+        })
+        .catch((err) =>
+          console.warn(
+            `Failed to send KYC rejected WhatsApp message for ${id}:`,
+            err,
+          ),
+        );
     }
 
     return result;
@@ -734,6 +755,7 @@ export class AdminProfileController {
     const result = await this.profileService.updateProfileStatusByAdmin(
       id,
       dto.status,
+      dto.reason,
     );
 
     const adminUserId = req.user?.userId;
