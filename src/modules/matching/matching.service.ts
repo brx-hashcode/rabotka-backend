@@ -9,8 +9,6 @@ const COLLECTION_WORKERS = COLLECTIONS.WORKERS;
 const COLLECTION_JOBS = COLLECTIONS.JOBS;
 const COLLECTION_EMPLOYERS = COLLECTIONS.EMPLOYERS;
 
-const MIN_NOTIFICATION_SCORE = 0.55;
-
 // Re-ranking weights. These are RELATIVE — every score is divided by the sum of
 // the weights actually applied, so `score` is always on [0,1] and a threshold
 // means the same thing however these are tuned.
@@ -29,7 +27,7 @@ const NEGATIVE_CATEGORY_THRESHOLD = 2;
 const MAX_PER_CATEGORY_JOBS = 3;
 const MAX_PER_CATEGORY_WORKERS = 5;
 
-export { MIN_NOTIFICATION_SCORE, NEGATIVE_HISTORY_MULTIPLIER };
+export { NEGATIVE_HISTORY_MULTIPLIER };
 
 interface ScoredHit {
   id: string;
@@ -849,13 +847,15 @@ export class MatchingService {
       const minScore = await this.systemConfig.getRecommendationMinScore();
       const filtered = applyThreshold(reRanked, minScore, topN);
 
-      // Phase 6: diversity then slice to topN
-      const diverse = diversifyByCategory(
-        filtered,
-        MAX_PER_CATEGORY_WORKERS,
-        topN,
-      );
-      return diverse;
+      // Phase 5: the best `topN`, in rank order.
+      //
+      // No category diversification here, unlike the employer feed. Retrieval
+      // already filtered every candidate to this offer's own category, so they
+      // all carry the same one — a per-category cap therefore capped the entire
+      // fan-out rather than spreading it, silently limiting a categorised offer
+      // to five recipients however many good matches existed and whatever
+      // `matching.max_notification_workers` was set to.
+      return filtered.slice(0, topN).map(({ id, score }) => ({ id, score }));
     } catch (err) {
       this.logger.error(
         `findMatchingWorkersForJob failed for ${jobOfferId}`,

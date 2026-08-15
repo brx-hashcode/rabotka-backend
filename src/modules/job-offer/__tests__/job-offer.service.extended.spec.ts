@@ -16,7 +16,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { EmploymentType, JobOfferStatus, PaymentFlow } from '@prisma/client';
 import { MatchingService } from '../../matching/matching.service';
 import { REDIS_CONNECTION } from '../../../common/services/redis/redis.constants';
-import { GeocodingService } from '../../../common/services/geocoding/geocoding.service';
+import { JobNotificationProcessor } from '../notification/job-notification.processor';
 
 const EMPLOYER_ID = 'employer-uuid-1';
 const OFFER_ID = 'offer-uuid-1';
@@ -50,6 +50,7 @@ describe('JobOfferService (extended)', () => {
   let systemConfigService: jest.Mocked<SystemConfigService>;
   let walletService: jest.Mocked<WalletService>;
   let botNotificationService: jest.Mocked<BotNotificationService>;
+  let jobNotification: jest.Mocked<JobNotificationProcessor>;
 
   beforeEach(async () => {
     const mockPrisma = {
@@ -123,8 +124,8 @@ describe('JobOfferService (extended)', () => {
           useValue: { set: jest.fn().mockResolvedValue(null) },
         },
         {
-          provide: GeocodingService,
-          useValue: { geocode: jest.fn().mockResolvedValue(null) },
+          provide: JobNotificationProcessor,
+          useValue: { enqueue: jest.fn().mockResolvedValue(undefined) },
         },
         {
           // The real GeoService: it has no dependencies beyond a checked-in
@@ -141,6 +142,7 @@ describe('JobOfferService (extended)', () => {
     systemConfigService = module.get(SystemConfigService);
     walletService = module.get(WalletService);
     botNotificationService = module.get(BotNotificationService);
+    jobNotification = module.get(JobNotificationProcessor);
   });
 
   describe('validateCreateDto() — note', () => {
