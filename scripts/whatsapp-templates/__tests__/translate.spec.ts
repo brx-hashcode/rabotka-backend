@@ -199,7 +199,38 @@ describe('authored templates', () => {
     expect(new Set(Object.keys(authored()))).toEqual(new Set(AUTHORED_KEYS));
   });
 
-  it.each([...AUTHORED_KEYS])(
+  // The Flow button is a property of the two contact-unlock templates, not of
+  // being authored here: `kycRejected` and `accountSuspended` are authored too
+  // and deliberately carry no button at all, because neither audience can
+  // follow a link (not ACTIVE / refused a session).
+  const FLOW_BUTTON_KEYS = [
+    'contactUnlocked',
+    'contactUnlockedRecommendation',
+  ] as const;
+  // v2 of both gained a URL button. v1 had none, on the reasoning that these
+  // profiles can never hold a session — no longer true, so the CTA is the
+  // point of the version bump and is worth pinning.
+  const URL_BUTTON_KEYS = ['kycRejected', 'accountSuspended'] as const;
+
+  it.each(URL_BUTTON_KEYS)('%s carries a URL button, not a Flow', (key) => {
+    const buttons = authored()[key]?.components.find(
+      (c) => c.type === 'BUTTONS',
+    );
+    expect(buttons?.buttons).toHaveLength(1);
+    expect(buttons?.buttons?.[0].type).toBe('URL');
+    // WhatsApp allows one variable in a button URL and it must END it — the
+    // outbound path swaps that variable for a one-tap login code.
+    expect(buttons?.buttons?.[0].url).toMatch(/\{\{1\}\}$/);
+  });
+
+  it('accounts for every authored key', () => {
+    // Stops a new authored template from silently having neither assertion.
+    expect(
+      new Set([...FLOW_BUTTON_KEYS, ...URL_BUTTON_KEYS]),
+    ).toEqual(new Set(AUTHORED_KEYS));
+  });
+
+  it.each(FLOW_BUTTON_KEYS)(
     '%s carries the feedback Flow on its button, not a link',
     (key) => {
       const buttons = authored()[key]?.components.find(

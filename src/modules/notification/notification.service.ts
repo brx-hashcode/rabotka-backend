@@ -23,6 +23,27 @@ import {
 import { CalendarLinkService } from '../calendar/services/calendar-link.service';
 import { IcsGeneratorService } from '../calendar/services/ics-generator.service';
 import { fetchWithTimeout } from '../../common/utils/fetch-with-timeout.util';
+import type { RecurrenceLabelInput } from '../../common/utils/recurrence-label.util';
+
+/**
+ * An options object rather than positional arguments: this reached seven
+ * parameters of mostly-optional strings, where `notifyEventCreated(to, name,
+ * title, start, end, description, location)` was one transposition away from
+ * mailing the location as the title.
+ */
+export type EventMailParams = {
+  to: string;
+  name: string;
+  title: string;
+  startDate: string;
+  endDate: string;
+  description?: string | null;
+  location?: string | null;
+  /** Identity for the calendar entry — see `icsAttachment`. */
+  eventId?: string;
+  seriesId?: string | null;
+  recurrence?: RecurrenceLabelInput | null;
+};
 
 @Injectable()
 export class NotificationService {
@@ -135,80 +156,67 @@ export class NotificationService {
     });
   }
 
-  async notifyEventCreated(
-    to: string,
-    name: string,
-    title: string,
-    startDate: string,
-    endDate: string,
-    description?: string | null,
-    location?: string | null,
-  ): Promise<void> {
-    const eventData = { title, startDate, endDate, description, location };
-    const googleCalendarUrl = this.calendarLink.googleCalendarLink(eventData);
-    const icsContent = this.icsGenerator.generate(eventData);
+  async notifyEventCreated(params: EventMailParams): Promise<void> {
+    const { to, title } = params;
 
     await this.mail.sendMail({
       to,
       subject: `Rabotka – Nouvel événement : ${title}`,
       html: await this.layout.wrap(
-        eventCreatedEmail(
-          name,
-          title,
-          startDate,
-          endDate,
-          description,
-          location,
-          googleCalendarUrl,
-        ),
+        eventCreatedEmail({ ...params, ...this.eventLinks(params) }),
         { previewText: `Nouvel événement : ${title}` },
       ),
-      attachments: [
-        {
-          filename: 'event.ics',
-          content: icsContent,
-          contentType: 'text/calendar',
-        },
-      ],
+      attachments: [this.icsAttachment(params, 0)],
     });
   }
 
-  async notifyEventUpdated(
-    to: string,
-    name: string,
-    title: string,
-    startDate: string,
-    endDate: string,
-    description?: string | null,
-    location?: string | null,
-  ): Promise<void> {
-    const eventData = { title, startDate, endDate, description, location };
-    const googleCalendarUrl = this.calendarLink.googleCalendarLink(eventData);
-    const icsContent = this.icsGenerator.generate(eventData);
+  async notifyEventUpdated(params: EventMailParams): Promise<void> {
+    const { to, title } = params;
 
     await this.mail.sendMail({
       to,
       subject: `Rabotka – Mise à jour de l'événement : ${title}`,
       html: await this.layout.wrap(
-        eventUpdatedEmail(
-          name,
-          title,
-          startDate,
-          endDate,
-          description,
-          location,
-          googleCalendarUrl,
-        ),
+        eventUpdatedEmail({ ...params, ...this.eventLinks(params) }),
         { previewText: `Mise à jour : ${title}` },
       ),
-      attachments: [
-        {
-          filename: 'event.ics',
-          content: icsContent,
-          contentType: 'text/calendar',
-        },
-      ],
+      // SEQUENCE 1 so a client that already holds the invitation treats this as
+      // a revision of it rather than ignoring it as stale.
+      attachments: [this.icsAttachment(params, 1)],
     });
+  }
+
+  private eventLinks(params: EventMailParams): { googleCalendarUrl: string } {
+    return {
+      googleCalendarUrl: this.calendarLink.googleCalendarLink({
+        title: params.title,
+        startDate: params.startDate,
+        endDate: params.endDate,
+        description: params.description,
+        location: params.location,
+      }),
+    };
+  }
+
+  private icsAttachment(params: EventMailParams, sequence: number) {
+    return {
+      filename: 'event.ics',
+      content: this.icsGenerator.generate({
+        title: params.title,
+        startDate: params.startDate,
+        endDate: params.endDate,
+        description: params.description,
+        location: params.location,
+        recurrence: params.recurrence,
+        // Stable identity, so the update mail revises the entry the invitation
+        // created instead of adding a second one. Keyed on the series when
+        // there is one — every occurrence of a series shares one calendar
+        // entry, expanded from the RRULE at the recipient's end.
+        uid: `event-${params.seriesId ?? params.eventId}@rabotka`,
+        sequence,
+      }),
+      contentType: 'text/calendar',
+    };
   }
 
   async notifyAdvertisementCreated(params: {

@@ -29,6 +29,7 @@ import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { WhatsAppFeedbackService } from '../whatsapp/feedback/whatsapp-feedback.service';
 import { generatePaymentReference } from '../../common/utils/payment-reference';
 import { InteractionEventService } from '../recommendation-engine/interaction-event.service';
+import { assertAccountActive } from '../../common/exceptions/account-not-active.exception';
 
 /**
  * EMPLOYER pays to unlock a RECOMMENDED worker's contact. Stateless / single-sided
@@ -56,6 +57,7 @@ export class RecommendationContactService {
     employerId: string,
     workerId: string,
   ): Promise<{ ok: true }> {
+    await this.assertEmployerActive(employerId);
     const worker = await this.getActiveWorker(workerId);
     const fee = await this.systemConfig.getRecommendationContactFee();
     const workerName = `${worker.first_name} ${worker.last_name}`.trim();
@@ -178,6 +180,7 @@ export class RecommendationContactService {
     employerId: string,
     workerId: string,
   ): Promise<{ token: string }> {
+    await this.assertEmployerActive(employerId);
     const worker = await this.getActiveWorker(workerId);
     const fee = await this.systemConfig.getRecommendationContactFee();
     const workerName = `${worker.first_name} ${worker.last_name}`.trim();
@@ -191,6 +194,29 @@ export class RecommendationContactService {
     );
     const token = url.split('/pay/')[1] ?? '';
     return { token };
+  }
+
+  /**
+   * The PAYING side must be in good standing too.
+   *
+   * `getActiveWorker` below has always checked the worker being unlocked; the
+   * employer doing the unlocking was never checked at all, so a suspended
+   * employer could keep spending wallet credit for as long as their session
+   * lasted. `ActiveProfileGuard` now covers the HTTP route, and this repeats it
+   * here for the same reason `job-offer.service` and `application.service`
+   * repeat their KYC check: the guard and the service must not be able to
+   * disagree, and a mobile-money payment can settle long after the request that
+   * started it.
+   */
+  private async assertEmployerActive(employerId: string) {
+    const employer = await this.prisma.profile.findUnique({
+      where: { id: employerId },
+      select: { status: true, suspension_reason: true },
+    });
+    if (!employer) {
+      throw new NotFoundException('Employeur introuvable');
+    }
+    assertAccountActive(employer.status, employer.suspension_reason);
   }
 
   private async getActiveWorker(workerId: string) {

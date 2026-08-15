@@ -17,6 +17,7 @@ import {
 } from '@nestjs/swagger';
 import { ProfileAuthGuard } from '../auth/guards/profile-auth.guard';
 import { KycVerifiedGuard } from '../auth/guards/kyc-verified.guard';
+import { ActiveProfileGuard } from '../auth/guards/active-profile.guard';
 import type { ProfileAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
 import { JobOfferService } from './job-offer.service';
 import { CreateJobOfferDto } from './dto/create-job-offer.dto';
@@ -31,7 +32,7 @@ export class JobOfferController {
   ) {}
 
   @Post()
-  @UseGuards(KycVerifiedGuard)
+  @UseGuards(ActiveProfileGuard, KycVerifiedGuard)
   @ApiBearerAuth()
   @ApiCookieAuth()
   @ApiOperation({
@@ -50,7 +51,7 @@ export class JobOfferController {
   }
 
   @Post(':id/republish')
-  @UseGuards(KycVerifiedGuard)
+  @UseGuards(ActiveProfileGuard, KycVerifiedGuard)
   @ApiBearerAuth()
   @ApiCookieAuth()
   @ApiOperation({

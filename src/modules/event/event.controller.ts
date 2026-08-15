@@ -20,6 +20,8 @@ import { EventService } from './event.service';
 import { CreateEventDto } from './dto/create-event.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
 import { ListEventsDto } from './dto/list-events.dto';
+import { DeleteEventQueryDto } from './dto/delete-event-query.dto';
+import { EventEditScope } from './enums/event-edit-scope.enum';
 import type { AdminAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
 import { LogService } from '../log/log.service';
 import { extractRequestMeta } from '../../common/utils/request-meta.util';
@@ -93,12 +95,16 @@ export class EventController {
   async remove(
     @Req() req: AdminAuthenticatedRequest,
     @Param('id', ParseIntPipe) id: number,
+    @Query() query: DeleteEventQueryDto,
   ) {
-    await this.eventService.remove(id);
+    await this.eventService.remove(id, query.scope);
     await this.logService.create({
       action: 'EVENT_DELETED',
       entityType: 'event',
       entityId: String(id),
+      // Worth recording: "deleted event 41" and "deleted the series event 41
+      // belonged to" are very different acts to find in an audit trail.
+      metadata: { scope: query.scope ?? EventEditScope.THIS },
       userId: req.user?.userId,
       ...extractRequestMeta(req),
     });

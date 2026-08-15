@@ -4,6 +4,7 @@ import type {
   EventNotificationPayload,
 } from '../interfaces/event-notification.interfaces';
 import { WhatsAppService } from '../../whatsapp/whatsapp.service';
+import { recurrenceLabel } from '../../../common/utils/recurrence-label.util';
 
 @Injectable()
 export class WhatsAppEventSender {
@@ -26,7 +27,11 @@ export class WhatsAppEventSender {
         ? `\n${payload.callToAction} : ${payload.location}`
         : `\nLien : ${payload.location}`;
     }
-    const message = `${verb} : ${payload.title}\nDu ${payload.startDate} au ${payload.endDate}${locationLine}`;
+    // Same line the email carries: this message is sent once for a whole
+    // series, so without it a weekly event looks like a single date.
+    const repeats = recurrenceLabel(payload.recurrence);
+    const repeatLine = repeats ? `\nRépétition : ${repeats}` : '';
+    const message = `${verb} : ${payload.title}\nDu ${payload.startDate} au ${payload.endDate}${repeatLine}${locationLine}`;
 
     this.logger.log(
       `WhatsApp event notification to ${recipient.phone}: ${message.slice(0, 80)}`,
