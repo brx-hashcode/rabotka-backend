@@ -10,6 +10,7 @@ import {
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { DeliveryChannel } from '@prisma/client';
+import { DEFAULT_EVENT_DURATION_MINUTES } from '../utils/event-window.util';
 import { RecurrenceDto } from './recurrence.dto';
 
 export class CreateEventDto {
@@ -27,9 +28,19 @@ export class CreateEventDto {
   @IsDateString()
   startDate: string;
 
-  @ApiProperty({ description: 'ISO 8601 datetime' })
+  /**
+   * When this occurrence finishes — not when a repeating event stops repeating,
+   * which is the recurrence's own `until`/`count`. Omit it for a
+   * {@link DEFAULT_EVENT_DURATION_MINUTES}-minute event: there is no way to
+   * express "this occurrence never ends", and an end date decades out is not
+   * one, it is an event that covers every day in between.
+   */
+  @ApiPropertyOptional({
+    description: `ISO 8601 datetime. Defaults to ${DEFAULT_EVENT_DURATION_MINUTES} minutes after startDate.`,
+  })
+  @IsOptional()
   @IsDateString()
-  endDate: string;
+  endDate?: string;
 
   @ApiProperty({
     description: 'Event color: blue | green | red | yellow | purple | orange',

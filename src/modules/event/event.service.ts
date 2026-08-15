@@ -8,6 +8,7 @@ import { ListEventsDto } from './dto/list-events.dto';
 import { RecurrenceDto } from './dto/recurrence.dto';
 import { EventEditScope } from './enums/event-edit-scope.enum';
 import { EventSeriesService } from './services/event-series.service';
+import { resolveEventWindow } from './utils/event-window.util';
 import { DeliveryChannel, Prisma } from '@prisma/client';
 import { NotificationService } from '../notification/notification.service';
 import { EventNotificationDispatcher } from './services/event-notification.dispatcher';
@@ -138,14 +139,18 @@ export class EventService {
     // row it always has. Either way exactly one event object comes back — the
     // first occurrence — so everything below this point is shared, and the
     // notification cannot accidentally fire per occurrence.
+    // The same resolution the series path applies, so a one-off and the first
+    // occurrence of a series treat an omitted end date identically.
+    const window = resolveEventWindow(dto.startDate, dto.endDate);
+
     const event = dto.recurrence
       ? await this.createSeriesMaster(dto, dto.recurrence, createdById)
       : await this.prisma.event.create({
           data: {
             title: dto.title,
             description: dto.description,
-            start_date: parseIsoDate(dto.startDate) ?? new Date(dto.startDate),
-            end_date: parseIsoDate(dto.endDate) ?? new Date(dto.endDate),
+            start_date: window.start,
+            end_date: window.end,
             color: dto.color,
             channel: dto.channel ?? DeliveryChannel.EMAIL,
             location: dto.location ?? null,
@@ -247,6 +252,8 @@ export class EventService {
       return mapped;
     }
 
+    this.assertDatesStillOrdered(dto, existing, datesChanged);
+
     const newStartDate = parseIsoDate(dto.startDate);
     const newEndDate = parseIsoDate(dto.endDate);
 
@@ -281,6 +288,26 @@ export class EventService {
   async remove(id: number, scope: EventEditScope = EventEditScope.THIS) {
     await this.findOne(id);
     await this.series.applyScopedDelete(id, scope);
+  }
+
+  /**
+   * Checks the row's dates as they will be *after* the edit, not as the request
+   * carries them: moving only the start still has to land before the end that
+   * was stored last time.
+   *
+   * Skipped when the edit leaves both alone, so a row that predates this check
+   * can still have its title fixed.
+   */
+  private assertDatesStillOrdered(
+    dto: UpdateEventDto,
+    existing: { startDate: string; endDate: string },
+    datesChanged: boolean,
+  ): void {
+    if (!datesChanged) return;
+    resolveEventWindow(
+      dto.startDate ?? existing.startDate,
+      dto.endDate ?? existing.endDate,
+    );
   }
 
   private emitUpdated(mapped: ReturnType<typeof mapEvent>) {
