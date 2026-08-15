@@ -461,7 +461,14 @@ describe('BotNotificationService', () => {
       (deps.prisma as any).jobOffer = {
         findUnique: jest.fn().mockResolvedValue(null),
       };
-      await service.sendRecommendedJobNotification('worker-1', 'jo-1');
+      const sent = await service.sendRecommendedJobNotification(
+        'worker-1',
+        'jo-1',
+      );
+
+      // The caller releases the worker's cooldown on `false`, so "nothing was
+      // sent" has to be reported, not swallowed.
+      expect(sent).toBe(false);
       expect(deps.whatsApp.sendTemplateMessage).not.toHaveBeenCalled();
     });
 
@@ -481,7 +488,12 @@ describe('BotNotificationService', () => {
           scheduled_at: new Date('2026-06-01T10:00:00Z'),
         }),
       };
-      await service.sendRecommendedJobNotification('worker-1', 'jo-1');
+      const sent = await service.sendRecommendedJobNotification(
+        'worker-1',
+        'jo-1',
+      );
+
+      expect(sent).toBe(true);
       expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+242001',
         expect.any(String),
@@ -511,8 +523,12 @@ describe('BotNotificationService', () => {
         }),
       };
 
-      await service.sendRecommendedJobNotification('worker-1', 'jo-1');
+      const sent = await service.sendRecommendedJobNotification(
+        'worker-1',
+        'jo-1',
+      );
 
+      expect(sent).toBe(true);
       expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalled();
     });
 
@@ -536,9 +552,63 @@ describe('BotNotificationService', () => {
         }),
       };
 
-      await service.sendRecommendedJobNotification('worker-1', 'jo-1');
+      const sent = await service.sendRecommendedJobNotification(
+        'worker-1',
+        'jo-1',
+      );
 
+      expect(sent).toBe(true);
       expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalled();
+    });
+
+    it('reports a provider failure rather than swallowing it', async () => {
+      // The caller cannot release a cooldown it was never told to release, so
+      // a throw here has to surface as `false` rather than as a silent void.
+      deps.prisma.profile.findUnique.mockResolvedValue({
+        phone: '+242001',
+        first_name: 'Alice',
+        status: 'ACTIVE',
+        profile_type: 'WORKER',
+      });
+      (deps.prisma as any).jobOffer = {
+        findUnique: jest.fn().mockResolvedValue({
+          title: 'Plombier',
+          amount: 5000,
+          payment_flow: null,
+          address: '10 Rue Paris',
+          scheduled_at: new Date('2026-06-01T10:00:00Z'),
+        }),
+      };
+      deps.whatsApp.sendTemplateMessage.mockRejectedValueOnce(
+        new Error('twilio down'),
+      );
+
+      await expect(
+        service.sendRecommendedJobNotification('worker-1', 'jo-1'),
+      ).resolves.toBe(false);
+    });
+
+    it('reports an ineligible worker as not sent', async () => {
+      deps.prisma.profile.findUnique.mockResolvedValue({
+        phone: '+242001',
+        first_name: 'Alice',
+        status: 'SUSPENDED',
+        profile_type: 'WORKER',
+      });
+      (deps.prisma as any).jobOffer = {
+        findUnique: jest.fn().mockResolvedValue({
+          title: 'Plombier',
+          amount: 5000,
+          payment_flow: null,
+          address: '10 Rue Paris',
+          scheduled_at: new Date('2026-06-01T10:00:00Z'),
+        }),
+      };
+
+      await expect(
+        service.sendRecommendedJobNotification('worker-1', 'jo-1'),
+      ).resolves.toBe(false);
+      expect(deps.whatsApp.sendTemplateMessage).not.toHaveBeenCalled();
     });
   });
 });

@@ -277,6 +277,20 @@ export class SystemConfigService implements OnModuleInit {
     return Number.isNaN(n) || n < 1 ? 20 : n;
   }
 
+  /**
+   * Whether a worker must be KYC-verified to be notified about a new offer.
+   *
+   * Defaults to `false` so that moving the notification path onto the v2 ranker
+   * — whose candidate query requires VERIFIED — does not silently drop every
+   * unverified recipient the legacy path used to reach. Flip it on once the
+   * volume change has been measured; the feed has always required verification
+   * and is unaffected either way.
+   */
+  async notifyRequiresVerified(): Promise<boolean> {
+    const val = await this.get('matching.notify_require_verified', 'false');
+    return val === 'true';
+  }
+
   /** Minimum minutes between two job recommendation notifications for the same worker. */
   async getNotificationCooldownMinutes(): Promise<number> {
     const val = await this.get('matching.notification_cooldown_minutes', '60');

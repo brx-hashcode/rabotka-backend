@@ -372,10 +372,19 @@ export class BotNotificationService {
     await this.whatsApp.sendTextMessage(phone, text);
   }
 
+  /**
+   * Sends the job-recommendation template, reporting whether it went out.
+   *
+   * The boolean is load-bearing rather than informational: the caller claims a
+   * per-worker cooldown before calling, and has to release it again when nothing
+   * was sent. A void return made "delivered", "skipped as ineligible" and
+   * "provider threw" indistinguishable, so a Twilio failure muted a worker for
+   * an hour over a message they never received.
+   */
   async sendRecommendedJobNotification(
     workerId: string,
     jobOfferId: string,
-  ): Promise<void> {
+  ): Promise<boolean> {
     try {
       const [profile, offer] = await Promise.all([
         this.prisma.profile.findUnique({
@@ -398,9 +407,9 @@ export class BotNotificationService {
           },
         }),
       ]);
-      if (!profile?.phone || !offer) return;
+      if (!profile?.phone || !offer) return false;
       if (profile.profile_type !== 'WORKER' || profile.status !== 'ACTIVE')
-        return;
+        return false;
 
       // No flow arming: the approved template's button opens `/offres/:id`, so
       // the worker applies on the web. This previously both armed the apply flow
@@ -415,7 +424,7 @@ export class BotNotificationService {
         minute: '2-digit',
       });
       const tpl = WHATSAPP_TEMPLATES.jobRecommendation;
-      await this.whatsApp.sendTemplateMessage(
+      return await this.whatsApp.sendTemplateMessage(
         profile.phone,
         'jobRecommendation',
         {
@@ -436,6 +445,7 @@ export class BotNotificationService {
         `Failed to send recommended job notification to worker ${workerId}`,
         err,
       );
+      return false;
     }
   }
 }

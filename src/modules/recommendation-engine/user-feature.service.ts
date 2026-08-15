@@ -57,19 +57,29 @@ export class UserFeatureService {
     const row = await this.prisma.interactionProfile.findUnique({
       where: { profile_id: profileId },
     });
-    if (!row) return EMPTY_FEATURES;
+    return row ? fromRow(row) : EMPTY_FEATURES;
+  }
 
-    return {
-      positiveCount: row.positive_count,
-      eventCount: row.event_count,
-      categoryAffinity: asRecord(row.category_affinity),
-      counterpartyAffinity: asRecord(row.counterparty_affinity),
-      amountBandAffinity: asRecord(row.amount_band_affinity),
-      paymentFlowAffinity: asRecord(row.payment_flow_affinity),
-      negativeCategoryIds: row.negative_category_ids,
-      distanceHalfLifeKm:
-        row.distance_half_life_km ?? DEFAULT_DISTANCE_HALF_LIFE_KM,
-    };
+  /**
+   * The same projection for a batch, in one query.
+   *
+   * Needed wherever features are read per *candidate* rather than per asker —
+   * ranking eighty workers by their own learned distance tolerance would
+   * otherwise be eighty sequential `findUnique`s. Absent ids come back neutral,
+   * so the caller never has to distinguish "no row" from "no history".
+   */
+  async getMany(profileIds: string[]): Promise<Map<string, UserFeatures>> {
+    const out = new Map<string, UserFeatures>();
+    if (profileIds.length === 0) return out;
+
+    const rows = await this.prisma.interactionProfile.findMany({
+      where: { profile_id: { in: profileIds } },
+    });
+    for (const row of rows) out.set(row.profile_id, fromRow(row));
+    for (const id of profileIds) {
+      if (!out.has(id)) out.set(id, EMPTY_FEATURES);
+    }
+    return out;
   }
 
   /**
@@ -242,7 +252,8 @@ export class UserFeatureService {
       .sort((a, b) => a - b);
     if (distances.length < 3) return null;
 
-    const p75 = distances[Math.floor(distances.length * 0.75)] ?? distances.at(-1)!;
+    const p75 =
+      distances[Math.floor(distances.length * 0.75)] ?? distances.at(-1)!;
     return Math.min(
       MAX_DISTANCE_HALF_LIFE_KM,
       Math.max(MIN_DISTANCE_HALF_LIFE_KM, p75),
@@ -278,6 +289,33 @@ export class UserFeatureService {
       this.logger.warn(`Failed to persist features for ${profileId}`, err);
     }
   }
+}
+
+/**
+ * One stored row as features. Shared by `get` and `getMany` so a batch read can
+ * never drift from a single read.
+ */
+function fromRow(row: {
+  positive_count: number;
+  event_count: number;
+  category_affinity: unknown;
+  counterparty_affinity: unknown;
+  amount_band_affinity: unknown;
+  payment_flow_affinity: unknown;
+  negative_category_ids: string[];
+  distance_half_life_km: number | null;
+}): UserFeatures {
+  return {
+    positiveCount: row.positive_count,
+    eventCount: row.event_count,
+    categoryAffinity: asRecord(row.category_affinity),
+    counterpartyAffinity: asRecord(row.counterparty_affinity),
+    amountBandAffinity: asRecord(row.amount_band_affinity),
+    paymentFlowAffinity: asRecord(row.payment_flow_affinity),
+    negativeCategoryIds: row.negative_category_ids,
+    distanceHalfLifeKm:
+      row.distance_half_life_km ?? DEFAULT_DISTANCE_HALF_LIFE_KM,
+  };
 }
 
 function asRecord(value: unknown): Record<string, number> {
