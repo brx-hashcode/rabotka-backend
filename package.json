@@ -36,7 +36,8 @@
     "portfolio:backfill-slugs": "tsx scripts/backfill-portfolio-slugs.ts",
     "profile:backfill-country": "tsx scripts/backfill-profile-country.ts",
     "job-offer:backfill-location": "tsx scripts/backfill-job-offer-location.ts",
-    "geo:build-dataset": "tsx scripts/build-geo-dataset.ts"
+    "geo:build-dataset": "tsx scripts/build-geo-dataset.ts",
+    "events:repair-series": "tsx scripts/repair-overlapping-series.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
