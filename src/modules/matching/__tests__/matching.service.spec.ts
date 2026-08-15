@@ -311,6 +311,76 @@ describe('MatchingService', () => {
       const result = await service.findMatchingWorkersForJob('jo-1');
       expect(result).toEqual([]);
     });
+
+    it('returns the top `topN`, not five', async () => {
+      // Retrieval filters every candidate to the offer's own category, so they
+      // all carry the same one. A per-category cap therefore capped the whole
+      // fan-out: a categorised offer reached five workers however many good
+      // matches existed, and whatever max_notification_workers was set to.
+      prisma.jobOffer.findUnique.mockResolvedValue({
+        id: 'jo-1',
+        title: 'Plombier',
+        description: null,
+        address: null,
+        category_id: 'cat-1',
+        category: { name: 'Plomberie', description: null },
+      });
+
+      const ids = Array.from({ length: 12 }, (_, i) => `w-${i}`);
+      qdrant.searchHybridWithFilter.mockResolvedValue(
+        ids.map((id) => ({
+          id,
+          score: 0.9,
+          payload: { profileId: id, categoryIds: ['cat-1'] },
+        })),
+      );
+      prisma.profile.findMany.mockResolvedValue(
+        ids.map((id) => ({
+          id,
+          reliability_score: 90,
+          profile_type: 'WORKER',
+          categories: [{ category_id: 'cat-1' }],
+        })),
+      );
+
+      const result = await service.findMatchingWorkersForJob('jo-1', 10);
+
+      expect(result).toHaveLength(10);
+      // Still in rank order — the cap is gone, the ranking is not.
+      expect(result[0].score).toBeGreaterThanOrEqual(result[9].score);
+    });
+
+    it('never returns more than topN', async () => {
+      prisma.jobOffer.findUnique.mockResolvedValue({
+        id: 'jo-1',
+        title: 'Plombier',
+        description: null,
+        address: null,
+        category_id: 'cat-1',
+        category: { name: 'Plomberie', description: null },
+      });
+
+      const ids = Array.from({ length: 12 }, (_, i) => `w-${i}`);
+      qdrant.searchHybridWithFilter.mockResolvedValue(
+        ids.map((id) => ({
+          id,
+          score: 0.9,
+          payload: { profileId: id, categoryIds: ['cat-1'] },
+        })),
+      );
+      prisma.profile.findMany.mockResolvedValue(
+        ids.map((id) => ({
+          id,
+          reliability_score: 90,
+          profile_type: 'WORKER',
+          categories: [{ category_id: 'cat-1' }],
+        })),
+      );
+
+      expect(await service.findMatchingWorkersForJob('jo-1', 3)).toHaveLength(
+        3,
+      );
+    });
   });
 
   describe('findMatchingJobsForWorker() - enabled', () => {

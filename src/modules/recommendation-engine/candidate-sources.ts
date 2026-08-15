@@ -11,6 +11,7 @@ import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { QdrantService } from '../qdrant/qdrant.service';
 import type { UserFeatures } from './user-feature.service';
 import { spreadSimilarity } from './scoring';
+import { HARD_BLOCK_DAYS } from '../penalty/penalty.utils';
 
 /** Candidate pool multiplier — over-fetch so filtering still yields topN. */
 const POOL_FACTOR = 4;
@@ -63,6 +64,16 @@ export type WorkerCandidate = {
 export type WorkerQueryOptions = {
   reliabilityMin: number;
   exclude: Set<string>;
+  /**
+   * Whether KYC is required to be a candidate. Defaults to true, which is what
+   * a feed wants: an unverified worker cannot be hired, so showing them wastes
+   * a slot.
+   *
+   * The notification path can turn it off, because it inherited a population
+   * that was never filtered this way and cutting those recipients is a decision
+   * to take deliberately rather than as a side effect of changing ranker.
+   */
+  requireVerified?: boolean;
 };
 
 const WORKER_SELECT = {
@@ -93,7 +104,9 @@ function eligibleWorkerWhere(
   return {
     profile_type: ProfileType.WORKER,
     status: AccountStatus.ACTIVE,
-    verification_status: VerificationStatus.VERIFIED,
+    ...(opts.requireVerified === false
+      ? {}
+      : { verification_status: VerificationStatus.VERIFIED }),
     deleted_at: null,
     reliability_score: { gte: opts.reliabilityMin },
     ...(opts.exclude.size > 0 ? { id: { notIn: [...opts.exclude] } } : {}),
@@ -573,6 +586,68 @@ export class CandidateSourceService {
       this.logger.warn('lastActiveAt failed', err);
     }
     return out;
+  }
+
+  /**
+   * When each worker was last *sent* a recommendation.
+   *
+   * Keyed by actor across every object, which is why `lastSeenAt` cannot serve:
+   * that one answers "was this worker shown this offer", and notification
+   * fatigue is about how recently they were messaged at all. Feeds the graded
+   * `seenDecay` penalty, so the ranker prefers people who have not just been
+   * contacted — and the hard cooldown rarely has to fire.
+   */
+  async lastRecommendedAt(workerIds: string[]): Promise<Map<string, Date>> {
+    const out = new Map<string, Date>();
+    if (workerIds.length === 0) return out;
+    try {
+      const rows = await this.prisma.interactionEvent.findMany({
+        where: {
+          actor_id: { in: workerIds },
+          kind: InteractionKind.RECOMMENDATION_SERVED,
+        },
+        orderBy: { occurred_at: 'desc' },
+        select: { actor_id: true, occurred_at: true },
+        take: 1000,
+      });
+      for (const r of rows) {
+        if (!out.has(r.actor_id)) out.set(r.actor_id, r.occurred_at);
+      }
+    } catch (err) {
+      this.logger.warn('lastRecommendedAt failed', err);
+    }
+    return out;
+  }
+
+  /**
+   * Workers with an unpaid penalty past the hard-block window.
+   *
+   * A post-fusion drop rather than part of `eligibleWorkerWhere`, because the
+   * predicate lives on `penalty` rather than `profile`. `JobOfferService.create`
+   * already refuses to let a hard-blocked *employer* post; a hard-blocked worker
+   * has no business being messaged about new work either.
+   */
+  async hardBlockedWorkerIds(workerIds: string[]): Promise<Set<string>> {
+    if (workerIds.length === 0) return new Set();
+    const threshold = new Date();
+    threshold.setDate(threshold.getDate() - HARD_BLOCK_DAYS);
+    try {
+      const rows = await this.prisma.penalty.findMany({
+        where: {
+          profile_id: { in: workerIds },
+          paid_at: null,
+          applied_at: { lte: threshold },
+        },
+        select: { profile_id: true },
+        distinct: ['profile_id'],
+      });
+      return new Set(rows.map((r) => r.profile_id));
+    } catch (err) {
+      // Failing open here notifies someone who should have been skipped, which
+      // is far better than failing closed and notifying nobody at all.
+      this.logger.warn('hardBlockedWorkerIds failed', err);
+      return new Set();
+    }
   }
 
   /** Offers the worker bookmarked and then removed — a soft negative. */

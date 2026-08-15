@@ -209,6 +209,13 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     isSecret: false,
   },
   {
+    key: 'matching.notify_require_verified',
+    value: 'false',
+    category: ConfigCategory.MATCHING,
+    label: 'Exiger la vérification KYC pour notifier un travailleur',
+    isSecret: false,
+  },
+  {
     key: 'matching.notification_cooldown_minutes',
     value: '60',
     category: ConfigCategory.MATCHING,
