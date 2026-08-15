@@ -22,6 +22,12 @@ const CACHE_TTL_SECONDS = 300; // 5 minutes
 const SEED_MAX_RETRIES = 10;
 const SEED_RETRY_DELAY_MS = 2000;
 
+/**
+ * Fan-out width when the config says nothing. Kept in step with the seeded
+ * value of `matching.max_notification_workers`.
+ */
+const DEFAULT_MAX_NOTIFICATION_WORKERS = 5;
+
 @Injectable()
 export class SystemConfigService implements OnModuleInit {
   private readonly logger = new Logger(SystemConfigService.name);
@@ -271,10 +277,34 @@ export class SystemConfigService implements OnModuleInit {
     return val === 'true';
   }
 
+  /**
+   * How many workers one offer may notify.
+   *
+   * The fallback matches the seeded default on purpose: a missing or malformed
+   * key must not quietly widen the fan-out, which is the failure mode that
+   * costs real money and a WhatsApp quality rating.
+   */
   async getMaxNotificationWorkers(): Promise<number> {
-    const val = await this.get('matching.max_notification_workers', '20');
+    const val = await this.get(
+      'matching.max_notification_workers',
+      String(DEFAULT_MAX_NOTIFICATION_WORKERS),
+    );
     const n = Number.parseInt(val, 10);
-    return Number.isNaN(n) || n < 1 ? 20 : n;
+    return Number.isNaN(n) || n < 1 ? DEFAULT_MAX_NOTIFICATION_WORKERS : n;
+  }
+
+  /**
+   * Whether a worker must be KYC-verified to be notified about a new offer.
+   *
+   * Defaults to `false` so that moving the notification path onto the v2 ranker
+   * — whose candidate query requires VERIFIED — does not silently drop every
+   * unverified recipient the legacy path used to reach. Flip it on once the
+   * volume change has been measured; the feed has always required verification
+   * and is unaffected either way.
+   */
+  async notifyRequiresVerified(): Promise<boolean> {
+    const val = await this.get('matching.notify_require_verified', 'false');
+    return val === 'true';
   }
 
   /** Minimum minutes between two job recommendation notifications for the same worker. */

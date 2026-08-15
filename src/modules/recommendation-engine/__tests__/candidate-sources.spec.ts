@@ -1,6 +1,7 @@
 import { Logger } from '@nestjs/common';
-import { JobOfferStatus } from '@prisma/client';
+import { InteractionKind, JobOfferStatus } from '@prisma/client';
 import { CandidateSourceService } from '../candidate-sources';
+import { HARD_BLOCK_DAYS } from '../../penalty/penalty.utils';
 import { EMPTY_FEATURES, type UserFeatures } from '../user-feature.service';
 
 jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => {});
@@ -33,6 +34,7 @@ function makePrisma() {
     },
     profile: { findMany: jest.fn().mockResolvedValue([]) },
     interactionEvent: { findMany: jest.fn().mockResolvedValue([]) },
+    penalty: { findMany: jest.fn().mockResolvedValue([]) },
   };
 }
 
@@ -43,7 +45,9 @@ describe('CandidateSourceService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     prisma = makePrisma();
-    service = new CandidateSourceService(prisma as never);
+    // Qdrant is only reached by `similarity`, which nothing here exercises —
+    // but the argument has to be passed for this to typecheck at all.
+    service = new CandidateSourceService(prisma as never, undefined as never);
   });
 
   describe('fromAffinities', () => {
@@ -488,6 +492,74 @@ describe('CandidateSourceService', () => {
     it('degrades to an empty map rather than failing', async () => {
       prisma.interactionEvent.findMany.mockRejectedValue(new Error('down'));
       expect((await service.lastActiveAt(['w1'])).size).toBe(0);
+    });
+  });
+
+  describe('lastRecommendedAt', () => {
+    it('does not query for an empty batch', async () => {
+      expect((await service.lastRecommendedAt([])).size).toBe(0);
+      expect(prisma.interactionEvent.findMany).not.toHaveBeenCalled();
+    });
+
+    it('asks only for recommendations actually served', async () => {
+      await service.lastRecommendedAt(['w1']);
+
+      const [{ where }] = prisma.interactionEvent.findMany.mock.calls[0];
+      expect(where.kind).toBe(InteractionKind.RECOMMENDATION_SERVED);
+      expect(where.actor_id).toEqual({ in: ['w1'] });
+    });
+
+    it('keeps the most recent per worker', async () => {
+      // Keyed by actor across every offer — the question is how recently this
+      // person was messaged at all, not whether they saw one particular job.
+      const recent = new Date('2026-07-30T12:00:00Z');
+      prisma.interactionEvent.findMany.mockResolvedValue([
+        { actor_id: 'w1', occurred_at: recent },
+        { actor_id: 'w1', occurred_at: new Date('2026-07-01T12:00:00Z') },
+      ]);
+
+      expect((await service.lastRecommendedAt(['w1'])).get('w1')).toEqual(
+        recent,
+      );
+    });
+
+    it('leaves a never-messaged worker absent rather than dated', async () => {
+      expect((await service.lastRecommendedAt(['w1'])).has('w1')).toBe(false);
+    });
+
+    it('degrades to an empty map rather than failing', async () => {
+      prisma.interactionEvent.findMany.mockRejectedValue(new Error('down'));
+      expect((await service.lastRecommendedAt(['w1'])).size).toBe(0);
+    });
+  });
+
+  describe('hardBlockedWorkerIds', () => {
+    it('does not query for an empty batch', async () => {
+      expect((await service.hardBlockedWorkerIds([])).size).toBe(0);
+      expect(prisma.penalty.findMany).not.toHaveBeenCalled();
+    });
+
+    it('looks only at unpaid penalties older than the hard-block window', async () => {
+      await service.hardBlockedWorkerIds(['w1']);
+
+      const [{ where }] = prisma.penalty.findMany.mock.calls[0];
+      expect(where.paid_at).toBeNull();
+      const cutoff = where.applied_at.lte as Date;
+      const daysAgo = (Date.now() - cutoff.getTime()) / 86_400_000;
+      expect(daysAgo).toBeCloseTo(HARD_BLOCK_DAYS, 1);
+    });
+
+    it('returns the blocked ids', async () => {
+      prisma.penalty.findMany.mockResolvedValue([{ profile_id: 'w1' }]);
+      expect([...(await service.hardBlockedWorkerIds(['w1', 'w2']))]).toEqual([
+        'w1',
+      ]);
+    });
+
+    it('fails open, so a penalty outage cannot mute the whole fan-out', async () => {
+      // Notifying someone who should have been skipped beats notifying no one.
+      prisma.penalty.findMany.mockRejectedValue(new Error('down'));
+      expect((await service.hardBlockedWorkerIds(['w1'])).size).toBe(0);
     });
   });
 });

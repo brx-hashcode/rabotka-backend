@@ -14,7 +14,11 @@ import {
 } from './candidate-sources';
 import { InteractionKind } from '@prisma/client';
 import { COLLECTIONS } from '../qdrant/qdrant.config';
-import { UserFeatureService, type UserFeatures } from './user-feature.service';
+import {
+  EMPTY_FEATURES,
+  UserFeatureService,
+  type UserFeatures,
+} from './user-feature.service';
 import {
   DEFAULT_PENALTIES,
   applyPenalties,
@@ -47,6 +51,21 @@ const SOURCE_WEIGHTS: Record<CandidateTier, number> = {
   cf: 0.6,
   declared: 0.5,
   all_open: 0.3,
+};
+
+/**
+ * Source weights for the offer-side fan-out, deliberately not `SOURCE_WEIGHTS`.
+ *
+ * Inverted relative to the feed: an offer names a concrete category, and
+ * "workers who declared exactly this trade" is stronger evidence than "trades
+ * this employer has engaged with before". The feed has no such anchor, which is
+ * why affinity leads there.
+ */
+const OFFER_SOURCE_WEIGHTS: Record<CandidateTier, number> = {
+  declared: 1.0,
+  affinity: 0.7,
+  cf: 0,
+  all_open: 0.2,
 };
 
 const MAX_PER_CATEGORY = 3;
@@ -420,6 +439,236 @@ export class RecommendationEngineService {
       ],
       limit,
     );
+
+    return selected.map(({ id, score, tier }) => ({ id, score, tier }));
+  }
+
+  /**
+   * Ranked workers to tell about one specific job offer.
+   *
+   * Distinct from `recommendWorkersForEmployer`, which ranks against an
+   * employer's whole history and knows nothing about a particular offer — no
+   * offer category to anchor on, no offer location to measure from. This is the
+   * direction a push notification needs, and the differences from the feed are
+   * deliberate rather than incidental:
+   *
+   * - `declared` outranks `affinity` as a source, because the offer names a
+   *   concrete category and that is stronger evidence than what the employer
+   *   happened to hire for last month.
+   * - `strictCategory` refuses the "any eligible worker" tier. On a feed an
+   *   irrelevant profile costs a scroll; here it costs a real WhatsApp message
+   *   and an hour of that worker's notification quota.
+   * - `keepAtLeast: 0` lets the threshold return nothing. For a feed that would
+   *   be a bug; here, "nobody is a good enough match" is the correct answer and
+   *   messaging the least-bad of a bad set is not.
+   */
+  async recommendWorkersForJobOffer(
+    jobOfferId: string,
+    limit = 20,
+    opts: {
+      exclude?: Set<string>;
+      minScore?: number;
+      keepAtLeast?: number;
+      explore?: boolean;
+      strictCategory?: boolean;
+      requireVerified?: boolean;
+      rng?: () => number;
+    } = {},
+  ): Promise<RankedWorker[]> {
+    const offer = await this.prisma.jobOffer.findUnique({
+      where: { id: jobOfferId },
+      select: {
+        id: true,
+        employer_id: true,
+        category_id: true,
+        is_remote: true,
+        latitude: true,
+        longitude: true,
+        country_code: true,
+        city: true,
+      },
+    });
+    if (!offer) return [];
+
+    const employerFeatures = await this.features.get(offer.employer_id);
+    const fees = await this.systemConfig.getFees();
+
+    // Someone who already applied does not need telling the job exists.
+    const applied = await this.prisma.application.findMany({
+      where: { job_offer_id: offer.id },
+      select: { worker_id: true },
+    });
+    const exclude = new Set([
+      ...(opts.exclude ?? []),
+      ...applied.map((a) => a.worker_id),
+    ]);
+
+    const queryOpts = {
+      reliabilityMin: fees.reliabilityScoreMin,
+      exclude,
+      requireVerified: opts.requireVerified,
+    };
+
+    const pools = new Map<CandidateTier, WorkerCandidate[]>();
+    const add = (tier: CandidateTier, list: WorkerCandidate[]) => {
+      if (list.length > 0) pools.set(tier, list);
+    };
+    const gathered = () =>
+      new Set([...pools.values()].flatMap((l) => l.map((c) => c.id))).size;
+
+    if (offer.category_id) {
+      add(
+        'declared',
+        await this.sources.workersFromCategories(
+          [offer.category_id],
+          queryOpts,
+          limit,
+        ),
+      );
+    }
+    if (gathered() < limit) {
+      add(
+        'affinity',
+        await this.sources.workersFromAffinities(
+          employerFeatures,
+          queryOpts,
+          limit,
+        ),
+      );
+    }
+    // An uncategorised offer has nothing to be strict about, so the broad tier
+    // is the only thing standing between it and an empty fan-out.
+    if (
+      gathered() < limit &&
+      (!opts.strictCategory || offer.category_id == null)
+    ) {
+      add('all_open', await this.sources.workersFromAll(queryOpts, limit));
+    }
+    if (pools.size === 0) return [];
+
+    const fused = rrfFuse(
+      [...pools.entries()].map(([tier, candidates]) => ({
+        ids: candidates.map((c) => c.id),
+        weight: OFFER_SOURCE_WEIGHTS[tier],
+      })),
+    );
+
+    const byId = new Map<string, WorkerCandidate>();
+    const tierOf = new Map<string, CandidateTier>();
+    for (const [tier, candidates] of pools) {
+      for (const c of candidates) {
+        if (!byId.has(c.id)) {
+          byId.set(c.id, c);
+          tierOf.set(c.id, tier);
+        }
+      }
+    }
+
+    const candidateIds = fused.map((f) => f.id);
+    const [
+      quality,
+      lastActive,
+      lastRecommended,
+      blocked,
+      workerFeatures,
+      simScores,
+    ] = await Promise.all([
+      this.sources.workerQuality(candidateIds),
+      this.sources.lastActiveAt(candidateIds),
+      this.sources.lastRecommendedAt(candidateIds),
+      this.sources.hardBlockedWorkerIds(candidateIds),
+      // Per candidate, not per asker: proximity is judged against each worker's
+      // own learned distance tolerance, and the negative-category penalty reads
+      // what that worker keeps rejecting.
+      this.features.getMany(candidateIds),
+      // The direction in which a worker's portfolio earns them work: the offer
+      // is the query, the workers are the candidates.
+      this.sources.similarity(
+        COLLECTIONS.JOBS,
+        offer.id,
+        COLLECTIONS.WORKERS,
+        candidateIds,
+      ),
+    ]);
+
+    const weights = interpolateWeights(employerFeatures.positiveCount);
+    const offerPlace = toPlace(offer);
+
+    const scored = fused
+      .filter((f) => !blocked.has(f.id))
+      .map((f) => {
+        const c = byId.get(f.id)!;
+        const active = lastActive.get(c.id);
+        const features = workerFeatures.get(c.id) ?? EMPTY_FEATURES;
+
+        const terms: ScoreTerms = {
+          sim: simScores.get(c.id) ?? null,
+          catAff: bestCategoryAffinity(
+            c.categoryIds,
+            employerFeatures.categoryAffinity,
+          ),
+          partyAff: employerFeatures.counterpartyAffinity[c.id] ?? null,
+          cf:
+            pools.size > 1 ? clamp01((f.sources - 1) / (pools.size - 1)) : null,
+          prox: offer.is_remote
+            ? null
+            : this.workerProximity(offerPlace, c, features),
+          // NOT `urgencyScore(offer.scheduled_at)`. Urgency belongs to the
+          // offer, so in this direction it is the same number for every
+          // candidate — and `computeRelevance` is a weighted MEAN, so a
+          // constant term does not cancel out. It would drag every score toward
+          // its own value while spending real weight, ordering nothing and
+          // moving the whole set across the threshold: a distant offer would
+          // silently notify no one, an imminent one would notify people it
+          // should not. Urgency widens the fan-out instead, outside the score.
+          urgency: null,
+          fresh: active
+            ? freshnessScore(active, ACTIVITY_HALF_LIFE_HOURS)
+            : null,
+          quality: quality.get(c.id) ?? null,
+          // `deriveFeatures` does not learn amount or payment-flow affinity yet,
+          // so this would be null for every candidate anyway.
+          payFit: null,
+        };
+
+        const relevance = computeRelevance(terms, weights);
+        const score = applyPenalties(
+          relevance,
+          {
+            // The worker's own rejection history against THIS offer's category.
+            // Replaces the legacy Qdrant `must_not rejectedCategoryIds` payload
+            // filter, as a graded penalty rather than a hard exclusion.
+            negativeCategory:
+              offer.category_id != null &&
+              features.negativeCategoryIds.includes(offer.category_id),
+            // Notification fatigue: prefer people who have not just been
+            // messaged, so the hard cooldown rarely has to fire.
+            seenDecay: seenDecay(lastRecommended.get(c.id) ?? null),
+          },
+          DEFAULT_PENALTIES,
+        );
+
+        return { id: c.id, score, tier: tierOf.get(c.id)!, candidate: c };
+      });
+
+    scored.sort((a, b) => b.score - a.score);
+
+    const minScore =
+      opts.minScore ?? (await this.systemConfig.getRecommendationMinScore());
+    const kept = applyThreshold(scored, minScore, opts.keepAtLeast ?? limit);
+
+    // No exploration and no diversification here. Every candidate was retrieved
+    // for the same offer, so a category cap would drop good matches for no
+    // spread; and an exploratory pick costs a real message rather than a scroll.
+    const selected =
+      opts.explore === false
+        ? kept.slice(0, limit)
+        : epsilonGreedySelect(
+            kept,
+            limit,
+            await this.exploreEpsilon(employerFeatures.positiveCount),
+            opts.rng,
+          );
 
     return selected.map(({ id, score, tier }) => ({ id, score, tier }));
   }

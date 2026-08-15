@@ -18,6 +18,7 @@ function makePrisma() {
   return {
     interactionProfile: {
       findUnique: jest.fn().mockResolvedValue(null),
+      findMany: jest.fn().mockResolvedValue([]),
       upsert: jest.fn().mockResolvedValue({}),
     },
     interactionEvent: { findMany: jest.fn().mockResolvedValue([]) },
@@ -248,6 +249,66 @@ describe('UserFeatureService', () => {
       expect(f.amountBandAffinity).toEqual({});
       // Falls back to the global default rather than NaN.
       expect(f.distanceHalfLifeKm).toBe(5);
+    });
+  });
+
+  describe('getMany', () => {
+    const storedRow = (profileId: string, halfLife: number) => ({
+      profile_id: profileId,
+      positive_count: 5,
+      event_count: 9,
+      category_affinity: { 'cat-a': 1 },
+      counterparty_affinity: {},
+      amount_band_affinity: {},
+      payment_flow_affinity: {},
+      negative_category_ids: ['cat-z'],
+      distance_half_life_km: halfLife,
+    });
+
+    it('does not query for an empty batch', async () => {
+      expect((await service.getMany([])).size).toBe(0);
+      expect(prisma.interactionProfile.findMany).not.toHaveBeenCalled();
+    });
+
+    it('reads a whole batch in one query', async () => {
+      // The reason this exists: ranking eighty candidates on their own learned
+      // tolerance would otherwise be eighty sequential findUniques.
+      prisma.interactionProfile.findMany.mockResolvedValue([
+        storedRow('w-1', 12),
+        storedRow('w-2', 30),
+      ]);
+
+      const out = await service.getMany(['w-1', 'w-2']);
+
+      expect(prisma.interactionProfile.findMany).toHaveBeenCalledTimes(1);
+      expect(out.get('w-1')!.distanceHalfLifeKm).toBe(12);
+      expect(out.get('w-2')!.distanceHalfLifeKm).toBe(30);
+      expect(out.get('w-1')!.negativeCategoryIds).toEqual(['cat-z']);
+    });
+
+    it('returns neutral features for ids with no projection', async () => {
+      // So a caller never has to tell "no row" from "no history".
+      prisma.interactionProfile.findMany.mockResolvedValue([
+        storedRow('w-1', 12),
+      ]);
+
+      const out = await service.getMany(['w-1', 'unseen']);
+
+      expect(out.get('unseen')).toEqual(EMPTY_FEATURES);
+    });
+
+    it('maps a row exactly as `get` does', async () => {
+      // One mapping, so a batch read can never drift from a single read.
+      prisma.interactionProfile.findUnique.mockResolvedValue(
+        storedRow('w-1', 12),
+      );
+      prisma.interactionProfile.findMany.mockResolvedValue([
+        storedRow('w-1', 12),
+      ]);
+
+      expect((await service.getMany(['w-1'])).get('w-1')).toEqual(
+        await service.get('w-1'),
+      );
     });
   });
 
