@@ -13,6 +13,7 @@ import {
 } from '@nestjs/common';
 import Redis from 'ioredis';
 import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
+import { JobNotificationProcessor } from './notification/job-notification.processor';
 import { deletedAtFilter } from '../../common/utils/soft-delete.util';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { assertKycVerified } from '../../common/exceptions/kyc-not-verified.exception';
@@ -25,7 +26,6 @@ import { MIN_HOURS_FROM_NOW } from './job-offer.constants';
 import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
 import { BotNotificationService } from '../bot/services/bot-notification.service';
 import { MatchingService } from '../matching/matching.service';
-import { GeocodingService } from '../../common/services/geocoding/geocoding.service';
 import type { Coordinates } from '../../common/services/geocoding/geocoding.service';
 import {
   haversineKm,
@@ -248,10 +248,10 @@ export class JobOfferService {
     private readonly botNotification: BotNotificationService,
     private readonly eventEmitter: EventEmitter2,
     private readonly matchingService: MatchingService,
-    private readonly geocodingService: GeocodingService,
     @Inject(REDIS_CONNECTION) private readonly redis: Redis,
     private readonly cache: AdminCacheService,
     private readonly geo: GeoService,
+    private readonly jobNotification: JobNotificationProcessor,
   ) {}
 
   /**
@@ -278,10 +278,6 @@ export class JobOfferService {
       country_name: employer.country_name ?? undefined,
       city: employer.city ?? undefined,
     };
-  }
-
-  private notificationCooldownKey(workerId: string): string {
-    return `job_notif_cooldown:${workerId}`;
   }
 
   async create(
@@ -413,90 +409,24 @@ export class JobOfferService {
       timestamp: new Date().toISOString(),
     });
 
-    // Geocode first, then index — matching uses lat/lng so coordinates must be written before indexing.
-    // A remote job has no address, so there is nothing to geocode; resolve
-    // straight through rather than sending an empty string to Nominatim, which
-    // would spend a request to be told nothing.
-    (offer.address
-      ? this.geocodingService.geocode(offer.address)
-      : Promise.resolve(null)
-    )
-      .then(async (coords) => {
-        if (coords) {
-          await this.prisma.jobOffer.update({
-            where: { id: offer.id },
-            data: { latitude: coords.lat, longitude: coords.lng },
-          });
-        }
-        await this.matchingService.indexJobOffer(offer.id);
-      })
-      .then(async () => {
-        const [enabled, minScore, maxWorkers, cooldownMinutes] =
-          await Promise.all([
-            this.systemConfigService.isRecommendationEnabled(),
-            this.systemConfigService.getMinNotificationScore(),
-            this.systemConfigService.getMaxNotificationWorkers(),
-            this.systemConfigService.getNotificationCooldownMinutes(),
-          ]);
-        if (!enabled) return;
-
-        const workerResults: { id: string; score: number }[] =
-          await this.matchingService.findMatchingWorkersForJob(
-            offer.id,
-            maxWorkers,
-          );
-
-        // Notify eligible workers with a concurrency cap of 5 to avoid
-        // thundering-herd on the WhatsApp queue when a job matches many workers.
-        const NOTIFY_CONCURRENCY = 5;
-        let active = 0;
-        const queue: Promise<void>[] = [];
-
-        const notify = async (workerId: string) => {
-          if (cooldownMinutes > 0) {
-            const key = this.notificationCooldownKey(workerId);
-            const locked = await this.redis.set(
-              key,
-              '1',
-              'EX',
-              cooldownMinutes * 60,
-              'NX',
-            );
-            if (locked === null) return;
-          }
-          await this.botNotification
-            .sendRecommendedJobNotification(workerId, offer.id)
-            .catch((err: unknown) =>
-              this.logger.warn(
-                `sendRecommendedJobNotification failed for worker ${workerId}`,
-                err instanceof Error ? err.message : String(err),
-              ),
-            );
-        };
-
-        for (const { id: workerId, score } of workerResults) {
-          if (score < minScore) continue;
-          const p = Promise.resolve().then(async () => {
-            while (active >= NOTIFY_CONCURRENCY) {
-              await Promise.race(queue);
-            }
-            active++;
-            try {
-              await notify(workerId);
-            } finally {
-              active--;
-            }
-          });
-          queue.push(p);
-        }
-        await Promise.all(queue);
-      })
+    // No geocoding pass: both an offer and a profile declare a country and a
+    // city, and `placeProximityScore` ranks off those directly. Resolving an
+    // address to coordinates bought a finer distance than the data supports,
+    // at the cost of a Nominatim round trip on every create whose silent
+    // failure left the offer permanently unlocated.
+    void this.matchingService
+      .indexJobOffer(offer.id)
       .catch((err: unknown) =>
         this.logger.warn(
-          `geocode/index/notify failed for offer ${offer.id}`,
+          `index failed for offer ${offer.id}`,
           err instanceof Error ? err.message : String(err),
         ),
       );
+
+    // Queued rather than chained onto the index above, so an indexing failure
+    // no longer takes the notification down with it and the fan-out survives a
+    // restart.
+    await this.jobNotification.enqueue(offer.id);
 
     return this.toListItem(offer);
   }

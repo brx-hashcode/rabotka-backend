@@ -16,7 +16,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { EmploymentType, JobOfferStatus, PaymentFlow } from '@prisma/client';
 import { MatchingService } from '../../matching/matching.service';
 import { REDIS_CONNECTION } from '../../../common/services/redis/redis.constants';
-import { GeocodingService } from '../../../common/services/geocoding/geocoding.service';
+import { JobNotificationProcessor } from '../notification/job-notification.processor';
 
 const EMPLOYER_ID = 'employer-uuid-1';
 const OFFER_ID = 'offer-uuid-1';
@@ -65,6 +65,7 @@ describe('JobOfferService', () => {
   let systemConfigService: jest.Mocked<SystemConfigService>;
   let walletService: jest.Mocked<WalletService>;
   let botNotificationService: jest.Mocked<BotNotificationService>;
+  let jobNotification: jest.Mocked<JobNotificationProcessor>;
 
   beforeEach(async () => {
     const mockPrisma = {
@@ -103,6 +104,9 @@ describe('JobOfferService', () => {
 
     const mockBotNotificationService = {
       sendMessage: jest.fn().mockResolvedValue(undefined),
+      // Present so "create does not notify anyone itself" is an assertion
+      // rather than a matcher error against an undefined property.
+      sendRecommendedJobNotification: jest.fn().mockResolvedValue(true),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -146,8 +150,8 @@ describe('JobOfferService', () => {
           useValue: { set: jest.fn().mockResolvedValue(null) },
         },
         {
-          provide: GeocodingService,
-          useValue: { geocode: jest.fn().mockResolvedValue(null) },
+          provide: JobNotificationProcessor,
+          useValue: { enqueue: jest.fn().mockResolvedValue(undefined) },
         },
       ],
     }).compile();
@@ -158,6 +162,7 @@ describe('JobOfferService', () => {
     systemConfigService = module.get(SystemConfigService);
     walletService = module.get(WalletService);
     botNotificationService = module.get(BotNotificationService);
+    jobNotification = module.get(JobNotificationProcessor);
   });
 
   describe('create()', () => {
@@ -179,6 +184,19 @@ describe('JobOfferService', () => {
           data: expect.objectContaining({ quantity: 2 }),
         }),
       );
+    });
+
+    it('hands the worker fan-out to the queue rather than running it inline', async () => {
+      // The fan-out used to be a detached promise chain inside `create`, which
+      // is why nothing here could assert on it: unretryable, invisible, and
+      // lost on restart. `create` now only enqueues.
+      await service.create(EMPLOYER_ID, { ...baseDto });
+
+      expect(jobNotification.enqueue).toHaveBeenCalledTimes(1);
+      expect(jobNotification.enqueue).toHaveBeenCalledWith(mockOffer.id);
+      expect(
+        botNotificationService.sendRecommendedJobNotification,
+      ).not.toHaveBeenCalled();
     });
 
     it('defaults quantity to 1 when not provided', async () => {
