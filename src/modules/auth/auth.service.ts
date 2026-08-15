@@ -22,8 +22,10 @@ import { LayoutService } from '../mail/layout.service';
 import { LogService } from '../log/log.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { sendOtpEmail } from '../mail/templates';
-import { WHATSAPP_TEMPLATES } from '../../common/constants/whatsapp-templates';
-import { WhatsAppLoginLinkService } from './whatsapp-login-link.service';
+import {
+  WhatsAppLoginLinkService,
+  canMintLoginCode,
+} from './whatsapp-login-link.service';
 import * as otplib from 'otplib';
 import * as QRCode from 'qrcode';
 
@@ -112,6 +114,36 @@ export class AuthService {
       );
   }
 
+  /**
+   * Stamp `last_login_at` on a profile that just signed in.
+   *
+   * The counterpart to `recordAdminLogin` above: admins have had a login
+   * timestamp since the start, profiles had only `first_login: boolean`, so
+   * nothing distinguished a dormant account from an active one.
+   *
+   * Fire-and-forget, and deliberately not awaited by its callers. The token is
+   * already signed by the time this runs; a failed timestamp must never turn a
+   * successful authentication into a failed request.
+   *
+   * Called from the three real sign-in paths ONLY — not from
+   * `issueMobileTokens`, which `refreshMobileTokens` also goes through. This is
+   * "last authenticated", not "last seen", and a client rotating its refresh
+   * token every 15 minutes would otherwise pin the value to now forever.
+   */
+  private recordProfileLogin(profileId: string): void {
+    void this.prisma.profile
+      .update({
+        where: { id: profileId },
+        data: { last_login_at: new Date() },
+      })
+      .catch((err) =>
+        this.logger.warn(
+          `Failed to record profile login for ${profileId}:`,
+          err,
+        ),
+      );
+  }
+
   async sendOtp(emailOrPhone: string): Promise<{ success: boolean }> {
     const normalized = this.normalize(emailOrPhone);
     const isEmail = this.isEmail(normalized);
@@ -132,6 +164,8 @@ export class AuthService {
     }
 
     const otp = this.generateOtp();
+
+
 
     this.logger.warn(`[OTP][send] ${normalized} → ${otp}`);
 
@@ -252,13 +286,24 @@ export class AuthService {
       select: { id: true, status: true },
     });
 
-    // Status is re-checked at consume time: the account may have been
-    // suspended in the hours between the message and the tap.
-    if (!profile || profile.status !== AccountStatus.ACTIVE) {
+    // Status is re-checked at consume time: the account may have changed in
+    // the hours between the message and the tap.
+    //
+    // The rule is `WhatsAppLoginLinkService`'s own, not a stricter one of its
+    // own invention. Requiring ACTIVE here silently undid the mint side's
+    // widening — PENDING_ACTIVATION could get a code and then be refused when
+    // it tapped, which is why the KYC-pending card's button dead-ended on the
+    // login screen even after that was supposedly fixed. Two checks that
+    // disagree are worse than either alone.
+    //
+    // What makes this safe is not the login gate but `ActiveProfileGuard`: a
+    // non-ACTIVE session can read and nothing else.
+    if (!profile || !canMintLoginCode(profile.status)) {
       throw new UnauthorizedException('Compte indisponible');
     }
 
     const payload = { sub: profile.id, type: 'profile', jti: randomUUID() };
+    this.recordProfileLogin(profile.id);
 
     return {
       token: this.jwtService.sign(payload),
@@ -312,16 +357,19 @@ export class AuthService {
 
     const payload = { sub: profile.id, type: 'profile', jti: randomUUID() };
     const token = this.jwtService.sign(payload);
+    this.recordProfileLogin(profile.id);
 
     return { success: true, token };
   }
-
 
   async verifyOtpMobile(
     emailOrPhone: string,
     otp: string,
   ): Promise<MobileTokens> {
     const profile = await this.verifyOtpAndGetProfile(emailOrPhone, otp);
+    // Here rather than inside `issueMobileTokens`: that method is shared with
+    // `refreshMobileTokens`, and a rotation is not a fresh login.
+    this.recordProfileLogin(profile.id);
     return this.issueMobileTokens(profile.id);
   }
 
@@ -705,6 +753,9 @@ export class AuthService {
     otp: string,
     first_name: string,
   ): Promise<void> {
+
+    this.logger.log(`OTP email sent to ${email} with OTP ${otp}`);
+
     await this.mailService.sendMail({
       to: email,
       subject: 'Votre code de vérification Rabotka',
@@ -716,7 +767,6 @@ export class AuthService {
   }
 
   private async sendOtpByWhatsApp(phone: string, otp: string): Promise<void> {
-    const template = WHATSAPP_TEMPLATES.otp;
     const sent = await this.whatsAppService.sendTemplateMessage(
       phone,
       'otp',

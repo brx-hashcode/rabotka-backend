@@ -36,14 +36,38 @@ export const DEFAULT_LOGIN_LANDING = 'home';
 /**
  * Account states allowed to receive a one-tap login code.
  *
- * Named rather than inlined so the exclusion is explicit: everything else —
- * SUSPENDED above all — is refused, and a new AccountStatus has to be added
- * here deliberately rather than slipping in behind a `!==` comparison.
+ * Named rather than inlined so the exclusion is explicit: BANNED is refused,
+ * and a new AccountStatus has to be added here deliberately rather than
+ * slipping in behind a `!==` comparison.
+ *
+ * SUSPENDED is allowed, which reverses the original rule. It was written when
+ * a session meant full privileges, so handing one to a suspended user was
+ * indeed handing them the platform. That is no longer true: `ActiveProfileGuard`
+ * refuses every action for a non-ACTIVE profile, so a session now grants
+ * READ access and nothing else — and a suspended user needs exactly that, to
+ * open the app, read why they were suspended and reach support. Refusing the
+ * code only broke the notifications telling them so.
+ *
+ * BANNED stays out: there is no path back, so there is nothing for them to
+ * read.
  */
 const MINTABLE_STATUSES: ReadonlySet<AccountStatus> = new Set([
   AccountStatus.ACTIVE,
   AccountStatus.PENDING_ACTIVATION,
+  AccountStatus.SUSPENDED,
 ]);
+
+/**
+ * The one place that decides which accounts a WhatsApp login link works for.
+ *
+ * Exported so the CONSUME side (`AuthService.loginWithWhatsAppCode`) applies
+ * the same rule instead of its own. It used to require ACTIVE, which quietly
+ * cancelled every widening done here: a code was minted and then refused on
+ * tap, and the failure looked like a broken link rather than a policy.
+ */
+export function canMintLoginCode(status: AccountStatus): boolean {
+  return MINTABLE_STATUSES.has(status);
+}
 
 /**
  * Reads the code and deletes it in the same round-trip, so two taps on a

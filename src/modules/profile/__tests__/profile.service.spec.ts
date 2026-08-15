@@ -1,4 +1,4 @@
-import { Logger } from '@nestjs/common';
+import { BadRequestException, Logger } from '@nestjs/common';
 import { ProfileService } from '../profile.service';
 import { GeoService } from '../../geo/geo.service';
 
@@ -163,6 +163,7 @@ describe('ProfileService', () => {
       fileService as any,
       redis as any,
       whatsApp as any,
+      { mint: jest.fn().mockResolvedValue('login-code-1') } as any,
       configService as any,
       {} as any, // mailService
       {
@@ -740,7 +741,9 @@ describe('ProfileService', () => {
   });
 
   describe('updateProfileStatusByAdmin() - SUSPENDED branch', () => {
-    it('sends suspension email when transitioning to SUSPENDED', async () => {
+    const REASON = 'Trois pénalités impayées';
+
+    it('sends suspension email carrying the reason', async () => {
       const mailService = { sendMail: jest.fn().mockResolvedValue(undefined) };
       (service as any).mailService = mailService;
       prisma.profile.findUnique.mockResolvedValue({
@@ -748,8 +751,90 @@ describe('ProfileService', () => {
         status: 'ACTIVE',
         email: 'alice@example.com',
       });
-      await service.updateProfileStatusByAdmin('p-1', 'SUSPENDED' as any);
-      expect(mailService.sendMail).toHaveBeenCalled();
+      await service.updateProfileStatusByAdmin(
+        'p-1',
+        'SUSPENDED' as any,
+        REASON,
+      );
+      expect(mailService.sendMail).toHaveBeenCalledWith(
+        expect.objectContaining({
+          to: 'alice@example.com',
+          html: expect.stringContaining(REASON),
+        }),
+      );
+    });
+
+    it('sends the suspension WhatsApp template with the reason', async () => {
+      prisma.profile.findUnique.mockResolvedValue({
+        ...baseProfile,
+        status: 'ACTIVE',
+        phone: '+242000001',
+      });
+      await service.updateProfileStatusByAdmin(
+        'p-1',
+        'SUSPENDED' as any,
+        REASON,
+      );
+      // Email alone reaches nobody when `email` is null, which it may be.
+      expect(whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
+        '+242000001',
+        'accountSuspended',
+        {
+          firstName: baseProfile.first_name,
+          reason: REASON,
+          loginCode: 'login-code-1',
+        },
+        'p-1',
+      );
+    });
+
+    it('persists the reason and the date on the profile', async () => {
+      prisma.profile.findUnique.mockResolvedValue({
+        ...baseProfile,
+        status: 'ACTIVE',
+      });
+      await service.updateProfileStatusByAdmin(
+        'p-1',
+        'SUSPENDED' as any,
+        REASON,
+      );
+      expect(prisma.profile.update).toHaveBeenCalledWith({
+        where: { id: 'p-1' },
+        data: {
+          status: 'SUSPENDED',
+          suspension_reason: REASON,
+          suspended_at: expect.any(Date),
+        },
+      });
+    });
+
+    it('clears the reason when the account leaves SUSPENDED', async () => {
+      // A reactivated account showing why it was once suspended reads as though
+      // it still is.
+      prisma.profile.findUnique.mockResolvedValue({
+        ...baseProfile,
+        status: 'SUSPENDED',
+      });
+      await service.updateProfileStatusByAdmin('p-1', 'ACTIVE' as any);
+      expect(prisma.profile.update).toHaveBeenCalledWith({
+        where: { id: 'p-1' },
+        data: {
+          status: 'ACTIVE',
+          suspension_reason: null,
+          suspended_at: null,
+        },
+      });
+    });
+
+    it('refuses to suspend without a reason', async () => {
+      prisma.profile.findUnique.mockResolvedValue({
+        ...baseProfile,
+        status: 'ACTIVE',
+      });
+      await expect(
+        service.updateProfileStatusByAdmin('p-1', 'SUSPENDED' as any, '   '),
+      ).rejects.toThrow(BadRequestException);
+      expect(prisma.profile.update).not.toHaveBeenCalled();
     });
 
     it('handles suspension email failure gracefully', async () => {
@@ -762,7 +847,11 @@ describe('ProfileService', () => {
         status: 'ACTIVE',
         email: 'alice@example.com',
       });
-      await service.updateProfileStatusByAdmin('p-1', 'SUSPENDED' as any);
+      await service.updateProfileStatusByAdmin(
+        'p-1',
+        'SUSPENDED' as any,
+        REASON,
+      );
       // Should not throw
     });
 

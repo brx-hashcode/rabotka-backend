@@ -22,6 +22,9 @@ export const FLOW_IDS = {
   CANCEL_APPLICATION: 'cancel_application',
   JOB_STATUS_CHECK: 'job_status_check',
   PAY_PENALTIES: 'pay_penalties',
+  /** Holds the numbered penalty list while the user picks which to settle.
+   *  Distinct from PAY_PENALTIES, which is the payment flow that follows. */
+  PENALTY_GATE: 'penalty_gate',
   /** Tiny state machine that handles the 1/2/3 menu shown to an employer
    *  after a worker cancels their candidature (see formatCancellationToEmployer). */
   POST_CANCELLATION_ACTIONS: 'post_cancellation_actions',
@@ -66,6 +69,27 @@ export const CMD_PAY = [
   'regler',
   'payer pénalités',
   'payer penalites',
+];
+
+/**
+ * Reach a human.
+ *
+ * Answered for EVERY account state, unlike the rest of the vocabulary. The
+ * suspension and KYC-rejection templates tell people to type it, and those
+ * people are by definition not ACTIVE — a command that only worked for
+ * healthy accounts would be useless to exactly the audience it names.
+ *
+ * `expandSlashCommand` already rewrites "/support" to "support", so only the
+ * bare words are listed. The accented and unaccented spellings both appear for
+ * the same reason they do in CMD_PAY: phone keyboards differ.
+ */
+export const CMD_SUPPORT = [
+  'support',
+  'aide',
+  'assistance',
+  'contact',
+  'réclamation',
+  'reclamation',
 ];
 
 /**

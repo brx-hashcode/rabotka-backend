@@ -22,6 +22,7 @@ import { PaymentRequestType, ProfileType } from '@prisma/client';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { ProfileAuthGuard } from '../auth/guards/profile-auth.guard';
 import { KycVerifiedGuard } from '../auth/guards/kyc-verified.guard';
+import { ActiveProfileGuard } from '../auth/guards/active-profile.guard';
 import type { ProfileAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
 import { ApplicationService } from '../application/application.service';
 import { SystemConfigService } from '../system-config/system-config.service';
@@ -180,7 +181,7 @@ export class MobileWorkerMissionController {
   }
 
   @Post(':id/unlock/pay-wallet')
-  @UseGuards(KycVerifiedGuard)
+  @UseGuards(ActiveProfileGuard, KycVerifiedGuard)
   @ApiOperation({
     summary: "[Mobile/WORKER] Pay my share of the contact unlock from wallet",
   })
@@ -209,7 +210,7 @@ export class MobileWorkerMissionController {
   }
 
   @Post(':id/unlock/pay-mobile')
-  @UseGuards(KycVerifiedGuard)
+  @UseGuards(ActiveProfileGuard, KycVerifiedGuard)
   @ApiOperation({
     summary:
       '[Mobile/WORKER] Create a mobile-money payment for my share of the unlock',

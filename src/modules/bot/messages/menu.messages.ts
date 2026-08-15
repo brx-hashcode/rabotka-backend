@@ -5,19 +5,53 @@ export type ContactInfo = {
   address: string;
 };
 
-export function accountSuspendedBotMessage(contact: ContactInfo): string {
-  return [
-    '🚫 *Compte suspendu*',
-    '',
-    'Votre compte a été suspendu. Vous ne pouvez plus accéder aux fonctionnalités.',
-    '',
-    'Pour toute réclamation ou demande de réactivation, veuillez contacter notre équipe support :',
+/**
+ * The support card.
+ *
+ * Answers `/support` for any account, and stands in as the whole reply for a
+ * suspended one. `reason` is the admin's own words when the suspension has
+ * them — "your account is suspended" with no motive leaves the reader with
+ * nothing to act on, which is the entire point of storing it.
+ */
+export function supportCardBotMessage(
+  contact: ContactInfo,
+  opts?: { suspended?: boolean; reason?: string | null },
+): string {
+  const lines = ['Support Rabotka', ''];
+
+  // Driven by the STATUS, not by whether a reason happens to be stored. Keying
+  // it off the reason meant every suspension predating the suspension_reason
+  // column produced a card that never mentioned the suspension at all.
+  if (opts?.suspended) {
+    lines.push('Votre compte est suspendu.', '');
+    if (opts.reason?.trim()) {
+      lines.push(`Motif : ${opts.reason.trim()}`, '');
+    }
+  }
+
+  lines.push(
+    'Notre équipe vous répond du lundi au samedi, de 8h à 18h :',
     '',
     `*Email* : ${contact.email}`,
     `*Téléphone* : ${contact.phone}`,
-  ].join('\n');
+  );
+
+  return lines.join('\n');
 }
 
+/**
+ * @deprecated Use {@link supportCardBotMessage}, which carries the suspension
+ * reason. Kept only until the last caller moves.
+ */
+export function accountSuspendedBotMessage(contact: ContactInfo): string {
+  return supportCardBotMessage(contact);
+}
+
+/**
+ * The penalty gate: what a user with unpaid penalties gets instead of the
+ * feature they asked for. Names the way out ("1"), because a block with no
+ * stated remedy just reads as the bot being broken.
+ */
 export function hasPenaltiesBotMessage(): string {
   return [
     '⚠️ *Accès bloqué - Pénalités impayées*',
@@ -36,12 +70,12 @@ export function penaltiesListBotMessage(
     jobTitle?: string | null;
   }>,
 ): string {
-  const lines: string[] = ['📋 *Vos pénalités impayées*', ''];
+  const lines: string[] = ['Vos pénalités impayées', ''];
   penalties.forEach((p, i) => {
     const date = p.created_at.toLocaleDateString('fr-FR');
-    const job = p.jobTitle ? ` - *_${p.jobTitle}_*` : '';
+    const job = p.jobTitle ? ` - ${p.jobTitle}` : '';
     lines.push(
-      `*${i + 1}.* ${p.amount.toLocaleString('fr-FR')} FCFA - ${p.reason}${job} _(${date})_`,
+      `${i + 1}. ${p.amount.toLocaleString('fr-FR')} FCFA - ${p.reason}${job} (${date})`,
     );
   });
   const total = penalties.reduce((s, p) => s + p.amount, 0);

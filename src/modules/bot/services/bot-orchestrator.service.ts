@@ -22,13 +22,14 @@ import { WHATSAPP_TEMPLATES } from '../../../common/constants/whatsapp-templates
 import { templateReply } from '../../../common/constants/whatsapp-carousel';
 import {
   unknownCommandMessage,
-  accountSuspendedBotMessage,
+  supportCardBotMessage,
   hasPenaltiesBotMessage,
   penaltiesListBotMessage,
 } from '../messages/menu.messages';
 import type { BotProfile, BotState } from '../types/bot-state.types';
 import type { FlowContext, FlowResult } from '../types/flow.types';
-import { FLOW_IDS, CMD_MENU } from '../bot.constants';
+import { FLOW_IDS, CMD_MENU, CMD_SUPPORT } from '../bot.constants';
+import { stripChatFormattingChars } from '../utils/chat-input';
 import {
   runAcceptRefuseCandidateFlow,
   getAcceptRefuseInitialState,
@@ -66,8 +67,6 @@ const KYC_APPROVED_PROMPT_MESSAGE = `✅ Votre vérification KYC a été validé
 const KYC_REJECTED_MESSAGE = `❌ *Votre vérification KYC a été refusée.*\n\nVos documents n'ont pas pu être validés. Veuillez nous contacter pour plus d'informations.`;
 
 const WHATSAPP_VERIFY_CODE_TTL_MINUTES = 15;
-
-const PENALTY_GATE_FLOW_ID = 'penalty_gate';
 
 function buildVerifyPromptMessage(code: string): string {
   return [
@@ -153,13 +152,18 @@ export class BotOrchestratorService {
 
     const botProfile = this.toBotProfile(profile);
 
+    // Ahead of the suspended short-circuit, so it answers in every account
+    // state. The suspension and KYC-rejection templates tell people to type
+    // "/support", and those people are by definition not ACTIVE.
+    if (CMD_SUPPORT.includes(stripChatFormattingChars(text).trim().toLowerCase())) {
+      return [await this.supportCardMessage()];
+    }
+
     if (profile.status === AccountStatus.SUSPENDED) {
-      const contact = await this.systemConfig.getContactInfo();
       return [
-        accountSuspendedBotMessage({
-          email: contact.email ?? '',
-          phone: contact.phone ?? '',
-          address: contact.address ?? '',
+        await this.supportCardMessage({
+          suspended: true,
+          reason: profile.suspension_reason,
         }),
       ];
     }
@@ -357,8 +361,11 @@ export class BotOrchestratorService {
       return this.routeMessage(profileId, text, profile, botProfile);
     }
 
-    // Currently showing the penalty list and waiting for the user to pick one
-    if (state?.flowId === PENALTY_GATE_FLOW_ID) {
+    // Currently showing the penalty list and waiting for the user to pick one.
+    // `state &&` rather than `state?.` so the narrowing reaches the call below —
+    // optional chaining leaves the type `BotState | null`, and the handler
+    // requires a state.
+    if (state && state.flowId === FLOW_IDS.PENALTY_GATE) {
       return this.handlePenaltyListSelection(
         profileId,
         text,
@@ -376,7 +383,7 @@ export class BotOrchestratorService {
         return [welcomePlatformMessage()];
       }
       await this.botState.set(profileId, {
-        flowId: PENALTY_GATE_FLOW_ID,
+        flowId: FLOW_IDS.PENALTY_GATE,
         step: 1,
         payload: {
           penaltyIds: penalties.map((p) => p.id),
@@ -760,6 +767,8 @@ export class BotOrchestratorService {
         email: true,
         profile_type: true,
         status: true,
+        // The admin's own words, so the bot can say WHY rather than just that.
+        suspension_reason: true,
         billing_status: true,
         reliability_score: true,
         whatsapp_connected: true,
@@ -767,6 +776,28 @@ export class BotOrchestratorService {
         verification_status: true,
       },
     });
+  }
+
+  /**
+   * Support contacts, with the suspension reason when there is one.
+   *
+   * One helper because two paths reach it — an explicit `/support` and a
+   * suspended profile saying anything at all — and they must not drift into
+   * telling the reader different things.
+   */
+  private async supportCardMessage(opts?: {
+    suspended?: boolean;
+    reason?: string | null;
+  }): Promise<string> {
+    const contact = await this.systemConfig.getContactInfo();
+    return supportCardBotMessage(
+      {
+        email: contact.email ?? '',
+        phone: contact.phone ?? '',
+        address: contact.address ?? '',
+      },
+      opts,
+    );
   }
 
   private loadProfile(profileId: string) {

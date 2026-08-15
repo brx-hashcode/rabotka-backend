@@ -1,5 +1,8 @@
 import { toE164 } from '../../contracts/address';
-import { WHATSAPP_TEMPLATES } from '../../../../common/constants/whatsapp-templates';
+import {
+  WHATSAPP_TEMPLATES,
+  templateContentSid,
+} from '../../../../common/constants/whatsapp-templates';
 import type { TemplateKey, TemplateParams } from '../../contracts';
 
 /**
@@ -15,9 +18,21 @@ export function toProviderAddress(raw: string): string {
  *
  * SIDs are env-overridable through `sid()` in the registry, so this reads the
  * resolved value rather than any hardcoded default.
+ *
+ * Throws for a Cloud-only template. Those have no Twilio counterpart at all, so
+ * reaching here means a deployment still on Twilio is trying to send one — a
+ * configuration mistake, and one worth failing loudly: returning undefined
+ * would send a message with no content and report success.
  */
 export function toContentSid(key: TemplateKey): string {
-  return WHATSAPP_TEMPLATES[key].contentSid;
+  const contentSid = templateContentSid(key);
+  if (!contentSid) {
+    throw new Error(
+      `WhatsApp template "${key}" is Cloud-only and has no Twilio Content SID. ` +
+        'Set WHATSAPP_PROVIDER=cloud, or stop sending it from this deployment.',
+    );
+  }
+  return contentSid;
 }
 
 /**

@@ -14,26 +14,23 @@ export class EmailEventSender {
     payload: EventNotificationPayload,
     action: 'created' | 'updated',
   ): Promise<void> {
+    const params = {
+      to: recipient.email,
+      name: recipient.name,
+      title: payload.title,
+      startDate: payload.startDate,
+      endDate: payload.endDate,
+      description: payload.description,
+      location: payload.location,
+      eventId: payload.eventId,
+      seriesId: payload.seriesId,
+      recurrence: payload.recurrence,
+    };
+
     if (action === 'created') {
-      await this.notification.notifyEventCreated(
-        recipient.email,
-        recipient.name,
-        payload.title,
-        payload.startDate,
-        payload.endDate,
-        payload.description,
-        payload.location,
-      );
+      await this.notification.notifyEventCreated(params);
     } else {
-      await this.notification.notifyEventUpdated(
-        recipient.email,
-        recipient.name,
-        payload.title,
-        payload.startDate,
-        payload.endDate,
-        payload.description,
-        payload.location,
-      );
+      await this.notification.notifyEventUpdated(params);
     }
   }
 }

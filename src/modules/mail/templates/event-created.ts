@@ -1,3 +1,7 @@
+import {
+  recurrenceLabel,
+  type RecurrenceLabelInput,
+} from '../../../common/utils/recurrence-label.util';
 import { escapeHtml } from './layout';
 
 function formatDate(iso: string): string {
@@ -15,18 +19,35 @@ function formatTime(iso: string): string {
   return d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
 }
 
-export function eventCreatedEmail(
-  name: string,
-  title: string,
-  startDate: string,
-  endDate: string,
-  description?: string | null,
-  location?: string | null,
-  googleCalendarUrl?: string,
-): string {
+export type EventEmailParams = {
+  name: string;
+  title: string;
+  startDate: string;
+  endDate: string;
+  description?: string | null;
+  location?: string | null;
+  googleCalendarUrl?: string;
+  /** Set when the event repeats — see the note by `repeats` below. */
+  recurrence?: RecurrenceLabelInput | null;
+};
+
+export function eventCreatedEmail({
+  name,
+  title,
+  startDate,
+  endDate,
+  description,
+  location,
+  googleCalendarUrl,
+  recurrence,
+}: EventEmailParams): string {
   const date = formatDate(startDate);
   const start = formatTime(startDate);
   const end = formatTime(endDate);
+  // A series is announced once, so this line is the only thing telling the
+  // recipient that the date above is the first of several. The attached .ics
+  // carries the same rule for their calendar app.
+  const repeats = recurrenceLabel(recurrence);
 
   return `
     <p>Bonjour <strong>${escapeHtml(name)}</strong>,</p>
@@ -35,6 +56,7 @@ export function eventCreatedEmail(
     <p><strong>${escapeHtml(title)}</strong></p>
     <p><strong>Date :</strong> ${escapeHtml(date)}</p>
     <p><strong>Horaire :</strong> ${escapeHtml(start)} – ${escapeHtml(end)}</p>
+    ${repeats ? `<p><strong>Répétition :</strong> ${escapeHtml(repeats)}</p>` : ''}
     ${location ? `<p><strong>Lieu :</strong> ${escapeHtml(location)}</p>` : ''}
     ${description ? `<p><strong>Description :</strong> ${escapeHtml(description)}</p>` : ''}
 
