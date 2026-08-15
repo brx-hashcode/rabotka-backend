@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import {
   DeliveryChannel,
   Prisma,
@@ -9,10 +13,22 @@ import { CreateEventDto } from '../dto/create-event.dto';
 import { RecurrenceDto } from '../dto/recurrence.dto';
 import { UpdateEventDto } from '../dto/update-event.dto';
 import { EventEditScope } from '../enums/event-edit-scope.enum';
+import { resolveEventWindow } from '../utils/event-window.util';
 import {
   MAX_MATERIALISED_PER_REQUEST,
   RecurrenceExpanderService,
 } from './recurrence-expander.service';
+
+/** How each frequency reads in an error message: "repeats weekly", "at most a week". */
+const FREQUENCY_WORDS: Record<
+  RecurrenceFrequency,
+  { adverb: string; period: string }
+> = {
+  DAILY: { adverb: 'daily', period: 'a day' },
+  WEEKLY: { adverb: 'weekly', period: 'a week' },
+  MONTHLY: { adverb: 'monthly', period: 'a month' },
+  YEARLY: { adverb: 'yearly', period: 'a year' },
+};
 
 /** Everything a created series hands back to the caller. */
 export type CreatedSeries = {
@@ -49,8 +65,12 @@ export class EventSeriesService {
     rule: RecurrenceDto,
     createdById: string,
   ): Promise<CreatedSeries> {
-    const anchorStart = new Date(dto.startDate);
-    const anchorEnd = new Date(dto.endDate);
+    const { start: anchorStart, end: anchorEnd } = resolveEventWindow(
+      dto.startDate,
+      dto.endDate,
+    );
+    this.assertOccurrenceFitsInterval(anchorStart, anchorEnd, rule.frequency);
+
     const until = rule.until ? new Date(rule.until) : null;
     const horizonEnd = until ?? this.expander.openEndedHorizon(anchorStart);
 
@@ -104,6 +124,37 @@ export class EventSeriesService {
       // A 120-row series is 120 inserts plus their join-table writes; the
       // default 5s timeout is not enough headroom on a cold connection.
       { timeout: 30_000 },
+    );
+  }
+
+  /**
+   * Rejects an occurrence that is still running when the next one starts.
+   *
+   * This is the shape behind "my repeating event is duplicated on every day".
+   * An occurrence lasting longer than its own repeat interval overlaps its
+   * successor, and the overlap accumulates: forty weeks into a weekly series
+   * whose occurrences each run for years, every single day carries forty bars —
+   * one per occurrence that has started and not yet finished. Nothing is
+   * actually duplicated, but nothing about the calendar says so either.
+   *
+   * The rule is almost always a misreading of the two "ends" in the form: the
+   * event's own end (when this occurrence finishes) versus the repeat's end
+   * (when the series stops). Someone wanting a series that never stops sets the
+   * occurrence to end far in the future, when what they wanted was to leave the
+   * repeat's end condition empty — which is already the default.
+   */
+  private assertOccurrenceFitsInterval(
+    anchorStart: Date,
+    anchorEnd: Date,
+    frequency: RecurrenceFrequency,
+  ): void {
+    const durationMs = anchorEnd.getTime() - anchorStart.getTime();
+    if (durationMs < this.expander.intervalMs(anchorStart, frequency)) return;
+
+    const { adverb, period } = FREQUENCY_WORDS[frequency];
+    throw new BadRequestException(
+      `An event that repeats ${adverb} must finish before it repeats, so it can last at most ${period}. ` +
+        'Shorten the event\'s end date — to make the repetition itself never stop, leave the recurrence without an "until" or a "count".',
     );
   }
 
@@ -214,10 +265,10 @@ export class EventSeriesService {
     from: Date,
   ): Promise<number> {
     const template = await this.tailTemplate(pivot.id, dto);
-    const anchorStart = dto.startDate
-      ? new Date(dto.startDate)
-      : pivot.start_date;
-    const anchorEnd = dto.endDate ? new Date(dto.endDate) : pivot.end_date;
+    const { start: anchorStart, end: anchorEnd } = resolveEventWindow(
+      dto.startDate ?? pivot.start_date,
+      dto.endDate ?? pivot.end_date,
+    );
 
     // A new rule replaces the old one wholesale — including its end condition,
     // so switching from "10 times" to "until March" does not leave the count
@@ -234,6 +285,7 @@ export class EventSeriesService {
           count: series.count,
         };
     const { frequency, until, count } = rule;
+    this.assertOccurrenceFitsInterval(anchorStart, anchorEnd, frequency);
 
     const horizonEnd = until ?? this.expander.openEndedHorizon(anchorStart);
     const occurrences = this.expander.expand({

@@ -179,4 +179,31 @@ describe('RecurrenceExpanderService', () => {
       expect(result.toISOString()).toBe(jan31.toISOString());
     });
   });
+
+  describe('intervalMs()', () => {
+    const DAY_MS = 86_400_000;
+
+    it('measures a fixed period', () => {
+      expect(service.intervalMs(anchorStart, RecurrenceFrequency.DAILY)).toBe(
+        DAY_MS,
+      );
+      expect(service.intervalMs(anchorStart, RecurrenceFrequency.WEEKLY)).toBe(
+        7 * DAY_MS,
+      );
+    });
+
+    it('measures the step this anchor actually takes, not an average month', () => {
+      // February is what a series anchored on 1 February steps across, and the
+      // shortest gap is the one an occurrence has to fit inside.
+      const feb1 = new Date('2027-02-01T09:00:00.000Z');
+      const mar1 = new Date('2027-03-01T09:00:00.000Z');
+
+      expect(service.intervalMs(feb1, RecurrenceFrequency.MONTHLY)).toBe(
+        28 * DAY_MS,
+      );
+      expect(service.intervalMs(mar1, RecurrenceFrequency.MONTHLY)).toBe(
+        31 * DAY_MS,
+      );
+    });
+  });
 });
