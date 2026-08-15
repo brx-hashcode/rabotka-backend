@@ -29,6 +29,8 @@ import type { WhatsAppTemplateName } from '../../src/common/constants/whatsapp-t
 export const AUTHORED_KEYS: ReadonlySet<WhatsAppTemplateName> = new Set([
   'contactUnlocked',
   'contactUnlockedRecommendation',
+  'kycRejected',
+  'accountSuspended',
 ]);
 
 /**
@@ -139,6 +141,118 @@ export function authoredTemplates(): Partial<
           },
         },
         { type: 'BUTTONS', buttons: [feedbackFlowButton()] },
+      ],
+    },
+
+    /**
+     * The two negative outcomes, which until now reached the user by email
+     * alone — on a platform where WhatsApp is the channel people actually read.
+     *
+     * Both carry the admin's reason as {{2}}. That is the whole point of them:
+     * "your account was suspended" with no motive tells someone nothing they
+     * can act on, and support then fields the question by hand.
+     *
+     * Neither has a button. A rejected profile is not ACTIVE and a suspended
+     * one is refused a session outright, so no link here can be followed —
+     * see `kycPendingMenu` in the registry for what a dead CTA costs.
+     */
+    /**
+     * v2 of both. v1 was approved, sent once, and was wrong on two counts.
+     *
+     * The KYC body invited people to "renvoyer des documents dans cette
+     * conversation" — the bot has no document-intake flow, so it promised an
+     * action that goes nowhere. A rejected decision is contested through a
+     * CLAIM (`/claims/new`), which is what it now says.
+     *
+     * The suspension body said "vous ne pouvez plus accéder à la plateforme",
+     * which stopped being true the moment we chose a read-only session: a
+     * suspended user CAN sign in and read, they simply cannot act. Telling
+     * them otherwise turns a recoverable state into a dead end.
+     *
+     * Both now carry a CTA into the app. v1 had none, on the reasoning that a
+     * login code is never minted for these profiles — true then, no longer:
+     * `MINTABLE_STATUSES` accepts SUSPENDED and the consume side agrees, so
+     * the button lands them signed in on the page that helps.
+     *
+     * New names rather than an edit. Meta re-reviews an edited body and this
+     * repo's tooling only creates, so a version is both the honest record and
+     * the cheaper path.
+     */
+    kycRejected: {
+      name: 'rabotka_kyc_rejected_v2',
+      language: 'fr',
+      category: 'UTILITY',
+      components: [
+        {
+          type: 'BODY',
+          text: [
+            'Bonjour {{1}},',
+            '',
+            'Après examen de votre dossier, votre vérification d’identité (KYC) n’a pas pu être validée.',
+            '',
+            'Motif : {{2}}',
+            '',
+            'Si vous estimez que cette décision est incorrecte, vous pouvez ouvrir une réclamation depuis l’application — notre équipe réexaminera votre dossier.',
+            '',
+            'L’équipe Rabotka',
+          ].join('\n'),
+          example: {
+            body_text: [
+              ['Jean', 'La photo de la pièce d’identité est illisible'],
+            ],
+          },
+        },
+        {
+          type: 'BUTTONS',
+          buttons: [
+            {
+              type: 'URL',
+              text: 'Ouvrir une réclamation',
+              // The variable ends the URL, which is what WhatsApp requires, and
+              // the outbound processor swaps it for a one-tap login code.
+              url: 'https://rabotka.work/s/{{1}}',
+              example: ['https://rabotka.work/s/claims-new'],
+            },
+          ],
+        },
+      ],
+    },
+
+    accountSuspended: {
+      name: 'rabotka_account_suspended_v2',
+      language: 'fr',
+      category: 'UTILITY',
+      components: [
+        {
+          type: 'BODY',
+          text: [
+            'Bonjour {{1}},',
+            '',
+            'Votre compte Rabotka a été suspendu.',
+            '',
+            'Motif : {{2}}',
+            '',
+            'Vous pouvez toujours consulter votre compte, mais vous ne pouvez ni postuler, ni publier d’offre, ni contacter un profil tant qu’il n’est pas rétabli.',
+            '',
+            'Tapez */support* pour joindre notre équipe.',
+            '',
+            'L’équipe Rabotka',
+          ].join('\n'),
+          example: {
+            body_text: [['Jean', 'Trois pénalités impayées']],
+          },
+        },
+        {
+          type: 'BUTTONS',
+          buttons: [
+            {
+              type: 'URL',
+              text: 'Ouvrir Rabotka',
+              url: 'https://rabotka.work/s/{{1}}',
+              example: ['https://rabotka.work/s/home'],
+            },
+          ],
+        },
       ],
     },
   };

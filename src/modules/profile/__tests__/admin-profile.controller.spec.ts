@@ -45,6 +45,10 @@ function makePrisma(profile: any = null) {
   };
 }
 
+function makeLoginLink() {
+  return { mint: jest.fn().mockResolvedValue('login-code-1') };
+}
+
 function makeWhatsApp() {
   return {
     sendTextMessage: jest.fn().mockResolvedValue(undefined),
@@ -92,6 +96,7 @@ function makeController(prismaProfile: any = null) {
     makePaymentRequestService() as any,
     makePrisma(prismaProfile) as any,
     makeWhatsApp() as any,
+    makeLoginLink() as any,
     makeMail() as any,
     makeLayout() as any,
     makeWalletService() as any,
@@ -157,6 +162,7 @@ describe('AdminProfileController', () => {
         makePaymentRequestService() as any,
         prisma as any,
         makeWhatsApp() as any,
+        makeLoginLink() as any,
         makeMail() as any,
         makeLayout() as any,
         makeWalletService() as any,
@@ -231,6 +237,7 @@ describe('AdminProfileController', () => {
         makePaymentRequestService() as any,
         prisma as any,
         whatsApp as any,
+        makeLoginLink() as any,
         makeMail() as any,
         makeLayout() as any,
         makeWalletService() as any,
@@ -276,6 +283,7 @@ describe('AdminProfileController', () => {
         makePaymentRequestService() as any,
         prisma as any,
         whatsApp as any,
+        makeLoginLink() as any,
         makeMail() as any,
         makeLayout() as any,
         makeWalletService() as any,
@@ -321,6 +329,7 @@ describe('AdminProfileController', () => {
         makePaymentRequestService() as any,
         prisma as any,
         whatsApp as any,
+        makeLoginLink() as any,
         makeMail() as any,
         makeLayout() as any,
         makeWalletService() as any,
@@ -381,6 +390,7 @@ describe('AdminProfileController', () => {
         makePaymentRequestService() as any,
         prisma as any,
         makeWhatsApp() as any,
+        makeLoginLink() as any,
         mail as any,
         makeLayout() as any,
         makeWalletService() as any,
@@ -414,6 +424,7 @@ describe('AdminProfileController', () => {
       makePaymentRequestService() as any,
       makePrisma() as any,
       makeWhatsApp() as any,
+      makeLoginLink() as any,
       makeMail() as any,
       makeLayout() as any,
       makeWalletService() as any,
@@ -439,6 +450,7 @@ describe('AdminProfileController', () => {
       makePaymentRequestService() as any,
       makePrisma() as any,
       makeWhatsApp() as any,
+      makeLoginLink() as any,
       makeMail() as any,
       makeLayout() as any,
       makeWalletService() as any,
@@ -461,6 +473,55 @@ describe('AdminProfileController', () => {
     expect(result).toEqual({ id: 'p1' });
   });
 
+  it('verify() notifies a rejection on WhatsApp with its reason', async () => {
+    // A rejection used to go out by email only, and `email` is nullable on a
+    // profile while `phone` is not.
+    const profileService = makeProfileService();
+    profileService.verifyProfileKyc.mockResolvedValue({
+      id: 'p1',
+      email: 'alice@example.com',
+      phone: '+242000001',
+      firstName: 'Alice',
+      lastName: 'Doe',
+    });
+    const whatsApp = makeWhatsApp();
+    const ctrl = new AdminProfileController(
+      profileService as any,
+      makeLogService() as any,
+      makePaymentRequestService() as any,
+      makePrisma() as any,
+      whatsApp as any,
+      makeLoginLink() as any,
+      makeMail() as any,
+      makeLayout() as any,
+      makeWalletService() as any,
+      makePortfolioService() as any,
+      { restore: jest.fn(), purge: jest.fn(), purgeBlockers: jest.fn() } as any,
+    );
+
+    await ctrl.verify(
+      'p1',
+      { decision: 'REJECTED' as any, reason: 'Pièce d’identité illisible' },
+      [],
+      {
+        user: { userId: 'u1' },
+        headers: {},
+        ip: '127.0.0.1',
+        get: () => undefined,
+      } as any,
+    );
+
+    expect(whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
+      '+242000001',
+      'kycRejected',
+      {
+        firstName: 'Alice',
+        reason: 'Pièce d’identité illisible',
+        loginCode: 'login-code-1',
+      },
+    );
+  });
+
   it('updateStatus() calls profileService and logs', async () => {
     const profileService = makeProfileService();
     const logService = makeLogService();
@@ -470,21 +531,29 @@ describe('AdminProfileController', () => {
       makePaymentRequestService() as any,
       makePrisma() as any,
       makeWhatsApp() as any,
+      makeLoginLink() as any,
       makeMail() as any,
       makeLayout() as any,
       makeWalletService() as any,
       makePortfolioService() as any,
       { restore: jest.fn(), purge: jest.fn(), purgeBlockers: jest.fn() } as any,
     );
-    const result = await ctrl.updateStatus('p1', { status: 'ACTIVE' as any }, {
-      user: { userId: 'u1' },
-      headers: {},
-      ip: '127.0.0.1',
-      get: () => undefined,
-    } as any);
+    const result = await ctrl.updateStatus(
+      'p1',
+      { status: 'SUSPENDED' as any, reason: 'Documents falsifiés' },
+      {
+        user: { userId: 'u1' },
+        headers: {},
+        ip: '127.0.0.1',
+        get: () => undefined,
+      } as any,
+    );
+    // The reason used to stop here, in the audit log, and never reach the
+    // notification the user actually receives.
     expect(profileService.updateProfileStatusByAdmin).toHaveBeenCalledWith(
       'p1',
-      'ACTIVE',
+      'SUSPENDED',
+      'Documents falsifiés',
     );
     expect(logService.create).toHaveBeenCalled();
     expect(result).toEqual({ id: 'p1' });
@@ -513,6 +582,7 @@ describe('AdminProfileController', () => {
         makePaymentRequestService() as any,
         makePrisma() as any,
         makeWhatsApp() as any,
+        makeLoginLink() as any,
         makeMail() as any,
         makeLayout() as any,
         makeWalletService() as any,
@@ -533,6 +603,7 @@ describe('AdminProfileController', () => {
         makePaymentRequestService() as any,
         makePrisma() as any,
         makeWhatsApp() as any,
+        makeLoginLink() as any,
         makeMail() as any,
         makeLayout() as any,
         makeWalletService() as any,
@@ -563,6 +634,7 @@ describe('AdminProfileController', () => {
         makePaymentRequestService() as any,
         makePrisma() as any,
         makeWhatsApp() as any,
+        makeLoginLink() as any,
         makeMail() as any,
         makeLayout() as any,
         makeWalletService() as any,
@@ -586,6 +658,7 @@ describe('AdminProfileController', () => {
         makePaymentRequestService() as any,
         makePrisma() as any,
         makeWhatsApp() as any,
+        makeLoginLink() as any,
         makeMail() as any,
         makeLayout() as any,
         makeWalletService() as any,

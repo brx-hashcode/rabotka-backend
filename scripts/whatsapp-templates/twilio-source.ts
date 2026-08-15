@@ -9,6 +9,7 @@
  */
 import {
   WHATSAPP_TEMPLATES,
+  templateContentSid,
   type WhatsAppTemplateName,
 } from '../../src/common/constants/whatsapp-templates';
 
@@ -88,9 +89,13 @@ export async function loadAll(
 
   const out: SourceTemplate[] = [];
   for (const key of wanted) {
-    const content = await fetchTwilioContent(
-      WHATSAPP_TEMPLATES[key].contentSid,
-    );
+    // Cloud-only templates were authored in `definitions.ts` and have no Twilio
+    // definition to read back. Skipping rather than throwing keeps a bare
+    // `loadAll()` — which passes every registry key — working.
+    const contentSid = templateContentSid(key);
+    if (!contentSid) continue;
+
+    const content = await fetchTwilioContent(contentSid);
     const kind = Object.keys(content.types ?? {})[0] as TwilioKind | undefined;
     if (!kind) throw new Error(`${key}: Twilio content has no type`);
     out.push({ key, kind, content, spec: content.types[kind] });

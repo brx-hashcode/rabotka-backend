@@ -6,6 +6,7 @@ import { ProfileService } from './profile.service';
 import { FileModule } from '../file/file.module';
 import { MailModule } from '../mail/mail.module';
 import { AuthModule } from '../auth/auth.module';
+import { WhatsAppLoginLinkModule } from '../auth/whatsapp-login-link.module';
 import { WhatsAppModule } from '../whatsapp/whatsapp.module';
 import { WalletModule } from '../wallet/wallet.module';
 import { LogModule } from '../log/log.module';
@@ -25,6 +26,11 @@ import { PortfolioModule } from '../portfolio/portfolio.module';
     FileModule,
     MailModule,
     AuthModule,
+    // For the one-tap login codes on the suspension / KYC-rejection CTAs.
+    // AuthModule imports this but does not re-export it, and these
+    // notifications go straight to the provider rather than through the
+    // outbound queue — so nothing else would fill their button variable.
+    WhatsAppLoginLinkModule,
     WhatsAppModule,
     WalletModule,
     LogModule,

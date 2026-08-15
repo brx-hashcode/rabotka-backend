@@ -35,13 +35,41 @@ describe('EmailEventSender', () => {
       'created',
     );
     expect(mockNotification.notifyEventCreated).toHaveBeenCalledWith(
-      'alice@test.com',
-      'Alice',
-      'Team Meeting',
-      '2026-06-01',
-      '2026-06-01',
-      'Monthly',
-      'Office',
+      expect.objectContaining({
+        to: 'alice@test.com',
+        name: 'Alice',
+        title: 'Team Meeting',
+        startDate: '2026-06-01',
+        endDate: '2026-06-01',
+        description: 'Monthly',
+        location: 'Office',
+      }),
+    );
+  });
+
+  it('passes the series and its rule through to the mail', async () => {
+    // Without these the invitation cannot say the event repeats, and the .ics
+    // gets a fresh UID each time — which files an update as a second entry in
+    // the recipient's calendar.
+    await sender.send(
+      { name: 'Alice', email: 'alice@test.com', phone: undefined },
+      {
+        eventId: 'evt-1',
+        seriesId: 'series-1',
+        recurrence: { frequency: 'WEEKLY', until: null, count: 4 },
+        title: 'Standup',
+        startDate: '2026-06-01',
+        endDate: '2026-06-01',
+      },
+      'created',
+    );
+
+    expect(mockNotification.notifyEventCreated).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventId: 'evt-1',
+        seriesId: 'series-1',
+        recurrence: { frequency: 'WEEKLY', until: null, count: 4 },
+      }),
     );
   });
 
@@ -59,13 +87,15 @@ describe('EmailEventSender', () => {
       'updated',
     );
     expect(mockNotification.notifyEventUpdated).toHaveBeenCalledWith(
-      'bob@test.com',
-      'Bob',
-      'Board Meeting',
-      '2026-07-01',
-      '2026-07-01',
-      null,
-      null,
+      expect.objectContaining({
+        to: 'bob@test.com',
+        name: 'Bob',
+        title: 'Board Meeting',
+        startDate: '2026-07-01',
+        endDate: '2026-07-01',
+        description: null,
+        location: null,
+      }),
     );
   });
 });

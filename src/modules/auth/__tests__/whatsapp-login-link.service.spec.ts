@@ -61,15 +61,27 @@ describe('WhatsAppLoginLinkService', () => {
       expect(first).not.toEqual(second);
     });
 
-    it.each([AccountStatus.SUSPENDED, AccountStatus.BANNED])(
-      'refuses to mint for a %s profile',
-      async (status) => {
-        prisma.profile.findUnique.mockResolvedValue({ status });
+    it('refuses to mint for a BANNED profile', async () => {
+      // No path back, so there is nothing for them to read.
+      prisma.profile.findUnique.mockResolvedValue({
+        status: AccountStatus.BANNED,
+      });
 
-        expect(await service.mint('profile-1')).toBeNull();
-        expect(redis.set).not.toHaveBeenCalled();
-      },
-    );
+      expect(await service.mint('profile-1')).toBeNull();
+      expect(redis.set).not.toHaveBeenCalled();
+    });
+
+    it('mints for a SUSPENDED profile', async () => {
+      // Reversed deliberately. A session no longer means privileges —
+      // ActiveProfileGuard refuses every action — so a suspended user gets
+      // read access, which is what the suspension notice's button needs.
+      prisma.profile.findUnique.mockResolvedValue({
+        status: AccountStatus.SUSPENDED,
+      });
+
+      expect(await service.mint('profile-1')).toEqual(expect.any(String));
+      expect(redis.set).toHaveBeenCalled();
+    });
 
     it('refuses to mint for an unknown profile', async () => {
       prisma.profile.findUnique.mockResolvedValue(null);
@@ -153,7 +165,7 @@ describe('WhatsAppLoginLinkService', () => {
 
     it('returns the plain target when the profile may not auto-login', async () => {
       prisma.profile.findUnique.mockResolvedValue({
-        status: AccountStatus.SUSPENDED,
+        status: AccountStatus.BANNED,
       });
 
       expect(await service.appendTo('profile-1', 'application-42')).toBe(
@@ -190,7 +202,7 @@ describe('WhatsAppLoginLinkService', () => {
 
     it('returns null when the profile may not auto-login', async () => {
       prisma.profile.findUnique.mockResolvedValue({
-        status: AccountStatus.SUSPENDED,
+        status: AccountStatus.BANNED,
       });
 
       expect(await service.shortLink('profile-1', 'home')).toBeNull();

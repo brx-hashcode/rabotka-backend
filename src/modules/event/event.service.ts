@@ -5,12 +5,16 @@ import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { CreateEventDto } from './dto/create-event.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
 import { ListEventsDto } from './dto/list-events.dto';
-import { DeliveryChannel } from '@prisma/client';
+import { RecurrenceDto } from './dto/recurrence.dto';
+import { EventEditScope } from './enums/event-edit-scope.enum';
+import { EventSeriesService } from './services/event-series.service';
+import { DeliveryChannel, Prisma } from '@prisma/client';
 import { NotificationService } from '../notification/notification.service';
 import { EventNotificationDispatcher } from './services/event-notification.dispatcher';
 import type { EventNotificationRecipient } from './interfaces/event-notification.interfaces';
 
 const eventInclude = {
+  series: true,
   created_by: { select: { id: true, first_name: true, last_name: true } },
   profiles: {
     select: {
@@ -45,6 +49,16 @@ function mapEvent(event: any) {
     location: event.location ?? null,
     createdAt: event.created_at.toISOString(),
     updatedAt: event.updated_at.toISOString(),
+    // Null on every event that predates recurrence, and on every one-off since.
+    seriesId: event.series_id ?? null,
+    occurrenceIndex: event.occurrence_index ?? null,
+    recurrence: event.series
+      ? {
+          frequency: event.series.frequency,
+          until: event.series.until?.toISOString() ?? null,
+          count: event.series.count ?? null,
+        }
+      : null,
     user: {
       id: event.created_by.id,
       name: `${event.created_by.first_name} ${event.created_by.last_name}`.trim(),
@@ -70,6 +84,7 @@ export class EventService {
     private readonly notification: NotificationService,
     private readonly dispatcher: EventNotificationDispatcher,
     private readonly eventEmitter: EventEmitter2,
+    private readonly series: EventSeriesService,
   ) {}
 
   async list(dto: ListEventsDto) {
@@ -77,14 +92,33 @@ export class EventService {
     const limit = dto.limit ?? 500;
     const skip = (page - 1) * limit;
 
+    // Interval overlap, not containment: an event that starts before the window
+    // and ends after it still shows on every day in between. Same predicate the
+    // client used to apply in helpers.ts (`getEventsForMonth`), moved to SQL so
+    // the calendar stops downloading the whole table on every page load.
+    const from = dto.from ? new Date(dto.from) : undefined;
+    const to = dto.to ? new Date(dto.to) : undefined;
+
+    // An open-ended series only exists as rows up to a horizon. Browsing past
+    // that horizon is what extends it — there is no scheduler doing it in the
+    // background, and without a window there is nothing to extend towards.
+    if (to) await this.series.ensureMaterialised(to);
+    const where: Prisma.EventWhereInput =
+      from && to
+        ? { start_date: { lte: to }, end_date: { gte: from } }
+        : {};
+
     const [events, total] = await Promise.all([
       this.prisma.event.findMany({
+        where,
         skip,
         take: limit,
         orderBy: { start_date: 'asc' },
         include: eventInclude,
       }),
-      this.prisma.event.count(),
+      // The same `where` — counting the whole table while returning a window
+      // makes `total` describe a different result set than `data`.
+      this.prisma.event.count({ where }),
     ]);
 
     return { data: events.map(mapEvent), total, page, limit };
@@ -100,25 +134,31 @@ export class EventService {
   }
 
   async create(dto: CreateEventDto, createdById: string) {
-    const event = await this.prisma.event.create({
-      data: {
-        title: dto.title,
-        description: dto.description,
-        start_date: parseIsoDate(dto.startDate) ?? new Date(dto.startDate),
-        end_date: parseIsoDate(dto.endDate) ?? new Date(dto.endDate),
-        color: dto.color,
-        channel: dto.channel ?? DeliveryChannel.EMAIL,
-        location: dto.location ?? null,
-        created_by_id: createdById,
-        profiles: dto.profileIds?.length
-          ? { connect: dto.profileIds.map((id) => ({ id })) }
-          : undefined,
-        assigned_users: dto.userIds?.length
-          ? { connect: dto.userIds.map((id) => ({ id })) }
-          : undefined,
-      },
-      include: eventInclude,
-    });
+    // A repeating event writes N rows and one rule; a one-off writes the single
+    // row it always has. Either way exactly one event object comes back — the
+    // first occurrence — so everything below this point is shared, and the
+    // notification cannot accidentally fire per occurrence.
+    const event = dto.recurrence
+      ? await this.createSeriesMaster(dto, dto.recurrence, createdById)
+      : await this.prisma.event.create({
+          data: {
+            title: dto.title,
+            description: dto.description,
+            start_date: parseIsoDate(dto.startDate) ?? new Date(dto.startDate),
+            end_date: parseIsoDate(dto.endDate) ?? new Date(dto.endDate),
+            color: dto.color,
+            channel: dto.channel ?? DeliveryChannel.EMAIL,
+            location: dto.location ?? null,
+            created_by_id: createdById,
+            profiles: dto.profileIds?.length
+              ? { connect: dto.profileIds.map((id) => ({ id })) }
+              : undefined,
+            assigned_users: dto.userIds?.length
+              ? { connect: dto.userIds.map((id) => ({ id })) }
+              : undefined,
+          },
+          include: eventInclude,
+        });
 
     const mapped = mapEvent(event);
 
@@ -143,10 +183,14 @@ export class EventService {
       })),
     ];
 
+    // One dispatch, whether this created 1 row or 120. It sits here rather than
+    // inside the series writer precisely so it cannot end up inside the loop.
     void this.dispatcher.dispatchEventCreated(
       recipients,
       {
         eventId: String(event.id),
+        seriesId: mapped.seriesId,
+        recurrence: mapped.recurrence,
         title: dto.title,
         startDate: mapped.startDate,
         endDate: mapped.endDate,
@@ -159,11 +203,49 @@ export class EventService {
     return mapped;
   }
 
+  /**
+   * Writes a series and returns its first occurrence, shaped exactly like the
+   * row `create()` would have made for a one-off — so the caller never has to
+   * care which kind it built.
+   */
+  private async createSeriesMaster(
+    dto: CreateEventDto,
+    rule: RecurrenceDto,
+    createdById: string,
+  ) {
+    const { masterId } = await this.series.createSeries(dto, rule, createdById);
+
+    const master = await this.prisma.event.findUnique({
+      where: { id: masterId },
+      include: eventInclude,
+    });
+    if (!master) throw new NotFoundException('Event not found');
+    return master;
+  }
+
   async update(id: number, dto: UpdateEventDto) {
     const existing = await this.findOne(id);
     const datesChanged =
       (dto.startDate !== undefined && dto.startDate !== existing.startDate) ||
       (dto.endDate !== undefined && dto.endDate !== existing.endDate);
+
+    const scope = dto.scope ?? EventEditScope.THIS;
+    // Anything wider than one occurrence is the series service's problem: it
+    // may split the series and renumber rows, which the single-row update below
+    // cannot express. A plain edit to a plain event never reaches it.
+    if (scope !== EventEditScope.THIS || dto.recurrence !== undefined) {
+      const pivotId = await this.series.applyScopedUpdate(id, dto, scope);
+      const pivot = await this.prisma.event.findUnique({
+        where: { id: pivotId },
+        include: eventInclude,
+      });
+      if (!pivot) throw new NotFoundException('Event not found');
+
+      const mapped = mapEvent(pivot);
+      this.emitUpdated(mapped);
+      if (datesChanged) this.dispatchUpdated(pivot, mapped, dto);
+      return mapped;
+    }
 
     const newStartDate = parseIsoDate(dto.startDate);
     const newEndDate = parseIsoDate(dto.endDate);
@@ -190,47 +272,67 @@ export class EventService {
 
     const mapped = mapEvent(event);
 
+    this.emitUpdated(mapped);
+    if (datesChanged) this.dispatchUpdated(event, mapped, dto);
+
+    return mapped;
+  }
+
+  async remove(id: number, scope: EventEditScope = EventEditScope.THIS) {
+    await this.findOne(id);
+    await this.series.applyScopedDelete(id, scope);
+  }
+
+  private emitUpdated(mapped: ReturnType<typeof mapEvent>) {
     this.eventEmitter.emit(AdminNotificationEvent.EVENT_UPDATED, {
       event: AdminNotificationEvent.EVENT_UPDATED,
       title: 'Événement modifié',
       message: `L'événement a été modifié : ${mapped.title}`,
       entityType: 'event',
-      entityId: String(event.id),
+      entityId: String(mapped.id),
       timestamp: new Date().toISOString(),
     });
-
-    if (datesChanged) {
-      const recipients: EventNotificationRecipient[] = [
-        ...event.profiles.map((p: any) => ({
-          email: p.email,
-          phone: p.phone,
-          name: `${p.first_name} ${p.last_name}`.trim(),
-        })),
-        ...event.assigned_users.map((u: any) => ({
-          email: u.email,
-          name: `${u.first_name} ${u.last_name}`.trim(),
-        })),
-      ];
-
-      void this.dispatcher.dispatchEventUpdated(
-        recipients,
-        {
-          eventId: String(event.id),
-          title: mapped.title,
-          startDate: mapped.startDate,
-          endDate: mapped.endDate,
-          description: mapped.description,
-          location: mapped.location,
-        },
-        dto.channel ?? DeliveryChannel.EMAIL,
-      );
-    }
-
-    return mapped;
   }
 
-  async remove(id: number) {
-    await this.findOne(id);
-    await this.prisma.event.delete({ where: { id } });
+  /**
+   * One message per edit, whatever it touched.
+   *
+   * Shared by both update paths so that rescheduling thirty occurrences mails
+   * each participant once, not thirty times — the same reason `create` keeps
+   * its dispatch outside the row-writing loop.
+   */
+  private dispatchUpdated(
+    // The raw row, not the mapped one: `mapEvent` drops emails and phones on
+    // purpose, since they must not travel in an API response.
+    event: any,
+    mapped: ReturnType<typeof mapEvent>,
+    dto: UpdateEventDto,
+  ) {
+    const recipients: EventNotificationRecipient[] = [
+      ...event.profiles.map((p: any) => ({
+        email: p.email,
+        phone: p.phone,
+        name: `${p.first_name} ${p.last_name}`.trim(),
+      })),
+      ...event.assigned_users.map((u: any) => ({
+        email: u.email,
+        name: `${u.first_name} ${u.last_name}`.trim(),
+      })),
+    ];
+
+    void this.dispatcher.dispatchEventUpdated(
+      recipients,
+      {
+        eventId: String(event.id),
+        seriesId: mapped.seriesId,
+        recurrence: mapped.recurrence,
+        title: mapped.title,
+        startDate: mapped.startDate,
+        endDate: mapped.endDate,
+        description: mapped.description,
+        location: mapped.location,
+      },
+      dto.channel ?? DeliveryChannel.EMAIL,
+    );
   }
 }

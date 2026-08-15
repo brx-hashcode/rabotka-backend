@@ -19,7 +19,11 @@ import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { FileService } from '../file/file.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { verificationLinkMessage } from '../whatsapp/templates';
-import { WHATSAPP_TEMPLATES } from '../../common/constants/whatsapp-templates';
+import {
+  WHATSAPP_TEMPLATES,
+  SUSPENDED_CTA_PATH,
+} from '../../common/constants/whatsapp-templates';
+import { WhatsAppLoginLinkService } from '../auth/whatsapp-login-link.service';
 import { MailService } from '../mail/mail.service';
 import { LayoutService } from '../mail/layout.service';
 import { accountSuspendedEmail } from '../mail/templates';
@@ -182,6 +186,11 @@ export type AdminProfileDetailResponse = AdminProfileListItem & {
   kycDocuments: AdminKycDocumentItem[];
   verificationImages: AdminVerificationImageItem[];
   vectorIndexedAt: Date | null;
+  /** Why the account is suspended right now; null unless it is. */
+  suspensionReason: string | null;
+  suspendedAt: Date | null;
+  /** Last successful sign-in. Null for a profile that has never logged in. */
+  lastLoginAt: Date | null;
 };
 
 type PrismaTransactionClient = Parameters<
@@ -204,6 +213,7 @@ export class ProfileService {
     @Inject(REDIS_CONNECTION)
     private readonly redis: Redis,
     private readonly whatsAppService: WhatsAppService,
+    private readonly whatsAppLoginLink: WhatsAppLoginLinkService,
     private readonly configService: ConfigService,
     private readonly mailService: MailService,
     private readonly layoutService: LayoutService,
@@ -583,10 +593,13 @@ export class ProfileService {
         verified_at: true,
         rejection_reason: true,
         kyc_verification_note: true,
+        suspension_reason: true,
+        suspended_at: true,
         reliability_score: true,
         avatar_url: true,
         created_at: true,
         updated_at: true,
+        last_login_at: true,
         vector_indexed_at: true,
         category: {
           select: { id: true, name: true },
@@ -677,10 +690,13 @@ export class ProfileService {
       verifiedAt: profile.verified_at,
       rejectionReason: profile.rejection_reason,
       kycVerificationNote: profile.kyc_verification_note,
+      suspensionReason: profile.suspension_reason,
+      suspendedAt: profile.suspended_at,
       reliabilityScore: profile.reliability_score,
       avatarUrl: profile.avatar_url,
       createdAt: profile.created_at,
       updatedAt: profile.updated_at,
+      lastLoginAt: profile.last_login_at,
       vectorIndexedAt: profile.vector_indexed_at,
       categoryId: profile.category?.id ?? null,
       categoryName: profile.category?.name ?? null,
@@ -841,7 +857,17 @@ export class ProfileService {
   async updateProfileStatusByAdmin(
     profileId: string,
     status: AccountStatus,
+    reason?: string,
   ): Promise<AdminProfileDetailResponse> {
+    const trimmedReason = reason?.trim() || null;
+
+    // Suspending someone without saying why is what this whole path exists to
+    // stop: the notification then reads "your account was suspended" and the
+    // user has nothing to act on. The admin UI already requires it client-side.
+    if (status === AccountStatus.SUSPENDED && !trimmedReason) {
+      throw new BadRequestException('La raison de la suspension est requise');
+    }
+
     const profile = await this.prisma.profile.findUnique({
       where: { id: profileId },
       select: {
@@ -857,9 +883,26 @@ export class ProfileService {
       throw new NotFoundException('Profil non trouvé');
     }
 
+    const becomingSuspended =
+      profile.status !== AccountStatus.SUSPENDED &&
+      status === AccountStatus.SUSPENDED;
+    const leavingSuspended =
+      profile.status === AccountStatus.SUSPENDED &&
+      status !== AccountStatus.SUSPENDED;
+
     await this.prisma.profile.update({
       where: { id: profileId },
-      data: { status },
+      data: {
+        status,
+        // The stored reason describes the CURRENT suspension. Leaving it behind
+        // on reactivation would show a stale motive next to an active account.
+        ...(becomingSuspended
+          ? { suspension_reason: trimmedReason, suspended_at: new Date() }
+          : {}),
+        ...(leavingSuspended
+          ? { suspension_reason: null, suspended_at: null }
+          : {}),
+      },
     });
 
     this.eventEmitter.emit(AdminNotificationEvent.PROFILE_STATUS_CHANGED, {
@@ -902,23 +945,52 @@ export class ProfileService {
         });
     }
 
-    if (
-      profile.status !== AccountStatus.SUSPENDED &&
-      status === AccountStatus.SUSPENDED
-    ) {
+    if (becomingSuspended) {
       try {
         if (profile.email) {
           await this.mailService.sendMail({
             to: profile.email,
             subject: 'Votre compte a été suspendu',
             html: await this.layoutService.wrap(
-              accountSuspendedEmail(profile.first_name),
+              accountSuspendedEmail(profile.first_name, trimmedReason ?? undefined),
             ),
           });
         }
       } catch {
         this.logger.warn(
           `Failed to send suspension email for profile ${profileId}`,
+        );
+      }
+
+      // WhatsApp as well as email. Both fields are required on a profile, so
+      // this is not about reachability — it is about which channel is read.
+      // WhatsApp is where this user base actually is; an email announcing a
+      // suspension can sit unopened for days.
+      try {
+        if (profile.phone) {
+          // Minted here, not by the outbound processor: this send goes
+          // straight to the provider and never enters the queue, so nothing
+          // else would fill the CTA's variable. A null code degrades to the
+          // bare path — the button then lands on the login screen instead of
+          // deep-linking, which beats a dead link.
+          const loginCode = await this.whatsAppLoginLink
+            .mint(profileId, SUSPENDED_CTA_PATH)
+            .catch(() => null);
+
+          await this.whatsAppService.sendTemplateMessage(
+            profile.phone,
+            'accountSuspended',
+            {
+              firstName: profile.first_name,
+              reason: trimmedReason,
+              loginCode,
+            },
+            profileId,
+          );
+        }
+      } catch {
+        this.logger.warn(
+          `Failed to send suspension WhatsApp message for profile ${profileId}`,
         );
       }
     }
