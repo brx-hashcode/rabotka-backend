@@ -201,8 +201,17 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     isSecret: false,
   },
   {
+    // Deliberately narrow. This is the real fan-out width now that the
+    // notification path no longer runs its candidates through a per-category
+    // diversity cap — that cap had been limiting every categorised offer to
+    // five recipients regardless of what this said. Five keeps a fresh
+    // environment behaving like the one that has actually been running, and
+    // makes widening a decision someone takes rather than inherits: each extra
+    // recipient is a paid MARKETING template sent to somebody who did not ask
+    // for it, and the WhatsApp quality rating is what pays for getting that
+    // wrong.
     key: 'matching.max_notification_workers',
-    value: '20',
+    value: '5',
     category: ConfigCategory.MATCHING,
     label: 'Nombre max de travailleurs notifiés par offre',
     isSecret: false,
