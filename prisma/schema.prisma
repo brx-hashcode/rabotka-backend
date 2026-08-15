@@ -50,6 +50,16 @@ enum DeliveryChannel {
   ALL
 }
 
+/// How often an EventSeries repeats. Deliberately no INTERVAL companion: the
+/// form offers presets only, and RFC 5545 treats a missing INTERVAL as 1, so
+/// these map straight onto RRULE FREQ values.
+enum RecurrenceFrequency {
+  DAILY
+  WEEKLY
+  MONTHLY
+  YEARLY
+}
+
 enum MessageDirection {
   INBOUND
   OUTBOUND
@@ -287,7 +297,6 @@ enum InteractionKind {
 
 /**
  * How an employer's REJECTED decision came about.
- *
  * Without this, a bulk auto-reject (offer filled up, so everyone still pending is
  * closed out) is indistinguishable from an employer actively turning someone
  * down. The recommender reads repeated rejections in a category as "this worker
@@ -299,7 +308,9 @@ enum RejectionSource {
   AUTO_FILL
 }
 
-/** Which way a rating points. Previously only derivable by joining assignments. */
+/**
+ * Which way a rating points. Previously only derivable by joining assignments.
+ */
 enum RatingDirection {
   EMPLOYER_TO_WORKER
   WORKER_TO_EMPLOYER
@@ -355,8 +366,15 @@ model Profile {
   rejection_reason                  String?
   /// Admin note from the latest KYC verify action (approve or reject).
   kyc_verification_note             String?            @db.Text
+  /// Why the account was suspended. Cleared when it leaves SUSPENDED, so it
+  /// always describes the CURRENT suspension rather than the last one ever.
+  suspension_reason                 String?            @db.Text
+  suspended_at                      DateTime?
   read_and_approved_policies        Boolean            @default(false)
   first_login                       Boolean            @default(true)
+  /// Last successful sign-in (web OTP, mobile OTP, WhatsApp link). Refresh-token
+  /// rotation does NOT move it — this is "last authenticated", not "last seen".
+  last_login_at                     DateTime?
 
   avatar_url        String?
   vector_indexed_at DateTime?
@@ -389,7 +407,7 @@ model Profile {
   invoices                        Invoice[]
   ad_delivery_logs                AdDeliveryLog[]
   ratings_given                   Rating[]                      @relation("RatingRater")
-  feedback          Feedback[]
+  feedback                        Feedback[]
   ratings_received                Rating[]                      @relation("RatingRatee")
   portfolio_items                 PortfolioItem[]
   saved_jobs                      SavedJob[]
@@ -550,13 +568,11 @@ model SavedJob {
 
 /**
  * Append-only behavioural log — the durable source of truth for recommendations.
- *
  * Signals previously lived only in Qdrant, keyed `sha256(user__job__type)`, so a
  * second view OVERWROTE the first: interaction frequency and recency-of-Nth-view
  * were physically unrecoverable, and a Qdrant wipe erased all learned state with
  * no replay path. Postgres owns the history now; Qdrant and Redis hold only
  * derived, rebuildable projections.
- *
  * Polymorphic on both ends because the subject can be a worker or an employer and
  * the object can be an offer, a profile, a portfolio or a search.
  */
@@ -604,18 +620,17 @@ model InteractionEvent {
 /**
  * Derived per-profile preference features, rebuildable from InteractionEvent at
  * any time.
- *
  * Lives in Postgres rather than Redis on purpose: the SQL-only fallback tier has
  * to read these when embeddings are disabled (`matching.use_embeddings` defaults
  * to false) or Qdrant is unavailable. That tier is what keeps two identical
  * profiles from getting identical feeds when the vector stack is off.
  */
 model InteractionProfile {
-  profile_id  String   @id @db.Uuid
-  updated_at  DateTime @updatedAt
-  event_count Int      @default(0)
+  profile_id     String    @id @db.Uuid
+  updated_at     DateTime  @updatedAt
+  event_count    Int       @default(0)
   /// Drives the cold→warm→hot weight interpolation.
-  positive_count Int   @default(0)
+  positive_count Int       @default(0)
   last_event_at  DateTime?
 
   /// { categoryId: 0..1 }
@@ -715,8 +730,8 @@ model Application {
 
   /// Set when an employer accepts. `updated_at` is overwritten by every later
   /// transition, so it can't stand in for the decision moment.
-  accepted_at DateTime?
-  rejected_at DateTime?
+  accepted_at      DateTime?
+  rejected_at      DateTime?
   /// EMPLOYER (an actual decision) vs AUTO_FILL (offer filled, pending closed out).
   /// Only EMPLOYER may be treated as a negative preference signal.
   rejection_source RejectionSource?
@@ -1056,6 +1071,36 @@ model ClaimComment {
   @@map("claim_comments")
 }
 
+/// A repeat rule. Its occurrences are real `events` rows carrying `series_id`,
+/// not virtual expansions — every consumer of an event keys on the numeric
+/// event id (React keys, drag/drop, PATCH/DELETE /admin/event/:id), and a
+/// virtual occurrence has no such id to offer.
+///
+/// `materialised_until` is how far ahead the rows have actually been written.
+/// A series with no end date is generated a year out and topped up lazily when
+/// someone browses past it, which is why the rule lives here rather than being
+/// copied onto every occurrence: a top-up is one row update, not N.
+model EventSeries {
+  id                 String              @id @default(uuid()) @db.Uuid
+  created_at         DateTime            @default(now())
+  updated_at         DateTime            @updatedAt
+  frequency          RecurrenceFrequency
+  /// The first occurrence — the reference point every later one is computed
+  /// from, so a month series anchored on the 31st keeps trying for the 31st
+  /// rather than drifting off a clamped February.
+  anchor_start       DateTime
+  anchor_end         DateTime
+  /// End condition. At most one is set; both null means open-ended.
+  until              DateTime?
+  count              Int?
+  materialised_until DateTime
+
+  events Event[]
+
+  @@index([materialised_until], name: "idx_event_series_materialised_until")
+  @@map("event_series")
+}
+
 model Event {
   id            Int             @id @default(autoincrement())
   created_at    DateTime        @default(now())
@@ -1069,12 +1114,23 @@ model Event {
   location      String?
   created_by_id String          @db.Uuid
 
-  created_by     User      @relation("EventCreatedBy", fields: [created_by_id], references: [id], onDelete: Cascade)
-  profiles       Profile[] @relation("EventProfiles")
-  assigned_users User[]    @relation("EventAssignedUsers")
+  /// Null for a one-off event, which is every event created before recurrence
+  /// existed. Every code path branches on this being set.
+  series_id        String? @db.Uuid
+  occurrence_index Int?
+
+  created_by     User         @relation("EventCreatedBy", fields: [created_by_id], references: [id], onDelete: Cascade)
+  series         EventSeries? @relation(fields: [series_id], references: [id], onDelete: Cascade)
+  profiles       Profile[]    @relation("EventProfiles")
+  assigned_users User[]       @relation("EventAssignedUsers")
 
   @@index([created_by_id], name: "idx_event_created_by")
-  @@index([start_date], name: "idx_event_start_date")
+  // Serves the calendar's overlap query (start_date <= to AND end_date >= from).
+  // Replaces a lone start_date index, which this one subsumes as its leading
+  // column.
+  @@index([start_date, end_date], name: "idx_event_start_end")
+  // Every scoped operation is "this series, from this date on".
+  @@index([series_id, start_date], name: "idx_event_series_start")
   @@map("events")
 }
 
@@ -1364,11 +1420,11 @@ model Feedback {
 }
 
 model Rating {
-  id            String   @id @default(uuid()) @db.Uuid
-  created_at    DateTime @default(now())
-  rater_id      String   @db.Uuid
-  ratee_id      String   @db.Uuid
-  assignment_id String   @db.Uuid
+  id            String           @id @default(uuid()) @db.Uuid
+  created_at    DateTime         @default(now())
+  rater_id      String           @db.Uuid
+  ratee_id      String           @db.Uuid
+  assignment_id String           @db.Uuid
   score         Int
   /// Stored rather than re-derived: telling worker→employer from employer→worker
   /// otherwise needs a join through assignment → job_offer on every read.

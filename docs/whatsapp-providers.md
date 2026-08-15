@@ -169,6 +169,49 @@ Both the SID and the Cloud name are overridable per environment
 back without a deploy. A blank override falls back to the default rather than
 sending nothing.
 
+### Cloud-only templates
+
+Step 1 above — approve it in both consoles — is the shape for the original 27,
+which existed in Twilio first. Anything genuinely new should skip Twilio: the
+account is moving to Cloud, and paying for a second approval on a binding
+nobody sends on buys nothing.
+
+Mark those `cloudOnly: true` and omit `contentSid` entirely:
+
+```ts
+accountSuspended: {
+  cloudOnly: true,
+  category: 'UTILITY',
+  cloud: { name: cloudName('TPL_CLOUD_ACCOUNT_SUSPENDED', 'rabotka_account_suspended') },
+  variables: (p: { firstName: string; reason: string | null }) => ({
+    '1': p.firstName,
+    '2': p.reason?.trim() || 'Non précisé',
+  }),
+} satisfies WhatsAppTemplate<[params: { firstName: string; reason: string | null }]>,
+```
+
+The two must agree — a `cloudOnly` entry that keeps a stale SID stays sendable
+on Twilio under copy that only ever existed on Meta, so `findBindingProblemsIn`
+reports that on *both* providers. Otherwise Twilio simply skips them, and
+`toContentSid` throws rather than sending an empty message if one is somehow
+dispatched from a Twilio deployment.
+
+The copy lives in `scripts/whatsapp-templates/definitions.ts` rather than being
+read back from the Twilio Content API — add the key to `AUTHORED_KEYS`, write
+the payload, then:
+
+```bash
+node_modules/.bin/tsx scripts/whatsapp-templates/author.ts --only accountSuspended
+node_modules/.bin/tsx scripts/whatsapp-templates/create.ts --commit
+node_modules/.bin/tsx scripts/whatsapp-templates/status.ts --watch
+```
+
+A body with no `BUTTONS` component is fine and sometimes correct: `kycRejected`
+and `accountSuspended` reach people who cannot follow a link at all (a
+suspended profile is refused a session, a rejected one is not ACTIVE), and a
+CTA that mints no login code lands on the login screen — see `kycPendingMenu`
+for what that cost.
+
 ### Recreating templates in the WABA
 
 Rabotka's Twilio templates are approved under **Twilio's** WABA — Twilio is a

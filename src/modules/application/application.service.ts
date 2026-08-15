@@ -1162,11 +1162,17 @@ export class ApplicationService {
         where: { profile_id: workerId, paid_at: null },
       });
       if (unpaidCount >= PENALTY_SUSPENSION_THRESHOLD) {
+        const total = unpaidCount * fees.lateCancellationPenaltyFcfa;
         const workerProfile = await this.prisma.profile.update({
           where: { id: workerId },
-          data: { status: AccountStatus.SUSPENDED },
+          data: {
+            status: AccountStatus.SUSPENDED,
+            // Same column the admin path writes, so the admin detail can answer
+            // "why is this account suspended?" for automatic suspensions too.
+            suspension_reason: `${unpaidCount} pénalités impayées (total : ${total.toLocaleString('fr-FR')} FCFA)`,
+            suspended_at: new Date(),
+          },
         });
-        const total = unpaidCount * fees.lateCancellationPenaltyFcfa;
         await this.botNotification.sendMessage(
           workerProfile.phone,
           `⚠️ Compte suspendu\n\nVotre compte Rabotka a été suspendu en raison de ${unpaidCount} pénalités impayées\n(total : ${total.toLocaleString('fr-FR')} FCFA).\n\nVous ne pouvez plus accéder aux fonctionnalités tant que vos pénalités ne sont pas réglées.\n\n1 – Régler mes pénalités\n2 – Annuler`,

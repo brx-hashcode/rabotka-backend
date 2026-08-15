@@ -516,9 +516,10 @@ describe('JobOfferService', () => {
     beforeEach(() => {
       (prisma.jobOffer.findUnique as jest.Mock).mockResolvedValue(expiredOffer);
       // Republishing puts a live offer back on the market, so it now also loads
-      // the actor to check KYC.
+      // the actor to check KYC and account standing.
       (prisma.profile.findUnique as jest.Mock).mockResolvedValue({
         verification_status: 'VERIFIED',
+        status: 'ACTIVE',
       });
       (prisma.jobOffer.update as jest.Mock).mockImplementation(
         ({ data }: { data: Record<string, unknown> }) =>
@@ -526,9 +527,24 @@ describe('JobOfferService', () => {
       );
     });
 
+    it('refuses a suspended employer', async () => {
+      // Reopening an expired offer put the employer back on the market, which
+      // is the one thing suspending them was supposed to prevent — create() has
+      // always refused this, republish() used to let it through.
+      (prisma.profile.findUnique as jest.Mock).mockResolvedValue({
+        verification_status: 'VERIFIED',
+        status: 'SUSPENDED',
+      });
+      await expect(
+        service.republish(OFFER_ID, OWNER_ID, hoursFromNow(48)),
+      ).rejects.toThrow(ForbiddenException);
+      expect(prisma.jobOffer.update).not.toHaveBeenCalled();
+    });
+
     it('refuses an employer whose KYC is not verified', async () => {
       (prisma.profile.findUnique as jest.Mock).mockResolvedValue({
         verification_status: 'PENDING',
+        status: 'ACTIVE',
       });
       await expect(
         service.republish(OFFER_ID, OWNER_ID, hoursFromNow(48)),

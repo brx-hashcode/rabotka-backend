@@ -311,6 +311,72 @@ describe('toTemplatePayload', () => {
     });
   });
 
+  it('routes a Cloud-only template’s CTA variable to the button', () => {
+    // The reason this matters: Meta splits body and button parameters, so the
+    // login code sitting in the body instead would be a 132000 count
+    // mismatch — invisible until a real send fails.
+    const payload = toTemplatePayloadFromParams(
+      '+242 06 99 17 686',
+      'accountSuspended',
+      {
+        firstName: 'Alice',
+        reason: 'Trois pénalités impayées',
+        loginCode: 'abc123',
+      },
+    );
+
+    expect(payload.template).toEqual({
+      name: 'rabotka_account_suspended_v2',
+      language: { code: 'fr' },
+      components: [
+        {
+          type: 'body',
+          parameters: [
+            { type: 'text', text: 'Alice' },
+            { type: 'text', text: 'Trois pénalités impayées' },
+          ],
+        },
+        {
+          type: 'button',
+          sub_type: 'url',
+          index: '0',
+          parameters: [{ type: 'text', text: 'abc123' }],
+        },
+      ],
+    });
+  });
+
+  it('falls back to the bare path when no login code was minted', () => {
+    // A live link into the login screen, rather than a dead `/s/<nothing>`.
+    const payload = toTemplatePayloadFromParams(
+      '+242069917686',
+      'accountSuspended',
+      { firstName: 'Alice', reason: null, loginCode: null },
+    );
+
+    expect(payload.template.components?.[1]).toEqual({
+      type: 'button',
+      sub_type: 'url',
+      index: '0',
+      parameters: [{ type: 'text', text: 'home' }],
+    });
+  });
+
+  it('substitutes a placeholder for a missing suspension reason', () => {
+    // Meta rejects a send whose positional parameter is blank, and the reason
+    // is optional on the automatic-suspension path.
+    const payload = toTemplatePayloadFromParams(
+      '+242069917686',
+      'kycRejected',
+      { firstName: 'Bob', reason: null },
+    );
+
+    expect(payload.template.components?.[0].parameters).toEqual([
+      { type: 'text', text: 'Bob' },
+      { type: 'text', text: 'Non précisé' },
+    ]);
+  });
+
   it('omits components entirely when there are none', () => {
     // Meta rejects `components: []` on some template shapes, so the key is
     // absent rather than empty. viewWorkerPortfolio with no variables at all

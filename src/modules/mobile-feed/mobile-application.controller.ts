@@ -28,6 +28,7 @@ import { ProfileType, PaymentRequestType } from '@prisma/client';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { ProfileAuthGuard } from '../auth/guards/profile-auth.guard';
 import { KycVerifiedGuard } from '../auth/guards/kyc-verified.guard';
+import { ActiveProfileGuard } from '../auth/guards/active-profile.guard';
 import type { ProfileAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
 import { ApplicationService } from '../application/application.service';
 import { ContactUnlockService } from '../contact-unlock/contact-unlock.service';
@@ -90,7 +91,7 @@ export class MobileApplicationController {
   }
 
   @Post(':id/accept')
-  @UseGuards(KycVerifiedGuard)
+  @UseGuards(ActiveProfileGuard, KycVerifiedGuard)
   @ApiOperation({
     summary: '[Mobile/EMPLOYER] Accept a candidate (→ WAITING_PAYMENT)',
   })
@@ -153,7 +154,7 @@ export class MobileApplicationController {
   }
 
   @Post(':id/unlock/pay-wallet')
-  @UseGuards(KycVerifiedGuard)
+  @UseGuards(ActiveProfileGuard, KycVerifiedGuard)
   @ApiOperation({
     summary: '[Mobile/EMPLOYER] Pay the contact-unlock fee with wallet credit',
   })
@@ -178,7 +179,7 @@ export class MobileApplicationController {
   }
 
   @Post(':id/unlock/pay-mobile')
-  @UseGuards(KycVerifiedGuard)
+  @UseGuards(ActiveProfileGuard, KycVerifiedGuard)
   @ApiOperation({
     summary:
       '[Mobile/EMPLOYER] Create a mobile-money payment for the contact unlock',
