@@ -136,6 +136,20 @@ export class RecurrenceExpanderService {
     );
   }
 
+  /**
+   * How long the gap is between the first occurrence and the second, in ms.
+   *
+   * Measured from the anchor rather than read off a table, because a period is
+   * not a fixed length: the same MONTHLY rule steps 28 days from February and
+   * 31 from March, and it is the step this anchor actually takes that an
+   * occurrence has to fit inside.
+   */
+  intervalMs(anchorStart: Date, frequency: RecurrenceFrequency): number {
+    return (
+      this.addUnits(anchorStart, frequency, 1).getTime() - anchorStart.getTime()
+    );
+  }
+
   /** The horizon an open-ended series is generated up to, measured from its anchor. */
   openEndedHorizon(anchorStart: Date): Date {
     return this.addUnits(

@@ -486,6 +486,7 @@ describe('EventService', () => {
       // one, and the lazy top-up would recreate them.
       await service.update(3, {
         startDate: '2026-09-21T14:00:00.000Z',
+        endDate: '2026-09-21T15:00:00.000Z',
         scope: 'THIS_AND_FOLLOWING' as never,
       });
 
@@ -500,6 +501,7 @@ describe('EventService', () => {
 
       await service.update(3, {
         startDate: '2026-09-21T14:00:00.000Z',
+        endDate: '2026-09-21T15:00:00.000Z',
         scope: 'ALL' as never,
       });
 
@@ -511,6 +513,7 @@ describe('EventService', () => {
     it('notifies once for a rescheduled series, not once per occurrence', async () => {
       await service.update(3, {
         startDate: '2026-09-21T14:00:00.000Z',
+        endDate: '2026-09-21T15:00:00.000Z',
         scope: 'ALL' as never,
       });
 
@@ -601,15 +604,20 @@ describe('EventService', () => {
     });
 
     it('dispatches update notification when dates change', async () => {
+      // Both bounds move together: the server rejects a start pushed past the
+      // end that is already stored, the way a half-finished drag would be.
       const newStart = new Date(now.getTime() + 7200000);
+      const newEnd = new Date(now.getTime() + 9000000);
       mockPrisma.event.findUnique.mockResolvedValue(baseEvent);
       mockPrisma.event.update.mockResolvedValue({
         ...baseEvent,
         start_date: newStart,
+        end_date: newEnd,
       });
 
       await service.update(1, {
         startDate: newStart.toISOString(),
+        endDate: newEnd.toISOString(),
       });
 
       expect(mockDispatcher.dispatchEventUpdated).toHaveBeenCalled();
@@ -617,9 +625,11 @@ describe('EventService', () => {
 
     it('dispatches update notification with profiles and assigned_users when dates change', async () => {
       const newStart = new Date(now.getTime() + 7200000);
+      const newEnd = new Date(now.getTime() + 9000000);
       const eventWithRecipients = {
         ...baseEvent,
         start_date: newStart,
+        end_date: newEnd,
         profiles: [
           {
             id: 'p1',
@@ -644,6 +654,7 @@ describe('EventService', () => {
 
       await service.update(1, {
         startDate: newStart.toISOString(),
+        endDate: newEnd.toISOString(),
         channel: DeliveryChannel.WHATSAPP,
       });
 
