@@ -372,8 +372,15 @@ model Profile {
   suspended_at                      DateTime?
   read_and_approved_policies        Boolean            @default(false)
   first_login                       Boolean            @default(true)
-  /// Last successful sign-in (web OTP, mobile OTP, WhatsApp link). Refresh-token
-  /// rotation does NOT move it — this is "last authenticated", not "last seen".
+  /// First time the account became usable. Distinct from `last_login_at`:
+  /// activating mints no session, so it is not a sign-in. Written once, by
+  /// whichever activation path gets there first, and never overwritten.
+  activated_at                      DateTime?
+  /// Last authenticated interaction: web OTP, mobile OTP, or any bot message —
+  /// a WhatsApp message arrives from a verified number, which is the same proof
+  /// the OTP flow establishes. Refresh-token rotation does NOT move it.
+  /// Throttled by `LOGIN_STAMP_THROTTLE_MS`, so it is accurate to the minute
+  /// rather than the message.
   last_login_at                     DateTime?
 
   avatar_url        String?

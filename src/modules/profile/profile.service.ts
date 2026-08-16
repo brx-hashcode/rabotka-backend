@@ -160,6 +160,8 @@ export type AdminProfileListItem = {
   suspensionReason: string | null;
   suspendedAt: Date | null;
   lastLoginAt: Date | null;
+  /** First time the account became usable. Not a sign-in — activation mints no session. */
+  activatedAt: Date | null;
   firstLogin: boolean;
   readAndApprovedPolicies: boolean;
   portfolioSlug: string | null;
@@ -629,6 +631,7 @@ export class ProfileService {
         created_at: true,
         updated_at: true,
         last_login_at: true,
+        activated_at: true,
         vector_indexed_at: true,
         category: {
           select: { id: true, name: true },
@@ -734,6 +737,7 @@ export class ProfileService {
       createdAt: profile.created_at,
       updatedAt: profile.updated_at,
       lastLoginAt: profile.last_login_at,
+      activatedAt: profile.activated_at,
       vectorIndexedAt: profile.vector_indexed_at,
       categoryId: profile.category?.id ?? null,
       categoryName: profile.category?.name ?? null,
@@ -989,7 +993,10 @@ export class ProfileService {
             to: profile.email,
             subject: 'Votre compte a été suspendu',
             html: await this.layoutService.wrap(
-              accountSuspendedEmail(profile.first_name, trimmedReason ?? undefined),
+              accountSuspendedEmail(
+                profile.first_name,
+                trimmedReason ?? undefined,
+              ),
             ),
           });
         }
@@ -1283,6 +1290,7 @@ export class ProfileService {
           suspension_reason: true,
           suspended_at: true,
           last_login_at: true,
+          activated_at: true,
           first_login: true,
           read_and_approved_policies: true,
           portfolio_slug: true,
@@ -1355,6 +1363,7 @@ export class ProfileService {
       suspensionReason: p.suspension_reason,
       suspendedAt: p.suspended_at,
       lastLoginAt: p.last_login_at,
+      activatedAt: p.activated_at,
       firstLogin: p.first_login,
       readAndApprovedPolicies: p.read_and_approved_policies,
       portfolioSlug: p.portfolio_slug,
