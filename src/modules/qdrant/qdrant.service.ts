@@ -357,6 +357,44 @@ export class QdrantService implements OnModuleInit {
     );
   }
 
+  /**
+   * Every point id in a collection, paged through with `scroll`.
+   *
+   * Exists so callers can reconcile the index against the source of truth —
+   * nothing else can tell you a point is present that SHOULD NOT BE, because
+   * search only ever surfaces what matches. Payload and vectors are left out:
+   * the reconciliation only needs identity, and pulling 384-float vectors for
+   * the whole collection to compare ids would be pure waste.
+   */
+  async listPointIds(collectionName: string): Promise<string[]> {
+    this.assertPrefix(collectionName);
+    const ids: string[] = [];
+    let offset: string | number | undefined = undefined;
+
+    // Bounded so a pathological collection cannot spin forever. At this page
+    // size the cap is 500k points — far past anything this platform will hold,
+    // and a loud warning if it is ever reached.
+    for (let page = 0; page < 500; page++) {
+      const res = await retryTransient(() =>
+        this.client.scroll(collectionName, {
+          limit: 1000,
+          offset,
+          with_payload: false,
+          with_vector: false,
+        }),
+      );
+      for (const point of res.points) ids.push(String(point.id));
+
+      offset = res.next_page_offset as string | number | undefined;
+      if (offset === undefined || offset === null) return ids;
+    }
+
+    this.logger.warn(
+      `listPointIds(${collectionName}) hit its page cap; returning ${ids.length} ids and stopping`,
+    );
+    return ids;
+  }
+
   /** Hybrid (dense+sparse RRF) search. `score` is ordinal — see {@link QdrantHit}. */
   async searchHybrid(
     collectionName: string,

@@ -153,9 +153,21 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
   // ── MATCHING ──────────────────────────────────────────────────────────────
   {
     key: 'matching.use_embeddings',
-    value: 'false',
+    value: 'true',
     category: ConfigCategory.MATCHING,
     label: 'Activer algorithme de similarité (embeddings)',
+    isSecret: false,
+  },
+  {
+    // Written automatically when `matching.use_embeddings` flips false → true.
+    // While embeddings are off the indexers stamp `vector_indexed_at` without
+    // writing a vector, so `reindexPending` — which looks for a null stamp —
+    // would find nothing to do forever. Comparing against this timestamp is what
+    // lets the scan reclaim those rows. Empty means "never enabled".
+    key: 'matching.embeddings_enabled_at',
+    value: '',
+    category: ConfigCategory.MATCHING,
+    label: 'Dernière activation des embeddings (ISO, automatique)',
     isSecret: false,
   },
   {
@@ -188,7 +200,7 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
   },
   {
     key: 'matching.engine_version',
-    value: 'legacy',
+    value: 'v2',
     category: ConfigCategory.MATCHING,
     label: 'Moteur de recommandation actif (legacy | v2)',
     isSecret: false,

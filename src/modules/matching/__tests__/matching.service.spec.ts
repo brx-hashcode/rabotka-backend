@@ -29,6 +29,8 @@ function makeQdrant() {
     searchHybrid: jest.fn().mockResolvedValue([]),
     searchHybridWithFilter: jest.fn().mockResolvedValue([]),
     recommendDense: jest.fn().mockResolvedValue([]),
+    listPointIds: jest.fn().mockResolvedValue([]),
+    deletePoints: jest.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -40,6 +42,9 @@ function makeSystemConfig(enabled = true) {
     // Must be stubbed: without it every search method throws inside its try and
     // returns [] via the catch, so assertions silently exercise the error path.
     getRecommendationMinScore: jest.fn().mockResolvedValue(0.3),
+    // Null = "embeddings were never toggled", which keeps `reindexPending` on
+    // its original null-stamp-only query. Tests that care override it.
+    getEmbeddingsEnabledAt: jest.fn().mockResolvedValue(null),
   };
 }
 
@@ -509,6 +514,130 @@ describe('MatchingService', () => {
       prisma.profile.findUnique.mockResolvedValue({ categories: [] });
       await service.reindexPending();
       expect(prisma.jobOffer.findMany).toHaveBeenCalled();
+    });
+
+    /**
+     * The regression this guards: while embeddings are off the three indexers
+     * stamp `vector_indexed_at` and return WITHOUT writing a vector. A scan that
+     * only looks for a null stamp therefore finds nothing to do once the flag is
+     * turned back on — every row looks indexed and none of them are, forever.
+     */
+    describe('reclaiming rows stamped while embeddings were off', () => {
+      const enabledAt = new Date('2026-08-16T10:00:00.000Z');
+
+      beforeEach(() => {
+        systemConfig.getEmbeddingsEnabledAt.mockResolvedValue(enabledAt);
+        prisma.jobOffer.findMany.mockResolvedValue([]);
+        prisma.profile.findMany.mockResolvedValue([]);
+      });
+
+      it('queries for stamps older than the activation as well as null ones', async () => {
+        await service.reindexPending();
+
+        for (const call of [
+          prisma.jobOffer.findMany.mock.calls[0][0],
+          prisma.profile.findMany.mock.calls[0][0],
+          prisma.profile.findMany.mock.calls[1][0],
+        ]) {
+          expect(call.where.OR).toEqual([
+            { vector_indexed_at: null },
+            { vector_indexed_at: { lt: enabledAt } },
+          ]);
+        }
+      });
+
+      it('keeps the other filters on each query intact', async () => {
+        await service.reindexPending();
+
+        expect(prisma.jobOffer.findMany.mock.calls[0][0].where).toMatchObject({
+          status: { not: 'CANCELLED' },
+        });
+        expect(prisma.profile.findMany.mock.calls[0][0].where).toMatchObject({
+          profile_type: 'WORKER',
+          status: 'ACTIVE',
+        });
+        expect(prisma.profile.findMany.mock.calls[1][0].where).toMatchObject({
+          profile_type: 'EMPLOYER',
+          status: 'ACTIVE',
+        });
+      });
+
+      it('falls back to null-only when embeddings were never toggled', async () => {
+        systemConfig.getEmbeddingsEnabledAt.mockResolvedValue(null);
+
+        await service.reindexPending();
+
+        const where = prisma.profile.findMany.mock.calls[0][0].where;
+        expect(where.OR).toBeUndefined();
+        expect(where.vector_indexed_at).toBeNull();
+      });
+    });
+
+    /**
+     * Indexing is additive — nothing removes points — so an archived profile
+     * keeps its vector and keeps being retrieved. Search cannot reveal this: it
+     * only reports what matches, never what should not be there.
+     */
+    describe('orphan sweep', () => {
+      beforeEach(() => {
+        prisma.jobOffer.findMany.mockResolvedValue([]);
+      });
+
+      it('deletes points whose profile is gone or archived', async () => {
+        qdrant.listPointIds.mockResolvedValue([
+          'w-live',
+          'w-archived',
+          'w-gone',
+        ]);
+        prisma.profile.findMany.mockImplementation((args: any) =>
+          Promise.resolve(
+            // The pending scan (keyed by status) finds nothing; the sweep's
+            // liveness lookup returns only the surviving profile.
+            args.where.status === 'ACTIVE' ? [] : [{ id: 'w-live' }],
+          ),
+        );
+
+        await service.reindexPending();
+
+        expect(qdrant.deletePoints).toHaveBeenCalledWith(
+          expect.stringContaining('workers'),
+          ['w-archived', 'w-gone'],
+        );
+      });
+
+      it('excludes soft-deleted profiles from the live set', async () => {
+        qdrant.listPointIds.mockResolvedValue(['w-1']);
+        prisma.profile.findMany.mockResolvedValue([]);
+
+        await service.reindexPending();
+
+        const sweepCall = prisma.profile.findMany.mock.calls.find(
+          (c: any[]) => c[0].where.deleted_at === null,
+        );
+        expect(sweepCall).toBeDefined();
+      });
+
+      it('deletes nothing when every point is live', async () => {
+        qdrant.listPointIds.mockResolvedValue(['w-1']);
+        prisma.profile.findMany.mockImplementation((args: any) =>
+          Promise.resolve(
+            args.where.status === 'ACTIVE' ? [] : [{ id: 'w-1' }],
+          ),
+        );
+
+        await service.reindexPending();
+
+        expect(qdrant.deletePoints).not.toHaveBeenCalled();
+      });
+
+      // The sweep runs after indexing has already succeeded; a Qdrant fault
+      // here must not turn a completed scan into a failed one.
+      it('survives a Qdrant failure', async () => {
+        qdrant.listPointIds.mockRejectedValue(new Error('qdrant down'));
+        prisma.profile.findMany.mockResolvedValue([]);
+
+        await expect(service.reindexPending()).resolves.toBeUndefined();
+      });
     });
 
     it('handles empty pending list', async () => {
