@@ -1,0 +1,25 @@
+-- When an account actually became usable, as distinct from when it last signed in.
+--
+-- `last_login_at` only ever recorded a token-issuing sign-in, and activating an
+-- account is not one: clicking the WhatsApp verification link sets the account
+-- ACTIVE and grants the welcome credit, but mints no session. The result was
+-- that a verified, funded, demonstrably-engaged profile still read "Never
+-- signed in" in the admin — true, and useless. Measured on dev, 36 of 37
+-- profiles had no login timestamp at all, including 11 that were ACTIVE with
+-- WhatsApp connected.
+--
+-- Stamping activation into `last_login_at` was the obvious shortcut and the
+-- wrong one: it would conflate "clicked the link once" with "came back", and
+-- that distinction is the whole value of the column. So activation gets its own
+-- field and `last_login_at` keeps meaning what it says.
+--
+-- Written once, on first activation, by whichever of the three paths gets there
+-- first — the verification link, the inline 4-digit code, or the menu-triggered
+-- activation after KYC approval. Never overwritten: this is when the account
+-- opened, not when it was last touched.
+--
+-- Nullable and unbackfilled. Activation was never logged as an event, so there
+-- is nothing to reconstruct it from for existing rows; they stay null and new
+-- activations populate from here.
+ALTER TABLE "profiles"
+  ADD COLUMN "activated_at" TIMESTAMP(3);

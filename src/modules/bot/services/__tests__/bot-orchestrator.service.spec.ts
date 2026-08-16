@@ -470,6 +470,19 @@ describe('BotOrchestratorService', () => {
       verification_status: 'VERIFIED',
     };
 
+    /**
+     * Activation, specifically — not "no write at all". Every bot message now
+     * also stamps `last_login_at`, so a bare `update` call no longer means the
+     * account was activated and asserting on one would pass for the wrong
+     * reason.
+     */
+    const activationWrites = () =>
+      deps.prisma.profile.update.mock.calls.filter(
+        (c: [{ data?: Record<string, unknown> }]) =>
+          c[0]?.data?.whatsapp_connected !== undefined ||
+          c[0]?.data?.status !== undefined,
+      );
+
     it('answers any input with the KYC-pending template while under review', async () => {
       // One template with a "Gérer mon profil" button replaces the old typed
       // 1/2 menu — whose options each only returned a webview template anyway.
@@ -481,7 +494,7 @@ describe('BotOrchestratorService', () => {
         const result = await service.handle(PROFILE_ID, PHONE, input);
         expect(result[0]).toContain('[TPL:kycPendingMenu]');
       }
-      expect(deps.prisma.profile.update).not.toHaveBeenCalled();
+      expect(activationWrites()).toHaveLength(0);
     });
 
     it('no longer asks the user to reply with a number', async () => {
@@ -501,7 +514,7 @@ describe('BotOrchestratorService', () => {
       });
       await service.handle(PROFILE_ID, PHONE, '1');
       await service.handle(PROFILE_ID, PHONE, 'menu');
-      expect(deps.prisma.profile.update).not.toHaveBeenCalled();
+      expect(activationWrites()).toHaveLength(0);
     });
 
     it('returns KYC rejected message when PENDING_ACTIVATION and verification_status is REJECTED', async () => {
@@ -511,7 +524,7 @@ describe('BotOrchestratorService', () => {
       });
       const result = await service.handle(PROFILE_ID, PHONE, 'menu');
       expect(result[0]).toContain('refusée');
-      expect(deps.prisma.profile.update).not.toHaveBeenCalled();
+      expect(activationWrites()).toHaveLength(0);
     });
 
     it('returns KYC prompt when PENDING_ACTIVATION (verified)', async () => {
