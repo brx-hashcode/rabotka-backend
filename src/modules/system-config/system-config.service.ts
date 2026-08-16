@@ -22,6 +22,7 @@ const CACHE_TTL_SECONDS = 300; // 5 minutes
 
 const EMBEDDINGS_KEY = 'matching.use_embeddings';
 const EMBEDDINGS_ENABLED_AT_KEY = 'matching.embeddings_enabled_at';
+const INDEX_SCHEMA_VERSION_KEY = 'matching.index_schema_version';
 const SEED_MAX_RETRIES = 10;
 const SEED_RETRY_DELAY_MS = 2000;
 
@@ -315,6 +316,53 @@ export class SystemConfigService implements OnModuleInit {
   async isSimilarityEnabled(): Promise<boolean> {
     const val = await this.get(EMBEDDINGS_KEY, 'false');
     return val === 'true';
+  }
+
+  /**
+   * The payload schema version the index was last fully rewritten at, or null if
+   * it has never been recorded.
+   *
+   * Null is the honest answer for a database predating this key, and it makes
+   * `reindexPending` rewrite everything once — which is exactly right, since a
+   * pre-existing index cannot have the fields added since.
+   */
+  async getIndexSchemaVersion(): Promise<number | null> {
+    const val = (await this.get(INDEX_SCHEMA_VERSION_KEY, '')).trim();
+    if (!val) return null;
+    const parsed = Number(val);
+    if (!Number.isInteger(parsed) || parsed < 0) {
+      this.logger.warn(
+        `Ignoring unparseable ${INDEX_SCHEMA_VERSION_KEY}: "${val}"`,
+      );
+      return null;
+    }
+    return parsed;
+  }
+
+  /** Records a completed full rewrite. Upserted for the same reason as the stamp. */
+  async setIndexSchemaVersion(version: number): Promise<void> {
+    try {
+      await this.prisma.systemConfig.upsert({
+        where: { key: INDEX_SCHEMA_VERSION_KEY },
+        update: { value: String(version) },
+        create: {
+          key: INDEX_SCHEMA_VERSION_KEY,
+          value: String(version),
+          category: ConfigCategory.MATCHING,
+          label: 'Version du schéma de payload Qdrant (automatique)',
+          is_secret: false,
+        },
+      });
+      await this.redis.del(`${CACHE_PREFIX}${INDEX_SCHEMA_VERSION_KEY}`);
+    } catch (err) {
+      // Leaves the version behind, so the next scan repeats the wide pass.
+      // Wasteful, never wrong — the alternative is claiming a migration that
+      // did not happen and letting filters run against a stale payload.
+      this.logger.error(
+        `Failed to record ${INDEX_SCHEMA_VERSION_KEY}=${version}; the next scan will rewrite the index again`,
+        err,
+      );
+    }
   }
 
   /**

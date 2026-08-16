@@ -51,6 +51,12 @@ const INDEXED_PAYLOAD_KEYS = [
   'employerId',
   'profileType',
   'amountBucket',
+  // Geo. Retrieval is the only place a country constraint can actually save
+  // work: scoring proximity afterwards cannot recover a candidate the vector
+  // search never returned, and on the notification path an out-of-country
+  // candidate costs a paid WhatsApp template rather than a wasted scroll.
+  'countryCode',
+  'city',
 ] as const;
 
 /**

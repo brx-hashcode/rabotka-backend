@@ -171,6 +171,17 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     isSecret: false,
   },
   {
+    // Written by `reindexPending` after it rewrites every point at the current
+    // payload schema. Compared against `INDEX_SCHEMA_VERSION` in qdrant.config —
+    // a mismatch triggers one full rewrite and suppresses any filter that
+    // depends on fields the old points do not carry. Empty means "never".
+    key: 'matching.index_schema_version',
+    value: '',
+    category: ConfigCategory.MATCHING,
+    label: 'Version du schéma de payload Qdrant (automatique)',
+    isSecret: false,
+  },
+  {
     key: 'matching.min_notification_score',
     value: '0.55',
     category: ConfigCategory.MATCHING,
