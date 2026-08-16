@@ -53,9 +53,13 @@ export class AdminJobCategoryController {
   ) {}
 
   @Get()
-  @ApiOperation({ summary: 'List all categories (admin)' })
+  @ApiOperation({
+    summary: 'List all categories with usage counts (admin)',
+    description:
+      'Same domains as the public endpoint, plus how many job offers and how many workers reference each one — what tells an admin which domains are actually carrying the marketplace.',
+  })
   findAll() {
-    return this.jobCategoryService.findAll();
+    return this.jobCategoryService.findAllForAdmin();
   }
 
   @Post()
