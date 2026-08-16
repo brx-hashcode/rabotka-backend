@@ -124,6 +124,82 @@ describe('SystemConfigService', () => {
         service.set('contact.email', 'admin@example.com', 'admin-1'),
       ).resolves.toBeUndefined();
     });
+
+    /**
+     * `matching.embeddings_enabled_at` is what lets `reindexPending` tell a real
+     * index from the stamp written while embeddings were off. It must move on
+     * the false→true transition and at no other time — a stamp written on a
+     * no-op save would jump past every `vector_indexed_at` recorded since the
+     * real activation and strand exactly the rows it exists to reclaim.
+     */
+    describe('matching.embeddings_enabled_at', () => {
+      const ENABLED_AT = 'matching.embeddings_enabled_at';
+      const upsertedKeys = () =>
+        mockPrisma.systemConfig.upsert.mock.calls.map((c) => c[0].where.key);
+
+      beforeEach(() => {
+        mockPrisma.systemConfig.update.mockResolvedValue({});
+      });
+
+      it('is stamped when embeddings go from off to on', async () => {
+        mockRedis.get.mockResolvedValue('false'); // prior value
+
+        await service.set('matching.use_embeddings', 'true', 'admin-1');
+
+        expect(upsertedKeys()).toContain(ENABLED_AT);
+        const call = mockPrisma.systemConfig.upsert.mock.calls.find(
+          (c) => c[0].where.key === ENABLED_AT,
+        );
+        expect(Number.isNaN(Date.parse(call![0].update.value))).toBe(false);
+      });
+
+      it('is not moved when embeddings were already on', async () => {
+        mockRedis.get.mockResolvedValue('true'); // already enabled
+
+        await service.set('matching.use_embeddings', 'true', 'admin-1');
+
+        expect(upsertedKeys()).not.toContain(ENABLED_AT);
+      });
+
+      it('is not stamped when embeddings are turned off', async () => {
+        mockRedis.get.mockResolvedValue('true');
+
+        await service.set('matching.use_embeddings', 'false', 'admin-1');
+
+        expect(upsertedKeys()).not.toContain(ENABLED_AT);
+      });
+
+      it('does not fail the admin write when the stamp cannot be saved', async () => {
+        mockRedis.get.mockResolvedValue('false');
+        mockPrisma.systemConfig.upsert.mockRejectedValue(new Error('db down'));
+
+        await expect(
+          service.set('matching.use_embeddings', 'true', 'admin-1'),
+        ).resolves.toBeUndefined();
+        // The config change itself still landed.
+        expect(mockPrisma.systemConfig.update).toHaveBeenCalled();
+      });
+    });
+  });
+
+  describe('getEmbeddingsEnabledAt', () => {
+    it('parses a stored ISO timestamp', async () => {
+      mockRedis.get.mockResolvedValue('2026-08-16T10:00:00.000Z');
+      const result = await service.getEmbeddingsEnabledAt();
+      expect(result?.toISOString()).toBe('2026-08-16T10:00:00.000Z');
+    });
+
+    it('returns null when never enabled', async () => {
+      mockRedis.get.mockResolvedValue('');
+      await expect(service.getEmbeddingsEnabledAt()).resolves.toBeNull();
+    });
+
+    // Degrades to the original null-stamp-only scan rather than matching every
+    // row on every pass, which would re-index the whole corpus every 30 minutes.
+    it('returns null for an unparseable value', async () => {
+      mockRedis.get.mockResolvedValue('not-a-date');
+      await expect(service.getEmbeddingsEnabledAt()).resolves.toBeNull();
+    });
   });
 
   describe('getAll', () => {

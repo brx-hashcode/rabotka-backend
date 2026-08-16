@@ -976,7 +976,15 @@ export class MatchingService {
     topN = 10,
   ): Promise<ScoredHit[]> {
     const enabled = await this.systemConfig.isSimilarityEnabled();
-    if (!enabled) return [];
+    if (!enabled) {
+      // Named rather than silent: an empty result here sends the employer feed
+      // to its SQL fallback, which serves a plausible list with every score at
+      // 0. Callers cannot tell that apart from "no worker matched".
+      this.logger.debug(
+        `findMatchingWorkersForEmployerProfile: matching.use_embeddings is off, returning no hits for ${employerProfileId}`,
+      );
+      return [];
+    }
 
     const profile = await this.prisma.profile.findUnique({
       where: { id: employerProfileId },
@@ -1025,14 +1033,32 @@ export class MatchingService {
     const enabled = await this.systemConfig.isSimilarityEnabled();
     if (!enabled) return;
 
+    const enabledAt = await this.systemConfig.getEmbeddingsEnabledAt();
+    // A null stamp is the obvious pending case. The second clause is the one
+    // that matters after a toggle: while embeddings are off the three indexers
+    // stamp `vector_indexed_at` and return WITHOUT writing a vector, so on the
+    // way back up every row looks indexed and this scan would find nothing to
+    // do — permanently. Anything stamped before embeddings were switched on is
+    // therefore bookkeeping, not an index, and has to be redone. A genuine
+    // re-index writes a stamp newer than `enabledAt`, so the set drains and the
+    // scan settles instead of churning.
+    const pending = enabledAt
+      ? {
+          OR: [
+            { vector_indexed_at: null },
+            { vector_indexed_at: { lt: enabledAt } },
+          ],
+        }
+      : { vector_indexed_at: null };
+
     const [jobs, workers, employers] = await Promise.all([
       this.prisma.jobOffer.findMany({
-        where: { vector_indexed_at: null, status: { not: 'CANCELLED' } },
+        where: { ...pending, status: { not: 'CANCELLED' } },
         select: { id: true },
       }),
       this.prisma.profile.findMany({
         where: {
-          vector_indexed_at: null,
+          ...pending,
           profile_type: 'WORKER',
           status: 'ACTIVE',
         },
@@ -1040,7 +1066,7 @@ export class MatchingService {
       }),
       this.prisma.profile.findMany({
         where: {
-          vector_indexed_at: null,
+          ...pending,
           profile_type: 'EMPLOYER',
           status: 'ACTIVE',
         },
@@ -1049,7 +1075,8 @@ export class MatchingService {
     ]);
 
     this.logger.log(
-      `reindexPending: ${jobs.length} jobs, ${workers.length} workers, ${employers.length} employers`,
+      `reindexPending: ${jobs.length} jobs, ${workers.length} workers, ${employers.length} employers` +
+        (enabledAt ? ` (stale cutoff ${enabledAt.toISOString()})` : ''),
     );
 
     const BATCH_SIZE = 10;
@@ -1067,5 +1094,52 @@ export class MatchingService {
     await batchProcess(jobs, (id) => this.indexJobOffer(id));
     await batchProcess(workers, (id) => this.indexWorkerProfile(id));
     await batchProcess(employers, (id) => this.indexEmployerProfile(id));
+
+    await this.sweepOrphanedProfilePoints();
+  }
+
+  /**
+   * Removes index points whose profile no longer exists or was archived.
+   *
+   * Indexing is additive — every path writes points, none removes them — so an
+   * archived profile keeps its vector and keeps being retrieved. Nothing else
+   * can catch this: search only reports what matches, so a point that should
+   * not exist is invisible until someone compares the two sides. Reconciling
+   * here rather than hooking each delete path covers rows removed by admin
+   * tooling or straight SQL as well, which a hook never would.
+   *
+   * Best-effort by design: this runs at the tail of a scan whose real job is
+   * indexing, and a Qdrant fault must not undo work that already succeeded.
+   */
+  private async sweepOrphanedProfilePoints(): Promise<void> {
+    for (const [collection, profileType] of [
+      [COLLECTION_WORKERS, 'WORKER'],
+      [COLLECTION_EMPLOYERS, 'EMPLOYER'],
+    ] as const) {
+      try {
+        const pointIds = await this.qdrant.listPointIds(collection);
+        if (pointIds.length === 0) continue;
+
+        const live = await this.prisma.profile.findMany({
+          where: {
+            id: { in: pointIds },
+            profile_type: profileType,
+            deleted_at: null,
+          },
+          select: { id: true },
+        });
+
+        const liveIds = new Set(live.map((p) => p.id));
+        const orphans = pointIds.filter((id) => !liveIds.has(id));
+        if (orphans.length === 0) continue;
+
+        await this.qdrant.deletePoints(collection, orphans);
+        this.logger.log(
+          `sweepOrphanedProfilePoints: removed ${orphans.length} stale point(s) from ${collection}`,
+        );
+      } catch (err) {
+        this.logger.warn(`Orphan sweep failed for ${collection}`, err);
+      }
+    }
   }
 }
