@@ -19,6 +19,10 @@ import {
 
 const CACHE_PREFIX = `${REDIS_KEY_PREFIX}syscfg:`;
 const CACHE_TTL_SECONDS = 300; // 5 minutes
+
+const EMBEDDINGS_KEY = 'matching.use_embeddings';
+const EMBEDDINGS_ENABLED_AT_KEY = 'matching.embeddings_enabled_at';
+const INDEX_SCHEMA_VERSION_KEY = 'matching.index_schema_version';
 const SEED_MAX_RETRIES = 10;
 const SEED_RETRY_DELAY_MS = 2000;
 
@@ -216,12 +220,60 @@ export class SystemConfigService implements OnModuleInit {
         );
       }
     }
+    // Read before writing: the stamp below is driven by the TRANSITION, not by
+    // the new value, so re-saving `true` over `true` must not move it. Moving it
+    // would push the timestamp past every `vector_indexed_at` written since the
+    // real activation and strand exactly the rows the stamp exists to reclaim.
+    const wasEnabled =
+      key === EMBEDDINGS_KEY ? await this.isSimilarityEnabled() : false;
+
     await this.prisma.systemConfig.update({
       where: { key },
       data: { value, updated_by: adminId ?? null },
     });
     await this.redis.del(`${CACHE_PREFIX}${key}`);
     this.logger.log(`Config updated: ${key} by ${adminId ?? 'system'}`);
+
+    if (key === EMBEDDINGS_KEY && !wasEnabled && value === 'true') {
+      await this.markEmbeddingsEnabled();
+    }
+  }
+
+  /**
+   * Records when embeddings came back on, so `MatchingService.reindexPending`
+   * can tell a genuine index from the bookkeeping stamp written while the
+   * feature was off.
+   *
+   * Upserted rather than updated: a database seeded before this key existed has
+   * no row, and a missing row must not turn re-enabling embeddings into a 500.
+   * Best-effort for the same reason — the admin's config write has already
+   * succeeded by the time this runs, so a failure here is logged and swallowed
+   * rather than rolled back onto the caller.
+   */
+  private async markEmbeddingsEnabled(): Promise<void> {
+    const now = new Date().toISOString();
+    try {
+      await this.prisma.systemConfig.upsert({
+        where: { key: EMBEDDINGS_ENABLED_AT_KEY },
+        update: { value: now },
+        create: {
+          key: EMBEDDINGS_ENABLED_AT_KEY,
+          value: now,
+          category: ConfigCategory.MATCHING,
+          label: 'Dernière activation des embeddings (ISO, automatique)',
+          is_secret: false,
+        },
+      });
+      await this.redis.del(`${CACHE_PREFIX}${EMBEDDINGS_ENABLED_AT_KEY}`);
+      this.logger.log(
+        `Embeddings enabled at ${now} — pending re-index widened`,
+      );
+    } catch (err) {
+      this.logger.error(
+        `Failed to record ${EMBEDDINGS_ENABLED_AT_KEY}; re-index will not reclaim stamped rows until embeddings are toggled again`,
+        err,
+      );
+    }
   }
 
   async getAll(category?: ConfigCategory) {
@@ -262,8 +314,76 @@ export class SystemConfigService implements OnModuleInit {
   // ── Typed getters ─────────────────────────────────────────────────────────
 
   async isSimilarityEnabled(): Promise<boolean> {
-    const val = await this.get('matching.use_embeddings', 'false');
+    const val = await this.get(EMBEDDINGS_KEY, 'false');
     return val === 'true';
+  }
+
+  /**
+   * The payload schema version the index was last fully rewritten at, or null if
+   * it has never been recorded.
+   *
+   * Null is the honest answer for a database predating this key, and it makes
+   * `reindexPending` rewrite everything once — which is exactly right, since a
+   * pre-existing index cannot have the fields added since.
+   */
+  async getIndexSchemaVersion(): Promise<number | null> {
+    const val = (await this.get(INDEX_SCHEMA_VERSION_KEY, '')).trim();
+    if (!val) return null;
+    const parsed = Number(val);
+    if (!Number.isInteger(parsed) || parsed < 0) {
+      this.logger.warn(
+        `Ignoring unparseable ${INDEX_SCHEMA_VERSION_KEY}: "${val}"`,
+      );
+      return null;
+    }
+    return parsed;
+  }
+
+  /** Records a completed full rewrite. Upserted for the same reason as the stamp. */
+  async setIndexSchemaVersion(version: number): Promise<void> {
+    try {
+      await this.prisma.systemConfig.upsert({
+        where: { key: INDEX_SCHEMA_VERSION_KEY },
+        update: { value: String(version) },
+        create: {
+          key: INDEX_SCHEMA_VERSION_KEY,
+          value: String(version),
+          category: ConfigCategory.MATCHING,
+          label: 'Version du schéma de payload Qdrant (automatique)',
+          is_secret: false,
+        },
+      });
+      await this.redis.del(`${CACHE_PREFIX}${INDEX_SCHEMA_VERSION_KEY}`);
+    } catch (err) {
+      // Leaves the version behind, so the next scan repeats the wide pass.
+      // Wasteful, never wrong — the alternative is claiming a migration that
+      // did not happen and letting filters run against a stale payload.
+      this.logger.error(
+        `Failed to record ${INDEX_SCHEMA_VERSION_KEY}=${version}; the next scan will rewrite the index again`,
+        err,
+      );
+    }
+  }
+
+  /**
+   * When embeddings were last switched on, or null if never.
+   *
+   * `reindexPending` treats any `vector_indexed_at` older than this as a
+   * bookkeeping stamp rather than a real index — see `markEmbeddingsEnabled`.
+   * Returns null on an unparseable value so a corrupt row degrades to the old
+   * null-only behaviour instead of matching every row on every scan.
+   */
+  async getEmbeddingsEnabledAt(): Promise<Date | null> {
+    const val = (await this.get(EMBEDDINGS_ENABLED_AT_KEY, '')).trim();
+    if (!val) return null;
+    const parsed = new Date(val);
+    if (Number.isNaN(parsed.getTime())) {
+      this.logger.warn(
+        `Ignoring unparseable ${EMBEDDINGS_ENABLED_AT_KEY}: "${val}"`,
+      );
+      return null;
+    }
+    return parsed;
   }
 
   async getMinNotificationScore(): Promise<number> {
