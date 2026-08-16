@@ -44,6 +44,9 @@ function makePrisma() {
     },
     penalty: {
       count: jest.fn().mockResolvedValue(0),
+      // The admin list resolves unpaid-penalty counts for a whole page in one
+      // grouped query rather than one count per profile.
+      groupBy: jest.fn().mockResolvedValue([]),
       findUnique: jest.fn().mockResolvedValue(null),
       findMany: jest.fn().mockResolvedValue([]),
       update: jest.fn().mockResolvedValue({}),
