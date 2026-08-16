@@ -554,6 +554,7 @@ export class WhatsAppService {
         phone: true,
         first_name: true,
         profile_type: true,
+        activated_at: true,
       },
     });
 
@@ -561,10 +562,19 @@ export class WhatsAppService {
       throw new BadRequestException('Profil introuvable');
     }
 
-    // Activate the account
+    // Preserved if already set: this is when the account opened, and a user who
+    // re-verifies later has not opened a second account.
+    const activatedAt = profile.activated_at;
+
+    // Activate the account. `activated_at` records when the account became
+    // usable — this path issues no session, so `last_login_at` would be a lie.
     await this.prisma.profile.update({
       where: { id: profileId },
-      data: { whatsapp_connected: true, status: AccountStatus.ACTIVE },
+      data: {
+        whatsapp_connected: true,
+        status: AccountStatus.ACTIVE,
+        activated_at: activatedAt ?? new Date(),
+      },
     });
 
     await this.redis.del(redisKey);
