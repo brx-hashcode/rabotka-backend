@@ -1,4 +1,5 @@
 import { MatchingService } from '../matching.service';
+import { INDEX_SCHEMA_VERSION } from '../../qdrant/qdrant.config';
 
 function makePrisma() {
   return {
@@ -6,6 +7,7 @@ function makePrisma() {
       findUnique: jest.fn().mockResolvedValue(null),
       findMany: jest.fn().mockResolvedValue([]),
       update: jest.fn().mockResolvedValue({}),
+      updateMany: jest.fn().mockResolvedValue({ count: 0 }),
     },
     application: {
       count: jest.fn().mockResolvedValue(0),
@@ -45,6 +47,10 @@ function makeSystemConfig(enabled = true) {
     // Null = "embeddings were never toggled", which keeps `reindexPending` on
     // its original null-stamp-only query. Tests that care override it.
     getEmbeddingsEnabledAt: jest.fn().mockResolvedValue(null),
+    // Current by default, so geo filters are live and the reindex scan stays on
+    // its narrow query. Tests that exercise the migration override it.
+    getIndexSchemaVersion: jest.fn().mockResolvedValue(INDEX_SCHEMA_VERSION),
+    setIndexSchemaVersion: jest.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -178,6 +184,174 @@ describe('MatchingService', () => {
       prisma.application.count.mockResolvedValue(0);
       qdrant.upsertHybrid.mockRejectedValueOnce(new Error('qdrant error'));
       await service.indexWorkerProfile('worker-1'); // should not throw
+    });
+  });
+
+  /**
+   * Geo has to reach the INDEX, not just the score. Proximity is already a
+   * scoring term, but a score cannot rescue a candidate retrieval never
+   * returned — and on the notification path a candidate that does survive
+   * costs a paid WhatsApp template.
+   */
+  describe('geo payload', () => {
+    const payloadOf = () => qdrant.upsertHybrid.mock.calls[0][3];
+
+    it('writes normalized countryCode and city for a worker', async () => {
+      prisma.profile.findUnique.mockResolvedValue({
+        id: 'worker-1',
+        first_name: 'Alice',
+        last_name: 'Dupont',
+        description: null,
+        address: 'Poto-Poto',
+        country_code: 'cg',
+        city: 'Brazzaville',
+        profile_type: 'WORKER',
+        reliability_score: 90,
+        categories: [],
+        applications: [],
+      });
+
+      await service.indexWorkerProfile('worker-1');
+
+      // Qdrant `match` is exact, so casing has to be settled at write time.
+      expect(payloadOf()).toMatchObject({
+        countryCode: 'CG',
+        city: 'brazzaville',
+      });
+    });
+
+    /**
+     * Empty string, never omitted: Qdrant cannot match "field is null", and a
+     * `must` clause on an absent key drops the point. Omitting would make every
+     * ungeocoded worker invisible the moment any geo filter is applied.
+     */
+    it('writes empty strings rather than omitting when geo is unknown', async () => {
+      prisma.profile.findUnique.mockResolvedValue({
+        id: 'worker-1',
+        first_name: 'Alice',
+        last_name: 'Dupont',
+        description: null,
+        address: null,
+        country_code: null,
+        city: null,
+        profile_type: 'WORKER',
+        reliability_score: 90,
+        categories: [],
+        applications: [],
+      });
+
+      await service.indexWorkerProfile('worker-1');
+
+      const payload = payloadOf();
+      expect(payload).toHaveProperty('countryCode', '');
+      expect(payload).toHaveProperty('city', '');
+    });
+
+    it('falls back to the employer’s place for an offer with none of its own', async () => {
+      prisma.jobOffer.findUnique.mockResolvedValue({
+        id: 'jo-1',
+        title: 'Plombier',
+        description: null,
+        address: null,
+        country_code: null,
+        city: null,
+        employer_id: 'emp-1',
+        employer: { country_code: 'CG', city: 'Brazzaville' },
+        category_id: 'cat-1',
+        amount: null,
+        payment_flow: 'DIRECT',
+        quantity: 1,
+        note: null,
+        status: 'ACTIVE',
+        created_at: new Date(),
+        category: { name: 'Plomberie', description: null },
+      });
+
+      await service.indexJobOffer('jo-1');
+
+      expect(payloadOf()).toMatchObject({
+        countryCode: 'CG',
+        city: 'brazzaville',
+      });
+    });
+  });
+
+  describe('country filter on the notification fan-out', () => {
+    const job = (over: Record<string, unknown> = {}) => ({
+      id: 'jo-1',
+      title: 'Plombier',
+      description: null,
+      address: null,
+      country_code: 'CG',
+      city: 'Brazzaville',
+      category_id: 'cat-1',
+      category: { name: 'Plomberie', description: null },
+      employer: { country_code: 'CG', city: 'Brazzaville' },
+      ...over,
+    });
+
+    const filterOf = () => qdrant.searchHybridWithFilter.mock.calls[0][2];
+
+    it('restricts retrieval to the offer’s country', async () => {
+      prisma.jobOffer.findUnique.mockResolvedValue(job());
+
+      await service.findMatchingWorkersForJob('jo-1');
+
+      // Ungeocoded workers ride along: unknown is not "elsewhere", and
+      // excluding them would shrink the fan-out where geocoding is patchy.
+      expect(filterOf().must).toContainEqual({
+        key: 'countryCode',
+        match: { any: ['CG', ''] },
+      });
+    });
+
+    /**
+     * The safety interlock. Old points have no `countryCode` key at all, and a
+     * `must` on a missing key excludes the point — so filtering before the
+     * rewrite would empty the fan-out silently instead of failing loudly.
+     */
+    it('does not filter while the index is behind the payload schema', async () => {
+      systemConfig.getIndexSchemaVersion.mockResolvedValue(
+        INDEX_SCHEMA_VERSION - 1,
+      );
+      prisma.jobOffer.findUnique.mockResolvedValue(job());
+
+      await service.findMatchingWorkersForJob('jo-1');
+
+      expect(filterOf().must).not.toContainEqual(
+        expect.objectContaining({ key: 'countryCode' }),
+      );
+    });
+
+    it('does not filter when the offer has no country', async () => {
+      prisma.jobOffer.findUnique.mockResolvedValue(
+        job({
+          country_code: null,
+          employer: { country_code: null, city: null },
+        }),
+      );
+
+      await service.findMatchingWorkersForJob('jo-1');
+
+      expect(filterOf().must).not.toContainEqual(
+        expect.objectContaining({ key: 'countryCode' }),
+      );
+    });
+
+    it('still applies the country filter when the offer has no category', async () => {
+      prisma.jobOffer.findUnique.mockResolvedValue(
+        job({ category_id: null, category: null }),
+      );
+
+      await service.findMatchingWorkersForJob('jo-1');
+
+      // Previously this branch used unfiltered searchHybrid, so an
+      // uncategorised offer could reach the whole world.
+      expect(qdrant.searchHybrid).not.toHaveBeenCalled();
+      expect(filterOf().must).toContainEqual({
+        key: 'countryCode',
+        match: { any: ['CG', ''] },
+      });
     });
   });
 
@@ -517,6 +691,57 @@ describe('MatchingService', () => {
     });
 
     /**
+     * A payload change makes every point stale however recently it was written:
+     * the vector is fine, the payload is missing fields filters now need. And a
+     * Qdrant `must` on a key a point lacks EXCLUDES it, so shipping a geo filter
+     * against a half-migrated index would silently return nothing.
+     */
+    describe('payload schema migration', () => {
+      beforeEach(() => {
+        prisma.jobOffer.findMany.mockResolvedValue([]);
+        prisma.profile.findMany.mockResolvedValue([]);
+      });
+
+      it('rewrites every point when the stored version is behind', async () => {
+        systemConfig.getIndexSchemaVersion.mockResolvedValue(
+          INDEX_SCHEMA_VERSION - 1,
+        );
+
+        await service.reindexPending();
+
+        // No staleness predicate at all — the whole corpus is in scope.
+        const where = prisma.profile.findMany.mock.calls[0][0].where;
+        expect(where.vector_indexed_at).toBeUndefined();
+        expect(where.OR).toBeUndefined();
+      });
+
+      it('rewrites everything when the version was never recorded', async () => {
+        systemConfig.getIndexSchemaVersion.mockResolvedValue(null);
+
+        await service.reindexPending();
+
+        expect(
+          prisma.profile.findMany.mock.calls[0][0].where.vector_indexed_at,
+        ).toBeUndefined();
+      });
+
+      it('records the new version only after the pass completes', async () => {
+        systemConfig.getIndexSchemaVersion.mockResolvedValue(null);
+
+        await service.reindexPending();
+
+        expect(systemConfig.setIndexSchemaVersion).toHaveBeenCalledWith(
+          INDEX_SCHEMA_VERSION,
+        );
+      });
+
+      it('does not re-record the version on an ordinary pass', async () => {
+        await service.reindexPending();
+        expect(systemConfig.setIndexSchemaVersion).not.toHaveBeenCalled();
+      });
+    });
+
+    /**
      * The regression this guards: while embeddings are off the three indexers
      * stamp `vector_indexed_at` and return WITHOUT writing a vector. A scan that
      * only looks for a null stamp therefore finds nothing to do once the flag is
@@ -579,6 +804,11 @@ describe('MatchingService', () => {
      * only reports what matches, never what should not be there.
      */
     describe('orphan sweep', () => {
+      // The pending scan and the sweep both query `profile.findMany`. Only the
+      // sweep looks rows up BY ID, so that is the reliable discriminator — the
+      // status filter is now common to both.
+      const isSweepLookup = (args: any) => args.where.id !== undefined;
+
       beforeEach(() => {
         prisma.jobOffer.findMany.mockResolvedValue([]);
       });
@@ -590,11 +820,7 @@ describe('MatchingService', () => {
           'w-gone',
         ]);
         prisma.profile.findMany.mockImplementation((args: any) =>
-          Promise.resolve(
-            // The pending scan (keyed by status) finds nothing; the sweep's
-            // liveness lookup returns only the surviving profile.
-            args.where.status === 'ACTIVE' ? [] : [{ id: 'w-live' }],
-          ),
+          Promise.resolve(isSweepLookup(args) ? [{ id: 'w-live' }] : []),
         );
 
         await service.reindexPending();
@@ -617,12 +843,53 @@ describe('MatchingService', () => {
         expect(sweepCall).toBeDefined();
       });
 
+      /**
+       * Found on real data: `reindexPending` only rewrites ACTIVE rows, so a
+       * SUSPENDED profile is never revisited. Its point survives every payload
+       * migration and stays retrievable — which also makes the schema version
+       * marker a lie, since the rewrite provably missed those points.
+       */
+      it('removes points for suspended profiles, not just deleted ones', async () => {
+        qdrant.listPointIds.mockResolvedValue(['w-active', 'w-suspended']);
+        prisma.profile.findMany.mockImplementation((args: any) =>
+          Promise.resolve(isSweepLookup(args) ? [{ id: 'w-active' }] : []),
+        );
+
+        await service.reindexPending();
+
+        const sweepWhere = prisma.profile.findMany.mock.calls.find((c: any[]) =>
+          isSweepLookup(c[0]),
+        )![0].where;
+        expect(sweepWhere.status).toBe('ACTIVE');
+        expect(qdrant.deletePoints).toHaveBeenCalledWith(
+          expect.stringContaining('workers'),
+          ['w-suspended'],
+        );
+      });
+
+      /**
+       * Without this a suspend→reactivate cycle makes someone permanently
+       * invisible: the point is gone but the stamp says it exists, so the scan
+       * skips them forever.
+       */
+      it('clears vector_indexed_at so a reactivated profile is re-indexed', async () => {
+        qdrant.listPointIds.mockResolvedValue(['w-active', 'w-suspended']);
+        prisma.profile.findMany.mockImplementation((args: any) =>
+          Promise.resolve(isSweepLookup(args) ? [{ id: 'w-active' }] : []),
+        );
+
+        await service.reindexPending();
+
+        expect(prisma.profile.updateMany).toHaveBeenCalledWith({
+          where: { id: { in: ['w-suspended'] } },
+          data: { vector_indexed_at: null },
+        });
+      });
+
       it('deletes nothing when every point is live', async () => {
         qdrant.listPointIds.mockResolvedValue(['w-1']);
         prisma.profile.findMany.mockImplementation((args: any) =>
-          Promise.resolve(
-            args.where.status === 'ACTIVE' ? [] : [{ id: 'w-1' }],
-          ),
+          Promise.resolve(isSweepLookup(args) ? [{ id: 'w-1' }] : []),
         );
 
         await service.reindexPending();
