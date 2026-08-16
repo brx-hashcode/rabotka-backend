@@ -64,6 +64,18 @@ const WORKER_SELECT = {
   },
 } as const;
 
+/**
+ * Which ranker produced the hits, for the diagnostic log only.
+ *
+ * `disabled` means no ranker ran at all because `matching.use_embeddings` is
+ * off — distinct from a ranker that ran and matched nothing, which is what the
+ * feed looked like from the outside before this was reported.
+ */
+type FeedEngine = 'v2' | 'legacy' | 'disabled';
+
+/** Which of the three tiers actually answered. */
+type FeedTier = 'ranked' | 'in_domain' | 'any_eligible';
+
 type RecommendedWorker = {
   id: string;
   firstName: string;
@@ -128,7 +140,19 @@ export class MobileRecommendationController {
     const contactedIds =
       await this.contactedProfiles.listContactedWorkerIds(profileId);
 
-    const served = await this.resolveWorkerFeed(profileId, topN, contactedIds);
+    const {
+      workers: served,
+      engine,
+      tier,
+    } = await this.resolveWorkerFeed(profileId, topN, contactedIds);
+
+    // The feed degrades silently by design — every tier returns a plausible list
+    // — so without this line a production feed serving `score: 0` from the SQL
+    // fallback is indistinguishable from a ranker that genuinely scored everyone
+    // 0. `engine=disabled tier=any_eligible` says "no ranker ran" at a glance.
+    this.logger.log(
+      `worker-feed profile=${profileId} engine=${engine} tier=${tier} count=${served.length} topScore=${served[0]?.score.toFixed(4) ?? 'n/a'}`,
+    );
 
     // Recorded once on whatever tier actually answered, rather than at each of
     // the three exits. Without this the employer feed is frozen: the ranker
@@ -152,29 +176,57 @@ export class MobileRecommendationController {
     profileId: string,
     topN: number,
     contactedIds: Set<string>,
-  ): Promise<RecommendedWorker[]> {
-    const hits = await this.rankWorkers(profileId, topN, contactedIds);
+  ): Promise<{
+    workers: RecommendedWorker[];
+    engine: FeedEngine;
+    tier: FeedTier;
+  }> {
+    const { hits, engine } = await this.rankWorkers(
+      profileId,
+      topN,
+      contactedIds,
+    );
     const recommended = await this.hydrate(
       hits.filter((h) => !contactedIds.has(h.id)).slice(0, topN),
     );
-    if (recommended.length > 0) return recommended;
+    if (recommended.length > 0) {
+      return { workers: recommended, engine, tier: 'ranked' };
+    }
 
     const categoryIds = await this.employerCategoryIds(profileId);
     if (categoryIds.length > 0) {
       const inDomain = await this.hydrate(
         await this.eligibleWorkerHits(categoryIds, contactedIds, topN),
       );
-      if (inDomain.length > 0) return inDomain;
+      if (inDomain.length > 0) {
+        return { workers: inDomain, engine, tier: 'in_domain' };
+      }
     }
 
-    return this.hydrate(await this.eligibleWorkerHits([], contactedIds, topN));
+    return {
+      workers: await this.hydrate(
+        await this.eligibleWorkerHits([], contactedIds, topN),
+      ),
+      engine,
+      tier: 'any_eligible',
+    };
   }
 
   private async rankWorkers(
     profileId: string,
     topN: number,
     contactedIds: Set<string>,
-  ): Promise<{ id: string; score: number }[]> {
+  ): Promise<{ hits: { id: string; score: number }[]; engine: FeedEngine }> {
+    // Reported separately from the tier because the two answer different
+    // questions: the tier says which list the employer got, `engine` says
+    // whether a ranker was ever consulted. `disabled` is the one that matters —
+    // the legacy ranker returns an empty array on its first line when
+    // `matching.use_embeddings` is off, which is indistinguishable from
+    // "nothing matched" everywhere downstream.
+    if (!(await this.systemConfig.isSimilarityEnabled())) {
+      return { hits: [], engine: 'disabled' };
+    }
+
     if ((await this.rollout.versionFor(profileId)) === 'v2') {
       try {
         const ranked = await this.engine.recommendWorkersForEmployer(
@@ -183,18 +235,23 @@ export class MobileRecommendationController {
           { exclude: contactedIds },
         );
         if (ranked.length > 0) {
-          return ranked.map((r) => ({ id: r.id, score: r.score }));
+          return {
+            hits: ranked.map((r) => ({ id: r.id, score: r.score })),
+            engine: 'v2',
+          };
         }
       } catch (err) {
         this.logger.warn(`v2 worker ranker failed for ${profileId}`, err);
       }
     }
-    return (
-      (await this.matching.findMatchingWorkersForEmployerProfile(
-        profileId,
-        topN + contactedIds.size,
-      )) ?? []
-    );
+    return {
+      hits:
+        (await this.matching.findMatchingWorkersForEmployerProfile(
+          profileId,
+          topN + contactedIds.size,
+        )) ?? [],
+      engine: 'legacy',
+    };
   }
 
   private async employerCategoryIds(employerId: string): Promise<string[]> {
@@ -419,6 +476,13 @@ export class MobileRecommendationController {
       ? { id: { in: ids } }
       : {
           id: { in: ids },
+          // Archiving a profile only writes `deleted_at` — it leaves `status`
+          // and `verification_status` untouched (`bulkSoftDeleteProfiles`). The
+          // SQL fallback tiers filter on it, but tier 1's ids come from Qdrant,
+          // where a point outlives the profile until the next sweep. Without
+          // this an archived worker keeps being recommended, and the employer
+          // pays a contact fee to reach someone who is gone.
+          deleted_at: null,
           status: 'ACTIVE' as const,
           verification_status: 'VERIFIED' as const,
           reliability_score: {

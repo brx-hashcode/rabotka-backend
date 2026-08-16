@@ -3,7 +3,7 @@ import { jobLocationLabel } from '../../common/utils/job-location.util';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { QdrantService } from '../qdrant/qdrant.service';
 import { SystemConfigService } from '../system-config/system-config.service';
-import { COLLECTIONS } from '../qdrant/qdrant.config';
+import { COLLECTIONS, INDEX_SCHEMA_VERSION } from '../qdrant/qdrant.config';
 
 const COLLECTION_WORKERS = COLLECTIONS.WORKERS;
 const COLLECTION_JOBS = COLLECTIONS.JOBS;
@@ -60,6 +60,56 @@ function mapSearchHitsToScoredIds(
     if (id !== undefined) out.push({ id, score: r.score });
   }
   return out;
+}
+
+/**
+ * The geo half of every payload, normalized so a filter can match on it.
+ *
+ * Country is upper-cased and city lower-cased because these are compared with
+ * Qdrant `match`, which is exact — `Brazzaville` and `brazzaville` are two
+ * different values to it, and the columns are free enough that both occur.
+ *
+ * A missing value is written as an empty string rather than omitted. Qdrant has
+ * no "field is null" match, and a `must` clause on an absent key excludes the
+ * point outright, so omitting it would make every ungeocoded profile invisible
+ * the moment any geo filter is applied. An empty string is a value that can be
+ * matched, counted, and deliberately allowed through.
+ */
+function geoPayload(place: {
+  country_code?: string | null;
+  city?: string | null;
+}): { countryCode: string; city: string } {
+  return {
+    countryCode: place.country_code?.trim().toUpperCase() ?? '',
+    city: place.city?.trim().toLowerCase() ?? '',
+  };
+}
+
+/**
+ * Which rows `reindexPending` should rewrite, in order of how wide the net is.
+ *
+ * Shared verbatim by the job, worker and employer queries — they differ only in
+ * the filters layered on top, and letting the staleness rule drift between them
+ * is how two of the three would quietly stop being reclaimed.
+ */
+function pendingWhere(
+  schemaChanged: boolean,
+  enabledAt: Date | null,
+): Record<string, unknown> {
+  // Everything: the payload shape itself moved, so a correct stamp says nothing
+  // about whether the point carries the fields filters now need.
+  if (schemaChanged) return {};
+  // Never indexed, or stamped by the disabled-path bookkeeping before
+  // embeddings came back on.
+  if (enabledAt) {
+    return {
+      OR: [
+        { vector_indexed_at: null },
+        { vector_indexed_at: { lt: enabledAt } },
+      ],
+    };
+  }
+  return { vector_indexed_at: null };
 }
 
 function computeReliabilityBucket(score: number | null | undefined): string {
@@ -511,6 +561,8 @@ export class MatchingService {
           last_name: true,
           description: true,
           address: true,
+          country_code: true,
+          city: true,
           profile_type: true,
           reliability_score: true,
           categories: {
@@ -598,6 +650,7 @@ export class MatchingService {
         reliabilityBucket: computeReliabilityBucket(profile.reliability_score),
         reliabilityScore: profile.reliability_score ?? 100,
         rejectedCategoryIds: negativeCategoryIds,
+        ...geoPayload(profile),
       });
       await this.prisma.profile.update({
         where: { id: profileId },
@@ -635,6 +688,8 @@ export class MatchingService {
         title: true,
         description: true,
         address: true,
+        country_code: true,
+        city: true,
         amount: true,
         payment_flow: true,
         quantity: true,
@@ -643,6 +698,9 @@ export class MatchingService {
         created_at: true,
         category_id: true,
         category: { select: { name: true, description: true } },
+        // Falls back to where the employer is when the offer names no place of
+        // its own — the same precedence `toCandidate` applies in the v2 ranker.
+        employer: { select: { country_code: true, city: true } },
       },
     });
 
@@ -684,6 +742,10 @@ export class MatchingService {
         categoryDescription: job.category?.description ?? '',
         status: job.status,
         createdAt: job.created_at.toISOString(),
+        ...geoPayload({
+          country_code: job.country_code ?? job.employer?.country_code,
+          city: job.city ?? job.employer?.city,
+        }),
       });
       await this.prisma.jobOffer.update({
         where: { id: jobOfferId },
@@ -749,6 +811,8 @@ export class MatchingService {
         last_name: true,
         description: true,
         address: true,
+        country_code: true,
+        city: true,
         profile_type: true,
         categories: {
           select: { category: { select: { name: true, description: true } } },
@@ -768,6 +832,7 @@ export class MatchingService {
         description: profile.description ?? '',
         address: profile.address ?? '',
         categoryIds: profile.categories.map((pc) => pc.category.name),
+        ...geoPayload(profile),
       });
       await this.prisma.profile.update({
         where: { id: profileId },
@@ -795,8 +860,11 @@ export class MatchingService {
         title: true,
         description: true,
         address: true,
+        country_code: true,
+        city: true,
         category_id: true,
         category: { select: { name: true, description: true } },
+        employer: { select: { country_code: true, city: true } },
       },
     });
     if (!job) return [];
@@ -804,6 +872,9 @@ export class MatchingService {
     try {
       await this.qdrant.ensureCollection(COLLECTION_WORKERS);
       const text = this.buildJobText(job);
+      const countryClause = await this.countryMustClause(
+        job.country_code ?? job.employer?.country_code,
+      );
 
       // Phase 2: filter workers to those who have this job's category
       let hits: ScoredHit[];
@@ -822,6 +893,7 @@ export class MatchingService {
                 },
               ],
             },
+            ...countryClause,
           ],
         };
         const results = await this.qdrant.searchHybridWithFilter(
@@ -829,6 +901,14 @@ export class MatchingService {
           text,
           filter,
           topN * 2, // fetch more before re-ranking
+        );
+        hits = mapSearchHitsToScoredIds(results, 'profileId');
+      } else if (countryClause.length > 0) {
+        const results = await this.qdrant.searchHybridWithFilter(
+          COLLECTION_WORKERS,
+          text,
+          { must: countryClause },
+          topN * 2,
         );
         hits = mapSearchHitsToScoredIds(results, 'profileId');
       } else {
@@ -976,7 +1056,15 @@ export class MatchingService {
     topN = 10,
   ): Promise<ScoredHit[]> {
     const enabled = await this.systemConfig.isSimilarityEnabled();
-    if (!enabled) return [];
+    if (!enabled) {
+      // Named rather than silent: an empty result here sends the employer feed
+      // to its SQL fallback, which serves a plausible list with every score at
+      // 0. Callers cannot tell that apart from "no worker matched".
+      this.logger.debug(
+        `findMatchingWorkersForEmployerProfile: matching.use_embeddings is off, returning no hits for ${employerProfileId}`,
+      );
+      return [];
+    }
 
     const profile = await this.prisma.profile.findUnique({
       where: { id: employerProfileId },
@@ -1019,20 +1107,88 @@ export class MatchingService {
     }
   }
 
+  /**
+   * A country constraint for retrieval, or nothing at all.
+   *
+   * Retrieval is the only place this can be enforced usefully. Proximity is
+   * already a scoring term, but a score cannot rescue a candidate the vector
+   * search never returned, and it cannot stop one being returned either — on
+   * the notification path an out-of-country worker that survives into the
+   * fan-out costs a paid WhatsApp template and an hour of that person's
+   * notification quota, which no amount of post-hoc ranking refunds.
+   *
+   * Returns an EMPTY clause list in two cases, and both matter:
+   *
+   * - The index has not been rewritten at the current payload schema. Points
+   *   written before `countryCode` existed do not carry the key, and a Qdrant
+   *   `must` clause on a key a point lacks excludes that point — so filtering a
+   *   half-migrated index would silently return nothing rather than erroring.
+   *   Better to keep today's country-blind behaviour until the rewrite lands.
+   * - The job has no country. Filtering on `''` would match only the other
+   *   ungeocoded workers, which is a narrower and more arbitrary pool than not
+   *   filtering at all.
+   *
+   * Workers with no country of their own are deliberately let through
+   * alongside the matching ones: a missing country is unknown, not elsewhere,
+   * and excluding them would silently shrink the fan-out in exactly the markets
+   * where geocoding is patchy.
+   */
+  private async countryMustClause(
+    countryCode: string | null | undefined,
+  ): Promise<Array<Record<string, unknown>>> {
+    const code = countryCode?.trim().toUpperCase();
+    if (!code) return [];
+
+    const storedVersion = await this.systemConfig.getIndexSchemaVersion();
+    if (storedVersion !== INDEX_SCHEMA_VERSION) {
+      this.logger.debug(
+        `Skipping country filter: index at schema ${storedVersion ?? 'unset'}, code expects ${INDEX_SCHEMA_VERSION}`,
+      );
+      return [];
+    }
+
+    return [{ key: 'countryCode', match: { any: [code, ''] } }];
+  }
+
   // ── Pending re-index ────────────────────────────────────────────────────────
 
   async reindexPending(): Promise<void> {
     const enabled = await this.systemConfig.isSimilarityEnabled();
     if (!enabled) return;
 
+    // A payload change makes every existing point stale regardless of when it
+    // was written: the vector is still right, but the payload is missing fields
+    // that filters now depend on. Rewriting all of them is the only way those
+    // fields ever appear on the back catalogue, so the version mismatch widens
+    // the scan to everything for exactly one pass.
+    const storedVersion = await this.systemConfig.getIndexSchemaVersion();
+    const schemaChanged = storedVersion !== INDEX_SCHEMA_VERSION;
+
+    const enabledAt = await this.systemConfig.getEmbeddingsEnabledAt();
+    // A null stamp is the obvious pending case. The second clause is the one
+    // that matters after a toggle: while embeddings are off the three indexers
+    // stamp `vector_indexed_at` and return WITHOUT writing a vector, so on the
+    // way back up every row looks indexed and this scan would find nothing to
+    // do — permanently. Anything stamped before embeddings were switched on is
+    // therefore bookkeeping, not an index, and has to be redone. A genuine
+    // re-index writes a stamp newer than `enabledAt`, so the set drains and the
+    // scan settles instead of churning.
+    const pending = pendingWhere(schemaChanged, enabledAt);
+
+    if (schemaChanged) {
+      this.logger.log(
+        `Index payload schema ${storedVersion ?? 'unset'} → ${INDEX_SCHEMA_VERSION}: rewriting every point once`,
+      );
+    }
+
     const [jobs, workers, employers] = await Promise.all([
       this.prisma.jobOffer.findMany({
-        where: { vector_indexed_at: null, status: { not: 'CANCELLED' } },
+        where: { ...pending, status: { not: 'CANCELLED' } },
         select: { id: true },
       }),
       this.prisma.profile.findMany({
         where: {
-          vector_indexed_at: null,
+          ...pending,
           profile_type: 'WORKER',
           status: 'ACTIVE',
         },
@@ -1040,7 +1196,7 @@ export class MatchingService {
       }),
       this.prisma.profile.findMany({
         where: {
-          vector_indexed_at: null,
+          ...pending,
           profile_type: 'EMPLOYER',
           status: 'ACTIVE',
         },
@@ -1049,7 +1205,8 @@ export class MatchingService {
     ]);
 
     this.logger.log(
-      `reindexPending: ${jobs.length} jobs, ${workers.length} workers, ${employers.length} employers`,
+      `reindexPending: ${jobs.length} jobs, ${workers.length} workers, ${employers.length} employers` +
+        (enabledAt ? ` (stale cutoff ${enabledAt.toISOString()})` : ''),
     );
 
     const BATCH_SIZE = 10;
@@ -1067,5 +1224,87 @@ export class MatchingService {
     await batchProcess(jobs, (id) => this.indexJobOffer(id));
     await batchProcess(workers, (id) => this.indexWorkerProfile(id));
     await batchProcess(employers, (id) => this.indexEmployerProfile(id));
+
+    await this.sweepOrphanedProfilePoints();
+
+    // Recorded only after the whole pass, and only when the pass was the wide
+    // one. Each `index*` call swallows its own errors, so a partial rewrite ends
+    // here looking successful — but the next scan re-picks whatever still has an
+    // old stamp, and marking the version early would cancel that safety net.
+    if (schemaChanged) {
+      await this.systemConfig.setIndexSchemaVersion(INDEX_SCHEMA_VERSION);
+      this.logger.log(
+        `Index payload schema now at ${INDEX_SCHEMA_VERSION}; geo filters are live`,
+      );
+    }
+  }
+
+  /**
+   * Enforces the invariant that the index holds exactly the profiles eligible to
+   * be retrieved: present, not archived, and ACTIVE.
+   *
+   * Indexing is additive — every path writes points, none removes them — so a
+   * profile that stops being eligible keeps its vector and keeps being
+   * retrieved. Nothing else can catch this: search only reports what matches, so
+   * a point that should not exist is invisible until someone compares the two
+   * sides. Reconciling here rather than hooking each delete path also covers
+   * rows changed by admin tooling or straight SQL, which a hook never would.
+   *
+   * Status matters as much as deletion, and is the easier one to miss.
+   * `reindexPending` only ever rewrites ACTIVE rows, so a SUSPENDED profile is
+   * never revisited: it keeps whatever payload it had when it was suspended,
+   * survives every payload migration, and stays retrievable by any search whose
+   * filters it happens to satisfy. Removing it is both the correctness fix and
+   * what keeps a schema migration honest — otherwise the version marker claims
+   * a rewrite that provably did not cover every point.
+   *
+   * Best-effort by design: this runs at the tail of a scan whose real job is
+   * indexing, and a Qdrant fault must not undo work that already succeeded.
+   */
+  private async sweepOrphanedProfilePoints(): Promise<void> {
+    for (const [collection, profileType] of [
+      [COLLECTION_WORKERS, 'WORKER'],
+      [COLLECTION_EMPLOYERS, 'EMPLOYER'],
+    ] as const) {
+      try {
+        const pointIds = await this.qdrant.listPointIds(collection);
+        if (pointIds.length === 0) continue;
+
+        const live = await this.prisma.profile.findMany({
+          where: {
+            id: { in: pointIds },
+            profile_type: profileType,
+            deleted_at: null,
+            // Mirrors the `status` filter every candidate query already applies,
+            // and the one `reindexPending` selects on. A point that cannot
+            // legally be recommended has no reason to occupy a retrieval slot.
+            status: 'ACTIVE',
+          },
+          select: { id: true },
+        });
+
+        const liveIds = new Set(live.map((p) => p.id));
+        const orphans = pointIds.filter((id) => !liveIds.has(id));
+        if (orphans.length === 0) continue;
+
+        await this.qdrant.deletePoints(collection, orphans);
+
+        // Clear the stamp on whatever rows survive, so a profile that becomes
+        // eligible again is re-indexed. Without this, suspending and then
+        // reactivating someone removes their point but leaves a stamp saying it
+        // exists — `reindexPending` skips them and they are invisible to search
+        // permanently. Rows that are gone or archived simply match nothing.
+        await this.prisma.profile.updateMany({
+          where: { id: { in: orphans } },
+          data: { vector_indexed_at: null },
+        });
+
+        this.logger.log(
+          `sweepOrphanedProfilePoints: removed ${orphans.length} ineligible point(s) from ${collection}`,
+        );
+      } catch (err) {
+        this.logger.warn(`Orphan sweep failed for ${collection}`, err);
+      }
+    }
   }
 }
