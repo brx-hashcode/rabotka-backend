@@ -18,6 +18,11 @@ const fakeReq = () =>
 
 const mockService = {
   findAll: jest.fn().mockResolvedValue([{ id: 'cat-1', name: 'Plomberie' }]),
+  // Admin-only variant: same domains plus usage counts. Kept off `findAll`
+  // because that one also serves the public endpoint.
+  findAllForAdmin: jest.fn().mockResolvedValue([
+    { id: 'cat-1', name: 'Plomberie', jobOffersCount: 3, workersCount: 7 },
+  ]),
   create: jest.fn().mockResolvedValue({ id: 'cat-1', name: 'Plomberie' }),
   update: jest.fn().mockResolvedValue({ id: 'cat-1', name: 'Updated' }),
   remove: jest.fn().mockResolvedValue(undefined),
@@ -38,6 +43,13 @@ describe('JobCategoryController (public)', () => {
   it('lists all categories', async () => {
     const result = await controller.findAll();
     expect(result).toHaveLength(1);
+  });
+
+  it('does not pay for admin usage counts', async () => {
+    await controller.findAll();
+    // The public endpoint is hit on every signup and offer form; aggregate
+    // subselects there would be cost with no caller.
+    expect(mockService.findAllForAdmin).not.toHaveBeenCalled();
   });
 });
 
@@ -63,9 +75,11 @@ describe('AdminJobCategoryController', () => {
     );
   });
 
-  it('lists all categories', async () => {
+  it('lists all categories with usage counts', async () => {
     const result = await controller.findAll();
     expect(result).toHaveLength(1);
+    expect(mockService.findAllForAdmin).toHaveBeenCalled();
+    expect(result[0]).toMatchObject({ jobOffersCount: 3, workersCount: 7 });
   });
 
   it('creates a category', async () => {

@@ -101,6 +101,14 @@ function looksLikeFlowInput(input: string): boolean {
   return /^\d+$/.test(t) || (t.length > 0 && t.length <= 20 && !/\s/.test(t));
 }
 
+/**
+ * How stale `last_login_at` must be before a bot message rewrites it.
+ *
+ * Fifteen minutes: long enough that working through a menu costs one UPDATE
+ * instead of a dozen, short enough that the column still reads as "today".
+ */
+const LOGIN_STAMP_THROTTLE_MS = 15 * 60 * 1000;
+
 @Injectable()
 export class BotOrchestratorService {
   private readonly logger = new Logger(BotOrchestratorService.name);
@@ -130,6 +138,35 @@ export class BotOrchestratorService {
     private readonly configService: ConfigService,
   ) {}
 
+  /**
+   * Move `last_login_at` for a profile that just used the bot.
+   *
+   * Throttled rather than written per message. Someone working through a menu
+   * sends a dozen messages in a minute, and an UPDATE on each would turn a read
+   * path into a write path for no gain — the column is read by admins at
+   * day granularity, so minute accuracy is already more than anyone uses.
+   *
+   * Fire-and-forget, like the auth-side stamp: the reply is what the user is
+   * waiting for, and a failed timestamp must never cost them a response.
+   */
+  private recordBotActivity(profileId: string, lastLoginAt: Date | null): void {
+    const now = Date.now();
+    if (lastLoginAt && now - lastLoginAt.getTime() < LOGIN_STAMP_THROTTLE_MS) {
+      return;
+    }
+    void this.prisma.profile
+      .update({
+        where: { id: profileId },
+        data: { last_login_at: new Date(now) },
+      })
+      .catch((err: unknown) =>
+        this.logger.warn(
+          `Failed to record bot activity for profile ${profileId}`,
+          err instanceof Error ? err.message : String(err),
+        ),
+      );
+  }
+
   async handle(
     profileId: string,
     _phone: string,
@@ -140,6 +177,15 @@ export class BotOrchestratorService {
     if (!profile) {
       return [welcomeUnregisteredMessage()];
     }
+
+    // Any bot message counts as a sign-in. A WhatsApp message arrives from a
+    // verified number, which is the same proof the OTP flow establishes — and
+    // for a WhatsApp-first product the bot IS the session, so a user who lives
+    // entirely in `/start` and `/support` was reading as "never signed in".
+    //
+    // Placed before every branch below, so it covers commands, menu numbers and
+    // free text alike rather than needing a call per handler.
+    this.recordBotActivity(profile.id, profile.last_login_at);
 
     const allowed: string[] = [
       AccountStatus.ACTIVE,
@@ -155,7 +201,9 @@ export class BotOrchestratorService {
     // Ahead of the suspended short-circuit, so it answers in every account
     // state. The suspension and KYC-rejection templates tell people to type
     // "/support", and those people are by definition not ACTIVE.
-    if (CMD_SUPPORT.includes(stripChatFormattingChars(text).trim().toLowerCase())) {
+    if (
+      CMD_SUPPORT.includes(stripChatFormattingChars(text).trim().toLowerCase())
+    ) {
       return [await this.supportCardMessage()];
     }
 
@@ -202,6 +250,8 @@ export class BotOrchestratorService {
           data: {
             whatsapp_connected: true,
             status: AccountStatus.ACTIVE,
+            // First activation wins — see `activated_at` on the model.
+            activated_at: profile.activated_at ?? new Date(),
           },
         });
         await this.walletService
@@ -276,7 +326,10 @@ export class BotOrchestratorService {
           }),
           this.prisma.profile.update({
             where: { id: profile.id },
-            data: { whatsapp_connected: true },
+            data: {
+              whatsapp_connected: true,
+              activated_at: profile.activated_at ?? now,
+            },
           }),
         ]);
 
@@ -774,6 +827,11 @@ export class BotOrchestratorService {
         whatsapp_connected: true,
         whatsapp_activation_bonus_granted: true,
         verification_status: true,
+        // Read, not written, on the hot path: `recordBotActivity` compares
+        // against it to decide whether the stamp is due, and the activation
+        // paths preserve `activated_at` rather than resetting it.
+        last_login_at: true,
+        activated_at: true,
       },
     });
   }

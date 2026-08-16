@@ -131,6 +131,9 @@ export type AdminProfileListItem = {
   countryCode: string | null;
   countryName: string | null;
   city: string | null;
+  /** Null unless geocoding succeeded; it is fire-and-forget, so gaps are normal. */
+  latitude: number | null;
+  longitude: number | null;
   description: string;
   status: string;
   profileType: string;
@@ -144,6 +147,30 @@ export type AdminProfileListItem = {
   avatarUrl: string | null;
   createdAt: Date;
   updatedAt: Date;
+  /**
+   * The trades this profile works in. Plural and unordered — a multi-skilled
+   * worker has several, and picking one to represent them is what made the
+   * recommendation cards look like specialists.
+   */
+  categoryIds: string[];
+  categoryNames: string[];
+  ratingAvg: number | null;
+  ratingCount: number;
+  billingStatus: string;
+  suspensionReason: string | null;
+  suspendedAt: Date | null;
+  lastLoginAt: Date | null;
+  /** First time the account became usable. Not a sign-in — activation mints no session. */
+  activatedAt: Date | null;
+  firstLogin: boolean;
+  readAndApprovedPolicies: boolean;
+  portfolioSlug: string | null;
+  /** When this profile last reached the vector index; null means never. */
+  vectorIndexedAt: Date | null;
+  jobOffersCount: number;
+  applicationsCount: number;
+  penaltiesCount: number;
+  unpaidPenaltiesCount: number;
 };
 
 export type AdminProfilesListResponse = {
@@ -172,25 +199,21 @@ export type AdminVerificationImageItem = {
   createdAt: Date;
 };
 
+/**
+ * Only what the detail view adds on top of the list item.
+ *
+ * The list now carries the profile's own columns, its trades and its activity
+ * counts — the export needed them, and a field declared in both places is a
+ * field that can silently disagree between them. What is left here is genuinely
+ * detail-only: the KYC evidence, and the single legacy `category_id` that the
+ * many-to-many `categories` replaced.
+ */
 export type AdminProfileDetailResponse = AdminProfileListItem & {
-  phone: string;
-  description: string;
+  /** Legacy single category, superseded by `categoryIds`/`categoryNames`. */
   categoryId: string | null;
   categoryName: string | null;
-  categoryIds: string[];
-  categoryNames: string[];
-  jobOffersCount: number;
-  applicationsCount: number;
-  penaltiesCount: number;
-  unpaidPenaltiesCount: number;
   kycDocuments: AdminKycDocumentItem[];
   verificationImages: AdminVerificationImageItem[];
-  vectorIndexedAt: Date | null;
-  /** Why the account is suspended right now; null unless it is. */
-  suspensionReason: string | null;
-  suspendedAt: Date | null;
-  /** Last successful sign-in. Null for a profile that has never logged in. */
-  lastLoginAt: Date | null;
 };
 
 type PrismaTransactionClient = Parameters<
@@ -584,6 +607,8 @@ export class ProfileService {
         country_code: true,
         country_name: true,
         city: true,
+        latitude: true,
+        longitude: true,
         description: true,
         status: true,
         profile_type: true,
@@ -596,10 +621,17 @@ export class ProfileService {
         suspension_reason: true,
         suspended_at: true,
         reliability_score: true,
+        rating_avg: true,
+        rating_count: true,
+        billing_status: true,
+        first_login: true,
+        read_and_approved_policies: true,
+        portfolio_slug: true,
         avatar_url: true,
         created_at: true,
         updated_at: true,
         last_login_at: true,
+        activated_at: true,
         vector_indexed_at: true,
         category: {
           select: { id: true, name: true },
@@ -679,6 +711,8 @@ export class ProfileService {
       countryCode: profile.country_code,
       countryName: profile.country_name,
       city: profile.city,
+      latitude: profile.latitude,
+      longitude: profile.longitude,
       description: profile.description,
       status: profile.status,
       profileType: profile.profile_type,
@@ -693,10 +727,17 @@ export class ProfileService {
       suspensionReason: profile.suspension_reason,
       suspendedAt: profile.suspended_at,
       reliabilityScore: profile.reliability_score,
+      ratingAvg: profile.rating_avg,
+      ratingCount: profile.rating_count,
+      billingStatus: profile.billing_status,
+      firstLogin: profile.first_login,
+      readAndApprovedPolicies: profile.read_and_approved_policies,
+      portfolioSlug: profile.portfolio_slug,
       avatarUrl: profile.avatar_url,
       createdAt: profile.created_at,
       updatedAt: profile.updated_at,
       lastLoginAt: profile.last_login_at,
+      activatedAt: profile.activated_at,
       vectorIndexedAt: profile.vector_indexed_at,
       categoryId: profile.category?.id ?? null,
       categoryName: profile.category?.name ?? null,
@@ -952,7 +993,10 @@ export class ProfileService {
             to: profile.email,
             subject: 'Votre compte a été suspendu',
             html: await this.layoutService.wrap(
-              accountSuspendedEmail(profile.first_name, trimmedReason ?? undefined),
+              accountSuspendedEmail(
+                profile.first_name,
+                trimmedReason ?? undefined,
+              ),
             ),
           });
         }
@@ -1228,6 +1272,8 @@ export class ProfileService {
           country_code: true,
           country_name: true,
           city: true,
+          latitude: true,
+          longitude: true,
           description: true,
           status: true,
           profile_type: true,
@@ -1238,13 +1284,51 @@ export class ProfileService {
           rejection_reason: true,
           kyc_verification_note: true,
           reliability_score: true,
+          rating_avg: true,
+          rating_count: true,
+          billing_status: true,
+          suspension_reason: true,
+          suspended_at: true,
+          last_login_at: true,
+          activated_at: true,
+          first_login: true,
+          read_and_approved_policies: true,
+          portfolio_slug: true,
+          vector_indexed_at: true,
           avatar_url: true,
           created_at: true,
           updated_at: true,
+          categories: {
+            select: { category: { select: { id: true, name: true } } },
+          },
+          // Subselects on the same query rather than a count per row — the
+          // export pulls whole pages at a time, and a per-profile round trip
+          // would turn one export into thousands of queries.
+          _count: {
+            select: {
+              job_offers: true,
+              applications: true,
+              penalties: true,
+            },
+          },
         },
       }),
       this.prisma.profile.count({ where }),
     ]);
+
+    // `_count` cannot express "penalties that are unpaid", so the one filtered
+    // count is a single grouped query over the page rather than one per profile.
+    const unpaidByProfile = new Map<string, number>();
+    if (profiles.length > 0) {
+      const grouped = await this.prisma.penalty.groupBy({
+        by: ['profile_id'],
+        where: { profile_id: { in: profiles.map((p) => p.id) }, paid_at: null },
+        _count: { _all: true },
+      });
+      for (const row of grouped) {
+        unpaidByProfile.set(row.profile_id, row._count._all);
+      }
+    }
 
     const data: AdminProfileListItem[] = profiles.map((p) => ({
       id: p.id,
@@ -1269,6 +1353,25 @@ export class ProfileService {
       avatarUrl: p.avatar_url,
       createdAt: p.created_at,
       updatedAt: p.updated_at,
+      latitude: p.latitude,
+      longitude: p.longitude,
+      categoryIds: p.categories.map((pc) => pc.category.id),
+      categoryNames: p.categories.map((pc) => pc.category.name),
+      ratingAvg: p.rating_avg,
+      ratingCount: p.rating_count,
+      billingStatus: p.billing_status,
+      suspensionReason: p.suspension_reason,
+      suspendedAt: p.suspended_at,
+      lastLoginAt: p.last_login_at,
+      activatedAt: p.activated_at,
+      firstLogin: p.first_login,
+      readAndApprovedPolicies: p.read_and_approved_policies,
+      portfolioSlug: p.portfolio_slug,
+      vectorIndexedAt: p.vector_indexed_at,
+      jobOffersCount: p._count.job_offers,
+      applicationsCount: p._count.applications,
+      penaltiesCount: p._count.penalties,
+      unpaidPenaltiesCount: unpaidByProfile.get(p.id) ?? 0,
     }));
 
     return { data, total, page, limit };
