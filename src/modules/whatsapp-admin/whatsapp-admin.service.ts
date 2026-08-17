@@ -21,6 +21,7 @@ import {
 } from '../../common/services/queue/queue.module';
 import {
   CloudAnalyticsClient,
+  unavailableAnalytics,
   type CloudAnalyticsResult,
 } from '../whatsapp/providers/cloud/cloud-analytics.client';
 import {
@@ -520,43 +521,68 @@ export class WhatsappAdminService {
     const start = from < earliest ? earliest : from;
 
     const config = this.whatsappConfig;
-    return this.cache.wrap(
-      this.cache.dashboardKey('whatsapp-billing', {
-        start: start.toISOString(),
-        end: to.toISOString(),
-      }),
-      // 15 minutes. Meta's own figures settle slowly and this is a paid,
-      // rate-limited upstream — refetching it on every page render would be
-      // both slower and ruder than reading a slightly stale number.
-      15 * 60,
-      async () => {
-        const analytics = new CloudAnalyticsClient(config);
-        const billing = new CloudBillingClient(config);
 
-        // In parallel, and the billing half is allowed to fail on its own: the
-        // consumption chart is useful with or without it, and a business-node
-        // outage should not blank the page.
-        const [result, billingResult] = await Promise.all([
-          analytics.fetch({ start, end: to }),
-          billing.fetch().catch((err: unknown) => {
-            this.logger.warn(
-              `WhatsApp billing lookup failed, showing consumption only: ${
-                err instanceof Error ? err.message : String(err)
-              }`,
-            );
-            return {
-              businessId: null,
-              permissionMissing: null,
-              creditLines: [],
-              invoices: [],
-              cards: [],
-            } satisfies CloudBillingResult;
-          }),
-        ]);
+    // The try/catch is OUTSIDE `wrap` on purpose. `wrap` only writes to the
+    // cache after the loader resolves, so letting the loader throw means a
+    // failure is never cached — catching inside would pin a "Graph is down"
+    // result for the next 15 minutes, long after Graph came back.
+    try {
+      return await this.cache.wrap(
+        this.cache.dashboardKey('whatsapp-billing', {
+          start: start.toISOString(),
+          end: to.toISOString(),
+        }),
+        // 15 minutes. Meta's own figures settle slowly and this is a paid,
+        // rate-limited upstream — refetching it on every page render would be
+        // both slower and ruder than reading a slightly stale number.
+        15 * 60,
+        async () => {
+          const analytics = new CloudAnalyticsClient(config);
+          const billing = new CloudBillingClient(config);
 
-        return { ...result, provider: 'cloud', billing: billingResult };
-      },
-    );
+          // In parallel, and the billing half is allowed to fail on its own:
+          // the consumption chart is useful with or without it, and a
+          // business-node outage should not blank the page.
+          const [result, billingResult] = await Promise.all([
+            analytics.fetch({ start, end: to }),
+            billing.fetch().catch((err: unknown) => {
+              this.logger.warn(
+                `WhatsApp billing lookup failed, showing consumption only: ${
+                  err instanceof Error ? err.message : String(err)
+                }`,
+              );
+              return {
+                businessId: null,
+                permissionMissing: null,
+                creditLines: [],
+                invoices: [],
+                cards: [],
+              } satisfies CloudBillingResult;
+            }),
+          ]);
+
+          return { ...result, provider: 'cloud', billing: billingResult };
+        },
+      );
+    } catch (err) {
+      // Graph was unreachable or refused us. Reported as DATA, not as a 500:
+      // the tab also holds delivery statistics that come from our own database
+      // and are perfectly fine, and taking the whole page down over a network
+      // blip at Meta is out of all proportion to the problem.
+      const detail = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`WhatsApp consumption unavailable: ${detail}`);
+      return {
+        ...unavailableAnalytics(detail),
+        provider: 'cloud',
+        billing: {
+          businessId: null,
+          permissionMissing: null,
+          creditLines: [],
+          invoices: [],
+          cards: [],
+        },
+      };
+    }
   }
 
   // ------------------------------------------------------------------- queue

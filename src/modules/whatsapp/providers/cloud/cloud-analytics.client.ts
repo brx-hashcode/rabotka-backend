@@ -65,6 +65,27 @@ export interface CloudAnalyticsResult {
    * reads as an explained limitation rather than a broken integration.
    */
   costUnavailableReason: string | null;
+  /**
+   * Why the whole lookup failed, when it did — a transient network blip, a
+   * rejected token. Null on success.
+   *
+   * Carried as data rather than raised as a 500: Graph being briefly
+   * unreachable is a normal condition, and blanking a page that also holds
+   * perfectly good local delivery statistics is a wildly disproportionate
+   * response to it.
+   */
+  unavailable: string | null;
+}
+
+/** The shape returned when Graph could not be reached at all. */
+export function unavailableAnalytics(reason: string): CloudAnalyticsResult {
+  return {
+    currency: null,
+    pricing: [],
+    messaging: [],
+    costUnavailableReason: null,
+    unavailable: reason,
+  };
 }
 
 export class CloudAnalyticsClient {
@@ -119,7 +140,13 @@ export class CloudAnalyticsClient {
           'Partner rather than directly — ask the partner for charges.'
         : null;
 
-    return { currency, pricing, messaging, costUnavailableReason };
+    return {
+      currency,
+      pricing,
+      messaging,
+      costUnavailableReason,
+      unavailable: null,
+    };
   }
 
   private async get(fields: string): Promise<Record<string, unknown>> {
