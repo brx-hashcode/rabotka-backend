@@ -11,12 +11,18 @@ import { WhatsappError, type InboundEvent } from '../../contracts';
 
 type StatusEvent = Extract<InboundEvent, { kind: 'status' }>;
 
-function makePrisma(row: Record<string, unknown> | null = null) {
+function makePrisma(
+  row: Record<string, unknown> | null = null,
+  profile: { id: string } | null = null,
+) {
   return {
     whatsappMessage: {
       create: jest.fn().mockResolvedValue({ id: 'row-1' }),
       update: jest.fn().mockResolvedValue({}),
       findUnique: jest.fn().mockResolvedValue(row),
+    },
+    profile: {
+      findFirst: jest.fn().mockResolvedValue(profile),
     },
   };
 }
@@ -79,6 +85,75 @@ describe('WhatsappMessageLogService', () => {
           }),
         }),
       );
+    });
+
+    it('falls back to the profile owning the number when none is named', async () => {
+      // Most senders — every bot reply — know the number they are answering
+      // and not the row behind it. Without this the back office showed "no
+      // profile" against perfectly ordinary registered users.
+      const prisma = makePrisma(null, { id: 'profile-9' });
+      const service = makeService(prisma);
+
+      await service.begin('+242069917686', {
+        kind: 'template',
+        templateKey: 'welcomePlatform',
+        bodyPreview: '[TPL:welcomePlatform]',
+      });
+
+      const data = prisma.whatsappMessage.create.mock.calls[0][0].data as {
+        profile_id: string | null;
+      };
+      expect(data.profile_id).toBe('profile-9');
+    });
+
+    it('matches both shapes the phone column is stored in', async () => {
+      const prisma = makePrisma(null, { id: 'profile-9' });
+      const service = makeService(prisma);
+
+      await service.begin('whatsapp:+242 06 99 17 686', {
+        kind: 'text',
+        bodyPreview: 'bonjour',
+      });
+
+      expect(prisma.profile.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { phone: { in: ['+242069917686', '242069917686'] } },
+        }),
+      );
+    });
+
+    it('prefers an explicit profileId over the phone lookup', async () => {
+      const prisma = makePrisma(null, { id: 'profile-9' });
+      const service = makeService(prisma);
+
+      await service.begin('+242069917686', {
+        kind: 'text',
+        bodyPreview: 'bonjour',
+        profileId: 'profile-1',
+      });
+
+      const data = prisma.whatsappMessage.create.mock.calls[0][0].data as {
+        profile_id: string | null;
+      };
+      expect(data.profile_id).toBe('profile-1');
+      expect(prisma.profile.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('still opens the row when the phone lookup fails', async () => {
+      const prisma = makePrisma();
+      prisma.profile.findFirst.mockRejectedValue(new Error('db down'));
+      const service = makeService(prisma);
+
+      const id = await service.begin('+242069917686', {
+        kind: 'text',
+        bodyPreview: 'bonjour',
+      });
+
+      expect(id).toBe('row-1');
+      const data = prisma.whatsappMessage.create.mock.calls[0][0].data as {
+        profile_id: string | null;
+      };
+      expect(data.profile_id).toBeNull();
     });
 
     it('resolves the template category from the registry', async () => {
