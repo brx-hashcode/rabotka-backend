@@ -682,6 +682,26 @@ describe('ProfileService', () => {
       expect(result?.message).toContain('succès');
     });
 
+    it('marks the number as connected without activating the account', async () => {
+      // The number used at signup is the one every platform message goes to,
+      // so the separate linking step only re-asked for what we had. The
+      // account still waits on KYC — `status` must stay PENDING_ACTIVATION.
+      const txPrisma = makePrisma();
+      txPrisma.profile.create.mockResolvedValue({ id: 'new-p-1' });
+      prisma.$transaction.mockImplementation((fn: any) => fn(txPrisma));
+
+      await service.createProfile(dto);
+
+      expect(txPrisma.profile.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            whatsapp_connected: true,
+            status: 'PENDING_ACTIVATION',
+          }),
+        }),
+      );
+    });
+
     it('does not re-upload files (urls already uploaded)', async () => {
       const txPrisma = makePrisma();
       txPrisma.profile.create.mockResolvedValue({ id: 'new-p-1' });
