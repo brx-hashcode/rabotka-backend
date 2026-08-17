@@ -599,6 +599,51 @@ describe('BotOrchestratorService', () => {
       );
     });
 
+    /**
+     * The shape signup now produces: the number is linked from the first
+     * write, but the account is not activated. The KYC wall keys on `status`,
+     * so it must still hold for a profile whose flag is already true —
+     * otherwise a profile under review walks into the full menu.
+     */
+    describe('whatsapp_connected=true but PENDING_ACTIVATION (post-signup shape)', () => {
+      const signedUpProfile = { ...pendingProfile, whatsapp_connected: true };
+
+      it('still answers with the KYC-pending template while under review', async () => {
+        deps.prisma.profile.findUnique.mockResolvedValue({
+          ...signedUpProfile,
+          verification_status: 'PENDING',
+        });
+        const result = await service.handle(PROFILE_ID, PHONE, 'menu');
+        expect(result[0]).toContain('[TPL:kycPendingMenu]');
+        expect(activationWrites()).toHaveLength(0);
+      });
+
+      it('never falls into the inline code prompt', async () => {
+        deps.prisma.profile.findUnique.mockResolvedValue(signedUpProfile);
+        await service.handle(PROFILE_ID, PHONE, 'hello');
+        expect(deps.prisma.verificationToken.create).not.toHaveBeenCalled();
+      });
+
+      it('activates on Menu once KYC is verified', async () => {
+        deps.prisma.profile.findUnique.mockResolvedValue(signedUpProfile);
+        (deps.walletService2 as any).grantWelcomeCredit = jest
+          .fn()
+          .mockResolvedValue(500);
+        deps.router.route.mockReturnValue({
+          type: 'command',
+          commandId: 'menu',
+        });
+
+        await service.handle(PROFILE_ID, PHONE, 'menu');
+
+        expect(deps.prisma.profile.update).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ status: 'ACTIVE' }),
+          }),
+        );
+      });
+    });
+
     it('issues an inline 4-digit code when ACTIVE profile has whatsapp_connected=false', async () => {
       deps.prisma.profile.findUnique.mockResolvedValue({
         ...mockActiveProfile,
