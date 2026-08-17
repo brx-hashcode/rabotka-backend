@@ -10,6 +10,7 @@ export type {
   InboundContent,
   InboundEvent,
   NormalizedError,
+  NormalizedPricing,
 } from './inbound.types';
 export type {
   CarouselCard,

@@ -92,4 +92,25 @@ export type InboundEvent =
       internalMessageId?: string;
       /** Recipient, when the provider includes it on the status callback. */
       to?: E164;
+      /**
+       * What the message costs, when the provider reports it.
+       *
+       * Meta attaches this to the `delivered` callback rather than `sent`, and
+       * Twilio never sends it at all — so a consumer must merge it in when it
+       * arrives instead of expecting it on the first status.
+       */
+      pricing?: NormalizedPricing;
     };
+
+/**
+ * The billing facts a status callback carries.
+ *
+ * Deliberately narrow: the category is what shows up on the Meta invoice and
+ * what the admin analytics group by. `billable: false` is a real and useful
+ * value (free service conversations), so it must not be conflated with absent.
+ */
+export interface NormalizedPricing {
+  billable?: boolean;
+  /** UTILITY | MARKETING | AUTHENTICATION | SERVICE, upper-cased. */
+  category?: string;
+}

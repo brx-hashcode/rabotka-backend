@@ -21,6 +21,7 @@ import {
   inboundKey,
 } from '../../../common/services/idempotency/idempotency.service';
 import { webhookDuplicateDroppedCounter } from '../telemetry/metrics';
+import { WhatsappMessageLogService } from '../logging/whatsapp-message-log.service';
 
 const RATE_LIMIT_MAX = 30; // max messages per window
 const RATE_LIMIT_WINDOW = 60; // seconds
@@ -47,6 +48,7 @@ export class InboundIngestService {
     @Inject(WHATSAPP_PROVIDER) private readonly provider: WhatsappProvider,
     private readonly feedback: WhatsAppFeedbackService,
     private readonly idempotency: IdempotencyService,
+    private readonly messageLog: WhatsappMessageLogService,
   ) {}
 
   /**
@@ -72,9 +74,19 @@ export class InboundIngestService {
     }
   }
 
+  /**
+   * Record a delivery receipt.
+   *
+   * Every status is persisted, not just the interesting-looking ones. This used
+   * to drop `sent` and `read` outright and reduce `failed` to a log line, which
+   * is why the admin back office could not answer "did it arrive?" — the answer
+   * existed, in a webhook, for the microsecond before it was discarded.
+   */
   private async handleStatus(
     event: Extract<InboundEvent, { kind: 'status' }>,
   ): Promise<void> {
+    await this.messageLog.applyStatus(event);
+
     if (event.status === 'delivered') {
       await this.sendTiming.recordDelivered(event.providerMessageId);
       return;

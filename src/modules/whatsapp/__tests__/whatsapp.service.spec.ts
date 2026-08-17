@@ -20,6 +20,7 @@ import { REDIS_CONNECTION } from '../../../common/services/redis/redis.constants
 import { ConfigService } from '@nestjs/config';
 import { WalletService } from '../../wallet/wallet.service';
 import { IdempotencyService } from '../../../common/services/idempotency/idempotency.service';
+import { WhatsappMessageLogService } from '../logging/whatsapp-message-log.service';
 
 // Prevent the real Twilio SDK from being loaded in this test suite
 jest.mock('twilio', () => {
@@ -102,6 +103,18 @@ describe('WhatsAppService', () => {
             release: jest.fn().mockResolvedValue(undefined),
           },
         },
+        {
+          // The delivery log is best-effort bookkeeping around the send, not
+          // part of what these tests assert. `begin` returns an id so the
+          // `internalMessageId` plumbing is still exercised.
+          provide: WhatsappMessageLogService,
+          useValue: {
+            begin: jest.fn().mockResolvedValue('log-row-id'),
+            markSent: jest.fn().mockResolvedValue(undefined),
+            markFailed: jest.fn().mockResolvedValue(undefined),
+            applyStatus: jest.fn().mockResolvedValue(undefined),
+          },
+        },
       ],
     }).compile();
 
@@ -120,7 +133,11 @@ describe('WhatsAppService', () => {
     it('sends text and returns true when SID is returned', async () => {
       const result = await service.sendTextMessage(PHONE, 'Hello');
       expect(result).toBe(true);
-      expect(provider.sendText).toHaveBeenCalledWith(PHONE, 'Hello');
+      // The third argument is the delivery-log row id, forwarded so Meta can
+      // echo it back on the status webhook as `biz_opaque_callback_data`.
+      expect(provider.sendText).toHaveBeenCalledWith(PHONE, 'Hello', {
+        internalMessageId: 'log-row-id',
+      });
     });
 
     it('saves outbound message when profileId is provided', async () => {
@@ -156,11 +173,15 @@ describe('WhatsAppService', () => {
         'caption',
       );
       expect(result).toBe(true);
-      expect(provider.sendMedia).toHaveBeenCalledWith(PHONE, {
-        kind: 'image',
-        url: 'https://x.com/img.jpg',
-        caption: 'caption',
-      });
+      expect(provider.sendMedia).toHaveBeenCalledWith(
+        PHONE,
+        {
+          kind: 'image',
+          url: 'https://x.com/img.jpg',
+          caption: 'caption',
+        },
+        { internalMessageId: 'log-row-id' },
+      );
     });
 
     it('returns false when the provider is not configured', async () => {
@@ -524,6 +545,10 @@ describe('WhatsAppService', () => {
     // The provider-agnostic safety net: whatever the upstream cause, this is
     // the last thing between a duplicate and the reader.
     function guard() {
+      // The cast is load-bearing: the container is typed with the real service,
+      // but the provider registered above is a mock, and these tests reach for
+      // `.mockResolvedValue`. (An eslint --fix once removed this as an
+      // "unnecessary assertion" and broke the whole block.)
       return module.get(IdempotencyService) as unknown as {
         claim: jest.Mock;
         release: jest.Mock;
