@@ -68,7 +68,14 @@ describe('JobOfferService (extended)', () => {
       application: {
         findMany: jest.fn().mockResolvedValue([]),
         updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+        groupBy: jest.fn().mockResolvedValue([]),
       },
+      // The admin list and detail both aggregate what became of an offer.
+      // Empty by default: a spec that cares about the numbers overrides them.
+      assignment: { findMany: jest.fn().mockResolvedValue([]) },
+      contactUnlockAttempt: { findMany: jest.fn().mockResolvedValue([]) },
+      penalty: { findMany: jest.fn().mockResolvedValue([]) },
+      rating: { findMany: jest.fn().mockResolvedValue([]) },
     };
 
     const mockMailService = {
@@ -239,6 +246,110 @@ describe('JobOfferService (extended)', () => {
       expect(result.data).toHaveLength(1);
       expect(result.total).toBe(1);
       expect(result.data[0].employerName).toBe('Paul Kanda');
+    });
+
+    /**
+     * Two offers, so a mis-keyed aggregate shows up as the wrong offer's
+     * numbers rather than as a coincidental match. Every relation is loaded in
+     * one page-wide query and then bucketed by id — this is the test for that
+     * bucketing.
+     */
+    it('attributes aggregates to the offer they belong to', async () => {
+      const other = { ...adminOffer, id: 'offer-2' };
+      (prisma.jobOffer.findMany as jest.Mock).mockResolvedValue([
+        adminOffer,
+        other,
+      ]);
+      (prisma.jobOffer.count as jest.Mock).mockResolvedValue(2);
+      (prisma.application.groupBy as jest.Mock).mockResolvedValue([
+        { job_offer_id: OFFER_ID, status: 'PENDING', _count: { _all: 2 } },
+        { job_offer_id: OFFER_ID, status: 'VIEWED', _count: { _all: 1 } },
+        { job_offer_id: OFFER_ID, status: 'ACCEPTED', _count: { _all: 1 } },
+        { job_offer_id: 'offer-2', status: 'REJECTED', _count: { _all: 4 } },
+      ]);
+      (prisma.assignment.findMany as jest.Mock).mockResolvedValue([
+        {
+          job_offer_id: OFFER_ID,
+          status: 'COMPLETED',
+          worker: { first_name: 'Alice', last_name: 'Dupont' },
+        },
+        {
+          job_offer_id: OFFER_ID,
+          status: 'NO_SHOW',
+          worker: { first_name: 'Jean', last_name: 'Mabiala' },
+        },
+      ]);
+      (prisma.contactUnlockAttempt.findMany as jest.Mock).mockResolvedValue([
+        {
+          job_offer_id: OFFER_ID,
+          employer_paid: true,
+          worker_paid: true,
+          unlocked_at: new Date(),
+          employer_amount: 500,
+          worker_amount: 300,
+        },
+        {
+          job_offer_id: OFFER_ID,
+          employer_paid: true,
+          worker_paid: false,
+          unlocked_at: null,
+          employer_amount: 500,
+          worker_amount: 300,
+        },
+      ]);
+      (prisma.penalty.findMany as jest.Mock).mockResolvedValue([
+        {
+          amount: 1000,
+          paid_at: null,
+          application: { job_offer_id: OFFER_ID },
+        },
+        {
+          amount: 2000,
+          paid_at: new Date(),
+          application: { job_offer_id: OFFER_ID },
+        },
+      ]);
+      (prisma.rating.findMany as jest.Mock).mockResolvedValue([
+        { score: 4, assignment: { job_offer_id: OFFER_ID } },
+        { score: 5, assignment: { job_offer_id: OFFER_ID } },
+      ]);
+
+      const { data } = await service.getJobOffersForAdmin({
+        page: 1,
+        limit: 10,
+      });
+      const [first, second] = data;
+
+      // PENDING, VIEWED and WAITING_PAYMENT collapse into one pending bucket.
+      expect(first!.applicationsPending).toBe(3);
+      expect(first!.applicationsAccepted).toBe(1);
+      expect(first!.hiredCount).toBe(2);
+      expect(first!.completedCount).toBe(1);
+      expect(first!.noShowCount).toBe(1);
+      expect(first!.workerNames).toEqual(['Alice Dupont', 'Jean Mabiala']);
+      expect(first!.unlockAttempts).toBe(2);
+      expect(first!.unlocksCompleted).toBe(1);
+      // Both sides of the first attempt, plus the employer's half of the second.
+      expect(first!.unlockRevenue).toBe(1300);
+      expect(first!.penaltiesCount).toBe(2);
+      expect(first!.unpaidPenaltiesCount).toBe(1);
+      expect(first!.penaltiesAmount).toBe(3000);
+      expect(first!.ratingAvg).toBe(4.5);
+
+      // The second offer only has rejections — nothing may leak across.
+      expect(second!.applicationsRejected).toBe(4);
+      expect(second!.applicationsPending).toBe(0);
+      expect(second!.hiredCount).toBe(0);
+      expect(second!.workerNames).toEqual([]);
+      expect(second!.ratingAvg).toBeNull();
+    });
+
+    it('skips the aggregate queries when the page is empty', async () => {
+      (prisma.jobOffer.findMany as jest.Mock).mockResolvedValue([]);
+      (prisma.jobOffer.count as jest.Mock).mockResolvedValue(0);
+      await service.getJobOffersForAdmin({ page: 1, limit: 10 });
+      expect(prisma.application.groupBy).not.toHaveBeenCalled();
+      expect(prisma.assignment.findMany).not.toHaveBeenCalled();
     });
 
     it('applies search query filter', async () => {
