@@ -24,6 +24,10 @@ import {
   type CloudAnalyticsResult,
 } from '../whatsapp/providers/cloud/cloud-analytics.client';
 import {
+  CloudBillingClient,
+  type CloudBillingResult,
+} from '../whatsapp/providers/cloud/cloud-billing.client';
+import {
   parseWhatsappConfig,
   type WhatsappConfig,
 } from '../whatsapp/whatsapp.config';
@@ -481,16 +485,23 @@ export class WhatsappAdminService {
   // ----------------------------------------------------------------- billing
 
   /**
-   * Meta's own consumption figures.
+   * Meta's consumption figures, plus the business's billing state.
    *
-   * Note for whoever reads the response: this is what we CONSUMED, not what we
-   * OWE. Meta exposes no balance or amount-due endpoint for a directly-billed
-   * WABA — see the comment on `CloudAnalyticsClient`.
+   * Two genuinely different things, returned together because the page shows
+   * them side by side and confusing them is the whole hazard: `analytics` is
+   * what we USED in the window, `billing` is what has been charged and what is
+   * outstanding. A usage total is not an amount owed.
+   *
+   * The billing half needs `business_management` on the access token. Without
+   * it the call still succeeds and reports `permissionMissing`, so the panel
+   * can name the scope to grant rather than showing a broken card.
    */
   async billingForAdmin(params: {
     created_from?: string;
     created_to?: string;
-  }): Promise<CloudAnalyticsResult & { provider: string }> {
+  }): Promise<
+    CloudAnalyticsResult & { provider: string; billing: CloudBillingResult }
+  > {
     if (this.whatsappConfig.provider !== 'cloud') {
       // Twilio bills through Twilio; its usage lives in the Twilio console and
       // has nothing to do with the Graph API. Saying so beats an empty chart.
@@ -519,9 +530,31 @@ export class WhatsappAdminService {
       // both slower and ruder than reading a slightly stale number.
       15 * 60,
       async () => {
-        const client = new CloudAnalyticsClient(config);
-        const result = await client.fetch({ start, end: to });
-        return { ...result, provider: 'cloud' };
+        const analytics = new CloudAnalyticsClient(config);
+        const billing = new CloudBillingClient(config);
+
+        // In parallel, and the billing half is allowed to fail on its own: the
+        // consumption chart is useful with or without it, and a business-node
+        // outage should not blank the page.
+        const [result, billingResult] = await Promise.all([
+          analytics.fetch({ start, end: to }),
+          billing.fetch().catch((err: unknown) => {
+            this.logger.warn(
+              `WhatsApp billing lookup failed, showing consumption only: ${
+                err instanceof Error ? err.message : String(err)
+              }`,
+            );
+            return {
+              businessId: null,
+              permissionMissing: null,
+              creditLines: [],
+              invoices: [],
+              cards: [],
+            } satisfies CloudBillingResult;
+          }),
+        ]);
+
+        return { ...result, provider: 'cloud', billing: billingResult };
       },
     );
   }

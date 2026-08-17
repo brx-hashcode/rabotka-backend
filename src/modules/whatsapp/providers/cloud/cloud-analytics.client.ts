@@ -13,15 +13,14 @@ import type { CloudProviderConfig } from '../../whatsapp.config';
  * ## What Meta will and will not tell us
  *
  * `pricing_analytics` returns the APPROXIMATE COST of what we consumed, per
- * day, broken down by category and country. That is the number the admin
- * actually wants when asking "what are we spending?".
+ * day, broken down by category and country. That is CONSUMPTION — it says
+ * nothing about what has already been paid, so it must never be presented as
+ * an amount owed. A 30-day usage total and an outstanding balance differ by
+ * everything Meta has already charged, which is most of it.
  *
- * There is NO endpoint that returns an outstanding balance or an amount due.
- * The WABA node exposes `currency` and `primary_funding_id` but no balance
- * field, and `/{business-id}/extendedcredits` only answers for accounts on a
- * credit line (the Solution Partner arrangement), not a card on Business
- * Manager. Amount owed stays a Business Manager UI fact — do not add an
- * endpoint here promising otherwise.
+ * Balance, payments and invoices live on the BUSINESS node and are handled by
+ * `CloudBillingClient`, not here. They need the `business_management` scope,
+ * which a WhatsApp-only system user does not carry by default.
  *
  * Cost is also suppressed entirely for WABAs billed through a Solution
  * Partner. When that is the case the response carries volume and omits cost,
