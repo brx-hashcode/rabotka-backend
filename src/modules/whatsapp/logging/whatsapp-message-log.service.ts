@@ -11,6 +11,7 @@ import {
   type TemplateKey,
 } from '../contracts';
 import { WHATSAPP_TEMPLATES } from '../../../common/constants/whatsapp-templates';
+import { toDigits, toE164 } from '../contracts/address';
 
 /**
  * The durable record of every outbound WhatsApp send.
@@ -98,7 +99,7 @@ export class WhatsappMessageLogService {
           provider: 'pending',
           direction: MessageDirection.OUTBOUND,
           to_phone: phone,
-          profile_id: ctx.profileId ?? null,
+          profile_id: ctx.profileId ?? (await this.profileIdForPhone(phone)),
           kind: ctx.kind,
           template_key: ctx.templateKey ?? null,
           template_category: ctx.templateKey
@@ -119,6 +120,35 @@ export class WhatsappMessageLogService {
       this.logger.warn(
         `Could not open a WhatsApp log row for ${phone}: ${reason(err)}`,
       );
+      return null;
+    }
+  }
+
+  /**
+   * The profile that owns this number, for the sends that do not name one.
+   *
+   * Most callers have no `profileId` to hand — a bot reply knows the number it
+   * is answering, not the row behind it — and without this every such row read
+   * "no profile" in the back office even when the recipient was a perfectly
+   * ordinary registered user. The phone is the only key an outbound WhatsApp
+   * send always carries, so it is the one to join on.
+   *
+   * Both stored shapes are tried because `profiles.phone` is not canonical:
+   * `toE164`'s own doc notes the column disagrees with the webhook and with
+   * whatever an admin typed. Matching one shape alone would silently miss.
+   *
+   * Never throws and never blocks the send: an unresolved profile is a slightly
+   * poorer log row, not a reason to lose the message.
+   */
+  private async profileIdForPhone(phone: string): Promise<string | null> {
+    try {
+      const e164 = toE164(phone);
+      const profile = await this.prisma.profile.findFirst({
+        where: { phone: { in: [e164, toDigits(phone)] } },
+        select: { id: true },
+      });
+      return profile?.id ?? null;
+    } catch {
       return null;
     }
   }
