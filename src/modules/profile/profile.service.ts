@@ -1580,6 +1580,16 @@ export class ProfileService {
         verification_status: 'PENDING',
         reliability_score: 100,
         read_and_approved_policies: true,
+        // Signup already proves the number: onboarding is WhatsApp-first and
+        // every message the platform sends this profile goes to `phone`. The
+        // separate "link your number" step only re-asked for what we had, and
+        // left new profiles unreachable by anything that targets connected
+        // numbers (ad dispatch, reminders) until they happened to reply.
+        //
+        // This does NOT activate the account — `status` stays
+        // PENDING_ACTIVATION until KYC passes. The bot's pre-activation gate
+        // keys on `status`, not on this flag, so the KYC wall still holds.
+        whatsapp_connected: true,
       },
       select: {
         id: true,
