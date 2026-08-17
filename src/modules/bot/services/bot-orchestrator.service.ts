@@ -218,7 +218,16 @@ export class BotOrchestratorService {
 
     const normalizedInput = text.trim().toLowerCase();
 
-    if (!profile.whatsapp_connected) {
+    // Two separate walls, and this block holds both: an ACTIVE profile whose
+    // number is not linked yet, and any profile that has not been activated.
+    // The condition used to be `!whatsapp_connected` alone, which worked only
+    // because signup left that flag false — now that it is set at signup, the
+    // KYC wall below has to key on `status` or a PENDING_ACTIVATION profile
+    // would walk straight into the full menu.
+    if (
+      profile.status !== AccountStatus.ACTIVE ||
+      !profile.whatsapp_connected
+    ) {
       // ACTIVE but WhatsApp not yet verified — issue a 4-digit code inline,
       // and when the user echoes it back, activate immediately.
       // (A genuinely SUSPENDED account is already short-circuited above.)
