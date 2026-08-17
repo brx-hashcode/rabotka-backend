@@ -18,6 +18,7 @@ import type { CloudProviderConfig } from '../../whatsapp.config';
 import { QueueService } from '../../../../common/services/queue/queue.service';
 import { SendTimingService } from '../../telemetry/send-timing.service';
 import { WhatsAppFeedbackService } from '../../feedback/whatsapp-feedback.service';
+import { WhatsappMessageLogService } from '../../logging/whatsapp-message-log.service';
 import {
   IdempotencyService,
   REDIS_CONNECTION_FOR_TESTS,
@@ -119,7 +120,8 @@ describe('duplicate webhook delivery', () => {
           // BullMQ refuses a second add under an id it already holds. Modelled
           // here because it is the first of the three layers.
           if (options?.jobId) {
-            if (seenJobIds.has(options.jobId)) return Promise.resolve(undefined);
+            if (seenJobIds.has(options.jobId))
+              return Promise.resolve(undefined);
             seenJobIds.add(options.jobId);
           }
           inboundJobs.push(data as WhatsAppInboundJobData);
@@ -187,11 +189,18 @@ describe('duplicate webhook delivery', () => {
           useValue: { handleSubmission: jest.fn() },
         },
         {
+          // Faked like the other edges: this test is about de-duplication, and
+          // the delivery log is a write it makes on the way through.
+          provide: WhatsappMessageLogService,
+          useValue: { applyStatus: jest.fn().mockResolvedValue(undefined) },
+        },
+        {
           provide: ConversationService,
           useValue: {
-            handleIncomingMessage: jest
-              .fn()
-              .mockResolvedValue({ replies: ['Bienvenue !'], profileId: 'p-1' }),
+            handleIncomingMessage: jest.fn().mockResolvedValue({
+              replies: ['Bienvenue !'],
+              profileId: 'p-1',
+            }),
           },
         },
       ],
@@ -241,7 +250,10 @@ describe('duplicate webhook delivery', () => {
               field: 'messages',
               value: {
                 messages: [
-                  { ...PAYLOAD.entry[0].changes[0].value.messages[0], id: wamid },
+                  {
+                    ...PAYLOAD.entry[0].changes[0].value.messages[0],
+                    id: wamid,
+                  },
                 ],
               },
             },
@@ -335,6 +347,9 @@ describe('duplicate webhook delivery', () => {
     // so BullMQ's retry dropped the message and the reader got nothing.
     seenJobIds.clear();
 
+    // The cast is load-bearing: the container is typed with the real service
+    // but holds the mock registered above. (An eslint --fix once removed this
+    // as an "unnecessary assertion" and broke this test.)
     const bot = app.get(ConversationService) as unknown as {
       handleIncomingMessage: jest.Mock;
     };
@@ -346,9 +361,9 @@ describe('duplicate webhook delivery', () => {
     const [job] = inboundJobs;
 
     // Attempt 1 throws, so BullMQ would retry.
-    await expect(processor.process({ data: job, attemptsMade: 0 })).rejects.toThrow(
-      'db down',
-    );
+    await expect(
+      processor.process({ data: job, attemptsMade: 0 }),
+    ).rejects.toThrow('db down');
     expect(outboundJobs).toHaveLength(0);
 
     // Attempt 2 must deliver, not treat the failure as a duplicate.

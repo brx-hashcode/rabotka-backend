@@ -35,6 +35,10 @@ import {
   outboundKey,
 } from '../../common/services/idempotency/idempotency.service';
 import { outboundDuplicateBlockedCounter } from './telemetry/metrics';
+import {
+  WhatsappMessageLogService,
+  type SendLogContext,
+} from './logging/whatsapp-message-log.service';
 
 const VERIFICATION_TOKEN_KEY_PREFIX = `${REDIS_KEY_PREFIX}wa:verify:`;
 
@@ -87,6 +91,7 @@ export class WhatsAppService {
     private readonly config: ConfigService,
     private readonly walletService: WalletService,
     private readonly idempotency: IdempotencyService,
+    private readonly messageLog: WhatsappMessageLogService,
   ) {}
 
   isConfigured(): boolean {
@@ -122,11 +127,26 @@ export class WhatsAppService {
   private async attempt(
     what: string,
     phone: string,
-    send: () => Promise<SendResult>,
+    ctx: SendLogContext,
+    send: (internalMessageId: string) => Promise<SendResult>,
   ): Promise<string | null> {
+    // Opened BEFORE the send, so its id can ride along as
+    // `biz_opaque_callback_data` and come back on the status webhook. That is
+    // the whole correlation mechanism — writing the row afterwards would leave
+    // a window in which a delivery receipt arrives with nothing to attach to.
+    const logId = await this.messageLog.begin(phone, ctx);
+
     try {
-      return (await send()).providerMessageId;
+      const result = await send(logId ?? '');
+      await this.messageLog.markSent(
+        logId,
+        result.providerMessageId,
+        result.provider,
+      );
+      return result.providerMessageId;
     } catch (err) {
+      await this.messageLog.markFailed(logId, this.provider.name, err);
+
       // An unconfigured provider is the expected state in dev and is already
       // reported by `isConfigured()`; logging it at error level on every send
       // would bury the failures that matter.
@@ -141,6 +161,17 @@ export class WhatsAppService {
       );
       return null;
     }
+  }
+
+  /**
+   * `SendOptions` for a send, or nothing when the log row could not be opened.
+   *
+   * An empty id must not be forwarded: Meta echoes
+   * `biz_opaque_callback_data` back verbatim, and an empty string would
+   * correlate to nothing while still occupying the field.
+   */
+  private sendOpts(internalMessageId: string): { internalMessageId?: string } {
+    return internalMessageId ? { internalMessageId } : {};
   }
 
   /**
@@ -223,8 +254,16 @@ export class WhatsAppService {
     profileId?: string,
     sentById?: string,
   ): Promise<boolean> {
-    const sid = await this.attempt('text', phone, () =>
-      this.provider.sendText(phone, text),
+    const sid = await this.attempt(
+      'text',
+      phone,
+      {
+        kind: 'text',
+        bodyPreview: text,
+        profileId,
+        sentById,
+      },
+      (logId) => this.provider.sendText(phone, text, this.sendOpts(logId)),
     );
     const sent = sid != null;
 
@@ -258,8 +297,26 @@ export class WhatsAppService {
     // dead-lettered jobs for the crime of correctly preventing a duplicate.
     if (!(await this.claimOutbound(phone, template, params))) return true;
 
-    const sid = await this.attempt(`template ${template}`, phone, () =>
-      this.provider.sendTemplate(phone, template, params),
+    const sid = await this.attempt(
+      `template ${template}`,
+      phone,
+      {
+        kind: 'template',
+        templateKey: template,
+        // `body` is the human-readable rendering, and most callers pass one.
+        // When they do not, the key plus the variables column still identifies
+        // the message — matching what `saveMessage` writes for templates.
+        bodyPreview: body ?? `[TPL:${template}]`,
+        profileId,
+        variables: params as Record<string, unknown> | undefined,
+      },
+      (logId) =>
+        this.provider.sendTemplate(
+          phone,
+          template,
+          params,
+          this.sendOpts(logId),
+        ),
     );
     const sent = sid != null;
 
@@ -298,8 +355,23 @@ export class WhatsAppService {
     // See sendTemplateMessage: blocked means already delivered, not failed.
     if (!(await this.claimOutbound(phone, template, variables))) return true;
 
-    const sid = await this.attempt(`template ${template}`, phone, () =>
-      this.provider.sendTemplateWithVariables(phone, template, variables),
+    const sid = await this.attempt(
+      `template ${template}`,
+      phone,
+      {
+        kind: 'template',
+        templateKey: template,
+        bodyPreview: body ?? `[TPL:${template}]`,
+        profileId,
+        variables,
+      },
+      (logId) =>
+        this.provider.sendTemplateWithVariables(
+          phone,
+          template,
+          variables,
+          this.sendOpts(logId),
+        ),
     );
     const sent = sid != null;
 
@@ -335,14 +407,27 @@ export class WhatsAppService {
       profileId?: string;
     },
   ): Promise<boolean> {
-    const sid = await this.attempt('flow', phone, () =>
-      this.provider.sendFlow(phone, {
-        body: params.body,
-        flowId: params.flowId,
-        flowCta: params.cta,
-        flowToken: params.flowToken,
-        screen: 'FEEDBACK',
-      }),
+    const sid = await this.attempt(
+      'flow',
+      phone,
+      {
+        kind: 'flow',
+        bodyPreview: params.body,
+        profileId: params.profileId,
+        variables: { flowId: params.flowId, flowToken: params.flowToken },
+      },
+      (logId) =>
+        this.provider.sendFlow(
+          phone,
+          {
+            body: params.body,
+            flowId: params.flowId,
+            flowCta: params.cta,
+            flowToken: params.flowToken,
+            screen: 'FEEDBACK',
+          },
+          this.sendOpts(logId),
+        ),
     );
     const sent = sid != null;
 
@@ -367,12 +452,27 @@ export class WhatsAppService {
     mediaUrl: string,
     caption?: string,
   ): Promise<boolean> {
-    const sid = await this.attempt('media', phone, () =>
-      this.provider.sendMedia(phone, {
-        kind: 'image',
-        url: mediaUrl,
-        caption,
-      }),
+    const sid = await this.attempt(
+      'media',
+      phone,
+      {
+        kind: 'media',
+        // Mirrors the `[IMG:url] caption` form the outbound processor writes to
+        // the chat transcript, so the two tables read the same way.
+        bodyPreview: caption
+          ? `[IMG:${mediaUrl}] ${caption}`
+          : `[IMG:${mediaUrl}]`,
+      },
+      (logId) =>
+        this.provider.sendMedia(
+          phone,
+          {
+            kind: 'image',
+            url: mediaUrl,
+            caption,
+          },
+          this.sendOpts(logId),
+        ),
     );
     return sid != null;
   }

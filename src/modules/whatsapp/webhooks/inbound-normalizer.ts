@@ -4,6 +4,7 @@ import type {
   InboundContent,
   InboundEvent,
   NormalizedError,
+  NormalizedPricing,
 } from '../contracts';
 import { cloudErrorCode } from '../providers/cloud/cloud.errors';
 import type {
@@ -157,6 +158,23 @@ function toDeliveryStatus(status: string): DeliveryStatus | null {
   return null;
 }
 
+/**
+ * Meta lowercases the pricing category (`"utility"`) while the template
+ * registry and the Graph analytics API both use upper case (`UTILITY`). Upper
+ * here so a report can group the two together without a second normalization.
+ */
+function toNormalizedPricing(
+  status: CloudStatus,
+): NormalizedPricing | undefined {
+  const pricing = status.pricing;
+  if (!pricing) return undefined;
+  if (pricing.billable === undefined && !pricing.category) return undefined;
+  return {
+    ...(pricing.billable !== undefined ? { billable: pricing.billable } : {}),
+    ...(pricing.category ? { category: pricing.category.toUpperCase() } : {}),
+  };
+}
+
 function toNormalizedError(status: CloudStatus): NormalizedError | undefined {
   const first = status.errors?.[0];
   if (!first) return undefined;
@@ -200,25 +218,35 @@ export function normalizeCloudWebhook(body: CloudWebhookBody): InboundEvent[] {
       }
 
       for (const status of value.statuses ?? []) {
-        const normalized = toDeliveryStatus(status.status);
-        // An unrecognized status is skipped rather than guessed at: inventing a
-        // delivery state would corrupt the telemetry it feeds.
-        if (!normalized) continue;
-        events.push({
-          kind: 'status',
-          providerMessageId: status.id,
-          status: normalized,
-          timestamp: toDate(status.timestamp),
-          provider: 'cloud',
-          error: toNormalizedError(status),
-          internalMessageId: status.biz_opaque_callback_data,
-          to: status.recipient_id ? toE164(status.recipient_id) : undefined,
-        });
+        const event = toCloudStatusEvent(status);
+        if (event) events.push(event);
       }
     }
   }
 
   return events;
+}
+
+/**
+ * One `statuses[]` entry as a normalized event, or `null` to skip it.
+ *
+ * An unrecognized status is skipped rather than guessed at: inventing a
+ * delivery state would corrupt the delivery log it feeds.
+ */
+function toCloudStatusEvent(status: CloudStatus): InboundEvent | null {
+  const normalized = toDeliveryStatus(status.status);
+  if (!normalized) return null;
+  return {
+    kind: 'status',
+    providerMessageId: status.id,
+    status: normalized,
+    timestamp: toDate(status.timestamp),
+    provider: 'cloud',
+    error: toNormalizedError(status),
+    internalMessageId: status.biz_opaque_callback_data,
+    to: status.recipient_id ? toE164(status.recipient_id) : undefined,
+    pricing: toNormalizedPricing(status),
+  };
 }
 
 /** Twilio's delivery-status callback values, which are not inbound messages. */
