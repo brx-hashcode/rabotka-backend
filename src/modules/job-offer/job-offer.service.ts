@@ -44,6 +44,7 @@ import { TERMINAL_JOB_OFFER_STATUSES } from './utils/job-offer-status.util';
 import {
   AccountStatus,
   ApplicationStatus,
+  AssignmentStatus,
   EmploymentType,
   JobOfferStatus,
   PaymentFlow,
@@ -161,7 +162,93 @@ export type AdminJobOfferListItem = {
   createdAt: string;
   updatedAt: string;
   vectorIndexedAt: string | null;
+
+  /**
+   * Everything the offer touches, aggregated per offer.
+   *
+   * An offer read on its own says what was asked for, never what came of it —
+   * whether anyone applied, whether anyone was hired, whether the contact was
+   * ever paid for. These carry that, and they are what the analytics export
+   * turns into a funnel.
+   */
+  applicationsPending: number;
+  applicationsAccepted: number;
+  applicationsRejected: number;
+  applicationsCancelled: number;
+  /** Assignments: the applications that became actual engagements. */
+  hiredCount: number;
+  completedCount: number;
+  cancelledAssignmentsCount: number;
+  noShowCount: number;
+  /** Names of the workers assigned to this offer, in assignment order. */
+  workerNames: string[];
+  /** Contact unlocks — the paid connection between employer and worker. */
+  unlockAttempts: number;
+  unlocksCompleted: number;
+  unlockEmployerPaid: number;
+  unlockWorkerPaid: number;
+  unlockRevenue: number;
+  /** The employer's own unlock fee for the offer, paid up front. */
+  employerUnlockPaid: boolean;
+  /** Penalties raised on this offer's applications. */
+  penaltiesCount: number;
+  unpaidPenaltiesCount: number;
+  penaltiesAmount: number;
+  /** Ratings left on this offer's assignments, both directions. */
+  ratingAvg: number | null;
+  ratingCount: number;
 };
+
+/**
+ * The per-offer aggregates, split out from the list item so the list and the
+ * detail endpoint fill them the same way instead of each growing its own
+ * counting logic.
+ */
+type JobOfferAggregates = Pick<
+  AdminJobOfferListItem,
+  | 'applicationsPending'
+  | 'applicationsAccepted'
+  | 'applicationsRejected'
+  | 'applicationsCancelled'
+  | 'hiredCount'
+  | 'completedCount'
+  | 'cancelledAssignmentsCount'
+  | 'noShowCount'
+  | 'workerNames'
+  | 'unlockAttempts'
+  | 'unlocksCompleted'
+  | 'unlockEmployerPaid'
+  | 'unlockWorkerPaid'
+  | 'unlockRevenue'
+  | 'penaltiesCount'
+  | 'unpaidPenaltiesCount'
+  | 'penaltiesAmount'
+  | 'ratingAvg'
+  | 'ratingCount'
+>;
+
+/** An offer nothing has happened to yet — zeros, not absent fields. */
+const emptyJobOfferAggregates = (): JobOfferAggregates => ({
+  applicationsPending: 0,
+  applicationsAccepted: 0,
+  applicationsRejected: 0,
+  applicationsCancelled: 0,
+  hiredCount: 0,
+  completedCount: 0,
+  cancelledAssignmentsCount: 0,
+  noShowCount: 0,
+  workerNames: [],
+  unlockAttempts: 0,
+  unlocksCompleted: 0,
+  unlockEmployerPaid: 0,
+  unlockWorkerPaid: 0,
+  unlockRevenue: 0,
+  penaltiesCount: 0,
+  unpaidPenaltiesCount: 0,
+  penaltiesAmount: 0,
+  ratingAvg: null,
+  ratingCount: 0,
+});
 
 export type AdminJobOfferApplicationItem = {
   id: string;
@@ -1186,6 +1273,12 @@ export class JobOfferService {
       this.prisma.jobOffer.count({ where }),
     ]);
 
+    // Aggregated over the whole page in a handful of queries, never one query
+    // per offer — same shape as the profile list's unpaid-penalty count. The
+    // list DTO caps `limit` at 100 and the export pages at 100, so this reads
+    // at most 100 offers' worth of relations at a time.
+    const aggregates = await this.loadJobOfferAggregates(offers.map((o) => o.id));
+
     const data: AdminJobOfferListItem[] = offers.map((o) => ({
       id: o.id,
       reference: o.reference,
@@ -1218,9 +1311,157 @@ export class JobOfferService {
       createdAt: o.created_at.toISOString(),
       updatedAt: o.updated_at.toISOString(),
       vectorIndexedAt: o.vector_indexed_at?.toISOString() ?? null,
+      employerUnlockPaid: o.employer_unlock_paid,
+      ...(aggregates.get(o.id) ?? emptyJobOfferAggregates()),
     }));
 
     return { data, total, page, limit };
+  }
+
+  /**
+   * What became of each offer: applications by outcome, who was hired, whether
+   * the contact was paid for, what it cost anyone in penalties, how it was
+   * rated.
+   *
+   * Five queries for a whole page. Doing it per offer would turn one export —
+   * which walks every page — into thousands of round trips.
+   */
+  private async loadJobOfferAggregates(
+    offerIds: string[],
+  ): Promise<Map<string, JobOfferAggregates>> {
+    const byOffer = new Map<string, JobOfferAggregates>();
+    if (offerIds.length === 0) return byOffer;
+
+    const at = (id: string): JobOfferAggregates => {
+      const existing = byOffer.get(id);
+      if (existing) return existing;
+      const fresh = emptyJobOfferAggregates();
+      byOffer.set(id, fresh);
+      return fresh;
+    };
+
+    const [applications, assignments, unlocks, penalties, ratings] =
+      await Promise.all([
+        this.prisma.application.groupBy({
+          by: ['job_offer_id', 'status'],
+          where: { job_offer_id: { in: offerIds } },
+          _count: { _all: true },
+        }),
+        this.prisma.assignment.findMany({
+          where: { job_offer_id: { in: offerIds } },
+          orderBy: { created_at: 'asc' },
+          select: {
+            job_offer_id: true,
+            status: true,
+            worker: { select: { first_name: true, last_name: true } },
+          },
+        }),
+        this.prisma.contactUnlockAttempt.findMany({
+          where: { job_offer_id: { in: offerIds } },
+          select: {
+            job_offer_id: true,
+            employer_paid: true,
+            worker_paid: true,
+            unlocked_at: true,
+            employer_amount: true,
+            worker_amount: true,
+          },
+        }),
+        // A deleted penalty is not a penalty: it was withdrawn, and counting it
+        // would overstate what this offer actually cost its workers.
+        this.prisma.penalty.findMany({
+          where: {
+            deleted_at: null,
+            application: { job_offer_id: { in: offerIds } },
+          },
+          select: {
+            amount: true,
+            paid_at: true,
+            application: { select: { job_offer_id: true } },
+          },
+        }),
+        this.prisma.rating.findMany({
+          where: { assignment: { job_offer_id: { in: offerIds } } },
+          select: { score: true, assignment: { select: { job_offer_id: true } } },
+        }),
+      ]);
+
+    for (const row of applications) {
+      const agg = at(row.job_offer_id);
+      const count = row._count._all;
+      // PENDING, VIEWED and WAITING_PAYMENT are all "still open" from the
+      // employer's side — the export reads them as one pending bucket.
+      if (
+        row.status === ApplicationStatus.PENDING ||
+        row.status === ApplicationStatus.VIEWED ||
+        row.status === ApplicationStatus.WAITING_PAYMENT
+      ) {
+        agg.applicationsPending += count;
+      } else if (row.status === ApplicationStatus.ACCEPTED) {
+        agg.applicationsAccepted += count;
+      } else if (row.status === ApplicationStatus.REJECTED) {
+        agg.applicationsRejected += count;
+      } else if (row.status === ApplicationStatus.CANCELLED) {
+        agg.applicationsCancelled += count;
+      }
+    }
+
+    for (const a of assignments) {
+      const agg = at(a.job_offer_id);
+      agg.hiredCount += 1;
+      if (a.status === AssignmentStatus.COMPLETED) agg.completedCount += 1;
+      if (a.status === AssignmentStatus.NO_SHOW) agg.noShowCount += 1;
+      if (
+        a.status === AssignmentStatus.CANCELLED_BY_WORKER ||
+        a.status === AssignmentStatus.CANCELLED_BY_EMPLOYER
+      ) {
+        agg.cancelledAssignmentsCount += 1;
+      }
+      const name = `${a.worker.first_name ?? ''} ${a.worker.last_name ?? ''}`.trim();
+      if (name) agg.workerNames.push(name);
+    }
+
+    for (const u of unlocks) {
+      const agg = at(u.job_offer_id);
+      agg.unlockAttempts += 1;
+      if (u.unlocked_at) agg.unlocksCompleted += 1;
+      // Revenue is what was actually paid, side by side: an attempt where only
+      // one party paid still earned that half.
+      if (u.employer_paid) {
+        agg.unlockEmployerPaid += 1;
+        agg.unlockRevenue += Number(u.employer_amount);
+      }
+      if (u.worker_paid) {
+        agg.unlockWorkerPaid += 1;
+        agg.unlockRevenue += Number(u.worker_amount);
+      }
+    }
+
+    for (const p of penalties) {
+      const offerId = p.application?.job_offer_id;
+      if (!offerId) continue;
+      const agg = at(offerId);
+      agg.penaltiesCount += 1;
+      agg.penaltiesAmount += Number(p.amount);
+      if (!p.paid_at) agg.unpaidPenaltiesCount += 1;
+    }
+
+    const ratingSums = new Map<string, number>();
+    for (const r of ratings) {
+      const offerId = r.assignment.job_offer_id;
+      const agg = at(offerId);
+      agg.ratingCount += 1;
+      ratingSums.set(offerId, (ratingSums.get(offerId) ?? 0) + r.score);
+    }
+    for (const [offerId, sum] of ratingSums) {
+      const agg = at(offerId);
+      // Rounded to one decimal: the raw mean of a handful of integer scores is
+      // a long float that means nothing more than 4,3 does.
+      agg.ratingAvg =
+        agg.ratingCount > 0 ? Math.round((sum / agg.ratingCount) * 10) / 10 : null;
+    }
+
+    return byOffer;
   }
 
   async getJobOfferDetailForAdmin(
@@ -1270,6 +1511,11 @@ export class JobOfferService {
       throw new NotFoundException("Offre d'emploi introuvable");
     }
 
+    // The detail response extends the list item, so it owes the same
+    // aggregates — one shared loader rather than a second counting path that
+    // could disagree with the list for the same offer.
+    const aggregates = await this.loadJobOfferAggregates([offer.id]);
+
     return {
       id: offer.id,
       reference: offer.reference,
@@ -1302,6 +1548,8 @@ export class JobOfferService {
       createdAt: offer.created_at.toISOString(),
       updatedAt: offer.updated_at.toISOString(),
       vectorIndexedAt: offer.vector_indexed_at?.toISOString() ?? null,
+      employerUnlockPaid: offer.employer_unlock_paid,
+      ...(aggregates.get(offer.id) ?? emptyJobOfferAggregates()),
       applications: offer.applications.map((a) => ({
         id: a.id,
         workerName:
