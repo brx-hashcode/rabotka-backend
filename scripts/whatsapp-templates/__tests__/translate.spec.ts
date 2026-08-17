@@ -211,6 +211,15 @@ describe('authored templates', () => {
   // profiles can never hold a session — no longer true, so the CTA is the
   // point of the version bump and is worth pinning.
   const URL_BUTTON_KEYS = ['kycRejected', 'accountSuspended'] as const;
+  // Deliberately button-less: this one carries whatever an admin typed, so
+  // there is no single destination a CTA could point at.
+  const NO_BUTTON_KEYS = ['adminMessage'] as const;
+
+  it.each(NO_BUTTON_KEYS)('%s carries no button at all', (key) => {
+    expect(
+      authored()[key]?.components.find((c) => c.type === 'BUTTONS'),
+    ).toBeUndefined();
+  });
 
   it.each(URL_BUTTON_KEYS)('%s carries a URL button, not a Flow', (key) => {
     const buttons = authored()[key]?.components.find(
@@ -226,7 +235,7 @@ describe('authored templates', () => {
   it('accounts for every authored key', () => {
     // Stops a new authored template from silently having neither assertion.
     expect(
-      new Set([...FLOW_BUTTON_KEYS, ...URL_BUTTON_KEYS]),
+      new Set([...FLOW_BUTTON_KEYS, ...URL_BUTTON_KEYS, ...NO_BUTTON_KEYS]),
     ).toEqual(new Set(AUTHORED_KEYS));
   });
 
