@@ -42,6 +42,18 @@ function cloudBody(
   };
 }
 
+/** An envelope carrying exactly one `statuses[]` entry. */
+function statusBody(status: CloudStatus): CloudWebhookBody {
+  return {
+    entry: [
+      {
+        id: 'e',
+        changes: [{ field: 'messages', value: { statuses: [status] } }],
+      },
+    ],
+  };
+}
+
 describe('normalizeCloudWebhook', () => {
   it('normalizes a text message', () => {
     const [event] = normalizeCloudWebhook(cloudBody());
@@ -278,6 +290,66 @@ describe('normalizeCloudWebhook', () => {
     });
   });
 
+  it('carries the pricing block, upper-casing the category', () => {
+    // Meta lowercases the category on the webhook (`"utility"`) but upper-cases
+    // it everywhere else — the template registry, the Graph analytics API. Left
+    // as-is, a cost report would group the same category into two buckets.
+    const [event] = normalizeCloudWebhook(
+      statusBody({
+        id: 'wamid.p',
+        status: 'delivered',
+        timestamp: '1754870400',
+        recipient_id: '242069917686',
+        pricing: {
+          billable: true,
+          pricing_model: 'PMP',
+          category: 'utility',
+          type: 'REGULAR',
+        },
+      }),
+    );
+
+    expect(event).toMatchObject({
+      kind: 'status',
+      status: 'delivered',
+      pricing: { billable: true, category: 'UTILITY' },
+    });
+  });
+
+  it('reports a free service message as billable: false, not as absent', () => {
+    // `false` and "we were not told" have to stay distinguishable: the first is
+    // a free conversation, the second is a callback that carried no pricing.
+    const [event] = normalizeCloudWebhook(
+      statusBody({
+        id: 'wamid.free',
+        status: 'delivered',
+        timestamp: '1',
+        recipient_id: '242069917686',
+        pricing: { billable: false, category: 'service' },
+      }),
+    );
+
+    expect(event).toMatchObject({
+      pricing: { billable: false, category: 'SERVICE' },
+    });
+  });
+
+  it('omits pricing entirely when the callback carries none', () => {
+    const [event] = normalizeCloudWebhook(
+      statusBody({
+        id: 'wamid.nopricing',
+        status: 'sent',
+        timestamp: '1',
+        recipient_id: '242069917686',
+      }),
+    );
+
+    expect(event).toMatchObject({ kind: 'status', status: 'sent' });
+    expect(
+      (event as Extract<typeof event, { kind: 'status' }>).pricing,
+    ).toBeUndefined();
+  });
+
   it('skips a status value it does not recognize rather than guessing', () => {
     // CloudStatus.status is the closed union Meta documents, so this value has
     // to be forced past the compiler — which is the point. The type describes
@@ -433,7 +505,9 @@ describe('toBotInput', () => {
 
     it('does not answer a reaction', () => {
       expect(
-        toBotInput(msg({ type: 'reaction', emoji: '👍', targetMessageId: 'x' })),
+        toBotInput(
+          msg({ type: 'reaction', emoji: '👍', targetMessageId: 'x' }),
+        ),
       ).toBeNull();
     });
 
@@ -474,9 +548,7 @@ describe('toBotInput', () => {
 
     it('still answers a shared location', () => {
       expect(
-        toBotInput(
-          msg({ type: 'location', latitude: 1, longitude: 2 }),
-        ),
+        toBotInput(msg({ type: 'location', latitude: 1, longitude: 2 })),
       ).toBe('');
     });
   });
