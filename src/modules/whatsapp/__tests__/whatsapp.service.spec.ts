@@ -410,7 +410,6 @@ describe('WhatsAppService', () => {
     const base = {
       phone: PHONE,
       profileId: PROFILE_ID,
-      adminName: 'Fariol Blondeau',
       adminUserId: 'admin-uuid-1',
     };
 
@@ -427,7 +426,9 @@ describe('WhatsAppService', () => {
 
       const [, body] = (provider.sendText as jest.Mock).mock.calls[0];
       expect(body).toContain('Bonjour,\n\nVotre compte est actif.');
-      expect(body).toContain('_Fariol Blondeau — L’équipe Rabotka_');
+      // v3 signs as the team: no admin name anywhere in the body.
+      expect(body).toContain('_L’équipe Rabotka_');
+      expect(body).not.toContain('Fariol Blondeau');
     });
 
     it('sends the approved template, flattened, once the window has closed', async () => {
@@ -447,7 +448,8 @@ describe('WhatsAppService', () => {
       // Meta rejects newlines inside a variable, so the flattening has to
       // happen before the params leave this service.
       expect(params.message).toBe('Bonjour, · Votre compte est actif.');
-      expect(params.adminName).toBe('Fariol Blondeau');
+      // v3 has a single variable; a stray second one is a 132000 on send.
+      expect(Object.keys(params)).toEqual(['message']);
     });
 
     it('opens a delivery-log row in both modes, with the admin who sent it', async () => {
@@ -582,19 +584,6 @@ describe('WhatsAppService', () => {
       ).rejects.toBeInstanceOf(BadRequestException);
     });
 
-    it('falls back to a signature rather than sending an empty variable', async () => {
-      closedWindow();
-
-      await service.sendAdminMessage({
-        ...base,
-        adminName: '   ',
-        message: 'Compte actif.',
-      });
-
-      const [, , params] = (provider.sendTemplate as jest.Mock).mock.calls[0];
-      // Meta rejects an empty variable value outright.
-      expect(params.adminName).toBe('Le support');
-    });
   });
 
   describe('outbound duplicate guard', () => {

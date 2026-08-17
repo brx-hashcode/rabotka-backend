@@ -31,6 +31,7 @@ export const AUTHORED_KEYS: ReadonlySet<WhatsAppTemplateName> = new Set([
   'contactUnlockedRecommendation',
   'kycRejected',
   'accountSuspended',
+  'adminMessage',
 ]);
 
 /**
@@ -252,6 +253,46 @@ export function authoredTemplates(): Partial<
               example: ['https://rabotka.work/s/home'],
             },
           ],
+        },
+      ],
+    },
+
+    /**
+     * v3: the same card without the sender's name.
+     *
+     * v2's closing line was `_{{2}} — L’équipe Rabotka_`, so every message an
+     * admin sent was signed with that admin's own name. Rabotka answers as one
+     * team, and a variable may never be empty — there was no value of `{{2}}`
+     * that rendered as the team alone, which is why this needed a new version
+     * rather than a code change.
+     *
+     * Dropping it leaves one variable against ~50 characters of static text.
+     * That is the ratio v1 failed on (subCode 2388293, two variables in ~27
+     * characters), and the closing line still keeps the body from ending on a
+     * variable (subCode 2388299).
+     *
+     * Must stay byte-identical to `formatAdminMessage`, which renders the same
+     * shape on the free-form path — the two modes are meant to be
+     * indistinguishable to the reader.
+     */
+    adminMessage: {
+      name: 'rabotka_admin_message_v3',
+      language: 'fr',
+      category: 'UTILITY',
+      components: [
+        {
+          type: 'BODY',
+          text: [
+            '*Rabotka*',
+            '',
+            '{{1}}',
+            '',
+            'Merci et à bientôt,',
+            '_L’équipe Rabotka_',
+          ].join('\n'),
+          example: {
+            body_text: [['Votre compte est actif.']],
+          },
         },
       ],
     },

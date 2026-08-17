@@ -54,21 +54,19 @@ export function flattenForTemplateVariable(text: string): string {
  */
 export const ADMIN_MESSAGE_VAR_MAX = 700;
 
-/** Rendered when the admin has no usable name. A variable may never be empty. */
-export const ADMIN_MESSAGE_FALLBACK_SIGNATURE = 'Le support';
-
 /**
  * The body a profile actually receives, in BOTH delivery modes.
  *
- * Keep byte-identical to the approved template body in `script.js`
- * (`rabotka_admin_message_v2`):
+ * Keep byte-identical to the approved template body
+ * (`rabotka_admin_message_v3`, authored in
+ * `scripts/whatsapp-templates/definitions.ts`):
  *
  *   *Rabotka*
  *
  *   {{1}}
  *
  *   Merci et à bientôt,
- *   _{{2}} — L’équipe Rabotka_
+ *   _L’équipe Rabotka_
  *
  * Neither static line is decoration. A template body may not start or end with a
  * variable (Meta subCode 2388299), and the v1 body — which had only these two
@@ -76,17 +74,19 @@ export const ADMIN_MESSAGE_FALLBACK_SIGNATURE = 'Le support';
  * subCode 2388293, "too many variables for its length". The closing line is what
  * buys that ratio back. Both lines are emitted on the free-form path too, so the
  * two delivery modes render identically.
+ *
+ * v3 dropped the sender's name. v2 signed each message with the individual
+ * admin's name via a second variable; Rabotka answers as one team, and since a
+ * variable may never be empty there was no value that rendered as the team
+ * alone.
  */
-export function formatAdminMessage(params: {
-  message: string;
-  adminName: string;
-}): string {
+export function formatAdminMessage(params: { message: string }): string {
   return [
     '*Rabotka*',
     '',
     params.message,
     '',
     'Merci et à bientôt,',
-    `_${params.adminName} — L’équipe Rabotka_`,
+    '_L’équipe Rabotka_',
   ].join('\n');
 }
