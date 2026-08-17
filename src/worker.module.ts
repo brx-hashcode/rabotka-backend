@@ -18,6 +18,7 @@ import { MailModule } from './modules/mail/mail.module';
 import { TwilioService } from './common/services/twilio/twilio.service';
 import { SendTimingService } from './modules/whatsapp/telemetry/send-timing.service';
 import { WhatsAppService } from './modules/whatsapp/whatsapp.service';
+import { WhatsappMessageLogService } from './modules/whatsapp/logging/whatsapp-message-log.service';
 import { ReminderProcessor } from './modules/bot/reminder/reminder.processor';
 import { PrismaService } from './common/services/prisma/prisma.service';
 import { QueueService } from './common/services/queue/queue.service';
@@ -121,6 +122,7 @@ export class WorkerModule {
         inject: [TwilioService],
       },
       whatsappProviderFactory,
+      WhatsappMessageLogService,
       {
         provide: WhatsAppService,
         useFactory: (
@@ -130,6 +132,7 @@ export class WorkerModule {
           config: ConfigService,
           wallet: WalletService,
           idempotency: IdempotencyService,
+          messageLog: WhatsappMessageLogService,
         ) =>
           new WhatsAppService(
             redis,
@@ -138,6 +141,7 @@ export class WorkerModule {
             config,
             wallet,
             idempotency,
+            messageLog,
           ),
         inject: [
           REDIS_CONNECTION,
@@ -146,6 +150,7 @@ export class WorkerModule {
           ConfigService,
           WalletService,
           IdempotencyService,
+          WhatsappMessageLogService,
         ],
       },
     ];

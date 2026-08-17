@@ -269,12 +269,29 @@ export interface CloudStatusError {
   error_data?: { details?: string };
 }
 
+/**
+ * What Meta will charge for the message.
+ *
+ * Only present once the message reaches a billable state — it rides on
+ * `delivered`, never on `sent` — so a status handler must treat it as
+ * optional rather than assuming the first callback carries it.
+ */
+export interface CloudStatusPricing {
+  billable?: boolean;
+  pricing_model?: string;
+  /** AUTHENTICATION | MARKETING | SERVICE | UTILITY, lowercased by Meta. */
+  category?: string;
+  /** FREE_CUSTOMER_SERVICE | FREE_ENTRY_POINT | REGULAR. */
+  type?: string;
+}
+
 export interface CloudStatus {
   id: string;
   status: 'sent' | 'delivered' | 'read' | 'failed';
   timestamp: string;
   recipient_id: string;
   biz_opaque_callback_data?: string;
+  pricing?: CloudStatusPricing;
   errors?: CloudStatusError[];
 }
 

@@ -119,6 +119,7 @@ describe('WhatsAppController', () => {
         claim: jest.fn().mockResolvedValue(true),
         release: jest.fn().mockResolvedValue(undefined),
       } as any,
+      { applyStatus: jest.fn().mockResolvedValue(undefined) } as any,
     );
     controller = new WhatsAppController(
       whatsAppService as any,
@@ -195,7 +196,7 @@ describe('WhatsAppController', () => {
       ).rejects.toThrow("'From' manquant");
     });
 
-    it('still enqueues a replay — dedup is the worker\'s job now', async () => {
+    it("still enqueues a replay — dedup is the worker's job now", async () => {
       // Both providers share one contract: the webhook verifies, enqueues and
       // acknowledges; the worker decides whether the message has been handled.
       // Covered end to end in whatsapp-inbound.processor.spec.ts.

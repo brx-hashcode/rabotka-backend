@@ -13,6 +13,7 @@ import { whatsappProviderFactory } from './whatsapp-provider.factory';
 import { CloudWebhookController } from './webhooks/cloud-webhook.controller';
 import { InboundIngestService } from './webhooks/inbound-ingest.service';
 import { WhatsAppFeedbackService } from './feedback/whatsapp-feedback.service';
+import { WhatsappMessageLogService } from './logging/whatsapp-message-log.service';
 
 @Module({
   imports: [
@@ -34,10 +35,15 @@ import { WhatsAppFeedbackService } from './feedback/whatsapp-feedback.service';
     whatsappProviderFactory,
     InboundIngestService,
     WhatsAppFeedbackService,
+    WhatsappMessageLogService,
     WhatsAppService,
     WhatsAppOutboundProcessor,
     WhatsAppInboundProcessor,
   ],
-  exports: [WhatsAppService, WhatsAppFeedbackService],
+  exports: [
+    WhatsAppService,
+    WhatsAppFeedbackService,
+    WhatsappMessageLogService,
+  ],
 })
 export class WhatsAppModule {}

@@ -65,6 +65,19 @@ enum MessageDirection {
   OUTBOUND
 }
 
+/// Lifecycle of one outbound WhatsApp message.
+///
+/// ORDERED. Meta batches status webhooks and does not guarantee their order, so
+/// a `sent` can land after a `read`; `applyStatus` only ever moves a row
+/// forward through this list. FAILED is terminal and outranks everything.
+enum WhatsappDeliveryStatus {
+  QUEUED
+  SENT
+  DELIVERED
+  READ
+  FAILED
+}
+
 enum ConversationStatus {
   ACTIVE
   ENDED
@@ -399,6 +412,7 @@ model Profile {
   payments                        Payment[]
   conversations                   Conversation[]
   messages                        Message[]
+  whatsapp_messages               WhatsappMessage[]
   logs                            Log[]
   files                           File[]
   wallets                         Wallet[]
@@ -452,6 +466,7 @@ model User {
   logs            Log[]
   wallets         Wallet[]
   sent_messages   Message[]
+  sent_whatsapp_messages WhatsappMessage[]
   claims_assigned Claim[]        @relation("ClaimAssignedUser")
   claims_created  Claim[]        @relation("ClaimCreatedByUser")
   claim_comments  ClaimComment[] @relation("ClaimCommentUser")
@@ -985,6 +1000,68 @@ model Message {
   // which runs on every admin send and every composer render.
   @@index([profile_id, direction, created_at(sort: Desc)], name: "idx_message_profile_direction_created")
   @@map("messages")
+}
+
+/// The delivery record for one WhatsApp send.
+///
+/// Deliberately NOT `Message`. That table is the profile CHAT transcript: it
+/// requires a `profile_id`, so an OTP to a number that never registered has
+/// nowhere to go, and it stores a template as the literal body `[TPL:kyc]` with
+/// no id, status or recipient. This one exists to answer "did it arrive?", so
+/// the recipient is a phone number, the profile is optional, and the row is
+/// written BEFORE the provider call — its `id` rides to Meta as
+/// `biz_opaque_callback_data` and comes back on the status webhook, which is
+/// what correlates a delivery receipt to a send without a provider lookup.
+model WhatsappMessage {
+  id         String   @id @default(uuid()) @db.Uuid
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  provider String // cloud | twilio
+  /// Meta wamid (`wamid.…`) or Twilio SID (`SM…`/`MM…`). Null until the
+  /// provider answers — and permanently null when the send failed outright.
+  provider_message_id String? @unique
+
+  direction  MessageDirection @default(OUTBOUND)
+  /// E.164 with the leading `+`, matching the codebase's canonical phone form.
+  to_phone   String
+  /// Optional: sends to unregistered numbers (OTP, activation) have no profile.
+  profile_id String?          @db.Uuid
+
+  kind              String // text | template | media | flow | interactive
+  template_key      String?
+  template_category String? // UTILITY | MARKETING | AUTHENTICATION
+  /// Rendered text, or the resolved template body. Truncated at write time.
+  body_preview      String
+  variables         Json?
+
+  status       WhatsappDeliveryStatus @default(QUEUED)
+  sent_at      DateTime?
+  delivered_at DateTime?
+  read_at      DateTime?
+  failed_at    DateTime?
+
+  error_code          String?
+  error_provider_code Int?
+  error_message       String?
+
+  /// From the webhook's `statuses[].pricing`. Meta only sends it once the
+  /// message is billable, so it arrives with `delivered`, not with `sent`.
+  pricing_category String?
+  billable         Boolean?
+
+  /// Set when an admin composed the message by hand.
+  sent_by_id String? @db.Uuid
+
+  profile Profile? @relation(fields: [profile_id], references: [id], onDelete: SetNull)
+  sent_by User?    @relation(fields: [sent_by_id], references: [id], onDelete: SetNull)
+
+  @@index([created_at(sort: Desc)], name: "idx_wa_msg_created")
+  @@index([status, created_at(sort: Desc)], name: "idx_wa_msg_status_created")
+  @@index([template_key, created_at(sort: Desc)], name: "idx_wa_msg_template_created")
+  @@index([to_phone], name: "idx_wa_msg_phone")
+  @@index([profile_id], name: "idx_wa_msg_profile")
+  @@map("whatsapp_messages")
 }
 
 model VerificationToken {
