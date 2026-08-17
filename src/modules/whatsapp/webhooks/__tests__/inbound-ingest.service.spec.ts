@@ -63,6 +63,9 @@ function makeDeps(redisOverrides = {}, provider = makeProvider()) {
     claim: jest.fn().mockResolvedValue(true),
     release: jest.fn().mockResolvedValue(undefined),
   };
+  const messageLog = {
+    applyStatus: jest.fn().mockResolvedValue(undefined),
+  };
   const service = new InboundIngestService(
     redis as never,
     queueService as never,
@@ -70,6 +73,7 @@ function makeDeps(redisOverrides = {}, provider = makeProvider()) {
     provider as never,
     feedback as never,
     idempotency as never,
+    messageLog as never,
   );
   return {
     service,
@@ -79,6 +83,7 @@ function makeDeps(redisOverrides = {}, provider = makeProvider()) {
     provider,
     feedback,
     idempotency,
+    messageLog,
   };
 }
 
