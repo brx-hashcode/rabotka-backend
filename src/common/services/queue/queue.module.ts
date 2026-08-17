@@ -14,6 +14,7 @@ export const POLL_PAYMENT_STATUS_QUEUE = 'poll-payment-status-queue';
 export const WHATSAPP_INBOUND_QUEUE = 'whatsapp-inbound-queue';
 export const USER_FEATURE_QUEUE = 'user-feature-queue';
 export const JOB_NOTIFICATION_QUEUE = 'job-notification-queue';
+export const WHATSAPP_LOG_RETENTION_QUEUE = 'whatsapp-log-retention-queue';
 
 @Module({})
 export class QueueModule {

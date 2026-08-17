@@ -38,6 +38,11 @@ export const LATERAL_ACCESS: Record<LateralRole, Record<string, AreaAccess>> = {
     'admin/invoices': 'read',
     // Finance needs to identify who a payment belongs to — not to moderate them.
     'admin/profiles': 'read',
+    // WhatsApp is a real line item on the Meta invoice, so finance needs the
+    // consumption figures. Read only: the delivery log carries message bodies
+    // and recipient numbers, and retrying a dead-lettered send is an
+    // operational act, not a financial one.
+    'admin/whatsapp': 'read',
   },
   [UserRole.SUPPORT]: {
     'admin/claims': 'full',
@@ -45,6 +50,9 @@ export const LATERAL_ACCESS: Record<LateralRole, Record<string, AreaAccess>> = {
     'admin/profiles': 'read',
     'admin/applications': 'read',
     'admin/job-offers': 'read',
+    // "Did the customer get the message?" is the first question on half of all
+    // support tickets, and until now nobody could answer it.
+    'admin/whatsapp': 'read',
     // Post-unlock sentiment is context for the claim sitting next to it. Read
     // only: the feedback rows carry the author's name and phone, and support's
     // reach into personal data stays at the same level as `admin/profiles`.
