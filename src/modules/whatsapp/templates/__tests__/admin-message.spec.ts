@@ -2,7 +2,6 @@ import {
   flattenForTemplateVariable,
   formatAdminMessage,
   ADMIN_MESSAGE_VAR_MAX,
-  ADMIN_MESSAGE_FALLBACK_SIGNATURE,
 } from '../admin-message';
 
 describe('flattenForTemplateVariable', () => {
@@ -63,32 +62,38 @@ describe('flattenForTemplateVariable', () => {
 
 describe('formatAdminMessage', () => {
   /**
-   * GOLDEN STRING — this is the approved body of `rabotka_admin_message` in the
-   * repo-root script.js, with {{1}} and {{2}} substituted.
+   * GOLDEN STRING — the approved body of `rabotka_admin_message_v4`, authored
+   * in `scripts/whatsapp-templates/definitions.ts`, with {{1}} substituted.
    *
    * If this test fails, either the local renderer drifted from the approved
    * template or someone changed the template body. An approved WhatsApp body
-   * cannot be edited: a wording change means a NEW template with a new SID, so
-   * update script.js, resubmit as _v2, and change this expectation to match.
+   * cannot be edited: a wording change means a NEW version, so update the
+   * payload in `definitions.ts`, resubmit with `create.ts`, wait for the
+   * verdict, then change this expectation to match.
+   *
+   * The category is MARKETING and cannot be argued back: v2 kept UTILITY only
+   * because it was signed with the admin's own name, and both nameless
+   * versions were reclassified. Accepted deliberately — see the registry entry.
    */
   it('renders exactly the approved template body', () => {
     expect(
       formatAdminMessage({
         message: 'Votre compte est maintenant actif.',
-        adminName: 'Fariol Blondeau',
       }),
     ).toBe(
       '*Rabotka*\n' +
         '\n' +
+        'Message de notre équipe support concernant votre compte :\n' +
+        '\n' +
         'Votre compte est maintenant actif.\n' +
         '\n' +
         'Merci et à bientôt,\n' +
-        '_Fariol Blondeau — L’équipe Rabotka_',
+        '_L’équipe Rabotka_',
     );
   });
 
   it('opens and closes on static text, as Meta requires of the template', () => {
-    const body = formatAdminMessage({ message: 'x', adminName: 'y' });
+    const body = formatAdminMessage({ message: 'x' });
     // A template body may neither start nor end with a variable (subCode
     // 2388299); the rendered body must show the same shape.
     expect(body.startsWith('*Rabotka*')).toBe(true);
@@ -99,20 +104,17 @@ describe('formatAdminMessage', () => {
     // The v1 body had ~27 static chars around two variables and was rejected
     // with subCode 2388293, "too many variables for its length". Guard the
     // budget so a future trim does not silently walk back into that.
-    const staticChars = formatAdminMessage({
-      message: '',
-      adminName: '',
-    }).replace(/\s/g, '').length;
+    const staticChars = formatAdminMessage({ message: '' }).replace(
+      /\s/g,
+      '',
+    ).length;
     expect(staticChars).toBeGreaterThanOrEqual(40);
   });
 });
 
 describe('constants', () => {
   it('caps the variable well inside Meta’s 1024-char body limit', () => {
-    const staticOverhead = formatAdminMessage({
-      message: '',
-      adminName: ADMIN_MESSAGE_FALLBACK_SIGNATURE,
-    }).length;
+    const staticOverhead = formatAdminMessage({ message: '' }).length;
     expect(ADMIN_MESSAGE_VAR_MAX + staticOverhead).toBeLessThan(1024);
   });
 });

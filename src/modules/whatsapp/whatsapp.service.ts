@@ -27,7 +27,6 @@ import {
   formatAdminMessage,
   flattenForTemplateVariable,
   ADMIN_MESSAGE_VAR_MAX,
-  ADMIN_MESSAGE_FALLBACK_SIGNATURE,
 } from './templates';
 import {
   IdempotencyService,
@@ -569,13 +568,9 @@ export class WhatsAppService {
     phone: string;
     profileId: string;
     message: string;
-    adminName: string;
     adminUserId?: string;
   }): Promise<AdminMessageDelivery> {
     const { phone, profileId, message, adminUserId } = params;
-    const adminName =
-      flattenForTemplateVariable(params.adminName) ||
-      ADMIN_MESSAGE_FALLBACK_SIGNATURE;
 
     const { open } = await this.isServiceWindowOpen(profileId);
     const mode: AdminMessageMode = open ? 'FREE_FORM' : 'TEMPLATE';
@@ -596,7 +591,7 @@ export class WhatsAppService {
       );
     }
 
-    const body = formatAdminMessage({ message: text, adminName });
+    const body = formatAdminMessage({ message: text });
 
     try {
       // Through `logged` rather than straight at the provider: this is the one
@@ -619,7 +614,7 @@ export class WhatsAppService {
               templateKey: 'adminMessage',
               profileId,
               sentById: adminUserId,
-              variables: { message: text, adminName },
+              variables: { message: text },
             },
         (logId) =>
           open
@@ -627,7 +622,7 @@ export class WhatsAppService {
             : this.provider.sendTemplate(
                 phone,
                 'adminMessage',
-                { message: text, adminName },
+                { message: text },
                 this.sendOpts(logId),
               ),
       );

@@ -344,24 +344,15 @@ export class AdminProfileController {
       throw new BadRequestException('Le message ne peut pas être vide');
     }
 
-    const adminFullName = await this.resolveAdminSignature(adminUserId);
-
     let delivery: AdminMessageDelivery | undefined;
     if (body.channel === 'WHATSAPP') {
       delivery = await this.sendWhatsAppMessage(
         profile,
         body.message,
-        adminFullName,
         adminUserId,
       );
     } else {
-      await this.sendEmailMessage(
-        profile,
-        body.message,
-        adminFullName,
-        files,
-        adminUserId,
-      );
+      await this.sendEmailMessage(profile, body.message, files, adminUserId);
     }
 
     // Logged before the throw below: a message that failed to reach the profile
@@ -394,29 +385,9 @@ export class AdminProfileController {
     return { success: true, deliveryMode: delivery?.mode ?? null };
   }
 
-  /**
-   * The name a message is signed with. Falls back to the team when the admin has
-   * no usable name — an empty signature would be an empty template variable,
-   * which Meta rejects outright.
-   */
-  private async resolveAdminSignature(
-    adminUserId: string | undefined,
-  ): Promise<string> {
-    if (!adminUserId) {
-      return "L'équipe Rabotka";
-    }
-    const admin = await this.prisma.user.findUnique({
-      where: { id: adminUserId },
-      select: { first_name: true, last_name: true },
-    });
-    const full = `${admin?.first_name ?? ''} ${admin?.last_name ?? ''}`.trim();
-    return full || "L'équipe Rabotka";
-  }
-
   private async sendWhatsAppMessage(
     profile: { id: string; phone: string | null },
     message: string,
-    adminFullName: string,
     adminUserId: string | undefined,
   ): Promise<AdminMessageDelivery> {
     if (!profile.phone) {
@@ -433,7 +404,6 @@ export class AdminProfileController {
       phone: profile.phone,
       profileId: profile.id,
       message,
-      adminName: adminFullName,
       adminUserId,
     });
   }
@@ -441,7 +411,6 @@ export class AdminProfileController {
   private async sendEmailMessage(
     profile: { id: string; email: string | null },
     message: string,
-    adminFullName: string,
     files: Express.Multer.File[] | undefined,
     adminUserId: string | undefined,
   ): Promise<void> {
@@ -463,7 +432,10 @@ export class AdminProfileController {
       })) ?? [];
     const messageHtml = message.trim().replaceAll('\n', '<br/>');
     const html = await this.layout.wrap(
-      `<p>${messageHtml}</p><br/><p>${adminFullName}<br/>L'équipe Rabotka</p>`,
+      // Signed by the team, not the individual admin — same reason the WhatsApp
+      // template dropped its name variable: Rabotka answers as one team, and the
+      // two channels must not sign the same message differently.
+      `<p>${messageHtml}</p><br/><p>L'équipe Rabotka</p>`,
     );
     await this.mail.sendMail({
       to: profile.email,
