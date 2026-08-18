@@ -266,17 +266,22 @@ export function authoredTemplates(): Partial<
      * that rendered as the team alone, which is why this needed a new version
      * rather than a code change.
      *
-     * v3 dropped the name and Meta approved it but RECLASSIFIED it UTILITY ->
-     * MARKETING. That is not cosmetic: marketing is billed at a higher rate,
-     * and it is subject to marketing opt-out, so a profile who opted out would
-     * stop receiving support replies altogether. Removing the name is the
-     * likely cause — what was left read as a brand header wrapped around
-     * arbitrary text, with nothing tying it to the recipient's account.
+     * Submitted as MARKETING because that is what Meta assigns it, not because
+     * it is one. Asking for UTILITY only earns a silent reclassification —
+     * `welcomePlatform` v3 sat pending for hours over exactly that, and v4 was
+     * approved in minutes once it asked for the category Meta wanted.
      *
-     * So the opening line says who is writing and about what. It restores the
-     * utility signal without putting the name back, and the extra static text
-     * widens the variable-density margin (v1 was rejected on that ratio,
-     * subCode 2388293). The line is deliberately not "réponse à votre demande":
+     * Three submissions pinned the cause, so do not spend a fourth on
+     * rephrasing: v2 (signed with the admin's own name) is UTILITY to this day;
+     * v3 (name removed) came back MARKETING; v4 (name removed, plus this
+     * opening line naming the sender and the subject) came back MARKETING too.
+     * The individual's name is what made Meta read this as 1:1 correspondence
+     * rather than a broadcast, and the team decided a nameless message is worth
+     * the marketing rate and the opt-out exposure.
+     *
+     * The opening line stays regardless: it says who is writing and about what,
+     * and its static text widens the variable-density margin v1 was rejected on
+     * (subCode 2388293). It is deliberately not "réponse à votre demande":
      * plenty of these are proactive — a KYC chaser, a penalty notice — and the
      * template must not claim the user asked first.
      *
@@ -287,7 +292,7 @@ export function authoredTemplates(): Partial<
     adminMessage: {
       name: 'rabotka_admin_message_v4',
       language: 'fr',
-      category: 'UTILITY',
+      category: 'MARKETING',
       components: [
         {
           type: 'BODY',
