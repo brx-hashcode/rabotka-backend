@@ -115,6 +115,9 @@ describe('template mapping', () => {
   it('stringifies numeric params', () => {
     expect(
       toContentVariables('unlockExpiredConversion', { amount: 500 }),
-    ).toEqual({ '1': '500' });
+      // '2' is the CTA destination, not a body value — the outbound processor
+      // swaps it for a login code. Its absence is what failed every send with
+      // Meta 131008.
+    ).toEqual({ '1': '500', '2': 'portefeuille' });
   });
 });
