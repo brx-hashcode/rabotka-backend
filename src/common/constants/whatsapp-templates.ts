@@ -338,7 +338,8 @@ export const WHATSAPP_TEMPLATES = {
         'rabotka_profile_created_kyc_worker_v2',
       ),
     },
-    variables: (firstName: string) => ({ '1': firstName }),
+    // '2' feeds the "Se connecter" button. See the note on `kyc`.
+    variables: (firstName: string) => ({ '1': firstName, '2': 'home' }),
   } satisfies WhatsAppTemplate<[firstName: string]>,
 
   profileCreatedEmployer: {
@@ -355,7 +356,8 @@ export const WHATSAPP_TEMPLATES = {
         'rabotka_profile_created_kyc_employer_v2',
       ),
     },
-    variables: (firstName: string) => ({ '1': firstName }),
+    // '2' feeds the "Se connecter" button. See the note on `kyc`.
+    variables: (firstName: string) => ({ '1': firstName, '2': 'home' }),
   } satisfies WhatsAppTemplate<[firstName: string]>,
 
   kyc: {
@@ -367,7 +369,14 @@ export const WHATSAPP_TEMPLATES = {
     urlSuffixMode: 'shortlink',
     category: 'UTILITY',
     cloud: { name: cloudName('TPL_CLOUD_KYC', 'rabotka_kyc_approved_cta_v2') },
-    variables: (name: string) => ({ '1': name }),
+    // '2' is NOT a body variable — it is the destination behind the "Accéder à
+    // Rabotka" button, which `withLoginCode` swaps for a one-tap login code.
+    // Omitting it sent no button parameter at all and Meta rejected every one
+    // of these with 131008, silently, for as long as the template existed.
+    // `/home` is role-aware. If the code cannot be minted (a BANNED profile,
+    // or no profileId in scope) the literal survives and `/s/home` still
+    // resolves — login-link.tsx treats a non-code segment as the destination.
+    variables: (name: string) => ({ '1': name, '2': 'home' }),
   } satisfies WhatsAppTemplate<[name: string]>,
 
   /**
@@ -881,7 +890,11 @@ export const WHATSAPP_TEMPLATES = {
         'rabotka_unlock_expired_conversion_cta_v2',
       ),
     },
-    variables: (p: { amount: number }) => ({ '1': String(p.amount) }),
+    // '2' feeds the "Voir mon portefeuille" button. See the note on `kyc`.
+    variables: (p: { amount: number }) => ({
+      '1': String(p.amount),
+      '2': 'portefeuille',
+    }),
   } satisfies WhatsAppTemplate<[params: { amount: number }]>,
 
   autoStarted: {
@@ -939,7 +952,11 @@ export const WHATSAPP_TEMPLATES = {
         'rabotka_offer_expired_applicant_cta_v2',
       ),
     },
-    variables: (p: { offerTitle: string }) => ({ '1': p.offerTitle }),
+    // '2' feeds the "Voir les offres" button. See the note on `kyc`.
+    variables: (p: { offerTitle: string }) => ({
+      '1': p.offerTitle,
+      '2': 'recherche-offres',
+    }),
   } satisfies WhatsAppTemplate<[params: { offerTitle: string }]>,
 
   offerExpiredEmployer: {
@@ -979,7 +996,11 @@ export const WHATSAPP_TEMPLATES = {
         'rabotka_offer_unavailable_worker_cta_v2',
       ),
     },
-    variables: (p: { offerTitle: string }) => ({ '1': p.offerTitle }),
+    // '2' feeds the "Voir les offres" button. See the note on `kyc`.
+    variables: (p: { offerTitle: string }) => ({
+      '1': p.offerTitle,
+      '2': 'recherche-offres',
+    }),
   } satisfies WhatsAppTemplate<[params: { offerTitle: string }]>,
 
   reminderStart: {

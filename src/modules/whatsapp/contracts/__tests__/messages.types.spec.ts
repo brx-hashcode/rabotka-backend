@@ -10,7 +10,12 @@ import { WHATSAPP_TEMPLATES } from '../../../../common/constants/whatsapp-templa
 describe('TemplateParams', () => {
   it('resolves a scalar-param template to that scalar', () => {
     const name: TemplateParams<'kyc'> = 'Fariol';
-    expect(WHATSAPP_TEMPLATES.kyc.variables(name)).toEqual({ '1': 'Fariol' });
+    // '2' is the CTA destination behind "Accéder à Rabotka", swapped for a
+    // login code on the way out — not a body parameter.
+    expect(WHATSAPP_TEMPLATES.kyc.variables(name)).toEqual({
+      '1': 'Fariol',
+      '2': 'home',
+    });
   });
 
   it('resolves an object-param template to its exact shape', () => {
