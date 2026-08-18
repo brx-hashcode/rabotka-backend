@@ -62,13 +62,18 @@ describe('flattenForTemplateVariable', () => {
 
 describe('formatAdminMessage', () => {
   /**
-   * GOLDEN STRING — this is the approved body of `rabotka_admin_message` in the
-   * repo-root script.js, with {{1}} and {{2}} substituted.
+   * GOLDEN STRING — the approved body of `rabotka_admin_message_v4`, authored
+   * in `scripts/whatsapp-templates/definitions.ts`, with {{1}} substituted.
    *
    * If this test fails, either the local renderer drifted from the approved
    * template or someone changed the template body. An approved WhatsApp body
-   * cannot be edited: a wording change means a NEW template with a new SID, so
-   * update script.js, resubmit as _v2, and change this expectation to match.
+   * cannot be edited: a wording change means a NEW version, so update the
+   * payload in `definitions.ts`, resubmit with `create.ts`, wait for the
+   * verdict, then change this expectation to match.
+   *
+   * Watch the category on that verdict. v3 was approved but reclassified
+   * UTILITY -> MARKETING, which bills higher and honours marketing opt-out;
+   * the opening line here is what carries the utility signal.
    */
   it('renders exactly the approved template body', () => {
     expect(
@@ -77,6 +82,8 @@ describe('formatAdminMessage', () => {
       }),
     ).toBe(
       '*Rabotka*\n' +
+        '\n' +
+        'Message de notre équipe support concernant votre compte :\n' +
         '\n' +
         'Votre compte est maintenant actif.\n' +
         '\n' +

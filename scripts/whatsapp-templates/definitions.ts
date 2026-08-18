@@ -258,7 +258,7 @@ export function authoredTemplates(): Partial<
     },
 
     /**
-     * v3: the same card without the sender's name.
+     * v4: no sender name, and anchored as account support.
      *
      * v2's closing line was `_{{2}} — L’équipe Rabotka_`, so every message an
      * admin sent was signed with that admin's own name. Rabotka answers as one
@@ -266,17 +266,26 @@ export function authoredTemplates(): Partial<
      * that rendered as the team alone, which is why this needed a new version
      * rather than a code change.
      *
-     * Dropping it leaves one variable against ~50 characters of static text.
-     * That is the ratio v1 failed on (subCode 2388293, two variables in ~27
-     * characters), and the closing line still keeps the body from ending on a
-     * variable (subCode 2388299).
+     * v3 dropped the name and Meta approved it but RECLASSIFIED it UTILITY ->
+     * MARKETING. That is not cosmetic: marketing is billed at a higher rate,
+     * and it is subject to marketing opt-out, so a profile who opted out would
+     * stop receiving support replies altogether. Removing the name is the
+     * likely cause — what was left read as a brand header wrapped around
+     * arbitrary text, with nothing tying it to the recipient's account.
+     *
+     * So the opening line says who is writing and about what. It restores the
+     * utility signal without putting the name back, and the extra static text
+     * widens the variable-density margin (v1 was rejected on that ratio,
+     * subCode 2388293). The line is deliberately not "réponse à votre demande":
+     * plenty of these are proactive — a KYC chaser, a penalty notice — and the
+     * template must not claim the user asked first.
      *
      * Must stay byte-identical to `formatAdminMessage`, which renders the same
      * shape on the free-form path — the two modes are meant to be
      * indistinguishable to the reader.
      */
     adminMessage: {
-      name: 'rabotka_admin_message_v3',
+      name: 'rabotka_admin_message_v4',
       language: 'fr',
       category: 'UTILITY',
       components: [
@@ -284,6 +293,8 @@ export function authoredTemplates(): Partial<
           type: 'BODY',
           text: [
             '*Rabotka*',
+            '',
+            'Message de notre équipe support concernant votre compte :',
             '',
             '{{1}}',
             '',

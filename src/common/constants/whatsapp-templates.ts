@@ -1050,10 +1050,16 @@ export const WHATSAPP_TEMPLATES = {
     contentSid: sid('TPL_ADMIN_MESSAGE', 'HX19ecc295fd0ad9070740b2db85154c95'),
     category: 'UTILITY',
     cloud: {
-      // v3 drops the sender's name: v2 signed every message with the individual
+      // v4 drops the sender's name: v2 signed every message with the individual
       // admin's, and Rabotka answers as one team. Authored in
       // scripts/whatsapp-templates/definitions.ts.
-      name: cloudName('TPL_CLOUD_ADMIN_MESSAGE', 'rabotka_admin_message_v3'),
+      //
+      // v3 did the same and was approved, but Meta reclassified it UTILITY ->
+      // MARKETING, which bills higher and honours marketing opt-out — a
+      // support reply that silently never arrives. v4 opens on a line naming
+      // the sender and the subject, which is what carries the utility signal
+      // now that the name is gone. Do not point the override at v3.
+      name: cloudName('TPL_CLOUD_ADMIN_MESSAGE', 'rabotka_admin_message_v4'),
     },
     variables: (p: { message: string }) => ({
       '1': p.message,

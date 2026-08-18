@@ -58,10 +58,12 @@ export const ADMIN_MESSAGE_VAR_MAX = 700;
  * The body a profile actually receives, in BOTH delivery modes.
  *
  * Keep byte-identical to the approved template body
- * (`rabotka_admin_message_v3`, authored in
+ * (`rabotka_admin_message_v4`, authored in
  * `scripts/whatsapp-templates/definitions.ts`):
  *
  *   *Rabotka*
+ *
+ *   Message de notre équipe support concernant votre compte :
  *
  *   {{1}}
  *
@@ -79,10 +81,17 @@ export const ADMIN_MESSAGE_VAR_MAX = 700;
  * admin's name via a second variable; Rabotka answers as one team, and since a
  * variable may never be empty there was no value that rendered as the team
  * alone.
+ *
+ * v4 added the opening line. Meta approved v3 but reclassified it UTILITY ->
+ * MARKETING — a higher rate, and subject to marketing opt-out, which would have
+ * cost some profiles their support replies entirely. Naming the sender and the
+ * subject restores the utility signal without restoring the name.
  */
 export function formatAdminMessage(params: { message: string }): string {
   return [
     '*Rabotka*',
+    '',
+    'Message de notre équipe support concernant votre compte :',
     '',
     params.message,
     '',
