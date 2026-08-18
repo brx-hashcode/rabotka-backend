@@ -54,21 +54,21 @@ export function flattenForTemplateVariable(text: string): string {
  */
 export const ADMIN_MESSAGE_VAR_MAX = 700;
 
-/** Rendered when the admin has no usable name. A variable may never be empty. */
-export const ADMIN_MESSAGE_FALLBACK_SIGNATURE = 'Le support';
-
 /**
  * The body a profile actually receives, in BOTH delivery modes.
  *
- * Keep byte-identical to the approved template body in `script.js`
- * (`rabotka_admin_message_v2`):
+ * Keep byte-identical to the approved template body
+ * (`rabotka_admin_message_v4`, authored in
+ * `scripts/whatsapp-templates/definitions.ts`):
  *
  *   *Rabotka*
+ *
+ *   Message de notre équipe support concernant votre compte :
  *
  *   {{1}}
  *
  *   Merci et à bientôt,
- *   _{{2}} — L’équipe Rabotka_
+ *   _L’équipe Rabotka_
  *
  * Neither static line is decoration. A template body may not start or end with a
  * variable (Meta subCode 2388299), and the v1 body — which had only these two
@@ -76,17 +76,28 @@ export const ADMIN_MESSAGE_FALLBACK_SIGNATURE = 'Le support';
  * subCode 2388293, "too many variables for its length". The closing line is what
  * buys that ratio back. Both lines are emitted on the free-form path too, so the
  * two delivery modes render identically.
+ *
+ * v3 dropped the sender's name. v2 signed each message with the individual
+ * admin's name via a second variable; Rabotka answers as one team, and since a
+ * variable may never be empty there was no value that rendered as the team
+ * alone.
+ *
+ * v4 added the opening line, which says who is writing and about what. It did
+ * NOT win back the UTILITY category — v3 and v4 were both reclassified to
+ * MARKETING, and v2 holds UTILITY only because it carries the admin's name. The
+ * line stays because it is honest about the sender and it widens the
+ * variable-density margin; the marketing rate and opt-out exposure were
+ * accepted knowingly. See the registry entry.
  */
-export function formatAdminMessage(params: {
-  message: string;
-  adminName: string;
-}): string {
+export function formatAdminMessage(params: { message: string }): string {
   return [
     '*Rabotka*',
+    '',
+    'Message de notre équipe support concernant votre compte :',
     '',
     params.message,
     '',
     'Merci et à bientôt,',
-    `_${params.adminName} — L’équipe Rabotka_`,
+    '_L’équipe Rabotka_',
   ].join('\n');
 }
