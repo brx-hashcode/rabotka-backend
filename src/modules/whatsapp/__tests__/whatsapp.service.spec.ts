@@ -40,6 +40,7 @@ describe('WhatsAppService', () => {
   let service: WhatsAppService;
   let prisma: jest.Mocked<PrismaService>;
   let provider: jest.Mocked<WhatsappProvider>;
+  let messageLog: jest.Mocked<WhatsappMessageLogService>;
   let redis: { get: jest.Mock; set: jest.Mock; del: jest.Mock };
   let module: TestingModule;
 
@@ -104,9 +105,10 @@ describe('WhatsAppService', () => {
           },
         },
         {
-          // The delivery log is best-effort bookkeeping around the send, not
-          // part of what these tests assert. `begin` returns an id so the
-          // `internalMessageId` plumbing is still exercised.
+          // Best-effort bookkeeping around most sends, so `begin` returns an id
+          // and the `internalMessageId` plumbing stays exercised. The admin
+          // path asserts against it directly: that one is composed by hand and
+          // is the one support gets asked to trace.
           provide: WhatsappMessageLogService,
           useValue: {
             begin: jest.fn().mockResolvedValue('log-row-id'),
@@ -121,6 +123,7 @@ describe('WhatsAppService', () => {
     service = module.get<WhatsAppService>(WhatsAppService);
     prisma = module.get(PrismaService);
     provider = module.get(WHATSAPP_PROVIDER);
+    messageLog = module.get(WhatsappMessageLogService);
   });
 
   describe('isConfigured()', () => {
@@ -407,7 +410,6 @@ describe('WhatsAppService', () => {
     const base = {
       phone: PHONE,
       profileId: PROFILE_ID,
-      adminName: 'Fariol Blondeau',
       adminUserId: 'admin-uuid-1',
     };
 
@@ -424,7 +426,9 @@ describe('WhatsAppService', () => {
 
       const [, body] = (provider.sendText as jest.Mock).mock.calls[0];
       expect(body).toContain('Bonjour,\n\nVotre compte est actif.');
-      expect(body).toContain('_Fariol Blondeau — L’équipe Rabotka_');
+      // v3 signs as the team: no admin name anywhere in the body.
+      expect(body).toContain('_L’équipe Rabotka_');
+      expect(body).not.toContain('Fariol Blondeau');
     });
 
     it('sends the approved template, flattened, once the window has closed', async () => {
@@ -444,7 +448,61 @@ describe('WhatsAppService', () => {
       // Meta rejects newlines inside a variable, so the flattening has to
       // happen before the params leave this service.
       expect(params.message).toBe('Bonjour, · Votre compte est actif.');
-      expect(params.adminName).toBe('Fariol Blondeau');
+      // v3 has a single variable; a stray second one is a 132000 on send.
+      expect(Object.keys(params)).toEqual(['message']);
+    });
+
+    it('opens a delivery-log row in both modes, with the admin who sent it', async () => {
+      // This send used to call the provider directly, so the one message a
+      // human composed by hand was the one that could not be traced afterwards
+      // — and it carried no callback id for the status webhook to attach a
+      // receipt to either.
+      openWindow();
+      await service.sendAdminMessage({ ...base, message: 'Compte actif.' });
+
+      expect(messageLog.begin).toHaveBeenCalledWith(
+        PHONE,
+        expect.objectContaining({
+          kind: 'text',
+          profileId: PROFILE_ID,
+          sentById: 'admin-uuid-1',
+        }),
+      );
+      expect((provider.sendText as jest.Mock).mock.calls[0][2]).toEqual({
+        internalMessageId: 'log-row-id',
+      });
+
+      (messageLog.begin as jest.Mock).mockClear();
+      closedWindow();
+      await service.sendAdminMessage({ ...base, message: 'Compte actif.' });
+
+      expect(messageLog.begin).toHaveBeenCalledWith(
+        PHONE,
+        expect.objectContaining({
+          kind: 'template',
+          templateKey: 'adminMessage',
+          profileId: PROFILE_ID,
+          sentById: 'admin-uuid-1',
+        }),
+      );
+    });
+
+    it('marks the log row failed and still hands the error back', async () => {
+      // The controller turns this into the 503 that tells the admin the
+      // message never left; swallowing it here would report success.
+      openWindow();
+      (provider.sendText as jest.Mock).mockRejectedValueOnce(
+        new Error('Meta said no'),
+      );
+
+      const result = await service.sendAdminMessage({
+        ...base,
+        message: 'Compte actif.',
+      });
+
+      expect(result.sent).toBe(false);
+      expect(result.error).toContain('Meta said no');
+      expect(messageLog.markFailed).toHaveBeenCalled();
     });
 
     it('persists the delivered body with the sending admin, exactly once', async () => {
@@ -526,19 +584,6 @@ describe('WhatsAppService', () => {
       ).rejects.toBeInstanceOf(BadRequestException);
     });
 
-    it('falls back to a signature rather than sending an empty variable', async () => {
-      closedWindow();
-
-      await service.sendAdminMessage({
-        ...base,
-        adminName: '   ',
-        message: 'Compte actif.',
-      });
-
-      const [, , params] = (provider.sendTemplate as jest.Mock).mock.calls[0];
-      // Meta rejects an empty variable value outright.
-      expect(params.adminName).toBe('Le support');
-    });
   });
 
   describe('outbound duplicate guard', () => {

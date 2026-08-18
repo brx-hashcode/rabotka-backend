@@ -1042,18 +1042,40 @@ export const WHATSAPP_TEMPLATES = {
     // with subCode 2388293 — it wrapped its two variables in only ~27 characters
     // of static text. Do not point the env override at it; it was never
     // approved and every send through it would fail.
+    //
+    // Twilio still points at the two-variable v2 body. It is the inactive
+    // provider (WHATSAPP_PROVIDER=cloud) and this template now sends one
+    // variable, so flipping back to Twilio needs a matching Content update
+    // first — otherwise `{{2}}` renders empty and Meta rejects the send.
     contentSid: sid('TPL_ADMIN_MESSAGE', 'HX19ecc295fd0ad9070740b2db85154c95'),
-    category: 'UTILITY',
+    // MARKETING, and not by choice — Meta assigns the category and reclassified
+    // both attempts at a nameless body. Declared truthfully because it is what
+    // the delivery log stores as `template_category`: claiming UTILITY here
+    // would mislabel every admin message on the WhatsApp page and skew the
+    // per-template consumption grouping.
+    //
+    // The cost of the change, accepted deliberately: out-of-window admin
+    // messages now bill at the marketing rate and honour marketing opt-out, so
+    // an opted-out profile may never receive one. In-window sends are free-form
+    // and carry no category, which is the common case.
+    category: 'MARKETING',
     cloud: {
-      name: cloudName('TPL_CLOUD_ADMIN_MESSAGE', 'rabotka_admin_message_v2'),
+      // v4 drops the sender's name: v2 signed every message with the individual
+      // admin's, and Rabotka answers as one team. Authored in
+      // scripts/whatsapp-templates/definitions.ts.
+      //
+      // Three submissions pinned the cause. v2 (with the name) is UTILITY to
+      // this day; v3 (name removed) and v4 (name removed, plus a line naming
+      // the sender and subject) both came back MARKETING. Wording does not
+      // recover it — the individual's name is what made Meta read this as 1:1
+      // correspondence rather than a broadcast. Do not spend another
+      // submission on rephrasing.
+      name: cloudName('TPL_CLOUD_ADMIN_MESSAGE', 'rabotka_admin_message_v4'),
     },
-    variables: (p: { message: string; adminName: string }) => ({
+    variables: (p: { message: string }) => ({
       '1': p.message,
-      '2': p.adminName,
     }),
-  } satisfies WhatsAppTemplate<
-    [params: { message: string; adminName: string }]
-  >,
+  } satisfies WhatsAppTemplate<[params: { message: string }]>,
 } as const;
 
 export type WhatsAppTemplateName = keyof typeof WHATSAPP_TEMPLATES;

@@ -210,18 +210,12 @@ describe('buildComponents', () => {
   it('emits only a body for a template with no CTA button', () => {
     const components = buildComponents(
       'adminMessage',
-      WHATSAPP_TEMPLATES.adminMessage.variables({
-        message: 'Bonjour',
-        adminName: 'Fariol',
-      }),
+      WHATSAPP_TEMPLATES.adminMessage.variables({ message: 'Bonjour' }),
     );
     expect(components).toEqual([
       {
         type: 'body',
-        parameters: [
-          { type: 'text', text: 'Bonjour' },
-          { type: 'text', text: 'Fariol' },
-        ],
+        parameters: [{ type: 'text', text: 'Bonjour' }],
       },
     ]);
   });

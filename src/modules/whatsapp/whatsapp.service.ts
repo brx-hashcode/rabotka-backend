@@ -27,7 +27,6 @@ import {
   formatAdminMessage,
   flattenForTemplateVariable,
   ADMIN_MESSAGE_VAR_MAX,
-  ADMIN_MESSAGE_FALLBACK_SIGNATURE,
 } from './templates';
 import {
   IdempotencyService,
@@ -130,6 +129,40 @@ export class WhatsAppService {
     ctx: SendLogContext,
     send: (internalMessageId: string) => Promise<SendResult>,
   ): Promise<string | null> {
+    try {
+      return await this.logged(phone, ctx, send);
+    } catch (err) {
+      // An unconfigured provider is the expected state in dev and is already
+      // reported by `isConfigured()`; logging it at error level on every send
+      // would bury the failures that matter.
+      if (err instanceof WhatsappError && err.code === 'NOT_CONFIGURED') {
+        this.logger.warn(
+          `WhatsApp ${what} to ${phone} skipped: ${err.message}`,
+        );
+        return null;
+      }
+      this.logger.error(
+        `WhatsApp ${what} to ${phone} failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * The logging half of `attempt`, with the failure left to propagate.
+   *
+   * Split out for `sendAdminMessage`, which must hand its error back to the
+   * controller (that is what becomes the 503 telling the admin the message
+   * never left). Before this existed it called the provider directly and so
+   * wrote no log row at all — an admin-composed message was the one kind of
+   * send that could not be traced afterwards, which is exactly the kind most
+   * likely to be asked about.
+   */
+  private async logged(
+    phone: string,
+    ctx: SendLogContext,
+    send: (internalMessageId: string) => Promise<SendResult>,
+  ): Promise<string | null> {
     // Opened BEFORE the send, so its id can ride along as
     // `biz_opaque_callback_data` and come back on the status webhook. That is
     // the whole correlation mechanism — writing the row afterwards would leave
@@ -146,20 +179,7 @@ export class WhatsAppService {
       return result.providerMessageId;
     } catch (err) {
       await this.messageLog.markFailed(logId, this.provider.name, err);
-
-      // An unconfigured provider is the expected state in dev and is already
-      // reported by `isConfigured()`; logging it at error level on every send
-      // would bury the failures that matter.
-      if (err instanceof WhatsappError && err.code === 'NOT_CONFIGURED') {
-        this.logger.warn(
-          `WhatsApp ${what} to ${phone} skipped: ${err.message}`,
-        );
-        return null;
-      }
-      this.logger.error(
-        `WhatsApp ${what} to ${phone} failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
-      return null;
+      throw err;
     }
   }
 
@@ -548,13 +568,9 @@ export class WhatsAppService {
     phone: string;
     profileId: string;
     message: string;
-    adminName: string;
     adminUserId?: string;
   }): Promise<AdminMessageDelivery> {
     const { phone, profileId, message, adminUserId } = params;
-    const adminName =
-      flattenForTemplateVariable(params.adminName) ||
-      ADMIN_MESSAGE_FALLBACK_SIGNATURE;
 
     const { open } = await this.isServiceWindowOpen(profileId);
     const mode: AdminMessageMode = open ? 'FREE_FORM' : 'TEMPLATE';
@@ -575,17 +591,41 @@ export class WhatsAppService {
       );
     }
 
-    const body = formatAdminMessage({ message: text, adminName });
+    const body = formatAdminMessage({ message: text });
 
     try {
-      if (open) {
-        await this.provider.sendText(phone, body);
-      } else {
-        await this.provider.sendTemplate(phone, 'adminMessage', {
-          message: text,
-          adminName,
-        });
-      }
+      // Through `logged` rather than straight at the provider: this is the one
+      // send an admin composes by hand, so it is the one most likely to be
+      // asked about later — and it was the only one leaving no trace in the
+      // delivery log, nor any `biz_opaque_callback_data` for the status webhook
+      // to correlate a receipt against.
+      await this.logged(
+        phone,
+        open
+          ? {
+              kind: 'text',
+              bodyPreview: body,
+              profileId,
+              sentById: adminUserId,
+            }
+          : {
+              kind: 'template',
+              bodyPreview: body,
+              templateKey: 'adminMessage',
+              profileId,
+              sentById: adminUserId,
+              variables: { message: text },
+            },
+        (logId) =>
+          open
+            ? this.provider.sendText(phone, body, this.sendOpts(logId))
+            : this.provider.sendTemplate(
+                phone,
+                'adminMessage',
+                { message: text },
+                this.sendOpts(logId),
+              ),
+      );
     } catch (err) {
       // An absent client is reported as "not configured" rather than as a
       // provider error — it is the one failure the admin can act on themselves.

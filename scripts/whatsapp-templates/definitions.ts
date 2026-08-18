@@ -31,6 +31,7 @@ export const AUTHORED_KEYS: ReadonlySet<WhatsAppTemplateName> = new Set([
   'contactUnlockedRecommendation',
   'kycRejected',
   'accountSuspended',
+  'adminMessage',
 ]);
 
 /**
@@ -252,6 +253,62 @@ export function authoredTemplates(): Partial<
               example: ['https://rabotka.work/s/home'],
             },
           ],
+        },
+      ],
+    },
+
+    /**
+     * v4: no sender name, and anchored as account support.
+     *
+     * v2's closing line was `_{{2}} — L’équipe Rabotka_`, so every message an
+     * admin sent was signed with that admin's own name. Rabotka answers as one
+     * team, and a variable may never be empty — there was no value of `{{2}}`
+     * that rendered as the team alone, which is why this needed a new version
+     * rather than a code change.
+     *
+     * Submitted as MARKETING because that is what Meta assigns it, not because
+     * it is one. Asking for UTILITY only earns a silent reclassification —
+     * `welcomePlatform` v3 sat pending for hours over exactly that, and v4 was
+     * approved in minutes once it asked for the category Meta wanted.
+     *
+     * Three submissions pinned the cause, so do not spend a fourth on
+     * rephrasing: v2 (signed with the admin's own name) is UTILITY to this day;
+     * v3 (name removed) came back MARKETING; v4 (name removed, plus this
+     * opening line naming the sender and the subject) came back MARKETING too.
+     * The individual's name is what made Meta read this as 1:1 correspondence
+     * rather than a broadcast, and the team decided a nameless message is worth
+     * the marketing rate and the opt-out exposure.
+     *
+     * The opening line stays regardless: it says who is writing and about what,
+     * and its static text widens the variable-density margin v1 was rejected on
+     * (subCode 2388293). It is deliberately not "réponse à votre demande":
+     * plenty of these are proactive — a KYC chaser, a penalty notice — and the
+     * template must not claim the user asked first.
+     *
+     * Must stay byte-identical to `formatAdminMessage`, which renders the same
+     * shape on the free-form path — the two modes are meant to be
+     * indistinguishable to the reader.
+     */
+    adminMessage: {
+      name: 'rabotka_admin_message_v4',
+      language: 'fr',
+      category: 'MARKETING',
+      components: [
+        {
+          type: 'BODY',
+          text: [
+            '*Rabotka*',
+            '',
+            'Message de notre équipe support concernant votre compte :',
+            '',
+            '{{1}}',
+            '',
+            'Merci et à bientôt,',
+            '_L’équipe Rabotka_',
+          ].join('\n'),
+          example: {
+            body_text: [['Votre compte est actif.']],
+          },
         },
       ],
     },
