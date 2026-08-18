@@ -82,10 +82,12 @@ export const ADMIN_MESSAGE_VAR_MAX = 700;
  * variable may never be empty there was no value that rendered as the team
  * alone.
  *
- * v4 added the opening line. Meta approved v3 but reclassified it UTILITY ->
- * MARKETING — a higher rate, and subject to marketing opt-out, which would have
- * cost some profiles their support replies entirely. Naming the sender and the
- * subject restores the utility signal without restoring the name.
+ * v4 added the opening line, which says who is writing and about what. It did
+ * NOT win back the UTILITY category — v3 and v4 were both reclassified to
+ * MARKETING, and v2 holds UTILITY only because it carries the admin's name. The
+ * line stays because it is honest about the sender and it widens the
+ * variable-density margin; the marketing rate and opt-out exposure were
+ * accepted knowingly. See the registry entry.
  */
 export function formatAdminMessage(params: { message: string }): string {
   return [

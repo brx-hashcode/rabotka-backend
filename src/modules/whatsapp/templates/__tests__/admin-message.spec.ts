@@ -71,9 +71,9 @@ describe('formatAdminMessage', () => {
    * payload in `definitions.ts`, resubmit with `create.ts`, wait for the
    * verdict, then change this expectation to match.
    *
-   * Watch the category on that verdict. v3 was approved but reclassified
-   * UTILITY -> MARKETING, which bills higher and honours marketing opt-out;
-   * the opening line here is what carries the utility signal.
+   * The category is MARKETING and cannot be argued back: v2 kept UTILITY only
+   * because it was signed with the admin's own name, and both nameless
+   * versions were reclassified. Accepted deliberately — see the registry entry.
    */
   it('renders exactly the approved template body', () => {
     expect(

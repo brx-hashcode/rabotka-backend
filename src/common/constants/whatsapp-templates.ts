@@ -1048,17 +1048,28 @@ export const WHATSAPP_TEMPLATES = {
     // variable, so flipping back to Twilio needs a matching Content update
     // first — otherwise `{{2}}` renders empty and Meta rejects the send.
     contentSid: sid('TPL_ADMIN_MESSAGE', 'HX19ecc295fd0ad9070740b2db85154c95'),
-    category: 'UTILITY',
+    // MARKETING, and not by choice — Meta assigns the category and reclassified
+    // both attempts at a nameless body. Declared truthfully because it is what
+    // the delivery log stores as `template_category`: claiming UTILITY here
+    // would mislabel every admin message on the WhatsApp page and skew the
+    // per-template consumption grouping.
+    //
+    // The cost of the change, accepted deliberately: out-of-window admin
+    // messages now bill at the marketing rate and honour marketing opt-out, so
+    // an opted-out profile may never receive one. In-window sends are free-form
+    // and carry no category, which is the common case.
+    category: 'MARKETING',
     cloud: {
       // v4 drops the sender's name: v2 signed every message with the individual
       // admin's, and Rabotka answers as one team. Authored in
       // scripts/whatsapp-templates/definitions.ts.
       //
-      // v3 did the same and was approved, but Meta reclassified it UTILITY ->
-      // MARKETING, which bills higher and honours marketing opt-out — a
-      // support reply that silently never arrives. v4 opens on a line naming
-      // the sender and the subject, which is what carries the utility signal
-      // now that the name is gone. Do not point the override at v3.
+      // Three submissions pinned the cause. v2 (with the name) is UTILITY to
+      // this day; v3 (name removed) and v4 (name removed, plus a line naming
+      // the sender and subject) both came back MARKETING. Wording does not
+      // recover it — the individual's name is what made Meta read this as 1:1
+      // correspondence rather than a broadcast. Do not spend another
+      // submission on rephrasing.
       name: cloudName('TPL_CLOUD_ADMIN_MESSAGE', 'rabotka_admin_message_v4'),
     },
     variables: (p: { message: string }) => ({
