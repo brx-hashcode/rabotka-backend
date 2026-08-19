@@ -6,7 +6,7 @@ import {
   LlmNoProviderError,
 } from '../llm.errors';
 import type { LlmProviderSpec } from '../llm.types';
-import { TIER_CHAINS } from '../models.config';
+import { PROVIDER_API_KEY_ENV, TIER_CHAINS } from '../models.config';
 
 jest.spyOn(Logger.prototype, 'log').mockImplementation(() => {});
 jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => {});
@@ -21,11 +21,17 @@ jest.spyOn(Logger.prototype, 'debug').mockImplementation(() => {});
 const CHAIN = TIER_CHAINS.standard.map((s) => s.provider);
 const [FIRST, SECOND, THIRD] = CHAIN;
 
-const KEYS = {
-  GOOGLE_API_KEY: 'g',
-  MISTRAL_API_KEY: 'm',
-  OPENAI_API_KEY: 'o',
-};
+/**
+ * A credential for every provider in the registry, derived rather than listed.
+ *
+ * Pinned by hand, this drifted the moment a provider was added: `resolveChain`
+ * silently dropped the new one for want of a key, so the service called a
+ * different chain than the one these tests had computed, and four of them
+ * failed on an ordering that was never wrong.
+ */
+const KEYS: Record<string, string> = Object.fromEntries(
+  Object.values(PROVIDER_API_KEY_ENV).map((env) => [env, 'k']),
+);
 
 function httpError(status: number) {
   return Object.assign(new Error(`http ${status}`), { status });
@@ -177,23 +183,23 @@ describe('LlmService', () => {
   });
 
   it('throws once every provider has failed', async () => {
-    const factory = makeFactory({
-      [FIRST]: [httpError(429)],
-      [SECOND]: [httpError(429)],
-      [THIRD]: [httpError(429)],
-    });
+    // The whole chain, however long it is — adding a provider must extend this
+    // test, not break it.
+    const factory = makeFactory(
+      Object.fromEntries(CHAIN.map((p) => [p, [httpError(429)]])),
+    );
 
     await expect(
       build(factory, makeBreaker()).invoke('hi', { tier: 'standard' }),
     ).rejects.toBeInstanceOf(LlmChainExhaustedError);
-    expect(factory.calls).toEqual([FIRST, SECOND, THIRD]);
+    expect(factory.calls).toEqual(CHAIN);
   });
 
   it('throws when the tier has no configured credential', async () => {
     process.env = { ...original };
-    delete process.env.GOOGLE_API_KEY;
-    delete process.env.MISTRAL_API_KEY;
-    delete process.env.OPENAI_API_KEY;
+    for (const env of Object.values(PROVIDER_API_KEY_ENV)) {
+      delete process.env[env];
+    }
 
     await expect(
       build(makeFactory({}), makeBreaker()).invoke('hi', { tier: 'standard' }),
