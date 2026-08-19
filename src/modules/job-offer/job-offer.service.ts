@@ -31,6 +31,7 @@ import {
   haversineKm,
   proximityScore,
   urgencyScore,
+  URGENCY_HALF_LIFE_HOURS,
 } from '../../common/services/geocoding/geo.utils';
 import { CreateJobOfferDto } from './dto/create-job-offer.dto';
 import { AdminUpdateJobOfferDto } from './dto/admin-update-job-offer.dto';
@@ -737,6 +738,11 @@ export class JobOfferService {
     const categorySet = new Set(workerCategoryIds ?? []);
     const ordered = workerCoords || categorySet.size > 0 ? [...slice] : slice;
     if (ordered !== slice) {
+      // One clock for the whole sort. `scoreOf` runs inside the comparator, so
+      // a `Date.now()` read in there was re-read on every comparison — not just
+      // a tie-break wobble but an inconsistent comparator, which a sort is
+      // entitled to turn into an arbitrary order.
+      const now = Date.now();
       ordered.sort((a, b) => {
         const scoreOf = (o: (typeof rows)[number]): number => {
           const prox =
@@ -753,7 +759,9 @@ export class JobOfferService {
           // an undated offer takes the neutral midpoint rather than 0, which
           // would sink it beneath every dated offer for no reason.
           const urgency =
-            o.scheduled_at === null ? 0.5 : urgencyScore(o.scheduled_at);
+            o.scheduled_at === null
+              ? 0.5
+              : urgencyScore(o.scheduled_at, URGENCY_HALF_LIFE_HOURS, now);
           const category =
             o.category_id && categorySet.has(o.category_id) ? 1.0 : 0.0;
           return 0.45 * prox + 0.3 * urgency + 0.25 * category;
@@ -1069,7 +1077,7 @@ export class JobOfferService {
       !TERMINAL_JOB_OFFER_STATUSES.includes(status)
     ) {
       throw new BadRequestException(
-        "Cette offre est clôturée : ses candidats ont déjà été soldés. Republiez-la ou créez-en une nouvelle plutôt que de la rouvrir.",
+        'Cette offre est clôturée : ses candidats ont déjà été soldés. Republiez-la ou créez-en une nouvelle plutôt que de la rouvrir.',
       );
     }
 
@@ -1277,7 +1285,9 @@ export class JobOfferService {
     // per offer — same shape as the profile list's unpaid-penalty count. The
     // list DTO caps `limit` at 100 and the export pages at 100, so this reads
     // at most 100 offers' worth of relations at a time.
-    const aggregates = await this.loadJobOfferAggregates(offers.map((o) => o.id));
+    const aggregates = await this.loadJobOfferAggregates(
+      offers.map((o) => o.id),
+    );
 
     const data: AdminJobOfferListItem[] = offers.map((o) => ({
       id: o.id,
@@ -1382,7 +1392,10 @@ export class JobOfferService {
         }),
         this.prisma.rating.findMany({
           where: { assignment: { job_offer_id: { in: offerIds } } },
-          select: { score: true, assignment: { select: { job_offer_id: true } } },
+          select: {
+            score: true,
+            assignment: { select: { job_offer_id: true } },
+          },
         }),
       ]);
 
@@ -1417,7 +1430,8 @@ export class JobOfferService {
       ) {
         agg.cancelledAssignmentsCount += 1;
       }
-      const name = `${a.worker.first_name ?? ''} ${a.worker.last_name ?? ''}`.trim();
+      const name =
+        `${a.worker.first_name ?? ''} ${a.worker.last_name ?? ''}`.trim();
       if (name) agg.workerNames.push(name);
     }
 
@@ -1458,7 +1472,9 @@ export class JobOfferService {
       // Rounded to one decimal: the raw mean of a handful of integer scores is
       // a long float that means nothing more than 4,3 does.
       agg.ratingAvg =
-        agg.ratingCount > 0 ? Math.round((sum / agg.ratingCount) * 10) / 10 : null;
+        agg.ratingCount > 0
+          ? Math.round((sum / agg.ratingCount) * 10) / 10
+          : null;
     }
 
     return byOffer;
