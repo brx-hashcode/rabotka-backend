@@ -27,12 +27,13 @@ function makePrisma(
   };
 }
 
-function makeService(prisma: ReturnType<typeof makePrisma>) {
+function makeService(prisma: ReturnType<typeof makePrisma> | undefined) {
   const service = new WhatsappMessageLogService(prisma as never);
   // The service logs its own swallowed failures; the assertions below are
   // about behaviour, and a screenful of expected warnings hides real ones.
   jest.spyOn(service['logger'], 'warn').mockImplementation(() => undefined);
   jest.spyOn(service['logger'], 'debug').mockImplementation(() => undefined);
+  jest.spyOn(service['logger'], 'error').mockImplementation(() => undefined);
   return service;
 }
 
@@ -179,6 +180,41 @@ describe('WhatsappMessageLogService', () => {
       const prisma = makePrisma();
       prisma.whatsappMessage.create.mockRejectedValue(new Error('db down'));
       const service = makeService(prisma);
+
+      await expect(
+        service.begin('+242069917686', { kind: 'text', bodyPreview: 'hi' }),
+      ).resolves.toBeNull();
+    });
+
+    it('shouts at ERROR when a row cannot be opened, naming what went unlogged', async () => {
+      // The incident this file now guards: `begin()` failed on every single
+      // send for two days and the only trace was a warn that read like noise.
+      // A send nobody can trace is an operational hole, so it is logged at
+      // error, with enough context to say WHICH send vanished.
+      const prisma = makePrisma();
+      prisma.whatsappMessage.create.mockRejectedValue(new Error('db down'));
+      const service = makeService(prisma);
+      const error = jest.spyOn(service['logger'], 'error');
+
+      await service.begin('+242069917686', {
+        kind: 'template',
+        bodyPreview: '[TPL:otp]',
+        templateKey: 'otp',
+      });
+
+      expect(error).toHaveBeenCalledTimes(1);
+      const [message] = error.mock.calls[0];
+      expect(message).toContain('UNTRACEABLE');
+      expect(message).toContain('kind=template');
+      expect(message).toContain('template=otp');
+    });
+
+    it('survives its own dependency being missing', async () => {
+      // Exactly what `tsx` did to this service: esbuild emits no
+      // `design:paramtypes`, so Nest built it with no constructor arguments
+      // and `this.prisma` was undefined on every call. The send must still go
+      // out — losing the log row is bad, losing the message is worse.
+      const service = makeService(undefined);
 
       await expect(
         service.begin('+242069917686', { kind: 'text', bodyPreview: 'hi' }),

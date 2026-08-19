@@ -10,6 +10,19 @@ import {
 } from './help-docs.config';
 import type { CorpusChunk } from './chunker';
 
+/**
+ * Who is asking, as far as the corpus is concerned.
+ *
+ * `anonymous` is a caller with no account — reachable since the assistant
+ * started answering unregistered numbers.
+ */
+export type HelpAudience = 'worker' | 'employer' | 'anonymous';
+
+/** The `audience` payload values a given caller is allowed to see. */
+export function audienceValues(audience: HelpAudience): string[] {
+  return audience === 'anonymous' ? ['all'] : ['all', audience];
+}
+
 export interface HelpHit {
   id: string;
   score: number;
@@ -177,11 +190,18 @@ export class HelpDocsStore {
    * `must` clause, which EXCLUDES any point lacking the key — which is exactly
    * why `HELP_SCHEMA_VERSION` moved to 2 and the corpus must be re-ingested
    * after this change, rather than the filter silently returning nothing.
+   *
+   * `'anonymous'` is the caller with no account, and it is NOT the same as
+   * omitting the argument: undefined means "no filter, every passage", while
+   * anonymous means `all` and only `all`. Someone who has not signed up cannot
+   * act on a worker's *Mes réalisations* or an employer's *Candidatures
+   * reçues* — passages about screens they cannot reach read as instructions
+   * they are failing to follow.
    */
   async search(
     query: string,
     limit: number,
-    audience?: 'worker' | 'employer',
+    audience?: HelpAudience,
     /**
      * Drop the lexical leg.
      *
@@ -217,7 +237,9 @@ export class HelpDocsStore {
         ...(audience
           ? {
               filter: {
-                must: [{ key: 'audience', match: { any: ['all', audience] } }],
+                must: [
+                  { key: 'audience', match: { any: audienceValues(audience) } },
+                ],
               },
             }
           : {}),

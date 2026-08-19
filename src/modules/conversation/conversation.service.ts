@@ -15,6 +15,8 @@ import {
   stripChatFormattingChars,
 } from '../bot/utils/chat-input';
 import { welcomeUnregisteredMessage } from '../bot/messages/welcome.messages';
+import { CMD_ACCOUNT, CMD_ANONYMOUS_CARD } from '../bot/bot.constants';
+import { VovaService } from '../rag/vova.service';
 
 const DEFAULT_BOT_SESSION_ID = 'default';
 const USER_LOCK_TTL = 30;
@@ -31,6 +33,7 @@ export class ConversationService {
     private readonly whatsApp: WhatsAppService,
     @Inject(REDIS_CONNECTION) private readonly redis: Redis,
     private readonly configService: ConfigService,
+    private readonly vova: VovaService,
   ) {}
 
   /**
@@ -41,18 +44,22 @@ export class ConversationService {
     phone: string,
     text: string,
   ): Promise<{ profileId: string | null; replies: string[] }> {
+    // Normalised BEFORE the unregistered branch, not after it.
+    //
+    // It used to be computed below, which meant the anonymous path saw the raw
+    // text — so `/compte` still carried its slash and matched nothing. Both
+    // branches want the same expansion, and it is a pure function of the input.
+    const textForBot = expandSlashCommand(stripChatFormattingChars(text));
+
     // Fetch the full profile once, by phone. The orchestrator would otherwise
     // re-query the same row by id on every message — this hands it straight to
     // handle() so we pay one DB round-trip per message instead of two.
     const profile = await this.botOrchestrator.loadProfileByPhone(phone);
 
     if (profile == null) {
-      this.logger.debug(
-        `Incoming message from unknown phone ${phone}; not registered`,
-      );
       return {
         profileId: null,
-        replies: [welcomeUnregisteredMessage()],
+        replies: await this.handleUnregistered(phone, textForBot),
       };
     }
 
@@ -70,8 +77,6 @@ export class ConversationService {
       );
       return { profileId: profile.id, replies: [] };
     }
-
-    const textForBot = expandSlashCommand(stripChatFormattingChars(text));
 
     try {
       const now = new Date();
@@ -129,6 +134,68 @@ export class ConversationService {
         `BotOrchestrator returned ${filtered.length} reply message(s) for profile ${profile.id}`,
       );
       return { profileId: profile.id, replies: filtered };
+    } finally {
+      await this.redis.del(lockKey);
+    }
+  }
+
+  /**
+   * A number with no profile.
+   *
+   * Until now this was one line: the signup card, whatever they wrote. The
+   * people most likely to ask « c'est quoi Rabotka ? » are precisely the ones
+   * who have not signed up, and they were the only ones the assistant could
+   * not answer.
+   *
+   * Nothing is written to Postgres here. `conversations.profile_id` and
+   * `messages.profile_id` are both required, so there is no row to attach a
+   * stranger's words to — the memory lives in Redis for half an hour, and the
+   * durable trace is the delivery log, which keys on the phone.
+   */
+  private async handleUnregistered(
+    phone: string,
+    textForBot: string,
+  ): Promise<string[]> {
+    const normalized = textForBot.trim().toLowerCase();
+
+    // Exact matches, for the same reason the orchestrator's own gate is:
+    // « Bonjour Rabotka, je cherche une opportunité » is a question, not a
+    // greeting, and answering it with a card is how the product's own front
+    // door got swallowed once already.
+    //
+    // `CMD_ANONYMOUS_CARD` is narrower than `CMD_MENU` on purpose — « bonjour »
+    // reaches the assistant, because a stranger opening a conversation deserves
+    // an answer rather than a card. See the note on that constant.
+    if (
+      CMD_ACCOUNT.includes(normalized) ||
+      CMD_ANONYMOUS_CARD.includes(normalized)
+    ) {
+      return [welcomeUnregisteredMessage()];
+    }
+
+    // Same guard as the registered path, keyed by phone since there is no id.
+    // Without it two fast messages start two concurrent model runs for the
+    // same stranger — and strangers are exactly who we are rate-limiting.
+    const lockKey = `${USER_LOCK_PREFIX}anon:${phone}`;
+    const acquired = await this.redis.set(
+      lockKey,
+      '1',
+      'EX',
+      USER_LOCK_TTL,
+      'NX',
+    );
+    if (acquired === null) {
+      this.logger.debug(
+        `Anonymous ${phone} locked — dropping concurrent message`,
+      );
+      return [];
+    }
+
+    try {
+      const reply = await this.vova.handleAnonymous(phone, textForBot);
+      // null is "not handled" — disabled, over budget, or failed. The card is
+      // exactly what this number would have got before any of this existed.
+      return reply ?? [welcomeUnregisteredMessage()];
     } finally {
       await this.redis.del(lockKey);
     }

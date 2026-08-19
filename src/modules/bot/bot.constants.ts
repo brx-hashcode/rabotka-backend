@@ -72,6 +72,65 @@ export const CMD_PAY = [
 ];
 
 /**
+ * "I want an account" — the one command an unregistered number can act on.
+ *
+ * Only reachable from the anonymous path: a registered user typing « compte »
+ * keeps whatever the bot already answers them. `expandSlashCommand` rewrites
+ * `/compte` to `compte` at the entry point, so only the bare words are listed,
+ * accented and unaccented like `CMD_PAY` — phone keyboards differ.
+ *
+ * Matched EXACTLY, never by prefix. Prefix matching is what swallowed the
+ * landing page's own CTA (« Bonjour Rabotka, je cherche… ») and sent the menu
+ * card to the first message a new user ever writes.
+ */
+/**
+ * The words a number with no account still gets a card for, without a model.
+ *
+ * A deliberately smaller set than `CMD_MENU`. That list mixes two kinds of
+ * word: navigation commands, and things people actually say.
+ *
+ * « bonjour », « aide » and « help » are the second kind, and answering them
+ * with a card was wrong. Someone with no account who writes « bonjour » is
+ * opening a conversation — the assistant can greet them, say what Rabotka is in
+ * a line, and point at `/compte`. A card is the reply you give when you have
+ * nothing to say, and here we do.
+ *
+ * What stays here is the vocabulary that means "show me the thing": *menu*,
+ * *start*, *démarrer*. Those are documented entry points, printed in templates,
+ * and they must not depend on a model provider being up.
+ *
+ * Nothing is lost when the assistant is off or over budget — the caller falls
+ * back to the same card either way.
+ */
+export const CMD_ANONYMOUS_CARD = [
+  'menu',
+  '*',
+  'start',
+  'démarrer',
+  'demarrer',
+  'commencer',
+  // `expandSlashCommand` rewrites a bare "/" to "menu" before this is reached;
+  // kept for any caller matching against raw input.
+  '/',
+];
+
+export const CMD_ACCOUNT = [
+  'compte',
+  'inscription',
+  "s'inscrire",
+  's inscrire',
+  'sinscrire',
+  'creer un compte',
+  'créer un compte',
+  'creer compte',
+  'créer compte',
+  'je veux un compte',
+  'signup',
+  'sign up',
+  'register',
+];
+
+/**
  * Reach a human.
  *
  * Answered for EVERY account state, unlike the rest of the vocabulary. The

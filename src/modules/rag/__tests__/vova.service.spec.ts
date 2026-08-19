@@ -22,6 +22,11 @@ function makeAgent(text = 'réponse de Vova') {
       destination: 'jobs',
       sanitizerBlocked: [],
     }),
+    handleAnonymous: jest.fn().mockResolvedValue({
+      text,
+      origin: 'agent',
+      sanitizerBlocked: [],
+    }),
   };
 }
 
@@ -40,12 +45,33 @@ function makeOffers(pending: string | null = null) {
   };
 }
 
+function makeAnonymous(
+  over: Partial<{
+    history: jest.Mock;
+    remember: jest.Mock;
+    consume: jest.Mock;
+  }> = {},
+) {
+  return {
+    history: jest.fn(() => Promise.resolve([])),
+    remember: jest.fn(() => Promise.resolve()),
+    consume: jest.fn(() => Promise.resolve(true)),
+    ...over,
+  };
+}
+
 const build = (
   agent: ReturnType<typeof makeAgent>,
   values?: Record<string, string>,
   offers = makeOffers(),
+  anonymous = makeAnonymous(),
 ) =>
-  new VovaService(agent as never, makeConfig(values) as never, offers as never);
+  new VovaService(
+    agent as never,
+    makeConfig(values) as never,
+    offers as never,
+    anonymous as never,
+  );
 
 /** A profile id whose stable bucket is below `percent`. */
 function idInBucket(percent: number): string {
@@ -149,6 +175,7 @@ describe('VovaService', () => {
       makeAgent() as never,
       config as never,
       makeOffers() as never,
+      makeAnonymous() as never,
     );
     expect(await service.handle(PROFILE, 'bonjour')).toBeNull();
   });
@@ -246,5 +273,102 @@ describe('the app card', () => {
 
     expect(agent.handle).toHaveBeenCalled();
     expect(replies).toHaveLength(1);
+  });
+});
+
+/**
+ * The unregistered path.
+ *
+ * Every "no" here must produce `null`, because `null` is what makes the caller
+ * send the signup card — the behaviour a stranger got before any of this
+ * existed. A bug that returned a string instead would put a generated reply in
+ * front of someone the assistant was switched off for.
+ */
+describe('VovaService.handleAnonymous', () => {
+  const ON = { 'vova.enabled': 'true', 'vova.anonymous_enabled': 'true' };
+
+  it('answers a stranger when both switches are on', async () => {
+    const agent = makeAgent('Rabotka met en relation…');
+    const service = build(agent, ON);
+
+    expect(
+      await service.handleAnonymous('+242060000001', 'c’est quoi Rabotka ?'),
+    ).toEqual(['Rabotka met en relation…']);
+  });
+
+  it('stays silent when only the master switch is on', async () => {
+    // The assistant answering registered users must not imply it answers
+    // strangers: that is a separate decision with a separate risk.
+    const agent = makeAgent();
+    const service = build(agent, { 'vova.enabled': 'true' });
+
+    expect(
+      await service.handleAnonymous('+242060000001', 'bonjour ?'),
+    ).toBeNull();
+    expect(agent.handleAnonymous).not.toHaveBeenCalled();
+  });
+
+  it('stays silent when the master switch is off, even if anonymous is on', async () => {
+    const agent = makeAgent();
+    const service = build(agent, { 'vova.anonymous_enabled': 'true' });
+
+    expect(
+      await service.handleAnonymous('+242060000001', 'bonjour ?'),
+    ).toBeNull();
+    expect(agent.handleAnonymous).not.toHaveBeenCalled();
+  });
+
+  it('does not call the model once the daily budget is spent', async () => {
+    const agent = makeAgent();
+    const anonymous = makeAnonymous({
+      consume: jest.fn(() => Promise.resolve(false)),
+    });
+    const service = build(agent, ON, makeOffers(), anonymous);
+
+    expect(
+      await service.handleAnonymous('+242060000001', 'et donc ?'),
+    ).toBeNull();
+    expect(agent.handleAnonymous).not.toHaveBeenCalled();
+  });
+
+  it('passes the stored turns to the agent and records the exchange', async () => {
+    const past = [{ role: 'user' as const, text: 'c’est quoi Rabotka ?' }];
+    const anonymous = makeAnonymous({
+      history: jest.fn(() => Promise.resolve(past)),
+    });
+    const agent = makeAgent('Oui, exactement.');
+    const service = build(agent, ON, makeOffers(), anonymous);
+
+    await service.handleAnonymous('+242060000001', 'oui');
+
+    expect(agent.handleAnonymous).toHaveBeenCalledWith(
+      expect.objectContaining({ text: 'oui', history: past }),
+    );
+    expect(anonymous.remember).toHaveBeenCalledWith(
+      '+242060000001',
+      'oui',
+      'Oui, exactement.',
+    );
+  });
+
+  it('falls back to the card when the agent throws', async () => {
+    const agent = makeAgent();
+    agent.handleAnonymous.mockRejectedValue(new Error('providers down'));
+    const service = build(agent, ON);
+
+    expect(
+      await service.handleAnonymous('+242060000001', 'bonjour ?'),
+    ).toBeNull();
+  });
+
+  it('never returns an app card — a stranger has nothing to open', async () => {
+    const service = build(makeAgent('Voici comment ça marche.'), ON);
+    const replies = await service.handleAnonymous(
+      '+242060000001',
+      'comment ça marche ?',
+    );
+
+    expect(replies).toHaveLength(1);
+    expect(replies?.[0]).not.toContain('[TPL:');
   });
 });
