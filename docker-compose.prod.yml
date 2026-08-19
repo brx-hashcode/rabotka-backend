@@ -12,8 +12,6 @@ services:
     environment:
       - NODE_ENV=production
       - RUN_QUEUE_WORKER=false
-    volumes:
-      - fastembed_cache:/var/cache/fastembed
     networks:
       - public
       - internal
@@ -39,14 +37,9 @@ services:
     environment:
       - NODE_ENV=production
       - RUN_QUEUE_WORKER=true
-    volumes:
-      - fastembed_cache:/var/cache/fastembed
     networks:
       - internal
 
-volumes:
-  fastembed_cache:
-    name: rabotka_fastembed_cache
 
 networks:
   public:
