@@ -50,6 +50,8 @@ const PROVIDER_PATTERNS = [
   'anthropic',
   'claude',
   'llama',
+  'groq',
+  'deepseek',
   'quelle version',
   'which model',
   'what model',

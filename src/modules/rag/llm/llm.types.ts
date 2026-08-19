@@ -16,7 +16,12 @@
  */
 export type LlmTier = 'cheap' | 'standard';
 
-export type LlmProviderName = 'google' | 'mistral' | 'openai';
+export type LlmProviderName =
+  | 'google'
+  | 'mistral'
+  | 'openai'
+  | 'groq'
+  | 'deepseek';
 
 export interface LlmProviderSpec {
   provider: LlmProviderName;

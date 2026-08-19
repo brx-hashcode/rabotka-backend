@@ -72,6 +72,34 @@ export const CMD_PAY = [
 ];
 
 /**
+ * "I want an account" — the one command an unregistered number can act on.
+ *
+ * Only reachable from the anonymous path: a registered user typing « compte »
+ * keeps whatever the bot already answers them. `expandSlashCommand` rewrites
+ * `/compte` to `compte` at the entry point, so only the bare words are listed,
+ * accented and unaccented like `CMD_PAY` — phone keyboards differ.
+ *
+ * Matched EXACTLY, never by prefix. Prefix matching is what swallowed the
+ * landing page's own CTA (« Bonjour Rabotka, je cherche… ») and sent the menu
+ * card to the first message a new user ever writes.
+ */
+export const CMD_ACCOUNT = [
+  'compte',
+  'inscription',
+  "s'inscrire",
+  's inscrire',
+  'sinscrire',
+  'creer un compte',
+  'créer un compte',
+  'creer compte',
+  'créer compte',
+  'je veux un compte',
+  'signup',
+  'sign up',
+  'register',
+];
+
+/**
  * Reach a human.
  *
  * Answered for EVERY account state, unlike the rest of the vocabulary. The

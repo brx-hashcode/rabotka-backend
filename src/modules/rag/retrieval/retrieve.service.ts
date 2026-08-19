@@ -1,7 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { expandQuery } from './aliases';
-import { HelpDocsStore, type HelpHit } from './help-docs.store';
+import {
+  HelpDocsStore,
+  type HelpAudience,
+  type HelpHit,
+} from './help-docs.store';
 import { readNumber } from '../shared/config';
 
 export interface RetrievalResult {
@@ -43,7 +47,7 @@ export class HelpRetrieveService {
   async search(
     question: string,
     limit?: number,
-    audience?: 'worker' | 'employer',
+    audience?: HelpAudience,
     /** Non-French questions skip the English-only lexical leg. */
     denseOnly = false,
   ): Promise<RetrievalResult> {

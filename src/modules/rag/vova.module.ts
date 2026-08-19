@@ -4,6 +4,7 @@ import { RecommendationEngineModule } from '../recommendation-engine/recommendat
 import { VovaAgentModule } from './agent/agent.module';
 import { VovaService } from './vova.service';
 import { VovaOfferStore } from './agent/offer.store';
+import { VovaAnonymousStore } from './agent/anonymous.store';
 
 /**
  * The seam between the WhatsApp bot and the assistant.
@@ -14,7 +15,7 @@ import { VovaOfferStore } from './agent/offer.store';
  */
 @Module({
   imports: [SystemConfigModule, RecommendationEngineModule, VovaAgentModule],
-  providers: [VovaService, VovaOfferStore],
+  providers: [VovaService, VovaOfferStore, VovaAnonymousStore],
   exports: [VovaService],
 })
 export class VovaModule {}
