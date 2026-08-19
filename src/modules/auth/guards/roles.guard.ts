@@ -55,12 +55,22 @@ export class RolesGuard implements CanActivate {
       throw new ForbiddenException('Accès refusé');
     }
 
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: { role: true, is_active: true },
-    });
+    // `AdminAuthGuard` runs first on every admin route and has already read
+    // this row; reuse it rather than issuing the same query twice per request.
+    // The fallback covers the routes that mount `RolesGuard` behind a different
+    // authentication guard.
+    const user =
+      request.adminAccount ??
+      (await this.prisma.user
+        .findUnique({
+          where: { id: userId },
+          select: { role: true, is_active: true },
+        })
+        .then((row) =>
+          row ? { role: row.role, isActive: row.is_active } : null,
+        ));
 
-    if (!user || !user.is_active) {
+    if (!user?.isActive) {
       throw new ForbiddenException('Accès refusé');
     }
 
@@ -96,7 +106,10 @@ export class RolesGuard implements CanActivate {
     role: LateralRole,
     requiredRoles: UserRole[] | undefined,
   ): boolean {
-    if (requiredRoles?.length && this.requiredLevel(requiredRoles) > MAX_LATERAL_LEVEL) {
+    if (
+      requiredRoles?.length &&
+      this.requiredLevel(requiredRoles) > MAX_LATERAL_LEVEL
+    ) {
       throw new ForbiddenException(
         "Vous n'avez pas les permissions nécessaires pour cette action",
       );

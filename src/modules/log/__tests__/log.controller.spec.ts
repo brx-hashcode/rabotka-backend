@@ -1,7 +1,10 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { LogController } from '../log.controller';
 import { LogService } from '../log.service';
+import { UserRole } from '@prisma/client';
 import { AdminAuthGuard } from '../../auth/guards/admin-auth.guard';
+import { RolesGuard } from '../../auth/guards/roles.guard';
+import { ROLES_KEY } from '../../auth/decorators/roles.decorator';
 
 const mockLogService = {
   listForAdmin: jest
@@ -20,8 +23,32 @@ describe('LogController', () => {
     })
       .overrideGuard(AdminAuthGuard)
       .useValue({ canActivate: () => true })
+      .overrideGuard(RolesGuard)
+      .useValue({ canActivate: () => true })
       .compile();
     controller = module.get<LogController>(LogController);
+  });
+
+  /**
+   * The audit log carried AdminAuthGuard alone, which made it the one admin
+   * route where the lateral allowlist never ran — FINANCE and SUPPORT read it
+   * by simply never being checked. Asserted on the metadata because the tests
+   * below stub the guards away.
+   */
+  it('requires RolesGuard and MANAGER, not just an admin token', () => {
+    const guards = Reflect.getMetadata(
+      '__guards__',
+      LogController.prototype.listAdmin,
+    ) as unknown[] | undefined;
+    expect(guards).toEqual(
+      expect.arrayContaining([AdminAuthGuard, RolesGuard]),
+    );
+
+    const roles = Reflect.getMetadata(
+      ROLES_KEY,
+      LogController.prototype.listAdmin,
+    ) as UserRole[] | undefined;
+    expect(roles).toEqual([UserRole.MANAGER]);
   });
 
   it('listAdmin uses defaults when no params given', async () => {
