@@ -286,6 +286,8 @@ jobs:
           GOOGLE_API_KEY=$(echo "$VAULT_SECRET" | jq -r '.GOOGLE_API_KEY // ""')
           MISTRAL_API_KEY=$(echo "$VAULT_SECRET" | jq -r '.MISTRAL_API_KEY // ""')
           OPENAI_API_KEY=$(echo "$VAULT_SECRET" | jq -r '.OPENAI_API_KEY // ""')
+          GROQ_API_KEY=$(echo "$VAULT_SECRET" | jq -r '.GROQ_API_KEY // ""')
+          DEEPSEEK_API_KEY=$(echo "$VAULT_SECRET" | jq -r '.DEEPSEEK_API_KEY // ""')
           # --- static values ---
           BACKEND_IMAGE=ghcr.io/${{ github.repository_owner }}/rabotka-backend:${{ needs.build-and-push.outputs.image-sha-tag }}
           NODE_ENV=production
@@ -326,6 +328,10 @@ jobs:
           VOVA_MODEL_STANDARD_GOOGLE=gemini-flash-latest
           VOVA_MODEL_STANDARD_MISTRAL=mistral-small-latest
           VOVA_MODEL_STANDARD_OPENAI=gpt-4o-mini
+          # Groq publishes no `-latest` alias and retires ids on a short cycle,
+          # so this pin matters more here than anywhere else in the list.
+          VOVA_MODEL_STANDARD_GROQ=llama-3.3-70b-versatile
+          VOVA_MODEL_STANDARD_DEEPSEEK=deepseek-chat
           # Per-attempt budget, not per-chain. The whole reply has to land
           # inside the WhatsApp window a user is actually waiting through.
           VOVA_LLM_TIMEOUT_MS=20000
@@ -435,7 +441,7 @@ jobs:
           get() { grep -E "^$1=" /tmp/deploy.env | head -1 | cut -d= -f2-; }
 
           PRESENT=""
-          for key in GOOGLE_API_KEY MISTRAL_API_KEY OPENAI_API_KEY; do
+          for key in GOOGLE_API_KEY MISTRAL_API_KEY OPENAI_API_KEY GROQ_API_KEY DEEPSEEK_API_KEY; do
             value=$(get "$key")
             if [ -n "$value" ] && [ "$value" != "null" ]; then
               PRESENT="$PRESENT ${key%%_API_KEY}"
@@ -443,7 +449,7 @@ jobs:
           done
 
           if [ -z "$PRESENT" ]; then
-            echo "::warning::No Vova LLM credentials in Vault (secret/data/apps/rabotka-backend-develop) — the assistant will have an empty provider chain and answer nothing. Expected one or more of GOOGLE_API_KEY, MISTRAL_API_KEY, OPENAI_API_KEY."
+            echo "::warning::No Vova LLM credentials in Vault (secret/data/apps/rabotka-backend-develop) — the assistant will have an empty provider chain and answer nothing. Expected one or more of GOOGLE_API_KEY, MISTRAL_API_KEY, OPENAI_API_KEY, GROQ_API_KEY, DEEPSEEK_API_KEY."
           else
             echo "Vova providers configured:$PRESENT"
           fi
