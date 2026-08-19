@@ -296,6 +296,23 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     label: 'Budget de réponse Vova AI (ms)',
     isSecret: false,
   },
+  {
+    // Off by default, and gated by `vova.enabled` as well. Answering a number
+    // with no account is the only path where somebody who never signed up can
+    // spend tokens, so it switches independently of the assistant itself.
+    key: 'vova.anonymous_enabled',
+    value: 'false',
+    category: ConfigCategory.GENERAL,
+    label: 'Vova AI répond aux numéros non inscrits',
+    isSecret: false,
+  },
+  {
+    key: 'vova.anon_daily_limit',
+    value: '10',
+    category: ConfigCategory.GENERAL,
+    label: 'Réponses IA par jour et par numéro non inscrit',
+    isSecret: false,
+  },
 
   // ── CONTACT ───────────────────────────────────────────────────────────────
   {
