@@ -151,9 +151,11 @@ describe('RolesGuard', () => {
       ).resolves.toBe(true);
     });
 
-    it('keeps FINANCE out of the two areas it does not own', async () => {
-      // Finance reaches everything an admin does EXCEPT team management and
-      // settings, so those two are the whole of the restriction.
+    it('keeps FINANCE out of the one area it does not own', async () => {
+      // FINANCE is ADMIN minus team management, so `user` is the whole of the
+      // restriction. `admin/system-configs` is checked alongside it because it
+      // must stay shut too — but as a SUPER_ADMIN area an ADMIN cannot open
+      // either, not as a second thing taken away from FINANCE.
       for (const area of ['user', 'admin/system-configs']) {
         activeUser(UserRole.FINANCE);
         await expect(
@@ -245,28 +247,41 @@ describe('RolesGuard', () => {
       }
     });
 
-    it('lets FINANCE pass ADMIN and SUPER_ADMIN gates in its own areas', async () => {
-      // Finance is deliberately near-total: inside the areas it owns it acts at
-      // any level, permanent purge included. It is restricted by which areas it
-      // has, not by what it may do within them.
-      for (const gate of [UserRole.ADMIN, UserRole.SUPER_ADMIN]) {
+    it('lets FINANCE pass an ADMIN gate in its own areas', async () => {
+      // The ceiling is ADMIN, so everything an ADMIN may do inside these areas
+      // is open — crediting a wallet included.
+      activeUser(UserRole.FINANCE);
+      await expect(
+        guardFor([UserRole.ADMIN]).canActivate(
+          makeContext({ userId: 'u1' }, 'admin/wallet', 'POST'),
+        ),
+      ).resolves.toBe(true);
+    });
+
+    it('refuses FINANCE at a SUPER_ADMIN gate, inside its areas and out', async () => {
+      // FINANCE is level with ADMIN, not above it: permanent purge is shut to
+      // both. The area map is not what stops this — the ceiling is.
+      for (const area of ['admin/wallet', 'user']) {
         activeUser(UserRole.FINANCE);
         await expect(
-          guardFor([gate]).canActivate(
-            makeContext({ userId: 'u1' }, 'admin/wallet', 'POST'),
+          guardFor([UserRole.SUPER_ADMIN]).canActivate(
+            makeContext({ userId: 'u1' }, area, 'POST'),
           ),
-        ).resolves.toBe(true);
+        ).rejects.toThrow(ForbiddenException);
       }
     });
 
-    it('still refuses FINANCE at a SUPER_ADMIN gate OUTSIDE its areas', async () => {
-      // The ceiling is lifted, the allowlist is not.
-      activeUser(UserRole.FINANCE);
-      await expect(
-        guardFor([UserRole.SUPER_ADMIN]).canActivate(
-          makeContext({ userId: 'u1' }, 'user', 'POST'),
-        ),
-      ).rejects.toThrow(ForbiddenException);
+    it('lets FINANCE into the claim thread and the notification areas', async () => {
+      // Both are areas an ADMIN reaches, and both sit under their own
+      // `@Controller` prefix rather than beneath `admin/claims`.
+      for (const area of ['admin/claims/:claimId/comments', 'admin/notifications']) {
+        activeUser(UserRole.FINANCE);
+        await expect(
+          guardFor([UserRole.MANAGER]).canActivate(
+            makeContext({ userId: 'u1' }, area, 'POST'),
+          ),
+        ).resolves.toBe(true);
+      }
     });
 
     it('lets SUPER_ADMIN through every gate, on any controller', async () => {

@@ -17,11 +17,6 @@ import {
 import { ROLE_HIERARCHY } from '../role-seniority';
 
 /**
- * The highest gate a lateral role may pass inside an area it owns. ADMIN- and
- * SUPER_ADMIN-gated actions (permanent deletion, team management) stay out of
- * reach even where the area itself is allowed.
- */
-/**
  * The highest gate each lateral role may pass INSIDE an area it owns.
  *
  * Two different roles, two different ceilings, because they are two different
@@ -31,17 +26,16 @@ import { ROLE_HIERARCHY } from '../role-seniority';
  *   nothing above. Permanent deletion and money movement stay out of reach even
  *   in the areas it fully owns — the ceiling is what enforces that, not the
  *   area map, so widening the map does not widen these.
- * - FINANCE is deliberately near-total: every area an admin can reach except
- *   team management and settings, with the full range of actions inside them.
- *   Restricting it is done by leaving `user` and `admin/system-configs` out of
- *   its map, not by capping what it may do where it is allowed.
+ * - FINANCE sits at ADMIN, because FINANCE *is* ADMIN minus team management.
+ *   Anything an ADMIN may do, it may do in the areas it owns; anything gated at
+ *   SUPER_ADMIN (permanent purge, settings) is closed to both alike.
  *
- * The consequence to be clear about: with no ceiling, FINANCE can perform
- * SUPER_ADMIN-gated actions in its areas, permanent purge included.
+ * The single difference between the two roles therefore lives in
+ * `LATERAL_ACCESS`, which withholds `user` from FINANCE — not here.
  */
 const LATERAL_CEILING: Record<LateralRole, number> = {
   [UserRole.SUPPORT]: ROLE_HIERARCHY[UserRole.MANAGER],
-  [UserRole.FINANCE]: ROLE_HIERARCHY[UserRole.SUPER_ADMIN],
+  [UserRole.FINANCE]: ROLE_HIERARCHY[UserRole.ADMIN],
 };
 
 @Injectable()
