@@ -89,9 +89,11 @@ describe('HealthController', () => {
     expect(Array.isArray(healthFns)).toBe(true);
     expect(healthFns.length).toBeGreaterThanOrEqual(1);
     await healthFns[0]();
+    // Configurable now (HEALTH_HEAP_LIMIT_MB). The old hardcoded 150 MB failed
+    // a healthy boot: the app idles around 151 with the assistant present.
     expect(memory.checkHeap).toHaveBeenCalledWith(
       'memory_heap',
-      150 * 1024 * 1024,
+      320 * 1024 * 1024,
     );
     expect(memory.checkRSS).not.toHaveBeenCalled();
   });

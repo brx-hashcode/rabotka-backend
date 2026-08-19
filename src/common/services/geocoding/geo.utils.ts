@@ -80,14 +80,24 @@ export function placeProximityScore(a: PlaceRef, b: PlaceRef): number {
     : GEO_MATCH_SCORE.SAME_COUNTRY;
 }
 
+export const URGENCY_HALF_LIFE_HOURS = 48;
+
 /**
  * Urgency score 0–1. A job scheduled now → 1.0, falls off with a half-life
  * of `halfLifeHours` (default 48 h).
+ *
+ * `now` is injected so a whole ranking pass shares one instant — see
+ * `freshnessScore` in the recommendation engine's `scoring.ts` for what reading
+ * the clock per candidate did to the order of a feed.
  */
-export function urgencyScore(scheduledAt: Date, halfLifeHours = 48): number {
+export function urgencyScore(
+  scheduledAt: Date,
+  halfLifeHours = URGENCY_HALF_LIFE_HOURS,
+  now: number = Date.now(),
+): number {
   const hoursUntil = Math.max(
     0,
-    (scheduledAt.getTime() - Date.now()) / (1000 * 60 * 60),
+    (scheduledAt.getTime() - now) / (1000 * 60 * 60),
   );
   return Math.exp((-Math.LN2 * hoursUntil) / halfLifeHours);
 }

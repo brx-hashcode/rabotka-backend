@@ -164,6 +164,8 @@ export const CLOUD_DEFAULT_LANGUAGE = 'fr';
  * read their own status.
  */
 export const KYC_REJECTED_CTA_PATH = 'claims/new';
+/** Where the KYC-pending card's single button lands: the profile. */
+export const KYC_PENDING_CTA_PATH = 'profile';
 export const SUSPENDED_CTA_PATH = 'home';
 
 /**
@@ -276,23 +278,42 @@ export const WHATSAPP_TEMPLATES = {
    * the v2 call-to-action. Same variable and the same shortlink mode, so
    * nothing else here changes — but the button goes back to being dead.
    */
+  /**
+   * Shown while a KYC dossier is under review.
+   *
+   * v4 replaces `rabotka_kyc_pending_menu_v3`, whose body offered a numbered
+   * menu — « 1- Mon profil / 2- Créer une réclamation », « répondez avec le
+   * numéro ». That menu no longer exists: with no live flow the router answers
+   * `unknown`, so a « 1 » returns this very card. The message asked for an
+   * action that loops.
+   *
+   * v4 states one thing and offers one button, onto the profile — the screen
+   * where the documents were submitted and where a correction is made.
+   *
+   * Body `{{1}}` is the first name and `{{2}}` carries the URL suffix.
+   *
+   * They need distinct keys because `buildComponents` takes ONE flat record and
+   * routes a single key to the button, sending the rest to the body
+   * positionally — the two are not separate namespaces here, whatever the Meta
+   * template's own numbering suggests. `kycRejected` does the same with `{{3}}`.
+   */
   kycPendingMenu: {
-    hasImageHeader: true,
-    contentSid: sid(
-      'TPL_KYC_PENDING_MENU',
-      'HX22cce223f0163abc339d502e686989a1',
-    ),
-    urlSuffixVar: '1',
+    // Meta only. The Twilio SID that used to sit here points at v3 — the card
+    // with the numbered menu — whose button URL uses {{1}}. Keeping it would
+    // leave the old copy sendable on the Twilio path under a variable layout
+    // this entry no longer matches.
+    cloudOnly: true,
+    urlSuffixVar: '2',
     urlSuffixMode: 'shortlink',
     category: 'UTILITY',
     cloud: {
-      name: cloudName(
-        'TPL_CLOUD_KYC_PENDING_MENU',
-        'rabotka_kyc_pending_menu_v3',
-      ),
+      name: cloudName('TPL_CLOUD_KYC_PENDING_MENU', 'rabotka_kyc_pending_v4'),
     },
-    variables: () => ({ '1': 'profile' }),
-  } satisfies WhatsAppTemplate<[]>,
+    variables: (firstName: string) => ({
+      '1': firstName,
+      '2': KYC_PENDING_CTA_PATH,
+    }),
+  } satisfies WhatsAppTemplate<[firstName: string]>,
 
   // "Voir le portfolio" — CTA button opening a worker's PUBLIC portfolio
   // (/p/<slug>) inside WhatsApp's in-app browser. Unlike the other webview
@@ -338,7 +359,8 @@ export const WHATSAPP_TEMPLATES = {
         'rabotka_profile_created_kyc_worker_v2',
       ),
     },
-    variables: (firstName: string) => ({ '1': firstName }),
+    // '2' feeds the "Se connecter" button. See the note on `kyc`.
+    variables: (firstName: string) => ({ '1': firstName, '2': 'home' }),
   } satisfies WhatsAppTemplate<[firstName: string]>,
 
   profileCreatedEmployer: {
@@ -355,7 +377,8 @@ export const WHATSAPP_TEMPLATES = {
         'rabotka_profile_created_kyc_employer_v2',
       ),
     },
-    variables: (firstName: string) => ({ '1': firstName }),
+    // '2' feeds the "Se connecter" button. See the note on `kyc`.
+    variables: (firstName: string) => ({ '1': firstName, '2': 'home' }),
   } satisfies WhatsAppTemplate<[firstName: string]>,
 
   kyc: {
@@ -367,7 +390,14 @@ export const WHATSAPP_TEMPLATES = {
     urlSuffixMode: 'shortlink',
     category: 'UTILITY',
     cloud: { name: cloudName('TPL_CLOUD_KYC', 'rabotka_kyc_approved_cta_v2') },
-    variables: (name: string) => ({ '1': name }),
+    // '2' is NOT a body variable — it is the destination behind the "Accéder à
+    // Rabotka" button, which `withLoginCode` swaps for a one-tap login code.
+    // Omitting it sent no button parameter at all and Meta rejected every one
+    // of these with 131008, silently, for as long as the template existed.
+    // `/home` is role-aware. If the code cannot be minted (a BANNED profile,
+    // or no profileId in scope) the literal survives and `/s/home` still
+    // resolves — login-link.tsx treats a non-code segment as the destination.
+    variables: (name: string) => ({ '1': name, '2': 'home' }),
   } satisfies WhatsAppTemplate<[name: string]>,
 
   /**
@@ -881,7 +911,11 @@ export const WHATSAPP_TEMPLATES = {
         'rabotka_unlock_expired_conversion_cta_v2',
       ),
     },
-    variables: (p: { amount: number }) => ({ '1': String(p.amount) }),
+    // '2' feeds the "Voir mon portefeuille" button. See the note on `kyc`.
+    variables: (p: { amount: number }) => ({
+      '1': String(p.amount),
+      '2': 'portefeuille',
+    }),
   } satisfies WhatsAppTemplate<[params: { amount: number }]>,
 
   autoStarted: {
@@ -939,7 +973,11 @@ export const WHATSAPP_TEMPLATES = {
         'rabotka_offer_expired_applicant_cta_v2',
       ),
     },
-    variables: (p: { offerTitle: string }) => ({ '1': p.offerTitle }),
+    // '2' feeds the "Voir les offres" button. See the note on `kyc`.
+    variables: (p: { offerTitle: string }) => ({
+      '1': p.offerTitle,
+      '2': 'recherche-offres',
+    }),
   } satisfies WhatsAppTemplate<[params: { offerTitle: string }]>,
 
   offerExpiredEmployer: {
@@ -979,7 +1017,11 @@ export const WHATSAPP_TEMPLATES = {
         'rabotka_offer_unavailable_worker_cta_v2',
       ),
     },
-    variables: (p: { offerTitle: string }) => ({ '1': p.offerTitle }),
+    // '2' feeds the "Voir les offres" button. See the note on `kyc`.
+    variables: (p: { offerTitle: string }) => ({
+      '1': p.offerTitle,
+      '2': 'recherche-offres',
+    }),
   } satisfies WhatsAppTemplate<[params: { offerTitle: string }]>,
 
   reminderStart: {
@@ -1286,8 +1328,10 @@ const URL_SUFFIX_BY_SID: ReadonlyMap<string, UrlSuffixTarget> = new Map(
       } =>
         'urlSuffixVar' in template &&
         typeof template.urlSuffixVar === 'string' &&
-        // Keyed by SID, so a Cloud-only template has nothing to key on. None
-        // has a CTA button either, so nothing is lost by dropping it here.
+        // This map is for the legacy SID path only. Cloud-only templates are
+        // resolved by key instead — see URL_SUFFIX_BY_KEY, and note that the
+        // old claim here ("none has a CTA button either") stopped being true
+        // when `kycRejected` and `kycPendingMenu` moved to Meta with one.
         'contentSid' in template &&
         typeof template.contentSid === 'string',
     )
@@ -1343,9 +1387,55 @@ export function getTemplateKeyBySid(
   return KEY_BY_SID.get(contentSid);
 }
 
+/**
+ * Every template that declares a URL suffix, keyed by NAME.
+ *
+ * Separate from the SID map because a Cloud-only template has no SID to key on
+ * — and resolving through one silently returned `undefined`, which the outbound
+ * processor reads as "no login code to inject". The button then carries the
+ * bare path, and the user lands on the login screen instead of the page the
+ * card promised.
+ */
+const URL_SUFFIX_BY_KEY: ReadonlyMap<WhatsAppTemplateName, UrlSuffixTarget> =
+  new Map(
+    (
+      Object.entries(WHATSAPP_TEMPLATES) as [
+        WhatsAppTemplateName,
+        (typeof WHATSAPP_TEMPLATES)[WhatsAppTemplateName],
+      ][]
+    )
+      .filter(
+        (
+          entry,
+        ): entry is [
+          WhatsAppTemplateName,
+          (typeof WHATSAPP_TEMPLATES)[WhatsAppTemplateName] & {
+            urlSuffixVar: string;
+          },
+        ] =>
+          'urlSuffixVar' in entry[1] &&
+          typeof entry[1].urlSuffixVar === 'string',
+      )
+      .map(([key, template]) => [
+        key,
+        {
+          variable: template.urlSuffixVar,
+          separator:
+            'urlSuffixSeparator' in template &&
+            template.urlSuffixSeparator === '&'
+              ? ('&' as const)
+              : ('?' as const),
+          mode:
+            'urlSuffixMode' in template &&
+            template.urlSuffixMode === 'shortlink'
+              ? ('shortlink' as const)
+              : ('append' as const),
+        },
+      ]),
+  );
+
 export function getUrlSuffixTargetByKey(
   key: WhatsAppTemplateName,
 ): UrlSuffixTarget | undefined {
-  const contentSid = TEMPLATE_BINDINGS[key].contentSid;
-  return contentSid ? URL_SUFFIX_BY_SID.get(contentSid) : undefined;
+  return URL_SUFFIX_BY_KEY.get(key);
 }

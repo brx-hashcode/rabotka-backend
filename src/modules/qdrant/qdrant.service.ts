@@ -97,7 +97,7 @@ const TRANSIENT_ERROR_CODES = new Set([
  * network errors with a tiny backoff hides this from callers and keeps the
  * `vector_indexed_at` bookkeeping honest.
  */
-async function retryTransient<T>(
+export async function retryTransient<T>(
   fn: () => Promise<T>,
   attempts = 3,
 ): Promise<T> {

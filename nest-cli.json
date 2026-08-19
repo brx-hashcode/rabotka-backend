@@ -18,6 +18,11 @@
         "include": "modules/geo/data/*.json",
         "outDir": "dist/src",
         "watchAssets": false
+      },
+      {
+        "include": "modules/rag/retrieval/corpus/**/*.md",
+        "outDir": "dist/src",
+        "watchAssets": true
       }
     ]
   }
