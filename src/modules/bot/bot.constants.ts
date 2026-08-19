@@ -84,25 +84,31 @@ export const CMD_PAY = [
  * card to the first message a new user ever writes.
  */
 /**
- * The words a number with no account still gets a card for, without a model.
+ * The words that get a card straight away, with no model in the path.
  *
- * A deliberately smaller set than `CMD_MENU`. That list mixes two kinds of
- * word: navigation commands, and things people actually say.
+ * A deliberately smaller set than `CMD_MENU`, and used by BOTH gates — the
+ * orchestrator's for registered users, and the anonymous branch in
+ * `ConversationService`. `CMD_MENU` mixes two kinds of word: navigation
+ * commands, and things people actually say.
  *
  * « bonjour », « aide » and « help » are the second kind, and answering them
- * with a card was wrong. Someone with no account who writes « bonjour » is
- * opening a conversation — the assistant can greet them, say what Rabotka is in
- * a line, and point at `/compte`. A card is the reply you give when you have
- * nothing to say, and here we do.
+ * with a card was wrong for either audience. Someone writing « bonjour » is
+ * opening a conversation; a card is the reply you give when you have nothing to
+ * say, and we have plenty — the assistant can introduce itself and ask what
+ * they need.
  *
  * What stays here is the vocabulary that means "show me the thing": *menu*,
  * *start*, *démarrer*. Those are documented entry points, printed in templates,
  * and they must not depend on a model provider being up.
  *
- * Nothing is lost when the assistant is off or over budget — the caller falls
- * back to the same card either way.
+ * NOTE this is not `CMD_MENU`, which still drives account activation in the
+ * orchestrator — a KYC-verified user typing « bonjour » must still activate.
+ * That path runs before either gate and is deliberately untouched.
+ *
+ * Nothing is lost when the assistant is off or over budget: both callers fall
+ * back to their usual card.
  */
-export const CMD_ANONYMOUS_CARD = [
+export const CMD_NAVIGATION = [
   'menu',
   '*',
   'start',

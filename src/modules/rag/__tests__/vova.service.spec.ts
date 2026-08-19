@@ -293,7 +293,7 @@ describe('VovaService.handleAnonymous', () => {
 
     expect(
       await service.handleAnonymous('+242060000001', 'c’est quoi Rabotka ?'),
-    ).toEqual(['Rabotka met en relation…']);
+    ).toEqual({ text: 'Rabotka met en relation…', offerAccount: false });
   });
 
   it('stays silent when only the master switch is on', async () => {
@@ -318,16 +318,21 @@ describe('VovaService.handleAnonymous', () => {
     expect(agent.handleAnonymous).not.toHaveBeenCalled();
   });
 
-  it('does not call the model once the daily budget is spent', async () => {
+  it('says so when the daily allowance is spent, instead of going quiet', async () => {
+    // Silently falling back to the card was indistinguishable from the
+    // assistant being switched off: the conversation simply stopped answering,
+    // which reads as a fault rather than a limit. A limit you are told about is
+    // a reason to open an account.
     const agent = makeAgent();
     const anonymous = makeAnonymous({
       consume: jest.fn(() => Promise.resolve(false)),
     });
     const service = build(agent, ON, makeOffers(), anonymous);
 
-    expect(
-      await service.handleAnonymous('+242060000001', 'et donc ?'),
-    ).toBeNull();
+    const reply = await service.handleAnonymous('+242060000001', 'et donc ?');
+
+    expect(reply?.offerAccount).toBe(true);
+    expect(reply?.text).toMatch(/compte/i);
     expect(agent.handleAnonymous).not.toHaveBeenCalled();
   });
 
@@ -363,12 +368,14 @@ describe('VovaService.handleAnonymous', () => {
 
   it('never returns an app card — a stranger has nothing to open', async () => {
     const service = build(makeAgent('Voici comment ça marche.'), ON);
-    const replies = await service.handleAnonymous(
+    const reply = await service.handleAnonymous(
       '+242060000001',
       'comment ça marche ?',
     );
 
-    expect(replies).toHaveLength(1);
-    expect(replies?.[0]).not.toContain('[TPL:');
+    // The card, when one is warranted, is the caller's to append — this
+    // service only says whether it is.
+    expect(reply?.text).not.toContain('[TPL:');
+    expect(reply?.offerAccount).toBe(false);
   });
 });
