@@ -21,8 +21,10 @@ import {
   ApiCookieAuth,
   ApiConsumes,
 } from '@nestjs/swagger';
+import { UserRole } from '@prisma/client';
 import { AdminAuthGuard } from '../auth/guards/admin-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 import type { AdminAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
 import { FileService } from '../file/file.service';
 import { ChatService, type ChatAttachment } from './chat.service';
@@ -35,9 +37,23 @@ import {
   AddMembersDto,
 } from './dto/chat.dto';
 
+/**
+ * Roles, which this controller declared none of.
+ *
+ * `RolesGuard` treats a guarded handler with no `@Roles` as open to any active
+ * admin, so every endpoint here — including three destructive ones — sat at the
+ * floor while every sibling controller (notifications, claims, events) puts its
+ * deletes behind MANAGER.
+ *
+ * MODERATOR at class level for the conversation itself; MANAGER for the three
+ * that destroy something another admin can see. SUPPORT keeps all of them: it
+ * is capped at MANAGER by `RolesGuard`, and removing an abusive message is
+ * support's job, not an escalation.
+ */
 @ApiTags('Admin – Chat')
 @Controller('admin/chat')
 @UseGuards(AdminAuthGuard, RolesGuard)
+@Roles(UserRole.MODERATOR)
 @ApiBearerAuth()
 @ApiCookieAuth()
 export class ChatController {

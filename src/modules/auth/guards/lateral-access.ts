@@ -57,6 +57,12 @@ export const LATERAL_ACCESS: Record<LateralRole, Record<string, AreaAccess>> = {
     // only: the feedback rows carry the author's name and phone, and support's
     // reach into personal data stays at the same level as `admin/profiles`.
     'admin/feedback': 'read',
+    // The paperwork behind a claim. "What did they actually agree to?" is
+    // unanswerable without the signed contract, and escalating to a manager to
+    // read a PDF is the kind of hop that makes support slower than the problem.
+    // Read only, and both are download-by-id — there is no listing to browse.
+    'admin/contracts': 'read',
+    'admin/invoices': 'read',
   },
 };
 
