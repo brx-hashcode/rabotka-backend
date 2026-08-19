@@ -113,12 +113,46 @@ describe('ConversationService', () => {
       expect(result.replies[0]).toContain('[TPL:welcomeUnregisteredCard]');
     });
 
-    it('keeps a bare greeting deterministic for an unknown phone', async () => {
+    it('sends a bare greeting to the assistant, not the card', async () => {
+      // A stranger writing « bonjour » is opening a conversation. A card is the
+      // reply you give when you have nothing to say, and here we do — the
+      // assistant can greet them and ask what they are looking for.
       (botOrchestrator.loadProfileByPhone as jest.Mock).mockResolvedValue(null);
+      (vova.handleAnonymous as jest.Mock).mockResolvedValue([
+        'Bonjour ! Rabotka met en relation…',
+      ]);
+
+      for (const greeting of ['Bonjour', 'bonjour', 'aide', 'help']) {
+        (vova.handleAnonymous as jest.Mock).mockClear();
+        const result = await service.handleIncomingMessage(PHONE, greeting);
+
+        expect(vova.handleAnonymous).toHaveBeenCalled();
+        expect(result.replies[0]).not.toContain('[TPL:');
+      }
+    });
+
+    it('keeps the navigation commands deterministic', async () => {
+      // These are documented entry points, printed in templates. They must not
+      // depend on a model provider being up.
+      (botOrchestrator.loadProfileByPhone as jest.Mock).mockResolvedValue(null);
+
+      for (const command of ['menu', 'start', 'démarrer', '/']) {
+        (vova.handleAnonymous as jest.Mock).mockClear();
+        const result = await service.handleIncomingMessage(PHONE, command);
+
+        expect(vova.handleAnonymous).not.toHaveBeenCalled();
+        expect(result.replies[0]).toContain('[TPL:welcomeUnregisteredCard]');
+      }
+    });
+
+    it('still falls back to the card when the assistant declines a greeting', async () => {
+      // vova.enabled=false, over budget, timed out: « bonjour » must not become
+      // a worse experience than it was before it reached the assistant.
+      (botOrchestrator.loadProfileByPhone as jest.Mock).mockResolvedValue(null);
+      (vova.handleAnonymous as jest.Mock).mockResolvedValue(null);
 
       const result = await service.handleIncomingMessage(PHONE, 'Bonjour');
 
-      expect(vova.handleAnonymous).not.toHaveBeenCalled();
       expect(result.replies[0]).toContain('[TPL:welcomeUnregisteredCard]');
     });
 

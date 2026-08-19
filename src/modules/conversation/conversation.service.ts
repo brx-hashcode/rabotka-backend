@@ -15,7 +15,7 @@ import {
   stripChatFormattingChars,
 } from '../bot/utils/chat-input';
 import { welcomeUnregisteredMessage } from '../bot/messages/welcome.messages';
-import { CMD_ACCOUNT, CMD_MENU } from '../bot/bot.constants';
+import { CMD_ACCOUNT, CMD_ANONYMOUS_CARD } from '../bot/bot.constants';
 import { VovaService } from '../rag/vova.service';
 
 const DEFAULT_BOT_SESSION_ID = 'default';
@@ -158,15 +158,18 @@ export class ConversationService {
   ): Promise<string[]> {
     const normalized = textForBot.trim().toLowerCase();
 
-    // Both land on the same card, and both are exact matches for the same
-    // reason the orchestrator's own gate is: « Bonjour Rabotka, je cherche une
-    // opportunité » is a question, not a greeting, and answering it with a card
-    // is how the product's own front door got swallowed once already.
+    // Exact matches, for the same reason the orchestrator's own gate is:
+    // « Bonjour Rabotka, je cherche une opportunité » is a question, not a
+    // greeting, and answering it with a card is how the product's own front
+    // door got swallowed once already.
     //
-    // CMD_ACCOUNT is the documented way to ask — it is what VoVa tells people
-    // to type — and CMD_MENU keeps the greeting deterministic, so « bonjour »
-    // never waits on a model.
-    if (CMD_ACCOUNT.includes(normalized) || CMD_MENU.includes(normalized)) {
+    // `CMD_ANONYMOUS_CARD` is narrower than `CMD_MENU` on purpose — « bonjour »
+    // reaches the assistant, because a stranger opening a conversation deserves
+    // an answer rather than a card. See the note on that constant.
+    if (
+      CMD_ACCOUNT.includes(normalized) ||
+      CMD_ANONYMOUS_CARD.includes(normalized)
+    ) {
       return [welcomeUnregisteredMessage()];
     }
 
