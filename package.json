@@ -38,7 +38,9 @@
     "profile:backfill-whatsapp": "tsx scripts/backfill-whatsapp-connected.ts",
     "job-offer:backfill-location": "tsx scripts/backfill-job-offer-location.ts",
     "geo:build-dataset": "tsx scripts/build-geo-dataset.ts",
-    "events:repair-series": "tsx scripts/repair-overlapping-series.ts"
+    "events:repair-series": "tsx scripts/repair-overlapping-series.ts",
+    "vova:ingest": "tsx scripts/vova-ingest.ts",
+    "vova:query": "tsx scripts/vova-query.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
@@ -47,6 +49,11 @@
     "@arcjet/nest": "^1.0.0",
     "@aws-sdk/client-s3": "^3.700.0",
     "@aws-sdk/s3-request-presigner": "^3.700.0",
+    "@langchain/core": "^1.2.8",
+    "@langchain/google-genai": "^2.2.0",
+    "@langchain/langgraph": "^1.4.10",
+    "@langchain/mistralai": "^1.2.0",
+    "@langchain/openai": "^1.5.8",
     "@nestjs-modules/mailer": "^2.0.2",
     "@nestjs/bullmq": "^11.0.4",
     "@nestjs/common": "^11.0.1",
@@ -175,7 +182,7 @@
     },
     "testEnvironment": "node",
     "transformIgnorePatterns": [
-      "node_modules[\\\\/](?!\\.pnpm[\\\\/](@otplib|@scure|@noble)|(@otplib|@scure|@noble))"
+      "node_modules[\\\\/](?!\\.pnpm[\\\\/](@otplib|@scure|@noble|@mistralai)|(@otplib|@scure|@noble|@mistralai))"
     ]
   }
 }
