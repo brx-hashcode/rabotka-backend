@@ -34,7 +34,10 @@ export const LATERAL_ACCESS: Record<LateralRole, Record<string, AreaAccess>> = {
     'admin/wallet': 'full',
     'admin/payment-requests': 'full',
     'admin/penalties': 'full',
-    'admin/dashboard': 'full',
+    // The dashboard is not a finance area — it is the landing page, and every
+    // role that can log in should be able to read it. It carries three GETs and
+    // no mutation, so `full` was never meaningful here.
+    'admin/dashboard': 'read',
     'admin/invoices': 'read',
     // Finance needs to identify who a payment belongs to — not to moderate them.
     'admin/profiles': 'read',
@@ -44,12 +47,27 @@ export const LATERAL_ACCESS: Record<LateralRole, Record<string, AreaAccess>> = {
     // operational act, not a financial one.
     'admin/whatsapp': 'read',
   },
+  // Support is not a narrow badge here — it is the team that runs the platform
+  // day to day. `read` on profiles meant they could open a profile and not
+  // verify it, which is the single thing they are most often asked to do.
+  //
+  // `full` is safe to hand out because `RolesGuard` caps every lateral role at
+  // MANAGER level regardless of this map: bulk purge (SUPER_ADMIN) and
+  // crediting a wallet (ADMIN) stay out of reach without being named here.
   [UserRole.SUPPORT]: {
     'admin/claims': 'full',
     'admin/chat': 'full',
-    'admin/profiles': 'read',
-    'admin/applications': 'read',
-    'admin/job-offers': 'read',
+    'admin/profiles': 'full',
+    'admin/applications': 'full',
+    'admin/job-offers': 'full',
+    // Disputes over a penalty are support's, including confirming that one was
+    // paid. Creating and cancelling them are MANAGER-level and stay reachable;
+    // permanent deletion is not.
+    'admin/penalties': 'full',
+    // The landing page, readable by every role — see the note on FINANCE above.
+    // Without it, support lands on a page of empty charts while the tables
+    // underneath fill in from `admin/profiles`.
+    'admin/dashboard': 'read',
     // "Did the customer get the message?" is the first question on half of all
     // support tickets, and until now nobody could answer it.
     'admin/whatsapp': 'read',

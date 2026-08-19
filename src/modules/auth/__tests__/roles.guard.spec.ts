@@ -170,7 +170,7 @@ describe('RolesGuard', () => {
       ).rejects.toThrow(ForbiddenException);
     });
 
-    it('lets SUPPORT read profiles but not write them', async () => {
+    it('lets SUPPORT write profiles — verification is the job', async () => {
       activeUser(UserRole.SUPPORT);
       await expect(
         guardFor([UserRole.MODERATOR]).canActivate(
@@ -178,12 +178,36 @@ describe('RolesGuard', () => {
         ),
       ).resolves.toBe(true);
 
+      // Was `read`, which let support open a profile and not verify it.
       activeUser(UserRole.SUPPORT);
       await expect(
-        guardFor([UserRole.MODERATOR]).canActivate(
+        guardFor([UserRole.MANAGER]).canActivate(
           makeContext({ userId: 'u1' }, 'admin/profiles', 'PATCH'),
         ),
+      ).resolves.toBe(true);
+    });
+
+    it('still keeps ADMIN-level actions away from SUPPORT', async () => {
+      // `POST admin/profiles/:id/wallet/credit` is @Roles(ADMIN). The area is
+      // theirs, but the lateral cap is what stops them crediting an account —
+      // which is why widening the map to `full` did not widen this.
+      activeUser(UserRole.SUPPORT);
+      await expect(
+        guardFor([UserRole.ADMIN]).canActivate(
+          makeContext({ userId: 'u1' }, 'admin/profiles', 'POST'),
+        ),
       ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('lets both lateral roles read the dashboard', async () => {
+      for (const role of [UserRole.SUPPORT, UserRole.FINANCE]) {
+        activeUser(role);
+        await expect(
+          guardFor([UserRole.MODERATOR]).canActivate(
+            makeContext({ userId: 'u1' }, 'admin/dashboard', 'GET'),
+          ),
+        ).resolves.toBe(true);
+      }
     });
 
     it('lets SUPPORT read feedback but not write it', async () => {
