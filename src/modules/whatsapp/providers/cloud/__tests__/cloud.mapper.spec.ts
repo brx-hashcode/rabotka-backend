@@ -107,13 +107,36 @@ describe('buildComponents', () => {
   });
 
   it('emits no body for a template whose single variable is the suffix', () => {
-    // kycPendingMenu's one variable IS the shortlink destination, so nothing is
-    // left for the body. It is also a card, hence the header.
+    // welcomePlatform's one variable IS the shortlink destination, so nothing
+    // is left for the body. It is also a card, hence the header.
+    // (kycPendingMenu used to be this fixture; v4 gained a first name in the
+    // body, so it no longer demonstrates the case.)
     const components = buildComponents(
-      'kycPendingMenu',
-      WHATSAPP_TEMPLATES.kycPendingMenu.variables(),
+      'welcomePlatform',
+      WHATSAPP_TEMPLATES.welcomePlatform.variables('home'),
     );
     expect(components.map((c) => c.type)).toEqual(['header', 'button']);
+  });
+
+  it('splits the body variables from the one that fills the button', () => {
+    // kycPendingMenu v4: {{1}} is the first name, {{2}} the URL suffix. They
+    // need distinct keys because buildComponents routes ONE key to the button
+    // and sends the rest to the body positionally.
+    const components = buildComponents(
+      'kycPendingMenu',
+      WHATSAPP_TEMPLATES.kycPendingMenu.variables('Jean'),
+    );
+    expect(components.map((c) => c.type)).toEqual(['body', 'button']);
+    expect(components[0]).toEqual({
+      type: 'body',
+      parameters: [{ type: 'text', text: 'Jean' }],
+    });
+    expect(components[1]).toEqual({
+      type: 'button',
+      sub_type: 'url',
+      index: '0',
+      parameters: [{ type: 'text', text: 'profile' }],
+    });
   });
 
   it('sends the image on every card, not just at template creation', () => {
@@ -136,17 +159,27 @@ describe('buildComponents', () => {
     });
   });
 
-  it.each([
-    'welcomeUnregisteredCard',
-    'welcomePlatform',
-    'kycPendingMenu',
-  ] as const)('%s carries an image header', (key) => {
-    const vars = (
-      WHATSAPP_TEMPLATES[key].variables as (
-        p?: unknown,
-      ) => Record<string, string>
-    )(key === 'welcomePlatform' ? 'home' : undefined);
-    expect(buildComponents(key, vars)[0]?.type).toBe('header');
+  it.each(['welcomeUnregisteredCard', 'welcomePlatform'] as const)(
+    '%s carries an image header',
+    (key) => {
+      const vars = (
+        WHATSAPP_TEMPLATES[key].variables as (
+          p?: unknown,
+        ) => Record<string, string>
+      )(key === 'welcomePlatform' ? 'home' : undefined);
+      expect(buildComponents(key, vars)[0]?.type).toBe('header');
+    },
+  );
+
+  // v4 dropped the image: the card said « répondez 1 ou 2 » to a bot that no
+  // longer has a numbered menu, and the replacement is a plain message with one
+  // button rather than a brand card.
+  it('emits no header for the KYC-pending card', () => {
+    const components = buildComponents(
+      'kycPendingMenu',
+      WHATSAPP_TEMPLATES.kycPendingMenu.variables('Jean'),
+    );
+    expect(components.some((c) => c.type === 'header')).toBe(false);
   });
 
   it('emits no header for a template that is not a card', () => {

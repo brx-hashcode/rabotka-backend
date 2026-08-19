@@ -109,7 +109,7 @@ export function formatPenaltyReminderDay(params: {
     '*Comment payer :*',
     'Tapez *payer* pour régler vos pénalités.',
     '',
-    'Tapez *5* (Mon profil) pour voir le détail de vos pénalités.',
+    'Le détail de vos pénalités est dans l’application, sur votre profil.',
   ].join('\n');
 }
 

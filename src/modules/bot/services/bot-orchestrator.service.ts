@@ -1,4 +1,5 @@
 import { Injectable, Logger, forwardRef, Inject } from '@nestjs/common';
+import { VovaService } from '../../rag/vova.service';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import {
   AccountStatus,
@@ -28,7 +29,7 @@ import {
 } from '../messages/menu.messages';
 import type { BotProfile, BotState } from '../types/bot-state.types';
 import type { FlowContext, FlowResult } from '../types/flow.types';
-import { FLOW_IDS, CMD_MENU, CMD_SUPPORT } from '../bot.constants';
+import { FLOW_IDS, CMD_MENU, CMD_PAY, CMD_SUPPORT } from '../bot.constants';
 import { stripChatFormattingChars } from '../utils/chat-input';
 import {
   runAcceptRefuseCandidateFlow,
@@ -136,6 +137,13 @@ export class BotOrchestratorService {
     private readonly portfolioService: PortfolioService,
     private readonly queueService: QueueService,
     private readonly configService: ConfigService,
+    /**
+     * forwardRef because the assistant closes a cycle back to here:
+     * BotModule → VovaModule → ContactUnlockModule → (forwardRef) BotModule.
+     * The same knot `worker.module.ts` documents, tied one module further out.
+     */
+    @Inject(forwardRef(() => VovaService))
+    private readonly vova: VovaService,
   ) {}
 
   /**
@@ -240,12 +248,11 @@ export class BotOrchestratorService {
         return [KYC_REJECTED_MESSAGE];
       }
       if (profile.verification_status !== VerificationStatus.VERIFIED) {
-        // Still under review: the account can't be activated yet, but an admin
-        // may ask the user to correct their profile or file a claim during the
-        // review — so those two stay reachable via a restricted 1/2 menu.
-        // Handled here, before routeMessage, so this numbering can't collide
-        // with the full menu's (worker '1' = Trouver une mission).
-        return [this.handlePendingKycInput()];
+        // Still under review. One card, one button, onto the profile — the
+        // screen where the documents were submitted and where a correction is
+        // made. The old card offered a « 1 / 2 » menu that no longer exists,
+        // so answering it returned the same card.
+        return [this.handlePendingKycInput(profile.first_name)];
       }
 
       // KYC verified + user types Menu → activate account
@@ -295,10 +302,10 @@ export class BotOrchestratorService {
    * carrying a "Gérer mon profil" button, whatever they typed. The old reply
    * was a 1/2 menu whose options each returned a webview template anyway.
    */
-  private handlePendingKycInput(): string {
+  private handlePendingKycInput(firstName: string): string {
     return templateReply(
       'kycPendingMenu',
-      WHATSAPP_TEMPLATES.kycPendingMenu.variables(),
+      WHATSAPP_TEMPLATES.kycPendingMenu.variables(firstName),
     );
   }
 
@@ -571,9 +578,32 @@ export class BotOrchestratorService {
         return this.handleCommandRoute(route, profile, profileId, botProfile);
       }
 
-      // Nothing recognised and no live flow: there is no menu to fall back
-      // to any more, so the welcome card is the answer — including for an
-      // expired session, where re-explaining the expiry helps nobody.
+      // Nothing recognised and no live flow. Before this, the welcome card was
+      // the whole answer — so a worker typing « j'ai un problème » got a menu.
+      //
+      // Vova AI gets first refusal on exactly that traffic. NOT on the menu
+      // vocabulary: `BotRouterService` returns `unknown` for everything when no
+      // flow is live, so « menu », « bonjour », « start » and a bare « / » all
+      // arrive here too, and routing the documented entry point through a model
+      // would make the one command every template tells users to type depend on
+      // a provider being up. Those keep their deterministic card.
+      if (
+        !isDeterministicCommand(
+          stripChatFormattingChars(text).trim().toLowerCase(),
+        )
+      ) {
+        const vovaReply = await this.vova.handle(
+          {
+            id: profile.id,
+            first_name: profile.first_name,
+            profile_type: profile.profile_type,
+            verification_status: profile.verification_status,
+          },
+          text,
+        );
+        if (vovaReply) return vovaReply;
+      }
+
       return [welcomePlatformMessage()];
     } catch (err) {
       this.logger.warn('Bot handling error', err);
@@ -877,4 +907,24 @@ export class BotOrchestratorService {
   loadProfileByPhone(phone: string) {
     return this.loadProfileWhere({ phone });
   }
+}
+
+/**
+ * Words the bot answers itself, with no model in the path.
+ *
+ * `CMD_SUPPORT` is not here because `handle()` already answers it before any of
+ * this, in every account state.
+ */
+function isDeterministicCommand(normalizedInput: string): boolean {
+  // EXACT match only, deliberately.
+  //
+  // Prefix matching swallowed the product's own front door: the landing page's
+  // WhatsApp CTA sends « Bonjour Rabotka, je cherche une opportunité ou un
+  // profil adapté », which begins with "bonjour " and was therefore answered
+  // with the menu card — the first message a new user ever sends, and the one
+  // that states their intent, never reached the assistant.
+  //
+  // A bare « bonjour » is a greeting and still gets the card. A greeting with a
+  // sentence after it is a question.
+  return [...CMD_MENU, ...CMD_PAY].includes(normalizedInput);
 }
