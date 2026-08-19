@@ -115,6 +115,22 @@ jobs:
         id: sha-tag
         run: echo "value=sha-$(echo ${{ github.sha }} | cut -c1-7)" >> "$GITHUB_OUTPUT"
 
+      # The image now carries ~2.7GB of baked ONNX models on top of Chromium and
+      # LibreOffice, and buildx keeps the build cache AND the exported layers on
+      # the runner's ~14GB volume. Without this the runner dies partway through
+      # `docker build` — the job fails with no log blob at all, because the
+      # process that would have uploaded it is gone.
+      #
+      # These toolchains are preinstalled on every hosted runner and nothing in
+      # this build touches them.
+      - name: Free runner disk space
+        run: |
+          echo "before:"; df -h / | tail -1
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" || true
+          sudo docker image prune -af || true
+          echo "after:"; df -h / | tail -1
+
       - name: Build and push
         id: push
         uses: docker/build-push-action@v6
