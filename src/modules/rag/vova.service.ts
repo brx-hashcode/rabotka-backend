@@ -9,6 +9,7 @@ import {
   offersNavigation,
 } from './agent/offer';
 import { VovaOfferStore } from './agent/offer.store';
+import { VovaAnonymousStore } from './agent/anonymous.store';
 import { templateReply } from '../../common/constants/whatsapp-carousel';
 import { WHATSAPP_TEMPLATES } from '../../common/constants/whatsapp-templates';
 import { withTimeout } from './llm/llm.service';
@@ -42,6 +43,7 @@ export class VovaService {
     private readonly agent: VovaAgentService,
     private readonly systemConfig: SystemConfigService,
     private readonly offers: VovaOfferStore,
+    private readonly anonymous: VovaAnonymousStore,
   ) {}
 
   private card(destination: string): string {
@@ -49,6 +51,76 @@ export class VovaService {
       'welcomePlatform',
       WHATSAPP_TEMPLATES.welcomePlatform.variables(destination),
     );
+  }
+
+  /**
+   * Answer a number with no profile.
+   *
+   * Returns `null` for "not handled" exactly like `handle()`, and the caller
+   * falls back to the signup card. Disabled, over budget, timed out, thrown —
+   * the stranger gets the card they would have got before this existed.
+   *
+   * No shadow mode and no rollout bucket here. Both key off a profile id, which
+   * this caller does not have; and the population is self-selecting rather than
+   * a slice of existing users, so a percentage of it would mean nothing.
+   * `vova.anonymous_enabled` is the whole control surface.
+   */
+  async handleAnonymous(
+    phone: string,
+    text: string,
+    correlationId?: string,
+  ): Promise<string[] | null> {
+    try {
+      const [enabled, anonymous, limitRaw, timeoutRaw] = await Promise.all([
+        this.systemConfig.get(VOVA_CONFIG_KEYS.ENABLED, 'false'),
+        this.systemConfig.get(VOVA_CONFIG_KEYS.ANONYMOUS_ENABLED, 'false'),
+        this.systemConfig.get(VOVA_CONFIG_KEYS.ANON_DAILY_LIMIT, '10'),
+        this.systemConfig.get(VOVA_CONFIG_KEYS.TIMEOUT_MS, '25000'),
+      ]);
+
+      // Both gates. The master switch still governs: turning the assistant off
+      // must silence it everywhere, not leave it answering strangers.
+      if (enabled !== 'true' || anonymous !== 'true') return null;
+
+      const limit = Number(limitRaw);
+      const withinBudget = await this.anonymous.consume(
+        phone,
+        Number.isFinite(limit) ? limit : 10,
+      );
+      if (!withinBudget) {
+        this.logger.log(`vova.anon over budget phone=${phone} — sending card`);
+        return null;
+      }
+
+      const history = await this.anonymous.history(phone);
+      const timeoutMs = Number(timeoutRaw) || 25000;
+      const started = Date.now();
+
+      const reply = await withTimeout(
+        () => this.agent.handleAnonymous({ text, history, correlationId }),
+        timeoutMs,
+        'vova-anon',
+      );
+
+      this.logger.log(
+        `vova.anon phone=${phone} origin=${reply.origin} ` +
+          `refusal=${reply.refusalId ?? '—'} model=${reply.telemetry?.model ?? '—'} ` +
+          `turns=${history.length} blocked=[${reply.sanitizerBlocked.join('|')}] ` +
+          `ms=${Date.now() - started}`,
+      );
+
+      // Written after the reply is known good, so a failed turn does not leave
+      // a question in history that the next message would answer twice.
+      await this.anonymous.remember(phone, text, reply.text);
+
+      return [reply.text];
+    } catch (err) {
+      this.logger.error(
+        `Vova failed for anonymous ${phone} — falling back to the signup card`,
+        err,
+      );
+      return null;
+    }
   }
 
   async handle(
