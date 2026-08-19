@@ -43,16 +43,15 @@ import { extractRequestMeta } from '../../common/utils/request-meta.util';
  * Why this is a hand-rolled set rather than `@Roles` like every other
  * controller — it looks like an oversight and is not.
  *
- * The rule here is "ADMIN and above, **or** FINANCE", and `@Roles` cannot say
- * that. `@Roles(ADMIN)` resolves to level 3, `RolesGuard.checkLateral` refuses
- * any lateral role at a level above MANAGER (2), and it refuses it *before*
- * consulting `LATERAL_ACCESS` — so decorating this controller with `ADMIN`
- * would lock FINANCE out of `admin/wallet`, the one area that exists for it.
- * `@Roles(MANAGER)` would fix that by handing every MANAGER the revenue
- * figures, which is the opposite mistake.
+ * The rule here is "ADMIN and above, **or** FINANCE". `@Roles(ADMIN)` now
+ * expresses that on its own, since `LATERAL_CEILING` puts FINANCE at ADMIN
+ * level and `admin/wallet` is in its area map — but only by coincidence of the
+ * two numbers matching. `@Roles(MANAGER)` would still be the opposite mistake,
+ * handing every MANAGER the revenue figures.
  *
  * So the set stays until the area registry lands and the two ideas — seniority
- * and ownership — stop being expressed through one decorator.
+ * and ownership — stop being expressed through one decorator. It is the thing
+ * that states the rule directly rather than as a consequence of a ceiling.
  */
 const ALLOWED_WALLET_ROLES = new Set<UserRole>([
   UserRole.ADMIN,
