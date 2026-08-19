@@ -96,14 +96,31 @@ async function main() {
       return;
     }
 
-    const question = args.join(' ').trim();
+    // `--as=` matters now that the filter has three values and they are not
+    // interchangeable: omitting it means NO filter (every passage), which is
+    // what the assistant never actually does. An answer that looks right
+    // unfiltered can still be empty for the role that asked.
+    const asFlag = args.find((a) => a.startsWith('--as='));
+    const audience = asFlag?.slice('--as='.length) as
+      | 'worker'
+      | 'employer'
+      | 'anonymous'
+      | undefined;
+
+    const question = args
+      .filter((a) => a !== asFlag)
+      .join(' ')
+      .trim();
     if (!question) {
-      console.error('Usage: vova-query.ts "votre question"  |  --suite');
+      console.error(
+        'Usage: vova-query.ts [--as=worker|employer|anonymous] "votre question"  |  --suite',
+      );
       process.exit(1);
     }
 
-    const result = await retrieve.search(question, 5);
+    const result = await retrieve.search(question, 5, audience);
     console.log(`Question : ${question}`);
+    console.log(`Public   : ${audience ?? 'aucun filtre'}`);
     console.log(`Élargie  : ${result.expandedQuery}`);
     if (result.requiredTools.length) {
       console.log(`Outils   : ${result.requiredTools.join(', ')}`);

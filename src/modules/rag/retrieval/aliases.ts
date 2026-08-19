@@ -72,6 +72,28 @@ const ALIASES: ReadonlyArray<readonly [string, readonly string[]]> = [
   ['ameliorer', ['profil', 'score de fiabilite']],
   ['refuse', ['kyc', 'verification', 'motif', 'rejet']],
   ['rejete', ['kyc', 'verification', 'motif']],
+
+  // Publishing, said the way a recruiter says it.
+  //
+  // « Je veux créer un job » retrieved the PORTFOLIO article and logged a gap:
+  // `job` expands to mission/travail/offre, all worker vocabulary, and nothing
+  // reached the one article that answers it — « Comment publier une mission »,
+  // which is written around *publier* and *annonce*. The recruiter's whole
+  // intent was invisible to the corpus.
+  //
+  // Multi-word triggers where the verb is ambiguous: « créer » alone also
+  // starts « créer un compte », which is a different article entirely.
+  ['creer un job', ['publier', 'annonce', 'recruteur']],
+  ['creer une offre', ['publier', 'annonce']],
+  ['creer une mission', ['publier', 'annonce']],
+  ['creer un emploi', ['publier', 'annonce', 'recruteur']],
+  ['creer du travail', ['publier', 'annonce', 'recruteur']],
+  ['poster', ['publier', 'annonce', 'offre']],
+  ['publier', ['annonce', 'offre', 'mission']],
+  ['recruter', ['publier', 'annonce', 'travailleur']],
+  ['embaucher', ['recruter', 'publier', 'annonce']],
+  ['engager quelqu un', ['recruter', 'publier', 'annonce']],
+  ['besoin de quelqu un', ['recruter', 'publier', 'annonce']],
 ];
 
 /**

@@ -4,6 +4,7 @@ import type { StructuredToolInterface } from '@langchain/core/tools';
 import { z } from 'zod';
 import { ProfileType } from '@prisma/client';
 import { HelpRetrieveService } from '../retrieval/retrieve.service';
+import type { HelpAudience } from '../retrieval/help-docs.store';
 import type {
   ReadOnlyApplications,
   ReadOnlyJobOffers,
@@ -79,24 +80,23 @@ function fail(tool: string, err: unknown): string {
   });
 }
 
-export function buildTools(
+/**
+ * The corpus search, built for one audience.
+ *
+ * Extracted so the anonymous path can hold the SAME tool with a different
+ * filter, rather than a second copy that drifts from this one.
+ */
+function makeRechercherAide(
   deps: ToolDeps,
-  ctx: ToolContext,
-  categorySlugs: string[],
-): StructuredToolInterface[] {
-  const isWorker = ctx.profileType === ProfileType.WORKER;
-
-  const rechercherAide = tool(
+  audience: HelpAudience,
+): StructuredToolInterface {
+  return tool(
     async ({ question_fr }: { question_fr: string }) => {
       try {
         // Same role filter as the pre-retrieval. Without it the model reaches
         // worker-only passages by calling the tool — and it did: an employer
         // was told to add réalisations to a screen they do not have.
-        const result = await deps.help.search(
-          question_fr,
-          undefined,
-          isWorker ? 'worker' : 'employer',
-        );
+        const result = await deps.help.search(question_fr, undefined, audience);
         if (result.hits.length === 0) {
           return ok({ resultats: [], note: 'aucun article pertinent' });
         }
@@ -126,6 +126,69 @@ export function buildTools(
           .describe('La question, reformulée en français simple.'),
       }),
     },
+  );
+}
+
+/** The domain check. Reads the category registry and nothing about the user. */
+function makeVerifierDomaine(deps: ToolDeps): StructuredToolInterface {
+  return tool(
+    async ({ metier }: { metier: string }) => {
+      try {
+        const found = await deps.categories.resolve(metier);
+        if (found) {
+          return ok({ couvert: true, domaine: found.name, slug: found.slug });
+        }
+        return ok({
+          couvert: false,
+          metier_demande: metier,
+          note:
+            'Aucun domaine ne correspond exactement. Ce métier peut tout de ' +
+            'même être publié : le domaine « Autre » existe pour ça. Ne dis ' +
+            'jamais que Rabotka ne couvre pas ce besoin.',
+        });
+      } catch (err) {
+        return fail('verifier_domaine', err);
+      }
+    },
+    {
+      name: 'verifier_domaine',
+      description:
+        "Vérifie qu'un métier existe bien sur Rabotka et donne son nom officiel. " +
+        "OBLIGATOIRE avant d'affirmer qu'un métier est couvert ou non : la liste " +
+        'des domaines vit en base et change, tu ne la connais pas par cœur.',
+      schema: z.object({
+        metier: z
+          .string()
+          .describe("Le métier tel que l'utilisateur l'a écrit."),
+      }),
+    },
+  );
+}
+
+/**
+ * Everything an anonymous caller may reach: the corpus, and the domain check.
+ *
+ * Not a narrowed version of `buildTools` — a deliberately separate, tiny list.
+ * Every other tool takes a `profileId` and answers with somebody's private
+ * data; a stranger has no profile, so there is nothing for them to read and no
+ * ambiguity about whose data it would be. `carte_support` is absent too:
+ * `support` is a bot command that already answers in every account state,
+ * including no account at all.
+ */
+export function buildAnonymousTools(deps: ToolDeps): StructuredToolInterface[] {
+  return [makeRechercherAide(deps, 'anonymous'), makeVerifierDomaine(deps)];
+}
+
+export function buildTools(
+  deps: ToolDeps,
+  ctx: ToolContext,
+  categorySlugs: string[],
+): StructuredToolInterface[] {
+  const isWorker = ctx.profileType === ProfileType.WORKER;
+
+  const rechercherAide = makeRechercherAide(
+    deps,
+    isWorker ? 'worker' : 'employer',
   );
 
   const rechercherOffres = tool(
@@ -535,38 +598,7 @@ export function buildTools(
     },
   );
 
-  const verifierDomaine = tool(
-    async ({ metier }: { metier: string }) => {
-      try {
-        const found = await deps.categories.resolve(metier);
-        if (found) {
-          return ok({ couvert: true, domaine: found.name, slug: found.slug });
-        }
-        return ok({
-          couvert: false,
-          metier_demande: metier,
-          note:
-            'Aucun domaine ne correspond exactement. Ce métier peut tout de ' +
-            'même être publié : le domaine « Autre » existe pour ça. Ne dis ' +
-            'jamais que Rabotka ne couvre pas ce besoin.',
-        });
-      } catch (err) {
-        return fail('verifier_domaine', err);
-      }
-    },
-    {
-      name: 'verifier_domaine',
-      description:
-        "Vérifie qu'un métier existe bien sur Rabotka et donne son nom officiel. " +
-        "OBLIGATOIRE avant d'affirmer qu'un métier est couvert ou non : la liste " +
-        'des domaines vit en base et change, tu ne la connais pas par cœur.',
-      schema: z.object({
-        metier: z
-          .string()
-          .describe("Le métier tel que l'utilisateur l'a écrit."),
-      }),
-    },
-  );
+  const verifierDomaine = makeVerifierDomaine(deps);
 
   const common = [
     rechercherAide,

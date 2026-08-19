@@ -44,6 +44,22 @@ export const TIER_CHAINS: Record<LlmTier, LlmProviderSpec[]> = {
       provider: 'mistral',
       model: modelId('VOVA_MODEL_STANDARD_MISTRAL', 'mistral-small-latest'),
     },
+    // Groq second, not first.
+    //
+    // Its whole selling point is latency, and on a WhatsApp budget that is the
+    // metric that decides this chain — so it may well belong at the front. But
+    // Mistral leads on *measured* production numbers, and promoting Groq on
+    // reputation would abandon the standard this file sets for itself. Measure,
+    // then reorder: it is one line.
+    //
+    // Model ids here are pinned, because Groq publishes no `-latest` alias. It
+    // also retires models on a short cycle, which is exactly the failure
+    // `gemini-2.0-flash` caused — hence the env override, and hence a default
+    // that is one of the longest-lived tool-calling ids Groq serves.
+    {
+      provider: 'groq',
+      model: modelId('VOVA_MODEL_STANDARD_GROQ', 'llama-3.3-70b-versatile'),
+    },
     {
       provider: 'google',
       model: modelId('VOVA_MODEL_STANDARD_GOOGLE', 'gemini-flash-latest'),
@@ -51,6 +67,13 @@ export const TIER_CHAINS: Record<LlmTier, LlmProviderSpec[]> = {
     {
       provider: 'openai',
       model: modelId('VOVA_MODEL_STANDARD_OPENAI', 'gpt-4o-mini'),
+    },
+    // Last: capable and cheap, but the slowest of the five on a tool-calling
+    // turn. `deepseek-chat` is a moving alias — the property this file argues
+    // for everywhere else — so it cannot be retired out from under us.
+    {
+      provider: 'deepseek',
+      model: modelId('VOVA_MODEL_STANDARD_DEEPSEEK', 'deepseek-chat'),
     },
   ],
 };
@@ -77,6 +100,8 @@ export const PROVIDER_API_KEY_ENV: Record<LlmProviderName, string> = {
   google: 'GOOGLE_API_KEY',
   mistral: 'MISTRAL_API_KEY',
   openai: 'OPENAI_API_KEY',
+  groq: 'GROQ_API_KEY',
+  deepseek: 'DEEPSEEK_API_KEY',
 };
 
 export function hasCredential(

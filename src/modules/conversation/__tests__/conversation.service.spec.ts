@@ -5,6 +5,7 @@ import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { BotOrchestratorService } from '../../bot/services/bot-orchestrator.service';
 import { WhatsAppService } from '../../whatsapp/whatsapp.service';
 import { REDIS_CONNECTION } from '../../../common/services/redis/redis.constants';
+import { VovaService } from '../../rag/vova.service';
 
 const PROFILE_ID = 'profile-uuid-1';
 const PHONE = '+24200000001';
@@ -14,6 +15,7 @@ describe('ConversationService', () => {
   let prisma: jest.Mocked<PrismaService>;
   let botOrchestrator: jest.Mocked<BotOrchestratorService>;
   let whatsApp: jest.Mocked<WhatsAppService>;
+  let vova: jest.Mocked<VovaService>;
 
   beforeEach(async () => {
     const mockPrismaService = {
@@ -30,6 +32,11 @@ describe('ConversationService', () => {
       saveMessage: jest.fn().mockResolvedValue(undefined),
     };
 
+    // null is "not handled" — the caller must then send the signup card.
+    const mockVova = {
+      handleAnonymous: jest.fn().mockResolvedValue(null),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ConversationService,
@@ -38,8 +45,15 @@ describe('ConversationService', () => {
         { provide: WhatsAppService, useValue: mockWhatsApp },
         {
           provide: REDIS_CONNECTION,
-          useValue: { get: jest.fn(), set: jest.fn(), del: jest.fn() },
+          // `set` returns 'OK' so the per-phone lock is acquired; returning
+          // undefined would read as "already locked" and drop every message.
+          useValue: {
+            get: jest.fn(),
+            set: jest.fn().mockResolvedValue('OK'),
+            del: jest.fn(),
+          },
         },
+        { provide: VovaService, useValue: mockVova },
         {
           provide: ConfigService,
           useValue: { get: jest.fn().mockReturnValue('https://rabotka.work') },
@@ -51,6 +65,7 @@ describe('ConversationService', () => {
     prisma = module.get(PrismaService);
     botOrchestrator = module.get(BotOrchestratorService);
     whatsApp = module.get(WhatsAppService);
+    vova = module.get(VovaService);
   });
 
   describe('handleIncomingMessage()', () => {
@@ -64,6 +79,107 @@ describe('ConversationService', () => {
       // Registry, not a literal — see bot-orchestrator.service.spec.ts.
       expect(result.replies[0]).toContain('[TPL:welcomeUnregisteredCard]');
       expect(botOrchestrator.handle).not.toHaveBeenCalled();
+    });
+
+    it('sends an unknown phone to the assistant before falling back', async () => {
+      (botOrchestrator.loadProfileByPhone as jest.Mock).mockResolvedValue(null);
+      (vova.handleAnonymous as jest.Mock).mockResolvedValue([
+        'Rabotka met en relation des travailleurs et des recruteurs.',
+      ]);
+
+      const result = await service.handleIncomingMessage(
+        PHONE,
+        'c’est quoi Rabotka ?',
+      );
+
+      expect(vova.handleAnonymous).toHaveBeenCalledWith(
+        PHONE,
+        'c’est quoi Rabotka ?',
+      );
+      expect(result.profileId).toBeNull();
+      expect(result.replies).toEqual([
+        'Rabotka met en relation des travailleurs et des recruteurs.',
+      ]);
+    });
+
+    it('answers /compte with the signup card and no model call', async () => {
+      (botOrchestrator.loadProfileByPhone as jest.Mock).mockResolvedValue(null);
+
+      const result = await service.handleIncomingMessage(PHONE, '/compte');
+
+      // The slash is expanded before the branch — it used to be expanded after,
+      // so `/compte` reached the matcher still carrying it.
+      expect(vova.handleAnonymous).not.toHaveBeenCalled();
+      expect(result.replies[0]).toContain('[TPL:welcomeUnregisteredCard]');
+    });
+
+    it('sends a bare greeting to the assistant, not the card', async () => {
+      // A stranger writing « bonjour » is opening a conversation. A card is the
+      // reply you give when you have nothing to say, and here we do — the
+      // assistant can greet them and ask what they are looking for.
+      (botOrchestrator.loadProfileByPhone as jest.Mock).mockResolvedValue(null);
+      (vova.handleAnonymous as jest.Mock).mockResolvedValue([
+        'Bonjour ! Rabotka met en relation…',
+      ]);
+
+      for (const greeting of ['Bonjour', 'bonjour', 'aide', 'help']) {
+        (vova.handleAnonymous as jest.Mock).mockClear();
+        const result = await service.handleIncomingMessage(PHONE, greeting);
+
+        expect(vova.handleAnonymous).toHaveBeenCalled();
+        expect(result.replies[0]).not.toContain('[TPL:');
+      }
+    });
+
+    it('keeps the navigation commands deterministic', async () => {
+      // These are documented entry points, printed in templates. They must not
+      // depend on a model provider being up.
+      (botOrchestrator.loadProfileByPhone as jest.Mock).mockResolvedValue(null);
+
+      for (const command of ['menu', 'start', 'démarrer', '/']) {
+        (vova.handleAnonymous as jest.Mock).mockClear();
+        const result = await service.handleIncomingMessage(PHONE, command);
+
+        expect(vova.handleAnonymous).not.toHaveBeenCalled();
+        expect(result.replies[0]).toContain('[TPL:welcomeUnregisteredCard]');
+      }
+    });
+
+    it('still falls back to the card when the assistant declines a greeting', async () => {
+      // vova.enabled=false, over budget, timed out: « bonjour » must not become
+      // a worse experience than it was before it reached the assistant.
+      (botOrchestrator.loadProfileByPhone as jest.Mock).mockResolvedValue(null);
+      (vova.handleAnonymous as jest.Mock).mockResolvedValue(null);
+
+      const result = await service.handleIncomingMessage(PHONE, 'Bonjour');
+
+      expect(result.replies[0]).toContain('[TPL:welcomeUnregisteredCard]');
+    });
+
+    it('sends the landing page CTA to the assistant, not the card', async () => {
+      // Exact matching, not prefix: this message begins with "bonjour" and is
+      // the first thing a new user ever sends. Prefix matching swallowed it.
+      (botOrchestrator.loadProfileByPhone as jest.Mock).mockResolvedValue(null);
+      (vova.handleAnonymous as jest.Mock).mockResolvedValue(['Bien sûr !']);
+
+      const result = await service.handleIncomingMessage(
+        PHONE,
+        'Bonjour Rabotka, je cherche une opportunité',
+      );
+
+      expect(vova.handleAnonymous).toHaveBeenCalled();
+      expect(result.replies).toEqual(['Bien sûr !']);
+    });
+
+    it('writes nothing to Postgres for an unknown phone', async () => {
+      // Both tables require a profile_id; there is no row to attach to.
+      (botOrchestrator.loadProfileByPhone as jest.Mock).mockResolvedValue(null);
+      (vova.handleAnonymous as jest.Mock).mockResolvedValue(['Voilà.']);
+
+      await service.handleIncomingMessage(PHONE, 'comment ça marche ?');
+
+      expect(prisma.conversation.upsert).not.toHaveBeenCalled();
+      expect(whatsApp.saveMessage).not.toHaveBeenCalled();
     });
 
     it('upserts conversation, saves message, and calls bot orchestrator', async () => {
