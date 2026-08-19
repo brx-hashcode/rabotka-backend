@@ -21,7 +21,28 @@ import { ROLE_HIERARCHY } from '../role-seniority';
  * SUPER_ADMIN-gated actions (permanent deletion, team management) stay out of
  * reach even where the area itself is allowed.
  */
-const MAX_LATERAL_LEVEL = ROLE_HIERARCHY[UserRole.MANAGER];
+/**
+ * The highest gate each lateral role may pass INSIDE an area it owns.
+ *
+ * Two different roles, two different ceilings, because they are two different
+ * jobs:
+ *
+ * - SUPPORT operates the platform, so it needs MANAGER-level actions and
+ *   nothing above. Permanent deletion and money movement stay out of reach even
+ *   in the areas it fully owns — the ceiling is what enforces that, not the
+ *   area map, so widening the map does not widen these.
+ * - FINANCE is deliberately near-total: every area an admin can reach except
+ *   team management and settings, with the full range of actions inside them.
+ *   Restricting it is done by leaving `user` and `admin/system-configs` out of
+ *   its map, not by capping what it may do where it is allowed.
+ *
+ * The consequence to be clear about: with no ceiling, FINANCE can perform
+ * SUPER_ADMIN-gated actions in its areas, permanent purge included.
+ */
+const LATERAL_CEILING: Record<LateralRole, number> = {
+  [UserRole.SUPPORT]: ROLE_HIERARCHY[UserRole.MANAGER],
+  [UserRole.FINANCE]: ROLE_HIERARCHY[UserRole.SUPER_ADMIN],
+};
 
 @Injectable()
 export class RolesGuard implements CanActivate {
@@ -87,7 +108,7 @@ export class RolesGuard implements CanActivate {
 
   /**
    * Lateral roles are allowed only inside the areas they own, and only up to
-   * MANAGER-level actions within them.
+   * their own ceiling within them — see `LATERAL_CEILING`.
    */
   private checkLateral(
     context: ExecutionContext,
@@ -96,7 +117,7 @@ export class RolesGuard implements CanActivate {
   ): boolean {
     if (
       requiredRoles?.length &&
-      this.requiredLevel(requiredRoles) > MAX_LATERAL_LEVEL
+      this.requiredLevel(requiredRoles) > LATERAL_CEILING[role]
     ) {
       throw new ForbiddenException(
         "Vous n'avez pas les permissions nécessaires pour cette action",

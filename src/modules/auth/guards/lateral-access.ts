@@ -30,22 +30,42 @@ export type AreaAccess = 'full' | 'read';
  * deliberately.
  */
 export const LATERAL_ACCESS: Record<LateralRole, Record<string, AreaAccess>> = {
+  // Finance is broad here, not narrow: everything an admin can reach EXCEPT
+  // team management and settings. That is a deliberate product decision, so the
+  // map is written as "all areas minus two" rather than a short allowlist.
+  //
+  // Note what this does NOT grant. `RolesGuard` caps every lateral role at
+  // MANAGER level whatever is written here, so ADMIN- and SUPER_ADMIN-gated
+  // handlers inside these areas stay closed — permanent purge, and crediting a
+  // wallet from a profile.
   [UserRole.FINANCE]: {
     'admin/wallet': 'full',
     'admin/payment-requests': 'full',
     'admin/penalties': 'full',
-    // The dashboard is not a finance area — it is the landing page, and every
-    // role that can log in should be able to read it. It carries three GETs and
-    // no mutation, so `full` was never meaningful here.
-    'admin/dashboard': 'read',
-    'admin/invoices': 'read',
-    // Finance needs to identify who a payment belongs to — not to moderate them.
-    'admin/profiles': 'read',
-    // WhatsApp is a real line item on the Meta invoice, so finance needs the
-    // consumption figures. Read only: the delivery log carries message bodies
-    // and recipient numbers, and retrying a dead-lettered send is an
-    // operational act, not a financial one.
-    'admin/whatsapp': 'read',
+    'admin/profiles': 'full',
+    'admin/job-offers': 'full',
+    'admin/applications': 'full',
+    'admin/job-categories': 'full',
+    'admin/claims': 'full',
+    'admin/chat': 'full',
+    'admin/event': 'full',
+    'admin/documents': 'full',
+    'admin/advertisements': 'full',
+    'admin/whatsapp': 'full',
+    // `full` throughout, including these — several expose only GETs today
+    // (dashboard, collaboration graph, feedback, the two download endpoints,
+    // the audit log), so `full` and `read` behave identically for them. It is
+    // written as `full` anyway so the map states the policy rather than an
+    // accident of which verbs those controllers happen to implement.
+    'admin/dashboard': 'full',
+    'admin/collaboration-graph': 'full',
+    'admin/feedback': 'full',
+    'admin/invoices': 'full',
+    'admin/contracts': 'full',
+    log: 'full',
+    // NOT PRESENT, deliberately: `user` (team management) and
+    // `admin/system-configs` (settings). Anything absent is denied, so leaving
+    // them out is the whole of the restriction.
   },
   // Support is not a narrow badge here — it is the team that runs the platform
   // day to day. `read` on profiles meant they could open a profile and not
