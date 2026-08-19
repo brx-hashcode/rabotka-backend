@@ -29,7 +29,13 @@ import {
 } from '../messages/menu.messages';
 import type { BotProfile, BotState } from '../types/bot-state.types';
 import type { FlowContext, FlowResult } from '../types/flow.types';
-import { FLOW_IDS, CMD_MENU, CMD_PAY, CMD_SUPPORT } from '../bot.constants';
+import {
+  FLOW_IDS,
+  CMD_MENU,
+  CMD_NAVIGATION,
+  CMD_PAY,
+  CMD_SUPPORT,
+} from '../bot.constants';
 import { stripChatFormattingChars } from '../utils/chat-input';
 import {
   runAcceptRefuseCandidateFlow,
@@ -924,7 +930,9 @@ function isDeterministicCommand(normalizedInput: string): boolean {
   // with the menu card — the first message a new user ever sends, and the one
   // that states their intent, never reached the assistant.
   //
-  // A bare « bonjour » is a greeting and still gets the card. A greeting with a
-  // sentence after it is a question.
-  return [...CMD_MENU, ...CMD_PAY].includes(normalizedInput);
+  // `CMD_NAVIGATION` rather than `CMD_MENU`: a bare « bonjour » now reaches the
+  // assistant too, which introduces itself and asks what the person needs. Only
+  // the "show me the thing" words stay deterministic, because templates print
+  // them and they must not wait on a model.
+  return [...CMD_NAVIGATION, ...CMD_PAY].includes(normalizedInput);
 }

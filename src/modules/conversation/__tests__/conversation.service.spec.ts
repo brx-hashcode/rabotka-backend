@@ -83,9 +83,10 @@ describe('ConversationService', () => {
 
     it('sends an unknown phone to the assistant before falling back', async () => {
       (botOrchestrator.loadProfileByPhone as jest.Mock).mockResolvedValue(null);
-      (vova.handleAnonymous as jest.Mock).mockResolvedValue([
-        'Rabotka met en relation des travailleurs et des recruteurs.',
-      ]);
+      (vova.handleAnonymous as jest.Mock).mockResolvedValue({
+        text: 'Rabotka met en relation des travailleurs et des recruteurs.',
+        offerAccount: false,
+      });
 
       const result = await service.handleIncomingMessage(
         PHONE,
@@ -118,9 +119,10 @@ describe('ConversationService', () => {
       // reply you give when you have nothing to say, and here we do — the
       // assistant can greet them and ask what they are looking for.
       (botOrchestrator.loadProfileByPhone as jest.Mock).mockResolvedValue(null);
-      (vova.handleAnonymous as jest.Mock).mockResolvedValue([
-        'Bonjour ! Rabotka met en relation…',
-      ]);
+      (vova.handleAnonymous as jest.Mock).mockResolvedValue({
+        text: 'Bonjour ! Je suis VoVa AI, l’assistant de Rabotka.',
+        offerAccount: false,
+      });
 
       for (const greeting of ['Bonjour', 'bonjour', 'aide', 'help']) {
         (vova.handleAnonymous as jest.Mock).mockClear();
@@ -160,7 +162,10 @@ describe('ConversationService', () => {
       // Exact matching, not prefix: this message begins with "bonjour" and is
       // the first thing a new user ever sends. Prefix matching swallowed it.
       (botOrchestrator.loadProfileByPhone as jest.Mock).mockResolvedValue(null);
-      (vova.handleAnonymous as jest.Mock).mockResolvedValue(['Bien sûr !']);
+      (vova.handleAnonymous as jest.Mock).mockResolvedValue({
+        text: 'Bien sûr !',
+        offerAccount: false,
+      });
 
       const result = await service.handleIncomingMessage(
         PHONE,
@@ -171,10 +176,30 @@ describe('ConversationService', () => {
       expect(result.replies).toEqual(['Bien sûr !']);
     });
 
+    it('shows the limit message AND the card when the allowance is spent', async () => {
+      // The only case that says something and shows the card together: the
+      // person is told why the conversation stops, and handed the way to
+      // continue it in the same breath.
+      (botOrchestrator.loadProfileByPhone as jest.Mock).mockResolvedValue(null);
+      (vova.handleAnonymous as jest.Mock).mockResolvedValue({
+        text: 'J’ai répondu à toutes les questions… Créez votre compte.',
+        offerAccount: true,
+      });
+
+      const result = await service.handleIncomingMessage(PHONE, 'et après ?');
+
+      expect(result.replies).toHaveLength(2);
+      expect(result.replies[0]).toContain('Créez votre compte');
+      expect(result.replies[1]).toContain('[TPL:welcomeUnregisteredCard]');
+    });
+
     it('writes nothing to Postgres for an unknown phone', async () => {
       // Both tables require a profile_id; there is no row to attach to.
       (botOrchestrator.loadProfileByPhone as jest.Mock).mockResolvedValue(null);
-      (vova.handleAnonymous as jest.Mock).mockResolvedValue(['Voilà.']);
+      (vova.handleAnonymous as jest.Mock).mockResolvedValue({
+        text: 'Voilà.',
+        offerAccount: false,
+      });
 
       await service.handleIncomingMessage(PHONE, 'comment ça marche ?');
 

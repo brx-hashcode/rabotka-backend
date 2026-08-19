@@ -15,7 +15,7 @@ import {
   stripChatFormattingChars,
 } from '../bot/utils/chat-input';
 import { welcomeUnregisteredMessage } from '../bot/messages/welcome.messages';
-import { CMD_ACCOUNT, CMD_ANONYMOUS_CARD } from '../bot/bot.constants';
+import { CMD_ACCOUNT, CMD_NAVIGATION } from '../bot/bot.constants';
 import { VovaService } from '../rag/vova.service';
 
 const DEFAULT_BOT_SESSION_ID = 'default';
@@ -163,12 +163,12 @@ export class ConversationService {
     // greeting, and answering it with a card is how the product's own front
     // door got swallowed once already.
     //
-    // `CMD_ANONYMOUS_CARD` is narrower than `CMD_MENU` on purpose — « bonjour »
+    // `CMD_NAVIGATION` is narrower than `CMD_MENU` on purpose — « bonjour »
     // reaches the assistant, because a stranger opening a conversation deserves
     // an answer rather than a card. See the note on that constant.
     if (
       CMD_ACCOUNT.includes(normalized) ||
-      CMD_ANONYMOUS_CARD.includes(normalized)
+      CMD_NAVIGATION.includes(normalized)
     ) {
       return [welcomeUnregisteredMessage()];
     }
@@ -193,9 +193,16 @@ export class ConversationService {
 
     try {
       const reply = await this.vova.handleAnonymous(phone, textForBot);
-      // null is "not handled" — disabled, over budget, or failed. The card is
-      // exactly what this number would have got before any of this existed.
-      return reply ?? [welcomeUnregisteredMessage()];
+      // null is "not handled" — disabled or failed. The card is exactly what
+      // this number would have got before any of this existed.
+      if (!reply) return [welcomeUnregisteredMessage()];
+
+      // The daily allowance is the one case that says something AND shows the
+      // card: the person is told why the conversation stops, and handed the
+      // way to continue it in the same breath.
+      return reply.offerAccount
+        ? [reply.text, welcomeUnregisteredMessage()]
+        : [reply.text];
     } finally {
       await this.redis.del(lockKey);
     }
