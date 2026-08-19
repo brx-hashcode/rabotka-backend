@@ -95,24 +95,28 @@ describe('UserController', () => {
       email: 'j@d.com',
     } as any);
     expect(result).toMatchObject({ id: '1', firstName: 'John' });
-    expect(service.updateAdmin).toHaveBeenCalledWith('1', { email: 'j@d.com' });
+    expect(service.updateAdmin).toHaveBeenCalledWith(
+      '1',
+      { email: 'j@d.com' },
+      'admin-1',
+    );
   });
 
   it('activate() calls service.activate and returns user', async () => {
     const result = await controller.activate(fakeReq(), '1');
-    expect(service.activate).toHaveBeenCalledWith('1');
+    expect(service.activate).toHaveBeenCalledWith('1', 'admin-1');
     expect(result).toMatchObject({ id: '1', isActive: true });
   });
 
   it('deactivate() calls service.deactivate and returns user', async () => {
     const result = await controller.deactivate(fakeReq(), '1');
-    expect(service.deactivate).toHaveBeenCalledWith('1');
+    expect(service.deactivate).toHaveBeenCalledWith('1', 'admin-1');
     expect(result).toMatchObject({ id: '1', isActive: false });
   });
 
   it('deleteAdmin() returns success', async () => {
     const result = await controller.deleteAdmin(fakeReq(), '1');
-    expect(service.deleteAdmin).toHaveBeenCalledWith('1');
+    expect(service.deleteAdmin).toHaveBeenCalledWith('1', 'admin-1');
     expect(result).toEqual({ success: true });
   });
 });

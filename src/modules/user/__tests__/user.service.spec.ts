@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
 import { UserService } from '../user.service';
@@ -10,6 +11,31 @@ import { NotificationService } from '../../notification/notification.service';
 import { UserRole } from '@prisma/client';
 
 const USER_ID = 'user-uuid-1';
+const ACTOR_ID = 'actor-uuid-1';
+
+/**
+ * Team management now reads the ACTOR as well as the target, so a single
+ * `mockResolvedValue` is no longer enough — it would answer the actor lookup
+ * with the target row (or with null, which reads as "actor does not exist").
+ */
+function stubUsers(
+  findUnique: jest.Mock,
+  opts: {
+    actor?: { role: UserRole; is_active: boolean } | null;
+    target?: unknown;
+    byEmail?: unknown;
+  } = {},
+) {
+  const { actor = { role: UserRole.SUPER_ADMIN, is_active: true } } = opts;
+  findUnique.mockImplementation(
+    ({ where }: { where: { id?: string; email?: string } }) => {
+      if (where.id === ACTOR_ID) return Promise.resolve(actor);
+      if (where.email !== undefined)
+        return Promise.resolve(opts.byEmail ?? null);
+      return Promise.resolve('target' in opts ? opts.target : mockUser);
+    },
+  );
+}
 
 const mockUser = {
   id: USER_ID,
@@ -58,6 +84,8 @@ describe('UserService', () => {
     service = module.get<UserService>(UserService);
     prisma = module.get(PrismaService);
     notification = module.get(NotificationService);
+
+    stubUsers(prisma.user.findUnique as jest.Mock);
   });
 
   describe('createAdmin()', () => {
@@ -69,12 +97,12 @@ describe('UserService', () => {
     };
 
     beforeEach(() => {
-      (prisma.user.findUnique as jest.Mock).mockResolvedValue(null);
+      stubUsers(prisma.user.findUnique as jest.Mock, { byEmail: null });
       (prisma.user.create as jest.Mock).mockResolvedValue(mockUser);
     });
 
     it('creates a new admin user and sends notification', async () => {
-      const result = await service.createAdmin(dto);
+      const result = await service.createAdmin(dto, ACTOR_ID);
 
       expect(result.id).toBe(USER_ID);
       expect(notification.notifyAdminCreated).toHaveBeenCalledWith(
@@ -84,9 +112,11 @@ describe('UserService', () => {
     });
 
     it('throws ConflictException when email already exists', async () => {
-      (prisma.user.findUnique as jest.Mock).mockResolvedValue(mockUser);
+      stubUsers(prisma.user.findUnique as jest.Mock, { byEmail: mockUser });
 
-      await expect(service.createAdmin(dto)).rejects.toThrow(ConflictException);
+      await expect(service.createAdmin(dto, ACTOR_ID)).rejects.toThrow(
+        ConflictException,
+      );
     });
   });
 
@@ -99,13 +129,7 @@ describe('UserService', () => {
     };
 
     beforeEach(() => {
-      (prisma.user.findUnique as jest.Mock).mockImplementation(
-        ({ where }: { where: { id?: string; email?: string } }) => {
-          if (where.id) return Promise.resolve(mockUser);
-          if (where.email) return Promise.resolve(null);
-          return Promise.resolve(null);
-        },
-      );
+      stubUsers(prisma.user.findUnique as jest.Mock);
       (prisma.user.update as jest.Mock).mockResolvedValue({
         ...mockUser,
         first_name: 'Jane',
@@ -114,31 +138,26 @@ describe('UserService', () => {
     });
 
     it('updates admin and sends notification', async () => {
-      const result = await service.updateAdmin(USER_ID, dto);
+      const result = await service.updateAdmin(USER_ID, dto, ACTOR_ID);
 
       expect(result.first_name).toBe('Jane');
       expect(notification.notifyAdminUpdated).toHaveBeenCalled();
     });
 
     it('throws NotFoundException when user not found', async () => {
-      (prisma.user.findUnique as jest.Mock).mockResolvedValue(null);
+      stubUsers(prisma.user.findUnique as jest.Mock, { target: null });
 
-      await expect(service.updateAdmin(USER_ID, dto)).rejects.toThrow(
+      await expect(service.updateAdmin(USER_ID, dto, ACTOR_ID)).rejects.toThrow(
         NotFoundException,
       );
     });
 
     it('throws ConflictException when new email is already taken', async () => {
-      (prisma.user.findUnique as jest.Mock).mockImplementation(
-        ({ where }: { where: { id?: string; email?: string } }) => {
-          if (where.id) return Promise.resolve(mockUser);
-          if (where.email)
-            return Promise.resolve({ ...mockUser, id: 'other-user' });
-          return Promise.resolve(null);
-        },
-      );
+      stubUsers(prisma.user.findUnique as jest.Mock, {
+        byEmail: { ...mockUser, id: 'other-user' },
+      });
 
-      await expect(service.updateAdmin(USER_ID, dto)).rejects.toThrow(
+      await expect(service.updateAdmin(USER_ID, dto, ACTOR_ID)).rejects.toThrow(
         ConflictException,
       );
     });
@@ -146,20 +165,19 @@ describe('UserService', () => {
 
   describe('activate()', () => {
     it('activates the user', async () => {
-      (prisma.user.findUnique as jest.Mock).mockResolvedValue(mockUser);
       (prisma.user.update as jest.Mock).mockResolvedValue({
         ...mockUser,
         is_active: true,
       });
 
-      const result = await service.activate(USER_ID);
+      const result = await service.activate(USER_ID, ACTOR_ID);
       expect(result.is_active).toBe(true);
     });
 
     it('throws NotFoundException when user not found', async () => {
-      (prisma.user.findUnique as jest.Mock).mockResolvedValue(null);
+      stubUsers(prisma.user.findUnique as jest.Mock, { target: null });
 
-      await expect(service.activate(USER_ID)).rejects.toThrow(
+      await expect(service.activate(USER_ID, ACTOR_ID)).rejects.toThrow(
         NotFoundException,
       );
     });
@@ -167,21 +185,115 @@ describe('UserService', () => {
 
   describe('deactivate()', () => {
     it('deactivates the user', async () => {
-      (prisma.user.findUnique as jest.Mock).mockResolvedValue(mockUser);
       (prisma.user.update as jest.Mock).mockResolvedValue({
         ...mockUser,
         is_active: false,
       });
 
-      const result = await service.deactivate(USER_ID);
+      const result = await service.deactivate(USER_ID, ACTOR_ID);
       expect(result.is_active).toBe(false);
     });
 
     it('throws NotFoundException when user not found', async () => {
-      (prisma.user.findUnique as jest.Mock).mockResolvedValue(null);
+      stubUsers(prisma.user.findUnique as jest.Mock, { target: null });
 
-      await expect(service.deactivate(USER_ID)).rejects.toThrow(
+      await expect(service.deactivate(USER_ID, ACTOR_ID)).rejects.toThrow(
         NotFoundException,
+      );
+    });
+  });
+
+  /**
+   * The hole this closes: `PATCH /user/:id` required only ADMIN, and the
+   * service wrote whatever `role` the body carried. An ADMIN could promote
+   * themselves to SUPER_ADMIN and then do anything at all.
+   */
+  describe('seniority invariants', () => {
+    const ADMIN_ACTOR = { role: UserRole.ADMIN, is_active: true };
+
+    const dto = {
+      firstName: 'Jane',
+      lastName: 'Doe',
+      email: 'jane@example.com',
+      role: UserRole.SUPER_ADMIN,
+    };
+
+    it('refuses to let an ADMIN promote anyone to SUPER_ADMIN', async () => {
+      stubUsers(prisma.user.findUnique as jest.Mock, { actor: ADMIN_ACTOR });
+
+      await expect(service.updateAdmin(USER_ID, dto, ACTOR_ID)).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('refuses to let an ADMIN promote THEMSELVES to SUPER_ADMIN', async () => {
+      stubUsers(prisma.user.findUnique as jest.Mock, {
+        actor: ADMIN_ACTOR,
+        target: { role: UserRole.ADMIN },
+      });
+
+      await expect(
+        service.updateAdmin(ACTOR_ID, dto, ACTOR_ID),
+      ).rejects.toThrow(ForbiddenException);
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('refuses to let an ADMIN create a SUPER_ADMIN', async () => {
+      stubUsers(prisma.user.findUnique as jest.Mock, { actor: ADMIN_ACTOR });
+
+      await expect(service.createAdmin(dto, ACTOR_ID)).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(prisma.user.create).not.toHaveBeenCalled();
+    });
+
+    it('refuses to let an ADMIN act on a SUPER_ADMIN', async () => {
+      stubUsers(prisma.user.findUnique as jest.Mock, {
+        actor: ADMIN_ACTOR,
+        target: { role: UserRole.SUPER_ADMIN },
+      });
+
+      await expect(service.deactivate(USER_ID, ACTOR_ID)).rejects.toThrow(
+        ForbiddenException,
+      );
+      await expect(service.deleteAdmin(USER_ID, ACTOR_ID)).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('still allows a SUPER_ADMIN to assign SUPER_ADMIN', async () => {
+      stubUsers(prisma.user.findUnique as jest.Mock, { byEmail: null });
+      (prisma.user.update as jest.Mock).mockResolvedValue(mockUser);
+
+      await expect(
+        service.updateAdmin(USER_ID, dto, ACTOR_ID),
+      ).resolves.toBeDefined();
+    });
+
+    it('allows an ADMIN to manage a MANAGER', async () => {
+      stubUsers(prisma.user.findUnique as jest.Mock, {
+        actor: ADMIN_ACTOR,
+        target: { role: UserRole.MANAGER },
+      });
+      (prisma.user.update as jest.Mock).mockResolvedValue({
+        ...mockUser,
+        is_active: false,
+      });
+
+      await expect(
+        service.deactivate(USER_ID, ACTOR_ID),
+      ).resolves.toBeDefined();
+    });
+
+    it('refuses a deactivated actor', async () => {
+      stubUsers(prisma.user.findUnique as jest.Mock, {
+        actor: { role: UserRole.SUPER_ADMIN, is_active: false },
+      });
+
+      await expect(service.deactivate(USER_ID, ACTOR_ID)).rejects.toThrow(
+        ForbiddenException,
       );
     });
   });
@@ -208,7 +320,9 @@ describe('UserService', () => {
       (prisma.user.findFirst as jest.Mock).mockResolvedValue(mockUser);
       (prisma.user.update as jest.Mock).mockResolvedValue(mockUser);
 
-      await expect(service.deleteAdmin(USER_ID)).resolves.toBeUndefined();
+      await expect(
+        service.deleteAdmin(USER_ID, ACTOR_ID),
+      ).resolves.toBeUndefined();
       expect(prisma.user.update).toHaveBeenCalledWith({
         where: { id: USER_ID },
         data: { deleted_at: expect.any(Date) },
@@ -218,7 +332,7 @@ describe('UserService', () => {
     it('throws NotFoundException when user not found', async () => {
       (prisma.user.findFirst as jest.Mock).mockResolvedValue(null);
 
-      await expect(service.deleteAdmin(USER_ID)).rejects.toThrow(
+      await expect(service.deleteAdmin(USER_ID, ACTOR_ID)).rejects.toThrow(
         NotFoundException,
       );
     });
