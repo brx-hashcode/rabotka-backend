@@ -254,7 +254,7 @@ export class LlmService {
     input: BaseLanguageModelInput,
     options: LlmInvokeOptions,
   ): Promise<AIMessage> {
-    const model = this.factory.build(spec);
+    const model = await this.factory.build(spec);
     let runnable: Runnable<BaseLanguageModelInput, AIMessage>;
 
     if (options.tools?.length) {
