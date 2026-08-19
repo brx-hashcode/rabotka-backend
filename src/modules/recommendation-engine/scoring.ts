@@ -237,13 +237,31 @@ export function applyPenalties(
   return clamp01(score);
 }
 
-/** Exponential freshness decay. Replaces a linear ramp with a hard floor. */
-export function freshnessScore(createdAt: Date, halfLifeHours = 72): number {
-  const ageHours = (Date.now() - createdAt.getTime()) / 3_600_000;
+export const FRESHNESS_HALF_LIFE_HOURS = 72;
+
+/**
+ * Exponential freshness decay. Replaces a linear ramp with a hard floor.
+ *
+ * `now` is a parameter rather than a `Date.now()` read inside: one ranking pass
+ * must score every candidate against ONE instant. Read per candidate, a tick
+ * landing mid-loop makes a later candidate a millisecond younger than an
+ * earlier one — a real score difference, on the order that separates otherwise
+ * tied candidates, so the feed's order came to depend on where a millisecond
+ * boundary happened to fall. It defaults, so a caller scoring a single item
+ * need not care.
+ */
+export function freshnessScore(
+  createdAt: Date,
+  halfLifeHours = FRESHNESS_HALF_LIFE_HOURS,
+  now: number = Date.now(),
+): number {
+  const ageHours = (now - createdAt.getTime()) / 3_600_000;
   if (ageHours <= 0) return 1;
   if (halfLifeHours <= 0) return 0;
   return clamp01(0.5 ** (ageHours / halfLifeHours));
 }
+
+export const SEEN_RECOVERY_HOURS = 72;
 
 /**
  * How strongly to suppress something the user was just shown.
@@ -251,10 +269,16 @@ export function freshnessScore(createdAt: Date, halfLifeHours = 72): number {
  * Returns 1 immediately after an impression, decaying linearly to 0 over
  * `recoveryHours`. Suppression by decay rather than by hard exclusion: filtering
  * seen items out entirely starves the feed once a user has browsed a while.
+ *
+ * `now` is injected for the reason given on `freshnessScore`.
  */
-export function seenDecay(lastSeenAt: Date | null, recoveryHours = 72): number {
+export function seenDecay(
+  lastSeenAt: Date | null,
+  recoveryHours = SEEN_RECOVERY_HOURS,
+  now: number = Date.now(),
+): number {
   if (!lastSeenAt) return 0;
-  const ageHours = (Date.now() - lastSeenAt.getTime()) / 3_600_000;
+  const ageHours = (now - lastSeenAt.getTime()) / 3_600_000;
   if (ageHours <= 0) return 1;
   if (recoveryHours <= 0) return 0;
   return clamp01(1 - ageHours / recoveryHours);

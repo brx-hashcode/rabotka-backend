@@ -5,12 +5,28 @@ import { EMPTY_FEATURES, type UserFeatures } from '../user-feature.service';
 
 jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => {});
 
+/**
+ * One clock for every fixture in this file.
+ *
+ * `Date.now()` read per fixture gave each candidate its own millisecond, and
+ * two candidates built in the same array literal can straddle a tick on a
+ * loaded CI runner. `fresh` and `urgency` are both read off those timestamps,
+ * so a 1ms skew is a real score difference — enough to flip an assertion that
+ * expects the delivered order preserved, and only ever on CI. Freezing one
+ * instant makes the fixtures differ by exactly what each test declares.
+ *
+ * Frozen at module load, not against the scoring clock: only the DIFFERENCE
+ * between candidates orders a feed, and the drift against `Date.now()` inside
+ * the service is the test's own runtime — milliseconds, on half-lives of days.
+ */
+const NOW = Date.now();
+
 const candidate = (id: string, over: Partial<Candidate> = {}): Candidate => ({
   id,
   categoryId: 'cat-a',
   employerId: 'emp-1',
-  scheduledAt: new Date(Date.now() + 86_400_000),
-  createdAt: new Date(Date.now() - 3_600_000),
+  scheduledAt: new Date(NOW + 86_400_000),
+  createdAt: new Date(NOW - 3_600_000),
   amount: null,
   paymentFlow: null,
   latitude: null,
@@ -33,7 +49,7 @@ const worker = (id: string, over: Record<string, unknown> = {}) => ({
   longitude: null,
   countryCode: null,
   city: null,
-  createdAt: new Date(Date.now() - 86_400_000),
+  createdAt: new Date(NOW - 86_400_000),
   ...over,
 });
 
@@ -196,8 +212,8 @@ describe('RecommendationEngineService', () => {
           employerId: 'e1',
           latitude: -4.26,
           longitude: 15.28,
-          scheduledAt: new Date(Date.now() + 60_000),
-          createdAt: new Date(),
+          scheduledAt: new Date(NOW + 60_000),
+          createdAt: new Date(NOW),
           amount: 12000,
           paymentFlow: 'DAILY',
         }),
@@ -474,7 +490,7 @@ describe('RecommendationEngineService', () => {
         candidate(`o${i}`, {
           categoryId: `cat-${i}`,
           employerId: `e${i}`,
-          createdAt: new Date(Date.now() - i * 12 * 3_600_000),
+          createdAt: new Date(NOW - i * 12 * 3_600_000),
         }),
       );
 
@@ -661,6 +677,33 @@ describe('RecommendationEngineService', () => {
       });
     });
 
+    it('scores the whole feed against one clock', async () => {
+      // The scoring pass used to read `Date.now()` per candidate. A tick landing
+      // mid-loop then scored a later candidate against a later instant, worth a
+      // millisecond of `fresh` and `urgency` — enough to reorder candidates
+      // nothing else separates, which is exactly what flipped this file's
+      // ordering assertions on CI and never on a quiet machine.
+      //
+      // A clock that advances on every read is that tick boundary made
+      // certain. It fails without the snapshot and passes with it, so this
+      // holds the fix rather than merely describing it.
+      const t = { ms: Date.now() };
+      const advancing = jest
+        .spyOn(Date, 'now')
+        .mockImplementation(() => t.ms++);
+      try {
+        deps.prisma.profile.findUnique.mockResolvedValue(null);
+        deps.sources.fromAffinities.mockResolvedValue([
+          candidate('a'),
+          candidate('b'),
+        ]);
+
+        expect((await recommend(2)).map((r) => r.id)).toEqual(['a', 'b']);
+      } finally {
+        advancing.mockRestore();
+      }
+    });
+
     it('is unchanged when neither side declared a country', async () => {
       // Nobody who has told us nothing may be moved by this change.
       deps.prisma.profile.findUnique.mockResolvedValue(null);
@@ -845,8 +888,8 @@ describe('RecommendationEngineService.recommendWorkersForEmployer', () => {
       ]);
       deps.sources.lastActiveAt.mockResolvedValue(
         new Map([
-          ['active', new Date(Date.now() - 3_600_000)],
-          ['dormant', new Date(Date.now() - 90 * 86_400_000)],
+          ['active', new Date(NOW - 3_600_000)],
+          ['dormant', new Date(NOW - 90 * 86_400_000)],
         ]),
       );
 
@@ -863,7 +906,7 @@ describe('RecommendationEngineService.recommendWorkersForEmployer', () => {
         worker('dormant', { categoryIds: ['cat-a'] }),
       ]);
       deps.sources.lastActiveAt.mockResolvedValue(
-        new Map([['dormant', new Date(Date.now() - 200 * 86_400_000)]]),
+        new Map([['dormant', new Date(NOW - 200 * 86_400_000)]]),
       );
 
       const out = await recommend(2);

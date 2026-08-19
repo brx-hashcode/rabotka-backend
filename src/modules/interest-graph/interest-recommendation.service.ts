@@ -7,6 +7,7 @@ import {
   haversineKm,
   proximityScore,
   urgencyScore,
+  URGENCY_HALF_LIFE_HOURS,
 } from '../../common/services/geocoding/geo.utils';
 import type { Coordinates } from '../../common/services/geocoding/geocoding.service';
 
@@ -130,6 +131,10 @@ export class InterestRecommendationService {
     const maxScore = Math.max(...scores);
     const scoreRange = maxScore - minScore || 1;
 
+    // One clock for the whole pass — see `freshnessScore` in the recommendation
+    // engine's `scoring.ts`.
+    const now = Date.now();
+
     const ranked = results.map((r) => {
       const offer = offerMap.get(r.jobId);
       const normalizedQdrant = (r.score - minScore) / scoreRange;
@@ -147,7 +152,7 @@ export class InterestRecommendationService {
           : 0.5; // neutral when coords unavailable
 
       const urgency = offer?.scheduled_at
-        ? urgencyScore(offer.scheduled_at)
+        ? urgencyScore(offer.scheduled_at, URGENCY_HALF_LIFE_HOURS, now)
         : 0.5;
 
       const combined = 0.5 * normalizedQdrant + 0.3 * prox + 0.2 * urgency;
