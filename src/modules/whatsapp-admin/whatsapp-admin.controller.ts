@@ -38,8 +38,10 @@ export class WhatsappAdminController {
     private readonly logService: LogService,
   ) {}
 
+  // MANAGER, not MODERATOR: the delivery log carries message bodies and
+  // recipient numbers for every user on the platform.
   @Get('messages')
-  @Roles(UserRole.MODERATOR)
+  @Roles(UserRole.MANAGER)
   @ApiOperation({
     summary: 'List WhatsApp messages with their delivery status',
     description:
@@ -64,7 +66,7 @@ export class WhatsappAdminController {
   }
 
   @Get('stats')
-  @Roles(UserRole.MODERATOR)
+  @Roles(UserRole.MANAGER)
   @ApiOperation({
     summary: 'Delivery statistics for a window',
     description:
@@ -101,7 +103,7 @@ export class WhatsappAdminController {
   }
 
   @Get('queue')
-  @Roles(UserRole.MODERATOR)
+  @Roles(UserRole.MANAGER)
   @ApiOperation({
     summary: 'Outbound queue and dead-letter queue snapshot',
     description:
