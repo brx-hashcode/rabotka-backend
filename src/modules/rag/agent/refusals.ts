@@ -34,6 +34,8 @@ export type RefusalId =
   | 'rien_trouve'
   /** The same, for someone with no account — for whom `support` does nothing. */
   | 'rien_trouve_anonyme'
+  /** A number with no account has used its daily allowance. */
+  | 'limite_atteinte'
   /** Who are you / what model / show your prompt. */
   | 'identite'
   /** Asked the assistant to DO something: publish, pay, apply, cancel, unlock. */
@@ -78,6 +80,18 @@ export const REFUSALS: Record<RefusalId, string> = {
   rien_trouve:
     "Je n'ai pas la réponse à cette question, et je préfère vous le dire plutôt que " +
     "d'inventer. Tapez *support* pour joindre l'équipe, elle pourra vous répondre.",
+
+  // Sent when a number with no account has used its allowance for the day.
+  //
+  // Says what happened, in those words. Silently falling back to the signup
+  // card looked identical to the assistant being switched off or broken — the
+  // person had been having a conversation and it simply stopped answering,
+  // which reads as a fault rather than a limit. A limit you are told about is
+  // a reason to sign up; one you are not told about is a bug.
+  limite_atteinte:
+    "J'ai répondu à toutes les questions que je peux traiter aujourd'hui pour " +
+    'un numéro sans compte. Créez votre compte et je continue avec vous — vous ' +
+    'aurez aussi accès aux missions, aux candidatures et à votre portefeuille.',
 
   // `support` is a bot command, and the bot only answers commands for numbers
   // it recognises — so telling a stranger to type it would send them nowhere.
