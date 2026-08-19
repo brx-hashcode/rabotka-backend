@@ -11,6 +11,8 @@ import { InvoiceService } from './invoice.service';
 import { ProfileAuthGuard } from '../auth/guards/profile-auth.guard';
 import { AdminAuthGuard } from '../auth/guards/admin-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { UserRole } from '@prisma/client';
 import type { ProfileAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
 
 @ApiTags('Invoices')
@@ -56,7 +58,9 @@ export class InvoiceController {
 export class AdminInvoiceController {
   constructor(private readonly invoiceService: InvoiceService) {}
 
+  // Counterparty identity and amounts, same as the contract download.
   @Get(':invoiceId/download')
+  @Roles(UserRole.MANAGER)
   @ApiOperation({ summary: 'Download an invoice PDF (admin)' })
   @ApiResponse({ status: 200, description: 'PDF file stream' })
   @ApiResponse({ status: 404, description: 'Invoice or template not found' })
