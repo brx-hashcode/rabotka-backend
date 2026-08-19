@@ -14,19 +14,7 @@ import {
   lateralRoleCanAccess,
   type LateralRole,
 } from './lateral-access';
-
-/**
- * Seniority ladder. Lateral roles are deliberately absent — they are not more
- * or less senior than a MODERATOR, they simply cover a different area, and
- * giving them a number here would silently grant them every endpoint at or
- * below that number.
- */
-const ROLE_HIERARCHY: Record<Exclude<UserRole, LateralRole>, number> = {
-  [UserRole.MODERATOR]: 1,
-  [UserRole.MANAGER]: 2,
-  [UserRole.ADMIN]: 3,
-  [UserRole.SUPER_ADMIN]: 4,
-};
+import { ROLE_HIERARCHY } from '../role-seniority';
 
 /**
  * The highest gate a lateral role may pass inside an area it owns. ADMIN- and
@@ -96,7 +84,10 @@ export class RolesGuard implements CanActivate {
     role: LateralRole,
     requiredRoles: UserRole[] | undefined,
   ): boolean {
-    if (requiredRoles?.length && this.requiredLevel(requiredRoles) > MAX_LATERAL_LEVEL) {
+    if (
+      requiredRoles?.length &&
+      this.requiredLevel(requiredRoles) > MAX_LATERAL_LEVEL
+    ) {
       throw new ForbiddenException(
         "Vous n'avez pas les permissions nécessaires pour cette action",
       );
