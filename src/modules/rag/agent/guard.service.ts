@@ -32,6 +32,8 @@ const PROVIDER_TERMS = [
   'anthropic',
   'claude',
   'llama',
+  'groq',
+  'deepseek',
   'langchain',
   'langgraph',
   'prompt systeme',

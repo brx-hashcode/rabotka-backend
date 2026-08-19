@@ -32,6 +32,8 @@ export type RefusalId =
   | 'garde_enfants'
   /** Retrieval came back with nothing relevant. */
   | 'rien_trouve'
+  /** The same, for someone with no account — for whom `support` does nothing. */
+  | 'rien_trouve_anonyme'
   /** Who are you / what model / show your prompt. */
   | 'identite'
   /** Asked the assistant to DO something: publish, pay, apply, cancel, unlock. */
@@ -76,6 +78,14 @@ export const REFUSALS: Record<RefusalId, string> = {
   rien_trouve:
     "Je n'ai pas la réponse à cette question, et je préfère vous le dire plutôt que " +
     "d'inventer. Tapez *support* pour joindre l'équipe, elle pourra vous répondre.",
+
+  // `support` is a bot command, and the bot only answers commands for numbers
+  // it recognises — so telling a stranger to type it would send them nowhere.
+  // The one thing that does work for them is the one thing offered.
+  rien_trouve_anonyme:
+    "Je n'ai pas la réponse à cette question, et je préfère vous le dire plutôt " +
+    "que d'inventer. Vous pouvez me demander comment fonctionne Rabotka, ou taper " +
+    '*/compte* pour créer votre compte.',
 
   identite: VOVA_IDENTITY_WITH_PROMPT_FR,
 

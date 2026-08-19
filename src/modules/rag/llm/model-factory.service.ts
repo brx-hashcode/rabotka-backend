@@ -100,6 +100,23 @@ export class LlmModelFactory {
           model: spec.model,
         }) as unknown as BaseChatModel;
       }
+      case 'groq': {
+        const { ChatGroq } = await import('@langchain/groq');
+        return new ChatGroq({
+          ...shared,
+          model: spec.model,
+        }) as unknown as BaseChatModel;
+      }
+      case 'deepseek': {
+        // Built on the OpenAI client (DeepSeek's API is OpenAI-compatible), so
+        // this branch costs almost nothing beyond `@langchain/openai`, which is
+        // already loaded whenever that provider is reached.
+        const { ChatDeepSeek } = await import('@langchain/deepseek');
+        return new ChatDeepSeek({
+          ...shared,
+          model: spec.model,
+        }) as unknown as BaseChatModel;
+      }
     }
   }
 }
