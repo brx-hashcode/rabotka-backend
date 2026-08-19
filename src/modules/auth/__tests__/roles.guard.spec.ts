@@ -151,14 +151,19 @@ describe('RolesGuard', () => {
       ).resolves.toBe(true);
     });
 
-    it('keeps FINANCE out of an area it does not own', async () => {
-      // The whole point of a lateral role: seniority elsewhere is not implied.
-      activeUser(UserRole.FINANCE);
-      await expect(
-        guardFor([UserRole.MODERATOR]).canActivate(
-          makeContext({ userId: 'u1' }, 'admin/claims', 'GET'),
-        ),
-      ).rejects.toThrow(ForbiddenException);
+    it('keeps FINANCE out of the one area it does not own', async () => {
+      // FINANCE is ADMIN minus team management, so `user` is the whole of the
+      // restriction. `admin/system-configs` is checked alongside it because it
+      // must stay shut too — but as a SUPER_ADMIN area an ADMIN cannot open
+      // either, not as a second thing taken away from FINANCE.
+      for (const area of ['user', 'admin/system-configs']) {
+        activeUser(UserRole.FINANCE);
+        await expect(
+          guardFor([UserRole.MODERATOR]).canActivate(
+            makeContext({ userId: 'u1' }, area, 'GET'),
+          ),
+        ).rejects.toThrow(ForbiddenException);
+      }
     });
 
     it('keeps SUPPORT out of the wallet', async () => {
@@ -170,7 +175,7 @@ describe('RolesGuard', () => {
       ).rejects.toThrow(ForbiddenException);
     });
 
-    it('lets SUPPORT read profiles but not write them', async () => {
+    it('lets SUPPORT write profiles — verification is the job', async () => {
       activeUser(UserRole.SUPPORT);
       await expect(
         guardFor([UserRole.MODERATOR]).canActivate(
@@ -178,12 +183,36 @@ describe('RolesGuard', () => {
         ),
       ).resolves.toBe(true);
 
+      // Was `read`, which let support open a profile and not verify it.
       activeUser(UserRole.SUPPORT);
       await expect(
-        guardFor([UserRole.MODERATOR]).canActivate(
+        guardFor([UserRole.MANAGER]).canActivate(
           makeContext({ userId: 'u1' }, 'admin/profiles', 'PATCH'),
         ),
+      ).resolves.toBe(true);
+    });
+
+    it('still keeps ADMIN-level actions away from SUPPORT', async () => {
+      // `POST admin/profiles/:id/wallet/credit` is @Roles(ADMIN). The area is
+      // theirs, but the lateral cap is what stops them crediting an account —
+      // which is why widening the map to `full` did not widen this.
+      activeUser(UserRole.SUPPORT);
+      await expect(
+        guardFor([UserRole.ADMIN]).canActivate(
+          makeContext({ userId: 'u1' }, 'admin/profiles', 'POST'),
+        ),
       ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('lets both lateral roles read the dashboard', async () => {
+      for (const role of [UserRole.SUPPORT, UserRole.FINANCE]) {
+        activeUser(role);
+        await expect(
+          guardFor([UserRole.MODERATOR]).canActivate(
+            makeContext({ userId: 'u1' }, 'admin/dashboard', 'GET'),
+          ),
+        ).resolves.toBe(true);
+      }
     });
 
     it('lets SUPPORT read feedback but not write it', async () => {
@@ -204,32 +233,99 @@ describe('RolesGuard', () => {
       ).rejects.toThrow(ForbiddenException);
     });
 
-    it('keeps FINANCE out of feedback', async () => {
-      // Granted to SUPPORT alone: finance has no reason to read what a worker
-      // said about a match.
-      activeUser(UserRole.FINANCE);
-      await expect(
-        guardFor([UserRole.MODERATOR]).canActivate(
-          makeContext({ userId: 'u1' }, 'admin/feedback', 'GET'),
-        ),
-      ).rejects.toThrow(ForbiddenException);
+    it('caps SUPPORT at MANAGER inside an area it fully owns', async () => {
+      // The ceiling, not the area map, is what keeps permanent deletion and
+      // money movement away from support — which is why granting `full` on
+      // profiles did not also grant these.
+      for (const gate of [UserRole.ADMIN, UserRole.SUPER_ADMIN]) {
+        activeUser(UserRole.SUPPORT);
+        await expect(
+          guardFor([gate]).canActivate(
+            makeContext({ userId: 'u1' }, 'admin/profiles', 'POST'),
+          ),
+        ).rejects.toThrow(ForbiddenException);
+      }
     });
 
-    it('never lets a lateral role pass a SUPER_ADMIN gate in its own area', async () => {
-      // Penalties belong to FINANCE, but permanent deletion never does.
-      activeUser(UserRole.FINANCE);
-      await expect(
-        guardFor([UserRole.SUPER_ADMIN]).canActivate(
-          makeContext({ userId: 'u1' }, 'admin/penalties', 'POST'),
-        ),
-      ).rejects.toThrow(ForbiddenException);
-    });
-
-    it('never lets a lateral role pass an ADMIN gate in its own area', async () => {
+    it('lets FINANCE pass an ADMIN gate in its own areas', async () => {
+      // The ceiling is ADMIN, so everything an ADMIN may do inside these areas
+      // is open — crediting a wallet included.
       activeUser(UserRole.FINANCE);
       await expect(
         guardFor([UserRole.ADMIN]).canActivate(
           makeContext({ userId: 'u1' }, 'admin/wallet', 'POST'),
+        ),
+      ).resolves.toBe(true);
+    });
+
+    it('refuses FINANCE at a SUPER_ADMIN gate, inside its areas and out', async () => {
+      // FINANCE is level with ADMIN, not above it: permanent purge is shut to
+      // both. The area map is not what stops this — the ceiling is.
+      for (const area of ['admin/wallet', 'user']) {
+        activeUser(UserRole.FINANCE);
+        await expect(
+          guardFor([UserRole.SUPER_ADMIN]).canActivate(
+            makeContext({ userId: 'u1' }, area, 'POST'),
+          ),
+        ).rejects.toThrow(ForbiddenException);
+      }
+    });
+
+    it('lets FINANCE into the claim thread and the notification areas', async () => {
+      // Both are areas an ADMIN reaches, and both sit under their own
+      // `@Controller` prefix rather than beneath `admin/claims`.
+      for (const area of ['admin/claims/:claimId/comments', 'admin/notifications']) {
+        activeUser(UserRole.FINANCE);
+        await expect(
+          guardFor([UserRole.MANAGER]).canActivate(
+            makeContext({ userId: 'u1' }, area, 'POST'),
+          ),
+        ).resolves.toBe(true);
+      }
+    });
+
+    it('lets SUPER_ADMIN through every gate, on any controller', async () => {
+      // SUPER_ADMIN is the top of the ladder, so `userLevel >= requiredLevel`
+      // holds for every gate — including a controller nobody has added to any
+      // map yet, since the lateral allowlist is consulted only for lateral
+      // roles. Asserted rather than assumed: this is the property most easily
+      // broken by accident.
+      const gates = [
+        null,
+        [UserRole.MODERATOR],
+        [UserRole.MANAGER],
+        [UserRole.ADMIN],
+        [UserRole.SUPER_ADMIN],
+      ];
+      const paths = [
+        'admin/wallet',
+        'user',
+        'admin/system-configs',
+        'admin/some-controller-added-tomorrow',
+      ];
+
+      for (const gate of gates) {
+        for (const path of paths) {
+          activeUser(UserRole.SUPER_ADMIN);
+          await expect(
+            guardFor(gate).canActivate(
+              makeContext({ userId: 'u1' }, path, 'POST'),
+            ),
+          ).resolves.toBe(true);
+        }
+      }
+    });
+
+    it('documents the one decorator that would lock SUPER_ADMIN out', async () => {
+      // `requiredLevel` filters lateral roles out before taking a minimum, so a
+      // handler declaring ONLY lateral roles has no ladder meaning and returns
+      // Infinity — fail-closed by design, but it denies SUPER_ADMIN too. The
+      // invariant is therefore "never write @Roles(FINANCE)", and this test is
+      // where that is written down.
+      activeUser(UserRole.SUPER_ADMIN);
+      await expect(
+        guardFor([UserRole.FINANCE]).canActivate(
+          makeContext({ userId: 'u1' }, 'admin/wallet', 'GET'),
         ),
       ).rejects.toThrow(ForbiddenException);
     });
