@@ -105,7 +105,8 @@ export class AdminProfileController {
   @Roles(UserRole.MANAGER)
   @ApiOperation({
     summary: 'Bulk restore archived rows (admin only)',
-    description: 'Clears deleted_at. Only rows that are currently archived are affected.',
+    description:
+      'Clears deleted_at. Only rows that are currently archived are affected.',
   })
   @ApiResponse({ status: 201, description: 'Rows restored' })
   async bulkRestore(
@@ -208,8 +209,13 @@ export class AdminProfileController {
     return await this.walletService.getProfileWalletForAdmin(id);
   }
 
+  // ADMIN, not MANAGER like the rest of this controller: this moves real money
+  // into an account. It is also what makes it safe to grant SUPPORT `full` on
+  // `admin/profiles` — support needs to verify identities and edit profiles,
+  // and lateral roles are capped at MANAGER, so raising this one handler keeps
+  // crediting out of reach without narrowing anything else.
   @Post(':id/wallet/credit')
-  @Roles(UserRole.MANAGER)
+  @Roles(UserRole.ADMIN)
   @ApiOperation({ summary: 'Manually credit a profile wallet (admin only)' })
   async creditWallet(
     @Param('id') id: string,
