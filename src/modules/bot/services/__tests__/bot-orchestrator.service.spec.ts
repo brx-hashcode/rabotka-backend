@@ -316,7 +316,7 @@ describe('BotOrchestratorService', () => {
     // `unknown` for everything when no flow is live, so these land on the same
     // fall-through the assistant sits on — and the one command every template
     // tells users to type cannot depend on a provider being up.
-    it.each(['menu', 'bonjour', 'start', '/', 'aide', 'payer'])(
+    it.each(['menu', 'start', '/', 'payer'])(
       'answers "%s" itself, without consulting the assistant',
       async (input) => {
         deps.router.route.mockReturnValue({ type: 'unknown' });
@@ -325,13 +325,46 @@ describe('BotOrchestratorService', () => {
         const result = await service.handle(PROFILE_ID, PHONE, input);
 
         expect(deps.vova.handle).not.toHaveBeenCalled();
-        // `aide` is in CMD_SUPPORT as well, and `handle()` answers it with the
-        // support card before routing — deterministic either way.
-        if (input !== 'aide') {
-          expect(result).toEqual([welcomePlatformMessage()]);
-        }
+        expect(result).toEqual([welcomePlatformMessage()]);
       },
     );
+
+    // « bonjour » is not a command, it is somebody saying hello. It used to be
+    // answered with the platform card; the assistant now introduces itself and
+    // asks what they need, which is what a person would do.
+    it('sends a bare greeting to the assistant', async () => {
+      deps.router.route.mockReturnValue({ type: 'unknown' });
+      deps.vova.handle.mockClear();
+      deps.vova.handle.mockResolvedValue([
+        'Bonjour ! Je suis *VoVa AI*, l’assistant de Rabotka.',
+      ]);
+
+      const result = await service.handle(PROFILE_ID, PHONE, 'bonjour');
+
+      expect(deps.vova.handle).toHaveBeenCalled();
+      expect(result[0]).toContain('VoVa AI');
+    });
+
+    it('still answers a greeting with the card when the assistant declines', async () => {
+      deps.router.route.mockReturnValue({ type: 'unknown' });
+      deps.vova.handle.mockClear();
+      deps.vova.handle.mockResolvedValue(null);
+
+      const result = await service.handle(PROFILE_ID, PHONE, 'bonjour');
+
+      expect(result).toEqual([welcomePlatformMessage()]);
+    });
+
+    // `aide` is in CMD_SUPPORT, and `handle()` answers it with the support card
+    // before routing — deterministic regardless of the gate below it.
+    it('answers "aide" with support, before any routing', async () => {
+      deps.router.route.mockReturnValue({ type: 'unknown' });
+      deps.vova.handle.mockClear();
+
+      await service.handle(PROFILE_ID, PHONE, 'aide');
+
+      expect(deps.vova.handle).not.toHaveBeenCalled();
+    });
 
     // The landing page's WhatsApp CTA opens with a greeting and then states an
     // intent. That message is the product's front door, not a menu command.
