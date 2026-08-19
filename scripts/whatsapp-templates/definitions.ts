@@ -32,6 +32,9 @@ export const AUTHORED_KEYS: ReadonlySet<WhatsAppTemplateName> = new Set([
   'kycRejected',
   'accountSuspended',
   'adminMessage',
+  // v4 is authored here and lives on Meta only; its Twilio fixture is the v3
+  // card with the numbered menu, which the app no longer sends.
+  'kycPendingMenu',
 ]);
 
 /**
@@ -213,6 +216,61 @@ export function authoredTemplates(): Partial<
               // the outbound processor swaps it for a one-tap login code.
               url: 'https://rabotka.work/s/{{1}}',
               example: ['https://rabotka.work/s/claims-new'],
+            },
+          ],
+        },
+      ],
+    },
+
+    /**
+     * v4 of the KYC-pending card, replacing `rabotka_kyc_pending_menu_v3`.
+     *
+     * v3 is not merely dated, it is wrong: its body offers « 1- Mon profil /
+     * 2- Créer une réclamation » and asks the reader to « répondre avec le
+     * numéro de votre choix ». The numbered menu was removed from the bot —
+     * `BotRouterService` answers `unknown` for everything when no flow is live
+     * — so a « 1 » comes back to the same card. The message invites an action
+     * that loops.
+     *
+     * v4 says one thing and offers one button. Nothing to type, nothing to
+     * choose, and the button lands on the profile — the only screen that is
+     * useful while a dossier is under review, since that is where the
+     * documents were submitted and where a correction is made.
+     *
+     * A new name rather than an edit: Meta re-reviews an edited body anyway,
+     * and this repo's tooling only creates. `kyc_pending_menu_v3` should be
+     * deleted from the WABA only AFTER this one is approved and deployed — a
+     * deleted template cannot be sent, and until the new build ships, v3 is
+     * what these users receive.
+     */
+    kycPendingMenu: {
+      name: 'rabotka_kyc_pending_v4',
+      language: 'fr',
+      category: 'UTILITY',
+      components: [
+        {
+          type: 'BODY',
+          text: [
+            'Bonjour {{1}},',
+            '',
+            'Votre vérification d’identité est en cours d’examen par notre équipe.',
+            '',
+            'Vous recevrez un message dès qu’elle est terminée. En attendant, vous pouvez consulter votre profil et compléter vos informations.',
+            '',
+            'L’équipe Rabotka',
+          ].join('\n'),
+          example: { body_text: [['Jean']] },
+        },
+        {
+          type: 'BUTTONS',
+          buttons: [
+            {
+              type: 'URL',
+              text: 'Voir mon profil',
+              // The variable ends the URL, as WhatsApp requires; the outbound
+              // processor swaps it for a one-tap login code.
+              url: 'https://rabotka.work/s/{{1}}',
+              example: ['https://rabotka.work/s/profile'],
             },
           ],
         },

@@ -48,6 +48,10 @@ import { KycModule } from './modules/kyc/kyc.module';
 import { FeedbackModule } from './modules/feedback/feedback.module';
 import { SystemConfigModule } from './modules/system-config/system-config.module';
 import { QdrantModule } from './modules/qdrant/qdrant.module';
+import { LlmModule } from './modules/rag/llm/llm.module';
+import { IntentsModule } from './modules/rag/intents/intents.module';
+import { RetrievalModule } from './modules/rag/retrieval/retrieval.module';
+import { VovaAgentModule } from './modules/rag/agent/agent.module';
 import { ClaimModule } from './modules/claim/claim.module';
 import { DocumentModule } from './modules/document/document.module';
 import { ContractModule } from './modules/contract/contract.module';
@@ -181,6 +185,10 @@ import { HttpOnlyArcjetGuard } from './common/guards/http-only-arcjet.guard';
     KycModule,
     FeedbackModule,
     QdrantModule,
+    LlmModule,
+    IntentsModule,
+    RetrievalModule,
+    VovaAgentModule,
     EventEmitterModule.forRoot({ wildcard: true }),
     ContactUnlockModule,
     WsNotificationsModule,
