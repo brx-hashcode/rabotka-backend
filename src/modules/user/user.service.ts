@@ -1,11 +1,16 @@
 import {
   Injectable,
   ConflictException,
+  ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { deletedAtFilter } from '../../common/utils/soft-delete.util';
-import { Prisma } from '@prisma/client';
+import { Prisma, UserRole } from '@prisma/client';
+import {
+  assertCanAssignRole,
+  assertCanManageUser,
+} from '../auth/role-seniority';
 import { CreateAdminDto } from './dto/create-admin.dto';
 import { UpdateAdminDto } from './dto/update-admin.dto';
 import { AdminListUsersDto } from './dto/admin-list-users.dto';
@@ -18,7 +23,49 @@ export class UserService {
     private readonly notification: NotificationService,
   ) {}
 
-  async createAdmin(data: CreateAdminDto) {
+  /**
+   * The acting admin's current role, read fresh.
+   *
+   * Not taken from the token — it carries no role claim, deliberately, so that
+   * a demotion takes effect immediately rather than whenever the token expires.
+   */
+  private async actorRole(actorId: string): Promise<UserRole> {
+    const actor = await this.prisma.user.findUnique({
+      where: { id: actorId },
+      select: { role: true, is_active: true },
+    });
+
+    if (!actor?.is_active) {
+      throw new ForbiddenException('Accès refusé');
+    }
+
+    return actor.role;
+  }
+
+  /** Loads the target and refuses if the actor does not outrank them. */
+  private async assertMayManage(
+    actorId: string,
+    targetId: string,
+  ): Promise<{ role: UserRole }> {
+    const [actor, target] = await Promise.all([
+      this.actorRole(actorId),
+      this.prisma.user.findUnique({
+        where: { id: targetId },
+        select: { role: true },
+      }),
+    ]);
+
+    if (!target) {
+      throw new NotFoundException('Utilisateur non trouvé');
+    }
+
+    assertCanManageUser(actor, target.role);
+    return { role: actor };
+  }
+
+  async createAdmin(data: CreateAdminDto, actorId: string) {
+    assertCanAssignRole(await this.actorRole(actorId), data.role);
+
     const existingUser = await this.prisma.user.findUnique({
       where: { email: data.email },
     });
@@ -57,7 +104,12 @@ export class UserService {
     return user;
   }
 
-  async updateAdmin(id: string, data: UpdateAdminDto) {
+  async updateAdmin(id: string, data: UpdateAdminDto, actorId: string) {
+    // Both invariants, because this one method can breach either: acting on a
+    // senior account, or promoting one (including your own) above yourself.
+    const { role: actorRole } = await this.assertMayManage(actorId, id);
+    assertCanAssignRole(actorRole, data.role);
+
     const user = await this.prisma.user.findUnique({ where: { id } });
 
     if (!user) {
@@ -105,7 +157,9 @@ export class UserService {
     return updated;
   }
 
-  async activate(id: string) {
+  async activate(id: string, actorId: string) {
+    await this.assertMayManage(actorId, id);
+
     const user = await this.prisma.user.findUnique({ where: { id } });
 
     if (!user) {
@@ -129,7 +183,11 @@ export class UserService {
     });
   }
 
-  async deactivate(id: string) {
+  async deactivate(id: string, actorId: string) {
+    // The escalation this closes is not only "promote myself": deactivating the
+    // account above you is the same manoeuvre with a different verb.
+    await this.assertMayManage(actorId, id);
+
     const user = await this.prisma.user.findUnique({ where: { id } });
 
     if (!user) {
@@ -239,7 +297,9 @@ export class UserService {
     };
   }
 
-  async deleteAdmin(id: string) {
+  async deleteAdmin(id: string, actorId: string) {
+    await this.assertMayManage(actorId, id);
+
     const user = await this.prisma.user.findFirst({
       where: { id, deleted_at: null },
     });
