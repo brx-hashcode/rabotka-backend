@@ -227,8 +227,18 @@ describe('key lookups', () => {
       separator: '&',
       mode: 'append',
     });
+    // v4 moved the suffix to {{2}}: {{1}} is the first name in the body.
     expect(getUrlSuffixTargetByKey('kycPendingMenu')).toEqual({
-      variable: '1',
+      variable: '2',
+      separator: '?',
+      mode: 'shortlink',
+    });
+
+    // Cloud-only, and still resolvable: keying this off the Twilio SID returned
+    // undefined, which the outbound processor reads as "no login code" — the
+    // button would then drop the user on the login screen.
+    expect(getUrlSuffixTargetByKey('kycRejected')).toEqual({
+      variable: '3',
       separator: '?',
       mode: 'shortlink',
     });

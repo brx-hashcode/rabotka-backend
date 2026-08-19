@@ -479,12 +479,15 @@ describe('WhatsAppOutboundProcessor', () => {
   });
 
   describe('short-link templates', () => {
-    // `kycPendingMenu` is `urlSuffixMode: 'shortlink'`: its approved URL is the
-    // fixed `…/s/{{1}}`, so the variable must be REPLACED by a code, never
-    // appended to. Any shortlink template would do — this one stands in for the
-    // mode, not for itself.
-    const shortlinkTpl = WHATSAPP_TEMPLATES.kycPendingMenu.contentSid;
-    const shortlinkKey = 'kycPendingMenu' as const;
+    // `applicationRejected` is `urlSuffixMode: 'shortlink'`: its approved URL
+    // is the fixed `…/s/{{1}}`, so the variable must be REPLACED by a code,
+    // never appended to. Any shortlink template would do — this one stands in
+    // for the mode, not for itself.
+    //
+    // It used to be `kycPendingMenu`, which is Cloud-only since v4 and so has
+    // no SID for this legacy path to resolve.
+    const shortlinkTpl = WHATSAPP_TEMPLATES.applicationRejected.contentSid;
+    const shortlinkKey = 'applicationRejected' as const;
 
     it('swaps the destination for a freshly minted code', async () => {
       await processor.process({

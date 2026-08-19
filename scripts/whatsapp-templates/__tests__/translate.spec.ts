@@ -125,14 +125,18 @@ describeIfCaptured('translated payloads', () => {
   });
 
   it('moves a card title into the BODY, because WhatsApp renders no card body', () => {
-    const p = payloadFor('kycPendingMenu');
+    // welcomePlatform stands in for the behaviour; kycPendingMenu used to, and
+    // is authored (Meta-only) since v4, so it is no longer translated at all.
+    const p = payloadFor('welcomePlatform');
     expect(p.components.map((c) => c.type)).toEqual([
       'HEADER',
       'BODY',
       'BUTTONS',
     ]);
+    // The card's TITLE — «*Rabotka*» — has to survive into the body, since
+    // WhatsApp renders no card body of its own.
     expect(p.components.find((c) => c.type === 'BODY')?.text).toContain(
-      'vérification',
+      'Rabotka',
     );
     expect(
       p.components.find((c) => c.type === 'HEADER')?.example?.header_handle,
@@ -210,7 +214,11 @@ describe('authored templates', () => {
   // v2 of both gained a URL button. v1 had none, on the reasoning that these
   // profiles can never hold a session — no longer true, so the CTA is the
   // point of the version bump and is worth pinning.
-  const URL_BUTTON_KEYS = ['kycRejected', 'accountSuspended'] as const;
+  const URL_BUTTON_KEYS = [
+    'kycRejected',
+    'accountSuspended',
+    'kycPendingMenu',
+  ] as const;
   // Deliberately button-less: this one carries whatever an admin typed, so
   // there is no single destination a CTA could point at.
   const NO_BUTTON_KEYS = ['adminMessage'] as const;

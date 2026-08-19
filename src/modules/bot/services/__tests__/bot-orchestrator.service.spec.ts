@@ -23,6 +23,7 @@ import { PortfolioService } from '../../../portfolio/portfolio.service';
 import { QueueService } from '../../../../common/services/queue/queue.service';
 import { ConfigService } from '@nestjs/config';
 import { WHATSAPP_TEMPLATES } from '../../../../common/constants/whatsapp-templates';
+import { VovaService } from '../../../rag/vova.service';
 
 const PROFILE_ID = 'profile-uuid-1';
 const PHONE = '+242000000';
@@ -51,6 +52,9 @@ const mockEmployerProfile = {
 
 function makeDeps() {
   return {
+    // Null is "I did not answer this" — the assistant's default state, and what
+    // every expectation in this file assumes.
+    vova: { handle: jest.fn().mockResolvedValue(null) },
     prisma: {
       $transaction: jest.fn().mockResolvedValue([]),
       profile: {
@@ -256,6 +260,12 @@ describe('BotOrchestratorService', () => {
           provide: ConfigService,
           useValue: { get: jest.fn().mockReturnValue('https://rabotka.work') },
         },
+        {
+          // Null is "I did not answer this" — the default state of the
+          // assistant, and what every existing expectation below assumes.
+          provide: VovaService,
+          useValue: deps.vova,
+        },
       ],
     }).compile();
 
@@ -300,6 +310,61 @@ describe('BotOrchestratorService', () => {
         'bonjour le monde',
       );
       expect(result).toEqual([welcomePlatformMessage()]);
+    });
+
+    // The menu vocabulary must never reach a model. `BotRouterService` returns
+    // `unknown` for everything when no flow is live, so these land on the same
+    // fall-through the assistant sits on — and the one command every template
+    // tells users to type cannot depend on a provider being up.
+    it.each(['menu', 'bonjour', 'start', '/', 'aide', 'payer'])(
+      'answers "%s" itself, without consulting the assistant',
+      async (input) => {
+        deps.router.route.mockReturnValue({ type: 'unknown' });
+        deps.vova.handle.mockClear();
+
+        const result = await service.handle(PROFILE_ID, PHONE, input);
+
+        expect(deps.vova.handle).not.toHaveBeenCalled();
+        // `aide` is in CMD_SUPPORT as well, and `handle()` answers it with the
+        // support card before routing — deterministic either way.
+        if (input !== 'aide') {
+          expect(result).toEqual([welcomePlatformMessage()]);
+        }
+      },
+    );
+
+    // The landing page's WhatsApp CTA opens with a greeting and then states an
+    // intent. That message is the product's front door, not a menu command.
+    it.each([
+      'Bonjour Rabotka, je cherche une opportunité ou un profil adapté.',
+      'Bonjour, je cherche une mission',
+      'Bonjour, je cherche un travailleur',
+      'bonjour comment ça marche ?',
+    ])('hands "%s" to the assistant', async (input) => {
+      deps.router.route.mockReturnValue({ type: 'unknown' });
+      deps.vova.handle.mockClear();
+
+      await service.handle(PROFILE_ID, PHONE, input);
+
+      expect(deps.vova.handle).toHaveBeenCalledTimes(1);
+    });
+
+    it('hands genuinely free-form input to the assistant', async () => {
+      deps.router.route.mockReturnValue({ type: 'unknown' });
+      deps.vova.handle.mockClear();
+
+      await service.handle(PROFILE_ID, PHONE, "j'ai un problème");
+
+      expect(deps.vova.handle).toHaveBeenCalledTimes(1);
+    });
+
+    it('sends the assistant reply when it answers', async () => {
+      deps.router.route.mockReturnValue({ type: 'unknown' });
+      deps.vova.handle.mockResolvedValueOnce(['réponse de Vova']);
+
+      const result = await service.handle(PROFILE_ID, PHONE, 'une question');
+
+      expect(result).toEqual(['réponse de Vova']);
     });
 
     it('answers the welcome card when the input looks like flow input but no flow is live', async () => {
