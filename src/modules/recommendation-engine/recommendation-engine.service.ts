@@ -6,6 +6,7 @@ import {
   placeProximityScore,
   proximityScore,
   urgencyScore,
+  URGENCY_HALF_LIFE_HOURS,
 } from '../../common/services/geocoding/geo.utils';
 import {
   CandidateSourceService,
@@ -28,9 +29,11 @@ import {
   diversifyByKeys,
   epsilonGreedySelect,
   freshnessScore,
+  FRESHNESS_HALF_LIFE_HOURS,
   interpolateWeights,
   rrfFuse,
   seenDecay,
+  SEEN_RECOVERY_HOURS,
   type ScoreTerms,
 } from './scoring';
 
@@ -207,6 +210,12 @@ export class RecommendationEngineService {
     // would be dishonest: within a tier the order is `created_at desc`, so the
     // heaviest-weighted term would silently be recency — duplicating `fresh` and
     // swamping the learned affinities this rewrite exists to surface.
+    // One clock for the whole pass. Read per candidate, a tick landing mid-map
+    // scored a later candidate against a later instant — worth a millisecond of
+    // urgency and freshness, which is enough to reorder candidates nothing else
+    // separates. The feed's order must come from the candidates, not from where
+    // a millisecond boundary fell.
+    const now = Date.now();
     const scored = fused.map((f) => {
       const c = byId.get(f.id)!;
       const terms: ScoreTerms = {
@@ -227,8 +236,11 @@ export class RecommendationEngineService {
         // evidence at all, and computeRelevance drops a null term and
         // redistributes its weight — whereas a constant would move every score
         // by the same amount, ranking nothing while still spending 0.18.
-        urgency: c.scheduledAt === null ? null : urgencyScore(c.scheduledAt),
-        fresh: freshnessScore(c.createdAt),
+        urgency:
+          c.scheduledAt === null
+            ? null
+            : urgencyScore(c.scheduledAt, URGENCY_HALF_LIFE_HOURS, now),
+        fresh: freshnessScore(c.createdAt, FRESHNESS_HALF_LIFE_HOURS, now),
         quality: quality.get(c.employerId) ?? null,
         payFit: this.payFitTerm(c, features),
       };
@@ -240,7 +252,11 @@ export class RecommendationEngineService {
           negativeCategory: c.categoryId
             ? negativeCategories.has(c.categoryId)
             : false,
-          seenDecay: seenDecay(lastSeen.get(c.id) ?? null),
+          seenDecay: seenDecay(
+            lastSeen.get(c.id) ?? null,
+            SEEN_RECOVERY_HOURS,
+            now,
+          ),
           unsaved: unsaved.has(c.id),
         },
         DEFAULT_PENALTIES,
@@ -382,6 +398,9 @@ export class RecommendationEngineService {
     const negativeCategories = new Set(features.negativeCategoryIds);
     const employerPlace = toPlace(employer);
 
+    // One clock for the whole pass — see `recommendJobsForWorker`.
+    const now = Date.now();
+
     const scored = fused.map((f) => {
       const c = byId.get(f.id)!;
       const active = lastActive.get(c.id);
@@ -394,7 +413,9 @@ export class RecommendationEngineService {
         // A worker has no scheduled start and no pay amount.
         urgency: null,
         // Recency of the worker's OWN activity, not of their profile row.
-        fresh: active ? freshnessScore(active, ACTIVITY_HALF_LIFE_HOURS) : null,
+        fresh: active
+          ? freshnessScore(active, ACTIVITY_HALF_LIFE_HOURS, now)
+          : null,
         quality: quality.get(c.id) ?? null,
         payFit: null,
       };
@@ -406,7 +427,11 @@ export class RecommendationEngineService {
           negativeCategory: c.categoryIds.some((id) =>
             negativeCategories.has(id),
           ),
-          seenDecay: seenDecay(lastSeen.get(c.id) ?? null),
+          seenDecay: seenDecay(
+            lastSeen.get(c.id) ?? null,
+            SEEN_RECOVERY_HOURS,
+            now,
+          ),
         },
         DEFAULT_PENALTIES,
       );
@@ -594,6 +619,9 @@ export class RecommendationEngineService {
     const weights = interpolateWeights(employerFeatures.positiveCount);
     const offerPlace = toPlace(offer);
 
+    // One clock for the whole pass — see `recommendJobsForWorker`.
+    const now = Date.now();
+
     const scored = fused
       .filter((f) => !blocked.has(f.id))
       .map((f) => {
@@ -623,7 +651,7 @@ export class RecommendationEngineService {
           // should not. Urgency widens the fan-out instead, outside the score.
           urgency: null,
           fresh: active
-            ? freshnessScore(active, ACTIVITY_HALF_LIFE_HOURS)
+            ? freshnessScore(active, ACTIVITY_HALF_LIFE_HOURS, now)
             : null,
           quality: quality.get(c.id) ?? null,
           // `deriveFeatures` does not learn amount or payment-flow affinity yet,
@@ -643,7 +671,11 @@ export class RecommendationEngineService {
               features.negativeCategoryIds.includes(offer.category_id),
             // Notification fatigue: prefer people who have not just been
             // messaged, so the hard cooldown rarely has to fire.
-            seenDecay: seenDecay(lastRecommended.get(c.id) ?? null),
+            seenDecay: seenDecay(
+              lastRecommended.get(c.id) ?? null,
+              SEEN_RECOVERY_HOURS,
+              now,
+            ),
           },
           DEFAULT_PENALTIES,
         );
