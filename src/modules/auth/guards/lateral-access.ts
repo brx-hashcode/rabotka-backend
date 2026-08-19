@@ -30,14 +30,16 @@ export type AreaAccess = 'full' | 'read';
  * deliberately.
  */
 export const LATERAL_ACCESS: Record<LateralRole, Record<string, AreaAccess>> = {
-  // Finance is broad here, not narrow: everything an admin can reach EXCEPT
-  // team management and settings. That is a deliberate product decision, so the
-  // map is written as "all areas minus two" rather than a short allowlist.
+  // FINANCE is ADMIN with one thing taken away: team management. Every other
+  // area an ADMIN can reach is listed below, and `LATERAL_CEILING` puts the
+  // role at ADMIN level inside them, so the two are permission-identical apart
+  // from `user`.
   //
-  // Note what this does NOT grant. `RolesGuard` caps every lateral role at
-  // MANAGER level whatever is written here, so ADMIN- and SUPER_ADMIN-gated
-  // handlers inside these areas stay closed — permanent purge, and crediting a
-  // wallet from a profile.
+  // Three admin-prefixed controllers are absent besides `user` and are NOT a
+  // second restriction: `admin/system-configs` (settings), `admin/matching` and
+  // `admin/interest-graph` are all `@Roles(SUPER_ADMIN)` at the class, so an
+  // ADMIN cannot reach them either. Leaving them out keeps FINANCE level with
+  // ADMIN rather than below it.
   [UserRole.FINANCE]: {
     'admin/wallet': 'full',
     'admin/payment-requests': 'full',
@@ -47,7 +49,11 @@ export const LATERAL_ACCESS: Record<LateralRole, Record<string, AreaAccess>> = {
     'admin/applications': 'full',
     'admin/job-categories': 'full',
     'admin/claims': 'full',
+    // Its own controller, so its own key: the claim board is unusable without
+    // the thread on it, and `admin/claims` does not cover this prefix.
+    'admin/claims/:claimId/comments': 'full',
     'admin/chat': 'full',
+    'admin/notifications': 'full',
     'admin/event': 'full',
     'admin/documents': 'full',
     'admin/advertisements': 'full',
@@ -63,17 +69,16 @@ export const LATERAL_ACCESS: Record<LateralRole, Record<string, AreaAccess>> = {
     'admin/invoices': 'full',
     'admin/contracts': 'full',
     log: 'full',
-    // NOT PRESENT, deliberately: `user` (team management) and
-    // `admin/system-configs` (settings). Anything absent is denied, so leaving
-    // them out is the whole of the restriction.
+    // NOT PRESENT, deliberately: `user` (team management). Anything absent is
+    // denied, so leaving it out is the whole of the restriction.
   },
   // Support is not a narrow badge here — it is the team that runs the platform
   // day to day. `read` on profiles meant they could open a profile and not
   // verify it, which is the single thing they are most often asked to do.
   //
-  // `full` is safe to hand out because `RolesGuard` caps every lateral role at
-  // MANAGER level regardless of this map: bulk purge (SUPER_ADMIN) and
-  // crediting a wallet (ADMIN) stay out of reach without being named here.
+  // `full` is safe to hand out because `RolesGuard` caps SUPPORT at MANAGER
+  // level regardless of this map: bulk purge (SUPER_ADMIN) and crediting a
+  // wallet (ADMIN) stay out of reach without being named here.
   [UserRole.SUPPORT]: {
     'admin/claims': 'full',
     'admin/chat': 'full',
