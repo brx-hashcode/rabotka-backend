@@ -175,6 +175,21 @@ jobs:
           WHATSAPP_CLOUD_VERIFY_TOKEN=$(echo "$VAULT_SECRET" | jq -r '.WHATSAPP_CLOUD_VERIFY_TOKEN // ""')
           WHATSAPP_CLOUD_WABA_ID=$(echo "$VAULT_SECRET" | jq -r '.WHATSAPP_CLOUD_WABA_ID // ""')
           WHATSAPP_FEEDBACK_FLOW_ID=$(echo "$VAULT_SECRET" | jq -r '.WHATSAPP_FEEDBACK_FLOW_ID // ""')
+          # --- Vova assistant: LLM provider credentials ---
+          # From Vault like every other credential; the keys themselves never
+          # appear in this file. Same "// empty-string" fallback and for the
+          # same reason as the WhatsApp block above — jq prints the literal
+          # string null for a key Vault does not have, and a provider client
+          # built on the credential "null" fails every call at request time
+          # rather than at boot.
+          #
+          # Blank is a supported state, not a broken one: resolveChain drops a
+          # provider with no credential instead of throwing, so a key missing
+          # from Vault costs a fallback tier quietly. The step below is what
+          # makes "all three blank" loud.
+          GOOGLE_API_KEY=$(echo "$VAULT_SECRET" | jq -r '.GOOGLE_API_KEY // ""')
+          MISTRAL_API_KEY=$(echo "$VAULT_SECRET" | jq -r '.MISTRAL_API_KEY // ""')
+          OPENAI_API_KEY=$(echo "$VAULT_SECRET" | jq -r '.OPENAI_API_KEY // ""')
           # --- static values ---
           BACKEND_IMAGE=ghcr.io/${{ github.repository_owner }}/rabotka-backend:latest
           NODE_ENV=production
@@ -194,6 +209,38 @@ jobs:
           PDF_OWNER_PASSWORD=password
           APP_ENV=prod
           API_DOMAIN=${{ secrets.PROD_API_DOMAIN }}
+          # --- Vova assistant: model ids and budgets ---
+          # Not secrets, so they are static here rather than Vault entries.
+          #
+          # Safe to blank, unlike WHATSAPP_CLOUD_API_VERSION above: every VOVA_*
+          # reader (modelId, readNumber) treats an empty string as "use the
+          # built-in default", so an empty line falls back instead of failing
+          # the boot.
+          #
+          # Pinned here rather than left to the code defaults so that a vendor
+          # renaming or retiring an id is a workflow edit and a redeploy, not a
+          # release — which is the failure this chain has already hit once, when
+          # Google retired gemini-2.0-flash out from under the build spec.
+          #
+          # CHEAP deliberately overrides the code default of
+          # gemini-flash-lite-latest.
+          VOVA_MODEL_CHEAP_GOOGLE=gemini-flash-latest
+          VOVA_MODEL_STANDARD_GOOGLE=gemini-flash-latest
+          VOVA_MODEL_STANDARD_MISTRAL=mistral-small-latest
+          VOVA_MODEL_STANDARD_OPENAI=gpt-4o-mini
+          # Per-attempt budget, not per-chain. The whole reply has to land
+          # inside the WhatsApp window a user is actually waiting through.
+          VOVA_LLM_TIMEOUT_MS=20000
+          VOVA_LLM_RETRY_BACKOFF_MS=250
+          # Circuit breaker: consecutive failures before a provider is skipped,
+          # and how long a failure keeps counting toward that threshold.
+          # VOVA_BREAKER_COOLDOWN_S is left to its 60s default.
+          VOVA_BREAKER_THRESHOLD=5
+          VOVA_BREAKER_WINDOW_S=120
+          # Staleness budget, not a constant: admins create and delete job
+          # categories at runtime, and a new one becomes searchable within a TTL.
+          VOVA_CATEGORY_TTL_MS=300000
+          VOVA_RETRIEVAL_LIMIT=5
           # --- SystemConfig-overridden placeholders ---
           DRIVER=S3
           AWS_REGION=placeholder
@@ -277,6 +324,30 @@ jobs:
             exit 1
           fi
           echo "All required WhatsApp secrets present."
+
+      # Not fatal. `resolveChain` drops a provider with no credential and the
+      # app boots clean either way, so this cannot break a deploy of unrelated
+      # work — but a Vault missing every key leaves the assistant answering
+      # nothing, which is the kind of silent misconfiguration that only shows up
+      # in a delivery log days later.
+      - name: Check Vova LLM credentials
+        run: |
+          set -euo pipefail
+          get() { grep -E "^$1=" /tmp/deploy.env | head -1 | cut -d= -f2-; }
+
+          PRESENT=""
+          for key in GOOGLE_API_KEY MISTRAL_API_KEY OPENAI_API_KEY; do
+            value=$(get "$key")
+            if [ -n "$value" ] && [ "$value" != "null" ]; then
+              PRESENT="$PRESENT ${key%%_API_KEY}"
+            fi
+          done
+
+          if [ -z "$PRESENT" ]; then
+            echo "::warning::No Vova LLM credentials in Vault (secret/data/apps/rabotka-backend-production) — the assistant will have an empty provider chain and answer nothing. Expected one or more of GOOGLE_API_KEY, MISTRAL_API_KEY, OPENAI_API_KEY."
+          else
+            echo "Vova providers configured:$PRESENT"
+          fi
 
       - name: Copy .env to VPS
         run: |
