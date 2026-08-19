@@ -36,6 +36,42 @@ describe('expandQuery', () => {
     expect(out.match(/mission/g)).toHaveLength(1);
   });
 
+  /**
+   * The recruiter's intent.
+   *
+   * « Je veux créer un job » retrieved the PORTFOLIO article and logged a gap.
+   * `job` alone expands to mission/travail/offre — all worker vocabulary —
+   * while the article that answers it is written around *publier* and
+   * *annonce*, so nothing connected the question to it.
+   */
+  describe('publishing', () => {
+    it('reaches the publishing vocabulary from « créer un job »', () => {
+      const out = expandQuery('je veux créer un job');
+      expect(out).toContain('publier');
+      expect(out).toContain('annonce');
+    });
+
+    it('does the same for the other ways of saying it', () => {
+      for (const q of [
+        'je veux créer une offre',
+        'créer une mission',
+        'je veux recruter',
+        'je veux embaucher quelqu’un',
+        'comment poster une annonce',
+      ]) {
+        expect(expandQuery(q)).toContain('publier');
+      }
+    });
+
+    it('does NOT hijack « créer un compte »', () => {
+      // The verb is ambiguous, which is why the triggers are multi-word:
+      // signing up is a different article entirely.
+      const out = expandQuery('je veux créer un compte');
+      expect(out).not.toContain('publier');
+      expect(out).not.toContain('annonce');
+    });
+  });
+
   it('leaves a query with no trigger untouched', () => {
     expect(expandQuery('bonjour')).toBe('bonjour');
     expect(expandQuery('')).toBe('');
