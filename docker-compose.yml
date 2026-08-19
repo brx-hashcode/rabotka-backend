@@ -73,7 +73,6 @@ services:
       - ./scripts/docker-entrypoint.sh:/usr/local/bin/docker-entrypoint.sh
       - ./prisma.config.ts:/app/prisma.config.ts
       - ./prisma:/app/prisma
-      - fastembed_cache:/var/cache/fastembed
     env_file:
       - .env
     environment:
@@ -112,7 +111,6 @@ services:
       - ./scripts/docker-entrypoint.sh:/usr/local/bin/docker-entrypoint.sh
       - ./prisma.config.ts:/app/prisma.config.ts
       - ./prisma:/app/prisma
-      - fastembed_cache:/var/cache/fastembed
     env_file:
       - .env
     environment:
@@ -135,8 +133,6 @@ volumes:
   postgres_data:
   pgadmin_data:
   qdrant_data:
-  fastembed_cache:
-    name: rabotka_fastembed_cache
 
 networks:
   rabotka_network:
