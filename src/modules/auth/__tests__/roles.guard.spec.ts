@@ -269,6 +269,52 @@ describe('RolesGuard', () => {
       ).rejects.toThrow(ForbiddenException);
     });
 
+    it('lets SUPER_ADMIN through every gate, on any controller', async () => {
+      // SUPER_ADMIN is the top of the ladder, so `userLevel >= requiredLevel`
+      // holds for every gate — including a controller nobody has added to any
+      // map yet, since the lateral allowlist is consulted only for lateral
+      // roles. Asserted rather than assumed: this is the property most easily
+      // broken by accident.
+      const gates = [
+        null,
+        [UserRole.MODERATOR],
+        [UserRole.MANAGER],
+        [UserRole.ADMIN],
+        [UserRole.SUPER_ADMIN],
+      ];
+      const paths = [
+        'admin/wallet',
+        'user',
+        'admin/system-configs',
+        'admin/some-controller-added-tomorrow',
+      ];
+
+      for (const gate of gates) {
+        for (const path of paths) {
+          activeUser(UserRole.SUPER_ADMIN);
+          await expect(
+            guardFor(gate).canActivate(
+              makeContext({ userId: 'u1' }, path, 'POST'),
+            ),
+          ).resolves.toBe(true);
+        }
+      }
+    });
+
+    it('documents the one decorator that would lock SUPER_ADMIN out', async () => {
+      // `requiredLevel` filters lateral roles out before taking a minimum, so a
+      // handler declaring ONLY lateral roles has no ladder meaning and returns
+      // Infinity — fail-closed by design, but it denies SUPER_ADMIN too. The
+      // invariant is therefore "never write @Roles(FINANCE)", and this test is
+      // where that is written down.
+      activeUser(UserRole.SUPER_ADMIN);
+      await expect(
+        guardFor([UserRole.FINANCE]).canActivate(
+          makeContext({ userId: 'u1' }, 'admin/wallet', 'GET'),
+        ),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
     it('denies an endpoint that declares no roles at all', async () => {
       // Fails closed: forgetting @Roles on a new admin controller must not hand
       // lateral roles an area they were never granted.
