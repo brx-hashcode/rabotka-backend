@@ -264,6 +264,39 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     isSecret: false,
   },
 
+  // ── VOVA AI (assistant) ───────────────────────────────────────────────────
+  {
+    key: 'vova.enabled',
+    value: 'false',
+    category: ConfigCategory.GENERAL,
+    label: 'Activer l’assistant Vova AI',
+    isSecret: false,
+  },
+  {
+    // On by default on purpose: turning the assistant on should NOT be the same
+    // action as letting it speak to a user.
+    key: 'vova.shadow_mode',
+    value: 'true',
+    category: ConfigCategory.GENERAL,
+    label:
+      'Vova AI en observation (calcule la réponse, envoie la carte d’accueil)',
+    isSecret: false,
+  },
+  {
+    key: 'vova.rollout_percent',
+    value: '0',
+    category: ConfigCategory.GENERAL,
+    label: 'Pourcentage de profils servis par Vova AI',
+    isSecret: false,
+  },
+  {
+    key: 'vova.timeout_ms',
+    value: '25000',
+    category: ConfigCategory.GENERAL,
+    label: 'Budget de réponse Vova AI (ms)',
+    isSecret: false,
+  },
+
   // ── CONTACT ───────────────────────────────────────────────────────────────
   {
     key: 'contact.email',

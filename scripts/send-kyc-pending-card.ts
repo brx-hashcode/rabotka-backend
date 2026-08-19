@@ -84,9 +84,16 @@ async function main(): Promise<void> {
 
   try {
     const template = WHATSAPP_TEMPLATES.kycPendingMenu;
-    // Lets the new card be tested before `whatsapp-templates.ts` is repointed
-    // at it — which must not happen until WhatsApp has approved it.
-    const contentSid = process.env.CONTENT_SID ?? template.contentSid;
+    // v4 is Cloud-only and carries no Twilio SID: v3's SID pointed at the card
+    // with the numbered menu, which the bot no longer honours. Testing the
+    // Twilio path now requires passing a SID explicitly.
+    const contentSid = process.env.CONTENT_SID;
+    if (!contentSid) {
+      throw new Error(
+        'kycPendingMenu is Cloud-only since v4 — set CONTENT_SID to a Twilio ' +
+          'template to exercise that path, or send through the Cloud provider.',
+      );
+    }
 
     const wanted = digits(TEST_NUMBER);
     const candidates = await prisma.profile.findMany({
@@ -111,7 +118,10 @@ async function main(): Promise<void> {
     // Exactly what whatsapp-outbound.processor.ts does for a shortlink-mode
     // template: the variable's value is the destination, and mint() swaps it
     // for a code minted against that destination.
-    const variables: Record<string, string> = template.variables();
+    // v4's body carries the first name; {{2}} is the URL suffix.
+    const variables: Record<string, string> = template.variables(
+      profile.first_name,
+    );
     const suffixVar = template.urlSuffixVar;
     const destination = variables[suffixVar];
     const code = await loginLink.mint(profile.id, destination);
