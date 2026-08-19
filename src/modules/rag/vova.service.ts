@@ -14,6 +14,20 @@ import { templateReply } from '../../common/constants/whatsapp-carousel';
 import { WHATSAPP_TEMPLATES } from '../../common/constants/whatsapp-templates';
 import { withTimeout } from './llm/llm.service';
 import { VOVA_CONFIG_KEYS } from './vova.constants';
+import { refusal } from './agent/refusals';
+
+/**
+ * What the assistant said to a stranger, and whether the signup card follows.
+ *
+ * `offerAccount` rather than the card itself: the card belongs to the bot,
+ * which already knows how to build it. Returning one from here would make the
+ * fallback path depend on the assistant working, which is backwards.
+ */
+export interface AnonymousReply {
+  text: string;
+  /** Append the signup card after this message. */
+  offerAccount: boolean;
+}
 
 export interface VovaBotProfile {
   id: string;
@@ -69,7 +83,7 @@ export class VovaService {
     phone: string,
     text: string,
     correlationId?: string,
-  ): Promise<string[] | null> {
+  ): Promise<AnonymousReply | null> {
     try {
       const [enabled, anonymous, limitRaw, timeoutRaw] = await Promise.all([
         this.systemConfig.get(VOVA_CONFIG_KEYS.ENABLED, 'false'),
@@ -88,8 +102,14 @@ export class VovaService {
         Number.isFinite(limit) ? limit : 10,
       );
       if (!withinBudget) {
-        this.logger.log(`vova.anon over budget phone=${phone} — sending card`);
-        return null;
+        this.logger.log(
+          `vova.anon limit reached phone=${phone} limit=${limit}`,
+        );
+        // Told, not silently degraded. Falling back to the bare card was
+        // indistinguishable from the assistant being switched off — a
+        // conversation that simply stops answering reads as a fault, where a
+        // stated limit is a reason to open an account.
+        return { text: refusal('limite_atteinte'), offerAccount: true };
       }
 
       const history = await this.anonymous.history(phone);
@@ -113,7 +133,7 @@ export class VovaService {
       // a question in history that the next message would answer twice.
       await this.anonymous.remember(phone, text, reply.text);
 
-      return [reply.text];
+      return { text: reply.text, offerAccount: false };
     } catch (err) {
       this.logger.error(
         `Vova failed for anonymous ${phone} — falling back to the signup card`,
