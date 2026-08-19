@@ -1,6 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { createReactAgent } from '@langchain/langgraph/prebuilt';
 import {
   AIMessage,
   HumanMessage,
@@ -141,6 +140,11 @@ export class VovaAgentService {
       // One provider per RUN. A conversation that starts on Gemini finishes on
       // Gemini, or restarts from scratch on the next provider — never swaps
       // halfway, which is what corrupted the tool history.
+      // Same reasoning as the provider SDKs: LangGraph is ~4 MB of heap that a
+      // disabled assistant should not pay for at boot.
+      const { createReactAgent } =
+        await import('@langchain/langgraph/prebuilt');
+
       const chain = await this.llm.usableChain(tier);
       if (chain.length === 0) throw new Error(`no usable provider for ${tier}`);
 
@@ -159,7 +163,12 @@ export class VovaAgentService {
         });
 
         try {
-          result = (await createReactAgent({ llm: model, tools }).invoke(
+          // Same dual-package cast as the factory: the dynamically imported
+          // LangGraph sees the ESM type identities.
+          result = (await createReactAgent({
+            llm: model as never,
+            tools: tools as never,
+          }).invoke(
             { messages },
             { recursionLimit: this.maxIterations * 2 },
           )) as { messages: BaseMessage[] };

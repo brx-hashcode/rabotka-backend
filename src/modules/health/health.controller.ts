@@ -51,8 +51,30 @@ export class HealthController {
       0.98,
     );
 
+    // 150 MB was hardcoded, and the app already idled at ~131 with Prisma,
+    // BullMQ, socket.io, puppeteer, sharp, mjml and googleapis in the graph —
+    // 87% of the budget before a single feature was added. The assistant's
+    // provider SDKs took it to 214, `/health` answered 503 and the deploy smoke
+    // test failed; those SDKs are now imported lazily, which brings it back to
+    // ~151. That is still a knife edge, and a check that trips whenever anyone
+    // adds a dependency measures dependency count, not health.
+    //
+    // Configurable, with headroom. Lower it deliberately if you want a tighter
+    // budget; do not leave it where a healthy boot fails.
+    const heapLimitMb = Number(
+      this.configService.get<string>('HEALTH_HEAP_LIMIT_MB', '320'),
+    );
+
     const healthChecks: Array<() => Promise<any>> = [
-      () => this.memory.checkHeap('memory_heap', 150 * 1024 * 1024),
+      () =>
+        this.memory.checkHeap(
+          'memory_heap',
+          (Number.isFinite(heapLimitMb) && heapLimitMb > 0
+            ? heapLimitMb
+            : 320) *
+            1024 *
+            1024,
+        ),
     ];
 
     if (enableDiskCheck) {

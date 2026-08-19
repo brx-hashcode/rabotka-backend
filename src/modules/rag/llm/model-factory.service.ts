@@ -1,9 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
-import { ChatGoogleGenerativeAI } from '@langchain/google-genai';
-import { ChatMistralAI } from '@langchain/mistralai';
-import { ChatOpenAI } from '@langchain/openai';
 import { PROVIDER_API_KEY_ENV } from './models.config';
 import { specId, type LlmProviderSpec } from './llm.types';
 import { readNumber } from '../shared/config';
@@ -25,7 +22,7 @@ export class LlmModelFactory {
 
   constructor(private readonly config: ConfigService) {}
 
-  build(spec: LlmProviderSpec): BaseChatModel {
+  async build(spec: LlmProviderSpec): Promise<BaseChatModel> {
     const cached = this.cache.get(specId(spec));
     if (cached) return cached;
 
@@ -39,13 +36,27 @@ export class LlmModelFactory {
       );
     }
 
-    const model = this.construct(spec, apiKey.trim());
+    const model = await this.construct(spec, apiKey.trim());
     this.cache.set(specId(spec), model);
     this.logger.debug(`Built chat model ${specId(spec)}`);
     return model;
   }
 
-  private construct(spec: LlmProviderSpec, apiKey: string): BaseChatModel {
+  /**
+   * Imported at CALL time, not at module load.
+   *
+   * Statically imported, the three SDKs cost ~83 MB of heap at boot — Mistral
+   * alone is 67 — and pushed the app from ~131 MB to 214 against a 150 MB
+   * terminus limit, so `/health` answered 503 and the deploy smoke test failed.
+   *
+   * The assistant ships disabled, so that was paid on every boot for a feature
+   * nobody was using. Now it is paid the first time a model is actually built,
+   * and never on an instance where VoVa is off.
+   */
+  private async construct(
+    spec: LlmProviderSpec,
+    apiKey: string,
+  ): Promise<BaseChatModel> {
     /**
      * Shared across vendors.
      *
@@ -61,13 +72,34 @@ export class LlmModelFactory {
       maxRetries: 0,
     };
 
+    // The casts are the price of the dynamic import: it resolves each package's
+    // ESM type definitions, while the rest of the app sees the CJS ones, so the
+    // two `BaseChatModel` symbols are structurally identical and nominally
+    // distinct. Contained to this file, which is the only place that touches a
+    // provider SDK at all.
     switch (spec.provider) {
-      case 'google':
-        return new ChatGoogleGenerativeAI({ ...shared, model: spec.model });
-      case 'mistral':
-        return new ChatMistralAI({ ...shared, model: spec.model });
-      case 'openai':
-        return new ChatOpenAI({ ...shared, model: spec.model });
+      case 'google': {
+        const { ChatGoogleGenerativeAI } =
+          await import('@langchain/google-genai');
+        return new ChatGoogleGenerativeAI({
+          ...shared,
+          model: spec.model,
+        }) as unknown as BaseChatModel;
+      }
+      case 'mistral': {
+        const { ChatMistralAI } = await import('@langchain/mistralai');
+        return new ChatMistralAI({
+          ...shared,
+          model: spec.model,
+        }) as unknown as BaseChatModel;
+      }
+      case 'openai': {
+        const { ChatOpenAI } = await import('@langchain/openai');
+        return new ChatOpenAI({
+          ...shared,
+          model: spec.model,
+        }) as unknown as BaseChatModel;
+      }
     }
   }
 }
