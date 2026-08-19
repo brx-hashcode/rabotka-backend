@@ -1,3 +1,23 @@
+/**
+ * The queue worker process.
+ *
+ * **Must be run through a TypeScript compiler that emits decorator metadata** —
+ * `ts-node` in dev (`worker:dev`), `tsc` in production (`node dist/src/worker`).
+ * NOT `tsx`, and not anything else built on esbuild.
+ *
+ * esbuild does not implement `emitDecoratorMetadata`, so `design:paramtypes` is
+ * never written and Nest has nothing to resolve a constructor from. It does not
+ * crash: a provider whose dependencies are all inferred from types — no
+ * `@Inject()` token anywhere in its constructor — is simply built with NO
+ * arguments, and every injected field lands as `undefined`.
+ *
+ * That is not theoretical. Under `tsx` this process ran for two days with
+ * `WhatsappMessageLogService.prisma === undefined`, so every `begin()` threw
+ * into its own catch and the delivery log recorded nothing at all, while the
+ * sends themselves went out perfectly. `WhatsAppService` survived because it
+ * carries `@Inject(WHATSAPP_PROVIDER)` and `@Inject(REDIS_CONNECTION)` — which
+ * is what makes the failure mode so uneven, and so quiet.
+ */
 import { createConnection } from 'node:net';
 import { config as loadEnv } from 'dotenv';
 import type {

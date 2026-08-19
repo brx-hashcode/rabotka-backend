@@ -117,8 +117,21 @@ export class WhatsappMessageLogService {
       });
       return row.id;
     } catch (err) {
-      this.logger.warn(
-        `Could not open a WhatsApp log row for ${phone}: ${reason(err)}`,
+      // ERROR, not warn, and with the stack.
+      //
+      // This returning null is not a detail — it is a message going out that
+      // nobody can ever trace. It stayed a warn for two days while the dev
+      // worker logged nothing whatsoever (`this.prisma` was undefined under
+      // `tsx`; see the note at the top of `src/worker.ts`), and the only clue
+      // anywhere was one line that read like routine noise.
+      //
+      // The kind and template are here so the line says WHAT went unlogged
+      // without needing the surrounding request.
+      const template = ctx.templateKey ? ` template=${ctx.templateKey}` : '';
+      this.logger.error(
+        `Could not open a WhatsApp log row — this send will be UNTRACEABLE. ` +
+          `to=${phone} kind=${ctx.kind}${template}: ${reason(err)}`,
+        err instanceof Error ? err.stack : undefined,
       );
       return null;
     }
