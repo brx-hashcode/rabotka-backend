@@ -3,6 +3,7 @@ import {
   WHATSAPP_TEMPLATES,
   templateContentSid,
 } from '../../../../common/constants/whatsapp-templates';
+import { sanitizeTemplateVariable } from '../../../../common/utils/whatsapp-template-text.util';
 import type { TemplateKey, TemplateParams } from '../../contracts';
 
 /**
@@ -51,4 +52,19 @@ export function toContentVariables<K extends TemplateKey>(
     p: TemplateParams<K>,
   ) => Record<string, string>;
   return build(params);
+}
+
+/**
+ * Normalise every value in a ContentVariables map for Meta.
+ *
+ * Applied by the provider immediately before the send, not here at build time,
+ * so it also covers the numbered maps the outbound processor assembles without
+ * going through `toContentVariables`. See `TwilioProvider.sendTemplateWithVariables`.
+ */
+export function sanitizeTemplateVariables(
+  variables: Record<string, string>,
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(variables).map(([k, v]) => [k, sanitizeTemplateVariable(v)]),
+  );
 }

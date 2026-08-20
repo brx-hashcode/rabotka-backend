@@ -18,5 +18,6 @@ export { welcomeActivationMessage } from './welcome-activation';
 export {
   formatAdminMessage,
   flattenForTemplateVariable,
+  sanitizeTemplateVariable,
   ADMIN_MESSAGE_VAR_MAX,
 } from './admin-message';

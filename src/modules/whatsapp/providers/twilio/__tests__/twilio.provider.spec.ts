@@ -62,6 +62,38 @@ describe('TwilioProvider', () => {
       );
     });
 
+    /**
+     * Twilio is a BSP in front of the same Meta endpoint, so it forwards a
+     * newline inside a ContentVariables value and has the send rejected with
+     * 132018 exactly as the Cloud provider would. The guard sits on this method
+     * rather than in `toContentVariables` because BOTH template paths converge
+     * here — typed params above, and the outbound processor's own numbered map.
+     */
+    it('sanitizes variables Meta would reject', async () => {
+      const { provider, twilio } = makeProvider();
+      // `cancellation` rather than one of the reason-carrying KYC templates:
+      // those are `cloudOnly`, so `toContentSid` throws before the guard runs.
+      await provider.sendTemplateWithVariables(
+        '+242069917686',
+        'cancellation',
+        {
+          '1': 'Marie',
+          '2': 'Serveuse',
+          '3': '12/03',
+          '4': 'Motif un.\r\nMotif deux.\r\n\r\nEquipe Rabotka.',
+          '5': 'Aucune pénalité',
+          '6': 'offer-1',
+        },
+      );
+
+      const [, , variables] = jest.mocked(twilio.sendWhatsAppTemplate).mock
+        .calls[0];
+      for (const value of Object.values(variables ?? {})) {
+        expect(value).not.toMatch(/[\n\t]|\s{4,}/);
+      }
+      expect(variables?.['4']).toBe('Motif un. Motif deux. · Equipe Rabotka.');
+    });
+
     it('flattens media onto the URL + caption pair Twilio takes', async () => {
       const { provider, twilio } = makeProvider();
       await provider.sendMedia('+242069917686', {
