@@ -5,6 +5,7 @@ import {
   toTemplatePayloadFromParams,
 } from '../cloud.mapper';
 import { WHATSAPP_TEMPLATES } from '../../../../../common/constants/whatsapp-templates';
+import type { CloudTemplateParameter } from '../cloud.types';
 
 describe('toProviderAddress (cloud)', () => {
   // Cloud accepts a `+`-prefixed number and then silently fails to deliver,
@@ -446,5 +447,97 @@ describe('toTemplatePayload', () => {
   it('defaults every template to French', () => {
     const payload = toTemplatePayload('+242069917686', 'kyc', { '1': 'A' });
     expect(payload.template.language).toEqual({ code: 'fr' });
+  });
+});
+
+/**
+ * The 132018 guard.
+ *
+ * These drive `buildComponents` with RAW numbered maps rather than through the
+ * registry's `variables()`, because that is the path the guard exists for: the
+ * outbound processor assembles its own map (it has to — the login-code rewrite
+ * operates on the numbered map) and never calls `variables()`, so a free-text
+ * value reaching Meta through the queue is sanitized here or nowhere.
+ */
+describe('buildComponents sanitizes template variables', () => {
+  const REJECTED = /[\n\t]|\s{4,}/;
+
+  // Copied off the error that started this: an admin's KYC rejection reason,
+  // CRLF and all, straight out of a browser textarea.
+  const RAW =
+    "Le selfie tenant le document d'identité n'a pas été transmis.\r\n" +
+    'Merci de bien vouloir le faire.\r\n\r\nEquipe Technique Rabotka.';
+
+  const textOf = (params: CloudTemplateParameter[] | undefined) =>
+    (params ?? []).map((p) => (p.type === 'text' ? p.text : ''));
+
+  it('flattens body parameters', () => {
+    const components = buildComponents('adminMessage', { '1': RAW });
+    const body = components.find((c) => c.type === 'body');
+
+    expect(textOf(body?.parameters)[0]).not.toMatch(REJECTED);
+    expect(textOf(body?.parameters)[0]).toContain('·');
+  });
+
+  it('flattens a CTA button parameter', () => {
+    // Nothing should ever put a newline in a URL suffix, which is exactly why
+    // this is worth pinning: the guard covers the whole component, not the
+    // fields somebody remembered.
+    const components = buildComponents('kycRejected', {
+      '1': 'Marie',
+      '2': 'raison',
+      '3': 'code\r\nsuffix',
+    });
+    const button = components.find((c) => c.type === 'button');
+
+    expect(textOf(button?.parameters)[0]).toBe('code suffix');
+  });
+
+  it('flattens BOTH copies of an AUTHENTICATION code', () => {
+    // The code is emitted twice — body and copy-code button — off one value.
+    // Sanitizing one and not the other would still fail the send.
+    const components = buildComponents('otp', { '1': '123\r\n456' });
+
+    for (const component of components) {
+      expect(textOf(component.parameters)[0]).toBe('123 456');
+    }
+  });
+
+  it('leaves a flow token untouched', () => {
+    // Opaque round-trip token on an `action` parameter, not display text: not
+    // what 132018 polices, and rewriting it would break the correlation back.
+    const token = 'fb_profile-1_uuid';
+    const components = buildComponents('contactUnlocked', {
+      '1': 'Marie',
+      '2': '+242060000000',
+      '3': 'marie@example.com',
+      flow_token: token,
+    });
+    const flow = components.find(
+      (c) => c.type === 'button' && c.sub_type === 'flow',
+    );
+
+    expect(flow?.parameters).toEqual([
+      { type: 'action', action: { flow_token: token } },
+    ]);
+  });
+
+  it('never emits a rejected parameter for any template in the registry', () => {
+    // The point of putting the guard at the chokepoint: a free-text variable
+    // added to the registry tomorrow is covered without anyone remembering to
+    // cover it. Every template, every variable, the same hostile value.
+    for (const key of Object.keys(WHATSAPP_TEMPLATES) as Array<
+      keyof typeof WHATSAPP_TEMPLATES
+    >) {
+      const variables = Object.fromEntries(
+        ['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((k) => [k, RAW]),
+      );
+
+      for (const component of buildComponents(key, variables)) {
+        for (const text of textOf(component.parameters)) {
+          expect(text).not.toMatch(REJECTED);
+        }
+      }
+    }
   });
 });
