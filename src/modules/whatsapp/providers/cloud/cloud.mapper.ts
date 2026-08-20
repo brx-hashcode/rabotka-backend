@@ -1,5 +1,6 @@
 import { toDigits } from '../../contracts/address';
 import { coverImageUrl } from '../../../../common/constants/whatsapp-carousel';
+import { sanitizeTemplateVariable } from '../../../../common/utils/whatsapp-template-text.util';
 import {
   getButtonUrlVar,
   getFlowTokenVar,
@@ -62,6 +63,16 @@ function orderedKeys(variables: Record<string, string>): string[] {
  * Order matters: Meta matches body parameters positionally, so a transposition
  * here delivers successfully with the values in the wrong slots. See
  * `orderedKeys` for why that is safe by default and still sorted explicitly.
+ *
+ * Every `text` parameter is run through `sanitizeTemplateVariable` on the way
+ * out. That guard belongs HERE rather than at the ~15 call sites: a variable
+ * carries free text more often than not (an admin's rejection reason, a worker's
+ * own profile description), Meta rejects the whole send with 132018 over a
+ * single newline inside one of them, and this is the one function every Cloud
+ * template send passes through — typed params via `toTemplatePayloadFromParams`
+ * and the raw numbered map the outbound processor hands over after rewriting the
+ * login code alike. A free-text variable added to the registry tomorrow is
+ * covered without anyone remembering to cover it.
  */
 export function buildComponents(
   key: WhatsAppTemplateName,
@@ -75,7 +86,9 @@ export function buildComponents(
   // parameter. Sending only the body is a parameter-count mismatch, so this
   // cannot go through the generic path below.
   if (WHATSAPP_TEMPLATES[key].category === 'AUTHENTICATION') {
-    const code = variables[orderedKeys(variables)[0]] ?? '';
+    const code = sanitizeTemplateVariable(
+      variables[orderedKeys(variables)[0]] ?? '',
+    );
     return [
       { type: 'body', parameters: [{ type: 'text', text: code }] },
       {
@@ -103,7 +116,7 @@ export function buildComponents(
       type: 'body',
       parameters: bodyKeys.map((k) => ({
         type: 'text' as const,
-        text: variables[k],
+        text: sanitizeTemplateVariable(variables[k]),
       })),
     });
   }
@@ -117,7 +130,9 @@ export function buildComponents(
       type: 'button',
       sub_type: 'url',
       index: '0',
-      parameters: [{ type: 'text', text: variables[buttonVar] }],
+      parameters: [
+        { type: 'text', text: sanitizeTemplateVariable(variables[buttonVar]) },
+      ],
     });
   }
 
@@ -126,6 +141,10 @@ export function buildComponents(
   // whole point of putting it here: `sendFeedbackFlow` only reaches people
   // inside WhatsApp's 24h service window, and someone who paid on the web
   // never opened one.
+  //
+  // Deliberately NOT sanitized. `flow_token` is an opaque round-trip token on an
+  // `action` parameter, not display text: it is not what 132018 polices, and
+  // rewriting it would break the correlation on the way back.
   const flowTokenVar = getFlowTokenVar(key);
   if (flowTokenVar && variables[flowTokenVar]) {
     components.push({
