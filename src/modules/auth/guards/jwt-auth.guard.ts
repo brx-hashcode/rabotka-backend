@@ -10,6 +10,7 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { Request, Response } from 'express';
 import Redis from 'ioredis';
+import { UserRole } from '@prisma/client';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator.js';
 import { clearAuthCookie, readAuthCookie } from '../auth-cookie.util';
 import {
@@ -25,12 +26,18 @@ export interface JwtPayload {
   exp?: number;
 }
 
+export interface AdminAccount {
+  role: UserRole;
+  isActive: boolean;
+}
+
 export interface AuthenticatedRequest extends Request {
   user: {
     profileId?: string;
     userId?: string;
     type: 'profile' | 'admin';
   };
+  adminAccount?: AdminAccount;
 }
 
 export interface ProfileAuthenticatedRequest extends Request {
@@ -96,11 +103,6 @@ export class JwtAuthGuard implements CanActivate {
 
       return true;
     } catch (err) {
-      // The cookie holds a token this server will never accept again (expired,
-      // revoked, or signed by a retired secret). Leaving it in place means the
-      // browser resends it on every request forever, and nothing on the client
-      // can delete it — it is httpOnly. Mobile sends a bearer token and has no
-      // cookie to clear, so only touch the response when one was actually sent.
       if (readAuthCookie(request, this.configService)) {
         clearAuthCookie(
           context.switchToHttp().getResponse<Response>(),

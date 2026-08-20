@@ -30,26 +30,69 @@ export type AreaAccess = 'full' | 'read';
  * deliberately.
  */
 export const LATERAL_ACCESS: Record<LateralRole, Record<string, AreaAccess>> = {
+  // FINANCE is ADMIN with one thing taken away: team management. Every other
+  // area an ADMIN can reach is listed below, and `LATERAL_CEILING` puts the
+  // role at ADMIN level inside them, so the two are permission-identical apart
+  // from `user`.
+  //
+  // Three admin-prefixed controllers are absent besides `user` and are NOT a
+  // second restriction: `admin/system-configs` (settings), `admin/matching` and
+  // `admin/interest-graph` are all `@Roles(SUPER_ADMIN)` at the class, so an
+  // ADMIN cannot reach them either. Leaving them out keeps FINANCE level with
+  // ADMIN rather than below it.
   [UserRole.FINANCE]: {
     'admin/wallet': 'full',
     'admin/payment-requests': 'full',
     'admin/penalties': 'full',
+    'admin/profiles': 'full',
+    'admin/job-offers': 'full',
+    'admin/applications': 'full',
+    'admin/job-categories': 'full',
+    'admin/claims': 'full',
+    // Its own controller, so its own key: the claim board is unusable without
+    // the thread on it, and `admin/claims` does not cover this prefix.
+    'admin/claims/:claimId/comments': 'full',
+    'admin/chat': 'full',
+    'admin/notifications': 'full',
+    'admin/event': 'full',
+    'admin/documents': 'full',
+    'admin/advertisements': 'full',
+    'admin/whatsapp': 'full',
+    // `full` throughout, including these — several expose only GETs today
+    // (dashboard, collaboration graph, feedback, the two download endpoints,
+    // the audit log), so `full` and `read` behave identically for them. It is
+    // written as `full` anyway so the map states the policy rather than an
+    // accident of which verbs those controllers happen to implement.
     'admin/dashboard': 'full',
-    'admin/invoices': 'read',
-    // Finance needs to identify who a payment belongs to — not to moderate them.
-    'admin/profiles': 'read',
-    // WhatsApp is a real line item on the Meta invoice, so finance needs the
-    // consumption figures. Read only: the delivery log carries message bodies
-    // and recipient numbers, and retrying a dead-lettered send is an
-    // operational act, not a financial one.
-    'admin/whatsapp': 'read',
+    'admin/collaboration-graph': 'full',
+    'admin/feedback': 'full',
+    'admin/invoices': 'full',
+    'admin/contracts': 'full',
+    log: 'full',
+    // NOT PRESENT, deliberately: `user` (team management). Anything absent is
+    // denied, so leaving it out is the whole of the restriction.
   },
+  // Support is not a narrow badge here — it is the team that runs the platform
+  // day to day. `read` on profiles meant they could open a profile and not
+  // verify it, which is the single thing they are most often asked to do.
+  //
+  // `full` is safe to hand out because `RolesGuard` caps SUPPORT at MANAGER
+  // level regardless of this map: bulk purge (SUPER_ADMIN) and crediting a
+  // wallet (ADMIN) stay out of reach without being named here.
   [UserRole.SUPPORT]: {
     'admin/claims': 'full',
     'admin/chat': 'full',
-    'admin/profiles': 'read',
-    'admin/applications': 'read',
-    'admin/job-offers': 'read',
+    'admin/profiles': 'full',
+    'admin/applications': 'full',
+    'admin/job-offers': 'full',
+    // Disputes over a penalty are support's, including confirming that one was
+    // paid. Creating and cancelling them are MANAGER-level and stay reachable;
+    // permanent deletion is not.
+    'admin/penalties': 'full',
+    // The landing page, readable by every role — see the note on FINANCE above.
+    // Without it, support lands on a page of empty charts while the tables
+    // underneath fill in from `admin/profiles`.
+    'admin/dashboard': 'read',
     // "Did the customer get the message?" is the first question on half of all
     // support tickets, and until now nobody could answer it.
     'admin/whatsapp': 'read',
@@ -57,6 +100,12 @@ export const LATERAL_ACCESS: Record<LateralRole, Record<string, AreaAccess>> = {
     // only: the feedback rows carry the author's name and phone, and support's
     // reach into personal data stays at the same level as `admin/profiles`.
     'admin/feedback': 'read',
+    // The paperwork behind a claim. "What did they actually agree to?" is
+    // unanswerable without the signed contract, and escalating to a manager to
+    // read a PDF is the kind of hop that makes support slower than the problem.
+    // Read only, and both are download-by-id — there is no listing to browse.
+    'admin/contracts': 'read',
+    'admin/invoices': 'read',
   },
 };
 
