@@ -39,6 +39,20 @@ import { BulkDeleteDto } from '../../common/dto/bulk-delete.dto';
 import { LogService } from '../log/log.service';
 import { extractRequestMeta } from '../../common/utils/request-meta.util';
 
+/**
+ * Why this is a hand-rolled set rather than `@Roles` like every other
+ * controller — it looks like an oversight and is not.
+ *
+ * The rule here is "ADMIN and above, **or** FINANCE". `@Roles(ADMIN)` now
+ * expresses that on its own, since `LATERAL_CEILING` puts FINANCE at ADMIN
+ * level and `admin/wallet` is in its area map — but only by coincidence of the
+ * two numbers matching. `@Roles(MANAGER)` would still be the opposite mistake,
+ * handing every MANAGER the revenue figures.
+ *
+ * So the set stays until the area registry lands and the two ideas — seniority
+ * and ownership — stop being expressed through one decorator. It is the thing
+ * that states the rule directly rather than as a consequence of a ceiling.
+ */
 const ALLOWED_WALLET_ROLES = new Set<UserRole>([
   UserRole.ADMIN,
   UserRole.SUPER_ADMIN,
@@ -91,7 +105,7 @@ export class WalletController {
     });
     if (!user || !ALLOWED_WALLET_ROLES.has(user.role)) {
       throw new ForbiddenException(
-        'Only ADMIN or SUPER_ADMIN can access wallet data',
+        'Only ADMIN, SUPER_ADMIN or FINANCE can access wallet data',
       );
     }
     return this.walletService.getSystemRevenue();
@@ -118,7 +132,7 @@ export class WalletController {
     });
     if (!user || !ALLOWED_WALLET_ROLES.has(user.role)) {
       throw new ForbiddenException(
-        'Only ADMIN or SUPER_ADMIN can access wallet data',
+        'Only ADMIN, SUPER_ADMIN or FINANCE can access wallet data',
       );
     }
 
@@ -159,7 +173,7 @@ export class WalletController {
     });
     if (!user || !ALLOWED_WALLET_ROLES.has(user.role)) {
       throw new ForbiddenException(
-        'Only ADMIN or SUPER_ADMIN can access wallet data',
+        'Only ADMIN, SUPER_ADMIN or FINANCE can access wallet data',
       );
     }
     return this.walletService.listTransactionsForAdmin({
@@ -176,7 +190,8 @@ export class WalletController {
   @Post('transactions/bulk-restore')
   @ApiOperation({
     summary: 'Bulk restore archived rows (admin only)',
-    description: 'Clears deleted_at. Only rows that are currently archived are affected.',
+    description:
+      'Clears deleted_at. Only rows that are currently archived are affected.',
   })
   @ApiResponse({ status: 201, description: 'Rows restored' })
   async bulkRestore(
@@ -247,7 +262,7 @@ export class WalletController {
     });
     if (!user || !ALLOWED_WALLET_ROLES.has(user.role)) {
       throw new ForbiddenException(
-        'Only ADMIN or SUPER_ADMIN can access wallet data',
+        'Only ADMIN, SUPER_ADMIN or FINANCE can access wallet data',
       );
     }
     const result = await this.walletService.bulkSoftDeleteTransactions(dto.ids);
@@ -278,7 +293,7 @@ export class WalletController {
     });
     if (!user || !ALLOWED_WALLET_ROLES.has(user.role)) {
       throw new ForbiddenException(
-        'Only ADMIN or SUPER_ADMIN can access wallet data',
+        'Only ADMIN, SUPER_ADMIN or FINANCE can access wallet data',
       );
     }
     return this.walletService.listPaymentsForAdmin({
@@ -307,7 +322,7 @@ export class WalletController {
     });
     if (!user || !ALLOWED_WALLET_ROLES.has(user.role)) {
       throw new ForbiddenException(
-        'Only ADMIN or SUPER_ADMIN can access wallet data',
+        'Only ADMIN, SUPER_ADMIN or FINANCE can access wallet data',
       );
     }
     return this.walletService.getMobileMoneyBalance();
@@ -332,7 +347,7 @@ export class WalletController {
     });
     if (!user || !ALLOWED_WALLET_ROLES.has(user.role)) {
       throw new ForbiddenException(
-        'Only ADMIN or SUPER_ADMIN can access wallet data',
+        'Only ADMIN, SUPER_ADMIN or FINANCE can access wallet data',
       );
     }
     return this.walletService.listMobileMoneyTransactionsForAdmin({
@@ -365,7 +380,7 @@ export class WalletController {
     });
     if (!user || !ALLOWED_WALLET_ROLES.has(user.role)) {
       throw new ForbiddenException(
-        'Only ADMIN or SUPER_ADMIN can access wallet data',
+        'Only ADMIN, SUPER_ADMIN or FINANCE can access wallet data',
       );
     }
     const result = await this.walletService.recordMobileMoneyWithdrawal(
@@ -402,7 +417,7 @@ export class WalletController {
     });
     if (!user || !ALLOWED_WALLET_ROLES.has(user.role)) {
       throw new ForbiddenException(
-        'Only ADMIN or SUPER_ADMIN can access wallet data',
+        'Only ADMIN, SUPER_ADMIN or FINANCE can access wallet data',
       );
     }
   }

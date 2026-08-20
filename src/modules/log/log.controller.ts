@@ -5,8 +5,11 @@ import {
   ApiResponse,
   ApiCookieAuth,
 } from '@nestjs/swagger';
+import { UserRole } from '@prisma/client';
 import { LogService } from './log.service';
 import { AdminAuthGuard } from '../auth/guards/admin-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 import { AdminListLogsDto } from './dto/admin-list-logs.dto';
 
 @ApiTags('Admin – Logs')
@@ -14,8 +17,17 @@ import { AdminListLogsDto } from './dto/admin-list-logs.dto';
 export class LogController {
   constructor(private readonly logService: LogService) {}
 
+  /**
+   * `RolesGuard` alongside `AdminAuthGuard`, not instead of it.
+   *
+   * This route carried `AdminAuthGuard` alone, which made it the one admin
+   * surface where the lateral allowlist never ran — FINANCE and SUPPORT reached
+   * the full audit log by simply not being checked. MANAGER matches the
+   * seniority of what the log exposes: every admin action, on every record.
+   */
   @Get('admin')
-  @UseGuards(AdminAuthGuard)
+  @UseGuards(AdminAuthGuard, RolesGuard)
+  @Roles(UserRole.MANAGER)
   @ApiCookieAuth()
   @ApiOperation({
     summary: 'List logs (admin only)',

@@ -11,6 +11,8 @@ import { ContractService } from './contract.service';
 import { ProfileAuthGuard } from '../auth/guards/profile-auth.guard';
 import { AdminAuthGuard } from '../auth/guards/admin-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { UserRole } from '@prisma/client';
 import type { ProfileAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
 
 @ApiTags('Contracts')
@@ -51,7 +53,11 @@ export class ContractController {
 export class AdminContractController {
   constructor(private readonly contractService: ContractService) {}
 
+  // A signed contract carries both parties' identities and the agreed terms.
+  // MANAGER, matching `admin/documents`, rather than the floor it sat at for
+  // want of any decorator at all.
   @Get(':contractId/download')
+  @Roles(UserRole.MANAGER)
   @ApiOperation({ summary: 'Download a contract PDF (admin)' })
   @ApiResponse({ status: 200, description: 'PDF file stream' })
   @ApiResponse({ status: 404, description: 'Contract or template not found' })

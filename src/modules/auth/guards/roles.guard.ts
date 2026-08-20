@@ -14,26 +14,29 @@ import {
   lateralRoleCanAccess,
   type LateralRole,
 } from './lateral-access';
+import { ROLE_HIERARCHY } from '../role-seniority';
 
 /**
- * Seniority ladder. Lateral roles are deliberately absent — they are not more
- * or less senior than a MODERATOR, they simply cover a different area, and
- * giving them a number here would silently grant them every endpoint at or
- * below that number.
+ * The highest gate each lateral role may pass INSIDE an area it owns.
+ *
+ * Two different roles, two different ceilings, because they are two different
+ * jobs:
+ *
+ * - SUPPORT operates the platform, so it needs MANAGER-level actions and
+ *   nothing above. Permanent deletion and money movement stay out of reach even
+ *   in the areas it fully owns — the ceiling is what enforces that, not the
+ *   area map, so widening the map does not widen these.
+ * - FINANCE sits at ADMIN, because FINANCE *is* ADMIN minus team management.
+ *   Anything an ADMIN may do, it may do in the areas it owns; anything gated at
+ *   SUPER_ADMIN (permanent purge, settings) is closed to both alike.
+ *
+ * The single difference between the two roles therefore lives in
+ * `LATERAL_ACCESS`, which withholds `user` from FINANCE — not here.
  */
-const ROLE_HIERARCHY: Record<Exclude<UserRole, LateralRole>, number> = {
-  [UserRole.MODERATOR]: 1,
-  [UserRole.MANAGER]: 2,
-  [UserRole.ADMIN]: 3,
-  [UserRole.SUPER_ADMIN]: 4,
+const LATERAL_CEILING: Record<LateralRole, number> = {
+  [UserRole.SUPPORT]: ROLE_HIERARCHY[UserRole.MANAGER],
+  [UserRole.FINANCE]: ROLE_HIERARCHY[UserRole.ADMIN],
 };
-
-/**
- * The highest gate a lateral role may pass inside an area it owns. ADMIN- and
- * SUPER_ADMIN-gated actions (permanent deletion, team management) stay out of
- * reach even where the area itself is allowed.
- */
-const MAX_LATERAL_LEVEL = ROLE_HIERARCHY[UserRole.MANAGER];
 
 @Injectable()
 export class RolesGuard implements CanActivate {
@@ -55,12 +58,22 @@ export class RolesGuard implements CanActivate {
       throw new ForbiddenException('Accès refusé');
     }
 
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: { role: true, is_active: true },
-    });
+    // `AdminAuthGuard` runs first on every admin route and has already read
+    // this row; reuse it rather than issuing the same query twice per request.
+    // The fallback covers the routes that mount `RolesGuard` behind a different
+    // authentication guard.
+    const user =
+      request.adminAccount ??
+      (await this.prisma.user
+        .findUnique({
+          where: { id: userId },
+          select: { role: true, is_active: true },
+        })
+        .then((row) =>
+          row ? { role: row.role, isActive: row.is_active } : null,
+        ));
 
-    if (!user || !user.is_active) {
+    if (!user?.isActive) {
       throw new ForbiddenException('Accès refusé');
     }
 
@@ -89,14 +102,17 @@ export class RolesGuard implements CanActivate {
 
   /**
    * Lateral roles are allowed only inside the areas they own, and only up to
-   * MANAGER-level actions within them.
+   * their own ceiling within them — see `LATERAL_CEILING`.
    */
   private checkLateral(
     context: ExecutionContext,
     role: LateralRole,
     requiredRoles: UserRole[] | undefined,
   ): boolean {
-    if (requiredRoles?.length && this.requiredLevel(requiredRoles) > MAX_LATERAL_LEVEL) {
+    if (
+      requiredRoles?.length &&
+      this.requiredLevel(requiredRoles) > LATERAL_CEILING[role]
+    ) {
       throw new ForbiddenException(
         "Vous n'avez pas les permissions nécessaires pour cette action",
       );

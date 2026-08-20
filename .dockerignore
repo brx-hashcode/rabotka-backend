@@ -58,3 +58,7 @@ yarn-error.log*
 .temp
 *.tmp
 
+# The developer-side FastEmbed cache — 2.7GB of ONNX weights. Gitignored, but
+# .dockerignore is what keeps it out of the build context, and `COPY . .` in the
+# builder stage would otherwise bake it into a layer.
+local_cache

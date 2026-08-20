@@ -111,8 +111,10 @@ export class DocumentController {
     return result;
   }
 
+  // MANAGER throughout: the library holds contract and policy templates, and
+  // filling one produces a document that goes to a real counterparty.
   @Get()
-  @Roles(UserRole.MODERATOR)
+  @Roles(UserRole.MANAGER)
   @ApiOperation({ summary: 'List all documents' })
   list(@Query() dto: ListDocumentsDto) {
     return this.documentService.list(dto);
@@ -181,7 +183,7 @@ export class DocumentController {
   }
 
   @Post(':id/fill/docx')
-  @Roles(UserRole.MODERATOR)
+  @Roles(UserRole.MANAGER)
   @ApiOperation({ summary: 'Fill template and return as DOCX' })
   async fillDocx(
     @Param('id') id: string,
@@ -213,7 +215,7 @@ export class DocumentController {
   }
 
   @Post(':id/fill/pdf')
-  @Roles(UserRole.MODERATOR)
+  @Roles(UserRole.MANAGER)
   @ApiOperation({ summary: 'Fill template and return as PDF' })
   async fillPdf(
     @Param('id') id: string,

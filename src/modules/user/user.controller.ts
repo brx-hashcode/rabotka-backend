@@ -79,7 +79,10 @@ export class UserController {
     @Req() req: AdminAuthenticatedRequest,
     @Body() createAdminDto: CreateAdminDto,
   ) {
-    const user = await this.userService.createAdmin(createAdminDto);
+    const user = await this.userService.createAdmin(
+      createAdminDto,
+      req.user.userId,
+    );
     await this.logService.create({
       action: 'ADMIN_USER_CREATED',
       entityType: 'user',
@@ -115,7 +118,11 @@ export class UserController {
     @Param('id') id: string,
     @Body() updateAdminDto: UpdateAdminDto,
   ) {
-    const user = await this.userService.updateAdmin(id, updateAdminDto);
+    const user = await this.userService.updateAdmin(
+      id,
+      updateAdminDto,
+      req.user.userId,
+    );
     await this.logService.create({
       action: 'ADMIN_USER_UPDATED',
       entityType: 'user',
@@ -146,7 +153,7 @@ export class UserController {
     @Req() req: AdminAuthenticatedRequest,
     @Param('id') id: string,
   ) {
-    const user = await this.userService.activate(id);
+    const user = await this.userService.activate(id, req.user.userId);
     await this.logService.create({
       action: 'ADMIN_USER_ACTIVATED',
       entityType: 'user',
@@ -176,7 +183,7 @@ export class UserController {
     @Req() req: AdminAuthenticatedRequest,
     @Param('id') id: string,
   ) {
-    const user = await this.userService.deactivate(id);
+    const user = await this.userService.deactivate(id, req.user.userId);
     await this.logService.create({
       action: 'ADMIN_USER_DEACTIVATED',
       entityType: 'user',
@@ -201,7 +208,8 @@ export class UserController {
   @Roles(UserRole.MANAGER)
   @ApiOperation({
     summary: 'Bulk restore archived rows (admin only)',
-    description: 'Clears deleted_at. Only rows that are currently archived are affected.',
+    description:
+      'Clears deleted_at. Only rows that are currently archived are affected.',
   })
   @ApiResponse({ status: 201, description: 'Rows restored' })
   async bulkRestore(
@@ -271,7 +279,7 @@ export class UserController {
     @Req() req: AdminAuthenticatedRequest,
     @Param('id') id: string,
   ) {
-    await this.userService.deleteAdmin(id);
+    await this.userService.deleteAdmin(id, req.user.userId);
     await this.logService.create({
       action: 'ADMIN_USER_DELETED',
       entityType: 'user',
