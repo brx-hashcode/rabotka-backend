@@ -1,3 +1,8 @@
+import {
+  capTemplateVar,
+  flattenForTemplateVariable,
+} from '../utils/whatsapp-template-text.util';
+
 /**
  * Meta's template category. Affects pricing and what Meta will approve, so it
  * is declared rather than inferred.
@@ -185,6 +190,35 @@ export const SUSPENDED_CTA_PATH = 'home';
 function cloudName(envVar: string, derivedDefault: string): string {
   const override = process.env[envVar]?.trim();
   return override && override.length > 0 ? override : derivedDefault;
+}
+
+/**
+ * Prepare a variable whose value is prose somebody typed — an admin's rejection
+ * reason, a worker's own profile description — rather than a name, a date or an
+ * id this codebase produced.
+ *
+ * Three things have to happen, in this order:
+ *
+ * 1. FLATTEN. Meta rejects the whole send with 132018 over one newline inside a
+ *    variable, and every one of these fields is fed by a `<textarea>` — the
+ *    browser normalises its line breaks to CRLF on submit, so the newlines are
+ *    not hypothetical. This is what a KYC rejection carrying a two-paragraph
+ *    reason failed on.
+ * 2. CAP. None of the upstream fields is length-bounded and Meta's rendered body
+ *    caps at 1024 characters shared across the template.
+ * 3. FALLBACK, last. A variable may never be empty (132000), and these fields
+ *    are optional upstream — the fallback has to see the FLATTENED value, or a
+ *    reason of `"\r\n "` passes a `.trim()` check and arrives blank anyway.
+ *
+ * The provider mappers sanitize every variable again on the way out. That guard
+ * is the one that makes 132018 impossible; this one is what keeps the fallback
+ * and the length budget correct, which the mappers cannot know about.
+ */
+function freeTextVar(
+  value: string | null | undefined,
+  fallback: string,
+): string {
+  return capTemplateVar(flattenForTemplateVariable(value ?? '')) || fallback;
 }
 
 export const WHATSAPP_TEMPLATES = {
@@ -432,9 +466,8 @@ export const WHATSAPP_TEMPLATES = {
       loginCode?: string | null;
     }) => ({
       '1': p.firstName,
-      // Never empty. WhatsApp rejects a send whose positional parameter is
-      // missing or blank (132000), and the reason is optional upstream.
-      '2': p.reason?.trim() || 'Non précisé',
+      // Admin-typed prose. Never empty, never multi-line — see `freeTextVar`.
+      '2': freeTextVar(p.reason, 'Non précisé'),
       // A minted login code when the caller has one, else the bare
       // destination — which lands on the login screen rather than the claim
       // form, but is still a live link rather than a dead `/s/<path>`.
@@ -476,7 +509,7 @@ export const WHATSAPP_TEMPLATES = {
       loginCode?: string | null;
     }) => ({
       '1': p.firstName,
-      '2': p.reason?.trim() || 'Non précisé',
+      '2': freeTextVar(p.reason, 'Non précisé'),
       '3': p.loginCode?.trim() || SUSPENDED_CTA_PATH,
     }),
   } satisfies WhatsAppTemplate<
@@ -663,7 +696,9 @@ export const WHATSAPP_TEMPLATES = {
       '2': p.workerName,
       '3': String(p.reliabilityScore),
       '4': String(p.completedMissions),
-      '5': p.workerDescription.trim() || 'Non renseignée',
+      // The worker's own bio, typed into a textarea in the mobile app — the same
+      // 132018 exposure as an admin's reason, and the one nobody was watching.
+      '5': freeTextVar(p.workerDescription, 'Non renseignée'),
       '6': p.scheduledAt,
       '7': p.address,
       '8': p.applicationId,
@@ -781,7 +816,7 @@ export const WHATSAPP_TEMPLATES = {
       '1': p.workerName,
       '2': p.offerTitle,
       '3': p.date,
-      '4': p.reason.trim() || 'Aucune raison donnée',
+      '4': freeTextVar(p.reason, 'Aucune raison donnée'),
       '5': p.penaltyStatus,
       // URL suffix for the CTA button (/job-offers/{{6}}).
       '6': p.jobOfferId,
@@ -1072,10 +1107,14 @@ export const WHATSAPP_TEMPLATES = {
    * (see `WhatsAppService.isServiceWindowOpen`); inside the window the same body
    * goes out as free-form.
    *
-   * `'1'` must arrive ALREADY FLATTENED — Meta rejects newlines, tabs and runs of
-   * 4+ spaces inside a variable. `flattenForTemplateVariable` in
-   * modules/whatsapp/templates/admin-message.ts does that, and
-   * `formatAdminMessage` there renders the body this template must match.
+   * `'1'` arrives ALREADY FLATTENED, from `WhatsAppService.sendAdminMessage`
+   * rather than through `freeTextVar` like the other free-text bindings here.
+   * That path has to flatten before it can enforce `ADMIN_MESSAGE_VAR_MAX` and
+   * tell the admin their message is too long, and it picks between this template
+   * and a free-form send off the same value. `flattenForTemplateVariable` lives
+   * in common/utils/whatsapp-template-text.util.ts; `formatAdminMessage` in
+   * modules/whatsapp/templates/admin-message.ts renders the body this template
+   * must match.
    *
    * No `urlSuffixVar`: the template has no CTA button.
    */

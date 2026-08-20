@@ -1,62 +1,21 @@
 import {
   flattenForTemplateVariable,
+  sanitizeTemplateVariable,
   formatAdminMessage,
   ADMIN_MESSAGE_VAR_MAX,
 } from '../admin-message';
 
-describe('flattenForTemplateVariable', () => {
-  // Meta rejects a template variable containing any of these.
-  const isAcceptableVariable = (v: string) =>
-    !/[\n\t]/.test(v) && !/ {2,}/.test(v);
-
-  it.each([
-    ['CRLF', 'a\r\nb', 'a b'],
-    ['lone CR', 'a\rb', 'a b'],
-    ['tabs', 'a\tb', 'a b'],
-    ['four spaces', 'a    b', 'a b'],
-    ['single newline', 'ligne un\nligne deux', 'ligne un ligne deux'],
-    [
-      'paragraph break becomes a separator',
-      'Bonjour,\n\nVotre dossier est validé.',
-      'Bonjour, · Votre dossier est validé.',
-    ],
-    ['many blank lines collapse to one separator', 'a\n\n\n\n\nb', 'a · b'],
-    ['leading blank lines', '\n\n\nBonjour', 'Bonjour'],
-    ['trailing blank lines', 'Bonjour\n\n\n', 'Bonjour'],
-    ['surrounding whitespace', '  a  \n\n  b\t\tc  ', 'a · b c'],
-    ['zero-width characters are dropped', 'a​b‍b', 'abb'],
-    ['accents and punctuation survive', 'déjà — c’est bon ! (100%)', 'déjà — c’est bon ! (100%)'],
-  ])('%s', (_label, input, expected) => {
-    const out = flattenForTemplateVariable(input);
-    expect(out).toBe(expected);
-    expect(isAcceptableVariable(out)).toBe(true);
-  });
-
-  it.each([
-    ['empty string', ''],
-    ['spaces only', '     '],
-    ['blank lines only', '  \n\n \t '],
-    ['newlines only', '\n\n\n'],
-  ])('returns empty for %s', (_label, input) => {
-    // Must be empty, not a bare "·" — the caller's emptiness check is what stops
-    // a whitespace-only message from being sent as a lone separator.
-    expect(flattenForTemplateVariable(input)).toBe('');
-  });
-
-  it('never emits a value Meta would reject, for a realistic canned message', () => {
-    const canned = [
-      'Bonjour Marie,',
-      '',
-      "Votre vérification d'identité est incomplète : il manque le verso de votre pièce.",
-      '',
-      'Merci de le téléverser depuis votre profil.',
-      '',
-      "L'équipe Rabotka",
-    ].join('\n');
-
-    const out = flattenForTemplateVariable(canned);
-    expect(isAcceptableVariable(out)).toBe(true);
-    expect(out).toContain('·');
+/**
+ * The flattening itself is tested at its home,
+ * common/utils/__tests__/whatsapp-template-text.util.spec.ts. What matters here
+ * is that it is still reachable from this path: `whatsapp.service.ts` imports it
+ * from `../templates`, and a re-export dropped in a tidy-up would break that
+ * import rather than any test of the function.
+ */
+describe('re-exports', () => {
+  it('still resolves the template-text helpers', () => {
+    expect(flattenForTemplateVariable('a\r\nb')).toBe('a b');
+    expect(sanitizeTemplateVariable('a\r\nb')).toBe('a b');
   });
 });
 

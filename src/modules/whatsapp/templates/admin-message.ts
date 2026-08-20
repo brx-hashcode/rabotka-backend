@@ -11,38 +11,18 @@
  */
 
 /**
- * Meta rejects newlines, tabs and runs of 4+ spaces INSIDE a ContentVariables
- * value, so an admin's multi-line message cannot be passed through as typed.
+ * Meta rejects newlines, tabs and runs of 4+ spaces INSIDE a template variable,
+ * so an admin's multi-line message cannot be passed through as typed.
  *
- * Pass order is load-bearing: collapsing spaces and tabs BEFORE the newline
- * passes stops `"a  \n  b"` from leaving a doubled space behind, and the final
- * pass mops up whatever inserting the separator created.
- *
- * Paragraph breaks become a visible `·` rather than a plain space — flattening
- * a three-paragraph message with spaces alone produces an unreadable run-on.
+ * The rule is not specific to this template — it binds every variable of every
+ * template — so the implementation lives in `common/utils`, where the registry
+ * and both provider mappers can reach it. Re-exported here because this is where
+ * callers have always imported it from.
  */
-export function flattenForTemplateVariable(text: string): string {
-  const flattened = text
-    // Up front, so leading/trailing blank lines never become an edge separator.
-    .trim()
-    .replace(/\r\n?/g, '\n')
-    // Control and format characters (zero-width joiners, bidi marks) survive
-    // a copy-paste out of a browser and are rejected inside a variable. \n and
-    // \t are control characters too, so they are spared here and normalised by
-    // the passes below. Written as Unicode property escapes so this file needs
-    // no literal control bytes of its own.
-    .replace(/[\p{Cc}\p{Cf}]/gu, (c) => (c === '\n' || c === '\t' ? c : ''))
-    .replace(/[ \t]+/g, ' ')
-    .replace(/\n{2,}/g, ' · ')
-    .replace(/\n/g, ' ')
-    .replace(/ {2,}/g, ' ')
-    .trim();
-
-  // A message that was only blank lines flattens to nothing but separators,
-  // which would sail past the caller's emptiness check and send a bare "·".
-  // Tested rather than stripped: one anchored character class, no backtracking.
-  return /^[·\s]*$/.test(flattened) ? '' : flattened;
-}
+export {
+  flattenForTemplateVariable,
+  sanitizeTemplateVariable,
+} from '../../../common/utils/whatsapp-template-text.util';
 
 /**
  * Ceiling on the flattened message.
