@@ -20,7 +20,11 @@ import {
   type TemplateParams,
   type WhatsappProvider,
 } from '../../contracts';
-import { toContentSid, toContentVariables } from './twilio.mapper';
+import {
+  toContentSid,
+  toContentVariables,
+  sanitizeTemplateVariables,
+} from './twilio.mapper';
 import { toWhatsappError } from './twilio.errors';
 
 /**
@@ -112,6 +116,17 @@ export class TwilioProvider implements WhatsappProvider {
     );
   }
 
+  /**
+   * Both template paths converge here — `sendTemplate` above with typed params,
+   * and the outbound processor with a numbered map it has already rewritten the
+   * login code into — which is why the 132018 guard sits here rather than in
+   * `toContentVariables`.
+   *
+   * Twilio is a BSP in front of the same Meta endpoint, so it forwards a
+   * newline inside a ContentVariables value and gets the send rejected exactly
+   * as the Cloud provider would. `cloud.mapper.ts`'s `buildComponents` carries
+   * the matching guard and the full reasoning.
+   */
   async sendTemplateWithVariables(
     to: E164,
     template: TemplateKey,
@@ -121,7 +136,7 @@ export class TwilioProvider implements WhatsappProvider {
       const sid = await this.twilio.sendWhatsAppTemplate(
         to,
         toContentSid(template),
-        variables,
+        sanitizeTemplateVariables(variables),
       );
       return this.toResult(sid, to);
     } catch (err) {
