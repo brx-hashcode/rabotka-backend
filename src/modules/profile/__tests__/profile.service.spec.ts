@@ -709,6 +709,75 @@ describe('ProfileService', () => {
       await service.createProfile(dto);
       expect(fileService.uploadToStorage).not.toHaveBeenCalled();
     });
+
+    describe('back-of-document row', () => {
+      // The categories a signup actually persisted, in call order.
+      const categoriesCreated = (txPrisma: any): string[] =>
+        txPrisma.kycDocument.create.mock.calls.map(
+          (call: any[]) => call[0].data.document_category,
+        );
+
+      const runSignup = async (overrides: Record<string, unknown>) => {
+        const txPrisma = makePrisma();
+        txPrisma.profile.create.mockResolvedValue({ id: 'new-p-1' });
+        prisma.$transaction.mockImplementation((fn: any) => fn(txPrisma));
+        await service.createProfile({ ...dto, ...overrides } as any);
+        return txPrisma;
+      };
+
+      it('stores three rows for a document type that has a back', async () => {
+        const txPrisma = await runSignup({
+          documentType: 'IDENTITY_CARD',
+          kycDocumentBackUrl: 'https://cdn.example.com/id-back.jpg',
+        });
+
+        expect(categoriesCreated(txPrisma)).toEqual([
+          'DOCUMENT',
+          'DOCUMENT_BACK',
+          'SELFIE',
+        ]);
+      });
+
+      it('stores only two rows for a passport', async () => {
+        // A passport carries everything on its photo page; there is no back to
+        // photograph, and the client never offers the third upload zone.
+        const txPrisma = await runSignup({ documentType: 'PASSPORT' });
+
+        expect(categoriesCreated(txPrisma)).toEqual(['DOCUMENT', 'SELFIE']);
+      });
+
+      it('discards a back sent alongside a passport', async () => {
+        // Gating on documentType rather than on the URL being present is what
+        // keeps a stale back -- e.g. uploaded before the user switched type --
+        // from becoming a row no reviewer is ever shown.
+        const txPrisma = await runSignup({
+          documentType: 'PASSPORT',
+          kycDocumentBackUrl: 'https://cdn.example.com/stale-back.jpg',
+        });
+
+        expect(categoriesCreated(txPrisma)).toEqual(['DOCUMENT', 'SELFIE']);
+      });
+
+      it('stores two rows when an older client omits the back', async () => {
+        // kycDocumentBackUrl ships optional so the deployed client keeps
+        // registering profiles while the new one rolls out.
+        const txPrisma = await runSignup({ documentType: 'DRIVER_LICENSE' });
+
+        expect(categoriesCreated(txPrisma)).toEqual(['DOCUMENT', 'SELFIE']);
+      });
+
+      it('tags every row with the submitted document type', async () => {
+        const txPrisma = await runSignup({
+          documentType: 'NIU_CARD',
+          kycDocumentBackUrl: 'https://cdn.example.com/niu-back.jpg',
+        });
+
+        const types = txPrisma.kycDocument.create.mock.calls.map(
+          (call: any[]) => call[0].data.document_type,
+        );
+        expect(types).toEqual(['NIU_CARD', 'NIU_CARD', 'NIU_CARD']);
+      });
+    });
   });
 
   describe('updateProfile() - EMPLOYER branch', () => {
