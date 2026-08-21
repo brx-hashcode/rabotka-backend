@@ -44,7 +44,9 @@ import { AdminUpdateProfileDto } from './dto/admin-update-profile.dto';
 import { deletedAtFilter } from '../../common/utils/soft-delete.util';
 import {
   AccountStatus,
+  DocumentType,
   EmploymentType,
+  KycDocumentCategory,
   Prisma,
   ProfileType,
   VerificationStatus,
@@ -652,7 +654,12 @@ export class ProfileService {
             rejection_reason: true,
             created_at: true,
           },
-          orderBy: { created_at: 'asc' },
+          // Category first, so the reviewer always sees front -> back -> selfie.
+          // created_at alone cannot order these: all of a profile's rows are
+          // inserted in one transaction and share its timestamp. Enum columns
+          // sort by declaration order, which is why the migration added
+          // DOCUMENT_BACK with `AFTER 'DOCUMENT'` rather than appending it.
+          orderBy: [{ document_category: 'asc' }, { created_at: 'asc' }],
         },
         kyc_verification_images: {
           select: {
@@ -1504,7 +1511,8 @@ export class ProfileService {
   }
 
   private async createProfileWithDocuments(createProfileDto: CreateProfileDto) {
-    const { kycDocumentUrl, kycSelfieUrl } = createProfileDto;
+    const { kycDocumentUrl, kycSelfieUrl, kycDocumentBackUrl } =
+      createProfileDto;
 
     return this.prisma.$transaction(async (tx) => {
       const createdProfile = await this.createProfileRecord(
@@ -1525,6 +1533,14 @@ export class ProfileService {
         });
       }
 
+      // A PASSPORT has no back to photograph, so it gets two rows; every other
+      // type gets three. Gating on documentType rather than merely on the URL
+      // being present is what makes a back sent alongside a PASSPORT a no-op
+      // instead of an orphan row no reviewer would ever be shown.
+      const wantsBackSide =
+        createProfileDto.documentType !== DocumentType.PASSPORT &&
+        !!kycDocumentBackUrl;
+
       await Promise.all([
         this.createKycDocumentRecord(
           tx,
@@ -1533,6 +1549,17 @@ export class ProfileService {
           'DOCUMENT',
           kycDocumentUrl,
         ),
+        ...(wantsBackSide
+          ? [
+              this.createKycDocumentRecord(
+                tx,
+                createdProfile.id,
+                createProfileDto.documentType,
+                'DOCUMENT_BACK',
+                kycDocumentBackUrl,
+              ),
+            ]
+          : []),
         this.createKycDocumentRecord(
           tx,
           createdProfile.id,
@@ -1601,14 +1628,14 @@ export class ProfileService {
     tx: PrismaTransactionClient,
     profileId: string,
     documentType: CreateProfileDto['documentType'] | undefined,
-    documentCategory: 'DOCUMENT' | 'SELFIE',
+    documentCategory: KycDocumentCategory,
     documentUrl: string,
     storageKey?: string,
   ) {
     const data: {
       profile_id: string;
       document_type?: CreateProfileDto['documentType'];
-      document_category: 'DOCUMENT' | 'SELFIE';
+      document_category: KycDocumentCategory;
       document_url: string;
       storage_key?: string;
       verification_status: 'PENDING';

@@ -95,14 +95,23 @@ enum DocumentType {
   IDENTITY_CARD
   PASSPORT
   DRIVER_LICENSE
-  BIRTH_CERTIFICATE
-  STUDENT_CARD
   NIU_CARD
-  OTHER
 }
 
+/// Which file of a KYC submission a row holds: DOCUMENT is the FRONT of the
+/// identity document, DOCUMENT_BACK the back, SELFIE the applicant holding it.
+/// One row per category per profile, enforced by KycDocument's
+/// unique([profile_id, document_category]).
+///
+/// PASSPORT submissions have no DOCUMENT_BACK row -- a passport carries all its
+/// data on the photo page. Every other DocumentType requires all three.
+///
+/// Declaration order is the sort order (hence the matching `AFTER 'DOCUMENT'`
+/// in the migration that added it), so `orderBy: { document_category: 'asc' }`
+/// yields front -> back -> selfie for the admin review grid.
 enum KycDocumentCategory {
   DOCUMENT
+  DOCUMENT_BACK
   SELFIE
 }
 
