@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { foldText } from '../shared/text';
-import { classifyIdentityQuery } from './identity';
+import { classifyIdentityQuery, refusalIdFor } from './identity';
 import { refusal, type RefusalId } from './refusals';
 
 export interface GuardDecision {
@@ -41,6 +41,64 @@ const PROVIDER_TERMS = [
   'modele de langage',
   'large language model',
 ];
+
+/**
+ * Insultes et menaces, et rien d'autre.
+ *
+ * LA BARRE EST HAUTE, DÉLIBÉRÉMENT. Ce garde-fou finit par déposer un
+ * signalement dans le dossier de quelqu'un, sur une plateforme où son compte est
+ * son gagne-pain. Un faux positif coûte donc infiniment plus cher qu'un faux
+ * négatif, et l'arbitrage est fait ici une fois pour toutes : on préfère rater
+ * une insulte que sanctionner une colère légitime.
+ *
+ * Ce qui N'EST PAS de l'abus et ne doit rien déclencher : « c'est nul », « ça
+ * marche pas », « vous êtes lents », « je suis en colère », « c'est de
+ * l'arnaque » — ce dernier étant même un signalement recevable, que
+ * `litige-reclamation.md` invite explicitement à faire.
+ *
+ * Les motifs passent par `foldText` comme le reste du fichier : accents, casse
+ * et ponctuation sont déjà absorbés, inutile de décliner les variantes.
+ *
+ * Cette liste ratera les insultes détournées et les créations du moment. C'est
+ * un filtre lexical, pas une compréhension — à relire quand de vrais
+ * signalements seront remontés, plutôt qu'à considérer comme réglé.
+ */
+const ABUSE_PATTERNS = [
+  // Insultes françaises sans ambiguïté possible.
+  'connard',
+  'connasse',
+  'enculé',
+  'encule toi',
+  'ta gueule',
+  'ferme ta gueule',
+  'va te faire foutre',
+  'nique ta mere',
+  'nique ta race',
+  'fils de pute',
+  'salope',
+  'pute',
+  'batard',
+  'espece de con',
+  'sale con',
+  // « imbécile », « abruti », « débile », « idiot » ont été retirés
+  // volontairement : « c'est débile ce système » vise le produit, pas une
+  // personne, et c'est de la frustration recevable. Les garder revenait à
+  // menacer de suspension quelqu'un qui se plaint mal.
+  // Menaces. Le registre change, la gravité aussi.
+  'je vais te tuer',
+  'je vais vous tuer',
+  'je vais te frapper',
+  'je vais te retrouver',
+  'on va te retrouver',
+  'je vais bruler',
+  'tu vas voir ce qui va t arriver',
+  // Anglais, pour les rares messages qui arrivent dans cette langue.
+  'fuck you',
+  'fuck off',
+  'motherfucker',
+  'son of a bitch',
+  'i will kill you',
+] as const;
 
 const CONTACT_REQUEST_PATTERNS = [
   'son numero',
@@ -202,11 +260,35 @@ const CHILD_SAFETY_PATTERNS = [
   'sans que les parents',
 ];
 
+/**
+ * Combien de messages abusifs, dans la fenêtre d'historique, avant de signaler.
+ *
+ * Trois, pas un. Le premier message reçoit un avertissement qui dit ce qui est
+ * en jeu ; quelqu'un qui s'excuse ou se calme ne laisse aucune trace dans son
+ * dossier. Le seuil n'est pas de la tolérance, c'est ce qui distingue un
+ * dérapage d'un comportement.
+ */
+export const ABUSE_REPORT_THRESHOLD = 3;
+
+/**
+ * Ce message contient-il une insulte ou une menace ?
+ *
+ * Exporté à part du `prefilter` parce que le pipeline le rejoue sur les tours
+ * précédents pour savoir si la personne PERSISTE. Aucun compteur n'est stocké :
+ * l'historique est déjà en base, et un état de plus serait un état de plus à
+ * garder juste.
+ */
+export function isAbusive(text: string): boolean {
+  const folded = foldText(text);
+  if (!folded) return false;
+  return ABUSE_PATTERNS.some((p) => folded.includes(p));
+}
+
 @Injectable()
 export class GuardService {
   private readonly logger = new Logger(GuardService.name);
 
-  prefilter(text: string): GuardDecision {
+  prefilter(text: string, priorAbuse = 0): GuardDecision {
     const folded = foldText(text);
     if (!folded) return { action: 'allow', reason: 'empty' };
 
@@ -219,6 +301,25 @@ export class GuardService {
         refusalId: 'garde_enfants',
         reason: 'child-safety pattern',
       };
+    }
+
+    // Avant tout le reste (sauf la sécurité des enfants, qui prime) : quelqu'un
+    // qui insulte n'attend pas une réponse produit, et lui en servir une revient
+    // à ne pas avoir entendu. `priorAbuse` est renseigné par l'appelant à partir
+    // de l'historique — sans lui, ce garde-fou ne sait pas compter.
+    if (hits(ABUSE_PATTERNS)) {
+      const total = (priorAbuse ?? 0) + 1;
+      return total >= ABUSE_REPORT_THRESHOLD
+        ? {
+            action: 'escalate',
+            refusalId: 'abus_signale',
+            reason: `abusive language, ${total} in window`,
+          }
+        : {
+            action: 'refuse',
+            refusalId: 'abus_avertissement',
+            reason: `abusive language, ${total} in window`,
+          };
     }
 
     if (hits(CONTACT_REQUEST_PATTERNS)) {
@@ -248,7 +349,14 @@ export class GuardService {
 
     const identity = classifyIdentityQuery(text);
     if (identity) {
-      return { action: 'refuse', refusalId: 'identite', reason: identity };
+      // Trois questions, trois réponses. La distinction était calculée par
+      // `classifyIdentityQuery` puis jetée ici : les trois recevaient la même
+      // phrase, y compris celle qui commence par « bien tenté ».
+      return {
+        action: 'refuse',
+        refusalId: refusalIdFor(identity),
+        reason: identity,
+      };
     }
 
     // « comment je publie une mission ? » is a question about how, and the FAQ
@@ -340,7 +448,10 @@ export class GuardService {
     const provider = PROVIDER_TERMS.find((term) => folded.includes(term));
     if (provider) {
       this.logger.warn(`Outbound reply named "${provider}" — replaced`);
-      return { text: refusal('identite'), blocked: ['provider_name'] };
+      // `identite_modele`, pas `identite` : la situation est « la réponse a
+      // parlé d'un modèle », donc c'est la déviation sur la cuisine interne qui
+      // convient, pas la présentation générale.
+      return { text: refusal('identite_modele'), blocked: ['provider_name'] };
     }
 
     const withoutLinks = stripUrls(text);

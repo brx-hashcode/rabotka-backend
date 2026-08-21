@@ -12,11 +12,18 @@ Arnaque, escroquerie, quelqu'un qui a disparu sans payer, quelqu'un qui vous a
 trompé sur le travail à faire : tout cela se signale par une réclamation. Ne
 réglez pas ça seul.
 
-## Ouvrir une réclamation
+## Ouvrir une réclamation, étape par étape
 
-C'est le canal officiel. Vous décrivez ce qui s'est passé, vous pouvez joindre
-des photos ou des captures, et une personne de l'équipe suit le dossier. Vous
-recevez les réponses dans la réclamation.
+1. Dans l'application, ouvrez *Réclamations*.
+2. Donnez un titre court, qui dit de quoi il s'agit.
+3. Écrivez une description : ce qui s'est passé, dans l'ordre.
+4. Joignez vos justificatifs — photos, captures d'écran, reçus.
+5. Soumettez. Le support prend le dossier en charge.
+6. Revenez la consulter de temps en temps : les réponses de l'équipe arrivent
+   dans la réclamation elle-même.
+
+C'est le canal officiel, et c'est vous qui l'ouvrez : vous voyez ce que vous
+déposez avant de l'envoyer.
 
 ## Ce qu'il faut mettre dedans
 

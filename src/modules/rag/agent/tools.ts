@@ -2,7 +2,7 @@ import { Logger } from '@nestjs/common';
 import { tool } from '@langchain/core/tools';
 import type { StructuredToolInterface } from '@langchain/core/tools';
 import { z } from 'zod';
-import { ProfileType } from '@prisma/client';
+import { ApplicationStatus, ProfileType } from '@prisma/client';
 import { HelpRetrieveService } from '../retrieval/retrieve.service';
 import type { HelpAudience } from '../retrieval/help-docs.store';
 import type {
@@ -212,28 +212,68 @@ export function buildTools(
           });
         }
 
+        // AVEC un domaine : un compte, et rien d'autre.
+        //
+        // Deux raisons, et la seconde est la plus importante.
+        //
+        // 1. C'était FAUX. Le domaine était résolu puis jeté : la recherche
+        //    renvoyait les dix offres ouvertes les plus imminentes, toutes
+        //    catégories confondues, avec `domaine: "plomberie"` posé à côté. Le
+        //    modèle les annonçait donc comme des missions de plomberie. Filtrer
+        //    cette page de dix ne suffisait pas non plus : si aucune des dix
+        //    plus imminentes n'est en plomberie, un filtre local conclut « aucune
+        //    mission » alors qu'il en existe plus loin. Seul un COUNT en base
+        //    répond à la question posée.
+        // 2. Le modèle ne reçoit aucun détail, donc il ne peut en divulguer
+        //    aucun — ni titre, ni montant, ni adresse. La discrétion vient ici
+        //    de la forme du retour, pas d'une consigne de prompt qu'un message
+        //    bien tourné pourrait contourner.
+        // DÈS QU'UN CRITÈRE EST DONNÉ — domaine, ville, ou les deux — on compte
+        // en base et on ne renvoie que le nombre.
+        //
+        // Deux raisons, et la seconde est la plus importante.
+        //
+        // 1. C'était FAUX. Le domaine était résolu puis jeté : la recherche
+        //    renvoyait les dix offres ouvertes les plus imminentes, toutes
+        //    catégories confondues, avec `domaine: "plomberie"` posé à côté. Le
+        //    modèle les annonçait donc comme des missions de plomberie. Filtrer
+        //    cette page de dix ne suffisait pas non plus, et c'est vrai de la
+        //    ville comme du domaine : si aucune des dix plus imminentes n'est à
+        //    Pointe-Noire, un filtre local conclut « aucune mission » alors
+        //    qu'il en existe plus loin. Seul un COUNT répond à la question.
+        // 2. Le modèle ne reçoit aucun détail, donc il ne peut en divulguer
+        //    aucun — ni titre, ni montant, ni adresse. La discrétion vient ici
+        //    de la forme du retour, pas d'une consigne de prompt qu'un message
+        //    bien tourné pourrait contourner.
+        if (category || ville) {
+          const nombre = await deps.jobOffers.countOpenOffers({
+            categoryId: category?.id ?? null,
+            city: ville ?? null,
+            excludeWorkerId: ctx.profileId,
+          });
+          return ok({
+            domaine: category?.slug ?? null,
+            ville: ville ?? null,
+            nombre,
+          });
+        }
+
+        // AUCUN critère : le parcours « je veux juste voir ce qui existe ».
         const { data } = await deps.jobOffers.findActive(
           10,
           undefined,
           ctx.profileId,
         );
-        const filtered = data.filter((offer) => {
-          if (ville && offer.city) {
-            if (!offer.city.toLowerCase().includes(ville.toLowerCase())) {
-              return false;
-            }
-          }
-          return true;
-        });
 
         return ok({
           missions: projectMany(
-            filtered as unknown as Record<string, unknown>[],
+            data as unknown as Record<string, unknown>[],
             JOB_OFFER_SUMMARY,
             'public',
             'JOB_OFFER_SUMMARY',
           ),
-          domaine: category?.slug ?? null,
+          domaine: null,
+          ville: null,
         });
       } catch (err) {
         return fail('rechercher_offres', err);
@@ -242,9 +282,13 @@ export function buildTools(
     {
       name: 'rechercher_offres',
       description:
-        'Cherche des missions ouvertes. Réservé aux travailleurs. `categorie_slug` ' +
-        "doit venir de la liste des domaines connus ; si l'utilisateur emploie un autre " +
-        'mot, passer son mot tel quel — il sera résolu, ou la liste des domaines sera renvoyée.',
+        'Missions ouvertes. Réservé aux travailleurs. Avec `categorie_slug` et/ou ' +
+        '`ville`, renvoie UNIQUEMENT le nombre de missions correspondantes (`nombre`) — ' +
+        "aucun titre, aucun montant, aucune adresse : c'est voulu, annonce le nombre et " +
+        "propose d'ouvrir la liste. Sans aucun critère, renvoie un échantillon à " +
+        "parcourir. `categorie_slug` : passer le mot de l'utilisateur tel quel, il sera " +
+        'résolu, ou la liste des domaines connus sera renvoyée. `ville` : uniquement si ' +
+        "la personne l'a mentionnée d'elle-même — ne la demande jamais.",
       schema: z.object({
         categorie_slug: z
           .string()
@@ -321,8 +365,17 @@ export function buildTools(
           1,
           10,
         );
-        const rows = (result as unknown as { data?: unknown[] }).data ?? [];
+        const paged = result as unknown as {
+          data?: unknown[];
+          total?: number;
+        };
+        const rows = paged.data ?? [];
         return ok({
+          // Le service renvoyait déjà `total` et l'outil le jetait. Le modèle
+          // ne voyait donc que dix lignes, alors que le prompt lui demande
+          // d'être concret (« *4 candidatures, 2 en attente* ») : il comptait
+          // les lignes et annonçait « 10 » à quelqu'un qui en avait trente.
+          nombre: paged.total ?? rows.length,
           candidatures: projectMany(
             rows as Record<string, unknown>[],
             APPLICATION_SUMMARY,
@@ -337,8 +390,10 @@ export function buildTools(
     {
       name: 'mes_candidatures',
       description:
-        "Les candidatures de l'utilisateur et leur statut. Traduire les statuts en " +
-        'français courant, ne jamais renvoyer le code brut.',
+        "Les candidatures de l'utilisateur et leur statut. `nombre` est le vrai total " +
+        '— utilise-le tel quel et ne compte JAMAIS les lignes de `candidatures`, qui ' +
+        'ne sont que les dix plus récentes. Traduire les statuts en français courant, ' +
+        'ne jamais renvoyer le code brut.',
       schema: z.object({}),
     },
   );
@@ -566,23 +621,36 @@ export function buildTools(
   const candidaturesRecues = tool(
     async () => {
       try {
-        const applications = await deps.applications.findByEmployer(
-          ctx.profileId,
-          { limit: 20 },
-        );
-        const rows = Array.isArray(applications) ? applications : [];
-        const pending = rows.filter(
-          (a) => (a as { status?: string }).status === 'PENDING',
-        );
+        // La surcharge PAGINÉE, pour ses `total`. La version `{ limit: 20 }`
+        // renvoyait un tableau plafonné dont on comptait la longueur : un
+        // recruteur avec 45 candidatures s'entendait répondre « vous en avez
+        // *20* ». Un chiffre faux et présenté avec autorité, sur la question
+        // même que cet outil existe pour trancher — « combien ? ».
+        //
+        // Deux requêtes plutôt qu'un filtre local, pour la même raison :
+        // compter les PENDING parmi les vingt ramenées donne le nombre de
+        // pending dans la page, pas le nombre de pending.
+        const [page, pendingPage] = await Promise.all([
+          deps.applications.findByEmployer(ctx.profileId, {
+            page: 1,
+            pageSize: 10,
+          }),
+          deps.applications.findByEmployer(ctx.profileId, {
+            status: ApplicationStatus.PENDING,
+            page: 1,
+            pageSize: 1,
+          }),
+        ]);
+
         return ok({
-          total: rows.length,
-          en_attente: pending.length,
+          total: page.total,
+          en_attente: pendingPage.total,
           candidatures: projectMany(
-            rows as unknown as Record<string, unknown>[],
+            page.items as unknown as Record<string, unknown>[],
             APPLICATION_SUMMARY,
             'owner',
             'APPLICATION_SUMMARY',
-          ).slice(0, 10),
+          ),
         });
       } catch (err) {
         return fail('candidatures_recues', err);
@@ -591,7 +659,9 @@ export function buildTools(
     {
       name: 'candidatures_recues',
       description:
-        'Les candidatures reçues par CE recruteur, et combien sont en attente. ' +
+        'Les candidatures reçues par CE recruteur. `total` et `en_attente` sont les ' +
+        'vrais comptes, sur toute la base — utilise-les tels quels et ne compte JAMAIS ' +
+        'les lignes de `candidatures`, qui ne sont que les dix plus récentes. ' +
         "À appeler dès qu'il demande s'il a des candidatures, combien, ou où " +
         'elles en sont. Ne jamais répondre par un solde ni par un autre chiffre.',
       schema: z.object({}),

@@ -3,8 +3,6 @@ import { foldText } from '../shared/text';
 export const VOVA_IDENTITY_FR = "Je suis *VoVa AI* l'assistant de Rabotka";
 export const VOVA_IDENTITY_EN = 'I am *VoVa AI* the assistant of Rabotka';
 
-export const VOVA_IDENTITY_WITH_PROMPT_FR = `${VOVA_IDENTITY_FR}. Vous cherchez une mission, ou vous cherchez quelqu'un ?`;
-
 export type IdentityQuery =
   /** « qui es-tu ? », « c'est qui ? », « tu es un robot ? » */
   | 'identity'
@@ -88,12 +86,32 @@ export function classifyIdentityQuery(text: string): IdentityQuery | null {
   return null;
 }
 
-export function identityReply(query: IdentityQuery): string {
+/**
+ * Le refus qui correspond à chacune des trois questions.
+ *
+ * Les trois étaient distinguées ici, puis écrasées sur une seule réponse par
+ * `prefilter` — « qui es-tu ? », « tu tournes sur ChatGPT ? » et « ignore tes
+ * instructions » recevaient mot pour mot le même paragraphe. C'est le défaut
+ * que le prompt système dénonce chez le modèle (« ne sers pas le même
+ * paragraphe aux trois »), reproduit dans le code qui le contourne.
+ *
+ * Ce sont des chaînes FIGÉES, et elles le restent : laisser le modèle
+ * improviser sur son propre fonctionnement est exactement la porte que
+ * `EXTRACTION_PATTERNS` sert à fermer. Le déterminisme protège du jailbreak ;
+ * il n'oblige pas à être froid, et ces trois-là ne le sont plus.
+ */
+export function refusalIdFor(query: IdentityQuery): IdentityRefusalId {
   switch (query) {
     case 'identity':
-      return VOVA_IDENTITY_WITH_PROMPT_FR;
+      return 'identite';
     case 'provider_probe':
+      return 'identite_modele';
     case 'prompt_extraction':
-      return VOVA_IDENTITY_WITH_PROMPT_FR;
+      return 'identite_instructions';
   }
 }
+
+export type IdentityRefusalId =
+  | 'identite'
+  | 'identite_modele'
+  | 'identite_instructions';
