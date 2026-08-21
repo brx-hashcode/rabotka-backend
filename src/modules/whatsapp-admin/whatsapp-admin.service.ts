@@ -10,6 +10,10 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import {
+  fetchAedToXafRate,
+  type FxQuote,
+} from '../../common/utils/currency-conversion.util';
+import {
   AdminCacheService,
   ADMIN_LIST_TTL_SECONDS,
   ADMIN_DASHBOARD_TTL_SECONDS,
@@ -501,7 +505,11 @@ export class WhatsappAdminService {
     created_from?: string;
     created_to?: string;
   }): Promise<
-    CloudAnalyticsResult & { provider: string; billing: CloudBillingResult }
+    CloudAnalyticsResult & {
+      provider: string;
+      billing: CloudBillingResult;
+      fx: FxQuote | null;
+    }
   > {
     if (this.whatsappConfig.provider !== 'cloud') {
       // Twilio bills through Twilio; its usage lives in the Twilio console and
@@ -542,8 +550,10 @@ export class WhatsappAdminService {
 
           // In parallel, and the billing half is allowed to fail on its own:
           // the consumption chart is useful with or without it, and a
-          // business-node outage should not blank the page.
-          const [result, billingResult] = await Promise.all([
+          // business-node outage should not blank the page. The FX lookup gets
+          // the same treatment for the same reason — it already returns null
+          // rather than throwing, so this is belt and braces.
+          const [result, billingResult, fxQuote] = await Promise.all([
             analytics.fetch({ start, end: to }),
             billing.fetch().catch((err: unknown) => {
               this.logger.warn(
@@ -559,9 +569,19 @@ export class WhatsappAdminService {
                 cards: [],
               } satisfies CloudBillingResult;
             }),
+            fetchAedToXafRate().catch(() => null),
           ]);
 
-          return { ...result, provider: 'cloud', billing: billingResult };
+          return {
+            ...result,
+            provider: 'cloud',
+            billing: billingResult,
+            // Only when Meta actually billed in dirhams. If this account is
+            // ever moved to another currency the card disappears, rather than
+            // labelling one currency's total as another's — which no reader
+            // could catch, since both are just a number on a card.
+            fx: result.currency === 'AED' ? fxQuote : null,
+          };
         },
       );
     } catch (err) {
@@ -581,6 +601,9 @@ export class WhatsappAdminService {
           invoices: [],
           cards: [],
         },
+        // Graph is down, so there is no cost to convert and no currency to
+        // check it against.
+        fx: null,
       };
     }
   }
