@@ -411,9 +411,18 @@ export class ClaimService {
     this.claimCommentsGateway.emitDeletedComment(claimId, commentId);
   }
 
+  /**
+   * @param options.notifyProfile e-mail « Votre réclamation a été créée » au
+   *   profil concerné. Vrai par défaut, parce que dans le cas normal c'est bien
+   *   LUI qui vient de la déposer. À passer à faux quand le dossier est ouvert
+   *   SUR lui et non PAR lui — un signalement de modération, par exemple :
+   *   « Votre réclamation "Signalement automatique — langage abusif" a été
+   *   créée avec succès » est faux sur le fond et absurde sur la forme.
+   */
   async createForProfile(
     profileId: string,
     dto: CreateClaimDto,
+    options?: { notifyProfile?: boolean },
   ): Promise<AdminClaimItem> {
     const claim = await this.prisma.claim.create({
       data: {
@@ -439,7 +448,7 @@ export class ClaimService {
       where: { id: profileId },
       select: { email: true, first_name: true, last_name: true },
     });
-    if (profile?.email) {
+    if (profile?.email && options?.notifyProfile !== false) {
       void this.notifications
         .notifyClaimCreated(
           profile.email,

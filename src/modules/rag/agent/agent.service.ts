@@ -13,7 +13,8 @@ import { LlmRouterService } from '../llm/router.service';
 import type { LlmCallTelemetry } from '../llm/llm.types';
 import { JobCategoryRegistry } from '../intents/job-category.registry';
 import { FallbackChatModel } from './fallback-chat-model';
-import { GuardService } from './guard.service';
+import { GuardService, isAbusive } from './guard.service';
+import { AbuseReportService } from './abuse-report.service';
 import { buildAnonymousSystemPrompt, buildSystemPrompt } from './prompts';
 import { refusal, type RefusalId } from './refusals';
 import { LlmFatalError } from '../llm/llm.errors';
@@ -82,6 +83,7 @@ export class VovaAgentService {
     private readonly categories: JobCategoryRegistry,
     private readonly history: VovaHistoryService,
     private readonly deps: ToolDepsProvider,
+    private readonly abuseReports: AbuseReportService,
     config: ConfigService,
   ) {
     this.maxIterations = readNumber(config, 'VOVA_MAX_TOOL_STEPS', 6);
@@ -269,8 +271,50 @@ export class VovaAgentService {
     }
   }
 
+  /**
+   * Combien des tours récents de CETTE personne étaient abusifs.
+   *
+   * Relit l'historique déjà en base plutôt que d'entretenir un compteur : un
+   * compteur serait un état de plus à remettre à zéro au bon moment, et se
+   * tromper de moment veut dire signaler quelqu'un pour des messages d'il y a
+   * trois semaines.
+   */
+  private async countRecentAbuse(profileId: string): Promise<number> {
+    // `priorInboundTexts`, pas `recent()` : il exclut le message courant, dont
+    // l'écriture court en parallèle de cet appel. Avec `recent()` le message
+    // qu'on est en train de traiter comptait parfois double — une fois lu dans
+    // l'historique, une fois ajouté par `prefilter` — et le signalement partait
+    // à la deuxième insulte au lieu de la troisième, selon qui gagnait la
+    // course. Un compteur qui décide d'une réclamation ne peut pas dépendre de
+    // ça.
+    const prior = await this.history.priorInboundTexts(profileId);
+    return prior.filter(isAbusive).length;
+  }
+
   async handle(request: AgentRequest): Promise<AgentReply> {
-    const decision = this.guard.prefilter(request.text);
+    // L'historique n'est chargé QUE si ce message est lui-même abusif. Le
+    // compte des récidives n'intéresse personne le reste du temps, et le
+    // chemin de refus doit rester bon marché : il est emprunté par tous les
+    // hors-sujet, qui sont fréquents.
+    const priorAbuse = isAbusive(request.text)
+      ? await this.countRecentAbuse(request.profileId)
+      : 0;
+    const decision = this.guard.prefilter(request.text, priorAbuse);
+
+    if (
+      decision.action === 'escalate' &&
+      decision.refusalId === 'abus_signale'
+    ) {
+      // Le PIPELINE dépose le signalement, jamais le modèle.
+      //
+      // `read-only.ts` interdit à l'agent de créer une réclamation, et cet
+      // appel ne l'enfreint pas : il ne passe pas par `tool-deps.provider.ts`,
+      // le modèle n'a aucun outil d'écriture, et rien de ce qu'une personne
+      // peut écrire ne le déclenche autrement qu'en insultant trois fois. La
+      // règle visait « une mutation déclenchée par une phrase » ; ici la
+      // mutation est déclenchée par un compteur, en code, sur un critère fixe.
+      await this.abuseReports.report(request.profileId, request.text);
+    }
 
     if (decision.action !== 'allow') {
       this.logger.log(
