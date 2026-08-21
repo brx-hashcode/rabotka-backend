@@ -94,6 +94,24 @@ const ALIASES: ReadonlyArray<readonly [string, readonly string[]]> = [
   ['embaucher', ['recruter', 'publier', 'annonce']],
   ['engager quelqu un', ['recruter', 'publier', 'annonce']],
   ['besoin de quelqu un', ['recruter', 'publier', 'annonce']],
+  // Sécurité du compte et vie privée. Les gens écrivent « piraté » ou
+  // « on a pris mon compte », jamais « compromission ».
+  ['pirate', ['securite', 'compte', 'usurpation']],
+  ['hacke', ['securite', 'compte', 'usurpation']],
+  ['vole', ['securite', 'compte', 'usurpation']],
+  ['usurpation', ['securite', 'identite', 'compte']],
+  ['faux profil', ['usurpation', 'securite']],
+  ['hameconnage', ['securite', 'lien', 'arnaque']],
+  ['phishing', ['securite', 'lien', 'arnaque']],
+  ['lien suspect', ['securite', 'arnaque']],
+  ['mot de passe', ['securite', 'compte']],
+  // Données personnelles. « RGPD » revient souvent par habitude, même hors UE.
+  ['mes donnees', ['donnees personnelles', 'confidentialite']],
+  ['vie privee', ['donnees personnelles', 'confidentialite']],
+  ['rgpd', ['donnees personnelles', 'confidentialite']],
+  ['confidentialite', ['donnees personnelles']],
+  ['supprimer mon compte', ['donnees personnelles', 'reclamation']],
+  ['cgu', ['conditions', 'donnees personnelles']],
 ];
 
 /**

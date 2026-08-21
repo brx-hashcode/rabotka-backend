@@ -113,12 +113,38 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     useradd -r -u 10001 -g nestjs nestjs && \
     mkdir -p /home/nestjs/.local/share/pnpm
 
-COPY package.json pnpm-lock.yaml tsconfig.json nest-cli.json prisma.config.ts ./
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/public ./public
-COPY --from=builder /app/prisma ./prisma
-COPY --from=builder /app/assets ./assets
+# ─── ORDER MATTERS HERE, AND IT IS NOT COSMETIC ──────────────────────────────
+#
+# Layers are ordered from NEVER-CHANGES to CHANGES-EVERY-COMMIT, because a layer
+# inherits the invalidation of everything above it.
+#
+# The embedders (2.4 GB) used to sit BELOW `dist`. Every commit changed `dist`,
+# which re-materialised the 2.4 GB layer with a fresh digest, and the VPS
+# re-pulled all of it on every deploy — for files that had not changed since the
+# model was pinned. A measured deploy showed 2 layers reused against 12 pulled,
+# and the pull needed three attempts because a single layer outlived the 300s
+# window twice. Moving this COPY up is the whole fix.
+#
+# Chowned on copy, never with a later `chown -R`: changing a file's owner
+# rewrites it into a new layer, so `chown -R` on a directory duplicates it at
+# full size.
+
+# 2.4 GB, and stable until the pinned model versions change.
+COPY --from=fastembed --chown=nestjs:nestjs /opt/fastembed /opt/fastembed
+
+# Tiny and near-static, but above `dist` for the same reason.
+COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh && \
+    chmod +x /usr/local/bin/docker-entrypoint.sh
+
+COPY --chown=nestjs:nestjs package.json pnpm-lock.yaml tsconfig.json nest-cli.json prisma.config.ts ./
+
+# Moves only when the lockfile does.
+COPY --from=builder --chown=nestjs:nestjs /app/node_modules ./node_modules
+
+COPY --from=builder --chown=nestjs:nestjs /app/public ./public
+COPY --from=builder --chown=nestjs:nestjs /app/prisma ./prisma
+COPY --from=builder --chown=nestjs:nestjs /app/assets ./assets
 # Maintenance scripts (pnpm portfolio:backfill-slugs, …).
 #
 # NOTE: 16 of these import from `../src/...`, which is NOT copied into this
@@ -126,15 +152,10 @@ COPY --from=builder /app/assets ./assets
 # invoked — `wa:test-reminders` and the vova CLIs among them. Anything that has
 # to run in production belongs in `dist` as its own entry point; see
 # `dist/src/modules/rag/retrieval/ingest.cli.js`.
-COPY --from=builder /app/scripts ./scripts
+COPY --from=builder --chown=nestjs:nestjs /app/scripts ./scripts
 
-# The embedders, from the stage that verified them. Chowned on copy so the
-# files are owned by the pinned uid without a second full-size layer.
-COPY --from=fastembed --chown=nestjs:nestjs /opt/fastembed /opt/fastembed
-
-COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh && \
-    chmod +x /usr/local/bin/docker-entrypoint.sh
+# LAST: the only thing that changes on an ordinary commit.
+COPY --from=builder --chown=nestjs:nestjs /app/dist ./dist
 
 # The corpus reaches `dist` through a nest-cli asset rule, not through tsc, so
 # nothing in the build fails if that rule is dropped or if .dockerignore starts
@@ -154,7 +175,11 @@ ENV NODE_ENV=production \
     PUPPETEER_SKIP_DOWNLOAD=true \
     FASTEMBED_CACHE_DIR=/opt/fastembed
 
-RUN chown -R nestjs:nestjs /app /home/nestjs
+# `/app` is chowned by each COPY above. A `chown -R /app` here rewrote every
+# file's metadata, and a metadata change copies the file into the new layer —
+# so this line used to add a second full-size copy of node_modules and dist to
+# the image. `/home/nestjs` is created empty by the base stage and is cheap.
+RUN chown -R nestjs:nestjs /home/nestjs
 
 USER nestjs
 
@@ -190,22 +215,33 @@ RUN groupadd -r nestjs && \
     useradd -r -g nestjs nestjs && \
     mkdir -p /home/nestjs/.local/share/pnpm
 
-COPY package.json pnpm-lock.yaml tsconfig.json nest-cli.json prisma.config.ts ./
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/public ./public
-COPY --from=builder /app/prisma ./prisma
-COPY --from=builder /app/assets ./assets
+# Même ordonnancement que l'étage `api` : du plus stable au plus volatil, et
+# l'appartenance posée par chaque COPY plutôt que par un `chown -R` final.
+# Cet étage ne contient aucun modèle, donc l'enjeu est `node_modules` et non
+# 2,4 Go — mais un `chown -R /app` en dupliquait quand même la totalité.
+
+# Quasi jamais.
+COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh && \
+    chmod +x /usr/local/bin/docker-entrypoint.sh
+
+COPY --chown=nestjs:nestjs package.json pnpm-lock.yaml tsconfig.json nest-cli.json prisma.config.ts ./
+
+# Bouge avec le lockfile.
+COPY --from=builder --chown=nestjs:nestjs /app/node_modules ./node_modules
+
+COPY --from=builder --chown=nestjs:nestjs /app/public ./public
+COPY --from=builder --chown=nestjs:nestjs /app/prisma ./prisma
+COPY --from=builder --chown=nestjs:nestjs /app/assets ./assets
 # Maintenance scripts (pnpm portfolio:backfill-slugs, wa:test-reminders, …).
 # Without this the package.json aliases resolve and then fail on a missing file,
 # because only scripts/docker-entrypoint.sh reached the image — and it lands in
 # /usr/local/bin, not /app/scripts. tsx and the Prisma client are already here,
 # so the .ts sources run as-is.
-COPY --from=builder /app/scripts ./scripts
+COPY --from=builder --chown=nestjs:nestjs /app/scripts ./scripts
 
-COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh && \
-    chmod +x /usr/local/bin/docker-entrypoint.sh
+# EN DERNIER : la seule chose qui change à chaque commit.
+COPY --from=builder --chown=nestjs:nestjs /app/dist ./dist
 
 # 512 MB heap — leaves headroom for LibreOffice within the 700 MB compose cap
 ENV NODE_ENV=production \
@@ -216,8 +252,12 @@ ENV NODE_ENV=production \
     FASTEMBED_CACHE_DIR=/var/cache/fastembed \
     FASTEMBED_MODEL_VERSION=v1
 
+# `/app` est chowné par chaque COPY ci-dessus. Le `chown -R /app` qui était ici
+# réécrivait les métadonnées de chaque fichier, et une métadonnée modifiée
+# recopie le fichier dans la nouvelle couche — soit un second exemplaire complet
+# de node_modules. Restent le home et le cache, tous deux créés vides.
 RUN mkdir -p /var/cache/fastembed && \
-    chown -R nestjs:nestjs /app /home/nestjs /var/cache/fastembed
+    chown -R nestjs:nestjs /home/nestjs /var/cache/fastembed
 
 USER nestjs
 
