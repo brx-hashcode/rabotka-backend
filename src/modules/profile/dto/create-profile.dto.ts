@@ -107,4 +107,31 @@ export class CreateProfileDto extends LocationDto {
   @IsString()
   @IsNotEmpty()
   kycSelfieUrl: string;
+
+  /**
+   * Back of the identity document, pre-uploaded via POST /profile/kyc-upload.
+   *
+   * Required for every DocumentType except PASSPORT, whose data sits entirely
+   * on the photo page. That rule is NOT enforced here yet: this field ships
+   * optional so the currently-deployed client -- which does not send it -- keeps
+   * registering profiles while the new client rolls out. Once no old client is
+   * in the field, swap @IsOptional() for:
+   *
+   *   @ValidateIf((o: CreateProfileDto) => o.documentType !== DocumentType.PASSPORT)
+   *   @IsNotEmpty()
+   *
+   * The persistence side already gates on documentType (see
+   * ProfileService.createProfileWithDocuments), so a back sent alongside a
+   * PASSPORT is discarded rather than stored as an orphan row.
+   */
+  @ApiPropertyOptional({
+    description:
+      'URL of the back of the KYC identity document, pre-uploaded via ' +
+      'POST /profile/kyc-upload. Expected for every document type except ' +
+      'PASSPORT, which has no back to photograph.',
+  })
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  kycDocumentBackUrl?: string;
 }
