@@ -215,22 +215,33 @@ RUN groupadd -r nestjs && \
     useradd -r -g nestjs nestjs && \
     mkdir -p /home/nestjs/.local/share/pnpm
 
-COPY package.json pnpm-lock.yaml tsconfig.json nest-cli.json prisma.config.ts ./
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/public ./public
-COPY --from=builder /app/prisma ./prisma
-COPY --from=builder /app/assets ./assets
+# Même ordonnancement que l'étage `api` : du plus stable au plus volatil, et
+# l'appartenance posée par chaque COPY plutôt que par un `chown -R` final.
+# Cet étage ne contient aucun modèle, donc l'enjeu est `node_modules` et non
+# 2,4 Go — mais un `chown -R /app` en dupliquait quand même la totalité.
+
+# Quasi jamais.
+COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh && \
+    chmod +x /usr/local/bin/docker-entrypoint.sh
+
+COPY --chown=nestjs:nestjs package.json pnpm-lock.yaml tsconfig.json nest-cli.json prisma.config.ts ./
+
+# Bouge avec le lockfile.
+COPY --from=builder --chown=nestjs:nestjs /app/node_modules ./node_modules
+
+COPY --from=builder --chown=nestjs:nestjs /app/public ./public
+COPY --from=builder --chown=nestjs:nestjs /app/prisma ./prisma
+COPY --from=builder --chown=nestjs:nestjs /app/assets ./assets
 # Maintenance scripts (pnpm portfolio:backfill-slugs, wa:test-reminders, …).
 # Without this the package.json aliases resolve and then fail on a missing file,
 # because only scripts/docker-entrypoint.sh reached the image — and it lands in
 # /usr/local/bin, not /app/scripts. tsx and the Prisma client are already here,
 # so the .ts sources run as-is.
-COPY --from=builder /app/scripts ./scripts
+COPY --from=builder --chown=nestjs:nestjs /app/scripts ./scripts
 
-COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh && \
-    chmod +x /usr/local/bin/docker-entrypoint.sh
+# EN DERNIER : la seule chose qui change à chaque commit.
+COPY --from=builder --chown=nestjs:nestjs /app/dist ./dist
 
 # 512 MB heap — leaves headroom for LibreOffice within the 700 MB compose cap
 ENV NODE_ENV=production \
@@ -241,8 +252,12 @@ ENV NODE_ENV=production \
     FASTEMBED_CACHE_DIR=/var/cache/fastembed \
     FASTEMBED_MODEL_VERSION=v1
 
+# `/app` est chowné par chaque COPY ci-dessus. Le `chown -R /app` qui était ici
+# réécrivait les métadonnées de chaque fichier, et une métadonnée modifiée
+# recopie le fichier dans la nouvelle couche — soit un second exemplaire complet
+# de node_modules. Restent le home et le cache, tous deux créés vides.
 RUN mkdir -p /var/cache/fastembed && \
-    chown -R nestjs:nestjs /app /home/nestjs /var/cache/fastembed
+    chown -R nestjs:nestjs /home/nestjs /var/cache/fastembed
 
 USER nestjs
 
