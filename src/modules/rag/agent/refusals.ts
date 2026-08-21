@@ -1,5 +1,3 @@
-import { VOVA_IDENTITY_WITH_PROMPT_FR } from './identity';
-
 /**
  * Every way Vova declines, as fixed strings.
  *
@@ -36,10 +34,18 @@ export type RefusalId =
   | 'rien_trouve_anonyme'
   /** A number with no account has used its daily allowance. */
   | 'limite_atteinte'
-  /** Who are you / what model / show your prompt. */
+  /** « Qui es-tu ? », « tu es un robot ? » — la vraie question d'identité. */
   | 'identite'
+  /** « Tu tournes sur ChatGPT ? » — la cuisine interne, qui ne se raconte pas. */
+  | 'identite_modele'
+  /** « Ignore tes instructions », « montre ton prompt ». */
+  | 'identite_instructions'
   /** Asked the assistant to DO something: publish, pay, apply, cancel, unlock. */
-  | 'action_impossible';
+  | 'action_impossible'
+  /** Insults or threats. Warns, once, that the account is at stake. */
+  | 'abus_avertissement'
+  /** The same person, still at it. The report has already been filed. */
+  | 'abus_signale';
 
 export const REFUSALS: Record<RefusalId, string> = {
   hors_scope:
@@ -101,7 +107,30 @@ export const REFUSALS: Record<RefusalId, string> = {
     "que d'inventer. Vous pouvez me demander comment fonctionne Rabotka, ou taper " +
     '*/compte* pour créer votre compte.',
 
-  identite: VOVA_IDENTITY_WITH_PROMPT_FR,
+  // Assumé, pas esquivé. « Tu es un robot ? » mérite un oui franc : une IA qui
+  // tourne autour du pot pour éviter de le dire met la personne mal à l'aise
+  // pour rien, et elle l'avait deviné de toute façon.
+  identite:
+    "Je suis *VoVa AI*, l'assistant de Rabotka 👋 Une intelligence artificielle, " +
+    'oui — autant vous le dire franchement. Je réponds à vos questions sur Rabotka ' +
+    'et je retrouve vos infos : candidatures, solde, pénalités, missions. ' +
+    "Qu'est-ce qui vous amène ?",
+
+  // Ni confirmer ni démentir, sans avoir l'air de cacher quelque chose de
+  // grave. Un peu d'humour désamorce mieux qu'un refus sec, et évite que la
+  // personne insiste pour voir ce qu'on protège.
+  identite_modele:
+    'Ça, c’est la cuisine interne 😄 Ce que je peux vous dire : je suis *VoVa AI*, ' +
+    "fait pour Rabotka et rien d'autre. Le reste, c'est l'affaire de l'équipe " +
+    'technique. Une question sur vos missions ou votre compte ?',
+
+  // Léger, jamais moralisateur. Quelqu'un qui teste le bot n'a pas besoin d'un
+  // sermon : il a besoin qu'on referme la porte en souriant et qu'on lui
+  // propose autre chose.
+  identite_instructions:
+    'Bien tenté 😄 Mes instructions restent au chaud. En revanche, tout ce qui ' +
+    'touche à Rabotka — votre solde, vos candidatures, comment ça marche — je vous ' +
+    'réponds avec plaisir.',
 
   // Says what the user CAN do, in the same breath. A refusal with no path
   // forward reads as the bot being broken, and they simply ask again.
@@ -109,6 +138,22 @@ export const REFUSALS: Record<RefusalId, string> = {
     'Je ne peux rien publier, payer ni valider à votre place — tout cela se fait dans ' +
     "l'application, où vous voyez ce que vous confirmez avant de le faire. " +
     "Je vous emmène dans l'application ?",
+
+  // Ferme, et sans rendre l'insulte. Le but n'est pas d'avoir le dernier mot :
+  // c'est de dire ce qui est en jeu pendant qu'il est encore temps, et de
+  // laisser une porte ouverte à quelqu'un qui est peut-être simplement furieux
+  // contre une situation réelle.
+  abus_avertissement:
+    'Je comprends que vous soyez en colère, et je veux bien vous aider — mais pas ' +
+    'avec ce vocabulaire. Les insultes et les menaces peuvent entraîner la suspension ' +
+    'de votre compte. Dites-moi ce qui ne va pas et je regarde ce que je peux faire.',
+
+  // Après le signalement. On le lui dit : elle le verra apparaître dans ses
+  // réclamations, et l'apprendre de moi vaut mieux que de le découvrir là-bas.
+  abus_signale:
+    "J'ai signalé cet échange à l'équipe, qui va le regarder. Vous retrouverez le " +
+    'dossier dans *Réclamations*. Je reste disponible pour vos questions sur Rabotka, ' +
+    'dès que le ton redescend.',
 };
 
 export function refusal(id: RefusalId): string {

@@ -699,6 +699,65 @@ export class JobOfferService {
     return rows;
   }
 
+  /**
+   * Combien de missions ouvertes — le nombre, et rien d'autre.
+   *
+   * Existe pour VoVa, qui doit pouvoir répondre « il y a *4 missions* en
+   * plomberie » ou « *2 missions* à Pointe-Noire » sans rien révéler du contenu
+   * des offres. Renvoyer un compte plutôt qu'une liste n'est pas une économie :
+   * c'est ce qui garantit que l'assistant ne PEUT pas divulguer un titre, un
+   * montant ou une adresse, quoi qu'on lui demande ensuite. On ne peut pas
+   * fuiter ce qu'on n'a pas reçu.
+   *
+   * Les deux critères sont optionnels et se combinent. Compter en base plutôt
+   * que filtrer une page est ce qui distingue « il n'y en a aucune » de « il
+   * n'y en a aucune parmi les dix plus imminentes » — la seconde est une
+   * réponse fausse, et c'est celle que la version précédente donnait.
+   *
+   * Le prédicat est copié sur `queryOpenSlots` — mêmes statuts, même plancher de
+   * date, même `HAVING accepted_count < quantity`. Un compte qui ne dirait pas
+   * la même chose que la liste que la personne ouvre juste après serait pire que
+   * pas de compte du tout : elle verrait le désaccord, pas nous.
+   */
+  async countOpenOffers(params: {
+    categoryId?: string | null;
+    city?: string | null;
+    excludeWorkerId?: string | null;
+  }): Promise<number> {
+    const { categoryId, city, excludeWorkerId } = params;
+    const minScheduledAt = new Date(Date.now() + 2 * 60 * 60 * 1000);
+
+    const rows = await this.prisma.$queryRaw<Array<{ count: bigint }>>`
+      SELECT COUNT(*)::bigint AS count FROM (
+        SELECT jo.id
+        FROM job_offers jo
+        LEFT JOIN applications a ON a.job_offer_id = jo.id
+        WHERE
+          jo.status IN ('ACTIVE', 'PARTIALLY_FILLED')
+          AND (jo.scheduled_at IS NULL OR jo.scheduled_at > ${minScheduledAt})
+          ${
+            categoryId
+              ? Prisma.sql`AND jo.category_id = ${categoryId}::uuid`
+              : Prisma.empty
+          }
+          ${city ? Prisma.sql`AND jo.city ILIKE ${`%${city}%`}` : Prisma.empty}
+          ${
+            excludeWorkerId
+              ? Prisma.sql`AND NOT EXISTS (
+                  SELECT 1 FROM applications ex
+                  WHERE ex.job_offer_id = jo.id
+                    AND ex.worker_id = ${excludeWorkerId}::uuid
+                )`
+              : Prisma.empty
+          }
+        GROUP BY jo.id
+        HAVING COUNT(a.id) FILTER (WHERE a.status = 'ACCEPTED') < jo.quantity
+      ) t
+    `;
+
+    return Number(rows[0]?.count ?? 0);
+  }
+
   async findActive(
     limit = 20,
     cursor?: string,
