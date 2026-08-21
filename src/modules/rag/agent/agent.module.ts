@@ -7,6 +7,7 @@ import { GuardService } from './guard.service';
 import { VovaAgentService } from './agent.service';
 import { ToolDepsProvider } from './tool-deps.provider';
 import { VovaHistoryService } from './history.service';
+import { AbuseReportService } from './abuse-report.service';
 import { PrismaModule } from '../../../common/services/prisma/prisma.module';
 
 /**
@@ -29,6 +30,7 @@ import { PrismaModule } from '../../../common/services/prisma/prisma.module';
     VovaAgentService,
     ToolDepsProvider,
     VovaHistoryService,
+    AbuseReportService,
   ],
   exports: [VovaAgentService, GuardService],
 })
