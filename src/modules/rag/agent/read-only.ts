@@ -36,6 +36,11 @@ export const PROFILE_READS = [
 export const JOB_OFFER_READS = [
   'findActive',
   'findByReference',
+  // Un COMPTE, pas une liste. C'est ce qui permet à l'assistant de dire
+  // combien de missions existent dans un domaine sans jamais recevoir leur
+  // contenu — la confidentialité vient de ce que la méthode ne renvoie pas,
+  // pas d'une consigne dans le prompt.
+  'countOpenOffers',
   // An employer asking « combien de missions j'ai publiées ? » had no tool at
   // all, so the model answered with whatever it did have — the wallet balance.
   'findByEmployerId',

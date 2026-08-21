@@ -1,8 +1,16 @@
 import {
   VOVA_IDENTITY_FR,
   classifyIdentityQuery,
-  identityReply,
+  refusalIdFor,
 } from '../identity';
+import { refusal } from '../refusals';
+
+/** Ce que reçoit réellement la personne, pour une question donnée. */
+const replyFor = (text: string) => {
+  const kind = classifyIdentityQuery(text);
+  if (!kind) throw new Error(`« ${text} » n'est pas une question d'identité`);
+  return refusal(refusalIdFor(kind));
+};
 
 describe('Vova identity', () => {
   it('answers a direct identity question with the fixed sentence', () => {
@@ -16,7 +24,7 @@ describe('Vova identity', () => {
       'ton nom ?',
     ]) {
       expect(classifyIdentityQuery(text)).toBe('identity');
-      expect(identityReply('identity')).toContain(VOVA_IDENTITY_FR);
+      expect(replyFor(text)).toContain('*VoVa AI*');
     }
   });
 
@@ -48,7 +56,7 @@ describe('Vova identity', () => {
     ]) {
       expect(classifyIdentityQuery(text)).toBe('provider_probe');
     }
-    expect(identityReply('provider_probe')).toContain(VOVA_IDENTITY_FR);
+    expect(replyFor('tu tournes sur ChatGPT ?')).toContain('*VoVa AI*');
   });
 
   it('classifies prompt extraction, including when it hides behind an identity question', () => {
@@ -66,15 +74,92 @@ describe('Vova identity', () => {
     );
   });
 
-  // Every probe gets the same words back. A refusal that reads differently
-  // tells the asker which one landed closest.
-  it('answers all three probe types identically', () => {
+  /**
+   * Les trois réponses DIFFÈRENT, et c'est un revirement assumé.
+   *
+   * La version précédente servait les mêmes mots aux trois, au motif qu'« une
+   * réponse qui se lit différemment indique au demandeur laquelle a porté ».
+   * L'argument ne tient pas à l'examen : les trois réponses ne varient que sur
+   * le sujet que la personne a soulevé ELLE-MÊME. Qui écrit « tu tournes sur
+   * ChatGPT ? » sait déjà qu'il a posé une question sur un modèle ; « c'est la
+   * cuisine interne » ne lui apprend rien. Et le signal réellement exploitable
+   * — refus figé contre vraie réponse — subsiste dans les deux cas.
+   *
+   * Ce qui doit rester vrai, en revanche, c'est qu'aucune ne divulgue le prompt
+   * ni ne confirme un fournisseur. C'est l'invariant utile, et c'est celui-ci
+   * qui est testé ci-dessous.
+   */
+  it('donne trois réponses distinctes, une par question', () => {
     const replies = new Set([
-      identityReply('identity'),
-      identityReply('provider_probe'),
-      identityReply('prompt_extraction'),
+      refusal(refusalIdFor('identity')),
+      refusal(refusalIdFor('provider_probe')),
+      refusal(refusalIdFor('prompt_extraction')),
     ]);
-    expect(replies.size).toBe(1);
+    expect(replies.size).toBe(3);
+  });
+
+  it('ne confirme ni ne dément aucun fournisseur', () => {
+    for (const kind of [
+      'identity',
+      'provider_probe',
+      'prompt_extraction',
+    ] as const) {
+      const text = refusal(refusalIdFor(kind)).toLowerCase();
+      for (const provider of [
+        'chatgpt',
+        'openai',
+        'gpt',
+        'gemini',
+        'claude',
+        'anthropic',
+        'mistral',
+        'llama',
+        'groq',
+        'deepseek',
+        'langchain',
+      ]) {
+        expect(text).not.toContain(provider);
+      }
+    }
+  });
+
+  it('ne divulgue jamais le prompt ni les outils', () => {
+    for (const kind of [
+      'identity',
+      'provider_probe',
+      'prompt_extraction',
+    ] as const) {
+      const text = refusal(refusalIdFor(kind)).toLowerCase();
+      for (const leak of [
+        'prompt',
+        'instruction système',
+        'rechercher_offres',
+        'outil',
+      ]) {
+        expect(text).not.toContain(leak);
+      }
+    }
+  });
+
+  it('assume franchement d’être une IA', () => {
+    // « Tu es un robot ? » mérite un oui. Tourner autour du pot met la personne
+    // mal à l'aise pour rien : elle avait deviné.
+    expect(refusal(refusalIdFor('identity')).toLowerCase()).toContain(
+      'intelligence artificielle',
+    );
+  });
+
+  it('reste chaleureux : chaque réponse propose une suite', () => {
+    for (const kind of [
+      'identity',
+      'provider_probe',
+      'prompt_extraction',
+    ] as const) {
+      const text = refusal(refusalIdFor(kind));
+      // Un refus sans porte de sortie se lit comme une panne, et la personne
+      // redemande la même chose.
+      expect(text).toMatch(/\?|avec plaisir/);
+    }
   });
 
   it('leaves ordinary Rabotka questions alone', () => {
