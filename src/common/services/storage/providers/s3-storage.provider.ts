@@ -12,6 +12,7 @@ import { StorageProvider } from '@prisma/client';
 import { IStorageProvider } from '../interfaces/storage-provider.interface';
 import {
   GetUrlOptions,
+  SIGNED_URL_TTL_SECONDS,
   UploadOptions,
   UploadResult,
 } from '../types/storage.types';
@@ -74,8 +75,11 @@ export class S3StorageProvider implements IStorageProvider {
 
       await this.s3Client.send(command);
 
+      // See the note in cloudflare-storage.provider: writing to one bucket
+      // and signing against another produces a url that can never resolve.
       const url = await this.getUrl(key, {
         access: options?.access ?? 'private',
+        ...(options?.bucket ? { bucket: options.bucket } : {}),
       });
 
       this.logger.log(`File uploaded successfully: ${key}`);
@@ -119,13 +123,15 @@ export class S3StorageProvider implements IStorageProvider {
         return `${endpoint}/${this.bucket}/${key}`;
       }
 
+      // Same as the Cloudflare provider: sign against the bucket the object
+      // lives in, not always the default one.
       const command = new GetObjectCommand({
-        Bucket: this.bucket,
+        Bucket: options?.bucket || this.bucket,
         Key: key,
       });
 
       const url = await getSignedUrl(this.s3Client, command, {
-        expiresIn: 3600,
+        expiresIn: SIGNED_URL_TTL_SECONDS,
       });
 
       return url;

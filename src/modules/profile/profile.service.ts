@@ -9,9 +9,12 @@ import {
   ConflictException,
   NotFoundException,
   Inject,
+  Optional,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { kycBucket } from '../../common/services/storage/kyc-bucket';
+import { SystemConfigService } from '../system-config/system-config.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
 import Redis from 'ioredis';
@@ -251,6 +254,11 @@ export class ProfileService {
     private readonly cache: AdminCacheService,
     private readonly portfolioService: PortfolioService,
     private readonly geo: GeoService,
+    // @Optional() parce que SystemConfigModule est @Global() mais que les specs
+    // instancient ProfileService à la main : `kycBucket` retombe alors sur
+    // l'env, et lève si celui-ci est vide lui aussi.
+    @Optional()
+    private readonly systemConfig?: SystemConfigService,
   ) {}
 
   async findById(id: string): Promise<ProfileMeResponse> {
@@ -665,6 +673,7 @@ export class ProfileService {
           select: {
             id: true,
             image_url: true,
+            storage_key: true,
             uploaded_by: true,
             created_at: true,
           },
@@ -756,13 +765,25 @@ export class ProfileService {
       unpaidPenaltiesCount,
       kycDocuments: await Promise.all(
         profile.kyc_documents.map(async (doc) => {
-          // Resolving a single doc's URL must never fail the whole profile
-          // load — a missing blob (deleted, expired, wrong provider) would
-          // otherwise 500 the entire detail endpoint. Degrade to null and
-          // log so the admin can still review the rest of the profile.
-          // Use the URL stored at upload time directly — same approach as avatar_url.
-          // Presigned URL re-generation is unreliable when storage config changes.
-          const documentUrl: string | null = doc.document_url ?? null;
+          // Signed on READ, never stored: a signed url written to the database
+          // is an expired url in the database.
+          //
+          // This reverses an earlier decision, whose comment read «presigned
+          // URL re-generation is unreliable when storage config changes». That
+          // was almost certainly true at the time — `getUrl` signed against
+          // `this.bucket` unconditionally, so any object living anywhere else
+          // got a signature pointing at the wrong bucket. `GetUrlOptions.bucket`
+          // now exists and is honoured, which is what makes this reliable.
+          //
+          // The property that comment was protecting is kept: resolving one
+          // document must never fail the whole profile load. A missing blob or
+          // an unreachable provider degrades to the stored url — worth having
+          // while the backfill runs, since rows without a key still carry a
+          // working public one.
+          const documentUrl = await this.signedKycUrl(
+            doc.storage_key,
+            doc.document_url,
+          );
           return {
             id: doc.id,
             documentType: doc.document_type,
@@ -778,14 +799,19 @@ export class ProfileService {
           };
         }),
       ),
-      verificationImages: profile.kyc_verification_images.map((img) => ({
-        id: img.id,
-        imageUrl: img.image_url,
-        uploadedBy: img.uploaded_by
-          ? (verifierNames.get(img.uploaded_by) ?? img.uploaded_by)
-          : null,
-        createdAt: img.created_at,
-      })),
+      verificationImages: await Promise.all(
+        profile.kyc_verification_images.map(async (img) => ({
+          id: img.id,
+          // Signed like the documents, and falling back to the stored url for
+          // the rows written before the bucket split.
+          imageUrl:
+            (await this.signedKycUrl(img.storage_key, img.image_url)) ?? '',
+          uploadedBy: img.uploaded_by
+            ? (verifierNames.get(img.uploaded_by) ?? img.uploaded_by)
+            : null,
+          createdAt: img.created_at,
+        })),
+      ),
     };
   }
 
@@ -810,14 +836,20 @@ export class ProfileService {
       throw new NotFoundException('Profil non trouvé');
     }
 
-    const uploadedUrls: string[] = [];
+    // Private, like the KYC documents themselves. These are evidence an admin
+    // attaches while reviewing an identity — usually photographs of the very
+    // same papers — and they were going to the public bucket under a guessable
+    // filename. They are only ever displayed in the admin detail view, so
+    // nothing public breaks by moving them.
+    const uploaded: { url: string; key: string }[] = [];
     if (files && files.length > 0) {
       for (const file of files) {
         const result = await this.fileService.uploadToStorage(file, {
           folder: 'kyc-verification',
-          access: 'public',
+          access: 'private',
+          bucket: await kycBucket(this.systemConfig, this.configService),
         });
-        uploadedUrls.push(result.url);
+        uploaded.push({ url: result.url, key: result.key });
       }
     }
 
@@ -854,11 +886,12 @@ export class ProfileService {
         where: { profile_id: profileId },
       }),
 
-      ...uploadedUrls.map((url) =>
+      ...uploaded.map(({ url, key }) =>
         this.prisma.kycVerificationImage.create({
           data: {
             profile_id: profileId,
             image_url: url,
+            storage_key: key,
             uploaded_by: adminUserId === 'system' ? null : adminUserId,
           },
         }),
@@ -1498,16 +1531,68 @@ export class ProfileService {
   }
 
   /**
-   * Uploads a single KYC file to storage and returns its public URL.
+   * A time-limited url for one KYC file, or the stored one if it cannot be
+   * signed.
+   *
+   * The fallback is not laziness, it is what makes the rollout safe: every row
+   * written before this change has `storage_key` NULL, and an admin still has
+   * to be able to review those profiles while the backfill runs. Once the
+   * backfill is done and old objects are gone from the public bucket, a null
+   * key means a genuinely broken row rather than a legacy one.
+   *
+   * Never throws. Reviewing a profile must not 500 because one blob moved.
+   */
+  private async signedKycUrl(
+    storageKey: string | null,
+    storedUrl: string | null,
+  ): Promise<string | null> {
+    if (!storageKey) return storedUrl ?? null;
+
+    try {
+      return await this.fileService.getPresignedUrl(
+        storageKey,
+        await kycBucket(this.systemConfig, this.configService),
+      );
+    } catch (err) {
+      this.logger.warn(
+        `Could not sign KYC url for key ${storageKey}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      return storedUrl ?? null;
+    }
+  }
+
+  /**
+   * Uploads a single KYC file and returns a SIGNED url plus its storage key.
    * Used by POST /profile/kyc-upload so files are uploaded during onboarding
    * (one round-trip per file) instead of inline with profile creation.
+   *
+   * Two things changed here, and both were load-bearing.
+   *
+   * `access: 'public'` put identity documents — ID cards, passports, and the
+   * selfie held next to them — behind a permanent, unauthenticated URL. They
+   * now go to a bucket that is never published, and are read back through a
+   * signature that dies within the hour.
+   *
+   * And the key is returned. It used to be dropped here, which is why
+   * `storage_key` is NULL on every KYC row ever written: the caller never had
+   * a key to send back, so `createKycDocumentRecord` was called without one and
+   * nothing could ever be signed.
+   *
+   * The url is still returned, and still works, because onboarding falls back
+   * to it when the local preview is gone (`kycDocumentPreview ?? kycDocumentUrl`
+   * in the client's confirmation view). An hour covers a signup session.
    */
-  async uploadKycFile(file: Express.Multer.File): Promise<{ url: string }> {
+  async uploadKycFile(
+    file: Express.Multer.File,
+  ): Promise<{ url: string; key: string }> {
     const result = await this.fileService.uploadToStorage(file, {
       folder: 'kyc-documents',
-      access: 'public',
+      access: 'private',
+      bucket: await kycBucket(this.systemConfig, this.configService),
     });
-    return { url: result.url };
+    return { url: result.url, key: result.key };
   }
 
   private async createProfileWithDocuments(createProfileDto: CreateProfileDto) {
@@ -1541,6 +1626,11 @@ export class ProfileService {
         createProfileDto.documentType !== DocumentType.PASSPORT &&
         !!kycDocumentBackUrl;
 
+      // The sixth argument is the storage key, and until now none of these
+      // three calls passed it — which is why `storage_key` is NULL on every
+      // KYC row in the database and no document could be served through a
+      // signed url. It arrives optional: a client that predates the change
+      // sends no key, the row keeps its url, and the backfill picks it up.
       await Promise.all([
         this.createKycDocumentRecord(
           tx,
@@ -1548,6 +1638,7 @@ export class ProfileService {
           createProfileDto.documentType,
           'DOCUMENT',
           kycDocumentUrl,
+          createProfileDto.kycDocumentKey,
         ),
         ...(wantsBackSide
           ? [
@@ -1557,6 +1648,7 @@ export class ProfileService {
                 createProfileDto.documentType,
                 'DOCUMENT_BACK',
                 kycDocumentBackUrl,
+                createProfileDto.kycDocumentBackKey,
               ),
             ]
           : []),
@@ -1566,6 +1658,7 @@ export class ProfileService {
           createProfileDto.documentType,
           'SELFIE',
           kycSelfieUrl,
+          createProfileDto.kycSelfieKey,
         ),
       ]);
 

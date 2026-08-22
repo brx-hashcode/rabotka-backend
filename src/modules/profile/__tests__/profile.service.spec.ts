@@ -124,7 +124,15 @@ function makeWhatsApp() {
 
 function makeConfigService() {
   return {
-    get: jest.fn().mockReturnValue('http://localhost:3000'),
+    // Répond PAR CLÉ. La version précédente renvoyait la même valeur pour
+    // toutes, ce qui donnait à `kycBucket` une URL de frontend en guise de nom
+    // de bucket — un mock qui ne peut pas distinguer deux réglages ne peut pas
+    // attraper une confusion entre eux.
+    get: jest.fn((key: string) =>
+      key === 'CLOUDFLARE_KYC_BUCKET_NAME'
+        ? 'rabotka-kyc'
+        : 'http://localhost:3000',
+    ),
   };
 }
 
@@ -600,7 +608,7 @@ describe('ProfileService', () => {
   });
 
   describe('uploadKycFile()', () => {
-    it('uploads to the kyc-documents folder and returns the url', async () => {
+    it('uploads privately to the KYC bucket and returns url AND key', async () => {
       const file = {
         originalname: 'id.jpg',
         mimetype: 'image/jpeg',
@@ -610,11 +618,20 @@ describe('ProfileService', () => {
 
       const result = await service.uploadKycFile(file);
 
+      // `private` + le bucket KYC : une pièce d'identité ne va plus dans le
+      // bucket public, où son URL restait valable indéfiniment.
       expect(fileService.uploadToStorage).toHaveBeenCalledWith(file, {
         folder: 'kyc-documents',
-        access: 'public',
+        access: 'private',
+        bucket: 'rabotka-kyc',
       });
-      expect(result).toEqual({ url: 'https://cdn.example.com/file.jpg' });
+      // La CLÉ est la régression qui compte : elle était jetée ici, ce qui
+      // laissait `storage_key` NULL sur chaque ligne KYC jamais écrite et
+      // rendait toute signature impossible.
+      expect(result).toEqual({
+        url: 'https://cdn.example.com/file.jpg',
+        key: 'folder/file.jpg',
+      });
     });
   });
 

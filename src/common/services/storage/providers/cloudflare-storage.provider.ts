@@ -12,6 +12,7 @@ import { StorageProvider } from '@prisma/client';
 import { IStorageProvider } from '../interfaces/storage-provider.interface';
 import {
   GetUrlOptions,
+  SIGNED_URL_TTL_SECONDS,
   UploadOptions,
   UploadResult,
 } from '../types/storage.types';
@@ -82,8 +83,14 @@ export class CloudflareStorageProvider implements IStorageProvider {
 
       await this.s3Client.send(command);
 
+      // `bucket` has to be forwarded. Without it the object is written to
+      // `options.bucket` but the returned url is signed against the DEFAULT
+      // bucket — so a KYC document landed in the private bucket while its url
+      // pointed at the public one, and that url is what gets stored as
+      // `document_url`. It 403s forever.
       const url = await this.getUrl(key, {
         access: options?.access ?? 'public',
+        ...(options?.bucket ? { bucket: options.bucket } : {}),
       });
 
       this.logger.log(`File uploaded successfully: ${key}`);
@@ -128,13 +135,17 @@ export class CloudflareStorageProvider implements IStorageProvider {
         return `${normalizedBase}/${encodeURI(key)}`;
       }
 
+      // `options.bucket` first: a signed URL has to address the bucket the
+      // object actually lives in. KYC documents sit in a private bucket of
+      // their own, and with `this.bucket` hardcoded here every signature
+      // pointed at the public one — so nothing could be moved out of it.
       const command = new GetObjectCommand({
-        Bucket: this.bucket,
+        Bucket: options?.bucket || this.bucket,
         Key: key,
       });
 
       const url = await getSignedUrl(this.s3Client, command, {
-        expiresIn: 3600,
+        expiresIn: SIGNED_URL_TTL_SECONDS,
       });
 
       return url;
