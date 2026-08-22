@@ -367,7 +367,9 @@ export class ResumeService {
       const browser = await launchBrowser();
       try {
         const page = await browser.newPage();
-        await page.setContent(html, { waitUntil: 'networkidle0' });
+        // See the note in document.service: setContent has no navigation, so
+        // 'networkidle0' never applied; 'load' waits for subresources.
+        await page.setContent(html, { waitUntil: 'load' });
         const pdf = await page.pdf({
           format: 'A4',
           printBackground: true,
