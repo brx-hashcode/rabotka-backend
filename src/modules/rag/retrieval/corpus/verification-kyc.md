@@ -8,9 +8,14 @@ audience: all
 
 ## Ce qu'il faut envoyer
 
-Deux choses : une pièce d'identité (carte nationale, passeport, permis, carte
-d'étudiant ou acte de naissance) et un selfie. Les deux se déposent depuis le
-site.
+Une pièce d'identité parmi ces quatre : carte nationale d'identité, passeport,
+permis de conduire, ou carte NIU. Aucune autre n'est acceptée.
+
+Vous envoyez le recto et le verso de la pièce, plus un selfie où vous la tenez
+en main. Le passeport fait exception : il n'a pas de verso à envoyer, tout est
+sur la page principale.
+
+Tout se dépose depuis l'application.
 
 ## Pourquoi c'est obligatoire
 
