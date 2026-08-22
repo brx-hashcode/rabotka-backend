@@ -134,4 +134,48 @@ export class CreateProfileDto extends LocationDto {
   @IsString()
   @IsNotEmpty()
   kycDocumentBackUrl?: string;
+
+  /*
+   * The storage keys of the three files above.
+   *
+   * `POST /profile/kyc-upload` used to return only a url, so nothing carried a
+   * key back here and `storage_key` ended up NULL on every KYC row ever
+   * written. That is what kept the documents in the public bucket: a signed
+   * url needs a key, and there was none to sign with.
+   *
+   * OPTIONAL, and they have to stay that way for now — the deployed client
+   * does not send them, exactly as with `kycDocumentBackUrl` above. A profile
+   * created without a key keeps its stored url and is picked up by the
+   * backfill. Tighten this once no old client is in the field.
+   */
+
+  @ApiPropertyOptional({
+    description:
+      'Storage key of the KYC identity document, returned by ' +
+      'POST /profile/kyc-upload. Required to serve the file through a ' +
+      'time-limited signed url.',
+  })
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  kycDocumentKey?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Storage key of the KYC selfie, returned by POST /profile/kyc-upload.',
+  })
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  kycSelfieKey?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Storage key of the back of the KYC identity document, returned by ' +
+      'POST /profile/kyc-upload.',
+  })
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  kycDocumentBackKey?: string;
 }
