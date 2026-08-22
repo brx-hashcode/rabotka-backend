@@ -471,17 +471,17 @@ model User {
   totp_secret     String?
   totp_enabled    Boolean   @default(false)
 
-  files           File[]
-  logs            Log[]
-  wallets         Wallet[]
-  sent_messages   Message[]
+  files                  File[]
+  logs                   Log[]
+  wallets                Wallet[]
+  sent_messages          Message[]
   sent_whatsapp_messages WhatsappMessage[]
-  claims_assigned Claim[]        @relation("ClaimAssignedUser")
-  claims_created  Claim[]        @relation("ClaimCreatedByUser")
-  claim_comments  ClaimComment[] @relation("ClaimCommentUser")
-  events_created  Event[]        @relation("EventCreatedBy")
-  events          Event[]        @relation("EventAssignedUsers")
-  deleted_at      DateTime?      @db.Timestamptz
+  claims_assigned        Claim[]           @relation("ClaimAssignedUser")
+  claims_created         Claim[]           @relation("ClaimCreatedByUser")
+  claim_comments         ClaimComment[]    @relation("ClaimCommentUser")
+  events_created         Event[]           @relation("EventCreatedBy")
+  events                 Event[]           @relation("EventAssignedUsers")
+  deleted_at             DateTime?         @db.Timestamptz
 
   chat_participants  ChatParticipant[]
   chat_messages      ChatMessage[]
@@ -520,6 +520,11 @@ model KycVerificationImage {
   created_at  DateTime @default(now())
   profile_id  String   @db.Uuid
   image_url   String
+  /// Object key in the PRIVATE kyc bucket, so the image can be served through
+  /// a time-limited signed url. Nullable because every row written before the
+  /// bucket split has only `image_url`, pointing at the public bucket; the
+  /// backfill fills these in.
+  storage_key String?
   uploaded_by String?  @db.Uuid
 
   profile Profile @relation(fields: [profile_id], references: [id], onDelete: Cascade)
@@ -1026,7 +1031,7 @@ model WhatsappMessage {
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
-  provider String // cloud | twilio
+  provider            String // cloud | twilio
   /// Meta wamid (`wamid.…`) or Twilio SID (`SM…`/`MM…`). Null until the
   /// provider answers — and permanently null when the send failed outright.
   provider_message_id String? @unique

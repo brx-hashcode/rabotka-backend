@@ -411,6 +411,17 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     isSecret: false,
   },
   {
+    key: 'storage.cloudflare.kyc_bucket_name',
+    value: '',
+    category: ConfigCategory.STORAGE,
+    // Séparé du bucket principal PARCE QUE R2 n'a pas d'ACL par objet : un
+    // bucket est public ou privé en entier. Les avatars et les images de
+    // réclamation doivent rester publics, les pièces d'identité non — il faut
+    // donc deux buckets, et non deux réglages sur le même.
+    label: 'Cloudflare R2 – Bucket KYC (privé)',
+    isSecret: false,
+  },
+  {
     key: 'storage.cloudflare.access_key_id',
     value: '',
     category: ConfigCategory.STORAGE,

@@ -25,6 +25,11 @@ export class FileService {
     options?: {
       folder?: string;
       access?: 'public' | 'private';
+      /**
+       * Target bucket, when it is not the default one. KYC documents live in a
+       * private bucket of their own; everything else stays where it was.
+       */
+      bucket?: string;
     },
   ) {
     if (!file.buffer || !file.originalname) {
@@ -35,6 +40,7 @@ export class FileService {
       mimeType: file.mimetype,
       folder: options?.folder,
       access: options?.access,
+      bucket: options?.bucket,
     };
 
     const fileBuffer: Buffer = Buffer.isBuffer(file.buffer)
@@ -104,8 +110,22 @@ export class FileService {
     }
   }
 
-  async getPresignedUrl(storageKey: string): Promise<string> {
-    return this.storageService.getUrl(storageKey, { access: 'private' });
+  /**
+   * A time-limited url for one object.
+   *
+   * `bucket` matters for anything outside the default one — KYC documents live
+   * in a private bucket of their own, and a signature made against the wrong
+   * bucket produces a url that resolves to nothing.
+   *
+   * Not to be confused with `getPresignedUrlFromPublicUrl` below, which despite
+   * its name returns a PUBLIC url. That one serves platform documents, which
+   * belong in the public bucket; its name is wrong, its behaviour is not.
+   */
+  async getPresignedUrl(storageKey: string, bucket?: string): Promise<string> {
+    return this.storageService.getUrl(storageKey, {
+      access: 'private',
+      ...(bucket ? { bucket } : {}),
+    });
   }
 
   async getPublicUrl(storageKey: string): Promise<string> {
