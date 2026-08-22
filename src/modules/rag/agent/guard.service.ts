@@ -570,7 +570,31 @@ export function balanceEmphasis(text: string): string {
     .trim();
 }
 
-export const REPLY_MAX_CHARS = 600;
+/**
+ * Ceiling on a reply, in characters.
+ *
+ * Was 600, and that number was silently deciding what VoVa could say. Measured
+ * against the corpus it answers from — `c-est-quoi-rabotka.md`, 2 364 chars:
+ *
+ *   En bref + Pourquoi passer par Rabotka    664   ← already over 600
+ *     + Les deux côtés                       927   ← fits at 1200
+ *     + Le parcours (6 étapes)              1477   ← does not, deliberately
+ *
+ * The two sections that carry the ANSWER — what Rabotka is, and why anyone
+ * would use it rather than word of mouth — did not fit. So « pourquoi
+ * Rabotka ? » could never be answered properly, whatever the prompt asked for,
+ * and a third-party assistant reading the public LinkedIn page described the
+ * product better than its own bot did. That comparison is what surfaced this.
+ *
+ * 1200 is chosen so 927 fits and 1477 does not: the six-step walkthrough
+ * belongs to « comment ça marche ? », which the prompt already requires to be
+ * a different answer. The ceiling now enforces that split instead of flattening
+ * all three questions into the same truncated paragraph.
+ *
+ * Measured on ONE document. A reply that still gets cut mid-sentence is a
+ * reason to re-measure, not to nudge this upward on instinct.
+ */
+export const REPLY_MAX_CHARS = 1200;
 
 export function capLength(text: string, max = REPLY_MAX_CHARS): string {
   if (text.length <= max) return text;
@@ -582,8 +606,13 @@ export function capLength(text: string, max = REPLY_MAX_CHARS): string {
     window.lastIndexOf(' !'),
   );
   if (lastStop > max * 0.5) return window.slice(0, lastStop + 1).trim();
+  // `max - 1` : l'ellipse compte dans le total. Sans cette réserve, un texte
+  // sans point ni espace ressortait à `max + 1` — une fonction nommée
+  // `capLength` qui dépasse son propre plafond. Même correction que
+  // `capTemplateVar` dans common/utils/whatsapp-template-text.util.ts.
   const lastSpace = window.lastIndexOf(' ');
-  return `${window.slice(0, lastSpace > 0 ? lastSpace : max).trim()}…`;
+  const cut = lastSpace > 0 ? lastSpace : max - 1;
+  return `${window.slice(0, cut).trim()}…`;
 }
 
 /**
