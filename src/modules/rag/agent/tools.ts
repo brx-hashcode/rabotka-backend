@@ -141,10 +141,20 @@ function makeVerifierDomaine(deps: ToolDeps): StructuredToolInterface {
         return ok({
           couvert: false,
           metier_demande: metier,
+          // NEUTRE EN RÔLE, délibérément.
+          //
+          // Disait « ce métier peut tout de même être PUBLIÉ », ce qui décrit
+          // le geste d'un recruteur. Le modèle a repris ce mot pour quelqu'un
+          // qui venait d'écrire « je cherche une mission » et lui a proposé
+          // quatre fois d'en publier une. Le biais était dans la réponse de
+          // l'outil, pas dans le prompt — le même texte sert un travailleur et
+          // un recruteur, il ne doit donc supposer ni l'un ni l'autre.
           note:
-            'Aucun domaine ne correspond exactement. Ce métier peut tout de ' +
-            'même être publié : le domaine « Autre » existe pour ça. Ne dis ' +
-            'jamais que Rabotka ne couvre pas ce besoin.',
+            'Aucun domaine ne correspond exactement, mais ce métier a sa place ' +
+            'sur Rabotka : le domaine « Autre » existe pour ça. Ne dis jamais ' +
+            'que Rabotka ne couvre pas ce besoin. Réponds selon ce que la ' +
+            "personne cherche — travailler, ou trouver quelqu'un — sans le " +
+            'supposer.',
         });
       } catch (err) {
         return fail('verifier_domaine', err);
@@ -155,7 +165,13 @@ function makeVerifierDomaine(deps: ToolDeps): StructuredToolInterface {
       description:
         "Vérifie qu'un métier existe bien sur Rabotka et donne son nom officiel. " +
         "OBLIGATOIRE avant d'affirmer qu'un métier est couvert ou non : la liste " +
-        'des domaines vit en base et change, tu ne la connais pas par cœur.',
+        'des domaines vit en base et change, tu ne la connais pas par cœur. ' +
+        // Sans cette phrase, « OBLIGATOIRE » se lisait comme une invitation à
+        // re-vérifier sans fin : le modèle appelait l'outil, recevait « Autre »,
+        // demandait une précision, rappelait l'outil — quatre tours d'affilée.
+        'UNE SEULE FOIS par métier : son résultat CONCLUT. Ne demande jamais ' +
+        'une précision pour rappeler cet outil — « Autre » est une réponse ' +
+        'valable, pas un échec à affiner.',
       schema: z.object({
         metier: z
           .string()

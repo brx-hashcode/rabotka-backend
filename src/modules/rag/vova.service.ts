@@ -211,6 +211,13 @@ export class VovaService {
         `vova.reply mode=${shadow ? 'shadow' : 'live'} profile=${profile.id} ` +
           `origin=${reply.origin} refusal=${reply.refusalId ?? '—'} ` +
           `model=${reply.telemetry?.model ?? '—'} depth=${reply.telemetry?.fallbackDepth ?? '—'} ` +
+          // `llm_ms` à côté de `ms` : la latence du modèle était mesurée dans
+          // `LlmTelemetry` et jetée ici. Sans elle on constate 6,5 s de moyenne
+          // en production sans pouvoir dire ce qui les consomme — l'appel au
+          // modèle, la recherche dans le corpus, ou un second aller-retour pour
+          // un outil. L'écart se lit maintenant d'un coup d'œil : `ms` moins
+          // `llm_ms`, c'est tout ce qui n'est pas le modèle.
+          `llm_ms=${reply.telemetry?.latencyMs ?? '—'} ` +
           `blocked=[${reply.sanitizerBlocked.join('|')}] ms=${elapsed}`,
       );
 
