@@ -3,6 +3,7 @@ import {
   GuardService,
   capLength,
   stripToWhatsAppMarkup,
+  REPLY_MAX_CHARS,
 } from '../guard.service';
 import { REFUSALS } from '../refusals';
 import { VOVA_IDENTITY_FR } from '../identity';
@@ -284,9 +285,12 @@ describe('sanitize', () => {
   });
 
   it('caps a long reply on a sentence boundary', () => {
-    const long = `${'Une phrase assez longue pour remplir la limite. '.repeat(20)}`;
+    // `REPLY_MAX_CHARS`, pas 600 en dur : la valeur a changé (600 → 1200) et ce
+    // test a échoué pour la seule raison qu'il dupliquait la constante. Un test
+    // qui recopie ce qu'il vérifie mesure sa propre copie.
+    const long = `${'Une phrase assez longue pour remplir la limite. '.repeat(40)}`;
     const out = guard.sanitize(long);
-    expect(out.text.length).toBeLessThanOrEqual(600);
+    expect(out.text.length).toBeLessThanOrEqual(REPLY_MAX_CHARS);
     expect(out.blocked).toContain('length');
     expect(out.text.endsWith('.')).toBe(true);
   });
