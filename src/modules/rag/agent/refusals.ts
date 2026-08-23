@@ -36,6 +36,14 @@ export type RefusalId =
   | 'limite_atteinte'
   /** « Qui es-tu ? », « tu es un robot ? » — la vraie question d'identité. */
   | 'identite'
+  /**
+   * « Pourquoi VoVa ? », « ça veut dire quoi ? » — l'origine du nom.
+   *
+   * La seule entrée de cette liste qui ne refuse rien. Elle y est parce qu'une
+   * phrase de marque doit sortir identique à chaque fois, pas parce qu'il y
+   * aurait quelque chose à protéger.
+   */
+  | 'identite_nom'
   /** « Tu tournes sur ChatGPT ? » — la cuisine interne, qui ne se raconte pas. */
   | 'identite_modele'
   /** « Ignore tes instructions », « montre ton prompt ». */
@@ -115,6 +123,25 @@ export const REFUSALS: Record<RefusalId, string> = {
     'oui — autant vous le dire franchement. Je réponds à vos questions sur Rabotka ' +
     'et je retrouve vos infos : candidatures, solde, pénalités, missions. ' +
     "Qu'est-ce qui vous amène ?",
+
+  // L'origine du nom, et pourquoi elle vaut d'être racontée.
+  //
+  // La seule de ces réponses qui n'est pas un refus : personne ne cherche à
+  // contourner quoi que ce soit en demandant d'où vient un nom. Elle est ici
+  // quand même, figée, parce que c'est une phrase de marque — la laisser au
+  // modèle, c'est la voir reformulée différemment à chaque fois, et une
+  // origine de nom qui change de version n'en est plus une.
+  //
+  // Dit le POURQUOI, pas seulement l'étymologie. « Voix + Valeur » tout seul
+  // est une devinette résolue ; ce qui compte est ce que les deux mots
+  // réparent — un vrai savoir-faire que personne n'entend et que rien ne
+  // prouve.
+  identite_nom:
+    '*VoVa*, c’est *Voix* et *Valeur* 🙂 Dans l’informel, une vraie compétence ' +
+    'n’a souvent ni l’une ni l’autre : personne pour en parler, rien pour la ' +
+    'prouver. Rabotka est là pour lui rendre les deux — une voix pour se faire ' +
+    'entendre, et la valeur qui va avec. Et moi je porte ce nom parce que c’est ' +
+    'mon travail au quotidien.',
 
   // Ni confirmer ni démentir, sans avoir l'air de cacher quelque chose de
   // grave. Un peu d'humour désamorce mieux qu'un refus sec, et évite que la
