@@ -1,3 +1,20 @@
+/**
+ * Rewrites stored signed urls into permanent public ones, for assets that
+ * belong in the public bucket: avatars and advertisement imagery.
+ *
+ * IT MUST NEVER TOUCH KYC AGAIN. This script used to carry
+ * `backfillKycDocuments` and `backfillVerificationImages`, which rewrote
+ * identity-document urls into public ones against the PUBLIC bucket. That was
+ * correct when one bucket held everything; since the bucket split it is the
+ * exact inverse of what those rows need, and once the originals are deleted
+ * from the public bucket it would rewrite them into permanent 404s while
+ * republishing the ID cards that survived.
+ *
+ * Deleted rather than merely unwired: a function still sitting in the file is
+ * a function someone adds back to `main()`. KYC keys are reconstructed by
+ * `prisma/backfill-kyc-storage-keys.ts`, which moves the objects INTO the
+ * private bucket and never writes a url at all.
+ */
 import { config } from 'dotenv';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '@prisma/client';
@@ -109,34 +126,6 @@ async function backfillProfiles(
   }
 }
 
-async function backfillVerificationImages(
-  publicBaseUrl: string,
-  bucketName: string | undefined,
-  apply: boolean,
-  counters: Counters,
-) {
-  const images = await prisma.kycVerificationImage.findMany({
-    select: { id: true, image_url: true },
-  });
-
-  for (const image of images) {
-    counters.scanned += 1;
-    const next = toPublicUrl(image.image_url, publicBaseUrl, bucketName);
-    if (!next) {
-      counters.skipped += 1;
-      continue;
-    }
-
-    if (apply) {
-      await prisma.kycVerificationImage.update({
-        where: { id: image.id },
-        data: { image_url: next },
-      });
-    }
-    counters.updated += 1;
-  }
-}
-
 async function backfillAdvertisements(
   publicBaseUrl: string,
   bucketName: string | undefined,
@@ -191,46 +180,29 @@ async function backfillAdvertisements(
   }
 }
 
-async function backfillKycDocuments(
-  publicBaseUrl: string,
-  bucketName: string | undefined,
-  apply: boolean,
-  counters: Counters,
-) {
-  const docs = await prisma.kycDocument.findMany({
-    select: { id: true, document_url: true },
-  });
-
-  for (const doc of docs) {
-    counters.scanned += 1;
-    const next = toPublicUrl(doc.document_url, publicBaseUrl, bucketName);
-    if (!next) {
-      counters.skipped += 1;
-      continue;
-    }
-
-    if (apply) {
-      await prisma.kycDocument.update({
-        where: { id: doc.id },
-        data: { document_url: next },
-      });
-    }
-    counters.updated += 1;
-  }
-}
-
 async function main() {
   const apply = process.argv.includes('--apply');
   const publicBaseUrl = normalizeBase(
     getRequiredEnv('CLOUDFLARE_PUBLIC_BASE_URL'),
   );
   const bucketName = process.env.CLOUDFLARE_BUCKET_NAME?.trim();
+  const kycBucketName = process.env.CLOUDFLARE_KYC_BUCKET_NAME?.trim();
+
+  // A canary, not a rewrite guard. If these two ever name the same bucket then
+  // the KYC isolation is gone entirely — R2 has no per-object ACL, so a bucket
+  // published for avatars publishes the identity documents beside them. Refuse
+  // to run at all rather than quietly rewriting urls in that world.
+  if (bucketName && kycBucketName && bucketName === kycBucketName) {
+    throw new Error(
+      `CLOUDFLARE_BUCKET_NAME and CLOUDFLARE_KYC_BUCKET_NAME are both ` +
+        `"${bucketName}". Identity documents must live in a bucket that is ` +
+        'never published. Fix the configuration before running any backfill.',
+    );
+  }
 
   const counters: Counters = { scanned: 0, updated: 0, skipped: 0 };
 
   await backfillProfiles(publicBaseUrl, bucketName, apply, counters);
-  await backfillVerificationImages(publicBaseUrl, bucketName, apply, counters);
-  await backfillKycDocuments(publicBaseUrl, bucketName, apply, counters);
   await backfillAdvertisements(publicBaseUrl, bucketName, apply, counters);
 
   // eslint-disable-next-line no-console
