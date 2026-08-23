@@ -523,7 +523,21 @@ export class ProfileController {
     schema: {
       type: 'object',
       properties: {
-        url: { type: 'string', description: 'Public URL of the uploaded file' },
+        // `key` was always returned and never documented, and the declared
+        // return type said `{ url }`. A client author reading either would not
+        // know to send the key back — which is how KYC rows ended up with a
+        // NULL `storage_key` and an unre-signable url.
+        key: {
+          type: 'string',
+          description:
+            'Storage key of the uploaded object. The durable half: send it ' +
+            'back in POST /profile.',
+        },
+        url: {
+          type: 'string',
+          description:
+            'Signed preview url. Expires within the hour — never persist it.',
+        },
       },
     },
   })
@@ -533,7 +547,7 @@ export class ProfileController {
   })
   async uploadKyc(
     @UploadedFile() file: Express.Multer.File,
-  ): Promise<{ url: string }> {
+  ): Promise<{ url: string; key: string }> {
     if (!file) {
       throw new BadRequestException('Le fichier KYC est requis');
     }
