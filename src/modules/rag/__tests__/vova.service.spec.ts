@@ -51,12 +51,14 @@ function makeAnonymous(
     history: jest.Mock;
     remember: jest.Mock;
     consume: jest.Mock;
+    consumeWalled: jest.Mock;
   }> = {},
 ) {
   return {
     history: jest.fn(() => Promise.resolve([])),
     remember: jest.fn(() => Promise.resolve()),
     consume: jest.fn(() => Promise.resolve(true)),
+    consumeWalled: jest.fn(() => Promise.resolve(true)),
     ...over,
   };
 }
@@ -378,5 +380,116 @@ describe('VovaService.handleAnonymous', () => {
     // service only says whether it is.
     expect(reply?.text).not.toContain('[TPL:');
     expect(reply?.offerAccount).toBe(false);
+  });
+});
+
+/**
+ * Le budget des comptes derrière un mur.
+ *
+ * Tant que le bot leur répondait par une carte figée, ces profils ne coûtaient
+ * rien. Les ouvrir à l'assistant est juste — c'est la seule population qui a
+ * une question brûlante et aucun menu pour y répondre — mais c'est aussi celle
+ * qui a le plus de raisons de la reposer vingt fois, qui ne rapporte rien tant
+ * qu'elle est bloquée, et qui, dans le cas d'une suspension, peut l'être
+ * justement pour abus.
+ */
+describe('la limite des comptes bloqués', () => {
+  const LIVE = {
+    'vova.enabled': 'true',
+    'vova.shadow_mode': 'false',
+    'vova.rollout_percent': '100',
+  };
+
+  const walled = [
+    ['suspendu', { status: AccountStatus.SUSPENDED }],
+    ['KYC en cours', { verification_status: VerificationStatus.PENDING }],
+    ['KYC refusé', { verification_status: VerificationStatus.REJECTED }],
+  ] as const;
+
+  it.each(walled)('décompte un profil %s', async (_label, over) => {
+    const anonymous = makeAnonymous();
+    const service = build(makeAgent(), LIVE, makeOffers(), anonymous);
+
+    await service.handle({ ...PROFILE, ...over }, 'pourquoi ?');
+
+    expect(anonymous.consumeWalled).toHaveBeenCalledWith('p-1', 10);
+  });
+
+  it('ne décompte pas un profil actif et vérifié', async () => {
+    const anonymous = makeAnonymous();
+    const service = build(makeAgent(), LIVE, makeOffers(), anonymous);
+
+    await service.handle(PROFILE, 'une question');
+
+    expect(anonymous.consumeWalled).not.toHaveBeenCalled();
+  });
+
+  // Au-delà du budget : null, donc le bot retombe sur sa propre carte. La porte
+  // s'ouvre toujours, il n'y a simplement plus d'assistant aujourd'hui.
+  it('rend null une fois le budget épuisé, sans appeler le modèle', async () => {
+    const agent = makeAgent();
+    const anonymous = makeAnonymous({
+      consumeWalled: jest.fn(() => Promise.resolve(false)),
+    });
+    const service = build(agent, LIVE, makeOffers(), anonymous);
+
+    const reply = await service.handle(
+      { ...PROFILE, status: AccountStatus.SUSPENDED },
+      'pourquoi ?',
+    );
+
+    expect(reply).toBeNull();
+    expect(agent.handle).not.toHaveBeenCalled();
+  });
+
+  // Le mode observation calcule la réponse puis la jette : les tokens sont
+  // dépensés pareil. Un budget qui ignore ce mode rate l'endroit le moins cher
+  // où trop dépenser.
+  it('décompte aussi en mode observation', async () => {
+    const anonymous = makeAnonymous();
+    const service = build(
+      makeAgent(),
+      { ...LIVE, 'vova.shadow_mode': 'true' },
+      makeOffers(),
+      anonymous,
+    );
+
+    await service.handle(
+      { ...PROFILE, status: AccountStatus.SUSPENDED },
+      'pourquoi ?',
+    );
+
+    expect(anonymous.consumeWalled).toHaveBeenCalled();
+  });
+
+  // Le raccourci « oui » ne passe pas par le modèle, donc il ne coûte rien et
+  // ne doit rien consommer.
+  it('ne décompte pas le raccourci d’acceptation', async () => {
+    const anonymous = makeAnonymous();
+    const service = build(makeAgent(), LIVE, makeOffers('/home'), anonymous);
+
+    await service.handle(
+      { ...PROFILE, status: AccountStatus.SUSPENDED },
+      'oui',
+    );
+
+    expect(anonymous.consumeWalled).not.toHaveBeenCalled();
+  });
+
+  it('respecte la limite configurée', async () => {
+    const anonymous = makeAnonymous();
+    const service = build(
+      makeAgent(),
+      { ...LIVE, 'vova.walled_daily_limit': '3' },
+      makeOffers(),
+      anonymous,
+    );
+
+    await service.handle(
+      { ...PROFILE, status: AccountStatus.SUSPENDED },
+      'pourquoi ?',
+    );
+
+    expect(anonymous.consumeWalled).toHaveBeenCalledWith('p-1', 3);
   });
 });

@@ -247,7 +247,7 @@ export function buildSystemPrompt(ctx: PromptContext): string {
  * : le bot leur renvoyait une carte et rien d'autre. Un profil actif garde son
  * menu complet et ses cartes à boutons.
  */
-function isWalled(
+export function isWalled(
   account: AccountStatus,
   verification: VerificationStatus,
 ): boolean {
