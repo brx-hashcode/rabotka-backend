@@ -1,4 +1,5 @@
 import {
+  ExistsOptions,
   GetUrlOptions,
   UploadOptions,
   UploadResult,
@@ -34,7 +35,8 @@ export interface IStorageProvider {
   /**
    * Check if a file exists in storage
    * @param key - Storage key of the file
+   * @param options - Which bucket to look in, when not the default one
    * @returns True if file exists, false otherwise
    */
-  exists(key: string): Promise<boolean>;
+  exists(key: string, options?: ExistsOptions): Promise<boolean>;
 }

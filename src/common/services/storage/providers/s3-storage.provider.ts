@@ -11,6 +11,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { StorageProvider } from '@prisma/client';
 import { IStorageProvider } from '../interfaces/storage-provider.interface';
 import {
+  ExistsOptions,
   GetUrlOptions,
   SIGNED_URL_TTL_SECONDS,
   UploadOptions,
@@ -144,7 +145,10 @@ export class S3StorageProvider implements IStorageProvider {
     }
   }
 
-  async exists(key: string): Promise<boolean> {
+  async exists(key: string, _options?: ExistsOptions): Promise<boolean> {
+  // Accepts `options` for interface parity. This provider serves a single
+  // container, so there is no second bucket to look in.
+
     try {
       const command = new HeadObjectCommand({
         Bucket: this.bucket,

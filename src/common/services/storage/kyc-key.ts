@@ -101,6 +101,44 @@ export function deriveKey(
 }
 
 /**
+ * The canonical, non-fetchable reference stored in `document_url` /
+ * `image_url`.
+ *
+ * Those columns used to hold whatever url the upload returned — for KYC that is
+ * a signed url that dies within the hour, so the column held an expired
+ * credential permanently. `storage_key` is the source of truth now, and this is
+ * what goes beside it: it names the bucket, it survives, and no code path can
+ * mistake it for something to fetch.
+ *
+ * `s3://` rather than a bare key on purpose. A bare `kyc-documents/x.jpg`
+ * passes an is-this-an-image check and, dropped into an `<img src>`, resolves
+ * against the admin's own origin — a silent 404 that looks exactly like the bug
+ * this replaces.
+ */
+export function kycObjectRef(bucket: string, key: string): string {
+  return `s3://${bucket}/${key}`;
+}
+
+/**
+ * What a stored url is still worth serving directly, for a row with no key.
+ *
+ * Only a legacy PUBLIC url qualifies. Two other things live in that column and
+ * neither may reach a browser: an `s3://` ref, which is not fetchable and
+ * renders as a silent 404 relative to whatever origin loads it; and an old
+ * signed url, which is a dead credential and 403s. Both used to be handed
+ * straight to the admin's `<img>` — the second is the bug being fixed.
+ *
+ * Null means "tell the caller there is no file", which the UI can say plainly,
+ * instead of a link that fails in the browser for reasons nobody can see.
+ */
+export function legacyKycUrl(storedUrl: string | null): string | null {
+  if (!storedUrl) return null;
+  if (!/^https?:\/\//i.test(storedUrl)) return null;
+  if (storedUrl.includes('X-Amz-Signature')) return null;
+  return storedUrl;
+}
+
+/**
  * Whether a key addresses a KYC object at all.
  *
  * Guards the client-supplied `kycDocumentKey` hint. Without it, `POST /profile`
