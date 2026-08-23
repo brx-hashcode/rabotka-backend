@@ -307,6 +307,16 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     isSecret: false,
   },
   {
+    // Suspended, KYC en cours, KYC refusé. Ces profils ne coûtaient rien tant
+    // que le bot leur répondait par une carte figée ; ce sont aussi ceux qui
+    // ont le plus de raisons d'insister et le moins de chances de rapporter.
+    key: 'vova.walled_daily_limit',
+    value: '10',
+    category: ConfigCategory.GENERAL,
+    label: 'Réponses Vova AI par jour pour un compte bloqué',
+    isSecret: false,
+  },
+  {
     key: 'vova.anon_daily_limit',
     value: '10',
     category: ConfigCategory.GENERAL,

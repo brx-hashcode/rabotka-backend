@@ -23,4 +23,19 @@ export const VOVA_CONFIG_KEYS = {
   ANONYMOUS_ENABLED: 'vova.anonymous_enabled',
   /** AI replies allowed per unregistered phone per day. Past it, the card. */
   ANON_DAILY_LIMIT: 'vova.anon_daily_limit',
+  /**
+   * AI replies allowed per day to a profile behind a wall — suspended, or KYC
+   * under review or refused.
+   *
+   * These people used to cost nothing: whatever they typed, the bot answered
+   * with a static card. Opening the assistant to them is right — it is the one
+   * population with a burning question and no menu to answer it — but it is
+   * also the one most likely to ask it twenty times, earns nothing while
+   * blocked, and in the suspended case may be blocked for abuse in the first
+   * place. Unmetered, that is an open tab.
+   *
+   * Separate from `ANON_DAILY_LIMIT` and from `ENABLED`: throttling blocked
+   * accounts must not require turning the assistant off for everyone else.
+   */
+  WALLED_DAILY_LIMIT: 'vova.walled_daily_limit',
 } as const;
