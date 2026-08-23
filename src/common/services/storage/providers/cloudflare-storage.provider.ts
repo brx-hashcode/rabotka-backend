@@ -11,6 +11,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { StorageProvider } from '@prisma/client';
 import { IStorageProvider } from '../interfaces/storage-provider.interface';
 import {
+  ExistsOptions,
   GetUrlOptions,
   SIGNED_URL_TTL_SECONDS,
   UploadOptions,
@@ -158,10 +159,13 @@ export class CloudflareStorageProvider implements IStorageProvider {
     }
   }
 
-  async exists(key: string): Promise<boolean> {
+  async exists(key: string, options?: ExistsOptions): Promise<boolean> {
     try {
+      // Same forwarding gap `upload()` and `getUrl()` had: hardcoding the
+      // default bucket reports a KYC document as missing while it sits in the
+      // private bucket, which reads as "the object is gone" to every caller.
       const command = new HeadObjectCommand({
-        Bucket: this.bucket,
+        Bucket: options?.bucket || this.bucket,
         Key: key,
       });
 

@@ -132,6 +132,19 @@ export class FileService {
     return this.storageService.getUrl(storageKey, { access: 'public' });
   }
 
+  /**
+   * Whether an object is actually there, in a named bucket.
+   *
+   * `bucket` for the same reason `getPresignedUrl` needs it: KYC objects live
+   * outside the default bucket, and a check against the default one reports
+   * them missing.
+   */
+  async exists(storageKey: string, bucket?: string): Promise<boolean> {
+    return this.storageService.exists(storageKey, {
+      ...(bucket ? { bucket } : {}),
+    });
+  }
+
   async getPresignedUrlFromPublicUrl(publicUrl: string): Promise<string> {
     const base = this.configService
       .get<string>('CLOUDFLARE_PUBLIC_BASE_URL', '')
