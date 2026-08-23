@@ -1,5 +1,5 @@
 import { Logger } from '@nestjs/common';
-import { ProfileType, VerificationStatus } from '@prisma/client';
+import { AccountStatus, ProfileType, VerificationStatus } from '@prisma/client';
 import { VovaService } from '../vova.service';
 import { bucketOf } from '../../recommendation-engine/engine-rollout.service';
 
@@ -11,6 +11,7 @@ const PROFILE = {
   first_name: 'Awa',
   profile_type: ProfileType.WORKER,
   verification_status: VerificationStatus.VERIFIED,
+  status: AccountStatus.ACTIVE,
 };
 
 function makeAgent(text = 'réponse de Vova') {

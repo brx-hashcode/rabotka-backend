@@ -1,9 +1,10 @@
-import { ProfileType, VerificationStatus } from '@prisma/client';
+import { AccountStatus, ProfileType, VerificationStatus } from '@prisma/client';
 import { buildSystemPrompt } from '../prompts';
 
 const base = {
   firstName: 'Marie',
   profileType: ProfileType.WORKER,
+  accountStatus: AccountStatus.ACTIVE,
   categorySlugs: [],
   knownCategorySlugs: [],
   grounding: [],
@@ -149,5 +150,63 @@ describe('le ton humain', () => {
 
   it('demande de reconnaître la situation sans réciter', () => {
     expect(verified).toContain('pas « je comprends votre frustration » récité');
+  });
+});
+
+/**
+ * La porte d'entrée des comptes qui n'ont pas de menu.
+ *
+ * L'assistant répond désormais derrière les murs — suspendu, KYC en cours, KYC
+ * refusé — et ces gens-là n'ont aucun menu : le bot leur renvoyait une carte et
+ * rien d'autre. `/start` est leur seule porte, et le bouton de la carte porte un
+ * code de connexion à usage unique.
+ */
+describe('l’invitation à ouvrir l’application', () => {
+  const promptWith = (
+    accountStatus: AccountStatus,
+    verificationStatus: VerificationStatus,
+  ) => buildSystemPrompt({ ...base, accountStatus, verificationStatus });
+
+  const walled: [string, AccountStatus, VerificationStatus][] = [
+    ['suspendu', AccountStatus.SUSPENDED, VerificationStatus.VERIFIED],
+    [
+      'KYC en cours',
+      AccountStatus.PENDING_ACTIVATION,
+      VerificationStatus.PENDING,
+    ],
+    [
+      'KYC refusé',
+      AccountStatus.PENDING_ACTIVATION,
+      VerificationStatus.REJECTED,
+    ],
+  ];
+
+  it.each(walled)('propose /start à un compte %s', (_label, account, verif) => {
+    expect(promptWith(account, verif)).toContain('*/start*');
+  });
+
+  // Un profil actif a déjà le menu complet et les cartes à boutons. Lui répéter
+  // /start à chaque réponse serait du bruit.
+  it('ne le propose pas à un compte actif et vérifié', () => {
+    expect(
+      promptWith(AccountStatus.ACTIVE, VerificationStatus.VERIFIED),
+    ).not.toContain('/start');
+  });
+
+  // Sans cette ligne le haut du prompt dit « déjà inscrite et déjà connectée » à
+  // tout le monde, et le modèle propose de postuler à quelqu'un qui ne peut pas.
+  it('dit au modèle ce qu’un compte suspendu ne peut pas faire', () => {
+    const prompt = promptWith(
+      AccountStatus.SUSPENDED,
+      VerificationStatus.VERIFIED,
+    );
+    expect(prompt).toContain('Ce compte est SUSPENDU');
+    expect(prompt).toContain('ni postuler');
+  });
+
+  it('ne parle pas de suspension à un dossier seulement en attente', () => {
+    expect(
+      promptWith(AccountStatus.PENDING_ACTIVATION, VerificationStatus.PENDING),
+    ).not.toContain('Ce compte est SUSPENDU');
   });
 });

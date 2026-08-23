@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { ProfileType, VerificationStatus } from '@prisma/client';
+import { AccountStatus, ProfileType, VerificationStatus } from '@prisma/client';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { bucketOf } from '../recommendation-engine/engine-rollout.service';
 import { VovaAgentService } from './agent/agent.service';
@@ -34,6 +34,16 @@ export interface VovaBotProfile {
   first_name: string;
   profile_type: ProfileType;
   verification_status: VerificationStatus;
+  /**
+   * The account status, because the assistant now answers people the bot used
+   * to turn away at the door — a suspended account, a dossier under review or
+   * refused.
+   *
+   * Without it the prompt tells everyone they are « déjà inscrite et déjà
+   * connectée » and lets the model discuss applying to missions, which a
+   * suspended profile cannot do. The status is what stops it saying so.
+   */
+  status: AccountStatus;
 }
 
 /**
@@ -194,6 +204,7 @@ export class VovaService {
             profileType: profile.profile_type,
             firstName: profile.first_name,
             verificationStatus: profile.verification_status,
+            accountStatus: profile.status,
             // Not loaded on the hot path: the bot's profile query is shared by
             // every message, and a categories join on all of them buys one line
             // of prompt context. The agent asks `etat_du_profil` when it needs it.

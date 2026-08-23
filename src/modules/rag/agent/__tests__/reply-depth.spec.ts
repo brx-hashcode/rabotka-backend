@@ -1,6 +1,6 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import * as path from 'node:path';
-import { ProfileType, VerificationStatus } from '@prisma/client';
+import { AccountStatus, ProfileType, VerificationStatus } from '@prisma/client';
 import { buildAnonymousSystemPrompt, buildSystemPrompt } from '../prompts';
 import { REPLY_MAX_CHARS, capLength } from '../guard.service';
 
@@ -16,6 +16,7 @@ import { REPLY_MAX_CHARS, capLength } from '../guard.service';
 const registered = buildSystemPrompt({
   firstName: 'Marie',
   profileType: ProfileType.WORKER,
+  accountStatus: AccountStatus.ACTIVE,
   verificationStatus: VerificationStatus.VERIFIED,
   categorySlugs: [],
   knownCategorySlugs: [],

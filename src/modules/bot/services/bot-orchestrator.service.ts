@@ -221,13 +221,19 @@ export class BotOrchestratorService {
       return [await this.supportCardMessage()];
     }
 
+    // A suspended account is not a closed one: the suspension copy itself says
+    // « vous pouvez toujours consulter votre compte », and `MINTABLE_STATUSES`
+    // mints a login code for SUSPENDED — so these people have somewhere to go
+    // and, until now, no way to ask anything about it. Every message returned
+    // the same support card.
+    //
+    // The assistant answers their free text; `/start` and the other
+    // deterministic words return the suspension card, whose button opens the
+    // app. `/support` is already handled above, in every account state.
     if (profile.status === AccountStatus.SUSPENDED) {
-      return [
-        await this.supportCardMessage({
-          suspended: true,
-          reason: profile.suspension_reason,
-        }),
-      ];
+      const vovaReply = await this.vovaReplyOrNull(profile, text);
+      if (vovaReply) return vovaReply;
+      return [this.openAppCard(profile.first_name)];
     }
 
     const normalizedInput = text.trim().toLowerCase();
@@ -295,13 +301,10 @@ export class BotOrchestratorService {
       const vovaReply = await this.vovaReplyOrNull(profile, text);
       if (vovaReply) return vovaReply;
 
-      // Still under review. One card, one button, onto the profile — the screen
-      // where the documents were submitted and where a correction is made. The
-      // old card offered a « 1 / 2 » menu that no longer exists, so answering it
-      // returned the same card.
-      return profile.verification_status === VerificationStatus.REJECTED
-        ? [KYC_REJECTED_MESSAGE]
-        : [this.handlePendingKycInput(profile.first_name)];
+      // The same door for both. Which wall they are behind, and why, is the
+      // assistant's to say — it has the status and the admin's own words. This
+      // card only has to open the app.
+      return [this.openAppCard(profile.first_name)];
     }
 
     // KYC verified + user types Menu → activate account
@@ -335,18 +338,38 @@ export class BotOrchestratorService {
   }
 
   /**
-   * The card for a profile whose KYC is still under review: one template, one
-   * "Voir mon profil" button. The old reply was a 1/2 menu whose options each
-   * returned a webview template anyway.
+   * The one card an account behind a wall can get: a button that opens the app.
    *
-   * No longer the answer to *whatever* they typed — free text goes to the
-   * assistant first, and this is what the deterministic words get, plus the
-   * fallback when the assistant declines.
+   * Three cards before this — the suspension, the refusal, the KYC-pending
+   * review — each repeating in template copy what the assistant now says
+   * itself. Copy in two places drifts, and the template half is the half that
+   * needs Meta's approval to change.
+   *
+   * ONE thing was lost with them, and it is worth naming: the admin's REASON.
+   * `suspension_reason` and `rejection_reason` sit in `NEVER_EXPOSE`
+   * (`intents/projections.ts`), so the assistant cannot read them and cannot
+   * repeat them. The user still receives the reason once — in the template an
+   * admin sends at the moment of suspending or refusing — but can no longer
+   * get it back by asking the bot. That is a deliberate trade, not an
+   * oversight; lift it by taking those fields out of `NEVER_EXPOSE`.
+   *
+   * So this one says nothing about the wall. It exists for a single reason: a
+   * bare link does not open WhatsApp's in-app browser, only a template's CTA
+   * button does. Without that, this would be free-form text — the bot answers
+   * inside the 24h service window, where templates are not required.
+   *
+   * The three explanatory templates stay: they are what an admin sends when
+   * suspending an account or refusing a dossier, which is outside any window
+   * and genuinely business-initiated.
+   *
+   * No `loginCode` argument: `openApp` declares `urlSuffixMode: 'shortlink'`,
+   * so the outbound processor mints the one-time code against the bare
+   * destination on the way out.
    */
-  private handlePendingKycInput(firstName: string): string {
+  private openAppCard(firstName: string): string {
     return templateReply(
-      'kycPendingMenu',
-      WHATSAPP_TEMPLATES.kycPendingMenu.variables(firstName),
+      'openApp',
+      WHATSAPP_TEMPLATES.openApp.variables(firstName),
     );
   }
 
@@ -388,6 +411,9 @@ export class BotOrchestratorService {
         first_name: profile.first_name,
         profile_type: profile.profile_type,
         verification_status: profile.verification_status,
+        // Suspended reaches here now. Without the status the prompt would tell
+        // them the app is theirs to use and offer to find them a mission.
+        status: profile.status,
       },
       text,
     );
@@ -929,6 +955,9 @@ export class BotOrchestratorService {
         whatsapp_connected: true,
         whatsapp_activation_bonus_granted: true,
         verification_status: true,
+        // The admin's own words again, for the refusal card — same reasoning as
+        // `suspension_reason` above, and the bot could not say WHY without it.
+        rejection_reason: true,
         // Read, not written, on the hot path: `recordBotActivity` compares
         // against it to decide whether the stamp is due, and the activation
         // paths preserve `activated_at` rather than resetting it.
