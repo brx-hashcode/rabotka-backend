@@ -7,7 +7,7 @@ import {
 } from '@langchain/core/messages';
 import type { BaseMessage } from '@langchain/core/messages';
 import type { StructuredToolInterface } from '@langchain/core/tools';
-import { ProfileType, VerificationStatus } from '@prisma/client';
+import { AccountStatus, ProfileType, VerificationStatus } from '@prisma/client';
 import { LlmService } from '../llm/llm.service';
 import { LlmRouterService } from '../llm/router.service';
 import type { LlmCallTelemetry } from '../llm/llm.types';
@@ -30,6 +30,7 @@ export interface AgentRequest {
   profileType: ProfileType;
   firstName: string | null;
   verificationStatus: VerificationStatus;
+  accountStatus: AccountStatus;
   categorySlugs: string[];
   text: string;
   correlationId?: string;
@@ -126,13 +127,10 @@ export class VovaAgentService {
       try {
         // Same dual-package cast as the factory: the dynamically imported
         // LangGraph sees the ESM type identities.
-        return (await createReactAgent({
+        return await createReactAgent({
           llm: model as never,
           tools: tools as never,
-        }).invoke(
-          { messages },
-          { recursionLimit: this.maxIterations * 2 },
-        )) as { messages: BaseMessage[] };
+        }).invoke({ messages }, { recursionLimit: this.maxIterations * 2 });
       } catch (err) {
         lastError = err;
         if (err instanceof LlmFatalError) throw err;
@@ -372,6 +370,7 @@ export class VovaAgentService {
             firstName: request.firstName,
             profileType: request.profileType,
             verificationStatus: request.verificationStatus,
+            accountStatus: request.accountStatus,
             categorySlugs: request.categorySlugs,
             knownCategorySlugs,
             language,

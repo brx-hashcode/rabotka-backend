@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { ProfileType, VerificationStatus } from '@prisma/client';
+import { AccountStatus, ProfileType, VerificationStatus } from '@prisma/client';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { bucketOf } from '../recommendation-engine/engine-rollout.service';
 import { VovaAgentService } from './agent/agent.service';
@@ -13,6 +13,7 @@ import { VovaAnonymousStore } from './agent/anonymous.store';
 import { templateReply } from '../../common/constants/whatsapp-carousel';
 import { WHATSAPP_TEMPLATES } from '../../common/constants/whatsapp-templates';
 import { withTimeout } from './llm/llm.service';
+import { isWalled } from './agent/prompts';
 import { VOVA_CONFIG_KEYS } from './vova.constants';
 import { refusal } from './agent/refusals';
 
@@ -34,6 +35,16 @@ export interface VovaBotProfile {
   first_name: string;
   profile_type: ProfileType;
   verification_status: VerificationStatus;
+  /**
+   * The account status, because the assistant now answers people the bot used
+   * to turn away at the door — a suspended account, a dossier under review or
+   * refused.
+   *
+   * Without it the prompt tells everyone they are « déjà inscrite et déjà
+   * connectée » and lets the model discuss applying to missions, which a
+   * suspended profile cannot do. The status is what stops it saying so.
+   */
+  status: AccountStatus;
 }
 
 /**
@@ -151,12 +162,14 @@ export class VovaService {
     let shadow = true;
 
     try {
-      const [enabled, shadowRaw, percentRaw, timeoutRaw] = await Promise.all([
-        this.systemConfig.get(VOVA_CONFIG_KEYS.ENABLED, 'false'),
-        this.systemConfig.get(VOVA_CONFIG_KEYS.SHADOW_MODE, 'true'),
-        this.systemConfig.get(VOVA_CONFIG_KEYS.ROLLOUT_PERCENT, '0'),
-        this.systemConfig.get(VOVA_CONFIG_KEYS.TIMEOUT_MS, '25000'),
-      ]);
+      const [enabled, shadowRaw, percentRaw, timeoutRaw, walledLimitRaw] =
+        await Promise.all([
+          this.systemConfig.get(VOVA_CONFIG_KEYS.ENABLED, 'false'),
+          this.systemConfig.get(VOVA_CONFIG_KEYS.SHADOW_MODE, 'true'),
+          this.systemConfig.get(VOVA_CONFIG_KEYS.ROLLOUT_PERCENT, '0'),
+          this.systemConfig.get(VOVA_CONFIG_KEYS.TIMEOUT_MS, '25000'),
+          this.systemConfig.get(VOVA_CONFIG_KEYS.WALLED_DAILY_LIMIT, '10'),
+        ]);
 
       if (enabled !== 'true') return null;
 
@@ -184,6 +197,34 @@ export class VovaService {
         }
       }
 
+      // Meter a profile behind a wall before the model runs.
+      //
+      // Placed here, after the affirmation shortcut and before the call: that
+      // shortcut costs nothing so it must not spend budget, while a call that
+      // times out is billed all the same — which is why the counter increments
+      // ahead of the model rather than after a successful reply.
+      //
+      // Deliberately not skipped in shadow mode. Shadow computes the reply and
+      // throws it away; the tokens are spent either way, and a budget that
+      // ignores the mode where nobody sees the output is a budget that misses
+      // the cheapest place to overspend.
+      //
+      // Over budget returns null, so the bot falls back to its own card — the
+      // door still opens, there is simply no more assistant today.
+      if (isWalled(profile.status, profile.verification_status)) {
+        const withinBudget = await this.anonymous.consumeWalled(
+          profile.id,
+          Number(walledLimitRaw) || 0,
+        );
+        if (!withinBudget) {
+          this.logger.log(
+            `vova.walled_limit profile=${profile.id} status=${profile.status} ` +
+              `verification=${profile.verification_status}`,
+          );
+          return null;
+        }
+      }
+
       const timeoutMs = Number(timeoutRaw) || 25000;
       const started = Date.now();
 
@@ -194,6 +235,7 @@ export class VovaService {
             profileType: profile.profile_type,
             firstName: profile.first_name,
             verificationStatus: profile.verification_status,
+            accountStatus: profile.status,
             // Not loaded on the hot path: the bot's profile query is shared by
             // every message, and a categories join on all of them buys one line
             // of prompt context. The agent asks `etat_du_profil` when it needs it.

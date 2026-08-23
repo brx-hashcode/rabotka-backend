@@ -93,17 +93,47 @@ export class VovaAnonymousStore {
    * stop answering people; it is a reason to look at Redis.
    */
   async consume(phone: string, dailyLimit: number): Promise<boolean> {
+    return this.meter(this.countKey(phone), dailyLimit, `phone ${phone}`);
+  }
+
+  /**
+   * The same allowance, for a REGISTERED profile that sits behind a wall —
+   * suspended, or KYC under review or refused.
+   *
+   * They belong here despite having an account, because they share the anonymous
+   * caller's economics exactly: a burning question, no menu to answer it, and
+   * nothing earned while they ask. Until the assistant reached them, whatever
+   * they typed was answered by a static card at zero cost; a suspended account
+   * may even be suspended for abuse. Registered ACTIVE profiles stay unmetered
+   * — they are the ones the product is for.
+   *
+   * Its own key namespace, so the two budgets never share a counter: a phone
+   * and a profile id are different things and a stranger who later signs up
+   * must not inherit a spent allowance.
+   */
+  async consumeWalled(profileId: string, dailyLimit: number): Promise<boolean> {
+    return this.meter(
+      `${REDIS_KEY_PREFIX}vova:walled:count:${profileId}`,
+      dailyLimit,
+      `profile ${profileId}`,
+    );
+  }
+
+  private async meter(
+    key: string,
+    dailyLimit: number,
+    subject: string,
+  ): Promise<boolean> {
     if (dailyLimit <= 0) return false;
 
     try {
-      const key = this.countKey(phone);
       const used = await this.redis.incr(key);
       // Only on the first increment, so the window is a fixed day from the
       // first message rather than a rolling one that never expires.
       if (used === 1) await this.redis.expire(key, secondsUntilMidnight());
       return used <= dailyLimit;
     } catch (err) {
-      this.logger.debug(`Could not meter anonymous replies for ${phone}`, err);
+      this.logger.debug(`Could not meter replies for ${subject}`, err);
       return true;
     }
   }

@@ -10,3 +10,44 @@ allowBuilds:
   puppeteer: true
   sharp: true
   unrs-resolver: true
+
+# Versions corrigées forcées sur des dépendances transitives dont le parent
+# épingle une version vulnérable. Chacune est notée avec son parent, pour qu'on
+# sache quand la retirer : dès que le parent monte de lui-même, l'override
+# devient inutile et doit disparaître.
+overrides:
+  # tar@6.2.1 <- fastembed. onnxruntime-node installe déjà tar@7 dans le même
+  # arbre, donc les deux majeures y cohabitaient déjà.
+  tar: ^7.5.22
+  # SAUF fastembed, qui ne survit pas à tar@7.
+  #
+  # Il appelle `tar.default.x()` ; tar@7 est passé aux exports nommés et n'a
+  # plus de default, donc `tar_1.default` vaut undefined et le build meurt sur
+  # « Cannot read properties of undefined (reading 'x') » — à l'étape qui
+  # pré-télécharge les modèles, donc AUCUNE image ne se construisait.
+  #
+  # Le pari du commentaire ci-dessus — « les deux majeures cohabitaient déjà »
+  # — était juste avant l'override : c'est l'override lui-même qui a supprimé
+  # la cohabitation en tirant fastembed sur tar@7. Aucune version de fastembed
+  # ne le supporte : la 2.1.0 est la dernière et demande ^6.2.0.
+  #
+  # La portée limite la régression à ce seul paquet, et son usage de tar est
+  # étroit : décompresser des archives de modèles téléchargées depuis
+  # HuggingFace AU BUILD. Entrée de confiance, jamais des données utilisateur.
+  # À retirer le jour où fastembed passe à tar@7.
+  fastembed>tar: ^6.2.1
+  # undici@5.29.0 <- @vercel/blob. cheerio installe déjà 6.28 ici.
+  undici: ^6.28.0
+  # linkify-it@5.0.0 <- mailparser <- preview-email. Correctif de patch.
+  linkify-it: ^5.0.2
+  # typeorm@0.3.28 <- @nestjs/terminus. Correctif de patch.
+  typeorm: ^0.3.31
+  # nanoid@5.1.5. Correctif de patch.
+  nanoid: ^5.1.16
+  # uuid@8.3.2 <- exceljs. typeorm tire déjà uuid@11 dans le même arbre.
+  uuid: ^11.1.1
+  # nodemailer@8.0.5 <- @nestjs-modules/mailer, alors que la dépendance directe
+  # est déjà en 9.x. Aligne les deux.
+  nodemailer: ^9.0.1
+  # deepmerge-ts@7.1.5 <- @prisma/config.
+  deepmerge-ts: ^8.0.0

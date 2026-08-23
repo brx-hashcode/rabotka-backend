@@ -75,6 +75,17 @@ export type ProfileMeResponse = {
   profileType: string;
   status: string;
   verificationStatus: string;
+  /**
+   * The admin's own words on a refusal and a suspension.
+   *
+   * Owner-only by construction — `findById` backs `GET /profile/me`, which is
+   * authenticated as the profile itself. Both strings have already reached this
+   * user on WhatsApp: they fill {{2}} of the refusal and suspension templates
+   * the moment an admin decides. Carrying them here lets the app and the
+   * assistant answer "why?" instead of only "it was refused".
+   */
+  rejectionReason: string | null;
+  suspensionReason: string | null;
   reliabilityScore: number | null;
   whatsappConnected: boolean;
   avatarUrl: string | null;
@@ -278,6 +289,8 @@ export class ProfileService {
         profile_type: true,
         status: true,
         verification_status: true,
+        rejection_reason: true,
+        suspension_reason: true,
         reliability_score: true,
         whatsapp_connected: true,
         avatar_url: true,
@@ -319,6 +332,8 @@ export class ProfileService {
       profileType: profile.profile_type,
       status: profile.status,
       verificationStatus: profile.verification_status,
+      rejectionReason: profile.rejection_reason,
+      suspensionReason: profile.suspension_reason,
       reliabilityScore: profile.reliability_score,
       whatsappConnected: profile.whatsapp_connected,
       avatarUrl: profile.avatar_url,
@@ -858,7 +873,7 @@ export class ProfileService {
       this.prisma.profile.update({
         where: { id: profileId },
         data: {
-          verification_status: decision as VerificationStatus,
+          verification_status: decision,
           verified_by: adminUserId,
           verified_at: now,
           kyc_verification_note: note,
@@ -875,7 +890,7 @@ export class ProfileService {
       this.prisma.kycDocument.updateMany({
         where: { profile_id: profileId },
         data: {
-          verification_status: decision as VerificationStatus,
+          verification_status: decision,
           verified_by: adminUserId,
           verified_at: now,
           rejection_reason: decision === 'REJECTED' ? note : null,
@@ -1936,6 +1951,6 @@ export class ProfileService {
   }
 
   private getProfileTypeLabel(profileType: ProfileType): string {
-    return PROFILE_TYPE_LABELS[profileType] ?? (profileType as string);
+    return PROFILE_TYPE_LABELS[profileType] ?? profileType;
   }
 }
