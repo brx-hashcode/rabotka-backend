@@ -368,13 +368,23 @@ export const WHATSAPP_TEMPLATES = {
    * does not open WhatsApp's in-app browser, only a template's CTA button does.
    * That is what makes it a template at all — the bot replies inside the 24h
    * service window, where free-form text would otherwise do.
+   *
+   * v2, and the bump was about Meta's CATEGORY rather than the wording. v1 was
+   * declared UTILITY and approved as MARKETING — which a user's marketing
+   * opt-out can drop, and this card is the only door a walled account has.
+   * Silencing it would recreate the very failure this card was added to fix.
+   *
+   * The cause was structural: saying nothing about the account's state is what
+   * made v1 read as an invitation rather than a service reply. v2 keeps the
+   * state out of the copy and anchors on the one thing always true when this
+   * card is sent — the person has just written in. Meta filed it UTILITY.
    */
   openApp: {
     cloudOnly: true,
     urlSuffixVar: '2',
     urlSuffixMode: 'shortlink',
     category: 'UTILITY',
-    cloud: { name: cloudName('TPL_CLOUD_OPEN_APP', 'rabotka_open_app_v1') },
+    cloud: { name: cloudName('TPL_CLOUD_OPEN_APP', 'rabotka_open_app_v2') },
     variables: (firstName: string) => ({
       '1': firstName,
       '2': OPEN_APP_CTA_PATH,

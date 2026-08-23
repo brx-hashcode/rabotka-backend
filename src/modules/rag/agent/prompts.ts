@@ -1,4 +1,5 @@
 import { AccountStatus, ProfileType, VerificationStatus } from '@prisma/client';
+import { BUSINESS_UTC_OFFSET_HOURS } from '../../../common/utils/business-day.util';
 import { VOVA_IDENTITY_FR } from './identity';
 import { languageDirective, type ReplyLanguage } from './language';
 
@@ -8,10 +9,47 @@ export interface GroundingChunk {
   text: string;
 }
 
+/**
+ * L'heure de Brazzaville, et la salutation qu'elle appelle.
+ *
+ * Le modèle n'avait AUCUNE notion de l'heure. Les deux prompts s'en
+ * accommodaient en lui interdisant de choisir — « recopie le mot de la
+ * personne » — ce qui marche tant que quelqu'un salue en premier, et laisse
+ * deviner dès que VoVa ouvre la conversation ou qu'on lui écrit sans bonjour.
+ * Deviner, avec des exemples qui disaient tous « Bonsoir », donnait « Bonsoir »
+ * à 14h35.
+ *
+ * `BUSINESS_UTC_OFFSET_HOURS` vient de `business-day.util.ts` plutôt que d'être
+ * réécrit ici : Rabotka a UN fuseau, et deux définitions dériveraient. Congo
+ * (Africa/Brazzaville, WAT), UTC+1 sans heure d'été — un décalage fixe est
+ * exact toute l'année et n'appelle aucune base de fuseaux.
+ *
+ * 18h comme bascule : c'est l'usage français, et Brazzaville est assez proche
+ * de l'équateur pour que le coucher du soleil ne s'en éloigne jamais beaucoup.
+ */
+const EVENING_FROM_HOUR = 18;
+
+export function brazzavilleClock(now: Date = new Date()): {
+  hhmm: string;
+  greeting: 'Bonjour' | 'Bonsoir';
+} {
+  const shifted = new Date(
+    now.getTime() + BUSINESS_UTC_OFFSET_HOURS * 60 * 60 * 1000,
+  );
+  const hour = shifted.getUTCHours();
+  const minutes = String(shifted.getUTCMinutes()).padStart(2, '0');
+  return {
+    hhmm: `${String(hour).padStart(2, '0')}h${minutes}`,
+    greeting: hour >= EVENING_FROM_HOUR ? 'Bonsoir' : 'Bonjour',
+  };
+}
+
 export interface PromptContext {
   firstName: string | null;
   profileType: ProfileType;
   verificationStatus: VerificationStatus;
+  /** Injectable pour les tests ; par défaut, l'instant de l'appel. */
+  now?: Date;
   /**
    * Suspended, or not yet activated. The assistant now answers behind those
    * walls, and it cannot be allowed to talk to those people as if the app were
@@ -59,6 +97,7 @@ export function buildSystemPrompt(ctx: PromptContext): string {
   const isWorker = ctx.profileType === ProfileType.WORKER;
   /** Le prénom tel qu'il doit APPARAÎTRE dans la réponse : en gras. */
   const boldName = ctx.firstName ? `*${ctx.firstName}*` : '';
+  const clock = brazzavilleClock(ctx.now);
 
   return [
     // First, and in the language being asked for: a rule stated in the target
@@ -66,6 +105,12 @@ export function buildSystemPrompt(ctx: PromptContext): string {
     languageDirective(ctx.language),
     '',
     "Tu es VoVa AI, l'assistant de Rabotka, sur WhatsApp.",
+    '',
+    // L'heure, enfin. Sans elle le modèle ne pouvait que recopier la salutation
+    // reçue — et deviner dès qu'il ouvrait la conversation ou qu'on lui écrivait
+    // sans bonjour. La règle du miroir reste prioritaire : cette ligne sert au
+    // cas où il n'y a rien à refléter.
+    `Il est ${clock.hhmm} à Brazzaville. Si c'est TOI qui salues en premier, dis « ${clock.greeting} » — jamais l'autre.`,
     '',
     `Tu parles à ${ctx.firstName ?? 'quelqu’un'}, ${isWorker ? 'travailleur' : 'recruteur'}. ${
       ctx.categorySlugs.length
@@ -131,7 +176,11 @@ export function buildSystemPrompt(ctx: PromptContext): string {
     // bonjour ». Un bonsoir accompagné d'autre chose ne relevait d'aucune des
     // deux. Cette règle-ci passe donc avant et ne dépend d'aucune condition :
     // on rend son bonjour à quelqu'un qui dit bonjour, toujours.
-    `- On te salue — « bonjour », « bonsoir », « salut », « hello » — même au milieu d'une autre phrase ? Rends la salutation EN PREMIER, avec le même mot et le prénom : « Bonsoir ${boldName} ! ». Puis seulement, réponds. Ne commence jamais une réponse par une question à quelqu'un qui vient de te saluer.`,
+    // Le correctif de l'exemple unique avait été appliqué au prompt anonyme et
+    // JAMAIS reporté ici : « avec le même mot » était suivi d'un seul modèle,
+    // « Bonsoir ». Un exemple unique se fait copier — c'est ce qui a produit un
+    // « Bonsoir » à 14h35. Il faut une paire pour montrer le miroir.
+    `- On te salue — « bonjour », « bonsoir », « salut », « hello » — même au milieu d'une autre phrase ? Rends la salutation EN PREMIER, avec LE MÊME MOT que la personne a employé, et le prénom : « bonjour » → « Bonjour ${boldName} ! », « bonsoir » → « Bonsoir ${boldName} ! ». Recopie son mot même s'il ne colle pas à l'heure : on ne corrige personne sur sa propre salutation. Puis seulement, réponds. Ne commence jamais une réponse par une question à quelqu'un qui vient de te saluer.`,
     `- Si c'est le tout premier message de la conversation, ajoute qui tu es après la salutation : « Bonsoir ${boldName} ! Je suis *VoVa AI*, l'assistant de Rabotka. » Puis, en UNE phrase, demande ce que la personne cherche. Chaleureux, simple, comme un collègue qui décroche. Pas de liste de ce que tu sais faire.`,
     "- On te remercie ? Réponds court et chaleureux, et arrête-toi là. Pas de relance forcée : quelqu'un qui dit merci a fini. Mais un « bonsoir, merci » est d'abord un bonsoir : salue, puis remercie en retour.",
     "- Tu as l'historique de la conversation. Ne répète pas ce que tu viens de dire, ne redemande pas ce qu'on t'a déjà donné, et reprends le sujet en cours plutôt que de repartir de zéro.",
@@ -316,6 +365,8 @@ function verificationLines(status: VerificationStatus): string[] {
 export interface AnonymousPromptContext {
   grounding: GroundingChunk[];
   language: ReplyLanguage;
+  /** Injectable pour les tests ; par défaut, l'instant de l'appel. */
+  now?: Date;
 }
 
 /**
@@ -334,10 +385,14 @@ export interface AnonymousPromptContext {
 export function buildAnonymousSystemPrompt(
   ctx: AnonymousPromptContext,
 ): string {
+  const clock = brazzavilleClock(ctx.now);
+
   return [
     languageDirective(ctx.language),
     '',
     "Tu es VoVa AI, l'assistant de Rabotka, sur WhatsApp.",
+    '',
+    `Il est ${clock.hhmm} à Brazzaville. Si c'est TOI qui salues en premier, dis « ${clock.greeting} » — jamais l'autre.`,
     '',
     "Cette personne n'a PAS de compte Rabotka — c'est un numéro inconnu qui écrit pour la première fois. Elle n'a donc ni solde, ni candidature, ni profil, ni score, ni mission. Ne fais jamais semblant du contraire, et ne lui demande jamais de se connecter « à son compte ».",
     '',
@@ -381,7 +436,7 @@ export function buildAnonymousSystemPrompt(
     //    une question sur les réclamations a reçu « Bonsoir ! 👋 Je suis
     //    VoVa AI… » en ouverture.
     // 3. La question de routage n'avait PAS de règle d'arrêt — voir plus bas.
-    "- On te salue, même au milieu d'une autre phrase ? Rends la salutation EN PREMIER, avec LE MÊME MOT que la personne a employé : « bonjour » → « Bonjour ! », « bonsoir » → « Bonsoir ! », « salut » → « Salut ! ». Tu n'as pas l'heure, alors ne devine jamais entre bonjour et bonsoir : recopie.",
+    "- On te salue, même au milieu d'une autre phrase ? Rends la salutation EN PREMIER, avec LE MÊME MOT que la personne a employé : « bonjour » → « Bonjour ! », « bonsoir » → « Bonsoir ! », « salut » → « Salut ! ». Recopie son mot même s'il ne colle pas à l'heure indiquée plus haut : on ne corrige personne sur sa propre salutation.",
     "- Si c'est le TOUT PREMIER message de la conversation, ajoute après la salutation : « Je suis *VoVa AI*, l'assistant de Rabotka. » Puis dis en UNE phrase ce qu'est Rabotka. Sinon, réponds simplement à la question : quelqu'un qui te parle depuis dix minutes sait déjà qui tu es, et se faire re-présenter en plein milieu donne l'impression de repartir de zéro.",
     // Deux options numérotées plutôt qu'une question ouverte.
     //
