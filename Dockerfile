@@ -13,7 +13,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     rm -rf /var/lib/apt/lists/* && \
     npm install -g pnpm
 
-COPY package.json pnpm-lock.yaml .npmrc ./
+# `pnpm-workspace.yaml` is NOT optional here, however little it looks like a
+# dependency file. pnpm 11 reads `overrides` and `allowBuilds` from it — a
+# `pnpm.overrides` block in package.json is silently ignored — and the lockfile
+# records the overrides it was resolved with. Without the file in the build
+# context pnpm sees no overrides, the lockfile declares eight, and
+# `--frozen-lockfile` refuses:
+#
+#   ERR_PNPM_LOCKFILE_CONFIG_MISMATCH — the current "overrides" configuration
+#   doesn't match the value found in the lockfile
+#
+# Which is exactly what happened: the overrides moved out of package.json and
+# into this file, and this COPY was not updated. Every develop image build
+# failed from that commit on, while `pnpm install` kept working locally — the
+# file is there.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
 
 # --ignore-scripts skips postinstall (prisma generate) which crashes due to
 # a transitive ESM/CJS conflict in @prisma/dev bundled with prisma@7.x.
