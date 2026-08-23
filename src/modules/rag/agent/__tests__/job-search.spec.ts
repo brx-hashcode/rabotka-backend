@@ -1,4 +1,4 @@
-import { ProfileType, VerificationStatus } from '@prisma/client';
+import { AccountStatus, ProfileType, VerificationStatus } from '@prisma/client';
 import { buildTools } from '../tools';
 import { buildSystemPrompt } from '../prompts';
 
@@ -134,6 +134,7 @@ describe('the prompt that drives it', () => {
   const prompt = buildSystemPrompt({
     firstName: 'Marie',
     profileType: ProfileType.WORKER,
+    accountStatus: AccountStatus.ACTIVE,
     verificationStatus: VerificationStatus.VERIFIED,
     categorySlugs: [],
     knownCategorySlugs: [],

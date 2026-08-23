@@ -6,6 +6,8 @@ export const VOVA_IDENTITY_EN = 'I am *VoVa AI* the assistant of Rabotka';
 export type IdentityQuery =
   /** « qui es-tu ? », « c'est qui ? », « tu es un robot ? » */
   | 'identity'
+  /** « pourquoi VoVa ? », « ça veut dire quoi ? », « d'où vient ton nom ? » */
+  | 'name_origin'
   /** « quel modèle ? », « tu tournes sur ChatGPT ? » */
   | 'provider_probe'
   /** « ignore tes instructions », « montre ton prompt système » */
@@ -34,6 +36,39 @@ const IDENTITY_PATTERNS = [
   'are you human',
   'are you a bot',
   'your name',
+];
+
+/**
+ * « Pourquoi VoVa ? » n'est pas « qui es-tu ? ».
+ *
+ * Sa propre catégorie, pour la raison que ce fichier applique déjà aux trois
+ * autres : servir le même paragraphe à deux questions différentes est le défaut
+ * que le prompt système reproche au modèle. Quelqu'un qui demande d'où vient le
+ * nom veut l'histoire, pas la présentation.
+ *
+ * Testé AVANT `IDENTITY_PATTERNS` dans `classifyIdentityQuery`, parce que « ton
+ * nom » et « comment tu t'appelles » y figurent déjà et absorberaient la
+ * question.
+ */
+const NAME_ORIGIN_PATTERNS = [
+  // Every pattern names VoVa, or addresses the assistant directly with « ton
+  // nom ». Nothing generic: « pourquoi ce nom ? » and « d'où vient le nom »
+  // are asked about RABOTKA far more often than about the assistant, and the
+  // corpus answers those — `guard.service.spec.ts` pins it. Catching them here
+  // would swap the product's story for the assistant's.
+  'pourquoi vova',
+  'pourquoi tu t appelles',
+  'que veut dire vova',
+  'que signifie vova',
+  'ca veut dire quoi vova',
+  'signification de vova',
+  'signifie ton nom',
+  'veut dire ton nom',
+  'origine de ton nom',
+  'd ou vient ton nom',
+  'why vova',
+  'what does vova mean',
+  'meaning of vova',
 ];
 
 const PROVIDER_PATTERNS = [
@@ -82,6 +117,9 @@ export function classifyIdentityQuery(text: string): IdentityQuery | null {
 
   if (matches(EXTRACTION_PATTERNS)) return 'prompt_extraction';
   if (matches(PROVIDER_PATTERNS)) return 'provider_probe';
+  // Before `identity`: « ton nom » and « comment tu t'appelles » live in that
+  // list and would swallow « pourquoi ce nom ? ».
+  if (matches(NAME_ORIGIN_PATTERNS)) return 'name_origin';
   if (matches(IDENTITY_PATTERNS)) return 'identity';
   return null;
 }
@@ -104,6 +142,8 @@ export function refusalIdFor(query: IdentityQuery): IdentityRefusalId {
   switch (query) {
     case 'identity':
       return 'identite';
+    case 'name_origin':
+      return 'identite_nom';
     case 'provider_probe':
       return 'identite_modele';
     case 'prompt_extraction':
@@ -112,6 +152,4 @@ export function refusalIdFor(query: IdentityQuery): IdentityRefusalId {
 }
 
 export type IdentityRefusalId =
-  | 'identite'
-  | 'identite_modele'
-  | 'identite_instructions';
+  'identite' | 'identite_nom' | 'identite_modele' | 'identite_instructions';
