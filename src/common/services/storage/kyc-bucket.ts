@@ -70,7 +70,12 @@ export async function storageNames(
       PUBLIC_BASE_URL_CONFIG_KEY,
       PUBLIC_BASE_URL_ENV_KEY,
     ),
-    setting(systemConfig, config, PUBLIC_BUCKET_CONFIG_KEY, PUBLIC_BUCKET_ENV_KEY),
+    setting(
+      systemConfig,
+      config,
+      PUBLIC_BUCKET_CONFIG_KEY,
+      PUBLIC_BUCKET_ENV_KEY,
+    ),
     setting(systemConfig, config, KYC_BUCKET_CONFIG_KEY, KYC_BUCKET_ENV_KEY),
   ]);
 

@@ -5,6 +5,8 @@ import type { UploadApiOptions } from 'cloudinary';
 import { StorageProvider } from '@prisma/client';
 import { IStorageProvider } from '../interfaces/storage-provider.interface';
 import {
+  DownloadOptions,
+  DownloadResult,
   ExistsOptions,
   GetUrlOptions,
   UploadOptions,
@@ -126,8 +128,8 @@ export class CloudinaryStorageProvider implements IStorageProvider {
   }
 
   async exists(key: string, _options?: ExistsOptions): Promise<boolean> {
-  // Accepts `options` for interface parity. This provider serves a single
-  // container, so there is no second bucket to look in.
+    // Accepts `options` for interface parity. This provider serves a single
+    // container, so there is no second bucket to look in.
 
     try {
       const result = await cloudinary.api.resource(key);
@@ -147,5 +149,17 @@ export class CloudinaryStorageProvider implements IStorageProvider {
       );
       throw new Error(`Cloudinary exists check failed: ${err.message}`);
     }
+  }
+
+  download(_key: string, _options?: DownloadOptions): Promise<DownloadResult> {
+    // Only the object storage providers stream bytes back, and only KYC needs
+    // it. Rejecting beats returning something empty: a KYC review that
+    // silently renders nothing is the failure this route was built to remove.
+    return Promise.reject(
+      new Error(
+        'Cloudinary does not support streaming downloads. KYC documents ' +
+          'require an S3-compatible provider.',
+      ),
+    );
   }
 }

@@ -20,9 +20,12 @@ import {
 import {
   deriveKey,
   isKycKey,
+  kycContentKind,
+  kycFileAvailable,
   kycObjectRef,
   legacyKycUrl,
 } from '../../common/services/storage/kyc-key';
+import { DownloadResult } from '../../common/services/storage/types/storage.types';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
@@ -205,11 +208,30 @@ export type AdminProfilesListResponse = {
   limit: number;
 };
 
+/**
+ * What kind of thing the bytes are.
+ *
+ * The admin needs this because the stream route's path has no file extension,
+ * so the client cannot guess from a url the way it used to. Derived from the
+ * stored key, server-side, where the extension actually is.
+ */
+export type KycContentKind = 'image' | 'pdf' | 'other';
+
 export type AdminKycDocumentItem = {
   id: string;
   documentType: string | null;
   documentCategory: string;
-  documentUrl: string | null;
+  /**
+   * No url. The document is fetched from
+   * `GET /admin/profiles/:id/kyc-documents/:docId/raw`, which streams the bytes
+   * behind the admin's session.
+   *
+   * `documentUrl` used to be here, and was either a signed url that expired
+   * within the hour — the bug — or a public url to an identity document that
+   * anyone holding the link could read. Neither belongs in a JSON payload.
+   */
+  fileAvailable: boolean;
+  contentKind: KycContentKind;
   verificationStatus: string;
   verifiedAt: Date | null;
   verifiedBy: string | null;
@@ -219,7 +241,9 @@ export type AdminKycDocumentItem = {
 
 export type AdminVerificationImageItem = {
   id: string;
-  imageUrl: string;
+  /** Streamed from `.../verification-images/:imageId/raw`. See above. */
+  fileAvailable: boolean;
+  contentKind: KycContentKind;
   uploadedBy: string | null;
   createdAt: Date;
 };
@@ -787,55 +811,33 @@ export class ProfileService {
       applicationsCount: profile._count.applications,
       penaltiesCount: profile._count.penalties,
       unpaidPenaltiesCount,
-      kycDocuments: await Promise.all(
-        profile.kyc_documents.map(async (doc) => {
-          // Signed on READ, never stored: a signed url written to the database
-          // is an expired url in the database.
-          //
-          // This reverses an earlier decision, whose comment read «presigned
-          // URL re-generation is unreliable when storage config changes». That
-          // was almost certainly true at the time — `getUrl` signed against
-          // `this.bucket` unconditionally, so any object living anywhere else
-          // got a signature pointing at the wrong bucket. `GetUrlOptions.bucket`
-          // now exists and is honoured, which is what makes this reliable.
-          //
-          // The property that comment was protecting is kept: resolving one
-          // document must never fail the whole profile load. A missing blob or
-          // an unreachable provider degrades to the stored url — worth having
-          // while the backfill runs, since rows without a key still carry a
-          // working public one.
-          const documentUrl = await this.signedKycUrl(
-            doc.storage_key,
-            doc.document_url,
-          );
-          return {
-            id: doc.id,
-            documentType: doc.document_type,
-            documentCategory: doc.document_category,
-            documentUrl,
-            verificationStatus: doc.verification_status,
-            verifiedAt: doc.verified_at,
-            verifiedBy: doc.verified_by
-              ? (verifierNames.get(doc.verified_by) ?? doc.verified_by)
-              : null,
-            rejectionReason: doc.rejection_reason,
-            createdAt: doc.created_at,
-          };
-        }),
-      ),
-      verificationImages: await Promise.all(
-        profile.kyc_verification_images.map(async (img) => ({
-          id: img.id,
-          // Signed like the documents, and falling back to the stored url for
-          // the rows written before the bucket split.
-          imageUrl:
-            (await this.signedKycUrl(img.storage_key, img.image_url)) ?? '',
-          uploadedBy: img.uploaded_by
-            ? (verifierNames.get(img.uploaded_by) ?? img.uploaded_by)
-            : null,
-          createdAt: img.created_at,
-        })),
-      ),
+      // No urls here any more, signed or otherwise. An admin's browser fetches
+      // each file from the stream route, authenticated by the session it
+      // already has — so nothing in this payload expires, and nothing in it
+      // grants access to an identity document to whoever it is forwarded to.
+      kycDocuments: profile.kyc_documents.map((doc) => ({
+        id: doc.id,
+        documentType: doc.document_type,
+        documentCategory: doc.document_category,
+        fileAvailable: kycFileAvailable(doc.storage_key, doc.document_url),
+        contentKind: kycContentKind(doc.storage_key, doc.document_url),
+        verificationStatus: doc.verification_status,
+        verifiedAt: doc.verified_at,
+        verifiedBy: doc.verified_by
+          ? (verifierNames.get(doc.verified_by) ?? doc.verified_by)
+          : null,
+        rejectionReason: doc.rejection_reason,
+        createdAt: doc.created_at,
+      })),
+      verificationImages: profile.kyc_verification_images.map((img) => ({
+        id: img.id,
+        fileAvailable: kycFileAvailable(img.storage_key, img.image_url),
+        contentKind: kycContentKind(img.storage_key, img.image_url),
+        uploadedBy: img.uploaded_by
+          ? (verifierNames.get(img.uploaded_by) ?? img.uploaded_by)
+          : null,
+        createdAt: img.created_at,
+      })),
     };
   }
 
@@ -879,7 +881,7 @@ export class ProfileService {
         });
         // The url is deliberately dropped. `uploadToStorage` returns a signed
         // one, and storing it is what left KYC rows holding a dead credential;
-        // the key is the durable half and `signedKycUrl` re-signs from it.
+        // the key is the durable half, and the stream route reads from it.
         uploaded.push({ key: result.key });
       }
     }
@@ -1562,36 +1564,119 @@ export class ProfileService {
   }
 
   /**
-   * A time-limited url for one KYC file, or the stored one if it cannot be
-   * signed.
+   * Where one KYC row's bytes actually live: a bucket and a key, or null when
+   * the row points at nothing readable.
    *
-   * The fallback is not laziness, it is what makes the rollout safe: every row
-   * written before this change has `storage_key` NULL, and an admin still has
-   * to be able to review those profiles while the backfill runs. Once the
-   * backfill is done and old objects are gone from the public bucket, a null
-   * key means a genuinely broken row rather than a legacy one.
+   * Two shapes have to resolve here. A row written since the key was derived
+   * server-side carries `storage_key` and lives in the private bucket. A row
+   * written before that carries no key at all, only a legacy PUBLIC url — and
+   * that url is enough, because `deriveKey` reconstructs the key from it and
+   * the object is still in the public bucket until the backfill moves it.
    *
-   * Never throws. Reviewing a profile must not 500 because one blob moved.
+   * Reading the legacy case out of the url rather than fetching the url means
+   * the stream route works on untouched production data, so it can ship
+   * without waiting on the backfill, and it does it without the server ever
+   * making an outbound request to a url held in a database column.
    */
-  private async signedKycUrl(
+  private async resolveKycStorage(
     storageKey: string | null,
     storedUrl: string | null,
-  ): Promise<string | null> {
-    if (!storageKey) return legacyKycUrl(storedUrl);
-
-    try {
-      return await this.fileService.getPresignedUrl(
-        storageKey,
-        await kycBucket(this.systemConfig, this.configService),
-      );
-    } catch (err) {
-      this.logger.warn(
-        `Could not sign KYC url for key ${storageKey}: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      );
-      return legacyKycUrl(storedUrl);
+  ): Promise<{ bucket: string; key: string } | null> {
+    if (storageKey) {
+      return {
+        bucket: await kycBucket(this.systemConfig, this.configService),
+        key: storageKey,
+      };
     }
+
+    const legacy = legacyKycUrl(storedUrl);
+    if (!legacy) return null;
+
+    const { publicBaseUrl, buckets } = await storageNames(
+      this.systemConfig,
+      this.configService,
+    );
+    const derived = deriveKey(legacy, publicBaseUrl, buckets);
+    if (!derived || !isKycKey(derived.key)) return null;
+
+    const [publicBucket] = buckets;
+    const bucket = derived.bucket || publicBucket;
+    if (!bucket) return null;
+
+    return { bucket, key: derived.key };
+  }
+
+  /**
+   * One KYC document's bytes, for an admin who is allowed to see them.
+   *
+   * `profileId` is part of the lookup rather than checked afterwards: a
+   * document id that belongs to another profile simply does not match, so the
+   * route cannot be walked sideways by swapping one id.
+   */
+  async streamKycDocument(
+    profileId: string,
+    documentId: string,
+  ): Promise<DownloadResult & { filename: string }> {
+    const doc = await this.prisma.kycDocument.findFirst({
+      where: { id: documentId, profile_id: profileId },
+      select: {
+        storage_key: true,
+        document_url: true,
+        document_category: true,
+      },
+    });
+
+    if (!doc) {
+      throw new NotFoundException('Document introuvable.');
+    }
+
+    return this.streamKycObject(
+      doc.storage_key,
+      doc.document_url,
+      doc.document_category,
+    );
+  }
+
+  /** The same, for a verification image attached during review. */
+  async streamVerificationImage(
+    profileId: string,
+    imageId: string,
+  ): Promise<DownloadResult & { filename: string }> {
+    const img = await this.prisma.kycVerificationImage.findFirst({
+      where: { id: imageId, profile_id: profileId },
+      select: { storage_key: true, image_url: true },
+    });
+
+    if (!img) {
+      throw new NotFoundException('Image introuvable.');
+    }
+
+    return this.streamKycObject(img.storage_key, img.image_url, 'verification');
+  }
+
+  private async streamKycObject(
+    storageKey: string | null,
+    storedUrl: string | null,
+    label: string,
+  ): Promise<DownloadResult & { filename: string }> {
+    const target = await this.resolveKycStorage(storageKey, storedUrl);
+
+    if (!target) {
+      throw new NotFoundException('Fichier indisponible.');
+    }
+
+    const downloaded = await this.fileService.download(
+      target.key,
+      target.bucket,
+    );
+
+    // The route path carries no extension, so the filename is what tells a
+    // download what it is.
+    const ext = target.key.split('.').pop();
+    return {
+      ...downloaded,
+      filename: ext && ext !== target.key ? `${label}.${ext}` : label,
+    };
   }
 
   /**

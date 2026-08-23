@@ -49,6 +49,30 @@ export type ExistsOptions = {
   bucket?: string;
 };
 
+/** Where to read an object from, when it is not the default bucket. */
+export type DownloadOptions = {
+  bucket?: string;
+};
+
+/**
+ * An object's bytes, streamed.
+ *
+ * KYC files are read this way rather than through a signed url so the url
+ * never reaches the browser at all. A signed url handed to an admin's tab is a
+ * bearer credential: it survives in history and in the network panel, it works
+ * for anyone who copies it, and it goes stale while the tab sits open — which
+ * is how an ID card became a broken image in the first place.
+ *
+ * `body` is a stream, not a Buffer, because these are photographs and a review
+ * queue loads several at once; buffering each one whole would hold megabytes
+ * per concurrent request for no reason.
+ */
+export type DownloadResult = {
+  body: NodeJS.ReadableStream;
+  contentType?: string;
+  contentLength?: number;
+};
+
 export type UploadOptions = {
   mimeType?: string;
   folder?: string;

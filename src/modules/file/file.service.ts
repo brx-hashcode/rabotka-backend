@@ -3,7 +3,10 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { StorageService } from '../../common/services/storage/storage.service';
 import { ImageWatermarkService } from '../../common/services/image-watermark/image-watermark.service';
-import { UploadOptions } from '../../common/services/storage/types/storage.types';
+import {
+  DownloadResult,
+  UploadOptions,
+} from '../../common/services/storage/types/storage.types';
 
 @Injectable()
 export class FileService {
@@ -141,6 +144,18 @@ export class FileService {
    */
   async exists(storageKey: string, bucket?: string): Promise<boolean> {
     return this.storageService.exists(storageKey, {
+      ...(bucket ? { bucket } : {}),
+    });
+  }
+
+  /**
+   * An object's bytes, for streaming straight to a response.
+   *
+   * The route that serves KYC documents uses this instead of handing the
+   * browser a signed url, so the credential never leaves the server.
+   */
+  async download(storageKey: string, bucket?: string): Promise<DownloadResult> {
+    return this.storageService.download(storageKey, {
       ...(bucket ? { bucket } : {}),
     });
   }
