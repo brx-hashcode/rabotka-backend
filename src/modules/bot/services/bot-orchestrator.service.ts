@@ -242,53 +242,7 @@ export class BotOrchestratorService {
       profile.status !== AccountStatus.ACTIVE ||
       !profile.whatsapp_connected
     ) {
-      // ACTIVE but WhatsApp not yet verified — issue a 4-digit code inline,
-      // and when the user echoes it back, activate immediately.
-      // (A genuinely SUSPENDED account is already short-circuited above.)
-      if (profile.status === AccountStatus.ACTIVE) {
-        return this.handleInlineWhatsappVerification(profile, text);
-      }
-
-      // Gate: KYC must be verified before activation
-      if (profile.verification_status === VerificationStatus.REJECTED) {
-        return [KYC_REJECTED_MESSAGE];
-      }
-      if (profile.verification_status !== VerificationStatus.VERIFIED) {
-        // Still under review. One card, one button, onto the profile — the
-        // screen where the documents were submitted and where a correction is
-        // made. The old card offered a « 1 / 2 » menu that no longer exists,
-        // so answering it returned the same card.
-        return [this.handlePendingKycInput(profile.first_name)];
-      }
-
-      // KYC verified + user types Menu → activate account
-      if (
-        CMD_MENU.some(
-          (c) => normalizedInput === c || normalizedInput.startsWith(c + ' '),
-        )
-      ) {
-        await this.prisma.profile.update({
-          where: { id: profileId },
-          data: {
-            whatsapp_connected: true,
-            status: AccountStatus.ACTIVE,
-            // First activation wins — see `activated_at` on the model.
-            activated_at: profile.activated_at ?? new Date(),
-          },
-        });
-        await this.walletService
-          .grantWelcomeCredit(profileId, profile.profile_type)
-          .catch((err: unknown) =>
-            this.logger.error(
-              `Failed to grant welcome credit to profile ${profileId}`,
-              err,
-            ),
-          );
-        return [welcomePlatformMessage()];
-      }
-
-      // PENDING_ACTIVATION + any other input → point at the app
-      return [KYC_APPROVED_PROMPT_MESSAGE];
+      return this.handleNotActivated(profileId, text, profile, normalizedInput);
     }
 
     if (profile.billing_status !== BillingStatus.CLEAR) {
@@ -304,14 +258,138 @@ export class BotOrchestratorService {
   }
 
   /**
-   * Input handling for a profile whose KYC is still under review: one template
-   * carrying a "Gérer mon profil" button, whatever they typed. The old reply
-   * was a 1/2 menu whose options each returned a webview template anyway.
+   * Everything behind the two walls: an ACTIVE profile whose number is not
+   * linked yet, and any profile that has not been activated.
+   *
+   * Extracted from `handle` rather than left inline — the KYC branch inside it
+   * grew a VoVa call, and `handle` was already the longest method here.
+   */
+  private async handleNotActivated(
+    profileId: string,
+    text: string,
+    profile: NonNullable<Awaited<ReturnType<typeof this.loadProfile>>>,
+    normalizedInput: string,
+  ): Promise<string[]> {
+    // ACTIVE but WhatsApp not yet verified — issue a 4-digit code inline, and
+    // when the user echoes it back, activate immediately. Deliberately ahead of
+    // the assistant: the expected reply here is a 4-digit code, which has no
+    // business reaching a model.
+    // (A genuinely SUSPENDED account is already short-circuited by the caller.)
+    if (profile.status === AccountStatus.ACTIVE) {
+      return this.handleInlineWhatsappVerification(profile, text);
+    }
+
+    // Gate: KYC must be verified before activation.
+    //
+    // The gate decides ACTIVATION, not whether the person deserves an answer.
+    // It used to decide both: whatever someone under review typed, they got the
+    // same card and never reached `routeMessage`, the only caller of VoVa. So
+    // the PENDING and REJECTED branches of `buildSystemPrompt` — « ne lui
+    // promets ni résultat ni délai », the whole refused-KYC path — were
+    // unreachable for the exact population they were written for, and « j'ai un
+    // problème » was answered with a button.
+    //
+    // The deterministic words keep their card; everything else is free text,
+    // and free text is what the assistant is for.
+    if (profile.verification_status !== VerificationStatus.VERIFIED) {
+      const vovaReply = await this.vovaReplyOrNull(profile, text);
+      if (vovaReply) return vovaReply;
+
+      // Still under review. One card, one button, onto the profile — the screen
+      // where the documents were submitted and where a correction is made. The
+      // old card offered a « 1 / 2 » menu that no longer exists, so answering it
+      // returned the same card.
+      return profile.verification_status === VerificationStatus.REJECTED
+        ? [KYC_REJECTED_MESSAGE]
+        : [this.handlePendingKycInput(profile.first_name)];
+    }
+
+    // KYC verified + user types Menu → activate account
+    if (
+      CMD_MENU.some(
+        (c) => normalizedInput === c || normalizedInput.startsWith(c + ' '),
+      )
+    ) {
+      await this.prisma.profile.update({
+        where: { id: profileId },
+        data: {
+          whatsapp_connected: true,
+          status: AccountStatus.ACTIVE,
+          // First activation wins — see `activated_at` on the model.
+          activated_at: profile.activated_at ?? new Date(),
+        },
+      });
+      await this.walletService
+        .grantWelcomeCredit(profileId, profile.profile_type)
+        .catch((err: unknown) =>
+          this.logger.error(
+            `Failed to grant welcome credit to profile ${profileId}`,
+            err,
+          ),
+        );
+      return [welcomePlatformMessage()];
+    }
+
+    // PENDING_ACTIVATION + any other input → point at the app
+    return [KYC_APPROVED_PROMPT_MESSAGE];
+  }
+
+  /**
+   * The card for a profile whose KYC is still under review: one template, one
+   * "Voir mon profil" button. The old reply was a 1/2 menu whose options each
+   * returned a webview template anyway.
+   *
+   * No longer the answer to *whatever* they typed — free text goes to the
+   * assistant first, and this is what the deterministic words get, plus the
+   * fallback when the assistant declines.
    */
   private handlePendingKycInput(firstName: string): string {
     return templateReply(
       'kycPendingMenu',
       WHATSAPP_TEMPLATES.kycPendingMenu.variables(firstName),
+    );
+  }
+
+  /**
+   * Let VoVa answer, unless the text is one of the words the product prints.
+   *
+   * `null` means "answer it yourself" — the caller keeps its own default, which
+   * is the point: the assistant is a first refusal on free text, never the
+   * owner of a reply. Every VoVa failure already returns null on its side
+   * (disabled, out of bucket, timed out, thrown), so the deterministic answer
+   * survives the model being down.
+   *
+   * NOT on the menu vocabulary: `BotRouterService` returns `unknown` for
+   * everything when no flow is live, so « menu », « start » and a bare « / »
+   * arrive here too, and routing the documented entry point through a model
+   * would make the one command every template tells users to type depend on a
+   * provider being up. `isDeterministicCommand` matches those EXACTLY, so
+   * « bonjour », « 1 » and « j'ai un problème » still reach the assistant.
+   *
+   * Shared by `routeMessage` and the KYC wall. It was inline in the former, and
+   * that is precisely how the latter went without it: a profile under review
+   * returned its card before `routeMessage` ever ran, so the PENDING and
+   * REJECTED branches written into `buildSystemPrompt` had never once executed.
+   */
+  private async vovaReplyOrNull(
+    profile: NonNullable<Awaited<ReturnType<typeof this.loadProfile>>>,
+    text: string,
+  ): Promise<string[] | null> {
+    if (
+      isDeterministicCommand(
+        stripChatFormattingChars(text).trim().toLowerCase(),
+      )
+    ) {
+      return null;
+    }
+    return this.vova.handle(
+      {
+        id: profile.id,
+        first_name: profile.first_name,
+        profile_type: profile.profile_type,
+        verification_status: profile.verification_status,
+      },
+      text,
     );
   }
 
@@ -586,29 +664,8 @@ export class BotOrchestratorService {
 
       // Nothing recognised and no live flow. Before this, the welcome card was
       // the whole answer — so a worker typing « j'ai un problème » got a menu.
-      //
-      // Vova AI gets first refusal on exactly that traffic. NOT on the menu
-      // vocabulary: `BotRouterService` returns `unknown` for everything when no
-      // flow is live, so « menu », « bonjour », « start » and a bare « / » all
-      // arrive here too, and routing the documented entry point through a model
-      // would make the one command every template tells users to type depend on
-      // a provider being up. Those keep their deterministic card.
-      if (
-        !isDeterministicCommand(
-          stripChatFormattingChars(text).trim().toLowerCase(),
-        )
-      ) {
-        const vovaReply = await this.vova.handle(
-          {
-            id: profile.id,
-            first_name: profile.first_name,
-            profile_type: profile.profile_type,
-            verification_status: profile.verification_status,
-          },
-          text,
-        );
-        if (vovaReply) return vovaReply;
-      }
+      const vovaReply = await this.vovaReplyOrNull(profile, text);
+      if (vovaReply) return vovaReply;
 
       return [welcomePlatformMessage()];
     } catch (err) {
@@ -626,7 +683,7 @@ export class BotOrchestratorService {
       last_name: profile.last_name,
       phone: profile.phone,
       email: profile.email,
-      profile_type: profile.profile_type as BotProfile['profile_type'],
+      profile_type: profile.profile_type,
       status: profile.status,
       reliability_score: profile.reliability_score,
       verification_status: profile.verification_status,
