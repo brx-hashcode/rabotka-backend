@@ -1,26 +1,46 @@
 import type { Projection } from './projections';
 
+/**
+ * What `etat_du_profil` may show the account owner.
+ *
+ * KEYS ARE camelCase, and that is not cosmetic. This projection is applied to
+ * `ProfileService.findById`, which returns `ProfileMeResponse` — a camelCase
+ * DTO. The list used to be snake_case, and `project()` skips a field that is
+ * absent from the source WITHOUT a word, so fourteen of the seventeen entries
+ * were dropped on every call: no verification status, no reliability score, no
+ * categories, no refusal reason. Only `status`, `city` and `description`
+ * happened to spell the same in both.
+ *
+ * The tool's own description promises the model "statut de vérification et
+ * MOTIF DE REFUS éventuel, score de fiabilité, note, ville, domaines" and tells
+ * it never to state those without calling the tool. It was asking for facts the
+ * tool could not return. `profile-projection.spec.ts` now pins every key here
+ * against the DTO so this cannot rot again.
+ *
+ * Five fields were declared and have no counterpart on `ProfileMeResponse` at
+ * all — `billing_status`, `kyc_verification_note`, `rating_avg`, `rating_count`,
+ * `portfolio_slug`. They were never delivered, so dropping them changes no
+ * behaviour; add them to `findById` first if the assistant should have them.
+ */
 export const PROFILE_STATE: Projection = {
   owner: [
-    'first_name',
-    'profile_type',
+    'firstName',
+    'profileType',
     'status',
-    'billing_status',
-    'verification_status',
-    // Why a KYC submission was refused, in the admin's own words. Without it the
-    // assistant can only say "it was refused", which helps nobody.
-    'rejection_reason',
-    'kyc_verification_note',
-    'whatsapp_connected',
-    'reliability_score',
-    'rating_avg',
-    'rating_count',
+    'verificationStatus',
+    // Why a KYC submission was refused, and why an account was suspended, in
+    // the admin's own words. Without them the assistant can only say "it was
+    // refused", which helps nobody — and the user has already received this
+    // exact text by WhatsApp, so repeating it discloses nothing new.
+    'rejectionReason',
+    'suspensionReason',
+    'whatsappConnected',
+    'reliabilityScore',
     'city',
-    'country_name',
-    'avatar_url',
+    'countryName',
+    'avatarUrl',
     'description',
-    'categories',
-    'portfolio_slug',
+    'categoryNames',
   ],
   public: [],
 };
