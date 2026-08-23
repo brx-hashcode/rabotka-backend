@@ -34,7 +34,7 @@
 import { config } from 'dotenv';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '@prisma/client';
-import { deriveKey } from './kyc-key';
+import { deriveKey } from '../src/common/services/storage/kyc-key';
 import {
   CopyObjectCommand,
   DeleteObjectCommand,
@@ -87,8 +87,15 @@ async function required(configKey: string, envKey: string): Promise<string> {
   return value;
 }
 
-/** Phase 1 — write the derived key back to the database. */
-async function derive(publicBaseUrl: string, bucketName: string) {
+/**
+ * Phase 1 — write the derived key back to the database.
+ *
+ * `buckets` carries BOTH bucket names, not just the public one. A signed url
+ * can name either, in the path or in the hostname depending on how the SDK was
+ * configured when it was minted, and a name the deriver does not recognise ends
+ * up baked into the key as a leading folder.
+ */
+async function derive(publicBaseUrl: string, buckets: string[]) {
   let written = 0;
   let already = 0;
 
@@ -120,8 +127,8 @@ async function derive(publicBaseUrl: string, bucketName: string) {
       continue;
     }
 
-    const key = deriveKey(row.url, publicBaseUrl, bucketName);
-    if (!key) {
+    const derived = deriveKey(row.url, publicBaseUrl, buckets);
+    if (!derived) {
       unresolved.push({
         ...row,
         why: 'url matches neither the public base nor a signed url',
@@ -133,12 +140,12 @@ async function derive(publicBaseUrl: string, bucketName: string) {
       if (row.table === 'kyc_documents') {
         await prisma.kycDocument.update({
           where: { id: row.id },
-          data: { storage_key: key },
+          data: { storage_key: derived.key },
         });
       } else {
         await prisma.kycVerificationImage.update({
           where: { id: row.id },
-          data: { storage_key: key },
+          data: { storage_key: derived.key },
         });
       }
     }
@@ -307,7 +314,7 @@ async function main() {
     credentials: { accessKeyId, secretAccessKey },
   });
 
-  const derived = await derive(publicBaseUrl, publicBucket);
+  const derived = await derive(publicBaseUrl, [publicBucket, privateBucket]);
   const moved = await move(s3, publicBucket, privateBucket);
 
   log(
