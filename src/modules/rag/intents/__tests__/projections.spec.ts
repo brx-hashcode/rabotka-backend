@@ -21,19 +21,19 @@ beforeEach(() => errorSpy.mockClear());
 describe('project', () => {
   it('keeps only the allow-listed fields', () => {
     const out = project(
-      { first_name: 'Awa', profile_type: 'WORKER', secret_note: 'nope' },
+      { firstName: 'Awa', profileType: 'WORKER', secret_note: 'nope' },
       PROFILE_STATE,
       'owner',
       'PROFILE_STATE',
     );
-    expect(out).toEqual({ first_name: 'Awa', profile_type: 'WORKER' });
+    expect(out).toEqual({ firstName: 'Awa', profileType: 'WORKER' });
   });
 
   // The property the whole layer exists for: a column added to Prisma next
   // sprint is invisible until somebody lists it.
   it('fails closed on a field nobody classified', () => {
     const out = project(
-      { first_name: 'Awa', new_column_added_next_sprint: 'leak' },
+      { firstName: 'Awa', new_column_added_next_sprint: 'leak' },
       PROFILE_STATE,
       'owner',
       'PROFILE_STATE',
@@ -43,12 +43,12 @@ describe('project', () => {
 
   it('drops a phone number even when the record is otherwise allowed', () => {
     const out = project(
-      { first_name: 'Awa', phone: '+242060000000', email: 'a@b.cg' },
+      { firstName: 'Awa', phone: '+242060000000', email: 'a@b.cg' },
       PROFILE_STATE,
       'owner',
       'PROFILE_STATE',
     );
-    expect(out).toEqual({ first_name: 'Awa' });
+    expect(out).toEqual({ firstName: 'Awa' });
   });
 
   it('scrubs a never-expose field hiding inside an allowed relation', () => {
@@ -77,7 +77,7 @@ describe('project', () => {
 
   it('says nothing about another profile through an owner-only DTO', () => {
     const out = project(
-      { first_name: 'Awa', reliability_score: 92 },
+      { firstName: 'Awa', reliabilityScore: 92 },
       PROFILE_STATE,
       'public',
       'PROFILE_STATE',

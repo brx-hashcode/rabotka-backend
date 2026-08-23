@@ -33,8 +33,20 @@ export const NEVER_EXPOSE = new Set<string>([
   'kyc_verification_images',
   'verification_images',
   'selfie_url',
-  'suspension_reason',
-  'rejection_reason',
+  // `suspension_reason` and `rejection_reason` used to sit here, and it was a
+  // mistake of category. Everything else on this list is a CREDENTIAL or a
+  // THIRD PARTY's data — an OTP, a national id, a document URL, someone's
+  // phone. Those two are the account owner's own information about their own
+  // account, and the user has already received the exact text: it fills {{2}}
+  // of the suspension and refusal templates the moment an admin decides.
+  //
+  // Blocking them did not protect anything. It only stopped the assistant
+  // repeating what WhatsApp had already delivered, which is precisely the
+  // question those users come back to ask. `PROFILE_STATE` scopes them to the
+  // `owner` audience and `public` is empty, so no other user can reach them.
+  //
+  // Note `kyc_verification_note` — another admin-typed field — was never on
+  // this list, which is how inconsistent the boundary had become.
 ]);
 
 export function isNeverExpose(key: string): boolean {

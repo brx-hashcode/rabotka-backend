@@ -32,7 +32,11 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '@prisma/client';
 import Redis from 'ioredis';
 import twilio from 'twilio';
-import { WHATSAPP_TEMPLATES } from '../src/common/constants/whatsapp-templates';
+import {
+  WHATSAPP_TEMPLATES,
+  templateCloudName,
+} from '../src/common/constants/whatsapp-templates';
+import { toTemplatePayload } from '../src/modules/whatsapp/providers/cloud/cloud.mapper';
 import { WhatsAppLoginLinkService } from '../src/modules/auth/whatsapp-login-link.service';
 
 config({ path: '.env.local' });
@@ -79,21 +83,67 @@ async function resolveTwilio(): Promise<{
 /** Digits only, so +242 06 99 17 686 and +242069917686 both match. */
 const digits = (s: string) => s.replace(/\D/g, '');
 
+/**
+ * Send the card through Meta Cloud, the provider production actually runs on.
+ *
+ * The payload comes from `toTemplatePayload` — the SAME mapper the outbound
+ * processor uses — rather than a hand-built body. Everything this script is
+ * meant to prove lives in `buildComponents`: which variable goes in the body,
+ * which one fills the button, whether a header is required. A script that
+ * rebuilt that would pass while production was broken, which is the failure
+ * this whole file exists to catch.
+ */
+async function sendViaCloud(
+  to: string,
+  variables: Record<string, string>,
+): Promise<string> {
+  const phoneNumberId = process.env.WHATSAPP_CLOUD_PHONE_NUMBER_ID;
+  const token = process.env.WHATSAPP_CLOUD_ACCESS_TOKEN;
+  const version = process.env.WHATSAPP_CLOUD_API_VERSION ?? 'v25.0';
+  if (!phoneNumberId || !token) {
+    throw new Error(
+      'WHATSAPP_CLOUD_PHONE_NUMBER_ID / WHATSAPP_CLOUD_ACCESS_TOKEN missing.',
+    );
+  }
+
+  const payload = toTemplatePayload(to, 'kycPendingMenu', variables);
+
+  const res = await fetch(
+    `https://graph.facebook.com/${version}/${phoneNumberId}/messages`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    },
+  );
+  const body: unknown = await res.json().catch(() => null);
+  if (!res.ok) {
+    const err =
+      typeof body === 'object' && body !== null && 'error' in body
+        ? (body as { error: { message?: string; code?: number } }).error
+        : undefined;
+    throw new Error(
+      `Cloud send failed (${res.status}): ${err?.message ?? res.statusText}` +
+        (err?.code ? ` [${err.code}]` : ''),
+    );
+  }
+  const sent = body as { messages?: { id: string }[] };
+  return sent.messages?.[0]?.id ?? '(no id returned)';
+}
+
 async function main(): Promise<void> {
   const redis = new Redis(process.env.REDIS_URL ?? 'redis://localhost:6379');
 
   try {
     const template = WHATSAPP_TEMPLATES.kycPendingMenu;
     // v4 is Cloud-only and carries no Twilio SID: v3's SID pointed at the card
-    // with the numbered menu, which the bot no longer honours. Testing the
-    // Twilio path now requires passing a SID explicitly.
+    // with the numbered menu, which the bot no longer honours. So Cloud is the
+    // default path here — it is also the one production runs on — and Twilio is
+    // reachable only by passing a SID explicitly.
     const contentSid = process.env.CONTENT_SID;
-    if (!contentSid) {
-      throw new Error(
-        'kycPendingMenu is Cloud-only since v4 — set CONTENT_SID to a Twilio ' +
-          'template to exercise that path, or send through the Cloud provider.',
-      );
-    }
 
     const wanted = digits(TEST_NUMBER);
     const candidates = await prisma.profile.findMany({
@@ -128,7 +178,9 @@ async function main(): Promise<void> {
 
     const finalVariables = { ...variables, [suffixVar]: code ?? destination };
 
-    console.log(`Template : ${contentSid}`);
+    const cloudName = templateCloudName('kycPendingMenu');
+    console.log(`Template : ${contentSid ?? cloudName}`);
+    console.log(`Provider : ${contentSid ? 'twilio' : 'cloud'}`);
     console.log(`Profile  : ${profile.first_name} (${profile.status})`);
     console.log(`To       : ${TEST_NUMBER}`);
     console.log(`Destination        : ${destination}`);
@@ -155,6 +207,17 @@ async function main(): Promise<void> {
 
     if (DRY_RUN) {
       console.log('\nDry run — nothing sent.');
+      return;
+    }
+
+    if (!contentSid) {
+      const sent = await sendViaCloud(TEST_NUMBER, finalVariables);
+      console.log(`\n✔  Sent via Cloud. message id: ${sent}`);
+      console.log(
+        'A returned id only means Meta accepted it. Check the handset: the ' +
+          'copy must not say "compléter", the button must read "Voir mon ' +
+          'profil", and tapping it must land on /profile signed in.',
+      );
       return;
     }
 

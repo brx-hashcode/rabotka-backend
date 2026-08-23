@@ -13,9 +13,7 @@ import {
  * to fix in Business Manager, not a value to quietly change here.
  */
 export type WhatsAppTemplateCategory =
-  | 'UTILITY'
-  | 'AUTHENTICATION'
-  | 'MARKETING';
+  'UTILITY' | 'AUTHENTICATION' | 'MARKETING';
 
 export interface WhatsAppTemplate<Args extends unknown[]> {
   /**
@@ -172,6 +170,15 @@ export const KYC_REJECTED_CTA_PATH = 'claims/new';
 /** Where the KYC-pending card's single button lands: the profile. */
 export const KYC_PENDING_CTA_PATH = 'profile';
 export const SUSPENDED_CTA_PATH = 'home';
+/**
+ * Where the generic door lands: `/home`, which is role-aware.
+ *
+ * One destination for all three walled states on purpose. The card says nothing
+ * about WHY the account is walled — the assistant does that — so sending a
+ * suspended user to the claim form or a refused one to their profile would be
+ * the card making a guess it has no business making.
+ */
+export const OPEN_APP_CTA_PATH = 'home';
 
 /**
  * Reads a Meta template name from the environment, falling back to the name the
@@ -346,6 +353,31 @@ export const WHATSAPP_TEMPLATES = {
     variables: (firstName: string) => ({
       '1': firstName,
       '2': KYC_PENDING_CTA_PATH,
+    }),
+  } satisfies WhatsAppTemplate<[firstName: string]>,
+
+  /**
+   * The door, for an account that has no menu.
+   *
+   * ONE card for all three walled states — suspended, KYC under review, KYC
+   * refused — because the card is no longer where the explanation lives. The
+   * assistant answers those people now, and it knows the account status and the
+   * admin's reason; a per-state card would repeat it worse and go stale.
+   *
+   * So this says nothing about the state. It exists for one reason: a bare link
+   * does not open WhatsApp's in-app browser, only a template's CTA button does.
+   * That is what makes it a template at all — the bot replies inside the 24h
+   * service window, where free-form text would otherwise do.
+   */
+  openApp: {
+    cloudOnly: true,
+    urlSuffixVar: '2',
+    urlSuffixMode: 'shortlink',
+    category: 'UTILITY',
+    cloud: { name: cloudName('TPL_CLOUD_OPEN_APP', 'rabotka_open_app_v1') },
+    variables: (firstName: string) => ({
+      '1': firstName,
+      '2': OPEN_APP_CTA_PATH,
     }),
   } satisfies WhatsAppTemplate<[firstName: string]>,
 

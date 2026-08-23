@@ -10,3 +10,27 @@ allowBuilds:
   puppeteer: true
   sharp: true
   unrs-resolver: true
+
+# Versions corrigées forcées sur des dépendances transitives dont le parent
+# épingle une version vulnérable. Chacune est notée avec son parent, pour qu'on
+# sache quand la retirer : dès que le parent monte de lui-même, l'override
+# devient inutile et doit disparaître.
+overrides:
+  # tar@6.2.1 <- fastembed. onnxruntime-node installe déjà tar@7 dans le même
+  # arbre, donc les deux majeures y cohabitaient déjà.
+  tar: ^7.5.22
+  # undici@5.29.0 <- @vercel/blob. cheerio installe déjà 6.28 ici.
+  undici: ^6.28.0
+  # linkify-it@5.0.0 <- mailparser <- preview-email. Correctif de patch.
+  linkify-it: ^5.0.2
+  # typeorm@0.3.28 <- @nestjs/terminus. Correctif de patch.
+  typeorm: ^0.3.31
+  # nanoid@5.1.5. Correctif de patch.
+  nanoid: ^5.1.16
+  # uuid@8.3.2 <- exceljs. typeorm tire déjà uuid@11 dans le même arbre.
+  uuid: ^11.1.1
+  # nodemailer@8.0.5 <- @nestjs-modules/mailer, alors que la dépendance directe
+  # est déjà en 9.x. Aligne les deux.
+  nodemailer: ^9.0.1
+  # deepmerge-ts@7.1.5 <- @prisma/config.
+  deepmerge-ts: ^8.0.0

@@ -636,7 +636,11 @@ export class DocumentService {
 </head>
 <body>${html}</body>
 </html>`,
-          { waitUntil: 'networkidle0' },
+          // 'load', not 'networkidle0': puppeteer's types stopped accepting the
+          // latter for setContent, and rightly — there is no navigation here, so
+          // there is no network to go idle. 'load' still waits for the images
+          // and fonts the markup references, which is what the PDF needs.
+          { waitUntil: 'load' },
         );
         const pdf = await page.pdf({
           format: 'A4',
