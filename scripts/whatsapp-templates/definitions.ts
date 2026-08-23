@@ -290,8 +290,29 @@ export function authoredTemplates(): Partial<
      * only a template's CTA button does. Without that constraint this would be
      * free-form text: the bot answers inside the 24h service window.
      */
+    /**
+     * v2, and the version bump is about Meta's CATEGORY, not the wording.
+     *
+     * v1 was declared UTILITY and Meta approved it as MARKETING. That is not
+     * cosmetic: a MARKETING template can be dropped by a user's marketing
+     * opt-out, and this card is the ONLY door an account behind a wall has.
+     * Silencing it recreates the exact failure this whole change set exists to
+     * fix.
+     *
+     * The cause was structural rather than accidental. What made v1 generic —
+     * saying nothing about the account's state — is what made it read as an
+     * invitation. Meta calls a message UTILITY when it follows up on a request
+     * the customer made or reports on their account; a standalone « open the
+     * app » is a promotion.
+     *
+     * So v2 keeps the state out of the copy and anchors it on the one thing
+     * that is always true when this card is sent: the person has just written
+     * in. That makes it a service reply, which is what it actually is — the
+     * bot only sends it in response to an inbound message, inside the 24h
+     * window.
+     */
     openApp: {
-      name: 'rabotka_open_app_v1',
+      name: 'rabotka_open_app_v2',
       language: 'fr',
       category: 'UTILITY',
       components: [
@@ -300,7 +321,7 @@ export function authoredTemplates(): Partial<
           text: [
             'Bonjour {{1}},',
             '',
-            'Vous pouvez ouvrir Rabotka ici pour consulter votre compte.',
+            'Suite à votre message, voici l’accès à votre espace Rabotka. Vous pouvez y consulter l’état de votre compte et vos informations.',
             '',
             'L’équipe Rabotka',
           ].join('\n'),
@@ -311,7 +332,11 @@ export function authoredTemplates(): Partial<
           buttons: [
             {
               type: 'URL',
-              text: 'Ouvrir l’application',
+              // « Voir mon compte » rather than « Ouvrir l'application »: it
+              // names what the button reports on, which is the half that reads
+              // as utility. An app-opening invitation is what got v1 filed as
+              // marketing.
+              text: 'Voir mon compte',
               // The variable ends the URL, as WhatsApp requires; the outbound
               // processor swaps it for a one-tap login code.
               url: 'https://rabotka.work/s/{{1}}',
