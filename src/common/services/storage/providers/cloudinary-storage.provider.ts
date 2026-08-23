@@ -5,6 +5,7 @@ import type { UploadApiOptions } from 'cloudinary';
 import { StorageProvider } from '@prisma/client';
 import { IStorageProvider } from '../interfaces/storage-provider.interface';
 import {
+  ExistsOptions,
   GetUrlOptions,
   UploadOptions,
   UploadResult,
@@ -124,7 +125,10 @@ export class CloudinaryStorageProvider implements IStorageProvider {
     return Promise.resolve(url);
   }
 
-  async exists(key: string): Promise<boolean> {
+  async exists(key: string, _options?: ExistsOptions): Promise<boolean> {
+  // Accepts `options` for interface parity. This provider serves a single
+  // container, so there is no second bucket to look in.
+
     try {
       const result = await cloudinary.api.resource(key);
       return !!result;

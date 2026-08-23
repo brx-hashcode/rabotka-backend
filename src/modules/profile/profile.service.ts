@@ -13,7 +13,16 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { kycBucket } from '../../common/services/storage/kyc-bucket';
+import {
+  kycBucket,
+  storageNames,
+} from '../../common/services/storage/kyc-bucket';
+import {
+  deriveKey,
+  isKycKey,
+  kycObjectRef,
+  legacyKycUrl,
+} from '../../common/services/storage/kyc-key';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
@@ -841,15 +850,22 @@ export class ProfileService {
     // same papers — and they were going to the public bucket under a guessable
     // filename. They are only ever displayed in the admin detail view, so
     // nothing public breaks by moving them.
-    const uploaded: { url: string; key: string }[] = [];
+    const uploaded: { key: string }[] = [];
+    const verificationBucket = await kycBucket(
+      this.systemConfig,
+      this.configService,
+    );
     if (files && files.length > 0) {
       for (const file of files) {
         const result = await this.fileService.uploadToStorage(file, {
           folder: 'kyc-verification',
           access: 'private',
-          bucket: await kycBucket(this.systemConfig, this.configService),
+          bucket: verificationBucket,
         });
-        uploaded.push({ url: result.url, key: result.key });
+        // The url is deliberately dropped. `uploadToStorage` returns a signed
+        // one, and storing it is what left KYC rows holding a dead credential;
+        // the key is the durable half and `signedKycUrl` re-signs from it.
+        uploaded.push({ key: result.key });
       }
     }
 
@@ -886,11 +902,11 @@ export class ProfileService {
         where: { profile_id: profileId },
       }),
 
-      ...uploaded.map(({ url, key }) =>
+      ...uploaded.map(({ key }) =>
         this.prisma.kycVerificationImage.create({
           data: {
             profile_id: profileId,
-            image_url: url,
+            image_url: kycObjectRef(verificationBucket, key),
             storage_key: key,
             uploaded_by: adminUserId === 'system' ? null : adminUserId,
           },
@@ -1546,7 +1562,7 @@ export class ProfileService {
     storageKey: string | null,
     storedUrl: string | null,
   ): Promise<string | null> {
-    if (!storageKey) return storedUrl ?? null;
+    if (!storageKey) return legacyKycUrl(storedUrl);
 
     try {
       return await this.fileService.getPresignedUrl(
@@ -1559,7 +1575,7 @@ export class ProfileService {
           err instanceof Error ? err.message : String(err)
         }`,
       );
-      return storedUrl ?? null;
+      return legacyKycUrl(storedUrl);
     }
   }
 
@@ -1595,9 +1611,123 @@ export class ProfileService {
     return { url: result.url, key: result.key };
   }
 
+  /**
+   * The object key for one submitted KYC document, decided HERE rather than
+   * accepted from the caller.
+   *
+   * This is the fix for the bug that made a document unviewable the hour after
+   * it was uploaded. `storage_key` used to come only from an optional DTO
+   * field, so a client that did not send one — a bundle loaded before the
+   * private-bucket rollout, a mobile app, anything calling the API directly —
+   * produced a row with a NULL key and a *signed* url frozen into
+   * `document_url`. Nothing could re-sign it, and the signature died in an
+   * hour. Deriving the key from the url the caller already sent removes the
+   * dependency on the caller behaving well.
+   *
+   * The hint is still honoured when it is a plausible KYC key, because a
+   * well-behaved client knows the key exactly and the url is only ever a
+   * reconstruction of it. But it is a candidate, not an answer: `isKycKey`
+   * rejects anything outside the KYC folders, and the object still has to be
+   * found in a bucket. Returning a caller-supplied string unchecked is what
+   * this method exists to stop doing.
+   *
+   * Accepts an object that is still in the PUBLIC bucket. That is precisely the
+   * case that produced this report — an onboarding session that uploaded some
+   * files before the cutover and submitted after it — and rejecting it would
+   * fail a signup for a file that is present and correct. It is logged, and the
+   * backfill relocates it.
+   */
+  private async resolveKycObject(
+    label: string,
+    url: string,
+    hintKey?: string,
+  ): Promise<string> {
+    const { publicBaseUrl, buckets } = await storageNames(
+      this.systemConfig,
+      this.configService,
+    );
+    const derived = deriveKey(url, publicBaseUrl, buckets);
+
+    if (hintKey && !isKycKey(hintKey)) {
+      this.logger.warn(
+        `Ignoring ${label} storage key hint that is not a KYC key: ${hintKey}`,
+      );
+    }
+
+    // The hint first — it is exact when it is right. The derived key is the
+    // fallback that makes a silent client harmless.
+    const candidates = [
+      hintKey && isKycKey(hintKey) ? hintKey : null,
+      derived && isKycKey(derived.key) ? derived.key : null,
+    ].filter((key): key is string => !!key);
+
+    if (candidates.length === 0) {
+      throw new BadRequestException(
+        `Le fichier ${label} n'est pas un document KYC valide.`,
+      );
+    }
+
+    const privateBucket = await kycBucket(
+      this.systemConfig,
+      this.configService,
+    );
+    const [publicBucket] = buckets;
+
+    for (const key of new Set(candidates)) {
+      if (await this.fileService.exists(key, privateBucket)) return key;
+
+      // Not in the private bucket. Before moving on, look in the public one: a
+      // session that straddled the rollout uploaded there, and the file is real.
+      if (publicBucket && (await this.fileService.exists(key, publicBucket))) {
+        this.logger.warn(
+          `${label} is still in the public bucket (${key}). Accepting it and ` +
+            'recording the key; run prisma/backfill-kyc-storage-keys.ts to move it.',
+        );
+        return key;
+      }
+    }
+
+    throw new BadRequestException(
+      `Le fichier ${label} est introuvable. Merci de le téléverser à nouveau.`,
+    );
+  }
+
   private async createProfileWithDocuments(createProfileDto: CreateProfileDto) {
     const { kycDocumentUrl, kycSelfieUrl, kycDocumentBackUrl } =
       createProfileDto;
+
+    // Resolved BEFORE the transaction opens. These do network I/O against R2,
+    // and holding a Postgres transaction open across it is how a slow bucket
+    // becomes a pool exhaustion; a rejection here also has to leave no
+    // half-written profile behind.
+    const wantsBackSide =
+      createProfileDto.documentType !== DocumentType.PASSPORT &&
+      !!kycDocumentBackUrl;
+
+    const [documentKey, documentBackKey, selfieKey] = await Promise.all([
+      this.resolveKycObject(
+        "recto du document d'identité",
+        kycDocumentUrl,
+        createProfileDto.kycDocumentKey,
+      ),
+      wantsBackSide
+        ? this.resolveKycObject(
+            "verso du document d'identité",
+            kycDocumentBackUrl,
+            createProfileDto.kycDocumentBackKey,
+          )
+        : Promise.resolve(undefined),
+      this.resolveKycObject(
+        'selfie',
+        kycSelfieUrl,
+        createProfileDto.kycSelfieKey,
+      ),
+    ]);
+
+    const privateBucket = await kycBucket(
+      this.systemConfig,
+      this.configService,
+    );
 
     return this.prisma.$transaction(async (tx) => {
       const createdProfile = await this.createProfileRecord(
@@ -1622,33 +1752,29 @@ export class ProfileService {
       // type gets three. Gating on documentType rather than merely on the URL
       // being present is what makes a back sent alongside a PASSPORT a no-op
       // instead of an orphan row no reviewer would ever be shown.
-      const wantsBackSide =
-        createProfileDto.documentType !== DocumentType.PASSPORT &&
-        !!kycDocumentBackUrl;
-
-      // The sixth argument is the storage key, and until now none of these
-      // three calls passed it — which is why `storage_key` is NULL on every
-      // KYC row in the database and no document could be served through a
-      // signed url. It arrives optional: a client that predates the change
-      // sends no key, the row keeps its url, and the backfill picks it up.
+      //
+      // The keys are the ones this service derived, not the ones the client
+      // sent, and the url is now a canonical `s3://` reference rather than
+      // whatever the client round-tripped. A signed url written here is an
+      // expired url written here.
       await Promise.all([
         this.createKycDocumentRecord(
           tx,
           createdProfile.id,
           createProfileDto.documentType,
           'DOCUMENT',
-          kycDocumentUrl,
-          createProfileDto.kycDocumentKey,
+          privateBucket,
+          documentKey,
         ),
-        ...(wantsBackSide
+        ...(wantsBackSide && documentBackKey
           ? [
               this.createKycDocumentRecord(
                 tx,
                 createdProfile.id,
                 createProfileDto.documentType,
                 'DOCUMENT_BACK',
-                kycDocumentBackUrl,
-                createProfileDto.kycDocumentBackKey,
+                privateBucket,
+                documentBackKey,
               ),
             ]
           : []),
@@ -1657,8 +1783,8 @@ export class ProfileService {
           createdProfile.id,
           createProfileDto.documentType,
           'SELFIE',
-          kycSelfieUrl,
-          createProfileDto.kycSelfieKey,
+          privateBucket,
+          selfieKey,
         ),
       ]);
 
@@ -1722,20 +1848,20 @@ export class ProfileService {
     profileId: string,
     documentType: CreateProfileDto['documentType'] | undefined,
     documentCategory: KycDocumentCategory,
-    documentUrl: string,
-    storageKey?: string,
+    bucket: string,
+    storageKey: string,
   ) {
     const data: {
       profile_id: string;
       document_type?: CreateProfileDto['documentType'];
       document_category: KycDocumentCategory;
       document_url: string;
-      storage_key?: string;
+      storage_key: string;
       verification_status: 'PENDING';
     } = {
       profile_id: profileId,
       document_category: documentCategory,
-      document_url: documentUrl,
+      document_url: kycObjectRef(bucket, storageKey),
       storage_key: storageKey,
       verification_status: 'PENDING',
     };

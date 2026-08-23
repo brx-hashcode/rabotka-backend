@@ -151,9 +151,7 @@ export class CreateProfileDto extends LocationDto {
 
   @ApiPropertyOptional({
     description:
-      'Storage key of the KYC identity document, returned by ' +
-      'POST /profile/kyc-upload. Required to serve the file through a ' +
-      'time-limited signed url.',
+      'Storage key of the KYC identity document, returned by POST /profile/kyc-upload. A hint, not a trusted input: the backend derives the key from the url and ignores this when the two disagree.',
   })
   @IsOptional()
   @IsString()
@@ -162,7 +160,7 @@ export class CreateProfileDto extends LocationDto {
 
   @ApiPropertyOptional({
     description:
-      'Storage key of the KYC selfie, returned by POST /profile/kyc-upload.',
+      'Storage key of the KYC selfie, returned by POST /profile/kyc-upload. A hint, not a trusted input: the backend derives the key from the url and ignores this when the two disagree.',
   })
   @IsOptional()
   @IsString()
@@ -171,8 +169,7 @@ export class CreateProfileDto extends LocationDto {
 
   @ApiPropertyOptional({
     description:
-      'Storage key of the back of the KYC identity document, returned by ' +
-      'POST /profile/kyc-upload.',
+      'Storage key of the back of the KYC identity document, returned by POST /profile/kyc-upload. A hint, not a trusted input: the backend derives the key from the url and ignores this when the two disagree.',
   })
   @IsOptional()
   @IsString()

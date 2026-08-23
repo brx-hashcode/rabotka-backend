@@ -7,6 +7,11 @@ import { SystemConfigService } from '../../../modules/system-config/system-confi
 export const KYC_BUCKET_CONFIG_KEY = 'storage.cloudflare.kyc_bucket_name';
 export const KYC_BUCKET_ENV_KEY = 'CLOUDFLARE_KYC_BUCKET_NAME';
 
+const PUBLIC_BUCKET_CONFIG_KEY = 'storage.cloudflare.bucket_name';
+const PUBLIC_BUCKET_ENV_KEY = 'CLOUDFLARE_BUCKET_NAME';
+const PUBLIC_BASE_URL_CONFIG_KEY = 'storage.cloudflare.public_base_url';
+const PUBLIC_BASE_URL_ENV_KEY = 'CLOUDFLARE_PUBLIC_BASE_URL';
+
 /**
  * The bucket that holds identity documents, and nothing else.
  *
@@ -32,6 +37,46 @@ export const KYC_BUCKET_ENV_KEY = 'CLOUDFLARE_KYC_BUCKET_NAME';
  * readable. That is exactly the shape of failure this change exists to remove,
  * so an unset value stops the upload instead.
  */
+/** SystemConfig first, env second — the resolution order every storage setting
+ *  uses. Blank rather than throwing; only `kycBucket` has a value so dangerous
+ *  to guess that its absence must stop the request. */
+async function setting(
+  systemConfig: SystemConfigService | undefined,
+  config: ConfigService,
+  configKey: string,
+  envKey: string,
+): Promise<string> {
+  const fromDb = await systemConfig?.get(configKey, '').catch(() => '');
+  return (fromDb || config.get<string>(envKey, '')).trim();
+}
+
+/**
+ * The names needed to read a stored url back: the base the public bucket is
+ * served under, and the two bucket names a signed url might carry.
+ *
+ * `deriveKey` needs all three to tell a key from a bucket name, and every
+ * caller of it in the runtime needs them resolved the same way the providers
+ * resolve theirs — otherwise the deriver disagrees with the uploader about
+ * what the buckets are called.
+ */
+export async function storageNames(
+  systemConfig: SystemConfigService | undefined,
+  config: ConfigService,
+): Promise<{ publicBaseUrl: string; buckets: string[] }> {
+  const [publicBaseUrl, publicBucket, privateBucket] = await Promise.all([
+    setting(
+      systemConfig,
+      config,
+      PUBLIC_BASE_URL_CONFIG_KEY,
+      PUBLIC_BASE_URL_ENV_KEY,
+    ),
+    setting(systemConfig, config, PUBLIC_BUCKET_CONFIG_KEY, PUBLIC_BUCKET_ENV_KEY),
+    setting(systemConfig, config, KYC_BUCKET_CONFIG_KEY, KYC_BUCKET_ENV_KEY),
+  ]);
+
+  return { publicBaseUrl, buckets: [publicBucket, privateBucket] };
+}
+
 export async function kycBucket(
   systemConfig: SystemConfigService | undefined,
   config: ConfigService,
@@ -39,11 +84,12 @@ export async function kycBucket(
   // `.catch()` because a DB or Redis hiccup must not be the thing that decides
   // where an ID card is stored — it falls through to env, and if env is empty
   // too, it throws below rather than guessing.
-  const fromDb = await systemConfig
-    ?.get(KYC_BUCKET_CONFIG_KEY, '')
-    .catch(() => '');
-
-  const bucket = (fromDb || config.get<string>(KYC_BUCKET_ENV_KEY, '')).trim();
+  const bucket = await setting(
+    systemConfig,
+    config,
+    KYC_BUCKET_CONFIG_KEY,
+    KYC_BUCKET_ENV_KEY,
+  );
 
   if (!bucket) {
     throw new Error(

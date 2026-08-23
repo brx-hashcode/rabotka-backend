@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { StorageProviderFactory } from './storage-provider.factory';
 import { IStorageProvider } from './interfaces/storage-provider.interface';
 import {
+  ExistsOptions,
   GetUrlOptions,
   UploadOptions,
   UploadResult,
@@ -53,7 +54,7 @@ export class StorageService implements OnModuleInit {
     return this.ensureProvider().getUrl(key, options);
   }
 
-  async exists(key: string): Promise<boolean> {
-    return this.ensureProvider().exists(key);
+  async exists(key: string, options?: ExistsOptions): Promise<boolean> {
+    return this.ensureProvider().exists(key, options);
   }
 }

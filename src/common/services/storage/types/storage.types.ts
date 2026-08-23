@@ -37,6 +37,18 @@ export type GetUrlOptions = {
   bucket?: string;
 };
 
+/**
+ * Where to look for an object.
+ *
+ * Same reason `GetUrlOptions` grew a bucket: an existence check against the
+ * default bucket answers a different question than the caller asked, and it
+ * answers it wrongly in the direction that matters — "no such KYC document"
+ * for a document that is sitting safely in the private bucket.
+ */
+export type ExistsOptions = {
+  bucket?: string;
+};
+
 export type UploadOptions = {
   mimeType?: string;
   folder?: string;

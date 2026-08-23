@@ -4,6 +4,7 @@ import { put, del, head } from '@vercel/blob';
 import { StorageProvider } from '@prisma/client';
 import { IStorageProvider } from '../interfaces/storage-provider.interface';
 import {
+  ExistsOptions,
   GetUrlOptions,
   UploadOptions,
   UploadResult,
@@ -86,7 +87,10 @@ export class VercelBlobStorageProvider implements IStorageProvider {
     }
   }
 
-  async exists(key: string): Promise<boolean> {
+  async exists(key: string, _options?: ExistsOptions): Promise<boolean> {
+  // Accepts `options` for interface parity. This provider serves a single
+  // container, so there is no second bucket to look in.
+
     try {
       await head(key, {
         token: this.token,
