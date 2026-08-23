@@ -210,3 +210,62 @@ describe('l’invitation à ouvrir l’application', () => {
     ).not.toContain('Ce compte est SUSPENDU');
   });
 });
+
+/**
+ * L'heure, que le modèle n'avait jamais eue.
+ *
+ * Les deux prompts s'en accommodaient en lui interdisant de choisir — « recopie
+ * le mot de la personne ». Ça marche tant que quelqu'un salue en premier, et
+ * laisse deviner dès que VoVa ouvre la conversation. Le transcript du 21/08
+ * montre le résultat : « Bonsoir » à 14h35.
+ */
+describe('l’heure de Brazzaville', () => {
+  // Brazzaville est UTC+1 sans heure d'été, donc un instant UTC suffit.
+  const at = (utcIso: string) =>
+    buildSystemPrompt({
+      ...base,
+      verificationStatus: VerificationStatus.VERIFIED,
+      now: new Date(utcIso),
+    });
+
+  it('annonce l’heure locale, pas l’heure UTC', () => {
+    // 13h00 UTC = 14h00 à Brazzaville.
+    expect(at('2026-08-23T13:00:00Z')).toContain('Il est 14h00 à Brazzaville');
+  });
+
+  it.each([
+    ['2026-08-23T05:00:00Z', '06h00', 'Bonjour'],
+    ['2026-08-23T13:35:00Z', '14h35', 'Bonjour'],
+    // 16h59 UTC = 17h59 local : encore le jour, à une minute près.
+    ['2026-08-23T16:59:00Z', '17h59', 'Bonjour'],
+    // 17h00 UTC = 18h00 local : bascule.
+    ['2026-08-23T17:00:00Z', '18h00', 'Bonsoir'],
+    ['2026-08-23T21:10:00Z', '22h10', 'Bonsoir'],
+  ])('à %s dit « %s » et salue par « %s »', (utc, hhmm, greeting) => {
+    const prompt = at(utc);
+    expect(prompt).toContain(`Il est ${hhmm} à Brazzaville`);
+    expect(prompt).toContain(`dis « ${greeting} »`);
+  });
+
+  // Le cas du 21/08, celui qui a motivé tout ça.
+  it('ne dit pas « Bonsoir » à 14h35', () => {
+    expect(at('2026-08-23T13:35:00Z')).not.toContain('dis « Bonsoir »');
+  });
+
+  /**
+   * La règle du miroir reste PRIORITAIRE sur l'horloge. Quelqu'un qui écrit
+   * « bonsoir » à 15h reçoit « Bonsoir » : on ne corrige personne sur sa propre
+   * salutation, et l'heure ne sert qu'à ce qu'il n'y a rien à refléter.
+   */
+  it('garde la paire d’exemples qui montre le miroir', () => {
+    const prompt = at('2026-08-23T13:00:00Z');
+    expect(prompt).toContain('« bonjour » → « Bonjour *Marie* ! »');
+    expect(prompt).toContain('« bonsoir » → « Bonsoir *Marie* ! »');
+  });
+
+  it('dit explicitement de recopier même contre l’heure', () => {
+    expect(at('2026-08-23T13:00:00Z')).toContain(
+      "Recopie son mot même s'il ne colle pas à l'heure",
+    );
+  });
+});

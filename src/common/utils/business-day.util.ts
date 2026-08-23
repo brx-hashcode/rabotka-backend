@@ -11,7 +11,7 @@
  * is UTC+1 with **no daylight saving**, so a fixed offset is exact all year and
  * needs no timezone database.
  */
-const BUSINESS_UTC_OFFSET_HOURS = 1;
+export const BUSINESS_UTC_OFFSET_HOURS = 1;
 const HOUR_MS = 60 * 60 * 1000;
 const OFFSET_MS = BUSINESS_UTC_OFFSET_HOURS * HOUR_MS;
 
