@@ -1,4 +1,6 @@
 import {
+  DownloadOptions,
+  DownloadResult,
   ExistsOptions,
   GetUrlOptions,
   UploadOptions,
@@ -39,4 +41,16 @@ export interface IStorageProvider {
    * @returns True if file exists, false otherwise
    */
   exists(key: string, options?: ExistsOptions): Promise<boolean>;
+
+  /**
+   * Read a file's bytes back.
+   *
+   * Needed so KYC documents can be streamed through an authenticated route
+   * instead of being handed to the browser as a signed url. Providers that
+   * cannot do this throw — no KYC deployment runs on them.
+   *
+   * @param key - Storage key of the file
+   * @param options - Which bucket to read from, when not the default one
+   */
+  download(key: string, options?: DownloadOptions): Promise<DownloadResult>;
 }

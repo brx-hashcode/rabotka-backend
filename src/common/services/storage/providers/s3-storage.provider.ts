@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   S3Client,
@@ -11,6 +11,8 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { StorageProvider } from '@prisma/client';
 import { IStorageProvider } from '../interfaces/storage-provider.interface';
 import {
+  DownloadOptions,
+  DownloadResult,
   ExistsOptions,
   GetUrlOptions,
   SIGNED_URL_TTL_SECONDS,
@@ -146,8 +148,8 @@ export class S3StorageProvider implements IStorageProvider {
   }
 
   async exists(key: string, _options?: ExistsOptions): Promise<boolean> {
-  // Accepts `options` for interface parity. This provider serves a single
-  // container, so there is no second bucket to look in.
+    // Accepts `options` for interface parity. This provider serves a single
+    // container, so there is no second bucket to look in.
 
     try {
       const command = new HeadObjectCommand({
@@ -169,6 +171,45 @@ export class S3StorageProvider implements IStorageProvider {
         error.stack,
       );
       throw new Error(`S3 exists check failed: ${error.message}`);
+    }
+  }
+
+  async download(
+    key: string,
+    _options?: DownloadOptions,
+  ): Promise<DownloadResult> {
+    // Accepts `options` for interface parity. This provider serves a single
+    // container, so there is no second bucket to read from.
+
+    try {
+      const response = await this.s3Client.send(
+        new GetObjectCommand({
+          Bucket: this.bucket,
+          Key: key,
+        }),
+      );
+
+      if (!response.Body) {
+        throw new Error('empty response body');
+      }
+
+      return {
+        body: response.Body as NodeJS.ReadableStream,
+        contentType: response.ContentType,
+        contentLength: response.ContentLength,
+      };
+    } catch (error: any) {
+      if (
+        error.name === 'NoSuchKey' ||
+        error.$metadata?.httpStatusCode === 404
+      ) {
+        throw new NotFoundException(`Object not found: ${key}`);
+      }
+      this.logger.error(
+        `Failed to download file: ${error.message}`,
+        error.stack,
+      );
+      throw new Error(`S3 download failed: ${error.message}`);
     }
   }
 }

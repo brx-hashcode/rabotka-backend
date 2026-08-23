@@ -4,6 +4,8 @@ import { put, del, head } from '@vercel/blob';
 import { StorageProvider } from '@prisma/client';
 import { IStorageProvider } from '../interfaces/storage-provider.interface';
 import {
+  DownloadOptions,
+  DownloadResult,
   ExistsOptions,
   GetUrlOptions,
   UploadOptions,
@@ -88,8 +90,8 @@ export class VercelBlobStorageProvider implements IStorageProvider {
   }
 
   async exists(key: string, _options?: ExistsOptions): Promise<boolean> {
-  // Accepts `options` for interface parity. This provider serves a single
-  // container, so there is no second bucket to look in.
+    // Accepts `options` for interface parity. This provider serves a single
+    // container, so there is no second bucket to look in.
 
     try {
       await head(key, {
@@ -106,5 +108,17 @@ export class VercelBlobStorageProvider implements IStorageProvider {
       );
       throw new Error(`Vercel Blob exists check failed: ${error.message}`);
     }
+  }
+
+  download(_key: string, _options?: DownloadOptions): Promise<DownloadResult> {
+    // Only the object storage providers stream bytes back, and only KYC needs
+    // it. Rejecting beats returning something empty: a KYC review that
+    // silently renders nothing is the failure this route was built to remove.
+    return Promise.reject(
+      new Error(
+        'Vercel Blob does not support streaming downloads. KYC documents ' +
+          'require an S3-compatible provider.',
+      ),
+    );
   }
 }
