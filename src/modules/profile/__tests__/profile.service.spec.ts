@@ -1,4 +1,4 @@
-import { BadRequestException, Logger } from '@nestjs/common';
+import { BadRequestException, Logger, NotFoundException } from '@nestjs/common';
 import { ProfileService } from '../profile.service';
 import { GeoService } from '../../geo/geo.service';
 
@@ -66,10 +66,12 @@ function makePrisma() {
     kycDocument: {
       updateMany: jest.fn().mockResolvedValue({}),
       create: jest.fn().mockResolvedValue({}),
+      findFirst: jest.fn().mockResolvedValue(null),
     },
     kycVerificationImage: {
       deleteMany: jest.fn().mockResolvedValue({}),
       create: jest.fn().mockResolvedValue({}),
+      findFirst: jest.fn().mockResolvedValue(null),
     },
     file: {
       create: jest.fn().mockResolvedValue({}),
@@ -106,6 +108,14 @@ function makeFileService() {
     // bucket before it writes a row. Default to "it is there"; the tests that
     // care about a missing object override this.
     exists: jest.fn().mockResolvedValue(true),
+    getPresignedUrl: jest
+      .fn()
+      .mockResolvedValue('https://signed.example.com/x'),
+    download: jest.fn().mockResolvedValue({
+      body: { pipe: jest.fn() },
+      contentType: 'image/jpeg',
+      contentLength: 100,
+    }),
   };
 }
 
@@ -1189,7 +1199,7 @@ describe('ProfileService', () => {
       expect(result.verifiedBy).toBeNull();
     });
 
-    it('returns document_url directly without file service calls', async () => {
+    it('describes the file without putting a url on the wire', async () => {
       prisma.profile.findUnique.mockResolvedValue({
         ...baseProfile,
         verified_by: null,
@@ -1213,9 +1223,15 @@ describe('ProfileService', () => {
         categories: [],
       });
       const result = await service.getProfileDetailForAdmin('p-1');
-      expect(result.kycDocuments[0].documentUrl).toBe(
-        'https://storage/folder/file.jpg',
-      );
+
+      expect(result.kycDocuments[0]).toMatchObject({
+        fileAvailable: true,
+        contentKind: 'image',
+      });
+      // The whole point of the stream route: nothing in this payload is a
+      // credential, so nothing in it can expire or be forwarded.
+      expect(JSON.stringify(result)).not.toContain('https://');
+      expect(fileService.getPresignedUrl).not.toHaveBeenCalled();
     });
   });
 
@@ -1411,6 +1427,96 @@ describe('ProfileService', () => {
         30 * 24 * 60 * 60,
         expect.any(String),
       );
+    });
+  });
+
+  // Stage 3: the url leaves the payload entirely and the bytes come back
+  // through a route that re-checks the admin's session on every request.
+  describe('streaming KYC files to an admin', () => {
+    const doc = {
+      storage_key: 'kyc-documents/id.jpg',
+      document_url: 's3://rabotka-kyc/kyc-documents/id.jpg',
+      document_category: 'DOCUMENT',
+    };
+
+    it('reads the object out of the private bucket', async () => {
+      prisma.kycDocument.findFirst.mockResolvedValue(doc);
+
+      const result = await service.streamKycDocument('p-1', 'doc-1');
+
+      expect(fileService.download).toHaveBeenCalledWith(
+        'kyc-documents/id.jpg',
+        'rabotka-kyc',
+      );
+      expect(result.contentType).toBe('image/jpeg');
+      expect(result.filename).toBe('DOCUMENT.jpg');
+    });
+
+    it('scopes the lookup to the profile in the path', async () => {
+      // The IDOR guard is the `where`, not a check afterwards: a document id
+      // belonging to another profile simply does not match.
+      prisma.kycDocument.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.streamKycDocument('p-1', 'someone-elses-doc'),
+      ).rejects.toBeInstanceOf(NotFoundException);
+
+      expect(prisma.kycDocument.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'someone-elses-doc', profile_id: 'p-1' },
+        }),
+      );
+      expect(fileService.download).not.toHaveBeenCalled();
+    });
+
+    it('serves a legacy row by reading the key out of its public url', async () => {
+      // Rows written before the key was derived server-side have no
+      // `storage_key` at all. Reconstructing it from the stored public url is
+      // what lets this route ship without waiting on the backfill.
+      prisma.kycDocument.findFirst.mockResolvedValue({
+        storage_key: null,
+        document_url: 'https://cdn.example.com/kyc-documents/legacy.jpg',
+        document_category: 'SELFIE',
+      });
+
+      await service.streamKycDocument('p-1', 'doc-1');
+
+      expect(fileService.download).toHaveBeenCalledWith(
+        'kyc-documents/legacy.jpg',
+        'rabotka-public',
+      );
+    });
+
+    it('refuses a legacy row whose url is a dead signature', async () => {
+      // The exact rows this whole change exists for. An expired signed url is
+      // not a location, so there is nothing to read and the admin should be
+      // told the file is unavailable rather than shown a broken image.
+      prisma.kycDocument.findFirst.mockResolvedValue({
+        storage_key: null,
+        document_url:
+          'https://acct.r2.cloudflarestorage.com/kyc-documents/x.jpg?X-Amz-Signature=dead',
+        document_category: 'DOCUMENT',
+      });
+
+      await expect(
+        service.streamKycDocument('p-1', 'doc-1'),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(fileService.download).not.toHaveBeenCalled();
+    });
+
+    it('streams a verification image the same way', async () => {
+      prisma.kycVerificationImage.findFirst.mockResolvedValue({
+        storage_key: 'kyc-verification/proof.png',
+        image_url: 's3://rabotka-kyc/kyc-verification/proof.png',
+      });
+
+      const result = await service.streamVerificationImage('p-1', 'img-1');
+
+      expect(fileService.download).toHaveBeenCalledWith(
+        'kyc-verification/proof.png',
+        'rabotka-kyc',
+      );
+      expect(result.filename).toBe('verification.png');
     });
   });
 });

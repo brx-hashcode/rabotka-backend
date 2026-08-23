@@ -182,6 +182,89 @@ export class AdminProfileController {
     return await this.profileService.getProfileDetailForAdmin(id);
   }
 
+  /**
+   * The bytes of one KYC document, streamed behind the admin session.
+   *
+   * This replaces handing the browser a signed url. A signed url is a bearer
+   * credential: it works for anyone who copies it out of the network panel, it
+   * lingers in history, and it goes stale while the tab sits open — which is
+   * how an identity document turned into a broken image an hour after upload.
+   * Here the url never exists, and the check happens on every single request.
+   *
+   * `no-store` because the alternative is an identity document sitting in an
+   * admin's disk cache after they log out.
+   */
+  @Get(':id/kyc-documents/:documentId/raw')
+  @Roles(UserRole.MODERATOR)
+  @ApiOperation({
+    summary: 'Stream a KYC document (admin only)',
+    description:
+      'Returns the raw bytes, authenticated by the admin session. No url is ' +
+      'ever issued for the underlying object.',
+  })
+  @ApiResponse({ status: 200, description: 'The file bytes' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({
+    status: 404,
+    description: 'No such document on this profile, or the file is gone',
+  })
+  async streamKycDocument(
+    @Param('id') id: string,
+    @Param('documentId') documentId: string,
+    @Res() res: Response,
+  ): Promise<void> {
+    const file = await this.profileService.streamKycDocument(id, documentId);
+    this.sendKycFile(res, file);
+  }
+
+  @Get(':id/verification-images/:imageId/raw')
+  @Roles(UserRole.MODERATOR)
+  @ApiOperation({
+    summary: 'Stream a KYC verification image (admin only)',
+    description: 'As above, for an image attached during review.',
+  })
+  @ApiResponse({ status: 200, description: 'The file bytes' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({
+    status: 404,
+    description: 'No such image on this profile, or the file is gone',
+  })
+  async streamVerificationImage(
+    @Param('id') id: string,
+    @Param('imageId') imageId: string,
+    @Res() res: Response,
+  ): Promise<void> {
+    const file = await this.profileService.streamVerificationImage(id, imageId);
+    this.sendKycFile(res, file);
+  }
+
+  private sendKycFile(
+    res: Response,
+    file: {
+      body: NodeJS.ReadableStream;
+      contentType?: string;
+      contentLength?: number;
+      filename: string;
+    },
+  ): void {
+    res.setHeader(
+      'Content-Type',
+      file.contentType || 'application/octet-stream',
+    );
+    if (file.contentLength !== undefined) {
+      res.setHeader('Content-Length', String(file.contentLength));
+    }
+    // `inline` so the admin's <img> renders it rather than downloading it; the
+    // filename is only there for when a reviewer does save a copy.
+    res.setHeader('Content-Disposition', `inline; filename="${file.filename}"`);
+    res.setHeader('Cache-Control', 'private, no-store');
+    // The bytes are a photograph of somebody's ID; nothing should be sniffing
+    // them into a different content type and rendering them as a document.
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+
+    file.body.pipe(res);
+  }
+
   @Get(':id/logs')
   @Roles(UserRole.MODERATOR)
   @ApiOperation({

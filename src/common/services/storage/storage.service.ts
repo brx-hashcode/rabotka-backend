@@ -2,6 +2,8 @@ import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { StorageProviderFactory } from './storage-provider.factory';
 import { IStorageProvider } from './interfaces/storage-provider.interface';
 import {
+  DownloadOptions,
+  DownloadResult,
   ExistsOptions,
   GetUrlOptions,
   UploadOptions,
@@ -56,5 +58,12 @@ export class StorageService implements OnModuleInit {
 
   async exists(key: string, options?: ExistsOptions): Promise<boolean> {
     return this.ensureProvider().exists(key, options);
+  }
+
+  async download(
+    key: string,
+    options?: DownloadOptions,
+  ): Promise<DownloadResult> {
+    return this.ensureProvider().download(key, options);
   }
 }

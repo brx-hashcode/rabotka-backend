@@ -145,6 +145,62 @@ export function legacyKycUrl(storedUrl: string | null): string | null {
  * would accept any key the caller cared to name and hand back a signed url for
  * it — an arbitrary-object read against the private bucket.
  */
+/**
+ * The best guess at an object key for a row, for questions that do not need
+ * the answer to be authoritative — "is there a file", "what kind of file".
+ *
+ * `storage_key` when the row has one; otherwise whatever the legacy public url
+ * spells out. Deliberately loose about buckets, because neither caller cares
+ * where the object lives, only what its name ends in.
+ */
+function keyish(storageKey: string | null, storedUrl: string | null): string {
+  if (storageKey) return storageKey;
+
+  const legacy = legacyKycUrl(storedUrl);
+  if (!legacy) return '';
+
+  try {
+    return decodeURIComponent(new URL(legacy).pathname);
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Whether the admin can expect the stream route to return bytes.
+ *
+ * A row with neither a key nor a legacy public url points at nothing, and the
+ * UI should say so plainly rather than render an image element that fails.
+ */
+export function kycFileAvailable(
+  storageKey: string | null,
+  storedUrl: string | null,
+): boolean {
+  return keyish(storageKey, storedUrl) !== '';
+}
+
+const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif'];
+
+/**
+ * What the admin should render the bytes with.
+ *
+ * Decided here rather than in the client because the stream route's path has
+ * no extension to read. The admin used to sniff the url for one; take the url
+ * away and that check silently starts answering "not an image" for everything.
+ */
+export function kycContentKind(
+  storageKey: string | null,
+  storedUrl: string | null,
+): 'image' | 'pdf' | 'other' {
+  const key = keyish(storageKey, storedUrl);
+  const ext = key.split('.').pop()?.toLowerCase();
+
+  if (!ext || ext === key) return 'other';
+  if (IMAGE_EXTENSIONS.includes(ext)) return 'image';
+  if (ext === 'pdf') return 'pdf';
+  return 'other';
+}
+
 export function isKycKey(key: string): boolean {
   if (!key || key.startsWith('/')) return false;
 
