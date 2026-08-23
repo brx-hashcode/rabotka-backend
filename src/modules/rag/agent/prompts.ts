@@ -1,4 +1,4 @@
-import { ProfileType, VerificationStatus } from '@prisma/client';
+import { AccountStatus, ProfileType, VerificationStatus } from '@prisma/client';
 import { VOVA_IDENTITY_FR } from './identity';
 import { languageDirective, type ReplyLanguage } from './language';
 
@@ -12,6 +12,12 @@ export interface PromptContext {
   firstName: string | null;
   profileType: ProfileType;
   verificationStatus: VerificationStatus;
+  /**
+   * Suspended, or not yet activated. The assistant now answers behind those
+   * walls, and it cannot be allowed to talk to those people as if the app were
+   * fully open to them — see `accessLines`.
+   */
+  accountStatus: AccountStatus;
   categorySlugs: string[];
   knownCategorySlugs: string[];
   /** Corpus passages retrieved for THIS message, before the model ran. */
@@ -219,6 +225,7 @@ export function buildSystemPrompt(ctx: PromptContext): string {
     // retrieval remonte sur ces questions. Ce prompt a déjà été dégradé une fois
     // par accumulation.
     ...verificationLines(ctx.verificationStatus),
+    ...accessLines(ctx.accountStatus, ctx.verificationStatus),
     `\nUne seule exception, tout à la fin : si on te demande QUI ou CE QUE TU ES — toi, l'assistant — réponds « ${VOVA_IDENTITY_FR} ». Une question sur Rabotka, son nom ou ce qu'il fait n'est PAS une question sur toi : réponds sur le produit.`,
   ]
     .filter((line) => line !== '')
@@ -233,6 +240,64 @@ export function buildSystemPrompt(ctx: PromptContext): string {
  * eux — « la vérification n'est pas encore validée » servie aussi bien à
  * quelqu'un qui attend qu'à quelqu'un dont le dossier a été refusé.
  */
+/**
+ * Le compte est-il derrière un mur ? Suspendu, ou pas encore activé.
+ *
+ * Ce sont les seuls états où l'assistant répond à quelqu'un qui n'a PAS de menu
+ * : le bot leur renvoyait une carte et rien d'autre. Un profil actif garde son
+ * menu complet et ses cartes à boutons.
+ */
+export function isWalled(
+  account: AccountStatus,
+  verification: VerificationStatus,
+): boolean {
+  return (
+    account === AccountStatus.SUSPENDED ||
+    verification !== VerificationStatus.VERIFIED
+  );
+}
+
+/**
+ * La porte d'entrée, pour les seuls comptes qui n'en ont pas d'autre.
+ *
+ * Deux choses, et uniquement derrière un mur :
+ *
+ * 1. NE PAS MENTIR SUR CE QUI EST POSSIBLE. Le haut du prompt dit à tout le
+ *    monde « déjà inscrite et déjà connectée ». Pour un compte suspendu c'est à
+ *    moitié faux, et sans cette ligne le modèle propose de postuler à une
+ *    mission — précisément ce que la suspension interdit.
+ * 2. OUVRIR L'APPLICATION. `/start` est la seule porte de ces gens-là : le bot
+ *    répond aux mots déterministes par une carte à bouton, et ce bouton porte
+ *    un code de connexion à usage unique (`MINTABLE_STATUSES` couvre SUSPENDED
+ *    et PENDING_ACTIVATION, donc le lien ouvre vraiment l'app).
+ *
+ * Volontairement PAS pour un profil actif : il a déjà le menu, et lui répéter
+ * `/start` à chaque réponse serait du bruit.
+ *
+ * Même forme que `verificationLines` : une ligne, pas six. Ce prompt a déjà été
+ * dégradé une fois par accumulation.
+ */
+function accessLines(
+  account: AccountStatus,
+  verification: VerificationStatus,
+): string[] {
+  if (!isWalled(account, verification)) return [];
+
+  const lines: string[] = [];
+
+  if (account === AccountStatus.SUSPENDED) {
+    lines.push(
+      "\nCe compte est SUSPENDU. La personne peut consulter son compte, mais elle ne peut ni postuler, ni publier de mission, ni débloquer un contact tant qu'il n'est pas rétabli : ne lui propose aucune de ces actions. Pour contester ou comprendre, le canal est une réclamation — tapez *support* pour joindre l'équipe.",
+    );
+  }
+
+  lines.push(
+    "\nCette personne n'a pas accès au menu du bot. À la fin de ta réponse, propose-lui d'ouvrir l'application en tapant */start* — c'est sa seule porte d'entrée. Une invitation courte, sur sa propre ligne, jamais un paragraphe, et jamais deux fois dans le même message.",
+  );
+
+  return lines;
+}
+
 function verificationLines(status: VerificationStatus): string[] {
   switch (status) {
     case VerificationStatus.VERIFIED:

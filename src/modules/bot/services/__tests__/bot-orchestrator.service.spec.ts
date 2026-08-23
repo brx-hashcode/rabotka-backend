@@ -549,13 +549,76 @@ describe('BotOrchestratorService', () => {
   });
 
   describe('handle() — SUSPENDED profile', () => {
-    it('returns accountSuspendedBotMessage for SUSPENDED account', async () => {
-      deps.prisma.profile.findUnique.mockResolvedValue({
-        ...mockActiveProfile,
-        status: 'SUSPENDED',
-      });
-      const result = await service.handle(PROFILE_ID, PHONE, 'Menu');
-      expect(result[0]).toContain('suspendu');
+    const suspendedProfile = {
+      ...mockActiveProfile,
+      status: 'SUSPENDED',
+      suspension_reason: 'Comportement signalé',
+    };
+
+    // The card, not the old support message: it carries the reason AND a button
+    // into the app, which is what makes « tapez /start » a door rather than a
+    // loop back to the same reply.
+    it.each(['Menu', 'start', 'payer'])(
+      'answers "%s" with the door card, without consulting the assistant',
+      async (input) => {
+        deps.prisma.profile.findUnique.mockResolvedValue(suspendedProfile);
+        deps.vova.handle.mockClear();
+
+        const result = await service.handle(PROFILE_ID, PHONE, input);
+
+        expect(deps.vova.handle).not.toHaveBeenCalled();
+        expect(result[0]).toContain('[TPL:openApp]');
+      },
+    );
+
+    // A suspended account is not a closed one — it could ask nothing at all
+    // before this, every message returning the same support card.
+    it('hands free text to the assistant', async () => {
+      deps.prisma.profile.findUnique.mockResolvedValue(suspendedProfile);
+      deps.vova.handle.mockClear();
+      deps.vova.handle.mockResolvedValue(['réponse de Vova']);
+
+      const result = await service.handle(
+        PROFILE_ID,
+        PHONE,
+        'pourquoi mon compte est suspendu ?',
+      );
+
+      expect(deps.vova.handle).toHaveBeenCalledTimes(1);
+      expect(result).toEqual(['réponse de Vova']);
+    });
+
+    it('falls back to the door card when the assistant declines', async () => {
+      deps.prisma.profile.findUnique.mockResolvedValue(suspendedProfile);
+      deps.vova.handle.mockResolvedValue(null);
+
+      const result = await service.handle(PROFILE_ID, PHONE, 'une question');
+
+      expect(result[0]).toContain('[TPL:openApp]');
+    });
+
+    // The assistant must not offer to apply or publish to someone who cannot,
+    // so it is told the account status rather than left to infer it.
+    it('tells the assistant the account is suspended', async () => {
+      deps.prisma.profile.findUnique.mockResolvedValue(suspendedProfile);
+      deps.vova.handle.mockClear();
+
+      await service.handle(PROFILE_ID, PHONE, 'une question');
+
+      expect(deps.vova.handle).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'SUSPENDED' }),
+        'une question',
+      );
+    });
+
+    // Intercepted above the suspension branch, in every account state.
+    it('still answers /support with the contacts, not the assistant', async () => {
+      deps.prisma.profile.findUnique.mockResolvedValue(suspendedProfile);
+      deps.vova.handle.mockClear();
+
+      await service.handle(PROFILE_ID, PHONE, 'support');
+
+      expect(deps.vova.handle).not.toHaveBeenCalled();
     });
   });
 
@@ -581,18 +644,107 @@ describe('BotOrchestratorService', () => {
           c[0]?.data?.status !== undefined,
       );
 
-    it('answers any input with the KYC-pending template while under review', async () => {
-      // One template with a "Gérer mon profil" button replaces the old typed
-      // 1/2 menu — whose options each only returned a webview template anyway.
-      for (const input of ['menu', 'start', 'bonjour', '1', '2', '7']) {
+    // The deterministic half. One template with a "Gérer mon profil" button
+    // replaces the old typed 1/2 menu — whose options each only returned a
+    // webview template anyway — and the words templates print must not wait on
+    // a model.
+    it.each(['menu', 'start', 'payer'])(
+      'answers "%s" itself while under review, without consulting the assistant',
+      async (input) => {
         deps.prisma.profile.findUnique.mockResolvedValue({
           ...pendingProfile,
           verification_status: 'PENDING',
         });
+        deps.vova.handle.mockClear();
+
         const result = await service.handle(PROFILE_ID, PHONE, input);
-        expect(result[0]).toContain('[TPL:kycPendingMenu]');
-      }
+
+        expect(deps.vova.handle).not.toHaveBeenCalled();
+        expect(result[0]).toContain('[TPL:openApp]');
+        expect(activationWrites()).toHaveLength(0);
+      },
+    );
+
+    // The half that never ran. A profile under review returned its card before
+    // `routeMessage`, the only caller of the assistant — so the PENDING branch
+    // written into the system prompt (« ne lui promets ni résultat ni délai »)
+    // was unreachable for the exact people it was written for, and « j'ai un
+    // problème » was answered with a button.
+    it.each(['bonjour', '1', '2', '7', "j'ai un problème"])(
+      'hands "%s" to the assistant while under review',
+      async (input) => {
+        deps.prisma.profile.findUnique.mockResolvedValue({
+          ...pendingProfile,
+          verification_status: 'PENDING',
+        });
+        deps.vova.handle.mockClear();
+        deps.vova.handle.mockResolvedValue(['réponse de Vova']);
+
+        const result = await service.handle(PROFILE_ID, PHONE, input);
+
+        expect(deps.vova.handle).toHaveBeenCalledTimes(1);
+        expect(result).toEqual(['réponse de Vova']);
+        expect(activationWrites()).toHaveLength(0);
+      },
+    );
+
+    // The assistant is a first refusal, never the owner of the reply: every one
+    // of its failures returns null on its side, so the card has to survive it
+    // being down.
+    it('falls back to the door card when the assistant declines', async () => {
+      deps.prisma.profile.findUnique.mockResolvedValue({
+        ...pendingProfile,
+        verification_status: 'PENDING',
+      });
+      deps.vova.handle.mockClear();
+      deps.vova.handle.mockResolvedValue(null);
+
+      const result = await service.handle(
+        PROFILE_ID,
+        PHONE,
+        "j'ai un problème",
+      );
+
+      expect(deps.vova.handle).toHaveBeenCalledTimes(1);
+      expect(result[0]).toContain('[TPL:openApp]');
       expect(activationWrites()).toHaveLength(0);
+    });
+
+    // The prompt carries a REJECTED branch too — a refusal closes the
+    // verification, not the account — and it was unreachable for the same
+    // reason.
+    it('hands free text to the assistant when the verification was refused', async () => {
+      deps.prisma.profile.findUnique.mockResolvedValue({
+        ...pendingProfile,
+        verification_status: 'REJECTED',
+      });
+      deps.vova.handle.mockClear();
+      deps.vova.handle.mockResolvedValue(['réponse de Vova']);
+
+      const result = await service.handle(
+        PROFILE_ID,
+        PHONE,
+        'pourquoi mon dossier a été refusé ?',
+      );
+
+      expect(deps.vova.handle).toHaveBeenCalledTimes(1);
+      expect(result).toEqual(['réponse de Vova']);
+      expect(activationWrites()).toHaveLength(0);
+    });
+
+    it('passes the verification status to the assistant, which branches on it', async () => {
+      deps.prisma.profile.findUnique.mockResolvedValue({
+        ...pendingProfile,
+        verification_status: 'PENDING',
+      });
+      deps.vova.handle.mockClear();
+
+      await service.handle(PROFILE_ID, PHONE, "j'ai un problème");
+
+      expect(deps.vova.handle).toHaveBeenCalledWith(
+        expect.objectContaining({ verification_status: 'PENDING' }),
+        "j'ai un problème",
+      );
     });
 
     it('no longer asks the user to reply with a number', async () => {
@@ -615,13 +767,21 @@ describe('BotOrchestratorService', () => {
       expect(activationWrites()).toHaveLength(0);
     });
 
-    it('returns KYC rejected message when PENDING_ACTIVATION and verification_status is REJECTED', async () => {
+    // The refusal card, not the old bare string: it carries the admin's reason
+    // and a button onto the claim form. The template had said more than the
+    // string for two versions; the bot simply never used it.
+    it('answers "menu" with the door card when the verification was refused', async () => {
       deps.prisma.profile.findUnique.mockResolvedValue({
         ...pendingProfile,
         verification_status: 'REJECTED',
+        rejection_reason: 'Pièce illisible',
       });
+      deps.vova.handle.mockClear();
+
       const result = await service.handle(PROFILE_ID, PHONE, 'menu');
-      expect(result[0]).toContain('refusée');
+
+      expect(deps.vova.handle).not.toHaveBeenCalled();
+      expect(result[0]).toContain('[TPL:openApp]');
       expect(activationWrites()).toHaveLength(0);
     });
 
@@ -712,7 +872,7 @@ describe('BotOrchestratorService', () => {
           verification_status: 'PENDING',
         });
         const result = await service.handle(PROFILE_ID, PHONE, 'menu');
-        expect(result[0]).toContain('[TPL:kycPendingMenu]');
+        expect(result[0]).toContain('[TPL:openApp]');
         expect(activationWrites()).toHaveLength(0);
       });
 
@@ -844,7 +1004,7 @@ describe('BotOrchestratorService', () => {
       deps.prisma.jobOffer = {
         findMany: jest.fn().mockResolvedValue([]),
         findFirst: jest.fn().mockResolvedValue(null),
-      } as any;
+      };
       const result = await service.handle(PROFILE_ID, PHONE, '1');
       expect(Array.isArray(result)).toBe(true);
     });
@@ -1124,7 +1284,7 @@ describe('BotOrchestratorService', () => {
       deps.prisma.jobOffer = {
         findMany: jest.fn().mockResolvedValue([]),
         findFirst: jest.fn().mockResolvedValue(null),
-      } as any;
+      };
       const result = await service.handle(PROFILE_ID, PHONE, '1');
       expect(Array.isArray(result)).toBe(true);
     });

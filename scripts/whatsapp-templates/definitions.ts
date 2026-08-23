@@ -35,6 +35,7 @@ export const AUTHORED_KEYS: ReadonlySet<WhatsAppTemplateName> = new Set([
   // v4 is authored here and lives on Meta only; its Twilio fixture is the v3
   // card with the numbered menu, which the app no longer sends.
   'kycPendingMenu',
+  'openApp',
 ]);
 
 /**
@@ -271,6 +272,50 @@ export function authoredTemplates(): Partial<
               // processor swaps it for a one-tap login code.
               url: 'https://rabotka.work/s/{{1}}',
               example: ['https://rabotka.work/s/profile'],
+            },
+          ],
+        },
+      ],
+    },
+
+    /**
+     * The door for an account with no menu, and nothing more.
+     *
+     * Says nothing about WHY the account is walled — not the suspension, not
+     * the review, not the refusal. That is the assistant's job now, and it has
+     * the status and the admin's own words; a card repeating them would say it
+     * worse and drift the day the wording changes.
+     *
+     * It exists because a bare link does not open WhatsApp's in-app browser —
+     * only a template's CTA button does. Without that constraint this would be
+     * free-form text: the bot answers inside the 24h service window.
+     */
+    openApp: {
+      name: 'rabotka_open_app_v1',
+      language: 'fr',
+      category: 'UTILITY',
+      components: [
+        {
+          type: 'BODY',
+          text: [
+            'Bonjour {{1}},',
+            '',
+            'Vous pouvez ouvrir Rabotka ici pour consulter votre compte.',
+            '',
+            'L’équipe Rabotka',
+          ].join('\n'),
+          example: { body_text: [['Jean']] },
+        },
+        {
+          type: 'BUTTONS',
+          buttons: [
+            {
+              type: 'URL',
+              text: 'Ouvrir l’application',
+              // The variable ends the URL, as WhatsApp requires; the outbound
+              // processor swaps it for a one-tap login code.
+              url: 'https://rabotka.work/s/{{1}}',
+              example: ['https://rabotka.work/s/home'],
             },
           ],
         },

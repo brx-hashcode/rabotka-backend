@@ -11,6 +11,7 @@
 import { config } from 'dotenv';
 import {
   WHATSAPP_TEMPLATES,
+  templateCloudName,
   type WhatsAppTemplateName,
 } from '../../src/common/constants/whatsapp-templates';
 import { listTemplates, type MetaTemplateSummary } from './meta-client';
@@ -38,6 +39,29 @@ function submittedNames(): Map<WhatsAppTemplateName, string> {
   return map;
 }
 
+/**
+ * The name to LOOK UP at Meta, and whether the local payload disagrees with it.
+ *
+ * `out/payloads/` is gitignored, so it is a per-machine artifact of the last
+ * `author.ts`/`generate.ts` run — not a record of what the app sends. Reading
+ * the name from it alone is what let `kycPendingMenu` report v3 APPROVED for
+ * weeks while every send asked for v4 and got `132001`.
+ *
+ * So the REGISTRY wins, since that is what a send resolves to, and a stale
+ * payload is called out rather than silently believed. `verify.ts` is the
+ * check that fails a deploy over it; this one only has to stop lying.
+ */
+function lookupName(
+  key: WhatsAppTemplateName,
+  submitted: Map<WhatsAppTemplateName, string>,
+): { name: string; stalePayload?: string } {
+  const registryName = templateCloudName(key);
+  const payloadName = submitted.get(key);
+  return payloadName && payloadName !== registryName
+    ? { name: registryName, stalePayload: payloadName }
+    : { name: registryName };
+}
+
 function render(live: MetaTemplateSummary[]): boolean {
   const byName = new Map(live.map((t) => [t.name, t]));
   const names = submittedNames();
@@ -48,8 +72,8 @@ function render(live: MetaTemplateSummary[]): boolean {
 
   console.log('');
   for (const key of keys) {
-    const name = names.get(key);
-    const found = name ? byName.get(name) : undefined;
+    const { name, stalePayload } = lookupName(key, names);
+    const found = byName.get(name);
     const status = found?.status ?? 'NOT SUBMITTED';
     counts[status] = (counts[status] ?? 0) + 1;
     if (status === 'PENDING' || status === 'IN_APPEAL') allSettled = false;
@@ -62,9 +86,15 @@ function render(live: MetaTemplateSummary[]): boolean {
     const drift =
       actual && actual !== intended ? `  <-- ${intended} -> ${actual}` : '';
     const why = found?.rejected_reason ? `  (${found.rejected_reason})` : '';
+    // The local payload names a different template than the one the app sends.
+    // Almost always: `definitions.ts` was bumped and `author.ts` never re-run,
+    // so nothing was ever submitted under the new name.
+    const stale = stalePayload
+      ? `  <-- local payload still says ${stalePayload}`
+      : '';
 
     console.log(
-      `  ${status.padEnd(14)} ${key.padEnd(30)} ${(name ?? '-').padEnd(42)}${drift}${why}`,
+      `  ${status.padEnd(14)} ${key.padEnd(30)} ${name.padEnd(42)}${drift}${why}${stale}`,
     );
   }
 

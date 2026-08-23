@@ -218,6 +218,9 @@ describe('authored templates', () => {
     'kycRejected',
     'accountSuspended',
     'kycPendingMenu',
+    // The one card the walled states share. Its button is the whole point of
+    // it being a template: a bare link does not open the in-app browser.
+    'openApp',
   ] as const;
   // Deliberately button-less: this one carries whatever an admin typed, so
   // there is no single destination a CTA could point at.
