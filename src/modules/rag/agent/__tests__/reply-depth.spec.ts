@@ -115,8 +115,18 @@ describe('salutation et présentation', () => {
     expect(anonymous).toContain('TOUT PREMIER message');
   });
 
-  it('anonyme : dit de ne pas deviner l’heure', () => {
-    expect(anonymous).toContain("Tu n'as pas l'heure");
+  // Le prompt disait « Tu n'as pas l'heure » — c'était vrai, et c'était le
+  // problème. Il la reçoit maintenant ; la consigne devient donc « recopie le
+  // mot de la personne MÊME s'il contredit l'heure », qui est une règle de
+  // politesse et non un aveu d'ignorance.
+  it('anonyme : donne l’heure de Brazzaville', () => {
+    expect(anonymous).toMatch(/Il est \d{2}h\d{2} à Brazzaville/);
+  });
+
+  it('anonyme : fait primer le mot reçu sur l’heure', () => {
+    expect(anonymous).toContain(
+      "Recopie son mot même s'il ne colle pas à l'heure",
+    );
   });
 });
 
