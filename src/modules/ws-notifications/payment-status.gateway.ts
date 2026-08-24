@@ -50,7 +50,7 @@ export class PaymentStatusGateway
   }
 
   /**
-   * Called by PaymentRequestService after Monetbil webhook is processed.
+   * Called by PaymentRequestService after the gateway webhook is processed.
    * Pushes the final status to the browser waiting on that payment token.
    */
   emitPaymentStatus(
