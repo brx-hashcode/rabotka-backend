@@ -287,6 +287,7 @@ describe('JobOfferService (extended)', () => {
           unlocked_at: new Date(),
           employer_amount: 500,
           worker_amount: 300,
+          job_offer: { quantity: 1, employer_unlock_paid: false },
         },
         {
           job_offer_id: OFFER_ID,
@@ -295,6 +296,7 @@ describe('JobOfferService (extended)', () => {
           unlocked_at: null,
           employer_amount: 500,
           worker_amount: 300,
+          job_offer: { quantity: 1, employer_unlock_paid: false },
         },
       ]);
       (prisma.penalty.findMany as jest.Mock).mockResolvedValue([
@@ -342,6 +344,44 @@ describe('JobOfferService (extended)', () => {
       expect(second!.hiredCount).toBe(0);
       expect(second!.workerNames).toEqual([]);
       expect(second!.ratingAvg).toBeNull();
+    });
+
+    /**
+     * A multi-seat offer is paid for once by the employer, and that single
+     * payment flips `employer_paid` on every candidate's attempt. Summing the
+     * fee per attempt reported three times the money actually collected.
+     */
+    it('counts a job-level employer fee once, not once per candidate', async () => {
+      (prisma.jobOffer.findMany as jest.Mock).mockResolvedValue([adminOffer]);
+      (prisma.jobOffer.count as jest.Mock).mockResolvedValue(1);
+      (prisma.application.groupBy as jest.Mock).mockResolvedValue([]);
+      (prisma.assignment.findMany as jest.Mock).mockResolvedValue([]);
+      (prisma.penalty.findMany as jest.Mock).mockResolvedValue([]);
+      (prisma.rating.findMany as jest.Mock).mockResolvedValue([]);
+
+      const seat = {
+        job_offer_id: OFFER_ID,
+        employer_paid: true,
+        worker_paid: false,
+        unlocked_at: null,
+        employer_amount: 500,
+        worker_amount: 100,
+        job_offer: { quantity: 3, employer_unlock_paid: true },
+      };
+      (prisma.contactUnlockAttempt.findMany as jest.Mock).mockResolvedValue([
+        seat,
+        seat,
+        seat,
+      ]);
+
+      const { data } = await service.getJobOffersForAdmin({
+        page: 1,
+        limit: 10,
+      });
+
+      // All three candidates are covered, but only 500 FCFA ever changed hands.
+      expect(data[0]!.unlockEmployerPaid).toBe(3);
+      expect(data[0]!.unlockRevenue).toBe(500);
     });
 
     it('skips the aggregate queries when the page is empty', async () => {

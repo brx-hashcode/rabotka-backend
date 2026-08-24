@@ -3,6 +3,7 @@ import { APP_BASE_URL, FLOW_IDS } from '../bot.constants';
 import type { ApplicationService } from '../../application/application.service';
 import type { BotNotificationService } from '../services/bot-notification.service';
 import type { ContactUnlockService } from '../../contact-unlock/contact-unlock.service';
+import { isEmployerCoveredAtJobLevel } from '../../contact-unlock/employer-coverage';
 import type { WalletService } from '../../wallet/wallet.service';
 import type { SystemConfigService } from '../../system-config/system-config.service';
 import type { PrismaService } from '../../../common/services/prisma/prisma.service';
@@ -76,8 +77,10 @@ async function handleAcceptRefuseStep1(args: StepArgs): Promise<FlowResult> {
           .catch(() => null);
 
         const isMultiPerson = (jobOffer?.quantity ?? 1) > 1;
-        const employerAlreadyPaid =
-          isMultiPerson && jobOffer?.employer_unlock_paid;
+        const employerAlreadyPaid = isEmployerCoveredAtJobLevel(
+          jobOffer?.quantity,
+          jobOffer?.employer_unlock_paid ?? false,
+        );
 
         if (employerAlreadyPaid) {
           return {
