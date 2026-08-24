@@ -372,7 +372,6 @@ export class VovaAgentService {
             verificationStatus: request.verificationStatus,
             accountStatus: request.accountStatus,
             categorySlugs: request.categorySlugs,
-            knownCategorySlugs,
             language,
             grounding: grounding.hits.map((hit) => ({
               title: hit.title,

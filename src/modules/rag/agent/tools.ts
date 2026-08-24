@@ -138,9 +138,20 @@ function makeVerifierDomaine(deps: ToolDeps): StructuredToolInterface {
         if (found) {
           return ok({ couvert: true, domaine: found.name, slug: found.slug });
         }
+
+        // Rien de sûr — mais « Autre » tout seul était une réponse pauvre pour
+        // un métier dont le domaine existe sous un autre nom. Le modèle reçoit
+        // les domaines les plus PROCHES et peut en proposer un, au lieu de
+        // renvoyer la personne au fourre-tout.
+        const proches = await deps.categories.suggest(metier, 3);
+
         return ok({
           couvert: false,
           metier_demande: metier,
+          domaines_proches: proches.map((p) => ({
+            domaine: p.entry.name,
+            slug: p.entry.slug,
+          })),
           // NEUTRE EN RÔLE, délibérément.
           //
           // Disait « ce métier peut tout de même être PUBLIÉ », ce qui décrit
@@ -152,9 +163,11 @@ function makeVerifierDomaine(deps: ToolDeps): StructuredToolInterface {
           note:
             'Aucun domaine ne correspond exactement, mais ce métier a sa place ' +
             'sur Rabotka : le domaine « Autre » existe pour ça. Ne dis jamais ' +
-            'que Rabotka ne couvre pas ce besoin. Réponds selon ce que la ' +
-            "personne cherche — travailler, ou trouver quelqu'un — sans le " +
-            'supposer.',
+            'que Rabotka ne couvre pas ce besoin. Si `domaines_proches` en ' +
+            'contient un qui convient manifestement, nomme-le — « ce métier ' +
+            'relève plutôt de X » — plutôt que de renvoyer vers « Autre ». ' +
+            'Réponds selon ce que la personne cherche — travailler, ou trouver ' +
+            "quelqu'un — sans le supposer.",
         });
       } catch (err) {
         return fail('verifier_domaine', err);
@@ -221,9 +234,13 @@ export function buildTools(
           : null;
 
         if (categorie_slug && !category) {
+          // Les plus proches d'abord : quarante slugs bruts obligeaient le
+          // modèle à choisir seul dans une liste, et il choisissait mal.
+          const proches = await deps.categories.suggest(categorie_slug, 3);
           return ok({
             erreur: 'domaine_inconnu',
             domaine_demande: categorie_slug,
+            domaines_proches: proches.map((p) => p.entry.slug),
             domaines_possibles: categorySlugs.slice(0, 40),
           });
         }
