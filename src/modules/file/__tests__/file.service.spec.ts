@@ -92,6 +92,23 @@ describe('FileService', () => {
       expect(watermark.addWatermark).not.toHaveBeenCalled();
     });
 
+    it('skips the watermark on an image when asked to', async () => {
+      // Admin KYC verification images opt out: they are internal evidence
+      // served only through an authenticated stream, so the mark protects
+      // nothing and re-encodes the detail a reviewer is trying to read.
+      const file = makeFile({ mimetype: 'image/jpeg' });
+      await service.uploadToStorage(file, { watermark: false });
+      expect(watermark.addWatermark).not.toHaveBeenCalled();
+    });
+
+    it('still watermarks an image when the flag is omitted', async () => {
+      // The default has to survive: every caller that predates the flag passes
+      // no value at all.
+      const file = makeFile({ mimetype: 'image/jpeg' });
+      await service.uploadToStorage(file, { folder: 'avatars' });
+      expect(watermark.addWatermark).toHaveBeenCalled();
+    });
+
     it('throws when buffer is missing', async () => {
       const file = makeFile({ buffer: undefined as any });
       await expect(service.uploadToStorage(file)).rejects.toThrow();

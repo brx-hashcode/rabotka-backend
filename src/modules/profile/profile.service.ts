@@ -846,7 +846,7 @@ export class ProfileService {
     adminUserId: string,
     decision: 'VERIFIED' | 'REJECTED',
     reason: string,
-    files?: Express.Multer.File[],
+    documents?: { key: string; url?: string }[],
   ): Promise<AdminProfileDetailResponse> {
     const note = reason?.trim();
     if (!note) {
@@ -867,24 +867,41 @@ export class ProfileService {
     // same papers — and they were going to the public bucket under a guessable
     // filename. They are only ever displayed in the admin detail view, so
     // nothing public breaks by moving them.
-    const uploaded: { key: string }[] = [];
     const verificationBucket = await kycBucket(
       this.systemConfig,
       this.configService,
     );
-    if (files && files.length > 0) {
-      for (const file of files) {
-        const result = await this.fileService.uploadToStorage(file, {
-          folder: 'kyc-verification',
-          access: 'private',
-          bucket: verificationBucket,
-        });
-        // The url is deliberately dropped. `uploadToStorage` returns a signed
-        // one, and storing it is what left KYC rows holding a dead credential;
-        // the key is the durable half, and the stream route reads from it.
-        uploaded.push({ key: result.key });
-      }
-    }
+
+    // The bytes are already in the bucket: `uploadVerificationImage` put them
+    // there as the admin picked each file, and this call carries only their
+    // keys. What is left to do is check that each key is one this profile is
+    // allowed to reference and that the object is really there.
+    //
+    // Deduped first. A double-click that submits the same key twice must not
+    // produce two rows pointing at one object.
+    const uniqueDocuments = [
+      ...new Map((documents ?? []).map((doc) => [doc.key, doc])).values(),
+    ];
+
+    // Resolved BEFORE the transaction opens, for the reason
+    // `createProfileWithDocuments` spells out: these are network round-trips,
+    // and holding a Postgres transaction open across them is how a slow bucket
+    // becomes a connection-pool outage.
+    //
+    // In parallel, unlike the sequential upload loop this replaces — a HEAD is
+    // a few hundred bytes and there are at most ten of them.
+    //
+    // The url each descriptor carries is used only as a derivation fallback
+    // inside `resolveVerificationImageKey` and then dropped. Storing it is what
+    // left KYC rows holding a dead credential; the key is the durable half, and
+    // the stream route reads from it.
+    const uploaded = (
+      await Promise.all(
+        uniqueDocuments.map((doc) =>
+          this.resolveVerificationImageKey(profileId, verificationBucket, doc),
+        ),
+      )
+    ).map((key) => ({ key }));
 
     const now = new Date();
     await this.prisma.$transaction([
@@ -1712,6 +1729,53 @@ export class ProfileService {
   }
 
   /**
+   * One image an admin attaches while reviewing an identity, uploaded on its
+   * own so the verify call afterwards carries only descriptors.
+   *
+   * The admin modal used to POST every attachment as binary inside the verify
+   * request — all-or-nothing, unbounded, and with nothing to show a reviewer on
+   * a slow connection but a spinner on the submit button. Splitting the upload
+   * out is what lets each file fail and retry by itself.
+   *
+   * FOLDER IS SCOPED TO THE PROFILE. Every provider builds the key as
+   * `${folder}/${filename}`, so this yields
+   * `kyc-verification/<profileId>/<ts>_<rand>.jpg`. That still satisfies
+   * `isKycKey`, and it gives `verifyProfileKyc` a structural check it could not
+   * otherwise make: a key submitted for one profile cannot name an object
+   * uploaded under another. Rows written before this keep their flat keys and
+   * stay readable — the stream route reads `storage_key` verbatim.
+   *
+   * NOT WATERMARKED, unlike everything else that goes through
+   * `uploadToStorage`. These images are only ever served through the
+   * authenticated stream route, so the mark protects nothing, and it re-encodes
+   * the very detail a reviewer opened the image to read.
+   */
+  async uploadVerificationImage(
+    profileId: string,
+    file: Express.Multer.File,
+  ): Promise<{ url: string; key: string }> {
+    // Checked before the PUT, not after: an admin working on a deleted profile
+    // should find out now rather than after uploading ten photographs.
+    const profile = await this.prisma.profile.findUnique({
+      where: { id: profileId },
+      select: { id: true },
+    });
+
+    if (!profile) {
+      throw new NotFoundException('Profil non trouvé');
+    }
+
+    const result = await this.fileService.uploadToStorage(file, {
+      folder: `kyc-verification/${profileId}`,
+      access: 'private',
+      bucket: await kycBucket(this.systemConfig, this.configService),
+      watermark: false,
+    });
+
+    return { url: result.url, key: result.key };
+  }
+
+  /**
    * The object key for one submitted KYC document, decided HERE rather than
    * accepted from the caller.
    *
@@ -1790,6 +1854,76 @@ export class ProfileService {
     throw new BadRequestException(
       `Le fichier ${label} est introuvable. Merci de le téléverser à nouveau.`,
     );
+  }
+
+  /**
+   * The object key for one verification image an admin attached.
+   *
+   * Deliberately NOT `resolveKycObject`, which sits directly above and is
+   * forgiving in three ways that would be wrong here:
+   *
+   * 1. It accepts an object still sitting in the PUBLIC bucket, because an
+   *    onboarding session that straddled the bucket split really did upload
+   *    there. Nothing of the sort applies to an image `uploadVerificationImage`
+   *    wrote seconds ago against a hardcoded private bucket — accepting a
+   *    public-bucket object here would quietly reopen the exposure the split
+   *    exists to close.
+   * 2. Its precedence is url-first with the key as a hint, because that caller
+   *    is an unauthenticated client that may know neither. Here it is inverted:
+   *    the key came from our own endpoint in this session and is authoritative,
+   *    while the url is a signed preview that may already have expired.
+   * 3. It accepts any KYC key, `kyc-documents/` included. A verification image
+   *    must not be able to point at the worker's passport object — verification
+   *    images are replaced wholesale on every verify, so that would let one
+   *    admin action rewrite what an evidence row references.
+   *
+   * Same primitives as that method — `isKycKey`, `deriveKey`, `storageNames`,
+   * `fileService.exists` — so this is a second policy, not a second
+   * implementation.
+   */
+  private async resolveVerificationImageKey(
+    profileId: string,
+    bucket: string,
+    doc: { key: string; url?: string },
+  ): Promise<string> {
+    const prefix = `kyc-verification/${profileId}/`;
+
+    const usable = (
+      candidate: string | null | undefined,
+    ): candidate is string =>
+      !!candidate && isKycKey(candidate) && candidate.startsWith(prefix);
+
+    let key: string | null = usable(doc.key) ? doc.key : null;
+
+    // Only reached by a caller that lost the key but kept the url. The admin
+    // client always has both, so this is belt-and-braces rather than a path
+    // anything takes today.
+    if (!key && doc.url) {
+      const { publicBaseUrl, buckets } = await storageNames(
+        this.systemConfig,
+        this.configService,
+      );
+      const derived = deriveKey(doc.url, publicBaseUrl, buckets);
+      if (usable(derived?.key)) key = derived.key;
+    }
+
+    if (!key) {
+      this.logger.warn(
+        `Rejected a verification image key for profile=${profileId}: ${doc.key}`,
+      );
+      throw new BadRequestException(
+        "Une des images jointes n'est pas une pièce de vérification valide.",
+      );
+    }
+
+    // The private bucket and nothing else — see reason 1 above.
+    if (!(await this.fileService.exists(key, bucket))) {
+      throw new BadRequestException(
+        'Une des images jointes est introuvable. Merci de la téléverser à nouveau.',
+      );
+    }
+
+    return key;
   }
 
   private async createProfileWithDocuments(createProfileDto: CreateProfileDto) {

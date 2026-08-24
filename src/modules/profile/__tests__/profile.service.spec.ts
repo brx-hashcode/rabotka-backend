@@ -568,23 +568,81 @@ describe('ProfileService', () => {
       expect(result.id).toBe('p-1');
     });
 
-    it('verifies KYC with file upload', async () => {
-      const file = {
-        fieldname: 'files',
-        originalname: 'verify.jpg',
-        mimetype: 'image/jpeg',
-        buffer: Buffer.from('data'),
-        size: 4,
-      } as Express.Multer.File;
+    it('attaches pre-uploaded documents without re-uploading them', async () => {
+      // The bytes went up one at a time while the admin was reviewing, so this
+      // call only checks the keys — it must not touch storage again.
       const result = await service.verifyProfileKyc(
         'p-1',
         'admin-1',
         'VERIFIED',
         'Approved with additional supporting images.',
-        [file],
+        [
+          {
+            key: 'kyc-verification/p-1/1700000000_abc123.jpg',
+            url: 'https://r2/x',
+          },
+        ],
       );
-      expect(fileService.uploadToStorage).toHaveBeenCalled();
+
+      expect(fileService.exists).toHaveBeenCalledWith(
+        'kyc-verification/p-1/1700000000_abc123.jpg',
+        expect.any(String),
+      );
+      expect(fileService.uploadToStorage).not.toHaveBeenCalled();
       expect(result.id).toBe('p-1');
+    });
+
+    it('refuses a key belonging to another profile', async () => {
+      // Verification images are replaced wholesale on every verify, so a key
+      // that escapes this profile's folder would let one admin action rewrite
+      // what another profile's evidence row references.
+      await expect(
+        service.verifyProfileKyc('p-1', 'admin-1', 'VERIFIED', 'Note.', [
+          { key: 'kyc-verification/p-2/1700000000_abc123.jpg' },
+        ]),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('refuses a KYC document key', async () => {
+      // `isKycKey` alone would allow this — an identity document is a KYC key.
+      await expect(
+        service.verifyProfileKyc('p-1', 'admin-1', 'VERIFIED', 'Note.', [
+          { key: 'kyc-documents/1700000000_abc123.jpg' },
+        ]),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('refuses a traversal key', async () => {
+      await expect(
+        service.verifyProfileKyc('p-1', 'admin-1', 'VERIFIED', 'Note.', [
+          { key: 'kyc-verification/p-1/../../etc/passwd' },
+        ]),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('writes nothing when a key cannot be found in the bucket', async () => {
+      // The property that makes a failed verify safe to retry: keys resolve
+      // BEFORE the transaction opens, so a bad one cannot have already deleted
+      // the previous reviewer's evidence rows.
+      fileService.exists.mockResolvedValueOnce(false);
+
+      await expect(
+        service.verifyProfileKyc('p-1', 'admin-1', 'VERIFIED', 'Note.', [
+          { key: 'kyc-verification/p-1/missing.jpg' },
+        ]),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('dedupes a key submitted twice', async () => {
+      // A double-click must not produce two rows pointing at one object.
+      await service.verifyProfileKyc('p-1', 'admin-1', 'VERIFIED', 'Note.', [
+        { key: 'kyc-verification/p-1/same.jpg' },
+        { key: 'kyc-verification/p-1/same.jpg' },
+      ]);
+
+      expect(prisma.kycVerificationImage.create).toHaveBeenCalledTimes(1);
     });
 
     it('activates the account when KYC passes', async () => {
@@ -656,6 +714,43 @@ describe('ProfileService', () => {
         url: 'https://cdn.example.com/file.jpg',
         key: 'folder/file.jpg',
       });
+    });
+  });
+
+  describe('uploadVerificationImage()', () => {
+    const file = {
+      originalname: 'evidence.jpg',
+      mimetype: 'image/jpeg',
+      buffer: Buffer.from('e'),
+      size: 1,
+    } as Express.Multer.File;
+
+    it('stores under the profile folder, privately, without a watermark', async () => {
+      const result = await service.uploadVerificationImage('p-1', file);
+
+      // The folder carries the profile id so `verifyProfileKyc` can check that
+      // a submitted key belongs to the profile being verified — there is no
+      // other way to make that binding.
+      expect(fileService.uploadToStorage).toHaveBeenCalledWith(file, {
+        folder: 'kyc-verification/p-1',
+        access: 'private',
+        bucket: 'rabotka-kyc',
+        watermark: false,
+      });
+      expect(result).toEqual({
+        url: 'https://cdn.example.com/file.jpg',
+        key: 'folder/file.jpg',
+      });
+    });
+
+    it('404s before spending an upload when the profile is gone', async () => {
+      prisma.profile.findUnique.mockResolvedValueOnce(null);
+
+      await expect(
+        service.uploadVerificationImage('missing', file),
+      ).rejects.toThrow(NotFoundException);
+
+      expect(fileService.uploadToStorage).not.toHaveBeenCalled();
     });
   });
 
