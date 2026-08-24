@@ -18,6 +18,7 @@ function makeDeps(overrides: {
   count?: jest.Mock;
   findActive?: jest.Mock;
   resolve?: jest.Mock;
+  suggest?: jest.Mock;
 }) {
   return {
     profiles: {} as never,
@@ -34,6 +35,9 @@ function makeDeps(overrides: {
     help: {} as never,
     categories: {
       resolve: overrides.resolve ?? jest.fn().mockResolvedValue(CATEGORY),
+      // Empty by default: the near-miss list is a bonus for the model, and no
+      // behaviour here may depend on the embedder having answered.
+      suggest: overrides.suggest ?? jest.fn().mockResolvedValue([]),
     } as never,
   };
 }
@@ -137,7 +141,6 @@ describe('the prompt that drives it', () => {
     accountStatus: AccountStatus.ACTIVE,
     verificationStatus: VerificationStatus.VERIFIED,
     categorySlugs: [],
-    knownCategorySlugs: [],
     grounding: [],
     requiredTools: [],
     language: 'fr',

@@ -157,3 +157,157 @@ describe('JobCategoryRegistry', () => {
     });
   });
 });
+
+/**
+ * The bug this exists for: « Agent de sécurité » shares no substring with
+ * « Gardiennage & Surveillance », so every literal step returned null and the
+ * assistant announced « Autre » for a domain Rabotka actually has.
+ */
+describe('JobCategoryRegistry — semantic matching', () => {
+  /** Unit vectors, so cosine is exact and the expected scores are obvious. */
+  const VECTORS: Record<string, number[]> = {
+    'Gardiennage & Surveillance. Surveillance de site, rondes de nuit': [
+      1, 0, 0,
+    ],
+    Plomberie: [0, 1, 0],
+    Maçonnerie: [0, 0, 1],
+  };
+
+  const SEMANTIC_ROWS = [
+    {
+      id: 'g',
+      slug: 'gardiennage-surveillance',
+      name: 'Gardiennage & Surveillance',
+      description: 'Surveillance de site, rondes de nuit',
+    },
+    { id: 'p', slug: 'plomberie', name: 'Plomberie', description: null },
+    { id: 'm', slug: 'maconnerie', name: 'Maçonnerie', description: null },
+  ];
+
+  function makeEmbeddings(queryVector: number[]) {
+    return {
+      embedPassages: jest.fn((texts: string[]) =>
+        Promise.resolve(texts.map((t) => VECTORS[t] ?? [0, 0, 0])),
+      ),
+      embedQuery: jest.fn(() => Promise.resolve(queryVector)),
+    };
+  }
+
+  function buildSemantic(
+    queryVector: number[],
+    minScore = 0.82,
+    rows = SEMANTIC_ROWS,
+  ) {
+    const service = {
+      jobCategory: { findMany: jest.fn(() => Promise.resolve(rows)) },
+    };
+    const config = {
+      get: jest.fn((key: string) =>
+        key === 'VOVA_CATEGORY_MIN_SCORE' ? minScore : 300_000,
+      ),
+    };
+    const embeddings = makeEmbeddings(queryVector);
+    const registry = new JobCategoryRegistry(
+      service as never,
+      config as never,
+      embeddings as never,
+    );
+    return { registry, embeddings, service };
+  }
+
+  it('resolves a job title that shares no word with any category', async () => {
+    // Pointing at the gardiennage vector: a perfect 1.0 cosine.
+    const { registry } = buildSemantic([1, 0, 0]);
+
+    const found = await registry.resolve('agent de sécurité');
+
+    expect(found?.slug).toBe('gardiennage-surveillance');
+  });
+
+  it('leaves the literal path in front, and never embeds when it hits', async () => {
+    const { registry, embeddings } = buildSemantic([1, 0, 0]);
+
+    expect((await registry.resolve('plomberie'))?.slug).toBe('plomberie');
+    // An exact slug must not cost a model call.
+    expect(embeddings.embedQuery).not.toHaveBeenCalled();
+  });
+
+  it('still returns null when nothing is close enough', async () => {
+    // Orthogonal to every category: cosine 0 against all three.
+    const { registry } = buildSemantic([0, 0, 0]);
+
+    expect(await registry.resolve('astrophysique')).toBeNull();
+  });
+
+  it('refuses a weak match rather than dressing it up as certainty', async () => {
+    // Halfway between two categories — 0.707, under the 0.82 bar.
+    const { registry } = buildSemantic([1, 1, 0]);
+
+    expect(await registry.resolve('quelque chose de vague')).toBeNull();
+  });
+
+  it('still offers the near misses that resolve() rejected', async () => {
+    // The point of suggest(): the tool can say « c'est plutôt X ? » even when
+    // nothing was confident enough to answer with. Leaning towards gardiennage
+    // without reaching it — 0.796, just under the 0.82 bar.
+    const { registry } = buildSemantic([0.8, 0.6, 0.1]);
+
+    expect(await registry.resolve('quelque chose de vague')).toBeNull();
+
+    const suggestions = await registry.suggest('quelque chose de vague', 2);
+
+    expect(suggestions).toHaveLength(2);
+    expect(suggestions[0].entry.slug).toBe('gardiennage-surveillance');
+    expect(suggestions[0].score).toBeCloseTo(0.796, 2);
+    expect(suggestions[0].score).toBeGreaterThan(suggestions[1].score);
+  });
+
+  it('embeds each category once, however many lookups follow', async () => {
+    const { registry, embeddings } = buildSemantic([1, 0, 0]);
+
+    await registry.resolve('agent de sécurité');
+    await registry.resolve('vigile');
+    await registry.resolve('surveillant');
+
+    // Three categories, embedded in one batch, once.
+    expect(embeddings.embedPassages).toHaveBeenCalledTimes(1);
+    expect(embeddings.embedQuery).toHaveBeenCalledTimes(3);
+  });
+
+  it('re-embeds only the category an admin actually edited', async () => {
+    const rows = SEMANTIC_ROWS.map((r) => ({ ...r }));
+    const { registry, embeddings } = buildSemantic([1, 0, 0], 0.82, rows);
+    await registry.resolve('agent de sécurité');
+
+    rows[1].description = 'Fuites, robinetterie, chauffe-eau';
+    registry.invalidate();
+    await registry.resolve('agent de sécurité');
+
+    expect(embeddings.embedPassages).toHaveBeenCalledTimes(2);
+    // The second batch carries the edited category and nothing else.
+    expect(embeddings.embedPassages.mock.calls[1][0]).toHaveLength(1);
+  });
+
+  it('falls back to literal matching when the embedder fails', async () => {
+    // A domain lookup must never be the thing that breaks a conversation.
+    const { registry, embeddings } = buildSemantic([1, 0, 0]);
+    embeddings.embedQuery.mockRejectedValue(new Error('model not loaded'));
+
+    expect(await registry.resolve('agent de sécurité')).toBeNull();
+    expect((await registry.resolve('plomberie'))?.slug).toBe('plomberie');
+    expect(await registry.suggest('agent de sécurité')).toEqual([]);
+  });
+
+  it('works with no embedder at all', async () => {
+    // The constructor argument is @Optional(): a context without retrieval must
+    // degrade to the matching this class has always done.
+    const service = {
+      jobCategory: { findMany: jest.fn(() => Promise.resolve(SEMANTIC_ROWS)) },
+    };
+    const config = { get: jest.fn(() => 300_000) };
+    const registry = new JobCategoryRegistry(service as never, config as never);
+
+    expect((await registry.resolve('plomberie'))?.slug).toBe('plomberie');
+    expect(await registry.suggest('agent de sécurité')).toEqual([]);
+  });
+});
