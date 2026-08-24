@@ -57,7 +57,6 @@ export interface PromptContext {
    */
   accountStatus: AccountStatus;
   categorySlugs: string[];
-  knownCategorySlugs: string[];
   /** Corpus passages retrieved for THIS message, before the model ran. */
   grounding: GroundingChunk[];
   /** Tools those passages say must be called before any figure is stated. */
@@ -180,7 +179,7 @@ export function buildSystemPrompt(ctx: PromptContext): string {
     // JAMAIS reporté ici : « avec le même mot » était suivi d'un seul modèle,
     // « Bonsoir ». Un exemple unique se fait copier — c'est ce qui a produit un
     // « Bonsoir » à 14h35. Il faut une paire pour montrer le miroir.
-    `- On te salue — « bonjour », « bonsoir », « salut », « hello » — même au milieu d'une autre phrase ? Rends la salutation EN PREMIER, avec LE MÊME MOT que la personne a employé, et le prénom : « bonjour » → « Bonjour ${boldName} ! », « bonsoir » → « Bonsoir ${boldName} ! ». Recopie son mot même s'il ne colle pas à l'heure : on ne corrige personne sur sa propre salutation. Puis seulement, réponds. Ne commence jamais une réponse par une question à quelqu'un qui vient de te saluer.`,
+    `- On te salue — « bonjour », « bonsoir », « salut », « hello » — même au milieu d'une autre phrase ? Rends la salutation EN PREMIER, avec LE MÊME MOT que la personne a employé, et le prénom : « bonjour » → « Bonjour ${boldName} ! », « bonsoir » → « Bonsoir ${boldName} ! ». Recopie son mot même s'il ne colle pas à l'heure : on ne corrige personne sur sa propre salutation. Cette règle vaut pour le DERNIER message, celui auquel tu réponds — jamais pour une salutation plus haut dans l'historique, qui peut dater d'un autre moment de la journée. Puis seulement, réponds. Ne commence jamais une réponse par une question à quelqu'un qui vient de te saluer.`,
     `- Si c'est le tout premier message de la conversation, ajoute qui tu es après la salutation : « Bonsoir ${boldName} ! Je suis *VoVa AI*, l'assistant de Rabotka. » Puis, en UNE phrase, demande ce que la personne cherche. Chaleureux, simple, comme un collègue qui décroche. Pas de liste de ce que tu sais faire.`,
     "- On te remercie ? Réponds court et chaleureux, et arrête-toi là. Pas de relance forcée : quelqu'un qui dit merci a fini. Mais un « bonsoir, merci » est d'abord un bonsoir : salue, puis remercie en retour.",
     "- Tu as l'historique de la conversation. Ne répète pas ce que tu viens de dire, ne redemande pas ce qu'on t'a déjà donné, et reprends le sujet en cours plutôt que de repartir de zéro.",
@@ -436,7 +435,7 @@ export function buildAnonymousSystemPrompt(
     //    une question sur les réclamations a reçu « Bonsoir ! 👋 Je suis
     //    VoVa AI… » en ouverture.
     // 3. La question de routage n'avait PAS de règle d'arrêt — voir plus bas.
-    "- On te salue, même au milieu d'une autre phrase ? Rends la salutation EN PREMIER, avec LE MÊME MOT que la personne a employé : « bonjour » → « Bonjour ! », « bonsoir » → « Bonsoir ! », « salut » → « Salut ! ». Recopie son mot même s'il ne colle pas à l'heure indiquée plus haut : on ne corrige personne sur sa propre salutation.",
+    "- On te salue, même au milieu d'une autre phrase ? Rends la salutation EN PREMIER, avec LE MÊME MOT que la personne a employé : « bonjour » → « Bonjour ! », « bonsoir » → « Bonsoir ! », « salut » → « Salut ! ». Recopie son mot même s'il ne colle pas à l'heure indiquée plus haut : on ne corrige personne sur sa propre salutation. Cette règle vaut pour le DERNIER message, celui auquel tu réponds — jamais pour une salutation plus haut dans l'historique.",
     "- Si c'est le TOUT PREMIER message de la conversation, ajoute après la salutation : « Je suis *VoVa AI*, l'assistant de Rabotka. » Puis dis en UNE phrase ce qu'est Rabotka. Sinon, réponds simplement à la question : quelqu'un qui te parle depuis dix minutes sait déjà qui tu es, et se faire re-présenter en plein milieu donne l'impression de repartir de zéro.",
     // Deux options numérotées plutôt qu'une question ouverte.
     //

@@ -223,6 +223,13 @@ export class MobileWorkerMissionController {
     const profileId = req.user.profileId;
     await this.assertWorker(profileId);
     const attempt = await this.requireOwnedAttempt(id, profileId);
+    // Same guard as the employer side: nothing stopped a second payment request
+    // being created for a share that is already settled.
+    if (attempt.worker_paid) {
+      throw new BadRequestException(
+        'Vous avez déjà payé votre part de ce déverrouillage.',
+      );
+    }
     const url = await this.paymentRequest.createPaymentUrl(
       profileId,
       Number(attempt.worker_amount),

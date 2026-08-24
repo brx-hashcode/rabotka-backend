@@ -26,6 +26,24 @@ export class VovaHistoryService {
   private readonly logger = new Logger(VovaHistoryService.name);
   private static readonly TURNS = 6;
 
+  /**
+   * How far back a turn can be and still count as *this* conversation.
+   *
+   * There was no bound at all, and the greeting is where it showed. Someone who
+   * wrote at 20h and again at 09h had « Bonsoir *Marie* ! » — VoVa's own words —
+   * replayed as the immediately preceding turn. The prompt's strongest greeting
+   * rule is the mirror one (« recopie son mot »), so the model mirrored the
+   * stale evening greeting and the clock line lost, every morning.
+   *
+   * Greetings are only the visible half. Six turns from last week also made
+   * « oui » resolve against a question the person had long forgotten asking.
+   *
+   * Four hours: long enough that a slow WhatsApp exchange stays one
+   * conversation, short enough that it cannot span the 18h Bonjour/Bonsoir
+   * boundary from either side.
+   */
+  private static readonly SESSION_MS = 4 * 60 * 60 * 1000;
+
   constructor(private readonly prisma: PrismaService) {}
 
   /**
@@ -72,10 +90,18 @@ export class VovaHistoryService {
     }
   }
 
-  async recent(profileId: string): Promise<HistoryTurn[]> {
+  async recent(
+    profileId: string,
+    now: Date = new Date(),
+  ): Promise<HistoryTurn[]> {
     try {
       const rows = await this.prisma.message.findMany({
-        where: { profile_id: profileId },
+        where: {
+          profile_id: profileId,
+          created_at: {
+            gte: new Date(now.getTime() - VovaHistoryService.SESSION_MS),
+          },
+        },
         orderBy: { created_at: 'desc' },
         take: VovaHistoryService.TURNS,
         select: { direction: true, body: true },

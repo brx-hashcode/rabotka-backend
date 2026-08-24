@@ -195,6 +195,16 @@ export class MobileApplicationController {
     const profileId = req.user.profileId;
     await this.assertEmployer(profileId);
     const attempt = await this.getOwnedAttempt(id, profileId);
+    // Without this the gateway happily collects a second time: on a multi-seat
+    // offer the employer's single payment cascades `employer_paid` onto every
+    // other candidate's attempt, so opening this screen on candidate #2 used to
+    // charge again. payUnlock then rejects it and the throw is swallowed
+    // downstream — money taken, nothing unlocked, no refund.
+    if (attempt.employer_paid) {
+      throw new BadRequestException(
+        'Vous avez déjà payé pour ce déverrouillage.',
+      );
+    }
     const url = await this.paymentRequest.createPaymentUrl(
       profileId,
       Number(attempt.employer_amount),

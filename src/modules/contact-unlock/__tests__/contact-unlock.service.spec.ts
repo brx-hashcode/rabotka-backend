@@ -657,6 +657,133 @@ describe('ContactUnlockService', () => {
       await service.rejectPendingAttemptByApplication('app-1', 'emp-1');
       expect(walletService.refundProfileWallet).not.toHaveBeenCalled();
     });
+
+    it('multi-person job: does not refund an employer fee paid at job level', async () => {
+      // The employer paid once for the whole offer and that payment was
+      // cascaded onto every candidate's attempt. Refunding here would hand back
+      // the fee once per rejected candidate for a single payment.
+      const attempt = {
+        ...fullAttempt,
+        employer_paid: true,
+        worker_paid: true,
+        job_offer: {
+          ...fullAttempt.job_offer,
+          quantity: 3,
+          employer_unlock_paid: true,
+        },
+      };
+      prisma.contactUnlockAttempt.findUnique.mockResolvedValue(attempt);
+      const txMock = prisma._txMock;
+      txMock.application.count.mockResolvedValue(0);
+      txMock.jobOffer.findUnique.mockResolvedValue({
+        status: JobOfferStatus.ACTIVE,
+        scheduled_at: new Date(Date.now() + 48 * 60 * 60 * 1000),
+      });
+      txMock.contactUnlockAttempt.update.mockResolvedValue({});
+      txMock.application.update.mockResolvedValue({});
+      txMock.assignment.updateMany.mockResolvedValue({ count: 1 });
+      txMock.jobOffer.update.mockResolvedValue({});
+
+      await service.rejectPendingAttemptByApplication('app-1', 'emp-1');
+
+      expect(walletService.refundProfileWallet).toHaveBeenCalledTimes(1);
+      expect(walletService.refundProfileWallet).toHaveBeenCalledWith(
+        'worker-1',
+        100,
+        expect.anything(),
+        'contact_unlock_attempt',
+        'attempt-1',
+      );
+      expect(walletService.refundProfileWallet).not.toHaveBeenCalledWith(
+        'emp-1',
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+      );
+    });
+
+    it('single-person job: still refunds the employer', async () => {
+      // Guards against the multi-seat rule leaking onto ordinary offers.
+      const attempt = {
+        ...fullAttempt,
+        employer_paid: true,
+        worker_paid: false,
+        job_offer: {
+          ...fullAttempt.job_offer,
+          quantity: 1,
+          employer_unlock_paid: true,
+        },
+      };
+      prisma.contactUnlockAttempt.findUnique.mockResolvedValue(attempt);
+      const txMock = prisma._txMock;
+      txMock.application.count.mockResolvedValue(0);
+      txMock.jobOffer.findUnique.mockResolvedValue({
+        status: JobOfferStatus.ACTIVE,
+        scheduled_at: new Date(Date.now() + 48 * 60 * 60 * 1000),
+      });
+      txMock.contactUnlockAttempt.update.mockResolvedValue({});
+      txMock.application.update.mockResolvedValue({});
+      txMock.assignment.updateMany.mockResolvedValue({ count: 1 });
+      txMock.jobOffer.update.mockResolvedValue({});
+
+      await service.rejectPendingAttemptByApplication('app-1', 'worker-1');
+
+      expect(walletService.refundProfileWallet).toHaveBeenCalledWith(
+        'emp-1',
+        500,
+        expect.anything(),
+        'contact_unlock_attempt',
+        'attempt-1',
+      );
+    });
+  });
+
+  describe('abortPendingUnlockByApplication()', () => {
+    it('multi-person job: does not refund an employer fee paid at job level', async () => {
+      prisma.contactUnlockAttempt.findUnique.mockResolvedValue(
+        makeAttempt({
+          employer_paid: true,
+          worker_paid: true,
+          job_offer: { quantity: 3, employer_unlock_paid: true },
+        }),
+      );
+      const txMock = prisma._txMock;
+      txMock.contactUnlockAttempt.update.mockResolvedValue({});
+
+      await service.abortPendingUnlockByApplication('app-1');
+
+      expect(walletService.refundProfileWallet).toHaveBeenCalledTimes(1);
+      expect(walletService.refundProfileWallet).toHaveBeenCalledWith(
+        'worker-1',
+        100,
+        expect.anything(),
+        'contact_unlock_attempt',
+        'attempt-1',
+      );
+    });
+
+    it('single-person job: still refunds the employer', async () => {
+      prisma.contactUnlockAttempt.findUnique.mockResolvedValue(
+        makeAttempt({
+          employer_paid: true,
+          worker_paid: false,
+          job_offer: { quantity: 1, employer_unlock_paid: true },
+        }),
+      );
+      const txMock = prisma._txMock;
+      txMock.contactUnlockAttempt.update.mockResolvedValue({});
+
+      await service.abortPendingUnlockByApplication('app-1');
+
+      expect(walletService.refundProfileWallet).toHaveBeenCalledWith(
+        'emp-1',
+        500,
+        expect.anything(),
+        'contact_unlock_attempt',
+        'attempt-1',
+      );
+    });
   });
 
   describe('getContactsIfUnlocked()', () => {
