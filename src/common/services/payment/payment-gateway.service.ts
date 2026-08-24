@@ -1,9 +1,11 @@
 import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { PaymentGatewayFactory } from './payment-gateway.factory';
 import { IPaymentGateway } from './interfaces/payment-gateway.interface';
+import { listPaymentGatewayMetadata } from './payment-gateway.registry';
 import {
   InitiatePaymentParams,
   InitiatePaymentResult,
+  PaymentGatewayMetadata,
   PaymentStatusResult,
   WebhookHandleResult,
 } from './types/payment-gateway.types';
@@ -30,6 +32,21 @@ export class PaymentGatewayService implements OnModuleInit {
       );
     }
     return this.gateway;
+  }
+
+  /** What the gateway this deployment runs on declares about itself. */
+  getActiveMetadata(): PaymentGatewayMetadata {
+    return this.ensureGateway().metadata;
+  }
+
+  /**
+   * Every gateway the application could run on, active or not.
+   *
+   * The admin lists these to label historical rows: a `payment_requests.gateway`
+   * of MONETBIL still needs a name after the deployment has moved to MTN.
+   */
+  listAvailable(): PaymentGatewayMetadata[] {
+    return listPaymentGatewayMetadata();
   }
 
   async initiatePayment(

@@ -1107,6 +1107,11 @@ model PaymentRequest {
   gateway                   String?
   gateway_payment_ref       String?              @unique
   gateway_tx_id             String?
+  /// DEPRECATED — superseded by gateway_payment_ref/gateway_tx_id. Nothing
+  /// writes these any more; the only remaining reader is the callback lookup
+  /// fallback in PaymentRequestService, for requests created before that
+  /// deploy. Drop both columns and idx_payment_request_monetbil_ref in the
+  /// release after 20260824220000_backfill_gateway_ref_from_monetbil.
   monetbil_payment_ref      String?              @unique
   monetbil_tx_id            String?
   request_type              PaymentRequestType?

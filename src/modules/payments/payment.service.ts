@@ -211,7 +211,6 @@ export class PaymentService {
       data: {
         gateway: activeGateway,
         gateway_payment_ref: gatewayRef,
-        monetbil_payment_ref: gatewayRef,
       },
     });
 
