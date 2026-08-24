@@ -14,6 +14,14 @@ import { HelpRetrieveService } from './retrieve.service';
     HelpIngestService,
     HelpRetrieveService,
   ],
-  exports: [HelpRetrieveService, HelpIngestService, HelpDocsStore],
+  exports: [
+    HelpRetrieveService,
+    HelpIngestService,
+    HelpDocsStore,
+    // Exported for the category registry, which matches job titles against
+    // category descriptions with the same multilingual model. A second embedder
+    // would mean a second ~1GB model in memory for identical vectors.
+    HelpEmbeddingsService,
+  ],
 })
 export class RetrievalModule {}

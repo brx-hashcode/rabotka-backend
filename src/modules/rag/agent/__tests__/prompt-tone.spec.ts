@@ -6,7 +6,6 @@ const base = {
   profileType: ProfileType.WORKER,
   accountStatus: AccountStatus.ACTIVE,
   categorySlugs: [],
-  knownCategorySlugs: [],
   grounding: [],
   requiredTools: [],
   language: 'fr' as const,
