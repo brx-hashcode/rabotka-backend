@@ -19,7 +19,6 @@ const registered = buildSystemPrompt({
   accountStatus: AccountStatus.ACTIVE,
   verificationStatus: VerificationStatus.VERIFIED,
   categorySlugs: [],
-  knownCategorySlugs: [],
   grounding: [],
   requiredTools: [],
   language: 'fr',

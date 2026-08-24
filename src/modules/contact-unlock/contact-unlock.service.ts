@@ -28,6 +28,7 @@ import {
   WalletTransactionType,
 } from '@prisma/client';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
+import { isEmployerCoveredAtJobLevel } from './employer-coverage';
 import { isWorkerHardBlocked } from '../penalty/penalty.utils';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { WalletService } from '../wallet/wallet.service';
@@ -422,8 +423,10 @@ export class ContactUnlockService {
         : configWindow;
     const expiresAt = preferredExpiry > minExpiry ? preferredExpiry : minExpiry;
 
-    const isMultiPerson = (jobOffer.quantity ?? 1) > 1;
-    const employerAlreadyPaid = isMultiPerson && jobOffer.employer_unlock_paid;
+    const employerAlreadyPaid = isEmployerCoveredAtJobLevel(
+      jobOffer.quantity,
+      jobOffer.employer_unlock_paid,
+    );
 
     const now = new Date();
 
@@ -883,6 +886,7 @@ export class ContactUnlockService {
             id: true,
             title: true,
             quantity: true,
+            employer_unlock_paid: true,
             status: true,
             scheduled_at: true,
           },
@@ -913,8 +917,16 @@ export class ContactUnlockService {
       ? AssignmentStatus.CANCELLED_BY_EMPLOYER
       : AssignmentStatus.CANCELLED_BY_WORKER;
 
+    // On a multi-seat offer the employer's one payment covers the whole job, and
+    // `employer_paid` is cascaded onto every candidate's attempt. Refunding per
+    // attempt would pay back the fee once per candidate for a single payment.
+    const employerPaidAtJobLevel = isEmployerCoveredAtJobLevel(
+      attempt.job_offer.quantity,
+      attempt.job_offer.employer_unlock_paid,
+    );
+
     await this.prisma.$transaction(async (tx) => {
-      if (attempt.employer_paid) {
+      if (attempt.employer_paid && !employerPaidAtJobLevel) {
         await this.walletService.refundProfileWallet(
           attempt.employer_id,
           Number(attempt.employer_amount),
@@ -1042,6 +1054,11 @@ export class ContactUnlockService {
   async abortPendingUnlockByApplication(applicationId: string): Promise<void> {
     const attempt = await this.prisma.contactUnlockAttempt.findUnique({
       where: { application_id: applicationId },
+      include: {
+        job_offer: {
+          select: { quantity: true, employer_unlock_paid: true },
+        },
+      },
     });
     if (!attempt) return;
     if (
@@ -1052,8 +1069,14 @@ export class ContactUnlockService {
       return;
     }
     const now = new Date();
+    // See rejectPendingAttemptByApplication: a job-level payment must not be
+    // refunded once per candidate.
+    const employerPaidAtJobLevel = isEmployerCoveredAtJobLevel(
+      attempt.job_offer.quantity,
+      attempt.job_offer.employer_unlock_paid,
+    );
     await this.prisma.$transaction(async (tx) => {
-      if (attempt.employer_paid) {
+      if (attempt.employer_paid && !employerPaidAtJobLevel) {
         await this.walletService.refundProfileWallet(
           attempt.employer_id,
           Number(attempt.employer_amount),
@@ -1174,8 +1197,10 @@ export class ContactUnlockService {
         let newStatus: ContactUnlockStatus = ContactUnlockStatus.EXPIRED;
 
         const isMultiPerson = (attempt.job_offer.quantity ?? 1) > 1;
-        const employerPaidAtJobLevel =
-          isMultiPerson && attempt.job_offer.employer_unlock_paid;
+        const employerPaidAtJobLevel = isEmployerCoveredAtJobLevel(
+          attempt.job_offer.quantity,
+          attempt.job_offer.employer_unlock_paid,
+        );
 
         if (!isMultiPerson && attempt.employer_paid && attempt.worker_paid) {
           // Standard job — both paid but unlock expired: refund both.

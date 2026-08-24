@@ -1,19 +1,25 @@
 import {
   IsString,
   IsOptional,
-  IsEnum,
+  IsIn,
   MinLength,
   MaxLength,
   Matches,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { listPaymentGatewayMetadata } from '../../../common/services/payment/payment-gateway.registry';
 
-export const MONETBIL_OPERATORS = [
-  'CG_MTNMOBILEMONEY',
-  'CG_AIRTELMONEY',
-] as const;
-
-export type MonetbilOperator = (typeof MONETBIL_OPERATORS)[number];
+/**
+ * Every operator code any registered gateway accepts.
+ *
+ * The DTO can only check the value is a code some gateway knows — whether it is
+ * the code the *active* gateway needs depends on runtime config, so that check
+ * belongs to the service (`assertOperatorMatchesGateway`). Built from the
+ * registry so a new provider's networks are accepted without touching this file.
+ */
+export const KNOWN_PAYMENT_OPERATORS: string[] = listPaymentGatewayMetadata()
+  .flatMap((gateway) => gateway.operators)
+  .map((operator) => operator.code);
 
 export class InitiatePaymentDto {
   @ApiProperty({ example: '069917686' })
@@ -25,11 +31,11 @@ export class InitiatePaymentDto {
 
   @ApiPropertyOptional({
     description:
-      'Monetbil operator code — required for MONETBIL gateway, omit for MTN_MOMO',
+      'Mobile-money operator code. Required by gateways that route by network, omitted by gateways that serve a single one — see GET /payment-requests/gateways.',
     example: 'CG_MTNMOBILEMONEY',
-    enum: MONETBIL_OPERATORS,
+    enum: KNOWN_PAYMENT_OPERATORS,
   })
   @IsOptional()
-  @IsEnum(MONETBIL_OPERATORS)
-  operator?: MonetbilOperator;
+  @IsIn(KNOWN_PAYMENT_OPERATORS)
+  operator?: string;
 }

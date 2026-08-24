@@ -28,6 +28,7 @@ import { MailService } from '../mail/mail.service';
 import { LayoutService } from '../mail/layout.service';
 import { paymentSuccessEmail } from '../mail/templates';
 import { PaymentGatewayService } from '../../common/services/payment/payment-gateway.service';
+import type { PaymentGatewayMetadata } from '../../common/services/payment/types/payment-gateway.types';
 import { PaymentStatusGateway } from '../ws-notifications/payment-status.gateway';
 import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
 import { BotNotificationService } from '../bot/services/bot-notification.service';
@@ -197,7 +198,44 @@ export class PaymentRequestService {
   }
 
   /**
-   * Initiates a Monetbil USSD push for the given token.
+   * The gateways this build knows about, and which one is live.
+   *
+   * Consumers render from this instead of keeping their own name tables, so a
+   * new provider shows up in the payment page and the admin without either of
+   * them being redeployed with a new constant.
+   */
+  listGateways(): {
+    active: string;
+    gateways: PaymentGatewayMetadata[];
+  } {
+    return {
+      active: this.paymentGateway.getActiveMetadata().key,
+      gateways: this.paymentGateway.listAvailable(),
+    };
+  }
+
+  /**
+   * The DTO can only confirm the operator is a code *some* gateway knows;
+   * whether it fits the one this deployment runs on is a runtime question.
+   * Sending Monetbil's `CG_AIRTELMONEY` to MTN MoMo would otherwise be accepted
+   * here and rejected by the gateway, after the request had already been
+   * claimed PROCESSING.
+   */
+  private assertOperatorMatchesGateway(operator: string | undefined): void {
+    const gateway = this.paymentGateway.getActiveMetadata();
+
+    if (!gateway.requiresOperator) return;
+
+    const accepted = gateway.operators.map((o) => o.code);
+    if (!operator || !accepted.includes(operator)) {
+      throw new BadRequestException(
+        `Opérateur invalide pour ${gateway.label}. Valeurs acceptées : ${accepted.join(', ')}`,
+      );
+    }
+  }
+
+  /**
+   * Initiates a mobile-money push for the given token on the active gateway.
    * Updates the PaymentRequest to PROCESSING status.
    */
   async initiatePayment(
@@ -219,6 +257,8 @@ export class PaymentRequestService {
     if (!request.amount) {
       throw new BadRequestException('Montant non défini pour cette demande');
     }
+
+    this.assertOperatorMatchesGateway(operator);
 
     // Atomically claim PENDING → PROCESSING before calling the gateway.
     // Concurrent double-taps both attempt this; only one succeeds (count === 1).
@@ -299,7 +339,6 @@ export class PaymentRequestService {
       data: {
         gateway: activeGateway,
         gateway_payment_ref: gatewayRef || null,
-        monetbil_payment_ref: gatewayRef || null, // keep for backward compat during transition
       },
     });
 
@@ -344,6 +383,9 @@ export class PaymentRequestService {
       return { received: true };
     }
 
+    // Nothing writes `monetbil_payment_ref` any more, but a callback can still
+    // arrive for a request created by the previous deploy. The fallback goes
+    // when the column does.
     const request = await this.prisma.paymentRequest.findFirst({
       where: {
         OR: [

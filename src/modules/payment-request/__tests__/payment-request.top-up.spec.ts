@@ -16,7 +16,6 @@ import {
   InvoiceReason,
 } from '@prisma/client';
 import { WalletService } from '../../wallet/wallet.service';
-import { MonetbilService } from '../monetbil.service';
 import { PaymentStatusGateway } from '../../ws-notifications/payment-status.gateway';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { BotNotificationService } from '../../bot/services/bot-notification.service';
@@ -164,7 +163,6 @@ describe('PaymentRequestService — WALLET_TOP_UP post-payment', () => {
           },
         },
         { provide: WalletService, useValue: mockWalletService },
-        { provide: MonetbilService, useValue: { initiatePayment: jest.fn(), verifyWebhookSignature: jest.fn() } },
         { provide: PaymentGatewayService, useValue: mockPaymentGateway },
         { provide: PaymentStatusGateway, useValue: { emitPaymentStatus: jest.fn() } },
         { provide: EventEmitter2, useValue: { emit: jest.fn() } },

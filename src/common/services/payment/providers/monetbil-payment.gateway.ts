@@ -4,6 +4,8 @@ import { IPaymentGateway } from '../interfaces/payment-gateway.interface';
 import {
   InitiatePaymentParams,
   InitiatePaymentResult,
+  PaymentGatewayDriver,
+  PaymentGatewayMetadata,
   PaymentStatusResult,
   WebhookHandleResult,
 } from '../types/payment-gateway.types';
@@ -12,9 +14,26 @@ import { fetchWithTimeout } from '../../../utils/fetch-with-timeout.util';
 const PLACE_PAYMENT_URL = 'https://api.monetbil.com/payment/v1/placePayment';
 const CHECK_PAYMENT_URL = 'https://api.monetbil.com/payment/v1/checkPayment';
 
+/**
+ * Monetbil routes by network, so the caller has to say which one. These are
+ * Monetbil's own codes and are meaningless to any other gateway — they live
+ * here rather than in the shared DTO for exactly that reason.
+ */
+export const MONETBIL_METADATA: PaymentGatewayMetadata = {
+  key: PaymentGatewayDriver.MONETBIL,
+  label: 'Monetbil',
+  requiresOperator: true,
+  operators: [
+    { code: 'CG_MTNMOBILEMONEY', label: 'MTN Mobile Money' },
+    { code: 'CG_AIRTELMONEY', label: 'Airtel Money' },
+  ],
+};
+
 @Injectable()
 export class MonetbilPaymentGateway implements IPaymentGateway {
   private readonly logger = new Logger(MonetbilPaymentGateway.name);
+
+  readonly metadata = MONETBIL_METADATA;
 
   constructor(private readonly configService: ConfigService) {}
 

@@ -5,6 +5,8 @@ import { IPaymentGateway } from '../interfaces/payment-gateway.interface';
 import {
   InitiatePaymentParams,
   InitiatePaymentResult,
+  PaymentGatewayDriver,
+  PaymentGatewayMetadata,
   PaymentStatusResult,
   WebhookHandleResult,
 } from '../types/payment-gateway.types';
@@ -12,10 +14,23 @@ import { fetchWithTimeout } from '../../../utils/fetch-with-timeout.util';
 
 type CachedToken = { value: string; expiresAt: number };
 
+/**
+ * MTN MoMo only ever talks to its own network, so there is nothing to choose:
+ * an operator code sent here would be ignored.
+ */
+export const MTN_MOMO_METADATA: PaymentGatewayMetadata = {
+  key: PaymentGatewayDriver.MTN_MOMO,
+  label: 'MTN MoMo',
+  requiresOperator: false,
+  operators: [],
+};
+
 @Injectable()
 export class MtnMomoPaymentGateway implements IPaymentGateway {
   private readonly logger = new Logger(MtnMomoPaymentGateway.name);
   private cachedToken: CachedToken | null = null;
+
+  readonly metadata = MTN_MOMO_METADATA;
 
   constructor(private readonly configService: ConfigService) {}
 
