@@ -1,9 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { PaymentGatewayDriver } from './types/payment-gateway.types';
 import { IPaymentGateway } from './interfaces/payment-gateway.interface';
-import { MonetbilPaymentGateway } from './providers/monetbil-payment.gateway';
-import { MtnMomoPaymentGateway } from './providers/mtn-momo-payment.gateway';
+import {
+  PAYMENT_GATEWAY_REGISTRY,
+  listPaymentGatewayDrivers,
+  resolvePaymentGatewayDriver,
+} from './payment-gateway.registry';
 
 @Injectable()
 export class PaymentGatewayFactory {
@@ -12,19 +14,16 @@ export class PaymentGatewayFactory {
   constructor(private readonly configService: ConfigService) {}
 
   create(): IPaymentGateway {
-    const driver = this.configService.get<string>('PAYMENT_GATEWAY_DRIVER', '').toUpperCase();
+    const raw = this.configService.get<string>('PAYMENT_GATEWAY_DRIVER', '');
+    const driver = resolvePaymentGatewayDriver(raw);
+
+    if (!driver) {
+      throw new Error(
+        `PAYMENT_GATEWAY_DRIVER is not set or invalid: "${raw}". Must be one of ${listPaymentGatewayDrivers().join(', ')}.`,
+      );
+    }
 
     this.logger.log(`Creating payment gateway: ${driver}`);
-
-    switch (driver) {
-      case PaymentGatewayDriver.MONETBIL:
-        return new MonetbilPaymentGateway(this.configService);
-      case PaymentGatewayDriver.MTN_MOMO:
-        return new MtnMomoPaymentGateway(this.configService);
-      default:
-        throw new Error(
-          `PAYMENT_GATEWAY_DRIVER is not set or invalid: "${driver}". Must be MONETBIL or MTN_MOMO.`,
-        );
-    }
+    return PAYMENT_GATEWAY_REGISTRY[driver].build(this.configService);
   }
 }
