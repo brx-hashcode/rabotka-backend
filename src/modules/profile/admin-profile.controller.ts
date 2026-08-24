@@ -706,21 +706,76 @@ export class AdminProfileController {
     return result;
   }
 
+  /**
+   * Upload ONE supporting image for a KYC review, ahead of the verify call.
+   *
+   * `PATCH :id/verify` used to carry the bytes itself, as up to ten binary
+   * parts. That made the whole review all-or-nothing on submit, with no
+   * progress and no way to retry a single failed photograph — and the route
+   * carried neither a size limit nor a mime filter.
+   *
+   * MANAGER, matching `:id/verify` exactly. A role that could upload here but
+   * not verify would be able to write objects into the private KYC bucket with
+   * no way to attach them, which is a write with no audit trail.
+   *
+   * Images only — no PDF, unlike the onboarding `POST /profile/kyc-upload`.
+   * The admin dropzone accepts jpeg/png/webp and compresses to JPEG before
+   * sending, so a PDF here would be a shape the UI cannot produce.
+   */
+  @Post(':id/verification-images')
+  @Roles(UserRole.MANAGER)
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: 10 * 1024 * 1024 },
+      fileFilter: (_req, file, cb) => {
+        if (['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype)) {
+          cb(null, true);
+        } else {
+          cb(
+            new BadRequestException(
+              'Only JPEG, PNG or WEBP images are allowed',
+            ),
+            false,
+          );
+        }
+      },
+    }),
+  )
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({
+    summary: 'Upload one KYC verification image (admin only)',
+    description:
+      'Stores the image in the private KYC bucket and returns its descriptor. ' +
+      'Pass the returned `key` to PATCH :id/verify. `key` is the durable half; ' +
+      '`url` is a signed preview that expires within the hour — never persist it.',
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'Image stored; key and url returned',
+  })
+  @ApiResponse({ status: 404, description: 'Profile not found' })
+  async uploadVerificationImage(
+    @Param('id') id: string,
+    @UploadedFile() file: Express.Multer.File | undefined,
+  ): Promise<{ key: string; url: string }> {
+    if (!file) throw new BadRequestException("L'image est requise");
+    return this.profileService.uploadVerificationImage(id, file);
+  }
+
   @Patch(':id/verify')
   @Roles(UserRole.MANAGER)
-  @UseInterceptors(FilesInterceptor('files', 10))
-  @ApiConsumes('multipart/form-data')
   @ApiOperation({
     summary: 'Verify or reject profile KYC (admin only)',
     description:
-      'Approves or rejects KYC verification for a profile and its documents. Supports uploading verification images.',
+      'Approves or rejects KYC verification for a profile and its documents. ' +
+      'Supporting images must be uploaded first via POST :id/verification-images; ' +
+      'this call carries only their keys.',
   })
   @ApiResponse({ status: 200, description: 'Updated profile details' })
   @ApiResponse({ status: 404, description: 'Profile not found' })
   async verify(
     @Param('id') id: string,
     @Body() dto: AdminVerifyProfileDto,
-    @UploadedFiles() files: Express.Multer.File[],
     @Req() req: any,
   ) {
     const adminUserId = req.user?.userId ?? 'system';
@@ -729,7 +784,7 @@ export class AdminProfileController {
       adminUserId as string,
       dto.decision,
       dto.reason,
-      files,
+      dto.documents,
     );
 
     await this.logService.create({
@@ -744,6 +799,9 @@ export class AdminProfileController {
       metadata: {
         decision: dto.decision,
         reason: dto.reason,
+        // The count, never the descriptors: a document's `url` is a live signed
+        // credential, and the audit log is not the place for one.
+        documentCount: dto.documents?.length ?? 0,
       },
     });
 
