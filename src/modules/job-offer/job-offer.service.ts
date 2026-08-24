@@ -42,6 +42,7 @@ import {
 } from './utils/job-reference.util';
 import { closesOnFill, isDatedMission } from './utils/employment-type.util';
 import { TERMINAL_JOB_OFFER_STATUSES } from './utils/job-offer-status.util';
+import { isEmployerCoveredAtJobLevel } from '../contact-unlock/employer-coverage';
 import {
   AccountStatus,
   ApplicationStatus,
@@ -1434,6 +1435,9 @@ export class JobOfferService {
             unlocked_at: true,
             employer_amount: true,
             worker_amount: true,
+            job_offer: {
+              select: { quantity: true, employer_unlock_paid: true },
+            },
           },
         }),
         // A deleted penalty is not a penalty: it was withdrawn, and counting it
@@ -1494,6 +1498,12 @@ export class JobOfferService {
       if (name) agg.workerNames.push(name);
     }
 
+    // A multi-seat offer is paid for once by the employer, and that single
+    // payment flips `employer_paid` on every candidate's attempt. Counting the
+    // fee per attempt would report N x what was actually collected, so credit
+    // a job-level payment the first time we meet its offer.
+    const employerFeeAlreadyCredited = new Set<string>();
+
     for (const u of unlocks) {
       const agg = at(u.job_offer_id);
       agg.unlockAttempts += 1;
@@ -1502,7 +1512,16 @@ export class JobOfferService {
       // one party paid still earned that half.
       if (u.employer_paid) {
         agg.unlockEmployerPaid += 1;
-        agg.unlockRevenue += Number(u.employer_amount);
+        const paidAtJobLevel = isEmployerCoveredAtJobLevel(
+          u.job_offer?.quantity,
+          u.job_offer?.employer_unlock_paid ?? false,
+        );
+        if (!paidAtJobLevel) {
+          agg.unlockRevenue += Number(u.employer_amount);
+        } else if (!employerFeeAlreadyCredited.has(u.job_offer_id)) {
+          employerFeeAlreadyCredited.add(u.job_offer_id);
+          agg.unlockRevenue += Number(u.employer_amount);
+        }
       }
       if (u.worker_paid) {
         agg.unlockWorkerPaid += 1;
