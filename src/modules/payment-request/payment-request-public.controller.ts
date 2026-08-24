@@ -13,6 +13,20 @@ export class PaymentRequestPublicController {
     private readonly logService: LogService,
   ) {}
 
+  /**
+   * Deliberately not under `pay/` — `pay/:token` would swallow it on any
+   * reordering of this file.
+   */
+  @Get('payment-gateways')
+  @ApiOperation({
+    summary: 'List payment gateways and the operators each one accepts',
+    description:
+      'The active gateway drives the payment page; the full list lets the admin label historical rows whose gateway is no longer the active one.',
+  })
+  listGateways() {
+    return this.service.listGateways();
+  }
+
   @Get('pay/:token')
   @ApiOperation({ summary: 'Get payment info by token' })
   getByToken(@Param('token') token: string) {
@@ -40,7 +54,7 @@ export class PaymentRequestPublicController {
   }
 
   @Post('webhooks/payment/callback')
-  @ApiOperation({ summary: 'Payment gateway webhook callback (Monetbil)' })
+  @ApiOperation({ summary: 'Payment gateway webhook callback' })
   async paymentCallback(@Body() payload: Record<string, string>) {
     const result = await this.service.handlePaymentCallback(payload);
     await this.logService.create({
