@@ -460,7 +460,6 @@ describe('AdminProfileController', () => {
     const result = await ctrl.verify(
       'p1',
       { decision: 'VERIFIED' as any, reason: 'approved' },
-      [],
       {
         user: { userId: 'u1' },
         headers: {},
@@ -502,7 +501,6 @@ describe('AdminProfileController', () => {
     await ctrl.verify(
       'p1',
       { decision: 'REJECTED' as any, reason: 'Pièce d’identité illisible' },
-      [],
       {
         user: { userId: 'u1' },
         headers: {},

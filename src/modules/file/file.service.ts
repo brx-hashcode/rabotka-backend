@@ -33,6 +33,18 @@ export class FileService {
        * private bucket of their own; everything else stays where it was.
        */
       bucket?: string;
+      /**
+       * Whether to stamp the Rabotka logo onto an image. Defaults to true, so
+       * omitting it keeps the historical behaviour for every existing caller.
+       *
+       * Set false for internal evidence that is never published. An admin's KYC
+       * verification image is only ever served through the authenticated
+       * `/verification-images/:imageId/raw` stream, so the mark protects
+       * nothing there and only degrades the thing a reviewer is trying to read
+       * — `addWatermark` re-encodes lossily, and it transcodes HEIC/HEIF to
+       * JPEG while the generated key keeps the original extension.
+       */
+      watermark?: boolean;
     },
   ) {
     if (!file.buffer || !file.originalname) {
@@ -53,7 +65,9 @@ export class FileService {
     const fileName = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
 
     let bufferToUpload = fileBuffer;
-    if (file.mimetype.startsWith('image/')) {
+    // `!== false` rather than a truthy check: `undefined` is every caller that
+    // predates the flag, and those must keep watermarking exactly as before.
+    if (options?.watermark !== false && file.mimetype.startsWith('image/')) {
       bufferToUpload = await this.imageWatermarkService.addWatermark(
         fileBuffer,
         file.mimetype,
