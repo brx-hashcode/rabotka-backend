@@ -595,6 +595,34 @@ export class SystemConfigService implements OnModuleInit {
     };
   }
 
+  /**
+   * Parrainage payout amounts and the per-parrain cap.
+   *
+   * `maxRewardedPerReferrer` is `null` for unlimited, not `0`. The config value
+   * uses 0 as the "no cap" sentinel because that reads better in the admin
+   * screen than an empty field, but letting that 0 reach a call site produces
+   * `rewardedCount >= 0` — a cap that rejects everyone, silently, and only for
+   * the admins who deliberately turned it off. Resolve it here, once.
+   */
+  async getReferralCredits(): Promise<{
+    referrerCreditFcfa: number;
+    refereeCreditFcfa: number;
+    maxRewardedPerReferrer: number | null;
+  }> {
+    const [referrerCredit, refereeCredit, maxRewarded] = await this.mgetBatch([
+      { key: 'fees.referral_credit_referrer', fallback: '300' },
+      { key: 'fees.referral_credit_referee', fallback: '200' },
+      { key: 'fees.referral_max_rewarded_per_referrer', fallback: '10' },
+    ]);
+
+    const cap = Number(maxRewarded);
+    return {
+      referrerCreditFcfa: Number(referrerCredit),
+      refereeCreditFcfa: Number(refereeCredit),
+      maxRewardedPerReferrer:
+        !Number.isFinite(cap) || cap <= 0 ? null : Math.floor(cap),
+    };
+  }
 
   async getStorageDriver(): Promise<string> {
     return this.get('storage.driver', 'S3');
