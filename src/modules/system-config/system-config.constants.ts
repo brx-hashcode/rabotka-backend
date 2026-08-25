@@ -189,6 +189,44 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     label: 'Crédit de bienvenue – Employeur (FCFA)',
     isSecret: false,
   },
+  {
+    // Paid to the parrain when their filleul makes their first mobile-money
+    // payment for a connection — never at signup, which would be farmable with
+    // throwaway accounts.
+    //
+    // 300 + 200 rather than 500 + 250 so the total (500) is covered by an
+    // employer contact unlock, which is also 500. The payout can never exceed
+    // the payment that triggered it, so at 750 the only qualifying trigger left
+    // was the 1000 FCFA recommendation contact — the program quietly paid on
+    // one of its three entry points.
+    key: 'fees.referral_credit_referrer',
+    value: '300',
+    category: ConfigCategory.FEES,
+    label: 'Crédit parrainage – Parrain (FCFA)',
+    isSecret: false,
+  },
+  {
+    // Paid to the filleul at the same moment, from the same claim. Note the
+    // two together are capped at the amount of the triggering payment, so
+    // raising either can silently stop small payments from qualifying — see
+    // ReferralService.settleForReferee.
+    key: 'fees.referral_credit_referee',
+    value: '200',
+    category: ConfigCategory.FEES,
+    label: 'Crédit parrainage – Filleul (FCFA)',
+    isSecret: false,
+  },
+  {
+    // Counts REWARDED referrals only: a parrain past the cap still has their
+    // referrals recorded and visible, they just stop paying. 0 = unlimited,
+    // resolved to null in getReferralCredits so no call site compares against
+    // the sentinel.
+    key: 'fees.referral_max_rewarded_per_referrer',
+    value: '10',
+    category: ConfigCategory.FEES,
+    label: 'Parrainages rémunérés max par parrain (0 = illimité)',
+    isSecret: false,
+  },
 
   // ── MATCHING ──────────────────────────────────────────────────────────────
   {

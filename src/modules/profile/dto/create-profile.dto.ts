@@ -9,11 +9,13 @@ import {
   IsArray,
   IsUUID,
   Equals,
+  Matches,
 } from 'class-validator';
-import { ProfileType, DocumentType } from '@prisma/client';
+import { ProfileType, DocumentType, ReferralSource } from '@prisma/client';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { HasMxRecord } from '../../../common/validators/has-mx-record.validator';
 import { LocationDto } from '../../../common/dto/location.dto';
+import { REFERRAL_CODE_PATTERN } from '../../referral/utils/referral-code.util';
 
 export class CreateProfileDto extends LocationDto {
   @ApiProperty({ description: 'First name of the profile' })
@@ -175,4 +177,48 @@ export class CreateProfileDto extends LocationDto {
   @IsString()
   @IsNotEmpty()
   kycDocumentBackKey?: string;
+
+  /**
+   * Parrainage code of the profile that invited this user — from a `?ref=`
+   * link or typed on the confirmation screen.
+   *
+   * An unknown, malformed or self-referring code is ignored rather than
+   * rejected: the code is the least important field on this form, and a bad one
+   * must never cost someone their account. `@Matches` only screens out what
+   * could not be a code at all, so the request still reaches the service.
+   */
+  @ApiPropertyOptional({
+    description:
+      'Parrainage code of the inviting profile. Unknown codes are ignored, never an error.',
+    example: 'K7M2XQ',
+  })
+  @Transform(({ value }) =>
+    typeof value === 'string'
+      ? value.trim().toUpperCase().replace(/[\s-]/g, '')
+      : undefined,
+  )
+  @IsOptional()
+  @IsString()
+  @Matches(REFERRAL_CODE_PATTERN, {
+    message: 'Le code de parrainage doit comporter 6 caractères.',
+  })
+  referralCode?: string;
+
+  /**
+   * How the code got here. Only the client can tell a followed `?ref=` link
+   * from a code someone typed, and the difference is the whole point of the
+   * column: it says whether links or word-of-mouth is doing the work.
+   *
+   * Untrusted, like any client input, and only ever used as a label. Defaults
+   * to MANUAL_CODE when absent — the deployed client does not send it, and a
+   * typed code is the safer thing to assume of an unknown caller.
+   */
+  @ApiPropertyOptional({
+    description: 'Where the referral code came from.',
+    enum: ReferralSource,
+    example: ReferralSource.LINK,
+  })
+  @IsOptional()
+  @IsEnum(ReferralSource)
+  referralSource?: ReferralSource;
 }

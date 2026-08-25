@@ -652,6 +652,18 @@ export class ContactUnlockService {
         description: 'Déverrouillage de contact (wallet interne)',
         payment_reference: paymentReference,
         contact_unlock_attempt_id: attemptId,
+        // DO NOT add `request_type` here.
+        //
+        // It looks like an oversight and is load-bearing. This row is synthetic
+        // — no external money arrived, the unlock was funded from wallet credit
+        // the platform itself issued. ReferralService.settleForReferee selects
+        // qualifying payments with `request_type IN (CONTACT_UNLOCK,
+        // RECOMMENDATION_CONTACT)`, and a NULL never matches an IN, which is
+        // what keeps credit-funded unlocks from paying out a parrainage.
+        //
+        // Setting it would let the referral programme pay real credit for a
+        // payment that brought in none — funding itself from its own welcome
+        // bonuses. Locked by a test in referral.service.spec.ts.
       },
     });
 
