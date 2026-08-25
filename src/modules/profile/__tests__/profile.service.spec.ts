@@ -177,6 +177,10 @@ describe('ProfileService', () => {
   let configService: ReturnType<typeof makeConfigService>;
   let documentService: ReturnType<typeof makeDocumentService>;
   let portfolioService: { ensurePortfolioSlug: jest.Mock };
+  let referralService: {
+    recordReferral: jest.Mock;
+    settleHeldForReferrer: jest.Mock;
+  };
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -192,6 +196,10 @@ describe('ProfileService', () => {
     documentService = makeDocumentService();
     portfolioService = {
       ensurePortfolioSlug: jest.fn().mockResolvedValue('alice-dupont-a1b2c3'),
+    };
+    referralService = {
+      recordReferral: jest.fn().mockResolvedValue(null),
+      settleHeldForReferrer: jest.fn().mockResolvedValue(undefined),
     };
     service = new ProfileService(
       prisma as any,
@@ -239,6 +247,7 @@ describe('ProfileService', () => {
       // The real one: it has no dependencies beyond a checked-in JSON file, so
       // mocking it would only weaken the country/city assertions below.
       new GeoService(), // geo
+      referralService as any, // referralService
     );
   });
 

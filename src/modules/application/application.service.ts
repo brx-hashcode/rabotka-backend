@@ -23,7 +23,10 @@ import {
 } from '../../common/utils/business-day.util';
 import { InteractionEventService } from '../recommendation-engine/interaction-event.service';
 import { JobEventsGateway } from '../ws-notifications/job-events.gateway';
-import { isWorkerHardBlocked } from '../penalty/penalty.utils';
+import {
+  isWorkerHardBlocked,
+  hardBlockMessage,
+} from '../penalty/penalty.utils';
 import { closesOnFill } from '../job-offer/utils/employment-type.util';
 import { isTerminalJobOfferStatus } from '../job-offer/utils/job-offer-status.util';
 import { closeRecruitedOfferTx } from '../job-offer/utils/close-recruited-offer';
@@ -47,10 +50,7 @@ import {
 import { ContractService } from '../contract/contract.service';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { MatchingService } from '../matching/matching.service';
-import {
-  RELIABILITY_SCORE_MAX,
-  PENALTY_SUSPENSION_THRESHOLD,
-} from './application.constants';
+import { RELIABILITY_SCORE_MAX } from './application.constants';
 
 /**
  * Statuses that count as a worker's "active" candidature — i.e. the worker
@@ -340,10 +340,16 @@ export class ApplicationService {
       },
     });
     if (unpaidPenaltiesCount > 0) {
-      const hardBlocked = await isWorkerHardBlocked(this.prisma, workerId);
+      const hardBlockDays =
+        await this.systemConfigService.getPenaltyHardBlockDays();
+      const hardBlocked = await isWorkerHardBlocked(
+        this.prisma,
+        workerId,
+        hardBlockDays,
+      );
       if (hardBlocked) {
         throw new ForbiddenException(
-          '🚨 Votre compte est bloqué en raison de pénalités impayées depuis plus de 3 jours. Veuillez les payer afin de pouvoir postuler à nouveau.',
+          hardBlockMessage(hardBlockDays, 'postuler à nouveau'),
         );
       }
       throw new ForbiddenException(
@@ -1158,11 +1164,18 @@ export class ApplicationService {
 
     // Suspension check after penalty creation
     if (applyPenalty) {
-      const unpaidCount = await this.prisma.penalty.count({
+      // Sum the recorded amounts rather than counting and multiplying by the
+      // current price: penalties keep the amount they were issued at, so a
+      // count × today's `lateCancellationPenaltyFcfa` misquotes the total for
+      // anyone holding a penalty from before the last price change.
+      const unpaid = await this.prisma.penalty.aggregate({
         where: { profile_id: workerId, paid_at: null },
+        _count: true,
+        _sum: { amount: true },
       });
-      if (unpaidCount >= PENALTY_SUSPENSION_THRESHOLD) {
-        const total = unpaidCount * fees.lateCancellationPenaltyFcfa;
+      const unpaidCount = unpaid._count;
+      if (unpaidCount >= fees.penaltySuspensionThreshold) {
+        const total = Number(unpaid._sum.amount ?? 0);
         const workerProfile = await this.prisma.profile.update({
           where: { id: workerId },
           data: {

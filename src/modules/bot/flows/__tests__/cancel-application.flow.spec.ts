@@ -61,6 +61,9 @@ function makeCtx(
       record: jest.fn().mockResolvedValue(undefined),
     } as unknown as CancelApplicationContext['interestSignalService'],
     cancellationThresholdHours: 4,
+    lateCancellationPenaltyFcfa: 5000,
+    lateCancellationScoreDeduction: 5,
+    reliabilityScoreMin: 50,
     ...overrides,
   };
 }
