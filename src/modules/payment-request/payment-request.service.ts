@@ -24,6 +24,7 @@ import { SystemConfigService } from '../system-config/system-config.service';
 import { WalletService } from '../wallet/wallet.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { WhatsAppFeedbackService } from '../whatsapp/feedback/whatsapp-feedback.service';
+import { ReferralService } from '../referral/referral.service';
 import { MailService } from '../mail/mail.service';
 import { LayoutService } from '../mail/layout.service';
 import { paymentSuccessEmail } from '../mail/templates';
@@ -121,6 +122,7 @@ export class PaymentRequestService {
     // the specs construct this service positionally, and inserting a parameter
     // mid-list silently shifts fourteen mocks by one.
     private readonly feedback: WhatsAppFeedbackService,
+    private readonly referralService: ReferralService,
   ) {}
 
   /**
@@ -538,6 +540,36 @@ export class PaymentRequestService {
         err,
       ),
     );
+
+    // 5. Parrainage payout — deliberately last, and deliberately not awaited.
+    //
+    // It credits two wallets, neither of which belongs to the person watching
+    // this payment complete, and it is the only step here that costs nothing to
+    // run late: settleForReferee re-derives its own facts from the database, so
+    // the KYC approval path and the parrainage screen both replay it. Nothing
+    // about a referral lookup belongs between a payer and the contact they just
+    // bought.
+    //
+    // This method is also the boundary that keeps wallet-credit-paid unlocks
+    // out of the program: those settle in ContactUnlockService.payUnlock and
+    // RecommendationContactService and never reach here. Do NOT add a second
+    // call site there — paying a parrainage on credit the platform issued is
+    // how the program funds itself out of its own bonuses.
+    //
+    // Gated on `context`, not on `request.request_type`:
+    // buildPaymentProcessingContext treats a request carrying a
+    // contact_unlock_attempt_id as an unlock whatever its type says, and a
+    // second copy of that rule here would drift from the one above it.
+    if (context.isContactUnlock || context.isRecommendationContact) {
+      void this.referralService
+        .settleForReferee(request.profile_id)
+        .catch((err) =>
+          this.logger.error(
+            `Referral settlement failed for payment ${request.id}:`,
+            err,
+          ),
+        );
+    }
   }
 
   private async buildPaymentProcessingContext(

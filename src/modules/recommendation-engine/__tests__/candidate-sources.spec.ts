@@ -1,7 +1,7 @@
 import { Logger } from '@nestjs/common';
 import { InteractionKind, JobOfferStatus } from '@prisma/client';
 import { CandidateSourceService } from '../candidate-sources';
-import { HARD_BLOCK_DAYS } from '../../penalty/penalty.utils';
+import { DEFAULT_HARD_BLOCK_DAYS } from '../../penalty/penalty.utils';
 import { EMPTY_FEATURES, type UserFeatures } from '../user-feature.service';
 
 jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => {});
@@ -535,23 +535,23 @@ describe('CandidateSourceService', () => {
 
   describe('hardBlockedWorkerIds', () => {
     it('does not query for an empty batch', async () => {
-      expect((await service.hardBlockedWorkerIds([])).size).toBe(0);
+      expect((await service.hardBlockedWorkerIds([], DEFAULT_HARD_BLOCK_DAYS)).size).toBe(0);
       expect(prisma.penalty.findMany).not.toHaveBeenCalled();
     });
 
     it('looks only at unpaid penalties older than the hard-block window', async () => {
-      await service.hardBlockedWorkerIds(['w1']);
+      await service.hardBlockedWorkerIds(['w1'], DEFAULT_HARD_BLOCK_DAYS);
 
       const [{ where }] = prisma.penalty.findMany.mock.calls[0];
       expect(where.paid_at).toBeNull();
       const cutoff = where.applied_at.lte as Date;
       const daysAgo = (Date.now() - cutoff.getTime()) / 86_400_000;
-      expect(daysAgo).toBeCloseTo(HARD_BLOCK_DAYS, 1);
+      expect(daysAgo).toBeCloseTo(DEFAULT_HARD_BLOCK_DAYS, 1);
     });
 
     it('returns the blocked ids', async () => {
       prisma.penalty.findMany.mockResolvedValue([{ profile_id: 'w1' }]);
-      expect([...(await service.hardBlockedWorkerIds(['w1', 'w2']))]).toEqual([
+      expect([...(await service.hardBlockedWorkerIds(['w1', 'w2'], DEFAULT_HARD_BLOCK_DAYS))]).toEqual([
         'w1',
       ]);
     });
@@ -559,7 +559,7 @@ describe('CandidateSourceService', () => {
     it('fails open, so a penalty outage cannot mute the whole fan-out', async () => {
       // Notifying someone who should have been skipped beats notifying no one.
       prisma.penalty.findMany.mockRejectedValue(new Error('down'));
-      expect((await service.hardBlockedWorkerIds(['w1'])).size).toBe(0);
+      expect((await service.hardBlockedWorkerIds(['w1'], DEFAULT_HARD_BLOCK_DAYS)).size).toBe(0);
     });
   });
 });

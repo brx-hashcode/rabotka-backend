@@ -221,6 +221,36 @@ enum WalletTransactionType {
   MOBILE_MONEY_CREDIT
   MOBILE_MONEY_WITHDRAWAL
   TOP_UP_CREDIT
+  REFERRAL_CREDIT
+}
+
+/// Lifecycle of one referral. Four of the five states mean "no money moved",
+/// which is why this is a status and not a boolean: an admin asked "why wasn't
+/// my friend's parrainage paid?" needs to distinguish "not yet" from "referrer
+/// unverified" from "over the cap" from "the payment was too small to fund it".
+enum ReferralStatus {
+  /// Relationship recorded at signup. The referee has not yet made a
+  /// qualifying payment.
+  PENDING
+  /// The referee paid, but the referrer was not ACTIVE+VERIFIED at that
+  /// moment. Settles later, when their KYC is approved.
+  QUALIFIED_ON_HOLD
+  /// Both sides credited. Terminal.
+  REWARDED
+  /// The referee paid, but nothing was owed: the referrer is over the cap, or
+  /// the payout would have exceeded the payment that triggered it. Terminal,
+  /// and deliberately distinct from FORFEITED — nobody did anything wrong.
+  CAPPED
+  /// Terminal non-payment: the referrer was deleted or banned, or the hold
+  /// expired before their KYC was approved.
+  FORFEITED
+}
+
+enum ReferralSource {
+  LINK
+  MANUAL_CODE
+  BOT
+  ADMIN
 }
 
 enum ContactUnlockStatus {
@@ -409,6 +439,13 @@ model Profile {
   vector_indexed_at DateTime?
   portfolio_slug    String?   @unique
 
+  /// Short, human-dictatable parrainage code. Minted lazily on first request
+  /// like `portfolio_slug` — see ReferralService.ensureReferralCode — so NULL
+  /// means "never asked for one", not "not eligible". There is deliberately no
+  /// `referred_by_id` beside it: Referral.referee_id is unique and answers that
+  /// in one place, and a second copy is a second thing that can disagree.
+  referral_code     String?   @unique
+
   category   JobCategory?      @relation(fields: [category_id], references: [id], onDelete: SetNull)
   categories ProfileCategory[]
 
@@ -443,6 +480,8 @@ model Profile {
   saved_jobs                      SavedJob[]
   interaction_events              InteractionEvent[]            @relation("InteractionActor")
   interaction_profile             InteractionProfile?
+  referrals_made                  Referral[]                    @relation("ReferralReferrer")
+  referral_received               Referral?                     @relation("ReferralReferee")
   deleted_at                      DateTime?                     @db.Timestamptz
 
   @@index([email], name: "idx_profile_email")
@@ -933,6 +972,56 @@ model WalletTransaction {
   @@map("wallet_transactions")
 }
 
+/// One parrainage relationship: who invited whom, and what came of it.
+///
+/// The row is created at signup and pays nothing. Settlement happens later,
+/// when the referee makes their first mobile-money payment for a connection —
+/// see ReferralService.settleForReferee. `status` is the idempotency target for
+/// that payout, the way `whatsapp_activation_bonus_granted` is for the welcome
+/// credit: a conditional updateMany claims it, and a second caller finds
+/// nothing to claim.
+model Referral {
+  id          String         @id @default(uuid()) @db.Uuid
+  created_at  DateTime       @default(now())
+  updated_at  DateTime       @updatedAt
+  referrer_id String         @db.Uuid
+  /// UNIQUE: a profile is referred at most once, ever, and only at signup.
+  /// This is what makes "who referred X" unambiguous at the database level
+  /// rather than by convention, and it removes the need for a `referred_by_id`
+  /// column on Profile that could drift from it.
+  referee_id  String         @db.Uuid @unique
+  /// The code as it was actually typed or followed, snapshotted. Codes are
+  /// stable today; the admin answer to "where did this signup come from" must
+  /// not depend on that staying true.
+  code_used   String
+  source      ReferralSource @default(LINK)
+  status      ReferralStatus @default(PENDING)
+
+  /// The payment that triggered settlement. NULL until the referee pays.
+  /// UNIQUE so one payment can never settle two referrals.
+  qualifying_payment_request_id String?   @unique @db.Uuid
+  rewarded_at                   DateTime?
+  /// What each side actually received. Written at settle time rather than read
+  /// back from config, so changing the fees later never rewrites history.
+  referrer_amount               Decimal?  @db.Decimal(10, 2)
+  referee_amount                Decimal?  @db.Decimal(10, 2)
+  /// Why nothing was paid. Set on CAPPED / FORFEITED / QUALIFIED_ON_HOLD, and
+  /// the only thing that can answer a support question about a missing credit.
+  settlement_note               String?
+
+  deleted_at DateTime? @db.Timestamptz
+
+  referrer           Profile         @relation("ReferralReferrer", fields: [referrer_id], references: [id], onDelete: Cascade)
+  referee            Profile         @relation("ReferralReferee", fields: [referee_id], references: [id], onDelete: Cascade)
+  qualifying_payment PaymentRequest? @relation(fields: [qualifying_payment_request_id], references: [id], onDelete: SetNull)
+
+  @@index([referrer_id, status], name: "idx_referral_referrer_status")
+  @@index([status], name: "idx_referral_status")
+  @@index([created_at], name: "idx_referral_created_at")
+  @@index([deleted_at], name: "idx_referral_deleted_at")
+  @@map("referrals")
+}
+
 model File {
   id                String          @id @default(uuid()) @db.Uuid
   created_at        DateTime        @default(now())
@@ -1120,6 +1209,7 @@ model PaymentRequest {
 
   profile    Profile   @relation(fields: [profile_id], references: [id], onDelete: Cascade)
   invoice    Invoice?
+  referral   Referral?
   deleted_at DateTime? @db.Timestamptz
 
   @@index([profile_id], name: "idx_payment_request_profile")

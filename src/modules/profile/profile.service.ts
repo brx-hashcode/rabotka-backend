@@ -53,6 +53,7 @@ import { InterestClusterService } from '../interest-graph/interest-cluster.servi
 import { PortfolioService } from '../portfolio/portfolio.service';
 import { GeocodingService } from '../../common/services/geocoding/geocoding.service';
 import { GeoService } from '../geo/geo.service';
+import { ReferralService } from '../referral/referral.service';
 import { CreateProfileDto } from './dto/create-profile.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { AdminUpdateProfileDto } from './dto/admin-update-profile.dto';
@@ -64,6 +65,8 @@ import {
   KycDocumentCategory,
   Prisma,
   ProfileType,
+  ReferralSource,
+  ReferralStatus,
   VerificationStatus,
 } from '@prisma/client';
 import { randomBytes } from 'node:crypto';
@@ -257,12 +260,28 @@ export type AdminVerificationImageItem = {
  * detail-only: the KYC evidence, and the single legacy `category_id` that the
  * many-to-many `categories` replaced.
  */
+/** Who invited this profile, or null if nobody did. */
+export type AdminProfileReferredBy = {
+  profileId: string;
+  firstName: string;
+  lastName: string;
+  code: string;
+  source: ReferralSource;
+  status: ReferralStatus;
+  rewardedAt: Date | null;
+  referrerAmount: number | null;
+  /** Why nothing was paid, when the status says nothing was. */
+  settlementNote: string | null;
+};
+
 export type AdminProfileDetailResponse = AdminProfileListItem & {
   /** Legacy single category, superseded by `categoryIds`/`categoryNames`. */
   categoryId: string | null;
   categoryName: string | null;
   kycDocuments: AdminKycDocumentItem[];
   verificationImages: AdminVerificationImageItem[];
+  referredBy: AdminProfileReferredBy | null;
+  referralsMadeCount: number;
 };
 
 type PrismaTransactionClient = Parameters<
@@ -298,6 +317,7 @@ export class ProfileService {
     private readonly cache: AdminCacheService,
     private readonly portfolioService: PortfolioService,
     private readonly geo: GeoService,
+    private readonly referralService: ReferralService,
     // @Optional() parce que SystemConfigModule est @Global() mais que les specs
     // instancient ProfileService à la main : `kycBucket` retombe alors sur
     // l'env, et lève si celui-ci est vide lui aussi.
@@ -727,11 +747,29 @@ export class ProfileService {
           },
           orderBy: { created_at: 'asc' },
         },
+        // Who invited this profile, straight off the relation. There is no
+        // `referred_by_id` column to read instead, on purpose: Referral is the
+        // one place that answers this, so the admin view and the payout logic
+        // cannot disagree about it.
+        referral_received: {
+          select: {
+            code_used: true,
+            source: true,
+            status: true,
+            rewarded_at: true,
+            referrer_amount: true,
+            settlement_note: true,
+            referrer: {
+              select: { id: true, first_name: true, last_name: true },
+            },
+          },
+        },
         _count: {
           select: {
             job_offers: true,
             applications: true,
             penalties: true,
+            referrals_made: true,
           },
         },
       },
@@ -811,6 +849,23 @@ export class ProfileService {
       applicationsCount: profile._count.applications,
       penaltiesCount: profile._count.penalties,
       unpaidPenaltiesCount,
+      referralsMadeCount: profile._count.referrals_made,
+      referredBy: profile.referral_received
+        ? {
+            profileId: profile.referral_received.referrer.id,
+            firstName: profile.referral_received.referrer.first_name,
+            lastName: profile.referral_received.referrer.last_name,
+            code: profile.referral_received.code_used,
+            source: profile.referral_received.source,
+            status: profile.referral_received.status,
+            rewardedAt: profile.referral_received.rewarded_at,
+            referrerAmount:
+              profile.referral_received.referrer_amount === null
+                ? null
+                : Number(profile.referral_received.referrer_amount),
+            settlementNote: profile.referral_received.settlement_note,
+          }
+        : null,
       // No urls here any more, signed or otherwise. An admin's browser fetches
       // each file from the stream route, authenticated by the session it
       // already has — so nothing in this payload expires, and nothing in it
@@ -980,6 +1035,19 @@ export class ProfileService {
             err,
           );
         });
+
+      // Pay out any parrainage that has been waiting on this KYC. A filleul
+      // who paid while their parrain was still in the review queue leaves the
+      // referral QUALIFIED_ON_HOLD; this is the trigger that releases it, which
+      // is why holding costs no scheduler of its own.
+      void this.referralService
+        .settleHeldForReferrer(profileId)
+        .catch((err) => {
+          this.logger.warn(
+            `Held referral settlement failed for referrer=${profileId}`,
+            err,
+          );
+        });
     }
 
     return this.getProfileDetailForAdmin(profileId);
@@ -1074,6 +1142,14 @@ export class ProfileService {
             `Failed to grant welcome credit for profile ${profileId}`,
           );
         });
+
+      // An account coming back from SUSPENDED becomes an eligible parrain
+      // again, so anything held while it was suspended settles here.
+      void this.referralService.settleHeldForReferrer(profileId).catch(() => {
+        this.logger.warn(
+          `Held referral settlement failed for referrer=${profileId}`,
+        );
+      });
     }
 
     if (becomingSuspended) {
@@ -1521,6 +1597,27 @@ export class ProfileService {
           );
           return 0;
         });
+
+      // Record who invited this profile. Credits nothing — the parrainage pays
+      // out when this user first pays by mobile money for a connection.
+      //
+      // After the transaction and swallowed on failure, for the same reason the
+      // portfolio slug above is: an unknown code, a self-referral or a dropped
+      // connection must never roll back a completed signup.
+      if (createProfileDto.referralCode) {
+        await this.referralService
+          .recordReferral({
+            refereeId: profile.id,
+            code: createProfileDto.referralCode,
+            source: createProfileDto.referralSource ?? ReferralSource.MANUAL_CODE,
+          })
+          .catch((err) =>
+            this.logger.warn(
+              `Referral not recorded for profile=${profile.id}`,
+              err,
+            ),
+          );
+      }
 
       // Geocode address asynchronously (fire-and-forget)
       this.geocodingService
