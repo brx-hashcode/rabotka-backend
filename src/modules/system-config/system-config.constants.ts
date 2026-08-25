@@ -101,6 +101,46 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     isSecret: false,
   },
   {
+    // Distinct from `billing_block_threshold` on purpose: blocking flips
+    // `billing_status`, suspending flips the account itself. It is the harsher
+    // of the two, so it must sit at or above the block threshold — an admin who
+    // pushes the block line past this one gets suspension first, which is the
+    // wrong order. Was `process.env.PENALTY_THRESHOLD` (default 3), which no
+    // deployment set and no admin could reach.
+    key: 'fees.penalty_suspension_threshold',
+    value: '3',
+    category: ConfigCategory.FEES,
+    label: 'Nombre de pénalités impayées avant suspension du compte',
+    isSecret: false,
+  },
+  {
+    // The hard block: one penalty left unpaid this long stops the account from
+    // applying, publishing, or unlocking a contact, and drops it out of the
+    // recommendation fan-out. Quoted verbatim in the message the user gets, so
+    // the number and the text can never drift apart.
+    key: 'fees.penalty_hard_block_days',
+    value: '3',
+    category: ConfigCategory.FEES,
+    label: 'Délai avant blocage dur pour pénalité impayée (jours)',
+    isSecret: false,
+  },
+  {
+    key: 'fees.penalty_max_notifications',
+    value: '3',
+    category: ConfigCategory.FEES,
+    label: 'Nombre max de rappels envoyés par pénalité impayée',
+    isSecret: false,
+  },
+  {
+    // Slightly under 24h so a daily reminder never drifts later and later:
+    // a scan an hour after yesterday's send still finds the penalty eligible.
+    key: 'fees.penalty_notification_interval_hours',
+    value: '23',
+    category: ConfigCategory.FEES,
+    label: 'Délai minimum entre deux rappels de pénalité (heures)',
+    isSecret: false,
+  },
+  {
     key: 'fees.max_daily_applications',
     value: '10',
     category: ConfigCategory.FEES,
@@ -179,6 +219,16 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     value: '',
     category: ConfigCategory.MATCHING,
     label: 'Version du schéma de payload Qdrant (automatique)',
+    isSecret: false,
+  },
+  {
+    // Read by `getMatchingReliabilityThreshold`, which was falling back to its
+    // hardcoded '50' on every call because the key was never seeded — so the
+    // admin screen had no row for it and it could not be changed at all.
+    key: 'matching.reliability_threshold',
+    value: '50',
+    category: ConfigCategory.MATCHING,
+    label: 'Score fiabilité minimum (moteur de matching)',
     isSecret: false,
   },
   {

@@ -11,7 +11,7 @@ import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { QdrantService } from '../qdrant/qdrant.service';
 import type { UserFeatures } from './user-feature.service';
 import { spreadSimilarity } from './scoring';
-import { HARD_BLOCK_DAYS } from '../penalty/penalty.utils';
+import { hardBlockCutoff } from '../penalty/penalty.utils';
 
 /** Candidate pool multiplier — over-fetch so filtering still yields topN. */
 const POOL_FACTOR = 4;
@@ -247,8 +247,7 @@ export class CandidateSourceService {
       with_payload: false,
     });
     const raw = points[0] as unknown as
-      | { vector?: { dense?: unknown } }
-      | undefined;
+      { vector?: { dense?: unknown } } | undefined;
     const dense = raw?.vector?.dense;
     return Array.isArray(dense) && dense.length > 0
       ? (dense as number[])
@@ -627,10 +626,12 @@ export class CandidateSourceService {
    * already refuses to let a hard-blocked *employer* post; a hard-blocked worker
    * has no business being messaged about new work either.
    */
-  async hardBlockedWorkerIds(workerIds: string[]): Promise<Set<string>> {
+  async hardBlockedWorkerIds(
+    workerIds: string[],
+    hardBlockDays: number,
+  ): Promise<Set<string>> {
     if (workerIds.length === 0) return new Set();
-    const threshold = new Date();
-    threshold.setDate(threshold.getDate() - HARD_BLOCK_DAYS);
+    const threshold = hardBlockCutoff(hardBlockDays);
     try {
       const rows = await this.prisma.penalty.findMany({
         where: {

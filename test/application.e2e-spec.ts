@@ -14,7 +14,9 @@ import {
 } from '../src/modules/application/application.service';
 import { PrismaService } from '../src/common/services/prisma/prisma.service';
 import { ApplicationStatus, JobOfferStatus, PaymentFlow } from '@prisma/client';
-import { LATE_CANCELLATION_PENALTY_FCFA } from '../src/modules/application/application.constants';
+
+/** The configured `fees.late_cancellation_penalty_fcfa`, mocked on SystemConfigService. */
+const LATE_CANCELLATION_PENALTY_FCFA = 5000;
 
 const JOB_OFFER_ID = 'offer-e2e-1';
 const WORKER_ID = 'worker-e2e-1';
