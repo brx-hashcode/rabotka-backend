@@ -23,7 +23,9 @@ import {
   JobOfferStatus,
   PaymentFlow,
 } from '@prisma/client';
-import { LATE_CANCELLATION_PENALTY_FCFA } from '../application.constants';
+
+/** The configured `fees.late_cancellation_penalty_fcfa`, mocked below. */
+const LATE_CANCELLATION_PENALTY_FCFA = 5000;
 
 const JOB_OFFER_ID = 'offer-uuid-1';
 const WORKER_ID = 'worker-uuid-1';
@@ -106,6 +108,9 @@ describe('ApplicationService', () => {
         count: jest.fn(),
         create: jest.fn(),
         upsert: jest.fn().mockResolvedValue({}),
+        aggregate: jest
+          .fn()
+          .mockResolvedValue({ _count: 0, _sum: { amount: 0 } }),
       },
       application: {
         findUnique: jest.fn(),
@@ -191,10 +196,13 @@ describe('ApplicationService', () => {
               reliabilityScoreMin: 50,
               employerLateCancelScoreDeduction: 5,
               billingBlockThreshold: 2,
+              penaltySuspensionThreshold: 3,
+              penaltyHardBlockDays: 3,
               maxDailyApplications: 10,
               completionScoreReward: 1,
               ratingScoreDeltas: { 1: -4, 2: -2, 3: 0, 4: 1, 5: 3 },
             }),
+            getPenaltyHardBlockDays: jest.fn().mockResolvedValue(3),
           },
         },
         {

@@ -17,7 +17,10 @@ import { JobNotificationProcessor } from './notification/job-notification.proces
 import { deletedAtFilter } from '../../common/utils/soft-delete.util';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { assertKycVerified } from '../../common/exceptions/kyc-not-verified.exception';
-import { isWorkerHardBlocked } from '../penalty/penalty.utils';
+import {
+  isWorkerHardBlocked,
+  hardBlockMessage,
+} from '../penalty/penalty.utils';
 import { MailService } from '../mail/mail.service';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { WalletService } from '../wallet/wallet.service';
@@ -412,10 +415,14 @@ export class JobOfferService {
       );
     }
 
-    const hardBlocked = await isWorkerHardBlocked(this.prisma, employerId);
+    const hardBlocked = await isWorkerHardBlocked(
+      this.prisma,
+      employerId,
+      fees.penaltyHardBlockDays,
+    );
     if (hardBlocked) {
       throw new ForbiddenException(
-        '🚨 Votre compte est bloqué en raison de pénalités impayées depuis plus de 3 jours. Tapez PAYER pour régulariser votre situation.',
+        hardBlockMessage(fees.penaltyHardBlockDays, 'publier une offre'),
       );
     }
 

@@ -29,7 +29,10 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { isEmployerCoveredAtJobLevel } from './employer-coverage';
-import { isWorkerHardBlocked } from '../penalty/penalty.utils';
+import {
+  isWorkerHardBlocked,
+  hardBlockMessage,
+} from '../penalty/penalty.utils';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { WalletService } from '../wallet/wallet.service';
 import { InvoiceService } from '../invoice/invoice.service';
@@ -222,10 +225,15 @@ export class ContactUnlockService {
       );
     }
 
-    const hardBlocked = await isWorkerHardBlocked(this.prisma, profileId);
+    const hardBlockDays = await this.systemConfig.getPenaltyHardBlockDays();
+    const hardBlocked = await isWorkerHardBlocked(
+      this.prisma,
+      profileId,
+      hardBlockDays,
+    );
     if (hardBlocked) {
       throw new ForbiddenException(
-        '🚨 Votre compte est bloqué en raison de pénalités impayées depuis plus de 3 jours. Tapez PAYER pour régulariser votre situation.',
+        hardBlockMessage(hardBlockDays, 'débloquer ce contact'),
       );
     }
   }

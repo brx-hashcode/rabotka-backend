@@ -13,7 +13,11 @@ import {
   WalletTransactionType,
 } from '@prisma/client';
 
+// Only the DB-touching check is stubbed. `hardBlockMessage` is a pure string
+// builder and the real one has to run, or the test stops covering the fact that
+// the message quotes the configured window.
 jest.mock('../../penalty/penalty.utils', () => ({
+  ...jest.requireActual('../../penalty/penalty.utils'),
   isWorkerHardBlocked: jest.fn().mockResolvedValue(false),
 }));
 import { isWorkerHardBlocked } from '../../penalty/penalty.utils';
@@ -89,6 +93,8 @@ function makeSystemConfig() {
       workerFeeFcfa: 100,
       expiryHours: 48,
     }),
+    // Seeded default of fees.penalty_hard_block_days.
+    getPenaltyHardBlockDays: jest.fn().mockResolvedValue(3),
   };
 }
 
