@@ -1,0 +1,87 @@
+import { Counter, Gauge, Histogram } from 'prom-client';
+import { appMetricsRegistry } from '../../../common/telemetry/metrics';
+
+/**
+ * What the model layer costs, in the terms an on-call engineer asks about.
+ *
+ * Registered on `appMetricsRegistry`, which `MetricsController` already merges
+ * onto `GET /metrics` — so this needs no route and no controller change.
+ *
+ * These do NOT replace the `vova.llm` log line. The log carries the
+ * `request_id` and is how one conversation gets reconstructed after the fact;
+ * these are how a degradation gets noticed before anyone reports it. Removing
+ * either would cost the other's job.
+ */
+
+/** Terminal outcome of one call, matching `LlmService.log`'s vocabulary. */
+export type LlmRequestStatus = 'ok' | 'fatal' | 'exhausted';
+
+export const llmRequestCounter = new Counter({
+  name: 'vova_llm_requests_total',
+  help: 'VoVa LLM calls by provider, model, tier and outcome',
+  labelNames: ['provider', 'model', 'tier', 'status'] as const,
+  registers: [appMetricsRegistry],
+});
+
+export const llmLatencyHistogram = new Histogram({
+  name: 'vova_llm_latency_seconds',
+  help: 'VoVa LLM call latency in seconds, including the retry a 5xx earns',
+  labelNames: ['provider', 'model', 'tier'] as const,
+  // Bucketed for a WhatsApp reply budget, not a batch job: the interesting
+  // question is "did this land in a few seconds", so the resolution is at the
+  // low end and the last bucket sits above VOVA_LLM_TIMEOUT_MS (20s).
+  buckets: [0.25, 0.5, 1, 2, 3, 5, 8, 12, 20, 30],
+  registers: [appMetricsRegistry],
+});
+
+/**
+ * Every time the chain gave up on one provider and moved to the next.
+ *
+ * `reason` is the `LlmErrorClass`, so a rate-limit failover and a provider that
+ * cannot represent our messages do not average into one meaningless number.
+ * `to` is `none` when there was nothing left to advance to.
+ */
+export const llmFallbackCounter = new Counter({
+  name: 'vova_llm_fallback_total',
+  help: 'VoVa LLM failovers from one provider to the next, by error class',
+  labelNames: ['from', 'to', 'reason'] as const,
+  registers: [appMetricsRegistry],
+});
+
+/**
+ * Prompt-cache accounting, as two counters rather than a ratio.
+ *
+ * A ratio published as a gauge cannot be aggregated across instances — two pods
+ * reporting 0.9 and 0.1 average to something that describes neither — and it
+ * loses the volume that makes it meaningful. The ratio belongs in PromQL:
+ *
+ *   rate(vova_llm_cache_read_tokens_total[5m])
+ *     / rate(vova_llm_input_tokens_total[5m])
+ */
+export const llmInputTokenCounter = new Counter({
+  name: 'vova_llm_input_tokens_total',
+  help: 'VoVa LLM input tokens billed, by provider and model',
+  labelNames: ['provider', 'model'] as const,
+  registers: [appMetricsRegistry],
+});
+
+export const llmCacheReadTokenCounter = new Counter({
+  name: 'vova_llm_cache_read_tokens_total',
+  help: 'VoVa LLM input tokens served from the prompt cache',
+  labelNames: ['provider', 'model'] as const,
+  registers: [appMetricsRegistry],
+});
+
+/**
+ * 1 while a provider's breaker is open, 0 once it closes.
+ *
+ * A gauge rather than a counter because the question is "is it open right now",
+ * which is what an alert fires on. The counter half of the story is already
+ * `vova_llm_fallback_total`.
+ */
+export const llmCircuitStateGauge = new Gauge({
+  name: 'vova_llm_circuit_state',
+  help: 'VoVa LLM circuit breaker state: 1 open, 0 closed',
+  labelNames: ['provider', 'model'] as const,
+  registers: [appMetricsRegistry],
+});
