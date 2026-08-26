@@ -34,35 +34,41 @@ export const TIER_CHAINS: Record<LlmTier, LlmProviderSpec[]> = {
       model: modelId('VOVA_MODEL_CHEAP_GOOGLE', 'gemini-flash-lite-latest'),
     },
   ],
-  // Anthropic first — and this one is NOT a measured decision, which is worth
-  // saying plainly in a file whose whole standard is "reorder on evidence".
+  // Google first, Anthropic second — and the ORDER here is a deployment fact,
+  // not a quality judgement: there is no Anthropic credential yet, so Haiku
+  // cannot lead a chain it would be filtered straight out of.
   //
-  // It is a product decision: Haiku 4.5 leads because prompt caching makes the
-  // repeated system prompt and tool schemas ~10% of their input cost, and
-  // because this chain's biggest quality risk is a model that answers a
-  // tool-shaped question with prose. What is NOT yet established is latency on
-  // *our* traffic. The numbers below for Mistral and Google are real production
-  // figures; there is no equivalent line for Anthropic yet because nobody has
-  // run one.
+  // Anthropic sits second deliberately rather than at the back. It is still the
+  // intended destination — prompt caching makes the repeated system prompt and
+  // tool schemas ~10% of their input cost — and keeping it here means the
+  // migration completes by adding a key, then swapping two entries, instead of
+  // rediscovering where it was supposed to go.
   //
-  // So: watch `vova.llm latency_ms` and `vova_llm_latency_seconds` after this
-  // lands. If Haiku does not hold a WhatsApp budget of a few seconds, moving
-  // Mistral back to the front is one line — and that reversal would be the
-  // evidence-driven move this comment cannot yet claim to be.
+  // Google's model id is `gemini-3.6-flash`, PINNED, and that is the second
+  // time this chain has been bitten by the same thing. `gemini-2.0-flash` was
+  // retired mid-project and answered 404 with "use models/gemini-3.6-flash";
+  // the fix then was to move to `-latest` aliases, on the theory that an alias
+  // cannot be retired. It cannot — but `gemini-flash-latest` stopped answering
+  // anyway, which is the failure an alias was supposed to make impossible.
   //
-  // Emptying ANTHROPIC_API_KEY does the same thing without a deploy:
-  // `resolveChain` drops a provider with no credential, and Mistral leads again.
+  // So the lesson is narrower than "prefer aliases": an alias protects against
+  // RETIREMENT and against nothing else. Pinned, a bad id fails loudly on the
+  // deploy that introduced it. That is the trade taken here.
   standard: [
+    {
+      provider: 'google',
+      model: modelId('VOVA_MODEL_STANDARD_GOOGLE', 'gemini-3.6-flash'),
+    },
     {
       provider: 'anthropic',
       model: modelId('VOVA_MODEL_STANDARD_ANTHROPIC', 'claude-haiku-4-5'),
     },
-    // Mistral second, on measured evidence: in production logs
+    // Mistral third, on measured evidence: in production logs
     // `gemini-flash-latest` (a thinking model) times out or takes 4–17s on a
     // tool-calling turn, while `mistral-small` answers the same turn in
-    // ~1.3–2.7s. On a WhatsApp budget of a few seconds that is not a close
-    // call — which is what makes it the right first fallback rather than a
-    // second-tier option.
+    // ~1.3–2.7s. That number is about the model ABOVE it in this list at the
+    // time — it was `gemini-flash-latest` then, and it is `gemini-3.6-flash`
+    // now, so the comparison no longer holds and wants re-measuring.
     {
       provider: 'mistral',
       model: modelId('VOVA_MODEL_STANDARD_MISTRAL', 'mistral-small-latest'),
@@ -82,10 +88,6 @@ export const TIER_CHAINS: Record<LlmTier, LlmProviderSpec[]> = {
     {
       provider: 'groq',
       model: modelId('VOVA_MODEL_STANDARD_GROQ', 'llama-3.3-70b-versatile'),
-    },
-    {
-      provider: 'google',
-      model: modelId('VOVA_MODEL_STANDARD_GOOGLE', 'gemini-flash-latest'),
     },
     {
       provider: 'openai',
