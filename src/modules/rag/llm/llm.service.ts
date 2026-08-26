@@ -9,6 +9,7 @@ import { readNumber } from '../shared/config';
 import { LlmModelFactory } from './model-factory.service';
 import {
   PROVIDERS_REQUIRING_FLAT_CONTENT,
+  PROVIDERS_SUPPORTING_CACHE_CONTROL,
   resolveChain,
 } from './models.config';
 import {
@@ -101,6 +102,7 @@ export class LlmService {
       breakerSkipped: [],
       inputTokens: null,
       outputTokens: null,
+      cacheReadTokens: null,
     };
 
     try {
@@ -149,6 +151,7 @@ export class LlmService {
       breakerSkipped: [],
       inputTokens: null,
       outputTokens: null,
+      cacheReadTokens: null,
     };
 
     if (chain.length === 0) {
@@ -278,22 +281,35 @@ export class LlmService {
 
     const timeoutMs = options.timeoutMs ?? this.defaultTimeoutMs;
     return withTimeout(
-      (signal) =>
-        runnable.invoke(
-          PROVIDERS_REQUIRING_FLAT_CONTENT.has(spec.provider)
-            ? flattenContent(input)
-            : input,
-          { signal },
-        ),
+      (signal) => runnable.invoke(this.shapeFor(spec, input), { signal }),
       timeoutMs,
       specId(spec),
     );
+  }
+
+  /**
+   * The one place a provider's content quirks are applied.
+   *
+   * Both rules are mutually exclusive by construction: a provider that needs
+   * flat text cannot carry a cache breakpoint, because flattening is what
+   * destroys the block the breakpoint lives on.
+   */
+  private shapeFor<T>(spec: LlmProviderSpec, input: T): T {
+    if (PROVIDERS_REQUIRING_FLAT_CONTENT.has(spec.provider)) {
+      return flattenContent(input);
+    }
+    if (PROVIDERS_SUPPORTING_CACHE_CONTROL.has(spec.provider)) {
+      return markCacheBreakpoint(input);
+    }
+    return input;
   }
 
   private readUsage(output: AIMessage, telemetry: LlmCallTelemetry): void {
     const usage = output.usage_metadata;
     telemetry.inputTokens = usage?.input_tokens ?? null;
     telemetry.outputTokens = usage?.output_tokens ?? null;
+    telemetry.cacheReadTokens =
+      usage?.input_token_details?.cache_read ?? null;
   }
 
   /**
@@ -320,6 +336,12 @@ export class LlmService {
     if (t.inputTokens !== null || t.outputTokens !== null) {
       parts.push(`tokens_in=${t.inputTokens ?? '?'}`);
       parts.push(`tokens_out=${t.outputTokens ?? '?'}`);
+    }
+    // Only where the provider reports it, so the field's absence stays
+    // meaningful: a missing `cache_read` is "this vendor does not cache", while
+    // `cache_read=0` on every turn is the prompt split having stopped working.
+    if (t.cacheReadTokens !== null) {
+      parts.push(`cache_read=${t.cacheReadTokens}`);
     }
     if (correlationId) parts.push(`request_id=${correlationId}`);
 
@@ -372,6 +394,56 @@ export function flattenContent<T>(input: T): T {
       message,
     ) as BaseMessage;
     copy.content = text;
+    return copy;
+  }) as T;
+}
+
+/**
+ * Marks the end of the cacheable prefix on the system message.
+ *
+ * `agent.service.ts` hands the system prompt over as two blocks — stable, then
+ * volatile — and this puts `cache_control` on the first one. Everything the API
+ * renders before that point is cached with it, and since the layout is
+ * `tools → system → messages`, that includes the tool schemas: ~1.3k tokens of
+ * them, on top of ~2.7k of stable prompt.
+ *
+ * Only the FIRST block, and only on the system message. A breakpoint on the
+ * volatile block would cache a prefix that changes every turn, which writes a
+ * new cache entry per message — the expensive half of caching with none of the
+ * saving.
+ *
+ * Messages are copied rather than mutated, for the same reason `flattenContent`
+ * copies: LangGraph holds its own reference to this history, and writing a
+ * provider-specific key into it would leak Anthropic's wire format into the
+ * turn every other provider sees on the next attempt.
+ */
+export function markCacheBreakpoint<T>(input: T): T {
+  if (!Array.isArray(input)) return input;
+
+  let marked = false;
+  return input.map((message) => {
+    if (
+      marked ||
+      !(message instanceof BaseMessage) ||
+      message.getType() !== 'system' ||
+      !Array.isArray(message.content) ||
+      message.content.length === 0
+    ) {
+      return message;
+    }
+
+    const [first, ...rest] = message.content;
+    if (typeof first !== 'object' || first === null) return message;
+
+    marked = true;
+    const copy = Object.assign(
+      Object.create(Object.getPrototypeOf(message) as object),
+      message,
+    ) as BaseMessage;
+    copy.content = [
+      { ...first, cache_control: { type: 'ephemeral' } },
+      ...rest,
+    ] as typeof message.content;
     return copy;
   }) as T;
 }

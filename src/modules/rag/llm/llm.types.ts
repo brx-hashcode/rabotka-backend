@@ -54,6 +54,15 @@ export interface LlmCallTelemetry {
   breakerSkipped: string[];
   inputTokens: number | null;
   outputTokens: number | null;
+  /**
+   * Input tokens served from the prompt cache rather than re-read.
+   *
+   * The only honest way to tell whether the stable/volatile prompt split is
+   * doing anything. Zero on the first turn of a conversation is correct; zero
+   * on every turn means something volatile leaked into the stable block and the
+   * prefix no longer matches. `null` where the provider reports no cache usage.
+   */
+  cacheReadTokens: number | null;
 }
 
 export interface LlmInvokeResult<T> {
