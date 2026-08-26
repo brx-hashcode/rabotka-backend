@@ -93,6 +93,22 @@ describe('models.config', () => {
       expect(providers).toContain('deepseek');
     });
 
+    it('leads with Anthropic and falls back to Mistral', () => {
+      // The property the migration exists to guarantee: Haiku answers, and the
+      // provider that used to lead is the FIRST thing tried when it cannot.
+      //
+      // Anthropic's position is a product decision, not a measured one — see
+      // the comment on TIER_CHAINS.standard. Mistral's is measured, which is
+      // why it is pinned ahead of Groq below rather than merely present.
+      const env = Object.fromEntries(
+        Object.values(PROVIDER_API_KEY_ENV).map((k) => [k, 'k']),
+      );
+      const providers = resolveChain('standard', env).map((s) => s.provider);
+
+      expect(providers[0]).toBe('anthropic');
+      expect(providers[1]).toBe('mistral');
+    });
+
     it('keeps Mistral ahead of Groq until the numbers say otherwise', () => {
       // Not a preference — Mistral leads on measured production latency, and
       // this file's own standard is to reorder on evidence rather than on a
@@ -107,6 +123,20 @@ describe('models.config', () => {
       );
       // DeepSeek is the fallback of last resort: slowest on a tool-calling turn.
       expect(providers.at(-1)).toBe('deepseek');
+    });
+
+    it('falls back to Mistral when Anthropic has no credential', () => {
+      // The rollback path, and the reason it needs no deploy: emptying
+      // ANTHROPIC_API_KEY puts the chain back exactly as it was before the
+      // migration.
+      const env = Object.fromEntries(
+        Object.values(PROVIDER_API_KEY_ENV).map((k) => [k, 'k']),
+      );
+      delete env.ANTHROPIC_API_KEY;
+      const providers = resolveChain('standard', env).map((s) => s.provider);
+
+      expect(providers[0]).toBe('mistral');
+      expect(providers).not.toContain('anthropic');
     });
 
     it('leaves the cheap tier on its single provider', () => {

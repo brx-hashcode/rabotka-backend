@@ -34,21 +34,44 @@ export const TIER_CHAINS: Record<LlmTier, LlmProviderSpec[]> = {
       model: modelId('VOVA_MODEL_CHEAP_GOOGLE', 'gemini-flash-lite-latest'),
     },
   ],
-  // Mistral first, on measured evidence rather than preference: in production
-  // logs `gemini-flash-latest` (a thinking model) times out or takes 4–17s on a
-  // tool-calling turn, while `mistral-small` answers the same turn in ~1.3–2.7s.
-  // On a WhatsApp budget of a few seconds that is not a close call. Google stays
-  // as the fallback, and the order is one line to reverse if quality demands it.
+  // Anthropic first — and this one is NOT a measured decision, which is worth
+  // saying plainly in a file whose whole standard is "reorder on evidence".
+  //
+  // It is a product decision: Haiku 4.5 leads because prompt caching makes the
+  // repeated system prompt and tool schemas ~10% of their input cost, and
+  // because this chain's biggest quality risk is a model that answers a
+  // tool-shaped question with prose. What is NOT yet established is latency on
+  // *our* traffic. The numbers below for Mistral and Google are real production
+  // figures; there is no equivalent line for Anthropic yet because nobody has
+  // run one.
+  //
+  // So: watch `vova.llm latency_ms` and `vova_llm_latency_seconds` after this
+  // lands. If Haiku does not hold a WhatsApp budget of a few seconds, moving
+  // Mistral back to the front is one line — and that reversal would be the
+  // evidence-driven move this comment cannot yet claim to be.
+  //
+  // Emptying ANTHROPIC_API_KEY does the same thing without a deploy:
+  // `resolveChain` drops a provider with no credential, and Mistral leads again.
   standard: [
+    {
+      provider: 'anthropic',
+      model: modelId('VOVA_MODEL_STANDARD_ANTHROPIC', 'claude-haiku-4-5'),
+    },
+    // Mistral second, on measured evidence: in production logs
+    // `gemini-flash-latest` (a thinking model) times out or takes 4–17s on a
+    // tool-calling turn, while `mistral-small` answers the same turn in
+    // ~1.3–2.7s. On a WhatsApp budget of a few seconds that is not a close
+    // call — which is what makes it the right first fallback rather than a
+    // second-tier option.
     {
       provider: 'mistral',
       model: modelId('VOVA_MODEL_STANDARD_MISTRAL', 'mistral-small-latest'),
     },
-    // Groq second, not first.
+    // Groq third, not second.
     //
     // Its whole selling point is latency, and on a WhatsApp budget that is the
-    // metric that decides this chain — so it may well belong at the front. But
-    // Mistral leads on *measured* production numbers, and promoting Groq on
+    // metric that decides this chain — so it may well belong further forward.
+    // But Mistral leads on *measured* production numbers, and promoting Groq on
     // reputation would abandon the standard this file sets for itself. Measure,
     // then reorder: it is one line.
     //
@@ -67,17 +90,6 @@ export const TIER_CHAINS: Record<LlmTier, LlmProviderSpec[]> = {
     {
       provider: 'openai',
       model: modelId('VOVA_MODEL_STANDARD_OPENAI', 'gpt-4o-mini'),
-    },
-    // Added near the back on purpose, so landing the provider and reordering
-    // the chain stay two separate, separately revertible changes — but ahead of
-    // DeepSeek, which this file keeps as the fallback of last resort.
-    //
-    // The id has no date suffix: Anthropic's current ids are bare
-    // (`claude-haiku-4-5`), and a dated snapshot is exactly what the env
-    // override is for — same argument as the `-latest` aliases above.
-    {
-      provider: 'anthropic',
-      model: modelId('VOVA_MODEL_STANDARD_ANTHROPIC', 'claude-haiku-4-5'),
     },
     // Last: capable and cheap, but the slowest of the five on a tool-calling
     // turn. `deepseek-chat` is a moving alias — the property this file argues
