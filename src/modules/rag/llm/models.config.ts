@@ -68,6 +68,17 @@ export const TIER_CHAINS: Record<LlmTier, LlmProviderSpec[]> = {
       provider: 'openai',
       model: modelId('VOVA_MODEL_STANDARD_OPENAI', 'gpt-4o-mini'),
     },
+    // Added near the back on purpose, so landing the provider and reordering
+    // the chain stay two separate, separately revertible changes — but ahead of
+    // DeepSeek, which this file keeps as the fallback of last resort.
+    //
+    // The id has no date suffix: Anthropic's current ids are bare
+    // (`claude-haiku-4-5`), and a dated snapshot is exactly what the env
+    // override is for — same argument as the `-latest` aliases above.
+    {
+      provider: 'anthropic',
+      model: modelId('VOVA_MODEL_STANDARD_ANTHROPIC', 'claude-haiku-4-5'),
+    },
     // Last: capable and cheap, but the slowest of the five on a tool-calling
     // turn. `deepseek-chat` is a moving alias — the property this file argues
     // for everywhere else — so it cannot be retired out from under us.
@@ -97,6 +108,7 @@ export const PROVIDERS_REQUIRING_FLAT_CONTENT = new Set<LlmProviderName>([
 
 /** Env var holding each provider's credential. */
 export const PROVIDER_API_KEY_ENV: Record<LlmProviderName, string> = {
+  anthropic: 'ANTHROPIC_API_KEY',
   google: 'GOOGLE_API_KEY',
   mistral: 'MISTRAL_API_KEY',
   openai: 'OPENAI_API_KEY',
