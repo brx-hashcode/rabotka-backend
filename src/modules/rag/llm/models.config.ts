@@ -28,27 +28,64 @@ export const TIER_CHAINS: Record<LlmTier, LlmProviderSpec[]> = {
   // Pre-filter and greetings. One provider: if it is down, the caller degrades
   // to "treat as in-scope and let the standard tier decide" rather than
   // spending a second vendor's quota on a classification.
+  // `gemini-flash-lite-latest` stays an alias where the standard tier is
+  // pinned, and the asymmetry is measured rather than sloppy: the id that broke
+  // was `gemini-flash-latest`, which answers 503 "experiencing high demand" on
+  // every call. The LITE alias was never affected — it answers a tool-calling
+  // turn in ~1.4s median, against ~10s for `gemini-3.6-flash`.
+  //
+  // So this tier keeps the fastest thing that works, which is also the cheapest,
+  // which is the entire reason the tier exists.
   cheap: [
     {
       provider: 'google',
       model: modelId('VOVA_MODEL_CHEAP_GOOGLE', 'gemini-flash-lite-latest'),
     },
   ],
-  // Mistral first, on measured evidence rather than preference: in production
-  // logs `gemini-flash-latest` (a thinking model) times out or takes 4–17s on a
-  // tool-calling turn, while `mistral-small` answers the same turn in ~1.3–2.7s.
-  // On a WhatsApp budget of a few seconds that is not a close call. Google stays
-  // as the fallback, and the order is one line to reverse if quality demands it.
+  // Google first, Anthropic second — and the ORDER here is a deployment fact,
+  // not a quality judgement: there is no Anthropic credential yet, so Haiku
+  // cannot lead a chain it would be filtered straight out of.
+  //
+  // Anthropic sits second deliberately rather than at the back. It is still the
+  // intended destination — prompt caching makes the repeated system prompt and
+  // tool schemas ~10% of their input cost — and keeping it here means the
+  // migration completes by adding a key, then swapping two entries, instead of
+  // rediscovering where it was supposed to go.
+  //
+  // Google's model id is `gemini-3.6-flash`, PINNED, and that is the second
+  // time this chain has been bitten by the same thing. `gemini-2.0-flash` was
+  // retired mid-project and answered 404 with "use models/gemini-3.6-flash";
+  // the fix then was to move to `-latest` aliases, on the theory that an alias
+  // cannot be retired. It cannot — but `gemini-flash-latest` stopped answering
+  // anyway, which is the failure an alias was supposed to make impossible.
+  //
+  // So the lesson is narrower than "prefer aliases": an alias protects against
+  // RETIREMENT and against nothing else. Pinned, a bad id fails loudly on the
+  // deploy that introduced it. That is the trade taken here.
   standard: [
+    {
+      provider: 'google',
+      model: modelId('VOVA_MODEL_STANDARD_GOOGLE', 'gemini-3.6-flash'),
+    },
+    {
+      provider: 'anthropic',
+      model: modelId('VOVA_MODEL_STANDARD_ANTHROPIC', 'claude-haiku-4-5'),
+    },
+    // Mistral third, on measured evidence: in production logs
+    // `gemini-flash-latest` (a thinking model) times out or takes 4–17s on a
+    // tool-calling turn, while `mistral-small` answers the same turn in
+    // ~1.3–2.7s. That number is about the model ABOVE it in this list at the
+    // time — it was `gemini-flash-latest` then, and it is `gemini-3.6-flash`
+    // now, so the comparison no longer holds and wants re-measuring.
     {
       provider: 'mistral',
       model: modelId('VOVA_MODEL_STANDARD_MISTRAL', 'mistral-small-latest'),
     },
-    // Groq second, not first.
+    // Groq third, not second.
     //
     // Its whole selling point is latency, and on a WhatsApp budget that is the
-    // metric that decides this chain — so it may well belong at the front. But
-    // Mistral leads on *measured* production numbers, and promoting Groq on
+    // metric that decides this chain — so it may well belong further forward.
+    // But Mistral leads on *measured* production numbers, and promoting Groq on
     // reputation would abandon the standard this file sets for itself. Measure,
     // then reorder: it is one line.
     //
@@ -59,10 +96,6 @@ export const TIER_CHAINS: Record<LlmTier, LlmProviderSpec[]> = {
     {
       provider: 'groq',
       model: modelId('VOVA_MODEL_STANDARD_GROQ', 'llama-3.3-70b-versatile'),
-    },
-    {
-      provider: 'google',
-      model: modelId('VOVA_MODEL_STANDARD_GOOGLE', 'gemini-flash-latest'),
     },
     {
       provider: 'openai',
@@ -95,8 +128,29 @@ export const PROVIDERS_REQUIRING_FLAT_CONTENT = new Set<LlmProviderName>([
   'mistral',
 ]);
 
+/**
+ * Providers that understand a `cache_control` breakpoint.
+ *
+ * The system prompt arrives as two blocks — stable, then volatile — and this
+ * set decides who gets told where the cacheable prefix ends. Everyone else
+ * receives the same two blocks with no marker, which is a no-op for them.
+ *
+ * A prefix match, so the saving covers everything rendered BEFORE the marker
+ * too: the request is laid out `tools → system → messages`, which means one
+ * breakpoint at the end of the stable block also caches ~1.3k tokens of tool
+ * schemas. That is why there is no second breakpoint on the tools.
+ *
+ * Deliberately NOT `PROVIDERS_REQUIRING_FLAT_CONTENT`'s opposite: Gemini also
+ * reads blocks and is absent here, because it has no such feature and an
+ * unknown key on a content block is a 400 waiting to happen.
+ */
+export const PROVIDERS_SUPPORTING_CACHE_CONTROL = new Set<LlmProviderName>([
+  'anthropic',
+]);
+
 /** Env var holding each provider's credential. */
 export const PROVIDER_API_KEY_ENV: Record<LlmProviderName, string> = {
+  anthropic: 'ANTHROPIC_API_KEY',
   google: 'GOOGLE_API_KEY',
   mistral: 'MISTRAL_API_KEY',
   openai: 'OPENAI_API_KEY',
