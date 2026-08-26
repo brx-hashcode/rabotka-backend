@@ -28,6 +28,14 @@ export const TIER_CHAINS: Record<LlmTier, LlmProviderSpec[]> = {
   // Pre-filter and greetings. One provider: if it is down, the caller degrades
   // to "treat as in-scope and let the standard tier decide" rather than
   // spending a second vendor's quota on a classification.
+  // `gemini-flash-lite-latest` stays an alias where the standard tier is
+  // pinned, and the asymmetry is measured rather than sloppy: the id that broke
+  // was `gemini-flash-latest`, which answers 503 "experiencing high demand" on
+  // every call. The LITE alias was never affected — it answers a tool-calling
+  // turn in ~1.4s median, against ~10s for `gemini-3.6-flash`.
+  //
+  // So this tier keeps the fastest thing that works, which is also the cheapest,
+  // which is the entire reason the tier exists.
   cheap: [
     {
       provider: 'google',
