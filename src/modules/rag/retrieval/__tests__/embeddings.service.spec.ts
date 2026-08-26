@@ -15,9 +15,7 @@ const stubQdrant = {} as never;
 /** A service whose model is already "loaded", so no embedder is ever built. */
 function serviceWith(env: Record<string, string>) {
   const config = new ConfigService();
-  jest
-    .spyOn(config, 'get')
-    .mockImplementation((key: string) => env[key] as never);
+  jest.spyOn(config, 'get').mockImplementation((key: string) => env[key]);
 
   const service = new HelpEmbeddingsService(config, stubQdrant);
   const embedder = {
@@ -34,18 +32,18 @@ describe('HelpEmbeddingsService — sequence length', () => {
     // the limit rather than to the text. 256 is ~775ms for the identical
     // vector, and still leaves ~4x headroom over the longest expanded query.
     const { service } = serviceWith({});
-    expect(
-      (service as unknown as { maxLength(): number }).maxLength(),
-    ).toBe(256);
+    expect((service as unknown as { maxLength(): number }).maxLength()).toBe(
+      256,
+    );
   });
 
   it('is overridable, so ingestion can ask for the full length', () => {
     // scripts/vova-ingest.ts sets 512 for itself: corpus chunks are 350 words
     // and would be truncated at the serving value.
     const { service } = serviceWith({ VOVA_EMBED_MAX_LENGTH: '512' });
-    expect(
-      (service as unknown as { maxLength(): number }).maxLength(),
-    ).toBe(512);
+    expect((service as unknown as { maxLength(): number }).maxLength()).toBe(
+      512,
+    );
   });
 
   it('reads the override as a number, not a string', () => {
@@ -98,11 +96,21 @@ describe('HelpEmbeddingsService — truncation guard', () => {
     const { service, embedder } = serviceWith({
       VOVA_EMBED_MAX_LENGTH: '256',
     });
-    embedder.passageEmbed.mockReturnValue(
-      (async function* () {
-        yield [[0.1], [0.2]];
-      })(),
-    );
+    // `embedPassages` consumes an async generator; this is the smallest thing
+    // that satisfies `for await` without the real embedder.
+    embedder.passageEmbed.mockReturnValue({
+      [Symbol.asyncIterator]() {
+        let done = false;
+        return {
+          next: () =>
+            Promise.resolve(
+              done
+                ? { value: undefined, done: true }
+                : ((done = true), { value: [[0.1], [0.2]], done: false }),
+            ),
+        };
+      },
+    });
     const warn = jest
       .spyOn(
         (service as unknown as { logger: { warn: (m: string) => void } })

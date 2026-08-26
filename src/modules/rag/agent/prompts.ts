@@ -565,7 +565,9 @@ export function buildAnonymousSystemPromptParts(
 }
 
 /** The two halves as one string — the shape every existing caller expects. */
-export function buildAnonymousSystemPrompt(ctx: AnonymousPromptContext): string {
+export function buildAnonymousSystemPrompt(
+  ctx: AnonymousPromptContext,
+): string {
   const { stable, volatile } = buildAnonymousSystemPromptParts(ctx);
   return `${stable}\n${volatile}`;
 }
