@@ -200,6 +200,7 @@ export class WorkerModule {
         prisma: PrismaService,
         queue: QueueService,
         whatsApp: WhatsAppService,
+        systemConfig: SystemConfigService,
       ) => {
         const botNotificationStub = {
           sendMessage: (phone: string, text: string) =>
@@ -209,9 +210,15 @@ export class WorkerModule {
           prisma,
           queue,
           botNotificationStub,
+          systemConfig,
         );
       },
-      inject: [PrismaService, QueueService, WhatsAppService],
+      inject: [
+        PrismaService,
+        QueueService,
+        WhatsAppService,
+        SystemConfigService,
+      ],
     };
 
     return {

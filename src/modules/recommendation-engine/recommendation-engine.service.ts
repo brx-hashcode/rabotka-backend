@@ -601,7 +601,10 @@ export class RecommendationEngineService {
       this.sources.workerQuality(candidateIds),
       this.sources.lastActiveAt(candidateIds),
       this.sources.lastRecommendedAt(candidateIds),
-      this.sources.hardBlockedWorkerIds(candidateIds),
+      this.sources.hardBlockedWorkerIds(
+        candidateIds,
+        fees.penaltyHardBlockDays,
+      ),
       // Per candidate, not per asker: proximity is judged against each worker's
       // own learned distance tolerance, and the negative-category penalty reads
       // what that worker keeps rejecting.

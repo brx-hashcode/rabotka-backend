@@ -41,6 +41,7 @@ import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
 import { WhatsappAdminModule } from './modules/whatsapp-admin/whatsapp-admin.module';
 import { WhatsAppTelemetryModule } from './modules/whatsapp/telemetry/whatsapp-telemetry.module';
 import { PortfolioModule } from './modules/portfolio/portfolio.module';
+import { ReferralModule } from './modules/referral/referral.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { ReminderModule } from './modules/bot/reminder/reminder.module';
 import { PaymentsModule } from './modules/payments/payment.module';
@@ -153,6 +154,7 @@ import { HttpOnlyArcjetGuard } from './common/guards/http-only-arcjet.guard';
     WhatsAppModule,
     WhatsappAdminModule,
     PortfolioModule,
+    ReferralModule,
     ReminderModule,
     AuthModule,
     ProfileModule,

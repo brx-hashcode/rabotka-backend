@@ -18,6 +18,7 @@ import { MatchingModule } from '../matching/matching.module';
 import { InterestGraphModule } from '../interest-graph/interest-graph.module';
 import { GeocodingModule } from '../../common/services/geocoding/geocoding.module';
 import { PortfolioModule } from '../portfolio/portfolio.module';
+import { ReferralModule } from '../referral/referral.module';
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { PortfolioModule } from '../portfolio/portfolio.module';
     InterestGraphModule,
     GeocodingModule,
     PortfolioModule,
+    ReferralModule,
   ],
   controllers: [ProfileController, AdminProfileController],
   providers: [ProfileService],

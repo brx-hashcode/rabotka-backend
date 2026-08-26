@@ -820,11 +820,18 @@ export class BotOrchestratorService {
       [FLOW_IDS.ACCEPT_REFUSE_CANDIDATE]: () =>
         runAcceptRefuseCandidateFlow(state, input, profile, ctx),
       [FLOW_IDS.CANCEL_APPLICATION]: async () => {
-        const { cancellationThresholdHours } =
-          await this.systemConfig.getFees();
+        const {
+          cancellationThresholdHours,
+          lateCancellationPenaltyFcfa,
+          lateCancellationScoreDeduction,
+          reliabilityScoreMin,
+        } = await this.systemConfig.getFees();
         return runCancelApplicationFlow(state, input, profile, {
           ...ctx,
           cancellationThresholdHours,
+          lateCancellationPenaltyFcfa,
+          lateCancellationScoreDeduction,
+          reliabilityScoreMin,
         });
       },
 

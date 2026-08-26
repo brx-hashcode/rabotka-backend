@@ -51,6 +51,11 @@ const PUBLIC_PREFIXES = new Set([
   'payments',
   'wallet',
   'notifications',
+  // Parrainage. `referral/me` carries ProfileAuthGuard; `referral/resolve/:code`
+  // is @Public() on purpose — the person checking a code is signing up and has
+  // no session yet. It is throttled and returns only a first name and an
+  // initial, so it confirms a code without becoming a directory of users.
+  'referral',
 ]);
 
 /**

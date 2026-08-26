@@ -3,6 +3,7 @@ import { PenaltyNotificationProcessor } from '../penalty-notification.processor'
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { QueueService } from '../../../common/services/queue/queue.service';
 import { BotNotificationService } from '../../bot/services/bot-notification.service';
+import { SystemConfigService } from '../../system-config/system-config.service';
 
 const mockPrisma = {
   penalty: {
@@ -22,6 +23,16 @@ const mockBotNotification = {
   sendMessage: jest.fn().mockResolvedValue(undefined),
 };
 
+// Mirrors the seeded defaults for fees.penalty_max_notifications,
+// fees.penalty_notification_interval_hours and fees.penalty_hard_block_days.
+const mockSystemConfig = {
+  getPenaltyNotificationConfig: jest.fn().mockResolvedValue({
+    maxNotifications: 3,
+    notificationIntervalHours: 23,
+    hardBlockDays: 3,
+  }),
+};
+
 describe('PenaltyNotificationProcessor', () => {
   let processor: PenaltyNotificationProcessor;
 
@@ -33,6 +44,7 @@ describe('PenaltyNotificationProcessor', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: QueueService, useValue: mockQueueService },
         { provide: BotNotificationService, useValue: mockBotNotification },
+        { provide: SystemConfigService, useValue: mockSystemConfig },
       ],
     }).compile();
     processor = module.get<PenaltyNotificationProcessor>(

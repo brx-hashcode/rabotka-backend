@@ -29,7 +29,10 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { isEmployerCoveredAtJobLevel } from './employer-coverage';
-import { isWorkerHardBlocked } from '../penalty/penalty.utils';
+import {
+  isWorkerHardBlocked,
+  hardBlockMessage,
+} from '../penalty/penalty.utils';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { WalletService } from '../wallet/wallet.service';
 import { InvoiceService } from '../invoice/invoice.service';
@@ -222,10 +225,15 @@ export class ContactUnlockService {
       );
     }
 
-    const hardBlocked = await isWorkerHardBlocked(this.prisma, profileId);
+    const hardBlockDays = await this.systemConfig.getPenaltyHardBlockDays();
+    const hardBlocked = await isWorkerHardBlocked(
+      this.prisma,
+      profileId,
+      hardBlockDays,
+    );
     if (hardBlocked) {
       throw new ForbiddenException(
-        '🚨 Votre compte est bloqué en raison de pénalités impayées depuis plus de 3 jours. Tapez PAYER pour régulariser votre situation.',
+        hardBlockMessage(hardBlockDays, 'débloquer ce contact'),
       );
     }
   }
@@ -644,6 +652,18 @@ export class ContactUnlockService {
         description: 'Déverrouillage de contact (wallet interne)',
         payment_reference: paymentReference,
         contact_unlock_attempt_id: attemptId,
+        // DO NOT add `request_type` here.
+        //
+        // It looks like an oversight and is load-bearing. This row is synthetic
+        // — no external money arrived, the unlock was funded from wallet credit
+        // the platform itself issued. ReferralService.settleForReferee selects
+        // qualifying payments with `request_type IN (CONTACT_UNLOCK,
+        // RECOMMENDATION_CONTACT)`, and a NULL never matches an IN, which is
+        // what keeps credit-funded unlocks from paying out a parrainage.
+        //
+        // Setting it would let the referral programme pay real credit for a
+        // payment that brought in none — funding itself from its own welcome
+        // bonuses. Locked by a test in referral.service.spec.ts.
       },
     });
 
