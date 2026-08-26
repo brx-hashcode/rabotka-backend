@@ -50,6 +50,7 @@
     "@arcjet/nest": "^1.10.0",
     "@aws-sdk/client-s3": "^3.1116.0",
     "@aws-sdk/s3-request-presigner": "^3.1116.0",
+    "@langchain/anthropic": "^1.5.8",
     "@langchain/core": "^1.2.9",
     "@langchain/deepseek": "^1.1.10",
     "@langchain/google-genai": "^2.3.0",
