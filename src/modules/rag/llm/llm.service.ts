@@ -30,6 +30,14 @@ import {
   type LlmProviderSpec,
   type LlmTier,
 } from './llm.types';
+import {
+  llmCacheReadTokenCounter,
+  llmFallbackCounter,
+  llmInputTokenCounter,
+  llmLatencyHistogram,
+  llmRequestCounter,
+  type LlmRequestStatus,
+} from './metrics';
 
 export interface LlmInvokeOptions {
   tier: LlmTier;
@@ -156,6 +164,11 @@ export class LlmService {
 
     if (chain.length === 0) {
       telemetry.latencyMs = Date.now() - startedAt;
+      // Counted, though nothing is logged here — the error carries the message
+      // and the caller decides how loud to be. Without this the series simply
+      // stops during a total misconfiguration, which reads on a dashboard as
+      // "no traffic" rather than "answering nobody".
+      this.record(telemetry, 'exhausted');
       throw new LlmNoProviderError(
         `Tier "${options.tier}" has no provider with a credential configured`,
         telemetry,
@@ -206,6 +219,14 @@ export class LlmService {
         }
 
         if (shouldTripBreaker(cls)) await this.breaker.recordFailure(spec);
+        // Counted here rather than at the top of the next iteration, because
+        // the LAST provider in the chain also fails over — to nothing. Skipping
+        // it would silently under-count the failure that matters most.
+        llmFallbackCounter.inc({
+          from: spec.provider,
+          to: chain[chain.indexOf(spec) + 1]?.provider ?? 'none',
+          reason: cls,
+        });
         this.logger.warn(
           `${specId(spec)} failed (${cls}: ${describe(err)}) — advancing`,
         );
@@ -313,6 +334,40 @@ export class LlmService {
   }
 
   /**
+   * The same telemetry, as Prometheus series.
+   *
+   * Called from `log()` because that is already the single point every call
+   * passes through on its way out, whichever way it ended — a second call site
+   * would eventually miss a branch and under-report exactly the failures the
+   * metric exists to catch.
+   *
+   * `provider`/`model` are null when the tier had nothing usable to try, and
+   * `none` keeps the label present rather than dropping the series: "we failed
+   * without reaching anybody" is itself worth alerting on.
+   */
+  private record(t: LlmCallTelemetry, outcome: LlmRequestStatus): void {
+    const provider = t.provider ?? 'none';
+    const model = t.model ?? 'none';
+
+    llmRequestCounter.inc({
+      provider,
+      model,
+      tier: t.tier,
+      status: outcome,
+    });
+    llmLatencyHistogram.observe(
+      { provider, model, tier: t.tier },
+      t.latencyMs / 1000,
+    );
+    if (t.inputTokens !== null) {
+      llmInputTokenCounter.inc({ provider, model }, t.inputTokens);
+    }
+    if (t.cacheReadTokens !== null) {
+      llmCacheReadTokenCounter.inc({ provider, model }, t.cacheReadTokens);
+    }
+  }
+
+  /**
    * One line per call, in the shape an incident is actually read in. A rising
    * `depth` is the earliest signal a provider is degrading, and it is invisible
    * in latency alone.
@@ -320,8 +375,10 @@ export class LlmService {
   private log(
     t: LlmCallTelemetry,
     correlationId: string | undefined,
-    outcome: 'ok' | 'fatal' | 'exhausted',
+    outcome: LlmRequestStatus,
   ): void {
+    this.record(t, outcome);
+
     const parts = [
       `outcome=${outcome}`,
       `tier=${t.tier}`,
