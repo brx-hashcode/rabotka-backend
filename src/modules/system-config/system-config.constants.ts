@@ -101,6 +101,46 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     isSecret: false,
   },
   {
+    // Distinct from `billing_block_threshold` on purpose: blocking flips
+    // `billing_status`, suspending flips the account itself. It is the harsher
+    // of the two, so it must sit at or above the block threshold — an admin who
+    // pushes the block line past this one gets suspension first, which is the
+    // wrong order. Was `process.env.PENALTY_THRESHOLD` (default 3), which no
+    // deployment set and no admin could reach.
+    key: 'fees.penalty_suspension_threshold',
+    value: '3',
+    category: ConfigCategory.FEES,
+    label: 'Nombre de pénalités impayées avant suspension du compte',
+    isSecret: false,
+  },
+  {
+    // The hard block: one penalty left unpaid this long stops the account from
+    // applying, publishing, or unlocking a contact, and drops it out of the
+    // recommendation fan-out. Quoted verbatim in the message the user gets, so
+    // the number and the text can never drift apart.
+    key: 'fees.penalty_hard_block_days',
+    value: '3',
+    category: ConfigCategory.FEES,
+    label: 'Délai avant blocage dur pour pénalité impayée (jours)',
+    isSecret: false,
+  },
+  {
+    key: 'fees.penalty_max_notifications',
+    value: '3',
+    category: ConfigCategory.FEES,
+    label: 'Nombre max de rappels envoyés par pénalité impayée',
+    isSecret: false,
+  },
+  {
+    // Slightly under 24h so a daily reminder never drifts later and later:
+    // a scan an hour after yesterday's send still finds the penalty eligible.
+    key: 'fees.penalty_notification_interval_hours',
+    value: '23',
+    category: ConfigCategory.FEES,
+    label: 'Délai minimum entre deux rappels de pénalité (heures)',
+    isSecret: false,
+  },
+  {
     key: 'fees.max_daily_applications',
     value: '10',
     category: ConfigCategory.FEES,
@@ -149,6 +189,44 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     label: 'Crédit de bienvenue – Employeur (FCFA)',
     isSecret: false,
   },
+  {
+    // Paid to the parrain when their filleul makes their first mobile-money
+    // payment for a connection — never at signup, which would be farmable with
+    // throwaway accounts.
+    //
+    // 300 + 200 rather than 500 + 250 so the total (500) is covered by an
+    // employer contact unlock, which is also 500. The payout can never exceed
+    // the payment that triggered it, so at 750 the only qualifying trigger left
+    // was the 1000 FCFA recommendation contact — the program quietly paid on
+    // one of its three entry points.
+    key: 'fees.referral_credit_referrer',
+    value: '300',
+    category: ConfigCategory.FEES,
+    label: 'Crédit parrainage – Parrain (FCFA)',
+    isSecret: false,
+  },
+  {
+    // Paid to the filleul at the same moment, from the same claim. Note the
+    // two together are capped at the amount of the triggering payment, so
+    // raising either can silently stop small payments from qualifying — see
+    // ReferralService.settleForReferee.
+    key: 'fees.referral_credit_referee',
+    value: '200',
+    category: ConfigCategory.FEES,
+    label: 'Crédit parrainage – Filleul (FCFA)',
+    isSecret: false,
+  },
+  {
+    // Counts REWARDED referrals only: a parrain past the cap still has their
+    // referrals recorded and visible, they just stop paying. 0 = unlimited,
+    // resolved to null in getReferralCredits so no call site compares against
+    // the sentinel.
+    key: 'fees.referral_max_rewarded_per_referrer',
+    value: '10',
+    category: ConfigCategory.FEES,
+    label: 'Parrainages rémunérés max par parrain (0 = illimité)',
+    isSecret: false,
+  },
 
   // ── MATCHING ──────────────────────────────────────────────────────────────
   {
@@ -179,6 +257,16 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     value: '',
     category: ConfigCategory.MATCHING,
     label: 'Version du schéma de payload Qdrant (automatique)',
+    isSecret: false,
+  },
+  {
+    // Read by `getMatchingReliabilityThreshold`, which was falling back to its
+    // hardcoded '50' on every call because the key was never seeded — so the
+    // admin screen had no row for it and it could not be changed at all.
+    key: 'matching.reliability_threshold',
+    value: '50',
+    category: ConfigCategory.MATCHING,
+    label: 'Score fiabilité minimum (moteur de matching)',
     isSecret: false,
   },
   {

@@ -182,6 +182,10 @@ export class SystemConfigService implements OnModuleInit {
     'fees.reliability_score_min',
     'fees.employer_late_cancel_score_deduction',
     'fees.billing_block_threshold',
+    'fees.penalty_suspension_threshold',
+    'fees.penalty_hard_block_days',
+    'fees.penalty_max_notifications',
+    'fees.penalty_notification_interval_hours',
     'fees.max_daily_applications',
     'fees.contact_unlock_fee_employer',
     'fees.contact_unlock_fee_worker',
@@ -464,6 +468,8 @@ export class SystemConfigService implements OnModuleInit {
       scoreMin,
       empLateCancelDed,
       billingBlock,
+      suspensionThreshold,
+      hardBlockDays,
       maxDailyApps,
       completionReward,
       ratingDelta1,
@@ -478,6 +484,8 @@ export class SystemConfigService implements OnModuleInit {
       { key: 'fees.reliability_score_min', fallback: '50' },
       { key: 'fees.employer_late_cancel_score_deduction', fallback: '5' },
       { key: 'fees.billing_block_threshold', fallback: '2' },
+      { key: 'fees.penalty_suspension_threshold', fallback: '3' },
+      { key: 'fees.penalty_hard_block_days', fallback: '3' },
       { key: 'fees.max_daily_applications', fallback: '10' },
       { key: 'fees.completion_score_reward', fallback: '1' },
       { key: 'fees.rating_score_delta_1', fallback: '-4' },
@@ -493,6 +501,14 @@ export class SystemConfigService implements OnModuleInit {
       reliabilityScoreMin: Number(scoreMin),
       employerLateCancelScoreDeduction: Number(empLateCancelDed),
       billingBlockThreshold: Number(billingBlock),
+      // Suspension is strictly harsher than a billing block, so it can never
+      // fire first. Clamping here rather than at write time keeps an existing
+      // bad pair (or a hand-edited row) from inverting the ladder.
+      penaltySuspensionThreshold: Math.max(
+        Number(suspensionThreshold),
+        Number(billingBlock),
+      ),
+      penaltyHardBlockDays: Number(hardBlockDays),
       maxDailyApplications: Number(maxDailyApps),
       completionScoreReward: Number(completionReward),
       ratingScoreDeltas: {
@@ -503,6 +519,32 @@ export class SystemConfigService implements OnModuleInit {
         5: Number(ratingDelta5),
       } as Record<number, number>,
     };
+  }
+
+  /**
+   * The reminder cadence for an unpaid penalty, and the window it runs for.
+   *
+   * Separate from `getFees()` because the hourly scan needs three keys, not
+   * fifteen. `hardBlockDays` is the same key `getFees` exposes as
+   * `penaltyHardBlockDays`: past that point the account is hard-blocked and
+   * reminding it further is pointless, so the scan stops there.
+   */
+  async getPenaltyNotificationConfig() {
+    const [maxNotifications, intervalHours, hardBlockDays] =
+      await this.mgetBatch([
+        { key: 'fees.penalty_max_notifications', fallback: '3' },
+        { key: 'fees.penalty_notification_interval_hours', fallback: '23' },
+        { key: 'fees.penalty_hard_block_days', fallback: '3' },
+      ]);
+    return {
+      maxNotifications: Number(maxNotifications),
+      notificationIntervalHours: Number(intervalHours),
+      hardBlockDays: Number(hardBlockDays),
+    };
+  }
+
+  async getPenaltyHardBlockDays(): Promise<number> {
+    return Number(await this.get('fees.penalty_hard_block_days', '3'));
   }
 
   async getContactUnlockFees() {
@@ -550,6 +592,35 @@ export class SystemConfigService implements OnModuleInit {
     return {
       workerCreditFcfa: Number(workerCredit),
       employerCreditFcfa: Number(employerCredit),
+    };
+  }
+
+  /**
+   * Parrainage payout amounts and the per-parrain cap.
+   *
+   * `maxRewardedPerReferrer` is `null` for unlimited, not `0`. The config value
+   * uses 0 as the "no cap" sentinel because that reads better in the admin
+   * screen than an empty field, but letting that 0 reach a call site produces
+   * `rewardedCount >= 0` — a cap that rejects everyone, silently, and only for
+   * the admins who deliberately turned it off. Resolve it here, once.
+   */
+  async getReferralCredits(): Promise<{
+    referrerCreditFcfa: number;
+    refereeCreditFcfa: number;
+    maxRewardedPerReferrer: number | null;
+  }> {
+    const [referrerCredit, refereeCredit, maxRewarded] = await this.mgetBatch([
+      { key: 'fees.referral_credit_referrer', fallback: '300' },
+      { key: 'fees.referral_credit_referee', fallback: '200' },
+      { key: 'fees.referral_max_rewarded_per_referrer', fallback: '10' },
+    ]);
+
+    const cap = Number(maxRewarded);
+    return {
+      referrerCreditFcfa: Number(referrerCredit),
+      refereeCreditFcfa: Number(refereeCredit),
+      maxRewardedPerReferrer:
+        !Number.isFinite(cap) || cap <= 0 ? null : Math.floor(cap),
     };
   }
 

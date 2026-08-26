@@ -4,10 +4,6 @@ import {
   formatCancelApplicationNoPenalty,
   formatCancelApplicationWithPenalty,
 } from '../messages/penalty.messages';
-import {
-  LATE_CANCELLATION_PENALTY_FCFA,
-  LATE_CANCELLATION_SCORE_DEDUCTION,
-} from '../../application/application.constants';
 import type { ApplicationService } from '../../application/application.service';
 import type { BotNotificationService } from '../services/bot-notification.service';
 import type { InterestSignalService } from '../../interest-graph/interest-signal.service';
@@ -18,7 +14,14 @@ export type CancelApplicationContext = {
   applicationService: ApplicationService;
   notificationService: BotNotificationService;
   interestSignalService: InterestSignalService;
+  // All four come from SystemConfig via the orchestrator. They used to be
+  // imported as hardcoded constants while `ApplicationService.cancel` charged
+  // the configured value, so raising the penalty in admin made the bot quote
+  // one figure and debit another.
   cancellationThresholdHours: number;
+  lateCancellationPenaltyFcfa: number;
+  lateCancellationScoreDeduction: number;
+  reliabilityScoreMin: number;
 };
 
 export type FlowResult = {
@@ -130,21 +133,23 @@ function showInitialCancelPrompt(
   profile: BotProfile,
   state: BotState,
   timeRemainingStr: string,
-  thresholdHours: number,
+  ctx: CancelApplicationContext,
 ): FlowResult {
   const scheduledAt = app.job_offer.scheduled_at;
   if (isLate) {
+    // Mirrors the clamp in ApplicationService.cancel, floor included — the
+    // score this previews has to be the score the worker actually ends up with.
     const newScore = Math.max(
-      50,
-      (profile.reliability_score ?? 100) - LATE_CANCELLATION_SCORE_DEDUCTION,
+      ctx.reliabilityScoreMin,
+      (profile.reliability_score ?? 100) - ctx.lateCancellationScoreDeduction,
     );
     const text = formatCancelApplicationWithPenalty({
       offerTitle: app.job_offer.title,
       scheduledAt,
       amount: app.job_offer.amount,
       timeRemaining: timeRemainingStr,
-      penaltyAmount: LATE_CANCELLATION_PENALTY_FCFA,
-      scoreDeduction: LATE_CANCELLATION_SCORE_DEDUCTION,
+      penaltyAmount: ctx.lateCancellationPenaltyFcfa,
+      scoreDeduction: ctx.lateCancellationScoreDeduction,
       newScore,
     });
     return { reply: [text], nextState: state };
@@ -154,13 +159,13 @@ function showInitialCancelPrompt(
     scheduledAt,
     amount: app.job_offer.amount,
     timeRemaining: timeRemainingStr,
-    thresholdHours,
+    thresholdHours: ctx.cancellationThresholdHours,
   });
   return { reply: [text], nextState: state };
 }
 
 function handleLateCancellationInput(args: CancelStepArgs): FlowResult {
-  const { state, payload, trimmed } = args;
+  const { state, payload, trimmed, ctx } = args;
   const reason = trimmed || undefined;
   if (!reason) {
     return {
@@ -175,7 +180,7 @@ function handleLateCancellationInput(args: CancelStepArgs): FlowResult {
       [
         '*Êtes-vous certain de vouloir annuler ?*',
         '',
-        `*Pénalité*: ${LATE_CANCELLATION_PENALTY_FCFA.toLocaleString('fr-FR')} FCFA`,
+        `*Pénalité*: ${ctx.lateCancellationPenaltyFcfa.toLocaleString('fr-FR')} FCFA`,
         '1- Oui, annuler malgré la pénalité',
         '2- Non, maintenir ma candidature',
         '',
@@ -206,7 +211,7 @@ async function handleCancelStep1(
       profile,
       state,
       timeRemainingStr,
-      args.ctx.cancellationThresholdHours,
+      args.ctx,
     );
   }
 
