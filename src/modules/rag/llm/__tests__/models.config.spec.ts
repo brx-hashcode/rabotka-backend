@@ -30,6 +30,31 @@ describe('models.config', () => {
     expect(keyFor('deepseek')).toBe('DEEPSEEK_API_KEY');
   });
 
+  it('reads Anthropic from ANTHROPIC_API_KEY', () => {
+    // The SDK's own conventional name, so a key already exported for another
+    // tool works without a second variable holding the same secret.
+    expect(keyFor('anthropic')).toBe('ANTHROPIC_API_KEY');
+  });
+
+  it('pins Google to a real model id rather than a moving alias', () => {
+    // Second time this chain has been broken by a Google id. `gemini-2.0-flash`
+    // was retired and 404'd; the answer then was `-latest` aliases, on the
+    // theory that an alias cannot be retired. Then `gemini-flash-latest`
+    // stopped answering anyway — so an alias buys protection from retirement
+    // and from nothing else, and a pinned id at least fails on the deploy that
+    // introduced it.
+    const spec = TIER_CHAINS.standard.find((s) => s.provider === 'google');
+    expect(spec?.model).toBe('gemini-3.6-flash');
+    expect(spec?.model).not.toContain('latest');
+  });
+
+  it('names Anthropic with an undated model id', () => {
+    // Current Anthropic ids are bare — `claude-haiku-4-5`. A date-suffixed id
+    // is a snapshot, and pinning one belongs in the env override, not here.
+    const spec = TIER_CHAINS.standard.find((s) => s.provider === 'anthropic');
+    expect(spec?.model).toBe('claude-haiku-4-5');
+  });
+
   describe('hasCredential', () => {
     it('is false when the key is absent, empty, or whitespace', () => {
       expect(hasCredential('groq', {})).toBe(false);
@@ -57,7 +82,16 @@ describe('models.config', () => {
 
       expect(providers).not.toContain('groq');
       expect(providers).not.toContain('deepseek');
+      expect(providers).not.toContain('anthropic');
       expect(providers).toContain('mistral');
+    });
+
+    it('includes Anthropic as soon as its key is set', () => {
+      const providers = resolveChain('standard', {
+        ANTHROPIC_API_KEY: 'sk-ant-x',
+      }).map((s) => s.provider);
+
+      expect(providers).toEqual(['anthropic']);
     });
 
     it('includes them once the keys are set, in registry order', () => {
@@ -69,6 +103,31 @@ describe('models.config', () => {
       expect(providers).toEqual(TIER_CHAINS.standard.map((s) => s.provider));
       expect(providers).toContain('groq');
       expect(providers).toContain('deepseek');
+    });
+
+    it('leads with Google and keeps Anthropic next in line', () => {
+      // Google leads because it is the provider that actually has a credential.
+      // Anthropic sits second rather than at the back so that finishing the
+      // migration is "add the key, swap two entries" — not a hunt for where it
+      // was meant to go.
+      const env = Object.fromEntries(
+        Object.values(PROVIDER_API_KEY_ENV).map((k) => [k, 'k']),
+      );
+      const providers = resolveChain('standard', env).map((s) => s.provider);
+
+      expect(providers[0]).toBe('google');
+      expect(providers[1]).toBe('anthropic');
+    });
+
+    it('leads with Google on the credentials actually configured today', () => {
+      // The realistic case, and the one that broke: no Anthropic key. Google
+      // still has to lead, and Mistral still has to be what catches it.
+      const providers = resolveChain('standard', {
+        GOOGLE_API_KEY: 'g',
+        MISTRAL_API_KEY: 'm',
+      }).map((s) => s.provider);
+
+      expect(providers).toEqual(['google', 'mistral']);
     });
 
     it('keeps Mistral ahead of Groq until the numbers say otherwise', () => {
@@ -85,6 +144,20 @@ describe('models.config', () => {
       );
       // DeepSeek is the fallback of last resort: slowest on a tool-calling turn.
       expect(providers.at(-1)).toBe('deepseek');
+    });
+
+    it('drops Anthropic silently until its key exists', () => {
+      // Why the assistant still answers with no ANTHROPIC_API_KEY set, and why
+      // adding one later needs no deploy — the chain reshapes itself.
+      const env = Object.fromEntries(
+        Object.values(PROVIDER_API_KEY_ENV).map((k) => [k, 'k']),
+      );
+      delete env.ANTHROPIC_API_KEY;
+      const providers = resolveChain('standard', env).map((s) => s.provider);
+
+      expect(providers[0]).toBe('google');
+      expect(providers[1]).toBe('mistral');
+      expect(providers).not.toContain('anthropic');
     });
 
     it('leaves the cheap tier on its single provider', () => {

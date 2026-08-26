@@ -9,6 +9,7 @@ import { readNumber } from '../shared/config';
 import { LlmModelFactory } from './model-factory.service';
 import {
   PROVIDERS_REQUIRING_FLAT_CONTENT,
+  PROVIDERS_SUPPORTING_CACHE_CONTROL,
   resolveChain,
 } from './models.config';
 import {
@@ -29,6 +30,14 @@ import {
   type LlmProviderSpec,
   type LlmTier,
 } from './llm.types';
+import {
+  llmCacheReadTokenCounter,
+  llmFallbackCounter,
+  llmInputTokenCounter,
+  llmLatencyHistogram,
+  llmRequestCounter,
+  type LlmRequestStatus,
+} from './metrics';
 
 export interface LlmInvokeOptions {
   tier: LlmTier;
@@ -101,6 +110,7 @@ export class LlmService {
       breakerSkipped: [],
       inputTokens: null,
       outputTokens: null,
+      cacheReadTokens: null,
     };
 
     try {
@@ -149,10 +159,16 @@ export class LlmService {
       breakerSkipped: [],
       inputTokens: null,
       outputTokens: null,
+      cacheReadTokens: null,
     };
 
     if (chain.length === 0) {
       telemetry.latencyMs = Date.now() - startedAt;
+      // Counted, though nothing is logged here — the error carries the message
+      // and the caller decides how loud to be. Without this the series simply
+      // stops during a total misconfiguration, which reads on a dashboard as
+      // "no traffic" rather than "answering nobody".
+      this.record(telemetry, 'exhausted');
       throw new LlmNoProviderError(
         `Tier "${options.tier}" has no provider with a credential configured`,
         telemetry,
@@ -203,6 +219,14 @@ export class LlmService {
         }
 
         if (shouldTripBreaker(cls)) await this.breaker.recordFailure(spec);
+        // Counted here rather than at the top of the next iteration, because
+        // the LAST provider in the chain also fails over — to nothing. Skipping
+        // it would silently under-count the failure that matters most.
+        llmFallbackCounter.inc({
+          from: spec.provider,
+          to: chain[chain.indexOf(spec) + 1]?.provider ?? 'none',
+          reason: cls,
+        });
         this.logger.warn(
           `${specId(spec)} failed (${cls}: ${describe(err)}) — advancing`,
         );
@@ -270,30 +294,73 @@ export class LlmService {
         AIMessage
       >;
     } else {
-      runnable = model as unknown as Runnable<
-        BaseLanguageModelInput,
-        AIMessage
-      >;
+      runnable = model;
     }
 
     const timeoutMs = options.timeoutMs ?? this.defaultTimeoutMs;
     return withTimeout(
-      (signal) =>
-        runnable.invoke(
-          PROVIDERS_REQUIRING_FLAT_CONTENT.has(spec.provider)
-            ? flattenContent(input)
-            : input,
-          { signal },
-        ),
+      (signal) => runnable.invoke(this.shapeFor(spec, input), { signal }),
       timeoutMs,
       specId(spec),
     );
+  }
+
+  /**
+   * The one place a provider's content quirks are applied.
+   *
+   * Both rules are mutually exclusive by construction: a provider that needs
+   * flat text cannot carry a cache breakpoint, because flattening is what
+   * destroys the block the breakpoint lives on.
+   */
+  private shapeFor<T>(spec: LlmProviderSpec, input: T): T {
+    if (PROVIDERS_REQUIRING_FLAT_CONTENT.has(spec.provider)) {
+      return flattenContent(input);
+    }
+    if (PROVIDERS_SUPPORTING_CACHE_CONTROL.has(spec.provider)) {
+      return markCacheBreakpoint(input);
+    }
+    return input;
   }
 
   private readUsage(output: AIMessage, telemetry: LlmCallTelemetry): void {
     const usage = output.usage_metadata;
     telemetry.inputTokens = usage?.input_tokens ?? null;
     telemetry.outputTokens = usage?.output_tokens ?? null;
+    telemetry.cacheReadTokens = usage?.input_token_details?.cache_read ?? null;
+  }
+
+  /**
+   * The same telemetry, as Prometheus series.
+   *
+   * Called from `log()` because that is already the single point every call
+   * passes through on its way out, whichever way it ended — a second call site
+   * would eventually miss a branch and under-report exactly the failures the
+   * metric exists to catch.
+   *
+   * `provider`/`model` are null when the tier had nothing usable to try, and
+   * `none` keeps the label present rather than dropping the series: "we failed
+   * without reaching anybody" is itself worth alerting on.
+   */
+  private record(t: LlmCallTelemetry, outcome: LlmRequestStatus): void {
+    const provider = t.provider ?? 'none';
+    const model = t.model ?? 'none';
+
+    llmRequestCounter.inc({
+      provider,
+      model,
+      tier: t.tier,
+      status: outcome,
+    });
+    llmLatencyHistogram.observe(
+      { provider, model, tier: t.tier },
+      t.latencyMs / 1000,
+    );
+    if (t.inputTokens !== null) {
+      llmInputTokenCounter.inc({ provider, model }, t.inputTokens);
+    }
+    if (t.cacheReadTokens !== null) {
+      llmCacheReadTokenCounter.inc({ provider, model }, t.cacheReadTokens);
+    }
   }
 
   /**
@@ -304,8 +371,10 @@ export class LlmService {
   private log(
     t: LlmCallTelemetry,
     correlationId: string | undefined,
-    outcome: 'ok' | 'fatal' | 'exhausted',
+    outcome: LlmRequestStatus,
   ): void {
+    this.record(t, outcome);
+
     const parts = [
       `outcome=${outcome}`,
       `tier=${t.tier}`,
@@ -320,6 +389,12 @@ export class LlmService {
     if (t.inputTokens !== null || t.outputTokens !== null) {
       parts.push(`tokens_in=${t.inputTokens ?? '?'}`);
       parts.push(`tokens_out=${t.outputTokens ?? '?'}`);
+    }
+    // Only where the provider reports it, so the field's absence stays
+    // meaningful: a missing `cache_read` is "this vendor does not cache", while
+    // `cache_read=0` on every turn is the prompt split having stopped working.
+    if (t.cacheReadTokens !== null) {
+      parts.push(`cache_read=${t.cacheReadTokens}`);
     }
     if (correlationId) parts.push(`request_id=${correlationId}`);
 
@@ -372,6 +447,56 @@ export function flattenContent<T>(input: T): T {
       message,
     ) as BaseMessage;
     copy.content = text;
+    return copy;
+  }) as T;
+}
+
+/**
+ * Marks the end of the cacheable prefix on the system message.
+ *
+ * `agent.service.ts` hands the system prompt over as two blocks — stable, then
+ * volatile — and this puts `cache_control` on the first one. Everything the API
+ * renders before that point is cached with it, and since the layout is
+ * `tools → system → messages`, that includes the tool schemas: ~1.3k tokens of
+ * them, on top of ~2.7k of stable prompt.
+ *
+ * Only the FIRST block, and only on the system message. A breakpoint on the
+ * volatile block would cache a prefix that changes every turn, which writes a
+ * new cache entry per message — the expensive half of caching with none of the
+ * saving.
+ *
+ * Messages are copied rather than mutated, for the same reason `flattenContent`
+ * copies: LangGraph holds its own reference to this history, and writing a
+ * provider-specific key into it would leak Anthropic's wire format into the
+ * turn every other provider sees on the next attempt.
+ */
+export function markCacheBreakpoint<T>(input: T): T {
+  if (!Array.isArray(input)) return input;
+
+  let marked = false;
+  return input.map((message) => {
+    if (
+      marked ||
+      !(message instanceof BaseMessage) ||
+      message.getType() !== 'system' ||
+      !Array.isArray(message.content) ||
+      message.content.length === 0
+    ) {
+      return message;
+    }
+
+    const [first, ...rest] = message.content;
+    if (typeof first !== 'object' || first === null) return message;
+
+    marked = true;
+    const copy = Object.assign(
+      Object.create(Object.getPrototypeOf(message) as object),
+      message,
+    ) as BaseMessage;
+    copy.content = [
+      { ...first, cache_control: { type: 'ephemeral' } },
+      ...rest,
+    ] as typeof message.content;
     return copy;
   }) as T;
 }

@@ -15,9 +15,15 @@ import { JobCategoryRegistry } from '../intents/job-category.registry';
 import { FallbackChatModel } from './fallback-chat-model';
 import { GuardService, isAbusive } from './guard.service';
 import { AbuseReportService } from './abuse-report.service';
-import { buildAnonymousSystemPrompt, buildSystemPrompt } from './prompts';
+import {
+  buildAnonymousSystemPromptParts,
+  buildSystemPromptParts,
+  type SystemPromptParts,
+} from './prompts';
 import { refusal, type RefusalId } from './refusals';
 import { LlmFatalError } from '../llm/llm.errors';
+import { classifyLlmError } from '../llm/error-classification';
+import { llmFallbackCounter } from '../llm/metrics';
 import { buildAnonymousTools, buildTools } from './tools';
 import { ToolDepsProvider } from './tool-deps.provider';
 import { readNumber } from '../shared/config';
@@ -72,6 +78,28 @@ export interface AgentReply {
   sanitizerBlocked: string[];
 }
 
+/**
+ * The system prompt as TWO content blocks, stable first.
+ *
+ * Two blocks rather than one string because that is what a cache breakpoint
+ * needs something to attach to: `LlmService` marks the first block for the
+ * providers that understand `cache_control`, and leaves it alone for the rest.
+ * Deciding here instead would mean this file knowing which vendor is answering,
+ * which is exactly what the provider abstraction exists to prevent.
+ *
+ * Providers that cannot read block arrays are handled at the same boundary —
+ * `flattenContent` joins the blocks back into one string for Mistral, and has
+ * read `part.text` since it was written, so it needs no change for this.
+ */
+function systemMessage(parts: SystemPromptParts): SystemMessage {
+  return new SystemMessage({
+    content: [
+      { type: 'text', text: parts.stable },
+      { type: 'text', text: parts.volatile },
+    ],
+  });
+}
+
 @Injectable()
 export class VovaAgentService {
   private readonly logger = new Logger(VovaAgentService.name);
@@ -115,7 +143,7 @@ export class VovaAgentService {
 
     let lastError: unknown;
 
-    for (const spec of chain) {
+    for (const [index, spec] of chain.entries()) {
       const model = new FallbackChatModel({
         llm: this.llm,
         tier,
@@ -134,6 +162,16 @@ export class VovaAgentService {
       } catch (err) {
         lastError = err;
         if (err instanceof LlmFatalError) throw err;
+        // THE failover metric. `LlmService.invoke` has one too, but nothing
+        // reaches it: the agent pins one provider per run through
+        // `invokeWith`, so this loop — not that one — is where a conversation
+        // actually changes vendor. Counting only there would have produced a
+        // series that sits at zero through an outage.
+        llmFallbackCounter.inc({
+          from: spec.provider,
+          to: chain[index + 1]?.provider ?? 'none',
+          reason: classifyLlmError(err),
+        });
         this.logger.warn(
           `Agent run failed on ${spec.provider}/${spec.model} — restarting on the next provider`,
         );
@@ -186,8 +224,8 @@ export class VovaAgentService {
         .help.search(request.text, undefined, 'anonymous', language !== 'fr');
 
       const messages: BaseMessage[] = [
-        new SystemMessage(
-          buildAnonymousSystemPrompt({
+        systemMessage(
+          buildAnonymousSystemPromptParts({
             language,
             grounding: grounding.hits.map((hit) => ({
               title: hit.title,
@@ -365,8 +403,8 @@ export class VovaAgentService {
       });
 
       const messages: BaseMessage[] = [
-        new SystemMessage(
-          buildSystemPrompt({
+        systemMessage(
+          buildSystemPromptParts({
             firstName: request.firstName,
             profileType: request.profileType,
             verificationStatus: request.verificationStatus,

@@ -78,6 +78,13 @@ export class LlmModelFactory {
     // distinct. Contained to this file, which is the only place that touches a
     // provider SDK at all.
     switch (spec.provider) {
+      case 'anthropic': {
+        const { ChatAnthropic } = await import('@langchain/anthropic');
+        return new ChatAnthropic({
+          ...shared,
+          model: spec.model,
+        }) as unknown as BaseChatModel;
+      }
       case 'google': {
         const { ChatGoogleGenerativeAI } =
           await import('@langchain/google-genai');

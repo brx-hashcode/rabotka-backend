@@ -7,6 +7,7 @@ import {
 } from '../../../common/services/redis/redis.constants';
 import { specId, type LlmProviderSpec } from './llm.types';
 import { readNumber } from '../shared/config';
+import { llmCircuitStateGauge } from './metrics';
 
 @Injectable()
 export class LlmBreakerService {
@@ -31,7 +32,16 @@ export class LlmBreakerService {
 
   async isOpen(spec: LlmProviderSpec): Promise<boolean> {
     try {
-      return (await this.redis.exists(this.key(spec, 'open'))) === 1;
+      const open = (await this.redis.exists(this.key(spec, 'open'))) === 1;
+      // The gauge is refreshed on the READ, not only on the transitions,
+      // because a breaker closes by key expiry — there is no event to hang a
+      // "back to zero" on. `usableChain` calls this per request per provider,
+      // so the series stays truthful without a poller of its own.
+      llmCircuitStateGauge.set(
+        { provider: spec.provider, model: spec.model },
+        open ? 1 : 0,
+      );
+      return open;
     } catch (err) {
       this.logger.warn(
         `Breaker read failed for ${specId(spec)} — treating as closed`,
@@ -58,6 +68,10 @@ export class LlmBreakerService {
         'NX',
       );
       if (opened) {
+        llmCircuitStateGauge.set(
+          { provider: spec.provider, model: spec.model },
+          1,
+        );
         this.logger.warn(
           `Breaker OPEN for ${specId(spec)} after ${count} failures — ` +
             `skipping it for ${this.cooldownSeconds}s`,

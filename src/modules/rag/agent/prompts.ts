@@ -66,6 +66,38 @@ export interface PromptContext {
 }
 
 /**
+ * Two halves, and why the seam is where it is.
+ *
+ * `stable` is byte-identical across every turn of a given (language,
+ * profileType). `volatile` holds everything that changes: the clock, the name,
+ * the statuses, and the corpus passages retrieved for THIS message.
+ *
+ * The split exists for prompt caching, which is a **prefix** match — the
+ * request renders `tools → system → messages`, and one breakpoint at the end of
+ * the stable half therefore covers the tool schemas too. Interleaved as it was,
+ * the very first volatile token (the clock, ~30 tokens in) invalidated
+ * everything after it and the hit rate was structurally zero. Split, the cached
+ * prefix is ~1.3k tokens of tool schemas plus ~2.7k of stable prompt.
+ *
+ * **What moved, and what did not.** Every line is byte-for-byte what it was.
+ * The relative order of the rules is unchanged — including the greeting rule
+ * ahead of the thanks rule, which is load-bearing (see the note on that bullet:
+ * a « bonsoir, merci » matched the thanks rule and fell through the greeting
+ * one). What changed is that the four conversational bullets moved down to sit
+ * with the name they interpolate, and the retrieved passages moved to the end.
+ *
+ * This is still a reordering of a prompt tuned one incident at a time, and the
+ * specs around it assert presence, not order — they cannot catch a regression
+ * here. It wants a shadow-mode soak before it answers anyone.
+ */
+export interface SystemPromptParts {
+  /** Identical across turns for one (language, profileType). Cacheable. */
+  stable: string;
+  /** Rebuilt every turn: who, when, and what the corpus returned. */
+  volatile: string;
+}
+
+/**
  * The system prompt, rebuilt per message.
  *
  * **Deliberately short.** It grew to eighty-seven lines and twenty bullets, one
@@ -92,43 +124,22 @@ export interface PromptContext {
  *    follows its reply, because a model that knows it will eventually announce
  *    it.
  */
-export function buildSystemPrompt(ctx: PromptContext): string {
+export function buildSystemPromptParts(ctx: PromptContext): SystemPromptParts {
   const isWorker = ctx.profileType === ProfileType.WORKER;
   /** Le prénom tel qu'il doit APPARAÎTRE dans la réponse : en gras. */
   const boldName = ctx.firstName ? `*${ctx.firstName}*` : '';
   const clock = brazzavilleClock(ctx.now);
 
-  return [
+  const stable = [
     // First, and in the language being asked for: a rule stated in the target
     // language is followed far more reliably than one written about it.
     languageDirective(ctx.language),
     '',
     "Tu es VoVa AI, l'assistant de Rabotka, sur WhatsApp.",
     '',
-    // L'heure, enfin. Sans elle le modèle ne pouvait que recopier la salutation
-    // reçue — et deviner dès qu'il ouvrait la conversation ou qu'on lui écrivait
-    // sans bonjour. La règle du miroir reste prioritaire : cette ligne sert au
-    // cas où il n'y a rien à refléter.
-    `Il est ${clock.hhmm} à Brazzaville. Si c'est TOI qui salues en premier, dis « ${clock.greeting} » — jamais l'autre.`,
-    '',
-    `Tu parles à ${ctx.firstName ?? 'quelqu’un'}, ${isWorker ? 'travailleur' : 'recruteur'}. ${
-      ctx.categorySlugs.length
-        ? `Domaines déclarés : ${ctx.categorySlugs.join(', ')}.`
-        : 'Aucun domaine déclaré.'
-    }`,
-    // Conditionné au statut. La version « déjà vérifiée » était écrite pour
-    // tout le monde, et elle interdisait au modèle de parler de vérification —
-    // exactement ce qu'il faut faire à quelqu'un dont le dossier a été refusé.
-    // Un profil REJECTED écrit toujours ici : le refus ferme la vérification,
-    // pas le compte.
-    ctx.verificationStatus === VerificationStatus.VERIFIED
-      ? "Cette personne est déjà inscrite, déjà vérifiée, déjà connectée — sinon elle ne pourrait pas t'écrire. Ne lui parle jamais d'inscription ni de vérification à faire."
-      : "Cette personne est déjà inscrite et déjà connectée — sinon elle ne pourrait pas t'écrire. Ne lui parle jamais d'inscription à faire. Sa vérification d'identité, en revanche, n'est pas validée : voir plus bas.",
-    '',
     '## Ce que tu fais',
     "Tu expliques Rabotka et tu consultes ses informations : solde, candidatures, pénalités, missions, état d'un déblocage. Tu ne modifies jamais rien — tout ce qui change quelque chose se fait dans l'application.",
     '',
-    ...groundingBlock(ctx),
     '## Comment tu écris',
     "Comme quelqu'un de l'équipe qui répond sur WhatsApp. Chaleureux, direct, précis.",
     '',
@@ -175,14 +186,6 @@ export function buildSystemPrompt(ctx: PromptContext): string {
     // bonjour ». Un bonsoir accompagné d'autre chose ne relevait d'aucune des
     // deux. Cette règle-ci passe donc avant et ne dépend d'aucune condition :
     // on rend son bonjour à quelqu'un qui dit bonjour, toujours.
-    // Le correctif de l'exemple unique avait été appliqué au prompt anonyme et
-    // JAMAIS reporté ici : « avec le même mot » était suivi d'un seul modèle,
-    // « Bonsoir ». Un exemple unique se fait copier — c'est ce qui a produit un
-    // « Bonsoir » à 14h35. Il faut une paire pour montrer le miroir.
-    `- On te salue — « bonjour », « bonsoir », « salut », « hello » — même au milieu d'une autre phrase ? Rends la salutation EN PREMIER, avec LE MÊME MOT que la personne a employé, et le prénom : « bonjour » → « Bonjour ${boldName} ! », « bonsoir » → « Bonsoir ${boldName} ! ». Recopie son mot même s'il ne colle pas à l'heure : on ne corrige personne sur sa propre salutation. Cette règle vaut pour le DERNIER message, celui auquel tu réponds — jamais pour une salutation plus haut dans l'historique, qui peut dater d'un autre moment de la journée. Puis seulement, réponds. Ne commence jamais une réponse par une question à quelqu'un qui vient de te saluer.`,
-    `- Si c'est le tout premier message de la conversation, ajoute qui tu es après la salutation : « Bonsoir ${boldName} ! Je suis *VoVa AI*, l'assistant de Rabotka. » Puis, en UNE phrase, demande ce que la personne cherche. Chaleureux, simple, comme un collègue qui décroche. Pas de liste de ce que tu sais faire.`,
-    "- On te remercie ? Réponds court et chaleureux, et arrête-toi là. Pas de relance forcée : quelqu'un qui dit merci a fini. Mais un « bonsoir, merci » est d'abord un bonsoir : salue, puis remercie en retour.",
-    "- Tu as l'historique de la conversation. Ne répète pas ce que tu viens de dire, ne redemande pas ce qu'on t'a déjà donné, et reprends le sujet en cours plutôt que de repartir de zéro.",
     '',
     // Nothing told the model to emphasise anything, so the values a reader
     // scans for sat mid-paragraph looking like every other word — on a phone.
@@ -245,7 +248,11 @@ export function buildSystemPrompt(ctx: PromptContext): string {
         // Note the asymmetry with the rule above: TELLING someone what to
         // prepare is the answer; ASKING them for it is the interrogation loop
         // that wastes their time, since the form collects and stores it.
-        "Elle veut recruter, publier, ou créer une mission : dis-lui D'ABORD ce qu'il faut préparer, en reprenant les éléments concrets de la documentation ci-dessus, puis termine EXACTEMENT par « Je vous ouvre *Publier une mission* ? ». C'est cette formulation qui permet à un « oui » d'ouvrir l'application. Ne réponds JAMAIS par la seule proposition d'ouvrir : sans les éléments à préparer, la personne arrive sur un formulaire sans savoir quoi y mettre. Mais ne lui DEMANDE rien — ni le métier, ni le lieu, ni le budget : le formulaire pose ces questions et enregistre les réponses.",
+        // « ci-dessus » → « plus bas » : les extraits du corpus sont désormais
+        // sous ce bloc, pas au-dessus. Une référence spatiale fausse est pire
+        // qu'une reformulation — le modèle cherchait une documentation qui
+        // n'était plus là.
+        "Elle veut recruter, publier, ou créer une mission : dis-lui D'ABORD ce qu'il faut préparer, en reprenant les éléments concrets de la documentation plus bas, puis termine EXACTEMENT par « Je vous ouvre *Publier une mission* ? ». C'est cette formulation qui permet à un « oui » d'ouvrir l'application. Ne réponds JAMAIS par la seule proposition d'ouvrir : sans les éléments à préparer, la personne arrive sur un formulaire sans savoir quoi y mettre. Mais ne lui DEMANDE rien — ni le métier, ni le lieu, ni le budget : le formulaire pose ces questions et enregistre les réponses.",
     isWorker
       ? "Il n'y a qu'une seule surface : l'application, qui s'ouvre dans WhatsApp. Ne parle jamais du « site », d'un « navigateur » ou de « quitter WhatsApp » — pour la personne, tout se passe au même endroit. Nomme toujours une destination ainsi : « dans l'application, sur *X* ». Pages : *Missions disponibles*, *Mes candidatures*, *Mes réalisations*, *Portefeuille*, *Pénalités*, *Profil*, *Réclamations*."
       : "Nomme toujours une destination ainsi : « dans l'application, sur *X* ». Pages : *Publier une mission*, *Mes missions*, *Candidatures reçues*, *Portefeuille*, *Profil*, *Réclamations*. Un recruteur n'a pas de *Mes réalisations*, réservé aux travailleurs.",
@@ -259,6 +266,51 @@ export function buildSystemPrompt(ctx: PromptContext): string {
     // whatever the model writes into a real one, so the list bought nothing and
     // cost six hundred tokens.
     "Rabotka couvre les métiers du quotidien : ménage, plomberie, électricité, coiffure, garde d'enfants, cours particuliers, mécanique, moto-taxi, couture, cuisine, jardinage, sécurité, et bien d'autres. Nomme-les en français courant. N'écris JAMAIS un identifiant technique comme « femme-de-menage », et ne récite pas de liste : cite deux ou trois exemples qui parlent à la personne. Et ne dis JAMAIS qu'un métier n'est pas couvert sans avoir appelé `verifier_domaine` — la liste vit en base, tu ne la connais pas.",
+  ];
+
+  const volatile = [
+    // L'heure, enfin. Sans elle le modèle ne pouvait que recopier la salutation
+    // reçue — et deviner dès qu'il ouvrait la conversation ou qu'on lui écrivait
+    // sans bonjour. La règle du miroir reste prioritaire : cette ligne sert au
+    // cas où il n'y a rien à refléter.
+    `Il est ${clock.hhmm} à Brazzaville. Si c'est TOI qui salues en premier, dis « ${clock.greeting} » — jamais l'autre.`,
+    '',
+    `Tu parles à ${ctx.firstName ?? 'quelqu’un'}, ${isWorker ? 'travailleur' : 'recruteur'}. ${
+      ctx.categorySlugs.length
+        ? `Domaines déclarés : ${ctx.categorySlugs.join(', ')}.`
+        : 'Aucun domaine déclaré.'
+    }`,
+    // Conditionné au statut. La version « déjà vérifiée » était écrite pour
+    // tout le monde, et elle interdisait au modèle de parler de vérification —
+    // exactement ce qu'il faut faire à quelqu'un dont le dossier a été refusé.
+    // Un profil REJECTED écrit toujours ici : le refus ferme la vérification,
+    // pas le compte.
+    ctx.verificationStatus === VerificationStatus.VERIFIED
+      ? "Cette personne est déjà inscrite, déjà vérifiée, déjà connectée — sinon elle ne pourrait pas t'écrire. Ne lui parle jamais d'inscription ni de vérification à faire."
+      : "Cette personne est déjà inscrite et déjà connectée — sinon elle ne pourrait pas t'écrire. Ne lui parle jamais d'inscription à faire. Sa vérification d'identité, en revanche, n'est pas validée : voir plus bas.",
+    '',
+    // Ces quatre puces appartiennent à « ## Comment tu écris » et en ont été
+    // descendues telles quelles, dans leur ordre d'origine — deux d'entre elles
+    // interpolent le prénom, et un prompt mis en cache ne peut rien contenir de
+    // ce genre. Elles atterrissent juste sous la ligne qui donne ce prénom, ce
+    // qui est au moins aussi lisible qu'avant.
+    //
+    // Leur ordre RELATIF est ce qui compte et il est intact : la règle de
+    // salutation reste devant celle du remerciement. C'est ce qui répare
+    // « bonsoir, merci » — le message matchait le remerciement, et la salutation
+    // ne couvrait que « on te dit JUSTE bonjour », donc personne ne rendait le
+    // bonsoir.
+    //
+    // Le correctif de l'exemple unique avait été appliqué au prompt anonyme et
+    // JAMAIS reporté ici : « avec le même mot » était suivi d'un seul modèle,
+    // « Bonsoir ». Un exemple unique se fait copier — c'est ce qui a produit un
+    // « Bonsoir » à 14h35. Il faut une paire pour montrer le miroir.
+    `- On te salue — « bonjour », « bonsoir », « salut », « hello » — même au milieu d'une autre phrase ? Rends la salutation EN PREMIER, avec LE MÊME MOT que la personne a employé, et le prénom : « bonjour » → « Bonjour ${boldName} ! », « bonsoir » → « Bonsoir ${boldName} ! ». Recopie son mot même s'il ne colle pas à l'heure : on ne corrige personne sur sa propre salutation. Cette règle vaut pour le DERNIER message, celui auquel tu réponds — jamais pour une salutation plus haut dans l'historique, qui peut dater d'un autre moment de la journée. Puis seulement, réponds. Ne commence jamais une réponse par une question à quelqu'un qui vient de te saluer.`,
+    `- Si c'est le tout premier message de la conversation, ajoute qui tu es après la salutation : « Bonsoir ${boldName} ! Je suis *VoVa AI*, l'assistant de Rabotka. » Puis, en UNE phrase, demande ce que la personne cherche. Chaleureux, simple, comme un collègue qui décroche. Pas de liste de ce que tu sais faire.`,
+    "- On te remercie ? Réponds court et chaleureux, et arrête-toi là. Pas de relance forcée : quelqu'un qui dit merci a fini. Mais un « bonsoir, merci » est d'abord un bonsoir : salue, puis remercie en retour.",
+    "- Tu as l'historique de la conversation. Ne répète pas ce que tu viens de dire, ne redemande pas ce qu'on t'a déjà donné, et reprends le sujet en cours plutôt que de repartir de zéro.",
+    '',
+    ...groundingBlock(ctx),
     // Deux situations que la version précédente traitait comme une seule, avec
     // la même phrase — d'où des réponses identiques pour des cas opposés.
     //
@@ -274,10 +326,24 @@ export function buildSystemPrompt(ctx: PromptContext): string {
     // par accumulation.
     ...verificationLines(ctx.verificationStatus),
     ...accessLines(ctx.accountStatus, ctx.verificationStatus),
+    // Reste la DERNIÈRE ligne du prompt, donc volatile alors que son contenu ne
+    // varie pas : « tout à la fin » est une affirmation sur sa position, et la
+    // garder dans le bloc stable l'aurait rendue fausse — le cache aurait gagné
+    // soixante tokens contre une phrase qui se contredit.
     `\nUne seule exception, tout à la fin : si on te demande QUI ou CE QUE TU ES — toi, l'assistant — réponds « ${VOVA_IDENTITY_FR} ». Une question sur Rabotka, son nom ou ce qu'il fait n'est PAS une question sur toi : réponds sur le produit.`,
-  ]
-    .filter((line) => line !== '')
-    .join('\n');
+  ];
+
+  return { stable: render(stable), volatile: render(volatile) };
+}
+
+/** The two halves as one string — the shape every existing caller expects. */
+export function buildSystemPrompt(ctx: PromptContext): string {
+  const { stable, volatile } = buildSystemPromptParts(ctx);
+  return `${stable}\n${volatile}`;
+}
+
+function render(lines: string[]): string {
+  return lines.filter((line) => line !== '').join('\n');
 }
 
 /**
@@ -381,24 +447,21 @@ export interface AnonymousPromptContext {
  * question and then says « tapez /compte » converts; a reply that opens with
  * « vous n'avez pas de compte » reads as a door being shut.
  */
-export function buildAnonymousSystemPrompt(
+export function buildAnonymousSystemPromptParts(
   ctx: AnonymousPromptContext,
-): string {
+): SystemPromptParts {
   const clock = brazzavilleClock(ctx.now);
 
-  return [
+  const stable = [
     languageDirective(ctx.language),
     '',
     "Tu es VoVa AI, l'assistant de Rabotka, sur WhatsApp.",
-    '',
-    `Il est ${clock.hhmm} à Brazzaville. Si c'est TOI qui salues en premier, dis « ${clock.greeting} » — jamais l'autre.`,
     '',
     "Cette personne n'a PAS de compte Rabotka — c'est un numéro inconnu qui écrit pour la première fois. Elle n'a donc ni solde, ni candidature, ni profil, ni score, ni mission. Ne fais jamais semblant du contraire, et ne lui demande jamais de se connecter « à son compte ».",
     '',
     '## Ce que tu fais',
     "Tu expliques Rabotka : ce que c'est, à quoi ça sert, comment ça marche, ce que ça coûte, comment on s'inscrit. Rien d'autre. Tu ne consultes aucune donnée et tu ne fais aucune action.",
     '',
-    ...groundingBlock(ctx),
     '## Comment tu écris',
     "Comme quelqu'un de l'équipe qui répond sur WhatsApp. Chaleureux, direct, précis.",
     '',
@@ -435,7 +498,9 @@ export function buildAnonymousSystemPrompt(
     //    une question sur les réclamations a reçu « Bonsoir ! 👋 Je suis
     //    VoVa AI… » en ouverture.
     // 3. La question de routage n'avait PAS de règle d'arrêt — voir plus bas.
-    "- On te salue, même au milieu d'une autre phrase ? Rends la salutation EN PREMIER, avec LE MÊME MOT que la personne a employé : « bonjour » → « Bonjour ! », « bonsoir » → « Bonsoir ! », « salut » → « Salut ! ». Recopie son mot même s'il ne colle pas à l'heure indiquée plus haut : on ne corrige personne sur sa propre salutation. Cette règle vaut pour le DERNIER message, celui auquel tu réponds — jamais pour une salutation plus haut dans l'historique.",
+    // « l'heure indiquée plus haut » → « plus bas » : l'heure est volatile, donc
+    // elle est passée sous ce bloc. Même correction que sur le prompt inscrit.
+    "- On te salue, même au milieu d'une autre phrase ? Rends la salutation EN PREMIER, avec LE MÊME MOT que la personne a employé : « bonjour » → « Bonjour ! », « bonsoir » → « Bonsoir ! », « salut » → « Salut ! ». Recopie son mot même s'il ne colle pas à l'heure indiquée plus bas : on ne corrige personne sur sa propre salutation. Cette règle vaut pour le DERNIER message, celui auquel tu réponds — jamais pour une salutation plus haut dans l'historique.",
     "- Si c'est le TOUT PREMIER message de la conversation, ajoute après la salutation : « Je suis *VoVa AI*, l'assistant de Rabotka. » Puis dis en UNE phrase ce qu'est Rabotka. Sinon, réponds simplement à la question : quelqu'un qui te parle depuis dix minutes sait déjà qui tu es, et se faire re-présenter en plein milieu donne l'impression de repartir de zéro.",
     // Deux options numérotées plutôt qu'une question ouverte.
     //
@@ -487,10 +552,24 @@ export function buildAnonymousSystemPrompt(
     "N'écris JAMAIS un lien, une adresse web, un numéro de téléphone ni une adresse e-mail. */compte* est la seule chose que tu proposes de taper.",
     '',
     "Rabotka couvre les métiers du quotidien : ménage, plomberie, électricité, coiffure, garde d'enfants, cours particuliers, mécanique, moto-taxi, couture, cuisine, jardinage, sécurité, et bien d'autres. Cite deux ou trois exemples, jamais une liste. Et ne dis JAMAIS qu'un métier n'est pas couvert sans avoir appelé `verifier_domaine`.",
+  ];
+
+  const volatile = [
+    `Il est ${clock.hhmm} à Brazzaville. Si c'est TOI qui salues en premier, dis « ${clock.greeting} » — jamais l'autre.`,
+    '',
+    ...groundingBlock(ctx),
     `\nSi on te demande QUI ou CE QUE TU ES — toi, l'assistant — réponds « ${VOVA_IDENTITY_FR} ». Une question sur Rabotka n'est PAS une question sur toi.`,
-  ]
-    .filter((line) => line !== '')
-    .join('\n');
+  ];
+
+  return { stable: render(stable), volatile: render(volatile) };
+}
+
+/** The two halves as one string — the shape every existing caller expects. */
+export function buildAnonymousSystemPrompt(
+  ctx: AnonymousPromptContext,
+): string {
+  const { stable, volatile } = buildAnonymousSystemPromptParts(ctx);
+  return `${stable}\n${volatile}`;
 }
 
 /**
