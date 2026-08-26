@@ -17,6 +17,7 @@
 export type LlmTier = 'cheap' | 'standard';
 
 export type LlmProviderName =
+  | 'anthropic'
   | 'google'
   | 'mistral'
   | 'openai'

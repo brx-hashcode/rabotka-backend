@@ -30,6 +30,19 @@ describe('models.config', () => {
     expect(keyFor('deepseek')).toBe('DEEPSEEK_API_KEY');
   });
 
+  it('reads Anthropic from ANTHROPIC_API_KEY', () => {
+    // The SDK's own conventional name, so a key already exported for another
+    // tool works without a second variable holding the same secret.
+    expect(keyFor('anthropic')).toBe('ANTHROPIC_API_KEY');
+  });
+
+  it('names Anthropic with an undated model id', () => {
+    // Current Anthropic ids are bare — `claude-haiku-4-5`. A date-suffixed id
+    // is a snapshot, and pinning one belongs in the env override, not here.
+    const spec = TIER_CHAINS.standard.find((s) => s.provider === 'anthropic');
+    expect(spec?.model).toBe('claude-haiku-4-5');
+  });
+
   describe('hasCredential', () => {
     it('is false when the key is absent, empty, or whitespace', () => {
       expect(hasCredential('groq', {})).toBe(false);
@@ -57,7 +70,16 @@ describe('models.config', () => {
 
       expect(providers).not.toContain('groq');
       expect(providers).not.toContain('deepseek');
+      expect(providers).not.toContain('anthropic');
       expect(providers).toContain('mistral');
+    });
+
+    it('includes Anthropic as soon as its key is set', () => {
+      const providers = resolveChain('standard', {
+        ANTHROPIC_API_KEY: 'sk-ant-x',
+      }).map((s) => s.provider);
+
+      expect(providers).toEqual(['anthropic']);
     });
 
     it('includes them once the keys are set, in registry order', () => {

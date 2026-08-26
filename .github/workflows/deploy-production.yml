@@ -187,6 +187,7 @@ jobs:
           # provider with no credential instead of throwing, so a key missing
           # from Vault costs a fallback tier quietly. The step below is what
           # makes "all three blank" loud.
+          ANTHROPIC_API_KEY=$(echo "$VAULT_SECRET" | jq -r '.ANTHROPIC_API_KEY // ""')
           GOOGLE_API_KEY=$(echo "$VAULT_SECRET" | jq -r '.GOOGLE_API_KEY // ""')
           MISTRAL_API_KEY=$(echo "$VAULT_SECRET" | jq -r '.MISTRAL_API_KEY // ""')
           OPENAI_API_KEY=$(echo "$VAULT_SECRET" | jq -r '.OPENAI_API_KEY // ""')
@@ -226,6 +227,7 @@ jobs:
           #
           # CHEAP deliberately overrides the code default of
           # gemini-flash-lite-latest.
+          VOVA_MODEL_STANDARD_ANTHROPIC=claude-haiku-4-5
           VOVA_MODEL_CHEAP_GOOGLE=gemini-flash-latest
           VOVA_MODEL_STANDARD_GOOGLE=gemini-flash-latest
           VOVA_MODEL_STANDARD_MISTRAL=mistral-small-latest
@@ -342,7 +344,7 @@ jobs:
           get() { grep -E "^$1=" /tmp/deploy.env | head -1 | cut -d= -f2-; }
 
           PRESENT=""
-          for key in GOOGLE_API_KEY MISTRAL_API_KEY OPENAI_API_KEY GROQ_API_KEY DEEPSEEK_API_KEY; do
+          for key in ANTHROPIC_API_KEY GOOGLE_API_KEY MISTRAL_API_KEY OPENAI_API_KEY GROQ_API_KEY DEEPSEEK_API_KEY; do
             value=$(get "$key")
             if [ -n "$value" ] && [ "$value" != "null" ]; then
               PRESENT="$PRESENT ${key%%_API_KEY}"
@@ -350,7 +352,7 @@ jobs:
           done
 
           if [ -z "$PRESENT" ]; then
-            echo "::warning::No Vova LLM credentials in Vault (secret/data/apps/rabotka-backend-production) — the assistant will have an empty provider chain and answer nothing. Expected one or more of GOOGLE_API_KEY, MISTRAL_API_KEY, OPENAI_API_KEY, GROQ_API_KEY, DEEPSEEK_API_KEY."
+            echo "::warning::No Vova LLM credentials in Vault (secret/data/apps/rabotka-backend-production) — the assistant will have an empty provider chain and answer nothing. Expected one or more of ANTHROPIC_API_KEY, GOOGLE_API_KEY, MISTRAL_API_KEY, OPENAI_API_KEY, GROQ_API_KEY, DEEPSEEK_API_KEY."
           else
             echo "Vova providers configured:$PRESENT"
           fi
