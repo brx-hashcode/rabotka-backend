@@ -19,6 +19,26 @@ import { HELP_DOCS_COLLECTION } from '../src/modules/rag/retrieval/help-docs.con
 config({ path: '.env.local' });
 config({ path: '.env' });
 
+/**
+ * Ingestion embeds at the model's full sequence length; the API does not.
+ *
+ * The serving side runs a much shorter `VOVA_EMBED_MAX_LENGTH` because a
+ * WhatsApp question is a few dozen tokens and fastembed pads to the limit
+ * rather than to the text — that is worth ~1.2s per message. Corpus chunks are
+ * `CHUNK_MAX_WORDS` (350 words) and would be silently TRUNCATED at that
+ * setting, which is a quality loss nothing would report: the vectors still come
+ * back, just computed from clipped text.
+ *
+ * Set before `createVovaContext()` because the value is read when the embedder
+ * is built. `??=` so an explicit override on the command line still wins.
+ *
+ * Safe to differ from the serving value: padding contributes nothing through
+ * e5's masked mean-pooling, so a query embedded at 256 and a passage embedded
+ * at 512 land in the same space — measured at cosine 1.000000 against the
+ * same text embedded at both lengths.
+ */
+process.env.VOVA_EMBED_MAX_LENGTH ??= '512';
+
 async function main() {
   const ctx = createVovaContext();
 
