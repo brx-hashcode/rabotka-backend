@@ -17,12 +17,7 @@
 export type LlmTier = 'cheap' | 'standard';
 
 export type LlmProviderName =
-  | 'anthropic'
-  | 'google'
-  | 'mistral'
-  | 'openai'
-  | 'groq'
-  | 'deepseek';
+  'anthropic' | 'google' | 'mistral' | 'openai' | 'groq' | 'deepseek';
 
 export interface LlmProviderSpec {
   provider: LlmProviderName;

@@ -294,10 +294,7 @@ export class LlmService {
         AIMessage
       >;
     } else {
-      runnable = model as unknown as Runnable<
-        BaseLanguageModelInput,
-        AIMessage
-      >;
+      runnable = model;
     }
 
     const timeoutMs = options.timeoutMs ?? this.defaultTimeoutMs;
@@ -329,8 +326,7 @@ export class LlmService {
     const usage = output.usage_metadata;
     telemetry.inputTokens = usage?.input_tokens ?? null;
     telemetry.outputTokens = usage?.output_tokens ?? null;
-    telemetry.cacheReadTokens =
-      usage?.input_token_details?.cache_read ?? null;
+    telemetry.cacheReadTokens = usage?.input_token_details?.cache_read ?? null;
   }
 
   /**

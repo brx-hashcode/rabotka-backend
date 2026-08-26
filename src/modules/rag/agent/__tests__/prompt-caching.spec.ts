@@ -118,7 +118,7 @@ describe('prompt caching — the stable half', () => {
       'REFUSÉE',
       'Ce compte est SUSPENDU',
       'Documentation Rabotka',
-      "si on te demande QUI ou CE QUE TU ES",
+      'si on te demande QUI ou CE QUE TU ES',
     ]) {
       expect(whole).toContain(line);
     }
