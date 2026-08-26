@@ -118,6 +118,26 @@ export const PROVIDERS_REQUIRING_FLAT_CONTENT = new Set<LlmProviderName>([
   'mistral',
 ]);
 
+/**
+ * Providers that understand a `cache_control` breakpoint.
+ *
+ * The system prompt arrives as two blocks — stable, then volatile — and this
+ * set decides who gets told where the cacheable prefix ends. Everyone else
+ * receives the same two blocks with no marker, which is a no-op for them.
+ *
+ * A prefix match, so the saving covers everything rendered BEFORE the marker
+ * too: the request is laid out `tools → system → messages`, which means one
+ * breakpoint at the end of the stable block also caches ~1.3k tokens of tool
+ * schemas. That is why there is no second breakpoint on the tools.
+ *
+ * Deliberately NOT `PROVIDERS_REQUIRING_FLAT_CONTENT`'s opposite: Gemini also
+ * reads blocks and is absent here, because it has no such feature and an
+ * unknown key on a content block is a 400 waiting to happen.
+ */
+export const PROVIDERS_SUPPORTING_CACHE_CONTROL = new Set<LlmProviderName>([
+  'anthropic',
+]);
+
 /** Env var holding each provider's credential. */
 export const PROVIDER_API_KEY_ENV: Record<LlmProviderName, string> = {
   anthropic: 'ANTHROPIC_API_KEY',
