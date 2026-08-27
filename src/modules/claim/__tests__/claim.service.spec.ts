@@ -294,6 +294,124 @@ describe('ClaimService', () => {
     });
   });
 
+  describe('reorderForAdmin', () => {
+    // The service runs inside `$transaction(cb)`; the mock prisma doubles as
+    // the transaction client so the same jest.fn()s record the calls.
+    function runInTransaction() {
+      mockPrisma.$transaction.mockImplementation((cb: any) => cb(mockPrisma));
+    }
+
+    function positionOfLastUpdate(): number {
+      const calls = mockPrisma.claim.update.mock.calls;
+      return calls[calls.length - 1][0].data.position;
+    }
+
+    beforeEach(() => {
+      runInTransaction();
+      mockPrisma.claim.findUnique.mockResolvedValue(baseClaim);
+      mockPrisma.claim.update.mockResolvedValue(baseClaim);
+    });
+
+    it('lands on the midpoint between its two neighbours', async () => {
+      mockPrisma.claim.findMany.mockResolvedValue([
+        { id: 'a', position: 1000 },
+        { id: 'b', position: 2000 },
+      ]);
+
+      await service.reorderForAdmin('claim-1', {
+        status: 'COMPLETED' as any,
+        index: 1,
+      });
+
+      expect(positionOfLastUpdate()).toBe(1500);
+    });
+
+    it('steps below the first claim when dropped at the top', async () => {
+      mockPrisma.claim.findMany.mockResolvedValue([
+        { id: 'a', position: 1000 },
+      ]);
+
+      await service.reorderForAdmin('claim-1', {
+        status: 'COMPLETED' as any,
+        index: 0,
+      });
+
+      expect(positionOfLastUpdate()).toBe(0);
+    });
+
+    it('steps above the last claim when dropped at the bottom', async () => {
+      mockPrisma.claim.findMany.mockResolvedValue([
+        { id: 'a', position: 1000 },
+      ]);
+
+      await service.reorderForAdmin('claim-1', {
+        status: 'COMPLETED' as any,
+        index: 1,
+      });
+
+      expect(positionOfLastUpdate()).toBe(2000);
+    });
+
+    it('opens an empty column at the first gap', async () => {
+      mockPrisma.claim.findMany.mockResolvedValue([]);
+
+      await service.reorderForAdmin('claim-1', {
+        status: 'REJECTED' as any,
+        index: 0,
+      });
+
+      expect(positionOfLastUpdate()).toBe(1000);
+    });
+
+    it('clamps an index past the end of the column', async () => {
+      mockPrisma.claim.findMany.mockResolvedValue([
+        { id: 'a', position: 1000 },
+      ]);
+
+      await service.reorderForAdmin('claim-1', {
+        status: 'COMPLETED' as any,
+        index: 99,
+      });
+
+      expect(positionOfLastUpdate()).toBe(2000);
+    });
+
+    it('renumbers the column when the gap is too small to halve', async () => {
+      mockPrisma.claim.findMany.mockResolvedValue([
+        { id: 'a', position: 1 },
+        { id: 'b', position: 1.0000000001 },
+        { id: 'c', position: 5000 },
+      ]);
+
+      await service.reorderForAdmin('claim-1', {
+        status: 'COMPLETED' as any,
+        index: 1,
+      });
+
+      const written = mockPrisma.claim.update.mock.calls.map(([arg]: any) => [
+        arg.where.id,
+        arg.data.position,
+      ]);
+      expect(written).toEqual([
+        ['a', 1000],
+        ['claim-1', 2000],
+        ['b', 3000],
+        ['c', 4000],
+      ]);
+    });
+
+    it('throws if the claim does not exist', async () => {
+      mockPrisma.claim.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.reorderForAdmin('nope', {
+          status: 'COMPLETED' as any,
+          index: 0,
+        }),
+      ).rejects.toThrow(NotFoundException);
+    });
+  });
+
   describe('deleteForAdmin', () => {
     it('deletes a claim', async () => {
       mockPrisma.claim.findUnique.mockResolvedValue(baseClaim);

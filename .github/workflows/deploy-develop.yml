@@ -242,6 +242,21 @@ jobs:
           JWT_SECRET=$(echo "$VAULT_SECRET" | jq -r '.JWT_SECRET')
           JWT_EXPIRES_IN=$(echo "$VAULT_SECRET" | jq -r '.JWT_EXPIRES_IN')
           CSRF_SECRET=$(echo "$VAULT_SECRET" | jq -r '.CSRF_SECRET')
+          # "Login with Rabotka" (OIDC provider). The app refuses to boot without
+          # these — deliberately: a missing signing key must fail at startup, not
+          # at the first partner login. See the preflight step below, which
+          # catches it on the runner before the VPS is touched at all.
+          #
+          # OIDC_PRIVATE_KEY is base64 of the PKCS#8 PEM, NOT the PEM itself: a
+          # multi-line value would break this heredoc and every line after it.
+          #
+          # OIDC_PAIRWISE_SALT must never change once partners exist. It derives
+          # the per-application `sub`, and partners key their own user tables on
+          # it — rotating it orphans every account every partner has created.
+          OIDC_ISSUER=$(echo "$VAULT_SECRET" | jq -r '.OIDC_ISSUER')
+          OIDC_PRIVATE_KEY=$(echo "$VAULT_SECRET" | jq -r '.OIDC_PRIVATE_KEY')
+          OIDC_KEY_ID=$(echo "$VAULT_SECRET" | jq -r '.OIDC_KEY_ID')
+          OIDC_PAIRWISE_SALT=$(echo "$VAULT_SECRET" | jq -r '.OIDC_PAIRWISE_SALT')
           ARCJET_KEY=$(echo "$VAULT_SECRET" | jq -r '.ARCJET_KEY')
           SMTP_HOST=$(echo "$VAULT_SECRET" | jq -r '.SMTP_HOST')
           SMTP_PORT=$(echo "$VAULT_SECRET" | jq -r '.SMTP_PORT')
@@ -453,6 +468,78 @@ jobs:
       # work — but a Vault missing every key leaves the assistant answering
       # nothing, which is the kind of silent misconfiguration that only shows up
       # in a delivery log days later.
+      # The same lesson as the WhatsApp step above, learned the hard way by this
+      # very feature: the first deploy of "Login with Rabotka" merged with no
+      # OIDC keys in Vault, the container threw in onModuleInit, and the
+      # environment sat at 502 through thirty smoke-test attempts with no
+      # rollback — because rollback() only fires when `docker compose up` itself
+      # fails, and it had succeeded.
+      #
+      # Checking here costs a second and fails the run before the VPS is touched.
+      - name: Verify required OIDC secrets are present
+        run: |
+          set -euo pipefail
+          get() { grep -E "^$1=" /tmp/deploy.env | head -1 | cut -d= -f2-; }
+
+          MISSING=""
+          for key in OIDC_ISSUER OIDC_PRIVATE_KEY OIDC_KEY_ID OIDC_PAIRWISE_SALT; do
+            value=$(get "$key")
+            # "null" is what jq writes for a key absent from Vault, and it is
+            # non-empty — the app would accept it and fail at boot.
+            if [ -z "$value" ] || [ "$value" = "null" ]; then
+              MISSING="$MISSING $key"
+            fi
+          done
+
+          if [ -n "$MISSING" ]; then
+            echo "::error::Missing from Vault (secret/data/apps/rabotka-backend-develop):$MISSING — the backend cannot boot without these."
+            exit 1
+          fi
+
+          # The PEM travels base64-encoded because a multi-line value would break
+          # the .env. Decoding here catches a raw PEM pasted into Vault, which
+          # would otherwise reach the container as an unparseable single line.
+          #
+          # Whitespace and CR are stripped first. A value copied through an
+          # editor or a Windows-formatted field arrives with a trailing \r that
+          # GNU base64 rejects outright, and "your key is invalid" is a
+          # miserable thing to be told when the key is fine and the newline is
+          # not.
+          RAW_KEY=$(get OIDC_PRIVATE_KEY | tr -d '\r\n ')
+
+          # BOTH checks, because each misses what the other catches:
+          #
+          #  - the header alone passes a key truncated mid-body, which still
+          #    begins "-----BEGIN PRIVATE KEY-----" and then fails at boot;
+          #  - openssl alone passes PKCS#1 ("BEGIN RSA PRIVATE KEY", what
+          #    `openssl genrsa` emits), which it parses happily but jose's
+          #    importPKCS8 cannot read.
+          DECODED=$(printf %s "$RAW_KEY" | base64 -d 2>/dev/null || true)
+
+          if ! printf '%s\n' "$DECODED" | head -1 | grep -q -- "-----BEGIN PRIVATE KEY-----" \
+             || ! printf '%s\n' "$DECODED" | openssl pkey -noout 2>/dev/null; then
+            # Report what is actually there. None of this is secret — the length,
+            # the first characters of a base64 PEM header, and the decoded header
+            # line are all fixed strings for any RSA key — and without them this
+            # failure is a guessing game played one deploy at a time.
+            DECODED_HEAD=$(printf '%s\n' "$DECODED" | head -1 | tr -cd '[:print:]' | cut -c1-40)
+
+            echo "::error::OIDC_PRIVATE_KEY is not a usable PKCS#8 private key."
+            echo "  length            : ${#RAW_KEY} chars (a 2048-bit PKCS#8 key is ~2272)"
+            echo "  first 16 chars    : ${RAW_KEY:0:16}"
+            echo "  base64 decodes to : ${DECODED_HEAD:-<nothing — not valid base64>}"
+            echo
+            echo "  Expected first 16 : LS0tLS1CRUdJTiBQ   (\"-----BEGIN P\")"
+            echo "  PKCS#1 looks like : LS0tLS1CRUdJTiBS   (\"-----BEGIN R\", from openssl genrsa)"
+            echo
+            echo "  Generate a usable key with:"
+            echo "    openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out oidc.pem"
+            echo "    base64 < oidc.pem | tr -d '\n'"
+            exit 1
+          fi
+
+          echo "All required OIDC secrets present."
+
       - name: Check Vova LLM credentials
         run: |
           set -euo pipefail
