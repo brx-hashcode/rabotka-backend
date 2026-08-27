@@ -62,7 +62,18 @@ async function bootstrap() {
     express.static(path.join(process.cwd(), 'public'), { index: false }),
   );
 
-  app.setGlobalPrefix('api/v1', { exclude: ['metrics'] });
+  // The two OIDC discovery documents are excluded alongside `metrics` because
+  // RFC 8414 fixes their paths relative to the issuer: every OIDC client
+  // library builds them by appending to the issuer URL, so serving them under
+  // `/api/v1` would make "Login with Rabotka" undiscoverable by every
+  // off-the-shelf client — which is the entire compatibility the feature buys.
+  app.setGlobalPrefix('api/v1', {
+    exclude: [
+      'metrics',
+      '.well-known/openid-configuration',
+      '.well-known/jwks.json',
+    ],
+  });
 
   app.useGlobalPipes(
     new ValidationPipe({

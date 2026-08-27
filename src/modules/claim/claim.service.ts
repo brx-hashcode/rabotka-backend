@@ -4,6 +4,7 @@ import { AdminNotificationEvent } from '../../common/events/admin-notification.e
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { CreateClaimDto } from './dto/create-claim.dto';
 import { UpdateClaimDto } from './dto/update-claim.dto';
+import { ReorderClaimDto } from './dto/reorder-claim.dto';
 import { AdminListClaimsDto } from './dto/admin-list-claims.dto';
 import { CreateCommentDto } from './dto/create-comment.dto';
 import { ClaimStatus } from '@prisma/client';
@@ -28,6 +29,7 @@ export type AdminClaimItem = {
   createdByUserEmail: string | null;
   createdByProfileId: string | null;
   createdByProfileName: string | null;
+  position: number;
   createdAt: string;
   updatedAt: string;
 };
@@ -71,6 +73,7 @@ function mapClaim(claim: any): AdminClaimItem {
     createdByProfileName: claim.created_by_profile
       ? `${claim.created_by_profile.first_name} ${claim.created_by_profile.last_name}`
       : null,
+    position: claim.position ?? 0,
     createdAt: claim.created_at.toISOString(),
     updatedAt: claim.updated_at.toISOString(),
   };
@@ -91,6 +94,12 @@ function mapComment(c: any): AdminClaimCommentItem {
     updatedAt: c.updated_at.toISOString(),
   };
 }
+
+/** Spacing between freshly numbered claims, and the step used at either end. */
+const POSITION_GAP = 1000;
+
+/** Below this, a midpoint would stop landing between its neighbours. */
+const MIN_POSITION_GAP = 0.000001;
 
 const claimInclude = {
   profile: {
@@ -207,7 +216,10 @@ export class ClaimService {
       this.prisma.claim.findMany({
         where,
         include: claimInclude,
-        orderBy: { created_at: 'desc' },
+        // Board order. `position` is manual rank within a column; created_at
+        // breaks the tie so claims that have never been dragged (all default
+        // to 0) still read newest-first.
+        orderBy: [{ position: 'asc' }, { created_at: 'desc' }],
         skip,
         take: limit,
       }),
@@ -340,6 +352,78 @@ export class ClaimService {
     }
 
     return mapClaim(claim);
+  }
+
+  /**
+   * Move a claim to `index` of the `status` column, where `index` counts the
+   * claim itself — the slot it should occupy once it has landed.
+   *
+   * The client sends an index rather than a raw position because it cannot
+   * know what the column looks like for everyone else: two admins dragging at
+   * once would compute their midpoints from stale neighbours. The neighbours
+   * are read here, inside the transaction, so the second move lands against
+   * the first one's result.
+   */
+  async reorderForAdmin(
+    id: string,
+    dto: ReorderClaimDto,
+  ): Promise<AdminClaimItem> {
+    return this.prisma.$transaction(async (tx) => {
+      const exists = await tx.claim.findUnique({ where: { id } });
+      if (!exists) throw new NotFoundException('Claim not found');
+
+      const siblings = await tx.claim.findMany({
+        where: { status: dto.status, id: { not: id } },
+        orderBy: [{ position: 'asc' }, { created_at: 'desc' }],
+        select: { id: true, position: true },
+      });
+
+      const index = Math.max(0, Math.min(dto.index, siblings.length));
+      const before = index > 0 ? siblings[index - 1].position : null;
+      const after = index < siblings.length ? siblings[index].position : null;
+
+      // Halving a gap ~50 times exhausts double precision and the midpoint
+      // stops landing between its neighbours. Rare — it takes that many drops
+      // into the same slot — but it corrupts the order silently, so spread the
+      // whole column out again and take the extra writes.
+      if (before !== null && after !== null && after - before < MIN_POSITION_GAP) {
+        const ordered = siblings.map((s) => s.id);
+        ordered.splice(index, 0, id);
+        for (const [i, claimId] of ordered.entries()) {
+          await tx.claim.update({
+            where: { id: claimId },
+            data: {
+              position: (i + 1) * POSITION_GAP,
+              ...(claimId === id ? { status: dto.status } : {}),
+            },
+          });
+        }
+        const rebalanced = await tx.claim.findUnique({
+          where: { id },
+          include: claimInclude,
+        });
+        return mapClaim(rebalanced);
+      }
+
+      let position: number;
+      if (before !== null && after !== null) {
+        position = (before + after) / 2;
+      } else if (after !== null) {
+        position = after - POSITION_GAP;
+      } else if (before !== null) {
+        position = before + POSITION_GAP;
+      } else {
+        position = POSITION_GAP;
+      }
+
+      const claim = await tx.claim.update({
+        where: { id },
+        data: { status: dto.status, position },
+        include: claimInclude,
+      });
+
+      return mapClaim(claim);
+    });
   }
 
   async deleteForAdmin(id: string): Promise<void> {

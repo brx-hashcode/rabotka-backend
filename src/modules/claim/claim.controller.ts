@@ -16,6 +16,7 @@ import { UserRole } from '@prisma/client';
 import { ClaimService } from './claim.service';
 import { CreateClaimDto } from './dto/create-claim.dto';
 import { UpdateClaimDto } from './dto/update-claim.dto';
+import { ReorderClaimDto } from './dto/reorder-claim.dto';
 import { AdminListClaimsDto } from './dto/admin-list-claims.dto';
 import { CreateCommentDto } from './dto/create-comment.dto';
 import { AdminAuthGuard } from '../auth/guards/admin-auth.guard';
@@ -78,6 +79,25 @@ export class ClaimController {
       entityId: id,
       userId: req.user?.userId,
       metadata: { fields: { ...dto } },
+      ...extractRequestMeta(req),
+    });
+    return result;
+  }
+
+  @Patch(':id/position')
+  @Roles(UserRole.MANAGER)
+  async reorder(
+    @Param('id') id: string,
+    @Body() dto: ReorderClaimDto,
+    @Req() req: AdminAuthenticatedRequest,
+  ) {
+    const result = await this.claimService.reorderForAdmin(id, dto);
+    await this.logService.create({
+      action: 'CLAIM_REORDERED',
+      entityType: 'Claim',
+      entityId: id,
+      userId: req.user?.userId,
+      metadata: { status: dto.status, index: dto.index },
       ...extractRequestMeta(req),
     });
     return result;

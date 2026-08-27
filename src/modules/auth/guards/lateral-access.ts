@@ -69,8 +69,17 @@ export const LATERAL_ACCESS: Record<LateralRole, Record<string, AreaAccess>> = {
     'admin/invoices': 'full',
     'admin/contracts': 'full',
     log: 'full',
-    // NOT PRESENT, deliberately: `user` (team management). Anything absent is
-    // denied, so leaving it out is the whole of the restriction.
+    // NOT PRESENT, deliberately: `user` (team management), and
+    // `admin/oauth-apps` ("Login with Rabotka" partner applications). Anything
+    // absent is denied, so leaving them out is the whole of the restriction.
+    //
+    // `admin/oauth-apps` is @Roles(SUPER_ADMIN) at the class, so an ADMIN
+    // cannot reach it either — listing it would put FINANCE ABOVE ADMIN rather
+    // than level with it. It belongs in the same category as `user` for a
+    // reason beyond seniority, though: registering an app decides who Rabotka
+    // vouches for its users' identities to, and hands out a credential that
+    // reads real people's phone numbers and KYC status. That is not a finance
+    // operation.
   },
   // Support is not a narrow badge here — it is the team that runs the platform
   // day to day. `read` on profiles meant they could open a profile and not
