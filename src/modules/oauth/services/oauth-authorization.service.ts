@@ -33,7 +33,21 @@ export type ConsentContext = {
   app: { name: string; description: string; logoUrl: string | null };
   scopes: string[];
   /** Null until the user has authenticated inside this interaction. */
-  profile: { firstName: string; lastName: string; phoneHint: string } | null;
+  profile: {
+    firstName: string;
+    lastName: string;
+    phoneHint: string;
+    /**
+     * The user's own photo, so the consent screen shows them who they are
+     * signing in as rather than a pair of initials.
+     *
+     * Safe to send before consent: the person looking at this screen is the
+     * person in the picture, authenticated moments ago. It is their own avatar
+     * being shown back to them, not a disclosure to the application — the
+     * partner only receives `picture` if the `profile` scope was granted.
+     */
+    avatarUrl: string | null;
+  } | null;
   /** True when a prior grant already covers every requested scope. */
   alreadyGranted: boolean;
 };
@@ -189,7 +203,12 @@ export class OAuthAuthorizationService {
     if (interaction.profileId) {
       const row = await this.prisma.profile.findFirst({
         where: { id: interaction.profileId, deleted_at: null },
-        select: { first_name: true, last_name: true, phone: true },
+        select: {
+          first_name: true,
+          last_name: true,
+          phone: true,
+          avatar_url: true,
+        },
       });
 
       if (row) {
@@ -197,6 +216,7 @@ export class OAuthAuthorizationService {
           firstName: row.first_name,
           lastName: row.last_name,
           phoneHint: maskPhone(row.phone),
+          avatarUrl: row.avatar_url,
         };
         alreadyGranted = await this.hasStandingGrant(
           interaction.appId,
