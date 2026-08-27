@@ -392,8 +392,42 @@ jobs:
           # The PEM travels base64-encoded because a multi-line value would break
           # the .env. Decoding here catches a raw PEM pasted into Vault, which
           # would otherwise reach the container as an unparseable single line.
-          if ! get OIDC_PRIVATE_KEY | base64 -d 2>/dev/null | grep -q "BEGIN PRIVATE KEY"; then
-            echo "::error::OIDC_PRIVATE_KEY is not base64 of a PKCS#8 PEM. Generate with: base64 < oidc.pem | tr -d '\n'"
+          #
+          # Whitespace and CR are stripped first. A value copied through an
+          # editor or a Windows-formatted field arrives with a trailing \r that
+          # GNU base64 rejects outright, and "your key is invalid" is a
+          # miserable thing to be told when the key is fine and the newline is
+          # not.
+          RAW_KEY=$(get OIDC_PRIVATE_KEY | tr -d '\r\n ')
+
+          # BOTH checks, because each misses what the other catches:
+          #
+          #  - the header alone passes a key truncated mid-body, which still
+          #    begins "-----BEGIN PRIVATE KEY-----" and then fails at boot;
+          #  - openssl alone passes PKCS#1 ("BEGIN RSA PRIVATE KEY", what
+          #    `openssl genrsa` emits), which it parses happily but jose's
+          #    importPKCS8 cannot read.
+          DECODED=$(printf %s "$RAW_KEY" | base64 -d 2>/dev/null || true)
+
+          if ! printf '%s\n' "$DECODED" | head -1 | grep -q -- "-----BEGIN PRIVATE KEY-----" \
+             || ! printf '%s\n' "$DECODED" | openssl pkey -noout 2>/dev/null; then
+            # Report what is actually there. None of this is secret — the length,
+            # the first characters of a base64 PEM header, and the decoded header
+            # line are all fixed strings for any RSA key — and without them this
+            # failure is a guessing game played one deploy at a time.
+            DECODED_HEAD=$(printf '%s\n' "$DECODED" | head -1 | tr -cd '[:print:]' | cut -c1-40)
+
+            echo "::error::OIDC_PRIVATE_KEY is not a usable PKCS#8 private key."
+            echo "  length            : ${#RAW_KEY} chars (a 2048-bit PKCS#8 key is ~2272)"
+            echo "  first 16 chars    : ${RAW_KEY:0:16}"
+            echo "  base64 decodes to : ${DECODED_HEAD:-<nothing — not valid base64>}"
+            echo
+            echo "  Expected first 16 : LS0tLS1CRUdJTiBQ   (\"-----BEGIN P\")"
+            echo "  PKCS#1 looks like : LS0tLS1CRUdJTiBS   (\"-----BEGIN R\", from openssl genrsa)"
+            echo
+            echo "  Generate a usable key with:"
+            echo "    openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out oidc.pem"
+            echo "    base64 < oidc.pem | tr -d '\n'"
             exit 1
           fi
 
