@@ -393,7 +393,7 @@ jobs:
           # the .env. Decoding here catches a raw PEM pasted into Vault, which
           # would otherwise reach the container as an unparseable single line.
           if ! get OIDC_PRIVATE_KEY | base64 -d 2>/dev/null | grep -q "BEGIN PRIVATE KEY"; then
-            echo "::error::OIDC_PRIVATE_KEY is not base64 of a PKCS#8 PEM. Generate with: base64 -w0 < oidc.pem"
+            echo "::error::OIDC_PRIVATE_KEY is not base64 of a PKCS#8 PEM. Generate with: base64 < oidc.pem | tr -d '\n'"
             exit 1
           fi
 
