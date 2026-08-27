@@ -56,6 +56,15 @@ const PUBLIC_PREFIXES = new Set([
   // no session yet. It is throttled and returns only a first name and an
   // initial, so it confirms a code without becoming a directory of users.
   'referral',
+  // "Login with Rabotka" (OIDC provider). Public by protocol: `authorize` is
+  // where a partner sends a user who has no session yet, `token` and `revoke`
+  // authenticate with client credentials, and `userinfo` with a bearer token.
+  // Session-based admin auth would make all four unusable. The one admin
+  // surface, `admin/oauth-apps`, is NOT here and carries AdminAuthGuard.
+  'oauth',
+  // The two OIDC discovery documents. Excluded from the global prefix in
+  // main.ts, and public by definition — a list of URLs and a set of public keys.
+  '.well-known',
 ]);
 
 /**
