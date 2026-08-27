@@ -11,11 +11,14 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
-import { randomUUID } from 'node:crypto';
+import { randomInt, randomUUID } from 'node:crypto';
 import Redis from 'ioredis';
 import { AccountStatus } from '@prisma/client';
 
-import { REDIS_KEY_PREFIX, REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
+import {
+  REDIS_KEY_PREFIX,
+  REDIS_CONNECTION,
+} from '../../common/services/redis/redis.constants';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
 import { LayoutService } from '../mail/layout.service';
@@ -165,9 +168,7 @@ export class AuthService {
 
     const otp = this.generateOtp();
 
-
-
-    this.logger.warn(`[OTP][send] ${normalized} → ${otp}`);
+    this.logOtp('send', normalized, otp);
 
     const redisKey = `${OTP_KEY_PREFIX}${normalized}`;
     await this.redis.set(redisKey, otp, 'EX', OTP_TTL_SECONDS);
@@ -214,7 +215,7 @@ export class AuthService {
     }
 
     const otp = this.generateOtp();
-    this.logger.warn(`[OTP][resend] ${normalized} → ${otp}`);
+    this.logOtp('resend', normalized, otp);
 
     const redisKey = `${OTP_KEY_PREFIX}${normalized}`;
     await this.redis.set(redisKey, otp, 'EX', OTP_TTL_SECONDS);
@@ -229,14 +230,19 @@ export class AuthService {
       await this.sendOtpByWhatsApp(normalized, otp);
     }
 
- 
     await this.redis.set(resendCooldownKey, '1', 'EX', RESEND_COOLDOWN_SECONDS);
 
     return { success: true };
   }
 
-
-  private async verifyOtpAndGetProfile(emailOrPhone: string, otp: string) {
+  /**
+   * Checks an OTP and returns whose it was. Public because the OAuth module
+   * ("Login with Rabotka") needs exactly this and must not grow a second copy:
+   * a duplicated verify is a duplicated place to forget that the code has to be
+   * deleted on use, and the atomic verify-and-delete below is the only thing
+   * stopping one code from being spent twice.
+   */
+  async verifyOtpAndGetProfile(emailOrPhone: string, otp: string) {
     const normalized = this.normalize(emailOrPhone);
     const isEmail = this.isEmail(normalized);
 
@@ -302,14 +308,24 @@ export class AuthService {
       throw new UnauthorizedException('Compte indisponible');
     }
 
-    const payload = { sub: profile.id, type: 'profile', jti: randomUUID() };
-    this.recordProfileLogin(profile.id);
+    const { token } = this.issueProfileSession(profile.id);
 
-    return {
-      token: this.jwtService.sign(payload),
-      profileId: profile.id,
-      path: grant.path,
-    };
+    return { token, profileId: profile.id, path: grant.path };
+  }
+
+  /**
+   * Mints a profile session token and stamps the login.
+   *
+   * The one place a `type: 'profile'` token is created. It was previously
+   * inlined identically in `verifyOtp` and `loginWithWhatsAppCode`, and the
+   * OAuth consent flow needed a third copy — three places that each have to
+   * remember the `jti` (without which the token cannot be revoked, because the
+   * blocklist is keyed on it) is two too many.
+   */
+  issueProfileSession(profileId: string): { token: string } {
+    const payload = { sub: profileId, type: 'profile', jti: randomUUID() };
+    this.recordProfileLogin(profileId);
+    return { token: this.jwtService.sign(payload) };
   }
 
   /**
@@ -355,9 +371,7 @@ export class AuthService {
   ): Promise<{ success: boolean; token: string }> {
     const profile = await this.verifyOtpAndGetProfile(emailOrPhone, otp);
 
-    const payload = { sub: profile.id, type: 'profile', jti: randomUUID() };
-    const token = this.jwtService.sign(payload);
-    this.recordProfileLogin(profile.id);
+    const { token } = this.issueProfileSession(profile.id);
 
     return { success: true, token };
   }
@@ -392,9 +406,7 @@ export class AuthService {
     const redisKey = `${MOBILE_REFRESH_PREFIX}${payload.jti}`;
     const storedProfileId = await this.redis.get(redisKey);
     if (!storedProfileId || storedProfileId !== payload.sub) {
-      throw new UnauthorizedException(
-        'Refresh token révoqué ou déjà utilisé',
-      );
+      throw new UnauthorizedException('Refresh token révoqué ou déjà utilisé');
     }
 
     await this.redis.del(redisKey);
@@ -421,14 +433,12 @@ export class AuthService {
     if (!refreshToken) return;
 
     try {
-      const payload = this.jwtService.decode(refreshToken) as {
-        jti?: string;
-      } | null;
+      const payload = this.jwtService.decode(refreshToken);
       if (payload?.jti) {
         await this.redis.del(`${MOBILE_REFRESH_PREFIX}${payload.jti}`);
       }
     } catch {
-        // Refresh token already invalid — nothing to revoke.
+      // Refresh token already invalid — nothing to revoke.
     }
   }
 
@@ -454,9 +464,7 @@ export class AuthService {
       },
     );
 
-    const decoded = this.jwtService.decode(refreshToken) as {
-      exp?: number;
-    } | null;
+    const decoded = this.jwtService.decode(refreshToken);
     const ttl = decoded?.exp
       ? decoded.exp - Math.floor(Date.now() / 1000)
       : DEFAULT_REFRESH_TTL_SECONDS;
@@ -697,6 +705,24 @@ export class AuthService {
     };
   }
 
+  /**
+   * Prints a live OTP to the logs — outside production only.
+   *
+   * This existed unconditionally, which meant every code Rabotka has ever sent
+   * is sitting in the production log stream next to the phone number it was
+   * sent to. Anyone who can read logs could sign in as anyone; log shipping,
+   * log search and log retention all inherit that.
+   *
+   * Kept for local development because the alternative is waiting on a real
+   * WhatsApp delivery for every login while working offline, and that is a real
+   * cost. `IS_PROD` is the same flag the Redis key prefix keys off, so there is
+   * one answer to "is this production" rather than two.
+   */
+  private logOtp(stage: 'send' | 'resend', identifier: string, otp: string) {
+    if (this.configService.get<string>('IS_PROD') === 'true') return;
+    this.logger.warn(`[OTP][${stage}] ${identifier} → ${otp}`);
+  }
+
   private normalize(value: string): string {
     return value.trim().toLowerCase();
   }
@@ -711,9 +737,19 @@ export class AuthService {
     return phoneRegex.test(value.replaceAll(/\s/g, ''));
   }
 
+  /**
+   * `randomInt`, not `Math.random`.
+   *
+   * `Math.random` is a PRNG seeded per process and is not required to be
+   * unpredictable — given enough observed outputs its internal state is
+   * recoverable, and from there every subsequent OTP is. That was already the
+   * wrong primitive for a credential; it became indefensible when these codes
+   * started standing behind "Login with Rabotka", where one guessed OTP is an
+   * account takeover on somebody else's platform. Same reasoning, and same
+   * fix, as the note in `referral/utils/referral-code.util.ts`.
+   */
   private generateOtp(): string {
-    const otp = Math.floor(100000 + Math.random() * 900000);
-    return otp.toString();
+    return randomInt(100000, 1000000).toString();
   }
 
   private async findProfileByEmail(email: string) {
@@ -753,7 +789,6 @@ export class AuthService {
     otp: string,
     first_name: string,
   ): Promise<void> {
-
     this.logger.log(`OTP email sent to ${email} with OTP ${otp}`);
 
     await this.mailService.sendMail({
@@ -773,7 +808,6 @@ export class AuthService {
       otp,
     );
     if (!sent) {
-
       this.logger.error(
         `WhatsApp failed to send OTP to ${phone}; user would not receive the code`,
       );
@@ -951,7 +985,6 @@ export class AuthService {
     if (!data.token) throw new UnauthorizedException('QR session invalid');
     return { token: data.token };
   }
-
 
   private readonly PAIR_TTL = 300;
   private pairOtpKey = (userId: string) => `admin:pair:otp:${userId}`;

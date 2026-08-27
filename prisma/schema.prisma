@@ -444,7 +444,7 @@ model Profile {
   /// means "never asked for one", not "not eligible". There is deliberately no
   /// `referred_by_id` beside it: Referral.referee_id is unique and answers that
   /// in one place, and a second copy is a second thing that can disagree.
-  referral_code     String?   @unique
+  referral_code String? @unique
 
   category   JobCategory?      @relation(fields: [category_id], references: [id], onDelete: SetNull)
   categories ProfileCategory[]
@@ -482,6 +482,7 @@ model Profile {
   interaction_profile             InteractionProfile?
   referrals_made                  Referral[]                    @relation("ReferralReferrer")
   referral_received               Referral?                     @relation("ReferralReferee")
+  oauth_authorizations            OAuthAuthorization[]
   deleted_at                      DateTime?                     @db.Timestamptz
 
   @@index([email], name: "idx_profile_email")
@@ -525,6 +526,7 @@ model User {
   chat_participants  ChatParticipant[]
   chat_messages      ChatMessage[]
   chat_conversations ChatConversation[] @relation("ChatConversationCreatedBy")
+  oauth_apps_created OAuthApp[]         @relation("OAuthAppCreatedBy")
 
   @@index([email], name: "idx_user_email")
   @@index([role], name: "idx_user_role")
@@ -989,7 +991,7 @@ model Referral {
   /// This is what makes "who referred X" unambiguous at the database level
   /// rather than by convention, and it removes the need for a `referred_by_id`
   /// column on Profile that could drift from it.
-  referee_id  String         @db.Uuid @unique
+  referee_id  String         @unique @db.Uuid
   /// The code as it was actually typed or followed, snapshotted. Codes are
   /// stable today; the admin answer to "where did this signup come from" must
   /// not depend on that staying true.
@@ -1688,4 +1690,133 @@ model ChatMessage {
   @@index([conversation_id, created_at], name: "idx_chat_message_conversation_created")
   @@index([sender_id], name: "idx_chat_message_sender")
   @@map("chat_messages")
+}
+
+/// Whether a partner application may currently authenticate anybody.
+///
+/// SUSPENDED is checked at BOTH `authorize` and `token`, not just at authorize:
+/// a code minted seconds before a suspension must not still be redeemable, and
+/// the two endpoints are minutes apart in the worst case.
+enum OAuthAppStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+/// A third-party application registered for "Login with Rabotka".
+///
+/// Rabotka acts as an OpenID Connect provider for these: the partner redirects
+/// a user here, the user proves their phone over the usual WhatsApp OTP, and
+/// the partner receives an ID token carrying the identity AND Rabotka's KYC
+/// verdict. The verdict is the product — anyone can ask for a phone number.
+model OAuthApp {
+  id          String  @id @default(uuid()) @db.Uuid
+  name        String
+  description String  @db.Text
+  /// Rendered on the consent screen. This is the face the user is asked to
+  /// trust, so an app without one shows its initials rather than nothing.
+  logo_url    String?
+
+  /// Public, opaque, and NOT the primary key: `client_id` travels in query
+  /// strings and partner config files, so it must be safe to expose and free
+  /// to rotate independently of the row it points at.
+  client_id String @unique
+
+  /// SHA-256 hex of the secret, never the secret.
+  ///
+  /// Deliberately not bcrypt/argon: the secret is 32 bytes straight out of a
+  /// CSPRNG, so there is no dictionary and no rainbow table for a slow KDF to
+  /// defend against. A work factor here would buy nothing and add latency to
+  /// every single token exchange. Comparison is still constant-time — see
+  /// `client-credentials.util.ts`.
+  client_secret_hash String
+  /// Last 4 characters of the secret. Admins can no longer read the secret
+  /// after creation, so this is the only way to tell two of them apart when
+  /// asking a partner "which one are you using".
+  client_secret_hint String
+
+  /// Set on rotation. The old secret keeps working until it expires, so a
+  /// partner can redeploy on their own schedule instead of taking downtime the
+  /// moment an admin clicks the button.
+  previous_secret_hash       String?
+  previous_secret_expires_at DateTime?
+  secret_rotated_at          DateTime?
+
+  /// Exact-match allowlist. No wildcards and no patterns, ever: a redirect_uri
+  /// that is matched loosely is an open redirector, and an open redirector on
+  /// an authorization endpoint hands authorization codes to whoever asked.
+  /// See RFC 9700 §4.1.
+  redirect_uris String[]
+
+  /// The ceiling on what this app may request. A scope absent here is refused
+  /// at `authorize` rather than silently dropped, so a partner discovers the
+  /// misconfiguration immediately instead of shipping against claims that
+  /// never arrive.
+  allowed_scopes String[]
+
+  status OAuthAppStatus @default(ACTIVE)
+
+  /// Who to contact about this integration. Not an account — partners have no
+  /// login here; registration is an admin action.
+  contact_email String
+
+  created_by String? @db.Uuid
+  creator    User?   @relation("OAuthAppCreatedBy", fields: [created_by], references: [id], onDelete: SetNull)
+
+  authorizations OAuthAuthorization[]
+
+  created_at DateTime  @default(now())
+  updated_at DateTime  @updatedAt
+  deleted_at DateTime? @db.Timestamptz
+
+  @@index([client_id], name: "idx_oauth_app_client_id")
+  @@index([status], name: "idx_oauth_app_status")
+  @@index([deleted_at], name: "idx_oauth_app_deleted_at")
+  @@map("oauth_apps")
+}
+
+/// One user's standing consent for one application.
+///
+/// Exists so that a returning user is not asked to consent again, and so that
+/// both the user and an admin have something concrete to revoke. Its real job,
+/// though, is to be the stable home of `pairwise_sub`.
+model OAuthAuthorization {
+  id         String @id @default(uuid()) @db.Uuid
+  app_id     String @db.Uuid
+  profile_id String @db.Uuid
+
+  /// The `sub` claim this app sees for this person, forever.
+  ///
+  /// Derived as sha256(app_id + profile_id + OIDC_PAIRWISE_SALT) but STORED,
+  /// not recomputed on demand, for two reasons: partners key their own user
+  /// tables on it, so it must survive any future change to how it is derived;
+  /// and being a real column makes "which Rabotka profile is this partner
+  /// asking about" a lookup rather than a brute-force search.
+  ///
+  /// Pairwise rather than a bare profile id so that two partners comparing
+  /// notes cannot discover they share a user.
+  pairwise_sub String @unique
+
+  /// What was actually granted, which is not necessarily what was requested:
+  /// scopes are intersected with the app's `allowed_scopes` first.
+  scopes String[]
+
+  granted_at   DateTime  @default(now())
+  /// Moved on every token exchange, throttled to the minute. Answers "is this
+  /// integration still live" without reading the audit log.
+  last_used_at DateTime?
+  /// The kill switch, for the user and for an admin. Non-null means every
+  /// access token is dead and the next `authorize` must re-consent. Kept as a
+  /// timestamp rather than a delete so revocation is auditable.
+  revoked_at   DateTime?
+
+  app     OAuthApp @relation(fields: [app_id], references: [id], onDelete: Cascade)
+  profile Profile  @relation(fields: [profile_id], references: [id], onDelete: Cascade)
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@unique([app_id, profile_id], name: "idx_oauth_authorization_app_profile")
+  @@index([profile_id], name: "idx_oauth_authorization_profile")
+  @@index([app_id, revoked_at], name: "idx_oauth_authorization_app_revoked")
+  @@map("oauth_authorizations")
 }
