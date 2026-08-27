@@ -92,7 +92,7 @@ export class OAuthDiscoveryController {
       ],
       claims_parameter_supported: false,
       request_parameter_supported: false,
-      service_documentation: `${issuer.replace('api.', '')}/developers/login-with-rabotka`,
+      service_documentation: `${issuer.replace('api.', '')}/developers/api-documentation`,
       ui_locales_supported: ['fr'],
     };
   }
