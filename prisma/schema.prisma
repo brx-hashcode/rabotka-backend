@@ -1236,6 +1236,12 @@ model Claim {
   created_by_user_id    String?     @db.Uuid
   created_by_profile_id String?     @db.Uuid
 
+  /// Manual rank within the board column, ascending. Fractional so a drag
+  /// writes one row — the moved claim lands on the midpoint between its new
+  /// neighbours — instead of renumbering everything below it. Ties (all new
+  /// claims default to 0, i.e. top of their column) break on created_at desc.
+  position Float @default(0)
+
   profile            Profile        @relation("ClaimProfile", fields: [profile_id], references: [id], onDelete: Cascade)
   assigned_user      User?          @relation("ClaimAssignedUser", fields: [assigned_user_id], references: [id], onDelete: SetNull)
   created_by_user    User?          @relation("ClaimCreatedByUser", fields: [created_by_user_id], references: [id], onDelete: SetNull)
@@ -1245,6 +1251,7 @@ model Claim {
   @@index([profile_id])
   @@index([status])
   @@index([assigned_user_id])
+  @@index([status, position])
   @@map("claims")
 }
 

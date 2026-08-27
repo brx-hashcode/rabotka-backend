@@ -183,6 +183,56 @@ The same claims are available from `GET /api/v1/oauth/userinfo` with
 `Authorization: Bearer <access_token>`, if you would rather fetch them than read
 the token.
 
+## Without an OIDC library
+
+Nothing forces you to use one — the protocol is HTTP and JSON. Three calls, in
+any language with an HTTP client and SHA-256.
+
+**1. Prepare PKCE**
+
+```bash
+code_verifier=$(openssl rand -base64 32 | tr -d '=+/' | cut -c1-43)
+code_challenge=$(printf %s "$code_verifier" \
+  | openssl dgst -binary -sha256 \
+  | openssl base64 | tr '+/' '-_' | tr -d '=')
+```
+
+Keep the verifier server-side, tied to the visitor's session. It must never
+reach the browser.
+
+**2. Send the user** to `/oauth/authorize` with `code_challenge` and
+`code_challenge_method=S256` (see the flow above).
+
+**3. Exchange the code, from your server**
+
+```bash
+curl -s -X POST https://api.rabotka.work/api/v1/oauth/token \
+  -u "$CLIENT_ID:$CLIENT_SECRET" \
+  -d grant_type=authorization_code \
+  -d code="$code" \
+  -d redirect_uri="https://you.com/callback" \
+  -d code_verifier="$code_verifier"
+```
+
+Then read the claims — decode the ID token's middle segment (base64url), or:
+
+```bash
+curl -s https://api.rabotka.work/api/v1/oauth/userinfo \
+  -H "Authorization: Bearer $access_token"
+```
+
+### Can you skip signature verification?
+
+Yes, but only here. OpenID Connect Core §3.1.3.7 permits it when the ID token
+arrives **directly** from the token endpoint: *"the TLS server validation MAY be
+used to validate the issuer in place of checking the token signature."* You
+authenticated the server with TLS and it handed you the token over that channel.
+
+The moment the token travels any other way — passed to another service, cached,
+relayed through a client — you must verify it against the JWKS. And check `exp`,
+`aud` and `nonce` either way; those are not signature checks and TLS says
+nothing about them.
+
 ## Scopes and claims
 
 | Scope | Claims |
