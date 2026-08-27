@@ -92,6 +92,7 @@
     "googleapis": "^171.4.0",
     "handlebars": "^4.7.9",
     "ioredis": "^5.11.1",
+    "jose": "^6.2.10",
     "libreoffice-convert": "^1.8.2",
     "mammoth": "^1.12.1",
     "mjml": "^4.18.0",
@@ -187,7 +188,7 @@
     },
     "testEnvironment": "node",
     "transformIgnorePatterns": [
-      "node_modules[\\\\/](?!\\.pnpm[\\\\/](@otplib|@scure|@noble|@mistralai)|(@otplib|@scure|@noble|@mistralai))"
+      "node_modules[\\\\/](?!\\.pnpm[\\\\/](@otplib|@scure|@noble|@mistralai|jose)|(@otplib|@scure|@noble|@mistralai|jose))"
     ]
   }
 }

@@ -22,6 +22,7 @@ import { CsrfModule } from './modules/csrf/csrf.module';
 import { getMailerTransportConfig } from './modules/mail/mailer-transport.config.js';
 import { MailModule } from './modules/mail/mail.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { OAuthModule } from './modules/oauth/oauth.module';
 import { ProfileModule } from './modules/profile/profile.module';
 import { UserModule } from './modules/user/user.module';
 import { ConversationModule } from './modules/conversation/conversation.module';
@@ -157,6 +158,7 @@ import { HttpOnlyArcjetGuard } from './common/guards/http-only-arcjet.guard';
     ReferralModule,
     ReminderModule,
     AuthModule,
+    OAuthModule,
     ProfileModule,
     UserModule,
     ConversationModule,
