@@ -12,6 +12,7 @@ import {
 } from '../oauth.constants';
 import { OAuthError } from '../oauth-error';
 import { OidcKeyService, OIDC_SIGNING_ALG } from './oidc-key.service';
+import { OAuthSandboxService } from './oauth-sandbox.service';
 import {
   buildClaims,
   type ClaimSourceProfile,
@@ -54,6 +55,7 @@ export class OAuthTokenService {
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
     private readonly keys: OidcKeyService,
+    private readonly sandbox: OAuthSandboxService,
   ) {}
 
   /** The `iss` claim, and the base of every URL in the discovery document. */
@@ -154,6 +156,33 @@ export class OAuthTokenService {
       throw invalid;
     }
 
+    if (this.sandbox.isSandboxSubject(record.profileId)) {
+      // There is no authorization row to re-read, so the app is re-checked by
+      // the `client_id` this token was minted for. Every check the real path
+      // makes below is preserved — deleted, suspended, and now also "still a
+      // sandbox app" — except revocation, which cannot exist for a grant that
+      // was never written down.
+      const app = await this.prisma.oAuthApp.findFirst({
+        where: { client_id: record.clientId, deleted_at: null },
+        select: { id: true, status: true, is_sandbox: true },
+      });
+
+      if (!app || app.status !== 'ACTIVE' || !this.sandbox.isSandboxApp(app)) {
+        await this.revokeAccessToken(token);
+        throw invalid;
+      }
+
+      const source = this.sandbox.claimSource(record.profileId);
+      const grant = this.sandbox.authorizationFor(app.id, record.profileId);
+
+      if (!source || !grant) {
+        await this.revokeAccessToken(token);
+        throw invalid;
+      }
+
+      return buildClaims(source, record.scopes, grant.pairwise_sub);
+    }
+
     const authorization = await this.prisma.oAuthAuthorization.findUnique({
       where: { id: record.authorizationId },
       include: {
@@ -184,6 +213,13 @@ export class OAuthTokenService {
 
   /** The claim-bearing columns for a profile, or null if it is gone. */
   async loadClaimSource(profileId: string): Promise<ClaimSourceProfile | null> {
+    // Checked before Prisma rather than beside it: a sandbox subject is not a
+    // uuid, and `profiles.id` is a uuid column, so this query would raise a
+    // P2023 rather than answering null.
+    if (this.sandbox.isSandboxSubject(profileId)) {
+      return this.sandbox.claimSource(profileId);
+    }
+
     const profile = await this.prisma.profile.findFirst({
       where: { id: profileId, deleted_at: null },
       select: CLAIM_SELECT,

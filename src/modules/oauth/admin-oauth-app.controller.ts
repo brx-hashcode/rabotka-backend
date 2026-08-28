@@ -20,6 +20,7 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { LogService } from '../log/log.service';
 import { OAuthAppService } from './services/oauth-app.service';
+import { OAuthSandboxService } from './services/oauth-sandbox.service';
 import { CreateOAuthAppDto, UpdateOAuthAppDto } from './dto';
 import { SUPPORTED_SCOPES } from './oauth.constants';
 
@@ -43,12 +44,22 @@ export class AdminOAuthAppController {
     private readonly apps: OAuthAppService,
     private readonly prisma: PrismaService,
     private readonly logs: LogService,
+    private readonly sandbox: OAuthSandboxService,
   ) {}
 
   /** The scope catalogue, so the admin UI never hardcodes its own copy. */
   @Get('scopes')
   scopes() {
     return { scopes: [...SUPPORTED_SCOPES] };
+  }
+
+  /**
+   * The sandbox catalogue, so the admin UI never hardcodes its own copy — the
+   * same reasoning as `scopes` above.
+   */
+  @Get('sandbox-users')
+  sandboxUsers() {
+    return this.sandbox.catalogue();
   }
 
   @Get()
@@ -58,7 +69,22 @@ export class AdminOAuthAppController {
       orderBy: { created_at: 'desc' },
       include: {
         creator: { select: { first_name: true, last_name: true } },
-        _count: { select: { authorizations: true } },
+        // Live consents only. Counting revoked rows too would report people who
+        // have since cut the app off as though they were still connected, which
+        // is the opposite of what an admin reads this number for. The
+        // `[app_id, revoked_at]` index covers the filter.
+        _count: {
+          select: { authorizations: { where: { revoked_at: null } } },
+        },
+        // Most recent token exchange across the app's live grants: the answer
+        // to "is this integration actually still running", which the count
+        // alone cannot give.
+        authorizations: {
+          where: { revoked_at: null, last_used_at: { not: null } },
+          orderBy: { last_used_at: 'desc' },
+          take: 1,
+          select: { last_used_at: true },
+        },
       },
     });
 
@@ -77,11 +103,13 @@ export class AdminOAuthAppController {
       redirectUris: app.redirect_uris,
       allowedScopes: app.allowed_scopes,
       status: app.status,
+      isSandbox: app.is_sandbox,
       contactEmail: app.contact_email,
       createdBy: app.creator
         ? `${app.creator.first_name} ${app.creator.last_name}`
         : null,
       userCount: app._count.authorizations,
+      lastUsedAt: app.authorizations[0]?.last_used_at?.toISOString() ?? null,
       createdAt: app.created_at.toISOString(),
     }));
   }
@@ -114,6 +142,7 @@ export class AdminOAuthAppController {
         clientId: app.client_id,
         redirectUris: app.redirect_uris,
         allowedScopes: app.allowed_scopes,
+        isSandbox: app.is_sandbox,
       },
       ...extractRequestMeta(req),
     });
@@ -122,6 +151,7 @@ export class AdminOAuthAppController {
       id: app.id,
       clientId: secret.clientId,
       clientSecret: secret.clientSecret,
+      isSandbox: app.is_sandbox,
       warning:
         'Copiez cette clé secrète maintenant : elle ne sera plus jamais affichée.',
     };
