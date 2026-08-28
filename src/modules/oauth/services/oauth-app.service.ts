@@ -109,6 +109,7 @@ export class OAuthAppService {
     logoUrl?: string;
     redirectUris: string[];
     allowedScopes?: string[];
+    isSandbox?: boolean;
     createdBy?: string;
   }): Promise<{ app: OAuthApp; secret: MintedSecret }> {
     const redirectUris = normaliseRedirectUris(params.redirectUris);
@@ -128,6 +129,10 @@ export class OAuthAppService {
         client_secret_hint: secretHint(clientSecret),
         redirect_uris: redirectUris,
         allowed_scopes: allowedScopes,
+        // `=== true` rather than `?? false`: a truthy non-boolean must not
+        // register a sandbox app, and this is the only place the flag is ever
+        // written.
+        is_sandbox: params.isSandbox === true,
         created_by: params.createdBy ?? null,
       },
     });
@@ -135,6 +140,12 @@ export class OAuthAppService {
     return { app, secret: { clientId, clientSecret } };
   }
 
+  /**
+   * Edits a registration.
+   *
+   * `is_sandbox` is intentionally not among the fields: it is set once at
+   * creation and never afterwards. See the note on the column in schema.prisma.
+   */
   async update(
     id: string,
     params: {
