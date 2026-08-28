@@ -138,3 +138,127 @@ describe('OidcKeyService', () => {
     expect(payload.phone_number_verified).toBe(true);
   });
 });
+
+/**
+ * `resolveUserinfo` is the only place a token is re-checked against live state.
+ * Expiry alone is not enough: consent can be withdrawn, an app suspended, or a
+ * profile removed on a different timescale than an hour.
+ */
+describe('OAuthTokenService.resolveUserinfo', () => {
+  const CLAIM_PROFILE = {
+    id: 'p-1',
+    first_name: 'Amina',
+    last_name: 'N',
+    phone: '+237690000000',
+    email: 'a@example.com',
+    avatar_url: null,
+    city: 'Douala',
+    country_code: 'CM',
+    status: 'ACTIVE',
+    verification_status: 'VERIFIED',
+    verified_at: new Date('2026-01-15T10:00:00Z'),
+  };
+
+  function build(record: unknown, authorization: unknown) {
+    const store = new Map<string, string>();
+    if (record) store.set('rabotka:dev:oauth:at:tok', JSON.stringify(record));
+
+    // Not `async`: nothing here awaits, and the callers only need a thenable.
+    const redis = {
+      get: (key: string) => Promise.resolve(store.get(key) ?? null),
+      del: (key: string) => Promise.resolve(store.delete(key) ? 1 : 0),
+      set: () => Promise.resolve('OK'),
+    } as never;
+
+    const prisma = {
+      oAuthAuthorization: {
+        findUnique: jest.fn().mockResolvedValue(authorization),
+      },
+    } as never;
+
+    const config = { get: () => 'https://api.rabotka.work' } as never;
+    return {
+      service: new OAuthTokenService(redis, prisma, config, {} as never),
+      store,
+    };
+  }
+
+  const RECORD = {
+    authorizationId: 'auth-1',
+    profileId: 'p-1',
+    clientId: 'rbk_abc',
+    scopes: ['openid', 'profile', 'phone'],
+  };
+
+  const LIVE = {
+    revoked_at: null,
+    pairwise_sub: 'sub-1',
+    app: { status: 'ACTIVE', deleted_at: null },
+    profile: CLAIM_PROFILE,
+  };
+
+  it('returns the claims the granted scopes allow', async () => {
+    const { service } = build(RECORD, LIVE);
+    const claims = await service.resolveUserinfo('tok');
+
+    expect(claims.sub).toBe('sub-1');
+    expect(claims.given_name).toBe('Amina');
+    expect(claims.phone_number_verified).toBe(true);
+    // Not granted, so absent.
+    expect(claims).not.toHaveProperty('email');
+  });
+
+  it.each([[null, 'an unknown token']])('refuses %s', async (record) => {
+    const { service } = build(record, LIVE);
+    await expect(service.resolveUserinfo('tok')).rejects.toThrow(
+      /expired|revoked|invalid/i,
+    );
+  });
+
+  it.each<[unknown, string]>([
+    [{ ...LIVE, revoked_at: new Date() }, 'a revoked consent'],
+    [
+      { ...LIVE, app: { status: 'SUSPENDED', deleted_at: null } },
+      'a suspended app',
+    ],
+    [
+      { ...LIVE, app: { status: 'ACTIVE', deleted_at: new Date() } },
+      'a deleted app',
+    ],
+    [null, 'a vanished authorization'],
+  ])(
+    'refuses when the grant is no longer live: %#  (%s)',
+    async (authorization) => {
+      const { service } = build(RECORD, authorization);
+      await expect(service.resolveUserinfo('tok')).rejects.toThrow();
+    },
+  );
+
+  /** Whatever invalidated it will not un-invalidate itself. */
+  it('drops the token rather than re-checking it on every retry', async () => {
+    const { service, store } = build(RECORD, {
+      ...LIVE,
+      revoked_at: new Date(),
+    });
+    await service.resolveUserinfo('tok').catch(() => undefined);
+    expect(store.size).toBe(0);
+  });
+
+  it('survives a corrupt token record without throwing a parse error', async () => {
+    const { service, store } = build(RECORD, LIVE);
+    store.set('rabotka:dev:oauth:at:tok', 'not json');
+    await expect(service.resolveUserinfo('tok')).rejects.toThrow(/invalid/i);
+  });
+
+  it('normalises the issuer, since clients compare it byte-for-byte', () => {
+    const { service } = build(RECORD, LIVE);
+    expect(service.issuer()).toBe('https://api.rabotka.work');
+  });
+
+  it('mints an opaque access token, not a second JWT', async () => {
+    const { service } = build(RECORD, LIVE);
+    const token = await service.mintAccessToken(RECORD);
+    expect(token).toMatch(/^rbk_at_/);
+    expect(token.split('.')).toHaveLength(1);
+  });
+});
