@@ -1762,6 +1762,25 @@ model OAuthApp {
 
   status OAuthAppStatus @default(ACTIVE)
 
+  /// A sandbox application: it authenticates ONLY the two hardcoded Rabotka
+  /// sandbox users, with a fixed OTP, and never touches `profiles`. It exists
+  /// so a partner can build their integration without a real account and
+  /// without a real WhatsApp message.
+  ///
+  /// This flag is the only gate — there is deliberately no environment check,
+  /// so a sandbox app works in production too. That makes it an explicit
+  /// SUPER_ADMIN decision at registration rather than a property of where the
+  /// code happens to be running.
+  ///
+  /// Set once and never updated. Flipping it would not migrate the identities
+  /// already issued: `pairwise_sub` is what a partner keys their own user table
+  /// on, and it does not change when the flag does, so a synthetic identity
+  /// would end up sitting in a partner's production table indistinguishable
+  /// from a real person's. Changing it means deleting the app and registering a
+  /// new one, which forces new credentials — correct, because the identity
+  /// semantics of that `client_id` have changed.
+  is_sandbox Boolean @default(false)
+
   /// Who to contact about this integration. Not an account — partners have no
   /// login here; registration is an admin action.
   contact_email String

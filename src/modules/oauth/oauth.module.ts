@@ -11,6 +11,7 @@ import { OAuthCodeService } from './services/oauth-code.service';
 import { OAuthInteractionService } from './services/oauth-interaction.service';
 import { OAuthTokenService } from './services/oauth-token.service';
 import { OAuthAuthorizationService } from './services/oauth-authorization.service';
+import { OAuthSandboxService } from './services/oauth-sandbox.service';
 import { OidcKeyService } from './services/oidc-key.service';
 
 /**
@@ -38,6 +39,7 @@ import { OidcKeyService } from './services/oidc-key.service';
     OAuthInteractionService,
     OAuthTokenService,
     OAuthAuthorizationService,
+    OAuthSandboxService,
   ],
   exports: [OAuthAppService],
 })
