@@ -23,6 +23,17 @@ export type ClaimSourceProfile = {
 export type OidcClaims = Record<string, string | boolean | number | null>;
 
 /**
+ * `+237 6XX XX XX 42` → `••42`. Enough to recognise, not enough to disclose.
+ *
+ * Lives here rather than beside the consent screen that renders it because the
+ * sandbox service needs the same masking for its synthetic users, and importing
+ * it from `oauth-authorization.service.ts` would be a cycle.
+ */
+export function maskPhone(phone: string): string {
+  return `••${phone.slice(-2)}`;
+}
+
+/**
  * Which account states may authenticate to a partner at all.
  *
  * BANNED is refused: there is no path back for that account, so handing it a

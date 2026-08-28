@@ -18,6 +18,7 @@ import { OAuthExceptionFilter } from './filters/oauth-exception.filter';
 import { OAuthAppService } from './services/oauth-app.service';
 import { OAuthCodeService } from './services/oauth-code.service';
 import { OAuthTokenService } from './services/oauth-token.service';
+import { OAuthSandboxService } from './services/oauth-sandbox.service';
 import { RevokeTokenDto, TokenRequestDto } from './dto';
 import { verifyCodeChallenge } from './utils/pkce.util';
 import { buildClaims } from './utils/claims.util';
@@ -41,6 +42,7 @@ export class OAuthTokenController {
     private readonly codes: OAuthCodeService,
     private readonly tokens: OAuthTokenService,
     private readonly prisma: PrismaService,
+    private readonly sandbox: OAuthSandboxService,
   ) {}
 
   @Public()
@@ -83,20 +85,42 @@ export class OAuthTokenController {
       throw invalidGrant;
     }
 
-    const authorization = await this.prisma.oAuthAuthorization.findUnique({
-      where: {
-        idx_oauth_authorization_app_profile: {
-          app_id: grant.appId,
-          profile_id: grant.profileId,
-        },
-      },
-      select: { id: true, pairwise_sub: true, revoked_at: true },
-    });
+    const sandboxSubject = this.sandbox.isSandboxSubject(grant.profileId);
 
-    // Revoked between consent and redemption. A sixty-second window, but the
-    // check costs one indexed read and the alternative is honouring a grant the
-    // user just withdrew.
-    if (!authorization || authorization.revoked_at !== null) throw invalidGrant;
+    // The second agreement check, after the one in `approve`. This is the one
+    // that catches an admin flipping `is_sandbox` in the sixty seconds between
+    // consent and redemption: without it a sandbox subject under a now-real app
+    // would be looked up in `profiles` with an id that is not a uuid, and the
+    // partner would see a 500 instead of `invalid_grant`.
+    if (sandboxSubject !== this.sandbox.isSandboxApp(app)) throw invalidGrant;
+
+    let authorization: { id: string; pairwise_sub: string };
+
+    if (sandboxSubject) {
+      const synthetic = this.sandbox.authorizationFor(
+        grant.appId,
+        grant.profileId,
+      );
+      if (!synthetic) throw invalidGrant;
+      authorization = synthetic;
+    } else {
+      const row = await this.prisma.oAuthAuthorization.findUnique({
+        where: {
+          idx_oauth_authorization_app_profile: {
+            app_id: grant.appId,
+            profile_id: grant.profileId,
+          },
+        },
+        select: { id: true, pairwise_sub: true, revoked_at: true },
+      });
+
+      // Revoked between consent and redemption. A sixty-second window, but the
+      // check costs one indexed read and the alternative is honouring a grant
+      // the user just withdrew.
+      if (!row || row.revoked_at !== null) throw invalidGrant;
+
+      authorization = row;
+    }
 
     const profile = await this.tokens.loadClaimSource(grant.profileId);
     if (!profile) throw invalidGrant;
@@ -122,12 +146,15 @@ export class OAuthTokenController {
     });
 
     // Fire-and-forget: a failure to stamp "last used" must not fail a login.
-    this.prisma.oAuthAuthorization
-      .update({
-        where: { id: authorization.id },
-        data: { last_used_at: new Date() },
-      })
-      .catch(() => undefined);
+    // Skipped for sandbox, where there is no row to stamp.
+    if (!sandboxSubject) {
+      this.prisma.oAuthAuthorization
+        .update({
+          where: { id: authorization.id },
+          data: { last_used_at: new Date() },
+        })
+        .catch(() => undefined);
+    }
 
     return {
       access_token: accessToken,

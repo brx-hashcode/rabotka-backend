@@ -27,6 +27,18 @@ export type OAuthInteraction = {
   state?: string;
   nonce?: string;
   codeChallenge: string;
+  /**
+   * This interaction belongs to a sandbox app.
+   *
+   * Decided once at `beginAuthorization`, where the app row has already been
+   * loaded and validated, so the two OTP endpoints do not re-read the app on
+   * every call. Server-side like everything else here — the browser carries
+   * only the opaque id — so it is not something a user can flip.
+   *
+   * Interactions created before this field existed parse as `undefined`, which
+   * is falsy and therefore the real path. Nothing to migrate.
+   */
+  sandbox: boolean;
   /** Null until the user proves the phone, or a live session is reused. */
   profileId: string | null;
   /** Seconds since epoch. Becomes the ID token's `auth_time`. */
