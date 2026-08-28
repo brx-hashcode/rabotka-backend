@@ -20,6 +20,7 @@ import { OAuthError } from './oauth-error';
 import { OAuthExceptionFilter } from './filters/oauth-exception.filter';
 import { OAuthAuthorizationService } from './services/oauth-authorization.service';
 import { OAuthInteractionService } from './services/oauth-interaction.service';
+import { OAuthSandboxService } from './services/oauth-sandbox.service';
 import {
   ConsentDecisionDto,
   SendInteractionOtpDto,
@@ -48,6 +49,7 @@ export class OAuthAuthorizeController {
     private readonly auth: AuthService,
     private readonly config: ConfigService,
     private readonly prisma: PrismaService,
+    private readonly sandbox: OAuthSandboxService,
   ) {}
 
   /**
@@ -115,17 +117,36 @@ export class OAuthAuthorizeController {
   async sendOtp(@Param('id') id: string, @Body() dto: SendInteractionOtpDto) {
     const interaction = await this.interactions.require(id);
     const phone = dto.phone.trim();
+    const sandboxUser = this.sandbox.findUserByPhone(phone);
 
-    try {
-      await this.auth.sendOtp(phone);
-    } catch {
-      // `AuthService.sendOtp` throws 404 for an unknown identifier, and here
-      // that is not an error — it is the product's answer. Partners get
-      // verified Rabotka users or nobody, so someone without an account is told
-      // to create one rather than being offered a signup they did not come here
-      // for. Returning 200 also means this endpoint cannot be used as a
-      // "does this phone number have a Rabotka account" oracle.
-      return { sent: false, reason: 'no_account' as const };
+    const noAccount = { sent: false, reason: 'no_account' as const };
+
+    if (interaction.sandbox) {
+      // A sandbox interaction may only ever address a sandbox number. Falling
+      // through to `auth.sendOtp` for anything else would let a sandbox app
+      // start a login against a real person, and would turn it into a free
+      // "send a WhatsApp message to an arbitrary number" endpoint.
+      if (!sandboxUser) return noAccount;
+      // Nothing is sent and nothing is written to Redis. The code is fixed, so
+      // there is no OTP to store and no message to deliver.
+    } else {
+      // The mirror of the branch above. The sandbox numbers are reserved
+      // platform-wide rather than relying on the 404 that only happens to be
+      // there because nobody has registered them — `profiles.phone` has no
+      // format validation, so that accident is one INSERT away from untrue.
+      if (sandboxUser) return noAccount;
+
+      try {
+        await this.auth.sendOtp(phone);
+      } catch {
+        // `AuthService.sendOtp` throws 404 for an unknown identifier, and here
+        // that is not an error — it is the product's answer. Partners get
+        // verified Rabotka users or nobody, so someone without an account is
+        // told to create one rather than being offered a signup they did not
+        // come here for. Returning 200 also means this endpoint cannot be used
+        // as a "does this phone number have a Rabotka account" oracle.
+        return noAccount;
+      }
     }
 
     await this.interactions.patch(id, {
@@ -157,6 +178,39 @@ export class OAuthAuthorizeController {
         'Demandez un nouveau code pour ce numéro.',
         400,
       );
+    }
+
+    if (interaction.sandbox) {
+      const user = this.sandbox.verifyOtp(phone, dto.otp);
+
+      if (!user) {
+        // Same shape as a real failed attempt — same message, same interaction
+        // burn after MAX_OTP_ATTEMPTS — so the consent screen branches
+        // identically and a sandbox app is not distinguishable by its error
+        // behaviour. A non-sandbox number reaching here is refused rather than
+        // falling through to the real verify below.
+        const { attemptsLeft } = await this.interactions.recordFailedOtp(id);
+        throw new OAuthError(
+          'access_denied',
+          `Code incorrect. Il vous reste ${attemptsLeft} tentative${attemptsLeft > 1 ? 's' : ''}.`,
+          401,
+        );
+      }
+
+      await this.interactions.patch(id, {
+        profileId: user.id,
+        authTime: Math.floor(Date.now() / 1000),
+        pendingPhone: undefined,
+        otpAttempts: 0,
+      });
+
+      // No `issueProfileSession` and no `setAuthCookie`, deliberately. There is
+      // no `profiles` row behind this id, so a session cookie would be a ghost
+      // session: every authenticated endpoint in the SPA would fail on it. It
+      // is also what keeps the sentinel out of `beginAuthorization` — with no
+      // cookie there is nothing for `resolveSessionProfile` to hand back, so a
+      // sandbox subject can never arrive at a real app as an existing session.
+      return this.authorization.consentContext(id);
     }
 
     let profile: { id: string };

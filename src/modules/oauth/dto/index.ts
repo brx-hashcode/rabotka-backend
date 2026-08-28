@@ -149,9 +149,25 @@ export class CreateOAuthAppDto {
   @IsArray()
   @IsIn(SUPPORTED_SCOPES, { each: true })
   allowedScopes?: string[];
+
+  @ApiPropertyOptional({
+    default: false,
+    description:
+      'Sandbox application. Authenticates only the two hardcoded Rabotka ' +
+      'sandbox users with a fixed OTP, never a real profile. Cannot be ' +
+      'changed after creation.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  isSandbox?: boolean;
 }
 
 export class UpdateOAuthAppDto {
+  // `isSandbox` is deliberately absent, and its absence is the enforcement:
+  // `main.ts` validates with `forbidNonWhitelisted: true`, so a PATCH carrying
+  // the field is a 400 rather than a silently ignored no-op. See the note on
+  // the column in schema.prisma for why it must never change.
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()

@@ -4,6 +4,8 @@ import { OAuthAuthorizationService } from '../services/oauth-authorization.servi
 import type { OAuthAppService } from '../services/oauth-app.service';
 import type { OAuthCodeService } from '../services/oauth-code.service';
 import type { OAuthInteractionService } from '../services/oauth-interaction.service';
+import { OAuthSandboxService } from '../services/oauth-sandbox.service';
+import { derivePairwiseSub } from '../utils/client-credentials.util';
 import { OAuthError } from '../oauth-error';
 
 /**
@@ -98,15 +100,21 @@ function build(
     get: (key: string) => (key === 'OIDC_PAIRWISE_SALT' ? 'salt' : undefined),
   } as unknown as ConfigService;
 
+  // The real sandbox service, not a fake. It reaches nothing — no Prisma, no
+  // Redis — and using the real one is what makes the "Prisma was never called"
+  // assertions below mean something.
+  const sandbox = new OAuthSandboxService(config);
+
   const service = new OAuthAuthorizationService(
     prisma,
     config,
     apps,
     interactions,
     codes,
+    sandbox,
   );
 
-  return { service, prisma, apps, interactions, codes };
+  return { service, prisma, apps, interactions, codes, sandbox };
 }
 
 const validQuery = {
@@ -530,5 +538,202 @@ describe('deny', () => {
     expect(url.searchParams.get('tenant')).toBe('42');
     expect(url.searchParams.get('error')).toBe('access_denied');
     expect(url.searchParams.has('state')).toBe(false);
+  });
+});
+
+/**
+ * The sandbox: an application flagged `is_sandbox` authenticates only the two
+ * hardcoded users, and never a real one.
+ *
+ * The assertions worth reading here are the negative ones. "Prisma was never
+ * called" is the mechanical proof that a synthetic subject cannot reach a uuid
+ * column, and "upsert was never called" is the proof that no row is written
+ * against a `profile_id` foreign key that has nothing to point at.
+ */
+describe('sandbox applications', () => {
+  const SANDBOX_APP = { ...APP, is_sandbox: true };
+  const SANDBOX_SUBJECT = 'sandbox:verified';
+
+  const sandboxInteraction = {
+    appId: 'app-1',
+    redirectUri: REDIRECT,
+    scopes: ['openid', 'profile'],
+    state: 'st-1',
+    nonce: 'n-1',
+    codeChallenge: CHALLENGE,
+    sandbox: true,
+    profileId: SANDBOX_SUBJECT,
+    authTime: 1_700_000_000,
+  };
+
+  describe('beginAuthorization', () => {
+    /**
+     * Invariant A, at its primary enforcement point. A session cookie only
+     * exists for a real `profiles` row, so carrying one into a sandbox
+     * interaction would sign a live user into a partner's test integration
+     * without anybody typing a phone number.
+     */
+    it('drops a live session rather than handing it to a sandbox app', async () => {
+      const { service, interactions } = build({ app: SANDBOX_APP });
+      await service.beginAuthorization(validQuery, 'p-1');
+
+      const arg = (interactions.create as jest.Mock).mock.calls[0][0];
+      expect(arg.profileId).toBeNull();
+      expect(arg.sandbox).toBe(true);
+    });
+
+    /**
+     * And does not stamp `auth_time` from the session it just dropped: that
+     * value survives into the ID token, where it would assert the user proved
+     * who they were at a moment when nobody had.
+     */
+    it('leaves authTime unset when it drops that session', async () => {
+      const { service, interactions } = build({ app: SANDBOX_APP });
+      await service.beginAuthorization(validQuery, 'p-1');
+
+      expect(
+        (interactions.create as jest.Mock).mock.calls[0][0].authTime,
+      ).toBeUndefined();
+    });
+
+    it('still reuses a session for a real app', async () => {
+      const { service, interactions } = build();
+      await service.beginAuthorization(validQuery, 'p-1');
+
+      const arg = (interactions.create as jest.Mock).mock.calls[0][0];
+      expect(arg.profileId).toBe('p-1');
+      expect(arg.sandbox).toBe(false);
+      expect(typeof arg.authTime).toBe('number');
+    });
+  });
+
+  describe('consentContext', () => {
+    it('renders the sandbox user without reading the database', async () => {
+      const { service, interactions, prisma } = build({ app: SANDBOX_APP });
+      (interactions.require as jest.Mock).mockResolvedValue(sandboxInteraction);
+
+      const context = await service.consentContext('int-1');
+
+      expect(context.profile).toEqual({
+        firstName: 'Rabotka',
+        lastName: 'Sandbox',
+        phoneHint: '••11',
+        avatarUrl: null,
+      });
+      expect(context.alreadyGranted).toBe(false);
+      expect(prisma.profile.findFirst).not.toHaveBeenCalled();
+      expect(prisma.oAuthAuthorization.findUnique).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('hasStandingGrant', () => {
+    it('is false for a sandbox subject, without querying', async () => {
+      const { service, prisma } = build({ app: SANDBOX_APP });
+
+      await expect(
+        service.hasStandingGrant('app-1', SANDBOX_SUBJECT, ['openid']),
+      ).resolves.toBe(false);
+      expect(prisma.oAuthAuthorization.findUnique).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('approve', () => {
+    it('mints a code without writing a grant or reading a profile', async () => {
+      const { service, interactions, codes, prisma } = build({
+        app: SANDBOX_APP,
+      });
+      (interactions.require as jest.Mock).mockResolvedValue(sandboxInteraction);
+
+      const url = new URL((await service.approve('int-1')).redirectTo);
+
+      expect(url.searchParams.get('code')).toBe('the-code');
+      expect(url.searchParams.get('state')).toBe('st-1');
+      expect(codes.mint).toHaveBeenCalledWith(
+        expect.objectContaining({ profileId: SANDBOX_SUBJECT }),
+      );
+      expect(prisma.profile.findFirst).not.toHaveBeenCalled();
+      expect(prisma.oAuthAuthorization.upsert).not.toHaveBeenCalled();
+    });
+
+    /**
+     * Invariant A at the minting door, re-derived from the database rather than
+     * trusted from the interaction. Nothing should be able to get a real
+     * subject this far under a sandbox app, which is exactly why it is worth a
+     * second check where the credential is actually produced.
+     */
+    it('refuses a real subject under a sandbox app', async () => {
+      const { service, interactions, codes, prisma } = build({
+        app: SANDBOX_APP,
+      });
+      (interactions.require as jest.Mock).mockResolvedValue({
+        ...sandboxInteraction,
+        profileId: 'p-1',
+      });
+
+      const error = await expectOAuthError(service.approve('int-1'));
+
+      expect(error.code).toBe('access_denied');
+      expect(codes.mint).not.toHaveBeenCalled();
+      expect(prisma.oAuthAuthorization.upsert).not.toHaveBeenCalled();
+    });
+
+    /** Invariant B: a synthetic identity must never be issued into production. */
+    it('refuses a sandbox subject under a real app', async () => {
+      const { service, interactions, codes, prisma } = build();
+      (interactions.require as jest.Mock).mockResolvedValue({
+        ...sandboxInteraction,
+        sandbox: false,
+      });
+
+      const error = await expectOAuthError(service.approve('int-1'));
+
+      expect(error.code).toBe('access_denied');
+      expect(codes.mint).not.toHaveBeenCalled();
+      expect(prisma.oAuthAuthorization.upsert).not.toHaveBeenCalled();
+    });
+
+    /**
+     * The subject is checked against the app row read at consent time, not
+     * against the flag recorded on the interaction ten minutes earlier — so an
+     * admin flipping `is_sandbox` mid-flight is refused rather than honoured.
+     */
+    it('trusts the app row over the interaction flag', async () => {
+      const { service, interactions, codes } = build({ app: SANDBOX_APP });
+      (interactions.require as jest.Mock).mockResolvedValue({
+        ...sandboxInteraction,
+        sandbox: false,
+        profileId: 'p-1',
+      });
+
+      const error = await expectOAuthError(service.approve('int-1'));
+
+      expect(error.code).toBe('access_denied');
+      expect(codes.mint).not.toHaveBeenCalled();
+    });
+
+    it('reports an unknown sandbox subject as access_denied, not a crash', async () => {
+      const { service, interactions, codes } = build({ app: SANDBOX_APP });
+      (interactions.require as jest.Mock).mockResolvedValue({
+        ...sandboxInteraction,
+        profileId: 'sandbox:nobody',
+      });
+
+      const error = await expectOAuthError(service.approve('int-1'));
+
+      expect(error.code).toBe('access_denied');
+      expect(codes.mint).not.toHaveBeenCalled();
+    });
+
+    it('derives the same pairwise sub the token endpoint will', async () => {
+      const { service, interactions, sandbox } = build({ app: SANDBOX_APP });
+      (interactions.require as jest.Mock).mockResolvedValue(sandboxInteraction);
+
+      await service.approve('int-1');
+
+      expect(sandbox.authorizationFor('app-1', SANDBOX_SUBJECT)).toEqual({
+        id: 'sandbox:authorization',
+        pairwise_sub: derivePairwiseSub('app-1', SANDBOX_SUBJECT, 'salt'),
+      });
+    });
   });
 });

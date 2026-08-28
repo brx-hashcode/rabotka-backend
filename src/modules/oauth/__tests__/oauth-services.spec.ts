@@ -250,6 +250,7 @@ describe('OAuthInteractionService', () => {
     redirectUri: 'https://p.com/cb',
     scopes: ['openid'],
     codeChallenge: 'c'.repeat(43),
+    sandbox: false,
     profileId: null,
   };
 
@@ -399,6 +400,49 @@ describe('OAuthAppService registration', () => {
     ]);
     // Personal data a partner has to ask for stays out by default.
     expect(created[0].allowed_scopes).not.toContain('email');
+  });
+
+  it('registers a real application by default', async () => {
+    const { service, created } = writable();
+    await service.create(base);
+    expect(created[0].is_sandbox).toBe(false);
+  });
+
+  it('registers a sandbox application when asked', async () => {
+    const { service, created } = writable();
+    await service.create({ ...base, isSandbox: true });
+    expect(created[0].is_sandbox).toBe(true);
+  });
+
+  it.each([['true'], [1], [{}], [null], [undefined]])(
+    'treats the non-boolean %p as "not a sandbox app"',
+    async (value) => {
+      const { service, created } = writable();
+      await service.create({
+        ...base,
+        isSandbox: value as unknown as boolean,
+      });
+      expect(created[0].is_sandbox).toBe(false);
+    },
+  );
+
+  /**
+   * The flag is set once at registration and never afterwards. `pairwise_sub`
+   * does not change when it flips, so a synthetic identity would end up in a
+   * partner's production user table indistinguishable from a real person's.
+   *
+   * The DTO is the real enforcement — `forbidNonWhitelisted` makes a PATCH
+   * carrying the field a 400 — and this is the belt to that pair of braces.
+   */
+  it('cannot be flipped by an update', async () => {
+    const { service, updated } = writable();
+    await service.update('app-1', {
+      name: 'Renamed',
+      isSandbox: true,
+    } as unknown as Parameters<OAuthAppService['update']>[1]);
+
+    expect(updated[0]).not.toHaveProperty('is_sandbox');
+    expect(updated[0].name).toBe('Renamed');
   });
 
   it('adds openid when an admin leaves it out of the checkbox list', async () => {

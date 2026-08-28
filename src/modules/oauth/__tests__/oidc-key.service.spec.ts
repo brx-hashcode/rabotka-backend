@@ -3,6 +3,7 @@ import { generateKeyPairSync } from 'node:crypto';
 import { jwtVerify, importJWK, type JWK } from 'jose';
 import { OidcKeyService, OIDC_SIGNING_ALG } from '../services/oidc-key.service';
 import { OAuthTokenService } from '../services/oauth-token.service';
+import { OAuthSandboxService } from '../services/oauth-sandbox.service';
 
 function makeKeyPair() {
   const { privateKey, publicKey } = generateKeyPairSync('rsa', {
@@ -111,6 +112,9 @@ describe('OidcKeyService', () => {
       {} as never,
       configWith({ OIDC_ISSUER: 'https://api.rabotka.work/' }),
       keys,
+      new OAuthSandboxService(
+        configWith({ OIDC_PAIRWISE_SALT: 'salt' }) as never,
+      ),
     );
 
     const jwt = await tokens.signIdToken({
@@ -178,7 +182,13 @@ describe('OAuthTokenService.resolveUserinfo', () => {
 
     const config = { get: () => 'https://api.rabotka.work' } as never;
     return {
-      service: new OAuthTokenService(redis, prisma, config, {} as never),
+      service: new OAuthTokenService(
+        redis,
+        prisma,
+        config,
+        {} as never,
+        new OAuthSandboxService(config),
+      ),
       store,
     };
   }

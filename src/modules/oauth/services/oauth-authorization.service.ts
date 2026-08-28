@@ -11,8 +11,9 @@ import {
 } from './oauth-interaction.service';
 import { isRegisteredRedirectUri } from '../utils/redirect-uri.util';
 import { isValidCodeChallenge } from '../utils/pkce.util';
-import { canAuthenticateToPartner } from '../utils/claims.util';
+import { canAuthenticateToPartner, maskPhone } from '../utils/claims.util';
 import { derivePairwiseSub } from '../utils/client-credentials.util';
+import { OAuthSandboxService } from './oauth-sandbox.service';
 import { SUPPORTED_SCOPES } from '../oauth.constants';
 
 /** The raw query string of an `authorize` request, before any validation. */
@@ -62,6 +63,7 @@ export class OAuthAuthorizationService {
     private readonly apps: OAuthAppService,
     private readonly interactions: OAuthInteractionService,
     private readonly codes: OAuthCodeService,
+    private readonly sandbox: OAuthSandboxService,
   ) {}
 
   /**
@@ -174,6 +176,19 @@ export class OAuthAuthorizationService {
       );
     }
 
+    const sandbox = this.sandbox.isSandboxApp(app);
+
+    // A sandbox app must never be handed a real person's identity, and the
+    // session-reuse shortcut above is the one path that could do it silently: a
+    // session cookie only ever exists for a real `profiles` row, so carrying it
+    // into a sandbox interaction would authenticate a live user into a
+    // partner's test integration without anybody typing a phone number.
+    //
+    // Dropped here rather than in the controller because the controller reads
+    // the cookie before the app is known — `findByClientId` runs above, in this
+    // method.
+    const profileId = sandbox ? null : existingProfileId;
+
     const interactionId = await this.interactions.create({
       appId: app.id,
       clientId: app.client_id,
@@ -182,8 +197,13 @@ export class OAuthAuthorizationService {
       state,
       nonce: query.nonce,
       codeChallenge: query.code_challenge,
-      profileId: existingProfileId,
-      authTime: existingProfileId ? Math.floor(Date.now() / 1000) : undefined,
+      sandbox,
+      profileId,
+      // Reads `profileId`, not `existingProfileId`. Stamping this from the
+      // dropped session would put an `auth_time` on an interaction nobody has
+      // authenticated in, and it survives into the ID token — a claim asserting
+      // the user proved who they were at a moment when they had not.
+      authTime: profileId ? Math.floor(Date.now() / 1000) : undefined,
     });
 
     return { interactionId };
@@ -200,7 +220,12 @@ export class OAuthAuthorizationService {
     let profile: ConsentContext['profile'] = null;
     let alreadyGranted = false;
 
-    if (interaction.profileId) {
+    if (this.sandbox.isSandboxSubject(interaction.profileId)) {
+      // `alreadyGranted` stays false: there is no `OAuthAuthorization` row to
+      // stand on, and showing the consent screen every time is what somebody
+      // testing that screen wants anyway.
+      profile = this.sandbox.consentProfile(interaction.profileId);
+    } else if (interaction.profileId) {
       const row = await this.prisma.profile.findFirst({
         where: { id: interaction.profileId, deleted_at: null },
         select: {
@@ -250,6 +275,10 @@ export class OAuthAuthorizationService {
     profileId: string,
     requestedScopes: readonly string[],
   ): Promise<boolean> {
+    // A sandbox subject has no row here to find, and its id is not a uuid: this
+    // would be a Prisma P2023 rather than the `false` the caller expects.
+    if (this.sandbox.isSandboxSubject(profileId)) return false;
+
     const authorization = await this.prisma.oAuthAuthorization.findUnique({
       where: {
         idx_oauth_authorization_app_profile: {
@@ -286,76 +315,128 @@ export class OAuthAuthorizationService {
 
     const app = await this.requireActiveApp(interaction.appId, interaction);
 
-    const profile = await this.prisma.profile.findFirst({
-      where: { id: interaction.profileId, deleted_at: null },
-      select: { id: true, status: true },
-    });
+    const subjectIsSandbox = this.sandbox.isSandboxSubject(
+      interaction.profileId,
+    );
 
-    if (!profile || !canAuthenticateToPartner(profile.status)) {
+    // The subject and the application must agree about which world they are in,
+    // re-derived from the database rather than trusted from the interaction.
+    //
+    // A real subject under a sandbox app is the session-reuse leak; a sandbox
+    // subject under a real app is a synthetic identity being issued into
+    // production. Neither is recoverable once a code has been minted — the
+    // partner will have written the resulting `sub` into their own user table —
+    // so both die here, at the door, rather than at the token endpoint.
+    if (subjectIsSandbox !== this.sandbox.isSandboxApp(app)) {
       throw new OAuthError(
         'access_denied',
-        'Ce compte ne peut pas être utilisé pour se connecter à une application partenaire.',
+        'Ce compte ne peut pas être utilisé pour se connecter à cette application.',
         403,
         interaction.redirectUri,
         interaction.state,
       );
     }
 
-    const salt = this.pairwiseSalt();
-    const pairwiseSub = derivePairwiseSub(app.id, profile.id, salt);
+    let authorizationId: string;
 
-    const existing = await this.prisma.oAuthAuthorization.findUnique({
-      where: {
-        idx_oauth_authorization_app_profile: {
+    if (subjectIsSandbox) {
+      const synthetic = this.sandbox.authorizationFor(
+        app.id,
+        interaction.profileId,
+      );
+
+      if (!synthetic) {
+        throw new OAuthError(
+          'access_denied',
+          'Ce compte ne peut pas être utilisé pour se connecter à cette application.',
+          403,
+          interaction.redirectUri,
+          interaction.state,
+        );
+      }
+
+      // No `OAuthAuthorization` row is written: `profile_id` is a foreign key
+      // into `profiles` and there is no row to point at. So there is nothing to
+      // union scopes into and nothing to revoke — a sandbox consent is asked
+      // fresh on every login, which is what somebody testing the consent screen
+      // wants in any case.
+      authorizationId = synthetic.id;
+    } else {
+      const profile = await this.prisma.profile.findFirst({
+        where: { id: interaction.profileId, deleted_at: null },
+        select: { id: true, status: true },
+      });
+
+      if (!profile || !canAuthenticateToPartner(profile.status)) {
+        throw new OAuthError(
+          'access_denied',
+          'Ce compte ne peut pas être utilisé pour se connecter à une application partenaire.',
+          403,
+          interaction.redirectUri,
+          interaction.state,
+        );
+      }
+
+      const salt = this.pairwiseSalt();
+      const pairwiseSub = derivePairwiseSub(app.id, profile.id, salt);
+
+      const existing = await this.prisma.oAuthAuthorization.findUnique({
+        where: {
+          idx_oauth_authorization_app_profile: {
+            app_id: app.id,
+            profile_id: profile.id,
+          },
+        },
+        select: { scopes: true, revoked_at: true },
+      });
+
+      /**
+       * Union with what was already granted, rather than replacing it.
+       *
+       * An app that asks for fewer scopes on a later login — because the
+       * partner trimmed their integration, or because one screen of theirs
+       * needs less — must not silently revoke access the user already agreed
+       * to; the user agreed to it, and taking it back is the revoke button's
+       * job, not a side effect of a login. The exception is a revoked grant:
+       * consenting again after a revocation starts from exactly what is on the
+       * screen now.
+       */
+      const scopes =
+        existing && existing.revoked_at === null
+          ? [...new Set([...existing.scopes, ...interaction.scopes])]
+          : [...interaction.scopes];
+
+      const authorization = await this.prisma.oAuthAuthorization.upsert({
+        where: {
+          idx_oauth_authorization_app_profile: {
+            app_id: app.id,
+            profile_id: profile.id,
+          },
+        },
+        create: {
           app_id: app.id,
           profile_id: profile.id,
+          pairwise_sub: pairwiseSub,
+          scopes,
         },
-      },
-      select: { scopes: true, revoked_at: true },
-    });
-
-    /**
-     * Union with what was already granted, rather than replacing it.
-     *
-     * An app that asks for fewer scopes on a later login — because the partner
-     * trimmed their integration, or because one screen of theirs needs less —
-     * must not silently revoke access the user already agreed to; the user
-     * agreed to it, and taking it back is the revoke button's job, not a side
-     * effect of a login. The exception is a revoked grant: consenting again
-     * after a revocation starts from exactly what is on the screen now.
-     */
-    const scopes =
-      existing && existing.revoked_at === null
-        ? [...new Set([...existing.scopes, ...interaction.scopes])]
-        : [...interaction.scopes];
-
-    const authorization = await this.prisma.oAuthAuthorization.upsert({
-      where: {
-        idx_oauth_authorization_app_profile: {
-          app_id: app.id,
-          profile_id: profile.id,
+        update: {
+          scopes: { set: scopes },
+          // Re-consenting is how a user un-revokes an app they previously cut
+          // off.
+          revoked_at: null,
         },
-      },
-      create: {
-        app_id: app.id,
-        profile_id: profile.id,
-        pairwise_sub: pairwiseSub,
-        scopes,
-      },
-      update: {
-        scopes: { set: scopes },
-        // Re-consenting is how a user un-revokes an app they previously cut off.
-        revoked_at: null,
-      },
-      select: { id: true },
-    });
+        select: { id: true },
+      });
+
+      authorizationId = authorization.id;
+    }
 
     const authTime = interaction.authTime ?? Math.floor(Date.now() / 1000);
 
     const code = await this.codes.mint({
       appId: app.id,
       clientId: app.client_id,
-      profileId: profile.id,
+      profileId: interaction.profileId,
       redirectUri: interaction.redirectUri,
       scopes: interaction.scopes,
       codeChallenge: interaction.codeChallenge,
@@ -368,7 +449,7 @@ export class OAuthAuthorizationService {
     await this.interactions.destroy(interactionId);
 
     this.logger.log(
-      `Authorization granted: app=${app.client_id} authorization=${authorization.id} scopes=[${interaction.scopes.join(' ')}]`,
+      `Authorization granted: app=${app.client_id} authorization=${authorizationId} sandbox=${subjectIsSandbox} scopes=[${interaction.scopes.join(' ')}]`,
     );
 
     return {
@@ -455,9 +536,4 @@ function buildRedirect(
     if (value !== undefined) url.searchParams.set(key, value);
   }
   return url.toString();
-}
-
-/** `+237 6XX XX XX 42` → `••42`. Enough to recognise, not enough to disclose. */
-function maskPhone(phone: string): string {
-  return `••${phone.slice(-2)}`;
 }
