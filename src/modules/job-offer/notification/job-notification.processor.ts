@@ -50,11 +50,18 @@ export class JobNotificationProcessor implements OnModuleInit {
   /**
    * `jobId` keyed on the offer, so a duplicated create cannot fan out twice —
    * BullMQ drops an add whose id is already present.
+   *
+   * The separator is `-`, NOT `:`. BullMQ namespaces its Redis keys as
+   * `bull:<queue>:<jobId>`, so a colon in a custom id would corrupt the key
+   * structure and it rejects the add outright with `Custom Ids cannot contain
+   * :`. This read `notify:${jobOfferId}` and threw on every single create —
+   * after the offer was already committed, so the employer got a 500 for an
+   * offer that existed, and the notification fan-out never ran once.
    */
   async enqueue(jobOfferId: string): Promise<void> {
     const queue = this.queueService.getQueue(JOB_NOTIFICATION_QUEUE);
     await queue.add('notify', { jobOfferId } satisfies JobNotificationJobData, {
-      jobId: `notify:${jobOfferId}`,
+      jobId: `notify-${jobOfferId}`,
       delay: NOTIFY_DELAY_MS,
     });
   }
