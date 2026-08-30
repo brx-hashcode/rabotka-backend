@@ -72,7 +72,24 @@ describe('JobNotificationProcessor', () => {
     expect(queue.add).toHaveBeenCalledWith(
       'notify',
       { jobOfferId: 'offer-1' },
-      { jobId: 'notify:offer-1', delay: NOTIFY_DELAY_MS },
+      { jobId: 'notify-offer-1', delay: NOTIFY_DELAY_MS },
     );
+  });
+
+  it('builds a jobId BullMQ will accept', async () => {
+    // This assertion is the one that was missing. The suite above pinned the
+    // exact string `notify:offer-1`, and `queue.add` is a mock, so the colon
+    // sailed through every run — while real BullMQ rejects it with `Custom Ids
+    // cannot contain :`, because it namespaces keys as `bull:<queue>:<jobId>`.
+    // Assert the constraint, not the literal, so a future separator change
+    // cannot reintroduce it.
+    await processor.enqueue('offer-1');
+
+    const [, , opts] = queue.add.mock.calls[0] as [
+      string,
+      unknown,
+      { jobId: string },
+    ];
+    expect(opts.jobId).not.toContain(':');
   });
 });
