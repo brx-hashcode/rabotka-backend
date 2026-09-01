@@ -233,6 +233,15 @@ jobs:
           VAULT_SECRET=$(echo "$SECRET_RESPONSE" | jq -r '.data.data')
 
           cat > /tmp/deploy.env << EOF
+          # DO NOT use backticks or $(...) in the comments below.
+          #
+          # This heredoc is UNQUOTED (<< EOF), because the Vault values under it
+          # need $(...) expansion. That expansion applies to comment lines too:
+          # anything in backticks is EXECUTED. Most of it merely printed
+          # "command not found" to stderr for months, but a comment saying
+          # "docker stats" ran it for real — and with no --no-stream it streams
+          # forever, hanging the deploy until the 40-minute timeout. A comment
+          # saying "free -m" injected its multi-line output straight into .env.
           # --- from Vault ---
           DATABASE_URL=$(echo "$VAULT_SECRET" | jq -r '.DATABASE_URL')
           DIRECT_DATABASE_URL=$(echo "$VAULT_SECRET" | jq -r '.DIRECT_DATABASE_URL')
@@ -251,7 +260,7 @@ jobs:
           # multi-line value would break this heredoc and every line after it.
           #
           # OIDC_PAIRWISE_SALT must never change once partners exist. It derives
-          # the per-application `sub`, and partners key their own user tables on
+          # the per-application sub, and partners key their own user tables on
           # it — rotating it orphans every account every partner has created.
           OIDC_ISSUER=$(echo "$VAULT_SECRET" | jq -r '.OIDC_ISSUER')
           OIDC_PRIVATE_KEY=$(echo "$VAULT_SECRET" | jq -r '.OIDC_PRIVATE_KEY')
@@ -365,12 +374,12 @@ jobs:
           VOVA_MODEL_STANDARD_GOOGLE=gemini-3.6-flash
           VOVA_MODEL_STANDARD_MISTRAL=mistral-small-latest
           VOVA_MODEL_STANDARD_OPENAI=gpt-4o-mini
-          # Groq publishes no `-latest` alias and retires ids on a short cycle,
+          # Groq publishes no -latest alias and retires ids on a short cycle,
           # so this pin matters more here than anywhere else in the list.
           VOVA_MODEL_STANDARD_GROQ=llama-3.3-70b-versatile
           VOVA_MODEL_STANDARD_DEEPSEEK=deepseek-chat
           # Per-attempt CEILING, now clamped by the turn deadline rather than
-          # standing alone. 20000 here against a 25000ms `vova.timeout_ms` left
+          # standing alone. 20000 here against a 25000ms vova.timeout_ms left
           # 5000ms for everything else, so the fallback chain was unreachable by
           # arithmetic — a second provider could only ever help the NEXT message.
           #
@@ -403,7 +412,7 @@ jobs:
           # SDKs only.
           #
           # Why it matters: onnxruntime-node runs loadModel and run as SYNC
-          # native calls on the main thread — `setImmediate` defers scheduling,
+          # native calls on the main thread — setImmediate defers scheduling,
           # not execution. While the ~3.9s cold start runs, NO TIMER FIRES.
           # On 2026-09-01 that ate an entire 25s VoVa turn before a single model
           # call, and made an unrelated WhatsApp markAsRead report a bogus 15s
@@ -412,12 +421,12 @@ jobs:
           # through that one blocking session.
           #
           # DEVELOP ONLY for now, deliberately. Before promoting to production,
-          # measure on the VPS: `docker stats` RSS before/after, `free -m`
-          # headroom, and the `Vova embedder warmed in Xms` boot line. The risk
+          # measure on the VPS: docker stats RSS before/after, free -m
+          # headroom, and the Vova embedder warmed in Xms boot line. The risk
           # is NOT /health — that checks V8 heap (limit 320MB) and these are
           # native/mmap allocations, and QdrantService already blocks the loop
           # at boot loading 636MB of its own ONNX models today. The risk is host
-          # RAM: `docker-compose.prod.yml` sets no memory cap on `api`, so
+          # RAM: docker-compose.prod.yml sets no memory cap on api, so
           # overshooting means the kernel OOM-killer, which can take neighbouring
           # containers with it.
           VOVA_WARMUP=true
