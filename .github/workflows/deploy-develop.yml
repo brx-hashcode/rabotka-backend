@@ -403,6 +403,19 @@ jobs:
           # Chain order stays a preference: a leader landing inside this
           # window beats a faster lower-priority run.
           VOVA_RACE_PREFERENCE_GRACE_MS=800
+          # Health-ordered chain. The scoreboard is written regardless so the
+          # gauges have data; only the REORDERING is gated. Enable after a
+          # week of watching vova_llm_health_score and _chain_position.
+          VOVA_HEALTH_ENABLED=false
+          VOVA_HEALTH_ALPHA=0.3
+          # Shortish on purpose: a demoted provider's entry must expire so it
+          # gets retried. That loop is the self-healing.
+          VOVA_HEALTH_TTL_S=900
+          VOVA_HEALTH_DEFAULT_MS=4000
+          VOVA_HEALTH_PRIOR=3
+          # An override for outliers, not a replacement for the hand-tuned
+          # order — a free sort would rewrite the chain on noise.
+          VOVA_HEALTH_MIN_GAIN_RATIO=1.25
           VOVA_LLM_RETRY_BACKOFF_MS=250
           # Gemini is a thinking model, and unconstrained it spent 5116ms on a
           # turn whose whole output was a 28-token tool call, then stalled past

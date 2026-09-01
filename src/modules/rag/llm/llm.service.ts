@@ -35,7 +35,9 @@ import {
 } from './llm.types';
 import {
   llmCacheReadTokenCounter,
+  llmChainPositionGauge,
   llmFallbackCounter,
+  llmHealthScoreGauge,
   llmInputTokenCounter,
   llmLatencyHistogram,
   llmRequestCounter,
@@ -96,6 +98,12 @@ export class LlmService {
   /** Config warnings already emitted, so a permanent problem is logged once. */
   private readonly warned = new Set<string>();
 
+  private readonly healthEnabled: boolean;
+  /** Assumed latency for a provider with no recent traffic. */
+  private readonly healthDefaultMs: number;
+  private readonly healthPrior: number;
+  private readonly healthMinGainRatio: number;
+
   constructor(
     private readonly factory: LlmModelFactory,
     private readonly breaker: LlmBreakerService,
@@ -113,6 +121,19 @@ export class LlmService {
       7000,
     );
     this.minCallMs = readNumber(config, 'VOVA_LLM_MIN_CALL_MS', 1500);
+
+    // Ships dark. The scoreboard is written from the first deploy so the gauges
+    // have real data to look at, but nothing reorders until this is turned on —
+    // a chain that rearranges itself is not something to debug for the first
+    // time during an incident.
+    this.healthEnabled = config.get<string>('VOVA_HEALTH_ENABLED') === 'true';
+    this.healthDefaultMs = readNumber(config, 'VOVA_HEALTH_DEFAULT_MS', 4000);
+    this.healthPrior = readNumber(config, 'VOVA_HEALTH_PRIOR', 3);
+    this.healthMinGainRatio = readNumber(
+      config,
+      'VOVA_HEALTH_MIN_GAIN_RATIO',
+      1.25,
+    );
   }
 
   /**
@@ -186,7 +207,73 @@ export class LlmService {
     });
 
     const open = await Promise.all(chain.map((s) => this.breaker.isOpen(s)));
-    return chain.filter((_, i) => !open[i]);
+    const usable = chain.filter((_, i) => !open[i]);
+
+    return this.healthEnabled ? await this.orderByHealth(usable) : usable;
+  }
+
+  /**
+   * Promote a provider past the one ahead of it, but only decisively.
+   *
+   * NOT a free sort by score. `models.config.ts` argues at length for why each
+   * entry sits where it does, and re-sorting on noise would quietly discard all
+   * of it — a provider 5% faster this minute is not evidence of anything. The
+   * static order stays the default and this is an override for outliers: one
+   * bubble pass, promoting only past `VOVA_HEALTH_MIN_GAIN_RATIO`.
+   *
+   * The score is expected latency — observed latency divided by success rate —
+   * so a fast provider that fails a third of its calls ranks below a steady
+   * slower one, which is the trade a WhatsApp budget actually wants.
+   */
+  private async orderByHealth(
+    chain: LlmProviderSpec[],
+  ): Promise<LlmProviderSpec[]> {
+    if (chain.length < 2) return chain;
+
+    const health = await this.breaker.health(chain);
+    if (health.size === 0) return chain;
+
+    const scoreOf = (spec: LlmProviderSpec): number => {
+      const h = health.get(specId(spec));
+      const latency = h?.ewmaMs ?? this.healthDefaultMs;
+      // Beta smoothing with a prior, so one lucky sample cannot promote an
+      // unproven provider to the head of the chain.
+      const ok = h?.ok ?? 0;
+      const fail = h?.fail ?? 0;
+      const p = (ok + this.healthPrior) / (ok + fail + 2 * this.healthPrior);
+      const score = latency / Math.max(p, 0.05);
+
+      llmHealthScoreGauge.set(
+        { provider: spec.provider, model: spec.model },
+        score,
+      );
+      return score;
+    };
+
+    const ordered = [...chain];
+    for (let i = 1; i < ordered.length; i++) {
+      if (
+        scoreOf(ordered[i]) * this.healthMinGainRatio <
+        scoreOf(ordered[i - 1])
+      ) {
+        const promoted = ordered[i];
+        this.logger.debug(
+          `Promoting ${specId(promoted)} ahead of ${specId(ordered[i - 1])} ` +
+            `on observed health`,
+        );
+        ordered[i] = ordered[i - 1];
+        ordered[i - 1] = promoted;
+      }
+    }
+
+    ordered.forEach((spec, position) => {
+      llmChainPositionGauge.set(
+        { provider: spec.provider, model: spec.model },
+        position,
+      );
+    });
+
+    return ordered;
   }
 
   /** Config problems are permanent; logging one per message would bury them. */
@@ -218,8 +305,10 @@ export class LlmService {
 
     try {
       const output = await this.callWithRetry(spec, input, options, telemetry);
-      await this.breaker.recordSuccess(spec);
       telemetry.latencyMs = Date.now() - startedAt;
+      // Latency is handed over here, on the ONE path where the call actually
+      // succeeded — a failure's duration must never reach the moving average.
+      await this.breaker.recordSuccess(spec, telemetry.latencyMs);
       this.readUsage(output, telemetry);
       this.log(telemetry, options.correlationId, 'ok');
       return { output, telemetry };
