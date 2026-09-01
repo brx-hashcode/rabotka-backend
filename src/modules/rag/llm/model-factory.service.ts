@@ -1,9 +1,33 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
+// `import type` only — erased at compile time, so this costs none of the heap
+// the runtime `import()`s below are carefully avoiding.
+import type { GoogleGenerativeAIChatInput } from '@langchain/google-genai';
 import { PROVIDER_API_KEY_ENV } from './models.config';
 import { specId, type LlmProviderSpec } from './llm.types';
 import { readNumber } from '../shared/config';
+
+/**
+ * Derived from the SDK's public input type rather than imported directly:
+ * `GoogleGenerativeAIThinkingLevel` lives in the package's internal
+ * `types.d.ts` and is re-exported from neither the root nor a subpath, so
+ * naming it would mean a deep import into `dist/`. Reaching it through
+ * `thinkingConfig` keeps us on the supported surface and still fails the build
+ * if the vendor changes the shape.
+ */
+type GoogleThinkingConfig = NonNullable<
+  GoogleGenerativeAIChatInput['thinkingConfig']
+>;
+type GoogleThinkingLevel = NonNullable<GoogleThinkingConfig['thinkingLevel']>;
+
+/** Accepted values of `VOVA_GOOGLE_THINKING_LEVEL`, plus our own `off`. */
+const THINKING_LEVELS = new Set<GoogleThinkingLevel>([
+  'THINKING_LEVEL_UNSPECIFIED',
+  'LOW',
+  'MEDIUM',
+  'HIGH',
+]);
 
 /**
  * The only file in the application allowed to import a provider SDK.
@@ -22,19 +46,43 @@ export class LlmModelFactory {
 
   constructor(private readonly config: ConfigService) {}
 
+  /**
+   * Can this spec actually be built?
+   *
+   * Reads the SAME source `build` does, which `models.config.ts`'s
+   * `hasCredential` does not: that one inspects `process.env` directly, while
+   * everything here goes through `ConfigService` — which is populated from
+   * `.env.local`/`.env`, cached at boot, and runs `expandVariables`. The two
+   * can therefore disagree, and the direction that hurts is a provider passing
+   * the static gate and then failing here: `build` throws a plain Error, which
+   * classifies as `transport` and trips the provider's breaker for a
+   * misconfiguration of ours.
+   *
+   * That was survivable while the chain was walked one provider at a time. Once
+   * runs are raced it is not — a miswired provider would consume a race slot on
+   * every turn and take a healthy vendor's breaker down with it.
+   */
+  hasCredential(spec: LlmProviderSpec): boolean {
+    const key = this.config.get<string>(PROVIDER_API_KEY_ENV[spec.provider]);
+    return typeof key === 'string' && key.trim().length > 0;
+  }
+
   async build(spec: LlmProviderSpec): Promise<BaseChatModel> {
     const cached = this.cache.get(specId(spec));
     if (cached) return cached;
 
-    const apiKey = this.config.get<string>(PROVIDER_API_KEY_ENV[spec.provider]);
-    if (!apiKey || apiKey.trim().length === 0) {
-      // resolveChain() filters these out before we get here; reaching this is a
+    if (!this.hasCredential(spec)) {
+      // `usableChain()` filters these out before we get here; reaching this is a
       // wiring bug, and it is worth saying so rather than failing later with an
       // opaque 401 from the vendor.
       throw new Error(
         `No ${PROVIDER_API_KEY_ENV[spec.provider]} configured for ${specId(spec)}`,
       );
     }
+
+    const apiKey = this.config.get<string>(
+      PROVIDER_API_KEY_ENV[spec.provider],
+    ) as string;
 
     const model = await this.construct(spec, apiKey.trim());
     this.cache.set(specId(spec), model);
@@ -91,6 +139,7 @@ export class LlmModelFactory {
         return new ChatGoogleGenerativeAI({
           ...shared,
           model: spec.model,
+          ...this.thinkingFor(spec),
         }) as unknown as BaseChatModel;
       }
       case 'mistral': {
@@ -125,5 +174,44 @@ export class LlmModelFactory {
         }) as unknown as BaseChatModel;
       }
     }
+  }
+
+  /**
+   * Cap what a Gemini model is allowed to think before it answers.
+   *
+   * Unconstrained, `gemini-3.6-flash` spent 5116ms on a turn whose entire output
+   * was a 28-token tool call, then stalled a second step past the 20s per-call
+   * cap — which expired the whole turn budget before the chain could reach a
+   * second provider. Thinking is priced in wall-clock on a WhatsApp budget, and
+   * this assistant's turns are lookups, not proofs.
+   *
+   * Two shapes, not one, because the vendor changed the contract mid-generation:
+   * 2.x accepts `thinkingBudget: 0` to disable thinking outright, while 3.x
+   * rejects it and requires a level of at least LOW. Encoding both keeps `off`
+   * available where it works and failing loudly where it does not — preferable
+   * to a single default that is silently wrong for half the chain.
+   */
+  private thinkingFor(spec: LlmProviderSpec): {
+    thinkingConfig: GoogleThinkingConfig;
+  } {
+    const raw = (
+      this.config.get<string>('VOVA_GOOGLE_THINKING_LEVEL') ?? 'LOW'
+    ).trim();
+
+    if (raw === 'off') return { thinkingConfig: { thinkingBudget: 0 } };
+
+    if (!THINKING_LEVELS.has(raw as GoogleThinkingLevel)) {
+      // Not fatal: a typo in an env var should not take the assistant down, and
+      // LOW is the value we would have chosen anyway. It IS worth a warning,
+      // because the symptom otherwise is "latency never improved".
+      this.logger.warn(
+        `VOVA_GOOGLE_THINKING_LEVEL="${raw}" is not a valid level for ` +
+          `${specId(spec)} — falling back to LOW. Valid: ` +
+          `${[...THINKING_LEVELS].join(', ')}, off.`,
+      );
+      return { thinkingConfig: { thinkingLevel: 'LOW' } };
+    }
+
+    return { thinkingConfig: { thinkingLevel: raw as GoogleThinkingLevel } };
   }
 }
