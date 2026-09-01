@@ -118,3 +118,30 @@ export const llmCircuitStateGauge = new Gauge({
   labelNames: ['provider', 'model'] as const,
   registers: [appMetricsRegistry],
 });
+
+/**
+ * Expected latency per provider: observed latency divided by success rate.
+ *
+ * The number the chain is ordered by when `VOVA_HEALTH_ENABLED` is on. Exported
+ * before the ordering is enabled deliberately — watch this for a week, then
+ * decide whether to let it move anything.
+ */
+export const llmHealthScoreGauge = new Gauge({
+  name: 'vova_llm_health_score',
+  help: 'VoVa LLM expected latency in ms, latency over success rate',
+  labelNames: ['provider', 'model'] as const,
+  registers: [appMetricsRegistry],
+});
+
+/**
+ * Where each provider sits in the chain after health ordering, 0 first.
+ *
+ * Watching this flip is how you see the scoreboard working — or thrashing,
+ * which is the failure mode to alert on.
+ */
+export const llmChainPositionGauge = new Gauge({
+  name: 'vova_llm_chain_position',
+  help: 'VoVa LLM provider position in the resolved chain, 0 is first',
+  labelNames: ['provider', 'model'] as const,
+  registers: [appMetricsRegistry],
+});

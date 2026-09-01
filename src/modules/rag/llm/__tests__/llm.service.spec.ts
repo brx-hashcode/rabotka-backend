@@ -395,6 +395,124 @@ describe('LlmService', () => {
     });
   });
 
+  /**
+   * Ordering the chain on what providers have actually been doing.
+   *
+   * Ships dark: the scoreboard is written from day one so the gauges have real
+   * data, but nothing moves until VOVA_HEALTH_ENABLED is on.
+   */
+  describe('health ordering', () => {
+    const healthyFactory = () =>
+      ({ hasCredential: () => true, build: jest.fn() }) as never;
+
+    const breakerWithHealth = (
+      entries: Record<
+        string,
+        { ewmaMs: number | null; ok: number; fail: number }
+      >,
+    ) => ({
+      isOpen: jest.fn(() => Promise.resolve(false)),
+      recordFailure: jest.fn(() => Promise.resolve(false)),
+      recordSuccess: jest.fn(() => Promise.resolve()),
+      health: jest.fn(() => Promise.resolve(new Map(Object.entries(entries)))),
+    });
+
+    const enabled = (extra: Record<string, number> = {}) => ({
+      get: jest.fn((key: string, fallback: unknown) => {
+        if (key === 'VOVA_HEALTH_ENABLED') return 'true';
+        return extra[key] ?? fallback;
+      }),
+    });
+
+    it('leaves the order alone while the flag is off', async () => {
+      const breaker = breakerWithHealth({
+        [SECOND]: { ewmaMs: 100, ok: 100, fail: 0 },
+        [FIRST]: { ewmaMs: 9000, ok: 100, fail: 0 },
+      });
+
+      const chain = await build(healthyFactory(), breaker as never).usableChain(
+        'standard',
+      );
+
+      expect(chain.map(specId)[0]).toBe(FIRST);
+      expect(breaker.health).not.toHaveBeenCalled();
+    });
+
+    it('promotes a decisively faster provider past the leader', async () => {
+      const chain = await new LlmService(
+        healthyFactory(),
+        breakerWithHealth({
+          [FIRST]: { ewmaMs: 9000, ok: 50, fail: 0 },
+          [SECOND]: { ewmaMs: 800, ok: 50, fail: 0 },
+        }) as never,
+        enabled() as never,
+      ).usableChain('standard');
+
+      expect(chain.map(specId)[0]).toBe(SECOND);
+    });
+
+    it('does NOT reorder on a marginal difference', async () => {
+      // A provider 10% quicker this minute is noise. Re-sorting on it would
+      // quietly discard the reasoning models.config.ts spends 60 lines on.
+      const chain = await new LlmService(
+        healthyFactory(),
+        breakerWithHealth({
+          [FIRST]: { ewmaMs: 1000, ok: 50, fail: 0 },
+          [SECOND]: { ewmaMs: 900, ok: 50, fail: 0 },
+        }) as never,
+        enabled() as never,
+      ).usableChain('standard');
+
+      expect(chain.map(specId)[0]).toBe(FIRST);
+    });
+
+    it('ranks a flaky fast provider below a steady slower one', async () => {
+      // Expected latency, not raw latency: failing a third of calls costs more
+      // than being somewhat slower.
+      const chain = await new LlmService(
+        healthyFactory(),
+        breakerWithHealth({
+          [FIRST]: { ewmaMs: 1200, ok: 100, fail: 0 },
+          [SECOND]: { ewmaMs: 400, ok: 20, fail: 40 },
+        }) as never,
+        enabled() as never,
+      ).usableChain('standard');
+
+      expect(chain.map(specId)[0]).toBe(FIRST);
+    });
+
+    it('does not promote an unproven provider on one lucky sample', async () => {
+      // Beta smoothing with a prior is what stops a single fast call from
+      // taking the head of the chain.
+      const chain = await new LlmService(
+        healthyFactory(),
+        breakerWithHealth({
+          [FIRST]: { ewmaMs: 1500, ok: 500, fail: 0 },
+          [SECOND]: { ewmaMs: 900, ok: 1, fail: 0 },
+        }) as never,
+        enabled() as never,
+      ).usableChain('standard');
+
+      expect(chain.map(specId)[0]).toBe(FIRST);
+    });
+
+    it('keeps the static order when Redis gives nothing back', async () => {
+      const chain = await new LlmService(
+        healthyFactory(),
+        {
+          isOpen: jest.fn(() => Promise.resolve(false)),
+          recordFailure: jest.fn(),
+          recordSuccess: jest.fn(),
+          health: jest.fn(() => Promise.resolve(new Map())),
+        } as never,
+        enabled() as never,
+      ).usableChain('standard');
+
+      // Same posture as `isOpen`: an unreachable Redis must not change routing.
+      expect(chain.map(specId)).toEqual(CHAIN);
+    });
+  });
+
   describe('deadline', () => {
     const hangingFactory = () => ({
       calls: [] as string[],
