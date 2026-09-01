@@ -36,16 +36,28 @@ describe('models.config', () => {
     expect(keyFor('anthropic')).toBe('ANTHROPIC_API_KEY');
   });
 
-  it('pins Google to a real model id rather than a moving alias', () => {
+  it('pins the capable Google model to a real id rather than a moving alias', () => {
     // Second time this chain has been broken by a Google id. `gemini-2.0-flash`
     // was retired and 404'd; the answer then was `-latest` aliases, on the
     // theory that an alias cannot be retired. Then `gemini-flash-latest`
     // stopped answering anyway — so an alias buys protection from retirement
     // and from nothing else, and a pinned id at least fails on the deploy that
     // introduced it.
-    const spec = TIER_CHAINS.standard.find((s) => s.provider === 'google');
-    expect(spec?.model).toBe('gemini-3.6-flash');
-    expect(spec?.model).not.toContain('latest');
+    //
+    // There are now TWO Google entries, so this cannot search by provider: the
+    // flash-lite one ahead of it is deliberately an alias (see below).
+    const google = TIER_CHAINS.standard.filter((s) => s.provider === 'google');
+    expect(google).toHaveLength(2);
+    expect(google.map((s) => s.model)).toContain('gemini-3.6-flash');
+  });
+
+  it('keeps the fast Google model on the alias that never stopped answering', () => {
+    // The asymmetry is measured, not sloppy. The id that broke was
+    // `gemini-flash-latest`; the LITE alias was never affected, and answers a
+    // tool-calling turn in ~1.4s against ~10s for `gemini-3.6-flash`. It leads
+    // the Google entries for that reason.
+    const [fast] = TIER_CHAINS.standard.filter((s) => s.provider === 'google');
+    expect(fast.model).toBe('gemini-flash-lite-latest');
   });
 
   it('names Anthropic with an undated model id', () => {
@@ -105,29 +117,52 @@ describe('models.config', () => {
       expect(providers).toContain('deepseek');
     });
 
-    it('leads with Google and keeps Anthropic next in line', () => {
-      // Google leads because it is the provider that actually has a credential.
-      // Anthropic sits second rather than at the back so that finishing the
-      // migration is "add the key, swap two entries" — not a hunt for where it
-      // was meant to go.
+    it('leads with two different vendors, so the race pair fails independently', () => {
+      // Position 1 and position 2 are what the agent races by default. Both on
+      // one vendor would make the hedge useless in exactly the case it exists
+      // for — that vendor being down or slow.
       const env = Object.fromEntries(
         Object.values(PROVIDER_API_KEY_ENV).map((k) => [k, 'k']),
       );
       const providers = resolveChain('standard', env).map((s) => s.provider);
 
-      expect(providers[0]).toBe('google');
-      expect(providers[1]).toBe('anthropic');
+      expect(providers[0]).toBe('openai');
+      expect(providers[1]).toBe('google');
+      expect(providers[0]).not.toBe(providers[1]);
     });
 
-    it('leads with Google on the credentials actually configured today', () => {
-      // The realistic case, and the one that broke: no Anthropic key. Google
-      // still has to lead, and Mistral still has to be what catches it.
-      const providers = resolveChain('standard', {
+    it('puts a non-thinking model at the head of the chain', () => {
+      // The incident this order came from: `gemini-3.6-flash` is a thinking
+      // model, spent 5116ms emitting a 28-token tool call, then stalled past the
+      // per-call cap and expired the whole turn budget. The head of the chain
+      // answers most turns, so it must be the model whose latency does not
+      // depend on a vendor-side reasoning budget.
+      const env = Object.fromEntries(
+        Object.values(PROVIDER_API_KEY_ENV).map((k) => [k, 'k']),
+      );
+      const chain = resolveChain('standard', env);
+
+      expect(chain[0].model).toBe('gpt-4o-mini');
+      // …and the thinking model it replaced is still there, just not first.
+      const thinking = chain.findIndex((s) => s.model === 'gemini-3.6-flash');
+      expect(thinking).toBeGreaterThan(0);
+    });
+
+    it('still reaches both Google models when only Google and Mistral are keyed', () => {
+      // The local-development case. Two Google entries means one absent
+      // credential no longer collapses the chain to a single model.
+      const specs = resolveChain('standard', {
         GOOGLE_API_KEY: 'g',
         MISTRAL_API_KEY: 'm',
-      }).map((s) => s.provider);
+      });
 
-      expect(providers).toEqual(['google', 'mistral']);
+      expect(specs.map((s) => s.provider)).toEqual([
+        'google',
+        'google',
+        'mistral',
+      ]);
+      expect(specs[0].model).toBe('gemini-flash-lite-latest');
+      expect(specs[1].model).toBe('gemini-3.6-flash');
     });
 
     it('keeps Mistral ahead of Groq until the numbers say otherwise', () => {
@@ -155,8 +190,8 @@ describe('models.config', () => {
       delete env.ANTHROPIC_API_KEY;
       const providers = resolveChain('standard', env).map((s) => s.provider);
 
-      expect(providers[0]).toBe('google');
-      expect(providers[1]).toBe('mistral');
+      expect(providers[0]).toBe('openai');
+      expect(providers[1]).toBe('google');
       expect(providers).not.toContain('anthropic');
     });
 
