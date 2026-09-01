@@ -234,7 +234,7 @@ jobs:
           SMTP_FROM_NAME=Rabotka
           PDF_OWNER_PASSWORD=password
           APP_ENV=prod
-          ARCJET_ENV=production
+          ARCJET_ENV=development
           API_DOMAIN=${{ secrets.PROD_API_DOMAIN }}
           # --- Vova assistant: model ids and budgets ---
           # Not secrets, so they are static here rather than Vault entries.
