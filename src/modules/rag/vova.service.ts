@@ -2,10 +2,15 @@ import { Injectable, Logger } from '@nestjs/common';
 import { AccountStatus, ProfileType, VerificationStatus } from '@prisma/client';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { bucketOf } from '../recommendation-engine/engine-rollout.service';
-import { VovaAgentService } from './agent/agent.service';
+import {
+  VovaAgentService,
+  type AgentReply,
+  type AnonymousAgentReply,
+} from './agent/agent.service';
 import {
   isAffirmation,
   isNavigationRequest,
+  isPureGreeting,
   offersNavigation,
 } from './agent/offer';
 import { VovaOfferStore } from './agent/offer.store';
@@ -13,6 +18,7 @@ import { VovaAnonymousStore } from './agent/anonymous.store';
 import { templateReply } from '../../common/constants/whatsapp-carousel';
 import { WHATSAPP_TEMPLATES } from '../../common/constants/whatsapp-templates';
 import { withTimeout } from './llm/llm.service';
+import { Deadline } from './llm/deadline';
 import { isWalled } from './agent/prompts';
 import { VOVA_CONFIG_KEYS } from './vova.constants';
 import { refusal } from './agent/refusals';
@@ -107,6 +113,15 @@ export class VovaService {
       // must silence it everywhere, not leave it answering strangers.
       if (enabled !== 'true' || anonymous !== 'true') return null;
 
+      // A bare hello, answered without a model call — and deliberately BEFORE
+      // the daily allowance is consumed. Spending one of a stranger's ten
+      // questions on « bonjour » would burn the budget on the one message that
+      // costs us nothing to answer.
+      if (isPureGreeting(text)) {
+        this.logger.log(`vova.greeting anonymous phone=${phone}`);
+        return { text: refusal('salutation'), offerAccount: false };
+      }
+
       const limit = Number(limitRaw);
       const withinBudget = await this.anonymous.consume(
         phone,
@@ -126,12 +141,30 @@ export class VovaService {
       const history = await this.anonymous.history(phone);
       const timeoutMs = Number(timeoutRaw) || 25000;
       const started = Date.now();
+      const deadline = Deadline.start(timeoutMs, 'vova-anon');
 
-      const reply = await withTimeout(
-        () => this.agent.handleAnonymous({ text, history, correlationId }),
-        timeoutMs,
-        'vova-anon',
-      );
+      // The outer race stays as the belt to the deadline's braces: the signal
+      // is what lets each layer stop cleanly, the race is what protects the
+      // WhatsApp reply if something ignores the signal entirely.
+      let reply: AnonymousAgentReply;
+      try {
+        reply = await withTimeout(
+          () =>
+            this.agent.handleAnonymous({
+              text,
+              history,
+              correlationId,
+              deadline,
+            }),
+          timeoutMs,
+          'vova-anon',
+          deadline.signal,
+        );
+      } finally {
+        // Not optional: without it every message leaves a live 25s timer
+        // behind, and anything still running for this turn keeps going.
+        deadline.dispose();
+      }
 
       this.logger.log(
         `vova.anon phone=${phone} origin=${reply.origin} ` +
@@ -197,6 +230,19 @@ export class VovaService {
         }
       }
 
+      // A bare « bonjour », answered with no model call for the same reason as
+      // the « oui » above — except this one is also the single largest cost
+      // reduction available. A greeting routes to the standard tier (the agent
+      // always binds tools, so the cheap tier is unreachable), which means a
+      // 4508-token prompt and a 12-tool graph to say hello.
+      //
+      // Exact match only: « bonjour, combien coûte un déblocage ? » is a
+      // question and must reach the model.
+      if (isPureGreeting(text)) {
+        this.logger.log(`vova.greeting profile=${profile.id}`);
+        return shadow ? null : [refusal('salutation')];
+      }
+
       // Meter a profile behind a wall before the model runs.
       //
       // Placed here, after the affirmation shortcut and before the call: that
@@ -227,25 +273,39 @@ export class VovaService {
 
       const timeoutMs = Number(timeoutRaw) || 25000;
       const started = Date.now();
+      const deadline = Deadline.start(timeoutMs, 'vova');
 
-      const reply = await withTimeout(
-        () =>
-          this.agent.handle({
-            profileId: profile.id,
-            profileType: profile.profile_type,
-            firstName: profile.first_name,
-            verificationStatus: profile.verification_status,
-            accountStatus: profile.status,
-            // Not loaded on the hot path: the bot's profile query is shared by
-            // every message, and a categories join on all of them buys one line
-            // of prompt context. The agent asks `etat_du_profil` when it needs it.
-            categorySlugs: [],
-            text,
-            correlationId,
-          }),
-        timeoutMs,
-        'vova',
-      );
+      // The outer race stays as the belt to the deadline's braces: the signal
+      // is what lets each layer stop cleanly, the race is what protects the
+      // WhatsApp reply if something ignores the signal entirely.
+      let reply: AgentReply;
+      try {
+        reply = await withTimeout(
+          () =>
+            this.agent.handle({
+              profileId: profile.id,
+              profileType: profile.profile_type,
+              firstName: profile.first_name,
+              verificationStatus: profile.verification_status,
+              accountStatus: profile.status,
+              // Not loaded on the hot path: the bot's profile query is shared by
+              // every message, and a categories join on all of them buys one line
+              // of prompt context. The agent asks `etat_du_profil` when it needs it.
+              categorySlugs: [],
+              text,
+              correlationId,
+              deadline,
+            }),
+          timeoutMs,
+          'vova',
+          deadline.signal,
+        );
+      } finally {
+        // Not optional: without it every message leaves a live 25s timer
+        // behind on the hottest path in the bot, and the work this turn
+        // started keeps running after the user has been answered.
+        deadline.dispose();
+      }
 
       const elapsed = Date.now() - started;
 

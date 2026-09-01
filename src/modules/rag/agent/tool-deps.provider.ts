@@ -91,4 +91,94 @@ export class ToolDepsProvider implements OnApplicationBootstrap {
     this.cached = deps;
     return deps;
   }
+
+  /**
+   * The same dependencies, memoised for the length of ONE turn.
+   *
+   * Safe because every method reachable here is read-only by construction —
+   * `read-only.ts` allow-lists the reads per service and a runtime Proxy
+   * refuses anything else — so serving a repeat call from the turn's own cache
+   * cannot change what the assistant does, only how many times it asks.
+   *
+   * It pays three times over:
+   *
+   *  - **Raced runs.** Two runs answering the same question ask the same
+   *    questions of Postgres. Without this, racing doubles database load for
+   *    nothing; with it, the second run's lookups are free.
+   *  - **Sequential failover.** A run restarting on the next provider replays
+   *    the first one's lookups from memory. This is the recoverable part of
+   *    "restarting discards completed work" — and it gets there WITHOUT
+   *    touching the message history, so it goes nowhere near Gemini's
+   *    `thought_signature` constraint, which is what makes the tempting version
+   *    of that fix unshippable.
+   *  - **Within one run.** The react loop asks `etat_du_profil` more than once
+   *    in a conversation more often than you would hope.
+   *
+   * Staleness is bounded by the turn's own deadline — 25s — and by nothing here
+   * being able to write. A fresh instance per turn, so nothing leaks between
+   * conversations.
+   */
+  getForTurn(): ToolDeps {
+    const base = this.get();
+    const memo = new Map<string, unknown>();
+
+    const wrap = <T extends object>(service: T, name: string): T =>
+      new Proxy(service, {
+        get(target, prop, receiver) {
+          const value = Reflect.get(target, prop, receiver) as unknown;
+          if (typeof value !== 'function') return value;
+
+          return (...args: unknown[]) => {
+            // Arguments are ids, slugs and small option objects, so this is
+            // cheap and stable. A key that cannot be built (a circular arg, a
+            // callback) falls through to calling the real method rather than
+            // guessing — correctness first, caching second.
+            let key: string;
+            try {
+              key = `${name}.${String(prop)}(${JSON.stringify(args)})`;
+            } catch {
+              return (value as (...a: unknown[]) => unknown).apply(
+                target,
+                args,
+              );
+            }
+
+            if (memo.has(key)) return memo.get(key);
+
+            const result = (value as (...a: unknown[]) => unknown).apply(
+              target,
+              args,
+            );
+
+            // A rejected promise must NOT stay in the cache: a transient
+            // failure would otherwise be replayed for the rest of the turn,
+            // including to the very fallback run started to escape it.
+            if (result instanceof Promise) {
+              memo.set(
+                key,
+                result.catch((err: unknown) => {
+                  memo.delete(key);
+                  throw err;
+                }),
+              );
+              return memo.get(key);
+            }
+
+            memo.set(key, result);
+            return result;
+          };
+        },
+      });
+
+    return {
+      profiles: wrap(base.profiles, 'profiles'),
+      jobOffers: wrap(base.jobOffers, 'jobOffers'),
+      applications: wrap(base.applications, 'applications'),
+      wallet: wrap(base.wallet, 'wallet'),
+      unlock: wrap(base.unlock, 'unlock'),
+      systemConfig: wrap(base.systemConfig, 'systemConfig'),
+      help: wrap(base.help, 'help'),
+      categories: wrap(base.categories, 'categories'),
+    };
+  }
 }

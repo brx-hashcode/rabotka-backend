@@ -42,46 +42,97 @@ export const TIER_CHAINS: Record<LlmTier, LlmProviderSpec[]> = {
       model: modelId('VOVA_MODEL_CHEAP_GOOGLE', 'gemini-flash-lite-latest'),
     },
   ],
-  // Google first, Anthropic second — and the ORDER here is a deployment fact,
-  // not a quality judgement: there is no Anthropic credential yet, so Haiku
-  // cannot lead a chain it would be filtered straight out of.
+  // ORDER IS THE FALLBACK ORDER, and — once the agent races runs — also the
+  // PREFERENCE order: position 1 gets an exclusive head start, and wins a near
+  // tie against anything below it. So the head of this list is the model that
+  // answers most turns, not merely the one tried first.
   //
-  // Anthropic sits second deliberately rather than at the back. It is still the
-  // intended destination — prompt caching makes the repeated system prompt and
-  // tool schemas ~10% of their input cost — and keeping it here means the
-  // migration completes by adding a key, then swapping two entries, instead of
-  // rediscovering where it was supposed to go.
+  // Reordered after a production incident where the turn budget expired before
+  // the chain could reach position 2 at all. The log:
   //
-  // Google's model id is `gemini-3.6-flash`, PINNED, and that is the second
-  // time this chain has been bitten by the same thing. `gemini-2.0-flash` was
-  // retired mid-project and answered 404 with "use models/gemini-3.6-flash";
-  // the fix then was to move to `-latest` aliases, on the theory that an alias
-  // cannot be retired. It cannot — but `gemini-flash-latest` stopped answering
-  // anyway, which is the failure an alias was supposed to make impossible.
+  //   step 1 · google/gemini-3.6-flash · 5116ms · a tool call
+  //   step 2 · stalled, then latency_ms=20007 — the per-attempt cap
+  //   …the 25s turn budget had already fired 4s earlier.
+  //
+  // Two facts drove the new order.
+  //
+  // FIRST: `gemini-3.6-flash` is a THINKING model, and nothing constrained its
+  // thinking budget. That is the 5116ms first step and the stalled second one.
+  // `model-factory.service.ts` now pins `thinkingLevel` (VOVA_GOOGLE_THINKING_LEVEL),
+  // but a model whose latency depends on a vendor-side reasoning budget is the
+  // wrong thing to put at the head of a WhatsApp chain regardless.
+  //
+  // SECOND: a non-thinking model with automatic prompt caching is worth more
+  // here than a nominally stronger one. The prefix is ~4.5k tokens (2.7k stable
+  // prompt + ~1.3k tool schemas) and it is re-sent on EVERY graph step, so the
+  // caching is not a rounding error — it is most of the bill.
+  //
+  // Hence:
+  //
+  //   1. openai/gpt-4o-mini      — non-thinking, so it cannot stall the way
+  //                                3.6-flash did; OpenAI caches any prefix over
+  //                                1024 tokens automatically, with no code and
+  //                                no `cache_control` key to get wrong.
+  //   2. google/gemini-flash-lite-latest
+  //                              — ~1.4s median on a tool-calling turn (the
+  //                                number measured for the cheap tier below),
+  //                                and a DIFFERENT VENDOR from position 1, which
+  //                                is what makes the default race pair fail
+  //                                independently. Same credential as position 4.
+  //   3. anthropic/claude-haiku-4-5
+  //                              — the only provider with explicit cache
+  //                                breakpoints wired (PROVIDERS_SUPPORTING_CACHE_CONTROL),
+  //                                taking the repeated prefix to ~10% of input
+  //                                cost. The credential now exists; the comment
+  //                                that used to say otherwise was stale.
+  //   4. google/gemini-3.6-flash — demoted from the lead, kept for capability.
+  //
+  // Positions 5-7 are unchanged and stay ordered by measured tool-calling
+  // latency. They are reached only when everything above is down.
+  //
+  // Google's `gemini-3.6-flash` id is PINNED, and that is the second time this
+  // chain has been bitten by the same thing. `gemini-2.0-flash` was retired
+  // mid-project and answered 404 with "use models/gemini-3.6-flash"; the fix
+  // then was to move to `-latest` aliases, on the theory that an alias cannot be
+  // retired. It cannot — but `gemini-flash-latest` stopped answering anyway,
+  // which is the failure an alias was supposed to make impossible.
   //
   // So the lesson is narrower than "prefer aliases": an alias protects against
   // RETIREMENT and against nothing else. Pinned, a bad id fails loudly on the
   // deploy that introduced it. That is the trade taken here.
   standard: [
     {
+      provider: 'openai',
+      model: modelId('VOVA_MODEL_STANDARD_OPENAI', 'gpt-4o-mini'),
+    },
+    // Two Google entries, and `specId` is `provider:model`, so they carry
+    // SEPARATE breaker and health keys. That is deliberate: flash-lite going
+    // down must not pull 3.6-flash out of rotation with it.
+    {
       provider: 'google',
-      model: modelId('VOVA_MODEL_STANDARD_GOOGLE', 'gemini-3.6-flash'),
+      model: modelId(
+        'VOVA_MODEL_STANDARD_GOOGLE_FAST',
+        'gemini-flash-lite-latest',
+      ),
     },
     {
       provider: 'anthropic',
       model: modelId('VOVA_MODEL_STANDARD_ANTHROPIC', 'claude-haiku-4-5'),
     },
-    // Mistral third, on measured evidence: in production logs
+    {
+      provider: 'google',
+      model: modelId('VOVA_MODEL_STANDARD_GOOGLE', 'gemini-3.6-flash'),
+    },
+    // Mistral next, on measured evidence: in production logs
     // `gemini-flash-latest` (a thinking model) times out or takes 4–17s on a
     // tool-calling turn, while `mistral-small` answers the same turn in
-    // ~1.3–2.7s. That number is about the model ABOVE it in this list at the
-    // time — it was `gemini-flash-latest` then, and it is `gemini-3.6-flash`
-    // now, so the comparison no longer holds and wants re-measuring.
+    // ~1.3–2.7s. That number is about a model that no longer sits above it, so
+    // the comparison no longer holds and wants re-measuring.
     {
       provider: 'mistral',
       model: modelId('VOVA_MODEL_STANDARD_MISTRAL', 'mistral-small-latest'),
     },
-    // Groq third, not second.
+    // Groq after Mistral.
     //
     // Its whole selling point is latency, and on a WhatsApp budget that is the
     // metric that decides this chain — so it may well belong further forward.
@@ -97,13 +148,9 @@ export const TIER_CHAINS: Record<LlmTier, LlmProviderSpec[]> = {
       provider: 'groq',
       model: modelId('VOVA_MODEL_STANDARD_GROQ', 'llama-3.3-70b-versatile'),
     },
-    {
-      provider: 'openai',
-      model: modelId('VOVA_MODEL_STANDARD_OPENAI', 'gpt-4o-mini'),
-    },
-    // Last: capable and cheap, but the slowest of the five on a tool-calling
-    // turn. `deepseek-chat` is a moving alias — the property this file argues
-    // for everywhere else — so it cannot be retired out from under us.
+    // Last: capable and cheap, but the slowest on a tool-calling turn.
+    // `deepseek-chat` is a moving alias — the property this file argues for
+    // everywhere else — so it cannot be retired out from under us.
     {
       provider: 'deepseek',
       model: modelId('VOVA_MODEL_STANDARD_DEEPSEEK', 'deepseek-chat'),

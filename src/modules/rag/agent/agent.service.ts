@@ -10,7 +10,12 @@ import type { StructuredToolInterface } from '@langchain/core/tools';
 import { AccountStatus, ProfileType, VerificationStatus } from '@prisma/client';
 import { LlmService } from '../llm/llm.service';
 import { LlmRouterService } from '../llm/router.service';
-import type { LlmCallTelemetry } from '../llm/llm.types';
+import {
+  specId,
+  type LlmCallTelemetry,
+  type LlmProviderSpec,
+} from '../llm/llm.types';
+import type { Deadline } from '../llm/deadline';
 import { JobCategoryRegistry } from '../intents/job-category.registry';
 import { FallbackChatModel } from './fallback-chat-model';
 import { GuardService, isAbusive } from './guard.service';
@@ -23,7 +28,7 @@ import {
 import { refusal, type RefusalId } from './refusals';
 import { LlmFatalError } from '../llm/llm.errors';
 import { classifyLlmError } from '../llm/error-classification';
-import { llmFallbackCounter } from '../llm/metrics';
+import { hedgeCounter, llmFallbackCounter } from '../llm/metrics';
 import { buildAnonymousTools, buildTools } from './tools';
 import { ToolDepsProvider } from './tool-deps.provider';
 import { readNumber } from '../shared/config';
@@ -40,6 +45,13 @@ export interface AgentRequest {
   categorySlugs: string[];
   text: string;
   correlationId?: string;
+  /**
+   * The turn's wall-clock budget, threaded down to every model call.
+   *
+   * Optional so callers that do not meter a turn (tests, scripts) still work —
+   * `LlmService` falls back to the flat per-call cap when it is absent.
+   */
+  deadline?: Deadline;
 }
 
 /** One turn of an anonymous conversation, as held in Redis. */
@@ -53,6 +65,8 @@ export interface AnonymousAgentRequest {
   /** Recent turns for this phone. Empty is normal, not an error. */
   history: AnonymousTurn[];
   correlationId?: string;
+  /** The turn's wall-clock budget, threaded down to every model call. */
+  deadline?: Deadline;
 }
 
 export interface AnonymousAgentReply {
@@ -100,10 +114,68 @@ function systemMessage(parts: SystemPromptParts): SystemMessage {
   });
 }
 
+/** One raced agent run, settled rather than rejected so `Promise.race` stays tractable. */
+type RunOutcome =
+  | {
+      i: number;
+      ok: true;
+      result: { messages: BaseMessage[] };
+      telemetry?: LlmCallTelemetry;
+    }
+  | { i: number; ok: false; err: unknown };
+
+interface InflightRun {
+  spec: LlmProviderSpec;
+  controller: AbortController;
+  p: Promise<RunOutcome>;
+}
+
+/** Distinguishes "the timer won the race" from "a run finished". */
+const GRACE_ELAPSED = Symbol('grace-elapsed');
+
+/**
+ * A sleep that can be cancelled.
+ *
+ * The cancel is load-bearing, not tidiness: this runs once per iteration of the
+ * scheduler loop, and an uncancelled timer per iteration leaks one live handle
+ * per hedge decision for the length of the turn.
+ */
+function sleepTagged(ms: number): {
+  promise: Promise<typeof GRACE_ELAPSED>;
+  cancel: () => void;
+} {
+  let timer: NodeJS.Timeout | undefined;
+  const promise = new Promise<typeof GRACE_ELAPSED>((resolve) => {
+    timer = setTimeout(() => resolve(GRACE_ELAPSED), ms);
+    timer.unref?.();
+  });
+  return { promise, cancel: () => clearTimeout(timer) };
+}
+
 @Injectable()
 export class VovaAgentService {
+  /**
+   * Hedges running across the whole process, not just this turn.
+   *
+   * Static because the thing being bounded is fleet load: a vendor-wide
+   * slowdown makes every concurrent turn want to hedge at the same instant,
+   * and a per-turn cap cannot see that.
+   */
+  private static hedgesInFlight = 0;
+
   private readonly logger = new Logger(VovaAgentService.name);
   private readonly maxIterations: number;
+  /** Least budget worth starting a whole agent run with. */
+  private readonly minRunMs: number;
+
+  private readonly hedgeEnabled: boolean;
+  /** Head start the leading provider gets alone. `0` starts everyone at once. */
+  private readonly hedgeMs: number;
+  private readonly hedgeMaxParallel: number;
+  private readonly hedgeMaxConcurrent: number;
+  private readonly hedgeMinRemainingMs: number;
+  /** How long a preferred run may still overtake one that finished first. */
+  private readonly raceGraceMs: number;
 
   constructor(
     private readonly llm: LlmService,
@@ -116,6 +188,25 @@ export class VovaAgentService {
     config: ConfigService,
   ) {
     this.maxIterations = readNumber(config, 'VOVA_MAX_TOOL_STEPS', 6);
+    this.minRunMs = readNumber(config, 'VOVA_MIN_RUN_MS', 5000);
+
+    // Off by default. Racing doubles token spend and database reads on the
+    // turns it fires, so it is enabled deliberately after the cheaper fixes
+    // have been measured — not inherited by anyone who upgrades.
+    this.hedgeEnabled = config.get<string>('VOVA_HEDGE_ENABLED') === 'true';
+    this.hedgeMs = readNumber(config, 'VOVA_HEDGE_MS', 3500);
+    this.hedgeMaxParallel = readNumber(config, 'VOVA_HEDGE_MAX_PARALLEL', 2);
+    this.hedgeMaxConcurrent = readNumber(
+      config,
+      'VOVA_HEDGE_MAX_CONCURRENT',
+      8,
+    );
+    this.hedgeMinRemainingMs = readNumber(
+      config,
+      'VOVA_HEDGE_MIN_REMAINING_MS',
+      8000,
+    );
+    this.raceGraceMs = readNumber(config, 'VOVA_RACE_PREFERENCE_GRACE_MS', 800);
   }
 
   /**
@@ -132,6 +223,7 @@ export class VovaAgentService {
     opts: {
       correlationId?: string;
       onTelemetry: (t: LlmCallTelemetry) => void;
+      deadline?: Deadline;
     },
   ): Promise<{ messages: BaseMessage[] }> {
     // Same reasoning as the provider SDKs: LangGraph is ~4 MB of heap that a
@@ -141,46 +233,272 @@ export class VovaAgentService {
     const chain = await this.llm.usableChain(tier);
     if (chain.length === 0) throw new Error(`no usable provider for ${tier}`);
 
+    const inflight = new Map<number, InflightRun>();
+    let next = 0;
     let lastError: unknown;
 
-    for (const [index, spec] of chain.entries()) {
+    /** Begin the run at chain position `i`. Never throws; settles into a RunOutcome. */
+    const start = (i: number): void => {
+      const spec = chain[i];
+      const controller = new AbortController();
+      const signal = opts.deadline
+        ? AbortSignal.any([controller.signal, opts.deadline.signal])
+        : controller.signal;
+
+      // A run-LOCAL telemetry slot, deliberately not `opts.onTelemetry`.
+      //
+      // That callback writes the caller's single `telemetry` variable, so two
+      // concurrent runs would race to be the last writer and the reply would be
+      // attributed to the loser about half the time. It is called exactly once,
+      // at the end, with whichever run actually won.
+      let telemetry: LlmCallTelemetry | undefined;
+
       const model = new FallbackChatModel({
         llm: this.llm,
         tier,
         spec,
         correlationId: opts.correlationId,
-        onTelemetry: opts.onTelemetry,
+        onTelemetry: (t) => {
+          telemetry = t;
+        },
+        deadline: opts.deadline ?? null,
+        // The last provider has nobody to save time for, so it may spend the
+        // whole remaining budget rather than holding a reserve back.
+        reserveMs: i === chain.length - 1 ? 0 : undefined,
       });
 
-      try {
-        // Same dual-package cast as the factory: the dynamically imported
-        // LangGraph sees the ESM type identities.
-        return await createReactAgent({
-          llm: model as never,
-          tools: tools as never,
-        }).invoke({ messages }, { recursionLimit: this.maxIterations * 2 });
-      } catch (err) {
-        lastError = err;
-        if (err instanceof LlmFatalError) throw err;
+      const isHedge = i > 0;
+      if (isHedge) {
+        hedgeCounter.inc({ provider: spec.provider, result: 'started' });
+        VovaAgentService.hedgesInFlight += 1;
+      }
+
+      const p = createReactAgent({
+        llm: model as never,
+        tools: tools as never,
+      })
+        // A copy of the messages per run: two graphs must never share a mutable
+        // input array. Cheap insurance against a class of bug that would only
+        // appear under concurrency.
+        .invoke(
+          { messages: [...messages] },
+          {
+            recursionLimit: this.maxIterations * 2,
+            // LangGraph checks this between graph nodes, so an expired turn —
+            // or a lost race — stops at the next step boundary instead of
+            // after another full model call.
+            signal,
+          },
+        )
+        .then(
+          (result): RunOutcome => ({ i, ok: true, result, telemetry }),
+          (err): RunOutcome => ({ i, ok: false, err }),
+        )
+        // Decremented when the run SETTLES, not when it is abandoned: an
+        // aborted graph keeps its slot until it actually stops, which is what
+        // makes the cap describe real load rather than intent.
+        .finally(() => {
+          if (isHedge) VovaAgentService.hedgesInFlight -= 1;
+        });
+
+      inflight.set(i, { spec, controller, p });
+    };
+
+    const abortRest = (): void => {
+      for (const [, run] of inflight) {
+        run.controller.abort();
+        hedgeCounter.inc({ provider: run.spec.provider, result: 'aborted' });
+      }
+      inflight.clear();
+    };
+
+    /**
+     * Chain order is a PREFERENCE, not just a start order.
+     *
+     * A lower-priority run finishing first does not automatically win: its
+     * answer is held for a grace window, and a higher-priority run landing
+     * inside that window is preferred. Without this, a flat race returns
+     * whichever model is fastest — which over a quality-diverse chain is
+     * reliably the weakest one, every single turn.
+     *
+     * Costs nothing on the common path: it only engages when a run EARLIER in
+     * the chain is still going, and it is clamped to the remaining budget.
+     */
+    const settle = async (
+      first: RunOutcome & { ok: true },
+    ): Promise<{ messages: BaseMessage[] }> => {
+      const preferred = [...inflight.keys()].filter((i) => i < first.i);
+
+      if (this.raceGraceMs > 0 && preferred.length > 0) {
+        const grace = Math.min(
+          this.raceGraceMs,
+          opts.deadline?.remainingMs() ?? this.raceGraceMs,
+        );
+        const timer = sleepTagged(grace);
+        try {
+          const winner = await Promise.race([
+            ...preferred.map((i) => inflight.get(i)!.p),
+            timer.promise,
+          ]);
+          if (winner !== GRACE_ELAPSED && winner.ok) {
+            inflight.delete(winner.i);
+            this.logger.debug(
+              `Preferred ${specId(chain[winner.i])} landed inside the ` +
+                `${grace}ms grace — using it over ${specId(chain[first.i])}`,
+            );
+            return finish(winner);
+          }
+        } finally {
+          timer.cancel();
+        }
+      }
+
+      return finish(first);
+    };
+
+    const finish = (
+      won: RunOutcome & { ok: true },
+    ): { messages: BaseMessage[] } => {
+      inflight.delete(won.i);
+      abortRest();
+      hedgeCounter.inc({
+        provider: chain[won.i].provider,
+        result: won.i === 0 ? 'won' : 'won_hedge',
+      });
+      if (won.telemetry) opts.onTelemetry(won.telemetry);
+      return won.result;
+    };
+
+    // Do not start a run that cannot finish. The direct fix for the orphaned
+    // work in the 2026-09-01 log: the user had already been sent the fallback
+    // card, and the chain went on to cold-import Anthropic's SDK, fail, and
+    // start Mistral — seconds of billed calls whose answer nobody would read.
+    const canStart = (i: number): boolean => {
+      if (i >= chain.length) return false;
+      const left = opts.deadline?.remainingMs();
+      if (left !== undefined && left < this.minRunMs) {
+        this.logger.warn(
+          `Skipping ${specId(chain[i])} — ${left}ms left in the turn, below ` +
+            `the ${this.minRunMs}ms floor for starting a run`,
+        );
+        return false;
+      }
+      return true;
+    };
+
+    if (!canStart(0)) throw new Error(`no budget to start a run for ${tier}`);
+    start(next++);
+
+    try {
+      while (inflight.size > 0) {
+        const hedge = this.canHedge(next, chain, inflight.size, opts.deadline)
+          ? sleepTagged(this.hedgeMs)
+          : null;
+
+        let settled: RunOutcome | typeof GRACE_ELAPSED;
+        try {
+          settled = await Promise.race([
+            ...[...inflight.values()].map((r) => r.p),
+            ...(hedge ? [hedge.promise] : []),
+          ]);
+        } finally {
+          hedge?.cancel();
+        }
+
+        // The hedge timer won: provider 1 is slow enough to be worth doubling
+        // up on. It is NOT cancelled — it may still win.
+        if (settled === GRACE_ELAPSED) {
+          // Re-checked HERE, not just when the timer was armed. The arming
+          // decision was made `hedgeMs` ago; under a vendor-wide slowdown every
+          // concurrent turn arms its timer while the process-wide count is
+          // still zero, and they then all fire together. Asking again at the
+          // moment of starting is what makes the cap bind at all — without it
+          // six simultaneous turns produced six hedges against a cap of two.
+          if (
+            this.canHedge(next, chain, inflight.size, opts.deadline) &&
+            canStart(next)
+          ) {
+            start(next++);
+          }
+          continue;
+        }
+
+        inflight.delete(settled.i);
+
+        if (settled.ok) return await settle(settled);
+
+        if (settled.err instanceof LlmFatalError) {
+          abortRest();
+          throw settled.err;
+        }
+
+        lastError = settled.err;
+
+        if (opts.deadline?.causedAbort()) {
+          this.logger.warn(
+            `Turn budget expired during ${specId(chain[settled.i])} — not advancing`,
+          );
+          break;
+        }
+
         // THE failover metric. `LlmService.invoke` has one too, but nothing
-        // reaches it: the agent pins one provider per run through
-        // `invokeWith`, so this loop — not that one — is where a conversation
-        // actually changes vendor. Counting only there would have produced a
-        // series that sits at zero through an outage.
+        // reaches it: the agent pins one provider per run through `invokeWith`,
+        // so this loop — not that one — is where a conversation actually
+        // changes vendor. Counting only there would have produced a series that
+        // sits at zero through an outage.
+        //
+        // A hedge STARTING is deliberately not counted here: it is not a
+        // failover, and conflating them makes this series unreadable.
         llmFallbackCounter.inc({
-          from: spec.provider,
-          to: chain[index + 1]?.provider ?? 'none',
-          reason: classifyLlmError(err),
+          from: chain[settled.i].provider,
+          to: chain[next]?.provider ?? 'none',
+          reason: classifyLlmError(settled.err),
+        });
+        hedgeCounter.inc({
+          provider: chain[settled.i].provider,
+          result: 'lost',
         });
         this.logger.warn(
-          `Agent run failed on ${spec.provider}/${spec.model} — restarting on the next provider`,
+          `Agent run failed on ${specId(chain[settled.i])} — ` +
+            `${inflight.size > 0 ? 'a parallel run is still going' : 'restarting on the next provider'}`,
         );
+
+        if (inflight.size === 0 && canStart(next)) start(next++);
       }
+    } finally {
+      abortRest();
     }
 
     throw lastError instanceof Error
       ? lastError
       : new Error('every provider failed to complete the agent run');
+  }
+
+  /**
+   * May a second (or third) run start alongside the ones already going?
+   *
+   * Every condition here is a brake, and the last one is the difference between
+   * racing as a latency tool and racing as an outage amplifier: without a
+   * process-wide cap, a vendor-wide slowdown makes EVERY concurrent turn hedge
+   * at once, doubling load on the database and on provider 2 at exactly the
+   * moment the system can least absorb it.
+   */
+  private canHedge(
+    next: number,
+    chain: LlmProviderSpec[],
+    inflightCount: number,
+    deadline?: Deadline,
+  ): boolean {
+    if (!this.hedgeEnabled) return false;
+    if (next >= chain.length) return false;
+    if (inflightCount >= this.hedgeMaxParallel) return false;
+    if (VovaAgentService.hedgesInFlight >= this.hedgeMaxConcurrent)
+      return false;
+
+    const left = deadline?.remainingMs();
+    if (left !== undefined && left < this.hedgeMinRemainingMs) return false;
+
+    return true;
   }
 
   /**
@@ -218,10 +536,17 @@ export class VovaAgentService {
     let telemetry: LlmCallTelemetry | undefined;
 
     try {
+      // One memo per turn, shared by the retrieval below and every tool call —
+      // so raced runs and a sequential failover replay each other's lookups
+      // from memory instead of re-hitting Postgres.
+      const deps = this.deps.getForTurn();
       const language = resolveLanguage(request.text, request.history);
-      const grounding = await this.deps
-        .get()
-        .help.search(request.text, undefined, 'anonymous', language !== 'fr');
+      const grounding = await deps.help.search(
+        request.text,
+        undefined,
+        'anonymous',
+        language !== 'fr',
+      );
 
       const messages: BaseMessage[] = [
         systemMessage(
@@ -250,10 +575,11 @@ export class VovaAgentService {
 
       const result = await this.runChain(
         messages,
-        buildAnonymousTools(this.deps.get()),
+        buildAnonymousTools(deps),
         tier,
         {
           correlationId: request.correlationId,
+          deadline: request.deadline,
           onTelemetry: (t) => {
             telemetry = t;
           },
@@ -382,16 +708,19 @@ export class VovaAgentService {
       const past = await this.history.recent(request.profileId);
       const language = resolveLanguage(request.text, past);
 
-      const grounding = await this.deps
-        .get()
-        .help.search(
-          request.text,
-          undefined,
-          request.profileType === ProfileType.WORKER ? 'worker' : 'employer',
-          language !== 'fr',
-        );
+      // One memo per turn, shared by the retrieval below and every tool call —
+      // so raced runs and a sequential failover replay each other's lookups
+      // from memory instead of re-hitting Postgres.
+      const deps = this.deps.getForTurn();
+
+      const grounding = await deps.help.search(
+        request.text,
+        undefined,
+        request.profileType === ProfileType.WORKER ? 'worker' : 'employer',
+        language !== 'fr',
+      );
       const tools = buildTools(
-        this.deps.get(),
+        deps,
         { profileId: request.profileId, profileType: request.profileType },
         knownCategorySlugs,
       );
@@ -429,6 +758,7 @@ export class VovaAgentService {
 
       const result = await this.runChain(messages, tools, tier, {
         correlationId: request.correlationId,
+        deadline: request.deadline,
         onTelemetry: (t) => {
           telemetry = t;
         },

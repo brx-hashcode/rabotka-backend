@@ -13,8 +13,16 @@ import { appMetricsRegistry } from '../../../common/telemetry/metrics';
  * either would cost the other's job.
  */
 
-/** Terminal outcome of one call, matching `LlmService.log`'s vocabulary. */
-export type LlmRequestStatus = 'ok' | 'fatal' | 'exhausted';
+/**
+ * Terminal outcome of one call, matching `LlmService.log`'s vocabulary.
+ *
+ * `deadline` is deliberately NOT a kind of `exhausted`. Exhausted means the
+ * provider failed; deadline means our turn budget ran out while it was still
+ * working, which is a statement about load and about the budget, not about the
+ * vendor. Folding them together would make a rate on this series answer
+ * "is a provider degrading?" and "are we over capacity?" with one number.
+ */
+export type LlmRequestStatus = 'ok' | 'fatal' | 'exhausted' | 'deadline';
 
 export const llmRequestCounter = new Counter({
   name: 'vova_llm_requests_total',
@@ -45,6 +53,31 @@ export const llmFallbackCounter = new Counter({
   name: 'vova_llm_fallback_total',
   help: 'VoVa LLM failovers from one provider to the next, by error class',
   labelNames: ['from', 'to', 'reason'] as const,
+  registers: [appMetricsRegistry],
+});
+
+/**
+ * Raced agent runs, by what became of each one.
+ *
+ * `started` counts a run begun alongside another rather than after it failing;
+ * `won` is the leading provider answering, `won_hedge` a later one overtaking
+ * it, `lost` a run that failed, `aborted` one cancelled because someone else
+ * had already answered.
+ *
+ * Note that `vova_llm_requests_total` and `vova_llm_latency_seconds` DO count
+ * the losing run's model calls. That is correct and must stay — those calls
+ * were made and billed. `vova_llm_hedge_total{result="lost"|"aborted"}` is what
+ * explains the gap between request count and turn count on a dashboard, so
+ * before "fixing" that discrepancy, read this comment.
+ *
+ * Kept separate from `vova_llm_fallback_total` deliberately: starting a hedge
+ * is not a failover, and folding the two together makes the series you would
+ * actually page on unreadable.
+ */
+export const hedgeCounter = new Counter({
+  name: 'vova_llm_hedge_total',
+  help: 'VoVa raced agent runs, by outcome',
+  labelNames: ['provider', 'result'] as const,
   registers: [appMetricsRegistry],
 });
 
@@ -82,6 +115,33 @@ export const llmCacheReadTokenCounter = new Counter({
 export const llmCircuitStateGauge = new Gauge({
   name: 'vova_llm_circuit_state',
   help: 'VoVa LLM circuit breaker state: 1 open, 0 closed',
+  labelNames: ['provider', 'model'] as const,
+  registers: [appMetricsRegistry],
+});
+
+/**
+ * Expected latency per provider: observed latency divided by success rate.
+ *
+ * The number the chain is ordered by when `VOVA_HEALTH_ENABLED` is on. Exported
+ * before the ordering is enabled deliberately — watch this for a week, then
+ * decide whether to let it move anything.
+ */
+export const llmHealthScoreGauge = new Gauge({
+  name: 'vova_llm_health_score',
+  help: 'VoVa LLM expected latency in ms, latency over success rate',
+  labelNames: ['provider', 'model'] as const,
+  registers: [appMetricsRegistry],
+});
+
+/**
+ * Where each provider sits in the chain after health ordering, 0 first.
+ *
+ * Watching this flip is how you see the scoreboard working — or thrashing,
+ * which is the failure mode to alert on.
+ */
+export const llmChainPositionGauge = new Gauge({
+  name: 'vova_llm_chain_position',
+  help: 'VoVa LLM provider position in the resolved chain, 0 is first',
   labelNames: ['provider', 'model'] as const,
   registers: [appMetricsRegistry],
 });
