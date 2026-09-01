@@ -234,6 +234,7 @@ jobs:
           SMTP_FROM_NAME=Rabotka
           PDF_OWNER_PASSWORD=password
           APP_ENV=prod
+          ARCJET_ENV=production
           API_DOMAIN=${{ secrets.PROD_API_DOMAIN }}
           # --- Vova assistant: model ids and budgets ---
           # Not secrets, so they are static here rather than Vault entries.
@@ -276,6 +277,40 @@ jobs:
           VOVA_LLM_MIN_CALL_MS=1500
           # Least budget worth starting a whole agent run with.
           VOVA_MIN_RUN_MS=5000
+          # Racing agent runs. OFF until the cheaper fixes above are measured:
+          # it doubles tokens and DB reads on the turns it fires. Safe only
+          # because all 14 VoVa tools are read-only.
+          # Build the chat models at boot so no turn pays an SDK cold start.
+          # A comma list, NOT a boolean: the SDKs are imported lazily because
+          # loading all six costs ~83MB and broke the 150MB terminus limit.
+          # Name only what the race uses; Mistral alone is 67MB.
+          VOVA_WARMUP_PROVIDERS=google,openai
+          VOVA_HEDGE_ENABLED=false
+          # Head start for the leading provider; 0 races everyone at once.
+          VOVA_HEDGE_MS=3500
+          # Never raise to the full chain: six SDKs is ~83MB, the regression
+          # that broke the 150MB terminus limit.
+          VOVA_HEDGE_MAX_PARALLEL=2
+          # Process-wide cap. Without it a vendor slowdown makes every turn
+          # hedge at once — a latency tool becomes an outage amplifier.
+          VOVA_HEDGE_MAX_CONCURRENT=8
+          VOVA_HEDGE_MIN_REMAINING_MS=8000
+          # Chain order stays a preference: a leader landing inside this
+          # window beats a faster lower-priority run.
+          VOVA_RACE_PREFERENCE_GRACE_MS=800
+          # Health-ordered chain. The scoreboard is written regardless so the
+          # gauges have data; only the REORDERING is gated. Enable after a
+          # week of watching vova_llm_health_score and _chain_position.
+          VOVA_HEALTH_ENABLED=false
+          VOVA_HEALTH_ALPHA=0.3
+          # Shortish on purpose: a demoted provider's entry must expire so it
+          # gets retried. That loop is the self-healing.
+          VOVA_HEALTH_TTL_S=900
+          VOVA_HEALTH_DEFAULT_MS=4000
+          VOVA_HEALTH_PRIOR=3
+          # An override for outliers, not a replacement for the hand-tuned
+          # order — a free sort would rewrite the chain on noise.
+          VOVA_HEALTH_MIN_GAIN_RATIO=1.25
           VOVA_LLM_RETRY_BACKOFF_MS=250
           # Gemini is a thinking model, and unconstrained it spent 5116ms on a
           # turn whose whole output was a 28-token tool call, then stalled past

@@ -320,6 +320,199 @@ describe('LlmService', () => {
     expect(TURN_BUDGET_MS - perCall).toBeGreaterThanOrEqual(minRun);
   });
 
+  /**
+   * What may enter the pool of providers a turn is allowed to use — and, once
+   * runs are raced, the pool it may race.
+   */
+  describe('usableChain', () => {
+    const factoryWithKeys = (
+      credentialed: (spec: LlmProviderSpec) => boolean,
+    ) => ({
+      hasCredential: jest.fn(credentialed),
+      build: jest.fn(),
+    });
+
+    it('offers only providers the factory can actually build', async () => {
+      const chain = await build(
+        factoryWithKeys((s) => s.provider === 'openai') as never,
+        makeBreaker(),
+      ).usableChain('standard');
+
+      expect(chain.every((s) => s.provider === 'openai')).toBe(true);
+      expect(chain.length).toBeGreaterThan(0);
+    });
+
+    /**
+     * The gate that matters for racing.
+     *
+     * `resolveChain` reads `process.env`; the factory reads the `ConfigService`
+     * it will actually build from — cached at boot, with `expandVariables`. A
+     * provider passing the first and failing the second throws a plain Error
+     * from `build`, which classifies as `transport` and opens ITS OWN breaker
+     * for what is our misconfiguration. Sequentially that cost one slow turn;
+     * raced, it would burn a slot on every single turn.
+     */
+    it('excludes a provider whose env var is set but whose config is not', async () => {
+      const factory = factoryWithKeys(() => false);
+
+      const chain = await build(factory as never, makeBreaker()).usableChain(
+        'standard',
+      );
+
+      // Every provider has an env var set (see KEYS), so the static gate passes
+      // all of them and only the factory's view removes them.
+      expect(chain).toEqual([]);
+      expect(factory.hasCredential).toHaveBeenCalled();
+    });
+
+    it('still drops providers whose breaker is open', async () => {
+      const open = specId(TIER_CHAINS.standard[0]);
+      const chain = await build(
+        factoryWithKeys(() => true) as never,
+        makeBreaker([open]),
+      ).usableChain('standard');
+
+      expect(chain.map(specId)).not.toContain(open);
+    });
+
+    it('warns once about a misconfigured provider, not once per message', async () => {
+      const warn = jest.spyOn(Logger.prototype, 'warn');
+      warn.mockClear();
+      const service = build(
+        factoryWithKeys((s) => s.provider !== 'mistral') as never,
+        makeBreaker(),
+      );
+
+      await service.usableChain('standard');
+      await service.usableChain('standard');
+      await service.usableChain('standard');
+
+      // A config problem is permanent; one line per message would bury it.
+      const mistralWarnings = warn.mock.calls.filter((c) =>
+        String(c[0]).includes('mistral'),
+      );
+      expect(mistralWarnings).toHaveLength(1);
+    });
+  });
+
+  /**
+   * Ordering the chain on what providers have actually been doing.
+   *
+   * Ships dark: the scoreboard is written from day one so the gauges have real
+   * data, but nothing moves until VOVA_HEALTH_ENABLED is on.
+   */
+  describe('health ordering', () => {
+    const healthyFactory = () =>
+      ({ hasCredential: () => true, build: jest.fn() }) as never;
+
+    const breakerWithHealth = (
+      entries: Record<
+        string,
+        { ewmaMs: number | null; ok: number; fail: number }
+      >,
+    ) => ({
+      isOpen: jest.fn(() => Promise.resolve(false)),
+      recordFailure: jest.fn(() => Promise.resolve(false)),
+      recordSuccess: jest.fn(() => Promise.resolve()),
+      health: jest.fn(() => Promise.resolve(new Map(Object.entries(entries)))),
+    });
+
+    const enabled = (extra: Record<string, number> = {}) => ({
+      get: jest.fn((key: string, fallback: unknown) => {
+        if (key === 'VOVA_HEALTH_ENABLED') return 'true';
+        return extra[key] ?? fallback;
+      }),
+    });
+
+    it('leaves the order alone while the flag is off', async () => {
+      const breaker = breakerWithHealth({
+        [SECOND]: { ewmaMs: 100, ok: 100, fail: 0 },
+        [FIRST]: { ewmaMs: 9000, ok: 100, fail: 0 },
+      });
+
+      const chain = await build(healthyFactory(), breaker as never).usableChain(
+        'standard',
+      );
+
+      expect(chain.map(specId)[0]).toBe(FIRST);
+      expect(breaker.health).not.toHaveBeenCalled();
+    });
+
+    it('promotes a decisively faster provider past the leader', async () => {
+      const chain = await new LlmService(
+        healthyFactory(),
+        breakerWithHealth({
+          [FIRST]: { ewmaMs: 9000, ok: 50, fail: 0 },
+          [SECOND]: { ewmaMs: 800, ok: 50, fail: 0 },
+        }) as never,
+        enabled() as never,
+      ).usableChain('standard');
+
+      expect(chain.map(specId)[0]).toBe(SECOND);
+    });
+
+    it('does NOT reorder on a marginal difference', async () => {
+      // A provider 10% quicker this minute is noise. Re-sorting on it would
+      // quietly discard the reasoning models.config.ts spends 60 lines on.
+      const chain = await new LlmService(
+        healthyFactory(),
+        breakerWithHealth({
+          [FIRST]: { ewmaMs: 1000, ok: 50, fail: 0 },
+          [SECOND]: { ewmaMs: 900, ok: 50, fail: 0 },
+        }) as never,
+        enabled() as never,
+      ).usableChain('standard');
+
+      expect(chain.map(specId)[0]).toBe(FIRST);
+    });
+
+    it('ranks a flaky fast provider below a steady slower one', async () => {
+      // Expected latency, not raw latency: failing a third of calls costs more
+      // than being somewhat slower.
+      const chain = await new LlmService(
+        healthyFactory(),
+        breakerWithHealth({
+          [FIRST]: { ewmaMs: 1200, ok: 100, fail: 0 },
+          [SECOND]: { ewmaMs: 400, ok: 20, fail: 40 },
+        }) as never,
+        enabled() as never,
+      ).usableChain('standard');
+
+      expect(chain.map(specId)[0]).toBe(FIRST);
+    });
+
+    it('does not promote an unproven provider on one lucky sample', async () => {
+      // Beta smoothing with a prior is what stops a single fast call from
+      // taking the head of the chain.
+      const chain = await new LlmService(
+        healthyFactory(),
+        breakerWithHealth({
+          [FIRST]: { ewmaMs: 1500, ok: 500, fail: 0 },
+          [SECOND]: { ewmaMs: 900, ok: 1, fail: 0 },
+        }) as never,
+        enabled() as never,
+      ).usableChain('standard');
+
+      expect(chain.map(specId)[0]).toBe(FIRST);
+    });
+
+    it('keeps the static order when Redis gives nothing back', async () => {
+      const chain = await new LlmService(
+        healthyFactory(),
+        {
+          isOpen: jest.fn(() => Promise.resolve(false)),
+          recordFailure: jest.fn(),
+          recordSuccess: jest.fn(),
+          health: jest.fn(() => Promise.resolve(new Map())),
+        } as never,
+        enabled() as never,
+      ).usableChain('standard');
+
+      // Same posture as `isOpen`: an unreachable Redis must not change routing.
+      expect(chain.map(specId)).toEqual(CHAIN);
+    });
+  });
+
   describe('deadline', () => {
     const hangingFactory = () => ({
       calls: [] as string[],
