@@ -2,9 +2,11 @@ import { Logger } from '@nestjs/common';
 import { LlmService } from '../llm.service';
 import {
   LlmChainExhaustedError,
+  LlmDeadlineExceededError,
   LlmFatalError,
   LlmNoProviderError,
 } from '../llm.errors';
+import { Deadline } from '../deadline';
 import { specId, type LlmProviderSpec } from '../llm.types';
 import { PROVIDER_API_KEY_ENV, TIER_CHAINS } from '../models.config';
 
@@ -295,6 +297,170 @@ describe('LlmService', () => {
 
     expect(factory.calls).toEqual([FIRST, SECOND]);
     expect(telemetry.provider).toBe(providerOf(SECOND));
+  });
+
+  /**
+   * The arithmetic that has to close, pinned so it cannot drift again.
+   *
+   * It did not close before: a 20000ms per-call cap inside a 25000ms turn left
+   * 5000ms for everything else, so one stalled call made the entire fallback
+   * chain unreachable and a second provider could only ever help the NEXT
+   * message. The numbers looked independent, which is exactly why nobody
+   * noticed they were not.
+   */
+  it('leaves room for a fallback inside one turn, on the defaults', () => {
+    const TURN_BUDGET_MS = 25_000; // `vova.timeout_ms`, SystemConfig default
+    const perCall = 12_000; // VOVA_LLM_TIMEOUT_MS default
+    const reserve = 7_000; // VOVA_FALLBACK_RESERVE_MS default
+    const minRun = 5_000; // VOVA_MIN_RUN_MS default
+
+    // A first provider burning its whole slice must still leave enough for a
+    // second run to be worth starting.
+    expect(perCall + reserve).toBeLessThanOrEqual(TURN_BUDGET_MS);
+    expect(TURN_BUDGET_MS - perCall).toBeGreaterThanOrEqual(minRun);
+  });
+
+  describe('deadline', () => {
+    const hangingFactory = () => ({
+      calls: [] as string[],
+      build: jest.fn(() => ({ invoke: jest.fn(() => new Promise(() => {})) })),
+    });
+
+    it('gives up at the turn deadline rather than at the per-call cap', async () => {
+      const deadline = Deadline.start(120, 'turn');
+      const started = Date.now();
+
+      await expect(
+        build(
+          hangingFactory() as never,
+          makeBreaker(),
+          // Per-call cap far above the turn budget: without the deadline this
+          // would run for 5s. This IS the production bug — a 20000ms cap inside
+          // a 25000ms turn left no room for anyone else.
+          makeConfig({ VOVA_LLM_TIMEOUT_MS: 5000, VOVA_LLM_MIN_CALL_MS: 10 }),
+        ).invokeWith(TIER_CHAINS.standard[0], 'hi', {
+          tier: 'standard',
+          deadline,
+          reserveMs: 0,
+        }),
+      ).rejects.toBeInstanceOf(LlmDeadlineExceededError);
+
+      expect(Date.now() - started).toBeLessThan(1000);
+      deadline.dispose();
+    });
+
+    // The cascade guard, and the single riskiest behaviour in this change.
+    it('does NOT blame a provider for the turn running out of time', async () => {
+      const deadline = Deadline.start(120, 'turn');
+      const breaker = makeBreaker();
+
+      await expect(
+        build(
+          hangingFactory() as never,
+          breaker,
+          makeConfig({ VOVA_LLM_TIMEOUT_MS: 5000, VOVA_LLM_MIN_CALL_MS: 10 }),
+        ).invokeWith(TIER_CHAINS.standard[0], 'hi', {
+          tier: 'standard',
+          deadline,
+          reserveMs: 0,
+        }),
+      ).rejects.toThrow();
+
+      // Without this, a slow afternoon opens breakers on vendors that never
+      // failed once — an outage assembled entirely out of healthy providers.
+      expect(breaker.recordFailure).not.toHaveBeenCalled();
+      deadline.dispose();
+    });
+
+    it('still blames a provider for its own per-call timeout', async () => {
+      const breaker = makeBreaker();
+
+      await expect(
+        build(
+          hangingFactory() as never,
+          breaker,
+          makeConfig({ VOVA_LLM_TIMEOUT_MS: 20 }),
+        ).invokeWith(TIER_CHAINS.standard[0], 'hi', { tier: 'standard' }),
+      ).rejects.toBeInstanceOf(LlmChainExhaustedError);
+
+      // No deadline involved: this one really is the provider being slow.
+      expect(breaker.recordFailure).toHaveBeenCalledTimes(1);
+    });
+
+    it('refuses a call there is no longer budget for', async () => {
+      const deadline = Deadline.start(0, 'turn');
+      const factory = hangingFactory();
+
+      await expect(
+        build(
+          factory as never,
+          makeBreaker(),
+          makeConfig({ VOVA_LLM_MIN_CALL_MS: 1500 }),
+        ).invokeWith(TIER_CHAINS.standard[0], 'hi', {
+          tier: 'standard',
+          deadline,
+        }),
+      ).rejects.toBeInstanceOf(LlmDeadlineExceededError);
+
+      // Refused before the model was ever built: a guaranteed timeout that
+      // bills a full prompt is worse than no call at all.
+      expect(factory.build).not.toHaveBeenCalled();
+      deadline.dispose();
+    });
+
+    it('withholds the reserve for a successor, and releases it for the last provider', async () => {
+      const budgets: number[] = [];
+      const spyFactory = () => ({
+        build: jest.fn(() => ({
+          invoke: jest.fn(
+            (_input: unknown, cfg: { signal?: AbortSignal }) =>
+              new Promise((_resolve, reject) => {
+                const started = Date.now();
+                cfg.signal?.addEventListener('abort', () => {
+                  budgets.push(Date.now() - started);
+                  reject(
+                    Object.assign(new Error('aborted'), {
+                      name: 'AbortError',
+                    }),
+                  );
+                });
+              }),
+          ),
+        })),
+      });
+
+      const cfg = makeConfig({
+        VOVA_LLM_TIMEOUT_MS: 5000,
+        VOVA_FALLBACK_RESERVE_MS: 200,
+        VOVA_LLM_MIN_CALL_MS: 10,
+      });
+
+      const withReserve = Deadline.start(400, 'turn');
+      await build(spyFactory() as never, makeBreaker(), cfg)
+        .invokeWith(TIER_CHAINS.standard[0], 'hi', {
+          tier: 'standard',
+          deadline: withReserve,
+        })
+        .catch(() => undefined);
+      withReserve.dispose();
+
+      const lastProvider = Deadline.start(400, 'turn');
+      await build(spyFactory() as never, makeBreaker(), cfg)
+        .invokeWith(TIER_CHAINS.standard[0], 'hi', {
+          tier: 'standard',
+          deadline: lastProvider,
+          reserveMs: 0,
+        })
+        .catch(() => undefined);
+      lastProvider.dispose();
+
+      const [held, released] = budgets;
+      // ~200ms vs ~400ms: the reserve is what keeps a fallback reachable inside
+      // the same message, and releasing it at the end of the chain is what
+      // stops the last provider from saving time for nobody.
+      expect(held).toBeLessThan(released);
+      expect(released - held).toBeGreaterThan(100);
+    });
   });
 
   it('fails fatally when tools are bound to a provider that cannot call them', async () => {
