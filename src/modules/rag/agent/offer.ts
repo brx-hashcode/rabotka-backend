@@ -79,6 +79,51 @@ export function isAffirmation(text: string): boolean {
   return AFFIRMATIONS.includes(folded);
 }
 
+/**
+ * A bare hello — nothing else in the message.
+ *
+ * Its own list rather than the router's `GREETINGS`, deliberately. That one
+ * answers "could a smaller model handle this?", which is a cost question and
+ * can afford to be generous; this one answers "should we reply with a fixed
+ * hello and no model call at all?", which is a correctness question and cannot.
+ * They will diverge — the router's list already contains « ok » and « d'accord »,
+ * which are agreements handled by {@link isAffirmation} above and would be
+ * absurd to answer with « Bonjour ». Sharing one list would make each change to
+ * either decision silently change the other.
+ */
+const PURE_GREETINGS = [
+  'bonjour',
+  'bonsoir',
+  'bjr',
+  'bsr',
+  'salut',
+  'coucou',
+  'hello',
+  'hi',
+  'hey',
+  'mbote',
+  'bonjour vova',
+  'salut vova',
+  'hello vova',
+  'bonjour a tous',
+  'good morning',
+  'good evening',
+];
+
+/**
+ * True only when the whole message is a greeting.
+ *
+ * EXACT match after folding, not `startsWith` — « bonjour, combien coûte un
+ * déblocage ? » is a question with a hello in front of it, and answering it
+ * with a fixed greeting would drop the question on the floor. That is the same
+ * trap {@link isAffirmation} documents, and the same answer.
+ */
+export function isPureGreeting(text: string): boolean {
+  const folded = foldText(text);
+  if (!folded || folded.length > 20) return false;
+  return PURE_GREETINGS.includes(folded);
+}
+
 export function isNavigationRequest(text: string): boolean {
   const folded = foldText(text);
   if (!folded) return false;

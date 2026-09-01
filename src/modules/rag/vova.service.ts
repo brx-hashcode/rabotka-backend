@@ -10,6 +10,7 @@ import {
 import {
   isAffirmation,
   isNavigationRequest,
+  isPureGreeting,
   offersNavigation,
 } from './agent/offer';
 import { VovaOfferStore } from './agent/offer.store';
@@ -111,6 +112,15 @@ export class VovaService {
       // Both gates. The master switch still governs: turning the assistant off
       // must silence it everywhere, not leave it answering strangers.
       if (enabled !== 'true' || anonymous !== 'true') return null;
+
+      // A bare hello, answered without a model call — and deliberately BEFORE
+      // the daily allowance is consumed. Spending one of a stranger's ten
+      // questions on « bonjour » would burn the budget on the one message that
+      // costs us nothing to answer.
+      if (isPureGreeting(text)) {
+        this.logger.log(`vova.greeting anonymous phone=${phone}`);
+        return { text: refusal('salutation'), offerAccount: false };
+      }
 
       const limit = Number(limitRaw);
       const withinBudget = await this.anonymous.consume(
@@ -218,6 +228,19 @@ export class VovaService {
             ? null
             : ['Voilà, c’est juste ici 👇', this.card(pending)];
         }
+      }
+
+      // A bare « bonjour », answered with no model call for the same reason as
+      // the « oui » above — except this one is also the single largest cost
+      // reduction available. A greeting routes to the standard tier (the agent
+      // always binds tools, so the cheap tier is unreachable), which means a
+      // 4508-token prompt and a 12-tool graph to say hello.
+      //
+      // Exact match only: « bonjour, combien coûte un déblocage ? » is a
+      // question and must reach the model.
+      if (isPureGreeting(text)) {
+        this.logger.log(`vova.greeting profile=${profile.id}`);
+        return shadow ? null : [refusal('salutation')];
       }
 
       // Meter a profile behind a wall before the model runs.
