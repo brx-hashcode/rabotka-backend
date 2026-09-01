@@ -10,7 +10,8 @@ import type { StructuredToolInterface } from '@langchain/core/tools';
 import { AccountStatus, ProfileType, VerificationStatus } from '@prisma/client';
 import { LlmService } from '../llm/llm.service';
 import { LlmRouterService } from '../llm/router.service';
-import type { LlmCallTelemetry } from '../llm/llm.types';
+import { specId, type LlmCallTelemetry } from '../llm/llm.types';
+import type { Deadline } from '../llm/deadline';
 import { JobCategoryRegistry } from '../intents/job-category.registry';
 import { FallbackChatModel } from './fallback-chat-model';
 import { GuardService, isAbusive } from './guard.service';
@@ -40,6 +41,13 @@ export interface AgentRequest {
   categorySlugs: string[];
   text: string;
   correlationId?: string;
+  /**
+   * The turn's wall-clock budget, threaded down to every model call.
+   *
+   * Optional so callers that do not meter a turn (tests, scripts) still work —
+   * `LlmService` falls back to the flat per-call cap when it is absent.
+   */
+  deadline?: Deadline;
 }
 
 /** One turn of an anonymous conversation, as held in Redis. */
@@ -53,6 +61,8 @@ export interface AnonymousAgentRequest {
   /** Recent turns for this phone. Empty is normal, not an error. */
   history: AnonymousTurn[];
   correlationId?: string;
+  /** The turn's wall-clock budget, threaded down to every model call. */
+  deadline?: Deadline;
 }
 
 export interface AnonymousAgentReply {
@@ -104,6 +114,8 @@ function systemMessage(parts: SystemPromptParts): SystemMessage {
 export class VovaAgentService {
   private readonly logger = new Logger(VovaAgentService.name);
   private readonly maxIterations: number;
+  /** Least budget worth starting a whole agent run with. */
+  private readonly minRunMs: number;
 
   constructor(
     private readonly llm: LlmService,
@@ -116,6 +128,7 @@ export class VovaAgentService {
     config: ConfigService,
   ) {
     this.maxIterations = readNumber(config, 'VOVA_MAX_TOOL_STEPS', 6);
+    this.minRunMs = readNumber(config, 'VOVA_MIN_RUN_MS', 5000);
   }
 
   /**
@@ -132,6 +145,7 @@ export class VovaAgentService {
     opts: {
       correlationId?: string;
       onTelemetry: (t: LlmCallTelemetry) => void;
+      deadline?: Deadline;
     },
   ): Promise<{ messages: BaseMessage[] }> {
     // Same reasoning as the provider SDKs: LangGraph is ~4 MB of heap that a
@@ -144,12 +158,31 @@ export class VovaAgentService {
     let lastError: unknown;
 
     for (const [index, spec] of chain.entries()) {
+      // Do not start a run that cannot finish.
+      //
+      // This is the direct fix for the orphaned work in the 2026-09-01 log:
+      // the user had already been sent the fallback card, and the chain went on
+      // to cold-import Anthropic's SDK, fail, and start Mistral — several
+      // seconds of billed calls whose answer nobody would ever read.
+      const left = opts.deadline?.remainingMs();
+      if (left !== undefined && left < this.minRunMs) {
+        this.logger.warn(
+          `Skipping ${specId(spec)} — ${left}ms left in the turn, below the ` +
+            `${this.minRunMs}ms floor for starting a run`,
+        );
+        break;
+      }
+
       const model = new FallbackChatModel({
         llm: this.llm,
         tier,
         spec,
         correlationId: opts.correlationId,
         onTelemetry: opts.onTelemetry,
+        deadline: opts.deadline ?? null,
+        // The last provider has nobody to save time for, so it may spend the
+        // whole remaining budget rather than holding a reserve back.
+        reserveMs: index === chain.length - 1 ? 0 : undefined,
       });
 
       try {
@@ -158,10 +191,29 @@ export class VovaAgentService {
         return await createReactAgent({
           llm: model as never,
           tools: tools as never,
-        }).invoke({ messages }, { recursionLimit: this.maxIterations * 2 });
+        }).invoke(
+          { messages },
+          {
+            recursionLimit: this.maxIterations * 2,
+            // LangGraph checks this between graph nodes, so an expired turn
+            // stops at the next step boundary instead of after another full
+            // model call.
+            signal: opts.deadline?.signal,
+          },
+        );
       } catch (err) {
         lastError = err;
         if (err instanceof LlmFatalError) throw err;
+
+        // Out of time, not out of providers. Advancing would start a run the
+        // budget gate above would refuse anyway, and would count a failover
+        // that never happened.
+        if (opts.deadline?.causedAbort()) {
+          this.logger.warn(
+            `Turn budget expired during ${specId(spec)} — not advancing`,
+          );
+          break;
+        }
         // THE failover metric. `LlmService.invoke` has one too, but nothing
         // reaches it: the agent pins one provider per run through
         // `invokeWith`, so this loop — not that one — is where a conversation
@@ -254,6 +306,7 @@ export class VovaAgentService {
         tier,
         {
           correlationId: request.correlationId,
+          deadline: request.deadline,
           onTelemetry: (t) => {
             telemetry = t;
           },
@@ -429,6 +482,7 @@ export class VovaAgentService {
 
       const result = await this.runChain(messages, tools, tier, {
         correlationId: request.correlationId,
+        deadline: request.deadline,
         onTelemetry: (t) => {
           telemetry = t;
         },
