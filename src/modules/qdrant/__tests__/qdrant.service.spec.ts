@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
-import { QdrantService } from '../qdrant.service';
+import { QdrantService, retryTransient } from '../qdrant.service';
 import { QDRANT_COLLECTION_PREFIX } from '../qdrant.config';
 import { REDIS_CONNECTION } from '../../../common/services/redis/redis.constants';
 
@@ -359,5 +359,43 @@ describe('QdrantService', () => {
       );
       expect(results).toHaveLength(1);
     });
+  });
+});
+
+/**
+ * The retry assumption the retrieval budget arithmetic rests on.
+ *
+ * `HelpDocsStore.search` runs inside `retryTransient(fn, 3)`, so the worst case
+ * a VoVa turn can absorb is `attempts × QDRANT_SEARCH_TIMEOUT_MS` plus backoff:
+ *
+ *     3 × 1000 + 150 + 300 = 3450ms  ≤  VOVA_RETRIEVAL_BUDGET_MS (4000)
+ *
+ * That only holds because a client-side timeout is NOT treated as transient —
+ * it carries no `.code`, so `extractErrorCode` returns null and the error is
+ * rethrown on the first attempt. If a library upgrade ever gives that error a
+ * code, the retries come back, the arithmetic silently breaks, and retrieval
+ * starts eating the whole turn again. This test is what catches that.
+ */
+describe('retryTransient and timeouts', () => {
+  it('retries a dropped socket', async () => {
+    const fn = jest
+      .fn()
+      .mockRejectedValueOnce(
+        Object.assign(new Error('boom'), { code: 'ECONNRESET' }),
+      )
+      .mockResolvedValue('ok');
+
+    await expect(retryTransient(fn, 3)).resolves.toBe('ok');
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+
+  it('does NOT retry a client-side timeout', async () => {
+    // Shape of @qdrant/js-client-rest's QdrantClientTimeoutError: no `.code`.
+    const timeout = new Error('Request timed out');
+    timeout.name = 'QdrantClientTimeoutError';
+    const fn = jest.fn().mockRejectedValue(timeout);
+
+    await expect(retryTransient(fn, 3)).rejects.toThrow('Request timed out');
+    expect(fn).toHaveBeenCalledTimes(1);
   });
 });

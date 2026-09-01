@@ -8,7 +8,7 @@ import {
 import type { BaseMessage } from '@langchain/core/messages';
 import type { StructuredToolInterface } from '@langchain/core/tools';
 import { AccountStatus, ProfileType, VerificationStatus } from '@prisma/client';
-import { LlmService } from '../llm/llm.service';
+import { LlmService, withTimeout } from '../llm/llm.service';
 import { LlmRouterService } from '../llm/router.service';
 import {
   specId,
@@ -26,6 +26,7 @@ import {
   type SystemPromptParts,
 } from './prompts';
 import { refusal, type RefusalId } from './refusals';
+import { AgentDeadlineExceededError } from './agent.errors';
 import { LlmFatalError } from '../llm/llm.errors';
 import { classifyLlmError } from '../llm/error-classification';
 import { hedgeCounter, llmFallbackCounter } from '../llm/metrics';
@@ -35,6 +36,7 @@ import { readNumber } from '../shared/config';
 import { destinationFor } from './destination';
 import { resolveLanguage } from './language';
 import { VovaHistoryService } from './history.service';
+import type { RetrievalResult } from '../retrieval/retrieve.service';
 
 export interface AgentRequest {
   profileId: string;
@@ -130,6 +132,14 @@ interface InflightRun {
   p: Promise<RunOutcome>;
 }
 
+/**
+ * Cost of getting from "retrieval returned" to "the first model call starts":
+ * `buildTools`, `buildSystemPromptParts`, and `usableChain`'s per-provider
+ * breaker read. Small, but not zero — and reserving only `minRunMs` for the run
+ * meant this ate the difference and the run was refused anyway.
+ */
+const RUN_HANDOFF_MS = 250;
+
 /** Distinguishes "the timer won the race" from "a run finished". */
 const GRACE_ELAPSED = Symbol('grace-elapsed');
 
@@ -167,6 +177,8 @@ export class VovaAgentService {
   private readonly maxIterations: number;
   /** Least budget worth starting a whole agent run with. */
   private readonly minRunMs: number;
+  /** Ceiling on retrieval, so grounding can never starve the model call. */
+  private readonly retrievalBudgetMs: number;
 
   private readonly hedgeEnabled: boolean;
   /** Head start the leading provider gets alone. `0` starts everyone at once. */
@@ -189,6 +201,11 @@ export class VovaAgentService {
   ) {
     this.maxIterations = readNumber(config, 'VOVA_MAX_TOOL_STEPS', 6);
     this.minRunMs = readNumber(config, 'VOVA_MIN_RUN_MS', 5000);
+    this.retrievalBudgetMs = readNumber(
+      config,
+      'VOVA_RETRIEVAL_BUDGET_MS',
+      4000,
+    );
 
     // Off by default. Racing doubles token spend and database reads on the
     // turns it fires, so it is enabled deliberately after the cheaper fixes
@@ -475,6 +492,177 @@ export class VovaAgentService {
   }
 
   /**
+   * Stop before a phase the turn no longer has time for.
+   *
+   * Every await before `runChain` — categories, history, retrieval — ignored
+   * the deadline entirely, so a turn whose budget was already gone kept doing
+   * database and vector work, then failed at `canStart(0)` with a bare Error.
+   * In the 2026-09-01 log that arrived a full second AFTER the user had been
+   * sent the fallback card.
+   *
+   * Two choices worth stating:
+   *
+   * `remainingMs() < minRunMs`, not `expired()` — `expired()` is only true at
+   * exactly zero, and a turn with 200ms left is going to die at `canStart(0)`
+   * regardless, just later and louder. Sharing the floor makes the two agree.
+   *
+   * `causedAbort()` as well — `VovaService.dispose()` aborts the signal but
+   * does not move `endsAt`, so a turn that LOST the outer race still reads a
+   * positive `remainingMs()`. Without this check the agent keeps working for a
+   * caller that has already answered. Same reasoning, and the same asymmetry,
+   * as `LlmService.deadlineCaused`.
+   *
+   * Honest limit: these only fire when the event loop is free. The turn stuck
+   * inside a synchronous ONNX embed still burns to the full budget — this
+   * saves the ones queued behind it.
+   */
+  /** Run one phase, recording its elapsed time on the turn's deadline. */
+  private async timePhase<T>(
+    deadline: Deadline | undefined,
+    phase: string,
+    run: () => Promise<T>,
+  ): Promise<T> {
+    const done = deadline?.beginPhase(phase);
+    try {
+      return await run();
+    } finally {
+      done?.();
+    }
+  }
+
+  /**
+   * Retrieval, on a budget it cannot exceed.
+   *
+   * Grounding is worth waiting for, but not worth the whole turn — and before
+   * this it could take the whole turn, leaving nothing for the model call the
+   * answer actually comes from. The slice is capped at what remains MINUS the
+   * same `minRunMs` floor `canStart` uses, which turns "retrieval cannot starve
+   * the model" from a hope into an invariant.
+   *
+   * On expiry we degrade to empty grounding rather than failing the turn:
+   * `HelpRetrieveService.search` already returns empty hits on any error, so
+   * this is an existing supported path. The assistant answers from the system
+   * prompt and its tools instead of not answering at all.
+   *
+   * **This caps how long we WAIT. It cancels nothing.** `queryEmbed` has no
+   * abort signal and runs to completion, still burning main-thread CPU after we
+   * stop awaiting it. Worse, while a synchronous ONNX embed holds the loop no
+   * timer fires at all — including this one — so the turn that owns a cold
+   * embed still pays for it in full. What this genuinely buys is the turns
+   * QUEUED BEHIND that one: their timers all fire in the same tick once the
+   * loop is released, and they abandon retrieval instead of each queueing
+   * another embed. With the inbound worker at concurrency:5, that is four
+   * turns saved out of five.
+   */
+  private async ground(
+    deadline: Deadline | undefined,
+    run: () => Promise<RetrievalResult>,
+  ): Promise<RetrievalResult> {
+    const empty: RetrievalResult = {
+      hits: [],
+      expandedQuery: '',
+      requiredTools: [],
+    };
+
+    const remaining = deadline?.remainingMs() ?? Number.POSITIVE_INFINITY;
+    // Leave the run floor PLUS the handoff between here and the first model
+    // call: building the tools and the system prompt, and `usableChain`'s
+    // breaker read (one Redis round trip per provider). Reserving exactly
+    // `minRunMs` looked right and was not — retrieval would spend its whole
+    // slice, the handoff would eat the few milliseconds that left, and the
+    // `chain` guard would refuse the run the slice had just been sized to
+    // protect. The cushion is what makes "retrieval cannot starve the model"
+    // an invariant instead of a near miss.
+    const slice = Math.min(
+      this.retrievalBudgetMs,
+      Math.max(0, remaining - this.minRunMs - RUN_HANDOFF_MS),
+    );
+
+    if (slice <= 0) {
+      this.logger.warn(
+        `Skipping retrieval — ${remaining}ms left, none of it spare above the ` +
+          `${this.minRunMs}ms run floor`,
+      );
+      deadline?.beginPhase('retrieval')();
+      return empty;
+    }
+
+    const done = deadline?.beginPhase('retrieval');
+    try {
+      // `run` takes no signal — `help.search` cannot be cancelled — so the
+      // callback argument is ignored. The deadline signal still matters as the
+      // external one: if the turn dies mid-retrieval we stop waiting at once
+      // rather than at the slice boundary.
+      return await withTimeout(
+        () => run(),
+        slice,
+        'vova-retrieval',
+        deadline?.signal,
+      );
+    } catch (err) {
+      // The turn itself is over — do not degrade and walk into a model call
+      // there is no budget for. Let the caller's classification handle it.
+      if (deadline?.causedAbort()) {
+        throw new AgentDeadlineExceededError('retrieval', 0, this.minRunMs);
+      }
+
+      this.logger.warn(
+        `Retrieval exceeded its ${slice}ms slice — answering without corpus ` +
+          `grounding (${err instanceof Error ? err.message : String(err)})`,
+      );
+      return empty;
+    } finally {
+      done?.();
+    }
+  }
+
+  /**
+   * Log a failed turn at the level it deserves.
+   *
+   * Running out of time is a capacity fact, not a fault: nobody misbehaved,
+   * the budget simply ran out. Logging it at ERROR beside genuine failures is
+   * what made one slow embedder read as five separate faults, and it is the
+   * same distinction `LlmService.deadlineCaused` already draws one layer down.
+   *
+   * `causedAbort()` is checked as well as the typed error because the turn can
+   * die between phase guards — inside `runChain`, or while `VovaService` is
+   * losing the outer race.
+   */
+  private report(
+    err: unknown,
+    who: string,
+    deadline: Deadline | undefined,
+  ): void {
+    const outOfTime =
+      err instanceof AgentDeadlineExceededError ||
+      deadline?.causedAbort() === true ||
+      deadline?.expired() === true;
+
+    if (outOfTime) {
+      this.logger.warn(
+        `Vova ran out of time for ${who}: ` +
+          `${err instanceof Error ? err.message : String(err)}`,
+      );
+      return;
+    }
+
+    this.logger.error(`Vova agent failed for ${who}`, err);
+  }
+
+  private assertTime(deadline: Deadline | undefined, phase: string): void {
+    if (!deadline) return;
+
+    if (deadline.causedAbort()) {
+      throw new AgentDeadlineExceededError(phase, 0, this.minRunMs);
+    }
+
+    const left = deadline.remainingMs();
+    if (left < this.minRunMs) {
+      throw new AgentDeadlineExceededError(phase, left, this.minRunMs);
+    }
+  }
+
+  /**
    * May a second (or third) run start alongside the ones already going?
    *
    * Every condition here is a brake, and the last one is the difference between
@@ -541,11 +729,15 @@ export class VovaAgentService {
       // from memory instead of re-hitting Postgres.
       const deps = this.deps.getForTurn();
       const language = resolveLanguage(request.text, request.history);
-      const grounding = await deps.help.search(
-        request.text,
-        undefined,
-        'anonymous',
-        language !== 'fr',
+
+      this.assertTime(request.deadline, 'retrieval');
+      const grounding = await this.ground(request.deadline, () =>
+        deps.help.search(
+          request.text,
+          undefined,
+          'anonymous',
+          language !== 'fr',
+        ),
       );
 
       const messages: BaseMessage[] = [
@@ -573,6 +765,7 @@ export class VovaAgentService {
         historyLength: request.history.length,
       });
 
+      this.assertTime(request.deadline, 'chain');
       const result = await this.runChain(
         messages,
         buildAnonymousTools(deps),
@@ -622,7 +815,7 @@ export class VovaAgentService {
         sanitizerBlocked: sanitized.blocked,
       };
     } catch (err) {
-      this.logger.error('Vova agent failed for an anonymous caller', err);
+      this.report(err, 'an anonymous caller', request.deadline);
       return {
         text: refusal('rien_trouve_anonyme'),
         origin: 'error',
@@ -696,7 +889,12 @@ export class VovaAgentService {
     let telemetry: LlmCallTelemetry | undefined;
 
     try {
-      const knownCategorySlugs = await this.categories.slugs();
+      this.assertTime(request.deadline, 'categories');
+      const knownCategorySlugs = await this.timePhase(
+        request.deadline,
+        'categories',
+        () => this.categories.slugs(),
+      );
 
       // The conversation so far, so a repeated « merci » does not produce a
       // repeated sentence and a subject already given is not asked for twice.
@@ -705,7 +903,10 @@ export class VovaAgentService {
       // below: « ok » carries no language of its own, and without the previous
       // turns to read it defaulted to French and switched an English
       // conversation mid-thread.
-      const past = await this.history.recent(request.profileId);
+      this.assertTime(request.deadline, 'history');
+      const past = await this.timePhase(request.deadline, 'history', () =>
+        this.history.recent(request.profileId),
+      );
       const language = resolveLanguage(request.text, past);
 
       // One memo per turn, shared by the retrieval below and every tool call —
@@ -713,11 +914,14 @@ export class VovaAgentService {
       // from memory instead of re-hitting Postgres.
       const deps = this.deps.getForTurn();
 
-      const grounding = await deps.help.search(
-        request.text,
-        undefined,
-        request.profileType === ProfileType.WORKER ? 'worker' : 'employer',
-        language !== 'fr',
+      this.assertTime(request.deadline, 'retrieval');
+      const grounding = await this.ground(request.deadline, () =>
+        deps.help.search(
+          request.text,
+          undefined,
+          request.profileType === ProfileType.WORKER ? 'worker' : 'employer',
+          language !== 'fr',
+        ),
       );
       const tools = buildTools(
         deps,
@@ -756,6 +960,7 @@ export class VovaAgentService {
         new HumanMessage(request.text),
       ];
 
+      this.assertTime(request.deadline, 'chain');
       const result = await this.runChain(messages, tools, tier, {
         correlationId: request.correlationId,
         deadline: request.deadline,
@@ -820,10 +1025,7 @@ export class VovaAgentService {
         sanitizerBlocked: sanitized.blocked,
       };
     } catch (err) {
-      this.logger.error(
-        `Vova agent failed for profile ${request.profileId}`,
-        err,
-      );
+      this.report(err, `profile ${request.profileId}`, request.deadline);
       return {
         text: refusal('rien_trouve'),
         origin: 'error',
