@@ -8,6 +8,7 @@ import { LlmBreakerService } from './breaker.service';
 import { readNumber } from '../shared/config';
 import { LlmModelFactory } from './model-factory.service';
 import {
+  PROVIDER_API_KEY_ENV,
   PROVIDERS_REQUIRING_FLAT_CONTENT,
   PROVIDERS_SUPPORTING_CACHE_CONTROL,
   resolveChain,
@@ -92,6 +93,8 @@ export class LlmService {
   private readonly fallbackReserveMs: number;
   /** Below this, a call is not "short" — it is a guaranteed timeout that bills tokens. */
   private readonly minCallMs: number;
+  /** Config warnings already emitted, so a permanent problem is logged once. */
+  private readonly warned = new Set<string>();
 
   constructor(
     private readonly factory: LlmModelFactory,
@@ -163,9 +166,34 @@ export class LlmService {
    * whole loop on it, and only then tries the next.
    */
   async usableChain(tier: LlmTier): Promise<LlmProviderSpec[]> {
-    const chain = resolveChain(tier);
+    // Two gates, and both matter once runs are raced.
+    //
+    // `resolveChain` filters on `process.env`; the factory filters on the
+    // `ConfigService` it will actually read when building. They are normally
+    // the same values, but ConfigService is cached at boot and runs
+    // `expandVariables`, so they CAN drift — and a provider that passes the
+    // first and fails the second throws a plain Error from `build`, which
+    // classifies as `transport` and opens that provider's breaker for what is
+    // our own misconfiguration. Racing would repeat that on every turn.
+    const chain = resolveChain(tier).filter((spec) => {
+      if (this.factory.hasCredential(spec)) return true;
+      this.warnOnce(
+        `${specId(spec)} is in the ${tier} chain and has an env var set, but ` +
+          `ConfigService has no value for ${PROVIDER_API_KEY_ENV[spec.provider]} — ` +
+          `excluding it. Check .env.local/.env and ConfigModule's envFilePath.`,
+      );
+      return false;
+    });
+
     const open = await Promise.all(chain.map((s) => this.breaker.isOpen(s)));
     return chain.filter((_, i) => !open[i]);
+  }
+
+  /** Config problems are permanent; logging one per message would bury them. */
+  private warnOnce(message: string): void {
+    if (this.warned.has(message)) return;
+    this.warned.add(message);
+    this.logger.warn(message);
   }
 
   /** One provider, no chain. The retry and timeout rules still apply. */

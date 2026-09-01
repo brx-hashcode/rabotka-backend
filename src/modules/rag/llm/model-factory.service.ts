@@ -46,19 +46,43 @@ export class LlmModelFactory {
 
   constructor(private readonly config: ConfigService) {}
 
+  /**
+   * Can this spec actually be built?
+   *
+   * Reads the SAME source `build` does, which `models.config.ts`'s
+   * `hasCredential` does not: that one inspects `process.env` directly, while
+   * everything here goes through `ConfigService` — which is populated from
+   * `.env.local`/`.env`, cached at boot, and runs `expandVariables`. The two
+   * can therefore disagree, and the direction that hurts is a provider passing
+   * the static gate and then failing here: `build` throws a plain Error, which
+   * classifies as `transport` and trips the provider's breaker for a
+   * misconfiguration of ours.
+   *
+   * That was survivable while the chain was walked one provider at a time. Once
+   * runs are raced it is not — a miswired provider would consume a race slot on
+   * every turn and take a healthy vendor's breaker down with it.
+   */
+  hasCredential(spec: LlmProviderSpec): boolean {
+    const key = this.config.get<string>(PROVIDER_API_KEY_ENV[spec.provider]);
+    return typeof key === 'string' && key.trim().length > 0;
+  }
+
   async build(spec: LlmProviderSpec): Promise<BaseChatModel> {
     const cached = this.cache.get(specId(spec));
     if (cached) return cached;
 
-    const apiKey = this.config.get<string>(PROVIDER_API_KEY_ENV[spec.provider]);
-    if (!apiKey || apiKey.trim().length === 0) {
-      // resolveChain() filters these out before we get here; reaching this is a
+    if (!this.hasCredential(spec)) {
+      // `usableChain()` filters these out before we get here; reaching this is a
       // wiring bug, and it is worth saying so rather than failing later with an
       // opaque 401 from the vendor.
       throw new Error(
         `No ${PROVIDER_API_KEY_ENV[spec.provider]} configured for ${specId(spec)}`,
       );
     }
+
+    const apiKey = this.config.get<string>(
+      PROVIDER_API_KEY_ENV[spec.provider],
+    ) as string;
 
     const model = await this.construct(spec, apiKey.trim());
     this.cache.set(specId(spec), model);
