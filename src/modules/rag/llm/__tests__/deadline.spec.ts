@@ -64,6 +64,56 @@ describe('Deadline', () => {
     expect(seen).toEqual(['abort']);
   });
 
+  describe('phase marks', () => {
+    it('records how long a finished phase took', async () => {
+      const d = Deadline.start(10_000, 'test');
+      const done = d.beginPhase('retrieval');
+      await tick(30);
+      done();
+
+      expect(d.marksLine()).toMatch(/retrieval_ms=\d+/);
+      expect(d.marksLine()).toContain('pending=—');
+      d.dispose();
+    });
+
+    /**
+     * The whole reason the marks live on `Deadline` rather than in the agent.
+     *
+     * The incident's signature was "retrieval started and never finished", read
+     * from the side that had already given up waiting. A map of completed
+     * phases cannot express that; an unfinished one has to report its elapsed
+     * time as of the read.
+     */
+    it('reports an unfinished phase, with its elapsed time so far', async () => {
+      const d = Deadline.start(10_000, 'test');
+      d.beginPhase('retrieval'); // never closed — still running
+      await tick(30);
+
+      expect(d.marksLine()).toMatch(/pending=retrieval@\d+/);
+      expect(d.marksLine()).not.toContain('retrieval_ms=');
+      d.dispose();
+    });
+
+    it('keeps its marks after dispose, so the loser can still be read', () => {
+      const d = Deadline.start(10_000, 'test');
+      d.beginPhase('history')();
+      d.dispose();
+
+      expect(d.marksLine()).toContain('history_ms=');
+    });
+
+    it('ignores a closer called twice', () => {
+      const d = Deadline.start(10_000, 'test');
+      const done = d.beginPhase('history');
+      done();
+      const once = d.marksLine();
+      done();
+
+      expect(d.marksLine()).toBe(once);
+      d.dispose();
+    });
+  });
+
   it('treats a non-positive budget as already spent', () => {
     const d = Deadline.start(0, 'test');
     expect(d.remainingMs()).toBe(0);

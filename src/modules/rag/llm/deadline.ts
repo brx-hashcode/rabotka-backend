@@ -25,11 +25,63 @@ export class Deadline {
   private readonly controller = new AbortController();
   private timer: ReturnType<typeof setTimeout> | null = null;
   private disposed = false;
+  /** Phases that finished, name → elapsed ms. */
+  private readonly marks = new Map<string, number>();
+  /** Phases still running, name → when they started. */
+  private readonly open = new Map<string, number>();
 
   private constructor(
     readonly label: string,
     readonly endsAt: number,
   ) {}
+
+  /**
+   * Time one phase of the turn. Returns the closer; call it in a `finally`.
+   *
+   * The marks live HERE rather than in the caller for one reason: this object
+   * is the only thing that crosses the `VovaService` ↔ `VovaAgentService`
+   * boundary and survives the outer race being LOST. When a turn expires,
+   * `VovaService` answers the user and moves on while the agent is still
+   * running — so a log line written by the agent lands out of order, or never.
+   * The reader sits on the winning side and can always print what it has.
+   *
+   * That property is the whole point. The 2026-09-01 incident had no
+   * `vova.llm` line at all, and nothing timing the phase that actually ate the
+   * budget, so the log could not say where 25 seconds went.
+   */
+  beginPhase(name: string): () => void {
+    const startedAt = Date.now();
+    this.open.set(name, startedAt);
+
+    let closed = false;
+    return () => {
+      if (closed) return;
+      closed = true;
+      this.open.delete(name);
+      this.marks.set(name, Date.now() - startedAt);
+    };
+  }
+
+  /**
+   * The phases, as one log fragment.
+   *
+   * `pending=` is not decoration: the incident's signature is "retrieval
+   * started and never finished", which a map of completed phases cannot
+   * express. Unfinished phases are reported with their elapsed time AT READ
+   * TIME, which is what makes the phase that is still burning visible from the
+   * side that gave up waiting for it.
+   */
+  marksLine(): string {
+    const parts = [...this.marks].map(([name, ms]) => `${name}_ms=${ms}`);
+
+    const now = Date.now();
+    const pending = [...this.open].map(
+      ([name, startedAt]) => `${name}@${now - startedAt}`,
+    );
+    parts.push(`pending=${pending.length ? pending.join(',') : '—'}`);
+
+    return parts.join(' ');
+  }
 
   /**
    * Start a budget of `totalMs` from now.
