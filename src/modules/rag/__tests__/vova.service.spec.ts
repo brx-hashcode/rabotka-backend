@@ -89,7 +89,7 @@ describe('VovaService', () => {
   // this module existed.
   it('does nothing when disabled', async () => {
     const agent = makeAgent();
-    expect(await build(agent).handle(PROFILE, 'bonjour')).toBeNull();
+    expect(await build(agent).handle(PROFILE, 'comment ca marche')).toBeNull();
     expect(agent.handle).not.toHaveBeenCalled();
   });
 
@@ -100,7 +100,7 @@ describe('VovaService', () => {
       'vova.shadow_mode': 'true',
     });
 
-    expect(await service.handle(PROFILE, 'bonjour')).toBeNull();
+    expect(await service.handle(PROFILE, 'comment ca marche')).toBeNull();
     // The point of shadow mode: real traffic, real replies, judged on the log.
     expect(agent.handle).toHaveBeenCalledTimes(1);
   });
@@ -127,7 +127,7 @@ describe('VovaService', () => {
       'vova.rollout_percent': '0',
     });
 
-    expect(await service.handle(PROFILE, 'bonjour')).toBeNull();
+    expect(await service.handle(PROFILE, 'comment ca marche')).toBeNull();
     expect(agent.handle).not.toHaveBeenCalled();
   });
 
@@ -142,7 +142,10 @@ describe('VovaService', () => {
     const inBucket = { ...PROFILE, id: idInBucket(50) };
 
     for (let i = 0; i < 5; i++) {
-      const result = await build(makeAgent(), values).handle(inBucket, 'salut');
+      const result = await build(makeAgent(), values).handle(
+        inBucket,
+        'comment ca marche',
+      );
       expect(result).toEqual(['réponse de Vova']);
     }
   });
@@ -155,7 +158,7 @@ describe('VovaService', () => {
       'vova.rollout_percent': '100',
     });
 
-    expect(await service.handle(PROFILE, 'bonjour')).toBeNull();
+    expect(await service.handle(PROFILE, 'comment ca marche')).toBeNull();
   });
 
   it('falls back when the agent exceeds its budget', async () => {
@@ -167,7 +170,7 @@ describe('VovaService', () => {
       'vova.timeout_ms': '30',
     });
 
-    expect(await service.handle(PROFILE, 'bonjour')).toBeNull();
+    expect(await service.handle(PROFILE, 'comment ca marche')).toBeNull();
   });
 
   it('falls back when the config lookup itself fails', async () => {
@@ -180,7 +183,7 @@ describe('VovaService', () => {
       makeOffers() as never,
       makeAnonymous() as never,
     );
-    expect(await service.handle(PROFILE, 'bonjour')).toBeNull();
+    expect(await service.handle(PROFILE, 'comment ca marche')).toBeNull();
   });
 
   it('treats a nonsense rollout percentage as zero rather than everyone', async () => {
@@ -191,7 +194,7 @@ describe('VovaService', () => {
       'vova.rollout_percent': 'beaucoup',
     });
 
-    expect(await service.handle(PROFILE, 'bonjour')).toBeNull();
+    expect(await service.handle(PROFILE, 'comment ca marche')).toBeNull();
     expect(agent.handle).not.toHaveBeenCalled();
   });
 });
@@ -306,7 +309,7 @@ describe('VovaService.handleAnonymous', () => {
     const service = build(agent, { 'vova.enabled': 'true' });
 
     expect(
-      await service.handleAnonymous('+242060000001', 'bonjour ?'),
+      await service.handleAnonymous('+242060000001', 'comment ca marche ?'),
     ).toBeNull();
     expect(agent.handleAnonymous).not.toHaveBeenCalled();
   });
@@ -316,7 +319,7 @@ describe('VovaService.handleAnonymous', () => {
     const service = build(agent, { 'vova.anonymous_enabled': 'true' });
 
     expect(
-      await service.handleAnonymous('+242060000001', 'bonjour ?'),
+      await service.handleAnonymous('+242060000001', 'comment ca marche ?'),
     ).toBeNull();
     expect(agent.handleAnonymous).not.toHaveBeenCalled();
   });
@@ -365,7 +368,7 @@ describe('VovaService.handleAnonymous', () => {
     const service = build(agent, ON);
 
     expect(
-      await service.handleAnonymous('+242060000001', 'bonjour ?'),
+      await service.handleAnonymous('+242060000001', 'comment ca marche ?'),
     ).toBeNull();
   });
 
@@ -491,5 +494,92 @@ describe('la limite des comptes bloqués', () => {
     );
 
     expect(anonymous.consumeWalled).toHaveBeenCalledWith('p-1', 3);
+  });
+});
+
+/**
+ * A bare hello, answered with a fixed string and no model call.
+ *
+ * The single largest cost reduction available on this path: the agent always
+ * binds tools, so `router.route` returns `standard` for everything and even
+ * « bonjour » paid a 4508-token prompt through a 12-tool graph.
+ */
+describe('VovaService greeting fast path', () => {
+  const LIVE = { 'vova.enabled': 'true', 'vova.shadow_mode': 'false' };
+
+  it('answers a registered user without calling the agent', async () => {
+    const agent = makeAgent();
+    const reply = await build(agent, {
+      ...LIVE,
+      'vova.rollout_percent': '100',
+    }).handle(PROFILE, 'bonjour');
+
+    expect(agent.handle).not.toHaveBeenCalled();
+    expect(reply).toHaveLength(1);
+    expect(reply?.[0]).toContain('VoVa');
+  });
+
+  it.each(['Bonjour', 'BONJOUR', 'bonjour !', 'salut', 'Coucou', 'hello'])(
+    'treats %p as a greeting whatever the casing or punctuation',
+    async (text) => {
+      const agent = makeAgent();
+      await build(agent, {
+        ...LIVE,
+        'vova.rollout_percent': '100',
+      }).handle(PROFILE, text);
+
+      expect(agent.handle).not.toHaveBeenCalled();
+    },
+  );
+
+  it('does NOT short-circuit a question that merely opens with a hello', async () => {
+    // The trap this guards: « bonjour, combien coûte un déblocage ? » is a
+    // question, and answering it with a fixed greeting drops it on the floor.
+    const agent = makeAgent();
+    await build(agent, {
+      ...LIVE,
+      'vova.rollout_percent': '100',
+    }).handle(PROFILE, 'bonjour, combien coute un deblocage ?');
+
+    expect(agent.handle).toHaveBeenCalled();
+  });
+
+  it('stays silent in shadow mode, like every other reply', async () => {
+    const agent = makeAgent();
+    const reply = await build(agent, {
+      'vova.enabled': 'true',
+      'vova.shadow_mode': 'true',
+      'vova.rollout_percent': '100',
+    }).handle(PROFILE, 'bonjour');
+
+    expect(reply).toBeNull();
+  });
+
+  it('answers a stranger without spending one of their daily questions', async () => {
+    // Deliberate: burning an allowance on the one message that costs nothing
+    // to answer would be the worst possible trade.
+    const anonymous = makeAnonymous();
+    const agent = makeAgent();
+    const service = build(
+      agent,
+      { 'vova.enabled': 'true', 'vova.anonymous_enabled': 'true' },
+      makeOffers(),
+      anonymous,
+    );
+
+    const reply = await service.handleAnonymous('+242060000001', 'bonjour');
+
+    expect(agent.handleAnonymous).not.toHaveBeenCalled();
+    expect(anonymous.consume).not.toHaveBeenCalled();
+    expect(reply?.text).toContain('VoVa');
+    expect(reply?.offerAccount).toBe(false);
+  });
+
+  it('still respects the master switch', async () => {
+    const reply = await build(makeAgent(), {
+      'vova.enabled': 'false',
+    }).handle(PROFILE, 'bonjour');
+
+    expect(reply).toBeNull();
   });
 });

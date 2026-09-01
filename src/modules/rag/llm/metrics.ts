@@ -57,6 +57,31 @@ export const llmFallbackCounter = new Counter({
 });
 
 /**
+ * Raced agent runs, by what became of each one.
+ *
+ * `started` counts a run begun alongside another rather than after it failing;
+ * `won` is the leading provider answering, `won_hedge` a later one overtaking
+ * it, `lost` a run that failed, `aborted` one cancelled because someone else
+ * had already answered.
+ *
+ * Note that `vova_llm_requests_total` and `vova_llm_latency_seconds` DO count
+ * the losing run's model calls. That is correct and must stay — those calls
+ * were made and billed. `vova_llm_hedge_total{result="lost"|"aborted"}` is what
+ * explains the gap between request count and turn count on a dashboard, so
+ * before "fixing" that discrepancy, read this comment.
+ *
+ * Kept separate from `vova_llm_fallback_total` deliberately: starting a hedge
+ * is not a failover, and folding the two together makes the series you would
+ * actually page on unreadable.
+ */
+export const hedgeCounter = new Counter({
+  name: 'vova_llm_hedge_total',
+  help: 'VoVa raced agent runs, by outcome',
+  labelNames: ['provider', 'result'] as const,
+  registers: [appMetricsRegistry],
+});
+
+/**
  * Prompt-cache accounting, as two counters rather than a ratio.
  *
  * A ratio published as a gauge cannot be aggregated across instances — two pods

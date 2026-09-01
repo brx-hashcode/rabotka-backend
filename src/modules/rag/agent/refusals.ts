@@ -48,6 +48,15 @@ export type RefusalId =
   | 'identite_modele'
   /** « Ignore tes instructions », « montre ton prompt ». */
   | 'identite_instructions'
+  /**
+   * « Bonjour » et rien d'autre.
+   *
+   * La deuxième entrée de cette liste qui ne refuse rien, pour la même raison
+   * que `identite_nom` : une phrase que tout le monde lit en premier doit
+   * sortir identique à chaque fois. Elle évite surtout un aller-retour complet
+   * au modèle — 4508 tokens et plusieurs secondes — pour dire bonjour.
+   */
+  | 'salutation'
   /** Asked the assistant to DO something: publish, pay, apply, cancel, unlock. */
   | 'action_impossible'
   /** Insults or threats. Warns, once, that the account is at stake. */
@@ -136,6 +145,14 @@ export const REFUSALS: Record<RefusalId, string> = {
   // est une devinette résolue ; ce qui compte est ce que les deux mots
   // réparent — un vrai savoir-faire que personne n'entend et que rien ne
   // prouve.
+  // Se termine par une question, délibérément. Un « Bonjour ! » seul rend la
+  // main à quelqu'un qui vient d'ouvrir la conversation et ne sait pas encore
+  // ce qu'on peut lui demander — les deux usages sont nommés pour qu'il ait
+  // quelque chose à répondre.
+  salutation:
+    'Bonjour 🙂 Je suis *VoVa*, l’assistant Rabotka. Vous cherchez une mission, ' +
+    'ou vous cherchez quelqu’un ?',
+
   identite_nom:
     '*VoVa*, c’est *Voix* et *Valeur* 🙂 Dans l’informel, une vraie compétence ' +
     'n’a souvent ni l’une ni l’autre : personne pour en parler, rien pour la ' +

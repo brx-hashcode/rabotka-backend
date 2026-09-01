@@ -320,6 +320,81 @@ describe('LlmService', () => {
     expect(TURN_BUDGET_MS - perCall).toBeGreaterThanOrEqual(minRun);
   });
 
+  /**
+   * What may enter the pool of providers a turn is allowed to use — and, once
+   * runs are raced, the pool it may race.
+   */
+  describe('usableChain', () => {
+    const factoryWithKeys = (
+      credentialed: (spec: LlmProviderSpec) => boolean,
+    ) => ({
+      hasCredential: jest.fn(credentialed),
+      build: jest.fn(),
+    });
+
+    it('offers only providers the factory can actually build', async () => {
+      const chain = await build(
+        factoryWithKeys((s) => s.provider === 'openai') as never,
+        makeBreaker(),
+      ).usableChain('standard');
+
+      expect(chain.every((s) => s.provider === 'openai')).toBe(true);
+      expect(chain.length).toBeGreaterThan(0);
+    });
+
+    /**
+     * The gate that matters for racing.
+     *
+     * `resolveChain` reads `process.env`; the factory reads the `ConfigService`
+     * it will actually build from — cached at boot, with `expandVariables`. A
+     * provider passing the first and failing the second throws a plain Error
+     * from `build`, which classifies as `transport` and opens ITS OWN breaker
+     * for what is our misconfiguration. Sequentially that cost one slow turn;
+     * raced, it would burn a slot on every single turn.
+     */
+    it('excludes a provider whose env var is set but whose config is not', async () => {
+      const factory = factoryWithKeys(() => false);
+
+      const chain = await build(factory as never, makeBreaker()).usableChain(
+        'standard',
+      );
+
+      // Every provider has an env var set (see KEYS), so the static gate passes
+      // all of them and only the factory's view removes them.
+      expect(chain).toEqual([]);
+      expect(factory.hasCredential).toHaveBeenCalled();
+    });
+
+    it('still drops providers whose breaker is open', async () => {
+      const open = specId(TIER_CHAINS.standard[0]);
+      const chain = await build(
+        factoryWithKeys(() => true) as never,
+        makeBreaker([open]),
+      ).usableChain('standard');
+
+      expect(chain.map(specId)).not.toContain(open);
+    });
+
+    it('warns once about a misconfigured provider, not once per message', async () => {
+      const warn = jest.spyOn(Logger.prototype, 'warn');
+      warn.mockClear();
+      const service = build(
+        factoryWithKeys((s) => s.provider !== 'mistral') as never,
+        makeBreaker(),
+      );
+
+      await service.usableChain('standard');
+      await service.usableChain('standard');
+      await service.usableChain('standard');
+
+      // A config problem is permanent; one line per message would bury it.
+      const mistralWarnings = warn.mock.calls.filter((c) =>
+        String(c[0]).includes('mistral'),
+      );
+      expect(mistralWarnings).toHaveLength(1);
+    });
+  });
+
   describe('deadline', () => {
     const hangingFactory = () => ({
       calls: [] as string[],
