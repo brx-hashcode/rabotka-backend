@@ -20,9 +20,11 @@ import {
 } from './error-classification';
 import {
   LlmChainExhaustedError,
+  LlmDeadlineExceededError,
   LlmFatalError,
   LlmNoProviderError,
 } from './llm.errors';
+import { Deadline } from './deadline';
 import {
   specId,
   type LlmCallTelemetry,
@@ -43,10 +45,28 @@ export interface LlmInvokeOptions {
   tier: LlmTier;
   /** Bound with `bindTools` when present. A provider without tool support fails fatal. */
   tools?: BindToolsInput[];
-  /** Per-attempt budget, not per-chain. Defaults to `VOVA_LLM_TIMEOUT_MS`. */
+  /** Per-attempt CEILING. The deadline can lower it; it can never raise it. */
   timeoutMs?: number;
   /** `requestIdMiddleware`'s id, so one conversation is greppable end to end. */
   correlationId?: string;
+  /**
+   * The turn's wall-clock budget. Per-call timeouts are clamped inside it, so a
+   * fallback always has room to run — see {@link Deadline}.
+   */
+  deadline?: Deadline;
+  /**
+   * Cancels THIS call only: LangGraph's per-run signal, or a raced run's own
+   * controller. Combined with the deadline rather than replacing it.
+   */
+  signal?: AbortSignal;
+  /**
+   * How much of the budget to hold back for whoever runs after this call.
+   *
+   * `undefined` means the service's default reserve. `0` means "I am the last
+   * provider — there is nobody left to save time for", which only the caller
+   * walking the chain can know.
+   */
+  reserveMs?: number;
 }
 
 /**
@@ -68,14 +88,69 @@ export class LlmService {
   private readonly defaultTimeoutMs: number;
   /** Pause before the single retry a 5xx earns. */
   private readonly retryBackoffMs: number;
+  /** Budget held back so a fallback is reachable inside the SAME turn. */
+  private readonly fallbackReserveMs: number;
+  /** Below this, a call is not "short" — it is a guaranteed timeout that bills tokens. */
+  private readonly minCallMs: number;
 
   constructor(
     private readonly factory: LlmModelFactory,
     private readonly breaker: LlmBreakerService,
     config: ConfigService,
   ) {
-    this.defaultTimeoutMs = readNumber(config, 'VOVA_LLM_TIMEOUT_MS', 20000);
+    // 12000, down from 20000, and the change is arithmetic rather than taste:
+    // against a 25000ms turn budget, a 20000ms per-call cap left 5000ms for
+    // everything else, so the second provider could not run at all. See
+    // `budgetFor` — this is now a CEILING that the deadline routinely lowers.
+    this.defaultTimeoutMs = readNumber(config, 'VOVA_LLM_TIMEOUT_MS', 12000);
     this.retryBackoffMs = readNumber(config, 'VOVA_LLM_RETRY_BACKOFF_MS', 250);
+    this.fallbackReserveMs = readNumber(
+      config,
+      'VOVA_FALLBACK_RESERVE_MS',
+      7000,
+    );
+    this.minCallMs = readNumber(config, 'VOVA_LLM_MIN_CALL_MS', 1500);
+  }
+
+  /**
+   * What this call may spend, given what the turn has left.
+   *
+   * The reserve is WITHHELD while somebody remains to fall over to, and
+   * RELEASED once nobody does — a last provider holding time back for a
+   * successor that does not exist would throw away the turn's final chance at
+   * an answer. Which case applies is known to the caller walking the chain, not
+   * here, so it arrives as `reserveMs`.
+   */
+  private budgetFor(options: LlmInvokeOptions): number {
+    const cap = options.timeoutMs ?? this.defaultTimeoutMs;
+    if (!options.deadline) return cap;
+
+    const remaining = options.deadline.remainingMs();
+    const reserve = options.reserveMs ?? this.fallbackReserveMs;
+    const usable = remaining - reserve;
+
+    if (usable >= this.minCallMs) return Math.min(cap, usable);
+
+    // Not enough room once the reserve is taken out. Spend what is actually
+    // left rather than nothing — but only if it could plausibly complete.
+    if (remaining >= this.minCallMs) return Math.min(cap, remaining);
+
+    throw new LlmDeadlineExceededError(
+      `no budget left for a model call (${remaining}ms remains, ` +
+        `${this.minCallMs}ms is the floor)`,
+      {
+        tier: options.tier,
+        provider: null,
+        model: null,
+        fallbackDepth: 0,
+        latencyMs: 0,
+        attempts: 0,
+        breakerSkipped: [],
+        inputTokens: null,
+        outputTokens: null,
+        cacheReadTokens: null,
+      },
+    );
   }
 
   /**
@@ -122,8 +197,31 @@ export class LlmService {
       return { output, telemetry };
     } catch (err) {
       const cls = classifyLlmError(err);
-      if (shouldTripBreaker(cls)) await this.breaker.recordFailure(spec);
       telemetry.latencyMs = Date.now() - startedAt;
+
+      // The turn running out of time is OUR budget expiring, not the vendor
+      // misbehaving — and `classifyLlmError` cannot tell the two aborts apart,
+      // since both surface as AbortError/TimeoutError and both classify as
+      // `transport`, which trips the breaker.
+      //
+      // Left unhandled, a slow afternoon would record a failure against every
+      // provider still in flight when its turn expired, and five such turns
+      // open a breaker on a vendor that never failed once. That is a
+      // self-inflicted outage built out of healthy providers, so a
+      // deadline-caused abort is logged as its own outcome and touches neither
+      // the breaker nor the failure counters.
+      if (this.deadlineCaused(err, options)) {
+        this.log(telemetry, options.correlationId, 'deadline');
+        throw err instanceof LlmDeadlineExceededError
+          ? err
+          : new LlmDeadlineExceededError(
+              `${specId(spec)} did not finish inside the turn budget (${describe(err)})`,
+              telemetry,
+              err,
+            );
+      }
+
+      if (shouldTripBreaker(cls)) await this.breaker.recordFailure(spec);
       this.log(
         telemetry,
         options.correlationId,
@@ -262,6 +360,21 @@ export class LlmService {
         cls = classifyLlmError(err);
         if (!isRetryableInPlace(cls)) break;
         if (attempt === 0) {
+          // A retry that cannot finish is worse than an immediate failover: it
+          // spends the backoff, bills a prompt, and hands the next provider a
+          // budget too small to use.
+          const left = options.deadline?.remainingMs();
+          if (
+            left !== undefined &&
+            left < this.retryBackoffMs + this.minCallMs
+          ) {
+            this.logger.debug(
+              `${specId(spec)} returned a server error — skipping the retry, ` +
+                `only ${left}ms left in the turn`,
+            );
+            break;
+          }
+
           this.logger.debug(
             `${specId(spec)} returned a server error — one retry in ${this.retryBackoffMs}ms`,
           );
@@ -278,6 +391,16 @@ export class LlmService {
     input: BaseLanguageModelInput,
     options: LlmInvokeOptions,
   ): Promise<AIMessage> {
+    // Budget FIRST, before the model is built.
+    //
+    // `factory.build` is not free on a cold provider: it dynamically imports
+    // the vendor SDK and constructs an HTTP client, which is tens of MB and
+    // hundreds of milliseconds the first time. Paying that to then discover
+    // there is no time left is the exact waste this check exists to prevent —
+    // and it is worst precisely when things are already going badly, which is
+    // when a cold provider gets reached at all.
+    const budget = this.budgetFor(options);
+
     const model = await this.factory.build(spec);
     let runnable: Runnable<BaseLanguageModelInput, AIMessage>;
 
@@ -297,11 +420,20 @@ export class LlmService {
       runnable = model;
     }
 
-    const timeoutMs = options.timeoutMs ?? this.defaultTimeoutMs;
+    // Two independent reasons to stop: the turn ran out of time, or this
+    // particular run was cancelled (LangGraph aborting the graph, or a raced
+    // run losing). Either must reach the SDK, so they are combined rather than
+    // one winning over the other.
+    const outer =
+      options.deadline && options.signal
+        ? AbortSignal.any([options.deadline.signal, options.signal])
+        : (options.signal ?? options.deadline?.signal);
+
     return withTimeout(
       (signal) => runnable.invoke(this.shapeFor(spec, input), { signal }),
-      timeoutMs,
+      budget,
       specId(spec),
+      outer,
     );
   }
 
@@ -400,7 +532,37 @@ export class LlmService {
 
     const line = `vova.llm ${parts.join(' ')}`;
     if (outcome === 'ok') this.logger.log(line);
+    // A turn running out of budget is a capacity fact, not a provider fault.
+    // Logging it at ERROR next to real failures is what would make an alert on
+    // this series mean two different things at once.
+    else if (outcome === 'deadline') this.logger.warn(line);
     else this.logger.error(line);
+  }
+
+  /**
+   * Did OUR cancellation end this call, rather than the provider failing?
+   *
+   * Covers both cancels: the turn deadline expiring, and this run being
+   * abandoned deliberately (LangGraph aborting the graph, or a raced run losing
+   * to a faster one). Neither is evidence about the vendor, so neither may
+   * reach the breaker.
+   */
+  private deadlineCaused(err: unknown, options: LlmInvokeOptions): boolean {
+    if (err instanceof LlmDeadlineExceededError) return true;
+    if (options.signal?.aborted === true) return true;
+    if (!options.deadline) return false;
+
+    // `causedAbort()` alone is not enough, and the gap is not hypothetical.
+    // On the LAST provider the reserve is released, so its per-call budget
+    // equals the whole remaining turn — both timers then fire in the same
+    // millisecond and whichever lands first decides whether a healthy vendor
+    // takes the blame. Asking "is the turn out of time?" instead of "did the
+    // turn's timer win the race?" makes that deterministic.
+    //
+    // It errs toward not blaming the provider. That asymmetry is deliberate:
+    // failing to open a breaker costs one slow call, while opening one on a
+    // healthy vendor removes it from the chain for a full cooldown.
+    return options.deadline.causedAbort() || options.deadline.expired();
   }
 }
 
@@ -518,14 +680,21 @@ function describe(err: unknown): string {
  * SDK that ignores the signal. The loser's rejection is swallowed explicitly —
  * without that, an abort that lands after the race resolves surfaces as an
  * unhandled rejection and, under Nest's default, can take the process down.
+ *
+ * `externalSignal` is the turn's deadline (and, once runs are raced, the
+ * per-run cancel). It gets the same treatment as the local timer for the same
+ * reason: cancelling the HTTP request is not enough on its own if the SDK never
+ * settles the promise.
  */
 export async function withTimeout<T>(
   run: (signal: AbortSignal) => Promise<T>,
   timeoutMs: number,
   label: string,
+  externalSignal?: AbortSignal,
 ): Promise<T> {
   const controller = new AbortController();
   let timer: NodeJS.Timeout | undefined;
+  let detach: (() => void) | undefined;
 
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
@@ -536,12 +705,43 @@ export async function withTimeout<T>(
     }, timeoutMs);
   });
 
-  const call = run(controller.signal);
+  const races: Promise<T>[] = [timeout];
+
+  if (externalSignal) {
+    races.push(
+      new Promise<never>((_, reject) => {
+        const fail = () => {
+          const err = new Error(`${label} aborted before it finished`);
+          err.name = 'AbortError';
+          reject(err);
+        };
+
+        if (externalSignal.aborted) return fail();
+
+        externalSignal.addEventListener('abort', fail, { once: true });
+        // Not optional. This function runs once per model call — up to
+        // `recursionLimit` times per graph run, doubled again when two runs are
+        // raced — while the deadline's signal lives for the whole turn. Leaving
+        // the listeners attached leaks a closure per call and trips Node's
+        // MaxListenersExceededWarning on a busy turn.
+        detach = () => externalSignal.removeEventListener('abort', fail);
+      }),
+    );
+  }
+
+  // `AbortSignal.any` composites are weakly held from Node 20.5, so this one
+  // needs none of the cleanup care the listener above does.
+  const call = run(
+    externalSignal
+      ? AbortSignal.any([controller.signal, externalSignal])
+      : controller.signal,
+  );
   call.catch(() => undefined);
 
   try {
-    return await Promise.race([call, timeout]);
+    return await Promise.race([call, ...races]);
   } finally {
     if (timer) clearTimeout(timer);
+    detach?.();
   }
 }
