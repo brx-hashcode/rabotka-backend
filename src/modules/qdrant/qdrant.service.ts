@@ -6,6 +6,7 @@ import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { QdrantClient } from '@qdrant/js-client-rest';
 import Redis from 'ioredis';
+import { readNumber } from '../rag/shared/config';
 import {
   REDIS_CONNECTION,
   REDIS_KEY_PREFIX,
@@ -163,6 +164,16 @@ function repairIncompleteFastembedCaches(
 export class QdrantService implements OnModuleInit {
   private readonly logger = new Logger(QdrantService.name);
   private client: QdrantClient;
+  /**
+   * A second client for reads a user is waiting on, with a much tighter timeout.
+   *
+   * Two clients rather than one tight setting, because the same connection is
+   * shared with ingestion: `scroll(limit:1000)` and batched `upsert`
+   * legitimately take minutes, and a timeout short enough to protect a
+   * WhatsApp turn would break them. A `QdrantClient` is a thin fetch wrapper,
+   * so the cost here is a second connection pool, not a second anything else.
+   */
+  private fastClient: QdrantClient;
   private embedder: FlagEmbedding | undefined;
   private sparseEmbedder: SparseTextEmbedding | undefined;
   private embeddersPromise: Promise<void> | null = null;
@@ -182,10 +193,29 @@ export class QdrantService implements OnModuleInit {
       throw new Error('QDRANT_API_KEY is not set');
     }
 
+    // The library default is 300_000ms — five minutes, on a call a person is
+    // waiting through. It has never fired only because Qdrant has been healthy;
+    // a single stalled search could have blocked a VoVa turn for longer than
+    // the turn budget by two orders of magnitude.
+    const timeout = readNumber(this.config, 'QDRANT_TIMEOUT_MS', 30_000);
+    const searchTimeout = readNumber(
+      this.config,
+      'QDRANT_SEARCH_TIMEOUT_MS',
+      1_000,
+    );
+
     this.client = new QdrantClient({
       url,
       apiKey,
       checkCompatibility: false,
+      timeout,
+    });
+
+    this.fastClient = new QdrantClient({
+      url,
+      apiKey,
+      checkCompatibility: false,
+      timeout: searchTimeout,
     });
 
     this.logger.log(
@@ -229,6 +259,14 @@ export class QdrantService implements OnModuleInit {
 
   getClient(): QdrantClient {
     return this.client;
+  }
+
+  /**
+   * For reads inside a user's turn only. Everything else — ingest, upsert,
+   * scroll, collection setup — must keep using {@link getClient}.
+   */
+  getFastClient(): QdrantClient {
+    return this.fastClient;
   }
 
   async embed(text: string): Promise<number[]> {

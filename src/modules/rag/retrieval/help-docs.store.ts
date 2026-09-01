@@ -56,6 +56,11 @@ export class HelpDocsStore {
     return this.qdrant.getClient();
   }
 
+  /** Tight timeout, for the one read that happens inside a user's turn. */
+  private fastClient() {
+    return this.qdrant.getFastClient();
+  }
+
   /**
    * Creates the collection if absent, and its payload indexes either way —
    * Qdrant does not build an index retroactively, so an existing collection
@@ -220,7 +225,8 @@ export class HelpDocsStore {
     ]);
 
     const result = await retryTransient(() =>
-      this.client().query(HELP_DOCS_COLLECTION, {
+      // The fast client: this is the only Qdrant call a person is waiting on.
+      this.fastClient().query(HELP_DOCS_COLLECTION, {
         prefetch: denseOnly
           ? [{ query: dense, using: 'dense', limit: PREFETCH_LIMIT }]
           : [
