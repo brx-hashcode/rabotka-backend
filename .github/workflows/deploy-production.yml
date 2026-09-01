@@ -259,9 +259,19 @@ jobs:
           # so this pin matters more here than anywhere else in the list.
           VOVA_MODEL_STANDARD_GROQ=llama-3.3-70b-versatile
           VOVA_MODEL_STANDARD_DEEPSEEK=deepseek-chat
-          # Per-attempt budget, not per-chain. The whole reply has to land
-          # inside the WhatsApp window a user is actually waiting through.
-          VOVA_LLM_TIMEOUT_MS=20000
+          # Per-attempt CEILING, now clamped by the turn deadline rather than
+          # standing alone. 20000 here against a 25000ms `vova.timeout_ms` left
+          # 5000ms for everything else, so the fallback chain was unreachable by
+          # arithmetic — a second provider could only ever help the NEXT message.
+          #
+          # Move these three together, and keep the invariant:
+          #   TIMEOUT_MS + FALLBACK_RESERVE_MS <= vova.timeout_ms (SystemConfig)
+          VOVA_LLM_TIMEOUT_MS=12000
+          VOVA_FALLBACK_RESERVE_MS=7000
+          # Below this, a call is a guaranteed timeout that still bills a prompt.
+          VOVA_LLM_MIN_CALL_MS=1500
+          # Least budget worth starting a whole agent run with.
+          VOVA_MIN_RUN_MS=5000
           VOVA_LLM_RETRY_BACKOFF_MS=250
           # Circuit breaker: consecutive failures before a provider is skipped,
           # and how long a failure keeps counting toward that threshold.

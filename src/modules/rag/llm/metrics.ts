@@ -13,8 +13,16 @@ import { appMetricsRegistry } from '../../../common/telemetry/metrics';
  * either would cost the other's job.
  */
 
-/** Terminal outcome of one call, matching `LlmService.log`'s vocabulary. */
-export type LlmRequestStatus = 'ok' | 'fatal' | 'exhausted';
+/**
+ * Terminal outcome of one call, matching `LlmService.log`'s vocabulary.
+ *
+ * `deadline` is deliberately NOT a kind of `exhausted`. Exhausted means the
+ * provider failed; deadline means our turn budget ran out while it was still
+ * working, which is a statement about load and about the budget, not about the
+ * vendor. Folding them together would make a rate on this series answer
+ * "is a provider degrading?" and "are we over capacity?" with one number.
+ */
+export type LlmRequestStatus = 'ok' | 'fatal' | 'exhausted' | 'deadline';
 
 export const llmRequestCounter = new Counter({
   name: 'vova_llm_requests_total',
