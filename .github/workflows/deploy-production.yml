@@ -252,6 +252,10 @@ jobs:
           # gemini-flash-lite-latest.
           VOVA_MODEL_STANDARD_ANTHROPIC=claude-haiku-4-5
           VOVA_MODEL_CHEAP_GOOGLE=gemini-flash-lite-latest
+          # Two Google entries. FAST leads the pair (~1.4s median on a
+          # tool-calling turn); the capable one sits behind it. Separate breaker
+          # keys, so one failing does not pull the other out of rotation.
+          VOVA_MODEL_STANDARD_GOOGLE_FAST=gemini-flash-lite-latest
           VOVA_MODEL_STANDARD_GOOGLE=gemini-3.6-flash
           VOVA_MODEL_STANDARD_MISTRAL=mistral-small-latest
           VOVA_MODEL_STANDARD_OPENAI=gpt-4o-mini
@@ -263,6 +267,10 @@ jobs:
           # inside the WhatsApp window a user is actually waiting through.
           VOVA_LLM_TIMEOUT_MS=20000
           VOVA_LLM_RETRY_BACKOFF_MS=250
+          # Gemini is a thinking model, and unconstrained it spent 5116ms on a
+          # turn whose whole output was a 28-token tool call, then stalled past
+          # the cap above. VoVa's turns are lookups, not proofs.
+          VOVA_GOOGLE_THINKING_LEVEL=LOW
           # Circuit breaker: consecutive failures before a provider is skipped,
           # and how long a failure keeps counting toward that threshold.
           # VOVA_BREAKER_COOLDOWN_S is left to its 60s default.

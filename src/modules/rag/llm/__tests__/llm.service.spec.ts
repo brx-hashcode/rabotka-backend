@@ -5,7 +5,7 @@ import {
   LlmFatalError,
   LlmNoProviderError,
 } from '../llm.errors';
-import type { LlmProviderSpec } from '../llm.types';
+import { specId, type LlmProviderSpec } from '../llm.types';
 import { PROVIDER_API_KEY_ENV, TIER_CHAINS } from '../models.config';
 
 jest.spyOn(Logger.prototype, 'log').mockImplementation(() => {});
@@ -14,12 +14,21 @@ jest.spyOn(Logger.prototype, 'error').mockImplementation(() => {});
 jest.spyOn(Logger.prototype, 'debug').mockImplementation(() => {});
 
 /**
- * The chain's ORDER is a tuning decision (it moved to mistral-first on measured
- * latency). These tests are about the fallback mechanics, so they read the
- * order from the config rather than pinning it — a reorder is not a regression.
+ * The chain's ORDER is a tuning decision (it has moved twice on measured
+ * latency, most recently to openai-first). These tests are about the fallback
+ * mechanics, so they read the order from the config rather than pinning it — a
+ * reorder is not a regression.
+ *
+ * Keyed by `specId`, NOT by provider name. The chain holds two `google` entries
+ * (flash-lite ahead of 3.6-flash), so a provider-keyed fake would serve one
+ * behaviour for both and record an ambiguous call log — every fallback test
+ * below would still pass while asserting nothing about which model ran.
  */
-const CHAIN = TIER_CHAINS.standard.map((s) => s.provider);
+const CHAIN = TIER_CHAINS.standard.map(specId);
 const [FIRST, SECOND, THIRD] = CHAIN;
+
+/** `provider:model` → `provider`, for the telemetry fields that carry only the vendor. */
+const providerOf = (id: string) => id.split(':')[0];
 
 /**
  * A credential for every provider in the registry, derived rather than listed.
@@ -38,8 +47,8 @@ function httpError(status: number) {
 }
 
 /**
- * A fake chat model per provider. `behaviours` maps a provider name to the
- * sequence of outcomes its `invoke` should produce, one per call.
+ * A fake chat model per spec. `behaviours` maps a `specId` to the sequence of
+ * outcomes its `invoke` should produce, one per call.
  */
 function makeFactory(
   behaviours: Partial<Record<string, Array<'ok' | Error>>>,
@@ -49,12 +58,12 @@ function makeFactory(
     calls,
     build: jest.fn((spec: LlmProviderSpec) => ({
       invoke: jest.fn(() => {
-        calls.push(spec.provider);
-        const queue = behaviours[spec.provider] ?? ['ok'];
+        calls.push(specId(spec));
+        const queue = behaviours[specId(spec)] ?? ['ok'];
         const next = queue.length > 1 ? queue.shift() : queue[0];
         if (next instanceof Error) return Promise.reject(next);
         return Promise.resolve({
-          content: `hello from ${spec.provider}`,
+          content: `hello from ${specId(spec)}`,
           usage_metadata: { input_tokens: 10, output_tokens: 4 },
         });
       }),
@@ -62,10 +71,11 @@ function makeFactory(
   };
 }
 
+/** `open` holds `specId`s: one Google model's breaker must not open the other's. */
 function makeBreaker(open: string[] = []) {
   return {
     isOpen: jest.fn((spec: LlmProviderSpec) =>
-      Promise.resolve(open.includes(spec.provider)),
+      Promise.resolve(open.includes(specId(spec))),
     ),
     recordFailure: jest.fn(() => Promise.resolve(false)),
     recordSuccess: jest.fn(() => Promise.resolve()),
@@ -106,7 +116,7 @@ describe('LlmService', () => {
 
     expect(factory.calls).toEqual([FIRST]);
     expect(telemetry.fallbackDepth).toBe(0);
-    expect(telemetry.provider).toBe(FIRST);
+    expect(telemetry.provider).toBe(providerOf(FIRST));
     expect(telemetry.inputTokens).toBe(10);
     expect(breaker.recordSuccess).toHaveBeenCalled();
   });
@@ -119,7 +129,7 @@ describe('LlmService', () => {
     });
 
     expect(factory.calls).toEqual([FIRST, SECOND]);
-    expect(telemetry.provider).toBe(SECOND);
+    expect(telemetry.provider).toBe(providerOf(SECOND));
     expect(telemetry.fallbackDepth).toBe(1);
     expect(breaker.recordFailure).toHaveBeenCalledTimes(1);
   });
@@ -157,7 +167,7 @@ describe('LlmService', () => {
     });
 
     expect(factory.calls).toEqual([FIRST, FIRST]);
-    expect(telemetry.provider).toBe(FIRST);
+    expect(telemetry.provider).toBe(providerOf(FIRST));
     expect(telemetry.fallbackDepth).toBe(0);
     expect(telemetry.attempts).toBe(2);
   });
@@ -176,9 +186,8 @@ describe('LlmService', () => {
     });
 
     expect(factory.calls).toEqual([SECOND]);
-    expect(telemetry.breakerSkipped).toEqual([
-      `${FIRST}:${TIER_CHAINS.standard[0].model}`,
-    ]);
+    // `breakerSkipped` already carries `specId`s, which is what FIRST now is.
+    expect(telemetry.breakerSkipped).toEqual([FIRST]);
     expect(telemetry.fallbackDepth).toBe(1);
   });
 
@@ -193,6 +202,53 @@ describe('LlmService', () => {
       build(factory, makeBreaker()).invoke('hi', { tier: 'standard' }),
     ).rejects.toBeInstanceOf(LlmChainExhaustedError);
     expect(factory.calls).toEqual(CHAIN);
+  });
+
+  it('treats two models from one vendor as independent providers', async () => {
+    // The chain carries `google:gemini-flash-lite-latest` AND
+    // `google:gemini-3.6-flash`. They share a credential and an SDK but not a
+    // failure mode, so one falling over must not skip the other — and a fake
+    // keyed on `spec.provider` rather than `specId` would hide exactly that.
+    const google = CHAIN.filter((id) => providerOf(id) === 'google');
+    expect(google.length).toBeGreaterThan(1);
+    const [fast, capable] = google;
+
+    const factory = makeFactory({
+      ...Object.fromEntries(
+        CHAIN.filter((id) => id !== capable).map((id) => [
+          id,
+          [httpError(429)],
+        ]),
+      ),
+    });
+    const breaker = makeBreaker();
+    const { telemetry } = await build(factory, breaker).invoke('hi', {
+      tier: 'standard',
+    });
+
+    expect(factory.calls).toContain(fast);
+    expect(factory.calls.at(-1)).toBe(capable);
+    expect(telemetry.provider).toBe('google');
+    expect(telemetry.model).toBe(capable.split(':')[1]);
+  });
+
+  it('opens one Google model’s breaker without skipping the other', async () => {
+    const google = CHAIN.filter((id) => providerOf(id) === 'google');
+    const [fast, capable] = google;
+
+    const factory = makeFactory({});
+    // Everything above the capable Google entry is out: the fast Google model by
+    // its own breaker, the rest by theirs.
+    const breaker = makeBreaker(
+      CHAIN.slice(0, CHAIN.indexOf(capable)).filter((id) => id !== capable),
+    );
+    const { telemetry } = await build(factory, breaker).invoke('hi', {
+      tier: 'standard',
+    });
+
+    expect(factory.calls).toEqual([capable]);
+    expect(telemetry.breakerSkipped).toContain(fast);
+    expect(telemetry.model).toBe(capable.split(':')[1]);
   });
 
   it('throws when the tier has no configured credential', async () => {
@@ -213,7 +269,9 @@ describe('LlmService', () => {
       tier: 'standard',
     });
 
-    expect(factory.calls).toEqual(['mistral']);
+    expect(factory.calls).toEqual(
+      CHAIN.filter((id) => providerOf(id) === 'mistral'),
+    );
     expect(telemetry.fallbackDepth).toBe(0);
   });
 
@@ -222,8 +280,8 @@ describe('LlmService', () => {
       calls: [] as string[],
       build: jest.fn((spec: LlmProviderSpec) => ({
         invoke: jest.fn(() => {
-          factory.calls.push(spec.provider);
-          if (spec.provider === FIRST) return new Promise(() => {});
+          factory.calls.push(specId(spec));
+          if (specId(spec) === FIRST) return new Promise(() => {});
           return Promise.resolve({ content: 'ok' });
         }),
       })),
@@ -236,7 +294,7 @@ describe('LlmService', () => {
     ).invoke('hi', { tier: 'standard' });
 
     expect(factory.calls).toEqual([FIRST, SECOND]);
-    expect(telemetry.provider).toBe(SECOND);
+    expect(telemetry.provider).toBe(providerOf(SECOND));
   });
 
   it('fails fatally when tools are bound to a provider that cannot call them', async () => {
