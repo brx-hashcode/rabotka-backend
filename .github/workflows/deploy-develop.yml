@@ -390,6 +390,29 @@ jobs:
           # loading all six costs ~83MB and broke the 150MB terminus limit.
           # Name only what the race uses; Mistral alone is 67MB.
           VOVA_WARMUP_PROVIDERS=google,openai
+          # Load the ~2.2GB e5 embedder at BOOT instead of inside a user's turn.
+          # Different from VOVA_WARMUP_PROVIDERS above, which warms chat-model
+          # SDKs only.
+          #
+          # Why it matters: onnxruntime-node runs loadModel and run as SYNC
+          # native calls on the main thread — `setImmediate` defers scheduling,
+          # not execution. While the ~3.9s cold start runs, NO TIMER FIRES.
+          # On 2026-09-01 that ate an entire 25s VoVa turn before a single model
+          # call, and made an unrelated WhatsApp markAsRead report a bogus 15s
+          # timeout because its abort timer was queued behind the blocked loop.
+          # The inbound worker runs concurrency:5, so five turns serialise
+          # through that one blocking session.
+          #
+          # DEVELOP ONLY for now, deliberately. Before promoting to production,
+          # measure on the VPS: `docker stats` RSS before/after, `free -m`
+          # headroom, and the `Vova embedder warmed in Xms` boot line. The risk
+          # is NOT /health — that checks V8 heap (limit 320MB) and these are
+          # native/mmap allocations, and QdrantService already blocks the loop
+          # at boot loading 636MB of its own ONNX models today. The risk is host
+          # RAM: `docker-compose.prod.yml` sets no memory cap on `api`, so
+          # overshooting means the kernel OOM-killer, which can take neighbouring
+          # containers with it.
+          VOVA_WARMUP=true
           VOVA_HEDGE_ENABLED=false
           # Head start for the leading provider; 0 races everyone at once.
           VOVA_HEDGE_MS=3500
