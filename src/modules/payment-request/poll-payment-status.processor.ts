@@ -3,8 +3,9 @@ import {
   PaymentRequestStatus,
   PaymentStatus,
   PaymentMethod,
-  PaymentType,
+  type PaymentRequestType,
 } from '@prisma/client';
+import { resolvePaymentType } from './payment-type';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { PaymentGatewayService } from '../../common/services/payment/payment-gateway.service';
 import { PaymentStatusGateway } from '../ws-notifications/payment-status.gateway';
@@ -25,7 +26,18 @@ export type PollPaymentStatusJobData = {
   amount: number;
   phone?: string;
   operator?: string;
-  requestType?: string;
+  /**
+   * The enum, not a bare `string`.
+   *
+   * As a string this compared fine against hand-written literals and told
+   * nobody when a new member appeared — which is how `WALLET_TOP_UP` was missed
+   * here and failed wallet recharges ended up typed as penalties. Typed, the
+   * exhaustive switch in `resolvePaymentType` catches the next one at build.
+   *
+   * Still optional: jobs enqueued before this field existed are already on the
+   * queue and deserialise without it.
+   */
+  requestType?: PaymentRequestType;
   gateway?: string;
 };
 
@@ -147,16 +159,14 @@ export class PollPaymentStatusProcessor {
       gatewayRef,
     } = jobData;
 
-    const isContactType =
-      requestType === 'CONTACT_UNLOCK' ||
-      requestType === 'RECOMMENDATION_CONTACT';
-
     try {
       await this.prisma.payment.create({
         data: {
-          type: isContactType
-            ? PaymentType.CONTACT_UNLOCK
-            : PaymentType.PENALTY,
+          // Shares the service's mapping rather than restating it. The version
+          // this replaced was `isContactType ? CONTACT_UNLOCK : PENALTY`, which
+          // had no WALLET_TOP_UP branch — so a wallet recharge that failed
+          // during polling was recorded as a PENALTY and shown to admins as one.
+          type: resolvePaymentType(requestType, false, false),
           profile_id: profileId,
           amount,
           payment_method: PaymentMethod.MOBILE_MONEY,
