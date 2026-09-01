@@ -77,6 +77,34 @@ export class VovaService {
     private readonly anonymous: VovaAnonymousStore,
   ) {}
 
+  /**
+   * Log a fallen-back turn at the level it deserves.
+   *
+   * A turn hitting its budget is the deadline doing its job, not a fault — and
+   * it was being logged at ERROR with a stack, next to real failures. The
+   * classification is on the error rather than on the `Deadline` because that
+   * object is scoped to the inner try; at THIS layer an `AbortError` or
+   * `TimeoutError` can only have come from the turn's own budget, since every
+   * provider-level abort is already converted below (`LlmService.deadlineCaused`).
+   */
+  private report(err: unknown, who: string): void {
+    const name = err instanceof Error ? err.name : '';
+    const outOfTime =
+      name === 'AbortError' ||
+      name === 'TimeoutError' ||
+      name === 'AgentDeadlineExceededError';
+
+    if (outOfTime) {
+      this.logger.warn(
+        `Vova ran out of time for ${who} ` +
+          `(${err instanceof Error ? err.message : String(err)})`,
+      );
+      return;
+    }
+
+    this.logger.error(`Vova failed for ${who}`, err);
+  }
+
   private card(destination: string): string {
     return templateReply(
       'welcomePlatform',
@@ -161,6 +189,19 @@ export class VovaService {
           deadline.signal,
         );
       } finally {
+        // Where the turn's time actually went, emitted from the `finally` so it
+        // appears exactly once however the turn ended — answered, shadowed, or
+        // thrown. The catch below logs no timing at all, which is why an
+        // incident that spent all 25s before the first model call left nothing
+        // in the log to point at.
+        //
+        // `pending=` is the load-bearing half: the agent is still running when
+        // this executes on a turn that lost the race, so an unfinished phase is
+        // reported with its elapsed time as of right now.
+        this.logger.log(
+          `vova.pre phone=${phone} ${deadline.marksLine()} ms=${Date.now() - started}`,
+        );
+
         // Not optional: without it every message leaves a live 25s timer
         // behind, and anything still running for this turn keeps going.
         deadline.dispose();
@@ -179,10 +220,7 @@ export class VovaService {
 
       return { text: reply.text, offerAccount: false };
     } catch (err) {
-      this.logger.error(
-        `Vova failed for anonymous ${phone} — falling back to the signup card`,
-        err,
-      );
+      this.report(err, `anonymous ${phone} — falling back to the signup card`);
       return null;
     }
   }
@@ -301,6 +339,19 @@ export class VovaService {
           deadline.signal,
         );
       } finally {
+        // Where the turn's time actually went, emitted from the `finally` so it
+        // appears exactly once however the turn ended — answered, shadowed, or
+        // thrown. The catch below logs no timing at all, which is why an
+        // incident that spent all 25s before the first model call left nothing
+        // in the log to point at.
+        //
+        // `pending=` is the load-bearing half: the agent is still running when
+        // this executes on a turn that lost the race, so an unfinished phase is
+        // reported with its elapsed time as of right now.
+        this.logger.log(
+          `vova.pre profile=${profile.id} ${deadline.marksLine()} ms=${Date.now() - started}`,
+        );
+
         // Not optional: without it every message leaves a live 25s timer
         // behind on the hottest path in the bot, and the work this turn
         // started keeps running after the user has been answered.
@@ -349,9 +400,9 @@ export class VovaService {
       }
       return [reply.text];
     } catch (err) {
-      this.logger.error(
-        `Vova failed for profile ${profile.id} (mode=${shadow ? 'shadow' : 'live'}) — falling back`,
+      this.report(
         err,
+        `profile ${profile.id} (mode=${shadow ? 'shadow' : 'live'}) — falling back`,
       );
       return null;
     }

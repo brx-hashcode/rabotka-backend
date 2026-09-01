@@ -277,6 +277,14 @@ jobs:
           VOVA_LLM_MIN_CALL_MS=1500
           # Least budget worth starting a whole agent run with.
           VOVA_MIN_RUN_MS=5000
+          # Ceiling on retrieval so grounding cannot starve the model call.
+          # Keep: 3 x QDRANT_SEARCH_TIMEOUT_MS + 450 <= this value.
+          VOVA_RETRIEVAL_BUDGET_MS=4000
+          # The client library defaults to 300000ms. Two clients: a shared
+          # safety net that cannot break ingest, and a tight one used only
+          # by the help search inside a user's turn.
+          QDRANT_TIMEOUT_MS=30000
+          QDRANT_SEARCH_TIMEOUT_MS=1000
           # Racing agent runs. OFF until the cheaper fixes above are measured:
           # it doubles tokens and DB reads on the turns it fires. Safe only
           # because all 14 VoVa tools are read-only.
