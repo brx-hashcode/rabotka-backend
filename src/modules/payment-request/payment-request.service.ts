@@ -18,6 +18,7 @@ import {
   BillingStatus,
 } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
+import { resolvePaymentType } from './payment-type';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { deletedAtFilter } from '../../common/utils/soft-delete.util';
 import { SystemConfigService } from '../system-config/system-config.service';
@@ -92,11 +93,11 @@ type PaymentProcessingContext = {
   paymentDescription: string;
 };
 
-function resolvePaymentType(requestType: PaymentRequestType | null | undefined, isContactUnlock: boolean, isRecommendationContact: boolean): PaymentType {
-  if (isContactUnlock || isRecommendationContact) return PaymentType.CONTACT_UNLOCK;
-  if (requestType === PaymentRequestType.WALLET_TOP_UP) return PaymentType.WALLET_TOP_UP;
-  return PaymentType.PENALTY;
-}
+// Moved to `payment-type.ts` so the poll processor writes the same mapping this
+// service does. It could not import it from here — the processor keeps a
+// hand-written interface to break exactly that cycle — so it open-coded the
+// rule instead, missed WALLET_TOP_UP, and filed failed wallet recharges as
+// penalties.
 
 @Injectable()
 export class PaymentRequestService {
@@ -604,7 +605,11 @@ export class PaymentRequestService {
       isContactUnlock,
       isRecommendationContact,
       recommendationWorkerId,
-      paymentType: resolvePaymentType(requestType, isContactUnlock, isRecommendationContact),
+      paymentType: resolvePaymentType(
+        requestType,
+        isContactUnlock,
+        isRecommendationContact,
+      ),
       paymentDescription,
     };
   }
