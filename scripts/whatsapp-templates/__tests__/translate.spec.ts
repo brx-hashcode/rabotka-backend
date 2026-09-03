@@ -221,6 +221,8 @@ describe('authored templates', () => {
     // The one card the walled states share. Its button is the whole point of
     // it being a template: a bare link does not open the in-app browser.
     'openApp',
+    // Lands on the claim that was answered, so the reply is one tap away.
+    'claimCommented',
   ] as const;
   // Deliberately button-less: this one carries whatever an admin typed, so
   // there is no single destination a CTA could point at.
