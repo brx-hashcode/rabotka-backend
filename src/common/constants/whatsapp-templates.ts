@@ -1,4 +1,5 @@
 import {
+  FREE_TEXT_VAR_MAX,
   capTemplateVar,
   flattenForTemplateVariable,
 } from '../utils/whatsapp-template-text.util';
@@ -179,6 +180,18 @@ export const SUSPENDED_CTA_PATH = 'home';
  * the card making a guess it has no business making.
  */
 export const OPEN_APP_CTA_PATH = 'home';
+/**
+ * Where a claim notification lands when no login code could be minted.
+ *
+ * The list rather than the claim itself: the fallback travels in the URL as a
+ * literal `/s/<path>`, and a bare uuid there is both unreadable and useless to
+ * anyone who forwards the message.
+ */
+export const CLAIMS_LIST_CTA_PATH = 'claims';
+/** The claim's own page — `/claims/:id` in rabotka-client. */
+export function claimDetailCtaPath(claimId: string): string {
+  return `claims/${claimId}`;
+}
 
 /**
  * Reads a Meta template name from the environment, falling back to the name the
@@ -220,12 +233,19 @@ function cloudName(envVar: string, derivedDefault: string): string {
  * The provider mappers sanitize every variable again on the way out. That guard
  * is the one that makes 132018 impossible; this one is what keeps the fallback
  * and the length budget correct, which the mappers cannot know about.
+ *
+ * `max` tightens step 2 for a template that spends its 1024-character body
+ * budget on more than one variable — `claimCommented` carries a title AND a
+ * comment, so neither may claim the whole default.
  */
 function freeTextVar(
   value: string | null | undefined,
   fallback: string,
+  max: number = FREE_TEXT_VAR_MAX,
 ): string {
-  return capTemplateVar(flattenForTemplateVariable(value ?? '')) || fallback;
+  return (
+    capTemplateVar(flattenForTemplateVariable(value ?? ''), max) || fallback
+  );
 }
 
 export const WHATSAPP_TEMPLATES = {
@@ -1199,6 +1219,58 @@ export const WHATSAPP_TEMPLATES = {
       '1': p.message,
     }),
   } satisfies WhatsAppTemplate<[params: { message: string }]>,
+
+  /**
+   * An admin answered a claim.
+   *
+   * The only signal the complainant gets: the `CLAIM_COMMENTED` event is
+   * admin-facing, and the `/claim-comments` socket only reaches someone already
+   * looking at the page. Everything else about a claim reaches them by e-mail;
+   * this one is on WhatsApp because a reply is what they are waiting for.
+   *
+   * Sent for admin comments ONLY (`ClaimService.addComment`) — the profile's own
+   * comments are the user talking to us.
+   */
+  claimCommented: {
+    // Authored in scripts/whatsapp-templates/definitions.ts; it never had a
+    // Twilio Content counterpart to translate from.
+    cloudOnly: true,
+    urlSuffixVar: '4',
+    urlSuffixMode: 'shortlink',
+    category: 'UTILITY',
+    cloud: {
+      name: cloudName('TPL_CLOUD_CLAIM_COMMENTED', 'rabotka_claim_comment_v1'),
+    },
+    variables: (p: {
+      firstName: string;
+      claimTitle: string;
+      excerpt: string | null;
+      loginCode?: string | null;
+    }) => ({
+      '1': p.firstName,
+      // User-typed at creation, so prose like any other — and capped short,
+      // because {{3}} below needs the rest of the 1024-character body budget.
+      '2': freeTextVar(p.claimTitle, 'votre réclamation', 80),
+      // The admin's comment. Never empty, never multi-line — see `freeTextVar`.
+      '3': freeTextVar(
+        p.excerpt,
+        'Consultez le détail dans l’application',
+        300,
+      ),
+      // A minted login code when the caller has one, else the bare claims list
+      // — a live link into the login screen rather than a dead `/s/<uuid>`.
+      '4': p.loginCode?.trim() || CLAIMS_LIST_CTA_PATH,
+    }),
+  } satisfies WhatsAppTemplate<
+    [
+      params: {
+        firstName: string;
+        claimTitle: string;
+        excerpt: string | null;
+        loginCode?: string | null;
+      },
+    ]
+  >,
 } as const;
 
 export type WhatsAppTemplateName = keyof typeof WHATSAPP_TEMPLATES;
