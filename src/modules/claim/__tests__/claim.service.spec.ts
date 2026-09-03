@@ -5,6 +5,8 @@ import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { NotificationService } from '../../notification/notification.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ClaimCommentsGateway } from '../../ws-notifications/claim-comments.gateway';
+import { WhatsAppService } from '../../whatsapp/whatsapp.service';
+import { WhatsAppLoginLinkService } from '../../auth/whatsapp-login-link.service';
 
 const mockPrisma = {
   claim: {
@@ -47,6 +49,20 @@ const mockGateway = {
   emitNewComment: jest.fn(),
   emitDeletedComment: jest.fn(),
 };
+
+const mockWhatsApp = {
+  sendTemplateMessage: jest.fn().mockResolvedValue(true),
+};
+
+const mockLoginLink = {
+  mint: jest.fn().mockResolvedValue('code-123'),
+};
+
+/**
+ * The notification is fired with `void`, so the assertion has to run after the
+ * microtasks it queues — the mint and the send — have both drained.
+ */
+const flushNotification = () => new Promise(process.nextTick);
 
 const now = new Date();
 
@@ -102,6 +118,8 @@ describe('ClaimService', () => {
         { provide: NotificationService, useValue: mockNotifications },
         { provide: EventEmitter2, useValue: mockEventEmitter },
         { provide: ClaimCommentsGateway, useValue: mockGateway },
+        { provide: WhatsAppService, useValue: mockWhatsApp },
+        { provide: WhatsAppLoginLinkService, useValue: mockLoginLink },
       ],
     }).compile();
     service = module.get<ClaimService>(ClaimService);
@@ -430,11 +448,15 @@ describe('ClaimService', () => {
   });
 
   describe('addComment', () => {
+    const claimWithOwner = {
+      id: 'claim-1',
+      title: 'Test',
+      profile_id: 'profile-1',
+      profile: { first_name: 'John', phone: '+242060000000' },
+    };
+
     it('adds a comment', async () => {
-      mockPrisma.claim.findUnique.mockResolvedValue({
-        id: 'claim-1',
-        title: 'Test',
-      });
+      mockPrisma.claim.findUnique.mockResolvedValue(claimWithOwner);
       mockPrisma.claimComment.create.mockResolvedValue(baseComment);
 
       const result = await service.addComment('claim-1', 'user-1', {
@@ -449,6 +471,76 @@ describe('ClaimService', () => {
       await expect(
         service.addComment('x', 'u', { content: 'c' }),
       ).rejects.toThrow(NotFoundException);
+    });
+
+    it('notifies the owner on WhatsApp with a code minted for the claim', async () => {
+      mockPrisma.claim.findUnique.mockResolvedValue(claimWithOwner);
+      mockPrisma.claimComment.create.mockResolvedValue(baseComment);
+
+      await service.addComment('claim-1', 'user-1', { content: 'On regarde' });
+      await flushNotification();
+
+      expect(mockLoginLink.mint).toHaveBeenCalledWith(
+        'profile-1',
+        'claims/claim-1',
+      );
+      expect(mockWhatsApp.sendTemplateMessage).toHaveBeenCalledWith(
+        '+242060000000',
+        'claimCommented',
+        {
+          firstName: 'John',
+          claimTitle: 'Test',
+          excerpt: 'On regarde',
+          loginCode: 'code-123',
+        },
+        'profile-1',
+      );
+    });
+
+    it('still sends when no login code can be minted', async () => {
+      mockPrisma.claim.findUnique.mockResolvedValue(claimWithOwner);
+      mockPrisma.claimComment.create.mockResolvedValue(baseComment);
+      mockLoginLink.mint.mockResolvedValueOnce(null);
+
+      await service.addComment('claim-1', 'user-1', { content: 'On regarde' });
+      await flushNotification();
+
+      // The template falls back to the bare claims path for a null code.
+      expect(mockWhatsApp.sendTemplateMessage).toHaveBeenCalledWith(
+        '+242060000000',
+        'claimCommented',
+        expect.objectContaining({ loginCode: null }),
+        'profile-1',
+      );
+    });
+
+    it('sends nothing when the owner has no phone', async () => {
+      mockPrisma.claim.findUnique.mockResolvedValue({
+        ...claimWithOwner,
+        profile: { first_name: 'John', phone: null },
+      });
+      mockPrisma.claimComment.create.mockResolvedValue(baseComment);
+
+      await service.addComment('claim-1', 'user-1', { content: 'On regarde' });
+      await flushNotification();
+
+      expect(mockWhatsApp.sendTemplateMessage).not.toHaveBeenCalled();
+      expect(mockLoginLink.mint).not.toHaveBeenCalled();
+    });
+
+    it('does not fail the comment when the send throws', async () => {
+      mockPrisma.claim.findUnique.mockResolvedValue(claimWithOwner);
+      mockPrisma.claimComment.create.mockResolvedValue(baseComment);
+      mockWhatsApp.sendTemplateMessage.mockRejectedValueOnce(
+        new Error('provider down'),
+      );
+
+      const result = await service.addComment('claim-1', 'user-1', {
+        content: 'On regarde',
+      });
+      await flushNotification();
+
+      expect(result.id).toBe('comment-1');
     });
   });
 
@@ -579,6 +671,29 @@ describe('ClaimService', () => {
       expect(mockGateway.emitNewComment).toHaveBeenCalled();
     });
 
+    it('does not notify the profile of its own comment', async () => {
+      mockPrisma.claim.findUnique.mockResolvedValue({
+        id: 'claim-1',
+        title: 'Test',
+        profile_id: 'profile-1',
+      });
+      mockPrisma.claimComment.create.mockResolvedValue({
+        ...baseComment,
+        profile_id: 'profile-1',
+        user_id: null,
+        created_by_type: 'profile',
+        user: null,
+        profile: { first_name: 'John', last_name: 'Doe' },
+      });
+
+      await service.addCommentAsProfile('claim-1', 'profile-1', {
+        content: 'Test',
+      });
+      await flushNotification();
+
+      expect(mockWhatsApp.sendTemplateMessage).not.toHaveBeenCalled();
+    });
+
     it('throws if claim not found', async () => {
       mockPrisma.claim.findUnique.mockResolvedValue(null);
       await expect(
@@ -601,7 +716,10 @@ describe('ClaimService', () => {
   describe('deleteCommentAsProfile', () => {
     it('deletes comment as profile', async () => {
       mockPrisma.claim.findUnique.mockResolvedValue(baseClaim);
-      mockPrisma.claimComment.findFirst.mockResolvedValue({ ...baseComment, profile_id: 'profile-1' });
+      mockPrisma.claimComment.findFirst.mockResolvedValue({
+        ...baseComment,
+        profile_id: 'profile-1',
+      });
       mockPrisma.claimComment.delete.mockResolvedValue(baseComment);
 
       await service.deleteCommentAsProfile('claim-1', 'comment-1', 'profile-1');
