@@ -36,6 +36,7 @@ export const AUTHORED_KEYS: ReadonlySet<WhatsAppTemplateName> = new Set([
   // card with the numbered menu, which the app no longer sends.
   'kycPendingMenu',
   'openApp',
+  'claimCommented',
 ]);
 
 /**
@@ -341,6 +342,68 @@ export function authoredTemplates(): Partial<
               // processor swaps it for a one-tap login code.
               url: 'https://rabotka.work/s/{{1}}',
               example: ['https://rabotka.work/s/home'],
+            },
+          ],
+        },
+      ],
+    },
+
+    /**
+     * An admin answered a claim.
+     *
+     * UTILITY, and it held on the first submission. What earns that is the
+     * STATIC text: Meta's classifier cannot see what a variable will hold at
+     * send time, so it judges the frame, and this frame names both the event
+     * and the specific claim it belongs to — a follow-up to something the user
+     * filed themselves.
+     *
+     * Contrast `adminMessage`, whose body is essentially just {{1}}. With no
+     * transactional anchor left in the static text once the sender's name went
+     * away, it reads as a broadcast and Meta reclassified it MARKETING twice.
+     * The lesson is not "sign it" — it is "anchor it in the static text".
+     *
+     * So this one signs as the team, per Rabotka answering as one team, and
+     * pays no category cost for it.
+     */
+    claimCommented: {
+      name: 'rabotka_claim_comment_v1',
+      language: 'fr',
+      category: 'UTILITY',
+      components: [
+        {
+          type: 'BODY',
+          text: [
+            'Bonjour {{1}},',
+            '',
+            'Notre équipe a répondu à votre réclamation « {{2}} ».',
+            '',
+            'Réponse : {{3}}',
+            '',
+            'Vous pouvez consulter la réclamation.',
+            '',
+            'L’équipe Rabotka',
+          ].join('\n'),
+          example: {
+            body_text: [
+              [
+                'Jean',
+                'Paiement non reçu',
+                'Nous avons vérifié la transaction et lancé le remboursement.',
+              ],
+            ],
+          },
+        },
+        {
+          type: 'BUTTONS',
+          buttons: [
+            {
+              type: 'URL',
+              text: 'Voir ma réclamation',
+              // The variable ends the URL, as WhatsApp requires. The CALLER
+              // mints the code here — `sendTemplateMessage` bypasses the
+              // outbound queue, so `withLoginCode` never runs for this one.
+              url: 'https://rabotka.work/s/{{1}}',
+              example: ['https://rabotka.work/s/claims'],
             },
           ],
         },

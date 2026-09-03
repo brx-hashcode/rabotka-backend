@@ -68,6 +68,18 @@ const FREE_TEXT_BINDINGS = [
         applicationId: 'app-1',
       }),
   },
+  {
+    name: 'claimCommented.excerpt',
+    variable: '3',
+    fallback: 'Consultez le détail dans l’application',
+    build: (excerpt: string | null) =>
+      WHATSAPP_TEMPLATES.claimCommented.variables({
+        firstName: 'Marie',
+        claimTitle: 'Paiement non reçu',
+        excerpt,
+        loginCode: 'abc123',
+      }),
+  },
 ] as const;
 
 describe.each(FREE_TEXT_BINDINGS)('$name', ({ variable, fallback, build }) => {
@@ -115,5 +127,44 @@ describe.each(FREE_TEXT_BINDINGS)('$name', ({ variable, fallback, build }) => {
     const value = build('mot '.repeat(500))[variable];
     expect(value.length).toBeLessThanOrEqual(FREE_TEXT_VAR_MAX);
     expect(value.endsWith('…')).toBe(true);
+  });
+});
+
+/**
+ * `claimCommented` is the first entry to spend the body budget on TWO free-text
+ * variables, so each takes a tighter cap than the shared default: a 900-char
+ * title would otherwise leave the comment itself no room, and the rendered body
+ * caps at 1024 across the whole template.
+ */
+describe('claimCommented budget', () => {
+  const build = (claimTitle: string, excerpt: string) =>
+    WHATSAPP_TEMPLATES.claimCommented.variables({
+      firstName: 'Marie',
+      claimTitle,
+      excerpt,
+      loginCode: 'abc123',
+    });
+
+  it('caps the title well short of the default budget', () => {
+    const value = build('mot '.repeat(500), 'court')['2'];
+    expect(value.length).toBeLessThanOrEqual(80);
+    expect(value.endsWith('…')).toBe(true);
+  });
+
+  it('caps the excerpt short enough to leave room for the title', () => {
+    const value = build('court', 'mot '.repeat(500))['3'];
+    expect(value.length).toBeLessThanOrEqual(300);
+  });
+
+  it('leaves the whole rendered body inside Meta’s 1024 characters', () => {
+    const vars = build('mot '.repeat(500), 'mot '.repeat(500));
+    // The static body is ~150 characters; the two variables are what vary.
+    expect(vars['1'].length + vars['2'].length + vars['3'].length).toBeLessThan(
+      800,
+    );
+  });
+
+  it('falls back for a blank title', () => {
+    expect(build('  ', 'une réponse')['2']).toBe('votre réclamation');
   });
 });

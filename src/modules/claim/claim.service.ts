@@ -10,6 +10,9 @@ import { CreateCommentDto } from './dto/create-comment.dto';
 import { ClaimStatus } from '@prisma/client';
 import { NotificationService } from '../notification/notification.service';
 import { ClaimCommentsGateway } from '../ws-notifications/claim-comments.gateway';
+import { WhatsAppService } from '../whatsapp/whatsapp.service';
+import { WhatsAppLoginLinkService } from '../auth/whatsapp-login-link.service';
+import { claimDetailCtaPath } from '../../common/constants/whatsapp-templates';
 
 export type AdminClaimItem = {
   id: string;
@@ -128,6 +131,8 @@ export class ClaimService {
     private readonly notifications: NotificationService,
     private readonly eventEmitter: EventEmitter2,
     private readonly claimCommentsGateway: ClaimCommentsGateway,
+    private readonly whatsApp: WhatsAppService,
+    private readonly loginLink: WhatsAppLoginLinkService,
   ) {}
 
   async createForAdmin(
@@ -386,7 +391,11 @@ export class ClaimService {
       // stops landing between its neighbours. Rare — it takes that many drops
       // into the same slot — but it corrupts the order silently, so spread the
       // whole column out again and take the extra writes.
-      if (before !== null && after !== null && after - before < MIN_POSITION_GAP) {
+      if (
+        before !== null &&
+        after !== null &&
+        after - before < MIN_POSITION_GAP
+      ) {
         const ordered = siblings.map((s) => s.id);
         ordered.splice(index, 0, id);
         for (const [i, claimId] of ordered.entries()) {
@@ -439,7 +448,14 @@ export class ClaimService {
   ): Promise<AdminClaimCommentItem> {
     const exists = await this.prisma.claim.findUnique({
       where: { id: claimId },
-      select: { id: true, title: true },
+      select: {
+        id: true,
+        title: true,
+        profile_id: true,
+        // For the WhatsApp notification below. Selected here rather than
+        // fetched after the insert: this query already runs.
+        profile: { select: { first_name: true, phone: true } },
+      },
     });
     if (!exists) throw new NotFoundException('Claim not found');
     const comment = await this.prisma.claimComment.create({
@@ -471,7 +487,58 @@ export class ClaimService {
       claimId,
       mapped as unknown as Record<string, unknown>,
     );
+
+    // Fire-and-forget, like every other notification here: WhatsApp being down
+    // must not fail an admin's comment, which is already saved.
+    void this.notifyOwnerOfAdminComment(claimId, exists, dto.content).catch(
+      (err: unknown) =>
+        this.logger.warn(
+          'Claim comment WhatsApp notification failed',
+          err instanceof Error ? err.message : String(err),
+        ),
+    );
+
     return mapped;
+  }
+
+  /**
+   * Tells the complainant that an admin answered.
+   *
+   * Admin comments only. `addCommentAsProfile` is the user writing TO us, and
+   * notifying them of their own message would be noise.
+   */
+  private async notifyOwnerOfAdminComment(
+    claimId: string,
+    claim: {
+      title: string;
+      profile_id: string;
+      profile: { first_name: string; phone: string | null } | null;
+    },
+    content: string,
+  ): Promise<void> {
+    const phone = claim.profile?.phone?.trim();
+    if (!phone) return;
+
+    // Minted HERE rather than in the outbound processor: `sendTemplateMessage`
+    // talks to the provider directly and never touches the queue, so
+    // `withLoginCode` — the only other filler of a url-suffix var — never runs.
+    // Null for a non-mintable status (suspended, banned); the template then
+    // falls back to the bare claims path.
+    const loginCode = await this.loginLink
+      .mint(claim.profile_id, claimDetailCtaPath(claimId))
+      .catch(() => null);
+
+    await this.whatsApp.sendTemplateMessage(
+      phone,
+      'claimCommented',
+      {
+        firstName: claim.profile?.first_name ?? '',
+        claimTitle: claim.title,
+        excerpt: content,
+        loginCode,
+      },
+      claim.profile_id,
+    );
   }
 
   async listComments(claimId: string): Promise<AdminClaimCommentItem[]> {
