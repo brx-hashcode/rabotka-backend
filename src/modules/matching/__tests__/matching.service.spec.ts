@@ -431,6 +431,115 @@ describe('MatchingService', () => {
     });
   });
 
+  /**
+   * The employer feed used to pass `null` for the target category, which zeroed
+   * the 0.1 category term for every candidate and capped the whole feed at
+   * 0.8/0.9 = 88.9 %. No worker could score above 89 %, however well suited,
+   * and `matching.recommendation_min_score` filtered against that squashed
+   * range.
+   */
+  describe('findMatchingWorkersForEmployerProfile() - category term', () => {
+    const EMPLOYER = {
+      id: 'emp-1',
+      first_name: 'Ets',
+      last_name: 'Congo',
+      description: 'Recrute des plombiers',
+      address: null,
+      profile_type: 'EMPLOYER',
+      categories: [
+        {
+          category_id: 'cat-1',
+          category: { name: 'Plomberie', description: null },
+        },
+      ],
+    };
+
+    function givenSingleWorker(categoryIds: string[]) {
+      prisma.profile.findUnique.mockResolvedValue(EMPLOYER);
+      qdrant.searchHybrid.mockResolvedValue([
+        { id: 'w-1', score: 0.9, payload: { profileId: 'w-1' } },
+      ]);
+      prisma.profile.findMany.mockResolvedValue([
+        {
+          id: 'w-1',
+          reliability_score: 100,
+          categories: categoryIds.map((id) => ({ category_id: id })),
+        },
+      ]);
+      systemConfig.getRecommendationMinScore.mockResolvedValue(0);
+    }
+
+    it('awards a perfect score to a top hit in one of the employer domains', async () => {
+      givenSingleWorker(['cat-1']);
+
+      const result =
+        await service.findMatchingWorkersForEmployerProfile('emp-1');
+
+      expect(result[0].score).toBeCloseTo(1, 5);
+    });
+
+    // The old ceiling, now reached only by someone who genuinely does not work
+    // in any of the employer's domains.
+    it('caps a mismatched worker at 0.8/0.9, which is where the whole feed used to sit', async () => {
+      givenSingleWorker(['cat-other']);
+
+      const result =
+        await service.findMatchingWorkersForEmployerProfile('emp-1');
+
+      expect(result[0].score).toBeCloseTo(0.8 / 0.9, 5);
+    });
+
+    it('matches on any of several employer domains, not just the first', async () => {
+      prisma.profile.findUnique.mockResolvedValue({
+        ...EMPLOYER,
+        categories: [
+          {
+            category_id: 'cat-1',
+            category: { name: 'Plomberie', description: null },
+          },
+          {
+            category_id: 'cat-2',
+            category: { name: 'Menuiserie', description: null },
+          },
+        ],
+      });
+      qdrant.searchHybrid.mockResolvedValue([
+        { id: 'w-1', score: 0.9, payload: { profileId: 'w-1' } },
+      ]);
+      prisma.profile.findMany.mockResolvedValue([
+        {
+          id: 'w-1',
+          reliability_score: 100,
+          categories: [{ category_id: 'cat-2' }],
+        },
+      ]);
+      systemConfig.getRecommendationMinScore.mockResolvedValue(0);
+
+      const result =
+        await service.findMatchingWorkersForEmployerProfile('emp-1');
+
+      expect(result[0].score).toBeCloseTo(1, 5);
+    });
+
+    it('selects the category id it needs to compare against', async () => {
+      // The id was previously not even fetched — only the name, for the search
+      // text — which is why the term could never fire.
+      givenSingleWorker(['cat-1']);
+
+      await service.findMatchingWorkersForEmployerProfile('emp-1');
+
+      expect(prisma.profile.findUnique).toHaveBeenCalledWith(
+        expect.objectContaining({
+          select: expect.objectContaining({
+            categories: expect.objectContaining({
+              select: expect.objectContaining({ category_id: true }),
+            }),
+          }),
+        }),
+      );
+    });
+  });
+
   describe('findMatchingWorkersForJob() - enabled', () => {
     it('returns empty array when job not found', async () => {
       prisma.jobOffer.findUnique.mockResolvedValue(null);
