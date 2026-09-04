@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { SystemConfigController } from '../system-config.controller';
 import { SystemConfigService } from '../system-config.service';
 import { AdminAuthGuard } from '../../auth/guards/admin-auth.guard';
@@ -14,7 +14,10 @@ const mockSystemConfigService = {
     .fn()
     .mockResolvedValue({ key: 'ENABLE_SIMILARITY', value: 'true' }),
   set: jest.fn().mockResolvedValue(undefined),
+  setMany: jest.fn().mockResolvedValue(undefined),
 };
+
+const mockLogService = { create: jest.fn() };
 
 describe('SystemConfigController', () => {
   let controller: SystemConfigController;
@@ -25,7 +28,7 @@ describe('SystemConfigController', () => {
       controllers: [SystemConfigController],
       providers: [
         { provide: SystemConfigService, useValue: mockSystemConfigService },
-        { provide: LogService, useValue: { create: jest.fn() } },
+        { provide: LogService, useValue: mockLogService },
       ],
     })
       .overrideGuard(AdminAuthGuard)
@@ -90,5 +93,53 @@ describe('SystemConfigController', () => {
     await expect(
       controller.update('UNKNOWN_KEY', { value: 'val' }, req),
     ).rejects.toThrow(NotFoundException);
+  });
+
+  describe('updateMany', () => {
+    const req = {
+      user: { userId: 'admin-1' },
+      headers: {},
+      ip: '127.0.0.1',
+      get: () => undefined,
+    } as any;
+
+    const values = {
+      'fees.referral_commission_type': 'PERCENTAGE',
+      'fees.referral_credit_referrer': '60',
+      'fees.referral_credit_referee': '40',
+    };
+
+    it('hands the whole block to the service as one write', async () => {
+      const result = await controller.updateMany({ values }, req);
+      expect(mockSystemConfigService.setMany).toHaveBeenCalledWith(
+        values,
+        'admin-1',
+      );
+      expect(result).toEqual({ success: true });
+    });
+
+    it('writes one audit row per key', async () => {
+      await controller.updateMany({ values }, req);
+      expect(mockLogService.create).toHaveBeenCalledTimes(3);
+    });
+
+    it('rejects an empty body', async () => {
+      await expect(controller.updateMany({ values: {} }, req)).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(mockSystemConfigService.setMany).not.toHaveBeenCalled();
+    });
+
+    // Named, not just counted: the admin has to know which key was wrong.
+    it('names every unknown key and writes nothing', async () => {
+      mockSystemConfigService.getOne
+        .mockResolvedValueOnce({ key: 'a', value: '1' })
+        .mockResolvedValueOnce(null);
+
+      await expect(
+        controller.updateMany({ values: { a: '1', 'fees.nope': '2' } }, req),
+      ).rejects.toThrow(/fees\.nope/);
+      expect(mockSystemConfigService.setMany).not.toHaveBeenCalled();
+    });
   });
 });
