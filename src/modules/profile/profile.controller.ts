@@ -33,6 +33,10 @@ import {
 } from './profile.service';
 import { CreateProfileDto } from './dto/create-profile.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import {
+  RequestPhoneChangeDto,
+  ConfirmPhoneChangeDto,
+} from './dto/change-phone.dto';
 import { sendWelcomeEmail, WELCOME_EMAIL_PREVIEW } from '../mail/templates';
 import { setAuthCookie } from '../auth/auth-cookie.util';
 import { MailService } from '../mail/mail.service';
@@ -553,6 +557,47 @@ export class ProfileController {
     }
 
     return this.profileService.uploadKycFile(file);
+  }
+
+  @Post('phone-change/request')
+  @UseGuards(ProfileAuthGuard)
+  @ApiBearerAuth()
+  @ApiCookieAuth()
+  @ApiOperation({
+    summary: 'Start changing the authenticated profile WhatsApp number',
+    description:
+      'Sends a 6-digit code to the NEW number and stores the pending change for 5 minutes. Nothing is written to the profile until the code comes back — the number is the login identity, so it only moves once the new handset is proven.',
+  })
+  @ApiResponse({ status: 200, description: 'Code sent to the new number' })
+  @ApiResponse({ status: 400, description: 'Invalid or unchanged number' })
+  @ApiResponse({ status: 409, description: 'Number already used by another account' })
+  @ApiResponse({ status: 503, description: 'WhatsApp unavailable or number unreachable' })
+  async requestPhoneChange(
+    @Body() dto: RequestPhoneChangeDto,
+    @Req() req: ProfileAuthenticatedRequest,
+  ): Promise<{ success: boolean }> {
+    return this.profileService.requestPhoneChange(
+      req.user.profileId,
+      dto.newPhone,
+    );
+  }
+
+  @Post('phone-change/confirm')
+  @UseGuards(ProfileAuthGuard)
+  @ApiBearerAuth()
+  @ApiCookieAuth()
+  @ApiOperation({
+    summary: 'Confirm the WhatsApp number change with the code',
+    description:
+      'Commits the pending number change. The code is single-use and the pending change is discarded after 5 failed attempts.',
+  })
+  @ApiResponse({ status: 200, description: 'Number changed' })
+  @ApiResponse({ status: 400, description: 'Wrong, expired or missing code' })
+  async confirmPhoneChange(
+    @Body() dto: ConfirmPhoneChangeDto,
+    @Req() req: ProfileAuthenticatedRequest,
+  ): Promise<{ success: boolean; phone: string }> {
+    return this.profileService.confirmPhoneChange(req.user.profileId, dto.code);
   }
 
   @Post('verify-whatsapp')

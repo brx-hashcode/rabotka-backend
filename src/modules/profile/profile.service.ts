@@ -69,7 +69,7 @@ import {
   ReferralStatus,
   VerificationStatus,
 } from '@prisma/client';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
 
 const PROFILE_TYPE_LABELS: Record<ProfileType, string> = {
   [ProfileType.WORKER]: 'Travailleur',
@@ -82,6 +82,8 @@ export type ProfileMeResponse = {
   lastName: string;
   email: string;
   phone: string;
+  /** Optional second number. Null for the majority who have only one. */
+  directPhone: string | null;
   address: string;
   countryCode: string | null;
   countryName: string | null;
@@ -158,6 +160,13 @@ export type AdminProfileListItem = {
   lastName: string;
   email: string;
   phone: string;
+  /**
+   * Optional second number. Null for the majority who have only one.
+   *
+   * Selected on the detail read only — the list query does not fetch it, so
+   * this is null on every row that comes from `listProfilesForAdmin`.
+   */
+  directPhone?: string | null;
   address: string;
   countryCode: string | null;
   countryName: string | null;
@@ -289,6 +298,25 @@ type PrismaTransactionClient = Parameters<
 >[0];
 
 const VERIFICATION_TOKEN_TTL_SECONDS = 1800;
+
+/**
+ * Changing the WhatsApp number — the login identity — is a two-step flow.
+ *
+ * Five minutes, matching the login OTP: long enough to fetch a handset from the
+ * next room, short enough that a code glimpsed over a shoulder is stale. The
+ * pending change is keyed by profile, so asking again simply replaces it and a
+ * user cannot accumulate several live codes for several numbers.
+ */
+const PHONE_CHANGE_TTL_SECONDS = 300;
+const PHONE_CHANGE_KEY_PREFIX = `${REDIS_KEY_PREFIX}profile:phone-change:`;
+/**
+ * Attempts before the pending change is discarded outright.
+ *
+ * A six-digit code is one in a million per guess, which is only true while the
+ * number of guesses is bounded. Discarding rather than locking keeps the
+ * failure recoverable: the user asks for a new code.
+ */
+const PHONE_CHANGE_MAX_ATTEMPTS = 5;
 const VERIFICATION_TOKEN_KEY_PREFIX = `${REDIS_KEY_PREFIX}wa:verify:`;
 
 /** Where the activation message's button lands. `/home` is role-aware. */
@@ -334,6 +362,7 @@ export class ProfileService {
         last_name: true,
         email: true,
         phone: true,
+        direct_phone: true,
         address: true,
         country_code: true,
         country_name: true,
@@ -377,6 +406,7 @@ export class ProfileService {
       lastName: profile.last_name,
       email: profile.email,
       phone: profile.phone,
+      directPhone: profile.direct_phone,
       address: profile.address,
       countryCode: profile.country_code,
       countryName: profile.country_name,
@@ -515,6 +545,12 @@ export class ProfileService {
     if (dto.lastName !== undefined) data.last_name = dto.lastName;
     if (dto.description !== undefined) data.description = dto.description;
     if (dto.address !== undefined) data.address = dto.address;
+    // Empty string clears it. Unlike the fields above, "no value" is a legitimate
+    // state here — most people have only one number — so the user needs a way to
+    // remove one they added by mistake.
+    if (dto.directPhone !== undefined) {
+      data.direct_phone = dto.directPhone || null;
+    }
     Object.assign(data, this.geo.resolveLocation(dto));
     return data;
   }
@@ -681,6 +717,7 @@ export class ProfileService {
         last_name: true,
         email: true,
         phone: true,
+        direct_phone: true,
         address: true,
         country_code: true,
         country_name: true,
@@ -809,6 +846,7 @@ export class ProfileService {
       lastName: profile.last_name,
       email: profile.email,
       phone: profile.phone,
+      directPhone: profile.direct_phone,
       address: profile.address,
       countryCode: profile.country_code,
       countryName: profile.country_name,
@@ -1294,6 +1332,11 @@ export class ProfileService {
     if (dto.description !== undefined) data.description = dto.description;
     if (dto.address !== undefined) data.address = dto.address;
     if (dto.phone !== undefined) data.phone = dto.phone;
+    // Empty string clears it, unlike `phone` above, which has no "absent"
+    // state — a profile always has a WhatsApp number, and most have no second.
+    if (dto.directPhone !== undefined) {
+      data.direct_phone = dto.directPhone.trim() || null;
+    }
     if (dto.email !== undefined) data.email = dto.email;
     if (dto.profileType !== undefined) data.profile_type = dto.profileType;
     Object.assign(data, this.geo.resolveLocation(dto));
@@ -2148,6 +2191,7 @@ export class ProfileService {
         last_name: createProfileDto.lastName,
         email: createProfileDto.email,
         phone: createProfileDto.phone,
+        direct_phone: createProfileDto.directPhone ?? null,
         address: createProfileDto.address,
         ...this.geo.resolveLocation(createProfileDto),
         description: createProfileDto.description || '',
@@ -2266,6 +2310,158 @@ export class ProfileService {
 
   private isPrismaError(error: any): boolean {
     return error instanceof Prisma.PrismaClientKnownRequestError;
+  }
+
+  /**
+   * Step 1 of changing the WhatsApp number: prove the new handset is reachable.
+   *
+   * Writes nothing to the profile. The number is the login identity, so the
+   * only safe order is prove-then-switch: committing here would let a single
+   * typo send every future login link to a number the user does not own, and
+   * would turn a borrowed session into a permanent account takeover rather than
+   * a temporary one.
+   *
+   * The code goes to the NEW number, not the current one. Sending to the
+   * current one would only re-confirm what we already know — and the person who
+   * just lost that handset is exactly who this exists for.
+   */
+  async requestPhoneChange(
+    profileId: string,
+    newPhone: string,
+  ): Promise<{ success: boolean }> {
+    const profile = await this.prisma.profile.findUnique({
+      where: { id: profileId },
+      select: { id: true, phone: true },
+    });
+    if (!profile) {
+      throw new NotFoundException('Profil non trouvé');
+    }
+
+    const phone = newPhone.trim().toLowerCase();
+    if (phone === profile.phone) {
+      throw new BadRequestException(
+        'Ce numéro est déjà celui de votre compte',
+      );
+    }
+
+    // `phone` is UNIQUE, so committing a taken number would fail at the
+    // database with an opaque error after the user had already entered a code.
+    // Checked here so the refusal lands on the field they can still edit.
+    const taken = await this.prisma.profile.findUnique({
+      where: { phone },
+      select: { id: true },
+    });
+    if (taken) {
+      throw new ConflictException(
+        'Ce numéro est déjà utilisé par un autre compte',
+      );
+    }
+
+    if (!this.whatsAppService.isConfigured()) {
+      throw new ServiceUnavailableException(
+        "Le service WhatsApp n'est pas configuré",
+      );
+    }
+
+    const code = randomInt(100000, 1000000).toString();
+
+    // Sent BEFORE the pending change is stored: if WhatsApp refuses the number
+    // — not on WhatsApp, unreachable — there is nothing to clean up, and the
+    // user learns immediately rather than at the code screen.
+    const sent = await this.whatsAppService.sendTemplateMessage(
+      phone,
+      'otp',
+      code,
+    );
+    if (!sent) {
+      this.logger.error(
+        `WhatsApp failed to send phone-change code for profile=${profileId}`,
+      );
+      throw new ServiceUnavailableException(
+        "Impossible d'envoyer le code sur ce numéro. Vérifiez qu'il est bien sur WhatsApp.",
+      );
+    }
+
+    await this.redis.set(
+      `${PHONE_CHANGE_KEY_PREFIX}${profileId}`,
+      JSON.stringify({ phone, code, attempts: 0 }),
+      'EX',
+      PHONE_CHANGE_TTL_SECONDS,
+    );
+
+    this.logger.log(`Phone-change code sent for profile=${profileId}`);
+    return { success: true };
+  }
+
+  /**
+   * Step 2: the code came back, so the handset is real. Switch the number.
+   *
+   * Also sets `whatsapp_connected`: reaching this point is proof the new number
+   * receives WhatsApp, which is the only thing that flag claims.
+   */
+  async confirmPhoneChange(
+    profileId: string,
+    code: string,
+  ): Promise<{ success: boolean; phone: string }> {
+    const key = `${PHONE_CHANGE_KEY_PREFIX}${profileId}`;
+    const raw = await this.redis.get(key);
+    if (!raw) {
+      throw new BadRequestException(
+        'Aucun changement de numéro en attente, ou le code a expiré',
+      );
+    }
+
+    const pending = JSON.parse(raw) as {
+      phone: string;
+      code: string;
+      attempts: number;
+    };
+
+    if (!this.codesMatch(pending.code, code)) {
+      const attempts = pending.attempts + 1;
+      if (attempts >= PHONE_CHANGE_MAX_ATTEMPTS) {
+        await this.redis.del(key);
+        throw new BadRequestException(
+          'Trop de tentatives. Demandez un nouveau code.',
+        );
+      }
+      // Preserves the original TTL rather than restarting it, so guessing
+      // cannot extend the window it happens in.
+      const ttl = await this.redis.ttl(key);
+      await this.redis.set(
+        key,
+        JSON.stringify({ ...pending, attempts }),
+        'EX',
+        ttl > 0 ? ttl : PHONE_CHANGE_TTL_SECONDS,
+      );
+      throw new BadRequestException('Code incorrect');
+    }
+
+    try {
+      await this.prisma.profile.update({
+        where: { id: profileId },
+        data: { phone: pending.phone, whatsapp_connected: true },
+      });
+    } catch (err) {
+      // Someone claimed the number in the five minutes since we checked.
+      this.throwIfUniqueConstraintViolation(err);
+      throw err;
+    }
+
+    await this.redis.del(key);
+    this.logger.log(`Phone changed for profile=${profileId}`);
+    return { success: true, phone: pending.phone };
+  }
+
+  /**
+   * Constant-time compare, so a wrong code cannot be narrowed digit by digit
+   * from how long the answer took. Lengths are checked first because
+   * `timingSafeEqual` throws on a mismatch.
+   */
+  private codesMatch(expected: string, supplied: string): boolean {
+    const a = Buffer.from(expected);
+    const b = Buffer.from(supplied);
+    return a.length === b.length && timingSafeEqual(a, b);
   }
 
   async requestWhatsAppVerification(

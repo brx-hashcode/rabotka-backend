@@ -8,6 +8,7 @@ import {
   ReferralSource,
   ReferralStatus,
   VerificationStatus,
+  WalletOwnerType,
   WalletTransactionType,
 } from '@prisma/client';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
@@ -21,6 +22,10 @@ import {
   REFERRAL_REWARDED_EMAIL_PREVIEW,
 } from '../mail/templates';
 import { AdminListReferralsDto } from './dto/admin-list-referrals.dto';
+import {
+  computeReferralPayout,
+  referralPayoutSettingsFrom,
+} from './referral-payout';
 import {
   generateReferralCode,
   normalizeReferralCode,
@@ -76,6 +81,28 @@ export type RecordReferralInput = {
   code: string;
   source?: ReferralSource;
 };
+
+/**
+ * The outcome of stage 1 — see {@link ReferralService.qualifyForSettlement}.
+ *
+ * The rejection arm carries nothing because there is nothing for the caller to
+ * do with it: the gate has already written the status and the note that explain
+ * the refusal, and every rejection is a silent stop by design (this runs
+ * fire-and-forget behind a payment).
+ */
+type ReferralQualification =
+  | { qualifies: false }
+  | {
+      qualifies: true;
+      referralId: string;
+      referrerId: string;
+      qualifyingPaymentRequestId: string;
+      /** What the payout may be divided from, in whole FCFA. */
+      realMoneyBaseFcfa: number;
+      credits: Awaited<ReturnType<SystemConfigService['getReferralCredits']>>;
+    };
+
+const NOT_QUALIFIED: ReferralQualification = { qualifies: false };
 
 @Injectable()
 export class ReferralService {
@@ -256,131 +283,46 @@ export class ReferralService {
    * the recovery just by opening the screen. Calling it twice is free.
    */
   async settleForReferee(refereeId: string): Promise<void> {
-    const referral = await this.prisma.referral.findUnique({
-      where: { referee_id: refereeId },
-      select: {
-        id: true,
-        referrer_id: true,
-        status: true,
-        created_at: true,
-      },
-    });
-    if (!referral) return;
-    if (
-      referral.status !== ReferralStatus.PENDING &&
-      referral.status !== ReferralStatus.QUALIFIED_ON_HOLD
-    ) {
-      return;
-    }
+    const gate = await this.qualifyForSettlement(refereeId);
+    if (!gate.qualifies) return;
 
-    const qualifying = await this.prisma.paymentRequest.findFirst({
-      where: {
-        profile_id: refereeId,
-        status: PaymentRequestStatus.APPROVED,
-        request_type: { in: QUALIFYING_PAYMENT_TYPES },
-        deleted_at: null,
-      },
-      orderBy: { created_at: 'asc' },
-      select: { id: true, amount: true },
-    });
-    if (!qualifying) return;
-
-    const qualifyingAmount = Number(qualifying.amount ?? 0);
-
-    const referrer = await this.prisma.profile.findUnique({
-      where: { id: referral.referrer_id },
-      select: { status: true, verification_status: true, deleted_at: true },
-    });
-
-    if (
-      !referrer ||
-      referrer.deleted_at !== null ||
-      referrer.status === AccountStatus.BANNED
-    ) {
-      await this.close(
-        referral.id,
-        ReferralStatus.FORFEITED,
-        qualifying.id,
-        'Parrain supprimé ou banni au moment du paiement.',
-      );
-      return;
-    }
-
-    const referrerEligible =
-      referrer.status === AccountStatus.ACTIVE &&
-      referrer.verification_status === VerificationStatus.VERIFIED;
-
-    if (!referrerEligible) {
-      const heldForMs = Date.now() - referral.created_at.getTime();
-      if (heldForMs > HOLD_EXPIRY_DAYS * 24 * 60 * 60 * 1000) {
-        await this.close(
-          referral.id,
-          ReferralStatus.FORFEITED,
-          qualifying.id,
-          `Parrain non vérifié plus de ${HOLD_EXPIRY_DAYS} jours après le parrainage.`,
-        );
-        return;
-      }
-      await this.close(
-        referral.id,
-        ReferralStatus.QUALIFIED_ON_HOLD,
-        qualifying.id,
-        'Filleul a payé, parrain pas encore actif et vérifié. Se règlera à la validation du KYC.',
-      );
-      return;
-    }
-
-    const { referrerCreditFcfa, refereeCreditFcfa, maxRewardedPerReferrer } =
-      await this.systemConfig.getReferralCredits();
-
-    const { referrerAmount, refereeAmount, totalPayout } = this.resolvePayout(
-      referrerCreditFcfa,
-      refereeCreditFcfa,
+    // Stage 2. The only place the commission type is consulted, and the only
+    // arithmetic in the whole settlement — everything that decides *whether*
+    // anyone is paid has happened above, identically for every type.
+    const payout = computeReferralPayout(
+      gate.realMoneyBaseFcfa,
+      referralPayoutSettingsFrom(gate.credits),
     );
-
-    if (maxRewardedPerReferrer !== null) {
-      const rewardedCount = await this.prisma.referral.count({
-        where: {
-          referrer_id: referral.referrer_id,
-          status: ReferralStatus.REWARDED,
-        },
-      });
-      if (rewardedCount >= maxRewardedPerReferrer) {
-        await this.close(
-          referral.id,
-          ReferralStatus.CAPPED,
-          qualifying.id,
-          `Parrain au plafond (${rewardedCount}/${maxRewardedPerReferrer} parrainages rémunérés).`,
-        );
-        return;
-      }
-    }
 
     // The program must never pay out more than the payment that triggered it
     // brought in. Without this, the cheapest qualifying payment — a worker-side
     // contact unlock, 100 FCFA by default — buys strictly more credit than it
     // costs, and the cap only bounds how many times that can be repeated.
-    // Recomputed from config on every settle, so changing a fee or a credit
-    // keeps this honest without anyone remembering to update a floor.
-    if (totalPayout > qualifyingAmount) {
+    //
+    // A property of the amount rather than a gate, because it is one: in
+    // PERCENTAGE mode it can never be true, and a rule that only exists for one
+    // commission type does not belong among the ones that must hold for all of
+    // them. The admin-visible outcome is unchanged — still CAPPED, still the
+    // same note.
+    if (payout.shortfall) {
       await this.close(
-        referral.id,
+        gate.referralId,
         ReferralStatus.CAPPED,
-        qualifying.id,
-        `Paiement déclencheur (${qualifyingAmount} FCFA) inférieur au total des crédits (${totalPayout} FCFA).`,
+        gate.qualifyingPaymentRequestId,
+        `Paiement déclencheur (${gate.realMoneyBaseFcfa} FCFA) inférieur au total des crédits (${payout.totalPayout} FCFA).`,
       );
       return;
     }
 
-    if (totalPayout === 0) {
+    if (payout.totalPayout === 0) {
       // Both credits configured to zero: the program is off. Close the row as
       // settled-for-nothing rather than leaving it PENDING, so switching the
       // amounts back on later does not silently back-pay every referral ever
       // recorded.
       await this.close(
-        referral.id,
+        gate.referralId,
         ReferralStatus.REWARDED,
-        qualifying.id,
+        gate.qualifyingPaymentRequestId,
         'Montants de parrainage à zéro au moment du règlement.',
         { referrerAmount: 0, refereeAmount: 0 },
       );
@@ -390,20 +332,19 @@ export class ReferralService {
     // Resolve both wallets before opening the transaction — upserting inside it
     // would hold the referral row lock across two more writes for no reason.
     const referrerWallet = await this.wallet.getOrCreateProfileWallet(
-      referral.referrer_id,
+      gate.referrerId,
     );
-    const refereeWallet =
-      await this.wallet.getOrCreateProfileWallet(refereeId);
+    const refereeWallet = await this.wallet.getOrCreateProfileWallet(refereeId);
 
     const credits = [
       {
         walletId: referrerWallet.id,
-        amount: referrerAmount,
+        amount: payout.referrerAmount,
         referenceType: 'referral:referrer',
       },
       {
         walletId: refereeWallet.id,
-        amount: refereeAmount,
+        amount: payout.refereeAmount,
         referenceType: 'referral:referee',
       },
     ]
@@ -421,7 +362,7 @@ export class ReferralService {
       // true without counting payments — a second one finds nothing to claim.
       const claim = await tx.referral.updateMany({
         where: {
-          id: referral.id,
+          id: gate.referralId,
           status: {
             in: [ReferralStatus.PENDING, ReferralStatus.QUALIFIED_ON_HOLD],
           },
@@ -429,9 +370,9 @@ export class ReferralService {
         data: {
           status: ReferralStatus.REWARDED,
           rewarded_at: new Date(),
-          referrer_amount: referrerAmount,
-          referee_amount: refereeAmount,
-          qualifying_payment_request_id: qualifying.id,
+          referrer_amount: payout.referrerAmount,
+          referee_amount: payout.refereeAmount,
+          qualifying_payment_request_id: gate.qualifyingPaymentRequestId,
           settlement_note: null,
         },
       });
@@ -444,7 +385,7 @@ export class ReferralService {
             type: WalletTransactionType.REFERRAL_CREDIT,
             amount: credit.amount,
             reference_type: credit.referenceType,
-            reference_id: referral.id,
+            reference_id: gate.referralId,
           },
         });
         await tx.wallet.update({
@@ -460,13 +401,175 @@ export class ReferralService {
     ]);
 
     this.logger.log(
-      `Referral ${referral.id} rewarded: ${referrerAmount} FCFA to referrer, ` +
-        `${refereeAmount} FCFA to referee, triggered by payment ${qualifying.id}`,
+      `Referral ${gate.referralId} rewarded: ${payout.referrerAmount} FCFA to referrer, ` +
+        `${payout.refereeAmount} FCFA to referee, triggered by payment ${gate.qualifyingPaymentRequestId}`,
     );
 
     // Fire-and-forget: the credit is already committed, and a mail failure must
     // not make a settled parrainage look unsettled to the caller.
-    void this.notifyReferrer(referral.referrer_id, refereeId, referrerAmount);
+    void this.notifyReferrer(gate.referrerId, refereeId, payout.referrerAmount);
+  }
+
+  /**
+   * Stage 1: does this filleul's parrainage owe anyone anything, and on what
+   * base?
+   *
+   * Every anti-farming rule lives here and none of them consults the commission
+   * type, so switching FIXED ⇄ PERCENTAGE in settings cannot open a path the
+   * other type closed. Stage 2 only divides a number this already approved.
+   *
+   * Closes the referral row itself on every rejection — the note it writes is
+   * the only thing that can answer "why was my parrainage not paid?", and the
+   * caller has no more context to write a better one with.
+   *
+   * Returns the config it loaded rather than making the caller re-read it: the
+   * cap needs `maxRewardedPerReferrer` here, and a second read for the amounts
+   * would be a second chance for the two stages to disagree about the settings
+   * a single settlement ran under.
+   */
+  private async qualifyForSettlement(
+    refereeId: string,
+  ): Promise<ReferralQualification> {
+    const referral = await this.prisma.referral.findUnique({
+      where: { referee_id: refereeId },
+      select: {
+        id: true,
+        referrer_id: true,
+        status: true,
+        created_at: true,
+      },
+    });
+    if (!referral) return NOT_QUALIFIED;
+    if (
+      referral.status !== ReferralStatus.PENDING &&
+      referral.status !== ReferralStatus.QUALIFIED_ON_HOLD
+    ) {
+      return NOT_QUALIFIED;
+    }
+
+    // Two shapes of connection qualify, and they are told apart by
+    // `request_type` rather than by a flag:
+    //
+    //  - Non-NULL — money arrived through the gateway for this unlock.
+    //  - NULL with an attempt id — the synthetic row
+    //    `ContactUnlockService.recordWalletUnlockPayment` writes for an unlock
+    //    settled from wallet balance. No external money arrived AT THIS MOMENT,
+    //    but it may have arrived earlier as a top-up.
+    //
+    // Top-ups and penalties match neither arm, so they still cannot trigger a
+    // parrainage on their own.
+    const qualifying = await this.prisma.paymentRequest.findFirst({
+      where: {
+        profile_id: refereeId,
+        status: PaymentRequestStatus.APPROVED,
+        deleted_at: null,
+        OR: [
+          { request_type: { in: QUALIFYING_PAYMENT_TYPES } },
+          { contact_unlock_attempt_id: { not: null } },
+        ],
+      },
+      orderBy: { created_at: 'asc' },
+      select: { id: true, amount: true, request_type: true },
+    });
+    if (!qualifying) return NOT_QUALIFIED;
+
+    const amount = Number(qualifying.amount ?? 0);
+
+    /**
+     * The base the payout may be divided from: real money, never credit the
+     * platform issued itself.
+     *
+     * A gateway payment IS the real money, so it is its own base. A
+     * wallet-funded unlock is capped by everything this person has ever topped
+     * up, because `Wallet.balance` commingles top-ups with welcome credit and
+     * cannot say which of the two funded this particular debit.
+     *
+     * Capping rather than tracking consumption is what keeps this cheap and
+     * still safe. The farm it closes: top up 100, collect 500 of welcome
+     * credit, unlock a 500 contact from the mixed balance. The unlock reads as
+     * 500, but only 100 ever came in — so the base is 100, and the programme
+     * can never issue more credit than that referee actually paid the platform.
+     * An account with no top-up at all gets a base of zero and pays nothing.
+     *
+     * It is deliberately conservative when an unlock genuinely mixes the two:
+     * paying less than was collected is the safe direction to be wrong.
+     */
+    const realMoneyBaseFcfa =
+      qualifying.request_type === null
+        ? Math.min(amount, await this.lifetimeTopUpFcfa(refereeId))
+        : amount;
+
+    const referrer = await this.prisma.profile.findUnique({
+      where: { id: referral.referrer_id },
+      select: { status: true, verification_status: true, deleted_at: true },
+    });
+
+    if (
+      !referrer ||
+      referrer.deleted_at !== null ||
+      referrer.status === AccountStatus.BANNED
+    ) {
+      await this.close(
+        referral.id,
+        ReferralStatus.FORFEITED,
+        qualifying.id,
+        'Parrain supprimé ou banni au moment du paiement.',
+      );
+      return NOT_QUALIFIED;
+    }
+
+    const referrerEligible =
+      referrer.status === AccountStatus.ACTIVE &&
+      referrer.verification_status === VerificationStatus.VERIFIED;
+
+    if (!referrerEligible) {
+      const heldForMs = Date.now() - referral.created_at.getTime();
+      if (heldForMs > HOLD_EXPIRY_DAYS * 24 * 60 * 60 * 1000) {
+        await this.close(
+          referral.id,
+          ReferralStatus.FORFEITED,
+          qualifying.id,
+          `Parrain non vérifié plus de ${HOLD_EXPIRY_DAYS} jours après le parrainage.`,
+        );
+        return NOT_QUALIFIED;
+      }
+      await this.close(
+        referral.id,
+        ReferralStatus.QUALIFIED_ON_HOLD,
+        qualifying.id,
+        'Filleul a payé, parrain pas encore actif et vérifié. Se règlera à la validation du KYC.',
+      );
+      return NOT_QUALIFIED;
+    }
+
+    const credits = await this.systemConfig.getReferralCredits();
+
+    if (credits.maxRewardedPerReferrer !== null) {
+      const rewardedCount = await this.prisma.referral.count({
+        where: {
+          referrer_id: referral.referrer_id,
+          status: ReferralStatus.REWARDED,
+        },
+      });
+      if (rewardedCount >= credits.maxRewardedPerReferrer) {
+        await this.close(
+          referral.id,
+          ReferralStatus.CAPPED,
+          qualifying.id,
+          `Parrain au plafond (${rewardedCount}/${credits.maxRewardedPerReferrer} parrainages rémunérés).`,
+        );
+        return NOT_QUALIFIED;
+      }
+    }
+
+    return {
+      qualifies: true,
+      referralId: referral.id,
+      referrerId: referral.referrer_id,
+      qualifyingPaymentRequestId: qualifying.id,
+      realMoneyBaseFcfa,
+      credits,
+    };
   }
 
   /**
@@ -571,23 +674,49 @@ export class ReferralService {
     const byStatus = new Map(counts.map((c) => [c.status, c._count._all]));
     const joined = counts.reduce((sum, c) => sum + c._count._all, 0);
 
-    const payout = this.resolvePayout(
-      credits.referrerCreditFcfa,
-      credits.refereeCreditFcfa,
+    const isPercentage = credits.commissionType === 'PERCENTAGE';
+
+    // Quoted through the settlement's own function, not alongside it: promising
+    // a credit and then declining to pay it is the one outcome this feature
+    // cannot afford.
+    //
+    // The base is chosen so the quote is base-independent in both modes. FIXED
+    // amounts are absolute, so any base returns the configured pair. Percentage
+    // shares OF 100 are the percentages themselves — clamped, and capped
+    // against each other, exactly as a real settlement would clamp them.
+    const payout = computeReferralPayout(
+      isPercentage ? 100 : 0,
+      referralPayoutSettingsFrom(
+        // The per-referral ceiling is a franc amount. It genuinely bounds a
+        // FIXED payout, so it belongs in that quote. It cannot be expressed as
+        // a share without knowing the base, so the percentage quote drops it
+        // rather than reporting a percentage that is not the configured one.
+        isPercentage ? { ...credits, maxPayoutPerReferralFcfa: 0 } : credits,
+      ),
     );
 
     return {
       code,
+      /**
+       * What unit the two numbers below are in. The client needs this to render
+       * "300 FCFA" versus "60 %" — without it, a percentage configuration reads
+       * on screen as a derisory franc amount.
+       */
+      commissionType: credits.commissionType,
       referrerCreditFcfa: payout.referrerAmount,
       refereeCreditFcfa: payout.refereeAmount,
       /**
        * What the filleul's first payment has to reach for the parrainage to pay
        * anything — the same number the settle floor uses, from the same
-       * function. The screen quotes it, so it must not be a second estimate of
-       * it: promising a credit and then declining to pay it is the one outcome
-       * this feature cannot afford.
+       * function.
+       *
+       * Null in PERCENTAGE mode, where there is no minimum: the payout is a
+       * share of whatever was paid, so it fits inside any payment by
+       * construction and no floor can fire. The existing client already guards
+       * this field with `Number.isFinite`, so null degrades to the sentence
+       * without a threshold rather than printing "undefined".
        */
-      minQualifyingAmountFcfa: payout.totalPayout,
+      minQualifyingAmountFcfa: isPercentage ? null : payout.totalPayout,
       maxRewardedPerReferrer: credits.maxRewardedPerReferrer,
       joinedCount: joined,
       rewardedCount: byStatus.get(ReferralStatus.REWARDED) ?? 0,
@@ -739,6 +868,38 @@ export class ReferralService {
   // ── Internals ─────────────────────────────────────────────────────────────
 
   /**
+   * Everything this profile has ever moved into the platform as real money.
+   *
+   * `TOP_UP_CREDIT` is the marker, and it is written in exactly one place —
+   * `PaymentRequestService.handleWalletTopUpPostPayment`, which only runs for a
+   * gateway-confirmed `WALLET_TOP_UP`. Nothing else can produce that row type,
+   * which is what makes it trustworthy as a measure of real money.
+   *
+   * Deliberately NOT the current balance. Balance falls as it is spent, so a
+   * referee who topped up 2000 and unlocked a contact yesterday would look
+   * poorer today than the money they actually brought in. And the other credit
+   * types on the same wallet — WELCOME_CREDIT, MANUAL_CREDIT, REFERRAL_CREDIT —
+   * are all platform-issued, which is exactly what must not count.
+   */
+  private async lifetimeTopUpFcfa(profileId: string): Promise<number> {
+    const wallet = await this.prisma.wallet.findFirst({
+      where: { owner_type: WalletOwnerType.PROFILE, profile_id: profileId },
+      select: { id: true },
+    });
+    if (!wallet) return 0;
+
+    const topUps = await this.prisma.walletTransaction.aggregate({
+      where: {
+        wallet_id: wallet.id,
+        type: WalletTransactionType.TOP_UP_CREDIT,
+        deleted_at: null,
+      },
+      _sum: { amount: true },
+    });
+    return Number(topUps._sum.amount ?? 0);
+  }
+
+  /**
    * Move a referral to a non-REWARDED outcome, recording why and which payment
    * exposed it. Guarded by the same conditional claim as the payout so a settle
    * racing a settle cannot overwrite a completed one.
@@ -769,37 +930,5 @@ export class ReferralService {
       },
     });
     await this.adminCache.invalidate('referrals');
-  }
-
-  /**
-   * Config values arrive as strings an admin typed. FCFA has no minor unit, so
-   * round; a negative or unparseable amount means the config is broken, and the
-   * right response in a fire-and-forget path is to pay nothing rather than
-   * throw into a log nobody reads.
-   */
-  /**
-   * The two credit amounts and their total, from raw config values.
-   *
-   * One place, because `totalPayout` is simultaneously what gets paid and the
-   * minimum a triggering payment must reach to pay it — and the parrainage
-   * screen quotes that minimum to the user. A second copy of this arithmetic is
-   * a promise on screen that the settle logic can silently stop honouring.
-   */
-  private resolvePayout(
-    referrerCreditFcfa: number,
-    refereeCreditFcfa: number,
-  ): { referrerAmount: number; refereeAmount: number; totalPayout: number } {
-    const referrerAmount = this.sanitizeAmount(referrerCreditFcfa);
-    const refereeAmount = this.sanitizeAmount(refereeCreditFcfa);
-    return {
-      referrerAmount,
-      refereeAmount,
-      totalPayout: referrerAmount + refereeAmount,
-    };
-  }
-
-  private sanitizeAmount(value: number): number {
-    if (!Number.isFinite(value) || value <= 0) return 0;
-    return Math.round(value);
   }
 }
