@@ -10,6 +10,7 @@ import {
   IsUUID,
   Equals,
   Matches,
+  MaxLength,
 } from 'class-validator';
 import { ProfileType, DocumentType, ReferralSource } from '@prisma/client';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
@@ -42,6 +43,18 @@ export class CreateProfileDto extends LocationDto {
   @IsString()
   @IsNotEmpty()
   phone: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Optional second number to be reached on, when the WhatsApp number is not one the person answers calls on. Not unique, never used for login.',
+  })
+  // Empty string normalised to undefined: the form always sends the field, and
+  // a blank one means "no second number", not "store an empty number".
+  @Transform(({ value }) => value?.trim() || undefined)
+  @IsOptional()
+  @IsString()
+  @MaxLength(30)
+  directPhone?: string;
 
   @ApiProperty({ description: 'Physical address' })
   @Transform(({ value }) => value?.trim())

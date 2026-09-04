@@ -27,6 +27,30 @@ const SEED_MAX_RETRIES = 10;
 const SEED_RETRY_DELAY_MS = 2000;
 
 /**
+ * The parrainage block, named because it is validated as a block.
+ *
+ * `commission_type` decides what unit the two credit values are in, and the two
+ * percentages have to sum to at most 100 — neither rule can be checked one key
+ * at a time, which is why {@link SystemConfigService.setMany} exists.
+ */
+const REFERRAL_COMMISSION_TYPE_KEY = 'fees.referral_commission_type';
+const REFERRAL_CREDIT_REFERRER_KEY = 'fees.referral_credit_referrer';
+const REFERRAL_CREDIT_REFEREE_KEY = 'fees.referral_credit_referee';
+const REFERRAL_MAX_REWARDED_KEY = 'fees.referral_max_rewarded_per_referrer';
+const REFERRAL_MAX_PAYOUT_KEY = 'fees.referral_max_payout_per_referral';
+
+const REFERRAL_DEFAULTS: Record<string, string> = {
+  [REFERRAL_COMMISSION_TYPE_KEY]: 'FIXED',
+  [REFERRAL_CREDIT_REFERRER_KEY]: '300',
+  [REFERRAL_CREDIT_REFEREE_KEY]: '200',
+  [REFERRAL_MAX_REWARDED_KEY]: '10',
+  [REFERRAL_MAX_PAYOUT_KEY]: '0',
+};
+
+const REFERRAL_COMMISSION_TYPES = ['FIXED', 'PERCENTAGE'] as const;
+const MAX_PERCENT = 100;
+
+/**
  * Fan-out width when the config says nothing. Kept in step with the seeded
  * value of `matching.max_notification_workers`.
  */
@@ -207,12 +231,92 @@ export class SystemConfigService implements OnModuleInit {
     'matching.recommendation_min_score',
   ]);
 
+  /**
+   * Counts that are allowed to be zero, where zero means "off" rather than
+   * "broken" — an unlimited cap, an absent ceiling. They cannot live in
+   * {@link POSITIVE_INT_KEYS} for that reason, but they still must not be
+   * negative or unparseable.
+   */
+  private static readonly NON_NEGATIVE_INT_KEYS = new Set([
+    REFERRAL_MAX_REWARDED_KEY,
+    REFERRAL_MAX_PAYOUT_KEY,
+  ]);
+
   async set(key: string, value: string, adminId?: string): Promise<void> {
+    await this.setMany({ [key]: value }, adminId);
+  }
+
+  /**
+   * Write several config values as one unit.
+   *
+   * Exists because some rules span keys. `fees.referral_commission_type`
+   * decides whether the two credit values are francs or percentages, and in
+   * PERCENTAGE mode they must sum to at most 100 — so switching from 300/200
+   * FCFA to 60/40 % is three writes that are each invalid on their own and only
+   * coherent together. One key at a time can either reject the admin's whole
+   * intent or persist a state the settlement cannot honour; neither is
+   * acceptable for a screen that pays people money.
+   *
+   * Validated as a set against the state the write would PRODUCE, then applied
+   * in a single transaction so a mid-way failure leaves nothing half-changed.
+   */
+  async setMany(
+    updates: Record<string, string>,
+    adminId?: string,
+  ): Promise<void> {
+    const entries = Object.entries(updates);
+    if (entries.length === 0) {
+      throw new BadRequestException('Aucune valeur à mettre à jour');
+    }
+
+    for (const [key, value] of entries) {
+      SystemConfigService.assertValueValid(key, value);
+    }
+    await this.assertReferralBlockCoherent(updates);
+
+    // Read before writing: the stamp below is driven by the TRANSITION, not by
+    // the new value, so re-saving `true` over `true` must not move it. Moving it
+    // would push the timestamp past every `vector_indexed_at` written since the
+    // real activation and strand exactly the rows the stamp exists to reclaim.
+    const wasEnabled =
+      EMBEDDINGS_KEY in updates ? await this.isSimilarityEnabled() : false;
+
+    // Array form: one transaction, and an unknown key fails it as P2025 with
+    // nothing committed, so a typo cannot half-apply a settings save.
+    await this.prisma.$transaction(
+      entries.map(([key, value]) =>
+        this.prisma.systemConfig.update({
+          where: { key },
+          data: { value, updated_by: adminId ?? null },
+        }),
+      ),
+    );
+
+    await this.redis.del(...entries.map(([key]) => `${CACHE_PREFIX}${key}`));
+    this.logger.log(
+      `Config updated: ${entries.map(([k]) => k).join(', ')} by ${adminId ?? 'system'}`,
+    );
+
+    if (!wasEnabled && updates[EMBEDDINGS_KEY] === 'true') {
+      await this.markEmbeddingsEnabled();
+    }
+  }
+
+  /** Rules that need only the one value being written. */
+  private static assertValueValid(key: string, value: string): void {
     if (SystemConfigService.POSITIVE_INT_KEYS.has(key)) {
       const n = Number(value);
       if (!Number.isFinite(n) || n <= 0) {
         throw new BadRequestException(
           `La valeur de "${key}" doit être un entier strictement positif`,
+        );
+      }
+    }
+    if (SystemConfigService.NON_NEGATIVE_INT_KEYS.has(key)) {
+      const n = Number(value);
+      if (!Number.isFinite(n) || n < 0) {
+        throw new BadRequestException(
+          `La valeur de "${key}" doit être un entier positif ou nul`,
         );
       }
     }
@@ -224,22 +328,70 @@ export class SystemConfigService implements OnModuleInit {
         );
       }
     }
-    // Read before writing: the stamp below is driven by the TRANSITION, not by
-    // the new value, so re-saving `true` over `true` must not move it. Moving it
-    // would push the timestamp past every `vector_indexed_at` written since the
-    // real activation and strand exactly the rows the stamp exists to reclaim.
-    const wasEnabled =
-      key === EMBEDDINGS_KEY ? await this.isSimilarityEnabled() : false;
+  }
 
-    await this.prisma.systemConfig.update({
-      where: { key },
-      data: { value, updated_by: adminId ?? null },
+  /**
+   * Rules that need the whole parrainage block, checked against the state this
+   * write would leave behind — the incoming values laid over what is stored.
+   *
+   * Skipped entirely when the write touches none of those keys, so an unrelated
+   * config save does not pay for a read of them.
+   */
+  private async assertReferralBlockCoherent(
+    updates: Record<string, string>,
+  ): Promise<void> {
+    const blockKeys = Object.keys(REFERRAL_DEFAULTS);
+    if (!blockKeys.some((key) => key in updates)) return;
+
+    const missing = blockKeys.filter((key) => !(key in updates));
+    const stored = await this.mgetBatch(
+      missing.map((key) => ({ key, fallback: REFERRAL_DEFAULTS[key] })),
+    );
+    const resulting: Record<string, string> = { ...updates };
+    missing.forEach((key, i) => {
+      resulting[key] = stored[i] ?? REFERRAL_DEFAULTS[key];
     });
-    await this.redis.del(`${CACHE_PREFIX}${key}`);
-    this.logger.log(`Config updated: ${key} by ${adminId ?? 'system'}`);
 
-    if (key === EMBEDDINGS_KEY && !wasEnabled && value === 'true') {
-      await this.markEmbeddingsEnabled();
+    const type = resulting[REFERRAL_COMMISSION_TYPE_KEY];
+    if (!REFERRAL_COMMISSION_TYPES.includes(type as 'FIXED')) {
+      throw new BadRequestException(
+        `La valeur de "${REFERRAL_COMMISSION_TYPE_KEY}" doit être ${REFERRAL_COMMISSION_TYPES.join(' ou ')}`,
+      );
+    }
+
+    const referrer = Number(resulting[REFERRAL_CREDIT_REFERRER_KEY]);
+    const referee = Number(resulting[REFERRAL_CREDIT_REFEREE_KEY]);
+    for (const [key, n] of [
+      [REFERRAL_CREDIT_REFERRER_KEY, referrer],
+      [REFERRAL_CREDIT_REFEREE_KEY, referee],
+    ] as const) {
+      if (!Number.isFinite(n) || n < 0) {
+        throw new BadRequestException(
+          `La valeur de "${key}" doit être un nombre positif ou nul`,
+        );
+      }
+    }
+
+    if (type !== 'PERCENTAGE') return;
+
+    // Percentages only. A pair summing past 100 would try to pay out more than
+    // the payment brought in; the payout function clamps it anyway, but silently
+    // paying something other than what the screen says is worse than refusing
+    // the save.
+    for (const [key, n] of [
+      [REFERRAL_CREDIT_REFERRER_KEY, referrer],
+      [REFERRAL_CREDIT_REFEREE_KEY, referee],
+    ] as const) {
+      if (!Number.isInteger(n) || n > MAX_PERCENT) {
+        throw new BadRequestException(
+          `En mode PERCENTAGE, "${key}" doit être un entier entre 0 et ${MAX_PERCENT}`,
+        );
+      }
+    }
+    if (referrer + referee > MAX_PERCENT) {
+      throw new BadRequestException(
+        `La somme des pourcentages de parrainage ne peut pas dépasser ${MAX_PERCENT} % (reçu ${referrer + referee} %)`,
+      );
     }
   }
 
@@ -604,23 +756,60 @@ export class SystemConfigService implements OnModuleInit {
    * `rewardedCount >= 0` — a cap that rejects everyone, silently, and only for
    * the admins who deliberately turned it off. Resolve it here, once.
    */
+  /**
+   * The parrainage settings, as one read.
+   *
+   * `referrerCreditFcfa` / `refereeCreditFcfa` are francs when
+   * `commissionType` is FIXED and percentages when it is PERCENTAGE — the name
+   * keeps the FCFA suffix because the storage keys do, and renaming them would
+   * churn every call site to describe a unit that is already carried by the
+   * type beside them.
+   */
   async getReferralCredits(): Promise<{
+    commissionType: 'FIXED' | 'PERCENTAGE';
     referrerCreditFcfa: number;
     refereeCreditFcfa: number;
     maxRewardedPerReferrer: number | null;
+    maxPayoutPerReferralFcfa: number;
   }> {
-    const [referrerCredit, refereeCredit, maxRewarded] = await this.mgetBatch([
-      { key: 'fees.referral_credit_referrer', fallback: '300' },
-      { key: 'fees.referral_credit_referee', fallback: '200' },
-      { key: 'fees.referral_max_rewarded_per_referrer', fallback: '10' },
-    ]);
+    const [referrerCredit, refereeCredit, maxRewarded, type, maxPayout] =
+      await this.mgetBatch([
+        {
+          key: REFERRAL_CREDIT_REFERRER_KEY,
+          fallback: REFERRAL_DEFAULTS[REFERRAL_CREDIT_REFERRER_KEY],
+        },
+        {
+          key: REFERRAL_CREDIT_REFEREE_KEY,
+          fallback: REFERRAL_DEFAULTS[REFERRAL_CREDIT_REFEREE_KEY],
+        },
+        {
+          key: REFERRAL_MAX_REWARDED_KEY,
+          fallback: REFERRAL_DEFAULTS[REFERRAL_MAX_REWARDED_KEY],
+        },
+        {
+          key: REFERRAL_COMMISSION_TYPE_KEY,
+          fallback: REFERRAL_DEFAULTS[REFERRAL_COMMISSION_TYPE_KEY],
+        },
+        {
+          key: REFERRAL_MAX_PAYOUT_KEY,
+          fallback: REFERRAL_DEFAULTS[REFERRAL_MAX_PAYOUT_KEY],
+        },
+      ]);
 
     const cap = Number(maxRewarded);
+    const ceiling = Number(maxPayout);
     return {
+      // Anything unrecognised reads as FIXED. A database row that says
+      // something else is a bug, and the safe reading of a broken type is the
+      // one whose amounts an admin explicitly typed rather than one that
+      // reinterprets 300 as 300 %.
+      commissionType: type === 'PERCENTAGE' ? 'PERCENTAGE' : 'FIXED',
       referrerCreditFcfa: Number(referrerCredit),
       refereeCreditFcfa: Number(refereeCredit),
       maxRewardedPerReferrer:
         !Number.isFinite(cap) || cap <= 0 ? null : Math.floor(cap),
+      maxPayoutPerReferralFcfa:
+        !Number.isFinite(ceiling) || ceiling <= 0 ? 0 : Math.floor(ceiling),
     };
   }
 

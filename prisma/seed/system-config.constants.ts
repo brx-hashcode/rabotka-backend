@@ -216,6 +216,25 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     label: 'Parrainages rémunérés max par parrain (0 = illimité)',
     isSecret: false,
   },
+  {
+    // What the two credit values above MEAN — absolute FCFA, or a percentage of
+    // the payment that triggered the settlement. FIXED keeps every existing
+    // install on its 300/200 behaviour untouched.
+    key: 'fees.referral_commission_type',
+    value: 'FIXED',
+    category: ConfigCategory.FEES,
+    label: 'Type de commission parrainage (FIXED = FCFA, PERCENTAGE = %)',
+    isSecret: false,
+  },
+  {
+    // Absolute ceiling on one parrainage payout, 0 = aucun. Matters in
+    // PERCENTAGE mode, where the payout follows a base the admin never types.
+    key: 'fees.referral_max_payout_per_referral',
+    value: '0',
+    category: ConfigCategory.FEES,
+    label: 'Plafond de commission par parrainage (FCFA, 0 = aucun)',
+    isSecret: false,
+  },
 
   // ── MATCHING ──────────────────────────────────────────────────────────────
   {
