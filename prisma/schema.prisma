@@ -389,6 +389,16 @@ model Profile {
   first_name                        String
   last_name                         String
   phone                             String             @unique
+  /// A second number to be reached on, when the WhatsApp number is not one the
+  /// person actually answers calls on — a shared handset, a business line, a
+  /// number that only runs WhatsApp over data.
+  ///
+  /// Deliberately NOT unique and deliberately nullable, unlike `phone`. This is
+  /// never a login identity: nothing authenticates against it, no OTP is sent
+  /// to it, and a household or a company switchboard shared by two profiles
+  /// must not make the second signup fail. Optional at every layer for the same
+  /// reason — most people have only one number.
+  direct_phone                      String?
   email                             String             @unique
   address                           String
   /// ISO 3166-1 alpha-2. What the ranker and the coming filters compare —

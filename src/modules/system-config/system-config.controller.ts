@@ -8,6 +8,7 @@ import {
   UseGuards,
   Req,
   NotFoundException,
+  BadRequestException,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -23,6 +24,7 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { SystemConfigService } from './system-config.service';
 import { UpdateSystemConfigDto } from './dto/update-system-config.dto';
+import { UpdateSystemConfigsDto } from './dto/update-system-configs.dto';
 import type { AdminAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
 import { LogService } from '../log/log.service';
 import { extractRequestMeta } from '../../common/utils/request-meta.util';
@@ -61,6 +63,60 @@ export class SystemConfigController {
     const entry = await this.systemConfigService.getOne(key);
     if (!entry) throw new NotFoundException(`Config key "${key}" not found`);
     return entry;
+  }
+
+  @Patch()
+  @ApiOperation({
+    summary: 'Update several system config values at once (admin only)',
+    description:
+      'Applies every key in one transaction, so a rejected value leaves nothing changed. Required for settings that are only valid together — the parrainage commission type decides the unit of the two credit values, and in PERCENTAGE mode they must sum to at most 100.',
+  })
+  @ApiResponse({ status: 200, description: 'Updated successfully' })
+  @ApiResponse({ status: 400, description: 'Invalid value or empty body' })
+  @ApiResponse({ status: 404, description: 'One or more keys not found' })
+  async updateMany(
+    @Body() dto: UpdateSystemConfigsDto,
+    @Req() req: AdminAuthenticatedRequest,
+  ) {
+    const keys = Object.keys(dto.values ?? {});
+    if (keys.length === 0) {
+      throw new BadRequestException('Aucune valeur à mettre à jour');
+    }
+
+    const existing = await Promise.all(
+      keys.map((key) => this.systemConfigService.getOne(key)),
+    );
+    const unknown = keys.filter((_, i) => existing[i] === null);
+    if (unknown.length > 0) {
+      throw new NotFoundException(
+        `Config key(s) not found: ${unknown.join(', ')}`,
+      );
+    }
+
+    await this.systemConfigService.setMany(dto.values, req.user?.userId);
+
+    // One audit row per key, matching the single-key endpoint: the settings
+    // screen saves a block, but "who changed the parrainage percentage" is
+    // asked about one key, and a combined row would not answer it.
+    const meta = extractRequestMeta(req);
+    await Promise.all(
+      keys.map((key, i) =>
+        this.logService.create({
+          action: 'SYSTEM_CONFIG_UPDATED',
+          entityType: 'system_config',
+          entityId: key,
+          userId: req.user?.userId,
+          metadata: {
+            key,
+            oldValue:
+              (existing[i] as { value?: unknown } | null)?.value ?? null,
+            newValue: dto.values[key],
+          },
+          ...meta,
+        }),
+      ),
+    );
+    return { success: true };
   }
 
   @Patch(':key')
