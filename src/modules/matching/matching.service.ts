@@ -386,9 +386,16 @@ export class MatchingService {
 
   // ── Re-ranking helpers ──────────────────────────────────────────────────────
 
+  /**
+   * `targetCategoryIds` is a SET, not one id, because the two callers ask
+   * different questions with the same machinery: a job has exactly one
+   * category, an employer recruits across several. Passing an empty array
+   * disables the term — which is what happens when a job carries no category —
+   * and that is the only case where nobody can reach a perfect score.
+   */
   private async reRankWorkers(
     hits: ScoredHit[],
-    jobCategoryId: string | null,
+    targetCategoryIds: readonly string[],
   ): Promise<ScoredHitWithCategory[]> {
     if (hits.length === 0) return [];
     const workerIds = hits.map((h) => h.id);
@@ -401,16 +408,19 @@ export class MatchingService {
       },
     });
     const profileMap = new Map(profiles.map((p) => [p.id, p]));
+    const targets = new Set(targetCategoryIds);
 
     // `hits` arrives in descending retrieval order, so the index IS the rank.
     // No recency term: a worker profile has no meaningful freshness, and passing a
     // constant for it would just add a fixed floor to every score.
     const ranked: ScoredHitWithCategory[] = hits.map((hit, rank) => {
       const profile = profileMap.get(hit.id);
-      const matchesJobCategory =
-        jobCategoryId != null &&
-        (profile?.categories.some((c) => c.category_id === jobCategoryId) ??
-          false);
+      // The category they matched ON, kept rather than discarded: it is both
+      // the scoring term and the tag `diversifyByCategory` groups by, and
+      // recomputing it separately is how those two drift apart.
+      const matchedCategoryId =
+        profile?.categories.find((c) => targets.has(c.category_id))
+          ?.category_id ?? null;
 
       const score = weightedMean([
         { value: rankRelevance(rank, hits.length), weight: W_VECTOR },
@@ -418,12 +428,11 @@ export class MatchingService {
           value: (profile?.reliability_score ?? 100) / 100,
           weight: W_RELIABILITY,
         },
-        { value: matchesJobCategory ? 1 : 0, weight: W_CATEGORY_EXACT },
+        { value: matchedCategoryId !== null ? 1 : 0, weight: W_CATEGORY_EXACT },
       ]);
 
-      const workerCategoryId = matchesJobCategory
-        ? jobCategoryId
-        : (profile?.categories[0]?.category_id ?? null);
+      const workerCategoryId =
+        matchedCategoryId ?? profile?.categories[0]?.category_id ?? null;
       return { id: hit.id, score, categoryId: workerCategoryId };
     });
 
@@ -921,7 +930,10 @@ export class MatchingService {
       }
 
       // Phase 3: re-rank
-      const reRanked = await this.reRankWorkers(hits, job.category_id ?? null);
+      const reRanked = await this.reRankWorkers(
+        hits,
+        job.category_id ? [job.category_id] : [],
+      );
 
       // Phase 4: score threshold — floored so it can never empty the result
       const minScore = await this.systemConfig.getRecommendationMinScore();
@@ -1076,7 +1088,13 @@ export class MatchingService {
         address: true,
         profile_type: true,
         categories: {
-          select: { category: { select: { name: true, description: true } } },
+          // `category_id` alongside the name: the name builds the search text,
+          // the id is what re-ranking matches a worker against. Selecting only
+          // the name is why this feed could never award the category term.
+          select: {
+            category_id: true,
+            category: { select: { name: true, description: true } },
+          },
         },
       },
     });
@@ -1092,7 +1110,13 @@ export class MatchingService {
         topN * 2,
       );
       const hits = mapSearchHitsToScoredIds(results, 'profileId');
-      const reRanked = await this.reRankWorkers(hits, null);
+      // The domains this employer recruits in. Previously hardcoded to null,
+      // which zeroed the category term for every candidate and capped the whole
+      // feed at 0.8/0.9 — nobody could score above 89 %, however well suited.
+      const reRanked = await this.reRankWorkers(
+        hits,
+        profile.categories.map((c) => c.category_id),
+      );
       // Threshold is config-driven (matching.recommendation_min_score) and
       // floored so it can never empty the feed.
       const minScore = await this.systemConfig.getRecommendationMinScore();
