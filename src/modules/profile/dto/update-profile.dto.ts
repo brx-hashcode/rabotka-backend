@@ -39,6 +39,23 @@ export class UpdateProfileDto extends LocationDto {
   @MaxLength(200)
   address?: string;
 
+  /**
+   * Editable here, unlike `phone`, which this DTO deliberately omits.
+   *
+   * The WhatsApp number is the login identity and changing it needs an OTP
+   * round-trip, which is why it is not editable through the ordinary update
+   * path. A direct line is just contact detail — nothing authenticates against
+   * it — so it can change like an address can. An empty string clears it.
+   */
+  @ApiPropertyOptional({
+    description: 'Optional second number to be reached on. Send "" to clear.',
+  })
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsOptional()
+  @IsString()
+  @MaxLength(30)
+  directPhone?: string;
+
   @ApiPropertyOptional({ description: 'Job category IDs (max 5)' })
   @Transform(({ value }) =>
     Array.isArray(value) ? value : value != null ? [value] : undefined,

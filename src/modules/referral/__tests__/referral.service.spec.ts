@@ -66,7 +66,11 @@ describe('ReferralService', () => {
   beforeEach(() => {
     tx = makeTx();
     prisma = {
-      profile: { findUnique: jest.fn(), findFirst: jest.fn(), update: jest.fn() },
+      profile: {
+        findUnique: jest.fn(),
+        findFirst: jest.fn(),
+        update: jest.fn(),
+      },
       referral: {
         findUnique: jest.fn(),
         findFirst: jest.fn(),
@@ -78,6 +82,11 @@ describe('ReferralService', () => {
         aggregate: jest.fn().mockResolvedValue({ _sum: {} }),
       },
       paymentRequest: { findFirst: jest.fn() },
+      wallet: { findFirst: jest.fn().mockResolvedValue({ id: 'w-referee' }) },
+      // Lifetime real money in, for the wallet-funded-unlock base cap.
+      walletTransaction: {
+        aggregate: jest.fn().mockResolvedValue({ _sum: { amount: 0 } }),
+      },
       $transaction: jest.fn().mockImplementation((cb: any) => cb(tx)),
     };
     wallet = {
@@ -89,15 +98,19 @@ describe('ReferralService', () => {
     };
     systemConfig = {
       getReferralCredits: jest.fn().mockResolvedValue({
+        commissionType: 'FIXED',
         referrerCreditFcfa: 500,
         refereeCreditFcfa: 250,
         maxRewardedPerReferrer: 10,
+        maxPayoutPerReferralFcfa: 0,
       }),
     };
     adminCache = { invalidate: jest.fn().mockResolvedValue(undefined) };
     mail = { sendMail: jest.fn().mockResolvedValue(undefined) };
     layout = {
-      wrap: jest.fn().mockImplementation((html: string) => Promise.resolve(html)),
+      wrap: jest
+        .fn()
+        .mockImplementation((html: string) => Promise.resolve(html)),
     };
     config = { get: jest.fn().mockReturnValue('https://rabotka.work') };
 
@@ -250,10 +263,27 @@ describe('ReferralService', () => {
       });
     }
 
+    /** A gateway-paid unlock: money arrived for this unlock. */
     function givenQualifyingPayment(amount: number) {
       prisma.paymentRequest.findFirst.mockResolvedValue({
         id: PAYMENT_ID,
         amount,
+        request_type: PaymentRequestType.CONTACT_UNLOCK,
+      });
+    }
+
+    /**
+     * An unlock settled from wallet balance: the synthetic row carries a NULL
+     * request_type, so the base is capped by lifetime top-ups.
+     */
+    function givenWalletFundedUnlock(amount: number, lifetimeTopUps: number) {
+      prisma.paymentRequest.findFirst.mockResolvedValue({
+        id: PAYMENT_ID,
+        amount,
+        request_type: null,
+      });
+      prisma.walletTransaction.aggregate.mockResolvedValue({
+        _sum: { amount: lifetimeTopUps },
       });
     }
 
@@ -280,50 +310,112 @@ describe('ReferralService', () => {
       expect(tx.wallet.update).toHaveBeenCalledTimes(2);
     });
 
-    it('only queries qualifying payment types — top-ups and penalties cannot trigger it', async () => {
+    it('matches only connections — a top-up or a penalty fits neither arm', async () => {
       givenPendingReferral();
       prisma.paymentRequest.findFirst.mockResolvedValue(null);
 
       await service.settleForReferee(REFEREE_ID);
 
+      // Either an unlock paid at the gateway, or the synthetic row a
+      // wallet-funded unlock writes. A WALLET_TOP_UP or a penalty has neither
+      // a qualifying request_type nor an attempt id, so it cannot trigger a
+      // parrainage on its own.
       expect(prisma.paymentRequest.findFirst).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
             status: PaymentRequestStatus.APPROVED,
-            request_type: {
-              in: [
-                PaymentRequestType.CONTACT_UNLOCK,
-                PaymentRequestType.RECOMMENDATION_CONTACT,
-              ],
-            },
+            OR: [
+              {
+                request_type: {
+                  in: [
+                    PaymentRequestType.CONTACT_UNLOCK,
+                    PaymentRequestType.RECOMMENDATION_CONTACT,
+                  ],
+                },
+              },
+              { contact_unlock_attempt_id: { not: null } },
+            ],
           }),
         }),
       );
       expect(tx.walletTransaction.create).not.toHaveBeenCalled();
     });
 
-    it('ignores a wallet-funded unlock, which carries a null request_type', async () => {
-      // ContactUnlockService.recordWalletUnlockPayment writes an APPROVED
-      // PaymentRequest with contact_unlock_attempt_id set but NO request_type.
-      // That null is the only thing keeping credit-funded unlocks out of the
-      // program — paying a parrainage out of credit the platform itself issued
-      // means the program funds itself from its own welcome bonuses.
-      //
-      // This test exists so that adding `request_type` over there fails here
-      // instead of silently opening that door.
-      givenPendingReferral();
-      prisma.paymentRequest.findFirst.mockResolvedValue(null);
+    /**
+     * The farm the old NULL-request_type guard used to close, now closed by the
+     * base instead: a wallet-funded unlock qualifies, but only up to the real
+     * money that referee ever put in.
+     */
+    describe('wallet-funded unlock', () => {
+      it('pays nothing when the balance was never topped up', async () => {
+        // Welcome credit only. Paying here would fund the programme out of its
+        // own bonuses — 500 of credit issued against nothing collected.
+        givenPendingReferral();
+        givenWalletFundedUnlock(500, 0);
+        prisma.profile.findUnique.mockResolvedValue(ELIGIBLE_REFERRER);
 
-      await service.settleForReferee(REFEREE_ID);
+        await service.settleForReferee(REFEREE_ID);
 
-      const where = prisma.paymentRequest.findFirst.mock.calls[0][0].where;
-      expect(where.request_type).toEqual({
-        in: [
-          PaymentRequestType.CONTACT_UNLOCK,
-          PaymentRequestType.RECOMMENDATION_CONTACT,
-        ],
+        expect(tx.walletTransaction.create).not.toHaveBeenCalled();
       });
-      expect(tx.walletTransaction.create).not.toHaveBeenCalled();
+
+      it('pays on a top-up spent later — the case the trigger exists for', async () => {
+        // Tops up 2000, unlocks a 500 contact from balance. Base is the 500.
+        givenPendingReferral();
+        givenWalletFundedUnlock(500, 2000);
+        prisma.profile.findUnique.mockResolvedValue(ELIGIBLE_REFERRER);
+        systemConfig.getReferralCredits.mockResolvedValue({
+          commissionType: 'PERCENTAGE',
+          referrerCreditFcfa: 60,
+          refereeCreditFcfa: 40,
+          maxRewardedPerReferrer: 10,
+          maxPayoutPerReferralFcfa: 0,
+        });
+
+        await service.settleForReferee(REFEREE_ID);
+
+        const amounts = tx.walletTransaction.create.mock.calls
+          .map((c: any) => c[0].data.amount)
+          .sort((a: number, b: number) => a - b);
+        expect(amounts).toEqual([200, 300]);
+      });
+
+      it('caps the base at what was topped up, not what the unlock cost', async () => {
+        // 100 topped up alongside 500 of welcome credit, unlocking a 500
+        // contact from the mixed balance. Only 100 ever came in.
+        givenPendingReferral();
+        givenWalletFundedUnlock(500, 100);
+        prisma.profile.findUnique.mockResolvedValue(ELIGIBLE_REFERRER);
+        systemConfig.getReferralCredits.mockResolvedValue({
+          commissionType: 'PERCENTAGE',
+          referrerCreditFcfa: 60,
+          refereeCreditFcfa: 40,
+          maxRewardedPerReferrer: 10,
+          maxPayoutPerReferralFcfa: 0,
+        });
+
+        await service.settleForReferee(REFEREE_ID);
+
+        const total = tx.walletTransaction.create.mock.calls
+          .map((c: any) => c[0].data.amount)
+          .reduce((a: number, b: number) => a + b, 0);
+        expect(total).toBeLessThanOrEqual(100);
+      });
+
+      it('does not cap a gateway payment by past top-ups', async () => {
+        // Money arrived for THIS unlock, so it is its own base — a first-time
+        // payer with no top-up history must still pay out.
+        givenPendingReferral();
+        givenQualifyingPayment(1000);
+        prisma.walletTransaction.aggregate.mockResolvedValue({
+          _sum: { amount: 0 },
+        });
+        prisma.profile.findUnique.mockResolvedValue(ELIGIBLE_REFERRER);
+
+        await service.settleForReferee(REFEREE_ID);
+
+        expect(tx.walletTransaction.create).toHaveBeenCalledTimes(2);
+      });
     });
 
     it('writes nothing when another thread already claimed the referral', async () => {
@@ -591,6 +683,254 @@ describe('ReferralService', () => {
         .sort((a: number, b: number) => a - b);
       expect(amounts).toEqual([250, 500]);
     });
+
+    describe('PERCENTAGE', () => {
+      function givenPercentage(referrerPct: number, refereePct: number) {
+        systemConfig.getReferralCredits.mockResolvedValue({
+          commissionType: 'PERCENTAGE',
+          referrerCreditFcfa: referrerPct,
+          refereeCreditFcfa: refereePct,
+          maxRewardedPerReferrer: 10,
+          maxPayoutPerReferralFcfa: 0,
+        });
+        prisma.profile.findUnique.mockResolvedValue(ELIGIBLE_REFERRER);
+        givenPendingReferral();
+      }
+
+      function creditedAmounts(): number[] {
+        return tx.walletTransaction.create.mock.calls
+          .map((c: any) => c[0].data.amount)
+          .sort((a: number, b: number) => a - b);
+      }
+
+      it('splits the triggering payment 60/40', async () => {
+        givenPercentage(60, 40);
+        givenQualifyingPayment(500);
+
+        await service.settleForReferee(REFEREE_ID);
+
+        expect(creditedAmounts()).toEqual([200, 300]);
+      });
+
+      it('scales with the payment, which FIXED does not', async () => {
+        givenPercentage(60, 40);
+        givenQualifyingPayment(1000);
+
+        await service.settleForReferee(REFEREE_ID);
+
+        expect(creditedAmounts()).toEqual([400, 600]);
+      });
+
+      it('pays on a payment a FIXED configuration would have refused', async () => {
+        // 100 FCFA worker unlock. Under FIXED 500/250 this is the money pump the
+        // floor closes; under PERCENTAGE it is simply a small payout.
+        givenPercentage(60, 40);
+        givenQualifyingPayment(100);
+
+        await service.settleForReferee(REFEREE_ID);
+
+        expect(creditedAmounts()).toEqual([40, 60]);
+      });
+
+      it('never pays out more than the payment brought in, whatever the rounding', async () => {
+        givenPercentage(50, 50);
+        givenQualifyingPayment(333);
+
+        await service.settleForReferee(REFEREE_ID);
+
+        const total = creditedAmounts().reduce((a, b) => a + b, 0);
+        expect(total).toBeLessThanOrEqual(333);
+        expect(creditedAmounts()).toEqual([166, 166]);
+      });
+
+      it('persists the computed amounts on the referral row, not the percentages', async () => {
+        // The row is the historical record. Storing 60/40 there would mean a
+        // later settings change silently rewrote what someone was paid.
+        givenPercentage(60, 40);
+        givenQualifyingPayment(1000);
+
+        await service.settleForReferee(REFEREE_ID);
+
+        expect(tx.referral.updateMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              referrer_amount: 600,
+              referee_amount: 400,
+            }),
+          }),
+        );
+      });
+
+      it('honours an absolute per-referral ceiling', async () => {
+        systemConfig.getReferralCredits.mockResolvedValue({
+          commissionType: 'PERCENTAGE',
+          referrerCreditFcfa: 60,
+          refereeCreditFcfa: 40,
+          maxRewardedPerReferrer: 10,
+          maxPayoutPerReferralFcfa: 500,
+        });
+        prisma.profile.findUnique.mockResolvedValue(ELIGIBLE_REFERRER);
+        givenPendingReferral();
+        givenQualifyingPayment(10_000);
+
+        await service.settleForReferee(REFEREE_ID);
+
+        expect(creditedAmounts()).toEqual([200, 300]);
+      });
+    });
+
+    /**
+     * The whole point of splitting stage 1 from stage 2.
+     *
+     * Every one of these is a reason to pay nothing, and none of them consults
+     * the commission type — so an admin flipping FIXED ⇄ PERCENTAGE in settings
+     * must not open a path the other type closed. Asserting them under both
+     * types is what turns that from a comment into a guarantee.
+     */
+    describe.each([
+      [
+        'FIXED',
+        {
+          commissionType: 'FIXED',
+          referrerCreditFcfa: 500,
+          refereeCreditFcfa: 250,
+          maxRewardedPerReferrer: 10,
+          maxPayoutPerReferralFcfa: 0,
+        },
+      ],
+      [
+        'PERCENTAGE',
+        {
+          commissionType: 'PERCENTAGE',
+          referrerCreditFcfa: 60,
+          refereeCreditFcfa: 40,
+          maxRewardedPerReferrer: 10,
+          maxPayoutPerReferralFcfa: 0,
+        },
+      ],
+    ])('the qualification gate, under %s', (_label, credits) => {
+      beforeEach(() => {
+        systemConfig.getReferralCredits.mockResolvedValue(credits);
+        prisma.profile.findUnique.mockResolvedValue(ELIGIBLE_REFERRER);
+      });
+
+      function expectPaidNothing() {
+        expect(tx.walletTransaction.create).not.toHaveBeenCalled();
+        expect(tx.wallet.update).not.toHaveBeenCalled();
+      }
+
+      it('pays nothing when the referee has no qualifying payment', async () => {
+        givenPendingReferral();
+        prisma.paymentRequest.findFirst.mockResolvedValue(null);
+
+        await service.settleForReferee(REFEREE_ID);
+
+        expectPaidNothing();
+      });
+
+      it('pays nothing on a top-up or a penalty — neither arm matches them', async () => {
+        givenPendingReferral();
+        prisma.paymentRequest.findFirst.mockResolvedValue(null);
+
+        await service.settleForReferee(REFEREE_ID);
+
+        expect(
+          prisma.paymentRequest.findFirst.mock.calls[0][0].where.OR,
+        ).toEqual([
+          {
+            request_type: {
+              in: [
+                PaymentRequestType.CONTACT_UNLOCK,
+                PaymentRequestType.RECOMMENDATION_CONTACT,
+              ],
+            },
+          },
+          { contact_unlock_attempt_id: { not: null } },
+        ]);
+        expectPaidNothing();
+      });
+
+      it('pays nothing for a wallet-funded unlock backed by no real money', async () => {
+        givenPendingReferral();
+        givenWalletFundedUnlock(500, 0);
+
+        await service.settleForReferee(REFEREE_ID);
+
+        expectPaidNothing();
+      });
+
+      it('pays nothing on a second unlock — the referral is already REWARDED', async () => {
+        givenPendingReferral({ status: ReferralStatus.REWARDED });
+
+        await service.settleForReferee(REFEREE_ID);
+
+        expect(prisma.paymentRequest.findFirst).not.toHaveBeenCalled();
+        expectPaidNothing();
+      });
+
+      it('pays nothing on a replayed webhook that loses the claim', async () => {
+        givenPendingReferral();
+        givenQualifyingPayment(1000);
+        tx.referral.updateMany.mockResolvedValue({ count: 0 });
+
+        await service.settleForReferee(REFEREE_ID);
+
+        expectPaidNothing();
+      });
+
+      it('pays nothing once the referrer is at the cap', async () => {
+        givenPendingReferral();
+        givenQualifyingPayment(1000);
+        prisma.referral.count.mockResolvedValue(10);
+
+        await service.settleForReferee(REFEREE_ID);
+
+        expect(prisma.referral.updateMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ status: ReferralStatus.CAPPED }),
+          }),
+        );
+        expectPaidNothing();
+      });
+
+      it('forfeits rather than pays when the referrer is banned', async () => {
+        givenPendingReferral();
+        givenQualifyingPayment(1000);
+        prisma.profile.findUnique.mockResolvedValue({
+          ...ELIGIBLE_REFERRER,
+          status: AccountStatus.BANNED,
+        });
+
+        await service.settleForReferee(REFEREE_ID);
+
+        expect(prisma.referral.updateMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ status: ReferralStatus.FORFEITED }),
+          }),
+        );
+        expectPaidNothing();
+      });
+
+      it('holds rather than pays when the referrer is not yet verified', async () => {
+        givenPendingReferral();
+        givenQualifyingPayment(1000);
+        prisma.profile.findUnique.mockResolvedValue({
+          ...ELIGIBLE_REFERRER,
+          verification_status: VerificationStatus.PENDING,
+        });
+
+        await service.settleForReferee(REFEREE_ID);
+
+        expect(prisma.referral.updateMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              status: ReferralStatus.QUALIFIED_ON_HOLD,
+            }),
+          }),
+        );
+        expectPaidNothing();
+      });
+    });
   });
 
   describe('getOwnReferralSummary()', () => {
@@ -622,6 +962,85 @@ describe('ReferralService', () => {
       expect(summary.referrerCreditFcfa).toBe(300);
       expect(summary.refereeCreditFcfa).toBe(200);
       expect(summary.minQualifyingAmountFcfa).toBe(500);
+    });
+
+    describe('PERCENTAGE', () => {
+      beforeEach(() => {
+        prisma.referral.findUnique.mockResolvedValue(null);
+        prisma.profile.findUnique.mockResolvedValue({
+          referral_code: 'AB23CD',
+        });
+        systemConfig.getReferralCredits.mockResolvedValue({
+          commissionType: 'PERCENTAGE',
+          referrerCreditFcfa: 60,
+          refereeCreditFcfa: 40,
+          maxRewardedPerReferrer: 10,
+          maxPayoutPerReferralFcfa: 0,
+        });
+      });
+
+      // Without this the client cannot tell "60 FCFA" from "60 %", and a
+      // percentage configuration reads on screen as a derisory franc amount.
+      it('tells the client which unit the two numbers are in', async () => {
+        const summary = await service.getOwnReferralSummary(REFERRER_ID);
+        expect(summary.commissionType).toBe('PERCENTAGE');
+      });
+
+      it('quotes the percentages themselves, not a payout on an unknown base', async () => {
+        const summary = await service.getOwnReferralSummary(REFERRER_ID);
+        expect(summary.referrerCreditFcfa).toBe(60);
+        expect(summary.refereeCreditFcfa).toBe(40);
+      });
+
+      // There is no floor in this mode: a share of any payment fits inside it,
+      // so no minimum can fire. The existing client guards this with
+      // `Number.isFinite`, so null degrades to the sentence without a threshold.
+      it('reports no minimum qualifying amount', async () => {
+        const summary = await service.getOwnReferralSummary(REFERRER_ID);
+        expect(summary.minQualifyingAmountFcfa).toBeNull();
+      });
+
+      it('clamps a misconfigured pair the way a settlement would', async () => {
+        systemConfig.getReferralCredits.mockResolvedValue({
+          commissionType: 'PERCENTAGE',
+          referrerCreditFcfa: 80,
+          refereeCreditFcfa: 80,
+          maxRewardedPerReferrer: 10,
+          maxPayoutPerReferralFcfa: 0,
+        });
+
+        const summary = await service.getOwnReferralSummary(REFERRER_ID);
+
+        expect(summary.referrerCreditFcfa).toBe(80);
+        expect(summary.refereeCreditFcfa).toBe(20);
+      });
+
+      // The ceiling is a franc amount; it cannot be restated as a share without
+      // a base, so quoting it would report a percentage nobody configured.
+      it('leaves the absolute ceiling out of a percentage quote', async () => {
+        systemConfig.getReferralCredits.mockResolvedValue({
+          commissionType: 'PERCENTAGE',
+          referrerCreditFcfa: 60,
+          refereeCreditFcfa: 40,
+          maxRewardedPerReferrer: 10,
+          maxPayoutPerReferralFcfa: 50,
+        });
+
+        const summary = await service.getOwnReferralSummary(REFERRER_ID);
+
+        expect(summary.referrerCreditFcfa).toBe(60);
+        expect(summary.refereeCreditFcfa).toBe(40);
+      });
+    });
+
+    it('reports FIXED for a default configuration', async () => {
+      prisma.referral.findUnique.mockResolvedValue(null);
+      prisma.profile.findUnique.mockResolvedValue({ referral_code: 'AB23CD' });
+
+      const summary = await service.getOwnReferralSummary(REFERRER_ID);
+
+      expect(summary.commissionType).toBe('FIXED');
+      expect(summary.minQualifyingAmountFcfa).toBe(750);
     });
   });
 

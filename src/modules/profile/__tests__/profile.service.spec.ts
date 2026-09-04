@@ -125,6 +125,7 @@ function makeRedis() {
     set: jest.fn().mockResolvedValue('OK'),
     setex: jest.fn().mockResolvedValue('OK'),
     del: jest.fn().mockResolvedValue(1),
+    ttl: jest.fn().mockResolvedValue(300),
   };
 }
 
@@ -290,6 +291,44 @@ describe('ProfileService', () => {
           data: expect.not.objectContaining({ status: expect.anything() }),
         }),
       );
+    });
+
+    /**
+     * The optional second number, unlike `phone`, which this DTO omits: the
+     * WhatsApp number is the login identity and changing it needs an OTP
+     * round-trip, a direct line is ordinary contact detail.
+     */
+    describe('directPhone', () => {
+      it('writes a supplied number', async () => {
+        await service.updateProfile('p-1', { directPhone: '+242060000000' });
+        expect(prisma.profile.update).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ direct_phone: '+242060000000' }),
+          }),
+        );
+      });
+
+      // "No second number" is a legitimate state — most people have one — so
+      // the user needs a way to remove one they added by mistake.
+      it('clears the column on an empty string rather than storing one', async () => {
+        await service.updateProfile('p-1', { directPhone: '' });
+        expect(prisma.profile.update).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ direct_phone: null }),
+          }),
+        );
+      });
+
+      it('leaves the column alone when the field is absent', async () => {
+        await service.updateProfile('p-1', { firstName: 'Bob' });
+        expect(prisma.profile.update).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.not.objectContaining({
+              direct_phone: expect.anything(),
+            }),
+          }),
+        );
+      });
     });
   });
 
@@ -483,6 +522,162 @@ describe('ProfileService', () => {
         'Échec',
       );
       expect(redis.del).toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * Changing the WhatsApp number is the one edit that can lock a user out of
+   * their own account: it IS the login identity. So the invariant under test
+   * throughout is prove-then-switch — nothing reaches the profile until the new
+   * handset has answered.
+   */
+  describe('phone change', () => {
+    const CURRENT = '+242060000000';
+    const NEW = '+242061111111';
+
+    function givenProfile() {
+      prisma.profile.findUnique.mockReset();
+      // 1st call: the profile. 2nd: the uniqueness check on the new number.
+      prisma.profile.findUnique
+        .mockResolvedValueOnce({ id: 'p-1', phone: CURRENT })
+        .mockResolvedValueOnce(null);
+    }
+
+    /** The pending change as `requestPhoneChange` stored it. */
+    function pendingCode(): string {
+      const stored = redis.set.mock.calls.at(-1)?.[1] as string;
+      return (JSON.parse(stored) as { code: string }).code;
+    }
+
+    describe('requestPhoneChange()', () => {
+      it('sends the code to the NEW number, not the one being replaced', async () => {
+        givenProfile();
+        await service.requestPhoneChange('p-1', NEW);
+
+        expect(whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
+          NEW,
+          'otp',
+          expect.stringMatching(/^\d{6}$/),
+        );
+      });
+
+      // The whole point of the two steps.
+      it('writes nothing to the profile', async () => {
+        givenProfile();
+        await service.requestPhoneChange('p-1', NEW);
+        expect(prisma.profile.update).not.toHaveBeenCalled();
+      });
+
+      it('refuses the number already on the account', async () => {
+        givenProfile();
+        await expect(service.requestPhoneChange('p-1', CURRENT)).rejects.toThrow(
+          'déjà celui de votre compte',
+        );
+      });
+
+      // `phone` is UNIQUE: without this the failure would surface as an opaque
+      // database error after the user had already entered a code.
+      it('refuses a number held by another account', async () => {
+        prisma.profile.findUnique.mockReset();
+        prisma.profile.findUnique
+          .mockResolvedValueOnce({ id: 'p-1', phone: CURRENT })
+          .mockResolvedValueOnce({ id: 'p-2' });
+
+        await expect(service.requestPhoneChange('p-1', NEW)).rejects.toThrow(
+          'déjà utilisé par un autre compte',
+        );
+      });
+
+      it('stores no pending change when the number cannot be reached', async () => {
+        givenProfile();
+        whatsApp.sendTemplateMessage.mockResolvedValueOnce(false);
+
+        await expect(service.requestPhoneChange('p-1', NEW)).rejects.toThrow(
+          'bien sur WhatsApp',
+        );
+        expect(redis.set).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('confirmPhoneChange()', () => {
+      function givenPending(overrides: Record<string, unknown> = {}) {
+        redis.get.mockResolvedValue(
+          JSON.stringify({ phone: NEW, code: '123456', attempts: 0, ...overrides }),
+        );
+      }
+
+      it('switches the number and marks it WhatsApp-reachable', async () => {
+        givenPending();
+        const result = await service.confirmPhoneChange('p-1', '123456');
+
+        expect(result).toEqual({ success: true, phone: NEW });
+        expect(prisma.profile.update).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: { phone: NEW, whatsapp_connected: true },
+          }),
+        );
+      });
+
+      it('consumes the pending change so a code cannot be replayed', async () => {
+        givenPending();
+        await service.confirmPhoneChange('p-1', '123456');
+        expect(redis.del).toHaveBeenCalled();
+      });
+
+      it('leaves the number alone on a wrong code', async () => {
+        givenPending();
+        await expect(service.confirmPhoneChange('p-1', '000000')).rejects.toThrow(
+          'Code incorrect',
+        );
+        expect(prisma.profile.update).not.toHaveBeenCalled();
+      });
+
+      // Six digits is one in a million per guess — true only while the guesses
+      // are bounded.
+      it('discards the pending change once attempts run out', async () => {
+        givenPending({ attempts: 4 });
+        await expect(service.confirmPhoneChange('p-1', '000000')).rejects.toThrow(
+          'Trop de tentatives',
+        );
+        expect(redis.del).toHaveBeenCalled();
+      });
+
+      it('does not extend the window while guessing', async () => {
+        givenPending({ attempts: 1 });
+        redis.ttl.mockResolvedValueOnce(42);
+
+        await expect(
+          service.confirmPhoneChange('p-1', '000000'),
+        ).rejects.toThrow();
+
+        expect(redis.set).toHaveBeenCalledWith(
+          expect.any(String),
+          expect.any(String),
+          'EX',
+          42,
+        );
+      });
+
+      it('rejects when nothing is pending or the code expired', async () => {
+        redis.get.mockResolvedValue(null);
+        await expect(service.confirmPhoneChange('p-1', '123456')).rejects.toThrow(
+          'expiré',
+        );
+      });
+    });
+
+    it('accepts the code it actually sent, end to end', async () => {
+      givenProfile();
+      await service.requestPhoneChange('p-1', NEW);
+      const code = pendingCode();
+
+      redis.get.mockResolvedValue(
+        JSON.stringify({ phone: NEW, code, attempts: 0 }),
+      );
+      await expect(service.confirmPhoneChange('p-1', code)).resolves.toEqual({
+        success: true,
+        phone: NEW,
+      });
     });
   });
 
