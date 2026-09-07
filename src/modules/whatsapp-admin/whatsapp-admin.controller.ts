@@ -5,8 +5,10 @@ import {
   Post,
   Query,
   Req,
+  Res,
   UseGuards,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import {
   ApiTags,
   ApiOperation,
@@ -100,6 +102,36 @@ export class WhatsappAdminController {
       created_from: dto.created_from,
       created_to: dto.created_to,
     });
+  }
+
+  @Get('billing/report.pdf')
+  @Roles(UserRole.MANAGER)
+  @ApiOperation({
+    summary: 'Download the consumption report for a window (PDF)',
+    description:
+      'The Consumption tab as a document: totals for the window, the daily ' +
+      'volume chart, the per-category breakdown and a day-by-day table. ' +
+      'Reads the same cached Meta figures the JSON endpoint serves, so a ' +
+      'download cannot disagree with the page it was taken from.',
+  })
+  @ApiResponse({ status: 200, description: 'PDF file stream' })
+  @ApiResponse({
+    status: 503,
+    description:
+      'The active provider is not Meta Cloud, or Graph is unreachable — ' +
+      'there are no figures to report',
+  })
+  async billingReport(
+    @Query() dto: AdminWhatsappRangeDto,
+    @Res() res: Response,
+  ) {
+    const { buffer, filename } = await this.service.billingReportPdf({
+      created_from: dto.created_from,
+      created_to: dto.created_to,
+    });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(buffer);
   }
 
   @Get('queue')
