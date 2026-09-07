@@ -13,9 +13,16 @@ import { SystemConfigService } from '../../system-config/system-config.service';
 import { WalletService } from '../../wallet/wallet.service';
 import { BotNotificationService } from '../../bot/services/bot-notification.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { EmploymentType, JobOfferStatus, PaymentFlow } from '@prisma/client';
+import {
+  EmploymentType,
+  InteractionActor,
+  InteractionKind,
+  JobOfferStatus,
+  PaymentFlow,
+} from '@prisma/client';
 import { MatchingService } from '../../matching/matching.service';
 import { REDIS_CONNECTION } from '../../../common/services/redis/redis.constants';
+import { InteractionEventService } from '../../recommendation-engine/interaction-event.service';
 import { JobNotificationProcessor } from '../notification/job-notification.processor';
 
 const EMPLOYER_ID = 'employer-uuid-1';
@@ -66,6 +73,7 @@ describe('JobOfferService', () => {
   let walletService: jest.Mocked<WalletService>;
   let botNotificationService: jest.Mocked<BotNotificationService>;
   let jobNotification: jest.Mocked<JobNotificationProcessor>;
+  let interactionEvents: jest.Mocked<InteractionEventService>;
 
   beforeEach(async () => {
     const mockPrisma = {
@@ -153,6 +161,10 @@ describe('JobOfferService', () => {
           provide: JobNotificationProcessor,
           useValue: { enqueue: jest.fn().mockResolvedValue(undefined) },
         },
+        {
+          provide: InteractionEventService,
+          useValue: { record: jest.fn().mockResolvedValue(undefined) },
+        },
       ],
     }).compile();
 
@@ -163,6 +175,7 @@ describe('JobOfferService', () => {
     walletService = module.get(WalletService);
     botNotificationService = module.get(BotNotificationService);
     jobNotification = module.get(JobNotificationProcessor);
+    interactionEvents = module.get(InteractionEventService);
   });
 
   describe('create()', () => {
@@ -198,6 +211,35 @@ describe('JobOfferService', () => {
         botNotificationService.sendRecommendedJobNotification,
       ).not.toHaveBeenCalled();
     });
+
+    // Publishing is the employer's most deliberate statement of the sector they
+    // hire in, and it used to emit nothing at all — so their category affinity
+    // could only ever come from the boxes they ticked once at signup.
+    it('books the publication as an interest signal carrying the category', async () => {
+      (prisma.jobOffer.create as jest.Mock).mockResolvedValue({
+        ...mockOffer,
+        category_id: 'cat-plomberie',
+      });
+
+      await service.create(EMPLOYER_ID, { ...baseDto });
+
+      expect(interactionEvents.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          actorId: EMPLOYER_ID,
+          actorType: InteractionActor.EMPLOYER,
+          kind: InteractionKind.PUBLISH,
+          objectId: mockOffer.id,
+          // The whole point: `deriveFeatures` folds this into categoryAffinity.
+          categoryId: 'cat-plomberie',
+        }),
+      );
+    });
+
+    // No "survives a failing signal" test on purpose: `record` wraps its whole
+    // body in try/catch and never rejects, so every call site — this one
+    // included — fires it with a bare `void`. Forcing the mock to reject would
+    // assert a case the service's own contract rules out, and the unhandled
+    // rejection takes the Jest worker down with it.
 
     it('defaults quantity to 1 when not provided', async () => {
       const dtoWithoutQuantity = { ...baseDto, quantity: undefined as any };

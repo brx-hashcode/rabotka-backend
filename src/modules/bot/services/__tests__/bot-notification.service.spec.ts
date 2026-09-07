@@ -75,9 +75,16 @@ describe('BotNotificationService', () => {
     contactUnlock: { getByApplicationId: jest.Mock };
   };
   let feedback: { requestFeedback: jest.Mock; mintFlowToken: jest.Mock };
+  // `set` returns 'OK' when the NX claim is won, null when someone holds it —
+  // which is exactly how the notification pacing decides to send or stay quiet.
+  let redis: { set: jest.Mock; del: jest.Mock };
 
   beforeEach(() => {
     const base = makeDeps();
+    redis = {
+      set: jest.fn().mockResolvedValue('OK'),
+      del: jest.fn().mockResolvedValue(1),
+    };
     const contactUnlock = {
       getByApplicationId: jest.fn().mockResolvedValue(null),
     };
@@ -109,9 +116,11 @@ describe('BotNotificationService', () => {
           employerLateCancelScoreDeduction: 5,
           billingBlockThreshold: 2,
         }),
+        getNewApplicationNotifyCooldownMinutes: jest.fn().mockResolvedValue(30),
       } as any,
       { getProfileWalletBalance: jest.fn().mockResolvedValue(0) } as any,
       feedback as any,
+      redis as any,
     );
   });
 
@@ -126,6 +135,57 @@ describe('BotNotificationService', () => {
         'newApplication',
         expect.objectContaining({ workerName: expect.any(String) }),
       );
+    });
+
+    // Pacing. An offer with twenty-five candidates used to send twenty-five
+    // billed templates, all opening the same page.
+    it('claims the offer window before sending, keyed by offer', async () => {
+      await service.sendNewApplicationToEmployer('app-1');
+      expect(redis.set).toHaveBeenCalledWith(
+        'new_application_notify:jo-1',
+        '1',
+        'EX',
+        30 * 60,
+        'NX',
+      );
+    });
+
+    it('stays quiet when the offer was already announced in this window', async () => {
+      // ioredis returns null when SET NX loses the race.
+      redis.set.mockResolvedValue(null);
+      await service.sendNewApplicationToEmployer('app-1');
+      expect(deps.whatsApp.sendTemplateMessage).not.toHaveBeenCalled();
+    });
+
+    // Skipping must be cheap: the counting query sits behind the claim, so a
+    // paced-out application costs neither a message nor a round trip.
+    it('does not query anything further once paced out', async () => {
+      redis.set.mockResolvedValue(null);
+      await service.sendNewApplicationToEmployer('app-1');
+      expect(deps.prisma.application.count).not.toHaveBeenCalled();
+    });
+
+    it('hands the window back when the send throws', async () => {
+      deps.whatsApp.sendTemplateMessage.mockRejectedValueOnce(
+        new Error('WhatsApp down'),
+      );
+      await service.sendNewApplicationToEmployer('app-1');
+      // Otherwise one transient failure silences every later applicant on this
+      // offer for the rest of the cooldown.
+      expect(redis.del).toHaveBeenCalledWith('new_application_notify:jo-1');
+    });
+
+    it('notifies on every application when the cooldown is 0', async () => {
+      (
+        service as unknown as {
+          systemConfig: { getNewApplicationNotifyCooldownMinutes: jest.Mock };
+        }
+      ).systemConfig.getNewApplicationNotifyCooldownMinutes.mockResolvedValue(
+        0,
+      );
+      await service.sendNewApplicationToEmployer('app-1');
+      expect(redis.set).not.toHaveBeenCalled();
+      expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalled();
     });
 
     it('passes the applicationId as the CTA button URL suffix', async () => {
