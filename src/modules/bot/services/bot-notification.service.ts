@@ -1,5 +1,7 @@
 import { Injectable, Logger, forwardRef, Inject } from '@nestjs/common';
+import Redis from 'ioredis';
 import { jobLocationLabel } from '../../../common/utils/job-location.util';
+import { REDIS_CONNECTION } from '../../../common/services/redis/redis.constants';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { WhatsAppService } from '../../whatsapp/whatsapp.service';
 import { WhatsAppFeedbackService } from '../../whatsapp/feedback/whatsapp-feedback.service';
@@ -28,7 +30,18 @@ export class BotNotificationService {
     private readonly walletService: WalletService,
     @Inject(forwardRef(() => WhatsAppFeedbackService))
     private readonly feedback: WhatsAppFeedbackService,
+    @Inject(REDIS_CONNECTION)
+    private readonly redis: Redis,
   ) {}
+
+  /**
+   * Paces "someone applied" so one offer cannot bill the employer once per
+   * applicant. Keyed by OFFER, not by employer: two offers are two different
+   * pieces of news, and one filling up must not silence the other.
+   */
+  private newApplicationCooldownKey(jobOfferId: string): string {
+    return `new_application_notify:${jobOfferId}`;
+  }
 
   /**
    * Tells the employer a worker applied. Notification only — the decision is
@@ -37,8 +50,20 @@ export class BotNotificationService {
    * No longer arms the accept/refuse flow or queues an inbox entry: the approved
    * template carries a URL button instead of « Accepter » / « Refuser », so
    * there is nothing for a typed reply to drive.
+   *
+   * PACED per offer. This used to fire once per application with nothing in
+   * front of it, so an offer with twenty-five candidates sent the employer
+   * twenty-five billed templates in real time, each opening the same page. The
+   * message is a nudge, not the channel — its button lands on the offer, where
+   * every applicant is listed — so the first one within the window does the
+   * whole job. `matching.new_application_notify_cooldown_minutes` tunes it
+   * without a deploy, and `0` restores a message per application.
    */
   async sendNewApplicationToEmployer(applicationId: string): Promise<void> {
+    // Held outside the try so the catch can hand it back: a send that threw
+    // must not silence the offer for the rest of the window over a message
+    // nobody received.
+    let claimedKey: string | null = null;
     try {
       const app = await this.prisma.application.findUnique({
         where: { id: applicationId },
@@ -46,6 +71,7 @@ export class BotNotificationService {
           worker_id: true,
           job_offer: {
             select: {
+              id: true,
               title: true,
               scheduled_at: true,
               address: true,
@@ -67,6 +93,29 @@ export class BotNotificationService {
         },
       });
       if (!app?.job_offer?.employer?.phone || !app.worker) return;
+
+      // Claimed BEFORE the counting query below, so a paced-out application
+      // costs neither a message nor a round trip.
+      const cooldownMinutes =
+        await this.systemConfig.getNewApplicationNotifyCooldownMinutes();
+      if (cooldownMinutes > 0) {
+        const key = this.newApplicationCooldownKey(app.job_offer.id);
+        const claimed = await this.redis.set(
+          key,
+          '1',
+          'EX',
+          cooldownMinutes * 60,
+          'NX',
+        );
+        if (claimed === null) {
+          this.logger.debug(
+            `Employer already notified about offer ${app.job_offer.id} within ` +
+              `${cooldownMinutes}min — skipping notification for application ${applicationId}`,
+          );
+          return;
+        }
+        claimedKey = key;
+      }
 
       const completedCount = await this.prisma.application.count({
         where: { worker_id: app.worker_id, status: 'END' },
@@ -105,6 +154,12 @@ export class BotNotificationService {
         },
       );
     } catch (err) {
+      // Hand the window back. Keeping it would let one failed send suppress
+      // every later applicant on this offer for the rest of the cooldown, so a
+      // transient WhatsApp error would cost the employer news it never got.
+      if (claimedKey) {
+        await this.redis.del(claimedKey).catch(() => undefined);
+      }
       this.logger.warn(
         `Failed to send new application notification to employer: ${applicationId}`,
         err,

@@ -268,9 +268,7 @@ describe('ReminderProcessor', () => {
       const autoStartQuery = prisma.jobOffer.findMany.mock.calls[0][0] as {
         where: { employment_type: unknown };
       };
-      expect(autoStartQuery.where.employment_type).toBe(
-        EmploymentType.MISSION,
-      );
+      expect(autoStartQuery.where.employment_type).toBe(EmploymentType.MISSION);
     });
 
     it('stops recruiting on a staffed engagement past its deadline', async () => {
@@ -356,6 +354,24 @@ describe('ReminderProcessor', () => {
         expect.any(Object),
         'worker-b',
       );
+
+      // ONCE each, and never the duplicate. `notifyExpiredOffer` used to send
+      // every applicant `offerUnavailableWorker` from the same list the caller
+      // was already sending `offerExpiredApplicant` to, so each of them got two
+      // billed templates for one event.
+      const perWorker = (phone: string) =>
+        whatsApp.sendTemplateMessage.mock.calls.filter(
+          (call: unknown[]) => call[0] === phone,
+        );
+      expect(perWorker('+2222')).toHaveLength(1);
+      expect(perWorker('+3333')).toHaveLength(1);
+      // On the template key alone, not via toHaveBeenCalledWith: the old call
+      // passed three arguments where the surviving one passes four, so an
+      // arity-bound matcher would pass without proving anything.
+      const keysSent = whatsApp.sendTemplateMessage.mock.calls.map(
+        (call: unknown[]) => call[1],
+      );
+      expect(keysSent).not.toContain('offerUnavailableWorker');
     });
 
     it('does not cancel applications when there are no overdue empty offers', async () => {

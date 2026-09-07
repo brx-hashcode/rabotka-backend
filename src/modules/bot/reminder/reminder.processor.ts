@@ -675,12 +675,32 @@ export class ReminderProcessor {
       });
   }
 
+  /**
+   * Tells the EMPLOYER their offer expired, and arms the republish flow.
+   *
+   * It used to also loop the offer's applicants and send them
+   * `offerUnavailableWorker` — while the caller was already sending each of
+   * them `offerExpiredApplicant` from the same list, for the same event. Every
+   * pending applicant therefore got two billed templates saying the same
+   * thing: "the offer is no longer available" and "the offer expired, your
+   * application is closed". The second is the accurate one — it names the
+   * consequence, and the transaction above really does cancel the application
+   * — so the vaguer duplicate went.
+   *
+   * The duplicate was also conditional on something unrelated: the early
+   * return below means workers were only messaged when the EMPLOYER had a
+   * phone number. Notifying applicants belongs to the caller, which does it
+   * per worker and passes the worker id along for the delivery log.
+   *
+   * This leaves `offerUnavailableWorker` with no sender. Its registry entry
+   * and its approved Meta template stay put — an approved template costs
+   * nothing to keep, and deleting the entry would break the binding check.
+   */
   private async notifyExpiredOffer(offer: {
     id: string;
     title: string;
     employer_id: string;
     employer?: { phone?: string | null; first_name?: string | null } | null;
-    applications?: { worker: { phone: string | null } }[];
   }): Promise<void> {
     const phone = offer.employer?.phone;
     if (!phone) return;
@@ -748,24 +768,6 @@ export class ReminderProcessor {
           err,
         );
       }
-    }
-
-    // Notify pending workers that the offer is no longer available
-    const unavailableTpl = WHATSAPP_TEMPLATES.offerUnavailableWorker;
-    for (const app of offer.applications ?? []) {
-      if (!app.worker.phone) continue;
-      await this.whatsApp
-        .sendTemplateMessage(
-          app.worker.phone,
-          'offerUnavailableWorker',
-          { offerTitle: offer.title },
-        )
-        .catch((err) =>
-          this.logger.warn(
-            `Failed to notify pending worker of expired offer ${offer.id}`,
-            err,
-          ),
-        );
     }
   }
 
@@ -898,23 +900,19 @@ export class ReminderProcessor {
 
     const fees = await this.systemConfigService.getFees();
     const tpl = WHATSAPP_TEMPLATES.reminder24h;
-    await this.whatsApp.sendTemplateMessage(
-      app.worker.phone,
-      'reminder24h',
-      {
-        offerTitle: app.job_offer.title,
-        date: formatDate(app.job_offer.scheduled_at),
-        address: jobLocationLabel(app.job_offer),
-        amount: Number(app.job_offer.amount).toLocaleString('fr-FR'),
-        employerName: `${app.job_offer.employer.first_name} ${app.job_offer.employer.last_name}`,
-        employerPhone: app.job_offer.employer.phone,
-        cancellationThresholdHours: String(fees.cancellationThresholdHours),
-        penaltyFcfa: fees.lateCancellationPenaltyFcfa.toLocaleString('fr-FR'),
-        // URL suffix: the reminder deep-links to this exact mission rather than
-        // dropping the worker on a list to find it.
-        applicationId,
-      },
-    );
+    await this.whatsApp.sendTemplateMessage(app.worker.phone, 'reminder24h', {
+      offerTitle: app.job_offer.title,
+      date: formatDate(app.job_offer.scheduled_at),
+      address: jobLocationLabel(app.job_offer),
+      amount: Number(app.job_offer.amount).toLocaleString('fr-FR'),
+      employerName: `${app.job_offer.employer.first_name} ${app.job_offer.employer.last_name}`,
+      employerPhone: app.job_offer.employer.phone,
+      cancellationThresholdHours: String(fees.cancellationThresholdHours),
+      penaltyFcfa: fees.lateCancellationPenaltyFcfa.toLocaleString('fr-FR'),
+      // URL suffix: the reminder deep-links to this exact mission rather than
+      // dropping the worker on a list to find it.
+      applicationId,
+    });
 
     // Set bot state so the worker's reply (1=cancel, 2=keep) routes to the cancel flow.
     const workerStateKey = `${BOT_STATE_KEY_PREFIX}${app.worker_id}`;

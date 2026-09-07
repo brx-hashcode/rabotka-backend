@@ -346,6 +346,15 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     label: 'Délai minimum entre deux notifications de recommandation (minutes)',
     isSecret: false,
   },
+  {
+    key: 'matching.new_application_notify_cooldown_minutes',
+    value: '30',
+    category: ConfigCategory.MATCHING,
+    label:
+      'Délai minimum entre deux notifications de candidature pour une même ' +
+      'offre (minutes, 0 = notifier à chaque candidature)',
+    isSecret: false,
+  },
 
   // ── GENERAL ───────────────────────────────────────────────────────────────
   {
