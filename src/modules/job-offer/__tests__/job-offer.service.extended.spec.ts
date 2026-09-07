@@ -16,6 +16,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { EmploymentType, JobOfferStatus, PaymentFlow } from '@prisma/client';
 import { MatchingService } from '../../matching/matching.service';
 import { REDIS_CONNECTION } from '../../../common/services/redis/redis.constants';
+import { InteractionEventService } from '../../recommendation-engine/interaction-event.service';
 import { JobNotificationProcessor } from '../notification/job-notification.processor';
 
 const EMPLOYER_ID = 'employer-uuid-1';
@@ -139,6 +140,10 @@ describe('JobOfferService (extended)', () => {
           // JSON file, so a mock would only weaken the location assertions.
           provide: GeoService,
           useValue: new GeoService(),
+        },
+        {
+          provide: InteractionEventService,
+          useValue: { record: jest.fn().mockResolvedValue(undefined) },
         },
       ],
     }).compile();
