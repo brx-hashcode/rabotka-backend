@@ -233,10 +233,11 @@ jobs:
           VAULT_SECRET=$(echo "$SECRET_RESPONSE" | jq -r '.data.data')
 
           cat > /tmp/deploy.env << EOF
-          # DO NOT use backticks or $(...) in the comments below.
+          # DO NOT use backticks or dollar-parenthesis in the comments below.
           #
           # This heredoc is UNQUOTED (<< EOF), because the Vault values under it
-          # need $(...) expansion. That expansion applies to comment lines too:
+          # need command substitution. That expansion applies to comment lines
+          # too:
           # anything in backticks is EXECUTED. Most of it merely printed
           # "command not found" to stderr for months, but a comment saying
           # "docker stats" ran it for real — and with no --no-stream it streams
