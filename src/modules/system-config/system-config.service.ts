@@ -590,6 +590,32 @@ export class SystemConfigService implements OnModuleInit {
     return Number.isNaN(n) || n < 0 ? 60 : n;
   }
 
+  /**
+   * Minimum minutes between two "someone applied" notifications for the SAME
+   * offer.
+   *
+   * Without it a popular offer sends the employer one billed template per
+   * applicant, in real time — twenty-five candidates, twenty-five messages,
+   * all pointing at the same page. The notification is a nudge, not the
+   * channel: its button opens the offer, where every applicant is listed. So
+   * pacing it costs the employer nothing they cannot see one tap later.
+   *
+   * `0` disables the pacing and restores a message per application, which is
+   * the escape hatch if this ever proves too quiet.
+   *
+   * Filed under MATCHING because that is where the sibling recommendation
+   * cooldown lives and where an operator looks for notification pacing — the
+   * category enum has no better home, and adding one costs a migration.
+   */
+  async getNewApplicationNotifyCooldownMinutes(): Promise<number> {
+    const val = await this.get(
+      'matching.new_application_notify_cooldown_minutes',
+      '30',
+    );
+    const n = Number.parseInt(val, 10);
+    return Number.isNaN(n) || n < 0 ? 30 : n;
+  }
+
   async getContactInfo() {
     const [email, phone, address] = await this.mgetBatch([
       { key: 'contact.email', fallback: 'contact@rabotka.com' },
