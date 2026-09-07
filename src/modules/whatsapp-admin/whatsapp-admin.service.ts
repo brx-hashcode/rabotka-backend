@@ -1,5 +1,6 @@
 import {
   Injectable,
+  InternalServerErrorException,
   Logger,
   ServiceUnavailableException,
 } from '@nestjs/common';
@@ -36,6 +37,11 @@ import {
   parseWhatsappConfig,
   type WhatsappConfig,
 } from '../whatsapp/whatsapp.config';
+import { launchBrowser } from '../../common/utils/puppeteer';
+import {
+  buildBillingReportFilename,
+  buildBillingReportHtml,
+} from './whatsapp-billing-report';
 
 /**
  * Read model for the WhatsApp back office.
@@ -520,13 +526,7 @@ export class WhatsappAdminService {
       );
     }
 
-    const to = params.created_to ? new Date(params.created_to) : new Date();
-    const from = params.created_from
-      ? new Date(params.created_from)
-      : daysAgo(30);
-
-    const earliest = daysAgo(META_LOOKBACK_DAYS);
-    const start = from < earliest ? earliest : from;
+    const { start, end: to } = resolveBillingWindow(params);
 
     const config = this.whatsappConfig;
 
@@ -605,6 +605,104 @@ export class WhatsappAdminService {
         // check it against.
         fx: null,
       };
+    }
+  }
+
+  /**
+   * The same window, as a PDF to keep.
+   *
+   * Goes through `billingForAdmin` rather than calling Graph again, so it reads
+   * the same 15-minute cache the tab does: pressing Download right after
+   * looking at the page cannot produce a document that disagrees with what is
+   * on screen, and it costs nothing against a rate-limited upstream.
+   *
+   * `unavailable` is the one case that becomes a 503 instead of a document.
+   * Everywhere else that field is deliberately data — the tab has local
+   * delivery stats worth showing beside a Graph outage — but a report is only
+   * its Meta figures, and rendering an empty one would hand the reader a file
+   * that looks like a month of zero traffic.
+   */
+  async billingReportPdf(params: {
+    created_from?: string;
+    created_to?: string;
+  }): Promise<{ buffer: Buffer; filename: string }> {
+    const data = await this.billingForAdmin(params);
+
+    if (data.unavailable) {
+      throw new ServiceUnavailableException(
+        `Consumption figures could not be read from Meta, so no report can be produced: ${data.unavailable}`,
+      );
+    }
+
+    const { start, end, clamped } = resolveBillingWindow(params);
+
+    const html = buildBillingReportHtml({
+      from: start,
+      to: end,
+      clampedToLookback: clamped,
+      currency: data.currency,
+      pricing: data.pricing,
+      fx: data.fx,
+      costUnavailableReason: data.costUnavailableReason,
+      generatedAt: new Date(),
+    });
+
+    return {
+      buffer: await this.renderHtmlToPdf(html),
+      filename: buildBillingReportFilename(start, end),
+    };
+  }
+
+  /**
+   * Mirrors ResumeService.renderHtmlToPdf — same launcher, same failure mode.
+   *
+   * It differs in one place, and for a reason the CV does not have: a CV is one
+   * fixed page, while a six-month window here runs to several. So this one
+   * prints a running footer with page numbers, in the CV's own uppercase
+   * lettering, and hands Puppeteer explicit margins to reserve room for it.
+   */
+  private async renderHtmlToPdf(html: string): Promise<Buffer> {
+    try {
+      const browser = await launchBrowser();
+      try {
+        const page = await browser.newPage();
+        // `setContent` performs no navigation, so 'networkidle0' would never
+        // settle; 'load' waits for the subresources this page actually has —
+        // here, the Google Fonts stylesheet the CV also pulls.
+        await page.setContent(html, { waitUntil: 'load' });
+        const pdf = await page.pdf({
+          format: 'A4',
+          printBackground: true,
+          displayHeaderFooter: true,
+          headerTemplate: '<span></span>',
+          footerTemplate: `
+            <div style="width:100%; padding:0 15mm; display:flex; justify-content:space-between;
+                        font-family:'Space Grotesk','Helvetica Neue',Arial,sans-serif;
+                        font-size:7px; font-weight:500; letter-spacing:0.16em;
+                        text-transform:uppercase; color:#9AA49E;">
+              <span>Rabotka&nbsp;&nbsp;·&nbsp;&nbsp;Consommation WhatsApp</span>
+              <span>P&nbsp;|&nbsp;<span class="pageNumber"></span>&nbsp;/&nbsp;<span class="totalPages"></span></span>
+            </div>`,
+          margin: {
+            top: '16mm',
+            right: '15mm',
+            bottom: '18mm',
+            left: '15mm',
+          },
+        });
+        return Buffer.from(pdf);
+      } finally {
+        await browser.close();
+      }
+    } catch (err) {
+      // The client sees only the generic message, so without this line the real
+      // cause — missing Chromium, launch failure, render timeout — is lost and
+      // the 500 is undiagnosable.
+      this.logger.error(
+        'WhatsApp consumption PDF generation failed',
+        err instanceof Error ? err.stack : String(err),
+      );
+      throw new InternalServerErrorException('PDF generation unavailable');
     }
   }
 
@@ -695,6 +793,30 @@ function dateRange(from?: string, to?: string): Prisma.DateTimeFilter | null {
 
 function daysAgo(days: number): Date {
   return new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+}
+
+/**
+ * The window a consumption request actually covers.
+ *
+ * Shared by the JSON endpoint and the PDF rather than computed twice: the PDF
+ * prints the window in its header, and a report whose title disagrees with its
+ * own figures is worse than one with no title. `clamped` is the case that makes
+ * this matter — ask for two years and Meta only has one, so the report has to
+ * say which year it is showing.
+ */
+export function resolveBillingWindow(params: {
+  created_from?: string;
+  created_to?: string;
+}): { start: Date; end: Date; clamped: boolean } {
+  const end = params.created_to ? new Date(params.created_to) : new Date();
+  const from = params.created_from
+    ? new Date(params.created_from)
+    : daysAgo(30);
+
+  const earliest = daysAgo(META_LOOKBACK_DAYS);
+  const clamped = from < earliest;
+
+  return { start: clamped ? earliest : from, end, clamped };
 }
 
 function fullName(
