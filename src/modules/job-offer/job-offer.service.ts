@@ -57,6 +57,13 @@ import {
   RejectionSource,
 } from '@prisma/client';
 import { GeoService } from '../geo/geo.service';
+import { InteractionEventService } from '../recommendation-engine/interaction-event.service';
+import {
+  InteractionActor,
+  InteractionKind,
+  InteractionObject,
+  InteractionSource,
+} from '@prisma/client';
 
 const REFERENCE_MAX_ATTEMPTS = 5;
 
@@ -344,6 +351,7 @@ export class JobOfferService {
     private readonly cache: AdminCacheService,
     private readonly geo: GeoService,
     private readonly jobNotification: JobNotificationProcessor,
+    private readonly interactionEvents: InteractionEventService,
   ) {}
 
   /**
@@ -518,6 +526,29 @@ export class JobOfferService {
           err instanceof Error ? err.message : String(err),
         ),
       );
+
+    // What this employer actually hires for, in their own actions.
+    //
+    // Until now their category affinity could only come from the categories
+    // they ticked once at signup: the ranker reads `interaction_events` and
+    // publishing emitted none, so an employer who signed up under one trade and
+    // then posted thirty offers in another was still ranked on the first.
+    // Carries `category_id`, which is the whole point — `deriveFeatures` folds
+    // it straight into `categoryAffinity`, decayed by age like every other
+    // signal, so a change of trade shows up on its own.
+    //
+    // Fire-and-forget, like every other `record` call: a ranking signal must
+    // never be able to fail a publish.
+    void this.interactionEvents.record({
+      actorId: employerId,
+      actorType: InteractionActor.EMPLOYER,
+      kind: InteractionKind.PUBLISH,
+      objectType: InteractionObject.JOB_OFFER,
+      objectId: offer.id,
+      categoryId: offer.category_id,
+      source: InteractionSource.SERVER,
+      surface: 'job_offer_create',
+    });
 
     // Queued rather than chained onto the index above, so an indexing failure
     // no longer takes the notification down with it and the fan-out survives a
