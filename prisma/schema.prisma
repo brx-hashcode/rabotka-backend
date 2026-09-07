@@ -327,6 +327,10 @@ enum InteractionKind {
   SEARCH_CLICK
   SAVE
   UNSAVE
+  // An employer publishing an offer. Their most deliberate statement of which
+  // sector they hire in — repeated, and costly to make — where the categories
+  // ticked once at signup are neither.
+  PUBLISH
   // Commitment
   APPLY
   APPLY_CANCEL
