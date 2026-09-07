@@ -35,6 +35,11 @@ export const INTERACTION_WEIGHTS: Record<InteractionKind, number> = {
   SEARCH_CLICK: 0.7,
   SAVE: 0.8,
   UNSAVE: -0.4,
+  // Above SAVE, below APPLY. Publishing costs the employer real effort and
+  // names a category outright, so it says more than bookmarking; but it is a
+  // statement of intent rather than a commitment to a particular counterparty,
+  // which is what the 1.0 band is for.
+  PUBLISH: 0.9,
   // Commitment
   APPLY: 1.0,
   APPLY_CANCEL: -0.6,
