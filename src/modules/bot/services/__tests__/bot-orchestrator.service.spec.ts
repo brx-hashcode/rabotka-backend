@@ -594,7 +594,12 @@ describe('BotOrchestratorService', () => {
       );
 
       expect(deps.vova.handle).toHaveBeenCalledTimes(1);
-      expect(result).toEqual(['réponse de Vova']);
+      // The card now FOLLOWS the answer instead of only replacing it: the
+      // prompt used to close with « tapez */start* », so the door was already
+      // offered on every reply — it is now a button at the same frequency.
+      expect(result[0]).toBe('réponse de Vova');
+      expect(result).toHaveLength(2);
+      expect(result[1]).toContain('openApp');
     });
 
     it('falls back to the door card when the assistant declines', async () => {
@@ -692,7 +697,12 @@ describe('BotOrchestratorService', () => {
         const result = await service.handle(PROFILE_ID, PHONE, input);
 
         expect(deps.vova.handle).toHaveBeenCalledTimes(1);
-        expect(result).toEqual(['réponse de Vova']);
+        // The answer, then the door. The card follows the assistant rather
+        // than replacing it — the prompt used to close with « tapez */start* »,
+        // so the door was already offered on every reply.
+        expect(result[0]).toBe('réponse de Vova');
+        expect(result).toHaveLength(2);
+        expect(result[1]).toContain('openApp');
         expect(activationWrites()).toHaveLength(0);
       },
     );
@@ -737,7 +747,12 @@ describe('BotOrchestratorService', () => {
       );
 
       expect(deps.vova.handle).toHaveBeenCalledTimes(1);
-      expect(result).toEqual(['réponse de Vova']);
+      // The card now FOLLOWS the answer instead of only replacing it: the
+      // prompt used to close with « tapez */start* », so the door was already
+      // offered on every reply — it is now a button at the same frequency.
+      expect(result[0]).toBe('réponse de Vova');
+      expect(result).toHaveLength(2);
+      expect(result[1]).toContain('openApp');
       expect(activationWrites()).toHaveLength(0);
     });
 

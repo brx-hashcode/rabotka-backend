@@ -118,11 +118,13 @@ export const REFUSALS: Record<RefusalId, string> = {
 
   // `support` is a bot command, and the bot only answers commands for numbers
   // it recognises — so telling a stranger to type it would send them nowhere.
-  // The one thing that does work for them is the one thing offered.
+  // The one thing that does work for them is the one thing offered — and it is
+  // now offered as the BUTTON the bot staples under this reply, not as a word
+  // to type. Naming the command here as well would contradict the card.
   rien_trouve_anonyme:
     "Je n'ai pas la réponse à cette question, et je préfère vous le dire plutôt " +
-    "que d'inventer. Vous pouvez me demander comment fonctionne Rabotka, ou taper " +
-    '*/compte* pour créer votre compte.',
+    "que d'inventer. Vous pouvez me demander comment fonctionne Rabotka, ou " +
+    'ouvrir votre compte ci-dessous.',
 
   // Assumé, pas esquivé. « Tu es un robot ? » mérite un oui franc : une IA qui
   // tourne autour du pot pour éviter de le dire met la personne mal à l'aise
