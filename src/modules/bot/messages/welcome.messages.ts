@@ -37,8 +37,20 @@ const APP_URL = 'https://rabotka.work/login?redirect=/home';
  *
  * The in-chat menu is gone: offers, applications and missions all live in the
  * app, so every message gets the same doorway back to it.
+ *
+ * EVERY path that sends this card must come through here. `vova.service` had
+ * its own `card()` calling `templateReply('welcomePlatform', …)` directly, so
+ * the assistant's replies kept going out as the MARKETING template — billed —
+ * while the rest of the bot had moved to the free-form version. Exactly the
+ * failure `welcomeUnregisteredMessage` below already records, one card later.
+ *
+ * @param destination where the button lands. Defaults to the app home; the
+ *   assistant passes the place the person actually asked about, so the card
+ *   opens there instead of making them navigate again.
  */
-export function welcomePlatformMessage(): string {
+export function welcomePlatformMessage(
+  destination: string = WELCOME_PATH,
+): string {
   const { variables } = WHATSAPP_TEMPLATES.welcomePlatform;
 
   return ctaReply({
@@ -50,10 +62,10 @@ export function welcomePlatformMessage(): string {
     buttonText: 'Ouvrir l’application',
     // A path, not a URL: the outbound worker mints the one-tap `/s/<code>`
     // link, exactly as it does for the template's button.
-    path: WELCOME_PATH,
+    path: destination,
     imageUrl: coverImageUrl(),
     fallbackTemplate: 'welcomePlatform',
-    fallbackVariables: variables(WELCOME_PATH),
+    fallbackVariables: variables(destination),
   });
 }
 
