@@ -299,7 +299,11 @@ describe('VovaService.handleAnonymous', () => {
 
     expect(
       await service.handleAnonymous('+242060000001', 'c’est quoi Rabotka ?'),
-    ).toEqual({ text: 'Rabotka met en relation…', offerAccount: false });
+      // `offerAccount` is true on every real answer now: a stranger's only next
+      // step is creating an account, and the bot staples the card that does it.
+      // The prompt used to end each reply with « Tapez */compte* » — same
+      // frequency, one tap instead of a typed command.
+    ).toEqual({ text: 'Rabotka met en relation…', offerAccount: true });
   });
 
   it('stays silent when only the master switch is on', async () => {
@@ -372,6 +376,24 @@ describe('VovaService.handleAnonymous', () => {
     ).toBeNull();
   });
 
+  // THE guard against noise. Every real answer now carries the signup card, so
+  // the one reply that must NOT is the one that hands the turn back: a greeting
+  // ends with « vous cherchez une mission, ou quelqu'un ? », and stapling a card
+  // to it answers a question the person has not been asked yet.
+  //
+  // This is the assertion that will rot silently if the card ever becomes
+  // unconditional — nothing else in the suite would fail.
+  it('does not offer the card on a bare greeting', async () => {
+    const agent = makeAgent();
+    const service = build(agent, ON);
+
+    const reply = await service.handleAnonymous('+242060000001', 'bonjour');
+
+    expect(reply?.offerAccount).toBe(false);
+    // And it never reached the model: the greeting is answered from a constant.
+    expect(agent.handleAnonymous).not.toHaveBeenCalled();
+  });
+
   it('never returns an app card — a stranger has nothing to open', async () => {
     const service = build(makeAgent('Voici comment ça marche.'), ON);
     const reply = await service.handleAnonymous(
@@ -380,9 +402,12 @@ describe('VovaService.handleAnonymous', () => {
     );
 
     // The card, when one is warranted, is the caller's to append — this
-    // service only says whether it is.
+    // service only says whether it is. That first assertion is the invariant
+    // the test is named for and still holds; the flag now says YES, because a
+    // stranger's only next step is creating an account and the card carries
+    // the button that does it. The prompt no longer asks them to type a word.
     expect(reply?.text).not.toContain('[TPL:');
-    expect(reply?.offerAccount).toBe(false);
+    expect(reply?.offerAccount).toBe(true);
   });
 });
 
