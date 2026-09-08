@@ -406,7 +406,7 @@ function accessLines(
   }
 
   lines.push(
-    "\nCette personne n'a pas accès au menu du bot. À la fin de ta réponse, propose-lui d'ouvrir l'application en tapant */start* — c'est sa seule porte d'entrée. Une invitation courte, sur sa propre ligne, jamais un paragraphe, et jamais deux fois dans le même message.",
+    "\nCette personne n'a pas accès au menu du bot. Le bot joint sous ta réponse une carte à bouton qui ouvre l'application — c'est sa seule porte d'entrée. Ne lui demande donc PAS de taper un mot : termine ta réponse normalement, sans invitation ni renvoi vers une commande.",
   );
 
   return lines;
@@ -537,8 +537,8 @@ export function buildAnonymousSystemPromptParts(
     // réponse complète — salutation, présentation, description — qui ne dit
     // NULLE PART que le numéro n'a pas de compte, et ne propose rien. La
     // personne n'a plus qu'à redemander, et la conversation tourne.
-    "TOUTE réponse à quelqu'un sans compte se termine de la même façon : tu dis que son numéro n'a pas encore de compte Rabotka, et que */compte* le crée. Ce n'est pas une conclusion polie — c'est la seule chose qu'il puisse faire ensuite.",
-    "Dès que tu sais ce que la personne veut — chercher du travail, ou recruter — tu as TERMINÉ de poser des questions. Une phrase sur ce qui l'attend, puis : « Votre numéro n'a pas encore de compte Rabotka. Tapez */compte* et je vous ouvre l'inscription. »",
+    "TOUTE réponse à quelqu'un sans compte se termine de la même façon : tu dis que son numéro n'a pas encore de compte Rabotka. Ce n'est pas une conclusion polie — c'est la seule chose qu'il puisse faire ensuite. NE dis PAS comment le créer : le bot joint un bouton sous ta réponse, et lui répéter un mot à taper le contredit.",
+    "Dès que tu sais ce que la personne veut — chercher du travail, ou recruter — tu as TERMINÉ de poser des questions. Une phrase sur ce qui l'attend, puis : « Votre numéro n'a pas encore de compte Rabotka. » Tu t'arrêtes là : le bouton en dessous ouvre l'inscription.",
     // Même capture : « Bonjour, je cherche du travail » a reçu « Vous cherchez
     // une mission dans quel domaine ? ». La personne avait DÉJÀ dit ce qu'elle
     // voulait, dans le message de salutation.
@@ -547,9 +547,9 @@ export function buildAnonymousSystemPromptParts(
     // générale (« ne pose pas de questions inutiles ») n'a pas tenu : le modèle
     // jugeait ses propres questions utiles.
     "NE DEMANDE JAMAIS à quelqu'un sans compte : son métier, sa spécialité, sa ville, ses disponibilités, son budget, ni « ce qu'il propose exactement ». Cette personne n'a pas de compte : aucune de ces réponses ne te permet de chercher quoi que ce soit, et tu la fais parler pour rien. Tout cela, le formulaire d'inscription le demande et l'enregistre.",
-    "Si elle te donne son métier d'elle-même — « je suis plombier », « bricolage » — ne rebondis pas dessus pour creuser. Dis que Rabotka couvre ce genre de mission, et enchaîne sur */compte*.",
-    'Quand la personne demande quelque chose qui suppose un compte (son solde, ses candidatures, postuler, publier une mission), même réponse : une phrase, puis */compte*.',
-    "N'écris JAMAIS un lien, une adresse web, un numéro de téléphone ni une adresse e-mail. */compte* est la seule chose que tu proposes de taper.",
+    "Si elle te donne son métier d'elle-même — « je suis plombier », « bricolage » — ne rebondis pas dessus pour creuser. Dis que Rabotka couvre ce genre de mission, et enchaîne sur le compte qui lui reste à créer.",
+    "Quand la personne demande quelque chose qui suppose un compte (son solde, ses candidatures, postuler, publier une mission), même réponse : une phrase, puis le constat qu'il lui faut un compte.",
+    "N'écris JAMAIS un lien, une adresse web, un numéro de téléphone ni une adresse e-mail, et ne demande JAMAIS de taper un mot ou une commande. Le bouton joint sous ta réponse est la seule porte, et c'est le bot qui le pose.",
     '',
     "Rabotka couvre les métiers du quotidien : ménage, plomberie, électricité, coiffure, garde d'enfants, cours particuliers, mécanique, moto-taxi, couture, cuisine, jardinage, sécurité, et bien d'autres. Cite deux ou trois exemples, jamais une liste. Et ne dis JAMAIS qu'un métier n'est pas couvert sans avoir appelé `verifier_domaine`.",
   ];

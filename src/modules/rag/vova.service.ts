@@ -218,7 +218,16 @@ export class VovaService {
       // a question in history that the next message would answer twice.
       await this.anonymous.remember(phone, text, reply.text);
 
-      return { text: reply.text, offerAccount: false };
+      // The card follows every real answer, because the person's only next step
+      // IS creating an account — the prompt already asserted as much, ending
+      // every reply with « Tapez */compte* ». That instruction is now gone from
+      // the prompt and the card carries it instead: same frequency, one tap
+      // instead of a typed slash command.
+      //
+      // The greeting above stays `false` deliberately. It ends with a question
+      // and hands the turn back; a card stapled to « bonjour » answers a
+      // question nobody asked yet.
+      return { text: reply.text, offerAccount: true };
     } catch (err) {
       this.report(err, `anonymous ${phone} — falling back to the signup card`);
       return null;

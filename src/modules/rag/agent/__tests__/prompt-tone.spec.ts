@@ -180,12 +180,21 @@ describe('l’invitation à ouvrir l’application', () => {
     ],
   ];
 
-  it.each(walled)('propose /start à un compte %s', (_label, account, verif) => {
-    expect(promptWith(account, verif)).toContain('*/start*');
-  });
+  // La porte est la même, sa forme a changé : le bot joint désormais une carte
+  // à bouton sous la réponse, au lieu que le modèle demande de taper un mot.
+  // Ce que le prompt doit encore faire, c'est l'ANNONCER au modèle — sans quoi
+  // il improvise une invitation qui contredit le bouton.
+  it.each(walled)(
+    'annonce la carte à bouton pour un compte %s',
+    (_label, account, verif) => {
+      const prompt = promptWith(account, verif);
+      expect(prompt).toContain('carte à bouton');
+      // Et surtout : il ne doit plus réclamer de frappe.
+      expect(prompt).not.toContain('*/start*');
+    },
+  );
 
-  // Un profil actif a déjà le menu complet et les cartes à boutons. Lui répéter
-  // /start à chaque réponse serait du bruit.
+  // Un profil actif a déjà le menu complet et les cartes à boutons.
   it('ne le propose pas à un compte actif et vérifié', () => {
     expect(
       promptWith(AccountStatus.ACTIVE, VerificationStatus.VERIFIED),
