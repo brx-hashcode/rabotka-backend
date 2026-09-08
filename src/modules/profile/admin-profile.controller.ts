@@ -815,7 +815,7 @@ export class AdminProfileController {
       });
 
       this.whatsApp
-        .sendTemplateMessage(result.phone, 'kyc', result.firstName)
+        .sendTemplateMessage(result.phone, 'kyc', result.firstName, id)
         .catch((err) =>
           console.warn(
             `Failed to send KYC validated WhatsApp message for ${id}:`,
@@ -841,11 +841,16 @@ export class AdminProfileController {
         .catch(() => null);
 
       this.whatsApp
-        .sendTemplateMessage(result.phone, 'kycRejected', {
-          firstName: result.firstName,
-          reason: dto.reason,
-          loginCode,
-        })
+        .sendTemplateMessage(
+          result.phone,
+          'kycRejected',
+          {
+            firstName: result.firstName,
+            reason: dto.reason,
+            loginCode,
+          },
+          id,
+        )
         .catch((err) =>
           console.warn(
             `Failed to send KYC rejected WhatsApp message for ${id}:`,

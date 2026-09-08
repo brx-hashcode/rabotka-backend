@@ -139,6 +139,7 @@ describe('ProfileController', () => {
         dto.phone,
         'profileCreatedWorker',
         dto.firstName,
+        expect.any(String),
       );
     });
 
