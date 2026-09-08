@@ -232,7 +232,13 @@ export class BotOrchestratorService {
     // app. `/support` is already handled above, in every account state.
     if (profile.status === AccountStatus.SUSPENDED) {
       const vovaReply = await this.vovaReplyOrNull(profile, text);
-      if (vovaReply) return vovaReply;
+      // The card FOLLOWS the answer rather than replacing it. The prompt used
+      // to make the model close with « tapez */start* », so the door was
+      // already offered on every reply — this offers the same door as a button
+      // instead of a word to type, at the same frequency.
+      if (vovaReply) {
+        return [...vovaReply, this.openAppCard(profile.first_name)];
+      }
       return [this.openAppCard(profile.first_name)];
     }
 
@@ -299,11 +305,15 @@ export class BotOrchestratorService {
     // and free text is what the assistant is for.
     if (profile.verification_status !== VerificationStatus.VERIFIED) {
       const vovaReply = await this.vovaReplyOrNull(profile, text);
-      if (vovaReply) return vovaReply;
 
-      // The same door for both. Which wall they are behind, and why, is the
-      // assistant's to say — it has the status and the admin's own words. This
-      // card only has to open the app.
+      // The same door for both, and it now rides WITH the assistant's answer
+      // rather than only instead of it. Which wall they are behind, and why, is
+      // the assistant's to say — it has the status and the admin's own words.
+      // This card only has to open the app, and it does so in one tap instead
+      // of asking for a typed command.
+      if (vovaReply) {
+        return [...vovaReply, this.openAppCard(profile.first_name)];
+      }
       return [this.openAppCard(profile.first_name)];
     }
 
