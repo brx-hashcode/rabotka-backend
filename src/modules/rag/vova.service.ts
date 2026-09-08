@@ -15,13 +15,12 @@ import {
 } from './agent/offer';
 import { VovaOfferStore } from './agent/offer.store';
 import { VovaAnonymousStore } from './agent/anonymous.store';
-import { templateReply } from '../../common/constants/whatsapp-carousel';
-import { WHATSAPP_TEMPLATES } from '../../common/constants/whatsapp-templates';
 import { withTimeout } from './llm/llm.service';
 import { Deadline } from './llm/deadline';
 import { isWalled } from './agent/prompts';
 import { VOVA_CONFIG_KEYS } from './vova.constants';
 import { refusal } from './agent/refusals';
+import { welcomePlatformMessage } from '../bot/messages/welcome.messages';
 
 /**
  * What the assistant said to a stranger, and whether the signup card follows.
@@ -105,11 +104,18 @@ export class VovaService {
     this.logger.error(`Vova failed for ${who}`, err);
   }
 
+  /**
+   * The doorway card, free-form.
+   *
+   * Delegates rather than building its own reply: this used to call
+   * `templateReply('welcomePlatform', …)`, which sends the approved MARKETING
+   * template. Meta bills MARKETING wherever it lands — the WABA's own figures
+   * carry a `MARKETING / REGULAR` line and no free one — so every assistant
+   * reply that offered to open the app was charged, months after the rest of
+   * the bot had moved to the free-form card.
+   */
   private card(destination: string): string {
-    return templateReply(
-      'welcomePlatform',
-      WHATSAPP_TEMPLATES.welcomePlatform.variables(destination),
-    );
+    return welcomePlatformMessage(destination);
   }
 
   /**
