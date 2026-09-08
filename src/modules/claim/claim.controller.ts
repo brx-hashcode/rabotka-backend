@@ -100,7 +100,11 @@ export class ClaimController {
     @Body() dto: UpdateClaimDto,
     @Req() req: AdminAuthenticatedRequest,
   ) {
-    const result = await this.claimService.updateForAdmin(id, dto);
+    const result = await this.claimService.updateForAdmin(
+      id,
+      dto,
+      req.user.userId,
+    );
     await this.logService.create({
       action: 'CLAIM_UPDATED',
       entityType: 'Claim',

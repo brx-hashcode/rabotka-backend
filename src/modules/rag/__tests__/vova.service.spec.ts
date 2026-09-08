@@ -246,7 +246,13 @@ describe('the app card', () => {
     const replies = await build(makeAgent(), live).handle(PROFILE, text);
 
     expect(replies).toHaveLength(2);
-    expect(replies?.[1]).toContain('[TPL:welcomePlatform]');
+    // Free-form, NOT the approved template. Meta bills MARKETING wherever it
+    // lands, and this card is always a reply — so inside the 24h window, where
+    // a free-form message costs nothing. The template stays as the fallback
+    // for a job that drains after the window has shut.
+    expect(replies?.[1]).toContain('[CTA:]');
+    expect(replies?.[1]).not.toContain('[TPL:');
+    expect(replies?.[1]).toContain('"fallbackTemplate":"welcomePlatform"');
   });
 
   it('is sent on a bare « oui » after an offer, with no model call', async () => {
