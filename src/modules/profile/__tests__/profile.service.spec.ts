@@ -558,6 +558,9 @@ describe('ProfileService', () => {
           NEW,
           'otp',
           expect.stringMatching(/^\d{6}$/),
+          // The profile id now rides along so the code lands in the
+          // conversation history rather than only in the delivery log.
+          'p-1',
         );
       });
 

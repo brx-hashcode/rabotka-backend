@@ -18,6 +18,7 @@ const mockWhatsApp = {
   sendMediaMessage: jest.fn().mockResolvedValue('SM-sid-456'),
   sendTemplateMessage: jest.fn().mockResolvedValue('SM-sid-789'),
   sendTemplateMessageWithVariables: jest.fn().mockResolvedValue('SM-sid-789'),
+  sendInteractiveCta: jest.fn().mockResolvedValue(true),
   showTyping: jest.fn().mockResolvedValue(undefined),
   saveMessage: jest.fn().mockResolvedValue(undefined),
 };
@@ -603,6 +604,80 @@ describe('WhatsAppOutboundProcessor', () => {
       });
 
       expect(mockLoginLink.shortLink).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('processCta()', () => {
+    const cta = {
+      body: '*Rabotka*',
+      buttonText: 'Ouvrir',
+      path: 'home',
+      imageUrl: 'https://img/cover.jpg',
+      fallbackTemplate: 'welcomePlatform' as const,
+      fallbackVariables: { '1': 'home' },
+    };
+
+    // The URL is minted at SEND time, through the same shortLink the template
+    // buttons use. A link baked in when the reply was composed would be stale
+    // by the time the job drains.
+    it('mints a one-tap link and sends free-form', async () => {
+      mockLoginLink.shortLink.mockResolvedValue('https://rabotka.work/s/CODE');
+
+      await processor.process({
+        data: { type: 'cta', phone: '+242001', profileId: 'p1', cta },
+      });
+
+      expect(mockLoginLink.shortLink).toHaveBeenCalledWith('p1', 'home');
+      expect(mockWhatsApp.sendInteractiveCta).toHaveBeenCalledWith(
+        '+242001',
+        expect.objectContaining({
+          url: 'https://rabotka.work/s/CODE',
+          buttonText: 'Ouvrir',
+          imageUrl: 'https://img/cover.jpg',
+        }),
+      );
+      expect(
+        mockWhatsApp.sendTemplateMessageWithVariables,
+      ).not.toHaveBeenCalled();
+    });
+
+    // No profile, no code — the unregistered card has no account to mint
+    // against, so it must still reach the bare path rather than nothing.
+    it('falls back to the plain frontend URL without a profile', async () => {
+      await processor.process({
+        data: { type: 'cta', phone: '+242001', cta },
+      });
+
+      expect(mockLoginLink.shortLink).not.toHaveBeenCalled();
+      expect(mockWhatsApp.sendInteractiveCta).toHaveBeenCalledWith(
+        '+242001',
+        expect.objectContaining({ url: 'https://rabotka.work/home' }),
+      );
+    });
+
+    // The window can shut between composing the reply and draining the job.
+    it('sends the fallback template when the free-form send fails', async () => {
+      mockWhatsApp.sendInteractiveCta.mockResolvedValueOnce(false);
+
+      await processor.process({
+        data: { type: 'cta', phone: '+242001', profileId: 'p1', cta },
+      });
+
+      expect(
+        mockWhatsApp.sendTemplateMessageWithVariables,
+      ).toHaveBeenCalledWith('+242001', 'welcomePlatform', expect.any(Object));
+    });
+
+    it('falls back on a thrown error too, not just a refusal', async () => {
+      mockWhatsApp.sendInteractiveCta.mockRejectedValueOnce(
+        new Error('131047 outside window'),
+      );
+
+      await processor.process({
+        data: { type: 'cta', phone: '+242001', profileId: 'p1', cta },
+      });
+
+      expect(mockWhatsApp.sendTemplateMessageWithVariables).toHaveBeenCalled();
     });
   });
 });

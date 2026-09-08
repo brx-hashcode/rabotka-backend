@@ -22,6 +22,7 @@ import type {
 } from './whatsapp-outbound.processor';
 import { SendTimingService } from './telemetry/send-timing.service';
 import { isTemplateKey } from '../../common/constants/whatsapp-templates';
+import type { CtaReply } from '../../common/constants/whatsapp-carousel';
 
 export type WhatsAppInboundJobData = {
   phone: string;
@@ -178,9 +179,36 @@ export class WhatsAppInboundProcessor implements OnApplicationBootstrap {
 }
 
 /** Drop the per-message recipient fields — the sequence job carries them once. */
+/**
+ * Decode a `[CTA:]` reply body, or null if it is unusable.
+ *
+ * Null rather than a throw, and dropped rather than enqueued: a malformed reply
+ * would fail the job and retry twice into the dead-letter queue for something
+ * that can never succeed. The fallback template is validated here because it is
+ * the escape hatch — a reply whose fallback does not exist would go out as
+ * free-form or not at all.
+ */
+function parseCtaReply(json: string): CtaReply | null {
+  const rest = json.trim();
+  if (!rest) return null;
+  let cta: CtaReply;
+  try {
+    cta = JSON.parse(rest) as CtaReply;
+  } catch {
+    return null;
+  }
+  if (!cta.body || !cta.buttonText || !isTemplateKey(cta.fallbackTemplate)) {
+    return null;
+  }
+  return cta;
+}
+
 function toSend(job: WhatsAppOutboundJobData): WhatsAppSend {
   if (job.type === 'media') {
     return { type: 'media', mediaUrl: job.mediaUrl, caption: job.caption };
+  }
+  if (job.type === 'cta') {
+    return { type: 'cta', cta: job.cta };
   }
   if (job.type === 'template') {
     // parseReplyToJob only ever produces the key-shaped variant; the legacy
@@ -212,6 +240,15 @@ function parseReplyToJob(
   const MEDIA_PREFIX = '[IMG:';
   const MEDIA_SUFFIX = ']';
   const TEMPLATE_PREFIX = '[TPL:';
+  const CTA_PREFIX = '[CTA:]';
+
+  // Free-form CTA send, encoded as `[CTA:]<json>`. Checked before the template
+  // prefix even though the two cannot collide, so the cheaper path reads first.
+  if (message.startsWith(CTA_PREFIX)) {
+    const cta = parseCtaReply(message.slice(CTA_PREFIX.length));
+    if (!cta) return null;
+    return { type: 'cta', phone, profileId: profileId ?? undefined, cta };
+  }
 
   // Template send, encoded as `[TPL:<templateKey>]<jsonVars>`.
   if (message.startsWith(TEMPLATE_PREFIX) && message.includes(MEDIA_SUFFIX)) {
