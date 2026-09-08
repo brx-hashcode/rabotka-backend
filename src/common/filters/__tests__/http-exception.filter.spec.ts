@@ -142,4 +142,59 @@ describe('HttpExceptionFilter', () => {
       expect(json.mock.calls[0][0]).not.toHaveProperty('code');
     });
   });
+  describe('multer failures', () => {
+    /** What multer throws: a plain Error with a `name` and a `code`. */
+    const multerError = (code: string) =>
+      Object.assign(new Error(`multer: ${code}`), {
+        name: 'MulterError',
+        code,
+      });
+
+    it('answers 400 for a file over the size limit', () => {
+      // Without the mapping this is a plain Error, so it lands in the generic
+      // branch as a 500 — the server blaming itself for an oversize photo, and
+      // logging a stack trace on every one.
+      const { host, json, status } = makeHost(
+        '/api/v1/profile/claims/attachments',
+      );
+
+      filter.catch(multerError('LIMIT_FILE_SIZE'), host);
+
+      expect(status).toHaveBeenCalledWith(400);
+      expect(json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          statusCode: 400,
+          message: 'Fichier trop volumineux',
+        }),
+      );
+    });
+
+    it('answers 400 for too many files', () => {
+      const { host, status } = makeHost('/api');
+      filter.catch(multerError('LIMIT_FILE_COUNT'), host);
+      expect(status).toHaveBeenCalledWith(400);
+    });
+
+    it('answers 400 for an unexpected field', () => {
+      const { host, status } = makeHost('/api');
+      filter.catch(multerError('LIMIT_UNEXPECTED_FILE'), host);
+      expect(status).toHaveBeenCalledWith(400);
+    });
+
+    it('leaves an unknown multer code as a 500', () => {
+      // A code we have no message for is a bug on our side, not the caller's.
+      const { host, status } = makeHost('/api');
+      filter.catch(multerError('SOMETHING_NEW'), host);
+      expect(status).toHaveBeenCalledWith(500);
+    });
+
+    it('does not mistake an ordinary Error carrying a code', () => {
+      const { host, status } = makeHost('/api');
+      filter.catch(
+        Object.assign(new Error('db down'), { code: 'LIMIT_FILE_SIZE' }),
+        host,
+      );
+      expect(status).toHaveBeenCalledWith(500);
+    });
+  });
 });

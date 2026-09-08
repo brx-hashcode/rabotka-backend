@@ -32,6 +32,7 @@ import { ArchiveService } from '../admin-archive/archive.service';
 import { BulkDeleteDto } from '../../common/dto/bulk-delete.dto';
 import { LogService } from '../log/log.service';
 import { extractRequestMeta } from '../../common/utils/request-meta.util';
+import { imageMulterOptions } from '../../common/utils/image-upload.util';
 import type { AdminAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
 import { UserRole } from '@prisma/client';
 import { AdminAuthGuard } from '../auth/guards/admin-auth.guard';
@@ -667,21 +668,7 @@ export class AdminProfileController {
   @Patch(':id/avatar')
   @Roles(UserRole.MANAGER)
   @UseInterceptors(
-    FileInterceptor('avatar', {
-      limits: { fileSize: 5 * 1024 * 1024 },
-      fileFilter: (_req, file, cb) => {
-        if (['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype)) {
-          cb(null, true);
-        } else {
-          cb(
-            new BadRequestException(
-              'Only JPEG, PNG or WEBP images are allowed',
-            ),
-            false,
-          );
-        }
-      },
-    }),
+    FileInterceptor('avatar', imageMulterOptions()),
   )
   @ApiConsumes('multipart/form-data')
   @ApiOperation({ summary: 'Update profile avatar (admin only)' })
@@ -725,21 +712,7 @@ export class AdminProfileController {
   @Post(':id/verification-images')
   @Roles(UserRole.MANAGER)
   @UseInterceptors(
-    FileInterceptor('file', {
-      limits: { fileSize: 10 * 1024 * 1024 },
-      fileFilter: (_req, file, cb) => {
-        if (['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype)) {
-          cb(null, true);
-        } else {
-          cb(
-            new BadRequestException(
-              'Only JPEG, PNG or WEBP images are allowed',
-            ),
-            false,
-          );
-        }
-      },
-    }),
+    FileInterceptor('file', imageMulterOptions(10 * 1024 * 1024)),
   )
   @ApiConsumes('multipart/form-data')
   @ApiOperation({

@@ -25,16 +25,17 @@ import type { ProfileAuthenticatedRequest } from '../auth/guards/jwt-auth.guard'
 import { PortfolioService } from './portfolio.service';
 import { CreatePortfolioItemDto } from './dto/create-portfolio-item.dto';
 import { UpdatePortfolioItemDto } from './dto/update-portfolio-item.dto';
+import { isAllowedImageMimeType } from '../../common/constants/image-upload';
 
 const IMAGE_UPLOAD_OPTIONS = {
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB per image
+  // Silent reject kept on purpose — see the note in `profile.controller.ts`.
   fileFilter: (
     _req: unknown,
     file: Express.Multer.File,
     cb: (error: Error | null, acceptFile: boolean) => void,
   ) => {
-    const allowed = ['image/jpeg', 'image/png', 'image/webp'];
-    cb(null, allowed.includes(file.mimetype));
+    cb(null, isAllowedImageMimeType(file.mimetype));
   },
 };
 

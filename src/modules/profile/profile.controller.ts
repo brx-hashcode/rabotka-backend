@@ -52,6 +52,10 @@ import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { ProfileType } from '@prisma/client';
 import { WHATSAPP_TEMPLATES } from '../../common/constants/whatsapp-templates';
 import { PayPenaltyDto } from '../wallet/dto/pay-penalty.dto';
+import {
+  ALLOWED_IMAGE_MIME_TYPES,
+  isAllowedImageMimeType,
+} from '../../common/constants/image-upload';
 
 @ApiTags('Profile')
 @Controller('profile')
@@ -431,9 +435,11 @@ export class ProfileController {
   @UseInterceptors(
     FileInterceptor('avatar', {
       limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+      // Silent reject, unlike `imageMulterOptions`: changing this route to
+      // throw is a behaviour change its callers have not been prepared for.
+      // Only the list is shared here — see the follow-up to unify the rest.
       fileFilter: (_req, file, cb) => {
-        const allowed = ['image/jpeg', 'image/png', 'image/webp'];
-        cb(null, allowed.includes(file.mimetype));
+        cb(null, isAllowedImageMimeType(file.mimetype));
       },
     }),
   )
@@ -492,11 +498,11 @@ export class ProfileController {
   @UseInterceptors(
     FileInterceptor('file', {
       limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+      // Not an image-only route: KYC accepts a scanned PDF too, so this
+      // extends the shared list rather than using it as-is.
       fileFilter: (_req, file, cb) => {
-        const allowed = [
-          'image/jpeg',
-          'image/png',
-          'image/webp',
+        const allowed: string[] = [
+          ...ALLOWED_IMAGE_MIME_TYPES,
           'application/pdf',
         ];
         cb(null, allowed.includes(file.mimetype));

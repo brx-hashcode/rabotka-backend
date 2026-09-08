@@ -10,6 +10,7 @@ import { LogService } from '../../log/log.service';
 import { AdminAuthGuard } from '../../auth/guards/admin-auth.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
 import { ProfileAuthGuard } from '../../auth/guards/profile-auth.guard';
+import { ClaimAttachmentService } from '../claim-attachment.service';
 
 const mockClaimService = {
   createForAdmin: jest.fn().mockResolvedValue({ id: 'claim-1', title: 'Test' }),
@@ -38,6 +39,19 @@ const mockLogService = {
   create: jest.fn().mockResolvedValue({}),
 };
 
+const uploadedFile = {
+  url: 'https://cdn.test/claim-attachments/1_ab.jpg',
+  key: 'claim-attachments/1_ab.jpg',
+  name: 'photo.jpg',
+  mimeType: 'image/jpeg',
+  size: 1234,
+};
+
+const mockAttachments = {
+  uploadMany: jest.fn().mockResolvedValue([uploadedFile]),
+  assertValidUrls: jest.fn().mockResolvedValue(undefined),
+};
+
 const adminReq = {
   user: { userId: 'user-1' },
   headers: {},
@@ -56,6 +70,7 @@ describe('ClaimController', () => {
       providers: [
         { provide: ClaimService, useValue: mockClaimService },
         { provide: LogService, useValue: mockLogService },
+        { provide: ClaimAttachmentService, useValue: mockAttachments },
       ],
     })
       .overrideGuard(AdminAuthGuard)
@@ -73,6 +88,14 @@ describe('ClaimController', () => {
     });
     expect(result.id).toBe('claim-1');
     expect(mockLogService.create).toHaveBeenCalled();
+  });
+
+  it('uploads attachments and returns their descriptors', async () => {
+    const files = [{ originalname: 'photo.jpg' }] as Express.Multer.File[];
+    const result = await controller.uploadAttachments(files);
+
+    expect(mockAttachments.uploadMany).toHaveBeenCalledWith(files);
+    expect(result).toEqual({ files: [uploadedFile] });
   });
 
   it('lists claims', async () => {
@@ -147,7 +170,10 @@ describe('ProfileClaimController', () => {
     jest.clearAllMocks();
     const module: TestingModule = await Test.createTestingModule({
       controllers: [ProfileClaimController],
-      providers: [{ provide: ClaimService, useValue: mockClaimService }],
+      providers: [
+        { provide: ClaimService, useValue: mockClaimService },
+        { provide: ClaimAttachmentService, useValue: mockAttachments },
+      ],
     })
       .overrideGuard(ProfileAuthGuard)
       .useValue({ canActivate: () => true })
@@ -161,6 +187,14 @@ describe('ProfileClaimController', () => {
       description: 'Desc',
     });
     expect(result.id).toBe('claim-1');
+  });
+
+  it('uploads attachments as profile', async () => {
+    const files = [{ originalname: 'photo.jpg' }] as Express.Multer.File[];
+    const result = await controller.uploadAttachments(files);
+
+    expect(mockAttachments.uploadMany).toHaveBeenCalledWith(files);
+    expect(result).toEqual({ files: [uploadedFile] });
   });
 
   it('lists claims as profile', async () => {

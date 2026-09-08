@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { ClaimService } from '../claim.service';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { NotificationService } from '../../notification/notification.service';
@@ -7,6 +7,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ClaimCommentsGateway } from '../../ws-notifications/claim-comments.gateway';
 import { WhatsAppService } from '../../whatsapp/whatsapp.service';
 import { WhatsAppLoginLinkService } from '../../auth/whatsapp-login-link.service';
+import { ClaimAttachmentService } from '../claim-attachment.service';
 
 const mockPrisma = {
   claim: {
@@ -58,11 +59,19 @@ const mockLoginLink = {
   mint: jest.fn().mockResolvedValue('code-123'),
 };
 
+const mockAttachments = {
+  uploadMany: jest.fn(),
+  assertValidUrls: jest.fn().mockResolvedValue(undefined),
+};
+
 /**
  * The notification is fired with `void`, so the assertion has to run after the
  * microtasks it queues — the mint and the send — have both drained.
  */
 const flushNotification = () => new Promise(process.nextTick);
+
+/** A url shaped like one the upload route hands back. */
+const imageUrl = 'https://cdn.test/claim-attachments/1757000000_ab12cd.jpg';
 
 const now = new Date();
 
@@ -96,6 +105,7 @@ const baseClaim = {
 const baseComment = {
   id: 'comment-1',
   content: 'Test comment',
+  attachment_urls: [],
   claim_id: 'claim-1',
   user_id: 'user-1',
   profile_id: null,
@@ -120,6 +130,7 @@ describe('ClaimService', () => {
         { provide: ClaimCommentsGateway, useValue: mockGateway },
         { provide: WhatsAppService, useValue: mockWhatsApp },
         { provide: WhatsAppLoginLinkService, useValue: mockLoginLink },
+        { provide: ClaimAttachmentService, useValue: mockAttachments },
       ],
     }).compile();
     service = module.get<ClaimService>(ClaimService);
@@ -542,6 +553,139 @@ describe('ClaimService', () => {
 
       expect(result.id).toBe('comment-1');
     });
+
+    describe('attachments', () => {
+      it('persists the urls and returns them mapped', async () => {
+        mockPrisma.claim.findUnique.mockResolvedValue(claimWithOwner);
+        mockPrisma.claimComment.create.mockResolvedValue({
+          ...baseComment,
+          attachment_urls: [imageUrl],
+        });
+
+        const result = await service.addComment('claim-1', 'user-1', {
+          content: 'Voici',
+          attachment_urls: [imageUrl],
+        });
+
+        expect(mockPrisma.claimComment.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ attachment_urls: [imageUrl] }),
+          }),
+        );
+        expect(result.attachmentUrls).toEqual([imageUrl]);
+      });
+
+      it('validates the urls before writing anything', async () => {
+        mockPrisma.claim.findUnique.mockResolvedValue(claimWithOwner);
+        mockAttachments.assertValidUrls.mockRejectedValueOnce(
+          new BadRequestException('Pièce jointe invalide'),
+        );
+
+        await expect(
+          service.addComment('claim-1', 'user-1', {
+            content: 'x',
+            attachment_urls: ['https://evil.test/x.jpg'],
+          }),
+        ).rejects.toThrow(BadRequestException);
+        expect(mockPrisma.claimComment.create).not.toHaveBeenCalled();
+      });
+
+      it('stores an image-only comment with empty content', async () => {
+        mockPrisma.claim.findUnique.mockResolvedValue(claimWithOwner);
+        mockPrisma.claimComment.create.mockResolvedValue({
+          ...baseComment,
+          content: '',
+          attachment_urls: [imageUrl],
+        });
+
+        await service.addComment('claim-1', 'user-1', {
+          attachment_urls: [imageUrl],
+        });
+
+        expect(mockPrisma.claimComment.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ content: '' }),
+          }),
+        );
+      });
+
+      it('sends NO WhatsApp notification for an image-only comment', async () => {
+        // The template's body quotes the comment. With no text there is
+        // nothing to quote, and the fallback copy says nothing worth a push.
+        mockPrisma.claim.findUnique.mockResolvedValue(claimWithOwner);
+        mockPrisma.claimComment.create.mockResolvedValue({
+          ...baseComment,
+          content: '',
+          attachment_urls: [imageUrl],
+        });
+
+        await service.addComment('claim-1', 'user-1', {
+          attachment_urls: [imageUrl],
+        });
+        await flushNotification();
+
+        expect(mockWhatsApp.sendTemplateMessage).not.toHaveBeenCalled();
+        expect(mockLoginLink.mint).not.toHaveBeenCalled();
+      });
+
+      it('still notifies when text accompanies the images', async () => {
+        mockPrisma.claim.findUnique.mockResolvedValue(claimWithOwner);
+        mockPrisma.claimComment.create.mockResolvedValue({
+          ...baseComment,
+          attachment_urls: [imageUrl],
+        });
+
+        await service.addComment('claim-1', 'user-1', {
+          content: 'Regardez la photo',
+          attachment_urls: [imageUrl],
+        });
+        await flushNotification();
+
+        expect(mockWhatsApp.sendTemplateMessage).toHaveBeenCalledWith(
+          '+242060000000',
+          'claimCommented',
+          expect.objectContaining({ excerpt: 'Regardez la photo' }),
+          'profile-1',
+        );
+      });
+
+      it('treats whitespace-only content as no text', async () => {
+        mockPrisma.claim.findUnique.mockResolvedValue(claimWithOwner);
+        mockPrisma.claimComment.create.mockResolvedValue({
+          ...baseComment,
+          content: '',
+          attachment_urls: [imageUrl],
+        });
+
+        await service.addComment('claim-1', 'user-1', {
+          content: '   ',
+          attachment_urls: [imageUrl],
+        });
+        await flushNotification();
+
+        expect(mockWhatsApp.sendTemplateMessage).not.toHaveBeenCalled();
+      });
+
+      it('puts the attachments on the socket payload', async () => {
+        // Both frontends read the thread live; a comment that only reaches
+        // them on refresh would look like a silent failure.
+        mockPrisma.claim.findUnique.mockResolvedValue(claimWithOwner);
+        mockPrisma.claimComment.create.mockResolvedValue({
+          ...baseComment,
+          attachment_urls: [imageUrl],
+        });
+
+        await service.addComment('claim-1', 'user-1', {
+          content: 'Voici',
+          attachment_urls: [imageUrl],
+        });
+
+        expect(mockGateway.emitNewComment).toHaveBeenCalledWith(
+          'claim-1',
+          expect.objectContaining({ attachmentUrls: [imageUrl] }),
+        );
+      });
+    });
   });
 
   describe('listComments', () => {
@@ -570,6 +714,21 @@ describe('ClaimService', () => {
   });
 
   describe('createForProfile', () => {
+    it('refuses a claim whose attachments are not vouched for', async () => {
+      mockAttachments.assertValidUrls.mockRejectedValueOnce(
+        new BadRequestException('Pièce jointe invalide'),
+      );
+
+      await expect(
+        service.createForProfile('profile-1', {
+          title: 'T',
+          description: 'D',
+          attachment_urls: ['https://evil.test/x.jpg'],
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockPrisma.claim.create).not.toHaveBeenCalled();
+    });
+
     it('creates claim as profile', async () => {
       mockPrisma.claim.create.mockResolvedValue(baseClaim);
       mockPrisma.profile.findUnique.mockResolvedValue({
@@ -649,6 +808,89 @@ describe('ClaimService', () => {
   });
 
   describe('addCommentAsProfile', () => {
+    const ownedClaim = {
+      id: 'claim-1',
+      title: 'Test',
+      profile_id: 'profile-1',
+    };
+    const profileComment = {
+      ...baseComment,
+      profile_id: 'profile-1',
+      user_id: null,
+      created_by_type: 'profile',
+      user: null,
+      profile: { first_name: 'John', last_name: 'Doe' },
+    };
+
+    it('persists attachments and returns them mapped', async () => {
+      mockPrisma.claim.findUnique.mockResolvedValue(ownedClaim);
+      mockPrisma.claimComment.create.mockResolvedValue({
+        ...profileComment,
+        attachment_urls: [imageUrl],
+      });
+
+      const result = await service.addCommentAsProfile('claim-1', 'profile-1', {
+        content: 'Voici la photo',
+        attachment_urls: [imageUrl],
+      });
+
+      expect(mockPrisma.claimComment.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ attachment_urls: [imageUrl] }),
+        }),
+      );
+      expect(result.attachmentUrls).toEqual([imageUrl]);
+    });
+
+    it('accepts an image-only reply', async () => {
+      mockPrisma.claim.findUnique.mockResolvedValue(ownedClaim);
+      mockPrisma.claimComment.create.mockResolvedValue({
+        ...profileComment,
+        content: '',
+        attachment_urls: [imageUrl],
+      });
+
+      await service.addCommentAsProfile('claim-1', 'profile-1', {
+        attachment_urls: [imageUrl],
+      });
+
+      expect(mockPrisma.claimComment.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ content: '' }),
+        }),
+      );
+    });
+
+    it('rejects an unvouched url before writing', async () => {
+      mockPrisma.claim.findUnique.mockResolvedValue(ownedClaim);
+      mockAttachments.assertValidUrls.mockRejectedValueOnce(
+        new BadRequestException('Pièce jointe invalide'),
+      );
+
+      await expect(
+        service.addCommentAsProfile('claim-1', 'profile-1', {
+          attachment_urls: ['https://evil.test/x.jpg'],
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockPrisma.claimComment.create).not.toHaveBeenCalled();
+    });
+
+    it('checks ownership before touching attachments', async () => {
+      // Order matters: validating first would tell a stranger whether a url is
+      // one of ours before we have established they may post here at all.
+      mockPrisma.claim.findUnique.mockResolvedValue({
+        ...ownedClaim,
+        profile_id: 'someone-else',
+      });
+
+      await expect(
+        service.addCommentAsProfile('claim-1', 'profile-1', {
+          attachment_urls: [imageUrl],
+        }),
+      ).rejects.toThrow(NotFoundException);
+      expect(mockAttachments.assertValidUrls).not.toHaveBeenCalled();
+    });
+
     it('adds comment as profile', async () => {
       mockPrisma.claim.findUnique.mockResolvedValue({
         id: 'claim-1',

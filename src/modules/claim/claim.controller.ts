@@ -8,12 +8,19 @@ import {
   Param,
   Query,
   UseGuards,
+  UseInterceptors,
+  UploadedFiles,
   Req,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
+import { FilesInterceptor } from '@nestjs/platform-express';
+import { ApiConsumes } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { ClaimService } from './claim.service';
+import { ClaimAttachmentService } from './claim-attachment.service';
+import { MAX_CLAIM_ATTACHMENTS } from './claim-attachment-key';
+import { imageMulterOptions } from '../../common/utils/image-upload.util';
 import { CreateClaimDto } from './dto/create-claim.dto';
 import { UpdateClaimDto } from './dto/update-claim.dto';
 import { ReorderClaimDto } from './dto/reorder-claim.dto';
@@ -33,7 +40,28 @@ export class ClaimController {
   constructor(
     private readonly claimService: ClaimService,
     private readonly logService: LogService,
+    private readonly attachments: ClaimAttachmentService,
   ) {}
+
+  /**
+   * Pre-upload images for a claim or a comment, and get back urls to reference.
+   *
+   * Declared before the `:id` routes for readability only — `attachments` is a
+   * literal segment, and neither controller declares a parameterised POST for
+   * it to shadow.
+   *
+   * MANAGER, matching `POST /admin/claims/:claimId/comments`. A role that could
+   * upload but not comment would only ever produce orphaned objects.
+   */
+  @Post('attachments')
+  @Roles(UserRole.MANAGER)
+  @UseInterceptors(
+    FilesInterceptor('files', MAX_CLAIM_ATTACHMENTS, imageMulterOptions()),
+  )
+  @ApiConsumes('multipart/form-data')
+  async uploadAttachments(@UploadedFiles() files: Express.Multer.File[]) {
+    return { files: await this.attachments.uploadMany(files) };
+  }
 
   @Post()
   @Roles(UserRole.MANAGER)
@@ -177,7 +205,20 @@ export class ClaimCommentController {
 @Controller('profile/claims')
 @UseGuards(ProfileAuthGuard)
 export class ProfileClaimController {
-  constructor(private readonly claimService: ClaimService) {}
+  constructor(
+    private readonly claimService: ClaimService,
+    private readonly attachments: ClaimAttachmentService,
+  ) {}
+
+  /** The complainant's side of `ClaimController.uploadAttachments`. */
+  @Post('attachments')
+  @UseInterceptors(
+    FilesInterceptor('files', MAX_CLAIM_ATTACHMENTS, imageMulterOptions()),
+  )
+  @ApiConsumes('multipart/form-data')
+  async uploadAttachments(@UploadedFiles() files: Express.Multer.File[]) {
+    return { files: await this.attachments.uploadMany(files) };
+  }
 
   @Post()
   create(@Req() req: any, @Body() dto: CreateClaimDto) {

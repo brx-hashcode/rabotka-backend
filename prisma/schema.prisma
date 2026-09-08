@@ -1274,7 +1274,13 @@ model ClaimComment {
   created_at      DateTime @default(now())
   updated_at      DateTime @updatedAt
   claim_id        String   @db.Uuid
+  /// Empty string for an image-only message. NOT nullable: every reader treats
+  /// this as a string today, and a nullable column would push a null check into
+  /// all of them to express something `''` already says.
   content         String   @db.Text
+  /// Public-bucket urls, same shape as `Claim.attachment_urls`. Validated on
+  /// write against `claim-attachments/` — see `claim-attachment-key.ts`.
+  attachment_urls String[] @default([])
   user_id         String?  @db.Uuid
   profile_id      String?  @db.Uuid
   created_by_type String   @default("user")
