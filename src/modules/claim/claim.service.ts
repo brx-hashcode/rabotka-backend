@@ -13,6 +13,7 @@ import { ClaimCommentsGateway } from '../ws-notifications/claim-comments.gateway
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { WhatsAppLoginLinkService } from '../auth/whatsapp-login-link.service';
 import { claimDetailCtaPath } from '../../common/constants/whatsapp-templates';
+import { ClaimAttachmentService } from './claim-attachment.service';
 
 export type AdminClaimItem = {
   id: string;
@@ -39,7 +40,9 @@ export type AdminClaimItem = {
 
 export type AdminClaimCommentItem = {
   id: string;
+  /** Empty for an image-only comment. Never null — see the schema comment. */
   content: string;
+  attachmentUrls: string[];
   userId: string | null;
   userName: string | null;
   profileId: string | null;
@@ -86,6 +89,10 @@ function mapComment(c: any): AdminClaimCommentItem {
   return {
     id: c.id,
     content: c.content,
+    // `?? []` for the rows that predate the column — the migration defaults
+    // them, but a `select` that omits the field would otherwise yield
+    // undefined and reach both frontends as a missing key.
+    attachmentUrls: c.attachment_urls ?? [],
     userId: c.user_id,
     userName: c.user ? `${c.user.first_name} ${c.user.last_name}` : null,
     profileId: c.profile_id,
@@ -133,12 +140,15 @@ export class ClaimService {
     private readonly claimCommentsGateway: ClaimCommentsGateway,
     private readonly whatsApp: WhatsAppService,
     private readonly loginLink: WhatsAppLoginLinkService,
+    private readonly attachments: ClaimAttachmentService,
   ) {}
 
   async createForAdmin(
     userId: string,
     dto: CreateClaimDto,
   ): Promise<AdminClaimItem> {
+    await this.attachments.assertValidUrls(dto.attachment_urls);
+
     const claim = await this.prisma.claim.create({
       data: {
         title: dto.title,
@@ -249,6 +259,8 @@ export class ClaimService {
   ): Promise<AdminClaimItem> {
     const exists = await this.prisma.claim.findUnique({ where: { id } });
     if (!exists) throw new NotFoundException('Claim not found');
+
+    await this.attachments.assertValidUrls(dto.attachment_urls);
 
     const data: any = {};
     if (dto.status !== undefined) data.status = dto.status;
@@ -458,10 +470,18 @@ export class ClaimService {
       },
     });
     if (!exists) throw new NotFoundException('Claim not found');
+
+    await this.attachments.assertValidUrls(dto.attachment_urls);
+
+    // Empty rather than null for an image-only comment: the column is NOT NULL
+    // and every reader treats `content` as a string.
+    const content = dto.content?.trim() ?? '';
+
     const comment = await this.prisma.claimComment.create({
       data: {
         claim_id: claimId,
-        content: dto.content,
+        content,
+        attachment_urls: dto.attachment_urls ?? [],
         user_id: userId,
         created_by_type: 'user',
       },
@@ -488,15 +508,22 @@ export class ClaimService {
       mapped as unknown as Record<string, unknown>,
     );
 
+    // Text only. An image-only reply sends nothing: the template's third
+    // variable is the comment itself, and with no text there is nothing to
+    // quote — `freeTextVar` would fall back to "Consultez le détail dans
+    // l'application", which is a notification that says nothing.
+    //
     // Fire-and-forget, like every other notification here: WhatsApp being down
     // must not fail an admin's comment, which is already saved.
-    void this.notifyOwnerOfAdminComment(claimId, exists, dto.content).catch(
-      (err: unknown) =>
-        this.logger.warn(
-          'Claim comment WhatsApp notification failed',
-          err instanceof Error ? err.message : String(err),
-        ),
-    );
+    if (content) {
+      void this.notifyOwnerOfAdminComment(claimId, exists, content).catch(
+        (err: unknown) =>
+          this.logger.warn(
+            'Claim comment WhatsApp notification failed',
+            err instanceof Error ? err.message : String(err),
+          ),
+      );
+    }
 
     return mapped;
   }
@@ -553,6 +580,16 @@ export class ClaimService {
     return comments.map(mapComment);
   }
 
+  /**
+   * Deletes the row, NOT the stored objects it points at.
+   *
+   * Deliberate, and the same choice `deleteForAdmin` already makes for a
+   * claim's own attachments. A url is not proof of sole ownership: a client
+   * that retried an upload leaves two rows on one key, and deleting the object
+   * for one of them breaks the other. Orphaned objects cost storage; deleting a
+   * live one loses evidence. A sweeper that reconciles keys against rows is the
+   * right fix and is tracked separately.
+   */
   async deleteComment(claimId: string, commentId: string): Promise<void> {
     const comment = await this.prisma.claimComment.findFirst({
       where: { id: commentId, claim_id: claimId },
@@ -575,6 +612,8 @@ export class ClaimService {
     dto: CreateClaimDto,
     options?: { notifyProfile?: boolean },
   ): Promise<AdminClaimItem> {
+    await this.attachments.assertValidUrls(dto.attachment_urls);
+
     const claim = await this.prisma.claim.create({
       data: {
         title: dto.title,
@@ -693,10 +732,13 @@ export class ClaimService {
       throw new NotFoundException('Claim not found');
     }
 
+    await this.attachments.assertValidUrls(dto.attachment_urls);
+
     const comment = await this.prisma.claimComment.create({
       data: {
         claim_id: claimId,
-        content: dto.content,
+        content: dto.content?.trim() ?? '',
+        attachment_urls: dto.attachment_urls ?? [],
         profile_id: profileId,
         created_by_type: 'profile',
       },
@@ -725,6 +767,7 @@ export class ClaimService {
     return mapped;
   }
 
+  /** Stored objects are left in place — see `deleteComment`. */
   async deleteCommentAsProfile(
     claimId: string,
     commentId: string,

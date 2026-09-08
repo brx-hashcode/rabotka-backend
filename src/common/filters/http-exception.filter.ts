@@ -67,6 +67,15 @@ export class HttpExceptionFilter implements ExceptionFilter {
       return { status, message };
     }
 
+    // Multer rejects an oversize or excess file by throwing a plain `Error`
+    // carrying a `code`, so without this it lands in the branch below as a 500
+    // — the server blaming itself for something the caller did, and logged with
+    // a stack trace on every too-big photo. Matched by shape rather than by
+    // `instanceof MulterError`: that class lives in multer's own package, which
+    // this file has no other reason to depend on.
+    const multerStatus = multerErrorStatus(exception);
+    if (multerStatus) return multerStatus;
+
     if (exception instanceof Error) {
       return {
         status: HttpStatus.INTERNAL_SERVER_ERROR,
@@ -100,4 +109,31 @@ export class HttpExceptionFilter implements ExceptionFilter {
 
     return exception.message;
   }
+}
+
+/** The multer failures a caller can actually fix, and what to tell them. */
+const MULTER_MESSAGES: Record<string, string> = {
+  LIMIT_FILE_SIZE: 'Fichier trop volumineux',
+  LIMIT_FILE_COUNT: 'Trop de fichiers',
+  LIMIT_UNEXPECTED_FILE: 'Champ de fichier inattendu',
+  LIMIT_PART_COUNT: 'Requête trop volumineuse',
+  LIMIT_FIELD_KEY: 'Nom de champ trop long',
+  LIMIT_FIELD_VALUE: 'Valeur de champ trop longue',
+  LIMIT_FIELD_COUNT: 'Trop de champs',
+};
+
+function multerErrorStatus(
+  exception: unknown,
+): { status: number; message: string } | null {
+  if (!(exception instanceof Error) || exception.name !== 'MulterError') {
+    return null;
+  }
+
+  const code = (exception as Error & { code?: unknown }).code;
+  if (typeof code !== 'string') return null;
+
+  const message = MULTER_MESSAGES[code];
+  if (!message) return null;
+
+  return { status: HttpStatus.BAD_REQUEST, message };
 }
