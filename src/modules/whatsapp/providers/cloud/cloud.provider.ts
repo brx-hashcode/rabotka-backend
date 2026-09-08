@@ -8,6 +8,7 @@ import {
   type FlowPayload,
   type InboundEvent,
   type InteractiveButtonsPayload,
+  type InteractiveCtaPayload,
   type InteractiveListPayload,
   type OutboundLocation,
   type OutboundMedia,
@@ -31,6 +32,9 @@ import {
   type CloudSendResponse,
 } from './cloud.types';
 
+/** Meta's cap on a `cta_url` button label. */
+const CTA_BUTTON_TEXT_MAX = 20;
+
 /**
  * Meta WhatsApp Cloud API implementation of the port.
  *
@@ -46,6 +50,7 @@ export class CloudProvider implements WhatsappProvider {
     readReceipts: true,
     interactiveButtons: true,
     interactiveList: true,
+    interactiveCta: true,
     // A carousel on Cloud is an approved TEMPLATE with carousel components and
     // a fixed card count, not something assemblable from a payload at send
     // time. False until such a template exists in the registry.
@@ -193,6 +198,64 @@ export class CloudProvider implements WhatsappProvider {
         : {}),
     });
     return this.toResult(response, 'interactive_buttons');
+  }
+
+  /**
+   * A free-form message with one URL button.
+   *
+   * The header is text OR image, never both — Meta allows a single header, and
+   * sending two is a 400 rather than a silent pick. The image wins because the
+   * callers that need this are brand cards.
+   */
+  async sendInteractiveCta(
+    to: E164,
+    payload: InteractiveCtaPayload,
+    opts?: SendOptions,
+  ): Promise<SendResult> {
+    // Meta truncates a longer label silently, which is worse than saying so:
+    // the button is the entire point of using this message type.
+    if (payload.buttonText.length > CTA_BUTTON_TEXT_MAX) {
+      throw new WhatsappError({
+        code: 'UNKNOWN',
+        provider: 'cloud',
+        message:
+          `CTA button text must be at most ${CTA_BUTTON_TEXT_MAX} characters, ` +
+          `got ${payload.buttonText.length}: "${payload.buttonText}"`,
+        providerCode: null,
+      });
+    }
+
+    const header = payload.imageUrl
+      ? {
+          header: { type: 'image' as const, image: { link: payload.imageUrl } },
+        }
+      : payload.header
+        ? { header: { type: 'text' as const, text: payload.header } }
+        : {};
+
+    const response = await this.client.send({
+      messaging_product: MESSAGING_PRODUCT,
+      recipient_type: 'individual',
+      to: toProviderAddress(to),
+      type: 'interactive',
+      interactive: {
+        type: 'cta_url',
+        ...header,
+        body: { text: payload.body },
+        ...(payload.footer ? { footer: { text: payload.footer } } : {}),
+        action: {
+          name: 'cta_url',
+          parameters: {
+            display_text: payload.buttonText,
+            url: payload.url,
+          },
+        },
+      },
+      ...(opts?.internalMessageId
+        ? { biz_opaque_callback_data: opts.internalMessageId }
+        : {}),
+    });
+    return this.toResult(response, 'interactive_cta');
   }
 
   async sendInteractiveList(

@@ -134,6 +134,7 @@ describe('BotNotificationService', () => {
         '+24200000002',
         'newApplication',
         expect.objectContaining({ workerName: expect.any(String) }),
+        expect.any(String),
       );
     });
 
@@ -194,6 +195,7 @@ describe('BotNotificationService', () => {
         expect.any(String),
         expect.any(String),
         expect.objectContaining({ applicationId: 'app-1' }),
+        expect.any(String),
       );
     });
 
@@ -327,6 +329,7 @@ describe('BotNotificationService', () => {
         '+24200000001',
         'applicationAccepted',
         expect.objectContaining({ offerTitle: expect.any(String) }),
+        expect.any(String),
       );
     });
 
@@ -340,6 +343,7 @@ describe('BotNotificationService', () => {
         '+24200000001',
         'applicationAcceptedUnlock',
         expect.objectContaining({ offerTitle: expect.any(String) }),
+        expect.any(String),
       );
       // It used to pre-arm the unlock flow so a "Continuer" quick-reply could
       // re-show a payment menu in the chat. The template carries a URL button
@@ -501,6 +505,7 @@ describe('BotNotificationService', () => {
         '+242001',
         'unlockExpiredConversion',
         { amount: 500 },
+        expect.any(String),
       );
     });
   });

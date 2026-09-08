@@ -153,6 +153,7 @@ export class ProfileController {
         createProfileDto.phone,
         profileCreatedKey,
         createProfileDto.firstName,
+        result.profileId,
       )
       .catch((err: unknown) =>
         this.logger.warn(
