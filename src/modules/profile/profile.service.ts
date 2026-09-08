@@ -9,9 +9,24 @@ import {
   ConflictException,
   NotFoundException,
   Inject,
+  Optional,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import {
+  kycBucket,
+  storageNames,
+} from '../../common/services/storage/kyc-bucket';
+import {
+  deriveKey,
+  isKycKey,
+  kycContentKind,
+  kycFileAvailable,
+  kycObjectRef,
+  legacyKycUrl,
+} from '../../common/services/storage/kyc-key';
+import { DownloadResult } from '../../common/services/storage/types/storage.types';
+import { SystemConfigService } from '../system-config/system-config.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
 import Redis from 'ioredis';
@@ -19,7 +34,11 @@ import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { FileService } from '../file/file.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { verificationLinkMessage } from '../whatsapp/templates';
-import { WHATSAPP_TEMPLATES } from '../../common/constants/whatsapp-templates';
+import {
+  WHATSAPP_TEMPLATES,
+  SUSPENDED_CTA_PATH,
+} from '../../common/constants/whatsapp-templates';
+import { WhatsAppLoginLinkService } from '../auth/whatsapp-login-link.service';
 import { MailService } from '../mail/mail.service';
 import { LayoutService } from '../mail/layout.service';
 import { accountSuspendedEmail } from '../mail/templates';
@@ -33,17 +52,24 @@ import { MatchingService } from '../matching/matching.service';
 import { InterestClusterService } from '../interest-graph/interest-cluster.service';
 import { PortfolioService } from '../portfolio/portfolio.service';
 import { GeocodingService } from '../../common/services/geocoding/geocoding.service';
+import { GeoService } from '../geo/geo.service';
+import { ReferralService } from '../referral/referral.service';
 import { CreateProfileDto } from './dto/create-profile.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { AdminUpdateProfileDto } from './dto/admin-update-profile.dto';
 import { deletedAtFilter } from '../../common/utils/soft-delete.util';
 import {
   AccountStatus,
+  DocumentType,
+  EmploymentType,
+  KycDocumentCategory,
   Prisma,
   ProfileType,
+  ReferralSource,
+  ReferralStatus,
   VerificationStatus,
 } from '@prisma/client';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
 
 const PROFILE_TYPE_LABELS: Record<ProfileType, string> = {
   [ProfileType.WORKER]: 'Travailleur',
@@ -56,11 +82,27 @@ export type ProfileMeResponse = {
   lastName: string;
   email: string;
   phone: string;
+  /** Optional second number. Null for the majority who have only one. */
+  directPhone: string | null;
   address: string;
+  countryCode: string | null;
+  countryName: string | null;
+  city: string | null;
   description: string;
   profileType: string;
   status: string;
   verificationStatus: string;
+  /**
+   * The admin's own words on a refusal and a suspension.
+   *
+   * Owner-only by construction — `findById` backs `GET /profile/me`, which is
+   * authenticated as the profile itself. Both strings have already reached this
+   * user on WhatsApp: they fill {{2}} of the refusal and suspension templates
+   * the moment an admin decides. Carrying them here lets the app and the
+   * assistant answer "why?" instead of only "it was refused".
+   */
+  rejectionReason: string | null;
+  suspensionReason: string | null;
   reliabilityScore: number | null;
   whatsappConnected: boolean;
   avatarUrl: string | null;
@@ -93,9 +135,14 @@ export type ProfileApplicationItem = {
   jobOffer: {
     id: string;
     title: string;
-    scheduledAt: Date;
-    amount: number;
-    address: string;
+    scheduledAt: Date | null;
+    employmentType: EmploymentType;
+    /** Null when the employer named no price — «À négocier», not «0 FCFA». */
+    amount: number | null;
+    address: string | null;
+    isRemote: boolean;
+    city: string | null;
+    countryName: string | null;
     status: string;
   };
 };
@@ -113,7 +160,20 @@ export type AdminProfileListItem = {
   lastName: string;
   email: string;
   phone: string;
+  /**
+   * Optional second number. Null for the majority who have only one.
+   *
+   * Selected on the detail read only — the list query does not fetch it, so
+   * this is null on every row that comes from `listProfilesForAdmin`.
+   */
+  directPhone?: string | null;
   address: string;
+  countryCode: string | null;
+  countryName: string | null;
+  city: string | null;
+  /** Null unless geocoding succeeded; it is fire-and-forget, so gaps are normal. */
+  latitude: number | null;
+  longitude: number | null;
   description: string;
   status: string;
   profileType: string;
@@ -127,6 +187,30 @@ export type AdminProfileListItem = {
   avatarUrl: string | null;
   createdAt: Date;
   updatedAt: Date;
+  /**
+   * The trades this profile works in. Plural and unordered — a multi-skilled
+   * worker has several, and picking one to represent them is what made the
+   * recommendation cards look like specialists.
+   */
+  categoryIds: string[];
+  categoryNames: string[];
+  ratingAvg: number | null;
+  ratingCount: number;
+  billingStatus: string;
+  suspensionReason: string | null;
+  suspendedAt: Date | null;
+  lastLoginAt: Date | null;
+  /** First time the account became usable. Not a sign-in — activation mints no session. */
+  activatedAt: Date | null;
+  firstLogin: boolean;
+  readAndApprovedPolicies: boolean;
+  portfolioSlug: string | null;
+  /** When this profile last reached the vector index; null means never. */
+  vectorIndexedAt: Date | null;
+  jobOffersCount: number;
+  applicationsCount: number;
+  penaltiesCount: number;
+  unpaidPenaltiesCount: number;
 };
 
 export type AdminProfilesListResponse = {
@@ -136,11 +220,30 @@ export type AdminProfilesListResponse = {
   limit: number;
 };
 
+/**
+ * What kind of thing the bytes are.
+ *
+ * The admin needs this because the stream route's path has no file extension,
+ * so the client cannot guess from a url the way it used to. Derived from the
+ * stored key, server-side, where the extension actually is.
+ */
+export type KycContentKind = 'image' | 'pdf' | 'other';
+
 export type AdminKycDocumentItem = {
   id: string;
   documentType: string | null;
   documentCategory: string;
-  documentUrl: string | null;
+  /**
+   * No url. The document is fetched from
+   * `GET /admin/profiles/:id/kyc-documents/:docId/raw`, which streams the bytes
+   * behind the admin's session.
+   *
+   * `documentUrl` used to be here, and was either a signed url that expired
+   * within the hour — the bug — or a public url to an identity document that
+   * anyone holding the link could read. Neither belongs in a JSON payload.
+   */
+  fileAvailable: boolean;
+  contentKind: KycContentKind;
   verificationStatus: string;
   verifiedAt: Date | null;
   verifiedBy: string | null;
@@ -150,25 +253,44 @@ export type AdminKycDocumentItem = {
 
 export type AdminVerificationImageItem = {
   id: string;
-  imageUrl: string;
+  /** Streamed from `.../verification-images/:imageId/raw`. See above. */
+  fileAvailable: boolean;
+  contentKind: KycContentKind;
   uploadedBy: string | null;
   createdAt: Date;
 };
 
+/**
+ * Only what the detail view adds on top of the list item.
+ *
+ * The list now carries the profile's own columns, its trades and its activity
+ * counts — the export needed them, and a field declared in both places is a
+ * field that can silently disagree between them. What is left here is genuinely
+ * detail-only: the KYC evidence, and the single legacy `category_id` that the
+ * many-to-many `categories` replaced.
+ */
+/** Who invited this profile, or null if nobody did. */
+export type AdminProfileReferredBy = {
+  profileId: string;
+  firstName: string;
+  lastName: string;
+  code: string;
+  source: ReferralSource;
+  status: ReferralStatus;
+  rewardedAt: Date | null;
+  referrerAmount: number | null;
+  /** Why nothing was paid, when the status says nothing was. */
+  settlementNote: string | null;
+};
+
 export type AdminProfileDetailResponse = AdminProfileListItem & {
-  phone: string;
-  description: string;
+  /** Legacy single category, superseded by `categoryIds`/`categoryNames`. */
   categoryId: string | null;
   categoryName: string | null;
-  categoryIds: string[];
-  categoryNames: string[];
-  jobOffersCount: number;
-  applicationsCount: number;
-  penaltiesCount: number;
-  unpaidPenaltiesCount: number;
   kycDocuments: AdminKycDocumentItem[];
   verificationImages: AdminVerificationImageItem[];
-  vectorIndexedAt: Date | null;
+  referredBy: AdminProfileReferredBy | null;
+  referralsMadeCount: number;
 };
 
 type PrismaTransactionClient = Parameters<
@@ -176,6 +298,25 @@ type PrismaTransactionClient = Parameters<
 >[0];
 
 const VERIFICATION_TOKEN_TTL_SECONDS = 1800;
+
+/**
+ * Changing the WhatsApp number — the login identity — is a two-step flow.
+ *
+ * Five minutes, matching the login OTP: long enough to fetch a handset from the
+ * next room, short enough that a code glimpsed over a shoulder is stale. The
+ * pending change is keyed by profile, so asking again simply replaces it and a
+ * user cannot accumulate several live codes for several numbers.
+ */
+const PHONE_CHANGE_TTL_SECONDS = 300;
+const PHONE_CHANGE_KEY_PREFIX = `${REDIS_KEY_PREFIX}profile:phone-change:`;
+/**
+ * Attempts before the pending change is discarded outright.
+ *
+ * A six-digit code is one in a million per guess, which is only true while the
+ * number of guesses is bounded. Discarding rather than locking keeps the
+ * failure recoverable: the user asks for a new code.
+ */
+const PHONE_CHANGE_MAX_ATTEMPTS = 5;
 const VERIFICATION_TOKEN_KEY_PREFIX = `${REDIS_KEY_PREFIX}wa:verify:`;
 
 /** Where the activation message's button lands. `/home` is role-aware. */
@@ -191,6 +332,7 @@ export class ProfileService {
     @Inject(REDIS_CONNECTION)
     private readonly redis: Redis,
     private readonly whatsAppService: WhatsAppService,
+    private readonly whatsAppLoginLink: WhatsAppLoginLinkService,
     private readonly configService: ConfigService,
     private readonly mailService: MailService,
     private readonly layoutService: LayoutService,
@@ -202,6 +344,13 @@ export class ProfileService {
     private readonly geocodingService: GeocodingService,
     private readonly cache: AdminCacheService,
     private readonly portfolioService: PortfolioService,
+    private readonly geo: GeoService,
+    private readonly referralService: ReferralService,
+    // @Optional() parce que SystemConfigModule est @Global() mais que les specs
+    // instancient ProfileService à la main : `kycBucket` retombe alors sur
+    // l'env, et lève si celui-ci est vide lui aussi.
+    @Optional()
+    private readonly systemConfig?: SystemConfigService,
   ) {}
 
   async findById(id: string): Promise<ProfileMeResponse> {
@@ -213,11 +362,17 @@ export class ProfileService {
         last_name: true,
         email: true,
         phone: true,
+        direct_phone: true,
         address: true,
+        country_code: true,
+        country_name: true,
+        city: true,
         description: true,
         profile_type: true,
         status: true,
         verification_status: true,
+        rejection_reason: true,
+        suspension_reason: true,
         reliability_score: true,
         whatsapp_connected: true,
         avatar_url: true,
@@ -251,11 +406,17 @@ export class ProfileService {
       lastName: profile.last_name,
       email: profile.email,
       phone: profile.phone,
+      directPhone: profile.direct_phone,
       address: profile.address,
+      countryCode: profile.country_code,
+      countryName: profile.country_name,
+      city: profile.city,
       description: profile.description,
       profileType: profile.profile_type,
       status: profile.status,
       verificationStatus: profile.verification_status,
+      rejectionReason: profile.rejection_reason,
+      suspensionReason: profile.suspension_reason,
       reliabilityScore: profile.reliability_score,
       whatsappConnected: profile.whatsapp_connected,
       avatarUrl: profile.avatar_url,
@@ -384,13 +545,26 @@ export class ProfileService {
     if (dto.lastName !== undefined) data.last_name = dto.lastName;
     if (dto.description !== undefined) data.description = dto.description;
     if (dto.address !== undefined) data.address = dto.address;
+    // Empty string clears it. Unlike the fields above, "no value" is a legitimate
+    // state here — most people have only one number — so the user needs a way to
+    // remove one they added by mistake.
+    if (dto.directPhone !== undefined) {
+      data.direct_phone = dto.directPhone || null;
+    }
+    Object.assign(data, this.geo.resolveLocation(dto));
     return data;
   }
 
-  private accountActivatedTemplate(profileType: ProfileType) {
+  /**
+   * Both variants take the same params, so the union is a single key type and
+   * callers pass it straight through to `sendTemplateMessage`.
+   */
+  private accountActivatedTemplateKey(
+    profileType: ProfileType,
+  ): 'accountActivatedWorker' | 'accountActivatedEmployer' {
     return profileType === ProfileType.WORKER
-      ? WHATSAPP_TEMPLATES.accountActivatedWorker
-      : WHATSAPP_TEMPLATES.accountActivatedEmployer;
+      ? 'accountActivatedWorker'
+      : 'accountActivatedEmployer';
   }
 
   private async sendActivationNotification(profileId: string): Promise<void> {
@@ -400,15 +574,14 @@ export class ProfileService {
         select: { phone: true, first_name: true, profile_type: true },
       });
       if (!profile?.phone) return;
-      const tpl = this.accountActivatedTemplate(profile.profile_type);
       await this.whatsAppService
         .sendTemplateMessage(
           profile.phone,
-          tpl.contentSid,
-          tpl.variables({
+          this.accountActivatedTemplateKey(profile.profile_type),
+          {
             firstName: profile.first_name,
             path: ACTIVATION_LANDING_PATH,
-          }),
+          },
         )
         .catch((err) =>
           this.logger.warn(
@@ -517,8 +690,16 @@ export class ProfileService {
         id: a.job_offer.id,
         title: a.job_offer.title,
         scheduledAt: a.job_offer.scheduled_at,
-        amount: Number(a.job_offer.amount),
+        employmentType: a.job_offer.employment_type,
+        // Number(null) is 0, which reads as "this job pays nothing" rather
+        // than "the price is open".
+        amount: a.job_offer.amount == null ? null : Number(a.job_offer.amount),
         address: a.job_offer.address,
+        // An address alone cannot express a remote job, so the applications
+        // list had a blank where the location goes.
+        isRemote: a.job_offer.is_remote,
+        city: a.job_offer.city,
+        countryName: a.job_offer.country_name,
         status: a.job_offer.status,
       },
     }));
@@ -536,7 +717,13 @@ export class ProfileService {
         last_name: true,
         email: true,
         phone: true,
+        direct_phone: true,
         address: true,
+        country_code: true,
+        country_name: true,
+        city: true,
+        latitude: true,
+        longitude: true,
         description: true,
         status: true,
         profile_type: true,
@@ -546,10 +733,20 @@ export class ProfileService {
         verified_at: true,
         rejection_reason: true,
         kyc_verification_note: true,
+        suspension_reason: true,
+        suspended_at: true,
         reliability_score: true,
+        rating_avg: true,
+        rating_count: true,
+        billing_status: true,
+        first_login: true,
+        read_and_approved_policies: true,
+        portfolio_slug: true,
         avatar_url: true,
         created_at: true,
         updated_at: true,
+        last_login_at: true,
+        activated_at: true,
         vector_indexed_at: true,
         category: {
           select: { id: true, name: true },
@@ -570,22 +767,46 @@ export class ProfileService {
             rejection_reason: true,
             created_at: true,
           },
-          orderBy: { created_at: 'asc' },
+          // Category first, so the reviewer always sees front -> back -> selfie.
+          // created_at alone cannot order these: all of a profile's rows are
+          // inserted in one transaction and share its timestamp. Enum columns
+          // sort by declaration order, which is why the migration added
+          // DOCUMENT_BACK with `AFTER 'DOCUMENT'` rather than appending it.
+          orderBy: [{ document_category: 'asc' }, { created_at: 'asc' }],
         },
         kyc_verification_images: {
           select: {
             id: true,
             image_url: true,
+            storage_key: true,
             uploaded_by: true,
             created_at: true,
           },
           orderBy: { created_at: 'asc' },
+        },
+        // Who invited this profile, straight off the relation. There is no
+        // `referred_by_id` column to read instead, on purpose: Referral is the
+        // one place that answers this, so the admin view and the payout logic
+        // cannot disagree about it.
+        referral_received: {
+          select: {
+            code_used: true,
+            source: true,
+            status: true,
+            rewarded_at: true,
+            referrer_amount: true,
+            settlement_note: true,
+            referrer: {
+              select: { id: true, first_name: true, last_name: true },
+            },
+          },
         },
         _count: {
           select: {
             job_offers: true,
             applications: true,
             penalties: true,
+            referrals_made: true,
           },
         },
       },
@@ -625,7 +846,13 @@ export class ProfileService {
       lastName: profile.last_name,
       email: profile.email,
       phone: profile.phone,
+      directPhone: profile.direct_phone,
       address: profile.address,
+      countryCode: profile.country_code,
+      countryName: profile.country_name,
+      city: profile.city,
+      latitude: profile.latitude,
+      longitude: profile.longitude,
       description: profile.description,
       status: profile.status,
       profileType: profile.profile_type,
@@ -637,10 +864,20 @@ export class ProfileService {
       verifiedAt: profile.verified_at,
       rejectionReason: profile.rejection_reason,
       kycVerificationNote: profile.kyc_verification_note,
+      suspensionReason: profile.suspension_reason,
+      suspendedAt: profile.suspended_at,
       reliabilityScore: profile.reliability_score,
+      ratingAvg: profile.rating_avg,
+      ratingCount: profile.rating_count,
+      billingStatus: profile.billing_status,
+      firstLogin: profile.first_login,
+      readAndApprovedPolicies: profile.read_and_approved_policies,
+      portfolioSlug: profile.portfolio_slug,
       avatarUrl: profile.avatar_url,
       createdAt: profile.created_at,
       updatedAt: profile.updated_at,
+      lastLoginAt: profile.last_login_at,
+      activatedAt: profile.activated_at,
       vectorIndexedAt: profile.vector_indexed_at,
       categoryId: profile.category?.id ?? null,
       categoryName: profile.category?.name ?? null,
@@ -650,33 +887,45 @@ export class ProfileService {
       applicationsCount: profile._count.applications,
       penaltiesCount: profile._count.penalties,
       unpaidPenaltiesCount,
-      kycDocuments: await Promise.all(
-        profile.kyc_documents.map(async (doc) => {
-          // Resolving a single doc's URL must never fail the whole profile
-          // load — a missing blob (deleted, expired, wrong provider) would
-          // otherwise 500 the entire detail endpoint. Degrade to null and
-          // log so the admin can still review the rest of the profile.
-          // Use the URL stored at upload time directly — same approach as avatar_url.
-          // Presigned URL re-generation is unreliable when storage config changes.
-          const documentUrl: string | null = doc.document_url ?? null;
-          return {
-            id: doc.id,
-            documentType: doc.document_type,
-            documentCategory: doc.document_category,
-            documentUrl,
-            verificationStatus: doc.verification_status,
-            verifiedAt: doc.verified_at,
-            verifiedBy: doc.verified_by
-              ? (verifierNames.get(doc.verified_by) ?? doc.verified_by)
-              : null,
-            rejectionReason: doc.rejection_reason,
-            createdAt: doc.created_at,
-          };
-        }),
-      ),
+      referralsMadeCount: profile._count.referrals_made,
+      referredBy: profile.referral_received
+        ? {
+            profileId: profile.referral_received.referrer.id,
+            firstName: profile.referral_received.referrer.first_name,
+            lastName: profile.referral_received.referrer.last_name,
+            code: profile.referral_received.code_used,
+            source: profile.referral_received.source,
+            status: profile.referral_received.status,
+            rewardedAt: profile.referral_received.rewarded_at,
+            referrerAmount:
+              profile.referral_received.referrer_amount === null
+                ? null
+                : Number(profile.referral_received.referrer_amount),
+            settlementNote: profile.referral_received.settlement_note,
+          }
+        : null,
+      // No urls here any more, signed or otherwise. An admin's browser fetches
+      // each file from the stream route, authenticated by the session it
+      // already has — so nothing in this payload expires, and nothing in it
+      // grants access to an identity document to whoever it is forwarded to.
+      kycDocuments: profile.kyc_documents.map((doc) => ({
+        id: doc.id,
+        documentType: doc.document_type,
+        documentCategory: doc.document_category,
+        fileAvailable: kycFileAvailable(doc.storage_key, doc.document_url),
+        contentKind: kycContentKind(doc.storage_key, doc.document_url),
+        verificationStatus: doc.verification_status,
+        verifiedAt: doc.verified_at,
+        verifiedBy: doc.verified_by
+          ? (verifierNames.get(doc.verified_by) ?? doc.verified_by)
+          : null,
+        rejectionReason: doc.rejection_reason,
+        createdAt: doc.created_at,
+      })),
       verificationImages: profile.kyc_verification_images.map((img) => ({
         id: img.id,
-        imageUrl: img.image_url,
+        fileAvailable: kycFileAvailable(img.storage_key, img.image_url),
+        contentKind: kycContentKind(img.storage_key, img.image_url),
         uploadedBy: img.uploaded_by
           ? (verifierNames.get(img.uploaded_by) ?? img.uploaded_by)
           : null,
@@ -690,7 +939,7 @@ export class ProfileService {
     adminUserId: string,
     decision: 'VERIFIED' | 'REJECTED',
     reason: string,
-    files?: Express.Multer.File[],
+    documents?: { key: string; url?: string }[],
   ): Promise<AdminProfileDetailResponse> {
     const note = reason?.trim();
     if (!note) {
@@ -706,23 +955,53 @@ export class ProfileService {
       throw new NotFoundException('Profil non trouvé');
     }
 
-    const uploadedUrls: string[] = [];
-    if (files && files.length > 0) {
-      for (const file of files) {
-        const result = await this.fileService.uploadToStorage(file, {
-          folder: 'kyc-verification',
-          access: 'public',
-        });
-        uploadedUrls.push(result.url);
-      }
-    }
+    // Private, like the KYC documents themselves. These are evidence an admin
+    // attaches while reviewing an identity — usually photographs of the very
+    // same papers — and they were going to the public bucket under a guessable
+    // filename. They are only ever displayed in the admin detail view, so
+    // nothing public breaks by moving them.
+    const verificationBucket = await kycBucket(
+      this.systemConfig,
+      this.configService,
+    );
+
+    // The bytes are already in the bucket: `uploadVerificationImage` put them
+    // there as the admin picked each file, and this call carries only their
+    // keys. What is left to do is check that each key is one this profile is
+    // allowed to reference and that the object is really there.
+    //
+    // Deduped first. A double-click that submits the same key twice must not
+    // produce two rows pointing at one object.
+    const uniqueDocuments = [
+      ...new Map((documents ?? []).map((doc) => [doc.key, doc])).values(),
+    ];
+
+    // Resolved BEFORE the transaction opens, for the reason
+    // `createProfileWithDocuments` spells out: these are network round-trips,
+    // and holding a Postgres transaction open across them is how a slow bucket
+    // becomes a connection-pool outage.
+    //
+    // In parallel, unlike the sequential upload loop this replaces — a HEAD is
+    // a few hundred bytes and there are at most ten of them.
+    //
+    // The url each descriptor carries is used only as a derivation fallback
+    // inside `resolveVerificationImageKey` and then dropped. Storing it is what
+    // left KYC rows holding a dead credential; the key is the durable half, and
+    // the stream route reads from it.
+    const uploaded = (
+      await Promise.all(
+        uniqueDocuments.map((doc) =>
+          this.resolveVerificationImageKey(profileId, verificationBucket, doc),
+        ),
+      )
+    ).map((key) => ({ key }));
 
     const now = new Date();
     await this.prisma.$transaction([
       this.prisma.profile.update({
         where: { id: profileId },
         data: {
-          verification_status: decision as VerificationStatus,
+          verification_status: decision,
           verified_by: adminUserId,
           verified_at: now,
           kyc_verification_note: note,
@@ -739,7 +1018,7 @@ export class ProfileService {
       this.prisma.kycDocument.updateMany({
         where: { profile_id: profileId },
         data: {
-          verification_status: decision as VerificationStatus,
+          verification_status: decision,
           verified_by: adminUserId,
           verified_at: now,
           rejection_reason: decision === 'REJECTED' ? note : null,
@@ -750,11 +1029,12 @@ export class ProfileService {
         where: { profile_id: profileId },
       }),
 
-      ...uploadedUrls.map((url) =>
+      ...uploaded.map(({ key }) =>
         this.prisma.kycVerificationImage.create({
           data: {
             profile_id: profileId,
-            image_url: url,
+            image_url: kycObjectRef(verificationBucket, key),
+            storage_key: key,
             uploaded_by: adminUserId === 'system' ? null : adminUserId,
           },
         }),
@@ -793,6 +1073,19 @@ export class ProfileService {
             err,
           );
         });
+
+      // Pay out any parrainage that has been waiting on this KYC. A filleul
+      // who paid while their parrain was still in the review queue leaves the
+      // referral QUALIFIED_ON_HOLD; this is the trigger that releases it, which
+      // is why holding costs no scheduler of its own.
+      void this.referralService
+        .settleHeldForReferrer(profileId)
+        .catch((err) => {
+          this.logger.warn(
+            `Held referral settlement failed for referrer=${profileId}`,
+            err,
+          );
+        });
     }
 
     return this.getProfileDetailForAdmin(profileId);
@@ -801,7 +1094,17 @@ export class ProfileService {
   async updateProfileStatusByAdmin(
     profileId: string,
     status: AccountStatus,
+    reason?: string,
   ): Promise<AdminProfileDetailResponse> {
+    const trimmedReason = reason?.trim() || null;
+
+    // Suspending someone without saying why is what this whole path exists to
+    // stop: the notification then reads "your account was suspended" and the
+    // user has nothing to act on. The admin UI already requires it client-side.
+    if (status === AccountStatus.SUSPENDED && !trimmedReason) {
+      throw new BadRequestException('La raison de la suspension est requise');
+    }
+
     const profile = await this.prisma.profile.findUnique({
       where: { id: profileId },
       select: {
@@ -817,9 +1120,26 @@ export class ProfileService {
       throw new NotFoundException('Profil non trouvé');
     }
 
+    const becomingSuspended =
+      profile.status !== AccountStatus.SUSPENDED &&
+      status === AccountStatus.SUSPENDED;
+    const leavingSuspended =
+      profile.status === AccountStatus.SUSPENDED &&
+      status !== AccountStatus.SUSPENDED;
+
     await this.prisma.profile.update({
       where: { id: profileId },
-      data: { status },
+      data: {
+        status,
+        // The stored reason describes the CURRENT suspension. Leaving it behind
+        // on reactivation would show a stale motive next to an active account.
+        ...(becomingSuspended
+          ? { suspension_reason: trimmedReason, suspended_at: new Date() }
+          : {}),
+        ...(leavingSuspended
+          ? { suspension_reason: null, suspended_at: null }
+          : {}),
+      },
     });
 
     this.eventEmitter.emit(AdminNotificationEvent.PROFILE_STATUS_CHANGED, {
@@ -837,15 +1157,13 @@ export class ProfileService {
     ) {
       try {
         if (profile.phone) {
-          const tpl = this.accountActivatedTemplate(profile.profile_type);
-
           await this.whatsAppService.sendTemplateMessage(
             profile.phone,
-            tpl.contentSid,
-            tpl.variables({
+            this.accountActivatedTemplateKey(profile.profile_type),
+            {
               firstName: profile.first_name,
               path: ACTIVATION_LANDING_PATH,
-            }),
+            },
             profileId,
           );
         }
@@ -862,25 +1180,65 @@ export class ProfileService {
             `Failed to grant welcome credit for profile ${profileId}`,
           );
         });
+
+      // An account coming back from SUSPENDED becomes an eligible parrain
+      // again, so anything held while it was suspended settles here.
+      void this.referralService.settleHeldForReferrer(profileId).catch(() => {
+        this.logger.warn(
+          `Held referral settlement failed for referrer=${profileId}`,
+        );
+      });
     }
 
-    if (
-      profile.status !== AccountStatus.SUSPENDED &&
-      status === AccountStatus.SUSPENDED
-    ) {
+    if (becomingSuspended) {
       try {
         if (profile.email) {
           await this.mailService.sendMail({
             to: profile.email,
             subject: 'Votre compte a été suspendu',
             html: await this.layoutService.wrap(
-              accountSuspendedEmail(profile.first_name),
+              accountSuspendedEmail(
+                profile.first_name,
+                trimmedReason ?? undefined,
+              ),
             ),
           });
         }
       } catch {
         this.logger.warn(
           `Failed to send suspension email for profile ${profileId}`,
+        );
+      }
+
+      // WhatsApp as well as email. Both fields are required on a profile, so
+      // this is not about reachability — it is about which channel is read.
+      // WhatsApp is where this user base actually is; an email announcing a
+      // suspension can sit unopened for days.
+      try {
+        if (profile.phone) {
+          // Minted here, not by the outbound processor: this send goes
+          // straight to the provider and never enters the queue, so nothing
+          // else would fill the CTA's variable. A null code degrades to the
+          // bare path — the button then lands on the login screen instead of
+          // deep-linking, which beats a dead link.
+          const loginCode = await this.whatsAppLoginLink
+            .mint(profileId, SUSPENDED_CTA_PATH)
+            .catch(() => null);
+
+          await this.whatsAppService.sendTemplateMessage(
+            profile.phone,
+            'accountSuspended',
+            {
+              firstName: profile.first_name,
+              reason: trimmedReason,
+              loginCode,
+            },
+            profileId,
+          );
+        }
+      } catch {
+        this.logger.warn(
+          `Failed to send suspension WhatsApp message for profile ${profileId}`,
         );
       }
     }
@@ -974,8 +1332,14 @@ export class ProfileService {
     if (dto.description !== undefined) data.description = dto.description;
     if (dto.address !== undefined) data.address = dto.address;
     if (dto.phone !== undefined) data.phone = dto.phone;
+    // Empty string clears it, unlike `phone` above, which has no "absent"
+    // state — a profile always has a WhatsApp number, and most have no second.
+    if (dto.directPhone !== undefined) {
+      data.direct_phone = dto.directPhone.trim() || null;
+    }
     if (dto.email !== undefined) data.email = dto.email;
     if (dto.profileType !== undefined) data.profile_type = dto.profileType;
+    Object.assign(data, this.geo.resolveLocation(dto));
     return data;
   }
 
@@ -1064,12 +1428,22 @@ export class ProfileService {
           {
             AND: [
               { first_name: { contains: parts[0], mode: 'insensitive' } },
-              { last_name: { contains: parts.slice(1).join(' '), mode: 'insensitive' } },
+              {
+                last_name: {
+                  contains: parts.slice(1).join(' '),
+                  mode: 'insensitive',
+                },
+              },
             ],
           },
           {
             AND: [
-              { first_name: { contains: parts.slice(1).join(' '), mode: 'insensitive' } },
+              {
+                first_name: {
+                  contains: parts.slice(1).join(' '),
+                  mode: 'insensitive',
+                },
+              },
               { last_name: { contains: parts[0], mode: 'insensitive' } },
             ],
           },
@@ -1104,6 +1478,11 @@ export class ProfileService {
           email: true,
           phone: true,
           address: true,
+          country_code: true,
+          country_name: true,
+          city: true,
+          latitude: true,
+          longitude: true,
           description: true,
           status: true,
           profile_type: true,
@@ -1114,13 +1493,51 @@ export class ProfileService {
           rejection_reason: true,
           kyc_verification_note: true,
           reliability_score: true,
+          rating_avg: true,
+          rating_count: true,
+          billing_status: true,
+          suspension_reason: true,
+          suspended_at: true,
+          last_login_at: true,
+          activated_at: true,
+          first_login: true,
+          read_and_approved_policies: true,
+          portfolio_slug: true,
+          vector_indexed_at: true,
           avatar_url: true,
           created_at: true,
           updated_at: true,
+          categories: {
+            select: { category: { select: { id: true, name: true } } },
+          },
+          // Subselects on the same query rather than a count per row — the
+          // export pulls whole pages at a time, and a per-profile round trip
+          // would turn one export into thousands of queries.
+          _count: {
+            select: {
+              job_offers: true,
+              applications: true,
+              penalties: true,
+            },
+          },
         },
       }),
       this.prisma.profile.count({ where }),
     ]);
+
+    // `_count` cannot express "penalties that are unpaid", so the one filtered
+    // count is a single grouped query over the page rather than one per profile.
+    const unpaidByProfile = new Map<string, number>();
+    if (profiles.length > 0) {
+      const grouped = await this.prisma.penalty.groupBy({
+        by: ['profile_id'],
+        where: { profile_id: { in: profiles.map((p) => p.id) }, paid_at: null },
+        _count: { _all: true },
+      });
+      for (const row of grouped) {
+        unpaidByProfile.set(row.profile_id, row._count._all);
+      }
+    }
 
     const data: AdminProfileListItem[] = profiles.map((p) => ({
       id: p.id,
@@ -1129,6 +1546,9 @@ export class ProfileService {
       email: p.email,
       phone: p.phone,
       address: p.address,
+      countryCode: p.country_code,
+      countryName: p.country_name,
+      city: p.city,
       description: p.description,
       status: p.status,
       profileType: p.profile_type,
@@ -1142,6 +1562,25 @@ export class ProfileService {
       avatarUrl: p.avatar_url,
       createdAt: p.created_at,
       updatedAt: p.updated_at,
+      latitude: p.latitude,
+      longitude: p.longitude,
+      categoryIds: p.categories.map((pc) => pc.category.id),
+      categoryNames: p.categories.map((pc) => pc.category.name),
+      ratingAvg: p.rating_avg,
+      ratingCount: p.rating_count,
+      billingStatus: p.billing_status,
+      suspensionReason: p.suspension_reason,
+      suspendedAt: p.suspended_at,
+      lastLoginAt: p.last_login_at,
+      activatedAt: p.activated_at,
+      firstLogin: p.first_login,
+      readAndApprovedPolicies: p.read_and_approved_policies,
+      portfolioSlug: p.portfolio_slug,
+      vectorIndexedAt: p.vector_indexed_at,
+      jobOffersCount: p._count.job_offers,
+      applicationsCount: p._count.applications,
+      penaltiesCount: p._count.penalties,
+      unpaidPenaltiesCount: unpaidByProfile.get(p.id) ?? 0,
     }));
 
     return { data, total, page, limit };
@@ -1202,6 +1641,27 @@ export class ProfileService {
           return 0;
         });
 
+      // Record who invited this profile. Credits nothing — the parrainage pays
+      // out when this user first pays by mobile money for a connection.
+      //
+      // After the transaction and swallowed on failure, for the same reason the
+      // portfolio slug above is: an unknown code, a self-referral or a dropped
+      // connection must never roll back a completed signup.
+      if (createProfileDto.referralCode) {
+        await this.referralService
+          .recordReferral({
+            refereeId: profile.id,
+            code: createProfileDto.referralCode,
+            source: createProfileDto.referralSource ?? ReferralSource.MANUAL_CODE,
+          })
+          .catch((err) =>
+            this.logger.warn(
+              `Referral not recorded for profile=${profile.id}`,
+              err,
+            ),
+          );
+      }
+
       // Geocode address asynchronously (fire-and-forget)
       this.geocodingService
         .geocode(createProfileDto.address)
@@ -1261,20 +1721,387 @@ export class ProfileService {
   }
 
   /**
-   * Uploads a single KYC file to storage and returns its public URL.
+   * Where one KYC row's bytes actually live: a bucket and a key, or null when
+   * the row points at nothing readable.
+   *
+   * Two shapes have to resolve here. A row written since the key was derived
+   * server-side carries `storage_key` and lives in the private bucket. A row
+   * written before that carries no key at all, only a legacy PUBLIC url — and
+   * that url is enough, because `deriveKey` reconstructs the key from it and
+   * the object is still in the public bucket until the backfill moves it.
+   *
+   * Reading the legacy case out of the url rather than fetching the url means
+   * the stream route works on untouched production data, so it can ship
+   * without waiting on the backfill, and it does it without the server ever
+   * making an outbound request to a url held in a database column.
+   */
+  private async resolveKycStorage(
+    storageKey: string | null,
+    storedUrl: string | null,
+  ): Promise<{ bucket: string; key: string } | null> {
+    if (storageKey) {
+      return {
+        bucket: await kycBucket(this.systemConfig, this.configService),
+        key: storageKey,
+      };
+    }
+
+    const legacy = legacyKycUrl(storedUrl);
+    if (!legacy) return null;
+
+    const { publicBaseUrl, buckets } = await storageNames(
+      this.systemConfig,
+      this.configService,
+    );
+    const derived = deriveKey(legacy, publicBaseUrl, buckets);
+    if (!derived || !isKycKey(derived.key)) return null;
+
+    const [publicBucket] = buckets;
+    const bucket = derived.bucket || publicBucket;
+    if (!bucket) return null;
+
+    return { bucket, key: derived.key };
+  }
+
+  /**
+   * One KYC document's bytes, for an admin who is allowed to see them.
+   *
+   * `profileId` is part of the lookup rather than checked afterwards: a
+   * document id that belongs to another profile simply does not match, so the
+   * route cannot be walked sideways by swapping one id.
+   */
+  async streamKycDocument(
+    profileId: string,
+    documentId: string,
+  ): Promise<DownloadResult & { filename: string }> {
+    const doc = await this.prisma.kycDocument.findFirst({
+      where: { id: documentId, profile_id: profileId },
+      select: {
+        storage_key: true,
+        document_url: true,
+        document_category: true,
+      },
+    });
+
+    if (!doc) {
+      throw new NotFoundException('Document introuvable.');
+    }
+
+    return this.streamKycObject(
+      doc.storage_key,
+      doc.document_url,
+      doc.document_category,
+    );
+  }
+
+  /** The same, for a verification image attached during review. */
+  async streamVerificationImage(
+    profileId: string,
+    imageId: string,
+  ): Promise<DownloadResult & { filename: string }> {
+    const img = await this.prisma.kycVerificationImage.findFirst({
+      where: { id: imageId, profile_id: profileId },
+      select: { storage_key: true, image_url: true },
+    });
+
+    if (!img) {
+      throw new NotFoundException('Image introuvable.');
+    }
+
+    return this.streamKycObject(img.storage_key, img.image_url, 'verification');
+  }
+
+  private async streamKycObject(
+    storageKey: string | null,
+    storedUrl: string | null,
+    label: string,
+  ): Promise<DownloadResult & { filename: string }> {
+    const target = await this.resolveKycStorage(storageKey, storedUrl);
+
+    if (!target) {
+      throw new NotFoundException('Fichier indisponible.');
+    }
+
+    const downloaded = await this.fileService.download(
+      target.key,
+      target.bucket,
+    );
+
+    // The route path carries no extension, so the filename is what tells a
+    // download what it is.
+    const ext = target.key.split('.').pop();
+    return {
+      ...downloaded,
+      filename: ext && ext !== target.key ? `${label}.${ext}` : label,
+    };
+  }
+
+  /**
+   * Uploads a single KYC file and returns a SIGNED url plus its storage key.
    * Used by POST /profile/kyc-upload so files are uploaded during onboarding
    * (one round-trip per file) instead of inline with profile creation.
+   *
+   * Two things changed here, and both were load-bearing.
+   *
+   * `access: 'public'` put identity documents — ID cards, passports, and the
+   * selfie held next to them — behind a permanent, unauthenticated URL. They
+   * now go to a bucket that is never published, and are read back through a
+   * signature that dies within the hour.
+   *
+   * And the key is returned. It used to be dropped here, which is why
+   * `storage_key` is NULL on every KYC row ever written: the caller never had
+   * a key to send back, so `createKycDocumentRecord` was called without one and
+   * nothing could ever be signed.
+   *
+   * The url is still returned, and still works, because onboarding falls back
+   * to it when the local preview is gone (`kycDocumentPreview ?? kycDocumentUrl`
+   * in the client's confirmation view). An hour covers a signup session.
    */
-  async uploadKycFile(file: Express.Multer.File): Promise<{ url: string }> {
+  async uploadKycFile(
+    file: Express.Multer.File,
+  ): Promise<{ url: string; key: string }> {
     const result = await this.fileService.uploadToStorage(file, {
       folder: 'kyc-documents',
-      access: 'public',
+      access: 'private',
+      bucket: await kycBucket(this.systemConfig, this.configService),
     });
-    return { url: result.url };
+    return { url: result.url, key: result.key };
+  }
+
+  /**
+   * One image an admin attaches while reviewing an identity, uploaded on its
+   * own so the verify call afterwards carries only descriptors.
+   *
+   * The admin modal used to POST every attachment as binary inside the verify
+   * request — all-or-nothing, unbounded, and with nothing to show a reviewer on
+   * a slow connection but a spinner on the submit button. Splitting the upload
+   * out is what lets each file fail and retry by itself.
+   *
+   * FOLDER IS SCOPED TO THE PROFILE. Every provider builds the key as
+   * `${folder}/${filename}`, so this yields
+   * `kyc-verification/<profileId>/<ts>_<rand>.jpg`. That still satisfies
+   * `isKycKey`, and it gives `verifyProfileKyc` a structural check it could not
+   * otherwise make: a key submitted for one profile cannot name an object
+   * uploaded under another. Rows written before this keep their flat keys and
+   * stay readable — the stream route reads `storage_key` verbatim.
+   *
+   * NOT WATERMARKED, unlike everything else that goes through
+   * `uploadToStorage`. These images are only ever served through the
+   * authenticated stream route, so the mark protects nothing, and it re-encodes
+   * the very detail a reviewer opened the image to read.
+   */
+  async uploadVerificationImage(
+    profileId: string,
+    file: Express.Multer.File,
+  ): Promise<{ url: string; key: string }> {
+    // Checked before the PUT, not after: an admin working on a deleted profile
+    // should find out now rather than after uploading ten photographs.
+    const profile = await this.prisma.profile.findUnique({
+      where: { id: profileId },
+      select: { id: true },
+    });
+
+    if (!profile) {
+      throw new NotFoundException('Profil non trouvé');
+    }
+
+    const result = await this.fileService.uploadToStorage(file, {
+      folder: `kyc-verification/${profileId}`,
+      access: 'private',
+      bucket: await kycBucket(this.systemConfig, this.configService),
+      watermark: false,
+    });
+
+    return { url: result.url, key: result.key };
+  }
+
+  /**
+   * The object key for one submitted KYC document, decided HERE rather than
+   * accepted from the caller.
+   *
+   * This is the fix for the bug that made a document unviewable the hour after
+   * it was uploaded. `storage_key` used to come only from an optional DTO
+   * field, so a client that did not send one — a bundle loaded before the
+   * private-bucket rollout, a mobile app, anything calling the API directly —
+   * produced a row with a NULL key and a *signed* url frozen into
+   * `document_url`. Nothing could re-sign it, and the signature died in an
+   * hour. Deriving the key from the url the caller already sent removes the
+   * dependency on the caller behaving well.
+   *
+   * The hint is still honoured when it is a plausible KYC key, because a
+   * well-behaved client knows the key exactly and the url is only ever a
+   * reconstruction of it. But it is a candidate, not an answer: `isKycKey`
+   * rejects anything outside the KYC folders, and the object still has to be
+   * found in a bucket. Returning a caller-supplied string unchecked is what
+   * this method exists to stop doing.
+   *
+   * Accepts an object that is still in the PUBLIC bucket. That is precisely the
+   * case that produced this report — an onboarding session that uploaded some
+   * files before the cutover and submitted after it — and rejecting it would
+   * fail a signup for a file that is present and correct. It is logged, and the
+   * backfill relocates it.
+   */
+  private async resolveKycObject(
+    label: string,
+    url: string,
+    hintKey?: string,
+  ): Promise<string> {
+    const { publicBaseUrl, buckets } = await storageNames(
+      this.systemConfig,
+      this.configService,
+    );
+    const derived = deriveKey(url, publicBaseUrl, buckets);
+
+    if (hintKey && !isKycKey(hintKey)) {
+      this.logger.warn(
+        `Ignoring ${label} storage key hint that is not a KYC key: ${hintKey}`,
+      );
+    }
+
+    // The hint first — it is exact when it is right. The derived key is the
+    // fallback that makes a silent client harmless.
+    const candidates = [
+      hintKey && isKycKey(hintKey) ? hintKey : null,
+      derived && isKycKey(derived.key) ? derived.key : null,
+    ].filter((key): key is string => !!key);
+
+    if (candidates.length === 0) {
+      throw new BadRequestException(
+        `Le fichier ${label} n'est pas un document KYC valide.`,
+      );
+    }
+
+    const privateBucket = await kycBucket(
+      this.systemConfig,
+      this.configService,
+    );
+    const [publicBucket] = buckets;
+
+    for (const key of new Set(candidates)) {
+      if (await this.fileService.exists(key, privateBucket)) return key;
+
+      // Not in the private bucket. Before moving on, look in the public one: a
+      // session that straddled the rollout uploaded there, and the file is real.
+      if (publicBucket && (await this.fileService.exists(key, publicBucket))) {
+        this.logger.warn(
+          `${label} is still in the public bucket (${key}). Accepting it and ` +
+            'recording the key; run prisma/backfill-kyc-storage-keys.ts to move it.',
+        );
+        return key;
+      }
+    }
+
+    throw new BadRequestException(
+      `Le fichier ${label} est introuvable. Merci de le téléverser à nouveau.`,
+    );
+  }
+
+  /**
+   * The object key for one verification image an admin attached.
+   *
+   * Deliberately NOT `resolveKycObject`, which sits directly above and is
+   * forgiving in three ways that would be wrong here:
+   *
+   * 1. It accepts an object still sitting in the PUBLIC bucket, because an
+   *    onboarding session that straddled the bucket split really did upload
+   *    there. Nothing of the sort applies to an image `uploadVerificationImage`
+   *    wrote seconds ago against a hardcoded private bucket — accepting a
+   *    public-bucket object here would quietly reopen the exposure the split
+   *    exists to close.
+   * 2. Its precedence is url-first with the key as a hint, because that caller
+   *    is an unauthenticated client that may know neither. Here it is inverted:
+   *    the key came from our own endpoint in this session and is authoritative,
+   *    while the url is a signed preview that may already have expired.
+   * 3. It accepts any KYC key, `kyc-documents/` included. A verification image
+   *    must not be able to point at the worker's passport object — verification
+   *    images are replaced wholesale on every verify, so that would let one
+   *    admin action rewrite what an evidence row references.
+   *
+   * Same primitives as that method — `isKycKey`, `deriveKey`, `storageNames`,
+   * `fileService.exists` — so this is a second policy, not a second
+   * implementation.
+   */
+  private async resolveVerificationImageKey(
+    profileId: string,
+    bucket: string,
+    doc: { key: string; url?: string },
+  ): Promise<string> {
+    const prefix = `kyc-verification/${profileId}/`;
+
+    const usable = (
+      candidate: string | null | undefined,
+    ): candidate is string =>
+      !!candidate && isKycKey(candidate) && candidate.startsWith(prefix);
+
+    let key: string | null = usable(doc.key) ? doc.key : null;
+
+    // Only reached by a caller that lost the key but kept the url. The admin
+    // client always has both, so this is belt-and-braces rather than a path
+    // anything takes today.
+    if (!key && doc.url) {
+      const { publicBaseUrl, buckets } = await storageNames(
+        this.systemConfig,
+        this.configService,
+      );
+      const derived = deriveKey(doc.url, publicBaseUrl, buckets);
+      if (usable(derived?.key)) key = derived.key;
+    }
+
+    if (!key) {
+      this.logger.warn(
+        `Rejected a verification image key for profile=${profileId}: ${doc.key}`,
+      );
+      throw new BadRequestException(
+        "Une des images jointes n'est pas une pièce de vérification valide.",
+      );
+    }
+
+    // The private bucket and nothing else — see reason 1 above.
+    if (!(await this.fileService.exists(key, bucket))) {
+      throw new BadRequestException(
+        'Une des images jointes est introuvable. Merci de la téléverser à nouveau.',
+      );
+    }
+
+    return key;
   }
 
   private async createProfileWithDocuments(createProfileDto: CreateProfileDto) {
-    const { kycDocumentUrl, kycSelfieUrl } = createProfileDto;
+    const { kycDocumentUrl, kycSelfieUrl, kycDocumentBackUrl } =
+      createProfileDto;
+
+    // Resolved BEFORE the transaction opens. These do network I/O against R2,
+    // and holding a Postgres transaction open across it is how a slow bucket
+    // becomes a pool exhaustion; a rejection here also has to leave no
+    // half-written profile behind.
+    const wantsBackSide =
+      createProfileDto.documentType !== DocumentType.PASSPORT &&
+      !!kycDocumentBackUrl;
+
+    const [documentKey, documentBackKey, selfieKey] = await Promise.all([
+      this.resolveKycObject(
+        "recto du document d'identité",
+        kycDocumentUrl,
+        createProfileDto.kycDocumentKey,
+      ),
+      wantsBackSide
+        ? this.resolveKycObject(
+            "verso du document d'identité",
+            kycDocumentBackUrl,
+            createProfileDto.kycDocumentBackKey,
+          )
+        : Promise.resolve(undefined),
+      this.resolveKycObject(
+        'selfie',
+        kycSelfieUrl,
+        createProfileDto.kycSelfieKey,
+      ),
+    ]);
+
+    const privateBucket = await kycBucket(
+      this.systemConfig,
+      this.configService,
+    );
 
     return this.prisma.$transaction(async (tx) => {
       const createdProfile = await this.createProfileRecord(
@@ -1295,20 +2122,43 @@ export class ProfileService {
         });
       }
 
+      // A PASSPORT has no back to photograph, so it gets two rows; every other
+      // type gets three. Gating on documentType rather than merely on the URL
+      // being present is what makes a back sent alongside a PASSPORT a no-op
+      // instead of an orphan row no reviewer would ever be shown.
+      //
+      // The keys are the ones this service derived, not the ones the client
+      // sent, and the url is now a canonical `s3://` reference rather than
+      // whatever the client round-tripped. A signed url written here is an
+      // expired url written here.
       await Promise.all([
         this.createKycDocumentRecord(
           tx,
           createdProfile.id,
           createProfileDto.documentType,
           'DOCUMENT',
-          kycDocumentUrl,
+          privateBucket,
+          documentKey,
         ),
+        ...(wantsBackSide && documentBackKey
+          ? [
+              this.createKycDocumentRecord(
+                tx,
+                createdProfile.id,
+                createProfileDto.documentType,
+                'DOCUMENT_BACK',
+                privateBucket,
+                documentBackKey,
+              ),
+            ]
+          : []),
         this.createKycDocumentRecord(
           tx,
           createdProfile.id,
           createProfileDto.documentType,
           'SELFIE',
-          kycSelfieUrl,
+          privateBucket,
+          selfieKey,
         ),
       ]);
 
@@ -1341,7 +2191,9 @@ export class ProfileService {
         last_name: createProfileDto.lastName,
         email: createProfileDto.email,
         phone: createProfileDto.phone,
+        direct_phone: createProfileDto.directPhone ?? null,
         address: createProfileDto.address,
+        ...this.geo.resolveLocation(createProfileDto),
         description: createProfileDto.description || '',
         profile_type: createProfileDto.profileType,
         category_id: null,
@@ -1349,6 +2201,16 @@ export class ProfileService {
         verification_status: 'PENDING',
         reliability_score: 100,
         read_and_approved_policies: true,
+        // Signup already proves the number: onboarding is WhatsApp-first and
+        // every message the platform sends this profile goes to `phone`. The
+        // separate "link your number" step only re-asked for what we had, and
+        // left new profiles unreachable by anything that targets connected
+        // numbers (ad dispatch, reminders) until they happened to reply.
+        //
+        // This does NOT activate the account — `status` stays
+        // PENDING_ACTIVATION until KYC passes. The bot's pre-activation gate
+        // keys on `status`, not on this flag, so the KYC wall still holds.
+        whatsapp_connected: true,
       },
       select: {
         id: true,
@@ -1360,21 +2222,21 @@ export class ProfileService {
     tx: PrismaTransactionClient,
     profileId: string,
     documentType: CreateProfileDto['documentType'] | undefined,
-    documentCategory: 'DOCUMENT' | 'SELFIE',
-    documentUrl: string,
-    storageKey?: string,
+    documentCategory: KycDocumentCategory,
+    bucket: string,
+    storageKey: string,
   ) {
     const data: {
       profile_id: string;
       document_type?: CreateProfileDto['documentType'];
-      document_category: 'DOCUMENT' | 'SELFIE';
+      document_category: KycDocumentCategory;
       document_url: string;
-      storage_key?: string;
+      storage_key: string;
       verification_status: 'PENDING';
     } = {
       profile_id: profileId,
       document_category: documentCategory,
-      document_url: documentUrl,
+      document_url: kycObjectRef(bucket, storageKey),
       storage_key: storageKey,
       verification_status: 'PENDING',
     };
@@ -1448,6 +2310,159 @@ export class ProfileService {
 
   private isPrismaError(error: any): boolean {
     return error instanceof Prisma.PrismaClientKnownRequestError;
+  }
+
+  /**
+   * Step 1 of changing the WhatsApp number: prove the new handset is reachable.
+   *
+   * Writes nothing to the profile. The number is the login identity, so the
+   * only safe order is prove-then-switch: committing here would let a single
+   * typo send every future login link to a number the user does not own, and
+   * would turn a borrowed session into a permanent account takeover rather than
+   * a temporary one.
+   *
+   * The code goes to the NEW number, not the current one. Sending to the
+   * current one would only re-confirm what we already know — and the person who
+   * just lost that handset is exactly who this exists for.
+   */
+  async requestPhoneChange(
+    profileId: string,
+    newPhone: string,
+  ): Promise<{ success: boolean }> {
+    const profile = await this.prisma.profile.findUnique({
+      where: { id: profileId },
+      select: { id: true, phone: true },
+    });
+    if (!profile) {
+      throw new NotFoundException('Profil non trouvé');
+    }
+
+    const phone = newPhone.trim().toLowerCase();
+    if (phone === profile.phone) {
+      throw new BadRequestException(
+        'Ce numéro est déjà celui de votre compte',
+      );
+    }
+
+    // `phone` is UNIQUE, so committing a taken number would fail at the
+    // database with an opaque error after the user had already entered a code.
+    // Checked here so the refusal lands on the field they can still edit.
+    const taken = await this.prisma.profile.findUnique({
+      where: { phone },
+      select: { id: true },
+    });
+    if (taken) {
+      throw new ConflictException(
+        'Ce numéro est déjà utilisé par un autre compte',
+      );
+    }
+
+    if (!this.whatsAppService.isConfigured()) {
+      throw new ServiceUnavailableException(
+        "Le service WhatsApp n'est pas configuré",
+      );
+    }
+
+    const code = randomInt(100000, 1000000).toString();
+
+    // Sent BEFORE the pending change is stored: if WhatsApp refuses the number
+    // — not on WhatsApp, unreachable — there is nothing to clean up, and the
+    // user learns immediately rather than at the code screen.
+    const sent = await this.whatsAppService.sendTemplateMessage(
+      phone,
+      'otp',
+      code,
+      profileId,
+    );
+    if (!sent) {
+      this.logger.error(
+        `WhatsApp failed to send phone-change code for profile=${profileId}`,
+      );
+      throw new ServiceUnavailableException(
+        "Impossible d'envoyer le code sur ce numéro. Vérifiez qu'il est bien sur WhatsApp.",
+      );
+    }
+
+    await this.redis.set(
+      `${PHONE_CHANGE_KEY_PREFIX}${profileId}`,
+      JSON.stringify({ phone, code, attempts: 0 }),
+      'EX',
+      PHONE_CHANGE_TTL_SECONDS,
+    );
+
+    this.logger.log(`Phone-change code sent for profile=${profileId}`);
+    return { success: true };
+  }
+
+  /**
+   * Step 2: the code came back, so the handset is real. Switch the number.
+   *
+   * Also sets `whatsapp_connected`: reaching this point is proof the new number
+   * receives WhatsApp, which is the only thing that flag claims.
+   */
+  async confirmPhoneChange(
+    profileId: string,
+    code: string,
+  ): Promise<{ success: boolean; phone: string }> {
+    const key = `${PHONE_CHANGE_KEY_PREFIX}${profileId}`;
+    const raw = await this.redis.get(key);
+    if (!raw) {
+      throw new BadRequestException(
+        'Aucun changement de numéro en attente, ou le code a expiré',
+      );
+    }
+
+    const pending = JSON.parse(raw) as {
+      phone: string;
+      code: string;
+      attempts: number;
+    };
+
+    if (!this.codesMatch(pending.code, code)) {
+      const attempts = pending.attempts + 1;
+      if (attempts >= PHONE_CHANGE_MAX_ATTEMPTS) {
+        await this.redis.del(key);
+        throw new BadRequestException(
+          'Trop de tentatives. Demandez un nouveau code.',
+        );
+      }
+      // Preserves the original TTL rather than restarting it, so guessing
+      // cannot extend the window it happens in.
+      const ttl = await this.redis.ttl(key);
+      await this.redis.set(
+        key,
+        JSON.stringify({ ...pending, attempts }),
+        'EX',
+        ttl > 0 ? ttl : PHONE_CHANGE_TTL_SECONDS,
+      );
+      throw new BadRequestException('Code incorrect');
+    }
+
+    try {
+      await this.prisma.profile.update({
+        where: { id: profileId },
+        data: { phone: pending.phone, whatsapp_connected: true },
+      });
+    } catch (err) {
+      // Someone claimed the number in the five minutes since we checked.
+      this.throwIfUniqueConstraintViolation(err);
+      throw err;
+    }
+
+    await this.redis.del(key);
+    this.logger.log(`Phone changed for profile=${profileId}`);
+    return { success: true, phone: pending.phone };
+  }
+
+  /**
+   * Constant-time compare, so a wrong code cannot be narrowed digit by digit
+   * from how long the answer took. Lengths are checked first because
+   * `timingSafeEqual` throws on a mismatch.
+   */
+  private codesMatch(expected: string, supplied: string): boolean {
+    const a = Buffer.from(expected);
+    const b = Buffer.from(supplied);
+    return a.length === b.length && timingSafeEqual(a, b);
   }
 
   async requestWhatsAppVerification(
@@ -1575,6 +2590,6 @@ export class ProfileService {
   }
 
   private getProfileTypeLabel(profileType: ProfileType): string {
-    return PROFILE_TYPE_LABELS[profileType] ?? (profileType as string);
+    return PROFILE_TYPE_LABELS[profileType] ?? profileType;
   }
 }

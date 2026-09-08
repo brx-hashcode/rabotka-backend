@@ -5,16 +5,35 @@ import { EMPTY_FEATURES, type UserFeatures } from '../user-feature.service';
 
 jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => {});
 
+/**
+ * One clock for every fixture in this file.
+ *
+ * `Date.now()` read per fixture gave each candidate its own millisecond, and
+ * two candidates built in the same array literal can straddle a tick on a
+ * loaded CI runner. `fresh` and `urgency` are both read off those timestamps,
+ * so a 1ms skew is a real score difference — enough to flip an assertion that
+ * expects the delivered order preserved, and only ever on CI. Freezing one
+ * instant makes the fixtures differ by exactly what each test declares.
+ *
+ * Frozen at module load, not against the scoring clock: only the DIFFERENCE
+ * between candidates orders a feed, and the drift against `Date.now()` inside
+ * the service is the test's own runtime — milliseconds, on half-lives of days.
+ */
+const NOW = Date.now();
+
 const candidate = (id: string, over: Partial<Candidate> = {}): Candidate => ({
   id,
   categoryId: 'cat-a',
   employerId: 'emp-1',
-  scheduledAt: new Date(Date.now() + 86_400_000),
-  createdAt: new Date(Date.now() - 3_600_000),
+  scheduledAt: new Date(NOW + 86_400_000),
+  createdAt: new Date(NOW - 3_600_000),
   amount: null,
   paymentFlow: null,
   latitude: null,
   longitude: null,
+  countryCode: null,
+  city: null,
+  isRemote: false,
   ...over,
 });
 
@@ -28,7 +47,9 @@ const worker = (id: string, over: Record<string, unknown> = {}) => ({
   categoryIds: ['cat-a'],
   latitude: null,
   longitude: null,
-  createdAt: new Date(Date.now() - 86_400_000),
+  countryCode: null,
+  city: null,
+  createdAt: new Date(NOW - 86_400_000),
   ...over,
 });
 
@@ -51,9 +72,12 @@ function makeDeps() {
     workersFromAll: jest.fn().mockResolvedValue([]),
     workerQuality: jest.fn().mockResolvedValue(new Map()),
     lastActiveAt: jest.fn().mockResolvedValue(new Map()),
+    similarity: jest.fn().mockResolvedValue(new Map()),
   };
   const featureService = { get: jest.fn().mockResolvedValue(features()) };
   const systemConfig = {
+    // On by default, matching production (`matching.use_embeddings = true`).
+    isSimilarityEnabled: jest.fn().mockResolvedValue(true),
     getRecommendationMinScore: jest.fn().mockResolvedValue(0),
     get: jest.fn().mockResolvedValue('false'),
     getFees: jest.fn().mockResolvedValue({ reliabilityScoreMin: 50 }),
@@ -188,8 +212,8 @@ describe('RecommendationEngineService', () => {
           employerId: 'e1',
           latitude: -4.26,
           longitude: 15.28,
-          scheduledAt: new Date(Date.now() + 60_000),
-          createdAt: new Date(),
+          scheduledAt: new Date(NOW + 60_000),
+          createdAt: new Date(NOW),
           amount: 12000,
           paymentFlow: 'DAILY',
         }),
@@ -352,7 +376,10 @@ describe('RecommendationEngineService', () => {
       deps.systemConfig.getRecommendationMinScore.mockResolvedValue(0.5);
       deps.sources.fromAllOpen.mockResolvedValue([
         ...Array.from({ length: 4 }, (_, i) =>
-          candidate(`good${i}`, { categoryId: `cat-${i}`, employerId: `e${i}` }),
+          candidate(`good${i}`, {
+            categoryId: `cat-${i}`,
+            employerId: `e${i}`,
+          }),
         ),
         candidate('bad-offer', { categoryId: 'bad', employerId: 'e9' }),
       ]);
@@ -463,7 +490,7 @@ describe('RecommendationEngineService', () => {
         candidate(`o${i}`, {
           categoryId: `cat-${i}`,
           employerId: `e${i}`,
-          createdAt: new Date(Date.now() - i * 12 * 3_600_000),
+          createdAt: new Date(NOW - i * 12 * 3_600_000),
         }),
       );
 
@@ -496,6 +523,196 @@ describe('RecommendationEngineService', () => {
 
       expect(exploring).toHaveLength(5);
       expect(exploring.map((r) => r.id)).not.toEqual(greedy.map((r) => r.id));
+    });
+  });
+  /**
+   * Proximity used to collapse to a flat 0.5 whenever either side lacked
+   * coordinates. `prox` carries 0.35 of the cold-start weight — the heaviest
+   * term there is — so for anyone whose fire-and-forget geocoding had failed,
+   * a third of the ranking was a constant that ordered nothing.
+   */
+  describe('proximity falls back to declared country/city', () => {
+    const brazzaville = {
+      latitude: null,
+      longitude: null,
+      country_code: 'CG',
+      city: 'Brazzaville',
+    };
+
+    it('ranks a same-city offer above one merely in the same country', async () => {
+      deps.prisma.profile.findUnique.mockResolvedValue(brazzaville);
+      deps.sources.fromAffinities.mockResolvedValue([
+        candidate('far', { countryCode: 'CG', city: 'Pointe-Noire' }),
+        candidate('near', { countryCode: 'CG', city: 'Brazzaville' }),
+      ]);
+
+      const out = await recommend(2);
+
+      // Both arrive from one source with `far` ranked first by the fuser, so
+      // only proximity can put `near` on top.
+      expect(out[0].id).toBe('near');
+    });
+
+    it('ranks a domestic offer above a foreign one', async () => {
+      deps.prisma.profile.findUnique.mockResolvedValue(brazzaville);
+      deps.sources.fromAffinities.mockResolvedValue([
+        candidate('abroad', { countryCode: 'FR', city: 'Paris' }),
+        candidate('home', { countryCode: 'CG', city: 'Owando' }),
+      ]);
+
+      expect((await recommend(2))[0].id).toBe('home');
+    });
+
+    it('leaves geocoded candidates on the haversine path', async () => {
+      // The regression that would matter most: quietly degrading users who
+      // already rank correctly. `close` is ~1 km away and in a DIFFERENT
+      // country; if the coarse fallback were consulted it would lose.
+      deps.prisma.profile.findUnique.mockResolvedValue({
+        latitude: -4.2634,
+        longitude: 15.2429,
+        country_code: 'CG',
+        city: 'Brazzaville',
+      });
+      deps.sources.fromAffinities.mockResolvedValue([
+        candidate('sameCityFarAway', {
+          latitude: -4.7889,
+          longitude: 11.8636,
+          countryCode: 'CG',
+          city: 'Brazzaville',
+        }),
+        candidate('close', {
+          latitude: -4.2723,
+          longitude: 15.2429,
+          countryCode: 'CD',
+          city: 'Kinshasa',
+        }),
+      ]);
+
+      expect((await recommend(2))[0].id).toBe('close');
+    });
+
+    it('drops distance entirely for a remote job', async () => {
+      // Not 0.5. A remote job is not "distance unknown", it is "distance
+      // irrelevant" — a constant would drag every remote offer toward the
+      // middle against local work while ordering nothing between them.
+      deps.prisma.profile.findUnique.mockResolvedValue(brazzaville);
+      deps.sources.fromAffinities.mockResolvedValue([
+        candidate('remote', { isRemote: true, countryCode: null, city: null }),
+        candidate('abroad', { countryCode: 'FR', city: 'Paris' }),
+      ]);
+
+      // With prox dropped, `remote` is scored on the terms that do carry
+      // information and beats a job on the other side of the world.
+      expect((await recommend(2))[0].id).toBe('remote');
+    });
+
+    /**
+     * Semantic similarity — the term that carries a worker's portfolio.
+     *
+     * Realizations are part of the text MatchingService embeds, so wiring `sim`
+     * is what makes them count. It was hardcoded null, and since
+     * computeRelevance silently drops nulls and redistributes their weight,
+     * nothing errored — the signal just never arrived.
+     */
+    describe('similarity', () => {
+      it('orders by similarity when nothing else separates candidates', async () => {
+        // A WARM user: `sim` carries 0 weight for a cold one by design, so a
+        // cold fixture would pass whatever the wiring did.
+        deps.featureService.get.mockResolvedValue(
+          features({ positiveCount: 50 }),
+        );
+        // Identical in every other respect and delivered in the losing order,
+        // so only `sim` can put `close` on top. Proves the score is actually
+        // consumed rather than merely computed.
+        deps.sources.fromAffinities.mockResolvedValue([
+          candidate('far'),
+          candidate('close'),
+        ]);
+        deps.sources.similarity.mockResolvedValue(
+          new Map([
+            ['far', 0.55],
+            ['close', 0.95],
+          ]),
+        );
+
+        expect((await recommend(2))[0].id).toBe('close');
+      });
+
+      it('treats a missing score as no evidence, not as zero', async () => {
+        // `0` would actively bury a worker who simply has not been indexed
+        // yet. Null drops the term and redistributes its weight instead, so an
+        // unindexed candidate can still win on everything else.
+        deps.featureService.get.mockResolvedValue(
+          features({ positiveCount: 50, categoryAffinity: { 'cat-hot': 1 } }),
+        );
+        deps.sources.fromAffinities.mockResolvedValue([
+          candidate('unindexed', { categoryId: 'cat-hot' }),
+          candidate('indexed'),
+        ]);
+        deps.sources.similarity.mockResolvedValue(new Map([['indexed', 0.6]]));
+
+        expect((await recommend(2))[0].id).toBe('unindexed');
+      });
+
+      it('keeps the feed when the similarity lookup fails', async () => {
+        // Degrade the ranking, never empty the feed.
+        deps.sources.similarity.mockRejectedValue(new Error('qdrant down'));
+        deps.sources.fromAffinities.mockResolvedValue([
+          candidate('a'),
+          candidate('b'),
+        ]);
+
+        expect(await recommend(2)).toHaveLength(2);
+      });
+
+      it('makes no Qdrant call when embeddings are switched off', async () => {
+        // One flag still disables embeddings everywhere, and it must short
+        // circuit before the query rather than discard the result after it.
+        deps.systemConfig.isSimilarityEnabled.mockResolvedValue(false);
+        deps.sources.fromAffinities.mockResolvedValue([candidate('a')]);
+
+        await recommend(1);
+
+        expect(deps.sources.similarity).not.toHaveBeenCalled();
+      });
+    });
+
+    it('scores the whole feed against one clock', async () => {
+      // The scoring pass used to read `Date.now()` per candidate. A tick landing
+      // mid-loop then scored a later candidate against a later instant, worth a
+      // millisecond of `fresh` and `urgency` — enough to reorder candidates
+      // nothing else separates, which is exactly what flipped this file's
+      // ordering assertions on CI and never on a quiet machine.
+      //
+      // A clock that advances on every read is that tick boundary made
+      // certain. It fails without the snapshot and passes with it, so this
+      // holds the fix rather than merely describing it.
+      const t = { ms: Date.now() };
+      const advancing = jest
+        .spyOn(Date, 'now')
+        .mockImplementation(() => t.ms++);
+      try {
+        deps.prisma.profile.findUnique.mockResolvedValue(null);
+        deps.sources.fromAffinities.mockResolvedValue([
+          candidate('a'),
+          candidate('b'),
+        ]);
+
+        expect((await recommend(2)).map((r) => r.id)).toEqual(['a', 'b']);
+      } finally {
+        advancing.mockRestore();
+      }
+    });
+
+    it('is unchanged when neither side declared a country', async () => {
+      // Nobody who has told us nothing may be moved by this change.
+      deps.prisma.profile.findUnique.mockResolvedValue(null);
+      deps.sources.fromAffinities.mockResolvedValue([
+        candidate('a'),
+        candidate('b'),
+      ]);
+
+      expect((await recommend(2)).map((r) => r.id)).toEqual(['a', 'b']);
     });
   });
 });
@@ -534,7 +751,7 @@ describe('RecommendationEngineService.recommendWorkersForEmployer', () => {
       expect(deps.sources.workersFromAll).not.toHaveBeenCalled();
     });
 
-    it('falls back to the employer\'s own offer categories', async () => {
+    it("falls back to the employer's own offer categories", async () => {
       deps.prisma.jobOffer.findMany.mockResolvedValue([
         { category_id: 'cat-x' },
         { category_id: null },
@@ -671,8 +888,8 @@ describe('RecommendationEngineService.recommendWorkersForEmployer', () => {
       ]);
       deps.sources.lastActiveAt.mockResolvedValue(
         new Map([
-          ['active', new Date(Date.now() - 3_600_000)],
-          ['dormant', new Date(Date.now() - 90 * 86_400_000)],
+          ['active', new Date(NOW - 3_600_000)],
+          ['dormant', new Date(NOW - 90 * 86_400_000)],
         ]),
       );
 
@@ -689,7 +906,7 @@ describe('RecommendationEngineService.recommendWorkersForEmployer', () => {
         worker('dormant', { categoryIds: ['cat-a'] }),
       ]);
       deps.sources.lastActiveAt.mockResolvedValue(
-        new Map([['dormant', new Date(Date.now() - 200 * 86_400_000)]]),
+        new Map([['dormant', new Date(NOW - 200 * 86_400_000)]]),
       );
 
       const out = await recommend(2);
@@ -762,6 +979,27 @@ describe('RecommendationEngineService.recommendWorkersForEmployer', () => {
       );
 
       expect(await recommend(7)).toHaveLength(7);
+    });
+  });
+  /**
+   * The employer-side mirror. Worth its own test rather than trusting symmetry:
+   * this path reads country/city off the WORKER row, a different select from
+   * the one the job path uses, so a missing field here would not show up above.
+   */
+  describe('proximity falls back to declared country/city', () => {
+    it('ranks a worker in the employer\u2019s own city first', async () => {
+      deps.prisma.profile.findUnique.mockResolvedValue({
+        latitude: null,
+        longitude: null,
+        country_code: 'CG',
+        city: 'Brazzaville',
+      });
+      deps.sources.workersFromAffinities.mockResolvedValue([
+        worker('elsewhere', { countryCode: 'CG', city: 'Dolisie' }),
+        worker('local', { countryCode: 'CG', city: 'Brazzaville' }),
+      ]);
+
+      expect((await recommend(2))[0].id).toBe('local');
     });
   });
 });

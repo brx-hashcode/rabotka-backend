@@ -15,6 +15,7 @@ import {
   UploadedFile,
   BadRequestException,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { FilesInterceptor, FileInterceptor } from '@nestjs/platform-express';
@@ -31,6 +32,7 @@ import { ArchiveService } from '../admin-archive/archive.service';
 import { BulkDeleteDto } from '../../common/dto/bulk-delete.dto';
 import { LogService } from '../log/log.service';
 import { extractRequestMeta } from '../../common/utils/request-meta.util';
+import { imageMulterOptions } from '../../common/utils/image-upload.util';
 import type { AdminAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
 import { UserRole } from '@prisma/client';
 import { AdminAuthGuard } from '../auth/guards/admin-auth.guard';
@@ -40,11 +42,13 @@ import { PaymentRequestService } from '../payment-request/payment-request.servic
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { WalletService } from '../wallet/wallet.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
+import type { AdminMessageDelivery } from '../whatsapp/whatsapp.service';
 import { MailService } from '../mail/mail.service';
 import { LayoutService } from '../mail/layout.service';
 import { kycApprovedEmail, kycRejectedEmail } from '../mail/templates';
-import { WHATSAPP_TEMPLATES } from '../../common/constants/whatsapp-templates';
 import { MessageDirection, BotPlatform } from '@prisma/client';
+import { KYC_REJECTED_CTA_PATH } from '../../common/constants/whatsapp-templates';
+import { WhatsAppLoginLinkService } from '../auth/whatsapp-login-link.service';
 import { AdminListProfilesDto } from './dto/admin-list-profiles.dto';
 import {
   AdminVerifyProfileDto,
@@ -67,6 +71,7 @@ export class AdminProfileController {
     private readonly paymentRequestService: PaymentRequestService,
     private readonly prisma: PrismaService,
     private readonly whatsApp: WhatsAppService,
+    private readonly loginLink: WhatsAppLoginLinkService,
     private readonly mail: MailService,
     private readonly layout: LayoutService,
     private readonly walletService: WalletService,
@@ -101,7 +106,8 @@ export class AdminProfileController {
   @Roles(UserRole.MANAGER)
   @ApiOperation({
     summary: 'Bulk restore archived rows (admin only)',
-    description: 'Clears deleted_at. Only rows that are currently archived are affected.',
+    description:
+      'Clears deleted_at. Only rows that are currently archived are affected.',
   })
   @ApiResponse({ status: 201, description: 'Rows restored' })
   async bulkRestore(
@@ -177,6 +183,89 @@ export class AdminProfileController {
     return await this.profileService.getProfileDetailForAdmin(id);
   }
 
+  /**
+   * The bytes of one KYC document, streamed behind the admin session.
+   *
+   * This replaces handing the browser a signed url. A signed url is a bearer
+   * credential: it works for anyone who copies it out of the network panel, it
+   * lingers in history, and it goes stale while the tab sits open — which is
+   * how an identity document turned into a broken image an hour after upload.
+   * Here the url never exists, and the check happens on every single request.
+   *
+   * `no-store` because the alternative is an identity document sitting in an
+   * admin's disk cache after they log out.
+   */
+  @Get(':id/kyc-documents/:documentId/raw')
+  @Roles(UserRole.MODERATOR)
+  @ApiOperation({
+    summary: 'Stream a KYC document (admin only)',
+    description:
+      'Returns the raw bytes, authenticated by the admin session. No url is ' +
+      'ever issued for the underlying object.',
+  })
+  @ApiResponse({ status: 200, description: 'The file bytes' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({
+    status: 404,
+    description: 'No such document on this profile, or the file is gone',
+  })
+  async streamKycDocument(
+    @Param('id') id: string,
+    @Param('documentId') documentId: string,
+    @Res() res: Response,
+  ): Promise<void> {
+    const file = await this.profileService.streamKycDocument(id, documentId);
+    this.sendKycFile(res, file);
+  }
+
+  @Get(':id/verification-images/:imageId/raw')
+  @Roles(UserRole.MODERATOR)
+  @ApiOperation({
+    summary: 'Stream a KYC verification image (admin only)',
+    description: 'As above, for an image attached during review.',
+  })
+  @ApiResponse({ status: 200, description: 'The file bytes' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({
+    status: 404,
+    description: 'No such image on this profile, or the file is gone',
+  })
+  async streamVerificationImage(
+    @Param('id') id: string,
+    @Param('imageId') imageId: string,
+    @Res() res: Response,
+  ): Promise<void> {
+    const file = await this.profileService.streamVerificationImage(id, imageId);
+    this.sendKycFile(res, file);
+  }
+
+  private sendKycFile(
+    res: Response,
+    file: {
+      body: NodeJS.ReadableStream;
+      contentType?: string;
+      contentLength?: number;
+      filename: string;
+    },
+  ): void {
+    res.setHeader(
+      'Content-Type',
+      file.contentType || 'application/octet-stream',
+    );
+    if (file.contentLength !== undefined) {
+      res.setHeader('Content-Length', String(file.contentLength));
+    }
+    // `inline` so the admin's <img> renders it rather than downloading it; the
+    // filename is only there for when a reviewer does save a copy.
+    res.setHeader('Content-Disposition', `inline; filename="${file.filename}"`);
+    res.setHeader('Cache-Control', 'private, no-store');
+    // The bytes are a photograph of somebody's ID; nothing should be sniffing
+    // them into a different content type and rendering them as a document.
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+
+    file.body.pipe(res);
+  }
+
   @Get(':id/logs')
   @Roles(UserRole.MODERATOR)
   @ApiOperation({
@@ -204,8 +293,13 @@ export class AdminProfileController {
     return await this.walletService.getProfileWalletForAdmin(id);
   }
 
+  // ADMIN, not MANAGER like the rest of this controller: this moves real money
+  // into an account. It is also what makes it safe to grant SUPPORT `full` on
+  // `admin/profiles` — support needs to verify identities and edit profiles,
+  // and lateral roles are capped at MANAGER, so raising this one handler keeps
+  // crediting out of reach without narrowing anything else.
   @Post(':id/wallet/credit')
-  @Roles(UserRole.MANAGER)
+  @Roles(UserRole.ADMIN)
   @ApiOperation({ summary: 'Manually credit a profile wallet (admin only)' })
   async creditWallet(
     @Param('id') id: string,
@@ -288,6 +382,34 @@ export class AdminProfileController {
     }));
   }
 
+  @Get(':id/whatsapp-window')
+  @Roles(UserRole.MODERATOR)
+  @ApiOperation({
+    summary: "Whether the profile's 24h WhatsApp window is open (admin only)",
+    description:
+      'Tells the composer which delivery mode a WhatsApp message would use. ' +
+      'Advisory only — the window can open or lapse between this call and the ' +
+      'send, so the send path recomputes it and is authoritative.',
+  })
+  async getWhatsAppWindow(@Param('id') id: string) {
+    const profile = await this.prisma.profile.findUnique({
+      where: { id },
+      select: { id: true, phone: true },
+    });
+    if (!profile) {
+      throw new NotFoundException('Profil non trouvé');
+    }
+
+    const { open, lastInboundAt } = await this.whatsApp.isServiceWindowOpen(id);
+
+    return {
+      windowOpen: open,
+      lastInboundAt,
+      mode: open ? 'FREE_FORM' : 'TEMPLATE',
+      hasPhone: !!profile.phone,
+    };
+  }
+
   @Post(':id/messages')
   @Roles(UserRole.MANAGER)
   @ApiOperation({ summary: 'Send a message to a profile (admin only)' })
@@ -312,34 +434,19 @@ export class AdminProfileController {
       throw new BadRequestException('Le message ne peut pas être vide');
     }
 
-    let adminFullName = "L'équipe Rabotka";
-    if (adminUserId) {
-      const admin = await this.prisma.user.findUnique({
-        where: { id: adminUserId },
-        select: { first_name: true, last_name: true },
-      });
-      if (admin) {
-        adminFullName = `${admin.first_name} ${admin.last_name}`.trim();
-      }
-    }
-
+    let delivery: AdminMessageDelivery | undefined;
     if (body.channel === 'WHATSAPP') {
-      await this.sendWhatsAppMessage(
+      delivery = await this.sendWhatsAppMessage(
         profile,
         body.message,
-        adminFullName,
         adminUserId,
       );
     } else {
-      await this.sendEmailMessage(
-        profile,
-        body.message,
-        adminFullName,
-        files,
-        adminUserId,
-      );
+      await this.sendEmailMessage(profile, body.message, files, adminUserId);
     }
 
+    // Logged before the throw below: a message that failed to reach the profile
+    // is exactly the event you want on the timeline.
     await this.logService.create({
       action: 'PROFILE_MESSAGE_SENT',
       entityType: 'Profile',
@@ -349,43 +456,51 @@ export class AdminProfileController {
       metadata: {
         channel: body.channel,
         attachmentsCount: files?.length ?? 0,
+        deliveryMode: delivery?.mode ?? null,
+        success: delivery?.sent ?? true,
+        ...(delivery?.sent === false ? { failureReason: delivery.error } : {}),
       },
       ...extractRequestMeta(req),
     });
 
-    return { success: true };
+    if (delivery && !delivery.sent) {
+      // 503, not 400: the failure is upstream (Twilio credentials, a Meta
+      // rejection, the sandbox cap), not something the admin typed wrong. This
+      // endpoint used to return success here and the message simply vanished.
+      throw new ServiceUnavailableException(
+        `Le message n'a pas pu être remis sur WhatsApp. ${delivery.error ?? ''}`.trim(),
+      );
+    }
+
+    return { success: true, deliveryMode: delivery?.mode ?? null };
   }
 
   private async sendWhatsAppMessage(
     profile: { id: string; phone: string | null },
     message: string,
-    adminFullName: string,
     adminUserId: string | undefined,
-  ): Promise<void> {
+  ): Promise<AdminMessageDelivery> {
     if (!profile.phone) {
       throw new BadRequestException("Ce profil n'a pas de numéro de téléphone");
     }
-    const whatsappBody = [
-      message.trim(),
-      '',
-      `_${adminFullName}_`,
-      `_L'équipe Rabotka_`,
-    ].join('\n');
-    // sendTextMessage persists the OUTBOUND Message itself (it's given the
-    // profileId + sender), so we must NOT create a second one here — doing so
-    // made every admin WhatsApp message show up twice in the conversation.
-    await this.whatsApp.sendTextMessage(
-      profile.phone,
-      whatsappBody,
-      profile.id,
+    // sendAdminMessage owns the whole WhatsApp side: it picks free-form vs the
+    // approved template from the 24h service window, formats the body (the same
+    // shape either way) and persists the OUTBOUND Message itself. We must NOT
+    // create a second one here — doing so made every admin WhatsApp message show
+    // up twice in the conversation. Unlike the rest of WhatsAppService it hands
+    // failures back rather than swallowing them, which is what the caller turns
+    // into a 503.
+    return this.whatsApp.sendAdminMessage({
+      phone: profile.phone,
+      profileId: profile.id,
+      message,
       adminUserId,
-    );
+    });
   }
 
   private async sendEmailMessage(
     profile: { id: string; email: string | null },
     message: string,
-    adminFullName: string,
     files: Express.Multer.File[] | undefined,
     adminUserId: string | undefined,
   ): Promise<void> {
@@ -407,7 +522,10 @@ export class AdminProfileController {
       })) ?? [];
     const messageHtml = message.trim().replaceAll('\n', '<br/>');
     const html = await this.layout.wrap(
-      `<p>${messageHtml}</p><br/><p>${adminFullName}<br/>L'équipe Rabotka</p>`,
+      // Signed by the team, not the individual admin — same reason the WhatsApp
+      // template dropped its name variable: Rabotka answers as one team, and the
+      // two channels must not sign the same message differently.
+      `<p>${messageHtml}</p><br/><p>L'équipe Rabotka</p>`,
     );
     await this.mail.sendMail({
       to: profile.email,
@@ -550,21 +668,7 @@ export class AdminProfileController {
   @Patch(':id/avatar')
   @Roles(UserRole.MANAGER)
   @UseInterceptors(
-    FileInterceptor('avatar', {
-      limits: { fileSize: 5 * 1024 * 1024 },
-      fileFilter: (_req, file, cb) => {
-        if (['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype)) {
-          cb(null, true);
-        } else {
-          cb(
-            new BadRequestException(
-              'Only JPEG, PNG or WEBP images are allowed',
-            ),
-            false,
-          );
-        }
-      },
-    }),
+    FileInterceptor('avatar', imageMulterOptions()),
   )
   @ApiConsumes('multipart/form-data')
   @ApiOperation({ summary: 'Update profile avatar (admin only)' })
@@ -589,21 +693,62 @@ export class AdminProfileController {
     return result;
   }
 
+  /**
+   * Upload ONE supporting image for a KYC review, ahead of the verify call.
+   *
+   * `PATCH :id/verify` used to carry the bytes itself, as up to ten binary
+   * parts. That made the whole review all-or-nothing on submit, with no
+   * progress and no way to retry a single failed photograph — and the route
+   * carried neither a size limit nor a mime filter.
+   *
+   * MANAGER, matching `:id/verify` exactly. A role that could upload here but
+   * not verify would be able to write objects into the private KYC bucket with
+   * no way to attach them, which is a write with no audit trail.
+   *
+   * Images only — no PDF, unlike the onboarding `POST /profile/kyc-upload`.
+   * The admin dropzone accepts jpeg/png/webp and compresses to JPEG before
+   * sending, so a PDF here would be a shape the UI cannot produce.
+   */
+  @Post(':id/verification-images')
+  @Roles(UserRole.MANAGER)
+  @UseInterceptors(
+    FileInterceptor('file', imageMulterOptions(10 * 1024 * 1024)),
+  )
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({
+    summary: 'Upload one KYC verification image (admin only)',
+    description:
+      'Stores the image in the private KYC bucket and returns its descriptor. ' +
+      'Pass the returned `key` to PATCH :id/verify. `key` is the durable half; ' +
+      '`url` is a signed preview that expires within the hour — never persist it.',
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'Image stored; key and url returned',
+  })
+  @ApiResponse({ status: 404, description: 'Profile not found' })
+  async uploadVerificationImage(
+    @Param('id') id: string,
+    @UploadedFile() file: Express.Multer.File | undefined,
+  ): Promise<{ key: string; url: string }> {
+    if (!file) throw new BadRequestException("L'image est requise");
+    return this.profileService.uploadVerificationImage(id, file);
+  }
+
   @Patch(':id/verify')
   @Roles(UserRole.MANAGER)
-  @UseInterceptors(FilesInterceptor('files', 10))
-  @ApiConsumes('multipart/form-data')
   @ApiOperation({
     summary: 'Verify or reject profile KYC (admin only)',
     description:
-      'Approves or rejects KYC verification for a profile and its documents. Supports uploading verification images.',
+      'Approves or rejects KYC verification for a profile and its documents. ' +
+      'Supporting images must be uploaded first via POST :id/verification-images; ' +
+      'this call carries only their keys.',
   })
   @ApiResponse({ status: 200, description: 'Updated profile details' })
   @ApiResponse({ status: 404, description: 'Profile not found' })
   async verify(
     @Param('id') id: string,
     @Body() dto: AdminVerifyProfileDto,
-    @UploadedFiles() files: Express.Multer.File[],
     @Req() req: any,
   ) {
     const adminUserId = req.user?.userId ?? 'system';
@@ -612,7 +757,7 @@ export class AdminProfileController {
       adminUserId as string,
       dto.decision,
       dto.reason,
-      files,
+      dto.documents,
     );
 
     await this.logService.create({
@@ -627,6 +772,9 @@ export class AdminProfileController {
       metadata: {
         decision: dto.decision,
         reason: dto.reason,
+        // The count, never the descriptors: a document's `url` is a live signed
+        // credential, and the audit log is not the place for one.
+        documentCount: dto.documents?.length ?? 0,
       },
     });
 
@@ -639,13 +787,8 @@ export class AdminProfileController {
         html: await this.layout.wrap(kycApprovedEmail(fullName)),
       });
 
-      const kycTpl = WHATSAPP_TEMPLATES.kyc;
       this.whatsApp
-        .sendTemplateMessage(
-          result.phone,
-          kycTpl.contentSid,
-          kycTpl.variables(result.firstName),
-        )
+        .sendTemplateMessage(result.phone, 'kyc', result.firstName, id)
         .catch((err) =>
           console.warn(
             `Failed to send KYC validated WhatsApp message for ${id}:`,
@@ -658,6 +801,35 @@ export class AdminProfileController {
         subject: 'Votre vérification KYC a été rejetée',
         html: await this.layout.wrap(kycRejectedEmail(fullName, dto.reason)),
       });
+
+      // The rejection used to go out by email only, and `email` is nullable on
+      // a profile while `phone` is not — so the people whose documents failed
+      // were the ones least likely to hear why.
+      // Minted here for the same reason as the suspension send: this goes
+      // straight to the provider, never through the outbound queue, so
+      // nothing else fills the CTA's variable. Null degrades to the bare
+      // path, which lands on the login screen rather than dead.
+      const loginCode = await this.loginLink
+        .mint(id, KYC_REJECTED_CTA_PATH)
+        .catch(() => null);
+
+      this.whatsApp
+        .sendTemplateMessage(
+          result.phone,
+          'kycRejected',
+          {
+            firstName: result.firstName,
+            reason: dto.reason,
+            loginCode,
+          },
+          id,
+        )
+        .catch((err) =>
+          console.warn(
+            `Failed to send KYC rejected WhatsApp message for ${id}:`,
+            err,
+          ),
+        );
     }
 
     return result;
@@ -680,6 +852,7 @@ export class AdminProfileController {
     const result = await this.profileService.updateProfileStatusByAdmin(
       id,
       dto.status,
+      dto.reason,
     );
 
     const adminUserId = req.user?.userId;

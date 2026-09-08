@@ -1,0 +1,36 @@
+# Operator tooling lives here. It runs against real credentials, so the rules
+# below exist to stop a local convenience file becoming a committed secret.
+#
+# Generated output already has its own rules in whatsapp-templates/out/ and
+# whatsapp-flows/out/ — this file covers the ad-hoc things that land at the top
+# level of scripts/ while someone is working.
+
+# Any environment file, whatever the suffix. The root .gitignore only lists the
+# specific names it expects at the repo root; a scripts/.env.staging would slip
+# straight through it.
+.env
+.env.*
+*.env
+
+# Python. Nothing in this service is Python — the one file that was
+# (create_listpickers.py, a Twilio Content list-picker creator) outlived its
+# feature and was removed. Anything reappearing here is a local scratch tool,
+# and those have a habit of holding an API key in a variable at the top.
+*.py
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Ad-hoc one-off scripts. The convention is a `_tmp-` or `_local-` prefix for
+# anything you do not intend to commit, so it can be written next to the module
+# it imports without being staged by a wide `git add`.
+_tmp-*
+_local-*
+*.local.ts
+
+# Command output someone piped to a file mid-debug. dump-twilio-config.ts in
+# particular prints live credentials to stdout.
+*.log
+*.out
+dump-*.txt

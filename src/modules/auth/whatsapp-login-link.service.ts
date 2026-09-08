@@ -34,6 +34,42 @@ export type WhatsAppLoginGrant = {
 export const DEFAULT_LOGIN_LANDING = 'home';
 
 /**
+ * Account states allowed to receive a one-tap login code.
+ *
+ * Named rather than inlined so the exclusion is explicit: BANNED is refused,
+ * and a new AccountStatus has to be added here deliberately rather than
+ * slipping in behind a `!==` comparison.
+ *
+ * SUSPENDED is allowed, which reverses the original rule. It was written when
+ * a session meant full privileges, so handing one to a suspended user was
+ * indeed handing them the platform. That is no longer true: `ActiveProfileGuard`
+ * refuses every action for a non-ACTIVE profile, so a session now grants
+ * READ access and nothing else — and a suspended user needs exactly that, to
+ * open the app, read why they were suspended and reach support. Refusing the
+ * code only broke the notifications telling them so.
+ *
+ * BANNED stays out: there is no path back, so there is nothing for them to
+ * read.
+ */
+const MINTABLE_STATUSES: ReadonlySet<AccountStatus> = new Set([
+  AccountStatus.ACTIVE,
+  AccountStatus.PENDING_ACTIVATION,
+  AccountStatus.SUSPENDED,
+]);
+
+/**
+ * The one place that decides which accounts a WhatsApp login link works for.
+ *
+ * Exported so the CONSUME side (`AuthService.loginWithWhatsAppCode`) applies
+ * the same rule instead of its own. It used to require ACTIVE, which quietly
+ * cancelled every widening done here: a code was minted and then refused on
+ * tap, and the failure looked like a broken link rather than a policy.
+ */
+export function canMintLoginCode(status: AccountStatus): boolean {
+  return MINTABLE_STATUSES.has(status);
+}
+
+/**
  * Reads the code and deletes it in the same round-trip, so two taps on a
  * forwarded message cannot both win. Mirrors the OTP verify-and-delete script
  * in `auth.service.ts`; GETDEL would need Redis >= 6.2.
@@ -81,7 +117,15 @@ export class WhatsAppLoginLinkService {
     });
 
     // A suspended or banned account must not get a free session handed to it.
-    if (profile?.status !== AccountStatus.ACTIVE) return null;
+    //
+    // PENDING_ACTIVATION is not that. It is a brand-new user waiting on KYC
+    // review, and signup already hands them a real 30-day session cookie
+    // (profile.controller), so refusing them a one-tap code grants no security
+    // — it only broke the links they are sent while they wait. The KYC-pending
+    // card is sent ONLY to pending profiles, so this guard rejected 100% of its
+    // mints and its button shipped the literal `/s/profile`: not a code, not a
+    // path, just a dead link into the login screen.
+    if (!profile || !MINTABLE_STATUSES.has(profile.status)) return null;
 
     const code = randomBytes(32).toString('base64url');
     await this.redis.set(

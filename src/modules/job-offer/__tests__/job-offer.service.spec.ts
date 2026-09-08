@@ -1,4 +1,5 @@
 import { AdminCacheService } from '../../../common/services/cache/admin-cache.service';
+import { GeoService } from '../../geo/geo.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import {
   BadRequestException,
@@ -12,10 +13,17 @@ import { SystemConfigService } from '../../system-config/system-config.service';
 import { WalletService } from '../../wallet/wallet.service';
 import { BotNotificationService } from '../../bot/services/bot-notification.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { JobOfferStatus, PaymentFlow } from '@prisma/client';
+import {
+  EmploymentType,
+  InteractionActor,
+  InteractionKind,
+  JobOfferStatus,
+  PaymentFlow,
+} from '@prisma/client';
 import { MatchingService } from '../../matching/matching.service';
 import { REDIS_CONNECTION } from '../../../common/services/redis/redis.constants';
-import { GeocodingService } from '../../../common/services/geocoding/geocoding.service';
+import { InteractionEventService } from '../../recommendation-engine/interaction-event.service';
+import { JobNotificationProcessor } from '../notification/job-notification.processor';
 
 const EMPLOYER_ID = 'employer-uuid-1';
 const OFFER_ID = 'offer-uuid-1';
@@ -34,6 +42,9 @@ const baseDto = {
   payment_flow: PaymentFlow.DAILY,
   address: '123 Avenue de la Paix, Poto-Poto',
   quantity: 2,
+  // Optional on the DTO, but declared here so the type-narrowing tests below
+  // can override it without casting through `unknown`.
+  employment_type: undefined as EmploymentType | undefined,
 };
 
 const mockOffer = {
@@ -61,6 +72,8 @@ describe('JobOfferService', () => {
   let systemConfigService: jest.Mocked<SystemConfigService>;
   let walletService: jest.Mocked<WalletService>;
   let botNotificationService: jest.Mocked<BotNotificationService>;
+  let jobNotification: jest.Mocked<JobNotificationProcessor>;
+  let interactionEvents: jest.Mocked<InteractionEventService>;
 
   beforeEach(async () => {
     const mockPrisma = {
@@ -99,10 +112,19 @@ describe('JobOfferService', () => {
 
     const mockBotNotificationService = {
       sendMessage: jest.fn().mockResolvedValue(undefined),
+      // Present so "create does not notify anyone itself" is an assertion
+      // rather than a matcher error against an undefined property.
+      sendRecommendedJobNotification: jest.fn().mockResolvedValue(true),
     };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        {
+          // The real GeoService: it has no dependencies beyond a checked-in
+          // JSON file, so a mock would only weaken the location assertions.
+          provide: GeoService,
+          useValue: new GeoService(),
+        },
         {
           // Pass-through cache: the loader always runs, so these specs keep
           // exercising the real queries rather than a cached value.
@@ -136,8 +158,12 @@ describe('JobOfferService', () => {
           useValue: { set: jest.fn().mockResolvedValue(null) },
         },
         {
-          provide: GeocodingService,
-          useValue: { geocode: jest.fn().mockResolvedValue(null) },
+          provide: JobNotificationProcessor,
+          useValue: { enqueue: jest.fn().mockResolvedValue(undefined) },
+        },
+        {
+          provide: InteractionEventService,
+          useValue: { record: jest.fn().mockResolvedValue(undefined) },
         },
       ],
     }).compile();
@@ -148,6 +174,8 @@ describe('JobOfferService', () => {
     systemConfigService = module.get(SystemConfigService);
     walletService = module.get(WalletService);
     botNotificationService = module.get(BotNotificationService);
+    jobNotification = module.get(JobNotificationProcessor);
+    interactionEvents = module.get(InteractionEventService);
   });
 
   describe('create()', () => {
@@ -170,6 +198,48 @@ describe('JobOfferService', () => {
         }),
       );
     });
+
+    it('hands the worker fan-out to the queue rather than running it inline', async () => {
+      // The fan-out used to be a detached promise chain inside `create`, which
+      // is why nothing here could assert on it: unretryable, invisible, and
+      // lost on restart. `create` now only enqueues.
+      await service.create(EMPLOYER_ID, { ...baseDto });
+
+      expect(jobNotification.enqueue).toHaveBeenCalledTimes(1);
+      expect(jobNotification.enqueue).toHaveBeenCalledWith(mockOffer.id);
+      expect(
+        botNotificationService.sendRecommendedJobNotification,
+      ).not.toHaveBeenCalled();
+    });
+
+    // Publishing is the employer's most deliberate statement of the sector they
+    // hire in, and it used to emit nothing at all — so their category affinity
+    // could only ever come from the boxes they ticked once at signup.
+    it('books the publication as an interest signal carrying the category', async () => {
+      (prisma.jobOffer.create as jest.Mock).mockResolvedValue({
+        ...mockOffer,
+        category_id: 'cat-plomberie',
+      });
+
+      await service.create(EMPLOYER_ID, { ...baseDto });
+
+      expect(interactionEvents.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          actorId: EMPLOYER_ID,
+          actorType: InteractionActor.EMPLOYER,
+          kind: InteractionKind.PUBLISH,
+          objectId: mockOffer.id,
+          // The whole point: `deriveFeatures` folds this into categoryAffinity.
+          categoryId: 'cat-plomberie',
+        }),
+      );
+    });
+
+    // No "survives a failing signal" test on purpose: `record` wraps its whole
+    // body in try/catch and never rejects, so every call site — this one
+    // included — fires it with a bare `void`. Forcing the mock to reject would
+    // assert a case the service's own contract rules out, and the unhandled
+    // rejection takes the Jest worker down with it.
 
     it('defaults quantity to 1 when not provided', async () => {
       const dtoWithoutQuantity = { ...baseDto, quantity: undefined as any };
@@ -359,6 +429,78 @@ describe('JobOfferService', () => {
     });
   });
 
+  describe('every type needs a date', () => {
+    /**
+     * `scheduled_at` means "the day this offer stops being open", which is true
+     * of any offer — for a MISSION it is also the day the work happens, for the
+     * rest it is only the application deadline.
+     *
+     * This used to be MISSION-only, on the reasoning that the others "have no
+     * single date". That confused when the job happens with when recruiting
+     * stops, and the cost was that every scan keying off this column skipped
+     * three of the four types — which is how a hired CDI became an offer that
+     * could never close and never be rated.
+     */
+    it.each([
+      EmploymentType.MISSION,
+      EmploymentType.CDI,
+      EmploymentType.CDD,
+      EmploymentType.STAGE,
+    ])('rejects a %s with no date', (employment_type) => {
+      const { scheduled_at: _omitted, ...noDate } = baseDto;
+
+      expect(() =>
+        service.validateCreateDto({
+          ...noDate,
+          employment_type,
+        } as typeof baseDto),
+      ).toThrow(BadRequestException);
+    });
+
+    it('names the mission date on a MISSION', () => {
+      const { scheduled_at: _omitted, ...noDate } = baseDto;
+
+      expect(() => service.validateCreateDto(noDate as typeof baseDto)).toThrow(
+        /date de la mission/i,
+      );
+    });
+
+    it('names the application deadline on an ongoing engagement', () => {
+      // The employer is being asked for two different things depending on the
+      // type. Demanding "la date de la mission" on a CDI is how you get one
+      // invented.
+      const { scheduled_at: _omitted, ...noDate } = baseDto;
+
+      expect(() =>
+        service.validateCreateDto({
+          ...noDate,
+          employment_type: EmploymentType.CDI,
+        } as typeof baseDto),
+      ).toThrow(/clôture des candidatures/i);
+    });
+
+    it('defaults to MISSION when the type is unspecified', () => {
+      const { scheduled_at: _omitted, ...noDate } = baseDto;
+
+      expect(() =>
+        service.validateCreateDto({
+          ...noDate,
+          employment_type: undefined,
+        } as typeof baseDto),
+      ).toThrow(/date de la mission/i);
+    });
+
+    it('still rejects a malformed date whatever the type', () => {
+      expect(() =>
+        service.validateCreateDto({
+          ...baseDto,
+          employment_type: EmploymentType.CDI,
+          scheduled_at: 'not-a-date',
+        } as typeof baseDto),
+      ).toThrow(BadRequestException);
+    });
+  });
+
   describe('validateCreateDto()', () => {
     it('throws when title is too short', () => {
       expect(() =>
@@ -434,9 +576,10 @@ describe('JobOfferService', () => {
     beforeEach(() => {
       (prisma.jobOffer.findUnique as jest.Mock).mockResolvedValue(expiredOffer);
       // Republishing puts a live offer back on the market, so it now also loads
-      // the actor to check KYC.
+      // the actor to check KYC and account standing.
       (prisma.profile.findUnique as jest.Mock).mockResolvedValue({
         verification_status: 'VERIFIED',
+        status: 'ACTIVE',
       });
       (prisma.jobOffer.update as jest.Mock).mockImplementation(
         ({ data }: { data: Record<string, unknown> }) =>
@@ -444,9 +587,24 @@ describe('JobOfferService', () => {
       );
     });
 
+    it('refuses a suspended employer', async () => {
+      // Reopening an expired offer put the employer back on the market, which
+      // is the one thing suspending them was supposed to prevent — create() has
+      // always refused this, republish() used to let it through.
+      (prisma.profile.findUnique as jest.Mock).mockResolvedValue({
+        verification_status: 'VERIFIED',
+        status: 'SUSPENDED',
+      });
+      await expect(
+        service.republish(OFFER_ID, OWNER_ID, hoursFromNow(48)),
+      ).rejects.toThrow(ForbiddenException);
+      expect(prisma.jobOffer.update).not.toHaveBeenCalled();
+    });
+
     it('refuses an employer whose KYC is not verified', async () => {
       (prisma.profile.findUnique as jest.Mock).mockResolvedValue({
         verification_status: 'PENDING',
+        status: 'ACTIVE',
       });
       await expect(
         service.republish(OFFER_ID, OWNER_ID, hoursFromNow(48)),

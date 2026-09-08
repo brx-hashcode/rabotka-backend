@@ -1,17 +1,16 @@
-import {
-  runJobStatusCheckFlow,
-} from '../job-status-check.flow';
+import { runJobStatusCheckFlow } from '../job-status-check.flow';
 import type { BotProfile, BotState } from '../../types/bot-state.types';
 import { FLOW_IDS } from '../../bot.constants';
 import { PaymentFlow } from '@prisma/client';
 
+// The worker answers this flow now — completion is theirs to confirm.
 const profile: BotProfile = {
-  id: 'employer-1',
+  id: 'worker-1',
   first_name: 'John',
-  last_name: 'Employer',
+  last_name: 'Worker',
   phone: '+242000001',
-  email: 'employer@test.com',
-  profile_type: 'EMPLOYER',
+  email: 'worker@test.com',
+  profile_type: 'WORKER',
   reliability_score: 85,
   status: 'ACTIVE',
 };
@@ -35,10 +34,9 @@ function makeState(payload: any = {}): BotState {
 function makeCtx() {
   return {
     applicationService: {
-      markJobCompleted: jest.fn().mockResolvedValue({}),
+      markCompletedByWorker: jest.fn().mockResolvedValue({}),
     } as any,
-    notificationService: {
-    } as any,
+    notificationService: {} as any,
     queueService: {
       addJob: jest.fn().mockResolvedValue(undefined),
     } as any,
@@ -91,12 +89,12 @@ describe('runJobStatusCheckFlow', () => {
     const result = await runJobStatusCheckFlow(makeState(), '1', profile, ctx);
     expect(result.clearState).toBe(true);
     expect(result.reply[0]).toContain('terminée');
-    expect(ctx.applicationService.markJobCompleted).toHaveBeenCalled();
+    expect(ctx.applicationService.markCompletedByWorker).toHaveBeenCalled();
   });
 
-  it('returns error when markJobCompleted fails', async () => {
+  it('returns error when markCompletedByWorker fails', async () => {
     const ctx = makeCtx();
-    ctx.applicationService.markJobCompleted.mockRejectedValue(
+    ctx.applicationService.markCompletedByWorker.mockRejectedValue(
       new Error('Failed'),
     );
     const result = await runJobStatusCheckFlow(makeState(), '1', profile, ctx);

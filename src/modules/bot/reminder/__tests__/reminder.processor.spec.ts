@@ -1,8 +1,11 @@
 import { Logger } from '@nestjs/common';
 import { ReminderProcessor } from '../reminder.processor';
-import { ApplicationStatus, JobOfferStatus } from '@prisma/client';
+import {
+  ApplicationStatus,
+  EmploymentType,
+  JobOfferStatus,
+} from '@prisma/client';
 import type { SystemConfigService } from '../../../system-config/system-config.service';
-import { WHATSAPP_TEMPLATES } from '../../../../common/constants/whatsapp-templates';
 
 jest.spyOn(Logger.prototype, 'log').mockImplementation(() => {});
 jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => {});
@@ -227,6 +230,70 @@ describe('ReminderProcessor', () => {
       );
     });
 
+    it('retires an undated offer on age, since it has no date to be past', async () => {
+      // This scan is the ONLY thing that ever retires an offer, and it filtered
+      // purely on scheduled_at — so a CDI/CDD/STAGE, which carries no closing
+      // date, would sit ACTIVE in the feed forever.
+      prisma.jobOffer.findMany
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([]);
+      prisma.application.findMany.mockResolvedValue([] as never);
+
+      await processor.process({ data: { type: 'scan' } });
+
+      const overdueQuery = prisma.jobOffer.findMany.mock.calls[1][0] as {
+        where: { OR: unknown[] };
+      };
+      expect(overdueQuery.where.OR).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ scheduled_at: { lt: expect.any(Date) } }),
+          expect.objectContaining({
+            scheduled_at: null,
+            created_at: { lt: expect.any(Date) },
+          }),
+        ]),
+      );
+    });
+
+    it('never auto-starts an ongoing engagement', async () => {
+      // Every type carries a date now. On a CDD/CDI/STAGE it is the day
+      // applications close, not a start time — without this filter a staffed
+      // CDI whose window shut would be flipped to IN_PROGRESS and its worker
+      // asked whether a job with years left to run is finished.
+      prisma.jobOffer.findMany.mockResolvedValue([] as never);
+      prisma.application.findMany.mockResolvedValue([] as never);
+
+      await processor.process({ data: { type: 'scan' } });
+
+      const autoStartQuery = prisma.jobOffer.findMany.mock.calls[0][0] as {
+        where: { employment_type: unknown };
+      };
+      expect(autoStartQuery.where.employment_type).toBe(EmploymentType.MISSION);
+    });
+
+    it('stops recruiting on a staffed engagement past its deadline', async () => {
+      // The expiry scan will not touch these — it requires zero accepted
+      // applications, since expiring an offer somebody was hired on would be
+      // wrong. That left a quantity-3 offer with one hire stuck forever:
+      // never full, so never closed; never empty, so never expired.
+      prisma.jobOffer.findMany.mockResolvedValue([] as never);
+      prisma.application.findMany.mockResolvedValue([] as never);
+      prisma.jobOffer.findMany.mockResolvedValueOnce([] as never); // autoStart
+      prisma.jobOffer.findMany.mockResolvedValueOnce([] as never); // expiry
+      prisma.jobOffer.findMany.mockResolvedValueOnce([] as never); // start window
+      prisma.jobOffer.findMany.mockResolvedValueOnce([
+        { id: 'offer-cdd' },
+      ] as never);
+
+      await processor.process({ data: { type: 'scan' } });
+
+      expect(prisma.jobOffer.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: { status: JobOfferStatus.FILLED },
+        }),
+      );
+    });
+
     it('cancels uncommitted applicants and notifies them when an offer expires', async () => {
       prisma.jobOffer.findMany
         .mockResolvedValueOnce([]) // offersToAutoStart
@@ -277,16 +344,34 @@ describe('ReminderProcessor', () => {
       // Each worker notified (+ the employer)
       expect(whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+2222',
-        WHATSAPP_TEMPLATES.offerExpiredApplicant.contentSid,
+        'offerExpiredApplicant',
         expect.any(Object),
         'worker-a',
       );
       expect(whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+3333',
-        WHATSAPP_TEMPLATES.offerExpiredApplicant.contentSid,
+        'offerExpiredApplicant',
         expect.any(Object),
         'worker-b',
       );
+
+      // ONCE each, and never the duplicate. `notifyExpiredOffer` used to send
+      // every applicant `offerUnavailableWorker` from the same list the caller
+      // was already sending `offerExpiredApplicant` to, so each of them got two
+      // billed templates for one event.
+      const perWorker = (phone: string) =>
+        whatsApp.sendTemplateMessage.mock.calls.filter(
+          (call: unknown[]) => call[0] === phone,
+        );
+      expect(perWorker('+2222')).toHaveLength(1);
+      expect(perWorker('+3333')).toHaveLength(1);
+      // On the template key alone, not via toHaveBeenCalledWith: the old call
+      // passed three arguments where the surviving one passes four, so an
+      // arity-bound matcher would pass without proving anything.
+      const keysSent = whatsApp.sendTemplateMessage.mock.calls.map(
+        (call: unknown[]) => call[1],
+      );
+      expect(keysSent).not.toContain('offerUnavailableWorker');
     });
 
     it('does not cancel applications when there are no overdue empty offers', async () => {
@@ -335,7 +420,7 @@ describe('ReminderProcessor', () => {
       );
       expect(whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+5555',
-        WHATSAPP_TEMPLATES.autoStarted.contentSid,
+        'autoStarted',
         expect.any(Object),
         'emp-filled',
       );
@@ -472,6 +557,9 @@ describe('ReminderProcessor', () => {
         '+1234567890',
         expect.any(String),
         expect.any(Object),
+        // The worker id now rides along so the reminder lands in the
+        // conversation history, not only in the delivery log.
+        expect.any(String),
       );
       expect(redis.set).toHaveBeenCalledWith(
         expect.stringContaining('app-1'),
@@ -570,8 +658,9 @@ describe('ReminderProcessor', () => {
       );
       expect(whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+1234567890',
-        WHATSAPP_TEMPLATES.reminderStart.contentSid,
+        'reminderStart',
         expect.any(Object),
+        expect.any(String),
       );
       expect(redis.set).toHaveBeenCalledWith(
         expect.stringContaining('app-1'),
@@ -626,11 +715,15 @@ describe('ReminderProcessor', () => {
   // ─── sendJobStatusCheckReminder() ────────────────────────────────────────────
 
   describe('sendJobStatusCheckReminder()', () => {
-    it('sends job status check reminder when offer is IN_PROGRESS', async () => {
+    it('asks the WORKER, not the employer — completion is theirs to confirm', async () => {
       prisma.jobOffer.findUnique = jest.fn().mockResolvedValue({
         status: JobOfferStatus.IN_PROGRESS,
         title: 'Test Job',
-        employer: { phone: '+242000001' },
+      });
+      prisma.application.findUnique.mockResolvedValue({
+        status: ApplicationStatus.STARTED,
+        worker_id: 'worker-1',
+        worker: { phone: '+242000002' },
       });
       await processor.process({
         data: {
@@ -642,11 +735,35 @@ describe('ReminderProcessor', () => {
         },
       });
       expect(whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
-        '+242000001',
-        WHATSAPP_TEMPLATES.statusCheck.contentSid,
+        '+242000002',
+        'statusCheck',
         expect.any(Object),
-        'emp-1',
+        'worker-1',
       );
+    });
+
+    it('stops chasing a worker who has already confirmed', async () => {
+      // Their application leaves ACCEPTED/STARTED the moment they confirm;
+      // re-pinging them after that is noise.
+      prisma.jobOffer.findUnique = jest.fn().mockResolvedValue({
+        status: JobOfferStatus.IN_PROGRESS,
+        title: 'Test Job',
+      });
+      prisma.application.findUnique.mockResolvedValue({
+        status: ApplicationStatus.END,
+        worker_id: 'worker-1',
+        worker: { phone: '+242000002' },
+      });
+      await processor.process({
+        data: {
+          type: 'reminder_job_status',
+          jobOfferId: 'offer-1',
+          employerId: 'emp-1',
+          applicationId: 'app-1',
+          paymentFlow: 'DAILY',
+        },
+      });
+      expect(whatsApp.sendTemplateMessage).not.toHaveBeenCalled();
     });
 
     it('skips when offer is not IN_PROGRESS', async () => {
@@ -703,7 +820,11 @@ describe('ReminderProcessor', () => {
       prisma.jobOffer.findUnique = jest.fn().mockResolvedValue({
         status: JobOfferStatus.IN_PROGRESS,
         title: 'Test Job',
-        employer: { phone: '+242000001' },
+      });
+      prisma.application.findUnique.mockResolvedValue({
+        status: ApplicationStatus.STARTED,
+        worker_id: 'worker-1',
+        worker: { phone: '+242000002' },
       });
       // Simulate existing Redis state with snoozeCount=3
       redis.get.mockResolvedValueOnce(
@@ -726,7 +847,7 @@ describe('ReminderProcessor', () => {
       // State is now written via CAS (redis.eval) to avoid overwriting active flows
       const evalCalls = redis.eval.mock.calls;
       const stateCall = evalCalls.find((call: unknown[]) =>
-        String(call[2]).includes('emp-1'),
+        String(call[2]).includes('worker-1'),
       );
       expect(stateCall).toBeDefined();
       const stateValue = JSON.parse(stateCall[3] as string) as {
@@ -741,7 +862,9 @@ describe('ReminderProcessor', () => {
         title: 'Test Job',
         employer: { phone: '+242000001' },
       });
-      whatsApp.sendTemplateMessage.mockRejectedValueOnce(new Error('send failed'));
+      whatsApp.sendTemplateMessage.mockRejectedValueOnce(
+        new Error('send failed'),
+      );
       await processor.process({
         data: {
           type: 'reminder_job_status',
@@ -844,7 +967,9 @@ describe('ReminderProcessor', () => {
           },
         ]); // openOverdue
       prisma.application.findMany.mockResolvedValue([] as never);
-      whatsApp.sendTemplateMessage.mockRejectedValueOnce(new Error('send failed'));
+      whatsApp.sendTemplateMessage.mockRejectedValueOnce(
+        new Error('send failed'),
+      );
       await processor.process({ data: { type: 'scan' } });
       // Should not throw; redis.set not called since sent=false
       expect(true).toBe(true);

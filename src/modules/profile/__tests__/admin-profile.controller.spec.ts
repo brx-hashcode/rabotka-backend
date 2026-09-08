@@ -1,4 +1,8 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  NotFoundException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { AdminProfileController } from '../admin-profile.controller';
 
 function makeProfileService() {
@@ -41,10 +45,20 @@ function makePrisma(profile: any = null) {
   };
 }
 
+function makeLoginLink() {
+  return { mint: jest.fn().mockResolvedValue('login-code-1') };
+}
+
 function makeWhatsApp() {
   return {
     sendTextMessage: jest.fn().mockResolvedValue(undefined),
     sendTemplateMessage: jest.fn().mockResolvedValue(true),
+    isServiceWindowOpen: jest
+      .fn()
+      .mockResolvedValue({ open: true, lastInboundAt: new Date() }),
+    sendAdminMessage: jest
+      .fn()
+      .mockResolvedValue({ mode: 'FREE_FORM', sent: true }),
   };
 }
 
@@ -82,6 +96,7 @@ function makeController(prismaProfile: any = null) {
     makePaymentRequestService() as any,
     makePrisma(prismaProfile) as any,
     makeWhatsApp() as any,
+    makeLoginLink() as any,
     makeMail() as any,
     makeLayout() as any,
     makeWalletService() as any,
@@ -147,6 +162,7 @@ describe('AdminProfileController', () => {
         makePaymentRequestService() as any,
         prisma as any,
         makeWhatsApp() as any,
+        makeLoginLink() as any,
         makeMail() as any,
         makeLayout() as any,
         makeWalletService() as any,
@@ -221,6 +237,7 @@ describe('AdminProfileController', () => {
         makePaymentRequestService() as any,
         prisma as any,
         whatsApp as any,
+        makeLoginLink() as any,
         makeMail() as any,
         makeLayout() as any,
         makeWalletService() as any,
@@ -238,16 +255,113 @@ describe('AdminProfileController', () => {
           get: () => undefined,
         } as any,
       );
-      expect(whatsApp.sendTextMessage).toHaveBeenCalledWith(
-        '+1234',
-        expect.stringContaining('hello'),
-        'p1',
-        'u1',
+      expect(whatsApp.sendAdminMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          phone: '+1234',
+          profileId: 'p1',
+          message: 'hello',
+          adminUserId: 'u1',
+        }),
       );
-      // sendTextMessage persists the OUTBOUND message itself; the controller
+      // sendAdminMessage persists the OUTBOUND message itself; the controller
       // must NOT create a second one (that caused duplicate WhatsApp bubbles).
       expect(prisma.message.create).not.toHaveBeenCalled();
-      expect(result).toEqual({ success: true });
+      expect(result).toEqual({ success: true, deliveryMode: 'FREE_FORM' });
+    });
+
+    it('reports the template mode when the 24h window has closed', async () => {
+      const whatsApp = makeWhatsApp();
+      whatsApp.sendAdminMessage.mockResolvedValue({
+        mode: 'TEMPLATE',
+        sent: true,
+      });
+      const prisma = makePrisma({ id: 'p1', phone: '+1234', email: null });
+      const logService = makeLogService();
+      const ctrl = new AdminProfileController(
+        makeProfileService() as any,
+        logService as any,
+        makePaymentRequestService() as any,
+        prisma as any,
+        whatsApp as any,
+        makeLoginLink() as any,
+        makeMail() as any,
+        makeLayout() as any,
+        makeWalletService() as any,
+        makePortfolioService() as any,
+        { restore: jest.fn(), purge: jest.fn(), purgeBlockers: jest.fn() } as any,
+      );
+
+      const result = await ctrl.sendMessage(
+        'p1',
+        { channel: 'WHATSAPP', message: 'hello' },
+        undefined,
+        {
+          user: { userId: 'u1' },
+          headers: {},
+          ip: '127.0.0.1',
+          get: () => undefined,
+        } as any,
+      );
+
+      expect(result).toEqual({ success: true, deliveryMode: 'TEMPLATE' });
+      expect(logService.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          metadata: expect.objectContaining({
+            deliveryMode: 'TEMPLATE',
+            success: true,
+          }),
+        }),
+      );
+    });
+
+    it('surfaces a failed WhatsApp delivery as 503, and still audit-logs it', async () => {
+      const whatsApp = makeWhatsApp();
+      whatsApp.sendAdminMessage.mockResolvedValue({
+        mode: 'TEMPLATE',
+        sent: false,
+        error: '[Twilio 63016] outside the 24h window — message failed',
+      });
+      const prisma = makePrisma({ id: 'p1', phone: '+1234', email: null });
+      const logService = makeLogService();
+      const ctrl = new AdminProfileController(
+        makeProfileService() as any,
+        logService as any,
+        makePaymentRequestService() as any,
+        prisma as any,
+        whatsApp as any,
+        makeLoginLink() as any,
+        makeMail() as any,
+        makeLayout() as any,
+        makeWalletService() as any,
+        makePortfolioService() as any,
+        { restore: jest.fn(), purge: jest.fn(), purgeBlockers: jest.fn() } as any,
+      );
+
+      // This used to return { success: true } and the message simply vanished.
+      await expect(
+        ctrl.sendMessage(
+          'p1',
+          { channel: 'WHATSAPP', message: 'hello' },
+          undefined,
+          {
+            user: { userId: 'u1' },
+            headers: {},
+            ip: '127.0.0.1',
+            get: () => undefined,
+          } as any,
+        ),
+      ).rejects.toThrow(ServiceUnavailableException);
+
+      // Logged before the throw: a message that never reached the profile is
+      // exactly the event you want on the timeline.
+      expect(logService.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          metadata: expect.objectContaining({
+            success: false,
+            failureReason: expect.stringContaining('63016'),
+          }),
+        }),
+      );
     });
 
     it('throws BadRequestException when EMAIL channel but no email', async () => {
@@ -276,6 +390,7 @@ describe('AdminProfileController', () => {
         makePaymentRequestService() as any,
         prisma as any,
         makeWhatsApp() as any,
+        makeLoginLink() as any,
         mail as any,
         makeLayout() as any,
         makeWalletService() as any,
@@ -295,7 +410,8 @@ describe('AdminProfileController', () => {
       );
       expect(mail.sendMail).toHaveBeenCalled();
       expect(prisma.message.create).toHaveBeenCalled();
-      expect(result).toEqual({ success: true });
+      // deliveryMode is null for email — it has no 24h service window.
+      expect(result).toEqual({ success: true, deliveryMode: null });
     });
   });
 
@@ -308,6 +424,7 @@ describe('AdminProfileController', () => {
       makePaymentRequestService() as any,
       makePrisma() as any,
       makeWhatsApp() as any,
+      makeLoginLink() as any,
       makeMail() as any,
       makeLayout() as any,
       makeWalletService() as any,
@@ -333,6 +450,7 @@ describe('AdminProfileController', () => {
       makePaymentRequestService() as any,
       makePrisma() as any,
       makeWhatsApp() as any,
+      makeLoginLink() as any,
       makeMail() as any,
       makeLayout() as any,
       makeWalletService() as any,
@@ -342,7 +460,6 @@ describe('AdminProfileController', () => {
     const result = await ctrl.verify(
       'p1',
       { decision: 'VERIFIED' as any, reason: 'approved' },
-      [],
       {
         user: { userId: 'u1' },
         headers: {},
@@ -355,6 +472,57 @@ describe('AdminProfileController', () => {
     expect(result).toEqual({ id: 'p1' });
   });
 
+  it('verify() notifies a rejection on WhatsApp with its reason', async () => {
+    // A rejection used to go out by email only, and `email` is nullable on a
+    // profile while `phone` is not.
+    const profileService = makeProfileService();
+    profileService.verifyProfileKyc.mockResolvedValue({
+      id: 'p1',
+      email: 'alice@example.com',
+      phone: '+242000001',
+      firstName: 'Alice',
+      lastName: 'Doe',
+    });
+    const whatsApp = makeWhatsApp();
+    const ctrl = new AdminProfileController(
+      profileService as any,
+      makeLogService() as any,
+      makePaymentRequestService() as any,
+      makePrisma() as any,
+      whatsApp as any,
+      makeLoginLink() as any,
+      makeMail() as any,
+      makeLayout() as any,
+      makeWalletService() as any,
+      makePortfolioService() as any,
+      { restore: jest.fn(), purge: jest.fn(), purgeBlockers: jest.fn() } as any,
+    );
+
+    await ctrl.verify(
+      'p1',
+      { decision: 'REJECTED' as any, reason: 'Pièce d’identité illisible' },
+      {
+        user: { userId: 'u1' },
+        headers: {},
+        ip: '127.0.0.1',
+        get: () => undefined,
+      } as any,
+    );
+
+    expect(whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
+      '+242000001',
+      'kycRejected',
+      {
+        firstName: 'Alice',
+        reason: 'Pièce d’identité illisible',
+        loginCode: 'login-code-1',
+      },
+      // The profile id now rides along so the refusal lands in the
+      // conversation history, not only in the delivery log.
+      expect.any(String),
+    );
+  });
+
   it('updateStatus() calls profileService and logs', async () => {
     const profileService = makeProfileService();
     const logService = makeLogService();
@@ -364,21 +532,29 @@ describe('AdminProfileController', () => {
       makePaymentRequestService() as any,
       makePrisma() as any,
       makeWhatsApp() as any,
+      makeLoginLink() as any,
       makeMail() as any,
       makeLayout() as any,
       makeWalletService() as any,
       makePortfolioService() as any,
       { restore: jest.fn(), purge: jest.fn(), purgeBlockers: jest.fn() } as any,
     );
-    const result = await ctrl.updateStatus('p1', { status: 'ACTIVE' as any }, {
-      user: { userId: 'u1' },
-      headers: {},
-      ip: '127.0.0.1',
-      get: () => undefined,
-    } as any);
+    const result = await ctrl.updateStatus(
+      'p1',
+      { status: 'SUSPENDED' as any, reason: 'Documents falsifiés' },
+      {
+        user: { userId: 'u1' },
+        headers: {},
+        ip: '127.0.0.1',
+        get: () => undefined,
+      } as any,
+    );
+    // The reason used to stop here, in the audit log, and never reach the
+    // notification the user actually receives.
     expect(profileService.updateProfileStatusByAdmin).toHaveBeenCalledWith(
       'p1',
-      'ACTIVE',
+      'SUSPENDED',
+      'Documents falsifiés',
     );
     expect(logService.create).toHaveBeenCalled();
     expect(result).toEqual({ id: 'p1' });
@@ -407,6 +583,7 @@ describe('AdminProfileController', () => {
         makePaymentRequestService() as any,
         makePrisma() as any,
         makeWhatsApp() as any,
+        makeLoginLink() as any,
         makeMail() as any,
         makeLayout() as any,
         makeWalletService() as any,
@@ -427,6 +604,7 @@ describe('AdminProfileController', () => {
         makePaymentRequestService() as any,
         makePrisma() as any,
         makeWhatsApp() as any,
+        makeLoginLink() as any,
         makeMail() as any,
         makeLayout() as any,
         makeWalletService() as any,
@@ -457,6 +635,7 @@ describe('AdminProfileController', () => {
         makePaymentRequestService() as any,
         makePrisma() as any,
         makeWhatsApp() as any,
+        makeLoginLink() as any,
         makeMail() as any,
         makeLayout() as any,
         makeWalletService() as any,
@@ -480,6 +659,7 @@ describe('AdminProfileController', () => {
         makePaymentRequestService() as any,
         makePrisma() as any,
         makeWhatsApp() as any,
+        makeLoginLink() as any,
         makeMail() as any,
         makeLayout() as any,
         makeWalletService() as any,

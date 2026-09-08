@@ -6,6 +6,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import * as fs from 'node:fs';
+import { jobLocationLabel } from '../../common/utils/job-location.util';
 import * as path from 'node:path';
 import Redis from 'ioredis';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
@@ -191,7 +192,9 @@ export class ResumeService {
 
     const experiences: ResumeJob[] = assignments.map((a) => {
       const job = a.job_offer;
-      const date = a.completed_at ?? job.scheduled_at;
+      // Same anchor as referenceDate: completion, then closing date, then
+      // when the assignment was created.
+      const date = a.completed_at ?? job.scheduled_at ?? a.created_at;
       const inProgress = a.status === AssignmentStatus.CONFIRMED;
       return {
         period: date.toLocaleDateString('fr-FR').toUpperCase(),
@@ -200,7 +203,7 @@ export class ResumeService {
         ongoing: inProgress,
         title: job.title,
         amount: this.formatAmount(job.amount),
-        location: job.address,
+        location: jobLocationLabel(job),
       };
     });
 
@@ -364,7 +367,9 @@ export class ResumeService {
       const browser = await launchBrowser();
       try {
         const page = await browser.newPage();
-        await page.setContent(html, { waitUntil: 'networkidle0' });
+        // See the note in document.service: setContent has no navigation, so
+        // 'networkidle0' never applied; 'load' waits for subresources.
+        await page.setContent(html, { waitUntil: 'load' });
         const pdf = await page.pdf({
           format: 'A4',
           printBackground: true,

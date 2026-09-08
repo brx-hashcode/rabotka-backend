@@ -1,10 +1,17 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { ClaimService } from '../claim.service';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { NotificationService } from '../../notification/notification.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ClaimCommentsGateway } from '../../ws-notifications/claim-comments.gateway';
+import { WhatsAppService } from '../../whatsapp/whatsapp.service';
+import { WhatsAppLoginLinkService } from '../../auth/whatsapp-login-link.service';
+import { ClaimAttachmentService } from '../claim-attachment.service';
 
 const mockPrisma = {
   claim: {
@@ -48,6 +55,31 @@ const mockGateway = {
   emitDeletedComment: jest.fn(),
 };
 
+const mockWhatsApp = {
+  sendTemplateMessage: jest.fn().mockResolvedValue(true),
+};
+
+const mockLoginLink = {
+  mint: jest.fn().mockResolvedValue('code-123'),
+};
+
+const mockAttachments = {
+  uploadMany: jest.fn(),
+  assertValidUrls: jest.fn().mockResolvedValue(undefined),
+};
+
+/**
+ * The notification is fired with `void`, so the assertion has to run after the
+ * microtasks it queues — the mint and the send — have both drained.
+ */
+const flushNotification = () => new Promise(process.nextTick);
+
+/** The admin performing an update, for `updateForAdmin`'s actor argument. */
+const ACTOR = 'user-1';
+
+/** A url shaped like one the upload route hands back. */
+const imageUrl = 'https://cdn.test/claim-attachments/1757000000_ab12cd.jpg';
+
 const now = new Date();
 
 const baseClaim = {
@@ -58,6 +90,8 @@ const baseClaim = {
   attachment_urls: [],
   profile_id: 'profile-1',
   assigned_user_id: null,
+  assigned_by_user_id: null,
+  assigned_by_user: null,
   created_by_user_id: 'user-1',
   created_by_profile_id: null,
   created_at: now,
@@ -80,6 +114,7 @@ const baseClaim = {
 const baseComment = {
   id: 'comment-1',
   content: 'Test comment',
+  attachment_urls: [],
   claim_id: 'claim-1',
   user_id: 'user-1',
   profile_id: null,
@@ -102,6 +137,9 @@ describe('ClaimService', () => {
         { provide: NotificationService, useValue: mockNotifications },
         { provide: EventEmitter2, useValue: mockEventEmitter },
         { provide: ClaimCommentsGateway, useValue: mockGateway },
+        { provide: WhatsAppService, useValue: mockWhatsApp },
+        { provide: WhatsAppLoginLinkService, useValue: mockLoginLink },
+        { provide: ClaimAttachmentService, useValue: mockAttachments },
       ],
     }).compile();
     service = module.get<ClaimService>(ClaimService);
@@ -189,15 +227,17 @@ describe('ClaimService', () => {
       });
       mockPrisma.profile.findUnique.mockResolvedValue(null);
 
-      const result = await service.updateForAdmin('claim-1', {
-        title: 'Updated',
-      });
+      const result = await service.updateForAdmin(
+        'claim-1',
+        { title: 'Updated' },
+        ACTOR,
+      );
       expect(result.title).toBe('Updated');
     });
 
     it('throws if claim not found', async () => {
       mockPrisma.claim.findUnique.mockResolvedValue(null);
-      await expect(service.updateForAdmin('x', {})).rejects.toThrow(
+      await expect(service.updateForAdmin('x', {}, ACTOR)).rejects.toThrow(
         NotFoundException,
       );
     });
@@ -217,7 +257,7 @@ describe('ClaimService', () => {
         last_name: 'Doe',
       });
 
-      await service.updateForAdmin('claim-1', { status: 'IN_PROGRESS' as any });
+      await service.updateForAdmin('claim-1', { status: 'IN_PROGRESS' }, ACTOR);
       expect(mockNotifications.notifyClaimInProgress).toHaveBeenCalled();
     });
 
@@ -236,7 +276,7 @@ describe('ClaimService', () => {
         last_name: 'Doe',
       });
 
-      await service.updateForAdmin('claim-1', { status: 'COMPLETED' as any });
+      await service.updateForAdmin('claim-1', { status: 'COMPLETED' }, ACTOR);
       expect(mockNotifications.notifyClaimCompleted).toHaveBeenCalled();
     });
 
@@ -255,7 +295,7 @@ describe('ClaimService', () => {
         last_name: 'Doe',
       });
 
-      await service.updateForAdmin('claim-1', { status: 'REJECTED' as any });
+      await service.updateForAdmin('claim-1', { status: 'REJECTED' }, ACTOR);
       expect(mockNotifications.notifyClaimRejected).toHaveBeenCalled();
     });
 
@@ -272,7 +312,11 @@ describe('ClaimService', () => {
         last_name: 'User',
       });
 
-      await service.updateForAdmin('claim-1', { assigned_user_id: 'user-2' });
+      await service.updateForAdmin(
+        'claim-1',
+        { assigned_user_id: 'user-2' },
+        ACTOR,
+      );
       expect(mockNotifications.notifyClaimAssigned).toHaveBeenCalled();
     });
 
@@ -289,8 +333,289 @@ describe('ClaimService', () => {
         last_name: 'User',
       });
 
-      await service.updateForAdmin('claim-1', { assigned_user_id: null });
+      await service.updateForAdmin(
+        'claim-1',
+        { assigned_user_id: null },
+        ACTOR,
+      );
       expect(mockNotifications.notifyClaimUnassigned).toHaveBeenCalled();
+    });
+  });
+
+  describe("updateForAdmin — qui peut changer l'assignation", () => {
+    // The point of the rule: someone handed a claim must not be able to set it
+    // back to "Unassigned", which looks like redistribution but is really the
+    // claim falling off everyone's list.
+    const assignedByOther = {
+      ...baseClaim,
+      assigned_user_id: 'user-2',
+      assigned_by_user_id: 'user-9',
+    };
+
+    beforeEach(() => {
+      mockPrisma.claim.update.mockResolvedValue(baseClaim);
+      mockPrisma.profile.findUnique.mockResolvedValue(null);
+    });
+
+    it('refuses the assignee unassigning themselves', async () => {
+      mockPrisma.claim.findUnique.mockResolvedValue(assignedByOther);
+      mockPrisma.user.findUnique.mockResolvedValue({ role: 'MANAGER' });
+
+      await expect(
+        service.updateForAdmin('claim-1', { assigned_user_id: null }, 'user-2'),
+      ).rejects.toThrow(ForbiddenException);
+      expect(mockPrisma.claim.update).not.toHaveBeenCalled();
+    });
+
+    it('refuses the assignee handing the claim to someone else', async () => {
+      // Blocking only the clear would leave the rule bypassable in one click.
+      mockPrisma.claim.findUnique.mockResolvedValue(assignedByOther);
+      mockPrisma.user.findUnique.mockResolvedValue({ role: 'MANAGER' });
+
+      await expect(
+        service.updateForAdmin(
+          'claim-1',
+          { assigned_user_id: 'user-3' },
+          'user-2',
+        ),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('names the assigner in the refusal', async () => {
+      mockPrisma.claim.findUnique.mockResolvedValue(assignedByOther);
+      mockPrisma.user.findUnique
+        .mockResolvedValueOnce({ role: 'MANAGER' })
+        .mockResolvedValueOnce({ first_name: 'Sara', last_name: 'NKEMBO' });
+
+      await expect(
+        service.updateForAdmin('claim-1', { assigned_user_id: null }, 'user-2'),
+      ).rejects.toThrow(/Sara NKEMBO/);
+    });
+
+    it('lets the assigner undo their own assignment', async () => {
+      mockPrisma.claim.findUnique.mockResolvedValue(assignedByOther);
+
+      await service.updateForAdmin(
+        'claim-1',
+        { assigned_user_id: null },
+        'user-9',
+      );
+
+      expect(mockPrisma.claim.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            assigned_user_id: null,
+            // Cleared with the assignee: a stale name would keep guarding a
+            // claim nobody is on.
+            assigned_by_user_id: null,
+          }),
+        }),
+      );
+    });
+
+    it('lets a SUPER_ADMIN override', async () => {
+      // Someone has to be able to move a claim on when the assigner has left.
+      mockPrisma.claim.findUnique.mockResolvedValue(assignedByOther);
+      mockPrisma.user.findUnique.mockResolvedValue({ role: 'SUPER_ADMIN' });
+
+      await service.updateForAdmin(
+        'claim-1',
+        { assigned_user_id: null },
+        'user-2',
+      );
+
+      expect(mockPrisma.claim.update).toHaveBeenCalled();
+    });
+
+    it('leaves assignments made before the column freely editable', async () => {
+      // `assigned_by_user_id` null means "unknown assigner". Locking those
+      // would make every pre-existing assignment unfixable.
+      mockPrisma.claim.findUnique.mockResolvedValue({
+        ...baseClaim,
+        assigned_user_id: 'user-2',
+        assigned_by_user_id: null,
+      });
+      mockPrisma.user.findUnique.mockResolvedValue({ role: 'MANAGER' });
+
+      await service.updateForAdmin(
+        'claim-1',
+        { assigned_user_id: null },
+        'user-7',
+      );
+
+      expect(mockPrisma.claim.update).toHaveBeenCalled();
+    });
+
+    it('records the actor as assigner when a claim gains one', async () => {
+      mockPrisma.claim.findUnique.mockResolvedValue(baseClaim);
+
+      await service.updateForAdmin(
+        'claim-1',
+        { assigned_user_id: 'user-2' },
+        'user-7',
+      );
+
+      expect(mockPrisma.claim.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            assigned_user_id: 'user-2',
+            assigned_by_user_id: 'user-7',
+          }),
+        }),
+      );
+    });
+
+    it('does not touch the assigner when the assignee is unchanged', async () => {
+      // A status-only edit by anyone must not silently reassign ownership of
+      // the assignment.
+      mockPrisma.claim.findUnique.mockResolvedValue(assignedByOther);
+
+      await service.updateForAdmin(
+        'claim-1',
+        { assigned_user_id: 'user-2', status: 'IN_PROGRESS' },
+        'user-5',
+      );
+
+      const data = mockPrisma.claim.update.mock.calls[0][0].data;
+      expect(data).not.toHaveProperty('assigned_by_user_id');
+      expect(data).not.toHaveProperty('assigned_user_id');
+    });
+
+    it('exposes the assigner on the mapped claim', async () => {
+      mockPrisma.claim.findUnique.mockResolvedValue(baseClaim);
+      mockPrisma.claim.update.mockResolvedValue({
+        ...baseClaim,
+        assigned_user_id: 'user-2',
+        assigned_by_user_id: 'user-7',
+        assigned_by_user: { first_name: 'Sara', last_name: 'NKEMBO' },
+      });
+
+      const result = await service.updateForAdmin(
+        'claim-1',
+        { assigned_user_id: 'user-2' },
+        'user-7',
+      );
+
+      expect(result.assignedByUserId).toBe('user-7');
+      expect(result.assignedByUserName).toBe('Sara NKEMBO');
+    });
+  });
+
+  describe('reorderForAdmin', () => {
+    // The service runs inside `$transaction(cb)`; the mock prisma doubles as
+    // the transaction client so the same jest.fn()s record the calls.
+    function runInTransaction() {
+      mockPrisma.$transaction.mockImplementation((cb: any) => cb(mockPrisma));
+    }
+
+    function positionOfLastUpdate(): number {
+      const calls = mockPrisma.claim.update.mock.calls;
+      return calls[calls.length - 1][0].data.position;
+    }
+
+    beforeEach(() => {
+      runInTransaction();
+      mockPrisma.claim.findUnique.mockResolvedValue(baseClaim);
+      mockPrisma.claim.update.mockResolvedValue(baseClaim);
+    });
+
+    it('lands on the midpoint between its two neighbours', async () => {
+      mockPrisma.claim.findMany.mockResolvedValue([
+        { id: 'a', position: 1000 },
+        { id: 'b', position: 2000 },
+      ]);
+
+      await service.reorderForAdmin('claim-1', {
+        status: 'COMPLETED' as any,
+        index: 1,
+      });
+
+      expect(positionOfLastUpdate()).toBe(1500);
+    });
+
+    it('steps below the first claim when dropped at the top', async () => {
+      mockPrisma.claim.findMany.mockResolvedValue([
+        { id: 'a', position: 1000 },
+      ]);
+
+      await service.reorderForAdmin('claim-1', {
+        status: 'COMPLETED' as any,
+        index: 0,
+      });
+
+      expect(positionOfLastUpdate()).toBe(0);
+    });
+
+    it('steps above the last claim when dropped at the bottom', async () => {
+      mockPrisma.claim.findMany.mockResolvedValue([
+        { id: 'a', position: 1000 },
+      ]);
+
+      await service.reorderForAdmin('claim-1', {
+        status: 'COMPLETED' as any,
+        index: 1,
+      });
+
+      expect(positionOfLastUpdate()).toBe(2000);
+    });
+
+    it('opens an empty column at the first gap', async () => {
+      mockPrisma.claim.findMany.mockResolvedValue([]);
+
+      await service.reorderForAdmin('claim-1', {
+        status: 'REJECTED' as any,
+        index: 0,
+      });
+
+      expect(positionOfLastUpdate()).toBe(1000);
+    });
+
+    it('clamps an index past the end of the column', async () => {
+      mockPrisma.claim.findMany.mockResolvedValue([
+        { id: 'a', position: 1000 },
+      ]);
+
+      await service.reorderForAdmin('claim-1', {
+        status: 'COMPLETED' as any,
+        index: 99,
+      });
+
+      expect(positionOfLastUpdate()).toBe(2000);
+    });
+
+    it('renumbers the column when the gap is too small to halve', async () => {
+      mockPrisma.claim.findMany.mockResolvedValue([
+        { id: 'a', position: 1 },
+        { id: 'b', position: 1.0000000001 },
+        { id: 'c', position: 5000 },
+      ]);
+
+      await service.reorderForAdmin('claim-1', {
+        status: 'COMPLETED' as any,
+        index: 1,
+      });
+
+      const written = mockPrisma.claim.update.mock.calls.map(([arg]: any) => [
+        arg.where.id,
+        arg.data.position,
+      ]);
+      expect(written).toEqual([
+        ['a', 1000],
+        ['claim-1', 2000],
+        ['b', 3000],
+        ['c', 4000],
+      ]);
+    });
+
+    it('throws if the claim does not exist', async () => {
+      mockPrisma.claim.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.reorderForAdmin('nope', {
+          status: 'COMPLETED' as any,
+          index: 0,
+        }),
+      ).rejects.toThrow(NotFoundException);
     });
   });
 
@@ -312,11 +637,15 @@ describe('ClaimService', () => {
   });
 
   describe('addComment', () => {
+    const claimWithOwner = {
+      id: 'claim-1',
+      title: 'Test',
+      profile_id: 'profile-1',
+      profile: { first_name: 'John', phone: '+242060000000' },
+    };
+
     it('adds a comment', async () => {
-      mockPrisma.claim.findUnique.mockResolvedValue({
-        id: 'claim-1',
-        title: 'Test',
-      });
+      mockPrisma.claim.findUnique.mockResolvedValue(claimWithOwner);
       mockPrisma.claimComment.create.mockResolvedValue(baseComment);
 
       const result = await service.addComment('claim-1', 'user-1', {
@@ -331,6 +660,209 @@ describe('ClaimService', () => {
       await expect(
         service.addComment('x', 'u', { content: 'c' }),
       ).rejects.toThrow(NotFoundException);
+    });
+
+    it('notifies the owner on WhatsApp with a code minted for the claim', async () => {
+      mockPrisma.claim.findUnique.mockResolvedValue(claimWithOwner);
+      mockPrisma.claimComment.create.mockResolvedValue(baseComment);
+
+      await service.addComment('claim-1', 'user-1', { content: 'On regarde' });
+      await flushNotification();
+
+      expect(mockLoginLink.mint).toHaveBeenCalledWith(
+        'profile-1',
+        'claims/claim-1',
+      );
+      expect(mockWhatsApp.sendTemplateMessage).toHaveBeenCalledWith(
+        '+242060000000',
+        'claimCommented',
+        {
+          firstName: 'John',
+          claimTitle: 'Test',
+          excerpt: 'On regarde',
+          loginCode: 'code-123',
+        },
+        'profile-1',
+      );
+    });
+
+    it('still sends when no login code can be minted', async () => {
+      mockPrisma.claim.findUnique.mockResolvedValue(claimWithOwner);
+      mockPrisma.claimComment.create.mockResolvedValue(baseComment);
+      mockLoginLink.mint.mockResolvedValueOnce(null);
+
+      await service.addComment('claim-1', 'user-1', { content: 'On regarde' });
+      await flushNotification();
+
+      // The template falls back to the bare claims path for a null code.
+      expect(mockWhatsApp.sendTemplateMessage).toHaveBeenCalledWith(
+        '+242060000000',
+        'claimCommented',
+        expect.objectContaining({ loginCode: null }),
+        'profile-1',
+      );
+    });
+
+    it('sends nothing when the owner has no phone', async () => {
+      mockPrisma.claim.findUnique.mockResolvedValue({
+        ...claimWithOwner,
+        profile: { first_name: 'John', phone: null },
+      });
+      mockPrisma.claimComment.create.mockResolvedValue(baseComment);
+
+      await service.addComment('claim-1', 'user-1', { content: 'On regarde' });
+      await flushNotification();
+
+      expect(mockWhatsApp.sendTemplateMessage).not.toHaveBeenCalled();
+      expect(mockLoginLink.mint).not.toHaveBeenCalled();
+    });
+
+    it('does not fail the comment when the send throws', async () => {
+      mockPrisma.claim.findUnique.mockResolvedValue(claimWithOwner);
+      mockPrisma.claimComment.create.mockResolvedValue(baseComment);
+      mockWhatsApp.sendTemplateMessage.mockRejectedValueOnce(
+        new Error('provider down'),
+      );
+
+      const result = await service.addComment('claim-1', 'user-1', {
+        content: 'On regarde',
+      });
+      await flushNotification();
+
+      expect(result.id).toBe('comment-1');
+    });
+
+    describe('attachments', () => {
+      it('persists the urls and returns them mapped', async () => {
+        mockPrisma.claim.findUnique.mockResolvedValue(claimWithOwner);
+        mockPrisma.claimComment.create.mockResolvedValue({
+          ...baseComment,
+          attachment_urls: [imageUrl],
+        });
+
+        const result = await service.addComment('claim-1', 'user-1', {
+          content: 'Voici',
+          attachment_urls: [imageUrl],
+        });
+
+        expect(mockPrisma.claimComment.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ attachment_urls: [imageUrl] }),
+          }),
+        );
+        expect(result.attachmentUrls).toEqual([imageUrl]);
+      });
+
+      it('validates the urls before writing anything', async () => {
+        mockPrisma.claim.findUnique.mockResolvedValue(claimWithOwner);
+        mockAttachments.assertValidUrls.mockRejectedValueOnce(
+          new BadRequestException('Pièce jointe invalide'),
+        );
+
+        await expect(
+          service.addComment('claim-1', 'user-1', {
+            content: 'x',
+            attachment_urls: ['https://evil.test/x.jpg'],
+          }),
+        ).rejects.toThrow(BadRequestException);
+        expect(mockPrisma.claimComment.create).not.toHaveBeenCalled();
+      });
+
+      it('stores an image-only comment with empty content', async () => {
+        mockPrisma.claim.findUnique.mockResolvedValue(claimWithOwner);
+        mockPrisma.claimComment.create.mockResolvedValue({
+          ...baseComment,
+          content: '',
+          attachment_urls: [imageUrl],
+        });
+
+        await service.addComment('claim-1', 'user-1', {
+          attachment_urls: [imageUrl],
+        });
+
+        expect(mockPrisma.claimComment.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ content: '' }),
+          }),
+        );
+      });
+
+      it('sends NO WhatsApp notification for an image-only comment', async () => {
+        // The template's body quotes the comment. With no text there is
+        // nothing to quote, and the fallback copy says nothing worth a push.
+        mockPrisma.claim.findUnique.mockResolvedValue(claimWithOwner);
+        mockPrisma.claimComment.create.mockResolvedValue({
+          ...baseComment,
+          content: '',
+          attachment_urls: [imageUrl],
+        });
+
+        await service.addComment('claim-1', 'user-1', {
+          attachment_urls: [imageUrl],
+        });
+        await flushNotification();
+
+        expect(mockWhatsApp.sendTemplateMessage).not.toHaveBeenCalled();
+        expect(mockLoginLink.mint).not.toHaveBeenCalled();
+      });
+
+      it('still notifies when text accompanies the images', async () => {
+        mockPrisma.claim.findUnique.mockResolvedValue(claimWithOwner);
+        mockPrisma.claimComment.create.mockResolvedValue({
+          ...baseComment,
+          attachment_urls: [imageUrl],
+        });
+
+        await service.addComment('claim-1', 'user-1', {
+          content: 'Regardez la photo',
+          attachment_urls: [imageUrl],
+        });
+        await flushNotification();
+
+        expect(mockWhatsApp.sendTemplateMessage).toHaveBeenCalledWith(
+          '+242060000000',
+          'claimCommented',
+          expect.objectContaining({ excerpt: 'Regardez la photo' }),
+          'profile-1',
+        );
+      });
+
+      it('treats whitespace-only content as no text', async () => {
+        mockPrisma.claim.findUnique.mockResolvedValue(claimWithOwner);
+        mockPrisma.claimComment.create.mockResolvedValue({
+          ...baseComment,
+          content: '',
+          attachment_urls: [imageUrl],
+        });
+
+        await service.addComment('claim-1', 'user-1', {
+          content: '   ',
+          attachment_urls: [imageUrl],
+        });
+        await flushNotification();
+
+        expect(mockWhatsApp.sendTemplateMessage).not.toHaveBeenCalled();
+      });
+
+      it('puts the attachments on the socket payload', async () => {
+        // Both frontends read the thread live; a comment that only reaches
+        // them on refresh would look like a silent failure.
+        mockPrisma.claim.findUnique.mockResolvedValue(claimWithOwner);
+        mockPrisma.claimComment.create.mockResolvedValue({
+          ...baseComment,
+          attachment_urls: [imageUrl],
+        });
+
+        await service.addComment('claim-1', 'user-1', {
+          content: 'Voici',
+          attachment_urls: [imageUrl],
+        });
+
+        expect(mockGateway.emitNewComment).toHaveBeenCalledWith(
+          'claim-1',
+          expect.objectContaining({ attachmentUrls: [imageUrl] }),
+        );
+      });
     });
   });
 
@@ -360,6 +892,21 @@ describe('ClaimService', () => {
   });
 
   describe('createForProfile', () => {
+    it('refuses a claim whose attachments are not vouched for', async () => {
+      mockAttachments.assertValidUrls.mockRejectedValueOnce(
+        new BadRequestException('Pièce jointe invalide'),
+      );
+
+      await expect(
+        service.createForProfile('profile-1', {
+          title: 'T',
+          description: 'D',
+          attachment_urls: ['https://evil.test/x.jpg'],
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockPrisma.claim.create).not.toHaveBeenCalled();
+    });
+
     it('creates claim as profile', async () => {
       mockPrisma.claim.create.mockResolvedValue(baseClaim);
       mockPrisma.profile.findUnique.mockResolvedValue({
@@ -439,6 +986,89 @@ describe('ClaimService', () => {
   });
 
   describe('addCommentAsProfile', () => {
+    const ownedClaim = {
+      id: 'claim-1',
+      title: 'Test',
+      profile_id: 'profile-1',
+    };
+    const profileComment = {
+      ...baseComment,
+      profile_id: 'profile-1',
+      user_id: null,
+      created_by_type: 'profile',
+      user: null,
+      profile: { first_name: 'John', last_name: 'Doe' },
+    };
+
+    it('persists attachments and returns them mapped', async () => {
+      mockPrisma.claim.findUnique.mockResolvedValue(ownedClaim);
+      mockPrisma.claimComment.create.mockResolvedValue({
+        ...profileComment,
+        attachment_urls: [imageUrl],
+      });
+
+      const result = await service.addCommentAsProfile('claim-1', 'profile-1', {
+        content: 'Voici la photo',
+        attachment_urls: [imageUrl],
+      });
+
+      expect(mockPrisma.claimComment.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ attachment_urls: [imageUrl] }),
+        }),
+      );
+      expect(result.attachmentUrls).toEqual([imageUrl]);
+    });
+
+    it('accepts an image-only reply', async () => {
+      mockPrisma.claim.findUnique.mockResolvedValue(ownedClaim);
+      mockPrisma.claimComment.create.mockResolvedValue({
+        ...profileComment,
+        content: '',
+        attachment_urls: [imageUrl],
+      });
+
+      await service.addCommentAsProfile('claim-1', 'profile-1', {
+        attachment_urls: [imageUrl],
+      });
+
+      expect(mockPrisma.claimComment.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ content: '' }),
+        }),
+      );
+    });
+
+    it('rejects an unvouched url before writing', async () => {
+      mockPrisma.claim.findUnique.mockResolvedValue(ownedClaim);
+      mockAttachments.assertValidUrls.mockRejectedValueOnce(
+        new BadRequestException('Pièce jointe invalide'),
+      );
+
+      await expect(
+        service.addCommentAsProfile('claim-1', 'profile-1', {
+          attachment_urls: ['https://evil.test/x.jpg'],
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockPrisma.claimComment.create).not.toHaveBeenCalled();
+    });
+
+    it('checks ownership before touching attachments', async () => {
+      // Order matters: validating first would tell a stranger whether a url is
+      // one of ours before we have established they may post here at all.
+      mockPrisma.claim.findUnique.mockResolvedValue({
+        ...ownedClaim,
+        profile_id: 'someone-else',
+      });
+
+      await expect(
+        service.addCommentAsProfile('claim-1', 'profile-1', {
+          attachment_urls: [imageUrl],
+        }),
+      ).rejects.toThrow(NotFoundException);
+      expect(mockAttachments.assertValidUrls).not.toHaveBeenCalled();
+    });
+
     it('adds comment as profile', async () => {
       mockPrisma.claim.findUnique.mockResolvedValue({
         id: 'claim-1',
@@ -459,6 +1089,29 @@ describe('ClaimService', () => {
       });
       expect(result.id).toBe('comment-1');
       expect(mockGateway.emitNewComment).toHaveBeenCalled();
+    });
+
+    it('does not notify the profile of its own comment', async () => {
+      mockPrisma.claim.findUnique.mockResolvedValue({
+        id: 'claim-1',
+        title: 'Test',
+        profile_id: 'profile-1',
+      });
+      mockPrisma.claimComment.create.mockResolvedValue({
+        ...baseComment,
+        profile_id: 'profile-1',
+        user_id: null,
+        created_by_type: 'profile',
+        user: null,
+        profile: { first_name: 'John', last_name: 'Doe' },
+      });
+
+      await service.addCommentAsProfile('claim-1', 'profile-1', {
+        content: 'Test',
+      });
+      await flushNotification();
+
+      expect(mockWhatsApp.sendTemplateMessage).not.toHaveBeenCalled();
     });
 
     it('throws if claim not found', async () => {
@@ -483,7 +1136,10 @@ describe('ClaimService', () => {
   describe('deleteCommentAsProfile', () => {
     it('deletes comment as profile', async () => {
       mockPrisma.claim.findUnique.mockResolvedValue(baseClaim);
-      mockPrisma.claimComment.findFirst.mockResolvedValue({ ...baseComment, profile_id: 'profile-1' });
+      mockPrisma.claimComment.findFirst.mockResolvedValue({
+        ...baseComment,
+        profile_id: 'profile-1',
+      });
       mockPrisma.claimComment.delete.mockResolvedValue(baseComment);
 
       await service.deleteCommentAsProfile('claim-1', 'comment-1', 'profile-1');

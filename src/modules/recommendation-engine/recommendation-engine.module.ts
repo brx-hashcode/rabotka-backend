@@ -3,6 +3,7 @@ import { PrismaModule } from '../../common/services/prisma/prisma.module';
 import { SystemConfigModule } from '../system-config/system-config.module';
 import { InteractionEventService } from './interaction-event.service';
 import { UserFeatureService } from './user-feature.service';
+import { UserFeatureProcessor } from './user-feature.processor';
 import { CandidateSourceService } from './candidate-sources';
 import { RecommendationEngineService } from './recommendation-engine.service';
 import { EngineRolloutService } from './engine-rollout.service';
@@ -20,6 +21,7 @@ import { EngineRolloutService } from './engine-rollout.service';
   providers: [
     InteractionEventService,
     UserFeatureService,
+    UserFeatureProcessor,
     CandidateSourceService,
     RecommendationEngineService,
     EngineRolloutService,

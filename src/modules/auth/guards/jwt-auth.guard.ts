@@ -8,9 +8,11 @@ import {
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
-import { Request } from 'express';
+import { Request, Response } from 'express';
 import Redis from 'ioredis';
+import { UserRole } from '@prisma/client';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator.js';
+import { clearAuthCookie, readAuthCookie } from '../auth-cookie.util';
 import {
   REDIS_CONNECTION,
   REDIS_KEY_PREFIX,
@@ -24,12 +26,18 @@ export interface JwtPayload {
   exp?: number;
 }
 
+export interface AdminAccount {
+  role: UserRole;
+  isActive: boolean;
+}
+
 export interface AuthenticatedRequest extends Request {
   user: {
     profileId?: string;
     userId?: string;
     type: 'profile' | 'admin';
   };
+  adminAccount?: AdminAccount;
 }
 
 export interface ProfileAuthenticatedRequest extends Request {
@@ -95,19 +103,20 @@ export class JwtAuthGuard implements CanActivate {
 
       return true;
     } catch (err) {
+      if (readAuthCookie(request, this.configService)) {
+        clearAuthCookie(
+          context.switchToHttp().getResponse<Response>(),
+          this.configService,
+        );
+      }
+
       if (err instanceof UnauthorizedException) throw err;
       throw new UnauthorizedException('Session invalide ou expirée');
     }
   }
 
   private extractToken(request: Request): string | undefined {
-    const cookieName = this.configService.get<string>('AUTH_COOKIE_NAME');
-
-    if (!cookieName) {
-      throw new Error('AUTH_COOKIE_NAME is not set');
-    }
-
-    const cookieToken = request.cookies?.[cookieName];
+    const cookieToken = readAuthCookie(request, this.configService);
     if (cookieToken) {
       return cookieToken;
     }

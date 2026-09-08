@@ -2,6 +2,7 @@ import { ArcjetModule, detectBot, fixedWindow, shield } from '@arcjet/nest';
 import { Module } from '@nestjs/common';
 import { createArcjetLoggerAdapter } from './common/utils/arcjet-logger.adapter.js';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { validateWhatsappEnv } from './modules/whatsapp/whatsapp.config';
 import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { MailerModule } from '@nestjs-modules/mailer';
@@ -14,12 +15,14 @@ import { AdminCacheModule } from './common/services/cache/admin-cache.module';
 import { AdminArchiveModule } from './modules/admin-archive/admin-archive.module';
 import { CollaborationGraphModule } from './modules/collaboration-graph/collaboration-graph.module';
 import { RedisModule } from './common/services/redis/redis.module';
+import { IdempotencyModule } from './common/services/idempotency/idempotency.module';
 import { QueueModule } from './common/services/queue/queue.module';
 import { HealthModule } from './modules/health/health.module';
 import { CsrfModule } from './modules/csrf/csrf.module';
 import { getMailerTransportConfig } from './modules/mail/mailer-transport.config.js';
 import { MailModule } from './modules/mail/mail.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { OAuthModule } from './modules/oauth/oauth.module';
 import { ProfileModule } from './modules/profile/profile.module';
 import { UserModule } from './modules/user/user.module';
 import { ConversationModule } from './modules/conversation/conversation.module';
@@ -32,17 +35,25 @@ import { MobileFeedModule } from './modules/mobile-feed/mobile-feed.module';
 import { PenaltyModule } from './modules/penalty/penalty.module';
 import { PaymentRequestModule } from './modules/payment-request/payment-request.module';
 import { FileModule } from './modules/file/file.module';
+import { GeoModule } from './modules/geo/geo.module';
 import { LogModule } from './modules/log/log.module';
 import { WalletModule } from './modules/wallet/wallet.module';
 import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
+import { WhatsappAdminModule } from './modules/whatsapp-admin/whatsapp-admin.module';
 import { WhatsAppTelemetryModule } from './modules/whatsapp/telemetry/whatsapp-telemetry.module';
 import { PortfolioModule } from './modules/portfolio/portfolio.module';
+import { ReferralModule } from './modules/referral/referral.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { ReminderModule } from './modules/bot/reminder/reminder.module';
 import { PaymentsModule } from './modules/payments/payment.module';
 import { KycModule } from './modules/kyc/kyc.module';
+import { FeedbackModule } from './modules/feedback/feedback.module';
 import { SystemConfigModule } from './modules/system-config/system-config.module';
 import { QdrantModule } from './modules/qdrant/qdrant.module';
+import { LlmModule } from './modules/rag/llm/llm.module';
+import { IntentsModule } from './modules/rag/intents/intents.module';
+import { RetrievalModule } from './modules/rag/retrieval/retrieval.module';
+import { VovaAgentModule } from './modules/rag/agent/agent.module';
 import { ClaimModule } from './modules/claim/claim.module';
 import { DocumentModule } from './modules/document/document.module';
 import { ContractModule } from './modules/contract/contract.module';
@@ -69,6 +80,9 @@ import { HttpOnlyArcjetGuard } from './common/guards/http-only-arcjet.guard';
       envFilePath: ['.env.local', '.env'],
       cache: true,
       expandVariables: true,
+      // Fails the boot naming every blank WhatsApp credential, rather than
+      // letting the process start and drop messages silently.
+      validate: validateWhatsappEnv,
     }),
     ThrottlerModule.forRootAsync({
       imports: [ConfigModule],
@@ -124,6 +138,7 @@ import { HttpOnlyArcjetGuard } from './common/guards/http-only-arcjet.guard';
     PrismaModule,
     TwilioModule,
     RedisModule.forRoot(),
+    IdempotencyModule,
     AdminCacheModule,
     AdminArchiveModule,
     CollaborationGraphModule,
@@ -138,9 +153,12 @@ import { HttpOnlyArcjetGuard } from './common/guards/http-only-arcjet.guard';
     MailModule,
     WhatsAppTelemetryModule,
     WhatsAppModule,
+    WhatsappAdminModule,
     PortfolioModule,
+    ReferralModule,
     ReminderModule,
     AuthModule,
+    OAuthModule,
     ProfileModule,
     UserModule,
     ConversationModule,
@@ -157,6 +175,7 @@ import { HttpOnlyArcjetGuard } from './common/guards/http-only-arcjet.guard';
     PaymentGatewayModule,
     ImageWatermarkModule,
     FileModule,
+    GeoModule,
     LogModule,
     WalletModule,
     ClaimModule,
@@ -168,7 +187,12 @@ import { HttpOnlyArcjetGuard } from './common/guards/http-only-arcjet.guard';
     DashboardModule,
     PaymentsModule,
     KycModule,
+    FeedbackModule,
     QdrantModule,
+    LlmModule,
+    IntentsModule,
+    RetrievalModule,
+    VovaAgentModule,
     EventEmitterModule.forRoot({ wildcard: true }),
     ContactUnlockModule,
     WsNotificationsModule,

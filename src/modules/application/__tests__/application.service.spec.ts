@@ -15,8 +15,17 @@ import { ContractService } from '../../contract/contract.service';
 import { SystemConfigService } from '../../system-config/system-config.service';
 import { MatchingService } from '../../matching/matching.service';
 import { InteractionEventService } from '../../recommendation-engine/interaction-event.service';
-import { ApplicationStatus, JobOfferStatus, PaymentFlow } from '@prisma/client';
-import { LATE_CANCELLATION_PENALTY_FCFA } from '../application.constants';
+import { JobEventsGateway } from '../../ws-notifications/job-events.gateway';
+import {
+  ApplicationStatus,
+  AssignmentStatus,
+  EmploymentType,
+  JobOfferStatus,
+  PaymentFlow,
+} from '@prisma/client';
+
+/** The configured `fees.late_cancellation_penalty_fcfa`, mocked below. */
+const LATE_CANCELLATION_PENALTY_FCFA = 5000;
 
 const JOB_OFFER_ID = 'offer-uuid-1';
 const WORKER_ID = 'worker-uuid-1';
@@ -34,6 +43,7 @@ const mockJobOffer = {
   scheduled_at: hoursFromNow(5),
   amount: 15000,
   payment_flow: PaymentFlow.DAILY,
+  employment_type: EmploymentType.MISSION,
   address: '123 Avenue de la Paix',
   note: null,
   quantity: 1,
@@ -88,6 +98,7 @@ describe('ApplicationService', () => {
   let service: ApplicationService;
   let prisma: jest.Mocked<PrismaService>;
   let botNotification: jest.Mocked<BotNotificationService>;
+  let testingModule: TestingModule;
 
   beforeEach(async () => {
     const mockPrismaService = {
@@ -97,6 +108,9 @@ describe('ApplicationService', () => {
         count: jest.fn(),
         create: jest.fn(),
         upsert: jest.fn().mockResolvedValue({}),
+        aggregate: jest
+          .fn()
+          .mockResolvedValue({ _count: 0, _sum: { amount: 0 } }),
       },
       application: {
         findUnique: jest.fn(),
@@ -182,10 +196,13 @@ describe('ApplicationService', () => {
               reliabilityScoreMin: 50,
               employerLateCancelScoreDeduction: 5,
               billingBlockThreshold: 2,
-              maxConcurrentApplications: 3,
+              penaltySuspensionThreshold: 3,
+              penaltyHardBlockDays: 3,
+              maxDailyApplications: 10,
               completionScoreReward: 1,
               ratingScoreDeltas: { 1: -4, 2: -2, 3: 0, 4: 1, 5: 3 },
             }),
+            getPenaltyHardBlockDays: jest.fn().mockResolvedValue(3),
           },
         },
         {
@@ -194,6 +211,12 @@ describe('ApplicationService', () => {
             refreshMatchesForJobOffer: jest.fn().mockResolvedValue(undefined),
             indexWorkerProfile: jest.fn().mockResolvedValue(undefined),
           },
+        },
+        {
+          // Push that keeps the counterparty's screen in sync; irrelevant to
+          // these assertions, but the service depends on it.
+          provide: JobEventsGateway,
+          useValue: { emitJobChanged: jest.fn() },
         },
         {
           provide: InteractionEventService,
@@ -208,6 +231,7 @@ describe('ApplicationService', () => {
     service = module.get<ApplicationService>(ApplicationService);
     prisma = module.get(PrismaService);
     botNotification = module.get(BotNotificationService);
+    testingModule = module;
   });
 
   describe('rejectPendingApplicants()', () => {
@@ -351,9 +375,7 @@ describe('ApplicationService', () => {
       // Only the ratee-aggregate profile.update runs, never a reliability bump.
       const reliabilityUpdate = (
         prisma.profile.update as jest.Mock
-      ).mock.calls.find(
-        (c) => c[0]?.data?.reliability_score !== undefined,
-      );
+      ).mock.calls.find((c) => c[0]?.data?.reliability_score !== undefined);
       expect(reliabilityUpdate).toBeUndefined();
     });
 
@@ -367,9 +389,7 @@ describe('ApplicationService', () => {
 
       const reliabilityUpdate = (
         prisma.profile.update as jest.Mock
-      ).mock.calls.find(
-        (c) => c[0]?.data?.reliability_score !== undefined,
-      );
+      ).mock.calls.find((c) => c[0]?.data?.reliability_score !== undefined);
       expect(reliabilityUpdate).toBeUndefined();
     });
 
@@ -478,19 +498,23 @@ describe('ApplicationService', () => {
       );
     });
 
-    it('throws ForbiddenException when worker has reached max concurrent applications', async () => {
-      (prisma.application.count as jest.Mock).mockResolvedValue(3);
+    it('throws ForbiddenException at the daily cap', async () => {
+      // The daily cap is the only gate now. The concurrent-slot cap is gone —
+      // it was the binding one and nothing cleared it on a clock, so a worker
+      // with open applications was blocked until an employer responded.
+      (prisma.application.count as jest.Mock).mockResolvedValue(10);
       await expect(service.create(JOB_OFFER_ID, WORKER_ID)).rejects.toThrow(
         ForbiddenException,
       );
     });
 
-    it('WAITING_PAYMENT applications do NOT count toward the concurrent limit', async () => {
-      // Only PENDING and ACCEPTED count; WAITING_PAYMENT should not block new applications
-      // Simulate: the quota count returns 0 (WAITING_PAYMENT excluded from query)
-      (prisma.application.count as jest.Mock).mockResolvedValue(0);
-      // Should succeed — no ForbiddenException
-      await expect(service.create(JOB_OFFER_ID, WORKER_ID)).resolves.toBeDefined();
+    it('does not block a worker who already has open applications', async () => {
+      // Five open applications used to be a hard stop. Now only today's count
+      // matters, and this worker has applied 3 times today against a cap of 10.
+      (prisma.application.count as jest.Mock).mockResolvedValue(3);
+      await expect(
+        service.create(JOB_OFFER_ID, WORKER_ID),
+      ).resolves.toBeDefined();
     });
 
     it('throws BadRequestException when offer is not ACTIVE', async () => {
@@ -521,6 +545,13 @@ describe('ApplicationService', () => {
       (prisma.application.findUnique as jest.Mock).mockResolvedValue(
         acceptedApplication,
       );
+      // Reopening a slot now reads the offer first and refuses to write over a
+      // closed one — so the offer has to exist and be live for the reopen to
+      // happen at all.
+      (prisma.jobOffer.findUnique as jest.Mock).mockResolvedValue({
+        ...mockJobOffer,
+        status: JobOfferStatus.PARTIALLY_FILLED,
+      });
       (prisma.jobOffer.update as jest.Mock).mockResolvedValue(mockJobOffer);
       (prisma.application.update as jest.Mock).mockResolvedValue({
         ...acceptedApplication,
@@ -877,90 +908,298 @@ describe('ApplicationService', () => {
     });
   });
 
-  describe('markJobCompleted()', () => {
-    const setupMock = (status: ApplicationStatus) => {
+  describe('markCompletedByWorker()', () => {
+    /**
+     * Completion belongs to the worker now — the employer only rates. Builds a
+     * tx double so each test can assert what was written inside the
+     * transaction, and control how many co-workers are still outstanding.
+     */
+    const setupTx = (
+      opts: { stillWorking?: number; offerStatus?: string } = {},
+    ) => {
+      const tx: any = {
+        jobOffer: {
+          update: jest.fn().mockResolvedValue({}),
+          findUnique: jest.fn().mockResolvedValue({
+            status: opts.offerStatus ?? JobOfferStatus.IN_PROGRESS,
+          }),
+        },
+        assignment: {
+          create: jest.fn().mockResolvedValue({}),
+          update: jest.fn().mockResolvedValue({}),
+          updateMany: jest.fn().mockResolvedValue({}),
+          findFirst: jest
+            .fn()
+            .mockResolvedValue({ id: 'asg-1', status: 'STARTED' }),
+          findUnique: jest.fn().mockResolvedValue({ status: 'COMPLETED' }),
+        },
+        application: {
+          update: jest.fn().mockResolvedValue({}),
+          updateMany: jest.fn().mockResolvedValue({}),
+          findMany: jest.fn().mockResolvedValue([]),
+          // How many hired workers have NOT finished yet.
+          count: jest.fn().mockResolvedValue(opts.stillWorking ?? 0),
+        },
+        payment: { create: jest.fn().mockResolvedValue({}) },
+        profile: {
+          findUnique: jest.fn().mockResolvedValue({ reliability_score: 100 }),
+          update: jest.fn().mockResolvedValue({}),
+        },
+        $executeRaw: jest.fn().mockResolvedValue(0),
+      };
+      (prisma.$transaction as jest.Mock).mockImplementation((fn: any) =>
+        typeof fn === 'function' ? fn(tx) : Promise.resolve([]),
+      );
+      return tx;
+    };
+
+    const setupApplication = (status: ApplicationStatus) => {
       (prisma.application.findUnique as jest.Mock).mockResolvedValue({
         ...mockApplication,
         status,
       });
-      (prisma.$transaction as jest.Mock).mockResolvedValue([]);
-      jest.spyOn(service, 'findById').mockResolvedValue({
-        ...mockApplication,
-        status: ApplicationStatus.END,
-        job_offer: {
-          ...mockJobOffer,
-          status: JobOfferStatus.COMPLETED,
-          description: 'desc',
-          payment_flow: 'DAILY',
-          note: null,
-        } as any,
-        worker: mockApplication.worker as any,
-      } as any);
     };
 
-    it('marks offer as COMPLETED when application is ACCEPTED', async () => {
-      setupMock(ApplicationStatus.ACCEPTED);
-      const result = await service.markJobCompleted(
-        APPLICATION_ID,
-        EMPLOYER_ID,
-      );
-      expect(prisma.$transaction as jest.Mock).toHaveBeenCalled();
-      expect(result.job_offer.status).toBe(JobOfferStatus.COMPLETED);
+    it('refuses a worker who is not the one on this mission', async () => {
+      setupApplication(ApplicationStatus.ACCEPTED);
+      setupTx();
+
+      await expect(
+        service.markCompletedByWorker(APPLICATION_ID, 'someone-else'),
+      ).rejects.toThrow(ForbiddenException);
     });
 
-    it('marks offer as COMPLETED when application is STARTED', async () => {
-      setupMock(ApplicationStatus.STARTED);
-      const result = await service.markJobCompleted(
-        APPLICATION_ID,
-        EMPLOYER_ID,
-      );
-      expect(prisma.$transaction as jest.Mock).toHaveBeenCalled();
-      expect(result.job_offer.status).toBe(JobOfferStatus.COMPLETED);
-    });
+    it('ends the worker own application', async () => {
+      setupApplication(ApplicationStatus.ACCEPTED);
+      const tx = setupTx();
 
-    it('sets applications to END status inside transaction', async () => {
-      setupMock(ApplicationStatus.ACCEPTED);
+      await service.markCompletedByWorker(APPLICATION_ID, WORKER_ID);
 
-      let capturedTx: any;
-      (prisma.$transaction as jest.Mock).mockImplementationOnce((fn: any) => {
-        capturedTx = {
-          jobOffer: {
-            update: jest.fn().mockResolvedValue({}),
-            findUnique: jest
-              .fn()
-              .mockResolvedValue({ status: JobOfferStatus.ACTIVE }),
-          },
-          assignment: {
-            updateMany: jest.fn().mockResolvedValue({}),
-            findUnique: jest.fn().mockResolvedValue({ status: 'COMPLETED' }),
-          },
-          payment: { create: jest.fn().mockResolvedValue({}) },
-          application: {
-            updateMany: jest.fn().mockResolvedValue({}),
-            findMany: jest.fn().mockResolvedValue([]),
-          },
-          profile: {
-            findUnique: jest.fn().mockResolvedValue({ reliability_score: 100 }),
-            update: jest.fn().mockResolvedValue({}),
-          },
-          $executeRaw: jest.fn().mockResolvedValue(0),
-        };
-        return fn(capturedTx);
-      });
-
-      await service.markJobCompleted(APPLICATION_ID, EMPLOYER_ID);
-
-      expect(capturedTx.application.updateMany).toHaveBeenCalledWith(
+      expect(tx.application.update).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: expect.objectContaining({
-            job_offer_id: JOB_OFFER_ID,
-            status: {
-              in: [ApplicationStatus.ACCEPTED, ApplicationStatus.STARTED],
-            },
-          }),
+          where: { id: APPLICATION_ID },
           data: { status: ApplicationStatus.END },
         }),
       );
+    });
+
+    it('works from STARTED too', async () => {
+      setupApplication(ApplicationStatus.STARTED);
+      const tx = setupTx();
+
+      await service.markCompletedByWorker(APPLICATION_ID, WORKER_ID);
+
+      expect(tx.assignment.update).toHaveBeenCalled();
+    });
+
+    it('closes the offer once no hired worker is left outstanding', async () => {
+      setupApplication(ApplicationStatus.ACCEPTED);
+      const tx = setupTx({ stillWorking: 0 });
+
+      await service.markCompletedByWorker(APPLICATION_ID, WORKER_ID);
+
+      expect(tx.jobOffer.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: { status: JobOfferStatus.COMPLETED },
+        }),
+      );
+    });
+
+    it('leaves the offer open while a co-worker is still going', async () => {
+      // The whole reason completion is per-worker: an offer can hire several
+      // people, and the first to finish must not end everyone else's mission.
+      setupApplication(ApplicationStatus.ACCEPTED);
+      const tx = setupTx({ stillWorking: 1 });
+
+      await service.markCompletedByWorker(APPLICATION_ID, WORKER_ID);
+
+      expect(tx.jobOffer.update).not.toHaveBeenCalled();
+    });
+
+    it('pushes to BOTH parties, not just the one who acted', async () => {
+      // The employer's rating action only becomes available once the worker
+      // confirms, and their screen has no other way to learn that:
+      // invalidateQueries runs in the worker's browser, not theirs. Inside
+      // WhatsApp's webview it never self-corrects either — no focus or
+      // reconnect events fire there.
+      setupApplication(ApplicationStatus.ACCEPTED);
+      setupTx();
+      const gateway = testingModule.get(JobEventsGateway);
+
+      await service.markCompletedByWorker(APPLICATION_ID, WORKER_ID);
+
+      expect(gateway.emitJobChanged).toHaveBeenCalledWith(
+        expect.arrayContaining([WORKER_ID, EMPLOYER_ID]),
+        expect.objectContaining({ kind: 'completed' }),
+      );
+    });
+
+    it.each([EmploymentType.CDI, EmploymentType.CDD, EmploymentType.STAGE])(
+      'refuses to complete a %s — it is not a one-off gig',
+      async (type) => {
+        // A permanent or fixed-term engagement has no moment to confirm. Offering
+        // "terminer" there would be misleading, and the error names the type so
+        // the caller can tell this from an ordinary state error.
+        (prisma.application.findUnique as jest.Mock).mockResolvedValue({
+          ...mockApplication,
+          status: ApplicationStatus.ACCEPTED,
+          job_offer: { ...mockJobOffer, employment_type: type },
+        });
+        setupTx();
+
+        await expect(
+          service.markCompletedByWorker(APPLICATION_ID, WORKER_ID),
+        ).rejects.toThrow(BadRequestException);
+      },
+    );
+
+    it('records no payment — Rabotka never touches the wage', async () => {
+      // The employer pays the worker directly. Recording the wage as a Payment
+      // invented a transaction that never happened and, because the revenue
+      // queries summed every COMPLETED payment, booked the worker's whole wage
+      // as platform revenue.
+      setupApplication(ApplicationStatus.ACCEPTED);
+      const tx = setupTx();
+
+      await service.markCompletedByWorker(APPLICATION_ID, WORKER_ID);
+
+      expect(tx.payment.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('confirmHireByEmployer()', () => {
+    /**
+     * An ongoing engagement is closed by the employer confirming the hire, not
+     * by anyone confirming the work is finished — the work carries on
+     * off-platform and we would never learn when it ended. Waiting for that is
+     * exactly how a hired CDI used to strand in FILLED with neither side able
+     * to rate the other.
+     */
+    const OFFER_ID = 'offer-1';
+
+    const setupOffer = (
+      overrides: {
+        status?: JobOfferStatus;
+        employment_type?: EmploymentType;
+        employer_id?: string;
+      } = {},
+    ) => {
+      (prisma.jobOffer.findUnique as jest.Mock).mockResolvedValue({
+        id: OFFER_ID,
+        title: 'Agent de sécurité',
+        employer_id: overrides.employer_id ?? EMPLOYER_ID,
+        status: overrides.status ?? JobOfferStatus.FILLED,
+        employment_type: overrides.employment_type ?? EmploymentType.CDI,
+      });
+    };
+
+    const setupTx = () => {
+      const tx: any = {
+        jobOffer: {
+          findUnique: jest
+            .fn()
+            .mockResolvedValue({ status: JobOfferStatus.FILLED }),
+          update: jest.fn().mockResolvedValue({}),
+        },
+        application: {
+          findMany: jest.fn().mockResolvedValue([{ id: APPLICATION_ID }]),
+          updateMany: jest.fn().mockResolvedValue({}),
+        },
+        assignment: { updateMany: jest.fn().mockResolvedValue({}) },
+        profile: {
+          findUnique: jest.fn().mockResolvedValue({ reliability_score: 100 }),
+          update: jest.fn().mockResolvedValue({}),
+        },
+        $executeRaw: jest.fn().mockResolvedValue(0),
+      };
+      (prisma.$transaction as jest.Mock).mockImplementation((fn: any) =>
+        typeof fn === 'function' ? fn(tx) : Promise.resolve([]),
+      );
+      (prisma.application.findMany as jest.Mock).mockResolvedValue([]);
+      return tx;
+    };
+
+    it('closes the offer and ends every hired application', async () => {
+      setupOffer();
+      const tx = setupTx();
+
+      await service.confirmHireByEmployer(OFFER_ID, EMPLOYER_ID);
+
+      expect(tx.application.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { status: ApplicationStatus.END } }),
+      );
+      expect(tx.jobOffer.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: { status: JobOfferStatus.COMPLETED },
+        }),
+      );
+    });
+
+    it('completes the assignments, which is what opens the rating', async () => {
+      // Both rating methods gate on the assignment being COMPLETED. Without
+      // this write the offer would close and still nobody could rate anyone.
+      setupOffer();
+      const tx = setupTx();
+
+      await service.confirmHireByEmployer(OFFER_ID, EMPLOYER_ID);
+
+      expect(tx.assignment.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: AssignmentStatus.COMPLETED,
+          }),
+        }),
+      );
+    });
+
+    it('awards no reliability score — being hired is not work delivered', async () => {
+      // completionScoreReward is paid for finishing a job. Paying it out at
+      // hiring would make the score inflatable by posting a role and filling
+      // it, which is the whole reason this path does not reuse
+      // markCompletedByWorker.
+      setupOffer();
+      const tx = setupTx();
+
+      await service.confirmHireByEmployer(OFFER_ID, EMPLOYER_ID);
+
+      expect(tx.profile.update).not.toHaveBeenCalled();
+    });
+
+    it('refuses a MISSION — its worker is the one who closes it', async () => {
+      setupOffer({ employment_type: EmploymentType.MISSION });
+      setupTx();
+
+      await expect(
+        service.confirmHireByEmployer(OFFER_ID, EMPLOYER_ID),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('refuses while the offer is still recruiting', async () => {
+      setupOffer({ status: JobOfferStatus.PARTIALLY_FILLED });
+      setupTx();
+
+      await expect(
+        service.confirmHireByEmployer(OFFER_ID, EMPLOYER_ID),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('refuses an employer who does not own the offer', async () => {
+      setupOffer({ employer_id: 'someone-else' });
+      setupTx();
+
+      await expect(
+        service.confirmHireByEmployer(OFFER_ID, EMPLOYER_ID),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('is idempotent once closed, so the grace sweep can race the employer', async () => {
+      setupOffer({ status: JobOfferStatus.COMPLETED });
+      const tx = setupTx();
+
+      await expect(
+        service.confirmHireByEmployer(OFFER_ID, EMPLOYER_ID),
+      ).resolves.toBeUndefined();
+      expect(tx.jobOffer.update).not.toHaveBeenCalled();
     });
   });
 });

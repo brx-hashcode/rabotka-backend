@@ -1,4 +1,4 @@
-import { ForbiddenException } from '@nestjs/common';
+import { ForbiddenException, Logger } from '@nestjs/common';
 import { ProfileType } from '@prisma/client';
 import { ContactedProfilesService } from '../../recommendation/contacted-profiles.service';
 import { MobileRecommendationController } from '../mobile-recommendation.controller';
@@ -31,8 +31,8 @@ describe('MobileRecommendationController — worker-feed tiers', () => {
     paymentRequest: { findMany: jest.Mock };
   };
   let matching: { findMatchingWorkersForEmployerProfile: jest.Mock };
-  let systemConfig: { getFees: jest.Mock };
-  let interactionEvents: { record: jest.Mock };
+  let systemConfig: { getFees: jest.Mock; isSimilarityEnabled: jest.Mock };
+  let interactionEvents: { record: jest.Mock; recordImpressions: jest.Mock };
   let rollout: { versionFor: jest.Mock };
   let engine: { recommendWorkersForEmployer: jest.Mock };
 
@@ -91,9 +91,16 @@ describe('MobileRecommendationController — worker-feed tiers', () => {
     };
     systemConfig = {
       getFees: jest.fn().mockResolvedValue({ reliabilityScoreMin: 50 }),
+      // On by default so the tier-1 tests below actually reach a ranker. The
+      // controller now short-circuits to `engine: 'disabled'` when this is
+      // false, which is the prod case the `engine reporting` block covers.
+      isSimilarityEnabled: jest.fn().mockResolvedValue(true),
     };
 
-    interactionEvents = { record: jest.fn().mockResolvedValue(undefined) };
+    interactionEvents = {
+      record: jest.fn().mockResolvedValue(undefined),
+      recordImpressions: jest.fn().mockResolvedValue(0),
+    };
     // Legacy by default — the v2 ranker is behind a rollout flag.
     rollout = { versionFor: jest.fn().mockResolvedValue('legacy') };
     engine = { recommendWorkersForEmployer: jest.fn().mockResolvedValue([]) };
@@ -112,15 +119,17 @@ describe('MobileRecommendationController — worker-feed tiers', () => {
       new ContactedProfilesService(prisma as never),
       // Returns a slug so workerDetail() does not try to mint one; the
       // mint-on-demand path has its own test below.
-      { ensurePortfolioSlug: jest.fn().mockResolvedValue('awa-a1b2c3') } as never,
+      {
+        ensurePortfolioSlug: jest.fn().mockResolvedValue('awa-a1b2c3'),
+      } as never,
     );
   });
 
   it('403s for a WORKER', async () => {
     mockType(ProfileType.WORKER);
-    await expect(
-      controller.workerFeed(reqFor('w1') as never),
-    ).rejects.toThrow(ForbiddenException);
+    await expect(controller.workerFeed(reqFor('w1') as never)).rejects.toThrow(
+      ForbiddenException,
+    );
     expect(
       matching.findMatchingWorkersForEmployerProfile,
     ).not.toHaveBeenCalled();
@@ -157,6 +166,89 @@ describe('MobileRecommendationController — worker-feed tiers', () => {
       const result = await controller.workerFeed(reqFor('e1') as never);
 
       expect(result.map((w) => w.id)).toEqual(['w-fresh']);
+    });
+  });
+
+  /**
+   * The prod incident this guards: every card came back `score: 0` because
+   * `matching.use_embeddings` was off, so the ranker never ran and the SQL
+   * fallback answered. From the response alone that is indistinguishable from a
+   * ranker that ran and scored everyone 0 — the log line is the only thing that
+   * separates them, so it is asserted rather than left to inspection.
+   */
+  describe('diagnostic reporting', () => {
+    const logged = () =>
+      (
+        Logger.prototype.log as unknown as jest.Mock
+      ).mock.calls.flat() as string[];
+
+    beforeEach(() => {
+      jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
+    });
+
+    afterEach(() => {
+      (Logger.prototype.log as unknown as jest.Mock).mockRestore();
+    });
+
+    it('reports engine=disabled and never consults a ranker when embeddings are off', async () => {
+      mockType(ProfileType.EMPLOYER);
+      systemConfig.isSimilarityEnabled.mockResolvedValue(false);
+      mockProfileQueries({
+        eligible: () => [{ id: 'w-1' }],
+        hydrated: [workerRow('w-1')],
+      });
+
+      const result = await controller.workerFeed(reqFor('e1') as never);
+
+      expect(
+        matching.findMatchingWorkersForEmployerProfile,
+      ).not.toHaveBeenCalled();
+      expect(engine.recommendWorkersForEmployer).not.toHaveBeenCalled();
+      // The exact prod signature: fallback tier, zeroed score, no ranker.
+      expect(result[0].score).toBe(0);
+      expect(logged().join(' ')).toContain('engine=disabled tier=any_eligible');
+    });
+
+    it('reports engine=legacy tier=ranked when the legacy ranker answers', async () => {
+      mockType(ProfileType.EMPLOYER);
+      matching.findMatchingWorkersForEmployerProfile.mockResolvedValue([
+        { id: 'w-9', score: 0.48 },
+      ]);
+      prisma.profile.findMany.mockResolvedValue([workerRow('w-9')]);
+
+      await controller.workerFeed(reqFor('e1') as never);
+
+      const line = logged().join(' ');
+      expect(line).toContain('engine=legacy tier=ranked');
+      expect(line).toContain('topScore=0.4800');
+    });
+
+    it('reports engine=v2 when the rollout puts this employer on v2', async () => {
+      mockType(ProfileType.EMPLOYER);
+      rollout.versionFor.mockResolvedValue('v2');
+      engine.recommendWorkersForEmployer.mockResolvedValue([
+        { id: 'w-9', score: 0.62 },
+      ]);
+      prisma.profile.findMany.mockResolvedValue([workerRow('w-9')]);
+
+      await controller.workerFeed(reqFor('e1') as never);
+
+      expect(logged().join(' ')).toContain('engine=v2 tier=ranked');
+    });
+
+    it('keeps the engine label when the ranker ran but the fallback answered', async () => {
+      mockType(ProfileType.EMPLOYER);
+      // Ranker consulted, matched nothing — distinct from never running.
+      matching.findMatchingWorkersForEmployerProfile.mockResolvedValue([]);
+      prisma.jobOffer.findMany.mockResolvedValue([{ category_id: 'c1' }]);
+      mockProfileQueries({
+        eligible: () => [{ id: 'w-1' }],
+        hydrated: [workerRow('w-1')],
+      });
+
+      await controller.workerFeed(reqFor('e1') as never);
+
+      expect(logged().join(' ')).toContain('engine=legacy tier=in_domain');
     });
   });
 

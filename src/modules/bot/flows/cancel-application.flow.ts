@@ -4,20 +4,24 @@ import {
   formatCancelApplicationNoPenalty,
   formatCancelApplicationWithPenalty,
 } from '../messages/penalty.messages';
-import {
-  LATE_CANCELLATION_PENALTY_FCFA,
-  LATE_CANCELLATION_SCORE_DEDUCTION,
-} from '../../application/application.constants';
 import type { ApplicationService } from '../../application/application.service';
 import type { BotNotificationService } from '../services/bot-notification.service';
 import type { InterestSignalService } from '../../interest-graph/interest-signal.service';
 import { welcomePlatformMessage } from '../messages/welcome.messages';
+import { closesOnFill } from '../../job-offer/utils/employment-type.util';
 
 export type CancelApplicationContext = {
   applicationService: ApplicationService;
   notificationService: BotNotificationService;
   interestSignalService: InterestSignalService;
+  // All four come from SystemConfig via the orchestrator. They used to be
+  // imported as hardcoded constants while `ApplicationService.cancel` charged
+  // the configured value, so raising the penalty in admin made the bot quote
+  // one figure and debit another.
   cancellationThresholdHours: number;
+  lateCancellationPenaltyFcfa: number;
+  lateCancellationScoreDeduction: number;
+  reliabilityScoreMin: number;
 };
 
 export type FlowResult = {
@@ -44,7 +48,7 @@ type AppWithOffer = {
   job_offer_id: string;
   job_offer: {
     title: string;
-    scheduled_at: Date;
+    scheduled_at: Date | null;
     amount: number | null;
   };
 };
@@ -129,21 +133,23 @@ function showInitialCancelPrompt(
   profile: BotProfile,
   state: BotState,
   timeRemainingStr: string,
-  thresholdHours: number,
+  ctx: CancelApplicationContext,
 ): FlowResult {
   const scheduledAt = app.job_offer.scheduled_at;
   if (isLate) {
+    // Mirrors the clamp in ApplicationService.cancel, floor included — the
+    // score this previews has to be the score the worker actually ends up with.
     const newScore = Math.max(
-      50,
-      (profile.reliability_score ?? 100) - LATE_CANCELLATION_SCORE_DEDUCTION,
+      ctx.reliabilityScoreMin,
+      (profile.reliability_score ?? 100) - ctx.lateCancellationScoreDeduction,
     );
     const text = formatCancelApplicationWithPenalty({
       offerTitle: app.job_offer.title,
       scheduledAt,
       amount: app.job_offer.amount,
       timeRemaining: timeRemainingStr,
-      penaltyAmount: LATE_CANCELLATION_PENALTY_FCFA,
-      scoreDeduction: LATE_CANCELLATION_SCORE_DEDUCTION,
+      penaltyAmount: ctx.lateCancellationPenaltyFcfa,
+      scoreDeduction: ctx.lateCancellationScoreDeduction,
       newScore,
     });
     return { reply: [text], nextState: state };
@@ -153,13 +159,13 @@ function showInitialCancelPrompt(
     scheduledAt,
     amount: app.job_offer.amount,
     timeRemaining: timeRemainingStr,
-    thresholdHours,
+    thresholdHours: ctx.cancellationThresholdHours,
   });
   return { reply: [text], nextState: state };
 }
 
 function handleLateCancellationInput(args: CancelStepArgs): FlowResult {
-  const { state, payload, trimmed } = args;
+  const { state, payload, trimmed, ctx } = args;
   const reason = trimmed || undefined;
   if (!reason) {
     return {
@@ -174,7 +180,7 @@ function handleLateCancellationInput(args: CancelStepArgs): FlowResult {
       [
         '*Êtes-vous certain de vouloir annuler ?*',
         '',
-        `*Pénalité*: ${LATE_CANCELLATION_PENALTY_FCFA.toLocaleString('fr-FR')} FCFA`,
+        `*Pénalité*: ${ctx.lateCancellationPenaltyFcfa.toLocaleString('fr-FR')} FCFA`,
         '1- Oui, annuler malgré la pénalité',
         '2- Non, maintenir ma candidature',
         '',
@@ -205,7 +211,7 @@ async function handleCancelStep1(
       profile,
       state,
       timeRemainingStr,
-      args.ctx.cancellationThresholdHours,
+      args.ctx,
     );
   }
 
@@ -231,9 +237,7 @@ async function handleCancelStep1(
 
   if (normalized === '2' || normalized === 'je serai présent') {
     return {
-      reply: [
-        'Annulation annulée. Votre candidature est maintenue.',
-      ],
+      reply: ['Annulation annulée. Votre candidature est maintenue.'],
       clearState: true,
     };
   }
@@ -277,9 +281,7 @@ async function handleCancelStep2(args: CancelStepArgs): Promise<FlowResult> {
   }
   if (normalized === '2' || normalized === 'non') {
     return {
-      reply: [
-        'Annulation annulée. Votre candidature est maintenue.',
-      ],
+      reply: ['Annulation annulée. Votre candidature est maintenue.'],
       clearState: true,
     };
   }
@@ -313,9 +315,7 @@ export async function runCancelApplicationFlow(
 
   if (profile.profile_type !== 'WORKER') {
     return {
-      reply: [
-        '❌ Seuls les travailleurs peuvent annuler leurs candidatures.',
-      ],
+      reply: ['❌ Seuls les travailleurs peuvent annuler leurs candidatures.'],
       clearState: true,
     };
   }
@@ -328,10 +328,18 @@ export async function runCancelApplicationFlow(
     };
   }
 
+  // END counts on an ongoing engagement: there it means "the offer closed once
+  // we were hired", not "the work is finished", and a hire that falls through
+  // has to be reversible from WhatsApp too — this flow is how most workers
+  // reach it. The service re-checks the same rule.
+  const isReversibleHire =
+    app.status === 'END' && closesOnFill(app.job_offer.employment_type);
+
   if (
     app.status !== 'PENDING' &&
     app.status !== 'ACCEPTED' &&
-    app.status !== 'WAITING_PAYMENT'
+    app.status !== 'WAITING_PAYMENT' &&
+    !isReversibleHire
   ) {
     return {
       reply: ['❌ Cette candidature ne peut plus être annulée.'],
@@ -340,7 +348,14 @@ export async function runCancelApplicationFlow(
   }
 
   const now = new Date();
-  const msUntil = app.job_offer.scheduled_at.getTime() - now.getTime();
+  const scheduledAt = app.job_offer.scheduled_at;
+  // An offer with no closing date has no deadline: it can never be "already
+  // passed", and leaving it is never late. Infinity keeps the arithmetic below
+  // honest without a second branch through the whole flow.
+  const msUntil =
+    scheduledAt === null
+      ? Number.POSITIVE_INFINITY
+      : scheduledAt.getTime() - now.getTime();
   const hoursUntil = msUntil / (60 * 60 * 1000);
 
   if (hoursUntil < 0) {
@@ -351,7 +366,8 @@ export async function runCancelApplicationFlow(
   }
 
   const isLate = hoursUntil < ctx.cancellationThresholdHours;
-  const timeRemainingStr = formatTimeRemaining(msUntil);
+  const timeRemainingStr =
+    scheduledAt === null ? '—' : formatTimeRemaining(msUntil);
 
   const stepArgs: CancelStepArgs = {
     state,

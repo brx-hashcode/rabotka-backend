@@ -1,6 +1,5 @@
 import { Logger } from '@nestjs/common';
 import { BotNotificationService } from '../bot-notification.service';
-import { WHATSAPP_TEMPLATES } from '../../../../common/constants/whatsapp-templates';
 
 jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => {});
 
@@ -75,11 +74,26 @@ describe('BotNotificationService', () => {
   let deps: ReturnType<typeof makeDeps> & {
     contactUnlock: { getByApplicationId: jest.Mock };
   };
+  let feedback: { requestFeedback: jest.Mock; mintFlowToken: jest.Mock };
+  // `set` returns 'OK' when the NX claim is won, null when someone holds it —
+  // which is exactly how the notification pacing decides to send or stay quiet.
+  let redis: { set: jest.Mock; del: jest.Mock };
 
   beforeEach(() => {
     const base = makeDeps();
+    redis = {
+      set: jest.fn().mockResolvedValue('OK'),
+      del: jest.fn().mockResolvedValue(1),
+    };
     const contactUnlock = {
       getByApplicationId: jest.fn().mockResolvedValue(null),
+    };
+    // The ask now rides on the unlock template's own FLOW button, so only the
+    // token comes from here; `requestFeedback` is the free-form path the
+    // unlock no longer uses.
+    feedback = {
+      requestFeedback: jest.fn().mockResolvedValue(true),
+      mintFlowToken: jest.fn((id: string) => `fb_${id}_uuid`),
     };
     deps = { ...base, contactUnlock };
     service = new BotNotificationService(
@@ -102,8 +116,11 @@ describe('BotNotificationService', () => {
           employerLateCancelScoreDeduction: 5,
           billingBlockThreshold: 2,
         }),
+        getNewApplicationNotifyCooldownMinutes: jest.fn().mockResolvedValue(30),
       } as any,
       { getProfileWalletBalance: jest.fn().mockResolvedValue(0) } as any,
+      feedback as any,
+      redis as any,
     );
   });
 
@@ -115,9 +132,61 @@ describe('BotNotificationService', () => {
       // approved template does not require touching this test.
       expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+24200000002',
-        WHATSAPP_TEMPLATES.newApplication.contentSid,
-        expect.objectContaining({ '2': expect.any(String) }),
+        'newApplication',
+        expect.objectContaining({ workerName: expect.any(String) }),
+        expect.any(String),
       );
+    });
+
+    // Pacing. An offer with twenty-five candidates used to send twenty-five
+    // billed templates, all opening the same page.
+    it('claims the offer window before sending, keyed by offer', async () => {
+      await service.sendNewApplicationToEmployer('app-1');
+      expect(redis.set).toHaveBeenCalledWith(
+        'new_application_notify:jo-1',
+        '1',
+        'EX',
+        30 * 60,
+        'NX',
+      );
+    });
+
+    it('stays quiet when the offer was already announced in this window', async () => {
+      // ioredis returns null when SET NX loses the race.
+      redis.set.mockResolvedValue(null);
+      await service.sendNewApplicationToEmployer('app-1');
+      expect(deps.whatsApp.sendTemplateMessage).not.toHaveBeenCalled();
+    });
+
+    // Skipping must be cheap: the counting query sits behind the claim, so a
+    // paced-out application costs neither a message nor a round trip.
+    it('does not query anything further once paced out', async () => {
+      redis.set.mockResolvedValue(null);
+      await service.sendNewApplicationToEmployer('app-1');
+      expect(deps.prisma.application.count).not.toHaveBeenCalled();
+    });
+
+    it('hands the window back when the send throws', async () => {
+      deps.whatsApp.sendTemplateMessage.mockRejectedValueOnce(
+        new Error('WhatsApp down'),
+      );
+      await service.sendNewApplicationToEmployer('app-1');
+      // Otherwise one transient failure silences every later applicant on this
+      // offer for the rest of the cooldown.
+      expect(redis.del).toHaveBeenCalledWith('new_application_notify:jo-1');
+    });
+
+    it('notifies on every application when the cooldown is 0', async () => {
+      (
+        service as unknown as {
+          systemConfig: { getNewApplicationNotifyCooldownMinutes: jest.Mock };
+        }
+      ).systemConfig.getNewApplicationNotifyCooldownMinutes.mockResolvedValue(
+        0,
+      );
+      await service.sendNewApplicationToEmployer('app-1');
+      expect(redis.set).not.toHaveBeenCalled();
+      expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalled();
     });
 
     it('passes the applicationId as the CTA button URL suffix', async () => {
@@ -125,7 +194,8 @@ describe('BotNotificationService', () => {
       expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         expect.any(String),
         expect.any(String),
-        expect.objectContaining({ '8': 'app-1' }),
+        expect.objectContaining({ applicationId: 'app-1' }),
+        expect.any(String),
       );
     });
 
@@ -183,17 +253,87 @@ describe('BotNotificationService', () => {
     });
   });
 
+  describe('asking for feedback after an unlock', () => {
+    it('asks both parties on the unlock template itself', async () => {
+      // The unlock is the moment the product either delivered or did not, so
+      // it is the honest place to ask — and the ask is a FLOW button on the
+      // template, not a second message. A second message would be a free-form
+      // interactive send, which WhatsApp rejects outside the 24h window (the
+      // window anyone who paid on the web is outside of).
+      deps.prisma.contactUnlockAttempt.findUnique.mockResolvedValue({
+        id: 'attempt-1',
+        employer_id: 'emp-1',
+        worker_id: 'worker-1',
+      });
+      deps.prisma.profile.findUnique
+        .mockResolvedValueOnce({
+          phone: '+242001',
+          first_name: 'Alice',
+          last_name: 'Smith',
+          email: 'alice@test.com',
+        })
+        .mockResolvedValueOnce({
+          phone: '+242002',
+          first_name: 'Bob',
+          last_name: 'Jones',
+          email: 'bob@test.com',
+        });
+      await service.sendContactUnlockedNotification('attempt-1');
+
+      expect(feedback.requestFeedback).not.toHaveBeenCalled();
+      // A token per recipient, and each one naming the profile that was asked
+      // — that string is the only thing tying a submission back to a person.
+      expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
+        '+242001',
+        'contactUnlocked',
+        expect.objectContaining({ flowToken: 'fb_emp-1_uuid' }),
+      );
+      expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
+        '+242002',
+        'contactUnlocked',
+        expect.objectContaining({ flowToken: 'fb_worker-1_uuid' }),
+      );
+    });
+
+    it('does not let a failed survey break the unlock notification', async () => {
+      // A survey must never cost the reader the contact details they paid for.
+      feedback.requestFeedback.mockRejectedValue(new Error('flow unavailable'));
+      deps.prisma.contactUnlockAttempt.findUnique.mockResolvedValue({
+        id: 'attempt-1',
+        employer_id: 'emp-1',
+        worker_id: 'worker-1',
+      });
+      deps.prisma.profile.findUnique
+        .mockResolvedValueOnce({
+          phone: '+242001',
+          first_name: 'Alice',
+          last_name: 'Smith',
+          email: 'alice@test.com',
+        })
+        .mockResolvedValueOnce({
+          phone: '+242002',
+          first_name: 'Bob',
+          last_name: 'Jones',
+          email: 'bob@test.com',
+        });
+      await expect(
+        service.sendContactUnlockedNotification('attempt-1'),
+      ).resolves.not.toThrow();
+    });
+  });
+
   describe('sendApplicationAcceptedToWorker()', () => {
     it('sends the simple accepted template when there is no pending unlock', async () => {
       await service.sendApplicationAcceptedToWorker('app-1');
       expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+24200000001',
-        WHATSAPP_TEMPLATES.applicationAccepted.contentSid,
-        expect.objectContaining({ '2': expect.any(String) }),
+        'applicationAccepted',
+        expect.objectContaining({ offerTitle: expect.any(String) }),
+        expect.any(String),
       );
     });
 
-    it('sends the unlock template and pre-sets unlock state when a pending unlock exists', async () => {
+    it('sends the unlock template and arms no chat state', async () => {
       deps.contactUnlock.getByApplicationId.mockResolvedValue({
         id: 'attempt-1',
         expires_at: new Date(Date.now() + 3600_000),
@@ -201,10 +341,15 @@ describe('BotNotificationService', () => {
       await service.sendApplicationAcceptedToWorker('app-1');
       expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+24200000001',
-        WHATSAPP_TEMPLATES.applicationAcceptedUnlock.contentSid,
-        expect.objectContaining({ '2': expect.any(String) }),
+        'applicationAcceptedUnlock',
+        expect.objectContaining({ offerTitle: expect.any(String) }),
+        expect.any(String),
       );
-      expect(deps.botState.setIfFlowAbsentOrMatches).toHaveBeenCalled();
+      // It used to pre-arm the unlock flow so a "Continuer" quick-reply could
+      // re-show a payment menu in the chat. The template carries a URL button
+      // now and the worker settles up in the app, so arming a flow only left a
+      // stale state for the next thing they typed to fall into.
+      expect(deps.botState.setIfFlowAbsentOrMatches).not.toHaveBeenCalled();
     });
 
     it('does nothing when worker has no phone', async () => {
@@ -230,10 +375,11 @@ describe('BotNotificationService', () => {
       await service.sendApplicationRejectedToWorker('app-1');
       expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+24200000001',
-        WHATSAPP_TEMPLATES.applicationRejected.contentSid,
-        // The destination the short link resolves to; the processor swaps it
-        // for a login code on the way out.
-        { '1': 'recherche-offres' },
+        'applicationRejected',
+        // Takes no params — the short-link destination is baked into the
+        // registry entry, and the processor swaps it for a login code on the
+        // way out. Covered in the twilio mapper spec.
+        undefined,
       );
     });
 
@@ -252,22 +398,25 @@ describe('BotNotificationService', () => {
       await service.sendCancellationToEmployer('app-1', 'Malade', false);
       expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+24200000002',
-        WHATSAPP_TEMPLATES.cancellation.contentSid,
-        expect.objectContaining({ '4': 'Malade' }),
+        'cancellation',
+        expect.objectContaining({ reason: 'Malade' }),
       );
     });
 
     it('falls back to a default reason and a no-penalty status when applicable', async () => {
       await service.sendCancellationToEmployer('app-1', null, false);
-      const vars = deps.whatsApp.sendTemplateMessage.mock.calls[0][2];
-      expect(vars['4']).toBe('Aucune raison donnée');
-      expect(vars['5']).toContain('Aucune pénalité');
+      // The "Aucune raison donnée" fallback now lives in the registry's
+      // variables() and is exercised in the twilio mapper spec; here the
+      // service is only responsible for passing the raw reason through.
+      const params = deps.whatsApp.sendTemplateMessage.mock.calls[0][2];
+      expect(params.reason ?? '').toBe('');
+      expect(params.penaltyStatus).toContain('Aucune pénalité');
     });
 
     it('sets a penalty status when the cancellation was late', async () => {
       await service.sendCancellationToEmployer('app-1', null, true);
-      const vars = deps.whatsApp.sendTemplateMessage.mock.calls[0][2];
-      expect(vars['5']).toContain('pénalité');
+      const params = deps.whatsApp.sendTemplateMessage.mock.calls[0][2];
+      expect(params.penaltyStatus).toContain('pénalité');
     });
 
     it('swallows errors gracefully', async () => {
@@ -354,8 +503,9 @@ describe('BotNotificationService', () => {
       );
       expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+242001',
-        WHATSAPP_TEMPLATES.unlockExpiredConversion.contentSid,
-        { '1': '500' },
+        'unlockExpiredConversion',
+        { amount: 500 },
+        expect.any(String),
       );
     });
   });
@@ -376,7 +526,14 @@ describe('BotNotificationService', () => {
       (deps.prisma as any).jobOffer = {
         findUnique: jest.fn().mockResolvedValue(null),
       };
-      await service.sendRecommendedJobNotification('worker-1', 'jo-1');
+      const sent = await service.sendRecommendedJobNotification(
+        'worker-1',
+        'jo-1',
+      );
+
+      // The caller releases the worker's cooldown on `false`, so "nothing was
+      // sent" has to be reported, not swallowed.
+      expect(sent).toBe(false);
       expect(deps.whatsApp.sendTemplateMessage).not.toHaveBeenCalled();
     });
 
@@ -396,11 +553,16 @@ describe('BotNotificationService', () => {
           scheduled_at: new Date('2026-06-01T10:00:00Z'),
         }),
       };
-      await service.sendRecommendedJobNotification('worker-1', 'jo-1');
+      const sent = await service.sendRecommendedJobNotification(
+        'worker-1',
+        'jo-1',
+      );
+
+      expect(sent).toBe(true);
       expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalledWith(
         '+242001',
         expect.any(String),
-        expect.objectContaining({ '2': 'Plombier' }),
+        expect.objectContaining({ title: 'Plombier' }),
       );
     });
 
@@ -426,8 +588,12 @@ describe('BotNotificationService', () => {
         }),
       };
 
-      await service.sendRecommendedJobNotification('worker-1', 'jo-1');
+      const sent = await service.sendRecommendedJobNotification(
+        'worker-1',
+        'jo-1',
+      );
 
+      expect(sent).toBe(true);
       expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalled();
     });
 
@@ -451,10 +617,63 @@ describe('BotNotificationService', () => {
         }),
       };
 
-      await service.sendRecommendedJobNotification('worker-1', 'jo-1');
+      const sent = await service.sendRecommendedJobNotification(
+        'worker-1',
+        'jo-1',
+      );
 
+      expect(sent).toBe(true);
       expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalled();
     });
-  });
 
+    it('reports a provider failure rather than swallowing it', async () => {
+      // The caller cannot release a cooldown it was never told to release, so
+      // a throw here has to surface as `false` rather than as a silent void.
+      deps.prisma.profile.findUnique.mockResolvedValue({
+        phone: '+242001',
+        first_name: 'Alice',
+        status: 'ACTIVE',
+        profile_type: 'WORKER',
+      });
+      (deps.prisma as any).jobOffer = {
+        findUnique: jest.fn().mockResolvedValue({
+          title: 'Plombier',
+          amount: 5000,
+          payment_flow: null,
+          address: '10 Rue Paris',
+          scheduled_at: new Date('2026-06-01T10:00:00Z'),
+        }),
+      };
+      deps.whatsApp.sendTemplateMessage.mockRejectedValueOnce(
+        new Error('twilio down'),
+      );
+
+      await expect(
+        service.sendRecommendedJobNotification('worker-1', 'jo-1'),
+      ).resolves.toBe(false);
+    });
+
+    it('reports an ineligible worker as not sent', async () => {
+      deps.prisma.profile.findUnique.mockResolvedValue({
+        phone: '+242001',
+        first_name: 'Alice',
+        status: 'SUSPENDED',
+        profile_type: 'WORKER',
+      });
+      (deps.prisma as any).jobOffer = {
+        findUnique: jest.fn().mockResolvedValue({
+          title: 'Plombier',
+          amount: 5000,
+          payment_flow: null,
+          address: '10 Rue Paris',
+          scheduled_at: new Date('2026-06-01T10:00:00Z'),
+        }),
+      };
+
+      await expect(
+        service.sendRecommendedJobNotification('worker-1', 'jo-1'),
+      ).resolves.toBe(false);
+      expect(deps.whatsApp.sendTemplateMessage).not.toHaveBeenCalled();
+    });
+  });
 });

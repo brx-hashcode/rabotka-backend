@@ -1,21 +1,33 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
+import { WHATSAPP_TEMPLATES } from '../../../common/constants/whatsapp-templates';
 import { WhatsAppOutboundProcessor } from '../whatsapp-outbound.processor';
 import { WhatsAppService } from '../whatsapp.service';
 import { QueueService } from '../../../common/services/queue/queue.service';
 import { WhatsAppLoginLinkService } from '../../auth/whatsapp-login-link.service';
-import { WHATSAPP_TEMPLATES } from '../../../common/constants/whatsapp-templates';
+
+/**
+ * A real registry SID: the processor resolves it back to a logical key so the
+ * send itself is provider-agnostic. viewWorkerPortfolio is hardcoded in the
+ * registry (no env override), so it is stable across environments.
+ */
+const CAROUSEL_SID = WHATSAPP_TEMPLATES.viewWorkerPortfolio.contentSid;
 
 const mockWhatsApp = {
   sendTextMessage: jest.fn().mockResolvedValue('SM-sid-123'),
   sendMediaMessage: jest.fn().mockResolvedValue('SM-sid-456'),
   sendTemplateMessage: jest.fn().mockResolvedValue('SM-sid-789'),
+  sendTemplateMessageWithVariables: jest.fn().mockResolvedValue('SM-sid-789'),
+  sendInteractiveCta: jest.fn().mockResolvedValue(true),
+  showTyping: jest.fn().mockResolvedValue(undefined),
   saveMessage: jest.fn().mockResolvedValue(undefined),
 };
 
 const mockLoginLink = {
   // Default: no login code attached, so existing expectations stay exact.
-  appendTo: jest.fn().mockImplementation((_id: string, target: string) => target),
+  appendTo: jest
+    .fn()
+    .mockImplementation((_id: string, target: string) => target),
   mint: jest.fn().mockResolvedValue('CODE123'),
   shortLink: jest.fn().mockResolvedValue(null),
 };
@@ -70,9 +82,44 @@ describe('WhatsAppOutboundProcessor', () => {
     );
   });
 
+  it('re-shows typing between the messages of a sequence, but not before the first', async () => {
+    // Sending clears the composer bubble, so a three-message reply would show
+    // it once and then go quiet. The webhook already showed it before the
+    // first, which is why index 0 is skipped.
+    await processor.process({
+      data: {
+        type: 'sequence',
+        phone: '+242001',
+        replyToMessageId: 'wamid.inbound',
+        messages: [
+          { type: 'text', text: 'un' },
+          { type: 'text', text: 'deux' },
+          { type: 'text', text: 'trois' },
+        ],
+      },
+    });
+    expect(mockWhatsApp.showTyping).toHaveBeenCalledTimes(2);
+    expect(mockWhatsApp.showTyping).toHaveBeenCalledWith('wamid.inbound');
+  });
+
+  it('shows no typing for a sequence with nothing to reply to', async () => {
+    // A notification nobody asked for has no inbound message to attach to.
+    await processor.process({
+      data: {
+        type: 'sequence',
+        phone: '+242001',
+        messages: [
+          { type: 'text', text: 'un' },
+          { type: 'text', text: 'deux' },
+        ],
+      },
+    });
+    expect(mockWhatsApp.showTyping).not.toHaveBeenCalled();
+  });
+
   it('process sends a sequence in array order', async () => {
     const order: string[] = [];
-    mockWhatsApp.sendTemplateMessage.mockImplementationOnce(() => {
+    mockWhatsApp.sendTemplateMessageWithVariables.mockImplementationOnce(() => {
       order.push('template');
       return Promise.resolve('SM-tpl');
     });
@@ -89,7 +136,7 @@ describe('WhatsAppOutboundProcessor', () => {
         messages: [
           {
             type: 'template',
-            contentSid: 'HXcarousel',
+            contentSid: CAROUSEL_SID,
             contentVariables: { '1': 'x' },
           },
           { type: 'text', text: 'Page 1/3' },
@@ -138,31 +185,55 @@ describe('WhatsAppOutboundProcessor', () => {
       data: {
         type: 'template',
         phone: '+242001',
-        contentSid: 'HXcarousel',
+        contentSid: CAROUSEL_SID,
         contentVariables: { '1': 'https://img/1.png', '2': '*Card*' },
         profileId: 'p1',
       },
     });
-    expect(mockWhatsApp.sendTemplateMessage).toHaveBeenCalledWith(
+    expect(mockWhatsApp.sendTemplateMessageWithVariables).toHaveBeenCalledWith(
       '+242001',
-      'HXcarousel',
+      'viewWorkerPortfolio',
       { '1': 'https://img/1.png', '2': '*Card*' },
     );
     expect(mockWhatsApp.saveMessage).toHaveBeenCalledWith(
       'p1',
       expect.any(String),
-      '[TPL:HXcarousel]',
+      // The persisted marker is the logical key now, not the Twilio SID.
+      // Rows written before this deploy keep `[TPL:HX…]`, so anything rendering
+      // a conversation thread has to tolerate both.
+      '[TPL:viewWorkerPortfolio]',
     );
   });
 
-  it('process throws when template returns no SID', async () => {
-    mockWhatsApp.sendTemplateMessage.mockResolvedValueOnce(null);
+  // Behaviour change, deliberate: a SID with no registry entry now fails the job
+  // instead of being forwarded blind. It can only happen to a job enqueued
+  // before a template env override changed under it, and the DLQ keeps the
+  // payload — whereas forwarding an untracked SID would send a template we can
+  // no longer reason about, and cannot be expressed on a non-Twilio provider.
+  it('fails a legacy job whose content SID is no longer in the registry', async () => {
     await expect(
       processor.process({
         data: {
           type: 'template',
           phone: '+242001',
-          contentSid: 'HXcarousel',
+          contentSid: 'HXdeadbeefdeadbeefdeadbeefdeadbeef',
+          contentVariables: {},
+        },
+      }),
+    ).rejects.toThrow('has no registry entry');
+    expect(
+      mockWhatsApp.sendTemplateMessageWithVariables,
+    ).not.toHaveBeenCalled();
+  });
+
+  it('process throws when template returns no SID', async () => {
+    mockWhatsApp.sendTemplateMessageWithVariables.mockResolvedValueOnce(null);
+    await expect(
+      processor.process({
+        data: {
+          type: 'template',
+          phone: '+242001',
+          contentSid: CAROUSEL_SID,
           contentVariables: {},
         },
       }),
@@ -179,14 +250,16 @@ describe('WhatsAppOutboundProcessor', () => {
         data: {
           type: 'template',
           phone: '+242001',
-          contentSid: 'HXcarousel',
+          contentSid: CAROUSEL_SID,
           contentVariables: { '1': 'x' },
           profileId: 'p1',
         },
       }),
     ).resolves.toBeUndefined();
     // Sent exactly once — the job completed, so BullMQ will not retry/resend.
-    expect(mockWhatsApp.sendTemplateMessage).toHaveBeenCalledTimes(1);
+    expect(mockWhatsApp.sendTemplateMessageWithVariables).toHaveBeenCalledTimes(
+      1,
+    );
   });
 
   it('process sends media without caption saves proper body', async () => {
@@ -324,6 +397,7 @@ describe('WhatsAppOutboundProcessor', () => {
     // `statusCheck` declares urlSuffixVar '2' — the job-offer id that ends the
     // CTA button's URL.
     const statusCheck = WHATSAPP_TEMPLATES.statusCheck.contentSid;
+    const statusCheckKey = 'statusCheck' as const;
 
     it('appends a login code to the CTA URL suffix variable', async () => {
       mockLoginLink.appendTo.mockResolvedValue('offer-9?s=code-1');
@@ -341,11 +415,12 @@ describe('WhatsAppOutboundProcessor', () => {
       // '&' because the CTA is `…/login?redirect=/missions/{{2}}`: a '?' would
       // bury the code inside the redirect value.
       expect(mockLoginLink.appendTo).toHaveBeenCalledWith('p1', 'offer-9', '&');
-      expect(mockWhatsApp.sendTemplateMessage).toHaveBeenCalledWith(
-        '+242001',
-        statusCheck,
-        { '1': 'Plomberie', '2': 'offer-9?s=code-1' },
-      );
+      expect(
+        mockWhatsApp.sendTemplateMessageWithVariables,
+      ).toHaveBeenCalledWith('+242001', statusCheckKey, {
+        '1': 'Plomberie',
+        '2': 'offer-9?s=code-1',
+      });
     });
 
     it('leaves templates without a URL suffix untouched', async () => {
@@ -353,7 +428,7 @@ describe('WhatsAppOutboundProcessor', () => {
         data: {
           type: 'template',
           phone: '+242001',
-          contentSid: 'HXcarousel',
+          contentSid: CAROUSEL_SID,
           contentVariables: { '1': 'x' },
           profileId: 'p1',
         },
@@ -373,11 +448,12 @@ describe('WhatsAppOutboundProcessor', () => {
       });
 
       expect(mockLoginLink.appendTo).not.toHaveBeenCalled();
-      expect(mockWhatsApp.sendTemplateMessage).toHaveBeenCalledWith(
-        '+242001',
-        statusCheck,
-        { '1': 'Plomberie', '2': 'offer-9' },
-      );
+      expect(
+        mockWhatsApp.sendTemplateMessageWithVariables,
+      ).toHaveBeenCalledWith('+242001', statusCheckKey, {
+        '1': 'Plomberie',
+        '2': 'offer-9',
+      });
     });
 
     it('still sends the template when no code could be attached', async () => {
@@ -394,20 +470,25 @@ describe('WhatsAppOutboundProcessor', () => {
         },
       });
 
-      expect(mockWhatsApp.sendTemplateMessage).toHaveBeenCalledWith(
-        '+242001',
-        statusCheck,
-        { '1': 'Plomberie', '2': 'offer-9' },
-      );
+      expect(
+        mockWhatsApp.sendTemplateMessageWithVariables,
+      ).toHaveBeenCalledWith('+242001', statusCheckKey, {
+        '1': 'Plomberie',
+        '2': 'offer-9',
+      });
     });
   });
 
   describe('short-link templates', () => {
-    // `kycPendingMenu` is `urlSuffixMode: 'shortlink'`: its approved URL is the
-    // fixed `…/s/{{1}}`, so the variable must be REPLACED by a code, never
-    // appended to. Any shortlink template would do — this one stands in for the
-    // mode, not for itself.
-    const shortlinkTpl = WHATSAPP_TEMPLATES.kycPendingMenu.contentSid;
+    // `applicationRejected` is `urlSuffixMode: 'shortlink'`: its approved URL
+    // is the fixed `…/s/{{1}}`, so the variable must be REPLACED by a code,
+    // never appended to. Any shortlink template would do — this one stands in
+    // for the mode, not for itself.
+    //
+    // It used to be `kycPendingMenu`, which is Cloud-only since v4 and so has
+    // no SID for this legacy path to resolve.
+    const shortlinkTpl = WHATSAPP_TEMPLATES.applicationRejected.contentSid;
+    const shortlinkKey = 'applicationRejected' as const;
 
     it('swaps the destination for a freshly minted code', async () => {
       await processor.process({
@@ -421,17 +502,43 @@ describe('WhatsAppOutboundProcessor', () => {
       });
 
       expect(mockLoginLink.mint).toHaveBeenCalledWith('p1', 'profile');
-      expect(mockWhatsApp.sendTemplateMessage).toHaveBeenCalledWith(
-        '+242001',
-        shortlinkTpl,
-        { '1': 'CODE123' },
-      );
+      expect(
+        mockWhatsApp.sendTemplateMessageWithVariables,
+      ).toHaveBeenCalledWith('+242001', shortlinkKey, { '1': 'CODE123' });
       expect(mockLoginLink.appendTo).not.toHaveBeenCalled();
     });
 
+    it('substitutes a code for a profile still awaiting KYC review', async () => {
+      // The case that mattered and was never covered. The KYC-pending card goes
+      // ONLY to PENDING_ACTIVATION profiles, and `mint()` used to refuse those
+      // outright — so this template took the bail-out branch below 100% of the
+      // time and its button shipped the literal `/s/profile`.
+      mockLoginLink.mint.mockResolvedValueOnce('MINTEDCODE1234567890');
+
+      await processor.process({
+        data: {
+          type: 'template',
+          phone: '+242001',
+          contentSid: shortlinkTpl,
+          contentVariables: { '1': 'profile' },
+          profileId: 'p1',
+        },
+      });
+
+      expect(mockLoginLink.mint).toHaveBeenCalledWith('p1', 'profile');
+      expect(
+        mockWhatsApp.sendTemplateMessageWithVariables,
+      ).toHaveBeenCalledWith('+242001', shortlinkKey, {
+        '1': 'MINTEDCODE1234567890',
+      });
+    });
+
     it('leaves the destination alone when no code could be minted', async () => {
-      // Sending `/s/profile` would be a dead link; the untouched template
-      // at least reaches the login fallback.
+      // Only reachable now for a profile genuinely refused a session — a
+      // suspended account, or Redis being down. The button then renders
+      // `/s/profile`, which fails CODE_PATTERN and falls through to the login
+      // screen. Not good, but the honest outcome when we cannot sign a link:
+      // fabricating one would hand a suspended account a session.
       mockLoginLink.mint.mockResolvedValueOnce(null);
 
       await processor.process({
@@ -444,11 +551,9 @@ describe('WhatsAppOutboundProcessor', () => {
         },
       });
 
-      expect(mockWhatsApp.sendTemplateMessage).toHaveBeenCalledWith(
-        '+242001',
-        shortlinkTpl,
-        { '1': 'profile' },
-      );
+      expect(
+        mockWhatsApp.sendTemplateMessageWithVariables,
+      ).toHaveBeenCalledWith('+242001', shortlinkKey, { '1': 'profile' });
     });
   });
 
@@ -499,6 +604,80 @@ describe('WhatsAppOutboundProcessor', () => {
       });
 
       expect(mockLoginLink.shortLink).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('processCta()', () => {
+    const cta = {
+      body: '*Rabotka*',
+      buttonText: 'Ouvrir',
+      path: 'home',
+      imageUrl: 'https://img/cover.jpg',
+      fallbackTemplate: 'welcomePlatform' as const,
+      fallbackVariables: { '1': 'home' },
+    };
+
+    // The URL is minted at SEND time, through the same shortLink the template
+    // buttons use. A link baked in when the reply was composed would be stale
+    // by the time the job drains.
+    it('mints a one-tap link and sends free-form', async () => {
+      mockLoginLink.shortLink.mockResolvedValue('https://rabotka.work/s/CODE');
+
+      await processor.process({
+        data: { type: 'cta', phone: '+242001', profileId: 'p1', cta },
+      });
+
+      expect(mockLoginLink.shortLink).toHaveBeenCalledWith('p1', 'home');
+      expect(mockWhatsApp.sendInteractiveCta).toHaveBeenCalledWith(
+        '+242001',
+        expect.objectContaining({
+          url: 'https://rabotka.work/s/CODE',
+          buttonText: 'Ouvrir',
+          imageUrl: 'https://img/cover.jpg',
+        }),
+      );
+      expect(
+        mockWhatsApp.sendTemplateMessageWithVariables,
+      ).not.toHaveBeenCalled();
+    });
+
+    // No profile, no code — the unregistered card has no account to mint
+    // against, so it must still reach the bare path rather than nothing.
+    it('falls back to the plain frontend URL without a profile', async () => {
+      await processor.process({
+        data: { type: 'cta', phone: '+242001', cta },
+      });
+
+      expect(mockLoginLink.shortLink).not.toHaveBeenCalled();
+      expect(mockWhatsApp.sendInteractiveCta).toHaveBeenCalledWith(
+        '+242001',
+        expect.objectContaining({ url: 'https://rabotka.work/home' }),
+      );
+    });
+
+    // The window can shut between composing the reply and draining the job.
+    it('sends the fallback template when the free-form send fails', async () => {
+      mockWhatsApp.sendInteractiveCta.mockResolvedValueOnce(false);
+
+      await processor.process({
+        data: { type: 'cta', phone: '+242001', profileId: 'p1', cta },
+      });
+
+      expect(
+        mockWhatsApp.sendTemplateMessageWithVariables,
+      ).toHaveBeenCalledWith('+242001', 'welcomePlatform', expect.any(Object));
+    });
+
+    it('falls back on a thrown error too, not just a refusal', async () => {
+      mockWhatsApp.sendInteractiveCta.mockRejectedValueOnce(
+        new Error('131047 outside window'),
+      );
+
+      await processor.process({
+        data: { type: 'cta', phone: '+242001', profileId: 'p1', cta },
+      });
+
+      expect(mockWhatsApp.sendTemplateMessageWithVariables).toHaveBeenCalled();
     });
   });
 });

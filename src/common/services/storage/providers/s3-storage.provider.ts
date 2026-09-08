@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   S3Client,
@@ -11,7 +11,11 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { StorageProvider } from '@prisma/client';
 import { IStorageProvider } from '../interfaces/storage-provider.interface';
 import {
+  DownloadOptions,
+  DownloadResult,
+  ExistsOptions,
   GetUrlOptions,
+  SIGNED_URL_TTL_SECONDS,
   UploadOptions,
   UploadResult,
 } from '../types/storage.types';
@@ -74,8 +78,11 @@ export class S3StorageProvider implements IStorageProvider {
 
       await this.s3Client.send(command);
 
+      // See the note in cloudflare-storage.provider: writing to one bucket
+      // and signing against another produces a url that can never resolve.
       const url = await this.getUrl(key, {
         access: options?.access ?? 'private',
+        ...(options?.bucket ? { bucket: options.bucket } : {}),
       });
 
       this.logger.log(`File uploaded successfully: ${key}`);
@@ -119,13 +126,15 @@ export class S3StorageProvider implements IStorageProvider {
         return `${endpoint}/${this.bucket}/${key}`;
       }
 
+      // Same as the Cloudflare provider: sign against the bucket the object
+      // lives in, not always the default one.
       const command = new GetObjectCommand({
-        Bucket: this.bucket,
+        Bucket: options?.bucket || this.bucket,
         Key: key,
       });
 
       const url = await getSignedUrl(this.s3Client, command, {
-        expiresIn: 3600,
+        expiresIn: SIGNED_URL_TTL_SECONDS,
       });
 
       return url;
@@ -138,7 +147,10 @@ export class S3StorageProvider implements IStorageProvider {
     }
   }
 
-  async exists(key: string): Promise<boolean> {
+  async exists(key: string, _options?: ExistsOptions): Promise<boolean> {
+    // Accepts `options` for interface parity. This provider serves a single
+    // container, so there is no second bucket to look in.
+
     try {
       const command = new HeadObjectCommand({
         Bucket: this.bucket,
@@ -159,6 +171,45 @@ export class S3StorageProvider implements IStorageProvider {
         error.stack,
       );
       throw new Error(`S3 exists check failed: ${error.message}`);
+    }
+  }
+
+  async download(
+    key: string,
+    _options?: DownloadOptions,
+  ): Promise<DownloadResult> {
+    // Accepts `options` for interface parity. This provider serves a single
+    // container, so there is no second bucket to read from.
+
+    try {
+      const response = await this.s3Client.send(
+        new GetObjectCommand({
+          Bucket: this.bucket,
+          Key: key,
+        }),
+      );
+
+      if (!response.Body) {
+        throw new Error('empty response body');
+      }
+
+      return {
+        body: response.Body as NodeJS.ReadableStream,
+        contentType: response.ContentType,
+        contentLength: response.ContentLength,
+      };
+    } catch (error: any) {
+      if (
+        error.name === 'NoSuchKey' ||
+        error.$metadata?.httpStatusCode === 404
+      ) {
+        throw new NotFoundException(`Object not found: ${key}`);
+      }
+      this.logger.error(
+        `Failed to download file: ${error.message}`,
+        error.stack,
+      );
+      throw new Error(`S3 download failed: ${error.message}`);
     }
   }
 }

@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { ProfileType } from '@prisma/client';
 import { MobileApplicationController } from '../mobile-application.controller';
 
@@ -90,5 +91,80 @@ describe('MobileApplicationController — pre-acceptance quote', () => {
     expect(detail.quote).toBeNull();
     expect(detail.unlock).toMatchObject({ employerFee: 500 });
     expect(systemConfig.getContactUnlockFees).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * On a multi-seat offer the employer's single payment cascades `employer_paid`
+ * onto every candidate's attempt. Without a guard here the gateway would take
+ * the money a second time: payUnlock rejects it afterwards and the throw is
+ * swallowed downstream, so nothing unlocks and nothing is refunded.
+ */
+describe('MobileApplicationController — payMobile double-charge guard', () => {
+  let controller: MobileApplicationController;
+  let contactUnlock: { getByApplicationId: jest.Mock };
+  let paymentRequest: { createPaymentUrl: jest.Mock };
+
+  const buildController = (attempt: Record<string, unknown>) => {
+    const prisma = {
+      profile: {
+        findUnique: jest
+          .fn()
+          .mockResolvedValueOnce({ profile_type: ProfileType.EMPLOYER })
+          .mockResolvedValue({ portfolio_slug: 'awa-m' }),
+      },
+    };
+    const applicationService = {
+      findById: jest.fn().mockResolvedValue(applicationRow()),
+    };
+    contactUnlock = {
+      getByApplicationId: jest.fn().mockResolvedValue(attempt),
+    };
+    paymentRequest = {
+      createPaymentUrl: jest
+        .fn()
+        .mockResolvedValue('https://pay.example/pay/tok-1'),
+    };
+    controller = new MobileApplicationController(
+      prisma as never,
+      applicationService as never,
+      contactUnlock as never,
+      {} as never,
+      {} as never,
+      paymentRequest as never,
+    );
+  };
+
+  it('refuses to create a payment when the employer share is already settled', async () => {
+    buildController({
+      id: 'attempt-1',
+      status: 'PENDING_WORKER',
+      employer_amount: 500,
+      employer_paid: true,
+      worker_paid: false,
+    });
+
+    await expect(
+      controller.payMobile(reqFor(EMPLOYER_ID) as never, APPLICATION_ID),
+    ).rejects.toThrow(BadRequestException);
+    expect(paymentRequest.createPaymentUrl).not.toHaveBeenCalled();
+  });
+
+  it('still creates a payment when the employer has not paid', async () => {
+    buildController({
+      id: 'attempt-1',
+      status: 'PENDING_BOTH',
+      employer_amount: 500,
+      employer_paid: false,
+      worker_paid: false,
+    });
+
+    const result = await controller.payMobile(
+      reqFor(EMPLOYER_ID) as never,
+      APPLICATION_ID,
+    );
+
+    expect(paymentRequest.createPaymentUrl).toHaveBeenCalled();
+    expect(result).toEqual({ token: 'tok-1' });
   });
 });

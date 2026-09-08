@@ -61,26 +61,61 @@ describe('WhatsAppLoginLinkService', () => {
       expect(first).not.toEqual(second);
     });
 
-    it.each([AccountStatus.SUSPENDED, AccountStatus.BANNED])(
-      'refuses to mint for a %s profile',
-      async (status) => {
-        prisma.profile.findUnique.mockResolvedValue({ status });
+    it('refuses to mint for a BANNED profile', async () => {
+      // No path back, so there is nothing for them to read.
+      prisma.profile.findUnique.mockResolvedValue({
+        status: AccountStatus.BANNED,
+      });
 
-        expect(await service.mint('profile-1')).toBeNull();
-        expect(redis.set).not.toHaveBeenCalled();
-      },
-    );
+      expect(await service.mint('profile-1')).toBeNull();
+      expect(redis.set).not.toHaveBeenCalled();
+    });
+
+    it('mints for a SUSPENDED profile', async () => {
+      // Reversed deliberately. A session no longer means privileges —
+      // ActiveProfileGuard refuses every action — so a suspended user gets
+      // read access, which is what the suspension notice's button needs.
+      prisma.profile.findUnique.mockResolvedValue({
+        status: AccountStatus.SUSPENDED,
+      });
+
+      expect(await service.mint('profile-1')).toEqual(expect.any(String));
+      expect(redis.set).toHaveBeenCalled();
+    });
 
     it('refuses to mint for an unknown profile', async () => {
       prisma.profile.findUnique.mockResolvedValue(null);
 
       expect(await service.mint('ghost')).toBeNull();
     });
+
+    it('mints for a profile still awaiting KYC review', async () => {
+      // The KYC-pending card is sent ONLY to PENDING_ACTIVATION profiles, so
+      // lumping them in with suspended accounts rejected 100% of its mints and
+      // shipped the literal `/s/profile` — a dead link into the login screen.
+      // Signup already hands these users a real session cookie, so a one-tap
+      // code grants them nothing they did not have.
+      prisma.profile.findUnique.mockResolvedValue({
+        status: AccountStatus.PENDING_ACTIVATION,
+      });
+
+      const code = await service.mint('profile-1', 'profile');
+
+      expect(code).toBeTruthy();
+      expect(redis.set).toHaveBeenCalledWith(
+        expect.stringContaining(code!),
+        expect.stringContaining('profile'),
+        'EX',
+        expect.any(Number),
+      );
+    });
   });
 
   describe('consume()', () => {
     it('returns the profile and the destination the code was minted for', async () => {
-      redis.eval.mockResolvedValue(JSON.stringify({ p: 'profile-1', d: 'applications/42' }));
+      redis.eval.mockResolvedValue(
+        JSON.stringify({ p: 'profile-1', d: 'applications/42' }),
+      );
 
       expect(await service.consume('code-1')).toEqual({
         profileId: 'profile-1',
@@ -104,10 +139,13 @@ describe('WhatsAppLoginLinkService', () => {
       expect(await service.consume('code-1')).toBeNull();
     });
 
-    it.each(['', '   '])('rejects a blank code (%p) without hitting Redis', async (code) => {
-      expect(await service.consume(code)).toBeNull();
-      expect(redis.eval).not.toHaveBeenCalled();
-    });
+    it.each(['', '   '])(
+      'rejects a blank code (%p) without hitting Redis',
+      async (code) => {
+        expect(await service.consume(code)).toBeNull();
+        expect(redis.eval).not.toHaveBeenCalled();
+      },
+    );
   });
 
   describe('appendTo()', () => {
@@ -127,7 +165,7 @@ describe('WhatsAppLoginLinkService', () => {
 
     it('returns the plain target when the profile may not auto-login', async () => {
       prisma.profile.findUnique.mockResolvedValue({
-        status: AccountStatus.SUSPENDED,
+        status: AccountStatus.BANNED,
       });
 
       expect(await service.appendTo('profile-1', 'application-42')).toBe(
@@ -164,7 +202,7 @@ describe('WhatsAppLoginLinkService', () => {
 
     it('returns null when the profile may not auto-login', async () => {
       prisma.profile.findUnique.mockResolvedValue({
-        status: AccountStatus.SUSPENDED,
+        status: AccountStatus.BANNED,
       });
 
       expect(await service.shortLink('profile-1', 'home')).toBeNull();

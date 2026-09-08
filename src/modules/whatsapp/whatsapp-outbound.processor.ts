@@ -7,8 +7,13 @@ import {
   WHATSAPP_OUTBOUND_QUEUE,
   WHATSAPP_OUTBOUND_DLQ,
 } from '../../common/services/queue/queue.module';
-import { getUrlSuffixTarget } from '../../common/constants/whatsapp-templates';
+import {
+  getTemplateKeyBySid,
+  getUrlSuffixTargetByKey,
+  type WhatsAppTemplateName,
+} from '../../common/constants/whatsapp-templates';
 import { WhatsAppLoginLinkService } from '../auth/whatsapp-login-link.service';
+import type { CtaReply } from '../../common/constants/whatsapp-carousel';
 
 // Twilio's hard limit on a WhatsApp body is 1600 chars. We chunk well below
 // that to leave room for any "(1/N)" prefix and to stay safe across UCS-2
@@ -47,7 +52,39 @@ function chunkForWhatsApp(text: string): string[] {
 export type WhatsAppSend =
   | { type: 'text'; text: string }
   | { type: 'media'; mediaUrl: string; caption?: string }
+  /**
+   * A free-form message with a URL button, with the approved template it
+   * replaces carried alongside as a fallback.
+   *
+   * The fallback is not belt-and-braces. A reply is built inside the 24h
+   * service window by construction, but the job is drained asynchronously and
+   * the window can shut in between — at which point Meta refuses free-form and
+   * the reply would simply never arrive.
+   */
+  | { type: 'cta'; cta: CtaReply }
   | {
+      type: 'template';
+      /** Logical template key. Provider-agnostic; what new jobs carry. */
+      templateKey: WhatsAppTemplateName;
+      /**
+       * The resolved `{'1': …}` map, still the payload's variable form.
+       *
+       * Kept rather than replaced with typed params because the login-code
+       * rewriting below operates on the numbered map (it has to — `urlSuffixVar`
+       * names a number), and because it survives JSON round-tripping through
+       * Redis without needing per-template deserialization.
+       */
+      contentVariables: Record<string, string>;
+    }
+  | {
+      /**
+       * LEGACY, drain-only. Jobs enqueued before template sends carried a key
+       * are already sitting in Redis and cannot be rewritten, so the processor
+       * accepts this shape and resolves the SID back to a key.
+       *
+       * Nothing produces it any more. Removable one release after this deploys,
+       * once the queue has certainly drained.
+       */
       type: 'template';
       contentSid: string;
       contentVariables: Record<string, string>;
@@ -56,6 +93,15 @@ export type WhatsAppSend =
 export type WhatsAppOutboundJobData = {
   phone: string;
   profileId?: string;
+  /**
+   * The inbound message this reply answers.
+   *
+   * Only used to re-show the typing bubble between the messages of a sequence:
+   * the indicator clears the moment anything is sent, so a three-message reply
+   * would show it once and then go quiet for the rest. Optional — a
+   * notification that nobody asked for has no message to attach it to.
+   */
+  replyToMessageId?: string;
 } & (
   | WhatsAppSend
   // An ordered batch delivered as ONE job: the worker runs concurrency: 3, so
@@ -131,7 +177,13 @@ export class WhatsAppOutboundProcessor {
       // Await each in turn so the batch arrives in order. If a later send fails
       // the whole job retries (earlier sends may repeat) — acceptable and rare,
       // versus the alternative of guaranteed out-of-order delivery.
-      for (const message of data.messages) {
+      for (const [i, message] of data.messages.entries()) {
+        // Sending clears the composer bubble, so put it back before each
+        // subsequent message. Not before the first: the webhook already did
+        // that the moment the inbound message arrived.
+        if (i > 0 && data.replyToMessageId) {
+          void this.whatsApp.showTyping(data.replyToMessageId);
+        }
         await this.processOne(data.phone, data.profileId, message);
       }
       return;
@@ -150,6 +202,15 @@ export class WhatsAppOutboundProcessor {
       await this.processMedia({ phone, profileId, ...message });
     } else if (message.type === 'template') {
       await this.processTemplate({ phone, profileId, ...message });
+    } else if (message.type === 'cta') {
+      await this.processCta({ phone, profileId, ...message });
+    } else {
+      // Was silently dropped. A shape this function does not know is a reply
+      // the user never receives and nothing records — the failure mode is an
+      // absence, which is exactly what nobody notices.
+      this.logger.error(
+        `Unhandled outbound message type ${String((message as { type?: unknown }).type)} for ${phone} — dropped`,
+      );
     }
   }
 
@@ -217,11 +278,11 @@ export class WhatsAppOutboundProcessor {
    * notification entirely.
    */
   private async withLoginCode(
-    contentSid: string,
+    templateKey: WhatsAppTemplateName,
     variables: Record<string, string>,
     profileId?: string,
   ): Promise<Record<string, string>> {
-    const target = getUrlSuffixTarget(contentSid);
+    const target = getUrlSuffixTargetByKey(templateKey);
     if (!profileId || !target) return variables;
 
     const suffix = variables[target.variable];
@@ -230,7 +291,9 @@ export class WhatsAppOutboundProcessor {
     // shortlink: the variable holds the DESTINATION, and the approved URL is
     // the fixed `…/s/{{n}}` — so the code replaces it outright.
     if (target.mode === 'shortlink') {
-      const code = await this.loginLink.mint(profileId, suffix).catch(() => null);
+      const code = await this.loginLink
+        .mint(profileId, suffix)
+        .catch(() => null);
       // No code means the profile may not auto-login (suspended) or Redis is
       // down. Leaving the destination in place would produce `/s/<path>`, a
       // dead link — so send the template as-is and let the button 404 into the
@@ -247,6 +310,13 @@ export class WhatsAppOutboundProcessor {
     if (withCode === suffix) return variables;
 
     return { ...variables, [target.variable]: withCode };
+  }
+
+  /** Base for a CTA URL when no login code could be minted. */
+  private frontendUrl(): string {
+    return (
+      this.config.get<string>('FRONTEND_URL') ?? 'http://localhost:3000'
+    ).replace(/\/$/, '');
   }
 
   /**
@@ -271,7 +341,10 @@ export class WhatsAppOutboundProcessor {
     if (!text.includes(base)) return text;
 
     const urls = [
-      ...new Set(text.match(new RegExp(`${escapeRegExp(base)}[^\\s<>"')\\]}]*`, 'g')) ?? []),
+      ...new Set(
+        text.match(new RegExp(`${escapeRegExp(base)}[^\\s<>"')\\]}]*`, 'g')) ??
+          [],
+      ),
     ].filter((url) => {
       const path = url.slice(base.length);
       return !/^\/(r|verify|s)\//.test(path) && path !== '' && path !== '/';
@@ -288,17 +361,83 @@ export class WhatsAppOutboundProcessor {
     return rewritten;
   }
 
+  /**
+   * The free-form half of a bot reply: same words, same button, no template.
+   *
+   * The URL is minted here rather than baked into the reply, through the same
+   * `shortLink` the template button URLs use — a link built when the reply was
+   * composed would be stale by the time the job drains, and an unauthenticated
+   * one drops the reader on a login screen instead of where they were going.
+   *
+   * Falls back to the approved template on ANY failure, not just an
+   * out-of-window refusal. The distinction is not worth drawing here: whatever
+   * went wrong, the reader is owed the message, and the template is the path
+   * that was working yesterday.
+   */
+  private async processCta(
+    data: Extract<WhatsAppOutboundJobData, { type: 'cta' }>,
+  ): Promise<void> {
+    const { cta, phone, profileId } = data;
+
+    const url = profileId
+      ? ((await this.loginLink
+          .shortLink(profileId, cta.path)
+          .catch(() => null)) ?? `${this.frontendUrl()}/${cta.path}`)
+      : `${this.frontendUrl()}/${cta.path}`;
+
+    const sent = await this.whatsApp
+      .sendInteractiveCta(phone, {
+        body: cta.body,
+        buttonText: cta.buttonText,
+        url,
+        ...(cta.imageUrl ? { imageUrl: cta.imageUrl } : {}),
+        ...(profileId ? { profileId } : {}),
+      })
+      .catch((err: unknown) => {
+        this.logger.warn(
+          `CTA send to ${phone} failed, falling back to template ${cta.fallbackTemplate}`,
+          err instanceof Error ? err.message : String(err),
+        );
+        return false;
+      });
+
+    if (sent) return;
+
+    await this.processTemplate({
+      type: 'template',
+      phone,
+      profileId,
+      templateKey: cta.fallbackTemplate,
+      contentVariables: cta.fallbackVariables ?? {},
+    });
+  }
+
   private async processTemplate(
     data: Extract<WhatsAppOutboundJobData, { type: 'template' }>,
   ): Promise<void> {
-    const sent = await this.whatsApp.sendTemplateMessage(
+    // New jobs carry the logical key. A job enqueued before this deploy carries
+    // a Twilio SID instead and is resolved back — that payload is already in
+    // Redis and cannot be rewritten.
+    const key =
+      'templateKey' in data
+        ? data.templateKey
+        : getTemplateKeyBySid(data.contentSid);
+    if (!key) {
+      throw new Error(
+        `WhatsApp template ${'contentSid' in data ? data.contentSid : '?'} to ${data.phone} ` +
+          `has no registry entry — the SID was removed or an env override points ` +
+          `at an unknown template`,
+      );
+    }
+
+    const sent = await this.whatsApp.sendTemplateMessageWithVariables(
       data.phone,
-      data.contentSid,
-      await this.withLoginCode(data.contentSid, data.contentVariables, data.profileId),
+      key,
+      await this.withLoginCode(key, data.contentVariables, data.profileId),
     );
     if (!sent) {
       throw new Error(
-        `WhatsApp template ${data.contentSid} to ${data.phone} returned no SID (unknown Twilio failure)`,
+        `WhatsApp template ${key} to ${data.phone} returned no SID (unknown provider failure)`,
       );
     }
     if (data.profileId) {
@@ -307,11 +446,7 @@ export class WhatsAppOutboundProcessor {
       // RESEND the message (the recommended-profiles duplicate-card bug).
       // Mirrors the guarded save in WhatsAppService.sendTextMessage.
       await this.whatsApp
-        .saveMessage(
-          data.profileId,
-          MessageDirection.OUTBOUND,
-          `[TPL:${data.contentSid}]`,
-        )
+        .saveMessage(data.profileId, MessageDirection.OUTBOUND, `[TPL:${key}]`)
         .catch((err: unknown) =>
           this.logger.warn(
             `Failed to save outbound template message for ${data.profileId}: ${err instanceof Error ? err.message : String(err)}`,

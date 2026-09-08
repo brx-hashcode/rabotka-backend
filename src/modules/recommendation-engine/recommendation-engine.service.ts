@@ -3,8 +3,10 @@ import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { SystemConfigService } from '../system-config/system-config.service';
 import {
   haversineKm,
+  placeProximityScore,
   proximityScore,
   urgencyScore,
+  URGENCY_HALF_LIFE_HOURS,
 } from '../../common/services/geocoding/geo.utils';
 import {
   CandidateSourceService,
@@ -12,7 +14,12 @@ import {
   type WorkerCandidate,
 } from './candidate-sources';
 import { InteractionKind } from '@prisma/client';
-import { UserFeatureService, type UserFeatures } from './user-feature.service';
+import { COLLECTIONS } from '../qdrant/qdrant.config';
+import {
+  EMPTY_FEATURES,
+  UserFeatureService,
+  type UserFeatures,
+} from './user-feature.service';
 import {
   DEFAULT_PENALTIES,
   applyPenalties,
@@ -22,18 +29,16 @@ import {
   diversifyByKeys,
   epsilonGreedySelect,
   freshnessScore,
+  FRESHNESS_HALF_LIFE_HOURS,
   interpolateWeights,
   rrfFuse,
   seenDecay,
+  SEEN_RECOVERY_HOURS,
   type ScoreTerms,
 } from './scoring';
 
 /** Which generator produced a candidate — logged so tier mix is observable. */
-export type CandidateTier =
-  | 'affinity'
-  | 'cf'
-  | 'declared'
-  | 'all_open';
+export type CandidateTier = 'affinity' | 'cf' | 'declared' | 'all_open';
 
 export type RankedJob = {
   id: string;
@@ -51,6 +56,21 @@ const SOURCE_WEIGHTS: Record<CandidateTier, number> = {
   all_open: 0.3,
 };
 
+/**
+ * Source weights for the offer-side fan-out, deliberately not `SOURCE_WEIGHTS`.
+ *
+ * Inverted relative to the feed: an offer names a concrete category, and
+ * "workers who declared exactly this trade" is stronger evidence than "trades
+ * this employer has engaged with before". The feed has no such anchor, which is
+ * why affinity leads there.
+ */
+const OFFER_SOURCE_WEIGHTS: Record<CandidateTier, number> = {
+  declared: 1.0,
+  affinity: 0.7,
+  cf: 0,
+  all_open: 0.2,
+};
+
 const MAX_PER_CATEGORY = 3;
 const MAX_PER_EMPLOYER = 2;
 /**
@@ -59,6 +79,37 @@ const MAX_PER_EMPLOYER = 2;
  * the way an offer is, and a worker idle for four days is still a live lead.
  */
 const ACTIVITY_HALF_LIFE_HOURS = 168;
+
+/**
+ * Everything the ranker knows about where the user asking for recommendations
+ * is: exact coordinates when geocoding worked, and the country/city they
+ * declared either way. The two are carried together so the proximity term can
+ * fall back without a second query.
+ */
+type WorkerPlace = {
+  coords: { lat: number; lng: number } | null;
+  countryCode: string | null;
+  city: string | null;
+};
+
+/** The profile row the two recommend paths select, as a `WorkerPlace`. */
+function toPlace(
+  row: {
+    latitude: number | null;
+    longitude: number | null;
+    country_code: string | null;
+    city: string | null;
+  } | null,
+): WorkerPlace {
+  return {
+    coords:
+      row?.latitude != null && row.longitude != null
+        ? { lat: row.latitude, lng: row.longitude }
+        : null,
+    countryCode: row?.country_code ?? null,
+    city: row?.city ?? null,
+  };
+}
 
 /**
  * The unified ranker.
@@ -125,47 +176,72 @@ export class RecommendationEngineService {
     }
 
     const candidateIds = fused.map((f) => f.id);
-    const [worker, quality, lastSeen, unsaved] = await Promise.all([
+    const [worker, quality, lastSeen, unsaved, simScores] = await Promise.all([
       this.prisma.profile.findUnique({
         where: { id: workerId },
-        select: { latitude: true, longitude: true },
+        select: {
+          latitude: true,
+          longitude: true,
+          country_code: true,
+          city: true,
+        },
       }),
       this.sources.employerQuality([
         ...new Set(candidateIds.map((id) => byId.get(id)?.employerId ?? '')),
       ]),
       this.sources.lastSeenAt(workerId, candidateIds),
       this.sources.unsavedOfferIds(workerId, candidateIds),
+      // The worker's own vector carries their portfolio; the jobs' carry their
+      // text. Empty when embeddings are off or Qdrant is unreachable, which
+      // leaves `sim` null rather than zero.
+      this.similarityFor(
+        COLLECTIONS.WORKERS,
+        workerId,
+        COLLECTIONS.JOBS,
+        candidateIds,
+      ),
     ]);
 
     const weights = interpolateWeights(features.positiveCount);
     const negativeCategories = new Set(features.negativeCategoryIds);
-    const workerCoords =
-      worker?.latitude != null && worker.longitude != null
-        ? { lat: worker.latitude, lng: worker.longitude }
-        : null;
+    const workerPlace = toPlace(worker);
 
     // `sim` stays null until the vector tier lands. Deriving it from fused rank
     // would be dishonest: within a tier the order is `created_at desc`, so the
     // heaviest-weighted term would silently be recency — duplicating `fresh` and
     // swamping the learned affinities this rewrite exists to surface.
+    // One clock for the whole pass. Read per candidate, a tick landing mid-map
+    // scored a later candidate against a later instant — worth a millisecond of
+    // urgency and freshness, which is enough to reorder candidates nothing else
+    // separates. The feed's order must come from the candidates, not from where
+    // a millisecond boundary fell.
+    const now = Date.now();
     const scored = fused.map((f) => {
       const c = byId.get(f.id)!;
       const terms: ScoreTerms = {
-        sim: null,
+        sim: simScores.get(c.id) ?? null,
+        // `?? null`, never `?? 0`: an unlearned category is no evidence, and
+        // zero would spend the full 0.15 weight asserting "measured, and bad"
+        // — identical for every candidate, so it orders nothing while dragging
+        // the whole feed toward the relevance threshold.
         catAff: c.categoryId
-          ? (features.categoryAffinity[c.categoryId] ?? 0)
-          : 0,
-        partyAff: features.counterpartyAffinity[c.employerId] ?? 0,
+          ? (features.categoryAffinity[c.categoryId] ?? null)
+          : null,
+        partyAff: features.counterpartyAffinity[c.employerId] ?? null,
         // Agreement across independent sources is itself evidence — but only
         // when there is more than one source to agree.
-        cf:
-          pools.size > 1
-            ? clamp01((f.sources - 1) / (pools.size - 1))
-            : null,
-        prox: this.proximityTerm(workerCoords, c, features),
-        urgency: urgencyScore(c.scheduledAt),
-        fresh: freshnessScore(c.createdAt),
-        quality: quality.get(c.employerId) ?? 0.5,
+        cf: pools.size > 1 ? clamp01((f.sources - 1) / (pools.size - 1)) : null,
+        prox: this.proximityTerm(workerPlace, c, features),
+        // Null, not 0.5. An offer with no closing date carries no urgency
+        // evidence at all, and computeRelevance drops a null term and
+        // redistributes its weight — whereas a constant would move every score
+        // by the same amount, ranking nothing while still spending 0.18.
+        urgency:
+          c.scheduledAt === null
+            ? null
+            : urgencyScore(c.scheduledAt, URGENCY_HALF_LIFE_HOURS, now),
+        fresh: freshnessScore(c.createdAt, FRESHNESS_HALF_LIFE_HOURS, now),
+        quality: quality.get(c.employerId) ?? null,
         payFit: this.payFitTerm(c, features),
       };
 
@@ -176,7 +252,11 @@ export class RecommendationEngineService {
           negativeCategory: c.categoryId
             ? negativeCategories.has(c.categoryId)
             : false,
-          seenDecay: seenDecay(lastSeen.get(c.id) ?? null),
+          seenDecay: seenDecay(
+            lastSeen.get(c.id) ?? null,
+            SEEN_RECOVERY_HOURS,
+            now,
+          ),
           unsaved: unsaved.has(c.id),
         },
         DEFAULT_PENALTIES,
@@ -257,11 +337,7 @@ export class RecommendationEngineService {
     if (gathered() < limit) {
       add(
         'declared',
-        await this.sources.workersFromCategories(
-          categoryIds,
-          queryOpts,
-          limit,
-        ),
+        await this.sources.workersFromCategories(categoryIds, queryOpts, limit),
       );
     }
     if (gathered() < limit) {
@@ -288,44 +364,59 @@ export class RecommendationEngineService {
     }
 
     const candidateIds = fused.map((f) => f.id);
-    const [employer, quality, lastActive, lastSeen] = await Promise.all([
-      this.prisma.profile.findUnique({
-        where: { id: employerId },
-        select: { latitude: true, longitude: true },
-      }),
-      this.sources.workerQuality(candidateIds),
-      this.sources.lastActiveAt(candidateIds),
-      // Which of these workers this employer has already been shown. Without it
-      // the employer feed is frozen: the same top profiles resurface on every
-      // refresh, and someone who scrolled past them yesterday sees them again.
-      this.sources.lastSeenAt(employerId, candidateIds, [
-        InteractionKind.PROFILE_VIEW,
-        InteractionKind.IMPRESSION_BATCH,
-      ]),
-    ]);
+    const [employer, quality, lastActive, lastSeen, simScores] =
+      await Promise.all([
+        this.prisma.profile.findUnique({
+          where: { id: employerId },
+          select: {
+            latitude: true,
+            longitude: true,
+            country_code: true,
+            city: true,
+          },
+        }),
+        this.sources.workerQuality(candidateIds),
+        this.sources.lastActiveAt(candidateIds),
+        // Which of these workers this employer has already been shown. Without it
+        // the employer feed is frozen: the same top profiles resurface on every
+        // refresh, and someone who scrolled past them yesterday sees them again.
+        this.sources.lastSeenAt(employerId, candidateIds, [
+          InteractionKind.PROFILE_VIEW,
+          InteractionKind.IMPRESSION_BATCH,
+        ]),
+        // The direction that answers "does my portfolio help me get found": the
+        // candidates ARE workers, so their realizations lift them here.
+        this.similarityFor(
+          COLLECTIONS.EMPLOYERS,
+          employerId,
+          COLLECTIONS.WORKERS,
+          candidateIds,
+        ),
+      ]);
 
     const weights = interpolateWeights(features.positiveCount);
     const negativeCategories = new Set(features.negativeCategoryIds);
-    const employerCoords =
-      employer?.latitude != null && employer.longitude != null
-        ? { lat: employer.latitude, lng: employer.longitude }
-        : null;
+    const employerPlace = toPlace(employer);
+
+    // One clock for the whole pass — see `recommendJobsForWorker`.
+    const now = Date.now();
 
     const scored = fused.map((f) => {
       const c = byId.get(f.id)!;
       const active = lastActive.get(c.id);
       const terms: ScoreTerms = {
-        sim: null,
+        sim: simScores.get(c.id) ?? null,
         catAff: bestCategoryAffinity(c.categoryIds, features.categoryAffinity),
-        partyAff: features.counterpartyAffinity[c.id] ?? 0,
-        cf:
-          pools.size > 1 ? clamp01((f.sources - 1) / (pools.size - 1)) : null,
-        prox: this.workerProximity(employerCoords, c, features),
+        partyAff: features.counterpartyAffinity[c.id] ?? null,
+        cf: pools.size > 1 ? clamp01((f.sources - 1) / (pools.size - 1)) : null,
+        prox: this.workerProximity(employerPlace, c, features),
         // A worker has no scheduled start and no pay amount.
         urgency: null,
         // Recency of the worker's OWN activity, not of their profile row.
-        fresh: active ? freshnessScore(active, ACTIVITY_HALF_LIFE_HOURS) : null,
-        quality: quality.get(c.id) ?? 0.5,
+        fresh: active
+          ? freshnessScore(active, ACTIVITY_HALF_LIFE_HOURS, now)
+          : null,
+        quality: quality.get(c.id) ?? null,
         payFit: null,
       };
 
@@ -336,7 +427,11 @@ export class RecommendationEngineService {
           negativeCategory: c.categoryIds.some((id) =>
             negativeCategories.has(id),
           ),
-          seenDecay: seenDecay(lastSeen.get(c.id) ?? null),
+          seenDecay: seenDecay(
+            lastSeen.get(c.id) ?? null,
+            SEEN_RECOVERY_HOURS,
+            now,
+          ),
         },
         DEFAULT_PENALTIES,
       );
@@ -373,6 +468,246 @@ export class RecommendationEngineService {
     return selected.map(({ id, score, tier }) => ({ id, score, tier }));
   }
 
+  /**
+   * Ranked workers to tell about one specific job offer.
+   *
+   * Distinct from `recommendWorkersForEmployer`, which ranks against an
+   * employer's whole history and knows nothing about a particular offer — no
+   * offer category to anchor on, no offer location to measure from. This is the
+   * direction a push notification needs, and the differences from the feed are
+   * deliberate rather than incidental:
+   *
+   * - `declared` outranks `affinity` as a source, because the offer names a
+   *   concrete category and that is stronger evidence than what the employer
+   *   happened to hire for last month.
+   * - `strictCategory` refuses the "any eligible worker" tier. On a feed an
+   *   irrelevant profile costs a scroll; here it costs a real WhatsApp message
+   *   and an hour of that worker's notification quota.
+   * - `keepAtLeast: 0` lets the threshold return nothing. For a feed that would
+   *   be a bug; here, "nobody is a good enough match" is the correct answer and
+   *   messaging the least-bad of a bad set is not.
+   */
+  async recommendWorkersForJobOffer(
+    jobOfferId: string,
+    limit = 20,
+    opts: {
+      exclude?: Set<string>;
+      minScore?: number;
+      keepAtLeast?: number;
+      explore?: boolean;
+      strictCategory?: boolean;
+      requireVerified?: boolean;
+      rng?: () => number;
+    } = {},
+  ): Promise<RankedWorker[]> {
+    const offer = await this.prisma.jobOffer.findUnique({
+      where: { id: jobOfferId },
+      select: {
+        id: true,
+        employer_id: true,
+        category_id: true,
+        is_remote: true,
+        latitude: true,
+        longitude: true,
+        country_code: true,
+        city: true,
+      },
+    });
+    if (!offer) return [];
+
+    const employerFeatures = await this.features.get(offer.employer_id);
+    const fees = await this.systemConfig.getFees();
+
+    // Someone who already applied does not need telling the job exists.
+    const applied = await this.prisma.application.findMany({
+      where: { job_offer_id: offer.id },
+      select: { worker_id: true },
+    });
+    const exclude = new Set([
+      ...(opts.exclude ?? []),
+      ...applied.map((a) => a.worker_id),
+    ]);
+
+    const queryOpts = {
+      reliabilityMin: fees.reliabilityScoreMin,
+      exclude,
+      requireVerified: opts.requireVerified,
+    };
+
+    const pools = new Map<CandidateTier, WorkerCandidate[]>();
+    const add = (tier: CandidateTier, list: WorkerCandidate[]) => {
+      if (list.length > 0) pools.set(tier, list);
+    };
+    const gathered = () =>
+      new Set([...pools.values()].flatMap((l) => l.map((c) => c.id))).size;
+
+    if (offer.category_id) {
+      add(
+        'declared',
+        await this.sources.workersFromCategories(
+          [offer.category_id],
+          queryOpts,
+          limit,
+        ),
+      );
+    }
+    if (gathered() < limit) {
+      add(
+        'affinity',
+        await this.sources.workersFromAffinities(
+          employerFeatures,
+          queryOpts,
+          limit,
+        ),
+      );
+    }
+    // An uncategorised offer has nothing to be strict about, so the broad tier
+    // is the only thing standing between it and an empty fan-out.
+    if (
+      gathered() < limit &&
+      (!opts.strictCategory || offer.category_id == null)
+    ) {
+      add('all_open', await this.sources.workersFromAll(queryOpts, limit));
+    }
+    if (pools.size === 0) return [];
+
+    const fused = rrfFuse(
+      [...pools.entries()].map(([tier, candidates]) => ({
+        ids: candidates.map((c) => c.id),
+        weight: OFFER_SOURCE_WEIGHTS[tier],
+      })),
+    );
+
+    const byId = new Map<string, WorkerCandidate>();
+    const tierOf = new Map<string, CandidateTier>();
+    for (const [tier, candidates] of pools) {
+      for (const c of candidates) {
+        if (!byId.has(c.id)) {
+          byId.set(c.id, c);
+          tierOf.set(c.id, tier);
+        }
+      }
+    }
+
+    const candidateIds = fused.map((f) => f.id);
+    const [
+      quality,
+      lastActive,
+      lastRecommended,
+      blocked,
+      workerFeatures,
+      simScores,
+    ] = await Promise.all([
+      this.sources.workerQuality(candidateIds),
+      this.sources.lastActiveAt(candidateIds),
+      this.sources.lastRecommendedAt(candidateIds),
+      this.sources.hardBlockedWorkerIds(
+        candidateIds,
+        fees.penaltyHardBlockDays,
+      ),
+      // Per candidate, not per asker: proximity is judged against each worker's
+      // own learned distance tolerance, and the negative-category penalty reads
+      // what that worker keeps rejecting.
+      this.features.getMany(candidateIds),
+      // The direction in which a worker's portfolio earns them work: the offer
+      // is the query, the workers are the candidates.
+      this.sources.similarity(
+        COLLECTIONS.JOBS,
+        offer.id,
+        COLLECTIONS.WORKERS,
+        candidateIds,
+      ),
+    ]);
+
+    const weights = interpolateWeights(employerFeatures.positiveCount);
+    const offerPlace = toPlace(offer);
+
+    // One clock for the whole pass — see `recommendJobsForWorker`.
+    const now = Date.now();
+
+    const scored = fused
+      .filter((f) => !blocked.has(f.id))
+      .map((f) => {
+        const c = byId.get(f.id)!;
+        const active = lastActive.get(c.id);
+        const features = workerFeatures.get(c.id) ?? EMPTY_FEATURES;
+
+        const terms: ScoreTerms = {
+          sim: simScores.get(c.id) ?? null,
+          catAff: bestCategoryAffinity(
+            c.categoryIds,
+            employerFeatures.categoryAffinity,
+          ),
+          partyAff: employerFeatures.counterpartyAffinity[c.id] ?? null,
+          cf:
+            pools.size > 1 ? clamp01((f.sources - 1) / (pools.size - 1)) : null,
+          prox: offer.is_remote
+            ? null
+            : this.workerProximity(offerPlace, c, features),
+          // NOT `urgencyScore(offer.scheduled_at)`. Urgency belongs to the
+          // offer, so in this direction it is the same number for every
+          // candidate — and `computeRelevance` is a weighted MEAN, so a
+          // constant term does not cancel out. It would drag every score toward
+          // its own value while spending real weight, ordering nothing and
+          // moving the whole set across the threshold: a distant offer would
+          // silently notify no one, an imminent one would notify people it
+          // should not. Urgency widens the fan-out instead, outside the score.
+          urgency: null,
+          fresh: active
+            ? freshnessScore(active, ACTIVITY_HALF_LIFE_HOURS, now)
+            : null,
+          quality: quality.get(c.id) ?? null,
+          // `deriveFeatures` does not learn amount or payment-flow affinity yet,
+          // so this would be null for every candidate anyway.
+          payFit: null,
+        };
+
+        const relevance = computeRelevance(terms, weights);
+        const score = applyPenalties(
+          relevance,
+          {
+            // The worker's own rejection history against THIS offer's category.
+            // Replaces the legacy Qdrant `must_not rejectedCategoryIds` payload
+            // filter, as a graded penalty rather than a hard exclusion.
+            negativeCategory:
+              offer.category_id != null &&
+              features.negativeCategoryIds.includes(offer.category_id),
+            // Notification fatigue: prefer people who have not just been
+            // messaged, so the hard cooldown rarely has to fire.
+            seenDecay: seenDecay(
+              lastRecommended.get(c.id) ?? null,
+              SEEN_RECOVERY_HOURS,
+              now,
+            ),
+          },
+          DEFAULT_PENALTIES,
+        );
+
+        return { id: c.id, score, tier: tierOf.get(c.id)!, candidate: c };
+      });
+
+    scored.sort((a, b) => b.score - a.score);
+
+    const minScore =
+      opts.minScore ?? (await this.systemConfig.getRecommendationMinScore());
+    const kept = applyThreshold(scored, minScore, opts.keepAtLeast ?? limit);
+
+    // No exploration and no diversification here. Every candidate was retrieved
+    // for the same offer, so a category cap would drop good matches for no
+    // spread; and an exploratory pick costs a real message rather than a scroll.
+    const selected =
+      opts.explore === false
+        ? kept.slice(0, limit)
+        : epsilonGreedySelect(
+            kept,
+            limit,
+            await this.exploreEpsilon(employerFeatures.positiveCount),
+            opts.rng,
+          );
+
+    return selected.map(({ id, score, tier }) => ({ id, score, tier }));
+  }
+
   /** The domains this employer hires in, derived from their own offers. */
   private async employerCategoryIds(employerId: string): Promise<string[]> {
     const rows = await this.prisma.jobOffer.findMany({
@@ -389,19 +724,20 @@ export class RecommendationEngineService {
       .filter((id): id is string => id !== null);
   }
 
+  /** The employer-side mirror of `proximityTerm`; same fallback, same reasons. */
   private workerProximity(
-    employerCoords: { lat: number; lng: number } | null,
+    employerPlace: WorkerPlace,
     candidate: WorkerCandidate,
     features: UserFeatures,
   ): number {
     if (
-      !employerCoords ||
+      !employerPlace.coords ||
       candidate.latitude == null ||
       candidate.longitude == null
     ) {
-      return 0.5;
+      return placeProximityScore(employerPlace, candidate);
     }
-    const km = haversineKm(employerCoords, {
+    const km = haversineKm(employerPlace.coords, {
       lat: candidate.latitude,
       lng: candidate.longitude,
     });
@@ -457,23 +793,67 @@ export class RecommendationEngineService {
   }
 
   /**
+   * Similarity scores, or an empty map when embeddings are switched off.
+   *
+   * Gated on the same `matching.use_embeddings` flag the legacy path honours,
+   * so one switch still disables embeddings everywhere. Checking it here rather
+   * than inside `similarity()` keeps the Qdrant calls from being made at all.
+   */
+  private async similarityFor(
+    queryCollection: string,
+    queryId: string,
+    candidateCollection: string,
+    candidateIds: string[],
+  ): Promise<Map<string, number>> {
+    try {
+      if (!(await this.systemConfig.isSimilarityEnabled())) {
+        return new Map();
+      }
+      return await this.sources.similarity(
+        queryCollection,
+        queryId,
+        candidateCollection,
+        candidateIds,
+      );
+    } catch (err) {
+      // `similarity()` already swallows Qdrant faults, but the config lookup in
+      // front of it does not — and this runs inside a Promise.all, where one
+      // rejection would take the whole feed down. A ranking without `sim` is a
+      // worse feed; a thrown error is no feed at all.
+      this.logger.warn('similarity lookup failed', err);
+      return new Map();
+    }
+  }
+
+  /**
    * Distance term using the worker's OWN learned tolerance rather than a single
-   * global half-life. Neutral (not zero) when coordinates are missing, so a
-   * profile without geocoding isn't penalised for it.
+   * global half-life, falling back to declared country/city when either side
+   * has no coordinates.
+   *
+   * That fallback is the point. This used to return a flat 0.5 in the missing-
+   * coordinate case, and `prox` carries 0.35 of the cold-start weight — the
+   * heaviest term there is. Since geocoding is fire-and-forget, a failure is
+   * silent and permanent, so for those users a third of the ranking was a
+   * constant that ordered nothing. Country and city are coarse, but coarse
+   * beats constant.
    */
   private proximityTerm(
-    workerCoords: { lat: number; lng: number } | null,
+    workerPlace: WorkerPlace,
     candidate: Candidate,
     features: UserFeatures,
-  ): number {
+  ): number | null {
+    // A remote job is not "distance unknown", it is "distance irrelevant".
+    // Returning null drops the term from the weighted mean entirely rather
+    // than scoring every remote offer the same flat value against local work.
+    if (candidate.isRemote) return null;
     if (
-      !workerCoords ||
+      !workerPlace.coords ||
       candidate.latitude == null ||
       candidate.longitude == null
     ) {
-      return 0.5;
+      return placeProximityScore(workerPlace, candidate);
     }
-    const km = haversineKm(workerCoords, {
+    const km = haversineKm(workerPlace.coords, {
       lat: candidate.latitude,
       lng: candidate.longitude,
     });
@@ -497,9 +877,10 @@ export class RecommendationEngineService {
     const flowFit = candidate.paymentFlow
       ? features.paymentFlowAffinity[candidate.paymentFlow]
       : undefined;
-    const bandFit = candidate.amount != null
-      ? features.amountBandAffinity[amountBand(candidate.amount)]
-      : undefined;
+    const bandFit =
+      candidate.amount != null
+        ? features.amountBandAffinity[amountBand(candidate.amount)]
+        : undefined;
     if (flowFit === undefined && bandFit === undefined) return null;
     return clamp01(((flowFit ?? 0.5) + (bandFit ?? 0.5)) / 2);
   }
@@ -514,7 +895,9 @@ export class RecommendationEngineService {
 
   private async cfEnabled(): Promise<boolean> {
     try {
-      return (await this.systemConfig.get('matching.cf_enabled', 'false')) === 'true';
+      return (
+        (await this.systemConfig.get('matching.cf_enabled', 'false')) === 'true'
+      );
     } catch {
       return false;
     }
@@ -544,14 +927,19 @@ function amountBand(amount: number): string {
  * plumbing when that's what the employer hires for, not be averaged down by the
  * unrelated trade.
  */
+/**
+ * The strongest learned affinity among a worker's categories, or null if none
+ * of them has been learned — "no evidence", which `computeRelevance` drops and
+ * redistributes, rather than a zero that would rank nothing at full weight.
+ */
 function bestCategoryAffinity(
   categoryIds: string[],
   affinity: Record<string, number>,
-): number {
-  let best = 0;
+): number | null {
+  let best: number | null = null;
   for (const id of categoryIds) {
-    const v = affinity[id] ?? 0;
-    if (v > best) best = v;
+    const v = affinity[id];
+    if (v != null && (best == null || v > best)) best = v;
   }
   return best;
 }

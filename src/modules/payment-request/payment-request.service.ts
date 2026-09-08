@@ -18,19 +18,24 @@ import {
   BillingStatus,
 } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
+import { resolvePaymentType } from './payment-type';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { deletedAtFilter } from '../../common/utils/soft-delete.util';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { WalletService } from '../wallet/wallet.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
+import { WhatsAppFeedbackService } from '../whatsapp/feedback/whatsapp-feedback.service';
+import { ReferralService } from '../referral/referral.service';
 import { MailService } from '../mail/mail.service';
 import { LayoutService } from '../mail/layout.service';
 import { paymentSuccessEmail } from '../mail/templates';
 import { PaymentGatewayService } from '../../common/services/payment/payment-gateway.service';
+import type { PaymentGatewayMetadata } from '../../common/services/payment/types/payment-gateway.types';
 import { PaymentStatusGateway } from '../ws-notifications/payment-status.gateway';
 import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
 import { BotNotificationService } from '../bot/services/bot-notification.service';
 import { formatPenaltyPaidSuccess } from '../bot/messages/penalty.messages';
+import { formatContactUnlockedMessage } from '../bot/messages/contact-unlock.messages';
 import { ContactUnlockService } from '../contact-unlock/contact-unlock.service';
 import { InvoiceService } from '../invoice/invoice.service';
 import { generatePaymentReference } from '../../common/utils/payment-reference';
@@ -88,11 +93,11 @@ type PaymentProcessingContext = {
   paymentDescription: string;
 };
 
-function resolvePaymentType(requestType: PaymentRequestType | null | undefined, isContactUnlock: boolean, isRecommendationContact: boolean): PaymentType {
-  if (isContactUnlock || isRecommendationContact) return PaymentType.CONTACT_UNLOCK;
-  if (requestType === PaymentRequestType.WALLET_TOP_UP) return PaymentType.WALLET_TOP_UP;
-  return PaymentType.PENALTY;
-}
+// Moved to `payment-type.ts` so the poll processor writes the same mapping this
+// service does. It could not import it from here — the processor keeps a
+// hand-written interface to break exactly that cycle — so it open-coded the
+// rule instead, missed WALLET_TOP_UP, and filed failed wallet recharges as
+// penalties.
 
 @Injectable()
 export class PaymentRequestService {
@@ -114,6 +119,11 @@ export class PaymentRequestService {
     private readonly invoiceService: InvoiceService,
     private readonly queueService: QueueService,
     private readonly logService: LogService,
+    // Appended, not slotted in beside `whatsAppService` where it reads better:
+    // the specs construct this service positionally, and inserting a parameter
+    // mid-list silently shifts fourteen mocks by one.
+    private readonly feedback: WhatsAppFeedbackService,
+    private readonly referralService: ReferralService,
   ) {}
 
   /**
@@ -191,7 +201,44 @@ export class PaymentRequestService {
   }
 
   /**
-   * Initiates a Monetbil USSD push for the given token.
+   * The gateways this build knows about, and which one is live.
+   *
+   * Consumers render from this instead of keeping their own name tables, so a
+   * new provider shows up in the payment page and the admin without either of
+   * them being redeployed with a new constant.
+   */
+  listGateways(): {
+    active: string;
+    gateways: PaymentGatewayMetadata[];
+  } {
+    return {
+      active: this.paymentGateway.getActiveMetadata().key,
+      gateways: this.paymentGateway.listAvailable(),
+    };
+  }
+
+  /**
+   * The DTO can only confirm the operator is a code *some* gateway knows;
+   * whether it fits the one this deployment runs on is a runtime question.
+   * Sending Monetbil's `CG_AIRTELMONEY` to MTN MoMo would otherwise be accepted
+   * here and rejected by the gateway, after the request had already been
+   * claimed PROCESSING.
+   */
+  private assertOperatorMatchesGateway(operator: string | undefined): void {
+    const gateway = this.paymentGateway.getActiveMetadata();
+
+    if (!gateway.requiresOperator) return;
+
+    const accepted = gateway.operators.map((o) => o.code);
+    if (!operator || !accepted.includes(operator)) {
+      throw new BadRequestException(
+        `Opérateur invalide pour ${gateway.label}. Valeurs acceptées : ${accepted.join(', ')}`,
+      );
+    }
+  }
+
+  /**
+   * Initiates a mobile-money push for the given token on the active gateway.
    * Updates the PaymentRequest to PROCESSING status.
    */
   async initiatePayment(
@@ -213,6 +260,8 @@ export class PaymentRequestService {
     if (!request.amount) {
       throw new BadRequestException('Montant non défini pour cette demande');
     }
+
+    this.assertOperatorMatchesGateway(operator);
 
     // Atomically claim PENDING → PROCESSING before calling the gateway.
     // Concurrent double-taps both attempt this; only one succeeds (count === 1).
@@ -293,7 +342,6 @@ export class PaymentRequestService {
       data: {
         gateway: activeGateway,
         gateway_payment_ref: gatewayRef || null,
-        monetbil_payment_ref: gatewayRef || null, // keep for backward compat during transition
       },
     });
 
@@ -338,6 +386,9 @@ export class PaymentRequestService {
       return { received: true };
     }
 
+    // Nothing writes `monetbil_payment_ref` any more, but a callback can still
+    // arrive for a request created by the previous deploy. The fallback goes
+    // when the column does.
     const request = await this.prisma.paymentRequest.findFirst({
       where: {
         OR: [
@@ -461,7 +512,7 @@ export class PaymentRequestService {
     // Compute unlock result first (needed for the confirmation message text).
     const unlockResult = await this.handleContactUnlockPostPayment(request);
 
-    // 1. "🎉 Paiement confirmé"
+    // 1. "Paiement confirmé"
     await this.sendPaymentSuccessNotifications(request, context, unlockResult);
 
     // 2. Contact details (regular unlock) — this is what the user is waiting
@@ -490,6 +541,36 @@ export class PaymentRequestService {
         err,
       ),
     );
+
+    // 5. Parrainage payout — deliberately last, and deliberately not awaited.
+    //
+    // It credits two wallets, neither of which belongs to the person watching
+    // this payment complete, and it is the only step here that costs nothing to
+    // run late: settleForReferee re-derives its own facts from the database, so
+    // the KYC approval path and the parrainage screen both replay it. Nothing
+    // about a referral lookup belongs between a payer and the contact they just
+    // bought.
+    //
+    // This method is also the boundary that keeps wallet-credit-paid unlocks
+    // out of the program: those settle in ContactUnlockService.payUnlock and
+    // RecommendationContactService and never reach here. Do NOT add a second
+    // call site there — paying a parrainage on credit the platform issued is
+    // how the program funds itself out of its own bonuses.
+    //
+    // Gated on `context`, not on `request.request_type`:
+    // buildPaymentProcessingContext treats a request carrying a
+    // contact_unlock_attempt_id as an unlock whatever its type says, and a
+    // second copy of that rule here would drift from the one above it.
+    if (context.isContactUnlock || context.isRecommendationContact) {
+      void this.referralService
+        .settleForReferee(request.profile_id)
+        .catch((err) =>
+          this.logger.error(
+            `Referral settlement failed for payment ${request.id}:`,
+            err,
+          ),
+        );
+    }
   }
 
   private async buildPaymentProcessingContext(
@@ -524,7 +605,11 @@ export class PaymentRequestService {
       isContactUnlock,
       isRecommendationContact,
       recommendationWorkerId,
-      paymentType: resolvePaymentType(requestType, isContactUnlock, isRecommendationContact),
+      paymentType: resolvePaymentType(
+        requestType,
+        isContactUnlock,
+        isRecommendationContact,
+      ),
       paymentDescription,
     };
   }
@@ -635,7 +720,7 @@ export class PaymentRequestService {
     if (!profile?.phone) return;
     const amountStr = Number(request.amount).toLocaleString('fr-FR');
     const message = [
-      `❌ *Paiement échoué*`,
+      `*Paiement échoué*`,
       ``,
       `Votre paiement de *${amountStr} FCFA* via Mobile Money n'a pas abouti.`,
       ``,
@@ -742,7 +827,7 @@ export class PaymentRequestService {
 
     if (request.profile.phone) {
       const lines = [
-        `🎉 *Paiement confirmé* !`,
+        `*Paiement confirmé*`,
         '',
         `Montant : *${context.amount.toLocaleString('fr-FR')} FCFA*`,
         `Objet : ${context.paymentDescription}`,
@@ -753,7 +838,7 @@ export class PaymentRequestService {
       if (context.isRecommendationContact) {
         lines.push(
           '',
-          '📞 *Les coordonnées du travailleur vous seront envoyées dans le message suivant.*',
+          '*Les coordonnées du travailleur vous seront envoyées dans le message suivant.*',
         );
       } else if (context.isContactUnlock) {
         if (unlockResult?.nowUnlocked) {
@@ -764,7 +849,7 @@ export class PaymentRequestService {
         } else {
           lines.push(
             '',
-            "⏳ *En attente du paiement de l'autre partie. Les coordonnées seront révélées dès que les deux parties auront payé.*",
+            "*En attente du paiement de l'autre partie. Les coordonnées seront révélées dès que les deux parties auront payé.*",
           );
         }
       }
@@ -879,20 +964,18 @@ export class PaymentRequestService {
         request.profile_id,
         false,
       );
-      const nowUnlocked =
-        result.status === 'UNLOCKED' || result.newlyUnlocked.length > 0;
+      // Same derivation the wallet-payment path uses. It was duplicated here,
+      // and "which attempts did this actually unlock" is exactly the question
+      // that, answered differently in two places, sends someone two contact
+      // messages or none.
+      const unlockedAttemptIds =
+        this.contactUnlockService.unlockedAttemptIds(result);
 
-      if (!nowUnlocked) return { nowUnlocked: false, unlockedAttemptIds: [] };
+      if (unlockedAttemptIds.length === 0) {
+        return { nowUnlocked: false, unlockedAttemptIds: [] };
+      }
 
-      const attemptIds =
-        result.status === 'UNLOCKED'
-          ? [result.attemptId, ...result.newlyUnlocked]
-          : result.newlyUnlocked;
-
-      return {
-        nowUnlocked: true,
-        unlockedAttemptIds: [...new Set(attemptIds)],
-      };
+      return { nowUnlocked: true, unlockedAttemptIds };
     } catch (err) {
       this.logger.error(
         `Contact unlock processing failed for attempt ${String(request.contact_unlock_attempt_id)}:`,
@@ -920,19 +1003,34 @@ export class PaymentRequestService {
       });
       if (!worker) return;
 
-      const waDigits = worker.phone ? worker.phone.replace(/\D/g, '') : null;
-      const contactLines = [
-        '🔓 *Contact déverrouillé avec succès !*',
-        '',
-        '👤 *Informations du travailleur*',
-        `• *Prénom* : ${worker.first_name ?? '—'}`,
-        `• *Nom* : ${worker.last_name ?? '—'}`,
-        ...(worker.phone ? [`• *Téléphone* : ${worker.phone}`] : []),
-        ...(waDigits ? [`• *WhatsApp* : https://wa.me/${waDigits}`] : []),
-        ...(worker.email ? [`• *Email* : ${worker.email}`] : []),
-      ].join('\n');
-      await this.botNotification
-        .sendMessage(request.profile.phone, contactLines)
+      const workerName =
+        `${worker.first_name ?? ''} ${worker.last_name ?? ''}`.trim() ||
+        'le travailleur';
+
+      // The approved template, not free-form text. Two reasons: it carries the
+      // feedback Flow on its « Laisser un avis » button, and an employer who
+      // paid on the web without ever messaging the bot is outside WhatsApp's
+      // 24h service window — where free-form is rejected (63016) and the
+      // contact they just paid for silently never arrives. Mirrors
+      // `RecommendationContactService`, which sends the same template on the
+      // wallet-paid path.
+      await this.whatsAppService
+        .sendTemplateMessage(
+          request.profile.phone,
+          'contactUnlockedRecommendation',
+          {
+            name: workerName,
+            phone: worker.phone ?? null,
+            email: worker.email ?? null,
+            flowToken: this.feedback.mintFlowToken(request.profile_id),
+          },
+          request.profile_id,
+          formatContactUnlockedMessage({
+            name: workerName,
+            phone: worker.phone ?? null,
+            email: worker.email ?? null,
+          }),
+        )
         .catch((err) =>
           this.logger.warn(
             `Recommendation contact send failed for worker ${context.recommendationWorkerId}:`,
@@ -1084,7 +1182,7 @@ export class PaymentRequestService {
 
       if (request.profile.phone) {
         const message = [
-          `✅ *Wallet rechargé avec succès !*`,
+          `*Wallet rechargé avec succès*`,
           ``,
           `Montant crédité : *${context.amount.toLocaleString('fr-FR')} FCFA*`,
           `Nouveau solde : *${newBalance.toLocaleString('fr-FR')} FCFA*`,

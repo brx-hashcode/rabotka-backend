@@ -9,6 +9,18 @@ import { Observable } from 'rxjs';
 import { tap } from 'rxjs/operators';
 import { SendTimingService } from './send-timing.service';
 
+/**
+ * Measures webhook handler time (entry -> response).
+ *
+ * Delivery latency is NOT recorded here any more. It used to be, keyed off
+ * Twilio's `MessageStatus === 'delivered'` form field — a shape Cloud does not
+ * post, so the metric would have gone silent at the provider flip. It now lives
+ * in `InboundIngestService`, which sees a normalized status event from either
+ * provider. Worth knowing when reading the dashboards: Twilio status callbacks
+ * are configured in the Twilio console and nothing in this codebase sets
+ * `statusCallback`, so this metric may be dark today and will come alive under
+ * Cloud, which posts statuses unconditionally.
+ */
 @Injectable()
 export class SendTimingInterceptor implements NestInterceptor {
   constructor(private readonly sendTiming: SendTimingService) {}
@@ -23,21 +35,13 @@ export class SendTimingInterceptor implements NestInterceptor {
     if (req.method !== 'POST') return next.handle();
 
     const body = req.body ?? {};
-    const messageSid = body.MessageSid;
-
-    // Twilio delivery status callback: hit the same endpoint as inbound
-    // messages but with a MessageStatus. Record end-to-end delivery latency
-    // and let the (early-returning) handler run untouched.
-    if (body.MessageStatus === 'delivered' && messageSid) {
-      void this.sendTiming.recordDelivered(messageSid);
-      return next.handle();
-    }
-
-    // Genuine inbound message: measure webhook handler time (entry -> 200).
     const start = performance.now();
     const record = (): void =>
       this.sendTiming.observe('handler', 'inbound', performance.now() - start, {
-        messageSid,
+        // Present on a Twilio form post; absent on a Cloud JSON body, where the
+        // ids live nested inside `entry[]` and are not worth digging out just
+        // to label a duration.
+        messageSid: body.MessageSid,
         to: body.From,
       });
 

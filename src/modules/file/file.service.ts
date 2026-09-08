@@ -3,7 +3,10 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { StorageService } from '../../common/services/storage/storage.service';
 import { ImageWatermarkService } from '../../common/services/image-watermark/image-watermark.service';
-import { UploadOptions } from '../../common/services/storage/types/storage.types';
+import {
+  DownloadResult,
+  UploadOptions,
+} from '../../common/services/storage/types/storage.types';
 
 @Injectable()
 export class FileService {
@@ -25,6 +28,23 @@ export class FileService {
     options?: {
       folder?: string;
       access?: 'public' | 'private';
+      /**
+       * Target bucket, when it is not the default one. KYC documents live in a
+       * private bucket of their own; everything else stays where it was.
+       */
+      bucket?: string;
+      /**
+       * Whether to stamp the Rabotka logo onto an image. Defaults to true, so
+       * omitting it keeps the historical behaviour for every existing caller.
+       *
+       * Set false for internal evidence that is never published. An admin's KYC
+       * verification image is only ever served through the authenticated
+       * `/verification-images/:imageId/raw` stream, so the mark protects
+       * nothing there and only degrades the thing a reviewer is trying to read
+       * — `addWatermark` re-encodes lossily, and it transcodes HEIC/HEIF to
+       * JPEG while the generated key keeps the original extension.
+       */
+      watermark?: boolean;
     },
   ) {
     if (!file.buffer || !file.originalname) {
@@ -35,6 +55,7 @@ export class FileService {
       mimeType: file.mimetype,
       folder: options?.folder,
       access: options?.access,
+      bucket: options?.bucket,
     };
 
     const fileBuffer: Buffer = Buffer.isBuffer(file.buffer)
@@ -44,7 +65,9 @@ export class FileService {
     const fileName = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
 
     let bufferToUpload = fileBuffer;
-    if (file.mimetype.startsWith('image/')) {
+    // `!== false` rather than a truthy check: `undefined` is every caller that
+    // predates the flag, and those must keep watermarking exactly as before.
+    if (options?.watermark !== false && file.mimetype.startsWith('image/')) {
       bufferToUpload = await this.imageWatermarkService.addWatermark(
         fileBuffer,
         file.mimetype,
@@ -104,12 +127,51 @@ export class FileService {
     }
   }
 
-  async getPresignedUrl(storageKey: string): Promise<string> {
-    return this.storageService.getUrl(storageKey, { access: 'private' });
+  /**
+   * A time-limited url for one object.
+   *
+   * `bucket` matters for anything outside the default one — KYC documents live
+   * in a private bucket of their own, and a signature made against the wrong
+   * bucket produces a url that resolves to nothing.
+   *
+   * Not to be confused with `getPresignedUrlFromPublicUrl` below, which despite
+   * its name returns a PUBLIC url. That one serves platform documents, which
+   * belong in the public bucket; its name is wrong, its behaviour is not.
+   */
+  async getPresignedUrl(storageKey: string, bucket?: string): Promise<string> {
+    return this.storageService.getUrl(storageKey, {
+      access: 'private',
+      ...(bucket ? { bucket } : {}),
+    });
   }
 
   async getPublicUrl(storageKey: string): Promise<string> {
     return this.storageService.getUrl(storageKey, { access: 'public' });
+  }
+
+  /**
+   * Whether an object is actually there, in a named bucket.
+   *
+   * `bucket` for the same reason `getPresignedUrl` needs it: KYC objects live
+   * outside the default bucket, and a check against the default one reports
+   * them missing.
+   */
+  async exists(storageKey: string, bucket?: string): Promise<boolean> {
+    return this.storageService.exists(storageKey, {
+      ...(bucket ? { bucket } : {}),
+    });
+  }
+
+  /**
+   * An object's bytes, for streaming straight to a response.
+   *
+   * The route that serves KYC documents uses this instead of handing the
+   * browser a signed url, so the credential never leaves the server.
+   */
+  async download(storageKey: string, bucket?: string): Promise<DownloadResult> {
+    return this.storageService.download(storageKey, {
+      ...(bucket ? { bucket } : {}),
+    });
   }
 
   async getPresignedUrlFromPublicUrl(publicUrl: string): Promise<string> {

@@ -1,9 +1,12 @@
 import { Injectable, Logger, forwardRef, Inject } from '@nestjs/common';
+import Redis from 'ioredis';
+import { jobLocationLabel } from '../../../common/utils/job-location.util';
+import { REDIS_CONNECTION } from '../../../common/services/redis/redis.constants';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { WhatsAppService } from '../../whatsapp/whatsapp.service';
+import { WhatsAppFeedbackService } from '../../whatsapp/feedback/whatsapp-feedback.service';
 import { BotStateService } from './bot-state.service';
 import { BotInboxService } from './bot-inbox.service';
-import { getUnlockContactInitialState } from '../flows/unlock-contact.flow';
 import { FLOW_IDS } from '../bot.constants';
 import { formatAmount } from '../messages/offers.messages';
 import { WHATSAPP_TEMPLATES } from '../../../common/constants/whatsapp-templates';
@@ -25,7 +28,20 @@ export class BotNotificationService {
     private readonly contactUnlock: ContactUnlockService,
     private readonly systemConfig: SystemConfigService,
     private readonly walletService: WalletService,
+    @Inject(forwardRef(() => WhatsAppFeedbackService))
+    private readonly feedback: WhatsAppFeedbackService,
+    @Inject(REDIS_CONNECTION)
+    private readonly redis: Redis,
   ) {}
+
+  /**
+   * Paces "someone applied" so one offer cannot bill the employer once per
+   * applicant. Keyed by OFFER, not by employer: two offers are two different
+   * pieces of news, and one filling up must not silence the other.
+   */
+  private newApplicationCooldownKey(jobOfferId: string): string {
+    return `new_application_notify:${jobOfferId}`;
+  }
 
   /**
    * Tells the employer a worker applied. Notification only — the decision is
@@ -34,8 +50,20 @@ export class BotNotificationService {
    * No longer arms the accept/refuse flow or queues an inbox entry: the approved
    * template carries a URL button instead of « Accepter » / « Refuser », so
    * there is nothing for a typed reply to drive.
+   *
+   * PACED per offer. This used to fire once per application with nothing in
+   * front of it, so an offer with twenty-five candidates sent the employer
+   * twenty-five billed templates in real time, each opening the same page. The
+   * message is a nudge, not the channel — its button lands on the offer, where
+   * every applicant is listed — so the first one within the window does the
+   * whole job. `matching.new_application_notify_cooldown_minutes` tunes it
+   * without a deploy, and `0` restores a message per application.
    */
   async sendNewApplicationToEmployer(applicationId: string): Promise<void> {
+    // Held outside the try so the catch can hand it back: a send that threw
+    // must not silence the offer for the rest of the window over a message
+    // nobody received.
+    let claimedKey: string | null = null;
     try {
       const app = await this.prisma.application.findUnique({
         where: { id: applicationId },
@@ -43,6 +71,7 @@ export class BotNotificationService {
           worker_id: true,
           job_offer: {
             select: {
+              id: true,
               title: true,
               scheduled_at: true,
               address: true,
@@ -65,11 +94,34 @@ export class BotNotificationService {
       });
       if (!app?.job_offer?.employer?.phone || !app.worker) return;
 
+      // Claimed BEFORE the counting query below, so a paced-out application
+      // costs neither a message nor a round trip.
+      const cooldownMinutes =
+        await this.systemConfig.getNewApplicationNotifyCooldownMinutes();
+      if (cooldownMinutes > 0) {
+        const key = this.newApplicationCooldownKey(app.job_offer.id);
+        const claimed = await this.redis.set(
+          key,
+          '1',
+          'EX',
+          cooldownMinutes * 60,
+          'NX',
+        );
+        if (claimed === null) {
+          this.logger.debug(
+            `Employer already notified about offer ${app.job_offer.id} within ` +
+              `${cooldownMinutes}min — skipping notification for application ${applicationId}`,
+          );
+          return;
+        }
+        claimedKey = key;
+      }
+
       const completedCount = await this.prisma.application.count({
         where: { worker_id: app.worker_id, status: 'END' },
       });
 
-      const scheduledAt = app.job_offer.scheduled_at.toLocaleDateString(
+      const scheduledAt = app.job_offer.scheduled_at?.toLocaleDateString(
         'fr-FR',
         {
           day: '2-digit',
@@ -80,12 +132,12 @@ export class BotNotificationService {
         },
       );
       const description = app.worker.description ?? '';
-      const address = app.job_offer.address;
+      const address = jobLocationLabel(app.job_offer);
       const tpl = WHATSAPP_TEMPLATES.newApplication;
       await this.whatsApp.sendTemplateMessage(
         app.job_offer.employer.phone,
-        tpl.contentSid,
-        tpl.variables({
+        'newApplication',
+        {
           offerTitle: app.job_offer.title,
           workerName: `${app.worker.first_name} ${app.worker.last_name}`,
           reliabilityScore: app.worker.reliability_score ?? 100,
@@ -94,14 +146,21 @@ export class BotNotificationService {
             description.length > 150
               ? `${description.slice(0, 150)}...`
               : description,
-          scheduledAt,
+          scheduledAt: scheduledAt ?? 'Non précisée',
           address: address.length > 80 ? `${address.slice(0, 80)}...` : address,
           // URL suffix for the CTA button (/candidatures/{{8}}). Ignored by the
           // pre-approval template, so this is safe either side of the cutover.
           applicationId,
-        }),
+        },
+        app.job_offer.employer_id,
       );
     } catch (err) {
+      // Hand the window back. Keeping it would let one failed send suppress
+      // every later applicant on this offer for the rest of the cooldown, so a
+      // transient WhatsApp error would cost the employer news it never got.
+      if (claimedKey) {
+        await this.redis.del(claimedKey).catch(() => undefined);
+      }
       this.logger.warn(
         `Failed to send new application notification to employer: ${applicationId}`,
         err,
@@ -134,42 +193,31 @@ export class BotNotificationService {
       if (attempt) {
         const fees = await this.systemConfig.getContactUnlockFees();
 
-        // Set unlockState BEFORE sending so that when the worker taps
-        // "Continuer" (payload "continuer") the flow is already active and
-        // re-shows the live payment prompt (unlock-contact.flow.ts). The
-        // dynamic, balance-dependent option list cannot live in a template.
-        const unlockState = getUnlockContactInitialState({
-          attemptId: attempt.id,
-          otherName: employerName,
-          amount: fees.workerFeeFcfa,
-          expiresAt: attempt.expires_at,
-        });
-        await this.botState.setIfFlowAbsentOrMatches(
-          app.worker_id,
-          unlockState,
-          null,
-        );
-
-        const tpl = WHATSAPP_TEMPLATES.applicationAcceptedUnlock;
+        // No chat state is armed. This used to pre-arm the unlock flow so a
+        // "Continuer" quick-reply could re-show a balance-dependent option list
+        // in the chat; the template carries a URL button now and the worker
+        // settles up in the app, so arming a flow only left a stale state for
+        // the next thing they typed to fall into.
         await this.whatsApp.sendTemplateMessage(
           app.worker.phone,
-          tpl.contentSid,
-          tpl.variables({
+          'applicationAcceptedUnlock',
+          {
             employerName,
             offerTitle: app.job_offer.title,
             // URL suffix: the worker settles their share on the web now.
             applicationId,
-          }),
+          },
+          app.worker_id,
         );
       } else {
-        const tpl = WHATSAPP_TEMPLATES.applicationAccepted;
         await this.whatsApp.sendTemplateMessage(
           app.worker.phone,
-          tpl.contentSid,
-          tpl.variables({
+          'applicationAccepted',
+          {
             employerName,
             offerTitle: app.job_offer.title,
-          }),
+          },
+          app.worker_id,
         );
       }
     } catch (err) {
@@ -217,29 +265,36 @@ export class BotNotificationService {
         }),
       ]);
 
-      const tpl = WHATSAPP_TEMPLATES.contactUnlocked;
-
+      // The unlock is the moment the product either delivered or did not, so it
+      // is the honest place to ask for feedback — and the template now carries
+      // the Flow on its own button, so the ask rides along with the contact
+      // details instead of arriving as a second message. That second message
+      // used to be `feedback.requestFeedback`, a free-form interactive send:
+      // WhatsApp rejects those outside the 24h service window (131047), which
+      // is precisely where anyone who paid on the web sits.
       if (employer?.phone && worker && attempt.employer_id !== skipId) {
         await this.whatsApp.sendTemplateMessage(
           employer.phone,
-          tpl.contentSid,
-          tpl.variables({
+          'contactUnlocked',
+          {
             name: `${worker.first_name} ${worker.last_name}`.trim(),
             phone: worker.phone,
             email: worker.email,
-          }),
+            flowToken: this.feedback.mintFlowToken(attempt.employer_id),
+          },
         );
       }
 
       if (worker?.phone && employer && attempt.worker_id !== skipId) {
         await this.whatsApp.sendTemplateMessage(
           worker.phone,
-          tpl.contentSid,
-          tpl.variables({
+          'contactUnlocked',
+          {
             name: `${employer.first_name} ${employer.last_name}`.trim(),
             phone: employer.phone,
             email: employer.email,
-          }),
+            flowToken: this.feedback.mintFlowToken(attempt.worker_id),
+          },
         );
       }
     } catch (err) {
@@ -264,8 +319,9 @@ export class BotNotificationService {
       const tpl = WHATSAPP_TEMPLATES.unlockExpiredConversion;
       await this.whatsApp.sendTemplateMessage(
         profile.phone,
-        tpl.contentSid,
-        tpl.variables({ amount }),
+        'unlockExpiredConversion',
+        { amount },
+        profileId,
       );
     } catch (err) {
       this.logger.warn(
@@ -286,8 +342,8 @@ export class BotNotificationService {
       const tpl = WHATSAPP_TEMPLATES.applicationRejected;
       await this.whatsApp.sendTemplateMessage(
         app.worker.phone,
-        tpl.contentSid,
-        tpl.variables(),
+        'applicationRejected',
+        undefined,
       );
     } catch (err) {
       this.logger.warn(
@@ -321,7 +377,7 @@ export class BotNotificationService {
       if (!app?.job_offer?.employer?.phone || !app.worker) return;
 
       const fees = await this.systemConfig.getFees();
-      const date = app.job_offer.scheduled_at.toLocaleDateString('fr-FR', {
+      const date = app.job_offer.scheduled_at?.toLocaleDateString('fr-FR', {
         day: '2-digit',
         month: '2-digit',
         year: 'numeric',
@@ -334,15 +390,15 @@ export class BotNotificationService {
       const tpl = WHATSAPP_TEMPLATES.cancellation;
       await this.whatsApp.sendTemplateMessage(
         app.job_offer.employer.phone,
-        tpl.contentSid,
-        tpl.variables({
+        'cancellation',
+        {
           workerName: `${app.worker.first_name} ${app.worker.last_name}`,
           offerTitle: app.job_offer.title,
-          date,
+          date: date ?? 'Non précisée',
           reason: reason ?? '',
           penaltyStatus,
           jobOfferId: app.job_offer.id,
-        }),
+        },
       );
 
       // Set the POST_CANCELLATION_ACTIONS state so 1/2/3 actually do
@@ -375,10 +431,19 @@ export class BotNotificationService {
     await this.whatsApp.sendTextMessage(phone, text);
   }
 
+  /**
+   * Sends the job-recommendation template, reporting whether it went out.
+   *
+   * The boolean is load-bearing rather than informational: the caller claims a
+   * per-worker cooldown before calling, and has to release it again when nothing
+   * was sent. A void return made "delivered", "skipped as ineligible" and
+   * "provider threw" indistinguishable, so a Twilio failure muted a worker for
+   * an hour over a message they never received.
+   */
   async sendRecommendedJobNotification(
     workerId: string,
     jobOfferId: string,
-  ): Promise<void> {
+  ): Promise<boolean> {
     try {
       const [profile, offer] = await Promise.all([
         this.prisma.profile.findUnique({
@@ -401,16 +466,16 @@ export class BotNotificationService {
           },
         }),
       ]);
-      if (!profile?.phone || !offer) return;
+      if (!profile?.phone || !offer) return false;
       if (profile.profile_type !== 'WORKER' || profile.status !== 'ACTIVE')
-        return;
+        return false;
 
       // No flow arming: the approved template's button opens `/offres/:id`, so
       // the worker applies on the web. This previously both armed the apply flow
       // and — worse — returned without sending when the worker happened to be
       // mid-conversation, silently dropping the recommendation entirely.
 
-      const dateStr = offer.scheduled_at.toLocaleDateString('fr-FR', {
+      const dateStr = offer.scheduled_at?.toLocaleDateString('fr-FR', {
         day: '2-digit',
         month: '2-digit',
         year: 'numeric',
@@ -418,28 +483,28 @@ export class BotNotificationService {
         minute: '2-digit',
       });
       const tpl = WHATSAPP_TEMPLATES.jobRecommendation;
-      await this.whatsApp.sendTemplateMessage(
+      return await this.whatsApp.sendTemplateMessage(
         profile.phone,
-        tpl.contentSid,
-        tpl.variables({
+        'jobRecommendation',
+        {
           firstName: profile.first_name,
           title: offer.title,
           amount: formatAmount(
             offer.amount != null ? Number(offer.amount) : null,
             offer.payment_flow,
           ),
-          address: offer.address,
-          date: dateStr,
+          address: jobLocationLabel(offer),
+          date: dateStr ?? 'Non précisée',
           // URL suffix for the CTA button (/offres/{{6}}).
           jobOfferId,
-        }),
+        },
       );
     } catch (err) {
       this.logger.warn(
         `Failed to send recommended job notification to worker ${workerId}`,
         err,
       );
+      return false;
     }
   }
-
 }

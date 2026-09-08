@@ -11,9 +11,20 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
+import { toWorkerJobShape } from './worker-job-shape';
+import { withCityFilter } from '../../common/queries/city-filter';
 import {
   ApplicationStatus,
+  InteractionActor,
+  InteractionKind,
+  InteractionObject,
+  InteractionSource,
   JobOfferStatus,
   PaymentFlow,
   Prisma,
@@ -22,11 +33,13 @@ import {
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { ProfileAuthGuard } from '../auth/guards/profile-auth.guard';
 import { KycVerifiedGuard } from '../auth/guards/kyc-verified.guard';
+import { ActiveProfileGuard } from '../auth/guards/active-profile.guard';
 import type { ProfileAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
 import { JobOfferService } from '../job-offer/job-offer.service';
 import { ApplicationService } from '../application/application.service';
 import { MatchingService } from '../matching/matching.service';
 import { EngineRolloutService } from '../recommendation-engine/engine-rollout.service';
+import { InteractionEventService } from '../recommendation-engine/interaction-event.service';
 import { RecommendationEngineService } from '../recommendation-engine/recommendation-engine.service';
 
 /** Cap the AND-chain so a pathological query can't fan out into 50 ILIKEs. */
@@ -83,6 +96,14 @@ const JOB_SEARCH_SELECT = {
   amount: true,
   payment_flow: true,
   address: true,
+  // The worker's detail screen shows where the job is, and "where" is not just
+  // the street: a remote job has no address at all, and an address alone hides
+  // which city it is in. Selecting only `address` is what left the client's
+  // jobLocationDetail() with nothing to add.
+  is_remote: true,
+  employment_type: true,
+  city: true,
+  country_name: true,
   quantity: true,
   created_at: true,
   category: { select: { id: true, name: true } },
@@ -123,11 +144,13 @@ export class MobileFeedController {
     private readonly matchingService: MatchingService,
     private readonly rollout: EngineRolloutService,
     private readonly engine: RecommendationEngineService,
+    private readonly interactionEvents: InteractionEventService,
   ) {}
 
   @Get('job-feed')
   @ApiOperation({
-    summary: '[Mobile/WORKER] Job offers for the worker (matched or by category)',
+    summary:
+      '[Mobile/WORKER] Job offers for the worker (matched or by category)',
     description:
       'With categoryId: open offers in that domain, newest first. Without: "Pour vous" — semantic recommendations when similarity is enabled, otherwise the worker\'s own domains newest-first (all open offers if they have no domains). Each item carries `saved`, `applied` and `matchScore`.',
   })
@@ -148,6 +171,7 @@ export class MobileFeedController {
       return this.hydrateWorkerJobs(
         profileId,
         await this.recentOpenOfferHits([categoryId], topN),
+        { surface: 'job_feed_category', requestId: req.requestId },
       );
     }
 
@@ -172,6 +196,7 @@ export class MobileFeedController {
     return this.hydrateWorkerJobs(
       profileId,
       this.dedupeHits([...matched, ...ownDomains, ...everythingElse], topN),
+      { surface: 'job_feed', requestId: req.requestId },
     );
   }
 
@@ -231,9 +256,7 @@ export class MobileFeedController {
           in: [JobOfferStatus.ACTIVE, JobOfferStatus.PARTIALLY_FILLED],
         },
         deleted_at: null,
-        ...(categoryIds.length > 0
-          ? { category_id: { in: categoryIds } }
-          : {}),
+        ...(categoryIds.length > 0 ? { category_id: { in: categoryIds } } : {}),
       },
       orderBy: { created_at: 'desc' },
       take,
@@ -312,7 +335,7 @@ export class MobileFeedController {
     // Base eligibility. ACTIVE/PARTIALLY_FILLED already implies "has open slots":
     // accept() flips an offer to FILLED once accepted >= quantity, so there is no
     // need to re-derive slot availability here.
-    const where: Prisma.JobOfferWhereInput = {
+    let where: Prisma.JobOfferWhereInput = {
       status: {
         in: [JobOfferStatus.ACTIVE, JobOfferStatus.PARTIALLY_FILLED],
       },
@@ -322,10 +345,9 @@ export class MobileFeedController {
     if (categoryId) {
       where.category_id = categoryId;
     }
-    // No city column exists — location is free-text `address` (+ optional lat/lng).
-    if (city?.trim()) {
-      where.address = { contains: city.trim(), mode: 'insensitive' };
-    }
+    // Structured `city` first, free-text `address` as the fallback — see
+    // withCityFilter for why both.
+    where = withCityFilter(where, city);
     if (paymentFlow && paymentFlow in PaymentFlow) {
       where.payment_flow = paymentFlow as PaymentFlow;
     }
@@ -407,26 +429,32 @@ export class MobileFeedController {
     const savedSet = new Set(saved.map((s) => s.job_offer_id));
     const appliedSet = new Set(applied.map((a) => a.job_offer_id));
 
-    const items = rows.map((r) => ({
-      id: r.id,
-      reference: r.reference,
-      title: r.title,
-      description: r.description,
-      status: r.status,
-      scheduled_at: r.scheduled_at,
+    // Built through toWorkerJobShape rather than field by field: the explicit
+    // list here used to omit is_remote, employment_type, city and country_name
+    // entirely, even though the shared select fetches all four.
+    const items = rows.map(({ category, _count, ...r }) => ({
+      ...toWorkerJobShape(r),
+      // Prisma Decimal → number, which is what the client's type declares.
       amount: r.amount == null ? null : Number(r.amount),
-      payment_flow: r.payment_flow,
-      address: r.address,
-      quantity: r.quantity,
-      acceptedCount: r._count.applications,
-      created_at: r.created_at,
-      categoryId: r.category?.id ?? null,
-      categoryName: r.category?.name ?? null,
+      acceptedCount: _count.applications,
+      categoryId: category?.id ?? null,
+      categoryName: category?.name ?? null,
       matchScore: 0,
       saved: savedSet.has(r.id),
       applied: appliedSet.has(r.id),
-      employer: r.employer,
     }));
+
+    // `offset: skip` — otherwise every page restarts at position 0 and
+    // position-bias analysis is meaningless.
+    void this.interactionEvents.recordImpressions({
+      actorId: profileId,
+      actorType: InteractionActor.WORKER,
+      objectType: InteractionObject.JOB_OFFER,
+      items: items.map((it) => ({ objectId: it.id })),
+      surface: 'job_search',
+      requestId: req.requestId,
+      offset: skip,
+    });
 
     return { items, total };
   }
@@ -449,18 +477,43 @@ export class MobileFeedController {
     if (!job) {
       throw new NotFoundException('Offre introuvable');
     }
+
+    // The single largest hole in the interest graph before this: a worker could
+    // open two hundred offers and it learned nothing. VIEW carries real weight
+    // (0.3), so categoryId matters here in a way it does not for a zero-weight
+    // impression — hence the extra lookup.
+    const category = await this.prisma.jobOffer.findUnique({
+      where: { id: jobOfferId },
+      select: { category_id: true },
+    });
+    void this.interactionEvents.record({
+      actorId: profileId,
+      actorType: InteractionActor.WORKER,
+      kind: InteractionKind.VIEW,
+      objectType: InteractionObject.JOB_OFFER,
+      objectId: jobOfferId,
+      categoryId: category?.category_id,
+      counterpartyId: job.employer_id,
+      source: InteractionSource.SERVER,
+      surface: 'job_detail',
+      requestId: req.requestId,
+    });
+
     return job;
   }
 
   @Post('jobs/:jobOfferId/apply')
-  @UseGuards(KycVerifiedGuard)
+  @UseGuards(ActiveProfileGuard, KycVerifiedGuard)
   @ApiOperation({
     summary: '[Mobile/WORKER] Apply to a job offer',
     description:
       'Creates an application (subject to duplicate / penalty / concurrent / daily-limit guards) and returns the updated daily quota.',
   })
   @ApiResponse({ status: 201, description: 'Application created' })
-  @ApiResponse({ status: 403, description: 'Not a WORKER / blocked / limit reached' })
+  @ApiResponse({
+    status: 403,
+    description: 'Not a WORKER / blocked / limit reached',
+  })
   @ApiResponse({ status: 409, description: 'Already applied' })
   async applyToJob(
     @Req() req: ProfileAuthenticatedRequest,
@@ -489,9 +542,15 @@ export class MobileFeedController {
    * Hydrate matched/category hits into full offers (preserving order) and attach
    * the worker's `saved` (bookmarked) and `applied` flags via batch lookups.
    */
+  /**
+   * @param impression When set, the returned list is recorded as an
+   * IMPRESSION_BATCH. Opt-in because `jobDetail` hydrates through here too, and
+   * opening one offer is a VIEW, not an impression of a feed.
+   */
   private async hydrateWorkerJobs(
     profileId: string,
     hits: { id: string; score: number }[],
+    impression?: { surface: string; requestId?: string; offset?: number },
   ) {
     const offers = (
       await Promise.all(hits.map((h) => this.jobOfferService.findById(h.id)))
@@ -516,12 +575,29 @@ export class MobileFeedController {
     const appliedSet = new Set(applied.map((a) => a.job_offer_id));
     const scoreById = new Map(hits.map((h) => [h.id, h.score]));
 
-    return offers.map((o) => ({
-      ...o,
+    const hydrated = offers.map((o) => ({
+      ...toWorkerJobShape(o),
       matchScore: scoreById.get(o.id) ?? 0,
       saved: savedSet.has(o.id),
       applied: appliedSet.has(o.id),
     }));
+
+    if (impression) {
+      void this.interactionEvents.recordImpressions({
+        actorId: profileId,
+        actorType: InteractionActor.WORKER,
+        objectType: InteractionObject.JOB_OFFER,
+        items: hydrated.map((o) => ({
+          objectId: o.id,
+          counterpartyId: o.employer_id,
+        })),
+        surface: impression.surface,
+        requestId: impression.requestId,
+        offset: impression.offset,
+      });
+    }
+
+    return hydrated;
   }
 
   @Get('job-offers')
@@ -579,7 +655,9 @@ export class MobileFeedController {
       throw new NotFoundException('Offre introuvable');
     }
     if (offer.employer_id !== profileId) {
-      throw new ForbiddenException("Vous n'êtes pas l'employeur de cette offre");
+      throw new ForbiddenException(
+        "Vous n'êtes pas l'employeur de cette offre",
+      );
     }
 
     return this.applicationService.findByJobOffer(id);
@@ -607,6 +685,30 @@ export class MobileFeedController {
     });
   }
 
+  @Post('job-offers/:id/confirm-hire')
+  @ApiOperation({
+    summary: '[Mobile/EMPLOYER] Confirm the hire on a CDD/CDI/STAGE offer',
+    description:
+      'Closes an offer whose positions are all taken, and opens the mutual rating. Only for ongoing engagements — a MISSION is closed by its worker confirming the work is done. Requires the offer to be FILLED, so an offer still taking candidates cannot be closed early. Idempotent once closed.',
+  })
+  @ApiResponse({ status: 200, description: 'Offer closed, rating open' })
+  @ApiResponse({
+    status: 400,
+    description: 'Still recruiting, or a MISSION',
+  })
+  @ApiResponse({ status: 403, description: 'Not an EMPLOYER / not the owner' })
+  @ApiResponse({ status: 404, description: 'Job offer not found' })
+  async confirmHire(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('id') id: string,
+  ) {
+    const profileId = req.user.profileId;
+    await this.assertProfileType(profileId, ProfileType.EMPLOYER);
+
+    await this.applicationService.confirmHireByEmployer(id, profileId);
+    return { success: true };
+  }
+
   @Delete('job-offers/:id')
   @ApiOperation({
     summary: '[Mobile/EMPLOYER] Delete one of my job offers',
@@ -614,7 +716,10 @@ export class MobileFeedController {
       'Soft-deletes a job offer owned by the authenticated employer. Only allowed while the offer is still ACTIVE with no candidates (no live applications) and no assignments.',
   })
   @ApiResponse({ status: 200, description: 'Job offer deleted' })
-  @ApiResponse({ status: 400, description: 'Offer has candidates or is engaged' })
+  @ApiResponse({
+    status: 400,
+    description: 'Offer has candidates or is engaged',
+  })
   @ApiResponse({ status: 403, description: 'Not an EMPLOYER / not the owner' })
   @ApiResponse({ status: 404, description: 'Job offer not found' })
   async deleteJobOffer(
@@ -688,11 +793,7 @@ export class MobileFeedController {
       ? (sort as JobSearchSort)
       : 'recent';
     if (key === 'soon') {
-      return [
-        { scheduled_at: 'asc' },
-        { created_at: 'desc' },
-        { id: 'asc' },
-      ];
+      return [{ scheduled_at: 'asc' }, { created_at: 'desc' }, { id: 'asc' }];
     }
     if (key === 'amount_desc') {
       return [

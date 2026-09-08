@@ -1,5 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { PollPaymentStatusProcessor } from '../poll-payment-status.processor';
+import { PaymentRequestType, PaymentStatus, PaymentType } from '@prisma/client';
+import {
+  PollPaymentStatusProcessor,
+  type PollPaymentStatusJobData,
+} from '../poll-payment-status.processor';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { PaymentGatewayService } from '../../../common/services/payment/payment-gateway.service';
 import { PaymentStatusGateway } from '../../ws-notifications/payment-status.gateway';
@@ -43,7 +47,7 @@ const mockPaymentRequestService = {
   processApprovedPaymentById: jest.fn().mockResolvedValue(undefined),
 };
 
-const baseJobData = {
+const baseJobData: PollPaymentStatusJobData = {
   requestId: 'req-1',
   token: 'tok-1',
   gatewayRef: 'gw-1',
@@ -54,7 +58,7 @@ const baseJobData = {
   amount: 5000,
   phone: '+242001',
   operator: 'MTN',
-  requestType: 'CONTACT_UNLOCK',
+  requestType: PaymentRequestType.CONTACT_UNLOCK,
   gateway: 'MONETBIL',
 };
 
@@ -155,6 +159,55 @@ describe('PollPaymentStatusProcessor', () => {
     expect(mockPaymentStatusGateway.emitPaymentStatus).toHaveBeenCalledWith(
       'tok-1',
       'TIMEOUT',
+    );
+  });
+
+  /**
+   * The bug this file did not catch.
+   *
+   * `recordFailure` open-coded `isContactType ? CONTACT_UNLOCK : PENALTY`, so a
+   * wallet recharge that failed at the gateway was written as a PENALTY — and
+   * shown to admins as an orange "Penalty" badge against a customer who had
+   * only tried to add credit. The mapping now comes from `resolvePaymentType`,
+   * which both failure paths share.
+   */
+  it.each([
+    [PaymentRequestType.WALLET_TOP_UP, PaymentType.WALLET_TOP_UP],
+    [PaymentRequestType.CONTACT_UNLOCK, PaymentType.CONTACT_UNLOCK],
+    [PaymentRequestType.RECOMMENDATION_CONTACT, PaymentType.CONTACT_UNLOCK],
+    [PaymentRequestType.PENALTY_BATCH, PaymentType.PENALTY],
+    [PaymentRequestType.PENALTY_RESOLUTION, PaymentType.PENALTY],
+  ])('records a failed %s as a %s payment', async (requestType, expected) => {
+    mockPaymentGateway.checkPaymentStatus.mockResolvedValueOnce({
+      status: 'FAILED',
+    });
+
+    await processor.process({ data: { ...baseJobData, requestType } });
+
+    expect(mockPrisma.payment.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          type: expected,
+          status: PaymentStatus.FAILED,
+        }),
+      }),
+    );
+  });
+
+  it('still records a penalty when the job carries no request type', async () => {
+    // Jobs queued before `requestType` existed deserialise without it, and a
+    // FAILED row with a stale type beats no row at all.
+    mockPaymentGateway.checkPaymentStatus.mockResolvedValueOnce({
+      status: 'FAILED',
+    });
+    const { requestType: _omitted, ...withoutType } = baseJobData;
+
+    await processor.process({ data: withoutType });
+
+    expect(mockPrisma.payment.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ type: PaymentType.PENALTY }),
+      }),
     );
   });
 

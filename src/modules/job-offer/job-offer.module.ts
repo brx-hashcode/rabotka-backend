@@ -11,7 +11,9 @@ import { WalletModule } from '../wallet/wallet.module';
 import { BotModule } from '../bot/bot.module';
 import { LogModule } from '../log/log.module';
 import { MatchingModule } from '../matching/matching.module';
-import { GeocodingModule } from '../../common/services/geocoding/geocoding.module';
+import { RecommendationEngineModule } from '../recommendation-engine/recommendation-engine.module';
+import { JobNotificationService } from './notification/job-notification.service';
+import { JobNotificationProcessor } from './notification/job-notification.processor';
 
 @Module({
   imports: [
@@ -24,10 +26,12 @@ import { GeocodingModule } from '../../common/services/geocoding/geocoding.modul
     WalletModule,
     LogModule,
     MatchingModule,
-    GeocodingModule,
+    // Only imports PrismaModule and SystemConfigModule, so this introduces no
+    // cycle with the forwardRef'd modules above.
+    RecommendationEngineModule,
   ],
   controllers: [AdminJobOfferController, JobOfferController],
-  providers: [JobOfferService],
+  providers: [JobOfferService, JobNotificationService, JobNotificationProcessor],
   exports: [JobOfferService],
 })
 export class JobOfferModule {}

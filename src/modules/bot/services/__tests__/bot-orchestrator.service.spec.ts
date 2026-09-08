@@ -23,6 +23,7 @@ import { PortfolioService } from '../../../portfolio/portfolio.service';
 import { QueueService } from '../../../../common/services/queue/queue.service';
 import { ConfigService } from '@nestjs/config';
 import { WHATSAPP_TEMPLATES } from '../../../../common/constants/whatsapp-templates';
+import { VovaService } from '../../../rag/vova.service';
 
 const PROFILE_ID = 'profile-uuid-1';
 const PHONE = '+242000000';
@@ -51,6 +52,9 @@ const mockEmployerProfile = {
 
 function makeDeps() {
   return {
+    // Null is "I did not answer this" — the assistant's default state, and what
+    // every expectation in this file assumes.
+    vova: { handle: jest.fn().mockResolvedValue(null) },
     prisma: {
       $transaction: jest.fn().mockResolvedValue([]),
       profile: {
@@ -256,6 +260,12 @@ describe('BotOrchestratorService', () => {
           provide: ConfigService,
           useValue: { get: jest.fn().mockReturnValue('https://rabotka.work') },
         },
+        {
+          // Null is "I did not answer this" — the default state of the
+          // assistant, and what every existing expectation below assumes.
+          provide: VovaService,
+          useValue: deps.vova,
+        },
       ],
     }).compile();
 
@@ -267,12 +277,19 @@ describe('BotOrchestratorService', () => {
       deps.prisma.profile.findUnique.mockResolvedValue(null);
       const result = await service.handle(PROFILE_ID, PHONE, 'Menu');
       expect(result).toHaveLength(1);
-      // Asserted against the registry, not a literal: a hardcoded SID passes
-      // happily while the wrong template goes out, which is exactly how the
-      // old text-only welcome survived the switch to the card.
+      // The card now goes out FREE-FORM — it is a reply, so it is inside the
+      // 24h window where that costs nothing, while its MARKETING template was
+      // billed. What must still hold is that the UNREGISTERED card is the one
+      // sent, so the assertion moved to the fallback the reply carries rather
+      // than being dropped: a hardcoded SID passes happily while the wrong
+      // card goes out, which is how the old text-only welcome survived the
+      // switch to this one.
+      expect(result[0]).toContain('[CTA:]');
       expect(result[0]).toContain(
-        `[TPL:${WHATSAPP_TEMPLATES.welcomeUnregisteredCard.contentSid}]`,
+        '"fallbackTemplate":"welcomeUnregisteredCard"',
       );
+      // And it points at onboarding, not at the app: there is no account yet.
+      expect(result[0]).toContain('"path":"onboarding"');
     });
 
     it('returns INACTIVE_MESSAGE when account is not ACTIVE', async () => {
@@ -302,6 +319,94 @@ describe('BotOrchestratorService', () => {
         'bonjour le monde',
       );
       expect(result).toEqual([welcomePlatformMessage()]);
+    });
+
+    // The menu vocabulary must never reach a model. `BotRouterService` returns
+    // `unknown` for everything when no flow is live, so these land on the same
+    // fall-through the assistant sits on — and the one command every template
+    // tells users to type cannot depend on a provider being up.
+    it.each(['menu', 'start', '/', 'payer'])(
+      'answers "%s" itself, without consulting the assistant',
+      async (input) => {
+        deps.router.route.mockReturnValue({ type: 'unknown' });
+        deps.vova.handle.mockClear();
+
+        const result = await service.handle(PROFILE_ID, PHONE, input);
+
+        expect(deps.vova.handle).not.toHaveBeenCalled();
+        expect(result).toEqual([welcomePlatformMessage()]);
+      },
+    );
+
+    // « bonjour » is not a command, it is somebody saying hello. It used to be
+    // answered with the platform card; the assistant now introduces itself and
+    // asks what they need, which is what a person would do.
+    it('sends a bare greeting to the assistant', async () => {
+      deps.router.route.mockReturnValue({ type: 'unknown' });
+      deps.vova.handle.mockClear();
+      deps.vova.handle.mockResolvedValue([
+        'Bonjour ! Je suis *VoVa AI*, l’assistant de Rabotka.',
+      ]);
+
+      const result = await service.handle(PROFILE_ID, PHONE, 'bonjour');
+
+      expect(deps.vova.handle).toHaveBeenCalled();
+      expect(result[0]).toContain('VoVa AI');
+    });
+
+    it('still answers a greeting with the card when the assistant declines', async () => {
+      deps.router.route.mockReturnValue({ type: 'unknown' });
+      deps.vova.handle.mockClear();
+      deps.vova.handle.mockResolvedValue(null);
+
+      const result = await service.handle(PROFILE_ID, PHONE, 'bonjour');
+
+      expect(result).toEqual([welcomePlatformMessage()]);
+    });
+
+    // `aide` is in CMD_SUPPORT, and `handle()` answers it with the support card
+    // before routing — deterministic regardless of the gate below it.
+    it('answers "aide" with support, before any routing', async () => {
+      deps.router.route.mockReturnValue({ type: 'unknown' });
+      deps.vova.handle.mockClear();
+
+      await service.handle(PROFILE_ID, PHONE, 'aide');
+
+      expect(deps.vova.handle).not.toHaveBeenCalled();
+    });
+
+    // The landing page's WhatsApp CTA opens with a greeting and then states an
+    // intent. That message is the product's front door, not a menu command.
+    it.each([
+      'Bonjour Rabotka, je cherche une opportunité ou un profil adapté.',
+      'Bonjour, je cherche une mission',
+      'Bonjour, je cherche un travailleur',
+      'bonjour comment ça marche ?',
+    ])('hands "%s" to the assistant', async (input) => {
+      deps.router.route.mockReturnValue({ type: 'unknown' });
+      deps.vova.handle.mockClear();
+
+      await service.handle(PROFILE_ID, PHONE, input);
+
+      expect(deps.vova.handle).toHaveBeenCalledTimes(1);
+    });
+
+    it('hands genuinely free-form input to the assistant', async () => {
+      deps.router.route.mockReturnValue({ type: 'unknown' });
+      deps.vova.handle.mockClear();
+
+      await service.handle(PROFILE_ID, PHONE, "j'ai un problème");
+
+      expect(deps.vova.handle).toHaveBeenCalledTimes(1);
+    });
+
+    it('sends the assistant reply when it answers', async () => {
+      deps.router.route.mockReturnValue({ type: 'unknown' });
+      deps.vova.handle.mockResolvedValueOnce(['réponse de Vova']);
+
+      const result = await service.handle(PROFILE_ID, PHONE, 'une question');
+
+      expect(result).toEqual(['réponse de Vova']);
     });
 
     it('answers the welcome card when the input looks like flow input but no flow is live', async () => {
@@ -453,13 +558,81 @@ describe('BotOrchestratorService', () => {
   });
 
   describe('handle() — SUSPENDED profile', () => {
-    it('returns accountSuspendedBotMessage for SUSPENDED account', async () => {
-      deps.prisma.profile.findUnique.mockResolvedValue({
-        ...mockActiveProfile,
-        status: 'SUSPENDED',
-      });
-      const result = await service.handle(PROFILE_ID, PHONE, 'Menu');
-      expect(result[0]).toContain('suspendu');
+    const suspendedProfile = {
+      ...mockActiveProfile,
+      status: 'SUSPENDED',
+      suspension_reason: 'Comportement signalé',
+    };
+
+    // The card, not the old support message: it carries the reason AND a button
+    // into the app, which is what makes « tapez /start » a door rather than a
+    // loop back to the same reply.
+    it.each(['Menu', 'start', 'payer'])(
+      'answers "%s" with the door card, without consulting the assistant',
+      async (input) => {
+        deps.prisma.profile.findUnique.mockResolvedValue(suspendedProfile);
+        deps.vova.handle.mockClear();
+
+        const result = await service.handle(PROFILE_ID, PHONE, input);
+
+        expect(deps.vova.handle).not.toHaveBeenCalled();
+        expect(result[0]).toContain('[TPL:openApp]');
+      },
+    );
+
+    // A suspended account is not a closed one — it could ask nothing at all
+    // before this, every message returning the same support card.
+    it('hands free text to the assistant', async () => {
+      deps.prisma.profile.findUnique.mockResolvedValue(suspendedProfile);
+      deps.vova.handle.mockClear();
+      deps.vova.handle.mockResolvedValue(['réponse de Vova']);
+
+      const result = await service.handle(
+        PROFILE_ID,
+        PHONE,
+        'pourquoi mon compte est suspendu ?',
+      );
+
+      expect(deps.vova.handle).toHaveBeenCalledTimes(1);
+      // The card now FOLLOWS the answer instead of only replacing it: the
+      // prompt used to close with « tapez */start* », so the door was already
+      // offered on every reply — it is now a button at the same frequency.
+      expect(result[0]).toBe('réponse de Vova');
+      expect(result).toHaveLength(2);
+      expect(result[1]).toContain('openApp');
+    });
+
+    it('falls back to the door card when the assistant declines', async () => {
+      deps.prisma.profile.findUnique.mockResolvedValue(suspendedProfile);
+      deps.vova.handle.mockResolvedValue(null);
+
+      const result = await service.handle(PROFILE_ID, PHONE, 'une question');
+
+      expect(result[0]).toContain('[TPL:openApp]');
+    });
+
+    // The assistant must not offer to apply or publish to someone who cannot,
+    // so it is told the account status rather than left to infer it.
+    it('tells the assistant the account is suspended', async () => {
+      deps.prisma.profile.findUnique.mockResolvedValue(suspendedProfile);
+      deps.vova.handle.mockClear();
+
+      await service.handle(PROFILE_ID, PHONE, 'une question');
+
+      expect(deps.vova.handle).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'SUSPENDED' }),
+        'une question',
+      );
+    });
+
+    // Intercepted above the suspension branch, in every account state.
+    it('still answers /support with the contacts, not the assistant', async () => {
+      deps.prisma.profile.findUnique.mockResolvedValue(suspendedProfile);
+      deps.vova.handle.mockClear();
+
+      await service.handle(PROFILE_ID, PHONE, 'support');
+
+      expect(deps.vova.handle).not.toHaveBeenCalled();
     });
   });
 
@@ -472,20 +645,130 @@ describe('BotOrchestratorService', () => {
       verification_status: 'VERIFIED',
     };
 
-    it('answers any input with the KYC-pending template while under review', async () => {
-      // One template with a "Gérer mon profil" button replaces the old typed
-      // 1/2 menu — whose options each only returned a webview template anyway.
-      for (const input of ['menu', 'start', 'bonjour', '1', '2', '7']) {
+    /**
+     * Activation, specifically — not "no write at all". Every bot message now
+     * also stamps `last_login_at`, so a bare `update` call no longer means the
+     * account was activated and asserting on one would pass for the wrong
+     * reason.
+     */
+    const activationWrites = () =>
+      deps.prisma.profile.update.mock.calls.filter(
+        (c: [{ data?: Record<string, unknown> }]) =>
+          c[0]?.data?.whatsapp_connected !== undefined ||
+          c[0]?.data?.status !== undefined,
+      );
+
+    // The deterministic half. One template with a "Gérer mon profil" button
+    // replaces the old typed 1/2 menu — whose options each only returned a
+    // webview template anyway — and the words templates print must not wait on
+    // a model.
+    it.each(['menu', 'start', 'payer'])(
+      'answers "%s" itself while under review, without consulting the assistant',
+      async (input) => {
         deps.prisma.profile.findUnique.mockResolvedValue({
           ...pendingProfile,
           verification_status: 'PENDING',
         });
+        deps.vova.handle.mockClear();
+
         const result = await service.handle(PROFILE_ID, PHONE, input);
-        expect(result[0]).toContain(
-          `[TPL:${WHATSAPP_TEMPLATES.kycPendingMenu.contentSid}]`,
-        );
-      }
-      expect(deps.prisma.profile.update).not.toHaveBeenCalled();
+
+        expect(deps.vova.handle).not.toHaveBeenCalled();
+        expect(result[0]).toContain('[TPL:openApp]');
+        expect(activationWrites()).toHaveLength(0);
+      },
+    );
+
+    // The half that never ran. A profile under review returned its card before
+    // `routeMessage`, the only caller of the assistant — so the PENDING branch
+    // written into the system prompt (« ne lui promets ni résultat ni délai »)
+    // was unreachable for the exact people it was written for, and « j'ai un
+    // problème » was answered with a button.
+    it.each(['bonjour', '1', '2', '7', "j'ai un problème"])(
+      'hands "%s" to the assistant while under review',
+      async (input) => {
+        deps.prisma.profile.findUnique.mockResolvedValue({
+          ...pendingProfile,
+          verification_status: 'PENDING',
+        });
+        deps.vova.handle.mockClear();
+        deps.vova.handle.mockResolvedValue(['réponse de Vova']);
+
+        const result = await service.handle(PROFILE_ID, PHONE, input);
+
+        expect(deps.vova.handle).toHaveBeenCalledTimes(1);
+        // The answer, then the door. The card follows the assistant rather
+        // than replacing it — the prompt used to close with « tapez */start* »,
+        // so the door was already offered on every reply.
+        expect(result[0]).toBe('réponse de Vova');
+        expect(result).toHaveLength(2);
+        expect(result[1]).toContain('openApp');
+        expect(activationWrites()).toHaveLength(0);
+      },
+    );
+
+    // The assistant is a first refusal, never the owner of the reply: every one
+    // of its failures returns null on its side, so the card has to survive it
+    // being down.
+    it('falls back to the door card when the assistant declines', async () => {
+      deps.prisma.profile.findUnique.mockResolvedValue({
+        ...pendingProfile,
+        verification_status: 'PENDING',
+      });
+      deps.vova.handle.mockClear();
+      deps.vova.handle.mockResolvedValue(null);
+
+      const result = await service.handle(
+        PROFILE_ID,
+        PHONE,
+        "j'ai un problème",
+      );
+
+      expect(deps.vova.handle).toHaveBeenCalledTimes(1);
+      expect(result[0]).toContain('[TPL:openApp]');
+      expect(activationWrites()).toHaveLength(0);
+    });
+
+    // The prompt carries a REJECTED branch too — a refusal closes the
+    // verification, not the account — and it was unreachable for the same
+    // reason.
+    it('hands free text to the assistant when the verification was refused', async () => {
+      deps.prisma.profile.findUnique.mockResolvedValue({
+        ...pendingProfile,
+        verification_status: 'REJECTED',
+      });
+      deps.vova.handle.mockClear();
+      deps.vova.handle.mockResolvedValue(['réponse de Vova']);
+
+      const result = await service.handle(
+        PROFILE_ID,
+        PHONE,
+        'pourquoi mon dossier a été refusé ?',
+      );
+
+      expect(deps.vova.handle).toHaveBeenCalledTimes(1);
+      // The card now FOLLOWS the answer instead of only replacing it: the
+      // prompt used to close with « tapez */start* », so the door was already
+      // offered on every reply — it is now a button at the same frequency.
+      expect(result[0]).toBe('réponse de Vova');
+      expect(result).toHaveLength(2);
+      expect(result[1]).toContain('openApp');
+      expect(activationWrites()).toHaveLength(0);
+    });
+
+    it('passes the verification status to the assistant, which branches on it', async () => {
+      deps.prisma.profile.findUnique.mockResolvedValue({
+        ...pendingProfile,
+        verification_status: 'PENDING',
+      });
+      deps.vova.handle.mockClear();
+
+      await service.handle(PROFILE_ID, PHONE, "j'ai un problème");
+
+      expect(deps.vova.handle).toHaveBeenCalledWith(
+        expect.objectContaining({ verification_status: 'PENDING' }),
+        "j'ai un problème",
+      );
     });
 
     it('no longer asks the user to reply with a number', async () => {
@@ -505,17 +788,25 @@ describe('BotOrchestratorService', () => {
       });
       await service.handle(PROFILE_ID, PHONE, '1');
       await service.handle(PROFILE_ID, PHONE, 'menu');
-      expect(deps.prisma.profile.update).not.toHaveBeenCalled();
+      expect(activationWrites()).toHaveLength(0);
     });
 
-    it('returns KYC rejected message when PENDING_ACTIVATION and verification_status is REJECTED', async () => {
+    // The refusal card, not the old bare string: it carries the admin's reason
+    // and a button onto the claim form. The template had said more than the
+    // string for two versions; the bot simply never used it.
+    it('answers "menu" with the door card when the verification was refused', async () => {
       deps.prisma.profile.findUnique.mockResolvedValue({
         ...pendingProfile,
         verification_status: 'REJECTED',
+        rejection_reason: 'Pièce illisible',
       });
+      deps.vova.handle.mockClear();
+
       const result = await service.handle(PROFILE_ID, PHONE, 'menu');
-      expect(result[0]).toContain('refusée');
-      expect(deps.prisma.profile.update).not.toHaveBeenCalled();
+
+      expect(deps.vova.handle).not.toHaveBeenCalled();
+      expect(result[0]).toContain('[TPL:openApp]');
+      expect(activationWrites()).toHaveLength(0);
     });
 
     it('returns KYC prompt when PENDING_ACTIVATION (verified)', async () => {
@@ -542,6 +833,37 @@ describe('BotOrchestratorService', () => {
       expect(Array.isArray(result)).toBe(true);
     });
 
+    /**
+     * `start` is the documented entry point, so it must do everything `menu`
+     * does. It reaches this branch through CMD_MENU rather than a case of its
+     * own — before that it only worked by falling through to the welcome card,
+     * which does not activate anything.
+     */
+    it.each(['start', 'démarrer', 'demarrer', 'commencer'])(
+      'activates a KYC-verified account when the user types %s',
+      async (input) => {
+        deps.prisma.profile.findUnique.mockResolvedValue(pendingProfile);
+        (deps.walletService2 as any).grantWelcomeCredit = jest
+          .fn()
+          .mockResolvedValue(500);
+        deps.router.route.mockReturnValue({
+          type: 'command',
+          commandId: 'menu',
+        });
+
+        await service.handle(PROFILE_ID, PHONE, input);
+
+        expect(deps.prisma.profile.update).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              whatsapp_connected: true,
+              status: 'ACTIVE',
+            }),
+          }),
+        );
+      },
+    );
+
     it('does not double-grant credit when bonus already granted', async () => {
       deps.prisma.profile.findUnique.mockResolvedValue({
         ...pendingProfile,
@@ -557,6 +879,51 @@ describe('BotOrchestratorService', () => {
         PROFILE_ID,
         pendingProfile.profile_type,
       );
+    });
+
+    /**
+     * The shape signup now produces: the number is linked from the first
+     * write, but the account is not activated. The KYC wall keys on `status`,
+     * so it must still hold for a profile whose flag is already true —
+     * otherwise a profile under review walks into the full menu.
+     */
+    describe('whatsapp_connected=true but PENDING_ACTIVATION (post-signup shape)', () => {
+      const signedUpProfile = { ...pendingProfile, whatsapp_connected: true };
+
+      it('still answers with the KYC-pending template while under review', async () => {
+        deps.prisma.profile.findUnique.mockResolvedValue({
+          ...signedUpProfile,
+          verification_status: 'PENDING',
+        });
+        const result = await service.handle(PROFILE_ID, PHONE, 'menu');
+        expect(result[0]).toContain('[TPL:openApp]');
+        expect(activationWrites()).toHaveLength(0);
+      });
+
+      it('never falls into the inline code prompt', async () => {
+        deps.prisma.profile.findUnique.mockResolvedValue(signedUpProfile);
+        await service.handle(PROFILE_ID, PHONE, 'hello');
+        expect(deps.prisma.verificationToken.create).not.toHaveBeenCalled();
+      });
+
+      it('activates on Menu once KYC is verified', async () => {
+        deps.prisma.profile.findUnique.mockResolvedValue(signedUpProfile);
+        (deps.walletService2 as any).grantWelcomeCredit = jest
+          .fn()
+          .mockResolvedValue(500);
+        deps.router.route.mockReturnValue({
+          type: 'command',
+          commandId: 'menu',
+        });
+
+        await service.handle(PROFILE_ID, PHONE, 'menu');
+
+        expect(deps.prisma.profile.update).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ status: 'ACTIVE' }),
+          }),
+        );
+      });
     });
 
     it('issues an inline 4-digit code when ACTIVE profile has whatsapp_connected=false', async () => {
@@ -661,7 +1028,7 @@ describe('BotOrchestratorService', () => {
       deps.prisma.jobOffer = {
         findMany: jest.fn().mockResolvedValue([]),
         findFirst: jest.fn().mockResolvedValue(null),
-      } as any;
+      };
       const result = await service.handle(PROFILE_ID, PHONE, '1');
       expect(Array.isArray(result)).toBe(true);
     });
@@ -941,7 +1308,7 @@ describe('BotOrchestratorService', () => {
       deps.prisma.jobOffer = {
         findMany: jest.fn().mockResolvedValue([]),
         findFirst: jest.fn().mockResolvedValue(null),
-      } as any;
+      };
       const result = await service.handle(PROFILE_ID, PHONE, '1');
       expect(Array.isArray(result)).toBe(true);
     });
@@ -1048,5 +1415,4 @@ describe('BotOrchestratorService', () => {
       expect(result).toEqual([welcomePlatformMessage()]);
     });
   });
-
 });

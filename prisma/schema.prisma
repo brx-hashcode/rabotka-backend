@@ -50,9 +50,32 @@ enum DeliveryChannel {
   ALL
 }
 
+/// How often an EventSeries repeats. Deliberately no INTERVAL companion: the
+/// form offers presets only, and RFC 5545 treats a missing INTERVAL as 1, so
+/// these map straight onto RRULE FREQ values.
+enum RecurrenceFrequency {
+  DAILY
+  WEEKLY
+  MONTHLY
+  YEARLY
+}
+
 enum MessageDirection {
   INBOUND
   OUTBOUND
+}
+
+/// Lifecycle of one outbound WhatsApp message.
+///
+/// ORDERED. Meta batches status webhooks and does not guarantee their order, so
+/// a `sent` can land after a `read`; `applyStatus` only ever moves a row
+/// forward through this list. FAILED is terminal and outranks everything.
+enum WhatsappDeliveryStatus {
+  QUEUED
+  SENT
+  DELIVERED
+  READ
+  FAILED
 }
 
 enum ConversationStatus {
@@ -72,14 +95,23 @@ enum DocumentType {
   IDENTITY_CARD
   PASSPORT
   DRIVER_LICENSE
-  BIRTH_CERTIFICATE
-  STUDENT_CARD
   NIU_CARD
-  OTHER
 }
 
+/// Which file of a KYC submission a row holds: DOCUMENT is the FRONT of the
+/// identity document, DOCUMENT_BACK the back, SELFIE the applicant holding it.
+/// One row per category per profile, enforced by KycDocument's
+/// unique([profile_id, document_category]).
+///
+/// PASSPORT submissions have no DOCUMENT_BACK row -- a passport carries all its
+/// data on the photo page. Every other DocumentType requires all three.
+///
+/// Declaration order is the sort order (hence the matching `AFTER 'DOCUMENT'`
+/// in the migration that added it), so `orderBy: { document_category: 'asc' }`
+/// yields front -> back -> selfie for the admin review grid.
 enum KycDocumentCategory {
   DOCUMENT
+  DOCUMENT_BACK
   SELFIE
 }
 
@@ -151,6 +183,23 @@ enum PaymentFlow {
   MONTHLY
 }
 
+/// What kind of engagement an offer is.
+///
+/// Named EmploymentType rather than ContractType because `Contract` already
+/// means the generated PDF agreement attached to an application — two meanings
+/// for one word is how PaymentFlow/payment_flow drifted.
+///
+/// MISSION is the one-off gig Rabotka started with and remains the default, so
+/// every offer that predates this enum keeps exactly its current semantics. It
+/// is also the only type that requires a date, and the only one that can be
+/// completed: a CDI is never "terminated" the way a gig is.
+enum EmploymentType {
+  MISSION
+  CDD
+  CDI
+  STAGE
+}
+
 enum WalletOwnerType {
   SYSTEM
   USER
@@ -172,6 +221,36 @@ enum WalletTransactionType {
   MOBILE_MONEY_CREDIT
   MOBILE_MONEY_WITHDRAWAL
   TOP_UP_CREDIT
+  REFERRAL_CREDIT
+}
+
+/// Lifecycle of one referral. Four of the five states mean "no money moved",
+/// which is why this is a status and not a boolean: an admin asked "why wasn't
+/// my friend's parrainage paid?" needs to distinguish "not yet" from "referrer
+/// unverified" from "over the cap" from "the payment was too small to fund it".
+enum ReferralStatus {
+  /// Relationship recorded at signup. The referee has not yet made a
+  /// qualifying payment.
+  PENDING
+  /// The referee paid, but the referrer was not ACTIVE+VERIFIED at that
+  /// moment. Settles later, when their KYC is approved.
+  QUALIFIED_ON_HOLD
+  /// Both sides credited. Terminal.
+  REWARDED
+  /// The referee paid, but nothing was owed: the referrer is over the cap, or
+  /// the payout would have exceeded the payment that triggered it. Terminal,
+  /// and deliberately distinct from FORFEITED — nobody did anything wrong.
+  CAPPED
+  /// Terminal non-payment: the referrer was deleted or banned, or the hold
+  /// expired before their KYC was approved.
+  FORFEITED
+}
+
+enum ReferralSource {
+  LINK
+  MANUAL_CODE
+  BOT
+  ADMIN
 }
 
 enum ContactUnlockStatus {
@@ -248,6 +327,10 @@ enum InteractionKind {
   SEARCH_CLICK
   SAVE
   UNSAVE
+  // An employer publishing an offer. Their most deliberate statement of which
+  // sector they hire in — repeated, and costly to make — where the categories
+  // ticked once at signup are neither.
+  PUBLISH
   // Commitment
   APPLY
   APPLY_CANCEL
@@ -270,7 +353,6 @@ enum InteractionKind {
 
 /**
  * How an employer's REJECTED decision came about.
- *
  * Without this, a bulk auto-reject (offer filled up, so everyone still pending is
  * closed out) is indistinguishable from an employer actively turning someone
  * down. The recommender reads repeated rejections in a category as "this worker
@@ -282,7 +364,9 @@ enum RejectionSource {
   AUTO_FILL
 }
 
-/** Which way a rating points. Previously only derivable by joining assignments. */
+/**
+ * Which way a rating points. Previously only derivable by joining assignments.
+ */
 enum RatingDirection {
   EMPLOYER_TO_WORKER
   WORKER_TO_EMPLOYER
@@ -309,8 +393,25 @@ model Profile {
   first_name                        String
   last_name                         String
   phone                             String             @unique
+  /// A second number to be reached on, when the WhatsApp number is not one the
+  /// person actually answers calls on — a shared handset, a business line, a
+  /// number that only runs WhatsApp over data.
+  ///
+  /// Deliberately NOT unique and deliberately nullable, unlike `phone`. This is
+  /// never a login identity: nothing authenticates against it, no OTP is sent
+  /// to it, and a household or a company switchboard shared by two profiles
+  /// must not make the second signup fail. Optional at every layer for the same
+  /// reason — most people have only one number.
+  direct_phone                      String?
   email                             String             @unique
   address                           String
+  /// ISO 3166-1 alpha-2. What the ranker and the coming filters compare —
+  /// stable and case-safe, unlike the display name beside it.
+  country_code                      String?            @db.VarChar(2)
+  /// Denormalised so admin and the profile page can render a country without
+  /// carrying the reference list.
+  country_name                      String?
+  city                              String?
   latitude                          Float?
   longitude                         Float?
   description                       String             @db.Text
@@ -331,12 +432,33 @@ model Profile {
   rejection_reason                  String?
   /// Admin note from the latest KYC verify action (approve or reject).
   kyc_verification_note             String?            @db.Text
+  /// Why the account was suspended. Cleared when it leaves SUSPENDED, so it
+  /// always describes the CURRENT suspension rather than the last one ever.
+  suspension_reason                 String?            @db.Text
+  suspended_at                      DateTime?
   read_and_approved_policies        Boolean            @default(false)
   first_login                       Boolean            @default(true)
+  /// First time the account became usable. Distinct from `last_login_at`:
+  /// activating mints no session, so it is not a sign-in. Written once, by
+  /// whichever activation path gets there first, and never overwritten.
+  activated_at                      DateTime?
+  /// Last authenticated interaction: web OTP, mobile OTP, or any bot message —
+  /// a WhatsApp message arrives from a verified number, which is the same proof
+  /// the OTP flow establishes. Refresh-token rotation does NOT move it.
+  /// Throttled by `LOGIN_STAMP_THROTTLE_MS`, so it is accurate to the minute
+  /// rather than the message.
+  last_login_at                     DateTime?
 
   avatar_url        String?
   vector_indexed_at DateTime?
   portfolio_slug    String?   @unique
+
+  /// Short, human-dictatable parrainage code. Minted lazily on first request
+  /// like `portfolio_slug` — see ReferralService.ensureReferralCode — so NULL
+  /// means "never asked for one", not "not eligible". There is deliberately no
+  /// `referred_by_id` beside it: Referral.referee_id is unique and answers that
+  /// in one place, and a second copy is a second thing that can disagree.
+  referral_code String? @unique
 
   category   JobCategory?      @relation(fields: [category_id], references: [id], onDelete: SetNull)
   categories ProfileCategory[]
@@ -350,6 +472,7 @@ model Profile {
   payments                        Payment[]
   conversations                   Conversation[]
   messages                        Message[]
+  whatsapp_messages               WhatsappMessage[]
   logs                            Log[]
   files                           File[]
   wallets                         Wallet[]
@@ -365,11 +488,15 @@ model Profile {
   invoices                        Invoice[]
   ad_delivery_logs                AdDeliveryLog[]
   ratings_given                   Rating[]                      @relation("RatingRater")
+  feedback                        Feedback[]
   ratings_received                Rating[]                      @relation("RatingRatee")
   portfolio_items                 PortfolioItem[]
   saved_jobs                      SavedJob[]
   interaction_events              InteractionEvent[]            @relation("InteractionActor")
   interaction_profile             InteractionProfile?
+  referrals_made                  Referral[]                    @relation("ReferralReferrer")
+  referral_received               Referral?                     @relation("ReferralReferee")
+  oauth_authorizations            OAuthAuthorization[]
   deleted_at                      DateTime?                     @db.Timestamptz
 
   @@index([email], name: "idx_profile_email")
@@ -379,6 +506,7 @@ model Profile {
   @@index([reliability_score], name: "idx_profile_reliability")
   @@index([category_id], name: "idx_profile_category")
   @@index([deleted_at], name: "idx_profile_deleted_at")
+  @@index([country_code, city], name: "idx_profile_country_city")
   @@map("profiles")
 }
 
@@ -397,20 +525,23 @@ model User {
   totp_secret     String?
   totp_enabled    Boolean   @default(false)
 
-  files           File[]
-  logs            Log[]
-  wallets         Wallet[]
-  sent_messages   Message[]
-  claims_assigned Claim[]        @relation("ClaimAssignedUser")
-  claims_created  Claim[]        @relation("ClaimCreatedByUser")
-  claim_comments  ClaimComment[] @relation("ClaimCommentUser")
-  events_created  Event[]        @relation("EventCreatedBy")
-  events          Event[]        @relation("EventAssignedUsers")
-  deleted_at      DateTime?      @db.Timestamptz
+  files                  File[]
+  logs                   Log[]
+  wallets                Wallet[]
+  sent_messages          Message[]
+  sent_whatsapp_messages WhatsappMessage[]
+  claims_assigned        Claim[]           @relation("ClaimAssignedUser")
+  claims_assigned_by     Claim[]           @relation("ClaimAssignedByUser")
+  claims_created         Claim[]           @relation("ClaimCreatedByUser")
+  claim_comments         ClaimComment[]    @relation("ClaimCommentUser")
+  events_created         Event[]           @relation("EventCreatedBy")
+  events                 Event[]           @relation("EventAssignedUsers")
+  deleted_at             DateTime?         @db.Timestamptz
 
   chat_participants  ChatParticipant[]
   chat_messages      ChatMessage[]
   chat_conversations ChatConversation[] @relation("ChatConversationCreatedBy")
+  oauth_apps_created OAuthApp[]         @relation("OAuthAppCreatedBy")
 
   @@index([email], name: "idx_user_email")
   @@index([role], name: "idx_user_role")
@@ -445,6 +576,11 @@ model KycVerificationImage {
   created_at  DateTime @default(now())
   profile_id  String   @db.Uuid
   image_url   String
+  /// Object key in the PRIVATE kyc bucket, so the image can be served through
+  /// a time-limited signed url. Nullable because every row written before the
+  /// bucket split has only `image_url`, pointing at the public bucket; the
+  /// backfill fills these in.
+  storage_key String?
   uploaded_by String?  @db.Uuid
 
   profile Profile @relation(fields: [profile_id], references: [id], onDelete: Cascade)
@@ -524,13 +660,11 @@ model SavedJob {
 
 /**
  * Append-only behavioural log — the durable source of truth for recommendations.
- *
  * Signals previously lived only in Qdrant, keyed `sha256(user__job__type)`, so a
  * second view OVERWROTE the first: interaction frequency and recency-of-Nth-view
  * were physically unrecoverable, and a Qdrant wipe erased all learned state with
  * no replay path. Postgres owns the history now; Qdrant and Redis hold only
  * derived, rebuildable projections.
- *
  * Polymorphic on both ends because the subject can be a worker or an employer and
  * the object can be an offer, a profile, a portfolio or a search.
  */
@@ -578,18 +712,17 @@ model InteractionEvent {
 /**
  * Derived per-profile preference features, rebuildable from InteractionEvent at
  * any time.
- *
  * Lives in Postgres rather than Redis on purpose: the SQL-only fallback tier has
  * to read these when embeddings are disabled (`matching.use_embeddings` defaults
  * to false) or Qdrant is unavailable. That tier is what keeps two identical
  * profiles from getting identical feeds when the vector stack is off.
  */
 model InteractionProfile {
-  profile_id  String   @id @db.Uuid
-  updated_at  DateTime @updatedAt
-  event_count Int      @default(0)
+  profile_id     String    @id @db.Uuid
+  updated_at     DateTime  @updatedAt
+  event_count    Int       @default(0)
   /// Drives the cold→warm→hot weight interpolation.
-  positive_count Int   @default(0)
+  positive_count Int       @default(0)
   last_event_at  DateTime?
 
   /// { categoryId: 0..1 }
@@ -622,10 +755,33 @@ model JobOffer {
   reference               String         @unique
   title                   String
   description             String         @db.Text
-  scheduled_at            DateTime
+  employment_type         EmploymentType @default(MISSION)
+  /// When the offer CLOSES — the point after which it stops accepting
+  /// applications. Shown as «Date de clôture».
+  ///
+  /// Null only for CDI/CDD/STAGE: a permanent role has no single hour, while a
+  /// MISSION still requires one. Null means the offer never expires on a date,
+  /// so `expireEmptyOverdueOffers` falls back to created_at + 30 days — without
+  /// that it would sit ACTIVE forever, since expiry is the only thing that ever
+  /// retires an offer.
+  ///
+  /// The column keeps its old name while the meaning has moved; renaming it to
+  /// `closes_at` touches ~50 call sites and is deliberately a separate change.
+  scheduled_at            DateTime?
   amount                  Decimal?       @db.Decimal(10, 2)
   payment_flow            PaymentFlow?
-  address                 String
+  /// Null for a remote job, which has no site to travel to. Everything that
+  /// renders it must handle that rather than printing an empty line.
+  address                 String?
+  /// A job done from anywhere. Suppresses the whole location block in the UI
+  /// and removes distance from its ranking entirely.
+  is_remote               Boolean        @default(false)
+  /// ISO 3166-1 alpha-2. Set from the employer's own location at creation
+  /// unless the offer declares its own — a job is usually, but not always,
+  /// where the person posting it is.
+  country_code            String?        @db.VarChar(2)
+  country_name            String?
+  city                    String?
   latitude                Float?
   longitude               Float?
   note                    String?
@@ -648,6 +804,7 @@ model JobOffer {
   @@index([scheduled_at], name: "idx_job_offer_scheduled")
   @@index([category_id], name: "idx_job_offer_category")
   @@index([deleted_at], name: "idx_job_offer_deleted_at")
+  @@index([country_code, city], name: "idx_job_offer_country_city")
   @@map("job_offers")
 }
 
@@ -665,8 +822,8 @@ model Application {
 
   /// Set when an employer accepts. `updated_at` is overwritten by every later
   /// transition, so it can't stand in for the decision moment.
-  accepted_at DateTime?
-  rejected_at DateTime?
+  accepted_at      DateTime?
+  rejected_at      DateTime?
   /// EMPLOYER (an actual decision) vs AUTO_FILL (offer filled, pending closed out).
   /// Only EMPLOYER may be treated as a negative preference signal.
   rejection_source RejectionSource?
@@ -832,6 +989,56 @@ model WalletTransaction {
   @@map("wallet_transactions")
 }
 
+/// One parrainage relationship: who invited whom, and what came of it.
+///
+/// The row is created at signup and pays nothing. Settlement happens later,
+/// when the referee makes their first mobile-money payment for a connection —
+/// see ReferralService.settleForReferee. `status` is the idempotency target for
+/// that payout, the way `whatsapp_activation_bonus_granted` is for the welcome
+/// credit: a conditional updateMany claims it, and a second caller finds
+/// nothing to claim.
+model Referral {
+  id          String         @id @default(uuid()) @db.Uuid
+  created_at  DateTime       @default(now())
+  updated_at  DateTime       @updatedAt
+  referrer_id String         @db.Uuid
+  /// UNIQUE: a profile is referred at most once, ever, and only at signup.
+  /// This is what makes "who referred X" unambiguous at the database level
+  /// rather than by convention, and it removes the need for a `referred_by_id`
+  /// column on Profile that could drift from it.
+  referee_id  String         @unique @db.Uuid
+  /// The code as it was actually typed or followed, snapshotted. Codes are
+  /// stable today; the admin answer to "where did this signup come from" must
+  /// not depend on that staying true.
+  code_used   String
+  source      ReferralSource @default(LINK)
+  status      ReferralStatus @default(PENDING)
+
+  /// The payment that triggered settlement. NULL until the referee pays.
+  /// UNIQUE so one payment can never settle two referrals.
+  qualifying_payment_request_id String?   @unique @db.Uuid
+  rewarded_at                   DateTime?
+  /// What each side actually received. Written at settle time rather than read
+  /// back from config, so changing the fees later never rewrites history.
+  referrer_amount               Decimal?  @db.Decimal(10, 2)
+  referee_amount                Decimal?  @db.Decimal(10, 2)
+  /// Why nothing was paid. Set on CAPPED / FORFEITED / QUALIFIED_ON_HOLD, and
+  /// the only thing that can answer a support question about a missing credit.
+  settlement_note               String?
+
+  deleted_at DateTime? @db.Timestamptz
+
+  referrer           Profile         @relation("ReferralReferrer", fields: [referrer_id], references: [id], onDelete: Cascade)
+  referee            Profile         @relation("ReferralReferee", fields: [referee_id], references: [id], onDelete: Cascade)
+  qualifying_payment PaymentRequest? @relation(fields: [qualifying_payment_request_id], references: [id], onDelete: SetNull)
+
+  @@index([referrer_id, status], name: "idx_referral_referrer_status")
+  @@index([status], name: "idx_referral_status")
+  @@index([created_at], name: "idx_referral_created_at")
+  @@index([deleted_at], name: "idx_referral_deleted_at")
+  @@map("referrals")
+}
+
 model File {
   id                String          @id @default(uuid()) @db.Uuid
   created_at        DateTime        @default(now())
@@ -909,7 +1116,72 @@ model Message {
 
   @@index([profile_id], name: "idx_message_profile")
   @@index([created_at], name: "idx_message_created_at")
+  // Serves the 24h WhatsApp service-window lookup (newest INBOUND per profile),
+  // which runs on every admin send and every composer render.
+  @@index([profile_id, direction, created_at(sort: Desc)], name: "idx_message_profile_direction_created")
   @@map("messages")
+}
+
+/// The delivery record for one WhatsApp send.
+///
+/// Deliberately NOT `Message`. That table is the profile CHAT transcript: it
+/// requires a `profile_id`, so an OTP to a number that never registered has
+/// nowhere to go, and it stores a template as the literal body `[TPL:kyc]` with
+/// no id, status or recipient. This one exists to answer "did it arrive?", so
+/// the recipient is a phone number, the profile is optional, and the row is
+/// written BEFORE the provider call — its `id` rides to Meta as
+/// `biz_opaque_callback_data` and comes back on the status webhook, which is
+/// what correlates a delivery receipt to a send without a provider lookup.
+model WhatsappMessage {
+  id         String   @id @default(uuid()) @db.Uuid
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  provider            String // cloud | twilio
+  /// Meta wamid (`wamid.…`) or Twilio SID (`SM…`/`MM…`). Null until the
+  /// provider answers — and permanently null when the send failed outright.
+  provider_message_id String? @unique
+
+  direction  MessageDirection @default(OUTBOUND)
+  /// E.164 with the leading `+`, matching the codebase's canonical phone form.
+  to_phone   String
+  /// Optional: sends to unregistered numbers (OTP, activation) have no profile.
+  profile_id String?          @db.Uuid
+
+  kind              String // text | template | media | flow | interactive
+  template_key      String?
+  template_category String? // UTILITY | MARKETING | AUTHENTICATION
+  /// Rendered text, or the resolved template body. Truncated at write time.
+  body_preview      String
+  variables         Json?
+
+  status       WhatsappDeliveryStatus @default(QUEUED)
+  sent_at      DateTime?
+  delivered_at DateTime?
+  read_at      DateTime?
+  failed_at    DateTime?
+
+  error_code          String?
+  error_provider_code Int?
+  error_message       String?
+
+  /// From the webhook's `statuses[].pricing`. Meta only sends it once the
+  /// message is billable, so it arrives with `delivered`, not with `sent`.
+  pricing_category String?
+  billable         Boolean?
+
+  /// Set when an admin composed the message by hand.
+  sent_by_id String? @db.Uuid
+
+  profile Profile? @relation(fields: [profile_id], references: [id], onDelete: SetNull)
+  sent_by User?    @relation(fields: [sent_by_id], references: [id], onDelete: SetNull)
+
+  @@index([created_at(sort: Desc)], name: "idx_wa_msg_created")
+  @@index([status, created_at(sort: Desc)], name: "idx_wa_msg_status_created")
+  @@index([template_key, created_at(sort: Desc)], name: "idx_wa_msg_template_created")
+  @@index([to_phone], name: "idx_wa_msg_phone")
+  @@index([profile_id], name: "idx_wa_msg_profile")
+  @@map("whatsapp_messages")
 }
 
 model VerificationToken {
@@ -941,6 +1213,11 @@ model PaymentRequest {
   gateway                   String?
   gateway_payment_ref       String?              @unique
   gateway_tx_id             String?
+  /// DEPRECATED — superseded by gateway_payment_ref/gateway_tx_id. Nothing
+  /// writes these any more; the only remaining reader is the callback lookup
+  /// fallback in PaymentRequestService, for requests created before that
+  /// deploy. Drop both columns and idx_payment_request_monetbil_ref in the
+  /// release after 20260824220000_backfill_gateway_ref_from_monetbil.
   monetbil_payment_ref      String?              @unique
   monetbil_tx_id            String?
   request_type              PaymentRequestType?
@@ -949,6 +1226,7 @@ model PaymentRequest {
 
   profile    Profile   @relation(fields: [profile_id], references: [id], onDelete: Cascade)
   invoice    Invoice?
+  referral   Referral?
   deleted_at DateTime? @db.Timestamptz
 
   @@index([profile_id], name: "idx_payment_request_profile")
@@ -970,11 +1248,22 @@ model Claim {
   attachment_urls       String[]    @default([])
   profile_id            String      @db.Uuid
   assigned_user_id      String?     @db.Uuid
+  /// Who performed the current assignment, and therefore the only person who
+  /// may undo it. NULL means the assignment predates this column, or nobody is
+  /// assigned — in both cases the restriction does not apply.
+  assigned_by_user_id   String?     @db.Uuid
   created_by_user_id    String?     @db.Uuid
   created_by_profile_id String?     @db.Uuid
 
+  /// Manual rank within the board column, ascending. Fractional so a drag
+  /// writes one row — the moved claim lands on the midpoint between its new
+  /// neighbours — instead of renumbering everything below it. Ties (all new
+  /// claims default to 0, i.e. top of their column) break on created_at desc.
+  position Float @default(0)
+
   profile            Profile        @relation("ClaimProfile", fields: [profile_id], references: [id], onDelete: Cascade)
   assigned_user      User?          @relation("ClaimAssignedUser", fields: [assigned_user_id], references: [id], onDelete: SetNull)
+  assigned_by_user   User?          @relation("ClaimAssignedByUser", fields: [assigned_by_user_id], references: [id], onDelete: SetNull)
   created_by_user    User?          @relation("ClaimCreatedByUser", fields: [created_by_user_id], references: [id], onDelete: SetNull)
   created_by_profile Profile?       @relation("ClaimCreatedByProfile", fields: [created_by_profile_id], references: [id], onDelete: SetNull)
   comments           ClaimComment[]
@@ -982,6 +1271,7 @@ model Claim {
   @@index([profile_id])
   @@index([status])
   @@index([assigned_user_id])
+  @@index([status, position])
   @@map("claims")
 }
 
@@ -990,7 +1280,13 @@ model ClaimComment {
   created_at      DateTime @default(now())
   updated_at      DateTime @updatedAt
   claim_id        String   @db.Uuid
+  /// Empty string for an image-only message. NOT nullable: every reader treats
+  /// this as a string today, and a nullable column would push a null check into
+  /// all of them to express something `''` already says.
   content         String   @db.Text
+  /// Public-bucket urls, same shape as `Claim.attachment_urls`. Validated on
+  /// write against `claim-attachments/` — see `claim-attachment-key.ts`.
+  attachment_urls String[] @default([])
   user_id         String?  @db.Uuid
   profile_id      String?  @db.Uuid
   created_by_type String   @default("user")
@@ -1001,6 +1297,36 @@ model ClaimComment {
 
   @@index([claim_id])
   @@map("claim_comments")
+}
+
+/// A repeat rule. Its occurrences are real `events` rows carrying `series_id`,
+/// not virtual expansions — every consumer of an event keys on the numeric
+/// event id (React keys, drag/drop, PATCH/DELETE /admin/event/:id), and a
+/// virtual occurrence has no such id to offer.
+///
+/// `materialised_until` is how far ahead the rows have actually been written.
+/// A series with no end date is generated a year out and topped up lazily when
+/// someone browses past it, which is why the rule lives here rather than being
+/// copied onto every occurrence: a top-up is one row update, not N.
+model EventSeries {
+  id                 String              @id @default(uuid()) @db.Uuid
+  created_at         DateTime            @default(now())
+  updated_at         DateTime            @updatedAt
+  frequency          RecurrenceFrequency
+  /// The first occurrence — the reference point every later one is computed
+  /// from, so a month series anchored on the 31st keeps trying for the 31st
+  /// rather than drifting off a clamped February.
+  anchor_start       DateTime
+  anchor_end         DateTime
+  /// End condition. At most one is set; both null means open-ended.
+  until              DateTime?
+  count              Int?
+  materialised_until DateTime
+
+  events Event[]
+
+  @@index([materialised_until], name: "idx_event_series_materialised_until")
+  @@map("event_series")
 }
 
 model Event {
@@ -1016,12 +1342,23 @@ model Event {
   location      String?
   created_by_id String          @db.Uuid
 
-  created_by     User      @relation("EventCreatedBy", fields: [created_by_id], references: [id], onDelete: Cascade)
-  profiles       Profile[] @relation("EventProfiles")
-  assigned_users User[]    @relation("EventAssignedUsers")
+  /// Null for a one-off event, which is every event created before recurrence
+  /// existed. Every code path branches on this being set.
+  series_id        String? @db.Uuid
+  occurrence_index Int?
+
+  created_by     User         @relation("EventCreatedBy", fields: [created_by_id], references: [id], onDelete: Cascade)
+  series         EventSeries? @relation(fields: [series_id], references: [id], onDelete: Cascade)
+  profiles       Profile[]    @relation("EventProfiles")
+  assigned_users User[]       @relation("EventAssignedUsers")
 
   @@index([created_by_id], name: "idx_event_created_by")
-  @@index([start_date], name: "idx_event_start_date")
+  // Serves the calendar's overlap query (start_date <= to AND end_date >= from).
+  // Replaces a lone start_date index, which this one subsumes as its leading
+  // column.
+  @@index([start_date, end_date], name: "idx_event_start_end")
+  // Every scoped operation is "this series, from this date on".
+  @@index([series_id, start_date], name: "idx_event_series_start")
   @@map("events")
 }
 
@@ -1284,12 +1621,38 @@ model AdTrackedLink {
   @@map("ad_tracked_links")
 }
 
+/// Feedback about RABOTKA, not about a person.
+///
+/// Distinct from `Rating`, which is rater -> ratee on an assignment. This has
+/// no counterparty: it is a product survey, today collected through a WhatsApp
+/// Flow after a contact unlock.
+model Feedback {
+  id         String   @id @default(uuid()) @db.Uuid
+  created_at DateTime @default(now())
+  profile_id String   @db.Uuid
+  /// 1-5. Constrained here rather than only in code: a survey answer arriving
+  /// from a webhook is external input.
+  score      Int
+  comment    String?
+  /// Where it came from, so a future in-app form does not need a new table.
+  source     String   @default("whatsapp_flow")
+  /// Echoed back by the Flow submission. Kept for correlation and de-duplication
+  /// — Meta retries a webhook, and a resubmitted form must not double-count.
+  flow_token String?  @unique
+
+  profile Profile @relation(fields: [profile_id], references: [id], onDelete: Cascade)
+
+  @@index([profile_id], name: "idx_feedback_profile")
+  @@index([created_at], name: "idx_feedback_created_at")
+  @@map("feedback")
+}
+
 model Rating {
-  id            String   @id @default(uuid()) @db.Uuid
-  created_at    DateTime @default(now())
-  rater_id      String   @db.Uuid
-  ratee_id      String   @db.Uuid
-  assignment_id String   @db.Uuid
+  id            String           @id @default(uuid()) @db.Uuid
+  created_at    DateTime         @default(now())
+  rater_id      String           @db.Uuid
+  ratee_id      String           @db.Uuid
+  assignment_id String           @db.Uuid
   score         Int
   /// Stored rather than re-derived: telling worker→employer from employer→worker
   /// otherwise needs a join through assignment → job_offer on every read.
@@ -1360,4 +1723,152 @@ model ChatMessage {
   @@index([conversation_id, created_at], name: "idx_chat_message_conversation_created")
   @@index([sender_id], name: "idx_chat_message_sender")
   @@map("chat_messages")
+}
+
+/// Whether a partner application may currently authenticate anybody.
+///
+/// SUSPENDED is checked at BOTH `authorize` and `token`, not just at authorize:
+/// a code minted seconds before a suspension must not still be redeemable, and
+/// the two endpoints are minutes apart in the worst case.
+enum OAuthAppStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+/// A third-party application registered for "Login with Rabotka".
+///
+/// Rabotka acts as an OpenID Connect provider for these: the partner redirects
+/// a user here, the user proves their phone over the usual WhatsApp OTP, and
+/// the partner receives an ID token carrying the identity AND Rabotka's KYC
+/// verdict. The verdict is the product — anyone can ask for a phone number.
+model OAuthApp {
+  id          String  @id @default(uuid()) @db.Uuid
+  name        String
+  description String  @db.Text
+  /// Rendered on the consent screen. This is the face the user is asked to
+  /// trust, so an app without one shows its initials rather than nothing.
+  logo_url    String?
+
+  /// Public, opaque, and NOT the primary key: `client_id` travels in query
+  /// strings and partner config files, so it must be safe to expose and free
+  /// to rotate independently of the row it points at.
+  client_id String @unique
+
+  /// SHA-256 hex of the secret, never the secret.
+  ///
+  /// Deliberately not bcrypt/argon: the secret is 32 bytes straight out of a
+  /// CSPRNG, so there is no dictionary and no rainbow table for a slow KDF to
+  /// defend against. A work factor here would buy nothing and add latency to
+  /// every single token exchange. Comparison is still constant-time — see
+  /// `client-credentials.util.ts`.
+  client_secret_hash String
+  /// Last 4 characters of the secret. Admins can no longer read the secret
+  /// after creation, so this is the only way to tell two of them apart when
+  /// asking a partner "which one are you using".
+  client_secret_hint String
+
+  /// Set on rotation. The old secret keeps working until it expires, so a
+  /// partner can redeploy on their own schedule instead of taking downtime the
+  /// moment an admin clicks the button.
+  previous_secret_hash       String?
+  previous_secret_expires_at DateTime?
+  secret_rotated_at          DateTime?
+
+  /// Exact-match allowlist. No wildcards and no patterns, ever: a redirect_uri
+  /// that is matched loosely is an open redirector, and an open redirector on
+  /// an authorization endpoint hands authorization codes to whoever asked.
+  /// See RFC 9700 §4.1.
+  redirect_uris String[]
+
+  /// The ceiling on what this app may request. A scope absent here is refused
+  /// at `authorize` rather than silently dropped, so a partner discovers the
+  /// misconfiguration immediately instead of shipping against claims that
+  /// never arrive.
+  allowed_scopes String[]
+
+  status OAuthAppStatus @default(ACTIVE)
+
+  /// A sandbox application: it authenticates ONLY the two hardcoded Rabotka
+  /// sandbox users, with a fixed OTP, and never touches `profiles`. It exists
+  /// so a partner can build their integration without a real account and
+  /// without a real WhatsApp message.
+  ///
+  /// This flag is the only gate — there is deliberately no environment check,
+  /// so a sandbox app works in production too. That makes it an explicit
+  /// SUPER_ADMIN decision at registration rather than a property of where the
+  /// code happens to be running.
+  ///
+  /// Set once and never updated. Flipping it would not migrate the identities
+  /// already issued: `pairwise_sub` is what a partner keys their own user table
+  /// on, and it does not change when the flag does, so a synthetic identity
+  /// would end up sitting in a partner's production table indistinguishable
+  /// from a real person's. Changing it means deleting the app and registering a
+  /// new one, which forces new credentials — correct, because the identity
+  /// semantics of that `client_id` have changed.
+  is_sandbox Boolean @default(false)
+
+  /// Who to contact about this integration. Not an account — partners have no
+  /// login here; registration is an admin action.
+  contact_email String
+
+  created_by String? @db.Uuid
+  creator    User?   @relation("OAuthAppCreatedBy", fields: [created_by], references: [id], onDelete: SetNull)
+
+  authorizations OAuthAuthorization[]
+
+  created_at DateTime  @default(now())
+  updated_at DateTime  @updatedAt
+  deleted_at DateTime? @db.Timestamptz
+
+  @@index([client_id], name: "idx_oauth_app_client_id")
+  @@index([status], name: "idx_oauth_app_status")
+  @@index([deleted_at], name: "idx_oauth_app_deleted_at")
+  @@map("oauth_apps")
+}
+
+/// One user's standing consent for one application.
+///
+/// Exists so that a returning user is not asked to consent again, and so that
+/// both the user and an admin have something concrete to revoke. Its real job,
+/// though, is to be the stable home of `pairwise_sub`.
+model OAuthAuthorization {
+  id         String @id @default(uuid()) @db.Uuid
+  app_id     String @db.Uuid
+  profile_id String @db.Uuid
+
+  /// The `sub` claim this app sees for this person, forever.
+  ///
+  /// Derived as sha256(app_id + profile_id + OIDC_PAIRWISE_SALT) but STORED,
+  /// not recomputed on demand, for two reasons: partners key their own user
+  /// tables on it, so it must survive any future change to how it is derived;
+  /// and being a real column makes "which Rabotka profile is this partner
+  /// asking about" a lookup rather than a brute-force search.
+  ///
+  /// Pairwise rather than a bare profile id so that two partners comparing
+  /// notes cannot discover they share a user.
+  pairwise_sub String @unique
+
+  /// What was actually granted, which is not necessarily what was requested:
+  /// scopes are intersected with the app's `allowed_scopes` first.
+  scopes String[]
+
+  granted_at   DateTime  @default(now())
+  /// Moved on every token exchange, throttled to the minute. Answers "is this
+  /// integration still live" without reading the audit log.
+  last_used_at DateTime?
+  /// The kill switch, for the user and for an admin. Non-null means every
+  /// access token is dead and the next `authorize` must re-consent. Kept as a
+  /// timestamp rather than a delete so revocation is auditable.
+  revoked_at   DateTime?
+
+  app     OAuthApp @relation(fields: [app_id], references: [id], onDelete: Cascade)
+  profile Profile  @relation(fields: [profile_id], references: [id], onDelete: Cascade)
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@unique([app_id, profile_id], name: "idx_oauth_authorization_app_profile")
+  @@index([profile_id], name: "idx_oauth_authorization_profile")
+  @@index([app_id, revoked_at], name: "idx_oauth_authorization_app_revoked")
+  @@map("oauth_authorizations")
 }

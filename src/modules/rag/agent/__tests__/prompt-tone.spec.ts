@@ -1,0 +1,279 @@
+import { AccountStatus, ProfileType, VerificationStatus } from '@prisma/client';
+import { buildSystemPrompt } from '../prompts';
+
+const base = {
+  firstName: 'Marie',
+  profileType: ProfileType.WORKER,
+  accountStatus: AccountStatus.ACTIVE,
+  categorySlugs: [],
+  grounding: [],
+  requiredTools: [],
+  language: 'fr' as const,
+};
+
+const promptFor = (verificationStatus: VerificationStatus) =>
+  buildSystemPrompt({ ...base, verificationStatus });
+
+const verified = promptFor(VerificationStatus.VERIFIED);
+
+describe('la salutation', () => {
+  /**
+   * Vient d'un échange réel : « Bonsoir Rabotka 😊, merci » a reçu « Dites-moi,
+   * que puis-je faire pour vous ce soir ? ». Le message contenait « merci »,
+   * donc la règle du remerciement s'appliquait, et celle de la salutation ne
+   * couvrait que les « bonjour » tout seuls.
+   */
+  it('impose de rendre la salutation avant de répondre', () => {
+    expect(verified).toContain('Rends la salutation EN PREMIER');
+  });
+
+  it('couvre le bonsoir accompagné, pas seulement le bonjour seul', () => {
+    expect(verified).toContain("même au milieu d'une autre phrase");
+  });
+
+  it('met le prénom en gras dans la salutation', () => {
+    expect(verified).toContain('Bonsoir *Marie* !');
+  });
+
+  it('interdit de commencer par une question à qui vient de saluer', () => {
+    expect(verified).toContain(
+      'Ne commence jamais une réponse par une question',
+    );
+  });
+
+  it('bannit aussi « que puis-je faire pour vous »', () => {
+    // La règle nommait « comment puis-je vous aider ? » ; la variante employée
+    // sur ce vrai message passait à travers.
+    expect(verified).toContain('que puis-je faire pour vous');
+  });
+
+  it("survit à l'absence de prénom", () => {
+    const anon = buildSystemPrompt({
+      ...base,
+      firstName: null,
+      verificationStatus: VerificationStatus.VERIFIED,
+    });
+    // Pas d'astérisques orphelins ni de « Bonsoir  ! » bancal à construire.
+    expect(anon).not.toContain('**');
+  });
+});
+
+describe('le prénom en gras', () => {
+  it('est listé parmi les éléments à mettre en gras', () => {
+    expect(verified).toContain('Le prénom de la personne se met en gras');
+  });
+
+  it('est limité à une occurrence par réponse', () => {
+    expect(verified).toContain('Une seule fois dans la réponse');
+  });
+});
+
+describe('les branches de vérification', () => {
+  it('affirme « déjà vérifiée » uniquement quand c’est vrai', () => {
+    expect(verified).toContain('déjà vérifiée');
+    expect(promptFor(VerificationStatus.PENDING)).not.toContain(
+      'déjà vérifiée',
+    );
+    expect(promptFor(VerificationStatus.REJECTED)).not.toContain(
+      'déjà vérifiée',
+    );
+  });
+
+  it('dit à un dossier REFUSÉ de passer par la réclamation', () => {
+    const rejected = promptFor(VerificationStatus.REJECTED);
+    expect(rejected).toContain('REFUSÉE');
+    expect(rejected).toContain('réclamation');
+    expect(rejected).toContain('ne peut pas renvoyer ses documents');
+  });
+
+  it('interdit de conseiller de recommencer la photo', () => {
+    // Le produit n'a aucun écran pour ça : les pièces ne sont acceptées qu'à la
+    // création du compte.
+    expect(promptFor(VerificationStatus.REJECTED)).toContain(
+      'jamais de recommencer sa photo',
+    );
+  });
+
+  it('distingue PENDING de REJECTED', () => {
+    const pending = promptFor(VerificationStatus.PENDING);
+    expect(pending).toContain("en cours d'examen");
+    expect(pending).not.toContain('REFUSÉE');
+  });
+
+  it('ne dit rien du tout quand le dossier est validé', () => {
+    expect(verified).not.toContain("en cours d'examen");
+    expect(verified).not.toContain('REFUSÉE');
+  });
+});
+
+describe('le ton humain', () => {
+  it('autorise les emojis, avec un plafond explicite', () => {
+    expect(verified).toContain('UN par message');
+    expect(verified).toContain('👋');
+  });
+
+  it('interdit la décoration', () => {
+    expect(verified).toContain('Jamais un emoji par phrase');
+  });
+
+  /**
+   * La partie qui compte.
+   *
+   * « Chaleureux et drôle » s'obtient facilement, et s'obtient facilement AU
+   * MAUVAIS MOMENT. Un smiley sur un refus de vérification ou une vanne à
+   * quelqu'un qui vient de se faire arnaquer donne l'impression qu'on n'a pas
+   * compris ce qui lui arrive.
+   */
+  it.each([
+    'vérification refusée',
+    'pénalité',
+    'suspension',
+    'litige',
+    'arnaque',
+    'sécurité',
+    'garde d’enfants',
+  ])('coupe emojis et plaisanteries : %s', (topic) => {
+    const block = verified.slice(verified.indexOf('AUCUN emoji'));
+    expect(block.slice(0, 600)).toContain(topic.replace('’', "'"));
+  });
+
+  it('dit où passe la chaleur quand les emojis sont coupés', () => {
+    expect(verified).toContain('La chaleur passe par ce que tu fais');
+  });
+
+  it('donne un exemple de ce qu’il ne faut PAS faire sur un refus', () => {
+    // Sans contre-exemple, la consigne « sois chaleureux » l'emporte sur la
+    // consigne « sauf ici », parce qu'elle est la seule illustrée.
+    expect(verified).toContain('Oups, votre vérification a été refusée');
+  });
+
+  it('demande de reconnaître la situation sans réciter', () => {
+    expect(verified).toContain('pas « je comprends votre frustration » récité');
+  });
+});
+
+/**
+ * La porte d'entrée des comptes qui n'ont pas de menu.
+ *
+ * L'assistant répond désormais derrière les murs — suspendu, KYC en cours, KYC
+ * refusé — et ces gens-là n'ont aucun menu : le bot leur renvoyait une carte et
+ * rien d'autre. `/start` est leur seule porte, et le bouton de la carte porte un
+ * code de connexion à usage unique.
+ */
+describe('l’invitation à ouvrir l’application', () => {
+  const promptWith = (
+    accountStatus: AccountStatus,
+    verificationStatus: VerificationStatus,
+  ) => buildSystemPrompt({ ...base, accountStatus, verificationStatus });
+
+  const walled: [string, AccountStatus, VerificationStatus][] = [
+    ['suspendu', AccountStatus.SUSPENDED, VerificationStatus.VERIFIED],
+    [
+      'KYC en cours',
+      AccountStatus.PENDING_ACTIVATION,
+      VerificationStatus.PENDING,
+    ],
+    [
+      'KYC refusé',
+      AccountStatus.PENDING_ACTIVATION,
+      VerificationStatus.REJECTED,
+    ],
+  ];
+
+  // La porte est la même, sa forme a changé : le bot joint désormais une carte
+  // à bouton sous la réponse, au lieu que le modèle demande de taper un mot.
+  // Ce que le prompt doit encore faire, c'est l'ANNONCER au modèle — sans quoi
+  // il improvise une invitation qui contredit le bouton.
+  it.each(walled)(
+    'annonce la carte à bouton pour un compte %s',
+    (_label, account, verif) => {
+      const prompt = promptWith(account, verif);
+      expect(prompt).toContain('carte à bouton');
+      // Et surtout : il ne doit plus réclamer de frappe.
+      expect(prompt).not.toContain('*/start*');
+    },
+  );
+
+  // Un profil actif a déjà le menu complet et les cartes à boutons.
+  it('ne le propose pas à un compte actif et vérifié', () => {
+    expect(
+      promptWith(AccountStatus.ACTIVE, VerificationStatus.VERIFIED),
+    ).not.toContain('/start');
+  });
+
+  // Sans cette ligne le haut du prompt dit « déjà inscrite et déjà connectée » à
+  // tout le monde, et le modèle propose de postuler à quelqu'un qui ne peut pas.
+  it('dit au modèle ce qu’un compte suspendu ne peut pas faire', () => {
+    const prompt = promptWith(
+      AccountStatus.SUSPENDED,
+      VerificationStatus.VERIFIED,
+    );
+    expect(prompt).toContain('Ce compte est SUSPENDU');
+    expect(prompt).toContain('ni postuler');
+  });
+
+  it('ne parle pas de suspension à un dossier seulement en attente', () => {
+    expect(
+      promptWith(AccountStatus.PENDING_ACTIVATION, VerificationStatus.PENDING),
+    ).not.toContain('Ce compte est SUSPENDU');
+  });
+});
+
+/**
+ * L'heure, que le modèle n'avait jamais eue.
+ *
+ * Les deux prompts s'en accommodaient en lui interdisant de choisir — « recopie
+ * le mot de la personne ». Ça marche tant que quelqu'un salue en premier, et
+ * laisse deviner dès que VoVa ouvre la conversation. Le transcript du 21/08
+ * montre le résultat : « Bonsoir » à 14h35.
+ */
+describe('l’heure de Brazzaville', () => {
+  // Brazzaville est UTC+1 sans heure d'été, donc un instant UTC suffit.
+  const at = (utcIso: string) =>
+    buildSystemPrompt({
+      ...base,
+      verificationStatus: VerificationStatus.VERIFIED,
+      now: new Date(utcIso),
+    });
+
+  it('annonce l’heure locale, pas l’heure UTC', () => {
+    // 13h00 UTC = 14h00 à Brazzaville.
+    expect(at('2026-08-23T13:00:00Z')).toContain('Il est 14h00 à Brazzaville');
+  });
+
+  it.each([
+    ['2026-08-23T05:00:00Z', '06h00', 'Bonjour'],
+    ['2026-08-23T13:35:00Z', '14h35', 'Bonjour'],
+    // 16h59 UTC = 17h59 local : encore le jour, à une minute près.
+    ['2026-08-23T16:59:00Z', '17h59', 'Bonjour'],
+    // 17h00 UTC = 18h00 local : bascule.
+    ['2026-08-23T17:00:00Z', '18h00', 'Bonsoir'],
+    ['2026-08-23T21:10:00Z', '22h10', 'Bonsoir'],
+  ])('à %s dit « %s » et salue par « %s »', (utc, hhmm, greeting) => {
+    const prompt = at(utc);
+    expect(prompt).toContain(`Il est ${hhmm} à Brazzaville`);
+    expect(prompt).toContain(`dis « ${greeting} »`);
+  });
+
+  // Le cas du 21/08, celui qui a motivé tout ça.
+  it('ne dit pas « Bonsoir » à 14h35', () => {
+    expect(at('2026-08-23T13:35:00Z')).not.toContain('dis « Bonsoir »');
+  });
+
+  /**
+   * La règle du miroir reste PRIORITAIRE sur l'horloge. Quelqu'un qui écrit
+   * « bonsoir » à 15h reçoit « Bonsoir » : on ne corrige personne sur sa propre
+   * salutation, et l'heure ne sert qu'à ce qu'il n'y a rien à refléter.
+   */
+  it('garde la paire d’exemples qui montre le miroir', () => {
+    const prompt = at('2026-08-23T13:00:00Z');
+    expect(prompt).toContain('« bonjour » → « Bonjour *Marie* ! »');
+    expect(prompt).toContain('« bonsoir » → « Bonsoir *Marie* ! »');
+  });
+
+  it('dit explicitement de recopier même contre l’heure', () => {
+    expect(at('2026-08-23T13:00:00Z')).toContain(
+      "Recopie son mot même s'il ne colle pas à l'heure",
+    );
+  });
+});

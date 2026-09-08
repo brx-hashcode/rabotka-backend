@@ -1,14 +1,24 @@
 import { AdminCacheService } from './common/services/cache/admin-cache.service';
 import { DynamicModule, Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { validateWhatsappEnv } from './modules/whatsapp/whatsapp.config';
+import { TwilioProvider } from './modules/whatsapp/providers/twilio/twilio.provider';
+import { whatsappProviderFactory } from './modules/whatsapp/whatsapp-provider.factory';
+import {
+  WHATSAPP_PROVIDER,
+  type WhatsappProvider,
+} from './modules/whatsapp/contracts';
 import { MailerModule } from '@nestjs-modules/mailer';
 import { PrismaModule } from './common/services/prisma/prisma.module';
 import { RedisModule } from './common/services/redis/redis.module';
+import { IdempotencyModule } from './common/services/idempotency/idempotency.module';
+import { IdempotencyService } from './common/services/idempotency/idempotency.service';
 import { QueueModule } from './common/services/queue/queue.module';
 import { MailModule } from './modules/mail/mail.module';
 import { TwilioService } from './common/services/twilio/twilio.service';
 import { SendTimingService } from './modules/whatsapp/telemetry/send-timing.service';
 import { WhatsAppService } from './modules/whatsapp/whatsapp.service';
+import { WhatsappMessageLogService } from './modules/whatsapp/logging/whatsapp-message-log.service';
 import { ReminderProcessor } from './modules/bot/reminder/reminder.processor';
 import { PrismaService } from './common/services/prisma/prisma.service';
 import { QueueService } from './common/services/queue/queue.service';
@@ -48,8 +58,12 @@ export class WorkerModule {
         envFilePath: ['.env.local', '.env'],
         cache: true,
         expandVariables: true,
+        // Same gate as the API process: the worker sends the bulk of the
+        // outbound traffic, so it must not boot on a blank credential either.
+        validate: validateWhatsappEnv,
       }),
       RedisModule.forRoot(),
+      IdempotencyModule,
       QueueModule.forRoot(),
       MailerModule.forRootAsync({
         imports: [ConfigModule],
@@ -84,12 +98,9 @@ export class WorkerModule {
       },
       {
         provide: TwilioService,
-        useFactory: (
-          config: ConfigService,
-          systemConfig: SystemConfigService,
-          sendTiming: SendTimingService,
-        ) => new TwilioService(config, systemConfig, sendTiming),
-        inject: [ConfigService, SystemConfigService, SendTimingService],
+        useFactory: (config: ConfigService, sendTiming: SendTimingService) =>
+          new TwilioService(config, sendTiming),
+        inject: [ConfigService, SendTimingService],
       },
       {
         provide: WalletService,
@@ -104,20 +115,42 @@ export class WorkerModule {
         inject: [PrismaService],
       },
       {
+        // The worker builds its graph by hand, so the provider token has to be
+        // registered here too — WhatsAppService injects it, not TwilioService.
+        provide: TwilioProvider,
+        useFactory: (twilio: TwilioService) => new TwilioProvider(twilio),
+        inject: [TwilioService],
+      },
+      whatsappProviderFactory,
+      WhatsappMessageLogService,
+      {
         provide: WhatsAppService,
         useFactory: (
           redis: Redis,
           prisma: PrismaService,
-          twilio: TwilioService,
+          provider: WhatsappProvider,
           config: ConfigService,
           wallet: WalletService,
-        ) => new WhatsAppService(redis, prisma, twilio, config, wallet),
+          idempotency: IdempotencyService,
+          messageLog: WhatsappMessageLogService,
+        ) =>
+          new WhatsAppService(
+            redis,
+            prisma,
+            provider,
+            config,
+            wallet,
+            idempotency,
+            messageLog,
+          ),
         inject: [
           REDIS_CONNECTION,
           PrismaService,
-          TwilioService,
+          WHATSAPP_PROVIDER,
           ConfigService,
           WalletService,
+          IdempotencyService,
+          WhatsappMessageLogService,
         ],
       },
     ];
@@ -167,6 +200,7 @@ export class WorkerModule {
         prisma: PrismaService,
         queue: QueueService,
         whatsApp: WhatsAppService,
+        systemConfig: SystemConfigService,
       ) => {
         const botNotificationStub = {
           sendMessage: (phone: string, text: string) =>
@@ -176,9 +210,15 @@ export class WorkerModule {
           prisma,
           queue,
           botNotificationStub,
+          systemConfig,
         );
       },
-      inject: [PrismaService, QueueService, WhatsAppService],
+      inject: [
+        PrismaService,
+        QueueService,
+        WhatsAppService,
+        SystemConfigService,
+      ],
     };
 
     return {

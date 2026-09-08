@@ -13,10 +13,14 @@ import {
 } from '@nestjs/common';
 import Redis from 'ioredis';
 import { REDIS_CONNECTION } from '../../common/services/redis/redis.constants';
+import { JobNotificationProcessor } from './notification/job-notification.processor';
 import { deletedAtFilter } from '../../common/utils/soft-delete.util';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { assertKycVerified } from '../../common/exceptions/kyc-not-verified.exception';
-import { isWorkerHardBlocked } from '../penalty/penalty.utils';
+import {
+  isWorkerHardBlocked,
+  hardBlockMessage,
+} from '../penalty/penalty.utils';
 import { MailService } from '../mail/mail.service';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { WalletService } from '../wallet/wallet.service';
@@ -25,12 +29,12 @@ import { MIN_HOURS_FROM_NOW } from './job-offer.constants';
 import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
 import { BotNotificationService } from '../bot/services/bot-notification.service';
 import { MatchingService } from '../matching/matching.service';
-import { GeocodingService } from '../../common/services/geocoding/geocoding.service';
 import type { Coordinates } from '../../common/services/geocoding/geocoding.service';
 import {
   haversineKm,
   proximityScore,
   urgencyScore,
+  URGENCY_HALF_LIFE_HOURS,
 } from '../../common/services/geocoding/geo.utils';
 import { CreateJobOfferDto } from './dto/create-job-offer.dto';
 import { AdminUpdateJobOfferDto } from './dto/admin-update-job-offer.dto';
@@ -39,27 +43,29 @@ import {
   isValidReferenceShape,
   normalizeJobReference,
 } from './utils/job-reference.util';
+import { closesOnFill, isDatedMission } from './utils/employment-type.util';
+import { TERMINAL_JOB_OFFER_STATUSES } from './utils/job-offer-status.util';
+import { isEmployerCoveredAtJobLevel } from '../contact-unlock/employer-coverage';
 import {
   AccountStatus,
   ApplicationStatus,
+  AssignmentStatus,
+  EmploymentType,
   JobOfferStatus,
   PaymentFlow,
   Prisma,
   RejectionSource,
 } from '@prisma/client';
+import { GeoService } from '../geo/geo.service';
+import { InteractionEventService } from '../recommendation-engine/interaction-event.service';
+import {
+  InteractionActor,
+  InteractionKind,
+  InteractionObject,
+  InteractionSource,
+} from '@prisma/client';
 
 const REFERENCE_MAX_ATTEMPTS = 5;
-
-/**
- * Offer statuses that close a posting for good. When an offer moves into one of
- * these, any applicants still waiting on it (PENDING / VIEWED / WAITING_PAYMENT)
- * can no longer be accepted and must be rejected + notified.
- */
-const TERMINAL_JOB_OFFER_STATUSES: JobOfferStatus[] = [
-  JobOfferStatus.CANCELLED,
-  JobOfferStatus.COMPLETED,
-  JobOfferStatus.EXPIRED,
-];
 
 /**
  * Statuses from which an employer may delete their own offer: it is either still
@@ -76,17 +82,21 @@ const EMPLOYER_DELETABLE_JOB_OFFER_STATUSES: JobOfferStatus[] = [
  * by, so paging can resume at an exact position instead of guessing from an id.
  */
 type OpenSlotsCursor = {
-  scheduledAt: Date;
+  /** Null for an offer with no closing date — those sort last. */
+  scheduledAt: Date | null;
   createdAt: Date;
   id: string;
 };
 
 function encodeOpenSlotsCursor(row: {
-  scheduled_at: Date;
+  scheduled_at: Date | null;
   created_at: Date;
   id: string;
 }): string {
-  const raw = `${row.scheduled_at.toISOString()}|${row.created_at.toISOString()}|${row.id}`;
+  // An empty first segment encodes "no closing date". It has to be
+  // representable: undated offers sort last, so a cursor landing on one must be
+  // able to say so, or the next page restarts from the dated rows.
+  const raw = `${row.scheduled_at?.toISOString() ?? ''}|${row.created_at.toISOString()}|${row.id}`;
   return Buffer.from(raw, 'utf8').toString('base64url');
 }
 
@@ -101,10 +111,14 @@ function decodeOpenSlotsCursor(cursor?: string): OpenSlotsCursor | null {
     const [scheduledAt, createdAt, id] = Buffer.from(cursor, 'base64url')
       .toString('utf8')
       .split('|');
-    if (!scheduledAt || !createdAt || !id) return null;
-    const scheduled = new Date(scheduledAt);
+    // `scheduledAt` may legitimately be empty — that is the undated marker.
+    if (scheduledAt === undefined || !createdAt || !id) return null;
+    const scheduled = scheduledAt === '' ? null : new Date(scheduledAt);
     const created = new Date(createdAt);
-    if (Number.isNaN(scheduled.getTime()) || Number.isNaN(created.getTime())) {
+    if (
+      (scheduled !== null && Number.isNaN(scheduled.getTime())) ||
+      Number.isNaN(created.getTime())
+    ) {
       return null;
     }
     return { scheduledAt: scheduled, createdAt: created, id };
@@ -129,10 +143,25 @@ export type AdminJobOfferListItem = {
   title: string;
   category: { id: string; name: string } | null;
   description: string;
-  scheduledAt: string;
-  amount: number;
+  /** Null for an offer with no closing date — CDI/CDD/STAGE. */
+  scheduledAt: string | null;
+  employmentType: EmploymentType;
+  /**
+   * Null when the employer named no price — «Laisser vide si pas de prix fixe».
+   * This was `number`, and the mappers coerced with `Number(offer.amount)`,
+   * which turns null into 0. The back office then showed «0 FCFA» for an
+   * open price, and saving the form wrote that 0 back over the null.
+   */
+  amount: number | null;
   paymentFlow: PaymentFlow | null;
-  address: string;
+  /** Null for a remote job — render `isRemote` instead of an empty line. */
+  address: string | null;
+  isRemote: boolean;
+  /** The structured location. Absent here, the admin form's country and city
+      selects rendered empty for an offer that has both. */
+  city: string | null;
+  countryCode: string | null;
+  countryName: string | null;
   note: string | null;
   quantity: number;
   status: string;
@@ -145,7 +174,93 @@ export type AdminJobOfferListItem = {
   createdAt: string;
   updatedAt: string;
   vectorIndexedAt: string | null;
+
+  /**
+   * Everything the offer touches, aggregated per offer.
+   *
+   * An offer read on its own says what was asked for, never what came of it —
+   * whether anyone applied, whether anyone was hired, whether the contact was
+   * ever paid for. These carry that, and they are what the analytics export
+   * turns into a funnel.
+   */
+  applicationsPending: number;
+  applicationsAccepted: number;
+  applicationsRejected: number;
+  applicationsCancelled: number;
+  /** Assignments: the applications that became actual engagements. */
+  hiredCount: number;
+  completedCount: number;
+  cancelledAssignmentsCount: number;
+  noShowCount: number;
+  /** Names of the workers assigned to this offer, in assignment order. */
+  workerNames: string[];
+  /** Contact unlocks — the paid connection between employer and worker. */
+  unlockAttempts: number;
+  unlocksCompleted: number;
+  unlockEmployerPaid: number;
+  unlockWorkerPaid: number;
+  unlockRevenue: number;
+  /** The employer's own unlock fee for the offer, paid up front. */
+  employerUnlockPaid: boolean;
+  /** Penalties raised on this offer's applications. */
+  penaltiesCount: number;
+  unpaidPenaltiesCount: number;
+  penaltiesAmount: number;
+  /** Ratings left on this offer's assignments, both directions. */
+  ratingAvg: number | null;
+  ratingCount: number;
 };
+
+/**
+ * The per-offer aggregates, split out from the list item so the list and the
+ * detail endpoint fill them the same way instead of each growing its own
+ * counting logic.
+ */
+type JobOfferAggregates = Pick<
+  AdminJobOfferListItem,
+  | 'applicationsPending'
+  | 'applicationsAccepted'
+  | 'applicationsRejected'
+  | 'applicationsCancelled'
+  | 'hiredCount'
+  | 'completedCount'
+  | 'cancelledAssignmentsCount'
+  | 'noShowCount'
+  | 'workerNames'
+  | 'unlockAttempts'
+  | 'unlocksCompleted'
+  | 'unlockEmployerPaid'
+  | 'unlockWorkerPaid'
+  | 'unlockRevenue'
+  | 'penaltiesCount'
+  | 'unpaidPenaltiesCount'
+  | 'penaltiesAmount'
+  | 'ratingAvg'
+  | 'ratingCount'
+>;
+
+/** An offer nothing has happened to yet — zeros, not absent fields. */
+const emptyJobOfferAggregates = (): JobOfferAggregates => ({
+  applicationsPending: 0,
+  applicationsAccepted: 0,
+  applicationsRejected: 0,
+  applicationsCancelled: 0,
+  hiredCount: 0,
+  completedCount: 0,
+  cancelledAssignmentsCount: 0,
+  noShowCount: 0,
+  workerNames: [],
+  unlockAttempts: 0,
+  unlocksCompleted: 0,
+  unlockEmployerPaid: 0,
+  unlockWorkerPaid: 0,
+  unlockRevenue: 0,
+  penaltiesCount: 0,
+  unpaidPenaltiesCount: 0,
+  penaltiesAmount: 0,
+  ratingAvg: null,
+  ratingCount: 0,
+});
 
 export type AdminJobOfferApplicationItem = {
   id: string;
@@ -166,15 +281,39 @@ export type AdminJobOfferDetailResponse = AdminJobOfferListItem & {
   applications: AdminJobOfferApplicationItem[];
 };
 
+/**
+ * Filters behind the admin job list. Named rather than inlined because the
+ * cached wrapper and the loader underneath it have to agree on the shape — the
+ * cache key is derived from this object, so a field that reaches only one of
+ * the two would be a filter that silently serves the wrong cached page.
+ */
+export type AdminJobOfferListParams = {
+  page: number;
+  limit: number;
+  q?: string;
+  status?: JobOfferStatus[];
+  employment_type?: EmploymentType[];
+  payment_flow?: PaymentFlow[];
+  amount_min?: number;
+  amount_max?: number;
+  deleted?: boolean;
+};
+
 export type JobOfferListItem = {
   id: string;
   reference: string;
   title: string;
   description: string;
-  scheduled_at: Date;
+  scheduled_at: Date | null;
   amount: number | null;
   payment_flow: PaymentFlow | null;
-  address: string;
+  /** Null for a remote job — render `is_remote` instead of an empty line. */
+  address: string | null;
+  is_remote: boolean;
+  employment_type: EmploymentType;
+  /** Where the job actually is. An address alone hides the city and country. */
+  city: string | null;
+  country_name: string | null;
   note: string | null;
   quantity: number;
   acceptedCount: number;
@@ -208,13 +347,37 @@ export class JobOfferService {
     private readonly botNotification: BotNotificationService,
     private readonly eventEmitter: EventEmitter2,
     private readonly matchingService: MatchingService,
-    private readonly geocodingService: GeocodingService,
     @Inject(REDIS_CONNECTION) private readonly redis: Redis,
     private readonly cache: AdminCacheService,
+    private readonly geo: GeoService,
+    private readonly jobNotification: JobNotificationProcessor,
+    private readonly interactionEvents: InteractionEventService,
   ) {}
 
-  private notificationCooldownKey(workerId: string): string {
-    return `job_notif_cooldown:${workerId}`;
+  /**
+   * The location columns for a new offer: whatever it declares, else the
+   * employer's.
+   *
+   * Inheriting is all-or-nothing on purpose. Mixing a declared country with an
+   * inherited city would silently produce a city that does not belong to the
+   * country stored beside it.
+   */
+  private offerLocation(
+    dto: { countryCode?: string; city?: string },
+    employer: {
+      country_code: string | null;
+      country_name: string | null;
+      city: string | null;
+    },
+  ): { country_code?: string; country_name?: string; city?: string } {
+    if (dto.countryCode !== undefined || dto.city !== undefined) {
+      return this.geo.resolveLocation(dto);
+    }
+    return {
+      country_code: employer.country_code ?? undefined,
+      country_name: employer.country_name ?? undefined,
+      city: employer.city ?? undefined,
+    };
   }
 
   async create(
@@ -229,6 +392,10 @@ export class JobOfferService {
         profile_type: true,
         reliability_score: true,
         verification_status: true,
+        // The fallback when the offer does not declare its own location.
+        country_code: true,
+        country_name: true,
+        city: true,
       },
     });
     if (!employer) {
@@ -256,21 +423,25 @@ export class JobOfferService {
       );
     }
 
-    const hardBlocked = await isWorkerHardBlocked(this.prisma, employerId);
+    const hardBlocked = await isWorkerHardBlocked(
+      this.prisma,
+      employerId,
+      fees.penaltyHardBlockDays,
+    );
     if (hardBlocked) {
       throw new ForbiddenException(
-        '🚨 Votre compte est bloqué en raison de pénalités impayées depuis plus de 3 jours. Tapez PAYER pour régulariser votre situation.',
+        hardBlockMessage(fees.penaltyHardBlockDays, 'publier une offre'),
       );
     }
 
     this.validateCreateDto(dto);
 
-    const scheduledAt = new Date(dto.scheduled_at);
+    const scheduledAt = dto.scheduled_at ? new Date(dto.scheduled_at) : null;
     const now = new Date();
     const minDate = new Date(
       now.getTime() + MIN_HOURS_FROM_NOW * 60 * 60 * 1000,
     );
-    if (scheduledAt < minDate) {
+    if (scheduledAt !== null && scheduledAt < minDate) {
       throw new BadRequestException(
         `La date doit être au moins ${MIN_HOURS_FROM_NOW} heures dans le futur`,
       );
@@ -281,9 +452,26 @@ export class JobOfferService {
       title: dto.title.trim(),
       description: dto.description.trim(),
       scheduled_at: scheduledAt,
+      employment_type: dto.employment_type ?? EmploymentType.MISSION,
       amount: dto.amount,
       payment_flow: dto.payment_flow,
-      address: dto.address.trim(),
+      is_remote: dto.isRemote ?? false,
+      // A remote job stores NO location at all — not the employer's, not a
+      // blank string. Inheriting one would put it in a city it has nothing to
+      // do with and let a city filter surface it as local work.
+      ...(dto.isRemote
+        ? { address: null, country_code: null, country_name: null, city: null }
+        : {
+            address: dto.address!.trim(),
+            // An offer that says nothing about where it is inherits the
+            // employer's own location. Most people recruit where they are, and
+            // a null here would drop the offer out of the proximity term
+            // entirely — the blind spot this column exists to close. An offer
+            // that DOES declare a location always wins, because recruiting for
+            // a site away from your base is exactly the case the employer's
+            // address gets wrong.
+            ...this.offerLocation(dto, employer),
+          }),
       note: dto.note?.trim() ?? null,
       quantity: dto.quantity ?? 1,
       status: JobOfferStatus.ACTIVE,
@@ -325,85 +513,47 @@ export class JobOfferService {
       timestamp: new Date().toISOString(),
     });
 
-    // Geocode first, then index — matching uses lat/lng so coordinates must be written before indexing.
-    this.geocodingService
-      .geocode(offer.address)
-      .then(async (coords) => {
-        if (coords) {
-          await this.prisma.jobOffer.update({
-            where: { id: offer.id },
-            data: { latitude: coords.lat, longitude: coords.lng },
-          });
-        }
-        await this.matchingService.indexJobOffer(offer.id);
-      })
-      .then(async () => {
-        const [enabled, minScore, maxWorkers, cooldownMinutes] =
-          await Promise.all([
-            this.systemConfigService.isRecommendationEnabled(),
-            this.systemConfigService.getMinNotificationScore(),
-            this.systemConfigService.getMaxNotificationWorkers(),
-            this.systemConfigService.getNotificationCooldownMinutes(),
-          ]);
-        if (!enabled) return;
-
-        const workerResults: { id: string; score: number }[] =
-          await this.matchingService.findMatchingWorkersForJob(
-            offer.id,
-            maxWorkers,
-          );
-
-        // Notify eligible workers with a concurrency cap of 5 to avoid
-        // thundering-herd on the WhatsApp queue when a job matches many workers.
-        const NOTIFY_CONCURRENCY = 5;
-        let active = 0;
-        const queue: Promise<void>[] = [];
-
-        const notify = async (workerId: string) => {
-          if (cooldownMinutes > 0) {
-            const key = this.notificationCooldownKey(workerId);
-            const locked = await this.redis.set(
-              key,
-              '1',
-              'EX',
-              cooldownMinutes * 60,
-              'NX',
-            );
-            if (locked === null) return;
-          }
-          await this.botNotification
-            .sendRecommendedJobNotification(workerId, offer.id)
-            .catch((err: unknown) =>
-              this.logger.warn(
-                `sendRecommendedJobNotification failed for worker ${workerId}`,
-                err instanceof Error ? err.message : String(err),
-              ),
-            );
-        };
-
-        for (const { id: workerId, score } of workerResults) {
-          if (score < minScore) continue;
-          const p = Promise.resolve().then(async () => {
-            while (active >= NOTIFY_CONCURRENCY) {
-              await Promise.race(queue);
-            }
-            active++;
-            try {
-              await notify(workerId);
-            } finally {
-              active--;
-            }
-          });
-          queue.push(p);
-        }
-        await Promise.all(queue);
-      })
+    // No geocoding pass: both an offer and a profile declare a country and a
+    // city, and `placeProximityScore` ranks off those directly. Resolving an
+    // address to coordinates bought a finer distance than the data supports,
+    // at the cost of a Nominatim round trip on every create whose silent
+    // failure left the offer permanently unlocated.
+    void this.matchingService
+      .indexJobOffer(offer.id)
       .catch((err: unknown) =>
         this.logger.warn(
-          `geocode/index/notify failed for offer ${offer.id}`,
+          `index failed for offer ${offer.id}`,
           err instanceof Error ? err.message : String(err),
         ),
       );
+
+    // What this employer actually hires for, in their own actions.
+    //
+    // Until now their category affinity could only come from the categories
+    // they ticked once at signup: the ranker reads `interaction_events` and
+    // publishing emitted none, so an employer who signed up under one trade and
+    // then posted thirty offers in another was still ranked on the first.
+    // Carries `category_id`, which is the whole point — `deriveFeatures` folds
+    // it straight into `categoryAffinity`, decayed by age like every other
+    // signal, so a change of trade shows up on its own.
+    //
+    // Fire-and-forget, like every other `record` call: a ranking signal must
+    // never be able to fail a publish.
+    void this.interactionEvents.record({
+      actorId: employerId,
+      actorType: InteractionActor.EMPLOYER,
+      kind: InteractionKind.PUBLISH,
+      objectType: InteractionObject.JOB_OFFER,
+      objectId: offer.id,
+      categoryId: offer.category_id,
+      source: InteractionSource.SERVER,
+      surface: 'job_offer_create',
+    });
+
+    // Queued rather than chained onto the index above, so an indexing failure
+    // no longer takes the notification down with it and the fan-out survives a
+    // restart.
+    await this.jobNotification.enqueue(offer.id);
 
     return this.toListItem(offer);
   }
@@ -464,10 +614,14 @@ export class JobOfferService {
       reference: string;
       title: string;
       description: string;
-      scheduled_at: Date;
+      scheduled_at: Date | null;
       amount: unknown;
       payment_flow: PaymentFlow | null;
-      address: string;
+      address: string | null;
+      is_remote: boolean;
+      employment_type: EmploymentType;
+      city: string | null;
+      country_name: string | null;
       latitude: number | null;
       longitude: number | null;
       note: string | null;
@@ -487,13 +641,26 @@ export class JobOfferService {
     // every column sorts the same way. The previous `jo.id > cursor` compared a
     // column the query never ordered by, so paging both skipped and repeated
     // offers regardless of the in-memory re-sort below.
-    const keyset = cursor
-      ? Prisma.sql`AND (
-          jo.scheduled_at > ${cursor.scheduledAt}
-          OR (jo.scheduled_at = ${cursor.scheduledAt} AND jo.created_at < ${cursor.createdAt})
-          OR (jo.scheduled_at = ${cursor.scheduledAt} AND jo.created_at = ${cursor.createdAt} AND jo.id > ${cursor.id}::uuid)
-        )`
-      : Prisma.empty;
+    //
+    // Two branches, because the sort is `scheduled_at ASC NULLS LAST`: an
+    // undated offer sorts after every dated one, and SQL's three-valued logic
+    // will not express that on its own — `NULL > x` is unknown, not false, so a
+    // single predicate silently drops rows.
+    const keyset = !cursor
+      ? Prisma.empty
+      : cursor.scheduledAt === null
+        ? // Already inside the undated block: only later undated rows remain.
+          Prisma.sql`AND jo.scheduled_at IS NULL AND (
+            jo.created_at < ${cursor.createdAt}
+            OR (jo.created_at = ${cursor.createdAt} AND jo.id > ${cursor.id}::uuid)
+          )`
+        : // Still in the dated block: later dated rows, then all undated ones.
+          Prisma.sql`AND (
+            jo.scheduled_at IS NULL
+            OR jo.scheduled_at > ${cursor.scheduledAt}
+            OR (jo.scheduled_at = ${cursor.scheduledAt} AND jo.created_at < ${cursor.createdAt})
+            OR (jo.scheduled_at = ${cursor.scheduledAt} AND jo.created_at = ${cursor.createdAt} AND jo.id > ${cursor.id}::uuid)
+          )`;
 
     // Prisma doesn't support HAVING on aggregates in findMany so we use $queryRaw.
     // Parameters are passed positionally as $1, $2, … to prevent SQL injection.
@@ -503,10 +670,14 @@ export class JobOfferService {
         reference: string;
         title: string;
         description: string;
-        scheduled_at: Date;
+        scheduled_at: Date | null;
         amount: unknown;
         payment_flow: PaymentFlow | null;
-        address: string;
+        address: string | null;
+        is_remote: boolean;
+        employment_type: EmploymentType;
+        city: string | null;
+        country_name: string | null;
         latitude: number | null;
         longitude: number | null;
         note: string | null;
@@ -527,6 +698,10 @@ export class JobOfferService {
         jo.amount,
         jo.payment_flow,
         jo.address,
+        jo.is_remote,
+        jo.employment_type,
+        jo.city,
+        jo.country_name,
         jo.latitude,
         jo.longitude,
         jo.note,
@@ -540,7 +715,10 @@ export class JobOfferService {
       LEFT JOIN applications a ON a.job_offer_id = jo.id
       WHERE
         jo.status IN ('ACTIVE', 'PARTIALLY_FILLED')
-        AND jo.scheduled_at > ${minScheduledAt}
+        -- An undated offer has no closing date to be past, so the floor
+        -- cannot apply to it. Without the IS NULL branch it would be excluded
+        -- from the entire open feed.
+        AND (jo.scheduled_at IS NULL OR jo.scheduled_at > ${minScheduledAt})
         ${keyset}
         ${
           excludeWorkerId
@@ -553,11 +731,70 @@ export class JobOfferService {
         }
       GROUP BY jo.id
       HAVING COUNT(a.id) FILTER (WHERE a.status = 'ACCEPTED') < jo.quantity
-      ORDER BY jo.scheduled_at ASC, jo.created_at DESC
+      ORDER BY jo.scheduled_at ASC NULLS LAST, jo.created_at DESC
       LIMIT ${take}
     `;
 
     return rows;
+  }
+
+  /**
+   * Combien de missions ouvertes — le nombre, et rien d'autre.
+   *
+   * Existe pour VoVa, qui doit pouvoir répondre « il y a *4 missions* en
+   * plomberie » ou « *2 missions* à Pointe-Noire » sans rien révéler du contenu
+   * des offres. Renvoyer un compte plutôt qu'une liste n'est pas une économie :
+   * c'est ce qui garantit que l'assistant ne PEUT pas divulguer un titre, un
+   * montant ou une adresse, quoi qu'on lui demande ensuite. On ne peut pas
+   * fuiter ce qu'on n'a pas reçu.
+   *
+   * Les deux critères sont optionnels et se combinent. Compter en base plutôt
+   * que filtrer une page est ce qui distingue « il n'y en a aucune » de « il
+   * n'y en a aucune parmi les dix plus imminentes » — la seconde est une
+   * réponse fausse, et c'est celle que la version précédente donnait.
+   *
+   * Le prédicat est copié sur `queryOpenSlots` — mêmes statuts, même plancher de
+   * date, même `HAVING accepted_count < quantity`. Un compte qui ne dirait pas
+   * la même chose que la liste que la personne ouvre juste après serait pire que
+   * pas de compte du tout : elle verrait le désaccord, pas nous.
+   */
+  async countOpenOffers(params: {
+    categoryId?: string | null;
+    city?: string | null;
+    excludeWorkerId?: string | null;
+  }): Promise<number> {
+    const { categoryId, city, excludeWorkerId } = params;
+    const minScheduledAt = new Date(Date.now() + 2 * 60 * 60 * 1000);
+
+    const rows = await this.prisma.$queryRaw<Array<{ count: bigint }>>`
+      SELECT COUNT(*)::bigint AS count FROM (
+        SELECT jo.id
+        FROM job_offers jo
+        LEFT JOIN applications a ON a.job_offer_id = jo.id
+        WHERE
+          jo.status IN ('ACTIVE', 'PARTIALLY_FILLED')
+          AND (jo.scheduled_at IS NULL OR jo.scheduled_at > ${minScheduledAt})
+          ${
+            categoryId
+              ? Prisma.sql`AND jo.category_id = ${categoryId}::uuid`
+              : Prisma.empty
+          }
+          ${city ? Prisma.sql`AND jo.city ILIKE ${`%${city}%`}` : Prisma.empty}
+          ${
+            excludeWorkerId
+              ? Prisma.sql`AND NOT EXISTS (
+                  SELECT 1 FROM applications ex
+                  WHERE ex.job_offer_id = jo.id
+                    AND ex.worker_id = ${excludeWorkerId}::uuid
+                )`
+              : Prisma.empty
+          }
+        GROUP BY jo.id
+        HAVING COUNT(a.id) FILTER (WHERE a.status = 'ACCEPTED') < jo.quantity
+      ) t
+    `;
+
+    return Number(rows[0]?.count ?? 0);
   }
 
   async findActive(
@@ -597,9 +834,13 @@ export class JobOfferService {
     // `scheduled_at` and only then reordered. Global ranking needs the
     // recommendation engine, which doesn't cursor-paginate.
     const categorySet = new Set(workerCategoryIds ?? []);
-    const ordered =
-      workerCoords || categorySet.size > 0 ? [...slice] : slice;
+    const ordered = workerCoords || categorySet.size > 0 ? [...slice] : slice;
     if (ordered !== slice) {
+      // One clock for the whole sort. `scoreOf` runs inside the comparator, so
+      // a `Date.now()` read in there was re-read on every comparison — not just
+      // a tie-break wobble but an inconsistent comparator, which a sort is
+      // entitled to turn into an arbitrary order.
+      const now = Date.now();
       ordered.sort((a, b) => {
         const scoreOf = (o: (typeof rows)[number]): number => {
           const prox =
@@ -611,7 +852,14 @@ export class JobOfferService {
                   }),
                 )
               : 0.5;
-          const urgency = urgencyScore(o.scheduled_at);
+          // This is a simple weighted display re-sort, not the v2 ranker's
+          // null-redistributing mean — there is nowhere to redistribute to, so
+          // an undated offer takes the neutral midpoint rather than 0, which
+          // would sink it beneath every dated offer for no reason.
+          const urgency =
+            o.scheduled_at === null
+              ? 0.5
+              : urgencyScore(o.scheduled_at, URGENCY_HALF_LIFE_HOURS, now);
           const category =
             o.category_id && categorySet.has(o.category_id) ? 1.0 : 0.0;
           return 0.45 * prox + 0.3 * urgency + 0.25 * category;
@@ -829,40 +1077,6 @@ export class JobOfferService {
     }
   }
 
-  async updateStatus(
-    id: string,
-    status: JobOfferStatus,
-    actorProfileId: string,
-  ): Promise<JobOfferListItem> {
-    const offer = await this.prisma.jobOffer.findUnique({
-      where: { id },
-    });
-    if (!offer) {
-      throw new NotFoundException("Offre d'emploi introuvable");
-    }
-    if (offer.employer_id !== actorProfileId) {
-      throw new ForbiddenException('Non autorisé à modifier cette offre');
-    }
-
-    const updated = await this.prisma.jobOffer.update({
-      where: { id },
-      data: { status },
-    });
-
-    await this.closeApplicantsIfTerminal(id, status);
-
-    this.eventEmitter.emit(AdminNotificationEvent.JOB_OFFER_STATUS_CHANGED, {
-      event: AdminNotificationEvent.JOB_OFFER_STATUS_CHANGED,
-      title: 'Statut offre modifié',
-      message: `Le statut de l'offre "${updated.title}" a été changé en ${status}`,
-      entityType: 'job-offer',
-      entityId: String(updated.id),
-      timestamp: new Date().toISOString(),
-    });
-
-    return this.toListItem(updated);
-  }
-
   /**
    * Reopens an expired offer at a new date.
    *
@@ -883,7 +1097,7 @@ export class JobOfferService {
       this.prisma.jobOffer.findUnique({ where: { id } }),
       this.prisma.profile.findUnique({
         where: { id: actorProfileId },
-        select: { verification_status: true },
+        select: { verification_status: true, status: true },
       }),
     ]);
     if (!offer || offer.deleted_at) {
@@ -896,6 +1110,14 @@ export class JobOfferService {
     // gate as creating one. Also reached from the bot (republish-expired-job.flow).
     if (!actor) {
       throw new NotFoundException('Employeur introuvable');
+    }
+    // The account check `create()` has always had, which this path was missing:
+    // a suspended employer could reopen an expired offer and be back on the
+    // market, which is exactly what suspending them was meant to stop.
+    if (actor.status !== AccountStatus.ACTIVE) {
+      throw new ForbiddenException(
+        'Le profil doit être actif pour publier des offres',
+      );
     }
     assertKycVerified(actor.verification_status);
     if (offer.status !== JobOfferStatus.EXPIRED) {
@@ -942,6 +1164,21 @@ export class JobOfferService {
       throw new NotFoundException("Offre d'emploi introuvable");
     }
 
+    // Admin status changes are otherwise unconstrained on purpose — this is the
+    // escape hatch when something has gone wrong. But reopening a COMPLETED
+    // offer is not an escape hatch, it is a corruption: closing it moved every
+    // hired application to END and its assignments to COMPLETED, and putting
+    // the offer back to recruiting leaves those workers attached to a live post
+    // in a state no other code expects. Nothing here can undo that half.
+    if (
+      offer.status === JobOfferStatus.COMPLETED &&
+      !TERMINAL_JOB_OFFER_STATUSES.includes(status)
+    ) {
+      throw new BadRequestException(
+        'Cette offre est clôturée : ses candidats ont déjà été soldés. Republiez-la ou créez-en une nouvelle plutôt que de la rouvrir.',
+      );
+    }
+
     const updated = await this.prisma.jobOffer.update({
       where: { id },
       data: { status },
@@ -980,8 +1217,18 @@ export class JobOfferService {
         `La description doit contenir entre ${DESCRIPTION_MIN} et ${DESCRIPTION_MAX} caractères`,
       );
     }
-    const scheduledAt = new Date(dto.scheduled_at);
-    if (Number.isNaN(scheduledAt.getTime())) {
+    // Every offer needs this date, but it means two different things, so the
+    // message names the one the employer is actually being asked for. Demanding
+    // "la date de clôture" on a CDI is how you get an employer inventing one.
+    if (!dto.scheduled_at) {
+      throw new BadRequestException(
+        isDatedMission(dto.employment_type)
+          ? 'La date de la mission est requise'
+          : 'La date de clôture des candidatures est requise',
+      );
+    }
+    const scheduledAt = dto.scheduled_at ? new Date(dto.scheduled_at) : null;
+    if (scheduledAt !== null && Number.isNaN(scheduledAt.getTime())) {
       throw new BadRequestException('Format de date invalide');
     }
     if (
@@ -992,7 +1239,23 @@ export class JobOfferService {
         `Le montant doit être entre ${AMOUNT_MIN_FCFA} et ${AMOUNT_MAX_FCFA} FCFA`,
       );
     }
-    if (!dto.address || dto.address.trim().length < ADDRESS_MIN) {
+    // A remote job has no site to travel to, so no address is required —
+    // but if one is supplied anyway it still has to be a real address rather
+    // than a stray character.
+    if (
+      !dto.isRemote &&
+      (!dto.address || dto.address.trim().length < ADDRESS_MIN)
+    ) {
+      throw new BadRequestException(
+        `L'adresse doit contenir au moins ${ADDRESS_MIN} caractères`,
+      );
+    }
+    if (
+      dto.isRemote &&
+      dto.address != null &&
+      dto.address.trim().length > 0 &&
+      dto.address.trim().length < ADDRESS_MIN
+    ) {
       throw new BadRequestException(
         `L'adresse doit contenir au moins ${ADDRESS_MIN} caractères`,
       );
@@ -1014,13 +1277,7 @@ export class JobOfferService {
     }
   }
 
-  async getJobOffersForAdmin(params: {
-    page: number;
-    limit: number;
-    q?: string;
-    status?: JobOfferStatus[];
-    deleted?: boolean;
-  }): Promise<{
+  async getJobOffersForAdmin(params: AdminJobOfferListParams): Promise<{
     data: AdminJobOfferListItem[];
     total: number;
     page: number;
@@ -1033,19 +1290,25 @@ export class JobOfferService {
     );
   }
 
-  private async loadGetJobOffersForAdmin(params: {
-    page: number;
-    limit: number;
-    q?: string;
-    status?: JobOfferStatus[];
-    deleted?: boolean;
-  }): Promise<{
+  private async loadGetJobOffersForAdmin(
+    params: AdminJobOfferListParams,
+  ): Promise<{
     data: AdminJobOfferListItem[];
     total: number;
     page: number;
     limit: number;
   }> {
-    const { page, limit, q, status, deleted } = params;
+    const {
+      page,
+      limit,
+      q,
+      status,
+      employment_type,
+      payment_flow,
+      amount_min,
+      amount_max,
+      deleted,
+    } = params;
     const skip = (page - 1) * limit;
 
     // Active rows by default; the admin "Deleted" filter flips to archived rows.
@@ -1064,6 +1327,25 @@ export class JobOfferService {
 
     if (status != null && status.length > 0) {
       where.status = { in: status };
+    }
+
+    if (employment_type != null && employment_type.length > 0) {
+      where.employment_type = { in: employment_type };
+    }
+
+    if (payment_flow != null && payment_flow.length > 0) {
+      where.payment_flow = { in: payment_flow };
+    }
+
+    // Only one bound may be given, so the two are applied independently rather
+    // than as a pair. Note this also drops offers with no amount set: Prisma
+    // translates gte/lte to SQL comparisons, and NULL fails both. That is the
+    // intended reading — an offer with no price is not "between 0 and 50,000".
+    if (amount_min != null || amount_max != null) {
+      where.amount = {
+        ...(amount_min != null ? { gte: amount_min } : {}),
+        ...(amount_max != null ? { lte: amount_max } : {}),
+      };
     }
 
     const [offers, total] = await Promise.all([
@@ -1097,6 +1379,14 @@ export class JobOfferService {
       this.prisma.jobOffer.count({ where }),
     ]);
 
+    // Aggregated over the whole page in a handful of queries, never one query
+    // per offer — same shape as the profile list's unpaid-penalty count. The
+    // list DTO caps `limit` at 100 and the export pages at 100, so this reads
+    // at most 100 offers' worth of relations at a time.
+    const aggregates = await this.loadJobOfferAggregates(
+      offers.map((o) => o.id),
+    );
+
     const data: AdminJobOfferListItem[] = offers.map((o) => ({
       id: o.id,
       reference: o.reference,
@@ -1106,10 +1396,15 @@ export class JobOfferService {
           ? null
           : { id: o.category.id, name: o.category.name },
       description: o.description,
-      scheduledAt: o.scheduled_at.toISOString(),
-      amount: Number(o.amount),
+      scheduledAt: o.scheduled_at?.toISOString() ?? null,
+      employmentType: o.employment_type,
+      amount: o.amount == null ? null : Number(o.amount),
       paymentFlow: o.payment_flow,
       address: o.address,
+      isRemote: o.is_remote,
+      city: o.city,
+      countryCode: o.country_code,
+      countryName: o.country_name,
       note: o.note,
       quantity: o.quantity,
       status: o.status,
@@ -1124,9 +1419,181 @@ export class JobOfferService {
       createdAt: o.created_at.toISOString(),
       updatedAt: o.updated_at.toISOString(),
       vectorIndexedAt: o.vector_indexed_at?.toISOString() ?? null,
+      employerUnlockPaid: o.employer_unlock_paid,
+      ...(aggregates.get(o.id) ?? emptyJobOfferAggregates()),
     }));
 
     return { data, total, page, limit };
+  }
+
+  /**
+   * What became of each offer: applications by outcome, who was hired, whether
+   * the contact was paid for, what it cost anyone in penalties, how it was
+   * rated.
+   *
+   * Five queries for a whole page. Doing it per offer would turn one export —
+   * which walks every page — into thousands of round trips.
+   */
+  private async loadJobOfferAggregates(
+    offerIds: string[],
+  ): Promise<Map<string, JobOfferAggregates>> {
+    const byOffer = new Map<string, JobOfferAggregates>();
+    if (offerIds.length === 0) return byOffer;
+
+    const at = (id: string): JobOfferAggregates => {
+      const existing = byOffer.get(id);
+      if (existing) return existing;
+      const fresh = emptyJobOfferAggregates();
+      byOffer.set(id, fresh);
+      return fresh;
+    };
+
+    const [applications, assignments, unlocks, penalties, ratings] =
+      await Promise.all([
+        this.prisma.application.groupBy({
+          by: ['job_offer_id', 'status'],
+          where: { job_offer_id: { in: offerIds } },
+          _count: { _all: true },
+        }),
+        this.prisma.assignment.findMany({
+          where: { job_offer_id: { in: offerIds } },
+          orderBy: { created_at: 'asc' },
+          select: {
+            job_offer_id: true,
+            status: true,
+            worker: { select: { first_name: true, last_name: true } },
+          },
+        }),
+        this.prisma.contactUnlockAttempt.findMany({
+          where: { job_offer_id: { in: offerIds } },
+          select: {
+            job_offer_id: true,
+            employer_paid: true,
+            worker_paid: true,
+            unlocked_at: true,
+            employer_amount: true,
+            worker_amount: true,
+            job_offer: {
+              select: { quantity: true, employer_unlock_paid: true },
+            },
+          },
+        }),
+        // A deleted penalty is not a penalty: it was withdrawn, and counting it
+        // would overstate what this offer actually cost its workers.
+        this.prisma.penalty.findMany({
+          where: {
+            deleted_at: null,
+            application: { job_offer_id: { in: offerIds } },
+          },
+          select: {
+            amount: true,
+            paid_at: true,
+            application: { select: { job_offer_id: true } },
+          },
+        }),
+        this.prisma.rating.findMany({
+          where: { assignment: { job_offer_id: { in: offerIds } } },
+          select: {
+            score: true,
+            assignment: { select: { job_offer_id: true } },
+          },
+        }),
+      ]);
+
+    for (const row of applications) {
+      const agg = at(row.job_offer_id);
+      const count = row._count._all;
+      // PENDING, VIEWED and WAITING_PAYMENT are all "still open" from the
+      // employer's side — the export reads them as one pending bucket.
+      if (
+        row.status === ApplicationStatus.PENDING ||
+        row.status === ApplicationStatus.VIEWED ||
+        row.status === ApplicationStatus.WAITING_PAYMENT
+      ) {
+        agg.applicationsPending += count;
+      } else if (row.status === ApplicationStatus.ACCEPTED) {
+        agg.applicationsAccepted += count;
+      } else if (row.status === ApplicationStatus.REJECTED) {
+        agg.applicationsRejected += count;
+      } else if (row.status === ApplicationStatus.CANCELLED) {
+        agg.applicationsCancelled += count;
+      }
+    }
+
+    for (const a of assignments) {
+      const agg = at(a.job_offer_id);
+      agg.hiredCount += 1;
+      if (a.status === AssignmentStatus.COMPLETED) agg.completedCount += 1;
+      if (a.status === AssignmentStatus.NO_SHOW) agg.noShowCount += 1;
+      if (
+        a.status === AssignmentStatus.CANCELLED_BY_WORKER ||
+        a.status === AssignmentStatus.CANCELLED_BY_EMPLOYER
+      ) {
+        agg.cancelledAssignmentsCount += 1;
+      }
+      const name =
+        `${a.worker.first_name ?? ''} ${a.worker.last_name ?? ''}`.trim();
+      if (name) agg.workerNames.push(name);
+    }
+
+    // A multi-seat offer is paid for once by the employer, and that single
+    // payment flips `employer_paid` on every candidate's attempt. Counting the
+    // fee per attempt would report N x what was actually collected, so credit
+    // a job-level payment the first time we meet its offer.
+    const employerFeeAlreadyCredited = new Set<string>();
+
+    for (const u of unlocks) {
+      const agg = at(u.job_offer_id);
+      agg.unlockAttempts += 1;
+      if (u.unlocked_at) agg.unlocksCompleted += 1;
+      // Revenue is what was actually paid, side by side: an attempt where only
+      // one party paid still earned that half.
+      if (u.employer_paid) {
+        agg.unlockEmployerPaid += 1;
+        const paidAtJobLevel = isEmployerCoveredAtJobLevel(
+          u.job_offer?.quantity,
+          u.job_offer?.employer_unlock_paid ?? false,
+        );
+        if (!paidAtJobLevel) {
+          agg.unlockRevenue += Number(u.employer_amount);
+        } else if (!employerFeeAlreadyCredited.has(u.job_offer_id)) {
+          employerFeeAlreadyCredited.add(u.job_offer_id);
+          agg.unlockRevenue += Number(u.employer_amount);
+        }
+      }
+      if (u.worker_paid) {
+        agg.unlockWorkerPaid += 1;
+        agg.unlockRevenue += Number(u.worker_amount);
+      }
+    }
+
+    for (const p of penalties) {
+      const offerId = p.application?.job_offer_id;
+      if (!offerId) continue;
+      const agg = at(offerId);
+      agg.penaltiesCount += 1;
+      agg.penaltiesAmount += Number(p.amount);
+      if (!p.paid_at) agg.unpaidPenaltiesCount += 1;
+    }
+
+    const ratingSums = new Map<string, number>();
+    for (const r of ratings) {
+      const offerId = r.assignment.job_offer_id;
+      const agg = at(offerId);
+      agg.ratingCount += 1;
+      ratingSums.set(offerId, (ratingSums.get(offerId) ?? 0) + r.score);
+    }
+    for (const [offerId, sum] of ratingSums) {
+      const agg = at(offerId);
+      // Rounded to one decimal: the raw mean of a handful of integer scores is
+      // a long float that means nothing more than 4,3 does.
+      agg.ratingAvg =
+        agg.ratingCount > 0
+          ? Math.round((sum / agg.ratingCount) * 10) / 10
+          : null;
+    }
+
+    return byOffer;
   }
 
   async getJobOfferDetailForAdmin(
@@ -1176,6 +1643,11 @@ export class JobOfferService {
       throw new NotFoundException("Offre d'emploi introuvable");
     }
 
+    // The detail response extends the list item, so it owes the same
+    // aggregates — one shared loader rather than a second counting path that
+    // could disagree with the list for the same offer.
+    const aggregates = await this.loadJobOfferAggregates([offer.id]);
+
     return {
       id: offer.id,
       reference: offer.reference,
@@ -1185,10 +1657,15 @@ export class JobOfferService {
           ? null
           : { id: offer.category.id, name: offer.category.name },
       description: offer.description,
-      scheduledAt: offer.scheduled_at.toISOString(),
-      amount: Number(offer.amount),
+      scheduledAt: offer.scheduled_at?.toISOString() ?? null,
+      employmentType: offer.employment_type,
+      amount: offer.amount == null ? null : Number(offer.amount),
       paymentFlow: offer.payment_flow,
       address: offer.address,
+      isRemote: offer.is_remote,
+      city: offer.city,
+      countryCode: offer.country_code,
+      countryName: offer.country_name,
       note: offer.note,
       quantity: offer.quantity,
       status: offer.status,
@@ -1203,6 +1680,8 @@ export class JobOfferService {
       createdAt: offer.created_at.toISOString(),
       updatedAt: offer.updated_at.toISOString(),
       vectorIndexedAt: offer.vector_indexed_at?.toISOString() ?? null,
+      employerUnlockPaid: offer.employer_unlock_paid,
+      ...(aggregates.get(offer.id) ?? emptyJobOfferAggregates()),
       applications: offer.applications.map((a) => ({
         id: a.id,
         workerName:
@@ -1275,7 +1754,9 @@ export class JobOfferService {
       throw new NotFoundException('Offre introuvable');
     }
     if (offer.employer_id !== actorProfileId) {
-      throw new ForbiddenException("Vous n'êtes pas l'employeur de cette offre");
+      throw new ForbiddenException(
+        "Vous n'êtes pas l'employeur de cette offre",
+      );
     }
     if (!EMPLOYER_DELETABLE_JOB_OFFER_STATUSES.includes(offer.status)) {
       throw new BadRequestException(
@@ -1328,9 +1809,7 @@ export class JobOfferService {
     await this.cache.invalidate('jobs');
     // Remove each from the vector index so archived offers stop being matched.
     for (const id of ids) {
-      void this.matchingService
-        .deleteJobFromIndex(id)
-        .catch(() => undefined);
+      void this.matchingService.deleteJobFromIndex(id).catch(() => undefined);
     }
     return { count };
   }
@@ -1354,8 +1833,15 @@ export class JobOfferService {
     if (dto.title !== undefined) data.title = dto.title.trim();
     if (dto.description !== undefined)
       data.description = dto.description.trim();
-    if (dto.scheduledAt !== undefined)
-      data.scheduled_at = new Date(dto.scheduledAt);
+    // Explicit null clears the closing date — the only way to turn a dated
+    // offer into an open-ended one. `undefined` still means "leave alone".
+    if (dto.scheduledAt !== undefined) {
+      data.scheduled_at =
+        dto.scheduledAt === null ? null : new Date(dto.scheduledAt);
+    }
+    if (dto.employmentType !== undefined) {
+      data.employment_type = dto.employmentType;
+    }
     if (dto.amount !== undefined) data.amount = dto.amount ?? null;
     if (dto.paymentFlow !== undefined)
       data.payment_flow = dto.paymentFlow ?? null;
@@ -1366,7 +1852,18 @@ export class JobOfferService {
         data.category = { connect: { id: dto.categoryId } };
       }
     }
-    if (dto.address !== undefined) data.address = dto.address.trim();
+    if (dto.isRemote !== undefined) data.is_remote = dto.isRemote;
+    if (dto.isRemote) {
+      // Same rule as creation: flipping an offer to remote drops its location
+      // rather than leaving a stale one behind for filters to trip over.
+      data.address = null;
+      data.country_code = null;
+      data.country_name = null;
+      data.city = null;
+    } else {
+      if (dto.address !== undefined) data.address = dto.address.trim();
+      Object.assign(data, this.geo.resolveLocation(dto));
+    }
     if (dto.note !== undefined) data.note = dto.note.trim() || null;
     if (dto.quantity !== undefined) data.quantity = dto.quantity;
 
@@ -1394,10 +1891,17 @@ export class JobOfferService {
       reference: string;
       title: string;
       description: string;
-      scheduled_at: Date;
+      scheduled_at: Date | null;
       amount: unknown;
       payment_flow: PaymentFlow | null;
-      address: string;
+      address: string | null;
+      is_remote?: boolean;
+      // Required, not optional-with-a-default: an `?? MISSION` fallback here
+      // silently relabelled every CDI/CDD/STAGE as a mission whenever a caller's
+      // `select` forgot the column. Let the compiler catch that instead.
+      employment_type: EmploymentType;
+      city: string | null;
+      country_name: string | null;
       note: string | null;
       quantity: number;
       status: string;
@@ -1415,6 +1919,10 @@ export class JobOfferService {
       amount: offer.amount == null ? null : Number(offer.amount),
       payment_flow: offer.payment_flow,
       address: offer.address,
+      is_remote: offer.is_remote ?? false,
+      employment_type: offer.employment_type,
+      city: offer.city,
+      country_name: offer.country_name,
       note: offer.note,
       quantity: offer.quantity,
       acceptedCount,

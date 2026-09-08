@@ -8,37 +8,13 @@ export interface ConfigDefault {
   isSecret: boolean;
 }
 
+// Keep in sync with src/modules/system-config/system-config.constants.ts —
+// a test asserts the two lists define the same keys.
+//
+// The `twilio.*` keys were removed when WhatsApp gained a second provider:
+// messaging credentials are environment-only now, for both Twilio and Meta
+// Cloud. See src/modules/whatsapp/whatsapp.config.ts.
 export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
-  // ── TWILIO ────────────────────────────────────────────────────────────────
-  {
-    key: 'twilio.account_sid',
-    value: '',
-    category: ConfigCategory.TWILIO,
-    label: 'Twilio Account SID',
-    isSecret: false,
-  },
-  {
-    key: 'twilio.auth_token',
-    value: '',
-    category: ConfigCategory.TWILIO,
-    label: 'Twilio Auth Token',
-    isSecret: true,
-  },
-  {
-    key: 'twilio.whatsapp_from',
-    value: '',
-    category: ConfigCategory.TWILIO,
-    label: 'Numéro WhatsApp expéditeur (ex: whatsapp:+14155...)',
-    isSecret: false,
-  },
-  {
-    key: 'twilio.sms_from',
-    value: '',
-    category: ConfigCategory.TWILIO,
-    label: 'Numéro SMS expéditeur',
-    isSecret: false,
-  },
-
   // ── FEES ──────────────────────────────────────────────────────────────────
   {
     key: 'fees.late_cancellation_penalty_fcfa',
@@ -126,10 +102,31 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     isSecret: false,
   },
   {
-    key: 'fees.max_concurrent_applications',
-    value: '10',
+    key: 'fees.penalty_suspension_threshold',
+    value: '3',
     category: ConfigCategory.FEES,
-    label: 'Nombre max de candidatures simultanées (par travailleur)',
+    label: 'Nombre de pénalités impayées avant suspension du compte',
+    isSecret: false,
+  },
+  {
+    key: 'fees.penalty_hard_block_days',
+    value: '3',
+    category: ConfigCategory.FEES,
+    label: 'Délai avant blocage dur pour pénalité impayée (jours)',
+    isSecret: false,
+  },
+  {
+    key: 'fees.penalty_max_notifications',
+    value: '3',
+    category: ConfigCategory.FEES,
+    label: 'Nombre max de rappels envoyés par pénalité impayée',
+    isSecret: false,
+  },
+  {
+    key: 'fees.penalty_notification_interval_hours',
+    value: '23',
+    category: ConfigCategory.FEES,
+    label: 'Délai minimum entre deux rappels de pénalité (heures)',
     isSecret: false,
   },
   {
@@ -181,13 +178,100 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     label: 'Crédit de bienvenue – Employeur (FCFA)',
     isSecret: false,
   },
+  {
+    // Paid to the parrain when their filleul makes their first mobile-money
+    // payment for a connection — never at signup, which would be farmable with
+    // throwaway accounts.
+    //
+    // 300 + 200 rather than 500 + 250 so the total (500) is covered by an
+    // employer contact unlock, which is also 500. The payout can never exceed
+    // the payment that triggered it, so at 750 the only qualifying trigger left
+    // was the 1000 FCFA recommendation contact — the program quietly paid on
+    // one of its three entry points.
+    key: 'fees.referral_credit_referrer',
+    value: '300',
+    category: ConfigCategory.FEES,
+    label: 'Crédit parrainage – Parrain (FCFA)',
+    isSecret: false,
+  },
+  {
+    // Paid to the filleul at the same moment, from the same claim. Note the
+    // two together are capped at the amount of the triggering payment, so
+    // raising either can silently stop small payments from qualifying — see
+    // ReferralService.settleForReferee.
+    key: 'fees.referral_credit_referee',
+    value: '200',
+    category: ConfigCategory.FEES,
+    label: 'Crédit parrainage – Filleul (FCFA)',
+    isSecret: false,
+  },
+  {
+    // Counts REWARDED referrals only: a parrain past the cap still has their
+    // referrals recorded and visible, they just stop paying. 0 = unlimited,
+    // resolved to null in getReferralCredits so no call site compares against
+    // the sentinel.
+    key: 'fees.referral_max_rewarded_per_referrer',
+    value: '10',
+    category: ConfigCategory.FEES,
+    label: 'Parrainages rémunérés max par parrain (0 = illimité)',
+    isSecret: false,
+  },
+  {
+    // What the two credit values above MEAN — absolute FCFA, or a percentage of
+    // the payment that triggered the settlement. FIXED keeps every existing
+    // install on its 300/200 behaviour untouched.
+    key: 'fees.referral_commission_type',
+    value: 'FIXED',
+    category: ConfigCategory.FEES,
+    label: 'Type de commission parrainage (FIXED = FCFA, PERCENTAGE = %)',
+    isSecret: false,
+  },
+  {
+    // Absolute ceiling on one parrainage payout, 0 = aucun. Matters in
+    // PERCENTAGE mode, where the payout follows a base the admin never types.
+    key: 'fees.referral_max_payout_per_referral',
+    value: '0',
+    category: ConfigCategory.FEES,
+    label: 'Plafond de commission par parrainage (FCFA, 0 = aucun)',
+    isSecret: false,
+  },
 
   // ── MATCHING ──────────────────────────────────────────────────────────────
   {
     key: 'matching.use_embeddings',
-    value: 'false',
+    value: 'true',
     category: ConfigCategory.MATCHING,
     label: 'Activer algorithme de similarité (embeddings)',
+    isSecret: false,
+  },
+  {
+    // Written automatically when `matching.use_embeddings` flips false → true.
+    // While embeddings are off the indexers stamp `vector_indexed_at` without
+    // writing a vector, so `reindexPending` — which looks for a null stamp —
+    // would find nothing to do forever. Comparing against this timestamp is what
+    // lets the scan reclaim those rows. Empty means "never enabled".
+    key: 'matching.embeddings_enabled_at',
+    value: '',
+    category: ConfigCategory.MATCHING,
+    label: 'Dernière activation des embeddings (ISO, automatique)',
+    isSecret: false,
+  },
+  {
+    // Written by `reindexPending` after it rewrites every point at the current
+    // payload schema. Compared against `INDEX_SCHEMA_VERSION` in qdrant.config —
+    // a mismatch triggers one full rewrite and suppresses any filter that
+    // depends on fields the old points do not carry. Empty means "never".
+    key: 'matching.index_schema_version',
+    value: '',
+    category: ConfigCategory.MATCHING,
+    label: 'Version du schéma de payload Qdrant (automatique)',
+    isSecret: false,
+  },
+  {
+    key: 'matching.reliability_threshold',
+    value: '50',
+    category: ConfigCategory.MATCHING,
+    label: 'Score fiabilité minimum (moteur de matching)',
     isSecret: false,
   },
   {
@@ -220,7 +304,7 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
   },
   {
     key: 'matching.engine_version',
-    value: 'legacy',
+    value: 'v2',
     category: ConfigCategory.MATCHING,
     label: 'Moteur de recommandation actif (legacy | v2)',
     isSecret: false,
@@ -233,10 +317,26 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     isSecret: false,
   },
   {
+    // Deliberately narrow. This is the real fan-out width now that the
+    // notification path no longer runs its candidates through a per-category
+    // diversity cap — that cap had been limiting every categorised offer to
+    // five recipients regardless of what this said. Five keeps a fresh
+    // environment behaving like the one that has actually been running, and
+    // makes widening a decision someone takes rather than inherits: each extra
+    // recipient is a paid MARKETING template sent to somebody who did not ask
+    // for it, and the WhatsApp quality rating is what pays for getting that
+    // wrong.
     key: 'matching.max_notification_workers',
-    value: '20',
+    value: '5',
     category: ConfigCategory.MATCHING,
     label: 'Nombre max de travailleurs notifiés par offre',
+    isSecret: false,
+  },
+  {
+    key: 'matching.notify_require_verified',
+    value: 'false',
+    category: ConfigCategory.MATCHING,
+    label: 'Exiger la vérification KYC pour notifier un travailleur',
     isSecret: false,
   },
   {
@@ -244,6 +344,15 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     value: '60',
     category: ConfigCategory.MATCHING,
     label: 'Délai minimum entre deux notifications de recommandation (minutes)',
+    isSecret: false,
+  },
+  {
+    key: 'matching.new_application_notify_cooldown_minutes',
+    value: '30',
+    category: ConfigCategory.MATCHING,
+    label:
+      'Délai minimum entre deux notifications de candidature pour une même ' +
+      'offre (minutes, 0 = notifier à chaque candidature)',
     isSecret: false,
   },
 
@@ -254,6 +363,66 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
       'Plateforme de mise en relation entre employeurs et travailleurs informels en Afrique.',
     category: ConfigCategory.GENERAL,
     label: 'Description courte de Rabotka (utilisée dans les emails)',
+    isSecret: false,
+  },
+
+  // ── VOVA AI (assistant) ───────────────────────────────────────────────────
+  {
+    key: 'vova.enabled',
+    value: 'false',
+    category: ConfigCategory.GENERAL,
+    label: 'Activer l’assistant Vova AI',
+    isSecret: false,
+  },
+  {
+    // On by default on purpose: turning the assistant on should NOT be the same
+    // action as letting it speak to a user.
+    key: 'vova.shadow_mode',
+    value: 'true',
+    category: ConfigCategory.GENERAL,
+    label:
+      'Vova AI en observation (calcule la réponse, envoie la carte d’accueil)',
+    isSecret: false,
+  },
+  {
+    key: 'vova.rollout_percent',
+    value: '0',
+    category: ConfigCategory.GENERAL,
+    label: 'Pourcentage de profils servis par Vova AI',
+    isSecret: false,
+  },
+  {
+    key: 'vova.timeout_ms',
+    value: '25000',
+    category: ConfigCategory.GENERAL,
+    label: 'Budget de réponse Vova AI (ms)',
+    isSecret: false,
+  },
+  {
+    // Off by default, and gated by `vova.enabled` as well. Answering a number
+    // with no account is the only path where somebody who never signed up can
+    // spend tokens, so it switches independently of the assistant itself.
+    key: 'vova.anonymous_enabled',
+    value: 'false',
+    category: ConfigCategory.GENERAL,
+    label: 'Vova AI répond aux numéros non inscrits',
+    isSecret: false,
+  },
+  {
+    key: 'vova.anon_daily_limit',
+    value: '10',
+    category: ConfigCategory.GENERAL,
+    label: 'Réponses IA par jour et par numéro non inscrit',
+    isSecret: false,
+  },
+  {
+    // Suspended, KYC en cours, KYC refusé. Ces profils ne coûtaient rien tant
+    // que le bot leur répondait par une carte figée ; ce sont aussi ceux qui
+    // ont le plus de raisons d'insister et le moins de chances de rapporter.
+    key: 'vova.walled_daily_limit',
+    value: '10',
+    category: ConfigCategory.GENERAL,
+    label: 'Réponses Vova AI par jour pour un compte bloqué',
     isSecret: false,
   },
 
@@ -354,6 +523,17 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     isSecret: false,
   },
   {
+    key: 'storage.cloudflare.kyc_bucket_name',
+    value: '',
+    category: ConfigCategory.STORAGE,
+    // Séparé du bucket principal PARCE QUE R2 n'a pas d'ACL par objet : un
+    // bucket est public ou privé en entier. Les avatars et les images de
+    // réclamation doivent rester publics, les pièces d'identité non — il faut
+    // donc deux buckets, et non deux réglages sur le même.
+    label: 'Cloudflare R2 – Bucket KYC (privé)',
+    isSecret: false,
+  },
+  {
     key: 'storage.cloudflare.access_key_id',
     value: '',
     category: ConfigCategory.STORAGE,
@@ -404,5 +584,4 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
     label: 'Vercel Blob – Read/Write Token',
     isSecret: true,
   },
-
 ];

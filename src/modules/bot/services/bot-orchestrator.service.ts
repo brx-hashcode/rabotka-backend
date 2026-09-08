@@ -1,4 +1,5 @@
 import { Injectable, Logger, forwardRef, Inject } from '@nestjs/common';
+import { VovaService } from '../../rag/vova.service';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import {
   AccountStatus,
@@ -22,13 +23,20 @@ import { WHATSAPP_TEMPLATES } from '../../../common/constants/whatsapp-templates
 import { templateReply } from '../../../common/constants/whatsapp-carousel';
 import {
   unknownCommandMessage,
-  accountSuspendedBotMessage,
+  supportCardBotMessage,
   hasPenaltiesBotMessage,
   penaltiesListBotMessage,
 } from '../messages/menu.messages';
 import type { BotProfile, BotState } from '../types/bot-state.types';
 import type { FlowContext, FlowResult } from '../types/flow.types';
-import { FLOW_IDS, CMD_MENU } from '../bot.constants';
+import {
+  FLOW_IDS,
+  CMD_MENU,
+  CMD_NAVIGATION,
+  CMD_PAY,
+  CMD_SUPPORT,
+} from '../bot.constants';
+import { stripChatFormattingChars } from '../utils/chat-input';
 import {
   runAcceptRefuseCandidateFlow,
   getAcceptRefuseInitialState,
@@ -41,10 +49,6 @@ import {
 import { PaymentService } from '../../payments/payment.service';
 import { ContactUnlockService } from '../../contact-unlock/contact-unlock.service';
 import { WalletService } from '../../wallet/wallet.service';
-import {
-  runUnlockContactFlow,
-  getUnlockContactInitialState,
-} from '../flows/unlock-contact.flow';
 import { jobOfferToOfferListItem } from '../messages/offers.messages';
 import {
   runRateAssignmentFlow,
@@ -70,8 +74,6 @@ const KYC_APPROVED_PROMPT_MESSAGE = `✅ Votre vérification KYC a été validé
 const KYC_REJECTED_MESSAGE = `❌ *Votre vérification KYC a été refusée.*\n\nVos documents n'ont pas pu être validés. Veuillez nous contacter pour plus d'informations.`;
 
 const WHATSAPP_VERIFY_CODE_TTL_MINUTES = 15;
-
-const PENALTY_GATE_FLOW_ID = 'penalty_gate';
 
 function buildVerifyPromptMessage(code: string): string {
   return [
@@ -99,13 +101,20 @@ function buildVerifyInvalidMessage(code: string): string {
   ].join('\n');
 }
 
-
 const ERROR_MESSAGE = `Une erreur est survenue. Veuillez réessayer.`;
 
 function looksLikeFlowInput(input: string): boolean {
   const t = input.trim();
   return /^\d+$/.test(t) || (t.length > 0 && t.length <= 20 && !/\s/.test(t));
 }
+
+/**
+ * How stale `last_login_at` must be before a bot message rewrites it.
+ *
+ * Fifteen minutes: long enough that working through a menu costs one UPDATE
+ * instead of a dozen, short enough that the column still reads as "today".
+ */
+const LOGIN_STAMP_THROTTLE_MS = 15 * 60 * 1000;
 
 @Injectable()
 export class BotOrchestratorService {
@@ -134,7 +143,43 @@ export class BotOrchestratorService {
     private readonly portfolioService: PortfolioService,
     private readonly queueService: QueueService,
     private readonly configService: ConfigService,
+    /**
+     * forwardRef because the assistant closes a cycle back to here:
+     * BotModule → VovaModule → ContactUnlockModule → (forwardRef) BotModule.
+     * The same knot `worker.module.ts` documents, tied one module further out.
+     */
+    @Inject(forwardRef(() => VovaService))
+    private readonly vova: VovaService,
   ) {}
+
+  /**
+   * Move `last_login_at` for a profile that just used the bot.
+   *
+   * Throttled rather than written per message. Someone working through a menu
+   * sends a dozen messages in a minute, and an UPDATE on each would turn a read
+   * path into a write path for no gain — the column is read by admins at
+   * day granularity, so minute accuracy is already more than anyone uses.
+   *
+   * Fire-and-forget, like the auth-side stamp: the reply is what the user is
+   * waiting for, and a failed timestamp must never cost them a response.
+   */
+  private recordBotActivity(profileId: string, lastLoginAt: Date | null): void {
+    const now = Date.now();
+    if (lastLoginAt && now - lastLoginAt.getTime() < LOGIN_STAMP_THROTTLE_MS) {
+      return;
+    }
+    void this.prisma.profile
+      .update({
+        where: { id: profileId },
+        data: { last_login_at: new Date(now) },
+      })
+      .catch((err: unknown) =>
+        this.logger.warn(
+          `Failed to record bot activity for profile ${profileId}`,
+          err instanceof Error ? err.message : String(err),
+        ),
+      );
+  }
 
   async handle(
     profileId: string,
@@ -147,6 +192,15 @@ export class BotOrchestratorService {
       return [welcomeUnregisteredMessage()];
     }
 
+    // Any bot message counts as a sign-in. A WhatsApp message arrives from a
+    // verified number, which is the same proof the OTP flow establishes — and
+    // for a WhatsApp-first product the bot IS the session, so a user who lives
+    // entirely in `/start` and `/support` was reading as "never signed in".
+    //
+    // Placed before every branch below, so it covers commands, menu numbers and
+    // free text alike rather than needing a call per handler.
+    this.recordBotActivity(profile.id, profile.last_login_at);
+
     const allowed: string[] = [
       AccountStatus.ACTIVE,
       AccountStatus.SUSPENDED,
@@ -158,66 +212,49 @@ export class BotOrchestratorService {
 
     const botProfile = this.toBotProfile(profile);
 
+    // Ahead of the suspended short-circuit, so it answers in every account
+    // state. The suspension and KYC-rejection templates tell people to type
+    // "/support", and those people are by definition not ACTIVE.
+    if (
+      CMD_SUPPORT.includes(stripChatFormattingChars(text).trim().toLowerCase())
+    ) {
+      return [await this.supportCardMessage()];
+    }
+
+    // A suspended account is not a closed one: the suspension copy itself says
+    // « vous pouvez toujours consulter votre compte », and `MINTABLE_STATUSES`
+    // mints a login code for SUSPENDED — so these people have somewhere to go
+    // and, until now, no way to ask anything about it. Every message returned
+    // the same support card.
+    //
+    // The assistant answers their free text; `/start` and the other
+    // deterministic words return the suspension card, whose button opens the
+    // app. `/support` is already handled above, in every account state.
     if (profile.status === AccountStatus.SUSPENDED) {
-      const contact = await this.systemConfig.getContactInfo();
-      return [
-        accountSuspendedBotMessage({
-          email: contact.email ?? '',
-          phone: contact.phone ?? '',
-          address: contact.address ?? '',
-        }),
-      ];
+      const vovaReply = await this.vovaReplyOrNull(profile, text);
+      // The card FOLLOWS the answer rather than replacing it. The prompt used
+      // to make the model close with « tapez */start* », so the door was
+      // already offered on every reply — this offers the same door as a button
+      // instead of a word to type, at the same frequency.
+      if (vovaReply) {
+        return [...vovaReply, this.openAppCard(profile.first_name)];
+      }
+      return [this.openAppCard(profile.first_name)];
     }
 
     const normalizedInput = text.trim().toLowerCase();
 
-    if (!profile.whatsapp_connected) {
-      // ACTIVE but WhatsApp not yet verified — issue a 4-digit code inline,
-      // and when the user echoes it back, activate immediately.
-      // (A genuinely SUSPENDED account is already short-circuited above.)
-      if (profile.status === AccountStatus.ACTIVE) {
-        return this.handleInlineWhatsappVerification(profile, text);
-      }
-
-      // Gate: KYC must be verified before activation
-      if (profile.verification_status === VerificationStatus.REJECTED) {
-        return [KYC_REJECTED_MESSAGE];
-      }
-      if (profile.verification_status !== VerificationStatus.VERIFIED) {
-        // Still under review: the account can't be activated yet, but an admin
-        // may ask the user to correct their profile or file a claim during the
-        // review — so those two stay reachable via a restricted 1/2 menu.
-        // Handled here, before routeMessage, so this numbering can't collide
-        // with the full menu's (worker '1' = Trouver une mission).
-        return [this.handlePendingKycInput()];
-      }
-
-      // KYC verified + user types Menu → activate account
-      if (
-        CMD_MENU.some(
-          (c) => normalizedInput === c || normalizedInput.startsWith(c + ' '),
-        )
-      ) {
-        await this.prisma.profile.update({
-          where: { id: profileId },
-          data: {
-            whatsapp_connected: true,
-            status: AccountStatus.ACTIVE,
-          },
-        });
-        await this.walletService
-          .grantWelcomeCredit(profileId, profile.profile_type)
-          .catch((err: unknown) =>
-            this.logger.error(
-              `Failed to grant welcome credit to profile ${profileId}`,
-              err,
-            ),
-          );
-        return [welcomePlatformMessage()];
-      }
-
-      // PENDING_ACTIVATION + any other input → point at the app
-      return [KYC_APPROVED_PROMPT_MESSAGE];
+    // Two separate walls, and this block holds both: an ACTIVE profile whose
+    // number is not linked yet, and any profile that has not been activated.
+    // The condition used to be `!whatsapp_connected` alone, which worked only
+    // because signup left that flag false — now that it is set at signup, the
+    // KYC wall below has to key on `status` or a PENDING_ACTIVATION profile
+    // would walk straight into the full menu.
+    if (
+      profile.status !== AccountStatus.ACTIVE ||
+      !profile.whatsapp_connected
+    ) {
+      return this.handleNotActivated(profileId, text, profile, normalizedInput);
     }
 
     if (profile.billing_status !== BillingStatus.CLEAR) {
@@ -233,14 +270,162 @@ export class BotOrchestratorService {
   }
 
   /**
-   * Input handling for a profile whose KYC is still under review: one template
-   * carrying a "Gérer mon profil" button, whatever they typed. The old reply
-   * was a 1/2 menu whose options each returned a webview template anyway.
+   * Everything behind the two walls: an ACTIVE profile whose number is not
+   * linked yet, and any profile that has not been activated.
+   *
+   * Extracted from `handle` rather than left inline — the KYC branch inside it
+   * grew a VoVa call, and `handle` was already the longest method here.
    */
-  private handlePendingKycInput(): string {
+  private async handleNotActivated(
+    profileId: string,
+    text: string,
+    profile: NonNullable<Awaited<ReturnType<typeof this.loadProfile>>>,
+    normalizedInput: string,
+  ): Promise<string[]> {
+    // ACTIVE but WhatsApp not yet verified — issue a 4-digit code inline, and
+    // when the user echoes it back, activate immediately. Deliberately ahead of
+    // the assistant: the expected reply here is a 4-digit code, which has no
+    // business reaching a model.
+    // (A genuinely SUSPENDED account is already short-circuited by the caller.)
+    if (profile.status === AccountStatus.ACTIVE) {
+      return this.handleInlineWhatsappVerification(profile, text);
+    }
+
+    // Gate: KYC must be verified before activation.
+    //
+    // The gate decides ACTIVATION, not whether the person deserves an answer.
+    // It used to decide both: whatever someone under review typed, they got the
+    // same card and never reached `routeMessage`, the only caller of VoVa. So
+    // the PENDING and REJECTED branches of `buildSystemPrompt` — « ne lui
+    // promets ni résultat ni délai », the whole refused-KYC path — were
+    // unreachable for the exact population they were written for, and « j'ai un
+    // problème » was answered with a button.
+    //
+    // The deterministic words keep their card; everything else is free text,
+    // and free text is what the assistant is for.
+    if (profile.verification_status !== VerificationStatus.VERIFIED) {
+      const vovaReply = await this.vovaReplyOrNull(profile, text);
+
+      // The same door for both, and it now rides WITH the assistant's answer
+      // rather than only instead of it. Which wall they are behind, and why, is
+      // the assistant's to say — it has the status and the admin's own words.
+      // This card only has to open the app, and it does so in one tap instead
+      // of asking for a typed command.
+      if (vovaReply) {
+        return [...vovaReply, this.openAppCard(profile.first_name)];
+      }
+      return [this.openAppCard(profile.first_name)];
+    }
+
+    // KYC verified + user types Menu → activate account
+    if (
+      CMD_MENU.some(
+        (c) => normalizedInput === c || normalizedInput.startsWith(c + ' '),
+      )
+    ) {
+      await this.prisma.profile.update({
+        where: { id: profileId },
+        data: {
+          whatsapp_connected: true,
+          status: AccountStatus.ACTIVE,
+          // First activation wins — see `activated_at` on the model.
+          activated_at: profile.activated_at ?? new Date(),
+        },
+      });
+      await this.walletService
+        .grantWelcomeCredit(profileId, profile.profile_type)
+        .catch((err: unknown) =>
+          this.logger.error(
+            `Failed to grant welcome credit to profile ${profileId}`,
+            err,
+          ),
+        );
+      return [welcomePlatformMessage()];
+    }
+
+    // PENDING_ACTIVATION + any other input → point at the app
+    return [KYC_APPROVED_PROMPT_MESSAGE];
+  }
+
+  /**
+   * The one card an account behind a wall can get: a button that opens the app.
+   *
+   * Three cards before this — the suspension, the refusal, the KYC-pending
+   * review — each repeating in template copy what the assistant now says
+   * itself. Copy in two places drifts, and the template half is the half that
+   * needs Meta's approval to change.
+   *
+   * ONE thing was lost with them, and it is worth naming: the admin's REASON.
+   * `suspension_reason` and `rejection_reason` sit in `NEVER_EXPOSE`
+   * (`intents/projections.ts`), so the assistant cannot read them and cannot
+   * repeat them. The user still receives the reason once — in the template an
+   * admin sends at the moment of suspending or refusing — but can no longer
+   * get it back by asking the bot. That is a deliberate trade, not an
+   * oversight; lift it by taking those fields out of `NEVER_EXPOSE`.
+   *
+   * So this one says nothing about the wall. It exists for a single reason: a
+   * bare link does not open WhatsApp's in-app browser, only a template's CTA
+   * button does. Without that, this would be free-form text — the bot answers
+   * inside the 24h service window, where templates are not required.
+   *
+   * The three explanatory templates stay: they are what an admin sends when
+   * suspending an account or refusing a dossier, which is outside any window
+   * and genuinely business-initiated.
+   *
+   * No `loginCode` argument: `openApp` declares `urlSuffixMode: 'shortlink'`,
+   * so the outbound processor mints the one-time code against the bare
+   * destination on the way out.
+   */
+  private openAppCard(firstName: string): string {
     return templateReply(
-      WHATSAPP_TEMPLATES.kycPendingMenu.contentSid,
-      WHATSAPP_TEMPLATES.kycPendingMenu.variables(),
+      'openApp',
+      WHATSAPP_TEMPLATES.openApp.variables(firstName),
+    );
+  }
+
+  /**
+   * Let VoVa answer, unless the text is one of the words the product prints.
+   *
+   * `null` means "answer it yourself" — the caller keeps its own default, which
+   * is the point: the assistant is a first refusal on free text, never the
+   * owner of a reply. Every VoVa failure already returns null on its side
+   * (disabled, out of bucket, timed out, thrown), so the deterministic answer
+   * survives the model being down.
+   *
+   * NOT on the menu vocabulary: `BotRouterService` returns `unknown` for
+   * everything when no flow is live, so « menu », « start » and a bare « / »
+   * arrive here too, and routing the documented entry point through a model
+   * would make the one command every template tells users to type depend on a
+   * provider being up. `isDeterministicCommand` matches those EXACTLY, so
+   * « bonjour », « 1 » and « j'ai un problème » still reach the assistant.
+   *
+   * Shared by `routeMessage` and the KYC wall. It was inline in the former, and
+   * that is precisely how the latter went without it: a profile under review
+   * returned its card before `routeMessage` ever ran, so the PENDING and
+   * REJECTED branches written into `buildSystemPrompt` had never once executed.
+   */
+  private async vovaReplyOrNull(
+    profile: NonNullable<Awaited<ReturnType<typeof this.loadProfile>>>,
+    text: string,
+  ): Promise<string[] | null> {
+    if (
+      isDeterministicCommand(
+        stripChatFormattingChars(text).trim().toLowerCase(),
+      )
+    ) {
+      return null;
+    }
+    return this.vova.handle(
+      {
+        id: profile.id,
+        first_name: profile.first_name,
+        profile_type: profile.profile_type,
+        verification_status: profile.verification_status,
+        // Suspended reaches here now. Without the status the prompt would tell
+        // them the app is theirs to use and offer to find them a mission.
+        status: profile.status,
+      },
+      text,
     );
   }
 
@@ -277,7 +462,10 @@ export class BotOrchestratorService {
           }),
           this.prisma.profile.update({
             where: { id: profile.id },
-            data: { whatsapp_connected: true },
+            data: {
+              whatsapp_connected: true,
+              activated_at: profile.activated_at ?? now,
+            },
           }),
         ]);
 
@@ -355,16 +543,18 @@ export class BotOrchestratorService {
     const normalized = text.trim().toLowerCase();
     const state = await this.botState.get(profileId);
 
-    // Already inside a payment-related flow — let it run.
-    const canContinueFlow =
-      state?.flowId === FLOW_IDS.PAY_PENALTIES ||
-      state?.flowId === FLOW_IDS.UNLOCK_CONTACT;
+    // Already inside a payment-related flow — let it run. Contact unlock used
+    // to be the other one; it is settled in the app now and has no chat flow.
+    const canContinueFlow = state?.flowId === FLOW_IDS.PAY_PENALTIES;
     if (canContinueFlow) {
       return this.routeMessage(profileId, text, profile, botProfile);
     }
 
-    // Currently showing the penalty list and waiting for the user to pick one
-    if (state?.flowId === PENALTY_GATE_FLOW_ID) {
+    // Currently showing the penalty list and waiting for the user to pick one.
+    // `state &&` rather than `state?.` so the narrowing reaches the call below —
+    // optional chaining leaves the type `BotState | null`, and the handler
+    // requires a state.
+    if (state && state.flowId === FLOW_IDS.PENALTY_GATE) {
       return this.handlePenaltyListSelection(
         profileId,
         text,
@@ -382,7 +572,7 @@ export class BotOrchestratorService {
         return [welcomePlatformMessage()];
       }
       await this.botState.set(profileId, {
-        flowId: PENALTY_GATE_FLOW_ID,
+        flowId: FLOW_IDS.PENALTY_GATE,
         step: 1,
         payload: {
           penaltyIds: penalties.map((p) => p.id),
@@ -508,9 +698,11 @@ export class BotOrchestratorService {
         return this.handleCommandRoute(route, profile, profileId, botProfile);
       }
 
-      // Nothing recognised and no live flow: there is no menu to fall back
-      // to any more, so the welcome card is the answer — including for an
-      // expired session, where re-explaining the expiry helps nobody.
+      // Nothing recognised and no live flow. Before this, the welcome card was
+      // the whole answer — so a worker typing « j'ai un problème » got a menu.
+      const vovaReply = await this.vovaReplyOrNull(profile, text);
+      if (vovaReply) return vovaReply;
+
       return [welcomePlatformMessage()];
     } catch (err) {
       this.logger.warn('Bot handling error', err);
@@ -527,7 +719,7 @@ export class BotOrchestratorService {
       last_name: profile.last_name,
       phone: profile.phone,
       email: profile.email,
-      profile_type: profile.profile_type as BotProfile['profile_type'],
+      profile_type: profile.profile_type,
       status: profile.status,
       reliability_score: profile.reliability_score,
       verification_status: profile.verification_status,
@@ -635,30 +827,26 @@ export class BotOrchestratorService {
   ): Promise<FlowResult | null> {
     const ctx = this.buildFlowContext();
     const runners: Record<string, () => Promise<FlowResult>> = {
-
-
-
       [FLOW_IDS.ACCEPT_REFUSE_CANDIDATE]: () =>
         runAcceptRefuseCandidateFlow(state, input, profile, ctx),
       [FLOW_IDS.CANCEL_APPLICATION]: async () => {
-        const { cancellationThresholdHours } =
-          await this.systemConfig.getFees();
+        const {
+          cancellationThresholdHours,
+          lateCancellationPenaltyFcfa,
+          lateCancellationScoreDeduction,
+          reliabilityScoreMin,
+        } = await this.systemConfig.getFees();
         return runCancelApplicationFlow(state, input, profile, {
           ...ctx,
           cancellationThresholdHours,
+          lateCancellationPenaltyFcfa,
+          lateCancellationScoreDeduction,
+          reliabilityScoreMin,
         });
       },
 
-
-
       [FLOW_IDS.PAY_PENALTIES]: () =>
         runPayPenaltiesFlow(state, input, profile, ctx),
-
-      [FLOW_IDS.UNLOCK_CONTACT]: () =>
-        runUnlockContactFlow(state, input, profile, {
-          ...ctx,
-          botNotification: this.notificationService,
-        }),
 
       [FLOW_IDS.REPUBLISH_EXPIRED_JOB]: () =>
         runRepublishExpiredJobFlow(state, input, profile, {
@@ -678,7 +866,6 @@ export class BotOrchestratorService {
           prisma: this.prisma,
           applicationService: this.applicationService,
         }),
-
 
       [FLOW_IDS.POST_CANCELLATION_ACTIONS]: async () => {
         const result = await runPostCancellationActionsFlow(
@@ -726,9 +913,7 @@ export class BotOrchestratorService {
   ): Promise<string[]> {
     const unpaid = await this.applicationService.getUnpaidPenalties(profile.id);
     if (unpaid.count === 0) {
-      return [
-        `✅ *Aucune pénalité impayée.* Votre compte est en règle.`,
-      ];
+      return [`✅ *Aucune pénalité impayée.* Votre compte est en règle.`];
     }
     const flowState = getPayPenaltiesInitialState(unpaid.count, unpaid.total);
     await this.botState.set(profileId, flowState);
@@ -780,13 +965,45 @@ export class BotOrchestratorService {
         email: true,
         profile_type: true,
         status: true,
+        // The admin's own words, so the bot can say WHY rather than just that.
+        suspension_reason: true,
         billing_status: true,
         reliability_score: true,
         whatsapp_connected: true,
         whatsapp_activation_bonus_granted: true,
         verification_status: true,
+        // The admin's own words again, for the refusal card — same reasoning as
+        // `suspension_reason` above, and the bot could not say WHY without it.
+        rejection_reason: true,
+        // Read, not written, on the hot path: `recordBotActivity` compares
+        // against it to decide whether the stamp is due, and the activation
+        // paths preserve `activated_at` rather than resetting it.
+        last_login_at: true,
+        activated_at: true,
       },
     });
+  }
+
+  /**
+   * Support contacts, with the suspension reason when there is one.
+   *
+   * One helper because two paths reach it — an explicit `/support` and a
+   * suspended profile saying anything at all — and they must not drift into
+   * telling the reader different things.
+   */
+  private async supportCardMessage(opts?: {
+    suspended?: boolean;
+    reason?: string | null;
+  }): Promise<string> {
+    const contact = await this.systemConfig.getContactInfo();
+    return supportCardBotMessage(
+      {
+        email: contact.email ?? '',
+        phone: contact.phone ?? '',
+        address: contact.address ?? '',
+      },
+      opts,
+    );
   }
 
   private loadProfile(profileId: string) {
@@ -799,5 +1016,26 @@ export class BotOrchestratorService {
   loadProfileByPhone(phone: string) {
     return this.loadProfileWhere({ phone });
   }
+}
 
+/**
+ * Words the bot answers itself, with no model in the path.
+ *
+ * `CMD_SUPPORT` is not here because `handle()` already answers it before any of
+ * this, in every account state.
+ */
+function isDeterministicCommand(normalizedInput: string): boolean {
+  // EXACT match only, deliberately.
+  //
+  // Prefix matching swallowed the product's own front door: the landing page's
+  // WhatsApp CTA sends « Bonjour Rabotka, je cherche une opportunité ou un
+  // profil adapté », which begins with "bonjour " and was therefore answered
+  // with the menu card — the first message a new user ever sends, and the one
+  // that states their intent, never reached the assistant.
+  //
+  // `CMD_NAVIGATION` rather than `CMD_MENU`: a bare « bonjour » now reaches the
+  // assistant too, which introduces itself and asks what the person needs. Only
+  // the "show me the thing" words stay deterministic, because templates print
+  // them and they must not wait on a model.
+  return [...CMD_NAVIGATION, ...CMD_PAY].includes(normalizedInput);
 }

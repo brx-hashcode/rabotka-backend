@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   S3Client,
@@ -11,7 +11,11 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { StorageProvider } from '@prisma/client';
 import { IStorageProvider } from '../interfaces/storage-provider.interface';
 import {
+  DownloadOptions,
+  DownloadResult,
+  ExistsOptions,
   GetUrlOptions,
+  SIGNED_URL_TTL_SECONDS,
   UploadOptions,
   UploadResult,
 } from '../types/storage.types';
@@ -82,8 +86,14 @@ export class CloudflareStorageProvider implements IStorageProvider {
 
       await this.s3Client.send(command);
 
+      // `bucket` has to be forwarded. Without it the object is written to
+      // `options.bucket` but the returned url is signed against the DEFAULT
+      // bucket — so a KYC document landed in the private bucket while its url
+      // pointed at the public one, and that url is what gets stored as
+      // `document_url`. It 403s forever.
       const url = await this.getUrl(key, {
         access: options?.access ?? 'public',
+        ...(options?.bucket ? { bucket: options.bucket } : {}),
       });
 
       this.logger.log(`File uploaded successfully: ${key}`);
@@ -128,13 +138,17 @@ export class CloudflareStorageProvider implements IStorageProvider {
         return `${normalizedBase}/${encodeURI(key)}`;
       }
 
+      // `options.bucket` first: a signed URL has to address the bucket the
+      // object actually lives in. KYC documents sit in a private bucket of
+      // their own, and with `this.bucket` hardcoded here every signature
+      // pointed at the public one — so nothing could be moved out of it.
       const command = new GetObjectCommand({
-        Bucket: this.bucket,
+        Bucket: options?.bucket || this.bucket,
         Key: key,
       });
 
       const url = await getSignedUrl(this.s3Client, command, {
-        expiresIn: 3600,
+        expiresIn: SIGNED_URL_TTL_SECONDS,
       });
 
       return url;
@@ -147,10 +161,13 @@ export class CloudflareStorageProvider implements IStorageProvider {
     }
   }
 
-  async exists(key: string): Promise<boolean> {
+  async exists(key: string, options?: ExistsOptions): Promise<boolean> {
     try {
+      // Same forwarding gap `upload()` and `getUrl()` had: hardcoding the
+      // default bucket reports a KYC document as missing while it sits in the
+      // private bucket, which reads as "the object is gone" to every caller.
       const command = new HeadObjectCommand({
-        Bucket: this.bucket,
+        Bucket: options?.bucket || this.bucket,
         Key: key,
       });
 
@@ -168,6 +185,44 @@ export class CloudflareStorageProvider implements IStorageProvider {
         error.stack,
       );
       throw new Error(`Cloudflare R2 exists check failed: ${error.message}`);
+    }
+  }
+
+  async download(
+    key: string,
+    options?: DownloadOptions,
+  ): Promise<DownloadResult> {
+    try {
+      const response = await this.s3Client.send(
+        new GetObjectCommand({
+          Bucket: options?.bucket || this.bucket,
+          Key: key,
+        }),
+      );
+
+      if (!response.Body) {
+        throw new Error('empty response body');
+      }
+
+      return {
+        // The SDK types `Body` as a union covering the browser too; under Node
+        // it is always a Readable.
+        body: response.Body as NodeJS.ReadableStream,
+        contentType: response.ContentType,
+        contentLength: response.ContentLength,
+      };
+    } catch (error: any) {
+      if (
+        error.name === 'NoSuchKey' ||
+        error.$metadata?.httpStatusCode === 404
+      ) {
+        throw new NotFoundException(`Object not found: ${key}`);
+      }
+      this.logger.error(
+        `Failed to download file: ${error.message}`,
+        error.stack,
+      );
+      throw new Error(`Cloudflare R2 download failed: ${error.message}`);
     }
   }
 }

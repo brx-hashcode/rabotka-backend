@@ -12,12 +12,14 @@ import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { RedisIoAdapter } from './common/adapters/redis-io.adapter';
 import { CSRF_UTILITIES } from './modules/csrf/csrf.constants';
 import { csrfVisitorMiddleware } from './modules/csrf/csrf-visitor.middleware';
+import { requestIdMiddleware } from './common/middleware/request-id.middleware';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
 
   const app = await NestFactory.create(AppModule, {
     logger: ['error', 'warn', 'log', 'debug', 'verbose'],
+    rawBody: true,
   });
 
   const configService = app.get(ConfigService);
@@ -55,7 +57,18 @@ async function bootstrap() {
     express.static(path.join(process.cwd(), 'public'), { index: false }),
   );
 
-  app.setGlobalPrefix('api/v1', { exclude: ['metrics'] });
+  // The two OIDC discovery documents are excluded alongside `metrics` because
+  // RFC 8414 fixes their paths relative to the issuer: every OIDC client
+  // library builds them by appending to the issuer URL, so serving them under
+  // `/api/v1` would make "Login with Rabotka" undiscoverable by every
+  // off-the-shelf client — which is the entire compatibility the feature buys.
+  app.setGlobalPrefix('api/v1', {
+    exclude: [
+      'metrics',
+      '.well-known/openid-configuration',
+      '.well-known/jwks.json',
+    ],
+  });
 
   app.useGlobalPipes(
     new ValidationPipe({
@@ -68,6 +81,9 @@ async function bootstrap() {
     }),
   );
 
+  // Before everything that might record an interaction, so a ranked feed and
+  // the taps that follow it share one correlation id.
+  app.use(requestIdMiddleware);
   app.use(I18nMiddleware);
   app.use(cookieParser());
   app.use(csrfVisitorMiddleware);

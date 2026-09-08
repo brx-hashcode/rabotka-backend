@@ -1,4 +1,5 @@
 import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
+import { jobLocationLabel } from '../../../common/utils/job-location.util';
 import Redis from 'ioredis';
 import { REDIS_CONNECTION } from '../../../common/services/redis/redis.constants';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
@@ -8,7 +9,12 @@ import { WHATSAPP_REMINDERS_QUEUE } from '../../../common/services/queue/queue.m
 import { formatDate } from '../messages/notifications.messages';
 import { APP_TIMEZONE } from '../utils/parse-date-time';
 import { WHATSAPP_TEMPLATES } from '../../../common/constants/whatsapp-templates';
-import { ApplicationStatus, JobOfferStatus } from '@prisma/client';
+import {
+  ApplicationStatus,
+  EmploymentType,
+  JobOfferStatus,
+} from '@prisma/client';
+import { closeRecruitedOfferTx } from '../../job-offer/utils/close-recruited-offer';
 import { SystemConfigService } from '../../system-config/system-config.service';
 import {
   BOT_STATE_KEY_PREFIX,
@@ -24,6 +30,30 @@ const REMINDER_24H_SENT_KEY = 'reminder:sent:24h:';
 const REMINDER_START_SENT_KEY = 'reminder:sent:start:';
 const SENT_KEY_TTL = 48 * 60 * 60;
 const SCAN_INTERVAL_MS = 15 * 60 * 1000;
+
+/**
+ * How long an offer with no closing date stays open.
+ *
+ * CDI/CDD/STAGE offers carry no date, so the expiry scan has nothing to compare
+ * against and they would never retire. Thirty days is long enough that a
+ * genuine permanent search is not cut short, and short enough that a forgotten
+ * offer does not haunt the feed indefinitely.
+ */
+const UNDATED_OFFER_TTL_DAYS = 30;
+
+/**
+ * How long a staffed CDD/CDI/STAGE waits for its employer to confirm the hire
+ * before the system closes it on their behalf.
+ *
+ * Without a backstop the dead end this whole flow exists to fix simply moves one
+ * state later: the offer parks in FILLED, and since rating hangs off the
+ * assignment being COMPLETED, neither side can ever rate the other.
+ *
+ * A week is long enough that a busy employer is not overruled for being slow,
+ * and closing is the low-stakes direction — it opens the rating and stops the
+ * offer lingering, and nothing about it is destructive.
+ */
+const FILLED_CONFIRMATION_GRACE_DAYS = 7;
 
 // CAS: only writes if the key is absent OR current flowId matches expectedFlowId.
 const LUA_CAS_SET = `
@@ -115,6 +145,10 @@ export class ReminderProcessor {
         status: ApplicationStatus.ACCEPTED,
         job_offer: {
           scheduled_at: { gte: window24hStart, lte: window24hEnd },
+          // "Your job starts in 24 hours" is only true of a MISSION. On the
+          // other types this date is the day applications close, and the work
+          // may have begun weeks earlier or not be arranged yet.
+          employment_type: EmploymentType.MISSION,
         },
       },
       select: { id: true },
@@ -139,6 +173,10 @@ export class ReminderProcessor {
     const startingOffers = await this.prisma.jobOffer.findMany({
       where: {
         scheduled_at: { gte: startWindowStart, lte: now },
+        // Same reason as the 24h window: a closing deadline is not a start
+        // time, and `sendReminderStart` reads `scheduled_at` as an hour of day
+        // to announce.
+        employment_type: EmploymentType.MISSION,
         status: {
           in: [
             JobOfferStatus.ACTIVE,
@@ -193,12 +231,126 @@ export class ReminderProcessor {
         }
       }
     }
+
+    // Ongoing engagements last. They are independent of everything above — the
+    // scans for MISSION reminders and expiry share no rows with these — and
+    // running them at the end keeps the earlier queries at the call positions
+    // `reminder.processor.spec.ts` asserts on.
+    await this.stopRecruitingOnDeadline(now);
+    await this.closeRecruitedOffersAfterGrace(now);
   }
 
   private async expireOverdueOffers(): Promise<void> {
     const now = new Date();
     await this.autoStartOffersWithWorkers(now);
     await this.expireEmptyOverdueOffers(now);
+  }
+
+  /**
+   * An ongoing engagement whose application deadline has passed, with at least
+   * one person hired, stops recruiting.
+   *
+   * `expireEmptyOverdueOffers` deliberately will not touch these — it requires
+   * zero accepted applications, because expiring an offer somebody was hired on
+   * would be wrong. But that left a `quantity: 3` offer with one hire in
+   * PARTIALLY_FILLED forever: never full, so never closed by the fill path, and
+   * never empty, so never expired. This is the missing exit.
+   *
+   * FILLED rather than COMPLETED: the employer still gets to say whether the
+   * hire actually stuck, exactly as they would had the offer filled normally.
+   */
+  private async stopRecruitingOnDeadline(now: Date): Promise<void> {
+    const overdue = await this.prisma.jobOffer.findMany({
+      where: {
+        status: {
+          in: [JobOfferStatus.ACTIVE, JobOfferStatus.PARTIALLY_FILLED],
+        },
+        employment_type: { not: EmploymentType.MISSION },
+        scheduled_at: { lt: now },
+        applications: {
+          some: {
+            status: {
+              in: [ApplicationStatus.ACCEPTED, ApplicationStatus.STARTED],
+            },
+          },
+        },
+      },
+      select: { id: true },
+    });
+
+    if (overdue.length === 0) return;
+
+    const ids = overdue.map((o) => o.id);
+    await this.prisma.$transaction([
+      this.prisma.jobOffer.updateMany({
+        where: { id: { in: ids } },
+        data: { status: JobOfferStatus.FILLED },
+      }),
+      // Whoever had not committed yet is out — recruiting is over. Mirrors what
+      // `rejectLeftoversIfOfferFilled` does when an offer fills normally.
+      this.prisma.application.updateMany({
+        where: {
+          job_offer_id: { in: ids },
+          status: {
+            in: [
+              ApplicationStatus.PENDING,
+              ApplicationStatus.VIEWED,
+              ApplicationStatus.WAITING_PAYMENT,
+            ],
+          },
+        },
+        data: { status: ApplicationStatus.REJECTED, rejected_at: now },
+      }),
+    ]);
+
+    this.logger.log(
+      `Stopped recruiting on ${overdue.length} ongoing engagement(s) past their application deadline`,
+    );
+  }
+
+  /**
+   * Closes a staffed ongoing engagement the employer never got round to
+   * confirming.
+   *
+   * Without this the dead end simply moves one state later: the offer sits in
+   * FILLED, and because rating hangs off the assignment being COMPLETED,
+   * neither side can ever rate the other — which is the whole problem this was
+   * meant to solve.
+   *
+   * Anchored on `updated_at` for want of a `filled_at` column. It is imprecise
+   * — any write to the row restarts the clock — but it is imprecise in the safe
+   * direction: an unrelated update delays the sweep, giving the employer longer
+   * to answer, and never closes an offer early.
+   */
+  private async closeRecruitedOffersAfterGrace(now: Date): Promise<void> {
+    const graceCutoff = new Date(
+      now.getTime() - FILLED_CONFIRMATION_GRACE_DAYS * 24 * 60 * 60 * 1000,
+    );
+    const stale = await this.prisma.jobOffer.findMany({
+      where: {
+        status: JobOfferStatus.FILLED,
+        employment_type: { not: EmploymentType.MISSION },
+        updated_at: { lt: graceCutoff },
+      },
+      select: { id: true },
+    });
+
+    if (stale.length === 0) return;
+
+    for (const offer of stale) {
+      await this.prisma
+        .$transaction((tx) => closeRecruitedOfferTx(tx, offer.id))
+        .catch((err) =>
+          this.logger.warn(
+            `Grace-period close failed for offer ${offer.id}:`,
+            err,
+          ),
+        );
+    }
+
+    this.logger.log(
+      `Closed ${stale.length} staffed engagement(s) unconfirmed after ${FILLED_CONFIRMATION_GRACE_DAYS} days`,
+    );
   }
 
   private async autoStartOffersWithWorkers(now: Date): Promise<void> {
@@ -208,6 +360,11 @@ export class ReminderProcessor {
           in: [JobOfferStatus.FILLED, JobOfferStatus.PARTIALLY_FILLED],
         },
         scheduled_at: { lt: now },
+        // Only a MISSION begins on its date. Every type carries a date now, so
+        // without this a staffed CDI whose application window closed would be
+        // flipped to IN_PROGRESS and its worker asked whether the job is
+        // finished — for an engagement that may have years left to run.
+        employment_type: EmploymentType.MISSION,
         applications: {
           some: { status: ApplicationStatus.ACCEPTED },
           none: {
@@ -223,7 +380,13 @@ export class ReminderProcessor {
         employer: { select: { phone: true, first_name: true } },
         applications: {
           where: { status: ApplicationStatus.ACCEPTED },
-          select: { id: true },
+          // The worker confirms completion now, so the status-check prompt goes
+          // to them rather than the employer — which needs their phone.
+          select: {
+            id: true,
+            worker_id: true,
+            worker: { select: { phone: true } },
+          },
         },
       },
     });
@@ -259,21 +422,24 @@ export class ReminderProcessor {
     payment_flow: string | null;
     employer_id: string;
     employer?: { phone?: string | null; first_name?: string | null } | null;
-    applications: { id: string }[];
+    applications: {
+      id: string;
+      worker_id: string;
+      worker?: { phone?: string | null } | null;
+    }[];
   }): Promise<void> {
     const phone = offer.employer?.phone;
-    const firstApp = offer.applications[0];
 
     if (phone) {
       const autoStartTpl = WHATSAPP_TEMPLATES.autoStarted;
       const sent = await this.whatsApp
         .sendTemplateMessage(
           phone,
-          autoStartTpl.contentSid,
-          autoStartTpl.variables({
+          'autoStarted',
+          {
             offerTitle: offer.title,
             jobOfferId: offer.id,
-          }),
+          },
           offer.employer_id,
         )
         .then(() => true)
@@ -285,88 +451,124 @@ export class ReminderProcessor {
           return false;
         });
 
-      if (sent && firstApp) {
-        const statusTpl = WHATSAPP_TEMPLATES.statusCheck;
-        await this.whatsApp
-          .sendTemplateMessage(
-            phone,
-            statusTpl.contentSid,
-            statusTpl.variables({
-              jobTitle: offer.title,
-              jobOfferId: offer.id,
-            }),
-            offer.employer_id,
-          )
-          .catch((err) =>
-            this.logger.warn(
-              `Failed to send status check prompt to employer ${offer.employer_id}`,
-              err,
-            ),
-          );
+      if (!sent) return;
 
-        const stateKey = `${BOT_STATE_KEY_PREFIX}${offer.employer_id}`;
-        const stateValue = JSON.stringify({
-          flowId: FLOW_IDS.JOB_STATUS_CHECK,
-          step: 0,
-          payload: {
-            jobOfferId: offer.id,
-            jobTitle: offer.title,
-            applicationId: firstApp.id,
-            paymentFlow: offer.payment_flow ?? 'DAILY',
-            snoozeCount: 0,
-          },
-          updatedAt: new Date().toISOString(),
-        });
-        await this.redis
-          .eval(
-            LUA_CAS_SET,
-            1,
-            stateKey,
-            stateValue,
-            String(BOT_STATE_TTL_SECONDS),
-            FLOW_IDS.JOB_STATUS_CHECK,
-          )
-          .catch((err) =>
-            this.logger.warn(
-              `Failed to set job status check state for employer ${offer.employer_id}`,
-              err,
-            ),
-          );
-
-        // Fallback re-ping if the employer never responds — enqueued with a
-        // unique jobId so BullMQ deduplicates across ticks.
-        await this.queueService
-          .addJob<ReminderJobData>(
-            WHATSAPP_REMINDERS_QUEUE,
-            {
-              type: 'reminder_job_status',
-              jobOfferId: offer.id,
-              employerId: offer.employer_id,
-              applicationId: firstApp.id,
-              paymentFlow: offer.payment_flow ?? 'DAILY',
-            },
-            {
-              jobId: `job-status-${offer.id}-autostart`,
-              delay: 4 * 60 * 60 * 1000,
-            },
-          )
-          .catch((err) =>
-            this.logger.warn(
-              `Failed to enqueue fallback job status reminder for offer ${offer.id}`,
-              err,
-            ),
-          );
+      // Completion is the worker's call, so the "is it finished?" prompt goes
+      // to each hired worker rather than the employer. On a multi-worker offer
+      // every one of them is asked: the offer closes only once all have
+      // confirmed, so a single answer is not enough.
+      for (const app of offer.applications) {
+        await this.promptWorkerForStatus(offer, app);
       }
     }
   }
 
+  /** Asks one hired worker to confirm their own mission is finished. */
+  private async promptWorkerForStatus(
+    offer: {
+      id: string;
+      title: string;
+      payment_flow: string | null;
+      employer_id: string;
+    },
+    app: {
+      id: string;
+      worker_id: string;
+      worker?: { phone?: string | null } | null;
+    },
+  ): Promise<void> {
+    const workerPhone = app.worker?.phone;
+    if (!workerPhone) return;
+
+    const statusTpl = WHATSAPP_TEMPLATES.statusCheck;
+    await this.whatsApp
+      .sendTemplateMessage(
+        workerPhone,
+        'statusCheck',
+        {
+          jobTitle: offer.title,
+          jobOfferId: offer.id,
+        },
+        app.worker_id,
+      )
+      .catch((err) =>
+        this.logger.warn(
+          `Failed to send status check prompt to worker ${app.worker_id}`,
+          err,
+        ),
+      );
+
+    const stateKey = `${BOT_STATE_KEY_PREFIX}${app.worker_id}`;
+    const stateValue = JSON.stringify({
+      flowId: FLOW_IDS.JOB_STATUS_CHECK,
+      step: 0,
+      payload: {
+        jobOfferId: offer.id,
+        jobTitle: offer.title,
+        applicationId: app.id,
+        paymentFlow: offer.payment_flow ?? 'DAILY',
+        snoozeCount: 0,
+      },
+      updatedAt: new Date().toISOString(),
+    });
+    await this.redis
+      .eval(
+        LUA_CAS_SET,
+        1,
+        stateKey,
+        stateValue,
+        String(BOT_STATE_TTL_SECONDS),
+        FLOW_IDS.JOB_STATUS_CHECK,
+      )
+      .catch((err) =>
+        this.logger.warn(
+          `Failed to set job status check state for worker ${app.worker_id}`,
+          err,
+        ),
+      );
+
+    // Fallback re-ping if the worker never responds — enqueued with a unique
+    // jobId so BullMQ deduplicates across ticks.
+    await this.queueService
+      .addJob<ReminderJobData>(
+        WHATSAPP_REMINDERS_QUEUE,
+        {
+          type: 'reminder_job_status',
+          jobOfferId: offer.id,
+          employerId: offer.employer_id,
+          applicationId: app.id,
+          paymentFlow: offer.payment_flow ?? 'DAILY',
+        },
+        {
+          jobId: `job-status-${offer.id}-${app.worker_id}-autostart`,
+          delay: 4 * 60 * 60 * 1000,
+        },
+      )
+      .catch((err) =>
+        this.logger.warn(
+          `Failed to enqueue fallback job status reminder for offer ${offer.id}`,
+          err,
+        ),
+      );
+  }
+
   private async expireEmptyOverdueOffers(now: Date): Promise<void> {
+    // An offer with no closing date — CDI, CDD, stage — would otherwise never
+    // expire, because this scan is the ONLY thing that ever retires an offer
+    // and it filters on a date those rows do not have. They would sit ACTIVE in
+    // the feed forever. Age since posting is the honest substitute.
+    const undatedCutoff = new Date(
+      now.getTime() - UNDATED_OFFER_TTL_DAYS * 24 * 60 * 60 * 1000,
+    );
     const overdue = await this.prisma.jobOffer.findMany({
       where: {
         status: {
           in: [JobOfferStatus.ACTIVE, JobOfferStatus.PARTIALLY_FILLED],
         },
-        scheduled_at: { lt: now },
+        OR: [
+          { scheduled_at: { lt: now } },
+          { scheduled_at: null, created_at: { lt: undatedCutoff } },
+        ],
         applications: {
           none: {
             status: {
@@ -461,8 +663,8 @@ export class ReminderProcessor {
     await this.whatsApp
       .sendTemplateMessage(
         phone,
-        tpl.contentSid,
-        tpl.variables({ offerTitle }),
+        'offerExpiredApplicant',
+        { offerTitle },
         worker.id,
       )
       .catch((err) => {
@@ -473,12 +675,32 @@ export class ReminderProcessor {
       });
   }
 
+  /**
+   * Tells the EMPLOYER their offer expired, and arms the republish flow.
+   *
+   * It used to also loop the offer's applicants and send them
+   * `offerUnavailableWorker` — while the caller was already sending each of
+   * them `offerExpiredApplicant` from the same list, for the same event. Every
+   * pending applicant therefore got two billed templates saying the same
+   * thing: "the offer is no longer available" and "the offer expired, your
+   * application is closed". The second is the accurate one — it names the
+   * consequence, and the transaction above really does cancel the application
+   * — so the vaguer duplicate went.
+   *
+   * The duplicate was also conditional on something unrelated: the early
+   * return below means workers were only messaged when the EMPLOYER had a
+   * phone number. Notifying applicants belongs to the caller, which does it
+   * per worker and passes the worker id along for the delivery log.
+   *
+   * This leaves `offerUnavailableWorker` with no sender. Its registry entry
+   * and its approved Meta template stay put — an approved template costs
+   * nothing to keep, and deleting the entry would break the binding check.
+   */
   private async notifyExpiredOffer(offer: {
     id: string;
     title: string;
     employer_id: string;
     employer?: { phone?: string | null; first_name?: string | null } | null;
-    applications?: { worker: { phone: string | null } }[];
   }): Promise<void> {
     const phone = offer.employer?.phone;
     if (!phone) return;
@@ -486,8 +708,8 @@ export class ReminderProcessor {
     const sent = await this.whatsApp
       .sendTemplateMessage(
         phone,
-        tpl.contentSid,
-        tpl.variables({ offerTitle: offer.title, jobOfferId: offer.id }),
+        'offerExpiredEmployer',
+        { offerTitle: offer.title, jobOfferId: offer.id },
         offer.employer_id,
       )
       .then(() => true)
@@ -547,24 +769,6 @@ export class ReminderProcessor {
         );
       }
     }
-
-    // Notify pending workers that the offer is no longer available
-    const unavailableTpl = WHATSAPP_TEMPLATES.offerUnavailableWorker;
-    for (const app of offer.applications ?? []) {
-      if (!app.worker.phone) continue;
-      await this.whatsApp
-        .sendTemplateMessage(
-          app.worker.phone,
-          unavailableTpl.contentSid,
-          unavailableTpl.variables({ offerTitle: offer.title }),
-        )
-        .catch((err) =>
-          this.logger.warn(
-            `Failed to notify pending worker of expired offer ${offer.id}`,
-            err,
-          ),
-        );
-    }
   }
 
   private async sendJobStatusCheckReminder(
@@ -576,41 +780,57 @@ export class ReminderProcessor {
     // Check the offer is still IN_PROGRESS — skip if already completed/expired
     const offer = await this.prisma.jobOffer.findUnique({
       where: { id: jobOfferId },
-      select: {
-        status: true,
-        title: true,
-        employer: { select: { phone: true } },
-      },
+      select: { status: true, title: true },
     });
     if (!offer || offer.status !== JobOfferStatus.IN_PROGRESS) return;
 
-    const phone = offer.employer?.phone;
+    // The worker confirms completion, so the re-ping goes to them. Skip once
+    // this worker has already answered — their application leaves ACCEPTED /
+    // STARTED the moment they confirm, and chasing them again would be noise.
+    const application = await this.prisma.application.findUnique({
+      where: { id: applicationId },
+      select: {
+        status: true,
+        worker_id: true,
+        worker: { select: { phone: true } },
+      },
+    });
+    if (
+      !application ||
+      (application.status !== ApplicationStatus.ACCEPTED &&
+        application.status !== ApplicationStatus.STARTED)
+    ) {
+      return;
+    }
+
+    const phone = application.worker?.phone;
     if (!phone) return;
 
+    const workerId = application.worker_id;
     const tpl = WHATSAPP_TEMPLATES.statusCheck;
     const sent = await this.whatsApp
       .sendTemplateMessage(
         phone,
-        tpl.contentSid,
-        tpl.variables({
+        'statusCheck',
+        {
           jobTitle: offer.title,
           jobOfferId,
-        }),
-        employerId,
+        },
+        workerId,
       )
       .then(() => true)
       .catch((err) => {
         this.logger.warn(
-          `Failed to send job status check reminder to employer ${employerId}`,
+          `Failed to send job status check reminder to worker ${workerId}`,
           err,
         );
         return false;
       });
 
     if (sent) {
-      // Refresh the bot state so the employer's reply still routes to the flow.
+      // Refresh the bot state so the worker's reply still routes to the flow.
       // Preserve the existing snoozeCount so the 5-snooze cap is cumulative.
-      const stateKey = `${BOT_STATE_KEY_PREFIX}${employerId}`;
+      const stateKey = `${BOT_STATE_KEY_PREFIX}${workerId}`;
       const existing = await this.redis.get(stateKey).catch(() => null);
       let snoozeCount = 0;
       if (existing) {
@@ -682,20 +902,21 @@ export class ReminderProcessor {
     const tpl = WHATSAPP_TEMPLATES.reminder24h;
     await this.whatsApp.sendTemplateMessage(
       app.worker.phone,
-      tpl.contentSid,
-      tpl.variables({
+      'reminder24h',
+      {
         offerTitle: app.job_offer.title,
         date: formatDate(app.job_offer.scheduled_at),
-        address: app.job_offer.address,
+        address: jobLocationLabel(app.job_offer),
         amount: Number(app.job_offer.amount).toLocaleString('fr-FR'),
         employerName: `${app.job_offer.employer.first_name} ${app.job_offer.employer.last_name}`,
         employerPhone: app.job_offer.employer.phone,
         cancellationThresholdHours: String(fees.cancellationThresholdHours),
         penaltyFcfa: fees.lateCancellationPenaltyFcfa.toLocaleString('fr-FR'),
-        // URL suffix: the reminder deep-links to this exact mission rather than
-        // dropping the worker on a list to find it.
+        // URL suffix: the reminder deep-links to this exact mission rather
+        // than dropping the worker on a list to find it.
         applicationId,
-      }),
+      },
+      app.worker_id,
     );
 
     // Set bot state so the worker's reply (1=cancel, 2=keep) routes to the cancel flow.
@@ -768,7 +989,7 @@ export class ReminderProcessor {
     }
 
     try {
-      const time = app.job_offer.scheduled_at.toLocaleTimeString('fr-FR', {
+      const time = app.job_offer.scheduled_at!.toLocaleTimeString('fr-FR', {
         hour: '2-digit',
         minute: '2-digit',
         timeZone: APP_TIMEZONE,
@@ -776,15 +997,16 @@ export class ReminderProcessor {
       const tpl = WHATSAPP_TEMPLATES.reminderStart;
       await this.whatsApp.sendTemplateMessage(
         app.worker.phone,
-        tpl.contentSid,
-        tpl.variables({
+        'reminderStart',
+        {
           offerTitle: app.job_offer.title,
           time,
-          address: app.job_offer.address,
+          address: jobLocationLabel(app.job_offer),
           employerName: `${app.job_offer.employer.first_name} ${app.job_offer.employer.last_name}`,
           employerPhone: app.job_offer.employer.phone,
           applicationId,
-        }),
+        },
+        app.worker_id,
       );
       this.logger.log(
         `Reminder start sent for application ${applicationId} (alreadyStarted=${alreadyStarted})`,

@@ -7,8 +7,8 @@ export function kycApprovedEmail(name: string): string {
     <p>Bonne nouvelle ! 🎉 Votre vérification d'identité (KYC) a été <strong>approuvée avec succès</strong>.</p>
 
     <p>
-      Pour accéder à la plateforme, ouvrez l'application Rabotka
-      avec Rabotka. Votre compte sera activé instantanément.
+      Pour accéder à la plateforme, ouvrez l'application Rabotka.
+      Votre compte sera activé instantanément.
     </p>
 
     <p>

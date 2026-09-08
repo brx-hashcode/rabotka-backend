@@ -8,6 +8,7 @@ import {
   resolveMissionPeriodForContractPdf,
   MONTHLY_CONTRACT_END_OFFSET_DAYS,
 } from '../contract-template.helpers';
+import { EmploymentType } from '@prisma/client';
 
 describe('contract-template.helpers', () => {
   describe('computeContractPublicReference', () => {
@@ -94,6 +95,40 @@ describe('contract-template.helpers', () => {
       });
       expect(p.durationLabel).toBe('5 jours');
       expect(p.endDate?.getUTCDate()).toBe(5);
+    });
+
+    it.each([
+      EmploymentType.CDI,
+      EmploymentType.CDD,
+      EmploymentType.STAGE,
+    ])('derives no period for a %s — nobody here knows one', (employmentType) => {
+      // The term starts when the person actually begins working, off-platform,
+      // on a day nobody reports to us, and `scheduled_at` on these types is the
+      // day applications closed. Before this, a permanent contract came out of
+      // the generator saying it lasted "1 jour" with both dates blank — a
+      // falsehood on a legal document, stated with total confidence.
+      const p = resolveMissionPeriodForContractPdf({
+        scheduledAt: new Date(Date.UTC(2026, 1, 1, 8, 0, 0)),
+        contractCreatedAt: new Date(Date.UTC(2026, 0, 1, 0, 0, 0)),
+        paymentFlow: 'MONTHLY',
+        jobNote: null,
+        employmentType,
+      });
+      expect(p.durationLabel).toBe('à convenir entre les parties');
+      expect(p.startDate).toBeNull();
+      expect(p.endDate).toBeNull();
+    });
+
+    it('still derives a period when the type is absent, i.e. a MISSION', () => {
+      // Defaults to MISSION everywhere: a missing field must behave as it
+      // always has, never silently take the new branch.
+      const p = resolveMissionPeriodForContractPdf({
+        scheduledAt: new Date(Date.UTC(2026, 1, 1, 8, 0, 0)),
+        contractCreatedAt: new Date(Date.UTC(2026, 0, 1, 0, 0, 0)),
+        paymentFlow: 'DAILY',
+        jobNote: '5 jours',
+      });
+      expect(p.durationLabel).toBe('5 jours');
     });
   });
 });

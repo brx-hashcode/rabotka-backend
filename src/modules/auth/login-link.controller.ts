@@ -5,7 +5,7 @@ import { Throttle } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
 import { Public } from './decorators/public.decorator';
 import { AuthService } from './auth.service';
-import { setAuthCookie } from './auth-cookie.util';
+import { readAuthCookie, setAuthCookie } from './auth-cookie.util';
 import { DEFAULT_LOGIN_LANDING } from './whatsapp-login-link.service';
 import { LogService } from '../log/log.service';
 import { extractRequestMeta } from '../../common/utils/request-meta.util';
@@ -46,7 +46,7 @@ export class LoginLinkController {
     const meta = extractRequestMeta(req);
 
     if (!CODE_PATTERN.test(code)) {
-      return this.fallback(res, DEFAULT_LOGIN_LANDING);
+      return this.landOrFallback(req, res, meta);
     }
 
     try {
@@ -65,9 +65,7 @@ export class LoginLinkController {
       // Absolute, so the redirect works whichever host served the link.
       res.redirect(`${this.frontendUrl()}/${result.path}`);
     } catch {
-      // Already used, expired, or a suspended account. Never show an error page
-      // for a link someone tapped in good faith — fall back to the login screen
-      // pointed at where they were going, which is exactly today's behaviour.
+      // Already used, expired, or a suspended account.
       await this.logService
         .create({
           action: 'auth.whatsapp_link.rejected',
@@ -76,14 +74,50 @@ export class LoginLinkController {
         })
         .catch(() => undefined);
 
-      this.fallback(res, DEFAULT_LOGIN_LANDING);
+      await this.landOrFallback(req, res, meta);
     }
   }
 
-  private fallback(res: Response, path: string): void {
-    res.redirect(
-      `${this.frontendUrl()}/login?redirect=${encodeURIComponent(`/${path}`)}`,
+  /**
+   * Where a link that could not be consumed should send the visitor.
+   *
+   * Codes are single-use, so every re-tap of an older WhatsApp message arrives
+   * here — with the session that message's *first* tap already established
+   * still sitting in the cookie jar. Bouncing those users to /login is what made
+   * the app flash the phone form and then immediately redirect back into it, so
+   * check the cookie before assuming a failed code means a signed-out visitor.
+   *
+   * Genuinely signed-out visitors still get the login screen pointed at where
+   * they were going, which is exactly the previous behaviour.
+   */
+  private async landOrFallback(
+    req: Request,
+    res: Response,
+    meta: ReturnType<typeof extractRequestMeta>,
+  ): Promise<void> {
+    const profileId = await this.authService.resolveSessionProfile(
+      readAuthCookie(req, this.configService),
     );
+
+    if (!profileId) {
+      return this.fallback(res, DEFAULT_LOGIN_LANDING);
+    }
+
+    await this.logService
+      .create({
+        action: 'auth.whatsapp_link.session_reused',
+        entityType: 'Profile',
+        entityId: profileId,
+        ...meta,
+      })
+      .catch(() => undefined);
+
+    res.redirect(`${this.frontendUrl()}/${DEFAULT_LOGIN_LANDING}`);
+  }
+
+  private fallback(res: Response, path: string): void {
+    const redirect = encodeURIComponent(`/${path}`);
+    res.redirect(`${this.frontendUrl()}/login?redirect=${redirect}`);
   }
 
   private frontendUrl(): string {

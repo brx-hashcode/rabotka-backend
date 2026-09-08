@@ -1,4 +1,5 @@
 import {
+  IsBoolean,
   IsOptional,
   IsString,
   IsNumber,
@@ -6,15 +7,19 @@ import {
   IsEnum,
   IsDateString,
   IsUUID,
+  ValidateIf,
   Min,
   Max,
   MinLength,
   MaxLength,
 } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { PaymentFlow } from '@prisma/client';
+import { PaymentFlow,
+  EmploymentType,
+} from '@prisma/client';
+import { LocationDto } from '../../../common/dto/location.dto';
 
-export class AdminUpdateJobOfferDto {
+export class AdminUpdateJobOfferDto extends LocationDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
@@ -29,10 +34,21 @@ export class AdminUpdateJobOfferDto {
   @MaxLength(1000)
   description?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({
+    description:
+      "The offer's closing date. Send null to clear it — only meaningful for " +
+      'a non-MISSION type, which has no single date.',
+    nullable: true,
+  })
   @IsOptional()
+  @ValidateIf((_o, value) => value !== null)
   @IsDateString()
-  scheduledAt?: string;
+  scheduledAt?: string | null;
+
+  @ApiPropertyOptional({ enum: EmploymentType })
+  @IsOptional()
+  @IsEnum(EmploymentType)
+  employmentType?: EmploymentType;
 
   @ApiPropertyOptional()
   @IsOptional()
@@ -56,6 +72,11 @@ export class AdminUpdateJobOfferDto {
   @IsString()
   @MinLength(10)
   address?: string;
+
+  @ApiPropertyOptional({ description: 'A job done from anywhere.' })
+  @IsOptional()
+  @IsBoolean()
+  isRemote?: boolean;
 
   @ApiPropertyOptional()
   @IsOptional()

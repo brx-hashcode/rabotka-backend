@@ -25,20 +25,38 @@
 export type ScoreTerms = {
   /** Calibrated cosine against the user's interest vector. */
   sim: number | null;
-  /** How much this user engages with this category. */
-  catAff: number;
-  /** How much this user engages with this employer/worker specifically. */
-  partyAff: number;
+  /** How much this user engages with this category. Null when unlearned. */
+  catAff: number | null;
+  /**
+   * How much this user engages with this employer/worker specifically.
+   *
+   * Null when there is no history with them — a first encounter is unknown, not
+   * bad. Zero here used to consume the full weight while ordering nothing.
+   */
+  partyAff: number | null;
   /** Agreement across independent candidate sources. */
   cf: number | null;
-  /** Distance, decayed by the user's own learned tolerance. */
-  prox: number;
+  /**
+   * Distance, decayed by the user's own learned tolerance.
+   *
+   * Null for a REMOTE job, where distance carries no information at all — not
+   * "neutral", genuinely absent. A constant 0.5 would drag every remote offer
+   * toward the middle against local work while ordering nothing; null drops the
+   * term and redistributes its weight onto the signals that do say something.
+   */
+  prox: number | null;
   /** How soon the job starts. Null for a worker, who has no start time. */
   urgency: number | null;
   /** How recently the item was posted, or the counterparty last active. */
   fresh: number | null;
-  /** Counterparty quality prior (fill rate, responsiveness, reliability). */
-  quality: number;
+  /**
+   * Counterparty quality prior (fill rate, responsiveness, reliability).
+   *
+   * Null for an unrated counterparty. A 0.5 "neutral" constant is the same
+   * mistake wearing a plausible number: it is identical for everyone it is
+   * applied to, so it orders nothing while still spending its weight.
+   */
+  quality: number | null;
   /** Fit against learned amount-band and payment-flow preferences. */
   payFit: number | null;
 };
@@ -108,6 +126,36 @@ export const DEFAULT_PENALTIES: Penalties = {
   seen: 0.7,
   unsaved: 0.4,
 };
+
+/**
+ * Floor of the realistic calibrated-similarity band, in `calibrateCosine` units.
+ *
+ * `calibrateCosine` maps the THEORETICAL cosine range [-1,1] onto [0,1]. Real
+ * normalized text embeddings never come close to -1: measured against this
+ * corpus, an employer scored against 15 workers produced 0.8026–0.8679. A
+ * 0.065 spread carrying a 0.30–0.36 weight adds ~0.25 to every candidate and
+ * separates them by ~0.02 — a term that moves every score by the same amount
+ * and therefore ranks nothing, which is precisely the miscalibration this
+ * ranker was rewritten to remove.
+ *
+ * Re-measure before changing: `spreadSimilarity` is only honest while the floor
+ * sits just below what the corpus actually produces.
+ */
+export const SIMILARITY_FLOOR = 0.75;
+
+/**
+ * Stretches a calibrated similarity across [0,1] so it can actually order.
+ *
+ * A FIXED transform, not a per-request min–max. Normalising within the
+ * candidate set would look better distributed but make scores incomparable
+ * between requests, breaking the absolute relevance threshold the whole engine
+ * depends on. Everything below the floor clamps to 0 — those are candidates
+ * with nothing in common, and the distinction between "unrelated" and "very
+ * unrelated" is not worth ranking on.
+ */
+export function spreadSimilarity(calibrated: number): number {
+  return clamp01((calibrated - SIMILARITY_FLOOR) / (1 - SIMILARITY_FLOOR));
+}
 
 export const clamp01 = (n: number): number =>
   Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 0;
@@ -183,18 +231,37 @@ export function applyPenalties(
 ): number {
   let score = clamp01(relevance);
   if (flags.negativeCategory) score *= 1 - clamp01(penalties.negCategory);
-  if (flags.seenDecay) score *= 1 - clamp01(penalties.seen) * clamp01(flags.seenDecay);
+  if (flags.seenDecay)
+    score *= 1 - clamp01(penalties.seen) * clamp01(flags.seenDecay);
   if (flags.unsaved) score *= 1 - clamp01(penalties.unsaved);
   return clamp01(score);
 }
 
-/** Exponential freshness decay. Replaces a linear ramp with a hard floor. */
-export function freshnessScore(createdAt: Date, halfLifeHours = 72): number {
-  const ageHours = (Date.now() - createdAt.getTime()) / 3_600_000;
+export const FRESHNESS_HALF_LIFE_HOURS = 72;
+
+/**
+ * Exponential freshness decay. Replaces a linear ramp with a hard floor.
+ *
+ * `now` is a parameter rather than a `Date.now()` read inside: one ranking pass
+ * must score every candidate against ONE instant. Read per candidate, a tick
+ * landing mid-loop makes a later candidate a millisecond younger than an
+ * earlier one — a real score difference, on the order that separates otherwise
+ * tied candidates, so the feed's order came to depend on where a millisecond
+ * boundary happened to fall. It defaults, so a caller scoring a single item
+ * need not care.
+ */
+export function freshnessScore(
+  createdAt: Date,
+  halfLifeHours = FRESHNESS_HALF_LIFE_HOURS,
+  now: number = Date.now(),
+): number {
+  const ageHours = (now - createdAt.getTime()) / 3_600_000;
   if (ageHours <= 0) return 1;
   if (halfLifeHours <= 0) return 0;
   return clamp01(0.5 ** (ageHours / halfLifeHours));
 }
+
+export const SEEN_RECOVERY_HOURS = 72;
 
 /**
  * How strongly to suppress something the user was just shown.
@@ -202,10 +269,16 @@ export function freshnessScore(createdAt: Date, halfLifeHours = 72): number {
  * Returns 1 immediately after an impression, decaying linearly to 0 over
  * `recoveryHours`. Suppression by decay rather than by hard exclusion: filtering
  * seen items out entirely starves the feed once a user has browsed a while.
+ *
+ * `now` is injected for the reason given on `freshnessScore`.
  */
-export function seenDecay(lastSeenAt: Date | null, recoveryHours = 72): number {
+export function seenDecay(
+  lastSeenAt: Date | null,
+  recoveryHours = SEEN_RECOVERY_HOURS,
+  now: number = Date.now(),
+): number {
   if (!lastSeenAt) return 0;
-  const ageHours = (Date.now() - lastSeenAt.getTime()) / 3_600_000;
+  const ageHours = (now - lastSeenAt.getTime()) / 3_600_000;
   if (ageHours <= 0) return 1;
   if (recoveryHours <= 0) return 0;
   return clamp01(1 - ageHours / recoveryHours);

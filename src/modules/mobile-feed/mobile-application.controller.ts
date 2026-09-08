@@ -16,11 +16,19 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import {
+  IsInt,
+  IsOptional,
+  IsString,
+  Max,
+  MaxLength,
+  Min,
+} from 'class-validator';
 import { ProfileType, PaymentRequestType } from '@prisma/client';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { ProfileAuthGuard } from '../auth/guards/profile-auth.guard';
 import { KycVerifiedGuard } from '../auth/guards/kyc-verified.guard';
+import { ActiveProfileGuard } from '../auth/guards/active-profile.guard';
 import type { ProfileAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
 import { ApplicationService } from '../application/application.service';
 import { ContactUnlockService } from '../contact-unlock/contact-unlock.service';
@@ -83,7 +91,7 @@ export class MobileApplicationController {
   }
 
   @Post(':id/accept')
-  @UseGuards(KycVerifiedGuard)
+  @UseGuards(ActiveProfileGuard, KycVerifiedGuard)
   @ApiOperation({
     summary: '[Mobile/EMPLOYER] Accept a candidate (→ WAITING_PAYMENT)',
   })
@@ -98,7 +106,9 @@ export class MobileApplicationController {
   }
 
   @Post(':id/reject')
-  @ApiOperation({ summary: '[Mobile/EMPLOYER] Reject a candidate (→ REJECTED)' })
+  @ApiOperation({
+    summary: '[Mobile/EMPLOYER] Reject a candidate (→ REJECTED)',
+  })
   async reject(
     @Req() req: ProfileAuthenticatedRequest,
     @Param('id') id: string,
@@ -114,23 +124,27 @@ export class MobileApplicationController {
     return { application };
   }
 
-  @Post(':id/complete')
+  @Post(':id/rate')
   @ApiOperation({
-    summary: '[Mobile/EMPLOYER] Mark the mission completed and rate the worker',
+    summary: '[Mobile/EMPLOYER] Rate the worker for a finished mission',
     description:
-      'Closes the offer, pays the worker, stores the optional note on the assignment, and records the employer→worker rating (1–5).',
+      'Records the employer→worker rating (1–5) and the optional note. Does NOT complete the mission — only the worker can confirm that, and this returns 400 until they have.',
   })
-  @ApiResponse({ status: 200, description: 'Mission completed and rated' })
-  @ApiResponse({ status: 400, description: 'Invalid state or score' })
+  @ApiResponse({ status: 200, description: 'Worker rated' })
+  @ApiResponse({
+    status: 400,
+    description:
+      'Invalid score, or the worker has not confirmed completion yet',
+  })
   @ApiResponse({ status: 403, description: 'Not an EMPLOYER / not the owner' })
-  async complete(
+  async rateWorker(
     @Req() req: ProfileAuthenticatedRequest,
     @Param('id') id: string,
     @Body() body: CompleteMissionDto,
   ) {
     const profileId = req.user.profileId;
     await this.assertEmployer(profileId);
-    await this.applicationService.completeAndRate(
+    await this.applicationService.rateWorkerForMission(
       id,
       profileId,
       body.score,
@@ -140,7 +154,7 @@ export class MobileApplicationController {
   }
 
   @Post(':id/unlock/pay-wallet')
-  @UseGuards(KycVerifiedGuard)
+  @UseGuards(ActiveProfileGuard, KycVerifiedGuard)
   @ApiOperation({
     summary: '[Mobile/EMPLOYER] Pay the contact-unlock fee with wallet credit',
   })
@@ -151,17 +165,29 @@ export class MobileApplicationController {
     const profileId = req.user.profileId;
     await this.assertEmployer(profileId);
     const attempt = await this.getOwnedAttempt(id, profileId);
-    await this.contactUnlock.payUnlock(attempt.id, profileId, true);
+    const result = await this.contactUnlock.payUnlock(
+      attempt.id,
+      profileId,
+      true,
+    );
+    // Deliver the contacts if this payment completed the unlock. Paying from
+    // wallet credit does not go through the payment-request flow, which is
+    // where the delivery used to live exclusively — so this call was missing
+    // and both parties were left waiting for a message that never came.
+    await this.contactUnlock.dispatchUnlockedContacts(result);
     return this.buildDetail(id, profileId);
   }
 
   @Post(':id/unlock/pay-mobile')
-  @UseGuards(KycVerifiedGuard)
+  @UseGuards(ActiveProfileGuard, KycVerifiedGuard)
   @ApiOperation({
     summary:
       '[Mobile/EMPLOYER] Create a mobile-money payment for the contact unlock',
   })
-  @ApiResponse({ status: 200, description: 'Payment token to drive /pay/:token' })
+  @ApiResponse({
+    status: 200,
+    description: 'Payment token to drive /pay/:token',
+  })
   async payMobile(
     @Req() req: ProfileAuthenticatedRequest,
     @Param('id') id: string,
@@ -169,6 +195,16 @@ export class MobileApplicationController {
     const profileId = req.user.profileId;
     await this.assertEmployer(profileId);
     const attempt = await this.getOwnedAttempt(id, profileId);
+    // Without this the gateway happily collects a second time: on a multi-seat
+    // offer the employer's single payment cascades `employer_paid` onto every
+    // other candidate's attempt, so opening this screen on candidate #2 used to
+    // charge again. payUnlock then rejects it and the throw is swallowed
+    // downstream — money taken, nothing unlocked, no refund.
+    if (attempt.employer_paid) {
+      throw new BadRequestException(
+        'Vous avez déjà payé pour ce déverrouillage.',
+      );
+    }
     const url = await this.paymentRequest.createPaymentUrl(
       profileId,
       Number(attempt.employer_amount),
@@ -188,7 +224,9 @@ export class MobileApplicationController {
       throw new NotFoundException('Candidature introuvable');
     }
     if (application.job_offer.employer_id !== profileId) {
-      throw new ForbiddenException("Vous n'êtes pas l'employeur de cette offre");
+      throw new ForbiddenException(
+        "Vous n'êtes pas l'employeur de cette offre",
+      );
     }
 
     // Public portfolio slug so the employer can open the candidate's profile.
@@ -243,7 +281,9 @@ export class MobileApplicationController {
       throw new NotFoundException('Candidature introuvable');
     }
     if (application.job_offer.employer_id !== profileId) {
-      throw new ForbiddenException("Vous n'êtes pas l'employeur de cette offre");
+      throw new ForbiddenException(
+        "Vous n'êtes pas l'employeur de cette offre",
+      );
     }
     const attempt = await this.contactUnlock.getByApplicationId(id);
     if (!attempt) {

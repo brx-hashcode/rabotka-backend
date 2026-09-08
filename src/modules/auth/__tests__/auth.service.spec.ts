@@ -69,7 +69,9 @@ describe('AuthService', () => {
     } as any;
 
     const mockPrismaService = {
-      profile: { findUnique: jest.fn() },
+      // `update` is the last_login_at stamp, fired and not awaited by every
+      // profile sign-in path.
+      profile: { findUnique: jest.fn(), update: jest.fn().mockResolvedValue({}) },
       user: { findUnique: jest.fn(), update: jest.fn() },
     };
 
@@ -236,6 +238,71 @@ describe('AuthService', () => {
     });
   });
 
+  describe('resolveSessionProfile()', () => {
+    // Answers "is this visitor already signed in?" on public routes, where a
+    // missing or dead token is an ordinary outcome rather than an error.
+    it('returns the profile behind a live session token', async () => {
+      (jwtService.verify as jest.Mock).mockReturnValue({
+        sub: 'p-1',
+        type: 'profile',
+        jti: 'j-1',
+      });
+
+      await expect(service.resolveSessionProfile('live-jwt')).resolves.toBe(
+        'p-1',
+      );
+    });
+
+    it('treats a missing token as signed out', async () => {
+      await expect(
+        service.resolveSessionProfile(undefined),
+      ).resolves.toBeNull();
+      expect(jwtService.verify).not.toHaveBeenCalled();
+    });
+
+    it('returns null instead of throwing when the token is dead', async () => {
+      (jwtService.verify as jest.Mock).mockImplementation(() => {
+        throw new Error('jwt expired');
+      });
+
+      await expect(
+        service.resolveSessionProfile('expired'),
+      ).resolves.toBeNull();
+    });
+
+    it('honours the revocation blocklist', async () => {
+      (jwtService.verify as jest.Mock).mockReturnValue({
+        sub: 'p-1',
+        type: 'profile',
+        jti: 'j-1',
+      });
+      redis.get.mockResolvedValue('1');
+
+      await expect(
+        service.resolveSessionProfile('logged-out'),
+      ).resolves.toBeNull();
+    });
+
+    it('refuses tokens that are not profile sessions', async () => {
+      // Admin and mobile-refresh tokens are signed with the same secret; only a
+      // profile session may stand in for a WhatsApp login link.
+      for (const type of ['admin', 'refresh']) {
+        (jwtService.verify as jest.Mock).mockReturnValue({ sub: 'x', type });
+        await expect(
+          service.resolveSessionProfile('other'),
+        ).resolves.toBeNull();
+      }
+    });
+
+    it('accepts a legacy token with no type, as the guard does', async () => {
+      (jwtService.verify as jest.Mock).mockReturnValue({ sub: 'p-1' });
+
+      await expect(service.resolveSessionProfile('legacy')).resolves.toBe(
+        'p-1',
+      );
+    });
+  });
+
   describe('verifyOtp()', () => {
     it('returns token when OTP matches', async () => {
       redis.eval.mockResolvedValue(1);
@@ -249,6 +316,10 @@ describe('AuthService', () => {
       expect(jwtService.sign).toHaveBeenCalledWith(
         expect.objectContaining({ sub: PROFILE_ID, type: 'profile' }),
       );
+      expect(prisma.profile.update).toHaveBeenCalledWith({
+        where: { id: PROFILE_ID },
+        data: { last_login_at: expect.any(Date) },
+      });
     });
 
     it('throws UnauthorizedException when OTP does not match', async () => {
@@ -341,6 +412,10 @@ describe('AuthService', () => {
           'EX',
           expect.any(Number),
         );
+        expect(prisma.profile.update).toHaveBeenCalledWith({
+          where: { id: PROFILE_ID },
+          data: { last_login_at: expect.any(Date) },
+        });
       });
 
       it('throws UnauthorizedException when OTP is invalid', async () => {
@@ -378,6 +453,10 @@ describe('AuthService', () => {
         expect(redis.del).toHaveBeenCalledWith(
           expect.stringContaining('mobile:refresh:refresh-jti-1'),
         );
+        // A rotation is not a fresh login. Stamping here would pin
+        // last_login_at to now for any client that keeps its session alive,
+        // making the field useless for spotting a dormant account.
+        expect(prisma.profile.update).not.toHaveBeenCalled();
       });
 
       it('rejects a refresh token whose jti is not whitelisted (reuse/revoked)', async () => {
@@ -1226,6 +1305,10 @@ describe('AuthService', () => {
       expect(jwtService.sign).toHaveBeenCalledWith(
         expect.objectContaining({ sub: PROFILE_ID, type: 'profile' }),
       );
+      expect(prisma.profile.update).toHaveBeenCalledWith({
+        where: { id: PROFILE_ID },
+        data: { last_login_at: expect.any(Date) },
+      });
     });
 
     it('rejects a code that was already used or expired', async () => {
@@ -1237,17 +1320,34 @@ describe('AuthService', () => {
       expect(jwtService.sign).not.toHaveBeenCalled();
     });
 
-    it('rejects when the account was suspended after the link was sent', async () => {
+    it('rejects when the account was banned after the link was sent', async () => {
       whatsAppLoginLink.consume.mockResolvedValue(PROFILE_ID);
       (prisma.profile.findUnique as jest.Mock).mockResolvedValue({
         id: PROFILE_ID,
-        status: 'SUSPENDED',
+        status: 'BANNED',
       });
 
       await expect(service.loginWithWhatsAppCode('code-1')).rejects.toThrow(
         UnauthorizedException,
       );
       expect(jwtService.sign).not.toHaveBeenCalled();
+    });
+
+    it('lets a suspended account in, read-only', async () => {
+      // Was refused here while the mint side allowed it — two checks that
+      // disagreed, which is why the KYC-pending card's button dead-ended.
+      // Both now defer to canMintLoginCode, and ActiveProfileGuard is what
+      // stops a suspended session from doing anything.
+      whatsAppLoginLink.consume.mockResolvedValue(PROFILE_ID);
+      (prisma.profile.findUnique as jest.Mock).mockResolvedValue({
+        id: PROFILE_ID,
+        status: 'SUSPENDED',
+      });
+
+      await expect(
+        service.loginWithWhatsAppCode('code-1'),
+      ).resolves.toMatchObject({ profileId: PROFILE_ID });
+      expect(jwtService.sign).toHaveBeenCalled();
     });
   });
 });

@@ -13,6 +13,17 @@ on:
       - closed
   workflow_dispatch:
 
+# One deploy at a time. Three PRs merged seconds apart raced each other on the
+# VPS: concurrent `git fetch` in the same checkout failed with "cannot lock ref
+# 'refs/remotes/origin/develop'" and two of the three deploys died.
+#
+# Queue rather than cancel — killing a run mid `docker compose up` can leave the
+# VPS on a half-swapped container. GitHub keeps only the newest pending run, so
+# a burst of merges converges on the latest commit instead of replaying each.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
 jobs:
   # ───────────────────────────────────────────────────────────────────────────
   # JOB 1: Run test suite with coverage gate (≥ 70%)
@@ -20,7 +31,15 @@ jobs:
   # ───────────────────────────────────────────────────────────────────────────
   test:
     name: Test Suite
-    if: github.event.pull_request.merged == true
+    # workflow_dispatch has no pull_request, so the merged check is false on a
+    # manual run and this job — plus `deploy` and `smoke-test`, which need it —
+    # skipped. The run then went green in 11 seconds having deployed nothing,
+    # and `notify` announced the release anyway. That is what the manual escape
+    # hatch was reached for during the 2026-08-26 Actions outage, and it is
+    # exactly when a silently inert deploy is most expensive.
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
 
     steps:
@@ -110,6 +129,16 @@ jobs:
           VAULT_SECRET=$(echo "$SECRET_RESPONSE" | jq -r '.data.data')
 
           cat > /tmp/deploy.env << EOF
+          # DO NOT use backticks or dollar-parenthesis in the comments below.
+          #
+          # This heredoc is UNQUOTED (<< EOF), because the Vault values under it
+          # need command substitution. That expansion applies to comment lines
+          # too:
+          # anything in backticks is EXECUTED. Most of it merely printed
+          # "command not found" to stderr for months, but a comment saying
+          # "docker stats" ran it for real — and with no --no-stream it streams
+          # forever, hanging the deploy until the 40-minute timeout. A comment
+          # saying "free -m" injected its multi-line output straight into .env.
           # --- from Vault ---
           DATABASE_URL=$(echo "$VAULT_SECRET" | jq -r '.DATABASE_URL')
           DIRECT_DATABASE_URL=$(echo "$VAULT_SECRET" | jq -r '.DIRECT_DATABASE_URL')
@@ -119,6 +148,21 @@ jobs:
           JWT_SECRET=$(echo "$VAULT_SECRET" | jq -r '.JWT_SECRET')
           JWT_EXPIRES_IN=$(echo "$VAULT_SECRET" | jq -r '.JWT_EXPIRES_IN')
           CSRF_SECRET=$(echo "$VAULT_SECRET" | jq -r '.CSRF_SECRET')
+          # "Login with Rabotka" (OIDC provider). The app refuses to boot without
+          # these — deliberately: a missing signing key must fail at startup, not
+          # at the first partner login. See the preflight step below, which
+          # catches it on the runner before the VPS is touched at all.
+          #
+          # OIDC_PRIVATE_KEY is base64 of the PKCS#8 PEM, NOT the PEM itself: a
+          # multi-line value would break this heredoc and every line after it.
+          #
+          # OIDC_PAIRWISE_SALT must never change once partners exist. It derives
+          # the per-application sub, and partners key their own user tables on
+          # it — rotating it orphans every account every partner has created.
+          OIDC_ISSUER=$(echo "$VAULT_SECRET" | jq -r '.OIDC_ISSUER')
+          OIDC_PRIVATE_KEY=$(echo "$VAULT_SECRET" | jq -r '.OIDC_PRIVATE_KEY')
+          OIDC_KEY_ID=$(echo "$VAULT_SECRET" | jq -r '.OIDC_KEY_ID')
+          OIDC_PAIRWISE_SALT=$(echo "$VAULT_SECRET" | jq -r '.OIDC_PAIRWISE_SALT')
           ARCJET_KEY=$(echo "$VAULT_SECRET" | jq -r '.ARCJET_KEY')
           SMTP_HOST=$(echo "$VAULT_SECRET" | jq -r '.SMTP_HOST')
           SMTP_PORT=$(echo "$VAULT_SECRET" | jq -r '.SMTP_PORT')
@@ -130,6 +174,58 @@ jobs:
           ADMIN_BASE_URL=$(echo "$VAULT_SECRET" | jq -r '.ADMIN_BASE_URL')
           ALLOW_ORIGINS=$(echo "$VAULT_SECRET" | jq -r '.ALLOW_ORIGINS')
           SUPER_ADMIN_EMAIL=$(echo "$VAULT_SECRET" | jq -r '.SUPER_ADMIN_EMAIL')
+          # --- WhatsApp: provider switch and both credential sets ---
+          # Every value here comes from Vault, the provider included, so moving
+          # an environment between Twilio and the Meta Cloud API is a Vault edit
+          # plus a re-run of this workflow — no code change, no image rebuild.
+          #
+          # The "// empty-string" fallback on every line is load-bearing: a jq
+          # lookup of a key Vault does not have prints the literal string null,
+          # and TWILIO_AUTH_TOKEN=null passes the schema's non-empty check, so
+          # the app would boot clean and fail every send on auth. Empty is the
+          # honest value for absent, and the guard step below makes it fatal.
+          #
+          # NOTE: this heredoc is unquoted, so backticks and dollar-parens in
+          # these comments would be EXECUTED and their output written into the
+          # .env. Keep the prose free of both.
+          #
+          # PROVIDER falls back to empty rather than to twilio: the preprocess
+          # in whatsapp.config.ts already treats blank as twilio, and repeating
+          # the default here is a second source of truth that can drift.
+          #
+          # WHATSAPP_CLOUD_API_VERSION is deliberately NOT in this heredoc. Its
+          # zod default only fires on undefined, not on an empty string, so an
+          # empty line here fails the v25.0 regex and the app will not boot. It
+          # is appended below only when Vault actually has a value.
+          WHATSAPP_PROVIDER=$(echo "$VAULT_SECRET" | jq -r '.WHATSAPP_PROVIDER // ""')
+          TWILIO_ACCOUNT_SID=$(echo "$VAULT_SECRET" | jq -r '.TWILIO_ACCOUNT_SID // ""')
+          TWILIO_AUTH_TOKEN=$(echo "$VAULT_SECRET" | jq -r '.TWILIO_AUTH_TOKEN // ""')
+          TWILIO_WHATSAPP_FROM=$(echo "$VAULT_SECRET" | jq -r '.TWILIO_WHATSAPP_FROM // ""')
+          TWILIO_SMS_FROM=$(echo "$VAULT_SECRET" | jq -r '.TWILIO_SMS_FROM // ""')
+          WHATSAPP_CLOUD_PHONE_NUMBER_ID=$(echo "$VAULT_SECRET" | jq -r '.WHATSAPP_CLOUD_PHONE_NUMBER_ID // ""')
+          WHATSAPP_CLOUD_ACCESS_TOKEN=$(echo "$VAULT_SECRET" | jq -r '.WHATSAPP_CLOUD_ACCESS_TOKEN // ""')
+          WHATSAPP_CLOUD_APP_SECRET=$(echo "$VAULT_SECRET" | jq -r '.WHATSAPP_CLOUD_APP_SECRET // ""')
+          WHATSAPP_CLOUD_VERIFY_TOKEN=$(echo "$VAULT_SECRET" | jq -r '.WHATSAPP_CLOUD_VERIFY_TOKEN // ""')
+          WHATSAPP_CLOUD_WABA_ID=$(echo "$VAULT_SECRET" | jq -r '.WHATSAPP_CLOUD_WABA_ID // ""')
+          WHATSAPP_FEEDBACK_FLOW_ID=$(echo "$VAULT_SECRET" | jq -r '.WHATSAPP_FEEDBACK_FLOW_ID // ""')
+          # --- Vova assistant: LLM provider credentials ---
+          # From Vault like every other credential; the keys themselves never
+          # appear in this file. Same "// empty-string" fallback and for the
+          # same reason as the WhatsApp block above — jq prints the literal
+          # string null for a key Vault does not have, and a provider client
+          # built on the credential "null" fails every call at request time
+          # rather than at boot.
+          #
+          # Blank is a supported state, not a broken one: resolveChain drops a
+          # provider with no credential instead of throwing, so a key missing
+          # from Vault costs a fallback tier quietly. The step below is what
+          # makes "all three blank" loud.
+          ANTHROPIC_API_KEY=$(echo "$VAULT_SECRET" | jq -r '.ANTHROPIC_API_KEY // ""')
+          GOOGLE_API_KEY=$(echo "$VAULT_SECRET" | jq -r '.GOOGLE_API_KEY // ""')
+          MISTRAL_API_KEY=$(echo "$VAULT_SECRET" | jq -r '.MISTRAL_API_KEY // ""')
+          OPENAI_API_KEY=$(echo "$VAULT_SECRET" | jq -r '.OPENAI_API_KEY // ""')
+          GROQ_API_KEY=$(echo "$VAULT_SECRET" | jq -r '.GROQ_API_KEY // ""')
+          DEEPSEEK_API_KEY=$(echo "$VAULT_SECRET" | jq -r '.DEEPSEEK_API_KEY // ""')
           # --- static values ---
           BACKEND_IMAGE=ghcr.io/${{ github.repository_owner }}/rabotka-backend:latest
           NODE_ENV=production
@@ -148,7 +244,105 @@ jobs:
           SMTP_FROM_NAME=Rabotka
           PDF_OWNER_PASSWORD=password
           APP_ENV=prod
+          ARCJET_ENV=development
           API_DOMAIN=${{ secrets.PROD_API_DOMAIN }}
+          # --- Vova assistant: model ids and budgets ---
+          # Not secrets, so they are static here rather than Vault entries.
+          #
+          # Safe to blank, unlike WHATSAPP_CLOUD_API_VERSION above: every VOVA_*
+          # reader (modelId, readNumber) treats an empty string as "use the
+          # built-in default", so an empty line falls back instead of failing
+          # the boot.
+          #
+          # Pinned here rather than left to the code defaults so that a vendor
+          # renaming or retiring an id is a workflow edit and a redeploy, not a
+          # release — which is the failure this chain has already hit once, when
+          # Google retired gemini-2.0-flash out from under the build spec.
+          #
+          # CHEAP deliberately overrides the code default of
+          # gemini-flash-lite-latest.
+          VOVA_MODEL_STANDARD_ANTHROPIC=claude-haiku-4-5
+          VOVA_MODEL_CHEAP_GOOGLE=gemini-flash-lite-latest
+          # Two Google entries. FAST leads the pair (~1.4s median on a
+          # tool-calling turn); the capable one sits behind it. Separate breaker
+          # keys, so one failing does not pull the other out of rotation.
+          VOVA_MODEL_STANDARD_GOOGLE_FAST=gemini-flash-lite-latest
+          VOVA_MODEL_STANDARD_GOOGLE=gemini-3.6-flash
+          VOVA_MODEL_STANDARD_MISTRAL=mistral-small-latest
+          VOVA_MODEL_STANDARD_OPENAI=gpt-4o-mini
+          # Groq publishes no -latest alias and retires ids on a short cycle,
+          # so this pin matters more here than anywhere else in the list.
+          VOVA_MODEL_STANDARD_GROQ=llama-3.3-70b-versatile
+          VOVA_MODEL_STANDARD_DEEPSEEK=deepseek-chat
+          # Per-attempt CEILING, now clamped by the turn deadline rather than
+          # standing alone. 20000 here against a 25000ms vova.timeout_ms left
+          # 5000ms for everything else, so the fallback chain was unreachable by
+          # arithmetic — a second provider could only ever help the NEXT message.
+          #
+          # Move these three together, and keep the invariant:
+          #   TIMEOUT_MS + FALLBACK_RESERVE_MS <= vova.timeout_ms (SystemConfig)
+          VOVA_LLM_TIMEOUT_MS=12000
+          VOVA_FALLBACK_RESERVE_MS=7000
+          # Below this, a call is a guaranteed timeout that still bills a prompt.
+          VOVA_LLM_MIN_CALL_MS=1500
+          # Least budget worth starting a whole agent run with.
+          VOVA_MIN_RUN_MS=5000
+          # Ceiling on retrieval so grounding cannot starve the model call.
+          # Keep: 3 x QDRANT_SEARCH_TIMEOUT_MS + 450 <= this value.
+          VOVA_RETRIEVAL_BUDGET_MS=4000
+          # The client library defaults to 300000ms. Two clients: a shared
+          # safety net that cannot break ingest, and a tight one used only
+          # by the help search inside a user's turn.
+          QDRANT_TIMEOUT_MS=30000
+          QDRANT_SEARCH_TIMEOUT_MS=1000
+          # Racing agent runs. OFF until the cheaper fixes above are measured:
+          # it doubles tokens and DB reads on the turns it fires. Safe only
+          # because all 14 VoVa tools are read-only.
+          # Build the chat models at boot so no turn pays an SDK cold start.
+          # A comma list, NOT a boolean: the SDKs are imported lazily because
+          # loading all six costs ~83MB and broke the 150MB terminus limit.
+          # Name only what the race uses; Mistral alone is 67MB.
+          VOVA_WARMUP_PROVIDERS=google,openai
+          VOVA_HEDGE_ENABLED=false
+          # Head start for the leading provider; 0 races everyone at once.
+          VOVA_HEDGE_MS=3500
+          # Never raise to the full chain: six SDKs is ~83MB, the regression
+          # that broke the 150MB terminus limit.
+          VOVA_HEDGE_MAX_PARALLEL=2
+          # Process-wide cap. Without it a vendor slowdown makes every turn
+          # hedge at once — a latency tool becomes an outage amplifier.
+          VOVA_HEDGE_MAX_CONCURRENT=8
+          VOVA_HEDGE_MIN_REMAINING_MS=8000
+          # Chain order stays a preference: a leader landing inside this
+          # window beats a faster lower-priority run.
+          VOVA_RACE_PREFERENCE_GRACE_MS=800
+          # Health-ordered chain. The scoreboard is written regardless so the
+          # gauges have data; only the REORDERING is gated. Enable after a
+          # week of watching vova_llm_health_score and _chain_position.
+          VOVA_HEALTH_ENABLED=false
+          VOVA_HEALTH_ALPHA=0.3
+          # Shortish on purpose: a demoted provider's entry must expire so it
+          # gets retried. That loop is the self-healing.
+          VOVA_HEALTH_TTL_S=900
+          VOVA_HEALTH_DEFAULT_MS=4000
+          VOVA_HEALTH_PRIOR=3
+          # An override for outliers, not a replacement for the hand-tuned
+          # order — a free sort would rewrite the chain on noise.
+          VOVA_HEALTH_MIN_GAIN_RATIO=1.25
+          VOVA_LLM_RETRY_BACKOFF_MS=250
+          # Gemini is a thinking model, and unconstrained it spent 5116ms on a
+          # turn whose whole output was a 28-token tool call, then stalled past
+          # the cap above. VoVa's turns are lookups, not proofs.
+          VOVA_GOOGLE_THINKING_LEVEL=LOW
+          # Circuit breaker: consecutive failures before a provider is skipped,
+          # and how long a failure keeps counting toward that threshold.
+          # VOVA_BREAKER_COOLDOWN_S is left to its 60s default.
+          VOVA_BREAKER_THRESHOLD=5
+          VOVA_BREAKER_WINDOW_S=120
+          # Staleness budget, not a constant: admins create and delete job
+          # categories at runtime, and a new one becomes searchable within a TTL.
+          VOVA_CATEGORY_TTL_MS=300000
+          VOVA_RETRIEVAL_LIMIT=5
           # --- SystemConfig-overridden placeholders ---
           DRIVER=S3
           AWS_REGION=placeholder
@@ -158,10 +352,6 @@ jobs:
           CLOUDINARY_CLOUD_NAME=placeholder
           CLOUDINARY_API_KEY=placeholder
           CLOUDINARY_API_SECRET=placeholder
-          TWILIO_ACCOUNT_SID=placeholder
-          TWILIO_AUTH_TOKEN=placeholder
-          TWILIO_WHATSAPP_FROM=placeholder
-          TWILIO_SMS_FROM=placeholder
           TWILIO_WEBHOOK_BASE_URL=$(echo "$VAULT_SECRET" | jq -r '.TWILIO_WEBHOOK_BASE_URL')
           QDRANT_URL=$(echo "$VAULT_SECRET" | jq -r '.QDRANT_URL')
           QDRANT_API_KEY=$(echo "$VAULT_SECRET" | jq -r '.QDRANT_API_KEY')
@@ -178,9 +368,160 @@ jobs:
           EOF
           sed -i 's/^[[:space:]]*//' /tmp/deploy.env
 
+          # Appended rather than written in the heredoc so the key is ABSENT
+          # when Vault has no value. zod's .default('v25.0') fires on undefined
+          # only — an empty WHATSAPP_CLOUD_API_VERSION= line fails its regex and
+          # takes the container down on boot.
+          WA_API_VERSION=$(echo "$VAULT_SECRET" | jq -r '.WHATSAPP_CLOUD_API_VERSION // ""')
+          if [ -n "$WA_API_VERSION" ]; then
+            echo "WHATSAPP_CLOUD_API_VERSION=$WA_API_VERSION" >> /tmp/deploy.env
+          fi
+
           curl -sf --request POST \
             --header "X-Vault-Token: $TOKEN" \
             "${{ secrets.VAULT_ADDR }}/v1/auth/token/revoke-self" > /dev/null || true
+
+      # Mirrors the discriminated union in whatsapp.config.ts so CI rejects
+      # exactly what the container would — but on the runner, before the VPS is
+      # touched at all.
+      #
+      # Worth its own step because a bad .env currently leaves the environment
+      # broken with NO rollback: rollback() only fires when `docker compose up
+      # -d` itself fails, and that returns success as soon as containers start.
+      # A crash-loop or a silently-misconfigured client sails past it and only
+      # surfaces in smoke-test, a separate job with no rollback path.
+      - name: Verify required WhatsApp secrets are present
+        run: |
+          set -euo pipefail
+          get() { grep -E "^$1=" /tmp/deploy.env | head -1 | cut -d= -f2-; }
+
+          PROVIDER=$(get WHATSAPP_PROVIDER)
+          # Blank inherits the schema's own default rather than assuming here.
+          [ -n "$PROVIDER" ] || PROVIDER=twilio
+
+          case "$PROVIDER" in
+            twilio) REQUIRED="TWILIO_ACCOUNT_SID TWILIO_AUTH_TOKEN TWILIO_WHATSAPP_FROM" ;;
+            cloud)  REQUIRED="WHATSAPP_CLOUD_PHONE_NUMBER_ID WHATSAPP_CLOUD_ACCESS_TOKEN WHATSAPP_CLOUD_APP_SECRET WHATSAPP_CLOUD_VERIFY_TOKEN WHATSAPP_CLOUD_WABA_ID" ;;
+            *)
+              echo "::error::WHATSAPP_PROVIDER must be 'twilio' or 'cloud', got '$PROVIDER'"
+              exit 1
+              ;;
+          esac
+
+          echo "Provider: $PROVIDER"
+          MISSING=""
+          for key in $REQUIRED; do
+            value=$(get "$key")
+            # "null" is what jq writes for a key absent from Vault, and it is
+            # non-empty, so the app would accept it and fail at send time.
+            if [ -z "$value" ] || [ "$value" = "null" ]; then
+              MISSING="$MISSING $key"
+            fi
+          done
+
+          # Report every missing key at once: fixing them one deploy at a time
+          # is three failed runs instead of one.
+          if [ -n "$MISSING" ]; then
+            echo "::error::Missing from Vault (secret/data/apps/rabotka-backend-production) for provider '$PROVIDER':$MISSING"
+            exit 1
+          fi
+          echo "All required WhatsApp secrets present."
+
+      # Not fatal. `resolveChain` drops a provider with no credential and the
+      # app boots clean either way, so this cannot break a deploy of unrelated
+      # work — but a Vault missing every key leaves the assistant answering
+      # nothing, which is the kind of silent misconfiguration that only shows up
+      # in a delivery log days later.
+      # The same lesson as the WhatsApp step above, learned the hard way by this
+      # very feature: the first deploy of "Login with Rabotka" merged with no
+      # OIDC keys in Vault, the container threw in onModuleInit, and the
+      # environment sat at 502 through thirty smoke-test attempts with no
+      # rollback — because rollback() only fires when `docker compose up` itself
+      # fails, and it had succeeded.
+      #
+      # Checking here costs a second and fails the run before the VPS is touched.
+      - name: Verify required OIDC secrets are present
+        run: |
+          set -euo pipefail
+          get() { grep -E "^$1=" /tmp/deploy.env | head -1 | cut -d= -f2-; }
+
+          MISSING=""
+          for key in OIDC_ISSUER OIDC_PRIVATE_KEY OIDC_KEY_ID OIDC_PAIRWISE_SALT; do
+            value=$(get "$key")
+            # "null" is what jq writes for a key absent from Vault, and it is
+            # non-empty — the app would accept it and fail at boot.
+            if [ -z "$value" ] || [ "$value" = "null" ]; then
+              MISSING="$MISSING $key"
+            fi
+          done
+
+          if [ -n "$MISSING" ]; then
+            echo "::error::Missing from Vault (secret/data/apps/rabotka-backend-production):$MISSING — the backend cannot boot without these."
+            exit 1
+          fi
+
+          # The PEM travels base64-encoded because a multi-line value would break
+          # the .env. Decoding here catches a raw PEM pasted into Vault, which
+          # would otherwise reach the container as an unparseable single line.
+          #
+          # Whitespace and CR are stripped first. A value copied through an
+          # editor or a Windows-formatted field arrives with a trailing \r that
+          # GNU base64 rejects outright, and "your key is invalid" is a
+          # miserable thing to be told when the key is fine and the newline is
+          # not.
+          RAW_KEY=$(get OIDC_PRIVATE_KEY | tr -d '\r\n ')
+
+          # BOTH checks, because each misses what the other catches:
+          #
+          #  - the header alone passes a key truncated mid-body, which still
+          #    begins "-----BEGIN PRIVATE KEY-----" and then fails at boot;
+          #  - openssl alone passes PKCS#1 ("BEGIN RSA PRIVATE KEY", what
+          #    `openssl genrsa` emits), which it parses happily but jose's
+          #    importPKCS8 cannot read.
+          DECODED=$(printf %s "$RAW_KEY" | base64 -d 2>/dev/null || true)
+
+          if ! printf '%s\n' "$DECODED" | head -1 | grep -q -- "-----BEGIN PRIVATE KEY-----" \
+             || ! printf '%s\n' "$DECODED" | openssl pkey -noout 2>/dev/null; then
+            # Report what is actually there. None of this is secret — the length,
+            # the first characters of a base64 PEM header, and the decoded header
+            # line are all fixed strings for any RSA key — and without them this
+            # failure is a guessing game played one deploy at a time.
+            DECODED_HEAD=$(printf '%s\n' "$DECODED" | head -1 | tr -cd '[:print:]' | cut -c1-40)
+
+            echo "::error::OIDC_PRIVATE_KEY is not a usable PKCS#8 private key."
+            echo "  length            : ${#RAW_KEY} chars (a 2048-bit PKCS#8 key is ~2272)"
+            echo "  first 16 chars    : ${RAW_KEY:0:16}"
+            echo "  base64 decodes to : ${DECODED_HEAD:-<nothing — not valid base64>}"
+            echo
+            echo "  Expected first 16 : LS0tLS1CRUdJTiBQ   (\"-----BEGIN P\")"
+            echo "  PKCS#1 looks like : LS0tLS1CRUdJTiBS   (\"-----BEGIN R\", from openssl genrsa)"
+            echo
+            echo "  Generate a usable key with:"
+            echo "    openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out oidc.pem"
+            echo "    base64 < oidc.pem | tr -d '\n'"
+            exit 1
+          fi
+
+          echo "All required OIDC secrets present."
+
+      - name: Check Vova LLM credentials
+        run: |
+          set -euo pipefail
+          get() { grep -E "^$1=" /tmp/deploy.env | head -1 | cut -d= -f2-; }
+
+          PRESENT=""
+          for key in ANTHROPIC_API_KEY GOOGLE_API_KEY MISTRAL_API_KEY OPENAI_API_KEY GROQ_API_KEY DEEPSEEK_API_KEY; do
+            value=$(get "$key")
+            if [ -n "$value" ] && [ "$value" != "null" ]; then
+              PRESENT="$PRESENT ${key%%_API_KEY}"
+            fi
+          done
+
+          if [ -z "$PRESENT" ]; then
+            echo "::warning::No Vova LLM credentials in Vault (secret/data/apps/rabotka-backend-production) — the assistant will have an empty provider chain and answer nothing. Expected one or more of ANTHROPIC_API_KEY, GOOGLE_API_KEY, MISTRAL_API_KEY, OPENAI_API_KEY, GROQ_API_KEY, DEEPSEEK_API_KEY."
+          else
+            echo "Vova providers configured:$PRESENT"
+          fi
 
       - name: Copy .env to VPS
         run: |
@@ -258,7 +599,11 @@ jobs:
     name: Slack Notification (production)
     runs-on: ubuntu-latest
     needs: [test, deploy, smoke-test]
-    if: always()
+    # always(), but not for a pipeline that never ran: `notify` is the only job
+    # without a dependency on `test`, so a skipped deploy still reached it and
+    # posted a success. Announcing a release that did not happen is worse than
+    # announcing nothing.
+    if: always() && needs.deploy.result != 'skipped'
     permissions:
       contents: read
 

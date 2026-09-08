@@ -28,10 +28,12 @@ import {
   VerificationStatus,
 } from '@prisma/client';
 import { ContactedProfilesService } from '../recommendation/contacted-profiles.service';
+import { withCityFilter } from '../../common/queries/city-filter';
 import { PortfolioService } from '../portfolio/portfolio.service';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { ProfileAuthGuard } from '../auth/guards/profile-auth.guard';
 import { KycVerifiedGuard } from '../auth/guards/kyc-verified.guard';
+import { ActiveProfileGuard } from '../auth/guards/active-profile.guard';
 import type { ProfileAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';
 import { MatchingService } from '../matching/matching.service';
 import { SystemConfigService } from '../system-config/system-config.service';
@@ -62,6 +64,18 @@ const WORKER_SELECT = {
   },
 } as const;
 
+/**
+ * Which ranker produced the hits, for the diagnostic log only.
+ *
+ * `disabled` means no ranker ran at all because `matching.use_embeddings` is
+ * off — distinct from a ranker that ran and matched nothing, which is what the
+ * feed looked like from the outside before this was reported.
+ */
+type FeedEngine = 'v2' | 'legacy' | 'disabled';
+
+/** Which of the three tiers actually answered. */
+type FeedTier = 'ranked' | 'in_domain' | 'any_eligible';
+
 type RecommendedWorker = {
   id: string;
   firstName: string;
@@ -86,7 +100,6 @@ type RecommendedWorker = {
   portfolioSlug: string | null;
   score: number;
 };
-
 
 @ApiTags('Mobile — Recommendations')
 @ApiBearerAuth()
@@ -124,33 +137,96 @@ export class MobileRecommendationController {
     await this.assertEmployer(profileId);
 
     const topN = this.parseLimit(limit, 20, 50);
-    const contactedIds = await this.contactedProfiles.listContactedWorkerIds(profileId);
+    const contactedIds =
+      await this.contactedProfiles.listContactedWorkerIds(profileId);
 
-    const hits = await this.rankWorkers(profileId, topN, contactedIds);
+    const {
+      workers: served,
+      engine,
+      tier,
+    } = await this.resolveWorkerFeed(profileId, topN, contactedIds);
+
+    // The feed degrades silently by design — every tier returns a plausible list
+    // — so without this line a production feed serving `score: 0` from the SQL
+    // fallback is indistinguishable from a ranker that genuinely scored everyone
+    // 0. `engine=disabled tier=any_eligible` says "no ranker ran" at a glance.
+    this.logger.log(
+      `worker-feed profile=${profileId} engine=${engine} tier=${tier} count=${served.length} topScore=${served[0]?.score.toFixed(4) ?? 'n/a'}`,
+    );
+
+    // Recorded once on whatever tier actually answered, rather than at each of
+    // the three exits. Without this the employer feed is frozen: the ranker
+    // seen-suppresses on [PROFILE_VIEW, IMPRESSION_BATCH], and only workers
+    // whose detail page was opened were ever suppressed — anyone merely
+    // scrolled past resurfaced on every refresh.
+    void this.interactionEvents.recordImpressions({
+      actorId: profileId,
+      actorType: InteractionActor.EMPLOYER,
+      objectType: InteractionObject.WORKER_PROFILE,
+      items: served.map((w) => ({ objectId: w.id })),
+      surface: 'worker_feed',
+      requestId: req.requestId,
+    });
+
+    return served;
+  }
+
+  /** The three tiers, best first: ranked → in-domain → any eligible worker. */
+  private async resolveWorkerFeed(
+    profileId: string,
+    topN: number,
+    contactedIds: Set<string>,
+  ): Promise<{
+    workers: RecommendedWorker[];
+    engine: FeedEngine;
+    tier: FeedTier;
+  }> {
+    const { hits, engine } = await this.rankWorkers(
+      profileId,
+      topN,
+      contactedIds,
+    );
     const recommended = await this.hydrate(
       hits.filter((h) => !contactedIds.has(h.id)).slice(0, topN),
     );
-    if (recommended.length > 0) return recommended;
+    if (recommended.length > 0) {
+      return { workers: recommended, engine, tier: 'ranked' };
+    }
 
     const categoryIds = await this.employerCategoryIds(profileId);
     if (categoryIds.length > 0) {
       const inDomain = await this.hydrate(
         await this.eligibleWorkerHits(categoryIds, contactedIds, topN),
       );
-      if (inDomain.length > 0) return inDomain;
+      if (inDomain.length > 0) {
+        return { workers: inDomain, engine, tier: 'in_domain' };
+      }
     }
 
-    return this.hydrate(
-      await this.eligibleWorkerHits([], contactedIds, topN),
-    );
+    return {
+      workers: await this.hydrate(
+        await this.eligibleWorkerHits([], contactedIds, topN),
+      ),
+      engine,
+      tier: 'any_eligible',
+    };
   }
-
 
   private async rankWorkers(
     profileId: string,
     topN: number,
     contactedIds: Set<string>,
-  ): Promise<{ id: string; score: number }[]> {
+  ): Promise<{ hits: { id: string; score: number }[]; engine: FeedEngine }> {
+    // Reported separately from the tier because the two answer different
+    // questions: the tier says which list the employer got, `engine` says
+    // whether a ranker was ever consulted. `disabled` is the one that matters —
+    // the legacy ranker returns an empty array on its first line when
+    // `matching.use_embeddings` is off, which is indistinguishable from
+    // "nothing matched" everywhere downstream.
+    if (!(await this.systemConfig.isSimilarityEnabled())) {
+      return { hits: [], engine: 'disabled' };
+    }
+
     if ((await this.rollout.versionFor(profileId)) === 'v2') {
       try {
         const ranked = await this.engine.recommendWorkersForEmployer(
@@ -159,18 +235,23 @@ export class MobileRecommendationController {
           { exclude: contactedIds },
         );
         if (ranked.length > 0) {
-          return ranked.map((r) => ({ id: r.id, score: r.score }));
+          return {
+            hits: ranked.map((r) => ({ id: r.id, score: r.score })),
+            engine: 'v2',
+          };
         }
       } catch (err) {
         this.logger.warn(`v2 worker ranker failed for ${profileId}`, err);
       }
     }
-    return (
-      (await this.matching.findMatchingWorkersForEmployerProfile(
-        profileId,
-        topN + contactedIds.size,
-      )) ?? []
-    );
+    return {
+      hits:
+        (await this.matching.findMatchingWorkersForEmployerProfile(
+          profileId,
+          topN + contactedIds.size,
+        )) ?? [],
+      engine: 'legacy',
+    };
   }
 
   private async employerCategoryIds(employerId: string): Promise<string[]> {
@@ -201,9 +282,7 @@ export class MobileRecommendationController {
         verification_status: 'VERIFIED',
         deleted_at: null,
         reliability_score: { gte: fees.reliabilityScoreMin },
-        ...(contactedIds.size > 0
-          ? { id: { notIn: [...contactedIds] } }
-          : {}),
+        ...(contactedIds.size > 0 ? { id: { notIn: [...contactedIds] } } : {}),
         ...(categoryIds.length > 0
           ? { categories: { some: { category_id: { in: categoryIds } } } }
           : {}),
@@ -263,13 +342,14 @@ export class MobileRecommendationController {
       objectId: workerId,
       source: InteractionSource.SERVER,
       surface: 'worker_detail',
+      requestId: req.requestId,
     });
 
     return { worker, recommendationFee, walletBalance };
   }
 
   @Post('recommended-workers/:workerId/contact/pay-wallet')
-  @UseGuards(KycVerifiedGuard)
+  @UseGuards(ActiveProfileGuard, KycVerifiedGuard)
   @ApiOperation({
     summary: '[Mobile/EMPLOYER] Pay a recommended worker contact via wallet',
   })
@@ -283,7 +363,7 @@ export class MobileRecommendationController {
   }
 
   @Post('recommended-workers/:workerId/contact/pay-mobile')
-  @UseGuards(KycVerifiedGuard)
+  @UseGuards(ActiveProfileGuard, KycVerifiedGuard)
   @ApiOperation({
     summary:
       '[Mobile/EMPLOYER] Create a mobile-money payment for a recommended worker contact',
@@ -302,7 +382,8 @@ export class MobileRecommendationController {
 
   @Get('worker-search')
   @ApiOperation({
-    summary: '[Mobile/EMPLOYER] Search all workers (name/description + filters)',
+    summary:
+      '[Mobile/EMPLOYER] Search all workers (name/description + filters)',
   })
   @ApiResponse({ status: 200, description: 'Paginated worker search results' })
   @ApiResponse({ status: 403, description: 'Not an EMPLOYER profile' })
@@ -322,7 +403,7 @@ export class MobileRecommendationController {
     const pageNum = Math.max(0, Number.parseInt(page ?? '0', 10) || 0);
     const skip = pageNum * take;
 
-    const where: Prisma.ProfileWhereInput = {
+    let where: Prisma.ProfileWhereInput = {
       profile_type: ProfileType.WORKER,
       status: 'ACTIVE',
       verification_status: 'VERIFIED',
@@ -339,9 +420,8 @@ export class MobileRecommendationController {
     if (minRating && Number.isFinite(rating)) {
       where.rating_avg = { gte: rating };
     }
-    if (city?.trim()) {
-      where.address = { contains: city.trim(), mode: 'insensitive' };
-    }
+    // Structured `city` first, free-text `address` as the fallback.
+    where = withCityFilter(where, city);
 
     const term = q?.trim();
     if (term) {
@@ -396,6 +476,13 @@ export class MobileRecommendationController {
       ? { id: { in: ids } }
       : {
           id: { in: ids },
+          // Archiving a profile only writes `deleted_at` — it leaves `status`
+          // and `verification_status` untouched (`bulkSoftDeleteProfiles`). The
+          // SQL fallback tiers filter on it, but tier 1's ids come from Qdrant,
+          // where a point outlives the profile until the next sweep. Without
+          // this an archived worker keeps being recommended, and the employer
+          // pays a contact fee to reach someone who is gone.
+          deleted_at: null,
           status: 'ACTIVE' as const,
           verification_status: 'VERIFIED' as const,
           reliability_score: {
@@ -412,16 +499,16 @@ export class MobileRecommendationController {
       }),
     ]);
 
-    const endById = new Map(
-      endCounts.map((c) => [c.worker_id, c._count._all]),
-    );
+    const endById = new Map(endCounts.map((c) => [c.worker_id, c._count._all]));
     const byId = new Map(profiles.map((p) => [p.id, p]));
     const scoreById = new Map(hits.map((h) => [h.id, h.score]));
 
     return ids
       .map((id) => byId.get(id))
       .filter((p): p is NonNullable<typeof p> => Boolean(p))
-      .map((p) => this.toCard(p, endById.get(p.id) ?? 0, scoreById.get(p.id) ?? 0));
+      .map((p) =>
+        this.toCard(p, endById.get(p.id) ?? 0, scoreById.get(p.id) ?? 0),
+      );
   }
 
   private toCard(

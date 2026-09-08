@@ -3,6 +3,8 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { PaymentRequestService } from '../payment-request.service';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { WhatsAppService } from '../../whatsapp/whatsapp.service';
+import { WhatsAppFeedbackService } from '../../whatsapp/feedback/whatsapp-feedback.service';
+import { ReferralService } from '../../referral/referral.service';
 import { LogService } from '../../log/log.service';
 import { ConfigService } from '@nestjs/config';
 import { MailService } from '../../mail/mail.service';
@@ -11,7 +13,6 @@ import { PaymentService } from '../../payments/payment.service';
 import { SystemConfigService } from '../../system-config/system-config.service';
 import { PaymentRequestStatus, PaymentRequestType } from '@prisma/client';
 import { WalletService } from '../../wallet/wallet.service';
-import { MonetbilService } from '../monetbil.service';
 import { PaymentStatusGateway } from '../../ws-notifications/payment-status.gateway';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { BotNotificationService } from '../../bot/services/bot-notification.service';
@@ -20,6 +21,8 @@ import { InvoiceService } from '../../invoice/invoice.service';
 import { StorageService } from '../../../common/services/storage/storage.service';
 import { QueueService } from '../../../common/services/queue/queue.service';
 import { PaymentGatewayService } from '../../../common/services/payment/payment-gateway.service';
+import { MONETBIL_METADATA } from '../../../common/services/payment/providers/monetbil-payment.gateway';
+import { MTN_MOMO_METADATA } from '../../../common/services/payment/providers/mtn-momo-payment.gateway';
 
 const PROFILE_ID = 'profile-uuid-1';
 const REQUEST_ID = 'req-uuid-1';
@@ -99,6 +102,16 @@ describe('PaymentRequestService', () => {
         PaymentRequestService,
         { provide: PrismaService, useValue: mockPrismaService },
         { provide: WhatsAppService, useValue: mockWhatsApp },
+        {
+          // The recommendation reveal mints one of these per send; the token is
+          // what ties a submitted feedback Flow back to the payer.
+          provide: WhatsAppFeedbackService,
+          useValue: { mintFlowToken: jest.fn(() => 'fb_profile-1_uuid') },
+        },
+        {
+          provide: ReferralService,
+          useValue: { settleForReferee: jest.fn().mockResolvedValue(undefined) },
+        },
         { provide: LogService, useValue: mockLog },
         { provide: ConfigService, useValue: mockConfig },
         {
@@ -137,17 +150,16 @@ describe('PaymentRequestService', () => {
           },
         },
         {
-          provide: MonetbilService,
-          useValue: {
-            initiatePayment: jest.fn(),
-            verifyWebhookSignature: jest.fn(),
-          },
-        },
-        {
           provide: PaymentGatewayService,
           useValue: {
             initiatePayment: jest.fn(),
             checkPaymentStatus: jest.fn(),
+            // The suite drives Monetbil-shaped operators, so the active gateway
+            // has to be one that accepts them.
+            getActiveMetadata: jest.fn().mockReturnValue(MONETBIL_METADATA),
+            listAvailable: jest
+              .fn()
+              .mockReturnValue([MONETBIL_METADATA, MTN_MOMO_METADATA]),
             handleWebhookPayload: jest.fn().mockResolvedValue({
               gatewayRef: null,
               status: 'PENDING',
@@ -314,7 +326,7 @@ describe('PaymentRequestService', () => {
       (prisma.paymentRequest.findUnique as jest.Mock).mockResolvedValue(null);
 
       await expect(
-        service.initiatePayment(TOKEN, '237600000001', 'MTN'),
+        service.initiatePayment(TOKEN, '237600000001', 'CG_MTNMOBILEMONEY'),
       ).rejects.toThrow(NotFoundException);
     });
 
@@ -324,7 +336,7 @@ describe('PaymentRequestService', () => {
       );
 
       await expect(
-        service.initiatePayment(TOKEN, '237600000001', 'MTN'),
+        service.initiatePayment(TOKEN, '237600000001', 'CG_MTNMOBILEMONEY'),
       ).rejects.toThrow(BadRequestException);
     });
   });
@@ -376,13 +388,69 @@ describe('PaymentRequestService', () => {
     });
   });
 
+  /**
+   * The DTO accepts any code the registry knows; only the service can tell
+   * whether it fits the gateway this deployment actually runs on.
+   */
+  describe('initiatePayment() - operator must match the active gateway', () => {
+    const pendingRequest = () =>
+      (prisma.paymentRequest.findUnique as jest.Mock).mockResolvedValue(
+        makeRequest(PaymentRequestStatus.PENDING, { amount: 5000 }),
+      );
+
+    it('rejects an operator the active gateway does not accept', async () => {
+      pendingRequest();
+      await expect(
+        // A real code — but Airtel's, on a build running MTN MoMo.
+        service.initiatePayment(TOKEN, '+242001', 'CG_AIRTELMONEY_TYPO'),
+      ).rejects.toThrow(/Opérateur invalide pour Monetbil/);
+      // Rejected before the request is claimed, so the payer can retry.
+      expect(prisma.paymentRequest.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('rejects a missing operator when the gateway routes by network', async () => {
+      pendingRequest();
+      await expect(
+        service.initiatePayment(TOKEN, '+242001', ''),
+      ).rejects.toThrow(/Opérateur invalide pour Monetbil/);
+    });
+
+    it('accepts any operator when the gateway serves a single network', async () => {
+      pendingRequest();
+      const paymentGateway = (service as any).paymentGateway;
+      paymentGateway.getActiveMetadata = jest
+        .fn()
+        .mockReturnValue(MTN_MOMO_METADATA);
+      paymentGateway.initiatePayment = jest
+        .fn()
+        .mockResolvedValue({ gatewayRef: 'gw-1' });
+      (prisma.paymentRequest.update as jest.Mock).mockResolvedValue({});
+      (service as any).queueService.addJob = jest.fn().mockResolvedValue(null);
+
+      // MTN MoMo ignores the field, so an empty operator must not block it.
+      const result = await service.initiatePayment(TOKEN, '+242001', '');
+      expect(result.success).toBe(true);
+    });
+  });
+
+  describe('listGateways()', () => {
+    it('reports the active gateway alongside every registered one', () => {
+      const result = service.listGateways();
+      expect(result.active).toBe('MONETBIL');
+      expect(result.gateways.map((g) => g.key)).toEqual([
+        'MONETBIL',
+        'MTN_MOMO',
+      ]);
+    });
+  });
+
   describe('initiatePayment() - more branches', () => {
     it('throws BadRequestException when amount is null', async () => {
       (prisma.paymentRequest.findUnique as jest.Mock).mockResolvedValue(
         makeRequest(PaymentRequestStatus.PENDING, { amount: null }),
       );
       await expect(
-        service.initiatePayment(TOKEN, '+242001', 'MTN'),
+        service.initiatePayment(TOKEN, '+242001', 'CG_MTNMOBILEMONEY'),
       ).rejects.toThrow(BadRequestException);
     });
 
@@ -394,7 +462,7 @@ describe('PaymentRequestService', () => {
         count: 0,
       });
       await expect(
-        service.initiatePayment(TOKEN, '+242001', 'MTN'),
+        service.initiatePayment(TOKEN, '+242001', 'CG_MTNMOBILEMONEY'),
       ).rejects.toThrow(BadRequestException);
     });
 
@@ -410,7 +478,7 @@ describe('PaymentRequestService', () => {
         .fn()
         .mockRejectedValueOnce(new Error('Gateway error'));
       await expect(
-        service.initiatePayment(TOKEN, '+242001', 'MTN'),
+        service.initiatePayment(TOKEN, '+242001', 'CG_MTNMOBILEMONEY'),
       ).rejects.toThrow(BadRequestException);
       expect(prisma.paymentRequest.updateMany).toHaveBeenCalledTimes(2); // original + revert
     });
@@ -429,7 +497,7 @@ describe('PaymentRequestService', () => {
         .mockResolvedValue({ gatewayRef: 'gw-ref-1' });
       const queueService = (service as any).queueService;
       queueService.addJob = jest.fn().mockResolvedValue(undefined);
-      const result = await service.initiatePayment(TOKEN, '+242001', 'MTN');
+      const result = await service.initiatePayment(TOKEN, '+242001', 'CG_MTNMOBILEMONEY');
       expect(result.success).toBe(true);
     });
 
@@ -445,7 +513,7 @@ describe('PaymentRequestService', () => {
       paymentGateway.initiatePayment = jest
         .fn()
         .mockResolvedValue({ gatewayRef: null });
-      const result = await service.initiatePayment(TOKEN, '+242001', 'MTN');
+      const result = await service.initiatePayment(TOKEN, '+242001', 'CG_MTNMOBILEMONEY');
       expect(result.success).toBe(true);
     });
   });

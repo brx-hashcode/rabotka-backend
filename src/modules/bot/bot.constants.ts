@@ -15,7 +15,6 @@ export const FLOW_TTL_SECONDS: Partial<Record<string, number>> = {
   republish_expired_job: 30 * 60, // 30 min
   rate_assignment: 2 * 3600,
   pay_penalties: 3600, // 1 h — holds payment intent
-  unlock_contact: 3600, // 1 h — holds payment intent
 };
 
 export const FLOW_IDS = {
@@ -23,20 +22,47 @@ export const FLOW_IDS = {
   CANCEL_APPLICATION: 'cancel_application',
   JOB_STATUS_CHECK: 'job_status_check',
   PAY_PENALTIES: 'pay_penalties',
+  /** Holds the numbered penalty list while the user picks which to settle.
+   *  Distinct from PAY_PENALTIES, which is the payment flow that follows. */
+  PENALTY_GATE: 'penalty_gate',
   /** Tiny state machine that handles the 1/2/3 menu shown to an employer
    *  after a worker cancels their candidature (see formatCancellationToEmployer). */
   POST_CANCELLATION_ACTIONS: 'post_cancellation_actions',
   RATE_ASSIGNMENT: 'rate_assignment',
   REPUBLISH_EXPIRED_JOB: 'republish_expired_job',
-  UNLOCK_CONTACT: 'unlock_contact',
   VERIFY_WHATSAPP: 'verify_whatsapp',
 } as const;
 
 /**
  * Words that mean "get me out of here". There is no menu any more — inside a
  * live flow these exit it, and the orchestrator answers with the welcome card.
+ *
+ * `start` is the documented entry point. It belongs HERE rather than being
+ * handled on its own, because until now it only worked by accident: unrecognised
+ * input falls through to the welcome card, so `start` did nothing while a user
+ * was mid-flow — which is precisely when someone types it. Someone stuck in the
+ * penalty-payment flow had it parsed as a payment option and stayed stuck.
+ * Listing it here gives it the escape behaviour every flow already honours.
+ *
+ * `démarrer`/`commencer` are here because a French-speaking user is at least as
+ * likely to type those, and the cost is two array entries.
  */
-export const CMD_MENU = ['menu', 'aide', 'help', 'bonjour', '*'];
+export const CMD_MENU = [
+  'menu',
+  'aide',
+  'help',
+  'bonjour',
+  '*',
+  'start',
+  'démarrer',
+  'demarrer',
+  'commencer',
+  // `expandSlashCommand` already rewrites a bare "/" to "menu" at the
+  // conversation entry point, so this is belt and braces — it keeps the slash
+  // working for any caller that matches CMD_MENU against raw input rather than
+  // the expanded text.
+  '/',
+];
 export const CMD_PAY = [
   'payer',
   'régler',
@@ -44,3 +70,101 @@ export const CMD_PAY = [
   'payer pénalités',
   'payer penalites',
 ];
+
+/**
+ * "I want an account" — the one command an unregistered number can act on.
+ *
+ * Only reachable from the anonymous path: a registered user typing « compte »
+ * keeps whatever the bot already answers them. `expandSlashCommand` rewrites
+ * `/compte` to `compte` at the entry point, so only the bare words are listed,
+ * accented and unaccented like `CMD_PAY` — phone keyboards differ.
+ *
+ * Matched EXACTLY, never by prefix. Prefix matching is what swallowed the
+ * landing page's own CTA (« Bonjour Rabotka, je cherche… ») and sent the menu
+ * card to the first message a new user ever writes.
+ */
+/**
+ * The words that get a card straight away, with no model in the path.
+ *
+ * A deliberately smaller set than `CMD_MENU`, and used by BOTH gates — the
+ * orchestrator's for registered users, and the anonymous branch in
+ * `ConversationService`. `CMD_MENU` mixes two kinds of word: navigation
+ * commands, and things people actually say.
+ *
+ * « bonjour », « aide » and « help » are the second kind, and answering them
+ * with a card was wrong for either audience. Someone writing « bonjour » is
+ * opening a conversation; a card is the reply you give when you have nothing to
+ * say, and we have plenty — the assistant can introduce itself and ask what
+ * they need.
+ *
+ * What stays here is the vocabulary that means "show me the thing": *menu*,
+ * *start*, *démarrer*. Those are documented entry points, printed in templates,
+ * and they must not depend on a model provider being up.
+ *
+ * NOTE this is not `CMD_MENU`, which still drives account activation in the
+ * orchestrator — a KYC-verified user typing « bonjour » must still activate.
+ * That path runs before either gate and is deliberately untouched.
+ *
+ * Nothing is lost when the assistant is off or over budget: both callers fall
+ * back to their usual card.
+ */
+export const CMD_NAVIGATION = [
+  'menu',
+  '*',
+  'start',
+  'démarrer',
+  'demarrer',
+  'commencer',
+  // `expandSlashCommand` rewrites a bare "/" to "menu" before this is reached;
+  // kept for any caller matching against raw input.
+  '/',
+];
+
+export const CMD_ACCOUNT = [
+  'compte',
+  'inscription',
+  "s'inscrire",
+  's inscrire',
+  'sinscrire',
+  'creer un compte',
+  'créer un compte',
+  'creer compte',
+  'créer compte',
+  'je veux un compte',
+  'signup',
+  'sign up',
+  'register',
+];
+
+/**
+ * Reach a human.
+ *
+ * Answered for EVERY account state, unlike the rest of the vocabulary. The
+ * suspension and KYC-rejection templates tell people to type it, and those
+ * people are by definition not ACTIVE — a command that only worked for
+ * healthy accounts would be useless to exactly the audience it names.
+ *
+ * `expandSlashCommand` already rewrites "/support" to "support", so only the
+ * bare words are listed. The accented and unaccented spellings both appear for
+ * the same reason they do in CMD_PAY: phone keyboards differ.
+ */
+export const CMD_SUPPORT = [
+  'support',
+  'aide',
+  'assistance',
+  'contact',
+  'réclamation',
+  'reclamation',
+];
+
+/**
+ * Base URL for links the bot puts in a message.
+ *
+ * Must match `FRONTEND_URL`, because that is what
+ * `WhatsAppOutboundProcessor.withLoginLinks` matches on when it rewrites a
+ * first-party link into a one-tap `/s/<code>`. A hardcoded production URL looks
+ * right and silently loses that rewrite in every other environment.
+ */
+export const APP_BASE_URL = (
+  process.env.FRONTEND_URL ?? 'https://rabotka.work'
+).replace(/\/+$/, '');

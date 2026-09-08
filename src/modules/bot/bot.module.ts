@@ -13,6 +13,7 @@ import { InterestGraphModule } from '../interest-graph/interest-graph.module';
 import { RecommendationEngineModule } from '../recommendation-engine/recommendation-engine.module';
 import { InvoiceModule } from '../invoice/invoice.module';
 import { PortfolioModule } from '../portfolio/portfolio.module';
+import { VovaModule } from '../rag/vova.module';
 import { BotStateService } from './services/bot-state.service';
 import { BotInboxService } from './services/bot-inbox.service';
 import { BotDraftService } from './services/bot-draft.service';
@@ -36,6 +37,7 @@ import { BotNotificationService } from './services/bot-notification.service';
     RecommendationEngineModule,
     InvoiceModule,
     forwardRef(() => PortfolioModule),
+    forwardRef(() => VovaModule),
   ],
   providers: [
     BotStateService,

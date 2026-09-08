@@ -2,6 +2,8 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { PaymentRequestService } from '../payment-request.service';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { WhatsAppService } from '../../whatsapp/whatsapp.service';
+import { WhatsAppFeedbackService } from '../../whatsapp/feedback/whatsapp-feedback.service';
+import { ReferralService } from '../../referral/referral.service';
 import { LogService } from '../../log/log.service';
 import { ConfigService } from '@nestjs/config';
 import { MailService } from '../../mail/mail.service';
@@ -15,7 +17,6 @@ import {
   InvoiceReason,
 } from '@prisma/client';
 import { WalletService } from '../../wallet/wallet.service';
-import { MonetbilService } from '../monetbil.service';
 import { PaymentStatusGateway } from '../../ws-notifications/payment-status.gateway';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { BotNotificationService } from '../../bot/services/bot-notification.service';
@@ -144,6 +145,14 @@ describe('PaymentRequestService — WALLET_TOP_UP post-payment', () => {
           provide: WhatsAppService,
           useValue: { sendTextMessage: jest.fn().mockResolvedValue(true), sendMediaMessage: jest.fn().mockResolvedValue(true) },
         },
+        {
+          provide: WhatsAppFeedbackService,
+          useValue: { mintFlowToken: jest.fn(() => 'fb_profile-1_uuid') },
+        },
+        {
+          provide: ReferralService,
+          useValue: { settleForReferee: jest.fn().mockResolvedValue(undefined) },
+        },
         { provide: LogService, useValue: { create: jest.fn().mockResolvedValue({}) } },
         { provide: ConfigService, useValue: { get: jest.fn().mockReturnValue('http://localhost:3000') } },
         { provide: MailService, useValue: { sendMail: jest.fn().mockResolvedValue(undefined) } },
@@ -159,7 +168,6 @@ describe('PaymentRequestService — WALLET_TOP_UP post-payment', () => {
           },
         },
         { provide: WalletService, useValue: mockWalletService },
-        { provide: MonetbilService, useValue: { initiatePayment: jest.fn(), verifyWebhookSignature: jest.fn() } },
         { provide: PaymentGatewayService, useValue: mockPaymentGateway },
         { provide: PaymentStatusGateway, useValue: { emitPaymentStatus: jest.fn() } },
         { provide: EventEmitter2, useValue: { emit: jest.fn() } },

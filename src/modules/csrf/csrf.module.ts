@@ -57,7 +57,26 @@ import { CsrfController } from './csrf.controller';
             return (
               isBearer ||
               url.includes('/whatsapp/incoming') ||
-              url.includes('/auth/mobile/')
+              // Meta's webhook. A provider cannot carry a CSRF token, and
+              // without this the POST is answered with a JSON 403 by this very
+              // middleware — signature verification never runs, and Meta
+              // retries against the 403 for days.
+              url.includes('/webhooks/whatsapp/') ||
+              url.includes('/auth/mobile/') ||
+              // The OIDC server-to-server endpoints. A partner's BACKEND calls
+              // these, authenticating with HTTP Basic client credentials or a
+              // bearer token — neither of which a browser attaches ambiently,
+              // so there is no CSRF to protect against. Note that the `isBearer`
+              // escape above does NOT cover `/oauth/token`: it authenticates
+              // with `Basic`, so without this line every token exchange would
+              // be answered with a 403 and no integration would ever complete.
+              //
+              // Deliberately NOT listed: `/oauth/interaction/*`. Those are
+              // called by Rabotka's own consent page, from FRONTEND_URL, with
+              // the session cookie attached — exactly the shape CSRF exists for.
+              url.includes('/oauth/token') ||
+              url.includes('/oauth/revoke') ||
+              url.includes('/oauth/userinfo')
             );
           },
         });

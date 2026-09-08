@@ -1,0 +1,11 @@
+-- The concurrent-application cap is gone; the daily cap is the only gate.
+--
+-- It was the binding limit (5 slots against 10/day) and, unlike the daily
+-- window, nothing cleared it on a clock: a slot frees only when an employer
+-- accepts or rejects. A worker with five pending applications was blocked
+-- indefinitely while the UI told them "0 remaining, resets at midnight".
+--
+-- Removing it from DEFAULT_SYSTEM_CONFIGS is not enough on its own —
+-- seedDefaults() upserts by key and never deletes, so the row would survive as
+-- an orphan the admin Fees card could still write to.
+DELETE FROM "system_configs" WHERE "key" = 'fees.max_concurrent_applications';

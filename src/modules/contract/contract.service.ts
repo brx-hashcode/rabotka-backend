@@ -5,9 +5,10 @@ import {
   Inject,
 } from '@nestjs/common';
 import Redis from 'ioredis';
+import { jobLocationLabel } from '../../common/utils/job-location.util';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { DocumentService } from '../document/document.service';
-import { DocumentCategory, PaymentFlow } from '@prisma/client';
+import { DocumentCategory, EmploymentType, PaymentFlow } from '@prisma/client';
 import {
   computeContractPublicReference,
   resolveMissionPeriodForContractPdf,
@@ -147,8 +148,11 @@ export class ContractService {
   }
 
   /**
-   * MONTHLY: END_DATE = contract.created_at (acceptance proxy) + 30 UTC calendar days.
-   * Other payment flows: END from scheduled_at + note-based duration (or 1 day).
+   * MISSION, MONTHLY: END_DATE = contract.created_at (acceptance proxy) + 30 UTC calendar days.
+   * MISSION, other payment flows: END from scheduled_at + note-based duration (or 1 day).
+   * CDD / CDI / STAGE: no dates and a "à convenir" term — nothing here knows when
+   * the engagement begins or ends, and inventing it would put a falsehood on a
+   * legal document.
    */
   private buildContractTemplateData(contract: {
     id: string;
@@ -157,10 +161,11 @@ export class ContractService {
       job_offer: {
         title: string;
         description: string;
-        address: string;
+        address: string | null;
         amount: { toString(): string } | null;
         payment_flow: PaymentFlow | null;
-        scheduled_at: Date;
+        employment_type: EmploymentType | null;
+        scheduled_at: Date | null;
         note: string | null;
         employer: {
           first_name: string;
@@ -191,6 +196,7 @@ export class ContractService {
       contractCreatedAt: contract.created_at,
       paymentFlow: job.payment_flow,
       jobNote: job.note,
+      employmentType: job.employment_type,
     });
     const startStr = period.startDate
       ? period.startDate.toLocaleDateString('fr-FR')
@@ -221,7 +227,7 @@ export class ContractService {
       WORKER_EMAIL: s(worker.email),
       JOB_TITLE: s(job.title),
       JOB_DESCRIPTION: s(job.description),
-      JOB_LOCATION: s(job.address),
+      JOB_LOCATION: s(jobLocationLabel(job)),
       PAY_MODE: paymentFlowPayModeFr(job.payment_flow),
       PAY_FREQUENCY: paymentFlowFrequencyFr(job.payment_flow),
       AMOUNT: amountFormatted,
@@ -229,7 +235,7 @@ export class ContractService {
       WORKER_LAST_NAME: s(worker.last_name),
       EMPLOYER_FIRST_NAME: s(employer.first_name),
       EMPLOYER_LAST_NAME: s(employer.last_name),
-      JOB_ADDRESS: s(job.address),
+      JOB_ADDRESS: s(jobLocationLabel(job)),
       JOB_AMOUNT: job.amount == null ? '-' : job.amount.toString(),
       JOB_PAYMENT_FLOW: s(job.payment_flow),
       JOB_DATE: startStr,

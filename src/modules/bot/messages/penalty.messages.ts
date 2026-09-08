@@ -1,4 +1,7 @@
-function formatDate(d: Date): string {
+function formatDate(d: Date | null): string {
+  // CDI/CDD/STAGE offers carry no closing date, and a penalty message still
+  // has to print something.
+  if (!d) return 'Non précisée';
   return d.toLocaleDateString('fr-FR', {
     day: '2-digit',
     month: '2-digit',
@@ -36,7 +39,7 @@ export type CompletedMissionItem = {
 
 export function formatCancelApplicationNoPenalty(params: {
   offerTitle: string;
-  scheduledAt: Date;
+  scheduledAt: Date | null;
   amount: number | null;
   timeRemaining: string;
   thresholdHours: number;
@@ -106,7 +109,7 @@ export function formatPenaltyReminderDay(params: {
     '*Comment payer :*',
     'Tapez *payer* pour régler vos pénalités.',
     '',
-    'Tapez *5* (Mon profil) pour voir le détail de vos pénalités.',
+    'Le détail de vos pénalités est dans l’application, sur votre profil.',
   ].join('\n');
 }
 
@@ -124,7 +127,7 @@ export function formatPenaltyPaidSuccess(firstName: string): string {
 
 export function formatCancelApplicationWithPenalty(params: {
   offerTitle: string;
-  scheduledAt: Date;
+  scheduledAt: Date | null;
   amount: number | null;
   timeRemaining: string;
   penaltyAmount: number;

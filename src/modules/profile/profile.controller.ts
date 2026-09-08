@@ -33,7 +33,12 @@ import {
 } from './profile.service';
 import { CreateProfileDto } from './dto/create-profile.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
-import { sendWelcomeEmail } from '../mail/templates';
+import {
+  RequestPhoneChangeDto,
+  ConfirmPhoneChangeDto,
+} from './dto/change-phone.dto';
+import { sendWelcomeEmail, WELCOME_EMAIL_PREVIEW } from '../mail/templates';
+import { setAuthCookie } from '../auth/auth-cookie.util';
 import { MailService } from '../mail/mail.service';
 import { LayoutService } from '../mail/layout.service';
 import { ProfileAuthGuard } from '../auth/guards/profile-auth.guard';
@@ -47,6 +52,10 @@ import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { ProfileType } from '@prisma/client';
 import { WHATSAPP_TEMPLATES } from '../../common/constants/whatsapp-templates';
 import { PayPenaltyDto } from '../wallet/dto/pay-penalty.dto';
+import {
+  ALLOWED_IMAGE_MIME_TYPES,
+  isAllowedImageMimeType,
+} from '../../common/constants/image-upload';
 
 @ApiTags('Profile')
 @Controller('profile')
@@ -124,7 +133,11 @@ export class ProfileController {
       to: createProfileDto.email,
       subject: 'Bienvenue sur Rabotka',
       html: await this.layoutService.wrap(
-        sendWelcomeEmail(createProfileDto.firstName),
+        sendWelcomeEmail(createProfileDto.firstName, {
+          appUrl: this.frontendUrl(),
+          creditedBalance: result.creditedBalance,
+        }),
+        { previewText: WELCOME_EMAIL_PREVIEW },
       ),
     });
 
@@ -135,15 +148,16 @@ export class ProfileController {
     // Role decides the closing line: workers are pointed at offers that match
     // them, employers at profiles that match them. Both land on /home, which is
     // already role-aware.
-    const profileCreatedTpl =
+    const profileCreatedKey =
       createProfileDto.profileType === ProfileType.EMPLOYER
-        ? WHATSAPP_TEMPLATES.profileCreatedEmployer
-        : WHATSAPP_TEMPLATES.profileCreatedWorker;
+        ? ('profileCreatedEmployer' as const)
+        : ('profileCreatedWorker' as const);
     void this.whatsApp
       .sendTemplateMessage(
         createProfileDto.phone,
-        profileCreatedTpl.contentSid,
-        profileCreatedTpl.variables(createProfileDto.firstName),
+        profileCreatedKey,
+        createProfileDto.firstName,
+        result.profileId,
       )
       .catch((err: unknown) =>
         this.logger.warn(
@@ -152,26 +166,25 @@ export class ProfileController {
         ),
       );
 
-    // Sign a JWT and set the auth cookie so the user is logged in immediately
-    const cookieName = this.configService.get<string>('AUTH_COOKIE_NAME');
-    if (cookieName) {
-      const payload = {
-        sub: result.profileId,
-        type: 'profile',
-        jti: randomUUID(),
-      };
-      const token = this.jwtService.sign(payload);
-      const isProduction = this.configService.get('NODE_ENV') === 'production';
-      res.cookie(cookieName, token, {
-        httpOnly: true,
-        secure: isProduction,
-        sameSite: isProduction ? 'none' : 'lax',
-        maxAge: 24 * 60 * 60 * 1000,
-        path: '/',
-      });
-    }
+    // Sign a JWT and set the auth cookie so the user is logged in immediately.
+    // Through `setAuthCookie` rather than an inline `res.cookie`: it is the one
+    // definition of the session cookie, and hand-rolling it here had quietly
+    // given everyone who signed up a 24h session while every other login path
+    // issued 30 days.
+    const payload = {
+      sub: result.profileId,
+      type: 'profile',
+      jti: randomUUID(),
+    };
+    setAuthCookie(res, this.configService, this.jwtService.sign(payload));
 
     return { message: result.message, creditedBalance: result.creditedBalance };
+  }
+
+  private frontendUrl(): string {
+    return (
+      this.configService.get<string>('FRONTEND_URL') ?? 'http://localhost:3000'
+    ).replace(/\/+$/, '');
   }
 
   @Get('me')
@@ -422,9 +435,11 @@ export class ProfileController {
   @UseInterceptors(
     FileInterceptor('avatar', {
       limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+      // Silent reject, unlike `imageMulterOptions`: changing this route to
+      // throw is a behaviour change its callers have not been prepared for.
+      // Only the list is shared here — see the follow-up to unify the rest.
       fileFilter: (_req, file, cb) => {
-        const allowed = ['image/jpeg', 'image/png', 'image/webp'];
-        cb(null, allowed.includes(file.mimetype));
+        cb(null, isAllowedImageMimeType(file.mimetype));
       },
     }),
   )
@@ -483,11 +498,11 @@ export class ProfileController {
   @UseInterceptors(
     FileInterceptor('file', {
       limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+      // Not an image-only route: KYC accepts a scanned PDF too, so this
+      // extends the shared list rather than using it as-is.
       fileFilter: (_req, file, cb) => {
-        const allowed = [
-          'image/jpeg',
-          'image/png',
-          'image/webp',
+        const allowed: string[] = [
+          ...ALLOWED_IMAGE_MIME_TYPES,
           'application/pdf',
         ];
         cb(null, allowed.includes(file.mimetype));
@@ -519,7 +534,21 @@ export class ProfileController {
     schema: {
       type: 'object',
       properties: {
-        url: { type: 'string', description: 'Public URL of the uploaded file' },
+        // `key` was always returned and never documented, and the declared
+        // return type said `{ url }`. A client author reading either would not
+        // know to send the key back — which is how KYC rows ended up with a
+        // NULL `storage_key` and an unre-signable url.
+        key: {
+          type: 'string',
+          description:
+            'Storage key of the uploaded object. The durable half: send it ' +
+            'back in POST /profile.',
+        },
+        url: {
+          type: 'string',
+          description:
+            'Signed preview url. Expires within the hour — never persist it.',
+        },
       },
     },
   })
@@ -529,12 +558,53 @@ export class ProfileController {
   })
   async uploadKyc(
     @UploadedFile() file: Express.Multer.File,
-  ): Promise<{ url: string }> {
+  ): Promise<{ url: string; key: string }> {
     if (!file) {
       throw new BadRequestException('Le fichier KYC est requis');
     }
 
     return this.profileService.uploadKycFile(file);
+  }
+
+  @Post('phone-change/request')
+  @UseGuards(ProfileAuthGuard)
+  @ApiBearerAuth()
+  @ApiCookieAuth()
+  @ApiOperation({
+    summary: 'Start changing the authenticated profile WhatsApp number',
+    description:
+      'Sends a 6-digit code to the NEW number and stores the pending change for 5 minutes. Nothing is written to the profile until the code comes back — the number is the login identity, so it only moves once the new handset is proven.',
+  })
+  @ApiResponse({ status: 200, description: 'Code sent to the new number' })
+  @ApiResponse({ status: 400, description: 'Invalid or unchanged number' })
+  @ApiResponse({ status: 409, description: 'Number already used by another account' })
+  @ApiResponse({ status: 503, description: 'WhatsApp unavailable or number unreachable' })
+  async requestPhoneChange(
+    @Body() dto: RequestPhoneChangeDto,
+    @Req() req: ProfileAuthenticatedRequest,
+  ): Promise<{ success: boolean }> {
+    return this.profileService.requestPhoneChange(
+      req.user.profileId,
+      dto.newPhone,
+    );
+  }
+
+  @Post('phone-change/confirm')
+  @UseGuards(ProfileAuthGuard)
+  @ApiBearerAuth()
+  @ApiCookieAuth()
+  @ApiOperation({
+    summary: 'Confirm the WhatsApp number change with the code',
+    description:
+      'Commits the pending number change. The code is single-use and the pending change is discarded after 5 failed attempts.',
+  })
+  @ApiResponse({ status: 200, description: 'Number changed' })
+  @ApiResponse({ status: 400, description: 'Wrong, expired or missing code' })
+  async confirmPhoneChange(
+    @Body() dto: ConfirmPhoneChangeDto,
+    @Req() req: ProfileAuthenticatedRequest,
+  ): Promise<{ success: boolean; phone: string }> {
+    return this.profileService.confirmPhoneChange(req.user.profileId, dto.code);
   }
 
   @Post('verify-whatsapp')

@@ -13,6 +13,10 @@ import {
   BillingStatus,
   ContactUnlockAttempt,
   ContactUnlockStatus,
+  InteractionActor,
+  InteractionKind,
+  InteractionObject,
+  InteractionSource,
   InvoiceReason,
   JobOfferStatus,
   PaymentMethod,
@@ -24,12 +28,17 @@ import {
   WalletTransactionType,
 } from '@prisma/client';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
-import { isWorkerHardBlocked } from '../penalty/penalty.utils';
+import { isEmployerCoveredAtJobLevel } from './employer-coverage';
+import {
+  isWorkerHardBlocked,
+  hardBlockMessage,
+} from '../penalty/penalty.utils';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { WalletService } from '../wallet/wallet.service';
 import { InvoiceService } from '../invoice/invoice.service';
 import { MatchingService } from '../matching/matching.service';
 import { BotNotificationService } from '../bot/services/bot-notification.service';
+import { InteractionEventService } from '../recommendation-engine/interaction-event.service';
 import { generatePaymentReference } from '../../common/utils/payment-reference';
 import { randomUUID } from 'node:crypto';
 
@@ -52,6 +61,13 @@ export type PayUnlockResult = {
   newlyUnlocked: string[];
 };
 
+/** The three ids an unlock signal needs — far less than a full attempt row. */
+type UnlockParties = {
+  employer_id: string;
+  worker_id: string;
+  job_offer_id: string;
+};
+
 @Injectable()
 export class ContactUnlockService {
   private readonly logger = new Logger(ContactUnlockService.name);
@@ -65,7 +81,53 @@ export class ContactUnlockService {
     private readonly matchingService: MatchingService,
     @Inject(forwardRef(() => BotNotificationService))
     private readonly botNotification: BotNotificationService,
+    private readonly interactionEvents: InteractionEventService,
   ) {}
+
+  /**
+   * Which attempts a `payUnlock` actually completed.
+   *
+   * `newlyUnlocked` covers the side-effect unlocks of a multi-person job, but
+   * not the attempt that was paid for directly — that one only shows up in
+   * `status`. Getting this wrong means either a missed contact or a duplicate
+   * WhatsApp message, so it is derived in one place rather than at each caller.
+   */
+  unlockedAttemptIds(result: PayUnlockResult): string[] {
+    const ids =
+      result.status === ContactUnlockStatus.UNLOCKED
+        ? [result.attemptId, ...result.newlyUnlocked]
+        : result.newlyUnlocked;
+    return [...new Set(ids)];
+  }
+
+  /**
+   * Sends both parties their contact details for every attempt this payment
+   * completed.
+   *
+   * An unlock is only worth anything once the contacts actually arrive, but
+   * this service never sent them: the delivery lived solely in the payment
+   * request flow, which handles mobile money. Paying the *final* share from
+   * wallet credit goes straight to `payUnlock` from the two controllers and
+   * skipped it entirely — so the attempt went UNLOCKED in the database, the web
+   * app would happily show the contact, and the WhatsApp message both parties
+   * were waiting for was never sent.
+   *
+   * Kept as an explicit call rather than folded into `payUnlock` so the payment
+   * flow keeps its deliberate ordering (confirmation, then contacts, then
+   * invoice) instead of having contacts jump the queue.
+   */
+  async dispatchUnlockedContacts(result: PayUnlockResult): Promise<void> {
+    for (const id of this.unlockedAttemptIds(result)) {
+      await this.botNotification
+        .sendContactUnlockedNotification(id)
+        .catch((err: unknown) =>
+          this.logger.warn(
+            `[contact-unlock] contact notification failed for ${id}:`,
+            err,
+          ),
+        );
+    }
+  }
 
   private notifyRejectedApplicants(applicationIds: string[]): void {
     for (const appId of applicationIds) {
@@ -81,11 +143,15 @@ export class ContactUnlockService {
   }
 
   private shouldReopenOffer(params: {
-    scheduledAt: Date;
+    scheduledAt: Date | null;
     currentStatus: JobOfferStatus;
     now: Date;
   }): boolean {
-    if (params.scheduledAt <= params.now) return false;
+    // Null means no closing date, so the offer cannot be in the past — it stays
+    // reopenable until something else closes it.
+    if (params.scheduledAt !== null && params.scheduledAt <= params.now) {
+      return false;
+    }
     if (
       params.currentStatus === JobOfferStatus.IN_PROGRESS ||
       params.currentStatus === JobOfferStatus.COMPLETED
@@ -159,10 +225,15 @@ export class ContactUnlockService {
       );
     }
 
-    const hardBlocked = await isWorkerHardBlocked(this.prisma, profileId);
+    const hardBlockDays = await this.systemConfig.getPenaltyHardBlockDays();
+    const hardBlocked = await isWorkerHardBlocked(
+      this.prisma,
+      profileId,
+      hardBlockDays,
+    );
     if (hardBlocked) {
       throw new ForbiddenException(
-        '🚨 Votre compte est bloqué en raison de pénalités impayées depuis plus de 3 jours. Tapez PAYER pour régulariser votre situation.',
+        hardBlockMessage(hardBlockDays, 'débloquer ce contact'),
       );
     }
   }
@@ -230,6 +301,7 @@ export class ContactUnlockService {
     });
     if (newStatus === ContactUnlockStatus.UNLOCKED) {
       await this.markApplicationAcceptedAfterUnlock([updated.application_id]);
+      this.recordUnlockSignal(updated);
     }
 
     return {
@@ -238,6 +310,71 @@ export class ContactUnlockService {
       newlyUnlocked:
         newStatus === ContactUnlockStatus.UNLOCKED ? [attemptId] : [],
     };
+  }
+
+  /**
+   * Paying to reach someone is the strongest intent signal in the product, and
+   * until now this flow — the application-based unlock used by both the web app
+   * and the WhatsApp bot — recorded none of it. Only the recommendation flow
+   * (`recommendation-contact.service.ts`) ever emitted CONTACT_PAID, so the
+   * interest graph saw one of two purchase paths.
+   *
+   * Recorded here rather than at the wallet debit in `payUnlock`: that debit can
+   * still be rolled back and refunded further down, and a paid event for a
+   * refunded transaction is worse than a missing one.
+   *
+   * Both directions, as `application.service.ts` already does for COMPLETE — the
+   * employer learns about this worker, the worker learns about this kind of job.
+   */
+  /** Batched variant, for the multi-person path where one payment unlocks N. */
+  private recordUnlockSignals(attempts: UnlockParties[]): void {
+    if (attempts.length === 0) return;
+    const rows = attempts.flatMap((a) => [
+      {
+        actorId: a.employer_id,
+        actorType: InteractionActor.EMPLOYER,
+        kind: InteractionKind.CONTACT_PAID,
+        objectType: InteractionObject.WORKER_PROFILE,
+        objectId: a.worker_id,
+        counterpartyId: a.job_offer_id,
+        source: InteractionSource.SERVER,
+        surface: 'contact_unlock',
+      },
+      {
+        actorId: a.worker_id,
+        actorType: InteractionActor.WORKER,
+        kind: InteractionKind.CONTACT_PAID,
+        objectType: InteractionObject.JOB_OFFER,
+        objectId: a.job_offer_id,
+        counterpartyId: a.employer_id,
+        source: InteractionSource.SERVER,
+        surface: 'contact_unlock',
+      },
+    ]);
+    void this.interactionEvents.recordMany(rows);
+  }
+
+  private recordUnlockSignal(attempt: UnlockParties): void {
+    void this.interactionEvents.record({
+      actorId: attempt.employer_id,
+      actorType: InteractionActor.EMPLOYER,
+      kind: InteractionKind.CONTACT_PAID,
+      objectType: InteractionObject.WORKER_PROFILE,
+      objectId: attempt.worker_id,
+      counterpartyId: attempt.job_offer_id,
+      source: InteractionSource.SERVER,
+      surface: 'contact_unlock',
+    });
+    void this.interactionEvents.record({
+      actorId: attempt.worker_id,
+      actorType: InteractionActor.WORKER,
+      kind: InteractionKind.CONTACT_PAID,
+      objectType: InteractionObject.JOB_OFFER,
+      objectId: attempt.job_offer_id,
+      counterpartyId: attempt.employer_id,
+      source: InteractionSource.SERVER,
+      surface: 'contact_unlock',
+    });
   }
 
   /**
@@ -278,19 +415,26 @@ export class ContactUnlockService {
     // Hard deadline: 2h before job starts (so both parties can exchange contacts in time).
     // Soft window: expiryHours from SystemConfig (default 48h) from now.
     // Whichever is sooner is used; minimum 2h from now if job is imminent.
-    const twoHBeforeJob = new Date(
-      jobOffer.scheduled_at.getTime() - 2 * 60 * 60 * 1000,
-    );
     const configWindow = new Date(
       Date.now() + fees.expiryHours * 60 * 60 * 1000,
     );
     const minExpiry = new Date(Date.now() + 2 * 60 * 60 * 1000);
+    // With no closing date there is no job start to be two hours ahead of, so
+    // only the soft config window applies.
+    const twoHBeforeJob =
+      jobOffer.scheduled_at === null
+        ? null
+        : new Date(jobOffer.scheduled_at.getTime() - 2 * 60 * 60 * 1000);
     const preferredExpiry =
-      twoHBeforeJob < configWindow ? twoHBeforeJob : configWindow;
+      twoHBeforeJob !== null && twoHBeforeJob < configWindow
+        ? twoHBeforeJob
+        : configWindow;
     const expiresAt = preferredExpiry > minExpiry ? preferredExpiry : minExpiry;
 
-    const isMultiPerson = (jobOffer.quantity ?? 1) > 1;
-    const employerAlreadyPaid = isMultiPerson && jobOffer.employer_unlock_paid;
+    const employerAlreadyPaid = isEmployerCoveredAtJobLevel(
+      jobOffer.quantity,
+      jobOffer.employer_unlock_paid,
+    );
 
     const now = new Date();
 
@@ -508,6 +652,18 @@ export class ContactUnlockService {
         description: 'Déverrouillage de contact (wallet interne)',
         payment_reference: paymentReference,
         contact_unlock_attempt_id: attemptId,
+        // DO NOT add `request_type` here.
+        //
+        // It looks like an oversight and is load-bearing. This row is synthetic
+        // — no external money arrived, the unlock was funded from wallet credit
+        // the platform itself issued. ReferralService.settleForReferee selects
+        // qualifying payments with `request_type IN (CONTACT_UNLOCK,
+        // RECOMMENDATION_CONTACT)`, and a NULL never matches an IN, which is
+        // what keeps credit-funded unlocks from paying out a parrainage.
+        //
+        // Setting it would let the referral programme pay real credit for a
+        // payment that brought in none — funding itself from its own welcome
+        // bonuses. Locked by a test in referral.service.spec.ts.
       },
     });
 
@@ -576,6 +732,12 @@ export class ContactUnlockService {
     jobOfferId: string,
   ): Promise<string[]> {
     return this.prisma.$transaction(async (tx) => {
+      // Lock the offer before counting. An employer paying for several unlocks
+      // at once cascades N calls through here, and without this two of them can
+      // both read "full" and both run the fill. `accept()` and
+      // `closeOfferIfAllWorkersDone` both take this lock for the same reason.
+      await tx.$executeRaw`SELECT id FROM "job_offers" WHERE id = ${jobOfferId}::uuid FOR UPDATE`;
+
       const offer = await tx.jobOffer.findUnique({
         where: { id: jobOfferId },
         select: { quantity: true, status: true },
@@ -655,6 +817,11 @@ export class ContactUnlockService {
     const newlyUnlocked: string[] = [];
     const unlockedApplicationIds: string[] = [];
 
+    // One employer payment can unlock N attempts here, so the signal has to be
+    // batched: recording once would lose N-1 unlocks. `recordMany` also skips
+    // the per-kind Redis dedupe, which is what a batch wants.
+    const unlockedAttempts: UnlockParties[] = [];
+
     for (const a of pendingAttempts) {
       const willUnlock = a.worker_paid;
       await this.prisma.contactUnlockAttempt.update({
@@ -668,8 +835,11 @@ export class ContactUnlockService {
           ...(willUnlock ? { unlocked_at: now } : {}),
         },
       });
-      if (willUnlock) newlyUnlocked.push(a.id);
-      if (willUnlock) unlockedApplicationIds.push(a.application_id);
+      if (willUnlock) {
+        newlyUnlocked.push(a.id);
+        unlockedApplicationIds.push(a.application_id);
+        unlockedAttempts.push(a);
+      }
     }
 
     // Also update PENDING_WORKER attempts for this job that didn't need employer pay
@@ -688,15 +858,24 @@ export class ContactUnlockService {
     if (triggerAttempt.worker_paid) {
       const trigger = await this.prisma.contactUnlockAttempt.findUnique({
         where: { id: triggerAttempt.id },
-        select: { application_id: true },
+        select: {
+          application_id: true,
+          employer_id: true,
+          worker_id: true,
+          job_offer_id: true,
+        },
       });
       if (trigger?.application_id)
         unlockedApplicationIds.push(trigger.application_id);
+      // The trigger attempt is a narrow select, so its party ids come from the
+      // lookup that is already happening rather than a second round-trip.
+      if (trigger) unlockedAttempts.push(trigger);
     }
 
     await this.markApplicationAcceptedAfterUnlock([
       ...new Set(unlockedApplicationIds),
     ]);
+    this.recordUnlockSignals(unlockedAttempts);
 
     return {
       attemptId: triggerAttempt.id,
@@ -727,6 +906,7 @@ export class ContactUnlockService {
             id: true,
             title: true,
             quantity: true,
+            employer_unlock_paid: true,
             status: true,
             scheduled_at: true,
           },
@@ -757,8 +937,16 @@ export class ContactUnlockService {
       ? AssignmentStatus.CANCELLED_BY_EMPLOYER
       : AssignmentStatus.CANCELLED_BY_WORKER;
 
+    // On a multi-seat offer the employer's one payment covers the whole job, and
+    // `employer_paid` is cascaded onto every candidate's attempt. Refunding per
+    // attempt would pay back the fee once per candidate for a single payment.
+    const employerPaidAtJobLevel = isEmployerCoveredAtJobLevel(
+      attempt.job_offer.quantity,
+      attempt.job_offer.employer_unlock_paid,
+    );
+
     await this.prisma.$transaction(async (tx) => {
-      if (attempt.employer_paid) {
+      if (attempt.employer_paid && !employerPaidAtJobLevel) {
         await this.walletService.refundProfileWallet(
           attempt.employer_id,
           Number(attempt.employer_amount),
@@ -818,10 +1006,21 @@ export class ContactUnlockService {
         remainingAccepted,
         quantity,
       );
+      // Re-read the status inside the transaction. `attempt` was loaded before
+      // it opened, and the offer can close in between — an ongoing engagement
+      // now closes at the very moment its last slot is paid for, which is the
+      // same event that leaves this rejection holding a stale PARTIALLY_FILLED.
+      // Acting on that stale value would write ACTIVE over a closed offer and
+      // put a fully-staffed post back on the feed with every worker at END.
+      const freshOffer = await tx.jobOffer.findUnique({
+        where: { id: attempt.job_offer_id },
+        select: { status: true, scheduled_at: true },
+      });
       if (
+        freshOffer &&
         this.shouldReopenOffer({
-          scheduledAt: attempt.job_offer.scheduled_at,
-          currentStatus: attempt.job_offer.status,
+          scheduledAt: freshOffer.scheduled_at,
+          currentStatus: freshOffer.status,
           now,
         })
       ) {
@@ -853,7 +1052,7 @@ export class ContactUnlockService {
         `La mise en relation pour "${attempt.job_offer.title}" a été annulée.`,
         ...refundLines,
         '',
-        "",
+        '',
       ].join('\n'),
       otherPartyMessage: [
         '*Demande de paiement annulée*',
@@ -861,7 +1060,7 @@ export class ContactUnlockService {
         `${currentName} a rejeté la mise en relation pour "${attempt.job_offer.title}".`,
         ...refundLines,
         '',
-        "",
+        '',
       ].join('\n'),
       otherPhone,
     };
@@ -875,6 +1074,11 @@ export class ContactUnlockService {
   async abortPendingUnlockByApplication(applicationId: string): Promise<void> {
     const attempt = await this.prisma.contactUnlockAttempt.findUnique({
       where: { application_id: applicationId },
+      include: {
+        job_offer: {
+          select: { quantity: true, employer_unlock_paid: true },
+        },
+      },
     });
     if (!attempt) return;
     if (
@@ -885,8 +1089,14 @@ export class ContactUnlockService {
       return;
     }
     const now = new Date();
+    // See rejectPendingAttemptByApplication: a job-level payment must not be
+    // refunded once per candidate.
+    const employerPaidAtJobLevel = isEmployerCoveredAtJobLevel(
+      attempt.job_offer.quantity,
+      attempt.job_offer.employer_unlock_paid,
+    );
     await this.prisma.$transaction(async (tx) => {
-      if (attempt.employer_paid) {
+      if (attempt.employer_paid && !employerPaidAtJobLevel) {
         await this.walletService.refundProfileWallet(
           attempt.employer_id,
           Number(attempt.employer_amount),
@@ -1007,8 +1217,10 @@ export class ContactUnlockService {
         let newStatus: ContactUnlockStatus = ContactUnlockStatus.EXPIRED;
 
         const isMultiPerson = (attempt.job_offer.quantity ?? 1) > 1;
-        const employerPaidAtJobLevel =
-          isMultiPerson && attempt.job_offer.employer_unlock_paid;
+        const employerPaidAtJobLevel = isEmployerCoveredAtJobLevel(
+          attempt.job_offer.quantity,
+          attempt.job_offer.employer_unlock_paid,
+        );
 
         if (!isMultiPerson && attempt.employer_paid && attempt.worker_paid) {
           // Standard job — both paid but unlock expired: refund both.

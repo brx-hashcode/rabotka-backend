@@ -1,4 +1,10 @@
-import { BadRequestException, Injectable, Logger, OnModuleInit, Inject } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  OnModuleInit,
+  Inject,
+} from '@nestjs/common';
 import Redis from 'ioredis';
 import { ConfigCategory } from '@prisma/client';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
@@ -13,8 +19,42 @@ import {
 
 const CACHE_PREFIX = `${REDIS_KEY_PREFIX}syscfg:`;
 const CACHE_TTL_SECONDS = 300; // 5 minutes
+
+const EMBEDDINGS_KEY = 'matching.use_embeddings';
+const EMBEDDINGS_ENABLED_AT_KEY = 'matching.embeddings_enabled_at';
+const INDEX_SCHEMA_VERSION_KEY = 'matching.index_schema_version';
 const SEED_MAX_RETRIES = 10;
 const SEED_RETRY_DELAY_MS = 2000;
+
+/**
+ * The parrainage block, named because it is validated as a block.
+ *
+ * `commission_type` decides what unit the two credit values are in, and the two
+ * percentages have to sum to at most 100 — neither rule can be checked one key
+ * at a time, which is why {@link SystemConfigService.setMany} exists.
+ */
+const REFERRAL_COMMISSION_TYPE_KEY = 'fees.referral_commission_type';
+const REFERRAL_CREDIT_REFERRER_KEY = 'fees.referral_credit_referrer';
+const REFERRAL_CREDIT_REFEREE_KEY = 'fees.referral_credit_referee';
+const REFERRAL_MAX_REWARDED_KEY = 'fees.referral_max_rewarded_per_referrer';
+const REFERRAL_MAX_PAYOUT_KEY = 'fees.referral_max_payout_per_referral';
+
+const REFERRAL_DEFAULTS: Record<string, string> = {
+  [REFERRAL_COMMISSION_TYPE_KEY]: 'FIXED',
+  [REFERRAL_CREDIT_REFERRER_KEY]: '300',
+  [REFERRAL_CREDIT_REFEREE_KEY]: '200',
+  [REFERRAL_MAX_REWARDED_KEY]: '10',
+  [REFERRAL_MAX_PAYOUT_KEY]: '0',
+};
+
+const REFERRAL_COMMISSION_TYPES = ['FIXED', 'PERCENTAGE'] as const;
+const MAX_PERCENT = 100;
+
+/**
+ * Fan-out width when the config says nothing. Kept in step with the seeded
+ * value of `matching.max_notification_workers`.
+ */
+const DEFAULT_MAX_NOTIFICATION_WORKERS = 5;
 
 @Injectable()
 export class SystemConfigService implements OnModuleInit {
@@ -123,10 +163,14 @@ export class SystemConfigService implements OnModuleInit {
     const cacheKeys = entries.map((e) => `${CACHE_PREFIX}${e.key}`);
     const cached = await this.redis.mget(...cacheKeys);
 
+    // Bounded by `entries`, not by what Redis returned. ioredis mirrors the key
+    // count, but indexing `entries[i]` off a longer response throws — and the
+    // symptom is an unrelated "Cannot read properties of undefined" deep in a
+    // fee lookup, which is a poor trade for one comparison.
     const missIndices: number[] = [];
-    cached.forEach((v, i) => {
-      if (v === null) missIndices.push(i);
-    });
+    for (let i = 0; i < entries.length; i++) {
+      if ((cached[i] ?? null) === null) missIndices.push(i);
+    }
 
     if (missIndices.length > 0) {
       const missKeys = missIndices.map((i) => entries[i].key);
@@ -162,7 +206,10 @@ export class SystemConfigService implements OnModuleInit {
     'fees.reliability_score_min',
     'fees.employer_late_cancel_score_deduction',
     'fees.billing_block_threshold',
-    'fees.max_concurrent_applications',
+    'fees.penalty_suspension_threshold',
+    'fees.penalty_hard_block_days',
+    'fees.penalty_max_notifications',
+    'fees.penalty_notification_interval_hours',
     'fees.max_daily_applications',
     'fees.contact_unlock_fee_employer',
     'fees.contact_unlock_fee_worker',
@@ -184,12 +231,92 @@ export class SystemConfigService implements OnModuleInit {
     'matching.recommendation_min_score',
   ]);
 
+  /**
+   * Counts that are allowed to be zero, where zero means "off" rather than
+   * "broken" — an unlimited cap, an absent ceiling. They cannot live in
+   * {@link POSITIVE_INT_KEYS} for that reason, but they still must not be
+   * negative or unparseable.
+   */
+  private static readonly NON_NEGATIVE_INT_KEYS = new Set([
+    REFERRAL_MAX_REWARDED_KEY,
+    REFERRAL_MAX_PAYOUT_KEY,
+  ]);
+
   async set(key: string, value: string, adminId?: string): Promise<void> {
+    await this.setMany({ [key]: value }, adminId);
+  }
+
+  /**
+   * Write several config values as one unit.
+   *
+   * Exists because some rules span keys. `fees.referral_commission_type`
+   * decides whether the two credit values are francs or percentages, and in
+   * PERCENTAGE mode they must sum to at most 100 — so switching from 300/200
+   * FCFA to 60/40 % is three writes that are each invalid on their own and only
+   * coherent together. One key at a time can either reject the admin's whole
+   * intent or persist a state the settlement cannot honour; neither is
+   * acceptable for a screen that pays people money.
+   *
+   * Validated as a set against the state the write would PRODUCE, then applied
+   * in a single transaction so a mid-way failure leaves nothing half-changed.
+   */
+  async setMany(
+    updates: Record<string, string>,
+    adminId?: string,
+  ): Promise<void> {
+    const entries = Object.entries(updates);
+    if (entries.length === 0) {
+      throw new BadRequestException('Aucune valeur à mettre à jour');
+    }
+
+    for (const [key, value] of entries) {
+      SystemConfigService.assertValueValid(key, value);
+    }
+    await this.assertReferralBlockCoherent(updates);
+
+    // Read before writing: the stamp below is driven by the TRANSITION, not by
+    // the new value, so re-saving `true` over `true` must not move it. Moving it
+    // would push the timestamp past every `vector_indexed_at` written since the
+    // real activation and strand exactly the rows the stamp exists to reclaim.
+    const wasEnabled =
+      EMBEDDINGS_KEY in updates ? await this.isSimilarityEnabled() : false;
+
+    // Array form: one transaction, and an unknown key fails it as P2025 with
+    // nothing committed, so a typo cannot half-apply a settings save.
+    await this.prisma.$transaction(
+      entries.map(([key, value]) =>
+        this.prisma.systemConfig.update({
+          where: { key },
+          data: { value, updated_by: adminId ?? null },
+        }),
+      ),
+    );
+
+    await this.redis.del(...entries.map(([key]) => `${CACHE_PREFIX}${key}`));
+    this.logger.log(
+      `Config updated: ${entries.map(([k]) => k).join(', ')} by ${adminId ?? 'system'}`,
+    );
+
+    if (!wasEnabled && updates[EMBEDDINGS_KEY] === 'true') {
+      await this.markEmbeddingsEnabled();
+    }
+  }
+
+  /** Rules that need only the one value being written. */
+  private static assertValueValid(key: string, value: string): void {
     if (SystemConfigService.POSITIVE_INT_KEYS.has(key)) {
       const n = Number(value);
       if (!Number.isFinite(n) || n <= 0) {
         throw new BadRequestException(
           `La valeur de "${key}" doit être un entier strictement positif`,
+        );
+      }
+    }
+    if (SystemConfigService.NON_NEGATIVE_INT_KEYS.has(key)) {
+      const n = Number(value);
+      if (!Number.isFinite(n) || n < 0) {
+        throw new BadRequestException(
+          `La valeur de "${key}" doit être un entier positif ou nul`,
         );
       }
     }
@@ -201,12 +328,108 @@ export class SystemConfigService implements OnModuleInit {
         );
       }
     }
-    await this.prisma.systemConfig.update({
-      where: { key },
-      data: { value, updated_by: adminId ?? null },
+  }
+
+  /**
+   * Rules that need the whole parrainage block, checked against the state this
+   * write would leave behind — the incoming values laid over what is stored.
+   *
+   * Skipped entirely when the write touches none of those keys, so an unrelated
+   * config save does not pay for a read of them.
+   */
+  private async assertReferralBlockCoherent(
+    updates: Record<string, string>,
+  ): Promise<void> {
+    const blockKeys = Object.keys(REFERRAL_DEFAULTS);
+    if (!blockKeys.some((key) => key in updates)) return;
+
+    const missing = blockKeys.filter((key) => !(key in updates));
+    const stored = await this.mgetBatch(
+      missing.map((key) => ({ key, fallback: REFERRAL_DEFAULTS[key] })),
+    );
+    const resulting: Record<string, string> = { ...updates };
+    missing.forEach((key, i) => {
+      resulting[key] = stored[i] ?? REFERRAL_DEFAULTS[key];
     });
-    await this.redis.del(`${CACHE_PREFIX}${key}`);
-    this.logger.log(`Config updated: ${key} by ${adminId ?? 'system'}`);
+
+    const type = resulting[REFERRAL_COMMISSION_TYPE_KEY];
+    if (!REFERRAL_COMMISSION_TYPES.includes(type as 'FIXED')) {
+      throw new BadRequestException(
+        `La valeur de "${REFERRAL_COMMISSION_TYPE_KEY}" doit être ${REFERRAL_COMMISSION_TYPES.join(' ou ')}`,
+      );
+    }
+
+    const referrer = Number(resulting[REFERRAL_CREDIT_REFERRER_KEY]);
+    const referee = Number(resulting[REFERRAL_CREDIT_REFEREE_KEY]);
+    for (const [key, n] of [
+      [REFERRAL_CREDIT_REFERRER_KEY, referrer],
+      [REFERRAL_CREDIT_REFEREE_KEY, referee],
+    ] as const) {
+      if (!Number.isFinite(n) || n < 0) {
+        throw new BadRequestException(
+          `La valeur de "${key}" doit être un nombre positif ou nul`,
+        );
+      }
+    }
+
+    if (type !== 'PERCENTAGE') return;
+
+    // Percentages only. A pair summing past 100 would try to pay out more than
+    // the payment brought in; the payout function clamps it anyway, but silently
+    // paying something other than what the screen says is worse than refusing
+    // the save.
+    for (const [key, n] of [
+      [REFERRAL_CREDIT_REFERRER_KEY, referrer],
+      [REFERRAL_CREDIT_REFEREE_KEY, referee],
+    ] as const) {
+      if (!Number.isInteger(n) || n > MAX_PERCENT) {
+        throw new BadRequestException(
+          `En mode PERCENTAGE, "${key}" doit être un entier entre 0 et ${MAX_PERCENT}`,
+        );
+      }
+    }
+    if (referrer + referee > MAX_PERCENT) {
+      throw new BadRequestException(
+        `La somme des pourcentages de parrainage ne peut pas dépasser ${MAX_PERCENT} % (reçu ${referrer + referee} %)`,
+      );
+    }
+  }
+
+  /**
+   * Records when embeddings came back on, so `MatchingService.reindexPending`
+   * can tell a genuine index from the bookkeeping stamp written while the
+   * feature was off.
+   *
+   * Upserted rather than updated: a database seeded before this key existed has
+   * no row, and a missing row must not turn re-enabling embeddings into a 500.
+   * Best-effort for the same reason — the admin's config write has already
+   * succeeded by the time this runs, so a failure here is logged and swallowed
+   * rather than rolled back onto the caller.
+   */
+  private async markEmbeddingsEnabled(): Promise<void> {
+    const now = new Date().toISOString();
+    try {
+      await this.prisma.systemConfig.upsert({
+        where: { key: EMBEDDINGS_ENABLED_AT_KEY },
+        update: { value: now },
+        create: {
+          key: EMBEDDINGS_ENABLED_AT_KEY,
+          value: now,
+          category: ConfigCategory.MATCHING,
+          label: 'Dernière activation des embeddings (ISO, automatique)',
+          is_secret: false,
+        },
+      });
+      await this.redis.del(`${CACHE_PREFIX}${EMBEDDINGS_ENABLED_AT_KEY}`);
+      this.logger.log(
+        `Embeddings enabled at ${now} — pending re-index widened`,
+      );
+    } catch (err) {
+      this.logger.error(
+        `Failed to record ${EMBEDDINGS_ENABLED_AT_KEY}; re-index will not reclaim stamped rows until embeddings are toggled again`,
+        err,
+      );
+    }
   }
 
   async getAll(category?: ConfigCategory) {
@@ -247,8 +470,76 @@ export class SystemConfigService implements OnModuleInit {
   // ── Typed getters ─────────────────────────────────────────────────────────
 
   async isSimilarityEnabled(): Promise<boolean> {
-    const val = await this.get('matching.use_embeddings', 'false');
+    const val = await this.get(EMBEDDINGS_KEY, 'false');
     return val === 'true';
+  }
+
+  /**
+   * The payload schema version the index was last fully rewritten at, or null if
+   * it has never been recorded.
+   *
+   * Null is the honest answer for a database predating this key, and it makes
+   * `reindexPending` rewrite everything once — which is exactly right, since a
+   * pre-existing index cannot have the fields added since.
+   */
+  async getIndexSchemaVersion(): Promise<number | null> {
+    const val = (await this.get(INDEX_SCHEMA_VERSION_KEY, '')).trim();
+    if (!val) return null;
+    const parsed = Number(val);
+    if (!Number.isInteger(parsed) || parsed < 0) {
+      this.logger.warn(
+        `Ignoring unparseable ${INDEX_SCHEMA_VERSION_KEY}: "${val}"`,
+      );
+      return null;
+    }
+    return parsed;
+  }
+
+  /** Records a completed full rewrite. Upserted for the same reason as the stamp. */
+  async setIndexSchemaVersion(version: number): Promise<void> {
+    try {
+      await this.prisma.systemConfig.upsert({
+        where: { key: INDEX_SCHEMA_VERSION_KEY },
+        update: { value: String(version) },
+        create: {
+          key: INDEX_SCHEMA_VERSION_KEY,
+          value: String(version),
+          category: ConfigCategory.MATCHING,
+          label: 'Version du schéma de payload Qdrant (automatique)',
+          is_secret: false,
+        },
+      });
+      await this.redis.del(`${CACHE_PREFIX}${INDEX_SCHEMA_VERSION_KEY}`);
+    } catch (err) {
+      // Leaves the version behind, so the next scan repeats the wide pass.
+      // Wasteful, never wrong — the alternative is claiming a migration that
+      // did not happen and letting filters run against a stale payload.
+      this.logger.error(
+        `Failed to record ${INDEX_SCHEMA_VERSION_KEY}=${version}; the next scan will rewrite the index again`,
+        err,
+      );
+    }
+  }
+
+  /**
+   * When embeddings were last switched on, or null if never.
+   *
+   * `reindexPending` treats any `vector_indexed_at` older than this as a
+   * bookkeeping stamp rather than a real index — see `markEmbeddingsEnabled`.
+   * Returns null on an unparseable value so a corrupt row degrades to the old
+   * null-only behaviour instead of matching every row on every scan.
+   */
+  async getEmbeddingsEnabledAt(): Promise<Date | null> {
+    const val = (await this.get(EMBEDDINGS_ENABLED_AT_KEY, '')).trim();
+    if (!val) return null;
+    const parsed = new Date(val);
+    if (Number.isNaN(parsed.getTime())) {
+      this.logger.warn(
+        `Ignoring unparseable ${EMBEDDINGS_ENABLED_AT_KEY}: "${val}"`,
+      );
+      return null;
+    }
+    return parsed;
   }
 
   async getMinNotificationScore(): Promise<number> {
@@ -262,10 +553,34 @@ export class SystemConfigService implements OnModuleInit {
     return val === 'true';
   }
 
+  /**
+   * How many workers one offer may notify.
+   *
+   * The fallback matches the seeded default on purpose: a missing or malformed
+   * key must not quietly widen the fan-out, which is the failure mode that
+   * costs real money and a WhatsApp quality rating.
+   */
   async getMaxNotificationWorkers(): Promise<number> {
-    const val = await this.get('matching.max_notification_workers', '20');
+    const val = await this.get(
+      'matching.max_notification_workers',
+      String(DEFAULT_MAX_NOTIFICATION_WORKERS),
+    );
     const n = Number.parseInt(val, 10);
-    return Number.isNaN(n) || n < 1 ? 20 : n;
+    return Number.isNaN(n) || n < 1 ? DEFAULT_MAX_NOTIFICATION_WORKERS : n;
+  }
+
+  /**
+   * Whether a worker must be KYC-verified to be notified about a new offer.
+   *
+   * Defaults to `false` so that moving the notification path onto the v2 ranker
+   * — whose candidate query requires VERIFIED — does not silently drop every
+   * unverified recipient the legacy path used to reach. Flip it on once the
+   * volume change has been measured; the feed has always required verification
+   * and is unaffected either way.
+   */
+  async notifyRequiresVerified(): Promise<boolean> {
+    const val = await this.get('matching.notify_require_verified', 'false');
+    return val === 'true';
   }
 
   /** Minimum minutes between two job recommendation notifications for the same worker. */
@@ -273,6 +588,32 @@ export class SystemConfigService implements OnModuleInit {
     const val = await this.get('matching.notification_cooldown_minutes', '60');
     const n = Number.parseInt(val, 10);
     return Number.isNaN(n) || n < 0 ? 60 : n;
+  }
+
+  /**
+   * Minimum minutes between two "someone applied" notifications for the SAME
+   * offer.
+   *
+   * Without it a popular offer sends the employer one billed template per
+   * applicant, in real time — twenty-five candidates, twenty-five messages,
+   * all pointing at the same page. The notification is a nudge, not the
+   * channel: its button opens the offer, where every applicant is listed. So
+   * pacing it costs the employer nothing they cannot see one tap later.
+   *
+   * `0` disables the pacing and restores a message per application, which is
+   * the escape hatch if this ever proves too quiet.
+   *
+   * Filed under MATCHING because that is where the sibling recommendation
+   * cooldown lives and where an operator looks for notification pacing — the
+   * category enum has no better home, and adding one costs a migration.
+   */
+  async getNewApplicationNotifyCooldownMinutes(): Promise<number> {
+    const val = await this.get(
+      'matching.new_application_notify_cooldown_minutes',
+      '30',
+    );
+    const n = Number.parseInt(val, 10);
+    return Number.isNaN(n) || n < 0 ? 30 : n;
   }
 
   async getContactInfo() {
@@ -305,7 +646,8 @@ export class SystemConfigService implements OnModuleInit {
       scoreMin,
       empLateCancelDed,
       billingBlock,
-      maxConcurrentApps,
+      suspensionThreshold,
+      hardBlockDays,
       maxDailyApps,
       completionReward,
       ratingDelta1,
@@ -320,7 +662,8 @@ export class SystemConfigService implements OnModuleInit {
       { key: 'fees.reliability_score_min', fallback: '50' },
       { key: 'fees.employer_late_cancel_score_deduction', fallback: '5' },
       { key: 'fees.billing_block_threshold', fallback: '2' },
-      { key: 'fees.max_concurrent_applications', fallback: '10' },
+      { key: 'fees.penalty_suspension_threshold', fallback: '3' },
+      { key: 'fees.penalty_hard_block_days', fallback: '3' },
       { key: 'fees.max_daily_applications', fallback: '10' },
       { key: 'fees.completion_score_reward', fallback: '1' },
       { key: 'fees.rating_score_delta_1', fallback: '-4' },
@@ -336,7 +679,14 @@ export class SystemConfigService implements OnModuleInit {
       reliabilityScoreMin: Number(scoreMin),
       employerLateCancelScoreDeduction: Number(empLateCancelDed),
       billingBlockThreshold: Number(billingBlock),
-      maxConcurrentApplications: Number(maxConcurrentApps),
+      // Suspension is strictly harsher than a billing block, so it can never
+      // fire first. Clamping here rather than at write time keeps an existing
+      // bad pair (or a hand-edited row) from inverting the ladder.
+      penaltySuspensionThreshold: Math.max(
+        Number(suspensionThreshold),
+        Number(billingBlock),
+      ),
+      penaltyHardBlockDays: Number(hardBlockDays),
       maxDailyApplications: Number(maxDailyApps),
       completionScoreReward: Number(completionReward),
       ratingScoreDeltas: {
@@ -347,6 +697,32 @@ export class SystemConfigService implements OnModuleInit {
         5: Number(ratingDelta5),
       } as Record<number, number>,
     };
+  }
+
+  /**
+   * The reminder cadence for an unpaid penalty, and the window it runs for.
+   *
+   * Separate from `getFees()` because the hourly scan needs three keys, not
+   * fifteen. `hardBlockDays` is the same key `getFees` exposes as
+   * `penaltyHardBlockDays`: past that point the account is hard-blocked and
+   * reminding it further is pointless, so the scan stops there.
+   */
+  async getPenaltyNotificationConfig() {
+    const [maxNotifications, intervalHours, hardBlockDays] =
+      await this.mgetBatch([
+        { key: 'fees.penalty_max_notifications', fallback: '3' },
+        { key: 'fees.penalty_notification_interval_hours', fallback: '23' },
+        { key: 'fees.penalty_hard_block_days', fallback: '3' },
+      ]);
+    return {
+      maxNotifications: Number(maxNotifications),
+      notificationIntervalHours: Number(intervalHours),
+      hardBlockDays: Number(hardBlockDays),
+    };
+  }
+
+  async getPenaltyHardBlockDays(): Promise<number> {
+    return Number(await this.get('fees.penalty_hard_block_days', '3'));
   }
 
   async getContactUnlockFees() {
@@ -394,6 +770,72 @@ export class SystemConfigService implements OnModuleInit {
     return {
       workerCreditFcfa: Number(workerCredit),
       employerCreditFcfa: Number(employerCredit),
+    };
+  }
+
+  /**
+   * Parrainage payout amounts and the per-parrain cap.
+   *
+   * `maxRewardedPerReferrer` is `null` for unlimited, not `0`. The config value
+   * uses 0 as the "no cap" sentinel because that reads better in the admin
+   * screen than an empty field, but letting that 0 reach a call site produces
+   * `rewardedCount >= 0` — a cap that rejects everyone, silently, and only for
+   * the admins who deliberately turned it off. Resolve it here, once.
+   */
+  /**
+   * The parrainage settings, as one read.
+   *
+   * `referrerCreditFcfa` / `refereeCreditFcfa` are francs when
+   * `commissionType` is FIXED and percentages when it is PERCENTAGE — the name
+   * keeps the FCFA suffix because the storage keys do, and renaming them would
+   * churn every call site to describe a unit that is already carried by the
+   * type beside them.
+   */
+  async getReferralCredits(): Promise<{
+    commissionType: 'FIXED' | 'PERCENTAGE';
+    referrerCreditFcfa: number;
+    refereeCreditFcfa: number;
+    maxRewardedPerReferrer: number | null;
+    maxPayoutPerReferralFcfa: number;
+  }> {
+    const [referrerCredit, refereeCredit, maxRewarded, type, maxPayout] =
+      await this.mgetBatch([
+        {
+          key: REFERRAL_CREDIT_REFERRER_KEY,
+          fallback: REFERRAL_DEFAULTS[REFERRAL_CREDIT_REFERRER_KEY],
+        },
+        {
+          key: REFERRAL_CREDIT_REFEREE_KEY,
+          fallback: REFERRAL_DEFAULTS[REFERRAL_CREDIT_REFEREE_KEY],
+        },
+        {
+          key: REFERRAL_MAX_REWARDED_KEY,
+          fallback: REFERRAL_DEFAULTS[REFERRAL_MAX_REWARDED_KEY],
+        },
+        {
+          key: REFERRAL_COMMISSION_TYPE_KEY,
+          fallback: REFERRAL_DEFAULTS[REFERRAL_COMMISSION_TYPE_KEY],
+        },
+        {
+          key: REFERRAL_MAX_PAYOUT_KEY,
+          fallback: REFERRAL_DEFAULTS[REFERRAL_MAX_PAYOUT_KEY],
+        },
+      ]);
+
+    const cap = Number(maxRewarded);
+    const ceiling = Number(maxPayout);
+    return {
+      // Anything unrecognised reads as FIXED. A database row that says
+      // something else is a bug, and the safe reading of a broken type is the
+      // one whose amounts an admin explicitly typed rather than one that
+      // reinterprets 300 as 300 %.
+      commissionType: type === 'PERCENTAGE' ? 'PERCENTAGE' : 'FIXED',
+      referrerCreditFcfa: Number(referrerCredit),
+      refereeCreditFcfa: Number(refereeCredit),
+      maxRewardedPerReferrer:
+        !Number.isFinite(cap) || cap <= 0 ? null : Math.floor(cap),
+      maxPayoutPerReferralFcfa:
+        !Number.isFinite(ceiling) || ceiling <= 0 ? 0 : Math.floor(ceiling),
     };
   }
 

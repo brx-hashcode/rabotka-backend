@@ -38,7 +38,10 @@ export class PaymentRequestController {
     private readonly archiveService: ArchiveService,
   ) {}
 
+  // The three siblings below declare a role; this one did not, which left the
+  // financial listing open to any active admin.
   @Get()
+  @Roles(UserRole.MODERATOR)
   @ApiOperation({ summary: 'List all payment requests (historical)' })
   getList(@Query() dto: ListPaymentRequestsDto) {
     return this.service.getList(dto);
@@ -48,14 +51,18 @@ export class PaymentRequestController {
   @Roles(UserRole.MANAGER)
   @ApiOperation({
     summary: 'Bulk restore archived rows (admin only)',
-    description: 'Clears deleted_at. Only rows that are currently archived are affected.',
+    description:
+      'Clears deleted_at. Only rows that are currently archived are affected.',
   })
   @ApiResponse({ status: 201, description: 'Rows restored' })
   async bulkRestore(
     @Body() dto: BulkDeleteDto,
     @Req() req: AdminAuthenticatedRequest,
   ): Promise<{ count: number }> {
-    const result = await this.archiveService.restore('payment-requests', dto.ids);
+    const result = await this.archiveService.restore(
+      'payment-requests',
+      dto.ids,
+    );
     await this.logService.create({
       action: 'PAYMENT_REQUEST_BULK_RESTORED',
       entityType: 'PaymentRequest',

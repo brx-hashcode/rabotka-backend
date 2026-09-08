@@ -8,6 +8,7 @@ import { AdminNotificationService } from './admin-notification.service';
 import { AdminNotificationController } from './admin-notification.controller';
 import { PaymentStatusGateway } from './payment-status.gateway';
 import { ClaimCommentsGateway } from './claim-comments.gateway';
+import { JobEventsGateway } from './job-events.gateway';
 import { LogModule } from '../log/log.module';
 
 @Module({
@@ -24,7 +25,13 @@ import { LogModule } from '../log/log.module';
     AdminNotificationService,
     PaymentStatusGateway,
     ClaimCommentsGateway,
+    JobEventsGateway,
   ],
-  exports: [WsNotificationsGateway, PaymentStatusGateway, ClaimCommentsGateway],
+  exports: [
+    WsNotificationsGateway,
+    PaymentStatusGateway,
+    ClaimCommentsGateway,
+    JobEventsGateway,
+  ],
 })
 export class WsNotificationsModule {}

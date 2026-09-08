@@ -1,4 +1,6 @@
 import {
+  SIMILARITY_FLOOR,
+  spreadSimilarity,
   COLD_WEIGHTS,
   WARM_WEIGHTS,
   HOT_WEIGHTS,
@@ -117,6 +119,48 @@ describe('scoring', () => {
     });
   });
 
+  describe('computeRelevance — null is not zero', () => {
+    /**
+     * The distinction the whole scoring design rests on, and the one three
+     * terms used to get wrong by populating with `?? 0` / `?? 0.5`.
+     *
+     * A cold worker looking at a job 10 km out (prox 0.25), starting in 48 h
+     * (urgency 0.5), posted 24 h ago (fresh 0.794), unrated employer.
+     */
+    const coldCase = (catAff: number | null): ScoreTerms => ({
+      ...ZERO_TERMS,
+      sim: null,
+      catAff,
+      partyAff: null,
+      cf: null,
+      prox: 0.25,
+      urgency: 0.5,
+      fresh: 0.794,
+      quality: 0.8,
+      payFit: null,
+    });
+
+    it('drops a null term and redistributes its weight', () => {
+      const withZero = computeRelevance(coldCase(0), COLD_WEIGHTS);
+      const withNull = computeRelevance(coldCase(null), COLD_WEIGHTS);
+
+      // Same evidence, different divisor: 0.95 vs 0.80.
+      expect(withZero).toBeCloseTo(0.413, 3);
+      expect(withNull).toBeCloseTo(0.491, 3);
+      expect(withNull).toBeGreaterThan(withZero);
+    });
+
+    it('a zero term orders nothing but still costs score', () => {
+      // Two candidates identical except for a term nobody has evidence on.
+      // Scoring it 0 lowers both equally — pure loss against the threshold.
+      const a = computeRelevance(coldCase(0), COLD_WEIGHTS);
+      const b = computeRelevance(coldCase(0), COLD_WEIGHTS);
+
+      expect(a).toBe(b);
+      expect(a).toBeLessThan(computeRelevance(coldCase(null), COLD_WEIGHTS));
+    });
+  });
+
   describe('computeRelevance', () => {
     it('maps all-zero terms to 0 and all-one terms to 1', () => {
       for (const n of [0, 10, 40]) {
@@ -154,10 +198,7 @@ describe('scoring', () => {
     it('ignores zero-weighted terms entirely', () => {
       // A cold user's `sim` weight is 0, so a perfect vector match must not move
       // their score at all.
-      const withSim = computeRelevance(
-        { ...ZERO_TERMS, sim: 1 },
-        COLD_WEIGHTS,
-      );
+      const withSim = computeRelevance({ ...ZERO_TERMS, sim: 1 }, COLD_WEIGHTS);
       expect(withSim).toBe(0);
     });
 
@@ -173,7 +214,7 @@ describe('scoring', () => {
       ).toBeLessThan(1);
     });
 
-    it('redistributes a null term\'s weight proportionally', () => {
+    it("redistributes a null term's weight proportionally", () => {
       // Dropping `sim` must be identical to never having declared its weight.
       const { sim: _sim, ...rest } = WARM_WEIGHTS;
       const withoutSim = { ...rest, sim: 0 } as typeof WARM_WEIGHTS;
@@ -501,5 +542,57 @@ describe('scoring', () => {
       expect(clamp01(Number.NaN)).toBe(0);
       expect(clamp01(Number.POSITIVE_INFINITY)).toBe(0);
     });
+  });
+});
+
+/**
+ * Similarity has to be stretched before it can rank.
+ *
+ * `calibrateCosine` maps the theoretical cosine range onto [0,1], but real text
+ * embeddings never approach -1. Measured on this corpus, an employer scored
+ * against 15 workers produced 0.8026–0.8679 — a 0.065 spread carrying a
+ * 0.30–0.36 weight, which adds the same ~0.25 to everyone and orders nothing.
+ */
+describe('spreadSimilarity', () => {
+  /** The real measurements this floor was chosen from. */
+  const OBSERVED = [0.8026, 0.8239, 0.8472, 0.8679];
+
+  it('turns a near-constant band into something that can order', () => {
+    const before = Math.max(...OBSERVED) - Math.min(...OBSERVED);
+    const after =
+      Math.max(...OBSERVED.map(spreadSimilarity)) -
+      Math.min(...OBSERVED.map(spreadSimilarity));
+
+    expect(before).toBeLessThan(0.1);
+    expect(after).toBeGreaterThan(0.2);
+  });
+
+  it('stays on [0,1] so the weighted mean keeps its meaning', () => {
+    for (const v of [0, 0.5, SIMILARITY_FLOOR, 0.9, 1, 2, -1, NaN]) {
+      const out = spreadSimilarity(v);
+      expect(out).toBeGreaterThanOrEqual(0);
+      expect(out).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it('preserves order — it only rescales', () => {
+    const sorted = [...OBSERVED].sort((a, b) => a - b).map(spreadSimilarity);
+    for (let i = 1; i < sorted.length; i++) {
+      expect(sorted[i]).toBeGreaterThan(sorted[i - 1]);
+    }
+  });
+
+  it('clamps everything at or below the floor to 0', () => {
+    // "Unrelated" and "very unrelated" are not worth ranking between.
+    expect(spreadSimilarity(SIMILARITY_FLOOR)).toBe(0);
+    expect(spreadSimilarity(0.5)).toBe(0);
+    expect(spreadSimilarity(0)).toBe(0);
+  });
+
+  it('is a FIXED transform, not a per-request normalisation', () => {
+    // The same input must score the same in every request, or the absolute
+    // relevance threshold stops meaning anything.
+    expect(spreadSimilarity(0.85)).toBe(spreadSimilarity(0.85));
+    expect(spreadSimilarity(1)).toBe(1);
   });
 });

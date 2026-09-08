@@ -1,12 +1,18 @@
 import { escapeHtml } from './layout';
 
-export function accountSuspendedEmail(name: string): string {
+export function accountSuspendedEmail(name: string, reason?: string): string {
+  const reasonBlock = reason
+    ? `<p><strong>Motif :</strong> ${escapeHtml(reason)}</p>`
+    : '';
+
   return `
     <p>Bonjour ${escapeHtml(name)},</p>
 
     <p>
       Nous vous informons que votre compte a été <strong>suspendu</strong>.
     </p>
+
+    ${reasonBlock}
 
     <p>
       Si vous pensez qu'il s'agit d'une erreur ou souhaitez obtenir plus d'informations,
