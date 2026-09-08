@@ -66,6 +66,30 @@ export interface InteractiveButtonsPayload {
   buttons: InteractiveButton[];
 }
 
+/**
+ * A free-form message carrying one URL button.
+ *
+ * Exists for a cost reason, not a cosmetic one. A bare link in text does not
+ * open WhatsApp's in-app browser — only a button does — which is why the bot's
+ * replies were sent as approved templates even though they are always answers,
+ * and therefore always inside the 24h service window where free-form is allowed
+ * and costs nothing. A MARKETING template is billed wherever it lands; this is
+ * the same button without the template, and without the bill.
+ *
+ * `imageUrl` keeps a brand card intact across the move. Verified against Graph:
+ * an image header on `cta_url` is accepted.
+ */
+export interface InteractiveCtaPayload {
+  body: string;
+  /** Button label. Meta caps it at 20 characters. */
+  buttonText: string;
+  url: string;
+  /** Text header. Ignored when `imageUrl` is set — Meta allows only one. */
+  header?: string;
+  imageUrl?: string;
+  footer?: string;
+}
+
 export interface InteractiveListRow {
   id: string;
   title: string;

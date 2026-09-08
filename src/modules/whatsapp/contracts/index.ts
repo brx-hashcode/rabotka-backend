@@ -19,6 +19,7 @@ export type {
   FlowPayload,
   InteractiveButton,
   InteractiveButtonsPayload,
+  InteractiveCtaPayload,
   InteractiveListPayload,
   InteractiveListRow,
   InteractiveListSection,

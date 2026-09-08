@@ -65,3 +65,36 @@ export function templateReply(
 ): string {
   return `[TPL:${templateKey}]${JSON.stringify(variables)}`;
 }
+
+/** A bot reply sent as a free-form CTA message, decoded by `parseReplyToJob`. */
+export interface CtaReply {
+  body: string;
+  buttonText: string;
+  /** Path under FRONTEND_URL. The outbound worker mints the one-tap login link. */
+  path: string;
+  imageUrl?: string;
+  /** The template to fall back to when the 24h window turns out to be shut. */
+  fallbackTemplate: WhatsAppTemplateName;
+  fallbackVariables?: Record<string, string>;
+}
+
+/**
+ * Encode a free-form CTA send as a bot reply string, `[CTA:]<json>`.
+ *
+ * The cheap twin of `templateReply`. A reply is by definition inside the 24h
+ * service window, where a free-form message costs nothing while an approved
+ * MARKETING template is billed all the same — and a `cta_url` message keeps the
+ * tappable button that made those replies templates in the first place.
+ *
+ * Carries its own fallback template rather than leaving the outbound worker to
+ * guess one: the window can close between the reply being built and the job
+ * being drained, and the reply is the only place that knows which approved
+ * template says the same thing.
+ *
+ * `path` rather than a URL, so the login code is minted at send time by the
+ * same machinery that rewrites template button URLs. A URL baked in here would
+ * be a dead link by the time it arrives.
+ */
+export function ctaReply(reply: CtaReply): string {
+  return `[CTA:]${JSON.stringify(reply)}`;
+}

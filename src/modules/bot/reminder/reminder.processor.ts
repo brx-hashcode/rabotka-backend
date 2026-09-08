@@ -900,19 +900,24 @@ export class ReminderProcessor {
 
     const fees = await this.systemConfigService.getFees();
     const tpl = WHATSAPP_TEMPLATES.reminder24h;
-    await this.whatsApp.sendTemplateMessage(app.worker.phone, 'reminder24h', {
-      offerTitle: app.job_offer.title,
-      date: formatDate(app.job_offer.scheduled_at),
-      address: jobLocationLabel(app.job_offer),
-      amount: Number(app.job_offer.amount).toLocaleString('fr-FR'),
-      employerName: `${app.job_offer.employer.first_name} ${app.job_offer.employer.last_name}`,
-      employerPhone: app.job_offer.employer.phone,
-      cancellationThresholdHours: String(fees.cancellationThresholdHours),
-      penaltyFcfa: fees.lateCancellationPenaltyFcfa.toLocaleString('fr-FR'),
-      // URL suffix: the reminder deep-links to this exact mission rather than
-      // dropping the worker on a list to find it.
-      applicationId,
-    });
+    await this.whatsApp.sendTemplateMessage(
+      app.worker.phone,
+      'reminder24h',
+      {
+        offerTitle: app.job_offer.title,
+        date: formatDate(app.job_offer.scheduled_at),
+        address: jobLocationLabel(app.job_offer),
+        amount: Number(app.job_offer.amount).toLocaleString('fr-FR'),
+        employerName: `${app.job_offer.employer.first_name} ${app.job_offer.employer.last_name}`,
+        employerPhone: app.job_offer.employer.phone,
+        cancellationThresholdHours: String(fees.cancellationThresholdHours),
+        penaltyFcfa: fees.lateCancellationPenaltyFcfa.toLocaleString('fr-FR'),
+        // URL suffix: the reminder deep-links to this exact mission rather
+        // than dropping the worker on a list to find it.
+        applicationId,
+      },
+      app.worker_id,
+    );
 
     // Set bot state so the worker's reply (1=cancel, 2=keep) routes to the cancel flow.
     const workerStateKey = `${BOT_STATE_KEY_PREFIX}${app.worker_id}`;
@@ -1001,6 +1006,7 @@ export class ReminderProcessor {
           employerPhone: app.job_offer.employer.phone,
           applicationId,
         },
+        app.worker_id,
       );
       this.logger.log(
         `Reminder start sent for application ${applicationId} (alreadyStarted=${alreadyStarted})`,

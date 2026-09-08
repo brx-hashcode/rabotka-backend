@@ -145,6 +145,84 @@ describe('WhatsAppInboundProcessor', () => {
       );
     });
 
+    // The cheap twin of [TPL:]. A reply is always inside the 24h window, where
+    // free-form costs nothing while a MARKETING template is billed all the same.
+    it('enqueues a CTA outbound job for a [CTA:] reply', async () => {
+      mockConversationService.handleIncomingMessage.mockResolvedValue({
+        replies: [
+          '[CTA:]' +
+            JSON.stringify({
+              body: '*Rabotka*',
+              buttonText: 'Ouvrir',
+              path: 'home',
+              imageUrl: 'https://img/cover.jpg',
+              fallbackTemplate: 'welcomePlatform',
+            }),
+        ],
+        profileId: 'p-1',
+      });
+
+      const processor = makeProcessor();
+      await processor.process({
+        data: { phone: '+242001', text: 'salut' },
+        attemptsMade: 0,
+      });
+
+      expect(mockQueueService.addJob).toHaveBeenCalledWith(
+        expect.stringContaining('whatsapp'),
+        expect.objectContaining({
+          type: 'cta',
+          phone: '+242001',
+          cta: expect.objectContaining({
+            buttonText: 'Ouvrir',
+            path: 'home',
+            fallbackTemplate: 'welcomePlatform',
+          }),
+        }),
+      );
+    });
+
+    it('skips a [CTA:] reply with invalid JSON', async () => {
+      mockConversationService.handleIncomingMessage.mockResolvedValue({
+        replies: ['[CTA:]{not-json}'],
+        profileId: null,
+      });
+
+      const processor = makeProcessor();
+      await processor.process({
+        data: { phone: '+242001', text: 'salut' },
+        attemptsMade: 0,
+      });
+
+      expect(mockQueueService.addJob).not.toHaveBeenCalled();
+    });
+
+    // The fallback is the escape hatch for a shut window. A reply naming a
+    // template that does not exist would go out free-form or not at all, so it
+    // is dropped here rather than failing the job twice into the DLQ.
+    it('skips a [CTA:] reply whose fallback template is unknown', async () => {
+      mockConversationService.handleIncomingMessage.mockResolvedValue({
+        replies: [
+          '[CTA:]' +
+            JSON.stringify({
+              body: 'x',
+              buttonText: 'y',
+              path: 'home',
+              fallbackTemplate: 'nopeNotATemplate',
+            }),
+        ],
+        profileId: null,
+      });
+
+      const processor = makeProcessor();
+      await processor.process({
+        data: { phone: '+242001', text: 'salut' },
+        attemptsMade: 0,
+      });
+
+      expect(mockQueueService.addJob).not.toHaveBeenCalled();
+    });
+
     it('skips a [TPL:] reply with invalid JSON variables', async () => {
       mockConversationService.handleIncomingMessage.mockResolvedValue({
         replies: ['[TPL:viewWorkerPortfolio]{not-json}'],

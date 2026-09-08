@@ -5,6 +5,7 @@ import type {
   E164,
   FlowPayload,
   InteractiveButtonsPayload,
+  InteractiveCtaPayload,
   InteractiveListPayload,
   OutboundLocation,
   OutboundMedia,
@@ -97,6 +98,12 @@ export interface WhatsappProvider {
   sendInteractiveList(
     to: E164,
     payload: InteractiveListPayload,
+    opts?: SendOptions,
+  ): Promise<SendResult>;
+
+  sendInteractiveCta(
+    to: E164,
+    payload: InteractiveCtaPayload,
     opts?: SendOptions,
   ): Promise<SendResult>;
 
