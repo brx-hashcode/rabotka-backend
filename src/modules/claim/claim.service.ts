@@ -1,4 +1,9 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
@@ -7,7 +12,7 @@ import { UpdateClaimDto } from './dto/update-claim.dto';
 import { ReorderClaimDto } from './dto/reorder-claim.dto';
 import { AdminListClaimsDto } from './dto/admin-list-claims.dto';
 import { CreateCommentDto } from './dto/create-comment.dto';
-import { ClaimStatus } from '@prisma/client';
+import { ClaimStatus, UserRole } from '@prisma/client';
 import { NotificationService } from '../notification/notification.service';
 import { ClaimCommentsGateway } from '../ws-notifications/claim-comments.gateway';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
@@ -28,6 +33,13 @@ export type AdminClaimItem = {
   assignedUserId: string | null;
   assignedUserName: string | null;
   assignedUserEmail: string | null;
+  /**
+   * Who performed the assignment, and therefore the only admin allowed to
+   * change it. Null when nobody is assigned, or when the assignment predates
+   * the column — in which case anyone may change it.
+   */
+  assignedByUserId: string | null;
+  assignedByUserName: string | null;
   createdByUserId: string | null;
   createdByUserName: string | null;
   createdByUserEmail: string | null;
@@ -70,6 +82,10 @@ function mapClaim(claim: any): AdminClaimItem {
       ? `${claim.assigned_user.first_name} ${claim.assigned_user.last_name}`
       : null,
     assignedUserEmail: claim.assigned_user?.email ?? null,
+    assignedByUserId: claim.assigned_by_user_id ?? null,
+    assignedByUserName: claim.assigned_by_user
+      ? `${claim.assigned_by_user.first_name} ${claim.assigned_by_user.last_name}`
+      : null,
     createdByUserId: claim.created_by_user_id,
     createdByUserName: claim.created_by_user
       ? `${claim.created_by_user.first_name} ${claim.created_by_user.last_name}`
@@ -123,6 +139,9 @@ const claimInclude = {
   assigned_user: {
     select: { first_name: true, last_name: true, email: true },
   },
+  assigned_by_user: {
+    select: { first_name: true, last_name: true },
+  },
   created_by_user: {
     select: { first_name: true, last_name: true, email: true },
   },
@@ -156,6 +175,9 @@ export class ClaimService {
         profile_id: dto.profile_id as string,
         attachment_urls: dto.attachment_urls ?? [],
         assigned_user_id: dto.assigned_user_id ?? null,
+        // Assigning at creation makes the creator the assigner, so the rule
+        // applies from the first save rather than from the first edit.
+        assigned_by_user_id: dto.assigned_user_id ? userId : null,
         created_by_user_id: userId,
       },
       include: claimInclude,
@@ -253,9 +275,15 @@ export class ClaimService {
     return mapClaim(claim);
   }
 
+  /**
+   * @param actorUserId the admin making the change. Required: an assignment may
+   *   only be undone by whoever made it, so the caller's identity is part of
+   *   the authorisation, not just of the audit trail.
+   */
   async updateForAdmin(
     id: string,
     dto: UpdateClaimDto,
+    actorUserId: string,
   ): Promise<AdminClaimItem> {
     const exists = await this.prisma.claim.findUnique({ where: { id } });
     if (!exists) throw new NotFoundException('Claim not found');
@@ -268,7 +296,19 @@ export class ClaimService {
     if (dto.description !== undefined) data.description = dto.description;
     if (dto.attachment_urls !== undefined)
       data.attachment_urls = dto.attachment_urls;
-    if ('assigned_user_id' in dto) data.assigned_user_id = dto.assigned_user_id;
+
+    const changesAssignee =
+      'assigned_user_id' in dto &&
+      (dto.assigned_user_id ?? null) !== exists.assigned_user_id;
+
+    if (changesAssignee) {
+      await this.assertMayChangeAssignee(exists, actorUserId);
+      data.assigned_user_id = dto.assigned_user_id ?? null;
+      // The actor becomes the new assigner, and clearing the assignee clears
+      // the assigner with it — otherwise a stale name would keep guarding a
+      // claim nobody is on.
+      data.assigned_by_user_id = dto.assigned_user_id ? actorUserId : null;
+    }
 
     const claim = await this.prisma.claim.update({
       where: { id },
@@ -578,6 +618,53 @@ export class ClaimService {
       orderBy: { created_at: 'asc' },
     });
     return comments.map(mapComment);
+  }
+
+  /**
+   * Whoever assigned a claim is the only one who may change that assignment.
+   *
+   * Without this, an admin handed a claim could simply set it back to
+   * "Unassigned" — which looks like the work was redistributed, but is really
+   * the claim quietly falling off everyone's list.
+   *
+   * It covers reassignment as well as clearing: allowing only the latter to be
+   * blocked would leave the rule bypassable in one click, by handing the claim
+   * to a colleague instead of dropping it.
+   *
+   * Two ways through:
+   *   - no known assigner (`assigned_by_user_id` null) — assignments made
+   *     before this column existed, which must not become unfixable
+   *   - SUPER_ADMIN — somebody has to be able to move a claim on when the
+   *     assigner has left the team or is away
+   */
+  private async assertMayChangeAssignee(
+    claim: {
+      assigned_user_id: string | null;
+      assigned_by_user_id: string | null;
+    },
+    actorUserId: string,
+  ): Promise<void> {
+    if (!claim.assigned_user_id) return;
+    if (!claim.assigned_by_user_id) return;
+    if (claim.assigned_by_user_id === actorUserId) return;
+
+    const actor = await this.prisma.user.findUnique({
+      where: { id: actorUserId },
+      select: { role: true },
+    });
+    if (actor?.role === UserRole.SUPER_ADMIN) return;
+
+    const assigner = await this.prisma.user.findUnique({
+      where: { id: claim.assigned_by_user_id },
+      select: { first_name: true, last_name: true },
+    });
+    const name = assigner
+      ? `${assigner.first_name} ${assigner.last_name}`.trim()
+      : "l'administrateur qui l'a assignée";
+
+    throw new ForbiddenException(
+      `Seul ${name} peut modifier cette assignation.`,
+    );
   }
 
   /**

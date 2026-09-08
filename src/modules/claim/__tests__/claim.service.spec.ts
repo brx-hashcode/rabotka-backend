@@ -1,5 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { ClaimService } from '../claim.service';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { NotificationService } from '../../notification/notification.service';
@@ -70,6 +74,9 @@ const mockAttachments = {
  */
 const flushNotification = () => new Promise(process.nextTick);
 
+/** The admin performing an update, for `updateForAdmin`'s actor argument. */
+const ACTOR = 'user-1';
+
 /** A url shaped like one the upload route hands back. */
 const imageUrl = 'https://cdn.test/claim-attachments/1757000000_ab12cd.jpg';
 
@@ -83,6 +90,8 @@ const baseClaim = {
   attachment_urls: [],
   profile_id: 'profile-1',
   assigned_user_id: null,
+  assigned_by_user_id: null,
+  assigned_by_user: null,
   created_by_user_id: 'user-1',
   created_by_profile_id: null,
   created_at: now,
@@ -218,15 +227,17 @@ describe('ClaimService', () => {
       });
       mockPrisma.profile.findUnique.mockResolvedValue(null);
 
-      const result = await service.updateForAdmin('claim-1', {
-        title: 'Updated',
-      });
+      const result = await service.updateForAdmin(
+        'claim-1',
+        { title: 'Updated' },
+        ACTOR,
+      );
       expect(result.title).toBe('Updated');
     });
 
     it('throws if claim not found', async () => {
       mockPrisma.claim.findUnique.mockResolvedValue(null);
-      await expect(service.updateForAdmin('x', {})).rejects.toThrow(
+      await expect(service.updateForAdmin('x', {}, ACTOR)).rejects.toThrow(
         NotFoundException,
       );
     });
@@ -246,7 +257,7 @@ describe('ClaimService', () => {
         last_name: 'Doe',
       });
 
-      await service.updateForAdmin('claim-1', { status: 'IN_PROGRESS' as any });
+      await service.updateForAdmin('claim-1', { status: 'IN_PROGRESS' }, ACTOR);
       expect(mockNotifications.notifyClaimInProgress).toHaveBeenCalled();
     });
 
@@ -265,7 +276,7 @@ describe('ClaimService', () => {
         last_name: 'Doe',
       });
 
-      await service.updateForAdmin('claim-1', { status: 'COMPLETED' as any });
+      await service.updateForAdmin('claim-1', { status: 'COMPLETED' }, ACTOR);
       expect(mockNotifications.notifyClaimCompleted).toHaveBeenCalled();
     });
 
@@ -284,7 +295,7 @@ describe('ClaimService', () => {
         last_name: 'Doe',
       });
 
-      await service.updateForAdmin('claim-1', { status: 'REJECTED' as any });
+      await service.updateForAdmin('claim-1', { status: 'REJECTED' }, ACTOR);
       expect(mockNotifications.notifyClaimRejected).toHaveBeenCalled();
     });
 
@@ -301,7 +312,11 @@ describe('ClaimService', () => {
         last_name: 'User',
       });
 
-      await service.updateForAdmin('claim-1', { assigned_user_id: 'user-2' });
+      await service.updateForAdmin(
+        'claim-1',
+        { assigned_user_id: 'user-2' },
+        ACTOR,
+      );
       expect(mockNotifications.notifyClaimAssigned).toHaveBeenCalled();
     });
 
@@ -318,8 +333,171 @@ describe('ClaimService', () => {
         last_name: 'User',
       });
 
-      await service.updateForAdmin('claim-1', { assigned_user_id: null });
+      await service.updateForAdmin(
+        'claim-1',
+        { assigned_user_id: null },
+        ACTOR,
+      );
       expect(mockNotifications.notifyClaimUnassigned).toHaveBeenCalled();
+    });
+  });
+
+  describe("updateForAdmin — qui peut changer l'assignation", () => {
+    // The point of the rule: someone handed a claim must not be able to set it
+    // back to "Unassigned", which looks like redistribution but is really the
+    // claim falling off everyone's list.
+    const assignedByOther = {
+      ...baseClaim,
+      assigned_user_id: 'user-2',
+      assigned_by_user_id: 'user-9',
+    };
+
+    beforeEach(() => {
+      mockPrisma.claim.update.mockResolvedValue(baseClaim);
+      mockPrisma.profile.findUnique.mockResolvedValue(null);
+    });
+
+    it('refuses the assignee unassigning themselves', async () => {
+      mockPrisma.claim.findUnique.mockResolvedValue(assignedByOther);
+      mockPrisma.user.findUnique.mockResolvedValue({ role: 'MANAGER' });
+
+      await expect(
+        service.updateForAdmin('claim-1', { assigned_user_id: null }, 'user-2'),
+      ).rejects.toThrow(ForbiddenException);
+      expect(mockPrisma.claim.update).not.toHaveBeenCalled();
+    });
+
+    it('refuses the assignee handing the claim to someone else', async () => {
+      // Blocking only the clear would leave the rule bypassable in one click.
+      mockPrisma.claim.findUnique.mockResolvedValue(assignedByOther);
+      mockPrisma.user.findUnique.mockResolvedValue({ role: 'MANAGER' });
+
+      await expect(
+        service.updateForAdmin(
+          'claim-1',
+          { assigned_user_id: 'user-3' },
+          'user-2',
+        ),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('names the assigner in the refusal', async () => {
+      mockPrisma.claim.findUnique.mockResolvedValue(assignedByOther);
+      mockPrisma.user.findUnique
+        .mockResolvedValueOnce({ role: 'MANAGER' })
+        .mockResolvedValueOnce({ first_name: 'Sara', last_name: 'NKEMBO' });
+
+      await expect(
+        service.updateForAdmin('claim-1', { assigned_user_id: null }, 'user-2'),
+      ).rejects.toThrow(/Sara NKEMBO/);
+    });
+
+    it('lets the assigner undo their own assignment', async () => {
+      mockPrisma.claim.findUnique.mockResolvedValue(assignedByOther);
+
+      await service.updateForAdmin(
+        'claim-1',
+        { assigned_user_id: null },
+        'user-9',
+      );
+
+      expect(mockPrisma.claim.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            assigned_user_id: null,
+            // Cleared with the assignee: a stale name would keep guarding a
+            // claim nobody is on.
+            assigned_by_user_id: null,
+          }),
+        }),
+      );
+    });
+
+    it('lets a SUPER_ADMIN override', async () => {
+      // Someone has to be able to move a claim on when the assigner has left.
+      mockPrisma.claim.findUnique.mockResolvedValue(assignedByOther);
+      mockPrisma.user.findUnique.mockResolvedValue({ role: 'SUPER_ADMIN' });
+
+      await service.updateForAdmin(
+        'claim-1',
+        { assigned_user_id: null },
+        'user-2',
+      );
+
+      expect(mockPrisma.claim.update).toHaveBeenCalled();
+    });
+
+    it('leaves assignments made before the column freely editable', async () => {
+      // `assigned_by_user_id` null means "unknown assigner". Locking those
+      // would make every pre-existing assignment unfixable.
+      mockPrisma.claim.findUnique.mockResolvedValue({
+        ...baseClaim,
+        assigned_user_id: 'user-2',
+        assigned_by_user_id: null,
+      });
+      mockPrisma.user.findUnique.mockResolvedValue({ role: 'MANAGER' });
+
+      await service.updateForAdmin(
+        'claim-1',
+        { assigned_user_id: null },
+        'user-7',
+      );
+
+      expect(mockPrisma.claim.update).toHaveBeenCalled();
+    });
+
+    it('records the actor as assigner when a claim gains one', async () => {
+      mockPrisma.claim.findUnique.mockResolvedValue(baseClaim);
+
+      await service.updateForAdmin(
+        'claim-1',
+        { assigned_user_id: 'user-2' },
+        'user-7',
+      );
+
+      expect(mockPrisma.claim.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            assigned_user_id: 'user-2',
+            assigned_by_user_id: 'user-7',
+          }),
+        }),
+      );
+    });
+
+    it('does not touch the assigner when the assignee is unchanged', async () => {
+      // A status-only edit by anyone must not silently reassign ownership of
+      // the assignment.
+      mockPrisma.claim.findUnique.mockResolvedValue(assignedByOther);
+
+      await service.updateForAdmin(
+        'claim-1',
+        { assigned_user_id: 'user-2', status: 'IN_PROGRESS' },
+        'user-5',
+      );
+
+      const data = mockPrisma.claim.update.mock.calls[0][0].data;
+      expect(data).not.toHaveProperty('assigned_by_user_id');
+      expect(data).not.toHaveProperty('assigned_user_id');
+    });
+
+    it('exposes the assigner on the mapped claim', async () => {
+      mockPrisma.claim.findUnique.mockResolvedValue(baseClaim);
+      mockPrisma.claim.update.mockResolvedValue({
+        ...baseClaim,
+        assigned_user_id: 'user-2',
+        assigned_by_user_id: 'user-7',
+        assigned_by_user: { first_name: 'Sara', last_name: 'NKEMBO' },
+      });
+
+      const result = await service.updateForAdmin(
+        'claim-1',
+        { assigned_user_id: 'user-2' },
+        'user-7',
+      );
+
+      expect(result.assignedByUserId).toBe('user-7');
+      expect(result.assignedByUserName).toBe('Sara NKEMBO');
     });
   });
 
