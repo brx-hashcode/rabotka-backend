@@ -323,9 +323,10 @@ export class WhatsAppService {
       {
         kind: 'template',
         templateKey: template,
-        // `body` is the human-readable rendering, and most callers pass one.
+        // `body` is the human-readable rendering, and few callers pass one.
         // When they do not, the key plus the variables column still identifies
-        // the message — matching what `saveMessage` writes for templates.
+        // the message — and `saveMessage` below now writes the same marker, so
+        // the delivery log and the conversation agree.
         bodyPreview: body ?? `[TPL:${template}]`,
         profileId,
         variables: params as Record<string, unknown> | undefined,
@@ -346,13 +347,25 @@ export class WhatsAppService {
     // transient failure becomes a permanent one.
     if (!sent) await this.releaseOutbound(phone, template, params);
 
-    if (sent && profileId && body) {
-      await this.saveMessage(profileId, MessageDirection.OUTBOUND, body).catch(
-        (err) =>
-          this.logger.warn(
-            `Failed to save outbound message for ${profileId}:`,
-            err,
-          ),
+    // `body` is OPTIONAL, and requiring it here is what emptied the admin's
+    // conversation view: 27 of the 29 template call sites pass no rendering,
+    // because the approved copy lives at Meta and the caller does not have it.
+    // So a moderator saw the customer's messages and almost none of ours.
+    //
+    // Falls back to the same `[TPL:key]` marker the delivery log already
+    // writes, which the comment above `bodyPreview` claimed this did all along.
+    // A row naming the template beats no row at all — the reader can see that
+    // an answer went out, and which one.
+    if (sent && profileId) {
+      await this.saveMessage(
+        profileId,
+        MessageDirection.OUTBOUND,
+        body ?? `[TPL:${template}]`,
+      ).catch((err) =>
+        this.logger.warn(
+          `Failed to save outbound message for ${profileId}:`,
+          err,
+        ),
       );
     }
 
@@ -397,13 +410,25 @@ export class WhatsAppService {
 
     if (!sent) await this.releaseOutbound(phone, template, variables);
 
-    if (sent && profileId && body) {
-      await this.saveMessage(profileId, MessageDirection.OUTBOUND, body).catch(
-        (err) =>
-          this.logger.warn(
-            `Failed to save outbound message for ${profileId}:`,
-            err,
-          ),
+    // `body` is OPTIONAL, and requiring it here is what emptied the admin's
+    // conversation view: 27 of the 29 template call sites pass no rendering,
+    // because the approved copy lives at Meta and the caller does not have it.
+    // So a moderator saw the customer's messages and almost none of ours.
+    //
+    // Falls back to the same `[TPL:key]` marker the delivery log already
+    // writes, which the comment above `bodyPreview` claimed this did all along.
+    // A row naming the template beats no row at all — the reader can see that
+    // an answer went out, and which one.
+    if (sent && profileId) {
+      await this.saveMessage(
+        profileId,
+        MessageDirection.OUTBOUND,
+        body ?? `[TPL:${template}]`,
+      ).catch((err) =>
+        this.logger.warn(
+          `Failed to save outbound message for ${profileId}:`,
+          err,
+        ),
       );
     }
 
@@ -459,6 +484,71 @@ export class WhatsAppService {
       ).catch((err) =>
         this.logger.warn(
           `Failed to save outbound flow message for ${params.profileId}:`,
+          err,
+        ),
+      );
+    }
+
+    return sent;
+  }
+
+  /**
+   * A free-form message carrying one URL button.
+   *
+   * The cheap half of what an approved template did for the bot's replies. A
+   * bare link does not open WhatsApp's in-app browser, only a button does —
+   * which is the entire reason those replies were templates, even though the
+   * bot only ever answers, and therefore only ever sends inside the 24h service
+   * window. A MARKETING template is billed wherever it lands; this is not
+   * billed at all.
+   *
+   * Callers must be sure the window is open. Nothing here checks it: this is
+   * reached from reply paths where an inbound message is what triggered the
+   * send, and a check would be a database round trip to confirm something the
+   * call site already knows. Outside the window Meta answers 131047/63016 and
+   * the caller falls back to its template.
+   */
+  async sendInteractiveCta(
+    phone: string,
+    params: {
+      body: string;
+      buttonText: string;
+      url: string;
+      imageUrl?: string;
+      profileId?: string;
+    },
+  ): Promise<boolean> {
+    const sid = await this.attempt(
+      'interactive_cta',
+      phone,
+      {
+        kind: 'interactive_cta',
+        bodyPreview: params.body,
+        profileId: params.profileId,
+        variables: { url: params.url, buttonText: params.buttonText },
+      },
+      (logId) =>
+        this.provider.sendInteractiveCta(
+          phone,
+          {
+            body: params.body,
+            buttonText: params.buttonText,
+            url: params.url,
+            ...(params.imageUrl ? { imageUrl: params.imageUrl } : {}),
+          },
+          this.sendOpts(logId),
+        ),
+    );
+    const sent = sid != null;
+
+    if (sent && params.profileId) {
+      await this.saveMessage(
+        params.profileId,
+        MessageDirection.OUTBOUND,
+        params.body,
+      ).catch((err) =>
+        this.logger.warn(
+          `Failed to save outbound CTA message for ${params.profileId}:`,
           err,
         ),
       );
@@ -733,7 +823,7 @@ export class WhatsAppService {
       const message = welcomeActivationMessage(
         profile.first_name,
         creditAmount,
-        profile.profile_type as 'WORKER' | 'EMPLOYER',
+        profile.profile_type,
         wallet.balance,
       );
       await this.sendTextMessage(profile.phone, message, profileId);

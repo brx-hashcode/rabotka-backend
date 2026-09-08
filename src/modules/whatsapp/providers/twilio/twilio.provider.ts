@@ -10,6 +10,7 @@ import {
   type FlowPayload,
   type InboundEvent,
   type InteractiveButtonsPayload,
+  type InteractiveCtaPayload,
   type InteractiveListPayload,
   type OutboundLocation,
   type OutboundMedia,
@@ -53,6 +54,7 @@ export class TwilioProvider implements WhatsappProvider {
     // Expressible only as an approved Content template, not from a payload.
     interactiveButtons: false,
     interactiveList: false,
+    interactiveCta: false,
     carousel: false,
     flows: false,
     location: false,
@@ -169,6 +171,13 @@ export class TwilioProvider implements WhatsappProvider {
     _payload: InteractiveListPayload,
   ): Promise<SendResult> {
     return this.unsupported('interactiveList');
+  }
+
+  sendInteractiveCta(
+    _to: E164,
+    _payload: InteractiveCtaPayload,
+  ): Promise<SendResult> {
+    return this.unsupported('interactiveCta');
   }
 
   sendCarousel(_to: E164, _payload: CarouselPayload): Promise<SendResult> {

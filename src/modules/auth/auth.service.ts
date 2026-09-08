@@ -180,7 +180,7 @@ export class AuthService {
         profile.first_name ?? undefined,
       );
     } else {
-      await this.sendOtpByWhatsApp(normalized, otp);
+      await this.sendOtpByWhatsApp(normalized, otp, profile.id);
     }
 
     return { success: true };
@@ -227,7 +227,7 @@ export class AuthService {
         profile.first_name ?? undefined,
       );
     } else {
-      await this.sendOtpByWhatsApp(normalized, otp);
+      await this.sendOtpByWhatsApp(normalized, otp, profile.id);
     }
 
     await this.redis.set(resendCooldownKey, '1', 'EX', RESEND_COOLDOWN_SECONDS);
@@ -801,11 +801,21 @@ export class AuthService {
     this.logger.log(`OTP email sent to ${email}`);
   }
 
-  private async sendOtpByWhatsApp(phone: string, otp: string): Promise<void> {
+  /**
+   * `profileId` is passed so the code appears in the conversation history.
+   * Without it the login code was the one message a moderator could never see
+   * having been sent — and it is the one users most often call about.
+   */
+  private async sendOtpByWhatsApp(
+    phone: string,
+    otp: string,
+    profileId?: string,
+  ): Promise<void> {
     const sent = await this.whatsAppService.sendTemplateMessage(
       phone,
       'otp',
       otp,
+      profileId,
     );
     if (!sent) {
       this.logger.error(

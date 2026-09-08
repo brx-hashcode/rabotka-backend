@@ -97,6 +97,31 @@ export interface CloudInteractivePayload {
         action: { buttons: CloudInteractiveButton[] };
       }
     | {
+        /**
+         * A URL button on a FREE-FORM message.
+         *
+         * The reason this type earns its place: a bare link in text does not
+         * open WhatsApp's in-app browser, only a button does — which is why the
+         * bot's replies were templates at all, even though they are always sent
+         * inside the 24h service window where free-form is allowed and costs
+         * nothing. This is the button without the template.
+         *
+         * Unlike the other three, its header may carry an image, so a brand
+         * card survives the move off templates. Verified against Graph before
+         * this was written: an image header on `cta_url` is accepted.
+         */
+        type: 'cta_url';
+        header?:
+          | { type: 'text'; text: string }
+          | { type: 'image'; image: { link: string } };
+        body: { text: string };
+        footer?: { text: string };
+        action: {
+          name: 'cta_url';
+          parameters: { display_text: string; url: string };
+        };
+      }
+    | {
         type: 'list';
         header?: { type: 'text'; text: string };
         body: { text: string };

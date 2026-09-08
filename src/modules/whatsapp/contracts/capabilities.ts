@@ -13,6 +13,8 @@ export interface ProviderCapabilities {
   readReceipts: boolean;
   interactiveButtons: boolean;
   interactiveList: boolean;
+  /** Free-form message with a URL button (`interactive.type: 'cta_url'`). */
+  interactiveCta: boolean;
   carousel: boolean;
   flows: boolean;
   location: boolean;

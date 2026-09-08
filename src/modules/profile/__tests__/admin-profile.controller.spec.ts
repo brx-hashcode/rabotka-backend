@@ -517,6 +517,9 @@ describe('AdminProfileController', () => {
         reason: 'Pièce d’identité illisible',
         loginCode: 'login-code-1',
       },
+      // The profile id now rides along so the refusal lands in the
+      // conversation history, not only in the delivery log.
+      expect.any(String),
     );
   });
 
