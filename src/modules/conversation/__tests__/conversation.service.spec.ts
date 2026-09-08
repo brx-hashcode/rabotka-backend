@@ -77,7 +77,9 @@ describe('ConversationService', () => {
       expect(result.profileId).toBeNull();
       expect(result.replies).toHaveLength(1);
       // Registry, not a literal — see bot-orchestrator.service.spec.ts.
-      expect(result.replies[0]).toContain('[TPL:welcomeUnregisteredCard]');
+      expect(result.replies[0]).toContain(
+        '"fallbackTemplate":"welcomeUnregisteredCard"',
+      );
       expect(botOrchestrator.handle).not.toHaveBeenCalled();
     });
 
@@ -111,7 +113,9 @@ describe('ConversationService', () => {
       // The slash is expanded before the branch — it used to be expanded after,
       // so `/compte` reached the matcher still carrying it.
       expect(vova.handleAnonymous).not.toHaveBeenCalled();
-      expect(result.replies[0]).toContain('[TPL:welcomeUnregisteredCard]');
+      expect(result.replies[0]).toContain(
+        '"fallbackTemplate":"welcomeUnregisteredCard"',
+      );
     });
 
     it('sends a bare greeting to the assistant, not the card', async () => {
@@ -143,7 +147,9 @@ describe('ConversationService', () => {
         const result = await service.handleIncomingMessage(PHONE, command);
 
         expect(vova.handleAnonymous).not.toHaveBeenCalled();
-        expect(result.replies[0]).toContain('[TPL:welcomeUnregisteredCard]');
+        expect(result.replies[0]).toContain(
+          '"fallbackTemplate":"welcomeUnregisteredCard"',
+        );
       }
     });
 
@@ -155,7 +161,9 @@ describe('ConversationService', () => {
 
       const result = await service.handleIncomingMessage(PHONE, 'Bonjour');
 
-      expect(result.replies[0]).toContain('[TPL:welcomeUnregisteredCard]');
+      expect(result.replies[0]).toContain(
+        '"fallbackTemplate":"welcomeUnregisteredCard"',
+      );
     });
 
     it('sends the landing page CTA to the assistant, not the card', async () => {
@@ -190,7 +198,9 @@ describe('ConversationService', () => {
 
       expect(result.replies).toHaveLength(2);
       expect(result.replies[0]).toContain('Créez votre compte');
-      expect(result.replies[1]).toContain('[TPL:welcomeUnregisteredCard]');
+      expect(result.replies[1]).toContain(
+        '"fallbackTemplate":"welcomeUnregisteredCard"',
+      );
     });
 
     it('writes nothing to Postgres for an unknown phone', async () => {

@@ -152,6 +152,7 @@ export class BotNotificationService {
           // pre-approval template, so this is safe either side of the cutover.
           applicationId,
         },
+        app.job_offer.employer_id,
       );
     } catch (err) {
       // Hand the window back. Keeping it would let one failed send suppress
@@ -206,6 +207,7 @@ export class BotNotificationService {
             // URL suffix: the worker settles their share on the web now.
             applicationId,
           },
+          app.worker_id,
         );
       } else {
         await this.whatsApp.sendTemplateMessage(
@@ -215,6 +217,7 @@ export class BotNotificationService {
             employerName,
             offerTitle: app.job_offer.title,
           },
+          app.worker_id,
         );
       }
     } catch (err) {
@@ -318,6 +321,7 @@ export class BotNotificationService {
         profile.phone,
         'unlockExpiredConversion',
         { amount },
+        profileId,
       );
     } catch (err) {
       this.logger.warn(

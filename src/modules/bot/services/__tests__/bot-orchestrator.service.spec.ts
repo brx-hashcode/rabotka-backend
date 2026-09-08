@@ -277,10 +277,19 @@ describe('BotOrchestratorService', () => {
       deps.prisma.profile.findUnique.mockResolvedValue(null);
       const result = await service.handle(PROFILE_ID, PHONE, 'Menu');
       expect(result).toHaveLength(1);
-      // Asserted against the registry, not a literal: a hardcoded SID passes
-      // happily while the wrong template goes out, which is exactly how the
-      // old text-only welcome survived the switch to the card.
-      expect(result[0]).toContain('[TPL:welcomeUnregisteredCard]');
+      // The card now goes out FREE-FORM — it is a reply, so it is inside the
+      // 24h window where that costs nothing, while its MARKETING template was
+      // billed. What must still hold is that the UNREGISTERED card is the one
+      // sent, so the assertion moved to the fallback the reply carries rather
+      // than being dropped: a hardcoded SID passes happily while the wrong
+      // card goes out, which is how the old text-only welcome survived the
+      // switch to this one.
+      expect(result[0]).toContain('[CTA:]');
+      expect(result[0]).toContain(
+        '"fallbackTemplate":"welcomeUnregisteredCard"',
+      );
+      // And it points at onboarding, not at the app: there is no account yet.
+      expect(result[0]).toContain('"path":"onboarding"');
     });
 
     it('returns INACTIVE_MESSAGE when account is not ACTIVE', async () => {

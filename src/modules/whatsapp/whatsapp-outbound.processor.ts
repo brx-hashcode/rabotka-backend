@@ -13,6 +13,7 @@ import {
   type WhatsAppTemplateName,
 } from '../../common/constants/whatsapp-templates';
 import { WhatsAppLoginLinkService } from '../auth/whatsapp-login-link.service';
+import type { CtaReply } from '../../common/constants/whatsapp-carousel';
 
 // Twilio's hard limit on a WhatsApp body is 1600 chars. We chunk well below
 // that to leave room for any "(1/N)" prefix and to stay safe across UCS-2
@@ -51,6 +52,16 @@ function chunkForWhatsApp(text: string): string[] {
 export type WhatsAppSend =
   | { type: 'text'; text: string }
   | { type: 'media'; mediaUrl: string; caption?: string }
+  /**
+   * A free-form message with a URL button, with the approved template it
+   * replaces carried alongside as a fallback.
+   *
+   * The fallback is not belt-and-braces. A reply is built inside the 24h
+   * service window by construction, but the job is drained asynchronously and
+   * the window can shut in between — at which point Meta refuses free-form and
+   * the reply would simply never arrive.
+   */
+  | { type: 'cta'; cta: CtaReply }
   | {
       type: 'template';
       /** Logical template key. Provider-agnostic; what new jobs carry. */
@@ -191,6 +202,15 @@ export class WhatsAppOutboundProcessor {
       await this.processMedia({ phone, profileId, ...message });
     } else if (message.type === 'template') {
       await this.processTemplate({ phone, profileId, ...message });
+    } else if (message.type === 'cta') {
+      await this.processCta({ phone, profileId, ...message });
+    } else {
+      // Was silently dropped. A shape this function does not know is a reply
+      // the user never receives and nothing records — the failure mode is an
+      // absence, which is exactly what nobody notices.
+      this.logger.error(
+        `Unhandled outbound message type ${String((message as { type?: unknown }).type)} for ${phone} — dropped`,
+      );
     }
   }
 
@@ -292,6 +312,13 @@ export class WhatsAppOutboundProcessor {
     return { ...variables, [target.variable]: withCode };
   }
 
+  /** Base for a CTA URL when no login code could be minted. */
+  private frontendUrl(): string {
+    return (
+      this.config.get<string>('FRONTEND_URL') ?? 'http://localhost:3000'
+    ).replace(/\/$/, '');
+  }
+
   /**
    * Rewrites first-party links in a plain-text message into one-tap `/s/<code>`
    * links. Templates funnel through `withLoginCode`; free-form messages — every
@@ -332,6 +359,57 @@ export class WhatsAppOutboundProcessor {
     }
 
     return rewritten;
+  }
+
+  /**
+   * The free-form half of a bot reply: same words, same button, no template.
+   *
+   * The URL is minted here rather than baked into the reply, through the same
+   * `shortLink` the template button URLs use — a link built when the reply was
+   * composed would be stale by the time the job drains, and an unauthenticated
+   * one drops the reader on a login screen instead of where they were going.
+   *
+   * Falls back to the approved template on ANY failure, not just an
+   * out-of-window refusal. The distinction is not worth drawing here: whatever
+   * went wrong, the reader is owed the message, and the template is the path
+   * that was working yesterday.
+   */
+  private async processCta(
+    data: Extract<WhatsAppOutboundJobData, { type: 'cta' }>,
+  ): Promise<void> {
+    const { cta, phone, profileId } = data;
+
+    const url = profileId
+      ? ((await this.loginLink
+          .shortLink(profileId, cta.path)
+          .catch(() => null)) ?? `${this.frontendUrl()}/${cta.path}`)
+      : `${this.frontendUrl()}/${cta.path}`;
+
+    const sent = await this.whatsApp
+      .sendInteractiveCta(phone, {
+        body: cta.body,
+        buttonText: cta.buttonText,
+        url,
+        ...(cta.imageUrl ? { imageUrl: cta.imageUrl } : {}),
+        ...(profileId ? { profileId } : {}),
+      })
+      .catch((err: unknown) => {
+        this.logger.warn(
+          `CTA send to ${phone} failed, falling back to template ${cta.fallbackTemplate}`,
+          err instanceof Error ? err.message : String(err),
+        );
+        return false;
+      });
+
+    if (sent) return;
+
+    await this.processTemplate({
+      type: 'template',
+      phone,
+      profileId,
+      templateKey: cta.fallbackTemplate,
+      contentVariables: cta.fallbackVariables ?? {},
+    });
   }
 
   private async processTemplate(

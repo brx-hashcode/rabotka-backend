@@ -557,6 +557,9 @@ describe('ReminderProcessor', () => {
         '+1234567890',
         expect.any(String),
         expect.any(Object),
+        // The worker id now rides along so the reminder lands in the
+        // conversation history, not only in the delivery log.
+        expect.any(String),
       );
       expect(redis.set).toHaveBeenCalledWith(
         expect.stringContaining('app-1'),
@@ -657,6 +660,7 @@ describe('ReminderProcessor', () => {
         '+1234567890',
         'reminderStart',
         expect.any(Object),
+        expect.any(String),
       );
       expect(redis.set).toHaveBeenCalledWith(
         expect.stringContaining('app-1'),

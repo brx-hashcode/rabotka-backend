@@ -55,7 +55,17 @@ export type WhatsappSendKind =
   | 'template'
   | 'media'
   | 'flow'
-  | 'interactive';
+  | 'interactive'
+  /**
+   * A free-form message with a URL button — what a bot reply sends instead of
+   * an approved template.
+   *
+   * Its own kind rather than plain `interactive`, because these rows carry no
+   * `template_key` and would otherwise vanish from the per-template consumption
+   * view: the moment this shipped, the traffic would read as messages that
+   * stopped being sent rather than messages that stopped being billed.
+   */
+  | 'interactive_cta';
 
 export interface SendLogContext {
   kind: WhatsappSendKind;
