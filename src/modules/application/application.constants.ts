@@ -50,9 +50,7 @@ export function cancellationPatch(args: {
 
 /** What `create()` may do about an existing row for this (offer, worker). */
 export type ReapplyDecision =
-  | 'ALLOW'
-  | 'BLOCKED_ACTIVE'
-  | 'BLOCKED_SELF_CANCELLED';
+  'ALLOW' | 'BLOCKED_ACTIVE' | 'BLOCKED_SELF_CANCELLED';
 
 export const SELF_CANCELLED_MESSAGE =
   'Vous avez annulé cette candidature. Vous ne pouvez plus postuler à cette offre.';
@@ -85,11 +83,7 @@ export function reapplyDecision(
     return 'BLOCKED_ACTIVE';
   }
 
-  if (
-    live.some(
-      (r) => r.cancelled_by === ApplicationCancelledBy.WORKER,
-    )
-  ) {
+  if (live.some((r) => r.cancelled_by === ApplicationCancelledBy.WORKER)) {
     return 'BLOCKED_SELF_CANCELLED';
   }
 

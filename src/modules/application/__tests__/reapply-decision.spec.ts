@@ -8,7 +8,9 @@ import { reapplyDecision } from '../application.constants';
  * fetching and the throwing; this is the whole of the decision.
  */
 
-const row = (over: Partial<Parameters<typeof reapplyDecision>[0][number]> = {}) => ({
+const row = (
+  over: Partial<Parameters<typeof reapplyDecision>[0][number]> = {},
+) => ({
   status: ApplicationStatus.CANCELLED,
   cancelled_by: null,
   deleted_at: null,
