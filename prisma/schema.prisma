@@ -1754,7 +1754,8 @@ model OAuthApp {
   /// to rotate independently of the row it points at.
   client_id String @unique
 
-  /// SHA-256 hex of the secret, never the secret.
+  /// SHA-256 hex of the secret, never the secret — and the ONLY thing
+  /// authentication consults, including for a sandbox app.
   ///
   /// Deliberately not bcrypt/argon: the secret is 32 bytes straight out of a
   /// CSPRNG, so there is no dictionary and no rainbow table for a slow KDF to
@@ -1762,10 +1763,38 @@ model OAuthApp {
   /// every single token exchange. Comparison is still constant-time — see
   /// `client-credentials.util.ts`.
   client_secret_hash String
-  /// Last 4 characters of the secret. Admins can no longer read the secret
-  /// after creation, so this is the only way to tell two of them apart when
-  /// asking a partner "which one are you using".
+  /// Last 4 characters of the secret. For a real app this is the only way to
+  /// tell two of them apart when asking a partner "which one are you using",
+  /// because the secret itself cannot be read back. A SANDBOX app is the one
+  /// exception — see `sandbox_client_secret_plaintext`.
   client_secret_hint String
+
+  /// The secret IN PLAINTEXT, and only ever for a sandbox app.
+  ///
+  /// `client_secret_hash` above remains the sole source of truth for
+  /// authentication: `authenticateClient` never reads this column. It exists
+  /// only so an admin can be shown the secret again.
+  ///
+  /// WHY THIS IS ACCEPTABLE HERE AND NOWHERE ELSE. A sandbox app signs in only
+  /// the two synthetic users in `oauth-sandbox.service.ts`, with the fixed OTP
+  /// `111111` — which `GET /admin/oauth-apps/sandbox-users` already returns in
+  /// the clear to the same SUPER_ADMIN who can read this. The secret therefore
+  /// guards nothing that was not already visible to its only reader. It is the
+  /// "test key" model: readable in the dashboard, unlike a live key.
+  ///
+  /// NULL for every real app, and NULL for sandbox apps registered before this
+  /// column existed — their secret is genuinely gone and no migration can
+  /// recover it. The UI tells those to rotate once.
+  ///
+  /// Its safety rests on `is_sandbox` being written once and never updated. If
+  /// that ever changes, the same statement must null this column.
+  ///
+  /// Deliberately NOT mirrored for `previous_secret_hash`: after a rotation the
+  /// old secret keeps authenticating for the grace window but its plaintext is
+  /// overwritten immediately. That asymmetry is intentional — the reveal
+  /// endpoint answers "what should the partner use NOW", and handing back a
+  /// superseded credential that dies in a few hours would be a trap.
+  sandbox_client_secret_plaintext String?
 
   /// Set on rotation. The old secret keeps working until it expires, so a
   /// partner can redeploy on their own schedule instead of taking downtime the
