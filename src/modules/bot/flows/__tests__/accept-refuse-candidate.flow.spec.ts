@@ -229,9 +229,11 @@ describe('runAcceptRefuseCandidateFlow()', () => {
         EMPLOYER_ID,
         'Not qualified',
       );
+      // `reject` notifies the worker itself, so the flow must not send a second
+      // notice on top of it.
       expect(
         ctx.notificationService.sendApplicationRejectedToWorker,
-      ).toHaveBeenCalledWith(APP_ID);
+      ).not.toHaveBeenCalled();
     });
 
     it('rejects with undefined reason when refusalReason is empty', async () => {

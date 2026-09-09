@@ -814,7 +814,10 @@ describe('ReminderProcessor', () => {
       expect(whatsApp.sendTextMessage).not.toHaveBeenCalled();
     });
 
-    it('preserves snoozeCount from existing bot state instead of resetting to 0', async () => {
+    // The snooze state went with the in-chat menu: the status-check template
+    // carries a CTA button and never printed "2 = remind me later", so an armed
+    // flow could only misread whatever the worker wrote next.
+    it('arms no bot state for the worker', async () => {
       prisma.jobOffer.findUnique = jest.fn().mockResolvedValue({
         status: JobOfferStatus.IN_PROGRESS,
         title: 'Test Job',
@@ -824,13 +827,6 @@ describe('ReminderProcessor', () => {
         worker_id: 'worker-1',
         worker: { phone: '+242000002' },
       });
-      // Simulate existing Redis state with snoozeCount=3
-      redis.get.mockResolvedValueOnce(
-        JSON.stringify({
-          flowId: 'job_status_check',
-          payload: { snoozeCount: 3 },
-        }),
-      );
 
       await processor.process({
         data: {
@@ -842,16 +838,11 @@ describe('ReminderProcessor', () => {
         },
       });
 
-      // State is now written via CAS (redis.eval) to avoid overwriting active flows
-      const evalCalls = redis.eval.mock.calls;
-      const stateCall = evalCalls.find((call: unknown[]) =>
-        String(call[2]).includes('worker-1'),
+      const wroteState = [...redis.eval.mock.calls, ...redis.set.mock.calls].some(
+        (call: unknown[]) =>
+          call.some((arg) => String(arg).includes('bot:state:')),
       );
-      expect(stateCall).toBeDefined();
-      const stateValue = JSON.parse(stateCall[3] as string) as {
-        payload: { snoozeCount: number };
-      };
-      expect(stateValue.payload.snoozeCount).toBe(3);
+      expect(wroteState).toBe(false);
     });
 
     it('handles whatsApp.sendTextMessage failure gracefully', async () => {

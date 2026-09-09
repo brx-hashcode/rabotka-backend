@@ -55,9 +55,6 @@ import {
 } from '../flows/rate-assignment.flow';
 import { MatchingService } from '../../matching/matching.service';
 import { QueueService } from '../../../common/services/queue/queue.service';
-import { runRepublishExpiredJobFlow } from '../flows/republish-expired-job.flow';
-import { runPostCancellationActionsFlow } from '../flows/post-cancellation-actions.flow';
-import { runJobStatusCheckFlow } from '../flows/job-status-check.flow';
 import { InterestSignalService } from '../../interest-graph/interest-signal.service';
 import { InterestRecommendationService } from '../../interest-graph/interest-recommendation.service';
 import { EngineRolloutService } from '../../recommendation-engine/engine-rollout.service';
@@ -831,42 +828,12 @@ export class BotOrchestratorService {
       [FLOW_IDS.PAY_PENALTIES]: () =>
         runPayPenaltiesFlow(state, input, profile, ctx),
 
-      [FLOW_IDS.REPUBLISH_EXPIRED_JOB]: () =>
-        runRepublishExpiredJobFlow(state, input, profile, {
-          prisma: this.prisma,
-          jobOfferService: this.jobOfferService,
-        }),
-      [FLOW_IDS.JOB_STATUS_CHECK]: () =>
-        runJobStatusCheckFlow(state, input, profile, {
-          applicationService: this.applicationService,
-          notificationService: this.notificationService,
-          queueService: this.queueService,
-          employerId: profile.id,
-        }),
-
       [FLOW_IDS.RATE_ASSIGNMENT]: () =>
         runRateAssignmentFlow(state, input, profile, {
           prisma: this.prisma,
           applicationService: this.applicationService,
         }),
 
-      [FLOW_IDS.POST_CANCELLATION_ACTIONS]: async () => {
-        const result = await runPostCancellationActionsFlow(
-          state,
-          input,
-          profile,
-          {
-            prisma: this.prisma,
-            applicationService: this.applicationService,
-          },
-        );
-        // "Voir les autres candidatures" now sends them to the app: the
-        // in-chat list flow is gone, and browsing candidates belongs there.
-        if (result.handoff?.type === 'candidatures') {
-          return { reply: [welcomePlatformMessage()], clearState: true };
-        }
-        return result;
-      },
     };
     const runner = runners[flowId];
     return runner ? runner() : Promise.resolve(null);

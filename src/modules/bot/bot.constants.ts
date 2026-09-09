@@ -9,25 +9,17 @@ export const BOT_STATE_TTL_SECONDS = 86400;
 export const FLOW_TTL_SECONDS: Partial<Record<string, number>> = {
   accept_refuse_candidate: 2 * 3600,
   verify_whatsapp: 10 * 60, // 10 min — OTP-like, short window
-  job_status_check: 30 * 60, // 30 min — re-triggered by reminder anyway
-  post_cancellation_actions: 30 * 60, // 30 min
-  republish_expired_job: 30 * 60, // 30 min
   rate_assignment: 2 * 3600,
   pay_penalties: 3600, // 1 h — holds payment intent
 };
 
 export const FLOW_IDS = {
   ACCEPT_REFUSE_CANDIDATE: 'accept_refuse_candidate',
-  JOB_STATUS_CHECK: 'job_status_check',
   PAY_PENALTIES: 'pay_penalties',
   /** Holds the numbered penalty list while the user picks which to settle.
    *  Distinct from PAY_PENALTIES, which is the payment flow that follows. */
   PENALTY_GATE: 'penalty_gate',
-  /** Tiny state machine that handles the 1/2/3 menu shown to an employer
-   *  after a worker cancels their candidature (see formatCancellationToEmployer). */
-  POST_CANCELLATION_ACTIONS: 'post_cancellation_actions',
   RATE_ASSIGNMENT: 'rate_assignment',
-  REPUBLISH_EXPIRED_JOB: 'republish_expired_job',
   VERIFY_WHATSAPP: 'verify_whatsapp',
 } as const;
 

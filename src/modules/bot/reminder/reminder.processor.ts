@@ -16,14 +16,8 @@ import {
 } from '@prisma/client';
 import { closeRecruitedOfferTx } from '../../job-offer/utils/close-recruited-offer';
 import { SystemConfigService } from '../../system-config/system-config.service';
-import {
-  BOT_STATE_KEY_PREFIX,
-  BOT_STATE_TTL_SECONDS,
-  FLOW_IDS,
-} from '../bot.constants';
 import { ContactUnlockService } from '../../contact-unlock/contact-unlock.service';
 import { BotNotificationService } from '../services/bot-notification.service';
-import { snoozeLabel } from '../flows/job-status-check.flow';
 
 const REMINDER_24H_SENT_KEY = 'reminder:sent:24h:';
 const REMINDER_START_SENT_KEY = 'reminder:sent:start:';
@@ -53,21 +47,6 @@ const UNDATED_OFFER_TTL_DAYS = 30;
  * offer lingering, and nothing about it is destructive.
  */
 const FILLED_CONFIRMATION_GRACE_DAYS = 7;
-
-// CAS: only writes if the key is absent OR current flowId matches expectedFlowId.
-const LUA_CAS_SET = `
-local current = redis.call('GET', KEYS[1])
-if current == false then
-  redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2])
-  return 1
-end
-local ok, parsed = pcall(cjson.decode, current)
-if not ok or parsed.flowId == ARGV[3] then
-  redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2])
-  return 1
-end
-return 0
-`;
 
 export type ReminderJobData =
   | { type: 'scan' }
@@ -497,34 +476,10 @@ export class ReminderProcessor {
         ),
       );
 
-    const stateKey = `${BOT_STATE_KEY_PREFIX}${app.worker_id}`;
-    const stateValue = JSON.stringify({
-      flowId: FLOW_IDS.JOB_STATUS_CHECK,
-      step: 0,
-      payload: {
-        jobOfferId: offer.id,
-        jobTitle: offer.title,
-        applicationId: app.id,
-        paymentFlow: offer.payment_flow ?? 'DAILY',
-        snoozeCount: 0,
-      },
-      updatedAt: new Date().toISOString(),
-    });
-    await this.redis
-      .eval(
-        LUA_CAS_SET,
-        1,
-        stateKey,
-        stateValue,
-        String(BOT_STATE_TTL_SECONDS),
-        FLOW_IDS.JOB_STATUS_CHECK,
-      )
-      .catch((err) =>
-        this.logger.warn(
-          `Failed to set job status check state for worker ${app.worker_id}`,
-          err,
-        ),
-      );
+    // No bot state is armed alongside this template. It carries a CTA button
+    // and no menu, so a state expecting "1 = done / 2 = later" would only make
+    // the bot act on messages the worker never meant as answers. Confirming a
+    // mission happens in the app.
 
     // Fallback re-ping if the worker never responds — enqueued with a unique
     // jobId so BullMQ deduplicates across ticks.
@@ -703,71 +658,22 @@ export class ReminderProcessor {
   }): Promise<void> {
     const phone = offer.employer?.phone;
     if (!phone) return;
-    const tpl = WHATSAPP_TEMPLATES.offerExpiredEmployer;
-    const sent = await this.whatsApp
+    // No bot state is armed alongside this template. Republishing is a CTA away
+    // in the app, and an armed queue would let a stray "1" republish an offer
+    // the employer had finished with.
+    await this.whatsApp
       .sendTemplateMessage(
         phone,
         'offerExpiredEmployer',
         { offerTitle: offer.title, jobOfferId: offer.id },
         offer.employer_id,
       )
-      .then(() => true)
-      .catch((err) => {
+      .catch((err) =>
         this.logger.warn(
           `Failed to notify employer ${offer.employer_id} of expired offer`,
           err,
-        );
-        return false;
-      });
-
-    if (sent) {
-      // Queue this offer in the employer's republish state instead of
-      // overwriting. If two offers expire in the same tick, the user
-      // should be able to republish both — one at a time.
-      const stateKey = `${BOT_STATE_KEY_PREFIX}${offer.employer_id}`;
-      try {
-        const existing = await this.redis.get(stateKey);
-        const queue: string[] = (() => {
-          if (!existing) return [offer.id];
-          try {
-            const parsed = JSON.parse(existing) as {
-              flowId?: string;
-              payload?: { jobOfferIds?: unknown; jobOfferId?: unknown };
-            };
-            // Only append when the existing state is the republish flow;
-            // otherwise the user is mid-flow elsewhere — start fresh.
-            if (parsed.flowId !== FLOW_IDS.REPUBLISH_EXPIRED_JOB) {
-              return [offer.id];
-            }
-            const existingIds = Array.isArray(parsed.payload?.jobOfferIds)
-              ? (parsed.payload.jobOfferIds as unknown[]).filter(
-                  (v): v is string => typeof v === 'string',
-                )
-              : typeof parsed.payload?.jobOfferId === 'string'
-                ? [parsed.payload.jobOfferId]
-                : [];
-            return existingIds.includes(offer.id)
-              ? existingIds
-              : [...existingIds, offer.id];
-          } catch {
-            return [offer.id];
-          }
-        })();
-
-        const stateValue = JSON.stringify({
-          flowId: FLOW_IDS.REPUBLISH_EXPIRED_JOB,
-          step: 0,
-          payload: { jobOfferIds: queue },
-          updatedAt: new Date().toISOString(),
-        });
-        await this.redis.set(stateKey, stateValue, 'EX', BOT_STATE_TTL_SECONDS);
-      } catch (err) {
-        this.logger.warn(
-          `Failed to enqueue republish flow state for employer ${offer.employer_id}`,
-          err,
-        );
-      }
-    }
+        ),
+      );
   }
 
   private async sendJobStatusCheckReminder(
@@ -826,52 +732,7 @@ export class ReminderProcessor {
         return false;
       });
 
-    if (sent) {
-      // Refresh the bot state so the worker's reply still routes to the flow.
-      // Preserve the existing snoozeCount so the 5-snooze cap is cumulative.
-      const stateKey = `${BOT_STATE_KEY_PREFIX}${workerId}`;
-      const existing = await this.redis.get(stateKey).catch(() => null);
-      let snoozeCount = 0;
-      if (existing) {
-        try {
-          const parsed = JSON.parse(existing) as {
-            payload?: { snoozeCount?: unknown };
-          };
-          if (typeof parsed?.payload?.snoozeCount === 'number') {
-            snoozeCount = parsed.payload.snoozeCount;
-          }
-        } catch {
-          // malformed state — start fresh
-        }
-      }
-      const stateValue = JSON.stringify({
-        flowId: FLOW_IDS.JOB_STATUS_CHECK,
-        step: 0,
-        payload: {
-          jobOfferId,
-          jobTitle: offer.title,
-          applicationId,
-          paymentFlow,
-          snoozeCount,
-        },
-        updatedAt: new Date().toISOString(),
-      });
-      await this.redis
-        .eval(
-          LUA_CAS_SET,
-          1,
-          stateKey,
-          stateValue,
-          String(BOT_STATE_TTL_SECONDS),
-          FLOW_IDS.JOB_STATUS_CHECK,
-        )
-        .catch((err) =>
-          this.logger.warn(
-            `Failed to refresh job status check state for employer ${employerId}`,
-            err,
-          ),
-        );
-    }
+    if (!sent) return;
 
     this.logger.log(
       `Job status check reminder sent to employer ${employerId} for offer ${jobOfferId}`,

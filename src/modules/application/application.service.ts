@@ -961,6 +961,20 @@ export class ApplicationService {
       timestamp: new Date().toISOString(),
     });
 
+    // The worker's "your application was turned down" notice only ever fired
+    // from the in-chat accept/refuse flow, so an employer refusing from the app
+    // left the worker waiting on an answer that never came. It belongs on the
+    // service, where both channels pass. Fire-and-forget — a WhatsApp failure
+    // must not undo a committed rejection.
+    void this.botNotification
+      .sendApplicationRejectedToWorker(applicationId)
+      .catch((err: unknown) =>
+        console.warn(
+          `[reject] rejection notify failed for ${applicationId}:`,
+          err,
+        ),
+      );
+
     return this.toApplicationWithOffer(updated);
   }
 
