@@ -41,7 +41,6 @@ import {
   runAcceptRefuseCandidateFlow,
   getAcceptRefuseInitialState,
 } from '../flows/accept-refuse-candidate.flow';
-import { runCancelApplicationFlow } from '../flows/cancel-application.flow';
 import {
   runPayPenaltiesFlow,
   getPayPenaltiesInitialState,
@@ -56,9 +55,6 @@ import {
 } from '../flows/rate-assignment.flow';
 import { MatchingService } from '../../matching/matching.service';
 import { QueueService } from '../../../common/services/queue/queue.service';
-import { runRepublishExpiredJobFlow } from '../flows/republish-expired-job.flow';
-import { runPostCancellationActionsFlow } from '../flows/post-cancellation-actions.flow';
-import { runJobStatusCheckFlow } from '../flows/job-status-check.flow';
 import { InterestSignalService } from '../../interest-graph/interest-signal.service';
 import { InterestRecommendationService } from '../../interest-graph/interest-recommendation.service';
 import { EngineRolloutService } from '../../recommendation-engine/engine-rollout.service';
@@ -829,37 +825,8 @@ export class BotOrchestratorService {
     const runners: Record<string, () => Promise<FlowResult>> = {
       [FLOW_IDS.ACCEPT_REFUSE_CANDIDATE]: () =>
         runAcceptRefuseCandidateFlow(state, input, profile, ctx),
-      [FLOW_IDS.CANCEL_APPLICATION]: async () => {
-        const {
-          cancellationThresholdHours,
-          lateCancellationPenaltyFcfa,
-          lateCancellationScoreDeduction,
-          reliabilityScoreMin,
-        } = await this.systemConfig.getFees();
-        return runCancelApplicationFlow(state, input, profile, {
-          ...ctx,
-          cancellationThresholdHours,
-          lateCancellationPenaltyFcfa,
-          lateCancellationScoreDeduction,
-          reliabilityScoreMin,
-        });
-      },
-
       [FLOW_IDS.PAY_PENALTIES]: () =>
         runPayPenaltiesFlow(state, input, profile, ctx),
-
-      [FLOW_IDS.REPUBLISH_EXPIRED_JOB]: () =>
-        runRepublishExpiredJobFlow(state, input, profile, {
-          prisma: this.prisma,
-          jobOfferService: this.jobOfferService,
-        }),
-      [FLOW_IDS.JOB_STATUS_CHECK]: () =>
-        runJobStatusCheckFlow(state, input, profile, {
-          applicationService: this.applicationService,
-          notificationService: this.notificationService,
-          queueService: this.queueService,
-          employerId: profile.id,
-        }),
 
       [FLOW_IDS.RATE_ASSIGNMENT]: () =>
         runRateAssignmentFlow(state, input, profile, {
@@ -867,23 +834,6 @@ export class BotOrchestratorService {
           applicationService: this.applicationService,
         }),
 
-      [FLOW_IDS.POST_CANCELLATION_ACTIONS]: async () => {
-        const result = await runPostCancellationActionsFlow(
-          state,
-          input,
-          profile,
-          {
-            prisma: this.prisma,
-            applicationService: this.applicationService,
-          },
-        );
-        // "Voir les autres candidatures" now sends them to the app: the
-        // in-chat list flow is gone, and browsing candidates belongs there.
-        if (result.handoff?.type === 'candidatures') {
-          return { reply: [welcomePlatformMessage()], clearState: true };
-        }
-        return result;
-      },
     };
     const runner = runners[flowId];
     return runner ? runner() : Promise.resolve(null);

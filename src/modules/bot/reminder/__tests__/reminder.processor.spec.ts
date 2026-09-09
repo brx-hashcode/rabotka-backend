@@ -610,25 +610,23 @@ describe('ReminderProcessor', () => {
       expect(whatsApp.sendTemplateMessage).not.toHaveBeenCalled();
     });
 
-    it('sets CANCEL_APPLICATION bot state for the worker after sending', async () => {
+    // Regression: this used to arm the cancel flow so a "1 = cancel / 2 = keep"
+    // quick reply had somewhere to land. The template now carries a single CTA
+    // button and shows no menu, so any state armed here turned the worker's
+    // next message — "Le rendez vous c'est pour 10h, et non 9h" — into a
+    // cancellation. Nothing may arm a flow the worker was never offered.
+    it('arms no bot state for the worker after sending', async () => {
       prisma.application.findUnique.mockResolvedValue(buildApplication());
 
       await processor.process({
         data: { type: 'reminder_24h', applicationId: 'app-1' },
       });
 
-      // Two redis.set calls: one for the dedup key, one for the bot state
-      const setCalls = redis.set.mock.calls;
-      const botStateCall = setCalls.find((call: unknown[]) =>
-        String(call[0]).includes('bot:state:worker-1'),
+      expect(whatsApp.sendTemplateMessage).toHaveBeenCalled();
+      const botStateCall = redis.set.mock.calls.find((call: unknown[]) =>
+        String(call[0]).includes('bot:state:'),
       );
-      expect(botStateCall).toBeDefined();
-      const stateValue = JSON.parse(botStateCall[1] as string) as {
-        flowId: string;
-        payload: { applicationId: string };
-      };
-      expect(stateValue.flowId).toBe('cancel_application');
-      expect(stateValue.payload.applicationId).toBe('app-1');
+      expect(botStateCall).toBeUndefined();
     });
   });
 
@@ -816,7 +814,10 @@ describe('ReminderProcessor', () => {
       expect(whatsApp.sendTextMessage).not.toHaveBeenCalled();
     });
 
-    it('preserves snoozeCount from existing bot state instead of resetting to 0', async () => {
+    // The snooze state went with the in-chat menu: the status-check template
+    // carries a CTA button and never printed "2 = remind me later", so an armed
+    // flow could only misread whatever the worker wrote next.
+    it('arms no bot state for the worker', async () => {
       prisma.jobOffer.findUnique = jest.fn().mockResolvedValue({
         status: JobOfferStatus.IN_PROGRESS,
         title: 'Test Job',
@@ -826,13 +827,6 @@ describe('ReminderProcessor', () => {
         worker_id: 'worker-1',
         worker: { phone: '+242000002' },
       });
-      // Simulate existing Redis state with snoozeCount=3
-      redis.get.mockResolvedValueOnce(
-        JSON.stringify({
-          flowId: 'job_status_check',
-          payload: { snoozeCount: 3 },
-        }),
-      );
 
       await processor.process({
         data: {
@@ -844,16 +838,11 @@ describe('ReminderProcessor', () => {
         },
       });
 
-      // State is now written via CAS (redis.eval) to avoid overwriting active flows
-      const evalCalls = redis.eval.mock.calls;
-      const stateCall = evalCalls.find((call: unknown[]) =>
-        String(call[2]).includes('worker-1'),
+      const wroteState = [...redis.eval.mock.calls, ...redis.set.mock.calls].some(
+        (call: unknown[]) =>
+          call.some((arg) => String(arg).includes('bot:state:')),
       );
-      expect(stateCall).toBeDefined();
-      const stateValue = JSON.parse(stateCall[3] as string) as {
-        payload: { snoozeCount: number };
-      };
-      expect(stateValue.payload.snoozeCount).toBe(3);
+      expect(wroteState).toBe(false);
     });
 
     it('handles whatsApp.sendTextMessage failure gracefully', async () => {

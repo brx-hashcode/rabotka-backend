@@ -10,7 +10,6 @@ export type BotState = {
 export type FlowId =
   | 'publish_job'
   | 'apply_job'
-  | 'cancel_application'
   | 'accept_refuse_candidate'
   | 'candidatures_list'
   | 'list_offers'

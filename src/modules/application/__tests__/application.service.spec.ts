@@ -173,7 +173,7 @@ describe('ApplicationService', () => {
             sendApplicationRejectedToWorker: jest
               .fn()
               .mockResolvedValue(undefined),
-            sendCancellationToEmployer: jest.fn(),
+            sendCancellationToEmployer: jest.fn().mockResolvedValue(undefined),
           },
         },
         { provide: EventEmitter2, useValue: { emit: jest.fn() } },
@@ -608,6 +608,44 @@ describe('ApplicationService', () => {
       const result = await service.cancel(APPLICATION_ID, WORKER_ID);
       expect(result.penaltyApplied).toBe(false);
       expect(prisma.penalty.upsert as jest.Mock).not.toHaveBeenCalled();
+    });
+
+    // The employer's notice used to hang off the in-chat cancel flow, so a
+    // worker cancelling from the app left the employer uninformed. It lives on
+    // the service now, so every channel notifies exactly once.
+    it('notifies the employer, flagging no penalty when cancelled in time', async () => {
+      await service.cancel(APPLICATION_ID, WORKER_ID, 'imprévu');
+      expect(botNotification.sendCancellationToEmployer).toHaveBeenCalledTimes(
+        1,
+      );
+      expect(botNotification.sendCancellationToEmployer).toHaveBeenCalledWith(
+        APPLICATION_ID,
+        'imprévu',
+        false,
+      );
+    });
+
+    it('notifies the employer, flagging the penalty on a late cancellation', async () => {
+      const lateMockOffer = { ...mockJobOffer, scheduled_at: hoursFromNow(2) };
+      (prisma.application.findUnique as jest.Mock).mockResolvedValue({
+        ...acceptedApplication,
+        job_offer: lateMockOffer,
+      });
+      await service.cancel(APPLICATION_ID, WORKER_ID);
+      expect(botNotification.sendCancellationToEmployer).toHaveBeenCalledWith(
+        APPLICATION_ID,
+        null,
+        true,
+      );
+    });
+
+    it('still cancels when notifying the employer fails', async () => {
+      botNotification.sendCancellationToEmployer.mockRejectedValue(
+        new Error('twilio down'),
+      );
+      await expect(service.cancel(APPLICATION_ID, WORKER_ID)).resolves.toEqual(
+        expect.objectContaining({ penaltyApplied: false }),
+      );
     });
 
     it('reverts offer to ACTIVE when cancelling accepted application', async () => {

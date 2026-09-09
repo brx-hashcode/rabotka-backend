@@ -1059,7 +1059,11 @@ describe('BotOrchestratorService', () => {
       expect(Array.isArray(result)).toBe(true);
     });
 
-    it('executes cancel_application flow', async () => {
+    // The in-chat cancel flow is gone: cancelling happens in the app, reached
+    // through the reminder's CTA button. A leftover state naming it must not
+    // resurrect a cancellation path — an unknown flowId falls through to the
+    // "je n'ai pas compris" card, and nothing is cancelled.
+    it('does not execute a cancel_application flow', async () => {
       const flowState = {
         flowId: 'cancel_application',
         step: 1,
@@ -1072,11 +1076,16 @@ describe('BotOrchestratorService', () => {
         state: flowState,
       });
       deps.botState.get.mockResolvedValue(flowState);
-      (deps.applicationService as any).findOne = jest
-        .fn()
-        .mockResolvedValue(null);
-      const result = await service.handle(PROFILE_ID, PHONE, '1');
+      (deps.applicationService as any).cancel = jest.fn();
+
+      const result = await service.handle(
+        PROFILE_ID,
+        PHONE,
+        "Le rendez vous c'est pour 10h, et non 9h",
+      );
+
       expect(Array.isArray(result)).toBe(true);
+      expect((deps.applicationService as any).cancel).not.toHaveBeenCalled();
     });
 
     it('executes my_applications flow', async () => {
