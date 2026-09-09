@@ -43,6 +43,13 @@ export class RejectApplicationDto {
   reason?: string;
 }
 
+export class EmployerCancelApplicationDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  reason?: string;
+}
+
 export class CompleteMissionDto {
   @IsInt()
   @Min(1)
@@ -117,6 +124,41 @@ export class MobileApplicationController {
     const profileId = req.user.profileId;
     await this.assertEmployer(profileId);
     const application = await this.applicationService.reject(
+      id,
+      profileId,
+      body.reason,
+    );
+    return { application };
+  }
+
+  /**
+   * The employer undoing a hire.
+   *
+   * The mirror of `accept`, and guarded like it rather than like `reject`: it
+   * moves money — the contact-unlock refund — and the employer's reliability
+   * score, so it deserves the same bar. (`reject` carries neither guard; that
+   * looks like an oversight rather than a rule to copy.)
+   *
+   * Distinct from the worker's own `POST profile/worker/missions/:id/cancel`,
+   * and the difference is now recorded: only a worker's own cancellation bars
+   * them from applying to the offer again.
+   */
+  @Post(':id/cancel')
+  @UseGuards(ActiveProfileGuard, KycVerifiedGuard)
+  @ApiOperation({
+    summary: '[Mobile/EMPLOYER] Cancel an accepted candidate (→ CANCELLED)',
+    description:
+      'The worker keeps the right to apply to this offer again, unlike a ' +
+      'cancellation they make themselves.',
+  })
+  async cancel(
+    @Req() req: ProfileAuthenticatedRequest,
+    @Param('id') id: string,
+    @Body() body: EmployerCancelApplicationDto,
+  ) {
+    const profileId = req.user.profileId;
+    await this.assertEmployer(profileId);
+    const application = await this.applicationService.cancelAcceptedByEmployer(
       id,
       profileId,
       body.reason,

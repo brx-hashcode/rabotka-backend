@@ -22,7 +22,6 @@ import { SystemConfigService } from '../../system-config/system-config.service';
 import { WHATSAPP_TEMPLATES } from '../../../common/constants/whatsapp-templates';
 import { templateReply } from '../../../common/constants/whatsapp-carousel';
 import {
-  unknownCommandMessage,
   supportCardBotMessage,
   hasPenaltiesBotMessage,
   penaltiesListBotMessage,
@@ -681,13 +680,17 @@ export class BotOrchestratorService {
       const route = this.router.route(text, botProfile, state);
 
       if (route.type === 'flow') {
-        return this.runFlow(
+        const flowReply = await this.runFlow(
           route.flowId,
           route.state,
           text,
           botProfile,
           profileId,
         );
+        // `null` means the flow is gone and its state has just been cleared.
+        // Fall through rather than answering: the person asked something, and
+        // they should get the answer they would have got with no flow open.
+        if (flowReply) return flowReply;
       }
 
       if (route.type === 'command') {
@@ -722,17 +725,31 @@ export class BotOrchestratorService {
     };
   }
 
+  /** Replies, or `null` when the flow no longer exists and the caller should
+   *  answer as though none had been open. */
   private async runFlow(
     flowId: string,
     state: BotState,
     input: string,
     profile: BotProfile,
     profileId: string,
-  ): Promise<string[]> {
+  ): Promise<string[] | null> {
     const result = await this.executeFlow(flowId, state, input, profile);
     if (!result) {
-      this.logger.debug(`Flow ${flowId} not implemented`);
-      return [unknownCommandMessage()];
+      // A state naming a flow that no longer exists. Retiring a flow leaves
+      // these behind in Redis for as long as their TTL, and the state alone is
+      // enough to capture every message: the router hands ALL input to the
+      // active flow, so the reply here used to be a dead end that kept the
+      // state — trapping the person for a day, with even « / » swallowed by the
+      // flow before it could reach the menu.
+      //
+      // Clearing and returning null is what makes a removed flow a non-event:
+      // the message is answered as if no flow had been open, which is the
+      // truth. Warn, not debug — reaching this means a flow was deleted while
+      // people were mid-conversation, and that is worth seeing in the log.
+      this.logger.warn(`Flow ${flowId} no longer exists — clearing state`);
+      await this.botState.clear(profileId).catch(() => undefined);
+      return null;
     }
 
     if (result.clearState) {
