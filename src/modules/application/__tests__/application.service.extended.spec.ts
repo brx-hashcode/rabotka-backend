@@ -144,7 +144,7 @@ describe('ApplicationService (extended)', () => {
             sendNewApplicationToEmployer: jest.fn(),
             sendApplicationAcceptedToWorker: jest.fn(),
             sendApplicationRejectedToWorker: jest.fn(),
-            sendCancellationToEmployer: jest.fn(),
+            sendCancellationToEmployer: jest.fn().mockResolvedValue(undefined),
           },
         },
         { provide: EventEmitter2, useValue: { emit: jest.fn() } },

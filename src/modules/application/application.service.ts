@@ -1231,6 +1231,20 @@ export class ApplicationService {
       surface: 'application_cancel',
     });
 
+    // The employer's WhatsApp notice — and the post-cancellation menu it arms —
+    // used to hang off the in-chat cancel flow, so a worker who cancelled from
+    // the app left the employer uninformed. It belongs here, on the single
+    // choke point every cancellation goes through, whatever the channel.
+    // Fire-and-forget: a failed notice must not undo a committed cancellation.
+    void this.botNotification
+      .sendCancellationToEmployer(applicationId, reason ?? null, penaltyApplied)
+      .catch((err: unknown) =>
+        console.warn(
+          `[cancel] cancellation notify failed for ${applicationId}:`,
+          err,
+        ),
+      );
+
     return {
       application: updated,
       penaltyApplied,

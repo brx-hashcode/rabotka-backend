@@ -41,7 +41,6 @@ import {
   runAcceptRefuseCandidateFlow,
   getAcceptRefuseInitialState,
 } from '../flows/accept-refuse-candidate.flow';
-import { runCancelApplicationFlow } from '../flows/cancel-application.flow';
 import {
   runPayPenaltiesFlow,
   getPayPenaltiesInitialState,
@@ -829,22 +828,6 @@ export class BotOrchestratorService {
     const runners: Record<string, () => Promise<FlowResult>> = {
       [FLOW_IDS.ACCEPT_REFUSE_CANDIDATE]: () =>
         runAcceptRefuseCandidateFlow(state, input, profile, ctx),
-      [FLOW_IDS.CANCEL_APPLICATION]: async () => {
-        const {
-          cancellationThresholdHours,
-          lateCancellationPenaltyFcfa,
-          lateCancellationScoreDeduction,
-          reliabilityScoreMin,
-        } = await this.systemConfig.getFees();
-        return runCancelApplicationFlow(state, input, profile, {
-          ...ctx,
-          cancellationThresholdHours,
-          lateCancellationPenaltyFcfa,
-          lateCancellationScoreDeduction,
-          reliabilityScoreMin,
-        });
-      },
-
       [FLOW_IDS.PAY_PENALTIES]: () =>
         runPayPenaltiesFlow(state, input, profile, ctx),
 

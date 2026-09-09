@@ -24,7 +24,6 @@ import {
 import { ContactUnlockService } from '../../contact-unlock/contact-unlock.service';
 import { BotNotificationService } from '../services/bot-notification.service';
 import { snoozeLabel } from '../flows/job-status-check.flow';
-import { getCancelApplicationInitialState } from '../flows/cancel-application.flow';
 
 const REMINDER_24H_SENT_KEY = 'reminder:sent:24h:';
 const REMINDER_START_SENT_KEY = 'reminder:sent:start:';
@@ -919,23 +918,12 @@ export class ReminderProcessor {
       app.worker_id,
     );
 
-    // Set bot state so the worker's reply (1=cancel, 2=keep) routes to the cancel flow.
-    const workerStateKey = `${BOT_STATE_KEY_PREFIX}${app.worker_id}`;
-    const cancelState = getCancelApplicationInitialState(applicationId);
-    await this.redis
-      .set(
-        workerStateKey,
-        JSON.stringify({ ...cancelState, updatedAt: new Date().toISOString() }),
-        'EX',
-        BOT_STATE_TTL_SECONDS,
-      )
-      .catch((err) =>
-        this.logger.warn(
-          `Failed to set cancel flow state for worker after 24h reminder ${applicationId}`,
-          err,
-        ),
-      );
-
+    // No bot state is armed here. This used to open the cancel flow so the
+    // worker's "1 = cancel / 2 = keep" quick reply had somewhere to land, but
+    // the template now carries a single CTA button and cancelling happens in
+    // the app. Arming a flow whose menu is never shown meant the next message
+    // the worker sent — a question about the hours, a "merci" — was read as an
+    // answer to that phantom menu and cancelled the mission outright.
     this.logger.log(`Reminder 24h sent for application ${applicationId}`);
   }
 

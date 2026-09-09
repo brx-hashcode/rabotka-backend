@@ -610,25 +610,23 @@ describe('ReminderProcessor', () => {
       expect(whatsApp.sendTemplateMessage).not.toHaveBeenCalled();
     });
 
-    it('sets CANCEL_APPLICATION bot state for the worker after sending', async () => {
+    // Regression: this used to arm the cancel flow so a "1 = cancel / 2 = keep"
+    // quick reply had somewhere to land. The template now carries a single CTA
+    // button and shows no menu, so any state armed here turned the worker's
+    // next message — "Le rendez vous c'est pour 10h, et non 9h" — into a
+    // cancellation. Nothing may arm a flow the worker was never offered.
+    it('arms no bot state for the worker after sending', async () => {
       prisma.application.findUnique.mockResolvedValue(buildApplication());
 
       await processor.process({
         data: { type: 'reminder_24h', applicationId: 'app-1' },
       });
 
-      // Two redis.set calls: one for the dedup key, one for the bot state
-      const setCalls = redis.set.mock.calls;
-      const botStateCall = setCalls.find((call: unknown[]) =>
-        String(call[0]).includes('bot:state:worker-1'),
+      expect(whatsApp.sendTemplateMessage).toHaveBeenCalled();
+      const botStateCall = redis.set.mock.calls.find((call: unknown[]) =>
+        String(call[0]).includes('bot:state:'),
       );
-      expect(botStateCall).toBeDefined();
-      const stateValue = JSON.parse(botStateCall[1] as string) as {
-        flowId: string;
-        payload: { applicationId: string };
-      };
-      expect(stateValue.flowId).toBe('cancel_application');
-      expect(stateValue.payload.applicationId).toBe('app-1');
+      expect(botStateCall).toBeUndefined();
     });
   });
 
