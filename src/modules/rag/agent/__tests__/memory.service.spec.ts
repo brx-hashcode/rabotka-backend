@@ -41,6 +41,9 @@ const TURNS = [
   { role: 'assistant' as const, text: 'très bien' },
 ];
 
+/** The exchange that just happened, handed to `refresh` rather than read back. */
+const CURRENT = { user: 'je suis libre le week-end', assistant: 'noté' };
+
 describe('VovaMemoryService.read()', () => {
   it('returns the stored facts', async () => {
     const deps = makeDeps();
@@ -112,7 +115,7 @@ describe('VovaMemoryService.refresh()', () => {
       output: { content: '- Fait le ménage\n- Habite Poto-Poto' },
     });
 
-    await build(deps).refresh(PROFILE);
+    await build(deps).refresh(PROFILE, CURRENT);
 
     expect(deps.llm.invoke).toHaveBeenCalledWith(
       expect.anything(),
@@ -134,19 +137,71 @@ describe('VovaMemoryService.refresh()', () => {
     const deps = makeDeps();
     deps.redis.set.mockResolvedValue(null);
 
-    await build(deps).refresh(PROFILE);
+    await build(deps).refresh(PROFILE, CURRENT);
 
     expect(deps.llm.invoke).not.toHaveBeenCalled();
     expect(deps.prisma.vovaProfileMemory.upsert).not.toHaveBeenCalled();
   });
 
-  it('does not spend a model call on a single-turn conversation', async () => {
+  /** The transcript the model was shown, as one string. */
+  function promptOf(deps: ReturnType<typeof makeDeps>): string {
+    const [messages] = deps.llm.invoke.mock.calls[0] as [
+      { content: unknown }[],
+    ];
+    return messages.map((m) => String(m.content)).join('\n');
+  }
+
+  it('reads the current exchange even when nothing is in the database yet', async () => {
+    // The inbound row is written in parallel with the bot and the outbound one
+    // only on send, so a first conversation has neither in Postgres when this
+    // runs. Read from history alone, the very turn that triggered the rebuild
+    // would be the one turn it never saw.
     const deps = makeDeps();
-    deps.history.recent.mockResolvedValue([TURNS[0]]);
+    deps.history.recent.mockResolvedValue([]);
+    deps.llm.invoke.mockResolvedValue({
+      output: { content: '- Libre le week-end' },
+    });
 
-    await build(deps).refresh(PROFILE);
+    await build(deps).refresh(PROFILE, CURRENT);
 
-    expect(deps.llm.invoke).not.toHaveBeenCalled();
+    expect(promptOf(deps)).toContain('je suis libre le week-end');
+    expect(deps.prisma.vovaProfileMemory.upsert).toHaveBeenCalled();
+  });
+
+  it('does not show the message twice when the race wrote it first', async () => {
+    // The same race cuts both ways. Doubled, the model reads a plain statement
+    // as insistence — and the result would depend on which write won.
+    const deps = makeDeps();
+    deps.history.recent.mockResolvedValue([
+      ...TURNS,
+      { role: 'user' as const, text: CURRENT.user },
+    ]);
+    deps.llm.invoke.mockResolvedValue({
+      output: { content: '- Libre le week-end' },
+    });
+
+    await build(deps).refresh(PROFILE, CURRENT);
+
+    const occurrences = promptOf(deps).split(CURRENT.user).length - 1;
+    expect(occurrences).toBe(1);
+  });
+
+  it('keeps both when the person genuinely repeated themselves', async () => {
+    // Only the tail is de-duplicated: saying the same thing twice, a turn
+    // apart, is a real thing people do and it means something.
+    const deps = makeDeps();
+    deps.history.recent.mockResolvedValue([
+      { role: 'user' as const, text: CURRENT.user },
+      { role: 'assistant' as const, text: 'noté' },
+    ]);
+    deps.llm.invoke.mockResolvedValue({
+      output: { content: '- Libre le week-end' },
+    });
+
+    await build(deps).refresh(PROFILE, CURRENT);
+
+    const occurrences = promptOf(deps).split(CURRENT.user).length - 1;
+    expect(occurrences).toBe(2);
   });
 
   it('keeps what is already known when the model returns nothing', async () => {
@@ -159,7 +214,7 @@ describe('VovaMemoryService.refresh()', () => {
     });
     deps.llm.invoke.mockResolvedValue({ output: { content: '   \n  ' } });
 
-    await build(deps).refresh(PROFILE);
+    await build(deps).refresh(PROFILE, CURRENT);
 
     expect(deps.prisma.vovaProfileMemory.upsert).not.toHaveBeenCalled();
   });
@@ -170,7 +225,9 @@ describe('VovaMemoryService.refresh()', () => {
     deps.history.recent.mockResolvedValue(TURNS);
     deps.llm.invoke.mockRejectedValue(new Error('provider down'));
 
-    await expect(build(deps).refresh(PROFILE)).resolves.toBeUndefined();
+    await expect(
+      build(deps).refresh(PROFILE, CURRENT),
+    ).resolves.toBeUndefined();
     expect(deps.prisma.vovaProfileMemory.upsert).not.toHaveBeenCalled();
   });
 
@@ -183,7 +240,7 @@ describe('VovaMemoryService.refresh()', () => {
       },
     });
 
-    await build(deps).refresh(PROFILE);
+    await build(deps).refresh(PROFILE, CURRENT);
 
     const written = deps.prisma.vovaProfileMemory.upsert.mock.calls[0][0] as {
       update: { facts: MemoryFact[] };

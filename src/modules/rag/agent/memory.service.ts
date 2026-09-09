@@ -96,19 +96,48 @@ export class VovaMemoryService {
   /**
    * Rebuilds the list from the conversation just had, if it is due.
    *
+   * `current` is the exchange that just happened, passed in rather than read
+   * back, and that is not an optimisation. The inbound row is written in
+   * PARALLEL with the bot (`conversation.service.ts`) and the outbound row only
+   * when the message is actually sent, so at the moment this runs neither half
+   * of the current turn is reliably in Postgres. Reading history alone would
+   * rebuild from everything EXCEPT the exchange that triggered the rebuild —
+   * and on a short conversation, where the debounce means this fires once and
+   * never again, the most informative turn would be the one always missed.
+   *
    * Call it AFTER the reply has been sent, never in front of it. Returns
    * silently on every failure — a memory that could not be updated is a memory
    * one turn out of date, which nobody notices.
    */
-  async refresh(profileId: string): Promise<void> {
+  async refresh(
+    profileId: string,
+    current: { user: string; assistant: string },
+  ): Promise<void> {
     try {
       if (!(await this.claimRebuild(profileId))) return;
 
-      const turns = await this.history.recent(profileId);
-      // One turn is a greeting, not a conversation. Rebuilding from it would
-      // spend a model call to learn nothing, and risks an over-eager model
-      // dropping facts it saw no evidence for this time.
-      if (turns.length < 2) return;
+      // The same race cuts the other way: the inbound row is sometimes written
+      // before this runs, in which case history already ends with the message
+      // we are about to append. Dropping that trailing duplicate is what makes
+      // the result identical whichever way the race fell — otherwise the model
+      // would see the person say the same thing twice and could read it as
+      // insistence. Compared on `recent`'s own 500-char truncation, and only at
+      // the tail, so somebody who genuinely repeats themselves keeps both.
+      const past = await this.history.recent(profileId);
+      const last = past.at(-1);
+      if (last?.role === 'user' && last.text === current.user.slice(0, 500)) {
+        past.pop();
+      }
+
+      // Older turns first, then the one in hand. No length guard: a greeting or
+      // a bare « oui » is answered without a model and never reaches this call,
+      // so anything arriving here is a real exchange worth reading — including
+      // a first message, which is often the most informative one there is.
+      const turns: HistoryTurn[] = [
+        ...past,
+        { role: 'user', text: current.user },
+        { role: 'assistant', text: current.assistant },
+      ];
 
       const existing = await this.read(profileId);
       const facts = await this.derive(turns, existing);

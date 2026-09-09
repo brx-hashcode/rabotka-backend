@@ -408,8 +408,10 @@ export class VovaService {
       // its own claim-and-skip inside, so a long exchange rebuilds once rather
       // than once per message — and it runs on the cheap tier, off the turn's
       // deadline, because a slower better summary buys nothing here.
+      // The exchange is handed over rather than looked up: neither half of it
+      // is reliably in Postgres yet at this point — see `refresh`.
       void this.memory
-        .refresh(profile.id)
+        .refresh(profile.id, { user: text, assistant: reply.text })
         .catch((err: unknown) =>
           this.logger.debug(`memory refresh failed for ${profile.id}`, err),
         );
