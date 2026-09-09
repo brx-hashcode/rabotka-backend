@@ -63,17 +63,25 @@ function makeAnonymous(
   };
 }
 
+/** Memory refresh is fire-and-forget after the reply — it must never be awaited
+ *  by the turn, so the default stub simply resolves. */
+function makeMemory(over: Record<string, unknown> = {}) {
+  return { refresh: jest.fn(() => Promise.resolve()), ...over };
+}
+
 const build = (
   agent: ReturnType<typeof makeAgent>,
   values?: Record<string, string>,
   offers = makeOffers(),
   anonymous = makeAnonymous(),
+  memory = makeMemory(),
 ) =>
   new VovaService(
     agent as never,
     makeConfig(values) as never,
     offers as never,
     anonymous as never,
+    memory as never,
   );
 
 /** A profile id whose stable bucket is below `percent`. */
@@ -182,6 +190,7 @@ describe('VovaService', () => {
       config as never,
       makeOffers() as never,
       makeAnonymous() as never,
+      makeMemory() as never,
     );
     expect(await service.handle(PROFILE, 'comment ca marche')).toBeNull();
   });

@@ -42,6 +42,10 @@ function makePrisma(profile: any = null) {
     user: {
       findUnique: jest.fn().mockResolvedValue(null),
     },
+    vovaProfileMemory: {
+      findUnique: jest.fn().mockResolvedValue(null),
+      deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
+    },
   };
 }
 
@@ -101,20 +105,20 @@ function makeController(prismaProfile: any = null) {
     makeLayout() as any,
     makeWalletService() as any,
     makePortfolioService() as any,
-      { restore: jest.fn(), purge: jest.fn(), purgeBlockers: jest.fn() } as any,
-    );
+    { restore: jest.fn(), purge: jest.fn(), purgeBlockers: jest.fn() } as any,
+  );
 }
 
 describe('AdminProfileController', () => {
   it('list() calls profileService.getProfilesForAdmin', async () => {
     const ctrl = makeController();
-    const result = await ctrl.list({ page: 1, limit: 5 } as any);
+    const result = await ctrl.list({ page: 1, limit: 5 });
     expect(result).toEqual({ data: [], total: 0 });
   });
 
   it('list() uses defaults when page/limit omitted', async () => {
     const ctrl = makeController();
-    await ctrl.list({} as any);
+    await ctrl.list({});
   });
 
   it('getById() delegates to profileService', async () => {
@@ -133,6 +137,82 @@ describe('AdminProfileController', () => {
     const ctrl = makeController();
     const result = await ctrl.getPaymentRequests('p1');
     expect(result).toEqual([]);
+  });
+
+  describe('VoVa memory', () => {
+    function buildWith(prisma: any, logService: any = makeLogService()) {
+      return new AdminProfileController(
+        makeProfileService() as any,
+        logService,
+        makePaymentRequestService() as any,
+        prisma,
+        makeWhatsApp() as any,
+        makeLoginLink() as any,
+        makeMail() as any,
+        makeLayout() as any,
+        makeWalletService() as any,
+        makePortfolioService() as any,
+        {
+          restore: jest.fn(),
+          purge: jest.fn(),
+          purgeBlockers: jest.fn(),
+        } as any,
+      );
+    }
+
+    it('reads back the remembered facts', async () => {
+      const prisma = makePrisma();
+      prisma.vovaProfileMemory.findUnique.mockResolvedValue({
+        facts: [{ text: 'Plombier', at: '2026-09-01T00:00:00.000Z' }],
+        updated_at: new Date('2026-09-01'),
+      });
+
+      const result = await buildWith(prisma).getVovaMemory('p1');
+
+      expect(result.facts).toEqual([
+        { text: 'Plombier', at: '2026-09-01T00:00:00.000Z' },
+      ]);
+    });
+
+    it('reports an empty memory rather than nothing at all', async () => {
+      // Most profiles have never been remembered. That has to read as "nothing
+      // stored", not as a missing endpoint.
+      const result = await buildWith(makePrisma()).getVovaMemory('p1');
+      expect(result).toEqual({ facts: [], updatedAt: null });
+    });
+
+    it('erases the memory and records who did it, on the profile timeline', async () => {
+      const prisma = makePrisma();
+      const logService = makeLogService();
+
+      await buildWith(prisma, logService).deleteVovaMemory('p1', {
+        user: { userId: 'admin-1' },
+      } as any);
+
+      expect(prisma.vovaProfileMemory.deleteMany).toHaveBeenCalledWith({
+        where: { profile_id: 'p1' },
+      });
+      expect(logService.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'PROFILE_VOVA_MEMORY_ERASED',
+          // Keyed on the profile too, so the erasure shows in that person's own
+          // timeline — where anyone handling their complaint will look.
+          profileId: 'p1',
+          userId: 'admin-1',
+        }),
+      );
+    });
+
+    it('succeeds when there was nothing to erase', async () => {
+      // The expected case for most profiles: it must not 404 at somebody
+      // trying to honour a complaint.
+      const prisma = makePrisma();
+      prisma.vovaProfileMemory.deleteMany.mockResolvedValue({ count: 0 });
+
+      await expect(
+        buildWith(prisma).deleteVovaMemory('p1', { user: {} } as any),
+      ).resolves.toEqual({ success: true });
+    });
   });
 
   describe('getMessages()', () => {
@@ -167,8 +247,12 @@ describe('AdminProfileController', () => {
         makeLayout() as any,
         makeWalletService() as any,
         makePortfolioService() as any,
-      { restore: jest.fn(), purge: jest.fn(), purgeBlockers: jest.fn() } as any,
-    );
+        {
+          restore: jest.fn(),
+          purge: jest.fn(),
+          purgeBlockers: jest.fn(),
+        } as any,
+      );
       const result = await ctrl.getMessages('p1');
       expect(result).toHaveLength(2);
       expect(result[0].sentByName).toBeNull();
@@ -242,8 +326,12 @@ describe('AdminProfileController', () => {
         makeLayout() as any,
         makeWalletService() as any,
         makePortfolioService() as any,
-      { restore: jest.fn(), purge: jest.fn(), purgeBlockers: jest.fn() } as any,
-    );
+        {
+          restore: jest.fn(),
+          purge: jest.fn(),
+          purgeBlockers: jest.fn(),
+        } as any,
+      );
       const result = await ctrl.sendMessage(
         'p1',
         { channel: 'WHATSAPP', message: 'hello' },
@@ -288,7 +376,11 @@ describe('AdminProfileController', () => {
         makeLayout() as any,
         makeWalletService() as any,
         makePortfolioService() as any,
-        { restore: jest.fn(), purge: jest.fn(), purgeBlockers: jest.fn() } as any,
+        {
+          restore: jest.fn(),
+          purge: jest.fn(),
+          purgeBlockers: jest.fn(),
+        } as any,
       );
 
       const result = await ctrl.sendMessage(
@@ -334,7 +426,11 @@ describe('AdminProfileController', () => {
         makeLayout() as any,
         makeWalletService() as any,
         makePortfolioService() as any,
-        { restore: jest.fn(), purge: jest.fn(), purgeBlockers: jest.fn() } as any,
+        {
+          restore: jest.fn(),
+          purge: jest.fn(),
+          purgeBlockers: jest.fn(),
+        } as any,
       );
 
       // This used to return { success: true } and the message simply vanished.
@@ -395,8 +491,12 @@ describe('AdminProfileController', () => {
         makeLayout() as any,
         makeWalletService() as any,
         makePortfolioService() as any,
-      { restore: jest.fn(), purge: jest.fn(), purgeBlockers: jest.fn() } as any,
-    );
+        {
+          restore: jest.fn(),
+          purge: jest.fn(),
+          purgeBlockers: jest.fn(),
+        } as any,
+      );
       const result = await ctrl.sendMessage(
         'p1',
         { channel: 'EMAIL', message: 'hello' },
@@ -541,7 +641,7 @@ describe('AdminProfileController', () => {
     );
     const result = await ctrl.updateStatus(
       'p1',
-      { status: 'SUSPENDED' as any, reason: 'Documents falsifiés' },
+      { status: 'SUSPENDED', reason: 'Documents falsifiés' },
       {
         user: { userId: 'u1' },
         headers: {},
@@ -588,8 +688,12 @@ describe('AdminProfileController', () => {
         makeLayout() as any,
         makeWalletService() as any,
         portfolio as any,
-      { restore: jest.fn(), purge: jest.fn(), purgeBlockers: jest.fn() } as any,
-    );
+        {
+          restore: jest.fn(),
+          purge: jest.fn(),
+          purgeBlockers: jest.fn(),
+        } as any,
+      );
       const result = await ctrl.getPortfolio('worker-1');
       expect(portfolio.listOwn).toHaveBeenCalledWith('worker-1');
       expect(result).toEqual([{ id: 'item1', images: [] }]);
@@ -609,10 +713,14 @@ describe('AdminProfileController', () => {
         makeLayout() as any,
         makeWalletService() as any,
         portfolio as any,
-      { restore: jest.fn(), purge: jest.fn(), purgeBlockers: jest.fn() } as any,
-    );
+        {
+          restore: jest.fn(),
+          purge: jest.fn(),
+          purgeBlockers: jest.fn(),
+        } as any,
+      );
       const dto = { title: 'new' };
-      await ctrl.updatePortfolioItem('worker-1', 'item1', dto as any, adminReq);
+      await ctrl.updatePortfolioItem('worker-1', 'item1', dto, adminReq);
       expect(portfolio.updateItem).toHaveBeenCalledWith(
         'worker-1',
         'item1',
@@ -640,8 +748,12 @@ describe('AdminProfileController', () => {
         makeLayout() as any,
         makeWalletService() as any,
         portfolio as any,
-      { restore: jest.fn(), purge: jest.fn(), purgeBlockers: jest.fn() } as any,
-    );
+        {
+          restore: jest.fn(),
+          purge: jest.fn(),
+          purgeBlockers: jest.fn(),
+        } as any,
+      );
       const result = await ctrl.deletePortfolioItem(
         'worker-1',
         'item1',
@@ -664,8 +776,12 @@ describe('AdminProfileController', () => {
         makeLayout() as any,
         makeWalletService() as any,
         portfolio as any,
-      { restore: jest.fn(), purge: jest.fn(), purgeBlockers: jest.fn() } as any,
-    );
+        {
+          restore: jest.fn(),
+          purge: jest.fn(),
+          purgeBlockers: jest.fn(),
+        } as any,
+      );
       const result = await ctrl.deletePortfolioImage(
         'worker-1',
         'item1',

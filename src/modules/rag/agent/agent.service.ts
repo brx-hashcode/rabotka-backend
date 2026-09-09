@@ -36,6 +36,7 @@ import { readNumber } from '../shared/config';
 import { destinationFor } from './destination';
 import { resolveLanguage } from './language';
 import { VovaHistoryService } from './history.service';
+import { VovaMemoryService } from './memory.service';
 import type { RetrievalResult } from '../retrieval/retrieve.service';
 
 export interface AgentRequest {
@@ -195,6 +196,7 @@ export class VovaAgentService {
     private readonly guard: GuardService,
     private readonly categories: JobCategoryRegistry,
     private readonly history: VovaHistoryService,
+    private readonly memory: VovaMemoryService,
     private readonly deps: ToolDepsProvider,
     private readonly abuseReports: AbuseReportService,
     config: ConfigService,
@@ -903,9 +905,19 @@ export class VovaAgentService {
       // below: « ok » carries no language of its own, and without the previous
       // turns to read it defaulted to French and switched an English
       // conversation mid-thread.
+      // Both read the same person and neither depends on the other, so they
+      // cost one round trip rather than two. The memory read is a single
+      // primary-key lookup — it is in the budget because it is that cheap, and
+      // it stays out of `history`'s phase so a slow one is attributed honestly.
       this.assertTime(request.deadline, 'history');
-      const past = await this.timePhase(request.deadline, 'history', () =>
-        this.history.recent(request.profileId),
+      const [past, memory] = await this.timePhase(
+        request.deadline,
+        'history',
+        () =>
+          Promise.all([
+            this.history.recent(request.profileId),
+            this.memory.read(request.profileId),
+          ]),
       );
       const language = resolveLanguage(request.text, past);
 
@@ -944,6 +956,7 @@ export class VovaAgentService {
             accountStatus: request.accountStatus,
             categorySlugs: request.categorySlugs,
             language,
+            memory: VovaMemoryService.render(memory),
             grounding: grounding.hits.map((hit) => ({
               title: hit.title,
               section: hit.section,

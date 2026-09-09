@@ -74,6 +74,36 @@ describe('prompt caching — the stable half', () => {
     expect(stable).not.toContain('soudure-industrielle');
   });
 
+  /**
+   * The stable half is shared across everyone of a given (language,
+   * profileType) — that is the whole point of the seam. So a remembered fact
+   * landing in it would not merely cost the cache: it would put one person's
+   * memory in front of another person's question. This is the one prompt
+   * invariant whose failure is a confidentiality incident rather than a
+   * regression, which is why it is asserted separately from the values above.
+   */
+  it('never carries a remembered fact, which belongs to one person alone', () => {
+    const { stable, volatile } = buildSystemPromptParts({
+      ...base,
+      memory: ['- SOUVENIR-PRIVÉ'],
+    });
+
+    expect(stable).not.toContain('SOUVENIR-PRIVÉ');
+    expect(volatile).toContain('SOUVENIR-PRIVÉ');
+  });
+
+  it('is byte-identical whether or not the person has a memory', () => {
+    // Otherwise the first conversation and every later one cache separately,
+    // and the prefix is invalidated the day a memory appears.
+    const without = buildSystemPromptParts(base).stable;
+    const with_ = buildSystemPromptParts({
+      ...base,
+      memory: ['- Habite Poto-Poto'],
+    }).stable;
+
+    expect(with_).toBe(without);
+  });
+
   it('clears the ~1024-token floor a cacheable prefix needs', () => {
     // Below the minimum, a prefix is silently NOT cached — no error, no
     // warning, just a hit rate of zero. French runs ~3 characters per token,
