@@ -34,6 +34,7 @@ import { BotNotificationService } from '../bot/services/bot-notification.service
 import { ContactUnlockService } from '../contact-unlock/contact-unlock.service';
 import {
   AccountStatus,
+  ApplicationCancelledBy,
   ApplicationStatus,
   AssignmentStatus,
   BillingStatus,
@@ -50,7 +51,12 @@ import {
 import { ContractService } from '../contract/contract.service';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { MatchingService } from '../matching/matching.service';
-import { RELIABILITY_SCORE_MAX } from './application.constants';
+import {
+  RELIABILITY_SCORE_MAX,
+  SELF_CANCELLED_MESSAGE,
+  cancellationPatch,
+  reapplyDecision,
+} from './application.constants';
 
 /**
  * Statuses that count as a worker's "active" candidature — i.e. the worker
@@ -357,16 +363,27 @@ export class ApplicationService {
       );
     }
 
-    const existing = await this.prisma.application.findUnique({
-      where: {
-        idx_application_unique: {
-          job_offer_id: jobOfferId,
-          worker_id: workerId,
-        },
-      },
+    // Every row this worker has on this offer, not one: a cancelled row no
+    // longer blocks a new one, so a pair can legitimately have several.
+    //
+    // Placement matters and is unchanged. AFTER the unpaid-penalty check above,
+    // so a blocked worker hears "pay your penalties" rather than "you cancelled
+    // this" — and BEFORE the daily cap below, because re-applying consumes a
+    // slot exactly like a first application does.
+    const existing = await this.prisma.application.findMany({
+      where: { job_offer_id: jobOfferId, worker_id: workerId },
+      select: { status: true, cancelled_by: true, deleted_at: true },
     });
-    if (existing) {
+
+    const decision = reapplyDecision(existing);
+    if (decision === 'BLOCKED_ACTIVE') {
       throw new ConflictException('Vous avez déjà postulé à cette offre');
+    }
+    if (decision === 'BLOCKED_SELF_CANCELLED') {
+      // A distinct message on purpose: the generic one is a lie once the row is
+      // cancelled, because the worker's own screen shows no application at all
+      // and they would read "you already applied" as a bug.
+      throw new ConflictException(SELF_CANCELLED_MESSAGE);
     }
 
     const fees = await this.systemConfigService.getFees();
@@ -1155,9 +1172,12 @@ export class ApplicationService {
       await tx.application.update({
         where: { id: applicationId },
         data: {
-          status: ApplicationStatus.CANCELLED,
-          cancelled_at: now,
-          cancellation_reason: reason ?? null,
+          // WORKER is the only value that bars re-applying.
+          ...cancellationPatch({
+            by: ApplicationCancelledBy.WORKER,
+            at: now,
+            reason: reason ?? null,
+          }),
           penalty_applied: penaltyApplied,
           penalty_amount: penaltyAmount,
         },
@@ -2168,6 +2188,7 @@ export class ApplicationService {
   async cancelAcceptedByEmployer(
     applicationId: string,
     employerId: string,
+    reason?: string,
   ): Promise<ApplicationWithOffer> {
     const application = await this.prisma.application.findUnique({
       where: { id: applicationId },
@@ -2214,11 +2235,16 @@ export class ApplicationService {
 
       await tx.application.update({
         where: { id: applicationId },
-        data: {
-          status: ApplicationStatus.CANCELLED,
-          cancelled_at: now,
-          cancellation_reason: "Annulée par l'employeur",
-        },
+        data: cancellationPatch({
+          by: ApplicationCancelledBy.EMPLOYER,
+          at: now,
+          // The prefix is load-bearing: `scripts/audit-ghost-cancellations.ts`
+          // classifies system reasons by it, so free text alone would push every
+          // employer cancellation into its suspect list.
+          reason: reason
+            ? `Annulée par l'employeur : ${reason}`
+            : "Annulée par l'employeur",
+        }),
       });
       // See the worker-side cancel: on an undone hire the other hires sit at
       // END, so they have to be counted or a staffed offer reads as empty.
@@ -2317,6 +2343,18 @@ export class ApplicationService {
       source: InteractionSource.SERVER,
       surface: 'employer_cancel',
     });
+
+    // Without this the mission just disappears from the worker's app. Same
+    // fire-and-forget shape as the worker-side notice: a failed message must not
+    // undo a cancellation that is already committed.
+    void this.botNotification
+      .sendCancellationToWorker(applicationId, reason ?? null)
+      .catch((err: unknown) =>
+        console.warn(
+          `[cancelAcceptedByEmployer] worker notify failed for ${applicationId}:`,
+          err,
+        ),
+      );
 
     return updated;
   }

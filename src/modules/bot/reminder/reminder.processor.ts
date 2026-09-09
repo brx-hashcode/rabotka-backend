@@ -10,10 +10,12 @@ import { formatDate } from '../messages/notifications.messages';
 import { APP_TIMEZONE } from '../utils/parse-date-time';
 import { WHATSAPP_TEMPLATES } from '../../../common/constants/whatsapp-templates';
 import {
+  ApplicationCancelledBy,
   ApplicationStatus,
   EmploymentType,
   JobOfferStatus,
 } from '@prisma/client';
+import { cancellationPatch } from '../../application/application.constants';
 import { closeRecruitedOfferTx } from '../../job-offer/utils/close-recruited-offer';
 import { SystemConfigService } from '../../system-config/system-config.service';
 import { ContactUnlockService } from '../../contact-unlock/contact-unlock.service';
@@ -582,12 +584,12 @@ export class ReminderProcessor {
             ],
           },
         },
-        data: {
-          status: ApplicationStatus.CANCELLED,
-          cancelled_at: now,
-          cancellation_reason:
-            'Offre expirée (date de début dépassée sans démarrage)',
-        },
+        // SYSTEM, so an expired offer never bars the worker from a republish.
+        data: cancellationPatch({
+          by: ApplicationCancelledBy.SYSTEM,
+          at: now,
+          reason: 'Offre expirée (date de début dépassée sans démarrage)',
+        }),
       }),
     ]);
 

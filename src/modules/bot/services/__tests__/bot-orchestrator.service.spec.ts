@@ -553,7 +553,13 @@ describe('BotOrchestratorService', () => {
       jest.spyOn(service as any, 'executeFlow').mockResolvedValue(null);
 
       const result = await service.handle(PROFILE_ID, PHONE, '1');
-      expect(result[0]).toContain("Je n'ai pas compris");
+
+      // The name of this test always said "welcome card"; the assertion used to
+      // say "Je n'ai pas compris". The disagreement was the bug: that reply was
+      // a dead end that kept the state, so a retired flow held the whole
+      // conversation hostage until its TTL ran out.
+      expect(deps.botState.clear).toHaveBeenCalledWith(PROFILE_ID);
+      expect(result.join('\n')).not.toContain("Je n'ai pas compris");
     });
   });
 
@@ -1061,8 +1067,7 @@ describe('BotOrchestratorService', () => {
 
     // The in-chat cancel flow is gone: cancelling happens in the app, reached
     // through the reminder's CTA button. A leftover state naming it must not
-    // resurrect a cancellation path — an unknown flowId falls through to the
-    // "je n'ai pas compris" card, and nothing is cancelled.
+    // resurrect a cancellation path.
     it('does not execute a cancel_application flow', async () => {
       const flowState = {
         flowId: 'cancel_application',
@@ -1086,6 +1091,36 @@ describe('BotOrchestratorService', () => {
 
       expect(Array.isArray(result)).toBe(true);
       expect((deps.applicationService as any).cancel).not.toHaveBeenCalled();
+    });
+
+    /**
+     * Retiring a flow leaves states naming it in Redis for as long as their
+     * TTL, and the state alone captures every message — the router hands ALL
+     * input to the active flow. Answering without clearing it trapped people
+     * for a full day: « VoVa tu es là ? », « Bonjour », even « / » came back as
+     * "Je n'ai pas compris votre réponse", because the menu command never got
+     * past the dead flow either.
+     */
+    it('clears the state when the flow no longer exists, instead of trapping', async () => {
+      const flowState = {
+        flowId: 'flow_that_was_deleted',
+        step: 0,
+        payload: {},
+        updatedAt: new Date().toISOString(),
+      };
+      deps.router.route.mockReturnValue({
+        type: 'flow',
+        flowId: 'flow_that_was_deleted',
+        state: flowState,
+      });
+      deps.botState.get.mockResolvedValue(flowState);
+
+      const result = await service.handle(PROFILE_ID, PHONE, 'VoVa tu es là?');
+
+      expect(deps.botState.clear).toHaveBeenCalledWith(PROFILE_ID);
+      // And the message is answered as though no flow had been open, rather
+      // than with the dead end.
+      expect(result.join('\n')).not.toContain("Je n'ai pas compris");
     });
 
     it('executes my_applications flow', async () => {
