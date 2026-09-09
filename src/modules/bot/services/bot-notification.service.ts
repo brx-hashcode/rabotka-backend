@@ -5,9 +5,7 @@ import { REDIS_CONNECTION } from '../../../common/services/redis/redis.constants
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { WhatsAppService } from '../../whatsapp/whatsapp.service';
 import { WhatsAppFeedbackService } from '../../whatsapp/feedback/whatsapp-feedback.service';
-import { BotStateService } from './bot-state.service';
 import { BotInboxService } from './bot-inbox.service';
-import { FLOW_IDS } from '../bot.constants';
 import { formatAmount } from '../messages/offers.messages';
 import { WHATSAPP_TEMPLATES } from '../../../common/constants/whatsapp-templates';
 import { ContactUnlockService } from '../../contact-unlock/contact-unlock.service';
@@ -22,7 +20,6 @@ export class BotNotificationService {
     private readonly prisma: PrismaService,
     @Inject(forwardRef(() => WhatsAppService))
     private readonly whatsApp: WhatsAppService,
-    private readonly botState: BotStateService,
     private readonly botInbox: BotInboxService,
     @Inject(forwardRef(() => ContactUnlockService))
     private readonly contactUnlock: ContactUnlockService,
@@ -401,24 +398,10 @@ export class BotNotificationService {
         },
       );
 
-      // Set the POST_CANCELLATION_ACTIONS state so 1/2/3 actually do
-      // something. CAS-write so we don't clobber an in-flight flow.
-      const employerId = app.job_offer.employer_id;
-      await this.botState
-        .setIfFlowAbsentOrMatches(
-          employerId,
-          {
-            flowId: FLOW_IDS.POST_CANCELLATION_ACTIONS,
-            step: 0,
-            payload: {
-              jobOfferId: app.job_offer.id,
-              jobOfferTitle: app.job_offer.title,
-            },
-            updatedAt: new Date().toISOString(),
-          },
-          null,
-        )
-        .catch(() => {});
+      // No bot state is armed here. This used to open a 1/2/3 action menu, back
+      // when the employer received a text message that printed one; the CTA
+      // template replaced it and the menu was never shown again. Managing the
+      // offer after a cancellation happens in the app.
     } catch (err) {
       this.logger.warn(
         `Failed to send cancellation notification to employer: ${String(applicationId)}`,

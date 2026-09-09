@@ -1,0 +1,11 @@
+-- AlterTable
+--
+-- The plaintext client secret, populated only for sandbox applications so an
+-- admin can copy it more than once. `client_secret_hash` stays the only thing
+-- authentication consults.
+--
+-- No backfill, and none is possible: existing sandbox apps stored only a hash,
+-- so their secret is gone. They stay NULL and the admin UI asks for one
+-- rotation to enable copying — deliberately not auto-rotated, which would break
+-- a partner's working sandbox integration without anyone asking.
+ALTER TABLE "oauth_apps" ADD COLUMN "sandbox_client_secret_plaintext" TEXT;

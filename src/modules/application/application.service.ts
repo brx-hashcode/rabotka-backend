@@ -961,6 +961,20 @@ export class ApplicationService {
       timestamp: new Date().toISOString(),
     });
 
+    // The worker's "your application was turned down" notice only ever fired
+    // from the in-chat accept/refuse flow, so an employer refusing from the app
+    // left the worker waiting on an answer that never came. It belongs on the
+    // service, where both channels pass. Fire-and-forget — a WhatsApp failure
+    // must not undo a committed rejection.
+    void this.botNotification
+      .sendApplicationRejectedToWorker(applicationId)
+      .catch((err: unknown) =>
+        console.warn(
+          `[reject] rejection notify failed for ${applicationId}:`,
+          err,
+        ),
+      );
+
     return this.toApplicationWithOffer(updated);
   }
 
@@ -1230,6 +1244,20 @@ export class ApplicationService {
       source: InteractionSource.SERVER,
       surface: 'application_cancel',
     });
+
+    // The employer's WhatsApp notice — and the post-cancellation menu it arms —
+    // used to hang off the in-chat cancel flow, so a worker who cancelled from
+    // the app left the employer uninformed. It belongs here, on the single
+    // choke point every cancellation goes through, whatever the channel.
+    // Fire-and-forget: a failed notice must not undo a committed cancellation.
+    void this.botNotification
+      .sendCancellationToEmployer(applicationId, reason ?? null, penaltyApplied)
+      .catch((err: unknown) =>
+        console.warn(
+          `[cancel] cancellation notify failed for ${applicationId}:`,
+          err,
+        ),
+      );
 
     return {
       application: updated,

@@ -217,10 +217,9 @@ async function handleAcceptRefuseStep3(args: StepArgs): Promise<FlowResult> {
       : undefined;
 
   try {
+    // `reject` notifies the worker itself now, so both this flow and the app
+    // send exactly one notice.
     await ctx.applicationService.reject(applicationId, profile.id, reason);
-    await ctx.notificationService.sendApplicationRejectedToWorker(
-      applicationId,
-    );
     return {
       reply: [
         [

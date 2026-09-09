@@ -472,6 +472,7 @@ model Profile {
   payments                        Payment[]
   conversations                   Conversation[]
   messages                        Message[]
+  vova_memory                     VovaProfileMemory?
   whatsapp_messages               WhatsappMessage[]
   logs                            Log[]
   files                           File[]
@@ -1122,6 +1123,37 @@ model Message {
   @@map("messages")
 }
 
+/// What VoVa knows about someone across conversations.
+///
+/// The transcript already lives in `messages`, but reading it back is not
+/// memory: the assistant answers under a wall-clock budget, and its working
+/// history is capped at six turns inside a four-hour window. Anything said
+/// before that is gone — someone who spent four messages last week explaining
+/// they only work weekends had to explain it again.
+///
+/// So this holds FACTS, not conversations: a short, rewritten-in-place list of
+/// what stays true about the person. One indexed read by primary key puts it in
+/// the prompt; the transcript is never re-read on the reply path.
+///
+/// Deliberately small. Every fact is a token spent on every later turn, and on
+/// WhatsApp those tokens are latency — the same reason the history is six turns
+/// and not sixty. The rebuild replaces the list rather than appending to it, so
+/// it cannot creep.
+model VovaProfileMemory {
+  profile_id String   @id @db.Uuid
+  /// `{ text, at }[]` — `at` is what lets a stale fact be dropped rather than
+  /// asserted forever. Someone who looked for cleaning work in March is not
+  /// still looking for it in September, and a confident wrong answer is worse
+  /// than no memory at all.
+  facts      Json     @default("[]")
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  profile Profile @relation(fields: [profile_id], references: [id], onDelete: Cascade)
+
+  @@map("vova_profile_memory")
+}
+
 /// The delivery record for one WhatsApp send.
 ///
 /// Deliberately NOT `Message`. That table is the profile CHAT transcript: it
@@ -1754,7 +1786,8 @@ model OAuthApp {
   /// to rotate independently of the row it points at.
   client_id String @unique
 
-  /// SHA-256 hex of the secret, never the secret.
+  /// SHA-256 hex of the secret, never the secret — and the ONLY thing
+  /// authentication consults, including for a sandbox app.
   ///
   /// Deliberately not bcrypt/argon: the secret is 32 bytes straight out of a
   /// CSPRNG, so there is no dictionary and no rainbow table for a slow KDF to
@@ -1762,10 +1795,38 @@ model OAuthApp {
   /// every single token exchange. Comparison is still constant-time — see
   /// `client-credentials.util.ts`.
   client_secret_hash String
-  /// Last 4 characters of the secret. Admins can no longer read the secret
-  /// after creation, so this is the only way to tell two of them apart when
-  /// asking a partner "which one are you using".
+  /// Last 4 characters of the secret. For a real app this is the only way to
+  /// tell two of them apart when asking a partner "which one are you using",
+  /// because the secret itself cannot be read back. A SANDBOX app is the one
+  /// exception — see `sandbox_client_secret_plaintext`.
   client_secret_hint String
+
+  /// The secret IN PLAINTEXT, and only ever for a sandbox app.
+  ///
+  /// `client_secret_hash` above remains the sole source of truth for
+  /// authentication: `authenticateClient` never reads this column. It exists
+  /// only so an admin can be shown the secret again.
+  ///
+  /// WHY THIS IS ACCEPTABLE HERE AND NOWHERE ELSE. A sandbox app signs in only
+  /// the two synthetic users in `oauth-sandbox.service.ts`, with the fixed OTP
+  /// `111111` — which `GET /admin/oauth-apps/sandbox-users` already returns in
+  /// the clear to the same SUPER_ADMIN who can read this. The secret therefore
+  /// guards nothing that was not already visible to its only reader. It is the
+  /// "test key" model: readable in the dashboard, unlike a live key.
+  ///
+  /// NULL for every real app, and NULL for sandbox apps registered before this
+  /// column existed — their secret is genuinely gone and no migration can
+  /// recover it. The UI tells those to rotate once.
+  ///
+  /// Its safety rests on `is_sandbox` being written once and never updated. If
+  /// that ever changes, the same statement must null this column.
+  ///
+  /// Deliberately NOT mirrored for `previous_secret_hash`: after a rotation the
+  /// old secret keeps authenticating for the grace window but its plaintext is
+  /// overwritten immediately. That asymmetry is intentional — the reveal
+  /// endpoint answers "what should the partner use NOW", and handing back a
+  /// superseded credential that dies in a few hours would be a trap.
+  sandbox_client_secret_plaintext String?
 
   /// Set on rotation. The old secret keeps working until it expires, so a
   /// partner can redeploy on their own schedule instead of taking downtime the

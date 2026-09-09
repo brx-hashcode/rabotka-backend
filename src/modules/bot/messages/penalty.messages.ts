@@ -37,37 +37,6 @@ export type CompletedMissionItem = {
   amount: number | null;
 };
 
-export function formatCancelApplicationNoPenalty(params: {
-  offerTitle: string;
-  scheduledAt: Date | null;
-  amount: number | null;
-  timeRemaining: string;
-  thresholdHours: number;
-}): string {
-  const threshold = params.thresholdHours;
-  const montant =
-    params.amount && params.amount > 0 ? fcfa(params.amount) : 'A negocier';
-  return [
-    '*Annulation de candidature*',
-    '',
-    `*Offre*: ${params.offerTitle}`,
-    `*Date*: ${formatDate(params.scheduledAt)}`,
-    `*Montant*: ${montant}`,
-    `*Temps restant*: ${params.timeRemaining}`,
-    '',
-    `Aucune pénalité — annulation effectuée plus de ${threshold}h avant.`,
-    '',
-    'Souhaitez-vous indiquer une raison ? (optionnel)',
-    '',
-    "1- Confirmer l'annulation sans raison",
-    '   ou tapez votre raison et envoyez directement',
-    '2- Retour a la candidature',
-    '3- Quitter',
-    '',
-    '*Tapez le numero correspondant.*',
-  ].join('\n');
-}
-
 export function formatPenaltyReminderDay(params: {
   firstName: string;
   amount: number;
@@ -122,39 +91,5 @@ export function formatPenaltyPaidSuccess(firstName: string): string {
     'Vous pouvez a nouveau postuler aux offres et publier.',
     '',
     '',
-  ].join('\n');
-}
-
-export function formatCancelApplicationWithPenalty(params: {
-  offerTitle: string;
-  scheduledAt: Date | null;
-  amount: number | null;
-  timeRemaining: string;
-  penaltyAmount: number;
-  scoreDeduction: number;
-  newScore: number;
-}): string {
-  const montant =
-    params.amount && params.amount > 0 ? fcfa(params.amount) : 'A negocier';
-  return [
-    '*ATTENTION - Annulation tardive*',
-    '',
-    `*Offre*: ${params.offerTitle}`,
-    `*Date mission*: ${formatDate(params.scheduledAt)}`,
-    `*Montant*: ${montant}`,
-    `*Temps restant*: ${params.timeRemaining}`,
-    '',
-    '',
-    '',
-    '*Pénalité applicable*',
-    `*Montant*: ${fcfa(params.penaltyAmount)}`,
-    `*Impact score*: -${params.scoreDeduction} points`,
-    `*Nouveau score*: ${params.newScore}/100`,
-    '',
-    '',
-    '',
-    "Raison de l'annulation ? (obligatoire pour annulation tardive)",
-    '',
-    '*Tapez votre raison.*',
   ].join('\n');
 }

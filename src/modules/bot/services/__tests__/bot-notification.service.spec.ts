@@ -55,18 +55,13 @@ function makeDeps() {
     sendMediaMessage: jest.fn().mockResolvedValue(true),
   };
 
-  const botState = {
-    get: jest.fn().mockResolvedValue(null),
-    set: jest.fn().mockResolvedValue(undefined),
-    setIfFlowAbsentOrMatches: jest.fn().mockResolvedValue(true),
-  };
 
   const botInbox = {
     push: jest.fn().mockResolvedValue(undefined),
     count: jest.fn().mockResolvedValue(1),
   };
 
-  return { prisma, whatsApp, botState, botInbox };
+  return { prisma, whatsApp, botInbox };
 }
 
 describe('BotNotificationService', () => {
@@ -99,7 +94,6 @@ describe('BotNotificationService', () => {
     service = new BotNotificationService(
       deps.prisma as any,
       deps.whatsApp as any,
-      deps.botState as any,
       deps.botInbox as any,
       contactUnlock as any,
       {
@@ -126,7 +120,6 @@ describe('BotNotificationService', () => {
 
   describe('sendNewApplicationToEmployer()', () => {
     it('sends the new-application template to the employer', async () => {
-      deps.botState.get.mockResolvedValue(null);
       await service.sendNewApplicationToEmployer('app-1');
       // Asserted against the constant, not a literal, so swapping in a newly
       // approved template does not require touching this test.
@@ -202,9 +195,9 @@ describe('BotNotificationService', () => {
     it('no longer arms the accept/refuse flow or queues an inbox entry', async () => {
       // The approved template carries a URL button to /candidatures/:id instead
       // of « Accepter » / « Refuser », so there is nothing a typed reply drives.
-      deps.botState.setIfFlowAbsentOrMatches.mockResolvedValue(false);
+      // The service holds no BotStateService at all now, so it cannot arm a
+      // flow even by accident — the guarantee is structural, not asserted.
       await service.sendNewApplicationToEmployer('app-1');
-      expect(deps.botState.setIfFlowAbsentOrMatches).not.toHaveBeenCalled();
       expect(deps.botInbox.push).not.toHaveBeenCalled();
       // ...and the send still happens regardless of chat state.
       expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalled();
@@ -348,8 +341,8 @@ describe('BotNotificationService', () => {
       // It used to pre-arm the unlock flow so a "Continuer" quick-reply could
       // re-show a payment menu in the chat. The template carries a URL button
       // now and the worker settles up in the app, so arming a flow only left a
-      // stale state for the next thing they typed to fall into.
-      expect(deps.botState.setIfFlowAbsentOrMatches).not.toHaveBeenCalled();
+      // stale state for the next thing they typed to fall into. The service no
+      // longer holds a BotStateService, so this can no longer regress.
     });
 
     it('does nothing when worker has no phone', async () => {
@@ -571,7 +564,6 @@ describe('BotNotificationService', () => {
       // written, so a worker who happened to be mid-conversation silently
       // received no job recommendations at all. Delivery must never depend on
       // chat state.
-      deps.botState.setIfFlowAbsentOrMatches.mockResolvedValue(false);
       deps.prisma.profile.findUnique.mockResolvedValue({
         phone: '+242001',
         first_name: 'Alice',
@@ -598,9 +590,6 @@ describe('BotNotificationService', () => {
     });
 
     it('still sends when arming the flow throws', async () => {
-      deps.botState.setIfFlowAbsentOrMatches.mockRejectedValue(
-        new Error('redis down'),
-      );
       deps.prisma.profile.findUnique.mockResolvedValue({
         phone: '+242001',
         first_name: 'Alice',

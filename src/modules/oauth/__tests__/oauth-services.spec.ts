@@ -93,6 +93,31 @@ describe('OAuthAppService', () => {
     });
 
     /**
+     * The one assertion that proves the readable sandbox column is a
+     * convenience copy and not a second authentication path.
+     *
+     * The row below is deliberately inconsistent: it authenticates as
+     * `rbk_sk_right` but carries `rbk_sk_readable` in the plaintext column. If
+     * anything ever starts comparing against that column, this flips to
+     * passing — which is exactly the regression worth catching.
+     */
+    it('never authenticates against the sandbox plaintext', async () => {
+      const sandbox = app({
+        is_sandbox: true,
+        sandbox_client_secret_plaintext: 'rbk_sk_readable',
+      });
+
+      await expect(
+        service(sandbox).authenticateClient('rbk_abc', 'rbk_sk_readable'),
+      ).rejects.toThrow(OAuthError);
+
+      // ...and the hash still works, so the app is not simply broken.
+      await expect(
+        service(sandbox).authenticateClient('rbk_abc', 'rbk_sk_right'),
+      ).resolves.toMatchObject({ id: 'app-1' });
+    });
+
+    /**
      * Unknown client and wrong secret must be indistinguishable, or the
      * endpoint becomes a directory of which client_ids exist.
      */
@@ -363,7 +388,7 @@ describe('OAuthAppService registration', () => {
     redirectUris: ['https://partner.com/cb'],
   };
 
-  it('mints a client id and a secret, storing only the hash', async () => {
+  it('stores only the hash for a REAL application, never the plaintext', async () => {
     const { service, created } = writable();
     const { secret } = await service.create(base);
 
@@ -372,8 +397,27 @@ describe('OAuthAppService registration', () => {
     expect(created[0].client_secret_hash).toBe(
       hashClientSecret(secret.clientSecret),
     );
-    // The plaintext must never be written anywhere.
+    // A real partner's secret is unrecoverable by design: nothing on the row
+    // may contain it. A sandbox app is the single deliberate exception (see
+    // the test below), which is why this one asserts an explicit null rather
+    // than settling for the absence of the key — a refactor that drops the
+    // field entirely must fail here too.
     expect(JSON.stringify(created[0])).not.toContain(secret.clientSecret);
+    expect(created[0].sandbox_client_secret_plaintext).toBeNull();
+  });
+
+  it('keeps the plaintext of a sandbox secret, and still hashes it', async () => {
+    const { service, created } = writable();
+    const { secret } = await service.create({ ...base, isSandbox: true });
+
+    expect(created[0].sandbox_client_secret_plaintext).toBe(
+      secret.clientSecret,
+    );
+    // The convenience copy does not replace the hash: authentication still
+    // goes through it, for a sandbox app exactly as for a real one.
+    expect(created[0].client_secret_hash).toBe(
+      hashClientSecret(secret.clientSecret),
+    );
   });
 
   it('keeps only the last four characters as a hint', async () => {
@@ -423,6 +467,10 @@ describe('OAuthAppService registration', () => {
         isSandbox: value as unknown as boolean,
       });
       expect(created[0].is_sandbox).toBe(false);
+      // The half that was missing: a truthy non-boolean must not register a
+      // sandbox app AND must not leave a readable secret behind. `'true'` is
+      // the case that matters — it is what a query string produces.
+      expect(created[0].sandbox_client_secret_plaintext).toBeNull();
     },
   );
 
@@ -536,6 +584,28 @@ describe('OAuthAppService registration', () => {
       expect(
         (updated[0].previous_secret_expires_at as Date).getTime(),
       ).toBeGreaterThan(Date.now());
+      // The fixture app is not a sandbox, so the rotation must write an
+      // explicit null. This looks like a removable branch and is not: it is
+      // what heals a row that acquired a plaintext it should never have had.
+      expect(updated[0].sandbox_client_secret_plaintext).toBeNull();
+    });
+
+    it('stores the new plaintext when the app is a sandbox', async () => {
+      const { service, prisma, updated } = writable();
+      (
+        prisma.oAuthApp.findUniqueOrThrow as unknown as jest.Mock
+      ).mockResolvedValue({
+        id: 'app-1',
+        client_id: 'rbk_abc',
+        client_secret_hash: hashClientSecret('rbk_sk_old'),
+        is_sandbox: true,
+      });
+
+      const secret = await service.rotateSecret('app-1');
+
+      expect(updated[0].sandbox_client_secret_plaintext).toBe(
+        secret.clientSecret,
+      );
     });
   });
 

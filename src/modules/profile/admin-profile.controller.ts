@@ -277,6 +277,66 @@ export class AdminProfileController {
     return await this.logService.getByProfileId(id);
   }
 
+  /**
+   * What the assistant remembers about someone, and the lever to erase it.
+   *
+   * VoVa keeps a short list of durable facts per profile and puts it in every
+   * prompt for up to ninety days. That is generated text about a real person,
+   * standing between them and every answer they get — so it has to be readable
+   * by a human and clearable by one. Without this the only remedy for a wrong
+   * or unwelcome fact is a hand-written UPDATE against production.
+   *
+   * Prisma is used directly rather than `VovaMemoryService`: reading the row is
+   * a primary-key lookup, and going through the service would make the profile
+   * module depend on the whole RAG module for two endpoints.
+   */
+  @Get(':id/vova-memory')
+  @Roles(UserRole.MODERATOR)
+  @ApiOperation({
+    summary: 'Read what the assistant remembers about a profile (admin only)',
+    description:
+      'The durable facts VoVa carries between conversations. Returns an empty list when nothing has been remembered yet, which is the ordinary state.',
+  })
+  @ApiResponse({ status: 200, description: 'The remembered facts' })
+  async getVovaMemory(@Param('id') id: string) {
+    const row = await this.prisma.vovaProfileMemory.findUnique({
+      where: { profile_id: id },
+      select: { facts: true, updated_at: true },
+    });
+    return { facts: row?.facts ?? [], updatedAt: row?.updated_at ?? null };
+  }
+
+  @Delete(':id/vova-memory')
+  @Roles(UserRole.MODERATOR)
+  @ApiOperation({
+    summary: "Erase the assistant's memory of a profile (admin only)",
+    description:
+      'Deletes the row outright. The list rebuilds itself from later conversations, so this is a reset rather than a permanent block — and it is idempotent: erasing a memory that does not exist succeeds.',
+  })
+  @ApiResponse({ status: 200, description: 'Memory erased' })
+  async deleteVovaMemory(
+    @Param('id') id: string,
+    @Req() req: AdminAuthenticatedRequest,
+  ): Promise<{ success: true }> {
+    // `deleteMany`, not `delete`: erasing a memory that was never written is
+    // the expected case for most profiles and must not 404 at somebody trying
+    // to honour a complaint.
+    await this.prisma.vovaProfileMemory.deleteMany({
+      where: { profile_id: id },
+    });
+    await this.logService.create({
+      action: 'PROFILE_VOVA_MEMORY_ERASED',
+      entityType: 'Profile',
+      entityId: id,
+      // Also keyed on the profile, so the erasure shows up in that person's own
+      // timeline — where anyone handling their complaint will look for it.
+      profileId: id,
+      userId: req.user?.userId,
+      ...extractRequestMeta(req),
+    });
+    return { success: true };
+  }
+
   @Get(':id/payment-requests')
   @Roles(UserRole.MODERATOR)
   @ApiOperation({ summary: 'Get payment requests for a profile (admin only)' })
@@ -317,7 +377,7 @@ export class AdminProfileController {
     await this.walletService.creditProfileWallet(
       id,
       amount,
-      'MANUAL_CREDIT' as any,
+      'MANUAL_CREDIT',
       refType,
     );
 
@@ -667,9 +727,7 @@ export class AdminProfileController {
 
   @Patch(':id/avatar')
   @Roles(UserRole.MANAGER)
-  @UseInterceptors(
-    FileInterceptor('avatar', imageMulterOptions()),
-  )
+  @UseInterceptors(FileInterceptor('avatar', imageMulterOptions()))
   @ApiConsumes('multipart/form-data')
   @ApiOperation({ summary: 'Update profile avatar (admin only)' })
   @ApiResponse({ status: 200, description: 'Avatar updated' })

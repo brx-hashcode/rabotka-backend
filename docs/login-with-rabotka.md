@@ -42,6 +42,10 @@ You receive a `client_id` and a `client_secret`. **The secret is displayed
 once.** Rabotka stores only a hash of it and cannot show it to you again; if it
 is lost, an administrator rotates it and you get a new one.
 
+Sandbox applications are the exception: their secret is also kept in the clear,
+so an administrator can read it back to you on request. It guards only the two
+synthetic sandbox users, never a real person.
+
 ### Redirect URIs are matched exactly
 
 `https://you.com/callback` and `https://you.com/callback/` are different URIs.
