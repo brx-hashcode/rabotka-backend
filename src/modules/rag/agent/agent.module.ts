@@ -7,6 +7,7 @@ import { GuardService } from './guard.service';
 import { VovaAgentService } from './agent.service';
 import { ToolDepsProvider } from './tool-deps.provider';
 import { VovaHistoryService } from './history.service';
+import { VovaMemoryService } from './memory.service';
 import { AbuseReportService } from './abuse-report.service';
 import { PrismaModule } from '../../../common/services/prisma/prisma.module';
 
@@ -30,8 +31,11 @@ import { PrismaModule } from '../../../common/services/prisma/prisma.module';
     VovaAgentService,
     ToolDepsProvider,
     VovaHistoryService,
+    VovaMemoryService,
     AbuseReportService,
   ],
-  exports: [VovaAgentService, GuardService],
+  // Exported because `VovaService` refreshes the memory after it has answered,
+  // which is the one thing that must NOT happen inside the agent's own budget.
+  exports: [VovaAgentService, GuardService, VovaMemoryService],
 })
 export class VovaAgentModule {}

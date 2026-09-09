@@ -54,6 +54,7 @@ function makeAgent(cfg: Record<string, number> = {}) {
     } as never,
     categories as never,
     history as never,
+    { read: jest.fn().mockResolvedValue([]) } as never,
     {
       get: jest.fn().mockReturnValue(deps),
       getForTurn: jest.fn().mockReturnValue(deps),

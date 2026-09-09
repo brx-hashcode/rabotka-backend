@@ -472,6 +472,7 @@ model Profile {
   payments                        Payment[]
   conversations                   Conversation[]
   messages                        Message[]
+  vova_memory                     VovaProfileMemory?
   whatsapp_messages               WhatsappMessage[]
   logs                            Log[]
   files                           File[]
@@ -1120,6 +1121,37 @@ model Message {
   // which runs on every admin send and every composer render.
   @@index([profile_id, direction, created_at(sort: Desc)], name: "idx_message_profile_direction_created")
   @@map("messages")
+}
+
+/// What VoVa knows about someone across conversations.
+///
+/// The transcript already lives in `messages`, but reading it back is not
+/// memory: the assistant answers under a wall-clock budget, and its working
+/// history is capped at six turns inside a four-hour window. Anything said
+/// before that is gone — someone who spent four messages last week explaining
+/// they only work weekends had to explain it again.
+///
+/// So this holds FACTS, not conversations: a short, rewritten-in-place list of
+/// what stays true about the person. One indexed read by primary key puts it in
+/// the prompt; the transcript is never re-read on the reply path.
+///
+/// Deliberately small. Every fact is a token spent on every later turn, and on
+/// WhatsApp those tokens are latency — the same reason the history is six turns
+/// and not sixty. The rebuild replaces the list rather than appending to it, so
+/// it cannot creep.
+model VovaProfileMemory {
+  profile_id String   @id @db.Uuid
+  /// `{ text, at }[]` — `at` is what lets a stale fact be dropped rather than
+  /// asserted forever. Someone who looked for cleaning work in March is not
+  /// still looking for it in September, and a confident wrong answer is worse
+  /// than no memory at all.
+  facts      Json     @default("[]")
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  profile Profile @relation(fields: [profile_id], references: [id], onDelete: Cascade)
+
+  @@map("vova_profile_memory")
 }
 
 /// The delivery record for one WhatsApp send.

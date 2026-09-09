@@ -57,6 +57,7 @@ function makeAgent(search: jest.Mock, cfg: Record<string, number> = {}) {
     } as never,
     { slugs: jest.fn().mockResolvedValue([]) } as never,
     { recent: jest.fn().mockResolvedValue([]) } as never,
+    { read: jest.fn().mockResolvedValue([]) } as never,
     {
       get: jest.fn().mockReturnValue(deps),
       getForTurn: jest.fn().mockReturnValue(deps),

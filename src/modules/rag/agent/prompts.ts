@@ -63,6 +63,15 @@ export interface PromptContext {
   requiredTools: string[];
   /** Detected from the user's message, not guessed by the model. */
   language: ReplyLanguage;
+  /**
+   * What earlier conversations established about this person, already trimmed
+   * and rendered by `VovaMemoryService`.
+   *
+   * Optional because having none is the ordinary state — a first conversation,
+   * or a rebuild that has not run yet — and a prompt with no remembered facts
+   * has to be the same prompt as before this existed, not a degraded one.
+   */
+  memory?: string[];
 }
 
 /**
@@ -289,6 +298,11 @@ export function buildSystemPromptParts(ctx: PromptContext): SystemPromptParts {
       ? "Cette personne est déjà inscrite, déjà vérifiée, déjà connectée — sinon elle ne pourrait pas t'écrire. Ne lui parle jamais d'inscription ni de vérification à faire."
       : "Cette personne est déjà inscrite et déjà connectée — sinon elle ne pourrait pas t'écrire. Ne lui parle jamais d'inscription à faire. Sa vérification d'identité, en revanche, n'est pas validée : voir plus bas.",
     '',
+    // Directly under the line that says who this person is, because that is
+    // what these are: more of the same subject. Above the writing rules and the
+    // corpus, so a remembered trade is known before anything is retrieved about
+    // it — and inside `volatile`, since nothing here is shared between people.
+    ...(ctx.memory ?? []),
     // Ces quatre puces appartiennent à « ## Comment tu écris » et en ont été
     // descendues telles quelles, dans leur ordre d'origine — deux d'entre elles
     // interpolent le prénom, et un prompt mis en cache ne peut rien contenir de

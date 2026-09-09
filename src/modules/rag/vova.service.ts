@@ -15,6 +15,7 @@ import {
 } from './agent/offer';
 import { VovaOfferStore } from './agent/offer.store';
 import { VovaAnonymousStore } from './agent/anonymous.store';
+import { VovaMemoryService } from './agent/memory.service';
 import { withTimeout } from './llm/llm.service';
 import { Deadline } from './llm/deadline';
 import { isWalled } from './agent/prompts';
@@ -74,6 +75,7 @@ export class VovaService {
     private readonly systemConfig: SystemConfigService,
     private readonly offers: VovaOfferStore,
     private readonly anonymous: VovaAnonymousStore,
+    private readonly memory: VovaMemoryService,
   ) {}
 
   /**
@@ -398,6 +400,19 @@ export class VovaService {
         );
         return null;
       }
+
+      // What this turn taught us about the person, folded in for the next one.
+      //
+      // Deliberately after the answer and deliberately unawaited: it is an
+      // extra model call, and nobody should wait on it to be replied to. It is
+      // its own claim-and-skip inside, so a long exchange rebuilds once rather
+      // than once per message — and it runs on the cheap tier, off the turn's
+      // deadline, because a slower better summary buys nothing here.
+      void this.memory
+        .refresh(profile.id)
+        .catch((err: unknown) =>
+          this.logger.debug(`memory refresh failed for ${profile.id}`, err),
+        );
 
       // The card goes out now only if the person asked to go somewhere.
       // Otherwise the reply stands on its own and the destination is
