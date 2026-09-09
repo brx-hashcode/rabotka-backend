@@ -220,6 +220,14 @@ export class VovaMemoryService {
             `Chacun tient en une phrase de moins de ${VovaMemoryService.MAX_FACT_CHARS} caractères, en français, à la troisième personne.`,
             '',
             'Garde ce qui reste vrai dans six mois : métier, quartier, disponibilités, contraintes, matériel, langue.',
+            // Without this, "contraintes" quietly licenses the worst of it. A
+            // model told to keep durable constraints will happily write down
+            // "a un enfant malade" — durable, true, volunteered, and something
+            // nobody agreed to have recalled to them for ninety days by a job
+            // assistant. Named categories, not a vague instruction: "sois
+            // prudent" is not a rule a model can apply.
+            "N'écris JAMAIS de fait portant sur : santé, grossesse, handicap, situation familiale, religion, origine ethnique, opinions politiques, orientation sexuelle, casier judiciaire, dettes ou difficultés d'argent.",
+            "Si une contrainte vient de l'un de ces sujets, note seulement son effet pratique — « indisponible le mardi matin », jamais sa cause.",
             // The failure mode this list exists to prevent: a memory that fills
             // with the texture of one conversation is a memory that says
             // nothing about the person.

@@ -204,6 +204,36 @@ describe('VovaMemoryService.refresh()', () => {
     expect(occurrences).toBe(2);
   });
 
+  it('forbids the sensitive categories by name, not by vague caution', async () => {
+    // "contraintes" alone licenses "a un enfant malade" — durable, true,
+    // volunteered, and something nobody agreed to have recalled to them for
+    // ninety days by a job assistant. A model cannot apply "sois prudent"; it
+    // can apply a list.
+    const deps = makeDeps();
+    deps.history.recent.mockResolvedValue(TURNS);
+    deps.llm.invoke.mockResolvedValue({ output: { content: '- Plombier' } });
+
+    await build(deps).refresh(PROFILE, CURRENT);
+
+    const instructions = promptOf(deps);
+    for (const topic of [
+      'santé',
+      'grossesse',
+      'handicap',
+      'situation familiale',
+      'religion',
+      'origine ethnique',
+      'opinions politiques',
+      'orientation sexuelle',
+      'casier judiciaire',
+    ]) {
+      expect(instructions).toContain(topic);
+    }
+    // And the escape hatch, so a real scheduling constraint is not lost with
+    // the reason behind it.
+    expect(instructions).toContain('son effet pratique');
+  });
+
   it('keeps what is already known when the model returns nothing', async () => {
     // An empty answer is legitimate — a conversation can carry nothing worth
     // keeping — but it must not wipe the existing list.
