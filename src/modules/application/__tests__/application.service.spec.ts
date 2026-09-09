@@ -7,7 +7,6 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ApplicationService } from '../application.service';
-import { SELF_CANCELLED_MESSAGE } from '../application.constants';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { BotNotificationService } from '../../bot/services/bot-notification.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -175,7 +174,6 @@ describe('ApplicationService', () => {
               .fn()
               .mockResolvedValue(undefined),
             sendCancellationToEmployer: jest.fn().mockResolvedValue(undefined),
-            sendCancellationToWorker: jest.fn().mockResolvedValue(undefined),
           },
         },
         { provide: EventEmitter2, useValue: { emit: jest.fn() } },
@@ -491,51 +489,10 @@ describe('ApplicationService', () => {
       );
     });
 
-    it('refuses, by name, a worker who cancelled this application themselves', async () => {
-      // The message is the point of the branch: the generic "you already
-      // applied" is a lie once the row is cancelled, because the worker's own
-      // screen shows no application at all.
-      (prisma.application.findMany as jest.Mock).mockResolvedValue([
-        {
-          status: ApplicationStatus.CANCELLED,
-          cancelled_by: 'WORKER',
-          deleted_at: null,
-        },
-      ]);
-
-      await expect(service.create(JOB_OFFER_ID, WORKER_ID)).rejects.toThrow(
-        SELF_CANCELLED_MESSAGE,
-      );
-      expect(prisma.application.create).not.toHaveBeenCalled();
-    });
-
-    it.each([['EMPLOYER'], ['SYSTEM'], [null]])(
-      'lets the worker apply again when %s cancelled it',
-      async (cancelledBy) => {
-        (prisma.application.findMany as jest.Mock).mockResolvedValue([
-          {
-            status: ApplicationStatus.CANCELLED,
-            cancelled_by: cancelledBy,
-            deleted_at: null,
-          },
-        ]);
-
-        await expect(
-          service.create(JOB_OFFER_ID, WORKER_ID),
-        ).resolves.toBeDefined();
-        // A NEW row, not a revived one: that is what keeps the assignment, the
-        // contract and the contact-unlock attempt new too — each is unique on
-        // application_id and would have collided.
-        expect(prisma.application.create).toHaveBeenCalled();
-      },
-    );
-
     it('throws ConflictException when worker already applied', async () => {
-      // The guard reads every row for the pair now, not one — a cancelled row
-      // no longer blocks, so a pair can legitimately have several.
-      (prisma.application.findMany as jest.Mock).mockResolvedValue([
-        { status: ApplicationStatus.PENDING, cancelled_by: null, deleted_at: null },
-      ]);
+      (prisma.application.findUnique as jest.Mock).mockResolvedValue(
+        mockApplication,
+      );
       await expect(service.create(JOB_OFFER_ID, WORKER_ID)).rejects.toThrow(
         ConflictException,
       );
@@ -579,7 +536,6 @@ describe('ApplicationService', () => {
   });
 
   describe('cancel()', () => {
-
     const acceptedApplication = {
       ...mockApplication,
       status: ApplicationStatus.ACCEPTED,
@@ -620,15 +576,6 @@ describe('ApplicationService', () => {
         } as any,
         worker: mockApplication.worker as any,
       } as any);
-    });
-
-    it('records that the WORKER cancelled — the only value that bars re-applying', async () => {
-      await service.cancel(APPLICATION_ID, WORKER_ID);
-
-      const call = (prisma.application.update as jest.Mock).mock.calls.find(
-        ([arg]) => arg?.data?.status === ApplicationStatus.CANCELLED,
-      );
-      expect(call?.[0].data.cancelled_by).toBe('WORKER');
     });
 
     it('cancels > 4h before: no penalty applied', async () => {

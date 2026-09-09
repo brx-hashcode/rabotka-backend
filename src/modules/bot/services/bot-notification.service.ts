@@ -350,51 +350,6 @@ export class BotNotificationService {
     }
   }
 
-  /**
-   * Tells a worker their hire was undone by the employer.
-   *
-   * Without this the mission simply vanishes from their app with no
-   * explanation — and under the re-application rule they also need telling
-   * that this one does NOT bar them from applying again, unlike a cancellation
-   * they make themselves.
-   *
-   * Free-form rather than a template, deliberately: there is no approved
-   * template for this, and a free-form reply costs nothing inside the 24h
-   * service window. The trade-off is that a worker who has not messaged in 24h
-   * will not receive it — the in-app state is still correct either way. A
-   * template would make delivery unconditional and is worth adding separately.
-   */
-  async sendCancellationToWorker(
-    applicationId: string,
-    reason: string | null,
-  ): Promise<void> {
-    try {
-      const app = await this.prisma.application.findUnique({
-        where: { id: applicationId },
-        select: {
-          job_offer: { select: { title: true } },
-          worker: { select: { phone: true, first_name: true } },
-        },
-      });
-      if (!app?.worker?.phone || !app.job_offer) return;
-
-      const lines = [
-        `*${app.worker.first_name}*, l'employeur a annulé votre mission « ${app.job_offer.title} ».`,
-      ];
-      if (reason) lines.push(`Motif : ${reason}`);
-      lines.push(
-        'Aucune pénalité pour vous, et vous pouvez postuler à nouveau à cette offre si elle est republiée.',
-      );
-
-      await this.whatsApp.sendTextMessage(app.worker.phone, lines.join('\n\n'));
-    } catch (err) {
-      this.logger.warn(
-        `Failed to send employer-cancellation notice to worker: ${String(applicationId)}`,
-        err,
-      );
-    }
-  }
-
   async sendCancellationToEmployer(
     applicationId: string,
     reason: string | null,

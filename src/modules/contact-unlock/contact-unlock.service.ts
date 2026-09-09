@@ -8,7 +8,6 @@ import {
   Inject,
 } from '@nestjs/common';
 import {
-  ApplicationCancelledBy,
   ApplicationStatus,
   AssignmentStatus,
   BillingStatus,
@@ -28,7 +27,6 @@ import {
   RejectionSource,
   WalletTransactionType,
 } from '@prisma/client';
-import { cancellationPatch } from '../application/application.constants';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { isEmployerCoveredAtJobLevel } from './employer-coverage';
 import {
@@ -483,14 +481,12 @@ export class ContactUnlockService {
       const now = new Date();
       await tx.application.update({
         where: { id: params.applicationId },
-        // SYSTEM: a lapsed payment window is the platform's own timeout, so
-        // the worker is not treated as having walked away.
-        data: cancellationPatch({
-          by: ApplicationCancelledBy.SYSTEM,
-          at: now,
-          reason:
+        data: {
+          status: ApplicationStatus.CANCELLED,
+          cancelled_at: now,
+          cancellation_reason:
             'Délai de paiement pour le déverrouillage expiré (aucune coordonnée échangée)',
-        }),
+        },
       });
       await tx.assignment.updateMany({
         where: { application_id: params.applicationId },

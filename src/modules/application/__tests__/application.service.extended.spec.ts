@@ -147,7 +147,6 @@ describe('ApplicationService (extended)', () => {
               .fn()
               .mockResolvedValue(undefined),
             sendCancellationToEmployer: jest.fn().mockResolvedValue(undefined),
-            sendCancellationToWorker: jest.fn().mockResolvedValue(undefined),
           },
         },
         { provide: EventEmitter2, useValue: { emit: jest.fn() } },
@@ -391,43 +390,6 @@ describe('ApplicationService (extended)', () => {
         } as any,
         worker: mockWorkerProfile as any,
       } as any);
-    });
-
-    it('records that the EMPLOYER cancelled, so the worker may apply again', async () => {
-      await service.cancelAcceptedByEmployer(APPLICATION_ID, EMPLOYER_ID);
-
-      const call = (prisma.application.update as jest.Mock).mock.calls.find(
-        ([arg]) => arg?.data?.status === ApplicationStatus.CANCELLED,
-      );
-      expect(call?.[0].data.cancelled_by).toBe('EMPLOYER');
-    });
-
-    it("keeps the audit script's reason prefix when a reason is given", async () => {
-      // `scripts/audit-ghost-cancellations.ts` classifies by this prefix, so
-      // free text alone would push every employer cancellation into its
-      // suspect list.
-      await service.cancelAcceptedByEmployer(
-        APPLICATION_ID,
-        EMPLOYER_ID,
-        'Chantier reporté',
-      );
-
-      const call = (prisma.application.update as jest.Mock).mock.calls.find(
-        ([arg]) => arg?.data?.status === ApplicationStatus.CANCELLED,
-      );
-      expect(call?.[0].data.cancellation_reason).toBe(
-        "Annulée par l'employeur : Chantier reporté",
-      );
-    });
-
-    it('tells the worker, or the mission just vanishes from their app', async () => {
-      await service.cancelAcceptedByEmployer(APPLICATION_ID, EMPLOYER_ID);
-      await new Promise(process.nextTick);
-
-      expect(botNotification.sendCancellationToWorker).toHaveBeenCalledWith(
-        APPLICATION_ID,
-        null,
-      );
     });
 
     it('cancels accepted application by employer', async () => {

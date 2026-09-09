@@ -155,20 +155,6 @@ enum CancelledBy {
   EMPLOYER
 }
 
-/// Who ended an application.
-///
-/// Separate from `CancelledBy` (which types `Assignment.cancelled_by`) because
-/// of SYSTEM: no assignment writer will ever produce that value, and widening
-/// the other enum would admit it everywhere for nothing.
-enum ApplicationCancelledBy {
-  WORKER
-  EMPLOYER
-  /// The platform's own timeouts — the offer expiring, an unlock payment window
-  /// lapsing. The worker did nothing, so they are not treated as having walked
-  /// away and may apply again.
-  SYSTEM
-}
-
 enum PaymentStatus {
   PENDING
   COMPLETED
@@ -824,26 +810,16 @@ model JobOffer {
 }
 
 model Application {
-  id                  String                  @id @default(uuid()) @db.Uuid
-  created_at          DateTime                @default(now())
-  updated_at          DateTime                @updatedAt
-  job_offer_id        String                  @db.Uuid
-  worker_id           String                  @db.Uuid
-  status              ApplicationStatus       @default(PENDING)
+  id                  String            @id @default(uuid()) @db.Uuid
+  created_at          DateTime          @default(now())
+  updated_at          DateTime          @updatedAt
+  job_offer_id        String            @db.Uuid
+  worker_id           String            @db.Uuid
+  status              ApplicationStatus @default(PENDING)
   cancelled_at        DateTime?
   cancellation_reason String?
-  /// Who cancelled, and therefore whether the worker may apply again: only a
-  /// worker's own cancellation bars them.
-  ///
-  /// NULL means UNKNOWN, not "nobody", and unknown deliberately FAILS OPEN. Rows
-  /// cancelled before this column existed cannot be classified: the ghost-cancel
-  /// bug (fixed in #709) wrote innocent free-text replies through
-  /// `ApplicationService.cancel()` itself, so they are indistinguishable from a
-  /// deliberate cancellation. Failing closed would permanently bar exactly the
-  /// people that fix was merged to unbar.
-  cancelled_by        ApplicationCancelledBy?
-  penalty_applied     Boolean                 @default(false)
-  penalty_amount      Decimal?                @db.Decimal(10, 2)
+  penalty_applied     Boolean           @default(false)
+  penalty_amount      Decimal?          @db.Decimal(10, 2)
 
   /// Set when an employer accepts. `updated_at` is overwritten by every later
   /// transition, so it can't stand in for the decision moment.
@@ -863,15 +839,7 @@ model Application {
   contract               Contract?
   deleted_at             DateTime?             @db.Timestamptz
 
-  /// NOT unique any more. Uniqueness is enforced by a PARTIAL index created in
-  /// raw SQL — `applications_live_unique`, on (job_offer_id, worker_id) WHERE
-  /// status <> 'CANCELLED' — so one live application per pair coexists with as
-  /// many cancelled ones as history produced.
-  ///
-  /// Prisma cannot express a partial index, so it lives only in the migration.
-  /// A future `migrate dev` will therefore report drift and offer to drop it:
-  /// SAY NO, and carry the index forward by hand.
-  @@index([job_offer_id, worker_id], name: "idx_application_pair")
+  @@unique([job_offer_id, worker_id], name: "idx_application_unique")
   @@index([worker_id], name: "idx_application_worker")
   @@index([job_offer_id], name: "idx_application_job_offer")
   @@index([status], name: "idx_application_status")
