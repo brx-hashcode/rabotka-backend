@@ -21,6 +21,39 @@ import { validateRedirectUriForRegistration } from '../utils/redirect-uri.util';
 export type MintedSecret = { clientId: string; clientSecret: string };
 
 /**
+ * An app row as this service hands it out.
+ *
+ * `sandbox_client_secret_plaintext` is omitted globally in `PrismaService`, so
+ * it is absent from every result at RUNTIME. That omission does not narrow
+ * Prisma's own types — `PrismaService extends PrismaClient` without passing the
+ * options as a type argument — so this alias is what carries the guarantee into
+ * the type system: every consumer of this service works with a shape that has
+ * no such field to read.
+ *
+ * The single query that needs the value asks for it by name, in
+ * `readSandboxSecret`.
+ */
+export type OAuthAppRow = Omit<OAuthApp, 'sandbox_client_secret_plaintext'>;
+
+/**
+ * The outcome of asking for a sandbox app's secret.
+ *
+ * A discriminated result rather than an exception: this service throws
+ * `OAuthError`, which `oauth-exception.filter.ts` renders in the OAuth protocol
+ * shape — wrong for an admin JSON endpoint. Returning the outcome also lets the
+ * controller audit each refusal reason separately.
+ *
+ * Note that no branch but `ok` carries a secret field at all. A controller bug
+ * that reads `clientSecret` without checking `status` is then a type error
+ * rather than a disclosure.
+ */
+export type SandboxSecretResult =
+  | { status: 'ok'; clientId: string; clientSecret: string }
+  | { status: 'not_found' }
+  | { status: 'not_sandbox'; clientId: string }
+  | { status: 'not_stored'; clientId: string };
+
+/**
  * Registration, credential lifecycle, and client authentication for partner
  * applications.
  *
@@ -43,7 +76,7 @@ export class OAuthAppService {
    * redirecting — so this returns the row and lets them decide, rather than
    * throwing two different errors that leak which one it was.
    */
-  async findByClientId(clientId: string): Promise<OAuthApp | null> {
+  async findByClientId(clientId: string): Promise<OAuthAppRow | null> {
     if (typeof clientId !== 'string' || clientId.length === 0) return null;
     return this.prisma.oAuthApp.findFirst({
       where: { client_id: clientId, deleted_at: null },
@@ -60,7 +93,7 @@ export class OAuthAppService {
   async authenticateClient(
     clientId: string,
     clientSecret: string,
-  ): Promise<OAuthApp> {
+  ): Promise<OAuthAppRow> {
     const app = await this.findByClientId(clientId);
 
     const failure = new OAuthError(
@@ -111,12 +144,17 @@ export class OAuthAppService {
     allowedScopes?: string[];
     isSandbox?: boolean;
     createdBy?: string;
-  }): Promise<{ app: OAuthApp; secret: MintedSecret }> {
+  }): Promise<{ app: OAuthAppRow; secret: MintedSecret }> {
     const redirectUris = normaliseRedirectUris(params.redirectUris);
     const allowedScopes = normaliseScopes(params.allowedScopes);
 
     const clientId = generateClientId();
     const clientSecret = generateClientSecret();
+
+    // Hoisted so the flag and the plaintext cannot disagree: one expression
+    // governs both columns below, and there is no arrangement of inputs that
+    // stores a readable secret on a non-sandbox row.
+    const isSandbox = params.isSandbox === true;
 
     const app = await this.prisma.oAuthApp.create({
       data: {
@@ -132,7 +170,9 @@ export class OAuthAppService {
         // `=== true` rather than `?? false`: a truthy non-boolean must not
         // register a sandbox app, and this is the only place the flag is ever
         // written.
-        is_sandbox: params.isSandbox === true,
+        is_sandbox: isSandbox,
+        // Readable only for a sandbox app; explicitly null otherwise.
+        sandbox_client_secret_plaintext: isSandbox ? clientSecret : null,
         created_by: params.createdBy ?? null,
       },
     });
@@ -157,7 +197,7 @@ export class OAuthAppService {
       allowedScopes?: string[];
       status?: OAuthAppStatus;
     },
-  ): Promise<OAuthApp> {
+  ): Promise<OAuthAppRow> {
     const data: Prisma.OAuthAppUpdateInput = {};
 
     if (params.name !== undefined) data.name = params.name.trim();
@@ -198,6 +238,12 @@ export class OAuthAppService {
       data: {
         client_secret_hash: hashClientSecret(clientSecret),
         client_secret_hint: secretHint(clientSecret),
+        // The `: null` branch is not dead code — it is the self-healing path.
+        // Any row that somehow acquired a plaintext without being a sandbox app
+        // (a bad backfill, a manual UPDATE, a future bug) loses it on the next
+        // rotation. Writing this as `...(app.is_sandbox && { … })` reads like a
+        // tidy-up and would silently remove that property.
+        sandbox_client_secret_plaintext: app.is_sandbox ? clientSecret : null,
         previous_secret_hash: app.client_secret_hash,
         previous_secret_expires_at: new Date(
           Date.now() + SECRET_ROTATION_GRACE_MS,
@@ -207,6 +253,44 @@ export class OAuthAppService {
     });
 
     return { clientId: app.client_id, clientSecret };
+  }
+
+  /**
+   * A sandbox app's client secret, in the clear.
+   *
+   * THE GATE LIVES HERE, not in the controller. This service is already the
+   * only place `is_sandbox` and the plaintext are written, so keeping the rule
+   * beside the field it protects means a second caller — a support script, the
+   * `GET /:id` somebody will eventually add — cannot get an ungated path by
+   * default.
+   *
+   * `is_sandbox === true` rather than a truthy check, mirroring `create`.
+   *
+   * This is the ONE query in the codebase that asks for the omitted column by
+   * name. `grep -rn sandbox_client_secret_plaintext src` should stay a short,
+   * auditable list.
+   */
+  async readSandboxSecret(id: string): Promise<SandboxSecretResult> {
+    const app = await this.prisma.oAuthApp.findFirst({
+      where: { id, deleted_at: null },
+      omit: { sandbox_client_secret_plaintext: false },
+    });
+
+    if (!app) return { status: 'not_found' };
+    if (app.is_sandbox !== true) {
+      return { status: 'not_sandbox', clientId: app.client_id };
+    }
+    if (!app.sandbox_client_secret_plaintext) {
+      // Registered before the column existed. The secret is genuinely gone —
+      // one rotation mints a new one and stores it.
+      return { status: 'not_stored', clientId: app.client_id };
+    }
+
+    return {
+      status: 'ok',
+      clientId: app.client_id,
+      clientSecret: app.sandbox_client_secret_plaintext,
+    };
   }
 
   /**
@@ -231,7 +315,7 @@ export class OAuthAppService {
    * `authorize` where the partner's developer sees it. Callers check the result
    * against the request themselves.
    */
-  grantableScopes(app: OAuthApp, requested: readonly string[]): string[] {
+  grantableScopes(app: OAuthAppRow, requested: readonly string[]): string[] {
     const allowed = new Set(app.allowed_scopes);
     return requested.filter((scope) => allowed.has(scope));
   }
