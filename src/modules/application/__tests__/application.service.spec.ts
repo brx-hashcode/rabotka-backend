@@ -534,7 +534,11 @@ describe('ApplicationService', () => {
       // The guard reads every row for the pair now, not one — a cancelled row
       // no longer blocks, so a pair can legitimately have several.
       (prisma.application.findMany as jest.Mock).mockResolvedValue([
-        { status: ApplicationStatus.PENDING, cancelled_by: null, deleted_at: null },
+        {
+          status: ApplicationStatus.PENDING,
+          cancelled_by: null,
+          deleted_at: null,
+        },
       ]);
       await expect(service.create(JOB_OFFER_ID, WORKER_ID)).rejects.toThrow(
         ConflictException,
@@ -579,7 +583,6 @@ describe('ApplicationService', () => {
   });
 
   describe('cancel()', () => {
-
     const acceptedApplication = {
       ...mockApplication,
       status: ApplicationStatus.ACCEPTED,

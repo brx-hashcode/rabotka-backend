@@ -230,6 +230,28 @@ describe('ReminderProcessor', () => {
       );
     });
 
+    it('attributes the cancellation to SYSTEM, so it never bars a re-application', async () => {
+      // An expired offer is the platform's own timeout. The worker did nothing,
+      // so they must stay free to apply if the offer is republished.
+      prisma.jobOffer.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([
+        {
+          id: 'offer-1',
+          title: 'Test',
+          employer_id: 'emp-1',
+          employer: { phone: '+1111', first_name: 'Bob' },
+        },
+      ]);
+      prisma.application.findMany.mockResolvedValue([] as never);
+
+      await processor.process({ data: { type: 'scan' } });
+
+      expect(prisma.application.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ cancelled_by: 'SYSTEM' }),
+        }),
+      );
+    });
+
     it('retires an undated offer on age, since it has no date to be past', async () => {
       // This scan is the ONLY thing that ever retires an offer, and it filtered
       // purely on scheduled_at — so a CDI/CDD/STAGE, which carries no closing
@@ -838,9 +860,11 @@ describe('ReminderProcessor', () => {
         },
       });
 
-      const wroteState = [...redis.eval.mock.calls, ...redis.set.mock.calls].some(
-        (call: unknown[]) =>
-          call.some((arg) => String(arg).includes('bot:state:')),
+      const wroteState = [
+        ...redis.eval.mock.calls,
+        ...redis.set.mock.calls,
+      ].some((call: unknown[]) =>
+        call.some((arg) => String(arg).includes('bot:state:')),
       );
       expect(wroteState).toBe(false);
     });

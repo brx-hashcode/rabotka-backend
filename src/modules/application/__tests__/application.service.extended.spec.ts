@@ -85,6 +85,7 @@ const mockApplication = {
 describe('ApplicationService (extended)', () => {
   let service: ApplicationService;
   let prisma: jest.Mocked<PrismaService>;
+  let botNotification: jest.Mocked<BotNotificationService>;
 
   beforeEach(async () => {
     const mockPrismaService = {
@@ -192,6 +193,7 @@ describe('ApplicationService (extended)', () => {
 
     service = module.get<ApplicationService>(ApplicationService);
     prisma = module.get(PrismaService);
+    botNotification = module.get(BotNotificationService);
   });
 
   describe('reject()', () => {
