@@ -297,8 +297,19 @@ export class ClaimService {
     if (dto.attachment_urls !== undefined)
       data.attachment_urls = dto.attachment_urls;
 
+    // Deliberately NOT `'assigned_user_id' in dto`. The DTO is a class, and
+    // `useDefineForClassFields` — implied by target ES2023 — emits every
+    // declared property as a real class field, so `plainToInstance` hands us an
+    // instance carrying all five keys whatever the client sent. The `in` test
+    // was therefore always true, and a status-only edit read as an
+    // unassignment: it ran the guard below (403 for anyone but the assigner and
+    // SUPER_ADMIN, so nobody else could complete a claim) and then cleared the
+    // assignee it had never been asked to touch.
+    //
+    // `undefined` means the field was absent; an explicit `null` still counts
+    // as a change, because `null !== undefined`.
     const changesAssignee =
-      'assigned_user_id' in dto &&
+      dto.assigned_user_id !== undefined &&
       (dto.assigned_user_id ?? null) !== exists.assigned_user_id;
 
     if (changesAssignee) {
@@ -363,10 +374,10 @@ export class ClaimService {
       }
     }
 
-    if (
-      'assigned_user_id' in dto &&
-      dto.assigned_user_id !== exists.assigned_user_id
-    ) {
+    // Same flag as the write above, rather than a second key-presence test:
+    // that one told the previous assignee they had been taken off a claim
+    // every time somebody merely moved it to another column.
+    if (changesAssignee) {
       if (dto.assigned_user_id) {
         const adminUser = await this.prisma.user.findUnique({
           where: { id: dto.assigned_user_id },
