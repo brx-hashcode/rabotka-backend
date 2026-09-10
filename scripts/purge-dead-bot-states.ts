@@ -22,16 +22,49 @@
  * first and reinstalls node_modules whenever the lockfile looks out of step,
  * which on a server turns a short repair into a several-minute install.
  *
- * Usage:
+ * Usage, locally or anywhere the dev dependencies are installed:
  *   node_modules/.bin/tsx scripts/purge-dead-bot-states.ts --dry-run
  *   node_modules/.bin/tsx scripts/purge-dead-bot-states.ts
+ *
+ * ON THE SERVER there is no `tsx` — it is a dev dependency, and production runs
+ * the built image (`node dist/…`). Run it in the API container instead, where
+ * `ioredis` and the real Redis credentials both already are:
+ *
+ *   docker exec rabotka_api_prod node -e '
+ *     const Redis = require("ioredis");
+ *     const LIVE = new Set(["accept_refuse_candidate","pay_penalties",
+ *       "penalty_gate","rate_assignment","verify_whatsapp"]);
+ *     const DRY = process.env.PURGE !== "go";
+ *     const u = process.env.REDIS_URL;
+ *     const r = u && /^rediss?:\/\//.test(u) ? new Redis(u) : new Redis({
+ *       host: process.env.REDIS_HOST || "localhost",
+ *       port: +(process.env.REDIS_PORT || 6379),
+ *       ...(process.env.REDIS_PASSWORD ? {password: process.env.REDIS_PASSWORD} : {})});
+ *     const p = `rabotka:${process.env.IS_PROD === "true" ? "prod" : "dev"}:bot:state:*`;
+ *     let n = 0, dead = 0;
+ *     (async () => {
+ *       for await (const keys of r.scanStream({match: p, count: 200})) {
+ *         for (const k of keys) {
+ *           n++;
+ *           const raw = await r.get(k); if (!raw) continue;
+ *           let f; try { f = JSON.parse(raw).flowId; } catch {}
+ *           if (f && LIVE.has(f)) continue;
+ *           dead++; if (!DRY) await r.del(k);
+ *         }
+ *       }
+ *       console.log(`${p}\n${n} inspectés — ${dead} ${DRY ? "à libérer" : "libérés"}`);
+ *       await r.quit();
+ *     })();'
+ *
+ * That is a dry run. Add `-e PURGE=go` to the `docker exec` to delete.
  */
-import { config } from 'dotenv';
+// FIRST, and deliberately: it loads the .env files as a side effect, so the
+// constants imported below are evaluated with the environment already in
+// place. See the note in load-env.ts — this order is load-bearing.
+import './load-env';
 import Redis from 'ioredis';
 import { FLOW_IDS } from '../src/modules/bot/bot.constants';
-
-config({ path: '.env.local' });
-config({ path: '.env' });
+import { REDIS_KEY_PREFIX } from '../src/common/services/redis/redis.constants';
 
 const DRY_RUN = process.argv.includes('--dry-run');
 
@@ -58,9 +91,18 @@ function connect(): Redis {
 }
 
 async function main() {
-  const env = process.env.NODE_ENV ?? 'development';
-  const pattern = `rabotka:${env}:bot:state:*`;
+  // From the app's own constant, never rebuilt here. The first version of this
+  // script derived the prefix from `NODE_ENV` and scanned `rabotka:production:`
+  // while the bot writes `rabotka:prod:` — it would have reported "0 personne à
+  // libérer" against a Redis full of trapped people. Its test passed only
+  // because the fixtures were seeded with the same wrong formula: a check that
+  // could not fail.
+  const pattern = `${REDIS_KEY_PREFIX}bot:state:*`;
   const redis = connect();
+
+  // Printed because getting this wrong is invisible: a wrong prefix does not
+  // error, it just finds nothing and reassures you.
+  console.log(`\nClés inspectées : ${pattern}`);
 
   let scanned = 0;
   let dead = 0;
