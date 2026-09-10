@@ -12,6 +12,8 @@ import { ClaimCommentsGateway } from '../../ws-notifications/claim-comments.gate
 import { WhatsAppService } from '../../whatsapp/whatsapp.service';
 import { WhatsAppLoginLinkService } from '../../auth/whatsapp-login-link.service';
 import { ClaimAttachmentService } from '../claim-attachment.service';
+import { plainToInstance } from 'class-transformer';
+import { UpdateClaimDto } from '../dto/update-claim.dto';
 
 const mockPrisma = {
   claim: {
@@ -498,6 +500,91 @@ describe('ClaimService', () => {
 
       expect(result.assignedByUserId).toBe('user-7');
       expect(result.assignedByUserName).toBe('Sara NKEMBO');
+    });
+  });
+
+  describe('updateForAdmin — payloads built the way the HTTP layer builds them', () => {
+    // Every other case in this file passes an object literal, where a missing
+    // key is genuinely missing. The real DTO is a class, and the properties it
+    // declares are emitted as class fields (target ES2023 implies
+    // `useDefineForClassFields`), so `plainToInstance` returns an instance
+    // carrying every key — `assigned_user_id` included — whatever the client
+    // sent. That gap hid a bug where a status-only edit was read as an
+    // unassignment: it refused the write for anyone but the assigner and a
+    // SUPER_ADMIN, and cleared the assignee when it did go through.
+    //
+    // These cases go through `plainToInstance` exactly as `ValidationPipe`
+    // (`transform: true`) does, so the literal can never paper over it again.
+    const assignedByOther = {
+      ...baseClaim,
+      assigned_user_id: 'user-2',
+      assigned_by_user_id: 'user-9',
+    };
+
+    beforeEach(() => {
+      mockPrisma.claim.update.mockResolvedValue(assignedByOther);
+      mockPrisma.profile.findUnique.mockResolvedValue(null);
+      mockPrisma.claim.findUnique.mockResolvedValue(assignedByOther);
+    });
+
+    it('is a class whose fields exist even when the client omits them', () => {
+      // Guards the premise of the tests below: if this ever becomes false the
+      // bug is gone for a different reason and these cases stop proving much.
+      const dto = plainToInstance(UpdateClaimDto, { status: 'COMPLETED' });
+      expect('assigned_user_id' in dto).toBe(true);
+      expect(dto.assigned_user_id).toBeUndefined();
+    });
+
+    it('lets a non-assigner move an assigned claim to COMPLETED', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({ role: 'MANAGER' });
+      const dto = plainToInstance(UpdateClaimDto, { status: 'COMPLETED' });
+
+      await expect(
+        service.updateForAdmin('claim-1', dto, 'user-5'),
+      ).resolves.toBeDefined();
+    });
+
+    it('leaves the assignee alone on a status-only edit', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({ role: 'MANAGER' });
+      const dto = plainToInstance(UpdateClaimDto, { status: 'COMPLETED' });
+
+      await service.updateForAdmin('claim-1', dto, 'user-5');
+
+      const data = mockPrisma.claim.update.mock.calls[0][0].data;
+      expect(data).toEqual({ status: 'COMPLETED' });
+      expect(data).not.toHaveProperty('assigned_user_id');
+      expect(data).not.toHaveProperty('assigned_by_user_id');
+    });
+
+    it('does not email the assignee that they were unassigned', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({ role: 'MANAGER' });
+      const dto = plainToInstance(UpdateClaimDto, { status: 'COMPLETED' });
+
+      await service.updateForAdmin('claim-1', dto, 'user-5');
+
+      expect(mockNotifications.notifyClaimUnassigned).not.toHaveBeenCalled();
+    });
+
+    it('still refuses a non-assigner clearing the assignee outright', async () => {
+      // The fix must not have simply disabled the guard.
+      mockPrisma.user.findUnique.mockResolvedValue({ role: 'MANAGER' });
+      const dto = plainToInstance(UpdateClaimDto, { assigned_user_id: null });
+
+      await expect(
+        service.updateForAdmin('claim-1', dto, 'user-5'),
+      ).rejects.toThrow(ForbiddenException);
+      expect(mockPrisma.claim.update).not.toHaveBeenCalled();
+    });
+
+    it('still lets the assigner clear the assignee', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({ role: 'MANAGER' });
+      const dto = plainToInstance(UpdateClaimDto, { assigned_user_id: null });
+
+      await service.updateForAdmin('claim-1', dto, 'user-9');
+
+      const data = mockPrisma.claim.update.mock.calls[0][0].data;
+      expect(data.assigned_user_id).toBeNull();
+      expect(data.assigned_by_user_id).toBeNull();
     });
   });
 
