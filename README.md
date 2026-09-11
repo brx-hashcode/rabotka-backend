@@ -1,8 +1,4 @@
 <p align="center">
-  <img src="./rabotka-logo.png" width="120" alt="Rabotka Logo" />
-</p>
-
-<p align="center">
   <strong>Rabotka Backend API</strong>
 </p>
 
