@@ -35,6 +35,7 @@ describe('PortfolioService', () => {
       delete: AnyMock;
     };
     application: { count: AnyMock };
+    contactRecord: { groupBy: AnyMock };
   };
   let fileService: { uploadToStorage: AnyMock };
   let storageService: { delete: AnyMock };
@@ -61,6 +62,7 @@ describe('PortfolioService', () => {
         delete: jest.fn(),
       },
       application: { count: jest.fn() },
+      contactRecord: { groupBy: jest.fn().mockResolvedValue([]) },
     };
     fileService = { uploadToStorage: jest.fn() };
     storageService = { delete: jest.fn().mockResolvedValue(undefined) };

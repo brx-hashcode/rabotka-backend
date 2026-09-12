@@ -7,19 +7,21 @@ import {
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ConfigService } from '@nestjs/config';
 import {
+  BillingStatus,
+  ContactRecordOrigin,
+  InvoiceReason,
+  PaymentMethod,
   PaymentRequestStatus,
   PaymentRequestType,
+  PaymentStatus,
+  PaymentType,
   Prisma,
   WalletTransactionType,
-  PaymentType,
-  PaymentMethod,
-  PaymentStatus,
-  InvoiceReason,
-  BillingStatus,
 } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { resolvePaymentType } from './payment-type';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
+import { ContactRecordService } from '../contact-unlock/contact-record.service';
 import { deletedAtFilter } from '../../common/utils/soft-delete.util';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { WalletService } from '../wallet/wallet.service';
@@ -124,6 +126,8 @@ export class PaymentRequestService {
     // mid-list silently shifts fourteen mocks by one.
     private readonly feedback: WhatsAppFeedbackService,
     private readonly referralService: ReferralService,
+    // Appended for the same reason as `feedback` above: positional mocks.
+    private readonly contactRecords: ContactRecordService,
   ) {}
 
   /**
@@ -188,7 +192,10 @@ export class PaymentRequestService {
     }
 
     const activeGateway = this.config.get<string>('PAYMENT_GATEWAY_DRIVER');
-    if (!activeGateway) throw new Error('PAYMENT_GATEWAY_DRIVER env var is required but not set.');
+    if (!activeGateway)
+      throw new Error(
+        'PAYMENT_GATEWAY_DRIVER env var is required but not set.',
+      );
 
     return {
       id: request.id,
@@ -335,7 +342,10 @@ export class PaymentRequestService {
     }
 
     const activeGateway = this.config.get<string>('PAYMENT_GATEWAY_DRIVER');
-    if (!activeGateway) throw new Error('PAYMENT_GATEWAY_DRIVER env var is required but not set.');
+    if (!activeGateway)
+      throw new Error(
+        'PAYMENT_GATEWAY_DRIVER env var is required but not set.',
+      );
 
     await this.prisma.paymentRequest.update({
       where: { id: request.id },
@@ -918,7 +928,12 @@ export class PaymentRequestService {
       relatedEntityId: relatedEntity?.id,
     });
 
-    // 2. Generate PDF
+    // 2. Generate PDF — but only if there is somewhere to send it. The invoice
+    // record above is a financial record and is always written; rendering its
+    // PDF is pure work for the email, and most profiles have no email address.
+    // It stays available on demand in the app's invoice list either way.
+    if (!request.profile.email) return;
+
     const { buffer, filename } = await this.invoiceService.downloadAsAdmin(
       invoice.id,
     );
@@ -989,7 +1004,22 @@ export class PaymentRequestService {
     request: PaymentRequestWithProfile,
     context: PaymentProcessingContext,
   ): Promise<void> {
-    if (!context.recommendationWorkerId || !request.profile.phone) return;
+    if (!context.recommendationWorkerId) return;
+
+    // Recorded BEFORE the phone guard below. The employer has paid either way,
+    // and whether we can reach them on WhatsApp says nothing about whether the
+    // money moved — gating the ledger on a deliverable phone number would drop
+    // exactly the payments hardest to reconcile later.
+    await this.contactRecords.record({
+      employerId: request.profile_id,
+      workerId: context.recommendationWorkerId,
+      origin: ContactRecordOrigin.DIRECT,
+      amount: context.amount,
+      unlockedAt: new Date(),
+      paymentRequestId: request.id,
+    });
+
+    if (!request.profile.phone) return;
 
     try {
       const worker = await this.prisma.profile.findUnique({

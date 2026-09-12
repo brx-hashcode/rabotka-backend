@@ -278,7 +278,7 @@ export class ResumeService {
 
   <!-- CONTACT LINE -->
   <div style="margin-top:22px; display:flex; flex-wrap:wrap; align-items:center; gap:14px; font-size:12.5px; color:#3C4641; letter-spacing:0.01em;">
-    <span style="display:inline-flex; align-items:center; gap:7px;"><span style="width:5px; height:5px; border-radius:50%; background:#10C95A; display:inline-block;"></span>${esc(profile.email)}</span>
+    ${profile.email ? `<span style="display:inline-flex; align-items:center; gap:7px;"><span style="width:5px; height:5px; border-radius:50%; background:#10C95A; display:inline-block;"></span>${esc(profile.email)}</span>` : ''}
     <span style="display:inline-flex; align-items:center; gap:7px;"><span style="width:5px; height:5px; border-radius:50%; background:#10C95A; display:inline-block;"></span>${esc(profile.phone ?? '')}</span>
     <span style="display:inline-flex; align-items:center; gap:7px;"><span style="width:5px; height:5px; border-radius:50%; background:#10C95A; display:inline-block;"></span>${esc(profile.address)}</span>
   </div>

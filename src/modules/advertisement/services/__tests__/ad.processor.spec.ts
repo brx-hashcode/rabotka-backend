@@ -333,7 +333,7 @@ describe('AdProcessor', () => {
       prisma.$queryRaw.mockResolvedValue([]);
       // email='' → EMAIL not deliverable
       adTargeting.resolveRecipients.mockResolvedValue([
-        makeProfile({ email: '', whatsapp_connected: false }),
+        makeProfile({ email: null, whatsapp_connected: false }),
       ]);
 
       await service.process({ data: { type: 'dispatch' } });
@@ -415,7 +415,7 @@ describe('AdProcessor', () => {
       prisma.adDeliveryLog.count.mockResolvedValue(0);
       prisma.$queryRaw.mockResolvedValue([]);
       adTargeting.resolveRecipients.mockResolvedValue([
-        makeProfile({ email: '', phone: null, whatsapp_connected: false }),
+        makeProfile({ email: null, phone: null, whatsapp_connected: false }),
       ]);
 
       await service.process({ data: { type: 'dispatch' } });
@@ -543,7 +543,7 @@ describe('AdProcessor', () => {
       prisma.$queryRaw.mockResolvedValue([]);
       // Profile with no deliverable channels
       adTargeting.resolveRecipients.mockResolvedValue([
-        makeProfile({ email: '', whatsapp_connected: false }),
+        makeProfile({ email: null, whatsapp_connected: false }),
       ]);
 
       await service.process({ data: { type: 'dispatch' } });

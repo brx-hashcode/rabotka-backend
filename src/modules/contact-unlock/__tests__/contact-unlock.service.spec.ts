@@ -136,6 +136,10 @@ describe('ContactUnlockService', () => {
       sendContactUnlockedNotification: jest.fn().mockResolvedValue(undefined),
     };
     interactionEvents = { record: jest.fn(), recordMany: jest.fn() };
+    // The ledger writer: one row per completed unlock. Swallows its own
+    // errors in production, so a bare jest.fn() is the honest stand-in.
+    const contactRecords = { record: jest.fn().mockResolvedValue(undefined) };
+
     service = new ContactUnlockService(
       prisma as any,
       systemConfig as any,
@@ -144,6 +148,7 @@ describe('ContactUnlockService', () => {
       matchingService as any,
       botNotification as any,
       interactionEvents as any,
+      contactRecords as any,
     );
   });
 

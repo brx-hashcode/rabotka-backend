@@ -11,7 +11,7 @@ export type ClaimSourceProfile = {
   first_name: string;
   last_name: string;
   phone: string;
-  email: string;
+  email: string | null;
   avatar_url: string | null;
   city: string | null;
   country_code: string | null;
@@ -84,7 +84,12 @@ export function buildClaims(
     claims.phone_number_verified = true;
   }
 
-  if (granted.has('email')) {
+  // Both claims are omitted entirely when the profile has no email, rather than
+  // sent as null. OIDC relying parties branch on a claim's *presence*, and a
+  // present-but-null `email` reads as "this account has a verified-shaped field
+  // that is broken" instead of "this account has no email" — which, for most of
+  // our workers, is simply the truth.
+  if (granted.has('email') && profile.email) {
     claims.email = profile.email;
     // Rabotka does not verify email addresses — signup takes one and never
     // sends a confirmation to it. Reporting `false` is the honest answer and

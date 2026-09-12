@@ -109,6 +109,11 @@ export const LATERAL_ACCESS: Record<LateralRole, Record<string, AreaAccess>> = {
     // only: the feedback rows carry the author's name and phone, and support's
     // reach into personal data stays at the same level as `admin/profiles`.
     'admin/feedback': 'read',
+    // Who paid to reach whom. Support fields "I paid and never got the
+    // contact" and finance reconciles the fees behind it, so both need to
+    // read the ledger; neither has any business writing to it — and there is
+    // no write endpoint to reach anyway.
+    'admin/contact-records': 'read',
     // The paperwork behind a claim. "What did they actually agree to?" is
     // unanswerable without the signed contract, and escalating to a manager to
     // read a PDF is the kind of hop that makes support slower than the problem.

@@ -21,7 +21,7 @@ describe('PaymentRequestController', () => {
   });
 
   it('getList() delegates to service', () => {
-    controller.getList({ page: 1 } as any);
+    controller.getList({ page: 1 });
     expect(service.getList).toHaveBeenCalledWith({ page: 1 });
   });
 });
@@ -49,7 +49,7 @@ describe('PaymentRequestPublicController', () => {
     controller.initiatePayment('tok', {
       phone: '237600000001',
       operator: 'MTN',
-    } as any);
+    });
     expect(service.initiatePayment).toHaveBeenCalledWith(
       'tok',
       '237600000001',

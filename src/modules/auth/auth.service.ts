@@ -62,7 +62,8 @@ export interface MobileSessionUser {
   id: string;
   first_name: string;
   last_name: string;
-  email: string;
+  /** Null for the majority, who sign up with a phone and no email. */
+  email: string | null;
   phone: string;
   avatar_url: string | null;
   profile_type: string;

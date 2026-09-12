@@ -23,7 +23,8 @@ export type BotProfile = {
   first_name: string;
   last_name: string;
   phone: string;
-  email: string;
+  /** Null for the majority, who sign up with a phone and no email. */
+  email: string | null;
   profile_type: BotProfileType;
   status: string;
   reliability_score: number | null;

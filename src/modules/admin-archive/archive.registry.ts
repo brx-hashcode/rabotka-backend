@@ -55,6 +55,11 @@ export const ARCHIVE_REGISTRY: Record<ArchiveEntity, ArchiveConfig> = {
       { field: 'wallets', label: 'portefeuilles' },
       { field: 'kyc_documents', label: 'documents KYC' },
       { field: 'kyc_verification_images', label: 'images de vérification KYC' },
+      // Both directions: a profile that paid to reach someone, and one someone
+      // paid to reach. Either way money moved over this profile and the ledger
+      // has to outlive it.
+      { field: 'contact_records_as_employer', label: 'contacts payés' },
+      { field: 'contact_records_as_worker', label: 'contacts payés (reçus)' },
     ],
   },
 
@@ -72,6 +77,7 @@ export const ARCHIVE_REGISTRY: Record<ArchiveEntity, ArchiveConfig> = {
       { field: 'applications', label: 'candidatures' },
       { field: 'assignments', label: 'missions' },
       { field: 'contact_unlock_attempts', label: 'déverrouillages de contact' },
+      { field: 'contact_records', label: 'contacts payés' },
     ],
   },
 

@@ -160,7 +160,7 @@ describe('AdNotificationService', () => {
 
     it('returns false when no email on EMAIL channel', async () => {
       const result = await service.sendOnChannel(
-        { email: '', name: 'No Email' },
+        { email: null, name: 'No Email' },
         basePayload,
         'EMAIL',
       );

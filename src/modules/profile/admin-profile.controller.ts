@@ -29,6 +29,7 @@ import {
 } from '@nestjs/swagger';
 import { ProfileService } from './profile.service';
 import { ArchiveService } from '../admin-archive/archive.service';
+import { AdminContactRecordService } from '../contact-unlock/admin-contact-record.service';
 import { BulkDeleteDto } from '../../common/dto/bulk-delete.dto';
 import { LogService } from '../log/log.service';
 import { extractRequestMeta } from '../../common/utils/request-meta.util';
@@ -77,6 +78,9 @@ export class AdminProfileController {
     private readonly walletService: WalletService,
     private readonly portfolioService: PortfolioService,
     private readonly archiveService: ArchiveService,
+    // Appended rather than slotted in: specs construct this controller
+    // positionally, so a mid-list parameter shifts every mock after it.
+    private readonly adminContactRecords: AdminContactRecordService,
   ) {}
 
   @Get()
@@ -342,6 +346,17 @@ export class AdminProfileController {
   @ApiOperation({ summary: 'Get payment requests for a profile (admin only)' })
   async getPaymentRequests(@Param('id') id: string) {
     return await this.paymentRequestService.getByProfileId(id);
+  }
+
+  @Get(':id/contacts')
+  @Roles(UserRole.MODERATOR)
+  @ApiOperation({
+    summary: 'Paid contacts for a profile (admin only)',
+    description:
+      'Both directions: `contacted` is everyone this employer paid to reach, `contactedBy` is every employer who paid to reach this worker. Same table as `admin/contact-records`, so the tab and the list cannot disagree.',
+  })
+  async getContacts(@Param('id') id: string) {
+    return this.adminContactRecords.forProfile(id);
   }
 
   @Get(':id/wallet')

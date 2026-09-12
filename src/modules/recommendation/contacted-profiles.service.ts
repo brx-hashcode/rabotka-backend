@@ -23,7 +23,7 @@ export type ContactedProfile = {
   portfolioSlug: string | null;
   /** The point of the whole feature: the details the employer paid for. */
   phone: string;
-  email: string;
+  email: string | null;
   origin: ContactOrigin;
   unlockedAt: string;
   /** Present for MISSION unlocks — which job brought them together. */
@@ -155,7 +155,9 @@ export class ContactedProfilesService {
 
     // A worker reached through a mission is the richer story (there is a job to
     // name), so that origin wins when both exist for the same pair.
-    const missionByWorker = new Map(missionUnlocks.map((u) => [u.worker_id, u]));
+    const missionByWorker = new Map(
+      missionUnlocks.map((u) => [u.worker_id, u]),
+    );
 
     const contacts = profiles.map((p): ContactedProfile => {
       const mission = missionByWorker.get(p.id);

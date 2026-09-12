@@ -32,7 +32,7 @@ import type { RecurrenceLabelInput } from '../../common/utils/recurrence-label.u
  * mailing the location as the title.
  */
 export type EventMailParams = {
-  to: string;
+  to: string | null;
   name: string;
   title: string;
   startDate: string;
@@ -220,7 +220,7 @@ export class NotificationService {
   }
 
   async notifyAdvertisementCreated(params: {
-    to: string;
+    to: string | null;
     name: string;
     title: string;
     startDate: string;
@@ -231,6 +231,11 @@ export class NotificationService {
     imageUrl?: string | null;
     tags?: string[] | null;
   }): Promise<void> {
+    // `sendMail` would drop this anyway, but the image download below is a
+    // network round-trip — skip it rather than fetch an attachment for a mail
+    // that is about to be discarded.
+    if (!params.to?.trim()) return;
+
     const attachment = await this.downloadImageAttachment(params.imageUrl);
 
     await this.mail.sendMail({
@@ -244,7 +249,7 @@ export class NotificationService {
   }
 
   async notifyAdvertisementCompleted(params: {
-    to: string;
+    to: string | null;
     adTitle: string;
     startDate: string;
     endDate: string;
@@ -252,6 +257,10 @@ export class NotificationService {
     timeline?: AdTimelinePoint[];
     excelBuffer: Buffer;
   }): Promise<void> {
+    // The caller has already built `excelBuffer`, but the HTML render below is
+    // the expensive half — skip it when there is nobody to send it to.
+    if (!params.to?.trim()) return;
+
     const slugTitle = params.adTitle
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')

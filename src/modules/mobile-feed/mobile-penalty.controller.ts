@@ -6,7 +6,12 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { PaymentRequestType } from '@prisma/client';
 import { ProfileAuthGuard } from '../auth/guards/profile-auth.guard';
 import type { ProfileAuthenticatedRequest } from '../auth/guards/jwt-auth.guard';

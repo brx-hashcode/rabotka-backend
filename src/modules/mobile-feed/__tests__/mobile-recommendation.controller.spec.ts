@@ -27,6 +27,7 @@ describe('MobileRecommendationController — worker-feed tiers', () => {
     profile: { findUnique: jest.Mock; findMany: jest.Mock };
     jobOffer: { findMany: jest.Mock };
     application: { groupBy: jest.Mock };
+    contactRecord: { groupBy: jest.Mock };
     walletTransaction: { findMany: jest.Mock };
     paymentRequest: { findMany: jest.Mock };
   };
@@ -82,6 +83,7 @@ describe('MobileRecommendationController — worker-feed tiers', () => {
       },
       jobOffer: { findMany: jest.fn().mockResolvedValue([]) },
       application: { groupBy: jest.fn().mockResolvedValue([]) },
+      contactRecord: { groupBy: jest.fn().mockResolvedValue([]) },
       walletTransaction: { findMany: jest.fn().mockResolvedValue([]) },
       paymentRequest: { findMany: jest.fn().mockResolvedValue([]) },
     };
@@ -114,9 +116,6 @@ describe('MobileRecommendationController — worker-feed tiers', () => {
       interactionEvents as never,
       rollout as never,
       engine as never,
-      // The real service on the same prisma mock: the exclusion assertions below
-      // are only meaningful if the derivation itself runs.
-      new ContactedProfilesService(prisma as never),
       // Returns a slug so workerDetail() does not try to mint one; the
       // mint-on-demand path has its own test below.
       {
@@ -293,7 +292,12 @@ describe('MobileRecommendationController — worker-feed tiers', () => {
       });
     });
 
-    it('excludes already-contacted workers here too', async () => {
+    // The feed used to hide anyone this employer had already paid to reach.
+    // That took the best-matched workers out of it permanently and made hiring
+    // the same person twice harder than hiring them once — while an unlock is a
+    // fresh payment every time, so there is nothing to protect them from. The
+    // repeats are recorded in `contact_records`; the feed just ranks.
+    it('still lists workers this employer has already paid to contact', async () => {
       mockType(ProfileType.EMPLOYER);
       prisma.paymentRequest.findMany.mockResolvedValue([
         { recommendation_worker_id: 'w-contacted' },
@@ -302,7 +306,7 @@ describe('MobileRecommendationController — worker-feed tiers', () => {
 
       await controller.workerFeed(reqFor('e1') as never);
 
-      expect(lastProfileWhere().id).toEqual({ notIn: ['w-contacted'] });
+      expect(lastProfileWhere().id).toBeUndefined();
     });
   });
 

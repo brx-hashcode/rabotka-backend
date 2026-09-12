@@ -417,7 +417,13 @@ model Profile {
   /// must not make the second signup fail. Optional at every layer for the same
   /// reason — most people have only one number.
   direct_phone                      String?
-  email                             String             @unique
+  /// Optional: Rabotka onboards the informal sector, where most workers have a
+  /// phone but no email address. `phone` is the real identity — onboarding is
+  /// WhatsApp-first and signup proves the number. Nullable rather than blank:
+  /// the unique index treats '' as a value, so two emailless profiles holding
+  /// '' would collide. Automated mail to a profile without one is skipped
+  /// silently in `MailService.sendMail`.
+  email                             String?            @unique
   address                           String
   /// ISO 3166-1 alpha-2. What the ranker and the coming filters compare —
   /// stable and case-safe, unlike the display name beside it.
@@ -496,6 +502,8 @@ model Profile {
   claims                          Claim[]                       @relation("ClaimProfile")
   unlock_attempts_as_worker       ContactUnlockAttempt[]        @relation("UnlockWorker")
   unlock_attempts_as_employer     ContactUnlockAttempt[]        @relation("UnlockEmployer")
+  contact_records_as_worker       ContactRecord[]               @relation("ContactRecordWorker")
+  contact_records_as_employer     ContactRecord[]               @relation("ContactRecordEmployer")
   claims_created                  Claim[]                       @relation("ClaimCreatedByProfile")
   claim_comments                  ClaimComment[]                @relation("ClaimCommentProfile")
   events                          Event[]                       @relation("EventProfiles")
@@ -811,6 +819,7 @@ model JobOffer {
   applications            Application[]
   assignments             Assignment[]
   contact_unlock_attempts ContactUnlockAttempt[]
+  contact_records         ContactRecord[]
   saved_by                SavedJob[]
   deleted_at              DateTime?              @db.Timestamptz
 
@@ -935,6 +944,72 @@ model ContactUnlockAttempt {
   @@index([worker_id], name: "idx_unlock_worker")
   @@index([employer_id], name: "idx_unlock_employer")
   @@map("contact_unlock_attempts")
+}
+
+/// How an employer came to hold a worker's contact details.
+enum ContactRecordOrigin {
+  /// Through an application on a job offer, via ContactUnlockAttempt.
+  MISSION
+  /// Straight from a recommendation or worker search — no job involved.
+  DIRECT
+}
+
+/// Every time an employer PAID to reach a worker, whatever route they took.
+///
+/// This exists because the two unlock paths recorded themselves differently and
+/// one of them recorded nothing at all. The mission path writes a
+/// ContactUnlockAttempt; the recommendation path is stateless, leaving only a
+/// wallet transaction whose `reference_id` is a bare worker uuid. So
+/// "who has this employer paid to reach?" had to be RECONSTRUCTED from payment
+/// rows at read time (see `contacted-profiles.service.ts` and
+/// `paid-contacts.sql.ts`), and admin could not answer it at all.
+///
+/// A ledger rather than a state machine: rows are append-only facts about
+/// money that moved. The attempt table keeps its two-sided payment state,
+/// expiry and refunds — none of which apply to a direct unlock, which is why
+/// this is a separate table rather than a nullable application_id on that one.
+///
+/// One row per PAYMENT, not per pair. An employer who pays twice for the same
+/// worker is charged twice and gets two rows; deduplicate on read when you want
+/// relationships rather than transactions.
+model ContactRecord {
+  id          String              @id @default(uuid()) @db.Uuid
+  created_at  DateTime            @default(now())
+  updated_at  DateTime            @updatedAt
+  employer_id String              @db.Uuid
+  worker_id   String              @db.Uuid
+  origin      ContactRecordOrigin
+  /// What the EMPLOYER paid. On a multi-seat offer the employer pays once for
+  /// the whole job, so each row carries the per-attempt fee — sum by
+  /// `job_offer_id`, not by row, or one payment counts N times.
+  amount      Decimal             @db.Decimal(10, 2)
+  unlocked_at DateTime
+
+  /// Set for MISSION only; all three are null for a DIRECT unlock.
+  ///
+  /// `@unique` on the attempt id gives one ledger row per mission unlock, so a
+  /// retried `payUnlock` or the multi-seat cascade cannot double-write. It is
+  /// nullable, and Postgres allows many NULLs in a unique index — which is what
+  /// leaves DIRECT rows unconstrained, exactly as "one row per payment" needs.
+  job_offer_id              String? @db.Uuid
+  application_id            String? @db.Uuid
+  contact_unlock_attempt_id String? @unique @db.Uuid
+
+  /// Whichever settled the money. Both are null on backfilled rows, where only
+  /// the originating wallet transaction survives.
+  payment_id         String? @db.Uuid
+  payment_request_id String? @db.Uuid
+
+  employer  Profile   @relation("ContactRecordEmployer", fields: [employer_id], references: [id], onDelete: Cascade)
+  worker    Profile   @relation("ContactRecordWorker", fields: [worker_id], references: [id], onDelete: Cascade)
+  job_offer JobOffer? @relation(fields: [job_offer_id], references: [id], onDelete: SetNull)
+
+  @@index([employer_id, worker_id], name: "idx_contact_record_pair")
+  @@index([employer_id], name: "idx_contact_record_employer")
+  @@index([worker_id], name: "idx_contact_record_worker")
+  @@index([origin], name: "idx_contact_record_origin")
+  @@index([unlocked_at], name: "idx_contact_record_unlocked_at")
+  @@map("contact_records")
 }
 
 model Penalty {

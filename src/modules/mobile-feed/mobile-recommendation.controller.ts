@@ -23,11 +23,11 @@ import {
   InteractionSource,
   Prisma,
   ProfileType,
+  ContactRecordOrigin,
   PaymentRequestType,
   PaymentRequestStatus,
   VerificationStatus,
 } from '@prisma/client';
-import { ContactedProfilesService } from '../recommendation/contacted-profiles.service';
 import { withCityFilter } from '../../common/queries/city-filter';
 import { PortfolioService } from '../portfolio/portfolio.service';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
@@ -97,6 +97,21 @@ type RecommendedWorker = {
    */
   isVerified: boolean;
   completedMissions: number;
+  /**
+   * How many times an employer paid to reach this worker, split by route.
+   *
+   * Demand rather than delivery: `completedMissions` says they finish what
+   * they start, this says people want to hire them. Counts payments, not
+   * distinct employers — a repeat client is a stronger signal, not a weaker
+   * one.
+   *
+   * Split because the two routes mean different things. `mission` is an
+   * employer who unlocked this worker through an application on a job they
+   * posted; `direct` is one who went looking and paid to reach them cold. The
+   * second is the purer demand signal, so a ranker should be able to weigh
+   * them separately rather than being handed a total that hides the mix.
+   */
+  timesContacted: { total: number; mission: number; direct: number };
   portfolioSlug: string | null;
   score: number;
 };
@@ -117,7 +132,6 @@ export class MobileRecommendationController {
     private readonly interactionEvents: InteractionEventService,
     private readonly rollout: EngineRolloutService,
     private readonly engine: RecommendationEngineService,
-    private readonly contactedProfiles: ContactedProfilesService,
     private readonly portfolio: PortfolioService,
   ) {}
 
@@ -125,7 +139,7 @@ export class MobileRecommendationController {
   @ApiOperation({
     summary: '[Mobile/EMPLOYER] Recommended worker profiles',
     description:
-      'Semantic recommendations when similarity is enabled; otherwise workers in the domains this employer posts offers in, best reliability/rating first, then any eligible worker. Already-contacted workers are excluded at every tier.',
+      'Semantic recommendations when similarity is enabled; otherwise workers in the domains this employer posts offers in, best reliability/rating first, then any eligible worker. Workers already contacted are still listed — an employer may pay to reach the same worker again.',
   })
   @ApiResponse({ status: 200, description: 'Ranked recommended workers' })
   @ApiResponse({ status: 403, description: 'Not an EMPLOYER profile' })
@@ -137,14 +151,19 @@ export class MobileRecommendationController {
     await this.assertEmployer(profileId);
 
     const topN = this.parseLimit(limit, 20, 50);
-    const contactedIds =
-      await this.contactedProfiles.listContactedWorkerIds(profileId);
 
+    // Already-contacted workers are NOT excluded any more.
+    //
+    // An employer can reach the same worker as many times as they want, and
+    // each unlock is a fresh payment — so hiding someone the moment they were
+    // paid for once took the best-matched workers out of the feed permanently
+    // and made a recurring hire harder than a first one. The ledger
+    // (`contact_records`) is what records the repeats; the feed just ranks.
     const {
       workers: served,
       engine,
       tier,
-    } = await this.resolveWorkerFeed(profileId, topN, contactedIds);
+    } = await this.resolveWorkerFeed(profileId, topN, new Set<string>());
 
     // The feed degrades silently by design — every tier returns a plausible list
     // — so without this line a production feed serving `score: 0` from the SQL
@@ -447,18 +466,31 @@ export class MobileRecommendationController {
     ]);
 
     const ids = profiles.map((p) => p.id);
-    const endCounts =
+    const [endCounts, contactCounts] =
       ids.length === 0
-        ? []
-        : await this.prisma.application.groupBy({
-            by: ['worker_id'],
-            where: { worker_id: { in: ids }, status: 'END' },
-            _count: { _all: true },
-          });
+        ? [[], []]
+        : await Promise.all([
+            this.prisma.application.groupBy({
+              by: ['worker_id'],
+              where: { worker_id: { in: ids }, status: 'END' },
+              _count: { _all: true },
+            }),
+            this.prisma.contactRecord.groupBy({
+              by: ['worker_id', 'origin'],
+              where: { worker_id: { in: ids } },
+              _count: { _all: true },
+            }),
+          ]);
     const endById = new Map(endCounts.map((c) => [c.worker_id, c._count._all]));
+    const contactedById = this.tallyContacts(contactCounts);
 
     const items = profiles.map((p) =>
-      this.toCard(p, endById.get(p.id) ?? 0, 0),
+      this.toCard(
+        p,
+        endById.get(p.id) ?? 0,
+        0,
+        contactedById.get(p.id) ?? { total: 0, mission: 0, direct: 0 },
+      ),
     );
     return { items, total };
   }
@@ -490,16 +522,25 @@ export class MobileRecommendationController {
           },
         };
 
-    const [profiles, endCounts] = await Promise.all([
+    const [profiles, endCounts, contactCounts] = await Promise.all([
       this.prisma.profile.findMany({ where, select: WORKER_SELECT }),
       this.prisma.application.groupBy({
         by: ['worker_id'],
         where: { worker_id: { in: ids }, status: 'END' },
         _count: { _all: true },
       }),
+      // Grouped, not counted per worker: a feed of 50 would otherwise be 50
+      // round-trips for a number shown on a card. Grouped by origin too, so
+      // the split costs the same single query as the total.
+      this.prisma.contactRecord.groupBy({
+        by: ['worker_id', 'origin'],
+        where: { worker_id: { in: ids } },
+        _count: { _all: true },
+      }),
     ]);
 
     const endById = new Map(endCounts.map((c) => [c.worker_id, c._count._all]));
+    const contactedById = this.tallyContacts(contactCounts);
     const byId = new Map(profiles.map((p) => [p.id, p]));
     const scoreById = new Map(hits.map((h) => [h.id, h.score]));
 
@@ -507,7 +548,12 @@ export class MobileRecommendationController {
       .map((id) => byId.get(id))
       .filter((p): p is NonNullable<typeof p> => Boolean(p))
       .map((p) =>
-        this.toCard(p, endById.get(p.id) ?? 0, scoreById.get(p.id) ?? 0),
+        this.toCard(
+          p,
+          endById.get(p.id) ?? 0,
+          scoreById.get(p.id) ?? 0,
+          contactedById.get(p.id) ?? { total: 0, mission: 0, direct: 0 },
+        ),
       );
   }
 
@@ -528,6 +574,7 @@ export class MobileRecommendationController {
     },
     completedMissions: number,
     score: number,
+    timesContacted: { total: number; mission: number; direct: number },
   ): RecommendedWorker {
     return {
       id: p.id,
@@ -545,9 +592,37 @@ export class MobileRecommendationController {
       address: p.address ?? null,
       isVerified: p.verification_status === VerificationStatus.VERIFIED,
       completedMissions,
+      timesContacted,
       portfolioSlug: p.portfolio_slug,
       score,
     };
+  }
+
+  /** groupBy([worker_id, origin]) rows → per-worker {total, mission, direct}. */
+  private tallyContacts(
+    rows: {
+      worker_id: string;
+      origin: ContactRecordOrigin;
+      _count: { _all: number };
+    }[],
+  ): Map<string, { total: number; mission: number; direct: number }> {
+    const byWorker = new Map<
+      string,
+      { total: number; mission: number; direct: number }
+    >();
+    for (const r of rows) {
+      const entry = byWorker.get(r.worker_id) ?? {
+        total: 0,
+        mission: 0,
+        direct: 0,
+      };
+      const n = r._count._all;
+      entry.total += n;
+      if (r.origin === ContactRecordOrigin.MISSION) entry.mission += n;
+      else entry.direct += n;
+      byWorker.set(r.worker_id, entry);
+    }
+    return byWorker;
   }
 
   private parseLimit(value: string | undefined, fallback: number, max: number) {
