@@ -4,6 +4,7 @@ import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { WhatsAppService } from '../../whatsapp/whatsapp.service';
 import { WhatsAppFeedbackService } from '../../whatsapp/feedback/whatsapp-feedback.service';
 import { ReferralService } from '../../referral/referral.service';
+import { ContactRecordService } from '../../contact-unlock/contact-record.service';
 import { LogService } from '../../log/log.service';
 import { ConfigService } from '@nestjs/config';
 import { MailService } from '../../mail/mail.service';
@@ -79,21 +80,32 @@ describe('PaymentRequestService — WALLET_TOP_UP post-payment', () => {
       | 'getProfileWalletBalance'
     >
   >;
-  let mockBotNotification: { sendMessage: jest.Mock; sendContactUnlockedNotification: jest.Mock };
+  let mockBotNotification: {
+    sendMessage: jest.Mock;
+    sendContactUnlockedNotification: jest.Mock;
+  };
   let mockPrisma: Record<string, unknown>;
-  let mockPaymentGateway: { handleWebhookPayload: jest.Mock; initiatePayment: jest.Mock };
+  let mockPaymentGateway: {
+    handleWebhookPayload: jest.Mock;
+    initiatePayment: jest.Mock;
+  };
   let mockInvoiceService: { create: jest.Mock; downloadAsAdmin: jest.Mock };
 
   beforeEach(async () => {
     mockInvoiceService = {
       create: jest.fn().mockResolvedValue({ id: 'inv-1' }),
-      downloadAsAdmin: jest
-        .fn()
-        .mockResolvedValue({ buffer: Buffer.from('pdf'), filename: 'invoice.pdf' }),
+      downloadAsAdmin: jest.fn().mockResolvedValue({
+        buffer: Buffer.from('pdf'),
+        filename: 'invoice.pdf',
+      }),
     };
     mockWalletService = {
-      getOrCreateSystemWallet: jest.fn().mockResolvedValue({ id: 'sys-wallet' }),
-      getOrCreateMobileMoneyWallet: jest.fn().mockResolvedValue({ id: 'mm-wallet' }),
+      getOrCreateSystemWallet: jest
+        .fn()
+        .mockResolvedValue({ id: 'sys-wallet' }),
+      getOrCreateMobileMoneyWallet: jest
+        .fn()
+        .mockResolvedValue({ id: 'mm-wallet' }),
       creditProfileWallet: jest.fn().mockResolvedValue(undefined),
       getProfileWalletBalance: jest.fn().mockResolvedValue(10000),
     };
@@ -123,9 +135,11 @@ describe('PaymentRequestService — WALLET_TOP_UP post-payment', () => {
         updateMany: jest.fn().mockResolvedValue({ count: 0 }),
         count: jest.fn().mockResolvedValue(0),
       },
-      $transaction: jest.fn().mockImplementation((cb: unknown) =>
-        typeof cb === 'function' ? cb(txMock) : Promise.resolve(true),
-      ),
+      $transaction: jest
+        .fn()
+        .mockImplementation((cb: unknown) =>
+          typeof cb === 'function' ? cb(txMock) : Promise.resolve(true),
+        ),
     };
 
     mockPaymentGateway = {
@@ -143,7 +157,10 @@ describe('PaymentRequestService — WALLET_TOP_UP post-payment', () => {
         { provide: PrismaService, useValue: mockPrisma },
         {
           provide: WhatsAppService,
-          useValue: { sendTextMessage: jest.fn().mockResolvedValue(true), sendMediaMessage: jest.fn().mockResolvedValue(true) },
+          useValue: {
+            sendTextMessage: jest.fn().mockResolvedValue(true),
+            sendMediaMessage: jest.fn().mockResolvedValue(true),
+          },
         },
         {
           provide: WhatsAppFeedbackService,
@@ -151,12 +168,34 @@ describe('PaymentRequestService — WALLET_TOP_UP post-payment', () => {
         },
         {
           provide: ReferralService,
-          useValue: { settleForReferee: jest.fn().mockResolvedValue(undefined) },
+          useValue: {
+            settleForReferee: jest.fn().mockResolvedValue(undefined),
+          },
         },
-        { provide: LogService, useValue: { create: jest.fn().mockResolvedValue({}) } },
-        { provide: ConfigService, useValue: { get: jest.fn().mockReturnValue('http://localhost:3000') } },
-        { provide: MailService, useValue: { sendMail: jest.fn().mockResolvedValue(undefined) } },
-        { provide: LayoutService, useValue: { wrap: jest.fn().mockImplementation((html: string) => Promise.resolve(html)) } },
+        {
+          provide: ContactRecordService,
+          useValue: { record: jest.fn().mockResolvedValue(undefined) },
+        },
+        {
+          provide: LogService,
+          useValue: { create: jest.fn().mockResolvedValue({}) },
+        },
+        {
+          provide: ConfigService,
+          useValue: { get: jest.fn().mockReturnValue('http://localhost:3000') },
+        },
+        {
+          provide: MailService,
+          useValue: { sendMail: jest.fn().mockResolvedValue(undefined) },
+        },
+        {
+          provide: LayoutService,
+          useValue: {
+            wrap: jest
+              .fn()
+              .mockImplementation((html: string) => Promise.resolve(html)),
+          },
+        },
         { provide: PaymentService, useValue: { makePayment: jest.fn() } },
         {
           provide: SystemConfigService,
@@ -169,16 +208,32 @@ describe('PaymentRequestService — WALLET_TOP_UP post-payment', () => {
         },
         { provide: WalletService, useValue: mockWalletService },
         { provide: PaymentGatewayService, useValue: mockPaymentGateway },
-        { provide: PaymentStatusGateway, useValue: { emitPaymentStatus: jest.fn() } },
+        {
+          provide: PaymentStatusGateway,
+          useValue: { emitPaymentStatus: jest.fn() },
+        },
         { provide: EventEmitter2, useValue: { emit: jest.fn() } },
         { provide: BotNotificationService, useValue: mockBotNotification },
-        { provide: ContactUnlockService, useValue: { payUnlock: jest.fn(), getContactsIfUnlocked: jest.fn() } },
+        {
+          provide: ContactUnlockService,
+          useValue: { payUnlock: jest.fn(), getContactsIfUnlocked: jest.fn() },
+        },
         {
           provide: InvoiceService,
           useValue: mockInvoiceService,
         },
-        { provide: StorageService, useValue: { upload: jest.fn().mockResolvedValue({ url: 'https://cdn.example.com/invoice.pdf' }) } },
-        { provide: QueueService, useValue: { addJob: jest.fn().mockResolvedValue('job-1') } },
+        {
+          provide: StorageService,
+          useValue: {
+            upload: jest.fn().mockResolvedValue({
+              url: 'https://cdn.example.com/invoice.pdf',
+            }),
+          },
+        },
+        {
+          provide: QueueService,
+          useValue: { addJob: jest.fn().mockResolvedValue('job-1') },
+        },
       ],
     }).compile();
 
@@ -186,7 +241,10 @@ describe('PaymentRequestService — WALLET_TOP_UP post-payment', () => {
   });
 
   it('credits profile wallet with TOP_UP_CREDIT on successful webhook', async () => {
-    await service.handlePaymentCallback({ paymentId: GATEWAY_REF, status: 'SUCCESS' });
+    await service.handlePaymentCallback({
+      paymentId: GATEWAY_REF,
+      status: 'SUCCESS',
+    });
 
     expect(mockWalletService.creditProfileWallet).toHaveBeenCalledWith(
       PROFILE_ID,
@@ -198,7 +256,10 @@ describe('PaymentRequestService — WALLET_TOP_UP post-payment', () => {
   });
 
   it('creates a downloadable WALLET_TOP_UP invoice on successful top-up', async () => {
-    await service.handlePaymentCallback({ paymentId: GATEWAY_REF, status: 'SUCCESS' });
+    await service.handlePaymentCallback({
+      paymentId: GATEWAY_REF,
+      status: 'SUCCESS',
+    });
 
     expect(mockInvoiceService.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -211,9 +272,14 @@ describe('PaymentRequestService — WALLET_TOP_UP post-payment', () => {
   });
 
   it('fetches new balance and sends WhatsApp confirmation after top-up', async () => {
-    await service.handlePaymentCallback({ paymentId: GATEWAY_REF, status: 'SUCCESS' });
+    await service.handlePaymentCallback({
+      paymentId: GATEWAY_REF,
+      status: 'SUCCESS',
+    });
 
-    expect(mockWalletService.getProfileWalletBalance).toHaveBeenCalledWith(PROFILE_ID);
+    expect(mockWalletService.getProfileWalletBalance).toHaveBeenCalledWith(
+      PROFILE_ID,
+    );
     expect(mockBotNotification.sendMessage).toHaveBeenCalledWith(
       mockProfile.phone,
       expect.stringContaining('Wallet rechargé'),
@@ -223,11 +289,15 @@ describe('PaymentRequestService — WALLET_TOP_UP post-payment', () => {
   it('WhatsApp message includes credited amount and new balance', async () => {
     mockWalletService.getProfileWalletBalance.mockResolvedValue(15000);
 
-    await service.handlePaymentCallback({ paymentId: GATEWAY_REF, status: 'SUCCESS' });
+    await service.handlePaymentCallback({
+      paymentId: GATEWAY_REF,
+      status: 'SUCCESS',
+    });
 
-    const sentMessage = mockBotNotification.sendMessage.mock.calls[0]?.[1] as string;
-    expect(sentMessage).toContain('5');    // credited amount
-    expect(sentMessage).toContain('15');   // new balance
+    const sentMessage = mockBotNotification.sendMessage.mock
+      .calls[0]?.[1] as string;
+    expect(sentMessage).toContain('5'); // credited amount
+    expect(sentMessage).toContain('15'); // new balance
   });
 
   it('does NOT credit wallet for PENALTY_BATCH payment (no regression)', async () => {
@@ -235,9 +305,14 @@ describe('PaymentRequestService — WALLET_TOP_UP post-payment', () => {
       ...makeTopUpRequest(),
       request_type: PaymentRequestType.PENALTY_BATCH,
     };
-    (mockPrisma.paymentRequest as Record<string, jest.Mock>).findFirst.mockResolvedValue(penaltyRequest);
+    (
+      mockPrisma.paymentRequest as Record<string, jest.Mock>
+    ).findFirst.mockResolvedValue(penaltyRequest);
 
-    await service.handlePaymentCallback({ paymentId: GATEWAY_REF, status: 'SUCCESS' });
+    await service.handlePaymentCallback({
+      paymentId: GATEWAY_REF,
+      status: 'SUCCESS',
+    });
 
     expect(mockWalletService.creditProfileWallet).not.toHaveBeenCalled();
   });
@@ -248,9 +323,14 @@ describe('PaymentRequestService — WALLET_TOP_UP post-payment', () => {
       request_type: PaymentRequestType.CONTACT_UNLOCK,
       contact_unlock_attempt_id: 'attempt-1',
     };
-    (mockPrisma.paymentRequest as Record<string, jest.Mock>).findFirst.mockResolvedValue(contactRequest);
+    (
+      mockPrisma.paymentRequest as Record<string, jest.Mock>
+    ).findFirst.mockResolvedValue(contactRequest);
 
-    await service.handlePaymentCallback({ paymentId: GATEWAY_REF, status: 'SUCCESS' });
+    await service.handlePaymentCallback({
+      paymentId: GATEWAY_REF,
+      status: 'SUCCESS',
+    });
 
     expect(mockWalletService.creditProfileWallet).not.toHaveBeenCalled();
   });
@@ -262,7 +342,9 @@ describe('PaymentRequestService — WALLET_TOP_UP post-payment', () => {
       .mockImplementationOnce((cb: unknown) =>
         typeof cb === 'function'
           ? cb({
-              paymentRequest: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+              paymentRequest: {
+                updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+              },
               payment: { create: jest.fn().mockResolvedValue({}) },
               walletTransaction: { create: jest.fn().mockResolvedValue({}) },
               wallet: { update: jest.fn().mockResolvedValue({}) },
@@ -272,7 +354,9 @@ describe('PaymentRequestService — WALLET_TOP_UP post-payment', () => {
       .mockImplementationOnce((cb: unknown) =>
         typeof cb === 'function'
           ? cb({
-              paymentRequest: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
+              paymentRequest: {
+                updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+              },
               payment: { create: jest.fn().mockResolvedValue({}) },
               walletTransaction: { create: jest.fn().mockResolvedValue({}) },
               wallet: { update: jest.fn().mockResolvedValue({}) },
@@ -280,8 +364,14 @@ describe('PaymentRequestService — WALLET_TOP_UP post-payment', () => {
           : Promise.resolve(false),
       );
 
-    await service.handlePaymentCallback({ paymentId: GATEWAY_REF, status: 'SUCCESS' });
-    await service.handlePaymentCallback({ paymentId: GATEWAY_REF, status: 'SUCCESS' });
+    await service.handlePaymentCallback({
+      paymentId: GATEWAY_REF,
+      status: 'SUCCESS',
+    });
+    await service.handlePaymentCallback({
+      paymentId: GATEWAY_REF,
+      status: 'SUCCESS',
+    });
 
     // creditProfileWallet should only have been called once
     expect(mockWalletService.creditProfileWallet).toHaveBeenCalledTimes(1);

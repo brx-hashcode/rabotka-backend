@@ -17,7 +17,14 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import {
+  IsInt,
+  IsOptional,
+  IsString,
+  Max,
+  MaxLength,
+  Min,
+} from 'class-validator';
 import { PaymentRequestType, ProfileType } from '@prisma/client';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { ProfileAuthGuard } from '../auth/guards/profile-auth.guard';
@@ -150,7 +157,7 @@ export class MobileWorkerMissionController {
 
   @Get(':id/unlock')
   @ApiOperation({
-    summary: "[Mobile/WORKER] My side of the contact unlock",
+    summary: '[Mobile/WORKER] My side of the contact unlock',
     description:
       'Contacts are released to both parties on WhatsApp only once BOTH have paid their share. The employer had web endpoints for this from the start; the worker did not, so an accepted worker could be stuck at "Paiement requis" with no way to pay.',
   })
@@ -183,7 +190,7 @@ export class MobileWorkerMissionController {
   @Post(':id/unlock/pay-wallet')
   @UseGuards(ActiveProfileGuard, KycVerifiedGuard)
   @ApiOperation({
-    summary: "[Mobile/WORKER] Pay my share of the contact unlock from wallet",
+    summary: '[Mobile/WORKER] Pay my share of the contact unlock from wallet',
   })
   @ApiResponse({ status: 200, description: 'Updated unlock state' })
   @ApiResponse({ status: 400, description: 'No pending unlock / already paid' })
@@ -215,7 +222,10 @@ export class MobileWorkerMissionController {
     summary:
       '[Mobile/WORKER] Create a mobile-money payment for my share of the unlock',
   })
-  @ApiResponse({ status: 200, description: 'Payment token to drive /pay/:token' })
+  @ApiResponse({
+    status: 200,
+    description: 'Payment token to drive /pay/:token',
+  })
   async payUnlockMobile(
     @Req() req: ProfileAuthenticatedRequest,
     @Param('id') id: string,

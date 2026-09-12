@@ -6,6 +6,7 @@ import {
   forwardRef,
 } from '@nestjs/common';
 import {
+  ContactRecordOrigin,
   InteractionActor,
   InteractionKind,
   InteractionObject,
@@ -18,6 +19,7 @@ import {
   WalletTransactionType,
 } from '@prisma/client';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
+import { ContactRecordService } from '../contact-unlock/contact-record.service';
 import { WalletService } from '../wallet/wallet.service';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { InvoiceService } from '../invoice/invoice.service';
@@ -47,6 +49,7 @@ export class RecommendationContactService {
     private readonly botNotification: BotNotificationService,
     private readonly paymentRequest: PaymentRequestService,
     private readonly interactionEvents: InteractionEventService,
+    private readonly contactRecords: ContactRecordService,
     @Inject(forwardRef(() => WhatsAppService))
     private readonly whatsApp: WhatsAppService,
     @Inject(forwardRef(() => WhatsAppFeedbackService))
@@ -62,7 +65,8 @@ export class RecommendationContactService {
     const fee = await this.systemConfig.getRecommendationContactFee();
     const workerName = `${worker.first_name} ${worker.last_name}`.trim();
 
-    const profileWallet = await this.wallet.getOrCreateProfileWallet(employerId);
+    const profileWallet =
+      await this.wallet.getOrCreateProfileWallet(employerId);
     if (Number(profileWallet.balance) < fee) {
       throw new BadRequestException(
         'Solde insuffisant dans votre portefeuille',
@@ -173,6 +177,22 @@ export class RecommendationContactService {
       metadata: { fee },
     });
 
+    // The ledger row this path never had. Until now a direct unlock left only a
+    // wallet transaction whose `reference_id` is a bare worker uuid, so admin
+    // could not see that this employer had paid to reach this worker at all.
+    //
+    // Awaited, unlike the signal above: this is the record of a payment, not a
+    // ranking hint, and it is cheap. It still cannot fail the unlock — the
+    // service swallows its own errors.
+    await this.contactRecords.record({
+      employerId,
+      workerId,
+      origin: ContactRecordOrigin.DIRECT,
+      amount: fee,
+      unlockedAt: new Date(),
+      paymentId,
+    });
+
     return { ok: true };
   }
 
@@ -234,9 +254,7 @@ export class RecommendationContactService {
       },
     });
     if (!worker) {
-      throw new NotFoundException(
-        "Ce profil n'est plus actif ou vérifié.",
-      );
+      throw new NotFoundException("Ce profil n'est plus actif ou vérifié.");
     }
     return worker;
   }

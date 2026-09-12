@@ -5,7 +5,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { ProfileType } from '@prisma/client';
+import { ContactRecordOrigin, ProfileType } from '@prisma/client';
 import { randomBytes } from 'node:crypto';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { StorageService } from '../../common/services/storage/storage.service';
@@ -54,6 +54,20 @@ export interface PublicPortfolioView {
   description: string;
   address: string;
   completedMissionsCount: number;
+  /**
+   * How many times an employer PAID to reach this worker, split by route.
+   *
+   * Social proof the worker earns without lifting a finger, and the one signal
+   * here that reflects demand rather than delivery: `completedMissionsCount`
+   * says they finish what they start, this says people want to hire them.
+   * Counts payments, not distinct employers — a repeat client is a stronger
+   * signal than a new one, not a weaker one.
+   *
+   * Split because the routes mean different things: `mission` is an employer
+   * who unlocked them through an application on a job, `direct` is one who
+   * went looking and paid to reach them cold.
+   */
+  timesContacted: { total: number; mission: number; direct: number };
   portfolio: PortfolioItemView[];
 }
 
@@ -254,9 +268,27 @@ export class PortfolioService {
       throw new NotFoundException('Portfolio introuvable');
     }
 
-    const completedMissionsCount = await this.prisma.application.count({
-      where: { worker_id: profile.id, status: 'END' },
-    });
+    const [completedMissionsCount, contactGroups] = await Promise.all([
+      this.prisma.application.count({
+        where: { worker_id: profile.id, status: 'END' },
+      }),
+      this.prisma.contactRecord.groupBy({
+        by: ['origin'],
+        where: { worker_id: profile.id },
+        _count: { _all: true },
+      }),
+    ]);
+
+    const timesContacted = contactGroups.reduce(
+      (acc, g) => {
+        const n = g._count._all;
+        acc.total += n;
+        if (g.origin === ContactRecordOrigin.MISSION) acc.mission += n;
+        else acc.direct += n;
+        return acc;
+      },
+      { total: 0, mission: 0, direct: 0 },
+    );
 
     return {
       slug,
@@ -269,6 +301,7 @@ export class PortfolioService {
       description: profile.description,
       address: profile.address,
       completedMissionsCount,
+      timesContacted,
       portfolio: profile.portfolio_items.map((item) => this.toItemView(item)),
     };
   }

@@ -5,6 +5,7 @@ import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { WhatsAppService } from '../../whatsapp/whatsapp.service';
 import { WhatsAppFeedbackService } from '../../whatsapp/feedback/whatsapp-feedback.service';
 import { ReferralService } from '../../referral/referral.service';
+import { ContactRecordService } from '../../contact-unlock/contact-record.service';
 import { LogService } from '../../log/log.service';
 import { ConfigService } from '@nestjs/config';
 import { MailService } from '../../mail/mail.service';
@@ -110,7 +111,13 @@ describe('PaymentRequestService', () => {
         },
         {
           provide: ReferralService,
-          useValue: { settleForReferee: jest.fn().mockResolvedValue(undefined) },
+          useValue: {
+            settleForReferee: jest.fn().mockResolvedValue(undefined),
+          },
+        },
+        {
+          provide: ContactRecordService,
+          useValue: { record: jest.fn().mockResolvedValue(undefined) },
         },
         { provide: LogService, useValue: mockLog },
         { provide: ConfigService, useValue: mockConfig },
@@ -173,7 +180,11 @@ describe('PaymentRequestService', () => {
         },
         {
           provide: LayoutService,
-          useValue: { wrap: jest.fn().mockImplementation((html: string) => Promise.resolve(html)) },
+          useValue: {
+            wrap: jest
+              .fn()
+              .mockImplementation((html: string) => Promise.resolve(html)),
+          },
         },
         { provide: EventEmitter2, useValue: { emit: jest.fn() } },
         {
@@ -497,7 +508,11 @@ describe('PaymentRequestService', () => {
         .mockResolvedValue({ gatewayRef: 'gw-ref-1' });
       const queueService = (service as any).queueService;
       queueService.addJob = jest.fn().mockResolvedValue(undefined);
-      const result = await service.initiatePayment(TOKEN, '+242001', 'CG_MTNMOBILEMONEY');
+      const result = await service.initiatePayment(
+        TOKEN,
+        '+242001',
+        'CG_MTNMOBILEMONEY',
+      );
       expect(result.success).toBe(true);
     });
 
@@ -513,7 +528,11 @@ describe('PaymentRequestService', () => {
       paymentGateway.initiatePayment = jest
         .fn()
         .mockResolvedValue({ gatewayRef: null });
-      const result = await service.initiatePayment(TOKEN, '+242001', 'CG_MTNMOBILEMONEY');
+      const result = await service.initiatePayment(
+        TOKEN,
+        '+242001',
+        'CG_MTNMOBILEMONEY',
+      );
       expect(result.success).toBe(true);
     });
   });

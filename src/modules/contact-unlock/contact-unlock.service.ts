@@ -12,6 +12,7 @@ import {
   ApplicationStatus,
   AssignmentStatus,
   BillingStatus,
+  ContactRecordOrigin,
   ContactUnlockAttempt,
   ContactUnlockStatus,
   InteractionActor,
@@ -31,6 +32,7 @@ import {
 import { cancellationPatch } from '../application/application.constants';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { isEmployerCoveredAtJobLevel } from './employer-coverage';
+import { ContactRecordService } from './contact-record.service';
 import {
   isWorkerHardBlocked,
   hardBlockMessage,
@@ -84,6 +86,7 @@ export class ContactUnlockService {
     @Inject(forwardRef(() => BotNotificationService))
     private readonly botNotification: BotNotificationService,
     private readonly interactionEvents: InteractionEventService,
+    private readonly contactRecords: ContactRecordService,
   ) {}
 
   /**
@@ -304,6 +307,10 @@ export class ContactUnlockService {
     if (newStatus === ContactUnlockStatus.UNLOCKED) {
       await this.markApplicationAcceptedAfterUnlock([updated.application_id]);
       this.recordUnlockSignal(updated);
+      // Recorded at UNLOCKED rather than at the payment, for the same reason
+      // `recordUnlockSignal` is: an earlier debit can still be rolled back and
+      // refunded, and a ledger row for a refunded payment is worse than none.
+      await this.recordUnlockedContact(updated);
     }
 
     return {
@@ -312,6 +319,34 @@ export class ContactUnlockService {
       newlyUnlocked:
         newStatus === ContactUnlockStatus.UNLOCKED ? [attemptId] : [],
     };
+  }
+
+  /**
+   * One ledger row for a mission unlock that has just completed.
+   *
+   * Only the employer's side is recorded: the ledger answers "what did an
+   * employer pay to reach this worker", and the worker's own fee is a separate
+   * transaction that does not create a contact.
+   */
+  private async recordUnlockedContact(attempt: {
+    id: string;
+    employer_id: string;
+    worker_id: string;
+    employer_amount: Prisma.Decimal;
+    job_offer_id: string;
+    application_id: string;
+    unlocked_at: Date | null;
+  }): Promise<void> {
+    await this.contactRecords.record({
+      employerId: attempt.employer_id,
+      workerId: attempt.worker_id,
+      origin: ContactRecordOrigin.MISSION,
+      amount: Number(attempt.employer_amount),
+      unlockedAt: attempt.unlocked_at ?? new Date(),
+      jobOfferId: attempt.job_offer_id,
+      applicationId: attempt.application_id,
+      contactUnlockAttemptId: attempt.id,
+    });
   }
 
   /**
@@ -705,7 +740,7 @@ export class ContactUnlockService {
     await this.prisma.application.updateMany({
       where: {
         id: { in: applicationIds },
-        status: 'WAITING_PAYMENT' as ApplicationStatus,
+        status: 'WAITING_PAYMENT',
       },
       data: { status: ApplicationStatus.ACCEPTED },
     });
@@ -880,12 +915,36 @@ export class ContactUnlockService {
       ...new Set(unlockedApplicationIds),
     ]);
     this.recordUnlockSignals(unlockedAttempts);
+    // One employer payment can unlock N attempts here, so the ledger needs N
+    // rows — recording once would lose N-1 contacts. Re-read rather than reuse
+    // `unlockedAttempts`: the trigger entry is a narrow select without the fee,
+    // and a ledger row without its amount is not worth writing.
+    //
+    // Note the employer paid ONCE for the whole job. Each row carries the
+    // per-attempt fee, so revenue has to be summed by `job_offer_id` rather
+    // than by row — the model comment says so too, because getting this wrong
+    // multiplies a single payment by the number of seats.
+    await this.recordUnlockedContactsByIds(newlyUnlocked);
 
     return {
       attemptId: triggerAttempt.id,
       status: triggerStatus,
       newlyUnlocked,
     };
+  }
+
+  /** Ledger rows for a batch of attempts that just reached UNLOCKED. */
+  private async recordUnlockedContactsByIds(
+    attemptIds: string[],
+  ): Promise<void> {
+    if (attemptIds.length === 0) return;
+
+    const rows = await this.prisma.contactUnlockAttempt.findMany({
+      where: { id: { in: attemptIds } },
+    });
+    for (const row of rows) {
+      await this.recordUnlockedContact(row);
+    }
   }
 
   async rejectPendingAttemptByApplication(
@@ -998,10 +1057,7 @@ export class ContactUnlockService {
           job_offer_id: attempt.job_offer_id,
           id: { not: applicationId },
           status: {
-            in: [
-              ApplicationStatus.ACCEPTED,
-              'WAITING_PAYMENT' as ApplicationStatus,
-            ],
+            in: [ApplicationStatus.ACCEPTED, 'WAITING_PAYMENT'],
           },
         },
       });
