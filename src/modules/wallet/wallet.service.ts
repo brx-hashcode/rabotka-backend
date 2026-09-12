@@ -1131,6 +1131,7 @@ export class WalletService {
     q?: string;
     type?: string[];
     status?: string[];
+    method?: string[];
     created_from?: string;
     created_to?: string;
   }): Promise<{
@@ -1198,6 +1199,11 @@ export class WalletService {
     }
     if (params.status?.length) {
       where.status = { in: params.status as PaymentStatus[] };
+    }
+    if (params.method?.length) {
+      // The column is `payment_method`; the filter is called `method` because
+      // that is the column's label in the table this filters.
+      where.payment_method = { in: params.method as PaymentMethod[] };
     }
     if (params.created_from || params.created_to) {
       where.created_at = {
