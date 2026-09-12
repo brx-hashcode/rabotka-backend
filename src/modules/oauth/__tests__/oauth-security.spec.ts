@@ -195,6 +195,21 @@ describe('claims', () => {
     ).toBe(false);
   });
 
+  // Email is optional on a profile: most of the informal sector signs up with a
+  // phone alone. A relying party branches on a claim's PRESENCE, so emitting
+  // `email: null` would read as a broken field rather than an absent one.
+  it('omits email and email_verified entirely when the profile has none', () => {
+    const claims = buildClaims(
+      { ...profile, email: null },
+      ['openid', 'email'],
+      'sub-1',
+    );
+
+    expect(claims).not.toHaveProperty('email');
+    expect(claims).not.toHaveProperty('email_verified');
+    expect(claims.sub).toBe('sub-1');
+  });
+
   it('reports the KYC verdict, separately from the phone check', () => {
     const claims = buildClaims(
       profile,

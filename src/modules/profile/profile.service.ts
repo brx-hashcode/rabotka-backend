@@ -80,7 +80,8 @@ export type ProfileMeResponse = {
   id: string;
   firstName: string;
   lastName: string;
-  email: string;
+  /** Null for the majority, who sign up with a phone and no email. */
+  email: string | null;
   phone: string;
   /** Optional second number. Null for the majority who have only one. */
   directPhone: string | null;
@@ -158,7 +159,8 @@ export type AdminProfileListItem = {
   id: string;
   firstName: string;
   lastName: string;
-  email: string;
+  /** Null for the majority, who sign up with a phone and no email. */
+  email: string | null;
   phone: string;
   /**
    * Optional second number. Null for the majority who have only one.
@@ -550,6 +552,13 @@ export class ProfileService {
     // remove one they added by mistake.
     if (dto.directPhone !== undefined) {
       data.direct_phone = dto.directPhone || null;
+    }
+    // Same "absent is legitimate" story as `directPhone`: email is optional at
+    // signup, so this is where someone adds one later or drops a stale one. The
+    // DTO transform has already lowercased it and mapped "" to null, so an
+    // explicit null here is a deliberate clear and `undefined` means untouched.
+    if (dto.email !== undefined) {
+      data.email = dto.email;
     }
     Object.assign(data, this.geo.resolveLocation(dto));
     return data;
@@ -2189,7 +2198,11 @@ export class ProfileService {
       data: {
         first_name: createProfileDto.firstName,
         last_name: createProfileDto.lastName,
-        email: createProfileDto.email,
+        // `?? null` like `direct_phone` below, and for the same reason: an
+        // omitted key arrives as `undefined`, which Prisma reads as "not
+        // provided" rather than "no value". Both end up NULL on this nullable
+        // column, but writing the intent down beats relying on that.
+        email: createProfileDto.email ?? null,
         phone: createProfileDto.phone,
         direct_phone: createProfileDto.directPhone ?? null,
         address: createProfileDto.address,
@@ -2566,7 +2579,7 @@ export class ProfileService {
     const filename = `${safeName}.pdf`;
 
     const data: Record<string, string> = {
-      EMAIL: profile.email,
+      EMAIL: profile.email ?? '-',
       LAST_NAME: profile.last_name,
       FIRST_NAME: profile.first_name,
       FULL_NAME: `${profile.first_name} ${profile.last_name}`,

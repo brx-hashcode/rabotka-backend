@@ -4,7 +4,7 @@ import { NotificationService } from '../../notification/notification.service';
 import { WhatsAppService } from '../../whatsapp/whatsapp.service';
 
 export type AdRecipient = {
-  email: string;
+  email: string | null;
   phone?: string;
   name: string;
 };

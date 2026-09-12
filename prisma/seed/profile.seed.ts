@@ -69,6 +69,30 @@ export async function seedProfiles(prisma: PrismaClient): Promise<void> {
     `[Profile seed] Created employer: ${employer.first_name} ${employer.last_name} (id: ${employer.id})`,
   );
 
+  // A worker with NO email — the majority case in the informal sector, and the
+  // one every local database was previously missing. Without a row like this,
+  // "profile has no email" is a branch nobody exercises until production does:
+  // no welcome mail, no invoice mail, a CV with no contact-line email, and an
+  // OIDC token whose `email` claim is absent rather than null.
+  const workerNoEmail = await prisma.profile.create({
+    data: {
+      first_name: 'Pascal',
+      last_name: 'Sanscourriel',
+      phone: '+33612345671',
+      email: null,
+      address: '2 rue des Artisans, 13001 Marseille',
+      description: 'Maçon, joignable uniquement par WhatsApp.',
+      profile_type: ProfileType.WORKER,
+      status: AccountStatus.ACTIVE,
+      verification_status: VerificationStatus.PENDING,
+      reliability_score: 100,
+      whatsapp_connected: true,
+    },
+  });
+  console.log(
+    `[Profile seed] Created worker without email: ${workerNoEmail.first_name} ${workerNoEmail.last_name} (id: ${workerNoEmail.id})`,
+  );
+
   const scheduled1 = new Date();
   scheduled1.setDate(scheduled1.getDate() + 7);
   const scheduled2 = new Date();

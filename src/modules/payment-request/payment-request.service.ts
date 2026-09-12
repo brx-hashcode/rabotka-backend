@@ -918,7 +918,12 @@ export class PaymentRequestService {
       relatedEntityId: relatedEntity?.id,
     });
 
-    // 2. Generate PDF
+    // 2. Generate PDF — but only if there is somewhere to send it. The invoice
+    // record above is a financial record and is always written; rendering its
+    // PDF is pure work for the email, and most profiles have no email address.
+    // It stays available on demand in the app's invoice list either way.
+    if (!request.profile.email) return;
+
     const { buffer, filename } = await this.invoiceService.downloadAsAdmin(
       invoice.id,
     );

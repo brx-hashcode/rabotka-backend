@@ -22,7 +22,7 @@ describe('WhatsAppEventSender', () => {
 
   it('sends event notification with created action', async () => {
     await sender.send(
-      { name: 'Alice', phone: '+242001', email: '' },
+      { name: 'Alice', phone: '+242001', email: null },
       {
         eventId: 'evt-1',
         title: 'Team Meeting',
@@ -40,7 +40,7 @@ describe('WhatsAppEventSender', () => {
 
   it('sends event notification with updated action', async () => {
     await sender.send(
-      { name: 'Bob', phone: '+242002', email: '' },
+      { name: 'Bob', phone: '+242002', email: null },
       {
         eventId: 'evt-2',
         title: 'Board Meeting',
@@ -73,7 +73,7 @@ describe('WhatsAppEventSender', () => {
 
   it('includes location in message', async () => {
     await sender.send(
-      { name: 'Dave', phone: '+242003', email: '' },
+      { name: 'Dave', phone: '+242003', email: null },
       {
         eventId: 'evt-2',
         title: 'Office Meeting',
@@ -92,7 +92,7 @@ describe('WhatsAppEventSender', () => {
 
   it('includes location without callToAction', async () => {
     await sender.send(
-      { name: 'Eve', phone: '+242004', email: '' },
+      { name: 'Eve', phone: '+242004', email: null },
       {
         eventId: 'evt-3',
         title: 'Meeting',

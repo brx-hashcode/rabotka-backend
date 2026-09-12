@@ -417,7 +417,13 @@ model Profile {
   /// must not make the second signup fail. Optional at every layer for the same
   /// reason — most people have only one number.
   direct_phone                      String?
-  email                             String             @unique
+  /// Optional: Rabotka onboards the informal sector, where most workers have a
+  /// phone but no email address. `phone` is the real identity — onboarding is
+  /// WhatsApp-first and signup proves the number. Nullable rather than blank:
+  /// the unique index treats '' as a value, so two emailless profiles holding
+  /// '' would collide. Automated mail to a profile without one is skipped
+  /// silently in `MailService.sendMail`.
+  email                             String?            @unique
   address                           String
   /// ISO 3166-1 alpha-2. What the ranker and the coming filters compare —
   /// stable and case-safe, unlike the display name beside it.

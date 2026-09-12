@@ -23,7 +23,7 @@ export type ContactedProfile = {
   portfolioSlug: string | null;
   /** The point of the whole feature: the details the employer paid for. */
   phone: string;
-  email: string;
+  email: string | null;
   origin: ContactOrigin;
   unlockedAt: string;
   /** Present for MISSION unlocks — which job brought them together. */

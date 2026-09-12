@@ -31,12 +31,24 @@ export class CreateProfileDto extends LocationDto {
   @IsNotEmpty()
   lastName: string;
 
-  @ApiProperty({ description: 'Email address (must be unique)' })
-  @Transform(({ value }) => value?.trim()?.toLowerCase())
+  /**
+   * Optional: most of the informal sector has a phone and no email. `phone` is
+   * the identity signup actually proves, and every message the platform sends
+   * goes there.
+   *
+   * `|| null` rather than leaving `''`: the column is unique, and Postgres
+   * treats '' as a real value, so a second emailless signup would collide.
+   * Validation still applies when an address IS given — an optional field is
+   * not a lax one.
+   */
+  @ApiPropertyOptional({
+    description: 'Email address (optional, must be unique when provided)',
+  })
+  @Transform(({ value }) => value?.trim()?.toLowerCase() || null)
+  @IsOptional()
   @IsEmail()
   @HasMxRecord()
-  @IsNotEmpty()
-  email: string;
+  email?: string | null;
 
   @ApiProperty({ description: 'Phone number (must be unique)' })
   @Transform(({ value }) => value?.trim()?.toLowerCase())

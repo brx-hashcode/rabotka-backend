@@ -166,7 +166,7 @@ export type AdminJobOfferListItem = {
   quantity: number;
   status: string;
   employerName: string;
-  employerEmail: string;
+  employerEmail: string | null;
   employerPhone: string;
   employerAvatarUrl: string | null;
   employerId: string;
@@ -265,7 +265,7 @@ const emptyJobOfferAggregates = (): JobOfferAggregates => ({
 export type AdminJobOfferApplicationItem = {
   id: string;
   workerName: string;
-  workerEmail: string;
+  workerEmail: string | null;
   workerPhone: string;
   workerAvatarUrl: string | null;
   workerId: string;
