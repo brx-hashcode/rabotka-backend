@@ -15,9 +15,14 @@ export type AdminContactRecordListItem = {
   employerId: string;
   employerName: string;
   employerPhone: string;
+  /** Null for the many profiles with no email — phone is the real identity. */
+  employerEmail: string | null;
+  employerAvatarUrl: string | null;
   workerId: string;
   workerName: string;
   workerPhone: string;
+  workerEmail: string | null;
+  workerAvatarUrl: string | null;
   /** Null for DIRECT — there is no job behind it. */
   jobOfferId: string | null;
   jobTitle: string | null;
@@ -117,9 +122,13 @@ export class AdminContactRecordService {
         employerId: r.employer_id,
         employerName: this.fullName(r.employer),
         employerPhone: r.employer.phone,
+        employerEmail: r.employer.email,
+        employerAvatarUrl: r.employer.avatar_url,
         workerId: r.worker_id,
         workerName: this.fullName(r.worker),
         workerPhone: r.worker.phone,
+        workerEmail: r.worker.email,
+        workerAvatarUrl: r.worker.avatar_url,
         jobOfferId: r.job_offer_id,
         jobTitle: r.job_offer?.title ?? null,
         createdAt: r.created_at.toISOString(),
