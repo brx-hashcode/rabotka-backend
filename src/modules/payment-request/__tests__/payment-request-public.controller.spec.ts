@@ -42,7 +42,7 @@ describe('PaymentRequestPublicController', () => {
     const result = await controller.initiatePayment('tok-1', {
       phone: '+242001',
       operator: 'MTN',
-    } as any);
+    });
     expect(mockService.initiatePayment).toHaveBeenCalledWith(
       'tok-1',
       '+242001',

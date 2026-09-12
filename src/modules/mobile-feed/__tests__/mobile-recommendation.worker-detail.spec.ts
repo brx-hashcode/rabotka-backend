@@ -36,6 +36,7 @@ describe('MobileRecommendationController — workerDetail()', () => {
   let prisma: {
     profile: { findUnique: jest.Mock; findMany: jest.Mock };
     application: { groupBy: jest.Mock };
+    contactRecord: { groupBy: jest.Mock };
   };
   let portfolio: { ensurePortfolioSlug: jest.Mock };
 
@@ -48,6 +49,7 @@ describe('MobileRecommendationController — workerDetail()', () => {
         findMany: jest.fn().mockResolvedValue([row]),
       },
       application: { groupBy: jest.fn().mockResolvedValue([]) },
+      contactRecord: { groupBy: jest.fn().mockResolvedValue([]) },
     };
     portfolio = {
       ensurePortfolioSlug: jest.fn().mockResolvedValue('awa-menagere-a1b2c3'),
@@ -65,7 +67,6 @@ describe('MobileRecommendationController — workerDetail()', () => {
       { record: jest.fn() } as never,
       { versionFor: jest.fn().mockResolvedValue('legacy') } as never,
       { recommendWorkersForEmployer: jest.fn() } as never,
-      { excludeContacted: jest.fn() } as never,
       portfolio as never,
     );
   };

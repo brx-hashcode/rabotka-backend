@@ -1,5 +1,5 @@
 import { AdminArchiveModule } from '../admin-archive/admin-archive.module';
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { ProfileController } from './profile.controller';
 import { AdminProfileController } from './admin-profile.controller';
 import { ProfileService } from './profile.service';
@@ -19,6 +19,7 @@ import { InterestGraphModule } from '../interest-graph/interest-graph.module';
 import { GeocodingModule } from '../../common/services/geocoding/geocoding.module';
 import { PortfolioModule } from '../portfolio/portfolio.module';
 import { ReferralModule } from '../referral/referral.module';
+import { ContactUnlockModule } from '../contact-unlock/contact-unlock.module';
 
 @Module({
   imports: [
@@ -44,6 +45,9 @@ import { ReferralModule } from '../referral/referral.module';
     GeocodingModule,
     PortfolioModule,
     ReferralModule,
+    // For the admin profile "contacts payés" tab. forwardRef: ContactUnlockModule
+    // pulls in Bot/Wallet, which reach back to profile.
+    forwardRef(() => ContactUnlockModule),
   ],
   controllers: [ProfileController, AdminProfileController],
   providers: [ProfileService],
