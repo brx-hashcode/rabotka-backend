@@ -5,6 +5,7 @@ import { WalletModule } from '../wallet/wallet.module';
 import { BotModule } from '../bot/bot.module';
 import { InvoiceModule } from '../invoice/invoice.module';
 import { AdminCacheModule } from '../../common/services/cache/admin-cache.module';
+import { AuthModule } from '../auth/auth.module';
 import { ContactUnlockService } from './contact-unlock.service';
 import { ContactRecordService } from './contact-record.service';
 import { AdminContactRecordService } from './admin-contact-record.service';
@@ -23,6 +24,9 @@ import { RecommendationEngineModule } from '../recommendation-engine/recommendat
     MatchingModule,
     RecommendationEngineModule,
     AdminCacheModule,
+    // For AdminAuthGuard/RolesGuard on AdminContactRecordController — the guard
+    // needs JwtService, which only AuthModule provides.
+    forwardRef(() => AuthModule),
   ],
   controllers: [AdminContactRecordController],
   providers: [
