@@ -247,13 +247,16 @@ export class AdProcessor {
   private deliverableChannels(
     allowed: ConcreteChannel[],
     profile: {
-      email: string;
+      email: string | null;
       phone: string | null;
       whatsapp_connected: boolean;
     },
   ): ConcreteChannel[] {
     return allowed.filter((c) => {
-      if (c === 'EMAIL') return Boolean(profile.email);
+      // Most profiles have no email at all, so this branch is the common case
+      // rather than the edge one. `trim()` because a legacy row may still hold
+      // a blank string the normalising migration did not reach.
+      if (c === 'EMAIL') return Boolean(profile.email?.trim());
       // In-app needs no contact details — the ad waits in the profile's inbox
       // until they next open the client.
       if (c === 'IN_APP') return true;
@@ -265,7 +268,7 @@ export class AdProcessor {
   private async sendOnChannel(
     advertisementId: string,
     channel: ConcreteChannel,
-    recipient: { email: string; phone?: string; name: string },
+    recipient: { email: string | null; phone?: string; name: string },
     basePayload: AdNotificationPayload,
     profileId: string,
   ): Promise<'sent' | 'failed' | 'skipped'> {

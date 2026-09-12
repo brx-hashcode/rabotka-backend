@@ -16,7 +16,7 @@ import { WalletService } from '../wallet/wallet.service';
 export type AdminPenaltyListItem = {
   id: string;
   profileName: string;
-  profileEmail: string;
+  profileEmail: string | null;
   profilePhone: string;
   profileAvatarUrl: string | null;
   profileId: string;

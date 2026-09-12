@@ -74,12 +74,12 @@ export type AdminApplicationListItem = {
   jobTitle: string;
   jobOfferId: string;
   workerName: string;
-  workerEmail: string;
+  workerEmail: string | null;
   workerPhone: string;
   workerAvatarUrl: string | null;
   workerId: string;
   employerName: string;
-  employerEmail: string;
+  employerEmail: string | null;
   employerAvatarUrl: string | null;
   employerId: string;
   status: string;
@@ -138,7 +138,7 @@ export type ApplicationListItem = {
     first_name: string;
     last_name: string;
     phone: string;
-    email: string;
+    email: string | null;
     description: string;
     reliability_score: number | null;
     verification_status: string;
@@ -2938,7 +2938,7 @@ export class ApplicationService {
       first_name: string;
       last_name: string;
       phone: string;
-      email: string;
+      email: string | null;
       description: string;
       reliability_score: number | null;
       verification_status: string;

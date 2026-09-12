@@ -129,17 +129,23 @@ export class ProfileController {
   ) {
     const result = await this.profileService.createProfile(createProfileDto);
 
-    await this.mailService.sendMail({
-      to: createProfileDto.email,
-      subject: 'Bienvenue sur Rabotka',
-      html: await this.layoutService.wrap(
-        sendWelcomeEmail(createProfileDto.firstName, {
-          appUrl: this.frontendUrl(),
-          creditedBalance: result.creditedBalance,
-        }),
-        { previewText: WELCOME_EMAIL_PREVIEW },
-      ),
-    });
+    // Email is optional at signup, and most workers have none. `sendMail` would
+    // drop this on its own, but rendering the welcome template is wasted work
+    // and an unconditional-looking send here misreads as a bug. The WhatsApp
+    // confirmation below is the real welcome, and it is not conditional.
+    if (createProfileDto.email) {
+      await this.mailService.sendMail({
+        to: createProfileDto.email,
+        subject: 'Bienvenue sur Rabotka',
+        html: await this.layoutService.wrap(
+          sendWelcomeEmail(createProfileDto.firstName, {
+            appUrl: this.frontendUrl(),
+            creditedBalance: result.creditedBalance,
+          }),
+          { previewText: WELCOME_EMAIL_PREVIEW },
+        ),
+      });
+    }
 
     // Tell the user on WhatsApp that their profile is created and under
     // review. Onboarding is a web form, so there is no open 24h session —

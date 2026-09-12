@@ -1,5 +1,5 @@
 export interface EventNotificationRecipient {
-  email: string;
+  email: string | null;
   phone?: string;
   name: string;
 }

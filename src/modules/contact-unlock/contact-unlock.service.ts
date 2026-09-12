@@ -47,7 +47,7 @@ import { randomUUID } from 'node:crypto';
 export type ContactDetails = {
   name: string;
   phone: string;
-  email: string;
+  email: string | null;
 };
 
 export type ExpiredConversionEvent = {

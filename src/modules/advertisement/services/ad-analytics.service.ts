@@ -31,7 +31,7 @@ export interface AdDeliveryLogItem {
   id: string;
   profileId: string;
   profileName: string;
-  profileEmail: string;
+  profileEmail: string | null;
   channel: string;
   status: string;
   sentAt: Date | null;

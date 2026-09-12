@@ -1,6 +1,7 @@
 import { Transform } from 'class-transformer';
 import {
   IsString,
+  IsEmail,
   IsOptional,
   MaxLength,
   IsArray,
@@ -8,6 +9,7 @@ import {
   ArrayMaxSize,
 } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { HasMxRecord } from '../../../common/validators/has-mx-record.validator';
 import { LocationDto } from '../../../common/dto/location.dto';
 
 export class UpdateProfileDto extends LocationDto {
@@ -55,6 +57,31 @@ export class UpdateProfileDto extends LocationDto {
   @IsString()
   @MaxLength(30)
   directPhone?: string;
+
+  /**
+   * Editable here for the same reason `directPhone` is: nothing authenticates
+   * against it. Email is optional at signup — most of the informal sector has
+   * none — so this is how someone adds one later, or drops one that has gone
+   * stale. Send `""` (or null) to clear it.
+   *
+   * The transform distinguishes three cases deliberately. class-transformer
+   * runs it for keys that are ABSENT from the payload too, so collapsing
+   * undefined into null here would make every unrelated profile edit silently
+   * wipe the user's email.
+   */
+  @ApiPropertyOptional({
+    description: 'Email address. Send "" or null to clear it.',
+    nullable: true,
+  })
+  @Transform(({ value }) => {
+    if (value === undefined) return undefined; // key absent — leave untouched
+    if (typeof value !== 'string') return value ?? null; // null clears
+    return value.trim().toLowerCase() || null; // "" clears
+  })
+  @IsOptional()
+  @IsEmail()
+  @HasMxRecord()
+  email?: string | null;
 
   @ApiPropertyOptional({ description: 'Job category IDs (max 5)' })
   @Transform(({ value }) =>
