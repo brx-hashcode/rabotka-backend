@@ -66,6 +66,16 @@ export class AdminListPaymentsDto {
   status?: string[];
 
   @ApiPropertyOptional({
+    description: 'Filter by payment method(s) — MOBILE_MONEY, WALLET, CARD, OTHER',
+    isArray: true,
+  })
+  @IsOptional()
+  @Transform(({ value }) => toArray(value))
+  @IsArray()
+  @IsString({ each: true })
+  method?: string[];
+
+  @ApiPropertyOptional({
     description: 'Filter payments created from this date (ISO 8601)',
   })
   @IsOptional()

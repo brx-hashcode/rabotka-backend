@@ -302,6 +302,7 @@ export class WalletController {
       q: dto.q,
       type: dto.type,
       status: dto.status,
+      method: dto.method,
       created_from: dto.created_from,
       created_to: dto.created_to,
     });

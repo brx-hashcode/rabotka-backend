@@ -770,6 +770,29 @@ describe('WalletService', () => {
       expect(result.total).toBe(1);
     });
 
+    // Asserts the WHERE clause rather than the row count: the mock returns the
+    // same row regardless, so `expect(total).toBe(1)` passes whether or not the
+    // filter was ever applied — which is what the cases above actually check.
+    it('filters on payment_method, the column behind the Method filter', async () => {
+      await service.listPaymentsForAdmin({
+        page: 1,
+        limit: 10,
+        method: ['MOBILE_MONEY', 'WALLET'],
+      });
+
+      const where = (prisma.payment.findMany as jest.Mock).mock.calls[0][0]
+        .where;
+      expect(where.payment_method).toEqual({ in: ['MOBILE_MONEY', 'WALLET'] });
+    });
+
+    it('leaves payment_method unset when no method is given', async () => {
+      await service.listPaymentsForAdmin({ page: 1, limit: 10 });
+
+      const where = (prisma.payment.findMany as jest.Mock).mock.calls[0][0]
+        .where;
+      expect(where.payment_method).toBeUndefined();
+    });
+
     it('applies date range filter', async () => {
       const result = await service.listPaymentsForAdmin({
         page: 1,
