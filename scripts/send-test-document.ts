@@ -133,13 +133,11 @@ async function main(): Promise<void> {
     // numbered map the mapper is supposed to produce.
     const payload = CONTRACT
       ? toTemplatePayloadFromParams(TEST_NUMBER, 'missionContractDocument', {
-          firstName: 'Fariol',
           offerTitle: 'Peinture appartement 2 pièces',
           documentUrl: url,
           documentFilename: filename,
         })
       : toTemplatePayloadFromParams(TEST_NUMBER, 'kycAgreementDocument', {
-          firstName: 'Fariol',
           documentUrl: url,
           documentFilename: filename,
         });

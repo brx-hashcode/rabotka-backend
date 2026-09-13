@@ -542,27 +542,21 @@ export const WHATSAPP_TEMPLATES = {
     cloud: {
       name: cloudName(
         'TPL_CLOUD_KYC_AGREEMENT_DOC',
-        'rabotka_kyc_agreement_document_v1',
+        'rabotka_kyc_agreement_document_v2',
       ),
     },
     documentHeaderVar: DOCUMENT_URL_VAR,
-    variables: (p: {
-      firstName: string;
-      documentUrl: string;
-      documentFilename: string;
-    }) => ({
-      '1': p.firstName,
+    // No body variables at all. v1 opened with « Bonjour {{1}} », but this
+    // arrives seconds after the `kyc` card, which has already greeted them by
+    // name — so the greeting was the same information twice and pushed the one
+    // sentence that matters below the fold. An attachment only has to say what
+    // it is and that it is worth keeping.
+    variables: (p: { documentUrl: string; documentFilename: string }) => ({
       [DOCUMENT_URL_VAR]: p.documentUrl,
       [DOCUMENT_FILENAME_VAR]: p.documentFilename,
     }),
   } satisfies WhatsAppTemplate<
-    [
-      params: {
-        firstName: string;
-        documentUrl: string;
-        documentFilename: string;
-      },
-    ]
+    [params: { documentUrl: string; documentFilename: string }]
   >,
 
   /**
@@ -1035,25 +1029,26 @@ export const WHATSAPP_TEMPLATES = {
     cloud: {
       name: cloudName(
         'TPL_CLOUD_MISSION_CONTRACT_DOC',
-        'rabotka_mission_contract_document_v1',
+        'rabotka_mission_contract_document_v2',
       ),
     },
     documentHeaderVar: DOCUMENT_URL_VAR,
+    // The mission title only. The greeting went for the same reason as the
+    // agreement's — `contactUnlocked` lands first and already names them — but
+    // the title stays: it is what tells someone WHICH contract this is, and an
+    // employer running three missions has three of these.
     variables: (p: {
-      firstName: string;
       offerTitle: string;
       documentUrl: string;
       documentFilename: string;
     }) => ({
-      '1': p.firstName,
-      '2': p.offerTitle,
+      '1': p.offerTitle,
       [DOCUMENT_URL_VAR]: p.documentUrl,
       [DOCUMENT_FILENAME_VAR]: p.documentFilename,
     }),
   } satisfies WhatsAppTemplate<
     [
       params: {
-        firstName: string;
         offerTitle: string;
         documentUrl: string;
         documentFilename: string;

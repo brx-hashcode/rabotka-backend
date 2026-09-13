@@ -171,7 +171,6 @@ describe('buildComponents', () => {
 
     const contractVars = () =>
       WHATSAPP_TEMPLATES.missionContractDocument.variables({
-        firstName: 'Jean',
         offerTitle: 'Peinture appartement',
         documentUrl: SIGNED_URL,
         documentFilename: 'contrat_Okemba.pdf',
@@ -220,7 +219,6 @@ describe('buildComponents', () => {
       ).find((c) => c.type === 'body');
 
       expect(body?.parameters).toEqual([
-        { type: 'text', text: 'Jean' },
         { type: 'text', text: 'Peinture appartement' },
       ]);
     });

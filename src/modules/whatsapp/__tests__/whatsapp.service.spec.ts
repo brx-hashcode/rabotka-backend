@@ -500,7 +500,6 @@ describe('WhatsAppService', () => {
         PHONE,
         'kycAgreementDocument',
         {
-          firstName: 'Jean',
           documentUrl: signed,
           documentFilename: 'accord_Okemba.pdf',
         },

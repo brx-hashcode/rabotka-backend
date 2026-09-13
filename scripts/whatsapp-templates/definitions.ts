@@ -520,7 +520,7 @@ export function authoredTemplates(): Partial<
      * distinction is load-bearing rather than a formality.
      */
     kycAgreementDocument: {
-      name: 'rabotka_kyc_agreement_document_v1',
+      name: 'rabotka_kyc_agreement_document_v2',
       language: 'fr',
       category: 'UTILITY',
       components: [
@@ -530,15 +530,15 @@ export function authoredTemplates(): Partial<
           example: { header_handle: ['MISSING_MEDIA_HANDLE'] },
         },
         {
+          // No variables and no greeting. v1 opened with « Bonjour {{1}} »,
+          // which repeated what the `kyc` card said seconds earlier and pushed
+          // the only sentence that matters below the fold.
           type: 'BODY',
           text: [
-            'Bonjour {{1}},',
-            '',
-            'Votre compte est vérifié. Vous trouverez ci-joint votre accord d\u2019utilisation Rabotka.',
+            'Votre accord d\u2019utilisation Rabotka.',
             '',
             'Conservez-le : il récapitule vos droits et vos engagements sur la plateforme.',
           ].join('\n'),
-          example: { body_text: [['Jean']] },
         },
       ],
     },
@@ -549,7 +549,7 @@ export function authoredTemplates(): Partial<
      * Same DOCUMENT-header requirement as `kycAgreementDocument` above.
      */
     missionContractDocument: {
-      name: 'rabotka_mission_contract_document_v1',
+      name: 'rabotka_mission_contract_document_v2',
       language: 'fr',
       category: 'UTILITY',
       components: [
@@ -559,15 +559,15 @@ export function authoredTemplates(): Partial<
           example: { header_handle: ['MISSING_MEDIA_HANDLE'] },
         },
         {
+          // The mission title is the only variable left: it says WHICH contract
+          // this is, and an employer running three missions receives three.
           type: 'BODY',
           text: [
-            'Bonjour {{1}},',
-            '',
-            'Voici le contrat de la mission *{{2}}*, en pièce jointe.',
+            'Le contrat de la mission *{{1}}*.',
             '',
             'Il reprend les informations convenues entre les deux parties. Conservez-le pour vos dossiers.',
           ].join('\n'),
-          example: { body_text: [['Jean', 'Peinture appartement 2 pièces']] },
+          example: { body_text: [['Peinture appartement 2 pièces']] },
         },
       ],
     },

@@ -306,7 +306,15 @@ describe('authored templates', () => {
       const body = authored()[key]?.components.find((c) => c.type === 'BODY');
       const vars = variablesIn(body?.text);
       expect(vars).toEqual(vars.map((_, i) => String(i + 1)));
-      // Meta matches examples to variables positionally.
+
+      // Meta matches examples to variables positionally — and rejects an
+      // example on a body that has no variables to match it to, which is why
+      // the absence is asserted rather than tolerated. `kycAgreementDocument`
+      // is the first authored template with a variable-free body.
+      if (vars.length === 0) {
+        expect(body?.example?.body_text).toBeUndefined();
+        return;
+      }
       expect(body?.example?.body_text?.[0]).toHaveLength(vars.length);
     },
   );

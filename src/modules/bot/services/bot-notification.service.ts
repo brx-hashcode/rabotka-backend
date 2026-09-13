@@ -407,10 +407,7 @@ export class BotNotificationService {
           phone,
           profileId: party.id,
           template: 'missionContractDocument',
-          params: {
-            firstName: party.profile?.first_name ?? '',
-            offerTitle,
-          },
+          params: { offerTitle },
           pdf: buffer,
           filename,
           storageKey: `contract/${contract.id}.pdf`,

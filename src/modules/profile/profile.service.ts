@@ -2583,7 +2583,9 @@ export class ProfileService {
         phone: profile.phone,
         profileId,
         template: 'kycAgreementDocument',
-        params: { firstName: profile.first_name },
+        // No body variables: the `kyc` card sent moments earlier already
+        // greets them by name.
+        params: {},
         pdf: buffer,
         filename,
         storageKey: `agreement/${profileId}.pdf`,
