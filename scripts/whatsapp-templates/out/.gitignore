@@ -5,3 +5,9 @@ payloads/
 report.md
 created.json
 media-handle.json
+
+# Upload handles and the sample documents behind a DOCUMENT header, from
+# upload-media.ts. Same class as media-handle.json above: one-shot artifacts
+# that go stale, and the PDFs are 50KB binaries regenerated on demand.
+document-handle.*.json
+sample-*.pdf

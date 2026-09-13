@@ -20,9 +20,14 @@ import { BotDraftService } from './services/bot-draft.service';
 import { BotRouterService } from './router/bot-router.service';
 import { BotOrchestratorService } from './services/bot-orchestrator.service';
 import { BotNotificationService } from './services/bot-notification.service';
+import { ContractModule } from '../contract/contract.module';
+import { WhatsAppDocumentModule } from '../whatsapp/documents/whatsapp-document.module';
 
 @Module({
   imports: [
+    // For the mission contract delivered over WhatsApp when an unlock completes.
+    ContractModule,
+    WhatsAppDocumentModule,
     PrismaModule,
     SystemConfigModule,
     forwardRef(() => JobOfferModule),

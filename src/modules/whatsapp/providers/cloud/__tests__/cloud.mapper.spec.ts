@@ -160,14 +160,121 @@ describe('buildComponents', () => {
     });
   });
 
+  /**
+   * A DOCUMENT header, whose link is supplied per send rather than baked into
+   * the approved template — the whole reason it cannot reuse the image path.
+   */
+  describe('document header', () => {
+    const SIGNED_URL =
+      'https://bucket.r2.cloudflarestorage.com/whatsapp-documents%2Fcontract%2Fabc.pdf' +
+      '?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=deadbeef&X-Amz-Expires=3600';
+
+    const contractVars = () =>
+      WHATSAPP_TEMPLATES.missionContractDocument.variables({
+        offerTitle: 'Peinture appartement',
+        documentUrl: SIGNED_URL,
+        documentFilename: 'contrat_Okemba.pdf',
+      });
+
+    it('emits a document header carrying the link and the filename', () => {
+      const components = buildComponents(
+        'missionContractDocument',
+        contractVars(),
+      );
+
+      expect(components[0]).toMatchObject({
+        type: 'header',
+        parameters: [
+          {
+            type: 'document',
+            document: { link: SIGNED_URL, filename: 'contrat_Okemba.pdf' },
+          },
+        ],
+      });
+    });
+
+    it('leaves the signed URL byte-identical', () => {
+      // A presigned URL is an opaque credential, not display text.
+      // `sanitizeTemplateVariable` collapses whitespace runs and strips format
+      // characters — apply it here and the signature stops verifying, which
+      // surfaces as a 404 from storage rather than as anything nameable.
+      const header = buildComponents(
+        'missionContractDocument',
+        contractVars(),
+      ).find((c) => c.type === 'header');
+
+      expect(
+        (header?.parameters?.[0] as { document: { link: string } }).document
+          .link,
+      ).toBe(SIGNED_URL);
+    });
+
+    it('keeps the reserved keys out of the body', () => {
+      // The 132000 regression: a non-numeric key that leaked into the body
+      // would send three body parameters for a two-variable template, and Meta
+      // answers with a parameter-count mismatch rather than a useful error.
+      const body = buildComponents(
+        'missionContractDocument',
+        contractVars(),
+      ).find((c) => c.type === 'body');
+
+      expect(body?.parameters).toEqual([
+        { type: 'text', text: 'Peinture appartement' },
+      ]);
+    });
+
+    it('omits the filename when none was supplied', () => {
+      const { document_filename: _omitted, ...vars } = contractVars();
+
+      const header = buildComponents('missionContractDocument', vars).find(
+        (c) => c.type === 'header',
+      );
+
+      expect(header?.parameters?.[0]).toEqual({
+        type: 'document',
+        document: { link: SIGNED_URL },
+      });
+    });
+
+    it('omits the header entirely when no link was supplied', () => {
+      // Better a recognisable 132012 than a header with an empty link, which
+      // Meta rejects with something that names neither field.
+      const { document_url: _omitted, ...vars } = contractVars();
+
+      expect(
+        buildComponents('missionContractDocument', vars).find(
+          (c) => c.type === 'header',
+        ),
+      ).toBeUndefined();
+    });
+
+    it('emits no document header for a template that has none', () => {
+      const components = buildComponents(
+        'kyc',
+        WHATSAPP_TEMPLATES.kyc.variables('Jean'),
+      );
+
+      expect(
+        components.some((c) =>
+          c.parameters?.some(
+            (param: { type: string }) => param.type === 'document',
+          ),
+        ),
+      ).toBe(false);
+    });
+  });
+
   it.each(['welcomeUnregisteredCard', 'welcomePlatform'] as const)(
     '%s carries an image header',
     (key) => {
-      const vars = (
-        WHATSAPP_TEMPLATES[key].variables as (
-          p?: unknown,
-        ) => Record<string, string>
-      )(key === 'welcomePlatform' ? 'home' : undefined);
+      // Load-bearing: `key` is a union, so its `variables` signatures differ
+      // and TS narrows the parameter to `never` without this. `--fix` has
+      // stripped it before; the disable stops that.
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
+      const variablesFn = WHATSAPP_TEMPLATES[key].variables as (
+        p?: unknown,
+      ) => Record<string, string>;
+      const vars = variablesFn(key === 'welcomePlatform' ? 'home' : undefined);
       expect(buildComponents(key, vars)[0]?.type).toBe('header');
     },
   );

@@ -1,7 +1,17 @@
-import { Injectable, Logger, forwardRef, Inject } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  Optional,
+  forwardRef,
+  Inject,
+} from '@nestjs/common';
 import Redis from 'ioredis';
+import { ContactUnlockStatus } from '@prisma/client';
 import { jobLocationLabel } from '../../../common/utils/job-location.util';
-import { REDIS_CONNECTION } from '../../../common/services/redis/redis.constants';
+import {
+  REDIS_CONNECTION,
+  REDIS_KEY_PREFIX,
+} from '../../../common/services/redis/redis.constants';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { WhatsAppService } from '../../whatsapp/whatsapp.service';
 import { WhatsAppFeedbackService } from '../../whatsapp/feedback/whatsapp-feedback.service';
@@ -11,6 +21,8 @@ import { WHATSAPP_TEMPLATES } from '../../../common/constants/whatsapp-templates
 import { ContactUnlockService } from '../../contact-unlock/contact-unlock.service';
 import { SystemConfigService } from '../../system-config/system-config.service';
 import { WalletService } from '../../wallet/wallet.service';
+import { ContractService } from '../../contract/contract.service';
+import { WhatsAppDocumentService } from '../../whatsapp/documents/whatsapp-document.service';
 
 @Injectable()
 export class BotNotificationService {
@@ -29,6 +41,13 @@ export class BotNotificationService {
     private readonly feedback: WhatsAppFeedbackService,
     @Inject(REDIS_CONNECTION)
     private readonly redis: Redis,
+    // Appended, and @Optional(): the specs construct this service positionally,
+    // so a mid-list parameter shifts every mock after it and one they do not
+    // pass must not be a hard dependency.
+    @Optional()
+    private readonly contractService?: ContractService,
+    @Optional()
+    private readonly whatsAppDocuments?: WhatsAppDocumentService,
   ) {}
 
   /**
@@ -294,12 +313,123 @@ export class BotNotificationService {
           },
         );
       }
+
+      // The contract, after both contact messages and behind its own failure
+      // boundary. It needs a CONTRACT template row, a renderable mission period
+      // and an object round trip, none of which the contact details depend on —
+      // and the contact details are what these two just paid for.
+      await this.sendMissionContractDocument(attempt, employer, worker).catch(
+        (err: unknown) =>
+          this.logger.warn(
+            `Contract document delivery failed for ${attemptId}:`,
+            err,
+          ),
+      );
     } catch (err) {
       this.logger.warn(
         `Failed to send contact unlocked notification: ${attemptId}`,
         err,
       );
     }
+  }
+
+  /**
+   * The mission contract, to BOTH parties, as a real PDF attachment.
+   *
+   * CREATES THE CONTRACT ROW FIRST, because at this moment there may not be
+   * one. `ContactUnlockService.markApplicationAcceptedAfterUnlock` flips
+   * WAITING_PAYMENT → ACCEPTED without creating a contract — only
+   * `ApplicationService.accept()` does, plus a lazy backfill on read — so an
+   * application that reached ACCEPTED through payment alone has never had one.
+   * `ContractService.create` is idempotent on `application_id` (which is
+   * `@unique`), so this is a backfill and not a second row.
+   *
+   * Out of scope: the recommendation unlock, which has no application and
+   * therefore no contract. "Contact unlocked" reads the same in both flows, but
+   * only this one is a mission.
+   */
+  private async sendMissionContractDocument(
+    attempt: {
+      id: string;
+      status: ContactUnlockStatus;
+      application_id: string;
+      employer_id: string;
+      worker_id: string;
+    },
+    employer: { phone: string; first_name: string } | null,
+    worker: { phone: string; first_name: string } | null,
+  ): Promise<void> {
+    // Gated where the contact details are not: sending a contract for a
+    // half-paid attempt would be a real bug, not a cosmetic one.
+    if (attempt.status !== ContactUnlockStatus.UNLOCKED) return;
+    if (!this.contractService || !this.whatsAppDocuments) return;
+    if (!this.whatsApp.supports('templateDocumentHeader')) return;
+
+    const contract = await this.contractService.create(attempt.application_id);
+
+    // `downloadAsAdmin`, not `download`: the latter enforces a
+    // requesting-profile check we would have to satisfy twice, and it flips the
+    // contract to DOWNLOADED. That status records whether a party pulled their
+    // own copy; a push delivery must not consume it. Both share the same Redis
+    // PDF cache, so the second party's copy is a cache hit.
+    const { buffer, filename } = await this.contractService.downloadAsAdmin(
+      contract.id,
+    );
+
+    const offerTitle = await this.missionTitleFor(attempt.application_id);
+
+    const parties = [
+      { profile: employer, id: attempt.employer_id },
+      { profile: worker, id: attempt.worker_id },
+    ];
+
+    for (const party of parties) {
+      const phone = party.profile?.phone;
+      if (!phone) continue;
+
+      // Long window, unlike the agreement's: the unlock path genuinely re-runs
+      // (BullMQ retries, and a multi-seat employer payment can surface one
+      // attempt in both `status` and `newlyUnlocked`). A mission unlocks once,
+      // so there is no legitimate second contract delivery.
+      const claimKey = `${REDIS_KEY_PREFIX}wa:doc:contract:${contract.id}:${party.id}`;
+      let claimed = false;
+      try {
+        claimed =
+          (await this.redis.set(claimKey, '1', 'EX', 30 * 24 * 3600, 'NX')) !==
+          null;
+      } catch {
+        claimed = true; // Redis down: a duplicate beats silence.
+      }
+      if (!claimed) continue;
+
+      try {
+        await this.whatsAppDocuments.send({
+          phone,
+          profileId: party.id,
+          template: 'missionContractDocument',
+          params: { offerTitle },
+          pdf: buffer,
+          filename,
+          storageKey: `contract/${contract.id}.pdf`,
+        });
+      } catch (err) {
+        // Release only this party's claim, and still try the other one.
+        await this.redis.del(claimKey).catch(() => undefined);
+        this.logger.warn(
+          `[contract] WhatsApp delivery failed for profile ${party.id}`,
+          err,
+        );
+      }
+    }
+  }
+
+  /** The job title the contract is for, for the template's second variable. */
+  private async missionTitleFor(applicationId: string): Promise<string> {
+    const application = await this.prisma.application.findUnique({
+      where: { id: applicationId },
+      select: { job_offer: { select: { title: true } } },
+    });
+    return application?.job_offer?.title ?? 'votre mission';
   }
 
   async sendContactUnlockCreditConversionNotification(

@@ -53,8 +53,10 @@ function makeDeps() {
     sendTextMessage: jest.fn().mockResolvedValue(true),
     sendTemplateMessage: jest.fn().mockResolvedValue(true),
     sendMediaMessage: jest.fn().mockResolvedValue(true),
+    // Cloud, which is what production runs. The document half short-circuits
+    // on a provider that cannot express a document header.
+    supports: jest.fn().mockReturnValue(true),
   };
-
 
   const botInbox = {
     push: jest.fn().mockResolvedValue(undefined),
@@ -73,6 +75,8 @@ describe('BotNotificationService', () => {
   // `set` returns 'OK' when the NX claim is won, null when someone holds it —
   // which is exactly how the notification pacing decides to send or stay quiet.
   let redis: { set: jest.Mock; del: jest.Mock };
+  let contractService: { create: jest.Mock; downloadAsAdmin: jest.Mock };
+  let whatsAppDocuments: { send: jest.Mock };
 
   beforeEach(() => {
     const base = makeDeps();
@@ -91,6 +95,14 @@ describe('BotNotificationService', () => {
       mintFlowToken: jest.fn((id: string) => `fb_${id}_uuid`),
     };
     deps = { ...base, contactUnlock };
+    contractService = {
+      create: jest.fn().mockResolvedValue({ id: 'contract-1' }),
+      downloadAsAdmin: jest
+        .fn()
+        .mockResolvedValue({ buffer: Buffer.from('%PDF'), filename: 'c.pdf' }),
+    };
+    whatsAppDocuments = { send: jest.fn().mockResolvedValue(true) };
+
     service = new BotNotificationService(
       deps.prisma as any,
       deps.whatsApp as any,
@@ -115,6 +127,8 @@ describe('BotNotificationService', () => {
       { getProfileWalletBalance: jest.fn().mockResolvedValue(0) } as any,
       feedback as any,
       redis as any,
+      contractService as any,
+      whatsAppDocuments as any,
     );
   });
 
@@ -450,6 +464,130 @@ describe('BotNotificationService', () => {
         }); // worker
       await service.sendContactUnlockedNotification('attempt-1');
       expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalledTimes(2);
+    });
+
+    /**
+     * The contract rides along with the contact details, from inside this
+     * method — so it reaches BOTH dispatch sites (ContactUnlockService and
+     * PaymentRequestService) without either being touched.
+     */
+    describe('mission contract', () => {
+      const unlocked = () => ({
+        id: 'attempt-1',
+        status: 'UNLOCKED',
+        application_id: 'app-1',
+        employer_id: 'emp-1',
+        worker_id: 'worker-1',
+      });
+
+      const bothParties = () => {
+        deps.prisma.profile.findUnique
+          .mockResolvedValueOnce({
+            phone: '+242001',
+            first_name: 'Alice',
+            last_name: 'Smith',
+            email: 'a@t.com',
+          })
+          .mockResolvedValueOnce({
+            phone: '+242002',
+            first_name: 'Bob',
+            last_name: 'Jones',
+            email: 'b@t.com',
+          });
+        deps.prisma.application.findUnique = jest
+          .fn()
+          .mockResolvedValue({ job_offer: { title: 'Peinture' } });
+        redis.set.mockResolvedValue('OK');
+      };
+
+      it('backfills the contract row, then sends to BOTH parties', async () => {
+        // `markApplicationAcceptedAfterUnlock` flips WAITING_PAYMENT →
+        // ACCEPTED without creating a contract, so an application that got
+        // here through payment alone has never had one. `create` is idempotent.
+        deps.prisma.contactUnlockAttempt.findUnique.mockResolvedValue(
+          unlocked(),
+        );
+        bothParties();
+
+        await service.sendContactUnlockedNotification('attempt-1');
+
+        expect(contractService.create).toHaveBeenCalledWith('app-1');
+        expect(whatsAppDocuments.send).toHaveBeenCalledTimes(2);
+      });
+
+      it('uses downloadAsAdmin, which does not consume DOWNLOADED', async () => {
+        // That status records whether a party pulled their own copy. A push
+        // delivery must not spend it on their behalf.
+        deps.prisma.contactUnlockAttempt.findUnique.mockResolvedValue(
+          unlocked(),
+        );
+        bothParties();
+
+        await service.sendContactUnlockedNotification('attempt-1');
+
+        expect(contractService.downloadAsAdmin).toHaveBeenCalledWith(
+          'contract-1',
+        );
+      });
+
+      it('sends no contract for an attempt that is not UNLOCKED', async () => {
+        // Half-paid: the contact details already guard themselves elsewhere,
+        // but a contract for an unfinished unlock would be a real bug.
+        deps.prisma.contactUnlockAttempt.findUnique.mockResolvedValue({
+          ...unlocked(),
+          status: 'PENDING_WORKER',
+        });
+        bothParties();
+
+        await service.sendContactUnlockedNotification('attempt-1');
+
+        expect(whatsAppDocuments.send).not.toHaveBeenCalled();
+      });
+
+      it('sends nothing a second time for the same pair', async () => {
+        deps.prisma.contactUnlockAttempt.findUnique.mockResolvedValue(
+          unlocked(),
+        );
+        bothParties();
+        redis.set.mockResolvedValue(null); // claim already held
+
+        await service.sendContactUnlockedNotification('attempt-1');
+
+        expect(whatsAppDocuments.send).not.toHaveBeenCalled();
+      });
+
+      it('still delivers both contact messages when the contract fails', async () => {
+        // The ordering guarantee: the contact details are what these two just
+        // paid for, and a contract that cannot render must not cost them that.
+        deps.prisma.contactUnlockAttempt.findUnique.mockResolvedValue(
+          unlocked(),
+        );
+        bothParties();
+        contractService.downloadAsAdmin.mockRejectedValue(
+          new Error('no CONTRACT template'),
+        );
+
+        await expect(
+          service.sendContactUnlockedNotification('attempt-1'),
+        ).resolves.toBeUndefined();
+
+        expect(deps.whatsApp.sendTemplateMessage).toHaveBeenCalledTimes(2);
+      });
+
+      it("releases only the failing party's claim and still tries the other", async () => {
+        deps.prisma.contactUnlockAttempt.findUnique.mockResolvedValue(
+          unlocked(),
+        );
+        bothParties();
+        whatsAppDocuments.send
+          .mockRejectedValueOnce(new Error('graph 500'))
+          .mockResolvedValueOnce(true);
+
+        await service.sendContactUnlockedNotification('attempt-1');
+
+        expect(whatsAppDocuments.send).toHaveBeenCalledTimes(2);
+        expect(redis.del).toHaveBeenCalledTimes(1);
+      });
     });
 
     it('skips notifying skipNotifyProfileId', async () => {

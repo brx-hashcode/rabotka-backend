@@ -28,6 +28,18 @@ export interface ProviderCapabilities {
    * `WhatsAppService.isServiceWindowOpen`, from the newest INBOUND message row.
    */
   freeformOutsideWindow: false;
+  /**
+   * A template whose HEADER is a document supplied at SEND time.
+   *
+   * Twilio bakes media into the approved Content template and accepts nothing
+   * at send time — `twilio.provider.sendMedia` drops `OutboundMedia.kind` and
+   * `filename` outright — so there is no Twilio shape for this at all.
+   *
+   * Callers must ask BEFORE rendering, not after: the work here is a PDF
+   * render, an object upload and a presign, all wasted on a provider that
+   * cannot deliver the result.
+   */
+  templateDocumentHeader: boolean;
 }
 
 export type Capability = keyof ProviderCapabilities;

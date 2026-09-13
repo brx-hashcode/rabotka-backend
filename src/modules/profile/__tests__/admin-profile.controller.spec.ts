@@ -13,6 +13,9 @@ function makeProfileService() {
     verifyProfileKyc: jest.fn().mockResolvedValue({ id: 'p1' }),
     updateProfileStatusByAdmin: jest.fn().mockResolvedValue({ id: 'p1' }),
     requestWhatsAppVerification: jest.fn().mockResolvedValue({ token: 'tok' }),
+    // Fire-and-forget on the VERIFIED branch. Resolves rather than throwing,
+    // because the controller only attaches a `.catch()` to it.
+    sendAgreementDocument: jest.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -106,7 +109,13 @@ function makeController(prismaProfile: any = null) {
     makeWalletService() as any,
     makePortfolioService() as any,
     { restore: jest.fn(), purge: jest.fn(), purgeBlockers: jest.fn() } as any,
-    { forProfile: jest.fn().mockResolvedValue({ contacted: [], contactedBy: [], totals: { contacted: 0, contactedBy: 0, spent: 0 } }) } as any,
+    {
+      forProfile: jest.fn().mockResolvedValue({
+        contacted: [],
+        contactedBy: [],
+        totals: { contacted: 0, contactedBy: 0, spent: 0 },
+      }),
+    } as any,
   );
 }
 
@@ -158,7 +167,13 @@ describe('AdminProfileController', () => {
           purge: jest.fn(),
           purgeBlockers: jest.fn(),
         } as any,
-        { forProfile: jest.fn().mockResolvedValue({ contacted: [], contactedBy: [], totals: { contacted: 0, contactedBy: 0, spent: 0 } }) } as any,
+        {
+          forProfile: jest.fn().mockResolvedValue({
+            contacted: [],
+            contactedBy: [],
+            totals: { contacted: 0, contactedBy: 0, spent: 0 },
+          }),
+        } as any,
       );
     }
 
@@ -254,7 +269,13 @@ describe('AdminProfileController', () => {
           purge: jest.fn(),
           purgeBlockers: jest.fn(),
         } as any,
-        { forProfile: jest.fn().mockResolvedValue({ contacted: [], contactedBy: [], totals: { contacted: 0, contactedBy: 0, spent: 0 } }) } as any,
+        {
+          forProfile: jest.fn().mockResolvedValue({
+            contacted: [],
+            contactedBy: [],
+            totals: { contacted: 0, contactedBy: 0, spent: 0 },
+          }),
+        } as any,
       );
       const result = await ctrl.getMessages('p1');
       expect(result).toHaveLength(2);
@@ -334,7 +355,13 @@ describe('AdminProfileController', () => {
           purge: jest.fn(),
           purgeBlockers: jest.fn(),
         } as any,
-        { forProfile: jest.fn().mockResolvedValue({ contacted: [], contactedBy: [], totals: { contacted: 0, contactedBy: 0, spent: 0 } }) } as any,
+        {
+          forProfile: jest.fn().mockResolvedValue({
+            contacted: [],
+            contactedBy: [],
+            totals: { contacted: 0, contactedBy: 0, spent: 0 },
+          }),
+        } as any,
       );
       const result = await ctrl.sendMessage(
         'p1',
@@ -385,7 +412,13 @@ describe('AdminProfileController', () => {
           purge: jest.fn(),
           purgeBlockers: jest.fn(),
         } as any,
-        { forProfile: jest.fn().mockResolvedValue({ contacted: [], contactedBy: [], totals: { contacted: 0, contactedBy: 0, spent: 0 } }) } as any,
+        {
+          forProfile: jest.fn().mockResolvedValue({
+            contacted: [],
+            contactedBy: [],
+            totals: { contacted: 0, contactedBy: 0, spent: 0 },
+          }),
+        } as any,
       );
 
       const result = await ctrl.sendMessage(
@@ -436,7 +469,13 @@ describe('AdminProfileController', () => {
           purge: jest.fn(),
           purgeBlockers: jest.fn(),
         } as any,
-        { forProfile: jest.fn().mockResolvedValue({ contacted: [], contactedBy: [], totals: { contacted: 0, contactedBy: 0, spent: 0 } }) } as any,
+        {
+          forProfile: jest.fn().mockResolvedValue({
+            contacted: [],
+            contactedBy: [],
+            totals: { contacted: 0, contactedBy: 0, spent: 0 },
+          }),
+        } as any,
       );
 
       // This used to return { success: true } and the message simply vanished.
@@ -502,7 +541,13 @@ describe('AdminProfileController', () => {
           purge: jest.fn(),
           purgeBlockers: jest.fn(),
         } as any,
-        { forProfile: jest.fn().mockResolvedValue({ contacted: [], contactedBy: [], totals: { contacted: 0, contactedBy: 0, spent: 0 } }) } as any,
+        {
+          forProfile: jest.fn().mockResolvedValue({
+            contacted: [],
+            contactedBy: [],
+            totals: { contacted: 0, contactedBy: 0, spent: 0 },
+          }),
+        } as any,
       );
       const result = await ctrl.sendMessage(
         'p1',
@@ -537,7 +582,13 @@ describe('AdminProfileController', () => {
       makeWalletService() as any,
       makePortfolioService() as any,
       { restore: jest.fn(), purge: jest.fn(), purgeBlockers: jest.fn() } as any,
-      { forProfile: jest.fn().mockResolvedValue({ contacted: [], contactedBy: [], totals: { contacted: 0, contactedBy: 0, spent: 0 } }) } as any,
+      {
+        forProfile: jest.fn().mockResolvedValue({
+          contacted: [],
+          contactedBy: [],
+          totals: { contacted: 0, contactedBy: 0, spent: 0 },
+        }),
+      } as any,
     );
     const result = await ctrl.update('p1', { first_name: 'Jo' } as any, {
       user: { userId: 'u1' },
@@ -564,7 +615,13 @@ describe('AdminProfileController', () => {
       makeWalletService() as any,
       makePortfolioService() as any,
       { restore: jest.fn(), purge: jest.fn(), purgeBlockers: jest.fn() } as any,
-      { forProfile: jest.fn().mockResolvedValue({ contacted: [], contactedBy: [], totals: { contacted: 0, contactedBy: 0, spent: 0 } }) } as any,
+      {
+        forProfile: jest.fn().mockResolvedValue({
+          contacted: [],
+          contactedBy: [],
+          totals: { contacted: 0, contactedBy: 0, spent: 0 },
+        }),
+      } as any,
     );
     const result = await ctrl.verify(
       'p1',
@@ -605,7 +662,13 @@ describe('AdminProfileController', () => {
       makeWalletService() as any,
       makePortfolioService() as any,
       { restore: jest.fn(), purge: jest.fn(), purgeBlockers: jest.fn() } as any,
-      { forProfile: jest.fn().mockResolvedValue({ contacted: [], contactedBy: [], totals: { contacted: 0, contactedBy: 0, spent: 0 } }) } as any,
+      {
+        forProfile: jest.fn().mockResolvedValue({
+          contacted: [],
+          contactedBy: [],
+          totals: { contacted: 0, contactedBy: 0, spent: 0 },
+        }),
+      } as any,
     );
 
     await ctrl.verify(
@@ -648,7 +711,13 @@ describe('AdminProfileController', () => {
       makeWalletService() as any,
       makePortfolioService() as any,
       { restore: jest.fn(), purge: jest.fn(), purgeBlockers: jest.fn() } as any,
-      { forProfile: jest.fn().mockResolvedValue({ contacted: [], contactedBy: [], totals: { contacted: 0, contactedBy: 0, spent: 0 } }) } as any,
+      {
+        forProfile: jest.fn().mockResolvedValue({
+          contacted: [],
+          contactedBy: [],
+          totals: { contacted: 0, contactedBy: 0, spent: 0 },
+        }),
+      } as any,
     );
     const result = await ctrl.updateStatus(
       'p1',
@@ -704,7 +773,13 @@ describe('AdminProfileController', () => {
           purge: jest.fn(),
           purgeBlockers: jest.fn(),
         } as any,
-        { forProfile: jest.fn().mockResolvedValue({ contacted: [], contactedBy: [], totals: { contacted: 0, contactedBy: 0, spent: 0 } }) } as any,
+        {
+          forProfile: jest.fn().mockResolvedValue({
+            contacted: [],
+            contactedBy: [],
+            totals: { contacted: 0, contactedBy: 0, spent: 0 },
+          }),
+        } as any,
       );
       const result = await ctrl.getPortfolio('worker-1');
       expect(portfolio.listOwn).toHaveBeenCalledWith('worker-1');
@@ -730,7 +805,13 @@ describe('AdminProfileController', () => {
           purge: jest.fn(),
           purgeBlockers: jest.fn(),
         } as any,
-        { forProfile: jest.fn().mockResolvedValue({ contacted: [], contactedBy: [], totals: { contacted: 0, contactedBy: 0, spent: 0 } }) } as any,
+        {
+          forProfile: jest.fn().mockResolvedValue({
+            contacted: [],
+            contactedBy: [],
+            totals: { contacted: 0, contactedBy: 0, spent: 0 },
+          }),
+        } as any,
       );
       const dto = { title: 'new' };
       await ctrl.updatePortfolioItem('worker-1', 'item1', dto, adminReq);
@@ -766,7 +847,13 @@ describe('AdminProfileController', () => {
           purge: jest.fn(),
           purgeBlockers: jest.fn(),
         } as any,
-        { forProfile: jest.fn().mockResolvedValue({ contacted: [], contactedBy: [], totals: { contacted: 0, contactedBy: 0, spent: 0 } }) } as any,
+        {
+          forProfile: jest.fn().mockResolvedValue({
+            contacted: [],
+            contactedBy: [],
+            totals: { contacted: 0, contactedBy: 0, spent: 0 },
+          }),
+        } as any,
       );
       const result = await ctrl.deletePortfolioItem(
         'worker-1',
@@ -795,7 +882,13 @@ describe('AdminProfileController', () => {
           purge: jest.fn(),
           purgeBlockers: jest.fn(),
         } as any,
-        { forProfile: jest.fn().mockResolvedValue({ contacted: [], contactedBy: [], totals: { contacted: 0, contactedBy: 0, spent: 0 } }) } as any,
+        {
+          forProfile: jest.fn().mockResolvedValue({
+            contacted: [],
+            contactedBy: [],
+            totals: { contacted: 0, contactedBy: 0, spent: 0 },
+          }),
+        } as any,
       );
       const result = await ctrl.deletePortfolioImage(
         'worker-1',
