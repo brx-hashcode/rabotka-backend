@@ -9,9 +9,17 @@
  * Writes out/media-handle.json, which generate.ts embeds. Run it once; the
  * handle is reusable across all three cards because they share one cover.
  *
+ * Also used for the DOCUMENT headers on the two attachment templates, which
+ * need a handle for exactly the same reason — Meta stores an EXAMPLE of the
+ * document at creation and reviewers open it. Those write a DIFFERENT handle
+ * file: `generate.ts` reads `media-handle.json` for the image cards, so a PDF
+ * landing there would put a contract behind every brand card.
+ *
  * Usage:
  *   node_modules/.bin/tsx scripts/whatsapp-templates/upload-media.ts
  *   node_modules/.bin/tsx scripts/whatsapp-templates/upload-media.ts --url <override>
+ *   node_modules/.bin/tsx scripts/whatsapp-templates/upload-media.ts \
+ *     --file sample-agreement.pdf --out document-handle.json
  */
 import { config } from 'dotenv';
 import * as fs from 'node:fs';
@@ -45,21 +53,62 @@ function sourceUrl(): string {
   return coverImageUrl();
 }
 
-async function main(): Promise<void> {
-  const url = sourceUrl();
-  console.log(`Source: ${url}`);
+/** A local file to upload instead of fetching a URL. */
+function sourceFile(): string | undefined {
+  const i = process.argv.indexOf('--file');
+  return i !== -1 ? process.argv[i + 1] : undefined;
+}
 
-  const img = await fetch(url);
-  if (!img.ok) {
-    throw new Error(
-      `Cover image is not reachable (HTTP ${img.status}). Meta fetches nothing ` +
-        `here — we upload the bytes — so a broken URL fails now rather than at ` +
-        `template review.`,
-    );
+/**
+ * Which handle file to write.
+ *
+ * Defaults to the cover image's, so the existing invocation is unchanged. A
+ * PDF must be given its own — see the note at the top.
+ */
+function outFile(): string {
+  const i = process.argv.indexOf('--out');
+  return i !== -1 && process.argv[i + 1]
+    ? process.argv[i + 1]
+    : 'media-handle.json';
+}
+
+/** Meta validates the declared type against the bytes, so guessing is not safe. */
+function typeFromName(name: string): string {
+  if (name.toLowerCase().endsWith('.pdf')) return 'application/pdf';
+  if (name.toLowerCase().endsWith('.png')) return 'image/png';
+  return 'image/jpeg';
+}
+
+async function main(): Promise<void> {
+  const local = sourceFile();
+  let bytes: Buffer;
+  let type: string;
+  let source: string;
+
+  if (local) {
+    if (!fs.existsSync(local)) {
+      throw new Error(`No such file: ${local}`);
+    }
+    source = local;
+    bytes = fs.readFileSync(local);
+    type = typeFromName(local);
+    console.log(`Source: ${source}`);
+  } else {
+    source = sourceUrl();
+    console.log(`Source: ${source}`);
+
+    const res = await fetch(source);
+    if (!res.ok) {
+      throw new Error(
+        `Source is not reachable (HTTP ${res.status}). Meta fetches nothing ` +
+          `here — we upload the bytes — so a broken URL fails now rather than ` +
+          `at template review.`,
+      );
+    }
+    bytes = Buffer.from(await res.arrayBuffer());
+    type = res.headers.get('content-type') ?? typeFromName(source);
   }
-  const bytes = Buffer.from(await img.arrayBuffer());
-  const type = img.headers.get('content-type') ?? 'image/jpeg';
-  console.log(`Fetched ${bytes.length} bytes (${type})`);
+  console.log(`Read ${bytes.length} bytes (${type})`);
 
   // Step 1: open an upload session.
   const startRes = await fetch(
@@ -101,11 +150,12 @@ async function main(): Promise<void> {
 
   fs.mkdirSync(OUT, { recursive: true });
   fs.writeFileSync(
-    path.join(OUT, 'media-handle.json'),
+    path.join(OUT, outFile()),
     JSON.stringify(
       {
         handle,
-        sourceUrl: url,
+        source,
+        type,
         bytes: bytes.length,
         uploadedAt: new Date().toISOString(),
       },
@@ -115,7 +165,7 @@ async function main(): Promise<void> {
   );
 
   console.log(
-    `\nHandle stored -> ${path.join(OUT, 'media-handle.json')}\n\n` +
+    `\nHandle stored -> ${path.join(OUT, outFile())}\n\n` +
       'Next:\n' +
       '  node_modules/.bin/tsx scripts/whatsapp-templates/generate.ts\n' +
       '  node_modules/.bin/tsx scripts/whatsapp-templates/create.ts --commit\n',
