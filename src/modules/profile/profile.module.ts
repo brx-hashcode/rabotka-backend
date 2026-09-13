@@ -20,6 +20,7 @@ import { GeocodingModule } from '../../common/services/geocoding/geocoding.modul
 import { PortfolioModule } from '../portfolio/portfolio.module';
 import { ReferralModule } from '../referral/referral.module';
 import { ContactUnlockModule } from '../contact-unlock/contact-unlock.module';
+import { WhatsAppDocumentModule } from '../whatsapp/documents/whatsapp-document.module';
 
 @Module({
   imports: [
@@ -48,6 +49,8 @@ import { ContactUnlockModule } from '../contact-unlock/contact-unlock.module';
     // For the admin profile "contacts payés" tab. forwardRef: ContactUnlockModule
     // pulls in Bot/Wallet, which reach back to profile.
     forwardRef(() => ContactUnlockModule),
+    // For the agreement PDF delivered over WhatsApp on KYC approval.
+    WhatsAppDocumentModule,
   ],
   controllers: [ProfileController, AdminProfileController],
   providers: [ProfileService],

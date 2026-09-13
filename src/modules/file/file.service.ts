@@ -138,6 +138,41 @@ export class FileService {
    * its name returns a PUBLIC url. That one serves platform documents, which
    * belong in the public bucket; its name is wrong, its behaviour is not.
    */
+  /**
+   * Store bytes we produced ourselves, at a key we choose.
+   *
+   * Distinct from `uploadToStorage` above: no Multer envelope, no watermarking
+   * (meaningless for a PDF), and a CALLER-SUPPLIED key so a re-render
+   * overwrites the previous object instead of leaving one behind per send.
+   *
+   * No `File` row is written. These are transient artefacts — fetched once by
+   * WhatsApp and re-hosted by Meta within seconds — not user uploads with an
+   * owner and a lifecycle.
+   */
+  async uploadBuffer(
+    buffer: Buffer,
+    key: string,
+    options: {
+      mimeType: string;
+      access?: 'public' | 'private';
+      bucket?: string;
+    },
+  ): Promise<{ key: string }> {
+    // `StorageService.upload` composes folder + filename itself, so the key is
+    // split rather than passed whole.
+    const slash = key.lastIndexOf('/');
+    const folder = slash === -1 ? undefined : key.slice(0, slash);
+    const filename = slash === -1 ? key : key.slice(slash + 1);
+
+    const result = await this.storageService.upload(buffer, filename, {
+      mimeType: options.mimeType,
+      ...(folder ? { folder } : {}),
+      ...(options.access ? { access: options.access } : {}),
+      ...(options.bucket ? { bucket: options.bucket } : {}),
+    });
+    return { key: result.key };
+  }
+
   async getPresignedUrl(storageKey: string, bucket?: string): Promise<string> {
     return this.storageService.getUrl(storageKey, {
       access: 'private',

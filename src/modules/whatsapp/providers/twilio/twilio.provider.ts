@@ -60,6 +60,7 @@ export class TwilioProvider implements WhatsappProvider {
     location: false,
     reactions: false,
     freeformOutsideWindow: false,
+    templateDocumentHeader: false,
   };
 
   private readonly logger = new Logger(TwilioProvider.name);

@@ -487,6 +487,34 @@ describe('WhatsAppService', () => {
       );
     });
 
+    it('never writes a presigned document URL into the delivery log', async () => {
+      // `whatsapp_messages.variables` is rendered in the back office, and a
+      // presigned URL is a bearer credential: for as long as it lives, anyone
+      // who can read that column can fetch a document carrying someone's
+      // identity data. The filename stays — it is what makes the row
+      // identifiable and it gives nothing away.
+      const signed =
+        'https://r2/whatsapp-documents/agreement/p1.pdf?X-Amz-Signature=deadbeef';
+
+      await service.sendTemplateMessage(
+        PHONE,
+        'kycAgreementDocument',
+        {
+          documentUrl: signed,
+          documentFilename: 'accord_Okemba.pdf',
+        },
+        PROFILE_ID,
+      );
+
+      const logged = (messageLog.begin as jest.Mock).mock.calls.at(-1)?.[1] as {
+        variables: Record<string, unknown>;
+      };
+
+      expect(logged.variables.documentUrl).toBe('[redacted]');
+      expect(logged.variables.documentFilename).toBe('accord_Okemba.pdf');
+      expect(JSON.stringify(logged.variables)).not.toContain('X-Amz-Signature');
+    });
+
     it('marks the log row failed and still hands the error back', async () => {
       // The controller turns this into the 503 that tells the admin the
       // message never left; swallowing it here would report success.
@@ -583,7 +611,6 @@ describe('WhatsAppService', () => {
         service.sendAdminMessage({ ...base, message: '  \n\n \t ' }),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
-
   });
 
   describe('outbound duplicate guard', () => {
@@ -594,6 +621,9 @@ describe('WhatsAppService', () => {
       // but the provider registered above is a mock, and these tests reach for
       // `.mockResolvedValue`. (An eslint --fix once removed this as an
       // "unnecessary assertion" and broke the whole block.)
+      // eslint's type info disagrees with `tsc` here, which fails without this
+      // assertion. `--fix` has stripped it twice; the disable stops a third.
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
       return module.get(IdempotencyService) as unknown as {
         claim: jest.Mock;
         release: jest.Mock;

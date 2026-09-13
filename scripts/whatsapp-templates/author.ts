@@ -25,6 +25,65 @@ config({ path: '.env.local' });
 config({ path: '.env' });
 
 const PAYLOADS = path.join('scripts', 'whatsapp-templates', 'out', 'payloads');
+const OUT = path.join('scripts', 'whatsapp-templates', 'out');
+
+/**
+ * The handle for a DOCUMENT header, uploaded by `upload-media.ts --out
+ * document-handle.json`.
+ *
+ * Meta will not take a URL at creation time: it stores an EXAMPLE of the
+ * document and reviewers open it, so the bytes have to be uploaded first and
+ * referenced by handle. Kept in its own file rather than `media-handle.json`,
+ * which `generate.ts` reads for the image cards — one file for both would put
+ * a contract PDF behind every brand card.
+ */
+function readDocumentHandle(key?: string): string | undefined {
+  // Per-template first: an agreement and a contract are different documents,
+  // and a reviewer opening the example expects the one the copy describes.
+  // Falls back to a shared handle when only one sample was uploaded.
+  const candidates = key
+    ? [`document-handle.${key}.json`, 'document-handle.json']
+    : ['document-handle.json'];
+
+  for (const name of candidates) {
+    const file = path.join(OUT, name);
+    if (!fs.existsSync(file)) continue;
+    const raw: unknown = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (typeof raw === 'object' && raw !== null && 'handle' in raw) {
+      return String(raw.handle);
+    }
+  }
+  return undefined;
+}
+
+/** The literal the definitions carry until a real handle is available. */
+const HANDLE_PLACEHOLDER = 'MISSING_MEDIA_HANDLE';
+
+/**
+ * Swap the placeholder for the uploaded handle.
+ *
+ * Returns whether the payload still carries a placeholder, so `main` can refuse
+ * to pretend a template is ready to submit. A rejected submission is not free —
+ * it counts against the WABA's quality rating — so this fails loudly here.
+ */
+function injectHandle(
+  payload: { components: { example?: { header_handle?: string[] } }[] },
+  handle: string | undefined,
+): boolean {
+  let placeholderLeft = false;
+  for (const component of payload.components) {
+    const handles = component.example?.header_handle;
+    if (!handles?.includes(HANDLE_PLACEHOLDER)) continue;
+    if (handle) {
+      component.example!.header_handle = handles.map((h) =>
+        h === HANDLE_PLACEHOLDER ? handle : h,
+      );
+    } else {
+      placeholderLeft = true;
+    }
+  }
+  return placeholderLeft;
+}
 
 function parseOnly(): string[] | undefined {
   const i = process.argv.findIndex(
@@ -53,8 +112,19 @@ function main(): void {
   }
 
   let drift = 0;
+  let missingHandles = 0;
   for (const [key, payload] of entries) {
     if (!payload) continue;
+
+    if (injectHandle(payload, readDocumentHandle(key))) {
+      missingHandles++;
+      console.log(
+        `NO HANDLE  ${key} -> needs a DOCUMENT example. Run:\n` +
+          '           node_modules/.bin/tsx scripts/whatsapp-templates/upload-media.ts \\\n' +
+          '             --file <sample.pdf> --out document-handle.json',
+      );
+    }
+
     fs.writeFileSync(
       path.join(PAYLOADS, `${key}.json`),
       JSON.stringify(payload, null, 2) + '\n',
@@ -72,6 +142,14 @@ function main(): void {
         (payload.name === registryName
           ? ''
           : ` (registry says ${registryName})`),
+    );
+  }
+
+  if (missingHandles > 0) {
+    console.log(
+      `\n${missingHandles} payload(s) still carry ${HANDLE_PLACEHOLDER}. ` +
+        'Submitting one would be rejected, and rejections count against the ' +
+        "WABA's quality rating — upload a sample first.",
     );
   }
 

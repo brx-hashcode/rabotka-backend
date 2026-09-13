@@ -2,7 +2,9 @@ import { toDigits } from '../../contracts/address';
 import { coverImageUrl } from '../../../../common/constants/whatsapp-carousel';
 import { sanitizeTemplateVariable } from '../../../../common/utils/whatsapp-template-text.util';
 import {
+  DOCUMENT_FILENAME_VAR,
   getButtonUrlVar,
+  getDocumentHeaderVar,
   getFlowTokenVar,
   hasImageHeader,
   templateCloudName,
@@ -107,6 +109,34 @@ export function buildComponents(
     components.push({
       type: 'header',
       parameters: [{ type: 'image', image: { link: coverImageUrl() } }],
+    });
+  }
+
+  // A DOCUMENT header, whose link is per-send rather than constant — the whole
+  // reason this cannot reuse the shape above. Meta keeps only the example PDF
+  // from template creation and fetches the real one server-side on every send,
+  // which is why a one-hour signed URL suffices: it is dereferenced within
+  // seconds and re-hosted, never handed to the reader.
+  //
+  // Deliberately NOT sanitized, for the same reason `flow_token` is not: a
+  // signed URL is an opaque credential, not display text.
+  // `sanitizeTemplateVariable` collapses runs of whitespace and strips format
+  // characters, neither of which a URL should be subjected to.
+  const documentVar = getDocumentHeaderVar(key);
+  const documentLink = documentVar ? variables[documentVar] : undefined;
+  if (documentLink) {
+    const filename = variables[DOCUMENT_FILENAME_VAR];
+    components.push({
+      type: 'header',
+      parameters: [
+        {
+          type: 'document',
+          document: {
+            link: documentLink,
+            ...(filename ? { filename } : {}),
+          },
+        },
+      ],
     });
   }
 

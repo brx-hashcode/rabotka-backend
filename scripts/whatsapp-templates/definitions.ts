@@ -37,6 +37,10 @@ export const AUTHORED_KEYS: ReadonlySet<WhatsAppTemplateName> = new Set([
   'kycPendingMenu',
   'openApp',
   'claimCommented',
+  // Cloud-only, with a DOCUMENT header supplied per send. Twilio has no shape
+  // for that at all, so these have no Content fixture to capture.
+  'kycAgreementDocument',
+  'missionContractDocument',
 ]);
 
 /**
@@ -500,6 +504,70 @@ export function authoredTemplates(): Partial<
           example: {
             body_text: [['Votre compte est actif.']],
           },
+        },
+      ],
+    },
+
+    /**
+     * The agreement PDF, sent right after `kyc`.
+     *
+     * The DOCUMENT header takes a `header_handle` from the Resumable Upload
+     * API, not a URL — the same two-step dance the image cards need, so run
+     * `upload-media.ts` against a sample PDF and pass the handle through.
+     *
+     * UTILITY, not MARKETING: it follows a verification the user applied for
+     * and carries the record of it. See the registry entry for why that
+     * distinction is load-bearing rather than a formality.
+     */
+    kycAgreementDocument: {
+      name: 'rabotka_kyc_agreement_document_v2',
+      language: 'fr',
+      category: 'UTILITY',
+      components: [
+        {
+          type: 'HEADER',
+          format: 'DOCUMENT',
+          example: { header_handle: ['MISSING_MEDIA_HANDLE'] },
+        },
+        {
+          // No variables and no greeting. v1 opened with « Bonjour {{1}} »,
+          // which repeated what the `kyc` card said seconds earlier and pushed
+          // the only sentence that matters below the fold.
+          type: 'BODY',
+          text: [
+            'Votre accord d\u2019utilisation Rabotka.',
+            '',
+            'Conservez-le : il récapitule vos droits et vos engagements sur la plateforme.',
+          ].join('\n'),
+        },
+      ],
+    },
+
+    /**
+     * The mission contract, sent to BOTH parties right after `contactUnlocked`.
+     *
+     * Same DOCUMENT-header requirement as `kycAgreementDocument` above.
+     */
+    missionContractDocument: {
+      name: 'rabotka_mission_contract_document_v2',
+      language: 'fr',
+      category: 'UTILITY',
+      components: [
+        {
+          type: 'HEADER',
+          format: 'DOCUMENT',
+          example: { header_handle: ['MISSING_MEDIA_HANDLE'] },
+        },
+        {
+          // The mission title is the only variable left: it says WHICH contract
+          // this is, and an employer running three missions receives three.
+          type: 'BODY',
+          text: [
+            'Le contrat de la mission *{{1}}*.',
+            '',
+            'Il reprend les informations convenues entre les deux parties. Conservez-le pour vos dossiers.',
+          ].join('\n'),
+          example: { body_text: [['Peinture appartement 2 pièces']] },
         },
       ],
     },

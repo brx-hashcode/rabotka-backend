@@ -27,6 +27,7 @@ import {
 } from '../../common/services/storage/kyc-key';
 import { DownloadResult } from '../../common/services/storage/types/storage.types';
 import { SystemConfigService } from '../system-config/system-config.service';
+import { WhatsAppDocumentService } from '../whatsapp/documents/whatsapp-document.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AdminNotificationEvent } from '../../common/events/admin-notification.events';
 import Redis from 'ioredis';
@@ -353,6 +354,12 @@ export class ProfileService {
     // l'env, et lève si celui-ci est vide lui aussi.
     @Optional()
     private readonly systemConfig?: SystemConfigService,
+    // Appended, and @Optional() for the same reason as `systemConfig` above:
+    // the specs construct this service positionally, so a mid-list parameter
+    // shifts every mock after it, and one they do not pass must not be a hard
+    // dependency.
+    @Optional()
+    private readonly whatsAppDocuments?: WhatsAppDocumentService,
   ) {}
 
   async findById(id: string): Promise<ProfileMeResponse> {
@@ -1661,7 +1668,8 @@ export class ProfileService {
           .recordReferral({
             refereeId: profile.id,
             code: createProfileDto.referralCode,
-            source: createProfileDto.referralSource ?? ReferralSource.MANUAL_CODE,
+            source:
+              createProfileDto.referralSource ?? ReferralSource.MANUAL_CODE,
           })
           .catch((err) =>
             this.logger.warn(
@@ -2352,9 +2360,7 @@ export class ProfileService {
 
     const phone = newPhone.trim().toLowerCase();
     if (phone === profile.phone) {
-      throw new BadRequestException(
-        'Ce numéro est déjà celui de votre compte',
-      );
+      throw new BadRequestException('Ce numéro est déjà celui de votre compte');
     }
 
     // `phone` is UNIQUE, so committing a taken number would fail at the
@@ -2531,6 +2537,67 @@ export class ProfileService {
 
     this.logger.log(`WhatsApp verification token sent to profile ${profileId}`);
     return { success: true };
+  }
+
+  /**
+   * Deliver the agreement PDF over WhatsApp, alongside the `kyc` notification.
+   *
+   * Lives here rather than at its two call sites because this is the only class
+   * that can render the thing: `downloadAgreement` below needs the AGREEMENT
+   * template row, the profile, and the 30-day Redis cache that keeps a
+   * re-verification from re-rendering it. Reusing it also means the WhatsApp
+   * copy is byte-identical to what the web download serves.
+   *
+   * BEST EFFORT, ALWAYS. A KYC approval is a state change the admin has already
+   * committed; an attachment that failed to render must not surface as a
+   * failure on that request, and must never be retried into a second copy.
+   */
+  async sendAgreementDocument(profileId: string): Promise<void> {
+    if (!this.whatsAppDocuments) return;
+
+    // Short, not long: 10 minutes absorbs a double-clicked verify button, while
+    // still letting the admin's explicit resend endpoint actually resend. A
+    // 30-day guard would make that endpoint silently do nothing, which is the
+    // worse failure of the two.
+    const claimKey = `${REDIS_KEY_PREFIX}wa:doc:agreement:${profileId}`;
+    let claimed = false;
+    try {
+      claimed = (await this.redis.set(claimKey, '1', 'EX', 600, 'NX')) !== null;
+    } catch {
+      // Redis down: send anyway. A duplicate agreement is an annoyance;
+      // silence is a document the user never receives.
+      claimed = true;
+    }
+    if (!claimed) return;
+
+    try {
+      const profile = await this.prisma.profile.findUnique({
+        where: { id: profileId },
+        select: { phone: true, first_name: true },
+      });
+      if (!profile?.phone) return;
+
+      const { buffer, filename } = await this.downloadAgreement(profileId);
+
+      await this.whatsAppDocuments.send({
+        phone: profile.phone,
+        profileId,
+        template: 'kycAgreementDocument',
+        // No body variables: the `kyc` card sent moments earlier already
+        // greets them by name.
+        params: {},
+        pdf: buffer,
+        filename,
+        storageKey: `agreement/${profileId}.pdf`,
+      });
+    } catch (err) {
+      // Release the claim so the next attempt is not suppressed by a failure.
+      await this.redis.del(claimKey).catch(() => undefined);
+      this.logger.warn(
+        `[agreement] WhatsApp delivery failed for profile ${profileId}`,
+        err,
+      );
+    }
   }
 
   async downloadAgreement(
