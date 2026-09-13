@@ -107,3 +107,14 @@ export async function kycBucket(
 
   return bucket;
 }
+
+/**
+ * The private bucket, under its general name.
+ *
+ * Exactly the same bucket as `kycBucket` — R2 has no per-object ACL, so
+ * "private" is a bucket-level property and there is only one of them. Exported
+ * under a second name because agreements and mission contracts are not KYC
+ * documents, and a call reading `kycBucket()` to store a contract reads as a
+ * bug at every future glance.
+ */
+export const privateBucket = kycBucket;

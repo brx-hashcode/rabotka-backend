@@ -52,6 +52,39 @@ const VERIFICATION_TOKEN_KEY_PREFIX = `${REDIS_KEY_PREFIX}wa:verify:`;
  * messaged; it only has to span the window a duplicate realistically arrives
  * in. Anything longer starts suppressing legitimate sends.
  */
+/**
+ * Template parameters that must never reach the message log.
+ *
+ * A presigned URL is a bearer credential: for as long as it lives, anyone who
+ * can read `whatsapp_messages.variables` — which the back office renders — can
+ * fetch a document carrying someone's identity data. Both spellings are listed
+ * because the two send paths carry different shapes: `sendTemplateMessage`
+ * passes the registry's named params, `sendTemplateMessageWithVariables` the
+ * already-numbered map.
+ *
+ * The filename is deliberately NOT redacted — it is what makes the row
+ * identifiable, and it gives away nothing.
+ */
+const REDACTED_LOG_PARAMS = new Set(['documentUrl', 'document_url']);
+
+/** Replace credential-bearing params so the row still records what went out. */
+function redactForLog(
+  params: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  if (!params) return params;
+  let touched = false;
+  const safe: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(params)) {
+    if (REDACTED_LOG_PARAMS.has(key)) {
+      safe[key] = '[redacted]';
+      touched = true;
+    } else {
+      safe[key] = value;
+    }
+  }
+  return touched ? safe : params;
+}
+
 const OUTBOUND_GUARD_WINDOW_SECONDS: Partial<Record<TemplateKey, number>> = {
   // Nothing here yet. Add a template only with a reason: a longer window turns
   // a second legitimate send into silence, and the caller is told it failed.
@@ -329,7 +362,7 @@ export class WhatsAppService {
         // the delivery log and the conversation agree.
         bodyPreview: body ?? `[TPL:${template}]`,
         profileId,
-        variables: params as Record<string, unknown> | undefined,
+        variables: redactForLog(params as Record<string, unknown> | undefined),
       },
       (logId) =>
         this.provider.sendTemplate(
@@ -396,7 +429,7 @@ export class WhatsAppService {
         templateKey: template,
         bodyPreview: body ?? `[TPL:${template}]`,
         profileId,
-        variables,
+        variables: redactForLog(variables),
       },
       (logId) =>
         this.provider.sendTemplateWithVariables(

@@ -12,6 +12,21 @@ export class KycService {
     private readonly whatsApp: WhatsAppService,
   ) {}
 
+  /**
+   * Re-send the KYC approval notification.
+   *
+   * NOTIFICATION ONLY — deliberately, and unlike the verification path in
+   * `admin-profile.controller.ts`, which also delivers the agreement PDF.
+   *
+   * Sending the agreement here would need `ProfileService`, and importing
+   * `ProfileModule` closes a module cycle: ProfileModule → AuthModule → … →
+   * KycModule → ProfileModule. `forwardRef` does not resolve it — it moves the
+   * undefined import one position along the list — because the loop is real
+   * rather than an ordering artefact.
+   *
+   * An admin who needs the document re-sent can re-run the verification, which
+   * does send it. That is a smaller gap than restructuring two large modules.
+   */
   async approveKyc(profileId: string): Promise<void> {
     const profile = await this.prisma.profile.findUnique({
       where: { id: profileId },

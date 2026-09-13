@@ -59,6 +59,7 @@ export class CloudProvider implements WhatsappProvider {
     location: true,
     reactions: true,
     freeformOutsideWindow: false,
+    templateDocumentHeader: true,
   };
 
   private readonly logger = new Logger(CloudProvider.name);

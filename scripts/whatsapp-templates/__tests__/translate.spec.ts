@@ -226,7 +226,14 @@ describe('authored templates', () => {
   ] as const;
   // Deliberately button-less: this one carries whatever an admin typed, so
   // there is no single destination a CTA could point at.
-  const NO_BUTTON_KEYS = ['adminMessage'] as const;
+  // The two document templates carry no button by design: the notification
+  // they follow already has the CTA, and a button would drag in the
+  // login-code rewriting for an attachment that needs none.
+  const NO_BUTTON_KEYS = [
+    'adminMessage',
+    'kycAgreementDocument',
+    'missionContractDocument',
+  ] as const;
 
   it.each(NO_BUTTON_KEYS)('%s carries no button at all', (key) => {
     expect(

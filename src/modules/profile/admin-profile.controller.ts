@@ -868,6 +868,22 @@ export class AdminProfileController {
             err,
           ),
         );
+
+      // The agreement, as a second message and deliberately after the one
+      // above. The `kyc` template carries the CTA that gets the user back into
+      // the app; putting a PDF render, an upload and a Graph fetch in front of
+      // it would delay the message this approval exists to send.
+      //
+      // Not awaited, like the notification: the verification response must not
+      // wait on any of that, and `sendAgreementDocument` never rejects.
+      void this.profileService
+        .sendAgreementDocument(id)
+        .catch((err) =>
+          console.warn(
+            `Failed to send the KYC agreement document for ${id}:`,
+            err,
+          ),
+        );
     } else {
       await this.mail.sendMail({
         to: result.email,

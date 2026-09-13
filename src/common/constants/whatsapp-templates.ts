@@ -78,6 +78,21 @@ export interface WhatsAppTemplate<Args extends unknown[]> {
    */
   hasImageHeader?: true;
   /**
+   * The template has a DOCUMENT header, and THIS key of the `variables()` map
+   * carries the link to fetch it from.
+   *
+   * A variable NAME rather than a boolean, which is the whole difference from
+   * `hasImageHeader` above. The card cover is one constant URL the mapper can
+   * resolve for itself; an agreement or a contract is rendered per recipient
+   * and lives behind a signed URL that expires within the hour, so it can only
+   * come from the send. `DOCUMENT_FILENAME_VAR` carries the name shown in the
+   * chat — WhatsApp otherwise displays the object key, which is a uuid.
+   *
+   * Mutually exclusive with `hasImageHeader`: Meta allows exactly one header,
+   * and `findBindingProblemsIn` refuses a binding that sets both.
+   */
+  documentHeaderVar?: typeof DOCUMENT_URL_VAR;
+  /**
    * Index of the variable that fills the CTA button's URL suffix, when that
    * link opens an authenticated page. The outbound processor appends a one-time
    * login code to it so the WebView lands signed in
@@ -135,6 +150,17 @@ export interface WhatsAppTemplate<Args extends unknown[]> {
  * button parameter at all.
  */
 export const FLOW_TOKEN_VAR = 'flow_token';
+
+/**
+ * The reserved `variables()` keys holding a DOCUMENT header's link and filename.
+ *
+ * Same reasoning as `FLOW_TOKEN_VAR`, and the same failure mode if they drift:
+ * the mapper reads them by name, and a typo sends a template with no header
+ * component at all — which Meta rejects as
+ * `132012 Format mismatch, expected DOCUMENT, received UNKNOWN`.
+ */
+export const DOCUMENT_URL_VAR = 'document_url';
+export const DOCUMENT_FILENAME_VAR = 'document_filename';
 
 /**
  * Reads a template SID from the environment, falling back to the currently
@@ -495,6 +521,49 @@ export const WHATSAPP_TEMPLATES = {
     // resolves — login-link.tsx treats a non-code segment as the destination.
     variables: (name: string) => ({ '1': name, '2': 'home' }),
   } satisfies WhatsAppTemplate<[name: string]>,
+
+  /**
+   * The agreement PDF, sent right after `kyc` above.
+   *
+   * A second message rather than a header on `kyc` itself: that template is
+   * live on both providers and carries the login CTA, so adding a header would
+   * mean re-approving it and diverging Twilio, which has no per-send document
+   * shape at all.
+   *
+   * UTILITY, and it must be submitted as UTILITY. This is triggered by a
+   * verification the user applied for and carries the record of it — the
+   * textbook case. As MARKETING it would open a new billable conversation on
+   * every approval, and be subject to per-user marketing limits that can drop a
+   * document someone actually needs.
+   */
+  kycAgreementDocument: {
+    cloudOnly: true,
+    category: 'UTILITY',
+    cloud: {
+      name: cloudName(
+        'TPL_CLOUD_KYC_AGREEMENT_DOC',
+        'rabotka_kyc_agreement_document_v1',
+      ),
+    },
+    documentHeaderVar: DOCUMENT_URL_VAR,
+    variables: (p: {
+      firstName: string;
+      documentUrl: string;
+      documentFilename: string;
+    }) => ({
+      '1': p.firstName,
+      [DOCUMENT_URL_VAR]: p.documentUrl,
+      [DOCUMENT_FILENAME_VAR]: p.documentFilename,
+    }),
+  } satisfies WhatsAppTemplate<
+    [
+      params: {
+        firstName: string;
+        documentUrl: string;
+        documentFilename: string;
+      },
+    ]
+  >,
 
   /**
    * The other half of `kyc` above: the rejection. It reached the user by email
@@ -950,6 +1019,49 @@ export const WHATSAPP_TEMPLATES = {
   >,
 
   /**
+   * The mission contract PDF, sent to BOTH parties after `contactUnlocked`.
+   *
+   * Its own template rather than a header on `contactUnlocked` for the same
+   * reason as `kycAgreementDocument`: that one is live on both providers and
+   * carries the feedback Flow button.
+   *
+   * UTILITY, and submitted as UTILITY: it follows a contact unlock both parties
+   * just paid for and carries the contract for it. See the note on
+   * `kycAgreementDocument` for why the category is not a formality.
+   */
+  missionContractDocument: {
+    cloudOnly: true,
+    category: 'UTILITY',
+    cloud: {
+      name: cloudName(
+        'TPL_CLOUD_MISSION_CONTRACT_DOC',
+        'rabotka_mission_contract_document_v1',
+      ),
+    },
+    documentHeaderVar: DOCUMENT_URL_VAR,
+    variables: (p: {
+      firstName: string;
+      offerTitle: string;
+      documentUrl: string;
+      documentFilename: string;
+    }) => ({
+      '1': p.firstName,
+      '2': p.offerTitle,
+      [DOCUMENT_URL_VAR]: p.documentUrl,
+      [DOCUMENT_FILENAME_VAR]: p.documentFilename,
+    }),
+  } satisfies WhatsAppTemplate<
+    [
+      params: {
+        firstName: string;
+        offerTitle: string;
+        documentUrl: string;
+        documentFilename: string;
+      },
+    ]
+  >,
+
+  /**
    * One-sided reveal: an employer paid to reach a worker from the recommendation
    * feed. This path used to send FREE-FORM text with `.catch(() => undefined)`,
    * so an employer who paid on the web outside the 24h window silently received
@@ -1292,6 +1404,7 @@ export type TemplateBinding = Pick<
   | 'buttonUrlVar'
   | 'urlSuffixVar'
   | 'hasImageHeader'
+  | 'documentHeaderVar'
   | 'flowTokenVar'
 >;
 
@@ -1332,10 +1445,12 @@ export function findBindingProblemsIn(
   const problems: TemplateBindingProblem[] = [];
   for (const [name, template] of Object.entries(bindings)) {
     const key = name as WhatsAppTemplateName;
-    const found =
-      provider === 'twilio'
+    const found = [
+      ...headerProblems(template),
+      ...(provider === 'twilio'
         ? twilioBindingProblem(template)
-        : cloudBindingProblem(template);
+        : cloudBindingProblem(template)),
+    ];
     for (const problem of found) problems.push({ key, problem });
   }
   return problems;
@@ -1355,6 +1470,22 @@ export function findBindingProblemsIn(
 function sidMarkerProblems(template: TemplateBinding): string[] {
   return template.cloudOnly && template.contentSid !== undefined
     ? ['cloudOnly is set but a contentSid is still declared']
+    : [];
+}
+
+/**
+ * Meta allows a template exactly ONE header component.
+ *
+ * Declaring both an image and a document header would build two, which Meta
+ * rejects at send time with a 132012 that names neither field. Checked at boot
+ * instead, on both providers, for the same reason `sidMarkerProblems` is: the
+ * mistake is in the binding, not in either provider's mapping of it.
+ */
+function headerProblems(template: TemplateBinding): string[] {
+  return template.hasImageHeader && template.documentHeaderVar
+    ? [
+        'hasImageHeader and documentHeaderVar are both set (Meta allows one header)',
+      ]
     : [];
 }
 
@@ -1414,6 +1545,19 @@ export function templateLanguage(key: WhatsAppTemplateName): string {
 /** Whether a template carries an IMAGE header that must be sent every time. */
 export function hasImageHeader(key: WhatsAppTemplateName): boolean {
   return TEMPLATE_BINDINGS[key].hasImageHeader === true;
+}
+
+/**
+ * Which `variables()` key holds this template's per-send DOCUMENT header link,
+ * or `undefined` when it has no document header.
+ *
+ * A name rather than a boolean, unlike `hasImageHeader` above — see the field's
+ * doc comment for why the link cannot be resolved by the mapper itself.
+ */
+export function getDocumentHeaderVar(
+  key: WhatsAppTemplateName,
+): string | undefined {
+  return TEMPLATE_BINDINGS[key].documentHeaderVar;
 }
 
 export function getButtonUrlVar(key: WhatsAppTemplateName): string | undefined {
