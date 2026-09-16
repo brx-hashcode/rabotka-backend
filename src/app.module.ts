@@ -23,6 +23,7 @@ import { getMailerTransportConfig } from './modules/mail/mailer-transport.config
 import { MailModule } from './modules/mail/mail.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { OAuthModule } from './modules/oauth/oauth.module';
+import { IdentityCheckModule } from './modules/identity-check/identity-check.module';
 import { ProfileModule } from './modules/profile/profile.module';
 import { UserModule } from './modules/user/user.module';
 import { ConversationModule } from './modules/conversation/conversation.module';
@@ -161,6 +162,7 @@ import { HttpOnlyArcjetGuard } from './common/guards/http-only-arcjet.guard';
     ReminderModule,
     AuthModule,
     OAuthModule,
+    IdentityCheckModule,
     ProfileModule,
     UserModule,
     ConversationModule,

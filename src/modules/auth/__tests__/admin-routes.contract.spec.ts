@@ -62,6 +62,11 @@ const PUBLIC_PREFIXES = new Set([
   // Session-based admin auth would make all four unusable. The one admin
   // surface, `admin/oauth-apps`, is NOT here and carries AdminAuthGuard.
   'oauth',
+  // The partner identity-check API. Called by a partner's backend with the
+  // same client credentials as `oauth/token`, enforced by
+  // PartnerClientAuthGuard on the controller; no admin session exists there.
+  // The person's side lives under `profile/identity-checks`.
+  'identity-checks',
   // The two OIDC discovery documents. Excluded from the global prefix in
   // main.ts, and public by definition — a list of URLs and a set of public keys.
   '.well-known',

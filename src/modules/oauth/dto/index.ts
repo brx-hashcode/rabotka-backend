@@ -1,7 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   ArrayMaxSize,
-  ArrayNotEmpty,
   IsArray,
   IsBoolean,
   IsEmail,
@@ -15,7 +14,7 @@ import {
   MinLength,
 } from 'class-validator';
 import { OAuthAppStatus } from '@prisma/client';
-import { SUPPORTED_SCOPES } from '../oauth.constants';
+import { REGISTRABLE_SCOPES, WEBHOOK_URL_MAX_LENGTH } from '../oauth.constants';
 
 export class SendInteractionOtpDto {
   @ApiProperty({ example: '+237690000000' })
@@ -129,26 +128,39 @@ export class CreateOAuthAppDto {
   @IsUrl({ protocols: ['https'], require_protocol: true })
   logoUrl?: string;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     isArray: true,
     type: String,
     description:
-      'Exact-match allowlist. Each URI must be written out in full — no wildcards.',
+      'Exact-match allowlist. Each URI must be written out in full — no ' +
+      'wildcards. Required unless the app is registered for identity checks only.',
   })
+  @IsOptional()
   @IsArray()
-  @ArrayNotEmpty()
   // A cap, because every one of these is compared on every authorize request
   // and because a partner needing more than ten callbacks has an architecture
   // question, not a registration question.
   @ArrayMaxSize(10)
   @IsString({ each: true })
-  redirectUris!: string[];
+  redirectUris?: string[];
 
-  @ApiPropertyOptional({ isArray: true, enum: SUPPORTED_SCOPES })
+  @ApiPropertyOptional({ isArray: true, enum: REGISTRABLE_SCOPES })
   @IsOptional()
   @IsArray()
-  @IsIn(SUPPORTED_SCOPES, { each: true })
+  @IsIn(REGISTRABLE_SCOPES, { each: true })
   allowedScopes?: string[];
+
+  @ApiPropertyOptional({
+    nullable: true,
+    description:
+      'Where identity-check results are POSTed. Required when ' +
+      '`rabotka:identity_check` is allowed; https only (http://localhost for ' +
+      'sandbox apps). Empty string or null removes it.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(WEBHOOK_URL_MAX_LENGTH)
+  webhookUrl?: string | null;
 
   @ApiPropertyOptional({
     default: false,
@@ -195,16 +207,27 @@ export class UpdateOAuthAppDto {
   @ApiPropertyOptional({ isArray: true, type: String })
   @IsOptional()
   @IsArray()
-  @ArrayNotEmpty()
   @ArrayMaxSize(10)
   @IsString({ each: true })
   redirectUris?: string[];
 
-  @ApiPropertyOptional({ isArray: true, enum: SUPPORTED_SCOPES })
+  @ApiPropertyOptional({ isArray: true, enum: REGISTRABLE_SCOPES })
   @IsOptional()
   @IsArray()
-  @IsIn(SUPPORTED_SCOPES, { each: true })
+  @IsIn(REGISTRABLE_SCOPES, { each: true })
   allowedScopes?: string[];
+
+  @ApiPropertyOptional({
+    nullable: true,
+    description:
+      'Where identity-check results are POSTed. Required when ' +
+      '`rabotka:identity_check` is allowed; https only (http://localhost for ' +
+      'sandbox apps). Empty string or null removes it.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(WEBHOOK_URL_MAX_LENGTH)
+  webhookUrl?: string | null;
 
   @ApiPropertyOptional({ enum: OAuthAppStatus })
   @IsOptional()
