@@ -6,13 +6,21 @@ import { AdminPenaltyController } from './admin-penalty.controller';
 import { AuthModule } from '../auth/auth.module';
 import { WalletModule } from '../wallet/wallet.module';
 import { LogModule } from '../log/log.module';
-import { BotModule } from '../bot/bot.module';
+import { WhatsAppModule } from '../whatsapp/whatsapp.module';
+import { WhatsAppLoginLinkModule } from '../auth/whatsapp-login-link.module';
 import { PenaltyNotificationScheduler } from './penalty-notification.scheduler';
 import { PenaltyNotificationProcessor } from './penalty-notification.processor';
 
 @Module({
   imports: [
-    AdminArchiveModule,PrismaModule, AuthModule, WalletModule, LogModule, BotModule],
+    AdminArchiveModule,
+    PrismaModule,
+    AuthModule,
+    WalletModule,
+    LogModule,
+    WhatsAppModule,
+    WhatsAppLoginLinkModule,
+  ],
   controllers: [AdminPenaltyController],
   providers: [
     PenaltyService,

@@ -20,9 +20,10 @@ import { WalletService } from '../wallet/wallet.service';
 import { PaymentRequestService } from '../payment-request/payment-request.service';
 
 /**
- * Settling unpaid penalties from the app. Offers the same two payment methods as
- * the rest of the app (and the WhatsApp pay-penalties flow): the profile's own
- * wallet, or Mobile Money via the shared /pay/:token screen.
+ * Settling unpaid penalties from the app — the only place they are paid; the
+ * WhatsApp bot sends a button here. Offers the same two payment methods as the
+ * rest of the app: the profile's own wallet, or Mobile Money via the shared
+ * /pay/:token screen.
  */
 @ApiTags('Mobile — Penalties')
 @ApiBearerAuth()

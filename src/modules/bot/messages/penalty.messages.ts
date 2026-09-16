@@ -75,10 +75,7 @@ export function formatPenaltyReminderDay(params: {
     ...header,
     ...totalLine,
     '',
-    '*Comment payer :*',
-    'Tapez *payer* pour régler vos pénalités.',
-    '',
-    'Le détail de vos pénalités est dans l’application, sur votre profil.',
+    'Appuyez sur *Payer mes pénalités* ci-dessous pour les régler dans l’application, où vous trouverez aussi leur détail.',
   ].join('\n');
 }
 
