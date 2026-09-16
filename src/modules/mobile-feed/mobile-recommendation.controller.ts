@@ -42,6 +42,7 @@ import { RecommendationContactService } from '../recommendation/recommendation-c
 import { InteractionEventService } from '../recommendation-engine/interaction-event.service';
 import { EngineRolloutService } from '../recommendation-engine/engine-rollout.service';
 import { RecommendationEngineService } from '../recommendation-engine/recommendation-engine.service';
+import { ProfileNotificationService } from '../profile-notification/profile-notification.service';
 
 const WORKER_SELECT = {
   id: true,
@@ -133,6 +134,8 @@ export class MobileRecommendationController {
     private readonly rollout: EngineRolloutService,
     private readonly engine: RecommendationEngineService,
     private readonly portfolio: PortfolioService,
+    // Appended: the specs construct this controller positionally.
+    private readonly profileNotifications: ProfileNotificationService,
   ) {}
 
   @Get('worker-feed')
@@ -363,6 +366,9 @@ export class MobileRecommendationController {
       surface: 'worker_detail',
       requestId: req.requestId,
     });
+    // Tells the worker. Deduplicated per employer/worker per day inside, which
+    // matters here: the contact drawer and every refetch hit this endpoint too.
+    void this.profileNotifications.notifyProfileView(profileId, workerId);
 
     return { worker, recommendationFee, walletBalance };
   }

@@ -377,6 +377,23 @@ export const DEFAULT_SYSTEM_CONFIGS: ConfigDefault[] = [
       'offre (minutes, 0 = notifier à chaque candidature)',
     isSecret: false,
   },
+  {
+    key: 'notifications.profile_views_whatsapp_threshold',
+    value: '5',
+    category: ConfigCategory.MATCHING,
+    label:
+      'Vues de profil non lues au-delà desquelles le travailleur est prévenu ' +
+      'sur WhatsApp (0 = désactivé)',
+    isSecret: false,
+  },
+  {
+    key: 'notifications.profile_views_whatsapp_cooldown_hours',
+    value: '168',
+    category: ConfigCategory.MATCHING,
+    label:
+      'Délai minimum entre deux rappels WhatsApp de vues de profil (heures)',
+    isSecret: false,
+  },
 
   // ── GENERAL ───────────────────────────────────────────────────────────────
   {

@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { BotNotificationService } from '../bot-notification.service';
+import { inAppNotifications } from '../../../profile-notification/__tests__/in-app-notifications';
 
 jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => {});
 
@@ -77,6 +78,7 @@ describe('BotNotificationService', () => {
   let redis: { set: jest.Mock; del: jest.Mock };
   let contractService: { create: jest.Mock; downloadAsAdmin: jest.Mock };
   let whatsAppDocuments: { send: jest.Mock };
+  let events: { emit: jest.Mock };
 
   beforeEach(() => {
     const base = makeDeps();
@@ -102,6 +104,7 @@ describe('BotNotificationService', () => {
         .mockResolvedValue({ buffer: Buffer.from('%PDF'), filename: 'c.pdf' }),
     };
     whatsAppDocuments = { send: jest.fn().mockResolvedValue(true) };
+    events = { emit: jest.fn() };
 
     service = new BotNotificationService(
       deps.prisma as any,
@@ -129,7 +132,110 @@ describe('BotNotificationService', () => {
       redis as any,
       contractService as any,
       whatsAppDocuments as any,
+      events as any,
     );
+  });
+
+  describe('in-app notifications', () => {
+    it('notifies an accepted worker even without a phone, flagging a pending fee', async () => {
+      deps.prisma.application.findUnique.mockResolvedValue(
+        makeApp({ worker: { ...makeApp().worker, phone: null } }),
+      );
+      deps.contactUnlock.getByApplicationId.mockResolvedValue({ id: 'a-1' });
+
+      await service.sendApplicationAcceptedToWorker('app-1');
+
+      const [payload] = inAppNotifications(events.emit, 'APPLICATION_ACCEPTED');
+      expect(payload.input).toMatchObject({
+        applicationId: 'app-1',
+        paymentPending: true,
+      });
+      expect(deps.whatsApp.sendTemplateMessage).not.toHaveBeenCalled();
+    });
+
+    it('marks an auto-fill rejection as automatic', async () => {
+      deps.prisma.application.findUnique.mockResolvedValue({
+        worker_id: 'worker-1',
+        rejection_source: 'AUTO_FILL',
+        job_offer: { title: 'Plombier' },
+        worker: { phone: null },
+      });
+
+      await service.sendApplicationRejectedToWorker('app-1');
+
+      const [payload] = inAppNotifications(events.emit, 'APPLICATION_REJECTED');
+      expect(payload).toMatchObject({
+        recipientId: 'worker-1',
+        input: { automatic: true, jobTitle: 'Plombier' },
+      });
+    });
+
+    it('tells the employer a worker cancelled', async () => {
+      await service.sendCancellationToEmployer('app-1', null, false);
+
+      const [payload] = inAppNotifications(
+        events.emit,
+        'APPLICATION_CANCELLED',
+      );
+      expect(payload.recipientId).toBeTruthy();
+      expect(payload.input).toMatchObject({ type: 'APPLICATION_CANCELLED' });
+    });
+
+    it('tells the worker the employer cancelled the hire', async () => {
+      deps.prisma.application.findUnique.mockResolvedValue({
+        worker_id: 'worker-1',
+        job_offer: { title: 'Plombier', employer_id: 'emp-1' },
+        worker: { phone: null, first_name: 'Bob' },
+      });
+
+      await service.sendCancellationToWorker('app-1', null);
+
+      const [payload] = inAppNotifications(events.emit, 'HIRE_CANCELLED');
+      expect(payload).toMatchObject({
+        recipientId: 'worker-1',
+        actorId: 'emp-1',
+      });
+    });
+
+    it('tells both parties about an unlock, each deduplicated', async () => {
+      deps.prisma.contactUnlockAttempt.findUnique.mockResolvedValue({
+        id: 'attempt-1',
+        application_id: 'app-1',
+        employer_id: 'emp-1',
+        worker_id: 'worker-1',
+      });
+      deps.prisma.profile.findUnique
+        .mockResolvedValueOnce({
+          phone: '+242001',
+          first_name: 'Alice',
+          last_name: 'Smith',
+          email: null,
+        })
+        .mockResolvedValueOnce({
+          phone: '+242002',
+          first_name: 'Bob',
+          last_name: 'Jones',
+          email: null,
+        });
+
+      // The payer is skipped on WhatsApp, never in the bell.
+      await service.sendContactUnlockedNotification('attempt-1', {
+        skipNotifyProfileId: 'emp-1',
+      });
+
+      const payloads = inAppNotifications(events.emit, 'CONTACT_UNLOCKED');
+      expect(payloads.map((p) => p.recipientId).sort()).toEqual([
+        'emp-1',
+        'worker-1',
+      ]);
+      const toEmployer = payloads.find((p) => p.recipientId === 'emp-1');
+      expect(toEmployer?.input).toMatchObject({
+        recipientRole: 'EMPLOYER',
+        applicationId: 'app-1',
+        counterpartName: 'Bob J.',
+      });
+      expect(new Set(payloads.map((p) => p.dedupeKey)).size).toBe(2);
+    });
   });
 
   describe('sendNewApplicationToEmployer()', () => {

@@ -1,4 +1,5 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import {
   InteractionActor,
   InteractionKind,
@@ -15,6 +16,7 @@ import { EngineRolloutService } from '../../recommendation-engine/engine-rollout
 import { InteractionEventService } from '../../recommendation-engine/interaction-event.service';
 import { RecommendationEngineService } from '../../recommendation-engine/recommendation-engine.service';
 import { SystemConfigService } from '../../system-config/system-config.service';
+import { notifyProfile } from '../../profile-notification/profile-notification.events';
 
 /** How many WhatsApp sends may be in flight at once for one offer. */
 export const NOTIFY_CONCURRENCY = 5;
@@ -64,6 +66,8 @@ export class JobNotificationService {
     private readonly botNotification: BotNotificationService,
     private readonly interactions: InteractionEventService,
     @Inject(REDIS_CONNECTION) private readonly redis: Redis,
+    // Appended and optional: the specs construct this service positionally.
+    @Optional() private readonly events?: EventEmitter2,
   ) {}
 
   /**
@@ -105,6 +109,7 @@ export class JobNotificationService {
       where: { id: jobOfferId },
       select: {
         id: true,
+        title: true,
         employer_id: true,
         category_id: true,
         status: true,
@@ -211,7 +216,12 @@ export class JobNotificationService {
    */
   private async notifyOne(
     worker: RankedWorkerRef,
-    offer: { id: string; employer_id: string; category_id: string | null },
+    offer: {
+      id: string;
+      title?: string | null;
+      employer_id: string;
+      category_id: string | null;
+    },
     cooldownMinutes: number,
     outcome: NotifyOutcome,
   ): Promise<void> {
@@ -257,6 +267,16 @@ export class JobNotificationService {
 
     outcome.sent++;
     await this.redis.set(sentKey, '1', 'EX', SENT_MARKER_TTL_SECONDS);
+    // After the send, so the bell obeys the same cooldown and sent marker as
+    // WhatsApp and never shows a recommendation the worker was not sent.
+    notifyProfile(this.events, {
+      recipientId: worker.id,
+      input: {
+        type: 'JOB_RECOMMENDATION',
+        jobOfferId: offer.id,
+        jobTitle: offer.title ?? '',
+      },
+    });
     await this.recordServed(worker.id, offer);
   }
 

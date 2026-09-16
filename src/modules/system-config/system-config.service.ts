@@ -616,6 +616,28 @@ export class SystemConfigService implements OnModuleInit {
     return Number.isNaN(n) || n < 0 ? 30 : n;
   }
 
+  /**
+   * How many unread profile views a worker may pile up before WhatsApp tells
+   * them. `0` turns the reminder off.
+   */
+  async getProfileViewsWhatsAppThreshold(): Promise<number> {
+    const val = await this.get(
+      'notifications.profile_views_whatsapp_threshold',
+      '5',
+    );
+    const n = Number.parseInt(val, 10);
+    return Number.isNaN(n) || n < 0 ? 5 : n;
+  }
+
+  async getProfileViewsWhatsAppCooldownHours(): Promise<number> {
+    const val = await this.get(
+      'notifications.profile_views_whatsapp_cooldown_hours',
+      '168',
+    );
+    const n = Number.parseInt(val, 10);
+    return Number.isNaN(n) || n < 1 ? 168 : n;
+  }
+
   async getContactInfo() {
     const [email, phone, address] = await this.mgetBatch([
       { key: 'contact.email', fallback: 'contact@rabotka.com' },

@@ -19,6 +19,14 @@ import {
   WalletTransactionType,
 } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
+import {
+  notifyProfile,
+  paymentFailedNotification,
+} from '../profile-notification/profile-notification.events';
+import {
+  paymentKindOf,
+  personName,
+} from '../profile-notification/notification-catalog';
 import { resolvePaymentType } from './payment-type';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { ContactRecordService } from '../contact-unlock/contact-record.service';
@@ -456,6 +464,7 @@ export class PaymentRequestService {
         gatewayRef,
       });
       this.paymentStatusGateway.emitPaymentStatus(request.token, 'REJECTED');
+      notifyProfile(this.eventEmitter, paymentFailedNotification(request));
       this.notifyPaymentFailedByWebhook(request).catch((err: unknown) =>
         this.logger.warn(
           `Could not send webhook failure WhatsApp notification for request ${request.id}`,
@@ -514,6 +523,16 @@ export class PaymentRequestService {
     this.logger.log(
       `Payment approved: ${request.id} — ${context.amount} FCFA credited to system wallet`,
     );
+
+    // After the atomic claim, so the webhook and the poller cannot both add one.
+    notifyProfile(this.eventEmitter, {
+      recipientId: request.profile_id,
+      input: {
+        type: 'PAYMENT_SUCCEEDED',
+        amount: context.amount,
+        kind: paymentKindOf(request.request_type),
+      },
+    });
 
     this.emitAdminPaymentNotification(request, context);
     await this.handlePenaltyPostPayment(request);
@@ -1019,8 +1038,6 @@ export class PaymentRequestService {
       paymentRequestId: request.id,
     });
 
-    if (!request.profile.phone) return;
-
     try {
       const worker = await this.prisma.profile.findUnique({
         where: { id: context.recommendationWorkerId },
@@ -1036,6 +1053,24 @@ export class PaymentRequestService {
       const workerName =
         `${worker.first_name ?? ''} ${worker.last_name ?? ''}`.trim() ||
         'le travailleur';
+
+      // Before the phone check: the bell does not need a WhatsApp number.
+      notifyProfile(this.eventEmitter, {
+        recipientId: request.profile_id,
+        actorId: context.recommendationWorkerId,
+        input: {
+          type: 'CONTACT_UNLOCKED',
+          recipientRole: 'EMPLOYER',
+          applicationId: null,
+          counterpartName: personName(
+            worker.first_name,
+            worker.last_name,
+            'le travailleur',
+          ),
+          jobTitle: null,
+        },
+      });
+      if (!request.profile.phone) return;
 
       // The approved template, not free-form text. Two reasons: it carries the
       // feedback Flow on its « Laisser un avis » button, and an employer who

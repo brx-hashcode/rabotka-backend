@@ -520,7 +520,9 @@ model Profile {
   referrals_made                  Referral[]                    @relation("ReferralReferrer")
   referral_received               Referral?                     @relation("ReferralReferee")
   oauth_authorizations            OAuthAuthorization[]
-  deleted_at                      DateTime?                     @db.Timestamptz
+  notifications_received          ProfileNotification[]         @relation("ProfileNotificationRecipient")
+  notifications_triggered         ProfileNotification[]         @relation("ProfileNotificationActor")
+  deleted_at                     DateTime?                     @db.Timestamptz
 
   @@index([email], name: "idx_profile_email")
   @@index([phone], name: "idx_profile_phone")
@@ -1548,6 +1550,61 @@ model ProfilePlatformDocumentLink {
 
   @@unique([profile_id, document_id])
   @@map("profile_platform_document_links")
+}
+
+/// What a ProfileNotification is about. The client picks its icon from this, so
+/// a new kind needs a client release to render as anything but the fallback.
+enum ProfileNotificationType {
+  // Worker
+  PROFILE_VIEW
+  JOB_RECOMMENDATION
+  APPLICATION_ACCEPTED
+  APPLICATION_REJECTED
+  HIRE_CANCELLED
+  MISSION_RATED
+  // Employer
+  NEW_APPLICATION
+  APPLICATION_CANCELLED
+  MISSION_COMPLETED
+  // Both
+  CONTACT_UNLOCKED
+  PAYMENT_SUCCEEDED
+  PAYMENT_FAILED
+  CLAIM_COMMENTED
+  CLAIM_STATUS_CHANGED
+}
+
+/// The in-app feed behind the bell in rabotka-client.
+///
+/// Per recipient, unlike AdminNotification, which every admin shares. The copy
+/// is rendered at write time and stored, so a feed row reads the same after
+/// the category or city it mentions is renamed.
+model ProfileNotification {
+  id           String                  @id @default(uuid()) @db.Uuid
+  created_at   DateTime                @default(now())
+  recipient_id String                  @db.Uuid
+  type         ProfileNotificationType
+  title        String
+  body         String
+  /// In-app path the client opens on tap, without the host. Null = no target.
+  link         String?
+  /// Who caused it. Kept for admin and abuse review and NEVER sent to the
+  /// recipient: a profile view is shown anonymised, because naming the employer
+  /// would give away what the contact unlock is paid for.
+  actor_id     String?                 @db.Uuid
+  /// Render inputs (sector, city, …) for clients that want more than the copy.
+  metadata     Json?
+  read_at      DateTime?
+  /// Cleared from the profile's feed (swipe or « Tout effacer »). Kept rather
+  /// than deleted so admin still sees the full history.
+  dismissed_at DateTime?
+
+  recipient Profile  @relation("ProfileNotificationRecipient", fields: [recipient_id], references: [id], onDelete: Cascade)
+  actor     Profile? @relation("ProfileNotificationActor", fields: [actor_id], references: [id], onDelete: SetNull)
+
+  @@index([recipient_id, created_at(sort: Desc)], name: "idx_profile_notif_recipient_time")
+  @@index([recipient_id, type, read_at], name: "idx_profile_notif_recipient_unread")
+  @@map("profile_notifications")
 }
 
 model AdminNotification {

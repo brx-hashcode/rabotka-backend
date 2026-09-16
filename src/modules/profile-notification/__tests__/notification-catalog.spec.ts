@@ -1,0 +1,178 @@
+import { PaymentRequestType } from '@prisma/client';
+import {
+  paymentKindOf,
+  personName,
+  renderNotification,
+  type NotificationInput,
+} from '../notification-catalog';
+
+/** One representative input per type — the list must stay exhaustive. */
+const SAMPLES: NotificationInput[] = [
+  { type: 'PROFILE_VIEW', sector: 'Restauration', city: 'Brazzaville' },
+  { type: 'JOB_RECOMMENDATION', jobOfferId: 'o-1', jobTitle: 'Plombier' },
+  {
+    type: 'APPLICATION_ACCEPTED',
+    applicationId: 'a-1',
+    jobTitle: 'Plombier',
+    paymentPending: false,
+  },
+  { type: 'APPLICATION_REJECTED', jobTitle: 'Plombier', automatic: false },
+  { type: 'HIRE_CANCELLED', jobTitle: 'Plombier' },
+  {
+    type: 'MISSION_RATED',
+    score: 4,
+    jobTitle: 'Plombier',
+    rateeRole: 'WORKER',
+    applicationId: 'a-1',
+    jobOfferId: 'o-1',
+  },
+  {
+    type: 'NEW_APPLICATION',
+    applicationId: 'a-1',
+    jobTitle: 'Plombier',
+    workerName: 'Awa K.',
+  },
+  {
+    type: 'APPLICATION_CANCELLED',
+    jobOfferId: 'o-1',
+    jobTitle: 'Plombier',
+    workerName: 'Awa K.',
+  },
+  {
+    type: 'MISSION_COMPLETED',
+    jobOfferId: 'o-1',
+    jobTitle: 'Plombier',
+    workerName: 'Awa K.',
+  },
+  {
+    type: 'CONTACT_UNLOCKED',
+    recipientRole: 'EMPLOYER',
+    applicationId: 'a-1',
+    counterpartName: 'Awa K.',
+    jobTitle: 'Plombier',
+  },
+  { type: 'PAYMENT_SUCCEEDED', amount: 2500, kind: 'WALLET_TOP_UP' },
+  { type: 'PAYMENT_FAILED', amount: 2500, kind: 'PENALTY' },
+  { type: 'CLAIM_COMMENTED', claimId: 'c-1', claimTitle: 'Paiement' },
+  {
+    type: 'CLAIM_STATUS_CHANGED',
+    claimId: 'c-1',
+    claimTitle: 'Paiement',
+    status: 'COMPLETED',
+  },
+];
+
+describe('renderNotification', () => {
+  it.each(SAMPLES.map((s) => [s.type, s] as const))(
+    '%s renders a title, a body and an in-app link',
+    (_type, input) => {
+      const out = renderNotification(input);
+      expect(out.title.trim()).not.toBe('');
+      expect(out.body.trim()).not.toBe('');
+      // Either an in-app path or deliberately nothing to open.
+      if (out.link !== null) expect(out.link).toMatch(/^\//);
+      expect(out.body).not.toContain('undefined');
+      expect(out.body).not.toContain('null');
+    },
+  );
+
+  it('keeps profile views anonymous', () => {
+    const out = renderNotification(SAMPLES[0]);
+    expect(out.body).toBe(
+      'Un employeur du secteur Restauration à Brazzaville a consulté votre profil.',
+    );
+  });
+
+  it('makes an unlock informational, whoever receives it', () => {
+    for (const recipientRole of ['EMPLOYER', 'WORKER'] as const) {
+      for (const applicationId of ['a-1', null]) {
+        const out = renderNotification({
+          type: 'CONTACT_UNLOCKED',
+          recipientRole,
+          applicationId,
+          counterpartName: 'Awa K.',
+          jobTitle: null,
+        });
+        expect(out.link).toBeNull();
+        // The initial's full stop is not doubled.
+        expect(out.body).not.toContain('..');
+        expect(out.body).toContain('WhatsApp');
+      }
+    }
+  });
+
+  it('never links to the hidden contacts list', () => {
+    for (const input of SAMPLES) {
+      expect(renderNotification(input).link ?? '').not.toContain(
+        'profils-contactes',
+      );
+    }
+    expect(
+      renderNotification({
+        type: 'PAYMENT_SUCCEEDED',
+        amount: 1000,
+        kind: 'RECOMMENDATION_CONTACT',
+      }).link,
+    ).toBe('/portefeuille');
+  });
+
+  it('sends an accepted worker who still owes the fee to the payment page', () => {
+    expect(
+      renderNotification({
+        type: 'APPLICATION_ACCEPTED',
+        applicationId: 'a-1',
+        jobTitle: 'X',
+        paymentPending: true,
+      }).link,
+    ).toBe('/applications/a-1/paiement');
+  });
+
+  it('formats amounts with plain spaces', () => {
+    const out = renderNotification({
+      type: 'PAYMENT_SUCCEEDED',
+      amount: 1234567,
+      kind: 'WALLET_TOP_UP',
+    });
+    expect(out.body).toContain('1 234 567 FCFA');
+  });
+
+  it('sends a failed penalty payment back to the payment page', () => {
+    expect(
+      renderNotification({ type: 'PAYMENT_FAILED', amount: 1, kind: 'PENALTY' })
+        .link,
+    ).toBe('/penalites/paiement');
+  });
+
+  it('drops the title quote when there is no title', () => {
+    const out = renderNotification({
+      type: 'APPLICATION_REJECTED',
+      jobTitle: null,
+      automatic: true,
+    });
+    expect(out.body).not.toContain('«');
+  });
+});
+
+describe('paymentKindOf', () => {
+  it('maps request types, treating null as a penalty', () => {
+    expect(paymentKindOf(PaymentRequestType.WALLET_TOP_UP)).toBe(
+      'WALLET_TOP_UP',
+    );
+    expect(paymentKindOf(PaymentRequestType.CONTACT_UNLOCK)).toBe(
+      'CONTACT_UNLOCK',
+    );
+    expect(paymentKindOf(PaymentRequestType.RECOMMENDATION_CONTACT)).toBe(
+      'RECOMMENDATION_CONTACT',
+    );
+    expect(paymentKindOf(PaymentRequestType.PENALTY_BATCH)).toBe('PENALTY');
+    expect(paymentKindOf(null)).toBe('PENALTY');
+  });
+});
+
+describe('personName', () => {
+  it('shortens to first name and initial', () => {
+    expect(personName('Awa', 'kouassi', 'X')).toBe('Awa K.');
+    expect(personName('Awa', '', 'X')).toBe('Awa');
+    expect(personName('  ', 'K', 'Un travailleur')).toBe('Un travailleur');
+  });
+});

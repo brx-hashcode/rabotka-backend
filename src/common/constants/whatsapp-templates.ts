@@ -214,6 +214,8 @@ export const OPEN_APP_CTA_PATH = 'home';
  * anyone who forwards the message.
  */
 export const CLAIMS_LIST_CTA_PATH = 'claims';
+/** Where the profile-views reminder lands: the worker's notification feed. */
+export const NOTIFICATIONS_CTA_PATH = 'notifications';
 /** The claim's own page — `/claims/:id` in rabotka-client. */
 export function claimDetailCtaPath(claimId: string): string {
   return `claims/${claimId}`;
@@ -1374,6 +1376,50 @@ export const WHATSAPP_TEMPLATES = {
         firstName: string;
         claimTitle: string;
         excerpt: string | null;
+        loginCode?: string | null;
+      },
+    ]
+  >,
+
+  /**
+   * A worker has let profile views pile up unread.
+   *
+   * The in-app bell is the channel for each view; this is the nudge for the
+   * worker who never opens the app to see it. Sent once the unread count passes
+   * `notifications.profile_views_whatsapp_threshold`, and at most once per
+   * cooldown — see `ProfileNotificationService.maybeRemindOnWhatsApp`.
+   *
+   * Carries a count and nothing about who looked: the feed is anonymised, and
+   * a WhatsApp message is easier to forward than an in-app one.
+   */
+  profileViewsDigest: {
+    // Authored in scripts/whatsapp-templates/definitions.ts; Meta only.
+    cloudOnly: true,
+    urlSuffixVar: '3',
+    urlSuffixMode: 'shortlink',
+    category: 'UTILITY',
+    cloud: {
+      name: cloudName(
+        'TPL_CLOUD_PROFILE_VIEWS_DIGEST',
+        'rabotka_profile_views_digest_v1',
+      ),
+    },
+    variables: (p: {
+      firstName: string;
+      count: number;
+      loginCode?: string | null;
+    }) => ({
+      '1': p.firstName,
+      '2': String(p.count),
+      // Same fallback shape as `claimCommented`: the bare path when no code
+      // could be minted, so the button still lands on the login screen.
+      '3': p.loginCode?.trim() || NOTIFICATIONS_CTA_PATH,
+    }),
+  } satisfies WhatsAppTemplate<
+    [
+      params: {
+        firstName: string;
+        count: number;
         loginCode?: string | null;
       },
     ]
