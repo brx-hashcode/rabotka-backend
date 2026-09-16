@@ -251,6 +251,7 @@ describe('Identity-check switch on OAuth apps', () => {
         findUniqueOrThrow: jest.fn().mockResolvedValue({
           allowed_scopes: ['openid'],
           webhook_url: null,
+          redirect_uris: ['https://banque.example/cb'],
           is_sandbox: false,
           ...current,
         }),
@@ -352,6 +353,44 @@ describe('Identity-check switch on OAuth apps', () => {
     await expectRequestError(
       service.update('app-1', { webhookUrl: 'http://localhost:4000/hook' }),
     );
+  });
+
+  it('registers an identity-check-only app without redirect URIs', async () => {
+    const { service, created } = writable();
+    await service.create({
+      ...base,
+      redirectUris: [],
+      allowedScopes: [IDENTITY_CHECK_SCOPE],
+      webhookUrl: 'https://banque.example/hook',
+    });
+    expect(created[0]).toEqual(expect.objectContaining({ redirect_uris: [] }));
+  });
+
+  it('still requires a redirect URI for a login app', async () => {
+    const { service, created } = writable();
+    await expectRequestError(service.create({ ...base, redirectUris: [' '] }));
+    expect(created).toHaveLength(0);
+  });
+
+  it('refuses turning the switch off while the app has no redirect URI', async () => {
+    const { service, updated } = writable({
+      allowed_scopes: ['openid', IDENTITY_CHECK_SCOPE],
+      webhook_url: 'https://banque.example/hook',
+      redirect_uris: [],
+    });
+    await expectRequestError(
+      service.update('app-1', { allowedScopes: ['openid'], webhookUrl: null }),
+    );
+    expect(updated).toHaveLength(0);
+  });
+
+  it('allows clearing redirect URIs once the switch is on', async () => {
+    const { service, updated } = writable({
+      allowed_scopes: ['openid', IDENTITY_CHECK_SCOPE],
+      webhook_url: 'https://banque.example/hook',
+    });
+    await service.update('app-1', { redirectUris: [] });
+    expect(updated[0]).toEqual({ redirect_uris: [] });
   });
 });
 

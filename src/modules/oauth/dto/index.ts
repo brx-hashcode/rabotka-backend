@@ -1,7 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   ArrayMaxSize,
-  ArrayNotEmpty,
   IsArray,
   IsBoolean,
   IsEmail,
@@ -129,20 +128,21 @@ export class CreateOAuthAppDto {
   @IsUrl({ protocols: ['https'], require_protocol: true })
   logoUrl?: string;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     isArray: true,
     type: String,
     description:
-      'Exact-match allowlist. Each URI must be written out in full — no wildcards.',
+      'Exact-match allowlist. Each URI must be written out in full — no ' +
+      'wildcards. Required unless the app is registered for identity checks only.',
   })
+  @IsOptional()
   @IsArray()
-  @ArrayNotEmpty()
   // A cap, because every one of these is compared on every authorize request
   // and because a partner needing more than ten callbacks has an architecture
   // question, not a registration question.
   @ArrayMaxSize(10)
   @IsString({ each: true })
-  redirectUris!: string[];
+  redirectUris?: string[];
 
   @ApiPropertyOptional({ isArray: true, enum: REGISTRABLE_SCOPES })
   @IsOptional()
@@ -207,7 +207,6 @@ export class UpdateOAuthAppDto {
   @ApiPropertyOptional({ isArray: true, type: String })
   @IsOptional()
   @IsArray()
-  @ArrayNotEmpty()
   @ArrayMaxSize(10)
   @IsString({ each: true })
   redirectUris?: string[];

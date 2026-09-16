@@ -142,7 +142,7 @@ export class OAuthAppService {
     description: string;
     contactEmail: string;
     logoUrl?: string;
-    redirectUris: string[];
+    redirectUris?: string[];
     allowedScopes?: string[];
     webhookUrl?: string | null;
     isSandbox?: boolean;
@@ -150,6 +150,7 @@ export class OAuthAppService {
   }): Promise<{ app: OAuthAppRow; secret: MintedSecret }> {
     const redirectUris = normaliseRedirectUris(params.redirectUris);
     const allowedScopes = normaliseScopes(params.allowedScopes);
+    assertRedirectUrisForLogin(allowedScopes, redirectUris);
 
     const clientId = generateClientId();
     const clientSecret = generateClientSecret();
@@ -206,7 +207,7 @@ export class OAuthAppService {
       status?: OAuthAppStatus;
     },
   ): Promise<OAuthAppRow> {
-    const data: Prisma.OAuthAppUpdateInput = await this.scopeAndWebhookChanges(
+    const data: Prisma.OAuthAppUpdateInput = await this.dependentChanges(
       id,
       params,
     );
@@ -221,30 +222,42 @@ export class OAuthAppService {
     if (params.logoUrl !== undefined) {
       data.logo_url = params.logoUrl?.trim() || null;
     }
-    if (params.redirectUris !== undefined) {
-      data.redirect_uris = normaliseRedirectUris(params.redirectUris);
-    }
     if (params.status !== undefined) data.status = params.status;
 
     return this.prisma.oAuthApp.update({ where: { id }, data });
   }
 
   /**
-   * The scope and the URL are checked TOGETHER, against the row as it will be
-   * after the update: turning the switch on without a URL, or clearing the URL
-   * while the switch stays on, are the same mistake.
+   * Scopes, webhook and redirect URIs depend on each other, so they are checked
+   * TOGETHER, against the row as it will be after the update: turning the
+   * identity-check switch on without a webhook, clearing the webhook while the
+   * switch stays on, or leaving a login app with no redirect URI are all
+   * refused here.
    */
-  private async scopeAndWebhookChanges(
+  private async dependentChanges(
     id: string,
-    params: { allowedScopes?: string[]; webhookUrl?: string | null },
+    params: {
+      allowedScopes?: string[];
+      webhookUrl?: string | null;
+      redirectUris?: string[];
+    },
   ): Promise<Prisma.OAuthAppUpdateInput> {
-    if (params.allowedScopes === undefined && params.webhookUrl === undefined) {
+    if (
+      params.allowedScopes === undefined &&
+      params.webhookUrl === undefined &&
+      params.redirectUris === undefined
+    ) {
       return {};
     }
 
     const current = await this.prisma.oAuthApp.findUniqueOrThrow({
       where: { id },
-      select: { allowed_scopes: true, webhook_url: true, is_sandbox: true },
+      select: {
+        allowed_scopes: true,
+        webhook_url: true,
+        redirect_uris: true,
+        is_sandbox: true,
+      },
     });
 
     const scopes =
@@ -255,12 +268,18 @@ export class OAuthAppService {
       params.webhookUrl === undefined
         ? current.webhook_url
         : normaliseWebhookUrl(params.webhookUrl, current.is_sandbox);
+    const redirectUris =
+      params.redirectUris === undefined
+        ? current.redirect_uris
+        : normaliseRedirectUris(params.redirectUris);
 
     assertWebhookForIdentityCheck(scopes, webhookUrl);
+    assertRedirectUrisForLogin(scopes, redirectUris);
 
     const data: Prisma.OAuthAppUpdateInput = {};
     if (params.allowedScopes !== undefined) data.allowed_scopes = scopes;
     if (params.webhookUrl !== undefined) data.webhook_url = webhookUrl;
+    if (params.redirectUris !== undefined) data.redirect_uris = redirectUris;
     return data;
   }
 
@@ -364,16 +383,8 @@ export class OAuthAppService {
   }
 }
 
-function normaliseRedirectUris(uris: string[]): string[] {
-  const cleaned = uris.map((u) => u.trim()).filter((u) => u.length > 0);
-
-  if (cleaned.length === 0) {
-    throw new OAuthError(
-      'invalid_request',
-      'Au moins une URI de redirection est requise.',
-      400,
-    );
-  }
+function normaliseRedirectUris(uris: string[] | undefined): string[] {
+  const cleaned = (uris ?? []).map((u) => u.trim()).filter((u) => u.length > 0);
 
   for (const uri of cleaned) {
     const problem = validateRedirectUriForRegistration(uri);
@@ -407,6 +418,24 @@ function normaliseScopes(scopes: string[] | undefined): string[] {
   const result = new Set<RegistrableScope>(scopes as RegistrableScope[]);
   result.add('openid');
   return [...result];
+}
+
+/**
+ * Redirect URIs only serve "Login with Rabotka". An app registered for identity
+ * checks alone may have none: every `authorize` against it then ends on the
+ * error page, because no redirect URI can match an empty list.
+ */
+function assertRedirectUrisForLogin(
+  scopes: readonly string[],
+  redirectUris: readonly string[],
+): void {
+  if (redirectUris.length === 0 && !scopes.includes(IDENTITY_CHECK_SCOPE)) {
+    throw new OAuthError(
+      'invalid_request',
+      'Au moins une URI de redirection est requise.',
+      400,
+    );
+  }
 }
 
 /** Trimmed, with an empty string meaning "no webhook". */

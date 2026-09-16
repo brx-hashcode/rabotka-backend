@@ -39,6 +39,9 @@ you must give them a **webhook URL** for it:
 
 Until the feature is on, every call returns `403 identity_check_not_enabled`.
 
+If you only use identity checks, you don't need to register any redirect URIs.
+Those are only for Login with Rabotka, which such an application can't use.
+
 ## Authentication
 
 Use HTTP Basic with your client credentials, exactly as you do on
