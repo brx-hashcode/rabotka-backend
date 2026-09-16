@@ -37,6 +37,7 @@ export const AUTHORED_KEYS: ReadonlySet<WhatsAppTemplateName> = new Set([
   'kycPendingMenu',
   'openApp',
   'claimCommented',
+  'profileViewsDigest',
   // Cloud-only, with a DOCUMENT header supplied per send. Twilio has no shape
   // for that at all, so these have no Content fixture to capture.
   'kycAgreementDocument',
@@ -408,6 +409,46 @@ export function authoredTemplates(): Partial<
               // outbound queue, so `withLoginCode` never runs for this one.
               url: 'https://rabotka.work/s/{{1}}',
               example: ['https://rabotka.work/s/claims'],
+            },
+          ],
+        },
+      ],
+    },
+
+    /**
+     * The profile-views reminder. A count and a link, nothing more — the feed it
+     * opens is anonymised, and so is this.
+     */
+    profileViewsDigest: {
+      name: 'rabotka_profile_views_digest_v1',
+      language: 'fr',
+      category: 'UTILITY',
+      components: [
+        {
+          type: 'BODY',
+          text: [
+            'Bonjour {{1}},',
+            '',
+            'Votre profil Rabotka a reçu {{2}} nouvelles visites d’employeurs.',
+            '',
+            'Ouvrez vos notifications pour voir le détail.',
+            '',
+            'L’équipe Rabotka',
+          ].join('\n'),
+          example: {
+            body_text: [['Jean', '6']],
+          },
+        },
+        {
+          type: 'BUTTONS',
+          buttons: [
+            {
+              type: 'URL',
+              text: 'Voir mes notifications',
+              // The CALLER mints the code — `sendTemplateMessage` bypasses the
+              // outbound queue, so `withLoginCode` never runs for this one.
+              url: 'https://rabotka.work/s/{{1}}',
+              example: ['https://rabotka.work/s/notifications'],
             },
           ],
         },

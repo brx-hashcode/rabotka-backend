@@ -21,6 +21,8 @@ import {
   startOfBusinessDay,
   startOfNextBusinessDay,
 } from '../../common/utils/business-day.util';
+import { notifyProfile } from '../profile-notification/profile-notification.events';
+import { personName } from '../profile-notification/notification-catalog';
 import { InteractionEventService } from '../recommendation-engine/interaction-event.service';
 import { JobEventsGateway } from '../ws-notifications/job-events.gateway';
 import {
@@ -303,6 +305,8 @@ export class ApplicationService {
           status: true,
           profile_type: true,
           verification_status: true,
+          first_name: true,
+          last_name: true,
         },
       }),
     ]);
@@ -457,6 +461,23 @@ export class ApplicationService {
     // from the WhatsApp apply flow, so a worker applying on the web produced no
     // notification at all. Fire-and-forget — a WhatsApp failure must never fail
     // the application itself.
+    // Unpaced, unlike the WhatsApp nudge: the feed lists each applicant, and a
+    // row costs nothing.
+    notifyProfile(this.eventEmitter, {
+      recipientId: application.job_offer.employer_id,
+      actorId: workerId,
+      input: {
+        type: 'NEW_APPLICATION',
+        applicationId: application.id,
+        jobTitle: application.job_offer.title,
+        workerName: personName(
+          worker.first_name,
+          worker.last_name,
+          'Un travailleur',
+        ),
+      },
+    });
+
     void this.botNotification
       .sendNewApplicationToEmployer(application.id)
       .catch((err: unknown) =>
@@ -1562,8 +1583,11 @@ export class ApplicationService {
         status: true,
         worker_id: true,
         job_offer_id: true,
+        application_id: true,
         // category_id is denormalised onto the interaction event below.
-        job_offer: { select: { employer_id: true, category_id: true } },
+        job_offer: {
+          select: { employer_id: true, category_id: true, title: true },
+        },
       },
     });
     if (!assignment) {
@@ -1588,6 +1612,7 @@ export class ApplicationService {
       throw new BadRequestException("Impossible de déterminer l'évalué");
     }
 
+    let firstRating = false;
     await this.prisma.$transaction(async (tx) => {
       // First rating? Determines whether the reliability delta applies (only the
       // first time, never on a re-rate — otherwise it would be counted twice).
@@ -1601,6 +1626,7 @@ export class ApplicationService {
         select: { id: true },
       });
       const isFirstRating = existing === null;
+      firstRating = isFirstRating;
 
       await tx.rating.upsert({
         where: {
@@ -1641,6 +1667,23 @@ export class ApplicationService {
         await this.applyRatingToReliability(tx, rateeId, score);
       }
     });
+
+    // First rating only: a re-rate is the rater changing their mind, not news.
+    // Covers both directions, and both the web and the bot entry points.
+    if (firstRating) {
+      notifyProfile(this.eventEmitter, {
+        recipientId: rateeId,
+        actorId: raterProfileId,
+        input: {
+          type: 'MISSION_RATED',
+          score,
+          jobTitle: assignment.job_offer?.title ?? null,
+          rateeRole: isEmployer ? 'WORKER' : 'EMPLOYER',
+          applicationId: assignment.application_id ?? null,
+          jobOfferId: assignment.job_offer_id ?? null,
+        },
+      });
+    }
 
     // A rating is the only signal that reflects how the work actually went, so
     // it's the highest-confidence evidence either side gives us. 3/5 is neutral
@@ -1970,6 +2013,24 @@ export class ApplicationService {
     });
 
     this.notifyRejectedApplicants(rejectedOrphanIds);
+
+    // Only on the first confirmation — END is accepted again as a no-op retry.
+    if (application.status !== ApplicationStatus.END) {
+      notifyProfile(this.eventEmitter, {
+        recipientId: application.job_offer.employer_id,
+        actorId: workerId,
+        input: {
+          type: 'MISSION_COMPLETED',
+          jobOfferId: application.job_offer_id,
+          jobTitle: application.job_offer.title,
+          workerName: personName(
+            application.worker.first_name,
+            application.worker.last_name,
+            'Le travailleur',
+          ),
+        },
+      });
+    }
 
     // Tell both sides the mission moved. The employer's rating action only
     // becomes available once this happens, and their screen has no other way to

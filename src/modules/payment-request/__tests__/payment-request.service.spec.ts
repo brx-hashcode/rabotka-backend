@@ -24,6 +24,7 @@ import { QueueService } from '../../../common/services/queue/queue.service';
 import { PaymentGatewayService } from '../../../common/services/payment/payment-gateway.service';
 import { MONETBIL_METADATA } from '../../../common/services/payment/providers/monetbil-payment.gateway';
 import { MTN_MOMO_METADATA } from '../../../common/services/payment/providers/mtn-momo-payment.gateway';
+import { inAppNotifications } from '../../profile-notification/__tests__/in-app-notifications';
 
 const PROFILE_ID = 'profile-uuid-1';
 const REQUEST_ID = 'req-uuid-1';
@@ -662,6 +663,13 @@ describe('PaymentRequestService', () => {
 
       await service.processApprovedPaymentById(REQUEST_ID);
       // Should complete without throwing
+
+      const emit = (service as any).eventEmitter.emit as jest.Mock;
+      const [payload] = inAppNotifications(emit, 'PAYMENT_SUCCEEDED');
+      expect(payload).toMatchObject({
+        recipientId: fullRequest.profile_id,
+        input: { amount: 5000, kind: 'PENALTY' },
+      });
     });
 
     it('handles already-processed payment (count=0 from tx)', async () => {
@@ -692,6 +700,66 @@ describe('PaymentRequestService', () => {
         return Promise.resolve([]);
       });
       await service.processApprovedPaymentById(REQUEST_ID);
+
+      // Another thread won the claim and notifies; this one must not.
+      const emit = (service as any).eventEmitter.emit as jest.Mock;
+      expect(inAppNotifications(emit, 'PAYMENT_SUCCEEDED')).toHaveLength(0);
+    });
+  });
+
+  describe('handlePaymentCallback() - in-app failure notification', () => {
+    const failedRequest = () => ({
+      ...makeRequest(PaymentRequestStatus.PENDING),
+      amount: 2500,
+      request_type: PaymentRequestType.WALLET_TOP_UP,
+      contact_unlock_attempt_id: null,
+      gateway_payment_ref: 'gw-ref-9',
+      monetbil_payment_ref: null,
+      token: TOKEN,
+      phone: null,
+      operator: 'MTN',
+      gateway: 'MONETBIL',
+      profile: { ...mockProfile, phone: null },
+    });
+
+    beforeEach(() => {
+      (prisma.paymentRequest as any).updateMany = jest.fn();
+      (prisma as any).payment = { create: jest.fn().mockResolvedValue({}) };
+      (service as any).paymentGateway.handleWebhookPayload = jest
+        .fn()
+        .mockResolvedValue({
+          gatewayRef: 'gw-ref-9',
+          status: 'FAILED',
+          transactionId: null,
+        });
+    });
+
+    it('notifies the payer once, keyed on the request', async () => {
+      const req = failedRequest();
+      (prisma.paymentRequest.findFirst as jest.Mock).mockResolvedValue(req);
+      (prisma.paymentRequest as any).updateMany.mockResolvedValue({ count: 1 });
+
+      await service.handlePaymentCallback({ status: 'FAILED' });
+
+      const emit = (service as any).eventEmitter.emit as jest.Mock;
+      const [payload] = inAppNotifications(emit, 'PAYMENT_FAILED');
+      expect(payload).toMatchObject({
+        recipientId: req.profile_id,
+        input: { amount: 2500, kind: 'WALLET_TOP_UP' },
+      });
+      expect(payload.dedupeKey).toContain(req.id);
+    });
+
+    it('stays quiet when another webhook already settled it', async () => {
+      (prisma.paymentRequest.findFirst as jest.Mock).mockResolvedValue(
+        failedRequest(),
+      );
+      (prisma.paymentRequest as any).updateMany.mockResolvedValue({ count: 0 });
+
+      await service.handlePaymentCallback({ status: 'FAILED' });
+
+      const emit = (service as any).eventEmitter.emit as jest.Mock;
+      expect(inAppNotifications(emit, 'PAYMENT_FAILED')).toHaveLength(0);
     });
   });
 

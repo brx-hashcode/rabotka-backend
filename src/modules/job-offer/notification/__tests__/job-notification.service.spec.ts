@@ -12,6 +12,8 @@ import {
   JobNotificationService,
   NOTIFY_CONCURRENCY,
 } from '../job-notification.service';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { inAppNotifications } from '../../../profile-notification/__tests__/in-app-notifications';
 
 const OFFER_ID = 'offer-1';
 const EMPLOYER_ID = 'employer-1';
@@ -35,12 +37,14 @@ describe('JobNotificationService', () => {
   let bot: { sendRecommendedJobNotification: jest.Mock };
   let interactions: { record: jest.Mock };
   let redis: { set: jest.Mock; del: jest.Mock; exists: jest.Mock };
+  let events: { emit: jest.Mock };
 
   beforeEach(async () => {
     prisma = {
       jobOffer: {
         findUnique: jest.fn().mockResolvedValue({
           id: OFFER_ID,
+          title: 'Plombier',
           employer_id: EMPLOYER_ID,
           category_id: 'cat-1',
           status: JobOfferStatus.ACTIVE,
@@ -72,6 +76,8 @@ describe('JobNotificationService', () => {
       exists: jest.fn().mockResolvedValue(0),
     };
 
+    events = { emit: jest.fn() };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         JobNotificationService,
@@ -83,6 +89,7 @@ describe('JobNotificationService', () => {
         { provide: BotNotificationService, useValue: bot },
         { provide: InteractionEventService, useValue: interactions },
         { provide: REDIS_CONNECTION, useValue: redis },
+        { provide: EventEmitter2, useValue: events },
       ],
     }).compile();
 
@@ -399,6 +406,36 @@ describe('JobNotificationService', () => {
       await service.notifyForOffer(OFFER_ID);
 
       expect(interactions.record).not.toHaveBeenCalled();
+      // The bell follows WhatsApp: no message, no in-app recommendation.
+      expect(
+        inAppNotifications(events.emit, 'JOB_RECOMMENDATION'),
+      ).toHaveLength(0);
+    });
+
+    it('puts each delivered recommendation in the worker’s bell', async () => {
+      await service.notifyForOffer(OFFER_ID);
+
+      const payloads = inAppNotifications(events.emit, 'JOB_RECOMMENDATION');
+      expect(payloads.map((p) => p.recipientId).sort()).toEqual([
+        'w0',
+        'w1',
+        'w2',
+      ]);
+      expect(payloads[0].input).toEqual({
+        type: 'JOB_RECOMMENDATION',
+        jobOfferId: OFFER_ID,
+        jobTitle: 'Plombier',
+      });
+    });
+
+    it('skips the bell for a worker still in cooldown', async () => {
+      redis.set.mockResolvedValue(null);
+
+      await service.notifyForOffer(OFFER_ID);
+
+      expect(
+        inAppNotifications(events.emit, 'JOB_RECOMMENDATION'),
+      ).toHaveLength(0);
     });
 
     it('still counts the send when the bookkeeping write fails', async () => {

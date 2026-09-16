@@ -223,6 +223,8 @@ describe('authored templates', () => {
     'openApp',
     // Lands on the claim that was answered, so the reply is one tap away.
     'claimCommented',
+    // Lands on the worker's notification feed.
+    'profileViewsDigest',
   ] as const;
   // Deliberately button-less: this one carries whatever an admin typed, so
   // there is no single destination a CTA could point at.

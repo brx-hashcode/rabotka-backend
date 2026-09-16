@@ -121,6 +121,7 @@ describe('MobileRecommendationController — worker-feed tiers', () => {
       {
         ensurePortfolioSlug: jest.fn().mockResolvedValue('awa-a1b2c3'),
       } as never,
+      { notifyProfileView: jest.fn().mockResolvedValue(undefined) } as never,
     );
   });
 

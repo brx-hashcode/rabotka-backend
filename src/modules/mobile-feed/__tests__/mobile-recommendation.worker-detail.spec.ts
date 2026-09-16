@@ -39,6 +39,7 @@ describe('MobileRecommendationController — workerDetail()', () => {
     contactRecord: { groupBy: jest.Mock };
   };
   let portfolio: { ensurePortfolioSlug: jest.Mock };
+  let profileNotifications: { notifyProfileView: jest.Mock };
 
   const build = (row = workerRow()) => {
     prisma = {
@@ -55,6 +56,10 @@ describe('MobileRecommendationController — workerDetail()', () => {
       ensurePortfolioSlug: jest.fn().mockResolvedValue('awa-menagere-a1b2c3'),
     };
 
+    profileNotifications = {
+      notifyProfileView: jest.fn().mockResolvedValue(undefined),
+    };
+
     controller = new MobileRecommendationController(
       prisma as never,
       { findMatchingWorkersForEmployerProfile: jest.fn() } as never,
@@ -68,6 +73,7 @@ describe('MobileRecommendationController — workerDetail()', () => {
       { versionFor: jest.fn().mockResolvedValue('legacy') } as never,
       { recommendWorkersForEmployer: jest.fn() } as never,
       portfolio as never,
+      profileNotifications as never,
     );
   };
 
@@ -125,6 +131,27 @@ describe('MobileRecommendationController — workerDetail()', () => {
     build(workerRow({ verification_status: VerificationStatus.REJECTED }));
     const rejected = await controller.workerDetail(req as never, WORKER_ID);
     expect(rejected.worker.isVerified).toBe(false);
+  });
+
+  it('tells the worker their profile was viewed', async () => {
+    build();
+
+    await controller.workerDetail(req as never, WORKER_ID);
+
+    expect(profileNotifications.notifyProfileView).toHaveBeenCalledWith(
+      EMPLOYER_ID,
+      WORKER_ID,
+    );
+  });
+
+  it('does not notify when the worker does not exist', async () => {
+    build();
+    prisma.profile.findMany.mockResolvedValue([]);
+
+    await expect(
+      controller.workerDetail(req as never, WORKER_ID),
+    ).rejects.toThrow();
+    expect(profileNotifications.notifyProfileView).not.toHaveBeenCalled();
   });
 
   it('carries the fee and balance the confirm sheet needs', async () => {
