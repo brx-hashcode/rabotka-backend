@@ -41,6 +41,13 @@ import { OidcKeyService } from './services/oidc-key.service';
     OAuthAuthorizationService,
     OAuthSandboxService,
   ],
-  exports: [OAuthAppService],
+  // The identity-check API authenticates the same apps, signs its webhooks
+  // with the same key, and honours the same sandbox.
+  exports: [
+    OAuthAppService,
+    OidcKeyService,
+    OAuthTokenService,
+    OAuthSandboxService,
+  ],
 })
 export class OAuthModule {}

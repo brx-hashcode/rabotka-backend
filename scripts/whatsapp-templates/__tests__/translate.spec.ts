@@ -225,6 +225,8 @@ describe('authored templates', () => {
     'claimCommented',
     // Lands on the worker's notification feed.
     'profileViewsDigest',
+    // Lands on the identity-check consent page.
+    'identityCheckConsent',
   ] as const;
   // Deliberately button-less: this one carries whatever an admin typed, so
   // there is no single destination a CTA could point at.

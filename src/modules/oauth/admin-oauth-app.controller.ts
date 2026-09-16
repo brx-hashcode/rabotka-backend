@@ -25,7 +25,7 @@ import { LogService } from '../log/log.service';
 import { OAuthAppService } from './services/oauth-app.service';
 import { OAuthSandboxService } from './services/oauth-sandbox.service';
 import { CreateOAuthAppDto, UpdateOAuthAppDto } from './dto';
-import { SUPPORTED_SCOPES } from './oauth.constants';
+import { REGISTRABLE_SCOPES } from './oauth.constants';
 
 type AdminRequest = Request & { adminAccount?: { id: string } };
 
@@ -53,7 +53,7 @@ export class AdminOAuthAppController {
   /** The scope catalogue, so the admin UI never hardcodes its own copy. */
   @Get('scopes')
   scopes() {
-    return { scopes: [...SUPPORTED_SCOPES] };
+    return { scopes: [...REGISTRABLE_SCOPES] };
   }
 
   /**
@@ -119,6 +119,7 @@ export class AdminOAuthAppController {
         app.previous_secret_expires_at?.toISOString() ?? null,
       redirectUris: app.redirect_uris,
       allowedScopes: app.allowed_scopes,
+      webhookUrl: app.webhook_url,
       status: app.status,
       isSandbox: app.is_sandbox,
       contactEmail: app.contact_email,
@@ -162,6 +163,7 @@ export class AdminOAuthAppController {
         clientId: app.client_id,
         redirectUris: app.redirect_uris,
         allowedScopes: app.allowed_scopes,
+        webhookUrl: app.webhook_url,
         isSandbox: app.is_sandbox,
       },
       ...extractRequestMeta(req),

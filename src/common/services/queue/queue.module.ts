@@ -15,6 +15,7 @@ export const WHATSAPP_INBOUND_QUEUE = 'whatsapp-inbound-queue';
 export const USER_FEATURE_QUEUE = 'user-feature-queue';
 export const JOB_NOTIFICATION_QUEUE = 'job-notification-queue';
 export const WHATSAPP_LOG_RETENTION_QUEUE = 'whatsapp-log-retention-queue';
+export const IDENTITY_CHECK_QUEUE = 'identity-check-queue';
 
 @Module({})
 export class QueueModule {

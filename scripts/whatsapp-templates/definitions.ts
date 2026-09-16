@@ -38,6 +38,7 @@ export const AUTHORED_KEYS: ReadonlySet<WhatsAppTemplateName> = new Set([
   'openApp',
   'claimCommented',
   'profileViewsDigest',
+  'identityCheckConsent',
   // Cloud-only, with a DOCUMENT header supplied per send. Twilio has no shape
   // for that at all, so these have no Content fixture to capture.
   'kycAgreementDocument',
@@ -449,6 +450,49 @@ export function authoredTemplates(): Partial<
               // outbound queue, so `withLoginCode` never runs for this one.
               url: 'https://rabotka.work/s/{{1}}',
               example: ['https://rabotka.work/s/notifications'],
+            },
+          ],
+        },
+      ],
+    },
+
+    /**
+     * A partner asks Rabotka to confirm who the person is. The body says what
+     * is and is not shared, because "a company wants your identity" with no
+     * detail reads like a phishing message.
+     */
+    identityCheckConsent: {
+      name: 'rabotka_identity_check_consent_v1',
+      language: 'fr',
+      category: 'UTILITY',
+      components: [
+        {
+          type: 'BODY',
+          text: [
+            'Bonjour {{1}},',
+            '',
+            '{{2}} demande à Rabotka de confirmer votre identité.',
+            '',
+            'Si vous acceptez, Rabotka indiquera uniquement si les informations transmises correspondent à votre profil vérifié. Aucun document ni aucune donnée de votre profil ne sera partagé.',
+            '',
+            'Sans réponse de votre part sous 24 heures, la demande expire.',
+            '',
+            'L’équipe Rabotka',
+          ].join('\n'),
+          example: {
+            body_text: [['Jean', 'Banque Exemple']],
+          },
+        },
+        {
+          type: 'BUTTONS',
+          buttons: [
+            {
+              type: 'URL',
+              text: 'Voir la demande',
+              // The CALLER mints the code — `sendTemplateMessage` bypasses the
+              // outbound queue, so `withLoginCode` never runs for this one.
+              url: 'https://rabotka.work/s/{{1}}',
+              example: ['https://rabotka.work/s/identity-checks'],
             },
           ],
         },

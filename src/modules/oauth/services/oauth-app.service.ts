@@ -11,11 +11,13 @@ import {
 } from '../utils/client-credentials.util';
 import {
   DEFAULT_ALLOWED_SCOPES,
+  IDENTITY_CHECK_SCOPE,
+  REGISTRABLE_SCOPES,
   SECRET_ROTATION_GRACE_MS,
-  SUPPORTED_SCOPES,
-  type SupportedScope,
+  type RegistrableScope,
 } from '../oauth.constants';
 import { validateRedirectUriForRegistration } from '../utils/redirect-uri.util';
+import { validateWebhookUrl } from '../utils/webhook-url.util';
 
 /** A freshly minted secret, returned once and never again. */
 export type MintedSecret = { clientId: string; clientSecret: string };
@@ -142,6 +144,7 @@ export class OAuthAppService {
     logoUrl?: string;
     redirectUris: string[];
     allowedScopes?: string[];
+    webhookUrl?: string | null;
     isSandbox?: boolean;
     createdBy?: string;
   }): Promise<{ app: OAuthAppRow; secret: MintedSecret }> {
@@ -156,6 +159,9 @@ export class OAuthAppService {
     // stores a readable secret on a non-sandbox row.
     const isSandbox = params.isSandbox === true;
 
+    const webhookUrl = normaliseWebhookUrl(params.webhookUrl, isSandbox);
+    assertWebhookForIdentityCheck(allowedScopes, webhookUrl);
+
     const app = await this.prisma.oAuthApp.create({
       data: {
         name: params.name.trim(),
@@ -167,6 +173,7 @@ export class OAuthAppService {
         client_secret_hint: secretHint(clientSecret),
         redirect_uris: redirectUris,
         allowed_scopes: allowedScopes,
+        webhook_url: webhookUrl,
         // `=== true` rather than `?? false`: a truthy non-boolean must not
         // register a sandbox app, and this is the only place the flag is ever
         // written.
@@ -195,10 +202,14 @@ export class OAuthAppService {
       logoUrl?: string | null;
       redirectUris?: string[];
       allowedScopes?: string[];
+      webhookUrl?: string | null;
       status?: OAuthAppStatus;
     },
   ): Promise<OAuthAppRow> {
-    const data: Prisma.OAuthAppUpdateInput = {};
+    const data: Prisma.OAuthAppUpdateInput = await this.scopeAndWebhookChanges(
+      id,
+      params,
+    );
 
     if (params.name !== undefined) data.name = params.name.trim();
     if (params.description !== undefined) {
@@ -213,12 +224,44 @@ export class OAuthAppService {
     if (params.redirectUris !== undefined) {
       data.redirect_uris = normaliseRedirectUris(params.redirectUris);
     }
-    if (params.allowedScopes !== undefined) {
-      data.allowed_scopes = normaliseScopes(params.allowedScopes);
-    }
     if (params.status !== undefined) data.status = params.status;
 
     return this.prisma.oAuthApp.update({ where: { id }, data });
+  }
+
+  /**
+   * The scope and the URL are checked TOGETHER, against the row as it will be
+   * after the update: turning the switch on without a URL, or clearing the URL
+   * while the switch stays on, are the same mistake.
+   */
+  private async scopeAndWebhookChanges(
+    id: string,
+    params: { allowedScopes?: string[]; webhookUrl?: string | null },
+  ): Promise<Prisma.OAuthAppUpdateInput> {
+    if (params.allowedScopes === undefined && params.webhookUrl === undefined) {
+      return {};
+    }
+
+    const current = await this.prisma.oAuthApp.findUniqueOrThrow({
+      where: { id },
+      select: { allowed_scopes: true, webhook_url: true, is_sandbox: true },
+    });
+
+    const scopes =
+      params.allowedScopes === undefined
+        ? current.allowed_scopes
+        : normaliseScopes(params.allowedScopes);
+    const webhookUrl =
+      params.webhookUrl === undefined
+        ? current.webhook_url
+        : normaliseWebhookUrl(params.webhookUrl, current.is_sandbox);
+
+    assertWebhookForIdentityCheck(scopes, webhookUrl);
+
+    const data: Prisma.OAuthAppUpdateInput = {};
+    if (params.allowedScopes !== undefined) data.allowed_scopes = scopes;
+    if (params.webhookUrl !== undefined) data.webhook_url = webhookUrl;
+    return data;
   }
 
   /**
@@ -348,7 +391,7 @@ function normaliseRedirectUris(uris: string[]): string[] {
 function normaliseScopes(scopes: string[] | undefined): string[] {
   if (!scopes || scopes.length === 0) return [...DEFAULT_ALLOWED_SCOPES];
 
-  const supported = new Set<string>(SUPPORTED_SCOPES);
+  const supported = new Set<string>(REGISTRABLE_SCOPES);
   const unknown = scopes.filter((s) => !supported.has(s));
   if (unknown.length > 0) {
     throw new OAuthError(
@@ -361,7 +404,40 @@ function normaliseScopes(scopes: string[] | undefined): string[] {
   // `openid` is what makes this OIDC rather than bare OAuth, and every claim
   // builder assumes a `sub`. Adding it silently is friendlier than rejecting an
   // admin who left it out of a checkbox list.
-  const result = new Set<SupportedScope>(scopes as SupportedScope[]);
+  const result = new Set<RegistrableScope>(scopes as RegistrableScope[]);
   result.add('openid');
   return [...result];
+}
+
+/** Trimmed, with an empty string meaning "no webhook". */
+function normaliseWebhookUrl(
+  raw: string | null | undefined,
+  isSandbox: boolean,
+): string | null {
+  const url = raw?.trim();
+  if (!url) return null;
+
+  const problem = validateWebhookUrl(url, isSandbox);
+  if (problem) {
+    throw new OAuthError('invalid_request', `Webhook : ${problem}`, 400);
+  }
+  return url;
+}
+
+/**
+ * Identity checks finish asynchronously — the person has to approve on their
+ * phone — so an app with the switch on and nowhere to deliver the result would
+ * accept checks it can never report.
+ */
+function assertWebhookForIdentityCheck(
+  scopes: readonly string[],
+  webhookUrl: string | null,
+): void {
+  if (scopes.includes(IDENTITY_CHECK_SCOPE) && !webhookUrl) {
+    throw new OAuthError(
+      'invalid_request',
+      "Une URL de webhook est obligatoire pour activer la vérification d'identité.",
+      400,
+    );
+  }
 }

@@ -76,7 +76,12 @@ import { CsrfController } from './csrf.controller';
               // the session cookie attached — exactly the shape CSRF exists for.
               url.includes('/oauth/token') ||
               url.includes('/oauth/revoke') ||
-              url.includes('/oauth/userinfo')
+              url.includes('/oauth/userinfo') ||
+              // The partner identity-check API, same reasoning: HTTP Basic
+              // client credentials from a partner's backend. The person-side
+              // routes live under `/profile/identity-checks` and are NOT
+              // matched here — they use the session cookie.
+              url.includes('/api/v1/identity-checks')
             );
           },
         });

@@ -15,7 +15,7 @@ import {
   MinLength,
 } from 'class-validator';
 import { OAuthAppStatus } from '@prisma/client';
-import { SUPPORTED_SCOPES } from '../oauth.constants';
+import { REGISTRABLE_SCOPES, WEBHOOK_URL_MAX_LENGTH } from '../oauth.constants';
 
 export class SendInteractionOtpDto {
   @ApiProperty({ example: '+237690000000' })
@@ -144,11 +144,23 @@ export class CreateOAuthAppDto {
   @IsString({ each: true })
   redirectUris!: string[];
 
-  @ApiPropertyOptional({ isArray: true, enum: SUPPORTED_SCOPES })
+  @ApiPropertyOptional({ isArray: true, enum: REGISTRABLE_SCOPES })
   @IsOptional()
   @IsArray()
-  @IsIn(SUPPORTED_SCOPES, { each: true })
+  @IsIn(REGISTRABLE_SCOPES, { each: true })
   allowedScopes?: string[];
+
+  @ApiPropertyOptional({
+    nullable: true,
+    description:
+      'Where identity-check results are POSTed. Required when ' +
+      '`rabotka:identity_check` is allowed; https only (http://localhost for ' +
+      'sandbox apps). Empty string or null removes it.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(WEBHOOK_URL_MAX_LENGTH)
+  webhookUrl?: string | null;
 
   @ApiPropertyOptional({
     default: false,
@@ -200,11 +212,23 @@ export class UpdateOAuthAppDto {
   @IsString({ each: true })
   redirectUris?: string[];
 
-  @ApiPropertyOptional({ isArray: true, enum: SUPPORTED_SCOPES })
+  @ApiPropertyOptional({ isArray: true, enum: REGISTRABLE_SCOPES })
   @IsOptional()
   @IsArray()
-  @IsIn(SUPPORTED_SCOPES, { each: true })
+  @IsIn(REGISTRABLE_SCOPES, { each: true })
   allowedScopes?: string[];
+
+  @ApiPropertyOptional({
+    nullable: true,
+    description:
+      'Where identity-check results are POSTed. Required when ' +
+      '`rabotka:identity_check` is allowed; https only (http://localhost for ' +
+      'sandbox apps). Empty string or null removes it.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(WEBHOOK_URL_MAX_LENGTH)
+  webhookUrl?: string | null;
 
   @ApiPropertyOptional({ enum: OAuthAppStatus })
   @IsOptional()
