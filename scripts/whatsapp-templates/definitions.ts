@@ -461,23 +461,26 @@ export function authoredTemplates(): Partial<
      * is and is not shared, because "a company wants your identity" with no
      * detail reads like a phishing message.
      */
+    // v2 (2026-09): bolder, warmer copy. v1 is approved and stays sendable
+    // through TPL_CLOUD_IDENTITY_CHECK_CONSENT until v2 is approved.
     identityCheckConsent: {
-      name: 'rabotka_identity_check_consent_v1',
+      name: 'rabotka_identity_check_consent_v2',
       language: 'fr',
       category: 'UTILITY',
       components: [
         {
           type: 'BODY',
           text: [
-            'Bonjour {{1}},',
+            'Bonjour *{{1}}*,',
             '',
-            '{{2}} demande à Rabotka de confirmer votre identité.',
+            '*{{2}}* vous demande l’autorisation de confirmer votre identité auprès de Rabotka.',
             '',
-            'Si vous acceptez, Rabotka indiquera uniquement si les informations transmises correspondent à votre profil vérifié. Aucun document ni aucune donnée de votre profil ne sera partagé.',
+            'Si vous acceptez, *Rabotka indiquera uniquement si les informations transmises correspondent à votre profil vérifié.*',
+            '*Aucun document ni aucune donnée de votre profil ne sera partagé.*',
             '',
-            'Sans réponse de votre part sous 24 heures, la demande expire.',
+            '*Cette demande expire dans 24 heures* si nous ne recevons pas de réponse de votre part.',
             '',
-            'L’équipe Rabotka',
+            '*L’équipe Rabotka*',
           ].join('\n'),
           example: {
             body_text: [['Jean', 'Banque Exemple']],

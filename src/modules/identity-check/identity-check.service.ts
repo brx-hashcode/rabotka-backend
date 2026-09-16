@@ -439,11 +439,14 @@ export class IdentityCheckService {
       if (url) {
         const sent = await this.whatsApp.sendInteractiveCta(p.phone, {
           body:
-            `Bonjour ${p.firstName},\n\n` +
-            `${p.partnerName} demande à Rabotka de confirmer votre identité.\n\n` +
-            'Si vous acceptez, Rabotka indiquera uniquement si les informations ' +
-            'transmises correspondent à votre profil vérifié. Aucun document ni ' +
-            'aucune donnée de votre profil ne sera partagé.',
+            `Bonjour *${p.firstName}*,\n\n` +
+            `*${p.partnerName}* vous demande l’autorisation de confirmer votre identité auprès de Rabotka.\n\n` +
+            'Si vous acceptez, *Rabotka indiquera uniquement si les informations ' +
+            'transmises correspondent à votre profil vérifié.*\n' +
+            '*Aucun document ni aucune donnée de votre profil ne sera partagé.*\n\n' +
+            '*Cette demande expire dans 24 heures* si nous ne recevons pas de ' +
+            'réponse de votre part.\n\n' +
+            '*L’équipe Rabotka*',
           buttonText: 'Voir la demande',
           url,
           profileId,

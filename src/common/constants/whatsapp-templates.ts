@@ -1442,7 +1442,7 @@ export const WHATSAPP_TEMPLATES = {
     cloud: {
       name: cloudName(
         'TPL_CLOUD_IDENTITY_CHECK_CONSENT',
-        'rabotka_identity_check_consent_v1',
+        'rabotka_identity_check_consent_v2',
       ),
     },
     variables: (p: {
