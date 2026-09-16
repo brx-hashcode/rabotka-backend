@@ -11,6 +11,7 @@ import { SELF_CANCELLED_MESSAGE } from '../application.constants';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { BotNotificationService } from '../../bot/services/bot-notification.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { inAppNotifications } from '../../profile-notification/__tests__/in-app-notifications';
 import { ContactUnlockService } from '../../contact-unlock/contact-unlock.service';
 import { ContractService } from '../../contract/contract.service';
 import { SystemConfigService } from '../../system-config/system-config.service';
@@ -395,6 +396,39 @@ describe('ApplicationService', () => {
       expect(reliabilityUpdate).toBeUndefined();
     });
 
+    it('tells the ratee about a first rating, in either direction', async () => {
+      (prisma.assignment.findUnique as jest.Mock).mockResolvedValueOnce({
+        ...completedAssignment,
+        application_id: 'app-9',
+        job_offer_id: 'offer-9',
+      });
+      (prisma.rating.findUnique as jest.Mock).mockResolvedValueOnce(null);
+
+      await service.rateAssignment(ASSIGNMENT_ID, WORKER_ID, 4);
+
+      const emit = testingModule.get(EventEmitter2).emit as jest.Mock;
+      const [payload] = inAppNotifications(emit, 'MISSION_RATED');
+      expect(payload).toMatchObject({
+        recipientId: EMPLOYER_ID,
+        actorId: WORKER_ID,
+        input: { score: 4, rateeRole: 'EMPLOYER', jobOfferId: 'offer-9' },
+      });
+    });
+
+    it('stays quiet on a re-rating', async () => {
+      (prisma.assignment.findUnique as jest.Mock).mockResolvedValueOnce(
+        completedAssignment,
+      );
+      (prisma.rating.findUnique as jest.Mock).mockResolvedValueOnce({
+        id: 'existing',
+      });
+
+      await service.rateAssignment(ASSIGNMENT_ID, EMPLOYER_ID, 2);
+
+      const emit = testingModule.get(EventEmitter2).emit as jest.Mock;
+      expect(inAppNotifications(emit, 'MISSION_RATED')).toHaveLength(0);
+    });
+
     it('rejects a rater who is neither the worker nor the employer', async () => {
       (prisma.assignment.findUnique as jest.Mock).mockResolvedValueOnce(
         completedAssignment,
@@ -445,6 +479,18 @@ describe('ApplicationService', () => {
       expect(botNotification.sendNewApplicationToEmployer).toHaveBeenCalledWith(
         APPLICATION_ID,
       );
+    });
+
+    it('puts the application in the employer’s bell, with the worker as actor', async () => {
+      await service.create(JOB_OFFER_ID, WORKER_ID);
+
+      const emit = testingModule.get(EventEmitter2).emit as jest.Mock;
+      const [payload] = inAppNotifications(emit, 'NEW_APPLICATION');
+      expect(payload).toMatchObject({
+        recipientId: mockJobOffer.employer_id,
+        actorId: WORKER_ID,
+        input: { applicationId: APPLICATION_ID },
+      });
     });
 
     it('still returns the application when the notification fails', async () => {
@@ -1126,6 +1172,30 @@ describe('ApplicationService', () => {
         expect.arrayContaining([WORKER_ID, EMPLOYER_ID]),
         expect.objectContaining({ kind: 'completed' }),
       );
+    });
+
+    it('tells the employer the mission is done, once', async () => {
+      setupApplication(ApplicationStatus.ACCEPTED);
+      setupTx();
+      const emit = testingModule.get(EventEmitter2).emit as jest.Mock;
+
+      await service.markCompletedByWorker(APPLICATION_ID, WORKER_ID);
+
+      const [payload] = inAppNotifications(emit, 'MISSION_COMPLETED');
+      expect(payload).toMatchObject({
+        recipientId: EMPLOYER_ID,
+        actorId: WORKER_ID,
+      });
+    });
+
+    it('does not re-notify a retried confirmation', async () => {
+      setupApplication(ApplicationStatus.END);
+      setupTx();
+      const emit = testingModule.get(EventEmitter2).emit as jest.Mock;
+
+      await service.markCompletedByWorker(APPLICATION_ID, WORKER_ID);
+
+      expect(inAppNotifications(emit, 'MISSION_COMPLETED')).toHaveLength(0);
     });
 
     it.each([EmploymentType.CDI, EmploymentType.CDD, EmploymentType.STAGE])(

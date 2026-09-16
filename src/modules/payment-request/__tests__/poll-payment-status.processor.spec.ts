@@ -10,6 +10,8 @@ import { PaymentStatusGateway } from '../../ws-notifications/payment-status.gate
 import { QueueService } from '../../../common/services/queue/queue.service';
 import { LogService } from '../../log/log.service';
 import { WhatsAppService } from '../../whatsapp/whatsapp.service';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { inAppNotifications } from '../../profile-notification/__tests__/in-app-notifications';
 
 const mockPrisma = {
   paymentRequest: {
@@ -42,6 +44,8 @@ const mockLogService = {
 const mockWhatsApp = {
   sendTextMessage: jest.fn().mockResolvedValue(undefined),
 };
+
+const mockEvents = { emit: jest.fn() };
 
 const mockPaymentRequestService = {
   processApprovedPaymentById: jest.fn().mockResolvedValue(undefined),
@@ -76,6 +80,7 @@ describe('PollPaymentStatusProcessor', () => {
         { provide: QueueService, useValue: mockQueueService },
         { provide: LogService, useValue: mockLogService },
         { provide: WhatsAppService, useValue: mockWhatsApp },
+        { provide: EventEmitter2, useValue: mockEvents },
       ],
     }).compile();
     processor = module.get<PollPaymentStatusProcessor>(
@@ -118,6 +123,33 @@ describe('PollPaymentStatusProcessor', () => {
     expect(mockPaymentStatusGateway.emitPaymentStatus).toHaveBeenCalledWith(
       'tok-1',
       'REJECTED',
+    );
+  });
+
+  it('puts a failure in the payer’s bell, deduplicated with the webhook', async () => {
+    mockPaymentGateway.checkPaymentStatus.mockResolvedValueOnce({
+      status: 'FAILED',
+    });
+    await processor.process({ data: baseJobData });
+
+    const [payload] = inAppNotifications(mockEvents.emit, 'PAYMENT_FAILED');
+    expect(payload).toMatchObject({
+      recipientId: 'profile-1',
+      input: { amount: 5000, kind: 'CONTACT_UNLOCK' },
+    });
+    expect(payload.dedupeKey).toMatch(/payfail:req-1$/);
+  });
+
+  it('does not report a timeout as a failure in the bell', async () => {
+    mockPaymentGateway.checkPaymentStatus.mockResolvedValueOnce({
+      status: 'PENDING',
+    });
+    await processor.process({
+      data: { ...baseJobData, attempt: 3, maxAttempts: 3 },
+    });
+
+    expect(inAppNotifications(mockEvents.emit, 'PAYMENT_FAILED')).toHaveLength(
+      0,
     );
   });
 

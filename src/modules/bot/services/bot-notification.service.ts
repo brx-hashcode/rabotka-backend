@@ -6,7 +6,8 @@ import {
   Inject,
 } from '@nestjs/common';
 import Redis from 'ioredis';
-import { ContactUnlockStatus } from '@prisma/client';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { ContactUnlockStatus, RejectionSource } from '@prisma/client';
 import { jobLocationLabel } from '../../../common/utils/job-location.util';
 import {
   REDIS_CONNECTION,
@@ -23,6 +24,14 @@ import { SystemConfigService } from '../../system-config/system-config.service';
 import { WalletService } from '../../wallet/wallet.service';
 import { ContractService } from '../../contract/contract.service';
 import { WhatsAppDocumentService } from '../../whatsapp/documents/whatsapp-document.service';
+import {
+  notificationDedupeKey,
+  notifyProfile,
+} from '../../profile-notification/profile-notification.events';
+import { personName } from '../../profile-notification/notification-catalog';
+
+/** A mission unlocks once; this only absorbs retries of the same unlock. */
+const CONTACT_UNLOCKED_DEDUPE_SECONDS = 30 * 24 * 3600;
 
 @Injectable()
 export class BotNotificationService {
@@ -48,6 +57,9 @@ export class BotNotificationService {
     private readonly contractService?: ContractService,
     @Optional()
     private readonly whatsAppDocuments?: WhatsAppDocumentService,
+    // In-app notifications. Optional for the same positional-spec reason.
+    @Optional()
+    private readonly events?: EventEmitter2,
   ) {}
 
   /**
@@ -193,19 +205,34 @@ export class BotNotificationService {
           job_offer: {
             select: {
               title: true,
+              employer_id: true,
               employer: { select: { first_name: true, last_name: true } },
             },
           },
           worker: { select: { phone: true } },
         },
       });
-      if (!app?.worker?.phone || !app.job_offer?.employer) return;
+      if (!app?.job_offer?.employer) return;
 
       const employerName =
         `${app.job_offer.employer.first_name} ${app.job_offer.employer.last_name}`.trim();
 
       const attempt =
         await this.contactUnlock.getByApplicationId(applicationId);
+
+      // Before the phone check: the bell does not need a WhatsApp number.
+      notifyProfile(this.events, {
+        recipientId: app.worker_id,
+        actorId: app.job_offer.employer_id,
+        input: {
+          type: 'APPLICATION_ACCEPTED',
+          applicationId,
+          jobTitle: app.job_offer.title,
+          paymentPending: !!attempt,
+        },
+      });
+      if (!app.worker?.phone) return;
+
       if (attempt) {
         const fees = await this.systemConfig.getContactUnlockFees();
 
@@ -280,6 +307,54 @@ export class BotNotificationService {
           },
         }),
       ]);
+
+      // Both parties, including the payer the WhatsApp side skips — the bot
+      // reply they already got does not reach the bell. Deduplicated per party
+      // because the unlock path re-runs (BullMQ retries, multi-seat payments).
+      if (employer && worker) {
+        const missionTitle = await this.missionTitleFor(
+          attempt.application_id,
+        ).catch(() => null);
+        const parties = [
+          {
+            recipientId: attempt.employer_id,
+            actorId: attempt.worker_id,
+            recipientRole: 'EMPLOYER' as const,
+            counterpart: worker,
+            fallback: 'le travailleur',
+          },
+          {
+            recipientId: attempt.worker_id,
+            actorId: attempt.employer_id,
+            recipientRole: 'WORKER' as const,
+            counterpart: employer,
+            fallback: 'l’employeur',
+          },
+        ];
+        for (const party of parties) {
+          notifyProfile(this.events, {
+            recipientId: party.recipientId,
+            actorId: party.actorId,
+            dedupeKey: notificationDedupeKey(
+              'unlocked',
+              attempt.id,
+              party.recipientId,
+            ),
+            dedupeTtlSeconds: CONTACT_UNLOCKED_DEDUPE_SECONDS,
+            input: {
+              type: 'CONTACT_UNLOCKED',
+              recipientRole: party.recipientRole,
+              applicationId: attempt.application_id,
+              counterpartName: personName(
+                party.counterpart.first_name,
+                party.counterpart.last_name,
+                party.fallback,
+              ),
+              jobTitle: missionTitle,
+            },
+          });
+        }
+      }
 
       // The unlock is the moment the product either delivered or did not, so it
       // is the honest place to ask for feedback — and the template now carries
@@ -462,9 +537,26 @@ export class BotNotificationService {
     try {
       const app = await this.prisma.application.findUnique({
         where: { id: applicationId },
-        select: { worker: { select: { phone: true } } },
+        select: {
+          worker_id: true,
+          rejection_source: true,
+          job_offer: { select: { title: true } },
+          worker: { select: { phone: true } },
+        },
       });
-      if (!app?.worker?.phone) return;
+      if (!app) return;
+
+      // The single choke point for every rejection path, so the bell is
+      // notified here rather than at each caller.
+      notifyProfile(this.events, {
+        recipientId: app.worker_id,
+        input: {
+          type: 'APPLICATION_REJECTED',
+          jobTitle: app.job_offer?.title ?? null,
+          automatic: app.rejection_source === RejectionSource.AUTO_FILL,
+        },
+      });
+      if (!app.worker?.phone) return;
 
       const tpl = WHATSAPP_TEMPLATES.applicationRejected;
       await this.whatsApp.sendTemplateMessage(
@@ -502,11 +594,19 @@ export class BotNotificationService {
       const app = await this.prisma.application.findUnique({
         where: { id: applicationId },
         select: {
-          job_offer: { select: { title: true } },
+          worker_id: true,
+          job_offer: { select: { title: true, employer_id: true } },
           worker: { select: { phone: true, first_name: true } },
         },
       });
-      if (!app?.worker?.phone || !app.job_offer) return;
+      if (!app?.job_offer) return;
+
+      notifyProfile(this.events, {
+        recipientId: app.worker_id,
+        actorId: app.job_offer.employer_id,
+        input: { type: 'HIRE_CANCELLED', jobTitle: app.job_offer.title },
+      });
+      if (!app.worker?.phone) return;
 
       const lines = [
         `*${app.worker.first_name}*, l'employeur a annulé votre mission « ${app.job_offer.title} ».`,
@@ -543,10 +643,27 @@ export class BotNotificationService {
               employer: { select: { phone: true } },
             },
           },
+          worker_id: true,
           worker: { select: { first_name: true, last_name: true } },
         },
       });
-      if (!app?.job_offer?.employer?.phone || !app.worker) return;
+      if (!app?.job_offer || !app.worker) return;
+
+      notifyProfile(this.events, {
+        recipientId: app.job_offer.employer_id,
+        actorId: app.worker_id,
+        input: {
+          type: 'APPLICATION_CANCELLED',
+          jobOfferId: app.job_offer.id,
+          jobTitle: app.job_offer.title,
+          workerName: personName(
+            app.worker.first_name,
+            app.worker.last_name,
+            'Un travailleur',
+          ),
+        },
+      });
+      if (!app.job_offer.employer?.phone) return;
 
       const fees = await this.systemConfig.getFees();
       const date = app.job_offer.scheduled_at?.toLocaleDateString('fr-FR', {

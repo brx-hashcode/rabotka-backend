@@ -3,8 +3,10 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  Optional,
   forwardRef,
 } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import {
   ContactRecordOrigin,
   InteractionActor,
@@ -28,6 +30,8 @@ import { PaymentRequestService } from '../payment-request/payment-request.servic
 import { formatContactUnlockedMessage } from '../bot/messages/contact-unlock.messages';
 import { WHATSAPP_TEMPLATES } from '../../common/constants/whatsapp-templates';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
+import { notifyProfile } from '../profile-notification/profile-notification.events';
+import { personName } from '../profile-notification/notification-catalog';
 import { WhatsAppFeedbackService } from '../whatsapp/feedback/whatsapp-feedback.service';
 import { generatePaymentReference } from '../../common/utils/payment-reference';
 import { InteractionEventService } from '../recommendation-engine/interaction-event.service';
@@ -54,6 +58,8 @@ export class RecommendationContactService {
     private readonly whatsApp: WhatsAppService,
     @Inject(forwardRef(() => WhatsAppFeedbackService))
     private readonly feedback: WhatsAppFeedbackService,
+    // Appended and optional: the specs construct this service positionally.
+    @Optional() private readonly events?: EventEmitter2,
   ) {}
 
   async payWithWallet(
@@ -130,6 +136,22 @@ export class RecommendationContactService {
         })
         .catch(() => undefined);
     }
+
+    notifyProfile(this.events, {
+      recipientId: employerId,
+      actorId: workerId,
+      input: {
+        type: 'CONTACT_UNLOCKED',
+        recipientRole: 'EMPLOYER',
+        applicationId: null,
+        counterpartName: personName(
+          worker.first_name,
+          worker.last_name,
+          'le travailleur',
+        ),
+        jobTitle: null,
+      },
+    });
 
     // Deliver the worker's contact to the employer over WhatsApp.
     const employer = await this.prisma.profile.findUnique({

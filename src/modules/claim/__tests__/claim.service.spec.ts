@@ -14,6 +14,7 @@ import { WhatsAppLoginLinkService } from '../../auth/whatsapp-login-link.service
 import { ClaimAttachmentService } from '../claim-attachment.service';
 import { plainToInstance } from 'class-transformer';
 import { UpdateClaimDto } from '../dto/update-claim.dto';
+import { inAppNotifications } from '../../profile-notification/__tests__/in-app-notifications';
 
 const mockPrisma = {
   claim: {
@@ -242,6 +243,29 @@ describe('ClaimService', () => {
       await expect(service.updateForAdmin('x', {}, ACTOR)).rejects.toThrow(
         NotFoundException,
       );
+    });
+
+    it('puts a status change in the owner’s bell', async () => {
+      mockPrisma.claim.findUnique.mockResolvedValue({
+        ...baseClaim,
+        status: 'CREATED',
+      });
+      mockPrisma.claim.update.mockResolvedValue({
+        ...baseClaim,
+        status: 'COMPLETED',
+      });
+      mockPrisma.profile.findUnique.mockResolvedValue(null);
+
+      await service.updateForAdmin('claim-1', { status: 'COMPLETED' }, ACTOR);
+
+      const [payload] = inAppNotifications(
+        mockEventEmitter.emit,
+        'CLAIM_STATUS_CHANGED',
+      );
+      expect(payload).toMatchObject({
+        recipientId: baseClaim.profile_id,
+        input: { claimId: baseClaim.id, status: 'COMPLETED' },
+      });
     });
 
     it('notifies profile on status change to IN_PROGRESS', async () => {
@@ -606,6 +630,34 @@ describe('ClaimService', () => {
       mockPrisma.claim.update.mockResolvedValue(baseClaim);
     });
 
+    it('tells the owner when a drag moves the claim to another column', async () => {
+      mockPrisma.claim.findMany.mockResolvedValue([]);
+
+      await service.reorderForAdmin('claim-1', {
+        status: 'REJECTED' as any,
+        index: 0,
+      });
+
+      const [payload] = inAppNotifications(
+        mockEventEmitter.emit,
+        'CLAIM_STATUS_CHANGED',
+      );
+      expect(payload.input).toMatchObject({ status: 'REJECTED' });
+    });
+
+    it('stays quiet for a move within the same column', async () => {
+      mockPrisma.claim.findMany.mockResolvedValue([]);
+
+      await service.reorderForAdmin('claim-1', {
+        status: baseClaim.status as any,
+        index: 0,
+      });
+
+      expect(
+        inAppNotifications(mockEventEmitter.emit, 'CLAIM_STATUS_CHANGED'),
+      ).toHaveLength(0);
+    });
+
     it('lands on the midpoint between its two neighbours', async () => {
       mockPrisma.claim.findMany.mockResolvedValue([
         { id: 'a', position: 1000 },
@@ -740,6 +792,22 @@ describe('ClaimService', () => {
       });
       expect(result.id).toBe('comment-1');
       expect(mockGateway.emitNewComment).toHaveBeenCalled();
+    });
+
+    it('tells the owner in the bell, even for an image-only reply', async () => {
+      mockPrisma.claim.findUnique.mockResolvedValue(claimWithOwner);
+      mockPrisma.claimComment.create.mockResolvedValue(baseComment);
+
+      await service.addComment('claim-1', 'user-1', { content: '  ' });
+
+      const [payload] = inAppNotifications(
+        mockEventEmitter.emit,
+        'CLAIM_COMMENTED',
+      );
+      expect(payload).toMatchObject({
+        recipientId: 'profile-1',
+        input: { claimId: 'claim-1', claimTitle: 'Test' },
+      });
     });
 
     it('throws if claim not found', async () => {

@@ -1,4 +1,5 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import {
   PaymentRequestStatus,
   PaymentStatus,
@@ -14,6 +15,10 @@ import { POLL_PAYMENT_STATUS_QUEUE } from '../../common/services/queue/queue.mod
 import { LogService } from '../log/log.service';
 import { generatePaymentReference } from '../../common/utils/payment-reference';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
+import {
+  notifyProfile,
+  paymentFailedNotification,
+} from '../profile-notification/profile-notification.events';
 
 export type PollPaymentStatusJobData = {
   requestId: string;
@@ -64,6 +69,8 @@ export class PollPaymentStatusProcessor {
     private readonly queueService: QueueService,
     private readonly logService: LogService,
     private readonly whatsApp: WhatsAppService,
+    // Appended and optional: the specs construct this processor positionally.
+    @Optional() private readonly events?: EventEmitter2,
   ) {}
 
   setPaymentRequestService(service: IProcessApprovedPayment): void {
@@ -109,6 +116,17 @@ export class PollPaymentStatusProcessor {
         attempt,
       });
       this.paymentStatusGateway.emitPaymentStatus(token, 'REJECTED');
+      // Deduplicated against the webhook, which may settle the same request.
+      // Not on the timeout below: that one reverts the request to PENDING.
+      notifyProfile(
+        this.events,
+        paymentFailedNotification({
+          id: requestId,
+          profile_id: job.data.profileId,
+          amount: job.data.amount,
+          request_type: job.data.requestType,
+        }),
+      );
       await this.notifyPaymentFailed(job.data);
       return;
     }

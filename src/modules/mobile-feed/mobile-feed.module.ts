@@ -19,6 +19,7 @@ import { MobileWorkerMissionController } from './mobile-worker-mission.controlle
 import { MobileWalletController } from './mobile-wallet.controller';
 import { MobileSavedJobController } from './mobile-saved-job.controller';
 import { MobilePenaltyController } from './mobile-penalty.controller';
+import { ProfileNotificationModule } from '../profile-notification/profile-notification.module';
 
 @Module({
   imports: [
@@ -35,6 +36,7 @@ import { MobilePenaltyController } from './mobile-penalty.controller';
     PaymentRequestModule,
     RecommendationModule,
     RecommendationEngineModule,
+    ProfileNotificationModule,
   ],
   controllers: [
     MobileFeedController,

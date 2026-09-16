@@ -18,6 +18,8 @@ import { ClaimCommentsGateway } from '../ws-notifications/claim-comments.gateway
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { WhatsAppLoginLinkService } from '../auth/whatsapp-login-link.service';
 import { claimDetailCtaPath } from '../../common/constants/whatsapp-templates';
+import { notifyProfile } from '../profile-notification/profile-notification.events';
+import type { ClaimStatusValue } from '../profile-notification/notification-catalog';
 import { ClaimAttachmentService } from './claim-attachment.service';
 
 export type AdminClaimItem = {
@@ -337,6 +339,7 @@ export class ClaimService {
     });
 
     if (dto.status && dto.status !== exists.status) {
+      this.notifyOwnerOfStatus(exists, dto.status);
       const profile = await this.prisma.profile.findUnique({
         where: { id: exists.profile_id },
         select: { email: true, first_name: true, last_name: true },
@@ -436,9 +439,15 @@ export class ClaimService {
     id: string,
     dto: ReorderClaimDto,
   ): Promise<AdminClaimItem> {
-    return this.prisma.$transaction(async (tx) => {
+    // Read back after the transaction: a drag between columns is a status
+    // change, and it used to be the one that told the owner nothing.
+    const moved: {
+      from?: { id: string; title: string; profile_id: string; status: string };
+    } = {};
+    const result = await this.prisma.$transaction(async (tx) => {
       const exists = await tx.claim.findUnique({ where: { id } });
       if (!exists) throw new NotFoundException('Claim not found');
+      moved.from = exists;
 
       const siblings = await tx.claim.findMany({
         where: { status: dto.status, id: { not: id } },
@@ -495,6 +504,27 @@ export class ClaimService {
       });
 
       return mapClaim(claim);
+    });
+
+    if (moved.from && moved.from.status !== dto.status) {
+      this.notifyOwnerOfStatus(moved.from, dto.status);
+    }
+    return result;
+  }
+
+  /** The bell only — status e-mails stay where they were, in `updateForAdmin`. */
+  private notifyOwnerOfStatus(
+    claim: { id: string; title: string; profile_id: string },
+    status: ClaimStatusValue,
+  ): void {
+    notifyProfile(this.eventEmitter, {
+      recipientId: claim.profile_id,
+      input: {
+        type: 'CLAIM_STATUS_CHANGED',
+        claimId: claim.id,
+        claimTitle: claim.title,
+        status,
+      },
     });
   }
 
@@ -558,6 +588,17 @@ export class ClaimService {
       claimId,
       mapped as unknown as Record<string, unknown>,
     );
+
+    // Unlike WhatsApp below, an image-only reply still counts: the bell says
+    // "our team replied", which is true either way.
+    notifyProfile(this.eventEmitter, {
+      recipientId: exists.profile_id,
+      input: {
+        type: 'CLAIM_COMMENTED',
+        claimId,
+        claimTitle: exists.title,
+      },
+    });
 
     // Text only. An image-only reply sends nothing: the template's third
     // variable is the comment itself, and with no text there is nothing to
