@@ -333,7 +333,8 @@ forgiving, and the assistant must not regress it:
     `demarrer`, `commencer`, `/`
   - `CMD_SUPPORT` — `support`, `aide`, `assistance`, `contact`, `réclamation`,
     `reclamation`
-  - `CMD_PAY` — `payer`, `régler`, `regler`, `payer pénalités`, …
+  - `CMD_PAY` — `payer`, `régler`, `regler`, `payer pénalités`, … — always
+    answered with the *Payer mes pénalités* button into the app
 - These words **also escape a live flow**. Someone stuck mid-flow typing
   « start » gets out; that behaviour is load-bearing and must survive the
   assistant.
@@ -347,12 +348,14 @@ commands stay a fast path — never route `CMD_*` matches or an active flow step
 through the LLM. A deterministic card is faster, cheaper, and cannot fail over.
 
 **Flows own the conversation while they are open** `[CODE]` `FLOW_IDS`,
-`FLOW_TTL_SECONDS`: accept/refuse a candidate, cancel a candidature, pay
-penalties, rate an assignment, republish an expired offer, verify WhatsApp,
+`FLOW_TTL_SECONDS`: accept/refuse a candidate, cancel a candidature,
+rate an assignment, republish an expired offer, verify WhatsApp,
 job-status check, post-cancellation actions. Each has its own TTL (10 min for
 OTP-like, 1–2 h for payment/rating). **The assistant must not interject
-mid-flow** — a numbered reply inside `pay_penalties` means a penalty, not a
-question for the agent.
+mid-flow** — a numbered reply inside a flow is an answer to that flow, not a
+question for the agent. Penalties are no longer paid in the chat: the bot sends
+a *Payer mes pénalités* button into the app, and « payer » (from older
+messages) gets that button too.
 
 ### 8.2 Deep links already exist — and they log the user in `[CODE]` `src/modules/auth/login-link.controller.ts`, `src/modules/whatsapp/whatsapp-outbound.processor.ts`
 

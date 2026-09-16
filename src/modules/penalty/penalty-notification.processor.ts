@@ -2,7 +2,9 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { QueueService } from '../../common/services/queue/queue.service';
 import { PENALTY_NOTIFICATIONS_QUEUE } from '../../common/services/queue/queue.module';
-import { BotNotificationService } from '../bot/services/bot-notification.service';
+import { PENALTIES_PAYMENT_CTA_PATH } from '../../common/constants/whatsapp-templates';
+import { WhatsAppService } from '../whatsapp/whatsapp.service';
+import { WhatsAppLoginLinkService } from '../auth/whatsapp-login-link.service';
 import { formatPenaltyReminderDay } from '../bot/messages/penalty.messages';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { hardBlockCutoff } from './penalty.utils';
@@ -17,7 +19,8 @@ export class PenaltyNotificationProcessor {
   constructor(
     private readonly prisma: PrismaService,
     private readonly queueService: QueueService,
-    private readonly botNotification: BotNotificationService,
+    private readonly whatsApp: WhatsAppService,
+    private readonly loginLink: WhatsAppLoginLinkService,
     private readonly systemConfig: SystemConfigService,
   ) {}
 
@@ -126,8 +129,41 @@ export class PenaltyNotificationProcessor {
       totalUnpaid: Number(totalUnpaid._sum.amount ?? penalty.amount),
     });
 
+    // Sent as a free message with a button, which WhatsApp only delivers while
+    // the person has written to us in the last 24 hours. Outside that window
+    // the reminder waits: it is not counted, so the next scan tries again.
+    const window = await this.whatsApp.isServiceWindowOpen(penalty.profile_id);
+    if (!window.open) {
+      this.logger.debug(
+        `Penalty ${penaltyId}: WhatsApp window closed, reminder postponed`,
+      );
+      return;
+    }
+
+    const url = await this.loginLink.shortLink(
+      penalty.profile_id,
+      PENALTIES_PAYMENT_CTA_PATH,
+    );
+    if (!url) {
+      this.logger.warn(
+        `Penalty ${penaltyId}: no sign-in link for profile ${penalty.profile_id}, reminder skipped`,
+      );
+      return;
+    }
+
     try {
-      await this.botNotification.sendMessage(penalty.profile.phone, text);
+      const sent = await this.whatsApp.sendInteractiveCta(
+        penalty.profile.phone,
+        {
+          body: text,
+          buttonText: 'Payer mes pénalités',
+          url,
+          profileId: penalty.profile_id,
+        },
+      );
+      if (!sent) {
+        throw new Error('WhatsApp did not accept the reminder');
+      }
 
       await this.prisma.penalty.update({
         where: { id: penaltyId },

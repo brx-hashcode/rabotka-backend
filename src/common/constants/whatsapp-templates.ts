@@ -197,6 +197,8 @@ export const KYC_REJECTED_CTA_PATH = 'claims/new';
 /** Where the KYC-pending card's single button lands: the profile. */
 export const KYC_PENDING_CTA_PATH = 'profile';
 export const SUSPENDED_CTA_PATH = 'home';
+/** Where unpaid penalties are settled — `/penalites/paiement` in rabotka-client. */
+export const PENALTIES_PAYMENT_CTA_PATH = 'penalites/paiement';
 /**
  * Where the generic door lands: `/home`, which is role-aware.
  *

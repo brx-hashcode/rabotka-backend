@@ -200,23 +200,21 @@ export class WorkerModule {
         prisma: PrismaService,
         queue: QueueService,
         whatsApp: WhatsAppService,
+        loginLink: WhatsAppLoginLinkService,
         systemConfig: SystemConfigService,
-      ) => {
-        const botNotificationStub = {
-          sendMessage: (phone: string, text: string) =>
-            whatsApp.sendTextMessage(phone, text),
-        } as never;
-        return new PenaltyNotificationProcessor(
+      ) =>
+        new PenaltyNotificationProcessor(
           prisma,
           queue,
-          botNotificationStub,
+          whatsApp,
+          loginLink,
           systemConfig,
-        );
-      },
+        ),
       inject: [
         PrismaService,
         QueueService,
         WhatsAppService,
+        WhatsAppLoginLinkService,
         SystemConfigService,
       ],
     };

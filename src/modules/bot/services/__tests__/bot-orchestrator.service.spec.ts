@@ -983,34 +983,60 @@ describe('BotOrchestratorService', () => {
   });
 
   describe('handle() — billing_status not CLEAR', () => {
-    it('shows hasPenaltiesBotMessage when billing not clear and unrelated command', async () => {
+    const blocked = () =>
       deps.prisma.profile.findUnique.mockResolvedValue({
         ...mockActiveProfile,
         billing_status: 'BLOCKED',
       });
-      deps.router.route.mockReturnValue({
-        type: 'command',
-        commandId: 'list_offers',
-      });
+    const cardOf = (reply: string) =>
+      JSON.parse(reply.slice('[CTA:]'.length)) as {
+        body: string;
+        buttonText: string;
+        path: string;
+        fallbackTemplate: string;
+      };
+
+    it('answers with a button into the app to pay', async () => {
+      blocked();
       const result = await service.handle(PROFILE_ID, PHONE, 'offres');
-      expect(result[0]).toContain('pénalité');
+
+      const reply = result[result.length - 1];
+      expect(reply.startsWith('[CTA:]')).toBe(true);
+      const card = cardOf(reply);
+      expect(card).toMatchObject({
+        buttonText: 'Payer mes pénalités',
+        path: 'penalites/paiement',
+        fallbackTemplate: 'openApp',
+      });
+      expect(card.body).toContain('Pénalités impayées');
+      expect(card.body).not.toMatch(/tapez/i);
     });
 
-    it('allows pay_penalties flow when billing not clear', async () => {
-      deps.prisma.profile.findUnique.mockResolvedValue({
-        ...mockActiveProfile,
-        billing_status: 'BLOCKED',
-      });
-      deps.botState.get.mockResolvedValue({
-        flowId: 'pay_penalties',
-        step: 1,
-        payload: {},
-        updatedAt: '',
-      });
-      deps.router.route.mockReturnValue({ type: 'command', commandId: 'menu' });
-      const result = await service.handle(PROFILE_ID, PHONE, 'payer');
-      expect(Array.isArray(result)).toBe(true);
+    it('lets VoVa answer first, then adds the card', async () => {
+      blocked();
+      deps.vova.handle.mockResolvedValueOnce(['Voici la réponse.']);
+      const result = await service.handle(PROFILE_ID, PHONE, 'pourquoi ?');
+
+      expect(result[0]).toBe('Voici la réponse.');
+      expect(result[1].startsWith('[CTA:]')).toBe(true);
     });
+
+    it.each(['pay_penalties', 'penalty_gate'])(
+      'releases a %p state left by the old chat payment path',
+      async (flowId) => {
+        blocked();
+        deps.botState.get.mockResolvedValue({
+          flowId,
+          step: 1,
+          payload: {},
+          updatedAt: '',
+        });
+        const result = await service.handle(PROFILE_ID, PHONE, '1');
+
+        expect(deps.botState.clear).toHaveBeenCalledWith(PROFILE_ID);
+        expect(result[result.length - 1].startsWith('[CTA:]')).toBe(true);
+      },
+    );
   });
 
   describe('handle() — real flow execution (executeFlow not mocked)', () => {
@@ -1422,7 +1448,7 @@ describe('BotOrchestratorService', () => {
       expect(Array.isArray(result)).toBe(true);
     });
 
-    it('executes pay_penalties flow via executeFlow', async () => {
+    it('answers a leftover pay_penalties state with the payment card', async () => {
       const flowState = {
         flowId: 'pay_penalties',
         step: 1,
@@ -1435,14 +1461,38 @@ describe('BotOrchestratorService', () => {
         state: flowState,
       });
       deps.botState.get.mockResolvedValue(flowState);
+      const result = await service.handle(PROFILE_ID, PHONE, '1');
+
+      expect(result[0].startsWith('[CTA:]')).toBe(true);
+      expect(deps.botState.clear).toHaveBeenCalledWith(PROFILE_ID);
+    });
+
+    it('answers « payer » with the card when penalties are unpaid', async () => {
+      deps.router.route.mockReturnValue({
+        type: 'command',
+        commandId: 'pay_penalties',
+      });
       (deps.applicationService as any).getUnpaidPenalties = jest
         .fn()
-        .mockResolvedValue({ count: 2, total: 10000, ids: ['p1'] });
-      deps.prisma.penalty = {
-        findMany: jest.fn().mockResolvedValue([{ id: 'p1', amount: 10000 }]),
-      } as any;
-      const result = await service.handle(PROFILE_ID, PHONE, '1');
-      expect(Array.isArray(result)).toBe(true);
+        .mockResolvedValue({ count: 1, total: 5000, ids: ['p1'] });
+      const result = await service.handle(PROFILE_ID, PHONE, 'payer');
+
+      expect(result[0].startsWith('[CTA:]')).toBe(true);
+    });
+
+    it('answers « payer » plainly when nothing is owed', async () => {
+      deps.router.route.mockReturnValue({
+        type: 'command',
+        commandId: 'pay_penalties',
+      });
+      (deps.applicationService as any).getUnpaidPenalties = jest
+        .fn()
+        .mockResolvedValue({ count: 0, total: 0, ids: [] });
+      const result = await service.handle(PROFILE_ID, PHONE, 'payer');
+
+      expect(result).toEqual([
+        '✅ *Aucune pénalité impayée.* Votre compte est en règle.',
+      ]);
     });
 
     it('returns the welcome card when state exists but no route matches', async () => {

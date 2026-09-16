@@ -31,8 +31,9 @@ export class BotRouterService {
     const trimmed = stripChatFormattingChars(input.trim());
     const normalized = trimmed.toLowerCase();
 
-    // "PAYER" must always launch the pay_penalties flow regardless of active state
-    if (state?.flowId && CMD_PAY.includes(normalized)) {
+    // « payer », which older messages told people to type, always answers
+    // with the button into the app — with or without an open flow.
+    if (CMD_PAY.includes(normalized)) {
       return { type: 'command', commandId: 'pay_penalties' };
     }
 
