@@ -197,6 +197,8 @@ export const KYC_REJECTED_CTA_PATH = 'claims/new';
 /** Where the KYC-pending card's single button lands: the profile. */
 export const KYC_PENDING_CTA_PATH = 'profile';
 export const SUSPENDED_CTA_PATH = 'home';
+/** Where unpaid penalties are settled — `/penalites/paiement` in rabotka-client. */
+export const PENALTIES_PAYMENT_CTA_PATH = 'penalites/paiement';
 /**
  * Where the generic door lands: `/home`, which is role-aware.
  *
@@ -1420,6 +1422,47 @@ export const WHATSAPP_TEMPLATES = {
       params: {
         firstName: string;
         count: number;
+        loginCode?: string | null;
+      },
+    ]
+  >,
+
+  /**
+   * A partner asks to confirm the person's identity. Body `{{1}}` is the first
+   * name, `{{2}}` the partner's registered name, and `{{3}}` carries the URL
+   * suffix onto the consent page.
+   *
+   * Sent through `sendTemplateMessage`, so the CALLER mints the login code —
+   * see `IdentityCheckService.sendConsent`. The partner name is admin-entered
+   * but still flattened: a stray newline in it would be rejected by Meta.
+   */
+  identityCheckConsent: {
+    cloudOnly: true,
+    urlSuffixVar: '3',
+    urlSuffixMode: 'shortlink',
+    category: 'UTILITY',
+    cloud: {
+      name: cloudName(
+        'TPL_CLOUD_IDENTITY_CHECK_CONSENT',
+        'rabotka_identity_check_consent_v2',
+      ),
+    },
+    variables: (p: {
+      firstName: string;
+      partnerName: string;
+      path: string;
+      loginCode?: string | null;
+    }) => ({
+      '1': p.firstName,
+      '2': freeTextVar(p.partnerName, 'Un partenaire', 80),
+      '3': p.loginCode?.trim() || p.path,
+    }),
+  } satisfies WhatsAppTemplate<
+    [
+      params: {
+        firstName: string;
+        partnerName: string;
+        path: string;
         loginCode?: string | null;
       },
     ]

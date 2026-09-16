@@ -520,6 +520,7 @@ model Profile {
   referrals_made                  Referral[]                    @relation("ReferralReferrer")
   referral_received               Referral?                     @relation("ReferralReferee")
   oauth_authorizations            OAuthAuthorization[]
+  identity_checks                 IdentityCheck[]
   notifications_received          ProfileNotification[]         @relation("ProfileNotificationRecipient")
   notifications_triggered         ProfileNotification[]         @relation("ProfileNotificationActor")
   deleted_at                     DateTime?                     @db.Timestamptz
@@ -2011,6 +2012,12 @@ model OAuthApp {
   /// never arrive.
   allowed_scopes String[]
 
+  /// Where identity-check results are POSTed, as an RS256 JWS signed with the
+  /// OIDC key. Required whenever `allowed_scopes` holds
+  /// `rabotka:identity_check` — enforced in `OAuthAppService`, since the rule
+  /// spans two columns. `https` only, except `http://localhost` for sandbox.
+  webhook_url String?
+
   status OAuthAppStatus @default(ACTIVE)
 
   /// A sandbox application: it authenticates ONLY the two hardcoded Rabotka
@@ -2039,7 +2046,8 @@ model OAuthApp {
   created_by String? @db.Uuid
   creator    User?   @relation("OAuthAppCreatedBy", fields: [created_by], references: [id], onDelete: SetNull)
 
-  authorizations OAuthAuthorization[]
+  authorizations  OAuthAuthorization[]
+  identity_checks IdentityCheck[]
 
   created_at DateTime  @default(now())
   updated_at DateTime  @updatedAt
@@ -2096,4 +2104,76 @@ model OAuthAuthorization {
   @@index([profile_id], name: "idx_oauth_authorization_profile")
   @@index([app_id, revoked_at], name: "idx_oauth_authorization_app_revoked")
   @@map("oauth_authorizations")
+}
+
+/// Where an identity check stands.
+///
+/// Only two outcomes, on purpose. A person who declined, a person who never
+/// answered and a number with no account all end as NOT_COMPLETED: telling a
+/// partner which one it was would turn the API into a way of learning who is on
+/// Rabotka without anyone's consent.
+enum IdentityCheckStatus {
+  PENDING_CONSENT
+  COMPLETED
+  NOT_COMPLETED
+}
+
+/// A partner asking "is the person behind this WhatsApp number who they claim
+/// to be?".
+///
+/// The person is asked on WhatsApp and decides in the app. Only once they
+/// approve is the claim scored against their verified profile, and the partner
+/// receives match levels and a score — never the stored data itself.
+model IdentityCheck {
+  id     String   @id @default(uuid()) @db.Uuid
+  app_id String   @db.Uuid
+  app    OAuthApp @relation(fields: [app_id], references: [id], onDelete: Cascade)
+
+  /// The profile the number resolved to, or null when it resolved to none.
+  /// Never returned to the partner.
+  profile_id String?  @db.Uuid
+  profile    Profile? @relation(fields: [profile_id], references: [id], onDelete: SetNull)
+
+  /// For a sandbox app: which synthetic user the number matched. Sandbox
+  /// subjects are not uuids and have no profile row to point at.
+  sandbox_subject String?
+
+  /// What the partner sent, normalised, as E.164.
+  phone_e164 String
+
+  /// The identity the partner claims (names, country, city, document type).
+  /// Personal data the partner already held; cleared by the retention sweep
+  /// once the check is long finished.
+  claimed Json?
+
+  /// The partner's own id for this check, echoed back untouched.
+  reference       String?
+  /// From the `Idempotency-Key` header. A retry returns the original check.
+  idempotency_key String?
+
+  status     IdentityCheckStatus @default(PENDING_CONSENT)
+  expires_at DateTime            @db.Timestamptz
+  /// When the WhatsApp consent request went out. Null when none was sent:
+  /// no account, a sandbox app, or the per-number cap reached.
+  consent_sent_at DateTime? @db.Timestamptz
+  decided_at      DateTime? @db.Timestamptz
+  /// Internal only — the partner sees NOT_COMPLETED either way.
+  declined        Boolean?
+
+  /// The partner-facing result, frozen when the person approved.
+  result Json?
+  score  Int?
+
+  webhook_attempts     Int       @default(0)
+  webhook_delivered_at DateTime? @db.Timestamptz
+  webhook_last_error   String?
+
+  created_at DateTime @default(now()) @db.Timestamptz
+  updated_at DateTime @updatedAt
+
+  @@unique([app_id, idempotency_key], name: "idx_identity_check_app_idempotency")
+  @@index([app_id, phone_e164, created_at], name: "idx_identity_check_app_phone_time")
+  @@index([status, expires_at], name: "idx_identity_check_status_expiry")
+  @@index([profile_id, status], name: "idx_identity_check_profile_status")
+  @@map("identity_checks")
 }

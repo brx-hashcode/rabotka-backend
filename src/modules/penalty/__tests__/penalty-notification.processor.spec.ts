@@ -2,7 +2,8 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { PenaltyNotificationProcessor } from '../penalty-notification.processor';
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import { QueueService } from '../../../common/services/queue/queue.service';
-import { BotNotificationService } from '../../bot/services/bot-notification.service';
+import { WhatsAppService } from '../../whatsapp/whatsapp.service';
+import { WhatsAppLoginLinkService } from '../../auth/whatsapp-login-link.service';
 import { SystemConfigService } from '../../system-config/system-config.service';
 
 const mockPrisma = {
@@ -19,8 +20,13 @@ const mockQueueService = {
   addJob: jest.fn().mockResolvedValue(undefined),
 };
 
-const mockBotNotification = {
-  sendMessage: jest.fn().mockResolvedValue(undefined),
+const mockWhatsApp = {
+  isServiceWindowOpen: jest.fn().mockResolvedValue({ open: true }),
+  sendInteractiveCta: jest.fn().mockResolvedValue(true),
+};
+
+const mockLoginLink = {
+  shortLink: jest.fn().mockResolvedValue('https://rabotka.work/s/CODE'),
 };
 
 // Mirrors the seeded defaults for fees.penalty_max_notifications,
@@ -38,12 +44,16 @@ describe('PenaltyNotificationProcessor', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    mockWhatsApp.isServiceWindowOpen.mockResolvedValue({ open: true });
+    mockWhatsApp.sendInteractiveCta.mockResolvedValue(true);
+    mockLoginLink.shortLink.mockResolvedValue('https://rabotka.work/s/CODE');
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PenaltyNotificationProcessor,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: QueueService, useValue: mockQueueService },
-        { provide: BotNotificationService, useValue: mockBotNotification },
+        { provide: WhatsAppService, useValue: mockWhatsApp },
+        { provide: WhatsAppLoginLinkService, useValue: mockLoginLink },
         { provide: SystemConfigService, useValue: mockSystemConfig },
       ],
     }).compile();
@@ -67,7 +77,7 @@ describe('PenaltyNotificationProcessor', () => {
     expect(mockQueueService.addJob).not.toHaveBeenCalled();
   });
 
-  it('process(notify_penalty) sends reminder and updates penalty', async () => {
+  it('process(notify_penalty) sends a button into the app and counts it', async () => {
     mockPrisma.penalty.findUnique.mockResolvedValueOnce({
       id: 'pen-1',
       profile_id: 'p1',
@@ -80,7 +90,16 @@ describe('PenaltyNotificationProcessor', () => {
     await processor.process({
       data: { type: 'notify_penalty', penaltyId: 'pen-1' },
     });
-    expect(mockBotNotification.sendMessage).toHaveBeenCalled();
+    expect(mockLoginLink.shortLink).toHaveBeenCalledWith(
+      'p1',
+      'penalites/paiement',
+    );
+    expect(mockWhatsApp.sendInteractiveCta).toHaveBeenCalledWith('+242001', {
+      body: expect.not.stringMatching(/tapez/i),
+      buttonText: 'Payer mes pénalités',
+      url: 'https://rabotka.work/s/CODE',
+      profileId: 'p1',
+    });
     expect(mockPrisma.penalty.update).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: 'pen-1' },
@@ -94,7 +113,7 @@ describe('PenaltyNotificationProcessor', () => {
     await processor.process({
       data: { type: 'notify_penalty', penaltyId: 'missing' },
     });
-    expect(mockBotNotification.sendMessage).not.toHaveBeenCalled();
+    expect(mockWhatsApp.sendInteractiveCta).not.toHaveBeenCalled();
   });
 
   it('process(notify_penalty) skips already paid penalties', async () => {
@@ -107,7 +126,7 @@ describe('PenaltyNotificationProcessor', () => {
     await processor.process({
       data: { type: 'notify_penalty', penaltyId: 'pen-1' },
     });
-    expect(mockBotNotification.sendMessage).not.toHaveBeenCalled();
+    expect(mockWhatsApp.sendInteractiveCta).not.toHaveBeenCalled();
   });
 
   it('process(notify_penalty) skips when max notifications reached', async () => {
@@ -121,7 +140,7 @@ describe('PenaltyNotificationProcessor', () => {
     await processor.process({
       data: { type: 'notify_penalty', penaltyId: 'pen-1' },
     });
-    expect(mockBotNotification.sendMessage).not.toHaveBeenCalled();
+    expect(mockWhatsApp.sendInteractiveCta).not.toHaveBeenCalled();
   });
 
   it('process(notify_penalty) skips when notified too recently', async () => {
@@ -135,10 +154,10 @@ describe('PenaltyNotificationProcessor', () => {
     await processor.process({
       data: { type: 'notify_penalty', penaltyId: 'pen-1' },
     });
-    expect(mockBotNotification.sendMessage).not.toHaveBeenCalled();
+    expect(mockWhatsApp.sendInteractiveCta).not.toHaveBeenCalled();
   });
 
-  it('process(notify_penalty) re-throws when sendMessage fails', async () => {
+  it('process(notify_penalty) waits, without counting, while the 24h window is closed', async () => {
     mockPrisma.penalty.findUnique.mockResolvedValueOnce({
       id: 'pen-1',
       profile_id: 'p1',
@@ -148,7 +167,47 @@ describe('PenaltyNotificationProcessor', () => {
       last_notified_at: null,
       profile: { phone: '+242001', first_name: 'Alice' },
     });
-    mockBotNotification.sendMessage.mockRejectedValueOnce(
+    mockWhatsApp.isServiceWindowOpen.mockResolvedValueOnce({ open: false });
+
+    await processor.process({
+      data: { type: 'notify_penalty', penaltyId: 'pen-1' },
+    });
+
+    expect(mockWhatsApp.sendInteractiveCta).not.toHaveBeenCalled();
+    expect(mockPrisma.penalty.update).not.toHaveBeenCalled();
+  });
+
+  it('process(notify_penalty) does not count a reminder WhatsApp refused', async () => {
+    mockPrisma.penalty.findUnique.mockResolvedValueOnce({
+      id: 'pen-1',
+      profile_id: 'p1',
+      amount: 1000,
+      paid_at: null,
+      notification_count: 0,
+      last_notified_at: null,
+      profile: { phone: '+242001', first_name: 'Alice' },
+    });
+    mockWhatsApp.sendInteractiveCta.mockResolvedValueOnce(false);
+
+    await expect(
+      processor.process({
+        data: { type: 'notify_penalty', penaltyId: 'pen-1' },
+      }),
+    ).rejects.toThrow();
+    expect(mockPrisma.penalty.update).not.toHaveBeenCalled();
+  });
+
+  it('process(notify_penalty) re-throws when the send fails', async () => {
+    mockPrisma.penalty.findUnique.mockResolvedValueOnce({
+      id: 'pen-1',
+      profile_id: 'p1',
+      amount: 1000,
+      paid_at: null,
+      notification_count: 0,
+      last_notified_at: null,
+      profile: { phone: '+242001', first_name: 'Alice' },
+    });
+    mockWhatsApp.sendInteractiveCta.mockRejectedValueOnce(
       new Error('WA error'),
     );
     await expect(

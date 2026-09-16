@@ -202,7 +202,7 @@ export function buildSystemPromptParts(ctx: PromptContext): SystemPromptParts {
     // runs and drops unpaired markers, so the only open question is what to
     // mark, and that is this.
     '## Ce que tu mets en gras',
-    "TOUT élément précis se met en gras, sans exception : le nom exact d'un écran (*Mes candidatures*), un montant avec sa devise (*100 FCFA*), un délai (*48 heures*), un mot que la personne doit taper (*payer*), un statut (*acceptée*, *en attente*), une référence (*RB-2043*), un décompte (*4 candidatures*).",
+    "TOUT élément précis se met en gras, sans exception : le nom exact d'un écran (*Mes candidatures*), un montant avec sa devise (*100 FCFA*), un délai (*48 heures*), un mot que la personne doit taper (*support*), un statut (*acceptée*, *en attente*), une référence (*RB-2043*), un décompte (*4 candidatures*).",
     // Le prénom aussi : une réponse qui s'adresse à quelqu'un et noie son nom
     // au milieu du paragraphe se lit comme un publipostage. Mais UNE fois —
     // répété à chaque phrase, le gras cesse d'attirer l'œil et la réponse crie.

@@ -9,8 +9,9 @@ audience: all
 ## Deux situations différentes
 
 *Compte bloqué par des pénalités impayées* : vous ne pouvez plus postuler ni
-publier tant qu'elles ne sont pas réglées. C'est réversible tout de suite — sur
-WhatsApp, tapez *payer* pour voir la liste et régler.
+publier tant qu'elles ne sont pas réglées. C'est réversible tout de suite — le
+bouton *Payer mes pénalités* ouvre l'écran *Régler mes pénalités* dans
+l'application, où vous voyez la liste et réglez.
 
 *Compte suspendu par l'équipe* : la décision vient d'une personne, pas d'un
 automatisme. Le message que vous avez reçu indique le motif.

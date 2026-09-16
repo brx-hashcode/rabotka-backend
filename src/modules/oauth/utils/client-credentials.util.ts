@@ -1,3 +1,4 @@
+import type { Request } from 'express';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 
 /**
@@ -91,4 +92,52 @@ export function derivePairwiseSub(
   return createHash('sha256')
     .update(`${appId}:${profileId}:${salt}`, 'utf8')
     .digest('base64url');
+}
+
+/**
+ * Client credentials from either place the spec allows.
+ *
+ * HTTP Basic (`client_secret_basic`) is what RFC 6749 §2.3.1 says clients SHOULD
+ * use and what most libraries default to; the form body (`client_secret_post`)
+ * is what the rest send. Supporting only one would break half of all
+ * integrations for no gain, so both are read here and nowhere else.
+ */
+export function readClientCredentials(
+  req: Request,
+  body: { client_id?: string; client_secret?: string },
+): { clientId: string; clientSecret: string } {
+  const header = req.headers.authorization;
+
+  if (typeof header === 'string' && header.startsWith('Basic ')) {
+    const decoded = Buffer.from(
+      header.slice('Basic '.length).trim(),
+      'base64',
+    ).toString('utf8');
+
+    // Split on the FIRST colon only: a secret is base64url and cannot contain
+    // one, but a split-on-all would silently truncate any future secret format
+    // that could.
+    const separator = decoded.indexOf(':');
+    if (separator > 0) {
+      return {
+        // Both halves are percent-encoded per RFC 6749 §2.3.1.
+        clientId: safeDecode(decoded.slice(0, separator)),
+        clientSecret: safeDecode(decoded.slice(separator + 1)),
+      };
+    }
+  }
+
+  return {
+    clientId: body.client_id ?? '',
+    clientSecret: body.client_secret ?? '',
+  };
+}
+
+function safeDecode(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    // A malformed escape is not worth a 500; it will simply fail to match.
+    return value;
+  }
 }

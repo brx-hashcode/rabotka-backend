@@ -26,8 +26,10 @@ publier tant qu'elles ne sont pas réglées.
 
 ## Comment les payer
 
-Par mobile money. Sur WhatsApp, tapez *payer* : la liste de vos pénalités
-s'affiche et vous choisissez celles à régler.
+Dans l'application, sur l'écran *Régler mes pénalités* : vous y voyez la liste
+de vos pénalités et vous payez par mobile money ou avec votre portefeuille. Sur
+WhatsApp, le bouton *Payer mes pénalités* ouvre cet écran directement — il n'y a
+rien à taper.
 
 Je peux vous dire ce que vous avez en attente aujourd'hui, et vous emmener sur
 l'application, sur le paiement des pénalités. Le règlement lui-même se fait là-bas,

@@ -47,10 +47,14 @@ describe('BotRouterService', () => {
     });
 
     it.each(['payer', 'PAYER', 'Payer'])(
-      'lets %p escape into pay_penalties',
+      'answers %p with the payment card command',
       (input) => {
         expect(
-          service.route(input, workerProfile, makeState(FLOW_IDS.PAY_PENALTIES)),
+          service.route(
+            input,
+            workerProfile,
+            makeState(FLOW_IDS.PAY_PENALTIES),
+          ),
         ).toEqual({ type: 'command', commandId: 'pay_penalties' });
       },
     );
@@ -64,6 +68,19 @@ describe('BotRouterService', () => {
         ),
       ).toEqual({ type: 'command', commandId: 'pay_penalties' });
     });
+  });
+
+  describe('« payer » with no live flow', () => {
+    // Older reminders told people to type it; it now opens the app.
+    it.each(['payer', 'régler', 'payer penalites'])(
+      'routes %p to pay_penalties',
+      (input) => {
+        expect(service.route(input, workerProfile, null)).toEqual({
+          type: 'command',
+          commandId: 'pay_penalties',
+        });
+      },
+    );
   });
 
   describe('with no live flow — the menu is retired', () => {

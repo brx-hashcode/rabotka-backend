@@ -453,7 +453,7 @@ export function buildTools(
       name: 'mes_penalites',
       description:
         "Les pénalités de l'utilisateur, payées et impayées. Toujours nommer la sortie : " +
-        'sur WhatsApp, taper *payer* ouvre le règlement.',
+        "elles se règlent dans l'application, sur l'écran *Régler mes pénalités*, que le bouton *Payer mes pénalités* ouvre directement.",
       schema: z.object({}),
     },
   );

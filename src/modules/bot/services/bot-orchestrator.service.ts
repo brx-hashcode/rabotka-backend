@@ -24,7 +24,6 @@ import { templateReply } from '../../../common/constants/whatsapp-carousel';
 import {
   supportCardBotMessage,
   hasPenaltiesBotMessage,
-  penaltiesListBotMessage,
 } from '../messages/menu.messages';
 import type { BotProfile, BotState } from '../types/bot-state.types';
 import type { FlowContext, FlowResult } from '../types/flow.types';
@@ -40,10 +39,6 @@ import {
   runAcceptRefuseCandidateFlow,
   getAcceptRefuseInitialState,
 } from '../flows/accept-refuse-candidate.flow';
-import {
-  runPayPenaltiesFlow,
-  getPayPenaltiesInitialState,
-} from '../flows/pay-penalties.flow';
 import { PaymentService } from '../../payments/payment.service';
 import { ContactUnlockService } from '../../contact-unlock/contact-unlock.service';
 import { WalletService } from '../../wallet/wallet.service';
@@ -253,12 +248,7 @@ export class BotOrchestratorService {
     }
 
     if (profile.billing_status !== BillingStatus.CLEAR) {
-      return this.handleBlockedByPenalties(
-        profileId,
-        text,
-        profile,
-        botProfile,
-      );
+      return this.handleBlockedByPenalties(profileId, text, profile);
     }
 
     return this.routeMessage(profileId, text, profile, botProfile);
@@ -521,152 +511,35 @@ export class BotOrchestratorService {
   }
 
   /**
-   * Penalty gate for profiles with billing_status != CLEAR.
+   * A profile with unpaid penalties (billing_status != CLEAR).
    *
-   *   Step A (no state)               → "You have penalties. Type *1* to list."
-   *   Step A + user types "1"         → list penalties, ask which to pay.
-   *   Step A.list + user picks index  → start PAY_PENALTIES flow for that one.
-   *   Step A.list + user picks "0"    → start PAY_PENALTIES flow for the lot.
-   *   In PAY_PENALTIES / UNLOCK / MY_APPLICATIONS → let the flow continue.
+   * Penalties are paid in the app, so every message gets the payment card —
+   * after VoVa's answer when there is one, as for suspended accounts. The chat
+   * used to run its own payment path (« tapez 1 », a list, a method); a person
+   * still inside it from before is released here rather than left in a flow
+   * that no longer exists.
    */
   private async handleBlockedByPenalties(
     profileId: string,
     text: string,
     profile: NonNullable<Awaited<ReturnType<typeof this.loadProfile>>>,
-    botProfile: BotProfile,
   ): Promise<string[]> {
-    const normalized = text.trim().toLowerCase();
+    await this.releaseChatPaymentState(profileId);
+
+    const card = hasPenaltiesBotMessage(profile.first_name);
+    const vovaReply = await this.vovaReplyOrNull(profile, text);
+    return vovaReply ? [...vovaReply, card] : [card];
+  }
+
+  /** Drops a state left by the retired chat payment path, if any. */
+  private async releaseChatPaymentState(profileId: string): Promise<void> {
     const state = await this.botState.get(profileId);
-
-    // Already inside a payment-related flow — let it run. Contact unlock used
-    // to be the other one; it is settled in the app now and has no chat flow.
-    const canContinueFlow = state?.flowId === FLOW_IDS.PAY_PENALTIES;
-    if (canContinueFlow) {
-      return this.routeMessage(profileId, text, profile, botProfile);
+    if (
+      state?.flowId === FLOW_IDS.PAY_PENALTIES ||
+      state?.flowId === FLOW_IDS.PENALTY_GATE
+    ) {
+      await this.botState.clear(profileId);
     }
-
-    // Currently showing the penalty list and waiting for the user to pick one.
-    // `state &&` rather than `state?.` so the narrowing reaches the call below —
-    // optional chaining leaves the type `BotState | null`, and the handler
-    // requires a state.
-    if (state && state.flowId === FLOW_IDS.PENALTY_GATE) {
-      return this.handlePenaltyListSelection(
-        profileId,
-        text,
-        profile,
-        botProfile,
-        state,
-      );
-    }
-
-    // User typed "1" → list penalties
-    if (normalized === '1') {
-      const penalties = await this.loadUnpaidPenalties(profileId);
-      if (penalties.length === 0) {
-        // Race: billing_status not yet refreshed; just send them back to the app.
-        return [welcomePlatformMessage()];
-      }
-      await this.botState.set(profileId, {
-        flowId: FLOW_IDS.PENALTY_GATE,
-        step: 1,
-        payload: {
-          penaltyIds: penalties.map((p) => p.id),
-          amounts: penalties.map((p) => p.amount),
-        },
-        updatedAt: new Date().toISOString(),
-      });
-      return [
-        penaltiesListBotMessage(
-          penalties.map((p) => ({
-            amount: p.amount,
-            reason: p.reason ?? 'Pénalité',
-            created_at: p.created_at,
-            jobTitle: p.jobTitle,
-          })),
-        ),
-      ];
-    }
-
-    return [hasPenaltiesBotMessage()];
-  }
-
-  private async handlePenaltyListSelection(
-    profileId: string,
-    text: string,
-    profile: NonNullable<Awaited<ReturnType<typeof this.loadProfile>>>,
-    botProfile: BotProfile,
-    state: BotState,
-  ): Promise<string[]> {
-    const trimmed = text.trim();
-    const ids = (state.payload?.penaltyIds as string[]) ?? [];
-    const amounts = (state.payload?.amounts as number[]) ?? [];
-
-    if (!/^\d+$/.test(trimmed)) {
-      return [
-        "Tapez le *numéro* d'une pénalité ou *0* pour toutes les régler.",
-      ];
-    }
-    const choice = Number.parseInt(trimmed, 10);
-
-    let selectedAmount: number;
-    let selectedCount: number;
-    if (choice === 0) {
-      selectedCount = ids.length;
-      selectedAmount = amounts.reduce((s, a) => s + a, 0);
-    } else if (choice >= 1 && choice <= ids.length) {
-      selectedCount = 1;
-      selectedAmount = amounts[choice - 1];
-    } else {
-      return [
-        `Numéro invalide. Choisissez entre *1* et *${ids.length}*, ou *0*.`,
-      ];
-    }
-
-    // Hand off to the existing PAY_PENALTIES flow at its main prompt
-    // (wallet vs mobile money). It uses penaltyCount + totalAmount.
-    const payState: BotState = {
-      flowId: FLOW_IDS.PAY_PENALTIES,
-      step: 1,
-      payload: {
-        penaltyCount: selectedCount,
-        totalAmount: selectedAmount,
-      },
-      updatedAt: new Date().toISOString(),
-    };
-    await this.botState.set(profileId, payState);
-    // Re-enter the flow with an empty input so it shows its main prompt.
-    return this.routeMessage(profileId, '', profile, botProfile);
-  }
-
-  private async loadUnpaidPenalties(profileId: string): Promise<
-    Array<{
-      id: string;
-      amount: number;
-      reason: string | null;
-      created_at: Date;
-      jobTitle: string | null;
-    }>
-  > {
-    const rows = await this.prisma.penalty.findMany({
-      where: { profile_id: profileId, paid_at: null },
-      select: {
-        id: true,
-        amount: true,
-        reason: true,
-        created_at: true,
-        application: {
-          select: { job_offer: { select: { title: true } } },
-        },
-      },
-      orderBy: { created_at: 'asc' },
-    });
-    return rows.map((r) => ({
-      id: r.id,
-      amount: Number(r.amount),
-      reason: r.reason,
-      created_at: r.created_at,
-      jobTitle: r.application?.job_offer?.title ?? null,
-    }));
   }
 
   private async routeMessage(
@@ -842,8 +715,13 @@ export class BotOrchestratorService {
     const runners: Record<string, () => Promise<FlowResult>> = {
       [FLOW_IDS.ACCEPT_REFUSE_CANDIDATE]: () =>
         runAcceptRefuseCandidateFlow(state, input, profile, ctx),
+      // Retired: penalties are paid in the app. A state armed before the
+      // change gets the payment card once and is cleared.
       [FLOW_IDS.PAY_PENALTIES]: () =>
-        runPayPenaltiesFlow(state, input, profile, ctx),
+        Promise.resolve({
+          reply: [hasPenaltiesBotMessage(profile.first_name)],
+          clearState: true,
+        }),
 
       [FLOW_IDS.RATE_ASSIGNMENT]: () =>
         runRateAssignmentFlow(state, input, profile, {
@@ -857,9 +735,9 @@ export class BotOrchestratorService {
   }
 
   /**
-   * The router can only produce `pay_penalties` now — the PAYER escape from
-   * inside a live flow. Every other command was reachable only by typing into
-   * the retired menu, and those journeys live in the app.
+   * The router can only produce `pay_penalties` now: someone typing « payer »,
+   * as older messages told them to. They get the payment card, or a plain
+   * confirmation when nothing is owed.
    */
   private async handleCommandRoute(
     route: { type: 'command'; commandId: string },
@@ -878,20 +756,12 @@ export class BotOrchestratorService {
     profile: BotProfile,
     profileId: string,
   ): Promise<string[]> {
+    await this.releaseChatPaymentState(profileId);
     const unpaid = await this.applicationService.getUnpaidPenalties(profile.id);
     if (unpaid.count === 0) {
       return [`✅ *Aucune pénalité impayée.* Votre compte est en règle.`];
     }
-    const flowState = getPayPenaltiesInitialState(unpaid.count, unpaid.total);
-    await this.botState.set(profileId, flowState);
-    const result = await runPayPenaltiesFlow(flowState, '', profile, {
-      applicationService: this.applicationService,
-      walletService: this.walletService,
-      paymentService: this.paymentService,
-      invoiceService: this.invoiceService,
-      prisma: this.prisma,
-    });
-    return result.reply;
+    return [hasPenaltiesBotMessage(profile.first_name)];
   }
 
   /**

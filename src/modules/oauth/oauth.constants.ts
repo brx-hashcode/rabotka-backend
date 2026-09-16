@@ -20,6 +20,27 @@ export const SUPPORTED_SCOPES = [
 export type SupportedScope = (typeof SUPPORTED_SCOPES)[number];
 
 /**
+ * The partner API's permission: calling `POST /identity-checks`.
+ *
+ * Kept OUT of `SUPPORTED_SCOPES` on purpose. Those are what a user grants at
+ * `authorize`; this one is granted to the APP by a super admin and is never
+ * part of a login. Listing it there would let a partner request it on the
+ * consent screen and publish it in the discovery document, both meaningless.
+ */
+export const IDENTITY_CHECK_SCOPE = 'rabotka:identity_check';
+
+/** Scopes that gate a server-to-server API rather than a login. */
+export const PARTNER_API_SCOPES = [IDENTITY_CHECK_SCOPE] as const;
+
+/** Everything an admin may put in `OAuthApp.allowed_scopes`. */
+export const REGISTRABLE_SCOPES = [
+  ...SUPPORTED_SCOPES,
+  ...PARTNER_API_SCOPES,
+] as const;
+
+export type RegistrableScope = (typeof REGISTRABLE_SCOPES)[number];
+
+/**
  * What a newly registered app may ask for unless an admin widens it.
  *
  * `email` and `rabotka:location` are deliberately absent: they are real
@@ -76,6 +97,9 @@ export const MAX_OTP_ATTEMPTS = 5;
  * this feature would earn a reputation. 24h is one business day.
  */
 export const SECRET_ROTATION_GRACE_MS = 24 * 60 * 60 * 1000;
+
+/** Cap on a webhook URL. Anything longer is a misconfiguration, not a URL. */
+export const WEBHOOK_URL_MAX_LENGTH = 2048;
 
 const NS = `${REDIS_KEY_PREFIX}oauth:`;
 

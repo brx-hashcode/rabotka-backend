@@ -167,7 +167,7 @@ export function languageDirective(language: ReplyLanguage): string {
         'But NEVER translate these — they are what the user reads on screen and types, and a translated one sends them looking for something that does not exist. Keep them exactly as written, in French:',
         '- screen names (*Mes candidatures*, *Publier une mission*, *Portefeuille*…);',
         '- the names of job domains;',
-        '- any word the user has to type (*payer*, *support*);',
+        '- any word the user has to type (*support*) and any button label (*Payer mes pénalités*);',
         '- the currency, always FCFA.',
         'So « Open *Mes candidatures* to see where each one stands. » is exactly right. Address the user as "you".',
       ].join('\n')

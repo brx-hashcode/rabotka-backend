@@ -1,3 +1,9 @@
+import { ctaReply } from '../../../common/constants/whatsapp-carousel';
+import {
+  PENALTIES_PAYMENT_CTA_PATH,
+  WHATSAPP_TEMPLATES,
+} from '../../../common/constants/whatsapp-templates';
+
 
 export type ContactInfo = {
   email: string;
@@ -48,44 +54,28 @@ export function accountSuspendedBotMessage(contact: ContactInfo): string {
 }
 
 /**
- * The penalty gate: what a user with unpaid penalties gets instead of the
- * feature they asked for. Names the way out ("1"), because a block with no
- * stated remedy just reads as the bot being broken.
+ * What a person with unpaid penalties gets instead of the feature they asked
+ * for: a button into the app, where penalties are paid.
+ *
+ * Payment used to happen in the chat — « tapez 1 », pick a number, choose a
+ * method. It lives in the app now, so the chat only says what is blocked and
+ * opens the page. Sent as a reply, so the free-form card is inside the 24h
+ * window; the fallback only covers a window that closed in between.
  */
-export function hasPenaltiesBotMessage(): string {
-  return [
-    '⚠️ *Accès bloqué - Pénalités impayées*',
-    '',
-    "Vous avez des pénalités impayées. Vous ne pouvez pas accéder aux fonctionnalités tant qu'elles ne sont pas réglées.",
-    '',
-    'Tapez *1* pour afficher la liste de vos pénalités et choisir celle(s) à régler.',
-  ].join('\n');
-}
-
-export function penaltiesListBotMessage(
-  penalties: Array<{
-    amount: number;
-    reason: string;
-    created_at: Date;
-    jobTitle?: string | null;
-  }>,
-): string {
-  const lines: string[] = ['Vos pénalités impayées', ''];
-  penalties.forEach((p, i) => {
-    const date = p.created_at.toLocaleDateString('fr-FR');
-    const job = p.jobTitle ? ` - ${p.jobTitle}` : '';
-    lines.push(
-      `${i + 1}. ${p.amount.toLocaleString('fr-FR')} FCFA - ${p.reason}${job} (${date})`,
-    );
+export function hasPenaltiesBotMessage(firstName: string): string {
+  return ctaReply({
+    body: [
+      '⚠️ *Pénalités impayées*',
+      '',
+      'Tant qu’elles ne sont pas réglées, vous ne pouvez pas postuler, publier d’offre ni débloquer de contact.',
+      '',
+      'Réglez-les en quelques instants dans l’application.',
+    ].join('\n'),
+    buttonText: 'Payer mes pénalités',
+    path: PENALTIES_PAYMENT_CTA_PATH,
+    fallbackTemplate: 'openApp',
+    fallbackVariables: WHATSAPP_TEMPLATES.openApp.variables(firstName),
   });
-  const total = penalties.reduce((s, p) => s + p.amount, 0);
-  lines.push(
-    '',
-    `*Total*: ${total.toLocaleString('fr-FR')} FCFA`,
-    '',
-    'Tapez le *numéro* de la pénalité à régler, ou *0* pour toutes les régler.',
-  );
-  return lines.join('\n');
 }
 
 /**
