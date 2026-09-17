@@ -370,9 +370,12 @@ describe('BotOrchestratorService', () => {
       deps.router.route.mockReturnValue({ type: 'unknown' });
       deps.vova.handle.mockClear();
 
-      await service.handle(PROFILE_ID, PHONE, 'aide');
+      const result = await service.handle(PROFILE_ID, PHONE, 'aide');
 
       expect(deps.vova.handle).not.toHaveBeenCalled();
+      // A card whose button opens the support chat.
+      expect(result[0]).toMatch(/^\[CTA:\]/);
+      expect(result[0]).toContain('https://wa.me/242060000000');
     });
 
     // The landing page's WhatsApp CTA opens with a greeting and then states an
