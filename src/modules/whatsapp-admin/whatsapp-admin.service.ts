@@ -64,6 +64,12 @@ export interface WhatsappMessageListItem {
   toPhone: string;
   profileId: string | null;
   profileName: string | null;
+  /**
+   * The contact's WhatsApp display name: the row's own for a received
+   * message, else the latest known for that phone. Often the only name there
+   * is for a number with no profile.
+   */
+  waProfileName: string | null;
   kind: string;
   templateKey: string | null;
   templateCategory: string | null;
@@ -74,6 +80,7 @@ export interface WhatsappMessageListItem {
   deliveredAt: Date | null;
   readAt: Date | null;
   failedAt: Date | null;
+  receivedAt: Date | null;
   errorCode: string | null;
   errorProviderCode: number | null;
   errorMessage: string | null;
@@ -83,9 +90,14 @@ export interface WhatsappMessageListItem {
 }
 
 export interface WhatsappStats {
-  /** Every message in the window, by furthest state reached. */
+  /**
+   * Every message SENT in the window, by furthest state reached. Received
+   * messages are excluded here and counted in `received` instead.
+   */
   totals: Record<WhatsappDeliveryStatus, number>;
   total: number;
+  /** Messages people sent us in the window. */
+  received: number;
   /**
    * Rates are expressed against SENT, not against total. A message still
    * QUEUED has not failed to be delivered — it has not been sent yet — and
@@ -211,6 +223,8 @@ export class WhatsappAdminService {
           delivered_at: true,
           read_at: true,
           failed_at: true,
+          received_at: true,
+          wa_profile_name: true,
           error_code: true,
           error_provider_code: true,
           error_message: true,
@@ -223,6 +237,10 @@ export class WhatsappAdminService {
       this.prisma.whatsappMessage.count({ where }),
     ]);
 
+    const contactNames = await this.contactNames(
+      rows.filter((row) => !row.wa_profile_name).map((row) => row.to_phone),
+    );
+
     return {
       data: rows.map((row) => ({
         id: row.id,
@@ -233,6 +251,8 @@ export class WhatsappAdminService {
         toPhone: row.to_phone,
         profileId: row.profile_id,
         profileName: fullName(row.profile),
+        waProfileName:
+          row.wa_profile_name ?? contactNames.get(row.to_phone) ?? null,
         kind: row.kind,
         templateKey: row.template_key,
         templateCategory: row.template_category,
@@ -243,6 +263,7 @@ export class WhatsappAdminService {
         deliveredAt: row.delivered_at,
         readAt: row.read_at,
         failedAt: row.failed_at,
+        receivedAt: row.received_at,
         errorCode: row.error_code,
         errorProviderCode: row.error_provider_code,
         errorMessage: row.error_message,
@@ -254,6 +275,20 @@ export class WhatsappAdminService {
       page,
       limit,
     };
+  }
+
+  /**
+   * Latest known WhatsApp name per phone, for rows that carry none of their
+   * own — chiefly our replies to a stranger. One query for the whole page.
+   */
+  private async contactNames(phones: string[]): Promise<Map<string, string>> {
+    const unique = [...new Set(phones)];
+    if (unique.length === 0) return new Map();
+    const contacts = await this.prisma.whatsappContact.findMany({
+      where: { phone: { in: unique }, wa_profile_name: { not: null } },
+      select: { phone: true, wa_profile_name: true },
+    });
+    return new Map(contacts.map((c) => [c.phone, c.wa_profile_name as string]));
   }
 
   private buildWhere(params: {
@@ -276,6 +311,7 @@ export class WhatsappAdminService {
         { body_preview: { contains: search, mode: 'insensitive' } },
         { template_key: { contains: search, mode: 'insensitive' } },
         { provider_message_id: { contains: search, mode: 'insensitive' } },
+        { wa_profile_name: { contains: search, mode: 'insensitive' } },
       ];
     }
 
@@ -312,11 +348,15 @@ export class WhatsappAdminService {
     created_to?: string;
   }): Promise<WhatsappStats> {
     const range = dateRange(params.created_from, params.created_to);
-    const where: Prisma.WhatsappMessageWhereInput = range
-      ? { created_at: range }
-      : {};
+    // Delivery figures are about what we SENT. A received message has no
+    // delivery lifecycle, and letting it in would inflate the total and dilute
+    // every rate.
+    const where: Prisma.WhatsappMessageWhereInput = {
+      direction: MessageDirection.OUTBOUND,
+      ...(range ? { created_at: range } : {}),
+    };
 
-    const [byStatus, byTemplate, byError, timeline, deliveryLatency] =
+    const [byStatus, byTemplate, byError, timeline, deliveryLatency, received] =
       await Promise.all([
         this.prisma.whatsappMessage.groupBy({
           by: ['status'],
@@ -333,6 +373,12 @@ export class WhatsappAdminService {
         }),
         this.loadTimeline(range),
         this.medianDeliverySeconds(range),
+        this.prisma.whatsappMessage.count({
+          where: {
+            direction: MessageDirection.INBOUND,
+            ...(range ? { created_at: range } : {}),
+          },
+        }),
       ]);
 
     const totals = emptyTotals();
@@ -353,6 +399,7 @@ export class WhatsappAdminService {
     return {
       totals,
       total,
+      received,
       sent,
       deliveryRate: rate(delivered, sent),
       readRate: rate(totals.READ, sent),
@@ -441,7 +488,8 @@ export class WhatsappAdminService {
           COUNT(*) FILTER (WHERE status = 'READ')                       AS read,
           COUNT(*) FILTER (WHERE status = 'FAILED')                     AS failed
         FROM whatsapp_messages
-        WHERE created_at >= ${from}::timestamptz
+        WHERE direction = 'OUTBOUND'
+          AND created_at >= ${from}::timestamptz
           AND created_at <= ${to}::timestamptz
         GROUP BY 1
       ) AS m ON m.day = d.day
@@ -465,7 +513,8 @@ export class WhatsappAdminService {
         ORDER BY EXTRACT(EPOCH FROM (delivered_at - sent_at))
       ) AS median
       FROM whatsapp_messages
-      WHERE sent_at IS NOT NULL
+      WHERE direction = 'OUTBOUND'
+        AND sent_at IS NOT NULL
         AND delivered_at IS NOT NULL
         AND created_at >= ${from}::timestamptz
         AND created_at <= ${to}::timestamptz
@@ -772,6 +821,7 @@ function emptyTotals(): Record<WhatsappDeliveryStatus, number> {
     DELIVERED: 0,
     READ: 0,
     FAILED: 0,
+    RECEIVED: 0,
   };
 }
 

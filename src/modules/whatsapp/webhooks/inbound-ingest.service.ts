@@ -103,6 +103,12 @@ export class InboundIngestService {
     event: Extract<InboundEvent, { kind: 'message' }>,
     correlationId?: string,
   ): Promise<void> {
+    // First, before any branch can return: every message someone sends is
+    // recorded — reactions, forms, system notices and rate-limited messages
+    // included. Awaited because it is one insert and the row must exist
+    // before the reply it prompts is logged beside it; it never throws.
+    await this.messageLog.recordInbound(event);
+
     // A submitted Flow is a form, not something the bot should answer. Handled
     // here rather than through the queue: it writes one row and produces no
     // reply, so the round trip would buy nothing.

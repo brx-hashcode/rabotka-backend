@@ -76,6 +76,9 @@ enum WhatsappDeliveryStatus {
   DELIVERED
   READ
   FAILED
+  /// An INBOUND row: someone wrote to us. Not a delivery state, so it sits
+  /// outside the outbound rates entirely.
+  RECEIVED
 }
 
 enum ConversationStatus {
@@ -494,6 +497,7 @@ model Profile {
   messages                        Message[]
   vova_memory                     VovaProfileMemory?
   whatsapp_messages               WhatsappMessage[]
+  whatsapp_contacts               WhatsappContact[]
   logs                            Log[]
   files                           File[]
   wallets                         Wallet[]
@@ -1286,6 +1290,8 @@ model WhatsappMessage {
 
   direction  MessageDirection @default(OUTBOUND)
   /// E.164 with the leading `+`, matching the codebase's canonical phone form.
+  /// For an INBOUND row this is the SENDER — the column keeps its name because
+  /// it is the one phone the row is about either way.
   to_phone   String
   /// Optional: sends to unregistered numbers (OTP, activation) have no profile.
   profile_id String?          @db.Uuid
@@ -1315,6 +1321,12 @@ model WhatsappMessage {
   /// Set when an admin composed the message by hand.
   sent_by_id String? @db.Uuid
 
+  /// INBOUND only: the sender's WhatsApp display name as it was when they
+  /// wrote. The only name we have for someone who never registered.
+  wa_profile_name String?
+  /// INBOUND only: when the provider says the message was sent to us.
+  received_at     DateTime?
+
   profile Profile? @relation(fields: [profile_id], references: [id], onDelete: SetNull)
   sent_by User?    @relation(fields: [sent_by_id], references: [id], onDelete: SetNull)
 
@@ -1323,7 +1335,34 @@ model WhatsappMessage {
   @@index([template_key, created_at(sort: Desc)], name: "idx_wa_msg_template_created")
   @@index([to_phone], name: "idx_wa_msg_phone")
   @@index([profile_id], name: "idx_wa_msg_profile")
+  @@index([direction, created_at(sort: Desc)], name: "idx_wa_msg_direction_created")
   @@map("whatsapp_messages")
+}
+
+/// Everyone who has ever written to us on WhatsApp, keyed by phone.
+///
+/// `whatsapp_messages` rows are purged after 180 days and a stranger has no
+/// profile, so without this the only trace of a lead who never registered —
+/// their number and the name they chose on WhatsApp — would expire with the
+/// log. Never purged.
+model WhatsappContact {
+  id              String   @id @default(uuid()) @db.Uuid
+  /// E.164 with the leading `+`.
+  phone           String   @unique
+  /// Latest WhatsApp display name seen. Never cleared by an event without one.
+  wa_profile_name String?
+  profile_id      String?  @db.Uuid
+  first_seen_at   DateTime
+  last_seen_at    DateTime
+  inbound_count   Int      @default(0)
+  created_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt
+
+  profile Profile? @relation(fields: [profile_id], references: [id], onDelete: SetNull)
+
+  @@index([last_seen_at(sort: Desc)], name: "idx_wa_contact_last_seen")
+  @@index([profile_id], name: "idx_wa_contact_profile")
+  @@map("whatsapp_contacts")
 }
 
 model VerificationToken {
