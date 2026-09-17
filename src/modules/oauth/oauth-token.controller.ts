@@ -7,6 +7,7 @@ import {
   Post,
   Req,
   UseFilters,
+  UseInterceptors,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
@@ -24,6 +25,12 @@ import { verifyCodeChallenge } from './utils/pkce.util';
 import { buildClaims } from './utils/claims.util';
 import { readClientCredentials } from './utils/client-credentials.util';
 import { ACCESS_TOKEN_TTL_SECONDS } from './oauth.constants';
+import { PartnerApiCallKind } from '@prisma/client';
+import {
+  PartnerApiCall,
+  type PartnerLogRequest,
+} from '../partner-activity/partner-api-call.decorator';
+import { PartnerRequestLogInterceptor } from '../partner-activity/partner-request-log.interceptor';
 
 /**
  * The server-to-server half of "Login with Rabotka".
@@ -37,6 +44,7 @@ import { ACCESS_TOKEN_TTL_SECONDS } from './oauth.constants';
 @ApiTags('OpenID Connect')
 @Controller('oauth')
 @UseFilters(OAuthExceptionFilter)
+@UseInterceptors(PartnerRequestLogInterceptor)
 export class OAuthTokenController {
   constructor(
     private readonly apps: OAuthAppService,
@@ -47,6 +55,7 @@ export class OAuthTokenController {
   ) {}
 
   @Public()
+  @PartnerApiCall(PartnerApiCallKind.TOKEN)
   @Post('token')
   @HttpCode(200)
   @Throttle({ default: { limit: 60, ttl: 60_000 } })
@@ -167,6 +176,7 @@ export class OAuthTokenController {
   }
 
   @Public()
+  @PartnerApiCall(PartnerApiCallKind.USERINFO)
   @Get('userinfo')
   @Throttle({ default: { limit: 120, ttl: 60_000 } })
   @Header('Cache-Control', 'no-store')
@@ -182,7 +192,12 @@ export class OAuthTokenController {
       );
     }
 
-    return this.tokens.resolveUserinfo(header.slice('Bearer '.length).trim());
+    return this.tokens.resolveUserinfo(
+      header.slice('Bearer '.length).trim(),
+      (clientId) => {
+        (req as PartnerLogRequest).partnerClientId = clientId;
+      },
+    );
   }
 
   /**
@@ -194,6 +209,7 @@ export class OAuthTokenController {
    * whether a stolen token is still live.
    */
   @Public()
+  @PartnerApiCall(PartnerApiCallKind.REVOKE)
   @Post('revoke')
   @HttpCode(200)
   @Throttle({ default: { limit: 60, ttl: 60_000 } })

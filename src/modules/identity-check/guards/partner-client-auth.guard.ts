@@ -1,5 +1,9 @@
 import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
+import type { PartnerApiCallKind } from '@prisma/client';
 import type { Request } from 'express';
+import { PARTNER_API_CALL } from '../../partner-activity/partner-api-call.decorator';
+import { PartnerRequestLogService } from '../../partner-activity/partner-request-log.service';
 import {
   OAuthAppService,
   type OAuthAppRow,
@@ -8,7 +12,10 @@ import { readClientCredentials } from '../../oauth/utils/client-credentials.util
 import { IDENTITY_CHECK_SCOPE } from '../../oauth/oauth.constants';
 import { partnerError } from '../partner-error';
 
-export type PartnerRequest = Request & { partnerApp: OAuthAppRow };
+export type PartnerRequest = Request & {
+  partnerApp: OAuthAppRow;
+  partnerCallStartedAt?: number;
+};
 
 /**
  * Authenticates a partner's backend with its client credentials, exactly as
@@ -20,11 +27,39 @@ export type PartnerRequest = Request & { partnerApp: OAuthAppRow };
  */
 @Injectable()
 export class PartnerClientAuthGuard implements CanActivate {
-  constructor(private readonly apps: OAuthAppService) {}
+  constructor(
+    private readonly apps: OAuthAppService,
+    private readonly reflector: Reflector,
+    private readonly log: PartnerRequestLogService,
+  ) {}
 
+  /**
+   * Refusals are recorded here: the log interceptor runs after guards, so it
+   * never sees a request this guard turns away.
+   */
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const req = context.switchToHttp().getRequest<PartnerRequest>();
+    req.partnerCallStartedAt = Date.now();
+    try {
+      return await this.authorize(req);
+    } catch (error) {
+      const kind = this.reflector.get<PartnerApiCallKind | undefined>(
+        PARTNER_API_CALL,
+        context.getHandler(),
+      );
+      if (kind) {
+        this.log.record({
+          kind,
+          req,
+          startedAt: req.partnerCallStartedAt,
+          error,
+        });
+      }
+      throw error;
+    }
+  }
 
+  private async authorize(req: PartnerRequest): Promise<boolean> {
     // Body credentials (`client_secret_post`) are not accepted here: the body
     // is the check itself, and HTTP Basic is what every partner already uses
     // against the token endpoint.

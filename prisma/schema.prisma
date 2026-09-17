@@ -2048,6 +2048,7 @@ model OAuthApp {
 
   authorizations  OAuthAuthorization[]
   identity_checks IdentityCheck[]
+  api_requests    PartnerApiRequest[]
 
   created_at DateTime  @default(now())
   updated_at DateTime  @updatedAt
@@ -2176,4 +2177,40 @@ model IdentityCheck {
   @@index([status, expires_at], name: "idx_identity_check_status_expiry")
   @@index([profile_id, status], name: "idx_identity_check_profile_status")
   @@map("identity_checks")
+}
+
+/// Which partner call a `PartnerApiRequest` row records.
+enum PartnerApiCallKind {
+  TOKEN
+  USERINFO
+  REVOKE
+  IDENTITY_CHECK_CREATE
+  IDENTITY_CHECK_READ
+}
+
+/// One server-to-server call from a partner app, for the admin's activity
+/// drawer.
+///
+/// A readable SUMMARY of the request and the response, never the bodies:
+/// no tokens, codes or secrets, and phone numbers masked. Rows older than 90
+/// days are deleted by `PartnerRequestLogService`.
+model PartnerApiRequest {
+  id     String   @id @default(uuid()) @db.Uuid
+  app_id String   @db.Uuid
+  app    OAuthApp @relation(fields: [app_id], references: [id], onDelete: Cascade)
+
+  kind        PartnerApiCallKind
+  status_code Int
+  /// `ok`, or the error code the partner received (`invalid_client`, …).
+  outcome     String
+  duration_ms Int
+
+  request  Json
+  response Json
+
+  created_at DateTime @default(now()) @db.Timestamptz
+
+  @@index([app_id, created_at(sort: Desc)], name: "idx_partner_api_request_app_time")
+  @@index([created_at], name: "idx_partner_api_request_created")
+  @@map("partner_api_requests")
 }

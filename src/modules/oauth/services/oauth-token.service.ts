@@ -138,7 +138,10 @@ export class OAuthTokenService {
    * all of which happen on a different timescale than an hour, and all of which
    * must take effect on the next request rather than at expiry.
    */
-  async resolveUserinfo(token: string): Promise<OidcClaims> {
+  async resolveUserinfo(
+    token: string,
+    onClient?: (clientId: string) => void,
+  ): Promise<OidcClaims> {
     const raw = await this.redis.get(OAUTH_KEYS.accessToken(token));
 
     const invalid = new OAuthError(
@@ -155,6 +158,10 @@ export class OAuthTokenService {
     } catch {
       throw invalid;
     }
+
+    // Lets the caller attribute the call (activity log) even if a later check
+    // refuses it.
+    onClient?.(record.clientId);
 
     if (this.sandbox.isSandboxSubject(record.profileId)) {
       // There is no authorization row to re-read, so the app is re-checked by

@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { UserRole } from '@prisma/client';
+import type { PartnerRequestLogService } from '../../partner-activity/partner-request-log.service';
 import { AdminOAuthAppController } from '../admin-oauth-app.controller';
 import type { OAuthAppService } from '../services/oauth-app.service';
 import type { PrismaService } from '../../../common/services/prisma/prisma.service';
@@ -55,7 +56,13 @@ function build(
   const sandbox = { catalogue: jest.fn() } as unknown as OAuthSandboxService;
 
   return {
-    controller: new AdminOAuthAppController(apps, prisma, logs, sandbox),
+    controller: new AdminOAuthAppController(
+      apps,
+      prisma,
+      logs,
+      sandbox,
+      {} as PartnerRequestLogService,
+    ),
     logged,
   };
 }
