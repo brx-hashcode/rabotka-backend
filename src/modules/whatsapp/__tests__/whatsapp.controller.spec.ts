@@ -119,7 +119,10 @@ describe('WhatsAppController', () => {
         claim: jest.fn().mockResolvedValue(true),
         release: jest.fn().mockResolvedValue(undefined),
       } as any,
-      { applyStatus: jest.fn().mockResolvedValue(undefined) } as any,
+      {
+        applyStatus: jest.fn().mockResolvedValue(undefined),
+        recordInbound: jest.fn().mockResolvedValue(undefined),
+      } as any,
     );
     controller = new WhatsAppController(
       whatsAppService as any,

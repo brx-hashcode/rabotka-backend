@@ -65,6 +65,7 @@ function makeDeps(redisOverrides = {}, provider = makeProvider()) {
   };
   const messageLog = {
     applyStatus: jest.fn().mockResolvedValue(undefined),
+    recordInbound: jest.fn().mockResolvedValue(undefined),
   };
   const service = new InboundIngestService(
     redis as never,
@@ -318,5 +319,57 @@ describe('InboundIngestService', () => {
       expect.objectContaining({ text: '2' }),
       expect.anything(),
     );
+  });
+
+  describe('recording what people send', () => {
+    it('logs a text message before it is queued', async () => {
+      const { service, messageLog, queueService } = makeDeps();
+      const event = message({ profileName: 'Jean K.' } as never);
+      await service.ingest([event]);
+      expect(messageLog.recordInbound).toHaveBeenCalledWith(event);
+      expect(messageLog.recordInbound.mock.invocationCallOrder[0]).toBeLessThan(
+        queueService.addJob.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('logs a reaction even though the bot ignores it', async () => {
+      const { service, messageLog, queueService } = makeDeps();
+      await service.ingest([
+        message({
+          content: { type: 'reaction', emoji: '👍', targetMessageId: 'x' },
+        }),
+      ]);
+      expect(messageLog.recordInbound).toHaveBeenCalledTimes(1);
+      expect(queueService.addJob).not.toHaveBeenCalled();
+    });
+
+    it('logs a submitted form', async () => {
+      const { service, messageLog } = makeDeps();
+      await service.ingest([
+        message({ content: { type: 'flow_reply', answers: { score: '5' } } }),
+      ]);
+      expect(messageLog.recordInbound).toHaveBeenCalledTimes(1);
+    });
+
+    it('logs a message dropped by the rate limit', async () => {
+      const { service, messageLog, queueService } = makeDeps({ count: 999 });
+      await service.ingest([message()]);
+      expect(messageLog.recordInbound).toHaveBeenCalledTimes(1);
+      expect(queueService.addJob).not.toHaveBeenCalled();
+    });
+
+    it('does not log a status event as a message', async () => {
+      const { service, messageLog } = makeDeps();
+      await service.ingest([
+        {
+          kind: 'status',
+          providerMessageId: 'wamid.1',
+          status: 'read',
+          timestamp: new Date(),
+          provider: 'cloud',
+        },
+      ]);
+      expect(messageLog.recordInbound).not.toHaveBeenCalled();
+    });
   });
 });
