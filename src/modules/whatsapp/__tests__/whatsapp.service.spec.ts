@@ -413,7 +413,7 @@ describe('WhatsAppService', () => {
       adminUserId: 'admin-uuid-1',
     };
 
-    it('sends free-form and keeps line breaks while the window is open', async () => {
+    it("sends the admin's text as typed while the window is open", async () => {
       openWindow();
 
       const result = await service.sendAdminMessage({
@@ -425,10 +425,39 @@ describe('WhatsAppService', () => {
       expect(provider.sendTemplate).not.toHaveBeenCalled();
 
       const [, body] = (provider.sendText as jest.Mock).mock.calls[0];
-      expect(body).toContain('Bonjour,\n\nVotre compte est actif.');
-      // v3 signs as the team: no admin name anywhere in the body.
-      expect(body).toContain('_L’équipe Rabotka_');
-      expect(body).not.toContain('Fariol Blondeau');
+      // Rien d'autre que ce qui a été écrit : l'en-tête et la signature
+      // n'existent que pour satisfaire le modèle approuvé, hors fenêtre.
+      expect(body).toBe('Bonjour,\n\nVotre compte est actif.');
+      expect(body).not.toContain('*Rabotka*');
+      expect(body).not.toContain('_L’équipe Rabotka_');
+    });
+
+    it('writes the same unwrapped text to the conversation', async () => {
+      // Le fil de discussion doit montrer ce que la personne a reçu, pas une
+      // version enjolivée.
+      openWindow();
+
+      await service.sendAdminMessage({ ...base, message: 'Compte actif.' });
+
+      expect(prisma.message.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ body: 'Compte actif.' }),
+        }),
+      );
+    });
+
+    it('still wraps the approved template, which cannot start with a variable', async () => {
+      closedWindow();
+
+      await service.sendAdminMessage({ ...base, message: 'Compte actif.' });
+
+      expect(prisma.message.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            body: expect.stringContaining('_L’équipe Rabotka_'),
+          }),
+        }),
+      );
     });
 
     it('sends the approved template, flattened, once the window has closed', async () => {

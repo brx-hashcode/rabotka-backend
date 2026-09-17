@@ -1277,8 +1277,9 @@ export const WHATSAPP_TEMPLATES = {
    *
    * The only template here that carries arbitrary text rather than a fixed
    * notification. Used when the profile's 24h customer-service window has closed
-   * (see `WhatsAppService.isServiceWindowOpen`); inside the window the same body
-   * goes out as free-form.
+   * (see `WhatsAppService.isServiceWindowOpen`); inside the window the admin's
+   * text goes out as free-form, WITHOUT this template's heading and signature —
+   * those exist because a template body may not begin or end with a variable.
    *
    * `'1'` arrives ALREADY FLATTENED, from `WhatsAppService.sendAdminMessage`
    * rather than through `freeTextVar` like the other free-text bindings here.

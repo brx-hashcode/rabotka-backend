@@ -699,8 +699,7 @@ export class WhatsAppService {
     const mode: AdminMessageMode = open ? 'FREE_FORM' : 'TEMPLATE';
 
     // Free-form keeps the admin's line breaks; the template cannot (Meta rejects
-    // newlines inside a variable), so its text is flattened first. Both go
-    // through the same formatter, so the two modes render identically.
+    // newlines inside a variable), so its text is flattened first.
     const text = open ? message.trim() : flattenForTemplateVariable(message);
 
     if (!text) {
@@ -714,7 +713,13 @@ export class WhatsAppService {
       );
     }
 
-    const body = formatAdminMessage({ message: text });
+    // Dans la fenêtre de 24 h, le message part TEL QUEL. L'en-tête « *Rabotka*
+    // — Message de notre équipe support » et la signature n'existent que pour
+    // satisfaire le modèle approuvé, qui ne peut ni commencer ni finir par une
+    // variable ; les imposer à une réponse libre ajoutait quatre lignes de
+    // formulaire à un message écrit à la main, souvent au milieu d'une
+    // conversation où la personne sait déjà à qui elle parle.
+    const body = open ? text : formatAdminMessage({ message: text });
 
     try {
       // Through `logged` rather than straight at the provider: this is the one
