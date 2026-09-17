@@ -679,5 +679,57 @@ describe('WhatsAppOutboundProcessor', () => {
 
       expect(mockWhatsApp.sendTemplateMessageWithVariables).toHaveBeenCalled();
     });
+
+    describe('with an outside link', () => {
+      const support = {
+        body: '*Support Rabotka*',
+        buttonText: 'Écrire au support',
+        url: 'https://wa.me/242061129696?text=Bonjour',
+        fallbackText: '*Support Rabotka*',
+      };
+
+      // Not our link: a login code would be meaningless on wa.me.
+      it('sends the link as given, without minting a code', async () => {
+        await processor.process({
+          data: {
+            type: 'cta',
+            phone: '+242001',
+            profileId: 'p1',
+            cta: support,
+          },
+        });
+
+        expect(mockLoginLink.shortLink).not.toHaveBeenCalled();
+        expect(mockWhatsApp.sendInteractiveCta).toHaveBeenCalledWith(
+          '+242001',
+          expect.objectContaining({
+            url: 'https://wa.me/242061129696?text=Bonjour',
+            buttonText: 'Écrire au support',
+          }),
+        );
+      });
+
+      it('falls back to the text, not a template', async () => {
+        mockWhatsApp.sendInteractiveCta.mockResolvedValueOnce(false);
+
+        await processor.process({
+          data: {
+            type: 'cta',
+            phone: '+242001',
+            profileId: 'p1',
+            cta: support,
+          },
+        });
+
+        expect(mockWhatsApp.sendTextMessage).toHaveBeenCalledWith(
+          '+242001',
+          '*Support Rabotka*',
+          'p1',
+        );
+        expect(
+          mockWhatsApp.sendTemplateMessageWithVariables,
+        ).not.toHaveBeenCalled();
+      });
+    });
   });
 });

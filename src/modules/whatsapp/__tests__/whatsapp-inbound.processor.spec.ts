@@ -76,7 +76,10 @@ describe('WhatsAppInboundProcessor', () => {
       });
 
       const processor = makeProcessor();
-      await processor.process({ data: { phone: '+242001', text: 'Hello' }, attemptsMade: 0 });
+      await processor.process({
+        data: { phone: '+242001', text: 'Hello' },
+        attemptsMade: 0,
+      });
 
       expect(mockQueueService.addJob).toHaveBeenCalledWith(
         expect.stringContaining('whatsapp'),
@@ -95,7 +98,10 @@ describe('WhatsAppInboundProcessor', () => {
       });
 
       const processor = makeProcessor();
-      await processor.process({ data: { phone: '+242001', text: 'photo' }, attemptsMade: 0 });
+      await processor.process({
+        data: { phone: '+242001', text: 'photo' },
+        attemptsMade: 0,
+      });
 
       expect(mockQueueService.addJob).toHaveBeenCalledWith(
         expect.stringContaining('whatsapp'),
@@ -115,7 +121,10 @@ describe('WhatsAppInboundProcessor', () => {
       });
 
       const processor = makeProcessor();
-      await processor.process({ data: { phone: '+242001', text: 'photo' }, attemptsMade: 0 });
+      await processor.process({
+        data: { phone: '+242001', text: 'photo' },
+        attemptsMade: 0,
+      });
 
       expect(mockQueueService.addJob).toHaveBeenCalledWith(
         expect.stringContaining('whatsapp'),
@@ -132,7 +141,10 @@ describe('WhatsAppInboundProcessor', () => {
       });
 
       const processor = makeProcessor();
-      await processor.process({ data: { phone: '+242001', text: 'menu' }, attemptsMade: 0 });
+      await processor.process({
+        data: { phone: '+242001', text: 'menu' },
+        attemptsMade: 0,
+      });
 
       expect(mockQueueService.addJob).toHaveBeenCalledWith(
         expect.stringContaining('whatsapp'),
@@ -180,6 +192,61 @@ describe('WhatsAppInboundProcessor', () => {
           }),
         }),
       );
+    });
+
+    // An outside link (the support chat) has no template twin; its fallback
+    // is the same body as plain text.
+    it('enqueues a [CTA:] reply with an outside link and a text fallback', async () => {
+      mockConversationService.handleIncomingMessage.mockResolvedValue({
+        replies: [
+          '[CTA:]' +
+            JSON.stringify({
+              body: 'Support',
+              buttonText: 'Écrire au support',
+              url: 'https://wa.me/242061129696',
+              fallbackText: 'Support',
+            }),
+        ],
+        profileId: 'p-1',
+      });
+
+      const processor = makeProcessor();
+      await processor.process({
+        data: { phone: '+242001', text: 'support' },
+        attemptsMade: 0,
+      });
+
+      expect(mockQueueService.addJob).toHaveBeenCalledWith(
+        expect.stringContaining('whatsapp'),
+        expect.objectContaining({
+          type: 'cta',
+          cta: expect.objectContaining({
+            url: 'https://wa.me/242061129696',
+            fallbackText: 'Support',
+          }),
+        }),
+      );
+    });
+
+    it.each([
+      ['no link', { fallbackText: 'x' }],
+      ['a non-https link', { url: 'http://wa.me/1', fallbackText: 'x' }],
+      ['no fallback', { url: 'https://wa.me/1' }],
+    ])('skips a [CTA:] reply with %s', async (_, rest) => {
+      mockConversationService.handleIncomingMessage.mockResolvedValue({
+        replies: [
+          '[CTA:]' + JSON.stringify({ body: 'x', buttonText: 'y', ...rest }),
+        ],
+        profileId: null,
+      });
+
+      const processor = makeProcessor();
+      await processor.process({
+        data: { phone: '+242001', text: 'salut' },
+        attemptsMade: 0,
+      });
+
+      expect(mockQueueService.addJob).not.toHaveBeenCalled();
     });
 
     it('skips a [CTA:] reply with invalid JSON', async () => {
@@ -230,7 +297,10 @@ describe('WhatsAppInboundProcessor', () => {
       });
 
       const processor = makeProcessor();
-      await processor.process({ data: { phone: '+242001', text: 'menu' }, attemptsMade: 0 });
+      await processor.process({
+        data: { phone: '+242001', text: 'menu' },
+        attemptsMade: 0,
+      });
 
       expect(mockQueueService.addJob).not.toHaveBeenCalled();
     });
@@ -242,7 +312,10 @@ describe('WhatsAppInboundProcessor', () => {
       });
 
       const processor = makeProcessor();
-      await processor.process({ data: { phone: '+242001', text: 'hi' }, attemptsMade: 0 });
+      await processor.process({
+        data: { phone: '+242001', text: 'hi' },
+        attemptsMade: 0,
+      });
 
       expect(mockQueueService.addJob).toHaveBeenCalledTimes(1);
       expect(mockQueueService.addJob).toHaveBeenCalledWith(
@@ -258,7 +331,10 @@ describe('WhatsAppInboundProcessor', () => {
       });
 
       const processor = makeProcessor();
-      await processor.process({ data: { phone: '+242001', text: 'hi' }, attemptsMade: 0 });
+      await processor.process({
+        data: { phone: '+242001', text: 'hi' },
+        attemptsMade: 0,
+      });
 
       expect(mockQueueService.addJob).not.toHaveBeenCalled();
     });
@@ -270,7 +346,10 @@ describe('WhatsAppInboundProcessor', () => {
       });
 
       const processor = makeProcessor();
-      await processor.process({ data: { phone: '+242001', text: 'hi' }, attemptsMade: 0 });
+      await processor.process({
+        data: { phone: '+242001', text: 'hi' },
+        attemptsMade: 0,
+      });
 
       expect(mockQueueService.addJob).toHaveBeenCalledWith(
         expect.any(String),
@@ -285,7 +364,10 @@ describe('WhatsAppInboundProcessor', () => {
       });
 
       const processor = makeProcessor();
-      await processor.process({ data: { phone: '+242001', text: 'hi' }, attemptsMade: 0 });
+      await processor.process({
+        data: { phone: '+242001', text: 'hi' },
+        attemptsMade: 0,
+      });
 
       // One job, not two — so the outbound worker (concurrency 3) can't race
       // them out of order.
@@ -320,7 +402,10 @@ describe('WhatsAppInboundProcessor', () => {
 
       // The marker is written AFTER handling, with Meta's full retry window.
       expect(mockConversationService.handleIncomingMessage).toHaveBeenCalled();
-      expect(mockIdempotency.claim).toHaveBeenCalledWith(DONE('wamid.1'), 604800);
+      expect(mockIdempotency.claim).toHaveBeenCalledWith(
+        DONE('wamid.1'),
+        604800,
+      );
     });
 
     it('drops a message whose id is already claimed, without sending', async () => {
@@ -418,7 +503,9 @@ describe('WhatsAppInboundProcessor', () => {
 
       // Attempt 2 must actually do the work, not treat it as already handled.
       await processor.process(job(1));
-      expect(mockConversationService.handleIncomingMessage).toHaveBeenCalledTimes(2);
+      expect(
+        mockConversationService.handleIncomingMessage,
+      ).toHaveBeenCalledTimes(2);
       expect(mockQueueService.addJob).toHaveBeenCalledTimes(1);
     });
 
@@ -430,9 +517,9 @@ describe('WhatsAppInboundProcessor', () => {
 
       await expect(processor.process(job(0))).rejects.toThrow('db down');
 
-      expect(await mockIdempotency.has(`rabotka:dev:wa:in:done:wamid.boom`)).toBe(
-        false,
-      );
+      expect(
+        await mockIdempotency.has(`rabotka:dev:wa:in:done:wamid.boom`),
+      ).toBe(false);
     });
 
     it('releases the in-flight lock even when handling throws', async () => {
@@ -445,9 +532,9 @@ describe('WhatsAppInboundProcessor', () => {
 
       await expect(processor.process(job(0))).rejects.toThrow('db down');
 
-      expect(await mockIdempotency.has(`rabotka:dev:wa:in:lock:wamid.boom`)).toBe(
-        false,
-      );
+      expect(
+        await mockIdempotency.has(`rabotka:dev:wa:in:lock:wamid.boom`),
+      ).toBe(false);
     });
 
     it('retries when the outbound enqueue throws', async () => {

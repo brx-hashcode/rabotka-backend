@@ -66,17 +66,46 @@ export function templateReply(
   return `[TPL:${templateKey}]${JSON.stringify(variables)}`;
 }
 
+/**
+ * Where the button goes: a path in the app, which the outbound worker turns
+ * into a one-tap login link, or an outside link (wa.me, …) sent as given.
+ */
+type CtaTarget =
+  | {
+      /** Path under FRONTEND_URL. The outbound worker mints the one-tap login link. */
+      path: string;
+      url?: never;
+    }
+  | {
+      /** Absolute https link, sent unchanged — no login code is attached. */
+      url: string;
+      path?: never;
+    };
+
+/**
+ * What goes out when the free-form send fails (the 24h window turned out to
+ * be shut): an approved template, or the body as plain text when the link
+ * has no template equivalent.
+ */
+type CtaFallback =
+  | {
+      fallbackTemplate: WhatsAppTemplateName;
+      fallbackVariables?: Record<string, string>;
+      fallbackText?: never;
+    }
+  | {
+      fallbackText: string;
+      fallbackTemplate?: never;
+      fallbackVariables?: never;
+    };
+
 /** A bot reply sent as a free-form CTA message, decoded by `parseReplyToJob`. */
-export interface CtaReply {
+export type CtaReply = {
   body: string;
   buttonText: string;
-  /** Path under FRONTEND_URL. The outbound worker mints the one-tap login link. */
-  path: string;
   imageUrl?: string;
-  /** The template to fall back to when the 24h window turns out to be shut. */
-  fallbackTemplate: WhatsAppTemplateName;
-  fallbackVariables?: Record<string, string>;
-}
+} & CtaTarget &
+  CtaFallback;
 
 /**
  * Encode a free-form CTA send as a bot reply string, `[CTA:]<json>`.
