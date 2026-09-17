@@ -12,8 +12,12 @@ import {
   Length,
   MaxLength,
   MinLength,
+  IsInt,
+  Max,
+  Min,
 } from 'class-validator';
-import { OAuthAppStatus } from '@prisma/client';
+import { OAuthAppStatus, PartnerApiCallKind } from '@prisma/client';
+import { Type } from 'class-transformer';
 import { REGISTRABLE_SCOPES, WEBHOOK_URL_MAX_LENGTH } from '../oauth.constants';
 
 export class SendInteractionOtpDto {
@@ -233,4 +237,26 @@ export class UpdateOAuthAppDto {
   @IsOptional()
   @IsEnum(OAuthAppStatus)
   status?: OAuthAppStatus;
+}
+
+export class ListPartnerRequestsDto {
+  @ApiPropertyOptional({ default: 1 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number;
+
+  @ApiPropertyOptional({ default: 20 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  limit?: number;
+
+  @ApiPropertyOptional({ enum: PartnerApiCallKind })
+  @IsOptional()
+  @IsEnum(PartnerApiCallKind)
+  kind?: PartnerApiCallKind;
 }

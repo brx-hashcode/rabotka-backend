@@ -3,6 +3,7 @@ import { AuthModule } from '../auth/auth.module';
 import { WhatsAppLoginLinkModule } from '../auth/whatsapp-login-link.module';
 import { LogModule } from '../log/log.module';
 import { OAuthModule } from '../oauth/oauth.module';
+import { PartnerActivityModule } from '../partner-activity/partner-activity.module';
 import { WhatsAppModule } from '../whatsapp/whatsapp.module';
 import { IdentityCheckConsentController } from './identity-check-consent.controller';
 import { IdentityCheckProcessor } from './identity-check.processor';
@@ -19,6 +20,7 @@ import { PartnerIdentityCheckController } from './partner-identity-check.control
   imports: [
     AuthModule,
     OAuthModule,
+    PartnerActivityModule,
     LogModule,
     WhatsAppModule,
     WhatsAppLoginLinkModule,

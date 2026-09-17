@@ -4,7 +4,6 @@ import {
   WHATSAPP_TEMPLATES,
 } from '../../../common/constants/whatsapp-templates';
 
-
 export type ContactInfo = {
   email: string;
   phone: string;
@@ -23,7 +22,7 @@ export function supportCardBotMessage(
   contact: ContactInfo,
   opts?: { suspended?: boolean; reason?: string | null },
 ): string {
-  const lines = ['Support Rabotka', ''];
+  const lines = ['*Support Rabotka*', ''];
 
   // Driven by the STATUS, not by whether a reason happens to be stored. Keying
   // it off the reason meant every suspension predating the suspension_reason
@@ -42,7 +41,35 @@ export function supportCardBotMessage(
     `*Téléphone* : ${contact.phone}`,
   );
 
-  return lines.join('\n');
+  const body = lines.join('\n');
+  const link = whatsappSupportLink(contact.phone, opts);
+  if (!link) return body;
+
+  // One link button is all a free-form CTA carries, so the button opens the
+  // support chat and the email stays in the text. The fallback is the same
+  // card without the button: there is no approved template for it.
+  return ctaReply({
+    body,
+    buttonText: 'Écrire au support',
+    url: link,
+    fallbackText: body,
+  });
+}
+
+/**
+ * A wa.me link to the support number, with a first message already typed so
+ * support knows why the person is writing. Null without a usable number.
+ */
+export function whatsappSupportLink(
+  phone: string,
+  opts?: { suspended?: boolean },
+): string | null {
+  const digits = phone.replace(/\D/g, '');
+  if (!digits) return null;
+  const text = opts?.suspended
+    ? 'Bonjour, mon compte Rabotka est suspendu.'
+    : 'Bonjour, j’ai besoin d’aide sur Rabotka.';
+  return `https://wa.me/${digits}?text=${encodeURIComponent(text)}`;
 }
 
 /**

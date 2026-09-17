@@ -10,6 +10,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -24,7 +25,12 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { LogService } from '../log/log.service';
 import { OAuthAppService } from './services/oauth-app.service';
 import { OAuthSandboxService } from './services/oauth-sandbox.service';
-import { CreateOAuthAppDto, UpdateOAuthAppDto } from './dto';
+import {
+  CreateOAuthAppDto,
+  ListPartnerRequestsDto,
+  UpdateOAuthAppDto,
+} from './dto';
+import { PartnerRequestLogService } from '../partner-activity/partner-request-log.service';
 import { REGISTRABLE_SCOPES } from './oauth.constants';
 
 type AdminRequest = Request & { adminAccount?: { id: string } };
@@ -48,6 +54,7 @@ export class AdminOAuthAppController {
     private readonly prisma: PrismaService,
     private readonly logs: LogService,
     private readonly sandbox: OAuthSandboxService,
+    private readonly activity: PartnerRequestLogService,
   ) {}
 
   /** The scope catalogue, so the admin UI never hardcodes its own copy. */
@@ -63,6 +70,40 @@ export class AdminOAuthAppController {
   @Get('sandbox-users')
   sandboxUsers() {
     return this.sandbox.catalogue();
+  }
+
+  /** Figures for the app's activity drawer. */
+  @Get(':id/stats')
+  @ApiOperation({ summary: "An application's activity figures" })
+  async stats(@Param('id', ParseUUIDPipe) id: string) {
+    await this.assertExists(id);
+    return this.activity.stats(id);
+  }
+
+  /** The app's server-side calls, newest first. */
+  @Get(':id/requests')
+  @ApiOperation({ summary: "An application's recent API calls" })
+  async requests(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() query: ListPartnerRequestsDto,
+  ) {
+    await this.assertExists(id);
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+    const result = await this.activity.list(id, {
+      page,
+      limit,
+      kind: query.kind,
+    });
+    return { ...result, page, limit };
+  }
+
+  private async assertExists(id: string): Promise<void> {
+    const app = await this.prisma.oAuthApp.findFirst({
+      where: { id, deleted_at: null },
+      select: { id: true },
+    });
+    if (!app) throw new NotFoundException('Application introuvable.');
   }
 
   @Get()

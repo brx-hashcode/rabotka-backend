@@ -379,11 +379,7 @@ export class WhatsAppOutboundProcessor {
   ): Promise<void> {
     const { cta, phone, profileId } = data;
 
-    const url = profileId
-      ? ((await this.loginLink
-          .shortLink(profileId, cta.path)
-          .catch(() => null)) ?? `${this.frontendUrl()}/${cta.path}`)
-      : `${this.frontendUrl()}/${cta.path}`;
+    const url = await this.ctaUrl(cta, profileId);
 
     const sent = await this.whatsApp
       .sendInteractiveCta(phone, {
@@ -395,13 +391,23 @@ export class WhatsAppOutboundProcessor {
       })
       .catch((err: unknown) => {
         this.logger.warn(
-          `CTA send to ${phone} failed, falling back to template ${cta.fallbackTemplate}`,
+          `CTA send to ${phone} failed, falling back to ${cta.fallbackTemplate ?? 'plain text'}`,
           err instanceof Error ? err.message : String(err),
         );
         return false;
       });
 
     if (sent) return;
+
+    if (cta.fallbackText !== undefined) {
+      await this.processText({
+        type: 'text',
+        phone,
+        profileId,
+        text: cta.fallbackText,
+      });
+      return;
+    }
 
     await this.processTemplate({
       type: 'template',
@@ -410,6 +416,21 @@ export class WhatsAppOutboundProcessor {
       templateKey: cta.fallbackTemplate,
       contentVariables: cta.fallbackVariables ?? {},
     });
+  }
+
+  /**
+   * The button's link. An outside link is sent as given; an app path gets
+   * the one-tap login code, or the bare URL when there is no profile to mint
+   * against or minting fails.
+   */
+  private async ctaUrl(cta: CtaReply, profileId?: string): Promise<string> {
+    if (cta.path === undefined) return cta.url;
+    const bare = `${this.frontendUrl()}/${cta.path}`;
+    if (!profileId) return bare;
+    return (
+      (await this.loginLink.shortLink(profileId, cta.path).catch(() => null)) ??
+      bare
+    );
   }
 
   private async processTemplate(

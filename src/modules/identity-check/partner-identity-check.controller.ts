@@ -11,6 +11,7 @@ import {
   Req,
   UseFilters,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import {
@@ -23,6 +24,9 @@ import { extractRequestMeta } from '../../common/utils/request-meta.util';
 import { Public } from '../auth/decorators/public.decorator';
 import { OAuthExceptionFilter } from '../oauth/filters/oauth-exception.filter';
 import { CreateIdentityCheckDto } from './dto';
+import { PartnerApiCallKind } from '@prisma/client';
+import { PartnerApiCall } from '../partner-activity/partner-api-call.decorator';
+import { PartnerRequestLogInterceptor } from '../partner-activity/partner-request-log.interceptor';
 import {
   PartnerClientAuthGuard,
   type PartnerRequest,
@@ -40,10 +44,12 @@ const IDEMPOTENCY_KEY_MAX = 128;
 @Controller('identity-checks')
 @UseFilters(OAuthExceptionFilter)
 @UseGuards(PartnerClientAuthGuard)
+@UseInterceptors(PartnerRequestLogInterceptor)
 export class PartnerIdentityCheckController {
   constructor(private readonly checks: IdentityCheckService) {}
 
   @Public()
+  @PartnerApiCall(PartnerApiCallKind.IDENTITY_CHECK_CREATE)
   @Post()
   @HttpCode(202)
   @Throttle({ default: { limit: 60, ttl: 60_000 } })
@@ -73,6 +79,7 @@ export class PartnerIdentityCheckController {
   }
 
   @Public()
+  @PartnerApiCall(PartnerApiCallKind.IDENTITY_CHECK_READ)
   @Get(':id')
   @Throttle({ default: { limit: 120, ttl: 60_000 } })
   @Header('Cache-Control', 'no-store')

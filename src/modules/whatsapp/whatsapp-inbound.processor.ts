@@ -197,10 +197,12 @@ function parseCtaReply(json: string): CtaReply | null {
   } catch {
     return null;
   }
-  if (!cta.body || !cta.buttonText || !isTemplateKey(cta.fallbackTemplate)) {
-    return null;
-  }
-  return cta;
+  if (!cta.body || !cta.buttonText) return null;
+  const hasTarget = Boolean(cta.path) || cta.url?.startsWith('https://');
+  const hasFallback = cta.fallbackText
+    ? true
+    : cta.fallbackTemplate !== undefined && isTemplateKey(cta.fallbackTemplate);
+  return hasTarget && hasFallback ? cta : null;
 }
 
 function toSend(job: WhatsAppOutboundJobData): WhatsAppSend {
