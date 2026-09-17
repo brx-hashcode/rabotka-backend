@@ -1,6 +1,13 @@
 import { HttpException, type ExecutionContext } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
-import { IdentityCheckStatus, OAuthAppStatus } from '@prisma/client';
+import { Reflector } from '@nestjs/core';
+import {
+  IdentityCheckStatus,
+  OAuthAppStatus,
+  PartnerApiCallKind,
+} from '@prisma/client';
+import { PartnerApiCall } from '../../partner-activity/partner-api-call.decorator';
+import type { PartnerRequestLogService } from '../../partner-activity/partner-request-log.service';
 import { generateKeyPairSync } from 'node:crypto';
 import { createLocalJWKSet, jwtVerify } from 'jose';
 import type { PrismaService } from '../../../common/services/prisma/prisma.service';
@@ -41,13 +48,48 @@ describe('PartnerClientAuthGuard', () => {
     const prisma = {
       oAuthApp: { findFirst: jest.fn().mockResolvedValue(found) },
     } as unknown as PrismaService;
-    const guard = new PartnerClientAuthGuard(new OAuthAppService(prisma));
+    const log = { record: jest.fn() };
+    const guard = new PartnerClientAuthGuard(
+      new OAuthAppService(prisma),
+      new Reflector(),
+      log as unknown as PartnerRequestLogService,
+    );
     const req = { headers: { authorization } } as unknown as PartnerRequest;
     const context = {
       switchToHttp: () => ({ getRequest: () => req }),
+      getHandler: () => handler,
     } as unknown as ExecutionContext;
-    return { result: guard.canActivate(context), req };
+    return { result: guard.canActivate(context), req, log };
   }
+
+  // A handler marked the way the real controller marks its routes.
+  const handler = () => undefined;
+  PartnerApiCall(PartnerApiCallKind.IDENTITY_CHECK_CREATE)(handler, 'handler', {
+    value: handler,
+  });
+
+  it('records a refused call in the activity log', async () => {
+    const { result, log } = run(
+      app(['openid']),
+      basic('rbk_app1', 'rbk_sk_right'),
+    );
+    await result.catch(() => undefined);
+    expect(log.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: PartnerApiCallKind.IDENTITY_CHECK_CREATE,
+        error: expect.any(HttpException),
+      }),
+    );
+  });
+
+  it('does not record an accepted call (the interceptor does)', async () => {
+    const { result, log } = run(
+      app([IDENTITY_CHECK_SCOPE]),
+      basic('rbk_app1', 'rbk_sk_right'),
+    );
+    await result;
+    expect(log.record).not.toHaveBeenCalled();
+  });
 
   it('lets an app with the switch on through and attaches it', async () => {
     const { result, req } = run(

@@ -213,7 +213,11 @@ describe('verify-otp in a sandbox interaction', () => {
     const { controller, interactions, res } = build(pending);
 
     const error = await expectOAuthError(
-      controller.verifyOtp('int-1', { phone: SANDBOX_PHONE, otp: '123456' }, res),
+      controller.verifyOtp(
+        'int-1',
+        { phone: SANDBOX_PHONE, otp: '123456' },
+        res,
+      ),
     );
 
     expect(error.code).toBe('access_denied');
@@ -270,7 +274,11 @@ describe('verify-otp in a real interaction', () => {
     );
 
     const error = await expectOAuthError(
-      controller.verifyOtp('int-1', { phone: REAL_PHONE, otp: SANDBOX_OTP }, res),
+      controller.verifyOtp(
+        'int-1',
+        { phone: REAL_PHONE, otp: SANDBOX_OTP },
+        res,
+      ),
     );
 
     expect(error.code).toBe('access_denied');

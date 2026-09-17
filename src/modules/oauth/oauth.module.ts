@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { AuthModule } from '../auth/auth.module';
 import { LogModule } from '../log/log.module';
+import { PartnerActivityModule } from '../partner-activity/partner-activity.module';
 import { OAuthDiscoveryController } from './oauth-discovery.controller';
 import { OAuthAuthorizeController } from './oauth-authorize.controller';
 import { OAuthTokenController } from './oauth-token.controller';
@@ -25,7 +26,7 @@ import { OidcKeyService } from './services/oidc-key.service';
  * door the user came through.
  */
 @Module({
-  imports: [ConfigModule, AuthModule, LogModule],
+  imports: [ConfigModule, AuthModule, LogModule, PartnerActivityModule],
   controllers: [
     OAuthDiscoveryController,
     OAuthAuthorizeController,

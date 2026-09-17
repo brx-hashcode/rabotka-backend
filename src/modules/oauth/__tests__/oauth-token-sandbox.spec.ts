@@ -122,7 +122,13 @@ function build(overrides: { app?: unknown; profileId?: string } = {}) {
   jest.spyOn(tokens, 'signIdToken').mockResolvedValue('the-id-token');
   jest.spyOn(tokens, 'mintAccessToken').mockResolvedValue('rbk_at_x');
 
-  const controller = new OAuthTokenController(apps, codes, tokens, prisma, sandbox);
+  const controller = new OAuthTokenController(
+    apps,
+    codes,
+    tokens,
+    prisma,
+    sandbox,
+  );
 
   return { controller, prisma, tokens, apps, codes, sandbox };
 }
@@ -261,10 +267,7 @@ describe('userinfo for a sandbox token', () => {
   });
 
   it('honours scope, so an ungranted claim is still absent', async () => {
-    const { service } = withToken(
-      { ...RECORD, scopes: ['openid'] },
-      APP,
-    );
+    const { service } = withToken({ ...RECORD, scopes: ['openid'] }, APP);
 
     await expect(service.resolveUserinfo('tok')).resolves.toEqual({
       sub: derivePairwiseSub(APP.id, SANDBOX_SUBJECT, SALT),
