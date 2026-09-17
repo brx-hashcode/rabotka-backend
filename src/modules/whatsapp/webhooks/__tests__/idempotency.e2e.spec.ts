@@ -192,7 +192,10 @@ describe('duplicate webhook delivery', () => {
           // Faked like the other edges: this test is about de-duplication, and
           // the delivery log is a write it makes on the way through.
           provide: WhatsappMessageLogService,
-          useValue: { applyStatus: jest.fn().mockResolvedValue(undefined) },
+          useValue: {
+            applyStatus: jest.fn().mockResolvedValue(undefined),
+            recordInbound: jest.fn().mockResolvedValue(undefined),
+          },
         },
         {
           provide: ConversationService,

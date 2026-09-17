@@ -1,5 +1,8 @@
 import { WhatsappDeliveryStatus } from '@prisma/client';
-import { WhatsappMessageLogService } from '../whatsapp-message-log.service';
+import {
+  describeInbound,
+  WhatsappMessageLogService,
+} from '../whatsapp-message-log.service';
 import { WhatsappError, type InboundEvent } from '../../contracts';
 
 /**
@@ -23,6 +26,9 @@ function makePrisma(
     },
     profile: {
       findFirst: jest.fn().mockResolvedValue(profile),
+    },
+    whatsappContact: {
+      upsert: jest.fn().mockResolvedValue({}),
     },
   };
 }
@@ -472,5 +478,189 @@ describe('WhatsappMessageLogService', () => {
 
       await expect(service.applyStatus(status())).resolves.toBeUndefined();
     });
+  });
+
+  describe('recordInbound()', () => {
+    type MessageEvent = Extract<InboundEvent, { kind: 'message' }>;
+    const at = new Date('2026-09-17T09:35:00Z');
+    const inbound = (over: Partial<MessageEvent> = {}): MessageEvent => ({
+      kind: 'message',
+      from: '+242066294896',
+      providerMessageId: 'wamid.in.1',
+      timestamp: at,
+      provider: 'cloud',
+      content: { type: 'text', text: 'Bonjour' },
+      profileName: 'Jean K.',
+      ...over,
+    });
+
+    it('writes a RECEIVED inbound row carrying the WhatsApp name', async () => {
+      const prisma = makePrisma();
+      const service = makeService(prisma);
+
+      await service.recordInbound(inbound());
+
+      expect(prisma.whatsappMessage.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            direction: 'INBOUND',
+            status: WhatsappDeliveryStatus.RECEIVED,
+            provider: 'cloud',
+            provider_message_id: 'wamid.in.1',
+            to_phone: '+242066294896',
+            profile_id: null,
+            kind: 'text',
+            body_preview: 'Bonjour',
+            wa_profile_name: 'Jean K.',
+            received_at: at,
+          }),
+        }),
+      );
+    });
+
+    it('links the row and the contact to the profile owning the number', async () => {
+      const prisma = makePrisma(null, { id: 'profile-9' });
+      const service = makeService(prisma);
+
+      await service.recordInbound(inbound());
+
+      expect(
+        prisma.whatsappMessage.create.mock.calls[0][0].data.profile_id,
+      ).toBe('profile-9');
+      expect(
+        prisma.whatsappContact.upsert.mock.calls[0][0].update.profile_id,
+      ).toBe('profile-9');
+    });
+
+    it('opens the contact on first sight and counts later messages', async () => {
+      const prisma = makePrisma();
+      const service = makeService(prisma);
+
+      await service.recordInbound(inbound());
+
+      const args = prisma.whatsappContact.upsert.mock.calls[0][0];
+      expect(args.where).toEqual({ phone: '+242066294896' });
+      expect(args.create).toEqual(
+        expect.objectContaining({
+          wa_profile_name: 'Jean K.',
+          first_seen_at: at,
+          last_seen_at: at,
+          inbound_count: 1,
+        }),
+      );
+      expect(args.update).toEqual(
+        expect.objectContaining({
+          last_seen_at: at,
+          inbound_count: { increment: 1 },
+          wa_profile_name: 'Jean K.',
+        }),
+      );
+    });
+
+    it('never erases a known name with an event that has none', async () => {
+      const prisma = makePrisma();
+      const service = makeService(prisma);
+
+      await service.recordInbound(inbound({ profileName: undefined }));
+
+      const args = prisma.whatsappContact.upsert.mock.calls[0][0];
+      expect(args.update).not.toHaveProperty('wa_profile_name');
+      expect(
+        prisma.whatsappMessage.create.mock.calls[0][0].data.wa_profile_name,
+      ).toBeNull();
+    });
+
+    it('ignores a replay: no second row, no second count', async () => {
+      const prisma = makePrisma();
+      prisma.whatsappMessage.create.mockRejectedValue(
+        Object.assign(new Error('Unique constraint failed'), { code: 'P2002' }),
+      );
+      const service = makeService(prisma);
+
+      await expect(service.recordInbound(inbound())).resolves.toBeUndefined();
+      expect(prisma.whatsappContact.upsert).not.toHaveBeenCalled();
+    });
+
+    it('still keeps the contact when the row cannot be written', async () => {
+      const prisma = makePrisma();
+      prisma.whatsappMessage.create.mockRejectedValue(new Error('db down'));
+      const service = makeService(prisma);
+
+      await expect(service.recordInbound(inbound())).resolves.toBeUndefined();
+      expect(prisma.whatsappContact.upsert).toHaveBeenCalled();
+    });
+
+    it('never throws when the contact write fails too', async () => {
+      const prisma = makePrisma();
+      prisma.whatsappMessage.create.mockRejectedValue(new Error('db down'));
+      prisma.whatsappContact.upsert.mockRejectedValue(new Error('db down'));
+      const service = makeService(prisma);
+
+      await expect(service.recordInbound(inbound())).resolves.toBeUndefined();
+    });
+
+    it('keeps the structured parts of a non-text message', async () => {
+      const prisma = makePrisma();
+      const service = makeService(prisma);
+
+      await service.recordInbound(
+        inbound({
+          content: {
+            type: 'image',
+            mediaId: 'media-1',
+            caption: 'Mon CV',
+            mimeType: 'image/jpeg',
+          },
+        }),
+      );
+
+      const data = prisma.whatsappMessage.create.mock.calls[0][0].data;
+      expect(data.kind).toBe('image');
+      expect(data.body_preview).toBe('[Image] Mon CV');
+      expect(data.variables).toEqual({
+        mediaId: 'media-1',
+        mimeType: 'image/jpeg',
+      });
+    });
+  });
+});
+
+describe('describeInbound()', () => {
+  it.each([
+    [{ type: 'text', text: 'Salut' }, 'Salut'],
+    [{ type: 'interactive_reply', replyId: 'menu_1', title: 'Menu' }, 'Menu'],
+    [{ type: 'interactive_reply', replyId: 'menu_1' }, 'menu_1'],
+    [{ type: 'image', mediaId: 'm' }, '[Image]'],
+    [{ type: 'video', mediaId: 'm', caption: 'démo' }, '[Video] démo'],
+    [{ type: 'audio', mediaId: 'm' }, '[Voice note]'],
+    [
+      { type: 'document', mediaId: 'm', filename: 'cv.pdf' },
+      '[Document: cv.pdf]',
+    ],
+    [
+      {
+        type: 'location',
+        latitude: -4.26,
+        longitude: 15.28,
+        name: 'Poto-Poto',
+      },
+      '[Location] Poto-Poto',
+    ],
+    [
+      { type: 'location', latitude: -4.26, longitude: 15.28 },
+      '[Location] -4.26, 15.28',
+    ],
+    [
+      { type: 'reaction', emoji: '👍', targetMessageId: 'wamid.x' },
+      '[Reaction 👍]',
+    ],
+    [
+      { type: 'reaction', emoji: '', targetMessageId: 'wamid.x' },
+      '[Reaction removed]',
+    ],
+    [{ type: 'flow_reply', answers: {} }, '[Form submitted]'],
+    [{ type: 'unsupported', rawType: 'sticker' }, '[sticker]'],
+  ])('%j → %s', (content, expected) => {
+    expect(describeInbound(content as never)).toBe(expected);
   });
 });

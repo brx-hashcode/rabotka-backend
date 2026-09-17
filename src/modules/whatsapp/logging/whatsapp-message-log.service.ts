@@ -7,6 +7,7 @@ import {
 import { PrismaService } from '../../../common/services/prisma/prisma.service';
 import {
   WhatsappError,
+  type InboundContent,
   type InboundEvent,
   type TemplateKey,
 } from '../contracts';
@@ -14,7 +15,7 @@ import { WHATSAPP_TEMPLATES } from '../../../common/constants/whatsapp-templates
 import { toDigits, toE164 } from '../contracts/address';
 
 /**
- * The durable record of every outbound WhatsApp send.
+ * The durable record of every WhatsApp message, sent or received.
  *
  * Before this existed the pipeline was amnesiac: `WhatsAppService.attempt()`
  * received Meta's wamid and reduced it to a boolean, and `handleStatus()`
@@ -47,7 +48,13 @@ const STATUS_RANK: Record<WhatsappDeliveryStatus, number> = {
   [WhatsappDeliveryStatus.DELIVERED]: 2,
   [WhatsappDeliveryStatus.READ]: 3,
   [WhatsappDeliveryStatus.FAILED]: 4,
+  // Inbound rows only. Status webhooks carry OUR wamids, so none ever
+  // correlates to a received message; ranked lowest so that if one somehow
+  // did, it could not be mistaken for a later state.
+  [WhatsappDeliveryStatus.RECEIVED]: 0,
 };
+
+type MessageEvent = Extract<InboundEvent, { kind: 'message' }>;
 
 /** The shape of an outbound send, as far as the log is concerned. */
 export type WhatsappSendKind =
@@ -234,6 +241,96 @@ export class WhatsappMessageLogService {
   }
 
   /**
+   * Record a message someone sent us, and remember who they are.
+   *
+   * Every inbound message, whatever its type and whoever sent it. Registered
+   * users' text also lands in the `messages` transcript, but a stranger's has
+   * nowhere else to go — `messages.profile_id` is NOT NULL — so until this
+   * existed their words were kept for thirty minutes in Redis and then lost.
+   *
+   * `create` rather than `upsert`, and the unique violation is the signal: a
+   * Meta replay or a re-delivered batch carries the same wamid, and it must
+   * neither add a row nor count the contact twice.
+   */
+  async recordInbound(event: MessageEvent): Promise<void> {
+    const phone = event.from;
+    const profileName = event.profileName?.trim() || null;
+    let profileId: string | null = null;
+
+    try {
+      profileId = await this.profileIdForPhone(phone);
+      await this.prisma.whatsappMessage.create({
+        data: {
+          provider: event.provider,
+          provider_message_id: event.providerMessageId || null,
+          direction: MessageDirection.INBOUND,
+          to_phone: phone,
+          profile_id: profileId,
+          kind: event.content.type,
+          body_preview: truncate(describeInbound(event.content)),
+          variables: inboundDetails(event.content) ?? undefined,
+          status: WhatsappDeliveryStatus.RECEIVED,
+          wa_profile_name: profileName,
+          received_at: event.timestamp,
+        },
+        select: { id: true },
+      });
+    } catch (err) {
+      if (isUniqueViolation(err)) {
+        this.logger.debug(
+          `Inbound ${event.providerMessageId} already logged — replay ignored`,
+        );
+        return;
+      }
+      this.logger.error(
+        `Could not log inbound WhatsApp message from ${phone} ` +
+          `(${event.content.type}, ${event.providerMessageId}): ${reason(err)}`,
+        err instanceof Error ? err.stack : undefined,
+      );
+      // Fall through: the contact is worth keeping even when the row is not.
+    }
+
+    await this.touchContact(phone, profileName, profileId, event.timestamp);
+  }
+
+  /**
+   * Keep the per-phone directory current.
+   *
+   * The name is only written when the event carries one: Twilio omits it on
+   * some payloads, and a missing name must not erase one we already know.
+   */
+  private async touchContact(
+    phone: string,
+    profileName: string | null,
+    profileId: string | null,
+    seenAt: Date,
+  ): Promise<void> {
+    try {
+      await this.prisma.whatsappContact.upsert({
+        where: { phone },
+        create: {
+          phone,
+          wa_profile_name: profileName,
+          profile_id: profileId,
+          first_seen_at: seenAt,
+          last_seen_at: seenAt,
+          inbound_count: 1,
+        },
+        update: {
+          last_seen_at: seenAt,
+          inbound_count: { increment: 1 },
+          ...(profileId ? { profile_id: profileId } : {}),
+          ...(profileName ? { wa_profile_name: profileName } : {}),
+        },
+      });
+    } catch (err) {
+      this.logger.warn(
+        `Could not update WhatsApp contact ${phone}: ${reason(err)}`,
+      );
+    }
+  }
+
+  /**
    * Apply one delivery-status webhook to its row.
    *
    * Correlation prefers `internalMessageId` — our own row id, echoed back by
@@ -377,6 +474,97 @@ function timestampColumn(
     default:
       return null;
   }
+}
+
+/**
+ * A readable one-liner for an inbound message, for the log's content column.
+ *
+ * Exported for its own table test: every content type needs a line an admin
+ * can read, and a new type falling through to an empty cell is easy to miss.
+ */
+export function describeInbound(content: InboundContent): string {
+  switch (content.type) {
+    case 'text':
+      return content.text;
+    case 'interactive_reply':
+      return content.title ?? content.replyId;
+    case 'image':
+      return withCaption('[Image]', content.caption);
+    case 'video':
+      return withCaption('[Video]', content.caption);
+    case 'document':
+      return withCaption(
+        content.filename ? `[Document: ${content.filename}]` : '[Document]',
+        content.caption,
+      );
+    case 'audio':
+      return '[Voice note]';
+    case 'location': {
+      const place = [content.name, content.address].filter(Boolean).join(', ');
+      return place
+        ? `[Location] ${place}`
+        : `[Location] ${content.latitude}, ${content.longitude}`;
+    }
+    case 'reaction':
+      return content.emoji
+        ? `[Reaction ${content.emoji}]`
+        : '[Reaction removed]';
+    case 'flow_reply':
+      return '[Form submitted]';
+    case 'unsupported':
+      return `[${content.rawType}]`;
+  }
+}
+
+/** The structured parts of an inbound message, kept alongside the preview. */
+function inboundDetails(content: InboundContent): Prisma.InputJsonValue | null {
+  switch (content.type) {
+    case 'text':
+      return null;
+    case 'interactive_reply':
+      return { replyId: content.replyId, title: content.title ?? null };
+    case 'image':
+    case 'video':
+    case 'audio':
+    case 'document':
+      return {
+        mediaId: content.mediaId,
+        mimeType: content.mimeType ?? null,
+        ...(content.type === 'document'
+          ? { filename: content.filename ?? null }
+          : {}),
+      };
+    case 'location':
+      return {
+        latitude: content.latitude,
+        longitude: content.longitude,
+        name: content.name ?? null,
+        address: content.address ?? null,
+      };
+    case 'reaction':
+      return { emoji: content.emoji, targetMessageId: content.targetMessageId };
+    case 'flow_reply':
+      // Answers are free-form JSON parsed from the provider payload, so they
+      // are serializable by construction.
+      return {
+        flowToken: content.flowToken ?? null,
+        answers: content.answers as Prisma.InputJsonValue,
+      };
+    case 'unsupported':
+      return { rawType: content.rawType };
+  }
+}
+
+function withCaption(label: string, caption?: string): string {
+  return caption ? `${label} ${caption}` : label;
+}
+
+function isUniqueViolation(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    (err as { code?: unknown }).code === 'P2002'
+  );
 }
 
 function truncate(value: string, max = BODY_PREVIEW_MAX): string {
