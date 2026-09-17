@@ -4,10 +4,13 @@
  * These go out one of two ways depending on WhatsApp's 24h customer-service
  * window (see `WhatsAppService.isServiceWindowOpen`): free-form text while the
  * window is open, and the approved `rabotka_admin_message` template once it has
- * closed. Both render the SAME body — `formatAdminMessage` below is the single
- * source of that shape, and it must stay byte-identical to the approved Twilio
- * body (`TEMPLATES.admin_message` in the repo-root `script.js`). If the two
- * drift, the admin thread silently misrepresents what the profile received.
+ * closed.
+ *
+ * ONLY THE TEMPLATE PATH IS WRAPPED. `formatAdminMessage` below renders the
+ * approved body and must stay byte-identical to it (`TEMPLATES.admin_message`
+ * in the repo-root `script.js`); inside the 24h window the admin's text is sent
+ * exactly as typed. The two modes therefore no longer look alike, which is the
+ * point: the wrapper is a constraint of the template, not a house style.
  */
 
 /**
@@ -35,7 +38,7 @@ export {
 export const ADMIN_MESSAGE_VAR_MAX = 700;
 
 /**
- * The body a profile actually receives, in BOTH delivery modes.
+ * The body a profile receives when the 24h window has CLOSED, via the template.
  *
  * Keep byte-identical to the approved template body
  * (`rabotka_admin_message_v4`, authored in
@@ -68,6 +71,9 @@ export const ADMIN_MESSAGE_VAR_MAX = 700;
  * line stays because it is honest about the sender and it widens the
  * variable-density margin; the marketing rate and opt-out exposure were
  * accepted knowingly. See the registry entry.
+ *
+ * Both static lines are emitted on the template path only — a free-form reply
+ * inside the window carries none of them.
  */
 export function formatAdminMessage(params: { message: string }): string {
   return [
