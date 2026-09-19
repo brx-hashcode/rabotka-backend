@@ -4,6 +4,8 @@ import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { QdrantService } from '../qdrant/qdrant.service';
 import { SystemConfigService } from '../system-config/system-config.service';
 import { COLLECTIONS, INDEX_SCHEMA_VERSION } from '../qdrant/qdrant.config';
+import { qualityPrior } from '../recommendation-engine/scoring';
+import { ApplicationStatus, AssignmentStatus } from '@prisma/client';
 
 const COLLECTION_WORKERS = COLLECTIONS.WORKERS;
 const COLLECTION_JOBS = COLLECTIONS.JOBS;
@@ -13,7 +15,15 @@ const COLLECTION_EMPLOYERS = COLLECTIONS.EMPLOYERS;
 // the weights actually applied, so `score` is always on [0,1] and a threshold
 // means the same thing however these are tuned.
 const W_VECTOR = 0.6;
-const W_RELIABILITY = 0.2;
+/**
+ * Counterparty quality via the shared `qualityPrior`: reliability, star
+ * rating, completed missions, how their applications were answered, and paid
+ * interest received.
+ *
+ * Was reliability alone under the name W_RELIABILITY, which ranked a five-star
+ * veteran level with a signup who had simply never been penalised.
+ */
+const W_QUALITY = 0.2;
 const W_RECENCY = 0.1;
 const W_CATEGORY_EXACT = 0.1;
 
@@ -387,6 +397,92 @@ export class MatchingService {
   // ── Re-ranking helpers ──────────────────────────────────────────────────────
 
   /**
+   * What each worker has completed, and how employers answered them.
+   *
+   * The legacy ranker needs the same evidence as the v2 engine, because the
+   * rollout splits employers between them and a worker who ranks first on one
+   * and mid-list on the other is a bug nobody can reproduce.
+   *
+   * Failure returns an empty map rather than throwing: missing counts make the
+   * quality term weaker, an exception here would empty a notification fan-out.
+   */
+  private async workerQualityEvidence(
+    workerIds: string[],
+  ): Promise<
+    Map<
+      string,
+      { missions: number; accepted: number; rejected: number; unlocks: number }
+    >
+  > {
+    const out = new Map<
+      string,
+      { missions: number; accepted: number; rejected: number; unlocks: number }
+    >();
+    if (workerIds.length === 0) return out;
+
+    const blank = () => ({
+      missions: 0,
+      accepted: 0,
+      rejected: 0,
+      unlocks: 0,
+    });
+
+    try {
+      const [assignments, applications, unlocks] = await Promise.all([
+        this.prisma.assignment.groupBy({
+          by: ['worker_id'],
+          where: {
+            worker_id: { in: workerIds },
+            status: AssignmentStatus.COMPLETED,
+          },
+          _count: { _all: true },
+        }),
+        this.prisma.application.groupBy({
+          by: ['worker_id', 'status'],
+          where: {
+            worker_id: { in: workerIds },
+            status: {
+              in: [
+                ApplicationStatus.ACCEPTED,
+                ApplicationStatus.STARTED,
+                ApplicationStatus.END,
+                ApplicationStatus.REJECTED,
+              ],
+            },
+          },
+          _count: { _all: true },
+        }),
+        this.prisma.contactUnlockAttempt.groupBy({
+          by: ['worker_id'],
+          where: { worker_id: { in: workerIds }, employer_paid: true },
+          _count: { _all: true },
+        }),
+      ]);
+
+      for (const r of assignments) {
+        out.set(r.worker_id, { ...blank(), missions: r._count._all });
+      }
+      for (const r of applications) {
+        const e = out.get(r.worker_id) ?? blank();
+        if (r.status === ApplicationStatus.REJECTED) {
+          e.rejected += r._count._all;
+        } else {
+          e.accepted += r._count._all;
+        }
+        out.set(r.worker_id, e);
+      }
+      for (const r of unlocks) {
+        const e = out.get(r.worker_id) ?? blank();
+        e.unlocks = r._count._all;
+        out.set(r.worker_id, e);
+      }
+    } catch (err) {
+      this.logger.warn('workerQualityEvidence failed', err);
+    }
+    return out;
+  }
+
+  /**
    * `targetCategoryIds` is a SET, not one id, because the two callers ask
    * different questions with the same machinery: a job has exactly one
    * category, an employer recruits across several. Passing an empty array
@@ -399,14 +495,19 @@ export class MatchingService {
   ): Promise<ScoredHitWithCategory[]> {
     if (hits.length === 0) return [];
     const workerIds = hits.map((h) => h.id);
-    const profiles = await this.prisma.profile.findMany({
-      where: { id: { in: workerIds } },
-      select: {
-        id: true,
-        reliability_score: true,
-        categories: { select: { category_id: true } },
-      },
-    });
+    const [profiles, evidence] = await Promise.all([
+      this.prisma.profile.findMany({
+        where: { id: { in: workerIds } },
+        select: {
+          id: true,
+          reliability_score: true,
+          rating_avg: true,
+          rating_count: true,
+          categories: { select: { category_id: true } },
+        },
+      }),
+      this.workerQualityEvidence(workerIds),
+    ]);
     const profileMap = new Map(profiles.map((p) => [p.id, p]));
     const targets = new Set(targetCategoryIds);
 
@@ -422,12 +523,27 @@ export class MatchingService {
         profile?.categories.find((c) => targets.has(c.category_id))
           ?.category_id ?? null;
 
+      // Rating and completed missions ride with reliability in one prior, the
+      // same one the v2 engine uses: employers are split across the two
+      // rankers by rollout, and a well-rated worker who surfaces first on one
+      // engine and mid-list on the other is a bug nobody can reproduce.
+      const e = evidence.get(hit.id);
+      const quality = qualityPrior({
+        reliabilityScore: profile?.reliability_score,
+        ratingAvg: profile?.rating_avg,
+        ratingCount: profile?.rating_count,
+        completedMissions: e?.missions ?? 0,
+        acceptedOutcomes: e?.accepted ?? 0,
+        rejectedOutcomes: e?.rejected ?? 0,
+        contactUnlocks: e?.unlocks ?? 0,
+      });
+
       const score = weightedMean([
         { value: rankRelevance(rank, hits.length), weight: W_VECTOR },
-        {
-          value: (profile?.reliability_score ?? 100) / 100,
-          weight: W_RELIABILITY,
-        },
+        // Omitted entirely when there is no history, rather than passed as a
+        // number: `weightedMean` divides by the weights it is handed, so
+        // leaving it out redistributes onto the terms that know something.
+        ...(quality !== null ? [{ value: quality, weight: W_QUALITY }] : []),
         { value: matchedCategoryId !== null ? 1 : 0, weight: W_CATEGORY_EXACT },
       ]);
 

@@ -1,7 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import {
   AccountStatus,
+  ApplicationStatus,
+  AssignmentStatus,
   InteractionKind,
+  InteractionObject,
   JobOfferStatus,
   Prisma,
   ProfileType,
@@ -10,11 +13,54 @@ import {
 import { PrismaService } from '../../common/services/prisma/prisma.service';
 import { QdrantService } from '../qdrant/qdrant.service';
 import type { UserFeatures } from './user-feature.service';
-import { spreadSimilarity } from './scoring';
+import { qualityPrior, spreadSimilarity } from './scoring';
 import { hardBlockCutoff } from '../penalty/penalty.utils';
 
 /** Candidate pool multiplier — over-fetch so filtering still yields topN. */
 const POOL_FACTOR = 4;
+
+/**
+ * Application statuses that mean an employer said yes.
+ *
+ * STARTED and END are included because they are downstream of an acceptance —
+ * counting only ACCEPTED would make a worker look worse the further their
+ * engagements actually progressed.
+ */
+const ACCEPTED_APPLICATION = [
+  ApplicationStatus.ACCEPTED,
+  ApplicationStatus.STARTED,
+  ApplicationStatus.END,
+] as const;
+
+/** Offers that reached someone. */
+const DELIVERED_OFFER = [
+  JobOfferStatus.FILLED,
+  JobOfferStatus.COMPLETED,
+] as const;
+
+/**
+ * Offers that did not, and that the employer is answerable for.
+ *
+ * ACTIVE and PARTIALLY_FILLED are excluded: an offer still open has not
+ * failed yet, and counting it would penalise an employer for posting today.
+ */
+const WASTED_OFFER = [
+  JobOfferStatus.CANCELLED,
+  JobOfferStatus.EXPIRED,
+] as const;
+
+/** Per-profile counts behind the quality prior. */
+type QualityEvidence = {
+  missions: number;
+  accepted: number;
+  rejected: number;
+};
+
+const blankEvidence = (): QualityEvidence => ({
+  missions: 0,
+  accepted: 0,
+  rejected: 0,
+});
 /** Ceiling on how many category/employer affinities feed a SQL query. */
 const MAX_AFFINITY_KEYS = 12;
 /** Minimum co-occurrence count before a CF edge is trusted at all. */
@@ -431,29 +477,20 @@ export class CandidateSourceService {
    * Answers "is this counterparty worth one of the user's limited slots" — an
    * item-quality signal, not personalization. Computed from data that already
    * exists: an employer who fills offers and rarely cancels is a better bet.
+   *
+   * "Missions" for an employer means offers actually delivered, which is the
+   * closest thing on their side to a worker's completed assignment: posting
+   * twenty offers proves nothing, filling them does.
    */
-  async employerQuality(employerIds: string[]): Promise<Map<string, number>> {
-    const out = new Map<string, number>();
-    if (employerIds.length === 0) return out;
-
-    try {
-      const profiles = await this.prisma.profile.findMany({
-        where: { id: { in: employerIds } },
-        select: { id: true, reliability_score: true, rating_avg: true },
-      });
-      for (const p of profiles) {
-        const reliability = (p.reliability_score ?? 100) / 100;
-        // rating_avg is 1–5; absent means "no evidence", i.e. neutral.
-        const rating = p.rating_avg != null ? (p.rating_avg - 1) / 4 : 0.5;
-        out.set(
-          p.id,
-          Math.min(1, Math.max(0, 0.6 * reliability + 0.4 * rating)),
-        );
-      }
-    } catch (err) {
-      this.logger.warn('employerQuality failed', err);
-    }
-    return out;
+  async employerQuality(
+    employerIds: string[],
+  ): Promise<Map<string, number | null>> {
+    return this.qualityFor(
+      employerIds,
+      (ids) => this.employerEvidence(ids),
+      InteractionObject.EMPLOYER_PROFILE,
+      'employer',
+    );
   }
 
   /** Offers the worker has recently been shown, for seen-suppression. */
@@ -551,12 +588,230 @@ export class CandidateSourceService {
   }
 
   /**
-   * Quality prior for a batch of workers, on [0,1]. Same formula as
-   * `employerQuality` — the notion of "is this counterparty worth a slot" is
-   * symmetric, and having one definition stops the two sides drifting apart.
+   * Quality prior for a batch of workers, on [0,1], or null with no history.
+   *
+   * Same formula as `employerQuality` — "is this counterparty worth a slot" is
+   * symmetric, and one definition stops the two sides drifting apart. Only the
+   * mission count differs, because the two sides complete different things:
+   * a worker finishes assignments, an employer delivers offers.
    */
-  async workerQuality(workerIds: string[]): Promise<Map<string, number>> {
-    return this.employerQuality(workerIds);
+  async workerQuality(
+    workerIds: string[],
+  ): Promise<Map<string, number | null>> {
+    return this.qualityFor(
+      workerIds,
+      (ids) => this.workerEvidence(ids),
+      InteractionObject.WORKER_PROFILE,
+      'worker',
+    );
+  }
+
+  /**
+   * Shared body of `workerQuality` / `employerQuality`.
+   *
+   * A null entry means no evidence, and the caller must pass it through as null
+   * rather than substituting a number: `computeRelevance` drops a null term and
+   * redistributes its weight, while any constant would rank nobody while
+   * spending the full weight of the term.
+   */
+  private async qualityFor(
+    profileIds: string[],
+    evidence: (ids: string[]) => Promise<Map<string, QualityEvidence>>,
+    profileObject: InteractionObject,
+    side: 'worker' | 'employer',
+  ): Promise<Map<string, number | null>> {
+    const out = new Map<string, number | null>();
+    if (profileIds.length === 0) return out;
+
+    try {
+      const [profiles, outcomes, demand] = await Promise.all([
+        this.prisma.profile.findMany({
+          where: { id: { in: profileIds } },
+          select: {
+            id: true,
+            reliability_score: true,
+            rating_avg: true,
+            rating_count: true,
+          },
+        }),
+        evidence(profileIds),
+        this.demandCounts(profileIds, profileObject, side),
+      ]);
+      for (const p of profiles) {
+        const e = outcomes.get(p.id);
+        const d = demand.get(p.id);
+        out.set(
+          p.id,
+          qualityPrior({
+            reliabilityScore: p.reliability_score,
+            ratingAvg: p.rating_avg,
+            ratingCount: p.rating_count,
+            completedMissions: e?.missions ?? 0,
+            acceptedOutcomes: e?.accepted ?? 0,
+            rejectedOutcomes: e?.rejected ?? 0,
+            profileViews: d?.views ?? 0,
+            contactUnlocks: d?.unlocks ?? 0,
+          }),
+        );
+      }
+    } catch (err) {
+      // No evidence beats a wrong number: an outage must leave the other terms
+      // to do the ranking, not push every candidate to an invented middle.
+      this.logger.warn('quality prior failed', err);
+    }
+    return out;
+  }
+
+  /**
+   * What a worker has completed, and how their applications were answered.
+   *
+   * Missions come from assignments rather than applications because an
+   * assignment is the record of work actually done; the application statuses
+   * answer a different question — whether employers pick this person at all.
+   */
+  private async workerEvidence(
+    workerIds: string[],
+  ): Promise<Map<string, QualityEvidence>> {
+    const out = new Map<string, QualityEvidence>();
+    if (workerIds.length === 0) return out;
+
+    const [assignments, applications] = await Promise.all([
+      this.prisma.assignment.groupBy({
+        by: ['worker_id'],
+        where: {
+          worker_id: { in: workerIds },
+          status: AssignmentStatus.COMPLETED,
+        },
+        _count: { _all: true },
+      }),
+      this.prisma.application.groupBy({
+        by: ['worker_id', 'status'],
+        where: {
+          worker_id: { in: workerIds },
+          // PENDING and VIEWED are left out: an unanswered application says
+          // something about the employer's inbox, not about the worker.
+          status: { in: [...ACCEPTED_APPLICATION, ApplicationStatus.REJECTED] },
+        },
+        _count: { _all: true },
+      }),
+    ]);
+
+    for (const r of assignments) {
+      out.set(r.worker_id, { ...blankEvidence(), missions: r._count._all });
+    }
+    for (const r of applications) {
+      const e = out.get(r.worker_id) ?? blankEvidence();
+      if (r.status === ApplicationStatus.REJECTED) {
+        e.rejected += r._count._all;
+      } else {
+        e.accepted += r._count._all;
+      }
+      out.set(r.worker_id, e);
+    }
+    return out;
+  }
+
+  /**
+   * What an employer has delivered, and how their offers ended.
+   *
+   * One grouped query answers both: offers filled or completed are the
+   * employer's equivalent of a finished mission AND their positive outcomes,
+   * while cancelled and expired offers are the wasted ones. Posting proves
+   * nothing; delivering does.
+   */
+  private async employerEvidence(
+    employerIds: string[],
+  ): Promise<Map<string, QualityEvidence>> {
+    const out = new Map<string, QualityEvidence>();
+    if (employerIds.length === 0) return out;
+
+    const rows = await this.prisma.jobOffer.groupBy({
+      by: ['employer_id', 'status'],
+      where: {
+        employer_id: { in: employerIds },
+        status: { in: [...DELIVERED_OFFER, ...WASTED_OFFER] },
+      },
+      _count: { _all: true },
+    });
+
+    for (const r of rows) {
+      const e = out.get(r.employer_id) ?? blankEvidence();
+      if ((DELIVERED_OFFER as readonly JobOfferStatus[]).includes(r.status)) {
+        e.missions += r._count._all;
+        e.accepted += r._count._all;
+      } else {
+        e.rejected += r._count._all;
+      }
+      out.set(r.employer_id, e);
+    }
+    return out;
+  }
+
+  /**
+   * Interest received: profile views, and contact unlocks the other side paid
+   * for.
+   *
+   * Two sources because they are not the same claim. A view is cheap and
+   * partly an echo of past ranking — it is counted, but `qualityPrior` caps
+   * what it can be worth. An unlock cost the other party money.
+   */
+  private async paidUnlockCounts(
+    profileIds: string[],
+    side: 'worker' | 'employer',
+  ): Promise<Map<string, number>> {
+    const out = new Map<string, number>();
+    // Two branches rather than one dynamic `by` key: a computed key erases the
+    // row type and needs a cast to put it back.
+    if (side === 'worker') {
+      const rows = await this.prisma.contactUnlockAttempt.groupBy({
+        by: ['worker_id'],
+        where: { worker_id: { in: profileIds }, employer_paid: true },
+        _count: { _all: true },
+      });
+      for (const r of rows) out.set(r.worker_id, r._count._all);
+      return out;
+    }
+    const rows = await this.prisma.contactUnlockAttempt.groupBy({
+      by: ['employer_id'],
+      where: { employer_id: { in: profileIds }, worker_paid: true },
+      _count: { _all: true },
+    });
+    for (const r of rows) out.set(r.employer_id, r._count._all);
+    return out;
+  }
+
+  private async demandCounts(
+    profileIds: string[],
+    profileObject: InteractionObject,
+    side: 'worker' | 'employer',
+  ): Promise<Map<string, { views: number; unlocks: number }>> {
+    const out = new Map<string, { views: number; unlocks: number }>();
+    if (profileIds.length === 0) return out;
+
+    const [views, unlocks] = await Promise.all([
+      this.prisma.interactionEvent.groupBy({
+        by: ['object_id'],
+        where: {
+          object_type: profileObject,
+          object_id: { in: profileIds },
+          kind: {
+            in: [InteractionKind.PROFILE_VIEW, InteractionKind.PORTFOLIO_VIEW],
+          },
+        },
+        _count: { _all: true },
+      }),
+      this.paidUnlockCounts(profileIds, side),
+    ]);
+
+    for (const r of views) {
+      if (!r.object_id) continue;
+      out.set(r.object_id, { views: r._count._all, unlocks: 0 });
+    }
+    for (const [id, count] of unlocks) {
+      const prev = out.get(id) ?? { views: 0, unlocks: 0 };
+      out.set(id, { ...prev, unlocks: count });
+    }
+    return out;
   }
 
   /**
