@@ -17,11 +17,13 @@ ce que vous avez déjà fait.
 couturière, un pâtissier ou un mécanicien, deux photos convainquent plus qu'un
 paragraphe.
 
-## Ajouter une réalisation
+## Ajouter une publication
 
-Une réalisation à la fois : au moins une photo, un titre, et une courte
-description de ce que vous avez fait. Vous pouvez ensuite la modifier ou en
-créer d'autres.
+Écrivez ce que vous voulez dire, ajoutez des photos, ou les deux — il faut
+seulement l'un des deux. Quelques mots sans photo, par exemple pour dire que
+vous êtes disponible cette semaine, c'est une publication valable. Des photos
+d'un chantier terminé, sans un mot, aussi. Vous pouvez ensuite les modifier ou
+en créer d'autres.
 
 Je ne peux pas l'ajouter à votre place — c'est vous qui choisissez ce que vous
 montrez. Je peux vous emmener directement dans l'application.
@@ -30,7 +32,8 @@ montrez. Je peux vous emmener directement dans l'application.
 
 - Des photos nettes, prises de jour, du travail terminé.
 - Un avant/après quand c'est parlant : une réparation, une coupe, un mur repeint.
-- Un titre concret : « Réfection d'un mur de clôture » plutôt que « travaux ».
+- Dire concrètement ce que c'est : « Réfection d'un mur de clôture » plutôt
+  que « travaux ».
 - Des réalisations récentes, et vraiment les vôtres.
 
 ## Ce qui dessert

@@ -1,5 +1,11 @@
 import { Logger } from '@nestjs/common';
-import { InteractionKind, JobOfferStatus } from '@prisma/client';
+import {
+  ApplicationStatus,
+  AssignmentStatus,
+  InteractionKind,
+  InteractionObject,
+  JobOfferStatus,
+} from '@prisma/client';
 import { CandidateSourceService } from '../candidate-sources';
 import { DEFAULT_HARD_BLOCK_DAYS } from '../../penalty/penalty.utils';
 import { EMPTY_FEATURES, type UserFeatures } from '../user-feature.service';
@@ -27,13 +33,21 @@ const features = (over: Partial<UserFeatures> = {}): UserFeatures => ({
 
 function makePrisma() {
   return {
-    jobOffer: { findMany: jest.fn().mockResolvedValue([]) },
+    jobOffer: {
+      findMany: jest.fn().mockResolvedValue([]),
+      groupBy: jest.fn().mockResolvedValue([]),
+    },
     application: {
       findMany: jest.fn().mockResolvedValue([]),
       groupBy: jest.fn().mockResolvedValue([]),
     },
+    assignment: { groupBy: jest.fn().mockResolvedValue([]) },
+    contactUnlockAttempt: { groupBy: jest.fn().mockResolvedValue([]) },
     profile: { findMany: jest.fn().mockResolvedValue([]) },
-    interactionEvent: { findMany: jest.fn().mockResolvedValue([]) },
+    interactionEvent: {
+      findMany: jest.fn().mockResolvedValue([]),
+      groupBy: jest.fn().mockResolvedValue([]),
+    },
     penalty: { findMany: jest.fn().mockResolvedValue([]) },
   };
 }
@@ -310,42 +324,176 @@ describe('CandidateSourceService', () => {
       expect(prisma.profile.findMany).not.toHaveBeenCalled();
     });
 
-    it('scores a perfect employer at 1 and a worst-case one at 0', async () => {
+    it('scores a proven employer near 1 and a worst-case one near 0', async () => {
       prisma.profile.findMany.mockResolvedValue([
-        { id: 'best', reliability_score: 100, rating_avg: 5 },
-        { id: 'worst', reliability_score: 0, rating_avg: 1 },
+        { id: 'best', reliability_score: 100, rating_avg: 5, rating_count: 50 },
+        { id: 'worst', reliability_score: 0, rating_avg: 1, rating_count: 50 },
+      ]);
+      prisma.jobOffer.groupBy.mockResolvedValue([
+        {
+          employer_id: 'best',
+          status: JobOfferStatus.FILLED,
+          _count: { _all: 100 },
+        },
+        {
+          employer_id: 'worst',
+          status: JobOfferStatus.CANCELLED,
+          _count: { _all: 20 },
+        },
       ]);
       const q = await service.employerQuality(['best', 'worst']);
-      expect(q.get('best')).toBeCloseTo(1, 6);
-      expect(q.get('worst')).toBeCloseTo(0, 6);
+      expect(q.get('best')).toBeGreaterThan(0.95);
+      expect(q.get('worst')).toBeLessThan(0.05);
     });
 
-    it('treats a missing rating as neutral rather than as zero', async () => {
+    it('returns null — not a number — for an employer with no history', async () => {
       prisma.profile.findMany.mockResolvedValue([
-        { id: 'e1', reliability_score: 100, rating_avg: null },
+        { id: 'e1', reliability_score: 100, rating_avg: null, rating_count: 0 },
       ]);
-      // 0.6 * 1 + 0.4 * 0.5
+      // The whole point: reliability defaults to 100 for everyone, so scoring
+      // this profile on reliability alone would hand every newcomer the same
+      // number — full weight spent, nothing ordered. Null drops the term.
+      expect((await service.employerQuality(['e1'])).get('e1')).toBeNull();
+    });
+
+    it('scores an employer who has delivered offers but is unrated', async () => {
+      prisma.profile.findMany.mockResolvedValue([
+        { id: 'e1', reliability_score: 100, rating_avg: null, rating_count: 0 },
+      ]);
+      prisma.jobOffer.groupBy.mockResolvedValue([
+        {
+          employer_id: 'e1',
+          status: JobOfferStatus.COMPLETED,
+          _count: { _all: 5 },
+        },
+      ]);
+      // Reliability, missions and outcomes carry it; the rating term is simply
+      // absent rather than filled in with the prior.
       expect((await service.employerQuality(['e1'])).get('e1')).toBeCloseTo(
-        0.8,
-        6,
+        0.8525,
+        3,
       );
     });
 
     it('assumes a full reliability score when none is recorded', async () => {
       prisma.profile.findMany.mockResolvedValue([
-        { id: 'e1', reliability_score: null, rating_avg: 3 },
+        { id: 'e1', reliability_score: null, rating_avg: 4, rating_count: 3 },
       ]);
-      // 0.6 * 1 + 0.4 * 0.5
+      prisma.jobOffer.groupBy.mockResolvedValue([
+        {
+          employer_id: 'e1',
+          status: JobOfferStatus.FILLED,
+          _count: { _all: 4 },
+        },
+      ]);
       expect((await service.employerQuality(['e1'])).get('e1')).toBeCloseTo(
-        0.8,
-        6,
+        0.7872,
+        3,
       );
+    });
+
+    it('counts offers delivered and wasted, never ones still open', async () => {
+      prisma.profile.findMany.mockResolvedValue([]);
+      await service.employerQuality(['e1']);
+      const where = prisma.jobOffer.groupBy.mock.calls[0][0].where;
+      // An offer posted this morning has not failed yet.
+      expect(where.status.in).not.toContain(JobOfferStatus.ACTIVE);
+      expect(where.status.in).not.toContain(JobOfferStatus.PARTIALLY_FILLED);
+      expect(where.status.in).toEqual(
+        expect.arrayContaining([
+          JobOfferStatus.FILLED,
+          JobOfferStatus.COMPLETED,
+          JobOfferStatus.CANCELLED,
+          JobOfferStatus.EXPIRED,
+        ]),
+      );
+    });
+
+    it('counts cancelled and expired offers against the employer', async () => {
+      prisma.profile.findMany.mockResolvedValue([
+        {
+          id: 'reliable',
+          reliability_score: 100,
+          rating_avg: 4,
+          rating_count: 10,
+        },
+        {
+          id: 'flaky',
+          reliability_score: 100,
+          rating_avg: 4,
+          rating_count: 10,
+        },
+      ]);
+      prisma.jobOffer.groupBy.mockResolvedValue([
+        {
+          employer_id: 'reliable',
+          status: JobOfferStatus.FILLED,
+          _count: { _all: 10 },
+        },
+        {
+          employer_id: 'flaky',
+          status: JobOfferStatus.FILLED,
+          _count: { _all: 10 },
+        },
+        {
+          employer_id: 'flaky',
+          status: JobOfferStatus.CANCELLED,
+          _count: { _all: 15 },
+        },
+      ]);
+      const q = await service.employerQuality(['reliable', 'flaky']);
+      expect(q.get('reliable')).toBeGreaterThan(q.get('flaky') as number);
+    });
+
+    it('ranks one lucky five-star below a steady record', async () => {
+      prisma.profile.findMany.mockResolvedValue([
+        { id: 'lucky', reliability_score: 100, rating_avg: 5, rating_count: 1 },
+        {
+          id: 'steady',
+          reliability_score: 100,
+          rating_avg: 4.6,
+          rating_count: 20,
+        },
+      ]);
+      prisma.jobOffer.groupBy.mockResolvedValue([
+        {
+          employer_id: 'lucky',
+          status: JobOfferStatus.FILLED,
+          _count: { _all: 1 },
+        },
+        {
+          employer_id: 'steady',
+          status: JobOfferStatus.FILLED,
+          _count: { _all: 20 },
+        },
+      ]);
+      const q = await service.employerQuality(['lucky', 'steady']);
+      // Otherwise the fastest route to the top of every list is one rating
+      // from a friend.
+      expect(q.get('steady')).toBeGreaterThan(q.get('lucky') as number);
+    });
+
+    it('counts interest the other side paid for, not its own spending', async () => {
+      prisma.profile.findMany.mockResolvedValue([]);
+      await service.employerQuality(['e1']);
+      const where = prisma.contactUnlockAttempt.groupBy.mock.calls[0][0].where;
+      expect(where).toEqual({
+        employer_id: { in: ['e1'] },
+        worker_paid: true,
+      });
     });
 
     it('keeps every score inside [0,1] for out-of-range stored values', async () => {
       prisma.profile.findMany.mockResolvedValue([
-        { id: 'over', reliability_score: 250, rating_avg: 5 },
-        { id: 'under', reliability_score: -40, rating_avg: 1 },
+        { id: 'over', reliability_score: 250, rating_avg: 5, rating_count: 9 },
+        { id: 'under', reliability_score: -40, rating_avg: 1, rating_count: 9 },
+      ]);
+      prisma.jobOffer.groupBy.mockResolvedValue([
+        {
+          employer_id: 'over',
+          status: JobOfferStatus.FILLED,
+          _count: { _all: 9 },
+        },
       ]);
       const q = await service.employerQuality(['over', 'under']);
       for (const v of q.values()) {
@@ -357,6 +505,146 @@ describe('CandidateSourceService', () => {
     it('degrades to an empty map rather than failing the whole request', async () => {
       prisma.profile.findMany.mockRejectedValue(new Error('db down'));
       expect((await service.employerQuality(['e1'])).size).toBe(0);
+    });
+  });
+
+  describe('workerQuality', () => {
+    it('returns an empty map for an empty batch without querying', async () => {
+      expect((await service.workerQuality([])).size).toBe(0);
+      expect(prisma.profile.findMany).not.toHaveBeenCalled();
+      expect(prisma.assignment.groupBy).not.toHaveBeenCalled();
+    });
+
+    it('counts completed assignments, not delivered offers', async () => {
+      prisma.profile.findMany.mockResolvedValue([]);
+      await service.workerQuality(['w1']);
+      // The two sides complete different things, so this no longer delegates
+      // to employerQuality: a worker with no offers is not a worker with no
+      // history.
+      expect(prisma.assignment.groupBy).toHaveBeenCalled();
+      expect(prisma.jobOffer.groupBy).not.toHaveBeenCalled();
+      const where = prisma.assignment.groupBy.mock.calls[0][0].where;
+      expect(where.status).toBe(AssignmentStatus.COMPLETED);
+      expect(where.worker_id).toEqual({ in: ['w1'] });
+    });
+
+    it('scores an unrated worker on their completed missions', async () => {
+      prisma.profile.findMany.mockResolvedValue([
+        { id: 'w1', reliability_score: 100, rating_avg: null, rating_count: 0 },
+        { id: 'w2', reliability_score: 100, rating_avg: null, rating_count: 0 },
+      ]);
+      prisma.assignment.groupBy.mockResolvedValue([
+        { worker_id: 'w1', _count: { _all: 12 } },
+      ]);
+      const q = await service.workerQuality(['w1', 'w2']);
+      // w2 has nothing at all, so they are ranked on the other terms rather
+      // than buried under a worker whose only edge is a longer record.
+      expect(q.get('w1')).toBeGreaterThan(0.9);
+      expect(q.get('w2')).toBeNull();
+    });
+
+    it('ranks a worker employers accept above one they keep rejecting', async () => {
+      prisma.profile.findMany.mockResolvedValue([
+        {
+          id: 'picked',
+          reliability_score: 100,
+          rating_avg: null,
+          rating_count: 0,
+        },
+        {
+          id: 'passed',
+          reliability_score: 100,
+          rating_avg: null,
+          rating_count: 0,
+        },
+      ]);
+      prisma.application.groupBy.mockResolvedValue([
+        {
+          worker_id: 'picked',
+          status: ApplicationStatus.ACCEPTED,
+          _count: { _all: 8 },
+        },
+        {
+          worker_id: 'passed',
+          status: ApplicationStatus.REJECTED,
+          _count: { _all: 8 },
+        },
+      ]);
+      const q = await service.workerQuality(['picked', 'passed']);
+      // Neither is rated: the market's own verdict is the only evidence here,
+      // and it is the one signal a worker cannot award themselves.
+      expect(q.get('picked')).toBeGreaterThan(q.get('passed') as number);
+    });
+
+    it('ignores applications nobody has answered', async () => {
+      prisma.profile.findMany.mockResolvedValue([]);
+      await service.workerQuality(['w1']);
+      const where = prisma.application.groupBy.mock.calls[0][0].where;
+      // A pending application says something about the employer's inbox, not
+      // about the worker.
+      expect(where.status.in).not.toContain(ApplicationStatus.PENDING);
+      expect(where.status.in).not.toContain(ApplicationStatus.VIEWED);
+      expect(where.status.in).toEqual(
+        expect.arrayContaining([
+          ApplicationStatus.ACCEPTED,
+          ApplicationStatus.STARTED,
+          ApplicationStatus.END,
+          ApplicationStatus.REJECTED,
+        ]),
+      );
+    });
+
+    it('counts profile views and paid unlocks as interest received', async () => {
+      prisma.profile.findMany.mockResolvedValue([
+        {
+          id: 'sought',
+          reliability_score: 100,
+          rating_avg: null,
+          rating_count: 0,
+        },
+        {
+          id: 'ignored',
+          reliability_score: 100,
+          rating_avg: null,
+          rating_count: 0,
+        },
+      ]);
+      prisma.interactionEvent.groupBy.mockResolvedValue([
+        { object_id: 'sought', _count: { _all: 40 } },
+      ]);
+      prisma.contactUnlockAttempt.groupBy.mockResolvedValue([
+        { worker_id: 'sought', _count: { _all: 6 } },
+      ]);
+      const q = await service.workerQuality(['sought', 'ignored']);
+      expect(q.get('sought')).not.toBeNull();
+      expect(q.get('ignored')).toBeNull();
+    });
+
+    it('reads views of the worker profile, not events they produced', async () => {
+      prisma.profile.findMany.mockResolvedValue([]);
+      await service.workerQuality(['w1']);
+      const where = prisma.interactionEvent.groupBy.mock.calls[0][0].where;
+      expect(where.object_type).toBe(InteractionObject.WORKER_PROFILE);
+      expect(where.object_id).toEqual({ in: ['w1'] });
+      expect(where.kind.in).toEqual(
+        expect.arrayContaining([
+          InteractionKind.PROFILE_VIEW,
+          InteractionKind.PORTFOLIO_VIEW,
+        ]),
+      );
+    });
+
+    it('counts unlocks the employer paid for, not the worker', async () => {
+      prisma.profile.findMany.mockResolvedValue([]);
+      await service.workerQuality(['w1']);
+      expect(
+        prisma.contactUnlockAttempt.groupBy.mock.calls[0][0].where,
+      ).toEqual({ worker_id: { in: ['w1'] }, employer_paid: true });
+    });
+
+    it('degrades to an empty map rather than failing the whole request', async () => {
+      prisma.assignment.groupBy.mockRejectedValue(new Error('db down'));
+      expect((await service.workerQuality(['w1'])).size).toBe(0);
     });
   });
 
@@ -535,7 +823,9 @@ describe('CandidateSourceService', () => {
 
   describe('hardBlockedWorkerIds', () => {
     it('does not query for an empty batch', async () => {
-      expect((await service.hardBlockedWorkerIds([], DEFAULT_HARD_BLOCK_DAYS)).size).toBe(0);
+      expect(
+        (await service.hardBlockedWorkerIds([], DEFAULT_HARD_BLOCK_DAYS)).size,
+      ).toBe(0);
       expect(prisma.penalty.findMany).not.toHaveBeenCalled();
     });
 
@@ -551,15 +841,21 @@ describe('CandidateSourceService', () => {
 
     it('returns the blocked ids', async () => {
       prisma.penalty.findMany.mockResolvedValue([{ profile_id: 'w1' }]);
-      expect([...(await service.hardBlockedWorkerIds(['w1', 'w2'], DEFAULT_HARD_BLOCK_DAYS))]).toEqual([
-        'w1',
-      ]);
+      expect([
+        ...(await service.hardBlockedWorkerIds(
+          ['w1', 'w2'],
+          DEFAULT_HARD_BLOCK_DAYS,
+        )),
+      ]).toEqual(['w1']);
     });
 
     it('fails open, so a penalty outage cannot mute the whole fan-out', async () => {
       // Notifying someone who should have been skipped beats notifying no one.
       prisma.penalty.findMany.mockRejectedValue(new Error('down'));
-      expect((await service.hardBlockedWorkerIds(['w1'], DEFAULT_HARD_BLOCK_DAYS)).size).toBe(0);
+      expect(
+        (await service.hardBlockedWorkerIds(['w1'], DEFAULT_HARD_BLOCK_DAYS))
+          .size,
+      ).toBe(0);
     });
   });
 });

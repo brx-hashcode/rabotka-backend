@@ -19,6 +19,8 @@ import {
   applyThreshold,
   normalizeAffinity,
   clamp01,
+  qualityPrior,
+  QUALITY_MIX,
 } from '../scoring';
 
 const ZERO_TERMS: ScoreTerms = {
@@ -145,8 +147,8 @@ describe('scoring', () => {
       const withNull = computeRelevance(coldCase(null), COLD_WEIGHTS);
 
       // Same evidence, different divisor: 0.95 vs 0.80.
-      expect(withZero).toBeCloseTo(0.413, 3);
-      expect(withNull).toBeCloseTo(0.491, 3);
+      expect(withZero).toBeCloseTo(0.426, 3);
+      expect(withNull).toBeCloseTo(0.506, 3);
       expect(withNull).toBeGreaterThan(withZero);
     });
 
@@ -158,6 +160,136 @@ describe('scoring', () => {
 
       expect(a).toBe(b);
       expect(a).toBeLessThan(computeRelevance(coldCase(null), COLD_WEIGHTS));
+    });
+  });
+
+  describe('qualityPrior', () => {
+    const NOTHING = {
+      reliabilityScore: 100,
+      ratingAvg: null,
+      ratingCount: 0,
+      completedMissions: 0,
+    };
+
+    it('returns null for a profile with no history of any kind', () => {
+      // Reliability defaults to 100 for everyone, so scoring on it alone hands
+      // every newcomer an identical number: full weight spent, nothing
+      // ordered. This is the anti-pattern the whole function exists to remove.
+      expect(qualityPrior(NOTHING)).toBeNull();
+    });
+
+    it('is not null once any single signal exists', () => {
+      expect(qualityPrior({ ...NOTHING, completedMissions: 1 })).not.toBeNull();
+      expect(
+        qualityPrior({ ...NOTHING, ratingAvg: 4, ratingCount: 1 }),
+      ).not.toBeNull();
+      expect(qualityPrior({ ...NOTHING, rejectedOutcomes: 1 })).not.toBeNull();
+      expect(qualityPrior({ ...NOTHING, contactUnlocks: 1 })).not.toBeNull();
+      expect(qualityPrior({ ...NOTHING, profileViews: 1 })).not.toBeNull();
+    });
+
+    it('ranks one lucky five-star below a steady long record', () => {
+      const lucky = qualityPrior({
+        ...NOTHING,
+        ratingAvg: 5,
+        ratingCount: 1,
+        completedMissions: 1,
+      });
+      const steady = qualityPrior({
+        ...NOTHING,
+        ratingAvg: 4.6,
+        ratingCount: 20,
+        completedMissions: 20,
+      });
+      // Otherwise the cheapest route to the top of every list is one rating
+      // from a friend.
+      expect(steady).toBeGreaterThan(lucky as number);
+    });
+
+    it('shrinks a rating toward the prior when little backs it', () => {
+      const thin = qualityPrior({ ...NOTHING, ratingAvg: 5, ratingCount: 1 });
+      const thick = qualityPrior({ ...NOTHING, ratingAvg: 5, ratingCount: 50 });
+      expect(thick).toBeGreaterThan(thin as number);
+    });
+
+    it('saturates on missions so a veteran is never unreachable', () => {
+      const few = qualityPrior({ ...NOTHING, completedMissions: 5 }) as number;
+      const many = qualityPrior({
+        ...NOTHING,
+        completedMissions: 40,
+      }) as number;
+      const absurd = qualityPrior({
+        ...NOTHING,
+        completedMissions: 4000,
+      }) as number;
+      expect(many).toBeGreaterThan(few);
+      // The gap between 40 and 4000 must be negligible next to 5 → 40.
+      expect(absurd - many).toBeLessThan(many - few);
+    });
+
+    it('rewards accepted applications over rejected ones', () => {
+      const picked = qualityPrior({ ...NOTHING, acceptedOutcomes: 8 });
+      const passed = qualityPrior({ ...NOTHING, rejectedOutcomes: 8 });
+      expect(picked).toBeGreaterThan(passed as number);
+    });
+
+    it('shrinks the acceptance rate by how many decisions back it', () => {
+      const one = qualityPrior({ ...NOTHING, acceptedOutcomes: 1 }) as number;
+      const many = qualityPrior({ ...NOTHING, acceptedOutcomes: 30 }) as number;
+      // One acceptance is not a 100 % acceptance rate.
+      expect(many).toBeGreaterThan(one);
+    });
+
+    it('weights a paid unlock above a page view', () => {
+      const viewed = qualityPrior({ ...NOTHING, profileViews: 1 }) as number;
+      const unlocked = qualityPrior({
+        ...NOTHING,
+        contactUnlocks: 1,
+      }) as number;
+      // A view is cheap and partly an echo of past ranking; an unlock cost the
+      // other party money.
+      expect(unlocked).toBeGreaterThan(viewed);
+    });
+
+    it('caps what interest alone can be worth', () => {
+      const adored = qualityPrior({
+        ...NOTHING,
+        profileViews: 10_000,
+        contactUnlocks: 500,
+      }) as number;
+      const delivered = qualityPrior({
+        ...NOTHING,
+        ratingAvg: 4.8,
+        ratingCount: 20,
+        completedMissions: 20,
+        acceptedOutcomes: 20,
+      }) as number;
+      // Popularity must not outrank a record of finished, well-rated work, or
+      // the ranking feeds on its own output.
+      expect(delivered).toBeGreaterThan(adored);
+    });
+
+    it('keeps the result inside [0,1] for out-of-range stored values', () => {
+      const over = qualityPrior({
+        reliabilityScore: 5000,
+        ratingAvg: 99,
+        ratingCount: 10,
+        completedMissions: 10,
+      }) as number;
+      const under = qualityPrior({
+        reliabilityScore: -900,
+        ratingAvg: -5,
+        ratingCount: 10,
+        completedMissions: 0,
+        rejectedOutcomes: 10,
+      }) as number;
+      expect(over).toBeLessThanOrEqual(1);
+      expect(under).toBeGreaterThanOrEqual(0);
+    });
+
+    it('mixes the signals in weights that sum to 1', () => {
+      const total = Object.values(QUALITY_MIX).reduce((a, b) => a + b, 0);
+      expect(total).toBeCloseTo(1, 10);
     });
   });
 
@@ -217,7 +349,7 @@ describe('scoring', () => {
     it("redistributes a null term's weight proportionally", () => {
       // Dropping `sim` must be identical to never having declared its weight.
       const { sim: _sim, ...rest } = WARM_WEIGHTS;
-      const withoutSim = { ...rest, sim: 0 } as typeof WARM_WEIGHTS;
+      const withoutSim = { ...rest, sim: 0 };
       const terms = { ...ZERO_TERMS, catAff: 0.7, prox: 0.3, quality: 1 };
 
       expect(
