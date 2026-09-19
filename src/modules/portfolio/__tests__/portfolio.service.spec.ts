@@ -23,6 +23,7 @@ describe('PortfolioService', () => {
       create: AnyMock;
       findMany: AnyMock;
       findFirst: AnyMock;
+      findUnique: AnyMock;
       update: AnyMock;
       delete: AnyMock;
       findUniqueOrThrow: AnyMock;
@@ -50,6 +51,7 @@ describe('PortfolioService', () => {
         create: jest.fn(),
         findMany: jest.fn(),
         findFirst: jest.fn(),
+        findUnique: jest.fn(),
         update: jest.fn(),
         delete: jest.fn(),
         findUniqueOrThrow: jest.fn(),
@@ -93,8 +95,7 @@ describe('PortfolioService', () => {
         .mockResolvedValueOnce({ url: 'u2', key: 'k2' });
       prisma.portfolioItem.create.mockResolvedValue({
         id: 'item1',
-        title: 'Peinture',
-        description: 'desc',
+        description: 'Peinture — mur refait',
         position: 0,
         created_at: new Date(),
         images: [
@@ -108,7 +109,7 @@ describe('PortfolioService', () => {
 
       const result = await service.createItem(
         'w1',
-        { title: 'Peinture', description: 'desc' },
+        { description: 'Peinture — mur refait en deux jours' },
         [makeFile('a.jpg'), makeFile('b.jpg')],
       );
 
@@ -132,17 +133,81 @@ describe('PortfolioService', () => {
         profile_type: ProfileType.EMPLOYER,
       });
       await expect(
-        service.createItem('e1', { title: 't', description: 'd' }, [
-          makeFile(),
-        ]),
+        service.createItem('e1', { description: 'd' }, [makeFile()]),
       ).rejects.toThrow('travailleurs');
       expect(fileService.uploadToStorage).not.toHaveBeenCalled();
     });
 
-    it('requires at least one image', async () => {
+    it('accepts a text-only publication, with no image at all', async () => {
+      prisma.profile.findUnique
+        .mockResolvedValueOnce({ id: 'w1', profile_type: ProfileType.WORKER })
+        .mockResolvedValueOnce({
+          portfolio_slug: null,
+          first_name: 'Jean',
+          last_name: 'Dupont',
+        });
+      prisma.portfolioItem.count.mockResolvedValue(0);
+      prisma.portfolioItem.create.mockResolvedValue({
+        id: 'item1',
+        description: 'Disponible cette semaine à Bacongo',
+        position: 0,
+        created_at: new Date(),
+        images: [],
+      });
+      prisma.profile.update.mockResolvedValue({ portfolio_slug: 'jean-abc' });
+
+      const result = await service.createItem(
+        'w1',
+        { description: 'Disponible cette semaine à Bacongo' },
+        [],
+      );
+
+      expect(fileService.uploadToStorage).not.toHaveBeenCalled();
+      expect(result.images).toHaveLength(0);
+    });
+
+    it('accepts an images-only publication, with nothing written', async () => {
+      prisma.profile.findUnique
+        .mockResolvedValueOnce({ id: 'w1', profile_type: ProfileType.WORKER })
+        .mockResolvedValueOnce({
+          portfolio_slug: null,
+          first_name: 'Jean',
+          last_name: 'Dupont',
+        });
+      prisma.portfolioItem.count.mockResolvedValue(0);
+      fileService.uploadToStorage.mockResolvedValueOnce({
+        url: 'u1',
+        key: 'k1',
+      });
+      prisma.portfolioItem.create.mockResolvedValue({
+        id: 'item1',
+        description: null,
+        position: 0,
+        created_at: new Date(),
+        images: [{ id: 'i1', image_url: 'u1', position: 0 }],
+      });
+      prisma.profile.update.mockResolvedValue({ portfolio_slug: 'jean-abc' });
+
+      const result = await service.createItem('w1', {}, [makeFile('a.jpg')]);
+
+      expect(
+        prisma.portfolioItem.create.mock.calls[0][0].data.description,
+      ).toBeNull();
+      expect(result.description).toBeNull();
+    });
+
+    it('rejects a publication that is neither text nor images', async () => {
+      // The one rule left: a post has to be something.
+      await expect(service.createItem('w1', {}, [])).rejects.toThrow(
+        'texte ou au moins une image',
+      );
+      expect(fileService.uploadToStorage).not.toHaveBeenCalled();
+    });
+
+    it('treats whitespace-only text as no text', async () => {
       await expect(
-        service.createItem('w1', { title: 't', description: 'd' }, []),
-      ).rejects.toThrow('image');
+        service.createItem('w1', { description: '   ' }, []),
+      ).rejects.toThrow('texte ou au moins une image');
     });
   });
 
@@ -150,7 +215,7 @@ describe('PortfolioService', () => {
     it('updateItem throws 404 when the item is not owned by the caller', async () => {
       prisma.portfolioItem.findFirst.mockResolvedValue(null);
       await expect(
-        service.updateItem('w1', 'item-x', { title: 'new' }),
+        service.updateItem('w1', 'item-x', { description: 'new' }),
       ).rejects.toThrow('non trouvée');
       expect(prisma.portfolioItem.update).not.toHaveBeenCalled();
       // ownership query is scoped to the caller
@@ -164,14 +229,38 @@ describe('PortfolioService', () => {
       prisma.portfolioItem.findFirst.mockResolvedValue({ id: 'item1' });
       prisma.portfolioItem.update.mockResolvedValue({
         id: 'item1',
-        title: 'new',
-        description: 'd',
+        description: 'new',
         position: 0,
         created_at: new Date(),
         images: [],
       });
-      await service.updateItem('w1', 'item1', { title: 'new' });
+      await service.updateItem('w1', 'item1', { description: 'new' });
       expect(matchingService.indexWorkerProfile).toHaveBeenCalledWith('w1');
+    });
+
+    it('refuses to clear the text of a publication that has no images', async () => {
+      prisma.portfolioItem.findFirst.mockResolvedValue({ id: 'item1' });
+      prisma.portfolioImage.count.mockResolvedValue(0);
+      await expect(
+        service.updateItem('w1', 'item1', { description: '' }),
+      ).rejects.toThrow('garder son texte');
+      expect(prisma.portfolioItem.update).not.toHaveBeenCalled();
+    });
+
+    it('allows clearing the text when the publication still has photos', async () => {
+      prisma.portfolioItem.findFirst.mockResolvedValue({ id: 'item1' });
+      prisma.portfolioImage.count.mockResolvedValue(2);
+      prisma.portfolioItem.update.mockResolvedValue({
+        id: 'item1',
+        description: null,
+        position: 0,
+        created_at: new Date(),
+        images: [{ id: 'i1', image_url: 'u1', position: 0 }],
+      });
+      await service.updateItem('w1', 'item1', { description: '' });
+      expect(
+        prisma.portfolioItem.update.mock.calls[0][0].data.description,
+      ).toBeNull();
     });
   });
 
@@ -199,6 +288,10 @@ describe('PortfolioService', () => {
   describe('removeImage', () => {
     it('does NOT re-index (image-only change) and cleans storage', async () => {
       prisma.portfolioItem.findFirst.mockResolvedValue({ id: 'item1' });
+      prisma.portfolioItem.findUnique.mockResolvedValue({
+        description: 'Mur refait',
+        _count: { images: 3 },
+      });
       prisma.portfolioImage.findFirst.mockResolvedValue({
         id: 'img1',
         storage_key: 'k9',
@@ -212,6 +305,43 @@ describe('PortfolioService', () => {
         where: { id: 'img1' },
       });
       expect(matchingService.indexWorkerProfile).not.toHaveBeenCalled();
+    });
+
+    it('refuses to remove the last image of a publication with no text', async () => {
+      // Otherwise the post is left as nothing at all — this is the only route
+      // that could empty one out.
+      prisma.portfolioItem.findFirst.mockResolvedValue({ id: 'item1' });
+      prisma.portfolioItem.findUnique.mockResolvedValue({
+        description: null,
+        _count: { images: 1 },
+      });
+      prisma.portfolioImage.findFirst.mockResolvedValue({
+        id: 'img1',
+        storage_key: 'k9',
+      });
+
+      await expect(service.removeImage('w1', 'item1', 'img1')).rejects.toThrow(
+        'garder au moins une image',
+      );
+      expect(prisma.portfolioImage.delete).not.toHaveBeenCalled();
+      expect(storageService.delete).not.toHaveBeenCalled();
+    });
+
+    it('allows removing the last image when the publication has text', async () => {
+      prisma.portfolioItem.findFirst.mockResolvedValue({ id: 'item1' });
+      prisma.portfolioItem.findUnique.mockResolvedValue({
+        description: 'Disponible cette semaine',
+        _count: { images: 1 },
+      });
+      prisma.portfolioImage.findFirst.mockResolvedValue({
+        id: 'img1',
+        storage_key: 'k9',
+      });
+      prisma.portfolioImage.delete.mockResolvedValue({});
+
+      await service.removeImage('w1', 'item1', 'img1');
+
+      expect(prisma.portfolioImage.delete).toHaveBeenCalled();
     });
   });
 
