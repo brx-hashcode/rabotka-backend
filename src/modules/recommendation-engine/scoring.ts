@@ -71,6 +71,14 @@ export type ScoreWeights = Record<keyof ScoreTerms, number>;
  * mostly proximity and freshness. As history accumulates, weight shifts to the
  * personalized terms. This is what makes two identical profiles diverge: same
  * attributes, different `sim`/`catAff`/`partyAff`/`cf`.
+ *
+ * `quality` carries roughly double what it used to. A proven counterparty —
+ * well rated, over missions actually completed — is the strongest predictor
+ * available of how the engagement ends, and at 0.05–0.10 it could not outrank
+ * an offer posted an hour closer to now. The increase is paid for by `urgency`
+ * and `fresh`, which say when something was posted rather than anything about
+ * who is on the other side. It is NOT paid for by the personalized terms:
+ * matching someone to work they want stays the point.
  */
 export const COLD_WEIGHTS: ScoreWeights = {
   sim: 0.0,
@@ -78,9 +86,9 @@ export const COLD_WEIGHTS: ScoreWeights = {
   partyAff: 0.0,
   cf: 0.0,
   prox: 0.35,
-  urgency: 0.18,
-  fresh: 0.17,
-  quality: 0.1,
+  urgency: 0.14,
+  fresh: 0.13,
+  quality: 0.18,
   payFit: 0.05,
 };
 
@@ -90,9 +98,9 @@ export const WARM_WEIGHTS: ScoreWeights = {
   partyAff: 0.06,
   cf: 0.05,
   prox: 0.16,
-  urgency: 0.09,
-  fresh: 0.08,
-  quality: 0.06,
+  urgency: 0.06,
+  fresh: 0.05,
+  quality: 0.12,
   payFit: 0.05,
 };
 
@@ -101,10 +109,10 @@ export const HOT_WEIGHTS: ScoreWeights = {
   catAff: 0.15,
   partyAff: 0.1,
   cf: 0.08,
-  prox: 0.11,
-  urgency: 0.06,
-  fresh: 0.05,
-  quality: 0.05,
+  prox: 0.09,
+  urgency: 0.05,
+  fresh: 0.03,
+  quality: 0.1,
   payFit: 0.04,
 };
 
@@ -210,6 +218,183 @@ export function computeRelevance(
   }
   if (totalWeight <= 0) return 0;
   return clamp01(sum / totalWeight);
+}
+
+/**
+ * Star rating a counterparty must clear before evidence starts moving them.
+ *
+ * Ratings on this platform skew high — an employer who was satisfied gives 5,
+ * and anything under 4 is a complaint. 3.5 is therefore the middle of the
+ * band people actually use, not the middle of the 1–5 scale.
+ */
+export const RATING_PRIOR_MEAN = 3.5;
+
+/**
+ * How many ratings of evidence the prior is worth.
+ *
+ * A single 5★ is one satisfied employer, not a track record. At 3 the first
+ * rating moves the estimate by about a quarter of the distance to the prior,
+ * and by the fifth the average is mostly the profile's own.
+ */
+export const RATING_PRIOR_WEIGHT = 3;
+
+/**
+ * Completed missions at which the experience term reaches 0.5.
+ *
+ * A saturating curve, not a count: the gap between 0 and 3 missions is real
+ * evidence, the gap between 40 and 200 is not, and a linear count would make
+ * the platform's oldest workers permanently unreachable for everyone else.
+ */
+export const MISSIONS_HALF_SATURATION = 3;
+
+/**
+ * Prior rate, and its weight in decisions, for the accept/fill term.
+ *
+ * Same shrinkage as the rating, for the same reason: a worker accepted on
+ * their only application is not a worker with a 100 % acceptance rate.
+ */
+export const OUTCOME_PRIOR_RATE = 0.5;
+export const OUTCOME_PRIOR_WEIGHT = 3;
+
+/**
+ * Weighted interest events at which the demand term reaches 0.5.
+ *
+ * Unlocks count for more than views because they cost money: an employer who
+ * paid to reach this worker has said something a page view has not.
+ */
+export const DEMAND_HALF_SATURATION = 5;
+export const UNLOCK_WEIGHT = 5;
+
+/**
+ * How the quality signals trade off against each other.
+ *
+ * `demand` is deliberately the smallest. Interest received is partly an echo
+ * of past ranking — surfacing a profile earns it views, which would then
+ * surface it again — so it is capped low and saturates early. The terms that
+ * cannot feed back on themselves (what the counterparty said afterwards, what
+ * they actually completed) carry the weight.
+ */
+export const QUALITY_MIX = {
+  reliability: 0.28,
+  rating: 0.27,
+  missions: 0.15,
+  outcome: 0.18,
+  demand: 0.12,
+} as const;
+
+export type QualityInputs = {
+  /** Profile.reliability_score, 0–100. */
+  reliabilityScore: number | null | undefined;
+  /** Profile.rating_avg, 1–5. */
+  ratingAvg: number | null | undefined;
+  /** Profile.rating_count. */
+  ratingCount: number | null | undefined;
+  /** Assignments completed (worker) or offers delivered (employer). */
+  completedMissions: number | null | undefined;
+  /**
+   * Decisions that went their way: applications accepted (worker) or offers
+   * filled (employer).
+   */
+  acceptedOutcomes?: number | null;
+  /**
+   * Decisions that did not: applications rejected (worker) or offers
+   * cancelled and expired (employer).
+   */
+  rejectedOutcomes?: number | null;
+  /** Profile views received. Weak on its own — see `demand` above. */
+  profileViews?: number | null;
+  /** Contact unlocks the other side paid for. The strongest interest signal. */
+  contactUnlocks?: number | null;
+};
+
+/**
+ * Counterparty quality prior on [0,1] — or null when there is nothing to go on.
+ *
+ * Five signals, because each alone is gameable or blind:
+ *  - reliability: platform-administered, says whether they keep commitments;
+ *  - rating: how the other side found them afterwards;
+ *  - missions: whether either of those numbers rests on anything;
+ *  - outcome: whether their applications get accepted / their offers get
+ *    filled, which is the market's own verdict and the one signal nobody can
+ *    award themselves;
+ *  - demand: views and paid contact unlocks received.
+ *
+ * Returns NULL for a profile with no history of any kind. That is the point of
+ * the rewrite: reliability defaults to 100 for everyone, so scoring a
+ * brand-new profile on reliability alone produced the same number for all of
+ * them — a constant that spent the term's full weight while ordering nothing.
+ * `computeRelevance` drops a null instead and redistributes the weight.
+ *
+ * Every rate is shrunk toward its prior by the volume behind it, so one lucky
+ * 5★ ranks below a steady 4.6★ over twenty missions, and one accepted
+ * application is not a 100 % acceptance rate. Without that, the fastest route
+ * to the top of every list is a single rating from a friend.
+ */
+export function qualityPrior(inputs: QualityInputs): number | null {
+  const ratingCount = Math.max(0, inputs.ratingCount ?? 0);
+  const missions = Math.max(0, inputs.completedMissions ?? 0);
+  const accepted = Math.max(0, inputs.acceptedOutcomes ?? 0);
+  const rejected = Math.max(0, inputs.rejectedOutcomes ?? 0);
+  const decided = accepted + rejected;
+  const views = Math.max(0, inputs.profileViews ?? 0);
+  const unlocks = Math.max(0, inputs.contactUnlocks ?? 0);
+  const interest = views + unlocks * UNLOCK_WEIGHT;
+
+  if (ratingCount === 0 && missions === 0 && decided === 0 && interest === 0) {
+    return null;
+  }
+
+  const terms: { value: number; weight: number }[] = [
+    {
+      value: clamp01((inputs.reliabilityScore ?? 100) / 100),
+      weight: QUALITY_MIX.reliability,
+    },
+    {
+      value: missions / (missions + MISSIONS_HALF_SATURATION),
+      weight: QUALITY_MIX.missions,
+    },
+  ];
+
+  // Only when they have actually been rated: rating_avg is null until then,
+  // and feeding the bare prior in would re-introduce the constant this
+  // function exists to remove.
+  if (ratingCount > 0 && inputs.ratingAvg != null) {
+    const shrunk =
+      (inputs.ratingAvg * ratingCount +
+        RATING_PRIOR_MEAN * RATING_PRIOR_WEIGHT) /
+      (ratingCount + RATING_PRIOR_WEIGHT);
+    // 1–5 onto [0,1]. Clamped because rating_avg is a stored aggregate: a bad
+    // backfill must degrade the term, not poison the whole score.
+    terms.push({
+      value: clamp01((shrunk - 1) / 4),
+      weight: QUALITY_MIX.rating,
+    });
+  }
+
+  // Pending decisions are excluded on purpose: an application nobody has
+  // answered says something about the employer's inbox, not about the worker.
+  if (decided > 0) {
+    terms.push({
+      value: clamp01(
+        (accepted + OUTCOME_PRIOR_RATE * OUTCOME_PRIOR_WEIGHT) /
+          (decided + OUTCOME_PRIOR_WEIGHT),
+      ),
+      weight: QUALITY_MIX.outcome,
+    });
+  }
+
+  if (interest > 0) {
+    terms.push({
+      value: interest / (interest + DEMAND_HALF_SATURATION),
+      weight: QUALITY_MIX.demand,
+    });
+  }
+
+  const totalWeight = terms.reduce((s, t) => s + t.weight, 0);
+  if (totalWeight <= 0) return null;
+  return clamp01(
+    terms.reduce((s, t) => s + t.value * t.weight, 0) / totalWeight,
+  );
 }
 
 /**

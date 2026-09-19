@@ -18,6 +18,7 @@ function makePrisma() {
       findMany: jest.fn().mockResolvedValue([]),
       update: jest.fn().mockResolvedValue({}),
     },
+    assignment: { groupBy: jest.fn().mockResolvedValue([]) },
     jobCategory: { findMany: jest.fn().mockResolvedValue([]) },
   };
 }
@@ -479,14 +480,51 @@ describe('MatchingService', () => {
     });
 
     // The old ceiling, now reached only by someone who genuinely does not work
-    // in any of the employer's domains.
-    it('caps a mismatched worker at 0.8/0.9, which is where the whole feed used to sit', async () => {
+    // in any of the employer's domains. This worker has no ratings and no
+    // completed missions, so the quality term is dropped rather than scored,
+    // and the mean divides by 0.7 instead of 0.9.
+    it('caps a mismatched worker with no history at 0.6/0.7', async () => {
       givenSingleWorker(['cat-other']);
 
       const result =
         await service.findMatchingWorkersForEmployerProfile('emp-1');
 
-      expect(result[0].score).toBeCloseTo(0.8 / 0.9, 5);
+      expect(result[0].score).toBeCloseTo(0.6 / 0.7, 5);
+    });
+
+    it('ranks a rated, experienced worker above an unproven one', async () => {
+      prisma.profile.findUnique.mockResolvedValue(EMPLOYER);
+      // Same retrieval rank for both, so only the quality prior can separate
+      // them — this is the whole reason the term exists.
+      qdrant.searchHybrid.mockResolvedValue([
+        { id: 'proven', score: 0.9, payload: { profileId: 'proven' } },
+        { id: 'unproven', score: 0.9, payload: { profileId: 'unproven' } },
+      ]);
+      prisma.profile.findMany.mockResolvedValue([
+        {
+          id: 'proven',
+          reliability_score: 100,
+          rating_avg: 4.8,
+          rating_count: 15,
+          categories: [{ category_id: 'cat-1' }],
+        },
+        {
+          id: 'unproven',
+          reliability_score: 100,
+          rating_avg: null,
+          rating_count: 0,
+          categories: [{ category_id: 'cat-1' }],
+        },
+      ]);
+      prisma.assignment.groupBy.mockResolvedValue([
+        { worker_id: 'proven', _count: { _all: 15 } },
+      ]);
+      systemConfig.getRecommendationMinScore.mockResolvedValue(0);
+
+      const result =
+        await service.findMatchingWorkersForEmployerProfile('emp-1');
+
+      expect(result[0].id).toBe('proven');
     });
 
     it('matches on any of several employer domains, not just the first', async () => {
